@@ -1,0 +1,5 @@
+build/
+*.gb
+*.gbc
+*.sav
+gui_shot.bmp
