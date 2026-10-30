@@ -291,17 +291,19 @@ void ms_report_json(const MsResults *res, const MsConfig *cfg, MsBuf *o) {
 
 // --- cov -------------------------------------------------------------------------
 void ms_report_cov(const MsResults *res, MsBuf *o) {
-    ms_buf_str(o, "# memscan coverage v1\n");
+    // m0boy coverage v1 semantics: flag 1 = executed, 2 = entry, 4 = reached
+    // only by forced exploration ("speculative" there)
+    ms_buf_str(o, "# gbl coverage v1\n");
     for (int bank = 0; bank < res->banks; bank++) {
         for (int a = 0; a < 0x4000; a++) {
             size_t k = (size_t)bank * 0x4000 + a;
-            uint8_t flags = 0;
-            if (res->exec_flags[k] & MS_XF_NATURAL) flags |= 1;
-            if (res->exec_flags[k] & MS_XF_ENTRY) flags |= 2;
-            if (res->exec_flags[k] & MS_XF_FORCED) flags |= 4;
-            if (!flags) continue;
-            ms_buf_fmt(o, "%d %x %u %u\n", bank, a, flags,
-                       res->exec_hits[k] > 0xFFFFFFFEu ? 0xFFFFFFFEu : res->exec_hits[k]);
+            uint8_t ef = res->exec_flags[k];
+            if (!(ef & (MS_XF_NATURAL | MS_XF_FORCED))) continue;
+            uint8_t flags = 1;
+            if (ef & MS_XF_ENTRY) flags |= 2;
+            if (ef & MS_XF_FORCED) flags |= 4;
+            ms_buf_fmt(o, "%02x %04x %x %x\n", bank, bank ? a + 0x4000 : a, flags,
+                       res->exec_hits[k] > 0xFFFFu ? 0xFFFFu : (unsigned)res->exec_hits[k]);
         }
     }
 }
