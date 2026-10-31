@@ -1,8 +1,8 @@
 // sm83.h: SM83 static decoder helpers (condition codes, lengths).  The
 // execution itself is the m0boy runtime's; these helpers classify bytes of
 // the ROM for the explorer, the disassembler and the nonsense eviction.
-#ifndef MS_SM83_H
-#define MS_SM83_H
+#ifndef DP_SM83_H
+#define DP_SM83_H
 
 #include <stdint.h>
 #include <stddef.h>

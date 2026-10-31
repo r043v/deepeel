@@ -2,24 +2,24 @@
 #include "gui.h"
 #include "../common.h"
 
-int ms_gui_available(void) { return 0; }
+int dp_gui_available(void) { return 0; }
 
-int ms_gui_run(MsResults *res, MsConfig *cfg, MsExplorer *ex, MsPlay *play) {
+int dp_gui_run(DpResults *res, DpConfig *cfg, DpExplorer *ex, DpPlay *play) {
     (void)res;
     (void)cfg;
     (void)ex;
     (void)play;
-    fprintf(stderr, "memscan: built without SDL2, --gui unavailable\n");
+    fprintf(stderr, "deepeel: built without SDL2, --gui unavailable\n");
     return 1;
 }
 
-int ms_watch_available(void) { return 0; }
+int dp_watch_available(void) { return 0; }
 
-int ms_watch_start(MsPlay *play, int fps) {
+int dp_watch_start(DpPlay *play, int fps) {
     (void)play;
     (void)fps;
-    fprintf(stderr, "memscan: built without SDL2, --watch unavailable\n");
+    fprintf(stderr, "deepeel: built without SDL2, --watch unavailable\n");
     return 1;
 }
 
-void ms_watch_stop(void) {}
+void dp_watch_stop(void) {}

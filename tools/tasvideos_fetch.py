@@ -4,7 +4,7 @@
 usage: tasvideos_fetch.py ROM.gb OUT_DIR [--max N] [--list] [--game "TASVideos game name"]
 --game is needed when the ROM file name differs from the TASVideos title.
 Each movie goes in its own fresh sub-directory of OUT_DIR (downloads are
-untrusted data). Prints the --tas arguments to give to memscan (at most 8).
+untrusted data). Prints the --tas arguments to give to deepeel (at most 8).
 """
 import io, json, os, re, sys, urllib.request, zipfile
 
@@ -13,7 +13,7 @@ DL = "https://tasvideos.org/%dM?handler=Download"
 EXT = (".vbm", ".bk2", ".gbm", ".fm2")
 
 def get(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "memscan-tasfetch/1"})
+    req = urllib.request.Request(url, headers={"User-Agent": "deepeel-tasfetch/1"})
     with urllib.request.urlopen(req, timeout=60) as r:
         return r.read()
 

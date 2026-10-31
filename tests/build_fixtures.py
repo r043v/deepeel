@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds the synthetic Game Boy fixtures for the memscan test suite.
+"""Builds the synthetic Game Boy fixtures for the deepeel test suite.
 
 Every fixture is a minimal ROM exercising one exploration behaviour:
   branch     - both sides of a conditional + a ROM->VRAM copy loop

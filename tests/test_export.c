@@ -1,4 +1,4 @@
-// test_export.c: the playable export — a .STA written by ms_sta_write must
+// test_export.c: the playable export — a .STA written by dp_sta_write must
 // read back the way m0boy's m0_state.cpp reads its slots (magic, format tag,
 // FNV checksum over exactly the data bytes, size, title, data from sector 1).
 #include "../src/core/sta.h"
@@ -39,9 +39,9 @@ int main(void) {
     static uint8_t img[BYTES];
     for (int i = 0; i < BYTES; i++) img[i] = (uint8_t)(i * 7 + i / 251);
 
-    MsSta sta;
+    DpSta sta;
     char err[256];
-    CHECK(ms_sta_from_project(&sta, "test_state_a/proj", BYTES, err, sizeof err));
+    CHECK(dp_sta_from_project(&sta, "test_state_a/proj", BYTES, err, sizeof err));
     CHECK(!strcmp(sta.sta_path, "test_state_a/proj/TESTGAME.STA"));
     CHECK(!strcmp(sta.sav_path, "test_state_a/proj/TESTGAME.SAV"));
     CHECK(sta.slots == 10 && sta.sectors == 53);
@@ -52,7 +52,7 @@ int main(void) {
     fmt = fnv(fmt, le, sizeof le);
     CHECK(sta.format == fmt);
 
-    CHECK(ms_sta_write(&sta, 0, img, BYTES, 12345, err, sizeof err));
+    CHECK(dp_sta_write(&sta, 0, img, BYTES, 12345, err, sizeof err));
 
     // read it back exactly like m0_state_load does
     static uint8_t slot[53 * 512];
@@ -78,7 +78,7 @@ int main(void) {
 
     // a second write lands in the same file, slot 0 overwritten
     img[0] ^= 0xFF;
-    CHECK(ms_sta_write(&sta, 0, img, BYTES, 5, err, sizeof err));
+    CHECK(dp_sta_write(&sta, 0, img, BYTES, 5, err, sizeof err));
     f = fopen(sta.sta_path, "rb");
     CHECK(f != NULL);
     CHECK(fread(slot, 1, sizeof slot, f) == sizeof slot);
@@ -93,10 +93,10 @@ int main(void) {
             "#define GBL_STATE_SLOT_SECTORS 10\n"
             "#define GBL_GEN_VERSION \"0.1-test\"\n");
     fclose(f);
-    MsSta bad;
-    CHECK(!ms_sta_from_project(&bad, "test_state_a/proj2", BYTES, err, sizeof err));
-    CHECK(!ms_sta_from_project(&bad, "test_state_a/proj_nonexistent", BYTES, err, sizeof err));
-    CHECK(!ms_sta_from_project(&bad, "test_state_a", BYTES, err, sizeof err)); // no gbl_config.h
+    DpSta bad;
+    CHECK(!dp_sta_from_project(&bad, "test_state_a/proj2", BYTES, err, sizeof err));
+    CHECK(!dp_sta_from_project(&bad, "test_state_a/proj_nonexistent", BYTES, err, sizeof err));
+    CHECK(!dp_sta_from_project(&bad, "test_state_a", BYTES, err, sizeof err)); // no gbl_config.h
 
     TEST_DONE("test_export");
 }

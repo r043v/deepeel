@@ -2,7 +2,7 @@
 
 ## Registre matériel
 
-`src/platform/gb/gb_plat.c` porte la table complète (`memscan regs gb` pour
+`src/platform/gb/gb_plat.c` porte la table complète (`deepeel regs gb` pour
 la lister) : 69 entrées — les fenêtres de mapper (RAMG, ROMB0, ROMB1, RAMB,
 MODE), les registres système/audio/vidéo (P1, SB/SC, DIV/TIMA/TMA/TAC, IF,
 NR10…NR52 + WAVE, LCDC…WX, DMA), les registres CGB (KEY1, VBK, BOOTROM,
@@ -17,20 +17,20 @@ les 8 RST et les 5 IRQ (un vecteur en padding n'est pas semé).
 
 ## Machine embarquée (0.3.0)
 
-La machine n'est plus approximée : memscan embarque la **runtime GB de
+La machine n'est plus approximée : deepeel embarque la **runtime GB de
 m0boy** (`targets/meta/runtime/gbl_*`, dépendance `M0BOY_DIR`) —
 l'interpréteur dont le run_hash/image_hash/audio_hash est tenu par la suite
 m0boy. Le registre matériel ci-dessus reste la grille de lecture
-(`memscan regs gb`) ; l'exécution, le PPU (rendu par ligne, 160×144
+(`deepeel regs gb`) ; l'exécution, le PPU (rendu par ligne, 160×144
 récupéré pour le GUI et les snapshots), l'APU, le timer et le joypad
 matériels sont ceux de m0boy.
 
 - **Variantes** : `GBL_MBC`/`GBL_ERAM_SIZE` sont compile-time — le build
   compile 17 variantes MBC×RAM (0:0 ; 1:0/0x800/0x2000 ; 2:0x200 ;
-  3 et 5 : 0..0x20000) et `ms_mach_pick_variant` choisit d'après l'en-tête.
+  3 et 5 : 0..0x20000) et `dp_mach_pick_variant` choisit d'après l'en-tête.
 - **Threads = instances** : la runtime vit dans des statics ; chaque worker
   reçoit une copie des symboles préfixée par `objcopy --redefine-syms`
-  (10 instances, `MS_MACHINES`). Les hooks (`trace`, lectures/écritures
+  (10 instances, `DP_MACHINES`). Les hooks (`trace`, lectures/écritures
   CPU interposées par `-Dgbl_rd/-Dgbl_wr`, vblank, lignes PPU) sont
   re-câblés par instance vers le moteur.
 - **États** : une image d'état (`gbl_state_io`, ~17 Kio + RAM cartouche) se
@@ -40,10 +40,10 @@ matériels sont ceux de m0boy.
 - **Garde-fous** : HALT que rien ne réveille (8 frames sans instruction) et
   glissade dans du padding (4096 pas) coupent la machine par `longjmp`.
 
-## Modélisation (ce que memscan ajoute par-dessus)
+## Modélisation (ce que deepeel ajoute par-dessus)
 
 - **Interposition** : chaque lecture CPU (IO y compris) et chaque écriture
-  (mapper, VRAM, OAM, IO) passe par un hook memscan avant/autour de
+  (mapper, VRAM, OAM, IO) passe par un hook deepeel avant/autour de
   l'effet machine — c'est de là viennent la carte data, les stats de
   registres, les événements de banque et les canaux de copie.
 - **OAM DMA** : l'écriture à $FF46 (canal 1) produit l'enregistrement
@@ -150,7 +150,7 @@ pas globaux (observations outil, pas mesures matérielles).
 ### Padding
 
 Une exécution qui **glisse** dans une plombée statique (runs 8+ de 00/FF,
-`MS_SF_PAD`) est un retour sauvage (RETI sur pile vide...) : les octets de
+`DP_SF_PAD`) est un retour sauvage (RETI sur pile vide...) : les octets de
 padding ne sont **jamais** marqués code, et la glissade est coupée après
 quelques pas de suite (sessions) ou bornée (fourcheur, qui doit atteindre le
 code derrière la plombée). Un pas isolé sur un octet plombé (le NOP du boot,
@@ -160,9 +160,9 @@ un vecteur) reste légal.
 
 `--human [slot]` (ou `H` dans la GUI) prend une lane : le pad/clavier la
 joue, l'outil surveille le crédit et **sauve chaque avancée** comme snapshot
-PNG (écran 160×144 + machine complète en chunk `tEXt` `memscan_snapshot`,
+PNG (écran 160×144 + machine complète en chunk `tEXt` `deepeel_snapshot`,
 style cartouche PICO-8 — un seul fichier, visible et rechargeable avec
-`--from-png f` ou `ms_play_load_png`). Les découvertes humaines alimentent
+`--from-png f` ou `dp_play_load_png`). Les découvertes humaines alimentent
 le pool et le fourcheur comme celles des sessions.
 
 ### Export jouable (build pc de m0boy)
@@ -204,7 +204,7 @@ La machine prouve le code en l'exécutant ; ses garde-fous (budget par chemin,
 mur global, plafonds de forks, file) laissent du flux direct non visité.
 `src/explore/closure.c` suit ce flux sans machine : depuis chaque instruction
 exécutée, fall-through, cibles JR/JP/CALL/RST et les deux côtés de chaque
-conditionnel. Ce qui est atteint ainsi est marqué `MS_XF_STATIC` — jamais
+conditionnel. Ce qui est atteint ainsi est marqué `DP_XF_STATIC` — jamais
 confondu avec `natural`/`forced`. Le rapport dit « static closure : … octets
 atteints par flux direct seul ».
 
@@ -239,7 +239,7 @@ les tests synthétiques.
 ## Données prouvées et pont .cov
 
 Une copie ROM→VRAM dont les octets lus hachent exactement comme les octets
-écrits (mêmes longueurs) est **verbatim** (`MS_DF_VERBATIM`, canaux OAM
+écrits (mêmes longueurs) est **verbatim** (`DP_DF_VERBATIM`, canaux OAM
 DMA/HDMA toujours) : la source est de la donnée, pas du code. Le `.cov`
 l'exporte avec le flag 8 (`1=exec, 2=entry, 4=speculative, 8=data`), jamais
 sur une ligne aussi exécutée au flux naturel ; l'exécution purement
@@ -263,12 +263,12 @@ code / data / padding.
   entre deux codes), `inferred-data` (≤ 256 octets entre deux data),
   `inferred-padding` (≥ 4 octets identiques 00/FF). Jamais à travers une banque.
 - « Connu » inclut donc les octets déduits ; la part déduite est rapportée à part.
-- `memscan explore ROM --map x.map` écrit le texte (`banque début fin classe`,
+- `deepeel explore ROM --map x.map` écrit le texte (`banque début fin classe`,
   fin incluse, adresses vues du CPU) ; `--map x.map.png` écrit une image
   (un carré par 64 octets, 16×16 par banque, rouge = inconnu, bleus = code,
   verts = data, ocre = table, gris = padding) qui **embarque le `.map`
-  complet** (chunk tEXt `memscan_map`, comme une cartouche PICO-8).
-  `memscan mapx x.map.png x.map` extrait le `.map` à l'identique.
+  complet** (chunk tEXt `deepeel_map`, comme une cartouche PICO-8).
+  `deepeel mapx x.map.png x.map` extrait le `.map` à l'identique.
 - `--html f` : page web autonome (carrés par banque, légende, tableau des
   classes, journal de découverte : temps, source, crédit, octets connus).
   Le rapport texte affiche aussi les 40 dernières entrées du journal.
@@ -293,7 +293,7 @@ stderr ; une saturation n'est jamais silencieuse.
 
 ## Fenêtre de surveillance `--watch` (0.5.1)
 
-`memscan explore ROM --play --tas film.vbm --watch [FPS]` ouvre une petite
+`deepeel explore ROM --play --tas film.vbm --watch [FPS]` ouvre une petite
 fenêtre SDL2 (sans carte ni stats) qui montre l'écran du jeu rejoué par le
 TAS, échantillonné à 1..30 images/s en temps humain (défaut 30). Une image
 sur 1/FPS s est rendue par la machine du film, les autres ne le sont pas :

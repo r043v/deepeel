@@ -8,8 +8,8 @@
 // context is indistinguishable for what the section reads ("même contexte").
 // Loops die on per-path step budgets, backward-edge caps and the global step
 // wall; the halt watchdog cuts paths parked in a HALT nothing wakes.
-#ifndef MS_EXPLORER_H
-#define MS_EXPLORER_H
+#ifndef DP_EXPLORER_H
+#define DP_EXPLORER_H
 
 #include "../core/machine.h"
 #include "../mach/m0boy.h"
@@ -19,91 +19,91 @@
 
 // --- execution flags per ROM byte -------------------------------------------
 enum {
-    MS_XF_NATURAL = 1 << 0, // executed by natural flow (no forced fork)
-    MS_XF_FORCED = 1 << 1,  // executed through a forked/speculative path
-    MS_XF_ENTRY = 1 << 2,   // reached non-sequentially (jump/call/ret/entry)
-    MS_XF_IRQ = 1 << 3,     // inside an IRQ handler execution
-    MS_XF_START = 1 << 4,   // opcode byte of an executed instruction (not an operand)
-    MS_XF_STATIC = 1 << 5,  // reached by the static flow closure only (never executed)
+    DP_XF_NATURAL = 1 << 0, // executed by natural flow (no forced fork)
+    DP_XF_FORCED = 1 << 1,  // executed through a forked/speculative path
+    DP_XF_ENTRY = 1 << 2,   // reached non-sequentially (jump/call/ret/entry)
+    DP_XF_IRQ = 1 << 3,     // inside an IRQ handler execution
+    DP_XF_START = 1 << 4,   // opcode byte of an executed instruction (not an operand)
+    DP_XF_STATIC = 1 << 5,  // reached by the static flow closure only (never executed)
 };
 enum {
-    MS_DF_READ = 1 << 0, // read as data through the ROM windows
-    MS_DF_COPIED = 1 << 1, // source range of a copy into VRAM/OAM
-    MS_DF_VERBATIM = 1 << 2, // source range of a verbatim copy (byte for byte)
+    DP_DF_READ = 1 << 0, // read as data through the ROM windows
+    DP_DF_COPIED = 1 << 1, // source range of a copy into VRAM/OAM
+    DP_DF_VERBATIM = 1 << 2, // source range of a verbatim copy (byte for byte)
 };
 enum {
-    MS_SF_POINTER = 1 << 0, // static: part of a plausible pointer table
-    MS_SF_PAD = 1 << 1,     // static: padding run (8+ identical 00/FF bytes)
+    DP_SF_POINTER = 1 << 0, // static: part of a plausible pointer table
+    DP_SF_PAD = 1 << 1,     // static: padding run (8+ identical 00/FF bytes)
 };
 
 // --- open-addressing u64 set -------------------------------------------------
-typedef struct MsHashSet {
+typedef struct DpHashSet {
     uint64_t *keys;
     uint8_t *used;
     size_t cap, cnt, cap_abs;
-} MsHashSet;
+} DpHashSet;
 
-void ms_set_init(MsHashSet *s, size_t cap_abs);
-void ms_set_free(MsHashSet *s);
+void dp_set_init(DpHashSet *s, size_t cap_abs);
+void dp_set_free(DpHashSet *s);
 // returns 1 if inserted, 0 if already present; returns -1 when full
-int ms_set_insert(MsHashSet *s, uint64_t key);
+int dp_set_insert(DpHashSet *s, uint64_t key);
 
 // --- open-addressing u32 -> payload map --------------------------------------
-typedef struct MsMap32 {
+typedef struct DpMap32 {
     uint32_t *keys;
     uint8_t *used;
     uint8_t *vals;
     size_t stride, cap, cnt, cap_abs;
-} MsMap32;
+} DpMap32;
 
-void ms_map_init(MsMap32 *m, size_t stride, size_t cap_abs);
-void ms_map_free(MsMap32 *m);
+void dp_map_init(DpMap32 *m, size_t stride, size_t cap_abs);
+void dp_map_free(DpMap32 *m);
 // returns payload slot (zeroed on first insert) or NULL when full
-void *ms_map_get_or_add(MsMap32 *m, uint32_t key);
-void *ms_map_find(MsMap32 *m, uint32_t key);
+void *dp_map_get_or_add(DpMap32 *m, uint32_t key);
+void *dp_map_find(DpMap32 *m, uint32_t key);
 
 // --- io usage per registry slot ----------------------------------------------
-typedef struct MsIoStat {
+typedef struct DpIoStat {
     uint32_t rd, wr;
     uint8_t values[8];
     uint8_t nvalues;
     uint16_t pcs[4]; // last write sites
     uint8_t npcs;
     uint32_t copies, bank_events;
-} MsIoStat;
+} DpIoStat;
 
 // --- per-branch-site outcome counts (completeness of both sides) -------------
-typedef struct MsSiteStat {
+typedef struct DpSiteStat {
     uint32_t taken, nottaken;
-} MsSiteStat;
+} DpSiteStat;
 
 // --- indirect jump sites (JP HL): the targets actually observed ----------------
-typedef struct MsIndirect {
+typedef struct DpIndirect {
     uint8_t n;            // distinct targets kept (cap 8)
     uint8_t overflow;     // more distinct targets than kept
     uint16_t target[8];
     uint8_t tbank[8];
     uint32_t hits;
-} MsIndirect;
+} DpIndirect;
 
 // --- caller lists per call target --------------------------------------------
-typedef struct MsCallList {
+typedef struct DpCallList {
     uint8_t n;
     uint32_t site[8]; // rom key of the call site
-} MsCallList;
+} DpCallList;
 
 // --- per-section record -------------------------------------------------------
-enum { MS_V_FORCED = 0, MS_V_REQUIRED = 1, MS_V_SPECULATIVE = 2, MS_V_PLAYED = 3 };
+enum { DP_V_FORCED = 0, DP_V_REQUIRED = 1, DP_V_SPECULATIVE = 2, DP_V_PLAYED = 3 };
 
 // liveness bits: which incoming state components the section actually reads
 enum {
-    MS_CTX_A = 0, MS_CTX_F, MS_CTX_B, MS_CTX_C, MS_CTX_D, MS_CTX_E,
-    MS_CTX_H, MS_CTX_L, MS_CTX_SP, MS_CTX_IME, MS_CTX_IE,
-    MS_CTX_ROMN, MS_CTX_RAMG, MS_CTX_VBK,
-    MS_CTX_BITS
+    DP_CTX_A = 0, DP_CTX_F, DP_CTX_B, DP_CTX_C, DP_CTX_D, DP_CTX_E,
+    DP_CTX_H, DP_CTX_L, DP_CTX_SP, DP_CTX_IME, DP_CTX_IE,
+    DP_CTX_ROMN, DP_CTX_RAMG, DP_CTX_VBK,
+    DP_CTX_BITS
 };
 
-typedef struct MsSection {
+typedef struct DpSection {
     uint32_t id;
     uint8_t bank;
     uint16_t lo, hi; // inclusive, within the bank
@@ -111,12 +111,12 @@ typedef struct MsSection {
     uint32_t entries;             // path entries into it
     uint32_t natural_hits, forced_hits;
     uint32_t boot_hits;           // hits from the reset flow specifically
-    uint8_t kind_bits;            // MS_XF_* observed inside
+    uint8_t kind_bits;            // DP_XF_* observed inside
     uint16_t io_used[16];
     uint8_t io_used_n;
     uint32_t banks_seen[8];       // ROMN windows while executing
     uint8_t banks_seen_n;
-    uint64_t ctx_mask;            // liveness: MS_CTX_* bits
+    uint64_t ctx_mask;            // liveness: DP_CTX_* bits
     uint64_t page_mask_wram;      // liveness: pages read (bit = page)
     uint64_t page_mask_vram[2];
     uint64_t page_mask_sram;
@@ -127,9 +127,9 @@ typedef struct MsSection {
     uint32_t ctx_count;           // distinct incoming contexts explored
     uint32_t callers[8];          // rom keys of call sites into this section
     uint8_t callers_n;
-    uint8_t verdict;              // MS_V_*
-    MsHashSet ctx_seen;           // projected contexts already explored
-} MsSection;
+    uint8_t verdict;              // DP_V_*
+    DpHashSet ctx_seen;           // projected contexts already explored
+} DpSection;
 
 // --- results ------------------------------------------------------------------
 // The per-byte maps and the record lists are shared by the forking explorer
@@ -139,19 +139,19 @@ typedef struct MsSection {
 // (sessions running).  The fork explorer only runs while the sessions wait at
 // the epoch barrier, so its own updates stay lock-free.
 // One line of the discovery log: who found how much, and when.
-typedef struct MsDiscEntry {
+typedef struct DpDiscEntry {
     double t;            // seconds since the first entry (wall clock)
     char source[48];     // "tas:<file>", "rng", "fork-explorer", "total-search", "closure-N"...
     uint64_t credit;     // discovery credit gained by that source in the step
     uint32_t known;      // ROM bytes carrying any evidence after the step
-} MsDiscEntry;
+} DpDiscEntry;
 
-typedef struct MsResults {
-    const MsCart *cart;
-    const MsPlatform *plat;
+typedef struct DpResults {
+    const DpCart *cart;
+    const DpPlatform *plat;
     int banks;
     int mt; // sessions running: take the mutexes
-    MsDiscEntry *disc; // discovery log (appended from one thread at a time)
+    DpDiscEntry *disc; // discovery log (appended from one thread at a time)
     int disc_n, disc_cap;
     double disc_t0;
     pthread_mutex_t sec_mtx, rec_mtx;
@@ -163,21 +163,21 @@ typedef struct MsResults {
     uint8_t *static_flags;
     uint32_t *section_of; // rom key -> section id + 1
     // sections
-    MsSection *sections;
+    DpSection *sections;
     int section_count, section_cap;
     // registry-indexed io stats (registry order; IE included when present)
-    MsIoStat *io;
+    DpIoStat *io;
     int io_count;
     // event records
-    MsCopyRec *copies;
+    DpCopyRec *copies;
     int copy_count, copy_cap;
-    MsBankEvent *bank_events;
+    DpBankEvent *bank_events;
     int bank_count, bank_cap;
     // maps
-    MsMap32 sites;   // branch site key -> MsSiteStat
-    MsMap32 callers; // call target key -> MsCallList
-    MsMap32 fork_counts; // branch site key -> forks emitted there
-    MsMap32 indirect;    // JP HL site key -> MsIndirect (observed targets)
+    DpMap32 sites;   // branch site key -> DpSiteStat
+    DpMap32 callers; // call target key -> DpCallList
+    DpMap32 fork_counts; // branch site key -> forks emitted there
+    DpMap32 indirect;    // JP HL site key -> DpIndirect (observed targets)
     // static flow closure (closure.c): code reached by following direct
     // control flow out of executed instructions, never executed itself
     uint32_t closure_rounds, closure_starts, closure_bytes;
@@ -187,8 +187,8 @@ typedef struct MsResults {
     uint32_t closure_seeds, closure_seeds_dropped;
     uint32_t *clo_entries;              // rom keys of static entry points never executed
     int clo_entry_n, clo_entry_cap;
-    MsHashSet bad_seen;                 // undefined-opcode sites already recorded
-    MsHashSet clo_seeded;               // entries already handed to the fork explorer
+    DpHashSet bad_seen;                 // undefined-opcode sites already recorded
+    DpHashSet clo_seeded;               // entries already handed to the fork explorer
     uint32_t forks_covered_pruned;      // forks dropped: both sides known, target covered
     // diagnostics: undefined opcodes (rom key + byte)
     struct { uint32_t key; uint8_t op; } *bad_ops;
@@ -211,12 +211,12 @@ typedef struct MsResults {
     uint64_t vram_write_pages[2], sram_write_pages; // page bitmaps
     uint8_t oam_written;
     // data proven by exploration, for the m0boy bridge
-    uint64_t data_verbatim_bytes; // bytes with MS_DF_VERBATIM
+    uint64_t data_verbatim_bytes; // bytes with DP_DF_VERBATIM
     uint32_t data_contradictions; // bytes both executed and proven data (kept code)
-} MsResults;
+} DpResults;
 
 // --- exploration config -------------------------------------------------------
-typedef struct MsConfig {
+typedef struct DpConfig {
     uint32_t max_steps_path;  // per-path step budget
     uint32_t max_paths;       // hard cap on paths run
     uint64_t max_steps_total; // hard cap on steps across all paths
@@ -239,14 +239,14 @@ typedef struct MsConfig {
     int dfs;                  // depth-first frontier: newest path first (the
                               // total-search phase; default breadth-first)
     int verbose;
-} MsConfig;
+} DpConfig;
 
-void ms_config_defaults(MsConfig *cfg);
+void dp_config_defaults(DpConfig *cfg);
 
-typedef struct MsExplorer MsExplorer;
+typedef struct DpExplorer DpExplorer;
 
 // --- copy-loop tracker (copies.c) ---------------------------------------------
-typedef struct MsCopyTracker {
+typedef struct DpCopyTracker {
     uint8_t src_valid, dst_valid;
     uint8_t src_bank, dst_bank;
     uint16_t src_lo, src_hi, dst_lo, dst_hi;
@@ -260,27 +260,27 @@ typedef struct MsCopyTracker {
     // length (an unrolled or transformed copy cannot match)
     uint64_t src_hash, dst_hash;
     uint32_t src_n, dst_n;
-} MsCopyTracker;
+} DpCopyTracker;
 
 // queue entry: a machine state image plus path bookkeeping
-typedef struct MsPathState {
-    uint8_t *img;        // gbl state image (ms_mach_state_bytes bytes)
+typedef struct DpPathState {
+    uint8_t *img;        // gbl state image (dp_mach_state_bytes bytes)
     uint8_t forced;      // reached through a fork or speculative seed
-    uint8_t kind;        // MS_SEED_* or MS_PATH_FORK
+    uint8_t kind;        // DP_SEED_* or DP_PATH_FORK
     uint8_t from_reset;  // descends from the reset flow (necessity verdicts)
     uint32_t choice;     // the tree choice this path answers
-} MsPathState;
+} DpPathState;
 
 // the engine state is shared with the sibling modules (sections.c, copies.c)
-struct MsExplorer {
-    MsConfig cfg;
-    MsResults *res;
-    MsMach *mach;      // the live machine (instance 0 during fork drains)
+struct DpExplorer {
+    DpConfig cfg;
+    DpResults *res;
+    DpMach *mach;      // the live machine (instance 0 during fork drains)
     uint32_t sb;       // state image size
     // worklist
-    MsPathState *queue;
+    DpPathState *queue;
     uint32_t q_cap, q_head, q_len;
-    MsHashSet exact;
+    DpHashSet exact;
     // per-path state
     int cur_forced;
     uint8_t cur_kind, cur_from_reset;
@@ -298,7 +298,7 @@ struct MsExplorer {
     uint16_t prev_target, prev_site_pc;
     uint16_t prev_site_bank;
     uint32_t cur_sec;
-    MsCopyTracker ct;
+    DpCopyTracker ct;
     struct { uint16_t pc; uint32_t count; } back_ring[8];
     int back_idx;
     uint32_t steps_this_path;
@@ -323,101 +323,101 @@ struct MsExplorer {
     uint64_t credit_exec, credit_data, credit_copies, credit_io, credit_banks;
     // common tree: owned by the caller (NULL = no bookkeeping, e.g. sessions);
     // cur_choice is the choice of the path currently running
-    struct MsTree *tree;
+    struct DpTree *tree;
     uint32_t cur_choice;
     // per-path outcome for the tree: steps without any first discovery, and
     // the dead/reset/nonsense flags the step hook raises
     uint32_t steps_no_credit;
     uint64_t credit_shown;
     uint8_t path_dead, path_reset;
-    uint8_t path_nonsense; // 0 none, else an MS_NS_* reason
+    uint8_t path_nonsense; // 0 none, else an DP_NS_* reason
 };
 
 // nonsense eviction reasons (the path proved senseless; the bytes it touched
 // stay out of the code map's evidence)
-enum { MS_NS_NONE = 0, MS_NS_ECHO, MS_NS_DATA, MS_NS_STACK };
+enum { DP_NS_NONE = 0, DP_NS_ECHO, DP_NS_DATA, DP_NS_STACK };
 
 // --- section bookkeeping (sections.c) -------------------------------------------
 // creates or extends the section at (bank, pc) and updates its per-run
 // counters; returns the section id (pointers would not survive the lock)
-uint32_t ms_section_touch(MsResults *res, uint8_t bank, uint16_t pc, uint16_t hi, int natural, int is_entry,
+uint32_t dp_section_touch(DpResults *res, uint8_t bank, uint16_t pc, uint16_t hi, int natural, int is_entry,
                           uint32_t cur_sec, int from_reset, int irq);
-void ms_section_live_reg(MsSection *s, int bit);
-void ms_section_live_wram(MsSection *s, uint32_t page);
-void ms_section_live_vram(MsSection *s, uint32_t bank, uint32_t page);
-void ms_section_live_sram(MsSection *s, uint32_t page);
-void ms_section_live_small(MsSection *s, int what); // 0 hram 1 oam 2 ie 3 romN 4 ramg 5 vbk
-void ms_section_live_io(MsSection *s, uint16_t io_off);
-void ms_section_io_used(MsSection *s, int slot);
-void ms_section_banks_seen(MsSection *s, uint32_t bank);
+void dp_section_live_reg(DpSection *s, int bit);
+void dp_section_live_wram(DpSection *s, uint32_t page);
+void dp_section_live_vram(DpSection *s, uint32_t bank, uint32_t page);
+void dp_section_live_sram(DpSection *s, uint32_t page);
+void dp_section_live_small(DpSection *s, int what); // 0 hram 1 oam 2 ie 3 romN 4 ramg 5 vbk
+void dp_section_live_io(DpSection *s, uint16_t io_off);
+void dp_section_io_used(DpSection *s, int slot);
+void dp_section_banks_seen(DpSection *s, uint32_t bank);
 
 // --- static flow closure (closure.c) ------------------------------------------
 // Follows direct control flow (fall-through, JR/JP/CALL/RST targets, both sides
 // of conditionals) out of every executed instruction and marks what it reaches
-// MS_XF_STATIC.  Executed bytes are never touched; padding, pointer tables and
+// DP_XF_STATIC.  Executed bytes are never touched; padding, pointer tables and
 // proven data stop the flow.  Terminates by construction (a visited map the
 // size of the ROM).  Returns the newly marked byte count.
-uint32_t ms_static_closure(MsResults *res);
+uint32_t dp_static_closure(DpResults *res);
 // seed the fork explorer at the closure's entry points that were never
 // executed (jump/call/branch targets): the static flow proposes, the machine
 // disposes (nonsense eviction, indirect targets).  Returns seeds queued; the
 // seeds over cfg.seed_cap are counted in closure_seeds_dropped.
-int ms_closure_seed(MsExplorer *ex);
+int dp_closure_seed(DpExplorer *ex);
 
-void ms_results_init(MsResults *res, const MsCart *cart, const MsPlatform *plat);
-void ms_results_free(MsResults *res);
+void dp_results_init(DpResults *res, const DpCart *cart, const DpPlatform *plat);
+void dp_results_free(DpResults *res);
 // Append a discovery-log entry (known = bytes with any evidence right now).
-void ms_disc_add(MsResults *res, const char *source, uint64_t credit);
+void dp_disc_add(DpResults *res, const char *source, uint64_t credit);
 // static byte classification (pointer tables, padding), independent of exploration
-void ms_static_scan(MsResults *res);
+void dp_static_scan(DpResults *res);
 // registry slot for an address (mapper windows and IO), or -1
-int ms_io_slot(const MsResults *res, uint16_t addr);
+int dp_io_slot(const DpResults *res, uint16_t addr);
 
-void ms_copy_reset(MsCopyTracker *ct);
-void ms_record_copy(MsExplorer *ex, const MsCopyRec *rec, uint32_t attrib_key);
-void ms_copy_on_rom_read(MsCopyTracker *ct, uint8_t bank, uint16_t addr, uint8_t v);
-void ms_copy_on_vram_write(MsCopyTracker *ct, uint8_t bank, uint16_t addr, uint8_t v);
-void ms_copy_on_back_edge(MsCopyTracker *ct, uint16_t site, uint32_t site_key);
-void ms_copy_flush_path(MsExplorer *ex, MsCopyTracker *ct);
+void dp_copy_reset(DpCopyTracker *ct);
+void dp_record_copy(DpExplorer *ex, const DpCopyRec *rec, uint32_t attrib_key);
+void dp_copy_on_rom_read(DpCopyTracker *ct, uint8_t bank, uint16_t addr, uint8_t v);
+void dp_copy_on_vram_write(DpCopyTracker *ct, uint8_t bank, uint16_t addr, uint8_t v);
+void dp_copy_on_back_edge(DpCopyTracker *ct, uint16_t site, uint32_t site_key);
+void dp_copy_flush_path(DpExplorer *ex, DpCopyTracker *ct);
 
 // --- engine -------------------------------------------------------------------
 
-// queue entry kind: MS_SEED_* from platform.h, plus internal forks
-enum { MS_PATH_FORK = 4 };
+// queue entry kind: DP_SEED_* from platform.h, plus internal forks
+enum { DP_PATH_FORK = 4 };
 
-MsExplorer *ms_explorer_new(const MsConfig *cfg, MsResults *res, MsMach *mach);
-void ms_explorer_free(MsExplorer *ex);
+DpExplorer *dp_explorer_new(const DpConfig *cfg, DpResults *res, DpMach *mach);
+void dp_explorer_free(DpExplorer *ex);
 // queue a state image (takes ownership of img); returns 0 if dropped
-int ms_explorer_seed(MsExplorer *ex, uint8_t *img, int kind, int forced);
+int dp_explorer_seed(DpExplorer *ex, uint8_t *img, int kind, int forced);
 // queue the reset state entered at pc (bank window applied for pc >= $4000);
 // returns 0 if dropped
-int ms_explorer_seed_pc(MsExplorer *ex, int bank, uint16_t pc, int kind, int forced);
+int dp_explorer_seed_pc(DpExplorer *ex, int bank, uint16_t pc, int kind, int forced);
 // standard GB seeding: reset, non-padding RST/IRQ vectors, pointer scan
-void ms_seed_gb(MsExplorer *ex);
+void dp_seed_gb(DpExplorer *ex);
 // the reset state image (built on first use; pool slot 0 starts from it)
-uint8_t *ms_explorer_seed_base(MsExplorer *ex);
+uint8_t *dp_explorer_seed_base(DpExplorer *ex);
 // pop and run one path; returns 0 when the worklist is empty or a budget wall
-int ms_explore_step(MsExplorer *ex);
+int dp_explore_step(DpExplorer *ex);
 // run paths for ~ms milliseconds (GUI slices); returns 0 when nothing left
-int ms_explore_slice(MsExplorer *ex, int ms);
+int dp_explore_slice(DpExplorer *ex, int ms);
 // branch-site completeness, callers, verdicts — call once exploration is done
-void ms_explore_finalize(MsExplorer *ex);
+void dp_explore_finalize(DpExplorer *ex);
 // run the whole worklist to completion (slice loop + finalize)
-int ms_explore(MsExplorer *ex);
+int dp_explore(DpExplorer *ex);
 // bytes neither executed, nor read as data, nor statically classified
 // (padding, pointer tables) — the honest "remaining" gap metric
-enum { MS_CLS_EXEC_NATURAL, MS_CLS_EXEC_FORCED, MS_CLS_STATIC_FLOW, MS_CLS_DATA_COPIED,
-       MS_CLS_DATA_READ, MS_CLS_POINTER_PAD, MS_CLS_UNEXPLAINED, MS_CLS_COUNT };
-void ms_results_breakdown(const MsResults *res, uint64_t out[MS_CLS_COUNT]);
-uint64_t ms_results_unexplained(const MsResults *res);
+enum { DP_CLS_EXEC_NATURAL, DP_CLS_EXEC_FORCED, DP_CLS_STATIC_FLOW, DP_CLS_DATA_COPIED,
+       DP_CLS_DATA_READ, DP_CLS_POINTER_PAD, DP_CLS_UNEXPLAINED, DP_CLS_COUNT };
+void dp_results_breakdown(const DpResults *res, uint64_t out[DP_CLS_COUNT]);
+uint64_t dp_results_unexplained(const DpResults *res);
 
 // progress snapshot for the GUI / verbose prints
-typedef struct MsProgress {
+typedef struct DpProgress {
     uint32_t queue_len;
     uint64_t steps_total;
     uint32_t paths_run;
     uint32_t sections;
-} MsProgress;
-void ms_explorer_progress(MsExplorer *ex, MsProgress *out);
+} DpProgress;
+void dp_explorer_progress(DpExplorer *ex, DpProgress *out);
 
 #endif

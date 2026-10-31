@@ -4,17 +4,17 @@
 
 // block classes: '.' untouched, 'C' code natural, 'c' code forced-only,
 // 'D' data read, 'V' copied to VRAM/OAM, 'P' pointer table, 'p' padding
-char ms_block_class(const MsResults *res, int bank, int block) {
+char dp_block_class(const DpResults *res, int bank, int block) {
     size_t base = (size_t)bank * 0x4000 + (size_t)block * 64;
     size_t end = base + 64;
     int natural = 0, forced = 0, copied = 0, data = 0, ptr = 0, pad = 0;
     for (size_t i = base; i < end && i < (size_t)res->banks * 0x4000; i++) {
-        if (res->exec_flags[i] & MS_XF_NATURAL) natural++;
-        else if (res->exec_flags[i] & MS_XF_FORCED) forced++;
-        if (res->data_flags[i] & MS_DF_COPIED) copied++;
-        else if (res->data_flags[i] & MS_DF_READ) data++;
-        if (res->static_flags[i] & MS_SF_POINTER) ptr++;
-        if (res->static_flags[i] & MS_SF_PAD) pad++;
+        if (res->exec_flags[i] & DP_XF_NATURAL) natural++;
+        else if (res->exec_flags[i] & DP_XF_FORCED) forced++;
+        if (res->data_flags[i] & DP_DF_COPIED) copied++;
+        else if (res->data_flags[i] & DP_DF_READ) data++;
+        if (res->static_flags[i] & DP_SF_POINTER) ptr++;
+        if (res->static_flags[i] & DP_SF_PAD) pad++;
     }
     if (natural) return 'C';
     if (forced) return 'c';
@@ -26,27 +26,27 @@ char ms_block_class(const MsResults *res, int bank, int block) {
 }
 
 // run-length encode the block classes of one bank: "C12.D3..." style
-static void bank_blocks_rle(const MsResults *res, int bank, MsBuf *out) {
+static void bank_blocks_rle(const DpResults *res, int bank, DpBuf *out) {
     char prev = -1;
     int count = 0;
     for (int b = 0; b < 256; b++) {
-        char cls = ms_block_class(res, bank, b);
+        char cls = dp_block_class(res, bank, b);
         if (cls == prev) {
             count++;
         } else {
-            if (prev >= 0) ms_buf_fmt(out, "%c%d.", prev, count);
+            if (prev >= 0) dp_buf_fmt(out, "%c%d.", prev, count);
             prev = cls;
             count = 1;
         }
     }
-    if (prev >= 0) ms_buf_fmt(out, "%c%d.", prev, count);
+    if (prev >= 0) dp_buf_fmt(out, "%c%d.", prev, count);
 }
 
 static const char *verdict_name(uint8_t v) {
     switch (v) {
-    case MS_V_REQUIRED: return "required";
-    case MS_V_PLAYED: return "played";
-    case MS_V_FORCED: return "forced";
+    case DP_V_REQUIRED: return "required";
+    case DP_V_PLAYED: return "played";
+    case DP_V_FORCED: return "forced";
     default: return "speculative";
     }
 }
@@ -60,12 +60,12 @@ static const char *chan_name(uint8_t c) {
 }
 
 // --- text -----------------------------------------------------------------------
-void ms_report_text(const MsResults *res, const MsConfig *cfg, MsBuf *out) {
-    const MsCart *c = res->cart;
+void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
+    const DpCart *c = res->cart;
     char line[2048];
-    snprintf(line, sizeof line, "memscan — %s (%s, %d banks, %u KiB, RAM %u KiB)\n",
-             c->title, ms_mbc_name(c->mbc), c->rom_banks, c->rom_size / 1024, c->ram_size / 1024);
-    ms_buf_str(out, line);
+    snprintf(line, sizeof line, "deepeel — %s (%s, %d banks, %u KiB, RAM %u KiB)\n",
+             c->title, dp_mbc_name(c->mbc), c->rom_banks, c->rom_size / 1024, c->ram_size / 1024);
+    dp_buf_str(out, line);
     snprintf(line, sizeof line,
              "exploration: %llu steps in %llu paths (%llu forks: %u branch, %u irq, %u key), %u sections\n"
              "evicted: %u exact states, %u same-context entries; cuts: %u cycles, %u step-budget, %u padding\n"
@@ -81,17 +81,17 @@ void ms_report_text(const MsResults *res, const MsConfig *cfg, MsBuf *out) {
              res->nonsense_stack, res->budget_paths, res->budget_steps, res->queue_overflows,
              res->seeds_natural, res->seeds_spec,
              (unsigned long long)res->data_verbatim_bytes, res->data_contradictions);
-    ms_buf_str(out, line);
+    dp_buf_str(out, line);
     {
         uint64_t stat_only = 0, ind_sites = 0, ind_over = 0;
         size_t nb = (size_t)res->banks * 0x4000;
         for (size_t k = 0; k < nb; k++)
-            if ((res->exec_flags[k] & MS_XF_STATIC) && !(res->exec_flags[k] & (MS_XF_NATURAL | MS_XF_FORCED)))
+            if ((res->exec_flags[k] & DP_XF_STATIC) && !(res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED)))
                 stat_only++;
         for (size_t i = 0; i < res->indirect.cap; i++) {
             if (!res->indirect.used[i]) continue;
             ind_sites++;
-            if (((const MsIndirect *)(res->indirect.vals + i * res->indirect.stride))->overflow) ind_over++;
+            if (((const DpIndirect *)(res->indirect.vals + i * res->indirect.stride))->overflow) ind_over++;
         }
         snprintf(line, sizeof line,
                  "static closure: %u rounds, %llu bytes (%u instructions) reached by direct flow only, "
@@ -103,27 +103,27 @@ void ms_report_text(const MsResults *res, const MsConfig *cfg, MsBuf *out) {
                  res->closure_seeds, res->closure_seeds_dropped, res->closure_stopped_data,
                  res->closure_stopped_illegal, res->closure_unresolved_bank,
                  (unsigned long long)ind_sites, (unsigned long long)ind_over, res->forks_covered_pruned);
-        ms_buf_str(out, line);
+        dp_buf_str(out, line);
     }
 
     // per-bank coverage
-    ms_buf_str(out, "\nper-bank executed bytes:\n");
+    dp_buf_str(out, "\nper-bank executed bytes:\n");
     for (int bank = 0; bank < res->banks; bank++) {
         int nat = 0, frc = 0, dat = 0;
         for (int i = 0; i < 0x4000; i++) {
             size_t k = (size_t)bank * 0x4000 + i;
-            if (res->exec_flags[k] & MS_XF_NATURAL) nat++;
-            else if (res->exec_flags[k] & MS_XF_FORCED) frc++;
-            if (res->data_flags[k] & MS_DF_READ) dat++;
+            if (res->exec_flags[k] & DP_XF_NATURAL) nat++;
+            else if (res->exec_flags[k] & DP_XF_FORCED) frc++;
+            if (res->data_flags[k] & DP_DF_READ) dat++;
         }
         if (!nat && !frc && !dat) continue;
         snprintf(line, sizeof line, "  bank %3d: %5d code (%5d natural) %5d data read\n", bank, nat + frc, nat, dat);
-        ms_buf_str(out, line);
+        dp_buf_str(out, line);
     }
 
     // sections: required first, then forced, top hits
-    ms_buf_str(out, "\nsections (top 60 by hits):\n");
-    ms_buf_str(out, "  bank:lo    hi     hits  nat/for  ctx  cond-both  io  copies  verdict\n");
+    dp_buf_str(out, "\nsections (top 60 by hits):\n");
+    dp_buf_str(out, "  bank:lo    hi     hits  nat/for  ctx  cond-both  io  copies  verdict\n");
     // simple selection: iterate sections, keep index list sorted by hits desc, cap 60
     uint32_t idx[60];
     int n = 0;
@@ -146,100 +146,100 @@ void ms_report_text(const MsResults *res, const MsConfig *cfg, MsBuf *out) {
             }
     }
     for (int i = 0; i < n; i++) {
-        const MsSection *s = &res->sections[idx[i]];
+        const DpSection *s = &res->sections[idx[i]];
         snprintf(line, sizeof line, "  %3d:%04x-%04x %7u %4u/%-4u %4u %5u/%-3u %3u %6u  %s\n",
                  s->bank, s->lo, s->hi, s->hits, s->natural_hits, s->forced_hits, s->ctx_count,
                  s->cond_both, s->cond_sites, s->io_used_n, s->copies, verdict_name(s->verdict));
-        ms_buf_str(out, line);
+        dp_buf_str(out, line);
     }
 
     // io usage
-    ms_buf_str(out, "\nregister usage:\n");
+    dp_buf_str(out, "\nregister usage:\n");
     for (int i = 0; i < res->io_count; i++) {
-        const MsIoStat *st = &res->io[i];
-        const MsIoReg *r = &res->plat->io_regs[i];
+        const DpIoStat *st = &res->io[i];
+        const DpIoReg *r = &res->plat->io_regs[i];
         if (!st->rd && !st->wr) continue;
         snprintf(line, sizeof line, "  %-6s %s rd=%-7u wr=%-7u", r->name, r->category, st->rd, st->wr);
-        ms_buf_str(out, line);
+        dp_buf_str(out, line);
         if (st->nvalues) {
-            ms_buf_str(out, " values=");
-            for (int v = 0; v < st->nvalues; v++) ms_buf_fmt(out, "%02x,", st->values[v]);
+            dp_buf_str(out, " values=");
+            for (int v = 0; v < st->nvalues; v++) dp_buf_fmt(out, "%02x,", st->values[v]);
         }
-        if (st->bank_events) ms_buf_fmt(out, " banks=%u", st->bank_events);
-        if (st->copies) ms_buf_fmt(out, " copies=%u", st->copies);
-        ms_buf_ch(out, '\n');
+        if (st->bank_events) dp_buf_fmt(out, " banks=%u", st->bank_events);
+        if (st->copies) dp_buf_fmt(out, " copies=%u", st->copies);
+        dp_buf_ch(out, '\n');
     }
 
     // copies
     if (res->copy_count) {
-        ms_buf_fmt(out, "\ncopies (%d):\n", res->copy_count);
+        dp_buf_fmt(out, "\ncopies (%d):\n", res->copy_count);
         int show = res->copy_count > 40 ? 40 : res->copy_count;
         for (int i = 0; i < show; i++) {
-            const MsCopyRec *r = &res->copies[i];
+            const DpCopyRec *r = &res->copies[i];
             snprintf(line, sizeof line, "  %-8s rom b%u:%04x-%04x -> %s b%u:%04x-%04x (%u bytes)%s at %04x\n",
                      chan_name(r->channel), r->src_bank, r->src_lo, r->src_hi,
-                     r->dst_space == MS_SPACE_VRAM ? "vram" : "oam", r->dst_bank, r->dst_lo, r->dst_hi,
+                     r->dst_space == DP_SPACE_VRAM ? "vram" : "oam", r->dst_bank, r->dst_lo, r->dst_hi,
                      r->bytes, r->verbatim ? " verbatim" : "", r->pc);
-            ms_buf_str(out, line);
+            dp_buf_str(out, line);
         }
-        if (res->copy_count > show) ms_buf_fmt(out, "  ... %d more\n", res->copy_count - show);
+        if (res->copy_count > show) dp_buf_fmt(out, "  ... %d more\n", res->copy_count - show);
     }
 
     // bank switches
     if (res->bank_count) {
-        ms_buf_fmt(out, "\nbank switches (%d", res->bank_count);
+        dp_buf_fmt(out, "\nbank switches (%d", res->bank_count);
         int show = res->bank_count > 30 ? 30 : res->bank_count;
-        ms_buf_str(out, "):\n");
+        dp_buf_str(out, "):\n");
         for (int i = 0; i < show; i++) {
-            const MsBankEvent *e = &res->bank_events[i];
+            const DpBankEvent *e = &res->bank_events[i];
             static const char *wn[3] = { "rom0", "romN", "ram" };
             snprintf(line, sizeof line, "  at %04x: %s %u -> %u\n", e->pc, wn[e->window], e->old_bank, e->new_bank);
-            ms_buf_str(out, line);
+            dp_buf_str(out, line);
         }
-        if (res->bank_count > show) ms_buf_fmt(out, "  ... %d more\n", res->bank_count - show);
+        if (res->bank_count > show) dp_buf_fmt(out, "  ... %d more\n", res->bank_count - show);
     }
 
     if (res->bad_op_count) {
-        ms_buf_fmt(out, "\nundefined opcodes: %d (first sites:", res->bad_op_count);
+        dp_buf_fmt(out, "\nundefined opcodes: %d (first sites:", res->bad_op_count);
         int show = res->bad_op_count > 8 ? 8 : res->bad_op_count;
         for (int i = 0; i < show; i++)
-            ms_buf_fmt(out, " %06x=%02x", res->bad_ops[i].key, res->bad_ops[i].op);
-        ms_buf_str(out, ")\n");
+            dp_buf_fmt(out, " %06x=%02x", res->bad_ops[i].key, res->bad_ops[i].op);
+        dp_buf_str(out, ")\n");
     }
     if (res->disc_n) {
         // discovery log: who found how much, and when (wall clock, tool observation)
         int show = res->disc_n > 40 ? 40 : res->disc_n;
-        ms_buf_fmt(out, "\ndiscovery log (%d entries%s): time(s) source credit known-bytes\n", res->disc_n,
+        dp_buf_fmt(out, "\ndiscovery log (%d entries%s): time(s) source credit known-bytes\n", res->disc_n,
                    show < res->disc_n ? ", last 40 shown; full log in --html" : "");
         for (int i = res->disc_n - show; i < res->disc_n; i++) {
-            const MsDiscEntry *e = &res->disc[i];
-            ms_buf_fmt(out, "  %8.2f  %-28s %10llu  %u\n", e->t, e->source, (unsigned long long)e->credit, e->known);
+            const DpDiscEntry *e = &res->disc[i];
+            dp_buf_fmt(out, "  %8.2f  %-28s %10llu  %u\n", e->t, e->source, (unsigned long long)e->credit, e->known);
         }
     }
     (void)cfg;
 }
 
 // --- json -----------------------------------------------------------------------
-static void json_esc(MsBuf *out, const char *s) {
+static void json_esc(DpBuf *out, const char *s) {
     for (const char *p = s; *p; p++) {
-        if (*p == '"' || *p == '\\') ms_buf_fmt(out, "\\%c", *p);
-        else if ((unsigned char)*p < 0x20) ms_buf_fmt(out, "\\u%04x", *p);
-        else ms_buf_ch(out, *p);
+        if (*p == '"' || *p == '\\') dp_buf_fmt(out, "\\%c", *p);
+        else if ((unsigned char)*p < 0x20) dp_buf_fmt(out, "\\u%04x", *p);
+        else dp_buf_ch(out, *p);
     }
 }
 
-void ms_report_json(const MsResults *res, const MsConfig *cfg, MsBuf *o) {
-    const MsCart *c = res->cart;
-    ms_buf_str(o, "{\n\"rom\": {");
-    ms_buf_fmt(o, "\"title\":\"");
+void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
+    const DpCart *c = res->cart;
+    dp_buf_str(o, "{\n\"rom\": {");
+    dp_buf_fmt(o, "\"title\":\"");
     json_esc(o, c->title);
-    ms_buf_fmt(o, "\",\"mbc\":\"%s\",\"banks\":%d,\"size\":%u,\"ram\":%u},\n",
-               ms_mbc_name(c->mbc), c->rom_banks, c->rom_size, c->ram_size);
-    ms_buf_fmt(o, "\"config\": {\"max_steps_path\":%u,\"max_paths\":%u,\"max_steps_total\":%llu,"
+    dp_buf_fmt(o, "\",\"mbc\":\"%s\",\"banks\":%d,\"size\":%u,\"ram\":%u},\n",
+               dp_mbc_name(c->mbc), c->rom_banks, c->rom_size, c->ram_size);
+    dp_buf_fmt(o, "\"config\": {\"max_steps_path\":%u,\"max_paths\":%u,\"max_steps_total\":%llu,"
                   "\"queue_cap\":%u,\"loop_back_cap\":%u,\"seed_cap\":%u,\"max_copies\":%u},\n",
                cfg->max_steps_path, cfg->max_paths, (unsigned long long)cfg->max_steps_total,
                cfg->queue_cap, cfg->loop_back_cap, cfg->seed_cap, cfg->max_copies);
-    ms_buf_fmt(o, "\"counters\": {\"steps\":%llu,\"paths\":%u,\"forks_branch\":%u,\"forks_irq\":%u,"
+    dp_buf_fmt(o, "\"counters\": {\"steps\":%llu,\"paths\":%u,\"forks_branch\":%u,\"forks_irq\":%u,"
                   "\"sections\":%u,\"evicted_exact\":%u,\"evicted_ctx\":%u,\"cycle_cuts\":%u,"
                   "\"step_cuts\":%u,\"pad_cuts\":%u,\"nonsense_echo\":%u,\"nonsense_data\":%u,\"nonsense_stack\":%u,\"budget_paths\":%u,\"budget_steps\":%u,\"queue_overflows\":%u,"
                   "\"seeds_natural\":%u,\"seeds_spec\":%u,\"bad_ops\":%u},\n",
@@ -249,85 +249,85 @@ void ms_report_json(const MsResults *res, const MsConfig *cfg, MsBuf *o) {
                res->nonsense_stack, res->budget_paths, res->budget_steps, res->queue_overflows,
                res->seeds_natural, res->seeds_spec, (unsigned)res->bad_op_count);
     // banks
-    ms_buf_str(o, "\"banks\": [\n");
+    dp_buf_str(o, "\"banks\": [\n");
     for (int bank = 0; bank < res->banks; bank++) {
-        ms_buf_fmt(o, "{\"bank\":%d,\"blocks\":\"", bank);
+        dp_buf_fmt(o, "{\"bank\":%d,\"blocks\":\"", bank);
         bank_blocks_rle(res, bank, o);
-        ms_buf_str(o, "\"}");
-        if (bank + 1 < res->banks) ms_buf_ch(o, ',');
-        ms_buf_ch(o, '\n');
+        dp_buf_str(o, "\"}");
+        if (bank + 1 < res->banks) dp_buf_ch(o, ',');
+        dp_buf_ch(o, '\n');
     }
-    ms_buf_str(o, "],\n");
+    dp_buf_str(o, "],\n");
     // sections
-    ms_buf_str(o, "\"sections\": [\n");
+    dp_buf_str(o, "\"sections\": [\n");
     for (int i = 0; i < res->section_count; i++) {
-        const MsSection *s = &res->sections[i];
-        ms_buf_fmt(o, "{\"id\":%u,\"bank\":%d,\"lo\":%u,\"hi\":%u,\"hits\":%u,\"entries\":%u,"
+        const DpSection *s = &res->sections[i];
+        dp_buf_fmt(o, "{\"id\":%u,\"bank\":%d,\"lo\":%u,\"hi\":%u,\"hits\":%u,\"entries\":%u,"
                       "\"natural\":%u,\"forced\":%u,\"verdict\":\"%s\",\"ctx\":%u,"
                       "\"cond_sites\":%u,\"cond_both\":%u,\"copies\":%u,\"io_used\":[",
                    s->id, s->bank, s->lo, s->hi, s->hits, s->entries, s->natural_hits, s->forced_hits,
                    verdict_name(s->verdict), s->ctx_count, s->cond_sites, s->cond_both, s->copies);
         for (int j = 0; j < s->io_used_n; j++) {
-            const MsIoReg *r = &res->plat->io_regs[s->io_used[j]];
-            ms_buf_fmt(o, "%s\"%s\"", j ? "," : "", r->name);
+            const DpIoReg *r = &res->plat->io_regs[s->io_used[j]];
+            dp_buf_fmt(o, "%s\"%s\"", j ? "," : "", r->name);
         }
-        ms_buf_str(o, "],\"banks_seen\":[");
-        for (int j = 0; j < s->banks_seen_n; j++) ms_buf_fmt(o, "%s%u", j ? "," : "", s->banks_seen[j]);
-        ms_buf_str(o, "],\"callers\":[");
-        for (int j = 0; j < s->callers_n; j++) ms_buf_fmt(o, "%s%u", j ? "," : "", s->callers[j]);
-        ms_buf_str(o, "]}");
-        if (i + 1 < res->section_count) ms_buf_ch(o, ',');
-        ms_buf_ch(o, '\n');
+        dp_buf_str(o, "],\"banks_seen\":[");
+        for (int j = 0; j < s->banks_seen_n; j++) dp_buf_fmt(o, "%s%u", j ? "," : "", s->banks_seen[j]);
+        dp_buf_str(o, "],\"callers\":[");
+        for (int j = 0; j < s->callers_n; j++) dp_buf_fmt(o, "%s%u", j ? "," : "", s->callers[j]);
+        dp_buf_str(o, "]}");
+        if (i + 1 < res->section_count) dp_buf_ch(o, ',');
+        dp_buf_ch(o, '\n');
     }
-    ms_buf_str(o, "],\n");
+    dp_buf_str(o, "],\n");
     // io
-    ms_buf_str(o, "\"io\": [\n");
+    dp_buf_str(o, "\"io\": [\n");
     int first = 1;
     for (int i = 0; i < res->io_count; i++) {
-        const MsIoStat *st = &res->io[i];
-        const MsIoReg *r = &res->plat->io_regs[i];
+        const DpIoStat *st = &res->io[i];
+        const DpIoReg *r = &res->plat->io_regs[i];
         if (!st->rd && !st->wr) continue;
-        if (!first) ms_buf_str(o, ",\n");
+        if (!first) dp_buf_str(o, ",\n");
         first = 0;
-        ms_buf_fmt(o, "{\"addr\":\"%04x\",\"name\":\"%s\",\"category\":\"%s\",\"rd\":%u,\"wr\":%u,\"values\":[",
+        dp_buf_fmt(o, "{\"addr\":\"%04x\",\"name\":\"%s\",\"category\":\"%s\",\"rd\":%u,\"wr\":%u,\"values\":[",
                    r->lo, r->name, r->category, st->rd, st->wr);
-        for (int v = 0; v < st->nvalues; v++) ms_buf_fmt(o, "%s%u", v ? "," : "", st->values[v]);
-        ms_buf_str(o, "],\"pcs\":[");
-        for (int v = 0; v < st->npcs; v++) ms_buf_fmt(o, "%s%u", v ? "," : "", st->pcs[v]);
-        ms_buf_fmt(o, "],\"copies\":%u,\"bank_events\":%u}", st->copies, st->bank_events);
+        for (int v = 0; v < st->nvalues; v++) dp_buf_fmt(o, "%s%u", v ? "," : "", st->values[v]);
+        dp_buf_str(o, "],\"pcs\":[");
+        for (int v = 0; v < st->npcs; v++) dp_buf_fmt(o, "%s%u", v ? "," : "", st->pcs[v]);
+        dp_buf_fmt(o, "],\"copies\":%u,\"bank_events\":%u}", st->copies, st->bank_events);
     }
-    ms_buf_str(o, "],\n");
+    dp_buf_str(o, "],\n");
     // copies
-    ms_buf_str(o, "\"copies\": [\n");
+    dp_buf_str(o, "\"copies\": [\n");
     for (int i = 0; i < res->copy_count; i++) {
-        const MsCopyRec *r = &res->copies[i];
-        ms_buf_fmt(o, "{\"channel\":\"%s\",\"verbatim\":%s,\"src\":{\"space\":\"%s\",\"bank\":%u,\"lo\":%u,\"hi\":%u},"
+        const DpCopyRec *r = &res->copies[i];
+        dp_buf_fmt(o, "{\"channel\":\"%s\",\"verbatim\":%s,\"src\":{\"space\":\"%s\",\"bank\":%u,\"lo\":%u,\"hi\":%u},"
                       "\"dst\":{\"space\":\"%s\",\"bank\":%u,\"lo\":%u,\"hi\":%u},\"bytes\":%u,\"pc\":%u}",
                    chan_name(r->channel), r->verbatim ? "true" : "false",
-                   r->src_space == MS_SPACE_ROM ? "rom" : (r->src_space == MS_SPACE_WRAM ? "wram" : "vram"),
+                   r->src_space == DP_SPACE_ROM ? "rom" : (r->src_space == DP_SPACE_WRAM ? "wram" : "vram"),
                    r->src_bank, r->src_lo, r->src_hi,
-                   r->dst_space == MS_SPACE_VRAM ? "vram" : "oam", r->dst_bank, r->dst_lo, r->dst_hi,
+                   r->dst_space == DP_SPACE_VRAM ? "vram" : "oam", r->dst_bank, r->dst_lo, r->dst_hi,
                    r->bytes, r->pc);
-        if (i + 1 < res->copy_count) ms_buf_ch(o, ',');
-        ms_buf_ch(o, '\n');
+        if (i + 1 < res->copy_count) dp_buf_ch(o, ',');
+        dp_buf_ch(o, '\n');
     }
-    ms_buf_str(o, "],\n");
+    dp_buf_str(o, "],\n");
     // bank events
-    ms_buf_str(o, "\"bank_events\": [\n");
+    dp_buf_str(o, "\"bank_events\": [\n");
     for (int i = 0; i < res->bank_count; i++) {
-        const MsBankEvent *e = &res->bank_events[i];
+        const DpBankEvent *e = &res->bank_events[i];
         static const char *wn[3] = { "rom0", "romN", "ram" };
-        ms_buf_fmt(o, "{\"pc\":%u,\"window\":\"%s\",\"old\":%u,\"new\":%u}", e->pc, wn[e->window],
+        dp_buf_fmt(o, "{\"pc\":%u,\"window\":\"%s\",\"old\":%u,\"new\":%u}", e->pc, wn[e->window],
                    e->old_bank, e->new_bank);
-        if (i + 1 < res->bank_count) ms_buf_ch(o, ',');
-        ms_buf_ch(o, '\n');
+        if (i + 1 < res->bank_count) dp_buf_ch(o, ',');
+        dp_buf_ch(o, '\n');
     }
-    ms_buf_str(o, "],\n");
+    dp_buf_str(o, "],\n");
     // bad ops
-    ms_buf_str(o, "\"bad_ops\": [");
+    dp_buf_str(o, "\"bad_ops\": [");
     for (int i = 0; i < res->bad_op_count && i < 64; i++)
-        ms_buf_fmt(o, "%s%u", i ? "," : "", res->bad_ops[i].key);
-    ms_buf_str(o, "]\n}\n");
+        dp_buf_fmt(o, "%s%u", i ? "," : "", res->bad_ops[i].key);
+    dp_buf_str(o, "]\n}\n");
 }
 
 // --- cov -------------------------------------------------------------------------
@@ -337,34 +337,34 @@ void ms_report_json(const MsResults *res, const MsConfig *cfg, MsBuf *o) {
 // execution and the data bit: execution wins, the contradiction is counted.
 // Data lines let m0boy's loader exclude those bytes even when another
 // coverage source (its static walk) proposed them as code.
-void ms_report_cov(const MsResults *res, MsBuf *o) {
-    ms_buf_str(o, "# gbl coverage v1: bank addr flags(1=exec,2=entry,4=speculative,8=data) hits\n");
+void dp_report_cov(const DpResults *res, DpBuf *o) {
+    dp_buf_str(o, "# gbl coverage v1: bank addr flags(1=exec,2=entry,4=speculative,8=data) hits\n");
     for (int bank = 0; bank < res->banks; bank++) {
         for (int a = 0; a < 0x4000; a++) {
             size_t k = (size_t)bank * 0x4000 + a;
             uint8_t ef = res->exec_flags[k];
-            uint8_t natural = (uint8_t)(ef & MS_XF_NATURAL);
-            if (ef & (MS_XF_NATURAL | MS_XF_FORCED)) {
+            uint8_t natural = (uint8_t)(ef & DP_XF_NATURAL);
+            if (ef & (DP_XF_NATURAL | DP_XF_FORCED)) {
                 // speculative-only execution (the fork deliberately runs data
                 // as code) does not outweigh a verbatim copy proof
-                if (!natural && (res->data_flags[k] & MS_DF_VERBATIM)) {
-                    ms_buf_fmt(o, "%02x %04x 8 %x\n", bank, bank ? a + 0x4000 : a,
+                if (!natural && (res->data_flags[k] & DP_DF_VERBATIM)) {
+                    dp_buf_fmt(o, "%02x %04x 8 %x\n", bank, bank ? a + 0x4000 : a,
                                res->data_hits[k] > 0xFFFFu ? 0xFFFFu : (unsigned)res->data_hits[k]);
                     continue;
                 }
                 uint8_t flags = 1;
-                if (ef & MS_XF_ENTRY) flags |= 2;
-                if (ef & MS_XF_FORCED) flags |= 4;
-                ms_buf_fmt(o, "%02x %04x %x %x\n", bank, bank ? a + 0x4000 : a, flags,
+                if (ef & DP_XF_ENTRY) flags |= 2;
+                if (ef & DP_XF_FORCED) flags |= 4;
+                dp_buf_fmt(o, "%02x %04x %x %x\n", bank, bank ? a + 0x4000 : a, flags,
                            res->exec_hits[k] > 0xFFFFu ? 0xFFFFu : (unsigned)res->exec_hits[k]);
-            } else if (ef & MS_XF_STATIC) {
+            } else if (ef & DP_XF_STATIC) {
                 // direct flow only: instruction starts, speculative (4), entry (2)
-                if (ef & MS_XF_START)
-                    ms_buf_fmt(o, "%02x %04x %x 0\n", bank, bank ? a + 0x4000 : a,
-                               (ef & MS_XF_ENTRY) ? 6u : 4u);
-            } else if ((res->data_flags[k] & MS_DF_VERBATIM) || (res->static_flags[k] & MS_SF_POINTER)) {
+                if (ef & DP_XF_START)
+                    dp_buf_fmt(o, "%02x %04x %x 0\n", bank, bank ? a + 0x4000 : a,
+                               (ef & DP_XF_ENTRY) ? 6u : 4u);
+            } else if ((res->data_flags[k] & DP_DF_VERBATIM) || (res->static_flags[k] & DP_SF_POINTER)) {
                 // proven data, never executed: m0boy must not compile it
-                ms_buf_fmt(o, "%02x %04x 8 %x\n", bank, bank ? a + 0x4000 : a,
+                dp_buf_fmt(o, "%02x %04x 8 %x\n", bank, bank ? a + 0x4000 : a,
                            res->data_hits[k] > 0xFFFFu ? 0xFFFFu : (unsigned)res->data_hits[k]);
             }
         }
@@ -375,7 +375,7 @@ void ms_report_cov(const MsResults *res, MsBuf *o) {
 // ROM data-read profile in m0boy's romdata-*.prof format ("page count", one
 // line per touched 256-byte page): it weights the flash residency/streaming
 // of the generated project by what the sessions actually read.
-void ms_report_romdata(const MsResults *res, MsBuf *o) {
+void dp_report_romdata(const DpResults *res, DpBuf *o) {
     size_t pages = ((size_t)res->cart->rom_size + 255) / 256;
     uint64_t *counts = calloc(pages, sizeof(uint64_t));
     if (!counts) return;
@@ -389,6 +389,6 @@ void ms_report_romdata(const MsResults *res, MsBuf *o) {
         }
     }
     for (size_t p = 0; p < pages; p++)
-        if (counts[p]) ms_buf_fmt(o, "%zx %llu\n", p, (unsigned long long)counts[p]);
+        if (counts[p]) dp_buf_fmt(o, "%zx %llu\n", p, (unsigned long long)counts[p]);
     free(counts);
 }

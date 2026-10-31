@@ -1,12 +1,12 @@
 #include "cart.h"
 
-const char *ms_mbc_name(MsMbc mbc) {
+const char *dp_mbc_name(DpMbc mbc) {
     switch (mbc) {
-    case MS_MBC_NONE: return "ROM ONLY";
-    case MS_MBC1: return "MBC1";
-    case MS_MBC2: return "MBC2";
-    case MS_MBC3: return "MBC3";
-    case MS_MBC5: return "MBC5";
+    case DP_MBC_NONE: return "ROM ONLY";
+    case DP_MBC1: return "MBC1";
+    case DP_MBC2: return "MBC2";
+    case DP_MBC3: return "MBC3";
+    case DP_MBC5: return "MBC5";
     default: return "UNKNOWN";
     }
 }
@@ -29,8 +29,8 @@ static int rom_banks_from_code(uint8_t code) {
     }
 }
 
-static uint32_t ram_size_from_code(uint8_t code, MsMbc mbc) {
-    if (mbc == MS_MBC2) return 512; // MBC2 has 512 x 4-bit internal RAM
+static uint32_t ram_size_from_code(uint8_t code, DpMbc mbc) {
+    if (mbc == DP_MBC2) return 512; // MBC2 has 512 x 4-bit internal RAM
     switch (code) {
     case 0: return 0;
     case 1: return 2048;
@@ -42,13 +42,13 @@ static uint32_t ram_size_from_code(uint8_t code, MsMbc mbc) {
     }
 }
 
-static MsCart *finalize(uint8_t *rom, uint32_t size, char *err, size_t errsz) {
+static DpCart *finalize(uint8_t *rom, uint32_t size, char *err, size_t errsz) {
     if (size < 0x150) {
         snprintf(err, errsz, "rom too small (%u bytes)", size);
         free(rom);
         return NULL;
     }
-    MsCart *c = calloc(1, sizeof *c);
+    DpCart *c = calloc(1, sizeof *c);
     c->rom = rom;
     c->rom_size = size;
     int banks = rom_banks_from_code(rom[0x148]);
@@ -57,12 +57,12 @@ static MsCart *finalize(uint8_t *rom, uint32_t size, char *err, size_t errsz) {
     c->rom_banks = banks;
     uint8_t code = rom[0x147];
     switch (code) {
-    case 0x00: c->mbc = MS_MBC_NONE; break;
-    case 0x01: case 0x02: case 0x03: c->mbc = MS_MBC1; break;
-    case 0x05: case 0x06: c->mbc = MS_MBC2; break;
-    case 0x0F: case 0x10: case 0x11: case 0x12: case 0x13: c->mbc = MS_MBC3; break;
-    case 0x19: case 0x1A: case 0x1B: case 0x1C: case 0x1D: case 0x1E: c->mbc = MS_MBC5; break;
-    default: c->mbc = MS_MBC_UNKNOWN; break;
+    case 0x00: c->mbc = DP_MBC_NONE; break;
+    case 0x01: case 0x02: case 0x03: c->mbc = DP_MBC1; break;
+    case 0x05: case 0x06: c->mbc = DP_MBC2; break;
+    case 0x0F: case 0x10: case 0x11: case 0x12: case 0x13: c->mbc = DP_MBC3; break;
+    case 0x19: case 0x1A: case 0x1B: case 0x1C: case 0x1D: case 0x1E: c->mbc = DP_MBC5; break;
+    default: c->mbc = DP_MBC_UNKNOWN; break;
     }
     c->cgb = (rom[0x143] & 0x80) != 0;
     memcpy(c->title, rom + 0x134, 16);
@@ -74,7 +74,7 @@ static MsCart *finalize(uint8_t *rom, uint32_t size, char *err, size_t errsz) {
     return c;
 }
 
-MsCart *ms_cart_load(const char *path, char *err, size_t errsz) {
+DpCart *dp_cart_load(const char *path, char *err, size_t errsz) {
     FILE *f = fopen(path, "rb");
     if (!f) {
         snprintf(err, errsz, "cannot open %s", path);
@@ -99,7 +99,7 @@ MsCart *ms_cart_load(const char *path, char *err, size_t errsz) {
     return finalize(rom, (uint32_t)sz, err, errsz);
 }
 
-MsCart *ms_cart_from_memory(uint8_t *rom, uint32_t size, char *err, size_t errsz) {
+DpCart *dp_cart_from_memory(uint8_t *rom, uint32_t size, char *err, size_t errsz) {
     if (!rom) {
         size = 0x8000;
         rom = calloc(1, size);
@@ -112,7 +112,7 @@ MsCart *ms_cart_from_memory(uint8_t *rom, uint32_t size, char *err, size_t errsz
     return finalize(rom, size, err, errsz);
 }
 
-void ms_cart_free(MsCart *c) {
+void dp_cart_free(DpCart *c) {
     if (!c) return;
     free(c->rom);
     free(c->ram);

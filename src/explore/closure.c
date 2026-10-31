@@ -3,7 +3,7 @@
 // control flow unvisited.  This pass follows that flow without a machine:
 // from every executed instruction it walks fall-through, JR/JP/CALL/RST
 // targets and both sides of every conditional, and marks what it reaches
-// MS_XF_STATIC.  Nothing executed is touched; padding, pointer tables and
+// DP_XF_STATIC.  Nothing executed is touched; padding, pointer tables and
 // proven data stop the walk.  The visited maps are ROM-sized, so it always
 // terminates; what it cannot resolve (bank-0 edge into the $4000 window with
 // no bank evidence, JP HL) is counted, never guessed.
@@ -40,12 +40,12 @@ static int illegal(uint8_t op) {
 }
 
 // the bank the $4000 window holds right after reset
-static uint16_t boot_bank(const MsResults *res) {
-    if (res->cart->mbc == MS_MBC5) return 0;
+static uint16_t boot_bank(const DpResults *res) {
+    if (res->cart->mbc == DP_MBC5) return 0;
     return res->banks > 1 ? 1 : 0;
 }
 
-static void entry_add(MsResults *res, uint32_t key) {
+static void entry_add(DpResults *res, uint32_t key) {
     if (res->clo_entry_n == res->clo_entry_cap) {
         res->clo_entry_cap = res->clo_entry_cap ? res->clo_entry_cap * 2 : 1024;
         res->clo_entries = realloc(res->clo_entries, (size_t)res->clo_entry_cap * sizeof(uint32_t));
@@ -54,17 +54,17 @@ static void entry_add(MsResults *res, uint32_t key) {
     res->clo_entries[res->clo_entry_n++] = key;
 }
 
-uint32_t ms_static_closure(MsResults *res) {
-    const MsCart *c = res->cart;
+uint32_t dp_static_closure(DpResults *res) {
+    const DpCart *c = res->cart;
     size_t n = (size_t)res->banks * 0x4000;
     uint8_t *vis = calloc(n, 1);   // banked code (and bank-0 code with no hint)
-    MsHashSet vis0;                // bank-0 code per bank hint
-    MsHashSet listed;              // entries already recorded
+    DpHashSet vis0;                // bank-0 code per bank hint
+    DpHashSet listed;              // entries already recorded
     Stack st = {0};
     uint32_t marked = 0;
     if (!vis) return 0;
-    ms_set_init(&vis0, 1 << 24);
-    ms_set_init(&listed, 1 << 22);
+    dp_set_init(&vis0, 1 << 24);
+    dp_set_init(&listed, 1 << 22);
     res->closure_rounds++;
     res->clo_entry_n = 0;
     // per-round counters are cumulative over rounds only for the totals the
@@ -72,11 +72,11 @@ uint32_t ms_static_closure(MsResults *res) {
     res->closure_unresolved_bank = res->closure_stopped_data = res->closure_stopped_illegal = 0;
 
     for (size_t k = 0; k < n; k++) {
-        if (!(res->exec_flags[k] & MS_XF_START)) continue;
+        if (!(res->exec_flags[k] & DP_XF_START)) continue;
         if (k >= 0x4000) { push(&st, (uint32_t)k, NO_HINT); continue; }
         uint32_t sid1 = res->section_of[k];
         if (sid1) {
-            const MsSection *s = &res->sections[sid1 - 1];
+            const DpSection *s = &res->sections[sid1 - 1];
             for (int i = 0; i < s->banks_seen_n; i++)
                 push(&st, (uint32_t)k, (uint16_t)s->banks_seen[i]);
         }
@@ -88,7 +88,7 @@ uint32_t ms_static_closure(MsResults *res) {
         uint32_t k = it.key;
         uint32_t bank = k / 0x4000, off = k % 0x4000;
         if (bank == 0) {
-            if (ms_set_insert(&vis0, ((uint64_t)k << 16) | it.hint) <= 0) continue;
+            if (dp_set_insert(&vis0, ((uint64_t)k << 16) | it.hint) <= 0) continue;
         } else {
             if (vis[k]) continue;
             vis[k] = 1;
@@ -98,11 +98,11 @@ uint32_t ms_static_closure(MsResults *res) {
         uint8_t op = c->rom[k];
         int len = sm83_len(op);
         if (k + (uint32_t)len > c->rom_size) continue;
-        int executed = (res->exec_flags[k] & (MS_XF_NATURAL | MS_XF_FORCED)) != 0;
+        int executed = (res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED)) != 0;
         if (!executed) {
             if (illegal(op)) { res->closure_stopped_illegal++; continue; }
-            if ((res->static_flags[k] & (MS_SF_PAD | MS_SF_POINTER)) ||
-                ((res->data_flags[k] & MS_DF_VERBATIM) && !(res->exec_flags[k] & MS_XF_NATURAL))) {
+            if ((res->static_flags[k] & (DP_SF_PAD | DP_SF_POINTER)) ||
+                ((res->data_flags[k] & DP_DF_VERBATIM) && !(res->exec_flags[k] & DP_XF_NATURAL))) {
                 res->closure_stopped_data++;
                 continue;
             }
@@ -113,10 +113,10 @@ uint32_t ms_static_closure(MsResults *res) {
             if (cross) continue;
             for (int i = 0; i < len; i++) {
                 uint8_t *f = &res->exec_flags[k + i];
-                if (!(*f & (MS_XF_NATURAL | MS_XF_FORCED | MS_XF_STATIC))) marked++;
-                *f |= MS_XF_STATIC;
+                if (!(*f & (DP_XF_NATURAL | DP_XF_FORCED | DP_XF_STATIC))) marked++;
+                *f |= DP_XF_STATIC;
             }
-            res->exec_flags[k] |= MS_XF_START;
+            res->exec_flags[k] |= DP_XF_START;
         }
 
         // successors
@@ -155,9 +155,9 @@ uint32_t ms_static_closure(MsResults *res) {
                 }
             } // RAM targets: not ROM map information
             if (tk != ~0u && tk < n) {
-                if (!(res->exec_flags[tk] & (MS_XF_NATURAL | MS_XF_FORCED))) {
-                    res->exec_flags[tk] |= MS_XF_ENTRY;
-                    if (ms_set_insert(&listed, tk) > 0) entry_add(res, tk);
+                if (!(res->exec_flags[tk] & (DP_XF_NATURAL | DP_XF_FORCED))) {
+                    res->exec_flags[tk] |= DP_XF_ENTRY;
+                    if (dp_set_insert(&listed, tk) > 0) entry_add(res, tk);
                 }
                 push(&st, tk, tk >= 0x4000 ? NO_HINT : thint);
             }
@@ -174,28 +174,28 @@ uint32_t ms_static_closure(MsResults *res) {
     res->closure_bytes += marked;
     res->closure_starts = 0;
     for (size_t k = 0; k < n; k++)
-        if ((res->exec_flags[k] & MS_XF_STATIC) && (res->exec_flags[k] & MS_XF_START)) res->closure_starts++;
+        if ((res->exec_flags[k] & DP_XF_STATIC) && (res->exec_flags[k] & DP_XF_START)) res->closure_starts++;
     free(st.v);
     free(vis);
-    ms_set_free(&vis0);
-    ms_set_free(&listed);
+    dp_set_free(&vis0);
+    dp_set_free(&listed);
     return marked;
 }
 
-int ms_closure_seed(MsExplorer *ex) {
-    MsResults *res = ex->res;
+int dp_closure_seed(DpExplorer *ex) {
+    DpResults *res = ex->res;
     int seeded = 0;
     for (int i = 0; i < res->clo_entry_n; i++) {
         uint32_t k = res->clo_entries[i];
-        if (res->exec_flags[k] & (MS_XF_NATURAL | MS_XF_FORCED)) continue;
+        if (res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED)) continue;
         if ((uint32_t)seeded >= ex->cfg.seed_cap) { // saturation is reported, not silent
             res->closure_seeds_dropped++;
             continue;
         }
-        if (ms_set_insert(&res->clo_seeded, k) <= 0) continue;
+        if (dp_set_insert(&res->clo_seeded, k) <= 0) continue;
 
         uint32_t bank = k / 0x4000, off = k % 0x4000;
-        ms_explorer_seed_pc(ex, (int)bank, (uint16_t)(bank ? 0x4000 + off : off), MS_SEED_POINTER, 1);
+        dp_explorer_seed_pc(ex, (int)bank, (uint16_t)(bank ? 0x4000 + off : off), DP_SEED_POINTER, 1);
         seeded++;
     }
     res->closure_seeds += (uint32_t)seeded;

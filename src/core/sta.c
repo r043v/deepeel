@@ -45,7 +45,7 @@ static int define_of(const char *text, const char *name, char *out, size_t outsz
     return 1;
 }
 
-int ms_sta_from_project(MsSta *st, const char *project_dir, uint32_t state_bytes, char *err,
+int dp_sta_from_project(DpSta *st, const char *project_dir, uint32_t state_bytes, char *err,
                         size_t errsz) {
     char cfgpath[512];
     snprintf(cfgpath, sizeof cfgpath, "%s/gbl_config.h", project_dir);
@@ -115,7 +115,7 @@ int ms_sta_from_project(MsSta *st, const char *project_dir, uint32_t state_bytes
     return 1;
 }
 
-int ms_sta_write(const MsSta *st, unsigned slot, const uint8_t *img, uint32_t nbytes,
+int dp_sta_write(const DpSta *st, unsigned slot, const uint8_t *img, uint32_t nbytes,
                  uint32_t frame, char *err, size_t errsz) {
     if (slot >= st->slots) {
         snprintf(err, errsz, "slot %u out of range (%u slots)", slot, st->slots);

@@ -5,13 +5,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void html_escape(MsBuf *out, const char *s) {
+static void html_escape(DpBuf *out, const char *s) {
     for (; *s; s++) {
-        if (*s == '<') ms_buf_str(out, "&lt;");
-        else if (*s == '>') ms_buf_str(out, "&gt;");
-        else if (*s == '&') ms_buf_str(out, "&amp;");
-        else if (*s == '"') ms_buf_str(out, "&quot;");
-        else ms_buf_fmt(out, "%c", *s);
+        if (*s == '<') dp_buf_str(out, "&lt;");
+        else if (*s == '>') dp_buf_str(out, "&gt;");
+        else if (*s == '&') dp_buf_str(out, "&amp;");
+        else if (*s == '"') dp_buf_str(out, "&quot;");
+        else dp_buf_fmt(out, "%c", *s);
     }
 }
 
@@ -20,9 +20,9 @@ static char block_letter(const uint8_t *cls, size_t n) {
     unsigned code = 0, data = 0, pad = 0, unk = 0;
     for (size_t i = 0; i < n; i++) {
         uint8_t c = cls[i];
-        if (c == MS_MAP_UNKNOWN) unk++;
-        else if (ms_map_is_code(c)) code++;
-        else if (c == MS_MAP_PAD || c == MS_MAP_INF_PAD) pad++;
+        if (c == DP_MAP_UNKNOWN) unk++;
+        else if (dp_map_is_code(c)) code++;
+        else if (c == DP_MAP_PAD || c == DP_MAP_INF_PAD) pad++;
         else data++;
     }
     if (unk * 2 > n) return '?';
@@ -32,13 +32,13 @@ static char block_letter(const uint8_t *cls, size_t n) {
     return 'P';
 }
 
-void ms_report_html(const MsResults *res, MsBuf *out) {
-    MsMapSummary sum;
-    uint8_t *cls = ms_map_build(res, &sum);
+void dp_report_html(const DpResults *res, DpBuf *out) {
+    DpMapSummary sum;
+    uint8_t *cls = dp_map_build(res, &sum);
     if (!cls) return;
     double t = sum.total ? 100.0 / (double)sum.total : 0.0;
-    ms_buf_str(out, "<!doctype html>\n<html lang=\"fr\"><head><meta charset=\"utf-8\">\n"
-        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>memscan map</title>\n<style>\n"
+    dp_buf_str(out, "<!doctype html>\n<html lang=\"fr\"><head><meta charset=\"utf-8\">\n"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>deepeel map</title>\n<style>\n"
         ":root{--bg:#fafafa;--fg:#1b1b1f;--mut:#666;--card:#fff;--bd:#d8d8de;--code:#2f7fd8;--data:#2fa56a;"
         "--pad:#a8a8b3;--unk:#d8453b;--mix:#8a5bd0}\n"
         "@media(prefers-color-scheme:dark){:root{--bg:#141418;--fg:#e8e8ee;--mut:#9a9aa6;--card:#1e1e24;--bd:#34343c;"
@@ -55,24 +55,24 @@ void ms_report_html(const MsResults *res, MsBuf *out) {
         "table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:3px 8px;border-bottom:1px solid var(--bd);"
         "font-variant-numeric:tabular-nums}th{color:var(--mut);font-weight:600}\n"
         "td.n,th.n{text-align:right}\n</style></head><body>\n");
-    ms_buf_str(out, "<h1>memscan : memory map de la ROM</h1>\n<div class=\"mut\">");
+    dp_buf_str(out, "<h1>deepeel : memory map de la ROM</h1>\n<div class=\"mut\">");
     html_escape(out, res->cart->title);
-    ms_buf_fmt(out, " &middot; %d banques de 16 Ko &middot; %llu octets &middot; observations de l'outil "
+    dp_buf_fmt(out, " &middot; %d banques de 16 Ko &middot; %llu octets &middot; observations de l'outil "
                "(machine concr&egrave;te, RAM &agrave; z&eacute;ro), pas des mesures mat&eacute;rielles</div>\n",
                res->banks, (unsigned long long)sum.total);
-    ms_buf_fmt(out, "<div class=\"card\"><b>%.1f%% connu</b> &middot; %.1f%% inconnu &middot; %.1f%% code &middot; "
+    dp_buf_fmt(out, "<div class=\"card\"><b>%.1f%% connu</b> &middot; %.1f%% inconnu &middot; %.1f%% code &middot; "
                "%.1f%% data &middot; %.1f%% padding <span class=\"mut\">(le connu inclut %.1f%% d'inf&eacute;r&eacute;)</span></div>\n",
                sum.known * t, sum.unknown * t, sum.code * t, sum.data * t, sum.pad * t, sum.inferred * t);
-    ms_buf_str(out, "<div class=\"lg\"><span><i class=\"C\"></i>code</span><span><i class=\"D\"></i>data</span>"
+    dp_buf_str(out, "<div class=\"lg\"><span><i class=\"C\"></i>code</span><span><i class=\"D\"></i>data</span>"
                     "<span><i class=\"P\"></i>padding</span><span><i class=\"M\"></i>code+data</span>"
                     "<span><i class=\"U\"></i>inconnu</span></div>\n");
-    ms_buf_str(out, "<h2>Carr&eacute;s de 64 octets par banque</h2>\n<div id=\"banks\"></div>\n<script>\nconst B=[\n");
+    dp_buf_str(out, "<h2>Carr&eacute;s de 64 octets par banque</h2>\n<div id=\"banks\"></div>\n<script>\nconst B=[\n");
     for (int b = 0; b < res->banks; b++) {
-        ms_buf_str(out, "\"");
-        for (size_t o = 0; o < 0x4000; o += 64) ms_buf_fmt(out, "%c", block_letter(cls + (size_t)b * 0x4000 + o, 64));
-        ms_buf_str(out, b + 1 < res->banks ? "\",\n" : "\"\n");
+        dp_buf_str(out, "\"");
+        for (size_t o = 0; o < 0x4000; o += 64) dp_buf_fmt(out, "%c", block_letter(cls + (size_t)b * 0x4000 + o, 64));
+        dp_buf_str(out, b + 1 < res->banks ? "\",\n" : "\"\n");
     }
-    ms_buf_str(out, "];\nconst N={C:'code',D:'data',P:'padding',M:'code+data','?':'inconnu'};\n"
+    dp_buf_str(out, "];\nconst N={C:'code',D:'data',P:'padding',M:'code+data','?':'inconnu'};\n"
         "const root=document.getElementById('banks');\n"
         "B.forEach((s,b)=>{const d=document.createElement('div');d.className='card';"
         "d.innerHTML='<b>Banque '+b+'</b> <span class=\"mut\">'+(b?'4000-7fff':'0000-3fff')+'</span>';"
@@ -80,21 +80,21 @@ void ms_report_html(const MsResults *res, MsBuf *out) {
         "[...s].forEach((c,i)=>{const e=document.createElement('i');e.className=c=='?'?'U':c;"
         "const a=(b?0x4000:0)+i*64;e.title='banque '+b+' '+a.toString(16).padStart(4,'0')+' : '+N[c];g.appendChild(e)});"
         "d.appendChild(g);root.appendChild(d)});\n</script>\n");
-    ms_buf_str(out, "<h2>R&eacute;partition par classe</h2>\n<div class=\"card\"><table><tr><th>classe</th>"
+    dp_buf_str(out, "<h2>R&eacute;partition par classe</h2>\n<div class=\"card\"><table><tr><th>classe</th>"
                     "<th class=\"n\">octets</th><th class=\"n\">%</th></tr>\n");
-    for (int c = 0; c < MS_MAP_COUNT; c++)
-        ms_buf_fmt(out, "<tr><td>%s</td><td class=\"n\">%llu</td><td class=\"n\">%.1f</td></tr>\n", ms_map_class_name(c),
+    for (int c = 0; c < DP_MAP_COUNT; c++)
+        dp_buf_fmt(out, "<tr><td>%s</td><td class=\"n\">%llu</td><td class=\"n\">%.1f</td></tr>\n", dp_map_class_name(c),
                    (unsigned long long)sum.cls[c], sum.cls[c] * t);
-    ms_buf_str(out, "</table></div>\n<h2>Journal de d&eacute;couverte</h2>\n<div class=\"card\"><table><tr>"
+    dp_buf_str(out, "</table></div>\n<h2>Journal de d&eacute;couverte</h2>\n<div class=\"card\"><table><tr>"
                     "<th class=\"n\">temps (s)</th><th>source</th><th class=\"n\">cr&eacute;dit</th>"
                     "<th class=\"n\">octets connus</th><th class=\"n\">%</th></tr>\n");
     for (int i = 0; i < res->disc_n; i++) {
-        const MsDiscEntry *e = &res->disc[i];
-        ms_buf_fmt(out, "<tr><td class=\"n\">%.2f</td><td>", e->t);
+        const DpDiscEntry *e = &res->disc[i];
+        dp_buf_fmt(out, "<tr><td class=\"n\">%.2f</td><td>", e->t);
         html_escape(out, e->source);
-        ms_buf_fmt(out, "</td><td class=\"n\">%llu</td><td class=\"n\">%u</td><td class=\"n\">%.1f</td></tr>\n",
+        dp_buf_fmt(out, "</td><td class=\"n\">%llu</td><td class=\"n\">%u</td><td class=\"n\">%.1f</td></tr>\n",
                    (unsigned long long)e->credit, e->known, e->known * t);
     }
-    ms_buf_str(out, "</table></div>\n</body></html>\n");
+    dp_buf_str(out, "</table></div>\n</body></html>\n");
     free(cls);
 }

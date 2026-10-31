@@ -4,7 +4,7 @@ build/
 *.sav
 gui_shot.bmp
 logs/
-memscan-snaps/
+deepeel-snaps/
 test_state_*/
 output/
 build-watch/

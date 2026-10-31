@@ -1,6 +1,6 @@
-# Working on memscan
+# Working on deepeel
 
-memscan découvre la memory map des ROMs : registre matériel par plateforme,
+deepeel découvre la memory map des ROMs : registre matériel par plateforme,
 exploration autonome à fourches (les deux issues de chaque conditionnel, forks
 d'IRQ), tout consigné (exécution, lectures de données, accès registres, copies
 ROM→VRAM, changements de banque), stats de nécessité par section, fenêtre SDL2
@@ -22,7 +22,7 @@ temps réel. Démarrer par `README.md`, puis `docs/GB.fr.md`.
   forks par site) et son compteur de saturation rapporté. Rien ne doit
   tourner sans fin, et une saturation ne doit jamais être silencieuse.
 - Les clés ROM sont des index compacts `bank * 0x4000 + (addr & 0x3FFF)`
-  (`ms_rom_index`) — jamais `bank << 16`. Toute nouvelle structure indexée par
+  (`dp_rom_index`) — jamais `bank << 16`. Toute nouvelle structure indexée par
   la ROM utilise cet index.
 - L'exécution hors ROM (pc ≥ $8000, code en VRAM/WRAM) est comptée
   (`exec_outside`) mais ne pénètre pas les cartes de la ROM.

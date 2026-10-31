@@ -1,6 +1,6 @@
 // test_exec.c: the retained SM83 decoder — lengths, conditions, disassembly.
 // Execution itself is m0boy's interpreter (flag exactness lives in m0boy's
-// own suite and the run_hash rules); what memscan keeps is the static decode.
+// own suite and the run_hash rules); what deepeel keeps is the static decode.
 #include "../src/cpu/sm83/sm83.h"
 #include "test_util.h"
 #include <string.h>

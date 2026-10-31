@@ -29,30 +29,30 @@ add_custom_command(
 add_custom_target(fixtures ALL DEPENDS ${FIXTURES})
 
 add_executable(test_core test_core.c)
-target_link_libraries(test_core PRIVATE memscan_core m)
+target_link_libraries(test_core PRIVATE deepeel_core m)
 add_test(NAME core COMMAND test_core)
 
 add_executable(test_exec test_exec.c)
-target_link_libraries(test_exec PRIVATE memscan_core m)
+target_link_libraries(test_exec PRIVATE deepeel_core m)
 add_test(NAME exec COMMAND test_exec)
 
 add_executable(test_explorer test_explorer.c)
-target_link_libraries(test_explorer PRIVATE memscan_core m)
+target_link_libraries(test_explorer PRIVATE deepeel_core m)
 add_dependencies(test_explorer fixtures)
 add_test(NAME explorer COMMAND test_explorer ${CMAKE_CURRENT_BINARY_DIR})
 
 add_executable(test_sessions test_sessions.c)
-target_link_libraries(test_sessions PRIVATE memscan_core m)
+target_link_libraries(test_sessions PRIVATE deepeel_core m)
 add_dependencies(test_sessions fixtures)
 add_test(NAME sessions COMMAND test_sessions ${CMAKE_CURRENT_BINARY_DIR})
 
 add_executable(test_export test_export.c)
-target_link_libraries(test_export PRIVATE memscan_core m)
+target_link_libraries(test_export PRIVATE deepeel_core m)
 add_test(NAME export COMMAND test_export)
 
-if(TARGET memscan AND MS_HAS_GUI)
+if(TARGET deepeel AND DP_HAS_GUI)
   add_executable(test_gui test_gui.c)
-  target_link_libraries(test_gui PRIVATE memscan_core m ${MS_GUI_LIBS})
+  target_link_libraries(test_gui PRIVATE deepeel_core m ${DP_GUI_LIBS})
   target_include_directories(test_gui PRIVATE ${SDL2_INCLUDE_DIRS})
   add_dependencies(test_gui fixtures)
   add_test(NAME gui COMMAND test_gui ${CMAKE_CURRENT_BINARY_DIR})

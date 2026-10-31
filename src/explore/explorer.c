@@ -6,8 +6,8 @@
 // "same context" section re-entries; budgets and backward edge caps keep
 // loops finite; the halt watchdog cuts paths nothing wakes.
 //
-// The same recording runs inside the play-session workers (one MsExplorer
-// each, sharing MsResults): their per-byte updates go through __atomic
+// The same recording runs inside the play-session workers (one DpExplorer
+// each, sharing DpResults): their per-byte updates go through __atomic
 // builtins, and their section/record updates take the results mutexes while
 // res->mt is set.  The fork explorer only runs while the sessions wait at
 // the epoch barrier, so its own updates stay lock-free.
@@ -18,11 +18,11 @@
 
 #include <stddef.h>
 
-static int is_padding_at(const MsCart *c, uint32_t bank, uint16_t addr);
+static int is_padding_at(const DpCart *c, uint32_t bank, uint16_t addr);
 static int is_illegal_op(uint8_t op);
-static void fork_branch(MsExplorer *ex, int cond, uint32_t site, uint16_t pc, uint8_t op);
-static void fork_irq(MsExplorer *ex);
-static void fork_key(MsExplorer *ex, uint32_t site);
+static void fork_branch(DpExplorer *ex, int cond, uint32_t site, uint16_t pc, uint8_t op);
+static void fork_irq(DpExplorer *ex);
+static void fork_key(DpExplorer *ex, uint32_t site);
 
 // --- shared-map primitives -----------------------------------------------------
 static inline uint8_t flags_or(uint8_t *p, uint8_t bit) {
@@ -34,7 +34,7 @@ static inline void u64_add(uint64_t *p, uint64_t v) { __atomic_add_fetch(p, v, _
 static inline void u64_or(uint64_t *p, uint64_t v) { __atomic_fetch_or(p, v, __ATOMIC_RELAXED); }
 
 // --- u64 set ------------------------------------------------------------------
-static size_t set_probe(const MsHashSet *s, uint64_t key) {
+static size_t set_probe(const DpHashSet *s, uint64_t key) {
     size_t i = (size_t)(key * 0x9E3779B97F4A7C15ull) & (s->cap - 1);
     while (s->used[i]) {
         if (s->keys[i] == key) return i;
@@ -43,7 +43,7 @@ static size_t set_probe(const MsHashSet *s, uint64_t key) {
     return i;
 }
 
-static int set_grow(MsHashSet *s) {
+static int set_grow(DpHashSet *s) {
     if (s->cap >= s->cap_abs) return 0;
     size_t ncap = s->cap * 2;
     uint64_t *nk = calloc(ncap, sizeof(uint64_t));
@@ -64,7 +64,7 @@ static int set_grow(MsHashSet *s) {
     return 1;
 }
 
-void ms_set_init(MsHashSet *s, size_t cap_abs) {
+void dp_set_init(DpHashSet *s, size_t cap_abs) {
     s->cap_abs = cap_abs ? cap_abs : 1 << 20;
     s->cap = 1024;
     s->keys = calloc(s->cap, sizeof(uint64_t));
@@ -72,7 +72,7 @@ void ms_set_init(MsHashSet *s, size_t cap_abs) {
     s->cnt = 0;
 }
 
-void ms_set_free(MsHashSet *s) {
+void dp_set_free(DpHashSet *s) {
     free(s->keys);
     free(s->used);
     s->keys = NULL;
@@ -80,7 +80,7 @@ void ms_set_free(MsHashSet *s) {
     s->cap = s->cnt = s->cap_abs = 0;
 }
 
-int ms_set_insert(MsHashSet *s, uint64_t key) {
+int dp_set_insert(DpHashSet *s, uint64_t key) {
     if (s->cnt >= s->cap * 3 / 4) {
         if (!set_grow(s)) return -1;
     }
@@ -93,7 +93,7 @@ int ms_set_insert(MsHashSet *s, uint64_t key) {
 }
 
 // --- u32 -> payload map ---------------------------------------------------------
-static void *map_find(MsMap32 *m, uint32_t key) {
+static void *map_find(DpMap32 *m, uint32_t key) {
     size_t i = (size_t)(key * 0x9E3779B97F4A7C15ull) & (m->cap - 1);
     while (m->used[i]) {
         if (m->keys[i] == key) return m->vals + i * m->stride;
@@ -102,7 +102,7 @@ static void *map_find(MsMap32 *m, uint32_t key) {
     return NULL;
 }
 
-static int map_grow(MsMap32 *m) {
+static int map_grow(DpMap32 *m) {
     if (m->cap >= m->cap_abs) return 0;
     size_t ncap = m->cap * 2;
     uint32_t *nk = calloc(ncap, sizeof(uint32_t));
@@ -127,7 +127,7 @@ static int map_grow(MsMap32 *m) {
     return 1;
 }
 
-void ms_map_init(MsMap32 *m, size_t stride, size_t cap_abs) {
+void dp_map_init(DpMap32 *m, size_t stride, size_t cap_abs) {
     m->stride = stride;
     m->cap_abs = cap_abs ? cap_abs : 1 << 20;
     m->cap = 1024;
@@ -137,14 +137,14 @@ void ms_map_init(MsMap32 *m, size_t stride, size_t cap_abs) {
     m->cnt = 0;
 }
 
-void ms_map_free(MsMap32 *m) {
+void dp_map_free(DpMap32 *m) {
     free(m->keys);
     free(m->used);
     free(m->vals);
     memset(m, 0, sizeof *m);
 }
 
-void *ms_map_get_or_add(MsMap32 *m, uint32_t key) {
+void *dp_map_get_or_add(DpMap32 *m, uint32_t key) {
     void *p = map_find(m, key);
     if (p) return p;
     if (m->cnt >= m->cap * 3 / 4) {
@@ -158,12 +158,12 @@ void *ms_map_get_or_add(MsMap32 *m, uint32_t key) {
     return m->vals + i * m->stride;
 }
 
-void *ms_map_find(MsMap32 *m, uint32_t key) {
+void *dp_map_find(DpMap32 *m, uint32_t key) {
     return map_find(m, key);
 }
 
 // --- config / results ------------------------------------------------------------
-void ms_config_defaults(MsConfig *cfg) {
+void dp_config_defaults(DpConfig *cfg) {
     memset(cfg, 0, sizeof *cfg);
     cfg->max_steps_path = 100000;
     cfg->max_paths = 200000;
@@ -183,7 +183,7 @@ static void *xrealloc(void *p, size_t n) {
     return q;
 }
 
-void ms_results_init(MsResults *res, const MsCart *cart, const MsPlatform *plat) {
+void dp_results_init(DpResults *res, const DpCart *cart, const DpPlatform *plat) {
     memset(res, 0, sizeof *res);
     res->cart = cart;
     res->plat = plat;
@@ -204,14 +204,14 @@ void ms_results_init(MsResults *res, const MsCart *cart, const MsPlatform *plat)
     memset(res->static_flags, 0, n);
     memset(res->section_of, 0, n * sizeof(uint32_t));
     res->io_count = plat->io_reg_count;
-    res->io = xrealloc(NULL, sizeof(MsIoStat) * (size_t)res->io_count);
-    memset(res->io, 0, sizeof(MsIoStat) * (size_t)res->io_count);
-    ms_map_init(&res->sites, sizeof(MsSiteStat), 1 << 22);
-    ms_map_init(&res->callers, sizeof(MsCallList), 1 << 20);
-    ms_map_init(&res->fork_counts, sizeof(uint32_t), 1 << 20);
-    ms_map_init(&res->indirect, sizeof(MsIndirect), 1 << 16);
-    ms_set_init(&res->clo_seeded, 1 << 20);
-    ms_set_init(&res->bad_seen, 1 << 20);
+    res->io = xrealloc(NULL, sizeof(DpIoStat) * (size_t)res->io_count);
+    memset(res->io, 0, sizeof(DpIoStat) * (size_t)res->io_count);
+    dp_map_init(&res->sites, sizeof(DpSiteStat), 1 << 22);
+    dp_map_init(&res->callers, sizeof(DpCallList), 1 << 20);
+    dp_map_init(&res->fork_counts, sizeof(uint32_t), 1 << 20);
+    dp_map_init(&res->indirect, sizeof(DpIndirect), 1 << 16);
+    dp_set_init(&res->clo_seeded, 1 << 20);
+    dp_set_init(&res->bad_seen, 1 << 20);
 }
 
 static double disc_now(void) {
@@ -220,10 +220,10 @@ static double disc_now(void) {
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 
-void ms_disc_add(MsResults *res, const char *source, uint64_t credit) {
+void dp_disc_add(DpResults *res, const char *source, uint64_t credit) {
     if (res->disc_n == res->disc_cap) {
         int cap = res->disc_cap ? res->disc_cap * 2 : 256;
-        MsDiscEntry *n = realloc(res->disc, (size_t)cap * sizeof *n);
+        DpDiscEntry *n = realloc(res->disc, (size_t)cap * sizeof *n);
         if (!n) return;
         res->disc = n;
         res->disc_cap = cap;
@@ -234,14 +234,14 @@ void ms_disc_add(MsResults *res, const char *source, uint64_t credit) {
     uint32_t known = 0;
     for (size_t i = 0; i < total; i++)
         if (res->exec_flags[i] || res->data_flags[i] || res->static_flags[i]) known++;
-    MsDiscEntry *e = &res->disc[res->disc_n++];
+    DpDiscEntry *e = &res->disc[res->disc_n++];
     e->t = now - res->disc_t0;
     snprintf(e->source, sizeof e->source, "%s", source);
     e->credit = credit;
     e->known = known;
 }
 
-void ms_results_free(MsResults *res) {
+void dp_results_free(DpResults *res) {
     free(res->disc);
     free(res->exec_flags);
     free(res->exec_hits);
@@ -249,17 +249,17 @@ void ms_results_free(MsResults *res) {
     free(res->data_hits);
     free(res->static_flags);
     free(res->section_of);
-    for (int i = 0; i < res->section_count; i++) ms_set_free(&res->sections[i].ctx_seen);
+    for (int i = 0; i < res->section_count; i++) dp_set_free(&res->sections[i].ctx_seen);
     free(res->sections);
     free(res->io);
     free(res->copies);
     free(res->bank_events);
-    ms_map_free(&res->sites);
-    ms_map_free(&res->callers);
-    ms_map_free(&res->fork_counts);
-    ms_map_free(&res->indirect);
-    ms_set_free(&res->clo_seeded);
-    ms_set_free(&res->bad_seen);
+    dp_map_free(&res->sites);
+    dp_map_free(&res->callers);
+    dp_map_free(&res->fork_counts);
+    dp_map_free(&res->indirect);
+    dp_set_free(&res->clo_seeded);
+    dp_set_free(&res->bad_seen);
     free(res->clo_entries);
     free(res->bad_ops);
     pthread_mutex_destroy(&res->sec_mtx);
@@ -267,17 +267,17 @@ void ms_results_free(MsResults *res) {
     memset(res, 0, sizeof *res);
 }
 
-int ms_io_slot(const MsResults *res, uint16_t addr) {
+int dp_io_slot(const DpResults *res, uint16_t addr) {
     for (int i = 0; i < res->io_count; i++) {
-        const MsIoReg *r = &res->plat->io_regs[i];
+        const DpIoReg *r = &res->plat->io_regs[i];
         if (addr >= r->lo && addr <= r->hi) return i;
     }
     return -1;
 }
 
 // static classification: padding runs and pointer tables
-void ms_static_scan(MsResults *res) {
-    const MsCart *c = res->cart;
+void dp_static_scan(DpResults *res) {
+    const DpCart *c = res->cart;
     size_t n = (size_t)c->rom_banks * 0x4000;
     // padding: runs of 8+ identical 00 or FF bytes
     uint32_t run = 0;
@@ -285,7 +285,7 @@ void ms_static_scan(MsResults *res) {
         uint8_t b = c->rom[i < c->rom_size ? i : c->rom_size - 1];
         if (b == 0x00 || b == 0xFF) {
             run++;
-            if (run >= 8) res->static_flags[i] |= MS_SF_PAD;
+            if (run >= 8) res->static_flags[i] |= DP_SF_PAD;
         } else {
             run = 0;
         }
@@ -294,8 +294,8 @@ void ms_static_scan(MsResults *res) {
     // (a zeroed or padding ROM is not a table of null pointers)
     for (int bank = 0; bank < res->banks; bank++) {
         for (int off = 0; off + 7 < 0x4000; off += 2) {
-            uint32_t k = ms_rom_index(bank, (uint16_t)off);
-            if (res->static_flags[k] & MS_SF_POINTER) continue;
+            uint32_t k = dp_rom_index(bank, (uint16_t)off);
+            if (res->static_flags[k] & DP_SF_POINTER) continue;
             int ok = 1;
             uint16_t first = 0;
             for (int w = 0; w < 4 && ok; w++) {
@@ -311,8 +311,8 @@ void ms_static_scan(MsResults *res) {
             for (int w = 0; w < 4; w++) {
                 uint32_t a = k + (uint32_t)w * 2;
                 if (a + 1 < n) {
-                    res->static_flags[a] |= MS_SF_POINTER;
-                    res->static_flags[a + 1] |= MS_SF_POINTER;
+                    res->static_flags[a] |= DP_SF_POINTER;
+                    res->static_flags[a + 1] |= DP_SF_POINTER;
                 }
             }
             off += 6; // skip past the table we just marked
@@ -322,38 +322,38 @@ void ms_static_scan(MsResults *res) {
 
 // --- explorer ---------------------------------------------------------------------
 
-// --- engine hooks (wired in ms_explorer_new) ----------------------------------------
-static void hook_step(MsMach *m, uint16_t pc, uint8_t op, int entry);
-static void hook_read(MsMach *m, uint16_t a, uint8_t v);
-static void hook_write(MsMach *m, uint16_t a, uint8_t v);
+// --- engine hooks (wired in dp_explorer_new) ----------------------------------------
+static void hook_step(DpMach *m, uint16_t pc, uint8_t op, int entry);
+static void hook_read(DpMach *m, uint16_t a, uint8_t v);
+static void hook_write(DpMach *m, uint16_t a, uint8_t v);
 
-MsExplorer *ms_explorer_new(const MsConfig *cfg, MsResults *res, MsMach *mach) {
-    MsExplorer *ex = calloc(1, sizeof *ex);
+DpExplorer *dp_explorer_new(const DpConfig *cfg, DpResults *res, DpMach *mach) {
+    DpExplorer *ex = calloc(1, sizeof *ex);
     ex->cfg = *cfg;
     ex->res = res;
     ex->mach = mach;
-    ex->sb = ms_mach_state_bytes(mach);
+    ex->sb = dp_mach_state_bytes(mach);
     ex->q_cap = cfg->queue_cap ? cfg->queue_cap : 2048;
-    ex->queue = xrealloc(NULL, sizeof(MsPathState) * ex->q_cap);
-    memset(ex->queue, 0, sizeof(MsPathState) * ex->q_cap);
+    ex->queue = xrealloc(NULL, sizeof(DpPathState) * ex->q_cap);
+    memset(ex->queue, 0, sizeof(DpPathState) * ex->q_cap);
     size_t dedup_cap = (size_t)ex->q_cap * 64;
     if (dedup_cap < (1 << 16)) dedup_cap = 1 << 16;
-    ms_set_init(&ex->exact, dedup_cap);
-    ms_mach_attach(mach, ex, hook_step, hook_read, hook_write, NULL);
+    dp_set_init(&ex->exact, dedup_cap);
+    dp_mach_attach(mach, ex, hook_step, hook_read, hook_write, NULL);
     return ex;
 }
 
-void ms_explorer_free(MsExplorer *ex) {
+void dp_explorer_free(DpExplorer *ex) {
     if (!ex) return;
     for (uint32_t i = 0; i < ex->q_cap; i++) free(ex->queue[i].img);
     free(ex->queue);
     free(ex->seed_base);
     free(ex->seed_bank_img);
-    ms_set_free(&ex->exact);
+    dp_set_free(&ex->exact);
     free(ex);
 }
 
-void ms_explorer_progress(MsExplorer *ex, MsProgress *out) {
+void dp_explorer_progress(DpExplorer *ex, DpProgress *out) {
     out->queue_len = ex->q_len;
     out->steps_total = ex->res->steps_total;
     out->paths_run = ex->res->paths_run;
@@ -364,15 +364,15 @@ void ms_explorer_progress(MsExplorer *ex, MsProgress *out) {
 // The runtime masks banks into 512; the result maps are cart-sized: fold a
 // wild bank back into the cart (a bank register value beyond the cart reads
 // as a mirror on real hardware too).
-static uint16_t cur_bank(MsExplorer *ex, uint16_t pc) {
+static uint16_t cur_bank(DpExplorer *ex, uint16_t pc) {
     uint32_t b = pc < 0x4000 ? 0 : ex->mach->api->gbr->rom_bank;
     uint32_t banks = (uint32_t)ex->res->banks;
     if (banks && b >= banks) b %= banks;
     return (uint16_t)b;
 }
 
-static uint32_t key_at(MsExplorer *ex, uint16_t pc) {
-    return ms_rom_index(cur_bank(ex, pc), pc);
+static uint32_t key_at(DpExplorer *ex, uint16_t pc) {
+    return dp_rom_index(cur_bank(ex, pc), pc);
 }
 
 // --- queue -----------------------------------------------------------------------
@@ -383,38 +383,38 @@ static uint16_t image_pc(const uint8_t *img) {
     return g.pc;
 }
 
-static uint64_t image_hash(MsExplorer *ex, const uint8_t *img) {
+static uint64_t image_hash(DpExplorer *ex, const uint8_t *img) {
     // gbr.cyc/next_evt ride at the head of the image and only encode where
     // time stood: skip them so equal machine states dedup across frames
     uint64_t h = 0xcbf29ce484222325ull;
-    h = ms_fnv1a(h, img, offsetof(gbl_cpu_t, cyc));
-    h = ms_fnv1a(h, img + sizeof(gbl_cpu_t), ex->sb - sizeof(gbl_cpu_t));
+    h = dp_fnv1a(h, img, offsetof(gbl_cpu_t, cyc));
+    h = dp_fnv1a(h, img + sizeof(gbl_cpu_t), ex->sb - sizeof(gbl_cpu_t));
     return h;
 }
 
-static void queue_push(MsExplorer *ex, uint8_t *img, int forced, int kind, int from_reset,
+static void queue_push(DpExplorer *ex, uint8_t *img, int forced, int kind, int from_reset,
                        uint32_t choice) {
     uint64_t h = image_hash(ex, img);
-    int ins = ms_set_insert(&ex->exact, h);
+    int ins = dp_set_insert(&ex->exact, h);
     if (ins == 0) {
         ex->res->evicted_exact++;
-        if (ex->tree) ms_tree_close(ex->tree, choice, MS_ISSUE_MERGED);
+        if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_MERGED);
         free(img);
         return;
     }
     if (ins < 0) { // dedup set full: surfaced, the state is dropped
         ex->res->queue_overflows++;
-        if (ex->tree) ms_tree_close(ex->tree, choice, MS_ISSUE_BUDGET);
+        if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_BUDGET);
         free(img);
         return;
     }
     if (ex->q_len >= ex->q_cap) {
         ex->res->queue_overflows++;
-        if (ex->tree) ms_tree_close(ex->tree, choice, MS_ISSUE_BUDGET);
+        if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_BUDGET);
         free(img);
         return;
     }
-    MsPathState *p = &ex->queue[(ex->q_head + ex->q_len) % ex->q_cap];
+    DpPathState *p = &ex->queue[(ex->q_head + ex->q_len) % ex->q_cap];
     p->img = img;
     p->forced = (uint8_t)(forced ? 1 : 0);
     p->kind = (uint8_t)kind;
@@ -424,17 +424,17 @@ static void queue_push(MsExplorer *ex, uint8_t *img, int forced, int kind, int f
 }
 
 // a tree choice for a new queued path (when the tree is tracked)
-static uint32_t choice_new(MsExplorer *ex, uint32_t parent, int kind, uint32_t site, int bank,
+static uint32_t choice_new(DpExplorer *ex, uint32_t parent, int kind, uint32_t site, int bank,
                            int pc) {
     if (!ex->tree) return 0;
-    return ms_tree_add(ex->tree, parent, kind, site, bank, pc);
+    return dp_tree_add(ex->tree, parent, kind, site, bank, pc);
 }
 
-int ms_explorer_seed(MsExplorer *ex, uint8_t *img, int kind, int forced) {
+int dp_explorer_seed(DpExplorer *ex, uint8_t *img, int kind, int forced) {
     uint16_t pc = image_pc(img);
     uint16_t bank = (uint16_t)(pc < 0x4000 ? 0 : ((const gbl_cpu_t *)img)->rom_bank);
-    queue_push(ex, img, forced, kind, kind == MS_SEED_RESET,
-               choice_new(ex, 0, kind, ms_rom_index(bank, pc), bank, pc));
+    queue_push(ex, img, forced, kind, kind == DP_SEED_RESET,
+               choice_new(ex, 0, kind, dp_rom_index(bank, pc), bank, pc));
     if (forced) ex->res->seeds_spec++;
     else ex->res->seeds_natural++;
     return 1;
@@ -442,88 +442,88 @@ int ms_explorer_seed(MsExplorer *ex, uint8_t *img, int kind, int forced) {
 
 // reset state with the bank window applied and pc moved: the shared seed
 // images every entry point starts from
-static uint8_t *seed_base(MsExplorer *ex) {
+static uint8_t *seed_base(DpExplorer *ex) {
     if (ex->seed_base) return ex->seed_base;
     uint8_t *img = xrealloc(NULL, ex->sb);
-    ms_mach_reset(ex->mach);
-    ms_mach_save(ex->mach, img);
+    dp_mach_reset(ex->mach);
+    dp_mach_save(ex->mach, img);
     ex->seed_base = img;
     return img;
 }
 
-uint8_t *ms_explorer_seed_base(MsExplorer *ex) { return seed_base(ex); }
+uint8_t *dp_explorer_seed_base(DpExplorer *ex) { return seed_base(ex); }
 
-static uint8_t *seed_bank_img(MsExplorer *ex, int bank) {
+static uint8_t *seed_bank_img(DpExplorer *ex, int bank) {
     if (ex->seed_bank_img && ex->seed_bank == bank) return ex->seed_bank_img;
     if (!ex->seed_bank_img) ex->seed_bank_img = xrealloc(NULL, ex->sb);
-    ms_mach_load(ex->mach, seed_base(ex));
-    const MsGblApi *api = ex->mach->api;
+    dp_mach_load(ex->mach, seed_base(ex));
+    const DpGblApi *api = ex->mach->api;
     api->wr(0x2000, (uint8_t)(bank & 0xFF)); // mapper registers, unobserved
     if (bank > 0xFF) api->wr(0x3000, (uint8_t)(bank >> 8));
-    ms_mach_save(ex->mach, ex->seed_bank_img);
+    dp_mach_save(ex->mach, ex->seed_bank_img);
     ex->seed_bank = bank;
     return ex->seed_bank_img;
 }
 
-int ms_explorer_seed_pc(MsExplorer *ex, int bank, uint16_t pc, int kind, int forced) {
+int dp_explorer_seed_pc(DpExplorer *ex, int bank, uint16_t pc, int kind, int forced) {
     uint8_t *img = xrealloc(NULL, ex->sb);
     memcpy(img, seed_bank_img(ex, bank), ex->sb);
     gbl_cpu_t g = *ex->mach->api->gbr; // the bank write leaves the regs alone
     g.pc = pc;
     memcpy(img, &g, sizeof g);
-    return ms_explorer_seed(ex, img, kind, forced);
+    return dp_explorer_seed(ex, img, kind, forced);
 }
 
 // --- read/write hooks ---------------------------------------------------------------
-static void section_live_access(MsExplorer *ex, uint16_t a) {
+static void section_live_access(DpExplorer *ex, uint16_t a) {
     if (ex->session) return;
-    MsSection *s = ex->cur_sec ? &ex->res->sections[ex->cur_sec] : NULL;
+    DpSection *s = ex->cur_sec ? &ex->res->sections[ex->cur_sec] : NULL;
     if (!s) return;
-    if (a >= 0x4000 && a < 0x8000) ms_section_live_small(s, 3); // upper window bank matters
+    if (a >= 0x4000 && a < 0x8000) dp_section_live_small(s, 3); // upper window bank matters
     else if (a >= 0x8000 && a < 0xA000) {
-        ms_section_live_vram(s, ex->mach->api->io[0x4F] & 1, (a - 0x8000) >> 8);
-        ms_section_live_small(s, 5); // vbk matters
+        dp_section_live_vram(s, ex->mach->api->io[0x4F] & 1, (a - 0x8000) >> 8);
+        dp_section_live_small(s, 5); // vbk matters
     } else if (a >= 0xA000 && a < 0xC000) {
-        ms_section_live_sram(s, (a - 0xA000) >> 8); // bank folds into the ctx hash
-        ms_section_live_small(s, 4); // ramg matters
+        dp_section_live_sram(s, (a - 0xA000) >> 8); // bank folds into the ctx hash
+        dp_section_live_small(s, 4); // ramg matters
     } else if (a >= 0xC000 && a < 0xFE00) {
-        ms_section_live_wram(s, ((a - 0xC000) & 0x1FFF) >> 8);
-    } else if (a >= 0xFF80 && a < 0xFFFF) ms_section_live_small(s, 0);
-    else if (a >= 0xFE00 && a < 0xFEA0) ms_section_live_small(s, 1);
-    else if (a == 0xFFFF) ms_section_live_small(s, 2);
+        dp_section_live_wram(s, ((a - 0xC000) & 0x1FFF) >> 8);
+    } else if (a >= 0xFF80 && a < 0xFFFF) dp_section_live_small(s, 0);
+    else if (a >= 0xFE00 && a < 0xFEA0) dp_section_live_small(s, 1);
+    else if (a == 0xFFFF) dp_section_live_small(s, 2);
 }
 
-static void hook_read(MsMach *m, uint16_t a, uint8_t v) {
-    MsExplorer *ex = m->owner;
-    MsResults *res = ex->res;
+static void hook_read(DpMach *m, uint16_t a, uint8_t v) {
+    DpExplorer *ex = m->owner;
+    DpResults *res = ex->res;
     if (a < 0x8000) { // ROM data read (opcode fetches never take this path)
         uint32_t key = key_at(ex, a);
-        uint8_t old = flags_or(&res->data_flags[key], MS_DF_READ);
-        if (!(old & MS_DF_READ)) ex->credit_data++;
+        uint8_t old = flags_or(&res->data_flags[key], DP_DF_READ);
+        if (!(old & DP_DF_READ)) ex->credit_data++;
         hits_add(&res->data_hits[key], 1);
-        ms_copy_on_rom_read(&ex->ct, (uint8_t)cur_bank(ex, a), a, v);
+        dp_copy_on_rom_read(&ex->ct, (uint8_t)cur_bank(ex, a), a, v);
     }
     section_live_access(ex, a);
     if (a >= 0xFF00 && a < 0xFF80) {
-        int slot = ms_io_slot(res, a);
+        int slot = dp_io_slot(res, a);
         if (slot >= 0) {
-            MsIoStat *st = &res->io[slot];
+            DpIoStat *st = &res->io[slot];
             uint32_t was = __atomic_fetch_add(&st->rd, 1, __ATOMIC_RELAXED);
             if (!was && !__atomic_load_n(&st->wr, __ATOMIC_RELAXED)) ex->credit_io++;
             if (!ex->session) {
-                MsSection *s = ex->cur_sec ? &res->sections[ex->cur_sec] : NULL;
+                DpSection *s = ex->cur_sec ? &res->sections[ex->cur_sec] : NULL;
                 if (s) {
-                    ms_section_live_io(s, (uint16_t)(a - 0xFF00));
-                    ms_section_io_used(s, slot);
+                    dp_section_live_io(s, (uint16_t)(a - 0xFF00));
+                    dp_section_io_used(s, slot);
                 }
             }
         }
     }
 }
 
-static void hook_write(MsMach *m, uint16_t a, uint8_t v) {
-    MsExplorer *ex = m->owner;
-    MsResults *res = ex->res;
+static void hook_write(DpMach *m, uint16_t a, uint8_t v) {
+    DpExplorer *ex = m->owner;
+    DpResults *res = ex->res;
     if (a < 0x8000) { // mapper write: the bank flip resolves on the next step
         ex->pend_map = 1;
         ex->pend_pc = m->api->gbr->pc;
@@ -535,12 +535,12 @@ static void hook_write(MsMach *m, uint16_t a, uint8_t v) {
     if (a < 0xA000) { // VRAM
         int vbk = m->api->io[0x4F] & 1;
         u64_or(&res->vram_write_pages[vbk], 1ull << ((a - 0x8000) >> 8));
-        ms_copy_on_vram_write(&ex->ct, (uint8_t)vbk, a, v);
+        dp_copy_on_vram_write(&ex->ct, (uint8_t)vbk, a, v);
         return;
     }
     if (a < 0xC000) { // cartridge RAM
         u64_or(&res->sram_write_pages,
-               1ull << (((a - 0xA000) & (MS_CRAM_PAGES * 256 - 1)) >> 8));
+               1ull << (((a - 0xA000) & (DP_CRAM_PAGES * 256 - 1)) >> 8));
         return;
     }
     if (a < 0xFE00) return; // WRAM and its echo: no per-byte map
@@ -549,10 +549,10 @@ static void hook_write(MsMach *m, uint16_t a, uint8_t v) {
         return;
     }
     if (a < 0xFF80) { // IO
-        int slot = ms_io_slot(res, a);
+        int slot = dp_io_slot(res, a);
         if (slot >= 0) {
             ex->last_io_slot = slot;
-            MsIoStat *st = &res->io[slot];
+            DpIoStat *st = &res->io[slot];
             uint32_t was = __atomic_fetch_add(&st->wr, 1, __ATOMIC_RELAXED);
             if (!was && !__atomic_load_n(&st->rd, __ATOMIC_RELAXED)) ex->credit_io++;
             if (res->mt) pthread_mutex_lock(&res->rec_mtx);
@@ -570,12 +570,12 @@ static void hook_write(MsMach *m, uint16_t a, uint8_t v) {
         }
         if (a == 0xFF46 && v * 0x100u < 0x8000u) {
             // OAM DMA: 160 bytes land verbatim in the OAM
-            MsCopyRec rec;
+            DpCopyRec rec;
             memset(&rec, 0, sizeof rec);
             rec.channel = 1;
             rec.verbatim = 1;
-            rec.src_space = MS_SPACE_ROM;
-            rec.dst_space = MS_SPACE_OAM;
+            rec.src_space = DP_SPACE_ROM;
+            rec.dst_space = DP_SPACE_OAM;
             rec.src_bank = v >= 0x40 ? cur_bank(ex, 0x4000) : 0;
             rec.src_lo = (uint16_t)((v * 0x100u) & 0x3FFF);
             rec.src_hi = (uint16_t)(rec.src_lo + 159);
@@ -583,49 +583,49 @@ static void hook_write(MsMach *m, uint16_t a, uint8_t v) {
             rec.dst_hi = 0xFE9F;
             rec.bytes = 160;
             rec.pc = m->api->gbr->pc;
-            ms_record_copy(ex, &rec, 0);
+            dp_record_copy(ex, &rec, 0);
         }
     }
 }
 
 // --- the per-instruction hook ---------------------------------------------------------
-static void emit_pend_map(MsExplorer *ex) {
+static void emit_pend_map(DpExplorer *ex) {
     if (!ex->pend_map) return;
     ex->pend_map = 0;
-    MsResults *res = ex->res;
+    DpResults *res = ex->res;
     uint32_t new_bank = ex->mach->api->gbr->rom_bank;
     if (res->mt) pthread_mutex_lock(&res->rec_mtx);
     if (res->bank_count == res->bank_cap) {
         res->bank_cap = res->bank_cap ? res->bank_cap * 2 : 64;
-        res->bank_events = xrealloc(res->bank_events, sizeof(MsBankEvent) * (size_t)res->bank_cap);
+        res->bank_events = xrealloc(res->bank_events, sizeof(DpBankEvent) * (size_t)res->bank_cap);
     }
-    MsBankEvent *e = &res->bank_events[res->bank_count++];
+    DpBankEvent *e = &res->bank_events[res->bank_count++];
     e->seq = (uint32_t)res->bank_count;
     e->pc = ex->pend_pc;
     e->window = ex->pend_window;
     e->old_bank = ex->pend_old;
     e->new_bank = new_bank;
     if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
-    int slot = ms_io_slot(res, ex->pend_addr);
+    int slot = dp_io_slot(res, ex->pend_addr);
     if (slot >= 0) {
         u32_add(&res->io[slot].wr, 1);
         u32_add(&res->io[slot].bank_events, 1);
     }
     ex->credit_banks++;
     if (!ex->session) {
-        MsSection *s = ex->cur_sec ? &res->sections[ex->cur_sec] : NULL;
+        DpSection *s = ex->cur_sec ? &res->sections[ex->cur_sec] : NULL;
         if (s) {
-            ms_section_banks_seen(s, new_bank);
-            ms_section_io_used(s, slot);
+            dp_section_banks_seen(s, new_bank);
+            dp_section_io_used(s, slot);
         }
     }
 }
 
-static void hook_step(MsMach *m, uint16_t pc, uint8_t op, int entry) {
+static void hook_step(DpMach *m, uint16_t pc, uint8_t op, int entry) {
     (void)entry;
-    MsExplorer *ex = m->owner;
-    MsResults *res = ex->res;
-    const MsGblApi *api = m->api;
+    DpExplorer *ex = m->owner;
+    DpResults *res = ex->res;
+    const DpGblApi *api = m->api;
 
     // a mapper write from the previous step resolved: record the switch
     emit_pend_map(ex);
@@ -639,11 +639,11 @@ static void hook_step(MsMach *m, uint16_t pc, uint8_t op, int entry) {
         if (ex->steps_own >= ex->cfg.max_steps_total) {
             res->budget_steps++;
             ex->stop = 1;
-            ms_mach_cut(m, MS_CUT_QUIT);
+            dp_mach_cut(m, DP_CUT_QUIT);
         }
         if (++ex->steps_this_path > ex->cfg.max_steps_path) {
             res->step_cuts++;
-            ms_mach_cut(m, MS_CUT_STEPS);
+            dp_mach_cut(m, DP_CUT_STEPS);
         }
     }
     u64_add(&res->steps_total, 1);
@@ -666,7 +666,7 @@ static void hook_step(MsMach *m, uint16_t pc, uint8_t op, int entry) {
         if (!ex->session) ex->path_dead = 1;
         if (res->mt) pthread_mutex_lock(&res->rec_mtx);
         // one record per site: a hot illegal opcode used to append every hit
-        if (ms_set_insert(&res->bad_seen, key_at(ex, pc)) != 1) {
+        if (dp_set_insert(&res->bad_seen, key_at(ex, pc)) != 1) {
             if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
             goto bad_done;
         }
@@ -688,35 +688,35 @@ bad_done:
     // and the tree choice closes with the nonsense issue.
     if (!ex->session && !ex->path_nonsense) {
         uint32_t pk = key_at(ex, pc);
-        int ns = MS_NS_NONE;
-        if (pc >= 0xE000 && pc < 0xFE00) ns = MS_NS_ECHO; // echo RAM
-        else if (pc >= 0xFE00 && pc < 0xFF00) ns = MS_NS_ECHO; // OAM
-        else if ((res->data_flags[pk] & MS_DF_VERBATIM) &&
-                 !(res->exec_flags[pk] & MS_XF_NATURAL)) ns = MS_NS_DATA;
+        int ns = DP_NS_NONE;
+        if (pc >= 0xE000 && pc < 0xFE00) ns = DP_NS_ECHO; // echo RAM
+        else if (pc >= 0xFE00 && pc < 0xFF00) ns = DP_NS_ECHO; // OAM
+        else if ((res->data_flags[pk] & DP_DF_VERBATIM) &&
+                 !(res->exec_flags[pk] & DP_XF_NATURAL)) ns = DP_NS_DATA;
         else if ((op == 0xC9 || op == 0xD9) &&
-                 (api->gbr->sp < 0xC000 || api->gbr->sp > 0xFFFE)) ns = MS_NS_STACK;
-        if (ns != MS_NS_NONE) {
+                 (api->gbr->sp < 0xC000 || api->gbr->sp > 0xFFFE)) ns = DP_NS_STACK;
+        if (ns != DP_NS_NONE) {
             ex->path_nonsense = (uint8_t)ns;
-            if (ns == MS_NS_ECHO) res->nonsense_echo++;
-            else if (ns == MS_NS_DATA) res->nonsense_data++;
+            if (ns == DP_NS_ECHO) res->nonsense_echo++;
+            else if (ns == DP_NS_DATA) res->nonsense_data++;
             else res->nonsense_stack++;
-            ms_mach_cut(m, MS_CUT_HALT);
+            dp_mach_cut(m, DP_CUT_HALT);
         }
     }
 
     // execution back at the entry point: the game reset itself
     if (!ex->session && pc == 0x0100 && ex->steps_this_path > 64 &&
-        !(ex->cur_kind == MS_SEED_RESET && ex->steps_no_credit == 0))
+        !(ex->cur_kind == DP_SEED_RESET && ex->steps_no_credit == 0))
         ex->path_reset = 1;
 
     // execution sliding through a padding run: keep going (the code after
     // the run is often the point of a forced entry) but never call the
     // padding itself code; bound the slide so garbage loops stay bounded
     uint32_t pk = key_at(ex, pc);
-    if ((res->static_flags[pk] & MS_SF_PAD) && (op == 0x00 || op == 0xFF)) {
+    if ((res->static_flags[pk] & DP_SF_PAD) && (op == 0x00 || op == 0xFF)) {
         if (++ex->pad_slide > 4096) {
             res->pad_cuts++;
-            ms_mach_cut(m, MS_CUT_PAD);
+            dp_mach_cut(m, DP_CUT_PAD);
         }
         ex->cur_pad = 1;
     } else {
@@ -742,22 +742,22 @@ bad_done:
     int is_back = 0, is_call = 0;
     switch (op) {
     case 0x18: case 0x20: case 0x28: case 0x30: case 0x38: {
-        int8_t e8 = (int8_t)ms_mach_op(m, (uint16_t)(pc + 1));
+        int8_t e8 = (int8_t)dp_mach_op(m, (uint16_t)(pc + 1));
         target = (uint16_t)(pc + 2 + e8);
         is_back = target <= pc;
         break;
     }
     case 0xC3: case 0xC2: case 0xCA: case 0xD2: case 0xDA:
     case 0xC4: case 0xCC: case 0xD4: case 0xDC: case 0xCD: {
-        target = (uint16_t)(ms_mach_op(m, (uint16_t)(pc + 1)) |
-                            (ms_mach_op(m, (uint16_t)(pc + 2)) << 8));
+        target = (uint16_t)(dp_mach_op(m, (uint16_t)(pc + 1)) |
+                            (dp_mach_op(m, (uint16_t)(pc + 2)) << 8));
         is_back = target <= pc && (op == 0xC3 || op == 0xC2 || op == 0xCA || op == 0xD2 || op == 0xDA);
         is_call = op == 0xCD || op == 0xC4 || op == 0xCC || op == 0xD4 || op == 0xDC;
         break;
     }
     case 0xE9: { // JP HL: the observed target feeds the indirect-site table
         if (!ex->session) {
-            MsIndirect *ind = ms_map_get_or_add(&res->indirect, pk);
+            DpIndirect *ind = dp_map_get_or_add(&res->indirect, pk);
             uint16_t t = api->gbr->hl;
             if (ind) {
                 ind->hits++;
@@ -791,15 +791,15 @@ bad_done:
             ex->back_ring[found].count = 0;
         }
         ex->back_ring[found].count++;
-        ms_copy_on_back_edge(&ex->ct, target, pk);
+        dp_copy_on_back_edge(&ex->ct, target, pk);
         if (ex->back_ring[found].count > ex->cfg.loop_back_cap && !ex->session) {
             res->cycle_cuts++;
-            ms_mach_cut(m, MS_CUT_CYCLES);
+            dp_mach_cut(m, DP_CUT_CYCLES);
         }
     }
     if (is_call && !ex->session) {
-        uint32_t tkey = ms_rom_index(target < 0x4000 ? 0 : (uint32_t)cur_bank(ex, target), target);
-        MsCallList *cl = ms_map_get_or_add(&res->callers, tkey);
+        uint32_t tkey = dp_rom_index(target < 0x4000 ? 0 : (uint32_t)cur_bank(ex, target), target);
+        DpCallList *cl = dp_map_get_or_add(&res->callers, tkey);
         if (cl && cl->n < 8) {
             int dup = 0;
             for (int i = 0; i < cl->n; i++)
@@ -810,8 +810,8 @@ bad_done:
     // branch-site outcome: the previous conditional's natural outcome shows now
     if (!ex->session && ex->prev_was_cond) {
         ex->prev_was_cond = 0;
-        uint32_t skey = ms_rom_index(ex->prev_site_bank, ex->prev_site_pc);
-        MsSiteStat *st = ms_map_get_or_add(&res->sites, skey);
+        uint32_t skey = dp_rom_index(ex->prev_site_bank, ex->prev_site_pc);
+        DpSiteStat *st = dp_map_get_or_add(&res->sites, skey);
         if (st) {
             if (pc == ex->prev_target) st->taken++;
             else st->nottaken++;
@@ -825,24 +825,24 @@ bad_done:
             // is not ROM map information — count it and move on
             u32_add(&res->exec_outside, 1);
         } else {
-            uint8_t nf = (uint8_t)(ex->cur_forced ? MS_XF_FORCED : MS_XF_NATURAL);
+            uint8_t nf = (uint8_t)(ex->cur_forced ? DP_XF_FORCED : DP_XF_NATURAL);
             uint8_t old = flags_or(&res->exec_flags[pk], nf);
             if (!(old & nf)) ex->credit_exec++;
-            if (!(old & MS_XF_START)) flags_or(&res->exec_flags[pk], MS_XF_START);
+            if (!(old & DP_XF_START)) flags_or(&res->exec_flags[pk], DP_XF_START);
             hits_add(&res->exec_hits[pk], 1);
-            if (is_entry) flags_or(&res->exec_flags[pk], MS_XF_ENTRY);
-            if (ex->irq_depth) flags_or(&res->exec_flags[pk], MS_XF_IRQ);
+            if (is_entry) flags_or(&res->exec_flags[pk], DP_XF_ENTRY);
+            if (ex->irq_depth) flags_or(&res->exec_flags[pk], DP_XF_IRQ);
             int len = sm83_len(op);
             uint16_t hi = pc;
             for (int i = 1; i < len; i++) { // operand bytes count as executed code
                 uint16_t a = (uint16_t)(pc + i);
                 if (pc < 0x4000 && a >= 0x4000) break; // crossed the window edge
-                uint32_t k = ms_rom_index(bank, a);
+                uint32_t k = dp_rom_index(bank, a);
                 uint8_t o2 = flags_or(&res->exec_flags[k], nf);
                 if (!(o2 & nf)) ex->credit_exec++;
                 hi = a;
             }
-            uint32_t id = ms_section_touch(res, (uint8_t)bank, pc, hi, ex->cur_forced ? 0 : 1,
+            uint32_t id = dp_section_touch(res, (uint8_t)bank, pc, hi, ex->cur_forced ? 0 : 1,
                                            is_entry, ex->cur_sec,
                                            ex->cur_from_reset && !ex->cur_forced,
                                            ex->irq_depth > 0);
@@ -877,17 +877,17 @@ bad_done:
 // three state images per fork, no knowledge of the image layout needed.
 // true when both successors of the conditional at pc were already executed:
 // the fork can then only add state diversity, never a new byte of code
-static int both_sides_covered(MsExplorer *ex, uint16_t pc, uint8_t op) {
-    MsResults *res = ex->res;
+static int both_sides_covered(DpExplorer *ex, uint16_t pc, uint8_t op) {
+    DpResults *res = ex->res;
     uint16_t bank = cur_bank(ex, pc);
     uint16_t taken;
     switch (op) {
     case 0x20: case 0x28: case 0x30: case 0x38:
-        taken = (uint16_t)(pc + 2 + (int8_t)ms_mach_op(ex->mach, (uint16_t)(pc + 1)));
+        taken = (uint16_t)(pc + 2 + (int8_t)dp_mach_op(ex->mach, (uint16_t)(pc + 1)));
         break;
     case 0xC2: case 0xCA: case 0xD2: case 0xDA: case 0xC4: case 0xCC: case 0xD4: case 0xDC:
-        taken = (uint16_t)(ms_mach_op(ex->mach, (uint16_t)(pc + 1)) |
-                           (ms_mach_op(ex->mach, (uint16_t)(pc + 2)) << 8));
+        taken = (uint16_t)(dp_mach_op(ex->mach, (uint16_t)(pc + 1)) |
+                           (dp_mach_op(ex->mach, (uint16_t)(pc + 2)) << 8));
         break;
     default:
         return 0; // RET cc: the taken side depends on the stack
@@ -897,19 +897,19 @@ static int both_sides_covered(MsExplorer *ex, uint16_t pc, uint8_t op) {
     for (int i = 0; i < 2; i++) {
         uint16_t a = sides[i];
         if (a >= 0x8000) return 0;
-        uint32_t k = ms_rom_index(a < 0x4000 ? 0 : (a >= 0x4000 && pc < 0x4000 ? ex->mach->api->gbr->rom_bank
+        uint32_t k = dp_rom_index(a < 0x4000 ? 0 : (a >= 0x4000 && pc < 0x4000 ? ex->mach->api->gbr->rom_bank
                                                                               : bank), a);
         if (k >= (uint32_t)res->banks * 0x4000) return 0;
         uint8_t f = res->exec_flags[k];
-        if (!(f & MS_XF_START) || !(f & (MS_XF_NATURAL | MS_XF_FORCED))) return 0;
+        if (!(f & DP_XF_START) || !(f & (DP_XF_NATURAL | DP_XF_FORCED))) return 0;
     }
     return 1;
 }
 
-static void fork_branch(MsExplorer *ex, int cond, uint32_t site, uint16_t pc, uint8_t op) {
+static void fork_branch(DpExplorer *ex, int cond, uint32_t site, uint16_t pc, uint8_t op) {
     // per-site cap: loop bodies reach their conditional every iteration and
     // the extra variants are data drift, not new map information
-    uint32_t *cnt = ms_map_get_or_add(&ex->res->fork_counts, site);
+    uint32_t *cnt = dp_map_get_or_add(&ex->res->fork_counts, site);
     if (cnt && *cnt >= ex->cfg.fork_site_cap) {
         ex->res->forks_capped++;
         return;
@@ -920,40 +920,40 @@ static void fork_branch(MsExplorer *ex, int cond, uint32_t site, uint16_t pc, ui
         return;
     }
     if (cnt) (*cnt)++;
-    MsMach *m = ex->mach;
+    DpMach *m = ex->mach;
     uint8_t flag = sm83_cond_flag(cond); // 0x80 = Z, 0x10 = C
     uint8_t *img = xrealloc(NULL, ex->sb);
-    ms_mach_save(m, img);
+    dp_mach_save(m, img);
     if (flag == 0x80) m->api->gbr->zr = m->api->gbr->zr ? 0 : 1; // Z set <=> zr == 0
     else m->api->gbr->cf ^= 1;
     uint8_t *fimg = xrealloc(NULL, ex->sb);
-    ms_mach_save(m, fimg);
-    ms_mach_load(m, img); // the natural side keeps running
+    dp_mach_save(m, fimg);
+    dp_mach_load(m, img); // the natural side keeps running
     free(img);
     // the fork keeps the reset lineage of its parent path
     uint16_t tpc = ex->mach->api->gbr->pc;
-    queue_push(ex, fimg, 1, MS_PATH_FORK,
-               ex->cur_kind == MS_SEED_RESET || ex->cur_from_reset,
-               choice_new(ex, ex->cur_choice, MS_PATH_FORK, site, (int)cur_bank(ex, tpc), tpc));
+    queue_push(ex, fimg, 1, DP_PATH_FORK,
+               ex->cur_kind == DP_SEED_RESET || ex->cur_from_reset,
+               choice_new(ex, ex->cur_choice, DP_PATH_FORK, site, (int)cur_bank(ex, tpc), tpc));
     ex->res->forks_branch++;
 }
 
-static void fork_irq(MsExplorer *ex) {
-    const MsGblApi *api = ex->mach->api;
+static void fork_irq(DpExplorer *ex) {
+    const DpGblApi *api = ex->mach->api;
     uint8_t pending = (uint8_t)(*api->ie & api->io[0x0F] & 0x1F);
     if (!pending) return;
-    MsMach *m = ex->mach;
+    DpMach *m = ex->mach;
     uint8_t *img = xrealloc(NULL, ex->sb);
-    ms_mach_save(m, img);
+    dp_mach_save(m, img);
     api->io[0x0F] &= (uint8_t)~pending; // the variant: the IRQ never fires
     uint8_t *fimg = xrealloc(NULL, ex->sb);
-    ms_mach_save(m, fimg);
-    ms_mach_load(m, img);
+    dp_mach_save(m, fimg);
+    dp_mach_load(m, img);
     free(img);
     uint16_t tpc = m->api->gbr->pc;
-    queue_push(ex, fimg, 1, MS_PATH_FORK,
-               ex->cur_kind == MS_SEED_RESET || ex->cur_from_reset,
-               choice_new(ex, ex->cur_choice, MS_PATH_FORK, 0, (int)cur_bank(ex, tpc), tpc));
+    queue_push(ex, fimg, 1, DP_PATH_FORK,
+               ex->cur_kind == DP_SEED_RESET || ex->cur_from_reset,
+               choice_new(ex, ex->cur_choice, DP_PATH_FORK, 0, (int)cur_bank(ex, tpc), tpc));
     ex->res->forks_irq++;
 }
 
@@ -963,13 +963,13 @@ static void fork_irq(MsExplorer *ex) {
  * the handler, which the natural path here cannot produce without a player.
  * Each pressed variant is one key the machine currently does not hold,
  * capped per site like branch forks. */
-static void fork_key(MsExplorer *ex, uint32_t site) {
-    const MsGblApi *api = ex->mach->api;
+static void fork_key(DpExplorer *ex, uint32_t site) {
+    const DpGblApi *api = ex->mach->api;
     if (api->io[0x0F] & 0x10) return; // already pending: the natural IRQ fires
-    uint32_t *cnt = ms_map_get_or_add(&ex->res->fork_counts, site ^ 0x80000000u);
+    uint32_t *cnt = dp_map_get_or_add(&ex->res->fork_counts, site ^ 0x80000000u);
     // once the joypad handler ($60) has run, more key variants at a site only
     // re-run known code: one round of presses per site is enough
-    uint32_t kcap = (ex->res->exec_flags[0x60] & MS_XF_START) ? 1 : ex->cfg.fork_site_cap;
+    uint32_t kcap = (ex->res->exec_flags[0x60] & DP_XF_START) ? 1 : ex->cfg.fork_site_cap;
     if (ex->cfg.no_covered_prune) kcap = ex->cfg.fork_site_cap;
     if (cnt && *cnt >= kcap) {
         ex->res->forks_capped++;
@@ -978,26 +978,26 @@ static void fork_key(MsExplorer *ex, uint32_t site) {
     if (cnt) (*cnt)++;
     static const uint8_t keys[8] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80};
     // the keys the machine already holds, read back from P1 (bits low = pressed)
-    MsMach *m = ex->mach;
+    DpMach *m = ex->mach;
     uint8_t *img = xrealloc(NULL, ex->sb);
-    ms_mach_save(m, img);
+    dp_mach_save(m, img);
     // the fork explorer never holds keys, so every key press is "new":
     // set_buttons raises IF bit 4, which is exactly the console behaviour
     for (int k = 0; k < 8; k++) {
-        if (k) { ms_mach_load(m, img); }
+        if (k) { dp_mach_load(m, img); }
         m->api->set_buttons(keys[k]);
         if (api->io[0x0F] & 0x10) { // this key raised the joypad IRQ
             uint8_t *fimg = xrealloc(NULL, ex->sb);
-            ms_mach_save(m, fimg);
+            dp_mach_save(m, fimg);
             uint16_t tpc = m->api->gbr->pc;
-            queue_push(ex, fimg, 1, MS_PATH_FORK,
-                       ex->cur_kind == MS_SEED_RESET || ex->cur_from_reset,
-                       choice_new(ex, ex->cur_choice, MS_PATH_FORK, site,
+            queue_push(ex, fimg, 1, DP_PATH_FORK,
+                       ex->cur_kind == DP_SEED_RESET || ex->cur_from_reset,
+                       choice_new(ex, ex->cur_choice, DP_PATH_FORK, site,
                                   (int)cur_bank(ex, tpc), tpc));
             ex->res->forks_key++;
         }
     }
-    ms_mach_load(m, img); // the natural side continues, untouched
+    dp_mach_load(m, img); // the natural side continues, untouched
     free(img);
 }
 
@@ -1005,42 +1005,42 @@ static void fork_key(MsExplorer *ex, uint32_t site) {
 // context projection: hash of the incoming state components this section reads
 // (the live machine holds the state being entered).  Cartridge RAM pages are
 // hashed raw: that folds the RAM bank and the RAMG gate into one proof.
-static uint64_t project_ctx(MsExplorer *ex, const MsSection *s) {
-    const MsGblApi *api = ex->mach->api;
+static uint64_t project_ctx(DpExplorer *ex, const DpSection *s) {
+    const DpGblApi *api = ex->mach->api;
     gbl_cpu_t *g = api->gbr;
     uint64_t h = 0xcbf29ce484222325ull;
-    h = ms_fnv1a(h, &g->a, 5); // a, zr, cf, hf, nf
-    h = ms_fnv1a(h, &g->bc, 2);
-    h = ms_fnv1a(h, &g->de, 2);
-    h = ms_fnv1a(h, &g->hl, 2);
-    h = ms_fnv1a_u32(h, g->sp);
-    if (s->ctx_mask & (1ull << MS_CTX_IME)) h = ms_fnv1a(h, &g->ime, 1);
-    if (s->ctx_mask & (1ull << MS_CTX_IE)) h = ms_fnv1a(h, api->ie, 1);
-    if (s->ctx_mask & (1ull << MS_CTX_ROMN)) h = ms_fnv1a_u32(h, g->rom_bank);
-    if (s->ctx_mask & (1ull << MS_CTX_VBK)) h = ms_fnv1a(h, &api->io[0x4F], 1);
+    h = dp_fnv1a(h, &g->a, 5); // a, zr, cf, hf, nf
+    h = dp_fnv1a(h, &g->bc, 2);
+    h = dp_fnv1a(h, &g->de, 2);
+    h = dp_fnv1a(h, &g->hl, 2);
+    h = dp_fnv1a_u32(h, g->sp);
+    if (s->ctx_mask & (1ull << DP_CTX_IME)) h = dp_fnv1a(h, &g->ime, 1);
+    if (s->ctx_mask & (1ull << DP_CTX_IE)) h = dp_fnv1a(h, api->ie, 1);
+    if (s->ctx_mask & (1ull << DP_CTX_ROMN)) h = dp_fnv1a_u32(h, g->rom_bank);
+    if (s->ctx_mask & (1ull << DP_CTX_VBK)) h = dp_fnv1a(h, &api->io[0x4F], 1);
     for (int pg = 0; pg < 32; pg++) {
-        if (s->page_mask_wram & (1ull << pg)) h = ms_fnv1a(h, api->wram + pg * 256, 256);
-        if (s->page_mask_vram[0] & (1ull << pg)) h = ms_fnv1a(h, api->vram + pg * 256, 256);
-        if (s->page_mask_vram[1] & (1ull << pg)) h = ms_fnv1a(h, api->vram + 0x2000 + pg * 256, 256);
+        if (s->page_mask_wram & (1ull << pg)) h = dp_fnv1a(h, api->wram + pg * 256, 256);
+        if (s->page_mask_vram[0] & (1ull << pg)) h = dp_fnv1a(h, api->vram + pg * 256, 256);
+        if (s->page_mask_vram[1] & (1ull << pg)) h = dp_fnv1a(h, api->vram + 0x2000 + pg * 256, 256);
     }
-    uint32_t eram_bytes = ms_gbl_variant_eram[ex->mach->vi];
+    uint32_t eram_bytes = dp_gbl_variant_eram[ex->mach->vi];
     for (int pg = 0; pg < 64 && (uint32_t)(pg * 256) < eram_bytes; pg++)
-        if (s->page_mask_sram & (1ull << pg)) h = ms_fnv1a(h, api->eram + pg * 256, 256);
-    if (s->ctx_hram) h = ms_fnv1a(h, api->hram, 0x7F);
-    if (s->ctx_oam) h = ms_fnv1a(h, api->oam, 0xA0);
+        if (s->page_mask_sram & (1ull << pg)) h = dp_fnv1a(h, api->eram + pg * 256, 256);
+    if (s->ctx_hram) h = dp_fnv1a(h, api->hram, 0x7F);
+    if (s->ctx_oam) h = dp_fnv1a(h, api->oam, 0xA0);
     for (int i = 0; i < 0x80; i++)
-        if (s->io_read_mask & (1u << i)) h = ms_fnv1a(h, &api->io[i], 1);
+        if (s->io_read_mask & (1u << i)) h = dp_fnv1a(h, &api->io[i], 1);
     return h;
 }
 
-int ms_explore_step(MsExplorer *ex) {
-    MsResults *res = ex->res;
+int dp_explore_step(DpExplorer *ex) {
+    DpResults *res = ex->res;
     if (!ex->q_len) return 0;
     if (ex->cfg.max_paths && res->paths_run >= ex->cfg.max_paths) {
         res->budget_paths++;
         return 0;
     }
-    MsPathState *p;
+    DpPathState *p;
     if (ex->cfg.dfs) { // total search: the newest path first, deepest first
         p = &ex->queue[(ex->q_head + ex->q_len - 1) % ex->q_cap];
     } else {
@@ -1072,63 +1072,63 @@ int ms_explore_step(MsExplorer *ex) {
     ex->pend_map = 0;
     memset(ex->back_ring, 0, sizeof ex->back_ring);
     ex->back_idx = 0;
-    ms_copy_reset(&ex->ct);
-    ms_mach_attach(ex->mach, ex, hook_step, hook_read, hook_write, NULL);
-    ms_mach_load(ex->mach, img); // execution starts at the image's pc
+    dp_copy_reset(&ex->ct);
+    dp_mach_attach(ex->mach, ex, hook_step, hook_read, hook_write, NULL);
+    dp_mach_load(ex->mach, img); // execution starts at the image's pc
     free(img);
     p->img = NULL;
     // "same context" eviction: entering a section start with a context the
     // section cannot distinguish from one already explored
     if (!ex->cfg.no_context_evict) {
-        const MsGblApi *api = ex->mach->api;
+        const DpGblApi *api = ex->mach->api;
         uint32_t key = key_at(ex, api->gbr->pc);
         uint32_t sid1 = res->section_of[key];
         if (sid1) {
-            MsSection *s = &res->sections[sid1 - 1];
-            if (key == ms_rom_index(s->bank, s->lo)) {
+            DpSection *s = &res->sections[sid1 - 1];
+            if (key == dp_rom_index(s->bank, s->lo)) {
                 uint64_t h = project_ctx(ex, s);
-                int ins = ms_set_insert(&s->ctx_seen, h);
+                int ins = dp_set_insert(&s->ctx_seen, h);
                 if (ins == 0) {
                     res->evicted_ctx++;
-                    if (ex->tree) ms_tree_close(ex->tree, choice, MS_ISSUE_MERGED);
+                    if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_MERGED);
                     return ex->q_len ? 1 : 0;
                 }
                 if (ins > 0) s->ctx_count++;
             }
         }
     }
-    int cut = ms_mach_run(ex->mach);
-    if (cut == MS_CUT_HALT) res->halt_cuts++;
-    ms_copy_flush_path(ex, &ex->ct);
+    int cut = dp_mach_run(ex->mach);
+    if (cut == DP_CUT_HALT) res->halt_cuts++;
+    dp_copy_flush_path(ex, &ex->ct);
     res->paths_run++;
     // the tree choice of this path closes with its outcome
     if (ex->tree) {
-        int issue = MS_ISSUE_DONE;
-        if (ex->path_dead) issue = MS_ISSUE_DEAD;
-        else if (ex->path_reset) issue = MS_ISSUE_RESET;
-        else if (ex->path_nonsense) issue = MS_ISSUE_NONSENSE;
-        else if (cut == MS_CUT_HALT || ex->steps_no_credit > ex->cfg.max_steps_path / 4)
-            issue = MS_ISSUE_MERGED; // a known loop, no way out found
-        else if (cut == MS_CUT_CYCLES) issue = MS_ISSUE_CAPPED;
-        else if (cut != MS_CUT_NONE) issue = MS_ISSUE_BUDGET;
-        ms_tree_close(ex->tree, choice, issue);
+        int issue = DP_ISSUE_DONE;
+        if (ex->path_dead) issue = DP_ISSUE_DEAD;
+        else if (ex->path_reset) issue = DP_ISSUE_RESET;
+        else if (ex->path_nonsense) issue = DP_ISSUE_NONSENSE;
+        else if (cut == DP_CUT_HALT || ex->steps_no_credit > ex->cfg.max_steps_path / 4)
+            issue = DP_ISSUE_MERGED; // a known loop, no way out found
+        else if (cut == DP_CUT_CYCLES) issue = DP_ISSUE_CAPPED;
+        else if (cut != DP_CUT_NONE) issue = DP_ISSUE_BUDGET;
+        dp_tree_close(ex->tree, choice, issue);
     }
     return ex->q_len ? 1 : 0;
 }
 
-int ms_explore_slice(MsExplorer *ex, int ms) {
+int dp_explore_slice(DpExplorer *ex, int ms) {
     uint64_t deadline = (uint64_t)ms * 1000 + (uint64_t)clock() * 1000000ull / CLOCKS_PER_SEC;
     int more = 1;
     while (more) {
-        more = ms_explore_step(ex);
+        more = dp_explore_step(ex);
         if (ex->stop) return 0;
         if ((uint64_t)clock() * 1000000ull / CLOCKS_PER_SEC >= deadline) break;
     }
     return more;
 }
 
-void ms_explore_finalize(MsExplorer *ex) {
-    MsResults *res = ex->res;
+void dp_explore_finalize(DpExplorer *ex) {
+    DpResults *res = ex->res;
     // finalize may run once per closure round: the derived counters restart
     for (int i = 0; i < res->section_count; i++) {
         res->sections[i].cond_sites = res->sections[i].cond_both = 0;
@@ -1139,8 +1139,8 @@ void ms_explore_finalize(MsExplorer *ex) {
         uint32_t key = res->sites.keys[i];
         uint32_t sid1 = key < (uint32_t)res->banks * 0x4000 ? res->section_of[key] : 0;
         if (!sid1) continue;
-        MsSection *s = &res->sections[sid1 - 1];
-        MsSiteStat *st = (MsSiteStat *)((uint8_t *)res->sites.vals + i * res->sites.stride);
+        DpSection *s = &res->sections[sid1 - 1];
+        DpSiteStat *st = (DpSiteStat *)((uint8_t *)res->sites.vals + i * res->sites.stride);
         s->cond_sites++;
         if (st->taken && st->nottaken) s->cond_both++;
     }
@@ -1149,18 +1149,18 @@ void ms_explore_finalize(MsExplorer *ex) {
         uint32_t key = res->callers.keys[i];
         uint32_t sid1 = key < (uint32_t)res->banks * 0x4000 ? res->section_of[key] : 0;
         if (!sid1) continue;
-        MsSection *s = &res->sections[sid1 - 1];
-        MsCallList *cl = (MsCallList *)((uint8_t *)res->callers.vals + i * res->callers.stride);
+        DpSection *s = &res->sections[sid1 - 1];
+        DpCallList *cl = (DpCallList *)((uint8_t *)res->callers.vals + i * res->callers.stride);
         for (int j = 0; j < cl->n && s->callers_n < 8; j++) s->callers[s->callers_n++] = cl->site[j];
     }
     for (int i = 0; i < res->section_count; i++) {
-        MsSection *s = &res->sections[i];
-        if (s->boot_hits > 0 || (s->kind_bits & MS_XF_IRQ) || s->copies > 0)
-            s->verdict = MS_V_REQUIRED;
+        DpSection *s = &res->sections[i];
+        if (s->boot_hits > 0 || (s->kind_bits & DP_XF_IRQ) || s->copies > 0)
+            s->verdict = DP_V_REQUIRED;
         else if (s->natural_hits > 0 && s->forced_hits == 0)
-            s->verdict = MS_V_PLAYED; // only ever seen in a real play session
+            s->verdict = DP_V_PLAYED; // only ever seen in a real play session
         else
-            s->verdict = MS_V_FORCED;
+            s->verdict = DP_V_FORCED;
     }
     // the m0boy bridge: count bytes that are both executed and proven data —
     // execution wins there, the data mark is dropped at export
@@ -1169,9 +1169,9 @@ void ms_explore_finalize(MsExplorer *ex) {
         uint64_t verb = 0;
         size_t n = (size_t)res->banks * 0x4000;
         for (size_t k = 0; k < n; k++) {
-            if (res->data_flags[k] & MS_DF_VERBATIM) {
+            if (res->data_flags[k] & DP_DF_VERBATIM) {
                 verb++;
-                if (res->exec_flags[k] & (MS_XF_NATURAL | MS_XF_FORCED)) contra++;
+                if (res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED)) contra++;
             }
         }
         res->data_verbatim_bytes = verb;
@@ -1179,39 +1179,39 @@ void ms_explore_finalize(MsExplorer *ex) {
     }
 }
 
-int ms_explore(MsExplorer *ex) {
-    while (ms_explore_slice(ex, 50))
+int dp_explore(DpExplorer *ex) {
+    while (dp_explore_slice(ex, 50))
         ;
-    ms_explore_finalize(ex);
+    dp_explore_finalize(ex);
     return 0;
 }
 
 // --- GB seeding ------------------------------------------------------------------------
 // Mutually exclusive per-byte classification, first match wins.
-void ms_results_breakdown(const MsResults *res, uint64_t out[MS_CLS_COUNT]) {
+void dp_results_breakdown(const DpResults *res, uint64_t out[DP_CLS_COUNT]) {
     size_t n = (size_t)res->banks * 0x4000;
-    for (int i = 0; i < MS_CLS_COUNT; i++) out[i] = 0;
+    for (int i = 0; i < DP_CLS_COUNT; i++) out[i] = 0;
     for (size_t k = 0; k < n; k++) {
         uint8_t x = res->exec_flags[k], d = res->data_flags[k], s = res->static_flags[k];
         int c;
-        if (x & MS_XF_NATURAL) c = MS_CLS_EXEC_NATURAL;
-        else if (x & MS_XF_FORCED) c = MS_CLS_EXEC_FORCED;
-        else if (x & MS_XF_STATIC) c = MS_CLS_STATIC_FLOW;
-        else if (d & (MS_DF_COPIED | MS_DF_VERBATIM)) c = MS_CLS_DATA_COPIED;
-        else if (d & MS_DF_READ) c = MS_CLS_DATA_READ;
-        else if (s & (MS_SF_POINTER | MS_SF_PAD)) c = MS_CLS_POINTER_PAD;
-        else c = MS_CLS_UNEXPLAINED;
+        if (x & DP_XF_NATURAL) c = DP_CLS_EXEC_NATURAL;
+        else if (x & DP_XF_FORCED) c = DP_CLS_EXEC_FORCED;
+        else if (x & DP_XF_STATIC) c = DP_CLS_STATIC_FLOW;
+        else if (d & (DP_DF_COPIED | DP_DF_VERBATIM)) c = DP_CLS_DATA_COPIED;
+        else if (d & DP_DF_READ) c = DP_CLS_DATA_READ;
+        else if (s & (DP_SF_POINTER | DP_SF_PAD)) c = DP_CLS_POINTER_PAD;
+        else c = DP_CLS_UNEXPLAINED;
         out[c]++;
     }
 }
 
-uint64_t ms_results_unexplained(const MsResults *res) {
-    uint64_t b[MS_CLS_COUNT];
-    ms_results_breakdown(res, b);
-    return b[MS_CLS_UNEXPLAINED];
+uint64_t dp_results_unexplained(const DpResults *res) {
+    uint64_t b[DP_CLS_COUNT];
+    dp_results_breakdown(res, b);
+    return b[DP_CLS_UNEXPLAINED];
 }
 
-static int is_padding_at(const MsCart *c, uint32_t bank, uint16_t addr) {
+static int is_padding_at(const DpCart *c, uint32_t bank, uint16_t addr) {
     uint32_t base = bank * 0x4000ull + (addr & 0x3FFF);
     uint8_t b0 = base < c->rom_size ? c->rom[base] : 0xFF;
     if (b0 != 0x00 && b0 != 0xFF) return 0;
@@ -1233,30 +1233,30 @@ static int is_illegal_op(uint8_t op) {
     }
 }
 
-void ms_seed_gb(MsExplorer *ex) {
-    MsResults *res = ex->res;
-    const MsCart *c = res->cart;
-    const MsPlatform *plat = res->plat;
+void dp_seed_gb(DpExplorer *ex) {
+    DpResults *res = ex->res;
+    const DpCart *c = res->cart;
+    const DpPlatform *plat = res->plat;
     // reset entry
     {
         uint8_t *img = xrealloc(NULL, ex->sb);
         memcpy(img, seed_base(ex), ex->sb);
-        ms_explorer_seed(ex, img, MS_SEED_RESET, 0);
+        dp_explorer_seed(ex, img, DP_SEED_RESET, 0);
     }
     // RST and IRQ vectors when they hold something that is not padding
     for (int i = 0; i < plat->entry_count; i++) {
-        const MsEntry *e = &plat->entries[i];
-        if (e->kind == MS_SEED_RESET) continue;
+        const DpEntry *e = &plat->entries[i];
+        if (e->kind == DP_SEED_RESET) continue;
         if (is_padding_at(c, 0, e->addr)) continue;
-        ms_explorer_seed_pc(ex, 0, e->addr, e->kind, e->kind == MS_SEED_RST ? 1 : 0);
+        dp_explorer_seed_pc(ex, 0, e->addr, e->kind, e->kind == DP_SEED_RST ? 1 : 0);
     }
     // pointer-table scan: every ROM word pointing at plausible code; targets
     // inside padding or pointer tables are evicted (static view — the
     // dynamic data proof only exists once coverage ran, see --sweep)
     if (!ex->cfg.no_pointer_scan) {
         int seeded = 0;
-        MsHashSet seen;
-        ms_set_init(&seen, 65536);
+        DpHashSet seen;
+        dp_set_init(&seen, 65536);
         for (int bank = 0; bank < res->banks && seeded < (int)ex->cfg.seed_cap; bank++) {
             for (int off = 0; off + 1 < 0x4000 && seeded < (int)ex->cfg.seed_cap; off++) {
                 uint32_t a = (uint32_t)bank * 0x4000 + (uint32_t)off;
@@ -1265,23 +1265,23 @@ void ms_seed_gb(MsExplorer *ex) {
                 if (v < 0x0100 || v >= 0x8000) continue;
                 uint32_t tbank = v < 0x4000 ? 0 : 1;
                 if (is_padding_at(c, tbank, v)) continue;
-                uint32_t tk = ms_rom_index(tbank, v);
-                if (res->static_flags[tk] & (MS_SF_PAD | MS_SF_POINTER)) {
+                uint32_t tk = dp_rom_index(tbank, v);
+                if (res->static_flags[tk] & (DP_SF_PAD | DP_SF_POINTER)) {
                     res->seeds_skipped_data++;
                     continue;
                 }
-                if (ms_set_insert(&seen, tk) == 0) continue;
-                ms_explorer_seed_pc(ex, (int)tbank, v, MS_SEED_POINTER, 1);
+                if (dp_set_insert(&seen, tk) == 0) continue;
+                dp_explorer_seed_pc(ex, (int)tbank, v, DP_SEED_POINTER, 1);
                 seeded++;
             }
         }
-        ms_set_free(&seen);
+        dp_set_free(&seen);
     }
     // bank sweep seeding: every switchable bank entered at $4000
     if (ex->cfg.seed_banks) {
         for (int bank = 1; bank < res->banks; bank++) {
             if (is_padding_at(c, (uint32_t)bank, 0x4000)) continue;
-            ms_explorer_seed_pc(ex, bank, 0x4000, MS_SEED_POINTER, 1);
+            dp_explorer_seed_pc(ex, bank, 0x4000, DP_SEED_POINTER, 1);
         }
     }
 }

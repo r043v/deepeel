@@ -1,4 +1,4 @@
-# memscan
+# deepeel
 
 Outil générique de découverte de la **memory map** des ROMs, plateforme par
 plateforme. Il contient le registre matériel complet de chaque console
@@ -53,33 +53,33 @@ SDL2 est optionnel (`-DBUILD_GUI=OFF` pour s'en passer).
 ## Usage
 
 ```bash
-memscan explore rom.gb [--gui] [--json map.json] [--text report.txt] [--cov out.cov]
-memscan explore rom.gb --max-total 50000000 --queue 8192
-memscan explore rom.gb --entry 2:4000        # graine supplémentaire banque 2, $4000
+deepeel explore rom.gb [--gui] [--json map.json] [--text report.txt] [--cov out.cov]
+deepeel explore rom.gb --max-total 50000000 --queue 8192
+deepeel explore rom.gb --entry 2:4000        # graine supplémentaire banque 2, $4000
 
 # sessions jouées (m0boy : inputs aléatoires + attract, 10 threads, pool de
 # checkpoints, scheduler d'époques, persistance --state-dir/--resume)
-memscan explore rom.gb --play --frames 72000 --state-dir s --cov jeu.cov --romdata jeu.prof
-memscan explore rom.gb --play --resume --state-dir s
+deepeel explore rom.gb --play --frames 72000 --state-dir s --cov jeu.cov --romdata jeu.prof
+deepeel explore rom.gb --play --resume --state-dir s
 # TAS : rejoue un movie tool-assisté (VBA .vmv, BizHawk .bk2, log texte) — un
 # worker par fichier ; le TAS est prioritaire : prioritaire sur tout budget
 # (frames, segments, stagnation), le film est joué en entier jusqu'au bout du
 # jeu, puis le worker passe en jeu aléatoire
-memscan explore rom.gb --play --tas supermarioland.bk2 --frames 18000
+deepeel explore rom.gb --play --tas supermarioland.bk2 --frames 18000
 # fenêtre de surveillance seule (SDL2) : l'écran du film échantillonné à
 # 1..30 images/s (défaut 30), sans ralentir le TAS ; Tab = film suivant
-memscan explore rom.gb --play --tas film.vbm --watch 10
+deepeel explore rom.gb --play --tas film.vbm --watch 10
 # export jouable : ecrit le checkpoint choisi (le plus productif, ou
 # --export-slot N) en slot 0 du <SD>.STA du projet pc m0boy — le firmware
 # pc le propose au menu (Etat -> Charger l'etat) et boote dessus avec
 # M0_STATE=0 ; le .SAV batterie suit quand la cartouche a de la RAM
-memscan explore rom.gb --play --frames 6000 --export-playable chemin/vers/projet_pc
+deepeel explore rom.gb --play --frames 6000 --export-playable chemin/vers/projet_pc
 # mode humain : une lane jouable au pad, chaque avancée sauvée en PNG (écran +
 # machine complète, rechargeable --from-png) et explorée automatiquement
-memscan explore rom.gb --play --gui --human
-memscan map rom.gb                           # carte statique seule (pointeurs, padding)
-memscan regs gb                              # dump du registre matériel GB
-memscan dis rom.gb 2:4000 12                 # désassemblage banque 2, $4000
+deepeel explore rom.gb --play --gui --human
+deepeel map rom.gb                           # carte statique seule (pointeurs, padding)
+deepeel regs gb                              # dump du registre matériel GB
+deepeel dis rom.gb 2:4000 12                 # désassemblage banque 2, $4000
 ```
 
 Options d'exploration : `--max-steps` (par chemin), `--max-paths`,

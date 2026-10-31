@@ -19,9 +19,9 @@ typedef struct {
     uint8_t *out;
     size_t out_cap, out_len;
     int err;
-} MsInf;
+} DpInf;
 
-static int inf_grow(MsInf *s, size_t need) {
+static int inf_grow(DpInf *s, size_t need) {
     if (need <= s->out_cap) return 1;
     size_t cap = s->out_cap ? s->out_cap * 2 : 4096;
     while (cap < need) cap *= 2;
@@ -32,7 +32,7 @@ static int inf_grow(MsInf *s, size_t need) {
     return 1;
 }
 
-static int inf_bits(MsInf *s, int n) {
+static int inf_bits(DpInf *s, int n) {
     while (s->bitcnt < n) {
         if (s->in_pos >= s->in_len) { s->err = 1; return -1; }
         s->bitbuf |= (uint32_t)s->in[s->in_pos++] << s->bitcnt;
@@ -45,9 +45,9 @@ static int inf_bits(MsInf *s, int n) {
 }
 
 // canonical Huffman: counts per length, symbols sorted; decode one symbol
-typedef struct { short count[16]; short sym[288]; } MsHuff;
+typedef struct { short count[16]; short sym[288]; } DpHuff;
 
-static int huff_build(MsHuff *h, const uint8_t *lens, int n) {
+static int huff_build(DpHuff *h, const uint8_t *lens, int n) {
     memset(h->count, 0, sizeof h->count);
     for (int i = 0; i < n; i++) h->count[lens[i]]++;
     if (h->count[0] == n) return 0; // all empty: unused table
@@ -59,7 +59,7 @@ static int huff_build(MsHuff *h, const uint8_t *lens, int n) {
     return 1;
 }
 
-static int huff_decode(MsInf *s, const MsHuff *h) {
+static int huff_decode(DpInf *s, const DpHuff *h) {
     int code = 0, first = 0, index = 0;
     for (int len = 1; len < 16; len++) {
         int b = inf_bits(s, 1);
@@ -85,7 +85,7 @@ static const short dist_base[30] = {1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65,
 static const short dist_extra[30] = {0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6,
                                      7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13};
 
-static int inf_block(MsInf *s, const MsHuff *lit, const MsHuff *dist) {
+static int inf_block(DpInf *s, const DpHuff *lit, const DpHuff *dist) {
     for (;;) {
         int sym = huff_decode(s, lit);
         if (sym < 0) return 0;
@@ -116,8 +116,8 @@ static const uint8_t fixed_lits[288] = {
     [0 ... 143] = 8, [144 ... 255] = 9, [256 ... 279] = 7, [280 ... 287] = 8,
 };
 
-uint8_t *ms_inflate(const uint8_t *in, size_t in_len, size_t *out_len) {
-    MsInf s = {in, in_len, 0, 0, 0, NULL, 0, 0, 0};
+uint8_t *dp_inflate(const uint8_t *in, size_t in_len, size_t *out_len) {
+    DpInf s = {in, in_len, 0, 0, 0, NULL, 0, 0, 0};
     if (in_len > 2 && in[0] == 0x78 && ((in[0] << 8) | in[1]) % 31 == 0) s.in_pos = 2; // zlib
     for (;;) {
         int last = inf_bits(&s, 1);
@@ -137,7 +137,7 @@ uint8_t *ms_inflate(const uint8_t *in, size_t in_len, size_t *out_len) {
             s.out_len += n;
             s.in_pos += n;
         } else if (type == 1 || type == 2) {
-            MsHuff lit, dist;
+            DpHuff lit, dist;
             if (type == 1) {
                 huff_build(&lit, fixed_lits, 288);
                 uint8_t dl[30];
@@ -156,7 +156,7 @@ uint8_t *ms_inflate(const uint8_t *in, size_t in_len, size_t *out_len) {
                     if (v < 0) { s.err = 1; break; }
                     cl[ord[i]] = (uint8_t)v;
                 }
-                MsHuff ch;
+                DpHuff ch;
                 if (s.err || !huff_build(&ch, cl, 19)) { s.err = 1; break; }
                 uint8_t lens[288 + 32] = {0};
                 int n = 0;
@@ -204,13 +204,13 @@ uint8_t *ms_inflate(const uint8_t *in, size_t in_len, size_t *out_len) {
 // ---------------------------------------------------------------------------
 // zip
 // ---------------------------------------------------------------------------
-int ms_zip_is(const uint8_t *in, size_t in_len) {
+int dp_zip_is(const uint8_t *in, size_t in_len) {
     return in_len > 4 && in[0] == 'P' && in[1] == 'K' && in[2] == 3 && in[3] == 4;
 }
 
-uint8_t *ms_zip_read(const uint8_t *in, size_t in_len, const char *needle, size_t *out_len,
+uint8_t *dp_zip_read(const uint8_t *in, size_t in_len, const char *needle, size_t *out_len,
                      char name[128]) {
-    if (in_len < 22 || !ms_zip_is(in, in_len)) return NULL;
+    if (in_len < 22 || !dp_zip_is(in, in_len)) return NULL;
     // central directory: scan the tail for PK\x05\x06 (no comment assumed, but scan anyway)
     size_t eo = in_len - 22;
     for (;;) {
@@ -271,7 +271,7 @@ uint8_t *ms_zip_read(const uint8_t *in, size_t in_len, const char *needle, size_
             if (out_len) *out_len = csize;
             return out;
         }
-        if (method == 8) return ms_inflate(in + data, csize, out_len);
+        if (method == 8) return dp_inflate(in + data, csize, out_len);
         return NULL;
     }
     return NULL;

@@ -1,6 +1,6 @@
 // snapshot_png.c: dependency-free PNG writer/reader for the snapshot
 // gallery.  The image is a normal, human-viewable PNG; the machine snapshot
-// rides inside a tEXt chunk ("memscan_snapshot", hex), the way a PICO-8
+// rides inside a tEXt chunk ("deepeel_snapshot", hex), the way a PICO-8
 // cartridge hides its code in the palette — one file, visible to the player,
 // loadable by the tool.
 //
@@ -132,12 +132,12 @@ static int png_write(const char *path, int w, int h, const uint8_t *rgb, const c
     return 1;
 }
 
-int ms_png_save(const char *path, int w, int h, const uint8_t *rgb, const uint8_t *payload,
+int dp_png_save(const char *path, int w, int h, const uint8_t *rgb, const uint8_t *payload,
                 size_t payload_len) {
-    return png_write(path, w, h, rgb, "memscan_snapshot", 1, payload, payload_len);
+    return png_write(path, w, h, rgb, "deepeel_snapshot", 1, payload, payload_len);
 }
 
-int ms_png_save_text(const char *path, int w, int h, const uint8_t *rgb, const char *key,
+int dp_png_save_text(const char *path, int w, int h, const uint8_t *rgb, const char *key,
                      const char *text, size_t text_len) {
     return png_write(path, w, h, rgb, key, 0, (const uint8_t *)text, text_len);
 }
@@ -177,7 +177,7 @@ static int hexval(char c) {
     return -1;
 }
 
-int ms_png_load(const char *path, int *w, int *h, uint8_t **rgb_out, uint8_t **payload_out,
+int dp_png_load(const char *path, int *w, int *h, uint8_t **rgb_out, uint8_t **payload_out,
                 size_t *payload_len_out) {
     static int inited;
     if (!inited) { crc_init(); inited = 1; }
@@ -217,7 +217,7 @@ int ms_png_load(const char *path, int *w, int *h, uint8_t **rgb_out, uint8_t **p
             memcpy(idat + idat_cap, chunk, len);
             idat_cap += len;
             idat_n = idat_cap;
-        } else if (!strcmp(type, "tEXt") && len > 17 && !memcmp(chunk, "memscan_snapshot", 16)) {
+        } else if (!strcmp(type, "tEXt") && len > 17 && !memcmp(chunk, "deepeel_snapshot", 16)) {
             // keyword NUL hex...
             if (chunk[16] == 0) {
                 size_t hexn = len - 17;
@@ -268,7 +268,7 @@ int ms_png_load(const char *path, int *w, int *h, uint8_t **rgb_out, uint8_t **p
 }
 
 // returns the malloc'd, NUL-terminated text of the tEXt chunk `key` (CRC checked)
-char *ms_png_text(const char *path, const char *key, size_t *len_out) {
+char *dp_png_text(const char *path, const char *key, size_t *len_out) {
     static int inited;
     if (!inited) { crc_init(); inited = 1; }
     FILE *f = fopen(path, "rb");

@@ -4,10 +4,10 @@
 // m0boy state image (cartridge RAM included); discovery credit is measured
 // by the same first-flip counters the engine hooks fill.
 //
-// Threading: every worker owns an MsExplorer (its recording context) and one
+// Threading: every worker owns an DpExplorer (its recording context) and one
 // machine instance (instances 1..n; instance 0 is the fork explorer's, the
 // human lane borrows it while the fork is idle, the last instance is the
-// snapshot preview).  The shared MsResults maps are updated through atomics
+// snapshot preview).  The shared DpResults maps are updated through atomics
 // and the results mutexes (res->mt stays 1 for the whole play).  A segment
 // ends inside the vblank hook: the next checkpoint loads straight into the
 // running machine and play continues without leaving gbl_run.
@@ -26,10 +26,10 @@
 // --- sigint -------------------------------------------------------------------
 static volatile sig_atomic_t g_sigint;
 static void on_sigint(int sig) { (void)sig; g_sigint = 1; }
-void ms_play_install_sigint(void) { signal(SIGINT, on_sigint); }
+void dp_play_install_sigint(void) { signal(SIGINT, on_sigint); }
 
 // --- config -------------------------------------------------------------------
-void ms_session_cfg_defaults(MsSessionCfg *cfg) {
+void dp_session_cfg_defaults(DpSessionCfg *cfg) {
     memset(cfg, 0, sizeof *cfg);
     cfg->sessions = 10;
     cfg->epoch_frames = 480;
@@ -55,12 +55,12 @@ void ms_session_cfg_defaults(MsSessionCfg *cfg) {
 #define K_B 0x02
 #define K_START 0x08
 
-typedef struct MsInputState {
+typedef struct DpInputState {
     uint32_t rng;
     uint32_t move_left, move_keys, tap_left;
     int uniform;              // draw one of the 8 keys, no human priors
     uint32_t uniform_hold;
-} MsInputState;
+} DpInputState;
 
 static uint32_t rnd(uint32_t *rng) {
     uint32_t x = *rng;
@@ -73,7 +73,7 @@ static uint32_t rnd(uint32_t *rng) {
 
 static const uint8_t key_tab[8] = { K_A, K_B, 0x04, K_START, K_RIGHT, K_LEFT, K_UP, K_DOWN };
 
-static void next_move(MsInputState *in) {
+static void next_move(DpInputState *in) {
     if (in->uniform) {
         in->move_keys = key_tab[rnd(&in->rng) % 8]; // one key, uniform
         in->move_left = 1 + rnd(&in->rng) % in->uniform_hold;
@@ -93,7 +93,7 @@ static void next_move(MsInputState *in) {
     in->move_keys = keys;
 }
 
-static uint8_t input_keys(MsInputState *in) {
+static uint8_t input_keys(DpInputState *in) {
     if (!in->move_left) next_move(in);
     in->move_left--;
     uint32_t keys = in->move_keys;
@@ -106,7 +106,7 @@ static uint8_t input_keys(MsInputState *in) {
 
 // m0boy held-named script: "<frame> a+b+start" or "none", a line only when
 // the held state changes; the mask latches until the next line
-typedef struct { uint32_t frame; uint8_t mask; } MsScriptEv;
+typedef struct { uint32_t frame; uint8_t mask; } DpScriptEv;
 
 static int parse_button_word(const char *w, uint8_t *mask) {
     static const struct { const char *n; uint8_t b; } tab[] = {
@@ -118,11 +118,11 @@ static int parse_button_word(const char *w, uint8_t *mask) {
     return 0;
 }
 
-static int script_load(const char *path, MsScriptEv **evs, int *n) {
+static int script_load(const char *path, DpScriptEv **evs, int *n) {
     FILE *f = fopen(path, "r");
     if (!f) return 0;
     int cap = 64, cnt = 0;
-    MsScriptEv *e = malloc(sizeof(MsScriptEv) * (size_t)cap);
+    DpScriptEv *e = malloc(sizeof(DpScriptEv) * (size_t)cap);
     char line[256];
     while (fgets(line, sizeof line, f)) {
         char *p = line;
@@ -155,7 +155,7 @@ static int script_load(const char *path, MsScriptEv **evs, int *n) {
         }
         if (cnt == cap) {
             cap *= 2;
-            e = realloc(e, sizeof(MsScriptEv) * (size_t)cap);
+            e = realloc(e, sizeof(DpScriptEv) * (size_t)cap);
         }
         e[cnt].frame = (uint32_t)(frame < 0 ? 0 : frame);
         e[cnt].mask = mask;
@@ -167,7 +167,7 @@ static int script_load(const char *path, MsScriptEv **evs, int *n) {
     return 1;
 }
 
-static uint8_t script_keys(const MsScriptEv *evs, int n, int *pos, uint32_t frame) {
+static uint8_t script_keys(const DpScriptEv *evs, int n, int *pos, uint32_t frame) {
     uint8_t mask = 0;
     while (*pos < n && evs[*pos].frame <= frame) mask = evs[(*pos)++].mask;
     return mask;
@@ -181,51 +181,51 @@ static uint16_t image_pc(const uint8_t *img) {
 }
 
 // --- checkpoint pool -------------------------------------------------------------
-typedef struct MsCheckpoint {
+typedef struct DpCheckpoint {
     uint8_t *img; // full m0boy state image (cartridge RAM included)
     uint32_t sb;  // image size (variant-shaped)
     uint32_t frame;
     uint64_t credit;
     uint32_t chosen;
     uint8_t slot0;
-} MsCheckpoint;
+} DpCheckpoint;
 
-typedef struct MsPool {
+typedef struct DpPool {
     pthread_mutex_t mtx;
-    MsCheckpoint *slot[MS_MAX_POOL];
+    DpCheckpoint *slot[DP_MAX_POOL];
     int n, cap;
-} MsPool;
+} DpPool;
 
-static void ckpt_free(MsCheckpoint *c) {
+static void ckpt_free(DpCheckpoint *c) {
     if (!c) return;
     free(c->img);
     free(c);
 }
 
 // --- seed inbox (worker -> fork explorer) ----------------------------------------
-typedef struct MsInboxEnt {
+typedef struct DpInboxEnt {
     uint8_t *img; // full state image, freed with the entry
-} MsInboxEnt;
+} DpInboxEnt;
 
-#define MS_INBOX_CAP 512
+#define DP_INBOX_CAP 512
 
 // --- play engine ------------------------------------------------------------------
 typedef enum { IN_RNG = 0, IN_ATTRACT, IN_SCRIPT, IN_TAS, IN_FIXED, IN_HUMAN } InMode;
 
-typedef struct MsWorker {
-    MsPlay *p;
+typedef struct DpWorker {
+    DpPlay *p;
     int id;
     InMode mode;
     pthread_t th;
     int started;
     // recording context: one explorer of our own, sharing the results maps
-    MsExplorer *ex;
-    MsMach *mach; // instance 1..n (0 for the human lane)
+    DpExplorer *ex;
+    DpMach *mach; // instance 1..n (0 for the human lane)
     // input state
-    MsInputState in;
-    MsScriptEv *script;
+    DpInputState in;
+    DpScriptEv *script;
     int script_n, script_pos;
-    MsTas tas;                 // IN_TAS: the loaded movie (masks per frame)
+    DpTas tas;                 // IN_TAS: the loaded movie (masks per frame)
     uint8_t fixed_mask;
     uint8_t human_buttons; // IN_HUMAN: set by the GUI thread before each frame
     uint8_t applied_mask;  // the mask the current frame applied
@@ -233,7 +233,7 @@ typedef struct MsWorker {
     uint32_t seg_left;
     uint64_t credit_prev; // credit at the last observe
     int has_pending;
-    MsCheckpoint pending;
+    DpCheckpoint pending;
     // epoch accounting
     uint32_t epoch_target, epoch_done;
     // bookkeeping
@@ -255,23 +255,23 @@ typedef struct MsWorker {
     // every 1/fps seconds, the rest of the time rendering stays off
     int watch_armed;
     uint64_t watch_next_ns;
-} MsWorker;
+} DpWorker;
 
-struct MsPlay {
-    MsSessionCfg cfg;
-    MsResults *res;
-    MsExplorer *fork;
-    MsMach *fork_mach;   // instance 0 (human lane borrows it while idle)
-    MsMach *preview;     // last instance: renders a checkpoint for PNGs
+struct DpPlay {
+    DpSessionCfg cfg;
+    DpResults *res;
+    DpExplorer *fork;
+    DpMach *fork_mach;   // instance 0 (human lane borrows it while idle)
+    DpMach *preview;     // last instance: renders a checkpoint for PNGs
     pthread_mutex_t preview_mtx;
-    const MsCart *cart;
-    const MsPlatform *plat;
-    MsPool pool;
-    MsWorker w[MS_MAX_SESSIONS];
+    const DpCart *cart;
+    const DpPlatform *plat;
+    DpPool pool;
+    DpWorker w[DP_MAX_SESSIONS];
     int nworkers;
     // human takeover lane (driven by the GUI thread, not threaded)
     int human_on;
-    MsWorker human;
+    DpWorker human;
     uint8_t human_buttons;
     uint8_t *human_screen;
     uint64_t human_png_credit; // credit at the last PNG save
@@ -285,7 +285,7 @@ struct MsPlay {
     int epoch_ran;
     // seed inbox
     pthread_mutex_t inb_mtx;
-    MsInboxEnt *inb;
+    DpInboxEnt *inb;
     int inb_n;
     uint64_t inb_dropped;
     uint64_t tas_ckpts;
@@ -295,7 +295,7 @@ struct MsPlay {
     int watch_fps;          // 0 = off
     int watch_sel;          // which TAS worker is shown (index among the movies)
     pthread_mutex_t watch_mtx;
-    uint8_t watch_buf[MS_GB_SCREEN_W * MS_GB_SCREEN_H];
+    uint8_t watch_buf[DP_GB_SCREEN_W * DP_GB_SCREEN_H];
     int watch_have;
     int watch_buf_movie;
     uint32_t watch_frame, watch_total;
@@ -311,15 +311,15 @@ struct MsPlay {
 };
 
 // worker credit: everything its engine hooks discovered so far
-static uint64_t worker_credit(const MsWorker *w) {
+static uint64_t worker_credit(const DpWorker *w) {
     return w->ex->credit_exec + w->ex->credit_data + w->ex->credit_copies + w->ex->credit_io +
            w->ex->credit_banks;
 }
 
 // fresh per-segment engine bookkeeping (the machine state comes from a load)
-static void worker_reset_run_state(MsWorker *w) {
+static void worker_reset_run_state(DpWorker *w) {
     w->ex->cur_forced = 0;
-    w->ex->cur_kind = 3; // MS_SEED_POINTER: real play state, not a fork
+    w->ex->cur_kind = 3; // DP_SEED_POINTER: real play state, not a fork
     w->ex->cur_from_reset = 0;
     w->ex->irq_depth = 0;
     w->ex->have_last = 0;
@@ -328,23 +328,23 @@ static void worker_reset_run_state(MsWorker *w) {
     w->ex->pad_slide = 0;
     memset(w->ex->back_ring, 0, sizeof w->ex->back_ring);
     w->ex->back_idx = 0;
-    ms_copy_reset(&w->ex->ct);
+    dp_copy_reset(&w->ex->ct);
 }
 
 // snapshot the live machine of a worker into a fresh image
-static uint8_t *worker_image(MsWorker *w) {
+static uint8_t *worker_image(DpWorker *w) {
     uint8_t *img = malloc(w->ex->sb);
-    if (img) ms_mach_save(w->mach, img);
+    if (img) dp_mach_save(w->mach, img);
     return img;
 }
 
 // a copy of img into the fork explorer's seed inbox (dropped when full)
-static void deposit_img(MsPlay *p, const uint8_t *img) {
+static void deposit_img(DpPlay *p, const uint8_t *img) {
     uint8_t *copy = malloc(p->fork->sb);
     if (!copy) return;
     memcpy(copy, img, p->fork->sb);
     pthread_mutex_lock(&p->inb_mtx);
-    if (p->inb_n < MS_INBOX_CAP) {
+    if (p->inb_n < DP_INBOX_CAP) {
         p->inb[p->inb_n++].img = copy;
     } else {
         free(copy);
@@ -354,7 +354,7 @@ static void deposit_img(MsPlay *p, const uint8_t *img) {
 }
 
 // m0x_observe: on discovery, keep the current machine as the pending snapshot
-static void observe(MsWorker *w, uint64_t credit) {
+static void observe(DpWorker *w, uint64_t credit) {
     if (w->has_pending) free(w->pending.img);
     memset(&w->pending, 0, sizeof w->pending);
     w->pending.img = worker_image(w);
@@ -364,7 +364,7 @@ static void observe(MsWorker *w, uint64_t credit) {
     w->has_pending = w->pending.img != NULL;
 }
 
-static int pool_insert(MsPlay *p, MsCheckpoint *c) {
+static int pool_insert(DpPlay *p, DpCheckpoint *c) {
     pthread_mutex_lock(&p->pool.mtx);
     int slot;
     if (p->pool.n < p->pool.cap) {
@@ -384,13 +384,13 @@ static int pool_insert(MsPlay *p, MsCheckpoint *c) {
 // m0x_next's promotion: the pending discovery joins the pool and the seed
 // inbox, so every engine (sessions, fork explorer, human gallery) gets it.
 // Returns the pool slot it landed in.
-static int promote_pending(MsWorker *w) {
+static int promote_pending(DpWorker *w) {
     if (!w->has_pending || !w->pending.img) return -1;
-    MsPlay *p = w->p;
+    DpPlay *p = w->p;
     deposit_img(p, w->pending.img);
     // the pool owns its own copy: w->pending is reused by the next observe,
     // a pointer into it would be zeroed (img = NULL) under the pool's feet
-    MsCheckpoint *c = malloc(sizeof *c);
+    DpCheckpoint *c = malloc(sizeof *c);
     if (!c) return -1;
     *c = w->pending; // c takes over pending.img
     int slot = pool_insert(p, c);
@@ -403,8 +403,8 @@ static int promote_pending(MsWorker *w) {
 // then load the next segment start.  Runs inside the vblank hook (frame
 // boundary = instruction boundary) or after a halt cut: the machine keeps
 // running from the freshly loaded state.
-static void segment_end(MsWorker *w) {
-    MsPlay *p = w->p;
+static void segment_end(DpWorker *w) {
+    DpPlay *p = w->p;
     if (w->has_pending) promote_pending(w);
     {
         uint8_t *img = worker_image(w);
@@ -442,7 +442,7 @@ static void segment_end(MsWorker *w) {
     }
     p->pool.slot[pick]->chosen++;
     w->backtracked = (pick != 0);
-    ms_mach_load(w->mach, p->pool.slot[pick]->img);
+    dp_mach_load(w->mach, p->pool.slot[pick]->img);
     pthread_mutex_unlock(&p->pool.mtx);
     w->seg_left = p->cfg.segment_min + rnd(&w->in.rng) % p->cfg.segment_span;
     w->in.move_left = 0;
@@ -458,7 +458,7 @@ static uint64_t mono_ns(void) {
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
-static int tas_movie_index(const MsPlay *p, const MsWorker *w) {
+static int tas_movie_index(const DpPlay *p, const DpWorker *w) {
     int k = 0;
     for (int i = 0; i < p->nworkers; i++) {
         if (&p->w[i] == w) return k;
@@ -468,7 +468,7 @@ static int tas_movie_index(const MsPlay *p, const MsWorker *w) {
 }
 
 // called once per movie frame; costs two loads while the window is off
-static void watch_sample(MsPlay *p, MsWorker *w, MsMach *m) {
+static void watch_sample(DpPlay *p, DpWorker *w, DpMach *m) {
     int fps = __atomic_load_n(&p->watch_fps, __ATOMIC_RELAXED);
     if (!fps || !w->tas.masks) return;
     int mine = tas_movie_index(p, w);
@@ -478,9 +478,9 @@ static void watch_sample(MsPlay *p, MsWorker *w, MsMach *m) {
     }
     if (w->watch_armed) { // the frame just finished was rendered in full
         pthread_mutex_lock(&p->watch_mtx);
-        for (int y = 0; y < MS_GB_SCREEN_H; y++)
-            for (int x = 0; x < MS_GB_SCREEN_W; x++)
-                p->watch_buf[y * MS_GB_SCREEN_W + x] = m->screen[y][x];
+        for (int y = 0; y < DP_GB_SCREEN_H; y++)
+            for (int x = 0; x < DP_GB_SCREEN_W; x++)
+                p->watch_buf[y * DP_GB_SCREEN_W + x] = m->screen[y][x];
         p->watch_have = 1;
         p->watch_buf_movie = mine;
         p->watch_frame = w->frames_done;
@@ -500,11 +500,11 @@ static void watch_sample(MsPlay *p, MsWorker *w, MsMach *m) {
 }
 
 // --- the vblank hook (one frame) ---------------------------------------------------
-static void worker_vblank(MsMach *m) {
-    MsWorker *w = ((MsExplorer *)m->owner)->session_ctx;
-    MsPlay *p = w->p;
+static void worker_vblank(DpMach *m) {
+    DpWorker *w = ((DpExplorer *)m->owner)->session_ctx;
+    DpPlay *p = w->p;
     if (p->quit) {
-        ms_mach_cut(m, MS_CUT_QUIT);
+        dp_mach_cut(m, DP_CUT_QUIT);
         return;
     }
     // input for this frame
@@ -546,9 +546,9 @@ static void worker_vblank(MsMach *m) {
         observe(w, cred);
         w->credit_prev = cred;
     }
-    ms_copy_flush_path(w->ex, &w->ex->ct);
+    dp_copy_flush_path(w->ex, &w->ex->ct);
     if (w->mode == IN_HUMAN) {
-        ms_mach_cut(m, MS_CUT_SEGEND); // one frame per call, the human decides
+        dp_mach_cut(m, DP_CUT_SEGEND); // one frame per call, the human decides
         return;
     }
     if (!w->seg_left) {
@@ -557,32 +557,32 @@ static void worker_vblank(MsMach *m) {
             // mid-movie (the frame index and the machine state must stay in
             // step), no segment budget.  seg_left sits at 0 until the movie
             // ends.
-            if (w->epoch_done >= w->epoch_target) ms_mach_cut(m, MS_CUT_SEGEND);
+            if (w->epoch_done >= w->epoch_target) dp_mach_cut(m, DP_CUT_SEGEND);
             return;
         }
         segment_end(w); // loads the next checkpoint, play continues
         return;
     }
-    if (w->epoch_done >= w->epoch_target) ms_mach_cut(m, MS_CUT_SEGEND);
+    if (w->epoch_done >= w->epoch_target) dp_mach_cut(m, DP_CUT_SEGEND);
 }
 
 // one scheduler slice: frames of play across as many segments as needed.
 // The halt watchdog (m0boy.c) cuts dead halts; the segment continues from a
 // fresh checkpoint.
-static void run_epoch(MsWorker *w, uint32_t frames) {
-    MsPlay *p = w->p;
+static void run_epoch(DpWorker *w, uint32_t frames) {
+    DpPlay *p = w->p;
     w->epoch_target = frames;
     w->epoch_done = 0;
     uint64_t tas_prev_frames = w->frames_done;
     int tas_same = 0;
     while (!p->quit && w->epoch_done < frames) {
-        ms_mach_attach(w->mach, w->ex, w->ex->mach->on_step, w->ex->mach->on_read,
+        dp_mach_attach(w->mach, w->ex, w->ex->mach->on_step, w->ex->mach->on_read,
                        w->ex->mach->on_write, worker_vblank);
-        int cut = ms_mach_run(w->mach);
+        int cut = dp_mach_run(w->mach);
         // the fork explorer's cuts (pad slide, halt) mean this play state is
         // stuck: rotate to the next checkpoint like a dead halt would.  A TAS
         // mid-replay cannot rewind its movie: it falls through to random play.
-        if (cut != MS_CUT_QUIT && cut != MS_CUT_SEGEND) {
+        if (cut != DP_CUT_QUIT && cut != DP_CUT_SEGEND) {
             if (w->mode == IN_HUMAN) return; // the human sees the freeze
             if (w->mode == IN_TAS) {
                 // TAS priority: the movie is never abandoned for a cut.  The
@@ -609,8 +609,8 @@ static void run_epoch(MsWorker *w, uint32_t frames) {
 
 // --- worker thread ---------------------------------------------------------------------
 static void *worker_main(void *arg) {
-    MsWorker *w = arg;
-    MsPlay *p = w->p;
+    DpWorker *w = arg;
+    DpPlay *p = w->p;
     for (;;) {
         pthread_mutex_lock(&p->bar_mtx);
         while (p->epoch_no == w->my_epoch && !p->quit)
@@ -648,8 +648,8 @@ static void *worker_main(void *arg) {
 // --- persistence -------------------------------------------------------------------------
 // pool file v2: every checkpoint is a full state image (variant-shaped), so
 // the record is slot0/chosen/frame/credit + the image.  v1 pool files (raw
-// MsMachine dumps) are not readable anymore.
-int ms_play_save(const MsPlay *p) {
+// DpMachine dumps) are not readable anymore.
+int dp_play_save(const DpPlay *p) {
     if (!p->cfg.state_dir) return 0;
     char path[512];
     snprintf(path, sizeof path, "%s/pool.bin", p->cfg.state_dir);
@@ -665,7 +665,7 @@ int ms_play_save(const MsPlay *p) {
     uint32_t n = (uint32_t)p->pool.n;
     fwrite(&n, sizeof n, 1, f);
     for (int i = 0; i < p->pool.n; i++) {
-        const MsCheckpoint *c = p->pool.slot[i];
+        const DpCheckpoint *c = p->pool.slot[i];
         fwrite(&c->slot0, 1, 1, f);
         fwrite(&c->chosen, sizeof c->chosen, 1, f);
         fwrite(&c->frame, sizeof c->frame, 1, f);
@@ -680,8 +680,8 @@ int ms_play_save(const MsPlay *p) {
     return 1;
 }
 
-static MsCheckpoint *ckpt_read(FILE *f, uint32_t sb) {
-    MsCheckpoint *c = calloc(1, sizeof *c);
+static DpCheckpoint *ckpt_read(FILE *f, uint32_t sb) {
+    DpCheckpoint *c = calloc(1, sizeof *c);
     if (fread(&c->slot0, 1, 1, f) != 1 || fread(&c->chosen, sizeof c->chosen, 1, f) != 1 ||
         fread(&c->frame, sizeof c->frame, 1, f) != 1 ||
         fread(&c->credit, sizeof c->credit, 1, f) != 1) {
@@ -697,7 +697,7 @@ static MsCheckpoint *ckpt_read(FILE *f, uint32_t sb) {
     return c;
 }
 
-static int pool_load(MsPlay *p) {
+static int pool_load(DpPlay *p) {
     if (!p->cfg.state_dir) return 0;
     char path[512];
     snprintf(path, sizeof path, "%s/pool.bin", p->cfg.state_dir);
@@ -719,7 +719,7 @@ static int pool_load(MsPlay *p) {
     p->pool.n = 0;
     int ok = 1;
     for (uint32_t i = 0; i < n && ok; i++) {
-        MsCheckpoint *c = ckpt_read(f, sb);
+        DpCheckpoint *c = ckpt_read(f, sb);
         if (!c) ok = 0;
         else p->pool.slot[p->pool.n++] = c;
     }
@@ -738,25 +738,25 @@ static int pool_load(MsPlay *p) {
 // --- lifecycle -----------------------------------------------------------------------------
 // builds the recording context (explorer + machine instance) of one lane;
 // used for the thread workers and for the human takeover lane
-static void worker_setup(MsPlay *p, MsWorker *w, int instance) {
+static void worker_setup(DpPlay *p, DpWorker *w, int instance) {
     w->p = p;
-    w->mach = ms_mach_open(p->fork_mach->vi, instance);
-    ms_mach_set_rom(w->mach, p->cart->rom, p->cart->rom_size);
+    w->mach = dp_mach_open(p->fork_mach->vi, instance);
+    dp_mach_set_rom(w->mach, p->cart->rom, p->cart->rom_size);
     w->mach->api->skip_render[0] = 1;
-    MsConfig ecfg = p->fork->cfg;
+    DpConfig ecfg = p->fork->cfg;
     ecfg.queue_cap = 1; // session explorers never queue
-    w->ex = ms_explorer_new(&ecfg, p->res, w->mach);
+    w->ex = dp_explorer_new(&ecfg, p->res, w->mach);
     w->ex->session = 1;
     w->ex->session_ctx = w;
-    ms_mach_load(w->mach, ms_explorer_seed_base(p->fork)); // power-on state
+    dp_mach_load(w->mach, dp_explorer_seed_base(p->fork)); // power-on state
     worker_reset_run_state(w);
 }
 
-MsPlay *ms_play_new(const MsSessionCfg *cfg, MsResults *res, MsExplorer *fork_ex) {
-    MsPlay *p = calloc(1, sizeof *p);
+DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex) {
+    DpPlay *p = calloc(1, sizeof *p);
     if (!p) return NULL;
     p->cfg = *cfg;
-    if (p->cfg.pool_cap > MS_MAX_POOL) p->cfg.pool_cap = MS_MAX_POOL;
+    if (p->cfg.pool_cap > DP_MAX_POOL) p->cfg.pool_cap = DP_MAX_POOL;
     p->res = res;
     p->fork = fork_ex;
     p->fork_mach = fork_ex->mach;
@@ -768,34 +768,34 @@ MsPlay *ms_play_new(const MsSessionCfg *cfg, MsResults *res, MsExplorer *fork_ex
     pthread_mutex_init(&p->inb_mtx, NULL);
     pthread_mutex_init(&p->preview_mtx, NULL);
     pthread_mutex_init(&p->watch_mtx, NULL);
-    p->inb = calloc(MS_INBOX_CAP, sizeof(MsInboxEnt));
+    p->inb = calloc(DP_INBOX_CAP, sizeof(DpInboxEnt));
     p->pool.cap = p->cfg.pool_cap;
 
     // slot 0: power-on state image
     {
-        MsCheckpoint *c = calloc(1, sizeof *c);
+        DpCheckpoint *c = calloc(1, sizeof *c);
         c->img = malloc(fork_ex->sb);
-        memcpy(c->img, ms_explorer_seed_base(fork_ex), fork_ex->sb);
+        memcpy(c->img, dp_explorer_seed_base(fork_ex), fork_ex->sb);
         c->sb = fork_ex->sb;
         c->slot0 = 1;
         p->pool.slot[p->pool.n++] = c;
     }
 
     if (p->cfg.resume && pool_load(p))
-        fprintf(stderr, "memscan: resumed %d checkpoints (epoch %u, %llu frames)\n", p->pool.n, p->epoch,
+        fprintf(stderr, "deepeel: resumed %d checkpoints (epoch %u, %llu frames)\n", p->pool.n, p->epoch,
                 (unsigned long long)p->total_frames);
     else if (p->cfg.resume)
-        fprintf(stderr, "memscan: no usable pool file, starting fresh\n");
+        fprintf(stderr, "deepeel: no usable pool file, starting fresh\n");
 
     // preview instance: renders checkpoints for the snapshot PNGs
-    p->preview = ms_mach_open(fork_ex->mach->vi, MS_GBL_MACHINES - 1);
-    ms_mach_set_rom(p->preview, p->cart->rom, p->cart->rom_size);
+    p->preview = dp_mach_open(fork_ex->mach->vi, DP_GBL_MACHINES - 1);
+    dp_mach_set_rom(p->preview, p->cart->rom, p->cart->rom_size);
     p->preview->render = 1;
 
     // workers: 0 attract, then one per replay script, the rest random
-    int maxw = MS_GBL_MACHINES - 2; // instance 0 = fork, last = preview
+    int maxw = DP_GBL_MACHINES - 2; // instance 0 = fork, last = preview
     if (p->cfg.sessions > maxw) {
-        fprintf(stderr, "memscan: %d sessions requested, %d machine instances available: clamping\n",
+        fprintf(stderr, "deepeel: %d sessions requested, %d machine instances available: clamping\n",
                 p->cfg.sessions, maxw);
         p->cfg.sessions = maxw;
     }
@@ -804,7 +804,7 @@ MsPlay *ms_play_new(const MsSessionCfg *cfg, MsResults *res, MsExplorer *fork_ex
     p->nworkers = p->cfg.sessions;
     p->workers_done = p->nworkers; // the first poll starts epoch 1
     for (int i = 0; i < p->nworkers; i++) {
-        MsWorker *w = &p->w[i];
+        DpWorker *w = &p->w[i];
         w->p = p;
         w->id = i;
         w->mode = IN_RNG;
@@ -812,19 +812,19 @@ MsPlay *ms_play_new(const MsSessionCfg *cfg, MsResults *res, MsExplorer *fork_ex
         else if (i - 1 < p->cfg.inputs_n && p->cfg.inputs[i - 1]) {
             w->mode = IN_SCRIPT;
             if (!script_load(p->cfg.inputs[i - 1], &w->script, &w->script_n)) {
-                fprintf(stderr, "memscan: cannot read input script %s\n", p->cfg.inputs[i - 1]);
+                fprintf(stderr, "deepeel: cannot read input script %s\n", p->cfg.inputs[i - 1]);
                 w->mode = IN_RNG;
             }
         } else if (i - 1 - p->cfg.inputs_n < p->cfg.tas_n && p->cfg.tas[i - 1 - p->cfg.inputs_n]) {
             char terr[256];
-            if (ms_tas_load(p->cfg.tas[i - 1 - p->cfg.inputs_n], &w->tas, terr, sizeof terr)) {
+            if (dp_tas_load(p->cfg.tas[i - 1 - p->cfg.inputs_n], &w->tas, terr, sizeof terr)) {
                 w->mode = IN_TAS;
-                fprintf(stderr, "memscan: TAS %s: %u frames%s\n", w->tas.source, w->tas.frames,
+                fprintf(stderr, "deepeel: TAS %s: %u frames%s\n", w->tas.source, w->tas.frames,
                         w->tas.anchored
                             ? " (savestate-anchored: replayed from power-on, best effort)"
                             : "");
             } else {
-                fprintf(stderr, "memscan: TAS %s: %s\n", p->cfg.tas[i - 1 - p->cfg.inputs_n], terr);
+                fprintf(stderr, "deepeel: TAS %s: %s\n", p->cfg.tas[i - 1 - p->cfg.inputs_n], terr);
                 w->mode = IN_RNG;
             }
         }
@@ -845,25 +845,25 @@ MsPlay *ms_play_new(const MsSessionCfg *cfg, MsResults *res, MsExplorer *fork_ex
     if (p->cfg.state_dir && *p->cfg.state_dir)
         snprintf(p->snap_dir, sizeof p->snap_dir, "%s/snapshots", p->cfg.state_dir);
     else
-        snprintf(p->snap_dir, sizeof p->snap_dir, "memscan-snaps");
+        snprintf(p->snap_dir, sizeof p->snap_dir, "deepeel-snaps");
     mkdir(p->snap_dir, 0755);
     return p;
 }
 
-void ms_play_free(MsPlay *p) {
+void dp_play_free(DpPlay *p) {
     if (!p) return;
-    ms_play_finish(p); // stop and join the workers, whatever the caller did
+    dp_play_finish(p); // stop and join the workers, whatever the caller did
     for (int i = 0; i < p->nworkers; i++) {
-        MsWorker *w = &p->w[i];
+        DpWorker *w = &p->w[i];
         if (w->started) pthread_join(w->th, NULL);
-        ms_explorer_free(w->ex);
-        ms_mach_close(w->mach);
+        dp_explorer_free(w->ex);
+        dp_mach_close(w->mach);
         free(w->script);
-        ms_tas_free(&w->tas);
+        dp_tas_free(&w->tas);
         free(w->pending.img);
     }
     if (p->human_on) {
-        ms_explorer_free(p->human.ex);
+        dp_explorer_free(p->human.ex);
         free(p->human.pending.img);
         p->human_on = 0;
     }
@@ -871,7 +871,7 @@ void ms_play_free(MsPlay *p) {
     for (int i = 0; i < p->pool.n; i++) ckpt_free(p->pool.slot[i]);
     for (int i = 0; i < p->inb_n; i++) free(p->inb[i].img);
     free(p->inb);
-    ms_mach_close(p->preview);
+    dp_mach_close(p->preview);
     p->res->mt = 0;
     pthread_mutex_destroy(&p->bar_mtx);
     pthread_cond_destroy(&p->cv);
@@ -883,7 +883,7 @@ void ms_play_free(MsPlay *p) {
 }
 
 // --- scheduler ------------------------------------------------------------------------------
-static void drain_inbox(MsPlay *p) {
+static void drain_inbox(DpPlay *p) {
     pthread_mutex_lock(&p->inb_mtx);
     int n = p->inb_n;
     p->inb_n = 0;
@@ -891,7 +891,7 @@ static void drain_inbox(MsPlay *p) {
     for (int i = 0; i < n; i++) {
         // the image is the state: the fork explorer replays it as deposited
         // (cartridge RAM included), no master-copy dance needed
-        ms_explorer_seed(p->fork, p->inb[i].img, 3 /* MS_SEED_POINTER: real play state */, 0);
+        dp_explorer_seed(p->fork, p->inb[i].img, 3 /* DP_SEED_POINTER: real play state */, 0);
     }
 }
 
@@ -900,11 +900,11 @@ static void drain_inbox(MsPlay *p) {
 // the fork explorer's queue, gives the fork explorer a slice, re-seeds the
 // stagnant sessions (their next segment_end picks the best checkpoint) and
 // checks the stop conditions.
-uint64_t ms_play_tas_ckpts(const MsPlay *p) { return p->tas_ckpts; }
-uint64_t ms_play_tas_cuts(const MsPlay *p) { return p->tas_cuts; }
-uint64_t ms_play_tas_cut_stuck(const MsPlay *p) { return p->tas_cut_stuck; }
+uint64_t dp_play_tas_ckpts(const DpPlay *p) { return p->tas_ckpts; }
+uint64_t dp_play_tas_cuts(const DpPlay *p) { return p->tas_cuts; }
+uint64_t dp_play_tas_cut_stuck(const DpPlay *p) { return p->tas_cut_stuck; }
 
-int ms_play_poll(MsPlay *p) {
+int dp_play_poll(DpPlay *p) {
     p->epoch_ran = 0;
     pthread_mutex_lock(&p->bar_mtx);
     if (p->quit || p->workers_done < p->nworkers) {
@@ -916,7 +916,7 @@ int ms_play_poll(MsPlay *p) {
     p->epoch++;
     uint64_t glob_new = 0, frames = 0;
     for (int i = 0; i < p->nworkers; i++) {
-        MsWorker *w = &p->w[i];
+        DpWorker *w = &p->w[i];
         w->credit_epoch = w->credit_total - w->credit_base;
         w->credit_base = w->credit_total;
         if (w->credit_epoch) {
@@ -929,7 +929,7 @@ int ms_play_poll(MsPlay *p) {
                 snprintf(src, sizeof src, "tas:%s", base);
             else
                 snprintf(src, sizeof src, "%s s%d", (unsigned)w->mode < 6 ? mn[w->mode] : "?", w->id);
-            ms_disc_add(p->res, src, w->credit_epoch);
+            dp_disc_add(p->res, src, w->credit_epoch);
         }
         glob_new += w->credit_epoch;
         frames += w->lane_frame - w->seen_frame;
@@ -946,14 +946,14 @@ int ms_play_poll(MsPlay *p) {
     }
     p->total_frames += frames;
     if (frames) p->stagnation = glob_new ? 0 : p->stagnation + frames;
-    p->unexplained = p->cfg.until_static ? ms_results_unexplained(p->res) : 0;
+    p->unexplained = p->cfg.until_static ? dp_results_unexplained(p->res) : 0;
 
     // sessions -> fork explorer: real play states become exploration seeds
     drain_inbox(p);
     // the fork advances while the sessions wait; bounded by paths, not time,
     // so a fixed-seed run is reproducible
     for (int i = 0; i < p->cfg.fork_paths_per_epoch && p->fork->q_len && !p->fork->stop; i++)
-        ms_explore_step(p->fork);
+        dp_explore_step(p->fork);
 
     // stop conditions.  TAS priority: a movie covers a whole playthrough, it
     // outruns every frame budget — max_frames and stagnation wait until every
@@ -969,12 +969,12 @@ int ms_play_poll(MsPlay *p) {
     if (reason >= 0) {
         p->quit = 1;
         p->stop_reason = reason;
-        ms_play_save(p);
+        dp_play_save(p);
         pthread_cond_broadcast(&p->cv);
         pthread_mutex_unlock(&p->bar_mtx);
         return 1;
     }
-    if (p->cfg.save_epochs && p->epoch % (uint32_t)p->cfg.save_epochs == 0) ms_play_save(p);
+    if (p->cfg.save_epochs && p->epoch % (uint32_t)p->cfg.save_epochs == 0) dp_play_save(p);
     p->workers_done = 0;
     p->epoch_no++;
     pthread_cond_broadcast(&p->cv);
@@ -982,7 +982,7 @@ int ms_play_poll(MsPlay *p) {
     return 1;
 }
 
-void ms_play_finish(MsPlay *p) {
+void dp_play_finish(DpPlay *p) {
     if (!p || p->workers_done < 0) return;
     pthread_mutex_lock(&p->bar_mtx);
     p->quit = 1;
@@ -994,37 +994,37 @@ void ms_play_finish(MsPlay *p) {
     p->workers_done = -1; // joined
 }
 
-int ms_play_run(MsPlay *p) {
+int dp_play_run(DpPlay *p) {
     // headless driver: poll until a stop condition, then let the workers exit
     while (!p->quit) {
-        if (!ms_play_poll(p)) usleep(500);
+        if (!dp_play_poll(p)) usleep(500);
     }
-    ms_play_finish(p);
+    dp_play_finish(p);
     return p->stop_reason;
 }
 
 // --- snapshot PNGs (screen + full machine in one file) ---------------------------------
 // payload = the exact record the pool file stores per checkpoint
-static void payload_ckpt(MsBuf *b, const MsCheckpoint *c) {
-    ms_buf_push(b, &c->slot0, 1);
-    ms_buf_push(b, &c->chosen, sizeof c->chosen);
-    ms_buf_push(b, &c->frame, sizeof c->frame);
-    ms_buf_push(b, &c->credit, sizeof c->credit);
-    ms_buf_push(b, &c->sb, sizeof c->sb);
-    ms_buf_push(b, c->img, c->sb);
+static void payload_ckpt(DpBuf *b, const DpCheckpoint *c) {
+    dp_buf_push(b, &c->slot0, 1);
+    dp_buf_push(b, &c->chosen, sizeof c->chosen);
+    dp_buf_push(b, &c->frame, sizeof c->frame);
+    dp_buf_push(b, &c->credit, sizeof c->credit);
+    dp_buf_push(b, &c->sb, sizeof c->sb);
+    dp_buf_push(b, c->img, c->sb);
 }
 
-static MsCheckpoint *ckpt_from_payload(const uint8_t *d, size_t n) {
+static DpCheckpoint *ckpt_from_payload(const uint8_t *d, size_t n) {
     size_t need = 1 + sizeof(uint32_t) * 3 + sizeof(uint64_t);
     if (n < need) return NULL;
-    MsCheckpoint *c = calloc(1, sizeof *c);
+    DpCheckpoint *c = calloc(1, sizeof *c);
     size_t o = 0;
     memcpy(&c->slot0, d + o, 1); o += 1;
     memcpy(&c->chosen, d + o, sizeof c->chosen); o += sizeof c->chosen;
     memcpy(&c->frame, d + o, sizeof c->frame); o += sizeof c->frame;
     memcpy(&c->credit, d + o, sizeof c->credit); o += sizeof c->credit;
     memcpy(&c->sb, d + o, sizeof c->sb); o += sizeof c->sb;
-    if (c->sb > MS_CRAM_PAGES * 256 + 0x20000 || n < o + c->sb) {
+    if (c->sb > DP_CRAM_PAGES * 256 + 0x20000 || n < o + c->sb) {
         free(c);
         return NULL;
     }
@@ -1035,48 +1035,48 @@ static MsCheckpoint *ckpt_from_payload(const uint8_t *d, size_t n) {
 
 // one frame of the preview instance: the checkpoint's state rendered as the
 // player would see it
-static void preview_vblank(MsMach *m) { ms_mach_cut(m, MS_CUT_SEGEND); }
+static void preview_vblank(DpMach *m) { dp_mach_cut(m, DP_CUT_SEGEND); }
 
-static void preview_frame(MsPlay *p, const uint8_t *img, uint8_t *gray) {
+static void preview_frame(DpPlay *p, const uint8_t *img, uint8_t *gray) {
     pthread_mutex_lock(&p->preview_mtx);
-    memset(gray, 3, MS_GB_SCREEN_W * MS_GB_SCREEN_H); // LCD off: dark
-    ms_mach_attach(p->preview, NULL, NULL, NULL, NULL, preview_vblank);
-    ms_mach_load(p->preview, img);
+    memset(gray, 3, DP_GB_SCREEN_W * DP_GB_SCREEN_H); // LCD off: dark
+    dp_mach_attach(p->preview, NULL, NULL, NULL, NULL, preview_vblank);
+    dp_mach_load(p->preview, img);
     p->preview->render = 1;
     p->preview->lines = 0;
     memset(p->preview->screen, 3, sizeof p->preview->screen);
-    ms_mach_run(p->preview); // exactly one frame, cut at its vblank
+    dp_mach_run(p->preview); // exactly one frame, cut at its vblank
     p->preview->render = 0;
-    for (int y = 0; y < MS_GB_SCREEN_H; y++)
-        for (int x = 0; x < MS_GB_SCREEN_W; x++)
-            gray[y * MS_GB_SCREEN_W + x] = p->preview->screen[y][x];
+    for (int y = 0; y < DP_GB_SCREEN_H; y++)
+        for (int x = 0; x < DP_GB_SCREEN_W; x++)
+            gray[y * DP_GB_SCREEN_W + x] = p->preview->screen[y][x];
     pthread_mutex_unlock(&p->preview_mtx);
 }
 
 // writes one snapshot PNG: the frame the player would see plus the machine
-static int save_png_of(MsPlay *p, const MsCheckpoint *c) {
-    static uint8_t gray[MS_GB_SCREEN_W * MS_GB_SCREEN_H];
-    static uint8_t rgb[MS_GB_SCREEN_W * MS_GB_SCREEN_H * 3];
+static int save_png_of(DpPlay *p, const DpCheckpoint *c) {
+    static uint8_t gray[DP_GB_SCREEN_W * DP_GB_SCREEN_H];
+    static uint8_t rgb[DP_GB_SCREEN_W * DP_GB_SCREEN_H * 3];
     preview_frame(p, c->img, gray);
-    for (int i = 0; i < MS_GB_SCREEN_W * MS_GB_SCREEN_H; i++) {
+    for (int i = 0; i < DP_GB_SCREEN_W * DP_GB_SCREEN_H; i++) {
         uint8_t v = (uint8_t)(255 - gray[i] * 85);
         rgb[i * 3] = rgb[i * 3 + 1] = rgb[i * 3 + 2] = v;
     }
-    MsBuf pay;
-    ms_buf_init(&pay);
+    DpBuf pay;
+    dp_buf_init(&pay);
     payload_ckpt(&pay, c);
     char path[600];
     snprintf(path, sizeof path, "%s/snap-%03u-cred%llu.png", p->snap_dir, p->snap_seq++,
              (unsigned long long)c->credit);
-    int ok = ms_png_save(path, MS_GB_SCREEN_W, MS_GB_SCREEN_H, rgb, pay.p, pay.len);
-    ms_buf_free(&pay);
+    int ok = dp_png_save(path, DP_GB_SCREEN_W, DP_GB_SCREEN_H, rgb, pay.p, pay.len);
+    dp_buf_free(&pay);
     if (ok) snprintf(p->last_snap, sizeof p->last_snap, "%s", path);
-    if (ok && p->cfg.verbose) fprintf(stderr, "memscan: snapshot %s\n", path);
+    if (ok && p->cfg.verbose) fprintf(stderr, "deepeel: snapshot %s\n", path);
     return ok;
 }
 
 // --- human takeover -----------------------------------------------------------------------
-void ms_play_human_begin(MsPlay *p, int slot) {
+void dp_play_human_begin(DpPlay *p, int slot) {
     if (!p->human_on) {
         worker_setup(p, &p->human, 0); // borrows the fork explorer's instance
         p->human.mode = IN_HUMAN;
@@ -1084,10 +1084,10 @@ void ms_play_human_begin(MsPlay *p, int slot) {
         p->human.my_epoch = ~0u; // never at the worker barrier
         p->human.credit_base = 0;
         p->human.seen_frame = 0;
-        p->human_screen = malloc(MS_GB_SCREEN_W * MS_GB_SCREEN_H);
+        p->human_screen = malloc(DP_GB_SCREEN_W * DP_GB_SCREEN_H);
         p->human_on = 1;
     }
-    const MsCheckpoint *pick = NULL;
+    const DpCheckpoint *pick = NULL;
     pthread_mutex_lock(&p->pool.mtx);
     if (slot >= 0 && slot < p->pool.n) {
         pick = p->pool.slot[slot];
@@ -1095,7 +1095,7 @@ void ms_play_human_begin(MsPlay *p, int slot) {
         for (int i = 0; i < p->pool.n; i++)
             if (!pick || p->pool.slot[i]->credit > pick->credit) pick = p->pool.slot[i];
     }
-    if (pick) ms_mach_load(p->human.mach, pick->img);
+    if (pick) dp_mach_load(p->human.mach, pick->img);
     pthread_mutex_unlock(&p->pool.mtx);
     // the human sees the game: render while the lane plays
     p->human.mach->render = 1;
@@ -1106,14 +1106,14 @@ void ms_play_human_begin(MsPlay *p, int slot) {
     p->human_png_credit = p->human.credit_prev;
 }
 
-void ms_play_human_frame(MsPlay *p, uint8_t buttons) {
+void dp_play_human_frame(DpPlay *p, uint8_t buttons) {
     if (!p->human_on || p->quit) return;
     p->human.human_buttons = buttons;
     run_epoch(&p->human, 1);
-    if (p->human.mach->lines >= MS_GB_SCREEN_H) {
-        for (int y = 0; y < MS_GB_SCREEN_H; y++)
-            for (int x = 0; x < MS_GB_SCREEN_W; x++)
-                p->human_screen[y * MS_GB_SCREEN_W + x] = p->human.mach->screen[y][x];
+    if (p->human.mach->lines >= DP_GB_SCREEN_H) {
+        for (int y = 0; y < DP_GB_SCREEN_H; y++)
+            for (int x = 0; x < DP_GB_SCREEN_W; x++)
+                p->human_screen[y * DP_GB_SCREEN_W + x] = p->human.mach->screen[y][x];
         p->human.mach->lines = 0;
     }
     uint64_t cred = worker_credit(&p->human);
@@ -1129,15 +1129,15 @@ void ms_play_human_frame(MsPlay *p, uint8_t buttons) {
     }
 }
 
-const uint8_t *ms_play_human_screen(MsPlay *p) {
+const uint8_t *dp_play_human_screen(DpPlay *p) {
     return p->human_on ? p->human_screen : NULL;
 }
 
-int ms_play_human_active(const MsPlay *p) { return p->human_on; }
+int dp_play_human_active(const DpPlay *p) { return p->human_on; }
 
-int ms_play_human_snapshot(MsPlay *p) {
+int dp_play_human_snapshot(DpPlay *p) {
     if (!p->human_on) return 0;
-    MsCheckpoint *c = calloc(1, sizeof *c);
+    DpCheckpoint *c = calloc(1, sizeof *c);
     c->img = worker_image(&p->human);
     if (!c->img) {
         free(c);
@@ -1150,48 +1150,48 @@ int ms_play_human_snapshot(MsPlay *p) {
     return save_png_of(p, p->pool.slot[slot]);
 }
 
-int ms_play_load_png(MsPlay *p, const char *path) {
+int dp_play_load_png(DpPlay *p, const char *path) {
     int w, h;
     uint8_t *rgb, *pay;
     size_t pay_n;
-    if (!ms_png_load(path, &w, &h, &rgb, &pay, &pay_n)) {
-        fprintf(stderr, "memscan: cannot read PNG %s\n", path);
+    if (!dp_png_load(path, &w, &h, &rgb, &pay, &pay_n)) {
+        fprintf(stderr, "deepeel: cannot read PNG %s\n", path);
         return -1;
     }
     free(rgb);
     if (!pay) {
-        fprintf(stderr, "memscan: %s has no memscan_snapshot payload\n", path);
+        fprintf(stderr, "deepeel: %s has no deepeel_snapshot payload\n", path);
         return -1;
     }
-    MsCheckpoint *c = ckpt_from_payload(pay, pay_n);
+    DpCheckpoint *c = ckpt_from_payload(pay, pay_n);
     free(pay);
     if (!c) {
-        fprintf(stderr, "memscan: %s payload unreadable\n", path);
+        fprintf(stderr, "deepeel: %s payload unreadable\n", path);
         return -1;
     }
     if (c->sb != p->fork->sb) {
-        fprintf(stderr, "memscan: %s state size does not match this run\n", path);
+        fprintf(stderr, "deepeel: %s state size does not match this run\n", path);
         ckpt_free(c);
         return -1;
     }
     return pool_insert(p, c);
 }
 
-int ms_play_pool_count(MsPlay *p) { return p->pool.n; }
+int dp_play_pool_count(DpPlay *p) { return p->pool.n; }
 
-uint16_t ms_play_slot_pc(MsPlay *p, int slot) {
+uint16_t dp_play_slot_pc(DpPlay *p, int slot) {
     if (slot < 0 || slot >= p->pool.n) return 0;
     return image_pc(p->pool.slot[slot]->img);
 }
 
-const char *ms_play_last_snapshot(const MsPlay *p) { return p->last_snap[0] ? p->last_snap : NULL; }
+const char *dp_play_last_snapshot(const DpPlay *p) { return p->last_snap[0] ? p->last_snap : NULL; }
 
-int ms_play_done(const MsPlay *p) { return p->quit; }
-uint64_t ms_play_frames(const MsPlay *p) { return p->total_frames; }
+int dp_play_done(const DpPlay *p) { return p->quit; }
+uint64_t dp_play_frames(const DpPlay *p) { return p->total_frames; }
 
 // the checkpoint an export offers: the most productive discovery, the power-on
 // slot only when the pool holds nothing else
-int ms_play_best_slot(const MsPlay *p) {
+int dp_play_best_slot(const DpPlay *p) {
     if (p->pool.n <= 0) return -1;
     int best = -1;
     pthread_mutex_lock(&p->pool.mtx);
@@ -1204,21 +1204,21 @@ int ms_play_best_slot(const MsPlay *p) {
     return best;
 }
 
-const uint8_t *ms_play_slot_img(const MsPlay *p, int slot) {
+const uint8_t *dp_play_slot_img(const DpPlay *p, int slot) {
     if (slot < 0 || slot >= p->pool.n) return NULL;
     return p->pool.slot[slot]->img;
 }
 
-uint32_t ms_play_slot_frame(const MsPlay *p, int slot) {
+uint32_t dp_play_slot_frame(const DpPlay *p, int slot) {
     if (slot < 0 || slot >= p->pool.n) return 0;
     return p->pool.slot[slot]->frame;
 }
 
-int ms_play_lanes(MsPlay *p, MsSessionLane *out, int max) {
+int dp_play_lanes(DpPlay *p, DpSessionLane *out, int max) {
     pthread_mutex_lock(&p->bar_mtx);
     int n = p->nworkers < max ? p->nworkers : max;
     for (int i = 0; i < n; i++) {
-        const MsWorker *w = &p->w[i];
+        const DpWorker *w = &p->w[i];
         out[i].id = i;
         out[i].mode = (int)w->mode; // 0 rng, 1 attract, 2 script, 3 tas, 4 fixed
         out[i].frame = w->lane_frame;
@@ -1234,7 +1234,7 @@ int ms_play_lanes(MsPlay *p, MsSessionLane *out, int max) {
     }
     pthread_mutex_unlock(&p->bar_mtx);
     if (p->human_on && n < max) { // the human lane, read directly (same thread)
-        const MsWorker *w = &p->human;
+        const DpWorker *w = &p->human;
         out[n].id = n;
         out[n].mode = (int)w->mode;
         out[n].frame = w->frames_done;
@@ -1255,7 +1255,7 @@ int ms_play_lanes(MsPlay *p, MsSessionLane *out, int max) {
 }
 
 // --- watch window feed ---------------------------------------------------------------
-int ms_play_watch_enable(MsPlay *p, int fps) {
+int dp_play_watch_enable(DpPlay *p, int fps) {
     if (!p) return 0;
     int n = 0;
     for (int i = 0; i < p->nworkers; i++) if (p->w[i].tas.masks) n++;
@@ -1266,17 +1266,17 @@ int ms_play_watch_enable(MsPlay *p, int fps) {
     return n;
 }
 
-void ms_play_watch_disable(MsPlay *p) {
+void dp_play_watch_disable(DpPlay *p) {
     if (p) __atomic_store_n(&p->watch_fps, 0, __ATOMIC_RELAXED);
 }
 
-void ms_play_watch_next(MsPlay *p, int n) {
+void dp_play_watch_next(DpPlay *p, int n) {
     if (!p || n < 1) return;
     __atomic_store_n(&p->watch_sel, (__atomic_load_n(&p->watch_sel, __ATOMIC_RELAXED) + 1) % n,
                      __ATOMIC_RELAXED);
 }
 
-int ms_play_watch_read(MsPlay *p, uint8_t *shades, MsWatchInfo *info) {
+int dp_play_watch_read(DpPlay *p, uint8_t *shades, DpWatchInfo *info) {
     if (!p) return 0;
     pthread_mutex_lock(&p->watch_mtx);
     int ok = p->watch_have;

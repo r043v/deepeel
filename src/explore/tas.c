@@ -1,6 +1,6 @@
 /* tas.c: TAS movie loading.  See tas.h.  Every format reduces to one mask
  * byte per frame; button names and bit orders of each format are mapped to
- * the memscan joypad layout at load time. */
+ * the deepeel joypad layout at load time. */
 #define _GNU_SOURCE
 #include "tas.h"
 #include "../core/zip.h"
@@ -10,10 +10,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MS_TAS_MAX_FRAMES (64u * 1024 * 1024) // 64 M frames: 64 MiB of masks
+#define DP_TAS_MAX_FRAMES (64u * 1024 * 1024) // 64 M frames: 64 MiB of masks
 
-static int emit(MsTas *out, uint8_t mask, char *err, size_t errsz) {
-    if (out->frames >= MS_TAS_MAX_FRAMES) {
+static int emit(DpTas *out, uint8_t mask, char *err, size_t errsz) {
+    if (out->frames >= DP_TAS_MAX_FRAMES) {
         snprintf(err, errsz, "movie too long");
         return 0;
     }
@@ -47,7 +47,7 @@ static uint8_t btn_mask(const char *n) {
 }
 
 // --- bk2 / plain input log ---------------------------------------------------
-static int log_parse(const uint8_t *d, size_t n, MsTas *out, char *err, size_t errsz) {
+static int log_parse(const uint8_t *d, size_t n, DpTas *out, char *err, size_t errsz) {
     const char *p = (const char *)d, *end = (const char *)d + n;
     uint8_t key_mask[64];
     int nkey = 0;
@@ -119,10 +119,10 @@ static int log_parse(const uint8_t *d, size_t n, MsTas *out, char *err, size_t e
 }
 
 // --- VBM ---------------------------------------------------------------------
-// VBM button bits match the memscan layout exactly
+// VBM button bits match the deepeel layout exactly
 // (A=1 B=2 Select=4 Start=8 Right=16 Left=32 Up=64 Down=128).
 
-static int vbm_parse(const uint8_t *d, size_t n, MsTas *out, char *err, size_t errsz) {
+static int vbm_parse(const uint8_t *d, size_t n, DpTas *out, char *err, size_t errsz) {
     if (n >= 0x40 && !memcmp(d, "VBM\x1a", 4)) {
         uint8_t start_flags = d[0x14];
         uint8_t ctl = d[0x15] & 0x0F;
@@ -167,22 +167,22 @@ static int vbm_parse(const uint8_t *d, size_t n, MsTas *out, char *err, size_t e
 }
 
 // --- dispatch ------------------------------------------------------------------
-static int tas_load_buf(uint8_t *d, size_t n, MsTas *out, char *err, size_t errsz, int depth);
+static int tas_load_buf(uint8_t *d, size_t n, DpTas *out, char *err, size_t errsz, int depth);
 
 // one zip layer: header entry for the savestate flag, log entry for input;
 // a zip without a log entry (a site download wrapping the .bk2) recurses on
 // its first entry
-static int tas_load_zip(uint8_t *d, size_t n, MsTas *out, char *err, size_t errsz, int depth) {
+static int tas_load_zip(uint8_t *d, size_t n, DpTas *out, char *err, size_t errsz, int depth) {
     size_t hn = 0;
-    uint8_t *hdr = ms_zip_read(d, n, "header", &hn, NULL);
+    uint8_t *hdr = dp_zip_read(d, n, "header", &hn, NULL);
     if (hdr) {
         if (strcasestr((const char *)hdr, "startsfromsavestate true")) out->anchored = 1;
         free(hdr);
     }
     size_t ln = 0;
-    uint8_t *log = ms_zip_read(d, n, "input log", &ln, NULL);
-    if (!log) log = ms_zip_read(d, n, "log", &ln, NULL);
-    if (!log) log = ms_zip_read(d, n, ".txt", &ln, NULL);
+    uint8_t *log = dp_zip_read(d, n, "input log", &ln, NULL);
+    if (!log) log = dp_zip_read(d, n, "log", &ln, NULL);
+    if (!log) log = dp_zip_read(d, n, ".txt", &ln, NULL);
     if (log) {
         int ok = tas_load_buf(log, ln, out, err, errsz, depth + 1);
         free(log);
@@ -190,7 +190,7 @@ static int tas_load_zip(uint8_t *d, size_t n, MsTas *out, char *err, size_t errs
     }
     size_t an = 0;
     char name[128];
-    uint8_t *any = ms_zip_read(d, n, NULL, &an, name);
+    uint8_t *any = dp_zip_read(d, n, NULL, &an, name);
     if (!any) {
         snprintf(err, errsz, "zip: no readable entry");
         return 0;
@@ -200,12 +200,12 @@ static int tas_load_zip(uint8_t *d, size_t n, MsTas *out, char *err, size_t errs
     return ok;
 }
 
-static int tas_load_buf(uint8_t *d, size_t n, MsTas *out, char *err, size_t errsz, int depth) {
+static int tas_load_buf(uint8_t *d, size_t n, DpTas *out, char *err, size_t errsz, int depth) {
     if (depth > 3) {
         snprintf(err, errsz, "too many nested containers");
         return 0;
     }
-    if (ms_zip_is(d, n)) return tas_load_zip(d, n, out, err, errsz, depth);
+    if (dp_zip_is(d, n)) return tas_load_zip(d, n, out, err, errsz, depth);
     if (!memcmp(d, "VBM\x1a", 4) || (n > 12 && !memcmp(d, "VBM_MOVIE", 9)))
         return vbm_parse(d, n, out, err, errsz);
     if (memchr(d, '|', n < 4096 ? n : 4096)) return log_parse(d, n, out, err, errsz);
@@ -213,7 +213,7 @@ static int tas_load_buf(uint8_t *d, size_t n, MsTas *out, char *err, size_t errs
     return 0;
 }
 
-int ms_tas_load(const char *path, MsTas *out, char *err, size_t errsz) {
+int dp_tas_load(const char *path, DpTas *out, char *err, size_t errsz) {
     memset(out, 0, sizeof *out);
     err[0] = 0;
     FILE *f = fopen(path, "rb");
@@ -240,11 +240,11 @@ int ms_tas_load(const char *path, MsTas *out, char *err, size_t errsz) {
     snprintf(out->source, sizeof out->source, "%s", path);
     int ok = tas_load_buf(d, (size_t)sz, out, err, errsz, 0);
     free(d);
-    if (!ok) ms_tas_free(out);
+    if (!ok) dp_tas_free(out);
     return ok;
 }
 
-void ms_tas_free(MsTas *t) {
+void dp_tas_free(DpTas *t) {
     if (!t) return;
     free(t->masks);
     memset(t, 0, sizeof *t);

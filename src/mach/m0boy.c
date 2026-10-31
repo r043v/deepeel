@@ -1,17 +1,17 @@
 /* m0boy machine host: context registry, hook dispatch, state images.
  * The generated instances file (cmake) owns the prefixed symbols: its
- * forwarders observe through ms_gbl_hook_* and then call the real runtime
+ * forwarders observe through dp_gbl_hook_* and then call the real runtime
  * symbol of that instance. */
 #include "m0boy.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-static MsMach *mach_at[MS_GBL_VARIANTS][MS_GBL_MACHINES];
+static DpMach *mach_at[DP_GBL_VARIANTS][DP_GBL_MACHINES];
 
 /* cartridge header 0x147 -> MBC, 0x149 -> RAM size, clamped to what the
  * variant table compiles. */
-int ms_mach_pick_variant(const uint8_t *header) {
+int dp_mach_pick_variant(const uint8_t *header) {
     static const struct { uint8_t lo, hi, mbc; } map[] = {
         {0x00, 0x00, 0}, {0x01, 0x03, 1}, {0x05, 0x06, 2},
         {0x0F, 0x13, 3}, {0x19, 0x1E, 5},
@@ -25,17 +25,17 @@ int ms_mach_pick_variant(const uint8_t *header) {
     if (mbc == 0) eram = 0;
     if (mbc == 2) eram = 0x200; /* fixed 512x4-bit */
     if (mbc == 1 && eram > 0x2000) eram = 0x2000;
-    for (int v = 0; v < MS_GBL_VARIANTS; v++)
-        if (ms_gbl_variant_mbc[v] == mbc && ms_gbl_variant_eram[v] == eram) return v;
+    for (int v = 0; v < DP_GBL_VARIANTS; v++)
+        if (dp_gbl_variant_mbc[v] == mbc && dp_gbl_variant_eram[v] == eram) return v;
     return -1;
 }
 
-MsMach *ms_mach_open(int vi, int ii) {
-    if (vi < 0 || vi >= MS_GBL_VARIANTS || ii < 0 || ii >= MS_GBL_MACHINES) return NULL;
+DpMach *dp_mach_open(int vi, int ii) {
+    if (vi < 0 || vi >= DP_GBL_VARIANTS || ii < 0 || ii >= DP_GBL_MACHINES) return NULL;
     if (mach_at[vi][ii]) return mach_at[vi][ii];
-    MsMach *m = calloc(1, sizeof *m);
+    DpMach *m = calloc(1, sizeof *m);
     if (!m) return NULL;
-    m->api = ms_gbl_inst[vi][ii];
+    m->api = dp_gbl_inst[vi][ii];
     m->vi = vi;
     m->ii = ii;
     m->api->interp_only[0] = 1; /* the whole ROM goes through the interpreter */
@@ -43,11 +43,11 @@ MsMach *ms_mach_open(int vi, int ii) {
     return m;
 }
 
-void ms_mach_attach(MsMach *m, void *owner,
-                    void (*on_step)(MsMach *, uint16_t, uint8_t, int),
-                    void (*on_read)(MsMach *, uint16_t, uint8_t),
-                    void (*on_write)(MsMach *, uint16_t, uint8_t),
-                    void (*on_vblank)(MsMach *)) {
+void dp_mach_attach(DpMach *m, void *owner,
+                    void (*on_step)(DpMach *, uint16_t, uint8_t, int),
+                    void (*on_read)(DpMach *, uint16_t, uint8_t),
+                    void (*on_write)(DpMach *, uint16_t, uint8_t),
+                    void (*on_vblank)(DpMach *)) {
     m->owner = owner;
     m->on_step = on_step;
     m->on_read = on_read;
@@ -55,31 +55,31 @@ void ms_mach_attach(MsMach *m, void *owner,
     m->on_vblank = on_vblank;
 }
 
-void ms_mach_close(MsMach *m) {
+void dp_mach_close(DpMach *m) {
     if (!m) return;
     mach_at[m->vi][m->ii] = NULL;
     free(m);
 }
 
-void ms_mach_set_rom(MsMach *m, const uint8_t *rom, uint32_t size) {
+void dp_mach_set_rom(DpMach *m, const uint8_t *rom, uint32_t size) {
     if (size > m->api->rom_max) size = m->api->rom_max; // the caller checked
     memcpy(m->api->rom, rom, size);
 }
 
-void ms_mach_reset(MsMach *m) {
+void dp_mach_reset(DpMach *m) {
     m->last_instrs = 0;
     m->stalls = 0;
     m->api->reset();
 }
 
-int ms_mach_run(MsMach *m) {
-    m->cut = MS_CUT_NONE;
+int dp_mach_run(DpMach *m) {
+    m->cut = DP_CUT_NONE;
     if (setjmp(m->jmp)) return m->cut;
     m->api->run(); /* never returns; hooks longjmp */
-    return MS_CUT_NONE;
+    return DP_CUT_NONE;
 }
 
-void ms_mach_cut(MsMach *m, int reason) {
+void dp_mach_cut(DpMach *m, int reason) {
     m->cut = reason;
     longjmp(m->jmp, 1);
 }
@@ -87,40 +87,40 @@ void ms_mach_cut(MsMach *m, int reason) {
 /* gbl_state_io streams the state in a fixed order; a plain cursor buffer is
  * the whole transport.  A load rebuilds the derived page maps, so execution
  * simply continues from the image's gbr.pc - no restart dance needed here. */
-typedef struct { uint8_t *buf; uint32_t pos, cap; } MsStIo;
+typedef struct { uint8_t *buf; uint32_t pos, cap; } DpStIo;
 
 static void st_save(void *data, uint32_t bytes, void *ctx) {
-    MsStIo *io = ctx;
+    DpStIo *io = ctx;
     if (io->pos + bytes <= io->cap) memcpy(io->buf + io->pos, data, bytes);
     io->pos += bytes;
 }
 
 static void st_load(void *data, uint32_t bytes, void *ctx) {
-    MsStIo *io = ctx;
+    DpStIo *io = ctx;
     if (io->pos + bytes <= io->cap) memcpy(data, io->buf + io->pos, bytes);
     io->pos += bytes;
 }
 
-uint32_t ms_mach_state_bytes(MsMach *m) { return m->api->state_bytes(); }
+uint32_t dp_mach_state_bytes(DpMach *m) { return m->api->state_bytes(); }
 
-void ms_mach_save(MsMach *m, uint8_t *buf) {
-    MsStIo io = {buf, 0, ms_mach_state_bytes(m)};
+void dp_mach_save(DpMach *m, uint8_t *buf) {
+    DpStIo io = {buf, 0, dp_mach_state_bytes(m)};
     m->api->state_io(st_save, &io, 0);
 }
 
-void ms_mach_load(MsMach *m, const uint8_t *buf) {
-    MsStIo io = {(uint8_t *)buf, 0, ms_mach_state_bytes(m)};
+void dp_mach_load(DpMach *m, const uint8_t *buf) {
+    DpStIo io = {(uint8_t *)buf, 0, dp_mach_state_bytes(m)};
     m->api->state_io(st_load, &io, 1);
 }
 
-uint8_t ms_mach_op(MsMach *m, uint16_t pc) {
+uint8_t dp_mach_op(DpMach *m, uint16_t pc) {
     const uint8_t *page = m->api->rmap[pc >> 12];
     return page ? page[pc] : 0xFF;
 }
 
 /* ---- hooks --------------------------------------------------------------- */
 
-void ms_gbl_hook_coverage(int v, int i, uint16_t bank, uint16_t addr, int entry) {
+void dp_gbl_hook_coverage(int v, int i, uint16_t bank, uint16_t addr, int entry) {
     (void)v;
     (void)i;
     (void)bank;
@@ -128,30 +128,30 @@ void ms_gbl_hook_coverage(int v, int i, uint16_t bank, uint16_t addr, int entry)
     (void)entry; /* exec marking happens in the engine's on_step */
 }
 
-void ms_gbl_hook_trace(int v, int i, uint16_t pc) {
-    MsMach *m = mach_at[v][i];
+void dp_gbl_hook_trace(int v, int i, uint16_t pc) {
+    DpMach *m = mach_at[v][i];
     if (!m || !m->on_step) return;
-    m->on_step(m, pc, ms_mach_op(m, pc), 0);
+    m->on_step(m, pc, dp_mach_op(m, pc), 0);
 }
 
-void ms_gbl_hook_read(int v, int i, uint16_t a, uint8_t val) {
-    MsMach *m = mach_at[v][i];
+void dp_gbl_hook_read(int v, int i, uint16_t a, uint8_t val) {
+    DpMach *m = mach_at[v][i];
     if (m && m->on_read) m->on_read(m, a, val);
 }
 
-void ms_gbl_hook_write(int v, int i, uint16_t a, uint8_t val) {
-    MsMach *m = mach_at[v][i];
+void dp_gbl_hook_write(int v, int i, uint16_t a, uint8_t val) {
+    DpMach *m = mach_at[v][i];
     if (m && m->on_write) m->on_write(m, a, val);
 }
 
-uint16_t *ms_gbl_hook_line_begin(int v, int i, uint8_t ly) {
-    MsMach *m = mach_at[v][i];
+uint16_t *dp_gbl_hook_line_begin(int v, int i, uint8_t ly) {
+    DpMach *m = mach_at[v][i];
     if (!m || !m->render || ly >= 144) return NULL;
     return m->line;
 }
 
-void ms_gbl_hook_line_end(int v, int i, uint8_t ly) {
-    MsMach *m = mach_at[v][i];
+void dp_gbl_hook_line_end(int v, int i, uint8_t ly) {
+    DpMach *m = mach_at[v][i];
     if (!m || !m->render) return;
     if (ly < 144) {
         for (int x = 0; x < 160; x++) m->screen[ly][x] = (uint8_t)m->line[x];
@@ -159,8 +159,8 @@ void ms_gbl_hook_line_end(int v, int i, uint8_t ly) {
     }
 }
 
-void ms_gbl_hook_vblank(int v, int i) {
-    MsMach *m = mach_at[v][i];
+void dp_gbl_hook_vblank(int v, int i) {
+    DpMach *m = mach_at[v][i];
     if (!m) return;
     uint32_t instrs = *m->api->interp_instrs;
     if (instrs == m->last_instrs) {
@@ -168,7 +168,7 @@ void ms_gbl_hook_vblank(int v, int i) {
          * nothing left that can wake it */
         if (++m->stalls >= 8) {
             m->stalls = 0;
-            ms_mach_cut(m, MS_CUT_HALT);
+            dp_mach_cut(m, DP_CUT_HALT);
             return;
         }
     } else {
@@ -178,7 +178,7 @@ void ms_gbl_hook_vblank(int v, int i) {
     if (m->on_vblank) m->on_vblank(m);
 }
 
-void ms_gbl_hook_safe(int v, int i) {
+void dp_gbl_hook_safe(int v, int i) {
     (void)v;
     (void)i; /* state changes happen from the engine loop, never mid-path */
 }

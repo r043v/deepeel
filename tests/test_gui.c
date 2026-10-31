@@ -9,38 +9,38 @@
 #include <SDL.h>
 #include <sys/stat.h>
 
-int ms_gui_run(MsResults *res, MsConfig *cfg, MsExplorer *ex, MsPlay *play); // gui.c (not in the stub)
+int dp_gui_run(DpResults *res, DpConfig *cfg, DpExplorer *ex, DpPlay *play); // gui.c (not in the stub)
 
 int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : ".";
     char path[512];
     char err[256];
     snprintf(path, sizeof path, "%s/fix_branch.gb", dir);
-    MsCart *cart = ms_cart_load(path, err, sizeof err);
+    DpCart *cart = dp_cart_load(path, err, sizeof err);
     if (!cart) {
         fprintf(stderr, "cannot load %s: %s\n", path, err);
         return 2;
     }
     setenv("SDL_VIDEODRIVER", "dummy", 1);
     const char *shot = "gui_shot.bmp";
-    setenv("MEMSCAN_SHOT", shot, 1);
+    setenv("DEEPEEL_SHOT", shot, 1);
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 2;
     }
     SDL_Quit();
 
-    MsResults res;
-    ms_results_init(&res, cart, ms_platform_gb());
-    ms_static_scan(&res);
-    MsConfig cfg;
-    ms_config_defaults(&cfg);
-    MsMach *mach = mach_for(cart);
-    MsExplorer *ex = ms_explorer_new(&cfg, &res, mach);
-    ms_seed_gb(ex);
-    ms_gui_run(&res, &cfg, ex, NULL);
-    ms_explorer_free(ex);
-    ms_mach_close(mach);
+    DpResults res;
+    dp_results_init(&res, cart, dp_platform_gb());
+    dp_static_scan(&res);
+    DpConfig cfg;
+    dp_config_defaults(&cfg);
+    DpMach *mach = mach_for(cart);
+    DpExplorer *ex = dp_explorer_new(&cfg, &res, mach);
+    dp_seed_gb(ex);
+    dp_gui_run(&res, &cfg, ex, NULL);
+    dp_explorer_free(ex);
+    dp_mach_close(mach);
 
     struct stat st;
     CHECK(stat(shot, &st) == 0);
@@ -49,7 +49,7 @@ int main(int argc, char **argv) {
     CHECK(res.paths_run > 0);
     CHECK(res.section_count > 0);
 
-    ms_results_free(&res);
-    ms_cart_free(cart);
+    dp_results_free(&res);
+    dp_cart_free(cart);
     TEST_DONE("test_gui");
 }
