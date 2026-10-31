@@ -290,3 +290,14 @@ suivante. Garde-fou : plus de 1000 coupures consécutives sans avancer d'une
 frame = machine réellement bloquée, repli en jeu aléatoire. Les deux compteurs
 (« TAS cuts absorbed », « wedged-machine fallbacks ») sont rapportés sur
 stderr ; une saturation n'est jamais silencieuse.
+
+## Fenêtre de surveillance `--watch` (0.5.1)
+
+`memscan explore ROM --play --tas film.vbm --watch [FPS]` ouvre une petite
+fenêtre SDL2 (sans carte ni stats) qui montre l'écran du jeu rejoué par le
+TAS, échantillonné à 1..30 images/s en temps humain (défaut 30). Une image
+sur 1/FPS s est rendue par la machine du film, les autres ne le sont pas :
+le TAS n'est pas ralenti. La fenêtre affiche le film, sa frame courante, et
+la vitesse réelle du rejeu en frames/s (observation de l'outil). `Espace`,
+`Tab` ou `→` passent au film suivant ; `Échap` ferme la fenêtre seule, le
+run continue. Sans SDL2, l'option affiche un message et est ignorée.

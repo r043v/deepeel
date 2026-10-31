@@ -66,6 +66,9 @@ memscan explore rom.gb --play --resume --state-dir s
 # (frames, segments, stagnation), le film est joué en entier jusqu'au bout du
 # jeu, puis le worker passe en jeu aléatoire
 memscan explore rom.gb --play --tas supermarioland.bk2 --frames 18000
+# fenêtre de surveillance seule (SDL2) : l'écran du film échantillonné à
+# 1..30 images/s (défaut 30), sans ralentir le TAS ; Tab = film suivant
+memscan explore rom.gb --play --tas film.vbm --watch 10
 # export jouable : ecrit le checkpoint choisi (le plus productif, ou
 # --export-slot N) en slot 0 du <SD>.STA du projet pc m0boy — le firmware
 # pc le propose au menu (Etat -> Charger l'etat) et boote dessus avec

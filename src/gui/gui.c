@@ -9,6 +9,9 @@
 #include "../cpu/sm83/sm83.h"
 
 #include <SDL.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <time.h>
 
 enum {
     MS_GW = 1280,
@@ -499,4 +502,133 @@ int ms_gui_run(MsResults *res, MsConfig *cfg, MsExplorer *ex, MsPlay *play) {
     SDL_DestroyWindow(g.win);
     SDL_Quit();
     return 0;
+}
+
+// --- watch window ---------------------------------------------------------------
+enum { MS_WATCH_SC = 3, MS_WATCH_STRIP = 64 };
+
+static pthread_t watch_th;
+static int watch_running;
+static atomic_int watch_quit;
+static MsPlay *watch_play;
+static int watch_fps_cfg;
+
+static double watch_now(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+}
+
+static void *watch_main(void *arg) {
+    (void)arg;
+    // all SDL calls stay in this thread
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+        fprintf(stderr, "memscan: watch: SDL_Init: %s\n", SDL_GetError());
+        return NULL;
+    }
+    const int w = MS_GB_SCREEN_W * MS_WATCH_SC, h = MS_GB_SCREEN_H * MS_WATCH_SC + MS_WATCH_STRIP;
+    SDL_Window *win = SDL_CreateWindow("memscan watch", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                                       w, h, 0);
+    SDL_Renderer *ren = win ? SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED) : NULL;
+    if (win && !ren) ren = SDL_CreateRenderer(win, -1, 0);
+    if (!win || !ren) {
+        fprintf(stderr, "memscan: watch: %s\n", SDL_GetError());
+        if (win) SDL_DestroyWindow(win);
+        SDL_Quit();
+        return NULL;
+    }
+    uint8_t shades[MS_GB_SCREEN_W * MS_GB_SCREEN_H];
+    memset(shades, 0, sizeof shades);
+    MsWatchInfo info;
+    memset(&info, 0, sizeof info);
+    int have = 0;
+    // real speed: replay frames per wall second, smoothed over ~1 s
+    double t_ref = watch_now(), speed = 0;
+    uint32_t f_ref = 0;
+    int movie_ref = -1;
+    while (!atomic_load(&watch_quit)) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_QUIT) atomic_store(&watch_quit, 1);
+            else if (e.type == SDL_KEYDOWN) {
+                SDL_Keycode k = e.key.keysym.sym;
+                if (k == SDLK_ESCAPE) atomic_store(&watch_quit, 1);
+                else if (k == SDLK_SPACE || k == SDLK_TAB || k == SDLK_RIGHT)
+                    ms_play_watch_next(watch_play, info.movies > 0 ? info.movies : 1);
+            }
+        }
+        MsWatchInfo ni;
+        uint8_t tmp[MS_GB_SCREEN_W * MS_GB_SCREEN_H];
+        if (ms_play_watch_read(watch_play, tmp, &ni)) {
+            memcpy(shades, tmp, sizeof shades);
+            info = ni;
+            have = 1;
+        }
+        double now = watch_now();
+        if (have) {
+            if (info.movie != movie_ref) {
+                movie_ref = info.movie;
+                t_ref = now;
+                f_ref = info.live_frame;
+                speed = 0;
+            } else if (now - t_ref >= 1.0) {
+                if (info.live_frame >= f_ref) speed = (info.live_frame - f_ref) / (now - t_ref);
+                t_ref = now;
+                f_ref = info.live_frame;
+            }
+        }
+        set_color(ren, 16, 16, 20);
+        SDL_RenderClear(ren);
+        for (int y = 0; y < MS_GB_SCREEN_H; y++)
+            for (int x = 0; x < MS_GB_SCREEN_W; x++) {
+                uint8_t v = (uint8_t)(255 - shades[y * MS_GB_SCREEN_W + x] * 85);
+                set_color(ren, v, v, v);
+                SDL_Rect r = { x * MS_WATCH_SC, y * MS_WATCH_SC, MS_WATCH_SC, MS_WATCH_SC };
+                SDL_RenderFillRect(ren, &r);
+            }
+        int ty = MS_GB_SCREEN_H * MS_WATCH_SC + 6;
+        char buf[200];
+        if (!have) {
+            draw_text(ren, 6, ty, "waiting for the first image...", 1, gui_color(MS_C_DIM));
+        } else {
+            const char *base = strrchr(info.name, '/');
+            base = base ? base + 1 : info.name;
+            snprintf(buf, sizeof buf, "%.52s", base);
+            draw_text(ren, 6, ty, buf, 1, gui_color(MS_C_TITLE));
+            snprintf(buf, sizeof buf, "movie %d/%d  frame %u/%u", info.movie + 1, info.movies,
+                     (unsigned)info.frame, (unsigned)info.total);
+            draw_text(ren, 6, ty + 12, buf, 1, gui_color(MS_C_TEXT));
+            snprintf(buf, sizeof buf, "replay %.0f frames/s  (shown %d img/s)", speed, watch_fps_cfg);
+            draw_text(ren, 6, ty + 24, buf, 1, gui_color(MS_C_LABEL));
+        }
+        draw_text(ren, 6, ty + 40, "space/tab: next movie   esc: close", 1, gui_color(MS_C_DIM));
+        SDL_RenderPresent(ren);
+        SDL_Delay(1000 / (watch_fps_cfg > 0 ? watch_fps_cfg : 30) / 2 + 1);
+    }
+    SDL_DestroyRenderer(ren);
+    SDL_DestroyWindow(win);
+    SDL_Quit();
+    return NULL;
+}
+
+int ms_watch_available(void) { return 1; }
+
+int ms_watch_start(MsPlay *play, int fps) {
+    if (watch_running) return 0;
+    watch_play = play;
+    watch_fps_cfg = fps;
+    atomic_store(&watch_quit, 0);
+    if (pthread_create(&watch_th, NULL, watch_main, NULL) != 0) {
+        fprintf(stderr, "memscan: watch: cannot start the window thread\n");
+        return 1;
+    }
+    watch_running = 1;
+    return 0;
+}
+
+void ms_watch_stop(void) {
+    if (!watch_running) return;
+    atomic_store(&watch_quit, 1);
+    pthread_join(watch_th, NULL);
+    watch_running = 0;
 }

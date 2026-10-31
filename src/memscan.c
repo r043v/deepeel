@@ -39,6 +39,7 @@ static void usage(void) {
             "    --no-covered-prune   keep forking sites whose both sides are covered\n"
             "    --covered-keep N     forks such a site still gets (default 2)\n"
             "    --gui                SDL2 live viewer\n"
+            "    --watch [FPS]        small window showing the replaying TAS movie, 1..30 img/s (default 30)\n"
             "    --json f / --text f / --cov f / --romdata f / --map f / --html f   outputs\n"
             "                         (--map x.map.png: squares image + embedded .map;\n"
             "                          memscan mapx x.map.png out.map extracts it)\n"
@@ -100,7 +101,7 @@ static void closure_rounds(MsExplorer *ex, MsResults *res);
 static int cmd_explore(int argc, char **argv) {
     const char *json = NULL, *text = NULL, *cov = NULL, *romdata = NULL, *map = NULL, *html = NULL, *path = NULL;
     const char *from_png = NULL, *export_dir = NULL;
-    int gui = 0, play = 0, human = 0, human_slot = -1, export_slot = -1, png_slot = -1;
+    int watch = 0, gui = 0, play = 0, human = 0, human_slot = -1, export_slot = -1, png_slot = -1;
     MsConfig cfg;
     ms_config_defaults(&cfg);
     MsSessionCfg scfg;
@@ -117,6 +118,12 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--map") && i + 1 < argc) map = argv[++i];
         else if (!strcmp(a, "--html") && i + 1 < argc) html = argv[++i];
         else if (!strcmp(a, "--gui")) gui = 1;
+        else if (!strcmp(a, "--watch")) {
+            watch = 30;
+            if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') watch = atoi(argv[++i]);
+            if (watch < 1) watch = 1;
+            if (watch > 30) watch = 30;
+        }
         else if (!strcmp(a, "--max-steps") && i + 1 < argc) cfg.max_steps_path = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--max-paths") && i + 1 < argc) cfg.max_paths = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--max-total") && i + 1 < argc) cfg.max_steps_total = strtoull(argv[++i], NULL, 0);
@@ -222,9 +229,16 @@ static int cmd_explore(int argc, char **argv) {
         rc = ms_gui_run(&res, &cfg, ex, play_engine);
     } else if (play) {
         ms_play_install_sigint();
+        if (watch && play_engine) {
+            if (!ms_play_watch_enable(play_engine, watch))
+                fprintf(stderr, "memscan: --watch needs at least one --tas movie, ignored\n");
+            else if (ms_watch_start(play_engine, watch))
+                ms_play_watch_disable(play_engine);
+        }
         ms_disc_add(&res, "start", 0);
         clock_t t0 = clock();
         int reason = ms_play_run(play_engine);
+        ms_watch_stop();
         double secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
         static const char *why[4] = { "frame budget reached", "stagnation wall reached",
                                       "interrupted", "every byte explained" };

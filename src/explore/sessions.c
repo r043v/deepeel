@@ -17,6 +17,7 @@
 #include "tas.h"
 
 #include <signal.h>
+#include <time.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -250,6 +251,10 @@ typedef struct MsWorker {
     uint8_t lane_bank;
     uint16_t lane_pc;
     uint8_t lane_buttons, lane_dead, lane_backtracked;
+    // watch sampling (IN_TAS only): the screen is rendered one frame out of
+    // every 1/fps seconds, the rest of the time rendering stays off
+    int watch_armed;
+    uint64_t watch_next_ns;
 } MsWorker;
 
 struct MsPlay {
@@ -286,6 +291,14 @@ struct MsPlay {
     uint64_t tas_ckpts;
     uint64_t tas_cuts;      // fork-explorer cuts absorbed mid-movie (movie kept)
     uint64_t tas_cut_stuck; // consecutive-cut guard hits (movie then falls to random play)
+    // watch window feed (--watch): a sampled screen of one replaying movie
+    int watch_fps;          // 0 = off
+    int watch_sel;          // which TAS worker is shown (index among the movies)
+    pthread_mutex_t watch_mtx;
+    uint8_t watch_buf[MS_GB_SCREEN_W * MS_GB_SCREEN_H];
+    int watch_have;
+    int watch_buf_movie;
+    uint32_t watch_frame, watch_total;
     // totals
     uint64_t total_frames;
     uint64_t stagnation;
@@ -438,6 +451,54 @@ static void segment_end(MsWorker *w) {
     worker_reset_run_state(w);
 }
 
+// --- watch sampling ----------------------------------------------------------------
+static uint64_t mono_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
+static int tas_movie_index(const MsPlay *p, const MsWorker *w) {
+    int k = 0;
+    for (int i = 0; i < p->nworkers; i++) {
+        if (&p->w[i] == w) return k;
+        if (p->w[i].tas.masks) k++;
+    }
+    return -1;
+}
+
+// called once per movie frame; costs two loads while the window is off
+static void watch_sample(MsPlay *p, MsWorker *w, MsMach *m) {
+    int fps = __atomic_load_n(&p->watch_fps, __ATOMIC_RELAXED);
+    if (!fps || !w->tas.masks) return;
+    int mine = tas_movie_index(p, w);
+    if (mine != __atomic_load_n(&p->watch_sel, __ATOMIC_RELAXED)) {
+        if (w->watch_armed) { w->watch_armed = 0; m->render = 0; m->api->skip_render[0] = 1; }
+        return;
+    }
+    if (w->watch_armed) { // the frame just finished was rendered in full
+        pthread_mutex_lock(&p->watch_mtx);
+        for (int y = 0; y < MS_GB_SCREEN_H; y++)
+            for (int x = 0; x < MS_GB_SCREEN_W; x++)
+                p->watch_buf[y * MS_GB_SCREEN_W + x] = m->screen[y][x];
+        p->watch_have = 1;
+        p->watch_buf_movie = mine;
+        p->watch_frame = w->frames_done;
+        p->watch_total = w->tas.frames;
+        pthread_mutex_unlock(&p->watch_mtx);
+        w->watch_armed = 0;
+        m->render = 0;
+        m->api->skip_render[0] = 1;
+    }
+    uint64_t now = mono_ns();
+    if (now >= w->watch_next_ns) {
+        w->watch_next_ns = now + 1000000000ull / (uint64_t)fps;
+        w->watch_armed = 1;
+        m->render = 1;
+        m->api->skip_render[0] = 0;
+    }
+}
+
 // --- the vblank hook (one frame) ---------------------------------------------------
 static void worker_vblank(MsMach *m) {
     MsWorker *w = ((MsExplorer *)m->owner)->session_ctx;
@@ -456,6 +517,7 @@ static void worker_vblank(MsMach *m) {
             mask = w->tas.masks[w->frames_done];
         } else { // the movie is over: uniform random play, segments resume
             w->mode = IN_RNG;
+            if (w->watch_armed) { w->watch_armed = 0; m->render = 0; m->api->skip_render[0] = 1; }
             mask = input_keys(&w->in);
             w->seg_left = 1; // rotate away from the movie's end state next frame
         }
@@ -467,6 +529,7 @@ static void worker_vblank(MsMach *m) {
 
     w->frames_done++;
     w->epoch_done++;
+    if (w->mode == IN_TAS) watch_sample(p, w, m);
     // TAS gameplay states are the best fork origins there are: populated RAM,
     // real level, real inputs behind them.  The movie's own pace is untouched.
     if (w->mode == IN_TAS && p->cfg.tas_ckpt_frames && w->frames_done % p->cfg.tas_ckpt_frames == 0) {
@@ -704,6 +767,7 @@ MsPlay *ms_play_new(const MsSessionCfg *cfg, MsResults *res, MsExplorer *fork_ex
     pthread_mutex_init(&p->pool.mtx, NULL);
     pthread_mutex_init(&p->inb_mtx, NULL);
     pthread_mutex_init(&p->preview_mtx, NULL);
+    pthread_mutex_init(&p->watch_mtx, NULL);
     p->inb = calloc(MS_INBOX_CAP, sizeof(MsInboxEnt));
     p->pool.cap = p->cfg.pool_cap;
 
@@ -814,6 +878,7 @@ void ms_play_free(MsPlay *p) {
     pthread_mutex_destroy(&p->pool.mtx);
     pthread_mutex_destroy(&p->inb_mtx);
     pthread_mutex_destroy(&p->preview_mtx);
+    pthread_mutex_destroy(&p->watch_mtx);
     free(p);
 }
 
@@ -1187,4 +1252,55 @@ int ms_play_lanes(MsPlay *p, MsSessionLane *out, int max) {
         n++;
     }
     return n;
+}
+
+// --- watch window feed ---------------------------------------------------------------
+int ms_play_watch_enable(MsPlay *p, int fps) {
+    if (!p) return 0;
+    int n = 0;
+    for (int i = 0; i < p->nworkers; i++) if (p->w[i].tas.masks) n++;
+    if (!n) return 0;
+    if (fps < 1) fps = 1;
+    if (fps > 30) fps = 30;
+    __atomic_store_n(&p->watch_fps, fps, __ATOMIC_RELAXED);
+    return n;
+}
+
+void ms_play_watch_disable(MsPlay *p) {
+    if (p) __atomic_store_n(&p->watch_fps, 0, __ATOMIC_RELAXED);
+}
+
+void ms_play_watch_next(MsPlay *p, int n) {
+    if (!p || n < 1) return;
+    __atomic_store_n(&p->watch_sel, (__atomic_load_n(&p->watch_sel, __ATOMIC_RELAXED) + 1) % n,
+                     __ATOMIC_RELAXED);
+}
+
+int ms_play_watch_read(MsPlay *p, uint8_t *shades, MsWatchInfo *info) {
+    if (!p) return 0;
+    pthread_mutex_lock(&p->watch_mtx);
+    int ok = p->watch_have;
+    if (ok) {
+        memcpy(shades, p->watch_buf, sizeof p->watch_buf);
+        info->movie = p->watch_buf_movie;
+        info->frame = p->watch_frame;
+        info->total = p->watch_total;
+    }
+    pthread_mutex_unlock(&p->watch_mtx);
+    if (!ok) return 0;
+    // movie name and the movie's live frame counter (read racily, display only)
+    int k = 0;
+    info->movies = 0;
+    info->name[0] = 0;
+    info->live_frame = 0;
+    for (int i = 0; i < p->nworkers; i++) {
+        if (!p->w[i].tas.masks) continue;
+        if (k == info->movie) {
+            snprintf(info->name, sizeof info->name, "%s", p->w[i].tas.source);
+            info->live_frame = __atomic_load_n(&p->w[i].frames_done, __ATOMIC_RELAXED);
+        }
+        k++;
+    }
+    info->movies = k;
+    return 1;
 }

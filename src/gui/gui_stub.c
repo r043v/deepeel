@@ -12,3 +12,14 @@ int ms_gui_run(MsResults *res, MsConfig *cfg, MsExplorer *ex, MsPlay *play) {
     fprintf(stderr, "memscan: built without SDL2, --gui unavailable\n");
     return 1;
 }
+
+int ms_watch_available(void) { return 0; }
+
+int ms_watch_start(MsPlay *play, int fps) {
+    (void)play;
+    (void)fps;
+    fprintf(stderr, "memscan: built without SDL2, --watch unavailable\n");
+    return 1;
+}
+
+void ms_watch_stop(void) {}

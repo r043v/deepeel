@@ -123,6 +123,22 @@ int ms_play_human_snapshot(MsPlay *p);
 // load a snapshot PNG into the pool; returns the pool slot or -1
 int ms_play_load_png(MsPlay *p, const char *path);
 int ms_play_pool_count(MsPlay *p);
+
+// --- watch window feed (--watch): the screen of a replaying movie, sampled
+// at 1..30 images/s without slowing the replay (one frame in 1/fps s is
+// rendered, the others are not).
+typedef struct {
+    int movie, movies;        // shown movie (0-based) and how many movies replay
+    uint32_t frame, total;    // movie frame of the sampled image / movie length
+    uint32_t live_frame;      // the replay's current frame (for the real speed)
+    char name[256];
+} MsWatchInfo;
+// returns the number of replaying movies (0 = nothing to watch)
+int ms_play_watch_enable(MsPlay *p, int fps);
+void ms_play_watch_disable(MsPlay *p);
+void ms_play_watch_next(MsPlay *p, int movies); // show the next movie
+// last sampled image (160x144 DMG shades) + info; 0 until the first sample
+int ms_play_watch_read(MsPlay *p, uint8_t *shades, MsWatchInfo *info);
 // inspection helpers (tests, tools): pc of pool slot `slot`, -1 if empty,
 // and the path of the last PNG snapshot written
 uint16_t ms_play_slot_pc(MsPlay *p, int slot);
