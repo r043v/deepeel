@@ -72,6 +72,15 @@ def build(out):
     w(r, 0xC005, 0xC9)                           # ret
     save(out, "fix_mbc5", r)
 
+    # --- keyirq: IE arms only the joypad IRQ; the explorer must simulate
+    # key presses, nothing else can raise IF bit 4 --------------------------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x3E, 0x10)                      # ld a,$10 (joypad bit)
+    w(r, 0x152, 0xEA, 0xFF, 0xFF)                # ld ($FFFF),a -> IE = joypad
+    w(r, 0x155, 0x76)                            # halt (IME 0: nothing dispatches)
+    save(out, "fix_keyirq", r)
+
     # --- dma: OAM DMA from ROM source ----------------------------------------
     r = rom(2)
     w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)

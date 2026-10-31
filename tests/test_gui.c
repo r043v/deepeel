@@ -4,6 +4,7 @@
 #include "../src/core/cart.h"
 #include "../src/explore/explorer.h"
 #include "../src/explore/sessions.h"
+#include "mach_util.h"
 #include "test_util.h"
 #include <SDL.h>
 #include <sys/stat.h>
@@ -34,10 +35,12 @@ int main(int argc, char **argv) {
     ms_static_scan(&res);
     MsConfig cfg;
     ms_config_defaults(&cfg);
-    MsExplorer *ex = ms_explorer_new(&cfg, &res);
+    MsMach *mach = mach_for(cart);
+    MsExplorer *ex = ms_explorer_new(&cfg, &res, mach);
     ms_seed_gb(ex);
     ms_gui_run(&res, &cfg, ex, NULL);
     ms_explorer_free(ex);
+    ms_mach_close(mach);
 
     struct stat st;
     CHECK(stat(shot, &st) == 0);

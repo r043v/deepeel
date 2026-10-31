@@ -7,7 +7,6 @@
 #include "gui.h"
 #include "font5x7.h"
 #include "../cpu/sm83/sm83.h"
-#include "../platform/gb/gb.h"
 
 #include <SDL.h>
 

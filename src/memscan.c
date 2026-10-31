@@ -7,9 +7,11 @@
 //   memscan dis rom.gb bank:addr [n]                disassemble n instructions
 #include "core/cart.h"
 #include "core/machine.h"
+#include "mach/m0boy.h"
 #include "core/snapshot_png.h"
 #include "explore/explorer.h"
 #include "explore/sessions.h"
+#include "explore/tree.h"
 #include "report/report.h"
 #include "gui/gui.h"
 #include "cpu/sm83/sm83.h"
@@ -48,6 +50,8 @@ static void usage(void) {
             "    --state-dir D        persist the pool (pool.bin) and the PNG snapshots\n"
             "    --resume             continue from a saved pool\n"
             "    --input f            replay an m0boy held-named input script (repeatable)\n"
+            "    --tas f              replay a TAS movie: VBA .vmv, BizHawk .bk2 or an\n"
+            "                         extracted input log (repeatable, one worker each)\n"
             "    --human [slot]       play a checkpoint yourself in the GUI (pad/keyboard);\n"
             "                         every advance is snapshotted (PNG) and explored\n"
             "    --from-png f         load a snapshot PNG into the pool before starting\n"
@@ -108,6 +112,7 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--no-pointer-scan")) cfg.no_pointer_scan = 1;
         else if (!strcmp(a, "--no-context-evict")) cfg.no_context_evict = 1;
         else if (!strcmp(a, "--no-irq-fork")) cfg.no_irq_fork = 1;
+        else if (!strcmp(a, "--no-key-fork")) cfg.no_key_fork = 1;
         else if (!strcmp(a, "--entry") && i + 1 < argc && entries < 32) {
             if (!parse_entry(argv[++i], &eb[entries], &ea[entries])) {
                 fprintf(stderr, "memscan: bad --entry '%s' (bank:addr)\n", argv[i]);
@@ -128,6 +133,10 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--state-dir") && i + 1 < argc) scfg.state_dir = argv[++i];
         else if (!strcmp(a, "--resume")) scfg.resume = 1;
         else if (!strcmp(a, "--input") && i + 1 < argc && scfg.inputs_n < 8) scfg.inputs[scfg.inputs_n++] = argv[++i];
+        else if (!strcmp(a, "--tas") && i + 1 < argc && scfg.tas_n < 8) scfg.tas[scfg.tas_n++] = argv[++i];
+        else if (!strcmp(a, "--inputs") && i + 1 < argc && !strcmp(argv[++i], "m0x")) scfg.uniform = 0;
+        else if (!strcmp(a, "--uniform-hold") && i + 1 < argc) scfg.uniform_hold = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--fork-paths") && i + 1 < argc) scfg.fork_paths_per_epoch = atoi(argv[++i]);
         else if (!strcmp(a, "--from-png") && i + 1 < argc) from_png = argv[++i];
         else if (!strcmp(a, "--human")) {
             human = 1;
@@ -154,18 +163,31 @@ static int cmd_explore(int argc, char **argv) {
     MsResults res;
     ms_results_init(&res, cart, plat);
     ms_static_scan(&res);
-    MsExplorer *ex = ms_explorer_new(&cfg, &res);
-    ms_seed_gb(ex);
-    for (int i = 0; i < entries; i++) {
-        MsMachine m;
-        ms_machine_init(&m, cart, plat);
-        if (ea[i] >= 0x4000) {
-            m.rom_lo = eb[i] ? eb[i] : 1;
-            ms_mapper_update_windows(&m);
-        }
-        m.pc = ea[i];
-        ms_explorer_seed(ex, &m, MS_SEED_POINTER, 1);
+    int vi = ms_mach_pick_variant(cart->rom);
+    if (vi < 0) {
+        fprintf(stderr, "memscan: no machine variant compiled for MBC %s\n", ms_mbc_name(cart->mbc));
+        ms_results_free(&res);
+        ms_cart_free(cart);
+        return 1;
     }
+    MsMach *mach = ms_mach_open(vi, 0);
+    ms_mach_set_rom(mach, cart->rom, cart->rom_size);
+    MsExplorer *ex = ms_explorer_new(&cfg, &res, mach);
+    // the common exploration tree: every seed, fork and session deposit is
+    // one choice; --resume reloads it from tree.bin
+    MsTree tree;
+    ms_tree_init(&tree);
+    ex->tree = &tree;
+    if (scfg.resume && scfg.state_dir) {
+        char tpath[540];
+        snprintf(tpath, sizeof tpath, "%s/tree.bin", scfg.state_dir);
+        if (ms_tree_load(&tree, tpath))
+            fprintf(stderr, "memscan: resumed tree (%u choices, depth %u)\n", tree.n - 1,
+                    tree.max_depth);
+    }
+    ms_seed_gb(ex);
+    for (int i = 0; i < entries; i++)
+        ms_explorer_seed_pc(ex, ea[i] >= 0x4000 ? (eb[i] ? eb[i] : 1) : 0, ea[i], MS_SEED_POINTER, 1);
     MsPlay *play_engine = NULL;
     if (play) {
         play_engine = ms_play_new(&scfg, &res, ex);
@@ -185,12 +207,31 @@ static int cmd_explore(int argc, char **argv) {
         fprintf(stderr, "memscan: play done after %llu frames (%s), %.2fs\n",
                 (unsigned long long)ms_play_frames(play_engine),
                 reason >= 0 && reason < 4 ? why[reason] : "?", secs);
+        // phase 3, mandatory: the total search drains the frontier the
+        // sessions fed, depth-first, until every choice is closed
+        if (reason != 2) {
+            clock_t t1 = clock();
+            ex->cfg.dfs = 1;
+            ms_explore(ex);
+            fprintf(stderr, "memscan: total search done in %.2fs (%llu paths)\n",
+                    (double)(clock() - t1) / CLOCKS_PER_SEC, (unsigned long long)res.paths_run);
+        }
         MsBuf out;
         ms_buf_init(&out);
         ms_report_text(&res, &cfg, &out);
         report_lanes(play_engine, &res, &out);
+        {
+            char tline[512];
+            ms_tree_stats(&tree, tline, sizeof tline);
+            ms_buf_str(&out, tline);
+        }
         fwrite(out.p, 1, out.len, stdout);
         ms_buf_free(&out);
+        if (scfg.state_dir) {
+            char tpath[540];
+            snprintf(tpath, sizeof tpath, "%s/tree.bin", scfg.state_dir);
+            ms_tree_save(&tree, tpath);
+        }
     } else {
         clock_t t0 = clock();
         ms_explore(ex);
@@ -232,6 +273,7 @@ static int cmd_explore(int argc, char **argv) {
     }
     ms_explorer_free(ex);
     if (play_engine) ms_play_free(play_engine);
+    ms_mach_close(mach);
     ms_results_free(&res);
     ms_cart_free(cart);
     return rc;
@@ -240,7 +282,7 @@ static int cmd_explore(int argc, char **argv) {
 static void report_lanes(const MsPlay *p, const MsResults *res, MsBuf *out) {
     MsSessionLane lanes[MS_MAX_SESSIONS + 1];
     int n = ms_play_lanes((MsPlay *)p, lanes, MS_MAX_SESSIONS + 1);
-    static const char *mode[5] = { "rng", "attract", "script", "fixed", "human" };
+    static const char *mode[6] = { "rng", "attract", "script", "tas", "fixed", "human" };
     ms_buf_str(out, "\nsessions (final):\n");
     for (int i = 0; i < n; i++) {
         ms_buf_fmt(out, "  s%d %-7s frames=%-7u epoch-credit=%-6llu total=%-8llu b%d:%04x%s%s\n",

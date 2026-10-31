@@ -67,13 +67,14 @@ void ms_report_text(const MsResults *res, const MsConfig *cfg, MsBuf *out) {
              c->title, ms_mbc_name(c->mbc), c->rom_banks, c->rom_size / 1024, c->ram_size / 1024);
     ms_buf_str(out, line);
     snprintf(line, sizeof line,
-             "exploration: %llu steps in %llu paths (%u forks: %u branch, %u irq), %u sections\n"
+             "exploration: %llu steps in %llu paths (%u forks: %u branch, %u irq, %u key), %u sections\n"
              "evicted: %u exact states, %u same-context entries; cuts: %u cycles, %u step-budget, %u padding\n"
              "budgets: %u paths cap hit, %u step-wall hit, %u queue overflows\n"
              "seeds: %u natural, %u speculative\n"
              "data: %llu bytes proven verbatim (cov flag 8), %u exec∩data contradictions\n",
              (unsigned long long)res->steps_total, (unsigned long long)res->paths_run,
-             (unsigned long long)(res->forks_branch + res->forks_irq), res->forks_branch, res->forks_irq,
+             (unsigned long long)(res->forks_branch + res->forks_irq + res->forks_key),
+             res->forks_branch, res->forks_irq, res->forks_key,
              res->section_count, res->evicted_exact, res->evicted_ctx, res->cycle_cuts,
              res->step_cuts, res->pad_cuts, res->budget_paths, res->budget_steps, res->queue_overflows,
              res->seeds_natural, res->seeds_spec,

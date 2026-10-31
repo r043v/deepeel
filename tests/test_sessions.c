@@ -6,6 +6,7 @@
 #include "../src/explore/explorer.h"
 #include "../src/explore/sessions.h"
 #include "../src/report/report.h"
+#include "mach_util.h"
 #include "test_util.h"
 
 #include <sys/stat.h>
@@ -63,7 +64,8 @@ int main(int argc, char **argv) {
             results_for(&res, cart);
             MsConfig cfg;
             ms_config_defaults(&cfg);
-            MsExplorer *ex = ms_explorer_new(&cfg, &res);
+            MsMach *mach = mach_for(cart);
+            MsExplorer *ex = ms_explorer_new(&cfg, &res, mach);
             ms_seed_gb(ex);
             MsSessionCfg sc = test_cfg(NULL);
             sc.fixed[0] = 0x01; // session 0 holds A
@@ -102,7 +104,8 @@ int main(int argc, char **argv) {
             results_for(&ra, cart);
             MsConfig cfg;
             ms_config_defaults(&cfg);
-            MsExplorer *exa = ms_explorer_new(&cfg, &ra);
+            MsMach *macha = mach_for(cart);
+            MsExplorer *exa = ms_explorer_new(&cfg, &ra, macha);
             ms_seed_gb(exa);
             MsSessionCfg sa = test_cfg("test_state_a");
             sa.save_epochs = 1;
@@ -117,7 +120,8 @@ int main(int argc, char **argv) {
             ms_explorer_free(exa);
             // B: resume from the saved pool, two more epochs
             results_for(&rb, cart);
-            MsExplorer *exb = ms_explorer_new(&cfg, &rb);
+            MsMach *machb = mach_for(cart);
+            MsExplorer *exb = ms_explorer_new(&cfg, &rb, machb);
             ms_seed_gb(exb);
             MsSessionCfg sb = test_cfg("test_state_a");
             sb.resume = 1;
@@ -132,7 +136,8 @@ int main(int argc, char **argv) {
             ms_explorer_free(exb);
             // C: the same four epochs without interruption
             results_for(&rc, cart);
-            MsExplorer *exc = ms_explorer_new(&cfg, &rc);
+            MsMach *machc = mach_for(cart);
+            MsExplorer *exc = ms_explorer_new(&cfg, &rc, machc);
             ms_seed_gb(exc);
             MsSessionCfg scc = test_cfg(NULL);
             scc.max_frames = 32;
@@ -163,7 +168,8 @@ int main(int argc, char **argv) {
             results_for(&res, cart);
             MsConfig cfg;
             ms_config_defaults(&cfg);
-            MsExplorer *ex = ms_explorer_new(&cfg, &res);
+            MsMach *mach = mach_for(cart);
+            MsExplorer *ex = ms_explorer_new(&cfg, &res, mach);
             ms_seed_gb(ex);
             MsSessionCfg sc = test_cfg(NULL);
             MsPlay *p = ms_play_new(&sc, &res, ex);
@@ -176,14 +182,25 @@ int main(int argc, char **argv) {
             CHECK(snap != NULL);
             uint16_t pc_saved = ms_play_slot_pc(p, ms_play_pool_count(p) - 1);
             CHECK(pc_saved != 0x100); // the game left the reset entry
+            // p owns machine instances: free it before the second engine opens
+            // the same ones (the instance registry hands out one MsMach per slot)
+            char snap_copy[600];
+            snprintf(snap_copy, sizeof snap_copy, "%s", snap ? snap : "");
+            ms_play_free(p);
+            ms_explorer_free(ex);
+            ms_results_free(&res);
+            ms_cart_free(cart);
             // load it back into a fresh engine and check the state follows
+            cart = load("fix_vblank");
+            CHECK(cart != NULL);
             MsResults res2;
             results_for(&res2, cart);
-            MsExplorer *ex2 = ms_explorer_new(&cfg, &res2);
+            MsMach *mach2 = mach_for(cart);
+            MsExplorer *ex2 = ms_explorer_new(&cfg, &res2, mach2);
             ms_seed_gb(ex2);
             MsPlay *p2 = ms_play_new(&sc, &res2, ex2);
             int loaded = -1;
-            if (snap) loaded = ms_play_load_png(p2, snap);
+            if (snap_copy[0]) loaded = ms_play_load_png(p2, snap_copy);
             CHECK(loaded >= 0);
             if (loaded >= 0) {
                 CHECK(ms_play_slot_pc(p2, loaded) == pc_saved);
@@ -195,9 +212,6 @@ int main(int argc, char **argv) {
             ms_play_free(p2);
             ms_explorer_free(ex2);
             ms_results_free(&res2);
-            ms_play_free(p);
-            ms_explorer_free(ex);
-            ms_results_free(&res);
             ms_cart_free(cart);
         }
     }

@@ -1,5 +1,6 @@
 // sm83_disasm.c: text disassembly for the map view, the report and the GUI.
 #include "sm83.h"
+#include <stdio.h>
 
 static const char *r8n[8] = { "b", "c", "d", "e", "h", "l", "(hl)", "a" };
 static const char *r16n[4] = { "bc", "de", "hl", "sp" };

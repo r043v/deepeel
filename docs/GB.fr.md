@@ -15,27 +15,46 @@ Les IRQ (VBlank $40, LCDSTAT $48, Timer $50, Serial $58, Joypad $60) ont
 leur vecteur et leur bit IE/IF ; les points d'entrée graine l'reset $100,
 les 8 RST et les 5 IRQ (un vecteur en padding n'est pas semé).
 
-## Modélisation
+## Machine embarquée (0.3.0)
 
-- **Mappers** : MBC0 (aucun registre), MBC1 (mode 0/1, banque 0 → 1),
-  MBC2 (RAMG sur bit 8 d'adresse, banque 4 bits), MBC3 (banque 7 bits,
-  RTC journalisée mais non simulée), MBC5 (9 bits, banque 0 légale, RAM 4
-  bits). Mapper inconnu : heuristique générique. Chaque écriture qui change
-  une fenêtre produit un événement de banque (PC, fenêtre, ancien → nouveau).
-- **Canaux de copie** : OAM DMA ($FF46, 160 octets) et HDMA CGB ($FF51-55,
-  mode général et H-blank, modèle instantané) produisent des enregistrements
-  `rom → oam/vram` ; la source marquée lue + copiée dans la carte.
-- **Boucles de copie CPU** : un corps de boucle (arrière-branche) qui lit une
-  plage ROM et écrit une plage VRAM à pointeurs monotones produit un
-  enregistrement coalescé (canal `cpu_loop`), avec PC du site de boucle.
-- **Interrupteurs** : à chaque conditionnel, l'autre issue est engendrée en
-  retournant le drapeau testé dans une copie d'état (bit 1 de l'index de
-  condition choisit Z ou C). Aux points où IME est actif et IE & IF a un bit
-  en attente, un fork d'IRQ empile le retour et saute au vecteur du bit de
-  plus haute priorité.
-- **Pile** : concrète — CALL/RET/PUSH/POP fonctionnent ; un RET sur une pile
-  invalide termine le chemin (le retour vers des données est exploré comme
-  n'importe quel chemin forcé, et les verdicts le classent).
+La machine n'est plus approximée : memscan embarque la **runtime GB de
+m0boy** (`targets/meta/runtime/gbl_*`, dépendance `M0BOY_DIR`) —
+l'interpréteur dont le run_hash/image_hash/audio_hash est tenu par la suite
+m0boy. Le registre matériel ci-dessus reste la grille de lecture
+(`memscan regs gb`) ; l'exécution, le PPU (rendu par ligne, 160×144
+récupéré pour le GUI et les snapshots), l'APU, le timer et le joypad
+matériels sont ceux de m0boy.
+
+- **Variantes** : `GBL_MBC`/`GBL_ERAM_SIZE` sont compile-time — le build
+  compile 17 variantes MBC×RAM (0:0 ; 1:0/0x800/0x2000 ; 2:0x200 ;
+  3 et 5 : 0..0x20000) et `ms_mach_pick_variant` choisit d'après l'en-tête.
+- **Threads = instances** : la runtime vit dans des statics ; chaque worker
+  reçoit une copie des symboles préfixée par `objcopy --redefine-syms`
+  (10 instances, `MS_MACHINES`). Les hooks (`trace`, lectures/écritures
+  CPU interposées par `-Dgbl_rd/-Dgbl_wr`, vblank, lignes PPU) sont
+  re-câblés par instance vers le moteur.
+- **États** : une image d'état (`gbl_state_io`, ~17 Kio + RAM cartouche) se
+  sauve/charge à frontière d'instruction ; fourche = sauver, retourner le
+  drapeau Z/C (ou vider IF) dans la copie, restituer. Les banques de boot :
+  MBC1-3 démarrent en banque 1, **MBC5 démarre en banque 0** (légal).
+- **Garde-fous** : HALT que rien ne réveille (8 frames sans instruction) et
+  glissade dans du padding (4096 pas) coupent la machine par `longjmp`.
+
+## Modélisation (ce que memscan ajoute par-dessus)
+
+- **Interposition** : chaque lecture CPU (IO y compris) et chaque écriture
+  (mapper, VRAM, OAM, IO) passe par un hook memscan avant/autour de
+  l'effet machine — c'est de là viennent la carte data, les stats de
+  registres, les événements de banque et les canaux de copie.
+- **OAM DMA** : l'écriture à $FF46 (canal 1) produit l'enregistrement
+  `rom -> oam` 160 octets comme le ferait la console.
+- **Interrupteurs** : à chaque conditionnel l'autre issue est engendrée en
+  retournant le drapeau testé (Z via `gbr.zr`, C via `gbr.cf`) ; aux points
+  IME && IE & IF, un fork « l'IRQ ne part pas » complète la dispatch
+  naturelle que la machine fait elle-même.
+- **Évictions** : dédup exact d'état (hash d'image hors cycle), éviction
+  « même contexte » par section, budgets (pas/chemin, pas global, sites de
+  fork, arrière-branches), tout compté dans le rapport.
 
 ## Limites (documentées, pas cachées)
 
@@ -65,40 +84,28 @@ Les compteurs de saturation (file, budgets, cuts) sont dans le rapport —
 une exploration réelle à budget par défaut en affiche : ce sont les pertes
 conscientes de l'exploration, pas des erreurs.
 
-## Horloge de session (0.2.0)
+## Sessions jouées (`explore --play`)
 
-`src/platform/gb/gb_tick.c` ajoute une horloge approximative pour les
-sessions jouées (moteur de fourches inchangé, il ne tick pas) :
+Le moteur de fourches explore tout ; les sessions jouent le jeu. N workers
+POSIX (défaut 10, `--sessions`, borné au nombre d'instances), chacun sa
+machine instance + son contexte d'enregistrement partageant les cartes :
 
-- table de cycles SM83 (256 + CB) avec les corrections des conditionnels
-  pris (JR/JP/CALL/RET +4/+12), 70224 T-cycles par frame ;
-- DIV /64 T, TIMA aux périodes TAC (1024/16/64/256, overflow → IF bit 2 +
-  TMA), LY 0..153 à ~456 T/ligne, IF bit 0 à LY=144, bits de mode STAT
-  approximatifs (OAM 0-80, VRAM 80-252, HBlank 252-456), comparaison LYC ;
-- **HALT** : avance de temps jusqu'au prochain événement qui lève un bit IF
-  autorisé par IE (vblank même depuis le vblank, STAT mode-2/LYC si
-  autorisés, timer, front de frame pour une nouvelle touche). Un HALT que
-  rien ne peut réveiller est une impasse, signalée comme telle ;
-- **IRQ naturelles** : au pas d'instruction (IME && IE && IF), la priorité
-  la plus haute dépilant PC est servie ; les handlers sont marqués
-  `MS_XF_IRQ` jusqu'à leur RETI ;
-- **P1 réel** : matrice bits 4/5, 0 = touche pressée, IF bit 4 sur nouvelle
-  pression. `m->buttons` porte l'état des touches.
-
-Approximations assumées : modes STAT grossiers, pas d'APU, pas de serial,
-pas de double vitesse CGB. C'est une horloge pour sortir des boucles
-d'attente, pas un modèle de matériel.
-
-## Sessions jouées (`explore --play`, 0.2.0)
 
 Le moteur de fourches explore tout ; les sessions jouent le jeu. N workers
 POSIX (défaut 10, `--sessions`), chacun sa machine (la SRAM cartouche vit
 dans la machine, snapshotée avec elle) :
 
-- **inputs** : le générateur de m0boy (m0x_move) — direction pondérée tenue
-  8-63 frames, A 45 %, B 25 %, START 2 %, taps 4-11 ; une session **attract
-  sans touches** reste toujours vivante ; `--input f.input` rejoue un script
-  m0boy (dialecte held-named) ; `--fixed mask` (tests) force un masque.
+- **inputs uniformes** (défaut) : une touche tirée uniformément parmi les 8,
+  tenue 1..`--uniform-hold` frames (64) puis re-tirage — aucun biais « appuis
+  attendus » ; `--inputs m0x` rend le générateur pondéré historique ;
+  `--input f` rejoue un script m0boy (held-named) ; `--fixed mask` (tests).
+- **TAS** : `--tas f` charge un movie tool-assisté — `.bk2` BizHawk (zip
+  pouvant être imbriqué, `Input Log.txt` avec LogKey), `.vmv` VBA (binaire
+  `VBM\x1a` ou en-tête texte), ou un log extrait — un worker par fichier,
+  rejoué frame par frame depuis la mise sous tension (les films ancrés sur
+  savestate sont signalés : le replay est un effort, pas du frame-exact) ;
+  à la fin du film le worker passe en jeu aléatoire. Validé bit à bit sur
+  les TAS Super Mario Land de tasvideos (43 755 et 43 986 frames).
 - **segments** : 480 + rand(1920) frames comme m0x ; 1 segment sur 8
   redémarre power-on, sinon le checkpoint **le moins choisi** du pool (48,
   jamais le slot 0) ; fin de segment sur stagnation, impasse HALT, crash
@@ -114,7 +121,25 @@ dans la machine, snapshotée avec elle) :
   continue. Un run coupé/repris est identique au run continu au sein de la
   session rejouée (testé).
 - **arrêt** : `--frames` (budget), `--stagnation F` frames sans découverte,
-  `--until-static` (carte statique entièrement expliquée), SIGINT gracieux.
+  `--until-static` (carte statique entièrement expliquée), SIGINT gracieux ;
+  l'arrêt des sessions enchaîne **obligatoirement** la phase de recherche
+  totale (DFS sur la frontière commune, ci-dessous).
+
+## Arbre commun et recherche totale (0.3.0)
+
+`src/explore/tree.c` : tout chemin — graine, fourche branche/IRQ, dépôt de
+session — est un **choix** relié à son parent (la frontière EST la file du
+fourcheur ; chaque état en file porte son id de choix). À la fin d'un
+chemin, le choix se ferme avec une issue : `done`, `merged` (HALT ou N pas
+sans aucune première découverte — retombe sur du connu sans issue, le cas
+gameover), `dead` (opcode indéfini exécuté), `reset` (exécution revenue à
+$0100), `budget`, `capped`. `tree.bin` (`--state-dir`) persiste les choix,
+`--resume` les recharge. Après les sessions, le run enchaîne la **recherche
+totale** : DFS (`--dfs` activé pour cette phase) jusqu'à frontière vide et
+choix tous clos, dans les limites des budgets — rapport : profondeur max,
+ouverts/fermés par issue. Sur Super Mario Land avec un TAS : 6 277 choix,
+profondeur 8, 341 merged, 28 dead, 1 674 budget, 148 capped au mur des 20 M
+pas globaux (observations outil, pas mesures matérielles).
 
 ### Padding
 

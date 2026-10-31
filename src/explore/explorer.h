@@ -1,16 +1,19 @@
 // explorer.h: the forking exploration engine and everything it records.
 //
-// The engine pops machine states from a FIFO, runs them one instruction at a
-// time and forks on every possibility: each side of a conditional branch, and
-// each pending IRQ at points where interrupts are enabled.  Dedup evicts
-// states that were already explored exactly, and section re-entries whose
-// incoming context is indistinguishable for what the section reads ("même
-// contexte").  Loops die on per-path step budgets, backward-edge caps and the
-// global step wall; nothing can run away.
+// The engine pops machine state images from a FIFO, runs them on the m0boy
+// machine (execution continues until a hook cuts the path) and forks on every
+// possibility: each side of a conditional branch, and a no-IRQ continuation
+// at points where interrupts are pending and enabled.  Dedup evicts states
+// that were already explored exactly, and section re-entries whose incoming
+// context is indistinguishable for what the section reads ("même contexte").
+// Loops die on per-path step budgets, backward-edge caps and the global step
+// wall; the halt watchdog cuts paths parked in a HALT nothing wakes.
 #ifndef MS_EXPLORER_H
 #define MS_EXPLORER_H
 
 #include "../core/machine.h"
+#include "../mach/m0boy.h"
+#include "../platform/platform.h"
 
 #include <pthread.h>
 
@@ -122,9 +125,8 @@ typedef struct MsSection {
 // (main thread) and the play-session workers.  Flags and hits go through
 // GCC/Clang __atomic builtins; the section records and the append-only record
 // lists are guarded by res->sec_mtx / res->rec_mtx whenever res->mt is set
-// (sessions running).  The fork explorer never runs concurrently with the
-// sessions: the scheduler pauses them to drain its queue, so its own updates
-// skip the mutexes.
+// (sessions running).  The fork explorer only runs while the sessions wait at
+// the epoch barrier, so its own updates stay lock-free.
 typedef struct MsResults {
     const MsCart *cart;
     const MsPlatform *plat;
@@ -153,18 +155,20 @@ typedef struct MsResults {
     MsMap32 sites;   // branch site key -> MsSiteStat
     MsMap32 callers; // call target key -> MsCallList
     MsMap32 fork_counts; // branch site key -> forks emitted there
-    // diagnostics: undefined opcodes
+    // diagnostics: undefined opcodes (rom key + byte)
     struct { uint32_t key; uint8_t op; } *bad_ops;
     int bad_op_count, bad_op_cap;
     // counters (fork-explorer ones are main-thread only; steps_total and the
     // discovery counters move under every session worker)
     uint64_t steps_total, paths_run;
     uint32_t exec_outside; // instructions executed outside ROM (VRAM/RAM code)
-    uint32_t forks_branch, forks_irq, evicted_exact, evicted_ctx;
+    uint32_t forks_branch, forks_irq, forks_key, evicted_exact, evicted_ctx;
     uint32_t forks_capped; // forks dropped by the per-site cap
     uint32_t cycle_cuts, step_cuts, budget_paths, budget_steps, queue_overflows;
     uint32_t pad_cuts; // paths stopped for executing a padding run
+    uint32_t halt_cuts; // paths parked in a HALT nothing wakes (watchdog)
     uint32_t seeds_natural, seeds_spec;
+    uint32_t seeds_skipped_data; // pointer-scan targets inside proven data/static zones
     uint64_t vram_write_pages[2], sram_write_pages; // page bitmaps
     uint8_t oam_written;
     // data proven by exploration, for the m0boy bridge
@@ -187,7 +191,10 @@ typedef struct MsConfig {
     int no_context_evict;     // disable the "same context" eviction
     int no_pointer_scan;      // disable pointer-table seeding
     int no_irq_fork;          // disable IRQ forking
+    int no_key_fork;          // disable the simulated joypad-IRQ key forks
     int seed_banks;           // seed every switchable bank at $4000
+    int dfs;                  // depth-first frontier: newest path first (the
+                              // total-search phase; default breadth-first)
     int verbose;
 } MsConfig;
 
@@ -212,32 +219,41 @@ typedef struct MsCopyTracker {
     uint32_t src_n, dst_n;
 } MsCopyTracker;
 
-// queue entry: a machine snapshot plus path bookkeeping
+// queue entry: a machine state image plus path bookkeeping
 typedef struct MsPathState {
-    MsMachine m;
-    uint32_t remaining;
+    uint8_t *img;        // gbl state image (ms_mach_state_bytes bytes)
     uint8_t forced;      // reached through a fork or speculative seed
     uint8_t kind;        // MS_SEED_* or MS_PATH_FORK
     uint8_t from_reset;  // descends from the reset flow (necessity verdicts)
+    uint32_t choice;     // the tree choice this path answers
 } MsPathState;
 
 // the engine state is shared with the sibling modules (sections.c, copies.c)
 struct MsExplorer {
     MsConfig cfg;
     MsResults *res;
+    MsMach *mach;      // the live machine (instance 0 during fork drains)
+    uint32_t sb;       // state image size
     // worklist
     MsPathState *queue;
     uint32_t q_cap, q_head, q_len;
     MsHashSet exact;
     // per-path state
-    MsMachine *cur;
     int cur_forced;
-    uint8_t cur_kind, cur_irq, cur_from_reset;
+    uint8_t cur_kind, cur_from_reset;
     uint8_t cur_pad;           // the step runs inside a padding slide: mark nothing
     int pad_slide;              // consecutive padding ops on the current path
     uint32_t cur_bankN;
     uint16_t last_pc;
-    uint8_t last_len, last_bank, have_last;
+    uint8_t last_len, have_last;
+    uint16_t last_bank;
+    // seed construction: the reset image and the last bank window image
+    uint8_t *seed_base, *seed_bank_img;
+    int seed_bank;
+    // branch-site outcome attribution: the previous step was a conditional
+    uint8_t prev_was_cond;
+    uint16_t prev_target, prev_site_pc;
+    uint16_t prev_site_bank;
     uint32_t cur_sec;
     MsCopyTracker ct;
     struct { uint16_t pc; uint32_t count; } back_ring[8];
@@ -245,17 +261,31 @@ struct MsExplorer {
     uint32_t steps_this_path;
     int last_io_slot; // io registry slot of the last register write (copy attribution)
     int stop; // set when a hard budget wall is hit
-    MsTraceVt vt;
     // play-session mode: set by a session worker that owns this explorer
     // (one explorer per worker, sharing res); the fork explorer runs with it
     // cleared.  Sessions record naturally, never fork, and attribute every
     // first discovery to their credit counters below.
     int session;
+    void *session_ctx;         // the owning worker (sessions.c)
     int irq_depth;             // natural IRQ handlers currently executing
-    uint32_t last_cycles;      // T-cycles of the last step (from the cycle table)
-    int last_ctrl;             // ctrl of the last step (session bookkeeping)
+    int reti_pending;          // a RETI executes this step: drop the depth after
+    // mapper write seen on the previous step: resolve old->new banks now
+    uint8_t pend_map;
+    uint16_t pend_pc;
+    uint16_t pend_addr; // the written address (mapper register)
+    uint8_t pend_window;
+    uint32_t pend_old;
     // discovery credit since the last reset (epoch bookkeeping)
     uint64_t credit_exec, credit_data, credit_copies, credit_io, credit_banks;
+    // common tree: owned by the caller (NULL = no bookkeeping, e.g. sessions);
+    // cur_choice is the choice of the path currently running
+    struct MsTree *tree;
+    uint32_t cur_choice;
+    // per-path outcome for the tree: steps without any first discovery, and
+    // the dead/reset flags the step hook raises
+    uint32_t steps_no_credit;
+    uint64_t credit_shown;
+    uint8_t path_dead, path_reset;
 };
 
 // --- section bookkeeping (sections.c) -------------------------------------------
@@ -291,12 +321,17 @@ void ms_copy_flush_path(MsExplorer *ex, MsCopyTracker *ct);
 // queue entry kind: MS_SEED_* from platform.h, plus internal forks
 enum { MS_PATH_FORK = 4 };
 
-MsExplorer *ms_explorer_new(const MsConfig *cfg, MsResults *res);
+MsExplorer *ms_explorer_new(const MsConfig *cfg, MsResults *res, MsMach *mach);
 void ms_explorer_free(MsExplorer *ex);
-// queue a starting state (pc set by caller on the machine); returns 0 if dropped
-int ms_explorer_seed(MsExplorer *ex, const MsMachine *m, int kind, int forced);
+// queue a state image (takes ownership of img); returns 0 if dropped
+int ms_explorer_seed(MsExplorer *ex, uint8_t *img, int kind, int forced);
+// queue the reset state entered at pc (bank window applied for pc >= $4000);
+// returns 0 if dropped
+int ms_explorer_seed_pc(MsExplorer *ex, int bank, uint16_t pc, int kind, int forced);
 // standard GB seeding: reset, non-padding RST/IRQ vectors, pointer scan
 void ms_seed_gb(MsExplorer *ex);
+// the reset state image (built on first use; pool slot 0 starts from it)
+uint8_t *ms_explorer_seed_base(MsExplorer *ex);
 // pop and run one path; returns 0 when the worklist is empty or a budget wall
 int ms_explore_step(MsExplorer *ex);
 // run paths for ~ms milliseconds (GUI slices); returns 0 when nothing left
@@ -308,17 +343,6 @@ int ms_explore(MsExplorer *ex);
 // bytes neither executed, nor read as data, nor statically classified
 // (padding, pointer tables) — the honest "remaining" gap metric
 uint64_t ms_results_unexplained(const MsResults *res);
-
-// per-step recording shared by the forking engine and the play sessions:
-// back-edge ring + copy tracker, branch-site and caller maps (fork mode),
-// RETI bookkeeping and the cycle count of the step (session mode)
-void ms_step_record(MsExplorer *ex, const MsStepInfo *info);
-// per-instruction pre-recording: exec marks, section touch, entry detection
-void ms_pre_step(MsExplorer *ex, MsMachine *m, uint8_t op);
-// service the highest-priority pending IRQ naturally (play sessions):
-// pushes PC, jumps to the vector, clears IME and the IF bit; returns the
-// IE bit serviced or 0
-int ms_service_irq(MsExplorer *ex, MsMachine *m);
 
 // progress snapshot for the GUI / verbose prints
 typedef struct MsProgress {

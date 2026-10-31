@@ -2,10 +2,12 @@
 #include "../src/core/cart.h"
 #include "../src/explore/explorer.h"
 #include "../src/report/report.h"
+#include "mach_util.h"
 #include "test_util.h"
 
 static MsCart *g_cart;
 static MsResults res;
+static MsMach *g_mach;
 
 // runs the full pipeline on one fixture; the results stay in `res` until cleanup
 static void run(const char *dir, const char *name) {
@@ -24,7 +26,9 @@ static void run(const char *dir, const char *name) {
     ms_static_scan(&res);
     MsConfig cfg;
     ms_config_defaults(&cfg);
-    MsExplorer *ex = ms_explorer_new(&cfg, &res);
+    if (g_mach) ms_mach_close(g_mach);
+    g_mach = mach_for(g_cart);
+    MsExplorer *ex = ms_explorer_new(&cfg, &res, g_mach);
     ms_seed_gb(ex);
     ms_explore(ex);
     ms_explorer_free(ex);
@@ -77,7 +81,7 @@ int main(int argc, char **argv) {
 
     // --- mbc5: bank timeline + cross-bank code -----------------------------------
     run(dir, "mbc5");
-    CHECK(bank_events_of(1, 2) >= 1 && bank_events_of(2, 3) >= 1);
+    CHECK(bank_events_of(0, 2) >= 1 && bank_events_of(2, 3) >= 1); // MBC5 boots on bank 0
     CHECK(res.exec_flags[ms_rom_index(2, 0x4000)] & MS_XF_NATURAL);  // bank 2 code ran
     CHECK(res.exec_flags[ms_rom_index(3, 0x8000)] & MS_XF_NATURAL);  // bank 3 code ran (offset 0)
     CHECK(res.exec_hits[ms_rom_index(2, 0x4002)] > 0);
@@ -104,6 +108,10 @@ int main(int argc, char **argv) {
     CHECK(s40 && (s40->kind_bits & MS_XF_IRQ) && s40->verdict == MS_V_REQUIRED);
     // the handler's VRAM write happened in the forked dispatch
     CHECK(res.vram_write_pages[0] & 1);
+
+    // --- keyirq: the joypad-IRQ key simulation ---------------------------------
+    run(dir, "keyirq");
+    CHECK(res.forks_key >= 1); // keys simulated, IF bit 4 armed with nothing pending
 
     // --- jumptable: JP HL reaches both handlers -------------------------------------
     run(dir, "jumptable");
@@ -134,7 +142,7 @@ int main(int argc, char **argv) {
     CHECK(res.data_flags[ms_rom_index(2, 0x4000)] & MS_DF_READ);
     CHECK(res.data_flags[ms_rom_index(2, 0x4007)] & MS_DF_READ);
     CHECK(copy_of(0, 2, 0x4000, 0x4007, 0x8000, 0x8007) != NULL);
-    CHECK(bank_events_of(1, 2) >= 1);
+    CHECK(bank_events_of(0, 2) >= 1); // MBC5 boots on bank 0
 
     // --- copy1: a pure 1:1 ROM->VRAM copy is proven verbatim --------------------------
     run(dir, "copy1");
@@ -195,6 +203,7 @@ int main(int argc, char **argv) {
     }
 
     if (res.cart) ms_results_free(&res);
+    if (g_mach) ms_mach_close(g_mach);
     if (g_cart) ms_cart_free(g_cart);
     TEST_DONE("test_explorer");
 }

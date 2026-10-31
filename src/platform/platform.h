@@ -11,8 +11,6 @@
 #include "../common.h"
 #include "../core/cart.h"
 
-struct MsMachine;
-
 // --- implications: what a register write means for the memory map -----------
 enum {
     MS_IMPL_NONE = 0,
@@ -84,18 +82,6 @@ typedef struct MsPlatform {
     int region_count;
     const MsEntry *entries;
     int entry_count;
-    // reset-time CPU state
-    uint16_t init_pc, init_sp;
-    uint8_t init_a, init_f, init_b, init_c, init_d, init_e, init_h, init_l;
-    // hooks (the machine routes through them)
-    // mapper window 0x0000-0x7FFF: bank registers
-    void (*rom_write)(struct MsMachine *m, uint16_t addr, uint8_t v);
-    uint8_t (*io_read)(struct MsMachine *m, uint16_t addr);
-    void (*io_write)(struct MsMachine *m, uint16_t addr, uint8_t v);
-    // advance the event-driven hardware (timer, PPU line clock...) by t
-    // T-cycles.  Play sessions tick every instruction; the forking explorer
-    // leaves the clock still and seeds the IRQ entries instead.  May be NULL.
-    void (*tick)(struct MsMachine *m, uint32_t t);
 } MsPlatform;
 
 // only platform implemented so far; more CPUs/consoles plug in here

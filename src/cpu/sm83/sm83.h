@@ -1,16 +1,11 @@
-// sm83.h: SM83 executor interface + register pair helpers.
+// sm83.h: SM83 static decoder helpers (condition codes, lengths).  The
+// execution itself is the m0boy runtime's; these helpers classify bytes of
+// the ROM for the explorer, the disassembler and the nonsense eviction.
 #ifndef MS_SM83_H
 #define MS_SM83_H
 
-#include "../../core/machine.h"
-
-static inline uint16_t r_bc(const MsMachine *m) { return (uint16_t)((m->b << 8) | m->c); }
-static inline uint16_t r_de(const MsMachine *m) { return (uint16_t)((m->d << 8) | m->e); }
-static inline uint16_t r_hl(const MsMachine *m) { return (uint16_t)((m->h << 8) | m->l); }
-
-// Executes one instruction at m->pc.  Returns 0 = ok, 1 = halted/stopped,
-// 2 = undefined opcode.  Reports through m->trace.
-int sm83_step(MsMachine *m);
+#include <stdint.h>
+#include <stddef.h>
 
 // Disassembles the instruction at rom[addr] (linear view of one bank slice,
 // rom must have at least addr+3 readable bytes).  Returns length (1-3), or
@@ -35,7 +30,7 @@ static inline int sm83_len(uint8_t op) {
     if (op == 0xCB) return 2;
     switch (op) {
     case 0x01: case 0x11: case 0x21: case 0x31: case 0x08:
-    case 0xC2: case 0xCA: case 0xD2: case 0xDA: case 0xC3:
+    case 0xC2: case 0xCA: case 0xD2: case 0xDA: case 0xC3: case 0xCD:
     case 0xC4: case 0xCC: case 0xD4: case 0xDC:
     case 0xEA: case 0xFA:
         return 3;

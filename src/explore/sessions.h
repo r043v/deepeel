@@ -34,6 +34,12 @@ typedef struct MsSessionCfg {
     int resume;                 // load the pool file and continue
     const char *inputs[8];      // m0boy held-named input scripts to replay
     int inputs_n;
+    const char *tas[8];         // TAS movie files (VBA .vmv, BizHawk .bk2, plain
+    int tas_n;                  // input log): one worker each, frame by frame
+    int uniform;                // 1 (default): uniform random keys (one of the
+                                // 8 buttons, held 1..uniform_hold frames); 0:
+                                // m0boy's weighted generator (m0x)
+    uint32_t uniform_hold;      // max hold of one uniform key (default 64)
     uint8_t fixed[MS_MAX_SESSIONS]; // fixed pad masks (tests); 0 = not fixed
     int fixed_n;
     int fork_paths_per_epoch;   // fork-explorer paths drained per epoch (0 = none)
@@ -58,7 +64,10 @@ typedef struct MsSessionLane {
 
 typedef struct MsPlay MsPlay;
 
-// builds the pool (slot 0 = power-on) and spawns the workers
+// builds the pool (slot 0 = power-on) and spawns the workers.  Machine
+// instances: the fork explorer owns instance 0 (the human lane borrows it
+// while the fork is idle), workers take 1..n, the last instance is the
+// snapshot preview.  `sessions` is clamped to what the build compiled.
 MsPlay *ms_play_new(const MsSessionCfg *cfg, MsResults *res, MsExplorer *fork_ex);
 // one scheduler step: at an epoch boundary, collects credits, drains the
 // session-seed inbox into the fork explorer's queue, drains the fork queue

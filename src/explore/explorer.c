@@ -1,22 +1,28 @@
-// explorer.c: the forking worklist engine.
+// explorer.c: the forking worklist engine on the m0boy machine.
 //
 // Every conditional branch forks (both outcomes are always tested), every
-// pending IRQ at an interrupt-enabled point forks a dispatch.  Dedup evicts
-// exact states and "same context" section re-entries; budgets and backward
-// edge caps keep loops finite.  Everything the machine does is recorded into
-// the results maps through the trace hooks.
+// pending enabled IRQ forks a no-IRQ continuation (the machine itself
+// dispatches the IRQ naturally).  Dedup evicts exact state images and
+// "same context" section re-entries; budgets and backward edge caps keep
+// loops finite; the halt watchdog cuts paths nothing wakes.
 //
 // The same recording runs inside the play-session workers (one MsExplorer
 // each, sharing MsResults): their per-byte updates go through __atomic
 // builtins, and their section/record updates take the results mutexes while
-// res->mt is set.  The fork explorer itself only runs while the sessions are
-// paused, so its updates stay lock-free.
+// res->mt is set.  The fork explorer only runs while the sessions wait at
+// the epoch barrier, so its own updates stay lock-free.
 #include "explorer.h"
 #include "../cpu/sm83/sm83.h"
-#include "../cpu/sm83/sm83_cycles.h"
+#include "tree.h"
 #include <time.h>
 
+#include <stddef.h>
+
 static int is_padding_at(const MsCart *c, uint32_t bank, uint16_t addr);
+static int is_illegal_op(uint8_t op);
+static void fork_branch(MsExplorer *ex, int cond, uint32_t site);
+static void fork_irq(MsExplorer *ex);
+static void fork_key(MsExplorer *ex, uint32_t site);
 
 // --- shared-map primitives -----------------------------------------------------
 static inline uint8_t flags_or(uint8_t *p, uint8_t bit) {
@@ -26,7 +32,6 @@ static inline void hits_add(uint32_t *p, uint32_t v) { __atomic_add_fetch(p, v, 
 static inline void u32_add(uint32_t *p, uint32_t v) { __atomic_add_fetch(p, v, __ATOMIC_RELAXED); }
 static inline void u64_add(uint64_t *p, uint64_t v) { __atomic_add_fetch(p, v, __ATOMIC_RELAXED); }
 static inline void u64_or(uint64_t *p, uint64_t v) { __atomic_fetch_or(p, v, __ATOMIC_RELAXED); }
-static inline uint64_t u64_get(const uint64_t *p) { return __atomic_load_n(p, __ATOMIC_RELAXED); }
 
 // --- u64 set ------------------------------------------------------------------
 static size_t set_probe(const MsHashSet *s, uint64_t key) {
@@ -280,39 +285,33 @@ void ms_static_scan(MsResults *res) {
 
 // --- explorer ---------------------------------------------------------------------
 
-struct MsExplorer; // defined in explorer.h
+// --- engine hooks (wired in ms_explorer_new) ----------------------------------------
+static void hook_step(MsMach *m, uint16_t pc, uint8_t op, int entry);
+static void hook_read(MsMach *m, uint16_t a, uint8_t v);
+static void hook_write(MsMach *m, uint16_t a, uint8_t v);
 
-// --- trace handlers (forward declarations, wired in ms_explorer_new) -----------
-static void on_mem_read(void *ctx, MsSpace sp, uint16_t addr, uint8_t v, MsAccKind kind, uint32_t bank);
-static void on_mem_write(void *ctx, MsSpace sp, uint16_t addr, uint8_t v, MsAccKind kind, uint32_t bank);
-static void on_mapper_write(void *ctx, uint16_t addr, uint8_t v, uint8_t window, uint32_t old, uint32_t new);
-static void on_io_access(void *ctx, uint16_t addr, uint8_t v, int is_write);
-static void on_copy(void *ctx, const MsCopyRec *rec);
-static void on_step(void *ctx, const MsStepInfo *info);
-static void on_event(void *ctx, int kind, uint32_t a, uint32_t b);
-
-MsExplorer *ms_explorer_new(const MsConfig *cfg, MsResults *res) {
+MsExplorer *ms_explorer_new(const MsConfig *cfg, MsResults *res, MsMach *mach) {
     MsExplorer *ex = calloc(1, sizeof *ex);
     ex->cfg = *cfg;
     ex->res = res;
+    ex->mach = mach;
+    ex->sb = ms_mach_state_bytes(mach);
     ex->q_cap = cfg->queue_cap ? cfg->queue_cap : 2048;
     ex->queue = xrealloc(NULL, sizeof(MsPathState) * ex->q_cap);
+    memset(ex->queue, 0, sizeof(MsPathState) * ex->q_cap);
     size_t dedup_cap = (size_t)ex->q_cap * 64;
     if (dedup_cap < (1 << 16)) dedup_cap = 1 << 16;
     ms_set_init(&ex->exact, dedup_cap);
-    ex->vt.mem_read = on_mem_read;
-    ex->vt.mem_write = on_mem_write;
-    ex->vt.mapper_write = on_mapper_write;
-    ex->vt.io_access = on_io_access;
-    ex->vt.copy = on_copy;
-    ex->vt.step = on_step;
-    ex->vt.event = on_event;
+    ms_mach_attach(mach, ex, hook_step, hook_read, hook_write, NULL);
     return ex;
 }
 
 void ms_explorer_free(MsExplorer *ex) {
     if (!ex) return;
+    for (uint32_t i = 0; i < ex->q_cap; i++) free(ex->queue[i].img);
     free(ex->queue);
+    free(ex->seed_base);
+    free(ex->seed_bank_img);
     ms_set_free(&ex->exact);
     free(ex);
 }
@@ -324,119 +323,196 @@ void ms_explorer_progress(MsExplorer *ex, MsProgress *out) {
     out->sections = (uint32_t)ex->res->section_count;
 }
 
+// --- bank/key helpers -----------------------------------------------------------------
+// The runtime masks banks into 512; the result maps are cart-sized: fold a
+// wild bank back into the cart (a bank register value beyond the cart reads
+// as a mirror on real hardware too).
+static uint16_t cur_bank(MsExplorer *ex, uint16_t pc) {
+    uint32_t b = pc < 0x4000 ? 0 : ex->mach->api->gbr->rom_bank;
+    uint32_t banks = (uint32_t)ex->res->banks;
+    if (banks && b >= banks) b %= banks;
+    return (uint16_t)b;
+}
+
+static uint32_t key_at(MsExplorer *ex, uint16_t pc) {
+    return ms_rom_index(cur_bank(ex, pc), pc);
+}
+
 // --- queue -----------------------------------------------------------------------
-static void queue_push(MsExplorer *ex, const MsMachine *m, uint32_t remaining, int forced, int kind,
-                       int from_reset) {
-    uint64_t h = ms_state_hash(m);
+// pc of a state image (gbl_cpu_t rides at offset 0 of the gbl state stream)
+static uint16_t image_pc(const uint8_t *img) {
+    gbl_cpu_t g;
+    memcpy(&g, img, sizeof g);
+    return g.pc;
+}
+
+static uint64_t image_hash(MsExplorer *ex, const uint8_t *img) {
+    // gbr.cyc/next_evt ride at the head of the image and only encode where
+    // time stood: skip them so equal machine states dedup across frames
+    uint64_t h = 0xcbf29ce484222325ull;
+    h = ms_fnv1a(h, img, offsetof(gbl_cpu_t, cyc));
+    h = ms_fnv1a(h, img + sizeof(gbl_cpu_t), ex->sb - sizeof(gbl_cpu_t));
+    return h;
+}
+
+static void queue_push(MsExplorer *ex, uint8_t *img, int forced, int kind, int from_reset,
+                       uint32_t choice) {
+    uint64_t h = image_hash(ex, img);
     int ins = ms_set_insert(&ex->exact, h);
     if (ins == 0) {
         ex->res->evicted_exact++;
+        if (ex->tree) ms_tree_close(ex->tree, choice, MS_ISSUE_MERGED);
+        free(img);
         return;
     }
-    if (ins < 0) return; // dedup set full
+    if (ins < 0) { // dedup set full: surfaced, the state is dropped
+        ex->res->queue_overflows++;
+        if (ex->tree) ms_tree_close(ex->tree, choice, MS_ISSUE_BUDGET);
+        free(img);
+        return;
+    }
     if (ex->q_len >= ex->q_cap) {
         ex->res->queue_overflows++;
+        if (ex->tree) ms_tree_close(ex->tree, choice, MS_ISSUE_BUDGET);
+        free(img);
         return;
     }
     MsPathState *p = &ex->queue[(ex->q_head + ex->q_len) % ex->q_cap];
-    p->m = *m;
-    p->m.trace = &ex->vt;
-    p->m.trace_ctx = ex;
-    p->remaining = remaining;
+    p->img = img;
     p->forced = (uint8_t)(forced ? 1 : 0);
     p->kind = (uint8_t)kind;
     p->from_reset = (uint8_t)(from_reset ? 1 : 0);
+    p->choice = choice;
     ex->q_len++;
 }
 
-int ms_explorer_seed(MsExplorer *ex, const MsMachine *m, int kind, int forced) {
-    queue_push(ex, m, ex->cfg.max_steps_path, forced, kind, kind == MS_SEED_RESET);
+// a tree choice for a new queued path (when the tree is tracked)
+static uint32_t choice_new(MsExplorer *ex, uint32_t parent, int kind, uint32_t site, int bank,
+                           int pc) {
+    if (!ex->tree) return 0;
+    return ms_tree_add(ex->tree, parent, kind, site, bank, pc);
+}
+
+int ms_explorer_seed(MsExplorer *ex, uint8_t *img, int kind, int forced) {
+    uint16_t pc = image_pc(img);
+    uint16_t bank = (uint16_t)(pc < 0x4000 ? 0 : ((const gbl_cpu_t *)img)->rom_bank);
+    queue_push(ex, img, forced, kind, kind == MS_SEED_RESET,
+               choice_new(ex, 0, kind, ms_rom_index(bank, pc), bank, pc));
     if (forced) ex->res->seeds_spec++;
     else ex->res->seeds_natural++;
     return 1;
 }
 
-// --- trace handlers ----------------------------------------------------------------
-static void cur_section_live_from_access(MsExplorer *ex, MsSection *s, MsSpace sp, uint16_t addr, uint32_t bank) {
-    switch (sp) {
-    case MS_SPACE_ROM:
-        if (addr >= 0x4000) ms_section_live_small(s, 3); // upper window bank matters
-        break;
-    case MS_SPACE_VRAM:
-        ms_section_live_vram(s, bank, (addr - 0x8000) >> 8);
-        ms_section_live_small(s, 5); // vbk matters
-        break;
-    case MS_SPACE_SRAM:
-        ms_section_live_sram(s, ((addr - 0xA000) + ex->cur->win_ram * 0x2000) >> 8);
-        ms_section_live_small(s, 4); // ramg matters
-        break;
-    case MS_SPACE_WRAM:
-        ms_section_live_wram(s, (addr - 0xC000) >> 8);
-        break;
-    case MS_SPACE_ECHO:
-        ms_section_live_wram(s, (addr - 0xE000) >> 8);
-        break;
-    case MS_SPACE_HRAM: ms_section_live_small(s, 0); break;
-    case MS_SPACE_OAM: ms_section_live_small(s, 1); break;
-    case MS_SPACE_IE: ms_section_live_small(s, 2); break;
-    default: break;
-    }
+// reset state with the bank window applied and pc moved: the shared seed
+// images every entry point starts from
+static uint8_t *seed_base(MsExplorer *ex) {
+    if (ex->seed_base) return ex->seed_base;
+    uint8_t *img = xrealloc(NULL, ex->sb);
+    ms_mach_reset(ex->mach);
+    ms_mach_save(ex->mach, img);
+    ex->seed_base = img;
+    return img;
 }
 
-static void on_mem_read(void *ctx, MsSpace sp, uint16_t addr, uint8_t v, MsAccKind kind, uint32_t bank) {
-    (void)v;
-    MsExplorer *ex = ctx;
+uint8_t *ms_explorer_seed_base(MsExplorer *ex) { return seed_base(ex); }
+
+static uint8_t *seed_bank_img(MsExplorer *ex, int bank) {
+    if (ex->seed_bank_img && ex->seed_bank == bank) return ex->seed_bank_img;
+    if (!ex->seed_bank_img) ex->seed_bank_img = xrealloc(NULL, ex->sb);
+    ms_mach_load(ex->mach, seed_base(ex));
+    const MsGblApi *api = ex->mach->api;
+    api->wr(0x2000, (uint8_t)(bank & 0xFF)); // mapper registers, unobserved
+    if (bank > 0xFF) api->wr(0x3000, (uint8_t)(bank >> 8));
+    ms_mach_save(ex->mach, ex->seed_bank_img);
+    ex->seed_bank = bank;
+    return ex->seed_bank_img;
+}
+
+int ms_explorer_seed_pc(MsExplorer *ex, int bank, uint16_t pc, int kind, int forced) {
+    uint8_t *img = xrealloc(NULL, ex->sb);
+    memcpy(img, seed_bank_img(ex, bank), ex->sb);
+    gbl_cpu_t g = *ex->mach->api->gbr; // the bank write leaves the regs alone
+    g.pc = pc;
+    memcpy(img, &g, sizeof g);
+    return ms_explorer_seed(ex, img, kind, forced);
+}
+
+// --- read/write hooks ---------------------------------------------------------------
+static void section_live_access(MsExplorer *ex, uint16_t a) {
+    if (ex->session) return;
+    MsSection *s = ex->cur_sec ? &ex->res->sections[ex->cur_sec] : NULL;
+    if (!s) return;
+    if (a >= 0x4000 && a < 0x8000) ms_section_live_small(s, 3); // upper window bank matters
+    else if (a >= 0x8000 && a < 0xA000) {
+        ms_section_live_vram(s, ex->mach->api->io[0x4F] & 1, (a - 0x8000) >> 8);
+        ms_section_live_small(s, 5); // vbk matters
+    } else if (a >= 0xA000 && a < 0xC000) {
+        ms_section_live_sram(s, (a - 0xA000) >> 8); // bank folds into the ctx hash
+        ms_section_live_small(s, 4); // ramg matters
+    } else if (a >= 0xC000 && a < 0xFE00) {
+        ms_section_live_wram(s, ((a - 0xC000) & 0x1FFF) >> 8);
+    } else if (a >= 0xFF80 && a < 0xFFFF) ms_section_live_small(s, 0);
+    else if (a >= 0xFE00 && a < 0xFEA0) ms_section_live_small(s, 1);
+    else if (a == 0xFFFF) ms_section_live_small(s, 2);
+}
+
+static void hook_read(MsMach *m, uint16_t a, uint8_t v) {
+    MsExplorer *ex = m->owner;
     MsResults *res = ex->res;
-    MsSection *s = ex->cur_sec ? &res->sections[ex->cur_sec] : NULL;
-    switch (sp) {
-    case MS_SPACE_ROM: {
-        uint32_t key = ms_rom_index(bank, addr);
-        if (kind == MS_ACC_DATA) {
-            uint8_t old = flags_or(&res->data_flags[key], MS_DF_READ);
-            if (!(old & MS_DF_READ)) ex->credit_data++;
-            hits_add(&res->data_hits[key], 1);
-            ms_copy_on_rom_read(&ex->ct, (uint8_t)bank, addr, v);
-        }
-        break;
+    if (a < 0x8000) { // ROM data read (opcode fetches never take this path)
+        uint32_t key = key_at(ex, a);
+        uint8_t old = flags_or(&res->data_flags[key], MS_DF_READ);
+        if (!(old & MS_DF_READ)) ex->credit_data++;
+        hits_add(&res->data_hits[key], 1);
+        ms_copy_on_rom_read(&ex->ct, (uint8_t)cur_bank(ex, a), a, v);
     }
-    case MS_SPACE_VRAM:
-        break;
-    default:
-        break;
-    }
-    if (s && !ex->session) cur_section_live_from_access(ex, s, sp, addr, bank);
-    if (sp == MS_SPACE_IO && kind == MS_ACC_IO) {
-        int slot = ms_io_slot(res, addr);
+    section_live_access(ex, a);
+    if (a >= 0xFF00 && a < 0xFF80) {
+        int slot = ms_io_slot(res, a);
         if (slot >= 0) {
             MsIoStat *st = &res->io[slot];
             uint32_t was = __atomic_fetch_add(&st->rd, 1, __ATOMIC_RELAXED);
             if (!was && !__atomic_load_n(&st->wr, __ATOMIC_RELAXED)) ex->credit_io++;
-        }
-        if (s && !ex->session && addr >= 0xFF00 && addr < 0xFF80) {
-            ms_section_live_io(s, (uint16_t)(addr - 0xFF00));
-            ms_section_io_used(s, slot);
+            if (!ex->session) {
+                MsSection *s = ex->cur_sec ? &res->sections[ex->cur_sec] : NULL;
+                if (s) {
+                    ms_section_live_io(s, (uint16_t)(a - 0xFF00));
+                    ms_section_io_used(s, slot);
+                }
+            }
         }
     }
 }
 
-static void on_mem_write(void *ctx, MsSpace sp, uint16_t addr, uint8_t v, MsAccKind kind, uint32_t bank) {
-    MsExplorer *ex = ctx;
+static void hook_write(MsMach *m, uint16_t a, uint8_t v) {
+    MsExplorer *ex = m->owner;
     MsResults *res = ex->res;
-    MsSection *s = ex->cur_sec ? &res->sections[ex->cur_sec] : NULL;
-    switch (sp) {
-    case MS_SPACE_VRAM:
-        u64_or(&res->vram_write_pages[bank & 1], 1ull << ((addr - 0x8000) >> 8));
-        ms_copy_on_vram_write(&ex->ct, (uint8_t)(bank & 1), addr, v);
-        break;
-    case MS_SPACE_SRAM:
+    if (a < 0x8000) { // mapper write: the bank flip resolves on the next step
+        ex->pend_map = 1;
+        ex->pend_pc = m->api->gbr->pc;
+        ex->pend_addr = a;
+        ex->pend_window = a < 0x2000 ? 2 : (a < 0x4000 ? 1 : (a < 0x6000 ? 2 : 1));
+        ex->pend_old = m->api->gbr->rom_bank;
+        return;
+    }
+    if (a < 0xA000) { // VRAM
+        int vbk = m->api->io[0x4F] & 1;
+        u64_or(&res->vram_write_pages[vbk], 1ull << ((a - 0x8000) >> 8));
+        ms_copy_on_vram_write(&ex->ct, (uint8_t)vbk, a, v);
+        return;
+    }
+    if (a < 0xC000) { // cartridge RAM
         u64_or(&res->sram_write_pages,
-               1ull << ((((addr - 0xA000) + ex->cur->win_ram * 0x2000) & (MS_CRAM_PAGES * 256 - 1)) >> 8));
-        break;
-    case MS_SPACE_OAM:
+               1ull << (((a - 0xA000) & (MS_CRAM_PAGES * 256 - 1)) >> 8));
+        return;
+    }
+    if (a < 0xFE00) return; // WRAM and its echo: no per-byte map
+    if (a < 0xFF00) { // OAM
         __atomic_store_n(&res->oam_written, 1, __ATOMIC_RELAXED);
-        break;
-    case MS_SPACE_IO: {
-        int slot = ms_io_slot(res, addr);
+        return;
+    }
+    if (a < 0xFF80) { // IO
+        int slot = ms_io_slot(res, a);
         if (slot >= 0) {
             ex->last_io_slot = slot;
             MsIoStat *st = &res->io[slot];
@@ -447,26 +523,40 @@ static void on_mem_write(void *ctx, MsSpace sp, uint16_t addr, uint8_t v, MsAccK
             for (int i = 0; i < st->nvalues; i++)
                 if (st->values[i] == v) have = 1;
             if (!have && st->nvalues < 8) st->values[st->nvalues++] = v;
-            if (st->npcs < 4)
-                st->pcs[st->npcs++] = ex->cur->pc;
+            uint16_t pc = m->api->gbr->pc;
+            if (st->npcs < 4) st->pcs[st->npcs++] = pc;
             else {
                 memmove(st->pcs, st->pcs + 1, 3 * sizeof(uint16_t));
-                st->pcs[3] = ex->cur->pc;
+                st->pcs[3] = pc;
             }
             if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
         }
-        break;
+        if (a == 0xFF46 && v * 0x100u < 0x8000u) {
+            // OAM DMA: 160 bytes land verbatim in the OAM
+            MsCopyRec rec;
+            memset(&rec, 0, sizeof rec);
+            rec.channel = 1;
+            rec.verbatim = 1;
+            rec.src_space = MS_SPACE_ROM;
+            rec.dst_space = MS_SPACE_OAM;
+            rec.src_bank = v >= 0x40 ? cur_bank(ex, 0x4000) : 0;
+            rec.src_lo = (uint16_t)((v * 0x100u) & 0x3FFF);
+            rec.src_hi = (uint16_t)(rec.src_lo + 159);
+            rec.dst_lo = 0xFE00;
+            rec.dst_hi = 0xFE9F;
+            rec.bytes = 160;
+            rec.pc = m->api->gbr->pc;
+            ms_record_copy(ex, &rec, 0);
+        }
     }
-    default:
-        break;
-    }
-    if (s && !ex->session && kind == MS_ACC_IO) ms_section_io_used(s, ms_io_slot(res, addr));
-    (void)bank;
 }
 
-static void on_mapper_write(void *ctx, uint16_t addr, uint8_t v, uint8_t window, uint32_t old, uint32_t new) {
-    MsExplorer *ex = ctx;
+// --- the per-instruction hook ---------------------------------------------------------
+static void emit_pend_map(MsExplorer *ex) {
+    if (!ex->pend_map) return;
+    ex->pend_map = 0;
     MsResults *res = ex->res;
+    uint32_t new_bank = ex->mach->api->gbr->rom_bank;
     if (res->mt) pthread_mutex_lock(&res->rec_mtx);
     if (res->bank_count == res->bank_cap) {
         res->bank_cap = res->bank_cap ? res->bank_cap * 2 : 64;
@@ -474,326 +564,344 @@ static void on_mapper_write(void *ctx, uint16_t addr, uint8_t v, uint8_t window,
     }
     MsBankEvent *e = &res->bank_events[res->bank_count++];
     e->seq = (uint32_t)res->bank_count;
-    e->pc = ex->cur->pc;
-    e->window = window;
-    e->old_bank = old;
-    e->new_bank = new;
+    e->pc = ex->pend_pc;
+    e->window = ex->pend_window;
+    e->old_bank = ex->pend_old;
+    e->new_bank = new_bank;
     if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
-    int slot = ms_io_slot(res, addr);
+    int slot = ms_io_slot(res, ex->pend_addr);
     if (slot >= 0) {
         u32_add(&res->io[slot].wr, 1);
         u32_add(&res->io[slot].bank_events, 1);
     }
     ex->credit_banks++;
-    MsSection *s = ex->cur_sec && !ex->session ? &res->sections[ex->cur_sec] : NULL;
-    if (s) {
-        ms_section_banks_seen(s, new);
-        ms_section_io_used(s, slot);
-    }
-    (void)v;
-}
-
-static void on_io_access(void *ctx, uint16_t addr, uint8_t v, int is_write) {
-    MsExplorer *ex = ctx;
-    MsResults *res = ex->res;
-    int slot = ms_io_slot(res, addr);
-    if (slot >= 0 && is_write) {
-        MsIoStat *st = &res->io[slot];
-        u32_add(&st->wr, 1);
-        if (res->mt) pthread_mutex_lock(&res->rec_mtx);
-        int have = 0;
-        for (int i = 0; i < st->nvalues; i++)
-            if (st->values[i] == v) have = 1;
-        if (!have && st->nvalues < 8) st->values[st->nvalues++] = v;
-        if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
-    }
-}
-
-static void on_copy(void *ctx, const MsCopyRec *rec) {
-    ms_record_copy((MsExplorer *)ctx, rec, 0);
-}
-
-// per-step recording shared by both engines (see the header).  The fork mode
-// keeps the branch-site and caller maps; the session mode adds the RETI
-// bookkeeping of the natural IRQ depth and the cycle count of the step.
-void ms_step_record(MsExplorer *ex, const MsStepInfo *info) {
-    MsResults *res = ex->res;
-    ex->last_len = info->len;
-    ex->have_last = 1;
-    ex->last_ctrl = (int)info->ctrl;
-    switch (info->ctrl) {
-    case MS_CTRL_JP:
-    case MS_CTRL_JR:
-    case MS_CTRL_JP_CC:
-    case MS_CTRL_JR_CC:
-    case MS_CTRL_JP_HL:
-        if (info->target <= info->pc) { // backward edge: loop guard
-            int found = -1;
-            for (int i = 0; i < 8; i++)
-                if (ex->back_ring[i].pc == info->target && ex->back_ring[i].count) { found = i; break; }
-            if (found < 0) {
-                found = ex->back_idx;
-                ex->back_idx = (ex->back_idx + 1) & 7;
-                ex->back_ring[found].pc = info->target;
-                ex->back_ring[found].count = 0;
-            }
-            ex->back_ring[found].count++;
-            ms_copy_on_back_edge(&ex->ct, info->target, ms_rom_key(ex->cur, info->pc));
-        }
-        break;
-    case MS_CTRL_CALL:
-    case MS_CTRL_CALL_CC:
-    case MS_CTRL_RST: {
-        if (ex->session) break; // the fork explorer owns the caller map
-        uint32_t tkey = ms_rom_index(info->target < 0x4000 ? 0 : ex->cur_bankN, info->target);
-        MsCallList *cl = ms_map_get_or_add(&res->callers, tkey);
-        if (cl && cl->n < 8) {
-            int dup = 0;
-            uint32_t skey = ms_rom_key(ex->cur, info->pc);
-            for (int i = 0; i < cl->n; i++)
-                if (cl->site[i] == skey) dup = 1;
-            if (!dup) cl->site[cl->n++] = skey;
-        }
-        break;
-    }
-    case MS_CTRL_RETI:
-        if (ex->session && ex->irq_depth) ex->irq_depth--;
-        break;
-    default:
-        break;
-    }
-    if (info->ctrl == MS_CTRL_JP_CC || info->ctrl == MS_CTRL_JR_CC || info->ctrl == MS_CTRL_CALL_CC ||
-        info->ctrl == MS_CTRL_RET_CC) {
-        if (!ex->session) { // branch-site outcomes are the fork explorer's map
-            uint32_t skey = ms_rom_key(ex->cur, info->pc);
-            MsSiteStat *st = ms_map_get_or_add(&res->sites, skey);
-            if (st) {
-                if (info->cond_taken) st->taken++;
-                else st->nottaken++;
-            }
+    if (!ex->session) {
+        MsSection *s = ex->cur_sec ? &res->sections[ex->cur_sec] : NULL;
+        if (s) {
+            ms_section_banks_seen(s, new_bank);
+            ms_section_io_used(s, slot);
         }
     }
-    if (ex->session)
-        ex->last_cycles = sm83_step_cycles(info, info->opcode == 0xCB ? ms_peek(ex->cur, (uint16_t)(info->pc + 1)) : 0);
 }
 
-static void on_step(void *ctx, const MsStepInfo *info) { ms_step_record((MsExplorer *)ctx, info); }
-
-static void on_event(void *ctx, int kind, uint32_t a, uint32_t b) {
-    MsExplorer *ex = ctx;
+static void hook_step(MsMach *m, uint16_t pc, uint8_t op, int entry) {
+    (void)entry;
+    MsExplorer *ex = m->owner;
     MsResults *res = ex->res;
-    if (kind == MS_EV_BADOP) {
+    const MsGblApi *api = m->api;
+
+    // a mapper write from the previous step resolved: record the switch
+    emit_pend_map(ex);
+
+    // the fork explorer's walls do not apply to session workers: their play
+    // is bounded by frames and segments, and they share res->steps_total
+    if (!ex->session) {
+        if (res->steps_total >= ex->cfg.max_steps_total) {
+            res->budget_steps++;
+            ex->stop = 1;
+            ms_mach_cut(m, MS_CUT_QUIT);
+        }
+        if (++ex->steps_this_path > ex->cfg.max_steps_path) {
+            res->step_cuts++;
+            ms_mach_cut(m, MS_CUT_STEPS);
+        }
+    }
+    u64_add(&res->steps_total, 1);
+
+    // a RETI from the previous step ends its IRQ handler
+    if (ex->reti_pending) {
+        ex->reti_pending = 0;
+        if (ex->irq_depth) ex->irq_depth--;
+    }
+    if (op == 0xD9) ex->reti_pending = 1;
+    uint16_t bank = cur_bank(ex, pc);
+    int is_entry = !ex->have_last || ex->last_bank != bank ||
+                   (uint16_t)(ex->last_pc + ex->last_len) != pc;
+    if (is_entry && (pc == 0x40 || pc == 0x48 || pc == 0x50 || pc == 0x58 || pc == 0x60))
+        ex->irq_depth++;
+
+    // illegal opcodes: recorded with their true banked key (the machine
+    // itself keeps running whatever its decoder does with them)
+    if (is_illegal_op(op)) {
+        if (!ex->session) ex->path_dead = 1;
         if (res->mt) pthread_mutex_lock(&res->rec_mtx);
         if (res->bad_op_count == res->bad_op_cap) {
             res->bad_op_cap = res->bad_op_cap ? res->bad_op_cap * 2 : 16;
             res->bad_ops = xrealloc(res->bad_ops, sizeof(*res->bad_ops) * (size_t)res->bad_op_cap);
         }
-        res->bad_ops[res->bad_op_count].key = a;
-        res->bad_ops[res->bad_op_count].op = (uint8_t)b;
+        res->bad_ops[res->bad_op_count].key = key_at(ex, pc);
+        res->bad_ops[res->bad_op_count].op = op;
         res->bad_op_count++;
         if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
+    }
+
+    // execution back at the entry point: the game reset itself
+    if (!ex->session && pc == 0x0100 && ex->steps_this_path > 64 &&
+        !(ex->cur_kind == MS_SEED_RESET && ex->steps_no_credit == 0))
+        ex->path_reset = 1;
+
+    // execution sliding through a padding run: keep going (the code after
+    // the run is often the point of a forced entry) but never call the
+    // padding itself code; bound the slide so garbage loops stay bounded
+    uint32_t pk = key_at(ex, pc);
+    if ((res->static_flags[pk] & MS_SF_PAD) && (op == 0x00 || op == 0xFF)) {
+        if (++ex->pad_slide > 4096) {
+            res->pad_cuts++;
+            ms_mach_cut(m, MS_CUT_PAD);
+        }
+        ex->cur_pad = 1;
+    } else {
+        ex->pad_slide = 0;
+        ex->cur_pad = 0;
+    }
+
+    // forking: both sides of every conditional, and the road not taken when
+    // an IRQ is about to dispatch (the machine takes the IRQ naturally)
+    if (!ex->session) {
+        int cond = sm83_cond_of(op);
+        if (cond >= 0) fork_branch(ex, cond, pk);
+        if (!ex->cfg.no_irq_fork && api->gbr->ime && (*api->ie & api->io[0x0F] & 0x1F))
+            fork_irq(ex);
+        // keys that only the joypad IRQ can deliver (IE bit 4 armed, nothing
+        // pending): the variant presses one key the machine is not pressing
+        if (!ex->cfg.no_key_fork && !ex->cfg.no_irq_fork && (*api->ie & 0x10))
+            fork_key(ex, pk);
+    }
+
+    // backward edges and call sites (operand bytes read through the map)
+    uint16_t target = 0;
+    int is_back = 0, is_call = 0;
+    switch (op) {
+    case 0x18: case 0x20: case 0x28: case 0x30: case 0x38: {
+        int8_t e8 = (int8_t)ms_mach_op(m, (uint16_t)(pc + 1));
+        target = (uint16_t)(pc + 2 + e8);
+        is_back = target <= pc;
+        break;
+    }
+    case 0xC3: case 0xC2: case 0xCA: case 0xD2: case 0xDA:
+    case 0xC4: case 0xCC: case 0xD4: case 0xDC: case 0xCD: {
+        target = (uint16_t)(ms_mach_op(m, (uint16_t)(pc + 1)) |
+                            (ms_mach_op(m, (uint16_t)(pc + 2)) << 8));
+        is_back = target <= pc && (op == 0xC3 || op == 0xC2 || op == 0xCA || op == 0xD2 || op == 0xDA);
+        is_call = op == 0xCD || op == 0xC4 || op == 0xCC || op == 0xD4 || op == 0xDC;
+        break;
+    }
+    default:
+        if ((op & 0xC7) == 0xC7) { // RST
+            target = (uint16_t)(op & 0x38);
+            is_call = 1;
+        }
+        break;
+    }
+    if (is_back && ex->cfg.loop_back_cap) {
+        int found = -1;
+        for (int i = 0; i < 8; i++)
+            if (ex->back_ring[i].pc == target && ex->back_ring[i].count) { found = i; break; }
+        if (found < 0) {
+            found = ex->back_idx;
+            ex->back_idx = (ex->back_idx + 1) & 7;
+            ex->back_ring[found].pc = target;
+            ex->back_ring[found].count = 0;
+        }
+        ex->back_ring[found].count++;
+        ms_copy_on_back_edge(&ex->ct, target, pk);
+        if (ex->back_ring[found].count > ex->cfg.loop_back_cap && !ex->session) {
+            res->cycle_cuts++;
+            ms_mach_cut(m, MS_CUT_CYCLES);
+        }
+    }
+    if (is_call && !ex->session) {
+        uint32_t tkey = ms_rom_index(target < 0x4000 ? 0 : (uint32_t)cur_bank(ex, target), target);
+        MsCallList *cl = ms_map_get_or_add(&res->callers, tkey);
+        if (cl && cl->n < 8) {
+            int dup = 0;
+            for (int i = 0; i < cl->n; i++)
+                if (cl->site[i] == pk) dup = 1;
+            if (!dup) cl->site[cl->n++] = pk;
+        }
+    }
+    // branch-site outcome: the previous conditional's natural outcome shows now
+    if (!ex->session && ex->prev_was_cond) {
+        ex->prev_was_cond = 0;
+        uint32_t skey = ms_rom_index(ex->prev_site_bank, ex->prev_site_pc);
+        MsSiteStat *st = ms_map_get_or_add(&res->sites, skey);
+        if (st) {
+            if (pc == ex->prev_target) st->taken++;
+            else st->nottaken++;
+        }
+    }
+
+    // exec marking + section touch (padding slides are never classified)
+    if (!ex->cur_pad) {
+        if (pc >= 0x8000) {
+            // executing VRAM/WRAM/HRAM code: real hardware allows it, but it
+            // is not ROM map information — count it and move on
+            u32_add(&res->exec_outside, 1);
+        } else {
+            uint8_t nf = (uint8_t)(ex->cur_forced ? MS_XF_FORCED : MS_XF_NATURAL);
+            uint8_t old = flags_or(&res->exec_flags[pk], nf);
+            if (!(old & nf)) ex->credit_exec++;
+            hits_add(&res->exec_hits[pk], 1);
+            if (is_entry) flags_or(&res->exec_flags[pk], MS_XF_ENTRY);
+            if (ex->irq_depth) flags_or(&res->exec_flags[pk], MS_XF_IRQ);
+            int len = sm83_len(op);
+            uint16_t hi = pc;
+            for (int i = 1; i < len; i++) { // operand bytes count as executed code
+                uint16_t a = (uint16_t)(pc + i);
+                if (pc < 0x4000 && a >= 0x4000) break; // crossed the window edge
+                uint32_t k = ms_rom_index(bank, a);
+                uint8_t o2 = flags_or(&res->exec_flags[k], nf);
+                if (!(o2 & nf)) ex->credit_exec++;
+                hi = a;
+            }
+            uint32_t id = ms_section_touch(res, (uint8_t)bank, pc, hi, ex->cur_forced ? 0 : 1,
+                                           is_entry, ex->cur_sec,
+                                           ex->cur_from_reset && !ex->cur_forced,
+                                           ex->irq_depth > 0);
+            ex->cur_sec = id;
+        }
+    }
+    ex->last_pc = pc;
+    ex->last_bank = bank;
+    ex->last_len = (uint8_t)sm83_len(op);
+    ex->have_last = 1;
+    ex->prev_was_cond = (uint8_t)(sm83_cond_of(op) >= 0 && !ex->session);
+    ex->prev_target = target;
+    ex->prev_site_bank = bank;
+    ex->prev_site_pc = pc;
+
+    // merged detection: steps since the last first discovery on this path
+    if (!ex->session && ex->tree) {
+        uint64_t cur = ex->credit_exec + ex->credit_data + ex->credit_copies + ex->credit_io +
+                       ex->credit_banks;
+        if (cur != ex->credit_shown) {
+            ex->credit_shown = cur;
+            ex->steps_no_credit = 0;
+        } else {
+            ex->steps_no_credit++;
+        }
     }
 }
 
 // --- forking -------------------------------------------------------------------------
-static void fork_branch(MsExplorer *ex, const MsMachine *m, int cond) {
+// The variant is captured by mutating the live machine through the public
+// api (the flag bit, the IF byte), saving, then restoring the natural state:
+// three state images per fork, no knowledge of the image layout needed.
+static void fork_branch(MsExplorer *ex, int cond, uint32_t site) {
     // per-site cap: loop bodies reach their conditional every iteration and
     // the extra variants are data drift, not new map information
-    uint32_t site = ms_rom_key(m, m->pc);
     uint32_t *cnt = ms_map_get_or_add(&ex->res->fork_counts, site);
     if (cnt && *cnt >= ex->cfg.fork_site_cap) {
         ex->res->forks_capped++;
         return;
     }
     if (cnt) (*cnt)++;
-    MsMachine f = *m;
-    f.f ^= sm83_cond_flag(cond); // the other outcome of this branch
+    MsMach *m = ex->mach;
+    uint8_t flag = sm83_cond_flag(cond); // 0x80 = Z, 0x10 = C
+    uint8_t *img = xrealloc(NULL, ex->sb);
+    ms_mach_save(m, img);
+    if (flag == 0x80) m->api->gbr->zr = m->api->gbr->zr ? 0 : 1; // Z set <=> zr == 0
+    else m->api->gbr->cf ^= 1;
+    uint8_t *fimg = xrealloc(NULL, ex->sb);
+    ms_mach_save(m, fimg);
+    ms_mach_load(m, img); // the natural side keeps running
+    free(img);
     // the fork keeps the reset lineage of its parent path
-    MsPathState *parent = NULL; // lineage passed through the machine copy below
-    (void)parent;
-    queue_push(ex, &f, ex->cfg.max_steps_path, 1, MS_PATH_FORK, ex->cur_kind == MS_SEED_RESET || ex->cur_from_reset);
+    uint16_t tpc = ex->mach->api->gbr->pc;
+    queue_push(ex, fimg, 1, MS_PATH_FORK,
+               ex->cur_kind == MS_SEED_RESET || ex->cur_from_reset,
+               choice_new(ex, ex->cur_choice, MS_PATH_FORK, site, (int)cur_bank(ex, tpc), tpc));
     ex->res->forks_branch++;
 }
 
-static void fork_irq(MsExplorer *ex, const MsMachine *m) {
-    uint8_t pending = (uint8_t)(m->ie & m->io[0x0F] & 0x1F);
+static void fork_irq(MsExplorer *ex) {
+    const MsGblApi *api = ex->mach->api;
+    uint8_t pending = (uint8_t)(*api->ie & api->io[0x0F] & 0x1F);
     if (!pending) return;
-    int bit = 0;
-    while (!(pending & (1 << bit))) bit++;
-    const MsPlatform *plat = m->plat;
-    uint16_t vector = 0;
-    for (int i = 0; i < plat->irq_count; i++)
-        if (plat->irqs[i].bit == bit) vector = plat->irqs[i].vector;
-    if (!vector) return;
-    MsMachine f = *m;
-    const MsTraceVt *t = f.trace;
-    void *tc = f.trace_ctx;
-    f.trace = NULL;
-    f.trace_ctx = NULL;
-    f.sp = (uint16_t)(f.sp - 2);
-    ms_write(&f, f.sp, (uint8_t)f.pc, MS_ACC_STACK);
-    ms_write(&f, (uint16_t)(f.sp + 1), (uint8_t)(f.pc >> 8), MS_ACC_STACK);
-    f.pc = vector;
-    f.ime = 0;
-    f.ime_delay = 0;
-    f.io[0x0F] &= (uint8_t)~(1 << bit);
-    f.trace = t;
-    f.trace_ctx = tc;
-    queue_push(ex, &f, ex->cfg.max_steps_path, 0, 2, 0);
+    MsMach *m = ex->mach;
+    uint8_t *img = xrealloc(NULL, ex->sb);
+    ms_mach_save(m, img);
+    api->io[0x0F] &= (uint8_t)~pending; // the variant: the IRQ never fires
+    uint8_t *fimg = xrealloc(NULL, ex->sb);
+    ms_mach_save(m, fimg);
+    ms_mach_load(m, img);
+    free(img);
+    uint16_t tpc = m->api->gbr->pc;
+    queue_push(ex, fimg, 1, MS_PATH_FORK,
+               ex->cur_kind == MS_SEED_RESET || ex->cur_from_reset,
+               choice_new(ex, ex->cur_choice, MS_PATH_FORK, 0, (int)cur_bank(ex, tpc), tpc));
     ex->res->forks_irq++;
 }
 
-// --- per-step bookkeeping -------------------------------------------------------------
-void ms_pre_step(MsExplorer *ex, MsMachine *m, uint8_t op) {
-    MsResults *res = ex->res;
-    if (ex->cur_pad) return; // padding slide: executed, but never classified code
-    if (m->pc >= 0x8000) {
-        // executing VRAM/WRAM/HRAM code: real hardware allows it, but it is
-        // not ROM map information — count it and move on
-        u32_add(&res->exec_outside, 1);
+
+/* the key-IRQ variant: the console raises the joypad IRQ when a NEW key is
+ * pressed; games that poll keys only through that IRQ see the press through
+ * the handler, which the natural path here cannot produce without a player.
+ * Each pressed variant is one key the machine currently does not hold,
+ * capped per site like branch forks. */
+static void fork_key(MsExplorer *ex, uint32_t site) {
+    const MsGblApi *api = ex->mach->api;
+    if (api->io[0x0F] & 0x10) return; // already pending: the natural IRQ fires
+    uint32_t *cnt = ms_map_get_or_add(&ex->res->fork_counts, site ^ 0x80000000u);
+    if (cnt && *cnt >= ex->cfg.fork_site_cap) {
+        ex->res->forks_capped++;
         return;
     }
-    uint32_t key = ms_rom_key(m, m->pc);
-    uint8_t bank = m->pc < 0x4000 ? (uint8_t)m->win_rom0 : (uint8_t)m->win_romN;
-    int is_entry = !ex->have_last || ex->last_bank != bank ||
-                   (uint16_t)(ex->last_pc + ex->last_len) != m->pc;
-    uint8_t nf = (uint8_t)(ex->cur_forced ? MS_XF_FORCED : MS_XF_NATURAL);
-    uint8_t old = flags_or(&res->exec_flags[key], nf);
-    if (!(old & nf)) ex->credit_exec++;
-    hits_add(&res->exec_hits[key], 1);
-    if (is_entry) flags_or(&res->exec_flags[key], MS_XF_ENTRY);
-    if (ex->cur_irq) flags_or(&res->exec_flags[key], MS_XF_IRQ);
-    int len = sm83_len(op);
-    uint16_t hi = m->pc;
-    for (int i = 1; i < len; i++) { // operand bytes count as executed code
-        uint16_t a = (uint16_t)(m->pc + i);
-        if (m->pc < 0x4000 && a >= 0x4000) break; // crossed the window edge
-        uint32_t k = ms_rom_key(m, a);
-        uint8_t o2 = flags_or(&res->exec_flags[k], nf);
-        if (!(o2 & nf)) ex->credit_exec++;
-        hi = a;
+    if (cnt) (*cnt)++;
+    static const uint8_t keys[8] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80};
+    // the keys the machine already holds, read back from P1 (bits low = pressed)
+    MsMach *m = ex->mach;
+    uint8_t *img = xrealloc(NULL, ex->sb);
+    ms_mach_save(m, img);
+    // the fork explorer never holds keys, so every key press is "new":
+    // set_buttons raises IF bit 4, which is exactly the console behaviour
+    for (int k = 0; k < 8; k++) {
+        if (k) { ms_mach_load(m, img); }
+        m->api->set_buttons(keys[k]);
+        if (api->io[0x0F] & 0x10) { // this key raised the joypad IRQ
+            uint8_t *fimg = xrealloc(NULL, ex->sb);
+            ms_mach_save(m, fimg);
+            uint16_t tpc = m->api->gbr->pc;
+            queue_push(ex, fimg, 1, MS_PATH_FORK,
+                       ex->cur_kind == MS_SEED_RESET || ex->cur_from_reset,
+                       choice_new(ex, ex->cur_choice, MS_PATH_FORK, site,
+                                  (int)cur_bank(ex, tpc), tpc));
+            ex->res->forks_key++;
+        }
     }
-    uint32_t id = ms_section_touch(res, bank, m->pc, hi, ex->cur_forced ? 0 : 1, is_entry, ex->cur_sec,
-                                   ex->cur_from_reset && !ex->cur_forced, ex->cur_irq);
-    ex->cur_sec = id;
-    ex->last_pc = m->pc;
-    ex->last_bank = bank;
-    // last_len is refreshed by the step trace after the instruction executes
-}
-
-// natural IRQ dispatch (play sessions): highest-priority pending bit, push PC,
-// jump to the vector, clear IME and the IF bit; the handler is marked MS_XF_IRQ
-// until its RETI
-int ms_service_irq(MsExplorer *ex, MsMachine *m) {
-    uint8_t pending = (uint8_t)(m->ime & m->ie & m->io[0x0F] & 0x1F);
-    if (!pending) return 0;
-    int bit = 0;
-    while (!(pending & (1 << bit))) bit++;
-    const MsPlatform *plat = m->plat;
-    uint16_t vector = 0;
-    for (int i = 0; i < plat->irq_count; i++)
-        if (plat->irqs[i].bit == bit) vector = plat->irqs[i].vector;
-    if (!vector) return 0;
-    m->halted = 0;
-    const MsTraceVt *t = m->trace;
-    void *tc = m->trace_ctx;
-    m->trace = NULL; // dispatch bookkeeping is not ROM behaviour
-    m->trace_ctx = NULL;
-    m->sp = (uint16_t)(m->sp - 2);
-    ms_write(m, m->sp, (uint8_t)m->pc, MS_ACC_STACK);
-    ms_write(m, (uint16_t)(m->sp + 1), (uint8_t)(m->pc >> 8), MS_ACC_STACK);
-    m->pc = vector;
-    m->ime = 0;
-    m->ime_delay = 0;
-    m->io[0x0F] &= (uint8_t)~(1 << bit);
-    m->trace = t;
-    m->trace_ctx = tc;
-    ex->irq_depth++;
-    if (m->trace && m->trace->event) m->trace->event(m->trace_ctx, MS_EV_IRQ, vector, (uint32_t)bit);
-    return bit + 1;
+    ms_mach_load(m, img); // the natural side continues, untouched
+    free(img);
 }
 
 // --- run loop ---------------------------------------------------------------------------
-static void run_path(MsExplorer *ex, MsPathState *p) {
-    MsResults *res = ex->res;
-    MsMachine *m = &p->m;
-    ex->cur = m;
-    ex->cur_forced = p->forced;
-    ex->cur_kind = p->kind;
-    ex->cur_from_reset = p->from_reset;
-    ex->cur_irq = (uint8_t)(p->kind == 2 ? 1 : 0);
-    ex->have_last = 0;
-    ex->cur_sec = 0;
-    ex->steps_this_path = 0;
-    memset(ex->back_ring, 0, sizeof ex->back_ring);
-    ex->back_idx = 0;
-    ms_copy_reset(&ex->ct);
-    while (ex->steps_this_path < p->remaining) {
-        if (res->steps_total >= ex->cfg.max_steps_total) {
-            res->budget_steps++;
-            ex->stop = 1;
-            break;
-        }
-        if (m->halted) break;
-        uint8_t op = ms_peek(m, m->pc);
-        // execution sliding through a padding run: keep going (the code after
-        // the run is often the point of a forced entry) but never call the
-        // padding itself code; bound the slide so garbage loops stay bounded
-        uint32_t pk = ms_rom_key(m, m->pc);
-        if ((res->static_flags[pk] & MS_SF_PAD) && (op == 0x00 || op == 0xFF)) {
-            if (++ex->pad_slide > 4096) { res->pad_cuts++; break; }
-            ex->cur_pad = 1;
-        } else {
-            ex->pad_slide = 0;
-            ex->cur_pad = 0;
-        }
-        int cond = sm83_cond_of(op);
-        if (cond >= 0) fork_branch(ex, m, cond);
-        if (!ex->cfg.no_irq_fork && m->ime && (m->ie & m->io[0x0F] & 0x1F)) fork_irq(ex, m);
-        ex->cur_bankN = m->win_romN;
-        ms_pre_step(ex, m, op);
-        int r = sm83_step(m);
-        ex->steps_this_path++;
-        u64_add(&res->steps_total, 1);
-        if (r != 0) break; // halt/stop/undefined opcode
-        if (ex->cfg.loop_back_cap) {
-            int cut = 0;
-            for (int i = 0; i < 8; i++)
-                if (ex->back_ring[i].count > ex->cfg.loop_back_cap) cut = 1;
-            if (cut) {
-                res->cycle_cuts++;
-                break;
-            }
-        }
-    }
-    if (ex->steps_this_path >= p->remaining) res->step_cuts++;
-    ms_copy_flush_path(ex, &ex->ct);
-    res->paths_run++;
-}
-
 // context projection: hash of the incoming state components this section reads
-static uint64_t project_ctx(MsExplorer *ex, const MsSection *s, const MsMachine *m) {
+// (the live machine holds the state being entered).  Cartridge RAM pages are
+// hashed raw: that folds the RAM bank and the RAMG gate into one proof.
+static uint64_t project_ctx(MsExplorer *ex, const MsSection *s) {
+    const MsGblApi *api = ex->mach->api;
+    gbl_cpu_t *g = api->gbr;
     uint64_t h = 0xcbf29ce484222325ull;
-    uint8_t regs[8] = { m->a, m->f, m->b, m->c, m->d, m->e, m->h, m->l };
-    h = ms_fnv1a(h, regs, 8);
-    h = ms_fnv1a_u32(h, m->sp);
-    if (s->ctx_mask & (1ull << MS_CTX_IME)) h = ms_fnv1a(h, &m->ime, 1);
-    if (s->ctx_mask & (1ull << MS_CTX_IE)) h = ms_fnv1a(h, &m->ie, 1);
-    if (s->ctx_mask & (1ull << MS_CTX_ROMN)) h = ms_fnv1a_u32(h, m->win_romN);
-    if (s->ctx_mask & (1ull << MS_CTX_RAMG)) h = ms_fnv1a(h, &m->ramg, 1);
-    if (s->ctx_mask & (1ull << MS_CTX_VBK)) h = ms_fnv1a(h, &m->vram_bank, 1);
+    h = ms_fnv1a(h, &g->a, 5); // a, zr, cf, hf, nf
+    h = ms_fnv1a(h, &g->bc, 2);
+    h = ms_fnv1a(h, &g->de, 2);
+    h = ms_fnv1a(h, &g->hl, 2);
+    h = ms_fnv1a_u32(h, g->sp);
+    if (s->ctx_mask & (1ull << MS_CTX_IME)) h = ms_fnv1a(h, &g->ime, 1);
+    if (s->ctx_mask & (1ull << MS_CTX_IE)) h = ms_fnv1a(h, api->ie, 1);
+    if (s->ctx_mask & (1ull << MS_CTX_ROMN)) h = ms_fnv1a_u32(h, g->rom_bank);
+    if (s->ctx_mask & (1ull << MS_CTX_VBK)) h = ms_fnv1a(h, &api->io[0x4F], 1);
     for (int pg = 0; pg < 32; pg++) {
-        if (s->page_mask_wram & (1ull << pg)) h = ms_fnv1a_u64(h, m->ph_wram[pg]);
-        if (s->page_mask_vram[0] & (1ull << pg)) h = ms_fnv1a_u64(h, m->ph_vram[0][pg]);
-        if (s->page_mask_vram[1] & (1ull << pg)) h = ms_fnv1a_u64(h, m->ph_vram[1][pg]);
+        if (s->page_mask_wram & (1ull << pg)) h = ms_fnv1a(h, api->wram + pg * 256, 256);
+        if (s->page_mask_vram[0] & (1ull << pg)) h = ms_fnv1a(h, api->vram + pg * 256, 256);
+        if (s->page_mask_vram[1] & (1ull << pg)) h = ms_fnv1a(h, api->vram + 0x2000 + pg * 256, 256);
     }
-    for (int pg = 0; pg < 64; pg++)
-        if (s->page_mask_sram & (1ull << pg)) h = ms_fnv1a_u64(h, m->ph_cram[pg]);
-    if (s->ctx_hram) h = ms_fnv1a_u64(h, m->ph_hram);
-    if (s->ctx_oam) h = ms_fnv1a_u64(h, m->ph_oam);
+    uint32_t eram_bytes = ms_gbl_variant_eram[ex->mach->vi];
+    for (int pg = 0; pg < 64 && (uint32_t)(pg * 256) < eram_bytes; pg++)
+        if (s->page_mask_sram & (1ull << pg)) h = ms_fnv1a(h, api->eram + pg * 256, 256);
+    if (s->ctx_hram) h = ms_fnv1a(h, api->hram, 0x7F);
+    if (s->ctx_oam) h = ms_fnv1a(h, api->oam, 0xA0);
     for (int i = 0; i < 0x80; i++)
-        if (s->io_read_mask & (1u << i)) h = ms_fnv1a(h, &m->io[i], 1);
-    (void)ex;
+        if (s->io_read_mask & (1u << i)) h = ms_fnv1a(h, &api->io[i], 1);
     return h;
 }
 
@@ -804,29 +912,77 @@ int ms_explore_step(MsExplorer *ex) {
         res->budget_paths++;
         return 0;
     }
-    MsPathState *p = &ex->queue[ex->q_head % ex->q_cap];
-    MsPathState cur = *p;
-    ex->q_head = (ex->q_head + 1) % ex->q_cap;
+    MsPathState *p;
+    if (ex->cfg.dfs) { // total search: the newest path first, deepest first
+        p = &ex->queue[(ex->q_head + ex->q_len - 1) % ex->q_cap];
+    } else {
+        p = &ex->queue[ex->q_head % ex->q_cap];
+        ex->q_head = (ex->q_head + 1) % ex->q_cap;
+    }
+    uint8_t *img = p->img;
+    int forced = p->forced, kind = p->kind, from_reset = p->from_reset;
+    uint32_t choice = p->choice;
     ex->q_len--;
+    ex->cur_forced = forced;
+    ex->cur_kind = (uint8_t)kind;
+    ex->cur_from_reset = (uint8_t)from_reset;
+    ex->cur_choice = choice;
+    ex->path_dead = 0;
+    ex->path_reset = 0;
+    ex->steps_no_credit = 0;
+    ex->credit_shown = ex->credit_exec + ex->credit_data + ex->credit_copies + ex->credit_io +
+                       ex->credit_banks;
+    ex->have_last = 0;
+    ex->cur_sec = 0;
+    ex->steps_this_path = 0;
+    ex->pad_slide = 0;
+    ex->cur_pad = 0;
+    ex->irq_depth = 0;
+    ex->reti_pending = 0;
+    ex->prev_was_cond = 0;
+    ex->pend_map = 0;
+    memset(ex->back_ring, 0, sizeof ex->back_ring);
+    ex->back_idx = 0;
+    ms_copy_reset(&ex->ct);
+    ms_mach_attach(ex->mach, ex, hook_step, hook_read, hook_write, NULL);
+    ms_mach_load(ex->mach, img); // execution starts at the image's pc
+    free(img);
+    p->img = NULL;
     // "same context" eviction: entering a section start with a context the
     // section cannot distinguish from one already explored
     if (!ex->cfg.no_context_evict) {
-        uint32_t key = ms_rom_key(&cur.m, cur.m.pc);
+        const MsGblApi *api = ex->mach->api;
+        uint32_t key = key_at(ex, api->gbr->pc);
         uint32_t sid1 = res->section_of[key];
         if (sid1) {
             MsSection *s = &res->sections[sid1 - 1];
             if (key == ms_rom_index(s->bank, s->lo)) {
-                uint64_t h = project_ctx(ex, s, &cur.m);
+                uint64_t h = project_ctx(ex, s);
                 int ins = ms_set_insert(&s->ctx_seen, h);
                 if (ins == 0) {
                     res->evicted_ctx++;
+                    if (ex->tree) ms_tree_close(ex->tree, choice, MS_ISSUE_MERGED);
                     return ex->q_len ? 1 : 0;
                 }
                 if (ins > 0) s->ctx_count++;
             }
         }
     }
-    run_path(ex, &cur);
+    int cut = ms_mach_run(ex->mach);
+    if (cut == MS_CUT_HALT) res->halt_cuts++;
+    ms_copy_flush_path(ex, &ex->ct);
+    res->paths_run++;
+    // the tree choice of this path closes with its outcome
+    if (ex->tree) {
+        int issue = MS_ISSUE_DONE;
+        if (ex->path_dead) issue = MS_ISSUE_DEAD;
+        else if (ex->path_reset) issue = MS_ISSUE_RESET;
+        else if (cut == MS_CUT_HALT || ex->steps_no_credit > ex->cfg.max_steps_path / 4)
+            issue = MS_ISSUE_MERGED; // a known loop, no way out found
+        else if (cut == MS_CUT_CYCLES) issue = MS_ISSUE_CAPPED;
+        else if (cut != MS_CUT_NONE) issue = MS_ISSUE_BUDGET;
+        ms_tree_close(ex->tree, choice, issue);
+    }
     return ex->q_len ? 1 : 0;
 }
 
@@ -920,24 +1076,36 @@ static int is_padding_at(const MsCart *c, uint32_t bank, uint16_t addr) {
     return 1;
 }
 
+static int is_illegal_op(uint8_t op) {
+    switch (op) {
+    case 0xD3: case 0xDB: case 0xDD: case 0xE3: case 0xE4:
+    case 0xEB: case 0xEC: case 0xED: case 0xF4: case 0xFC: case 0xFD:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 void ms_seed_gb(MsExplorer *ex) {
     MsResults *res = ex->res;
     const MsCart *c = res->cart;
     const MsPlatform *plat = res->plat;
-    MsMachine m;
-    ms_machine_init(&m, c, plat);
     // reset entry
-    ms_explorer_seed(ex, &m, MS_SEED_RESET, 0);
+    {
+        uint8_t *img = xrealloc(NULL, ex->sb);
+        memcpy(img, seed_base(ex), ex->sb);
+        ms_explorer_seed(ex, img, MS_SEED_RESET, 0);
+    }
     // RST and IRQ vectors when they hold something that is not padding
     for (int i = 0; i < plat->entry_count; i++) {
         const MsEntry *e = &plat->entries[i];
         if (e->kind == MS_SEED_RESET) continue;
         if (is_padding_at(c, 0, e->addr)) continue;
-        MsMachine v = m;
-        v.pc = e->addr;
-        ms_explorer_seed(ex, &v, e->kind, e->kind == MS_SEED_RST ? 1 : 0);
+        ms_explorer_seed_pc(ex, 0, e->addr, e->kind, e->kind == MS_SEED_RST ? 1 : 0);
     }
-    // pointer-table scan: every ROM word pointing at plausible code
+    // pointer-table scan: every ROM word pointing at plausible code; targets
+    // inside padding or pointer tables are evicted (static view — the
+    // dynamic data proof only exists once coverage ran, see --sweep)
     if (!ex->cfg.no_pointer_scan) {
         int seeded = 0;
         MsHashSet seen;
@@ -950,15 +1118,13 @@ void ms_seed_gb(MsExplorer *ex) {
                 if (v < 0x0100 || v >= 0x8000) continue;
                 uint32_t tbank = v < 0x4000 ? 0 : 1;
                 if (is_padding_at(c, tbank, v)) continue;
-                uint64_t ckey = (uint64_t)ms_rom_index((uint32_t)tbank, v);
-                if (ms_set_insert(&seen, ckey) == 0) continue;
-                MsMachine s = m;
-                s.pc = v;
-                if (v >= 0x4000) {
-                    s.rom_lo = 1;
-                    ms_mapper_update_windows(&s);
+                uint32_t tk = ms_rom_index(tbank, v);
+                if (res->static_flags[tk] & (MS_SF_PAD | MS_SF_POINTER)) {
+                    res->seeds_skipped_data++;
+                    continue;
                 }
-                ms_explorer_seed(ex, &s, MS_SEED_POINTER, 1);
+                if (ms_set_insert(&seen, tk) == 0) continue;
+                ms_explorer_seed_pc(ex, (int)tbank, v, MS_SEED_POINTER, 1);
                 seeded++;
             }
         }
@@ -968,11 +1134,7 @@ void ms_seed_gb(MsExplorer *ex) {
     if (ex->cfg.seed_banks) {
         for (int bank = 1; bank < res->banks; bank++) {
             if (is_padding_at(c, (uint32_t)bank, 0x4000)) continue;
-            MsMachine s = m;
-            s.rom_lo = (uint8_t)bank;
-            ms_mapper_update_windows(&s);
-            s.pc = 0x4000;
-            ms_explorer_seed(ex, &s, MS_SEED_POINTER, 1);
+            ms_explorer_seed_pc(ex, bank, 0x4000, MS_SEED_POINTER, 1);
         }
     }
 }
