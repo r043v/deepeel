@@ -121,12 +121,14 @@ dans la machine, snapshotée avec elle) :
   sessions vers le fourcheur et avance le fourcheur pendant que les workers
   attendent (bounded par `--fork-paths`, défaut 200, 0 = coupé) ; sessions
   stagnantes re-semées depuis le meilleur crédité.
-- **persistance** : `--state-dir D` écrit le pool (`pool.bin`) et les
-  snapshots toutes les `--save-epochs` époques ; `--resume` recharge et
-  continue. Un run coupé/repris est identique au run continu au sein de la
-  session rejouée (testé).
+- **persistance** : `--state-dir D` écrit le pool (`pool.bin` v3, snapshots
+  TAS compris) et les snapshots toutes les `--save-epochs` époques (et à
+  l'arrêt, SIGINT y compris) ; `--resume` recharge et continue. Un run
+  coupé/repris est identique au run continu au sein de la session rejouée
+  (testé).
 - **arrêt** : `--frames` (budget), `--stagnation F` frames sans découverte,
-  `--until-static` (carte statique entièrement expliquée), SIGINT gracieux ;
+  `--until-static` (carte statique entièrement expliquée), `--mem-cap MB`,
+  `--tas-solo` (fin des films), SIGINT gracieux ;
   l'arrêt des sessions enchaîne **obligatoirement** la phase de recherche
   totale (DFS sur la frontière commune, ci-dessous).
 
@@ -225,9 +227,28 @@ atteints par flux direct seul ».
   sont limités à un tour par site une fois le gestionnaire joypad (`$60`) vu.
 - Le mur global compte les pas du seul explorateur à forks : les pas des
   sessions jouées ne l'épuisent plus. Chaque tour de fermeture a son mur.
-- TAS : tous les `--tas-ckpt` images (défaut 240), l'état de la machine est
-  déposé dans la boîte de graines du fork — des états de jeu réels (RAM
-  peuplée) d'où forker. Compteur dans le rapport de session.
+- TAS : pendant le replay, l'état de la machine est capturé en **snapshot
+  PNG** (écran + machine complet, comme les snapshots humains) à intervalle
+  `min(tas_ckpt_frames, tas_ckpt_secs×60)` — par défaut `min(frames du film /
+  1024, 30 s × 60)` — plafonné à `--tas-ckpt-max` (défaut 1024) par film.
+  Ces « shoots » ne nourrissent **pas** l'exploration pendant le jeu : une
+  fois les films joués en entier et toute la couverture drainée (phase 3),
+  ils sont semés chacun dans le fourcheur et une passe d'exploration
+  supplémentaire leur est consacrée (phase 4, époques `tas-shoots` /
+  `tas-shoots-search` du journal des découvertes). `--tas-ckpt-live` rétablit
+  l'ancien dépôt direct dans la boîte de graines pendant le replay.
+  `--tas-ckpt N` force l'intervalle en frames, `--tas-ckpt-secs 0` coupe.
+- **TAS solo** : `--tas-solo` — seuls les workers TAS tournent (un par film,
+  pas de foule aléatoire/attract) et le jeu s'arrête à la fin des films :
+  le replay en mode single, ses snapshots conservés, puis les phases de
+  couverture et l'exploration des shoots. Combiné à `--mem-cap MB` (RSS
+  plafonné — la seule condition qui passe devant la priorité TAS) et
+  `--resume`, un long run se mène par segments : au plafond, arrêt
+  gracieux avec rapports, reprise là où il s'était arrêté.
+- **reprise TAS** : `pool.bin` (v3) conserve aussi les records de snapshots
+  TAS ; `--resume` relance chaque film là où s'est arrêté son dernier
+  snapshot (au plus 1 intervalle de jeu perdu), pas depuis la mise sous
+  tension.
 - Un opcode indéfini n'est plus consigné qu'une fois par site.
 
 Observations de l'outil (machine concrète, RAM à zéro), sans jeu, avant → après :

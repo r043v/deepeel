@@ -52,15 +52,29 @@ static void usage(void) {
             "    --frames F           total frame budget (default unlimited)\n"
             "    --seed N             input RNG base seed\n"
             "    --stagnation F       stop after F frames with no discovery (default never)\n"
+            "    --mem-cap MB         stop (gracefully, resumable) once RSS exceeds MB MiB\n"
             "    --until-static       also stop when every byte is explained\n"
             "    --checkpoints N      checkpoint pool size (default 48)\n"
             "    --stall E            empty epochs before re-seeding from the best (default 3)\n"
             "    --state-dir D        persist the pool (pool.bin) and the PNG snapshots\n"
             "    --resume             continue from a saved pool\n"
             "    --input f            replay an m0boy held-named input script (repeatable)\n"
-            "    --tas-ckpt N         TAS replay: fork-explorer seed every N frames (default 240, 0 = off)\n"
+            "    --tas-ckpt N         TAS replay: capture-interval override in frames (default:\n"
+            "                         auto, from --tas-ckpt-secs and --tas-ckpt-max)\n"
+            "    --tas-ckpt-secs S    TAS replay: a checkpoint snapshot every S seconds of game\n"
+            "                         time (default 30, 0 = off)\n"
+            "    --tas-ckpt-max N     TAS replay: snapshot cap per movie (default 1024); the\n"
+            "                         interval is min(movie/S, S secs), so a long movie stays at\n"
+            "                         one snapshot per S seconds\n"
+            "    --tas-ckpt-live      feed the TAS snapshots to the fork explorer during the\n"
+            "                         replay instead of the default: save them, then seed the\n"
+            "                         whole set after the coverage exploration\n"
             "    --tas f              replay a TAS movie: VBA .vmv, BizHawk .bk2 or an\n"
             "                         extracted input log (repeatable, one worker each)\n"
+            "    --tas-solo           single mode: only the TAS workers run (one per movie, no\n"
+            "                         random/attract crowd), the play stops when the movies end;\n"
+            "                         the checkpoint snapshots are kept, then explored after\n"
+            "                         the coverage phases\n"
             "    --human [slot]       play a checkpoint yourself in the GUI (pad/keyboard);\n"
             "                         every advance is snapshotted (PNG) and explored\n"
             "    --from-png f         load a snapshot PNG into the pool before starting\n"
@@ -153,6 +167,7 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--frames") && i + 1 < argc) scfg.max_frames = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed") && i + 1 < argc) scfg.seed = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--stagnation") && i + 1 < argc) scfg.stagnation_frames = strtoull(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--mem-cap") && i + 1 < argc) scfg.mem_cap_mb = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--until-static")) scfg.until_static = 1;
         else if (!strcmp(a, "--checkpoints") && i + 1 < argc) scfg.pool_cap = atoi(argv[++i]);
         else if (!strcmp(a, "--stall") && i + 1 < argc) scfg.stall_epochs = atoi(argv[++i]);
@@ -161,6 +176,10 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--input") && i + 1 < argc && scfg.inputs_n < 8) scfg.inputs[scfg.inputs_n++] = argv[++i];
         else if (!strcmp(a, "--tas") && i + 1 < argc && scfg.tas_n < 8) scfg.tas[scfg.tas_n++] = argv[++i];
         else if (!strcmp(a, "--tas-ckpt") && i + 1 < argc) scfg.tas_ckpt_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--tas-ckpt-secs") && i + 1 < argc) scfg.tas_ckpt_secs = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--tas-ckpt-max") && i + 1 < argc) scfg.tas_ckpt_max = atoi(argv[++i]);
+        else if (!strcmp(a, "--tas-ckpt-live")) scfg.tas_ckpt_live = 1;
+        else if (!strcmp(a, "--tas-solo")) scfg.tas_solo = 1;
         else if (!strcmp(a, "--inputs") && i + 1 < argc && !strcmp(argv[++i], "m0x")) scfg.uniform = 0;
         else if (!strcmp(a, "--uniform-hold") && i + 1 < argc) scfg.uniform_hold = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--fork-paths") && i + 1 < argc) scfg.fork_paths_per_epoch = atoi(argv[++i]);
@@ -240,14 +259,21 @@ static int cmd_explore(int argc, char **argv) {
         int reason = dp_play_run(play_engine);
         dp_watch_stop();
         double secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
-        static const char *why[4] = { "frame budget reached", "stagnation wall reached",
-                                      "interrupted", "every byte explained" };
+        static const char *why[6] = { "frame budget reached", "stagnation wall reached",
+                                      "interrupted", "every byte explained", "memory cap reached",
+                                      "TAS replay done" };
         fprintf(stderr, "deepeel: play done after %llu frames (%s), %.2fs\n",
                 (unsigned long long)dp_play_frames(play_engine),
-                reason >= 0 && reason < 4 ? why[reason] : "?", secs);
-        if (scfg.tas_n)
-            fprintf(stderr, "deepeel: %llu TAS gameplay states handed to the fork explorer\n",
-                    (unsigned long long)dp_play_tas_ckpts(play_engine));
+                reason >= 0 && reason < 6 ? why[reason] : "?", secs);
+        if (scfg.tas_n) {
+            if (scfg.tas_ckpt_live)
+                fprintf(stderr, "deepeel: %llu TAS gameplay states handed to the fork explorer\n",
+                        (unsigned long long)dp_play_tas_ckpts(play_engine));
+            else
+                fprintf(stderr, "deepeel: %llu TAS checkpoint snapshots saved (%llu captures)\n",
+                        (unsigned long long)dp_play_tas_snap_files(play_engine),
+                        (unsigned long long)dp_play_tas_ckpts(play_engine));
+        }
         if (scfg.tas_n)
             fprintf(stderr, "deepeel: TAS cuts absorbed (movie kept) %llu, wedged-machine fallbacks %llu\n",
                     (unsigned long long)dp_play_tas_cuts(play_engine),
@@ -266,6 +292,22 @@ static int cmd_explore(int argc, char **argv) {
             closure_rounds(ex, &res);
             fprintf(stderr, "deepeel: total search done in %.2fs (%llu paths)\n",
                     (double)(clock() - t1) / CLOCKS_PER_SEC, (unsigned long long)res.paths_run);
+            // phase 4: the TAS checkpoints were only saved during the replay;
+            // now that the whole coverage is drained, every one of them seeds
+            // its own pass (dedup keeps the already-known states cheap)
+            if (scfg.tas_n && !scfg.tas_ckpt_live && dp_play_tas_snap_files(play_engine)) {
+                clock_t t2 = clock();
+                dp_disc_add(&res, "tas-shoots", 0);
+                uint32_t k1 = res.disc_n ? res.disc[res.disc_n - 1].known : 0;
+                int seeds = dp_play_seed_tas_snaps(play_engine);
+                fprintf(stderr, "deepeel: TAS shoots: %d snapshots seeded\n", seeds);
+                dp_explore(ex);
+                dp_disc_add(&res, "tas-shoots-search", 0);
+                if (res.disc_n) res.disc[res.disc_n - 1].credit = res.disc[res.disc_n - 1].known - k1;
+                closure_rounds(ex, &res);
+                fprintf(stderr, "deepeel: TAS shoots explored in %.2fs (%llu paths)\n",
+                        (double)(clock() - t2) / CLOCKS_PER_SEC, (unsigned long long)res.paths_run);
+            }
         }
         DpBuf out;
         dp_buf_init(&out);

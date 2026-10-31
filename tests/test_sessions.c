@@ -273,5 +273,56 @@ int main(int argc, char **argv) {
         }
     }
 
+    // --- TAS checkpoint snapshots: saved during the replay, seeded after -----
+    {
+        // the same 700-frame movie as above; with the auto interval
+        // min(700/ckpt_max, secs*60) the captures land a few frames apart,
+        // the PNGs land in the state dir, and the post-play seeding hands
+        // them to the fork explorer
+        char tpath[512];
+        snprintf(tpath, sizeof tpath, "%s/tas_ckpt.log", dir);
+        FILE *f = fopen(tpath, "w");
+        CHECK(f != NULL);
+        if (f) {
+            for (int i = 0; i < 700; i++) fputs("|.......S|\n", f);
+            fclose(f);
+        }
+        DpCart *cart = load("fix_vblank");
+        CHECK(cart != NULL);
+        if (cart) {
+            DpResults res;
+            results_for(&res, cart);
+            DpConfig cfg;
+            dp_config_defaults(&cfg);
+            DpMach *mach = mach_for(cart);
+            DpExplorer *ex = dp_explorer_new(&cfg, &res, mach);
+            dp_seed_gb(ex);
+            DpSessionCfg sc = test_cfg("test_state_tas");
+            mkdir(sc.state_dir, 0755);
+            sc.sessions = 2; // worker 0 attract, worker 1 TAS
+            sc.tas[0] = tpath;
+            sc.tas_n = 1;
+            sc.max_frames = 400; // the TAS priority lets the movie finish first
+            sc.tas_ckpt_secs = 1;  // 60 frames of game time between captures
+            sc.tas_ckpt_max = 1024;
+            DpPlay *p = dp_play_new(&sc, &res, ex);
+            CHECK(p != NULL);
+            dp_play_run(p);
+            // 700 frames / 60 = 11 captures, the movie fully replayed
+            CHECK(dp_play_tas_snap_files(p) >= 10);
+            CHECK(dp_play_frames(p) >= 2 * 700);
+            // the fork explorer received nothing during the play (the seeds
+            // only enter at the post-play phase); q0 = the initial seeds
+            uint32_t q0 = ex->q_len;
+            int seeded = dp_play_seed_tas_snaps(p);
+            CHECK(seeded == (int)dp_play_tas_snap_files(p));
+            CHECK(ex->q_len == q0 + (uint32_t)seeded);
+            dp_play_free(p);
+            dp_explorer_free(ex);
+            dp_results_free(&res);
+            dp_cart_free(cart);
+        }
+    }
+
     TEST_DONE("test_sessions");
 }

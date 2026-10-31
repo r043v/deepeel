@@ -28,6 +28,7 @@ typedef struct DpSessionCfg {
     uint32_t seed;              // input RNG base
     uint64_t max_frames;        // stop after this many frames total (0 = unlimited)
     uint64_t stagnation_frames; // stop after this many frames with no discovery (0 = never)
+    uint64_t mem_cap_mb;        // stop (gracefully) once resident memory exceeds this (0 = off)
     int until_static;           // also stop when no byte is left unexplained
     int save_epochs;            // persist the checkpoint pool every n epochs
     const char *state_dir;      // persistence directory (pool file inside)
@@ -36,8 +37,17 @@ typedef struct DpSessionCfg {
     int inputs_n;
     const char *tas[8];         // TAS movie files (VBA .vmv, BizHawk .bk2, plain
     int tas_n;                  // input log): one worker each, frame by frame
-    uint32_t tas_ckpt_frames;   // TAS replay: deposit the machine to the fork explorer every n
-                                // frames (0 = off; default 240) — real gameplay states to fork from
+    int tas_solo;               // 1: only the TAS workers run (no attract/random crowd);
+                                // the play stops once every movie has ended — the
+                                // checkpoints are kept for the post-play phases
+    uint32_t tas_ckpt_frames;   // TAS replay: capture interval override, in frames (0 = auto:
+                                // derived from tas_ckpt_secs and tas_ckpt_max)
+    uint32_t tas_ckpt_secs;     // TAS replay: save a checkpoint snapshot every n seconds of game
+                                // time (0 = off; default 30)
+    int tas_ckpt_max;           // TAS replay: checkpoint snapshots kept per movie (default 1024)
+    int tas_ckpt_live;          // 1: the old behavior — the captures feed the fork explorer's
+                                // inbox during the replay instead of waiting for the post-play
+                                // phase (default 0)
     int uniform;                // 1 (default): uniform random keys (one of the
                                 // 8 buttons, held 1..uniform_hold frames); 0:
                                 // m0boy's weighted generator (m0x)
@@ -79,7 +89,7 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
 int dp_play_poll(DpPlay *p);
 // headless driver: poll until a stop condition, join the workers;
 // returns the reason (0 frame budget, 1 stagnation, 2 interrupt, 3 static
-// map fully explained)
+// map fully explained, 4 memory cap, 5 TAS replay done)
 int dp_play_run(DpPlay *p);
 void dp_play_free(DpPlay *p);
 // persist the checkpoint pool now (also automatic every save_epochs)
@@ -87,6 +97,11 @@ int dp_play_save(const DpPlay *p);
 int dp_play_done(const DpPlay *p);
 // TAS gameplay states handed to the fork explorer so far
 uint64_t dp_play_tas_ckpts(const DpPlay *p);
+// TAS checkpoint snapshots saved on disk during the replays
+uint64_t dp_play_tas_snap_files(const DpPlay *p);
+// seed the fork explorer from every saved TAS checkpoint snapshot (in movie
+// order), the post-play phase; returns the number of seeds deposited
+int dp_play_seed_tas_snaps(DpPlay *p);
 // fork-explorer cuts absorbed mid-movie / wedged-machine guard hits
 uint64_t dp_play_tas_cuts(const DpPlay *p);
 uint64_t dp_play_tas_cut_stuck(const DpPlay *p);

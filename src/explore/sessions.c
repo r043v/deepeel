@@ -28,6 +28,17 @@ static volatile sig_atomic_t g_sigint;
 static void on_sigint(int sig) { (void)sig; g_sigint = 1; }
 void dp_play_install_sigint(void) { signal(SIGINT, on_sigint); }
 
+// resident memory of this process, in MiB (0 when unreadable) — the memory
+// cap's probe: long runs must not eat the machine's RAM and swap
+static uint64_t rss_mb(void) {
+    FILE *f = fopen("/proc/self/statm", "r");
+    if (!f) return 0;
+    unsigned long rss_pages = 0;
+    if (fscanf(f, "%*lu %lu", &rss_pages) != 1) rss_pages = 0;
+    fclose(f);
+    return rss_pages * (unsigned long)sysconf(_SC_PAGESIZE) / (1024u * 1024u);
+}
+
 // --- config -------------------------------------------------------------------
 void dp_session_cfg_defaults(DpSessionCfg *cfg) {
     memset(cfg, 0, sizeof *cfg);
@@ -40,7 +51,9 @@ void dp_session_cfg_defaults(DpSessionCfg *cfg) {
     cfg->restart_rate = 8;
     cfg->save_epochs = 10;
     cfg->fork_paths_per_epoch = 200;
-    cfg->tas_ckpt_frames = 240;
+    cfg->tas_ckpt_frames = 0; // auto: derived from tas_ckpt_secs and tas_ckpt_max
+    cfg->tas_ckpt_secs = 30;
+    cfg->tas_ckpt_max = 1024;
     cfg->uniform = 1;
     cfg->uniform_hold = 64;
 }
@@ -188,6 +201,7 @@ typedef struct DpCheckpoint {
     uint64_t credit;
     uint32_t chosen;
     uint8_t slot0;
+    uint32_t tas; // movie index when captured from a TAS replay, DP_MAX_TAS otherwise
 } DpCheckpoint;
 
 typedef struct DpPool {
@@ -209,6 +223,32 @@ typedef struct DpInboxEnt {
 
 #define DP_INBOX_CAP 512
 
+// --- TAS checkpoint captures (worker -> snapshot writer) --------------------------
+// During a TAS replay the machine is captured on the (derived) interval; the
+// scheduler thread turns each capture into a snapshot PNG on disk and keeps
+// the record for the post-play seeding phase.  The queue only absorbs the
+// jitter between both paces; a full queue drops the capture, never blocks.
+typedef struct DpTasSnap {
+    uint8_t *img; // full state image, freed after the PNG is written
+    uint32_t frame;
+    uint64_t credit;
+    int tas;      // movie index (the --tas order)
+} DpTasSnap;
+
+#define DP_TSN_CAP 64
+#define DP_MAX_TAS 8
+
+typedef struct DpTasSnapRec {
+    uint32_t frame;
+    uint64_t credit;
+    int tas;
+    char path[600];
+} DpTasSnapRec;
+
+// defined near the snapshot machinery, used by the scheduler and the resume
+static int save_png_path(DpPlay *p, const DpCheckpoint *c, const char *path);
+static DpCheckpoint *tas_snap_load(DpPlay *p, const char *path);
+
 // --- play engine ------------------------------------------------------------------
 typedef enum { IN_RNG = 0, IN_ATTRACT, IN_SCRIPT, IN_TAS, IN_FIXED, IN_HUMAN } InMode;
 
@@ -226,6 +266,8 @@ typedef struct DpWorker {
     DpScriptEv *script;
     int script_n, script_pos;
     DpTas tas;                 // IN_TAS: the loaded movie (masks per frame)
+    int tas_idx;               // IN_TAS: movie index (the --tas order)
+    uint32_t tas_ckpt_every;   // IN_TAS: capture interval in frames (0 = no capture)
     uint8_t fixed_mask;
     uint8_t human_buttons; // IN_HUMAN: set by the GUI thread before each frame
     uint8_t applied_mask;  // the mask the current frame applied
@@ -288,6 +330,14 @@ struct DpPlay {
     DpInboxEnt *inb;
     int inb_n;
     uint64_t inb_dropped;
+    // TAS checkpoint captures waiting for their snapshot PNG
+    pthread_mutex_t tsn_mtx;
+    DpTasSnap tsn[DP_TSN_CAP];
+    int tsn_n;
+    int tas_taken[DP_MAX_TAS]; // captures already handed over per movie (the cap)
+    DpTasSnapRec *tasnaps;     // the snapshots on disk, in movie then frame order
+    int tasnaps_n, tasnaps_cap;
+    int tas_resume_rec[DP_MAX_TAS]; // resume: latest snapshot record per movie (-1 = none)
     uint64_t tas_ckpts;
     uint64_t tas_cuts;      // fork-explorer cuts absorbed mid-movie (movie kept)
     uint64_t tas_cut_stuck; // consecutive-cut guard hits (movie then falls to random play)
@@ -531,13 +581,33 @@ static void worker_vblank(DpMach *m) {
     w->epoch_done++;
     if (w->mode == IN_TAS) watch_sample(p, w, m);
     // TAS gameplay states are the best fork origins there are: populated RAM,
-    // real level, real inputs behind them.  The movie's own pace is untouched.
-    if (w->mode == IN_TAS && p->cfg.tas_ckpt_frames && w->frames_done % p->cfg.tas_ckpt_frames == 0) {
-        uint8_t *img = worker_image(w);
-        if (img) {
-            deposit_img(p, img);
-            free(img);
-            __atomic_fetch_add(&p->tas_ckpts, 1, __ATOMIC_RELAXED);
+    // real level, real inputs behind them.  By default the capture only goes
+    // to the snapshot writer (the seeding happens after the whole play);
+    // --tas-ckpt-live keeps the old direct hand-over to the fork explorer.
+    if (w->mode == IN_TAS && w->tas_ckpt_every && w->frames_done % w->tas_ckpt_every == 0) {
+        int take = p->cfg.tas_ckpt_live;
+        if (!take) {
+            pthread_mutex_lock(&p->tsn_mtx);
+            take = p->tas_taken[w->tas_idx] < p->cfg.tas_ckpt_max && p->tsn_n < DP_TSN_CAP;
+            if (take) p->tas_taken[w->tas_idx]++;
+            pthread_mutex_unlock(&p->tsn_mtx);
+        }
+        if (take) {
+            uint8_t *img = worker_image(w);
+            if (img) {
+                __atomic_fetch_add(&p->tas_ckpts, 1, __ATOMIC_RELAXED);
+                if (p->cfg.tas_ckpt_live) deposit_img(p, img);
+                else {
+                    pthread_mutex_lock(&p->tsn_mtx);
+                    if (p->tsn_n < DP_TSN_CAP) {
+                        p->tsn[p->tsn_n++] =
+                            (DpTasSnap){ img, w->frames_done, worker_credit(w), w->tas_idx };
+                        img = NULL; // the queue entry owns it now
+                    }
+                    pthread_mutex_unlock(&p->tsn_mtx);
+                }
+                free(img);
+            }
         }
     }
     if (w->seg_left) w->seg_left--;
@@ -646,17 +716,19 @@ static void *worker_main(void *arg) {
 }
 
 // --- persistence -------------------------------------------------------------------------
-// pool file v2: every checkpoint is a full state image (variant-shaped), so
-// the record is slot0/chosen/frame/credit + the image.  v1 pool files (raw
-// DpMachine dumps) are not readable anymore.
+// pool file v3: every checkpoint is a full state image (variant-shaped), so
+// the record is slot0/chosen/frame/credit/tas + the image; then the snapshot
+// records (path + frame/credit/tas) and the TAS replay positions, so a
+// resume continues each movie where it stopped.  v1/v2 pool files (raw
+// DpMachine dumps, then the pre-TAS layout) are not readable anymore.
 int dp_play_save(const DpPlay *p) {
     if (!p->cfg.state_dir) return 0;
     char path[512];
     snprintf(path, sizeof path, "%s/pool.bin", p->cfg.state_dir);
     FILE *f = fopen(path, "wb");
     if (!f) return 0;
-    const char magic[4] = { 'M', 'S', 'P', 'S' };
-    const uint32_t ver = 2;
+    const char magic[4] = { 'D', 'P', 'P', 'S' };
+    const uint32_t ver = 3;
     uint32_t sb = p->fork->sb;
     fwrite(magic, 1, 4, f);
     fwrite(&ver, sizeof ver, 1, f);
@@ -670,21 +742,36 @@ int dp_play_save(const DpPlay *p) {
         fwrite(&c->chosen, sizeof c->chosen, 1, f);
         fwrite(&c->frame, sizeof c->frame, 1, f);
         fwrite(&c->credit, sizeof c->credit, 1, f);
+        fwrite(&c->tas, sizeof c->tas, 1, f);
         fwrite(c->img, 1, sb, f);
     }
     pthread_mutex_unlock(&p->pool.mtx);
     fwrite(&p->epoch, sizeof p->epoch, 1, f);
     fwrite(&p->total_frames, sizeof p->total_frames, 1, f);
     fwrite(&p->stagnation, sizeof p->stagnation, 1, f);
+    // the TAS snapshot records (so the post-play seeding survives a stop)
+    uint32_t tn = (uint32_t)p->tasnaps_n;
+    fwrite(&tn, sizeof tn, 1, f);
+    for (int i = 0; i < p->tasnaps_n; i++) {
+        const DpTasSnapRec *r = &p->tasnaps[i];
+        fwrite(&r->frame, sizeof r->frame, 1, f);
+        fwrite(&r->credit, sizeof r->credit, 1, f);
+        fwrite(&r->tas, sizeof r->tas, 1, f);
+        uint32_t pl = (uint32_t)strlen(r->path);
+        fwrite(&pl, sizeof pl, 1, f);
+        fwrite(r->path, 1, pl, f);
+    }
     fclose(f);
     return 1;
 }
 
 static DpCheckpoint *ckpt_read(FILE *f, uint32_t sb) {
     DpCheckpoint *c = calloc(1, sizeof *c);
+    c->tas = DP_MAX_TAS;
     if (fread(&c->slot0, 1, 1, f) != 1 || fread(&c->chosen, sizeof c->chosen, 1, f) != 1 ||
         fread(&c->frame, sizeof c->frame, 1, f) != 1 ||
-        fread(&c->credit, sizeof c->credit, 1, f) != 1) {
+        fread(&c->credit, sizeof c->credit, 1, f) != 1 ||
+        fread(&c->tas, sizeof c->tas, 1, f) != 1) {
         free(c);
         return NULL;
     }
@@ -705,8 +792,8 @@ static int pool_load(DpPlay *p) {
     if (!f) return 0;
     char magic[4];
     uint32_t ver, sb;
-    if (fread(magic, 1, 4, f) != 4 || memcmp(magic, "MSPS", 4) || fread(&ver, sizeof ver, 1, f) != 1 ||
-        ver != 2 || fread(&sb, sizeof sb, 1, f) != 1 || sb != p->fork->sb) {
+    if (fread(magic, 1, 4, f) != 4 || memcmp(magic, "DPPS", 4) || fread(&ver, sizeof ver, 1, f) != 1 ||
+        ver != 3 || fread(&sb, sizeof sb, 1, f) != 1 || sb != p->fork->sb) {
         fclose(f);
         return 0;
     }
@@ -726,6 +813,37 @@ static int pool_load(DpPlay *p) {
     if (ok && fread(&p->epoch, sizeof p->epoch, 1, f) != 1) ok = 0;
     if (ok && fread(&p->total_frames, sizeof p->total_frames, 1, f) != 1) ok = 0;
     if (ok && fread(&p->stagnation, sizeof p->stagnation, 1, f) != 1) ok = 0;
+    if (ok) { // the TAS snapshot records + the replay positions to resume from
+        uint32_t tn = 0;
+        if (fread(&tn, sizeof tn, 1, f) != 1 || tn > 64u * 1024u) ok = 0;
+        for (uint32_t i = 0; ok && i < tn; i++) {
+            DpTasSnapRec r = { 0, 0, DP_MAX_TAS, "" };
+            uint32_t pl = 0;
+            if (fread(&r.frame, sizeof r.frame, 1, f) != 1 ||
+                fread(&r.credit, sizeof r.credit, 1, f) != 1 ||
+                fread(&r.tas, sizeof r.tas, 1, f) != 1 ||
+                fread(&pl, sizeof pl, 1, f) != 1 || pl >= sizeof r.path ||
+                fread(r.path, 1, pl, f) != pl) {
+                ok = 0;
+                break;
+            }
+            r.path[pl] = 0;
+            if (p->tasnaps_n == p->tasnaps_cap) {
+                p->tasnaps_cap = p->tasnaps_cap ? p->tasnaps_cap * 2 : 64;
+                p->tasnaps = realloc(p->tasnaps, (size_t)p->tasnaps_cap * sizeof *p->tasnaps);
+            }
+            p->tasnaps[p->tasnaps_n++] = r;
+        }
+        // the resume point of each movie: its latest snapshot record — the
+        // captures live on disk (PNG), not in the pool
+        if (ok)
+            for (int i = 0; i < p->tasnaps_n; i++) {
+                DpTasSnapRec *r = &p->tasnaps[i];
+                if (r->tas >= DP_MAX_TAS) continue;
+                int cur = p->tas_resume_rec[r->tas];
+                if (cur < 0 || r->frame >= p->tasnaps[cur].frame) p->tas_resume_rec[r->tas] = i;
+            }
+    }
     fclose(f);
     if (!ok) {
         for (int i = 0; i < p->pool.n; i++) ckpt_free(p->pool.slot[i]);
@@ -768,6 +886,8 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
     pthread_mutex_init(&p->inb_mtx, NULL);
     pthread_mutex_init(&p->preview_mtx, NULL);
     pthread_mutex_init(&p->watch_mtx, NULL);
+    pthread_mutex_init(&p->tsn_mtx, NULL);
+    for (int k = 0; k < DP_MAX_TAS; k++) p->tas_resume_rec[k] = -1;
     p->inb = calloc(DP_INBOX_CAP, sizeof(DpInboxEnt));
     p->pool.cap = p->cfg.pool_cap;
 
@@ -792,8 +912,10 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
     dp_mach_set_rom(p->preview, p->cart->rom, p->cart->rom_size);
     p->preview->render = 1;
 
-    // workers: 0 attract, then one per replay script, the rest random
+    // workers: 0 attract, then one per replay script, the rest random —
+    // or, tas_solo, only one worker per movie and nobody else
     int maxw = DP_GBL_MACHINES - 2; // instance 0 = fork, last = preview
+    if (p->cfg.tas_solo && p->cfg.tas_n > 0) p->cfg.sessions = p->cfg.tas_n;
     if (p->cfg.sessions > maxw) {
         fprintf(stderr, "deepeel: %d sessions requested, %d machine instances available: clamping\n",
                 p->cfg.sessions, maxw);
@@ -808,21 +930,39 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
         w->p = p;
         w->id = i;
         w->mode = IN_RNG;
-        if (i == 0) w->mode = IN_ATTRACT;
-        else if (i - 1 < p->cfg.inputs_n && p->cfg.inputs[i - 1]) {
+        int t = p->cfg.tas_solo ? i : i - 1 - p->cfg.inputs_n; // TAS movie index
+        if (i == 0 && !p->cfg.tas_solo) w->mode = IN_ATTRACT;
+        else if (!p->cfg.tas_solo && i - 1 < p->cfg.inputs_n && p->cfg.inputs[i - 1]) {
             w->mode = IN_SCRIPT;
             if (!script_load(p->cfg.inputs[i - 1], &w->script, &w->script_n)) {
                 fprintf(stderr, "deepeel: cannot read input script %s\n", p->cfg.inputs[i - 1]);
                 w->mode = IN_RNG;
             }
-        } else if (i - 1 - p->cfg.inputs_n < p->cfg.tas_n && p->cfg.tas[i - 1 - p->cfg.inputs_n]) {
+        } else if (t >= 0 && t < p->cfg.tas_n && p->cfg.tas[t]) {
             char terr[256];
-            if (dp_tas_load(p->cfg.tas[i - 1 - p->cfg.inputs_n], &w->tas, terr, sizeof terr)) {
+            if (dp_tas_load(p->cfg.tas[t], &w->tas, terr, sizeof terr)) {
                 w->mode = IN_TAS;
-                fprintf(stderr, "deepeel: TAS %s: %u frames%s\n", w->tas.source, w->tas.frames,
+                w->tas_idx = t;
+                // capture interval: both constraints are lower bounds on the
+                // interval — the pace (tas_ckpt_secs of game time) and the
+                // cap (the whole movie yields at most tas_ckpt_max snapshots)
+                w->tas_ckpt_every = p->cfg.tas_ckpt_frames;
+                if (!w->tas_ckpt_every && p->cfg.tas_ckpt_secs && p->cfg.tas_ckpt_max > 0) {
+                    uint32_t by_cap = w->tas.frames / (uint32_t)p->cfg.tas_ckpt_max;
+                    uint32_t by_secs = p->cfg.tas_ckpt_secs * 60; // 60 fps game time
+                    w->tas_ckpt_every = by_cap > by_secs ? by_cap : by_secs;
+                }
+                fprintf(stderr, "deepeel: TAS %s: %u frames%s%s\n", w->tas.source, w->tas.frames,
                         w->tas.anchored
                             ? " (savestate-anchored: replayed from power-on, best effort)"
-                            : "");
+                            : "",
+                        w->tas_ckpt_every
+                            ? ""
+                            : " (no checkpoint capture)");
+                if (w->tas_ckpt_every)
+                    fprintf(stderr, "deepeel: TAS %d: checkpoint snapshot every %u frames (max %d)\n",
+                            w->tas_idx, w->tas_ckpt_every,
+                            p->cfg.tas_ckpt_max > 0 ? p->cfg.tas_ckpt_max : 0);
             } else {
                 fprintf(stderr, "deepeel: TAS %s: %s\n", p->cfg.tas[i - 1 - p->cfg.inputs_n], terr);
                 w->mode = IN_RNG;
@@ -837,6 +977,21 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
         w->in.uniform = p->cfg.uniform;
         w->in.uniform_hold = p->cfg.uniform_hold ? p->cfg.uniform_hold : 64;
         worker_setup(p, w, 1 + i);
+        // resume: a TAS worker continues its movie at its latest snapshot
+        if (w->mode == IN_TAS && p->cfg.resume && p->tas_resume_rec[w->tas_idx] >= 0) {
+            const DpTasSnapRec *r = &p->tasnaps[p->tas_resume_rec[w->tas_idx]];
+            DpCheckpoint *c = tas_snap_load(p, r->path);
+            if (c) {
+                dp_mach_load(w->mach, c->img);
+                w->frames_done = c->frame;
+                fprintf(stderr, "deepeel: TAS %d resumed at frame %u: %s\n", w->tas_idx, c->frame,
+                        r->path);
+                ckpt_free(c);
+            } else {
+                fprintf(stderr, "deepeel: TAS %d: resume snapshot unreadable (%s), replay from power-on\n",
+                        w->tas_idx, r->path);
+            }
+        }
         w->seg_left = p->cfg.segment_min + rnd(&w->in.rng) % p->cfg.segment_span;
         w->my_epoch = 0;
         if (pthread_create(&w->th, NULL, worker_main, w) == 0) w->started = 1;
@@ -871,6 +1026,8 @@ void dp_play_free(DpPlay *p) {
     for (int i = 0; i < p->pool.n; i++) ckpt_free(p->pool.slot[i]);
     for (int i = 0; i < p->inb_n; i++) free(p->inb[i].img);
     free(p->inb);
+    for (int i = 0; i < p->tsn_n; i++) free(p->tsn[i].img);
+    free(p->tasnaps);
     dp_mach_close(p->preview);
     p->res->mt = 0;
     pthread_mutex_destroy(&p->bar_mtx);
@@ -879,6 +1036,7 @@ void dp_play_free(DpPlay *p) {
     pthread_mutex_destroy(&p->inb_mtx);
     pthread_mutex_destroy(&p->preview_mtx);
     pthread_mutex_destroy(&p->watch_mtx);
+    pthread_mutex_destroy(&p->tsn_mtx);
     free(p);
 }
 
@@ -895,12 +1053,62 @@ static void drain_inbox(DpPlay *p) {
     }
 }
 
+// TAS captures -> snapshot PNGs on disk + records kept for the post-play
+// seeding phase (and for the resume point)
+static void drain_tas_snaps(DpPlay *p) {
+    for (;;) {
+        pthread_mutex_lock(&p->tsn_mtx);
+        if (!p->tsn_n) {
+            pthread_mutex_unlock(&p->tsn_mtx);
+            return;
+        }
+        DpTasSnap s = p->tsn[0];
+        memmove(&p->tsn[0], &p->tsn[1], (size_t)(p->tsn_n - 1) * sizeof s);
+        p->tsn_n--;
+        pthread_mutex_unlock(&p->tsn_mtx);
+        const DpCheckpoint c = { s.img, p->fork->sb, s.frame, s.credit, 0, 0, (uint32_t)s.tas };
+        char path[600];
+        snprintf(path, sizeof path, "%s/tas%02d-f%u.png", p->snap_dir, s.tas, s.frame);
+        if (save_png_path(p, &c, path)) {
+            if (p->tasnaps_n == p->tasnaps_cap) {
+                p->tasnaps_cap = p->tasnaps_cap ? p->tasnaps_cap * 2 : 64;
+                p->tasnaps = realloc(p->tasnaps, (size_t)p->tasnaps_cap * sizeof *p->tasnaps);
+            }
+            DpTasSnapRec *r = &p->tasnaps[p->tasnaps_n++];
+            r->frame = s.frame;
+            r->credit = s.credit;
+            r->tas = s.tas;
+            snprintf(r->path, sizeof r->path, "%s", path);
+        }
+        free(s.img);
+    }
+}
+
 // one scheduler step.  While the workers run, this returns immediately; at an
 // epoch boundary it collects the credits, drains the session-seed inbox into
 // the fork explorer's queue, gives the fork explorer a slice, re-seeds the
 // stagnant sessions (their next segment_end picks the best checkpoint) and
 // checks the stop conditions.
 uint64_t dp_play_tas_ckpts(const DpPlay *p) { return p->tas_ckpts; }
+uint64_t dp_play_tas_snap_files(const DpPlay *p) { return (uint64_t)p->tasnaps_n; }
+
+// the post-play phase: every snapshot saved during the TAS replays becomes a
+// fork-explorer seed, in movie then frame order
+int dp_play_seed_tas_snaps(DpPlay *p) {
+    int n = 0;
+    for (int i = 0; i < p->tasnaps_n; i++) {
+        DpCheckpoint *c = tas_snap_load(p, p->tasnaps[i].path);
+        if (!c) {
+            fprintf(stderr, "deepeel: TAS snapshot unreadable: %s\n", p->tasnaps[i].path);
+            continue;
+        }
+        dp_explorer_seed(p->fork, c->img, 3 /* DP_SEED_POINTER: real play state */, 0);
+        n++;
+        c->img = NULL; // the fork explorer's queue owns the image now
+        ckpt_free(c);
+    }
+    return n;
+}
 uint64_t dp_play_tas_cuts(const DpPlay *p) { return p->tas_cuts; }
 uint64_t dp_play_tas_cut_stuck(const DpPlay *p) { return p->tas_cut_stuck; }
 
@@ -950,6 +1158,8 @@ int dp_play_poll(DpPlay *p) {
 
     // sessions -> fork explorer: real play states become exploration seeds
     drain_inbox(p);
+    // TAS captures -> snapshot PNGs (the seeding waits for the post-play phase)
+    drain_tas_snaps(p);
     // the fork advances while the sessions wait; bounded by paths, not time,
     // so a fixed-seed run is reproducible
     for (int i = 0; i < p->cfg.fork_paths_per_epoch && p->fork->q_len && !p->fork->stop; i++)
@@ -966,6 +1176,8 @@ int dp_play_poll(DpPlay *p) {
     else if (p->cfg.max_frames && !tas_left && p->total_frames >= p->cfg.max_frames) reason = 0;
     else if (p->cfg.stagnation_frames && !tas_left && p->stagnation >= p->cfg.stagnation_frames) reason = 1;
     else if (p->cfg.until_static && !tas_left && p->unexplained == 0 && frames) reason = 3;
+    else if (p->cfg.mem_cap_mb && rss_mb() > p->cfg.mem_cap_mb) reason = 4;
+    else if (p->cfg.tas_solo && !tas_left && p->epoch > 0) reason = 5;
     if (reason >= 0) {
         p->quit = 1;
         p->stop_reason = reason;
@@ -1018,6 +1230,7 @@ static DpCheckpoint *ckpt_from_payload(const uint8_t *d, size_t n) {
     size_t need = 1 + sizeof(uint32_t) * 3 + sizeof(uint64_t);
     if (n < need) return NULL;
     DpCheckpoint *c = calloc(1, sizeof *c);
+    c->tas = DP_MAX_TAS;
     size_t o = 0;
     memcpy(&c->slot0, d + o, 1); o += 1;
     memcpy(&c->chosen, d + o, sizeof c->chosen); o += sizeof c->chosen;
@@ -1053,8 +1266,9 @@ static void preview_frame(DpPlay *p, const uint8_t *img, uint8_t *gray) {
     pthread_mutex_unlock(&p->preview_mtx);
 }
 
-// writes one snapshot PNG: the frame the player would see plus the machine
-static int save_png_of(DpPlay *p, const DpCheckpoint *c) {
+// writes one snapshot PNG at the given path: the frame the player would see
+// plus the machine
+static int save_png_path(DpPlay *p, const DpCheckpoint *c, const char *path) {
     static uint8_t gray[DP_GB_SCREEN_W * DP_GB_SCREEN_H];
     static uint8_t rgb[DP_GB_SCREEN_W * DP_GB_SCREEN_H * 3];
     preview_frame(p, c->img, gray);
@@ -1065,14 +1279,34 @@ static int save_png_of(DpPlay *p, const DpCheckpoint *c) {
     DpBuf pay;
     dp_buf_init(&pay);
     payload_ckpt(&pay, c);
-    char path[600];
-    snprintf(path, sizeof path, "%s/snap-%03u-cred%llu.png", p->snap_dir, p->snap_seq++,
-             (unsigned long long)c->credit);
     int ok = dp_png_save(path, DP_GB_SCREEN_W, DP_GB_SCREEN_H, rgb, pay.p, pay.len);
     dp_buf_free(&pay);
     if (ok) snprintf(p->last_snap, sizeof p->last_snap, "%s", path);
     if (ok && p->cfg.verbose) fprintf(stderr, "deepeel: snapshot %s\n", path);
     return ok;
+}
+
+static int save_png_of(DpPlay *p, const DpCheckpoint *c) {
+    char path[600];
+    snprintf(path, sizeof path, "%s/snap-%03u-cred%llu.png", p->snap_dir, p->snap_seq++,
+             (unsigned long long)c->credit);
+    return save_png_path(p, c, path);
+}
+
+// reads a snapshot PNG back into a checkpoint (sb-checked against this run)
+static DpCheckpoint *tas_snap_load(DpPlay *p, const char *path) {
+    int w, h;
+    uint8_t *rgb, *pay;
+    size_t pay_n;
+    if (!dp_png_load(path, &w, &h, &rgb, &pay, &pay_n)) return NULL;
+    free(rgb);
+    DpCheckpoint *c = pay ? ckpt_from_payload(pay, pay_n) : NULL;
+    free(pay);
+    if (!c || c->sb != p->fork->sb) {
+        ckpt_free(c);
+        return NULL;
+    }
+    return c;
 }
 
 // --- human takeover -----------------------------------------------------------------------
