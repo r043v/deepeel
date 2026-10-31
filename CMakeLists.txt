@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(memscan VERSION 0.1.0 LANGUAGES C)
+project(memscan VERSION 0.2.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -27,16 +27,23 @@ endif()
 add_library(memscan_core STATIC
   src/core/cart.c
   src/core/machine.c
+  src/core/snapshot_png.c
   src/cpu/sm83/sm83_exec.c
   src/cpu/sm83/sm83_disasm.c
+  src/cpu/sm83/sm83_cycles.c
   src/platform/gb/gb_plat.c
+  src/platform/gb/gb_tick.c
+  src/platform/gb/gb_ppu.c
   src/explore/explorer.c
   src/explore/sections.c
   src/explore/copies.c
+  src/explore/sessions.c
   src/report/report.c
   src/gui/font5x7.c
   ${MS_GUI_FILE}
 )
+find_package(Threads REQUIRED)
+target_link_libraries(memscan_core PUBLIC Threads::Threads)
 target_include_directories(memscan_core PUBLIC src include ${SDL2_INCLUDE_DIRS})
 if(SDL2_FOUND AND BUILD_GUI)
   set(MS_HAS_GUI 1)

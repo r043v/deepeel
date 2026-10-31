@@ -12,7 +12,7 @@ temps réel. Démarrer par `README.md`, puis `docs/GB.fr.md`.
   construction par `tests/build_fixtures.py` dans le répertoire de build ;
   les ROMs réelles restent hors du dépôt (essais manuels dans `output/`,
   ignoré).
-- Les changements du moteur d'exploration doivent garder les 4 tests verts :
+- Les changements du moteur d'exploration doivent garder les 5 tests verts :
   `ctest --test-dir build --output-on-failure`. `test_explorer` épingle les
   comportements contractuels : les deux côtés d'un conditionnel, l'éviction
   par contexte, les enregistrements de copie (boucle CPU, OAM DMA), la

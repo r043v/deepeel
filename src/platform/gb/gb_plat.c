@@ -5,6 +5,7 @@
 // (timer/PPU/serial progress) are held static; their IRQ entries are seeded
 // instead, so handler code is still explored.  See docs/GB.fr.md.
 #include "../../core/machine.h"
+#include "gb.h"
 
 // ---------------------------------------------------------------------------
 // register registry: every register/range a GB ROM can meaningfully touch
@@ -219,7 +220,7 @@ static void oam_dma(MsMachine *m, uint8_t page) {
         for (int i = 0; i < 0xA0; i++) { h ^= m->oam[i]; h *= 0x100000001b3ull; }
         m->ph_oam = h;
     }
-    MsCopyRec rec = { 1, (uint8_t)sp, MS_SPACE_OAM, bank, 0, src, (uint16_t)(src + 0x9F), 0xFE00, 0xFE9F, 0xA0, m->pc };
+    MsCopyRec rec = { 1, 1, (uint8_t)sp, MS_SPACE_OAM, bank, 0, src, (uint16_t)(src + 0x9F), 0xFE00, 0xFE9F, 0xA0, m->pc };
     record_copy(m, &rec);
 }
 
@@ -250,7 +251,7 @@ static void hdma(MsMachine *m, uint8_t v) {
         for (int i = 0; i < 256; i++) { h ^= p[i]; h *= 0x100000001b3ull; }
         m->ph_vram[m->vram_bank & 1][pg] = h;
     }
-    MsCopyRec rec = { 2, (uint8_t)sp, MS_SPACE_VRAM, sbank, (uint32_t)(m->vram_bank & 1),
+    MsCopyRec rec = { 2, 1, (uint8_t)sp, MS_SPACE_VRAM, sbank, (uint32_t)(m->vram_bank & 1),
                       src, (uint16_t)(src + len - 1), dst, (uint16_t)(dst + len - 1),
                       (uint32_t)len, m->pc };
     record_copy(m, &rec);
@@ -263,7 +264,14 @@ static void hdma(MsMachine *m, uint8_t v) {
 static uint8_t gb_io_read(MsMachine *m, uint16_t addr) {
     uint8_t r = addr - 0xFF00;
     switch (addr) {
-    case 0xFF00: return (uint8_t)((m->io[r] & 0x30) | 0x0F); // no buttons pressed
+    case 0xFF00: {
+        // P1 matrix: bits 4-5 select, active-low; 0 = key pressed
+        uint8_t sel = (uint8_t)(m->io[r] & 0x30);
+        uint8_t v = 0x0F;
+        if (!(sel & 0x10)) v &= (uint8_t)(~m->buttons & 0x0F);        // a b select start
+        if (!(sel & 0x20)) v &= (uint8_t)(~(m->buttons >> 4) & 0x0F); // right left up down
+        return (uint8_t)(0xC0 | sel | v);
+    }
     case 0xFF0F: return (uint8_t)(0xE0 | (m->io[r] & 0x1F));
     case 0xFF41: return (uint8_t)((m->io[r] & 0x78) | ((m->io[0x45 - 0xFF00] == m->io[0x44 - 0xFF00]) ? 0x04 : 0));
     case 0xFF55: return 0xFF; // no transfer in flight (instant model)
@@ -312,6 +320,7 @@ static const MsPlatform gb_platform = {
     .rom_write = gb_rom_write,
     .io_read = gb_io_read,
     .io_write = gb_io_write,
+    .tick = gb_tick,
 };
 
 const MsPlatform *ms_platform_gb(void) { return &gb_platform; }

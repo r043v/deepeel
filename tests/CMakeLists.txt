@@ -10,6 +10,9 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_loop.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_unreach.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_bankdata.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_vblank.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_copy1.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_copyx.gb
 )
 
 add_custom_command(
@@ -33,6 +36,11 @@ add_executable(test_explorer test_explorer.c)
 target_link_libraries(test_explorer PRIVATE memscan_core m)
 add_dependencies(test_explorer fixtures)
 add_test(NAME explorer COMMAND test_explorer ${CMAKE_CURRENT_BINARY_DIR})
+
+add_executable(test_sessions test_sessions.c)
+target_link_libraries(test_sessions PRIVATE memscan_core m)
+add_dependencies(test_sessions fixtures)
+add_test(NAME sessions COMMAND test_sessions ${CMAKE_CURRENT_BINARY_DIR})
 
 if(TARGET memscan AND MS_HAS_GUI)
   add_executable(test_gui test_gui.c)

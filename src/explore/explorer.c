@@ -5,11 +5,28 @@
 // exact states and "same context" section re-entries; budgets and backward
 // edge caps keep loops finite.  Everything the machine does is recorded into
 // the results maps through the trace hooks.
+//
+// The same recording runs inside the play-session workers (one MsExplorer
+// each, sharing MsResults): their per-byte updates go through __atomic
+// builtins, and their section/record updates take the results mutexes while
+// res->mt is set.  The fork explorer itself only runs while the sessions are
+// paused, so its updates stay lock-free.
 #include "explorer.h"
 #include "../cpu/sm83/sm83.h"
+#include "../cpu/sm83/sm83_cycles.h"
 #include <time.h>
 
 static int is_padding_at(const MsCart *c, uint32_t bank, uint16_t addr);
+
+// --- shared-map primitives -----------------------------------------------------
+static inline uint8_t flags_or(uint8_t *p, uint8_t bit) {
+    return __atomic_or_fetch(p, bit, __ATOMIC_RELAXED); // returns the old bits
+}
+static inline void hits_add(uint32_t *p, uint32_t v) { __atomic_add_fetch(p, v, __ATOMIC_RELAXED); }
+static inline void u32_add(uint32_t *p, uint32_t v) { __atomic_add_fetch(p, v, __ATOMIC_RELAXED); }
+static inline void u64_add(uint64_t *p, uint64_t v) { __atomic_add_fetch(p, v, __ATOMIC_RELAXED); }
+static inline void u64_or(uint64_t *p, uint64_t v) { __atomic_fetch_or(p, v, __ATOMIC_RELAXED); }
+static inline uint64_t u64_get(const uint64_t *p) { return __atomic_load_n(p, __ATOMIC_RELAXED); }
 
 // --- u64 set ------------------------------------------------------------------
 static size_t set_probe(const MsHashSet *s, uint64_t key) {
@@ -164,6 +181,8 @@ void ms_results_init(MsResults *res, const MsCart *cart, const MsPlatform *plat)
     res->cart = cart;
     res->plat = plat;
     res->banks = cart->rom_banks;
+    pthread_mutex_init(&res->sec_mtx, NULL);
+    pthread_mutex_init(&res->rec_mtx, NULL);
     size_t n = (size_t)cart->rom_banks * 0x4000;
     res->exec_flags = xrealloc(NULL, n);
     res->exec_hits = xrealloc(NULL, n * sizeof(uint32_t));
@@ -201,6 +220,8 @@ void ms_results_free(MsResults *res) {
     ms_map_free(&res->callers);
     ms_map_free(&res->fork_counts);
     free(res->bad_ops);
+    pthread_mutex_destroy(&res->sec_mtx);
+    pthread_mutex_destroy(&res->rec_mtx);
     memset(res, 0, sizeof *res);
 }
 
@@ -371,9 +392,10 @@ static void on_mem_read(void *ctx, MsSpace sp, uint16_t addr, uint8_t v, MsAccKi
     case MS_SPACE_ROM: {
         uint32_t key = ms_rom_index(bank, addr);
         if (kind == MS_ACC_DATA) {
-            if (!(res->data_flags[key] & MS_DF_READ)) res->data_flags[key] |= MS_DF_READ;
-            res->data_hits[key]++;
-            ms_copy_on_rom_read(&ex->ct, (uint8_t)bank, addr);
+            uint8_t old = flags_or(&res->data_flags[key], MS_DF_READ);
+            if (!(old & MS_DF_READ)) ex->credit_data++;
+            hits_add(&res->data_hits[key], 1);
+            ms_copy_on_rom_read(&ex->ct, (uint8_t)bank, addr, v);
         }
         break;
     }
@@ -382,11 +404,15 @@ static void on_mem_read(void *ctx, MsSpace sp, uint16_t addr, uint8_t v, MsAccKi
     default:
         break;
     }
-    if (s) cur_section_live_from_access(ex, s, sp, addr, bank);
+    if (s && !ex->session) cur_section_live_from_access(ex, s, sp, addr, bank);
     if (sp == MS_SPACE_IO && kind == MS_ACC_IO) {
         int slot = ms_io_slot(res, addr);
-        if (slot >= 0) res->io[slot].rd++;
-        if (s && addr >= 0xFF00 && addr < 0xFF80) {
+        if (slot >= 0) {
+            MsIoStat *st = &res->io[slot];
+            uint32_t was = __atomic_fetch_add(&st->rd, 1, __ATOMIC_RELAXED);
+            if (!was && !__atomic_load_n(&st->wr, __ATOMIC_RELAXED)) ex->credit_io++;
+        }
+        if (s && !ex->session && addr >= 0xFF00 && addr < 0xFF80) {
             ms_section_live_io(s, (uint16_t)(addr - 0xFF00));
             ms_section_io_used(s, slot);
         }
@@ -399,21 +425,24 @@ static void on_mem_write(void *ctx, MsSpace sp, uint16_t addr, uint8_t v, MsAccK
     MsSection *s = ex->cur_sec ? &res->sections[ex->cur_sec] : NULL;
     switch (sp) {
     case MS_SPACE_VRAM:
-        res->vram_write_pages[bank & 1] |= 1ull << ((addr - 0x8000) >> 8);
-        ms_copy_on_vram_write(&ex->ct, (uint8_t)(bank & 1), addr);
+        u64_or(&res->vram_write_pages[bank & 1], 1ull << ((addr - 0x8000) >> 8));
+        ms_copy_on_vram_write(&ex->ct, (uint8_t)(bank & 1), addr, v);
         break;
     case MS_SPACE_SRAM:
-        res->sram_write_pages |= 1ull << ((((addr - 0xA000) + ex->cur->win_ram * 0x2000) & (MS_CRAM_PAGES * 256 - 1)) >> 8);
+        u64_or(&res->sram_write_pages,
+               1ull << ((((addr - 0xA000) + ex->cur->win_ram * 0x2000) & (MS_CRAM_PAGES * 256 - 1)) >> 8));
         break;
     case MS_SPACE_OAM:
-        res->oam_written = 1;
+        __atomic_store_n(&res->oam_written, 1, __ATOMIC_RELAXED);
         break;
     case MS_SPACE_IO: {
         int slot = ms_io_slot(res, addr);
         if (slot >= 0) {
             ex->last_io_slot = slot;
             MsIoStat *st = &res->io[slot];
-            st->wr++;
+            uint32_t was = __atomic_fetch_add(&st->wr, 1, __ATOMIC_RELAXED);
+            if (!was && !__atomic_load_n(&st->rd, __ATOMIC_RELAXED)) ex->credit_io++;
+            if (res->mt) pthread_mutex_lock(&res->rec_mtx);
             int have = 0;
             for (int i = 0; i < st->nvalues; i++)
                 if (st->values[i] == v) have = 1;
@@ -424,19 +453,21 @@ static void on_mem_write(void *ctx, MsSpace sp, uint16_t addr, uint8_t v, MsAccK
                 memmove(st->pcs, st->pcs + 1, 3 * sizeof(uint16_t));
                 st->pcs[3] = ex->cur->pc;
             }
+            if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
         }
         break;
     }
     default:
         break;
     }
-    if (s && kind == MS_ACC_IO) ms_section_io_used(s, ms_io_slot(res, addr));
+    if (s && !ex->session && kind == MS_ACC_IO) ms_section_io_used(s, ms_io_slot(res, addr));
     (void)bank;
 }
 
 static void on_mapper_write(void *ctx, uint16_t addr, uint8_t v, uint8_t window, uint32_t old, uint32_t new) {
     MsExplorer *ex = ctx;
     MsResults *res = ex->res;
+    if (res->mt) pthread_mutex_lock(&res->rec_mtx);
     if (res->bank_count == res->bank_cap) {
         res->bank_cap = res->bank_cap ? res->bank_cap * 2 : 64;
         res->bank_events = xrealloc(res->bank_events, sizeof(MsBankEvent) * (size_t)res->bank_cap);
@@ -447,12 +478,14 @@ static void on_mapper_write(void *ctx, uint16_t addr, uint8_t v, uint8_t window,
     e->window = window;
     e->old_bank = old;
     e->new_bank = new;
+    if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
     int slot = ms_io_slot(res, addr);
     if (slot >= 0) {
-        res->io[slot].wr++;
-        res->io[slot].bank_events++;
+        u32_add(&res->io[slot].wr, 1);
+        u32_add(&res->io[slot].bank_events, 1);
     }
-    MsSection *s = ex->cur_sec ? &res->sections[ex->cur_sec] : NULL;
+    ex->credit_banks++;
+    MsSection *s = ex->cur_sec && !ex->session ? &res->sections[ex->cur_sec] : NULL;
     if (s) {
         ms_section_banks_seen(s, new);
         ms_section_io_used(s, slot);
@@ -466,11 +499,13 @@ static void on_io_access(void *ctx, uint16_t addr, uint8_t v, int is_write) {
     int slot = ms_io_slot(res, addr);
     if (slot >= 0 && is_write) {
         MsIoStat *st = &res->io[slot];
-        st->wr++;
+        u32_add(&st->wr, 1);
+        if (res->mt) pthread_mutex_lock(&res->rec_mtx);
         int have = 0;
         for (int i = 0; i < st->nvalues; i++)
             if (st->values[i] == v) have = 1;
         if (!have && st->nvalues < 8) st->values[st->nvalues++] = v;
+        if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
     }
 }
 
@@ -478,11 +513,14 @@ static void on_copy(void *ctx, const MsCopyRec *rec) {
     ms_record_copy((MsExplorer *)ctx, rec, 0);
 }
 
-static void on_step(void *ctx, const MsStepInfo *info) {
-    MsExplorer *ex = ctx;
+// per-step recording shared by both engines (see the header).  The fork mode
+// keeps the branch-site and caller maps; the session mode adds the RETI
+// bookkeeping of the natural IRQ depth and the cycle count of the step.
+void ms_step_record(MsExplorer *ex, const MsStepInfo *info) {
+    MsResults *res = ex->res;
     ex->last_len = info->len;
     ex->have_last = 1;
-    MsResults *res = ex->res;
+    ex->last_ctrl = (int)info->ctrl;
     switch (info->ctrl) {
     case MS_CTRL_JP:
     case MS_CTRL_JR:
@@ -506,6 +544,7 @@ static void on_step(void *ctx, const MsStepInfo *info) {
     case MS_CTRL_CALL:
     case MS_CTRL_CALL_CC:
     case MS_CTRL_RST: {
+        if (ex->session) break; // the fork explorer owns the caller map
         uint32_t tkey = ms_rom_index(info->target < 0x4000 ? 0 : ex->cur_bankN, info->target);
         MsCallList *cl = ms_map_get_or_add(&res->callers, tkey);
         if (cl && cl->n < 8) {
@@ -517,24 +556,34 @@ static void on_step(void *ctx, const MsStepInfo *info) {
         }
         break;
     }
+    case MS_CTRL_RETI:
+        if (ex->session && ex->irq_depth) ex->irq_depth--;
+        break;
     default:
         break;
     }
     if (info->ctrl == MS_CTRL_JP_CC || info->ctrl == MS_CTRL_JR_CC || info->ctrl == MS_CTRL_CALL_CC ||
         info->ctrl == MS_CTRL_RET_CC) {
-        uint32_t skey = ms_rom_key(ex->cur, info->pc);
-        MsSiteStat *st = ms_map_get_or_add(&res->sites, skey);
-        if (st) {
-            if (info->cond_taken) st->taken++;
-            else st->nottaken++;
+        if (!ex->session) { // branch-site outcomes are the fork explorer's map
+            uint32_t skey = ms_rom_key(ex->cur, info->pc);
+            MsSiteStat *st = ms_map_get_or_add(&res->sites, skey);
+            if (st) {
+                if (info->cond_taken) st->taken++;
+                else st->nottaken++;
+            }
         }
     }
+    if (ex->session)
+        ex->last_cycles = sm83_step_cycles(info, info->opcode == 0xCB ? ms_peek(ex->cur, (uint16_t)(info->pc + 1)) : 0);
 }
+
+static void on_step(void *ctx, const MsStepInfo *info) { ms_step_record((MsExplorer *)ctx, info); }
 
 static void on_event(void *ctx, int kind, uint32_t a, uint32_t b) {
     MsExplorer *ex = ctx;
     MsResults *res = ex->res;
     if (kind == MS_EV_BADOP) {
+        if (res->mt) pthread_mutex_lock(&res->rec_mtx);
         if (res->bad_op_count == res->bad_op_cap) {
             res->bad_op_cap = res->bad_op_cap ? res->bad_op_cap * 2 : 16;
             res->bad_ops = xrealloc(res->bad_ops, sizeof(*res->bad_ops) * (size_t)res->bad_op_cap);
@@ -542,6 +591,7 @@ static void on_event(void *ctx, int kind, uint32_t a, uint32_t b) {
         res->bad_ops[res->bad_op_count].key = a;
         res->bad_ops[res->bad_op_count].op = (uint8_t)b;
         res->bad_op_count++;
+        if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
     }
 }
 
@@ -594,12 +644,13 @@ static void fork_irq(MsExplorer *ex, const MsMachine *m) {
 }
 
 // --- per-step bookkeeping -------------------------------------------------------------
-static void pre_step(MsExplorer *ex, MsMachine *m, uint8_t op) {
+void ms_pre_step(MsExplorer *ex, MsMachine *m, uint8_t op) {
     MsResults *res = ex->res;
+    if (ex->cur_pad) return; // padding slide: executed, but never classified code
     if (m->pc >= 0x8000) {
         // executing VRAM/WRAM/HRAM code: real hardware allows it, but it is
         // not ROM map information — count it and move on
-        res->exec_outside++;
+        u32_add(&res->exec_outside, 1);
         return;
     }
     uint32_t key = ms_rom_key(m, m->pc);
@@ -607,26 +658,59 @@ static void pre_step(MsExplorer *ex, MsMachine *m, uint8_t op) {
     int is_entry = !ex->have_last || ex->last_bank != bank ||
                    (uint16_t)(ex->last_pc + ex->last_len) != m->pc;
     uint8_t nf = (uint8_t)(ex->cur_forced ? MS_XF_FORCED : MS_XF_NATURAL);
-    if (!(res->exec_flags[key] & nf)) res->exec_flags[key] |= nf;
-    res->exec_hits[key]++;
-    if (is_entry) res->exec_flags[key] |= MS_XF_ENTRY;
-    if (ex->cur_irq) res->exec_flags[key] |= MS_XF_IRQ;
+    uint8_t old = flags_or(&res->exec_flags[key], nf);
+    if (!(old & nf)) ex->credit_exec++;
+    hits_add(&res->exec_hits[key], 1);
+    if (is_entry) flags_or(&res->exec_flags[key], MS_XF_ENTRY);
+    if (ex->cur_irq) flags_or(&res->exec_flags[key], MS_XF_IRQ);
     int len = sm83_len(op);
     uint16_t hi = m->pc;
     for (int i = 1; i < len; i++) { // operand bytes count as executed code
         uint16_t a = (uint16_t)(m->pc + i);
         if (m->pc < 0x4000 && a >= 0x4000) break; // crossed the window edge
         uint32_t k = ms_rom_key(m, a);
-        res->exec_flags[k] |= nf;
+        uint8_t o2 = flags_or(&res->exec_flags[k], nf);
+        if (!(o2 & nf)) ex->credit_exec++;
         hi = a;
     }
-    MsSection *s = ms_section_touch(res, bank, m->pc, hi, ex->cur_forced ? 0 : 1, is_entry, ex->cur_sec);
-    if (ex->cur_from_reset && !ex->cur_forced) s->boot_hits++;
-    if (ex->cur_irq) s->kind_bits |= MS_XF_IRQ;
-    ex->cur_sec = s->id;
+    uint32_t id = ms_section_touch(res, bank, m->pc, hi, ex->cur_forced ? 0 : 1, is_entry, ex->cur_sec,
+                                   ex->cur_from_reset && !ex->cur_forced, ex->cur_irq);
+    ex->cur_sec = id;
     ex->last_pc = m->pc;
     ex->last_bank = bank;
     // last_len is refreshed by the step trace after the instruction executes
+}
+
+// natural IRQ dispatch (play sessions): highest-priority pending bit, push PC,
+// jump to the vector, clear IME and the IF bit; the handler is marked MS_XF_IRQ
+// until its RETI
+int ms_service_irq(MsExplorer *ex, MsMachine *m) {
+    uint8_t pending = (uint8_t)(m->ime & m->ie & m->io[0x0F] & 0x1F);
+    if (!pending) return 0;
+    int bit = 0;
+    while (!(pending & (1 << bit))) bit++;
+    const MsPlatform *plat = m->plat;
+    uint16_t vector = 0;
+    for (int i = 0; i < plat->irq_count; i++)
+        if (plat->irqs[i].bit == bit) vector = plat->irqs[i].vector;
+    if (!vector) return 0;
+    m->halted = 0;
+    const MsTraceVt *t = m->trace;
+    void *tc = m->trace_ctx;
+    m->trace = NULL; // dispatch bookkeeping is not ROM behaviour
+    m->trace_ctx = NULL;
+    m->sp = (uint16_t)(m->sp - 2);
+    ms_write(m, m->sp, (uint8_t)m->pc, MS_ACC_STACK);
+    ms_write(m, (uint16_t)(m->sp + 1), (uint8_t)(m->pc >> 8), MS_ACC_STACK);
+    m->pc = vector;
+    m->ime = 0;
+    m->ime_delay = 0;
+    m->io[0x0F] &= (uint8_t)~(1 << bit);
+    m->trace = t;
+    m->trace_ctx = tc;
+    ex->irq_depth++;
+    if (m->trace && m->trace->event) m->trace->event(m->trace_ctx, MS_EV_IRQ, vector, (uint32_t)bit);
+    return bit + 1;
 }
 
 // --- run loop ---------------------------------------------------------------------------
@@ -652,14 +736,25 @@ static void run_path(MsExplorer *ex, MsPathState *p) {
         }
         if (m->halted) break;
         uint8_t op = ms_peek(m, m->pc);
+        // execution sliding through a padding run: keep going (the code after
+        // the run is often the point of a forced entry) but never call the
+        // padding itself code; bound the slide so garbage loops stay bounded
+        uint32_t pk = ms_rom_key(m, m->pc);
+        if ((res->static_flags[pk] & MS_SF_PAD) && (op == 0x00 || op == 0xFF)) {
+            if (++ex->pad_slide > 4096) { res->pad_cuts++; break; }
+            ex->cur_pad = 1;
+        } else {
+            ex->pad_slide = 0;
+            ex->cur_pad = 0;
+        }
         int cond = sm83_cond_of(op);
         if (cond >= 0) fork_branch(ex, m, cond);
         if (!ex->cfg.no_irq_fork && m->ime && (m->ie & m->io[0x0F] & 0x1F)) fork_irq(ex, m);
         ex->cur_bankN = m->win_romN;
-        pre_step(ex, m, op);
+        ms_pre_step(ex, m, op);
         int r = sm83_step(m);
         ex->steps_this_path++;
-        res->steps_total++;
+        u64_add(&res->steps_total, 1);
         if (r != 0) break; // halt/stop/undefined opcode
         if (ex->cfg.loop_back_cap) {
             int cut = 0;
@@ -771,8 +866,25 @@ void ms_explore_finalize(MsExplorer *ex) {
         MsSection *s = &res->sections[i];
         if (s->boot_hits > 0 || (s->kind_bits & MS_XF_IRQ) || s->copies > 0)
             s->verdict = MS_V_REQUIRED;
+        else if (s->natural_hits > 0 && s->forced_hits == 0)
+            s->verdict = MS_V_PLAYED; // only ever seen in a real play session
         else
             s->verdict = MS_V_FORCED;
+    }
+    // the m0boy bridge: count bytes that are both executed and proven data —
+    // execution wins there, the data mark is dropped at export
+    {
+        uint32_t contra = 0;
+        uint64_t verb = 0;
+        size_t n = (size_t)res->banks * 0x4000;
+        for (size_t k = 0; k < n; k++) {
+            if (res->data_flags[k] & MS_DF_VERBATIM) {
+                verb++;
+                if (res->exec_flags[k] & (MS_XF_NATURAL | MS_XF_FORCED)) contra++;
+            }
+        }
+        res->data_verbatim_bytes = verb;
+        res->data_contradictions = contra;
     }
 }
 
@@ -784,6 +896,18 @@ int ms_explore(MsExplorer *ex) {
 }
 
 // --- GB seeding ------------------------------------------------------------------------
+uint64_t ms_results_unexplained(const MsResults *res) {
+    size_t n = (size_t)res->banks * 0x4000;
+    uint64_t cnt = 0;
+    for (size_t k = 0; k < n; k++) {
+        if (res->exec_flags[k] & (MS_XF_NATURAL | MS_XF_FORCED)) continue;
+        if (res->data_flags[k] & (MS_DF_READ | MS_DF_COPIED | MS_DF_VERBATIM)) continue;
+        if (res->static_flags[k] & (MS_SF_POINTER | MS_SF_PAD)) continue;
+        cnt++;
+    }
+    return cnt;
+}
+
 static int is_padding_at(const MsCart *c, uint32_t bank, uint16_t addr) {
     uint32_t base = bank * 0x4000ull + (addr & 0x3FFF);
     uint8_t b0 = base < c->rom_size ? c->rom[base] : 0xFF;

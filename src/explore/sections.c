@@ -2,10 +2,26 @@
 // A section is a maximal contiguous run of executed addresses within one
 // bank; every access an instruction makes is attributed to the section its
 // pc belongs to, which is where the necessity statistics live.
+//
+// Section records are shared with the play-session workers: every entry point
+// below takes res->sec_mtx when res->mt is set.  The fork explorer runs with
+// the sessions paused and skips the lock.
 #include "explorer.h"
 
-MsSection *ms_section_touch(MsResults *res, uint8_t bank, uint16_t pc, uint16_t hi, int natural,
-                            int is_entry, uint32_t cur_sec) {
+static MsSection *sec_lock(MsResults *res) {
+    if (res->mt) pthread_mutex_lock(&res->sec_mtx);
+    return NULL;
+}
+static void sec_unlock(MsResults *res) {
+    if (res->mt) pthread_mutex_unlock(&res->sec_mtx);
+}
+
+// creates or extends the section at (bank, pc) and updates its per-run
+// counters under the section lock; returns the section id (the pointer would
+// not survive the lock: another worker may realloc the array)
+uint32_t ms_section_touch(MsResults *res, uint8_t bank, uint16_t pc, uint16_t hi, int natural,
+                          int is_entry, uint32_t cur_sec, int from_reset, int irq) {
+    sec_lock(res);
     uint32_t key = ms_rom_index(bank, pc);
     uint32_t sid1 = res->section_of[key];
     MsSection *s;
@@ -37,7 +53,11 @@ MsSection *ms_section_touch(MsResults *res, uint8_t bank, uint16_t pc, uint16_t 
     else s->forced_hits++;
     if (is_entry) s->entries++;
     s->kind_bits |= (uint8_t)(natural ? MS_XF_NATURAL : MS_XF_FORCED);
-    return s;
+    if (from_reset && natural) s->boot_hits++;
+    if (irq) s->kind_bits |= MS_XF_IRQ;
+    uint32_t id = s->id;
+    sec_unlock(res);
+    return id;
 }
 
 static void ctx_grew(MsSection *s) {
@@ -46,6 +66,9 @@ static void ctx_grew(MsSection *s) {
     ms_set_init(&s->ctx_seen, 4096);
 }
 
+// the live_* entry points run per memory access from the session workers;
+// only the fork explorer uses the liveness masks, but the records are shared,
+// so they are updated under the same lock discipline
 void ms_section_live_reg(MsSection *s, int bit) {
     uint64_t old = s->ctx_mask;
     s->ctx_mask |= 1ull << bit;

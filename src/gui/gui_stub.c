@@ -4,10 +4,11 @@
 
 int ms_gui_available(void) { return 0; }
 
-int ms_gui_run(MsResults *res, MsConfig *cfg, MsExplorer *ex) {
+int ms_gui_run(MsResults *res, MsConfig *cfg, MsExplorer *ex, MsPlay *play) {
     (void)res;
     (void)cfg;
     (void)ex;
+    (void)play;
     fprintf(stderr, "memscan: built without SDL2, --gui unavailable\n");
     return 1;
 }

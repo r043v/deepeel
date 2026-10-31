@@ -45,6 +45,7 @@ static void bank_blocks_rle(const MsResults *res, int bank, MsBuf *out) {
 static const char *verdict_name(uint8_t v) {
     switch (v) {
     case MS_V_REQUIRED: return "required";
+    case MS_V_PLAYED: return "played";
     case MS_V_FORCED: return "forced";
     default: return "speculative";
     }
@@ -67,14 +68,16 @@ void ms_report_text(const MsResults *res, const MsConfig *cfg, MsBuf *out) {
     ms_buf_str(out, line);
     snprintf(line, sizeof line,
              "exploration: %llu steps in %llu paths (%u forks: %u branch, %u irq), %u sections\n"
-             "evicted: %u exact states, %u same-context entries; cuts: %u cycles, %u step-budget\n"
+             "evicted: %u exact states, %u same-context entries; cuts: %u cycles, %u step-budget, %u padding\n"
              "budgets: %u paths cap hit, %u step-wall hit, %u queue overflows\n"
-             "seeds: %u natural, %u speculative\n",
+             "seeds: %u natural, %u speculative\n"
+             "data: %llu bytes proven verbatim (cov flag 8), %u exec∩data contradictions\n",
              (unsigned long long)res->steps_total, (unsigned long long)res->paths_run,
              (unsigned long long)(res->forks_branch + res->forks_irq), res->forks_branch, res->forks_irq,
              res->section_count, res->evicted_exact, res->evicted_ctx, res->cycle_cuts,
-             res->step_cuts, res->budget_paths, res->budget_steps, res->queue_overflows,
-             res->seeds_natural, res->seeds_spec);
+             res->step_cuts, res->pad_cuts, res->budget_paths, res->budget_steps, res->queue_overflows,
+             res->seeds_natural, res->seeds_spec,
+             (unsigned long long)res->data_verbatim_bytes, res->data_contradictions);
     ms_buf_str(out, line);
 
     // per-bank coverage
@@ -147,10 +150,10 @@ void ms_report_text(const MsResults *res, const MsConfig *cfg, MsBuf *out) {
         int show = res->copy_count > 40 ? 40 : res->copy_count;
         for (int i = 0; i < show; i++) {
             const MsCopyRec *r = &res->copies[i];
-            snprintf(line, sizeof line, "  %-8s rom b%u:%04x-%04x -> %s b%u:%04x-%04x (%u bytes) at %04x\n",
+            snprintf(line, sizeof line, "  %-8s rom b%u:%04x-%04x -> %s b%u:%04x-%04x (%u bytes)%s at %04x\n",
                      chan_name(r->channel), r->src_bank, r->src_lo, r->src_hi,
                      r->dst_space == MS_SPACE_VRAM ? "vram" : "oam", r->dst_bank, r->dst_lo, r->dst_hi,
-                     r->bytes, r->pc);
+                     r->bytes, r->verbatim ? " verbatim" : "", r->pc);
             ms_buf_str(out, line);
         }
         if (res->copy_count > show) ms_buf_fmt(out, "  ... %d more\n", res->copy_count - show);
@@ -261,9 +264,10 @@ void ms_report_json(const MsResults *res, const MsConfig *cfg, MsBuf *o) {
     ms_buf_str(o, "\"copies\": [\n");
     for (int i = 0; i < res->copy_count; i++) {
         const MsCopyRec *r = &res->copies[i];
-        ms_buf_fmt(o, "{\"channel\":\"%s\",\"src\":{\"space\":\"%s\",\"bank\":%u,\"lo\":%u,\"hi\":%u},"
+        ms_buf_fmt(o, "{\"channel\":\"%s\",\"verbatim\":%s,\"src\":{\"space\":\"%s\",\"bank\":%u,\"lo\":%u,\"hi\":%u},"
                       "\"dst\":{\"space\":\"%s\",\"bank\":%u,\"lo\":%u,\"hi\":%u},\"bytes\":%u,\"pc\":%u}",
-                   chan_name(r->channel), r->src_space == MS_SPACE_ROM ? "rom" : (r->src_space == MS_SPACE_WRAM ? "wram" : "vram"),
+                   chan_name(r->channel), r->verbatim ? "true" : "false",
+                   r->src_space == MS_SPACE_ROM ? "rom" : (r->src_space == MS_SPACE_WRAM ? "wram" : "vram"),
                    r->src_bank, r->src_lo, r->src_hi,
                    r->dst_space == MS_SPACE_VRAM ? "vram" : "oam", r->dst_bank, r->dst_lo, r->dst_hi,
                    r->bytes, r->pc);
@@ -290,20 +294,59 @@ void ms_report_json(const MsResults *res, const MsConfig *cfg, MsBuf *o) {
 }
 
 // --- cov -------------------------------------------------------------------------
+// m0boy coverage v1: "bank addr flags count".  Flags: 1 = executed, 2 = entry,
+// 4 = speculative (m0boy's static walk), 8 = proven data (this tool's
+// verbatim-copy proof and its pointer tables).  A byte never exports both
+// execution and the data bit: execution wins, the contradiction is counted.
+// Data lines let m0boy's loader exclude those bytes even when another
+// coverage source (its static walk) proposed them as code.
 void ms_report_cov(const MsResults *res, MsBuf *o) {
-    // m0boy coverage v1 semantics: flag 1 = executed, 2 = entry, 4 = reached
-    // only by forced exploration ("speculative" there)
-    ms_buf_str(o, "# gbl coverage v1\n");
+    ms_buf_str(o, "# gbl coverage v1: bank addr flags(1=exec,2=entry,4=speculative,8=data) hits\n");
     for (int bank = 0; bank < res->banks; bank++) {
         for (int a = 0; a < 0x4000; a++) {
             size_t k = (size_t)bank * 0x4000 + a;
             uint8_t ef = res->exec_flags[k];
-            if (!(ef & (MS_XF_NATURAL | MS_XF_FORCED))) continue;
-            uint8_t flags = 1;
-            if (ef & MS_XF_ENTRY) flags |= 2;
-            if (ef & MS_XF_FORCED) flags |= 4;
-            ms_buf_fmt(o, "%02x %04x %x %x\n", bank, bank ? a + 0x4000 : a, flags,
-                       res->exec_hits[k] > 0xFFFFu ? 0xFFFFu : (unsigned)res->exec_hits[k]);
+            uint8_t natural = (uint8_t)(ef & MS_XF_NATURAL);
+            if (ef & (MS_XF_NATURAL | MS_XF_FORCED)) {
+                // speculative-only execution (the fork deliberately runs data
+                // as code) does not outweigh a verbatim copy proof
+                if (!natural && (res->data_flags[k] & MS_DF_VERBATIM)) {
+                    ms_buf_fmt(o, "%02x %04x 8 %x\n", bank, bank ? a + 0x4000 : a,
+                               res->data_hits[k] > 0xFFFFu ? 0xFFFFu : (unsigned)res->data_hits[k]);
+                    continue;
+                }
+                uint8_t flags = 1;
+                if (ef & MS_XF_ENTRY) flags |= 2;
+                if (ef & MS_XF_FORCED) flags |= 4;
+                ms_buf_fmt(o, "%02x %04x %x %x\n", bank, bank ? a + 0x4000 : a, flags,
+                           res->exec_hits[k] > 0xFFFFu ? 0xFFFFu : (unsigned)res->exec_hits[k]);
+            } else if ((res->data_flags[k] & MS_DF_VERBATIM) || (res->static_flags[k] & MS_SF_POINTER)) {
+                // proven data, never executed: m0boy must not compile it
+                ms_buf_fmt(o, "%02x %04x 8 %x\n", bank, bank ? a + 0x4000 : a,
+                           res->data_hits[k] > 0xFFFFu ? 0xFFFFu : (unsigned)res->data_hits[k]);
+            }
         }
     }
+}
+
+// --- romdata ----------------------------------------------------------------------
+// ROM data-read profile in m0boy's romdata-*.prof format ("page count", one
+// line per touched 256-byte page): it weights the flash residency/streaming
+// of the generated project by what the sessions actually read.
+void ms_report_romdata(const MsResults *res, MsBuf *o) {
+    size_t pages = ((size_t)res->cart->rom_size + 255) / 256;
+    uint64_t *counts = calloc(pages, sizeof(uint64_t));
+    if (!counts) return;
+    for (int bank = 0; bank < res->banks; bank++) {
+        for (int a = 0; a < 0x4000; a++) {
+            size_t k = (size_t)bank * 0x4000 + a;
+            uint32_t h = __atomic_load_n(&res->data_hits[k], __ATOMIC_RELAXED);
+            if (!h) continue;
+            uint32_t off = (uint32_t)bank * 0x4000 + (uint32_t)a;
+            if (off / 256 < pages) counts[off / 256] += h;
+        }
+    }
+    for (size_t p = 0; p < pages; p++)
+        if (counts[p]) ms_buf_fmt(o, "%zx %llu\n", p, (unsigned long long)counts[p]);
+    free(counts);
 }

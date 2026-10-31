@@ -17,11 +17,11 @@ static void rehash_wram(MsMachine *m, uint16_t addr) {
 static void rehash_hram(MsMachine *m) { m->ph_hram = page_hash(m->hram, 0x7F); }
 static void rehash_oam(MsMachine *m) { m->ph_oam = page_hash(m->oam, 0xA0); }
 static void rehash_cram(MsMachine *m, uint32_t off) {
-    if (off < m->cart->ram_size) {
+    if (off < m->sram_size) {
         uint32_t pg = off >> 8;
         if (pg < MS_CRAM_PAGES)
-            m->ph_cram[pg] = page_hash(m->cart->ram + (pg << 8),
-                                       (int)((m->cart->ram_size - (pg << 8)) < 256 ? m->cart->ram_size - (pg << 8) : 256));
+            m->ph_cram[pg] = page_hash(m->sram + (pg << 8),
+                                       (int)((m->sram_size - (pg << 8)) < 256 ? m->sram_size - (pg << 8) : 256));
     }
 }
 
@@ -68,9 +68,9 @@ void ms_mapper_update_windows(MsMachine *m) {
 
 uint32_t ms_map_sram(const MsMachine *m, uint16_t addr) {
     // physical cartridge-RAM offset for an A000-BFFF access, or UINT32_MAX
-    if (!m->ramg || m->cart->ram_size == 0) return UINT32_MAX;
+    if (!m->ramg || m->sram_size == 0) return UINT32_MAX;
     uint32_t off = (uint32_t)(addr - 0xA000) + m->win_ram * 0x2000;
-    if (off >= m->cart->ram_size) off %= m->cart->ram_size;
+    if (off >= m->sram_size) off %= m->sram_size;
     return off;
 }
 
@@ -80,6 +80,8 @@ void ms_machine_init(MsMachine *m, const MsCart *cart, const MsPlatform *plat) {
     memset(m, 0, sizeof *m);
     m->cart = cart;
     m->plat = plat;
+    m->sram = cart->ram;
+    m->sram_size = cart->ram_size;
     m->sp = plat->init_sp;
     m->pc = plat->init_pc;
     m->a = plat->init_a;
@@ -123,7 +125,7 @@ uint64_t ms_state_hash(const MsMachine *m) {
         for (int i = 0; i < 32; i++) h = ms_fnv1a_u64(h, m->ph_vram[b][i]);
     h = ms_fnv1a_u64(h, m->ph_hram);
     h = ms_fnv1a_u64(h, m->ph_oam);
-    uint32_t cram_pages = m->cart->ram_size ? (uint32_t)((m->cart->ram_size + 255) >> 8) : 0;
+    uint32_t cram_pages = m->sram_size ? (uint32_t)((m->sram_size + 255) >> 8) : 0;
     if (cram_pages > MS_CRAM_PAGES) cram_pages = MS_CRAM_PAGES;
     for (uint32_t i = 0; i < cram_pages; i++) h = ms_fnv1a_u64(h, m->ph_cram[i]);
     return h;
@@ -157,7 +159,7 @@ uint8_t ms_peek(const MsMachine *m, uint16_t addr) {
     if (addr < 0xA000) return m->vram[m->vram_bank & 1][addr - 0x8000];
     if (addr < 0xC000) {
         uint32_t off = ms_map_sram(m, addr);
-        return off == UINT32_MAX ? 0xFF : c->ram[off];
+        return off == UINT32_MAX ? 0xFF : m->sram[off];
     }
     if (addr < 0xE000) return m->wram[addr - 0xC000];
     if (addr < 0xFE00) return m->wram[addr - 0xE000];
@@ -187,7 +189,7 @@ uint8_t ms_read(MsMachine *m, uint16_t addr, MsAccKind kind) {
         break;
     case MS_SPACE_SRAM: {
         uint32_t off = ms_map_sram(m, addr);
-        v = off == UINT32_MAX ? 0xFF : c->ram[off];
+        v = off == UINT32_MAX ? 0xFF : m->sram[off];
         bank = m->win_ram;
         break;
     }
@@ -241,7 +243,7 @@ void ms_write(MsMachine *m, uint16_t addr, uint8_t v, MsAccKind kind) {
     case MS_SPACE_SRAM: {
         uint32_t off = ms_map_sram(m, addr);
         if (off != UINT32_MAX) {
-            m->cart->ram[off] = v;
+            m->sram[off] = v;
             rehash_cram(m, off);
             bank = m->win_ram;
         }

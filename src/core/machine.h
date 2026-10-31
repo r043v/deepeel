@@ -42,6 +42,7 @@ typedef struct MsStepInfo {
 // one observed copy: a source range that landed in a destination range
 typedef struct MsCopyRec {
     uint8_t channel;      // 0 = CPU loop, 1 = OAM DMA, 2 = HDMA
+    uint8_t verbatim;     // destination bytes equal the source bytes exactly
     uint8_t src_space, dst_space;
     uint32_t src_bank, dst_bank;
     uint16_t src_lo, src_hi; // inclusive
@@ -79,6 +80,13 @@ typedef struct MsMachine {
     uint16_t pc, sp;
     uint8_t a, f, b, c, d, e, h, l;
     uint8_t ime, ime_delay, halted;
+    // session pad latch (play sessions only): a=1 b=2 select=4 start=8,
+    // right=16 left=32 up=64 down=128; 1 = held.  The forking explorer
+    // never touches it.
+    uint8_t buttons;
+    // session clock (T-cycles), advanced by the platform tick; the forking
+    // explorer never ticks, so these stay 0 there
+    uint32_t clk_div, clk_tima, clk_line;
     // memory
     const MsCart *cart;
     const MsPlatform *plat;
@@ -88,6 +96,11 @@ typedef struct MsMachine {
     uint8_t oam[0xA0];
     uint8_t ie;
     uint8_t io[0x80]; // 0xFF00-0xFF7F plain storage backing
+    // cartridge RAM backing: points at cart->ram by default; play sessions
+    // replace it with a private copy so machines stay snapshot-able and
+    // thread-safe (fork paths share, exactly as before)
+    uint8_t *sram;
+    uint32_t sram_size;
     // mapper state
     uint8_t rom_lo, rom_hi, ram_bank, ramg, mbc_mode, vram_bank;
     // derived windows (updated by the mapper hooks)

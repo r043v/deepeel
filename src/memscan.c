@@ -1,12 +1,15 @@
 // memscan.c: command line front-end.
 //
 //   memscan explore rom.gb [options] [--json f] [--text f] [--cov f] [--gui]
+//   memscan explore rom.gb --play [...]   play sessions (m0boy-style coverage)
 //   memscan map rom.gb [--json f] [--text f]        static map only
 //   memscan regs gb                                 dump the GB register registry
 //   memscan dis rom.gb bank:addr [n]                disassemble n instructions
 #include "core/cart.h"
 #include "core/machine.h"
+#include "core/snapshot_png.h"
 #include "explore/explorer.h"
+#include "explore/sessions.h"
 #include "report/report.h"
 #include "gui/gui.h"
 #include "cpu/sm83/sm83.h"
@@ -29,7 +32,25 @@ static void usage(void) {
             "    --no-context-evict   disable same-context eviction\n"
             "    --no-irq-fork        disable IRQ forking\n"
             "    --gui                SDL2 live viewer\n"
-            "    --json f / --text f / --cov f   outputs\n"
+            "    --json f / --text f / --cov f / --romdata f   outputs\n"
+            "\n"
+            "  play sessions (the m0boy coverage machinery: random inputs, attract mode,\n"
+            "  checkpoint pool, epoch scheduler, discovery credit):\n"
+            "    --play               enable the play sessions (default 10 workers)\n"
+            "    --sessions N         parallel sessions (default 10)\n"
+            "    --epoch F            frames per epoch (default 480)\n"
+            "    --frames F           total frame budget (default unlimited)\n"
+            "    --seed N             input RNG base seed\n"
+            "    --stagnation F       stop after F frames with no discovery (default never)\n"
+            "    --until-static       also stop when every byte is explained\n"
+            "    --checkpoints N      checkpoint pool size (default 48)\n"
+            "    --stall E            empty epochs before re-seeding from the best (default 3)\n"
+            "    --state-dir D        persist the pool (pool.bin) and the PNG snapshots\n"
+            "    --resume             continue from a saved pool\n"
+            "    --input f            replay an m0boy held-named input script (repeatable)\n"
+            "    --human [slot]       play a checkpoint yourself in the GUI (pad/keyboard);\n"
+            "                         every advance is snapshotted (PNG) and explored\n"
+            "    --from-png f         load a snapshot PNG into the pool before starting\n"
             "  memscan map rom.gb     static map only (pointer tables, padding)\n"
             "  memscan regs gb        dump the register registry\n"
             "  memscan dis rom.gb bank:addr [n]\n");
@@ -46,6 +67,8 @@ static int parse_entry(const char *s, uint8_t *bank, uint16_t *addr) {
     return 1;
 }
 
+static void report_lanes(const MsPlay *p, const MsResults *res, MsBuf *out);
+
 static int write_file(const char *path, const MsBuf *b) {
     FILE *f = fopen(path, "wb");
     if (!f) {
@@ -58,10 +81,13 @@ static int write_file(const char *path, const MsBuf *b) {
 }
 
 static int cmd_explore(int argc, char **argv) {
-    const char *json = NULL, *text = NULL, *cov = NULL, *path = NULL;
-    int gui = 0;
+    const char *json = NULL, *text = NULL, *cov = NULL, *romdata = NULL, *path = NULL;
+    const char *from_png = NULL;
+    int gui = 0, play = 0, human = 0, human_slot = -1;
     MsConfig cfg;
     ms_config_defaults(&cfg);
+    MsSessionCfg scfg;
+    ms_session_cfg_defaults(&scfg);
     uint8_t eb[32];
     uint16_t ea[32];
     int entries = 0;
@@ -70,6 +96,7 @@ static int cmd_explore(int argc, char **argv) {
         if (!strcmp(a, "--json") && i + 1 < argc) json = argv[++i];
         else if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
         else if (!strcmp(a, "--cov") && i + 1 < argc) cov = argv[++i];
+        else if (!strcmp(a, "--romdata") && i + 1 < argc) romdata = argv[++i];
         else if (!strcmp(a, "--gui")) gui = 1;
         else if (!strcmp(a, "--max-steps") && i + 1 < argc) cfg.max_steps_path = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--max-paths") && i + 1 < argc) cfg.max_paths = (uint32_t)strtoul(argv[++i], NULL, 0);
@@ -87,11 +114,34 @@ static int cmd_explore(int argc, char **argv) {
                 return 2;
             }
             entries++;
+        }
+        // play sessions
+        else if (!strcmp(a, "--play")) play = 1;
+        else if (!strcmp(a, "--sessions") && i + 1 < argc) scfg.sessions = atoi(argv[++i]);
+        else if (!strcmp(a, "--epoch") && i + 1 < argc) scfg.epoch_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--frames") && i + 1 < argc) scfg.max_frames = strtoull(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--seed") && i + 1 < argc) scfg.seed = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--stagnation") && i + 1 < argc) scfg.stagnation_frames = strtoull(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--until-static")) scfg.until_static = 1;
+        else if (!strcmp(a, "--checkpoints") && i + 1 < argc) scfg.pool_cap = atoi(argv[++i]);
+        else if (!strcmp(a, "--stall") && i + 1 < argc) scfg.stall_epochs = atoi(argv[++i]);
+        else if (!strcmp(a, "--state-dir") && i + 1 < argc) scfg.state_dir = argv[++i];
+        else if (!strcmp(a, "--resume")) scfg.resume = 1;
+        else if (!strcmp(a, "--input") && i + 1 < argc && scfg.inputs_n < 8) scfg.inputs[scfg.inputs_n++] = argv[++i];
+        else if (!strcmp(a, "--from-png") && i + 1 < argc) from_png = argv[++i];
+        else if (!strcmp(a, "--human")) {
+            human = 1;
+            play = 1;
+            if (i + 1 < argc && argv[i + 1][0] != '-') human_slot = atoi(argv[++i]);
         } else if (!path) path = a;
         else { fprintf(stderr, "memscan: unknown option %s\n", a); return 2; }
     }
     if (!path) {
         usage();
+        return 2;
+    }
+    if (human && !gui) {
+        fprintf(stderr, "memscan: --human needs --gui (the human plays with eyes)\n");
         return 2;
     }
     char err[256];
@@ -116,9 +166,31 @@ static int cmd_explore(int argc, char **argv) {
         m.pc = ea[i];
         ms_explorer_seed(ex, &m, MS_SEED_POINTER, 1);
     }
+    MsPlay *play_engine = NULL;
+    if (play) {
+        play_engine = ms_play_new(&scfg, &res, ex);
+        if (from_png && ms_play_load_png(play_engine, from_png) < 0) return 1;
+    }
     int rc = 0;
     if (gui && ms_gui_available()) {
-        rc = ms_gui_run(&res, &cfg, ex);
+        if (human) ms_play_human_begin(play_engine, human_slot);
+        rc = ms_gui_run(&res, &cfg, ex, play_engine);
+    } else if (play) {
+        ms_play_install_sigint();
+        clock_t t0 = clock();
+        int reason = ms_play_run(play_engine);
+        double secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
+        static const char *why[4] = { "frame budget reached", "stagnation wall reached",
+                                      "interrupted", "every byte explained" };
+        fprintf(stderr, "memscan: play done after %llu frames (%s), %.2fs\n",
+                (unsigned long long)ms_play_frames(play_engine),
+                reason >= 0 && reason < 4 ? why[reason] : "?", secs);
+        MsBuf out;
+        ms_buf_init(&out);
+        ms_report_text(&res, &cfg, &out);
+        report_lanes(play_engine, &res, &out);
+        fwrite(out.p, 1, out.len, stdout);
+        ms_buf_free(&out);
     } else {
         clock_t t0 = clock();
         ms_explore(ex);
@@ -151,10 +223,34 @@ static int cmd_explore(int argc, char **argv) {
         if (!write_file(cov, &out)) rc = 1;
         ms_buf_free(&out);
     }
+    if (romdata) {
+        MsBuf out;
+        ms_buf_init(&out);
+        ms_report_romdata(&res, &out);
+        if (!write_file(romdata, &out)) rc = 1;
+        ms_buf_free(&out);
+    }
     ms_explorer_free(ex);
+    if (play_engine) ms_play_free(play_engine);
     ms_results_free(&res);
     ms_cart_free(cart);
     return rc;
+}
+
+static void report_lanes(const MsPlay *p, const MsResults *res, MsBuf *out) {
+    MsSessionLane lanes[MS_MAX_SESSIONS + 1];
+    int n = ms_play_lanes((MsPlay *)p, lanes, MS_MAX_SESSIONS + 1);
+    static const char *mode[5] = { "rng", "attract", "script", "fixed", "human" };
+    ms_buf_str(out, "\nsessions (final):\n");
+    for (int i = 0; i < n; i++) {
+        ms_buf_fmt(out, "  s%d %-7s frames=%-7u epoch-credit=%-6llu total=%-8llu b%d:%04x%s%s\n",
+                   lanes[i].id, mode[lanes[i].mode & 7], lanes[i].frame,
+                   (unsigned long long)lanes[i].credit_epoch, (unsigned long long)lanes[i].credit_total,
+                   lanes[i].bank, lanes[i].pc, lanes[i].dead ? " dead" : "",
+                   lanes[i].backtracked ? " backtracked" : "");
+    }
+    ms_buf_fmt(out, "unexplained bytes (neither executed, read, nor static data): %llu\n",
+               (unsigned long long)ms_results_unexplained(res));
 }
 
 static int cmd_map(int argc, char **argv) {

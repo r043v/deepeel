@@ -3,3 +3,5 @@ build/
 *.gbc
 *.sav
 gui_shot.bmp
+logs/
+memscan-snaps/

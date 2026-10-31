@@ -3,11 +3,12 @@
 // a headless run: slices only change pacing, never worklist order.
 #include "../src/core/cart.h"
 #include "../src/explore/explorer.h"
+#include "../src/explore/sessions.h"
 #include "test_util.h"
 #include <SDL.h>
 #include <sys/stat.h>
 
-int ms_gui_run(MsResults *res, MsConfig *cfg, MsExplorer *ex); // gui.c (not in the stub)
+int ms_gui_run(MsResults *res, MsConfig *cfg, MsExplorer *ex, MsPlay *play); // gui.c (not in the stub)
 
 int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : ".";
@@ -35,7 +36,7 @@ int main(int argc, char **argv) {
     ms_config_defaults(&cfg);
     MsExplorer *ex = ms_explorer_new(&cfg, &res);
     ms_seed_gb(ex);
-    ms_gui_run(&res, &cfg, ex);
+    ms_gui_run(&res, &cfg, ex, NULL);
     ms_explorer_free(ex);
 
     struct stat st;

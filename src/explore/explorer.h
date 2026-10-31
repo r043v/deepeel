@@ -12,6 +12,8 @@
 
 #include "../core/machine.h"
 
+#include <pthread.h>
+
 // --- execution flags per ROM byte -------------------------------------------
 enum {
     MS_XF_NATURAL = 1 << 0, // executed by natural flow (no forced fork)
@@ -22,6 +24,7 @@ enum {
 enum {
     MS_DF_READ = 1 << 0, // read as data through the ROM windows
     MS_DF_COPIED = 1 << 1, // source range of a copy into VRAM/OAM
+    MS_DF_VERBATIM = 1 << 2, // source range of a verbatim copy (byte for byte)
 };
 enum {
     MS_SF_POINTER = 1 << 0, // static: part of a plausible pointer table
@@ -76,7 +79,7 @@ typedef struct MsCallList {
 } MsCallList;
 
 // --- per-section record -------------------------------------------------------
-enum { MS_V_FORCED = 0, MS_V_REQUIRED = 1, MS_V_SPECULATIVE = 2 };
+enum { MS_V_FORCED = 0, MS_V_REQUIRED = 1, MS_V_SPECULATIVE = 2, MS_V_PLAYED = 3 };
 
 // liveness bits: which incoming state components the section actually reads
 enum {
@@ -115,10 +118,19 @@ typedef struct MsSection {
 } MsSection;
 
 // --- results ------------------------------------------------------------------
+// The per-byte maps and the record lists are shared by the forking explorer
+// (main thread) and the play-session workers.  Flags and hits go through
+// GCC/Clang __atomic builtins; the section records and the append-only record
+// lists are guarded by res->sec_mtx / res->rec_mtx whenever res->mt is set
+// (sessions running).  The fork explorer never runs concurrently with the
+// sessions: the scheduler pauses them to drain its queue, so its own updates
+// skip the mutexes.
 typedef struct MsResults {
     const MsCart *cart;
     const MsPlatform *plat;
     int banks;
+    int mt; // sessions running: take the mutexes
+    pthread_mutex_t sec_mtx, rec_mtx;
     // per-ROM-byte maps, banks * 0x4000 entries
     uint8_t *exec_flags;
     uint32_t *exec_hits;
@@ -144,15 +156,20 @@ typedef struct MsResults {
     // diagnostics: undefined opcodes
     struct { uint32_t key; uint8_t op; } *bad_ops;
     int bad_op_count, bad_op_cap;
-    // counters
+    // counters (fork-explorer ones are main-thread only; steps_total and the
+    // discovery counters move under every session worker)
     uint64_t steps_total, paths_run;
     uint32_t exec_outside; // instructions executed outside ROM (VRAM/RAM code)
     uint32_t forks_branch, forks_irq, evicted_exact, evicted_ctx;
     uint32_t forks_capped; // forks dropped by the per-site cap
     uint32_t cycle_cuts, step_cuts, budget_paths, budget_steps, queue_overflows;
+    uint32_t pad_cuts; // paths stopped for executing a padding run
     uint32_t seeds_natural, seeds_spec;
     uint64_t vram_write_pages[2], sram_write_pages; // page bitmaps
     uint8_t oam_written;
+    // data proven by exploration, for the m0boy bridge
+    uint64_t data_verbatim_bytes; // bytes with MS_DF_VERBATIM
+    uint32_t data_contradictions; // bytes both executed and proven data (kept code)
 } MsResults;
 
 // --- exploration config -------------------------------------------------------
@@ -187,6 +204,12 @@ typedef struct MsCopyTracker {
     uint32_t loop_key; // rom index of the loop site (section attribution)
     uint32_t iter;
     uint8_t loop_active;
+    // verbatim evidence: running hash of the bytes read from ROM and of the
+    // bytes written to VRAM inside the accumulation window; a record is
+    // verbatim when both counts and hashes match and the ranges have equal
+    // length (an unrolled or transformed copy cannot match)
+    uint64_t src_hash, dst_hash;
+    uint32_t src_n, dst_n;
 } MsCopyTracker;
 
 // queue entry: a machine snapshot plus path bookkeeping
@@ -210,6 +233,8 @@ struct MsExplorer {
     MsMachine *cur;
     int cur_forced;
     uint8_t cur_kind, cur_irq, cur_from_reset;
+    uint8_t cur_pad;           // the step runs inside a padding slide: mark nothing
+    int pad_slide;              // consecutive padding ops on the current path
     uint32_t cur_bankN;
     uint16_t last_pc;
     uint8_t last_len, last_bank, have_last;
@@ -221,10 +246,23 @@ struct MsExplorer {
     int last_io_slot; // io registry slot of the last register write (copy attribution)
     int stop; // set when a hard budget wall is hit
     MsTraceVt vt;
+    // play-session mode: set by a session worker that owns this explorer
+    // (one explorer per worker, sharing res); the fork explorer runs with it
+    // cleared.  Sessions record naturally, never fork, and attribute every
+    // first discovery to their credit counters below.
+    int session;
+    int irq_depth;             // natural IRQ handlers currently executing
+    uint32_t last_cycles;      // T-cycles of the last step (from the cycle table)
+    int last_ctrl;             // ctrl of the last step (session bookkeeping)
+    // discovery credit since the last reset (epoch bookkeeping)
+    uint64_t credit_exec, credit_data, credit_copies, credit_io, credit_banks;
 };
 
 // --- section bookkeeping (sections.c) -------------------------------------------
-MsSection *ms_section_touch(MsResults *res, uint8_t bank, uint16_t pc, uint16_t hi, int natural, int is_entry, uint32_t cur_sec);
+// creates or extends the section at (bank, pc) and updates its per-run
+// counters; returns the section id (pointers would not survive the lock)
+uint32_t ms_section_touch(MsResults *res, uint8_t bank, uint16_t pc, uint16_t hi, int natural, int is_entry,
+                          uint32_t cur_sec, int from_reset, int irq);
 void ms_section_live_reg(MsSection *s, int bit);
 void ms_section_live_wram(MsSection *s, uint32_t page);
 void ms_section_live_vram(MsSection *s, uint32_t bank, uint32_t page);
@@ -243,8 +281,8 @@ int ms_io_slot(const MsResults *res, uint16_t addr);
 
 void ms_copy_reset(MsCopyTracker *ct);
 void ms_record_copy(MsExplorer *ex, const MsCopyRec *rec, uint32_t attrib_key);
-void ms_copy_on_rom_read(MsCopyTracker *ct, uint8_t bank, uint16_t addr);
-void ms_copy_on_vram_write(MsCopyTracker *ct, uint8_t bank, uint16_t addr);
+void ms_copy_on_rom_read(MsCopyTracker *ct, uint8_t bank, uint16_t addr, uint8_t v);
+void ms_copy_on_vram_write(MsCopyTracker *ct, uint8_t bank, uint16_t addr, uint8_t v);
 void ms_copy_on_back_edge(MsCopyTracker *ct, uint16_t site, uint32_t site_key);
 void ms_copy_flush_path(MsExplorer *ex, MsCopyTracker *ct);
 
@@ -267,6 +305,20 @@ int ms_explore_slice(MsExplorer *ex, int ms);
 void ms_explore_finalize(MsExplorer *ex);
 // run the whole worklist to completion (slice loop + finalize)
 int ms_explore(MsExplorer *ex);
+// bytes neither executed, nor read as data, nor statically classified
+// (padding, pointer tables) — the honest "remaining" gap metric
+uint64_t ms_results_unexplained(const MsResults *res);
+
+// per-step recording shared by the forking engine and the play sessions:
+// back-edge ring + copy tracker, branch-site and caller maps (fork mode),
+// RETI bookkeeping and the cycle count of the step (session mode)
+void ms_step_record(MsExplorer *ex, const MsStepInfo *info);
+// per-instruction pre-recording: exec marks, section touch, entry detection
+void ms_pre_step(MsExplorer *ex, MsMachine *m, uint8_t op);
+// service the highest-priority pending IRQ naturally (play sessions):
+// pushes PC, jumps to the vector, clears IME and the IF bit; returns the
+// IE bit serviced or 0
+int ms_service_irq(MsExplorer *ex, MsMachine *m);
 
 // progress snapshot for the GUI / verbose prints
 typedef struct MsProgress {

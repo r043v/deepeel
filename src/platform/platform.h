@@ -92,6 +92,10 @@ typedef struct MsPlatform {
     void (*rom_write)(struct MsMachine *m, uint16_t addr, uint8_t v);
     uint8_t (*io_read)(struct MsMachine *m, uint16_t addr);
     void (*io_write)(struct MsMachine *m, uint16_t addr, uint8_t v);
+    // advance the event-driven hardware (timer, PPU line clock...) by t
+    // T-cycles.  Play sessions tick every instruction; the forking explorer
+    // leaves the clock still and seeds the IRQ entries instead.  May be NULL.
+    void (*tick)(struct MsMachine *m, uint32_t t);
 } MsPlatform;
 
 // only platform implemented so far; more CPUs/consoles plug in here

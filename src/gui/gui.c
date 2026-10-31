@@ -1,10 +1,13 @@
-// gui.c: the SDL2 live viewer.  Single-threaded and deterministic: the
-// explorer runs in time slices between frames, so a GUI run explores exactly
-// like a headless one.  The map shows every bank as a 16x16 grid of 64-byte
-// blocks; the panel follows the hover and the selected section.
+// gui.c: the SDL2 live viewer.  The map shows every bank as a 16x16 grid of
+// 64-byte blocks; the panel follows the hover and the selected section, the
+// session lanes and the human screen.  When a play engine is given, the
+// scheduler runs in slices between frames and the human takeover lane is
+// driven from this thread: a gamepad or the keyboard plays the game while
+// the tool records, snapshots and re-seeds exploration from every advance.
 #include "gui.h"
 #include "font5x7.h"
 #include "../cpu/sm83/sm83.h"
+#include "../platform/gb/gb.h"
 
 #include <SDL.h>
 
@@ -82,14 +85,14 @@ static void block_color(const MsResults *res, int bank, int block, uint8_t *r, u
     }
 }
 
-static void draw_map(Gui *g, const MsResults *res) {
-    SDL_Rect clip = { 0, 0, MS_GW - MS_PANEL_W, MS_GH };
+static void draw_map(Gui *g, const MsResults *res, int canvas_w) {
+    SDL_Rect clip = { 0, 0, canvas_w, MS_GH };
     SDL_RenderSetClipRect(g->ren, &clip);
     for (int bank = 0; bank < res->banks; bank++) {
         int ox, oy;
         bank_origin(g, bank, &ox, &oy);
         if (oy > MS_GH || oy + MS_TILE * g->block < 24) continue;
-        if (ox > MS_GW - MS_PANEL_W || ox + MS_TILE * g->block < 0) continue;
+        if (ox > canvas_w || ox + MS_TILE * g->block < 0) continue;
         char label[32];
         snprintf(label, sizeof label, "b%d", bank);
         draw_text(g->ren, ox, oy - 10 > 0 ? oy - 10 : 0, label, 1, gui_color(MS_C_LABEL));
@@ -121,10 +124,54 @@ static void draw_line(SDL_Renderer *ren, int x, int y, int w) {
 }
 
 static const char *verdict_str(uint8_t v) {
-    return v == MS_V_REQUIRED ? "required" : (v == MS_V_FORCED ? "forced" : "speculative");
+    return v == MS_V_REQUIRED ? "required" : v == MS_V_PLAYED ? "played" : (v == MS_V_FORCED ? "forced" : "speculative");
 }
 
-static void draw_panel(Gui *g, const MsResults *res, const MsConfig *cfg, const MsProgress *pr) {
+// --- sessions lanes -----------------------------------------------------------
+static const char *mode_letter(int mode) {
+    static const char *l[5] = { "r", "a", "s", "f", "H" };
+    return l[mode];
+}
+
+static void draw_lanes(Gui *g, MsPlay *play, int x, int *yp, int w) {
+    MsSessionLane lanes[20];
+    int n = ms_play_lanes(play, lanes, 20);
+    draw_text(g->ren, x, *yp, "sessions:", 1, gui_color(MS_C_LABEL));
+    *yp += 12;
+    for (int i = 0; i < n; i++) {
+        char buf[128];
+        snprintf(buf, sizeof buf, "%c%d %s f%-7u +%3llu c%-7llu %2d:%04x %s%s", lanes[i].mode == 4 ? ' ' : 's',
+                 lanes[i].id, mode_letter(lanes[i].mode), lanes[i].frame,
+                 (unsigned long long)lanes[i].credit_epoch, (unsigned long long)lanes[i].credit_total,
+                 lanes[i].bank, lanes[i].pc, lanes[i].dead ? " dead" : (lanes[i].backtracked ? " back" : ""),
+                 lanes[i].stagnant_epochs >= 3 ? " stall" : "");
+        draw_text(g->ren, x, *yp, buf, 1, gui_color(MS_C_TEXT));
+        *yp += 11;
+        if (*yp > MS_GH - 40) break;
+    }
+    (void)w;
+}
+
+// --- human screen ---------------------------------------------------------------
+static void draw_human(Gui *g, MsPlay *play, int ox, int oy) {
+    const uint8_t *px = ms_play_human_screen(play);
+    if (!px) return;
+    const int sc = 2, w = MS_GB_SCREEN_W * sc, h = MS_GB_SCREEN_H * sc;
+    set_color(g->ren, 90, 90, 100);
+    SDL_Rect frame = { ox - 2, oy - 2, w + 4, h + 4 };
+    SDL_RenderDrawRect(g->ren, &frame);
+    for (int y = 0; y < MS_GB_SCREEN_H; y++)
+        for (int x = 0; x < MS_GB_SCREEN_W; x++) {
+            uint8_t v = (uint8_t)(255 - px[y * MS_GB_SCREEN_W + x] * 85);
+            set_color(g->ren, v, v, v);
+            SDL_Rect r = { ox + x * sc, oy + y * sc, sc, sc };
+            SDL_RenderFillRect(g->ren, &r);
+        }
+}
+
+// --- panel -------------------------------------------------------------------------
+static void draw_panel(Gui *g, const MsResults *res, const MsConfig *cfg, const MsProgress *pr,
+                       MsPlay *play) {
     int x = MS_GW - MS_PANEL_W + 8, y = 8, w = MS_PANEL_W - 16;
     char buf[160];
     int sc = 2;
@@ -158,6 +205,13 @@ static void draw_panel(Gui *g, const MsResults *res, const MsConfig *cfg, const 
 
     draw_line(g->ren, x, y, w);
     y += 6;
+    if (play) {
+        draw_lanes(g, play, x, &y, w);
+        y += 6;
+        draw_line(g->ren, x, y, w);
+        y += 6;
+    }
+
     if (g->has_hover) {
         int addr = g->hover_block * 64;
         snprintf(buf, sizeof buf, "hover b%d:%04x", g->hover_bank, addr);
@@ -265,8 +319,8 @@ static void draw_panel(Gui *g, const MsResults *res, const MsConfig *cfg, const 
         for (int i = 0; i < res->copy_count && i < 6; i++) {
             const MsCopyRec *r = &res->copies[i];
             static const char *ch[3] = { "loop", "dma", "hdma" };
-            snprintf(buf, sizeof buf, "  %s b%u:%04x>%04x %uB", ch[r->channel], r->src_bank, r->src_lo,
-                     r->src_hi, r->bytes);
+            snprintf(buf, sizeof buf, "  %s%s b%u:%04x>%04x %uB", ch[r->channel], r->verbatim ? "=v" : "",
+                     r->src_bank, r->src_lo, r->src_hi, r->bytes);
             draw_text(g->ren, x, y, buf, 1, gui_color(MS_C_TEXT));
             y += 12;
         }
@@ -290,15 +344,39 @@ static void pick_block(Gui *g, const MsResults *res, int mx, int my, int *bank, 
     *block = (py / g->block) * MS_TILE + (px / g->block);
 }
 
+// pad mask from keyboard + gamepad: a=1 b=2 select=4 start=8 right=16 left=32 up=64 down=128
+static uint8_t read_buttons(const uint8_t *kb, SDL_GameController *pad) {
+    uint8_t b = 0;
+    if (kb[SDL_SCANCODE_X] || kb[SDL_SCANCODE_PERIOD]) b |= 0x01;
+    if (kb[SDL_SCANCODE_Z] || kb[SDL_SCANCODE_COMMA]) b |= 0x02;
+    if (kb[SDL_SCANCODE_RSHIFT]) b |= 0x04;
+    if (kb[SDL_SCANCODE_RETURN] || kb[SDL_SCANCODE_KP_ENTER]) b |= 0x08;
+    if (kb[SDL_SCANCODE_RIGHT]) b |= 0x10;
+    if (kb[SDL_SCANCODE_LEFT]) b |= 0x20;
+    if (kb[SDL_SCANCODE_UP]) b |= 0x40;
+    if (kb[SDL_SCANCODE_DOWN]) b |= 0x80;
+    if (pad) {
+        if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A)) b |= 0x01;
+        if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_B)) b |= 0x02;
+        if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_BACK)) b |= 0x04;
+        if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_START)) b |= 0x08;
+        if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) b |= 0x10;
+        if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_LEFT)) b |= 0x20;
+        if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_UP)) b |= 0x40;
+        if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) b |= 0x80;
+    }
+    return b;
+}
+
 int ms_gui_available(void) { return 1; }
 
-int ms_gui_run(MsResults *res, MsConfig *cfg, MsExplorer *ex) {
+int ms_gui_run(MsResults *res, MsConfig *cfg, MsExplorer *ex, MsPlay *play) {
     Gui g;
     memset(&g, 0, sizeof g);
     g.block = 4;
     snprintf(g.status, sizeof g.status, "exploring...");
 
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         fprintf(stderr, "memscan: SDL_Init: %s\n", SDL_GetError());
         return 1;
     }
@@ -306,13 +384,16 @@ int ms_gui_run(MsResults *res, MsConfig *cfg, MsExplorer *ex) {
                              SDL_WINDOW_RESIZABLE);
     g.ren = SDL_CreateRenderer(g.win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!g.ren) g.ren = SDL_CreateRenderer(g.win, -1, 0);
+    SDL_GameController *pad = SDL_IsGameController(0) ? SDL_GameControllerOpen(0) : NULL;
 
+    uint32_t human_last = SDL_GetTicks();
     int done = 0;
     int frames = 0;
     const char *shot = getenv("MEMSCAN_SHOT"); // headless testing: save a frame and exit
     int shot_frame = shot ? 40 : -1;
     while (!done) {
         SDL_Event e;
+        const uint8_t *kb = SDL_GetKeyboardState(NULL);
         while (SDL_PollEvent(&e)) {
             switch (e.type) {
             case SDL_QUIT:
@@ -320,13 +401,19 @@ int ms_gui_run(MsResults *res, MsConfig *cfg, MsExplorer *ex) {
                 break;
             case SDL_KEYDOWN:
                 if (e.key.keysym.sym == SDLK_ESCAPE) done = 1;
+                if (play && e.key.keysym.sym == SDLK_h && !ms_play_human_active(play)) {
+                    ms_play_human_begin(play, -1); // H: take over from the best checkpoint
+                    snprintf(g.status, sizeof g.status, "human takeover - pad or arrows/z/x/enter/rshift");
+                }
+                if (play && e.key.keysym.sym == SDLK_F5 && ms_play_human_active(play)) {
+                    ms_play_human_snapshot(play);
+                    snprintf(g.status, sizeof g.status, "snapshot saved");
+                }
                 break;
             case SDL_MOUSEWHEEL: {
-                int old = g.block;
                 g.block += e.wheel.y > 0 ? 1 : -1;
                 if (g.block < 2) g.block = 2;
                 if (g.block > 12) g.block = 12;
-                (void)old;
                 break;
             }
             case SDL_MOUSEMOTION: {
@@ -358,24 +445,43 @@ int ms_gui_run(MsResults *res, MsConfig *cfg, MsExplorer *ex) {
                 break;
             }
         }
-        // exploration slice between frames
+        // engine slices between frames
         if (!g.finalized) {
-            MsProgress pr;
-            ms_explorer_progress(ex, &pr);
-            if (pr.queue_len == 0) {
-                ms_explore_finalize(ex);
-                g.finalized = 1;
-                snprintf(g.status, sizeof g.status, "done - %llu steps", (unsigned long long)pr.steps_total);
+            if (play) {
+                if (ms_play_done(play)) {
+                    ms_play_finish((MsPlay *)play);
+                    ms_explore_finalize(ex);
+                    g.finalized = 1;
+                    snprintf(g.status, sizeof g.status, "play done - %llu frames",
+                             (unsigned long long)ms_play_frames(play));
+                } else {
+                    ms_play_poll(play);
+                    // the human lane runs on this thread, paced to ~60 fps
+                    uint32_t now = SDL_GetTicks();
+                    if (ms_play_human_active(play) && now - human_last >= 16) {
+                        human_last = now;
+                        ms_play_human_frame((MsPlay *)play, read_buttons(kb, pad));
+                    }
+                }
             } else {
-                ms_explore_slice(ex, 8);
+                MsProgress pr;
+                ms_explorer_progress(ex, &pr);
+                if (pr.queue_len == 0) {
+                    ms_explore_finalize(ex);
+                    g.finalized = 1;
+                    snprintf(g.status, sizeof g.status, "done - %llu steps", (unsigned long long)pr.steps_total);
+                } else {
+                    ms_explore_slice(ex, 8);
+                }
             }
         }
         MsProgress pr;
         ms_explorer_progress(ex, &pr);
         set_color(g.ren, 16, 16, 20);
         SDL_RenderClear(g.ren);
-        draw_map(&g, res);
-        draw_panel(&g, res, cfg, &pr);
+        draw_map(&g, res, MS_GW - MS_PANEL_W);
+        if (play) draw_human(&g, (MsPlay *)play, 8, 28);
+        draw_panel(&g, res, cfg, &pr, (MsPlay *)play);
         SDL_RenderPresent(g.ren);
         if (frames == shot_frame) {
             SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, MS_GW, MS_GH, 24, SDL_PIXELFORMAT_RGB24);
@@ -387,7 +493,9 @@ int ms_gui_run(MsResults *res, MsConfig *cfg, MsExplorer *ex) {
         frames++;
         SDL_Delay(12);
     }
+    if (play) ms_play_finish((MsPlay *)play);
     if (!g.finalized) ms_explore_finalize(ex);
+    if (pad) SDL_GameControllerClose(pad);
     SDL_DestroyRenderer(g.ren);
     SDL_DestroyWindow(g.win);
     SDL_Quit();

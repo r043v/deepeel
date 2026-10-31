@@ -134,5 +134,73 @@ def build(out):
     w(r, 0x8000, *range(1, 9))                   # 8 bytes of data in bank 2 (file offset)
     save(out, "fix_bankdata", r)
 
+    # --- vblank: HALT waits the session clock, VBlank handler, JOYP branch ---
+    # The forking explorer cannot press keys: only play sessions take both
+    # JOYP branches (worker 0 holds A, worker 1 holds START).
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x3E, 0x01)                      # ld a,1
+    w(r, 0x152, 0xE0, 0xFF)                      # ldh ($FF),a  IE = vblank
+    w(r, 0x154, 0xFB)                            # ei
+    w(r, 0x155, 0x00)                            # nop (IME effective here)
+    w(r, 0x156, 0x76)                            # main: halt  (session clock wakes it)
+    w(r, 0x157, 0x3E, 0x10)                      # ld a,$10    select button keys
+    w(r, 0x159, 0xE0, 0x00)                      # ldh ($00),a
+    w(r, 0x15B, 0xF0, 0x00)                      # ldh a,($00) read JOYP
+    w(r, 0x15D, 0x1F)                            # cpl         active-low -> 1 = pressed
+    w(r, 0x15E, 0xE6, 0x01)                      # and $01     A pressed?
+    w(r, 0x160, 0xFE, 0x01)                      # cp 1
+    w(r, 0x162, 0x20, 0x03)                      # jr nz,+3
+    w(r, 0x164, 0xCD, 0x80, 0x01)                # call $0180  path A
+    w(r, 0x167, 0xF0, 0x00)                      # ldh a,($00)
+    w(r, 0x169, 0x1F)                            # cpl
+    w(r, 0x16A, 0xE6, 0x08)                      # and $08     START pressed?
+    w(r, 0x16C, 0xFE, 0x08)                      # cp 8
+    w(r, 0x16E, 0x20, 0x03)                      # jr nz,+3
+    w(r, 0x170, 0xCD, 0xA0, 0x01)                # call $01A0  path B
+    w(r, 0x173, 0xC3, 0x56, 0x01)                # jp main
+    w(r, 0x40, 0x3E, 0x77, 0xEA, 0x00, 0x80, 0xD9)  # vblank handler: vram $77, reti
+    w(r, 0x180, 0x3E, 0xAA, 0xEA, 0x02, 0x80, 0xC9)  # path A: vram $AA
+    w(r, 0x1A0, 0x3E, 0xBB, 0xEA, 0x03, 0x80, 0xC9)  # path B: vram $BB
+    save(out, "fix_vblank", r)
+
+    # --- copy1: a pure 1:1 ROM->VRAM copy loop (verbatim proof) ---------------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x21, 0x00, 0x40)                # ld hl,$4000 (bank 1 data)
+    w(r, 0x153, 0x11, 0x00, 0x80)                # ld de,$8000
+    w(r, 0x156, 0x01, 0x00, 0x01)                # ld bc,$0100
+    w(r, 0x159, 0x2A)                            # loop: ld a,(hl+)
+    w(r, 0x15A, 0x12)                            # ld (de),a
+    w(r, 0x15B, 0x13)                            # inc de
+    w(r, 0x15C, 0x0B)                            # dec bc
+    w(r, 0x15D, 0x78)                            # ld a,b
+    w(r, 0x15E, 0xB1)                            # or c
+    w(r, 0x15F, 0x20, 0xF8)                      # jr nz,$0159
+    w(r, 0x161, 0x76)                            # halt
+    for i in range(0x100):                       # the "tile data" in bank 1
+        r[0x4000 + i] = (i * 13 + 5) & 0xFF
+    save(out, "fix_copy1", r)
+
+    # --- copyx: same loop but every byte is XOR-transformed -------------------
+    # (a decompressor shape: the ranges match, the bytes do not)
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x21, 0x00, 0x40)                # ld hl,$4000
+    w(r, 0x153, 0x11, 0x00, 0x80)                # ld de,$8000
+    w(r, 0x156, 0x01, 0x00, 0x01)                # ld bc,$0100
+    w(r, 0x159, 0x2A)                            # loop: ld a,(hl+)
+    w(r, 0x15A, 0xEE, 0xFF)                      # xor $FF   (the transformation)
+    w(r, 0x15C, 0x12)                            # ld (de),a
+    w(r, 0x15D, 0x13)                            # inc de
+    w(r, 0x15E, 0x0B)                            # dec bc
+    w(r, 0x15F, 0x78)                            # ld a,b
+    w(r, 0x160, 0xB1)                            # or c
+    w(r, 0x161, 0x20, 0xF6)                      # jr nz,$0159
+    w(r, 0x163, 0x76)                            # halt
+    for i in range(0x100):
+        r[0x4000 + i] = (i * 29 + 11) & 0xFF
+    save(out, "fix_copyx", r)
+
 if __name__ == "__main__":
     build(sys.argv[1] if len(sys.argv) > 1 else ".")

@@ -47,6 +47,14 @@ SDL2 est optionnel (`-DBUILD_GUI=OFF` pour s'en passer).
 memscan explore rom.gb [--gui] [--json map.json] [--text report.txt] [--cov out.cov]
 memscan explore rom.gb --max-total 50000000 --queue 8192
 memscan explore rom.gb --entry 2:4000        # graine supplémentaire banque 2, $4000
+
+# sessions jouées (m0boy : inputs aléatoires + attract, 10 threads, pool de
+# checkpoints, scheduler d'époques, persistance --state-dir/--resume)
+memscan explore rom.gb --play --frames 72000 --state-dir s --cov jeu.cov --romdata jeu.prof
+memscan explore rom.gb --play --resume --state-dir s
+# mode humain : une lane jouable au pad, chaque avancée sauvée en PNG (écran +
+# machine complète, rechargeable --from-png) et explorée automatiquement
+memscan explore rom.gb --play --gui --human
 memscan map rom.gb                           # carte statique seule (pointeurs, padding)
 memscan regs gb                              # dump du registre matériel GB
 memscan dis rom.gb 2:4000 12                 # désassemblage banque 2, $4000

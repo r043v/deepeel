@@ -136,6 +136,44 @@ int main(int argc, char **argv) {
     CHECK(copy_of(0, 2, 0x4000, 0x4007, 0x8000, 0x8007) != NULL);
     CHECK(bank_events_of(1, 2) >= 1);
 
+    // --- copy1: a pure 1:1 ROM->VRAM copy is proven verbatim --------------------------
+    run(dir, "copy1");
+    const MsCopyRec *cv = copy_of(0, 1, 0x4000, 0x40FF, 0x8000, 0x80FF);
+    CHECK(cv != NULL && cv->verbatim);
+    {
+        int unmarked = 0;
+        for (int i = 0x4000; i < 0x4100; i++)
+            if (!(res.data_flags[i] & MS_DF_VERBATIM)) unmarked++;
+        CHECK(unmarked == 0);
+        // the cov export carries the proof as flag 8, never on an executed line
+        MsBuf o;
+        ms_buf_init(&o);
+        ms_report_cov(&res, &o);
+        int data_lines = 0, exec_data = 0;
+        char *q = (char *)o.p, *end = (char *)o.p + o.len;
+        while (q < end) {
+            char *nl = memchr(q, '\n', (size_t)(end - q));
+            if (!nl) break;
+            if (*q != '#') {
+                unsigned b, a, f;
+                if (sscanf(q, "%x %x %x", &b, &a, &f) == 3 && (f & 8)) {
+                    data_lines++;
+                    if (f & 1) exec_data++;
+                }
+            }
+            q = nl + 1;
+        }
+        CHECK(data_lines >= 0x100);
+        CHECK(exec_data == 0);
+        ms_buf_free(&o);
+    }
+
+    // --- copyx: a transformed copy is data, but not proven verbatim --------------------
+    run(dir, "copyx");
+    const MsCopyRec *cx = copy_of(0, 1, 0x4000, 0x40FF, 0x8000, 0x80FF);
+    CHECK(cx != NULL && !cx->verbatim);
+    CHECK(!(res.data_flags[0x4000] & MS_DF_VERBATIM));
+
     // --- reports produce output -------------------------------------------------------
     {
         MsConfig cfg;
