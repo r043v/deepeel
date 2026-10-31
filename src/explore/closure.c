@@ -5,8 +5,11 @@
 // targets and both sides of every conditional, and marks what it reaches
 // DP_XF_STATIC.  Nothing executed is touched; padding, pointer tables and
 // proven data stop the walk.  The visited maps are ROM-sized, so it always
-// terminates; what it cannot resolve (bank-0 edge into the $4000 window with
-// no bank evidence, JP HL) is counted, never guessed.
+// terminates; what it cannot resolve while walking (bank-0 edge into the
+// $4000 window with no bank evidence, JP HL) is counted, never guessed at —
+// but every bank's view of an unresolved edge target is collected and later
+// seeded as speculative exploration (dp_closure_seed), so the ambiguity
+// becomes bounded forks instead of a dead end.
 #include "explorer.h"
 #include "../cpu/sm83/sm83.h"
 
@@ -27,6 +30,21 @@ static void push(Stack *s, uint32_t key, uint16_t hint) {
     s->v[s->n].key = key;
     s->v[s->n].hint = hint;
     s->n++;
+}
+
+// every bank's view of one unresolved edge target, once per round
+static void bank_edge_add(DpResults *res, DpHashSet *seen, uint16_t target) {
+    for (int b = 0; b < res->banks; b++) {
+        uint32_t k = dp_rom_index(b, target);
+        if (dp_set_insert(seen, k) <= 0) continue;
+        if (res->clo_bank_n == res->clo_bank_cap) {
+            res->clo_bank_cap = res->clo_bank_cap ? res->clo_bank_cap * 2 : 1024;
+            res->clo_bank_entries =
+                realloc(res->clo_bank_entries, (size_t)res->clo_bank_cap * sizeof(uint32_t));
+            if (!res->clo_bank_entries) abort();
+        }
+        res->clo_bank_entries[res->clo_bank_n++] = k;
+    }
 }
 
 static int illegal(uint8_t op) {
@@ -60,13 +78,16 @@ uint32_t dp_static_closure(DpResults *res) {
     uint8_t *vis = calloc(n, 1);   // banked code (and bank-0 code with no hint)
     DpHashSet vis0;                // bank-0 code per bank hint
     DpHashSet listed;              // entries already recorded
+    DpHashSet blisted;             // unresolved-edge bank candidates already collected
     Stack st = {0};
     uint32_t marked = 0;
     if (!vis) return 0;
     dp_set_init(&vis0, 1 << 24);
     dp_set_init(&listed, 1 << 22);
+    dp_set_init(&blisted, 1 << 16);
     res->closure_rounds++;
     res->clo_entry_n = 0;
+    res->clo_bank_n = 0;
     // per-round counters are cumulative over rounds only for the totals the
     // report shows; the stop counters restart so a round never double counts
     res->closure_unresolved_bank = res->closure_stopped_data = res->closure_stopped_illegal = 0;
@@ -148,6 +169,7 @@ uint32_t dp_static_closure(DpResults *res) {
                 uint32_t tb = bank ? bank : it.hint;
                 if (tb == NO_HINT) {
                     res->closure_unresolved_bank++;
+                    bank_edge_add(res, &blisted, (uint16_t)target);
                 } else {
                     if (tb >= (uint32_t)res->banks) tb %= (uint32_t)res->banks;
                     tk = tb * 0x4000 + (uint32_t)(target & 0x3FFF);
@@ -166,8 +188,10 @@ uint32_t dp_static_closure(DpResults *res) {
             uint32_t npc = pc + (uint32_t)len;
             if (bank == 0 ? off + (uint32_t)len < 0x4000 : npc < 0x8000)
                 push(&st, k + (uint32_t)len, it.hint);
-            else if (bank == 0)
+            else if (bank == 0) {
                 res->closure_unresolved_bank++;
+                bank_edge_add(res, &blisted, 0x4000);
+            }
         }
     }
 
@@ -179,12 +203,15 @@ uint32_t dp_static_closure(DpResults *res) {
     free(vis);
     dp_set_free(&vis0);
     dp_set_free(&listed);
+    dp_set_free(&blisted);
     return marked;
 }
 
 int dp_closure_seed(DpExplorer *ex) {
     DpResults *res = ex->res;
     int seeded = 0;
+    // a seed the queue refused stays unmarked: the next round proposes it
+    // again instead of losing it for good
     for (int i = 0; i < res->clo_entry_n; i++) {
         uint32_t k = res->clo_entries[i];
         if (res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED)) continue;
@@ -192,12 +219,29 @@ int dp_closure_seed(DpExplorer *ex) {
             res->closure_seeds_dropped++;
             continue;
         }
-        if (dp_set_insert(&res->clo_seeded, k) <= 0) continue;
-
         uint32_t bank = k / 0x4000, off = k % 0x4000;
-        dp_explorer_seed_pc(ex, (int)bank, (uint16_t)(bank ? 0x4000 + off : off), DP_SEED_POINTER, 1);
+        if (!dp_explorer_seed_pc_pri(ex, (int)bank, (uint16_t)(bank ? 0x4000 + off : off),
+                                     DP_SEED_POINTER, 1, 1))
+            continue; // refused by the priority inbox: counted there, retried later
         seeded++;
     }
+    // the ambiguous bank-0 edges: every bank's view of the target becomes a
+    // speculative seed (bounded by the seed cap, banked seeds reported)
+    int banked = 0;
+    for (int i = 0; i < res->clo_bank_n; i++) {
+        uint32_t k = res->clo_bank_entries[i];
+        if (res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED)) continue;
+        if ((uint32_t)(seeded + banked) >= ex->cfg.seed_cap) {
+            res->closure_seeds_dropped++;
+            continue;
+        }
+        uint32_t bank = k / 0x4000, off = k % 0x4000;
+        if (!dp_explorer_seed_pc_pri(ex, (int)bank, (uint16_t)(0x4000 + off), DP_SEED_POINTER, 1,
+                                     1))
+            continue;
+        banked++;
+    }
     res->closure_seeds += (uint32_t)seeded;
-    return seeded;
+    res->closure_bank_seeds += (uint32_t)banked;
+    return seeded + banked;
 }

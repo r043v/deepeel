@@ -313,10 +313,11 @@ int main(int argc, char **argv) {
             CHECK(dp_play_frames(p) >= 2 * 700);
             // the fork explorer received nothing during the play (the seeds
             // only enter at the post-play phase); q0 = the initial seeds
-            uint32_t q0 = ex->q_len;
+            uint32_t q0 = ex->q_len + ex->pq_len;
             int seeded = dp_play_seed_tas_snaps(p);
             CHECK(seeded == (int)dp_play_tas_snap_files(p));
-            CHECK(ex->q_len == q0 + (uint32_t)seeded);
+            // snapshot seeds take the priority inbox: queued means q + pq
+            CHECK(ex->q_len + ex->pq_len == q0 + (uint32_t)seeded);
             dp_play_free(p);
             dp_explorer_free(ex);
             dp_results_free(&res);

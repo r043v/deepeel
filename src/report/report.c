@@ -104,6 +104,19 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
                  res->closure_stopped_illegal, res->closure_unresolved_bank,
                  (unsigned long long)ind_sites, (unsigned long long)ind_over, res->forks_covered_pruned);
         dp_buf_str(out, line);
+        snprintf(line, sizeof line,
+                 "  seeding: %u bank candidates on the ambiguous edges, %u JP HL targets seeded, "
+                 "%u seed refusals retried\n",
+                 res->closure_bank_seeds, res->indirect_seeds, res->closure_seeds_refused);
+        dp_buf_str(out, line);
+        {
+            DpMapSummary rsum;
+            uint8_t *rmap = dp_map_build(res, &rsum);
+            if (rmap) {
+                dp_map_residual_text(res, rmap, out);
+                free(rmap);
+            }
+        }
     }
 
     // per-bank coverage

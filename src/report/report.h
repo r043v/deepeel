@@ -28,6 +28,8 @@ const char *dp_map_class_name(int c);
 int dp_map_is_code(int c);
 int dp_map_is_data(int c);
 void dp_map_summary_text(const DpMapSummary *s, DpBuf *out);
+// the unclassified ranges (largest first), from a dp_map_build array
+void dp_map_residual_text(const DpResults *res, const uint8_t *m, DpBuf *out);
 void dp_report_map(const DpResults *res, DpBuf *out);
 int dp_report_map_png(const DpResults *res, const char *path);
 void dp_report_html(const DpResults *res, DpBuf *out);

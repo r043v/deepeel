@@ -13,7 +13,12 @@ mapping** (`bank-lo`, `bank-hi`, `ram-bank`, `ramg`, `mode`, `dma`, `hdma`,
 
 Les IRQ (VBlank $40, LCDSTAT $48, Timer $50, Serial $58, Joypad $60) ont
 leur vecteur et leur bit IE/IF ; les points d'entrée graine l'reset $100,
-les 8 RST et les 5 IRQ (un vecteur en padding n'est pas semé).
+les 8 RST et les 5 IRQ (un vecteur en padding n'est pas semé). Le balayage
+de pointeurs sème toute valeur ROM plausible ; une cible `$4000+` **encadrée
+de deux autres mots de la fenêtre `$4000`** est traitée comme entrée de
+table de dispatch : **toutes les banques commutables en sont semées** (la
+banque visée par un pointeur banqué est indémontrable statiquement), un mot
+isolé reste semé en banque 1. Plafond `--seed-cap`, dédup par index ROM.
 
 ## Machine embarquée (0.3.0)
 
@@ -214,11 +219,24 @@ atteints par flux direct seul ».
   verbatim. Comptés (`stopped by data/padding`, `by undefined opcodes`).
 - Une arête de banque 0 vers `$4000+` n'est résolue que par les banques
   observées dans la section (ou la banque de boot) ; sinon elle est comptée
-  `unresolved`, jamais devinée. Les `JP HL` observés sont listés avec leurs cibles
-  (jusqu'à 8 par site, débordement compté).
+  `unresolved` et **toutes les vues banque de la cible sont semées** comme
+  graines spéculatives (borné : sites × banques, plafond `--seed-cap`, compteur
+  `bank candidates seeded`). Les `JP HL` observés sont listés avec leurs cibles
+  (jusqu'à 8 par site, débordement compté) ; **après les phases de couverture,
+  chaque cible observée sans exécution est semée à son tour** (phase
+  `indirect-search`, compteur `JP HL targets seeded`).
+- Une graine refusée par la file pleine n'est plus perdue : elle est
+  re-proposée au tour suivant (les compteurs `seeds:` ne comptent que les
+  graines réellement acceptées). Les graines de fermeture, les cibles
+  indirectes et les snapshots TAS passent par une **boîte d'arrivée
+  prioritaire** servie avant la file de travail — dans un régime saturé (chaque
+  chemin forké en produit d'autres), les graines tardives n'y meurent plus de
+  faim ; elles **contournent l'éviction par contexte** (sonde délibérée, peu
+  nombreuses, plafonnées).
 - Boucle `--closure-rounds N` (défaut 4) : fermeture → graines (les entrées non
-  exécutées) → recherche totale → fermeture… jusqu'à ce qu'un tour ne sème
-  rien. Plafond de graines `--seed-cap`, rejets comptés (`dropped`).
+  exécutées, plus les vues banque ambiguës) → recherche totale → fermeture…
+  jusqu'à ce qu'un tour ne sème rien. Plafond de graines `--seed-cap`, rejets
+  comptés (`dropped`).
 - Export `.cov` : octets statiques = début d'instruction seul, drapeau 4
   (spéculatif), +2 si entrée, compte 0. Jamais le drapeau 1.
 - Élagage : un site conditionnel dont les deux côtés ont déjà été exécutés ne
@@ -281,8 +299,14 @@ code / data / padding.
   ROM→VRAM/WRAM ou verbatim), `data-read` (lu), `table` (pointeurs
   statiques), `padding`.
 - Classes **déduites** (toujours étiquetées) : `inferred-code` (≤ 3 octets
-  entre deux codes), `inferred-data` (≤ 256 octets entre deux data),
-  `inferred-padding` (≥ 4 octets identiques 00/FF). Jamais à travers une banque.
+  entre deux codes), `inferred-data` (≤ 1024 octets entre deux data),
+  `inferred-padding` (≥ 4 octets ne contenant que du 00/FF, mélangés). Jamais
+  à travers une banque.
+- Le balayage statique marque un run de padding **en entier** dès le seuil de
+  8 octets (la tête du run n'est plus laissée de côté).
+- La ligne `residual unknown` du rapport liste les plages que rien n'a pu
+  observer ni déduire, les plus grandes d'abord — la frontière honnête de la
+  carte.
 - « Connu » inclut donc les octets déduits ; la part déduite est rapportée à part.
 - `deepeel explore ROM --map x.map` écrit le texte (`banque début fin classe`,
   fin incluse, adresses vues du CPU) ; `--map x.map.png` écrit une image

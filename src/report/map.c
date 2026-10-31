@@ -44,12 +44,13 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
             while (j < be && m[j] == DP_MAP_UNKNOWN) j++;
             int before = i > bs ? m[i - 1] : -1, after = j < be ? m[j] : -1;
             size_t len = j - i;
+            // pure filler: every byte 00 or FF (mixed runs happen between tiles)
             int fill = rom && j <= rsz && len >= 4;
-            for (size_t k = i; fill && k < j; k++) if (rom[k] != rom[i] || (rom[i] != 0x00 && rom[i] != 0xFF)) fill = 0;
+            for (size_t k = i; fill && k < j; k++) if (rom[k] != 0x00 && rom[k] != 0xFF) fill = 0;
             int c = DP_MAP_UNKNOWN;
             if (fill) c = DP_MAP_INF_PAD;
             else if (before >= 0 && after >= 0 && dp_map_is_code(before) && dp_map_is_code(after) && len <= 3) c = DP_MAP_INF_CODE;
-            else if (before >= 0 && after >= 0 && dp_map_is_data(before) && dp_map_is_data(after) && len <= 256) c = DP_MAP_INF_DATA;
+            else if (before >= 0 && after >= 0 && dp_map_is_data(before) && dp_map_is_data(after) && len <= 1024) c = DP_MAP_INF_DATA;
             if (c != DP_MAP_UNKNOWN) memset(m + i, c, len);
             i = j;
         }
@@ -79,6 +80,49 @@ void dp_map_summary_text(const DpMapSummary *s, DpBuf *out) {
     dp_buf_fmt(out, "  code     %5.1f%%   data    %5.1f%%   padding %5.1f%%\n", s->code * t, s->data * t, s->pad * t);
     for (int c = 0; c < DP_MAP_COUNT; c++)
         dp_buf_fmt(out, "    %-17s %8llu  %5.1f%%\n", dp_map_class_name(c), (unsigned long long)s->cls[c], s->cls[c] * t);
+}
+
+// the last mile: the byte ranges nothing could observe or infer, largest
+// first — the honest boundary of the map
+void dp_map_residual_text(const DpResults *res, const uint8_t *m, DpBuf *out) {
+    size_t n = (size_t)res->banks * 0x4000;
+    struct { unsigned bank, lo, hi; size_t len; } top[8] = {{0}};
+    uint32_t total = 0, ranges = 0;
+    for (size_t bs = 0; bs < n; bs += 0x4000) {
+        for (size_t i = bs; i < bs + 0x4000;) {
+            if (m[i] != DP_MAP_UNKNOWN) { i++; continue; }
+            size_t j = i;
+            while (j < bs + 0x4000 && m[j] == DP_MAP_UNKNOWN) j++;
+            if (j > i) {
+                ranges++;
+                total += (uint32_t)(j - i);
+                size_t len = j - i;
+                for (int t = 0; t < 8; t++) {
+                    if (len > top[t].len) {
+                        for (int u = 7; u > t; u--) top[u] = top[u - 1];
+                        top[t].bank = (unsigned)(bs / 0x4000);
+                        top[t].lo = (unsigned)(i - bs);
+                        top[t].hi = (unsigned)(j - 1 - bs);
+                        top[t].len = len;
+                        break;
+                    }
+                }
+            }
+            i = j;
+        }
+    }
+    if (!total) {
+        dp_buf_str(out, "residual unknown: none\n");
+        return;
+    }
+    dp_buf_fmt(out, "residual unknown: %u bytes in %u ranges, largest:", total, ranges);
+    unsigned win = 0;
+    for (int t = 0; t < 8 && top[t].len; t++) {
+        win = top[t].bank ? 0x4000 : 0;
+        dp_buf_fmt(out, " %u:%04x-%04x (%zu)", top[t].bank, win + top[t].lo, win + top[t].hi,
+                   top[t].len);
+    }
+    dp_buf_str(out, "\n");
 }
 
 void dp_report_map(const DpResults *res, DpBuf *out) {

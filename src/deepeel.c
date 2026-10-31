@@ -26,8 +26,8 @@ static void usage(void) {
             "    --max-steps N        per-path step budget (default 100000)\n"
             "    --max-paths N        path cap (default 200000)\n"
             "    --max-total N        global step wall (default 20000000)\n"
-            "    --queue N            pending-state cap (default 2048)\n"
-            "    --loop-cap N         iterations of one backward edge before cut (default 65536)\n"
+            "    --queue N            pending-state cap (default 4096)\n"
+            "    --loop-cap N         iterations of one backward edge before cut (default 4096)\n"
             "    --seed-cap N         pointer-scan seed cap (default 4096)\n"
             "    --entry bank:addr    extra seed (repeatable)\n"
             "    --seed-banks         also seed every bank at $4000\n"
@@ -308,6 +308,21 @@ static int cmd_explore(int argc, char **argv) {
                 fprintf(stderr, "deepeel: TAS shoots explored in %.2fs (%llu paths)\n",
                         (double)(clock() - t2) / CLOCKS_PER_SEC, (unsigned long long)res.paths_run);
             }
+            // phase 5: the dispatch targets the JP HL sites actually took —
+            // some never ran because their continuation hit a budget wall
+            int iseeds = dp_seed_indirect(ex);
+            if (iseeds) {
+                clock_t t3 = clock();
+                dp_disc_add(&res, "indirect", 0);
+                uint32_t k2 = res.disc_n ? res.disc[res.disc_n - 1].known : 0;
+                fprintf(stderr, "deepeel: indirect: %d JP HL targets seeded\n", iseeds);
+                dp_explore(ex);
+                dp_disc_add(&res, "indirect-search", 0);
+                if (res.disc_n) res.disc[res.disc_n - 1].credit = res.disc[res.disc_n - 1].known - k2;
+                closure_rounds(ex, &res);
+                fprintf(stderr, "deepeel: indirect seeds explored in %.2fs (%llu paths)\n",
+                        (double)(clock() - t3) / CLOCKS_PER_SEC, (unsigned long long)res.paths_run);
+            }
         }
         DpBuf out;
         dp_buf_init(&out);
@@ -366,6 +381,13 @@ static int cmd_explore(int argc, char **argv) {
         clock_t t0 = clock();
         dp_explore(ex);
         closure_rounds(ex, &res);
+        int iseeds = dp_seed_indirect(ex);
+        if (iseeds) {
+            dp_disc_add(&res, "indirect", 0);
+            dp_explore(ex);
+            dp_disc_add(&res, "indirect-search", 0);
+            closure_rounds(ex, &res);
+        }
         double secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
         DpBuf out;
         dp_buf_init(&out);
@@ -429,6 +451,7 @@ static int cmd_explore(int argc, char **argv) {
             DpBuf out;
             dp_buf_init(&out);
             dp_map_summary_text(&sum, &out);
+            dp_map_residual_text(&res, cls, &out);
             fwrite(out.p, 1, out.len, stdout);
             dp_buf_free(&out);
             free(cls);
@@ -593,15 +616,19 @@ static int cmd_dis(int argc, char **argv) {
 
 // closure rounds: the static flow proposes the unvisited entries of known
 // code, the machine disposes (a fresh total search from each), until a round
-// seeds nothing or the round cap is reached.  Each search gets a fresh wall.
+// seeds nothing — accepted or refused — or the round cap is reached.  A
+// refused seed is retried the next round, once the search freed queue room.
+// Each search gets a fresh wall.
 static void closure_rounds(DpExplorer *ex, DpResults *res) {
     if (ex->cfg.no_closure) return;
     for (int r = 0; r < ex->cfg.closure_rounds; r++) {
         uint32_t marked = dp_static_closure(res);
+        uint32_t ref0 = res->closure_seeds_refused;
         int seeded = dp_closure_seed(ex);
-        fprintf(stderr, "deepeel: closure round %d: +%u static bytes, %d entries seeded\n", r + 1,
-                marked, seeded);
-        if (!seeded) return;
+        uint32_t refused = res->closure_seeds_refused - ref0;
+        fprintf(stderr, "deepeel: closure round %d: +%u static bytes, %d entries seeded, %u refused\n",
+                r + 1, marked, seeded, refused);
+        if (!seeded && !refused) return;
         ex->stop = 0;
         ex->steps_own = 0;
         ex->cfg.dfs = 1;

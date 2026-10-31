@@ -210,7 +210,6 @@ void dp_results_init(DpResults *res, const DpCart *cart, const DpPlatform *plat)
     dp_map_init(&res->callers, sizeof(DpCallList), 1 << 20);
     dp_map_init(&res->fork_counts, sizeof(uint32_t), 1 << 20);
     dp_map_init(&res->indirect, sizeof(DpIndirect), 1 << 16);
-    dp_set_init(&res->clo_seeded, 1 << 20);
     dp_set_init(&res->bad_seen, 1 << 20);
 }
 
@@ -258,9 +257,9 @@ void dp_results_free(DpResults *res) {
     dp_map_free(&res->callers);
     dp_map_free(&res->fork_counts);
     dp_map_free(&res->indirect);
-    dp_set_free(&res->clo_seeded);
     dp_set_free(&res->bad_seen);
     free(res->clo_entries);
+    free(res->clo_bank_entries);
     free(res->bad_ops);
     pthread_mutex_destroy(&res->sec_mtx);
     pthread_mutex_destroy(&res->rec_mtx);
@@ -279,13 +278,18 @@ int dp_io_slot(const DpResults *res, uint16_t addr) {
 void dp_static_scan(DpResults *res) {
     const DpCart *c = res->cart;
     size_t n = (size_t)c->rom_banks * 0x4000;
-    // padding: runs of 8+ identical 00 or FF bytes
+    // padding: runs of 8+ identical 00 or FF bytes, the whole run marked
+    // (an unmarked head of 7 would leave a systematic unknown fringe)
     uint32_t run = 0;
+    size_t rstart = 0;
     for (size_t i = 0; i < n; i++) {
         uint8_t b = c->rom[i < c->rom_size ? i : c->rom_size - 1];
         if (b == 0x00 || b == 0xFF) {
+            if (!run) rstart = i;
             run++;
-            if (run >= 8) res->static_flags[i] |= DP_SF_PAD;
+            if (run == 8)
+                for (size_t j = rstart; j <= i; j++) res->static_flags[j] |= DP_SF_PAD;
+            else if (run > 8) res->static_flags[i] |= DP_SF_PAD;
         } else {
             run = 0;
         }
@@ -336,6 +340,10 @@ DpExplorer *dp_explorer_new(const DpConfig *cfg, DpResults *res, DpMach *mach) {
     ex->q_cap = cfg->queue_cap ? cfg->queue_cap : 2048;
     ex->queue = xrealloc(NULL, sizeof(DpPathState) * ex->q_cap);
     memset(ex->queue, 0, sizeof(DpPathState) * ex->q_cap);
+    // the priority inbox stays small: seeds are few, saturation is counted
+    ex->pq_cap = cfg->seed_cap ? (cfg->seed_cap < 1024 ? cfg->seed_cap : 1024) : 512;
+    ex->pqueue = xrealloc(NULL, sizeof(DpPathState) * ex->pq_cap);
+    memset(ex->pqueue, 0, sizeof(DpPathState) * ex->pq_cap);
     size_t dedup_cap = (size_t)ex->q_cap * 64;
     if (dedup_cap < (1 << 16)) dedup_cap = 1 << 16;
     dp_set_init(&ex->exact, dedup_cap);
@@ -347,6 +355,8 @@ void dp_explorer_free(DpExplorer *ex) {
     if (!ex) return;
     for (uint32_t i = 0; i < ex->q_cap; i++) free(ex->queue[i].img);
     free(ex->queue);
+    for (uint32_t i = 0; i < ex->pq_cap; i++) free(ex->pqueue[i].img);
+    free(ex->pqueue);
     free(ex->seed_base);
     free(ex->seed_bank_img);
     dp_set_free(&ex->exact);
@@ -392,35 +402,49 @@ static uint64_t image_hash(DpExplorer *ex, const uint8_t *img) {
     return h;
 }
 
-static void queue_push(DpExplorer *ex, uint8_t *img, int forced, int kind, int from_reset,
-                       uint32_t choice) {
+// returns 0 when the state was dropped (dedup, dedup-set full or queue full):
+// the caller can then retry it later instead of losing it
+static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, int from_reset,
+                          uint32_t choice, int pri) {
     uint64_t h = image_hash(ex, img);
     int ins = dp_set_insert(&ex->exact, h);
     if (ins == 0) {
         ex->res->evicted_exact++;
         if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_MERGED);
         free(img);
-        return;
+        return 0;
     }
     if (ins < 0) { // dedup set full: surfaced, the state is dropped
         ex->res->queue_overflows++;
         if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_BUDGET);
         free(img);
-        return;
+        return 0;
     }
-    if (ex->q_len >= ex->q_cap) {
-        ex->res->queue_overflows++;
+    DpPathState *q = pri ? ex->pqueue : ex->queue;
+    uint32_t cap = pri ? ex->pq_cap : ex->q_cap;
+    uint32_t len = pri ? ex->pq_len : ex->q_len;
+    uint32_t head = pri ? ex->pq_head : ex->q_head;
+    if (len >= cap) {
+        if (pri) ex->res->closure_seeds_refused++; // saturation surfaced, retried later
+        else ex->res->queue_overflows++;
         if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_BUDGET);
         free(img);
-        return;
+        return 0;
     }
-    DpPathState *p = &ex->queue[(ex->q_head + ex->q_len) % ex->q_cap];
+    DpPathState *p = &q[(head + len) % cap];
     p->img = img;
     p->forced = (uint8_t)(forced ? 1 : 0);
     p->kind = (uint8_t)kind;
     p->from_reset = (uint8_t)(from_reset ? 1 : 0);
     p->choice = choice;
-    ex->q_len++;
+    if (pri) ex->pq_len++;
+    else ex->q_len++;
+    return 1;
+}
+
+static int queue_push(DpExplorer *ex, uint8_t *img, int forced, int kind, int from_reset,
+                      uint32_t choice) {
+    return queue_push_pri(ex, img, forced, kind, from_reset, choice, 0);
 }
 
 // a tree choice for a new queued path (when the tree is tracked)
@@ -431,10 +455,17 @@ static uint32_t choice_new(DpExplorer *ex, uint32_t parent, int kind, uint32_t s
 }
 
 int dp_explorer_seed(DpExplorer *ex, uint8_t *img, int kind, int forced) {
+    return dp_explorer_seed_pri(ex, img, kind, forced, 0);
+}
+
+// priority seeds (closure entries, indirect targets, TAS snapshots handed in
+// after the play) are served before the main worklist; ordinary seeds join it
+int dp_explorer_seed_pri(DpExplorer *ex, uint8_t *img, int kind, int forced, int pri) {
     uint16_t pc = image_pc(img);
     uint16_t bank = (uint16_t)(pc < 0x4000 ? 0 : ((const gbl_cpu_t *)img)->rom_bank);
-    queue_push(ex, img, forced, kind, kind == DP_SEED_RESET,
-               choice_new(ex, 0, kind, dp_rom_index(bank, pc), bank, pc));
+    if (!queue_push_pri(ex, img, forced, kind, kind == DP_SEED_RESET,
+                        choice_new(ex, 0, kind, dp_rom_index(bank, pc), bank, pc), pri))
+        return 0; // dropped: the seed counters only count seeds that will run
     if (forced) ex->res->seeds_spec++;
     else ex->res->seeds_natural++;
     return 1;
@@ -466,12 +497,16 @@ static uint8_t *seed_bank_img(DpExplorer *ex, int bank) {
 }
 
 int dp_explorer_seed_pc(DpExplorer *ex, int bank, uint16_t pc, int kind, int forced) {
+    return dp_explorer_seed_pc_pri(ex, bank, pc, kind, forced, 0);
+}
+
+int dp_explorer_seed_pc_pri(DpExplorer *ex, int bank, uint16_t pc, int kind, int forced, int pri) {
     uint8_t *img = xrealloc(NULL, ex->sb);
     memcpy(img, seed_bank_img(ex, bank), ex->sb);
     gbl_cpu_t g = *ex->mach->api->gbr; // the bank write leaves the regs alone
     g.pc = pc;
     memcpy(img, &g, sizeof g);
-    return dp_explorer_seed(ex, img, kind, forced);
+    return dp_explorer_seed_pri(ex, img, kind, forced, pri);
 }
 
 // --- read/write hooks ---------------------------------------------------------------
@@ -1035,13 +1070,18 @@ static uint64_t project_ctx(DpExplorer *ex, const DpSection *s) {
 
 int dp_explore_step(DpExplorer *ex) {
     DpResults *res = ex->res;
-    if (!ex->q_len) return 0;
+    if (!ex->q_len && !ex->pq_len) return 0;
     if (ex->cfg.max_paths && res->paths_run >= ex->cfg.max_paths) {
         res->budget_paths++;
         return 0;
     }
     DpPathState *p;
-    if (ex->cfg.dfs) { // total search: the newest path first, deepest first
+    int from_pq = ex->pq_len != 0;
+    if (from_pq) { // priority seeds first, FIFO: they must not starve
+        p = &ex->pqueue[ex->pq_head % ex->pq_cap];
+        ex->pq_head = (ex->pq_head + 1) % ex->pq_cap;
+        ex->pq_len--;
+    } else if (ex->cfg.dfs) { // total search: the newest path first, deepest first
         p = &ex->queue[(ex->q_head + ex->q_len - 1) % ex->q_cap];
     } else {
         p = &ex->queue[ex->q_head % ex->q_cap];
@@ -1050,7 +1090,7 @@ int dp_explore_step(DpExplorer *ex) {
     uint8_t *img = p->img;
     int forced = p->forced, kind = p->kind, from_reset = p->from_reset;
     uint32_t choice = p->choice;
-    ex->q_len--;
+    if (!from_pq) ex->q_len--;
     ex->cur_forced = forced;
     ex->cur_kind = (uint8_t)kind;
     ex->cur_from_reset = (uint8_t)from_reset;
@@ -1078,8 +1118,9 @@ int dp_explore_step(DpExplorer *ex) {
     free(img);
     p->img = NULL;
     // "same context" eviction: entering a section start with a context the
-    // section cannot distinguish from one already explored
-    if (!ex->cfg.no_context_evict) {
+    // section cannot distinguish from one already explored.  A priority seed
+    // bypasses it: it is a deliberate probe of a specific entry, few by cap.
+    if (!ex->cfg.no_context_evict && !from_pq) {
         const DpGblApi *api = ex->mach->api;
         uint32_t key = key_at(ex, api->gbr->pc);
         uint32_t sid1 = res->section_of[key];
@@ -1091,7 +1132,7 @@ int dp_explore_step(DpExplorer *ex) {
                 if (ins == 0) {
                     res->evicted_ctx++;
                     if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_MERGED);
-                    return ex->q_len ? 1 : 0;
+                    return (ex->q_len || ex->pq_len) ? 1 : 0;
                 }
                 if (ins > 0) s->ctx_count++;
             }
@@ -1113,7 +1154,7 @@ int dp_explore_step(DpExplorer *ex) {
         else if (cut != DP_CUT_NONE) issue = DP_ISSUE_BUDGET;
         dp_tree_close(ex->tree, choice, issue);
     }
-    return ex->q_len ? 1 : 0;
+    return (ex->q_len || ex->pq_len) ? 1 : 0;
 }
 
 int dp_explore_slice(DpExplorer *ex, int ms) {
@@ -1252,7 +1293,9 @@ void dp_seed_gb(DpExplorer *ex) {
     }
     // pointer-table scan: every ROM word pointing at plausible code; targets
     // inside padding or pointer tables are evicted (static view — the
-    // dynamic data proof only exists once coverage ran, see --sweep)
+    // dynamic data proof only exists once coverage ran, see --sweep).
+    // A word >= $4000 carries no bank evidence: every switchable bank's view
+    // of the target is seeded (bounded by the seed cap, dedup by rom key).
     if (!ex->cfg.no_pointer_scan) {
         int seeded = 0;
         DpHashSet seen;
@@ -1263,16 +1306,28 @@ void dp_seed_gb(DpExplorer *ex) {
                 if (a + 1 >= c->rom_size) break;
                 uint16_t v = (uint16_t)(c->rom[a] | (c->rom[a + 1] << 8));
                 if (v < 0x0100 || v >= 0x8000) continue;
-                uint32_t tbank = v < 0x4000 ? 0 : 1;
-                if (is_padding_at(c, tbank, v)) continue;
-                uint32_t tk = dp_rom_index(tbank, v);
-                if (res->static_flags[tk] & (DP_SF_PAD | DP_SF_POINTER)) {
-                    res->seeds_skipped_data++;
-                    continue;
+                // a word flanked by two other $4000-window words is a
+                // dispatch-table entry: its true bank is unknown, so every
+                // switchable bank's view is seeded.  An isolated word is a
+                // plain pointer: bank 1, as before.
+                uint16_t pv = a >= 2 ? (uint16_t)(c->rom[a - 2] | (c->rom[a - 1] << 8)) : 0;
+                uint16_t nv = a + 3 < c->rom_size
+                                  ? (uint16_t)(c->rom[a + 2] | (c->rom[a + 3] << 8))
+                                  : 0;
+                int tab = pv >= 0x4000 && pv < 0x8000 && nv >= 0x4000 && nv < 0x8000;
+                int nb = v < 0x4000 ? 1 : (tab ? res->banks : 2);
+                for (int tbank = v < 0x4000 ? 0 : 1; tbank < nb; tbank++) {
+                    if (is_padding_at(c, (uint32_t)tbank, v)) continue;
+                    uint32_t tk = dp_rom_index(tbank, v);
+                    if (res->static_flags[tk] & (DP_SF_PAD | DP_SF_POINTER)) {
+                        res->seeds_skipped_data++;
+                        continue;
+                    }
+                    if (dp_set_insert(&seen, tk) == 0) continue;
+                    if (seeded >= (int)ex->cfg.seed_cap) break;
+                    dp_explorer_seed_pc(ex, tbank, v, DP_SEED_POINTER, 1);
+                    seeded++;
                 }
-                if (dp_set_insert(&seen, tk) == 0) continue;
-                dp_explorer_seed_pc(ex, (int)tbank, v, DP_SEED_POINTER, 1);
-                seeded++;
             }
         }
         dp_set_free(&seen);
@@ -1284,4 +1339,27 @@ void dp_seed_gb(DpExplorer *ex) {
             dp_explorer_seed_pc(ex, bank, 0x4000, DP_SEED_POINTER, 1);
         }
     }
+}
+
+// the JP HL sites recorded the targets the dispatch actually took; some of
+// those continuations were dropped by a budget wall, so seed every target
+// whose rom key carries no execution evidence yet (bounded: sites x 8, seed cap)
+int dp_seed_indirect(DpExplorer *ex) {
+    DpResults *res = ex->res;
+    int seeded = 0;
+    for (size_t i = 0; i < res->indirect.cap; i++) {
+        if (!res->indirect.used[i]) continue;
+        const DpIndirect *ind = (const DpIndirect *)(res->indirect.vals + i * res->indirect.stride);
+        for (int t = 0; t < ind->n; t++) {
+            if (seeded >= (int)ex->cfg.seed_cap) return seeded;
+            uint32_t k = dp_rom_index(ind->tbank[t], ind->target[t]);
+            if (res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED)) continue;
+            if (res->static_flags[k] & (DP_SF_PAD | DP_SF_POINTER)) continue;
+            if (!dp_explorer_seed_pc_pri(ex, ind->tbank[t], ind->target[t], DP_SEED_POINTER, 1, 1))
+                continue;
+            seeded++;
+            res->indirect_seeds++;
+        }
+    }
+    return seeded;
 }

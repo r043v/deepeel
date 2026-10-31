@@ -185,10 +185,14 @@ typedef struct DpResults {
     uint32_t closure_stopped_data;      // flow stopped by padding / proven data
     uint32_t closure_stopped_illegal;   // flow stopped by an undefined opcode
     uint32_t closure_seeds, closure_seeds_dropped;
+    uint32_t closure_seeds_refused;     // seeds the full queue sent back (retried next round)
+    uint32_t closure_bank_seeds;        // bank candidates seeded on ambiguous edges
     uint32_t *clo_entries;              // rom keys of static entry points never executed
     int clo_entry_n, clo_entry_cap;
+    uint32_t *clo_bank_entries;         // rom keys: every bank's view of an unresolved edge target
+    int clo_bank_n, clo_bank_cap;
+    uint32_t indirect_seeds;            // JP HL observed targets handed to the explorer
     DpHashSet bad_seen;                 // undefined-opcode sites already recorded
-    DpHashSet clo_seeded;               // entries already handed to the fork explorer
     uint32_t forks_covered_pruned;      // forks dropped: both sides known, target covered
     // diagnostics: undefined opcodes (rom key + byte)
     struct { uint32_t key; uint8_t op; } *bad_ops;
@@ -280,6 +284,12 @@ struct DpExplorer {
     // worklist
     DpPathState *queue;
     uint32_t q_cap, q_head, q_len;
+    // priority inbox: closure / indirect / TAS-shoot seeds.  The main worklist
+    // runs saturated in steady state (every popped path forks new ones), so
+    // late seeds would starve there; these are served first, the slot cap
+    // bounds them and refusals are counted.
+    DpPathState *pqueue;
+    uint32_t pq_cap, pq_head, pq_len;
     DpHashSet exact;
     // per-path state
     int cur_forced;
@@ -389,11 +399,18 @@ DpExplorer *dp_explorer_new(const DpConfig *cfg, DpResults *res, DpMach *mach);
 void dp_explorer_free(DpExplorer *ex);
 // queue a state image (takes ownership of img); returns 0 if dropped
 int dp_explorer_seed(DpExplorer *ex, uint8_t *img, int kind, int forced);
+// same, into the priority inbox served before the main worklist
+int dp_explorer_seed_pri(DpExplorer *ex, uint8_t *img, int kind, int forced, int pri);
 // queue the reset state entered at pc (bank window applied for pc >= $4000);
 // returns 0 if dropped
 int dp_explorer_seed_pc(DpExplorer *ex, int bank, uint16_t pc, int kind, int forced);
+// same, into the priority inbox
+int dp_explorer_seed_pc_pri(DpExplorer *ex, int bank, uint16_t pc, int kind, int forced, int pri);
 // standard GB seeding: reset, non-padding RST/IRQ vectors, pointer scan
 void dp_seed_gb(DpExplorer *ex);
+// seed the targets the JP HL sites actually took (bounded: sites x 8, seed cap);
+// returns how many were queued
+int dp_seed_indirect(DpExplorer *ex);
 // the reset state image (built on first use; pool slot 0 starts from it)
 uint8_t *dp_explorer_seed_base(DpExplorer *ex);
 // pop and run one path; returns 0 when the worklist is empty or a budget wall

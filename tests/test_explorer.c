@@ -236,6 +236,30 @@ int main(int argc, char **argv) {
     run(dir, "nsstack");
     CHECK(res.nonsense_stack >= 1);
 
+    // --- static scan: a detected padding run is marked whole, head included ------
+    {
+        size_t n = (size_t)res.banks * 0x4000;
+        uint32_t run = 0;
+        size_t start = 0, checked = 0, heads = 0;
+        for (size_t i = 0; i < n; i++) {
+            uint8_t b = i < res.cart->rom_size ? res.cart->rom[i]
+                                               : res.cart->rom[res.cart->rom_size - 1];
+            if (b == 0x00 || b == 0xFF) {
+                if (!run) start = i;
+                run++;
+                if (run == 12) { // well past the 8-byte detection threshold
+                    for (size_t j = start; j < start + 8; j++)
+                        if (!(res.static_flags[j] & DP_SF_PAD)) heads++;
+                    checked++;
+                }
+            } else {
+                run = 0;
+            }
+        }
+        CHECK(checked >= 1);      // the zero-filled fixtures have long 00 runs
+        CHECK(heads == 0);        // the 7 bytes before the detection point are marked too
+    }
+
     // --- reports produce output -------------------------------------------------------
     {
         DpConfig cfg;

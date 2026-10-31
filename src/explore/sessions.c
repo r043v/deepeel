@@ -997,11 +997,14 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
         if (pthread_create(&w->th, NULL, worker_main, w) == 0) w->started = 1;
     }
     // snapshot gallery directory (next to the pool file, or beside the run)
-    if (p->cfg.state_dir && *p->cfg.state_dir)
+    if (p->cfg.state_dir && *p->cfg.state_dir) {
         snprintf(p->snap_dir, sizeof p->snap_dir, "%s/snapshots", p->cfg.state_dir);
-    else
+        mkdir(p->cfg.state_dir, 0755); // the parent must exist for the mkdir below
+        mkdir(p->snap_dir, 0755);
+    } else {
         snprintf(p->snap_dir, sizeof p->snap_dir, "deepeel-snaps");
-    mkdir(p->snap_dir, 0755);
+        mkdir(p->snap_dir, 0755);
+    }
     return p;
 }
 
@@ -1079,6 +1082,8 @@ static void drain_tas_snaps(DpPlay *p) {
             r->credit = s.credit;
             r->tas = s.tas;
             snprintf(r->path, sizeof r->path, "%s", path);
+        } else {
+            fprintf(stderr, "deepeel: TAS snapshot save failed: %s\n", path);
         }
         free(s.img);
     }
@@ -1102,7 +1107,8 @@ int dp_play_seed_tas_snaps(DpPlay *p) {
             fprintf(stderr, "deepeel: TAS snapshot unreadable: %s\n", p->tasnaps[i].path);
             continue;
         }
-        dp_explorer_seed(p->fork, c->img, 3 /* DP_SEED_POINTER: real play state */, 0);
+        if (!dp_explorer_seed_pri(p->fork, c->img, 3 /* DP_SEED_POINTER: real play state */, 0, 1))
+            continue; // dropped: not seeded (the report counts accepted seeds only)
         n++;
         c->img = NULL; // the fork explorer's queue owns the image now
         ckpt_free(c);

@@ -54,7 +54,7 @@ SDL2 est optionnel (`-DBUILD_GUI=OFF` pour s'en passer).
 
 ```bash
 deepeel explore rom.gb [--gui] [--json map.json] [--text report.txt] [--cov out.cov]
-deepeel explore rom.gb --max-total 50000000 --queue 8192
+deepeel explore rom.gb --max-total 50000000 --queue 16384 --covered-keep 8 --seed-banks
 deepeel explore rom.gb --entry 2:4000        # graine supplémentaire banque 2, $4000
 
 # sessions jouées (m0boy : inputs aléatoires + attract, 10 threads, pool de
