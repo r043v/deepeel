@@ -104,8 +104,13 @@ dans la machine, snapshotée avec elle) :
   `VBM\x1a` ou en-tête texte), ou un log extrait — un worker par fichier,
   rejoué frame par frame depuis la mise sous tension (les films ancrés sur
   savestate sont signalés : le replay est un effort, pas du frame-exact) ;
-  à la fin du film le worker passe en jeu aléatoire. Validé bit à bit sur
-  les TAS Super Mario Land de tasvideos (43 755 et 43 986 frames).
+  à la fin du film le worker passe en jeu aléatoire. **Le TAS est
+  prioritaire** : pendant le replay aucun budget ne coupe le worker — ni
+  `--frames`, ni la stagnation, ni la rotation des segments (l'index du film
+  et l'état machine restent en pas l'un avec l'autre) — le film couvre un
+  gameplay complet et est joué jusqu'au bout ; l'état de fin de film rejoint
+  le pool au segment suivant. Validé bit à bit sur les TAS Super Mario Land
+  de tasvideos (43 755 et 43 986 frames).
 - **segments** : 480 + rand(1920) frames comme m0x ; 1 segment sur 8
   redémarre power-on, sinon le checkpoint **le moins choisi** du pool (48,
   jamais le slot 0) ; fin de segment sur stagnation, impasse HALT, crash

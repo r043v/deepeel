@@ -233,5 +233,45 @@ int main(int argc, char **argv) {
         free(opay);
     }
 
+    // --- TAS priority: the movie replays in full, past every frame budget ------
+    {
+        // a 700-frame movie holding START; max_frames = 400 would cut the play
+        // mid-movie if TAS replay were not exempt from the frame budgets
+        char tpath[512];
+        snprintf(tpath, sizeof tpath, "%s/tas_long.log", dir);
+        FILE *f = fopen(tpath, "w");
+        CHECK(f != NULL);
+        if (f) {
+            for (int i = 0; i < 700; i++) fputs("|.......S|\n", f);
+            fclose(f);
+        }
+        MsCart *cart = load("fix_vblank");
+        CHECK(cart != NULL);
+        if (cart) {
+            MsResults res;
+            results_for(&res, cart);
+            MsConfig cfg;
+            ms_config_defaults(&cfg);
+            MsMach *mach = mach_for(cart);
+            MsExplorer *ex = ms_explorer_new(&cfg, &res, mach);
+            ms_seed_gb(ex);
+            MsSessionCfg sc = test_cfg(NULL);
+            sc.sessions = 2; // worker 0 attract, worker 1 TAS
+            sc.max_frames = 400;
+            sc.tas[0] = tpath;
+            sc.tas_n = 1;
+            MsPlay *p = ms_play_new(&sc, &res, ex);
+            CHECK(p != NULL);
+            ms_play_run(p);
+            // the TAS worker replayed its whole movie before the max_frames
+            // wall could fire: total = both workers, 700 frames each or more
+            CHECK(ms_play_frames(p) >= 2 * 700);
+            ms_play_free(p);
+            ms_explorer_free(ex);
+            ms_results_free(&res);
+            ms_cart_free(cart);
+        }
+    }
+
     TEST_DONE("test_sessions");
 }

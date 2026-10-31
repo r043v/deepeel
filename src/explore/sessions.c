@@ -371,7 +371,12 @@ static int promote_pending(MsWorker *w) {
     if (!w->has_pending || !w->pending.img) return -1;
     MsPlay *p = w->p;
     deposit_img(p, w->pending.img);
-    int slot = pool_insert(p, &w->pending); // takes ownership of pending.img
+    // the pool owns its own copy: w->pending is reused by the next observe,
+    // a pointer into it would be zeroed (img = NULL) under the pool's feet
+    MsCheckpoint *c = malloc(sizeof *c);
+    if (!c) return -1;
+    *c = w->pending; // c takes over pending.img
+    int slot = pool_insert(p, c);
     w->has_pending = 0;
     memset(&w->pending, 0, sizeof w->pending);
     return slot;
@@ -448,6 +453,7 @@ static void worker_vblank(MsMach *m) {
         } else { // the movie is over: uniform random play, segments resume
             w->mode = IN_RNG;
             mask = input_keys(&w->in);
+            w->seg_left = 1; // rotate away from the movie's end state next frame
         }
     } else if (w->mode == IN_SCRIPT)
         mask = script_keys(w->script, w->script_n, &w->script_pos, w->frames_done);
@@ -469,6 +475,14 @@ static void worker_vblank(MsMach *m) {
         return;
     }
     if (!w->seg_left) {
+        if (w->mode == IN_TAS) {
+            // TAS priority: the movie replays in full, no checkpoint rotation
+            // mid-movie (the frame index and the machine state must stay in
+            // step), no segment budget.  seg_left sits at 0 until the movie
+            // ends.
+            if (w->epoch_done >= w->epoch_target) ms_mach_cut(m, MS_CUT_SEGEND);
+            return;
+        }
         segment_end(w); // loads the next checkpoint, play continues
         return;
     }
@@ -717,7 +731,7 @@ MsPlay *ms_play_new(const MsSessionCfg *cfg, MsResults *res, MsExplorer *fork_ex
                 w->mode = IN_RNG;
             }
         }
-        if (i < p->cfg.fixed_n && p->cfg.fixed[i]) {
+        if (i < p->cfg.fixed_n && p->cfg.fixed[i] && w->mode == IN_RNG) {
             w->mode = IN_FIXED;
             w->fixed_mask = p->cfg.fixed[i];
         }
@@ -827,11 +841,16 @@ int ms_play_poll(MsPlay *p) {
     for (int i = 0; i < p->cfg.fork_paths_per_epoch && p->fork->q_len && !p->fork->stop; i++)
         ms_explore_step(p->fork);
 
-    // stop conditions
+    // stop conditions.  TAS priority: a movie covers a whole playthrough, it
+    // outruns every frame budget — max_frames and stagnation wait until every
+    // TAS worker has finished its replay (a SIGINT still stops at once).
     int reason = -1;
+    int tas_left = 0;
+    for (int i = 0; i < p->nworkers; i++)
+        if (p->w[i].mode == IN_TAS && p->w[i].frames_done < p->w[i].tas.frames) tas_left = 1;
     if (g_sigint) reason = 2;
-    else if (p->cfg.max_frames && p->total_frames >= p->cfg.max_frames) reason = 0;
-    else if (p->cfg.stagnation_frames && p->stagnation >= p->cfg.stagnation_frames) reason = 1;
+    else if (p->cfg.max_frames && !tas_left && p->total_frames >= p->cfg.max_frames) reason = 0;
+    else if (p->cfg.stagnation_frames && !tas_left && p->stagnation >= p->cfg.stagnation_frames) reason = 1;
     else if (p->cfg.until_static && p->unexplained == 0 && frames) reason = 3;
     if (reason >= 0) {
         p->quit = 1;

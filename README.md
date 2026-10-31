@@ -62,7 +62,9 @@ memscan explore rom.gb --entry 2:4000        # graine supplémentaire banque 2, 
 memscan explore rom.gb --play --frames 72000 --state-dir s --cov jeu.cov --romdata jeu.prof
 memscan explore rom.gb --play --resume --state-dir s
 # TAS : rejoue un movie tool-assisté (VBA .vmv, BizHawk .bk2, log texte) — un
-# worker par fichier ; à la fin du film le worker passe en jeu aléatoire
+# worker par fichier ; le TAS est prioritaire : prioritaire sur tout budget
+# (frames, segments, stagnation), le film est joué en entier jusqu'au bout du
+# jeu, puis le worker passe en jeu aléatoire
 memscan explore rom.gb --play --tas supermarioland.bk2 --frames 18000
 # mode humain : une lane jouable au pad, chaque avancée sauvée en PNG (écran +
 # machine complète, rechargeable --from-png) et explorée automatiquement
