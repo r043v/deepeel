@@ -20,7 +20,7 @@
 
 static int is_padding_at(const MsCart *c, uint32_t bank, uint16_t addr);
 static int is_illegal_op(uint8_t op);
-static void fork_branch(MsExplorer *ex, int cond, uint32_t site);
+static void fork_branch(MsExplorer *ex, int cond, uint32_t site, uint16_t pc, uint8_t op);
 static void fork_irq(MsExplorer *ex);
 static void fork_key(MsExplorer *ex, uint32_t site);
 
@@ -173,6 +173,8 @@ void ms_config_defaults(MsConfig *cfg) {
     cfg->fork_site_cap = 16;
     cfg->seed_cap = 4096;
     cfg->max_copies = 65536;
+    cfg->closure_rounds = 4;
+    cfg->covered_fork_keep = 2;
 }
 
 static void *xrealloc(void *p, size_t n) {
@@ -207,9 +209,40 @@ void ms_results_init(MsResults *res, const MsCart *cart, const MsPlatform *plat)
     ms_map_init(&res->sites, sizeof(MsSiteStat), 1 << 22);
     ms_map_init(&res->callers, sizeof(MsCallList), 1 << 20);
     ms_map_init(&res->fork_counts, sizeof(uint32_t), 1 << 20);
+    ms_map_init(&res->indirect, sizeof(MsIndirect), 1 << 16);
+    ms_set_init(&res->clo_seeded, 1 << 20);
+    ms_set_init(&res->bad_seen, 1 << 20);
+}
+
+static double disc_now(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+}
+
+void ms_disc_add(MsResults *res, const char *source, uint64_t credit) {
+    if (res->disc_n == res->disc_cap) {
+        int cap = res->disc_cap ? res->disc_cap * 2 : 256;
+        MsDiscEntry *n = realloc(res->disc, (size_t)cap * sizeof *n);
+        if (!n) return;
+        res->disc = n;
+        res->disc_cap = cap;
+    }
+    double now = disc_now();
+    if (!res->disc_n) res->disc_t0 = now;
+    size_t total = (size_t)res->banks * 0x4000;
+    uint32_t known = 0;
+    for (size_t i = 0; i < total; i++)
+        if (res->exec_flags[i] || res->data_flags[i] || res->static_flags[i]) known++;
+    MsDiscEntry *e = &res->disc[res->disc_n++];
+    e->t = now - res->disc_t0;
+    snprintf(e->source, sizeof e->source, "%s", source);
+    e->credit = credit;
+    e->known = known;
 }
 
 void ms_results_free(MsResults *res) {
+    free(res->disc);
     free(res->exec_flags);
     free(res->exec_hits);
     free(res->data_flags);
@@ -224,6 +257,10 @@ void ms_results_free(MsResults *res) {
     ms_map_free(&res->sites);
     ms_map_free(&res->callers);
     ms_map_free(&res->fork_counts);
+    ms_map_free(&res->indirect);
+    ms_set_free(&res->clo_seeded);
+    ms_set_free(&res->bad_seen);
+    free(res->clo_entries);
     free(res->bad_ops);
     pthread_mutex_destroy(&res->sec_mtx);
     pthread_mutex_destroy(&res->rec_mtx);
@@ -596,7 +633,10 @@ static void hook_step(MsMach *m, uint16_t pc, uint8_t op, int entry) {
     // the fork explorer's walls do not apply to session workers: their play
     // is bounded by frames and segments, and they share res->steps_total
     if (!ex->session) {
-        if (res->steps_total >= ex->cfg.max_steps_total) {
+        // the wall counts the fork explorer's own steps: the sessions' play
+        // steps share res->steps_total and must not starve the total search
+        ex->steps_own++;
+        if (ex->steps_own >= ex->cfg.max_steps_total) {
             res->budget_steps++;
             ex->stop = 1;
             ms_mach_cut(m, MS_CUT_QUIT);
@@ -625,6 +665,11 @@ static void hook_step(MsMach *m, uint16_t pc, uint8_t op, int entry) {
     if (is_illegal_op(op)) {
         if (!ex->session) ex->path_dead = 1;
         if (res->mt) pthread_mutex_lock(&res->rec_mtx);
+        // one record per site: a hot illegal opcode used to append every hit
+        if (ms_set_insert(&res->bad_seen, key_at(ex, pc)) != 1) {
+            if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
+            goto bad_done;
+        }
         if (res->bad_op_count == res->bad_op_cap) {
             res->bad_op_cap = res->bad_op_cap ? res->bad_op_cap * 2 : 16;
             res->bad_ops = xrealloc(res->bad_ops, sizeof(*res->bad_ops) * (size_t)res->bad_op_cap);
@@ -634,6 +679,7 @@ static void hook_step(MsMach *m, uint16_t pc, uint8_t op, int entry) {
         res->bad_op_count++;
         if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
     }
+bad_done:
 
     // nonsense eviction (fork explorer only): the path proved senseless —
     // execution in echo RAM or OAM, execution inside verbatim-proven data,
@@ -682,7 +728,7 @@ static void hook_step(MsMach *m, uint16_t pc, uint8_t op, int entry) {
     // an IRQ is about to dispatch (the machine takes the IRQ naturally)
     if (!ex->session) {
         int cond = sm83_cond_of(op);
-        if (cond >= 0) fork_branch(ex, cond, pk);
+        if (cond >= 0) fork_branch(ex, cond, pk, pc, op);
         if (!ex->cfg.no_irq_fork && api->gbr->ime && (*api->ie & api->io[0x0F] & 0x1F))
             fork_irq(ex);
         // keys that only the joypad IRQ can deliver (IE bit 4 armed, nothing
@@ -707,6 +753,24 @@ static void hook_step(MsMach *m, uint16_t pc, uint8_t op, int entry) {
                             (ms_mach_op(m, (uint16_t)(pc + 2)) << 8));
         is_back = target <= pc && (op == 0xC3 || op == 0xC2 || op == 0xCA || op == 0xD2 || op == 0xDA);
         is_call = op == 0xCD || op == 0xC4 || op == 0xCC || op == 0xD4 || op == 0xDC;
+        break;
+    }
+    case 0xE9: { // JP HL: the observed target feeds the indirect-site table
+        if (!ex->session) {
+            MsIndirect *ind = ms_map_get_or_add(&res->indirect, pk);
+            uint16_t t = api->gbr->hl;
+            if (ind) {
+                ind->hits++;
+                uint8_t tb = (uint8_t)(t < 0x4000 ? 0 : cur_bank(ex, t));
+                int have = 0;
+                for (int i = 0; i < ind->n; i++)
+                    if (ind->target[i] == t && ind->tbank[i] == tb) have = 1;
+                if (!have) {
+                    if (ind->n < 8) { ind->target[ind->n] = t; ind->tbank[ind->n++] = tb; }
+                    else ind->overflow = 1;
+                }
+            }
+        }
         break;
     }
     default:
@@ -764,6 +828,7 @@ static void hook_step(MsMach *m, uint16_t pc, uint8_t op, int entry) {
             uint8_t nf = (uint8_t)(ex->cur_forced ? MS_XF_FORCED : MS_XF_NATURAL);
             uint8_t old = flags_or(&res->exec_flags[pk], nf);
             if (!(old & nf)) ex->credit_exec++;
+            if (!(old & MS_XF_START)) flags_or(&res->exec_flags[pk], MS_XF_START);
             hits_add(&res->exec_hits[pk], 1);
             if (is_entry) flags_or(&res->exec_flags[pk], MS_XF_ENTRY);
             if (ex->irq_depth) flags_or(&res->exec_flags[pk], MS_XF_IRQ);
@@ -810,12 +875,48 @@ static void hook_step(MsMach *m, uint16_t pc, uint8_t op, int entry) {
 // The variant is captured by mutating the live machine through the public
 // api (the flag bit, the IF byte), saving, then restoring the natural state:
 // three state images per fork, no knowledge of the image layout needed.
-static void fork_branch(MsExplorer *ex, int cond, uint32_t site) {
+// true when both successors of the conditional at pc were already executed:
+// the fork can then only add state diversity, never a new byte of code
+static int both_sides_covered(MsExplorer *ex, uint16_t pc, uint8_t op) {
+    MsResults *res = ex->res;
+    uint16_t bank = cur_bank(ex, pc);
+    uint16_t taken;
+    switch (op) {
+    case 0x20: case 0x28: case 0x30: case 0x38:
+        taken = (uint16_t)(pc + 2 + (int8_t)ms_mach_op(ex->mach, (uint16_t)(pc + 1)));
+        break;
+    case 0xC2: case 0xCA: case 0xD2: case 0xDA: case 0xC4: case 0xCC: case 0xD4: case 0xDC:
+        taken = (uint16_t)(ms_mach_op(ex->mach, (uint16_t)(pc + 1)) |
+                           (ms_mach_op(ex->mach, (uint16_t)(pc + 2)) << 8));
+        break;
+    default:
+        return 0; // RET cc: the taken side depends on the stack
+    }
+    uint16_t fall = (uint16_t)(pc + sm83_len(op));
+    uint16_t sides[2] = { taken, fall };
+    for (int i = 0; i < 2; i++) {
+        uint16_t a = sides[i];
+        if (a >= 0x8000) return 0;
+        uint32_t k = ms_rom_index(a < 0x4000 ? 0 : (a >= 0x4000 && pc < 0x4000 ? ex->mach->api->gbr->rom_bank
+                                                                              : bank), a);
+        if (k >= (uint32_t)res->banks * 0x4000) return 0;
+        uint8_t f = res->exec_flags[k];
+        if (!(f & MS_XF_START) || !(f & (MS_XF_NATURAL | MS_XF_FORCED))) return 0;
+    }
+    return 1;
+}
+
+static void fork_branch(MsExplorer *ex, int cond, uint32_t site, uint16_t pc, uint8_t op) {
     // per-site cap: loop bodies reach their conditional every iteration and
     // the extra variants are data drift, not new map information
     uint32_t *cnt = ms_map_get_or_add(&ex->res->fork_counts, site);
     if (cnt && *cnt >= ex->cfg.fork_site_cap) {
         ex->res->forks_capped++;
+        return;
+    }
+    if (cnt && !ex->cfg.no_covered_prune && *cnt >= ex->cfg.covered_fork_keep &&
+        both_sides_covered(ex, pc, op)) {
+        ex->res->forks_covered_pruned++;
         return;
     }
     if (cnt) (*cnt)++;
@@ -866,7 +967,11 @@ static void fork_key(MsExplorer *ex, uint32_t site) {
     const MsGblApi *api = ex->mach->api;
     if (api->io[0x0F] & 0x10) return; // already pending: the natural IRQ fires
     uint32_t *cnt = ms_map_get_or_add(&ex->res->fork_counts, site ^ 0x80000000u);
-    if (cnt && *cnt >= ex->cfg.fork_site_cap) {
+    // once the joypad handler ($60) has run, more key variants at a site only
+    // re-run known code: one round of presses per site is enough
+    uint32_t kcap = (ex->res->exec_flags[0x60] & MS_XF_START) ? 1 : ex->cfg.fork_site_cap;
+    if (ex->cfg.no_covered_prune) kcap = ex->cfg.fork_site_cap;
+    if (cnt && *cnt >= kcap) {
         ex->res->forks_capped++;
         return;
     }
@@ -1024,6 +1129,11 @@ int ms_explore_slice(MsExplorer *ex, int ms) {
 
 void ms_explore_finalize(MsExplorer *ex) {
     MsResults *res = ex->res;
+    // finalize may run once per closure round: the derived counters restart
+    for (int i = 0; i < res->section_count; i++) {
+        res->sections[i].cond_sites = res->sections[i].cond_both = 0;
+        res->sections[i].callers_n = 0;
+    }
     for (size_t i = 0; i < res->sites.cap; i++) {
         if (!res->sites.used[i]) continue;
         uint32_t key = res->sites.keys[i];
@@ -1077,16 +1187,28 @@ int ms_explore(MsExplorer *ex) {
 }
 
 // --- GB seeding ------------------------------------------------------------------------
-uint64_t ms_results_unexplained(const MsResults *res) {
+// Mutually exclusive per-byte classification, first match wins.
+void ms_results_breakdown(const MsResults *res, uint64_t out[MS_CLS_COUNT]) {
     size_t n = (size_t)res->banks * 0x4000;
-    uint64_t cnt = 0;
+    for (int i = 0; i < MS_CLS_COUNT; i++) out[i] = 0;
     for (size_t k = 0; k < n; k++) {
-        if (res->exec_flags[k] & (MS_XF_NATURAL | MS_XF_FORCED)) continue;
-        if (res->data_flags[k] & (MS_DF_READ | MS_DF_COPIED | MS_DF_VERBATIM)) continue;
-        if (res->static_flags[k] & (MS_SF_POINTER | MS_SF_PAD)) continue;
-        cnt++;
+        uint8_t x = res->exec_flags[k], d = res->data_flags[k], s = res->static_flags[k];
+        int c;
+        if (x & MS_XF_NATURAL) c = MS_CLS_EXEC_NATURAL;
+        else if (x & MS_XF_FORCED) c = MS_CLS_EXEC_FORCED;
+        else if (x & MS_XF_STATIC) c = MS_CLS_STATIC_FLOW;
+        else if (d & (MS_DF_COPIED | MS_DF_VERBATIM)) c = MS_CLS_DATA_COPIED;
+        else if (d & MS_DF_READ) c = MS_CLS_DATA_READ;
+        else if (s & (MS_SF_POINTER | MS_SF_PAD)) c = MS_CLS_POINTER_PAD;
+        else c = MS_CLS_UNEXPLAINED;
+        out[c]++;
     }
-    return cnt;
+}
+
+uint64_t ms_results_unexplained(const MsResults *res) {
+    uint64_t b[MS_CLS_COUNT];
+    ms_results_breakdown(res, b);
+    return b[MS_CLS_UNEXPLAINED];
 }
 
 static int is_padding_at(const MsCart *c, uint32_t bank, uint16_t addr) {

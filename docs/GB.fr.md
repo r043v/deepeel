@@ -198,6 +198,44 @@ Perdu entre threads (l'entrelacement dépend de l'ordonnanceur) ; par contre
 chaque session reste rejouable individuellement (graine ou script), et un
 run à masques fixes + `--fork-paths 0` est reproductible.
 
+## Fermeture statique et élagage (0.4.0)
+
+La machine prouve le code en l'exécutant ; ses garde-fous (budget par chemin,
+mur global, plafonds de forks, file) laissent du flux direct non visité.
+`src/explore/closure.c` suit ce flux sans machine : depuis chaque instruction
+exécutée, fall-through, cibles JR/JP/CALL/RST et les deux côtés de chaque
+conditionnel. Ce qui est atteint ainsi est marqué `MS_XF_STATIC` — jamais
+confondu avec `natural`/`forced`. Le rapport dit « static closure : … octets
+atteints par flux direct seul ».
+
+- Arrêts : opcode indéfini, padding, table de pointeurs, données prouvées
+  verbatim. Comptés (`stopped by data/padding`, `by undefined opcodes`).
+- Une arête de banque 0 vers `$4000+` n'est résolue que par les banques
+  observées dans la section (ou la banque de boot) ; sinon elle est comptée
+  `unresolved`, jamais devinée. Les `JP HL` observés sont listés avec leurs cibles
+  (jusqu'à 8 par site, débordement compté).
+- Boucle `--closure-rounds N` (défaut 4) : fermeture → graines (les entrées non
+  exécutées) → recherche totale → fermeture… jusqu'à ce qu'un tour ne sème
+  rien. Plafond de graines `--seed-cap`, rejets comptés (`dropped`).
+- Export `.cov` : octets statiques = début d'instruction seul, drapeau 4
+  (spéculatif), +2 si entrée, compte 0. Jamais le drapeau 1.
+- Élagage : un site conditionnel dont les deux côtés ont déjà été exécutés ne
+  reçoit plus que `--covered-keep` forks (défaut 2) ; `--no-covered-prune`
+  rétablit l'ancien comportement. Compteur `forks pruned`. Les forks de touches
+  sont limités à un tour par site une fois le gestionnaire joypad (`$60`) vu.
+- Le mur global compte les pas du seul explorateur à forks : les pas des
+  sessions jouées ne l'épuisent plus. Chaque tour de fermeture a son mur.
+- TAS : tous les `--tas-ckpt` images (défaut 240), l'état de la machine est
+  déposé dans la boîte de graines du fork — des états de jeu réels (RAM
+  peuplée) d'où forker. Compteur dans le rapport de session.
+- Un opcode indéfini n'est plus consigné qu'une fois par site.
+
+Observations de l'outil (machine concrète, RAM à zéro), sans jeu, avant → après :
+Super Mario Land 14 062 → 20 551 octets de code, Mystic Quest 19 341 → 28 575.
+Ce sont des comptes de l'outil, statiques inclus, pas des mesures de matériel.
+Aucun fichier TAS n'était disponible : le chemin TAS n'est couvert que par
+les tests synthétiques.
+
 ## Données prouvées et pont .cov
 
 Une copie ROM→VRAM dont les octets lus hachent exactement comme les octets
@@ -210,3 +248,45 @@ spéculative du fourcheur ne contredit pas la preuve de copie. Côté m0boy,
 : le convertisseur ne compile plus les tuiles/tableaux copiés « au cas où ».
 `--romdata f` écrit le profil de lectures ROM (pages de 256 octets, format
 `romdata-*.prof`) pour peser la résidence flash/streaming.
+
+## Memory map `.map` et `.map.png` (0.5.0)
+
+Le but de l'outil est une memory map couvrant **100 % de la ROM** : chaque
+octet reçoit exactement une classe. Les rapports donnent connu / inconnu,
+code / data / padding.
+
+- Classes observées : `code-natural` (exécuté en jeu), `code-forced`
+  (chemin forcé), `code-static` (fermeture statique), `data-copied` (copié
+  ROM→VRAM/WRAM ou verbatim), `data-read` (lu), `table` (pointeurs
+  statiques), `padding`.
+- Classes **déduites** (toujours étiquetées) : `inferred-code` (≤ 3 octets
+  entre deux codes), `inferred-data` (≤ 256 octets entre deux data),
+  `inferred-padding` (≥ 4 octets identiques 00/FF). Jamais à travers une banque.
+- « Connu » inclut donc les octets déduits ; la part déduite est rapportée à part.
+- `memscan explore ROM --map x.map` écrit le texte (`banque début fin classe`,
+  fin incluse, adresses vues du CPU) ; `--map x.map.png` écrit une image
+  (un carré par 64 octets, 16×16 par banque, rouge = inconnu, bleus = code,
+  verts = data, ocre = table, gris = padding) qui **embarque le `.map`
+  complet** (chunk tEXt `memscan_map`, comme une cartouche PICO-8).
+  `memscan mapx x.map.png x.map` extrait le `.map` à l'identique.
+- `--html f` : page web autonome (carrés par banque, légende, tableau des
+  classes, journal de découverte : temps, source, crédit, octets connus).
+  Le rapport texte affiche aussi les 40 dernières entrées du journal.
+- `tools/tasvideos_fetch.py ROM.gb DIR [--max N] [--list] [--game "nom"]`
+  télécharge les TAS TASVideos de la ROM (nom de jeu strict) ; `--tas`
+  accepte jusqu'à 8 fichiers, tous joués en entier.
+- Saturation : les débordements de file de la recherche sont rapportés
+  (« queue overflows »), jamais silencieux.
+- Ces nombres sont des observations de l'outil (machine concrète, RAM à
+  zéro, registres événementiels statiques), pas des mesures de matériel.
+
+### TAS sans limite de temps ni de budget (0.5.0)
+
+Un film TAS est rejoué en entier : `--frames`, `--stagnation` et `--until-static`
+attendent la fin de tous les films (seul un SIGINT ou un argument explicite
+borne un film). Une coupure du fork explorer pendant le film (halt mort,
+glissade dans le padding) n'abandonne plus le film : il reprend à la frame
+suivante. Garde-fou : plus de 1000 coupures consécutives sans avancer d'une
+frame = machine réellement bloquée, repli en jeu aléatoire. Les deux compteurs
+(« TAS cuts absorbed », « wedged-machine fallbacks ») sont rapportés sur
+stderr ; une saturation n'est jamais silencieuse.

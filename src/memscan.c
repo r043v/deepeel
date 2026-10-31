@@ -34,8 +34,14 @@ static void usage(void) {
             "    --no-pointer-scan    disable pointer-table seeding\n"
             "    --no-context-evict   disable same-context eviction\n"
             "    --no-irq-fork        disable IRQ forking\n"
+            "    --no-closure         disable the static flow closure (and its seeds)\n"
+            "    --closure-rounds N   closure -> seed -> search loops (default 4)\n"
+            "    --no-covered-prune   keep forking sites whose both sides are covered\n"
+            "    --covered-keep N     forks such a site still gets (default 2)\n"
             "    --gui                SDL2 live viewer\n"
-            "    --json f / --text f / --cov f / --romdata f   outputs\n"
+            "    --json f / --text f / --cov f / --romdata f / --map f / --html f   outputs\n"
+            "                         (--map x.map.png: squares image + embedded .map;\n"
+            "                          memscan mapx x.map.png out.map extracts it)\n"
             "\n"
             "  play sessions (the m0boy coverage machinery: random inputs, attract mode,\n"
             "  checkpoint pool, epoch scheduler, discovery credit):\n"
@@ -51,6 +57,7 @@ static void usage(void) {
             "    --state-dir D        persist the pool (pool.bin) and the PNG snapshots\n"
             "    --resume             continue from a saved pool\n"
             "    --input f            replay an m0boy held-named input script (repeatable)\n"
+            "    --tas-ckpt N         TAS replay: fork-explorer seed every N frames (default 240, 0 = off)\n"
             "    --tas f              replay a TAS movie: VBA .vmv, BizHawk .bk2 or an\n"
             "                         extracted input log (repeatable, one worker each)\n"
             "    --human [slot]       play a checkpoint yourself in the GUI (pad/keyboard);\n"
@@ -88,8 +95,10 @@ static int write_file(const char *path, const MsBuf *b) {
     return 1;
 }
 
+static void closure_rounds(MsExplorer *ex, MsResults *res);
+
 static int cmd_explore(int argc, char **argv) {
-    const char *json = NULL, *text = NULL, *cov = NULL, *romdata = NULL, *path = NULL;
+    const char *json = NULL, *text = NULL, *cov = NULL, *romdata = NULL, *map = NULL, *html = NULL, *path = NULL;
     const char *from_png = NULL, *export_dir = NULL;
     int gui = 0, play = 0, human = 0, human_slot = -1, export_slot = -1, png_slot = -1;
     MsConfig cfg;
@@ -105,6 +114,8 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
         else if (!strcmp(a, "--cov") && i + 1 < argc) cov = argv[++i];
         else if (!strcmp(a, "--romdata") && i + 1 < argc) romdata = argv[++i];
+        else if (!strcmp(a, "--map") && i + 1 < argc) map = argv[++i];
+        else if (!strcmp(a, "--html") && i + 1 < argc) html = argv[++i];
         else if (!strcmp(a, "--gui")) gui = 1;
         else if (!strcmp(a, "--max-steps") && i + 1 < argc) cfg.max_steps_path = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--max-paths") && i + 1 < argc) cfg.max_paths = (uint32_t)strtoul(argv[++i], NULL, 0);
@@ -117,6 +128,10 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--no-context-evict")) cfg.no_context_evict = 1;
         else if (!strcmp(a, "--no-irq-fork")) cfg.no_irq_fork = 1;
         else if (!strcmp(a, "--no-key-fork")) cfg.no_key_fork = 1;
+        else if (!strcmp(a, "--no-closure")) cfg.no_closure = 1;
+        else if (!strcmp(a, "--closure-rounds") && i + 1 < argc) cfg.closure_rounds = atoi(argv[++i]);
+        else if (!strcmp(a, "--no-covered-prune")) cfg.no_covered_prune = 1;
+        else if (!strcmp(a, "--covered-keep") && i + 1 < argc) cfg.covered_fork_keep = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--entry") && i + 1 < argc && entries < 32) {
             if (!parse_entry(argv[++i], &eb[entries], &ea[entries])) {
                 fprintf(stderr, "memscan: bad --entry '%s' (bank:addr)\n", argv[i]);
@@ -138,6 +153,7 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--resume")) scfg.resume = 1;
         else if (!strcmp(a, "--input") && i + 1 < argc && scfg.inputs_n < 8) scfg.inputs[scfg.inputs_n++] = argv[++i];
         else if (!strcmp(a, "--tas") && i + 1 < argc && scfg.tas_n < 8) scfg.tas[scfg.tas_n++] = argv[++i];
+        else if (!strcmp(a, "--tas-ckpt") && i + 1 < argc) scfg.tas_ckpt_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--inputs") && i + 1 < argc && !strcmp(argv[++i], "m0x")) scfg.uniform = 0;
         else if (!strcmp(a, "--uniform-hold") && i + 1 < argc) scfg.uniform_hold = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--fork-paths") && i + 1 < argc) scfg.fork_paths_per_epoch = atoi(argv[++i]);
@@ -206,6 +222,7 @@ static int cmd_explore(int argc, char **argv) {
         rc = ms_gui_run(&res, &cfg, ex, play_engine);
     } else if (play) {
         ms_play_install_sigint();
+        ms_disc_add(&res, "start", 0);
         clock_t t0 = clock();
         int reason = ms_play_run(play_engine);
         double secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
@@ -214,12 +231,25 @@ static int cmd_explore(int argc, char **argv) {
         fprintf(stderr, "memscan: play done after %llu frames (%s), %.2fs\n",
                 (unsigned long long)ms_play_frames(play_engine),
                 reason >= 0 && reason < 4 ? why[reason] : "?", secs);
+        if (scfg.tas_n)
+            fprintf(stderr, "memscan: %llu TAS gameplay states handed to the fork explorer\n",
+                    (unsigned long long)ms_play_tas_ckpts(play_engine));
+        if (scfg.tas_n)
+            fprintf(stderr, "memscan: TAS cuts absorbed (movie kept) %llu, wedged-machine fallbacks %llu\n",
+                    (unsigned long long)ms_play_tas_cuts(play_engine),
+                    (unsigned long long)ms_play_tas_cut_stuck(play_engine));
         // phase 3, mandatory: the total search drains the frontier the
         // sessions fed, depth-first, until every choice is closed
         if (reason != 2) {
             clock_t t1 = clock();
             ex->cfg.dfs = 1;
+            ex->stop = 0;
+            ex->steps_own = 0;
+            uint32_t k0 = res.disc_n ? res.disc[res.disc_n - 1].known : 0;
             ms_explore(ex);
+            ms_disc_add(&res, "total-search", 0);
+            if (res.disc_n) res.disc[res.disc_n - 1].credit = res.disc[res.disc_n - 1].known - k0;
+            closure_rounds(ex, &res);
             fprintf(stderr, "memscan: total search done in %.2fs (%llu paths)\n",
                     (double)(clock() - t1) / CLOCKS_PER_SEC, (unsigned long long)res.paths_run);
         }
@@ -279,6 +309,7 @@ static int cmd_explore(int argc, char **argv) {
     } else {
         clock_t t0 = clock();
         ms_explore(ex);
+        closure_rounds(ex, &res);
         double secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
         MsBuf out;
         ms_buf_init(&out);
@@ -315,6 +346,38 @@ static int cmd_explore(int argc, char **argv) {
         if (!write_file(romdata, &out)) rc = 1;
         ms_buf_free(&out);
     }
+    if (map) {
+        MsBuf out;
+        ms_buf_init(&out);
+        size_t ml = strlen(map);
+        if (ml > 4 && !strcmp(map + ml - 4, ".png")) {
+            // x.map.png: image of the squares with the .map embedded
+            if (!ms_report_map_png(&res, map)) rc = 1;
+        } else {
+            ms_report_map(&res, &out);
+            if (!write_file(map, &out)) rc = 1;
+        }
+        ms_buf_free(&out);
+    }
+    if (html) {
+        MsBuf out;
+        ms_buf_init(&out);
+        ms_report_html(&res, &out);
+        if (!write_file(html, &out)) rc = 1;
+        ms_buf_free(&out);
+    }
+    {
+        MsMapSummary sum;
+        uint8_t *cls = ms_map_build(&res, &sum);
+        if (cls) {
+            MsBuf out;
+            ms_buf_init(&out);
+            ms_map_summary_text(&sum, &out);
+            fwrite(out.p, 1, out.len, stdout);
+            ms_buf_free(&out);
+            free(cls);
+        }
+    }
     ms_explorer_free(ex);
     if (play_engine) ms_play_free(play_engine);
     ms_mach_close(mach);
@@ -335,8 +398,28 @@ static void report_lanes(const MsPlay *p, const MsResults *res, MsBuf *out) {
                    lanes[i].bank, lanes[i].pc, lanes[i].dead ? " dead" : "",
                    lanes[i].backtracked ? " backtracked" : "");
     }
-    ms_buf_fmt(out, "unexplained bytes (neither executed, read, nor static data): %llu\n",
-               (unsigned long long)ms_results_unexplained(res));
+    uint64_t b[MS_CLS_COUNT], tot = 0;
+    ms_results_breakdown(res, b);
+    for (int i = 0; i < MS_CLS_COUNT; i++) tot += b[i];
+    static const char *nm[MS_CLS_COUNT] = { "executed (natural)", "executed (forced only)",
+        "static flow only", "data copied/verbatim", "data read", "pointer/padding", "unexplained" };
+    ms_buf_str(out, "\nper-byte classification (exclusive, tool observation):\n");
+    for (int i = 0; i < MS_CLS_COUNT; i++)
+        ms_buf_fmt(out, "  %-24s %7llu  %5.1f%%\n", nm[i], (unsigned long long)b[i],
+                   tot ? 100.0 * (double)b[i] / (double)tot : 0.0);
+}
+
+static int cmd_mapx(int argc, char **argv) {
+    if (argc < 4) { fprintf(stderr, "usage: memscan mapx in.map.png out.map\n"); return 2; }
+    size_t n = 0;
+    char *t = ms_png_text(argv[2], "memscan_map", &n);
+    if (!t) { fprintf(stderr, "no embedded memscan_map in %s\n", argv[2]); return 1; }
+    FILE *f = fopen(argv[3], "wb");
+    if (!f) { free(t); perror(argv[3]); return 1; }
+    fwrite(t, 1, n, f);
+    fclose(f);
+    free(t);
+    return 0;
 }
 
 static int cmd_map(int argc, char **argv) {
@@ -452,9 +535,36 @@ static int cmd_dis(int argc, char **argv) {
     return 0;
 }
 
+// closure rounds: the static flow proposes the unvisited entries of known
+// code, the machine disposes (a fresh total search from each), until a round
+// seeds nothing or the round cap is reached.  Each search gets a fresh wall.
+static void closure_rounds(MsExplorer *ex, MsResults *res) {
+    if (ex->cfg.no_closure) return;
+    for (int r = 0; r < ex->cfg.closure_rounds; r++) {
+        uint32_t marked = ms_static_closure(res);
+        int seeded = ms_closure_seed(ex);
+        fprintf(stderr, "memscan: closure round %d: +%u static bytes, %d entries seeded\n", r + 1,
+                marked, seeded);
+        if (!seeded) return;
+        ex->stop = 0;
+        ex->steps_own = 0;
+        ex->cfg.dfs = 1;
+        uint32_t k0 = res->disc_n ? res->disc[res->disc_n - 1].known : 0;
+        ms_explore(ex);
+        {
+            char nm[48];
+            snprintf(nm, sizeof nm, "closure-%d", r + 1);
+            ms_disc_add(res, nm, 0);
+            if (res->disc_n) res->disc[res->disc_n - 1].credit = res->disc[res->disc_n - 1].known - k0;
+        }
+    }
+    ms_static_closure(res); // the last search may have opened more direct flow
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) return usage(), 2;
     if (!strcmp(argv[1], "explore")) return cmd_explore(argc, argv);
+    if (!strcmp(argv[1], "mapx")) return cmd_mapx(argc, argv);
     if (!strcmp(argv[1], "map")) return cmd_map(argc, argv);
     if (!strcmp(argv[1], "regs")) return cmd_regs(argc, argv);
     if (!strcmp(argv[1], "dis")) return cmd_dis(argc, argv);

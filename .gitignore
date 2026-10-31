@@ -6,3 +6,4 @@ gui_shot.bmp
 logs/
 memscan-snaps/
 test_state_*/
+output/

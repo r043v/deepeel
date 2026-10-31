@@ -11,6 +11,13 @@
 int ms_png_save(const char *path, int w, int h, const uint8_t *rgb, const uint8_t *payload,
                 size_t payload_len);
 
+// same image, with `text` stored verbatim (Latin-1/ASCII) in a tEXt chunk named `key`
+int ms_png_save_text(const char *path, int w, int h, const uint8_t *rgb, const char *key,
+                     const char *text, size_t text_len);
+
+// text of the tEXt chunk `key` (malloc'd, NUL-terminated) or NULL
+char *ms_png_text(const char *path, const char *key, size_t *len_out);
+
 // reads a PNG written by this tool (8-bit RGB, stored-block zlib); returns
 // malloc'd rgb and the embedded payload (NULL/0 when absent)
 int ms_png_load(const char *path, int *w, int *h, uint8_t **rgb_out, uint8_t **payload_out,

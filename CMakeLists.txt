@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(memscan VERSION 0.3.0 LANGUAGES C)
+project(memscan VERSION 0.5.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -197,8 +197,11 @@ add_library(memscan_core STATIC
   src/explore/copies.c
   src/explore/sessions.c
   src/explore/tree.c
+  src/explore/closure.c
   src/explore/tas.c
   src/report/report.c
+  src/report/map.c
+    src/report/html.c
   src/gui/font5x7.c
   ${MS_GUI_FILE}
 )

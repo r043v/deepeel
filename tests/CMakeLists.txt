@@ -9,6 +9,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_jumptable.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_loop.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_unreach.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_closure.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_bankdata.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_vblank.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_copy1.gb

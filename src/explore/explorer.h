@@ -23,6 +23,8 @@ enum {
     MS_XF_FORCED = 1 << 1,  // executed through a forked/speculative path
     MS_XF_ENTRY = 1 << 2,   // reached non-sequentially (jump/call/ret/entry)
     MS_XF_IRQ = 1 << 3,     // inside an IRQ handler execution
+    MS_XF_START = 1 << 4,   // opcode byte of an executed instruction (not an operand)
+    MS_XF_STATIC = 1 << 5,  // reached by the static flow closure only (never executed)
 };
 enum {
     MS_DF_READ = 1 << 0, // read as data through the ROM windows
@@ -74,6 +76,15 @@ typedef struct MsIoStat {
 typedef struct MsSiteStat {
     uint32_t taken, nottaken;
 } MsSiteStat;
+
+// --- indirect jump sites (JP HL): the targets actually observed ----------------
+typedef struct MsIndirect {
+    uint8_t n;            // distinct targets kept (cap 8)
+    uint8_t overflow;     // more distinct targets than kept
+    uint16_t target[8];
+    uint8_t tbank[8];
+    uint32_t hits;
+} MsIndirect;
 
 // --- caller lists per call target --------------------------------------------
 typedef struct MsCallList {
@@ -127,11 +138,22 @@ typedef struct MsSection {
 // lists are guarded by res->sec_mtx / res->rec_mtx whenever res->mt is set
 // (sessions running).  The fork explorer only runs while the sessions wait at
 // the epoch barrier, so its own updates stay lock-free.
+// One line of the discovery log: who found how much, and when.
+typedef struct MsDiscEntry {
+    double t;            // seconds since the first entry (wall clock)
+    char source[48];     // "tas:<file>", "rng", "fork-explorer", "total-search", "closure-N"...
+    uint64_t credit;     // discovery credit gained by that source in the step
+    uint32_t known;      // ROM bytes carrying any evidence after the step
+} MsDiscEntry;
+
 typedef struct MsResults {
     const MsCart *cart;
     const MsPlatform *plat;
     int banks;
     int mt; // sessions running: take the mutexes
+    MsDiscEntry *disc; // discovery log (appended from one thread at a time)
+    int disc_n, disc_cap;
+    double disc_t0;
     pthread_mutex_t sec_mtx, rec_mtx;
     // per-ROM-byte maps, banks * 0x4000 entries
     uint8_t *exec_flags;
@@ -155,6 +177,19 @@ typedef struct MsResults {
     MsMap32 sites;   // branch site key -> MsSiteStat
     MsMap32 callers; // call target key -> MsCallList
     MsMap32 fork_counts; // branch site key -> forks emitted there
+    MsMap32 indirect;    // JP HL site key -> MsIndirect (observed targets)
+    // static flow closure (closure.c): code reached by following direct
+    // control flow out of executed instructions, never executed itself
+    uint32_t closure_rounds, closure_starts, closure_bytes;
+    uint32_t closure_unresolved_bank;   // bank-0 edge into $4000+ with no bank evidence
+    uint32_t closure_stopped_data;      // flow stopped by padding / proven data
+    uint32_t closure_stopped_illegal;   // flow stopped by an undefined opcode
+    uint32_t closure_seeds, closure_seeds_dropped;
+    uint32_t *clo_entries;              // rom keys of static entry points never executed
+    int clo_entry_n, clo_entry_cap;
+    MsHashSet bad_seen;                 // undefined-opcode sites already recorded
+    MsHashSet clo_seeded;               // entries already handed to the fork explorer
+    uint32_t forks_covered_pruned;      // forks dropped: both sides known, target covered
     // diagnostics: undefined opcodes (rom key + byte)
     struct { uint32_t key; uint8_t op; } *bad_ops;
     int bad_op_count, bad_op_cap;
@@ -196,6 +231,10 @@ typedef struct MsConfig {
     int no_pointer_scan;      // disable pointer-table seeding
     int no_irq_fork;          // disable IRQ forking
     int no_key_fork;          // disable the simulated joypad-IRQ key forks
+    int no_closure;           // disable the static flow closure
+    int closure_rounds;       // closure -> seed -> explore loops (default 4)
+    int no_covered_prune;     // keep forking sites whose both sides are known
+    uint32_t covered_fork_keep; // forks a fully-known site still gets (default 2)
     int seed_banks;           // seed every switchable bank at $4000
     int dfs;                  // depth-first frontier: newest path first (the
                               // total-search phase; default breadth-first)
@@ -263,6 +302,7 @@ struct MsExplorer {
     struct { uint16_t pc; uint32_t count; } back_ring[8];
     int back_idx;
     uint32_t steps_this_path;
+    uint64_t steps_own;  // fork-explorer steps (the wall); sessions share res->steps_total
     int last_io_slot; // io registry slot of the last register write (copy attribution)
     int stop; // set when a hard budget wall is hit
     // play-session mode: set by a session worker that owns this explorer
@@ -311,8 +351,23 @@ void ms_section_live_io(MsSection *s, uint16_t io_off);
 void ms_section_io_used(MsSection *s, int slot);
 void ms_section_banks_seen(MsSection *s, uint32_t bank);
 
+// --- static flow closure (closure.c) ------------------------------------------
+// Follows direct control flow (fall-through, JR/JP/CALL/RST targets, both sides
+// of conditionals) out of every executed instruction and marks what it reaches
+// MS_XF_STATIC.  Executed bytes are never touched; padding, pointer tables and
+// proven data stop the flow.  Terminates by construction (a visited map the
+// size of the ROM).  Returns the newly marked byte count.
+uint32_t ms_static_closure(MsResults *res);
+// seed the fork explorer at the closure's entry points that were never
+// executed (jump/call/branch targets): the static flow proposes, the machine
+// disposes (nonsense eviction, indirect targets).  Returns seeds queued; the
+// seeds over cfg.seed_cap are counted in closure_seeds_dropped.
+int ms_closure_seed(MsExplorer *ex);
+
 void ms_results_init(MsResults *res, const MsCart *cart, const MsPlatform *plat);
 void ms_results_free(MsResults *res);
+// Append a discovery-log entry (known = bytes with any evidence right now).
+void ms_disc_add(MsResults *res, const char *source, uint64_t credit);
 // static byte classification (pointer tables, padding), independent of exploration
 void ms_static_scan(MsResults *res);
 // registry slot for an address (mapper windows and IO), or -1
@@ -351,6 +406,9 @@ void ms_explore_finalize(MsExplorer *ex);
 int ms_explore(MsExplorer *ex);
 // bytes neither executed, nor read as data, nor statically classified
 // (padding, pointer tables) — the honest "remaining" gap metric
+enum { MS_CLS_EXEC_NATURAL, MS_CLS_EXEC_FORCED, MS_CLS_STATIC_FLOW, MS_CLS_DATA_COPIED,
+       MS_CLS_DATA_READ, MS_CLS_POINTER_PAD, MS_CLS_UNEXPLAINED, MS_CLS_COUNT };
+void ms_results_breakdown(const MsResults *res, uint64_t out[MS_CLS_COUNT]);
 uint64_t ms_results_unexplained(const MsResults *res);
 
 // progress snapshot for the GUI / verbose prints

@@ -36,6 +36,8 @@ typedef struct MsSessionCfg {
     int inputs_n;
     const char *tas[8];         // TAS movie files (VBA .vmv, BizHawk .bk2, plain
     int tas_n;                  // input log): one worker each, frame by frame
+    uint32_t tas_ckpt_frames;   // TAS replay: deposit the machine to the fork explorer every n
+                                // frames (0 = off; default 240) — real gameplay states to fork from
     int uniform;                // 1 (default): uniform random keys (one of the
                                 // 8 buttons, held 1..uniform_hold frames); 0:
                                 // m0boy's weighted generator (m0x)
@@ -83,6 +85,11 @@ void ms_play_free(MsPlay *p);
 // persist the checkpoint pool now (also automatic every save_epochs)
 int ms_play_save(const MsPlay *p);
 int ms_play_done(const MsPlay *p);
+// TAS gameplay states handed to the fork explorer so far
+uint64_t ms_play_tas_ckpts(const MsPlay *p);
+// fork-explorer cuts absorbed mid-movie / wedged-machine guard hits
+uint64_t ms_play_tas_cuts(const MsPlay *p);
+uint64_t ms_play_tas_cut_stuck(const MsPlay *p);
 uint64_t ms_play_frames(const MsPlay *p);
 int ms_play_lanes(MsPlay *p, MsSessionLane *out, int max);
 // checkpoint pool access for the playable export (--export-playable): the

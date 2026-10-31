@@ -46,8 +46,8 @@ static void wr_chunk(FILE *f, const char *type, const uint8_t *data, size_t len)
 }
 
 // --- png writer ------------------------------------------------------------------
-int ms_png_save(const char *path, int w, int h, const uint8_t *rgb, const uint8_t *payload,
-                size_t payload_len) {
+static int png_write(const char *path, int w, int h, const uint8_t *rgb, const char *key, int hex,
+                     const uint8_t *payload, size_t payload_len) {
     static int inited;
     if (!inited) { crc_init(); inited = 1; }
     FILE *f = fopen(path, "wb");
@@ -107,25 +107,39 @@ int ms_png_save(const char *path, int w, int h, const uint8_t *rgb, const uint8_
     free(z);
     free(raw);
 
-    // the machine snapshot rides in a tEXt chunk, hex-encoded
+    // the payload rides in a tEXt chunk: hex-encoded (snapshots) or verbatim text (maps)
     if (payload && payload_len) {
         static const char hexd[] = "0123456789abcdef";
-        static const char key[] = "memscan_snapshot";
-        uint8_t *txt = malloc(sizeof key + 1 + payload_len * 2);
+        size_t kl = strlen(key), body = hex ? payload_len * 2 : payload_len;
+        uint8_t *txt = malloc(kl + 1 + body);
         if (txt) {
-            memcpy(txt, key, sizeof key - 1);
-            txt[sizeof key - 1] = 0; // NUL separator
+            memcpy(txt, key, kl);
+            txt[kl] = 0; // NUL separator
             for (size_t i = 0; i < payload_len; i++) {
-                txt[sizeof key + i * 2] = (uint8_t)hexd[payload[i] >> 4];
-                txt[sizeof key + 1 + i * 2] = (uint8_t)hexd[payload[i] & 0xF];
+                if (hex) {
+                    txt[kl + 1 + i * 2] = (uint8_t)hexd[payload[i] >> 4];
+                    txt[kl + 2 + i * 2] = (uint8_t)hexd[payload[i] & 0xF];
+                } else {
+                    txt[kl + 1 + i] = payload[i];
+                }
             }
-            wr_chunk(f, "tEXt", txt, sizeof key - 1 + 1 + payload_len * 2);
+            wr_chunk(f, "tEXt", txt, kl + 1 + body);
             free(txt);
         }
     }
     wr_chunk(f, "IEND", NULL, 0);
     fclose(f);
     return 1;
+}
+
+int ms_png_save(const char *path, int w, int h, const uint8_t *rgb, const uint8_t *payload,
+                size_t payload_len) {
+    return png_write(path, w, h, rgb, "memscan_snapshot", 1, payload, payload_len);
+}
+
+int ms_png_save_text(const char *path, int w, int h, const uint8_t *rgb, const char *key,
+                     const char *text, size_t text_len) {
+    return png_write(path, w, h, rgb, key, 0, (const uint8_t *)text, text_len);
 }
 
 // --- png reader (stored-block zlib only) ---------------------------------------------
@@ -251,4 +265,45 @@ int ms_png_load(const char *path, int *w, int *h, uint8_t **rgb_out, uint8_t **p
     *payload_out = payload; // may be NULL: no snapshot inside
     *payload_len_out = payload_n;
     return 1;
+}
+
+// returns the malloc'd, NUL-terminated text of the tEXt chunk `key` (CRC checked)
+char *ms_png_text(const char *path, const char *key, size_t *len_out) {
+    static int inited;
+    if (!inited) { crc_init(); inited = 1; }
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    uint8_t sig[8];
+    if (fread(sig, 1, 8, f) != 8 || memcmp(sig, "\x89PNG\r\n\x1a\n", 8)) { fclose(f); return NULL; }
+    size_t kl = strlen(key);
+    char *res = NULL;
+    uint8_t *chunk = NULL;
+    size_t cap = 0;
+    for (;;) {
+        uint8_t hdr[8];
+        if (fread(hdr, 1, 8, f) != 8) break;
+        uint32_t len = rd32(hdr);
+        char type[5] = { 0 };
+        memcpy(type, hdr + 4, 4);
+        if ((size_t)len + 5 > cap) {
+            cap = (size_t)len + 1024;
+            chunk = realloc(chunk, cap);
+            if (!chunk) break;
+        }
+        if (fread(chunk, 1, (size_t)len + 4, f) != (size_t)len + 4) break;
+        uint32_t c = 0xFFFFFFFFu;
+        for (const char *t = type; *t; t++) c = crc_table[(c ^ (uint8_t)*t) & 0xFF] ^ (c >> 8);
+        for (uint32_t i = 0; i < len; i++) c = crc_table[(c ^ chunk[i]) & 0xFF] ^ (c >> 8);
+        if ((c ^ 0xFFFFFFFFu) != rd32(chunk + len)) break;
+        if (!strcmp(type, "tEXt") && len > kl && !memcmp(chunk, key, kl) && chunk[kl] == 0) {
+            size_t n = len - kl - 1;
+            res = malloc(n + 1);
+            if (res) { memcpy(res, chunk + kl + 1, n); res[n] = 0; if (len_out) *len_out = n; }
+            break;
+        }
+        if (!strcmp(type, "IEND")) break;
+    }
+    free(chunk);
+    fclose(f);
+    return res;
 }

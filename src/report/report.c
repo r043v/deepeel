@@ -62,12 +62,12 @@ static const char *chan_name(uint8_t c) {
 // --- text -----------------------------------------------------------------------
 void ms_report_text(const MsResults *res, const MsConfig *cfg, MsBuf *out) {
     const MsCart *c = res->cart;
-    char line[256];
+    char line[2048];
     snprintf(line, sizeof line, "memscan — %s (%s, %d banks, %u KiB, RAM %u KiB)\n",
              c->title, ms_mbc_name(c->mbc), c->rom_banks, c->rom_size / 1024, c->ram_size / 1024);
     ms_buf_str(out, line);
     snprintf(line, sizeof line,
-             "exploration: %llu steps in %llu paths (%u forks: %u branch, %u irq, %u key), %u sections\n"
+             "exploration: %llu steps in %llu paths (%llu forks: %u branch, %u irq, %u key), %u sections\n"
              "evicted: %u exact states, %u same-context entries; cuts: %u cycles, %u step-budget, %u padding\n"
              "nonsense evictions: %u echo/OAM, %u verbatim data, %u incoherent stack\n"
              "budgets: %u paths cap hit, %u step-wall hit, %u queue overflows\n"
@@ -82,6 +82,29 @@ void ms_report_text(const MsResults *res, const MsConfig *cfg, MsBuf *out) {
              res->seeds_natural, res->seeds_spec,
              (unsigned long long)res->data_verbatim_bytes, res->data_contradictions);
     ms_buf_str(out, line);
+    {
+        uint64_t stat_only = 0, ind_sites = 0, ind_over = 0;
+        size_t nb = (size_t)res->banks * 0x4000;
+        for (size_t k = 0; k < nb; k++)
+            if ((res->exec_flags[k] & MS_XF_STATIC) && !(res->exec_flags[k] & (MS_XF_NATURAL | MS_XF_FORCED)))
+                stat_only++;
+        for (size_t i = 0; i < res->indirect.cap; i++) {
+            if (!res->indirect.used[i]) continue;
+            ind_sites++;
+            if (((const MsIndirect *)(res->indirect.vals + i * res->indirect.stride))->overflow) ind_over++;
+        }
+        snprintf(line, sizeof line,
+                 "static closure: %u rounds, %llu bytes (%u instructions) reached by direct flow only, "
+                 "%u seeds (%u dropped), %u stopped by data/padding, %u by undefined opcodes\n"
+                 "  unresolved: %u bank-0 edges into $4000+ with no bank evidence, "
+                 "%llu JP HL sites observed (%llu with more than 8 targets)\n"
+                 "forks pruned (both sides covered): %u\n",
+                 res->closure_rounds, (unsigned long long)stat_only, res->closure_starts,
+                 res->closure_seeds, res->closure_seeds_dropped, res->closure_stopped_data,
+                 res->closure_stopped_illegal, res->closure_unresolved_bank,
+                 (unsigned long long)ind_sites, (unsigned long long)ind_over, res->forks_covered_pruned);
+        ms_buf_str(out, line);
+    }
 
     // per-bank coverage
     ms_buf_str(out, "\nper-bank executed bytes:\n");
@@ -182,6 +205,16 @@ void ms_report_text(const MsResults *res, const MsConfig *cfg, MsBuf *out) {
         for (int i = 0; i < show; i++)
             ms_buf_fmt(out, " %06x=%02x", res->bad_ops[i].key, res->bad_ops[i].op);
         ms_buf_str(out, ")\n");
+    }
+    if (res->disc_n) {
+        // discovery log: who found how much, and when (wall clock, tool observation)
+        int show = res->disc_n > 40 ? 40 : res->disc_n;
+        ms_buf_fmt(out, "\ndiscovery log (%d entries%s): time(s) source credit known-bytes\n", res->disc_n,
+                   show < res->disc_n ? ", last 40 shown; full log in --html" : "");
+        for (int i = res->disc_n - show; i < res->disc_n; i++) {
+            const MsDiscEntry *e = &res->disc[i];
+            ms_buf_fmt(out, "  %8.2f  %-28s %10llu  %u\n", e->t, e->source, (unsigned long long)e->credit, e->known);
+        }
     }
     (void)cfg;
 }
@@ -324,6 +357,11 @@ void ms_report_cov(const MsResults *res, MsBuf *o) {
                 if (ef & MS_XF_FORCED) flags |= 4;
                 ms_buf_fmt(o, "%02x %04x %x %x\n", bank, bank ? a + 0x4000 : a, flags,
                            res->exec_hits[k] > 0xFFFFu ? 0xFFFFu : (unsigned)res->exec_hits[k]);
+            } else if (ef & MS_XF_STATIC) {
+                // direct flow only: instruction starts, speculative (4), entry (2)
+                if (ef & MS_XF_START)
+                    ms_buf_fmt(o, "%02x %04x %x 0\n", bank, bank ? a + 0x4000 : a,
+                               (ef & MS_XF_ENTRY) ? 6u : 4u);
             } else if ((res->data_flags[k] & MS_DF_VERBATIM) || (res->static_flags[k] & MS_SF_POINTER)) {
                 // proven data, never executed: m0boy must not compile it
                 ms_buf_fmt(o, "%02x %04x 8 %x\n", bank, bank ? a + 0x4000 : a,

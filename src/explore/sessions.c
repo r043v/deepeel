@@ -39,6 +39,7 @@ void ms_session_cfg_defaults(MsSessionCfg *cfg) {
     cfg->restart_rate = 8;
     cfg->save_epochs = 10;
     cfg->fork_paths_per_epoch = 200;
+    cfg->tas_ckpt_frames = 240;
     cfg->uniform = 1;
     cfg->uniform_hold = 64;
 }
@@ -282,6 +283,9 @@ struct MsPlay {
     MsInboxEnt *inb;
     int inb_n;
     uint64_t inb_dropped;
+    uint64_t tas_ckpts;
+    uint64_t tas_cuts;      // fork-explorer cuts absorbed mid-movie (movie kept)
+    uint64_t tas_cut_stuck; // consecutive-cut guard hits (movie then falls to random play)
     // totals
     uint64_t total_frames;
     uint64_t stagnation;
@@ -463,6 +467,16 @@ static void worker_vblank(MsMach *m) {
 
     w->frames_done++;
     w->epoch_done++;
+    // TAS gameplay states are the best fork origins there are: populated RAM,
+    // real level, real inputs behind them.  The movie's own pace is untouched.
+    if (w->mode == IN_TAS && p->cfg.tas_ckpt_frames && w->frames_done % p->cfg.tas_ckpt_frames == 0) {
+        uint8_t *img = worker_image(w);
+        if (img) {
+            deposit_img(p, img);
+            free(img);
+            __atomic_fetch_add(&p->tas_ckpts, 1, __ATOMIC_RELAXED);
+        }
+    }
     if (w->seg_left) w->seg_left--;
     uint64_t cred = worker_credit(w);
     if (cred > w->credit_prev) {
@@ -496,6 +510,8 @@ static void run_epoch(MsWorker *w, uint32_t frames) {
     MsPlay *p = w->p;
     w->epoch_target = frames;
     w->epoch_done = 0;
+    uint64_t tas_prev_frames = w->frames_done;
+    int tas_same = 0;
     while (!p->quit && w->epoch_done < frames) {
         ms_mach_attach(w->mach, w->ex, w->ex->mach->on_step, w->ex->mach->on_read,
                        w->ex->mach->on_write, worker_vblank);
@@ -505,7 +521,24 @@ static void run_epoch(MsWorker *w, uint32_t frames) {
         // mid-replay cannot rewind its movie: it falls through to random play.
         if (cut != MS_CUT_QUIT && cut != MS_CUT_SEGEND) {
             if (w->mode == IN_HUMAN) return; // the human sees the freeze
-            if (w->mode == IN_TAS) w->mode = IN_RNG;
+            if (w->mode == IN_TAS) {
+                // TAS priority: the movie is never abandoned for a cut.  The
+                // game really is there (halt, padding); resume it, the next
+                // vblank feeds the next movie frame.  Guard: if no frame
+                // advances over many consecutive cuts the machine is truly
+                // wedged — only then fall to random play, counted.
+                __atomic_fetch_add(&p->tas_cuts, 1, __ATOMIC_RELAXED);
+                if (w->frames_done == tas_prev_frames) {
+                    if (++tas_same > 1000) {
+                        __atomic_fetch_add(&p->tas_cut_stuck, 1, __ATOMIC_RELAXED);
+                        w->mode = IN_RNG;
+                        segment_end(w);
+                        tas_same = 0;
+                    }
+                } else tas_same = 0;
+                tas_prev_frames = w->frames_done;
+                continue;
+            }
             segment_end(w); // dead halt or pad slide: rotate the checkpoint
         }
     }
@@ -802,6 +835,10 @@ static void drain_inbox(MsPlay *p) {
 // the fork explorer's queue, gives the fork explorer a slice, re-seeds the
 // stagnant sessions (their next segment_end picks the best checkpoint) and
 // checks the stop conditions.
+uint64_t ms_play_tas_ckpts(const MsPlay *p) { return p->tas_ckpts; }
+uint64_t ms_play_tas_cuts(const MsPlay *p) { return p->tas_cuts; }
+uint64_t ms_play_tas_cut_stuck(const MsPlay *p) { return p->tas_cut_stuck; }
+
 int ms_play_poll(MsPlay *p) {
     p->epoch_ran = 0;
     pthread_mutex_lock(&p->bar_mtx);
@@ -817,6 +854,18 @@ int ms_play_poll(MsPlay *p) {
         MsWorker *w = &p->w[i];
         w->credit_epoch = w->credit_total - w->credit_base;
         w->credit_base = w->credit_total;
+        if (w->credit_epoch) {
+            static const char *mn[] = { "rng", "attract", "script", "tas", "fixed", "human" };
+            char src[48];
+            const char *base = w->tas.source;
+            const char *sl = strrchr(base, '/');
+            if (sl) base = sl + 1;
+            if (w->mode == IN_TAS)
+                snprintf(src, sizeof src, "tas:%s", base);
+            else
+                snprintf(src, sizeof src, "%s s%d", (unsigned)w->mode < 6 ? mn[w->mode] : "?", w->id);
+            ms_disc_add(p->res, src, w->credit_epoch);
+        }
         glob_new += w->credit_epoch;
         frames += w->lane_frame - w->seen_frame;
         w->seen_frame = w->lane_frame;
@@ -851,7 +900,7 @@ int ms_play_poll(MsPlay *p) {
     if (g_sigint) reason = 2;
     else if (p->cfg.max_frames && !tas_left && p->total_frames >= p->cfg.max_frames) reason = 0;
     else if (p->cfg.stagnation_frames && !tas_left && p->stagnation >= p->cfg.stagnation_frames) reason = 1;
-    else if (p->cfg.until_static && p->unexplained == 0 && frames) reason = 3;
+    else if (p->cfg.until_static && !tas_left && p->unexplained == 0 && frames) reason = 3;
     if (reason >= 0) {
         p->quit = 1;
         p->stop_reason = reason;

@@ -9,6 +9,7 @@ Every fixture is a minimal ROM exercising one exploration behaviour:
   jumptable  - JP HL through a pointer table, both handlers reachable
   loop       - infinite loop, must be contained by the guards
   unreach    - a data blob no code ever touches
+  closure    - code left unvisited by a tiny budget, reached by direct flow
   bankdata   - data read through the banked window of an MBC5 cart
 """
 import sys, os
@@ -71,6 +72,28 @@ def build(out):
     w(r, 0xC002, 0xEA, 0x01, 0x80)               # ld ($8001),a
     w(r, 0xC005, 0xC9)                           # ret
     save(out, "fix_mbc5", r)
+
+    # --- closure: code the budget never reaches, found by direct flow ---------
+    r = rom(4, mbc=0x19)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x3E, 0x02)                      # ld a,2
+    w(r, 0x152, 0xEA, 0x00, 0x20)                # ld ($2000),a -> bank 2
+    w(r, 0x155, 0xCD, 0x00, 0x40)                # call $4000
+    w(r, 0x158, 0xC3, 0x30, 0x40)                # jp $4030 (bank 2, cross-bank edge)
+    w(r, 0x8000, 0x3E, 0x01)                     # $4000 ld a,1
+    w(r, 0x8002, 0xFE, 0x01)                     # cp 1
+    w(r, 0x8004, 0x28, 0x03)                     # jr z,$4009
+    w(r, 0x8006, 0x06, 0x02)                     # ld b,2   (not-taken side)
+    w(r, 0x8008, 0xC9)                           # ret
+    w(r, 0x8009, 0x0E, 0x03)                     # ld c,3
+    w(r, 0x800B, 0xCD, 0x20, 0x40)               # call $4020
+    w(r, 0x800E, 0xC9)                           # ret
+    w(r, 0x8020, 0x3E, 0x55)                     # ld a,$55
+    w(r, 0x8022, 0xEA, 0x00, 0x80)               # ld ($8000),a
+    w(r, 0x8025, 0xC9)                           # ret
+    w(r, 0x8030, 0x3E, 0x09)                     # $4030 ld a,9
+    w(r, 0x8032, 0xC9)                           # ret
+    save(out, "fix_closure", r)
 
     # --- keyirq: IE arms only the joypad IRQ; the explorer must simulate
     # key presses, nothing else can raise IF bit 4 --------------------------

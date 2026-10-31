@@ -10,6 +10,8 @@ static MsResults res;
 static MsMach *g_mach;
 
 // runs the full pipeline on one fixture; the results stay in `res` until cleanup
+static uint64_t g_wall; // 0 = default budget
+
 static void run(const char *dir, const char *name) {
     char path[512];
     char err[256];
@@ -26,6 +28,7 @@ static void run(const char *dir, const char *name) {
     ms_static_scan(&res);
     MsConfig cfg;
     ms_config_defaults(&cfg);
+    if (g_wall) cfg.max_steps_total = g_wall;
     if (g_mach) ms_mach_close(g_mach);
     g_mach = mach_for(g_cart);
     MsExplorer *ex = ms_explorer_new(&cfg, &res, g_mach);
@@ -136,6 +139,41 @@ int main(int argc, char **argv) {
             break;
         }
     CHECK(!(res.exec_flags[0x400] & MS_XF_NATURAL)); // never on the natural flow
+
+    // --- closure: a tiny wall leaves code unvisited; direct flow finds it ------------
+    g_wall = 9;
+    run(dir, "closure");
+    g_wall = 0;
+    {
+        uint32_t k3 = ms_rom_index(2, 0x4030), k20 = ms_rom_index(2, 0x4020), k6 = ms_rom_index(2, 0x4006);
+        CHECK(!(res.exec_flags[k3] & (MS_XF_NATURAL | MS_XF_FORCED))); // the wall really cut the run
+        uint32_t marked = ms_static_closure(&res);
+        CHECK(marked > 0 && res.closure_starts > 0);
+        CHECK((res.exec_flags[k3] & MS_XF_STATIC) && (res.exec_flags[k3] & MS_XF_START));
+        CHECK(res.exec_flags[k20] & MS_XF_STATIC);
+        CHECK(res.exec_flags[k6] & MS_XF_STATIC);
+        CHECK(res.clo_entry_n >= 1);
+        // idempotent: a second pass finds nothing new
+        CHECK(ms_static_closure(&res) == 0);
+        MsBuf o;
+        ms_buf_init(&o);
+        ms_report_cov(&res, &o);
+        int spec = 0;
+        char *q = (char *)o.p, *end = (char *)o.p + o.len;
+        while (q < end) {
+            char *nl = memchr(q, '\n', (size_t)(end - q));
+            if (!nl) break;
+            unsigned b, a, f;
+            if (*q != '#' && sscanf(q, "%x %x %x", &b, &a, &f) == 3 && b == 2 && a == 0x4030 && f == 6) spec++;
+            q = nl + 1;
+        }
+        CHECK(spec == 1); // static entry: speculative (4) + entry (2), never executed (1)
+        ms_buf_free(&o);
+    }
+    // direct flow never enters proven data
+    run(dir, "unreach");
+    ms_static_closure(&res);
+    CHECK(!(res.exec_flags[0x200] & MS_XF_STATIC));
 
     // --- bankdata: reads through the banked window -----------------------------------
     run(dir, "bankdata");
