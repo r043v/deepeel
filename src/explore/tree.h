@@ -27,6 +27,7 @@ enum {
     MS_ISSUE_RESET,
     MS_ISSUE_BUDGET,
     MS_ISSUE_CAPPED,
+    MS_ISSUE_NONSENSE,
     MS_ISSUE_N,
 };
 

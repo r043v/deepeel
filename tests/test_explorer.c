@@ -182,6 +182,22 @@ int main(int argc, char **argv) {
     CHECK(cx != NULL && !cx->verbatim);
     CHECK(!(res.data_flags[0x4000] & MS_DF_VERBATIM));
 
+    // --- nonsense: echo/OAM execution is evicted --------------------------------------
+    run(dir, "nsecho");
+    CHECK(res.nonsense_echo >= 1);
+    CHECK(res.paths_run <= 3); // the nonsense path was cut at once
+
+    // --- nonsense: execution inside verbatim-proven data is evicted -------------------
+    // the proof only exists once the copying path has ended, so the jump into
+    // the data lives on the not-taken side of a conditional the fork explores
+    run(dir, "nsdata");
+    CHECK(res.nonsense_data >= 1);
+    CHECK(res.data_flags[0x200] & MS_DF_VERBATIM);
+
+    // --- nonsense: RET with the stack outside WRAM/HRAM is evicted --------------------
+    run(dir, "nsstack");
+    CHECK(res.nonsense_stack >= 1);
+
     // --- reports produce output -------------------------------------------------------
     {
         MsConfig cfg;

@@ -166,6 +166,10 @@ typedef struct MsResults {
     uint32_t forks_capped; // forks dropped by the per-site cap
     uint32_t cycle_cuts, step_cuts, budget_paths, budget_steps, queue_overflows;
     uint32_t pad_cuts; // paths stopped for executing a padding run
+    // nonsense evictions (the path proved senseless): echo/OAM execution,
+    // execution inside verbatim-proven data, RET with a stack outside
+    // WRAM/HRAM — the bytes stay out of the code map
+    uint32_t nonsense_echo, nonsense_data, nonsense_stack;
     uint32_t halt_cuts; // paths parked in a HALT nothing wakes (watchdog)
     uint32_t seeds_natural, seeds_spec;
     uint32_t seeds_skipped_data; // pointer-scan targets inside proven data/static zones
@@ -282,11 +286,16 @@ struct MsExplorer {
     struct MsTree *tree;
     uint32_t cur_choice;
     // per-path outcome for the tree: steps without any first discovery, and
-    // the dead/reset flags the step hook raises
+    // the dead/reset/nonsense flags the step hook raises
     uint32_t steps_no_credit;
     uint64_t credit_shown;
     uint8_t path_dead, path_reset;
+    uint8_t path_nonsense; // 0 none, else an MS_NS_* reason
 };
+
+// nonsense eviction reasons (the path proved senseless; the bytes it touched
+// stay out of the code map's evidence)
+enum { MS_NS_NONE = 0, MS_NS_ECHO, MS_NS_DATA, MS_NS_STACK };
 
 // --- section bookkeeping (sections.c) -------------------------------------------
 // creates or extends the section at (bank, pc) and updates its per-run

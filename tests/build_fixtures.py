@@ -211,5 +211,45 @@ def build(out):
         r[0x4000 + i] = (i * 29 + 11) & 0xFF
     save(out, "fix_copyx", r)
 
+    # --- nonsense: jump into echo RAM, jump into verbatim data, RET with a
+    # stack pointer outside WRAM/HRAM — each is one nonsense eviction ---------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    # echo RAM: jp $E000 (2 bytes of 0xFF there -> the slide guard would eat
+    # it, so seed a real opcode: copy code to WRAM through the echo?  no —
+    # the echo hit itself is the eviction, before anything runs)
+    w(r, 0x150, 0x21, 0x00, 0xE0)                # ld hl,$E000
+    w(r, 0x153, 0xE9)                            # jp (hl)
+    w(r, 0x154, 0x76)                            # halt
+    save(out, "fix_nsecho", r)
+
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    # verbatim data: copy $0200..$02FF to VRAM (proven verbatim), then a
+    # second forced path jumps into it
+    w(r, 0x150, 0x21, 0x00, 0x02)                # ld hl,$0200
+    w(r, 0x153, 0x11, 0x00, 0x80)                # ld de,$8000
+    w(r, 0x156, 0x01, 0x00, 0x01)                # ld bc,$0100
+    w(r, 0x159, 0x2A)                            # loop: ld a,(hl+)
+    w(r, 0x15A, 0x12)                            # ld (de),a
+    w(r, 0x15B, 0x13)                            # inc de
+    w(r, 0x15C, 0x0B)                            # dec bc
+    w(r, 0x15D, 0x78)                            # ld a,b
+    w(r, 0x15E, 0xB1)                            # or c
+    w(r, 0x15F, 0x20, 0xF8)                      # jr nz,$0159
+    w(r, 0x161, 0x21, 0x00, 0x02)                # ld hl,$0200
+    w(r, 0x164, 0xE9)                            # jp (hl)   -> into proven data
+    for i in range(0x100):
+        r[0x200 + i] = (i * 31 + 7) & 0xFF
+    save(out, "fix_nsdata", r)
+
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    # RET with the stack pointer in ROM: senseless return
+    w(r, 0x150, 0x31, 0x00, 0x01)                # ld sp,$0100
+    w(r, 0x153, 0xC9)                            # ret
+    w(r, 0x154, 0x76)                            # halt
+    save(out, "fix_nsstack", r)
+
 if __name__ == "__main__":
     build(sys.argv[1] if len(sys.argv) > 1 else ".")

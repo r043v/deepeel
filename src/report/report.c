@@ -69,6 +69,7 @@ void ms_report_text(const MsResults *res, const MsConfig *cfg, MsBuf *out) {
     snprintf(line, sizeof line,
              "exploration: %llu steps in %llu paths (%u forks: %u branch, %u irq, %u key), %u sections\n"
              "evicted: %u exact states, %u same-context entries; cuts: %u cycles, %u step-budget, %u padding\n"
+             "nonsense evictions: %u echo/OAM, %u verbatim data, %u incoherent stack\n"
              "budgets: %u paths cap hit, %u step-wall hit, %u queue overflows\n"
              "seeds: %u natural, %u speculative\n"
              "data: %llu bytes proven verbatim (cov flag 8), %u exec∩data contradictions\n",
@@ -76,7 +77,8 @@ void ms_report_text(const MsResults *res, const MsConfig *cfg, MsBuf *out) {
              (unsigned long long)(res->forks_branch + res->forks_irq + res->forks_key),
              res->forks_branch, res->forks_irq, res->forks_key,
              res->section_count, res->evicted_exact, res->evicted_ctx, res->cycle_cuts,
-             res->step_cuts, res->pad_cuts, res->budget_paths, res->budget_steps, res->queue_overflows,
+             res->step_cuts, res->pad_cuts, res->nonsense_echo, res->nonsense_data,
+             res->nonsense_stack, res->budget_paths, res->budget_steps, res->queue_overflows,
              res->seeds_natural, res->seeds_spec,
              (unsigned long long)res->data_verbatim_bytes, res->data_contradictions);
     ms_buf_str(out, line);
@@ -206,11 +208,12 @@ void ms_report_json(const MsResults *res, const MsConfig *cfg, MsBuf *o) {
                cfg->queue_cap, cfg->loop_back_cap, cfg->seed_cap, cfg->max_copies);
     ms_buf_fmt(o, "\"counters\": {\"steps\":%llu,\"paths\":%u,\"forks_branch\":%u,\"forks_irq\":%u,"
                   "\"sections\":%u,\"evicted_exact\":%u,\"evicted_ctx\":%u,\"cycle_cuts\":%u,"
-                  "\"step_cuts\":%u,\"budget_paths\":%u,\"budget_steps\":%u,\"queue_overflows\":%u,"
+                  "\"step_cuts\":%u,\"pad_cuts\":%u,\"nonsense_echo\":%u,\"nonsense_data\":%u,\"nonsense_stack\":%u,\"budget_paths\":%u,\"budget_steps\":%u,\"queue_overflows\":%u,"
                   "\"seeds_natural\":%u,\"seeds_spec\":%u,\"bad_ops\":%u},\n",
                (unsigned long long)res->steps_total, (unsigned long long)res->paths_run, res->forks_branch, res->forks_irq,
                (unsigned)res->section_count, res->evicted_exact, res->evicted_ctx, res->cycle_cuts,
-               res->step_cuts, res->budget_paths, res->budget_steps, res->queue_overflows,
+               res->step_cuts, res->pad_cuts, res->nonsense_echo, res->nonsense_data,
+               res->nonsense_stack, res->budget_paths, res->budget_steps, res->queue_overflows,
                res->seeds_natural, res->seeds_spec, (unsigned)res->bad_op_count);
     // banks
     ms_buf_str(o, "\"banks\": [\n");

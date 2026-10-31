@@ -635,6 +635,29 @@ static void hook_step(MsMach *m, uint16_t pc, uint8_t op, int entry) {
         if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
     }
 
+    // nonsense eviction (fork explorer only): the path proved senseless —
+    // execution in echo RAM or OAM, execution inside verbatim-proven data,
+    // or a RET whose stack pointer left WRAM/HRAM.  The path is cut at once
+    // (the nonsense bytes never become code evidence); the reason is counted
+    // and the tree choice closes with the nonsense issue.
+    if (!ex->session && !ex->path_nonsense) {
+        uint32_t pk = key_at(ex, pc);
+        int ns = MS_NS_NONE;
+        if (pc >= 0xE000 && pc < 0xFE00) ns = MS_NS_ECHO; // echo RAM
+        else if (pc >= 0xFE00 && pc < 0xFF00) ns = MS_NS_ECHO; // OAM
+        else if ((res->data_flags[pk] & MS_DF_VERBATIM) &&
+                 !(res->exec_flags[pk] & MS_XF_NATURAL)) ns = MS_NS_DATA;
+        else if ((op == 0xC9 || op == 0xD9) &&
+                 (api->gbr->sp < 0xC000 || api->gbr->sp > 0xFFFE)) ns = MS_NS_STACK;
+        if (ns != MS_NS_NONE) {
+            ex->path_nonsense = (uint8_t)ns;
+            if (ns == MS_NS_ECHO) res->nonsense_echo++;
+            else if (ns == MS_NS_DATA) res->nonsense_data++;
+            else res->nonsense_stack++;
+            ms_mach_cut(m, MS_CUT_HALT);
+        }
+    }
+
     // execution back at the entry point: the game reset itself
     if (!ex->session && pc == 0x0100 && ex->steps_this_path > 64 &&
         !(ex->cur_kind == MS_SEED_RESET && ex->steps_no_credit == 0))
@@ -940,6 +963,7 @@ int ms_explore_step(MsExplorer *ex) {
     ex->irq_depth = 0;
     ex->reti_pending = 0;
     ex->prev_was_cond = 0;
+    ex->path_nonsense = 0;
     ex->pend_map = 0;
     memset(ex->back_ring, 0, sizeof ex->back_ring);
     ex->back_idx = 0;
@@ -977,6 +1001,7 @@ int ms_explore_step(MsExplorer *ex) {
         int issue = MS_ISSUE_DONE;
         if (ex->path_dead) issue = MS_ISSUE_DEAD;
         else if (ex->path_reset) issue = MS_ISSUE_RESET;
+        else if (ex->path_nonsense) issue = MS_ISSUE_NONSENSE;
         else if (cut == MS_CUT_HALT || ex->steps_no_credit > ex->cfg.max_steps_path / 4)
             issue = MS_ISSUE_MERGED; // a known loop, no way out found
         else if (cut == MS_CUT_CYCLES) issue = MS_ISSUE_CAPPED;

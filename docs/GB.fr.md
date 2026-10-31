@@ -138,7 +138,8 @@ fourcheur ; chaque état en file porte son id de choix). À la fin d'un
 chemin, le choix se ferme avec une issue : `done`, `merged` (HALT ou N pas
 sans aucune première découverte — retombe sur du connu sans issue, le cas
 gameover), `dead` (opcode indéfini exécuté), `reset` (exécution revenue à
-$0100), `budget`, `capped`. `tree.bin` (`--state-dir`) persiste les choix,
+$0100), `budget`, `capped`, `nonsense` (évidence de non-sens, voir plus
+bas). `tree.bin` (`--state-dir`) persiste les choix,
 `--resume` les recharge. Après les sessions, le run enchaîne la **recherche
 totale** : DFS (`--dfs` activé pour cette phase) jusqu'à frontière vide et
 choix tous clos, dans les limites des budgets — rapport : profondeur max,
@@ -178,6 +179,18 @@ propose ensuite le slot au menu (Etat → Charger l'etat) et `M0_STATE=0`
 boote directement dessus. Testé bout en bout sur Super Mario Land :
 slot accepté par le magasin d'états du firmware, écran différent avec et
 sans `M0_STATE`.
+
+### Éviction du non-sens
+
+Un chemin du fourcheur qui prouve son non-sens est coupé sur place et ses
+octets ne deviennent jamais de l'évidence de code — l'issue `nonsense`
+ferme le choix, la raison est comptée au rapport (`nonsense evictions`):
+exécution dans l'echo RAM ou l'OAM (`echo/OAM`), exécution dans des octets
+prouvés `verbatim` en data par le suivi de copies et jamais exécutés du
+flot naturel (`verbatim data`), `RET` avec un pointeur de pile hors
+WRAM/HRAM (`incoherent stack`). Fixtures `fix_nsecho`, `fix_nsdata` (le
+saut dans la data vit sur l'issue non prise d'un conditionnel, la preuve
+verbatim n'existant qu'à la fin du chemin qui copie), `fix_nsstack`.
 
 ### Déterminisme
 

@@ -13,6 +13,9 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_vblank.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_copy1.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_copyx.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nsecho.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nsdata.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nsstack.gb
 )
 
 add_custom_command(

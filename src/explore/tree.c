@@ -55,7 +55,7 @@ void ms_tree_close(MsTree *t, uint32_t id, int issue) {
 
 const char *ms_issue_name(int issue) {
     static const char *names[MS_ISSUE_N] = {"open", "done", "merged", "dead", "reset",
-                                            "budget", "capped"};
+                                            "budget", "capped", "nonsense"};
     return issue >= 0 && issue < MS_ISSUE_N ? names[issue] : "?";
 }
 
@@ -116,7 +116,7 @@ void ms_tree_stats(const MsTree *t, char *out, size_t outsz) {
     o += (size_t)snprintf(out + o, outsz - o, "tree: %u choices, depth %u, open %u",
                           t->n ? t->n - 1 : 0, t->max_depth, t->open);
     static const char *names[MS_ISSUE_N] = {"open", "done", "merged", "dead", "reset",
-                                            "budget", "capped"};
+                                            "budget", "capped", "nonsense"};
     for (int i = 1; i < MS_ISSUE_N; i++)
         if (t->closed[i])
             o += (size_t)snprintf(out + o, outsz - o, ", %s %u", names[i], t->closed[i]);
