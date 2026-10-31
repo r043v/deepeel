@@ -85,6 +85,11 @@ int ms_play_save(const MsPlay *p);
 int ms_play_done(const MsPlay *p);
 uint64_t ms_play_frames(const MsPlay *p);
 int ms_play_lanes(MsPlay *p, MsSessionLane *out, int max);
+// checkpoint pool access for the playable export (--export-playable): the
+// most productive checkpoint and its image / discovery frame
+int ms_play_best_slot(const MsPlay *p);
+const uint8_t *ms_play_slot_img(const MsPlay *p, int slot);
+uint32_t ms_play_slot_frame(const MsPlay *p, int slot);
 // stop the workers and join them (idempotent); call before finalizing
 void ms_play_finish(MsPlay *p);
 

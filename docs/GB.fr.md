@@ -164,6 +164,21 @@ style cartouche PICO-8 — un seul fichier, visible et rechargeable avec
 `--from-png f` ou `ms_play_load_png`). Les découvertes humaines alimentent
 le pool et le fourcheur comme celles des sessions.
 
+### Export jouable (build pc de m0boy)
+
+`--export-playable <projet_pc>` écrit le checkpoint choisi (le plus
+productif du pool, `--export-slot N` pour un autre, le slot déposé par
+`--from-png` sinon) en **slot 0** du `<SD>.STA` du projet pc, au format
+de `m0_state.cpp` (en-tête `GBLSTATE`, tag de format = FNV de la version
+du générateur et de la taille d'état, checksum FNV, écriture de l'en-tête
+en dernier). Les constantes sont lues dans le `gbl_config.h` du projet —
+pas de seconde copie des décisions du générateur — et le `.SAV` batterie
+est écrit avec (l'état porte lui-même la RAM cartouche). Le firmware pc
+propose ensuite le slot au menu (Etat → Charger l'etat) et `M0_STATE=0`
+boote directement dessus. Testé bout en bout sur Super Mario Land :
+slot accepté par le magasin d'états du firmware, écran différent avec et
+sans `M0_STATE`.
+
 ### Déterminisme
 
 Perdu entre threads (l'entrelacement dépend de l'ordonnanceur) ; par contre

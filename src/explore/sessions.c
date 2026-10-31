@@ -1075,6 +1075,31 @@ const char *ms_play_last_snapshot(const MsPlay *p) { return p->last_snap[0] ? p-
 int ms_play_done(const MsPlay *p) { return p->quit; }
 uint64_t ms_play_frames(const MsPlay *p) { return p->total_frames; }
 
+// the checkpoint an export offers: the most productive discovery, the power-on
+// slot only when the pool holds nothing else
+int ms_play_best_slot(const MsPlay *p) {
+    if (p->pool.n <= 0) return -1;
+    int best = -1;
+    pthread_mutex_lock(&p->pool.mtx);
+    for (int i = 0; i < p->pool.n; i++)
+        if (p->pool.slot[i]->img &&
+            (best < 0 || p->pool.slot[i]->credit > p->pool.slot[best]->credit))
+            best = i;
+    pthread_mutex_unlock(&p->pool.mtx);
+    if (best < 0) best = 0;
+    return best;
+}
+
+const uint8_t *ms_play_slot_img(const MsPlay *p, int slot) {
+    if (slot < 0 || slot >= p->pool.n) return NULL;
+    return p->pool.slot[slot]->img;
+}
+
+uint32_t ms_play_slot_frame(const MsPlay *p, int slot) {
+    if (slot < 0 || slot >= p->pool.n) return 0;
+    return p->pool.slot[slot]->frame;
+}
+
 int ms_play_lanes(MsPlay *p, MsSessionLane *out, int max) {
     pthread_mutex_lock(&p->bar_mtx);
     int n = p->nworkers < max ? p->nworkers : max;

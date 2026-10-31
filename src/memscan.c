@@ -7,6 +7,7 @@
 //   memscan dis rom.gb bank:addr [n]                disassemble n instructions
 #include "core/cart.h"
 #include "core/machine.h"
+#include "core/sta.h"
 #include "mach/m0boy.h"
 #include "core/snapshot_png.h"
 #include "explore/explorer.h"
@@ -55,6 +56,9 @@ static void usage(void) {
             "    --human [slot]       play a checkpoint yourself in the GUI (pad/keyboard);\n"
             "                         every advance is snapshotted (PNG) and explored\n"
             "    --from-png f         load a snapshot PNG into the pool before starting\n"
+            "    --export-playable D  after the play, write the chosen checkpoint as slot 0\n"
+            "                         of the pc project D's <SD>.STA (menu -> Charger\n"
+            "                         l'Etat) and its .SAV; --export-slot N picks the slot\n"
             "  memscan map rom.gb     static map only (pointer tables, padding)\n"
             "  memscan regs gb        dump the register registry\n"
             "  memscan dis rom.gb bank:addr [n]\n");
@@ -86,8 +90,8 @@ static int write_file(const char *path, const MsBuf *b) {
 
 static int cmd_explore(int argc, char **argv) {
     const char *json = NULL, *text = NULL, *cov = NULL, *romdata = NULL, *path = NULL;
-    const char *from_png = NULL;
-    int gui = 0, play = 0, human = 0, human_slot = -1;
+    const char *from_png = NULL, *export_dir = NULL;
+    int gui = 0, play = 0, human = 0, human_slot = -1, export_slot = -1, png_slot = -1;
     MsConfig cfg;
     ms_config_defaults(&cfg);
     MsSessionCfg scfg;
@@ -138,6 +142,8 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--uniform-hold") && i + 1 < argc) scfg.uniform_hold = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--fork-paths") && i + 1 < argc) scfg.fork_paths_per_epoch = atoi(argv[++i]);
         else if (!strcmp(a, "--from-png") && i + 1 < argc) from_png = argv[++i];
+        else if (!strcmp(a, "--export-playable") && i + 1 < argc) export_dir = argv[++i];
+        else if (!strcmp(a, "--export-slot") && i + 1 < argc) export_slot = atoi(argv[++i]);
         else if (!strcmp(a, "--human")) {
             human = 1;
             play = 1;
@@ -191,7 +197,8 @@ static int cmd_explore(int argc, char **argv) {
     MsPlay *play_engine = NULL;
     if (play) {
         play_engine = ms_play_new(&scfg, &res, ex);
-        if (from_png && ms_play_load_png(play_engine, from_png) < 0) return 1;
+        if (from_png) png_slot = ms_play_load_png(play_engine, from_png);
+        if (from_png && png_slot < 0) return 1;
     }
     int rc = 0;
     if (gui && ms_gui_available()) {
@@ -231,6 +238,43 @@ static int cmd_explore(int argc, char **argv) {
             char tpath[540];
             snprintf(tpath, sizeof tpath, "%s/tree.bin", scfg.state_dir);
             ms_tree_save(&tree, tpath);
+        }
+        // the playable export: the chosen checkpoint becomes slot 0 of the pc
+        // project's <SD>.STA, the firmware's menu then loads it; the battery
+        // .SAV follows (the state image carries the cartridge RAM too, the
+        // .SAV keeps the card in step between sessions)
+        if (export_dir) {
+            int slot = export_slot >= 0 ? export_slot : (png_slot >= 0 ? png_slot : ms_play_best_slot(play_engine));
+            const uint8_t *img = ms_play_slot_img(play_engine, slot);
+            MsSta sta;
+            if (slot < 0 || !img) {
+                fprintf(stderr, "memscan: export: no checkpoint to export\n");
+                rc = 1;
+            } else if (!ms_sta_from_project(&sta, export_dir, ex->sb, err, sizeof err)) {
+                fprintf(stderr, "memscan: export: %s\n", err);
+                rc = 1;
+            } else if (!ms_sta_write(&sta, 0, img, ex->sb, ms_play_slot_frame(play_engine, slot),
+                                     err, sizeof err)) {
+                fprintf(stderr, "memscan: export: %s\n", err);
+                rc = 1;
+            } else {
+                fprintf(stderr, "memscan: exported pool slot %d as state slot 0 of %s (frame %u)\n",
+                        slot, sta.sta_path, ms_play_slot_frame(play_engine, slot));
+                // the .SAV: load the checkpoint into the idle fork machine and
+                // copy its cartridge RAM
+                if (sta.sav_path[0] && ms_gbl_variant_eram[vi]) {
+                    ms_mach_load(mach, img);
+                    FILE *sf = fopen(sta.sav_path, "wb");
+                    if (sf) {
+                        fwrite(mach->api->eram, 1, ms_gbl_variant_eram[vi], sf);
+                        fclose(sf);
+                        fprintf(stderr, "memscan: battery RAM written to %s\n", sta.sav_path);
+                    } else {
+                        fprintf(stderr, "memscan: cannot write %s\n", sta.sav_path);
+                        rc = 1;
+                    }
+                }
+            }
         }
     } else {
         clock_t t0 = clock();

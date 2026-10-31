@@ -187,6 +187,7 @@ add_library(memscan_core STATIC
   src/core/cart.c
   src/core/snapshot_png.c
   src/core/zip.c
+  src/core/sta.c
   src/platform/gb/gb_registry.c
   src/cpu/sm83/sm83_disasm.c
   src/mach/m0boy.c

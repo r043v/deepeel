@@ -42,6 +42,10 @@ target_link_libraries(test_sessions PRIVATE memscan_core m)
 add_dependencies(test_sessions fixtures)
 add_test(NAME sessions COMMAND test_sessions ${CMAKE_CURRENT_BINARY_DIR})
 
+add_executable(test_export test_export.c)
+target_link_libraries(test_export PRIVATE memscan_core m)
+add_test(NAME export COMMAND test_export)
+
 if(TARGET memscan AND MS_HAS_GUI)
   add_executable(test_gui test_gui.c)
   target_link_libraries(test_gui PRIVATE memscan_core m ${MS_GUI_LIBS})
