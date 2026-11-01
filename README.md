@@ -142,7 +142,9 @@ python3 tools/scan_all.py digest            # -> output/batch/REPORT.md
   Les profils SMS/GG acceptent aussi `--mapper sega|codemasters|korean150`
   pour remplacer l’autodétection. Les graines GB sont portées : scan de
   tables de pointeurs par vues de banques, `--seed-banks`, `--entry`
-  (0.14.0). Voir `docs/Z80.fr.md` pour les limites.
+  (0.14.0) ; sections exécutées avec éviction par contexte et verdicts de
+  nécessité (0.15.0) ; file croissante, spool disque, `--resume` et arbre
+  de choix (0.16.0). Voir `docs/Z80.fr.md` pour les limites.
 - **MSX1** : registre matériel et pont machine isolé (slots, mappers,
   PPI, AY, BIOS simulé), exploration dynamique bornée et cartes texte via
   `deepeel z80 explore msx jeu.rom --mapper auto`, puis fermeture statique

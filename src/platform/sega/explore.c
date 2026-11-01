@@ -5,6 +5,7 @@
 #include "../msx/explore.h"
 #include "../../cpu/z80/provenance.h"
 #include "../../core/hashset.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
@@ -15,11 +16,11 @@ typedef struct {
     DpZ80Origin cram_latch;
     DpZ80Origin ram[];
 } Origins;
-typedef struct { void *state; uint8_t *cart; Origins *origins; int forced,skip_irq; } Path;
+typedef struct { void *state; uint8_t *cart; Origins *origins; int forced,skip_irq; uint32_t choice; } Path;
 // A seed spec: pc in a mapper view. exact=1 applies seed_window(pc,bank) and
 // refuses any view where rom_index(pc) is not bank*0x4000+(pc&0x3FFF); exact=0
 // keeps the boot view untouched.
-typedef struct { uint16_t pc; uint16_t bank; uint8_t exact; } SeedSpec;
+typedef struct { uint16_t pc; uint16_t bank; uint8_t exact,kind; } SeedSpec;
 static uint64_t fnv1a(uint64_t h,const void *p,size_t n) {
     const uint8_t *b=p;
     for(size_t i=0;i<n;i++) { h^=b[i]; h*=1099511628211ull; }
@@ -43,9 +44,12 @@ typedef struct {
     DpSegaCopy pending_copy;
     int has_pending_copy;
     Path *queue;
-    uint32_t queued;
+    uint32_t queued,queue_capacity;
     Path *input_queue;
     uint32_t input_queued;
+    FILE *spool;
+    uint64_t spool_wr,spool_rd,spool_bytes;
+    uint32_t cur_choice;
     uint64_t created[2];
     unsigned phase;
     uint64_t discoveries;
@@ -315,25 +319,97 @@ static void hook(Run *x) {
     z80_t *c=x->b->cpu(); c->user=x; c->read=read_bus; c->write=write_bus; c->in=in_bus; c->out=out_bus;
 }
 static void free_path(Path p) { free(p.state); free(p.cart); free(p.origins); }
-static int push_to(Run *x,int forced,int skip_irq,int input) {
+static size_t site(Run *x,uint16_t pc);
+// choice tree: one node per queued path, parented on the path being run
+static uint32_t tree_add(Run *x,unsigned kind) {
+    DpSegaResults *r=x->r;
+    if(r->tree_count==r->tree_capacity) {
+        uint32_t cap=r->tree_capacity?r->tree_capacity*2:256;
+        if(cap>1048576) return 0;
+        DpSegaTreeNode *grown=realloc(r->tree_nodes,(size_t)cap*sizeof(*grown));
+        if(!grown) return 0;
+        r->tree_nodes=grown; r->tree_capacity=cap;
+    }
+    DpSegaTreeNode *n=&r->tree_nodes[r->tree_count];
+    n->parent=x->cur_choice;
+    n->pc=x->b->cpu()->pc; n->site=(uint32_t)site(x,n->pc);
+    n->kind=(uint8_t)kind; n->issue=DP_SEGA_ISSUE_NONE;
+    return (uint32_t)r->tree_count+++1;
+}
+static void tree_close(Run *x,uint32_t choice,int issue) {
+    DpSegaResults *r=x->r;
+    if(choice && choice<=r->tree_count) r->tree_nodes[choice-1].issue=(uint8_t)issue;
+}
+// disk spool record: a queued path survives a full frontier (--resume re-reads)
+enum { DP_SPOOL_MAGIC=0x5a535044ull }; // 'DPSZ'
+static int spool_write_path(Run *x,const Path *p,int flushed) {
+    if(!x->spool) return 0;
+    uint64_t rec=x->b->state_size+0x8000+x->origin_size+4*8;
+    if(x->opt->spool_cap_mb && x->spool_bytes+rec>(uint64_t)x->opt->spool_cap_mb*1024*1024) {
+        x->r->spool_refused++; return 0;
+    }
+    uint64_t hdr[4]={DP_SPOOL_MAGIC,
+        (uint64_t)(p->forced?1:0)|((uint64_t)(p->skip_irq?1:0)<<1)|((uint64_t)p->choice<<32),
+        (uint64_t)x->b->state_size,(uint64_t)x->origin_size};
+    // one file, two cursors: records are appended at spool_wr, reads replay
+    // from spool_rd — the explicit seek keeps writes from landing where the
+    // last read stopped
+    int ok=!fseek(x->spool,(long)x->spool_wr,SEEK_SET) &&
+        fwrite(hdr,sizeof hdr,1,x->spool)==1 &&
+        fwrite(p->state,1,x->b->state_size,x->spool)==x->b->state_size &&
+        fwrite(p->cart,1,0x8000,x->spool)==0x8000 &&
+        fwrite(p->origins,1,x->origin_size,x->spool)==x->origin_size;
+    if(!ok) return 0;
+    x->spool_wr+=rec; x->spool_bytes+=rec;
+    // the path's outcome is known: it lives on disk until a run re-reads it
+    tree_close(x,p->choice,DP_SEGA_ISSUE_SPOOLED);
+    if(flushed) x->r->spool_flushed++;
+    else x->r->spool_writes++;
+    return 1;
+}
+static int queue_room(Run *x,int input) {
+    if(input) return x->input_queued<x->opt->queue_cap;
+    if(x->queued<x->queue_capacity) return 1;
+    uint32_t want=x->queue_capacity?x->queue_capacity*2:64;
+    uint32_t max=x->opt->queue_max>x->opt->queue_cap?x->opt->queue_max:x->opt->queue_cap;
+    if(want>max) want=max;
+    if(want>x->queue_capacity) {
+        Path *grown=realloc(x->queue,(size_t)want*sizeof(*grown));
+        if(grown) { x->queue=grown; x->queue_capacity=want; x->r->queue_growths++; }
+    }
+    return x->queued<x->queue_capacity;
+}
+static int push_to(Run *x,int forced,int skip_irq,int input,unsigned kind) {
     unsigned phase=input?1:x->phase;
-    Path *queue=input?x->input_queue:x->queue;
-    uint32_t *queued=input?&x->input_queued:&x->queued;
     if(x->created[phase]>=x->opt->max_paths) {
         if(input) x->r->input_path_cuts++; else x->r->path_cuts++;
         return 0;
     }
-    if(*queued>=x->opt->queue_cap) {
-        if(input) x->r->input_queue_cuts++; else x->r->queue_cuts++;
+    int room=queue_room(x,input);
+    if(!room && !input) {
+        // a full frontier is not the end: the state survives on disk
+        uint32_t choice=tree_add(x,kind);
+        Path p={malloc(x->b->state_size),malloc(0x8000),malloc(x->origin_size),forced,skip_irq,choice};
+        if(p.state&&p.cart&&p.origins) {
+            x->b->save(p.state); memcpy(p.cart,x->cart,0x8000);
+            memcpy(p.origins,x->origins,x->origin_size);
+            if(spool_write_path(x,&p,0)) { free_path(p); x->created[phase]++; return 1; }
+        }
+        free_path(p);
+        x->r->queue_cuts++;
         return 0;
     }
-    Path p={malloc(x->b->state_size),malloc(0x8000),malloc(x->origin_size),forced,skip_irq};
+    if(!room) { x->r->input_queue_cuts++; return 0; }
+    uint32_t choice=tree_add(x,kind);
+    Path p={malloc(x->b->state_size),malloc(0x8000),malloc(x->origin_size),forced,skip_irq,choice};
     if(!p.state||!p.cart||!p.origins) { free(p.state); free(p.cart); free(p.origins); return -1; }
     x->b->save(p.state); memcpy(p.cart,x->cart,0x8000);
     memcpy(p.origins,x->origins,x->origin_size);
-    queue[(*queued)++]=p; x->created[phase]++; return 1;
+    if(input) { x->input_queue[x->input_queued++]=p; }
+    else { x->queue[x->queued++]=p; }
+    x->created[phase]++; return 1;
 }
-static int push(Run *x,int forced,int skip_irq) { return push_to(x,forced,skip_irq,0); }
+static int push(Run *x,int forced,int skip_irq) { return push_to(x,forced,skip_irq,0,DP_SEGA_TREE_BRANCH); }
 static size_t site(Run *x,uint16_t pc) {
     int64_t i=x->b->rom_index(pc);
     return i>=0 && (uint64_t)i<x->r->size ? (size_t)i : x->r->size+pc;
@@ -349,9 +425,11 @@ static int seed_padding(const uint8_t *image,size_t size,uint64_t index) {
 // A seed enters below the pending frontier: branch forks keep popping first,
 // and the reset path and vector entries still run ahead of every seed.
 static int push_seed_front(Run *x) {
+    const SeedSpec *s=&x->seeds[x->seed_next-1];
     if(x->created[x->phase]>=x->opt->max_paths) { x->r->path_cuts++; return 0; }
     if(x->queued>=x->opt->queue_cap) { x->r->queue_cuts++; return 0; }
-    Path p={malloc(x->b->state_size),malloc(0x8000),malloc(x->origin_size),1,0};
+    uint32_t choice=tree_add(x,s->kind);
+    Path p={malloc(x->b->state_size),malloc(0x8000),malloc(x->origin_size),1,0,choice};
     if(!p.state||!p.cart||!p.origins) { free(p.state); free(p.cart); free(p.origins); return -1; }
     x->b->save(p.state); memcpy(p.cart,x->cart,0x8000); memcpy(p.origins,x->origins,x->origin_size);
     memmove(x->queue+1,x->queue,x->queued*sizeof(Path));
@@ -589,7 +667,7 @@ static int probe_inputs(Run *x,unsigned group,uint16_t port,size_t at,int skip_i
         if(!saved) { x->b->save(x->input_scratch); saved=1; }
         x->b->set_input(next);
         DpSegaInput actual=x->b->input();
-        int accepted=same_input(old,actual)?0:push_to(x,1,skip_irq,1);
+        int accepted=same_input(old,actual)?0:push_to(x,1,skip_irq,1,DP_SEGA_TREE_INPUT);
         // A Pause edge can set NMI and reschedule devices. Releasing the
         // key alone would not undo these effects on the parent's machine.
         x->b->load(x->input_scratch); hook(x);
@@ -646,7 +724,7 @@ DpSegaOptions dp_sega_options(void) {
     // Boot code often runs nested 16-bit delay loops before touching the VDP.
     DpSegaOptions o={.max_total=20000000,.input_total=20000000,.max_steps=2000000,.max_paths=4096,.queue_cap=128,
         .loop_cap=262144,.fork_cap=2,.stagnation=32768,.copy_cap=DP_SEGA_COPY_CAP,
-        .input_masks=8,.input_sites=4096,.seed_vectors=1,.seed_cap=1024,.target_closure=1,.block_closure=1,.msx_mapper=DP_MSX_AUTO,.closure={262144,65536,256,8}}; return o;
+        .input_masks=8,.input_sites=4096,.seed_vectors=1,.seed_cap=1024,.queue_max=4096,.target_closure=1,.block_closure=1,.msx_mapper=DP_MSX_AUTO,.closure={262144,65536,256,8}}; return o;
 }
 DpSegaOptions dp_msx_options(void) {
     DpSegaOptions o=dp_sega_options(); o.seed_vectors=0; return o;
@@ -677,7 +755,7 @@ static void generate_seed_specs(Run *x,const uint8_t *image,size_t size) {
                     if(seed_padding(image,size,key)) { r->seeds_skipped_padding++; continue; }
                     if(x->seed_count>=x->seed_capacity || r->seeds_pointer>=o->seed_cap) { r->seeds_refused_cap++; continue; }
                     if(dp_set_insert(&seen,key)!=1) continue;
-                    x->seeds[x->seed_count++]=(SeedSpec){v,(uint16_t)b,1};
+                    x->seeds[x->seed_count++]=(SeedSpec){v,(uint16_t)b,1,DP_SEGA_TREE_POINTER};
                     r->seeds_pointer++;
                 }
             } else {
@@ -686,7 +764,7 @@ static void generate_seed_specs(Run *x,const uint8_t *image,size_t size) {
                 if(seed_padding(image,size,(uint64_t)key)) { r->seeds_skipped_padding++; continue; }
                 if(x->seed_count>=x->seed_capacity || r->seeds_pointer>=o->seed_cap) { r->seeds_refused_cap++; continue; }
                 if(dp_set_insert(&seen,(uint64_t)key)!=1) continue;
-                x->seeds[x->seed_count++]=(SeedSpec){v,0,0};
+                x->seeds[x->seed_count++]=(SeedSpec){v,0,0,DP_SEGA_TREE_POINTER};
                 r->seeds_pointer++;
             }
         }
@@ -698,20 +776,20 @@ static void generate_seed_specs(Run *x,const uint8_t *image,size_t size) {
                 if(key>=size) continue;
                 if(seed_padding(image,size,key)) { r->seeds_skipped_padding++; continue; }
                 if(dp_set_insert(&seen,key)!=1) continue;
-                x->seeds[x->seed_count++]=(SeedSpec){(uint16_t)w,(uint16_t)b,1};
+                x->seeds[x->seed_count++]=(SeedSpec){(uint16_t)w,(uint16_t)b,1,DP_SEGA_TREE_BANK};
                 r->seeds_bank++;
             }
         }
     }
     for(unsigned i=0;i<o->entry_count && x->seed_count<x->seed_capacity;i++) {
-        x->seeds[x->seed_count++]=(SeedSpec){o->entry[i].addr,(uint16_t)o->entry[i].bank,1};
+        x->seeds[x->seed_count++]=(SeedSpec){o->entry[i].addr,(uint16_t)o->entry[i].bank,1,DP_SEGA_TREE_ENTRY};
         r->seeds_entry++;
     }
     dp_set_free(&seen);
 }
 void dp_sega_results_free(DpSegaResults *r) {
     for(uint32_t i=0;i<r->section_count;i++) dp_set_free(&r->sections[i].ctx_seen);
-    free(r->sections); free(r->section_of);
+    free(r->sections); free(r->section_of); free(r->tree_nodes);
     free(r->flags); free(r->copies); memset(r,0,sizeof(*r));
 }
 int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *o,DpSegaResults *r) {
@@ -722,7 +800,7 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
     if(o->sega_mapper==DP_SEGA_MAPPER_KOREAN150 && size>0x200000) return 0;
     if(msx && (size>0x100000 || o->msx_mapper<DP_MSX_AUTO || o->msx_mapper>DP_MSX_KONAMI_SCC)) return 0;
     if((sg && size>0xc000) || size>0x400000 || o->queue_cap>4096 || o->copy_cap>65536 || o->input_masks>128 || o->input_sites>65536 ||
-       o->seed_cap>65536 || o->entry_count>32 ||
+       o->seed_cap>65536 || o->entry_count>32 || o->queue_max>65536 || o->queue_max<o->queue_cap ||
        (o->input_masks && o->input_total>UINT64_MAX-o->max_total)) return 0;
     for(unsigned i=0;i<o->entry_count;i++) if(o->entry[i].bank>0xffff) return 0;
     if(o->closure.nodes && (o->closure.nodes>1048576 || !o->closure.seeds || o->closure.seeds>1048576 ||
@@ -758,6 +836,7 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
     r->copy_capacity=o->copy_cap;
     r->copies=calloc(o->copy_cap?o->copy_cap:1,sizeof(*r->copies));
     x.forks=calloc(sites,1); x.sides=calloc(sites,1); x.irq_forks=calloc(sites,1);
+    x.queue_capacity=o->queue_cap;
     x.queue=calloc(o->queue_cap,sizeof(*x.queue));
     x.input_queue=calloc(o->queue_cap,sizeof(*x.input_queue));
     int ok=image&&r->flags&&r->copies&&x.origins&&x.copy_hash&&x.cart&&x.forks&&x.sides&&x.irq_forks&&x.queue&&x.input_queue&&
@@ -770,6 +849,19 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
     if(o->sega_mapper && (!x.b->select_mapper || !x.b->select_mapper((unsigned)o->sega_mapper))) { ok=0; goto cleanup; }
     if(!sg && !msx) { r->sega_mapper=x.b->mapper(); r->sega_mapper_explicit=!!o->sega_mapper; }
     hook(&x);
+    if(o->spool_path) {
+        int resume;
+        if(o->resume) {
+            x.spool=fopen(o->spool_path,"r+b");
+            resume=x.spool && !fseek(x.spool,0,SEEK_END) && (x.spool_wr=(uint64_t)ftell(x.spool))>0;
+            if(resume) x.spool_bytes=x.spool_wr;
+            else { if(x.spool) fclose(x.spool); x.spool=NULL; }
+        } else {
+            x.spool=fopen(o->spool_path,"w+b");
+            resume=0;
+        }
+        if(!x.spool) { ok=0; goto cleanup; }
+    }
     if(msx) { r->msx_mapper=dp_msx_info().mapper; dp_msx_observe(msx_event,&x); }
     r->closure.limits=o->closure; r->target_closure.limits=o->closure;
     if(!o->target_closure) r->target_closure.limits.nodes=0;
@@ -795,7 +887,7 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
         memcpy(x.seed_origins,x.origins,x.origin_size);
         generate_seed_specs(&x,image,size);
     }
-    if(push(&x,0,0)<0) { ok=0; goto cleanup; }
+    if(push_to(&x,0,0,0,DP_SEGA_TREE_RESET)<0) { ok=0; goto cleanup; }
     if(o->seed_vectors && !msx) {
         const uint16_t entries[]={8,16,24,32,40,48,56,0x66};
         for(unsigned j=0;j<sizeof(entries)/sizeof(entries[0]);j++) {
@@ -803,7 +895,7 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
             for(unsigned k=0;k<8;k++) { uint8_t v=x.b->read(pc+k); code|=(v!=0 && v!=0xff); }
             if(!code) continue;
             x.b->cpu()->pc=pc;
-            if(push(&x,1,0)<0) { ok=0; goto cleanup; }
+            if(push_to(&x,1,0,0,DP_SEGA_TREE_VECTOR)<0) { ok=0; goto cleanup; }
         }
     }
     // FIFO root first, then depth-first forks: seed creation above is reversed once.
@@ -812,7 +904,8 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
         x.phase=phase;
         uint64_t start_steps=r->steps,start_paths=r->paths,budget=r->phase_limits[phase];
         if(phase && budget) { memset(x.forks,0,sites); memset(x.sides,0,sites); memset(x.irq_forks,0,sites); }
-        while((x.queued || (phase && x.input_queued) || (!phase && x.seed_next<x.seed_count)) && r->steps-start_steps<budget) {
+        while((x.queued || (phase && x.input_queued) || (!phase && x.seed_next<x.seed_count) ||
+               x.spool_rd<x.spool_wr) && r->steps-start_steps<budget) {
             // Seeds materialize below the pending frontier while the base
             // phase has room: forks keep popping first, reset and vectors run
             // ahead of every seed, and leftovers close as counted pending work.
@@ -821,7 +914,23 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
             }
             // Keep input seeds and their branch children moving in turn. Their
             // separate frontier never displaces the original exploration pass.
-            int from_input=phase && x.input_queued && (!x.queued || ((r->paths-start_paths)&1)==0);
+            // spooled states come back while the frontier runs low
+            while(x.queued<x.queue_capacity && x.spool_rd<x.spool_wr) {
+                uint64_t hdr[4];
+                if(fseek(x.spool,(long)x.spool_rd,SEEK_SET) ||
+                   fread(hdr,sizeof hdr,1,x.spool)!=1 || hdr[0]!=DP_SPOOL_MAGIC) break;
+                if(hdr[2]!=x.b->state_size || hdr[3]!=x.origin_size) break;
+                Path p={malloc(x.b->state_size),malloc(0x8000),malloc(x.origin_size),
+                    (int)(hdr[1]&1),(int)((hdr[1]>>1)&1),(uint32_t)(hdr[1]>>32)};
+                if(!p.state||!p.cart||!p.origins) { free_path(p); break; }
+                if(fread(p.state,1,x.b->state_size,x.spool)!=x.b->state_size ||
+                   fread(p.cart,1,0x8000,x.spool)!=0x8000 ||
+                   fread(p.origins,1,x.origin_size,x.spool)!=x.origin_size) { free_path(p); break; }
+                x.spool_rd+=4*8+hdr[2]+0x8000+hdr[3]; r->spool_reads++;
+                memmove(x.queue+1,x.queue,x.queued*sizeof(Path));
+                x.queue[0]=p; x.queued++;
+            }
+                        int from_input=phase && x.input_queued && (!x.queued || ((r->paths-start_paths)&1)==0);
             Path p=from_input?x.input_queue[--x.input_queued]:x.queue[--x.queued];
             if(from_input) x.input_epoch++;
             x.b->load(p.state); memcpy(x.cart,p.cart,0x8000);
@@ -829,10 +938,15 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
             memcpy(x.origins,p.origins,x.origin_size);
             free_path(p); hook(&x); x.forced=p.forced;
             dp_sega_visits_reset(&visits); r->paths++;
+            x.cur_choice=p.choice;
             x.boot_path=r->paths==1 && !p.forced; // natural work on the reset path
             // same-context eviction: the entry section of an already admitted
             // incoming context is closed without running (counted, GB parity)
-            if(!context_admitted(&x,site(&x,x.b->cpu()->pc))) { x.boot_path=0; continue; }
+            if(!context_admitted(&x,site(&x,x.b->cpu()->pc))) {
+                x.boot_path=0;
+                tree_close(&x,p.choice,DP_SEGA_ISSUE_EVICTED);
+                continue;
+            }
             x.cur_sec=NULL;
             uint32_t n=0,quiet=0;
             int closed=0;
@@ -852,7 +966,7 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
                     .sources=interrupt&&!c->nmi?x.b->irq_sources():0,.forced=x.forced};
                 if(interrupt && !p.skip_irq) {
                     if(x.irq_forks[at]<o->fork_cap) {
-                        int accepted=push(&x,1,1);
+                        int accepted=push_to(&x,1,1,0,DP_SEGA_TREE_IRQ);
                         if(accepted<0) { ok=0; goto cleanup; }
                         if(accepted) { x.irq_forks[at]++; r->irq_forks++; }
                     } else r->fork_cuts++;
@@ -896,7 +1010,7 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
                                 if(in.flow==DP_Z80_REPEAT) dp_z80_force_repeat(&in,c,source,!taken);
                                 else dp_z80_force(in.condition,c,!taken);
                                 dp_z80_provenance_force(&x.origins->cpu,&in,&saved,c);
-                                int accepted=push(&x,1,service_suppressed);
+                                int accepted=push_to(&x,1,service_suppressed,0,DP_SEGA_TREE_BRANCH);
                                 *c=saved;
                                 x.origins->cpu=saved_origins;
                                 if(accepted<0) { ok=0; goto cleanup; }
@@ -931,6 +1045,8 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
             dp_sega_closure_observe(x.closure);
             if(r->steps-start_steps==budget && n<o->max_steps && !closed) r->phase_pending[phase]++;
             flush_copy(&x);
+            tree_close(&x,x.cur_choice,DP_SEGA_ISSUE_DONE);
+            x.cur_choice=0;
         }
         r->phase_steps[phase]=r->steps-start_steps; r->phase_paths[phase]=r->paths-start_paths;
         if(!phase) r->seeds_pending=x.seed_count-x.seed_next;
@@ -939,11 +1055,34 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
         for(size_t i=0;i<size;i++) r->phase_known[phase]+=!!r->flags[i];
         // A phase wall closes its pending branch work. Input seeds have their
         // own declared budget, so finishing the first pass is never regressed.
-        for(uint32_t i=0;i<x.queued;i++) free_path(x.queue[i]);
+        // An open spool keeps the remainders resumable instead of dropping them.
+        for(uint32_t i=0;i<x.queued;i++) {
+            if(x.spool) spool_write_path(&x,&x.queue[i],1);
+            else tree_close(&x,x.queue[i].choice,DP_SEGA_ISSUE_BUDGET);
+            free_path(x.queue[i]);
+        }
         x.queued=0;
     }
     dp_sega_closure_run(x.closure);
     sections_finalize(r);
+    if(o->tree_path && r->tree_count) {
+        FILE *t=fopen(o->tree_path,"wb");
+        if(t) {
+            uint32_t hdr[2]={0x5a545044u,r->tree_count}; // 'DPTZ' + version 1 in low bits
+            hdr[1]=1;
+            if(fwrite(hdr,sizeof hdr,1,t)==1) {
+                for(uint32_t i=0;i<r->tree_count;i++) {
+                    const DpSegaTreeNode *n=&r->tree_nodes[i];
+                    uint32_t rec[2]={n->parent,n->site};
+                    uint16_t pc=n->pc; uint8_t ki[2]={n->kind,n->issue};
+                    if(fwrite(rec,sizeof rec,1,t)!=1 || fwrite(&pc,2,1,t)!=1 ||
+                       fwrite(ki,1,2,t)!=2) break;
+                }
+            }
+            ok&=!ferror(t);
+            if(fclose(t)) ok=0;
+        } else ok=0;
+    }
 cleanup:
     if(x.b->close) x.b->close();
     dp_sega_closure_free(x.closure);
@@ -958,6 +1097,7 @@ cleanup:
     free(x.input_queue);
     free(x.seeds); free(x.seed_state); free(x.seed_cart); free(x.seed_origins);
     free(x.seed_scratch); free(x.seed_scratch_cart); free(x.seed_scratch_origins);
+    if(x.spool) fclose(x.spool);
     if(!ok) { free(r->sections); free(r->section_of); dp_sega_results_free(r); }
     return ok;
 }
@@ -1061,6 +1201,8 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
     fprintf(out,"loop contexts: CPU address + compact ROM index (outside: CPU address); peak %zu; buckets %zu; growths %"PRIu64"\n",
         r->loop_context_peak,r->loop_context_capacity,r->loop_context_growths);
     fprintf(out,"forced stagnation cuts %"PRIu64"\n",r->stagnation_cuts);
+    fprintf(out,"queue growths %"PRIu64"; spool writes %"PRIu64", reads %"PRIu64", flushed %"PRIu64", refused %"PRIu64"; tree nodes %u\n",
+        r->queue_growths,r->spool_writes,r->spool_reads,r->spool_flushed,r->spool_refused,r->tree_count);
     fprintf(out,"input forks %"PRIu64"; masks/site %u; site-cap cuts %"PRIu64"; queue/path drops %"PRIu64"; sites %u/%u; site drops %"PRIu64"; input log overflow %"PRIu64"\n",r->input_forks,r->input_mask_limit,r->input_cap_cuts,r->input_drops,r->input_site_count,r->input_site_capacity,r->input_site_drops,r->input_log_overflow);
     fprintf(out,"input frontier cuts: queue %"PRIu64"; paths %"PRIu64"; deferred retry skips %"PRIu64"\n",r->input_queue_cuts,r->input_path_cuts,r->input_retry_skips);
     for(unsigned i=0;i<r->input_count;i++) {
@@ -1129,6 +1271,12 @@ int dp_sega_explore_command(int argc,char **argv) {
     for(int i=5;i<argc;i++) {
         if(!strcmp(argv[i],"--no-vector-seeds")) { o.seed_vectors=0; continue; }
         if(!strcmp(argv[i],"--no-context-evict")) { o.no_context_evict=1; continue; }
+        if(!strcmp(argv[i],"--spool") || !strcmp(argv[i],"--resume")) {
+            if(i+1>=argc) goto usage;
+            o.spool_path=argv[++i]; o.resume=argv[i-1][2]=='r';
+            continue;
+        }
+        if(!strcmp(argv[i],"--tree")) { if(i+1>=argc) goto usage; o.tree_path=argv[++i]; continue; }
         if(!strcmp(argv[i],"--seed-banks")) { o.seed_banks=1; continue; }
         if(!strcmp(argv[i],"--no-pointer-scan")) { o.no_pointer_scan=1; continue; }
         if(!strcmp(argv[i],"--entry")) {
@@ -1175,6 +1323,8 @@ int dp_sega_explore_command(int argc,char **argv) {
             else if(!strcmp(key,"--closure-views")) o.closure.views=(uint32_t)n;
             else if(!strcmp(key,"--closure-contexts")) o.closure.contexts=(uint32_t)n;
             else if(!strcmp(key,"--fork-cap") && n<=255) o.fork_cap=(uint32_t)n;
+            else if(!strcmp(key,"--queue-max")) { if(n>65536 || n<o.queue_cap) goto usage; o.queue_max=(uint32_t)n; }
+            else if(!strcmp(key,"--spool-cap-mb") && n<=1048576) o.spool_cap_mb=(uint32_t)n;
             else goto usage;
         }
     }
@@ -1198,5 +1348,5 @@ int dp_sega_explore_command(int argc,char **argv) {
     }
     dp_sega_results_free(&r); return ok?0:1;
 usage:
-    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--text FILE] [--map FILE] [--evidence FILE]\n"); return 2;
+    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE]\n"); return 2;
 }

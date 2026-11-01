@@ -45,12 +45,33 @@ typedef struct {
     int seed_banks;        // seed every switchable window/bank pair
     int no_pointer_scan;   // disable pointer-table seeding
     int no_context_evict;  // disable same-context eviction (GB parity)
+    uint32_t queue_max;    // queue growth ceiling (0: no growth past queue_cap)
+    const char *spool_path; // overflow states survive here (--resume re-reads)
+    int resume;             // continue from spool_path instead of truncating it
+    uint32_t spool_cap_mb;  // 0: unbounded
+    const char *tree_path;  // choice tree record (--tree FILE)
     struct { uint32_t bank; uint16_t addr; } entry[32]; // extra --entry seeds
     unsigned entry_count;
     int sega_mapper; // 0 auto; otherwise DP_SEGA_MAPPER_* (SMS/GG only)
     int msx_mapper; // -1 auto; otherwise DP_MSX_* mapper selection
     DpSegaClosureOptions closure;
 } DpSegaOptions;
+// Choice tree (GB tree.c parity): every queued path is a node; issues close
+// nodes when their outcome is known. Nodes are written as binary records.
+enum {
+    DP_SEGA_TREE_RESET=1, DP_SEGA_TREE_VECTOR, DP_SEGA_TREE_POINTER, DP_SEGA_TREE_BANK,
+    DP_SEGA_TREE_ENTRY, DP_SEGA_TREE_BRANCH, DP_SEGA_TREE_IRQ, DP_SEGA_TREE_INPUT
+};
+enum {
+    DP_SEGA_ISSUE_NONE=0, DP_SEGA_ISSUE_DONE, DP_SEGA_ISSUE_EVICTED,
+    DP_SEGA_ISSUE_SPOOLED, DP_SEGA_ISSUE_BUDGET
+};
+typedef struct {
+    uint32_t parent;   // 0 for roots
+    uint32_t site;     // physical byte of the entry pc (size+cpu addr outside)
+    uint16_t pc;
+    uint8_t kind,issue;
+} DpSegaTreeNode;
 // Executed-range section with per-context bookkeeping (GB DpSection parity).
 // A section is a maximal contiguous run of executed physical bytes inside one
 // 16 KiB bank; every access an instruction makes is attributed to the section
@@ -85,6 +106,10 @@ typedef struct {
     uint32_t section_count,section_capacity;
     uint32_t *section_of;      // physical byte -> section id + 1 (0: none)
     uint64_t evicted_ctx,ctx_grew,ctx_full,section_cuts;
+    // growing queue, disk spool and choice tree (GB parity)
+    uint64_t queue_growths,spool_writes,spool_reads,spool_refused,spool_flushed;
+    DpSegaTreeNode *tree_nodes;
+    uint32_t tree_count,tree_capacity;
     size_t loop_context_peak,loop_context_capacity;
     uint64_t loop_context_growths;
     uint64_t io_read[256],io_write[256],bank_changes,bank_log_overflow;

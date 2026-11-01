@@ -90,11 +90,17 @@ static void exploration(void) {
     CHECK(r.bank_changes==1 && r.bank_count==1 && r.banks[0].addr==0xffff);
     dp_sega_results_free(&r);
     // Queue saturation is visible while several different branch sites fork.
+    // Default: the frontier grows (GB adaptive queue) instead of dropping;
+    // a bounded --queue-max keeps the counted refusals visible.
     memset(rom,0,0x10000);
     const uint8_t branches[]={0xaf,0x20,1,0,0x20,1,0,0x76};
     memcpy(rom,branches,sizeof(branches)); o.queue_cap=1; o.loop_cap=12; o.max_total=200;
     CHECK(dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r));
-    CHECK(r.queue_cuts>0 && r.forks>0); dp_sega_results_free(&r);
+    CHECK(r.queue_growths>0 && r.forks>0 && r.queue_cuts==0); dp_sega_results_free(&r);
+    o.queue_max=1;
+    CHECK(dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r));
+    CHECK(r.queue_cuts>0 && r.forks>0 && r.queue_growths==0); dp_sega_results_free(&r);
+    o.queue_max=4096;
     // VDP-driven INT is dispatched naturally; the alternative delay is forked.
     memset(rom,0,0x10000); memcpy(rom,start,sizeof(start));
     const uint8_t irqcode[]={0x31,0x00,0xd0,0xed,0x56,0x3e,0x20,0xd3,0xbf,
