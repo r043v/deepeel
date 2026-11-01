@@ -28,17 +28,6 @@ static volatile sig_atomic_t g_sigint;
 static void on_sigint(int sig) { (void)sig; g_sigint = 1; }
 void dp_play_install_sigint(void) { signal(SIGINT, on_sigint); }
 
-// resident memory of this process, in MiB (0 when unreadable) — the memory
-// cap's probe: long runs must not eat the machine's RAM and swap
-static uint64_t rss_mb(void) {
-    FILE *f = fopen("/proc/self/statm", "r");
-    if (!f) return 0;
-    unsigned long rss_pages = 0;
-    if (fscanf(f, "%*lu %lu", &rss_pages) != 1) rss_pages = 0;
-    fclose(f);
-    return rss_pages * (unsigned long)sysconf(_SC_PAGESIZE) / (1024u * 1024u);
-}
-
 // --- config -------------------------------------------------------------------
 void dp_session_cfg_defaults(DpSessionCfg *cfg) {
     memset(cfg, 0, sizeof *cfg);
@@ -325,6 +314,7 @@ struct DpPlay {
     int quit;
     int stop_reason;
     int epoch_ran;
+    time_t t_start; // wall clock at play start (the --time-limit wall)
     // seed inbox
     pthread_mutex_t inb_mtx;
     DpInboxEnt *inb;
@@ -888,6 +878,7 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
     pthread_mutex_init(&p->watch_mtx, NULL);
     pthread_mutex_init(&p->tsn_mtx, NULL);
     for (int k = 0; k < DP_MAX_TAS; k++) p->tas_resume_rec[k] = -1;
+    p->t_start = time(NULL);
     p->inb = calloc(DP_INBOX_CAP, sizeof(DpInboxEnt));
     p->pool.cap = p->cfg.pool_cap;
 
@@ -1182,7 +1173,9 @@ int dp_play_poll(DpPlay *p) {
     else if (p->cfg.max_frames && !tas_left && p->total_frames >= p->cfg.max_frames) reason = 0;
     else if (p->cfg.stagnation_frames && !tas_left && p->stagnation >= p->cfg.stagnation_frames) reason = 1;
     else if (p->cfg.until_static && !tas_left && p->unexplained == 0 && frames) reason = 3;
-    else if (p->cfg.mem_cap_mb && rss_mb() > p->cfg.mem_cap_mb) reason = 4;
+    else if (p->cfg.mem_cap_mb && dp_rss_mb() > p->cfg.mem_cap_mb) reason = 4;
+    else if (p->cfg.time_limit_secs &&
+             (uint64_t)(time(NULL) - p->t_start) >= p->cfg.time_limit_secs) reason = 6;
     else if (p->cfg.tas_solo && !tas_left && p->epoch > 0) reason = 5;
     if (reason >= 0) {
         p->quit = 1;

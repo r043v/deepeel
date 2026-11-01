@@ -30,8 +30,34 @@ int dp_map_is_data(int c);
 void dp_map_summary_text(const DpMapSummary *s, DpBuf *out);
 // the unclassified ranges (largest first), from a dp_map_build array
 void dp_map_residual_text(const DpResults *res, const uint8_t *m, DpBuf *out);
+// one unclassified range (rom coordinates: lo/hi inside the bank)
+typedef struct DpResidualRange {
+    uint16_t bank, lo, hi; // lo/hi inclusive, 0x0000..0x3FFF within the bank
+    uint32_t len;
+} DpResidualRange;
+// every unclassified range of a dp_map_build array, up to cap of them;
+// returns the total number of ranges (even beyond cap)
+int dp_map_residual_list(const DpResults *res, const uint8_t *m, DpResidualRange *out, int cap);
+// what blocks one residual range (edge classes): code-code/code-data/
+// data-data/padding-fringe/edge-code/edge-data/bank — explains, never classifies
+const char *dp_residual_mechanism(const uint8_t *m, const DpResidualRange *r);
+// per-mechanism rollup of the residual unknown (ranges, bytes, biggest)
+void dp_residual_anatomy_text(const DpResults *res, const uint8_t *m, DpBuf *out);
+// compact machine-readable profile of one run (rom identity, config echo,
+// map summary, full residual list, every counter, tree and play facts):
+// the aggregation input of a multi-ROM campaign
+struct DpTree;
+void dp_report_summary(const DpResults *res, const DpConfig *cfg, const struct DpTree *tree,
+                       const char *stop_reason, unsigned long long frames, int tas_n, DpBuf *out);
 void dp_report_map(const DpResults *res, DpBuf *out);
-int dp_report_map_png(const DpResults *res, const char *path);
+// rom_path feeds the legend's name fallback (the internal title comes first);
+// cfg rides into the "deepeel_meta" tEXt chunk (version + settings + result)
+int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom_path,
+                      const char *path);
+// re-render the squares image from a saved .map text (no re-exploration):
+// the text is embedded verbatim as "deepeel_map", meta rides in "deepeel_meta"
+int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char *title,
+                            const char *meta, const char *path);
 void dp_report_html(const DpResults *res, DpBuf *out);
 
 #endif

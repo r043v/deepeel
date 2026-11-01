@@ -349,8 +349,15 @@ code / data / padding.
   fin incluse, adresses vues du CPU) ; `--map x.map.png` écrit une image
   (un carré par 64 octets, 16×16 par banque, rouge = inconnu, bleus = code,
   verts = data, ocre = table, gris = padding) qui **embarque le `.map`
-  complet** (chunk tEXt `deepeel_map`, comme une cartouche PICO-8).
-  `deepeel mapx x.map.png x.map` extrait le `.map` à l'identique.
+  complet** (chunk tEXt `deepeel_map`, comme une cartouche PICO-8) et les
+  paramètres de la conversion (chunk tEXt `deepeel_meta` : version, ROM,
+  config, résultat) ; sous la grille, une légende dessinée : nom interne de
+  la ROM (repli : nom de fichier), couverture globale, signature du
+  convertisseur, puis chaque classe présente en deux colonnes justifiées —
+  pastille carrée de sa couleur à côté du texte, police 8-bit 5×7 (accents
+  é/è/ê/à dessinés dans les rangées libres des glyphes), deux colonnes
+  seulement quand l'image est assez large. `deepeel mapx x.map.png x.map`
+  extrait le `.map` à l'identique.
 - `--html f` : page web autonome (carrés par banque, légende, tableau des
   classes, journal de découverte : temps, source, crédit, octets connus).
   Le rapport texte affiche aussi les 40 dernières entrées du journal.
@@ -361,6 +368,55 @@ code / data / padding.
   (« queue overflows »), jamais silencieux.
 - Ces nombres sont des observations de l'outil (machine concrète, RAM à
   zéro, registres événementiels statiques), pas des mesures de matériel.
+
+### File adaptative et murs de ressource (0.9.0)
+
+- La file de travail pleine **double** au lieu de jeter des chemins entiers :
+  croissance ×2 jusqu'au plafond `--queue-max` (défaut 4× la taille `--queue`),
+  arrêtée par le mur `--mem-cap` (RSS sondé via `/proc`, le même mur que les
+  sessions). Chaque croissance est comptée (`queue growths` dans la ligne
+  `budgets:` du rapport) ; au plafond, les pertes repassent dans
+  « queue overflows ». La boîte prioritaire reste bornée par `--seed-cap`.
+- `--time-limit SEC` : mur horloce de la phase de jeu, arrêt **gracieux**
+  (pool sauvegardé, `--resume` reprend). C'est un mur de campagne : il
+  l'emporte même sur la priorité TAS — un scan est borné sans surveillance.
+- **Spool disque des branches** (dès qu'un `--state-dir` est fourni) : les
+  états que la file RAM ne peut pas tenir (queue pleine au plafond
+  `--queue-max` ou au mur `--mem-cap`) sont écrits dans
+  `<state-dir>/spool.bin` au lieu d'être jetés — `spool: N written, M read
+  back, K refused` dans la ligne budgets, un refus réel n'est plus jamais
+  silencieux. `dp_explore_step` réalimente la file depuis le spool dès qu'un
+  slot se libère. Un arrêt (SIGINT, mur horloge, mur mémoire) **vide la file
+  restante dans le spool** avant de sortir : `--resume` relit le spool tel
+  quel et l'exploration reprend exactement là où elle s'était arrêtée,
+  y compris après un kill d'urgence (seuls les enregistrements entiers sont
+  relus). Le dedup d'états exacts persiste à côté (`<state-dir>/exact.bin`) —
+  sans lui, un run repris ré-explorerait tout le spool depuis zéro. Plafond
+  disque `--spool-cap-mb` (défaut 4096) ; l'arbre marque les choix spoolés
+  (`issue "spooled"`).
+- **Anatomie du résidu** : après la carte, chaque plage inconnue reçoit un
+  verdict mécanique d'après la classe de ses deux bords — `code-code`
+  (dispatch que la closure n'a jamais résolu), `code-data` (bord mixte,
+  jamais inféré par conception), `data-data` (donnée qu'aucune route n'a
+  lue), `padding-fringe`, `edge-code`/`edge-data`/`bank` (bord de banque).
+  Le rapport texte la résume (`residual anatomy:`) et le summary JSON porte
+  le champ `mech` sur chaque plage résiduelle : la feuille de route vers
+  100 % est désormais produite par l'outil lui-même.
+- `--tas-dir D` (répétable) : découvre les films du répertoire (8 max, triés
+  par ressemblance de titre quand il y en a plus ; `.vmv`, `.vbm`, `.bk2`,
+  `.gbm`, `.fm2`, `.log`), les films retenus sont loggés sur stderr.
+- `--summary f` : profil JSON compact d'une passe — identité ROM, écho de la
+  config, résumé de la carte (toutes classes), liste **complète** des plages
+  résiduelles, tous les compteurs (y compris ceux que le texte taisait :
+  `forks_capped`, `halt_cuts`, `exec_outside`, toute la famille closure),
+  arbre (choix, ouverts, issues) et faits de jeu (frames, TAS, raison
+  d'arrêt). `--json` gagne les mêmes compteurs et une section `map`.
+- `tools/scan_all.py` : campagne multi-ROMs — `scan` applique la recette
+  générique à chaque ROM d'un répertoire (30 min de jeu par défaut, films TAS
+  minés localement avec assignation exclusive par ressemblance — «
+  supermarioland2 » ne pollue pas « supermarioland »), `--full --only <slug>`
+  enchaîne une passe à fond avec `--resume`, `digest` agrège les profils en
+  `REPORT.md` (couverture, anatomie du résidu, murs et saturations).
 
 ### TAS sans limite de temps ni de budget (0.5.0)
 

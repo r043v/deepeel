@@ -29,6 +29,9 @@ typedef struct DpSessionCfg {
     uint64_t max_frames;        // stop after this many frames total (0 = unlimited)
     uint64_t stagnation_frames; // stop after this many frames with no discovery (0 = never)
     uint64_t mem_cap_mb;        // stop (gracefully) once resident memory exceeds this (0 = off)
+    uint64_t time_limit_secs;   // stop (gracefully) after this many wall-clock seconds of
+                                // play (0 = off) — a campaign wall: it outranks even the
+                                // TAS priority, the pool stays saved and resumable
     int until_static;           // also stop when no byte is left unexplained
     int save_epochs;            // persist the checkpoint pool every n epochs
     const char *state_dir;      // persistence directory (pool file inside)
@@ -89,7 +92,7 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
 int dp_play_poll(DpPlay *p);
 // headless driver: poll until a stop condition, join the workers;
 // returns the reason (0 frame budget, 1 stagnation, 2 interrupt, 3 static
-// map fully explained, 4 memory cap, 5 TAS replay done)
+// map fully explained, 4 memory cap, 5 TAS replay done, 6 time budget)
 int dp_play_run(DpPlay *p);
 void dp_play_free(DpPlay *p);
 // persist the checkpoint pool now (also automatic every save_epochs)

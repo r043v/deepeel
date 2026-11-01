@@ -4,6 +4,7 @@
 // labelled so). Numbers are tool observations, not hardware measurements.
 #include "report.h"
 #include "core/snapshot_png.h"
+#include "../gui/font5x7.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -82,12 +83,11 @@ void dp_map_summary_text(const DpMapSummary *s, DpBuf *out) {
         dp_buf_fmt(out, "    %-17s %8llu  %5.1f%%\n", dp_map_class_name(c), (unsigned long long)s->cls[c], s->cls[c] * t);
 }
 
-// the last mile: the byte ranges nothing could observe or infer, largest
-// first — the honest boundary of the map
-void dp_map_residual_text(const DpResults *res, const uint8_t *m, DpBuf *out) {
+// the last mile: every range nothing could observe or infer, bank by bank
+int dp_map_residual_list(const DpResults *res, const uint8_t *m, DpResidualRange *out, int cap) {
     size_t n = (size_t)res->banks * 0x4000;
-    struct { unsigned bank, lo, hi; size_t len; } top[8] = {{0}};
-    uint32_t total = 0, ranges = 0;
+    int kept = 0;
+    uint32_t ranges = 0;
     for (size_t bs = 0; bs < n; bs += 0x4000) {
         for (size_t i = bs; i < bs + 0x4000;) {
             if (m[i] != DP_MAP_UNKNOWN) { i++; continue; }
@@ -95,17 +95,104 @@ void dp_map_residual_text(const DpResults *res, const uint8_t *m, DpBuf *out) {
             while (j < bs + 0x4000 && m[j] == DP_MAP_UNKNOWN) j++;
             if (j > i) {
                 ranges++;
-                total += (uint32_t)(j - i);
-                size_t len = j - i;
-                for (int t = 0; t < 8; t++) {
-                    if (len > top[t].len) {
-                        for (int u = 7; u > t; u--) top[u] = top[u - 1];
-                        top[t].bank = (unsigned)(bs / 0x4000);
-                        top[t].lo = (unsigned)(i - bs);
-                        top[t].hi = (unsigned)(j - 1 - bs);
-                        top[t].len = len;
-                        break;
-                    }
+                if (kept < cap) {
+                    out[kept].bank = (uint16_t)(bs / 0x4000);
+                    out[kept].lo = (uint16_t)(i - bs);
+                    out[kept].hi = (uint16_t)(j - 1 - bs);
+                    out[kept].len = (uint32_t)(j - i);
+                    kept++;
+                }
+            }
+            i = j;
+        }
+    }
+    return (int)ranges;
+}
+
+// mechanical verdict of one residual range: what blocks it, from the class of
+// its two edges (the C port of the campaign's residual anatomy).  It explains
+// the unknown, it never classifies it — the inference rules stay untouched.
+const char *dp_residual_mechanism(const uint8_t *m, const DpResidualRange *r) {
+    size_t bs = (size_t)r->bank * 0x4000;
+    int before = r->lo > 0 ? m[bs + r->lo - 1] : -1;
+    int after = r->hi < 0x3FFF ? m[bs + r->hi + 1] : -1;
+    int bc = before >= 0 && dp_map_is_code(before);
+    int bd = before >= 0 && dp_map_is_data(before);
+    int bp = before == DP_MAP_PAD || before == DP_MAP_INF_PAD;
+    int ac = after >= 0 && dp_map_is_code(after);
+    int ad = after >= 0 && dp_map_is_data(after);
+    int ap = after == DP_MAP_PAD || after == DP_MAP_INF_PAD;
+    if (before < 0 && after < 0) return "bank";
+    if (before < 0 || after < 0) { // one end is the bank's edge: judge by the other
+        if (bp || ap) return "padding-fringe";
+        if (bc || ac) return "edge-code";
+        if (bd || ad) return "edge-data";
+        return "bank";
+    }
+    if (bp || ap) return "padding-fringe";
+    if (bc && ac) return "code-code";  // a dispatch the closure never resolved
+    if ((bc && ad) || (bd && ac)) return "code-data"; // mixed edge: never inferred
+    if (bd && ad) return "data-data";  // data no route ever read
+    return "other";
+}
+
+// per-mechanism rollup of the residual unknown: ranges, bytes, where
+void dp_residual_anatomy_text(const DpResults *res, const uint8_t *m, DpBuf *out) {
+    static const char *mech[7] = { "code-code (dispatch non prouvé)",
+                                   "code-data (bord mixte, jamais inféré)",
+                                   "data-data (donnée jamais lue)",
+                                   "padding-fringe (frange de remplissage)",
+                                   "edge-code", "edge-data", "bank/bord de banque" };
+    static const char *key[7] = { "code-code", "code-data", "data-data", "padding-fringe",
+                                  "edge-code", "edge-data", "bank" };
+    uint32_t bytes[7] = { 0 }, biggest[7] = { 0 };
+    int ranges[7] = { 0 }, bi[7] = { 0 };
+    size_t n = (size_t)res->banks * 0x4000;
+    for (size_t bs = 0; bs < n; bs += 0x4000) {
+        for (size_t i = bs; i < bs + 0x4000;) {
+            if (m[i] != DP_MAP_UNKNOWN) { i++; continue; }
+            size_t j = i;
+            while (j < bs + 0x4000 && m[j] == DP_MAP_UNKNOWN) j++;
+            DpResidualRange r = { (uint16_t)(bs / 0x4000), (uint16_t)(i - bs),
+                                  (uint16_t)(j - 1 - bs), (uint32_t)(j - i) };
+            const char *mk = dp_residual_mechanism(m, &r);
+            for (int k = 0; k < 7; k++)
+                if (!strcmp(mk, key[k])) {
+                    bytes[k] += r.len;
+                    ranges[k]++;
+                    if (r.len > biggest[k]) { biggest[k] = r.len; bi[k] = r.bank; }
+                    break;
+                }
+            i = j;
+        }
+    }
+    dp_buf_str(out, "residual anatomy (what blocks each unknown range):\n");
+    for (int k = 0; k < 7; k++)
+        if (ranges[k])
+            dp_buf_fmt(out, "  %-42s %5d ranges %8u bytes (biggest %u in bank %d)\n",
+                       mech[k], ranges[k], bytes[k], biggest[k], bi[k]);
+}
+
+// the honest boundary of the map, largest first
+void dp_map_residual_text(const DpResults *res, const uint8_t *m, DpBuf *out) {    DpResidualRange top[8] = {{0, 0, 0, 0}};
+    int ranges = dp_map_residual_list(res, m, NULL, 0);
+    uint32_t total = 0;
+    size_t n = (size_t)res->banks * 0x4000;
+    for (size_t bs = 0; bs < n; bs += 0x4000) {
+        for (size_t i = bs; i < bs + 0x4000;) {
+            if (m[i] != DP_MAP_UNKNOWN) { i++; continue; }
+            size_t j = i;
+            while (j < bs + 0x4000 && m[j] == DP_MAP_UNKNOWN) j++;
+            uint32_t len = (uint32_t)(j - i);
+            total += len;
+            for (int t = 0; t < 8; t++) {
+                if (len > top[t].len) {
+                    for (int u = 7; u > t; u--) top[u] = top[u - 1];
+                    top[t].bank = (uint16_t)(bs / 0x4000);
+                    top[t].lo = (uint16_t)(i - bs);
+                    top[t].hi = (uint16_t)(j - 1 - bs);
+                    top[t].len = len;
+                    break;
                 }
             }
             i = j;
@@ -115,11 +202,10 @@ void dp_map_residual_text(const DpResults *res, const uint8_t *m, DpBuf *out) {
         dp_buf_str(out, "residual unknown: none\n");
         return;
     }
-    dp_buf_fmt(out, "residual unknown: %u bytes in %u ranges, largest:", total, ranges);
-    unsigned win = 0;
+    dp_buf_fmt(out, "residual unknown: %u bytes in %d ranges, largest:", total, ranges);
     for (int t = 0; t < 8 && top[t].len; t++) {
-        win = top[t].bank ? 0x4000 : 0;
-        dp_buf_fmt(out, " %u:%04x-%04x (%zu)", top[t].bank, win + top[t].lo, win + top[t].hi,
+        unsigned win = top[t].bank ? 0x4000 : 0;
+        dp_buf_fmt(out, " %u:%04x-%04x (%u)", top[t].bank, win + top[t].lo, win + top[t].hi,
                    top[t].len);
     }
     dp_buf_str(out, "\n");
@@ -173,19 +259,231 @@ static const uint8_t map_rgb[DP_MAP_COUNT][3] = {
     { 0xa0, 0xa0, 0xa0 }, // inferred-padding
 };
 
+// accented glyphs: the base lowercase letter (its top two rows are free in
+// this font) with the mark drawn in rows 0-1 — decoded from UTF-8 input
+static uint8_t acc_glyph[4][5]; // é è ê à
+static int acc_ready;
+
+static const uint8_t *glyph_of(const char *s, int *adv) {
+    unsigned char c = (unsigned char)*s;
+    if (c == 0xC3 && (unsigned char)s[1] >= 0x80) {
+        if (!acc_ready) {
+            memcpy(acc_glyph[0], &dp_font5x7['e' - 0x20][0], 5); // é acute
+            acc_glyph[0][3] |= 1 << 0;
+            acc_glyph[0][2] |= 3 << 1;
+            memcpy(acc_glyph[1], &dp_font5x7['e' - 0x20][0], 5); // è grave
+            acc_glyph[1][1] |= 1 << 0;
+            acc_glyph[1][2] |= 1 << 1;
+            memcpy(acc_glyph[2], &dp_font5x7['e' - 0x20][0], 5); // ê circumflex
+            acc_glyph[2][2] |= 1 << 0;
+            acc_glyph[2][1] |= 1 << 1;
+            acc_glyph[2][3] |= 1 << 1;
+            memcpy(acc_glyph[3], &dp_font5x7['a' - 0x20][0], 5); // à grave
+            acc_glyph[3][1] |= 1 << 0;
+            acc_glyph[3][2] |= 1 << 1;
+            acc_ready = 1;
+        }
+        unsigned char c2 = (unsigned char)s[1];
+        if (c2 == 0xA9) { *adv = 2; return acc_glyph[0]; }
+        if (c2 == 0xA8) { *adv = 2; return acc_glyph[1]; }
+        if (c2 == 0xAA) { *adv = 2; return acc_glyph[2]; }
+        if (c2 == 0xA0) { *adv = 2; return acc_glyph[3]; }
+    }
+    *adv = 1;
+    unsigned ch = c;
+    if (ch < 0x20 || ch > 0x7e) ch = '?';
+    return &dp_font5x7[ch - 0x20][0];
+}
+
+// draws a 5x7 glyph string scaled by `scale` (8-bit style small font,
+// dp_font5x7, ASCII 0x20-0x7E, column-major)
+static void legend_text(uint8_t *rgb, int w, int h, int x, int y, const char *str,
+                        const uint8_t *col, int scale) {
+    for (; *str; str++, x += 6 * scale) {
+        int adv;
+        const uint8_t *g = glyph_of(str, &adv);
+        for (int cx = 0; cx < 5; cx++)
+            for (int cy = 0; cy < 7; cy++) {
+                if (!(g[cx] & (1u << cy))) continue;
+                for (int dy = 0; dy < scale; dy++)
+                    for (int dx = 0; dx < scale; dx++) {
+                        int px = x + cx * scale + dx, py = y + cy * scale + dy;
+                        if (px < 0 || px >= w || py < 0 || py >= h) continue;
+                        size_t off = ((size_t)py * w + px) * 3;
+                        rgb[off] = col[0]; rgb[off + 1] = col[1]; rgb[off + 2] = col[2];
+                    }
+            }
+        str += adv - 1; // the loop's ++ does the last step
+    }
+}
+
+// largest font scale whose text still fits the image width
+static int fit_scale(const char *str, int w, int x, int scale) {
+    while (scale > 1 && x + (int)strlen(str) * 6 * scale > w) scale--;
+    return scale;
+}
+
+// draws one legend entry — a square swatch, one text line tall, then the
+// text (swatch on the right when right_edge >= 0, the whole entry then
+// right-aligned to it).  The scale backs down until the entry fits `avail`.
+static void legend_entry(uint8_t *rgb, int w, int h, int y, const char *str,
+                         const uint8_t *col, int scale, int avail, int right_edge) {
+    int side = 7 * scale, gap = 3 * scale;
+    int tw = (int)strlen(str) * 6 * scale;
+    int need = side + gap + tw;
+    while (scale > 1 && need > avail) {
+        scale--;
+        side = 7 * scale; gap = 3 * scale;
+        tw = (int)strlen(str) * 6 * scale;
+        need = side + gap + tw;
+    }
+    int x0 = right_edge >= 0 ? right_edge - need : 10; // grid margin + 4
+    int sx = right_edge >= 0 ? x0 + tw + gap : x0;
+    for (int yy = 0; yy < side; yy++)
+        for (int xx = 0; xx < side; xx++) {
+            int px = sx + xx, py = y + yy;
+            if (px < 0 || px >= w || py < 0 || py >= h) continue;
+            size_t off = ((size_t)py * w + px) * 3;
+            rgb[off] = col[0]; rgb[off + 1] = col[1]; rgb[off + 2] = col[2];
+        }
+    legend_text(rgb, w, h, right_edge >= 0 ? x0 : x0 + side + gap, y, str, col, scale);
+}
+
 // One SQ x SQ square per 64 ROM bytes (dominant class), 16x16 squares per bank,
-// banks laid out in rows of up to 8. The full .map text rides in the PNG.
-int dp_report_map_png(const DpResults *res, const char *path) {
-    enum { SQ = 6, GRID = 16, BANK_PX = SQ * GRID, GAP = 6, PER_ROW = 8 };
+// banks laid out in rows of up to 8. The full .map text rides in the PNG
+// (tEXt "deepeel_map"), next to the converter's version and settings
+// (tEXt "deepeel_meta").  Under the grid, a legend band: rom name + coverage,
+// then the classes in two justified columns, swatch beside each entry.
+static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapSummary *s,
+                          const char *map_text, size_t map_len, const char *meta,
+                          const char *path);
+int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom_path,
+                      const char *path) {
     DpMapSummary s;
     uint8_t *m = dp_map_build(res, &s);
     if (!m) return 0;
-    int banks = (int)res->banks;
+    char title[17];
+    const char *ti = res->cart && res->cart->title[0] ? res->cart->title : NULL;
+    int tl = 0;
+    if (ti) {
+        for (; *ti && tl < 16; ti++)
+            if (*ti == '?') break; // cart titles are zero-padded with '?' in places
+            else if ((unsigned char)*ti >= 0x20 && (unsigned char)*ti < 0x7f) title[tl++] = *ti;
+    }
+    if (!tl && rom_path) { // no usable internal name: the file's base name
+        const char *base = rom_path + strlen(rom_path);
+        while (base > rom_path && base[-1] != '/' && base[-1] != '\\') base--;
+        for (; *base && tl < 16; base++)
+            if ((unsigned char)*base >= 0x20 && (unsigned char)*base < 0x7f) title[tl++] = *base;
+    }
+    title[tl] = 0;
+    DpBuf txt;
+    dp_buf_init(&txt);
+    dp_report_map(res, &txt);
+    double pct = s.total ? 100.0 / (double)s.total : 0.0;
+    // the conversion's identity: version, rom, settings, result — a tEXt
+    // chunk next to the map itself
+    char meta[768];
+    snprintf(meta, sizeof meta,
+             "{\"deepeel\":\"%s\",\"rom\":{\"title\":\"%s\",\"banks\":%d,\"size\":%u},"
+             "\"config\":{\"max_steps_path\":%u,\"max_paths\":%u,\"max_steps_total\":%llu,"
+             "\"queue\":%u,\"queue_max\":%u,\"mem_cap_mb\":%llu,\"loop_cap\":%u,\"seed_cap\":%u,"
+             "\"closure_rounds\":%d,\"covered_keep\":%u,\"seed_banks\":%d},"
+             "\"map\":{\"known_pct\":%.2f,\"unknown_pct\":%.2f,\"inferred_pct\":%.2f}}",
+             DEEPEEL_VERSION, title, res->banks,
+             res->cart ? (unsigned)res->cart->rom_size : 0u,
+             cfg ? cfg->max_steps_path : 0u, cfg ? cfg->max_paths : 0u,
+             cfg ? (unsigned long long)cfg->max_steps_total : 0ull,
+             cfg ? cfg->queue_cap : 0u, cfg ? cfg->queue_max : 0u,
+             cfg ? (unsigned long long)cfg->mem_cap_mb : 0ull,
+             cfg ? cfg->loop_back_cap : 0u, cfg ? cfg->seed_cap : 0u,
+             cfg ? cfg->closure_rounds : 0, cfg ? cfg->covered_fork_keep : 0u,
+             cfg ? cfg->seed_banks : 0,
+             s.known * pct, s.unknown * pct, s.inferred * pct);
+    int ok = map_png_render(m, (int)res->banks, title, &s, (const char *)txt.p, txt.len,
+                            meta, path);
+    dp_buf_free(&txt);
+    free(m);
+    return ok;
+}
+
+int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char *title,
+                            const char *meta, const char *path) {
+    if (banks <= 0) return 0;
+    size_t n = (size_t)banks * 0x4000;
+    uint8_t *m = calloc(n ? n : 1, 1); // DP_MAP_UNKNOWN
+    if (!m) return 0;
+    // parse "bank start end(inclusive) class" — CPU-view addresses (bank 0
+    // from 0, the others from 0x4000), one run per line, '#' comments
+    DpMapSummary s;
+    memset(&s, 0, sizeof s);
+    s.total = n;
+    const char *p = text, *end = text + len;
+    while (p < end) {
+        if (*p == '#' || *p == '\n') { // a whole comment line, or a newline
+            while (p < end && *p != '\n') p++;
+            if (p < end) p++;
+            continue;
+        }
+        unsigned bank, a, e;
+        char cls[32];
+        int got = sscanf(p, "%u %x %x %31s", &bank, &a, &e, cls);
+        while (p < end && *p != '\n') p++;
+        if (got != 4 || bank >= (unsigned)banks) continue;
+        unsigned win = bank ? 0x4000u : 0u;
+        if (a < win || e < a) continue;
+        size_t lo = bank * 0x4000ull + (a - win), hi = bank * 0x4000ull + (e - win);
+        if (lo >= n) continue;
+        if (hi >= n) hi = n - 1;
+        int c = -1;
+        for (int k = 0; k < DP_MAP_COUNT; k++)
+            if (!strcmp(cls, dp_map_class_name(k))) { c = k; break; }
+        if (c < 0) continue;
+        memset(m + lo, c, hi - lo + 1);
+    }
+    for (size_t k = 0; k < n; k++) {
+        int c = m[k];
+        s.cls[c]++;
+        if (c == DP_MAP_UNKNOWN) s.unknown++; else s.known++;
+        if (dp_map_is_code(c)) s.code++;
+        else if (dp_map_is_data(c)) s.data++;
+        else if (c == DP_MAP_PAD || c == DP_MAP_INF_PAD) s.pad++;
+        if (c >= DP_MAP_INF_DATA) s.inferred++;
+    }
+    return map_png_render(m, banks, title, &s, text, len, meta, path);
+}
+
+// the shared renderer: squares grid + legend band + tEXt chunks, from a
+// per-byte class array and the .map text to embed
+static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapSummary *s,
+                          const char *map_text, size_t map_len, const char *meta,
+                          const char *path) {
+    enum { SQ = 6, GRID = 16, BANK_PX = SQ * GRID, GAP = 6, PER_ROW = 8 };
+    static const char *fr[DP_MAP_COUNT] = {
+        "inconnu", "code naturel", "code forcé", "code statique",
+        "donnée copiée", "donnée lue", "table", "padding",
+        "donnée inférée", "code inféré", "padding inféré" };
     int cols = banks < PER_ROW ? banks : PER_ROW;
     int rows = (banks + PER_ROW - 1) / PER_ROW;
     if (cols < 1) cols = 1;
     if (rows < 1) rows = 1;
-    int w = GAP + cols * (BANK_PX + GAP), h = GAP + rows * (BANK_PX + GAP);
+    // legend band sizing: one title line + one line per class present
+    int order[DP_MAP_COUNT], ncls = 0;
+    for (int c = 0; c < DP_MAP_COUNT; c++)
+        if (s->cls[c]) order[ncls++] = c;
+    for (int i = 1; i < ncls; i++) { // insertion sort, largest share first
+        int cur = order[i], j = i - 1;
+        while (j >= 0 && s->cls[order[j]] < s->cls[cur]) { order[j + 1] = order[j]; j--; }
+        order[j + 1] = cur;
+    }
+    enum { LH = 18, FSCALE = 2 };
+    int w = GAP + cols * (BANK_PX + GAP);
+    // two justified columns only when each half can hold an entry; otherwise
+    // one left-aligned column
+    int two_cols = w / 2 - 12 >= 110;
+    int half = two_cols ? (ncls + 1) / 2 : ncls;
+    int grid_h = GAP + rows * (BANK_PX + GAP);
+    int h = grid_h + GAP + (1 + half) * LH + GAP;
     uint8_t *rgb = malloc((size_t)w * h * 3);
     if (!rgb) { free(m); return 0; }
     for (size_t i = 0; i < (size_t)w * h; i++) { rgb[i * 3] = 0x18; rgb[i * 3 + 1] = 0x18; rgb[i * 3 + 2] = 0x1c; }
@@ -204,12 +502,68 @@ int dp_report_map_png(const DpResults *res, const char *path) {
                 }
         }
     }
-    free(m);
-    DpBuf txt;
-    dp_buf_init(&txt);
-    dp_report_map(res, &txt);
-    int ok = dp_png_save_text(path, w, h, rgb, "deepeel_map", (const char *)txt.p, txt.len);
-    dp_buf_free(&txt);
+    // the legend itself: rom name (given by the caller), then the classes in
+    // two columns, swatch beside each entry
+    double pct = s->total ? 100.0 / (double)s->total : 0.0;
+    char head[160];
+    snprintf(head, sizeof head, "%s - connu %.1f%%", title[0] ? title : "?", s->known * pct);
+    int y = grid_h + GAP;
+    int head_scale = fit_scale(head, w, GAP, FSCALE);
+    legend_text(rgb, w, h, GAP, y, head, (const uint8_t *)"\xe0\xe0\xe0", head_scale);
+    // the converter's signature, small, on the same row, right-aligned —
+    // dropped when the title leaves no room for it
+    char foot[40];
+    snprintf(foot, sizeof foot, "deepeel %s", DEEPEEL_VERSION);
+    int foot_w = (int)strlen(foot) * 6;
+    if (GAP + (int)strlen(head) * 6 * head_scale + 2 * GAP + foot_w <= w)
+        legend_text(rgb, w, h, w - GAP - foot_w, y, foot, (const uint8_t *)"\x90\x90\x98", 1);
+    y += LH;
+    // one common scale for every legend entry (a mixed-size legend reads
+    // badly): the largest scale at which the widest entry of each column
+    // still fits its own column
+    int lavail = two_cols ? w / 2 - 14 : w - 12, ravail = w - GAP - w / 2;
+    int ls = FSCALE, rs = FSCALE;
+    for (int r = 0; r < half; r++) {
+        if (r < ncls) {
+            char line[64];
+            double p = s->cls[order[r]] * pct;
+            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[order[r]]);
+            else snprintf(line, sizeof line, "%s %.1f%%", fr[order[r]], p);
+            int need = (7 + 3 + (int)strlen(line) * 6) * ls;
+            while (ls > 1 && need > lavail) { ls--; need = (7 + 3 + (int)strlen(line) * 6) * ls; }
+        }
+        if (two_cols && r + half < ncls) {
+            char line[64];
+            double p = s->cls[order[r + half]] * pct;
+            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[order[r + half]]);
+            else snprintf(line, sizeof line, "%s %.1f%%", fr[order[r + half]], p);
+            int need = (7 + 3 + (int)strlen(line) * 6) * rs;
+            while (rs > 1 && need > ravail) { rs--; need = (7 + 3 + (int)strlen(line) * 6) * rs; }
+        }
+    }
+    int s_common = ls < rs ? ls : rs; // both columns at the same scale
+    ls = rs = s_common;
+    for (int r = 0; r < half; r++) {
+        int ry = y + r * LH;
+        if (r < ncls) {
+            int c = order[r];
+            char line[64];
+            double p = s->cls[c] * pct;
+            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[c]);
+            else snprintf(line, sizeof line, "%s %.1f%%", fr[c], p);
+            legend_entry(rgb, w, h, ry, line, map_rgb[c], ls, lavail, -1);
+        }
+        if (two_cols && r + half < ncls) {
+            int c = order[r + half];
+            char line[64];
+            double p = s->cls[c] * pct;
+            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[c]);
+            else snprintf(line, sizeof line, "%s %.1f%%", fr[c], p);
+            legend_entry(rgb, w, h, ry, line, map_rgb[c], rs, ravail, w - GAP);
+        }
+    }
+    int ok = dp_png_save_text2(path, w, h, rgb, "deepeel_map", map_text, map_len,
+                               "deepeel_meta", meta, strlen(meta));
     free(rgb);
     return ok;
 }

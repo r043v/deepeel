@@ -16,6 +16,7 @@
 #include "../platform/platform.h"
 
 #include <pthread.h>
+#include <stdio.h>
 
 // --- execution flags per ROM byte -------------------------------------------
 enum {
@@ -204,6 +205,13 @@ typedef struct DpResults {
     uint32_t forks_branch, forks_irq, forks_key, evicted_exact, evicted_ctx;
     uint32_t forks_capped; // forks dropped by the per-site cap
     uint32_t cycle_cuts, step_cuts, budget_paths, budget_steps, queue_overflows;
+    uint32_t queue_growths;   // times the full worklist grew instead of dropping paths
+    // disk spool (state-dir/spool.bin): states the RAM worklist could not hold
+    // (queue full under the mem-cap/q_max) are written there instead of being
+    // dropped, and fed back when the worklist runs low; a graceful stop flushes
+    // the remaining worklist into it, --resume picks everything up
+    uint32_t spool_writes, spool_reads, spool_refused; // refused = spool cap hit
+    uint64_t spool_bytes;     // pending spooled bytes (written minus read back)
     uint32_t pad_cuts; // paths stopped for executing a padding run
     // nonsense evictions (the path proved senseless): echo/OAM execution,
     // execution inside verbatim-proven data, RET with a stack outside
@@ -225,6 +233,12 @@ typedef struct DpConfig {
     uint32_t max_paths;       // hard cap on paths run
     uint64_t max_steps_total; // hard cap on steps across all paths
     uint32_t queue_cap;       // max pending states
+    uint32_t queue_max;       // adaptive growth cap of the worklist (0 = 4x queue_cap):
+                              // a full queue grows by doubling up to this instead of
+                              // dropping whole paths
+    uint64_t mem_cap_mb;      // queue growth stops once RSS exceeds this MiB (0 = off;
+                              // same wall as the sessions' --mem-cap)
+    uint64_t spool_cap_mb;    // disk budget of the spool file (0 = off; default 4096)
     uint32_t loop_back_cap;   // iterations of one backward edge before cut
     uint32_t fork_site_cap;   // max forks per branch site (loop bodies fork
                               // every iteration; the interesting variants are
@@ -246,6 +260,10 @@ typedef struct DpConfig {
 } DpConfig;
 
 void dp_config_defaults(DpConfig *cfg);
+
+// resident memory of this process, in MiB (0 when unreadable) — the shared
+// memory-cap probe: long runs must not eat the machine's RAM and swap
+uint64_t dp_rss_mb(void);
 
 typedef struct DpExplorer DpExplorer;
 
@@ -284,6 +302,7 @@ struct DpExplorer {
     // worklist
     DpPathState *queue;
     uint32_t q_cap, q_head, q_len;
+    uint32_t q_max;    // growth ceiling (resolved from cfg.queue_max)
     // priority inbox: closure / indirect / TAS-shoot seeds.  The main worklist
     // runs saturated in steady state (every popped path forks new ones), so
     // late seeds would starve there; these are served first, the slot cap
@@ -291,6 +310,11 @@ struct DpExplorer {
     DpPathState *pqueue;
     uint32_t pq_cap, pq_head, pq_len;
     DpHashSet exact;
+    // disk spool of the overflow (see DpResults): records appended at spool_wr,
+    // fed back from spool_rd while the worklist runs low; both cursors live in
+    // one file so a stopped run resumes without a rewrite
+    FILE *spool;
+    uint64_t spool_rd, spool_wr;
     // per-path state
     int cur_forced;
     uint8_t cur_kind, cur_from_reset;
@@ -421,6 +445,18 @@ int dp_explore_slice(DpExplorer *ex, int ms);
 void dp_explore_finalize(DpExplorer *ex);
 // run the whole worklist to completion (slice loop + finalize)
 int dp_explore(DpExplorer *ex);
+// disk spool: overflow states survive the run and any stop.  attach() binds
+// <state-dir>/spool.bin (resume keeps the existing records), feed-back happens
+// inside dp_explore_step; flush() pours the remaining worklist in before the
+// process exits so --resume continues exactly where the run stopped.
+int dp_explorer_spool_attach(DpExplorer *ex, const char *path, int resume);
+// pours queue + priority inbox into the spool; returns states still pending
+uint64_t dp_explorer_spool_flush(DpExplorer *ex);
+uint64_t dp_explorer_spool_pending(const DpExplorer *ex);
+// exact-state dedup persistence: without it a resumed run would re-explore
+// every spooled state from scratch
+int dp_explorer_exact_save(const DpExplorer *ex, const char *path);
+int dp_explorer_exact_load(DpExplorer *ex, const char *path);
 // bytes neither executed, nor read as data, nor statically classified
 // (padding, pointer tables) — the honest "remaining" gap metric
 enum { DP_CLS_EXEC_NATURAL, DP_CLS_EXEC_FORCED, DP_CLS_STATIC_FLOW, DP_CLS_DATA_COPIED,

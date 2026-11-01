@@ -15,6 +15,11 @@ int dp_png_save(const char *path, int w, int h, const uint8_t *rgb, const uint8_
 int dp_png_save_text(const char *path, int w, int h, const uint8_t *rgb, const char *key,
                      const char *text, size_t text_len);
 
+// same, with a second verbatim tEXt chunk (the map's settings next to the map)
+int dp_png_save_text2(const char *path, int w, int h, const uint8_t *rgb, const char *key,
+                      const char *text, size_t text_len, const char *key2, const char *text2,
+                      size_t text2_len);
+
 // text of the tEXt chunk `key` (malloc'd, NUL-terminated) or NULL
 char *dp_png_text(const char *path, const char *key, size_t *len_out);
 

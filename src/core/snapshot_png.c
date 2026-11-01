@@ -45,9 +45,11 @@ static void wr_chunk(FILE *f, const char *type, const uint8_t *data, size_t len)
     fwrite(crcb, 1, 4, f);
 }
 
-// --- png writer ------------------------------------------------------------------
-static int png_write(const char *path, int w, int h, const uint8_t *rgb, const char *key, int hex,
-                     const uint8_t *payload, size_t payload_len) {
+// png writer with an optional second tEXt chunk (the map's settings next to
+// the map itself)
+static int png_write2(const char *path, int w, int h, const uint8_t *rgb, const char *key,
+                      int hex, const uint8_t *payload, size_t payload_len, const char *key2,
+                      const char *text2, size_t len2) {
     static int inited;
     if (!inited) { crc_init(); inited = 1; }
     FILE *f = fopen(path, "wb");
@@ -127,9 +129,25 @@ static int png_write(const char *path, int w, int h, const uint8_t *rgb, const c
             free(txt);
         }
     }
+    if (key2 && text2) {
+        size_t kl = strlen(key2);
+        uint8_t *txt = malloc(kl + 1 + len2);
+        if (txt) {
+            memcpy(txt, key2, kl);
+            txt[kl] = 0; // NUL separator
+            memcpy(txt + kl + 1, text2, len2);
+            wr_chunk(f, "tEXt", txt, kl + 1 + len2);
+            free(txt);
+        }
+    }
     wr_chunk(f, "IEND", NULL, 0);
     fclose(f);
     return 1;
+}
+
+static int png_write(const char *path, int w, int h, const uint8_t *rgb, const char *key, int hex,
+                     const uint8_t *payload, size_t payload_len) {
+    return png_write2(path, w, h, rgb, key, hex, payload, payload_len, NULL, NULL, 0);
 }
 
 int dp_png_save(const char *path, int w, int h, const uint8_t *rgb, const uint8_t *payload,
@@ -140,6 +158,13 @@ int dp_png_save(const char *path, int w, int h, const uint8_t *rgb, const uint8_
 int dp_png_save_text(const char *path, int w, int h, const uint8_t *rgb, const char *key,
                      const char *text, size_t text_len) {
     return png_write(path, w, h, rgb, key, 0, (const uint8_t *)text, text_len);
+}
+
+int dp_png_save_text2(const char *path, int w, int h, const uint8_t *rgb, const char *key,
+                      const char *text, size_t text_len, const char *key2, const char *text2,
+                      size_t text2_len) {
+    return png_write2(path, w, h, rgb, key, 0, (const uint8_t *)text, text_len, key2, text2,
+                      text2_len);
 }
 
 // --- png reader (stored-block zlib only) ---------------------------------------------

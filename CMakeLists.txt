@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.8.0 LANGUAGES C)
+project(deepeel VERSION 0.10.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -182,6 +182,9 @@ if(SDL2_FOUND AND BUILD_GUI)
   set(DP_GUI_FILE src/gui/gui.c)
   set(DP_GUI_LIBS ${SDL2_LIBRARIES})
 endif()
+
+# the version the reports and the .map.png metadata carry
+add_compile_definitions(DEEPEEL_VERSION="${PROJECT_VERSION}")
 
 add_library(deepeel_core STATIC
   src/core/cart.c

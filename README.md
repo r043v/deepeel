@@ -61,11 +61,20 @@ deepeel explore rom.gb --entry 2:4000        # graine supplémentaire banque 2, 
 # checkpoints, scheduler d'époques, persistance --state-dir/--resume)
 deepeel explore rom.gb --play --frames 72000 --state-dir s --cov jeu.cov --romdata jeu.prof
 deepeel explore rom.gb --play --resume --state-dir s
-# TAS : rejoue un movie tool-assisté (VBA .vmv, BizHawk .bk2, log texte) — un
-# worker par fichier ; le TAS est prioritaire : prioritaire sur tout budget
-# (frames, segments, stagnation), le film est joué en entier jusqu'au bout du
-# jeu, puis le worker passe en jeu aléatoire
+# TAS : rejoue un movie tool-assisté (VBA .vmv/.vbm, BizHawk .bk2, log texte) —
+# un worker par fichier ; le TAS est prioritaire sur tout budget (frames,
+# segments, stagnation), le film est joué en entier jusqu'au bout du jeu,
+# puis le worker passe en jeu aléatoire
 deepeel explore rom.gb --play --tas supermarioland.bk2 --frames 18000
+# découverte des films : tous les fichiers-movies d'un répertoire (8 max,
+# meilleure ressemblance de titre d'abord), plus besoin de les nommer un à un
+deepeel explore rom.gb --play --tas-dir output/tas --tas-solo
+# murs de ressource : arrêt gracieux (pool sauvegardé, --resume reprend) après
+# N secondes de jeu (films TAS compris) ou une fois le RSS au-dessus de MB MiB
+deepeel explore rom.gb --play --time-limit 1800 --mem-cap 2000
+# profil compact de la passe : résumé carte + liste complète des plages
+# résiduelles + tous les compteurs (l'entrée de l'agrégation multi-ROMs)
+deepeel explore rom.gb --play --summary run.summary.json
 # fenêtre de surveillance seule (SDL2) : l'écran du film échantillonné à
 # 1..30 images/s (défaut 30), sans ralentir le TAS ; Tab = film suivant
 deepeel explore rom.gb --play --tas film.vbm --watch 10
@@ -84,12 +93,37 @@ deepeel dis rom.gb 2:4000 12                 # désassemblage banque 2, $4000
 ```
 
 Options d'exploration : `--max-steps` (par chemin), `--max-paths`,
-`--max-total` (mur global de pas), `--queue`, `--loop-cap`,
-`--fork-cap` implicite via `--max-*`, `--seed-cap`, `--seed-banks`,
-`--no-pointer-scan`, `--no-context-evict`, `--no-irq-fork`.
+`--max-total` (mur global de pas), `--queue` + `--queue-max` (la file pleine
+**double** jusqu'au plafond au lieu de jeter des chemins entiers ; la
+croissance s'arrête au mur `--mem-cap` et chaque croissance est comptée),
+`--loop-cap`, `--seed-cap`, `--seed-banks`, `--closure-rounds` (défaut 12),
+`--covered-keep`, `--no-pointer-scan`, `--no-context-evict`, `--no-irq-fork`.
+
+Avec un `--state-dir`, le **spool disque** rend l'exploration arrêtable et
+repreneuse à volonté : les états débordant de la file RAM attendent dans
+`spool.bin` et un `--resume` relit tout (file + dedup `exact.bin`), même après
+un kill. `deepeel maprender rom.gb in.map out.map.png` re-rend l'image de
+couverture depuis un `.map` sauvegardé, sans re-scan.
 
 L'export `--cov` écrit le format de couverture de m0boy (`bank addr flags
 count`) — pont optionnel vers le convertisseur.
+
+### Campagne multi-ROMs
+
+`tools/scan_all.py` applique la recette générique à tout un répertoire de
+ROMs, puis agrège les profils :
+
+```bash
+# scan borné : 30 min de jeu par ROM (mur horloce gracieux), films TAS minés
+# localement par ressemblance de titre (assignation exclusive, les suites ne
+# polluent pas l'original), RAM plafonnée ; sorties dans
+# output/batch/<titre>/{<titre>.summary.json, .txt, .map.png, .log, state/}
+python3 tools/scan_all.py scan
+# une ROM à fond (pas de mur horloge), en reprenant son pool sauvegardé
+python3 tools/scan_all.py scan --only zelda --full --resume
+# agrégation : couverture par ROM, anatomie du résidu, murs et saturations
+python3 tools/scan_all.py digest            # -> output/batch/REPORT.md
+```
 
 ## État
 

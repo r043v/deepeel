@@ -71,12 +71,19 @@ void dp_copy_on_back_edge(DpCopyTracker *ct, uint16_t site, uint32_t site_key) {
 // that triggered hardware channels
 void dp_record_copy(DpExplorer *ex, const DpCopyRec *rec, uint32_t attrib_key) {
     DpResults *res = ex->res;
-    if (res->copy_count >= (int)ex->cfg.max_copies) return;
+    // the append+grow is one critical section: two session workers hitting the
+    // growth window together used to swap reallocs and corrupt the heap
+    if (res->mt) pthread_mutex_lock(&res->rec_mtx);
+    if (res->copy_count >= (int)ex->cfg.max_copies) {
+        if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
+        return;
+    }
     if (res->copy_count == res->copy_cap) {
         res->copy_cap = res->copy_cap ? res->copy_cap * 2 : 64;
         res->copies = realloc(res->copies, sizeof(DpCopyRec) * (size_t)res->copy_cap);
     }
     res->copies[res->copy_count++] = *rec;
+    if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
     ex->credit_copies++;
     if (rec->src_space == DP_SPACE_ROM) {
         uint32_t len = (uint32_t)(rec->src_hi - rec->src_lo + 1);
