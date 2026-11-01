@@ -74,7 +74,8 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
              "budgets: %u paths cap hit, %u step-wall hit, %u queue overflows (%u growths), %u forks capped, %u outside-rom exec\n"
              "spool: %u written, %u read back, %u refused, %llu bytes pending\n"
              "seeds: %u natural, %u speculative\n"
-             "data: %llu bytes proven verbatim (cov flag 8), %u exec∩data contradictions\n",
+             "data: %llu bytes proven verbatim (cov flag 8), %u exec∩data contradictions\n"
+             "provenance: %u jp-hl targets, %u data bytes static, %u partial, %u caps\n",
              (unsigned long long)res->steps_total, (unsigned long long)res->paths_run,
              (unsigned long long)(res->forks_branch + res->forks_irq + res->forks_key +
                                   res->forks_p1),
@@ -86,7 +87,8 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
              res->spool_writes, res->spool_reads, res->spool_refused,
              (unsigned long long)res->spool_bytes,
              res->seeds_natural, res->seeds_spec,
-             (unsigned long long)res->data_verbatim_bytes, res->data_contradictions);
+             (unsigned long long)res->data_verbatim_bytes, res->data_contradictions,
+             res->prov_jp_hl, res->prov_data, res->prov_unresolved, res->prov_sat);
     dp_buf_str(out, line);
     {
         uint64_t stat_only = 0, ind_sites = 0, ind_over = 0;
@@ -267,7 +269,7 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
                   "\"forks_key\":%u,\"forks_p1\":%u,\"forks_capped\":%u,\"forks_covered_pruned\":%u,"
                   "\"sections\":%u,\"evicted_exact\":%u,\"evicted_ctx\":%u,\"cycle_cuts\":%u,"
                   "\"step_cuts\":%u,\"pad_cuts\":%u,\"halt_cuts\":%u,\"nonsense_echo\":%u,\"nonsense_data\":%u,\"nonsense_stack\":%u,\"budget_paths\":%u,\"budget_steps\":%u,\"queue_overflows\":%u,\"queue_growths\":%u,\"spool_writes\":%u,\"spool_reads\":%u,\"spool_refused\":%u,"
-                  "\"exec_outside\":%u,\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u},\n",
+                  "\"exec_outside\":%u,\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u,\"prov_jp_hl\":%u,\"prov_data\":%u,\"prov_partial\":%u,\"prov_sat\":%u},\n",
                (unsigned long long)res->steps_total, (unsigned long long)res->paths_run, res->forks_branch, res->forks_irq,
                res->forks_key, res->forks_p1, res->forks_capped, res->forks_covered_pruned,
                (unsigned)res->section_count, res->evicted_exact, res->evicted_ctx, res->cycle_cuts,
@@ -275,7 +277,8 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
                res->nonsense_stack, res->budget_paths, res->budget_steps, res->queue_overflows,
                res->queue_growths, res->spool_writes, res->spool_reads, res->spool_refused,
                res->exec_outside, res->seeds_natural, res->seeds_spec,
-               res->seeds_skipped_data, (unsigned)res->bad_op_count);
+               res->seeds_skipped_data, (unsigned)res->bad_op_count, res->prov_jp_hl,
+               res->prov_data, res->prov_unresolved, res->prov_sat);
     dp_buf_fmt(o, "\"closure\": {\"rounds\":%u,\"starts\":%u,\"unresolved_bank\":%u,"
                   "\"stopped_data\":%u,\"stopped_illegal\":%u,\"seeds\":%u,\"seeds_dropped\":%u,"
                   "\"seeds_refused\":%u,\"bank_seeds\":%u,\"indirect_seeds\":%u},\n",
@@ -470,7 +473,7 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
                   "\"pad_cuts\":%u,\"halt_cuts\":%u,\"nonsense_echo\":%u,\"nonsense_data\":%u,"
                   "\"nonsense_stack\":%u,\"budget_paths\":%u,\"budget_steps\":%u,"
                   "\"queue_overflows\":%u,\"queue_growths\":%u,\"spool_writes\":%u,\"spool_reads\":%u,\"spool_refused\":%u,\"exec_outside\":%u,"
-                  "\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u},\n",
+                  "\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u,\"prov_jp_hl\":%u,\"prov_data\":%u,\"prov_partial\":%u,\"prov_sat\":%u},\n",
                (unsigned long long)res->steps_total, (unsigned long long)res->paths_run,
                res->forks_branch, res->forks_irq, res->forks_key, res->forks_p1, res->forks_capped,
                res->forks_covered_pruned, (unsigned)res->section_count, res->evicted_exact,
@@ -479,7 +482,8 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
                res->budget_steps, res->queue_overflows, res->queue_growths, res->spool_writes,
                res->spool_reads, res->spool_refused, res->exec_outside,
                res->seeds_natural, res->seeds_spec, res->seeds_skipped_data,
-               (unsigned)res->bad_op_count);
+               (unsigned)res->bad_op_count, res->prov_jp_hl, res->prov_data,
+               res->prov_unresolved, res->prov_sat);
     dp_buf_fmt(o, "\"closure\": {\"rounds\":%u,\"starts\":%u,\"unresolved_bank\":%u,"
                   "\"stopped_data\":%u,\"stopped_illegal\":%u,\"seeds\":%u,\"seeds_dropped\":%u,"
                   "\"seeds_refused\":%u,\"bank_seeds\":%u,\"indirect_seeds\":%u},\n",

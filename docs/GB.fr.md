@@ -63,6 +63,15 @@ matériels sont ceux de m0boy.
   C=$FF00) : chaque touche pressée devient une variante forcée dont seule
   la valeur lue diffère (l'IRQ du press est effacée de la variante).
   `--no-key-fork` / `--no-p1-fork` pour désactiver ; compteur `forks_p1`.
+- **Provenance statique** : passe sans machine qui suit HL (et A) octet par
+  octet sur les runs droits — chargements immédiats, mots ROM à adresse
+  absolue, `INC/DEC HL` exacts, `ld h/l,a`, et les tables parcourues pointeur
+  en main (`ld a,(hl); inc hl; ld h,(hl); ld l,a; jp hl`). Un `jp hl` à HL
+  entièrement connu prouve sa cible (`code statique`, la fermeture l'étend) ;
+  une lecture ROM à adresse entièrement connue prouve la donnée
+  (`donnée statique`, nouvelle classe de carte). Preuve partielle (octet haut
+  inconnu, fenêtre $4000 sans banque prouvée) = rien n'est prouvé, compté
+  (`prov_partial`) ; caps de pas/d'états comptés (`prov_sat`).
 - **Évictions** : dédup exact d'état (hash d'image hors cycle), éviction
   « même contexte » par section, budgets (pas/chemin, pas global, sites de
   fork, arrière-branches), tout compté dans le rapport.

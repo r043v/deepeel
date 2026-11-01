@@ -31,6 +31,7 @@ enum {
     DP_DF_READ = 1 << 0, // read as data through the ROM windows
     DP_DF_COPIED = 1 << 1, // source range of a copy into VRAM/OAM
     DP_DF_VERBATIM = 1 << 2, // source range of a verbatim copy (byte for byte)
+    DP_DF_STATIC = 1 << 3, // read by statically proven code (provenance pass)
 };
 enum {
     DP_SF_POINTER = 1 << 0, // static: part of a plausible pointer table
@@ -224,6 +225,8 @@ typedef struct DpResults {
     uint8_t oam_written;
     // data proven by exploration, for the m0boy bridge
     uint64_t data_verbatim_bytes; // bytes with DP_DF_VERBATIM
+    uint32_t prov_jp_hl, prov_data;  // provenance: jp-hl targets proven, bytes proven data
+    uint32_t prov_unresolved, prov_sat, prov_steps; // partial proofs, caps hit, walk steps
     uint32_t data_contradictions; // bytes both executed and proven data (kept code)
 } DpResults;
 
@@ -416,6 +419,7 @@ void dp_section_banks_seen(DpSection *s, uint32_t bank);
 // proven data stop the flow.  Terminates by construction (a visited map the
 // size of the ROM).  Returns the newly marked byte count.
 uint32_t dp_static_closure(DpResults *res);
+uint32_t dp_provenance(DpResults *res); // static HL/A provenance: jp-hl targets + proven data reads
 // seed the fork explorer at the closure's entry points that were never
 // executed (jump/call/branch targets): the static flow proposes, the machine
 // disposes (nonsense eviction, indirect targets).  Returns seeds queued; the

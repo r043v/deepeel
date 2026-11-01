@@ -98,6 +98,11 @@ croissance s'arrête au mur `--mem-cap` et chaque croissance est comptée),
 `--loop-cap`, `--seed-cap`, `--seed-banks`, `--closure-rounds` (défaut 12),
 `--covered-keep`, `--no-pointer-scan`, `--no-context-evict`, `--no-irq-fork`, `--no-key-fork`, `--no-p1-fork` (sondes manette : presses par IRQ joypad et lectures directes de `$FF00`).
 
+La **provenance statique** (portage de la branche z80) prouve sans machine
+les cibles des `jp hl` (chargements immédiats, tables parcourues pointeur en
+main) et les octets de données qu'elles consultent — nouvelle classe
+`donnée statique` sur la carte, compteurs `prov_*` dans le rapport.
+
 Avec un `--state-dir`, le **spool disque** rend l'exploration arrêtable et
 repreneuse à volonté : les états débordant de la file RAM attendent dans
 `spool.bin` et un `--resume` relit tout (file + dedup `exact.bin`), même après

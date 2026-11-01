@@ -16,7 +16,7 @@ char dp_block_class(const DpResults *res, int bank, int block);
 
 // ---- .map: classification of 100% of the ROM (see map.c)
 enum { DP_MAP_UNKNOWN, DP_MAP_CODE_NAT, DP_MAP_CODE_FORCED, DP_MAP_CODE_STATIC,
-       DP_MAP_DATA_COPIED, DP_MAP_DATA_READ, DP_MAP_TABLE, DP_MAP_PAD,
+       DP_MAP_DATA_COPIED, DP_MAP_DATA_READ, DP_MAP_DATA_STATIC, DP_MAP_TABLE, DP_MAP_PAD,
        DP_MAP_INF_DATA, DP_MAP_INF_CODE, DP_MAP_INF_PAD, DP_MAP_COUNT };
 typedef struct DpMapSummary {
     uint64_t total, known, unknown, code, data, pad, inferred;

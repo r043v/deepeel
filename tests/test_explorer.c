@@ -128,6 +128,12 @@ int main(int argc, char **argv) {
     run(dir, "jumptable");
     CHECK(section_at(0, 0x220) != NULL && section_at(0, 0x210) != NULL);
     CHECK(res.exec_hits[0x215] > 0 && res.exec_hits[0x225] > 0); // both handlers halted
+    // provenance: HL proven at each jp hl, and the pointer table proven data
+    dp_provenance(&res);
+    CHECK(res.prov_jp_hl >= 3);                  // $0210, $0220 (imm) and $0240 (walk)
+    CHECK(res.data_flags[0x230] & DP_DF_STATIC); // table bytes proven data
+    CHECK(res.data_flags[0x231] & DP_DF_STATIC);
+    CHECK(res.exec_hits[dp_rom_index(0, 0x240)] > 0); // the walk really landed there
 
     // --- loop: infinite loop contained ----------------------------------------------
     run(dir, "loop");

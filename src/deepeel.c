@@ -856,6 +856,10 @@ static void closure_rounds(DpExplorer *ex, DpResults *res) {
             if (res->disc_n) res->disc[res->disc_n - 1].credit = res->disc[res->disc_n - 1].known - k0;
         }
     }
+    uint32_t prov = dp_provenance(res);
+    fprintf(stderr, "deepeel: provenance: %u jp-hl targets, %u data bytes proven (%u partial, %u caps)\n",
+            res->prov_jp_hl, res->prov_data, res->prov_unresolved, res->prov_sat);
+    (void)prov;
     dp_static_closure(res); // the last search may have opened more direct flow
 }
 

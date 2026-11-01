@@ -10,13 +10,13 @@
 
 const char *dp_map_class_name(int c) {
     static const char *nm[DP_MAP_COUNT] = { "unknown", "code-natural", "code-forced",
-        "code-static", "data-copied", "data-read", "table", "padding",
+        "code-static", "data-copied", "data-read", "data-static", "table", "padding",
         "inferred-data", "inferred-code", "inferred-padding" };
     return c >= 0 && c < DP_MAP_COUNT ? nm[c] : "?";
 }
 
 int dp_map_is_code(int c) { return c == DP_MAP_CODE_NAT || c == DP_MAP_CODE_FORCED || c == DP_MAP_CODE_STATIC || c == DP_MAP_INF_CODE; }
-int dp_map_is_data(int c) { return c == DP_MAP_DATA_COPIED || c == DP_MAP_DATA_READ || c == DP_MAP_TABLE || c == DP_MAP_INF_DATA; }
+int dp_map_is_data(int c) { return c == DP_MAP_DATA_COPIED || c == DP_MAP_DATA_READ || c == DP_MAP_DATA_STATIC || c == DP_MAP_TABLE || c == DP_MAP_INF_DATA; }
 
 uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
     size_t n = (size_t)res->banks * 0x4000;
@@ -28,6 +28,7 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
         else if (x & DP_XF_FORCED) c = DP_MAP_CODE_FORCED;
         else if (x & DP_XF_STATIC) c = DP_MAP_CODE_STATIC;
         else if (d & (DP_DF_COPIED | DP_DF_VERBATIM)) c = DP_MAP_DATA_COPIED;
+        else if (d & DP_DF_STATIC) c = DP_MAP_DATA_STATIC;
         else if (d & DP_DF_READ) c = DP_MAP_DATA_READ;
         else if (s & DP_SF_POINTER) c = DP_MAP_TABLE;
         else if (s & DP_SF_PAD) c = DP_MAP_PAD;
@@ -252,6 +253,7 @@ static const uint8_t map_rgb[DP_MAP_COUNT][3] = {
     { 0x9c, 0xc4, 0xee }, // code-static
     { 0x2e, 0xa0, 0x4f }, // data-copied
     { 0x62, 0xc2, 0x7a }, // data-read
+    { 0x3a, 0xb8, 0xbf }, // data-static
     { 0xc9, 0xa2, 0x27 }, // table
     { 0x70, 0x70, 0x70 }, // padding
     { 0x8f, 0xd6, 0xa0 }, // inferred-data
@@ -483,7 +485,7 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     enum { SQ = 6, GRID = 16, BANK_PX = SQ * GRID, GAP = 6, PER_ROW = 8 };
     static const char *fr[DP_MAP_COUNT] = {
         "inconnu", "code naturel", "code forcé", "code statique",
-        "donnée copiée", "donnée lue", "table", "padding",
+        "donnée copiée", "donnée lue", "donnée statique", "table", "padding",
         "donnée inférée", "code inféré", "padding inféré" };
     int cols = banks < PER_ROW ? banks : PER_ROW;
     int rows = (banks + PER_ROW - 1) / PER_ROW;

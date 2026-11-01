@@ -150,7 +150,15 @@ def build(out):
     w(r, 0x159, 0x21, 0x20, 0x02)                # ld hl,$0220 (handler A)
     w(r, 0x15C, 0xE9)                            # jp hl
     w(r, 0x210, 0x3E, 0x11, 0xEA, 0x00, 0x80, 0x76)  # handler B: vram $11, halt
-    w(r, 0x220, 0x3E, 0x22, 0xEA, 0x00, 0x80, 0x76)  # handler A: vram $22, halt
+    # handler A: walks the pointer table at $0230, then jp hl -> handler C
+    w(r, 0x220, 0x21, 0x30, 0x02)                # ld hl,$0230
+    w(r, 0x223, 0x7E)                            # ld a,(hl)   a = low byte
+    w(r, 0x224, 0x23)                            # inc hl
+    w(r, 0x225, 0x66)                            # ld h,(hl)   h = high byte
+    w(r, 0x226, 0x6F)                            # ld l,a      hl = pointer
+    w(r, 0x227, 0xE9)                            # jp hl
+    w(r, 0x230, 0x40, 0x02)                      # pointer -> $0240
+    w(r, 0x240, 0x3E, 0x33, 0xEA, 0x00, 0x80, 0x76)  # handler C: vram $33, halt
     save(out, "fix_jumptable", r)
 
     # --- loop: infinite tight loop -------------------------------------------
