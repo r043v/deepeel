@@ -1,5 +1,42 @@
 # Plateforme Game Boy
 
+Évolution multi-systèmes : le registre de ports, le désassemblage et les
+premières explorations Z80/Sega sont décrits dans [Z80.fr.md](Z80.fr.md).
+Ils utilisent des machines et rapports séparés ; la limite ROM `$8000` de
+la GB ne s'applique pas aux fenêtres ROM Sega `$8000-$BFFF`.
+Les rapports Z80 suivent aussi les origines à travers registres, pile et
+RAM, distinguent WRAM/SRAM/VRAM/CRAM et les validations du latch de palette GG.
+Les sondes de pads, Start, Pause/NMI et Reset SMS ont une seconde phase et
+un budget explicite `--input-total` ; les plafonds du passage initial sont conservés.
+La fermeture statique Z80 ajoute une classe `code-static`, distincte des
+exécutions, avec vues de banques observées et saturations rapportées.
+La classe Z80 `data-static` conserve les consultations ROM de l’analyse sans
+les compter comme lectures machine ; `--evidence` exporte les preuves
+superposées par octet en complément de la carte à classe principale.
+Les constantes HL/IX/IY permettent aussi de résoudre des sauts indirects
+statiques, sans contourner les barrières de mapping ni compter une exécution.
+Leurs adresses d’écriture connues affinent aussi les barrières de banques et
+les invalidations de pile, avec déplacements signés et miroirs propres au profil.
+Les lectures d’octets ROM à adresse connue et les INC/DEC 16 bits permettent
+aussi de reconstruire des cibles depuis une table, sans supposer de valeur RAM.
+Un affinement BC/DE et des blocs utilise le budget restant des cibles, avec
+contextes séparés et saturations rapportées, pour conserver les preuves antérieures.
+Le pont Sega distingue les gates cartouche/RAM/entrées du contrôle mémoire ;
+les changements de visibilité sont consignés dans la timeline bornée de banques.
+Le choix Z80 `--mapper auto|sega|codemasters|korean150` est désormais explicite
+pour SMS/GG ; le rapport indique le mapper retenu et son mode de sélection.
+Un journal Z80 `memory control writes` conserve aussi les valeurs avant/après,
+les bits actifs du profil et le caractère naturel/forcé, avec surplus compté,
+même si l’écriture ne change aucune visibilité ROM/RAM.
+Les commandes VDP indirectes et prises effectives INT/NMI ont aussi leurs
+compteurs et journaux bornés, distincts des simples accès ports et fourches.
+Le registre et le premier pont MSX1 isolé sont décrits dans [MSX.fr.md](MSX.fr.md) ;
+leur exploration dynamique produit désormais rapports et cartes, avec slots,
+BIOS, AY, entrées et IRQ. La fermeture statique MSX utilise les vues de
+slots et de banques observées, avec preuves de pile limitées à la RAM visible.
+Les accès internes du BIOS MSX simulé sont instrumentés au build et comparés
+à la version non instrumentée.
+
 ## Registre matériel
 
 `src/platform/gb/gb_plat.c` porte la table complète (`deepeel regs gb` pour

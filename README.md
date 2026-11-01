@@ -79,6 +79,7 @@ deepeel explore rom.gb --play --frames 6000 --export-playable chemin/vers/projet
 deepeel explore rom.gb --play --gui --human
 deepeel map rom.gb                           # carte statique seule (pointeurs, padding)
 deepeel regs gb                              # dump du registre matériel GB
+deepeel regs msx                             # registre MSX1 ; pont machine en cours
 deepeel dis rom.gb 2:4000 12                 # désassemblage banque 2, $4000
 ```
 
@@ -96,9 +97,19 @@ count`) — pont optionnel vers le convertisseur.
   réels, CPU interprété) — 17 variantes MBC×RAM compilées au build, un
   thread = une instance préfixée. Voir `docs/GB.fr.md` pour le registre
   matériel, l'arbre et les limites actuelles.
+- **Z80 / SG-1000 / Master System / Game Gear** : première intégration des
+  machines m0boy, exploration bornée à fourches, registres matériels,
+  désassemblage et cartes texte via `deepeel z80 explore sms jeu.sms`.
+  Les profils SMS/GG acceptent aussi `--mapper sega|codemasters|korean150`
+  pour remplacer l’autodétection. Voir `docs/Z80.fr.md` pour les limites.
+- **MSX1** : registre matériel et pont machine isolé (slots, mappers,
+  PPI, AY, BIOS simulé), exploration dynamique bornée et cartes texte via
+  `deepeel z80 explore msx jeu.rom --mapper auto`, puis fermeture statique
+  sur les vues de slots et de banques observées. Voir
+  [docs/MSX.fr.md](docs/MSX.fr.md).
 - Autres plateformes : l'architecture est prête (`src/platform/platform.h`,
   `src/cpu/`) — une plateforme = une table de registres + des hooks ; un CPU
-  = un décodeur/exécuteur qui journalise ses effets. Z80, 6502, HuC6280,
+  = un décodeur/exécuteur qui journalise ses effets. 6502, HuC6280,
   68000, 65816 sont les suivants naturels.
 
 ## Layout

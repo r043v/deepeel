@@ -215,6 +215,69 @@ if(SDL2_FOUND AND BUILD_GUI)
 endif()
 
 add_executable(deepeel src/deepeel.c)
+add_library(deepeel_z80 STATIC
+  ${M0BOY_DIR}/targets/sg1000/runtime/z80.c
+  src/cpu/z80/z80.c
+  src/cpu/z80/provenance.c
+  src/cpu/z80/command.c
+  src/platform/sega/sega.c)
+target_include_directories(deepeel_z80 PUBLIC
+  ${M0BOY_DIR}/targets/sg1000/runtime src)
+add_library(deepeel_sg STATIC
+  ${M0BOY_DIR}/targets/sg1000/runtime/sg1000.c
+  ${M0BOY_DIR}/targets/sg1000/runtime/sg_audio.c
+  ${M0BOY_DIR}/targets/sg1000/runtime/tms9918.c
+  src/platform/sega/backend_sg.c)
+target_compile_definitions(deepeel_sg PRIVATE
+  machine=dp_sg_machine sg_stack_limit=dp_sg_stack_limit
+  sg_sync=dp_sg_sync sg_event=dp_sg_event sg_halt=dp_sg_halt
+  sg_exec=dp_sg_exec sg_interp_block=dp_sg_interp_block sg_step=dp_sg_step)
+target_include_directories(deepeel_sg PRIVATE ${M0BOY_DIR}/targets/common/runtime)
+target_link_libraries(deepeel_sg PUBLIC deepeel_z80)
+add_library(deepeel_gg STATIC
+  ${M0BOY_DIR}/targets/gamegear/runtime/gg.c
+  ${M0BOY_DIR}/targets/gamegear/runtime/gg_vdp.c
+  ${M0BOY_DIR}/targets/gamegear/runtime/gg_psg.c
+  src/platform/sega/backend_gg.c)
+target_include_directories(deepeel_gg PRIVATE
+  ${M0BOY_DIR}/targets/gamegear/runtime ${M0BOY_DIR}/targets/common/runtime)
+target_compile_definitions(deepeel_gg PRIVATE GG_ROM_TRACE=1)
+target_link_libraries(deepeel_gg PUBLIC deepeel_z80)
+# A separate MSX1 instance: shared Z80 CPU, distinct SG/TMS/AY runtime symbols.
+set(DP_MSX_SOURCE ${GEN}/dp_msx_runtime.c)
+add_custom_command(OUTPUT ${DP_MSX_SOURCE}
+  COMMAND ${CMAKE_COMMAND}
+    -DINPUT=${M0BOY_DIR}/targets/msx/runtime/msx.c -DOUTPUT=${DP_MSX_SOURCE}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_msx_instrument.cmake
+  DEPENDS ${M0BOY_DIR}/targets/msx/runtime/msx.c cmake/dp_msx_instrument.cmake
+  VERBATIM)
+add_library(deepeel_msx_raw STATIC
+  ${M0BOY_DIR}/targets/sg1000/runtime/sg1000.c
+  ${M0BOY_DIR}/targets/sg1000/runtime/tms9918.c
+  ${DP_MSX_SOURCE}
+  ${M0BOY_DIR}/targets/msx/runtime/msx_ay.c
+  src/platform/msx/backend.c src/platform/msx/registry.c)
+target_compile_definitions(deepeel_msx_raw PRIVATE SG_MSX=1 SG_MSX_RAM=65536)
+target_include_directories(deepeel_msx_raw PRIVATE
+  ${M0BOY_DIR}/targets/sg1000/runtime ${M0BOY_DIR}/targets/common/runtime
+  ${M0BOY_DIR}/targets/msx/runtime ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/msx)
+set(DP_MSX_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_msx.a)
+add_custom_command(OUTPUT ${DP_MSX_ARCHIVE}
+  BYPRODUCTS ${DP_MSX_ARCHIVE}.syms
+  COMMAND ${CMAKE_COMMAND} -DNM=${DP_NM} -DOBJCOPY=${DP_OBJCOPY}
+    -DINPUT=$<TARGET_FILE:deepeel_msx_raw> -DOUTPUT=${DP_MSX_ARCHIVE}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_msx_prefix.cmake
+  DEPENDS deepeel_msx_raw cmake/dp_msx_prefix.cmake VERBATIM)
+add_custom_target(dp_msx_runtime DEPENDS ${DP_MSX_ARCHIVE})
+add_library(deepeel_msx STATIC IMPORTED GLOBAL)
+set_target_properties(deepeel_msx PROPERTIES IMPORTED_LOCATION ${DP_MSX_ARCHIVE}
+  INTERFACE_LINK_LIBRARIES deepeel_z80)
+add_dependencies(deepeel_msx dp_msx_runtime)
+target_link_libraries(deepeel PRIVATE deepeel_msx)
+add_library(deepeel_sega STATIC src/platform/sega/explore.c src/platform/sega/closure.c src/platform/sega/visits.c)
+target_link_libraries(deepeel_sega PUBLIC deepeel_sg deepeel_gg deepeel_msx)
+target_link_libraries(deepeel PRIVATE deepeel_sega)
+target_link_libraries(deepeel PRIVATE deepeel_z80)
 target_link_libraries(deepeel PRIVATE deepeel_core m ${DP_GUI_LIBS})
 
 option(BUILD_TESTS "Build the test suite" ON)

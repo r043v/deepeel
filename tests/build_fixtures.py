@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds the synthetic Game Boy fixtures for the deepeel test suite.
+"""Builds the synthetic GB and Z80 fixtures for the deepeel test suite.
 
 Every fixture is a minimal ROM exercising one exploration behaviour:
   branch     - both sides of a conditional + a ROM->VRAM copy loop
@@ -33,6 +33,15 @@ def save(out, name, r):
     print("wrote", path, len(r))
 
 def build(out):
+    # Ambiguous Sega image: Codemasters signature, code that banks slot zero.
+    z80 = bytearray([0xff]) * 0x10000
+    w(z80, 0, 0xc3, 0x00, 0x01)
+    w(z80, 0x100, 0x3e, 2, 0x32, 0, 0, 0x76)
+    w(z80, 0x8105, 0x21, 0xcd, 0xab, 0x76)
+    w(z80, 0x7fe6, 1, 0, 0xff, 0xff)
+    with open(os.path.join(out, "fix_sega_mapper.sms"), "wb") as f:
+        f.write(z80)
+
     # --- branch: cp/jr z with both sides + copy loop -------------------------
     r = rom(2)
     w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)          # nop; jp $0150

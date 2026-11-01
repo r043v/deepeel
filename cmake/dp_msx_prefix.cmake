@@ -1,0 +1,22 @@
+# Namespace the embedded MSX runtime, including references between archive members.
+execute_process(COMMAND "${NM}" -g --defined-only --format=posix "${INPUT}"
+  OUTPUT_VARIABLE symbols RESULT_VARIABLE result)
+if(NOT result EQUAL 0)
+  message(FATAL_ERROR "Cannot inspect MSX runtime symbols")
+endif()
+string(REGEX MATCHALL "(^|\n)(__odr_asan[.])?(machine|sg_[A-Za-z0-9_]+|sg1000_[A-Za-z0-9_]+|msx_[A-Za-z0-9_]+) [A-Za-z] " matches "${symbols}")
+set(mapping "")
+foreach(match IN LISTS matches)
+  string(STRIP "${match}" match)
+  string(REGEX REPLACE " [A-Za-z]$" "" symbol "${match}")
+  string(APPEND mapping "${symbol} dp_msx_runtime_${symbol}\n")
+endforeach()
+if(mapping STREQUAL "")
+  message(FATAL_ERROR "No MSX runtime symbols found")
+endif()
+file(WRITE "${OUTPUT}.syms" "${mapping}")
+execute_process(COMMAND "${OBJCOPY}" --redefine-syms "${OUTPUT}.syms" "${INPUT}" "${OUTPUT}"
+  RESULT_VARIABLE result)
+if(NOT result EQUAL 0)
+  message(FATAL_ERROR "Cannot namespace MSX runtime")
+endif()

@@ -1,7 +1,101 @@
 # fixtures are generated at build time; no ROM ever lands in the repository
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_executable(test_z80 test_z80.c)
+target_link_libraries(test_z80 PRIVATE deepeel_z80)
+add_test(NAME z80 COMMAND test_z80)
+add_executable(test_provenance test_provenance.c)
+target_link_libraries(test_provenance PRIVATE deepeel_z80)
+add_test(NAME provenance COMMAND test_provenance)
+add_executable(test_sega test_sega.c)
+target_link_libraries(test_sega PRIVATE deepeel_sega)
+add_test(NAME sega COMMAND test_sega)
+add_executable(test_sega_copies test_sega_copies.c)
+target_link_libraries(test_sega_copies PRIVATE deepeel_sega)
+add_test(NAME sega_copies COMMAND test_sega_copies)
+add_executable(test_sega_inputs test_sega_inputs.c)
+target_link_libraries(test_sega_inputs PRIVATE deepeel_sega)
+add_test(NAME sega_inputs COMMAND test_sega_inputs)
+
+add_executable(test_sega_closure test_sega_closure.c)
+target_link_libraries(test_sega_closure PRIVATE deepeel_sega)
+add_test(NAME sega_closure COMMAND test_sega_closure)
+
+add_executable(test_sega_visits test_sega_visits.c)
+target_link_libraries(test_sega_visits PRIVATE deepeel_sega)
+add_test(NAME sega_visits COMMAND test_sega_visits)
+set_tests_properties(sega_visits PROPERTIES TIMEOUT 30)
+
+add_executable(test_sega_mappers test_sega_mappers.c)
+target_link_libraries(test_sega_mappers PRIVATE deepeel_sega)
+add_test(NAME sega_mappers COMMAND test_sega_mappers)
+set_tests_properties(sega_mappers PROPERTIES TIMEOUT 30)
+
+add_executable(test_sega_hardware test_sega_hardware.c)
+target_link_libraries(test_sega_hardware PRIVATE deepeel_sega)
+add_test(NAME sega_hardware COMMAND test_sega_hardware)
+
+add_executable(test_msx test_msx.c)
+target_link_libraries(test_msx PRIVATE deepeel_msx deepeel_sega)
+add_test(NAME msx COMMAND test_msx)
+
+add_executable(test_z80_blocks test_z80_blocks.c)
+target_link_libraries(test_z80_blocks PRIVATE deepeel_sega)
+add_test(NAME z80_blocks COMMAND test_z80_blocks)
+set_tests_properties(z80_blocks PROPERTIES TIMEOUT 30)
+
+add_executable(test_z80_static_data test_z80_static_data.c)
+target_link_libraries(test_z80_static_data PRIVATE deepeel_sega)
+add_test(NAME z80_static_data COMMAND test_z80_static_data)
+set_tests_properties(z80_static_data PROPERTIES TIMEOUT 30)
+
+add_executable(test_z80_stores test_z80_stores.c)
+target_link_libraries(test_z80_stores PRIVATE deepeel_sega)
+add_test(NAME z80_stores COMMAND test_z80_stores)
+set_tests_properties(z80_stores PROPERTIES TIMEOUT 30)
+
+add_executable(test_z80_targets test_z80_targets.c)
+target_link_libraries(test_z80_targets PRIVATE deepeel_sega)
+add_test(NAME z80_targets COMMAND test_z80_targets)
+set_tests_properties(z80_targets PROPERTIES TIMEOUT 30)
+
+add_executable(test_msx_closure test_msx_closure.c)
+target_link_libraries(test_msx_closure PRIVATE deepeel_sega)
+add_test(NAME msx_closure COMMAND test_msx_closure)
+set_tests_properties(msx_closure PROPERTIES TIMEOUT 30)
+
+add_executable(test_msx_explore test_msx_explore.c)
+target_link_libraries(test_msx_explore PRIVATE deepeel_sega)
+add_test(NAME msx_explore COMMAND test_msx_explore)
+set_tests_properties(msx_explore PROPERTIES TIMEOUT 30)
+
+add_executable(test_msx_bios test_msx_bios.c)
+target_link_libraries(test_msx_bios PRIVATE deepeel_msx)
+add_test(NAME msx_bios COMMAND test_msx_bios)
+set_tests_properties(msx msx_bios PROPERTIES TIMEOUT 30)
+
+# Differential check: instrumented BIOS and untouched upstream BIOS must
+# produce the same CPU, memory and device state, in separate executables.
+add_library(msx_bios_native STATIC
+  ${M0BOY_DIR}/targets/sg1000/runtime/sg1000.c
+  ${M0BOY_DIR}/targets/sg1000/runtime/tms9918.c
+  ${M0BOY_DIR}/targets/msx/runtime/msx.c
+  ${M0BOY_DIR}/targets/msx/runtime/msx_ay.c
+  ${CMAKE_SOURCE_DIR}/src/platform/msx/backend.c)
+target_compile_definitions(msx_bios_native PRIVATE SG_MSX=1 SG_MSX_RAM=65536)
+target_include_directories(msx_bios_native PRIVATE
+  ${M0BOY_DIR}/targets/sg1000/runtime ${M0BOY_DIR}/targets/common/runtime)
+target_link_libraries(msx_bios_native PUBLIC deepeel_z80)
+add_executable(msx_bios_reference msx_bios_digest.c)
+target_link_libraries(msx_bios_reference PRIVATE msx_bios_native)
+add_executable(msx_bios_instrumented msx_bios_digest.c)
+target_link_libraries(msx_bios_instrumented PRIVATE deepeel_msx)
+add_test(NAME msx_bios_equivalence COMMAND ${CMAKE_COMMAND}
+  -DNATIVE=$<TARGET_FILE:msx_bios_reference> -DTRACED=$<TARGET_FILE:msx_bios_instrumented>
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/msx_bios_compare.cmake)
+set_tests_properties(msx_bios_equivalence PROPERTIES TIMEOUT 30)
 
 set(FIXTURES
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_sega_mapper.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_branch.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_mbc5.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_dma.gb
@@ -23,10 +117,16 @@ add_custom_command(
   OUTPUT ${FIXTURES}
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/build_fixtures.py ${CMAKE_CURRENT_BINARY_DIR}
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/build_fixtures.py
-  COMMENT "building synthetic GB fixtures"
+  COMMENT "building synthetic ROM fixtures"
 )
 
 add_custom_target(fixtures ALL DEPENDS ${FIXTURES})
+
+add_test(NAME sega_mapper_cli COMMAND ${CMAKE_COMMAND}
+  -DCLI=$<TARGET_FILE:deepeel> -DROM=${CMAKE_CURRENT_BINARY_DIR}/fix_sega_mapper.sms
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/sega_mapper_cli.cmake)
+set_tests_properties(sega_mapper_cli PROPERTIES TIMEOUT 30)
+
 
 add_executable(test_core test_core.c)
 target_link_libraries(test_core PRIVATE deepeel_core m)

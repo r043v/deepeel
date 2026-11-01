@@ -16,6 +16,9 @@
 #include "report/report.h"
 #include "gui/gui.h"
 #include "cpu/sm83/sm83.h"
+#include "platform/sega/sega.h"
+#include "platform/msx/msx.h"
+#include "platform/sega/explore.h"
 
 #include <time.h>
 
@@ -23,6 +26,9 @@ static void usage(void) {
     fprintf(stderr,
             "deepeel — ROM memory-map explorer (game boy first)\n\n"
             "  deepeel explore rom.gb [options]\n"
+            "  deepeel z80 explore <sg|sms|gg|msx> ROM [--input-total N] [--input-forks N] [--text FILE] [--map FILE] [--evidence FILE]\n"
+            "  deepeel z80 dis ROM hex-offset [instruction-count]\n"
+            "  deepeel regs <gb|sg|sms|gg|msx>\n"
             "    --max-steps N        per-path step budget (default 100000)\n"
             "    --max-paths N        path cap (default 200000)\n"
             "    --max-total N        global step wall (default 20000000)\n"
@@ -551,8 +557,11 @@ static int cmd_map(int argc, char **argv) {
 }
 
 static int cmd_regs(int argc, char **argv) {
+    if(argc>=3 && !strcmp(argv[2],"msx")) { dp_msx_regs(stdout); return 0; }
+    const DpSegaSystem *sega = argc >= 3 ? dp_sega_system(argv[2]) : NULL;
+    if (sega) { dp_sega_regs(stdout, sega); return 0; }
     if (argc < 3 || strcmp(argv[2], "gb")) {
-        fprintf(stderr, "deepeel regs <platform> — platforms: gb\n");
+        fprintf(stderr, "deepeel regs <platform> — platforms: gb, sg, sms, gg, msx\n");
         return 2;
     }
     const DpPlatform *p = dp_platform_gb();
@@ -646,6 +655,9 @@ static void closure_rounds(DpExplorer *ex, DpResults *res) {
 
 int main(int argc, char **argv) {
     if (argc < 2) return usage(), 2;
+    if (!strcmp(argv[1], "z80") && argc > 2 && !strcmp(argv[2], "explore"))
+        return dp_sega_explore_command(argc, argv);
+    if (!strcmp(argv[1], "z80")) return dp_z80_command(argc, argv);
     if (!strcmp(argv[1], "explore")) return cmd_explore(argc, argv);
     if (!strcmp(argv[1], "mapx")) return cmd_mapx(argc, argv);
     if (!strcmp(argv[1], "map")) return cmd_map(argc, argv);
