@@ -81,6 +81,7 @@ typedef struct {
     // observed indirect jump sites: physical site -> distinct targets
     DpSegaIndirectRec *indirect;
     size_t indirect_hash;
+    DpSegaVisits play_visits;      // loop guard of the play session
 } Run;
 
 // observed indirect targets without execution evidence seed a further pass
@@ -643,7 +644,9 @@ static void sections_finalize(DpSegaResults *r) {
         DpSegaSection *s=&r->sections[i];
         if(s->boot_hits>0 || (s->kind_bits&DP_SEGA_IRQ) || s->copies>0)
             s->verdict=DP_SEGA_VERDICT_REQUIRED;
-        else s->verdict=DP_SEGA_VERDICT_FORCED; // PLAYED needs sessions
+        else if(s->played_hits>0 && s->forced_hits==0)
+            s->verdict=DP_SEGA_VERDICT_PLAYED; // natural coverage of a session
+        else s->verdict=DP_SEGA_VERDICT_FORCED;
     }
 }
 static InputSite *input_site(Run *x,size_t at,unsigned group) {
@@ -751,12 +754,85 @@ static int fork_inputs(Run *x,const z80_decoded_t *d,size_t at,int skip_irq) {
 }
 DpSegaOptions dp_sega_options(void) {
     // Boot code often runs nested 16-bit delay loops before touching the VDP.
-    DpSegaOptions o={.max_total=20000000,.input_total=20000000,.indirect_total=20000000,.max_steps=2000000,.max_paths=4096,.queue_cap=128,
+    DpSegaOptions o={.max_total=20000000,.input_total=20000000,.indirect_total=20000000,.play_total=0,.max_steps=2000000,.max_paths=4096,.queue_cap=128,
         .loop_cap=262144,.fork_cap=2,.stagnation=32768,.copy_cap=DP_SEGA_COPY_CAP,
         .input_masks=8,.input_sites=4096,.seed_vectors=1,.seed_cap=1024,.queue_max=4096,.target_closure=1,.block_closure=1,.msx_mapper=DP_MSX_AUTO,.closure={262144,65536,256,8}}; return o;
 }
 DpSegaOptions dp_msx_options(void) {
     DpSegaOptions o=dp_sega_options(); o.seed_vectors=0; return o;
+}
+// play session (GB sessions parity): the machine runs from reset with held
+// inputs changing every epoch, every access recorded as natural evidence.
+// Section hits carry played_hits so the verdict can say PLAYED, and no fork
+// is created: a session is one concrete pass.
+static void play_session(Run *x) {
+    DpSegaResults *r=x->r;
+    const DpSegaOptions *o=x->opt;
+    if(!o->play_total) return;
+    x->b->load(x->seed_state); hook(x);
+    memcpy(x->cart,x->seed_cart,0x8000);
+    memcpy(x->origins,x->seed_origins,x->origin_size);
+    dp_sega_visits_reset(&x->play_visits);
+    x->forced=0; x->cur_sec=NULL; x->boot_path=0; x->irq_flag=0;
+    x->b->set_input((DpSegaInput){{0,0},0,0,0}); // released hands to start
+    const uint8_t catalog[]={0,16,64,32,1,2,4,8};
+    uint64_t epoch_len=o->play_total/9;
+    if(!epoch_len) epoch_len=1;
+    unsigned epoch=0; // 0: released; 1..8: input catalog masks
+    while(r->steps<o->play_total) {
+        z80_t *c=x->b->cpu(); x->pc=c->pc; x->fetching=0;
+        dp_z80_provenance_clear_plan(&x->origins->cpu);
+        if(c->fault) { r->faults++; break; }
+        if(epoch_len && r->steps/epoch_len!=epoch) {
+            epoch=(unsigned)(r->steps/epoch_len);
+            if(epoch>8) break;
+            DpSegaInput in={{0,0},0,0,0};
+            if(epoch) {
+                unsigned mask=catalog[epoch-1];
+                in.pad[0]=(uint8_t)(mask&63);
+                // the pad-1 system key: Start on GG, Pause (NMI) on SG/SMS
+                if(!strcmp(x->system->id,"gg")) in.start=!!(mask&64);
+                else in.pause=!!(mask&64);
+            }
+            x->b->set_input(in); x->r->play_epochs++;
+        }
+        size_t at=site(x,c->pc);
+        int admitted=dp_sega_visits_enter(&x->play_visits,(uint32_t)at,c->pc,o->loop_cap);
+        if(admitted<0) break;
+        if(!admitted) { r->loop_cuts++; break; }
+        unsigned cycles=z80_service(c);
+        if(c->fault) { r->faults++; break; }
+        if(!cycles) {
+            x->fetching=1;
+            z80_decoded_t d;
+            if(!z80_decode(c,&d)) { x->fetching=0; r->decode_cuts++; break; }
+            x->fetching=0;
+            uint8_t bytes[8];
+            for(unsigned j=0;j<d.length && j<sizeof bytes;j++) bytes[j]=x->b->read((uint16_t)(c->pc+j));
+            DpZ80Instruction in;
+            if(!dp_z80_decode(bytes,d.length,c->pc,&in)) { r->decode_cuts++; break; }
+            x->cur_sec=section_touch(x,at,at+d.length-1,at!=x->prev_at+1);
+            x->prev_at=at+d.length-1;
+            if(x->cur_sec) x->cur_sec->played_hits++;
+            for(unsigned j=0;j<d.length;j++) {
+                int64_t index=x->b->rom_index((uint16_t)(c->pc+j));
+                if(index>=0 && (uint64_t)index<r->size) r->flags[index]|=DP_SEGA_NATURAL;
+                else r->exec_outside++;
+            }
+            dp_sega_closure_observe(x->closure);
+            dp_z80_provenance_begin(&x->origins->cpu,c,&d,origin_read,x);
+            cycles=z80_execute_decoded(c,&d); z80_finish(c,cycles);
+        }
+        r->steps++; x->b->advance(cycles);
+    }
+    r->play_steps=r->steps; // the session runs before the exploration phases
+    x->b->set_input((DpSegaInput){{0,0},0,0,0}); // power-on inputs released
+    // back to the untouched reset state the exploration phases start from
+    x->b->load(x->seed_state); hook(x);
+    memcpy(x->cart,x->seed_cart,0x8000);
+    memcpy(x->origins,x->seed_origins,x->origin_size);
+    dp_sega_visits_reset(&x->play_visits);
+    x->cur_sec=NULL; x->prev_at=0;
 }
 // GB dp_seed_indirect parity: every jp (hl)/(ix)/(iy) target observed at
 // runtime without execution evidence seeds a further pass; the phase's
@@ -931,7 +1007,7 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
     }
     // Seed base: the reset state every seed starts from. Generation reads the
     // boot view through rom_index while the machine has not run yet.
-    if(o->seed_cap || o->entry_count || o->seed_banks || o->indirect_total) {
+    if(o->seed_cap || o->entry_count || o->seed_banks || o->indirect_total || o->play_total) {
         x.seed_capacity=o->seed_cap+o->entry_count+3*256+8192;
         x.seeds=malloc((size_t)x.seed_capacity*sizeof(*x.seeds));
         x.seed_state=malloc(x.b->state_size); x.seed_scratch=malloc(x.b->state_size);
@@ -944,6 +1020,7 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
         memcpy(x.seed_origins,x.origins,x.origin_size);
         generate_seed_specs(&x,image,size);
     }
+    play_session(&x);
     if(push_to(&x,0,0,0,DP_SEGA_TREE_RESET)<0) { ok=0; goto cleanup; }
     if(o->seed_vectors && !msx) {
         const uint16_t entries[]={8,16,24,32,40,48,56,0x66};
@@ -1336,6 +1413,7 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
         r->phase_steps[0],r->phase_limits[0],r->phase_paths[0],r->phase_known[0],r->phase_pending[0],
         r->phase_steps[1],r->phase_limits[1],r->phase_paths[1],r->phase_known[1],r->phase_pending[1],
         r->phase_steps[2],r->phase_limits[2],r->phase_paths[2],r->phase_known[2],r->phase_pending[2]);
+    fprintf(out,"play session: %"PRIu64" steps; %"PRIu64" input epochs\n",r->play_steps,r->play_epochs);
     fprintf(out,"indirect jumps: sites %"PRIu64"; targets %"PRIu64"; seeded %"PRIu64"; refused budget %"PRIu64"; pending %"PRIu64"; site overflow %"PRIu64"; target overflow %"PRIu64"\n",
         r->indirect_sites,r->indirect_targets,r->indirect_seeds,r->indirect_refused_budget,r->indirect_pending,r->indirect_site_overflow,r->indirect_target_overflow);
     fprintf(out,"cuts: steps %"PRIu64"; loop %"PRIu64"; fork %"PRIu64"; queue %"PRIu64"; paths %"PRIu64"; global-pending %"PRIu64"; decode %"PRIu64"; faults %"PRIu64"\n",r->step_cuts,r->loop_cuts,r->fork_cuts,r->queue_cuts,r->path_cuts,r->global_cuts,r->decode_cuts,r->faults);
@@ -1479,6 +1557,7 @@ int dp_sega_explore_command(int argc,char **argv) {
             else if(!strcmp(key,"--closure-contexts")) o.closure.contexts=(uint32_t)n;
             else if(!strcmp(key,"--fork-cap") && n<=255) o.fork_cap=(uint32_t)n;
             else if(!strcmp(key,"--indirect-total")) o.indirect_total=n;
+            else if(!strcmp(key,"--play-steps")) o.play_total=n;
             else if(!strcmp(key,"--queue-max")) { if(n>65536 || n<o.queue_cap) goto usage; o.queue_max=(uint32_t)n; }
             else if(!strcmp(key,"--spool-cap-mb") && n<=1048576) o.spool_cap_mb=(uint32_t)n;
             else goto usage;
@@ -1504,5 +1583,5 @@ int dp_sega_explore_command(int argc,char **argv) {
     }
     dp_sega_results_free(&r); return ok?0:1;
 usage:
-    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE]\n"); return 2;
+    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE]\n"); return 2;
 }

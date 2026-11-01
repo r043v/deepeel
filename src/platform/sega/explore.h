@@ -51,6 +51,7 @@ typedef struct {
     uint64_t max_total;
     uint64_t input_total;
     uint64_t indirect_total; // second pass seeding observed jp (hl) targets
+    uint64_t play_total;     // instrumented play session steps (0: no session)
     uint32_t max_steps,max_paths,queue_cap,loop_cap,fork_cap,stagnation,copy_cap,input_masks,input_sites;
     int target_closure,block_closure;
     int seed_vectors;
@@ -94,7 +95,7 @@ typedef struct {
     uint32_t id;
     uint8_t bank;              // physical 16 KiB bank
     uint16_t lo,hi;            // bank offsets, inclusive
-    uint64_t hits,natural_hits,forced_hits,boot_hits,entries;
+    uint64_t hits,natural_hits,forced_hits,boot_hits,played_hits,entries;
     uint8_t kind_bits;         // DP_SEGA_NATURAL|DP_SEGA_FORCED|DP_SEGA_IRQ
     uint64_t copies;           // copy records attributed to a pc in this section
     uint8_t verdict;           // DP_SEGA_VERDICT_*, computed at finalize
@@ -128,6 +129,8 @@ typedef struct {
     // observed indirect jumps and their seeding pass (GB dp_seed_indirect)
     uint64_t indirect_sites,indirect_targets,indirect_site_overflow,indirect_target_overflow;
     uint64_t indirect_seeds,indirect_refused_budget,indirect_pending;
+    // play session (GB sessions parity): natural coverage from held inputs
+    uint64_t play_steps,play_epochs;
     size_t loop_context_peak,loop_context_capacity;
     uint64_t loop_context_growths;
     uint64_t io_read[256],io_write[256],bank_changes,bank_log_overflow;
