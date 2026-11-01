@@ -196,14 +196,49 @@ static const uint8_t map_rgb[DP_MAP_COUNT][3] = {
     { 0xa0, 0xa0, 0xa0 }, // inferred-padding
 };
 
+// accented glyphs: the base lowercase letter (its top two rows are free in
+// this font) with the mark drawn in rows 0-1 — decoded from UTF-8 input
+static uint8_t acc_glyph[4][5]; // é è ê à
+static int acc_ready;
+
+static const uint8_t *glyph_of(const char *s, int *adv) {
+    unsigned char c = (unsigned char)*s;
+    if (c == 0xC3 && (unsigned char)s[1] >= 0x80) {
+        if (!acc_ready) {
+            memcpy(acc_glyph[0], &dp_font5x7['e' - 0x20][0], 5); // é acute
+            acc_glyph[0][3] |= 1 << 0;
+            acc_glyph[0][2] |= 3 << 1;
+            memcpy(acc_glyph[1], &dp_font5x7['e' - 0x20][0], 5); // è grave
+            acc_glyph[1][1] |= 1 << 0;
+            acc_glyph[1][2] |= 1 << 1;
+            memcpy(acc_glyph[2], &dp_font5x7['e' - 0x20][0], 5); // ê circumflex
+            acc_glyph[2][2] |= 1 << 0;
+            acc_glyph[2][1] |= 1 << 1;
+            acc_glyph[2][3] |= 1 << 1;
+            memcpy(acc_glyph[3], &dp_font5x7['a' - 0x20][0], 5); // à grave
+            acc_glyph[3][1] |= 1 << 0;
+            acc_glyph[3][2] |= 1 << 1;
+            acc_ready = 1;
+        }
+        unsigned char c2 = (unsigned char)s[1];
+        if (c2 == 0xA9) { *adv = 2; return acc_glyph[0]; }
+        if (c2 == 0xA8) { *adv = 2; return acc_glyph[1]; }
+        if (c2 == 0xAA) { *adv = 2; return acc_glyph[2]; }
+        if (c2 == 0xA0) { *adv = 2; return acc_glyph[3]; }
+    }
+    *adv = 1;
+    unsigned ch = c;
+    if (ch < 0x20 || ch > 0x7e) ch = '?';
+    return &dp_font5x7[ch - 0x20][0];
+}
+
 // draws a 5x7 glyph string scaled by `scale` (8-bit style small font,
 // dp_font5x7, ASCII 0x20-0x7E, column-major)
 static void legend_text(uint8_t *rgb, int w, int h, int x, int y, const char *str,
                         const uint8_t *col, int scale) {
     for (; *str; str++, x += 6 * scale) {
-        unsigned ch = (unsigned char)*str;
-        if (ch < 0x20 || ch > 0x7e) ch = '?';
-        const uint8_t *g = dp_font5x7[ch - 0x20];
+        int adv;
+        const uint8_t *g = glyph_of(str, &adv);
         for (int cx = 0; cx < 5; cx++)
             for (int cy = 0; cy < 7; cy++) {
                 if (!(g[cx] & (1u << cy))) continue;
@@ -215,6 +250,7 @@ static void legend_text(uint8_t *rgb, int w, int h, int x, int y, const char *st
                         rgb[off] = col[0]; rgb[off + 1] = col[1]; rgb[off + 2] = col[2];
                     }
             }
+        str += adv - 1; // the loop's ++ does the last step
     }
 }
 
@@ -224,39 +260,44 @@ static int fit_scale(const char *str, int w, int x, int scale) {
     return scale;
 }
 
-// draws one legend entry — a char-sized colour swatch then the text; when
-// right_edge >= 0 the whole entry is right-aligned to it.  The scale backs
-// down until the entry fits the width.
+// draws one legend entry — a square swatch, one text line tall, then the
+// text (swatch on the right when right_edge >= 0, the whole entry then
+// right-aligned to it).  The scale backs down until the entry fits `avail`.
 static void legend_entry(uint8_t *rgb, int w, int h, int y, const char *str,
-                         const uint8_t *col, int scale, int right_edge) {
-    int avail = w - 12; // the grid's own margins
-    int sw = 5 * scale, gap = scale;
-    int need = sw + gap + (int)strlen(str) * 6 * scale;
+                         const uint8_t *col, int scale, int avail, int right_edge) {
+    int side = 7 * scale, gap = 3 * scale;
+    int tw = (int)strlen(str) * 6 * scale;
+    int need = side + gap + tw;
     while (scale > 1 && need > avail) {
         scale--;
-        sw = 5 * scale; gap = scale;
-        need = sw + gap + (int)strlen(str) * 6 * scale;
+        side = 7 * scale; gap = 3 * scale;
+        tw = (int)strlen(str) * 6 * scale;
+        need = side + gap + tw;
     }
-    int x = right_edge >= 0 ? right_edge - need : 10; // grid margin + 4
-    for (int yy = 0; yy < 7 * scale; yy++)
-        for (int xx = 0; xx < sw; xx++) {
-            int px = x + xx, py = y + yy;
+    int x0 = right_edge >= 0 ? right_edge - need : 10; // grid margin + 4
+    int sx = right_edge >= 0 ? x0 + tw + gap : x0;
+    for (int yy = 0; yy < side; yy++)
+        for (int xx = 0; xx < side; xx++) {
+            int px = sx + xx, py = y + yy;
             if (px < 0 || px >= w || py < 0 || py >= h) continue;
             size_t off = ((size_t)py * w + px) * 3;
             rgb[off] = col[0]; rgb[off + 1] = col[1]; rgb[off + 2] = col[2];
         }
-    legend_text(rgb, w, h, x + sw + gap, y, str, col, scale);
+    legend_text(rgb, w, h, right_edge >= 0 ? x0 : x0 + side + gap, y, str, col, scale);
 }
 
 // One SQ x SQ square per 64 ROM bytes (dominant class), 16x16 squares per bank,
-// banks laid out in rows of up to 8. The full .map text rides in the PNG.
-// Under the grid, a legend band: rom name + coverage, then the classes in two
-// justified columns, each entry preceded by its colour swatch.
-int dp_report_map_png(const DpResults *res, const char *rom_path, const char *path) {
+// banks laid out in rows of up to 8. The full .map text rides in the PNG
+// (tEXt "deepeel_map"), next to the converter's version and settings
+// (tEXt "deepeel_meta").  Under the grid, a legend band: rom name + coverage,
+// then the classes in two justified columns, swatch beside each entry.
+int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom_path,
+                      const char *path) {
     enum { SQ = 6, GRID = 16, BANK_PX = SQ * GRID, GAP = 6, PER_ROW = 8 };
-    static const char *fr[DP_MAP_COUNT] = { "inconnu", "code naturel", "code force",
-        "code statique", "data copiee", "data lue", "table", "padding",
-        "data inferee", "code infere", "padding infere" };
+    static const char *fr[DP_MAP_COUNT] = {
+        "inconnu", "code naturel", "code forcé", "code statique",
+        "donnée copiée", "donnée lue", "table", "padding",
+        "donnée inférée", "code inféré", "padding inféré" };
     DpMapSummary s;
     uint8_t *m = dp_map_build(res, &s);
     if (!m) return 0;
@@ -275,9 +316,13 @@ int dp_report_map_png(const DpResults *res, const char *rom_path, const char *pa
         order[j + 1] = cur;
     }
     enum { LH = 18, FSCALE = 2 };
+    int w = GAP + cols * (BANK_PX + GAP);
+    // two justified columns only when each half can hold an entry; otherwise
+    // one left-aligned column
+    int two_cols = w / 2 - 12 >= 110;
+    int half = two_cols ? (ncls + 1) / 2 : ncls;
     int grid_h = GAP + rows * (BANK_PX + GAP);
-    int half = (ncls + 1) / 2; // two justified columns of entries
-    int w = GAP + cols * (BANK_PX + GAP), h = grid_h + GAP + (1 + half) * LH + GAP;
+    int h = grid_h + GAP + (1 + half) * LH + GAP;
     uint8_t *rgb = malloc((size_t)w * h * 3);
     if (!rgb) { free(m); return 0; }
     for (size_t i = 0; i < (size_t)w * h; i++) { rgb[i * 3] = 0x18; rgb[i * 3 + 1] = 0x18; rgb[i * 3 + 2] = 0x1c; }
@@ -318,8 +363,15 @@ int dp_report_map_png(const DpResults *res, const char *rom_path, const char *pa
     char head[160];
     snprintf(head, sizeof head, "%s - connu %.1f%%", title[0] ? title : "?", s.known * pct);
     int y = grid_h + GAP;
-    legend_text(rgb, w, h, GAP, y, head, (const uint8_t *)"\xe0\xe0\xe0",
-                fit_scale(head, w, GAP, FSCALE));
+    int head_scale = fit_scale(head, w, GAP, FSCALE);
+    legend_text(rgb, w, h, GAP, y, head, (const uint8_t *)"\xe0\xe0\xe0", head_scale);
+    // the converter's signature, small, on the same row, right-aligned —
+    // dropped when the title leaves no room for it
+    char foot[40];
+    snprintf(foot, sizeof foot, "deepeel %s", DEEPEEL_VERSION);
+    int foot_w = (int)strlen(foot) * 6;
+    if (GAP + (int)strlen(head) * 6 * head_scale + 2 * GAP + foot_w <= w)
+        legend_text(rgb, w, h, w - GAP - foot_w, y, foot, (const uint8_t *)"\x90\x90\x98", 1);
     y += LH;
     for (int r = 0; r < half; r++) {
         int ry = y + r * LH;
@@ -329,21 +381,42 @@ int dp_report_map_png(const DpResults *res, const char *rom_path, const char *pa
             double p = s.cls[c] * pct;
             if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[c]);
             else snprintf(line, sizeof line, "%s %.1f%%", fr[c], p);
-            legend_entry(rgb, w, h, ry, line, map_rgb[c], FSCALE, -1);
+            legend_entry(rgb, w, h, ry, line, map_rgb[c], FSCALE,
+                         two_cols ? w / 2 - 14 : w - 12, -1);
         }
-        if (r + half < ncls) {
+        if (two_cols && r + half < ncls) {
             int c = order[r + half];
             char line[64];
             double p = s.cls[c] * pct;
             if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[c]);
             else snprintf(line, sizeof line, "%s %.1f%%", fr[c], p);
-            legend_entry(rgb, w, h, ry, line, map_rgb[c], FSCALE, w - GAP);
+            legend_entry(rgb, w, h, ry, line, map_rgb[c], FSCALE, w - GAP - w / 2, w - GAP);
         }
     }
     DpBuf txt;
     dp_buf_init(&txt);
     dp_report_map(res, &txt);
-    int ok = dp_png_save_text(path, w, h, rgb, "deepeel_map", (const char *)txt.p, txt.len);
+    // the conversion's identity: version, rom, settings, result — a tEXt
+    // chunk next to the map itself
+    char meta[768];
+    snprintf(meta, sizeof meta,
+             "{\"deepeel\":\"%s\",\"rom\":{\"title\":\"%s\",\"banks\":%d,\"size\":%u},"
+             "\"config\":{\"max_steps_path\":%u,\"max_paths\":%u,\"max_steps_total\":%llu,"
+             "\"queue\":%u,\"queue_max\":%u,\"mem_cap_mb\":%llu,\"loop_cap\":%u,\"seed_cap\":%u,"
+             "\"closure_rounds\":%d,\"covered_keep\":%u,\"seed_banks\":%d},"
+             "\"map\":{\"known_pct\":%.2f,\"unknown_pct\":%.2f,\"inferred_pct\":%.2f}}",
+             DEEPEEL_VERSION, title, res->banks,
+             res->cart ? (unsigned)res->cart->rom_size : 0u,
+             cfg ? cfg->max_steps_path : 0u, cfg ? cfg->max_paths : 0u,
+             cfg ? (unsigned long long)cfg->max_steps_total : 0ull,
+             cfg ? cfg->queue_cap : 0u, cfg ? cfg->queue_max : 0u,
+             cfg ? (unsigned long long)cfg->mem_cap_mb : 0ull,
+             cfg ? cfg->loop_back_cap : 0u, cfg ? cfg->seed_cap : 0u,
+             cfg ? cfg->closure_rounds : 0, cfg ? cfg->covered_fork_keep : 0u,
+             cfg ? cfg->seed_banks : 0,
+             s.known * pct, s.unknown * pct, s.inferred * pct);
+    int ok = dp_png_save_text2(path, w, h, rgb, "deepeel_map", (const char *)txt.p, txt.len,
+                               "deepeel_meta", meta, strlen(meta));
     dp_buf_free(&txt);
     free(rgb);
     return ok;

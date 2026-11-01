@@ -45,8 +45,10 @@ struct DpTree;
 void dp_report_summary(const DpResults *res, const DpConfig *cfg, const struct DpTree *tree,
                        const char *stop_reason, unsigned long long frames, int tas_n, DpBuf *out);
 void dp_report_map(const DpResults *res, DpBuf *out);
-// rom_path feeds the legend's name fallback (the internal title comes first)
-int dp_report_map_png(const DpResults *res, const char *rom_path, const char *path);
+// rom_path feeds the legend's name fallback (the internal title comes first);
+// cfg rides into the "deepeel_meta" tEXt chunk (version + settings + result)
+int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom_path,
+                      const char *path);
 void dp_report_html(const DpResults *res, DpBuf *out);
 
 #endif

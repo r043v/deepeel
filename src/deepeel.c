@@ -542,7 +542,7 @@ static int cmd_explore(int argc, char **argv) {
         size_t ml = strlen(map);
         if (ml > 4 && !strcmp(map + ml - 4, ".png")) {
             // x.map.png: image of the squares with the .map embedded
-            if (!dp_report_map_png(&res, path, map)) rc = 1;
+            if (!dp_report_map_png(&res, &cfg, path, map)) rc = 1;
         } else {
             dp_report_map(&res, &out);
             if (!write_file(map, &out)) rc = 1;

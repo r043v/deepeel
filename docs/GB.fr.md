@@ -312,10 +312,15 @@ code / data / padding.
   fin incluse, adresses vues du CPU) ; `--map x.map.png` écrit une image
   (un carré par 64 octets, 16×16 par banque, rouge = inconnu, bleus = code,
   verts = data, ocre = table, gris = padding) qui **embarque le `.map`
-  complet** (chunk tEXt `deepeel_map`, comme une cartouche PICO-8) et, sous
-  la grille, une légende dessinée : nom de la ROM, couverture globale, puis
-  chaque classe présente dans sa couleur avec sa part (police 8-bit 5×7).
-  `deepeel mapx x.map.png x.map` extrait le `.map` à l'identique.
+  complet** (chunk tEXt `deepeel_map`, comme une cartouche PICO-8) et les
+  paramètres de la conversion (chunk tEXt `deepeel_meta` : version, ROM,
+  config, résultat) ; sous la grille, une légende dessinée : nom interne de
+  la ROM (repli : nom de fichier), couverture globale, signature du
+  convertisseur, puis chaque classe présente en deux colonnes justifiées —
+  pastille carrée de sa couleur à côté du texte, police 8-bit 5×7 (accents
+  é/è/ê/à dessinés dans les rangées libres des glyphes), deux colonnes
+  seulement quand l'image est assez large. `deepeel mapx x.map.png x.map`
+  extrait le `.map` à l'identique.
 - `--html f` : page web autonome (carrés par banque, légende, tableau des
   classes, journal de découverte : temps, source, crédit, octets connus).
   Le rapport texte affiche aussi les 40 dernières entrées du journal.
