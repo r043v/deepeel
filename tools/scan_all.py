@@ -146,8 +146,9 @@ def cmd_scan(args):
         cmd = [
             binary, "explore", path,
             "--play",
-            "--queue", "4096", "--queue-max", "16384",
+            "--queue", "4096", "--queue-max", str(args.queue_max),
             "--mem-cap", str(args.mem_cap),
+            "--spool-cap-mb", str(args.spool_cap_mb),
             "--covered-keep", "8", "--seed-banks",
             "--closure-rounds", "12",
             "--max-total", str(max_total_for(rom_banks(path))),
@@ -397,7 +398,9 @@ def main():
     scan.add_argument("--tas-dirs", nargs="*", default=["output/tas"])
     scan.add_argument("--binary", default="build/deepeel")
     scan.add_argument("--time-limit", type=int, default=1800, help="play wall seconds per ROM (0 = none)")
-    scan.add_argument("--mem-cap", type=int, default=2000, help="RSS cap in MiB")
+    scan.add_argument("--mem-cap", type=int, default=3500, help="RSS cap in MiB")
+    scan.add_argument("--queue-max", type=int, default=32768, help="worklist growth ceiling")
+    scan.add_argument("--spool-cap-mb", type=int, default=3000, help="disk spool cap in MiB")
     scan.add_argument("--only", help="single slug")
     scan.add_argument("--full", action="store_true", help="no time limit (the 'à fond' pass)")
     scan.add_argument("--resume", action="store_true", help="resume from the saved pool if any")

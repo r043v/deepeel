@@ -109,9 +109,72 @@ int dp_map_residual_list(const DpResults *res, const uint8_t *m, DpResidualRange
     return (int)ranges;
 }
 
+// mechanical verdict of one residual range: what blocks it, from the class of
+// its two edges (the C port of the campaign's residual anatomy).  It explains
+// the unknown, it never classifies it — the inference rules stay untouched.
+const char *dp_residual_mechanism(const uint8_t *m, const DpResidualRange *r) {
+    size_t bs = (size_t)r->bank * 0x4000;
+    int before = r->lo > 0 ? m[bs + r->lo - 1] : -1;
+    int after = r->hi < 0x3FFF ? m[bs + r->hi + 1] : -1;
+    int bc = before >= 0 && dp_map_is_code(before);
+    int bd = before >= 0 && dp_map_is_data(before);
+    int bp = before == DP_MAP_PAD || before == DP_MAP_INF_PAD;
+    int ac = after >= 0 && dp_map_is_code(after);
+    int ad = after >= 0 && dp_map_is_data(after);
+    int ap = after == DP_MAP_PAD || after == DP_MAP_INF_PAD;
+    if (before < 0 && after < 0) return "bank";
+    if (before < 0 || after < 0) { // one end is the bank's edge: judge by the other
+        if (bp || ap) return "padding-fringe";
+        if (bc || ac) return "edge-code";
+        if (bd || ad) return "edge-data";
+        return "bank";
+    }
+    if (bp || ap) return "padding-fringe";
+    if (bc && ac) return "code-code";  // a dispatch the closure never resolved
+    if ((bc && ad) || (bd && ac)) return "code-data"; // mixed edge: never inferred
+    if (bd && ad) return "data-data";  // data no route ever read
+    return "other";
+}
+
+// per-mechanism rollup of the residual unknown: ranges, bytes, where
+void dp_residual_anatomy_text(const DpResults *res, const uint8_t *m, DpBuf *out) {
+    static const char *mech[7] = { "code-code (dispatch non prouvé)",
+                                   "code-data (bord mixte, jamais inféré)",
+                                   "data-data (donnée jamais lue)",
+                                   "padding-fringe (frange de remplissage)",
+                                   "edge-code", "edge-data", "bank/bord de banque" };
+    static const char *key[7] = { "code-code", "code-data", "data-data", "padding-fringe",
+                                  "edge-code", "edge-data", "bank" };
+    uint32_t bytes[7] = { 0 }, biggest[7] = { 0 };
+    int ranges[7] = { 0 }, bi[7] = { 0 };
+    size_t n = (size_t)res->banks * 0x4000;
+    for (size_t bs = 0; bs < n; bs += 0x4000) {
+        for (size_t i = bs; i < bs + 0x4000;) {
+            if (m[i] != DP_MAP_UNKNOWN) { i++; continue; }
+            size_t j = i;
+            while (j < bs + 0x4000 && m[j] == DP_MAP_UNKNOWN) j++;
+            DpResidualRange r = { (uint16_t)(bs / 0x4000), (uint16_t)(i - bs),
+                                  (uint16_t)(j - 1 - bs), (uint32_t)(j - i) };
+            const char *mk = dp_residual_mechanism(m, &r);
+            for (int k = 0; k < 7; k++)
+                if (!strcmp(mk, key[k])) {
+                    bytes[k] += r.len;
+                    ranges[k]++;
+                    if (r.len > biggest[k]) { biggest[k] = r.len; bi[k] = r.bank; }
+                    break;
+                }
+            i = j;
+        }
+    }
+    dp_buf_str(out, "residual anatomy (what blocks each unknown range):\n");
+    for (int k = 0; k < 7; k++)
+        if (ranges[k])
+            dp_buf_fmt(out, "  %-42s %5d ranges %8u bytes (biggest %u in bank %d)\n",
+                       mech[k], ranges[k], bytes[k], biggest[k], bi[k]);
+}
+
 // the honest boundary of the map, largest first
-void dp_map_residual_text(const DpResults *res, const uint8_t *m, DpBuf *out) {
-    DpResidualRange top[8] = {{0, 0, 0, 0}};
+void dp_map_residual_text(const DpResults *res, const uint8_t *m, DpBuf *out) {    DpResidualRange top[8] = {{0, 0, 0, 0}};
     int ranges = dp_map_residual_list(res, m, NULL, 0);
     uint32_t total = 0;
     size_t n = (size_t)res->banks * 0x4000;

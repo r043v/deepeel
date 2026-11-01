@@ -343,6 +343,28 @@ code / data / padding.
 - `--time-limit SEC` : mur horloce de la phase de jeu, arrêt **gracieux**
   (pool sauvegardé, `--resume` reprend). C'est un mur de campagne : il
   l'emporte même sur la priorité TAS — un scan est borné sans surveillance.
+- **Spool disque des branches** (dès qu'un `--state-dir` est fourni) : les
+  états que la file RAM ne peut pas tenir (queue pleine au plafond
+  `--queue-max` ou au mur `--mem-cap`) sont écrits dans
+  `<state-dir>/spool.bin` au lieu d'être jetés — `spool: N written, M read
+  back, K refused` dans la ligne budgets, un refus réel n'est plus jamais
+  silencieux. `dp_explore_step` réalimente la file depuis le spool dès qu'un
+  slot se libère. Un arrêt (SIGINT, mur horloge, mur mémoire) **vide la file
+  restante dans le spool** avant de sortir : `--resume` relit le spool tel
+  quel et l'exploration reprend exactement là où elle s'était arrêtée,
+  y compris après un kill d'urgence (seuls les enregistrements entiers sont
+  relus). Le dedup d'états exacts persiste à côté (`<state-dir>/exact.bin`) —
+  sans lui, un run repris ré-explorerait tout le spool depuis zéro. Plafond
+  disque `--spool-cap-mb` (défaut 4096) ; l'arbre marque les choix spoolés
+  (`issue "spooled"`).
+- **Anatomie du résidu** : après la carte, chaque plage inconnue reçoit un
+  verdict mécanique d'après la classe de ses deux bords — `code-code`
+  (dispatch que la closure n'a jamais résolu), `code-data` (bord mixte,
+  jamais inféré par conception), `data-data` (donnée qu'aucune route n'a
+  lue), `padding-fringe`, `edge-code`/`edge-data`/`bank` (bord de banque).
+  Le rapport texte la résume (`residual anatomy:`) et le summary JSON porte
+  le champ `mech` sur chaque plage résiduelle : la feuille de route vers
+  100 % est désormais produite par l'outil lui-même.
 - `--tas-dir D` (répétable) : découvre les films du répertoire (8 max, triés
   par ressemblance de titre quand il y en a plus ; `.vmv`, `.vbm`, `.bk2`,
   `.gbm`, `.fm2`, `.log`), les films retenus sont loggés sur stderr.

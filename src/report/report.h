@@ -38,6 +38,11 @@ typedef struct DpResidualRange {
 // every unclassified range of a dp_map_build array, up to cap of them;
 // returns the total number of ranges (even beyond cap)
 int dp_map_residual_list(const DpResults *res, const uint8_t *m, DpResidualRange *out, int cap);
+// what blocks one residual range (edge classes): code-code/code-data/
+// data-data/padding-fringe/edge-code/edge-data/bank — explains, never classifies
+const char *dp_residual_mechanism(const uint8_t *m, const DpResidualRange *r);
+// per-mechanism rollup of the residual unknown (ranges, bytes, biggest)
+void dp_residual_anatomy_text(const DpResults *res, const uint8_t *m, DpBuf *out);
 // compact machine-readable profile of one run (rom identity, config echo,
 // map summary, full residual list, every counter, tree and play facts):
 // the aggregation input of a multi-ROM campaign

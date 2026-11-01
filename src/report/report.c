@@ -119,6 +119,7 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
             uint8_t *rmap = dp_map_build(res, &rsum);
             if (rmap) {
                 dp_map_residual_text(res, rmap, out);
+                dp_residual_anatomy_text(res, rmap, out);
                 free(rmap);
             }
         }
@@ -302,8 +303,9 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
             dp_buf_fmt(o, ",\"residual_bytes\":%llu,\"residual_ranges\":%d,\"residual\":[",
                        (unsigned long long)s.unknown, nr);
             for (int i = 0; i < nr && i < 4096; i++)
-                dp_buf_fmt(o, "%s{\"bank\":%u,\"lo\":%u,\"hi\":%u,\"len\":%u}", i ? "," : "",
-                           rr[i].bank, rr[i].lo, rr[i].hi, rr[i].len);
+                dp_buf_fmt(o, "%s{\"bank\":%u,\"lo\":%u,\"hi\":%u,\"len\":%u,\"mech\":\"%s\"}", i ? "," : "",
+                           rr[i].bank, rr[i].lo, rr[i].hi, rr[i].len,
+                           dp_residual_mechanism(m, &rr[i]));
             dp_buf_str(o, "]");
             free(m);
         }
@@ -451,8 +453,9 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
                 dp_buf_fmt(o, ",\"residual_bytes\":%llu,\"residual_ranges\":%d,\"residual\":[",
                            (unsigned long long)s.unknown, nr);
                 for (int i = 0; i < nr && i < cap; i++)
-                    dp_buf_fmt(o, "%s{\"bank\":%u,\"lo\":%u,\"hi\":%u,\"len\":%u}", i ? "," : "",
-                               rr[i].bank, rr[i].lo, rr[i].hi, rr[i].len);
+                    dp_buf_fmt(o, "%s{\"bank\":%u,\"lo\":%u,\"hi\":%u,\"len\":%u,\"mech\":\"%s\"}", i ? "," : "",
+                               rr[i].bank, rr[i].lo, rr[i].hi, rr[i].len,
+                               dp_residual_mechanism(m, &rr[i]));
                 dp_buf_str(o, "]");
                 free(rr);
             }

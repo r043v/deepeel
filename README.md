@@ -98,6 +98,12 @@ croissance s'arrête au mur `--mem-cap` et chaque croissance est comptée),
 `--loop-cap`, `--seed-cap`, `--seed-banks`, `--closure-rounds` (défaut 12),
 `--covered-keep`, `--no-pointer-scan`, `--no-context-evict`, `--no-irq-fork`.
 
+Avec un `--state-dir`, le **spool disque** rend l'exploration arrêtable et
+repreneuse à volonté : les états débordant de la file RAM attendent dans
+`spool.bin` et un `--resume` relit tout (file + dedup `exact.bin`), même après
+un kill. `deepeel maprender rom.gb in.map out.map.png` re-rend l'image de
+couverture depuis un `.map` sauvegardé, sans re-scan.
+
 L'export `--cov` écrit le format de couverture de m0boy (`bank addr flags
 count`) — pont optionnel vers le convertisseur.
 
