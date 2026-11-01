@@ -6,6 +6,8 @@
 //   deepeel regs gb                                 dump the GB register registry
 //   deepeel dis rom.gb bank:addr [n]                disassemble n instructions
 #include "core/cart.h"
+#include "core/cart_md.h"
+#include "explore/md_trace.h"
 #include "core/machine.h"
 #include "core/sta.h"
 #include "mach/m0boy.h"
@@ -320,6 +322,26 @@ static int cmd_explore(int argc, char **argv) {
         return 2;
     }
     char err[256];
+    {   // Mega Drive ROMs take the linear-run path (milestone 1: no forks, no GUI)
+        DpMdCart mc;
+        if (dp_md_cart_load(&mc, path, err, sizeof err) == 0) {
+            DpMdTrace tr;
+            uint64_t budget = cfg.max_steps_total ? cfg.max_steps_total : 2000000;
+            if (dp_md_trace_run(&mc, budget, &tr) != 0) {
+                fprintf(stderr, "deepeel: md run failed\n");
+                dp_md_cart_free(&mc);
+                return 1;
+            }
+            FILE *o = text ? fopen(text, "w") : stdout;
+            if (o) {
+                dp_md_trace_report(&mc, &tr, o);
+                if (text) fclose(o);
+            }
+            dp_md_trace_free(&tr);
+            dp_md_cart_free(&mc);
+            return 0;
+        }
+    }
     DpCart *cart = dp_cart_load(path, err, sizeof err);
     if (!cart) {
         fprintf(stderr, "deepeel: %s\n", err);
