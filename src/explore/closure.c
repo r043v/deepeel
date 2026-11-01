@@ -207,7 +207,7 @@ uint32_t dp_static_closure(DpResults *res) {
     return marked;
 }
 
-int dp_closure_seed(DpExplorer *ex) {
+int dp_closure_seed(DpExplorer *ex, uint32_t cap) {
     DpResults *res = ex->res;
     int seeded = 0;
     // a seed the queue refused stays unmarked: the next round proposes it
@@ -215,8 +215,9 @@ int dp_closure_seed(DpExplorer *ex) {
     for (int i = 0; i < res->clo_entry_n; i++) {
         uint32_t k = res->clo_entries[i];
         if (res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED)) continue;
-        if ((uint32_t)seeded >= ex->cfg.seed_cap) { // saturation is reported, not silent
+        if ((uint32_t)seeded >= cap) { // the phase's solde is spent: reported, not silent
             res->closure_seeds_dropped++;
+            res->seeds_refused_budget++;
             continue;
         }
         uint32_t bank = k / 0x4000, off = k % 0x4000;
@@ -231,8 +232,9 @@ int dp_closure_seed(DpExplorer *ex) {
     for (int i = 0; i < res->clo_bank_n; i++) {
         uint32_t k = res->clo_bank_entries[i];
         if (res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED)) continue;
-        if ((uint32_t)(seeded + banked) >= ex->cfg.seed_cap) {
+        if ((uint32_t)(seeded + banked) >= cap) {
             res->closure_seeds_dropped++;
+            res->seeds_refused_budget++;
             continue;
         }
         uint32_t bank = k / 0x4000, off = k % 0x4000;

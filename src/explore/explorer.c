@@ -1827,17 +1827,20 @@ void dp_seed_gb(DpExplorer *ex) {
 // the JP HL sites recorded the targets the dispatch actually took; some of
 // those continuations were dropped by a budget wall, so seed every target
 // whose rom key carries no execution evidence yet (bounded: sites x 8, seed cap)
-int dp_seed_indirect(DpExplorer *ex) {
+int dp_seed_indirect(DpExplorer *ex, uint32_t cap) {
     DpResults *res = ex->res;
     int seeded = 0;
     for (size_t i = 0; i < res->indirect.cap; i++) {
         if (!res->indirect.used[i]) continue;
         const DpIndirect *ind = (const DpIndirect *)(res->indirect.vals + i * res->indirect.stride);
         for (int t = 0; t < ind->n; t++) {
-            if (seeded >= (int)ex->cfg.seed_cap) return seeded;
             uint32_t k = dp_rom_index(ind->tbank[t], ind->target[t]);
             if (res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED)) continue;
             if (res->static_flags[k] & (DP_SF_PAD | DP_SF_POINTER)) continue;
+            if (seeded >= (int)cap) { // the phase's solde is spent: counted, retried next phase
+                res->seeds_refused_budget++;
+                continue;
+            }
             if (!dp_explorer_seed_pc_pri(ex, ind->tbank[t], ind->target[t], DP_SEED_POINTER, 1, 1))
                 continue;
             seeded++;

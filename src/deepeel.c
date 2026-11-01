@@ -206,7 +206,7 @@ static int write_file(const char *path, const DpBuf *b) {
     return 1;
 }
 
-static void closure_rounds(DpExplorer *ex, DpResults *res);
+static void closure_rounds(DpExplorer *ex, DpResults *res, uint32_t *seed_spent, uint32_t seed_total);
 
 static int cmd_explore(int argc, char **argv) {
     const char *json = NULL, *text = NULL, *cov = NULL, *romdata = NULL, *map = NULL, *html = NULL, *path = NULL;
@@ -325,6 +325,11 @@ static int cmd_explore(int argc, char **argv) {
         tas_collect_dir(tas_dirs[i], cart->title, scfg.tas, &scfg.tas_n, 8);
     DpResults res;
     dp_results_init(&res, cart, plat);
+    // cascading seed budgets (z80 branch): the re-seeding phases share one
+    // total (2x the per-phase cap); each phase spends from the solde left by
+    // the previous ones, refusals for a spent solde are counted
+    uint32_t seed_total = cfg.seed_cap > (1u << 30) ? cfg.seed_cap : cfg.seed_cap * 2;
+    uint32_t seed_spent = 0;
     dp_static_scan(&res);
     int vi = dp_mach_pick_variant(cart->rom);
     if (vi < 0) {
@@ -419,7 +424,7 @@ static int cmd_explore(int argc, char **argv) {
             dp_explore(ex);
             dp_disc_add(&res, "total-search", 0);
             if (res.disc_n) res.disc[res.disc_n - 1].credit = res.disc[res.disc_n - 1].known - k0;
-            closure_rounds(ex, &res);
+            closure_rounds(ex, &res, &seed_spent, seed_total);
             fprintf(stderr, "deepeel: total search done in %.2fs (%llu paths)\n",
                     (double)(clock() - t1) / CLOCKS_PER_SEC, (unsigned long long)res.paths_run);
             // phase 4: the TAS checkpoints were only saved during the replay;
@@ -434,13 +439,14 @@ static int cmd_explore(int argc, char **argv) {
                 dp_explore(ex);
                 dp_disc_add(&res, "tas-shoots-search", 0);
                 if (res.disc_n) res.disc[res.disc_n - 1].credit = res.disc[res.disc_n - 1].known - k1;
-                closure_rounds(ex, &res);
+                closure_rounds(ex, &res, &seed_spent, seed_total);
                 fprintf(stderr, "deepeel: TAS shoots explored in %.2fs (%llu paths)\n",
                         (double)(clock() - t2) / CLOCKS_PER_SEC, (unsigned long long)res.paths_run);
             }
             // phase 5: the dispatch targets the JP HL sites actually took —
             // some never ran because their continuation hit a budget wall
-            int iseeds = dp_seed_indirect(ex);
+            int iseeds = dp_seed_indirect(ex, seed_total - seed_spent);
+            seed_spent += (uint32_t)iseeds;
             if (iseeds) {
                 clock_t t3 = clock();
                 dp_disc_add(&res, "indirect", 0);
@@ -449,7 +455,7 @@ static int cmd_explore(int argc, char **argv) {
                 dp_explore(ex);
                 dp_disc_add(&res, "indirect-search", 0);
                 if (res.disc_n) res.disc[res.disc_n - 1].credit = res.disc[res.disc_n - 1].known - k2;
-                closure_rounds(ex, &res);
+                closure_rounds(ex, &res, &seed_spent, seed_total);
                 fprintf(stderr, "deepeel: indirect seeds explored in %.2fs (%llu paths)\n",
                         (double)(clock() - t3) / CLOCKS_PER_SEC, (unsigned long long)res.paths_run);
             }
@@ -510,13 +516,14 @@ static int cmd_explore(int argc, char **argv) {
     } else {
         clock_t t0 = clock();
         dp_explore(ex);
-        closure_rounds(ex, &res);
-        int iseeds = dp_seed_indirect(ex);
+        closure_rounds(ex, &res, &seed_spent, seed_total);
+        int iseeds = dp_seed_indirect(ex, seed_total - seed_spent);
+        seed_spent += (uint32_t)iseeds;
         if (iseeds) {
             dp_disc_add(&res, "indirect", 0);
             dp_explore(ex);
             dp_disc_add(&res, "indirect-search", 0);
-            closure_rounds(ex, &res);
+            closure_rounds(ex, &res, &seed_spent, seed_total);
         }
         double secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
         DpBuf out;
@@ -834,12 +841,14 @@ static int cmd_dis(int argc, char **argv) {
 // seeds nothing — accepted or refused — or the round cap is reached.  A
 // refused seed is retried the next round, once the search freed queue room.
 // Each search gets a fresh wall.
-static void closure_rounds(DpExplorer *ex, DpResults *res) {
+static void closure_rounds(DpExplorer *ex, DpResults *res, uint32_t *seed_spent,
+                           uint32_t seed_total) {
     if (ex->cfg.no_closure) return;
     for (int r = 0; r < ex->cfg.closure_rounds; r++) {
         uint32_t marked = dp_static_closure(res);
         uint32_t ref0 = res->closure_seeds_refused;
-        int seeded = dp_closure_seed(ex);
+        int seeded = dp_closure_seed(ex, seed_total - *seed_spent); // the cascade solde
+        *seed_spent += (uint32_t)seeded;
         uint32_t refused = res->closure_seeds_refused - ref0;
         fprintf(stderr, "deepeel: closure round %d: +%u static bytes, %d entries seeded, %u refused\n",
                 r + 1, marked, seeded, refused);

@@ -225,6 +225,7 @@ typedef struct DpResults {
     uint8_t oam_written;
     // data proven by exploration, for the m0boy bridge
     uint64_t data_verbatim_bytes; // bytes with DP_DF_VERBATIM
+    uint32_t seeds_refused_budget; // seeds dropped: the phase's cascade solde was spent
     uint32_t prov_jp_hl, prov_data;  // provenance: jp-hl targets proven, bytes proven data
     uint32_t prov_unresolved, prov_sat, prov_steps; // partial proofs, caps hit, walk steps
     uint32_t data_contradictions; // bytes both executed and proven data (kept code)
@@ -424,7 +425,7 @@ uint32_t dp_provenance(DpResults *res); // static HL/A provenance: jp-hl targets
 // executed (jump/call/branch targets): the static flow proposes, the machine
 // disposes (nonsense eviction, indirect targets).  Returns seeds queued; the
 // seeds over cfg.seed_cap are counted in closure_seeds_dropped.
-int dp_closure_seed(DpExplorer *ex);
+int dp_closure_seed(DpExplorer *ex, uint32_t cap); // seed cap of this phase (cascade solde)
 
 void dp_results_init(DpResults *res, const DpCart *cart, const DpPlatform *plat);
 void dp_results_free(DpResults *res);
@@ -462,7 +463,7 @@ int dp_explorer_seed_pc_pri(DpExplorer *ex, int bank, uint16_t pc, int kind, int
 void dp_seed_gb(DpExplorer *ex);
 // seed the targets the JP HL sites actually took (bounded: sites x 8, seed cap);
 // returns how many were queued
-int dp_seed_indirect(DpExplorer *ex);
+int dp_seed_indirect(DpExplorer *ex, uint32_t cap); // seed cap of this phase (cascade solde)
 // the reset state image (built on first use; pool slot 0 starts from it)
 uint8_t *dp_explorer_seed_base(DpExplorer *ex);
 // pop and run one path; returns 0 when the worklist is empty or a budget wall

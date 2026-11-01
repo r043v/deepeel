@@ -63,6 +63,11 @@ matériels sont ceux de m0boy.
   C=$FF00) : chaque touche pressée devient une variante forcée dont seule
   la valeur lue diffère (l'IRQ du press est effacée de la variante).
   `--no-key-fork` / `--no-p1-fork` pour désactiver ; compteur `forks_p1`.
+- **Budgets en cascade** (portage z80) : les phases de re-semis (cibles JP HL
+  puis chaque tour de fermeture) partagent un total de graines (2×
+  `--seed-cap`) : chaque phase dépense le solde laissé par les précédentes au
+  lieu d'un budget plat par phase ; un semis refusé faute de solde est compté
+  (`seeds_refused_budget`) et reporté au tour suivant.
 - **Provenance statique** : passe sans machine qui suit HL (et A) octet par
   octet sur les runs droits — chargements immédiats, mots ROM à adresse
   absolue, `INC/DEC HL` exacts, `ld h/l,a`, et les tables parcourues pointeur
