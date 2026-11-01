@@ -224,11 +224,35 @@ static int fit_scale(const char *str, int w, int x, int scale) {
     return scale;
 }
 
+// draws one legend entry — a char-sized colour swatch then the text; when
+// right_edge >= 0 the whole entry is right-aligned to it.  The scale backs
+// down until the entry fits the width.
+static void legend_entry(uint8_t *rgb, int w, int h, int y, const char *str,
+                         const uint8_t *col, int scale, int right_edge) {
+    int avail = w - 12; // the grid's own margins
+    int sw = 5 * scale, gap = scale;
+    int need = sw + gap + (int)strlen(str) * 6 * scale;
+    while (scale > 1 && need > avail) {
+        scale--;
+        sw = 5 * scale; gap = scale;
+        need = sw + gap + (int)strlen(str) * 6 * scale;
+    }
+    int x = right_edge >= 0 ? right_edge - need : 10; // grid margin + 4
+    for (int yy = 0; yy < 7 * scale; yy++)
+        for (int xx = 0; xx < sw; xx++) {
+            int px = x + xx, py = y + yy;
+            if (px < 0 || px >= w || py < 0 || py >= h) continue;
+            size_t off = ((size_t)py * w + px) * 3;
+            rgb[off] = col[0]; rgb[off + 1] = col[1]; rgb[off + 2] = col[2];
+        }
+    legend_text(rgb, w, h, x + sw + gap, y, str, col, scale);
+}
+
 // One SQ x SQ square per 64 ROM bytes (dominant class), 16x16 squares per bank,
 // banks laid out in rows of up to 8. The full .map text rides in the PNG.
-// Under the grid, a legend band: rom name + coverage, then one line per class
-// present in its own colour (ASCII font — no accents).
-int dp_report_map_png(const DpResults *res, const char *path) {
+// Under the grid, a legend band: rom name + coverage, then the classes in two
+// justified columns, each entry preceded by its colour swatch.
+int dp_report_map_png(const DpResults *res, const char *rom_path, const char *path) {
     enum { SQ = 6, GRID = 16, BANK_PX = SQ * GRID, GAP = 6, PER_ROW = 8 };
     static const char *fr[DP_MAP_COUNT] = { "inconnu", "code naturel", "code force",
         "code statique", "data copiee", "data lue", "table", "padding",
@@ -252,7 +276,8 @@ int dp_report_map_png(const DpResults *res, const char *path) {
     }
     enum { LH = 18, FSCALE = 2 };
     int grid_h = GAP + rows * (BANK_PX + GAP);
-    int w = GAP + cols * (BANK_PX + GAP), h = grid_h + GAP + (1 + ncls) * LH + GAP;
+    int half = (ncls + 1) / 2; // two justified columns of entries
+    int w = GAP + cols * (BANK_PX + GAP), h = grid_h + GAP + (1 + half) * LH + GAP;
     uint8_t *rgb = malloc((size_t)w * h * 3);
     if (!rgb) { free(m); return 0; }
     for (size_t i = 0; i < (size_t)w * h; i++) { rgb[i * 3] = 0x18; rgb[i * 3 + 1] = 0x18; rgb[i * 3 + 2] = 0x1c; }
@@ -272,29 +297,48 @@ int dp_report_map_png(const DpResults *res, const char *path) {
         }
     }
     free(m);
-    // the legend itself
+    // the legend itself: internal rom name (the cart title), the file name as
+    // fallback; then the classes in two columns, swatch before each entry
     double pct = s.total ? 100.0 / (double)s.total : 0.0;
     char title[17];
-    const char *ti = res->cart && res->cart->title[0] ? res->cart->title : "?";
+    const char *ti = res->cart && res->cart->title[0] ? res->cart->title : NULL;
     int tl = 0;
-    for (; *ti && tl < 16; ti++)
-        if (*ti == '?') break; // cart titles are zero-padded with '?' in places
-        else if ((unsigned char)*ti >= 0x20 && (unsigned char)*ti < 0x7f) title[tl++] = *ti;
+    if (ti) {
+        for (; *ti && tl < 16; ti++)
+            if (*ti == '?') break; // cart titles are zero-padded with '?' in places
+            else if ((unsigned char)*ti >= 0x20 && (unsigned char)*ti < 0x7f) title[tl++] = *ti;
+    }
+    if (!tl && rom_path) { // no usable internal name: the file's base name
+        const char *base = rom_path + strlen(rom_path);
+        while (base > rom_path && base[-1] != '/' && base[-1] != '\\') base--;
+        for (; *base && tl < 16; base++)
+            if ((unsigned char)*base >= 0x20 && (unsigned char)*base < 0x7f) title[tl++] = *base;
+    }
     title[tl] = 0;
-    char head[96];
+    char head[160];
     snprintf(head, sizeof head, "%s - connu %.1f%%", title[0] ? title : "?", s.known * pct);
     int y = grid_h + GAP;
     legend_text(rgb, w, h, GAP, y, head, (const uint8_t *)"\xe0\xe0\xe0",
                 fit_scale(head, w, GAP, FSCALE));
     y += LH;
-    for (int i = 0; i < ncls; i++) {
-        int c = order[i];
-        char line[64];
-        double p = s.cls[c] * pct;
-        if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[c]);
-        else snprintf(line, sizeof line, "%s %.1f%%", fr[c], p);
-        legend_text(rgb, w, h, GAP + 4, y, line, map_rgb[c], fit_scale(line, w, GAP + 4, FSCALE));
-        y += LH;
+    for (int r = 0; r < half; r++) {
+        int ry = y + r * LH;
+        if (r < ncls) {
+            int c = order[r];
+            char line[64];
+            double p = s.cls[c] * pct;
+            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[c]);
+            else snprintf(line, sizeof line, "%s %.1f%%", fr[c], p);
+            legend_entry(rgb, w, h, ry, line, map_rgb[c], FSCALE, -1);
+        }
+        if (r + half < ncls) {
+            int c = order[r + half];
+            char line[64];
+            double p = s.cls[c] * pct;
+            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[c]);
+            else snprintf(line, sizeof line, "%s %.1f%%", fr[c], p);
+            legend_entry(rgb, w, h, ry, line, map_rgb[c], FSCALE, w - GAP);
+        }
     }
     DpBuf txt;
     dp_buf_init(&txt);
