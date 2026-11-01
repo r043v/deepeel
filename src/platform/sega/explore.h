@@ -5,7 +5,19 @@
 #include "../../../src/core/hashset.h"
 #include <stddef.h>
 #include <stdint.h>
-enum { DP_SEGA_NATURAL=1, DP_SEGA_FORCED=2, DP_SEGA_DATA=4, DP_SEGA_COPIED=8, DP_SEGA_STATIC=16, DP_SEGA_STATIC_DATA=32 };
+enum { DP_SEGA_NATURAL=1, DP_SEGA_FORCED=2, DP_SEGA_DATA=4, DP_SEGA_COPIED=8, DP_SEGA_STATIC=16, DP_SEGA_STATIC_DATA=32,
+    DP_SEGA_TABLE=64, DP_SEGA_PAD=128 }; // static scan: pointer table, padding run
+// map classes mirror the GB names so maprender renders z80 maps unchanged;
+// inferred-* classes are deduced from neighbours, never observed
+enum {
+    DP_SMAP_UNKNOWN, DP_SMAP_CODE_NAT, DP_SMAP_CODE_FORCED, DP_SMAP_CODE_STATIC,
+    DP_SMAP_DATA_COPIED, DP_SMAP_DATA_READ, DP_SMAP_DATA_STATIC, DP_SMAP_TABLE,
+    DP_SMAP_PAD, DP_SMAP_INF_DATA, DP_SMAP_INF_CODE, DP_SMAP_INF_PAD, DP_SMAP_COUNT
+};
+static const char *const dp_smap_names[DP_SMAP_COUNT]={"unknown","code-natural","code-forced",
+    "code-static","data-copied","data-read","data-static","table","padding",
+    "inferred-data","inferred-code","inferred-padding"};
+
 enum { DP_SEGA_COPY_CAP=4096 };
 enum { DP_SEGA_INPUT_LOG_CAP=1024 };
 enum { DP_SEGA_HARDWARE_LOG_CAP=1024 };
@@ -111,6 +123,8 @@ typedef struct {
     uint64_t queue_growths,spool_writes,spool_reads,spool_refused,spool_flushed;
     DpSegaTreeNode *tree_nodes;
     uint32_t tree_count,tree_capacity;
+    const uint8_t *rom;        // ROM image copy for static map classes
+    uint8_t *static_flags;     // static scan: DP_SEGA_TABLE|DP_SEGA_PAD per byte
     // observed indirect jumps and their seeding pass (GB dp_seed_indirect)
     uint64_t indirect_sites,indirect_targets,indirect_site_overflow,indirect_target_overflow;
     uint64_t indirect_seeds,indirect_refused_budget,indirect_pending;
@@ -153,6 +167,8 @@ DpSegaOptions dp_sega_options(void);
 int dp_sega_explore(const DpSegaSystem *system,const uint8_t *rom,size_t size,
                     const DpSegaOptions *options,DpSegaResults *results);
 void dp_sega_results_free(DpSegaResults *results);
+// one class per byte (GB dp_map_build parity); NULL when out of memory
+uint8_t *dp_sega_map_build(const DpSegaResults *r);
 void dp_sega_report(FILE *out,const DpSegaSystem *system,const DpSegaResults *results);
 void dp_sega_map(FILE *out,const DpSegaResults *results);
 // Lossless per-byte evidence flags, including overlapping code/data proofs.

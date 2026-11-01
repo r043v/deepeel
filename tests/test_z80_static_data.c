@@ -126,7 +126,9 @@ static void map_and_report(void) {
         DP_SEGA_STATIC_DATA|DP_SEGA_COPIED|DP_SEGA_FORCED,
         DP_SEGA_STATIC_DATA|DP_SEGA_NATURAL|DP_SEGA_COPIED,DP_SEGA_STATIC_DATA|DP_SEGA_STATIC|DP_SEGA_DATA};
     static DpSegaResults r; r.flags=flags; r.size=sizeof(flags);
-    const char *expected[]={"unknown","data-static","code-static","data-read","code-forced","data-copied","code-natural","data-read"};
+    // GB precedence: code (natural > forced > static) beats data (copied >
+    // static > read), which beats the static scan classes
+    const char *expected[]={"unknown","data-static","code-static","data-static","code-forced","code-forced","code-natural","code-static"};
     FILE *f=tmpfile(); CHECK(f); if(!f) return; dp_sega_map(f,&r); rewind(f);
     char line[512],kind[32]; unsigned seen=0,bank,lo,hi;
     while(fgets(line,sizeof(line),f)) {
@@ -139,7 +141,7 @@ static void map_and_report(void) {
     CHECK(seen==sizeof(flags)); fclose(f);
     f=tmpfile(); CHECK(f); if(!f) return; dp_sega_report(f,dp_sega_system("sms"),&r); rewind(f);
     int matched=0; while(fgets(line,sizeof(line),f))
-        matched|=strstr(line,"code-natural 1; code-forced 1; code-static 1; data 3; data-static 1")!=NULL;
+        matched|=strstr(line,"code-natural 1; code-forced 2; code-static 2; data 0; data-static 2")!=NULL;
     CHECK(matched); fclose(f); evidence_roundtrip(&r);
     uint8_t *boundary=malloc(0x4002); CHECK(boundary); if(!boundary) return;
     memset(boundary,DP_SEGA_STATIC_DATA,0x4002); r.flags=boundary; r.size=0x4002;
