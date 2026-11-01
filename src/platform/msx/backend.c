@@ -137,10 +137,52 @@ static unsigned explore_irq(void) {
     return (machine.vdp_status&128) && (machine.vdp[1]&32)?DP_SEGA_IRQ_FRAME:0;
 }
 static uint8_t explore_windows(void) { return machine.cart_vis; }
+// Switchable cartridge windows in 16 KiB pairs: ASCII8/ASCII16/SCC bank $4000
+// and $8000, the plain Konami board only $6000 and $8000 ($4000 stays fixed).
+// Plain cartridges never switch: seeds use the boot view.
+static int explore_geometry(DpSegaSeedGeometry *g) {
+    memset(g,0,sizeof(*g));
+    unsigned banks=image_size>>14;
+    if(!machine.msx_mapper || !banks) return 1;
+    g->banks=(uint8_t)(banks>255?255:banks);
+    g->window_lo=machine.msx_mapper==DP_MSX_KONAMI?0x6000:0x4000;
+    g->window_hi=0x8000;
+    return 1;
+}
+static int explore_window(uint16_t addr, unsigned bank) {
+    if(!machine.msx_mapper || addr<0x4000 || addr>=0xc000) return 0;
+    // A dispatch entry above $7FFF implies the game mapped the cartridge into
+    // that 16 KiB page too (PPI $A8), not only the mapper bank: select the
+    // boot cartridge slot there before the selector writes, which stay in
+    // page 1 where the cartridge always shows at INIT.
+    unsigned page=addr>>14, slot=(machine.ppi_a>>(2*(machine.msx_init>>14)))&3;
+    uint8_t slots=(uint8_t)((machine.ppi_a&~(3u<<(page*2)))|(slot<<(page*2)));
+    if(slots!=machine.ppi_a) dp_msx_out(0xa8,slots);
+    unsigned lo8=bank*2; // the two 8 KiB pages of the requested 16 KiB bank
+    switch(machine.msx_mapper) {
+    case DP_MSX_ASCII8:
+        if(addr<0x8000) { dp_msx_write(0x6000,(uint8_t)lo8); dp_msx_write(0x6800,(uint8_t)(lo8+1)); }
+        else { dp_msx_write(0x7000,(uint8_t)lo8); dp_msx_write(0x7800,(uint8_t)(lo8+1)); }
+        return 1;
+    case DP_MSX_ASCII16:
+        dp_msx_write(addr<0x8000?0x6000:0x7000,(uint8_t)bank); return 1;
+    case DP_MSX_KONAMI:
+        if(addr<0x8000) { dp_msx_write(0x6000,(uint8_t)lo8); dp_msx_write(0x8000,(uint8_t)(lo8+1)); }
+        else { dp_msx_write(0x8000,(uint8_t)lo8); dp_msx_write(0xa000,(uint8_t)(lo8+1)); }
+        return 1;
+    case DP_MSX_KONAMI_SCC:
+        // $9000 selector values with the low six bits all set also enable the
+        // SCC overlay at $9800: such views stay refused by rom_index checks.
+        if(addr<0x8000) { dp_msx_write(0x5000,(uint8_t)lo8); dp_msx_write(0x7000,(uint8_t)(lo8+1)); }
+        else { dp_msx_write(0x9000,(uint8_t)lo8); dp_msx_write(0xb000,(uint8_t)(lo8+1)); }
+        return 1;
+    default: return 0;
+    }
+}
 const DpSegaBackend *dp_msx_backend(void) {
     static const DpSegaBackend ops={explore_init,dp_msx_cpu,dp_msx_read,dp_msx_write,
         dp_msx_in,dp_msx_out,dp_msx_advance,dp_msx_rom_index,sizeof(Snapshot),explore_save,explore_load,
         dp_msx_ram_index,explore_target,explore_input,explore_set_input,explore_mapper,explore_command,
-        explore_irq,65536,65536,0xff,0x98,0x99,dp_msx_close,explore_windows,NULL,NULL};
+        explore_irq,65536,65536,0xff,0x98,0x99,dp_msx_close,explore_windows,NULL,NULL,explore_geometry,explore_window};
     return &ops;
 }

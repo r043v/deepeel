@@ -4,6 +4,7 @@
 #include "../msx/msx.h"
 #include "../msx/explore.h"
 #include "../../cpu/z80/provenance.h"
+#include "../../core/hashset.h"
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
@@ -15,6 +16,10 @@ typedef struct {
     DpZ80Origin ram[];
 } Origins;
 typedef struct { void *state; uint8_t *cart; Origins *origins; int forced,skip_irq; } Path;
+// A seed spec: pc in a mapper view. exact=1 applies seed_window(pc,bank) and
+// refuses any view where rom_index(pc) is not bank*0x4000+(pc&0x3FFF); exact=0
+// keeps the boot view untouched.
+typedef struct { uint16_t pc; uint16_t bank; uint8_t exact; } SeedSpec;
 enum { INPUT_PAD1, INPUT_PAD2, INPUT_START, INPUT_HALT_PAUSE, INPUT_PAD2_UD, INPUT_GROUP_COUNT };
 typedef struct { uint32_t key; uint8_t accepted,seen[16]; uint64_t blocked_epoch; } InputSite;
 typedef struct {
@@ -49,6 +54,14 @@ typedef struct {
     unsigned bios_id;
     DpZ80Origin bios_a,bios_e,bios_read,bios_return;
     int64_t bios_mapping[10];
+    SeedSpec *seeds;
+    unsigned seed_count,seed_next,seed_capacity;
+    void *seed_state;              // reset machine image seeds start from
+    uint8_t *seed_cart;            // reset cartridge RAM alongside it
+    Origins *seed_origins;         // reset provenance origins alongside it
+    void *seed_scratch;            // running machine saved across materialization
+    uint8_t *seed_scratch_cart;
+    Origins *seed_scratch_origins;
 } Run;
 static DpZ80Origin origin_read(void *user,uint16_t a) {
     Run *x=user;
@@ -308,6 +321,53 @@ static size_t site(Run *x,uint16_t pc) {
     int64_t i=x->b->rom_index(pc);
     return i>=0 && (uint64_t)i<x->r->size ? (size_t)i : x->r->size+pc;
 }
+// GB is_padding_at parity: 8 identical $00/$FF bytes, or a view past the ROM.
+static int seed_padding(const uint8_t *image,size_t size,uint64_t index) {
+    if(index>=size) return 1;
+    uint8_t b0=image[index];
+    if(b0!=0x00 && b0!=0xff) return 0;
+    for(unsigned i=1;i<8;i++) if(index+i>=size || image[index+i]!=b0) return 0;
+    return 1;
+}
+// A seed enters below the pending frontier: branch forks keep popping first,
+// and the reset path and vector entries still run ahead of every seed.
+static int push_seed_front(Run *x) {
+    if(x->created[x->phase]>=x->opt->max_paths) { x->r->path_cuts++; return 0; }
+    if(x->queued>=x->opt->queue_cap) { x->r->queue_cuts++; return 0; }
+    Path p={malloc(x->b->state_size),malloc(0x8000),malloc(x->origin_size),1,0};
+    if(!p.state||!p.cart||!p.origins) { free(p.state); free(p.cart); free(p.origins); return -1; }
+    x->b->save(p.state); memcpy(p.cart,x->cart,0x8000); memcpy(p.origins,x->origins,x->origin_size);
+    memmove(x->queue+1,x->queue,x->queued*sizeof(Path));
+    x->queue[0]=p; x->queued++; x->created[x->phase]++; x->r->seeds_admitted++;
+    return 1;
+}
+// Rebuild "reset state + mapper view + pc" for one seed between two running
+// paths. The running machine, cartridge RAM and origins are fully restored;
+// latch writes stay unobserved and out of the bank timeline (GB seed parity).
+static int materialize_seed(Run *x) {
+    const SeedSpec *s=&x->seeds[x->seed_next++];
+    DpSegaResults *r=x->r;
+    x->b->save(x->seed_scratch);
+    memcpy(x->seed_scratch_cart,x->cart,0x8000);
+    memcpy(x->seed_scratch_origins,x->origins,x->origin_size);
+    x->b->load(x->seed_state); hook(x);
+    memcpy(x->cart,x->seed_cart,0x8000);
+    memcpy(x->origins,x->seed_origins,x->origin_size);
+    if(s->exact && x->b->seed_window) (void)x->b->seed_window(s->pc,s->bank);
+    int64_t index=x->b->rom_index(s->pc);
+    int accepted=0;
+    if(index<0 || (uint64_t)index>=r->size ||
+       (s->exact && index!=(int64_t)((uint32_t)s->bank*0x4000+(s->pc&0x3fff)))) r->seeds_refused_view++;
+    else {
+        x->b->cpu()->pc=s->pc;
+        accepted=push_seed_front(x);
+        if(!accepted) r->seeds_refused_queue++;
+    }
+    x->b->load(x->seed_scratch); hook(x);
+    memcpy(x->cart,x->seed_scratch_cart,0x8000);
+    memcpy(x->origins,x->seed_scratch_origins,x->origin_size);
+    return accepted<0?-1:0;
+}
 static InputSite *input_site(Run *x,size_t at,unsigned group) {
     uint32_t key=(uint32_t)at*INPUT_GROUP_COUNT+group+1;
     size_t bucket=(key*2654435761u)&(x->input_hash_size-1);
@@ -415,10 +475,68 @@ DpSegaOptions dp_sega_options(void) {
     // Boot code often runs nested 16-bit delay loops before touching the VDP.
     DpSegaOptions o={.max_total=20000000,.input_total=20000000,.max_steps=2000000,.max_paths=4096,.queue_cap=128,
         .loop_cap=262144,.fork_cap=2,.stagnation=32768,.copy_cap=DP_SEGA_COPY_CAP,
-        .input_masks=8,.input_sites=4096,.seed_vectors=1,.target_closure=1,.block_closure=1,.msx_mapper=DP_MSX_AUTO,.closure={262144,65536,256,8}}; return o;
+        .input_masks=8,.input_sites=4096,.seed_vectors=1,.seed_cap=1024,.target_closure=1,.block_closure=1,.msx_mapper=DP_MSX_AUTO,.closure={262144,65536,256,8}}; return o;
 }
 DpSegaOptions dp_msx_options(void) {
     DpSegaOptions o=dp_sega_options(); o.seed_vectors=0; return o;
+}
+// Pointer-table scan, bank sweep and explicit entries (GB dp_seed_gb parity).
+// A ROM word pointing into cartridge space seeds its target; a word flanked by
+// two other switchable-window words is a dispatch entry, so every switchable
+// bank's view of the target is seeded, an isolated word the boot view only.
+// Dedup is per physical byte key; padding targets are skipped; every cap hit
+// or refused view is counted, never silent.
+static void generate_seed_specs(Run *x,const uint8_t *image,size_t size) {
+    const DpSegaOptions *o=x->opt; DpSegaResults *r=x->r;
+    DpSegaSeedGeometry g;
+    int geo=x->b->seed_geometry && x->b->seed_geometry(&g);
+    DpHashSet seen; dp_set_init(&seen,1<<16);
+    if(o->seed_cap && !o->no_pointer_scan) {
+        uint16_t lo=geo?g.window_lo:0, hi=geo?(uint16_t)(g.window_hi+0x4000):0;
+        for(size_t a=0;a+1<size;a++) {
+            uint16_t v=(uint16_t)(image[a]|(image[a+1]<<8));
+            if(v<8 || v>=0xc000) continue;
+            uint16_t pv=a>=2?(uint16_t)(image[a-2]|(image[a-1]<<8)):0;
+            uint16_t nv=a+3<size?(uint16_t)(image[a+2]|(image[a+3]<<8)):0;
+            int tab=geo && g.banks && v>=lo && v<hi && pv>=lo && pv<hi && nv>=lo && nv<hi;
+            if(tab) {
+                for(unsigned b=0;b<g.banks;b++) {
+                    uint64_t key=(uint64_t)b*0x4000+(v&0x3fff);
+                    if(key>=size) continue; // a view into the padded tail
+                    if(seed_padding(image,size,key)) { r->seeds_skipped_padding++; continue; }
+                    if(x->seed_count>=x->seed_capacity || r->seeds_pointer>=o->seed_cap) { r->seeds_refused_cap++; continue; }
+                    if(dp_set_insert(&seen,key)!=1) continue;
+                    x->seeds[x->seed_count++]=(SeedSpec){v,(uint16_t)b,1};
+                    r->seeds_pointer++;
+                }
+            } else {
+                int64_t key=x->b->rom_index(v); // the boot view, machine at reset
+                if(key<0 || (uint64_t)key>=size) continue;
+                if(seed_padding(image,size,(uint64_t)key)) { r->seeds_skipped_padding++; continue; }
+                if(x->seed_count>=x->seed_capacity || r->seeds_pointer>=o->seed_cap) { r->seeds_refused_cap++; continue; }
+                if(dp_set_insert(&seen,(uint64_t)key)!=1) continue;
+                x->seeds[x->seed_count++]=(SeedSpec){v,0,0};
+                r->seeds_pointer++;
+            }
+        }
+    }
+    if(o->seed_banks && geo && g.banks) {
+        for(uint32_t w=g.window_lo;w<=g.window_hi;w+=0x4000) {
+            for(unsigned b=0;b<g.banks && x->seed_count<x->seed_capacity;b++) {
+                uint64_t key=(uint64_t)b*0x4000; // w is a window base: offset 0
+                if(key>=size) continue;
+                if(seed_padding(image,size,key)) { r->seeds_skipped_padding++; continue; }
+                if(dp_set_insert(&seen,key)!=1) continue;
+                x->seeds[x->seed_count++]=(SeedSpec){(uint16_t)w,(uint16_t)b,1};
+                r->seeds_bank++;
+            }
+        }
+    }
+    for(unsigned i=0;i<o->entry_count && x->seed_count<x->seed_capacity;i++) {
+        x->seeds[x->seed_count++]=(SeedSpec){o->entry[i].addr,(uint16_t)o->entry[i].bank,1};
+        r->seeds_entry++;
+    }
+    dp_set_free(&seen);
 }
 void dp_sega_results_free(DpSegaResults *r) { free(r->flags); free(r->copies); memset(r,0,sizeof(*r)); }
 int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *o,DpSegaResults *r) {
@@ -429,7 +547,9 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
     if(o->sega_mapper==DP_SEGA_MAPPER_KOREAN150 && size>0x200000) return 0;
     if(msx && (size>0x100000 || o->msx_mapper<DP_MSX_AUTO || o->msx_mapper>DP_MSX_KONAMI_SCC)) return 0;
     if((sg && size>0xc000) || size>0x400000 || o->queue_cap>4096 || o->copy_cap>65536 || o->input_masks>128 || o->input_sites>65536 ||
+       o->seed_cap>65536 || o->entry_count>32 ||
        (o->input_masks && o->input_total>UINT64_MAX-o->max_total)) return 0;
+    for(unsigned i=0;i<o->entry_count;i++) if(o->entry[i].bank>0xffff) return 0;
     if(o->closure.nodes && (o->closure.nodes>1048576 || !o->closure.seeds || o->closure.seeds>1048576 ||
        !o->closure.views || o->closure.views>4096 || !o->closure.contexts || o->closure.contexts>64)) return 0;
     memset(r,0,sizeof(*r)); r->size=size;
@@ -481,6 +601,21 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
         if(!x.closure || (o->target_closure && !dp_sega_closure_targets(x.closure,&r->target_closure)) ||
            (o->target_closure && o->block_closure && !dp_sega_closure_blocks(x.closure,&r->block_closure))) { ok=0; goto cleanup; }
     }
+    // Seed base: the reset state every seed starts from. Generation reads the
+    // boot view through rom_index while the machine has not run yet.
+    if(o->seed_cap || o->entry_count || o->seed_banks) {
+        x.seed_capacity=o->seed_cap+o->entry_count+3*256;
+        x.seeds=malloc((size_t)x.seed_capacity*sizeof(*x.seeds));
+        x.seed_state=malloc(x.b->state_size); x.seed_scratch=malloc(x.b->state_size);
+        x.seed_cart=malloc(0x8000); x.seed_scratch_cart=malloc(0x8000);
+        x.seed_origins=malloc(x.origin_size); x.seed_scratch_origins=malloc(x.origin_size);
+        if(!x.seeds||!x.seed_state||!x.seed_scratch||!x.seed_cart||!x.seed_scratch_cart||
+           !x.seed_origins||!x.seed_scratch_origins) { ok=0; goto cleanup; }
+        x.b->save(x.seed_state);
+        memcpy(x.seed_cart,x.cart,0x8000);
+        memcpy(x.seed_origins,x.origins,x.origin_size);
+        generate_seed_specs(&x,image,size);
+    }
     if(push(&x,0,0)<0) { ok=0; goto cleanup; }
     if(o->seed_vectors && !msx) {
         const uint16_t entries[]={8,16,24,32,40,48,56,0x66};
@@ -498,7 +633,13 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
         x.phase=phase;
         uint64_t start_steps=r->steps,start_paths=r->paths,budget=r->phase_limits[phase];
         if(phase && budget) { memset(x.forks,0,sites); memset(x.sides,0,sites); memset(x.irq_forks,0,sites); }
-        while((x.queued || (phase && x.input_queued)) && r->steps-start_steps<budget) {
+        while((x.queued || (phase && x.input_queued) || (!phase && x.seed_next<x.seed_count)) && r->steps-start_steps<budget) {
+            // Seeds materialize below the pending frontier while the base
+            // phase has room: forks keep popping first, reset and vectors run
+            // ahead of every seed, and leftovers close as counted pending work.
+            if(!phase) while(x.seed_next<x.seed_count && x.queued<x.opt->queue_cap) {
+                if(materialize_seed(&x)<0) { ok=0; goto cleanup; }
+            }
             // Keep input seeds and their branch children moving in turn. Their
             // separate frontier never displaces the original exploration pass.
             int from_input=phase && x.input_queued && (!x.queued || ((r->paths-start_paths)&1)==0);
@@ -604,7 +745,8 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
             flush_copy(&x);
         }
         r->phase_steps[phase]=r->steps-start_steps; r->phase_paths[phase]=r->paths-start_paths;
-        r->phase_pending[phase]+=x.queued+(phase?x.input_queued:0);
+        if(!phase) r->seeds_pending=x.seed_count-x.seed_next;
+        r->phase_pending[phase]+=x.queued+(phase?x.input_queued:0)+(!phase?r->seeds_pending:0);
         r->global_cuts+=r->phase_pending[phase];
         for(size_t i=0;i<size;i++) r->phase_known[phase]+=!!r->flags[i];
         // A phase wall closes its pending branch work. Input seeds have their
@@ -625,6 +767,8 @@ cleanup:
     free(x.copy_hash);
     free(x.input_sites); free(x.input_scratch);
     free(x.input_queue);
+    free(x.seeds); free(x.seed_state); free(x.seed_cart); free(x.seed_origins);
+    free(x.seed_scratch); free(x.seed_scratch_cart); free(x.seed_scratch_origins);
     if(!ok) dp_sega_results_free(r);
     return ok;
 }
@@ -711,6 +855,8 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
     }
     fprintf(out,"phases: base %"PRIu64"/%"PRIu64" steps, %"PRIu64" paths, %"PRIu64" known, %"PRIu64" pending; inputs %"PRIu64"/%"PRIu64" steps, %"PRIu64" paths, %"PRIu64" known, %"PRIu64" pending\n",r->phase_steps[0],r->phase_limits[0],r->phase_paths[0],r->phase_known[0],r->phase_pending[0],r->phase_steps[1],r->phase_limits[1],r->phase_paths[1],r->phase_known[1],r->phase_pending[1]);
     fprintf(out,"cuts: steps %"PRIu64"; loop %"PRIu64"; fork %"PRIu64"; queue %"PRIu64"; paths %"PRIu64"; global-pending %"PRIu64"; decode %"PRIu64"; faults %"PRIu64"\n",r->step_cuts,r->loop_cuts,r->fork_cuts,r->queue_cuts,r->path_cuts,r->global_cuts,r->decode_cuts,r->faults);
+    fprintf(out,"seeds: pointer %"PRIu64"; bank sweep %"PRIu64"; entries %"PRIu64"; admitted %"PRIu64"; skipped padding %"PRIu64"; refused view %"PRIu64", queue %"PRIu64", cap %"PRIu64"; pending %"PRIu64"\n",
+        r->seeds_pointer,r->seeds_bank,r->seeds_entry,r->seeds_admitted,r->seeds_skipped_padding,r->seeds_refused_view,r->seeds_refused_queue,r->seeds_refused_cap,r->seeds_pending);
     fprintf(out,"loop contexts: CPU address + compact ROM index (outside: CPU address); peak %zu; buckets %zu; growths %"PRIu64"\n",
         r->loop_context_peak,r->loop_context_capacity,r->loop_context_growths);
     fprintf(out,"forced stagnation cuts %"PRIu64"\n",r->stagnation_cuts);
@@ -751,10 +897,10 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
         fprintf(out,"  port $%02X read %"PRIu64" (%s), write %"PRIu64" (%s)\n",p,r->io_read[p],rd?rd->name:"unmapped",r->io_write[p],wr?wr->name:"unmapped");
     }
     if(!strcmp(s->id,"msx")) {
-        fputs("Limits: partial simulated BIOS, zero RAM and fixed primary-slot profile; no real BIOS, expanded slots, RAM mapper, disk/tape or MSX2. No pointer/bank seeds, dynamic context dedup or sessions yet. Static closure uses observed slot/bank views and stops at BIOS, RAM, unresolved indirect jumps and mapping barriers. Pure CPU/RAM and selected BIOS copies only; VRAM read-back and transformed data have no origin. RETURN is polled, never NMI. Forced reachability is speculative.\n",out);
+        fputs("Limits: partial simulated BIOS, zero RAM and fixed primary-slot profile; no real BIOS, expanded slots, RAM mapper, disk/tape or MSX2. No dynamic context dedup or sessions yet. Static closure uses observed slot/bank views and stops at BIOS, RAM, unresolved indirect jumps and mapping barriers. Pure CPU/RAM and selected BIOS copies only; VRAM read-back and transformed data have no origin. RETURN is polled, never NMI. Forced reachability is speculative.\n",out);
         return;
     }
-    fprintf(out,"Limits: no pointer/bank seeds, dynamic context dedup or sessions yet. Static closure uses observed ROM views and stops unresolved indirect jumps and mapper effects. Provenance covers pure CPU/RAM transfers, not transformed data or VRAM read-back. Power-on inputs released; input probes hold their selected state until another probe. SMS pads use export digital TR/TH levels; GG has one pad. Zero RAM; no BIOS; disabled console bus reads $FF, without revision-specific floating bus effects. Hardware registry may describe devices absent from the embedded runtime (FM, link, BIOS/card/expansion, peripheral variants). Forced reachability is speculative.\n");
+    fprintf(out,"Limits: no dynamic context dedup or sessions yet. Static closure uses observed ROM views and stops unresolved indirect jumps and mapper effects. Provenance covers pure CPU/RAM transfers, not transformed data or VRAM read-back. Power-on inputs released; input probes hold their selected state until another probe. SMS pads use export digital TR/TH levels; GG has one pad. Zero RAM; no BIOS; disabled console bus reads $FF, without revision-specific floating bus effects. Hardware registry may describe devices absent from the embedded runtime (FM, link, BIOS/card/expansion, peripheral variants). Forced reachability is speculative.\n");
 }
 static int number(const char *s,uint64_t *n) {
     if(!*s||*s=='-') return 0;
@@ -762,12 +908,31 @@ static int number(const char *s,uint64_t *n) {
     if(errno||*end) return 0;
     *n=v; return 1;
 }
+// GB parse_entry parity: bank in strtoul base 0, CPU address in hex.
+static int parse_entry(const char *s,DpSegaOptions *o) {
+    char *end;
+    unsigned long bank=strtoul(s,&end,0);
+    if(end==s || *end!=':' || bank>0xffff) return 0;
+    const char *as=end+1;
+    unsigned long addr=strtoul(as,&end,16);
+    if(end==as || *end || addr>0xffff) return 0;
+    o->entry[o->entry_count].bank=(uint32_t)bank;
+    o->entry[o->entry_count].addr=(uint16_t)addr;
+    o->entry_count++;
+    return 1;
+}
 int dp_sega_explore_command(int argc,char **argv) {
     if(argc<5) goto usage;
     const DpSegaSystem *s=!strcmp(argv[3],"msx")?dp_msx_system():dp_sega_system(argv[3]); if(!s) goto usage;
     DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); const char *text=NULL,*map=NULL,*evidence=NULL;
     for(int i=5;i<argc;i++) {
         if(!strcmp(argv[i],"--no-vector-seeds")) { o.seed_vectors=0; continue; }
+        if(!strcmp(argv[i],"--seed-banks")) { o.seed_banks=1; continue; }
+        if(!strcmp(argv[i],"--no-pointer-scan")) { o.no_pointer_scan=1; continue; }
+        if(!strcmp(argv[i],"--entry")) {
+            if(i+1>=argc || o.entry_count>=32 || !parse_entry(argv[++i],&o)) goto usage;
+            continue;
+        }
         if(!strcmp(argv[i],"--no-block-closure")) { o.block_closure=0; continue; }
         if(!strcmp(argv[i],"--no-target-closure")) { o.target_closure=0; continue; }
         if(!strcmp(argv[i],"--no-closure")) { o.closure.nodes=0; continue; }
@@ -790,9 +955,10 @@ int dp_sega_explore_command(int argc,char **argv) {
         }
         else {
             uint64_t n; if(!number(value,&n)) goto usage;
-            if(!n && strcmp(key,"--fork-cap") && strcmp(key,"--stagnation") && strcmp(key,"--copy-cap") && strcmp(key,"--input-forks") && strcmp(key,"--input-sites") && strcmp(key,"--input-total") && strcmp(key,"--closure-nodes")) goto usage;
+            if(!n && strcmp(key,"--fork-cap") && strcmp(key,"--stagnation") && strcmp(key,"--copy-cap") && strcmp(key,"--input-forks") && strcmp(key,"--input-sites") && strcmp(key,"--input-total") && strcmp(key,"--closure-nodes") && strcmp(key,"--seed-cap")) goto usage;
             if(!strcmp(key,"--max-total")) o.max_total=n;
             else if(!strcmp(key,"--input-total")) o.input_total=n;
+            else if(!strcmp(key,"--seed-cap")) { if(n>65536) goto usage; o.seed_cap=(uint32_t)n; }
             else if(n>UINT32_MAX) goto usage;
             else if(!strcmp(key,"--max-steps")) o.max_steps=(uint32_t)n;
             else if(!strcmp(key,"--max-paths")) o.max_paths=(uint32_t)n;
@@ -830,5 +996,5 @@ int dp_sega_explore_command(int argc,char **argv) {
     }
     dp_sega_results_free(&r); return ok?0:1;
 usage:
-    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--text FILE] [--map FILE] [--evidence FILE]\n"); return 2;
+    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--text FILE] [--map FILE] [--evidence FILE]\n"); return 2;
 }

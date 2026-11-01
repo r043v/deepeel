@@ -38,17 +38,8 @@ enum {
     DP_SF_PAD = 1 << 1,     // static: padding run (8+ identical 00/FF bytes)
 };
 
-// --- open-addressing u64 set -------------------------------------------------
-typedef struct DpHashSet {
-    uint64_t *keys;
-    uint8_t *used;
-    size_t cap, cnt, cap_abs;
-} DpHashSet;
-
-void dp_set_init(DpHashSet *s, size_t cap_abs);
-void dp_set_free(DpHashSet *s);
-// returns 1 if inserted, 0 if already present; returns -1 when full
-int dp_set_insert(DpHashSet *s, uint64_t key);
+// --- open-addressing u64 set (shared implementation) ---------------------------
+#include "../core/hashset.h"
 
 // --- open-addressing u32 -> payload map --------------------------------------
 typedef struct DpMap32 {
@@ -207,6 +198,8 @@ typedef struct DpResults {
     uint32_t forks_capped; // forks dropped by the per-site cap
     uint32_t cycle_cuts, step_cuts, budget_paths, budget_steps, queue_overflows;
     uint32_t queue_growths;   // times the full worklist grew instead of dropping paths
+    uint32_t copy_window_breaks; // copy windows emitted when a touch left them (not at path end)
+    uint32_t copies_dropped;  // copy records refused by the max_copies cap (saturation)
     // disk spool (state-dir/spool.bin): states the RAM worklist could not hold
     // (queue full under the mem-cap/q_max) are written there instead of being
     // dropped, and fed back when the worklist runs low; a graceful stop flushes
@@ -373,6 +366,7 @@ struct DpExplorer {
     // first discovery to their credit counters below.
     int session;
     void *session_ctx;         // the owning worker (sessions.c)
+    void (*session_tick)(DpMach *m); // per-step frame clock of a TAS lane (NULL: off)
     int irq_depth;             // natural IRQ handlers currently executing
     int reti_pending;          // a RETI executes this step: drop the depth after
     // mapper write seen on the previous step: resolve old->new banks now
@@ -438,8 +432,8 @@ int dp_io_slot(const DpResults *res, uint16_t addr);
 
 void dp_copy_reset(DpCopyTracker *ct);
 void dp_record_copy(DpExplorer *ex, const DpCopyRec *rec, uint32_t attrib_key);
-void dp_copy_on_rom_read(DpCopyTracker *ct, uint8_t bank, uint16_t addr, uint8_t v);
-void dp_copy_on_vram_write(DpCopyTracker *ct, uint8_t bank, uint16_t addr, uint8_t v);
+void dp_copy_on_rom_read(DpExplorer *ex, uint8_t bank, uint16_t addr, uint8_t v);
+void dp_copy_on_vram_write(DpExplorer *ex, uint8_t bank, uint16_t addr, uint8_t v);
 void dp_copy_on_back_edge(DpCopyTracker *ct, uint16_t site, uint32_t site_key);
 void dp_copy_flush_path(DpExplorer *ex, DpCopyTracker *ct);
 

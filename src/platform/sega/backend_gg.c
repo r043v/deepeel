@@ -120,7 +120,32 @@ static int select_mapper(unsigned selected) {
     machine.mapper=(uint8_t)(selected-DP_SEGA_MAPPER_SEGA);
     gg_reset(); return 1;
 }
+// Sega mapper: $FFFD-$FFFF switch their own 16 KiB slot (the first $400 stays
+// at bank 0). Codemasters switches all three slots from $0000/$4000/$8000.
+// Korean150 switches the low 32 KiB in 8 KiB steps through $FFF3/$FFFC.
+static int seed_geometry(DpSegaSeedGeometry *g) {
+    memset(g,0,sizeof(*g));
+    unsigned banks=machine.rom_size>>14;
+    if(!banks) return 1;
+    g->banks=(uint8_t)(banks>255?255:banks);
+    if(GG_KOREAN150) { g->window_lo=0x0000; g->window_hi=0x4000; }
+    else if(GG_CODEMASTERS) { g->window_lo=0x0000; g->window_hi=0x8000; }
+    else { g->window_lo=0x4000; g->window_hi=0x8000; }
+    return 1;
+}
+static int seed_window(uint16_t addr, unsigned bank) {
+    if(addr>=0xc000 || bank>255) return 0;
+    if(GG_KOREAN150) {
+        if(addr>=0x8000) return 0;
+        // Mode $00 keeps ROM enabled and shows 8 KiB page 2*bank+(s&1) at slot
+        // s: the requested 16 KiB bank lands in both halves of its window.
+        write(0xfffc,0x00); write(0xfff3,(uint8_t)bank); return 1;
+    }
+    if(GG_CODEMASTERS) { write((uint16_t)(addr&0xc000),(uint8_t)bank); return 1; }
+    if(addr<0x400) return 0; // fixed bank 0
+    write((uint16_t)(0xfffd+(addr>>14)),(uint8_t)bank); return 1;
+}
 const DpSegaBackend *dp_sega_backend_gg(void) {
-    static const DpSegaBackend ops={init,cpu,read,write,in,out,advance,rom_index,sizeof(State),save,load,ram_index,vdp_target,input,set_input,mapper,vdp_command,irq_sources,DP_SEGA_RAM_TAGS,8192,0xc1,0x80,0x81,NULL,NULL,control_state,select_mapper};
+    static const DpSegaBackend ops={init,cpu,read,write,in,out,advance,rom_index,sizeof(State),save,load,ram_index,vdp_target,input,set_input,mapper,vdp_command,irq_sources,DP_SEGA_RAM_TAGS,8192,0xc1,0x80,0x81,NULL,NULL,control_state,select_mapper,seed_geometry,seed_window};
     return &ops;
 }

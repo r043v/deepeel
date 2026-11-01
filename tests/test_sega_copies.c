@@ -6,7 +6,7 @@
 static DpSegaResults result;
 static uint8_t rom[0x10000];
 static DpSegaOptions options(void) {
-    DpSegaOptions o=dp_sega_options();
+    DpSegaOptions o=dp_sega_options(); o.seed_cap=0;
     o.max_total=4096; o.max_steps=256; o.loop_cap=4; o.max_paths=1; o.fork_cap=0; o.seed_vectors=0; o.input_masks=0;
     return o;
 }

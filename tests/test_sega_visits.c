@@ -28,7 +28,7 @@ static void table(void) {
     dp_sega_visits_free(&v); CHECK(!v.slots && !v.capacity && !v.used);
 }
 static DpSegaOptions options(void) {
-    DpSegaOptions o=dp_sega_options(); o.max_steps=24; o.max_total=96;
+    DpSegaOptions o=dp_sega_options(); o.seed_cap=0; o.max_steps=24; o.max_total=96;
     o.input_total=0; o.input_masks=0; o.closure.nodes=0; o.seed_vectors=0;
     o.fork_cap=0; o.loop_cap=1; return o;
 }

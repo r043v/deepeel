@@ -54,7 +54,7 @@ static void exploration(void) {
         0x21,0x00,0x40,0x01,0xbe,0x04,0xed,0xb3,0xc3,0x1b,0x01};
     memcpy(rom+0x100,body,sizeof(body));
     for(unsigned i=0;i<4;i++) rom[0x4000+i]=(uint8_t)(0x50+i);
-    DpSegaOptions o=dp_sega_options(); o.max_total=1000; o.max_steps=100; o.loop_cap=12; o.seed_vectors=0; o.input_masks=0;
+    DpSegaOptions o=dp_sega_options(); o.seed_cap=0; o.max_total=1000; o.max_steps=100; o.loop_cap=12; o.seed_vectors=0; o.input_masks=0;
     DpSegaResults r;
     CHECK(dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r));
     CHECK(r.forks>=3 && r.paths>=4); CHECK(r.loop_cuts>=2);

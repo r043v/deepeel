@@ -14,6 +14,14 @@ typedef struct {
     uint16_t address;
     uint8_t mask,latch,pair,latch_value;
 } DpSegaVdpTarget;
+// Switchable ROM geometry for seeding, in 16 KiB physical banks. window_lo and
+// window_hi are 16 KiB window bases (inclusive): a ROM word landing there carries
+// no bank evidence and may seed every switchable bank's view of its target.
+typedef struct {
+    uint8_t banks;       // switchable 16 KiB banks (0: the profile never switches)
+    uint16_t window_lo;  // lowest switchable window base
+    uint16_t window_hi;  // highest switchable window base, inclusive
+} DpSegaSeedGeometry;
 typedef struct {
     int (*init)(const uint8_t *, size_t, uint8_t *, int);
     z80_t *(*cpu)(void);
@@ -52,6 +60,15 @@ typedef struct {
     int (*memory_control)(uint16_t port,uint8_t *value,uint8_t *effect_mask);
     // Initialization only: select an explicit DP_SEGA_MAPPER_* board and reset it.
     int (*select_mapper)(unsigned mapper);
+    // Query the switchable ROM geometry for seeding (always fills, zeroed when
+    // the profile never switches banks). Returns 1, or 0 when unsupported.
+    int (*seed_geometry)(DpSegaSeedGeometry *out);
+    // Program the mapper so 16 KiB bank `bank` shows at the switchable window
+    // covering `addr`, through raw machine writes: unobserved by the explorer
+    // instrumentation and absent from the bank timeline. Returns 1 when the
+    // latches were applied, 0 when this window/bank is not switchable. The
+    // caller verifies the resulting view with rom_index before seeding.
+    int (*seed_window)(uint16_t addr, unsigned bank);
 } DpSegaBackend;
 const DpSegaBackend *dp_sega_backend_sg(void);
 const DpSegaBackend *dp_sega_backend_gg(void);

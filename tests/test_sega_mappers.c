@@ -38,7 +38,7 @@ static void backend(int sms,unsigned mapper) {
     free(state);
 }
 static void run(const char *system,int selected) {
-    DpSegaOptions o=dp_sega_options(); o.sega_mapper=selected;
+    DpSegaOptions o=dp_sega_options(); o.seed_cap=0; o.sega_mapper=selected;
     o.max_steps=24; o.max_total=48; o.input_total=0; o.input_masks=0;
     o.seed_vectors=0; o.fork_cap=0; o.closure.nodes=128; o.closure.seeds=32;
     dp_sega_results_free(&result);
@@ -73,7 +73,7 @@ static void dynamic(const char *system,unsigned mapper) {
     }
 }
 static void invalid(void) {
-    fixture(); DpSegaOptions o=dp_sega_options(); DpSegaResults unused;
+    fixture(); DpSegaOptions o=dp_sega_options(); o.seed_cap=0; DpSegaResults unused;
     o.sega_mapper=-1; CHECK(!dp_sega_explore(dp_sega_system("sms"),rom,sizeof(rom),&o,&unused));
     o.sega_mapper=4; CHECK(!dp_sega_explore(dp_sega_system("gg"),rom,sizeof(rom),&o,&unused));
     o.sega_mapper=1; CHECK(!dp_sega_explore(dp_sega_system("sg"),rom,0xc000,&o,&unused));

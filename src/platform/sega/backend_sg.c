@@ -35,7 +35,10 @@ static unsigned vdp_command(uint8_t second,uint8_t *reg,uint8_t *value) {
 static unsigned irq_sources(void) {
     return (machine.vdp_status&128) && (machine.vdp[1]&32)?DP_SEGA_IRQ_FRAME:0;
 }
+// Unbanked board: nothing ever switches, every seed uses the boot view.
+static int seed_geometry(DpSegaSeedGeometry *g) { memset(g,0,sizeof(*g)); return 1; }
+static int seed_window(uint16_t addr, unsigned bank) { (void)addr; (void)bank; return 0; }
 const DpSegaBackend *dp_sega_backend_sg(void) {
-    static const DpSegaBackend ops={init,cpu,sg1000_read,sg1000_write,in,out,advance,rom_index,sizeof(sg1000_t),save,load,ram_index,vdp_target,input,set_input,mapper,vdp_command,irq_sources,DP_SEGA_RAM_TAGS,8192,0xc1,0x80,0x81,NULL,NULL,NULL,NULL};
+    static const DpSegaBackend ops={init,cpu,sg1000_read,sg1000_write,in,out,advance,rom_index,sizeof(sg1000_t),save,load,ram_index,vdp_target,input,set_input,mapper,vdp_command,irq_sources,DP_SEGA_RAM_TAGS,8192,0xc1,0x80,0x81,NULL,NULL,NULL,NULL,seed_geometry,seed_window};
     return &ops;
 }

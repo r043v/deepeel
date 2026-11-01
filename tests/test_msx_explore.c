@@ -7,7 +7,7 @@ static DpSegaResults result;
 static DpSegaOptions options(void) {
     DpSegaOptions o=dp_msx_options();
     o.max_total=4096; o.max_steps=256; o.max_paths=16; o.loop_cap=16;
-    o.input_masks=0; o.msx_mapper=DP_MSX_PLAIN; return o;
+    o.input_masks=0; o.seed_cap=0; o.msx_mapper=DP_MSX_PLAIN; return o;
 }
 static void fixture(const uint8_t *code,size_t size) {
     memset(rom,0,sizeof(rom)); rom[0]='A'; rom[1]='B'; rom[2]=0x10; rom[3]=0x40;

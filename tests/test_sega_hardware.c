@@ -14,7 +14,7 @@ static void reset(void) {
     memset(rom,0xff,sizeof(rom)); rom[0]=0xc3; rom[1]=0; rom[2]=1; cursor=0x100;
 }
 static DpSegaOptions options(void) {
-    DpSegaOptions o=dp_sega_options();
+    DpSegaOptions o=dp_sega_options(); o.seed_cap=0;
     o.seed_vectors=0; o.input_total=0; o.input_masks=0; o.closure.nodes=0;
     o.max_steps=18000; o.max_total=36000; o.loop_cap=20000; o.fork_cap=1;
     return o;

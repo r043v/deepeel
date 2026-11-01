@@ -37,6 +37,11 @@ typedef struct {
     uint32_t max_steps,max_paths,queue_cap,loop_cap,fork_cap,stagnation,copy_cap,input_masks,input_sites;
     int target_closure,block_closure;
     int seed_vectors;
+    uint32_t seed_cap;     // max pointer-scan seeds (0 disables the scan)
+    int seed_banks;        // seed every switchable window/bank pair
+    int no_pointer_scan;   // disable pointer-table seeding
+    struct { uint32_t bank; uint16_t addr; } entry[32]; // extra --entry seeds
+    unsigned entry_count;
     int sega_mapper; // 0 auto; otherwise DP_SEGA_MAPPER_* (SMS/GG only)
     int msx_mapper; // -1 auto; otherwise DP_MSX_* mapper selection
     DpSegaClosureOptions closure;
@@ -46,6 +51,9 @@ typedef struct {
     size_t size;
     uint64_t steps,paths,forks,irq_forks,exec_outside,data_reads,vdp_copies,ram_copies;
     uint64_t step_cuts,loop_cuts,fork_cuts,queue_cuts,global_cuts,path_cuts,faults,decode_cuts,stagnation_cuts;
+    // Seeds (GB parity): generated specs by kind, admissions, bounded refusals.
+    uint64_t seeds_pointer,seeds_bank,seeds_entry,seeds_admitted,seeds_skipped_padding;
+    uint64_t seeds_refused_view,seeds_refused_queue,seeds_refused_cap,seeds_pending;
     size_t loop_context_peak,loop_context_capacity;
     uint64_t loop_context_growths;
     uint64_t io_read[256],io_write[256],bank_changes,bank_log_overflow;

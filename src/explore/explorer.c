@@ -35,65 +35,6 @@ static inline void u32_add(uint32_t *p, uint32_t v) { __atomic_add_fetch(p, v, _
 static inline void u64_add(uint64_t *p, uint64_t v) { __atomic_add_fetch(p, v, __ATOMIC_RELAXED); }
 static inline void u64_or(uint64_t *p, uint64_t v) { __atomic_fetch_or(p, v, __ATOMIC_RELAXED); }
 
-// --- u64 set ------------------------------------------------------------------
-static size_t set_probe(const DpHashSet *s, uint64_t key) {
-    size_t i = (size_t)(key * 0x9E3779B97F4A7C15ull) & (s->cap - 1);
-    while (s->used[i]) {
-        if (s->keys[i] == key) return i;
-        i = (i + 1) & (s->cap - 1);
-    }
-    return i;
-}
-
-static int set_grow(DpHashSet *s) {
-    if (s->cap >= s->cap_abs) return 0;
-    size_t ncap = s->cap * 2;
-    uint64_t *nk = calloc(ncap, sizeof(uint64_t));
-    uint8_t *nu = calloc(ncap, 1);
-    if (!nk || !nu) { free(nk); free(nu); return 0; }
-    for (size_t i = 0; i < s->cap; i++) {
-        if (!s->used[i]) continue;
-        size_t j = (size_t)(s->keys[i] * 0x9E3779B97F4A7C15ull) & (ncap - 1);
-        while (nu[j]) j = (j + 1) & (ncap - 1);
-        nk[j] = s->keys[i];
-        nu[j] = 1;
-    }
-    free(s->keys);
-    free(s->used);
-    s->keys = nk;
-    s->used = nu;
-    s->cap = ncap;
-    return 1;
-}
-
-void dp_set_init(DpHashSet *s, size_t cap_abs) {
-    s->cap_abs = cap_abs ? cap_abs : 1 << 20;
-    s->cap = 1024;
-    s->keys = calloc(s->cap, sizeof(uint64_t));
-    s->used = calloc(s->cap, 1);
-    s->cnt = 0;
-}
-
-void dp_set_free(DpHashSet *s) {
-    free(s->keys);
-    free(s->used);
-    s->keys = NULL;
-    s->used = NULL;
-    s->cap = s->cnt = s->cap_abs = 0;
-}
-
-int dp_set_insert(DpHashSet *s, uint64_t key) {
-    if (s->cnt >= s->cap * 3 / 4) {
-        if (!set_grow(s)) return -1;
-    }
-    size_t i = set_probe(s, key);
-    if (s->used[i]) return 0;
-    s->keys[i] = key;
-    s->used[i] = 1;
-    s->cnt++;
-    return 1;
-}
-
 // --- u32 -> payload map ---------------------------------------------------------
 static void *map_find(DpMap32 *m, uint32_t key) {
     size_t i = (size_t)(key * 0x9E3779B97F4A7C15ull) & (m->cap - 1);
@@ -653,9 +594,10 @@ static void hook_read(DpMach *m, uint16_t a, uint8_t v) {
         uint8_t old = flags_or(&res->data_flags[key], DP_DF_READ);
         if (!(old & DP_DF_READ)) ex->credit_data++;
         hits_add(&res->data_hits[key], 1);
-        dp_copy_on_rom_read(&ex->ct, (uint8_t)cur_bank(ex, a), a, v);
+        dp_copy_on_rom_read(ex, (uint8_t)cur_bank(ex, a), a, v);
     }
     section_live_access(ex, a);
+    if (a == 0xFF04 && ex->session && getenv("DP_COPYDBG")) fprintf(stderr, "DBG div pc=%04x v=%02x\n", m->api->gbr->pc, v);
     if (a >= 0xFF00 && a < 0xFF80) {
         int slot = dp_io_slot(res, a);
         if (slot >= 0) {
@@ -676,6 +618,7 @@ static void hook_read(DpMach *m, uint16_t a, uint8_t v) {
 static void hook_write(DpMach *m, uint16_t a, uint8_t v) {
     DpExplorer *ex = m->owner;
     DpResults *res = ex->res;
+    if (a == 0xFFB4 && ex->session && getenv("DP_COPYDBG")) fprintf(stderr, "DBG level %02x\n", v);
     if (a < 0x8000) { // mapper write: the bank flip resolves on the next step
         ex->pend_map = 1;
         ex->pend_pc = m->api->gbr->pc;
@@ -687,7 +630,7 @@ static void hook_write(DpMach *m, uint16_t a, uint8_t v) {
     if (a < 0xA000) { // VRAM
         int vbk = m->api->io[0x4F] & 1;
         u64_or(&res->vram_write_pages[vbk], 1ull << ((a - 0x8000) >> 8));
-        dp_copy_on_vram_write(&ex->ct, (uint8_t)vbk, a, v);
+        dp_copy_on_vram_write(ex, (uint8_t)vbk, a, v);
         return;
     }
     if (a < 0xC000) { // cartridge RAM
@@ -781,6 +724,7 @@ static void hook_step(DpMach *m, uint16_t pc, uint8_t op, int entry) {
 
     // a mapper write from the previous step resolved: record the switch
     emit_pend_map(ex);
+    if (ex->session_tick) ex->session_tick(m);
 
     // the fork explorer's walls do not apply to session workers: their play
     // is bounded by frames and segments, and they share res->steps_total
