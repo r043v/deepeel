@@ -317,9 +317,20 @@ static void legend_text(uint8_t *rgb, int w, int h, int x, int y, const char *st
     }
 }
 
+// rendered width of a string: one 6*scale cell per glyph (accented letters
+// are two UTF-8 bytes but one glyph — strlen would overcount them)
+static int legend_text_width(const char *str, int scale) {
+    int wpx = 0, adv;
+    for (; *str; str += adv) {
+        glyph_of(str, &adv);
+        wpx += 6 * scale;
+    }
+    return wpx;
+}
+
 // largest font scale whose text still fits the image width
 static int fit_scale(const char *str, int w, int x, int scale) {
-    while (scale > 1 && x + (int)strlen(str) * 6 * scale > w) scale--;
+    while (scale > 1 && x + legend_text_width(str, scale) > w) scale--;
     return scale;
 }
 
@@ -329,12 +340,12 @@ static int fit_scale(const char *str, int w, int x, int scale) {
 static void legend_entry(uint8_t *rgb, int w, int h, int y, const char *str,
                          const uint8_t *col, int scale, int avail, int right_edge) {
     int side = 7 * scale, gap = 3 * scale;
-    int tw = (int)strlen(str) * 6 * scale;
+    int tw = legend_text_width(str, scale);
     int need = side + gap + tw;
     while (scale > 1 && need > avail) {
         scale--;
         side = 7 * scale; gap = 3 * scale;
-        tw = (int)strlen(str) * 6 * scale;
+        tw = legend_text_width(str, scale);
         need = side + gap + tw;
     }
     int x0 = right_edge >= 0 ? right_edge - need : 10; // grid margin + 4
@@ -506,16 +517,16 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
             double p = s->cls[order[r]] * pct0;
             if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[order[r]]);
             else snprintf(line, sizeof line, "%s %.1f%%", fr[order[r]], p);
-            int need = (7 + 3 + (int)strlen(line) * 6) * ls;
-            while (ls > 1 && need > lavail) { ls--; need = (7 + 3 + (int)strlen(line) * 6) * ls; }
+            int need = (7 + 3) * ls + legend_text_width(line, ls);
+            while (ls > 1 && need > lavail) { ls--; need = (7 + 3) * ls + legend_text_width(line, ls); }
         }
         if (two_cols && r + half < ncls) {
             char line[64];
             double p = s->cls[order[r + half]] * pct0;
             if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[order[r + half]]);
             else snprintf(line, sizeof line, "%s %.1f%%", fr[order[r + half]], p);
-            int need = (7 + 3 + (int)strlen(line) * 6) * rs;
-            while (rs > 1 && need > ravail) { rs--; need = (7 + 3 + (int)strlen(line) * 6) * rs; }
+            int need = (7 + 3) * rs + legend_text_width(line, rs);
+            while (rs > 1 && need > ravail) { rs--; need = (7 + 3) * rs + legend_text_width(line, rs); }
         }
     }
     int s_common = ls < rs ? ls : rs; // both columns at the same scale
@@ -528,19 +539,14 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
         snprintf(size_txt, sizeof size_txt, "%.1f Mio", (double)rom_size / (1024.0 * 1024.0));
     else
         snprintf(size_txt, sizeof size_txt, "%u Kio", rom_size / 1024);
-    char info_a[192], info_b[128];
+    char info_a[192];
     snprintf(info_a, sizeof info_a, "%s - %s - %s", sysname ? sysname : "?",
              filename && filename[0] ? filename : "?", size_txt);
-    snprintf(info_b, sizeof info_b, "carré de 64 o - deepeel %s", DEEPEEL_VERSION);
-    int ninfo = 1;
-    if (GAP + (int)(strlen(info_a) + 3 + strlen(info_b)) * 6 <= w) {
-        strncat(info_a, " - ", sizeof info_a - strlen(info_a) - 1);
-        strncat(info_a, info_b, sizeof info_a - strlen(info_a) - 1);
-    } else {
-        ninfo = 2;
-    }
     int head_LH = 7 * FSCALE + 4;
-    int h = grid_h + GAP + head_LH + GAP + ninfo * (7 + 4) + GAP + half * LH + GAP;
+    int ann_LH = 11; // the "square = 64 o" annotation line, right-aligned
+    int foot_LH = 11; // the deepeel signature, bottom right
+    int h = grid_h + GAP + ann_LH + GAP + head_LH + GAP + (7 + 4) + GAP + half * LH +
+            GAP + foot_LH;
     uint8_t *rgb = malloc((size_t)w * h * 3);
     if (!rgb) { free(m); return 0; }
     for (size_t i = 0; i < (size_t)w * h; i++) { rgb[i * 3] = 0x18; rgb[i * 3 + 1] = 0x18; rgb[i * 3 + 2] = 0x1c; }
@@ -559,19 +565,34 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
                 }
         }
     }
-    // the legend itself: rom name (given by the caller), the identity line,
-    // then the classes in two columns, swatch beside each entry
+    // the legend itself: the 64-octet square annotation under the grid (right),
+    // the rom name, the identity line, the classes in two columns, then the
+    // signature bottom right
+    // the annotation: a real grid-sized square (one cell = 64 ROM bytes),
+    // drawn, not written — "64 o" beside it, the whole right-aligned
+    int y = grid_h + GAP;
+    {
+        const char *ann = "64 o";
+        const uint8_t *col = (const uint8_t *)"\x90\x90\x98";
+        int tw = legend_text_width(ann, 1);
+        int side = 5, gap = 3; // a grid cell is SQ-1 = 5 px of color
+        int x0 = w - GAP - (side + gap + tw);
+        for (int yy = 0; yy < side; yy++)
+            for (int xx = 0; xx < side; xx++) {
+                size_t off = ((size_t)(y + yy) * w + x0 + xx) * 3;
+                rgb[off] = col[0]; rgb[off + 1] = col[1]; rgb[off + 2] = col[2];
+            }
+        legend_text(rgb, w, h, x0 + side + gap, y, ann, col, 1);
+    }
+    y += ann_LH + GAP;
     double pct = s->total ? 100.0 / (double)s->total : 0.0;
     char head[160];
     snprintf(head, sizeof head, "%s - connu %.1f%%", title[0] ? title : "?", s->known * pct);
-    int y = grid_h + GAP;
     int head_scale = fit_scale(head, w, GAP, FSCALE);
     legend_text(rgb, w, h, GAP, y, head, (const uint8_t *)"\xe0\xe0\xe0", head_scale);
     y += head_LH + GAP;
     legend_text(rgb, w, h, GAP, y, info_a, (const uint8_t *)"\x90\x90\x98", 1);
-    if (ninfo == 2)
-        legend_text(rgb, w, h, GAP, y + (7 + 4), info_b, (const uint8_t *)"\x90\x90\x98", 1);
-    y += ninfo * (7 + 4) + GAP;
+    y += (7 + 4) + GAP;
     for (int r = 0; r < half; r++) {
         int ry = y + r * LH;
         if (r < ncls) {
@@ -590,6 +611,13 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
             else snprintf(line, sizeof line, "%s %.1f%%", fr[c], p);
             legend_entry(rgb, w, h, ry, line, map_rgb[c], rs, ravail, w - GAP);
         }
+    }
+    // the signature, bottom right
+    {
+        char sig[32];
+        snprintf(sig, sizeof sig, "deepeel %s", DEEPEEL_VERSION);
+        legend_text(rgb, w, h, w - GAP - legend_text_width(sig, 1), y + half * LH + GAP,
+                    sig, (const uint8_t *)"\x70\x70\x78", 1);
     }
     int ok = dp_png_save_text2(path, w, h, rgb, "deepeel_map", map_text, map_len,
                                "deepeel_meta", meta, strlen(meta));
