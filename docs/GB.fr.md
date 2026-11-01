@@ -94,6 +94,26 @@ matériels sont ceux de m0boy.
   retournant le drapeau testé (Z via `gbr.zr`, C via `gbr.cf`) ; aux points
   IME && IE & IF, un fork « l'IRQ ne part pas » complète la dispatch
   naturelle que la machine fait elle-même.
+- **Touches** : deux sondes couvrent la manette — les presses quand l'IRQ
+  joypad est armée (le press lève IF bit 4, comportement console) et les
+  lectures directes de `$FF00` en polling (`ldh a,($00)` / `ld a,(C)` avec
+  C=$FF00) : chaque touche pressée devient une variante forcée dont seule
+  la valeur lue diffère (l'IRQ du press est effacée de la variante).
+  `--no-key-fork` / `--no-p1-fork` pour désactiver ; compteur `forks_p1`.
+- **Budgets en cascade** (portage z80) : les phases de re-semis (cibles JP HL
+  puis chaque tour de fermeture) partagent un total de graines (2×
+  `--seed-cap`) : chaque phase dépense le solde laissé par les précédentes au
+  lieu d'un budget plat par phase ; un semis refusé faute de solde est compté
+  (`seeds_refused_budget`) et reporté au tour suivant.
+- **Provenance statique** : passe sans machine qui suit HL (et A) octet par
+  octet sur les runs droits — chargements immédiats, mots ROM à adresse
+  absolue, `INC/DEC HL` exacts, `ld h/l,a`, et les tables parcourues pointeur
+  en main (`ld a,(hl); inc hl; ld h,(hl); ld l,a; jp hl`). Un `jp hl` à HL
+  entièrement connu prouve sa cible (`code statique`, la fermeture l'étend) ;
+  une lecture ROM à adresse entièrement connue prouve la donnée
+  (`donnée statique`, nouvelle classe de carte). Preuve partielle (octet haut
+  inconnu, fenêtre $4000 sans banque prouvée) = rien n'est prouvé, compté
+  (`prov_partial`) ; caps de pas/d'états comptés (`prov_sat`).
 - **Évictions** : dédup exact d'état (hash d'image hors cycle), éviction
   « même contexte » par section, budgets (pas/chemin, pas global, sites de
   fork, arrière-branches), tout compté dans le rapport.

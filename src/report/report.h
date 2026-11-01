@@ -16,7 +16,7 @@ char dp_block_class(const DpResults *res, int bank, int block);
 
 // ---- .map: classification of 100% of the ROM (see map.c)
 enum { DP_MAP_UNKNOWN, DP_MAP_CODE_NAT, DP_MAP_CODE_FORCED, DP_MAP_CODE_STATIC,
-       DP_MAP_DATA_COPIED, DP_MAP_DATA_READ, DP_MAP_TABLE, DP_MAP_PAD,
+       DP_MAP_DATA_COPIED, DP_MAP_DATA_READ, DP_MAP_DATA_STATIC, DP_MAP_TABLE, DP_MAP_PAD,
        DP_MAP_INF_DATA, DP_MAP_INF_CODE, DP_MAP_INF_PAD, DP_MAP_COUNT };
 typedef struct DpMapSummary {
     uint64_t total, known, unknown, code, data, pad, inferred;
@@ -57,7 +57,8 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
 // re-render the squares image from a saved .map text (no re-exploration):
 // the text is embedded verbatim as "deepeel_map", meta rides in "deepeel_meta"
 int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char *title,
-                            const char *meta, const char *path);
+                            const char *meta, const char *path, const char *sysname,
+                            const char *filename, unsigned rom_size);
 void dp_report_html(const DpResults *res, DpBuf *out);
 
 #endif

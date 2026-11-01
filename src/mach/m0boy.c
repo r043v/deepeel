@@ -43,6 +43,12 @@ DpMach *dp_mach_open(int vi, int ii) {
     return m;
 }
 
+DpMach *dp_mach_open_exclusive(int vi, int ii) {
+    if (vi < 0 || vi >= DP_GBL_VARIANTS || ii < 0 || ii >= DP_GBL_MACHINES) return NULL;
+    if (mach_at[vi][ii]) return NULL; // the slot is taken (sessions, preview)
+    return dp_mach_open(vi, ii);
+}
+
 void dp_mach_attach(DpMach *m, void *owner,
                     void (*on_step)(DpMach *, uint16_t, uint8_t, int),
                     void (*on_read)(DpMach *, uint16_t, uint8_t),

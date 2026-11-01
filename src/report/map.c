@@ -10,13 +10,13 @@
 
 const char *dp_map_class_name(int c) {
     static const char *nm[DP_MAP_COUNT] = { "unknown", "code-natural", "code-forced",
-        "code-static", "data-copied", "data-read", "table", "padding",
+        "code-static", "data-copied", "data-read", "data-static", "table", "padding",
         "inferred-data", "inferred-code", "inferred-padding" };
     return c >= 0 && c < DP_MAP_COUNT ? nm[c] : "?";
 }
 
 int dp_map_is_code(int c) { return c == DP_MAP_CODE_NAT || c == DP_MAP_CODE_FORCED || c == DP_MAP_CODE_STATIC || c == DP_MAP_INF_CODE; }
-int dp_map_is_data(int c) { return c == DP_MAP_DATA_COPIED || c == DP_MAP_DATA_READ || c == DP_MAP_TABLE || c == DP_MAP_INF_DATA; }
+int dp_map_is_data(int c) { return c == DP_MAP_DATA_COPIED || c == DP_MAP_DATA_READ || c == DP_MAP_DATA_STATIC || c == DP_MAP_TABLE || c == DP_MAP_INF_DATA; }
 
 uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
     size_t n = (size_t)res->banks * 0x4000;
@@ -28,6 +28,7 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
         else if (x & DP_XF_FORCED) c = DP_MAP_CODE_FORCED;
         else if (x & DP_XF_STATIC) c = DP_MAP_CODE_STATIC;
         else if (d & (DP_DF_COPIED | DP_DF_VERBATIM)) c = DP_MAP_DATA_COPIED;
+        else if (d & DP_DF_STATIC) c = DP_MAP_DATA_STATIC;
         else if (d & DP_DF_READ) c = DP_MAP_DATA_READ;
         else if (s & DP_SF_POINTER) c = DP_MAP_TABLE;
         else if (s & DP_SF_PAD) c = DP_MAP_PAD;
@@ -252,6 +253,7 @@ static const uint8_t map_rgb[DP_MAP_COUNT][3] = {
     { 0x9c, 0xc4, 0xee }, // code-static
     { 0x2e, 0xa0, 0x4f }, // data-copied
     { 0x62, 0xc2, 0x7a }, // data-read
+    { 0x3a, 0xb8, 0xbf }, // data-static
     { 0xc9, 0xa2, 0x27 }, // table
     { 0x70, 0x70, 0x70 }, // padding
     { 0x8f, 0xd6, 0xa0 }, // inferred-data
@@ -317,9 +319,20 @@ static void legend_text(uint8_t *rgb, int w, int h, int x, int y, const char *st
     }
 }
 
+// rendered width of a string: one 6*scale cell per glyph (accented letters
+// are two UTF-8 bytes but one glyph — strlen would overcount them)
+static int legend_text_width(const char *str, int scale) {
+    int wpx = 0, adv;
+    for (; *str; str += adv) {
+        glyph_of(str, &adv);
+        wpx += 6 * scale;
+    }
+    return wpx;
+}
+
 // largest font scale whose text still fits the image width
 static int fit_scale(const char *str, int w, int x, int scale) {
-    while (scale > 1 && x + (int)strlen(str) * 6 * scale > w) scale--;
+    while (scale > 1 && x + legend_text_width(str, scale) > w) scale--;
     return scale;
 }
 
@@ -329,12 +342,12 @@ static int fit_scale(const char *str, int w, int x, int scale) {
 static void legend_entry(uint8_t *rgb, int w, int h, int y, const char *str,
                          const uint8_t *col, int scale, int avail, int right_edge) {
     int side = 7 * scale, gap = 3 * scale;
-    int tw = (int)strlen(str) * 6 * scale;
+    int tw = legend_text_width(str, scale);
     int need = side + gap + tw;
     while (scale > 1 && need > avail) {
         scale--;
         side = 7 * scale; gap = 3 * scale;
-        tw = (int)strlen(str) * 6 * scale;
+        tw = legend_text_width(str, scale);
         need = side + gap + tw;
     }
     int x0 = right_edge >= 0 ? right_edge - need : 10; // grid margin + 4
@@ -356,7 +369,8 @@ static void legend_entry(uint8_t *rgb, int w, int h, int y, const char *str,
 // then the classes in two justified columns, swatch beside each entry.
 static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapSummary *s,
                           const char *map_text, size_t map_len, const char *meta,
-                          const char *path);
+                          const char *path, const char *sysname, const char *filename,
+                          unsigned rom_size);
 int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom_path,
                       const char *path) {
     DpMapSummary s;
@@ -400,15 +414,23 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
              cfg ? cfg->closure_rounds : 0, cfg ? cfg->covered_fork_keep : 0u,
              cfg ? cfg->seed_banks : 0,
              s.known * pct, s.unknown * pct, s.inferred * pct);
+    char file[64];
+    if (rom_path) {
+        const char *b = rom_path + strlen(rom_path);
+        while (b > rom_path && b[-1] != '/' && b[-1] != '\\') b--;
+        snprintf(file, sizeof file, "%s", b);
+    } else file[0] = 0;
     int ok = map_png_render(m, (int)res->banks, title, &s, (const char *)txt.p, txt.len,
-                            meta, path);
+                            meta, path, res->plat ? res->plat->name : "gb", file,
+                            res->cart ? (unsigned)res->cart->rom_size : 0u);
     dp_buf_free(&txt);
     free(m);
     return ok;
 }
 
 int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char *title,
-                            const char *meta, const char *path) {
+                            const char *meta, const char *path, const char *sysname,
+                            const char *filename, unsigned rom_size) {
     if (banks <= 0) return 0;
     size_t n = (size_t)banks * 0x4000;
     uint8_t *m = calloc(n ? n : 1, 1); // DP_MAP_UNKNOWN
@@ -450,18 +472,20 @@ int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char 
         else if (c == DP_MAP_PAD || c == DP_MAP_INF_PAD) s.pad++;
         if (c >= DP_MAP_INF_DATA) s.inferred++;
     }
-    return map_png_render(m, banks, title, &s, text, len, meta, path);
+    return map_png_render(m, banks, title, &s, text, len, meta, path, sysname, filename,
+                          rom_size);
 }
 
 // the shared renderer: squares grid + legend band + tEXt chunks, from a
 // per-byte class array and the .map text to embed
 static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapSummary *s,
                           const char *map_text, size_t map_len, const char *meta,
-                          const char *path) {
+                          const char *path, const char *sysname, const char *filename,
+                          unsigned rom_size) {
     enum { SQ = 6, GRID = 16, BANK_PX = SQ * GRID, GAP = 6, PER_ROW = 8 };
     static const char *fr[DP_MAP_COUNT] = {
         "inconnu", "code naturel", "code forcé", "code statique",
-        "donnée copiée", "donnée lue", "table", "padding",
+        "donnée copiée", "donnée lue", "donnée statique", "table", "padding",
         "donnée inférée", "code inféré", "padding inféré" };
     int cols = banks < PER_ROW ? banks : PER_ROW;
     int rows = (banks + PER_ROW - 1) / PER_ROW;
@@ -476,14 +500,53 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
         while (j >= 0 && s->cls[order[j]] < s->cls[cur]) { order[j + 1] = order[j]; j--; }
         order[j + 1] = cur;
     }
-    enum { LH = 18, FSCALE = 2 };
+    enum { FSCALE = 2 };
     int w = GAP + cols * (BANK_PX + GAP);
     // two justified columns only when each half can hold an entry; otherwise
     // one left-aligned column
     int two_cols = w / 2 - 12 >= 110;
     int half = two_cols ? (ncls + 1) / 2 : ncls;
+    // the common legend scale (a mixed-size legend reads badly): the largest
+    // scale at which the widest entry of each column still fits its column.
+    // The line height follows the scale: a 1x legend must not keep the 2x
+    // interline.
+    int lavail = two_cols ? w / 2 - 14 : w - 12, ravail = w - GAP - w / 2;
+    int ls = FSCALE, rs = FSCALE;
+    double pct0 = s->total ? 100.0 / (double)s->total : 0.0;
+    for (int r = 0; r < half; r++) {
+        if (r < ncls) {
+            char line[64];
+            double p = s->cls[order[r]] * pct0;
+            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[order[r]]);
+            else snprintf(line, sizeof line, "%s %.1f%%", fr[order[r]], p);
+            int need = (7 + 3) * ls + legend_text_width(line, ls);
+            while (ls > 1 && need > lavail) { ls--; need = (7 + 3) * ls + legend_text_width(line, ls); }
+        }
+        if (two_cols && r + half < ncls) {
+            char line[64];
+            double p = s->cls[order[r + half]] * pct0;
+            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[order[r + half]]);
+            else snprintf(line, sizeof line, "%s %.1f%%", fr[order[r + half]], p);
+            int need = (7 + 3) * rs + legend_text_width(line, rs);
+            while (rs > 1 && need > ravail) { rs--; need = (7 + 3) * rs + legend_text_width(line, rs); }
+        }
+    }
+    int s_common = ls < rs ? ls : rs; // both columns at the same scale
+    ls = rs = s_common;
+    int LH = 7 * s_common + 4;
     int grid_h = GAP + rows * (BANK_PX + GAP);
-    int h = grid_h + GAP + (1 + half) * LH + GAP;
+    // identity block: title row, then system / file / sizes / converter
+    char size_txt[24];
+    if (rom_size >= 1024 * 1024)
+        snprintf(size_txt, sizeof size_txt, "%.1f Mio", (double)rom_size / (1024.0 * 1024.0));
+    else
+        snprintf(size_txt, sizeof size_txt, "%u Kio", rom_size / 1024);
+    char info_a[192];
+    snprintf(info_a, sizeof info_a, "%s - %s - %s", sysname ? sysname : "?",
+             filename && filename[0] ? filename : "?", size_txt);
+    int head_LH = 7 * FSCALE + 4;
+    int foot_LH = 11; // the 64-o square note + deepeel signature, bottom right
+    int h = grid_h + GAP + head_LH + GAP + (7 + 4) + GAP + half * LH + GAP + foot_LH;
     uint8_t *rgb = malloc((size_t)w * h * 3);
     if (!rgb) { free(m); return 0; }
     for (size_t i = 0; i < (size_t)w * h; i++) { rgb[i * 3] = 0x18; rgb[i * 3 + 1] = 0x18; rgb[i * 3 + 2] = 0x1c; }
@@ -502,47 +565,18 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
                 }
         }
     }
-    // the legend itself: rom name (given by the caller), then the classes in
-    // two columns, swatch beside each entry
+    // the legend itself: rom name, identity line, the classes in two columns,
+    // then the bottom-right note — a real grid-sized square (one cell = 64
+    // ROM bytes), "64 o", a slash and the deepeel signature, one small line
+    int y = grid_h + GAP;
     double pct = s->total ? 100.0 / (double)s->total : 0.0;
     char head[160];
-    snprintf(head, sizeof head, "%s - connu %.1f%%", title[0] ? title : "?", s->known * pct);
-    int y = grid_h + GAP;
+    snprintf(head, sizeof head, "%s - %.1f%%", title[0] ? title : "?", s->known * pct);
     int head_scale = fit_scale(head, w, GAP, FSCALE);
     legend_text(rgb, w, h, GAP, y, head, (const uint8_t *)"\xe0\xe0\xe0", head_scale);
-    // the converter's signature, small, on the same row, right-aligned —
-    // dropped when the title leaves no room for it
-    char foot[40];
-    snprintf(foot, sizeof foot, "deepeel %s", DEEPEEL_VERSION);
-    int foot_w = (int)strlen(foot) * 6;
-    if (GAP + (int)strlen(head) * 6 * head_scale + 2 * GAP + foot_w <= w)
-        legend_text(rgb, w, h, w - GAP - foot_w, y, foot, (const uint8_t *)"\x90\x90\x98", 1);
-    y += LH;
-    // one common scale for every legend entry (a mixed-size legend reads
-    // badly): the largest scale at which the widest entry of each column
-    // still fits its own column
-    int lavail = two_cols ? w / 2 - 14 : w - 12, ravail = w - GAP - w / 2;
-    int ls = FSCALE, rs = FSCALE;
-    for (int r = 0; r < half; r++) {
-        if (r < ncls) {
-            char line[64];
-            double p = s->cls[order[r]] * pct;
-            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[order[r]]);
-            else snprintf(line, sizeof line, "%s %.1f%%", fr[order[r]], p);
-            int need = (7 + 3 + (int)strlen(line) * 6) * ls;
-            while (ls > 1 && need > lavail) { ls--; need = (7 + 3 + (int)strlen(line) * 6) * ls; }
-        }
-        if (two_cols && r + half < ncls) {
-            char line[64];
-            double p = s->cls[order[r + half]] * pct;
-            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[order[r + half]]);
-            else snprintf(line, sizeof line, "%s %.1f%%", fr[order[r + half]], p);
-            int need = (7 + 3 + (int)strlen(line) * 6) * rs;
-            while (rs > 1 && need > ravail) { rs--; need = (7 + 3 + (int)strlen(line) * 6) * rs; }
-        }
-    }
-    int s_common = ls < rs ? ls : rs; // both columns at the same scale
-    ls = rs = s_common;
+    y += head_LH + GAP;
+    legend_text(rgb, w, h, GAP, y, info_a, (const uint8_t *)"\x90\x90\x98", 1);
+    y += (7 + 4) + GAP;
     for (int r = 0; r < half; r++) {
         int ry = y + r * LH;
         if (r < ncls) {
@@ -561,6 +595,27 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
             else snprintf(line, sizeof line, "%s %.1f%%", fr[c], p);
             legend_entry(rgb, w, h, ry, line, map_rgb[c], rs, ravail, w - GAP);
         }
+    }
+    // the bottom-right note, left to right: square, "64 o", "/", signature
+    {
+        char sig[40];
+        snprintf(sig, sizeof sig, "deepeel %s", DEEPEEL_VERSION);
+        const uint8_t *col = (const uint8_t *)"\x70\x70\x78";
+        int side = 5, gap = 3; // a grid cell is SQ-1 = 5 px of color
+        int total = side + gap + legend_text_width("64 o", 1) + 4 +
+                    legend_text_width("/", 1) + 4 + legend_text_width(sig, 1);
+        int x = w - GAP - total, fy = y + half * LH + GAP;
+        for (int yy = 0; yy < side; yy++)
+            for (int xx = 0; xx < side; xx++) {
+                size_t off = ((size_t)(fy + yy) * w + x + xx) * 3;
+                rgb[off] = col[0]; rgb[off + 1] = col[1]; rgb[off + 2] = col[2];
+            }
+        x += side + gap;
+        legend_text(rgb, w, h, x, fy, "64 o", col, 1);
+        x += legend_text_width("64 o", 1) + 4;
+        legend_text(rgb, w, h, x, fy, "/", col, 1);
+        x += legend_text_width("/", 1) + 4;
+        legend_text(rgb, w, h, x, fy, sig, col, 1);
     }
     int ok = dp_png_save_text2(path, w, h, rgb, "deepeel_map", map_text, map_len,
                                "deepeel_meta", meta, strlen(meta));

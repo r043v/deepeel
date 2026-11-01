@@ -24,6 +24,7 @@ static int is_illegal_op(uint8_t op);
 static void fork_branch(DpExplorer *ex, int cond, uint32_t site, uint16_t pc, uint8_t op);
 static void fork_irq(DpExplorer *ex);
 static void fork_key(DpExplorer *ex, uint32_t site);
+static void fork_p1(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op);
 
 // --- shared-map primitives -----------------------------------------------------
 static inline uint8_t flags_or(uint8_t *p, uint8_t bit) {
@@ -360,6 +361,10 @@ DpExplorer *dp_explorer_new(const DpConfig *cfg, DpResults *res, DpMach *mach) {
     size_t dedup_cap = (size_t)ex->q_cap * 64;
     if (dedup_cap < (1 << 16)) dedup_cap = 1 << 16;
     dp_set_init(&ex->exact, dedup_cap);
+    pthread_mutex_init(&ex->tmtx, NULL);
+    ex->exactp = &ex->exact;
+    ex->exact_mtx = &ex->tmtx; // any mutex works single-threaded; share() retargets
+    ex->tree_mtx = &ex->tmtx;
     dp_mach_attach(mach, ex, hook_step, hook_read, hook_write, NULL);
     return ex;
 }
@@ -373,7 +378,12 @@ void dp_explorer_free(DpExplorer *ex) {
     free(ex->seed_base);
     free(ex->seed_bank_img);
     dp_set_free(&ex->exact);
-    if (ex->spool) fclose(ex->spool);
+    pthread_mutex_destroy(&ex->tmtx);
+    if (ex->spool && ex->spool_owned) {
+        fclose(ex->spool->f);
+        pthread_mutex_destroy(&ex->spool->mtx);
+        free(ex->spool);
+    }
     free(ex);
 }
 
@@ -441,21 +451,62 @@ static int queue_grow(DpExplorer *ex) {
 // the caller can then retry it later instead of losing it
 static int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int kind,
                            int from_reset, uint32_t choice);
+static void tree_close_g(DpExplorer *ex, uint32_t choice, int issue);
+static uint32_t tree_add_g(DpExplorer *ex, uint32_t parent, int kind, uint32_t site, int bank,
+                           int pc);
 static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, int from_reset,
                           uint32_t choice, int pri) {
     uint64_t h = image_hash(ex, img);
-    int ins = dp_set_insert(&ex->exact, h);
+    int ins;
+    if (ex->sh) { // the exact set is shared by the parallel workers
+        pthread_mutex_lock(ex->exact_mtx);
+        ins = dp_set_insert(ex->exactp, h);
+        pthread_mutex_unlock(ex->exact_mtx);
+    } else {
+        ins = dp_set_insert(ex->exactp, h);
+    }
     if (ins == 0) {
-        ex->res->evicted_exact++;
-        if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_MERGED);
+        u32_add(&ex->res->evicted_exact, 1);
+        tree_close_g(ex, choice, DP_ISSUE_MERGED);
         free(img);
         return 0;
     }
     if (ins < 0) { // dedup set full: surfaced, the state is dropped
-        ex->res->queue_overflows++;
-        if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_BUDGET);
+        u32_add(&ex->res->queue_overflows, 1);
+        tree_close_g(ex, choice, DP_ISSUE_BUDGET);
         free(img);
         return 0;
+    }
+    if (ex->sh && !pri) { // the parallel drain: everything through the pool
+        DpSharedPool *sh = ex->sh;
+        pthread_mutex_lock(&sh->mtx);
+        if (sh->len >= sh->cap) {
+            uint32_t ncap = sh->cap * 2;
+            if (ncap > sh->max) ncap = sh->max;
+            if (sh->cap < sh->max &&
+                !(ex->cfg.mem_cap_mb && dp_rss_mb() >= ex->cfg.mem_cap_mb)) {
+                sh->q = xrealloc(sh->q, sizeof(DpPathState) * (size_t)ncap);
+                sh->cap = ncap;
+                u32_add(&ex->res->queue_growths, 1);
+            } else if (spool_write_rec(ex, img, forced, kind, from_reset, choice)) {
+                pthread_mutex_unlock(&sh->mtx);
+                tree_close_g(ex, choice, DP_ISSUE_SPOOLED);
+                free(img);
+                return 0;
+            } else {
+                u32_add(&ex->res->queue_overflows, 1);
+                pthread_mutex_unlock(&sh->mtx);
+                tree_close_g(ex, choice, DP_ISSUE_BUDGET);
+                free(img);
+                return 0;
+            }
+        }
+        sh->q[(sh->head + sh->len) % sh->cap] =
+            (DpPathState){ img, (uint8_t)(forced ? 1 : 0), (uint8_t)kind,
+                           (uint8_t)(from_reset ? 1 : 0), choice };
+        sh->len++;
+        pthread_mutex_unlock(&sh->mtx);
+        return 1;
     }
     DpPathState *q = pri ? ex->pqueue : ex->queue;
     uint32_t cap = pri ? ex->pq_cap : ex->q_cap;
@@ -500,8 +551,24 @@ static int queue_push(DpExplorer *ex, uint8_t *img, int forced, int kind, int fr
 // a tree choice for a new queued path (when the tree is tracked)
 static uint32_t choice_new(DpExplorer *ex, uint32_t parent, int kind, uint32_t site, int bank,
                            int pc) {
+    return tree_add_g(ex, parent, kind, site, bank, pc);
+}
+
+// tree bookkeeping under the shared lock when the drain is parallel
+static void tree_close_g(DpExplorer *ex, uint32_t choice, int issue) {
+    if (!ex->tree) return;
+    if (ex->sh) pthread_mutex_lock(ex->tree_mtx);
+    dp_tree_close(ex->tree, choice, issue);
+    if (ex->sh) pthread_mutex_unlock(ex->tree_mtx);
+}
+
+static uint32_t tree_add_g(DpExplorer *ex, uint32_t parent, int kind, uint32_t site, int bank,
+                           int pc) {
     if (!ex->tree) return 0;
-    return dp_tree_add(ex->tree, parent, kind, site, bank, pc);
+    if (ex->sh) pthread_mutex_lock(ex->tree_mtx);
+    uint32_t c = dp_tree_add(ex->tree, parent, kind, site, bank, pc);
+    if (ex->sh) pthread_mutex_unlock(ex->tree_mtx);
+    return c;
 }
 
 int dp_explorer_seed(DpExplorer *ex, uint8_t *img, int kind, int forced) {
@@ -820,6 +887,10 @@ bad_done:
         // pending): the variant presses one key the machine is not pressing
         if (!ex->cfg.no_key_fork && !ex->cfg.no_irq_fork && (*api->ie & 0x10))
             fork_key(ex, pk);
+        // keys a polling game reads straight out of $FF00 (no IRQ needed):
+        // propose each pressed key as its own variant
+        if (!ex->cfg.no_p1_fork && (op == 0xF0 || op == 0xF2))
+            fork_p1(ex, pk, pc, op);
     }
 
     // backward edges and call sites (operand bytes read through the map)
@@ -1083,9 +1154,49 @@ static void fork_key(DpExplorer *ex, uint32_t site) {
         }
     }
     dp_mach_load(m, img); // the natural side continues, untouched
+    m->api->set_buttons(0); // recompute the derived P1 register (not in the image)
     free(img);
 }
 
+/* the P1-poll variant: games that read $FF00 directly (polling, no joypad
+ * IRQ armed) never see a key pressed on this explorer — the buttons stay
+ * released for the whole run.  Each variant holds one key the machine is
+ * not pressing; the joypad IRQ the console would raise at the press is
+ * cleared in the variant so only the polled VALUE differs (the IRQ path
+ * already has its own forks).  Capped per site like the branch forks. */
+static void fork_p1(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op) {
+    const DpGblApi *api = ex->mach->api;
+    if (op == 0xF0) { // ldh a,(n): only $FF00 is the joypad
+        if (dp_mach_op(ex->mach, (uint16_t)(pc + 1)) != 0x00) return;
+    } else if (api->gbr->c != 0x00) { // ld a,(C): P1 only when C == $FF00
+        return;
+    }
+    uint32_t *cnt = dp_map_get_or_add(&ex->res->fork_counts, site ^ 0xC0000000u);
+    if (cnt && *cnt >= ex->cfg.fork_site_cap) {
+        ex->res->forks_capped++;
+        return;
+    }
+    if (cnt) (*cnt)++;
+    static const uint8_t keys[8] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80};
+    DpMach *m = ex->mach;
+    uint8_t *img = xrealloc(NULL, ex->sb);
+    dp_mach_save(m, img);
+    for (int k = 0; k < 8; k++) {
+        m->api->set_buttons(keys[k]);
+        api->io[0x0F] &= (uint8_t)~0x10; // the value fork: no IRQ side effect
+        uint8_t *fimg = xrealloc(NULL, ex->sb);
+        dp_mach_save(m, fimg);
+        uint16_t tpc = m->api->gbr->pc;
+        queue_push(ex, fimg, 1, DP_PATH_FORK,
+                   ex->cur_kind == DP_SEED_RESET || ex->cur_from_reset,
+                   choice_new(ex, ex->cur_choice, DP_PATH_FORK, site,
+                              (int)cur_bank(ex, tpc), tpc));
+        ex->res->forks_p1++;
+    }
+    dp_mach_load(m, img); // the natural side continues, untouched
+    m->api->set_buttons(0); // recompute the derived P1 register (not in the image)
+    free(img);
+}
 // --- run loop ---------------------------------------------------------------------------
 // context projection: hash of the incoming state components this section reads
 // (the live machine holds the state being entered).  Cartridge RAM pages are
@@ -1129,83 +1240,144 @@ static uint64_t project_ctx(DpExplorer *ex, const DpSection *s) {
 
 static int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int kind,
                            int from_reset, uint32_t choice) {
-    if (!ex->spool) return 0;
+    DpSpool *sp = ex->spool;
+    if (!sp) return 0;
+    pthread_mutex_lock(&sp->mtx);
     if (ex->cfg.spool_cap_mb &&
-        (ex->spool_wr - ex->spool_rd) / (1024 * 1024) >= ex->cfg.spool_cap_mb) {
-        ex->res->spool_refused++;
+        (sp->wr - sp->rd) / (1024 * 1024) >= ex->cfg.spool_cap_mb) {
+        pthread_mutex_unlock(&sp->mtx);
+        u32_add(&ex->res->spool_refused, 1);
         return 0;
     }
     uint64_t hdr[3] = { DP_SPOOL_REC,
                         (uint64_t)(forced ? 1 : 0) | ((uint64_t)kind << 8) |
                             ((uint64_t)(from_reset ? 1 : 0) << 16) | ((uint64_t)choice << 32),
                         ex->sb };
-    if (fseek(ex->spool, (long)ex->spool_wr, SEEK_SET)) return 0;
-    if (fwrite(hdr, sizeof hdr, 1, ex->spool) != 1 || fwrite(img, 1, ex->sb, ex->spool) != ex->sb) {
+    int ok = !fseek(sp->f, (long)sp->wr, SEEK_SET) &&
+             fwrite(hdr, sizeof hdr, 1, sp->f) == 1 && fwrite(img, 1, ex->sb, sp->f) == ex->sb;
+    if (ok) {
+        sp->wr += sizeof hdr + ex->sb;
+        u32_add(&ex->res->spool_writes, 1);
+    } else {
         perror("deepeel spool");
-        return 0;
     }
-    ex->spool_wr += sizeof hdr + ex->sb;
-    ex->res->spool_writes++;
-    ex->res->spool_bytes = ex->spool_wr - ex->spool_rd;
-    return 1;
+    pthread_mutex_unlock(&sp->mtx);
+    return ok;
 }
 
-// feeds pending spool records back into the main worklist (never the priority
+// feeds pending spool records back into the worklist (never the priority
 // inbox: its seeds are retried by their own phases).  Stops when the spool is
-// drained or the queue holds no more room.  The exact-state dedup already
+// drained or the target holds no more room.  The exact-state dedup already
 // contains these states (inserted at push time), so nothing is re-hashed.
 static void spool_feed(DpExplorer *ex) {
-    while (ex->spool && ex->spool_rd < ex->spool_wr && ex->q_len < ex->q_cap) {
+    DpSpool *sp = ex->spool;
+    if (!sp) return;
+    for (;;) {
+        pthread_mutex_lock(&sp->mtx);
+        if (sp->rd >= sp->wr) { pthread_mutex_unlock(&sp->mtx); return; }
+        // room checked under the pool lock when shared (the push must not overflow)
+        if (ex->sh) pthread_mutex_lock(&ex->sh->mtx);
+        int room = ex->sh ? (ex->sh->len < ex->sh->cap) : (ex->q_len < ex->q_cap);
+        if (!room) {
+            if (ex->sh) pthread_mutex_unlock(&ex->sh->mtx);
+            pthread_mutex_unlock(&sp->mtx);
+            return;
+        }
         uint64_t hdr[3];
-        if (fseek(ex->spool, (long)ex->spool_rd, SEEK_SET) ||
-            fread(hdr, sizeof hdr, 1, ex->spool) != 1 || hdr[0] != DP_SPOOL_REC ||
+        if (fseek(sp->f, (long)sp->rd, SEEK_SET) ||
+            fread(hdr, sizeof hdr, 1, sp->f) != 1 || hdr[0] != DP_SPOOL_REC ||
             hdr[2] != ex->sb) {
             fprintf(stderr, "deepeel: spool corrupt at %llu, dropping the rest\n",
-                    (unsigned long long)ex->spool_rd);
-            ex->spool_rd = ex->spool_wr;
-            break;
+                    (unsigned long long)sp->rd);
+            sp->rd = sp->wr;
+            pthread_mutex_unlock(&sp->mtx);
+            return;
         }
         uint8_t *img = xrealloc(NULL, ex->sb);
-        if (!img || fread(img, 1, ex->sb, ex->spool) != ex->sb) { free(img); break; }
-        ex->spool_rd += sizeof hdr + ex->sb;
-        DpPathState *p = &ex->queue[(ex->q_head + ex->q_len) % ex->q_cap];
-        memset(p, 0, sizeof *p);
-        p->img = img;
-        p->forced = (uint8_t)(hdr[1] & 1);
-        p->kind = (uint8_t)(hdr[1] >> 8);
-        p->from_reset = (uint8_t)((hdr[1] >> 16) & 1);
-        p->choice = (uint32_t)(hdr[1] >> 32);
-        ex->q_len++;
-        ex->res->spool_reads++;
-        ex->res->spool_bytes = ex->spool_wr - ex->spool_rd;
+        if (!img || fread(img, 1, ex->sb, sp->f) != ex->sb) {
+            free(img);
+            pthread_mutex_unlock(&sp->mtx);
+            return;
+        }
+        sp->rd += sizeof hdr + ex->sb;
+        u32_add(&ex->res->spool_reads, 1);
+        DpPathState p;
+        memset(&p, 0, sizeof p);
+        p.img = img;
+        p.forced = (uint8_t)(hdr[1] & 1);
+        p.kind = (uint8_t)(hdr[1] >> 8);
+        p.from_reset = (uint8_t)((hdr[1] >> 16) & 1);
+        p.choice = (uint32_t)(hdr[1] >> 32);
+        if (ex->sh) { // the parallel drain: everything goes through the pool
+            ex->sh->q[(ex->sh->head + ex->sh->len) % ex->sh->cap] = p;
+            ex->sh->len++;
+            pthread_mutex_unlock(&ex->sh->mtx);
+            pthread_mutex_unlock(&sp->mtx);
+        } else {
+            pthread_mutex_unlock(&sp->mtx);
+            ex->queue[(ex->q_head + ex->q_len) % ex->q_cap] = p;
+            ex->q_len++;
+        }
     }
 }
 
 int dp_explorer_spool_attach(DpExplorer *ex, const char *path, int resume) {
-    ex->spool = fopen(path, resume ? "r+b" : "wb+");
-    if (!ex->spool) return 0;
-    if (resume && fseek(ex->spool, 0, SEEK_END) == 0) {
-        long sz = ftell(ex->spool);
-        ex->spool_wr = ex->spool_rd = 0;
+    DpSpool *sp = calloc(1, sizeof *sp);
+    if (!sp) return 0;
+    sp->f = fopen(path, resume ? "r+b" : "wb+");
+    if (!sp->f) { free(sp); return 0; }
+    pthread_mutex_init(&sp->mtx, NULL);
+    ex->spool = sp;
+    ex->spool_owned = 1;
+    if (resume && fseek(sp->f, 0, SEEK_END) == 0) {
+        long sz = ftell(sp->f);
         if (sz >= 0) {
             // only whole records count: a killed process may have truncated one
             size_t rec = sizeof(uint64_t) * 3 + ex->sb;
-            ex->spool_wr = ex->spool_rd = (uint64_t)((long)sz / (long)rec * (long)rec);
+            sp->wr = sp->rd = (uint64_t)((long)sz / (long)rec * (long)rec);
         }
-    } else {
-        ex->spool_wr = ex->spool_rd = 0;
     }
     return 1;
 }
 
+// parallel drain: the worker borrows the leader's spool, exact dedup and tree
+void dp_explorer_share(DpExplorer *worker, DpExplorer *leader) {
+    worker->spool = leader->spool;
+    worker->spool_owned = 0;
+    worker->exactp = &leader->exact;
+    worker->exact_mtx = leader->exact_mtx;
+    worker->tree_mtx = &leader->tmtx;
+    worker->sh = leader->sh;
+}
+
 uint64_t dp_explorer_spool_pending(const DpExplorer *ex) {
-    return ex->spool ? ex->spool_wr - ex->spool_rd : 0;
+    DpSpool *sp = ex->spool;
+    if (!sp) return 0;
+    pthread_mutex_lock(&sp->mtx);
+    uint64_t p = sp->wr - sp->rd;
+    pthread_mutex_unlock(&sp->mtx);
+    return p;
 }
 
 // pours the remaining worklist into the spool (a stop or a normal exit): the
 // next --resume picks the states up; returns states still pending
 uint64_t dp_explorer_spool_flush(DpExplorer *ex) {
     if (!ex->spool) return 0;
+    // a parallel drain may have left states in the shared pool
+    if (ex->sh) {
+        pthread_mutex_lock(&ex->sh->mtx);
+        for (uint32_t i = 0; i < ex->sh->len; i++) {
+            DpPathState *p = &ex->sh->q[(ex->sh->head + i) % ex->sh->cap];
+            if (p->img) {
+                spool_write_rec(ex, p->img, p->forced, p->kind, p->from_reset, p->choice);
+                free(p->img);
+                memset(p, 0, sizeof *p);
+            }
+        }
+        ex->sh->len = 0;
+        ex->sh->head = 0;
+        pthread_mutex_unlock(&ex->sh->mtx);
+    }
     for (uint32_t i = 0; i < ex->q_len; i++) {
         DpPathState *p = &ex->queue[(ex->q_head + i) % ex->q_cap];
         if (p->img) {
@@ -1226,7 +1398,7 @@ uint64_t dp_explorer_spool_flush(DpExplorer *ex) {
     }
     ex->pq_len = 0;
     ex->pq_head = 0;
-    fflush(ex->spool);
+    fflush(ex->spool->f);
     return dp_explorer_spool_pending(ex);
 }
 
@@ -1234,12 +1406,13 @@ uint64_t dp_explorer_spool_flush(DpExplorer *ex) {
 int dp_explorer_exact_save(const DpExplorer *ex, const char *path) {
     FILE *f = fopen(path, "wb");
     if (!f) return 0;
+    const DpHashSet *s = ex->exactp;
     const uint32_t ver = 1;
     fwrite("DPEX", 1, 4, f);
     fwrite(&ver, sizeof ver, 1, f);
-    fwrite(&ex->exact.cnt, sizeof ex->exact.cnt, 1, f);
-    for (size_t i = 0; i < ex->exact.cap; i++)
-        if (ex->exact.used[i]) fwrite(&ex->exact.keys[i], sizeof(uint64_t), 1, f);
+    fwrite(&s->cnt, sizeof s->cnt, 1, f);
+    for (size_t i = 0; i < s->cap; i++)
+        if (s->used[i]) fwrite(&s->keys[i], sizeof(uint64_t), 1, f);
     int ok = !ferror(f);
     fclose(f);
     return ok;
@@ -1257,14 +1430,15 @@ int dp_explorer_exact_load(DpExplorer *ex, const char *path) {
         return 0;
     }
     // room for the saved keys plus the run's own discoveries
+    DpHashSet *s = ex->exactp;
     size_t need = cnt * 2 + 65536;
-    if (need > ex->exact.cap_abs) {
-        dp_set_free(&ex->exact);
-        dp_set_init(&ex->exact, need);
+    if (need > s->cap_abs) {
+        dp_set_free(s);
+        dp_set_init(s, need);
     }
     size_t n = 0;
     for (uint64_t k; n < cnt && fread(&k, sizeof k, 1, f) == 1; n++)
-        if (dp_set_insert(&ex->exact, k) != 1) break;
+        if (dp_set_insert(s, k) != 1) break;
     fclose(f);
     fprintf(stderr, "deepeel: resumed dedup (%zu states known)\n", n);
     return n == cnt;
@@ -1275,27 +1449,51 @@ int dp_explore_step(DpExplorer *ex) {
     // any free worklist slot: pull the spooled overflow back in (also covers
     // the everything-drained case, so a spool keeps dp_explore going)
     if (ex->q_len < ex->q_cap && dp_explorer_spool_pending(ex)) spool_feed(ex);
-    if (!ex->q_len && !ex->pq_len) return 0;
-    if (ex->cfg.max_paths && res->paths_run >= ex->cfg.max_paths) {
-        res->budget_paths++;
-        return 0;
-    }
-    DpPathState *p;
+    DpPathState tmp;
+    memset(&tmp, 0, sizeof tmp); // the pool may stay empty: img must start NULL
+    DpPathState *p = &tmp;
     int from_pq = ex->pq_len != 0;
-    if (from_pq) { // priority seeds first, FIFO: they must not starve
-        p = &ex->pqueue[ex->pq_head % ex->pq_cap];
-        ex->pq_head = (ex->pq_head + 1) % ex->pq_cap;
-        ex->pq_len--;
-    } else if (ex->cfg.dfs) { // total search: the newest path first, deepest first
-        p = &ex->queue[(ex->q_head + ex->q_len - 1) % ex->q_cap];
+    if (ex->sh && !from_pq) { // the parallel drain: pops come from the pool
+        pthread_mutex_lock(&ex->sh->mtx);
+        if (ex->sh->len) {
+            *p = ex->sh->q[ex->sh->head % ex->sh->cap];
+            ex->sh->head = (ex->sh->head + 1) % ex->sh->cap;
+            ex->sh->len--;
+        } else {
+            p->img = NULL;
+        }
+        pthread_mutex_unlock(&ex->sh->mtx);
+        if (!p->img) return 0;
     } else {
-        p = &ex->queue[ex->q_head % ex->q_cap];
-        ex->q_head = (ex->q_head + 1) % ex->q_cap;
+        if (!ex->q_len && !ex->pq_len) return 0;
+        if (from_pq) { // priority seeds first, FIFO: they must not starve
+            p = &ex->pqueue[ex->pq_head % ex->pq_cap];
+            ex->pq_head = (ex->pq_head + 1) % ex->pq_cap;
+            ex->pq_len--;
+        } else if (ex->cfg.dfs) { // total search: newest path first, deepest first
+            ex->q_len--;
+            p = &ex->queue[(ex->q_head + ex->q_len) % ex->q_cap];
+        } else {
+            p = &ex->queue[ex->q_head % ex->q_cap];
+            ex->q_head = (ex->q_head + 1) % ex->q_cap;
+            ex->q_len--;
+        }
+    }
+    if (ex->cfg.max_paths && res->paths_run >= ex->cfg.max_paths) {
+        u32_add(&res->budget_paths, 1);
+        free(p->img);
+        if (p != &tmp && ex->sh) {
+            long idx = p - ex->queue;
+            long rel = (idx - (long)ex->q_head + (long)ex->q_cap) % (long)ex->q_cap;
+            if (rel < (long)ex->q_len)
+                fprintf(stderr, "deepeel: BUG budget NULL in window\n");
+        }
+        p->img = NULL;
+        return 0;
     }
     uint8_t *img = p->img;
     int forced = p->forced, kind = p->kind, from_reset = p->from_reset;
     uint32_t choice = p->choice;
-    if (!from_pq) ex->q_len--;
     ex->cur_forced = forced;
     ex->cur_kind = (uint8_t)kind;
     ex->cur_from_reset = (uint8_t)from_reset;
@@ -1321,6 +1519,13 @@ int dp_explore_step(DpExplorer *ex) {
     dp_mach_attach(ex->mach, ex, hook_step, hook_read, hook_write, NULL);
     dp_mach_load(ex->mach, img); // execution starts at the image's pc
     free(img);
+    if (p != &tmp && ex->sh) { // trap: a NULL written into a live ring slot?
+        long idx = p - ex->queue;
+        long rel = (idx - (long)ex->q_head + (long)ex->q_cap) % (long)ex->q_cap;
+        if (rel < (long)ex->q_len)
+            fprintf(stderr, "deepeel: BUG NULL write in ring window (idx=%ld q_head=%u q_len=%u)\n",
+                    idx, ex->q_head, ex->q_len);
+    }
     p->img = NULL;
     // "same context" eviction: entering a section start with a context the
     // section cannot distinguish from one already explored.  A priority seed
@@ -1333,9 +1538,11 @@ int dp_explore_step(DpExplorer *ex) {
             DpSection *s = &res->sections[sid1 - 1];
             if (key == dp_rom_index(s->bank, s->lo)) {
                 uint64_t h = project_ctx(ex, s);
+                if (ex->sh) pthread_mutex_lock(&res->sec_mtx);
                 int ins = dp_set_insert(&s->ctx_seen, h);
+                if (ex->sh) pthread_mutex_unlock(&res->sec_mtx);
                 if (ins == 0) {
-                    res->evicted_ctx++;
+                    u32_add(&res->evicted_ctx, 1);
                     if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_MERGED);
                     return (ex->q_len || ex->pq_len) ? 1 : 0;
                 }
@@ -1346,9 +1553,9 @@ int dp_explore_step(DpExplorer *ex) {
     int cut = dp_mach_run(ex->mach);
     if (cut == DP_CUT_HALT) res->halt_cuts++;
     dp_copy_flush_path(ex, &ex->ct);
-    res->paths_run++;
+    u64_add(&res->paths_run, 1);
     // the tree choice of this path closes with its outcome
-    if (ex->tree) {
+    {
         int issue = DP_ISSUE_DONE;
         if (ex->path_dead) issue = DP_ISSUE_DEAD;
         else if (ex->path_reset) issue = DP_ISSUE_RESET;
@@ -1357,9 +1564,9 @@ int dp_explore_step(DpExplorer *ex) {
             issue = DP_ISSUE_MERGED; // a known loop, no way out found
         else if (cut == DP_CUT_CYCLES) issue = DP_ISSUE_CAPPED;
         else if (cut != DP_CUT_NONE) issue = DP_ISSUE_BUDGET;
-        dp_tree_close(ex->tree, choice, issue);
+        tree_close_g(ex, choice, issue);
     }
-    return (ex->q_len || ex->pq_len) ? 1 : 0;
+    return (ex->q_len || ex->pq_len || ex->sh || dp_explorer_spool_pending(ex)) ? 1 : 0;
 }
 
 int dp_explore_slice(DpExplorer *ex, int ms) {
@@ -1425,9 +1632,80 @@ void dp_explore_finalize(DpExplorer *ex) {
     }
 }
 
+// one parallel drain worker: same slice loop, pops from the shared pool
+static void *drain_thread(void *arg) {
+    DpExplorer *w = arg;
+    while (dp_explore_slice(w, 50))
+        ;
+    return NULL;
+}
+
 int dp_explore(DpExplorer *ex) {
+    if (ex->cfg.jobs <= 1 || ex->sh) {
+        while (dp_explore_slice(ex, 50))
+            ;
+        dp_explore_finalize(ex);
+        return 0;
+    }
+    // parallel drain: N explorers (one machine each) share one work pool,
+    // exact dedup, spool and tree.  The pool and the spool ARE the frontier:
+    // a full RAM pool spills to disk, nothing is dropped while disk lasts.
+    DpSharedPool sh;
+    memset(&sh, 0, sizeof sh);
+    sh.cap = 1024;
+    sh.max = ex->q_max;
+    sh.q = xrealloc(NULL, sizeof(DpPathState) * sh.cap);
+    pthread_mutex_init(&sh.mtx, NULL);
+    ex->sh = &sh;
+    ex->res->mt = 1; // the record lists are shared from now on: take the mutexes
+    // the seeds queued before the drain sit in the leader's local worklist:
+    // hand them to the pool, the workers cannot see the local ring
+    for (uint32_t i = 0; i < ex->q_len; i++) {
+        DpPathState *p = &ex->queue[(ex->q_head + i) % ex->q_cap];
+        if (!p->img) continue;
+        pthread_mutex_lock(&sh.mtx);
+        if (sh.len >= sh.cap) {
+            sh.q = xrealloc(sh.q, sizeof(DpPathState) * (size_t)sh.cap * 2);
+            sh.cap *= 2;
+        }
+        sh.q[(sh.head + sh.len) % sh.cap] = *p;
+        sh.len++;
+        pthread_mutex_unlock(&sh.mtx);
+        p->img = NULL;
+    }
+    ex->q_len = 0;
+    ex->q_head = 0;
+    // one worker per free machine instance (the sessions and the preview keep
+    // theirs): fewer free slots, fewer cores — the cap is DP_GBL_MACHINES
+    int n = ex->cfg.jobs - 1;
+    if (n > DP_GBL_MACHINES - 1) n = DP_GBL_MACHINES - 1;
+    DpExplorer **w = calloc((size_t)n, sizeof *w);
+    pthread_t *th = calloc((size_t)n, sizeof *th);
+    int nw = 0;
+    for (int i = 0; i < n; i++) {
+        DpMach *m = dp_mach_open_exclusive(ex->mach->vi, i + 1);
+        if (!m) continue; // the slot is taken (sessions, preview)
+        dp_mach_set_rom(m, ex->res->cart->rom, ex->res->cart->rom_size);
+        w[nw] = dp_explorer_new(&ex->cfg, ex->res, m);
+        w[nw]->tree = ex->tree;
+        dp_explorer_share(w[nw], ex);
+        pthread_create(&th[nw], NULL, drain_thread, w[nw]);
+        nw++;
+    }
+    if (!nw) fprintf(stderr, "deepeel: --jobs: no free machine instance, single core\n");
     while (dp_explore_slice(ex, 50))
         ;
+    for (int i = 0; i < nw; i++) pthread_join(th[i], NULL);
+    for (int i = 0; i < nw; i++) {
+        DpMach *m = w[i]->mach;
+        dp_explorer_free(w[i]);
+        dp_mach_close(m);
+    }
+    free(w);
+    free(th);
+    ex->sh = NULL;
+    pthread_mutex_destroy(&sh.mtx);
+    free(sh.q);
     dp_explore_finalize(ex);
     return 0;
 }
@@ -1549,17 +1827,20 @@ void dp_seed_gb(DpExplorer *ex) {
 // the JP HL sites recorded the targets the dispatch actually took; some of
 // those continuations were dropped by a budget wall, so seed every target
 // whose rom key carries no execution evidence yet (bounded: sites x 8, seed cap)
-int dp_seed_indirect(DpExplorer *ex) {
+int dp_seed_indirect(DpExplorer *ex, uint32_t cap) {
     DpResults *res = ex->res;
     int seeded = 0;
     for (size_t i = 0; i < res->indirect.cap; i++) {
         if (!res->indirect.used[i]) continue;
         const DpIndirect *ind = (const DpIndirect *)(res->indirect.vals + i * res->indirect.stride);
         for (int t = 0; t < ind->n; t++) {
-            if (seeded >= (int)ex->cfg.seed_cap) return seeded;
             uint32_t k = dp_rom_index(ind->tbank[t], ind->target[t]);
             if (res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED)) continue;
             if (res->static_flags[k] & (DP_SF_PAD | DP_SF_POINTER)) continue;
+            if (seeded >= (int)cap) { // the phase's solde is spent: counted, retried next phase
+                res->seeds_refused_budget++;
+                continue;
+            }
             if (!dp_explorer_seed_pc_pri(ex, ind->tbank[t], ind->target[t], DP_SEED_POINTER, 1, 1))
                 continue;
             seeded++;

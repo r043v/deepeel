@@ -31,6 +31,7 @@ enum {
     DP_DF_READ = 1 << 0, // read as data through the ROM windows
     DP_DF_COPIED = 1 << 1, // source range of a copy into VRAM/OAM
     DP_DF_VERBATIM = 1 << 2, // source range of a verbatim copy (byte for byte)
+    DP_DF_STATIC = 1 << 3, // read by statically proven code (provenance pass)
 };
 enum {
     DP_SF_POINTER = 1 << 0, // static: part of a plausible pointer table
@@ -202,7 +203,7 @@ typedef struct DpResults {
     // discovery counters move under every session worker)
     uint64_t steps_total, paths_run;
     uint32_t exec_outside; // instructions executed outside ROM (VRAM/RAM code)
-    uint32_t forks_branch, forks_irq, forks_key, evicted_exact, evicted_ctx;
+    uint32_t forks_branch, forks_irq, forks_key, forks_p1, evicted_exact, evicted_ctx;
     uint32_t forks_capped; // forks dropped by the per-site cap
     uint32_t cycle_cuts, step_cuts, budget_paths, budget_steps, queue_overflows;
     uint32_t queue_growths;   // times the full worklist grew instead of dropping paths
@@ -224,6 +225,9 @@ typedef struct DpResults {
     uint8_t oam_written;
     // data proven by exploration, for the m0boy bridge
     uint64_t data_verbatim_bytes; // bytes with DP_DF_VERBATIM
+    uint32_t seeds_refused_budget; // seeds dropped: the phase's cascade solde was spent
+    uint32_t prov_jp_hl, prov_data;  // provenance: jp-hl targets proven, bytes proven data
+    uint32_t prov_unresolved, prov_sat, prov_steps; // partial proofs, caps hit, walk steps
     uint32_t data_contradictions; // bytes both executed and proven data (kept code)
 } DpResults;
 
@@ -249,11 +253,13 @@ typedef struct DpConfig {
     int no_pointer_scan;      // disable pointer-table seeding
     int no_irq_fork;          // disable IRQ forking
     int no_key_fork;          // disable the simulated joypad-IRQ key forks
+    int no_p1_fork;           // disable the P1-polling read forks
     int no_closure;           // disable the static flow closure
     int closure_rounds;       // closure -> seed -> explore loops (default 4)
     int no_covered_prune;     // keep forking sites whose both sides are known
     uint32_t covered_fork_keep; // forks a fully-known site still gets (default 2)
     int seed_banks;           // seed every switchable bank at $4000
+    int jobs;                 // parallel drain workers (1 = single core)
     int dfs;                  // depth-first frontier: newest path first (the
                               // total-search phase; default breadth-first)
     int verbose;
@@ -293,6 +299,23 @@ typedef struct DpPathState {
     uint32_t choice;     // the tree choice this path answers
 } DpPathState;
 
+// disk spool of the overflow: appended at wr, fed back from rd, both cursors
+// in one file so a stopped run resumes without a rewrite.  Shared (mutex, one
+// struct) by the parallel workers: the spool doubles as the shared worklist.
+typedef struct DpSpool {
+    FILE *f;
+    uint64_t rd, wr;
+    pthread_mutex_t mtx;
+} DpSpool;
+
+// shared work pool of a parallel drain (--jobs N): ordinary pushes go here,
+// pops come from here; the exact dedup and the spool are shared alongside
+typedef struct DpSharedPool {
+    pthread_mutex_t mtx;
+    DpPathState *q;
+    uint32_t cap, head, len, max;
+} DpSharedPool;
+
 // the engine state is shared with the sibling modules (sections.c, copies.c)
 struct DpExplorer {
     DpConfig cfg;
@@ -310,11 +333,16 @@ struct DpExplorer {
     DpPathState *pqueue;
     uint32_t pq_cap, pq_head, pq_len;
     DpHashSet exact;
-    // disk spool of the overflow (see DpResults): records appended at spool_wr,
-    // fed back from spool_rd while the worklist runs low; both cursors live in
-    // one file so a stopped run resumes without a rewrite
-    FILE *spool;
-    uint64_t spool_rd, spool_wr;
+    pthread_mutex_t *exact_mtx; // guards the set when shared by parallel workers
+    DpHashSet *exactp;         // &exact, or the leader's set when shared
+    // disk spool of the overflow (see DpResults): shared with the parallel
+    // workers, which makes it the shared worklist of a parallel drain
+    DpSpool *spool;
+    int spool_owned; // this explorer allocated the spool (frees it)
+    // parallel drain (--jobs N): ordinary pushes/pops go through this pool
+    DpSharedPool *sh;
+    pthread_mutex_t tmtx;      // guards the tree when shared (parallel workers)
+    pthread_mutex_t *tree_mtx; // -> own tmtx, or the leader's when shared
     // per-path state
     int cur_forced;
     uint8_t cur_kind, cur_from_reset;
@@ -392,11 +420,12 @@ void dp_section_banks_seen(DpSection *s, uint32_t bank);
 // proven data stop the flow.  Terminates by construction (a visited map the
 // size of the ROM).  Returns the newly marked byte count.
 uint32_t dp_static_closure(DpResults *res);
+uint32_t dp_provenance(DpResults *res); // static HL/A provenance: jp-hl targets + proven data reads
 // seed the fork explorer at the closure's entry points that were never
 // executed (jump/call/branch targets): the static flow proposes, the machine
 // disposes (nonsense eviction, indirect targets).  Returns seeds queued; the
 // seeds over cfg.seed_cap are counted in closure_seeds_dropped.
-int dp_closure_seed(DpExplorer *ex);
+int dp_closure_seed(DpExplorer *ex, uint32_t cap); // seed cap of this phase (cascade solde)
 
 void dp_results_init(DpResults *res, const DpCart *cart, const DpPlatform *plat);
 void dp_results_free(DpResults *res);
@@ -434,7 +463,7 @@ int dp_explorer_seed_pc_pri(DpExplorer *ex, int bank, uint16_t pc, int kind, int
 void dp_seed_gb(DpExplorer *ex);
 // seed the targets the JP HL sites actually took (bounded: sites x 8, seed cap);
 // returns how many were queued
-int dp_seed_indirect(DpExplorer *ex);
+int dp_seed_indirect(DpExplorer *ex, uint32_t cap); // seed cap of this phase (cascade solde)
 // the reset state image (built on first use; pool slot 0 starts from it)
 uint8_t *dp_explorer_seed_base(DpExplorer *ex);
 // pop and run one path; returns 0 when the worklist is empty or a budget wall
@@ -450,6 +479,8 @@ int dp_explore(DpExplorer *ex);
 // inside dp_explore_step; flush() pours the remaining worklist in before the
 // process exits so --resume continues exactly where the run stopped.
 int dp_explorer_spool_attach(DpExplorer *ex, const char *path, int resume);
+// parallel drain: the worker borrows the leader's spool, exact dedup and tree
+void dp_explorer_share(DpExplorer *worker, DpExplorer *leader);
 // pours queue + priority inbox into the spool; returns states still pending
 uint64_t dp_explorer_spool_flush(DpExplorer *ex);
 uint64_t dp_explorer_spool_pending(const DpExplorer *ex);
