@@ -144,7 +144,9 @@ python3 tools/scan_all.py digest            # -> output/batch/REPORT.md
   tables de pointeurs par vues de banques, `--seed-banks`, `--entry`
   (0.14.0) ; sections exécutées avec éviction par contexte et verdicts de
   nécessité (0.15.0) ; file croissante, spool disque, `--resume` et arbre
-  de choix (0.16.0). Voir `docs/Z80.fr.md` pour les limites.
+  de choix (0.16.0) ; sessions jouées et verdict `played` (0.19.0) ; rejeu
+  TAS prioritaire `--tas` (.bk2/log texte, 0.20.0). Voir `docs/Z80.fr.md`
+  pour les limites.
 - **MSX1** : registre matériel et pont machine isolé (slots, mappers,
   PPI, AY, BIOS simulé), exploration dynamique bornée et cartes texte via
   `deepeel z80 explore msx jeu.rom --mapper auto`, puis fermeture statique

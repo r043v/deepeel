@@ -59,6 +59,11 @@ target_link_libraries(test_sega_play PRIVATE deepeel_sega)
 add_test(NAME sega_play COMMAND test_sega_play)
 set_tests_properties(sega_play PROPERTIES TIMEOUT 30)
 
+add_executable(test_sega_tas test_sega_tas.c)
+target_link_libraries(test_sega_tas PRIVATE deepeel_sega)
+add_test(NAME sega_tas COMMAND test_sega_tas)
+set_tests_properties(sega_tas PROPERTIES TIMEOUT 30)
+
 add_executable(test_msx test_msx.c)
 target_link_libraries(test_msx PRIVATE deepeel_msx deepeel_sega)
 add_test(NAME msx COMMAND test_msx)
