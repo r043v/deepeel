@@ -325,6 +325,33 @@ code / data / padding.
 - Ces nombres sont des observations de l'outil (machine concrète, RAM à
   zéro, registres événementiels statiques), pas des mesures de matériel.
 
+### File adaptative et murs de ressource (0.9.0)
+
+- La file de travail pleine **double** au lieu de jeter des chemins entiers :
+  croissance ×2 jusqu'au plafond `--queue-max` (défaut 4× la taille `--queue`),
+  arrêtée par le mur `--mem-cap` (RSS sondé via `/proc`, le même mur que les
+  sessions). Chaque croissance est comptée (`queue growths` dans la ligne
+  `budgets:` du rapport) ; au plafond, les pertes repassent dans
+  « queue overflows ». La boîte prioritaire reste bornée par `--seed-cap`.
+- `--time-limit SEC` : mur horloce de la phase de jeu, arrêt **gracieux**
+  (pool sauvegardé, `--resume` reprend). C'est un mur de campagne : il
+  l'emporte même sur la priorité TAS — un scan est borné sans surveillance.
+- `--tas-dir D` (répétable) : découvre les films du répertoire (8 max, triés
+  par ressemblance de titre quand il y en a plus ; `.vmv`, `.vbm`, `.bk2`,
+  `.gbm`, `.fm2`, `.log`), les films retenus sont loggés sur stderr.
+- `--summary f` : profil JSON compact d'une passe — identité ROM, écho de la
+  config, résumé de la carte (toutes classes), liste **complète** des plages
+  résiduelles, tous les compteurs (y compris ceux que le texte taisait :
+  `forks_capped`, `halt_cuts`, `exec_outside`, toute la famille closure),
+  arbre (choix, ouverts, issues) et faits de jeu (frames, TAS, raison
+  d'arrêt). `--json` gagne les mêmes compteurs et une section `map`.
+- `tools/scan_all.py` : campagne multi-ROMs — `scan` applique la recette
+  générique à chaque ROM d'un répertoire (30 min de jeu par défaut, films TAS
+  minés localement avec assignation exclusive par ressemblance — «
+  supermarioland2 » ne pollue pas « supermarioland »), `--full --only <slug>`
+  enchaîne une passe à fond avec `--resume`, `digest` agrège les profils en
+  `REPORT.md` (couverture, anatomie du résidu, murs et saturations).
+
 ### TAS sans limite de temps ni de budget (0.5.0)
 
 Un film TAS est rejoué en entier : `--frames`, `--stagnation` et `--until-static`

@@ -204,6 +204,7 @@ typedef struct DpResults {
     uint32_t forks_branch, forks_irq, forks_key, evicted_exact, evicted_ctx;
     uint32_t forks_capped; // forks dropped by the per-site cap
     uint32_t cycle_cuts, step_cuts, budget_paths, budget_steps, queue_overflows;
+    uint32_t queue_growths;   // times the full worklist grew instead of dropping paths
     uint32_t pad_cuts; // paths stopped for executing a padding run
     // nonsense evictions (the path proved senseless): echo/OAM execution,
     // execution inside verbatim-proven data, RET with a stack outside
@@ -225,6 +226,11 @@ typedef struct DpConfig {
     uint32_t max_paths;       // hard cap on paths run
     uint64_t max_steps_total; // hard cap on steps across all paths
     uint32_t queue_cap;       // max pending states
+    uint32_t queue_max;       // adaptive growth cap of the worklist (0 = 4x queue_cap):
+                              // a full queue grows by doubling up to this instead of
+                              // dropping whole paths
+    uint64_t mem_cap_mb;      // queue growth stops once RSS exceeds this MiB (0 = off;
+                              // same wall as the sessions' --mem-cap)
     uint32_t loop_back_cap;   // iterations of one backward edge before cut
     uint32_t fork_site_cap;   // max forks per branch site (loop bodies fork
                               // every iteration; the interesting variants are
@@ -246,6 +252,10 @@ typedef struct DpConfig {
 } DpConfig;
 
 void dp_config_defaults(DpConfig *cfg);
+
+// resident memory of this process, in MiB (0 when unreadable) — the shared
+// memory-cap probe: long runs must not eat the machine's RAM and swap
+uint64_t dp_rss_mb(void);
 
 typedef struct DpExplorer DpExplorer;
 
@@ -284,6 +294,7 @@ struct DpExplorer {
     // worklist
     DpPathState *queue;
     uint32_t q_cap, q_head, q_len;
+    uint32_t q_max;    // growth ceiling (resolved from cfg.queue_max)
     // priority inbox: closure / indirect / TAS-shoot seeds.  The main worklist
     // runs saturated in steady state (every popped path forks new ones), so
     // late seeds would starve there; these are served first, the slot cap

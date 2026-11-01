@@ -1,6 +1,7 @@
 // report.c: human text report, machine-readable JSON map, and a .cov export
 // compatible with m0boy's coverage format (flags 1=exec 2=entry 4=speculative).
 #include "report.h"
+#include "../explore/tree.h"
 
 // block classes: '.' untouched, 'C' code natural, 'c' code forced-only,
 // 'D' data read, 'V' copied to VRAM/OAM, 'P' pointer table, 'p' padding
@@ -70,7 +71,7 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
              "exploration: %llu steps in %llu paths (%llu forks: %u branch, %u irq, %u key), %u sections\n"
              "evicted: %u exact states, %u same-context entries; cuts: %u cycles, %u step-budget, %u padding\n"
              "nonsense evictions: %u echo/OAM, %u verbatim data, %u incoherent stack\n"
-             "budgets: %u paths cap hit, %u step-wall hit, %u queue overflows\n"
+             "budgets: %u paths cap hit, %u step-wall hit, %u queue overflows (%u growths), %u forks capped, %u outside-rom exec\n"
              "seeds: %u natural, %u speculative\n"
              "data: %llu bytes proven verbatim (cov flag 8), %u exec∩data contradictions\n",
              (unsigned long long)res->steps_total, (unsigned long long)res->paths_run,
@@ -79,6 +80,7 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
              res->section_count, res->evicted_exact, res->evicted_ctx, res->cycle_cuts,
              res->step_cuts, res->pad_cuts, res->nonsense_echo, res->nonsense_data,
              res->nonsense_stack, res->budget_paths, res->budget_steps, res->queue_overflows,
+             res->queue_growths, res->forks_capped, res->exec_outside,
              res->seeds_natural, res->seeds_spec,
              (unsigned long long)res->data_verbatim_bytes, res->data_contradictions);
     dp_buf_str(out, line);
@@ -249,18 +251,60 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
     dp_buf_fmt(o, "\",\"mbc\":\"%s\",\"banks\":%d,\"size\":%u,\"ram\":%u},\n",
                dp_mbc_name(c->mbc), c->rom_banks, c->rom_size, c->ram_size);
     dp_buf_fmt(o, "\"config\": {\"max_steps_path\":%u,\"max_paths\":%u,\"max_steps_total\":%llu,"
-                  "\"queue_cap\":%u,\"loop_back_cap\":%u,\"seed_cap\":%u,\"max_copies\":%u},\n",
+                  "\"queue_cap\":%u,\"queue_max\":%u,\"mem_cap_mb\":%llu,\"loop_back_cap\":%u,"
+                  "\"seed_cap\":%u,\"max_copies\":%u,\"closure_rounds\":%d,\"covered_fork_keep\":%u,"
+                  "\"seed_banks\":%d},\n",
                cfg->max_steps_path, cfg->max_paths, (unsigned long long)cfg->max_steps_total,
-               cfg->queue_cap, cfg->loop_back_cap, cfg->seed_cap, cfg->max_copies);
+               cfg->queue_cap, cfg->queue_max, (unsigned long long)cfg->mem_cap_mb,
+               cfg->loop_back_cap, cfg->seed_cap, cfg->max_copies, cfg->closure_rounds,
+               cfg->covered_fork_keep, cfg->seed_banks);
     dp_buf_fmt(o, "\"counters\": {\"steps\":%llu,\"paths\":%u,\"forks_branch\":%u,\"forks_irq\":%u,"
+                  "\"forks_key\":%u,\"forks_capped\":%u,\"forks_covered_pruned\":%u,"
                   "\"sections\":%u,\"evicted_exact\":%u,\"evicted_ctx\":%u,\"cycle_cuts\":%u,"
-                  "\"step_cuts\":%u,\"pad_cuts\":%u,\"nonsense_echo\":%u,\"nonsense_data\":%u,\"nonsense_stack\":%u,\"budget_paths\":%u,\"budget_steps\":%u,\"queue_overflows\":%u,"
-                  "\"seeds_natural\":%u,\"seeds_spec\":%u,\"bad_ops\":%u},\n",
+                  "\"step_cuts\":%u,\"pad_cuts\":%u,\"halt_cuts\":%u,\"nonsense_echo\":%u,\"nonsense_data\":%u,\"nonsense_stack\":%u,\"budget_paths\":%u,\"budget_steps\":%u,\"queue_overflows\":%u,\"queue_growths\":%u,"
+                  "\"exec_outside\":%u,\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u},\n",
                (unsigned long long)res->steps_total, (unsigned long long)res->paths_run, res->forks_branch, res->forks_irq,
+               res->forks_key, res->forks_capped, res->forks_covered_pruned,
                (unsigned)res->section_count, res->evicted_exact, res->evicted_ctx, res->cycle_cuts,
-               res->step_cuts, res->pad_cuts, res->nonsense_echo, res->nonsense_data,
+               res->step_cuts, res->pad_cuts, res->halt_cuts, res->nonsense_echo, res->nonsense_data,
                res->nonsense_stack, res->budget_paths, res->budget_steps, res->queue_overflows,
-               res->seeds_natural, res->seeds_spec, (unsigned)res->bad_op_count);
+               res->queue_growths, res->exec_outside, res->seeds_natural, res->seeds_spec,
+               res->seeds_skipped_data, (unsigned)res->bad_op_count);
+    dp_buf_fmt(o, "\"closure\": {\"rounds\":%u,\"starts\":%u,\"unresolved_bank\":%u,"
+                  "\"stopped_data\":%u,\"stopped_illegal\":%u,\"seeds\":%u,\"seeds_dropped\":%u,"
+                  "\"seeds_refused\":%u,\"bank_seeds\":%u,\"indirect_seeds\":%u},\n",
+               res->closure_rounds, res->closure_starts, res->closure_unresolved_bank,
+               res->closure_stopped_data, res->closure_stopped_illegal, res->closure_seeds,
+               res->closure_seeds_dropped, res->closure_seeds_refused, res->closure_bank_seeds,
+               res->indirect_seeds);
+    dp_buf_fmt(o, "\"data\": {\"verbatim_bytes\":%llu,\"contradictions\":%u},\n",
+               (unsigned long long)res->data_verbatim_bytes, res->data_contradictions);
+    {   // map summary + residual ranges (the aggregation view)
+        DpMapSummary s;
+        uint8_t *m = dp_map_build(res, &s);
+        dp_buf_str(o, "\"map\": {");
+        dp_buf_fmt(o, "\"known_pct\":%.2f,\"unknown_pct\":%.2f,\"inferred_pct\":%.2f",
+                   s.total ? 100.0 * (double)s.known / (double)s.total : 0.0,
+                   s.total ? 100.0 * (double)s.unknown / (double)s.total : 0.0,
+                   s.total ? 100.0 * (double)s.inferred / (double)s.total : 0.0);
+        dp_buf_str(o, ",\"classes\":{");
+        for (int cl = 0; cl < DP_MAP_COUNT; cl++)
+            dp_buf_fmt(o, "%s\"%s\":%llu", cl ? "," : "", dp_map_class_name(cl),
+                       (unsigned long long)s.cls[cl]);
+        dp_buf_str(o, "}");
+        if (m) {
+            DpResidualRange rr[4096];
+            int nr = dp_map_residual_list(res, m, rr, 4096);
+            dp_buf_fmt(o, ",\"residual_bytes\":%llu,\"residual_ranges\":%d,\"residual\":[",
+                       (unsigned long long)s.unknown, nr);
+            for (int i = 0; i < nr && i < 4096; i++)
+                dp_buf_fmt(o, "%s{\"bank\":%u,\"lo\":%u,\"hi\":%u,\"len\":%u}", i ? "," : "",
+                           rr[i].bank, rr[i].lo, rr[i].hi, rr[i].len);
+            dp_buf_str(o, "]");
+            free(m);
+        }
+        dp_buf_str(o, "},\n");
+    }
     // banks
     dp_buf_str(o, "\"banks\": [\n");
     for (int bank = 0; bank < res->banks; bank++) {
@@ -341,6 +385,101 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
     for (int i = 0; i < res->bad_op_count && i < 64; i++)
         dp_buf_fmt(o, "%s%u", i ? "," : "", res->bad_ops[i].key);
     dp_buf_str(o, "]\n}\n");
+}
+
+// --- summary ------------------------------------------------------------------
+// the compact per-run profile: everything a multi-ROM campaign aggregates,
+// one JSON small enough to keep for every run
+void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *tree,
+                       const char *stop_reason, unsigned long long frames, int tas_n, DpBuf *o) {
+    const DpCart *c = res->cart;
+    dp_buf_str(o, "{\n\"rom\": {");
+    dp_buf_fmt(o, "\"title\":\"");
+    json_esc(o, c->title);
+    dp_buf_fmt(o, "\",\"mbc\":\"%s\",\"banks\":%d,\"size\":%u,\"ram\":%u},\n",
+               dp_mbc_name(c->mbc), c->rom_banks, c->rom_size, c->ram_size);
+    dp_buf_fmt(o, "\"config\": {\"max_steps_path\":%u,\"max_paths\":%u,\"max_steps_total\":%llu,"
+                  "\"queue_cap\":%u,\"queue_max\":%u,\"mem_cap_mb\":%llu,\"loop_back_cap\":%u,"
+                  "\"seed_cap\":%u,\"closure_rounds\":%d,\"covered_fork_keep\":%u,\"seed_banks\":%d},\n",
+               cfg->max_steps_path, cfg->max_paths, (unsigned long long)cfg->max_steps_total,
+               cfg->queue_cap, cfg->queue_max, (unsigned long long)cfg->mem_cap_mb,
+               cfg->loop_back_cap, cfg->seed_cap, cfg->closure_rounds, cfg->covered_fork_keep,
+               cfg->seed_banks);
+    dp_buf_fmt(o, "\"play\": {\"frames\":%llu,\"tas_n\":%d,\"stop_reason\":\"%s\"},\n",
+               frames, tas_n, stop_reason ? stop_reason : "explore-only");
+    dp_buf_str(o, "\"tree\": {");
+    if (tree) {
+        dp_buf_fmt(o, "\"choices\":%u,\"open\":%u,\"max_depth\":%u,\"closed\":{", tree->n ? tree->n - 1 : 0,
+                   tree->open, tree->max_depth);
+        int first = 1;
+        for (int i = 1; i < DP_ISSUE_N; i++) {
+            if (!tree->closed[i]) continue;
+            dp_buf_fmt(o, "%s\"%s\":%u", first ? "" : ",", dp_issue_name(i), tree->closed[i]);
+            first = 0;
+        }
+        dp_buf_str(o, "}");
+    } else {
+        dp_buf_str(o, "\"choices\":0,\"open\":0,\"max_depth\":0,\"closed\":{}");
+    }
+    dp_buf_str(o, "},\n");
+    {   // map summary + full residual list
+        DpMapSummary s;
+        uint8_t *m = dp_map_build(res, &s);
+        dp_buf_str(o, "\"map\": {");
+        dp_buf_fmt(o, "\"known_pct\":%.3f,\"unknown_pct\":%.3f,\"inferred_pct\":%.3f,"
+                      "\"code_pct\":%.3f,\"data_pct\":%.3f,\"pad_pct\":%.3f",
+                   s.total ? 100.0 * (double)s.known / (double)s.total : 0.0,
+                   s.total ? 100.0 * (double)s.unknown / (double)s.total : 0.0,
+                   s.total ? 100.0 * (double)s.inferred / (double)s.total : 0.0,
+                   s.total ? 100.0 * (double)s.code / (double)s.total : 0.0,
+                   s.total ? 100.0 * (double)s.data / (double)s.total : 0.0,
+                   s.total ? 100.0 * (double)s.pad / (double)s.total : 0.0);
+        dp_buf_str(o, ",\"classes\":{");
+        for (int cl = 0; cl < DP_MAP_COUNT; cl++)
+            dp_buf_fmt(o, "%s\"%s\":%llu", cl ? "," : "", dp_map_class_name(cl),
+                       (unsigned long long)s.cls[cl]);
+        dp_buf_str(o, "}");
+        if (m) {
+            int cap = 16384;
+            DpResidualRange *rr = malloc((size_t)cap * sizeof *rr);
+            if (rr) {
+                int nr = dp_map_residual_list(res, m, rr, cap);
+                dp_buf_fmt(o, ",\"residual_bytes\":%llu,\"residual_ranges\":%d,\"residual\":[",
+                           (unsigned long long)s.unknown, nr);
+                for (int i = 0; i < nr && i < cap; i++)
+                    dp_buf_fmt(o, "%s{\"bank\":%u,\"lo\":%u,\"hi\":%u,\"len\":%u}", i ? "," : "",
+                               rr[i].bank, rr[i].lo, rr[i].hi, rr[i].len);
+                dp_buf_str(o, "]");
+                free(rr);
+            }
+            free(m);
+        }
+        dp_buf_str(o, "},\n");
+    }
+    dp_buf_fmt(o, "\"counters\": {\"steps\":%llu,\"paths\":%u,\"forks_branch\":%u,\"forks_irq\":%u,"
+                  "\"forks_key\":%u,\"forks_capped\":%u,\"forks_covered_pruned\":%u,\"sections\":%u,"
+                  "\"evicted_exact\":%u,\"evicted_ctx\":%u,\"cycle_cuts\":%u,\"step_cuts\":%u,"
+                  "\"pad_cuts\":%u,\"halt_cuts\":%u,\"nonsense_echo\":%u,\"nonsense_data\":%u,"
+                  "\"nonsense_stack\":%u,\"budget_paths\":%u,\"budget_steps\":%u,"
+                  "\"queue_overflows\":%u,\"queue_growths\":%u,\"exec_outside\":%u,"
+                  "\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u},\n",
+               (unsigned long long)res->steps_total, (unsigned long long)res->paths_run,
+               res->forks_branch, res->forks_irq, res->forks_key, res->forks_capped,
+               res->forks_covered_pruned, (unsigned)res->section_count, res->evicted_exact,
+               res->evicted_ctx, res->cycle_cuts, res->step_cuts, res->pad_cuts, res->halt_cuts,
+               res->nonsense_echo, res->nonsense_data, res->nonsense_stack, res->budget_paths,
+               res->budget_steps, res->queue_overflows, res->queue_growths, res->exec_outside,
+               res->seeds_natural, res->seeds_spec, res->seeds_skipped_data,
+               (unsigned)res->bad_op_count);
+    dp_buf_fmt(o, "\"closure\": {\"rounds\":%u,\"starts\":%u,\"unresolved_bank\":%u,"
+                  "\"stopped_data\":%u,\"stopped_illegal\":%u,\"seeds\":%u,\"seeds_dropped\":%u,"
+                  "\"seeds_refused\":%u,\"bank_seeds\":%u,\"indirect_seeds\":%u},\n",
+               res->closure_rounds, res->closure_starts, res->closure_unresolved_bank,
+               res->closure_stopped_data, res->closure_stopped_illegal, res->closure_seeds,
+               res->closure_seeds_dropped, res->closure_seeds_refused, res->closure_bank_seeds,
+               res->indirect_seeds);
+    dp_buf_fmt(o, "\"data\": {\"verbatim_bytes\":%llu,\"contradictions\":%u}\n}\n",
+               (unsigned long long)res->data_verbatim_bytes, res->data_contradictions);
 }
 
 // --- cov -------------------------------------------------------------------------

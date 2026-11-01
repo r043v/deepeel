@@ -260,6 +260,51 @@ int main(int argc, char **argv) {
         CHECK(heads == 0);        // the 7 bytes before the detection point are marked too
     }
 
+    // --- adaptive worklist: a full queue grows up to queue_max instead of ---------
+    // dropping whole paths; the growth is counted and the kept paths really run
+    {
+        char p[512], err[256];
+        snprintf(p, sizeof p, "%s/fix_branch.gb", dir);
+        if (g_cart) dp_cart_free(g_cart);
+        g_cart = dp_cart_load(p, err, sizeof err);
+        if (!g_cart) exit(2);
+        if (res.cart) dp_results_free(&res);
+        memset(&res, 0, sizeof res);
+        dp_results_init(&res, g_cart, dp_platform_gb());
+        dp_static_scan(&res);
+        DpConfig cfg;
+        dp_config_defaults(&cfg);
+        cfg.queue_cap = 2;
+        cfg.queue_max = 2; // ceiling == cap: no growth possible
+        cfg.fork_site_cap = 1000;
+        cfg.no_covered_prune = 1;
+        cfg.max_steps_total = 2000000;
+        if (g_mach) dp_mach_close(g_mach);
+        g_mach = mach_for(g_cart);
+        DpExplorer *ex = dp_explorer_new(&cfg, &res, g_mach);
+        dp_seed_gb(ex);
+        dp_explore(ex);
+        dp_explorer_free(ex);
+        uint64_t paths_capped = res.paths_run;
+        CHECK(res.queue_overflows >= 1); // the tiny queue really dropped paths
+
+        // same run with growth allowed: the dropped paths run, the growth shows
+        dp_results_free(&res);
+        memset(&res, 0, sizeof res);
+        dp_results_init(&res, g_cart, dp_platform_gb());
+        dp_static_scan(&res);
+        if (g_mach) dp_mach_close(g_mach);
+        g_mach = mach_for(g_cart);
+        cfg.queue_max = 4096; // far above this fixture's occupancy: no loss under it
+        DpExplorer *ex2 = dp_explorer_new(&cfg, &res, g_mach);
+        dp_seed_gb(ex2);
+        dp_explore(ex2);
+        dp_explorer_free(ex2);
+        CHECK(res.queue_growths >= 1);        // the growth happened, counted
+        CHECK(res.paths_run > paths_capped);  // the kept paths really ran
+        CHECK(res.queue_overflows == 0);      // under the ceiling nothing is lost
+    }
+
     // --- reports produce output -------------------------------------------------------
     {
         DpConfig cfg;

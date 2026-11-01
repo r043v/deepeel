@@ -15,6 +15,7 @@
 #include "../cpu/sm83/sm83.h"
 #include "tree.h"
 #include <time.h>
+#include <unistd.h>
 
 #include <stddef.h>
 
@@ -173,8 +174,17 @@ void dp_config_defaults(DpConfig *cfg) {
     cfg->fork_site_cap = 16;
     cfg->seed_cap = 4096;
     cfg->max_copies = 65536;
-    cfg->closure_rounds = 4;
+    cfg->closure_rounds = 12; // each round exits early once it seeds nothing
     cfg->covered_fork_keep = 2;
+}
+
+uint64_t dp_rss_mb(void) {
+    FILE *f = fopen("/proc/self/statm", "r");
+    if (!f) return 0;
+    unsigned long rss_pages = 0;
+    if (fscanf(f, "%*lu %lu", &rss_pages) != 1) rss_pages = 0;
+    fclose(f);
+    return rss_pages * (unsigned long)sysconf(_SC_PAGESIZE) / (1024u * 1024u);
 }
 
 static void *xrealloc(void *p, size_t n) {
@@ -338,6 +348,8 @@ DpExplorer *dp_explorer_new(const DpConfig *cfg, DpResults *res, DpMach *mach) {
     ex->mach = mach;
     ex->sb = dp_mach_state_bytes(mach);
     ex->q_cap = cfg->queue_cap ? cfg->queue_cap : 2048;
+    ex->q_max = cfg->queue_max ? cfg->queue_max : ex->q_cap * 4;
+    if (ex->q_max < ex->q_cap) ex->q_max = ex->q_cap;
     ex->queue = xrealloc(NULL, sizeof(DpPathState) * ex->q_cap);
     memset(ex->queue, 0, sizeof(DpPathState) * ex->q_cap);
     // the priority inbox stays small: seeds are few, saturation is counted
@@ -402,6 +414,27 @@ static uint64_t image_hash(DpExplorer *ex, const uint8_t *img) {
     return h;
 }
 
+// bounded adaptive growth of the main worklist: a full queue used to drop
+// whole paths; doubling up to q_max (and under the memory cap when set)
+// keeps them.  Returns 0 when the growth is impossible (ceiling, memory cap).
+static int queue_grow(DpExplorer *ex) {
+    if (ex->q_cap >= ex->q_max) return 0;
+    if (ex->cfg.mem_cap_mb && dp_rss_mb() >= ex->cfg.mem_cap_mb) return 0;
+    uint32_t ncap = ex->q_cap * 2;
+    if (ncap > ex->q_max) ncap = ex->q_max;
+    DpPathState *nq = xrealloc(NULL, sizeof(DpPathState) * (size_t)ncap);
+    // logical order preserved, head rebased to 0
+    for (uint32_t i = 0; i < ex->q_len; i++)
+        nq[i] = ex->queue[(ex->q_head + i) % ex->q_cap];
+    memset(nq + ex->q_len, 0, sizeof(DpPathState) * (size_t)(ncap - ex->q_len));
+    free(ex->queue);
+    ex->queue = nq;
+    ex->q_head = 0;
+    ex->q_cap = ncap;
+    ex->res->queue_growths++;
+    return 1;
+}
+
 // returns 0 when the state was dropped (dedup, dedup-set full or queue full):
 // the caller can then retry it later instead of losing it
 static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, int from_reset,
@@ -425,11 +458,17 @@ static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, in
     uint32_t len = pri ? ex->pq_len : ex->q_len;
     uint32_t head = pri ? ex->pq_head : ex->q_head;
     if (len >= cap) {
-        if (pri) ex->res->closure_seeds_refused++; // saturation surfaced, retried later
-        else ex->res->queue_overflows++;
-        if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_BUDGET);
-        free(img);
-        return 0;
+        if (!pri && queue_grow(ex)) { // bounded adaptive growth, counted
+            q = ex->queue;
+            cap = ex->q_cap;
+            head = ex->q_head;
+        } else {
+            if (pri) ex->res->closure_seeds_refused++; // saturation surfaced, retried later
+            else ex->res->queue_overflows++;
+            if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_BUDGET);
+            free(img);
+            return 0;
+        }
     }
     DpPathState *p = &q[(head + len) % cap];
     p->img = img;

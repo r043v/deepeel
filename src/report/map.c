@@ -82,12 +82,11 @@ void dp_map_summary_text(const DpMapSummary *s, DpBuf *out) {
         dp_buf_fmt(out, "    %-17s %8llu  %5.1f%%\n", dp_map_class_name(c), (unsigned long long)s->cls[c], s->cls[c] * t);
 }
 
-// the last mile: the byte ranges nothing could observe or infer, largest
-// first — the honest boundary of the map
-void dp_map_residual_text(const DpResults *res, const uint8_t *m, DpBuf *out) {
+// the last mile: every range nothing could observe or infer, bank by bank
+int dp_map_residual_list(const DpResults *res, const uint8_t *m, DpResidualRange *out, int cap) {
     size_t n = (size_t)res->banks * 0x4000;
-    struct { unsigned bank, lo, hi; size_t len; } top[8] = {{0}};
-    uint32_t total = 0, ranges = 0;
+    int kept = 0;
+    uint32_t ranges = 0;
     for (size_t bs = 0; bs < n; bs += 0x4000) {
         for (size_t i = bs; i < bs + 0x4000;) {
             if (m[i] != DP_MAP_UNKNOWN) { i++; continue; }
@@ -95,17 +94,41 @@ void dp_map_residual_text(const DpResults *res, const uint8_t *m, DpBuf *out) {
             while (j < bs + 0x4000 && m[j] == DP_MAP_UNKNOWN) j++;
             if (j > i) {
                 ranges++;
-                total += (uint32_t)(j - i);
-                size_t len = j - i;
-                for (int t = 0; t < 8; t++) {
-                    if (len > top[t].len) {
-                        for (int u = 7; u > t; u--) top[u] = top[u - 1];
-                        top[t].bank = (unsigned)(bs / 0x4000);
-                        top[t].lo = (unsigned)(i - bs);
-                        top[t].hi = (unsigned)(j - 1 - bs);
-                        top[t].len = len;
-                        break;
-                    }
+                if (kept < cap) {
+                    out[kept].bank = (uint16_t)(bs / 0x4000);
+                    out[kept].lo = (uint16_t)(i - bs);
+                    out[kept].hi = (uint16_t)(j - 1 - bs);
+                    out[kept].len = (uint32_t)(j - i);
+                    kept++;
+                }
+            }
+            i = j;
+        }
+    }
+    return (int)ranges;
+}
+
+// the honest boundary of the map, largest first
+void dp_map_residual_text(const DpResults *res, const uint8_t *m, DpBuf *out) {
+    DpResidualRange top[8] = {{0, 0, 0, 0}};
+    int ranges = dp_map_residual_list(res, m, NULL, 0);
+    uint32_t total = 0;
+    size_t n = (size_t)res->banks * 0x4000;
+    for (size_t bs = 0; bs < n; bs += 0x4000) {
+        for (size_t i = bs; i < bs + 0x4000;) {
+            if (m[i] != DP_MAP_UNKNOWN) { i++; continue; }
+            size_t j = i;
+            while (j < bs + 0x4000 && m[j] == DP_MAP_UNKNOWN) j++;
+            uint32_t len = (uint32_t)(j - i);
+            total += len;
+            for (int t = 0; t < 8; t++) {
+                if (len > top[t].len) {
+                    for (int u = 7; u > t; u--) top[u] = top[u - 1];
+                    top[t].bank = (uint16_t)(bs / 0x4000);
+                    top[t].lo = (uint16_t)(i - bs);
+                    top[t].hi = (uint16_t)(j - 1 - bs);
+                    top[t].len = len;
+                    break;
                 }
             }
             i = j;
@@ -115,11 +138,10 @@ void dp_map_residual_text(const DpResults *res, const uint8_t *m, DpBuf *out) {
         dp_buf_str(out, "residual unknown: none\n");
         return;
     }
-    dp_buf_fmt(out, "residual unknown: %u bytes in %u ranges, largest:", total, ranges);
-    unsigned win = 0;
+    dp_buf_fmt(out, "residual unknown: %u bytes in %d ranges, largest:", total, ranges);
     for (int t = 0; t < 8 && top[t].len; t++) {
-        win = top[t].bank ? 0x4000 : 0;
-        dp_buf_fmt(out, " %u:%04x-%04x (%zu)", top[t].bank, win + top[t].lo, win + top[t].hi,
+        unsigned win = top[t].bank ? 0x4000 : 0;
+        dp_buf_fmt(out, " %u:%04x-%04x (%u)", top[t].bank, win + top[t].lo, win + top[t].hi,
                    top[t].len);
     }
     dp_buf_str(out, "\n");

@@ -17,6 +17,9 @@
 #include "gui/gui.h"
 #include "cpu/sm83/sm83.h"
 
+#include <dirent.h>
+#include <ctype.h>
+#include <errno.h>
 #include <time.h>
 
 static void usage(void) {
@@ -27,6 +30,13 @@ static void usage(void) {
             "    --max-paths N        path cap (default 200000)\n"
             "    --max-total N        global step wall (default 20000000)\n"
             "    --queue N            pending-state cap (default 4096)\n"
+            "    --queue-max N        adaptive growth ceiling of the pending states\n"
+            "                         (default 4x queue): a full queue doubles instead of\n"
+            "                         dropping paths, stopped by --mem-cap when set\n"
+            "    --mem-cap MB         wall shared by the play and the queue growth:\n"
+            "                         stop/grow no more once RSS exceeds MB MiB\n"
+            "    --time-limit SEC     play wall clock: stop gracefully (pool saved) after\n"
+            "                         SEC seconds, TAS movies included (0 = off)\n"
             "    --loop-cap N         iterations of one backward edge before cut (default 4096)\n"
             "    --seed-cap N         pointer-scan seed cap (default 4096)\n"
             "    --entry bank:addr    extra seed (repeatable)\n"
@@ -35,7 +45,8 @@ static void usage(void) {
             "    --no-context-evict   disable same-context eviction\n"
             "    --no-irq-fork        disable IRQ forking\n"
             "    --no-closure         disable the static flow closure (and its seeds)\n"
-            "    --closure-rounds N   closure -> seed -> search loops (default 4)\n"
+            "    --closure-rounds N   closure -> seed -> search loops (default 12; each\n"
+            "                         round exits early once it seeds nothing)\n"
             "    --no-covered-prune   keep forking sites whose both sides are covered\n"
             "    --covered-keep N     forks such a site still gets (default 2)\n"
             "    --gui                SDL2 live viewer\n"
@@ -71,6 +82,10 @@ static void usage(void) {
             "                         whole set after the coverage exploration\n"
             "    --tas f              replay a TAS movie: VBA .vmv, BizHawk .bk2 or an\n"
             "                         extracted input log (repeatable, one worker each)\n"
+            "    --tas-dir D          discover movies in directory D (up to 8, best title\n"
+            "                         match first when there are more) — repeatable\n"
+            "    --summary f          compact JSON profile of the run (map summary, full\n"
+            "                         residual list, every counter, tree, play facts)\n"
             "    --tas-solo           single mode: only the TAS workers run (one per movie, no\n"
             "                         random/attract crowd), the play stops when the movies end;\n"
             "                         the checkpoint snapshots are kept, then explored after\n"
@@ -97,6 +112,78 @@ static int parse_entry(const char *s, uint8_t *bank, uint16_t *addr) {
     return 1;
 }
 
+// --- --tas-dir: movie discovery ------------------------------------------------
+static int mov_ext(const char *name) {
+    static const char *exts[] = { ".vmv", ".vbm", ".bk2", ".gbm", ".fm2", ".log" };
+    size_t n = strlen(name);
+    for (int i = 0; i < 6; i++) {
+        size_t e = strlen(exts[i]);
+        if (n > e && !strcasecmp(name + n - e, exts[i])) return 1;
+    }
+    return 0;
+}
+
+// longest common substring between the lowercase alnum forms of both names
+static int title_score(const char *file, const char *title) {
+    char a[256], b[64];
+    size_t na = 0, nb = 0;
+    for (const char *p = file; *p && na < sizeof a - 1; p++)
+        if (isalnum((unsigned char)*p)) a[na++] = (char)tolower((unsigned char)*p);
+    a[na] = 0;
+    for (const char *p = title; *p && nb < sizeof b - 1; p++)
+        if (isalnum((unsigned char)*p)) b[nb++] = (char)tolower((unsigned char)*p);
+    b[nb] = 0;
+    int best = 0;
+    for (size_t i = 0; i < nb; i++)
+        for (size_t j = 0; j < na; j++) {
+            int l = 0;
+            while (i + l < nb && j + l < na && b[i + l] == a[j + l]) l++;
+            if (l > best) best = l;
+        }
+    return best;
+}
+
+static void tas_collect_dir(const char *dir, const char *title, const char **tas, int *n, int max) {
+    DIR *d = opendir(dir);
+    if (!d) {
+        fprintf(stderr, "deepeel: --tas-dir %s: %s\n", dir, strerror(errno));
+        return;
+    }
+    char (*names)[256] = calloc(64, 256);
+    if (!names) {
+        closedir(d);
+        return;
+    }
+    int nn = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) && nn < 64) {
+        if (e->d_name[0] == '.') continue;
+        if (!mov_ext(e->d_name)) continue;
+        snprintf(names[nn], 256, "%s", e->d_name);
+        nn++;
+    }
+    closedir(d);
+    for (int i = 1; i < nn; i++) { // insertion sort, best title match first
+        char cur[256];
+        snprintf(cur, sizeof cur, "%s", names[i]);
+        int cs = title_score(cur, title);
+        int j = i - 1;
+        while (j >= 0 && title_score(names[j], title) < cs) {
+            snprintf(names[j + 1], 256, "%s", names[j]);
+            j--;
+        }
+        snprintf(names[j + 1], 256, "%s", cur);
+    }
+    for (int i = 0; i < nn && *n < max; i++) {
+        char *full = malloc(strlen(dir) + strlen(names[i]) + 2);
+        if (!full) break;
+        sprintf(full, "%s/%s", dir, names[i]);
+        tas[(*n)++] = full;
+        fprintf(stderr, "deepeel: --tas-dir: movie %s\n", full);
+    }
+    free(names);
+}
+
 static void report_lanes(const DpPlay *p, const DpResults *res, DpBuf *out);
 
 static int write_file(const char *path, const DpBuf *b) {
@@ -114,7 +201,11 @@ static void closure_rounds(DpExplorer *ex, DpResults *res);
 
 static int cmd_explore(int argc, char **argv) {
     const char *json = NULL, *text = NULL, *cov = NULL, *romdata = NULL, *map = NULL, *html = NULL, *path = NULL;
-    const char *from_png = NULL, *export_dir = NULL;
+    const char *from_png = NULL, *export_dir = NULL, *summary = NULL;
+    const char *tas_dirs[8];
+    int tas_dirs_n = 0;
+    const char *stop_txt = "explore-only";
+    unsigned long long play_frames = 0;
     int watch = 0, gui = 0, play = 0, human = 0, human_slot = -1, export_slot = -1, png_slot = -1;
     DpConfig cfg;
     dp_config_defaults(&cfg);
@@ -127,6 +218,7 @@ static int cmd_explore(int argc, char **argv) {
         const char *a = argv[i];
         if (!strcmp(a, "--json") && i + 1 < argc) json = argv[++i];
         else if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
+        else if (!strcmp(a, "--summary") && i + 1 < argc) summary = argv[++i];
         else if (!strcmp(a, "--cov") && i + 1 < argc) cov = argv[++i];
         else if (!strcmp(a, "--romdata") && i + 1 < argc) romdata = argv[++i];
         else if (!strcmp(a, "--map") && i + 1 < argc) map = argv[++i];
@@ -142,7 +234,14 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--max-paths") && i + 1 < argc) cfg.max_paths = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--max-total") && i + 1 < argc) cfg.max_steps_total = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--queue") && i + 1 < argc) cfg.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--queue-max") && i + 1 < argc) cfg.queue_max = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--loop-cap") && i + 1 < argc) cfg.loop_back_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--mem-cap") && i + 1 < argc) {
+            // one wall for both consumers: the play sessions and the queue growth
+            scfg.mem_cap_mb = strtoull(argv[++i], NULL, 0);
+            cfg.mem_cap_mb = scfg.mem_cap_mb;
+        }
+        else if (!strcmp(a, "--time-limit") && i + 1 < argc) scfg.time_limit_secs = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed-cap") && i + 1 < argc) cfg.seed_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed-banks")) cfg.seed_banks = 1;
         else if (!strcmp(a, "--no-pointer-scan")) cfg.no_pointer_scan = 1;
@@ -175,6 +274,7 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--resume")) scfg.resume = 1;
         else if (!strcmp(a, "--input") && i + 1 < argc && scfg.inputs_n < 8) scfg.inputs[scfg.inputs_n++] = argv[++i];
         else if (!strcmp(a, "--tas") && i + 1 < argc && scfg.tas_n < 8) scfg.tas[scfg.tas_n++] = argv[++i];
+        else if (!strcmp(a, "--tas-dir") && i + 1 < argc && tas_dirs_n < 8) tas_dirs[tas_dirs_n++] = argv[++i];
         else if (!strcmp(a, "--tas-ckpt") && i + 1 < argc) scfg.tas_ckpt_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--tas-ckpt-secs") && i + 1 < argc) scfg.tas_ckpt_secs = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--tas-ckpt-max") && i + 1 < argc) scfg.tas_ckpt_max = atoi(argv[++i]);
@@ -208,6 +308,9 @@ static int cmd_explore(int argc, char **argv) {
         return 1;
     }
     const DpPlatform *plat = dp_platform_gb();
+    // the discovered movies join the explicit --tas ones (the worker list caps at 8)
+    for (int i = 0; i < tas_dirs_n; i++)
+        tas_collect_dir(tas_dirs[i], cart->title, scfg.tas, &scfg.tas_n, 8);
     DpResults res;
     dp_results_init(&res, cart, plat);
     dp_static_scan(&res);
@@ -259,12 +362,14 @@ static int cmd_explore(int argc, char **argv) {
         int reason = dp_play_run(play_engine);
         dp_watch_stop();
         double secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
-        static const char *why[6] = { "frame budget reached", "stagnation wall reached",
+        static const char *why[7] = { "frame budget reached", "stagnation wall reached",
                                       "interrupted", "every byte explained", "memory cap reached",
-                                      "TAS replay done" };
+                                      "TAS replay done", "time budget reached" };
         fprintf(stderr, "deepeel: play done after %llu frames (%s), %.2fs\n",
                 (unsigned long long)dp_play_frames(play_engine),
-                reason >= 0 && reason < 6 ? why[reason] : "?", secs);
+                reason >= 0 && reason < 7 ? why[reason] : "?", secs);
+        stop_txt = reason >= 0 && reason < 7 ? why[reason] : "?";
+        play_frames = dp_play_frames(play_engine);
         if (scfg.tas_n) {
             if (scfg.tas_ckpt_live)
                 fprintf(stderr, "deepeel: %llu TAS gameplay states handed to the fork explorer\n",
@@ -408,6 +513,13 @@ static int cmd_explore(int argc, char **argv) {
         dp_buf_init(&out);
         dp_report_text(&res, &cfg, &out);
         if (!write_file(text, &out)) rc = 1;
+        dp_buf_free(&out);
+    }
+    if (summary) {
+        DpBuf out;
+        dp_buf_init(&out);
+        dp_report_summary(&res, &cfg, &tree, stop_txt, play_frames, scfg.tas_n, &out);
+        if (!write_file(summary, &out)) rc = 1;
         dp_buf_free(&out);
     }
     if (cov) {
