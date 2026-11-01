@@ -4,6 +4,7 @@
 // labelled so). Numbers are tool observations, not hardware measurements.
 #include "report.h"
 #include "core/snapshot_png.h"
+#include "../gui/font5x7.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -195,10 +196,43 @@ static const uint8_t map_rgb[DP_MAP_COUNT][3] = {
     { 0xa0, 0xa0, 0xa0 }, // inferred-padding
 };
 
+// draws a 5x7 glyph string scaled by `scale` (8-bit style small font,
+// dp_font5x7, ASCII 0x20-0x7E, column-major)
+static void legend_text(uint8_t *rgb, int w, int h, int x, int y, const char *str,
+                        const uint8_t *col, int scale) {
+    for (; *str; str++, x += 6 * scale) {
+        unsigned ch = (unsigned char)*str;
+        if (ch < 0x20 || ch > 0x7e) ch = '?';
+        const uint8_t *g = dp_font5x7[ch - 0x20];
+        for (int cx = 0; cx < 5; cx++)
+            for (int cy = 0; cy < 7; cy++) {
+                if (!(g[cx] & (1u << cy))) continue;
+                for (int dy = 0; dy < scale; dy++)
+                    for (int dx = 0; dx < scale; dx++) {
+                        int px = x + cx * scale + dx, py = y + cy * scale + dy;
+                        if (px < 0 || px >= w || py < 0 || py >= h) continue;
+                        size_t off = ((size_t)py * w + px) * 3;
+                        rgb[off] = col[0]; rgb[off + 1] = col[1]; rgb[off + 2] = col[2];
+                    }
+            }
+    }
+}
+
+// largest font scale whose text still fits the image width
+static int fit_scale(const char *str, int w, int x, int scale) {
+    while (scale > 1 && x + (int)strlen(str) * 6 * scale > w) scale--;
+    return scale;
+}
+
 // One SQ x SQ square per 64 ROM bytes (dominant class), 16x16 squares per bank,
 // banks laid out in rows of up to 8. The full .map text rides in the PNG.
+// Under the grid, a legend band: rom name + coverage, then one line per class
+// present in its own colour (ASCII font — no accents).
 int dp_report_map_png(const DpResults *res, const char *path) {
     enum { SQ = 6, GRID = 16, BANK_PX = SQ * GRID, GAP = 6, PER_ROW = 8 };
+    static const char *fr[DP_MAP_COUNT] = { "inconnu", "code naturel", "code force",
+        "code statique", "data copiee", "data lue", "table", "padding",
+        "data inferee", "code infere", "padding infere" };
     DpMapSummary s;
     uint8_t *m = dp_map_build(res, &s);
     if (!m) return 0;
@@ -207,7 +241,18 @@ int dp_report_map_png(const DpResults *res, const char *path) {
     int rows = (banks + PER_ROW - 1) / PER_ROW;
     if (cols < 1) cols = 1;
     if (rows < 1) rows = 1;
-    int w = GAP + cols * (BANK_PX + GAP), h = GAP + rows * (BANK_PX + GAP);
+    // legend band sizing: one title line + one line per class present
+    int order[DP_MAP_COUNT], ncls = 0;
+    for (int c = 0; c < DP_MAP_COUNT; c++)
+        if (s.cls[c]) order[ncls++] = c;
+    for (int i = 1; i < ncls; i++) { // insertion sort, largest share first
+        int cur = order[i], j = i - 1;
+        while (j >= 0 && s.cls[order[j]] < s.cls[cur]) { order[j + 1] = order[j]; j--; }
+        order[j + 1] = cur;
+    }
+    enum { LH = 18, FSCALE = 2 };
+    int grid_h = GAP + rows * (BANK_PX + GAP);
+    int w = GAP + cols * (BANK_PX + GAP), h = grid_h + GAP + (1 + ncls) * LH + GAP;
     uint8_t *rgb = malloc((size_t)w * h * 3);
     if (!rgb) { free(m); return 0; }
     for (size_t i = 0; i < (size_t)w * h; i++) { rgb[i * 3] = 0x18; rgb[i * 3 + 1] = 0x18; rgb[i * 3 + 2] = 0x1c; }
@@ -227,6 +272,30 @@ int dp_report_map_png(const DpResults *res, const char *path) {
         }
     }
     free(m);
+    // the legend itself
+    double pct = s.total ? 100.0 / (double)s.total : 0.0;
+    char title[17];
+    const char *ti = res->cart && res->cart->title[0] ? res->cart->title : "?";
+    int tl = 0;
+    for (; *ti && tl < 16; ti++)
+        if (*ti == '?') break; // cart titles are zero-padded with '?' in places
+        else if ((unsigned char)*ti >= 0x20 && (unsigned char)*ti < 0x7f) title[tl++] = *ti;
+    title[tl] = 0;
+    char head[96];
+    snprintf(head, sizeof head, "%s - connu %.1f%%", title[0] ? title : "?", s.known * pct);
+    int y = grid_h + GAP;
+    legend_text(rgb, w, h, GAP, y, head, (const uint8_t *)"\xe0\xe0\xe0",
+                fit_scale(head, w, GAP, FSCALE));
+    y += LH;
+    for (int i = 0; i < ncls; i++) {
+        int c = order[i];
+        char line[64];
+        double p = s.cls[c] * pct;
+        if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[c]);
+        else snprintf(line, sizeof line, "%s %.1f%%", fr[c], p);
+        legend_text(rgb, w, h, GAP + 4, y, line, map_rgb[c], fit_scale(line, w, GAP + 4, FSCALE));
+        y += LH;
+    }
     DpBuf txt;
     dp_buf_init(&txt);
     dp_report_map(res, &txt);

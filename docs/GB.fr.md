@@ -312,7 +312,9 @@ code / data / padding.
   fin incluse, adresses vues du CPU) ; `--map x.map.png` écrit une image
   (un carré par 64 octets, 16×16 par banque, rouge = inconnu, bleus = code,
   verts = data, ocre = table, gris = padding) qui **embarque le `.map`
-  complet** (chunk tEXt `deepeel_map`, comme une cartouche PICO-8).
+  complet** (chunk tEXt `deepeel_map`, comme une cartouche PICO-8) et, sous
+  la grille, une légende dessinée : nom de la ROM, couverture globale, puis
+  chaque classe présente dans sa couleur avec sa part (police 8-bit 5×7).
   `deepeel mapx x.map.png x.map` extrait le `.map` à l'identique.
 - `--html f` : page web autonome (carrés par banque, légende, tableau des
   classes, journal de découverte : temps, source, crédit, octets connus).
