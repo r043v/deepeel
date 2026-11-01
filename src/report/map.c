@@ -543,10 +543,8 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     snprintf(info_a, sizeof info_a, "%s - %s - %s", sysname ? sysname : "?",
              filename && filename[0] ? filename : "?", size_txt);
     int head_LH = 7 * FSCALE + 4;
-    int ann_LH = 11; // the "square = 64 o" annotation line, right-aligned
-    int foot_LH = 11; // the deepeel signature, bottom right
-    int h = grid_h + GAP + ann_LH + GAP + head_LH + GAP + (7 + 4) + GAP + half * LH +
-            GAP + foot_LH;
+    int foot_LH = 11; // the 64-o square note + deepeel signature, bottom right
+    int h = grid_h + GAP + head_LH + GAP + (7 + 4) + GAP + half * LH + GAP + foot_LH;
     uint8_t *rgb = malloc((size_t)w * h * 3);
     if (!rgb) { free(m); return 0; }
     for (size_t i = 0; i < (size_t)w * h; i++) { rgb[i * 3] = 0x18; rgb[i * 3 + 1] = 0x18; rgb[i * 3 + 2] = 0x1c; }
@@ -565,29 +563,13 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
                 }
         }
     }
-    // the legend itself: the 64-octet square annotation under the grid (right),
-    // the rom name, the identity line, the classes in two columns, then the
-    // signature bottom right
-    // the annotation: a real grid-sized square (one cell = 64 ROM bytes),
-    // drawn, not written — "64 o" beside it, the whole right-aligned
+    // the legend itself: rom name, identity line, the classes in two columns,
+    // then the bottom-right note — a real grid-sized square (one cell = 64
+    // ROM bytes), "64 o", a slash and the deepeel signature, one small line
     int y = grid_h + GAP;
-    {
-        const char *ann = "64 o";
-        const uint8_t *col = (const uint8_t *)"\x90\x90\x98";
-        int tw = legend_text_width(ann, 1);
-        int side = 5, gap = 3; // a grid cell is SQ-1 = 5 px of color
-        int x0 = w - GAP - (side + gap + tw);
-        for (int yy = 0; yy < side; yy++)
-            for (int xx = 0; xx < side; xx++) {
-                size_t off = ((size_t)(y + yy) * w + x0 + xx) * 3;
-                rgb[off] = col[0]; rgb[off + 1] = col[1]; rgb[off + 2] = col[2];
-            }
-        legend_text(rgb, w, h, x0 + side + gap, y, ann, col, 1);
-    }
-    y += ann_LH + GAP;
     double pct = s->total ? 100.0 / (double)s->total : 0.0;
     char head[160];
-    snprintf(head, sizeof head, "%s - connu %.1f%%", title[0] ? title : "?", s->known * pct);
+    snprintf(head, sizeof head, "%s - %.1f%%", title[0] ? title : "?", s->known * pct);
     int head_scale = fit_scale(head, w, GAP, FSCALE);
     legend_text(rgb, w, h, GAP, y, head, (const uint8_t *)"\xe0\xe0\xe0", head_scale);
     y += head_LH + GAP;
@@ -612,12 +594,26 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
             legend_entry(rgb, w, h, ry, line, map_rgb[c], rs, ravail, w - GAP);
         }
     }
-    // the signature, bottom right
+    // the bottom-right note, left to right: square, "64 o", "/", signature
     {
-        char sig[32];
+        char sig[40];
         snprintf(sig, sizeof sig, "deepeel %s", DEEPEEL_VERSION);
-        legend_text(rgb, w, h, w - GAP - legend_text_width(sig, 1), y + half * LH + GAP,
-                    sig, (const uint8_t *)"\x70\x70\x78", 1);
+        const uint8_t *col = (const uint8_t *)"\x70\x70\x78";
+        int side = 5, gap = 3; // a grid cell is SQ-1 = 5 px of color
+        int total = side + gap + legend_text_width("64 o", 1) + 4 +
+                    legend_text_width("/", 1) + 4 + legend_text_width(sig, 1);
+        int x = w - GAP - total, fy = y + half * LH + GAP;
+        for (int yy = 0; yy < side; yy++)
+            for (int xx = 0; xx < side; xx++) {
+                size_t off = ((size_t)(fy + yy) * w + x + xx) * 3;
+                rgb[off] = col[0]; rgb[off + 1] = col[1]; rgb[off + 2] = col[2];
+            }
+        x += side + gap;
+        legend_text(rgb, w, h, x, fy, "64 o", col, 1);
+        x += legend_text_width("64 o", 1) + 4;
+        legend_text(rgb, w, h, x, fy, "/", col, 1);
+        x += legend_text_width("/", 1) + 4;
+        legend_text(rgb, w, h, x, fy, sig, col, 1);
     }
     int ok = dp_png_save_text2(path, w, h, rgb, "deepeel_map", map_text, map_len,
                                "deepeel_meta", meta, strlen(meta));
