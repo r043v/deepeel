@@ -16,8 +16,8 @@ static void run(const char *system,DpSegaOptions o) {
     CHECK(!result.provenance_mismatches);
     CHECK(result.input_forks==result.input_count+result.input_log_overflow);
     CHECK(result.input_drops==result.input_queue_cuts+result.input_path_cuts);
-    CHECK(result.steps==result.phase_steps[0]+result.phase_steps[1]);
-    CHECK(result.paths==result.phase_paths[0]+result.phase_paths[1]);
+    CHECK(result.steps==result.phase_steps[0]+result.phase_steps[1]+result.phase_steps[2]);
+    CHECK(result.paths==result.phase_paths[0]+result.phase_paths[1]+result.phase_paths[2]);
     for(unsigned p=0;p<2;p++) {
         CHECK(result.phase_steps[p]<=result.phase_limits[p]);
         CHECK(result.phase_paths[p]<=o.max_paths);

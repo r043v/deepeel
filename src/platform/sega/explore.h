@@ -38,6 +38,7 @@ typedef struct {
 typedef struct {
     uint64_t max_total;
     uint64_t input_total;
+    uint64_t indirect_total; // second pass seeding observed jp (hl) targets
     uint32_t max_steps,max_paths,queue_cap,loop_cap,fork_cap,stagnation,copy_cap,input_masks,input_sites;
     int target_closure,block_closure;
     int seed_vectors;
@@ -110,6 +111,9 @@ typedef struct {
     uint64_t queue_growths,spool_writes,spool_reads,spool_refused,spool_flushed;
     DpSegaTreeNode *tree_nodes;
     uint32_t tree_count,tree_capacity;
+    // observed indirect jumps and their seeding pass (GB dp_seed_indirect)
+    uint64_t indirect_sites,indirect_targets,indirect_site_overflow,indirect_target_overflow;
+    uint64_t indirect_seeds,indirect_refused_budget,indirect_pending;
     size_t loop_context_peak,loop_context_capacity;
     uint64_t loop_context_growths;
     uint64_t io_read[256],io_write[256],bank_changes,bank_log_overflow;
@@ -119,7 +123,7 @@ typedef struct {
     uint64_t input_forks,input_cap_cuts,input_drops,input_site_drops,input_log_overflow;
     uint64_t input_queue_cuts,input_path_cuts;
     uint64_t input_retry_skips;
-    uint64_t phase_steps[2],phase_paths[2],phase_pending[2],phase_limits[2],phase_known[2];
+    uint64_t phase_steps[3],phase_paths[3],phase_pending[3],phase_limits[3],phase_known[3];
     uint32_t input_site_count,input_site_capacity,input_mask_limit;
     struct {
         uint64_t parent_path,step;

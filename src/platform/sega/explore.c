@@ -21,6 +21,8 @@ typedef struct { void *state; uint8_t *cart; Origins *origins; int forced,skip_i
 // refuses any view where rom_index(pc) is not bank*0x4000+(pc&0x3FFF); exact=0
 // keeps the boot view untouched.
 typedef struct { uint16_t pc; uint16_t bank; uint8_t exact,kind; } SeedSpec;
+// observed indirect jump site: up to 8 distinct physical targets
+typedef struct { uint32_t site; uint8_t n,overflow; uint32_t target[8]; uint32_t hits; } DpSegaIndirectRec;
 static uint64_t fnv1a(uint64_t h,const void *p,size_t n) {
     const uint8_t *b=p;
     for(size_t i=0;i<n;i++) { h^=b[i]; h*=1099511628211ull; }
@@ -76,7 +78,33 @@ typedef struct {
     DpSegaSection *cur_sec;        // section of the instruction being executed
     size_t prev_at;                // last instruction's final physical byte
     int irq_flag,boot_path;        // applied at the next section touch
+    // observed indirect jump sites: physical site -> distinct targets
+    DpSegaIndirectRec *indirect;
+    size_t indirect_hash;
 } Run;
+
+// observed indirect targets without execution evidence seed a further pass
+// (GB dp_seed_indirect parity); every cap hit is counted, never silent
+static void record_indirect(Run *x,size_t at,uint16_t target) {
+    DpSegaResults *r=x->r;
+    if(!x->indirect_hash) return;
+    size_t bucket=(at*2654435761u)&(x->indirect_hash-1);
+    for(size_t probe=0;probe<x->indirect_hash;probe++,bucket=(bucket+1)&(x->indirect_hash-1)) {
+        DpSegaIndirectRec *rec=&x->indirect[bucket];
+        if(rec->site!=at) {
+            if(rec->site) continue;
+            rec->site=(uint32_t)at;
+        }
+        rec->hits++;
+        int64_t index=x->b->rom_index(target);
+        if(index<0 || (uint64_t)index>=r->size) break; // target outside the ROM
+        for(unsigned i=0;i<rec->n;i++) if(rec->target[i]==(uint32_t)index) return;
+        if(rec->n<8) { rec->target[rec->n++]=(uint32_t)index; r->indirect_targets++; }
+        else { rec->overflow=1; r->indirect_target_overflow++; }
+        return;
+    }
+    x->r->indirect_site_overflow++;
+}
 static DpZ80Origin origin_read(void *user,uint16_t a) {
     Run *x=user;
     int64_t i=x->b->rom_index(a);
@@ -722,12 +750,35 @@ static int fork_inputs(Run *x,const z80_decoded_t *d,size_t at,int skip_irq) {
 }
 DpSegaOptions dp_sega_options(void) {
     // Boot code often runs nested 16-bit delay loops before touching the VDP.
-    DpSegaOptions o={.max_total=20000000,.input_total=20000000,.max_steps=2000000,.max_paths=4096,.queue_cap=128,
+    DpSegaOptions o={.max_total=20000000,.input_total=20000000,.indirect_total=20000000,.max_steps=2000000,.max_paths=4096,.queue_cap=128,
         .loop_cap=262144,.fork_cap=2,.stagnation=32768,.copy_cap=DP_SEGA_COPY_CAP,
         .input_masks=8,.input_sites=4096,.seed_vectors=1,.seed_cap=1024,.queue_max=4096,.target_closure=1,.block_closure=1,.msx_mapper=DP_MSX_AUTO,.closure={262144,65536,256,8}}; return o;
 }
 DpSegaOptions dp_msx_options(void) {
     DpSegaOptions o=dp_sega_options(); o.seed_vectors=0; return o;
+}
+// GB dp_seed_indirect parity: every jp (hl)/(ix)/(iy) target observed at
+// runtime without execution evidence seeds a further pass; the phase's
+// budget refuses the remainder, counted, never silent.
+static void generate_indirect_specs(Run *x) {
+    DpSegaResults *r=x->r;
+    DpSegaSeedGeometry g;
+    int banked=x->b->seed_geometry && x->b->seed_geometry(&g) && g.banks;
+    DpHashSet seen; dp_set_init(&seen,1024);
+    for(size_t i=0;i<x->indirect_hash;i++) {
+        const DpSegaIndirectRec *rec=&x->indirect[i];
+        if(!rec->site) continue;
+        for(unsigned t=0;t<rec->n;t++) {
+            uint32_t target=rec->target[t];
+            if(r->flags[target]&(DP_SEGA_NATURAL|DP_SEGA_FORCED)) continue;
+            if(x->seed_count>=x->seed_capacity || r->indirect_seeds>=8192) { r->indirect_refused_budget++; continue; }
+            if(dp_set_insert(&seen,target)!=1) continue;
+            uint16_t pc=target<0x4000?(uint16_t)target:(uint16_t)(0x4000u|(target&0x3fff));
+            x->seeds[x->seed_count++]=(SeedSpec){pc,(uint16_t)(target>>14),(uint8_t)!!banked,DP_SEGA_TREE_POINTER};
+            r->indirect_seeds++;
+        }
+    }
+    dp_set_free(&seen);
 }
 // Pointer-table scan, bank sweep and explicit entries (GB dp_seed_gb parity).
 // A ROM word pointing into cartridge space seeds its target; a word flanked by
@@ -824,6 +875,8 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
             if(!duplicate) x.input_catalog[count++]=(uint8_t)mask;
         }
     }
+    x.indirect_hash=8192;
+    x.indirect=calloc(x.indirect_hash,sizeof(*x.indirect));
     x.origin_size=sizeof(Origins)+x.b->ram_tags*sizeof(DpZ80Origin);
     x.image=image; x.origins=calloc(1,x.origin_size);
     x.copy_hash_size=1;
@@ -840,7 +893,7 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
     x.queue=calloc(o->queue_cap,sizeof(*x.queue));
     x.input_queue=calloc(o->queue_cap,sizeof(*x.input_queue));
     int ok=image&&r->flags&&r->copies&&x.origins&&x.copy_hash&&x.cart&&x.forks&&x.sides&&x.irq_forks&&x.queue&&x.input_queue&&
-        r->section_of&&r->sections&&
+        r->section_of&&r->sections&&x.indirect&&
         (!o->input_masks || !o->input_total || (x.input_sites&&x.input_scratch));
     if(!ok) goto cleanup;
     memset(image,0xff,padded); memcpy(image,rom,size);
@@ -874,8 +927,8 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
     }
     // Seed base: the reset state every seed starts from. Generation reads the
     // boot view through rom_index while the machine has not run yet.
-    if(o->seed_cap || o->entry_count || o->seed_banks) {
-        x.seed_capacity=o->seed_cap+o->entry_count+3*256;
+    if(o->seed_cap || o->entry_count || o->seed_banks || o->indirect_total) {
+        x.seed_capacity=o->seed_cap+o->entry_count+3*256+8192;
         x.seeds=malloc((size_t)x.seed_capacity*sizeof(*x.seeds));
         x.seed_state=malloc(x.b->state_size); x.seed_scratch=malloc(x.b->state_size);
         x.seed_cart=malloc(0x8000); x.seed_scratch_cart=malloc(0x8000);
@@ -900,22 +953,30 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
     }
     // FIFO root first, then depth-first forks: seed creation above is reversed once.
     for(uint32_t i=0;i<x.queued/2;i++) { Path p=x.queue[i]; x.queue[i]=x.queue[x.queued-i-1]; x.queue[x.queued-i-1]=p; }
-    for(unsigned phase=0;phase<2;phase++) {
+    r->phase_limits[2]=o->indirect_total;
+    for(unsigned phase=0;phase<3;phase++) {
         x.phase=phase;
         uint64_t start_steps=r->steps,start_paths=r->paths,budget=r->phase_limits[phase];
+        if(phase==2 && budget) generate_indirect_specs(&x);
         if(phase && budget) { memset(x.forks,0,sites); memset(x.sides,0,sites); memset(x.irq_forks,0,sites); }
-        while((x.queued || (phase && x.input_queued) || (!phase && x.seed_next<x.seed_count) ||
-               x.spool_rd<x.spool_wr) && r->steps-start_steps<budget) {
+        while((x.queued || (phase && x.input_queued) ||
+               (phase!=1 && x.seed_next<x.seed_count) ||
+               (!phase && x.spool_rd<x.spool_wr)) && r->steps-start_steps<budget) {
             // Seeds materialize below the pending frontier while the base
             // phase has room: forks keep popping first, reset and vectors run
             // ahead of every seed, and leftovers close as counted pending work.
-            if(!phase) while(x.seed_next<x.seed_count && x.queued<x.opt->queue_cap) {
+            // The indirect pass is phase 2: its specs were generated from the
+            // observations of the passes before it.
+            if(phase!=1) while(x.seed_next<x.seed_count && x.queued<x.opt->queue_cap) {
                 if(materialize_seed(&x)<0) { ok=0; goto cleanup; }
             }
             // Keep input seeds and their branch children moving in turn. Their
             // separate frontier never displaces the original exploration pass.
             // spooled states come back while the frontier runs low
-            while(x.queued<x.queue_capacity && x.spool_rd<x.spool_wr) {
+            // spooled states come back while the base frontier runs low;
+            // a later phase leaves them to --resume rather than re-funding
+            // the exhausted pass with its own budget
+            while(!phase && x.queued<x.queue_capacity && x.spool_rd<x.spool_wr) {
                 uint64_t hdr[4];
                 if(fseek(x.spool,(long)x.spool_rd,SEEK_SET) ||
                    fread(hdr,sizeof hdr,1,x.spool)!=1 || hdr[0]!=DP_SPOOL_MAGIC) break;
@@ -1018,7 +1079,9 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
                             } else r->fork_cuts++;
                         }
                     }
-                    if(fork_inputs(&x,&d,at,service_suppressed)<0) { ok=0; goto cleanup; }
+                    // input probes belong to their dedicated pass; the
+                    // indirect phase never opens a second input frontier
+                    if(phase!=2 && fork_inputs(&x,&d,at,service_suppressed)<0) { ok=0; goto cleanup; }
                     int outside=0;
                     for(unsigned j=0;j<d.length;j++) {
                         int64_t index=x.b->rom_index((uint16_t)(c->pc+j));
@@ -1032,6 +1095,7 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
                     dp_sega_closure_observe(x.closure);
                     dp_z80_provenance_begin(&x.origins->cpu,c,&d,origin_read,&x);
                     cycles=z80_execute_decoded(c,&d); z80_finish(c,cycles);
+                    if(in.flow==DP_Z80_INDIRECT) record_indirect(&x,at,c->pc);
                 }
                 r->steps++; x.b->advance(cycles);
                 quiet=x.discoveries==before_discoveries?quiet+1:0;
@@ -1049,8 +1113,10 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
             x.cur_choice=0;
         }
         r->phase_steps[phase]=r->steps-start_steps; r->phase_paths[phase]=r->paths-start_paths;
-        if(!phase) r->seeds_pending=x.seed_count-x.seed_next;
-        r->phase_pending[phase]+=x.queued+(phase?x.input_queued:0)+(!phase?r->seeds_pending:0);
+        if(phase!=1) r->seeds_pending=x.seed_count-x.seed_next;
+        if(phase==2) r->indirect_pending=r->seeds_pending;
+        r->phase_pending[phase]+=x.queued+(phase==1?x.input_queued:0)+
+            (phase!=1?r->seeds_pending:0);
         r->global_cuts+=r->phase_pending[phase];
         for(size_t i=0;i<size;i++) r->phase_known[phase]+=!!r->flags[i];
         // A phase wall closes its pending branch work. Input seeds have their
@@ -1065,6 +1131,8 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
     }
     dp_sega_closure_run(x.closure);
     sections_finalize(r);
+    // distinct observed indirect sites, counted whatever the pass budgets did
+    for(size_t i=0;i<x.indirect_hash;i++) if(x.indirect[i].site) r->indirect_sites++;
     if(o->tree_path && r->tree_count) {
         FILE *t=fopen(o->tree_path,"wb");
         if(t) {
@@ -1095,6 +1163,7 @@ cleanup:
     free(x.copy_hash);
     free(x.input_sites); free(x.input_scratch);
     free(x.input_queue);
+    free(x.indirect);
     free(x.seeds); free(x.seed_state); free(x.seed_cart); free(x.seed_origins);
     free(x.seed_scratch); free(x.seed_scratch_cart); free(x.seed_scratch_origins);
     if(x.spool) fclose(x.spool);
@@ -1182,7 +1251,12 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
         const DpSegaRegisterWrite *e=&r->register_log[j];
         fprintf(out,"  VDP path %"PRIu64" step %"PRIu64" PC $%04X port $%04X R%u=$%02X %s %s\n",e->path,e->step,e->pc,e->port,e->reg,e->value,e->ignored?"ignored":"written",e->forced?"forced":"natural");
     }
-    fprintf(out,"phases: base %"PRIu64"/%"PRIu64" steps, %"PRIu64" paths, %"PRIu64" known, %"PRIu64" pending; inputs %"PRIu64"/%"PRIu64" steps, %"PRIu64" paths, %"PRIu64" known, %"PRIu64" pending\n",r->phase_steps[0],r->phase_limits[0],r->phase_paths[0],r->phase_known[0],r->phase_pending[0],r->phase_steps[1],r->phase_limits[1],r->phase_paths[1],r->phase_known[1],r->phase_pending[1]);
+    fprintf(out,"phases: base %"PRIu64"/%"PRIu64" steps, %"PRIu64" paths, %"PRIu64" known, %"PRIu64" pending; inputs %"PRIu64"/%"PRIu64" steps, %"PRIu64" paths, %"PRIu64" known, %"PRIu64" pending; indirect %"PRIu64"/%"PRIu64" steps, %"PRIu64" paths, %"PRIu64" known, %"PRIu64" pending\n",
+        r->phase_steps[0],r->phase_limits[0],r->phase_paths[0],r->phase_known[0],r->phase_pending[0],
+        r->phase_steps[1],r->phase_limits[1],r->phase_paths[1],r->phase_known[1],r->phase_pending[1],
+        r->phase_steps[2],r->phase_limits[2],r->phase_paths[2],r->phase_known[2],r->phase_pending[2]);
+    fprintf(out,"indirect jumps: sites %"PRIu64"; targets %"PRIu64"; seeded %"PRIu64"; refused budget %"PRIu64"; pending %"PRIu64"; site overflow %"PRIu64"; target overflow %"PRIu64"\n",
+        r->indirect_sites,r->indirect_targets,r->indirect_seeds,r->indirect_refused_budget,r->indirect_pending,r->indirect_site_overflow,r->indirect_target_overflow);
     fprintf(out,"cuts: steps %"PRIu64"; loop %"PRIu64"; fork %"PRIu64"; queue %"PRIu64"; paths %"PRIu64"; global-pending %"PRIu64"; decode %"PRIu64"; faults %"PRIu64"\n",r->step_cuts,r->loop_cuts,r->fork_cuts,r->queue_cuts,r->path_cuts,r->global_cuts,r->decode_cuts,r->faults);
     fprintf(out,"seeds: pointer %"PRIu64"; bank sweep %"PRIu64"; entries %"PRIu64"; admitted %"PRIu64"; skipped padding %"PRIu64"; refused view %"PRIu64", queue %"PRIu64", cap %"PRIu64"; pending %"PRIu64"\n",
         r->seeds_pointer,r->seeds_bank,r->seeds_entry,r->seeds_admitted,r->seeds_skipped_padding,r->seeds_refused_view,r->seeds_refused_queue,r->seeds_refused_cap,r->seeds_pending);
@@ -1240,10 +1314,10 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
         fprintf(out,"  port $%02X read %"PRIu64" (%s), write %"PRIu64" (%s)\n",p,r->io_read[p],rd?rd->name:"unmapped",r->io_write[p],wr?wr->name:"unmapped");
     }
     if(!strcmp(s->id,"msx")) {
-        fputs("Limits: partial simulated BIOS, zero RAM and fixed primary-slot profile; no real BIOS, expanded slots, RAM mapper, disk/tape or MSX2. No sessions yet. Context projection hashes registers, held input, mapper views and the pages/ports a section read; IN port values are not hashed. Static closure uses observed slot/bank views and stops at BIOS, RAM, unresolved indirect jumps and mapping barriers. Pure CPU/RAM and selected BIOS copies only; VRAM read-back and transformed data have no origin. RETURN is polled, never NMI. Forced reachability is speculative.\n",out);
+        fputs("Limits: partial simulated BIOS, zero RAM and fixed primary-slot profile; no real BIOS, expanded slots, RAM mapper, disk/tape or MSX2. No sessions yet. Context projection hashes registers, held input, mapper views and the pages/ports a section read; IN port values are not hashed. Static closure uses observed slot/bank views and stops at BIOS, RAM, indirect jumps its constants cannot prove and mapping barriers; targets observed at runtime are seeded in the indirect pass. Pure CPU/RAM and selected BIOS copies only; VRAM read-back and transformed data have no origin. RETURN is polled, never NMI. Forced reachability is speculative.\n",out);
         return;
     }
-    fprintf(out,"Limits: no sessions yet. Context projection hashes registers, held input, mapper views and the pages/ports a section read; IN port values are not hashed. Static closure uses observed ROM views and stops unresolved indirect jumps and mapper effects. Provenance covers pure CPU/RAM transfers, not transformed data or VRAM read-back. Power-on inputs released; input probes hold their selected state until another probe. SMS pads use export digital TR/TH levels; GG has one pad. Zero RAM; no BIOS; disabled console bus reads $FF, without revision-specific floating bus effects. Hardware registry may describe devices absent from the embedded runtime (FM, link, BIOS/card/expansion, peripheral variants). Forced reachability is speculative.\n");
+    fprintf(out,"Limits: no sessions yet. Context projection hashes registers, held input, mapper views and the pages/ports a section read; IN port values are not hashed. Static closure uses observed ROM views and stops indirect jumps its constants cannot prove and mapper effects; targets observed at runtime are seeded in the indirect pass. Provenance covers pure CPU/RAM transfers, not transformed data or VRAM read-back. Power-on inputs released; input probes hold their selected state until another probe. SMS pads use export digital TR/TH levels; GG has one pad. Zero RAM; no BIOS; disabled console bus reads $FF, without revision-specific floating bus effects. Hardware registry may describe devices absent from the embedded runtime (FM, link, BIOS/card/expansion, peripheral variants). Forced reachability is speculative.\n");
 }
 static int number(const char *s,uint64_t *n) {
     if(!*s||*s=='-') return 0;
@@ -1323,6 +1397,7 @@ int dp_sega_explore_command(int argc,char **argv) {
             else if(!strcmp(key,"--closure-views")) o.closure.views=(uint32_t)n;
             else if(!strcmp(key,"--closure-contexts")) o.closure.contexts=(uint32_t)n;
             else if(!strcmp(key,"--fork-cap") && n<=255) o.fork_cap=(uint32_t)n;
+            else if(!strcmp(key,"--indirect-total")) o.indirect_total=n;
             else if(!strcmp(key,"--queue-max")) { if(n>65536 || n<o.queue_cap) goto usage; o.queue_max=(uint32_t)n; }
             else if(!strcmp(key,"--spool-cap-mb") && n<=1048576) o.spool_cap_mb=(uint32_t)n;
             else goto usage;
@@ -1348,5 +1423,5 @@ int dp_sega_explore_command(int argc,char **argv) {
     }
     dp_sega_results_free(&r); return ok?0:1;
 usage:
-    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE]\n"); return 2;
+    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE]\n"); return 2;
 }
