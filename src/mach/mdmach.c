@@ -85,13 +85,42 @@ uint64_t dp_mdmach_run(DpMdMach *d, uint64_t max_steps, int *cut, int *fault) {
     while (!d->m->fault && d->steps < d->budget)
         md_full_frame(d->m, 0);
     if (cut) *cut = d->m->fault == DP_MD_FAULT_BUDGET || (!d->m->fault && d->steps >= d->budget);
-    if (fault) *fault = d->m->fault == DP_MD_FAULT_BUDGET ? 0 : d->m->fault;
+    if (fault) *fault = (d->m->fault == DP_MD_FAULT_BUDGET || d->m->fault == DP_MD_FAULT_HALT) ? 0 : d->m->fault;
     return d->steps;
 }
 
 uint32_t dp_mdmach_pc(const DpMdMach *d) { return d->m->pc; }
 
+size_t dp_mdmach_state_size(void) { return sizeof(MdFull); }
+void dp_mdmach_save(const DpMdMach *d, void *buf) { memcpy(buf, d->m, sizeof(MdFull)); }
+void dp_mdmach_load(DpMdMach *d, const void *buf) {
+    memcpy(d->m, buf, sizeof(MdFull));
+    md_full_cram_sync(d->m);
+}
+void dp_mdmach_state_set_pc(void *buf, uint32_t pc) { ((MdFull *)buf)->pc = pc; }
+void dp_mdmach_state_set_dn_word(void *buf, unsigned n, uint16_t w) {
+    MdFull *s = buf;
+    s->d[n & 7] = (s->d[n & 7] & 0xFFFF0000u) | w;
+}
+uint32_t dp_mdmach_state_pc(const void *buf) { return ((const MdFull *)buf)->pc; }
+void dp_mdmach_halt(DpMdMach *d) {
+    d->m->fault = DP_MD_FAULT_HALT;
+    d->m->slice_limit = 0;
+}
+uint16_t dp_mdmach_vdp_reg(const DpMdMach *d, unsigned r) { return d->m->vdp_reg[r % 24]; }
+uint16_t dp_mdmach_sr(const DpMdMach *d) { return d->m->sr; }
+uint32_t dp_mdmach_dn(const DpMdMach *d, unsigned n) { return d->m->d[n & 7]; }
+void dp_mdmach_set_pad(DpMdMach *d, uint8_t pad) { d->m->pad = pad; }
+
 uint32_t dp_mdmach_peek32(const DpMdMach *d, uint32_t a) {
     (void)d;
     return dp_mdrom_peek32(a);
 }
+
+void dp_mdmach_state_set_irq(void *buf, int vint, int hint) {
+    MdFull *s = buf;
+    if (vint) s->irq_pending = 1;
+    if (hint) s->hint_pending = 1;
+}
+int dp_mdmach_vdp_pending(const DpMdMach *d) { return d->m->vdp_pending; }
+uint16_t dp_mdmach_vdp_first(const DpMdMach *d) { return (uint16_t)d->m->vdp_first; }

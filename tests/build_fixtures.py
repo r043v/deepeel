@@ -308,7 +308,7 @@ def build(out):
 
 def md_rom(size=0x1000):
     r = bytearray(size)
-    r[0:4] = (0x00FF0000).to_bytes(4, "big")      # initial SSP
+    r[0:4] = (0x00FFFE00).to_bytes(4, "big")      # initial SSP
     r[4:8] = (0x200).to_bytes(4, "big")           # reset vector
     for i in range(2, 64):                        # every other vector: reset code
         r[i * 4:i * 4 + 4] = (0x200).to_bytes(4, "big")
@@ -336,6 +336,27 @@ def build_md(out):
     for i in range(0x20):
         r[0x400 + i] = i
     save_md(out, "fix_md_dma", r)
+
+    # --- fork: tst.w d0 / bne.s (not taken naturally) / both sides end in bra.s * -
+    r = md_rom()
+    r[0x200:0x20C] = bytes([0x4A, 0x40, 0x66, 0x04, 0x4E, 0x71, 0x60, 0xFE, 0x4E, 0x71, 0x60, 0xFE])
+    save_md(out, "fix_md_fork", r)
+    # --- dbcc: moveq #0,d0 / dbf d0,* / nop / bra.s * ---------------------------
+    r = md_rom()
+    r[0x200:0x20A] = bytes([0x70, 0x00, 0x51, 0xC8, 0xFF, 0xFE, 0x4E, 0x71, 0x60, 0xFE])
+    save_md(out, "fix_md_dbcc", r)
+    # --- loop: a single bra.s * (loop bound must report saturation) ------------
+    r = md_rom()
+    r[0x200:0x202] = bytes([0x60, 0xFE])
+    save_md(out, "fix_md_loop", r)
+    # --- vint: enable V-int (reg1 bit 5), vector 30 -> $300, main loop bra.s * --
+    r = md_rom()
+    r[30 * 4:30 * 4 + 4] = (0x300).to_bytes(4, "big")
+    r[0x200:0x208] = bytes([0x33, 0xFC, 0x81, 0x64, 0x00, 0xC0, 0x00, 0x04])
+    r[0x208:0x20C] = bytes([0x46, 0xFC, 0x20, 0x00])        # move #$2000,sr (unmask)
+    r[0x20C:0x20E] = bytes([0x60, 0xFE])
+    r[0x300:0x302] = bytes([0x4E, 0x73])                 # rte
+    save_md(out, "fix_md_vint", r)
 
 if __name__ == "__main__":
     build_md(sys.argv[1] if len(sys.argv) > 1 else ".")

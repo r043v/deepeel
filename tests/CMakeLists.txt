@@ -152,6 +152,11 @@ target_link_libraries(test_md PRIVATE deepeel_core m)
 add_dependencies(test_md fixtures)
 add_test(NAME md COMMAND test_md ${CMAKE_CURRENT_BINARY_DIR})
 
+add_executable(test_md_explore test_md_explore.c)
+target_link_libraries(test_md_explore PRIVATE deepeel_core m)
+add_dependencies(test_md_explore fixtures)
+add_test(NAME md_explore COMMAND test_md_explore ${CMAKE_CURRENT_BINARY_DIR})
+
 add_executable(test_export test_export.c)
 target_link_libraries(test_export PRIVATE deepeel_core m)
 add_test(NAME export COMMAND test_export)

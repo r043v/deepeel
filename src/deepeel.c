@@ -21,6 +21,9 @@
 #include "platform/sega/sega.h"
 #include "platform/msx/msx.h"
 #include "platform/sega/explore.h"
+#include "platform/md/explore.h"
+#include "platform/md/md_registry.h"
+#include "cpu/m68k/m68k.h"
 
 #include <dirent.h>
 #include <ctype.h>
@@ -33,7 +36,9 @@ static void usage(void) {
             "  deepeel explore rom.gb [options]\n"
             "  deepeel z80 explore <sg|sms|gg|msx> ROM [--input-total N] [--input-forks N] [--text FILE] [--map FILE] [--evidence FILE]\n"
             "  deepeel z80 dis ROM hex-offset [instruction-count]\n"
-            "  deepeel regs <gb|sg|sms|gg|msx>\n"
+            "  deepeel md explore ROM [--max-total N] [--path-steps N] [--queue N] [--fork-cap N] [--visit-cap N] [--text FILE] [--map FILE] [--evidence FILE]\n"
+            "  deepeel md dis ROM hex-offset [instruction-count]\n"
+            "  deepeel regs <gb|sg|sms|gg|msx|md>\n"
             "    --max-steps N        per-path step budget (default 100000)\n"
             "    --max-paths N        path cap (default 200000)\n"
             "    --max-total N        global step wall (default 20000000)\n"
@@ -216,6 +221,7 @@ static int write_file(const char *path, const DpBuf *b) {
 
 static void closure_rounds(DpExplorer *ex, DpResults *res, uint32_t *seed_spent, uint32_t seed_total);
 
+static int cmd_md(int argc, char **argv);
 static int cmd_explore(int argc, char **argv) {
     const char *json = NULL, *text = NULL, *cov = NULL, *romdata = NULL, *map = NULL, *html = NULL, *path = NULL;
     const char *from_png = NULL, *export_dir = NULL, *summary = NULL;
@@ -322,24 +328,23 @@ static int cmd_explore(int argc, char **argv) {
         return 2;
     }
     char err[256];
-    {   // Mega Drive ROMs take the linear-run path (milestone 1: no forks, no GUI)
+    {   // Mega Drive ROMs: alias of `deepeel md explore` (forking exploration)
         DpMdCart mc;
         if (dp_md_cart_load(&mc, path, err, sizeof err) == 0) {
-            DpMdTrace tr;
-            uint64_t budget = cfg.max_steps_total ? cfg.max_steps_total : 2000000;
-            if (dp_md_trace_run(&mc, budget, &tr) != 0) {
-                fprintf(stderr, "deepeel: md run failed\n");
-                dp_md_cart_free(&mc);
-                return 1;
-            }
-            FILE *o = text ? fopen(text, "w") : stdout;
-            if (o) {
-                dp_md_trace_report(&mc, &tr, o);
-                if (text) fclose(o);
-            }
-            dp_md_trace_free(&tr);
             dp_md_cart_free(&mc);
-            return 0;
+            char tot[32];
+            char *av[10] = {"deepeel", "md", "explore", (char *)path};
+            int n = 4;
+            if (cfg.max_steps_total) {
+                snprintf(tot, sizeof tot, "%llu", (unsigned long long)cfg.max_steps_total);
+                av[n++] = "--max-total";
+                av[n++] = tot;
+            }
+            if (text) {
+                av[n++] = "--text";
+                av[n++] = (char *)text;
+            }
+            return cmd_md(n, av);
         }
     }
     DpCart *cart = dp_cart_load(path, err, sizeof err);
@@ -854,7 +859,9 @@ static int cmd_map(int argc, char **argv) {
     return 0;
 }
 
+static void md_regs_print(void);
 static int cmd_regs(int argc, char **argv) {
+    if (argc >= 3 && !strcmp(argv[2], "md")) { md_regs_print(); return 0; }
     if(argc>=3 && !strcmp(argv[2],"msx")) { dp_msx_regs(stdout); return 0; }
     const DpSegaSystem *sega = argc >= 3 ? dp_sega_system(argv[2]) : NULL;
     if (sega) { dp_sega_regs(stdout, sega); return 0; }
@@ -957,8 +964,73 @@ static void closure_rounds(DpExplorer *ex, DpResults *res, uint32_t *seed_spent,
     dp_static_closure(res); // the last search may have opened more direct flow
 }
 
+static void md_regs_print(void) {
+    printf("megadrive register registry (%d entries):\n", dp_md_reg_count);
+    for (int i = 0; i < dp_md_reg_count; i++)
+        printf("  %06x-%06x  %-12s %s\n", dp_md_regs[i].lo, dp_md_regs[i].hi, dp_md_regs[i].name,
+               dp_md_regs[i].category);
+}
+
+static int cmd_md(int argc, char **argv) {
+    if (argc < 4) return usage(), 2;
+    char err[256];
+    DpMdCart c;
+    if (dp_md_cart_load(&c, argv[3], err, sizeof err)) {
+        fprintf(stderr, "deepeel: %s\n", err);
+        return 1;
+    }
+    int rc = 0;
+    if (!strcmp(argv[2], "dis")) {
+        if (argc < 5) { dp_md_cart_free(&c); return usage(), 2; }
+        uint32_t pc = (uint32_t)strtoul(argv[4], NULL, 16);
+        int n = argc > 5 ? atoi(argv[5]) : 16;
+        for (int i = 0; i < n && pc < c.size; i++) {
+            DpM68kInsn in;
+            unsigned len = dp_m68k_decode(c.rom + pc, c.size - pc, pc, &in);
+            printf("%06X  %s\n", pc, in.text);
+            pc += len ? len : 2;
+        }
+    } else if (!strcmp(argv[2], "explore")) {
+        DpMdOptions o;
+        dp_md_options_default(&o);
+        const char *text = NULL, *map = NULL, *ev = NULL;
+        for (int i = 4; i < argc; i++) {
+            const char *a = argv[i];
+            if (i + 1 >= argc) { fprintf(stderr, "deepeel: bad option %s\n", a); rc = 2; break; }
+            if (!strcmp(a, "--max-total")) o.max_total = strtoull(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--path-steps")) o.path_steps = strtoull(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--queue")) o.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--fork-cap")) o.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--visit-cap")) o.visit_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--text")) text = argv[++i];
+            else if (!strcmp(a, "--map")) map = argv[++i];
+            else if (!strcmp(a, "--evidence")) ev = argv[++i];
+            else { fprintf(stderr, "deepeel: unknown option %s\n", a); rc = 2; break; }
+        }
+        if (!rc) {
+            DpMdResults r;
+            if (dp_md_explore(&c, &o, &r)) {
+                fprintf(stderr, "deepeel: md explore failed\n");
+                rc = 1;
+            } else {
+                FILE *f = text ? fopen(text, "w") : stdout;
+                if (f) {
+                    dp_md_explore_report(&c, &o, &r, f);
+                    if (text) fclose(f);
+                }
+                if (map) dp_md_explore_map(&r, map);
+                if (ev) dp_md_explore_evidence(&r, ev);
+                dp_md_results_free(&r);
+            }
+        }
+    } else rc = (usage(), 2);
+    dp_md_cart_free(&c);
+    return rc;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) return usage(), 2;
+    if (!strcmp(argv[1], "md")) return cmd_md(argc, argv);
     if (!strcmp(argv[1], "z80") && argc > 2 && !strcmp(argv[2], "explore"))
         return dp_sega_explore_command(argc, argv);
     if (!strcmp(argv[1], "z80")) return dp_z80_command(argc, argv);
