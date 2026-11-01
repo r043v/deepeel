@@ -20,6 +20,13 @@ typedef struct { void *state; uint8_t *cart; Origins *origins; int forced,skip_i
 // refuses any view where rom_index(pc) is not bank*0x4000+(pc&0x3FFF); exact=0
 // keeps the boot view untouched.
 typedef struct { uint16_t pc; uint16_t bank; uint8_t exact; } SeedSpec;
+static uint64_t fnv1a(uint64_t h,const void *p,size_t n) {
+    const uint8_t *b=p;
+    for(size_t i=0;i<n;i++) { h^=b[i]; h*=1099511628211ull; }
+    return h;
+}
+static uint64_t fnv1a_u16(uint64_t h,uint16_t v) { return fnv1a(h,&v,sizeof v); }
+static uint64_t fnv1a_u32(uint64_t h,uint32_t v) { return fnv1a(h,&v,sizeof v); }
 enum { INPUT_PAD1, INPUT_PAD2, INPUT_START, INPUT_HALT_PAUSE, INPUT_PAD2_UD, INPUT_GROUP_COUNT };
 typedef struct { uint32_t key; uint8_t accepted,seen[16]; uint64_t blocked_epoch; } InputSite;
 typedef struct {
@@ -62,6 +69,9 @@ typedef struct {
     void *seed_scratch;            // running machine saved across materialization
     uint8_t *seed_scratch_cart;
     Origins *seed_scratch_origins;
+    DpSegaSection *cur_sec;        // section of the instruction being executed
+    size_t prev_at;                // last instruction's final physical byte
+    int irq_flag,boot_path;        // applied at the next section touch
 } Run;
 static DpZ80Origin origin_read(void *user,uint16_t a) {
     Run *x=user;
@@ -77,6 +87,8 @@ static DpZ80Origin valid_origin(Run *x,DpZ80Origin origin,uint8_t value) {
     }
     return origin;
 }
+static void section_live_ram(Run *x,int32_t ram);
+static void section_live_port(Run *x,uint16_t port);
 static uint8_t read_bus(void *user,uint16_t a) {
     Run *x=user; uint8_t v=x->b->read(a);
     int64_t index=x->b->rom_index(a);
@@ -84,6 +96,7 @@ static uint8_t read_bus(void *user,uint16_t a) {
         if(!(x->r->flags[index]&DP_SEGA_DATA)) x->discoveries++;
         x->r->flags[index]|=DP_SEGA_DATA; x->r->data_reads++;
     }
+    if(!x->fetching) section_live_ram(x,x->b->ram_index(a));
     if(x->bios_active && x->bios_id==15) x->bios_read=valid_origin(x,origin_read(x,a),v);
     return v;
 }
@@ -113,6 +126,7 @@ static void flush_copy(Run *x) {
         } else if(r->copy_count<r->copy_capacity) {
             x->copy_hash[bucket]=r->copy_count+1;
             r->copies[r->copy_count++]=*c;
+            if(x->cur_sec) x->cur_sec->copies++;
         } else r->copy_log_overflow+=c->length;
         x->has_pending_copy=0; return;
     }
@@ -238,8 +252,11 @@ static void msx_event(void *user,DpMsxEvent event) {
     }
 }
 static uint8_t in_bus(void *user,uint16_t p) {
-    Run *x=user; if(!x->r->io_read[p&255]) x->discoveries++;
-    x->r->io_read[p&255]++; return x->b->in(p);
+    Run *x=user;
+    if(!x->r->io_read[p&255]) x->discoveries++;
+    x->r->io_read[p&255]++;
+    if(!x->fetching) section_live_port(x,p);
+    return x->b->in(p);
 }
 static void out_bus(void *user,uint16_t p,uint8_t v) {
     Run *x=user;
@@ -367,6 +384,160 @@ static int materialize_seed(Run *x) {
     memcpy(x->cart,x->seed_scratch_cart,0x8000);
     memcpy(x->origins,x->seed_scratch_origins,x->origin_size);
     return accepted<0?-1:0;
+}
+// --- sections: executed runs, liveness, verdicts (GB parity) -------------------
+static void ctx_grew(Run *x,DpSegaSection *s) {
+    // the liveness mask grew: previously seen contexts may now differ
+    dp_set_free(&s->ctx_seen);
+    dp_set_init(&s->ctx_seen,4096);
+    x->r->ctx_grew++;
+}
+// creates or extends the section containing physical byte `at`; hi is the last
+// physical byte of the instruction. Returns the section (never NULL on success).
+static DpSegaSection *section_touch(Run *x,size_t at,size_t hi,int is_entry) {
+    DpSegaResults *r=x->r;
+    if(at>=r->size) return NULL;
+    uint32_t sid=r->section_of[at];
+    DpSegaSection *s;
+    uint8_t bank=(uint8_t)((uint64_t)at>>14);
+    uint16_t lo=(uint16_t)(at&0x3fff),hio=(uint16_t)(hi&0x3fff);
+    if(sid) {
+        s=&r->sections[sid-1];
+        if(s->bank==bank && (uint16_t)(s->hi+1)>=lo && hio>s->hi) s->hi=hio;
+    } else {
+        // sequential execution continues the current run within one bank
+        if(x->cur_sec && x->cur_sec->bank==bank && lo==(uint16_t)(x->cur_sec->hi+1)) {
+            s=x->cur_sec;
+            if(hio>s->hi) s->hi=hio;
+        } else {
+            if(r->section_count==r->section_capacity) {
+                if(r->section_capacity>=DP_SEGA_SECTION_CAP) { r->section_cuts++; return NULL; }
+                DpSegaSection *grown=realloc(r->sections,(size_t)r->section_capacity*2*sizeof(*grown));
+                if(!grown) { r->section_cuts++; return NULL; }
+                r->sections=grown; r->section_capacity*=2;
+            }
+            s=&r->sections[r->section_count];
+            memset(s,0,sizeof(*s));
+            s->id=r->section_count++;
+            s->bank=bank; s->lo=lo; s->hi=hio;
+            dp_set_init(&s->ctx_seen,4096);
+        }
+        r->section_of[at]=s->id+1;
+    }
+    s->hits++;
+    if(x->forced) s->forced_hits++; else s->natural_hits++;
+    if(is_entry) s->entries++;
+    s->kind_bits|=(uint8_t)(x->forced?DP_SEGA_FORCED:DP_SEGA_NATURAL);
+    if(x->boot_path && !x->forced) s->boot_hits++;
+    if(x->irq_flag) s->kind_bits|=DP_SEGA_IRQ;
+    x->irq_flag=0;
+    return s;
+}
+static void section_live_ram(Run *x,int32_t ram) {
+    DpSegaSection *s=x->cur_sec;
+    if(!s||ram<0) return;
+    size_t tag=(size_t)ram;
+    if(tag<x->b->wram_tags) { // 8 KiB WRAM window, 256 B pages
+        uint64_t bit=1ull<<(tag>>8);
+        if(!(s->page_mask_wram&bit)) { s->page_mask_wram|=bit; ctx_grew(x,s); }
+    } else { // cartridge RAM follows WRAM tags
+        unsigned page=(unsigned)(tag-x->b->wram_tags)>>8;
+        if(page<128 && !(s->page_mask_cart[page>>3]&(1u<<(page&7)))) {
+            s->page_mask_cart[page>>3]|=(uint8_t)(1u<<(page&7));
+            ctx_grew(x,s);
+        }
+    }
+}
+static void section_live_port(Run *x,uint16_t port) {
+    DpSegaSection *s=x->cur_sec;
+    if(!s) return;
+    uint8_t bit=(uint8_t)(1u<<(port&7));
+    if(!(s->io_read_live[(port&255)>>3]&bit)) {
+        s->io_read_live[(port&255)>>3]|=bit;
+        ctx_grew(x,s);
+    }
+}
+// context projection: hash of the incoming state components this section
+// reads (GB project_ctx parity). Registers, pending interrupt state and
+// mapper views always join; WRAM, cartridge RAM and IN ports only when the
+// section actually read them. Timing fields (R, cycles) never join.
+static uint64_t project_ctx(Run *x,const DpSegaSection *s) {
+    const z80_t *c=x->b->cpu();
+    uint64_t h=0xcbf29ce484222325ull;
+    h=fnv1a(h,&c->bc,sizeof c->bc);
+    h=fnv1a(h,&c->de,sizeof c->de);
+    h=fnv1a(h,&c->hl,sizeof c->hl);
+    h=fnv1a(h,&c->a,sizeof c->a);
+    h=fnv1a(h,&c->f,sizeof c->f);
+    h=fnv1a(h,&c->ix,sizeof c->ix);
+    h=fnv1a(h,&c->iy,sizeof c->iy);
+    h=fnv1a_u16(h,c->sp);
+    h=fnv1a(h,&c->i,sizeof c->i);
+    h=fnv1a(h,&c->im,sizeof c->im);
+    h=fnv1a(h,&c->iff1,sizeof c->iff1);
+    h=fnv1a(h,&c->iff2,sizeof c->iff2);
+    h=fnv1a(h,&c->halted,sizeof c->halted);
+    h=fnv1a(h,&c->irq,sizeof c->irq);
+    h=fnv1a(h,&c->nmi,sizeof c->nmi);
+    h=fnv1a(h,&c->irq_vector,sizeof c->irq_vector);
+    // held input state is context like the GB P1 register byte: input probes
+    // fork on exactly this difference and must not be evicted as duplicates
+    DpSegaInput held=x->b->input();
+    h=fnv1a(h,held.pad,sizeof held.pad);
+    h=fnv1a(h,&held.start,sizeof held.start);
+    h=fnv1a(h,&held.pause,sizeof held.pause);
+    h=fnv1a(h,&held.reset,sizeof held.reset);
+    // mapper/slot views through passive physical probes
+    for(unsigned i=0;i<sizeof(mapping_probe)/sizeof(mapping_probe[0]);i++)
+        h=fnv1a_u32(h,(uint32_t)x->b->rom_index(mapping_probe[i]));
+    if(x->msx) h=fnv1a_u32(h,dp_msx_info().slots);
+    h=fnv1a_u32(h,(uint32_t)x->b->ram_index(0xc000));
+    for(unsigned pg=0;pg<32;pg++)
+        if(s->page_mask_wram&(1ull<<pg))
+            for(unsigned o=0;o<256;o++) { uint8_t v=x->b->read((uint16_t)(0xc000+pg*256+o)); h=fnv1a(h,&v,1); }
+    for(unsigned pg=0;pg<128;pg++)
+        if(s->page_mask_cart[pg>>3]&(1u<<(pg&7))) h=fnv1a(h,x->cart+pg*256,256);
+    // IN port values are not hashed: reading arbitrary ports through the bus
+    // could touch devices; the port set itself still separates sections.
+    for(unsigned i=0;i<32;i++) h=fnv1a(h,&s->io_read_live[i],1);
+    return h;
+}
+// same-context eviction at path entry: a section whose incoming context was
+// already admitted is evicted (counted, never silent)
+static int context_admitted(Run *x,size_t at) {
+    if(x->opt->no_context_evict || at>=x->r->size) return 1;
+    DpSegaResults *r=x->r;
+    uint32_t sid=r->section_of[at];
+    DpSegaSection *s;
+    if(sid) {
+        s=&r->sections[sid-1];
+        if(s->bank!=(uint8_t)((uint64_t)at>>14) || (uint16_t)(at&0x3fff)>s->hi) sid=0;
+    }
+    if(sid) {
+        uint64_t h=project_ctx(x,s);
+        int ins=dp_set_insert(&s->ctx_seen,h);
+        if(ins==0) { r->evicted_ctx++; return 0; }
+        if(ins<0) { r->ctx_full++; return 1; }
+        s->ctx_count++;
+        return 1;
+    }
+    // new section: admit and create it below (its masks start empty)
+    s=section_touch(x,at,at,1);
+    if(!s) return 1;
+    uint64_t h=project_ctx(x,s);
+    int ins=dp_set_insert(&s->ctx_seen,h);
+    if(ins==0) { r->evicted_ctx++; return 0; }
+    if(ins<0) { r->ctx_full++; return 1; }
+    s->ctx_count++;
+    return 1;
+}
+static void sections_finalize(DpSegaResults *r) {
+    for(uint32_t i=0;i<r->section_count;i++) {
+        DpSegaSection *s=&r->sections[i];
+        if(s->boot_hits>0 || (s->kind_bits&DP_SEGA_IRQ) || s->copies>0)
+            s->verdict=DP_SEGA_VERDICT_REQUIRED;
+        else s->verdict=DP_SEGA_VERDICT_FORCED; // PLAYED needs sessions
+    }
 }
 static InputSite *input_site(Run *x,size_t at,unsigned group) {
     uint32_t key=(uint32_t)at*INPUT_GROUP_COUNT+group+1;
@@ -538,7 +709,11 @@ static void generate_seed_specs(Run *x,const uint8_t *image,size_t size) {
     }
     dp_set_free(&seen);
 }
-void dp_sega_results_free(DpSegaResults *r) { free(r->flags); free(r->copies); memset(r,0,sizeof(*r)); }
+void dp_sega_results_free(DpSegaResults *r) {
+    for(uint32_t i=0;i<r->section_count;i++) dp_set_free(&r->sections[i].ctx_seen);
+    free(r->sections); free(r->section_of);
+    free(r->flags); free(r->copies); memset(r,0,sizeof(*r));
+}
 int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *o,DpSegaResults *r) {
     if(!s||!rom||!size||!o||!r||!o->max_total||!o->max_steps||!o->max_paths||!o->queue_cap||!o->loop_cap||o->fork_cap>255) return 0;
     int sg=!strcmp(s->id,"sg"),msx=!strcmp(s->id,"msx");
@@ -577,12 +752,16 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
     while(x.copy_hash_size<(size_t)o->copy_cap*2) x.copy_hash_size*=2;
     x.copy_hash=calloc(x.copy_hash_size,sizeof(*x.copy_hash));
     r->flags=calloc(size,1); x.cart=calloc(0x8000,1);
+    r->section_of=calloc(size,sizeof(*r->section_of));
+    r->section_capacity=256;
+    r->sections=calloc(r->section_capacity,sizeof(*r->sections));
     r->copy_capacity=o->copy_cap;
     r->copies=calloc(o->copy_cap?o->copy_cap:1,sizeof(*r->copies));
     x.forks=calloc(sites,1); x.sides=calloc(sites,1); x.irq_forks=calloc(sites,1);
     x.queue=calloc(o->queue_cap,sizeof(*x.queue));
     x.input_queue=calloc(o->queue_cap,sizeof(*x.input_queue));
     int ok=image&&r->flags&&r->copies&&x.origins&&x.copy_hash&&x.cart&&x.forks&&x.sides&&x.irq_forks&&x.queue&&x.input_queue&&
+        r->section_of&&r->sections&&
         (!o->input_masks || !o->input_total || (x.input_sites&&x.input_scratch));
     if(!ok) goto cleanup;
     memset(image,0xff,padded); memcpy(image,rom,size);
@@ -650,6 +829,11 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
             memcpy(x.origins,p.origins,x.origin_size);
             free_path(p); hook(&x); x.forced=p.forced;
             dp_sega_visits_reset(&visits); r->paths++;
+            x.boot_path=r->paths==1 && !p.forced; // natural work on the reset path
+            // same-context eviction: the entry section of an already admitted
+            // incoming context is closed without running (counted, GB parity)
+            if(!context_admitted(&x,site(&x,x.b->cpu()->pc))) { x.boot_path=0; continue; }
+            x.cur_sec=NULL;
             uint32_t n=0,quiet=0;
             int closed=0;
             for(;n<o->max_steps && r->steps-start_steps<budget;n++) {
@@ -683,6 +867,7 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
                 if(interrupt && !p.skip_irq && cycles) {
                     dp_z80_provenance_stack_changed(&x.origins->cpu);
                     record_interrupt(&x,irq_event);
+                    x.irq_flag=1; // the handler's section runs inside an IRQ
                 }
                 p.skip_irq=0;
                 if(c->fault) { r->faults++; break; }
@@ -697,6 +882,9 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
                     // Classification uses the exact bytes fetched from this machine view.
                     for(unsigned j=0;j<d.length;j++) bytes[j]=x.b->read((uint16_t)(c->pc+j));
                     if(!dp_z80_decode(bytes,d.length,c->pc,&in)) { r->decode_cuts++; break; }
+                    // every instruction belongs to the section its pc is in
+                    x.cur_sec=section_touch(&x,at,at+d.length-1,n==0 || at!=x.prev_at+1);
+                    x.prev_at=at+d.length-1;
                     if(in.condition>=0 || in.flow==DP_Z80_REPEAT) {
                         uint8_t source=in.flow==DP_Z80_REPEAT?x.b->read(c->hl):0;
                         int taken=in.flow==DP_Z80_REPEAT?dp_z80_repeat_taken(&in,c,source):dp_z80_condition(in.condition,c);
@@ -755,6 +943,7 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
         x.queued=0;
     }
     dp_sega_closure_run(x.closure);
+    sections_finalize(r);
 cleanup:
     if(x.b->close) x.b->close();
     dp_sega_closure_free(x.closure);
@@ -769,7 +958,7 @@ cleanup:
     free(x.input_queue);
     free(x.seeds); free(x.seed_state); free(x.seed_cart); free(x.seed_origins);
     free(x.seed_scratch); free(x.seed_scratch_cart); free(x.seed_scratch_origins);
-    if(!ok) dp_sega_results_free(r);
+    if(!ok) { free(r->sections); free(r->section_of); dp_sega_results_free(r); }
     return ok;
 }
 static const char *class_of(uint8_t f) {
@@ -857,6 +1046,18 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
     fprintf(out,"cuts: steps %"PRIu64"; loop %"PRIu64"; fork %"PRIu64"; queue %"PRIu64"; paths %"PRIu64"; global-pending %"PRIu64"; decode %"PRIu64"; faults %"PRIu64"\n",r->step_cuts,r->loop_cuts,r->fork_cuts,r->queue_cuts,r->path_cuts,r->global_cuts,r->decode_cuts,r->faults);
     fprintf(out,"seeds: pointer %"PRIu64"; bank sweep %"PRIu64"; entries %"PRIu64"; admitted %"PRIu64"; skipped padding %"PRIu64"; refused view %"PRIu64", queue %"PRIu64", cap %"PRIu64"; pending %"PRIu64"\n",
         r->seeds_pointer,r->seeds_bank,r->seeds_entry,r->seeds_admitted,r->seeds_skipped_padding,r->seeds_refused_view,r->seeds_refused_queue,r->seeds_refused_cap,r->seeds_pending);
+    fprintf(out,"sections: %u; cap cuts %"PRIu64"; contexts evicted %"PRIu64"; grew %"PRIu64"; full %"PRIu64"\n",
+        r->section_count,r->section_cuts,r->evicted_ctx,r->ctx_grew,r->ctx_full);
+    unsigned printed=r->section_count<256?r->section_count:256;
+    for(unsigned i=0;i<printed;i++) {
+        const DpSegaSection *s=&r->sections[i];
+        fprintf(out,"  section %u bank %u $%04X-$%04X hits %"PRIu64" natural %"PRIu64" forced %"PRIu64" boot %"PRIu64" entries %"PRIu64" copies %"PRIu64" ctx %"PRIu64"%s%s verdict %s\n",
+            s->id,s->bank,s->lo,s->hi,s->hits,s->natural_hits,s->forced_hits,s->boot_hits,
+            s->entries,s->copies,s->ctx_count,
+            s->kind_bits&DP_SEGA_IRQ?" irq":"",s->kind_bits&DP_SEGA_FORCED?" forced":"",
+            dp_sega_verdict_names[s->verdict]);
+    }
+    if(r->section_count>printed) fprintf(out,"  ... %u more sections\n",r->section_count-printed);
     fprintf(out,"loop contexts: CPU address + compact ROM index (outside: CPU address); peak %zu; buckets %zu; growths %"PRIu64"\n",
         r->loop_context_peak,r->loop_context_capacity,r->loop_context_growths);
     fprintf(out,"forced stagnation cuts %"PRIu64"\n",r->stagnation_cuts);
@@ -897,10 +1098,10 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
         fprintf(out,"  port $%02X read %"PRIu64" (%s), write %"PRIu64" (%s)\n",p,r->io_read[p],rd?rd->name:"unmapped",r->io_write[p],wr?wr->name:"unmapped");
     }
     if(!strcmp(s->id,"msx")) {
-        fputs("Limits: partial simulated BIOS, zero RAM and fixed primary-slot profile; no real BIOS, expanded slots, RAM mapper, disk/tape or MSX2. No dynamic context dedup or sessions yet. Static closure uses observed slot/bank views and stops at BIOS, RAM, unresolved indirect jumps and mapping barriers. Pure CPU/RAM and selected BIOS copies only; VRAM read-back and transformed data have no origin. RETURN is polled, never NMI. Forced reachability is speculative.\n",out);
+        fputs("Limits: partial simulated BIOS, zero RAM and fixed primary-slot profile; no real BIOS, expanded slots, RAM mapper, disk/tape or MSX2. No sessions yet. Context projection hashes registers, held input, mapper views and the pages/ports a section read; IN port values are not hashed. Static closure uses observed slot/bank views and stops at BIOS, RAM, unresolved indirect jumps and mapping barriers. Pure CPU/RAM and selected BIOS copies only; VRAM read-back and transformed data have no origin. RETURN is polled, never NMI. Forced reachability is speculative.\n",out);
         return;
     }
-    fprintf(out,"Limits: no dynamic context dedup or sessions yet. Static closure uses observed ROM views and stops unresolved indirect jumps and mapper effects. Provenance covers pure CPU/RAM transfers, not transformed data or VRAM read-back. Power-on inputs released; input probes hold their selected state until another probe. SMS pads use export digital TR/TH levels; GG has one pad. Zero RAM; no BIOS; disabled console bus reads $FF, without revision-specific floating bus effects. Hardware registry may describe devices absent from the embedded runtime (FM, link, BIOS/card/expansion, peripheral variants). Forced reachability is speculative.\n");
+    fprintf(out,"Limits: no sessions yet. Context projection hashes registers, held input, mapper views and the pages/ports a section read; IN port values are not hashed. Static closure uses observed ROM views and stops unresolved indirect jumps and mapper effects. Provenance covers pure CPU/RAM transfers, not transformed data or VRAM read-back. Power-on inputs released; input probes hold their selected state until another probe. SMS pads use export digital TR/TH levels; GG has one pad. Zero RAM; no BIOS; disabled console bus reads $FF, without revision-specific floating bus effects. Hardware registry may describe devices absent from the embedded runtime (FM, link, BIOS/card/expansion, peripheral variants). Forced reachability is speculative.\n");
 }
 static int number(const char *s,uint64_t *n) {
     if(!*s||*s=='-') return 0;
@@ -927,6 +1128,7 @@ int dp_sega_explore_command(int argc,char **argv) {
     DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); const char *text=NULL,*map=NULL,*evidence=NULL;
     for(int i=5;i<argc;i++) {
         if(!strcmp(argv[i],"--no-vector-seeds")) { o.seed_vectors=0; continue; }
+        if(!strcmp(argv[i],"--no-context-evict")) { o.no_context_evict=1; continue; }
         if(!strcmp(argv[i],"--seed-banks")) { o.seed_banks=1; continue; }
         if(!strcmp(argv[i],"--no-pointer-scan")) { o.no_pointer_scan=1; continue; }
         if(!strcmp(argv[i],"--entry")) {

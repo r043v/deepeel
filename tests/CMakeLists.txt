@@ -39,6 +39,11 @@ target_link_libraries(test_sega_seeds PRIVATE deepeel_sega)
 add_test(NAME sega_seeds COMMAND test_sega_seeds)
 set_tests_properties(sega_seeds PROPERTIES TIMEOUT 30)
 
+add_executable(test_sega_sections test_sega_sections.c)
+target_link_libraries(test_sega_sections PRIVATE deepeel_sega)
+add_test(NAME sega_sections COMMAND test_sega_sections)
+set_tests_properties(sega_sections PROPERTIES TIMEOUT 30)
+
 add_executable(test_msx test_msx.c)
 target_link_libraries(test_msx PRIVATE deepeel_msx deepeel_sega)
 add_test(NAME msx COMMAND test_msx)

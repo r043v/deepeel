@@ -2,12 +2,16 @@
 #define DP_SEGA_EXPLORE_H
 #include "sega.h"
 #include "closure.h"
+#include "../../../src/core/hashset.h"
 #include <stddef.h>
 #include <stdint.h>
 enum { DP_SEGA_NATURAL=1, DP_SEGA_FORCED=2, DP_SEGA_DATA=4, DP_SEGA_COPIED=8, DP_SEGA_STATIC=16, DP_SEGA_STATIC_DATA=32 };
 enum { DP_SEGA_COPY_CAP=4096 };
 enum { DP_SEGA_INPUT_LOG_CAP=1024 };
 enum { DP_SEGA_HARDWARE_LOG_CAP=1024 };
+enum { DP_SEGA_IRQ=0x80 }; // kind bit: section runs inside an accepted interrupt
+enum { DP_SEGA_SECTION_CAP=65536 };
+static const char *const dp_sega_verdict_names[]={"none","required","forced","played"};
 typedef struct {
     uint64_t path,step;
     int64_t target_rom;
@@ -40,12 +44,34 @@ typedef struct {
     uint32_t seed_cap;     // max pointer-scan seeds (0 disables the scan)
     int seed_banks;        // seed every switchable window/bank pair
     int no_pointer_scan;   // disable pointer-table seeding
+    int no_context_evict;  // disable same-context eviction (GB parity)
     struct { uint32_t bank; uint16_t addr; } entry[32]; // extra --entry seeds
     unsigned entry_count;
     int sega_mapper; // 0 auto; otherwise DP_SEGA_MAPPER_* (SMS/GG only)
     int msx_mapper; // -1 auto; otherwise DP_MSX_* mapper selection
     DpSegaClosureOptions closure;
 } DpSegaOptions;
+// Executed-range section with per-context bookkeeping (GB DpSection parity).
+// A section is a maximal contiguous run of executed physical bytes inside one
+// 16 KiB bank; every access an instruction makes is attributed to the section
+// its pc belongs to, which is where the necessity statistics live.
+enum { DP_SEGA_VERDICT_NONE=0, DP_SEGA_VERDICT_REQUIRED, DP_SEGA_VERDICT_FORCED, DP_SEGA_VERDICT_PLAYED };
+typedef struct {
+    uint32_t id;
+    uint8_t bank;              // physical 16 KiB bank
+    uint16_t lo,hi;            // bank offsets, inclusive
+    uint64_t hits,natural_hits,forced_hits,boot_hits,entries;
+    uint8_t kind_bits;         // DP_SEGA_NATURAL|DP_SEGA_FORCED|DP_SEGA_IRQ
+    uint64_t copies;           // copy records attributed to a pc in this section
+    uint8_t verdict;           // DP_SEGA_VERDICT_*, computed at finalize
+    // liveness learned from the section's own reads; the context projection
+    // hashes only these components (contexts seen resets when a mask grows)
+    uint64_t page_mask_wram;   // 32 pages x 256 B over the 8 KiB WRAM window
+    uint8_t page_mask_cart[16];// 128 pages x 256 B over cartridge RAM
+    uint8_t io_read_live[32];  // 256 IN ports
+    uint64_t ctx_count;        // distinct incoming contexts admitted
+    DpHashSet ctx_seen;
+} DpSegaSection;
 typedef struct {
     uint8_t *flags;
     size_t size;
@@ -54,6 +80,11 @@ typedef struct {
     // Seeds (GB parity): generated specs by kind, admissions, bounded refusals.
     uint64_t seeds_pointer,seeds_bank,seeds_entry,seeds_admitted,seeds_skipped_padding;
     uint64_t seeds_refused_view,seeds_refused_queue,seeds_refused_cap,seeds_pending;
+    // sections and same-context eviction (GB parity)
+    DpSegaSection *sections;
+    uint32_t section_count,section_capacity;
+    uint32_t *section_of;      // physical byte -> section id + 1 (0: none)
+    uint64_t evicted_ctx,ctx_grew,ctx_full,section_cuts;
     size_t loop_context_peak,loop_context_capacity;
     uint64_t loop_context_growths;
     uint64_t io_read[256],io_write[256],bank_changes,bank_log_overflow;
