@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.11.1 LANGUAGES C)
+project(deepeel VERSION 0.12.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -24,6 +24,21 @@ if(NOT EXISTS "${DP_GBL_RUNTIME}/gbl_core.c")
   message(FATAL_ERROR "M0BOY_DIR (${M0BOY_DIR}) must contain targets/meta/runtime/gbl_core.c: \
 deepeel embeds m0boy's Game Boy machine instead of its own")
 endif()
+# --- the m0boy Mega Drive machine (MdFull, 68000 + bus) ----------------------
+set(DP_MD_RUNTIME "${M0BOY_DIR}/targets/megadrive/runtime")
+set(DP_MD_Z80 "${M0BOY_DIR}/targets/sg1000/runtime")
+if(NOT EXISTS "${DP_MD_RUNTIME}/md_full_cpu.c" OR NOT EXISTS "${DP_MD_RUNTIME}/md_trace.h")
+  message(FATAL_ERROR "M0BOY_DIR must provide targets/megadrive/runtime with the MD_TRACE hooks")
+endif()
+add_library(dp_mdmach_lib STATIC
+  ${DP_MD_RUNTIME}/md_full_cpu.c ${DP_MD_RUNTIME}/md_full_bus.c
+  ${DP_MD_RUNTIME}/md_full_video.c ${DP_MD_RUNTIME}/md_full_audio.c
+  ${DP_MD_RUNTIME}/md_ym2612.c ${DP_MD_Z80}/z80.c
+  src/mach/mdmach.c src/mach/mdrom.c)
+target_compile_definitions(dp_mdmach_lib PRIVATE MD_TRACE)
+target_include_directories(dp_mdmach_lib PUBLIC src/mach PRIVATE ${DP_MD_RUNTIME} ${DP_MD_Z80})
+target_compile_options(dp_mdmach_lib PRIVATE -w)
+
 set(DP_MACHINES "18" CACHE STRING "compiled m0boy machine instances (session workers)")
 set(DP_GBL_VARIANTS "0:0;1:0;1:0x800;1:0x2000;2:0x200;3:0;3:0x800;3:0x2000;3:0x8000;3:0x10000;3:0x20000;5:0;5:0x800;5:0x2000;5:0x8000;5:0x10000;5:0x20000"
     CACHE STRING "cartridge shapes compiled into the machine (MBC:ERAM)")
@@ -188,6 +203,9 @@ add_compile_definitions(DEEPEEL_VERSION="${PROJECT_VERSION}")
 
 add_library(deepeel_core STATIC
   src/core/cart.c
+  src/core/cart_md.c
+  src/platform/md/md_registry.c
+  src/explore/md_trace.c
   src/core/snapshot_png.c
   src/core/zip.c
   src/core/sta.c
@@ -210,7 +228,7 @@ add_library(deepeel_core STATIC
   ${DP_GUI_FILE}
 )
 find_package(Threads REQUIRED)
-target_link_libraries(deepeel_core PUBLIC Threads::Threads dp_gblmach_lib)
+target_link_libraries(deepeel_core PUBLIC Threads::Threads dp_gblmach_lib dp_mdmach_lib)
 target_include_directories(deepeel_core PUBLIC
   src include ${GEN} ${DP_GBL_RUNTIME} ${SDL2_INCLUDE_DIRS})
 if(SDL2_FOUND AND BUILD_GUI)

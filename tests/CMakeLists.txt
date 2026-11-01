@@ -111,6 +111,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nsecho.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nsdata.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nsstack.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_md_dma.md
 )
 
 add_custom_command(
@@ -145,6 +146,11 @@ add_executable(test_sessions test_sessions.c)
 target_link_libraries(test_sessions PRIVATE deepeel_core m)
 add_dependencies(test_sessions fixtures)
 add_test(NAME sessions COMMAND test_sessions ${CMAKE_CURRENT_BINARY_DIR})
+
+add_executable(test_md test_md.c)
+target_link_libraries(test_md PRIVATE deepeel_core m)
+add_dependencies(test_md fixtures)
+add_test(NAME md COMMAND test_md ${CMAKE_CURRENT_BINARY_DIR})
 
 add_executable(test_export test_export.c)
 target_link_libraries(test_export PRIVATE deepeel_core m)

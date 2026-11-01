@@ -652,15 +652,21 @@ static void report_lanes(const DpPlay *p, const DpResults *res, DpBuf *out) {
 // synthesized (version, rom, source)
 static int cmd_maprender(int argc, char **argv) {
     const char *meta_src = NULL, *rom = NULL, *inmap = NULL, *out = NULL;
+    const char *sysname = "gb", *title_arg = NULL;
+    int z80_map = 0;
     for (int i = 2; i < argc; i++) {
         if (!strcmp(argv[i], "--meta") && i + 1 < argc) meta_src = argv[++i];
+        else if (!strcmp(argv[i], "--sys") && i + 1 < argc) sysname = argv[++i];
+        else if (!strcmp(argv[i], "--title") && i + 1 < argc) title_arg = argv[++i];
+        else if (!strcmp(argv[i], "--z80")) z80_map = 1; // physical-offset map (z80 platforms)
         else if (!rom) rom = argv[i];
         else if (!inmap) inmap = argv[i];
         else if (!out) out = argv[i];
         else return usage(), 2;
     }
     if (!rom || !inmap || !out) {
-        fprintf(stderr, "usage: deepeel maprender rom.gb in.map out.map.png [--meta f]\n");
+        fprintf(stderr, "usage: deepeel maprender rom in.map out.map.png [--meta f] [--sys gb] "
+                        "[--title t] [--z80]\n");
         return 2;
     }
     FILE *f = fopen(inmap, "rb");
@@ -672,12 +678,60 @@ static int cmd_maprender(int argc, char **argv) {
     if (!text || fread(text, 1, (size_t)ln, f) != (size_t)ln) { fclose(f); free(text); perror(inmap); return 1; }
     text[ln] = 0;
     fclose(f);
-    char err[256];
-    DpCart *cart = dp_cart_load(rom, err, sizeof err);
-    if (!cart) { fprintf(stderr, "deepeel: %s\n", err); free(text); return 1; }
+    if (z80_map) {
+        // z80 maps list physical 16 KiB banks and whole-ROM offsets; rewrite
+        // each run into the windowed "bank start end class" form the renderer
+        // expects (bank 0 from 0, the others from 0x4000), splitting at the
+        // 16 KiB boundaries
+        DpBuf cv;
+        dp_buf_init(&cv);
+        char *p = text, *end = text + ln;
+        while (p < end) {
+            char *nl = memchr(p, '\n', (size_t)(end - p));
+            if (!nl) nl = end;
+            unsigned b, a, e;
+            char cls[32];
+            if (sscanf(p, "%x %x %x %31s", &b, &a, &e, cls) == 4) {
+                uint32_t lo = (uint32_t)b * 0x4000 + a, hi = (uint32_t)b * 0x4000 + e;
+                for (uint32_t s = lo; s <= hi;) {
+                    uint32_t bk = s / 0x4000, cut = (s | 0x3FFF) < hi ? (bk + 1) * 0x4000 - 1 : hi;
+                    dp_buf_fmt(&cv, "%u %04x %04x %s\n", bk, s % 0x4000 + (bk ? 0x4000u : 0u),
+                               cut % 0x4000 + (bk ? 0x4000u : 0u), cls);
+                    s = cut + 1;
+                }
+            } else if (*p != '#') {
+                dp_buf_fmt(&cv, "%.*s\n", (int)(nl - p), p);
+            }
+            p = nl < end ? nl + 1 : end;
+        }
+        free(text);
+        text = cv.p;
+        ln = (long)cv.len;
+    }
+    unsigned rom_size = 0;
+    int rom_banks = 0;
+    DpCart *cart = NULL;
     char title[17];
     int tl = 0;
-    for (const char *ti = cart->title; *ti && tl < 16; ti++)
+    if (!strcmp(sysname, "gb")) {
+        char err[256];
+        cart = dp_cart_load(rom, err, sizeof err);
+        if (!cart) { fprintf(stderr, "deepeel: %s\n", err); free(text); return 1; }
+        rom_size = (unsigned)cart->rom_size;
+        rom_banks = cart->rom_banks;
+    } else { // z80 platforms: no GB header — size from the file, banks of 16 KiB
+        FILE *rf = fopen(rom, "rb");
+        if (!rf) { perror(rom); free(text); return 1; }
+        fseek(rf, 0, SEEK_END);
+        rom_size = (unsigned)ftell(rf);
+        fclose(rf);
+        rom_banks = (int)((rom_size + 0x3FFF) / 0x4000);
+    }
+    if (title_arg) {
+        snprintf(title, sizeof title, "%.16s", title_arg);
+        tl = (int)strlen(title);
+    } else
+    for (const char *ti = cart ? cart->title : ""; *ti && tl < 16; ti++)
         if (*ti == '?') break;
         else if ((unsigned char)*ti >= 0x20 && (unsigned char)*ti < 0x7f) title[tl++] = *ti;
     if (!tl) {
@@ -703,13 +757,13 @@ static int cmd_maprender(int argc, char **argv) {
         snprintf(meta_syn, sizeof meta_syn,
                  "{\"deepeel\":\"%s\",\"mode\":\"maprender\",\"source\":\"%s\","
                  "\"rom\":{\"title\":\"%s\",\"banks\":%d,\"size\":%u}}",
-                 DEEPEEL_VERSION, inmap, title, cart->rom_banks,
-                 (unsigned)cart->rom_size);
+                 DEEPEEL_VERSION, inmap, title, rom_banks, rom_size);
         meta = meta_syn;
     }
-    int ok = dp_map_png_from_maptext(text, (size_t)ln, cart->rom_banks,
-                                     title, meta, out, "gb", strrchr(rom, '/') ? strrchr(rom, '/') + 1 : rom,
-                                     (unsigned)cart->rom_size);
+    int ok = dp_map_png_from_maptext(text, (size_t)ln, rom_banks,
+                                     title, meta, out, sysname,
+                                     strrchr(rom, '/') ? strrchr(rom, '/') + 1 : rom,
+                                     rom_size);
     if (!ok) { fprintf(stderr, "deepeel: %s: render failed\n", inmap); }
     if (meta != meta_syn) free(meta);
     free(text);

@@ -146,10 +146,14 @@ python3 tools/scan_all.py digest            # -> output/batch/REPORT.md
   `deepeel z80 explore msx jeu.rom --mapper auto`, puis fermeture statique
   sur les vues de slots et de banques observées. Voir
   [docs/MSX.fr.md](docs/MSX.fr.md).
+- **Mega Drive** (0.12.0, jalon 1) : passe linéaire journalisée sur le 68000
+  de m0boy (`MdFull`) — registre matériel, en-tête et vecteurs, carte
+  d'exécution, copies DMA ROM→VRAM. Pas encore de fourches ni de GUI. Voir
+  `docs/MD.fr.md`.
 - Autres plateformes : l'architecture est prête (`src/platform/platform.h`,
   `src/cpu/`) — une plateforme = une table de registres + des hooks ; un CPU
-  = un décodeur/exécuteur qui journalise ses effets. 6502, HuC6280,
-  68000, 65816 sont les suivants naturels.
+  = un décodeur/exécuteur qui journalise ses effets. Z80, 6502, HuC6280,
+  65816 sont les suivants naturels.
 
 ## Layout
 

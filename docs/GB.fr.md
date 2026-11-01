@@ -365,6 +365,10 @@ code / data / padding.
   observer ni déduire, les plus grandes d'abord — la frontière honnête de la
   carte.
 - « Connu » inclut donc les octets déduits ; la part déduite est rapportée à part.
+- `deepeel maprender ROM in.map out.png` re-rend une couverture depuis un
+  `.map` sauvegardé ; pour les cartes z80 (offsets physiques de 16 Kio) :
+  `--z80` réécrit les plages en vues fenêtrées, et `--sys sms|gg|msx`
+  + `--title nom` rendent la couverture d'une ROM non GB sans re-scan.
 - `deepeel explore ROM --map x.map` écrit le texte (`banque début fin classe`,
   fin incluse, adresses vues du CPU) ; `--map x.map.png` écrit une image
   (un carré par 64 octets, 16×16 par banque, rouge = inconnu, bleus = code,

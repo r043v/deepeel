@@ -306,5 +306,37 @@ def build(out):
     w(r, 0x154, 0x76)                            # halt
     save(out, "fix_nsstack", r)
 
+def md_rom(size=0x1000):
+    r = bytearray(size)
+    r[0:4] = (0x00FF0000).to_bytes(4, "big")      # initial SSP
+    r[4:8] = (0x200).to_bytes(4, "big")           # reset vector
+    for i in range(2, 64):                        # every other vector: reset code
+        r[i * 4:i * 4 + 4] = (0x200).to_bytes(4, "big")
+    r[0x100:0x110] = b"SEGA MEGA DRIVE "
+    r[0x120:0x130] = b"DEEPEEL FIXTURE "
+    r[0x1F0:0x1F3] = b"JUE"
+    return r
+
+def save_md(out, name, r):
+    path = os.path.join(out, name + ".md")
+    with open(path, "wb") as f:
+        f.write(r)
+    print("wrote", path, len(r))
+
+def build_md(out):
+    # --- dma: VDP regs, then a ROM->VRAM DMA of 16 words from $000400 ---------
+    r = md_rom()
+    pc = 0x200
+    for v in (0x8114, 0x9310, 0x9400, 0x9500, 0x9602):   # DMA on, len=$10, src=$400>>1
+        r[pc:pc + 8] = bytes([0x33, 0xFC, v >> 8, v & 0xFF, 0x00, 0xC0, 0x00, 0x04])
+        pc += 8
+    r[pc:pc + 10] = bytes([0x23, 0xFC, 0x40, 0x00, 0x00, 0x80, 0x00, 0xC0, 0x00, 0x04])
+    pc += 10
+    r[pc:pc + 2] = bytes([0x60, 0xFE])                   # bra.s * : bounded by the budget
+    for i in range(0x20):
+        r[0x400 + i] = i
+    save_md(out, "fix_md_dma", r)
+
 if __name__ == "__main__":
+    build_md(sys.argv[1] if len(sys.argv) > 1 else ".")
     build(sys.argv[1] if len(sys.argv) > 1 else ".")
