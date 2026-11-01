@@ -24,7 +24,7 @@ if(NOT EXISTS "${DP_GBL_RUNTIME}/gbl_core.c")
   message(FATAL_ERROR "M0BOY_DIR (${M0BOY_DIR}) must contain targets/meta/runtime/gbl_core.c: \
 deepeel embeds m0boy's Game Boy machine instead of its own")
 endif()
-set(DP_MACHINES "10" CACHE STRING "compiled m0boy machine instances (session workers)")
+set(DP_MACHINES "18" CACHE STRING "compiled m0boy machine instances (session workers)")
 set(DP_GBL_VARIANTS "0:0;1:0;1:0x800;1:0x2000;2:0x200;3:0;3:0x800;3:0x2000;3:0x8000;3:0x10000;3:0x20000;5:0;5:0x800;5:0x2000;5:0x8000;5:0x10000;5:0x20000"
     CACHE STRING "cartridge shapes compiled into the machine (MBC:ERAM)")
 

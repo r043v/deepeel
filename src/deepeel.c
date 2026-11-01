@@ -35,6 +35,9 @@ static void usage(void) {
             "                         dropping paths, stopped by --mem-cap when set\n"
             "    --mem-cap MB         wall shared by the play and the queue growth:\n"
             "                         stop/grow no more once RSS exceeds MB MiB\n"
+            "    --jobs N             parallel drain: N explorers (own machine each) share\n"
+            "                         one work pool, exact dedup and spool; the RAM wall\n"
+            "                         bounds the shared pool, the spool keeps the excess\n"
             "    --spool-cap-mb MB    disk budget of the state spool (default 4096): with\n"
             "                         a --state-dir, states the RAM worklist cannot hold\n"
             "                         wait in <state-dir>/spool.bin and --resume continues\n"
@@ -249,6 +252,7 @@ static int cmd_explore(int argc, char **argv) {
         }
         else if (!strcmp(a, "--time-limit") && i + 1 < argc) scfg.time_limit_secs = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--spool-cap-mb") && i + 1 < argc) cfg.spool_cap_mb = strtoull(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--jobs") && i + 1 < argc) cfg.jobs = atoi(argv[++i]);
         else if (!strcmp(a, "--seed-cap") && i + 1 < argc) cfg.seed_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed-banks")) cfg.seed_banks = 1;
         else if (!strcmp(a, "--no-pointer-scan")) cfg.no_pointer_scan = 1;
@@ -690,7 +694,8 @@ static int cmd_maprender(int argc, char **argv) {
         meta = meta_syn;
     }
     int ok = dp_map_png_from_maptext(text, (size_t)ln, cart->rom_banks,
-                                     title, meta, out);
+                                     title, meta, out, "gb", strrchr(rom, '/') ? strrchr(rom, '/') + 1 : rom,
+                                     (unsigned)cart->rom_size);
     if (!ok) { fprintf(stderr, "deepeel: %s: render failed\n", inmap); }
     if (meta != meta_syn) free(meta);
     free(text);

@@ -64,6 +64,9 @@ struct DpMach {
 int dp_mach_pick_variant(const uint8_t *header);
 
 DpMach *dp_mach_open(int vi, int ii);
+// same, but NULL when the instance slot is already taken (a session worker,
+// the preview): the parallel drain only runs on free instances
+DpMach *dp_mach_open_exclusive(int vi, int ii);
 void dp_mach_close(DpMach *m);
 /* wire the hooks before a run: one live machine instance serves several
  * users (fork explorer, worker, human lane, preview) at disjoint times, and

@@ -254,6 +254,7 @@ typedef struct DpConfig {
     int no_covered_prune;     // keep forking sites whose both sides are known
     uint32_t covered_fork_keep; // forks a fully-known site still gets (default 2)
     int seed_banks;           // seed every switchable bank at $4000
+    int jobs;                 // parallel drain workers (1 = single core)
     int dfs;                  // depth-first frontier: newest path first (the
                               // total-search phase; default breadth-first)
     int verbose;
@@ -293,6 +294,23 @@ typedef struct DpPathState {
     uint32_t choice;     // the tree choice this path answers
 } DpPathState;
 
+// disk spool of the overflow: appended at wr, fed back from rd, both cursors
+// in one file so a stopped run resumes without a rewrite.  Shared (mutex, one
+// struct) by the parallel workers: the spool doubles as the shared worklist.
+typedef struct DpSpool {
+    FILE *f;
+    uint64_t rd, wr;
+    pthread_mutex_t mtx;
+} DpSpool;
+
+// shared work pool of a parallel drain (--jobs N): ordinary pushes go here,
+// pops come from here; the exact dedup and the spool are shared alongside
+typedef struct DpSharedPool {
+    pthread_mutex_t mtx;
+    DpPathState *q;
+    uint32_t cap, head, len, max;
+} DpSharedPool;
+
 // the engine state is shared with the sibling modules (sections.c, copies.c)
 struct DpExplorer {
     DpConfig cfg;
@@ -310,11 +328,16 @@ struct DpExplorer {
     DpPathState *pqueue;
     uint32_t pq_cap, pq_head, pq_len;
     DpHashSet exact;
-    // disk spool of the overflow (see DpResults): records appended at spool_wr,
-    // fed back from spool_rd while the worklist runs low; both cursors live in
-    // one file so a stopped run resumes without a rewrite
-    FILE *spool;
-    uint64_t spool_rd, spool_wr;
+    pthread_mutex_t *exact_mtx; // guards the set when shared by parallel workers
+    DpHashSet *exactp;         // &exact, or the leader's set when shared
+    // disk spool of the overflow (see DpResults): shared with the parallel
+    // workers, which makes it the shared worklist of a parallel drain
+    DpSpool *spool;
+    int spool_owned; // this explorer allocated the spool (frees it)
+    // parallel drain (--jobs N): ordinary pushes/pops go through this pool
+    DpSharedPool *sh;
+    pthread_mutex_t tmtx;      // guards the tree when shared (parallel workers)
+    pthread_mutex_t *tree_mtx; // -> own tmtx, or the leader's when shared
     // per-path state
     int cur_forced;
     uint8_t cur_kind, cur_from_reset;
@@ -450,6 +473,8 @@ int dp_explore(DpExplorer *ex);
 // inside dp_explore_step; flush() pours the remaining worklist in before the
 // process exits so --resume continues exactly where the run stopped.
 int dp_explorer_spool_attach(DpExplorer *ex, const char *path, int resume);
+// parallel drain: the worker borrows the leader's spool, exact dedup and tree
+void dp_explorer_share(DpExplorer *worker, DpExplorer *leader);
 // pours queue + priority inbox into the spool; returns states still pending
 uint64_t dp_explorer_spool_flush(DpExplorer *ex);
 uint64_t dp_explorer_spool_pending(const DpExplorer *ex);
