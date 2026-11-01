@@ -64,6 +64,11 @@ target_link_libraries(test_sega_tas PRIVATE deepeel_sega)
 add_test(NAME sega_tas COMMAND test_sega_tas)
 set_tests_properties(sega_tas PROPERTIES TIMEOUT 30)
 
+add_executable(test_sega_jobs test_sega_jobs.c)
+target_link_libraries(test_sega_jobs PRIVATE deepeel_sega)
+add_test(NAME sega_jobs COMMAND test_sega_jobs)
+set_tests_properties(sega_jobs PROPERTIES TIMEOUT 30)
+
 add_executable(test_msx test_msx.c)
 target_link_libraries(test_msx PRIVATE deepeel_msx deepeel_sega)
 add_test(NAME msx COMMAND test_msx)

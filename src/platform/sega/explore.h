@@ -55,6 +55,7 @@ typedef struct {
     uint64_t tas_total;      // TAS replay budget, steps (bounded whatever the movie length)
     uint32_t tas_frame_steps; // per-frame step cap of the TAS replay
     const char *tas_path;    // TAS movie (.bk2 or plain input log, sega/tas.h)
+    int jobs;                // parallel drain workers (2 max: prefixed instances)
     uint32_t max_steps,max_paths,queue_cap,loop_cap,fork_cap,stagnation,copy_cap,input_masks,input_sites;
     int target_closure,block_closure;
     int seed_vectors;
@@ -136,6 +137,8 @@ typedef struct {
     uint64_t play_steps,play_epochs;
     // TAS replay (GB tas.c parity): natural coverage from a movie, priority
     uint64_t tas_frames,tas_frames_refused,tas_steps;
+    // parallel drain (--jobs): seeds routed to another worker, requests capped
+    uint64_t seeds_offlane,jobs_capped,merge_conflicts;
     size_t loop_context_peak,loop_context_capacity;
     uint64_t loop_context_growths;
     uint64_t io_read[256],io_write[256],bank_changes,bank_log_overflow;

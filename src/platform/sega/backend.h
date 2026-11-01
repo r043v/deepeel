@@ -72,4 +72,8 @@ typedef struct {
 } DpSegaBackend;
 const DpSegaBackend *dp_sega_backend_sg(void);
 const DpSegaBackend *dp_sega_backend_gg(void);
+// Second instances (objcopy-namespaced runtime clones): the --jobs parallel
+// drain runs one worker per instance. MSX has no clone: jobs fall back.
+const DpSegaBackend *dp_sega_backend_sg2(void);
+const DpSegaBackend *dp_sega_backend_gg2(void);
 #endif

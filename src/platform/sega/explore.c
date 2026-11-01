@@ -11,6 +11,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include <errno.h>
+#include <pthread.h>
 
 typedef struct {
     DpZ80Provenance cpu;
@@ -757,7 +758,7 @@ DpSegaOptions dp_sega_options(void) {
     // Boot code often runs nested 16-bit delay loops before touching the VDP.
     DpSegaOptions o={.max_total=20000000,.input_total=20000000,.indirect_total=20000000,.play_total=0,.tas_total=2000000,.tas_frame_steps=1000,.max_steps=2000000,.max_paths=4096,.queue_cap=128,
         .loop_cap=262144,.fork_cap=2,.stagnation=32768,.copy_cap=DP_SEGA_COPY_CAP,
-        .input_masks=8,.input_sites=4096,.seed_vectors=1,.seed_cap=1024,.queue_max=4096,.target_closure=1,.block_closure=1,.msx_mapper=DP_MSX_AUTO,.closure={262144,65536,256,8}}; return o;
+        .input_masks=8,.input_sites=4096,.seed_vectors=1,.seed_cap=1024,.queue_max=4096,.target_closure=1,.block_closure=1,.msx_mapper=DP_MSX_AUTO,.closure={262144,65536,256,8},.jobs=1}; return o;
 }
 DpSegaOptions dp_msx_options(void) {
     DpSegaOptions o=dp_sega_options(); o.seed_vectors=0; return o;
@@ -969,7 +970,16 @@ void dp_sega_results_free(DpSegaResults *r) {
     free(r->static_flags);
     free(r->flags); free(r->copies); memset(r,0,sizeof(*r));
 }
-int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *o,DpSegaResults *r) {
+// One exploration worker. worker 0 runs everything: the TAS replay, the play
+// session, the reset path. Higher workers own every jobs-th seed spec and an
+// jobs-th vector entry, on a private prefixed runtime instance; their flags,
+// sections and counters merge into worker 0's results after the join.
+static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *opt,DpSegaResults *r,int worker,int jobs) {
+    DpSegaOptions wopt=*opt;
+    if(worker) { // the spool file, tree and TAS movie belong to worker 0
+        wopt.spool_path=NULL; wopt.tree_path=NULL; wopt.tas_path=NULL; wopt.jobs=1;
+    }
+    const DpSegaOptions *o=&wopt;
     if(!s||!rom||!size||!o||!r||!o->max_total||!o->max_steps||!o->max_paths||!o->queue_cap||!o->loop_cap||o->fork_cap>255) return 0;
     int sg=!strcmp(s->id,"sg"),msx=!strcmp(s->id,"msx");
     if(!sg && !msx && strcmp(s->id,"sms") && strcmp(s->id,"gg")) return 0;
@@ -985,7 +995,8 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
     memset(r,0,sizeof(*r)); r->size=size;
     size_t padded=(size+0x3fff)&~(size_t)0x3fff, sites=size+65536;
     uint8_t *image=malloc(padded); DpSegaVisits visits={0};
-    Run x={0}; x.b=msx?dp_msx_backend():sg?dp_sega_backend_sg():dp_sega_backend_gg(); x.msx=msx; x.system=s; x.opt=o; x.r=r; x.input_epoch=1;
+    Run x={0}; x.b=msx?dp_msx_backend():worker?(sg?dp_sega_backend_sg2():dp_sega_backend_gg2()):(sg?dp_sega_backend_sg():dp_sega_backend_gg());
+    x.msx=msx; x.system=s; x.opt=o; x.r=r; x.input_epoch=1;
     r->input_site_capacity=o->input_sites; r->input_mask_limit=o->input_masks;
     r->phase_limits[0]=o->max_total; r->phase_limits[1]=o->input_masks?o->input_total:0;
     if(o->input_masks && o->input_total) {
@@ -1068,12 +1079,15 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
         memcpy(x.seed_origins,x.origins,x.origin_size);
         generate_seed_specs(&x,image,size);
     }
-    if(!tas_replay(&x)) { ok=0; goto cleanup; }
-    play_session(&x);
-    if(push_to(&x,0,0,0,DP_SEGA_TREE_RESET)<0) { ok=0; goto cleanup; }
+    if(!worker) {
+        if(!tas_replay(&x)) { ok=0; goto cleanup; }
+        play_session(&x);
+    }
+    if(!worker && push_to(&x,0,0,0,DP_SEGA_TREE_RESET)<0) { ok=0; goto cleanup; }
     if(o->seed_vectors && !msx) {
         const uint16_t entries[]={8,16,24,32,40,48,56,0x66};
         for(unsigned j=0;j<sizeof(entries)/sizeof(entries[0]);j++) {
+            if(j%jobs!=worker) continue; // this worker's vector entries only
             uint16_t pc=entries[j]; int code=0;
             for(unsigned k=0;k<8;k++) { uint8_t v=x.b->read(pc+k); code|=(v!=0 && v!=0xff); }
             if(!code) continue;
@@ -1098,6 +1112,7 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
             // The indirect pass is phase 2: its specs were generated from the
             // observations of the passes before it.
             if(phase!=1) while(x.seed_next<x.seed_count && x.queued<x.opt->queue_cap) {
+                if((x.seed_next%jobs)!=worker) { x.seed_next++; r->seeds_offlane++; continue; }
                 if(materialize_seed(&x)<0) { ok=0; goto cleanup; }
             }
             // Keep input seeds and their branch children moving in turn. Their
@@ -1303,6 +1318,186 @@ cleanup:
     if(!ok) { free(r->sections); free(r->section_of); dp_sega_results_free(r); }
     return ok;
 }
+// --- parallel drain (--jobs) -------------------------------------------------------
+// Workers never share mutable state during the run: one prefixed runtime
+// instance and one DpSegaResults each.  After the join the union merges here:
+// per-byte evidence ORs, sections concatenate (worker 0 keeps a byte's
+// attribution, conflicts counted), structured logs append under their caps
+// (the excess bumps the same overflow counters), counters sum, and the
+// verdicts recompute from the merged evidence.
+static void append_log(void *dst,unsigned *dn,unsigned dcap,void *src,unsigned sn,
+                       uint64_t *dst_overflow,size_t elt) {
+    for(unsigned i=0;i<sn;i++) {
+        if(*dn>=dcap) { (*dst_overflow)+=sn-i; break; }
+        memcpy((char *)dst+(size_t)(*dn)*elt,(char *)src+(size_t)i*elt,elt);
+        (*dn)++;
+    }
+}
+static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
+    uint32_t sec_base=d->section_count,tree_base=d->tree_count;
+    for(size_t i=0;i<d->size;i++) {
+        d->flags[i]|=s->flags[i];
+        if(s->section_of[i]) {
+            if(d->section_of[i]) d->merge_conflicts++;
+            else d->section_of[i]=s->section_of[i]+sec_base;
+        }
+    }
+    if(d->section_count+s->section_count>d->section_capacity && s->section_count) {
+        uint32_t cap=d->section_capacity;
+        while(cap<d->section_count+s->section_count && cap<DP_SEGA_SECTION_CAP) cap*=2;
+        DpSegaSection *p=realloc(d->sections,cap*sizeof(*p));
+        if(p) { d->sections=p; d->section_capacity=cap; }
+    }
+    for(uint32_t i=0;i<s->section_count;i++) {
+        if(d->section_count>=d->section_capacity || d->section_count>=DP_SEGA_SECTION_CAP) { d->section_cuts+=s->section_count-i; break; }
+        DpSegaSection sec=s->sections[i];
+        sec.id+=sec_base;
+        d->sections[d->section_count++]=sec;
+        // the context set moves with the section: empty the source's copy so
+        // its results_free does not release the same buckets
+        memset(&((DpSegaResults *)s)->sections[i].ctx_seen,0,sizeof(DpHashSet));
+    }
+    for(uint32_t i=0;i<s->tree_count;i++) {
+        DpSegaTreeNode n=s->tree_nodes[i];
+        if(d->tree_count>=d->tree_capacity) {
+            d->tree_capacity=d->tree_capacity?d->tree_capacity*2:256;
+            DpSegaTreeNode *p=realloc(d->tree_nodes,d->tree_capacity*sizeof(*p));
+            if(!p) break;
+            d->tree_nodes=p;
+        }
+        if(n.parent) n.parent+=tree_base;
+        d->tree_nodes[d->tree_count++]=n;
+    }
+    // structured logs append under worker 0's capacities; the excess bumps
+    // the same overflow counters (the worker's own excess sums below)
+    append_log(d->copies,&d->copy_count,d->copy_capacity,s->copies,s->copy_count,
+               &d->copy_log_overflow,sizeof(DpSegaCopy));
+    append_log(d->inputs,&d->input_count,DP_SEGA_INPUT_LOG_CAP,s->inputs,s->input_count,
+               &d->input_log_overflow,sizeof *d->inputs);
+    append_log(d->banks,&d->bank_count,1024,s->banks,s->bank_count,
+               &d->bank_log_overflow,sizeof *d->banks);
+    append_log(d->interrupt_log,&d->interrupt_count,DP_SEGA_HARDWARE_LOG_CAP,s->interrupt_log,s->interrupt_count,
+               &d->interrupt_log_overflow,sizeof(DpSegaInterrupt));
+    append_log(d->register_log,&d->register_count,DP_SEGA_HARDWARE_LOG_CAP,s->register_log,s->register_count,
+               &d->register_log_overflow,sizeof(DpSegaRegisterWrite));
+    append_log(d->memory_log,&d->memory_count,DP_SEGA_HARDWARE_LOG_CAP,s->memory_log,s->memory_count,
+               &d->memory_log_overflow,sizeof(DpSegaMemoryWrite));
+    append_log(d->ay_log,&d->ay_count,DP_SEGA_HARDWARE_LOG_CAP,s->ay_log,s->ay_count,
+               &d->ay_log_overflow,sizeof(DpSegaRegisterWrite));
+    for(unsigned i=0;i<256;i++) { d->io_read[i]+=s->io_read[i]; d->io_write[i]+=s->io_write[i]; }
+    for(unsigned i=0;i<16;i++) {
+        d->vdp_register_writes[i]+=s->vdp_register_writes[i];
+        d->ay_writes[i]+=s->ay_writes[i];
+    }
+    for(unsigned i=0;i<64;i++) d->bios_calls[i]+=s->bios_calls[i];
+    for(unsigned i=0;i<3;i++) {
+        d->phase_steps[i]+=s->phase_steps[i]; d->phase_paths[i]+=s->phase_paths[i];
+        d->phase_pending[i]+=s->phase_pending[i]; d->phase_known[i]+=s->phase_known[i];
+    }
+    d->closure.limits=s->closure.limits;
+#define DP_MR_SUM(f) d->f+=s->f
+    DP_MR_SUM(steps); DP_MR_SUM(paths); DP_MR_SUM(forks); DP_MR_SUM(irq_forks);
+    DP_MR_SUM(exec_outside); DP_MR_SUM(data_reads); DP_MR_SUM(vdp_copies); DP_MR_SUM(ram_copies);
+    DP_MR_SUM(step_cuts); DP_MR_SUM(loop_cuts); DP_MR_SUM(fork_cuts); DP_MR_SUM(queue_cuts);
+    DP_MR_SUM(global_cuts); DP_MR_SUM(path_cuts); DP_MR_SUM(faults); DP_MR_SUM(decode_cuts);
+    DP_MR_SUM(stagnation_cuts);
+    DP_MR_SUM(seeds_pointer); DP_MR_SUM(seeds_bank); DP_MR_SUM(seeds_entry); DP_MR_SUM(seeds_admitted);
+    DP_MR_SUM(seeds_skipped_padding); DP_MR_SUM(seeds_refused_view); DP_MR_SUM(seeds_refused_queue);
+    DP_MR_SUM(seeds_refused_cap); DP_MR_SUM(seeds_pending); DP_MR_SUM(seeds_offlane);
+    DP_MR_SUM(evicted_ctx); DP_MR_SUM(ctx_grew); DP_MR_SUM(ctx_full); DP_MR_SUM(section_cuts);
+    DP_MR_SUM(queue_growths); DP_MR_SUM(spool_writes); DP_MR_SUM(spool_reads);
+    DP_MR_SUM(spool_refused); DP_MR_SUM(spool_flushed);
+    DP_MR_SUM(indirect_sites); DP_MR_SUM(indirect_targets); DP_MR_SUM(indirect_site_overflow);
+    DP_MR_SUM(indirect_target_overflow); DP_MR_SUM(indirect_seeds);
+    DP_MR_SUM(indirect_refused_budget); DP_MR_SUM(indirect_pending);
+    DP_MR_SUM(play_steps); DP_MR_SUM(play_epochs);
+    DP_MR_SUM(tas_frames); DP_MR_SUM(tas_frames_refused); DP_MR_SUM(tas_steps);
+    DP_MR_SUM(jobs_capped); DP_MR_SUM(merge_conflicts);
+    DP_MR_SUM(vram_copies); DP_MR_SUM(cram_copies); DP_MR_SUM(sram_copies);
+    DP_MR_SUM(copy_transformed); DP_MR_SUM(copy_log_overflow); DP_MR_SUM(provenance_mismatches);
+    DP_MR_SUM(input_forks); DP_MR_SUM(input_cap_cuts); DP_MR_SUM(input_drops);
+    DP_MR_SUM(input_site_drops); DP_MR_SUM(input_log_overflow); DP_MR_SUM(input_queue_cuts);
+    DP_MR_SUM(input_path_cuts); DP_MR_SUM(input_retry_skips);
+    DP_MR_SUM(bank_changes); DP_MR_SUM(bank_log_overflow);
+    DP_MR_SUM(interrupt_suppressed); DP_MR_SUM(vdp_register_ignored);
+    DP_MR_SUM(memory_writes); DP_MR_SUM(memory_effect_changes); DP_MR_SUM(memory_log_overflow);
+    if(s->input_site_count>d->input_site_count) d->input_site_count=s->input_site_count;
+    d->loop_context_peak+=s->loop_context_peak;
+    d->loop_context_capacity+=s->loop_context_capacity;
+    d->loop_context_growths+=s->loop_context_growths;
+#define DP_MR_CS(f) d->closure.f+=s->closure.f
+    DP_MR_CS(seeds); DP_MR_CS(seed_skips); DP_MR_CS(nodes); DP_MR_CS(processed);
+    DP_MR_CS(duplicates); DP_MR_CS(view_skips); DP_MR_CS(context_cuts); DP_MR_CS(node_cuts);
+    DP_MR_CS(unmapped); DP_MR_CS(ambiguous); DP_MR_CS(padding); DP_MR_CS(data);
+    DP_MR_CS(decode); DP_MR_CS(indirect); DP_MR_CS(returns_resolved); DP_MR_CS(halted);
+    DP_MR_CS(map_barriers); DP_MR_CS(new_bytes); DP_MR_CS(stack_invalidations);
+    DP_MR_CS(stack_cuts); DP_MR_CS(indirect_resolved); DP_MR_CS(memory_resolved);
+    DP_MR_CS(static_data_reads); DP_MR_CS(static_data_bytes);
+    d->closure.views+=s->closure.views;
+#define DP_MR_TC(f) d->target_closure.f+=s->target_closure.f
+    DP_MR_TC(seeds); DP_MR_TC(seed_skips); DP_MR_TC(nodes); DP_MR_TC(processed);
+    DP_MR_TC(duplicates); DP_MR_TC(view_skips); DP_MR_TC(context_cuts); DP_MR_TC(node_cuts);
+    DP_MR_TC(unmapped); DP_MR_TC(ambiguous); DP_MR_TC(padding); DP_MR_TC(data);
+    DP_MR_TC(decode); DP_MR_TC(indirect); DP_MR_TC(returns_resolved); DP_MR_TC(halted);
+    DP_MR_TC(map_barriers); DP_MR_TC(new_bytes); DP_MR_TC(stack_invalidations);
+    DP_MR_TC(stack_cuts); DP_MR_TC(indirect_resolved); DP_MR_TC(memory_resolved);
+    DP_MR_TC(static_data_reads); DP_MR_TC(static_data_bytes);
+    d->target_closure.views+=s->target_closure.views;
+#define DP_MR_BC(f) d->block_closure.f+=s->block_closure.f
+    DP_MR_BC(seeds); DP_MR_BC(seed_skips); DP_MR_BC(nodes); DP_MR_BC(processed);
+    DP_MR_BC(duplicates); DP_MR_BC(view_skips); DP_MR_BC(context_cuts); DP_MR_BC(node_cuts);
+    DP_MR_BC(unmapped); DP_MR_BC(ambiguous); DP_MR_BC(padding); DP_MR_BC(data);
+    DP_MR_BC(decode); DP_MR_BC(indirect); DP_MR_BC(returns_resolved); DP_MR_BC(halted);
+    DP_MR_BC(map_barriers); DP_MR_BC(new_bytes); DP_MR_BC(stack_invalidations);
+    DP_MR_BC(stack_cuts); DP_MR_BC(indirect_resolved); DP_MR_BC(memory_resolved);
+    DP_MR_BC(static_data_reads); DP_MR_BC(static_data_bytes);
+    d->block_closure.views+=s->block_closure.views;
+#undef DP_MR_CS
+#undef DP_MR_TC
+#undef DP_MR_BC
+#undef DP_MR_SUM
+    sections_finalize(d);
+}
+// thread body of the parallel drain
+typedef struct { const DpSegaSystem *s; const uint8_t *rom; size_t size;
+    const DpSegaOptions *o; DpSegaResults *r; int worker,jobs,ok; } DpSegaWorker;
+static void *drain_thread(void *arg) {
+    DpSegaWorker *w=arg;
+    w->ok=sega_explore_one(w->s,w->rom,w->size,w->o,w->r,w->worker,w->jobs);
+    return NULL;
+}
+int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *o,DpSegaResults *r) {
+    int jobs=o?o->jobs:1;
+    if(jobs<=1) return sega_explore_one(s,rom,size,o,r,0,1);
+    if(!strcmp(s->id,"msx")) {
+        // the MSX runtime has no prefixed clone yet: the request is refused,
+        // counted, and the exploration runs single core
+        DpSegaOptions one=*o; one.jobs=1;
+        int ok=sega_explore_one(s,rom,size,&one,r,0,1);
+        if(ok) { r->jobs_capped=1; }
+        return ok;
+    }
+    if(jobs>2) jobs=2;
+    DpSegaResults second;
+    DpSegaWorker w={s,rom,size,o,&second,1,jobs,0};
+    pthread_t th;
+    if(pthread_create(&th,NULL,drain_thread,&w)) {
+        int ok=sega_explore_one(s,rom,size,o,r,0,1);
+        if(ok) r->jobs_capped=1;
+        return ok;
+    }
+    int ok=sega_explore_one(s,rom,size,o,r,0,jobs);
+    pthread_join(th,NULL);
+    if(!w.ok) { // a failed worker must not halve the result silently
+        dp_sega_results_free(&second);
+        if(ok) fprintf(stderr,"deepeel: --jobs: worker 1 failed, results incomplete\n");
+        return 0;
+    }
+    if(ok) merge_results(r,&second);
+    dp_sega_results_free(&second);
+    if(o->jobs>2) r->jobs_capped=o->jobs-2;
+    return ok;
+}
 // static scan (GB dp_static_scan parity): padding runs of 8+ identical
 // $00/$FF bytes, and pointer-table words — a word in a switchable window
 // flanked by two other window words — marked on the observed flag bytes
@@ -1464,6 +1659,8 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
         r->phase_steps[2],r->phase_limits[2],r->phase_paths[2],r->phase_known[2],r->phase_pending[2]);
     fprintf(out,"play session: %"PRIu64" steps; %"PRIu64" input epochs\n",r->play_steps,r->play_epochs);
     fprintf(out,"tas replay: %"PRIu64" frames; %"PRIu64" steps; frames refused %"PRIu64"\n",r->tas_frames,r->tas_steps,r->tas_frames_refused);
+    fprintf(out,"drain: jobs capped %"PRIu64"; seeds off-lane %"PRIu64"; section attribution conflicts %"PRIu64" (record paths and parent paths are per-worker with --jobs 2)\n",
+        r->jobs_capped,r->seeds_offlane,r->merge_conflicts);
     fprintf(out,"indirect jumps: sites %"PRIu64"; targets %"PRIu64"; seeded %"PRIu64"; refused budget %"PRIu64"; pending %"PRIu64"; site overflow %"PRIu64"; target overflow %"PRIu64"\n",
         r->indirect_sites,r->indirect_targets,r->indirect_seeds,r->indirect_refused_budget,r->indirect_pending,r->indirect_site_overflow,r->indirect_target_overflow);
     fprintf(out,"cuts: steps %"PRIu64"; loop %"PRIu64"; fork %"PRIu64"; queue %"PRIu64"; paths %"PRIu64"; global-pending %"PRIu64"; decode %"PRIu64"; faults %"PRIu64"\n",r->step_cuts,r->loop_cuts,r->fork_cuts,r->queue_cuts,r->path_cuts,r->global_cuts,r->decode_cuts,r->faults);
@@ -1570,6 +1767,11 @@ int dp_sega_explore_command(int argc,char **argv) {
         if(!strcmp(argv[i],"--no-target-closure")) { o.target_closure=0; continue; }
         if(!strcmp(argv[i],"--no-closure")) { o.closure.nodes=0; continue; }
         if(!strcmp(argv[i],"--tas")) { if(i+1>=argc) goto usage; o.tas_path=argv[++i]; continue; }
+        if(!strcmp(argv[i],"--jobs")) {
+            if(i+1>=argc) goto usage;
+            uint64_t n; if(!number(argv[++i],&n) || !n || n>65536) goto usage;
+            o.jobs=(int)n; continue;
+        }
         if(i+1>=argc) goto usage;
         const char *key=argv[i++],*value=argv[i];
         if(!strcmp(key,"--text")) text=value;
@@ -1636,5 +1838,5 @@ int dp_sega_explore_command(int argc,char **argv) {
     }
     dp_sega_results_free(&r); return ok?0:1;
 usage:
-    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE]\n"); return 2;
+    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE]\n"); return 2;
 }

@@ -299,7 +299,51 @@ set_target_properties(deepeel_msx PROPERTIES IMPORTED_LOCATION ${DP_MSX_ARCHIVE}
 add_dependencies(deepeel_msx dp_msx_runtime)
 target_link_libraries(deepeel PRIVATE deepeel_msx)
 add_library(deepeel_sega STATIC src/platform/sega/explore.c src/platform/sega/closure.c src/platform/sega/visits.c src/platform/sega/tas.c src/core/zip.c)
-target_link_libraries(deepeel_sega PUBLIC deepeel_sg deepeel_gg deepeel_msx)
+# Second runtime instances for --jobs 2: the same sources compiled again with
+# the backend getter renamed, then every global namespaced by objcopy (the
+# dp_sega_prefix.cmake generalization of the MSX technique).
+add_library(deepeel_sg2_raw STATIC
+  ${M0BOY_DIR}/targets/sg1000/runtime/sg1000.c
+  ${M0BOY_DIR}/targets/sg1000/runtime/sg_audio.c
+  ${M0BOY_DIR}/targets/sg1000/runtime/tms9918.c
+  src/platform/sega/backend_sg.c)
+target_compile_definitions(deepeel_sg2_raw PRIVATE dp_sega_backend_sg=dp_sega_backend_sg2)
+target_include_directories(deepeel_sg2_raw PRIVATE
+  ${M0BOY_DIR}/targets/common/runtime ${M0BOY_DIR}/targets/sg1000/runtime)
+set(DP_SG2_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_sg2.a)
+add_custom_command(OUTPUT ${DP_SG2_ARCHIVE}
+  BYPRODUCTS ${DP_SG2_ARCHIVE}.syms
+  COMMAND ${CMAKE_COMMAND} -DNM=${DP_NM} -DOBJCOPY=${DP_OBJCOPY}
+    -DINPUT=$<TARGET_FILE:deepeel_sg2_raw> -DOUTPUT=${DP_SG2_ARCHIVE}
+    -DPREFIX=dp_sg2_ -DPATTERNS=machine|sg[A-Za-z0-9_]*|tms[A-Za-z0-9_]*
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_sega_prefix.cmake
+  DEPENDS deepeel_sg2_raw cmake/dp_sega_prefix.cmake VERBATIM)
+add_library(deepeel_sg2 STATIC IMPORTED GLOBAL)
+set_target_properties(deepeel_sg2 PROPERTIES IMPORTED_LOCATION ${DP_SG2_ARCHIVE})
+add_custom_target(dp_sg2_runtime DEPENDS ${DP_SG2_ARCHIVE})
+add_dependencies(deepeel_sg2 dp_sg2_runtime)
+add_library(deepeel_gg2_raw STATIC
+  ${M0BOY_DIR}/targets/gamegear/runtime/gg.c
+  ${M0BOY_DIR}/targets/gamegear/runtime/gg_vdp.c
+  ${M0BOY_DIR}/targets/gamegear/runtime/gg_psg.c
+  src/platform/sega/backend_gg.c)
+target_compile_definitions(deepeel_gg2_raw PRIVATE GG_ROM_TRACE=1 dp_sega_backend_gg=dp_sega_backend_gg2)
+target_include_directories(deepeel_gg2_raw PRIVATE
+  ${M0BOY_DIR}/targets/gamegear/runtime ${M0BOY_DIR}/targets/common/runtime
+  ${M0BOY_DIR}/targets/sg1000/runtime)
+set(DP_GG2_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_gg2.a)
+add_custom_command(OUTPUT ${DP_GG2_ARCHIVE}
+  BYPRODUCTS ${DP_GG2_ARCHIVE}.syms
+  COMMAND ${CMAKE_COMMAND} -DNM=${DP_NM} -DOBJCOPY=${DP_OBJCOPY}
+    -DINPUT=$<TARGET_FILE:deepeel_gg2_raw> -DOUTPUT=${DP_GG2_ARCHIVE}
+    -DPREFIX=dp_gg2_ -DPATTERNS=machine|sg[A-Za-z0-9_]*|gg[A-Za-z0-9_]*|tms[A-Za-z0-9_]*
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_sega_prefix.cmake
+  DEPENDS deepeel_gg2_raw cmake/dp_sega_prefix.cmake VERBATIM)
+add_library(deepeel_gg2 STATIC IMPORTED GLOBAL)
+set_target_properties(deepeel_gg2 PROPERTIES IMPORTED_LOCATION ${DP_GG2_ARCHIVE})
+add_custom_target(dp_gg2_runtime DEPENDS ${DP_GG2_ARCHIVE})
+add_dependencies(deepeel_gg2 dp_gg2_runtime)
+target_link_libraries(deepeel_sega PUBLIC deepeel_sg deepeel_gg deepeel_msx deepeel_sg2 deepeel_gg2 Threads::Threads)
 target_link_libraries(deepeel PRIVATE deepeel_sega)
 target_link_libraries(deepeel PRIVATE deepeel_z80)
 target_link_libraries(deepeel PRIVATE deepeel_core m ${DP_GUI_LIBS})
