@@ -28,6 +28,7 @@ enum {
     DP_ISSUE_BUDGET,
     DP_ISSUE_CAPPED,
     DP_ISSUE_NONSENSE,
+    DP_ISSUE_SPOOLED,
     DP_ISSUE_N,
 };
 

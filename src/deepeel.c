@@ -35,6 +35,10 @@ static void usage(void) {
             "                         dropping paths, stopped by --mem-cap when set\n"
             "    --mem-cap MB         wall shared by the play and the queue growth:\n"
             "                         stop/grow no more once RSS exceeds MB MiB\n"
+            "    --spool-cap-mb MB    disk budget of the state spool (default 4096): with\n"
+            "                         a --state-dir, states the RAM worklist cannot hold\n"
+            "                         wait in <state-dir>/spool.bin and --resume continues\n"
+            "                         an interrupted run exactly where it stopped\n"
             "    --time-limit SEC     play wall clock: stop gracefully (pool saved) after\n"
             "                         SEC seconds, TAS movies included (0 = off)\n"
             "    --loop-cap N         iterations of one backward edge before cut (default 4096)\n"
@@ -244,6 +248,7 @@ static int cmd_explore(int argc, char **argv) {
             cfg.mem_cap_mb = scfg.mem_cap_mb;
         }
         else if (!strcmp(a, "--time-limit") && i + 1 < argc) scfg.time_limit_secs = strtoull(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--spool-cap-mb") && i + 1 < argc) cfg.spool_cap_mb = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed-cap") && i + 1 < argc) cfg.seed_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed-banks")) cfg.seed_banks = 1;
         else if (!strcmp(a, "--no-pointer-scan")) cfg.no_pointer_scan = 1;
@@ -337,6 +342,19 @@ static int cmd_explore(int argc, char **argv) {
         if (dp_tree_load(&tree, tpath))
             fprintf(stderr, "deepeel: resumed tree (%u choices, depth %u)\n", tree.n - 1,
                     tree.max_depth);
+    }
+    // the disk spool: overflow states survive any stop, --resume continues
+    // where the previous run stopped (worklist + exact dedup)
+    char spool_path[540], exact_path[540];
+    int spool_on = 0;
+    if (scfg.state_dir) {
+        snprintf(spool_path, sizeof spool_path, "%s/spool.bin", scfg.state_dir);
+        snprintf(exact_path, sizeof exact_path, "%s/exact.bin", scfg.state_dir);
+        spool_on = dp_explorer_spool_attach(ex, spool_path, scfg.resume);
+        if (!spool_on)
+            fprintf(stderr, "deepeel: spool unavailable (%s), overflow states are dropped\n",
+                    spool_path);
+        if (scfg.resume) dp_explorer_exact_load(ex, exact_path);
     }
     dp_seed_gb(ex);
     for (int i = 0; i < entries; i++)
@@ -570,6 +588,14 @@ static int cmd_explore(int argc, char **argv) {
             dp_buf_free(&out);
             free(cls);
         }
+    }
+    if (spool_on) {
+        uint64_t pend = dp_explorer_spool_flush(ex);
+        if (pend)
+            fprintf(stderr, "deepeel: %llu states (%llu MiB) spooled for the next --resume\n",
+                    (unsigned long long)(res.spool_writes - res.spool_reads),
+                    (unsigned long long)(pend >> 20));
+        dp_explorer_exact_save(ex, exact_path);
     }
     dp_explorer_free(ex);
     if (play_engine) dp_play_free(play_engine);

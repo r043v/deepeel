@@ -55,7 +55,7 @@ void dp_tree_close(DpTree *t, uint32_t id, int issue) {
 
 const char *dp_issue_name(int issue) {
     static const char *names[DP_ISSUE_N] = {"open", "done", "merged", "dead", "reset",
-                                            "budget", "capped", "nonsense"};
+                                            "budget", "capped", "nonsense", "spooled"};
     return issue >= 0 && issue < DP_ISSUE_N ? names[issue] : "?";
 }
 
@@ -116,7 +116,7 @@ void dp_tree_stats(const DpTree *t, char *out, size_t outsz) {
     o += (size_t)snprintf(out + o, outsz - o, "tree: %u choices, depth %u, open %u",
                           t->n ? t->n - 1 : 0, t->max_depth, t->open);
     static const char *names[DP_ISSUE_N] = {"open", "done", "merged", "dead", "reset",
-                                            "budget", "capped", "nonsense"};
+                                            "budget", "capped", "nonsense", "spooled"};
     for (int i = 1; i < DP_ISSUE_N; i++)
         if (t->closed[i])
             o += (size_t)snprintf(out + o, outsz - o, ", %s %u", names[i], t->closed[i]);

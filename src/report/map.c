@@ -455,6 +455,31 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     if (GAP + (int)strlen(head) * 6 * head_scale + 2 * GAP + foot_w <= w)
         legend_text(rgb, w, h, w - GAP - foot_w, y, foot, (const uint8_t *)"\x90\x90\x98", 1);
     y += LH;
+    // one common scale for every legend entry (a mixed-size legend reads
+    // badly): the largest scale at which the widest entry of each column
+    // still fits its own column
+    int lavail = two_cols ? w / 2 - 14 : w - 12, ravail = w - GAP - w / 2;
+    int ls = FSCALE, rs = FSCALE;
+    for (int r = 0; r < half; r++) {
+        if (r < ncls) {
+            char line[64];
+            double p = s->cls[order[r]] * pct;
+            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[order[r]]);
+            else snprintf(line, sizeof line, "%s %.1f%%", fr[order[r]], p);
+            int need = (7 + 3 + (int)strlen(line) * 6) * ls;
+            while (ls > 1 && need > lavail) { ls--; need = (7 + 3 + (int)strlen(line) * 6) * ls; }
+        }
+        if (two_cols && r + half < ncls) {
+            char line[64];
+            double p = s->cls[order[r + half]] * pct;
+            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[order[r + half]]);
+            else snprintf(line, sizeof line, "%s %.1f%%", fr[order[r + half]], p);
+            int need = (7 + 3 + (int)strlen(line) * 6) * rs;
+            while (rs > 1 && need > ravail) { rs--; need = (7 + 3 + (int)strlen(line) * 6) * rs; }
+        }
+    }
+    int s_common = ls < rs ? ls : rs; // both columns at the same scale
+    ls = rs = s_common;
     for (int r = 0; r < half; r++) {
         int ry = y + r * LH;
         if (r < ncls) {
@@ -463,8 +488,7 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
             double p = s->cls[c] * pct;
             if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[c]);
             else snprintf(line, sizeof line, "%s %.1f%%", fr[c], p);
-            legend_entry(rgb, w, h, ry, line, map_rgb[c], FSCALE,
-                         two_cols ? w / 2 - 14 : w - 12, -1);
+            legend_entry(rgb, w, h, ry, line, map_rgb[c], ls, lavail, -1);
         }
         if (two_cols && r + half < ncls) {
             int c = order[r + half];
@@ -472,7 +496,7 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
             double p = s->cls[c] * pct;
             if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[c]);
             else snprintf(line, sizeof line, "%s %.1f%%", fr[c], p);
-            legend_entry(rgb, w, h, ry, line, map_rgb[c], FSCALE, w - GAP - w / 2, w - GAP);
+            legend_entry(rgb, w, h, ry, line, map_rgb[c], rs, ravail, w - GAP);
         }
     }
     int ok = dp_png_save_text2(path, w, h, rgb, "deepeel_map", map_text, map_len,

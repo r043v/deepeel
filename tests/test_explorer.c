@@ -3,6 +3,7 @@
 #include "../src/explore/explorer.h"
 #include "../src/report/report.h"
 #include "mach_util.h"
+#include <unistd.h>
 #include "test_util.h"
 
 static DpCart *g_cart;
@@ -303,6 +304,69 @@ int main(int argc, char **argv) {
         CHECK(res.queue_growths >= 1);        // the growth happened, counted
         CHECK(res.paths_run > paths_capped);  // the kept paths really ran
         CHECK(res.queue_overflows == 0);      // under the ceiling nothing is lost
+    }
+
+    // --- disk spool: the states a tiny worklist cannot hold wait on disk, ---------
+    // a stopped run resumes exactly where it stopped (worklist + exact dedup)
+    {
+        char p[512], err[256], spool[512], exactf[512];
+        snprintf(p, sizeof p, "%s/fix_branch.gb", dir);
+        snprintf(spool, sizeof spool, "%s/spool_test.bin", dir);
+        snprintf(exactf, sizeof exactf, "%s/exact_test.bin", dir);
+        unlink(spool);
+        unlink(exactf);
+        if (g_cart) dp_cart_free(g_cart);
+        g_cart = dp_cart_load(p, err, sizeof err);
+        if (!g_cart) exit(2);
+        DpConfig cfg;
+        dp_config_defaults(&cfg);
+        cfg.queue_cap = 2;
+        cfg.queue_max = 2; // no RAM growth: everything overflows to the spool
+        cfg.fork_site_cap = 1000;
+        cfg.no_covered_prune = 1;
+        cfg.max_steps_total = 2000000;
+
+        // run 1: a hard stop after a few paths, the worklist is flushed out
+        if (res.cart) dp_results_free(&res);
+        memset(&res, 0, sizeof res);
+        dp_results_init(&res, g_cart, dp_platform_gb());
+        dp_static_scan(&res);
+        if (g_mach) dp_mach_close(g_mach);
+        g_mach = mach_for(g_cart);
+        cfg.max_paths = 5;
+        DpExplorer *ex = dp_explorer_new(&cfg, &res, g_mach);
+        CHECK(dp_explorer_spool_attach(ex, spool, 0));
+        dp_seed_gb(ex);
+        dp_explore(ex); // the path wall stops it, the worklist is still full
+        uint64_t paths_run1 = res.paths_run;
+        CHECK(res.spool_writes >= 1); // the queue really overflowed to disk
+        CHECK(res.queue_overflows == 0); // nothing was dropped
+        uint64_t pend = dp_explorer_spool_flush(ex);
+        CHECK(pend >= 1); // the stop left pending states for the next run
+        CHECK(dp_explorer_exact_save(ex, exactf));
+        dp_explorer_free(ex);
+
+        // run 2: --resume — the spool and the dedup come back, the exploration
+        // continues and runs strictly more paths than the stopped run
+        dp_results_init(&res, g_cart, dp_platform_gb());
+        dp_static_scan(&res);
+        if (g_mach) dp_mach_close(g_mach);
+        g_mach = mach_for(g_cart);
+        cfg.max_paths = 0;
+        DpExplorer *ex2 = dp_explorer_new(&cfg, &res, g_mach);
+        CHECK(dp_explorer_spool_attach(ex2, spool, 1));
+        CHECK(dp_explorer_exact_load(ex2, exactf));
+        ex2->tree = NULL;
+        dp_seed_gb(ex2);
+        dp_explore(ex2);
+        uint64_t pend2 = dp_explorer_spool_flush(ex2);
+        dp_explorer_free(ex2);
+        CHECK(res.spool_reads >= 1); // the spooled states really came back
+        CHECK(res.paths_run > paths_run1); // the resumed run went further
+        CHECK(pend2 == 0); // the resumed run drained the spool completely
+        CHECK(res.queue_overflows == 0);
+        unlink(spool);
+        unlink(exactf);
     }
 
     // --- reports produce output -------------------------------------------------------

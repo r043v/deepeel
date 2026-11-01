@@ -176,6 +176,7 @@ void dp_config_defaults(DpConfig *cfg) {
     cfg->max_copies = 65536;
     cfg->closure_rounds = 12; // each round exits early once it seeds nothing
     cfg->covered_fork_keep = 2;
+    cfg->spool_cap_mb = 4096;
 }
 
 uint64_t dp_rss_mb(void) {
@@ -372,6 +373,7 @@ void dp_explorer_free(DpExplorer *ex) {
     free(ex->seed_base);
     free(ex->seed_bank_img);
     dp_set_free(&ex->exact);
+    if (ex->spool) fclose(ex->spool);
     free(ex);
 }
 
@@ -437,6 +439,8 @@ static int queue_grow(DpExplorer *ex) {
 
 // returns 0 when the state was dropped (dedup, dedup-set full or queue full):
 // the caller can then retry it later instead of losing it
+static int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int kind,
+                           int from_reset, uint32_t choice);
 static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, int from_reset,
                           uint32_t choice, int pri) {
     uint64_t h = image_hash(ex, img);
@@ -462,6 +466,13 @@ static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, in
             q = ex->queue;
             cap = ex->q_cap;
             head = ex->q_head;
+        } else if (!pri && ex->spool &&
+                   spool_write_rec(ex, img, forced, kind, from_reset, choice)) {
+            // the RAM worklist is at its wall: the state waits on disk instead
+            // of dying — never a silent loss
+            if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_SPOOLED);
+            free(img);
+            return 0;
         } else {
             if (pri) ex->res->closure_seeds_refused++; // saturation surfaced, retried later
             else ex->res->queue_overflows++;
@@ -1107,8 +1118,163 @@ static uint64_t project_ctx(DpExplorer *ex, const DpSection *s) {
     return h;
 }
 
+// --- disk spool -------------------------------------------------------------------
+// Overflow states survive: a full worklist under the mem-cap/q_max writes them
+// to <state-dir>/spool.bin instead of dropping them, dp_explore_step feeds them
+// back while the worklist runs low, and a flush before exit lets --resume
+// continue exactly where the run stopped.  Record: magic 'DPSR', flags byte,
+// u32 choice, u32 img length, image bytes.  One file, two cursors: records are
+// appended at spool_wr and read back from spool_rd.
+#define DP_SPOOL_REC 0x52535044ull // 'DPSR' little-endian
+
+static int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int kind,
+                           int from_reset, uint32_t choice) {
+    if (!ex->spool) return 0;
+    if (ex->cfg.spool_cap_mb &&
+        (ex->spool_wr - ex->spool_rd) / (1024 * 1024) >= ex->cfg.spool_cap_mb) {
+        ex->res->spool_refused++;
+        return 0;
+    }
+    uint64_t hdr[3] = { DP_SPOOL_REC,
+                        (uint64_t)(forced ? 1 : 0) | ((uint64_t)kind << 8) |
+                            ((uint64_t)(from_reset ? 1 : 0) << 16) | ((uint64_t)choice << 32),
+                        ex->sb };
+    if (fseek(ex->spool, (long)ex->spool_wr, SEEK_SET)) return 0;
+    if (fwrite(hdr, sizeof hdr, 1, ex->spool) != 1 || fwrite(img, 1, ex->sb, ex->spool) != ex->sb) {
+        perror("deepeel spool");
+        return 0;
+    }
+    ex->spool_wr += sizeof hdr + ex->sb;
+    ex->res->spool_writes++;
+    ex->res->spool_bytes = ex->spool_wr - ex->spool_rd;
+    return 1;
+}
+
+// feeds pending spool records back into the main worklist (never the priority
+// inbox: its seeds are retried by their own phases).  Stops when the spool is
+// drained or the queue holds no more room.  The exact-state dedup already
+// contains these states (inserted at push time), so nothing is re-hashed.
+static void spool_feed(DpExplorer *ex) {
+    while (ex->spool && ex->spool_rd < ex->spool_wr && ex->q_len < ex->q_cap) {
+        uint64_t hdr[3];
+        if (fseek(ex->spool, (long)ex->spool_rd, SEEK_SET) ||
+            fread(hdr, sizeof hdr, 1, ex->spool) != 1 || hdr[0] != DP_SPOOL_REC ||
+            hdr[2] != ex->sb) {
+            fprintf(stderr, "deepeel: spool corrupt at %llu, dropping the rest\n",
+                    (unsigned long long)ex->spool_rd);
+            ex->spool_rd = ex->spool_wr;
+            break;
+        }
+        uint8_t *img = xrealloc(NULL, ex->sb);
+        if (!img || fread(img, 1, ex->sb, ex->spool) != ex->sb) { free(img); break; }
+        ex->spool_rd += sizeof hdr + ex->sb;
+        DpPathState *p = &ex->queue[(ex->q_head + ex->q_len) % ex->q_cap];
+        memset(p, 0, sizeof *p);
+        p->img = img;
+        p->forced = (uint8_t)(hdr[1] & 1);
+        p->kind = (uint8_t)(hdr[1] >> 8);
+        p->from_reset = (uint8_t)((hdr[1] >> 16) & 1);
+        p->choice = (uint32_t)(hdr[1] >> 32);
+        ex->q_len++;
+        ex->res->spool_reads++;
+        ex->res->spool_bytes = ex->spool_wr - ex->spool_rd;
+    }
+}
+
+int dp_explorer_spool_attach(DpExplorer *ex, const char *path, int resume) {
+    ex->spool = fopen(path, resume ? "r+b" : "wb+");
+    if (!ex->spool) return 0;
+    if (resume && fseek(ex->spool, 0, SEEK_END) == 0) {
+        long sz = ftell(ex->spool);
+        ex->spool_wr = ex->spool_rd = 0;
+        if (sz >= 0) {
+            // only whole records count: a killed process may have truncated one
+            size_t rec = sizeof(uint64_t) * 3 + ex->sb;
+            ex->spool_wr = ex->spool_rd = (uint64_t)((long)sz / (long)rec * (long)rec);
+        }
+    } else {
+        ex->spool_wr = ex->spool_rd = 0;
+    }
+    return 1;
+}
+
+uint64_t dp_explorer_spool_pending(const DpExplorer *ex) {
+    return ex->spool ? ex->spool_wr - ex->spool_rd : 0;
+}
+
+// pours the remaining worklist into the spool (a stop or a normal exit): the
+// next --resume picks the states up; returns states still pending
+uint64_t dp_explorer_spool_flush(DpExplorer *ex) {
+    if (!ex->spool) return 0;
+    for (uint32_t i = 0; i < ex->q_len; i++) {
+        DpPathState *p = &ex->queue[(ex->q_head + i) % ex->q_cap];
+        if (p->img) {
+            spool_write_rec(ex, p->img, p->forced, p->kind, p->from_reset, p->choice);
+            free(p->img);
+            memset(p, 0, sizeof *p);
+        }
+    }
+    ex->q_len = 0;
+    ex->q_head = 0;
+    for (uint32_t i = 0; i < ex->pq_len; i++) {
+        DpPathState *p = &ex->pqueue[(ex->pq_head + i) % ex->pq_cap];
+        if (p->img) {
+            spool_write_rec(ex, p->img, p->forced, p->kind, p->from_reset, p->choice);
+            free(p->img);
+            memset(p, 0, sizeof *p);
+        }
+    }
+    ex->pq_len = 0;
+    ex->pq_head = 0;
+    fflush(ex->spool);
+    return dp_explorer_spool_pending(ex);
+}
+
+// --- exact-set persistence -----------------------------------------------------
+int dp_explorer_exact_save(const DpExplorer *ex, const char *path) {
+    FILE *f = fopen(path, "wb");
+    if (!f) return 0;
+    const uint32_t ver = 1;
+    fwrite("DPEX", 1, 4, f);
+    fwrite(&ver, sizeof ver, 1, f);
+    fwrite(&ex->exact.cnt, sizeof ex->exact.cnt, 1, f);
+    for (size_t i = 0; i < ex->exact.cap; i++)
+        if (ex->exact.used[i]) fwrite(&ex->exact.keys[i], sizeof(uint64_t), 1, f);
+    int ok = !ferror(f);
+    fclose(f);
+    return ok;
+}
+
+int dp_explorer_exact_load(DpExplorer *ex, const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    char magic[4];
+    uint32_t ver;
+    size_t cnt = 0;
+    if (fread(magic, 1, 4, f) != 4 || memcmp(magic, "DPEX", 4) || fread(&ver, sizeof ver, 1, f) != 1 ||
+        ver != 1 || fread(&cnt, sizeof cnt, 1, f) != 1) {
+        fclose(f);
+        return 0;
+    }
+    // room for the saved keys plus the run's own discoveries
+    size_t need = cnt * 2 + 65536;
+    if (need > ex->exact.cap_abs) {
+        dp_set_free(&ex->exact);
+        dp_set_init(&ex->exact, need);
+    }
+    size_t n = 0;
+    for (uint64_t k; n < cnt && fread(&k, sizeof k, 1, f) == 1; n++)
+        if (dp_set_insert(&ex->exact, k) != 1) break;
+    fclose(f);
+    fprintf(stderr, "deepeel: resumed dedup (%zu states known)\n", n);
+    return n == cnt;
+}
+
 int dp_explore_step(DpExplorer *ex) {
     DpResults *res = ex->res;
+    // any free worklist slot: pull the spooled overflow back in (also covers
+    // the everything-drained case, so a spool keeps dp_explore going)
+    if (ex->q_len < ex->q_cap && dp_explorer_spool_pending(ex)) spool_feed(ex);
     if (!ex->q_len && !ex->pq_len) return 0;
     if (ex->cfg.max_paths && res->paths_run >= ex->cfg.max_paths) {
         res->budget_paths++;
