@@ -149,6 +149,7 @@ def cmd_scan(args):
             "--queue", "4096", "--queue-max", str(args.queue_max),
             "--mem-cap", str(args.mem_cap),
             "--spool-cap-mb", str(args.spool_cap_mb),
+            "--jobs", str(args.jobs),
             "--covered-keep", "8", "--seed-banks",
             "--closure-rounds", "12",
             "--max-total", str(max_total_for(rom_banks(path))),
@@ -401,6 +402,8 @@ def main():
     scan.add_argument("--mem-cap", type=int, default=3500, help="RSS cap in MiB")
     scan.add_argument("--queue-max", type=int, default=32768, help="worklist growth ceiling")
     scan.add_argument("--spool-cap-mb", type=int, default=3000, help="disk spool cap in MiB")
+    scan.add_argument("--jobs", type=int, default=min(16, os.cpu_count() or 1),
+                      help="parallel drain workers")
     scan.add_argument("--only", help="single slug")
     scan.add_argument("--full", action="store_true", help="no time limit (the 'à fond' pass)")
     scan.add_argument("--resume", action="store_true", help="resume from the saved pool if any")
