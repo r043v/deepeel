@@ -104,6 +104,21 @@ def build(out):
     w(r, 0x155, 0x76)                            # halt (IME 0: nothing dispatches)
     save(out, "fix_keyirq", r)
 
+    # --- p1poll: keys read straight out of $FF00 (polling, no IRQ); the
+    # explorer must fork on the read and press each key ---------------------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x3E, 0x20)                      # ld a,$20 (select button keys)
+    w(r, 0x152, 0xE0, 0x00)                      # ldh ($00),a  P1 select
+    w(r, 0x154, 0xF0, 0x00)                      # ldh a,($00)  poll P1
+    w(r, 0x156, 0xE6, 0x08)                      # and $08      Start pressed? (0 = yes)
+    w(r, 0x158, 0xCA, 0x70, 0x01)                # jp z,$170    (only with the fork)
+    w(r, 0x15B, 0x18, 0xFE)                      # jr -2: poll again (natural path)
+    w(r, 0x170, 0x3E, 0x99)                      # ld a,$99
+    w(r, 0x172, 0xEA, 0x00, 0x80)                # ld ($8000),a
+    w(r, 0x175, 0x76)                            # halt
+    save(out, "fix_p1poll", r)
+
     # --- dma: OAM DMA from ROM source ----------------------------------------
     r = rom(2)
     w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)

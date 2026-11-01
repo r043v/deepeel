@@ -259,6 +259,7 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--no-context-evict")) cfg.no_context_evict = 1;
         else if (!strcmp(a, "--no-irq-fork")) cfg.no_irq_fork = 1;
         else if (!strcmp(a, "--no-key-fork")) cfg.no_key_fork = 1;
+        else if (!strcmp(a, "--no-p1-fork")) cfg.no_p1_fork = 1;
         else if (!strcmp(a, "--no-closure")) cfg.no_closure = 1;
         else if (!strcmp(a, "--closure-rounds") && i + 1 < argc) cfg.closure_rounds = atoi(argv[++i]);
         else if (!strcmp(a, "--no-covered-prune")) cfg.no_covered_prune = 1;

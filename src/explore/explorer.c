@@ -24,6 +24,7 @@ static int is_illegal_op(uint8_t op);
 static void fork_branch(DpExplorer *ex, int cond, uint32_t site, uint16_t pc, uint8_t op);
 static void fork_irq(DpExplorer *ex);
 static void fork_key(DpExplorer *ex, uint32_t site);
+static void fork_p1(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op);
 
 // --- shared-map primitives -----------------------------------------------------
 static inline uint8_t flags_or(uint8_t *p, uint8_t bit) {
@@ -886,6 +887,10 @@ bad_done:
         // pending): the variant presses one key the machine is not pressing
         if (!ex->cfg.no_key_fork && !ex->cfg.no_irq_fork && (*api->ie & 0x10))
             fork_key(ex, pk);
+        // keys a polling game reads straight out of $FF00 (no IRQ needed):
+        // propose each pressed key as its own variant
+        if (!ex->cfg.no_p1_fork && (op == 0xF0 || op == 0xF2))
+            fork_p1(ex, pk, pc, op);
     }
 
     // backward edges and call sites (operand bytes read through the map)
@@ -1149,9 +1154,49 @@ static void fork_key(DpExplorer *ex, uint32_t site) {
         }
     }
     dp_mach_load(m, img); // the natural side continues, untouched
+    m->api->set_buttons(0); // recompute the derived P1 register (not in the image)
     free(img);
 }
 
+/* the P1-poll variant: games that read $FF00 directly (polling, no joypad
+ * IRQ armed) never see a key pressed on this explorer — the buttons stay
+ * released for the whole run.  Each variant holds one key the machine is
+ * not pressing; the joypad IRQ the console would raise at the press is
+ * cleared in the variant so only the polled VALUE differs (the IRQ path
+ * already has its own forks).  Capped per site like the branch forks. */
+static void fork_p1(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op) {
+    const DpGblApi *api = ex->mach->api;
+    if (op == 0xF0) { // ldh a,(n): only $FF00 is the joypad
+        if (dp_mach_op(ex->mach, (uint16_t)(pc + 1)) != 0x00) return;
+    } else if (api->gbr->c != 0x00) { // ld a,(C): P1 only when C == $FF00
+        return;
+    }
+    uint32_t *cnt = dp_map_get_or_add(&ex->res->fork_counts, site ^ 0xC0000000u);
+    if (cnt && *cnt >= ex->cfg.fork_site_cap) {
+        ex->res->forks_capped++;
+        return;
+    }
+    if (cnt) (*cnt)++;
+    static const uint8_t keys[8] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80};
+    DpMach *m = ex->mach;
+    uint8_t *img = xrealloc(NULL, ex->sb);
+    dp_mach_save(m, img);
+    for (int k = 0; k < 8; k++) {
+        m->api->set_buttons(keys[k]);
+        api->io[0x0F] &= (uint8_t)~0x10; // the value fork: no IRQ side effect
+        uint8_t *fimg = xrealloc(NULL, ex->sb);
+        dp_mach_save(m, fimg);
+        uint16_t tpc = m->api->gbr->pc;
+        queue_push(ex, fimg, 1, DP_PATH_FORK,
+                   ex->cur_kind == DP_SEED_RESET || ex->cur_from_reset,
+                   choice_new(ex, ex->cur_choice, DP_PATH_FORK, site,
+                              (int)cur_bank(ex, tpc), tpc));
+        ex->res->forks_p1++;
+    }
+    dp_mach_load(m, img); // the natural side continues, untouched
+    m->api->set_buttons(0); // recompute the derived P1 register (not in the image)
+    free(img);
+}
 // --- run loop ---------------------------------------------------------------------------
 // context projection: hash of the incoming state components this section reads
 // (the live machine holds the state being entered).  Cartridge RAM pages are

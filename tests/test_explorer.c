@@ -117,6 +117,13 @@ int main(int argc, char **argv) {
     run(dir, "keyirq");
     CHECK(res.forks_key >= 1); // keys simulated, IF bit 4 armed with nothing pending
 
+    // --- p1poll: keys read straight from $FF00, no IRQ -------------------------
+    run(dir, "p1poll");
+    CHECK(res.forks_p1 >= 1);                            // the read forked per key
+    CHECK(res.exec_flags[0x170] & DP_XF_FORCED);         // handler reached with Start held
+    CHECK(!(res.exec_flags[0x170] & DP_XF_NATURAL));     // never on the released-keys flow
+    CHECK(res.vram_write_pages[0] & 1);                  // the handler's write happened
+
     // --- jumptable: JP HL reaches both handlers -------------------------------------
     run(dir, "jumptable");
     CHECK(section_at(0, 0x220) != NULL && section_at(0, 0x210) != NULL);

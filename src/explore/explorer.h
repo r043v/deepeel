@@ -202,7 +202,7 @@ typedef struct DpResults {
     // discovery counters move under every session worker)
     uint64_t steps_total, paths_run;
     uint32_t exec_outside; // instructions executed outside ROM (VRAM/RAM code)
-    uint32_t forks_branch, forks_irq, forks_key, evicted_exact, evicted_ctx;
+    uint32_t forks_branch, forks_irq, forks_key, forks_p1, evicted_exact, evicted_ctx;
     uint32_t forks_capped; // forks dropped by the per-site cap
     uint32_t cycle_cuts, step_cuts, budget_paths, budget_steps, queue_overflows;
     uint32_t queue_growths;   // times the full worklist grew instead of dropping paths
@@ -249,6 +249,7 @@ typedef struct DpConfig {
     int no_pointer_scan;      // disable pointer-table seeding
     int no_irq_fork;          // disable IRQ forking
     int no_key_fork;          // disable the simulated joypad-IRQ key forks
+    int no_p1_fork;           // disable the P1-polling read forks
     int no_closure;           // disable the static flow closure
     int closure_rounds;       // closure -> seed -> explore loops (default 4)
     int no_covered_prune;     // keep forking sites whose both sides are known
