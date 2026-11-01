@@ -291,17 +291,115 @@ static void legend_entry(uint8_t *rgb, int w, int h, int y, const char *str,
 // (tEXt "deepeel_map"), next to the converter's version and settings
 // (tEXt "deepeel_meta").  Under the grid, a legend band: rom name + coverage,
 // then the classes in two justified columns, swatch beside each entry.
+static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapSummary *s,
+                          const char *map_text, size_t map_len, const char *meta,
+                          const char *path);
 int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom_path,
                       const char *path) {
+    DpMapSummary s;
+    uint8_t *m = dp_map_build(res, &s);
+    if (!m) return 0;
+    char title[17];
+    const char *ti = res->cart && res->cart->title[0] ? res->cart->title : NULL;
+    int tl = 0;
+    if (ti) {
+        for (; *ti && tl < 16; ti++)
+            if (*ti == '?') break; // cart titles are zero-padded with '?' in places
+            else if ((unsigned char)*ti >= 0x20 && (unsigned char)*ti < 0x7f) title[tl++] = *ti;
+    }
+    if (!tl && rom_path) { // no usable internal name: the file's base name
+        const char *base = rom_path + strlen(rom_path);
+        while (base > rom_path && base[-1] != '/' && base[-1] != '\\') base--;
+        for (; *base && tl < 16; base++)
+            if ((unsigned char)*base >= 0x20 && (unsigned char)*base < 0x7f) title[tl++] = *base;
+    }
+    title[tl] = 0;
+    DpBuf txt;
+    dp_buf_init(&txt);
+    dp_report_map(res, &txt);
+    double pct = s.total ? 100.0 / (double)s.total : 0.0;
+    // the conversion's identity: version, rom, settings, result — a tEXt
+    // chunk next to the map itself
+    char meta[768];
+    snprintf(meta, sizeof meta,
+             "{\"deepeel\":\"%s\",\"rom\":{\"title\":\"%s\",\"banks\":%d,\"size\":%u},"
+             "\"config\":{\"max_steps_path\":%u,\"max_paths\":%u,\"max_steps_total\":%llu,"
+             "\"queue\":%u,\"queue_max\":%u,\"mem_cap_mb\":%llu,\"loop_cap\":%u,\"seed_cap\":%u,"
+             "\"closure_rounds\":%d,\"covered_keep\":%u,\"seed_banks\":%d},"
+             "\"map\":{\"known_pct\":%.2f,\"unknown_pct\":%.2f,\"inferred_pct\":%.2f}}",
+             DEEPEEL_VERSION, title, res->banks,
+             res->cart ? (unsigned)res->cart->rom_size : 0u,
+             cfg ? cfg->max_steps_path : 0u, cfg ? cfg->max_paths : 0u,
+             cfg ? (unsigned long long)cfg->max_steps_total : 0ull,
+             cfg ? cfg->queue_cap : 0u, cfg ? cfg->queue_max : 0u,
+             cfg ? (unsigned long long)cfg->mem_cap_mb : 0ull,
+             cfg ? cfg->loop_back_cap : 0u, cfg ? cfg->seed_cap : 0u,
+             cfg ? cfg->closure_rounds : 0, cfg ? cfg->covered_fork_keep : 0u,
+             cfg ? cfg->seed_banks : 0,
+             s.known * pct, s.unknown * pct, s.inferred * pct);
+    int ok = map_png_render(m, (int)res->banks, title, &s, (const char *)txt.p, txt.len,
+                            meta, path);
+    dp_buf_free(&txt);
+    free(m);
+    return ok;
+}
+
+int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char *title,
+                            const char *meta, const char *path) {
+    if (banks <= 0) return 0;
+    size_t n = (size_t)banks * 0x4000;
+    uint8_t *m = calloc(n ? n : 1, 1); // DP_MAP_UNKNOWN
+    if (!m) return 0;
+    // parse "bank start end(inclusive) class" — CPU-view addresses (bank 0
+    // from 0, the others from 0x4000), one run per line, '#' comments
+    DpMapSummary s;
+    memset(&s, 0, sizeof s);
+    s.total = n;
+    const char *p = text, *end = text + len;
+    while (p < end) {
+        if (*p == '#' || *p == '\n') { // a whole comment line, or a newline
+            while (p < end && *p != '\n') p++;
+            if (p < end) p++;
+            continue;
+        }
+        unsigned bank, a, e;
+        char cls[32];
+        int got = sscanf(p, "%u %x %x %31s", &bank, &a, &e, cls);
+        while (p < end && *p != '\n') p++;
+        if (got != 4 || bank >= (unsigned)banks) continue;
+        unsigned win = bank ? 0x4000u : 0u;
+        if (a < win || e < a) continue;
+        size_t lo = bank * 0x4000ull + (a - win), hi = bank * 0x4000ull + (e - win);
+        if (lo >= n) continue;
+        if (hi >= n) hi = n - 1;
+        int c = -1;
+        for (int k = 0; k < DP_MAP_COUNT; k++)
+            if (!strcmp(cls, dp_map_class_name(k))) { c = k; break; }
+        if (c < 0) continue;
+        memset(m + lo, c, hi - lo + 1);
+    }
+    for (size_t k = 0; k < n; k++) {
+        int c = m[k];
+        s.cls[c]++;
+        if (c == DP_MAP_UNKNOWN) s.unknown++; else s.known++;
+        if (dp_map_is_code(c)) s.code++;
+        else if (dp_map_is_data(c)) s.data++;
+        else if (c == DP_MAP_PAD || c == DP_MAP_INF_PAD) s.pad++;
+        if (c >= DP_MAP_INF_DATA) s.inferred++;
+    }
+    return map_png_render(m, banks, title, &s, text, len, meta, path);
+}
+
+// the shared renderer: squares grid + legend band + tEXt chunks, from a
+// per-byte class array and the .map text to embed
+static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapSummary *s,
+                          const char *map_text, size_t map_len, const char *meta,
+                          const char *path) {
     enum { SQ = 6, GRID = 16, BANK_PX = SQ * GRID, GAP = 6, PER_ROW = 8 };
     static const char *fr[DP_MAP_COUNT] = {
         "inconnu", "code naturel", "code forcé", "code statique",
         "donnée copiée", "donnée lue", "table", "padding",
         "donnée inférée", "code inféré", "padding inféré" };
-    DpMapSummary s;
-    uint8_t *m = dp_map_build(res, &s);
-    if (!m) return 0;
-    int banks = (int)res->banks;
     int cols = banks < PER_ROW ? banks : PER_ROW;
     int rows = (banks + PER_ROW - 1) / PER_ROW;
     if (cols < 1) cols = 1;
@@ -309,10 +407,10 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
     // legend band sizing: one title line + one line per class present
     int order[DP_MAP_COUNT], ncls = 0;
     for (int c = 0; c < DP_MAP_COUNT; c++)
-        if (s.cls[c]) order[ncls++] = c;
+        if (s->cls[c]) order[ncls++] = c;
     for (int i = 1; i < ncls; i++) { // insertion sort, largest share first
         int cur = order[i], j = i - 1;
-        while (j >= 0 && s.cls[order[j]] < s.cls[cur]) { order[j + 1] = order[j]; j--; }
+        while (j >= 0 && s->cls[order[j]] < s->cls[cur]) { order[j + 1] = order[j]; j--; }
         order[j + 1] = cur;
     }
     enum { LH = 18, FSCALE = 2 };
@@ -341,27 +439,11 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
                 }
         }
     }
-    free(m);
-    // the legend itself: internal rom name (the cart title), the file name as
-    // fallback; then the classes in two columns, swatch before each entry
-    double pct = s.total ? 100.0 / (double)s.total : 0.0;
-    char title[17];
-    const char *ti = res->cart && res->cart->title[0] ? res->cart->title : NULL;
-    int tl = 0;
-    if (ti) {
-        for (; *ti && tl < 16; ti++)
-            if (*ti == '?') break; // cart titles are zero-padded with '?' in places
-            else if ((unsigned char)*ti >= 0x20 && (unsigned char)*ti < 0x7f) title[tl++] = *ti;
-    }
-    if (!tl && rom_path) { // no usable internal name: the file's base name
-        const char *base = rom_path + strlen(rom_path);
-        while (base > rom_path && base[-1] != '/' && base[-1] != '\\') base--;
-        for (; *base && tl < 16; base++)
-            if ((unsigned char)*base >= 0x20 && (unsigned char)*base < 0x7f) title[tl++] = *base;
-    }
-    title[tl] = 0;
+    // the legend itself: rom name (given by the caller), then the classes in
+    // two columns, swatch beside each entry
+    double pct = s->total ? 100.0 / (double)s->total : 0.0;
     char head[160];
-    snprintf(head, sizeof head, "%s - connu %.1f%%", title[0] ? title : "?", s.known * pct);
+    snprintf(head, sizeof head, "%s - connu %.1f%%", title[0] ? title : "?", s->known * pct);
     int y = grid_h + GAP;
     int head_scale = fit_scale(head, w, GAP, FSCALE);
     legend_text(rgb, w, h, GAP, y, head, (const uint8_t *)"\xe0\xe0\xe0", head_scale);
@@ -378,7 +460,7 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
         if (r < ncls) {
             int c = order[r];
             char line[64];
-            double p = s.cls[c] * pct;
+            double p = s->cls[c] * pct;
             if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[c]);
             else snprintf(line, sizeof line, "%s %.1f%%", fr[c], p);
             legend_entry(rgb, w, h, ry, line, map_rgb[c], FSCALE,
@@ -387,37 +469,14 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
         if (two_cols && r + half < ncls) {
             int c = order[r + half];
             char line[64];
-            double p = s.cls[c] * pct;
+            double p = s->cls[c] * pct;
             if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[c]);
             else snprintf(line, sizeof line, "%s %.1f%%", fr[c], p);
             legend_entry(rgb, w, h, ry, line, map_rgb[c], FSCALE, w - GAP - w / 2, w - GAP);
         }
     }
-    DpBuf txt;
-    dp_buf_init(&txt);
-    dp_report_map(res, &txt);
-    // the conversion's identity: version, rom, settings, result — a tEXt
-    // chunk next to the map itself
-    char meta[768];
-    snprintf(meta, sizeof meta,
-             "{\"deepeel\":\"%s\",\"rom\":{\"title\":\"%s\",\"banks\":%d,\"size\":%u},"
-             "\"config\":{\"max_steps_path\":%u,\"max_paths\":%u,\"max_steps_total\":%llu,"
-             "\"queue\":%u,\"queue_max\":%u,\"mem_cap_mb\":%llu,\"loop_cap\":%u,\"seed_cap\":%u,"
-             "\"closure_rounds\":%d,\"covered_keep\":%u,\"seed_banks\":%d},"
-             "\"map\":{\"known_pct\":%.2f,\"unknown_pct\":%.2f,\"inferred_pct\":%.2f}}",
-             DEEPEEL_VERSION, title, res->banks,
-             res->cart ? (unsigned)res->cart->rom_size : 0u,
-             cfg ? cfg->max_steps_path : 0u, cfg ? cfg->max_paths : 0u,
-             cfg ? (unsigned long long)cfg->max_steps_total : 0ull,
-             cfg ? cfg->queue_cap : 0u, cfg ? cfg->queue_max : 0u,
-             cfg ? (unsigned long long)cfg->mem_cap_mb : 0ull,
-             cfg ? cfg->loop_back_cap : 0u, cfg ? cfg->seed_cap : 0u,
-             cfg ? cfg->closure_rounds : 0, cfg ? cfg->covered_fork_keep : 0u,
-             cfg ? cfg->seed_banks : 0,
-             s.known * pct, s.unknown * pct, s.inferred * pct);
-    int ok = dp_png_save_text2(path, w, h, rgb, "deepeel_map", (const char *)txt.p, txt.len,
+    int ok = dp_png_save_text2(path, w, h, rgb, "deepeel_map", map_text, map_len,
                                "deepeel_meta", meta, strlen(meta));
-    dp_buf_free(&txt);
     free(rgb);
     return ok;
 }

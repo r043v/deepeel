@@ -97,6 +97,8 @@ static void usage(void) {
             "                         of the pc project D's <SD>.STA (menu -> Charger\n"
             "                         l'Etat) and its .SAV; --export-slot N picks the slot\n"
             "  deepeel map rom.gb     static map only (pointer tables, padding)\n"
+            "  deepeel maprender rom.gb in.map out.map.png [--meta f]\n"
+            "                         re-render the squares image from a saved .map\n"
             "  deepeel regs gb        dump the register registry\n"
             "  deepeel dis rom.gb bank:addr [n]\n");
 }
@@ -600,8 +602,77 @@ static void report_lanes(const DpPlay *p, const DpResults *res, DpBuf *out) {
                    tot ? 100.0 * (double)b[i] / (double)tot : 0.0);
 }
 
-static int cmd_mapx(int argc, char **argv) {
-    if (argc < 4) { fprintf(stderr, "usage: deepeel mapx in.map.png out.map\n"); return 2; }
+// re-render the squares image from a saved .map text — no exploration: the
+// map is trusted as written (explore --map or mapx produced it).  --meta
+// embeds a file verbatim as deepeel_meta, otherwise a compact identity is
+// synthesized (version, rom, source)
+static int cmd_maprender(int argc, char **argv) {
+    const char *meta_src = NULL, *rom = NULL, *inmap = NULL, *out = NULL;
+    for (int i = 2; i < argc; i++) {
+        if (!strcmp(argv[i], "--meta") && i + 1 < argc) meta_src = argv[++i];
+        else if (!rom) rom = argv[i];
+        else if (!inmap) inmap = argv[i];
+        else if (!out) out = argv[i];
+        else return usage(), 2;
+    }
+    if (!rom || !inmap || !out) {
+        fprintf(stderr, "usage: deepeel maprender rom.gb in.map out.map.png [--meta f]\n");
+        return 2;
+    }
+    FILE *f = fopen(inmap, "rb");
+    if (!f) { perror(inmap); return 1; }
+    fseek(f, 0, SEEK_END);
+    long ln = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *text = malloc((size_t)ln + 1);
+    if (!text || fread(text, 1, (size_t)ln, f) != (size_t)ln) { fclose(f); free(text); perror(inmap); return 1; }
+    text[ln] = 0;
+    fclose(f);
+    char err[256];
+    DpCart *cart = dp_cart_load(rom, err, sizeof err);
+    if (!cart) { fprintf(stderr, "deepeel: %s\n", err); free(text); return 1; }
+    char title[17];
+    int tl = 0;
+    for (const char *ti = cart->title; *ti && tl < 16; ti++)
+        if (*ti == '?') break;
+        else if ((unsigned char)*ti >= 0x20 && (unsigned char)*ti < 0x7f) title[tl++] = *ti;
+    if (!tl) {
+        const char *base = strrchr(inmap, '/');
+        base = base ? base + 1 : inmap;
+        for (; *base && tl < 16; base++)
+            if ((unsigned char)*base >= 0x20 && (unsigned char)*base < 0x7f) title[tl++] = *base;
+    }
+    title[tl] = 0;
+    char meta_syn[512], *meta = NULL;
+    if (meta_src) { // embed the given file verbatim (a summary.json, ...)
+        FILE *mf = fopen(meta_src, "rb");
+        if (!mf) { perror(meta_src); free(text); dp_cart_free(cart); return 1; }
+        fseek(mf, 0, SEEK_END);
+        long mn = ftell(mf);
+        fseek(mf, 0, SEEK_SET);
+        meta = malloc((size_t)mn + 1);
+        if (!meta || fread(meta, 1, (size_t)mn, mf) != (size_t)mn) mn = 0;
+        if (meta) meta[mn] = 0;
+        fclose(mf);
+        if (!meta) { free(text); dp_cart_free(cart); return 1; }
+    } else {
+        snprintf(meta_syn, sizeof meta_syn,
+                 "{\"deepeel\":\"%s\",\"mode\":\"maprender\",\"source\":\"%s\","
+                 "\"rom\":{\"title\":\"%s\",\"banks\":%d,\"size\":%u}}",
+                 DEEPEEL_VERSION, inmap, title, cart->rom_banks,
+                 (unsigned)cart->rom_size);
+        meta = meta_syn;
+    }
+    int ok = dp_map_png_from_maptext(text, (size_t)ln, cart->rom_banks,
+                                     title, meta, out);
+    if (!ok) { fprintf(stderr, "deepeel: %s: render failed\n", inmap); }
+    if (meta != meta_syn) free(meta);
+    free(text);
+    dp_cart_free(cart);
+    return ok ? 0 : 1;
+}
+
+static int cmd_mapx(int argc, char **argv) {    if (argc < 4) { fprintf(stderr, "usage: deepeel mapx in.map.png out.map\n"); return 2; }
     size_t n = 0;
     char *t = dp_png_text(argv[2], "deepeel_map", &n);
     if (!t) { fprintf(stderr, "no embedded deepeel_map in %s\n", argv[2]); return 1; }
@@ -760,6 +831,7 @@ int main(int argc, char **argv) {
     if (argc < 2) return usage(), 2;
     if (!strcmp(argv[1], "explore")) return cmd_explore(argc, argv);
     if (!strcmp(argv[1], "mapx")) return cmd_mapx(argc, argv);
+    if (!strcmp(argv[1], "maprender")) return cmd_maprender(argc, argv);
     if (!strcmp(argv[1], "map")) return cmd_map(argc, argv);
     if (!strcmp(argv[1], "regs")) return cmd_regs(argc, argv);
     if (!strcmp(argv[1], "dis")) return cmd_dis(argc, argv);

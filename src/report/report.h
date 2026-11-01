@@ -49,6 +49,10 @@ void dp_report_map(const DpResults *res, DpBuf *out);
 // cfg rides into the "deepeel_meta" tEXt chunk (version + settings + result)
 int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom_path,
                       const char *path);
+// re-render the squares image from a saved .map text (no re-exploration):
+// the text is embedded verbatim as "deepeel_map", meta rides in "deepeel_meta"
+int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char *title,
+                            const char *meta, const char *path);
 void dp_report_html(const DpResults *res, DpBuf *out);
 
 #endif
