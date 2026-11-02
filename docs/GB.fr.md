@@ -617,3 +617,38 @@ Campagne `scan_all` bornée (300 s, `--jobs 7`), observations de l'outil :
 | Mystic Quest | 90,81 % | 90,8 % | 24 105 → 24 105 o |
 | SML2 | 86,85 % | 89,3 % | 68 925 → 56 041 o |
 | Pokémon Jaune | 80,30 % | 80,8 % | 206 592 → 201 161 o |
+
+## Compatibilité TAS hors de m0boy, profil VBA 1.7.2, diagnostic Rev A (0.25.0)
+
+**Séparation** : m0boy ne garde que les corrections matérielles (fidélité
+DMG vérifiée contre SameBoy et Gambatte). Les réglages de synchronisation de
+film (`gbl_sync_div_skew`, `gbl_sync_vba_off_clock`) ne sont pas du
+matériel : ils vivent dans deepeel, `cmake/m0boy-tas-compat.patch`, appliqué
+à une **copie** du runtime dans l'arbre de build (`cmake/dp_gbl_build.cmake`,
+`DP_GBL_PATCH`). Si m0boy évolue au point que le patch ne s'applique plus, la
+construction s'arrête en le disant.
+
+**Profil VBA 1.7.2** (VBM de version mineure 0 : VBA 1.7.2 rerecording
+jusqu'à VBA-rr v23.0, cœur « V7 ») :
+
+- l'entrée de la trame k est lue à la k-ième vblank (pas à la mise sous
+  tension, contrairement à v23.1+/v24 et BizHawk) ;
+- aucune trame tant que le LCD est éteint (une toutes les 600 longueurs de
+  trame au plus, pour que le crochet de trame de l'hôte tourne encore) ;
+- au rallumage, la ligne 0 dure dix lignes en mode 0 (VBA charge la durée du
+  mode 1), sans le front STAT LYC=0 immédiat.
+
+Profil **partiel**, assumé : ces cœurs ont aussi des défauts CPU que deepeel
+ne reproduit pas (`RES b,(HL)` en 12 cycles au lieu de 16, réveil de HALT sur
+STAT/timer décalé, DIV à 0 au démarrage). Ils s'accumulent dans la phase de
+DIV, et le jeu bonus de 1-3 tire `DIV & 3` : sur Super Mario Land Rev A,
+TheAxeMan (rr 9), xenos (rr v19.2) et mugg-hard (v21) suivent désormais le
+cœur V7 trame pour trame jusqu'au jeu bonus (puis 2-1) au lieu de mourir en
+1-2, mais le prix tiré diffère (V7 lit $D2, m0boy $D3) et le film décroche.
+Le cœur V7 lui-même ne synchronise pas xenos (enregistré sur une version
+antérieure, introuvable à l'identique). Le film BizHawk « Small Only 100% »
+est enregistré en mode GBC (matériel CGB non émulé).
+
+Couverture Rev A inchangée (observation de l'outil) : 99,7 %, 170 octets du
+contenu des mondes 3 et 4, que seul un film synchronisé jouerait.
+Super Mario Land World : toujours 100,0 % (0,0 % déduit) avec le patch.

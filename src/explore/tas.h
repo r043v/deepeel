@@ -33,6 +33,9 @@ typedef struct DpTas {
     // the recording emulator, when the format tells it: replaying a movie
     // needs that emulator's timing quirks (sessions.c sync profile)
     int recorder;
+    // VBM header minor version ($30): 0 = VBA 1.7.2 based recorders (up to
+    // VBA-rr v23.0), 1 = later (VBA-rr v23.1+, v24 "V8" core)
+    int recorder_rev;
 } DpTas;
 
 enum { DP_TAS_REC_UNKNOWN = 0, DP_TAS_REC_VBA, DP_TAS_REC_BIZHAWK };

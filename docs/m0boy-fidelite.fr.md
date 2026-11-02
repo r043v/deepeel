@@ -67,22 +67,14 @@ Chaque correctif ci-dessous fait avancer la première divergence de m0boy.
    $FF / écriture ignorée en mode 3 ; OAM : idem en modes 2-3. Coûte la page
    VRAM directe ; activé par deepeel.
 
-## Réglages de synchronisation de film (pas des correctifs de fidélité)
+## Réglages de synchronisation de film : dans deepeel, pas dans m0boy
 
-Deux variables par instance, défaut 0 = matériel, configuration (hors état
-sauvegardé), chemin C seulement (`gbl.h`) :
-
-- `gbl_sync_div_skew` : cycles ajoutés à l'horloge à la lecture de DIV
-  (`gbl_io_rd`). VBA-rr V8 lit ses registres en fin d'instruction : 4.
-- `gbl_sync_vba_off_clock` : trames virtuelles LCD éteint à la façon de
-  VBA-rr (phase de l'horloge de lignes conservée, fin de trame au passage
-  LY 144→145 après l'écran blanc). La boucle de `gbl_ppu_advance_off` compare
-  désormais en signé (la première trame virtuelle peut commencer après
-  l'extinction). L'assembleur ARM (`GBL_TIMING_ASM`) garde la comparaison non
-  signée : n'y activer ce réglage qu'après portage.
-
-deepeel les arme pendant le rejeu d'un film VBM ; ils ne changent rien au
-comportement par défaut du firmware.
+Les réglages qui reproduisent les émulateurs d'enregistrement des films TAS
+(`gbl_sync_div_skew`, `gbl_sync_vba_off_clock`) ne sont pas du matériel. Ils
+ne sont pas rétroportés : deepeel les garde dans
+`cmake/m0boy-tas-compat.patch` et les applique à une copie du runtime au
+moment de construire ses instances. m0boy ne reçoit que les correctifs
+ci-dessus.
 
 ## Constaté, pas encore corrigé (prochaines étapes)
 

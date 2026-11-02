@@ -4,11 +4,28 @@
 # the objects' own symbol list, libc calls untouched), archive everything.
 #
 # In: DP_GBL_SRC DP_GBL_OUT CMAKE_C_COMPILER BASE_FLAGS DP_GBL_VARIANTS
-#     DP_MACHINES
+#     DP_MACHINES DP_GBL_PATCH
 # Out: ${DP_GBL_OUT}/libgblmach.a
+#
+# DP_GBL_PATCH (cmake/m0boy-tas-compat.patch): deepeel's movie-sync knobs
+# (gbl_sync_*: the recording emulators' timing quirks).  They are not
+# hardware behaviour, so they live here, not in m0boy: the runtime is copied
+# into the build tree and the patch applied to the copy.
 
 set(SOURCES gbl_core.c gbl_cpu.c gbl_ppu.c gbl_apu.c)
 file(MAKE_DIRECTORY ${DP_GBL_OUT})
+if(DP_GBL_PATCH)
+  set(rt ${DP_GBL_OUT}/runtime)
+  file(REMOVE_RECURSE ${rt})
+  file(COPY ${DP_GBL_SRC}/ DESTINATION ${rt})
+  execute_process(COMMAND patch -p1 --no-backup-if-mismatch -s -i ${DP_GBL_PATCH}
+    WORKING_DIRECTORY ${rt} RESULT_VARIABLE r OUTPUT_VARIABLE out ERROR_VARIABLE out)
+  if(NOT r EQUAL 0)
+    message(FATAL_ERROR "dp_gbl: ${DP_GBL_PATCH} does not apply to ${DP_GBL_SRC} \
+(m0boy runtime changed: refresh the patch)\n${out}")
+  endif()
+  set(DP_GBL_SRC ${rt})
+endif()
 # the variant list travels comma-separated (semicolons cannot survive the
 # shell ninja runs the command through)
 string(REPLACE "," ";" DP_GBL_VARIANTS "${DP_GBL_VARIANTS}")

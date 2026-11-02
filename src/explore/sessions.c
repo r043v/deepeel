@@ -1018,17 +1018,26 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
             // the recording emulator's timing quirks (gbl.h movie sync
             // knobs), for this worker's machine only and while the movie
             // plays: random play after it runs on hardware timing again
-            if (w->tas.recorder == DP_TAS_REC_VBA) {
+            int vba_old = w->tas.recorder == DP_TAS_REC_VBA && w->tas.recorder_rev == 0;
+            if (vba_old) {
+                // VBA 1.7.2 based recorders (VBM minor version 0): input
+                // read at each vblank, no frame while the LCD is off, a
+                // ten-line line 0 after an enable.  Partial: their CPU
+                // timing quirks (cycle table, HALT wake-up) stay hardware
+                *w->mach->api->sync_vba_off_clock = 2;
+                fprintf(stderr, "deepeel: TAS %s: VBA 1.7.2 sync profile (input at vblank, no LCD-off frame, "
+                                "ten-line enable)\n", w->tas.source);
+            } else if (w->tas.recorder == DP_TAS_REC_VBA) {
                 *w->mach->api->sync_div_skew = 4;
                 *w->mach->api->sync_vba_off_clock = 1;
                 fprintf(stderr, "deepeel: TAS %s: VBA sync profile (DIV read +4 cycles, VBA LCD-off frame clock)\n",
                         w->tas.source);
             }
             // movie frame 0 is the power-on frame: its input is held from
-            // the first instruction (VBA and BizHawk alike), each vblank then
-            // feeds the next frame.  Feeding frame 0 at the first vblank
-            // replayed the whole movie one frame late.
-            if (w->tas.frames) {
+            // the first instruction (VBA-rr v23.1+ and BizHawk), each vblank
+            // then feeds the next frame.  The VBA 1.7.2 cores read the pad
+            // at the vblank instead: frame 0 lands at the first one.
+            if (w->tas.frames && !vba_old) {
                 w->mach->api->set_buttons(w->tas.masks[0]);
                 w->applied_mask = w->tas.masks[0];
                 w->frames_done = 1;

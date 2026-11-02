@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.24.0 LANGUAGES C)
+project(deepeel VERSION 0.25.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -182,10 +182,13 @@ add_custom_command(OUTPUT ${GBL_ARCH}
     -DBASE_FLAGS=${CMAKE_C_FLAGS}
     -DDP_GBL_VARIANTS=${DP_GBL_VARIANTS_COMMA}
     -DDP_MACHINES=${DP_MACHINES}
+    -DDP_GBL_PATCH=${CMAKE_CURRENT_SOURCE_DIR}/cmake/m0boy-tas-compat.patch
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_gbl_build.cmake
   DEPENDS ${DP_GBL_RUNTIME}/gbl_core.c ${DP_GBL_RUNTIME}/gbl_cpu.c
           ${DP_GBL_RUNTIME}/gbl_ppu.c ${DP_GBL_RUNTIME}/gbl_apu.c
-          cmake/dp_gbl_build.cmake
+          ${DP_GBL_RUNTIME}/gbl.h ${DP_GBL_RUNTIME}/gbl_internal.h
+          ${DP_GBL_RUNTIME}/gbl_options.h
+          cmake/dp_gbl_build.cmake cmake/m0boy-tas-compat.patch
   COMMENT "Building the m0boy GB machine (${nv} variants x ${DP_MACHINES} instances)")
 add_custom_target(dp_gblmach DEPENDS ${GBL_ARCH})
 add_library(dp_gblmach_lib STATIC IMPORTED GLOBAL)

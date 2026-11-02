@@ -135,6 +135,7 @@ static int vbm_parse(const uint8_t *d, size_t n, DpTas *out, char *err, size_t e
         }
         out->anchored = (start_flags & 0x03) != 0;
         out->recorder = DP_TAS_REC_VBA; // binary VBM: VBA-rr / VBA-M
+        out->recorder_rev = d[0x30];
         // $30 minor version, $31 ROM header checksum, $32-$33 global checksum
         out->has_cksum = 1;
         out->hdr_ck = d[0x31];
@@ -162,6 +163,8 @@ static int vbm_parse(const uint8_t *d, size_t n, DpTas *out, char *err, size_t e
         p += (p[0] == '\r' && p[1] == '\n' && p[2] == '\r') ? 4 : 2;
         size_t avail = n - (size_t)(p - d);
         out->anchored = 1; // text v1 starts from SRAM or savestate; best-effort
+        out->recorder = DP_TAS_REC_VBA; // text header: an early VBA recorder
+        out->recorder_rev = 0;
         for (size_t off = 0; off + 4 <= avail; off += 4) {
             uint8_t ctl = p[off + 1];
             if (ctl > 1) continue; // controllers 2..4: skip the frame slot

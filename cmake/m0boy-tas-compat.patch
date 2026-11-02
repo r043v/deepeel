@@ -1,0 +1,215 @@
+--- a/gbl.h
++++ b/gbl.h
+@@ -387,6 +387,31 @@
+ extern uint8_t gbl_safe_request;
+ void gbl_platform_safe_point(void); /* weak default: nothing */
+ 
++/* ---- movie sync compatibility (C interpreter path only) -----------------
++ * A tool-assisted movie replays only on the timing its recording emulator
++ * had.  These knobs reproduce documented quirks of such an emulator; 0 (the
++ * default) is the hardware behaviour.  The host sets them per instance; they
++ * are configuration, not machine state (gbl_reset and gbl_state_io leave
++ * them alone).
++ *  - gbl_sync_div_skew: cycles added to the clock when DIV is read.  VBA-rr's
++ *    GB core (V8) charges an instruction's cycles before executing it, so its
++ *    register reads see the end of the instruction: 4 cycles after the
++ *    hardware's last M-cycle access.
++ *  - gbl_sync_vba_off_clock: the frame clock around LCD off/on.
++ *    1 = VBA-rr v24 (V8 core): virtual frames while the LCD is off keep the
++ *    line clock's phase; a frame ends at each LY 144->145 step once the
++ *    white screen is up ((150 - LY) lines + 49 M-cycles after the
++ *    switch-off), instead of every 70224 cycles from the switch-off.
++ *    2 = VBA 1.7.2 based cores (up to VBA-rr v23, V7 core): no frame at all
++ *    while the LCD is off (one every 600 frame lengths at most, so a host
++ *    frame hook still runs), and an enable keeps LY at 0 in mode 0 for ten
++ *    lines (VBA loads the mode-1 length) without the LYC=0 STAT edge.
++ *    There is no vblank on hardware with the LCD off: these are frame-clock
++ *    conventions, the movie's.  Value 2 needs the C timing path (the ARM
++ *    assembly gbl_ppu_advance_off ignores the pending enable). */
++extern uint8_t gbl_sync_div_skew;
++extern uint8_t gbl_sync_vba_off_clock;
++
+ /* ---- diagnostics -------------------------------------------------------- */
+ extern uint8_t gbl_interp_only;     /* ignore compiled code (reference mode) */
+ extern uint32_t gbl_frame;
+--- a/gbl_core.c
++++ b/gbl_core.c
+@@ -25,6 +25,8 @@
+ uint8_t *gbl_wmap[16];
+ 
+ uint8_t gbl_interp_only;
++uint8_t gbl_sync_div_skew;      /* gbl.h: movie sync compatibility */
++uint8_t gbl_sync_vba_off_clock;
+ uint32_t gbl_frame;
+ uint32_t gbl_interp_instrs;
+ uintptr_t gbl_stack_limit;
+@@ -1262,7 +1264,7 @@
+     switch (n) {
+     case 0x00: return gbl_joyp;
+     case 0x02: return gbl_io[0x02] | 0x7E;
+-    case 0x04: return (uint8_t)((gbr.cyc - div_base) >> 8);
++    case 0x04: return (uint8_t)((gbr.cyc + gbl_sync_div_skew - div_base) >> 8);
+     case 0x05: timer_sync(gbr.cyc); return TIMA;
+     case 0x07: return TAC | 0xF8;
+     case 0x0F: gbl_sync(); return IF | 0xE0;
+--- a/gbl_ppu.c
++++ b/gbl_ppu.c
+@@ -837,10 +837,23 @@
+  * calls (register polls, VRAM writes) land between two transitions. */
+ uint32_t gbl_ppu_due;
+ 
++/* gbl_sync_vba_off_clock == 2 (gbl.h): an LCD enable keeps the line clock
++ * stopped until line 0's mode 0 has lasted ten lines; on_at is when line 0
++ * then starts (configuration-dependent state, never armed at 0). */
++static uint8_t on_pend;
++static uint32_t on_at;
++/* LCD-off frames left silent under gbl_sync_vba_off_clock == 2 (bounded) */
++static uint32_t off_silent;
++#define OFF_SILENT_MAX 600u
++static uint32_t off_due(void) {
++    uint32_t f = off_start + FRAME_CYCLES;
++    return (on_pend && (int32_t)(on_at - f) < 0) ? on_at : f;
++}
+ static void update_due(void) {
+-    gbl_ppu_due = lcd_on ? line_start + next_stage_off : off_start + FRAME_CYCLES;
++    gbl_ppu_due = lcd_on ? line_start + next_stage_off : off_due();
+ }
+ 
++static void lcd_enable_at(uint32_t at, int lyc_edge);
+ /* LCD off: a virtual frame clock (the assembly version jumps here too). */
+ #if GBL_TIMING_ASM
+ void gbl_ppu_advance_off(uint32_t now);
+@@ -848,10 +861,25 @@
+ static
+ #endif
+ void gbl_ppu_advance_off(uint32_t now) {
+-    while (now - off_start >= FRAME_CYCLES) {
++    if (on_pend && (int32_t)(now - on_at) >= 0) {
++        on_pend = 0;
++        lcd_enable_at(on_at, 0);
++        ppu_moved = 1;
++        P.evt_dirty = 1;
++        update_due();
++        gbl_ppu_advance(now);
++        return;
++    }
++    /* signed: with gbl_sync_vba_off_clock == 1 the first virtual frame may
++     * start after the switch-off */
++    while ((int32_t)(now - off_start) >= (int32_t)FRAME_CYCLES) {
+         off_start += FRAME_CYCLES;
+         ppu_moved = 1;
+         P.evt_dirty = 1;
++        /* == 2: no frame while the LCD is off, except one every
++         * OFF_SILENT_MAX so the host's frame hook still runs */
++        if (gbl_sync_vba_off_clock == 2 && ++off_silent < OFF_SILENT_MAX) continue;
++        off_silent = 0;
+         gbl_frame++;
+         gbl_platform_vblank();
+     }
+@@ -977,12 +1005,12 @@
+ #endif
+ 
+ uint32_t gbl_ppu_stable_until(void) {
+-    if (!lcd_on) return off_start + FRAME_CYCLES;
++    if (!lcd_on) return off_due();
+     return line_start + next_stage_off;
+ }
+ 
+ static inline uint32_t ppu_next_event(void) {
+-    if (!lcd_on) return off_start + FRAME_CYCLES;
++    if (!lcd_on) return off_due();
+     uint8_t s = STAT;
+ #if GBL_TIMING_ASM
+     if (ly < 144 && stage < 2 && (s & 0x08)) return line_start + MODE0_START;
+@@ -1055,6 +1083,28 @@
+     return gbl_io[n];
+ }
+ 
++static void lcd_enable_at(uint32_t at, int lyc_edge) {
++    lcd_on = 1;
++    /* The frame restarted by an enable runs 2 cycles ahead of the
++     * write (SameBoy and Gambatte: the first VBlank after enable is
++     * requested 65662 cycles after the write's bus cycle). */
++    line_start = at - 2u;
++    ly = 0;
++    stage = 0;
++    next_stage_off = MODE3_START;
++    mode = 2;
++    win_line = 0;
++    stat_line = 0;
++    /* LY=0 at enable: a LYC=0 match with the LYC source armed
++     * raises the STAT line at once (SameBoy reference: the IRQ is
++     * taken right after enable, not at the first mode-3 edge).  The
++     * mode sources stay quiet: the first line after enable starts
++     * without a mode-2 OAM search. */
++    lyc_refresh();
++    if (lyc_edge && P.lyc_line) IF |= 0x02;
++    stat_line = P.lyc_line;
++}
++
+ void gbl_ppu_write(uint8_t n, uint8_t v) {
+     gbl_ppu_sync(gbr.cyc);
+ #if GBL_FRAME_SIGNATURE
+@@ -1063,33 +1113,33 @@
+ #endif
+     switch (n) {
+     case 0x40:
+-        if ((v & 0x80) && !lcd_on) {
+-            lcd_on = 1;
+-            /* The frame restarted by an enable runs 2 cycles ahead of the
+-             * write (SameBoy and Gambatte: the first VBlank after enable is
+-             * requested 65662 cycles after the write's bus cycle). */
+-            line_start = gbr.cyc - 2u;
+-            ly = 0;
+-            stage = 0;
+-            next_stage_off = MODE3_START;
+-            mode = 2;
+-            win_line = 0;
+-            stat_line = 0;
+-            /* LY=0 at enable: a LYC=0 match with the LYC source armed
+-             * raises the STAT line at once (SameBoy reference: the IRQ is
+-             * taken right after enable, not at the first mode-3 edge).  The
+-             * mode sources stay quiet: the first line after enable starts
+-             * without a mode-2 OAM search. */
++        if ((v & 0x80) && !lcd_on && !on_pend) {
+             LCDC = v;
+-            lyc_refresh();
+-            if (P.lyc_line) IF |= 0x02;
+-            stat_line = P.lyc_line;
++            if (gbl_sync_vba_off_clock == 2) {
++                /* gbl.h: line 0 runs ten lines of mode 0, LY 0, no STAT edge */
++                on_pend = 1;
++                on_at = gbr.cyc + 9u * LINE_CYCLES;
++            } else
++                lcd_enable_at(gbr.cyc, 1);
++        } else if (!(v & 0x80) && on_pend) {
++            on_pend = 0;
+         } else if (!(v & 0x80) && lcd_on) {
++            uint32_t off_ly = ly, off_line = line_start;
+             lcd_on = 0;
+             ly = 0;
+             mode = 0;
+             stat_line = 0;
+             off_start = gbr.cyc;
++            off_silent = 0;
++            if (gbl_sync_vba_off_clock == 1) {
++                /* gbl.h: the first frame ends at the line clock's next LY
++                 * 144->145 step after the white screen; off_start is the
++                 * start of that virtual frame (it may lie ahead of now). */
++                uint32_t white = gbr.cyc + (off_ly <= 150 ? (150u - off_ly) * LINE_CYCLES : 0u) + 196u;
++                uint32_t end = off_line + ((145u + 154u - off_ly) % 154u) * LINE_CYCLES;
++                while ((int32_t)(end - LINE_CYCLES - white) < 0) end += FRAME_CYCLES;
++                off_start = end - FRAME_CYCLES;
++            }
+         }
+         LCDC = v;
+         update_due();
+@@ -1109,6 +1159,8 @@
+ }
+ 
+ void gbl_ppu_reset(void) {
++    on_pend = 0;
++    off_silent = 0;
+     LCDC = 0x91;
+     STAT = 0x00;
+     BGP = 0xFC;
