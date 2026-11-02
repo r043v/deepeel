@@ -551,3 +551,69 @@ instruction et cycle par cycle sur la zone étudiée) sont corrigés dans le
 runtime m0boy ; deepeel compile ce runtime avec `GBL_ACCESS_BLOCK=1`
 (blocage VRAM/OAM par mode). Rapport et patch : `docs/m0boy-fidelite.fr.md`,
 `docs/patches/m0boy-fidelite-dmg.patch`.
+
+## Rejeu TAS : trame 0 à la mise sous tension, profil de synchronisation VBA (0.24.0)
+
+Diagnostic fait contre une référence : le cœur GB de VBA-rr v24 (« V8 »,
+`/home/m/dev/vba-rerecording`) compilé sans affichage rejoue le film
+`muggv3` jusqu'en 4-3 sur la ROM World (le cœur « V7 » de v23 désynchronise
+lui-même). Comparaison trame par trame des hachages de WRAM (hors pile $CFxx
+et pilote sonore $DFxx), puis des traces d'instructions à la première trame
+divergente. Trois causes :
+
+- **Trame 0 = trame de mise sous tension** (bogue générique de deepeel, tous
+  formats) : l'entrée de la trame 0 d'un film est tenue dès la première
+  instruction (VBA comme BizHawk), chaque vblank fournit ensuite la trame
+  suivante. deepeel fournissait la trame 0 à la première vblank : tout film
+  était rejoué **une trame en retard** (symptômes : compteur de trames du jeu
+  $FFAC à +1, DIV à +18 aux tirages aléatoires). Corrigé dans `sessions.c`.
+- **Lecture de DIV en fin d'instruction** (particularité de VBA) : le cœur V8
+  décompte les cycles d'une instruction *avant* de l'exécuter ; ses lectures
+  de registres voient la fin de l'instruction, 4 cycles après l'accès matériel
+  (dernier cycle machine). Sur SML cela décide la lecture de DIV en $5A76
+  (fin du jeu bonus de 1-3).
+- **Horloge de trame LCD éteint** (convention de VBA) : LCD éteint, l'horloge
+  de lignes de VBA garde sa phase ; une trame se termine à chaque passage
+  LY 144→145 une fois l'écran blanc affiché ((150 − LY) lignes + 49 cycles
+  machine après l'extinction). m0boy redémarrait une trame virtuelle de
+  70 224 cycles à l'extinction. Le matériel n'a pas de vblank LCD éteint :
+  ce sont deux conventions de trame, celle du film fait foi.
+
+Les deux particularités sont des **réglages de synchronisation de film** du
+runtime m0boy (`gbl_sync_div_skew`, `gbl_sync_vba_off_clock`, défaut 0 =
+comportement matériel, chemin C seulement), exposés dans `DpGblApi`. deepeel
+les arme sur la machine d'un worker **seulement pendant qu'il rejoue un VBM
+binaire** (ligne stderr `VBA sync profile`) et les remet à 0 quand le film se
+termine ou que la machine est déclarée bloquée : le jeu aléatoire, le
+fork-explorer et les autres films tournent avec la temporisation matérielle.
+m0boy reste fidèle (SameBoy et Gambatte concordent avec lui) ; seul le rejeu
+reproduit l'émulateur d'enregistrement, comme les « sync settings » de
+BizHawk. Le format du film est consigné dans `DpTas.recorder`.
+
+Résultat (observation de l'outil) : Super Mario Land World, films seuls
+(`--tas-solo`) — `muggv3` atteint le monde 4 ; **100,0 % connus, 0,0 %
+déduits, résidu nul** (0.22 : 99,991 %, 6 octets du flux du monde 4).
+
+Deux corrections de campagne vont avec :
+
+- **`--tas-solo` sans film jouable** : si tous les films sont illisibles ou
+  enregistrés sur une autre révision (refusés par l'identité), le mode solo
+  s'arrêtait à la trame 0 — aucune session jouée, en silence (Zelda France :
+  ses trois films visent d'autres versions). deepeel le signale
+  (`TAS solo: no movie loaded (N refused), random play until the time limit`)
+  et garde la foule normale jusqu'à `--time-limit`.
+- **`scan_all.py`** : deux révisions au même titre d'en-tête (`SUPER
+  MARIOLAND` World et Rev A) partageaient le même répertoire de sortie ; le
+  nom de fichier départage désormais (`unique_slugs`). Un film à égalité de
+  score va à chacune ; l'identité de deepeel refuse la mauvaise révision.
+
+Campagne `scan_all` bornée (300 s, `--jobs 7`), observations de l'outil :
+
+| ROM | 0.22 | 0.24 | résidu |
+|---|---|---|---|
+| Super Mario Land (World) | 99,991 % | **100,0 %** | 6 → 0 o (0,0 % déduit) |
+| Super Mario Land (Rev A) | — | 99,7 % | 170 o (films Rev A encore désynchronisés) |
+| Zelda LA (France) | 91,88 % | 92,5 % | 42 590 → 39 579 o |
+| Mystic Quest | 90,81 % | 90,8 % | 24 105 → 24 105 o |
+| SML2 | 86,85 % | 89,3 % | 68 925 → 56 041 o |
+| Pokémon Jaune | 80,30 % | 80,8 % | 206 592 → 201 161 o |

@@ -30,7 +30,12 @@ typedef struct DpTas {
     // 70224 cycles from power-on (BizHawk Gambatte "EqualLengthFrames"),
     // 0 = a frame ends at vblank (VBA; m0boy's own frame clock)
     int equal_frames;
+    // the recording emulator, when the format tells it: replaying a movie
+    // needs that emulator's timing quirks (sessions.c sync profile)
+    int recorder;
 } DpTas;
+
+enum { DP_TAS_REC_UNKNOWN = 0, DP_TAS_REC_VBA, DP_TAS_REC_BIZHAWK };
 
 // the movie's recorded ROM identity against this ROM: 1 match, 0 mismatch,
 // -1 the movie records no identity.  `why` gets a human description.

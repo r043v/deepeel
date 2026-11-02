@@ -558,6 +558,8 @@ static void worker_vblank(DpMach *m) {
             mask = w->tas.masks[w->frames_done];
         } else { // the movie is over: uniform random play, segments resume
             w->mode = IN_RNG;
+            *m->api->sync_div_skew = 0;
+            *m->api->sync_vba_off_clock = 0;
             if (w->watch_armed) { w->watch_armed = 0; m->render = 0; m->api->skip_render[0] = 1; }
             mask = input_keys(&w->in);
             w->seg_left = 1; // rotate away from the movie's end state next frame
@@ -656,6 +658,8 @@ static void run_epoch(DpWorker *w, uint32_t frames) {
                     if (++tas_same > 1000) {
                         __atomic_fetch_add(&p->tas_cut_stuck, 1, __ATOMIC_RELAXED);
                         w->mode = IN_RNG;
+                        *w->mach->api->sync_div_skew = 0;
+                        *w->mach->api->sync_vba_off_clock = 0;
                         segment_end(w);
                         tas_same = 0;
                     }
@@ -907,6 +911,28 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
     // workers: 0 attract, then one per replay script, the rest random —
     // or, tas_solo, only one worker per movie and nobody else
     int maxw = DP_GBL_MACHINES - 2; // instance 0 = fork, last = preview
+    if (p->cfg.tas_solo) {
+        // solo with no playable movie (every one unreadable or recorded on
+        // another ROM) would stop at frame 0: keep the normal crowd instead,
+        // reported (the refusals themselves are logged by the workers)
+        int playable = 0, refused = 0;
+        for (int t = 0; t < p->cfg.tas_n; t++) {
+            DpTas probe;
+            char terr[256], why[256];
+            memset(&probe, 0, sizeof probe);
+            if (!p->cfg.tas[t] || !dp_tas_load(p->cfg.tas[t], &probe, terr, sizeof terr)) continue;
+            if (!p->cfg.tas_any_rom && dp_tas_rom_match(&probe, p->cart->rom, p->cart->rom_size, why, sizeof why) == 0)
+                refused++;
+            else
+                playable++;
+            dp_tas_free(&probe);
+        }
+        if (!playable) {
+            fprintf(stderr, "deepeel: TAS solo: no movie loaded (%d refused), random play until the time limit\n",
+                    refused);
+            p->cfg.tas_solo = 0;
+        }
+    }
     if (p->cfg.tas_solo && p->cfg.tas_n > 0) p->cfg.sessions = p->cfg.tas_n;
     if (p->cfg.sessions > maxw) {
         fprintf(stderr, "deepeel: %d sessions requested, %d machine instances available: clamping\n",
@@ -988,6 +1014,26 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
         w->in.uniform = p->cfg.uniform;
         w->in.uniform_hold = p->cfg.uniform_hold ? p->cfg.uniform_hold : 64;
         worker_setup(p, w, 1 + i);
+        if (w->mode == IN_TAS) {
+            // the recording emulator's timing quirks (gbl.h movie sync
+            // knobs), for this worker's machine only and while the movie
+            // plays: random play after it runs on hardware timing again
+            if (w->tas.recorder == DP_TAS_REC_VBA) {
+                *w->mach->api->sync_div_skew = 4;
+                *w->mach->api->sync_vba_off_clock = 1;
+                fprintf(stderr, "deepeel: TAS %s: VBA sync profile (DIV read +4 cycles, VBA LCD-off frame clock)\n",
+                        w->tas.source);
+            }
+            // movie frame 0 is the power-on frame: its input is held from
+            // the first instruction (VBA and BizHawk alike), each vblank then
+            // feeds the next frame.  Feeding frame 0 at the first vblank
+            // replayed the whole movie one frame late.
+            if (w->tas.frames) {
+                w->mach->api->set_buttons(w->tas.masks[0]);
+                w->applied_mask = w->tas.masks[0];
+                w->frames_done = 1;
+            }
+        }
         // resume: a TAS worker continues its movie at its latest snapshot
         if (w->mode == IN_TAS && p->cfg.resume && p->tas_resume_rec[w->tas_idx] >= 0) {
             const DpTasSnapRec *r = &p->tasnaps[p->tas_resume_rec[w->tas_idx]];

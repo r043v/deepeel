@@ -94,7 +94,9 @@ def assign_movies(tas_dirs, roms, z80=False):
     """give every movie file to the ROM it scores best (min score 8).
 
     roms: list of dicts with 'slug', 'title' and 'file'.  Returns {slug: [paths]}.
-    Exclusive assignment: each movie goes to exactly one ROM (or none).
+    A movie goes to the ROM it scores best, or to every ROM tied at that score:
+    revisions of one game share a title, and deepeel's ROM identity check
+    refuses (and logs) a movie recorded on the other revision.
     """
     files = []
     for root_dir in tas_dirs:
@@ -108,13 +110,16 @@ def assign_movies(tas_dirs, roms, z80=False):
         files = [f for f in files if f.lower().endswith(".bk2")]
     assign = {r["slug"]: [] for r in roms}
     for path in sorted(files):
-        best, best_score = None, 0
+        best, best_score = [], 0
         for r in roms:
             s = match_score(os.path.basename(path), r["title"], r.get("file", ""))
             if s > best_score:
-                best, best_score = r["slug"], s
-        if best is not None and best_score >= 8:
-            assign[best].append(path)
+                best, best_score = [r["slug"]], s
+            elif s == best_score and best:
+                best.append(r["slug"])
+        if best and best_score >= 8:
+            for slug in best:
+                assign[slug].append(path)
     return {k: v[:8] for k, v in assign.items()}
 
 
@@ -277,6 +282,21 @@ def cmd_digest_z80(args):
     print(f"scan_all: {report} written ({len(rows)} runs)")
 
 
+def unique_slugs(entries):
+    """Header titles collide across revisions (World and Rev A are both
+    'SUPER MARIOLAND'): the shortest file name keeps the title slug, the others
+    get their file name appended, so no run overwrites another's outputs."""
+    by_slug = {}
+    for e in entries:
+        by_slug.setdefault(e["slug"], []).append(e)
+    for slug, group in by_slug.items():
+        if len(group) < 2:
+            continue
+        group.sort(key=lambda e: (len(e["file"]), e["file"]))
+        for e in group[1:]:
+            e["slug"] = f"{slug}-{slugify(os.path.splitext(e['file'])[0])}"[:80]
+
+
 def cmd_scan(args):
     roms = sorted(
         f for f in os.listdir(args.roms)
@@ -286,6 +306,7 @@ def cmd_scan(args):
         sys.exit(f"scan_all: no .gb/.gbc ROM in {args.roms}")
     entries = [{"path": os.path.join(args.roms, n), "title": rom_title(os.path.join(args.roms, n)),
                 "slug": slugify(rom_title(os.path.join(args.roms, n))), "file": n} for n in roms]
+    unique_slugs(entries)
     movies_by_slug = assign_movies(args.tas_dirs, entries)
     os.makedirs(args.out, exist_ok=True)
     binary = os.path.abspath(args.binary)

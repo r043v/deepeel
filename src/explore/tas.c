@@ -134,6 +134,7 @@ static int vbm_parse(const uint8_t *d, size_t n, DpTas *out, char *err, size_t e
             return 0;
         }
         out->anchored = (start_flags & 0x03) != 0;
+        out->recorder = DP_TAS_REC_VBA; // binary VBM: VBA-rr / VBA-M
         // $30 minor version, $31 ROM header checksum, $32-$33 global checksum
         out->has_cksum = 1;
         out->hdr_ck = d[0x31];
@@ -240,6 +241,7 @@ static int tas_load_zip(uint8_t *d, size_t n, DpTas *out, char *err, size_t errs
         bk2_header(hdr, hn, out);
         free(hdr);
     }
+    out->recorder = DP_TAS_REC_BIZHAWK;
     size_t sn = 0;
     uint8_t *sync = dp_zip_read(d, n, "syncsettings", &sn, NULL);
     if (sync) {

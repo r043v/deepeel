@@ -36,6 +36,8 @@ typedef struct DpGblApi {
     /* the instance's real bus write (mapper registers, seeding): bypasses
      * the interposed read/write hooks on purpose */
     void (*wr)(uint16_t a, uint8_t v);
+    /* movie sync compatibility knobs (gbl.h): 0 = hardware behaviour */
+    uint8_t *sync_div_skew, *sync_vba_off_clock;
 } DpGblApi;
 
 extern const DpGblApi *const dp_gbl_inst[DP_GBL_VARIANTS][DP_GBL_MACHINES];
