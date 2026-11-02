@@ -181,6 +181,8 @@ void dp_sega_results_free(DpSegaResults *results);
 // one class per byte (GB dp_map_build parity); NULL when out of memory
 uint8_t *dp_sega_map_build(const DpSegaResults *r);
 void dp_sega_report(FILE *out,const DpSegaSystem *system,const DpSegaResults *results);
+// campaign summary (--summary FILE): one JSON object per run for scan_all.py
+void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *results);
 void dp_sega_map(FILE *out,const DpSegaResults *results);
 // Lossless per-byte evidence flags, including overlapping code/data proofs.
 void dp_sega_evidence(FILE *out,const DpSegaResults *results);

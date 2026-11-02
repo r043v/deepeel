@@ -22,6 +22,7 @@ import time
 # not input logs — the C-side --tas-dir still accepts .log on purpose
 MOVIE_EXTS = (".vbm", ".vmv", ".bk2", ".gbm", ".fm2")
 ROM_EXTS = (".gb", ".gbc")
+Z80_ROM_EXTS = {"sg": (".sg", ".rom"), "sms": (".sms",), "gg": (".gg",), "msx": (".rom", ".mx1", ".mx2")}
 
 
 def norm(s):
@@ -89,7 +90,7 @@ def match_score(movie, rom_title, rom_file=""):
     return best
 
 
-def assign_movies(tas_dirs, roms):
+def assign_movies(tas_dirs, roms, z80=False):
     """give every movie file to the ROM it scores best (min score 8).
 
     roms: list of dicts with 'slug', 'title' and 'file'.  Returns {slug: [paths]}.
@@ -101,6 +102,10 @@ def assign_movies(tas_dirs, roms):
             for name in names:
                 if name.lower().endswith(MOVIE_EXTS):
                     files.append(os.path.join(dirpath, name))
+    if z80:
+        # the z80 explorer replays BizHawk containers only: VBM/VMV/FM2 are
+        # GB(NES) layouts its loader rejects
+        files = [f for f in files if f.lower().endswith(".bk2")]
     assign = {r["slug"]: [] for r in roms}
     for path in sorted(files):
         best, best_score = None, 0
@@ -119,6 +124,157 @@ def max_total_for(banks):
     if banks <= 32:
         return 200_000_000
     return 300_000_000
+
+
+# --- z80 campaign (SG-1000 / Master System / Game Gear / MSX1) ---------------
+
+def z80_entries(roms_dir, system):
+    exts = Z80_ROM_EXTS[system]
+    files = sorted(f for f in os.listdir(roms_dir)
+                   if f.lower().endswith(exts) and os.path.isfile(os.path.join(roms_dir, f)))
+    if not files:
+        sys.exit(f"scan_all: no {'/'.join(exts)} ROM in {roms_dir}")
+    # z80 carts carry no header title: slug and match key come from the filename
+    return [{"path": os.path.join(roms_dir, n), "title": "", "slug": slugify(os.path.splitext(n)[0]),
+             "file": n} for n in files]
+
+
+def cmd_scan_z80(args):
+    entries = z80_entries(args.roms, args.system)
+    movies_by_slug = assign_movies(args.tas_dirs, entries, z80=True)
+    out_root = args.out
+    os.makedirs(out_root, exist_ok=True)
+    binary = os.path.abspath(args.binary)
+
+    for e in entries:
+        path, slug = e["path"], e["slug"]
+        if args.only and args.only != slug:
+            continue
+        out_dir = os.path.join(out_root, slug)
+        os.makedirs(out_dir, exist_ok=True)
+        cmd = [
+            binary, "z80", "explore", args.system, path,
+            "--max-total", str(args.max_total),
+            "--input-total", str(args.max_total),
+            "--indirect-total", str(args.max_total),
+            "--seed-banks", "--jobs", str(args.jobs),
+            "--text", os.path.join(out_dir, f"{slug}.txt"),
+            "--map", os.path.join(out_dir, f"{slug}.map"),
+            "--evidence", os.path.join(out_dir, f"{slug}.evidence"),
+            "--summary", os.path.join(out_dir, f"{slug}.summary.json"),
+        ]
+        for m in movies_by_slug.get(slug, []):
+            cmd += ["--tas", m]
+        log_path = os.path.join(out_dir, f"{slug}.log")
+        print(f"=== {args.system}/{slug}: {len(movies_by_slug.get(slug, []))} TAS movie(s), "
+              f"budget {args.max_total:,} steps/phase")
+        t0 = time.time()
+        with open(log_path, "w") as log:
+            proc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, timeout=args.wall)
+        print(f"    done in {time.time() - t0:.0f}s (rc={proc.returncode})")
+        sp = os.path.join(out_dir, f"{slug}.summary.json")
+        if os.path.exists(sp):
+            s = json.load(open(sp))
+            m = s["map"]
+            print(f"    known {m['known_pct']:.2f}%  unknown {m['unknown_pct']:.3f}%  "
+                  f"inferred {m['inferred_pct']:.2f}%  ({m['residual_ranges']} residual ranges)")
+        else:
+            print("    NO SUMMARY — check the log")
+
+
+def cmd_digest_z80(args):
+    rows = []
+    for slug in sorted(os.listdir(args.out)):
+        sp = os.path.join(args.out, slug, f"{slug}.summary.json")
+        if not os.path.isfile(sp):
+            continue
+        try:
+            s = json.load(open(sp))
+        except json.JSONDecodeError:
+            continue
+        s["_slug"] = slug
+        rows.append(s)
+    if not rows:
+        sys.exit("scan_all: no z80 summary found — run scan-z80 first")
+
+    lines = ["# Rapport de campagne z80 (SG-1000 / Master System / Game Gear / MSX1)",
+             "",
+             "Observations de l'outil (machine concrète, RAM à zéro, registres",
+             "événementiels statiques) — pas des mesures de matériel.", ""]
+
+    lines += ["## Couverture", "",
+              "| ROM | système | Ko | connu | inconnu | inféré | résidu (o / plages) | pas | chemins |",
+              "|---|---|---|---|---|---|---|---|---|"]
+    for s in rows:
+        m, c = s["map"], s["counters"]
+        lines.append(
+            f"| {s['_slug']} | {s['system']} | {s['rom']['bytes'] // 1024} | "
+            f"{m['known_pct']:.2f}% | {m['unknown_pct']:.3f}% | {m['inferred_pct']:.2f}% | "
+            f"{m['residual_bytes']} / {m['residual_ranges']} | "
+            f"{c['steps']:,} | {c['paths']:,} |")
+    lines.append("")
+
+    lines += ["## Classes de la carte (octets par classe)", "",
+              "| ROM | " + " | ".join(c for c in rows[0]["map"]["classes"]) + " |",
+              "|---|" + "---|" * len(rows[0]["map"]["classes"])]
+    for s in rows:
+        cls = s["map"]["classes"]
+        lines.append(f"| {s['_slug']} | " + " | ".join(f"{cls[k]:,}" for k in cls) + " |")
+    lines.append("")
+
+    lines += ["## Murs et saturations", "",
+              "| ROM | boucles coupées | fourches bouchées | file: coupes / croissances |"
+              " spool: écrit / relu / refusé | graines refusées (cap / vue) | en attente |"
+              " évictions ctx | indirect: sites / semées / en attente | jobs | exec hors ROM |",
+              "|---|" + "---|" * 10]
+    for s in rows:
+        c = s["counters"]
+        lines.append(
+            f"| {s['_slug']} | {c['loop_cuts']:,} | {c['fork_cuts']:,} | "
+            f"{c['queue_cuts']:,} / {c['queue_growths']:,} | "
+            f"{c['spool_writes']:,} / {c['spool_reads']:,} / {c['spool_refused']:,} | "
+            f"{c['seeds_refused_cap']:,} / {c['seeds_refused_view']:,} | "
+            f"{c['seeds_pending'] + c['indirect_pending']:,} | {c['evicted_ctx']:,} | "
+            f"{c['indirect_sites']:,} / {c['indirect_seeds']:,} / {c['indirect_pending']:,} | "
+            f"{c['jobs_capped']:,} | {c['exec_outside']:,} |")
+    lines.append("")
+
+    lines += ["## Verdicts des sections (nécessité)", "",
+              "| ROM | required | played | forced | total |", "|---|---|---|---|---|"]
+    for s in rows:
+        v = {"required": 0, "played": 0, "forced": 0, "none": 0}
+        for sec in s["sections"]:
+            v[sec["verdict"]] += 1
+        lines.append(f"| {s['_slug']} | {v['required']} | {v['played']} | {v['forced']} | {len(s['sections'])} |")
+    lines.append("")
+
+    lines += ["## Mécanismes bloquants détectés", ""]
+    for s in rows:
+        c, m = s["counters"], s["map"]
+        notes = []
+        if c["queue_cuts"]:
+            notes.append(f"{c['queue_cuts']:,} chemins coupés par la file (croissances déjà payées: {c['queue_growths']:,})")
+        if c["fork_cuts"]:
+            notes.append(f"{c['fork_cuts']:,} fourches bouchées par le cap par site")
+        if c["seeds_refused_cap"] or c["seeds_refused_view"]:
+            notes.append(f"graines refusées: cap {c['seeds_refused_cap']:,}, vue {c['seeds_refused_view']:,}")
+        if c["indirect_pending"]:
+            notes.append(f"{c['indirect_pending']:,} cibles indirectes restées en attente de budget")
+        if c["exec_outside"]:
+            notes.append(f"{c['exec_outside']:,} pas d'exécution hors ROM (dispatch calculé)")
+        if c["jobs_capped"]:
+            notes.append(f"--jobs demandé au-delà des 2 instances: excès {c['jobs_capped']:,}")
+        if m["residual_ranges"]:
+            top = sorted(m["residual"], key=lambda r: -r["len"])[:5]
+            fmt = ", ".join(f"{r['bank']}:{r['lo']:04x}-{r['hi']:04x} ({r['len']} o)" for r in top)
+            notes.append(f"résidu {m['residual_bytes']:,} o en {m['residual_ranges']} plages; plus grandes: {fmt}")
+        lines.append(f"- **{s['_slug']}** : " + (" ; ".join(notes) if notes else "aucun mur visible."))
+    lines.append("")
+
+    report = os.path.join(args.out, "REPORT.md")
+    with open(report, "w") as f:
+        f.write("\n".join(lines))
+    print(f"scan_all: {report} written ({len(rows)} runs)")
 
 
 def cmd_scan(args):
@@ -411,11 +567,32 @@ def main():
     dig = sub.add_parser("digest", help="aggregate the summaries into REPORT.md")
     dig.add_argument("--out", default="output/batch")
 
+    sz = sub.add_parser("scan-z80", help="run the z80 recipe on every SG/SMS/GG/MSX ROM")
+    sz.add_argument("--system", required=True, choices=sorted(Z80_ROM_EXTS))
+    sz.add_argument("--roms", required=True)
+    sz.add_argument("--out", default=None, help="default: output/batch-z80/<system>")
+    sz.add_argument("--tas-dirs", nargs="*", default=["output/tas"])
+    sz.add_argument("--binary", default="build/deepeel")
+    sz.add_argument("--max-total", type=int, default=20_000_000,
+                    help="step budget of each phase (base, inputs, indirect)")
+    sz.add_argument("--jobs", type=int, default=1, choices=(1, 2), help="parallel drain workers")
+    sz.add_argument("--wall", type=int, default=3600, help="hard wall seconds per ROM")
+    sz.add_argument("--only", help="single slug")
+
+    dz = sub.add_parser("digest-z80", help="aggregate the z80 summaries into REPORT.md")
+    dz.add_argument("--out", default=None, help="default: output/batch-z80/<system> — required with several systems")
+
     args = ap.parse_args()
     if args.mode == "scan":
         cmd_scan(args)
+    elif args.mode == "scan-z80":
+        if not args.out:
+            args.out = os.path.join("output", "batch-z80", args.system)
+        cmd_scan_z80(args)
     else:
-        cmd_digest(args)
+        if not args.out:
+            sys.exit("scan_all: digest-z80 needs --out (one system's batch dir)")
+        cmd_digest_z80(args)
 
 
 if __name__ == "__main__":

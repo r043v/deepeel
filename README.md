@@ -128,6 +128,12 @@ python3 tools/scan_all.py scan
 python3 tools/scan_all.py scan --only zelda --full --resume
 # agrégation : couverture par ROM, anatomie du résidu, murs et saturations
 python3 tools/scan_all.py digest            # -> output/batch/REPORT.md
+
+# z80 : même principe pour SG-1000 / Master System / Game Gear / MSX1 —
+# 20 M pas par phase, --seed-banks, --jobs 2, films TAS appariés par nom,
+# résumé JSON par ROM ; agrégation en rapport de campagne
+python3 tools/scan_all.py scan-z80 --system sms --roms ~/roms/sms
+python3 tools/scan_all.py digest-z80 --out output/batch-z80/sms
 ```
 
 ## État

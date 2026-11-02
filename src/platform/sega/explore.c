@@ -1315,7 +1315,7 @@ cleanup:
     free(x.seeds); free(x.seed_state); free(x.seed_cart); free(x.seed_origins);
     free(x.seed_scratch); free(x.seed_scratch_cart); free(x.seed_scratch_origins);
     if(x.spool) fclose(x.spool);
-    if(!ok) { free(r->sections); free(r->section_of); dp_sega_results_free(r); }
+    if(!ok) dp_sega_results_free(r); // frees every results-owned block exactly once
     return ok;
 }
 // --- parallel drain (--jobs) -------------------------------------------------------
@@ -1497,6 +1497,81 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
     dp_sega_results_free(&second);
     if(o->jobs>2) r->jobs_capped=o->jobs-2;
     return ok;
+}
+// Campaign summary (--summary FILE): one JSON object per run, the raw
+// material of tools/scan_all.py digest.  Observations of the tool, never
+// hardware measurements.  Residual = map classes still unknown, longest
+// ranges first (capped at 512 ranges).
+void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r) {
+    uint8_t *map=dp_sega_map_build(r);
+    uint64_t known=0,unknown=0,inferred=0;
+    uint64_t class_bytes[DP_SMAP_COUNT]={0};
+    if(map) for(size_t i=0;i<r->size;i++) {
+        class_bytes[map[i]]++;
+        if(map[i]==DP_SMAP_UNKNOWN) unknown++;
+        else if(map[i]>=DP_SMAP_INF_DATA) inferred++;
+        else known++;
+    }
+    typedef struct { uint32_t bank,lo,hi,len; } DpSegaResidual;
+    DpSegaResidual resid[512];
+    unsigned nresid=0;
+    if(map) for(size_t i=0;i<r->size;) {
+        if(map[i]!=DP_SMAP_UNKNOWN) { i++; continue; }
+        size_t j=i;
+        while(j<r->size && map[j]==DP_SMAP_UNKNOWN) j++;
+        uint32_t len=(uint32_t)(j-i),bank=(uint32_t)(i>>14),off=(uint32_t)(i&0x3fff);
+        if(nresid<512) {
+            unsigned k=nresid++;
+            while(k && resid[k-1].len<len) { resid[k]=resid[k-1]; k--; }
+            resid[k]=(DpSegaResidual){bank,off,off+len-1,len};
+        }
+        i=j;
+    }
+    double total=(double)(r->size?r->size:1);
+    fprintf(out,"{\"system\":\"%s\",\"rom\":{\"bytes\":%zu,\"banks\":%zu},"
+        "\"map\":{\"known_pct\":%.3f,\"unknown_pct\":%.3f,\"inferred_pct\":%.3f,"
+        "\"residual_bytes\":%"PRIu64",\"residual_ranges\":%u,\"residual\":[",
+        system->id,r->size,(size_t)((r->size+0x3fff)/0x4000),
+        100.0*known/total,100.0*unknown/total,100.0*inferred/total,
+        unknown,nresid);
+    for(unsigned i=0;i<nresid;i++)
+        fprintf(out,"%s{\"bank\":%u,\"lo\":%u,\"hi\":%u,\"len\":%u}",i?",":"",resid[i].bank,resid[i].lo,resid[i].hi,resid[i].len);
+    fputs("],\"classes\":{",out);
+    for(unsigned i=0;i<DP_SMAP_COUNT;i++)
+        fprintf(out,"%s\"%s\":%"PRIu64,i?",":"",dp_smap_names[i],class_bytes[i]);
+    fprintf(out,"}},\"counters\":{\"steps\":%"PRIu64",\"paths\":%"PRIu64",\"forks\":%"PRIu64",\"irq_forks\":%"PRIu64
+        ",\"exec_outside\":%"PRIu64",\"loop_cuts\":%"PRIu64",\"fork_cuts\":%"PRIu64",\"queue_cuts\":%"PRIu64
+        ",\"global_cuts\":%"PRIu64",\"path_cuts\":%"PRIu64",\"faults\":%"PRIu64",\"decode_cuts\":%"PRIu64
+        ",\"queue_growths\":%"PRIu64",\"spool_writes\":%"PRIu64",\"spool_reads\":%"PRIu64",\"spool_refused\":%"PRIu64
+        ",\"seeds_pointer\":%"PRIu64",\"seeds_bank\":%"PRIu64",\"seeds_entry\":%"PRIu64",\"seeds_admitted\":%"PRIu64
+        ",\"seeds_refused_cap\":%"PRIu64",\"seeds_refused_view\":%"PRIu64",\"seeds_pending\":%"PRIu64
+        ",\"evicted_ctx\":%"PRIu64",\"indirect_sites\":%"PRIu64",\"indirect_targets\":%"PRIu64
+        ",\"indirect_seeds\":%"PRIu64",\"indirect_pending\":%"PRIu64
+        ",\"play_steps\":%"PRIu64",\"play_epochs\":%"PRIu64
+        ",\"tas_frames\":%"PRIu64",\"tas_frames_refused\":%"PRIu64
+        ",\"jobs_capped\":%"PRIu64",\"seeds_offlane\":%"PRIu64",\"merge_conflicts\":%"PRIu64
+        ",\"bank_changes\":%"PRIu64",\"data_reads\":%"PRIu64"}",
+        r->steps,r->paths,r->forks,r->irq_forks,r->exec_outside,r->loop_cuts,r->fork_cuts,
+        r->queue_cuts,r->global_cuts,r->path_cuts,r->faults,r->decode_cuts,r->queue_growths,
+        r->spool_writes,r->spool_reads,r->spool_refused,r->seeds_pointer,r->seeds_bank,
+        r->seeds_entry,r->seeds_admitted,r->seeds_refused_cap,r->seeds_refused_view,
+        r->seeds_pending,r->evicted_ctx,r->indirect_sites,r->indirect_targets,
+        r->indirect_seeds,r->indirect_pending,r->play_steps,r->play_epochs,
+        r->tas_frames,r->tas_frames_refused,r->jobs_capped,r->seeds_offlane,
+        r->merge_conflicts,r->bank_changes,r->data_reads);
+    fprintf(out,",\"limits\":{\"base\":%"PRIu64",\"inputs\":%"PRIu64",\"indirect\":%"PRIu64"}",
+        r->phase_limits[0],r->phase_limits[1],r->phase_limits[2]);
+    fputs(",\"sections\":[",out);
+    unsigned printed=r->section_count<4096?r->section_count:4096;
+    for(unsigned i=0;i<printed;i++) {
+        const DpSegaSection *s=&r->sections[i];
+        fprintf(out,"%s{\"bank\":%u,\"lo\":%u,\"hi\":%u,\"verdict\":\"%s\",\"hits\":%"PRIu64
+            ",\"natural\":%"PRIu64",\"forced\":%"PRIu64",\"boot\":%"PRIu64",\"played\":%"PRIu64",\"copies\":%"PRIu64",\"ctx\":%"PRIu64"}",
+            i?",":"",s->bank,s->lo,s->hi,dp_sega_verdict_names[s->verdict],s->hits,
+            s->natural_hits,s->forced_hits,s->boot_hits,s->played_hits,s->copies,s->ctx_count);
+    }
+    fprintf(out,"],\"sections_count\":%u}\n",r->section_count);
+    free(map);
 }
 // static scan (GB dp_static_scan parity): padding runs of 8+ identical
 // $00/$FF bytes, and pointer-table words — a word in a switchable window
@@ -1747,7 +1822,7 @@ static int parse_entry(const char *s,DpSegaOptions *o) {
 int dp_sega_explore_command(int argc,char **argv) {
     if(argc<5) goto usage;
     const DpSegaSystem *s=!strcmp(argv[3],"msx")?dp_msx_system():dp_sega_system(argv[3]); if(!s) goto usage;
-    DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); const char *text=NULL,*map=NULL,*evidence=NULL;
+    DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); const char *text=NULL,*map=NULL,*evidence=NULL,*summary=NULL;
     for(int i=5;i<argc;i++) {
         if(!strcmp(argv[i],"--no-vector-seeds")) { o.seed_vectors=0; continue; }
         if(!strcmp(argv[i],"--no-context-evict")) { o.no_context_evict=1; continue; }
@@ -1776,6 +1851,7 @@ int dp_sega_explore_command(int argc,char **argv) {
         const char *key=argv[i++],*value=argv[i];
         if(!strcmp(key,"--text")) text=value;
         else if(!strcmp(key,"--map")) map=value;
+        else if(!strcmp(key,"--summary")) summary=value;
         else if(!strcmp(key,"--evidence")) evidence=value;
         else if(!strcmp(key,"--mapper") && (!strcmp(s->id,"sms") || !strcmp(s->id,"gg"))) {
             const char *names[]={"auto","sega","codemasters","korean150"};
@@ -1829,14 +1905,16 @@ int dp_sega_explore_command(int argc,char **argv) {
     int ok=dp_sega_explore(s,image+header,(size_t)end-header,&o,&r); free(image);
     if(!ok) { fprintf(stderr,"invalid machine profile/budgets/ROM size, or allocation failure\n"); return 1; }
     dp_sega_report(stdout,s,&r);
-    const char *paths[]={text,map,evidence};
-    for(unsigned i=0;i<3;i++) if(paths[i]) {
+    const char *paths[]={text,map,evidence,summary};
+    for(unsigned i=0;i<4;i++) if(paths[i]) {
         FILE *out=fopen(paths[i],"w"); if(!out) { perror(paths[i]); ok=0; continue; }
-        if(i==2) dp_sega_evidence(out,&r); else if(i==1) dp_sega_map(out,&r); else dp_sega_report(out,s,&r);
+        if(i==2) dp_sega_evidence(out,&r); else if(i==1) dp_sega_map(out,&r);
+        else if(i==3) dp_sega_summary(out,s,&r);
+        else dp_sega_report(out,s,&r);
         if(ferror(out)) ok=0;
         if(fclose(out)) ok=0;
     }
     dp_sega_results_free(&r); return ok?0:1;
 usage:
-    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE]\n"); return 2;
+    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--summary FILE]\n"); return 2;
 }
