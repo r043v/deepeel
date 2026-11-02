@@ -331,6 +331,7 @@ struct DpPlay {
     uint64_t tas_ckpts;
     uint64_t tas_cuts;      // fork-explorer cuts absorbed mid-movie (movie kept)
     uint64_t tas_cut_stuck; // consecutive-cut guard hits (movie then falls to random play)
+    uint32_t tas_rom_refused; // movies refused: recorded on another ROM (identity mismatch)
     // watch window feed (--watch): a sampled screen of one replaying movie
     int watch_fps;          // 0 = off
     int watch_sel;          // which TAS worker is shown (index among the movies)
@@ -931,7 +932,26 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
             }
         } else if (t >= 0 && t < p->cfg.tas_n && p->cfg.tas[t]) {
             char terr[256];
-            if (dp_tas_load(p->cfg.tas[t], &w->tas, terr, sizeof terr)) {
+            int loaded = dp_tas_load(p->cfg.tas[t], &w->tas, terr, sizeof terr);
+            if (loaded) {
+                char why[256];
+                int match = dp_tas_rom_match(&w->tas, p->cart->rom, p->cart->rom_size, why, sizeof why);
+                if (match == 0 && !p->cfg.tas_any_rom) {
+                    // a movie for another revision desyncs by construction:
+                    // refused, reported (never silently replayed)
+                    fprintf(stderr, "deepeel: TAS %s refused: recorded on another ROM (%s); --tas-any-rom forces it\n",
+                            w->tas.source, why);
+                    p->tas_rom_refused++;
+                    dp_tas_free(&w->tas);
+                    loaded = 0;
+                } else if (match == 0) {
+                    fprintf(stderr, "deepeel: TAS %s: recorded on another ROM (%s), replayed anyway (--tas-any-rom)\n",
+                            w->tas.source, why);
+                } else if (match == 1) {
+                    fprintf(stderr, "deepeel: TAS %s: ROM identity verified (%s)\n", w->tas.source, why);
+                }
+            }
+            if (loaded) {
                 w->mode = IN_TAS;
                 w->tas_idx = t;
                 // capture interval: both constraints are lower bounds on the

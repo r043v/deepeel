@@ -18,7 +18,23 @@ typedef struct DpTas {
     int anchored;     // 1 = the movie starts from a savestate (replay from
                       // power-on is best-effort, not frame-exact)
     char source[512]; // file path
+    // the ROM the movie was made on, when the format records it: BizHawk
+    // writes the SHA-1 (Header.txt), VBA the cartridge header checksum
+    // ($014D) and global checksum ($014E-$014F)
+    int has_sha1, has_cksum;
+    uint8_t sha1[20];
+    uint8_t hdr_ck;
+    uint16_t global_ck;
+    char game[96];       // the movie's game name (BizHawk GameName), if any
+    // frame clock of the recording emulator: 1 = every frame lasts exactly
+    // 70224 cycles from power-on (BizHawk Gambatte "EqualLengthFrames"),
+    // 0 = a frame ends at vblank (VBA; m0boy's own frame clock)
+    int equal_frames;
 } DpTas;
+
+// the movie's recorded ROM identity against this ROM: 1 match, 0 mismatch,
+// -1 the movie records no identity.  `why` gets a human description.
+int dp_tas_rom_match(const DpTas *t, const uint8_t *rom, size_t rom_size, char *why, size_t whysz);
 
 // sniff and load any supported format; returns 1 on success, 0 with a human
 // message in `err` otherwise

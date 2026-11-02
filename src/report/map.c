@@ -30,6 +30,7 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
         else if (d & (DP_DF_COPIED | DP_DF_VERBATIM)) c = DP_MAP_DATA_COPIED;
         else if (d & DP_DF_STATIC) c = DP_MAP_DATA_STATIC;
         else if (d & DP_DF_READ) c = DP_MAP_DATA_READ;
+        else if (d & DP_DF_SIBLING) c = DP_MAP_INF_DATA; // inferred, labelled so
         else if (s & DP_SF_POINTER) c = DP_MAP_TABLE;
         else if (s & DP_SF_PAD) c = DP_MAP_PAD;
         else c = DP_MAP_UNKNOWN;

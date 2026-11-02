@@ -463,3 +463,91 @@ le TAS n'est pas ralenti. La fenêtre affiche le film, sa frame courante, et
 la vitesse réelle du rejeu en frames/s (observation de l'outil). `Espace`,
 `Tab` ou `→` passent au film suivant ; `Échap` ferme la fenêtre seule, le
 run continue. Sans SDL2, l'option affiche un message et est ignorée.
+
+## Copies des longues sessions, provenance, sources sœurs, identité des films (0.22.0)
+
+Quatre corrections génériques du moteur et de la carte, mesurées sur toute la
+campagne (observations de l'outil, pas des mesures de matériel).
+
+- **Copies des sessions** : le traceur de boucles de copie n'émettait un
+  enregistrement qu'en fin de chemin ; une lecture ROM ou une écriture VRAM
+  hors fenêtre (IRQ, routine suivante) **réinitialisait** la fenêtre accumulée
+  sans l'émettre. Une session jouée (un TAS entier) perdait ainsi presque
+  toutes ses copies réelles. La fenêtre est désormais émise avant d'être
+  réinitialisée (même règle des ≥ 2 itérations). Ligne de rapport
+  `copies: N records, M emitted at window breaks, K dropped by the cap` ; le
+  plafond `max_copies` est compté (`copies_dropped`), plus jamais silencieux.
+- **Provenance réellement exécutée** : `closure_rounds` quittait la fonction
+  (`return`) au premier tour sans graine — la passe de provenance et la
+  closure finale ne tournaient jamais (« 0 data bytes static » partout).
+- **Closure par flot garanti** : un successeur d'instruction exécutée (ou
+  d'une ligne droite déjà garantie) traverse une marque heuristique `table`
+  du scan de pointeurs — le flot de contrôle prouve une instruction. La
+  garantie tombe après un `CALL`/`RST` (données en ligne après un appel) ;
+  padding, data verbatim et opcodes illégaux arrêtent toujours. Chaque état
+  est visité au plus deux fois (garanti / non garanti) : borné.
+- **Sources sœurs d'une copie** (`DP_DF_SIBLING`, classe `inferred-data`) :
+  une copie ROM→VRAM *verbatim* (≥ 16 octets) dont l'adresse source est un
+  mot d'une table ROM lue (mots contigus, non exécutés, lus ou pointeurs,
+  même fenêtre, ≤ 64 entrées) rend les autres entrées de la table sources de
+  même longueur — les tuiles d'un niveau jamais joué, chargées par le même
+  chargeur. Refus comptés (une plage sœur sur du code naturel), plafonds
+  comptés ; ligne stderr `copy siblings: tables, ranges, bytes (refused,
+  caps)` ; compteurs `sib_*`. Une inférence ne masque jamais une observation.
+
+Campagne `scan_all` bornée (300 s de jeu par ROM, `--jobs 7`, deux passes
+parallèles ; le moteur est déterministe : deux passes de référence
+identiques à l'octet) :
+
+| ROM | 0.13 (référence) | 0.22 | résidu |
+|---|---|---|---|
+| Super Mario Land | 99,826 % | 99,991 % | 114 → 6 o |
+| Zelda LA | 91,70 % | 91,88 % | 43 513 → 42 590 o |
+| Mystic Quest | 90,27 % | 90,81 % | 25 516 → 24 105 o |
+| SML2 | 85,20 % | 86,85 % | 77 606 → 68 925 o |
+| Pokémon Jaune | 77,55 % | 80,30 % | 235 455 → 206 592 o |
+
+La part déduite **baisse** sur SML2 et Pokémon : les copies des sessions sont
+de l'observation nouvelle. Aucun octet de code n'est étiqueté data par la
+règle des sœurs (contrôle : décodage des plages nouvellement déduites).
+
+Règles essayées puis **écartées** (elles étiquetaient du code en data) :
+
+- *bords mixtes code|data* (trou après un terminateur `RET`/`JP`, ou avant du
+  code atteint par saut) : sur Zelda, ~43 % des octets ainsi déduits se
+  décodent en vraies routines jamais exécutées (`call $3B8D … ret`) ;
+- *segments entre cibles d'une table de pointeurs copiée* : une table de
+  routines non exécutées (Zelda 1:$6027) passe pour des segments de données ;
+  exiger une lecture observée du segment la rend inopérante là où il n'y a
+  pas de jeu.
+
+Limite connue de la règle préexistante `data|data` (≤ 1024 octets) : une
+marque `table` (heuristique) compte comme bord de data ; des routines non
+explorées encadrées de faux pointeurs deviennent ainsi `inferred-data`
+(vu sur Zelda 6:$53B8, Pokémon 15:$6870). L'exclure entièrement fait
+s'effondrer la carte (Mystic 90 % → 53 %) : dans les banques de tuiles la
+règle est juste ; elle reste donc, documentée.
+
+Super Mario Land : les 6 octets restants (1:$58D1, $5915, $592D–$592F, $5953)
+sont dans le flux de niveau du monde 4, comme les tuiles de 1:$47F2–$4FB1
+(désormais `inferred-data` par la règle des sœurs). Le monde 4 n'est jamais
+joué : les films TAS désynchronisent au jeu bonus de 1-3 — lot tiré de
+`DIV & 3` en $3E7D ; un décalage de phase de DIV donne le bon lot, puis
+l'aléa des poissons de 2-1 (DIV encore) diverge : la phase de DIV n'est pas
+reproduite au cycle près par rapport à VBA/Gambatte.
+
+**Identité des films TAS** : l'attribution des films par `scan_all.py` se
+fait au nom de fichier ; deepeel vérifie maintenant l'identité de la ROM
+enregistrée dans le film — SHA-1 du `Header.txt` BizHawk, checksums d'en-tête
+et global de l'en-tête VBM ($31-$33). Un film d'une autre révision est
+**refusé** et journalisé (`TAS … refused: recorded on another ROM`),
+`--tas-any-rom` le force. Sur Super Mario Land World, quatre des sept films
+visaient la Rev A et désynchronisaient par construction (Gambatte lui-même
+décroche en 2-1 en rejouant le BK2 Rev A sur la ROM World).
+
+**Fidélité de la machine** : les écarts entre m0boy et deux références
+indépendantes (SameBoy et Gambatte, identiques entre elles instruction par
+instruction et cycle par cycle sur la zone étudiée) sont corrigés dans le
+runtime m0boy ; deepeel compile ce runtime avec `GBL_ACCESS_BLOCK=1`
+(blocage VRAM/OAM par mode). Rapport et patch : `docs/m0boy-fidelite.fr.md`,
+`docs/patches/m0boy-fidelite-dmg.patch`.

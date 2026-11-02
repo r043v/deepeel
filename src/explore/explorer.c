@@ -597,7 +597,6 @@ static void hook_read(DpMach *m, uint16_t a, uint8_t v) {
         dp_copy_on_rom_read(ex, (uint8_t)cur_bank(ex, a), a, v);
     }
     section_live_access(ex, a);
-    if (a == 0xFF04 && ex->session && getenv("DP_COPYDBG")) fprintf(stderr, "DBG div pc=%04x v=%02x\n", m->api->gbr->pc, v);
     if (a >= 0xFF00 && a < 0xFF80) {
         int slot = dp_io_slot(res, a);
         if (slot >= 0) {
@@ -618,7 +617,6 @@ static void hook_read(DpMach *m, uint16_t a, uint8_t v) {
 static void hook_write(DpMach *m, uint16_t a, uint8_t v) {
     DpExplorer *ex = m->owner;
     DpResults *res = ex->res;
-    if (a == 0xFFB4 && ex->session && getenv("DP_COPYDBG")) fprintf(stderr, "DBG level %02x\n", v);
     if (a < 0x8000) { // mapper write: the bank flip resolves on the next step
         ex->pend_map = 1;
         ex->pend_pc = m->api->gbr->pc;
@@ -724,7 +722,6 @@ static void hook_step(DpMach *m, uint16_t pc, uint8_t op, int entry) {
 
     // a mapper write from the previous step resolved: record the switch
     emit_pend_map(ex);
-    if (ex->session_tick) ex->session_tick(m);
 
     // the fork explorer's walls do not apply to session workers: their play
     // is bounded by frames and segments, and they share res->steps_total

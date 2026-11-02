@@ -40,6 +40,8 @@ typedef struct DpSessionCfg {
     int inputs_n;
     const char *tas[8];         // TAS movie files (VBA .vmv, BizHawk .bk2, plain
     int tas_n;                  // input log): one worker each, frame by frame
+    int tas_any_rom;            // 1: replay a movie whose recorded ROM identity differs
+                                //    from this ROM (default: refused, counted)
     int tas_solo;               // 1: only the TAS workers run (no attract/random crowd);
                                 // the play stops once every movie has ended — the
                                 // checkpoints are kept for the post-play phases

@@ -32,6 +32,7 @@ enum {
     DP_DF_COPIED = 1 << 1, // source range of a copy into VRAM/OAM
     DP_DF_VERBATIM = 1 << 2, // source range of a verbatim copy (byte for byte)
     DP_DF_STATIC = 1 << 3, // read by statically proven code (provenance pass)
+    DP_DF_SIBLING = 1 << 4, // inferred: sibling entry of a verbatim copy's source table
 };
 enum {
     DP_SF_POINTER = 1 << 0, // static: part of a plausible pointer table
@@ -219,6 +220,7 @@ typedef struct DpResults {
     // data proven by exploration, for the m0boy bridge
     uint64_t data_verbatim_bytes; // bytes with DP_DF_VERBATIM
     uint32_t seeds_refused_budget; // seeds dropped: the phase's cascade solde was spent
+    uint32_t sib_tables, sib_ranges, sib_bytes, sib_refused, sib_caps; // copy-sibling inference
     uint32_t prov_jp_hl, prov_data;  // provenance: jp-hl targets proven, bytes proven data
     uint32_t prov_unresolved, prov_sat, prov_steps; // partial proofs, caps hit, walk steps
     uint32_t data_contradictions; // bytes both executed and proven data (kept code)
@@ -366,7 +368,6 @@ struct DpExplorer {
     // first discovery to their credit counters below.
     int session;
     void *session_ctx;         // the owning worker (sessions.c)
-    void (*session_tick)(DpMach *m); // per-step frame clock of a TAS lane (NULL: off)
     int irq_depth;             // natural IRQ handlers currently executing
     int reti_pending;          // a RETI executes this step: drop the depth after
     // mapper write seen on the previous step: resolve old->new banks now
@@ -436,6 +437,10 @@ void dp_copy_on_rom_read(DpExplorer *ex, uint8_t bank, uint16_t addr, uint8_t v)
 void dp_copy_on_vram_write(DpExplorer *ex, uint8_t bank, uint16_t addr, uint8_t v);
 void dp_copy_on_back_edge(DpCopyTracker *ct, uint16_t site, uint32_t site_key);
 void dp_copy_flush_path(DpExplorer *ex, DpCopyTracker *ct);
+// copy-sibling inference (after the runs): a verbatim ROM->VRAM copy whose
+// source address is an entry of a read ROM pointer table makes the table's
+// other entries sources of the same length (DP_DF_SIBLING, map inferred-data)
+uint32_t dp_copy_siblings(DpResults *res);
 
 // --- engine -------------------------------------------------------------------
 

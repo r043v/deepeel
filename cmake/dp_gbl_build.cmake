@@ -51,7 +51,7 @@ foreach(v RANGE ${nv})
     execute_process(
       COMMAND ${CMAKE_C_COMPILER} -c -O2 -w -fno-stack-protector
         -I${DP_GBL_SRC} -I${cfg}
-        -DGBL_COVERAGE -DGBL_TRACE -DGBL_VRAM_HOOK=1
+        -DGBL_COVERAGE -DGBL_TRACE -DGBL_VRAM_HOOK=1 -DGBL_ACCESS_BLOCK=1
         ${hooks}
         ${BASE_FLAGS}
         ${DP_GBL_SRC}/${src} -o ${obj}

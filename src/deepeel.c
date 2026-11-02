@@ -100,6 +100,8 @@ static void usage(void) {
             "    --tas-ckpt-live      feed the TAS snapshots to the fork explorer during the\n"
             "                         replay instead of the default: save them, then seed the\n"
             "                         whole set after the coverage exploration\n"
+            "    --tas-any-rom        replay movies recorded on another ROM (revision): by default a\n"
+            "                         movie whose SHA-1 (bk2) or checksums (vbm) differ is refused\n"
             "    --tas f              replay a TAS movie: VBA .vmv, BizHawk .bk2 or an\n"
             "                         extracted input log (repeatable, one worker each)\n"
             "    --tas-dir D          discover movies in directory D (up to 8, best title\n"
@@ -306,6 +308,7 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--tas-ckpt-max") && i + 1 < argc) scfg.tas_ckpt_max = atoi(argv[++i]);
         else if (!strcmp(a, "--tas-ckpt-live")) scfg.tas_ckpt_live = 1;
         else if (!strcmp(a, "--tas-solo")) scfg.tas_solo = 1;
+        else if (!strcmp(a, "--tas-any-rom")) scfg.tas_any_rom = 1;
         else if (!strcmp(a, "--inputs") && i + 1 < argc && !strcmp(argv[++i], "m0x")) scfg.uniform = 0;
         else if (!strcmp(a, "--uniform-hold") && i + 1 < argc) scfg.uniform_hold = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--fork-paths") && i + 1 < argc) scfg.fork_paths_per_epoch = atoi(argv[++i]);
@@ -944,7 +947,7 @@ static void closure_rounds(DpExplorer *ex, DpResults *res, uint32_t *seed_spent,
         uint32_t refused = res->closure_seeds_refused - ref0;
         fprintf(stderr, "deepeel: closure round %d: +%u static bytes, %d entries seeded, %u refused\n",
                 r + 1, marked, seeded, refused);
-        if (!seeded && !refused) return;
+        if (!seeded && !refused) break; // provenance + final closure still run
         ex->stop = 0;
         ex->steps_own = 0;
         ex->cfg.dfs = 1;
@@ -961,6 +964,9 @@ static void closure_rounds(DpExplorer *ex, DpResults *res, uint32_t *seed_spent,
     fprintf(stderr, "deepeel: provenance: %u jp-hl targets, %u data bytes proven (%u partial, %u caps)\n",
             res->prov_jp_hl, res->prov_data, res->prov_unresolved, res->prov_sat);
     (void)prov;
+    uint32_t sib = dp_copy_siblings(res);
+    fprintf(stderr, "deepeel: copy siblings: %u tables, %u ranges, %u bytes inferred (%u refused, %u caps)\n",
+            res->sib_tables, res->sib_ranges, sib, res->sib_refused, res->sib_caps);
     dp_static_closure(res); // the last search may have opened more direct flow
 }
 

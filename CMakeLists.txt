@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.20.0 LANGUAGES C)
+project(deepeel VERSION 0.22.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -210,6 +210,7 @@ add_library(deepeel_core STATIC
   src/platform/md/explore.c
   src/core/snapshot_png.c
   src/core/zip.c
+  src/core/sha1.c
   src/core/sta.c
   src/platform/gb/gb_registry.c
   src/cpu/sm83/sm83_disasm.c

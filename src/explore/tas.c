@@ -3,6 +3,7 @@
  * the deepeel joypad layout at load time. */
 #define _GNU_SOURCE
 #include "tas.h"
+#include "../core/sha1.h"
 #include "../core/zip.h"
 
 #include <ctype.h>
@@ -133,6 +134,10 @@ static int vbm_parse(const uint8_t *d, size_t n, DpTas *out, char *err, size_t e
             return 0;
         }
         out->anchored = (start_flags & 0x03) != 0;
+        // $30 minor version, $31 ROM header checksum, $32-$33 global checksum
+        out->has_cksum = 1;
+        out->hdr_ck = d[0x31];
+        out->global_ck = (uint16_t)(d[0x32] | d[0x33] << 8);
         int nctl = 0;
         for (int i = 0; i < 4; i++)
             if (ctl & (1 << i)) nctl++;
@@ -166,6 +171,61 @@ static int vbm_parse(const uint8_t *d, size_t n, DpTas *out, char *err, size_t e
     return 0;
 }
 
+// --- BizHawk header: "SHA1 <40 hex>", "GameName <name>" -------------------------
+static int hexv(int c) {
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+}
+
+static void bk2_header(const uint8_t *h, size_t n, DpTas *out) {
+    size_t i = 0;
+    while (i < n) {
+        size_t j = i;
+        while (j < n && h[j] != '\n') j++;
+        const char *l = (const char *)h + i;
+        size_t len = j - i;
+        if (len && l[len - 1] == '\r') len--;
+        if (len >= 45 && !strncmp(l, "SHA1 ", 5)) {
+            int ok = 1;
+            for (int k = 0; k < 20 && ok; k++) {
+                int a = hexv(l[5 + 2 * k]), b = hexv(l[6 + 2 * k]);
+                if (a < 0 || b < 0) ok = 0;
+                else out->sha1[k] = (uint8_t)(a << 4 | b);
+            }
+            out->has_sha1 = ok;
+        } else if (len > 9 && !strncmp(l, "GameName ", 9)) {
+            size_t g = len - 9 < sizeof out->game - 1 ? len - 9 : sizeof out->game - 1;
+            memcpy(out->game, l + 9, g);
+            out->game[g] = 0;
+        }
+        i = j + 1;
+    }
+}
+
+int dp_tas_rom_match(const DpTas *t, const uint8_t *rom, size_t rom_size, char *why, size_t whysz) {
+    if (t->has_sha1) {
+        uint8_t h[20];
+        dp_sha1(rom, rom_size, h);
+        int ok = !memcmp(h, t->sha1, 20);
+        char a[41], b[41];
+        for (int k = 0; k < 20; k++) {
+            snprintf(a + 2 * k, 3, "%02x", t->sha1[k]);
+            snprintf(b + 2 * k, 3, "%02x", h[k]);
+        }
+        snprintf(why, whysz, "movie SHA-1 %s%s%s%s, ROM SHA-1 %s", a, t->game[0] ? " (" : "",
+                 t->game[0] ? t->game : "", t->game[0] ? ")" : "", b);
+        return ok;
+    }
+    if (t->has_cksum && rom_size >= 0x150) {
+        uint8_t hc = rom[0x14D];
+        uint16_t gc = (uint16_t)(rom[0x14E] << 8 | rom[0x14F]);
+        int ok = hc == t->hdr_ck && gc == t->global_ck;
+        snprintf(why, whysz, "movie checksums %02x/%04x, ROM %02x/%04x", t->hdr_ck, t->global_ck, hc, gc);
+        return ok;
+    }
+    snprintf(why, whysz, "movie records no ROM identity");
+    return -1;
+}
+
 // --- dispatch ------------------------------------------------------------------
 static int tas_load_buf(uint8_t *d, size_t n, DpTas *out, char *err, size_t errsz, int depth);
 
@@ -177,7 +237,20 @@ static int tas_load_zip(uint8_t *d, size_t n, DpTas *out, char *err, size_t errs
     uint8_t *hdr = dp_zip_read(d, n, "header", &hn, NULL);
     if (hdr) {
         if (strcasestr((const char *)hdr, "startsfromsavestate true")) out->anchored = 1;
+        bk2_header(hdr, hn, out);
         free(hdr);
+    }
+    size_t sn = 0;
+    uint8_t *sync = dp_zip_read(d, n, "syncsettings", &sn, NULL);
+    if (sync) {
+        char *z = malloc(sn + 1);
+        if (z) {
+            memcpy(z, sync, sn);
+            z[sn] = 0;
+            if (strstr(z, "\"EqualLengthFrames\":true")) out->equal_frames = 1;
+            free(z);
+        }
+        free(sync);
     }
     size_t ln = 0;
     uint8_t *log = dp_zip_read(d, n, "input log", &ln, NULL);

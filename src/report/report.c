@@ -75,6 +75,7 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
              "spool: %u written, %u read back, %u refused, %llu bytes pending\n"
              "seeds: %u natural, %u speculative (%u refused: cascade solde spent)\n"
              "data: %llu bytes proven verbatim (cov flag 8), %u exec∩data contradictions\n"
+             "copies: %d records, %u emitted at window breaks, %u dropped by the cap\n"
              "provenance: %u jp-hl targets, %u data bytes static, %u partial, %u caps\n",
              (unsigned long long)res->steps_total, (unsigned long long)res->paths_run,
              (unsigned long long)(res->forks_branch + res->forks_irq + res->forks_key +
@@ -88,6 +89,7 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
              (unsigned long long)res->spool_bytes,
              res->seeds_natural, res->seeds_spec, res->seeds_refused_budget,
              (unsigned long long)res->data_verbatim_bytes, res->data_contradictions,
+             res->copy_count, res->copy_window_breaks, res->copies_dropped,
              res->prov_jp_hl, res->prov_data, res->prov_unresolved, res->prov_sat);
     dp_buf_str(out, line);
     {
@@ -287,8 +289,9 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
                res->closure_stopped_data, res->closure_stopped_illegal, res->closure_seeds,
                res->closure_seeds_dropped, res->closure_seeds_refused, res->closure_bank_seeds,
                res->indirect_seeds);
-    dp_buf_fmt(o, "\"data\": {\"verbatim_bytes\":%llu,\"contradictions\":%u},\n",
-               (unsigned long long)res->data_verbatim_bytes, res->data_contradictions);
+    dp_buf_fmt(o, "\"data\": {\"verbatim_bytes\":%llu,\"contradictions\":%u,\"copies\":%d,\"copy_window_breaks\":%u,\"copies_dropped\":%u},\n",
+               (unsigned long long)res->data_verbatim_bytes, res->data_contradictions,
+               res->copy_count, res->copy_window_breaks, res->copies_dropped);
     {   // map summary + residual ranges (the aggregation view)
         DpMapSummary s;
         uint8_t *m = dp_map_build(res, &s);
@@ -492,8 +495,9 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
                res->closure_stopped_data, res->closure_stopped_illegal, res->closure_seeds,
                res->closure_seeds_dropped, res->closure_seeds_refused, res->closure_bank_seeds,
                res->indirect_seeds);
-    dp_buf_fmt(o, "\"data\": {\"verbatim_bytes\":%llu,\"contradictions\":%u}\n}\n",
-               (unsigned long long)res->data_verbatim_bytes, res->data_contradictions);
+    dp_buf_fmt(o, "\"data\": {\"verbatim_bytes\":%llu,\"contradictions\":%u,\"copies\":%d,\"copy_window_breaks\":%u,\"copies_dropped\":%u}\n}\n",
+               (unsigned long long)res->data_verbatim_bytes, res->data_contradictions,
+               res->copy_count, res->copy_window_breaks, res->copies_dropped);
 }
 
 // --- cov -------------------------------------------------------------------------

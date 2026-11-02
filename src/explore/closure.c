@@ -18,10 +18,13 @@
 
 #define NO_HINT 0xFFFFu
 
-typedef struct { uint32_t key; uint16_t hint; } Item;
+// trust: the item is a successor of executed code (or of a trusted straight
+// line) on an edge that is not a call's return — control flow proves it is an
+// instruction, so a heuristic pointer-table mark does not stop it
+typedef struct { uint32_t key; uint16_t hint; uint8_t trust; } Item;
 typedef struct { Item *v; size_t n, cap; } Stack;
 
-static void push(Stack *s, uint32_t key, uint16_t hint) {
+static void push(Stack *s, uint32_t key, uint16_t hint, uint8_t trust) {
     if (s->n == s->cap) {
         s->cap = s->cap ? s->cap * 2 : 4096;
         s->v = realloc(s->v, s->cap * sizeof(Item));
@@ -29,6 +32,7 @@ static void push(Stack *s, uint32_t key, uint16_t hint) {
     }
     s->v[s->n].key = key;
     s->v[s->n].hint = hint;
+    s->v[s->n].trust = trust;
     s->n++;
 }
 
@@ -94,25 +98,29 @@ uint32_t dp_static_closure(DpResults *res) {
 
     for (size_t k = 0; k < n; k++) {
         if (!(res->exec_flags[k] & DP_XF_START)) continue;
-        if (k >= 0x4000) { push(&st, (uint32_t)k, NO_HINT); continue; }
+        if (k >= 0x4000) { push(&st, (uint32_t)k, NO_HINT, 0); continue; }
         uint32_t sid1 = res->section_of[k];
         if (sid1) {
             const DpSection *s = &res->sections[sid1 - 1];
             for (int i = 0; i < s->banks_seen_n; i++)
-                push(&st, (uint32_t)k, (uint16_t)s->banks_seen[i]);
+                push(&st, (uint32_t)k, (uint16_t)s->banks_seen[i], 0);
         }
-        push(&st, (uint32_t)k, boot_bank(res)); // the window before any switch
+        push(&st, (uint32_t)k, boot_bank(res), 0); // the window before any switch
     }
 
     while (st.n) {
         Item it = st.v[--st.n];
         uint32_t k = it.key;
         uint32_t bank = k / 0x4000, off = k % 0x4000;
+        // visited per trust level: a trusted visit may pass where an
+        // untrusted one stopped (at most two visits per state: bounded)
         if (bank == 0) {
-            if (dp_set_insert(&vis0, ((uint64_t)k << 16) | it.hint) <= 0) continue;
+            if (dp_set_insert(&vis0, ((uint64_t)k << 17) | ((uint64_t)it.hint << 1) | it.trust) <= 0)
+                continue;
         } else {
-            if (vis[k]) continue;
-            vis[k] = 1;
+            uint8_t bit = it.trust ? 2 : 1;
+            if (vis[k] & (bit | 2)) continue;
+            vis[k] |= bit;
         }
         uint32_t pc = bank ? 0x4000 + off : off;
         if (k >= c->rom_size) continue;
@@ -122,7 +130,8 @@ uint32_t dp_static_closure(DpResults *res) {
         int executed = (res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED)) != 0;
         if (!executed) {
             if (illegal(op)) { res->closure_stopped_illegal++; continue; }
-            if ((res->static_flags[k] & (DP_SF_PAD | DP_SF_POINTER)) ||
+            if ((res->static_flags[k] & DP_SF_PAD) ||
+                ((res->static_flags[k] & DP_SF_POINTER) && !it.trust) ||
                 ((res->data_flags[k] & DP_DF_VERBATIM) && !(res->exec_flags[k] & DP_XF_NATURAL))) {
                 res->closure_stopped_data++;
                 continue;
@@ -140,7 +149,11 @@ uint32_t dp_static_closure(DpResults *res) {
             res->exec_flags[k] |= DP_XF_START;
         }
 
-        // successors
+        // successors: executed or trusted code hands trust to its targets and
+        // to its fall-through, except after a call (inline data idiom)
+        uint8_t tr = (uint8_t)(executed || it.trust);
+        int is_call = op == 0xCD || op == 0xC4 || op == 0xCC || op == 0xD4 || op == 0xDC ||
+                      (op & 0xC7) == 0xC7;
         int target = -1;          // absolute address of a direct transfer
         int fall = 1;
         switch (op) {
@@ -181,13 +194,13 @@ uint32_t dp_static_closure(DpResults *res) {
                     res->exec_flags[tk] |= DP_XF_ENTRY;
                     if (dp_set_insert(&listed, tk) > 0) entry_add(res, tk);
                 }
-                push(&st, tk, tk >= 0x4000 ? NO_HINT : thint);
+                push(&st, tk, tk >= 0x4000 ? NO_HINT : thint, tr);
             }
         }
         if (fall) {
             uint32_t npc = pc + (uint32_t)len;
             if (bank == 0 ? off + (uint32_t)len < 0x4000 : npc < 0x8000)
-                push(&st, k + (uint32_t)len, it.hint);
+                push(&st, k + (uint32_t)len, it.hint, (uint8_t)(tr && !is_call));
             else if (bank == 0) {
                 res->closure_unresolved_bank++;
                 bank_edge_add(res, &blisted, 0x4000);
