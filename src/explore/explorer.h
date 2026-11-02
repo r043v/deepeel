@@ -154,6 +154,11 @@ typedef struct DpResults {
     uint32_t *exec_hits;
     uint8_t *data_flags;
     uint32_t *data_hits;
+    // real usage: the same counts from played sessions only (TAS, random,
+    // attract, human), never the fork explorer's forced paths; the heat map
+    // and the hot-zone statistics read these
+    uint32_t *play_exec_hits;
+    uint32_t *play_data_hits;
     uint8_t *static_flags;
     uint32_t *section_of; // rom key -> section id + 1
     // sections
@@ -195,6 +200,7 @@ typedef struct DpResults {
     // discovery counters move under every session worker)
     uint64_t steps_total, paths_run;
     uint32_t exec_outside; // instructions executed outside ROM (VRAM/RAM code)
+    uint64_t hits_saturated; // per-byte hit counters held at UINT32_MAX (never wrap)
     uint32_t forks_branch, forks_irq, forks_key, forks_p1, evicted_exact, evicted_ctx;
     uint32_t forks_capped; // forks dropped by the per-site cap
     uint32_t cycle_cuts, step_cuts, budget_paths, budget_steps, queue_overflows;

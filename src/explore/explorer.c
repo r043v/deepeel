@@ -30,7 +30,14 @@ static void fork_p1(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op);
 static inline uint8_t flags_or(uint8_t *p, uint8_t bit) {
     return __atomic_or_fetch(p, bit, __ATOMIC_RELAXED); // returns the old bits
 }
-static inline void hits_add(uint32_t *p, uint32_t v) { __atomic_add_fetch(p, v, __ATOMIC_RELAXED); }
+// per-byte hit counter, saturating at UINT32_MAX (a hot loop never wraps to
+// "cold"); each held increment is counted
+static inline void hits_add(DpResults *res, uint32_t *p) {
+    if (__atomic_fetch_add(p, 1, __ATOMIC_RELAXED) == UINT32_MAX) {
+        __atomic_store_n(p, UINT32_MAX, __ATOMIC_RELAXED);
+        __atomic_add_fetch(&res->hits_saturated, 1, __ATOMIC_RELAXED);
+    }
+}
 static inline void u32_add(uint32_t *p, uint32_t v) { __atomic_add_fetch(p, v, __ATOMIC_RELAXED); }
 static inline void u64_add(uint64_t *p, uint64_t v) { __atomic_add_fetch(p, v, __ATOMIC_RELAXED); }
 static inline void u64_or(uint64_t *p, uint64_t v) { __atomic_fetch_or(p, v, __ATOMIC_RELAXED); }
@@ -148,8 +155,12 @@ void dp_results_init(DpResults *res, const DpCart *cart, const DpPlatform *plat)
     res->exec_hits = xrealloc(NULL, n * sizeof(uint32_t));
     res->data_flags = xrealloc(NULL, n);
     res->data_hits = xrealloc(NULL, n * sizeof(uint32_t));
+    res->play_exec_hits = xrealloc(NULL, n * sizeof(uint32_t));
+    res->play_data_hits = xrealloc(NULL, n * sizeof(uint32_t));
     res->static_flags = xrealloc(NULL, n);
     res->section_of = xrealloc(NULL, n * sizeof(uint32_t));
+    memset(res->play_exec_hits, 0, n * sizeof(uint32_t));
+    memset(res->play_data_hits, 0, n * sizeof(uint32_t));
     memset(res->exec_flags, 0, n);
     memset(res->exec_hits, 0, n * sizeof(uint32_t));
     memset(res->data_flags, 0, n);
@@ -199,6 +210,8 @@ void dp_results_free(DpResults *res) {
     free(res->exec_hits);
     free(res->data_flags);
     free(res->data_hits);
+    free(res->play_exec_hits);
+    free(res->play_data_hits);
     free(res->static_flags);
     free(res->section_of);
     for (int i = 0; i < res->section_count; i++) dp_set_free(&res->sections[i].ctx_seen);
@@ -593,7 +606,8 @@ static void hook_read(DpMach *m, uint16_t a, uint8_t v) {
         uint32_t key = key_at(ex, a);
         uint8_t old = flags_or(&res->data_flags[key], DP_DF_READ);
         if (!(old & DP_DF_READ)) ex->credit_data++;
-        hits_add(&res->data_hits[key], 1);
+        hits_add(res, &res->data_hits[key]);
+        if (ex->session) hits_add(res, &res->play_data_hits[key]);
         dp_copy_on_rom_read(ex, (uint8_t)cur_bank(ex, a), a, v);
     }
     section_live_access(ex, a);
@@ -926,7 +940,8 @@ bad_done:
             uint8_t old = flags_or(&res->exec_flags[pk], nf);
             if (!(old & nf)) ex->credit_exec++;
             if (!(old & DP_XF_START)) flags_or(&res->exec_flags[pk], DP_XF_START);
-            hits_add(&res->exec_hits[pk], 1);
+            hits_add(res, &res->exec_hits[pk]);
+            if (ex->session) hits_add(res, &res->play_exec_hits[pk]);
             if (is_entry) flags_or(&res->exec_flags[pk], DP_XF_ENTRY);
             if (ex->irq_depth) flags_or(&res->exec_flags[pk], DP_XF_IRQ);
             int len = sm83_len(op);

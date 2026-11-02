@@ -370,18 +370,19 @@ code / data / padding.
   `--z80` réécrit les plages en vues fenêtrées, et `--sys sms|gg|msx`
   + `--title nom` rendent la couverture d'une ROM non GB sans re-scan.
 - `deepeel explore ROM --map x.map` écrit le texte (`banque début fin classe`,
-  fin incluse, adresses vues du CPU) ; `--map x.map.png` écrit une image
-  (un carré par 64 octets, 16×16 par banque, rouge = inconnu, bleus = code,
-  verts = data, ocre = table, gris = padding) qui **embarque le `.map`
-  complet** (chunk tEXt `deepeel_map`, comme une cartouche PICO-8) et les
-  paramètres de la conversion (chunk tEXt `deepeel_meta` : version, ROM,
+  fin incluse, adresses vues du CPU) ; tout autre chemin écrit l'image PNG
+  (défaut depuis 0.26.0, voir plus bas : 1 pixel par octet, panneau de
+  chaleur, chunks zTXt compressés). Rouge = inconnu, bleus = code,
+  verts = data, ocre = table, gris = padding. Elle **embarque le `.map`
+  complet** (chunk `deepeel_map`, comme une cartouche PICO-8) et les
+  paramètres de la conversion (chunk `deepeel_meta` : version, ROM,
   config, résultat) ; sous la grille, une légende dessinée : nom interne de
   la ROM (repli : nom de fichier), couverture globale, signature du
   convertisseur, puis chaque classe présente en deux colonnes justifiées —
   pastille carrée de sa couleur à côté du texte, police 8-bit 5×7 (accents
   é/è/ê/à dessinés dans les rangées libres des glyphes), deux colonnes
   seulement quand l'image est assez large. `deepeel mapx x.map.png x.map`
-  extrait le `.map` à l'identique.
+  extrait le `.map` à l'identique (`--chunk NOM` pour un autre chunk).
 - `--html f` : page web autonome (carrés par banque, légende, tableau des
   classes, journal de découverte : temps, source, crédit, octets connus).
   Le rapport texte affiche aussi les 40 dernières entrées du journal.
@@ -651,3 +652,45 @@ est enregistré en mode GBC (matériel CGB non émulé).
 Couverture Rev A inchangée (observation de l'outil) : 99,7 %, 170 octets du
 contenu des mondes 3 et 4, que seul un film synchronisé jouerait.
 Super Mario Land World : toujours 100,0 % (0,0 % déduit) avec le patch.
+
+## Carte PNG compressée, 1 pixel par octet, chaleur d'usage pour m0boy (0.26.0)
+
+- **PNG par défaut et compressé** : `--map P` écrit le PNG sauf si P finit
+  par `.map` ou `.txt` (texte) ; sans extension, `.png` est ajouté. L'image
+  passe par zlib (niveau 9, `compress2`) au lieu de blocs DEFLATE « stored »,
+  et toutes les charges utiles vont dans des chunks **zTXt** (zlib), snapshots
+  compris (`deepeel_snapshot`). Les anciens fichiers (stored, tEXt) restent
+  lisibles. zlib devient une dépendance (`find_package(ZLIB)`).
+- **1 pixel = 1 octet** : chaque banque est une tuile de 128×128 pixels (une
+  ligne par 128 octets), colorée par la classe exacte de chaque octet — les
+  vraies zones, plus de cellule de 64 octets à la classe dominante. À droite
+  de chaque banque, un **panneau de chaleur** de même géométrie : usage joué,
+  échelle log2, du violet sombre au jaune pâle (légende en bas).
+- **Usage réel seulement** : `play_exec_hits` / `play_data_hits` comptent les
+  instructions exécutées (octet d'opcode) et les octets ROM lus par les
+  sessions jouées (TAS, aléatoire, attract, humain), jamais les chemins forcés
+  du fork-explorer. Tous les compteurs par octet saturent à 2³²−1 au lieu de
+  reboucler ; les plafonnements sont comptés (`hits_saturated`, rapport texte
+  et JSON).
+- **Statistiques par zone** (`src/report/heat.c`) : une zone = une ligne du
+  `.map` ; octets, exécutions et lectures jouées, rang par usage, et
+  **ensemble chaud** (les zones qui portent 90 % de l'usage). Sorties :
+  top 20 dans le rapport texte, bloc `heat` du JSON et de `deepeel_meta`,
+  chunks du PNG :
+  - `deepeel_heat` : `bank start end class bytes exec reads rank hot`, toutes
+    les zones ;
+  - `deepeel_cov` : le `.cov` joué (hits 32 bits des sessions), débuts
+    d'instruction seulement, plages de données prouvées en une ligne avec une
+    5ᵉ colonne de longueur ;
+  - `deepeel_rom` : lectures jouées par page de 256 octets (format
+    `--rom-profile` de m0boy).
+- `--cov` garde son format (hits désormais 32 bits, plus plafonnés à 0xFFFF).
+- **m0boy** lit ce PNG : `gbrecomp --coverage x.map.png` prend `deepeel_cov`
+  (classement du budget de flash par les comptes joués) et, sans
+  `--rom-profile`, `deepeel_rom` pour choisir les blocs ROM résidents.
+
+Super Mario Land World (TAS muggv3) : PNG de 146 Ko contre 155 Ko pour
+l'ancien format, qui ne portait qu'une image par cellules de 64 octets et le
+`.map` (image + carte : 26 Ko au lieu de 155 Ko) ; l'ensemble chaud tient en
+23 zones, 7 241 octets (moteur en banque 0, banque 3). Observations de
+l'outil, pas des mesures de matériel.

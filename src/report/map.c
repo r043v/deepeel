@@ -5,6 +5,7 @@
 #include "report.h"
 #include "core/snapshot_png.h"
 #include "../gui/font5x7.h"
+#include <math.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -363,15 +364,19 @@ static void legend_entry(uint8_t *rgb, int w, int h, int y, const char *str,
     legend_text(rgb, w, h, right_edge >= 0 ? x0 : x0 + side + gap, y, str, col, scale);
 }
 
-// One SQ x SQ square per 64 ROM bytes (dominant class), 16x16 squares per bank,
-// banks laid out in rows of up to 8. The full .map text rides in the PNG
-// (tEXt "deepeel_map"), next to the converter's version and settings
-// (tEXt "deepeel_meta").  Under the grid, a legend band: rom name + coverage,
-// then the classes in two justified columns, swatch beside each entry.
+// One pixel per ROM byte, exact class: each bank is a 128x128 tile (one row
+// per 128 bytes), so every zone shows at its real size and place.  With
+// per-byte heat, a same-geometry heat tile sits right of each bank (played
+// usage, log scale).  The full .map text rides in the PNG (zTXt
+// "deepeel_map"), next to the converter's version and settings (zTXt
+// "deepeel_meta") and any extra chunks (usage statistics).  Under the grid,
+// a legend band: rom name + coverage, then the classes in two justified
+// columns, swatch beside each entry.
 static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapSummary *s,
                           const char *map_text, size_t map_len, const char *meta,
                           const char *path, const char *sysname, const char *filename,
-                          unsigned rom_size);
+                          unsigned rom_size, const uint32_t *heat, const DpPngText *extra,
+                          int n_extra);
 int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom_path,
                       const char *path) {
     DpMapSummary s;
@@ -396,15 +401,29 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
     dp_buf_init(&txt);
     dp_report_map(res, &txt);
     double pct = s.total ? 100.0 / (double)s.total : 0.0;
+    // played usage: per-zone ranking, the played .cov, the played ROM reads
+    // per page — what m0boy picks its native code and resident ROM by
+    DpHeat heat;
+    int have_heat = dp_heat_build(res, m, &heat);
+    DpBuf heat_txt, cov_txt, rom_txt;
+    dp_buf_init(&heat_txt);
+    dp_buf_init(&cov_txt);
+    dp_buf_init(&rom_txt);
+    if (have_heat) dp_heat_text(&heat, &heat_txt);
+    dp_report_cov_play(res, &cov_txt);
+    dp_report_romdata_play(res, &rom_txt);
+    uint32_t *hb = dp_heat_bytes(res);
     // the conversion's identity: version, rom, settings, result — a tEXt
     // chunk next to the map itself
-    char meta[768];
+    char meta[1024];
     snprintf(meta, sizeof meta,
              "{\"deepeel\":\"%s\",\"rom\":{\"title\":\"%s\",\"banks\":%d,\"size\":%u},"
              "\"config\":{\"max_steps_path\":%u,\"max_paths\":%u,\"max_steps_total\":%llu,"
              "\"queue\":%u,\"queue_max\":%u,\"mem_cap_mb\":%llu,\"loop_cap\":%u,\"seed_cap\":%u,"
              "\"closure_rounds\":%d,\"covered_keep\":%u,\"seed_banks\":%d},"
-             "\"map\":{\"known_pct\":%.2f,\"unknown_pct\":%.2f,\"inferred_pct\":%.2f}}",
+             "\"map\":{\"known_pct\":%.2f,\"unknown_pct\":%.2f,\"inferred_pct\":%.2f},"
+             "\"heat\":{\"exec\":%llu,\"reads\":%llu,\"zones_used\":%d,\"hot_zones\":%d,"
+             "\"hot_bytes\":%u,\"hot_share\":0.90}}",
              DEEPEEL_VERSION, title, res->banks,
              res->cart ? (unsigned)res->cart->rom_size : 0u,
              cfg ? cfg->max_steps_path : 0u, cfg ? cfg->max_paths : 0u,
@@ -414,16 +433,29 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
              cfg ? cfg->loop_back_cap : 0u, cfg ? cfg->seed_cap : 0u,
              cfg ? cfg->closure_rounds : 0, cfg ? cfg->covered_fork_keep : 0u,
              cfg ? cfg->seed_banks : 0,
-             s.known * pct, s.unknown * pct, s.inferred * pct);
+             s.known * pct, s.unknown * pct, s.inferred * pct,
+             have_heat ? (unsigned long long)heat.exec_total : 0ull,
+             have_heat ? (unsigned long long)heat.read_total : 0ull, have_heat ? heat.used_n : 0,
+             have_heat ? heat.hot_n : 0, have_heat ? heat.hot_bytes : 0u);
     char file[64];
     if (rom_path) {
         const char *b = rom_path + strlen(rom_path);
         while (b > rom_path && b[-1] != '/' && b[-1] != '\\') b--;
         snprintf(file, sizeof file, "%s", b);
     } else file[0] = 0;
+    DpPngText extra[3] = {
+        { "deepeel_heat", heat_txt.p, heat_txt.len, 0 },
+        { "deepeel_cov", cov_txt.p, cov_txt.len, 0 },
+        { "deepeel_rom", rom_txt.p, rom_txt.len, 0 },
+    };
     int ok = map_png_render(m, (int)res->banks, title, &s, (const char *)txt.p, txt.len,
                             meta, path, res->plat ? res->plat->name : "gb", file,
-                            res->cart ? (unsigned)res->cart->rom_size : 0u);
+                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 3);
+    free(hb);
+    if (have_heat) dp_heat_free(&heat);
+    dp_buf_free(&heat_txt);
+    dp_buf_free(&cov_txt);
+    dp_buf_free(&rom_txt);
     dp_buf_free(&txt);
     free(m);
     return ok;
@@ -474,16 +506,37 @@ int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char 
         if (c >= DP_MAP_INF_DATA) s.inferred++;
     }
     return map_png_render(m, banks, title, &s, text, len, meta, path, sysname, filename,
-                          rom_size);
+                          rom_size, NULL, NULL, 0);
 }
 
 // the shared renderer: squares grid + legend band + tEXt chunks, from a
 // per-byte class array and the .map text to embed
+// heat ramp: dark (cold, 0) through purple and red to pale yellow (hottest)
+static void heat_rgb(double t, uint8_t *px) {
+    static const uint8_t stops[5][3] = {
+        { 0x30, 0x1a, 0x50 }, { 0x8a, 0x22, 0x6a }, { 0xd8, 0x3c, 0x3c },
+        { 0xf2, 0x98, 0x2a }, { 0xfa, 0xec, 0xa0 } };
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    double f = t * 4.0;
+    int i = (int)f;
+    if (i > 3) i = 3;
+    f -= i;
+    for (int c = 0; c < 3; c++)
+        px[c] = (uint8_t)(stops[i][c] + (stops[i + 1][c] - stops[i][c]) * f + 0.5);
+}
+
 static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapSummary *s,
                           const char *map_text, size_t map_len, const char *meta,
                           const char *path, const char *sysname, const char *filename,
-                          unsigned rom_size) {
-    enum { SQ = 6, GRID = 16, BANK_PX = SQ * GRID, GAP = 6, PER_ROW = 8 };
+                          unsigned rom_size, const uint32_t *heat, const DpPngText *extra,
+                          int n_extra) {
+    // TILE: one pixel per byte, 128 bytes per row; with heat, a heat tile
+    // follows each bank tile (TGAP apart)
+    enum { TILE = 128, TGAP = 2, GAP = 6 };
+    const int BANK_PX = heat ? TILE + TGAP + TILE : TILE;
+    const int BANK_H = TILE;
+    const int PER_ROW = heat ? 4 : 8;
     static const char *fr[DP_MAP_COUNT] = {
         "inconnu", "code naturel", "code forcé", "code statique",
         "donnée copiée", "donnée lue", "donnée statique", "table", "padding",
@@ -535,7 +588,7 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     int s_common = ls < rs ? ls : rs; // both columns at the same scale
     ls = rs = s_common;
     int LH = 7 * s_common + 4;
-    int grid_h = GAP + rows * (BANK_PX + GAP);
+    int grid_h = GAP + rows * (BANK_H + GAP);
     // identity block: title row, then system / file / sizes / converter
     char size_txt[24];
     if (rom_size >= 1024 * 1024)
@@ -546,24 +599,32 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     snprintf(info_a, sizeof info_a, "%s - %s - %s", sysname ? sysname : "?",
              filename && filename[0] ? filename : "?", size_txt);
     int head_LH = 7 * FSCALE + 4;
-    int foot_LH = 11; // the 64-o square note + deepeel signature, bottom right
+    int foot_LH = 11; // the 1-px note (+ heat scale) + deepeel signature, bottom right
     int h = grid_h + GAP + head_LH + GAP + (7 + 4) + GAP + half * LH + GAP + foot_LH;
     uint8_t *rgb = malloc((size_t)w * h * 3);
     if (!rgb) { free(m); return 0; }
     for (size_t i = 0; i < (size_t)w * h; i++) { rgb[i * 3] = 0x18; rgb[i * 3 + 1] = 0x18; rgb[i * 3 + 2] = 0x1c; }
+    // heat scale: log2(hits + 1) against the hottest byte of the ROM
+    double hlog = 0.0;
+    if (heat) {
+        uint32_t hmax = 0;
+        for (size_t k = 0; k < (size_t)banks * 0x4000; k++)
+            if (heat[k] > hmax) hmax = heat[k];
+        hlog = hmax ? log2((double)hmax + 1.0) : 0.0;
+    }
     for (int b = 0; b < banks; b++) {
-        int ox = GAP + (b % PER_ROW) * (BANK_PX + GAP), oy = GAP + (b / PER_ROW) * (BANK_PX + GAP);
-        for (int q = 0; q < GRID * GRID; q++) {
-            unsigned cnt[DP_MAP_COUNT] = { 0 };
-            const uint8_t *blk = m + (size_t)b * 0x4000 + (size_t)q * 64;
-            for (int k = 0; k < 64; k++) cnt[blk[k]]++;
-            int best = 0;
-            for (int c = 1; c < DP_MAP_COUNT; c++) if (cnt[c] > cnt[best]) best = c;
-            for (int y = 0; y < SQ - 1; y++)
-                for (int x = 0; x < SQ - 1; x++) {
-                    uint8_t *px = rgb + ((size_t)(oy + (q / GRID) * SQ + y) * w + ox + (q % GRID) * SQ + x) * 3;
-                    px[0] = map_rgb[best][0]; px[1] = map_rgb[best][1]; px[2] = map_rgb[best][2];
-                }
+        int ox = GAP + (b % PER_ROW) * (BANK_PX + GAP), oy = GAP + (b / PER_ROW) * (BANK_H + GAP);
+        for (int a = 0; a < 0x4000; a++) {
+            size_t k = (size_t)b * 0x4000 + (size_t)a;
+            int x = a % TILE, y = a / TILE;
+            uint8_t *px = rgb + ((size_t)(oy + y) * w + ox + x) * 3;
+            const uint8_t *c = map_rgb[m[k]];
+            px[0] = c[0]; px[1] = c[1]; px[2] = c[2];
+            if (heat) {
+                uint8_t *hp = rgb + ((size_t)(oy + y) * w + ox + TILE + TGAP + x) * 3;
+                if (heat[k] && hlog > 0.0) heat_rgb(log2((double)heat[k] + 1.0) / hlog, hp);
+                else { hp[0] = 0x22; hp[1] = 0x22; hp[2] = 0x28; }
+            }
         }
     }
     // the legend itself: rom name, identity line, the classes in two columns,
@@ -597,29 +658,44 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
             legend_entry(rgb, w, h, ry, line, map_rgb[c], rs, ravail, w - GAP);
         }
     }
-    // the bottom-right note, left to right: square, "64 o", "/", signature
+    // the bottom line: heat scale (left, when drawn), then on the right
+    // "1 px = 1 o", "/", the deepeel signature
     {
         char sig[40];
         snprintf(sig, sizeof sig, "deepeel %s", DEEPEEL_VERSION);
         const uint8_t *col = (const uint8_t *)"\x70\x70\x78";
-        int side = 5, gap = 3; // a grid cell is SQ-1 = 5 px of color
-        int total = side + gap + legend_text_width("64 o", 1) + 4 +
-                    legend_text_width("/", 1) + 4 + legend_text_width(sig, 1);
-        int x = w - GAP - total, fy = y + half * LH + GAP;
-        for (int yy = 0; yy < side; yy++)
-            for (int xx = 0; xx < side; xx++) {
-                size_t off = ((size_t)(fy + yy) * w + x + xx) * 3;
-                rgb[off] = col[0]; rgb[off + 1] = col[1]; rgb[off + 2] = col[2];
-            }
-        x += side + gap;
-        legend_text(rgb, w, h, x, fy, "64 o", col, 1);
-        x += legend_text_width("64 o", 1) + 4;
+        int fy = y + half * LH + GAP;
+        if (heat) {
+            const char *lt = "chaleur (jeu) : froid", *rt = "chaud";
+            int x = GAP;
+            legend_text(rgb, w, h, x, fy, lt, col, 1);
+            x += legend_text_width(lt, 1) + 4;
+            for (int xx = 0; xx < 64; xx++)
+                for (int yy = 0; yy < 7; yy++) {
+                    int px = x + xx, py = fy + yy;
+                    if (px >= w || py >= h) continue;
+                    heat_rgb(xx / 63.0, rgb + ((size_t)py * w + px) * 3);
+                }
+            x += 64 + 4;
+            legend_text(rgb, w, h, x, fy, rt, col, 1);
+        }
+        const char *px_note = "1 px = 1 o";
+        int total = legend_text_width(px_note, 1) + 4 + legend_text_width("/", 1) + 4 +
+                    legend_text_width(sig, 1);
+        int x = w - GAP - total;
+        legend_text(rgb, w, h, x, fy, px_note, col, 1);
+        x += legend_text_width(px_note, 1) + 4;
         legend_text(rgb, w, h, x, fy, "/", col, 1);
         x += legend_text_width("/", 1) + 4;
         legend_text(rgb, w, h, x, fy, sig, col, 1);
     }
-    int ok = dp_png_save_text2(path, w, h, rgb, "deepeel_map", map_text, map_len,
-                               "deepeel_meta", meta, strlen(meta));
+    DpPngText items[2 + 8];
+    int ni = 0;
+    items[ni++] = (DpPngText){ "deepeel_map", map_text, map_len, 0 };
+    items[ni++] = (DpPngText){ "deepeel_meta", meta, strlen(meta), 0 };
+    for (int i = 0; i < n_extra && ni < (int)(sizeof items / sizeof items[0]); i++)
+        items[ni++] = extra[i];
+    int ok = dp_png_save_chunks(path, w, h, rgb, items, ni);
     free(rgb);
     return ok;
 }

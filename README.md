@@ -111,7 +111,10 @@ un kill. `deepeel maprender rom.gb in.map out.map.png` re-rend l'image de
 couverture depuis un `.map` sauvegardé, sans re-scan.
 
 L'export `--cov` écrit le format de couverture de m0boy (`bank addr flags
-count`) — pont optionnel vers le convertisseur.
+count`) — pont optionnel vers le convertisseur. `--map x` écrit par défaut la
+carte PNG (1 pixel par octet + chaleur d'usage joué, chunks zTXt : carte,
+`.cov` joué, profil ROM, usage par zone) que `gbrecomp --coverage x.map.png`
+lit directement ; `--map x.map` écrit le texte.
 
 ### Campagne multi-ROMs
 

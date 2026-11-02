@@ -8,8 +8,35 @@
 void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out);
 void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *out);
 void dp_report_cov(const DpResults *res, DpBuf *out);
+// same lines, hits from the played sessions only (the map PNG's deepeel_cov)
+void dp_report_cov_play(const DpResults *res, DpBuf *out);
 // ROM data-read heat per 256-byte page, m0boy's romdata-*.prof format
 void dp_report_romdata(const DpResults *res, DpBuf *out);
+// same, played reads only (the map PNG's deepeel_rom, m0boy's --rom-profile)
+void dp_report_romdata_play(const DpResults *res, DpBuf *out);
+
+// ---- heat: played usage per memory-map zone (heat.c)
+typedef struct DpZone {
+    uint16_t bank, lo, hi; // lo/hi inclusive, 0x0000..0x3FFF within the bank
+    uint8_t cls;           // DP_MAP_* class of the run
+    uint32_t bytes;
+    uint64_t exec, reads;  // played instructions executed / ROM bytes read
+    uint32_t rank;         // 1 = hottest
+    int hot;               // in the hot set (90% of usage)
+} DpZone;
+typedef struct DpHeat {
+    DpZone *z; // ROM order
+    int n, used_n, hot_n;
+    uint32_t hot_bytes;
+    uint64_t exec_total, read_total;
+} DpHeat;
+// zones of a dp_map_build array, ranked by played usage
+int dp_heat_build(const DpResults *res, const uint8_t *map, DpHeat *h);
+void dp_heat_free(DpHeat *h);
+void dp_heat_text(const DpHeat *h, DpBuf *out);              // deepeel_heat chunk
+void dp_heat_top_text(const DpHeat *h, int top, DpBuf *out); // text report
+// per-byte played heat for the map image (malloc'd, banks*0x4000)
+uint32_t *dp_heat_bytes(const DpResults *res);
 
 // classification of a 64-byte block of the ROM for the map views
 char dp_block_class(const DpResults *res, int bank, int block);

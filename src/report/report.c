@@ -125,8 +125,16 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
             if (rmap) {
                 dp_map_residual_text(res, rmap, out);
                 dp_residual_anatomy_text(res, rmap, out);
+                DpHeat heat;
+                if (dp_heat_build(res, rmap, &heat)) {
+                    dp_heat_top_text(&heat, 20, out);
+                    dp_heat_free(&heat);
+                }
                 free(rmap);
             }
+            snprintf(line, sizeof line, "hit counters held at their 32-bit ceiling: %llu increments\n",
+                     (unsigned long long)res->hits_saturated);
+            dp_buf_str(out, line);
         }
     }
 
@@ -282,6 +290,37 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
                res->seeds_refused_budget, res->seeds_skipped_data,
                (unsigned)res->bad_op_count, res->prov_jp_hl,
                res->prov_data, res->prov_unresolved, res->prov_sat);
+    {
+        // played usage (sessions only): totals and the hot set
+        DpMapSummary hs;
+        uint8_t *hm = dp_map_build(res, &hs);
+        DpHeat heat;
+        if (hm && dp_heat_build(res, hm, &heat)) {
+            dp_buf_fmt(o, "\"heat\": {\"exec\":%llu,\"reads\":%llu,\"zones_used\":%d,"
+                          "\"hot_zones\":%d,\"hot_bytes\":%u,\"hot_share\":0.90,"
+                          "\"hits_saturated\":%llu,\"top\":[",
+                       (unsigned long long)heat.exec_total, (unsigned long long)heat.read_total,
+                       heat.used_n, heat.hot_n, heat.hot_bytes,
+                       (unsigned long long)res->hits_saturated);
+            int first = 1;
+            for (int r = 1; r <= 20; r++)
+                for (int i = 0; i < heat.n; i++) {
+                    const DpZone *z = &heat.z[i];
+                    if (z->rank != (uint32_t)r || !(z->exec + z->reads)) continue;
+                    unsigned win = z->bank ? 0x4000u : 0u;
+                    dp_buf_fmt(o, "%s{\"bank\":%u,\"start\":%u,\"end\":%u,\"class\":\"%s\","
+                                  "\"exec\":%llu,\"reads\":%llu}",
+                               first ? "" : ",", z->bank, win + z->lo, win + z->hi,
+                               dp_map_class_name(z->cls), (unsigned long long)z->exec,
+                               (unsigned long long)z->reads);
+                    first = 0;
+                    break;
+                }
+            dp_buf_str(o, "]},\n");
+            dp_heat_free(&heat);
+        }
+        free(hm);
+    }
     dp_buf_fmt(o, "\"closure\": {\"rounds\":%u,\"starts\":%u,\"unresolved_bank\":%u,"
                   "\"stopped_data\":%u,\"stopped_illegal\":%u,\"seeds\":%u,\"seeds_dropped\":%u,"
                   "\"seeds_refused\":%u,\"bank_seeds\":%u,\"indirect_seeds\":%u},\n",
@@ -507,7 +546,8 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
 // execution and the data bit: execution wins, the contradiction is counted.
 // Data lines let m0boy's loader exclude those bytes even when another
 // coverage source (its static walk) proposed them as code.
-void dp_report_cov(const DpResults *res, DpBuf *o) {
+static void report_cov(const DpResults *res, DpBuf *o, const uint32_t *exec_hits,
+                       const uint32_t *data_hits, int starts_only) {
     dp_buf_str(o, "# gbl coverage v1: bank addr flags(1=exec,2=entry,4=speculative,8=data) hits\n");
     for (int bank = 0; bank < res->banks; bank++) {
         for (int a = 0; a < 0x4000; a++) {
@@ -519,14 +559,16 @@ void dp_report_cov(const DpResults *res, DpBuf *o) {
                 // as code) does not outweigh a verbatim copy proof
                 if (!natural && (res->data_flags[k] & DP_DF_VERBATIM)) {
                     dp_buf_fmt(o, "%02x %04x 8 %x\n", bank, bank ? a + 0x4000 : a,
-                               res->data_hits[k] > 0xFFFFu ? 0xFFFFu : (unsigned)res->data_hits[k]);
+                               (unsigned)data_hits[k]);
                     continue;
                 }
+                // operand bytes: m0boy decodes an instruction at every line
+                if (starts_only && !(ef & DP_XF_START)) continue;
                 uint8_t flags = 1;
                 if (ef & DP_XF_ENTRY) flags |= 2;
                 if (ef & DP_XF_FORCED) flags |= 4;
                 dp_buf_fmt(o, "%02x %04x %x %x\n", bank, bank ? a + 0x4000 : a, flags,
-                           res->exec_hits[k] > 0xFFFFu ? 0xFFFFu : (unsigned)res->exec_hits[k]);
+                           (unsigned)exec_hits[k]);
             } else if (ef & DP_XF_STATIC) {
                 // direct flow only: instruction starts, speculative (4), entry (2)
                 if (ef & DP_XF_START)
@@ -534,25 +576,53 @@ void dp_report_cov(const DpResults *res, DpBuf *o) {
                                (ef & DP_XF_ENTRY) ? 6u : 4u);
             } else if ((res->data_flags[k] & DP_DF_VERBATIM) || (res->static_flags[k] & DP_SF_POINTER)) {
                 // proven data, never executed: m0boy must not compile it
+                if (starts_only) {
+                    // compact form: one line per run, a 5th column = run
+                    // length, hits = the run's sum (saturating)
+                    int b = a;
+                    uint64_t sum = 0;
+                    while (b < 0x4000) {
+                        size_t kb = (size_t)bank * 0x4000 + b;
+                        if (res->exec_flags[kb] & (DP_XF_NATURAL | DP_XF_FORCED | DP_XF_STATIC)) break;
+                        if (!((res->data_flags[kb] & DP_DF_VERBATIM) || (res->static_flags[kb] & DP_SF_POINTER)))
+                            break;
+                        sum += data_hits[kb];
+                        b++;
+                    }
+                    dp_buf_fmt(o, "%02x %04x 8 %x %x\n", bank, bank ? a + 0x4000 : a,
+                               (unsigned)(sum > 0xFFFFFFFFu ? 0xFFFFFFFFu : sum), (unsigned)(b - a));
+                    a = b - 1;
+                    continue;
+                }
                 dp_buf_fmt(o, "%02x %04x 8 %x\n", bank, bank ? a + 0x4000 : a,
-                           res->data_hits[k] > 0xFFFFu ? 0xFFFFu : (unsigned)res->data_hits[k]);
+                           (unsigned)data_hits[k]);
             }
         }
     }
+}
+
+// hits are the full 32-bit counts (they saturate, never wrap)
+void dp_report_cov(const DpResults *res, DpBuf *o) { report_cov(res, o, res->exec_hits, res->data_hits, 0); }
+
+// played sessions only, instruction starts only, proven-data runs as one
+// line with a 5th column (run length): what m0boy should rank its flash
+// budget by (the map PNG's deepeel_cov)
+void dp_report_cov_play(const DpResults *res, DpBuf *o) {
+    report_cov(res, o, res->play_exec_hits, res->play_data_hits, 1);
 }
 
 // --- romdata ----------------------------------------------------------------------
 // ROM data-read profile in m0boy's romdata-*.prof format ("page count", one
 // line per touched 256-byte page): it weights the flash residency/streaming
 // of the generated project by what the sessions actually read.
-void dp_report_romdata(const DpResults *res, DpBuf *o) {
+static void report_romdata(const DpResults *res, DpBuf *o, const uint32_t *data_hits) {
     size_t pages = ((size_t)res->cart->rom_size + 255) / 256;
     uint64_t *counts = calloc(pages, sizeof(uint64_t));
     if (!counts) return;
     for (int bank = 0; bank < res->banks; bank++) {
         for (int a = 0; a < 0x4000; a++) {
             size_t k = (size_t)bank * 0x4000 + a;
-            uint32_t h = __atomic_load_n(&res->data_hits[k], __ATOMIC_RELAXED);
+            uint32_t h = __atomic_load_n(&data_hits[k], __ATOMIC_RELAXED);
             if (!h) continue;
             uint32_t off = (uint32_t)bank * 0x4000 + (uint32_t)a;
             if (off / 256 < pages) counts[off / 256] += h;
@@ -561,4 +631,10 @@ void dp_report_romdata(const DpResults *res, DpBuf *o) {
     for (size_t p = 0; p < pages; p++)
         if (counts[p]) dp_buf_fmt(o, "%zx %llu\n", p, (unsigned long long)counts[p]);
     free(counts);
+}
+
+void dp_report_romdata(const DpResults *res, DpBuf *o) { report_romdata(res, o, res->data_hits); }
+
+void dp_report_romdata_play(const DpResults *res, DpBuf *o) {
+    report_romdata(res, o, res->play_data_hits);
 }

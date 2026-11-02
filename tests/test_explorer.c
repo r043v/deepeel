@@ -80,6 +80,13 @@ int main(int argc, char **argv) {
     CHECK(res.data_flags[0x300] & DP_DF_COPIED);
     CHECK(res.exec_flags[0x150] & DP_XF_ENTRY); // jump target flagged as entry
     CHECK(res.exec_hits[0x156] > 0);
+    // real usage counts played sessions only: the fork explorer leaves it at 0
+    {
+        uint64_t played = 0;
+        for (size_t k = 0; k < (size_t)res.banks * 0x4000; k++)
+            played += res.play_exec_hits[k] + res.play_data_hits[k];
+        CHECK(played == 0);
+    }
     // the rom data never runs on the natural flow (forked wandering may touch it)
     CHECK(!(res.exec_flags[0x300] & DP_XF_NATURAL));
 

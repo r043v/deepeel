@@ -10,6 +10,7 @@
 #include "test_util.h"
 
 #include <sys/stat.h>
+#include <zlib.h>
 
 static char dir[512];
 
@@ -233,6 +234,67 @@ int main(int argc, char **argv) {
         free(opay);
     }
 
+    // --- PNG: zlib image + zTXt chunks, and the older stored/tEXt files ------
+    {
+        enum { W = 64, H = 64 };
+        static uint8_t rgb[W * H * 3]; // flat areas: zlib must shrink them
+        for (int i = 0; i < W * H; i++) rgb[i * 3] = (uint8_t)(i < W * H / 2 ? 0x20 : 0xC0);
+        const char *ta = "first chunk text", *tb = "# second\n1 2 3\n";
+        DpPngText items[2] = { { "dp_a", ta, strlen(ta), 0 }, { "dp_b", tb, strlen(tb), 0 } };
+        CHECK(dp_png_save_chunks("test_state_a/z.png", W, H, rgb, items, 2));
+        FILE *zf = fopen("test_state_a/z.png", "rb");
+        long zsz = 0;
+        if (zf) { fseek(zf, 0, SEEK_END); zsz = ftell(zf); fclose(zf); }
+        CHECK(zsz > 0 && zsz < W * H * 3 / 8);
+        size_t n = 0;
+        char *t = dp_png_text("test_state_a/z.png", "dp_b", &n);
+        CHECK(t && n == strlen(tb) && !strcmp(t, tb));
+        free(t);
+        t = dp_png_text("test_state_a/z.png", "dp_a", &n);
+        CHECK(t && !strcmp(t, ta));
+        free(t);
+        CHECK(dp_png_text("test_state_a/z.png", "dp_missing", &n) == NULL);
+        // an older file: stored-block IDAT (level 0) and a plain tEXt chunk
+        FILE *of = fopen("test_state_a/old.png", "wb");
+        CHECK(of != NULL);
+        if (of) {
+            uint8_t raw[4 * (1 + 4 * 3)];
+            for (int y = 0; y < 4; y++) {
+                raw[y * 13] = 0;
+                for (int x = 0; x < 12; x++) raw[y * 13 + 1 + x] = (uint8_t)(y * 16 + x);
+            }
+            uint8_t z[256];
+            uLongf zl = sizeof z;
+            compress2(z, &zl, raw, sizeof raw, 0);
+            uint8_t ihdr[13] = { 0, 0, 0, 4, 0, 0, 0, 4, 8, 2, 0, 0, 0 };
+            const char txt[] = "deepeel_map\0" "0 0000 3fff unknown\n";
+            struct { const char *type; const uint8_t *d; uint32_t n; } ch[4] = {
+                { "IHDR", ihdr, 13 }, { "IDAT", z, (uint32_t)zl },
+                { "tEXt", (const uint8_t *)txt, (uint32_t)(sizeof txt - 1) }, { "IEND", NULL, 0 } };
+            fwrite("\x89PNG\r\n\x1a\n", 1, 8, of);
+            for (int i = 0; i < 4; i++) {
+                uint8_t b[4] = { (uint8_t)(ch[i].n >> 24), (uint8_t)(ch[i].n >> 16), (uint8_t)(ch[i].n >> 8),
+                                 (uint8_t)ch[i].n };
+                fwrite(b, 1, 4, of);
+                fwrite(ch[i].type, 1, 4, of);
+                if (ch[i].n) fwrite(ch[i].d, 1, ch[i].n, of);
+                uLong c = crc32(crc32(0L, (const Bytef *)ch[i].type, 4), ch[i].d, ch[i].n);
+                uint8_t cb[4] = { (uint8_t)(c >> 24), (uint8_t)(c >> 16), (uint8_t)(c >> 8), (uint8_t)c };
+                fwrite(cb, 1, 4, of);
+            }
+            fclose(of);
+            t = dp_png_text("test_state_a/old.png", "deepeel_map", &n);
+            CHECK(t && !strcmp(t, "0 0000 3fff unknown\n"));
+            free(t);
+            int w, h;
+            uint8_t *orgb, *opay;
+            size_t on;
+            CHECK(dp_png_load("test_state_a/old.png", &w, &h, &orgb, &opay, &on));
+            CHECK(w == 4 && h == 4 && orgb && orgb[3] == 3 && opay == NULL);
+            free(orgb);
+        }
+    }
+
     // --- TAS priority: the movie replays in full, past every frame budget ------
     {
         // a 700-frame movie holding START; max_frames = 400 would cut the play
@@ -266,6 +328,12 @@ int main(int argc, char **argv) {
             // the TAS worker replayed its whole movie before the max_frames
             // wall could fire: total = both workers, 700 frames each or more
             CHECK(dp_play_frames(p) >= 2 * 700);
+            // the played sessions fill the real-usage counters
+            {
+                uint64_t played = 0;
+                for (size_t k = 0; k < (size_t)res.banks * 0x4000; k++) played += res.play_exec_hits[k];
+                CHECK(played > 0);
+            }
             dp_play_free(p);
             dp_explorer_free(ex);
             dp_results_free(&res);

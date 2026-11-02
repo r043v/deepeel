@@ -72,8 +72,10 @@ static void usage(void) {
             "    --gui                SDL2 live viewer\n"
             "    --watch [FPS]        small window showing the replaying TAS movie, 1..30 img/s (default 30)\n"
             "    --json f / --text f / --cov f / --romdata f / --map f / --html f   outputs\n"
-            "                         (--map x.map.png: squares image + embedded .map;\n"
-            "                          deepeel mapx x.map.png out.map extracts it)\n"
+            "                         (--map: PNG by default, 1 px per ROM byte + played heat,\n"
+            "                          the .map, the played .cov and the usage per zone embedded;\n"
+            "                          a path ending in .map or .txt writes the plain .map text;\n"
+            "                          deepeel mapx x.map.png out [--chunk NAME] extracts one)\n"
             "\n"
             "  play sessions (the m0boy coverage machinery: random inputs, attract mode,\n"
             "  checkpoint pool, epoch scheduler, discovery credit):\n"
@@ -608,9 +610,17 @@ static int cmd_explore(int argc, char **argv) {
         DpBuf out;
         dp_buf_init(&out);
         size_t ml = strlen(map);
-        if (ml > 4 && !strcmp(map + ml - 4, ".png")) {
-            // x.map.png: image of the squares with the .map embedded
-            if (!dp_report_map_png(&res, &cfg, path, map)) rc = 1;
+        int as_text = (ml > 4 && (!strcmp(map + ml - 4, ".map") || !strcmp(map + ml - 4, ".txt")));
+        if (!as_text) {
+            // the PNG is the default: 1 px per byte image + the .map, the
+            // settings and the played usage embedded (zTXt).  A path with
+            // no extension gets ".png".
+            const char *base = strrchr(map, '/');
+            base = base ? base + 1 : map;
+            char *png = NULL;
+            if (!strchr(base, '.') && (png = malloc(ml + 5))) snprintf(png, ml + 5, "%s.png", map);
+            if (!dp_report_map_png(&res, &cfg, path, png ? png : map)) rc = 1;
+            free(png);
         } else {
             dp_report_map(&res, &out);
             if (!write_file(map, &out)) rc = 1;
@@ -801,10 +811,20 @@ static int cmd_maprender(int argc, char **argv) {
     return ok ? 0 : 1;
 }
 
-static int cmd_mapx(int argc, char **argv) {    if (argc < 4) { fprintf(stderr, "usage: deepeel mapx in.map.png out.map\n"); return 2; }
+// extracts one embedded chunk of a map PNG: deepeel_map (default), deepeel_meta,
+// deepeel_heat (played usage per zone), deepeel_cov (played .cov),
+// deepeel_rom (played ROM reads per 256-byte page)
+static int cmd_mapx(int argc, char **argv) {
+    const char *chunk = "deepeel_map";
+    if (argc >= 6 && !strcmp(argv[4], "--chunk")) chunk = argv[5];
+    if (argc < 4) {
+        fprintf(stderr, "usage: deepeel mapx in.map.png out [--chunk deepeel_map|deepeel_meta|"
+                        "deepeel_heat|deepeel_cov|deepeel_rom]\n");
+        return 2;
+    }
     size_t n = 0;
-    char *t = dp_png_text(argv[2], "deepeel_map", &n);
-    if (!t) { fprintf(stderr, "no embedded deepeel_map in %s\n", argv[2]); return 1; }
+    char *t = dp_png_text(argv[2], chunk, &n);
+    if (!t) { fprintf(stderr, "no embedded %s in %s\n", chunk, argv[2]); return 1; }
     FILE *f = fopen(argv[3], "wb");
     if (!f) { free(t); perror(argv[3]); return 1; }
     fwrite(t, 1, n, f);
