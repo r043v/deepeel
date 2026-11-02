@@ -376,7 +376,7 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
                           const char *map_text, size_t map_len, const char *meta,
                           const char *path, const char *sysname, const char *filename,
                           unsigned rom_size, const uint32_t *heat, const DpPngText *extra,
-                          int n_extra);
+                          int n_extra, const char *methods);
 int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom_path,
                       const char *path) {
     DpMapSummary s;
@@ -415,7 +415,51 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
     uint32_t *hb = dp_heat_bytes(res);
     // the conversion's identity: version, rom, settings, result — a tEXt
     // chunk next to the map itself
-    char meta[1024];
+    // what each exploration method added, in % of the whole ROM: the rise of
+    // the known-byte count over each discovery entry, credited by source
+    double mshare[5] = {0}; // tas, rng, fork, attract, other
+    {
+        uint32_t prev = 0;
+        double tot = (double)res->banks * 0x4000;
+        for (uint32_t i = 0; i < (uint32_t)res->disc_n;) {
+            // one play epoch adds one entry per worker that found something,
+            // all with the epoch's final known count: split the rise by credit
+            uint32_t j = i + 1;
+            uint64_t csum = res->disc[i].credit;
+            if (res->disc[i].credit)
+                while (j < (uint32_t)res->disc_n && res->disc[j].credit &&
+                       res->disc[j].known == res->disc[i].known)
+                    csum += res->disc[j++].credit;
+            uint32_t k = res->disc[j - 1].known;
+            if (k > prev) {
+                for (uint32_t q = i; q < j; q++) {
+                    const char *src = res->disc[q].source;
+                    int c = !strncmp(src, "tas", 3) && strncmp(src, "tas-shoots", 10) ? 0
+                            : !strncmp(src, "rng", 3)                                 ? 1
+                            : !strncmp(src, "attract", 7)                             ? 3
+                            : (!strcmp(src, "start") || !strncmp(src, "script", 6) ||
+                               !strncmp(src, "fixed", 5) || !strncmp(src, "human", 5) ||
+                               !strncmp(src, "closure", 7) || !strncmp(src, "static", 6))
+                                ? 4
+                                : 2;
+                    double f = j - i > 1 && csum ? (double)res->disc[q].credit / (double)csum
+                                                 : 1.0 / (j - i);
+                    mshare[c] += (k - prev) * f * 100.0 / tot;
+                }
+                prev = k;
+            }
+            i = j;
+        }
+        double sum = mshare[0] + mshare[1] + mshare[2] + mshare[3] + mshare[4];
+        double rest = s.known * pct - sum; // provenance, final closure, inference
+        if (rest > 0) mshare[4] += rest;
+    }
+    char meth[160];
+    snprintf(meth, sizeof meth,
+             "apport : tas %.1f%%  aleatoire %.1f%%  fourche %.1f%%  demo %.1f%%  "
+             "statique+infere %.1f%%",
+             mshare[0], mshare[1], mshare[2], mshare[3], mshare[4]);
+    char meta[1280];
     snprintf(meta, sizeof meta,
              "{\"deepeel\":\"%s\",\"rom\":{\"title\":\"%s\",\"banks\":%d,\"size\":%u},"
              "\"config\":{\"max_steps_path\":%u,\"max_paths\":%u,\"max_steps_total\":%llu,"
@@ -423,7 +467,9 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
              "\"closure_rounds\":%d,\"covered_keep\":%u,\"seed_banks\":%d},"
              "\"map\":{\"known_pct\":%.2f,\"unknown_pct\":%.2f,\"inferred_pct\":%.2f},"
              "\"heat\":{\"exec\":%llu,\"reads\":%llu,\"zones_used\":%d,\"hot_zones\":%d,"
-             "\"hot_bytes\":%u,\"hot_share\":0.90}}",
+             "\"hot_bytes\":%u,\"hot_share\":0.90},"
+             "\"methods_pct\":{\"tas\":%.2f,\"random\":%.2f,\"fork\":%.2f,\"attract\":%.2f,"
+             "\"static\":%.2f}}",
              DEEPEEL_VERSION, title, res->banks,
              res->cart ? (unsigned)res->cart->rom_size : 0u,
              cfg ? cfg->max_steps_path : 0u, cfg ? cfg->max_paths : 0u,
@@ -436,7 +482,8 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
              s.known * pct, s.unknown * pct, s.inferred * pct,
              have_heat ? (unsigned long long)heat.exec_total : 0ull,
              have_heat ? (unsigned long long)heat.read_total : 0ull, have_heat ? heat.used_n : 0,
-             have_heat ? heat.hot_n : 0, have_heat ? heat.hot_bytes : 0u);
+             have_heat ? heat.hot_n : 0, have_heat ? heat.hot_bytes : 0u,
+             mshare[0], mshare[1], mshare[2], mshare[3], mshare[4]);
     char file[64];
     if (rom_path) {
         const char *b = rom_path + strlen(rom_path);
@@ -450,7 +497,7 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
     };
     int ok = map_png_render(m, (int)res->banks, title, &s, (const char *)txt.p, txt.len,
                             meta, path, res->plat ? res->plat->name : "gb", file,
-                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 3);
+                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 3, meth);
     free(hb);
     if (have_heat) dp_heat_free(&heat);
     dp_buf_free(&heat_txt);
@@ -506,7 +553,7 @@ int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char 
         if (c >= DP_MAP_INF_DATA) s.inferred++;
     }
     return map_png_render(m, banks, title, &s, text, len, meta, path, sysname, filename,
-                          rom_size, NULL, NULL, 0);
+                          rom_size, NULL, NULL, 0, NULL);
 }
 
 // the shared renderer: squares grid + legend band + tEXt chunks, from a
@@ -530,13 +577,16 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
                           const char *map_text, size_t map_len, const char *meta,
                           const char *path, const char *sysname, const char *filename,
                           unsigned rom_size, const uint32_t *heat, const DpPngText *extra,
-                          int n_extra) {
+                          int n_extra, const char *methods) {
     // TILE: one pixel per byte, 128 bytes per row; with heat, a heat tile
     // follows each bank tile (TGAP apart)
     enum { TILE = 128, TGAP = 2, GAP = 6 };
-    const int BANK_PX = heat ? TILE + TGAP + TILE : TILE;
+    // the ROM grid, then (with heat) a separate heat grid of the same
+    // geometry below it, under its own caption
+    const int BANK_PX = TILE;
     const int BANK_H = TILE;
-    const int PER_ROW = heat ? 4 : 8;
+    const int PER_ROW = 8;
+    (void)TGAP;
     static const char *fr[DP_MAP_COUNT] = {
         "inconnu", "code naturel", "code forcé", "code statique",
         "donnée copiée", "donnée lue", "donnée statique", "table", "padding",
@@ -588,7 +638,10 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     int s_common = ls < rs ? ls : rs; // both columns at the same scale
     ls = rs = s_common;
     int LH = 7 * s_common + 4;
-    int grid_h = GAP + rows * (BANK_H + GAP);
+    int map_h = GAP + rows * (BANK_H + GAP);
+    int heat_oy = map_h - GAP; // heat grid right below the ROM grid
+    int grid_h = heat ? heat_oy + map_h : map_h;
+    int n_meth = methods ? 1 : 0; // one legend line for the method shares
     // identity block: title row, then system / file / sizes / converter
     char size_txt[24];
     if (rom_size >= 1024 * 1024)
@@ -600,7 +653,7 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
              filename && filename[0] ? filename : "?", size_txt);
     int head_LH = 7 * FSCALE + 4;
     int foot_LH = 11; // the 1-px note (+ heat scale) + deepeel signature, bottom right
-    int h = grid_h + GAP + head_LH + GAP + (7 + 4) + GAP + half * LH + GAP + foot_LH;
+    int h = grid_h + GAP + head_LH + GAP + (7 + 4) + GAP + n_meth * (7 + 4 + GAP) + half * LH + GAP + foot_LH;
     uint8_t *rgb = malloc((size_t)w * h * 3);
     if (!rgb) { free(m); return 0; }
     for (size_t i = 0; i < (size_t)w * h; i++) { rgb[i * 3] = 0x18; rgb[i * 3 + 1] = 0x18; rgb[i * 3 + 2] = 0x1c; }
@@ -621,7 +674,7 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
             const uint8_t *c = map_rgb[m[k]];
             px[0] = c[0]; px[1] = c[1]; px[2] = c[2];
             if (heat) {
-                uint8_t *hp = rgb + ((size_t)(oy + y) * w + ox + TILE + TGAP + x) * 3;
+                uint8_t *hp = rgb + ((size_t)(heat_oy + oy + y) * w + ox + x) * 3;
                 if (heat[k] && hlog > 0.0) heat_rgb(log2((double)heat[k] + 1.0) / hlog, hp);
                 else { hp[0] = 0x22; hp[1] = 0x22; hp[2] = 0x28; }
             }
@@ -633,12 +686,18 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     int y = grid_h + GAP;
     double pct = s->total ? 100.0 / (double)s->total : 0.0;
     char head[160];
-    snprintf(head, sizeof head, "%s - %.1f%%", title[0] ? title : "?", s->known * pct);
+    // truncated, never rounded up: 100.0% only when nothing is unknown
+    snprintf(head, sizeof head, "%s - %.1f%%", title[0] ? title : "?",
+             s->unknown ? floor(s->known * pct * 10.0) / 10.0 : 100.0);
     int head_scale = fit_scale(head, w, GAP, FSCALE);
     legend_text(rgb, w, h, GAP, y, head, (const uint8_t *)"\xe0\xe0\xe0", head_scale);
     y += head_LH + GAP;
     legend_text(rgb, w, h, GAP, y, info_a, (const uint8_t *)"\x90\x90\x98", 1);
     y += (7 + 4) + GAP;
+    if (methods) {
+        legend_text(rgb, w, h, GAP, y, methods, (const uint8_t *)"\xc0\xc0\xc8", 1);
+        y += (7 + 4) + GAP;
+    }
     for (int r = 0; r < half; r++) {
         int ry = y + r * LH;
         if (r < ncls) {

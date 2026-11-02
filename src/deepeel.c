@@ -369,6 +369,7 @@ static int cmd_explore(int argc, char **argv) {
     uint32_t seed_total = cfg.seed_cap > (1u << 30) ? cfg.seed_cap : cfg.seed_cap * 2;
     uint32_t seed_spent = 0;
     dp_static_scan(&res);
+    dp_disc_add(&res, "static-scan", 0); // method shares: the static baseline
     int vi = dp_mach_pick_variant(cart->rom);
     if (vi < 0) {
         fprintf(stderr, "deepeel: no machine variant compiled for MBC %s\n", dp_mbc_name(cart->mbc));
@@ -554,6 +555,7 @@ static int cmd_explore(int argc, char **argv) {
     } else {
         clock_t t0 = clock();
         dp_explore(ex);
+        dp_disc_add(&res, "explore", 0); // method shares: the fork explorer
         closure_rounds(ex, &res, &seed_spent, seed_total);
         int iseeds = dp_seed_indirect(ex, seed_total - seed_spent);
         seed_spent += (uint32_t)iseeds;
