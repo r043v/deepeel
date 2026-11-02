@@ -549,8 +549,7 @@ décroche en 2-1 en rejouant le BK2 Rev A sur la ROM World).
 indépendantes (SameBoy et Gambatte, identiques entre elles instruction par
 instruction et cycle par cycle sur la zone étudiée) sont corrigés dans le
 runtime m0boy ; deepeel compile ce runtime avec `GBL_ACCESS_BLOCK=1`
-(blocage VRAM/OAM par mode). Rapport et patch : `docs/m0boy-fidelite.fr.md`,
-`docs/patches/m0boy-fidelite-dmg.patch`.
+(blocage VRAM/OAM par mode). Rapport : `docs/m0boy-fidelite.fr.md` (rétroporté dans m0boy, commit `645df84`).
 
 ## Rejeu TAS : trame 0 à la mise sous tension, profil de synchronisation VBA (0.24.0)
 

@@ -1,8 +1,14 @@
 # Fidélité DMG de m0boy — rapport de rétroportage
 
+> **Rétroporté** dans m0boy, commit `645df84` (`targets/meta/VERSION` 0.10.57) :
+> correctifs du chemin C, et la table `gbl_acc_last` (`gbl_cycles.h`) partagée
+> avec l'émetteur natif précis, qui reste égal à l'interpréteur. L'assembleur
+> ARM n'est pas porté. Les réglages de synchronisation TAS restent dans deepeel
+> (`cmake/m0boy-tas-compat.patch`).
+
 *Établi depuis deepeel (rejeu du TAS muggv3 de Super Mario Land World,
-m0boy en interpréteur C). Patch complet : `docs/patches/m0boy-fidelite-dmg.patch`
-(à appliquer dans `m0boy/targets/meta/runtime`). Observations d'émulateurs,
+m0boy en interpréteur C). Commit m0boy : `645df84`
+(dans `m0boy/targets/meta/runtime`). Observations d'émulateurs,
 pas de mesures sur matériel.*
 
 ## Méthode
