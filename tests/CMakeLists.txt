@@ -69,6 +69,15 @@ target_link_libraries(test_sega_jobs PRIVATE deepeel_sega)
 add_test(NAME sega_jobs COMMAND test_sega_jobs)
 set_tests_properties(sega_jobs PROPERTIES TIMEOUT 30)
 
+add_executable(test_nes_cpu test_nes_cpu.c)
+target_link_libraries(test_nes_cpu PRIVATE deepeel_nes)
+add_test(NAME nes_cpu COMMAND test_nes_cpu)
+
+add_executable(test_nes test_nes.c)
+target_link_libraries(test_nes PRIVATE deepeel_nes deepeel_core)
+add_test(NAME nes COMMAND test_nes)
+set_tests_properties(nes PROPERTIES TIMEOUT 60)
+
 add_executable(test_msx test_msx.c)
 target_link_libraries(test_msx PRIVATE deepeel_msx deepeel_sega)
 add_test(NAME msx COMMAND test_msx)

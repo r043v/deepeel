@@ -24,6 +24,10 @@
 #include "platform/md/explore.h"
 #include "platform/md/md_registry.h"
 #include "cpu/m68k/m68k.h"
+#include "platform/nes/explore.h"
+
+static uint8_t *nes_read_file(const char *path, size_t *size);
+static int cmd_nes(int argc, char **argv);
 
 #include <dirent.h>
 #include <ctype.h>
@@ -352,6 +356,27 @@ static int cmd_explore(int argc, char **argv) {
             return cmd_md(n, av);
         }
     }
+    {   // iNES images: alias of `deepeel nes explore` (6502 forking exploration)
+        size_t nsize = 0;
+        uint8_t *ndata = nes_read_file(path, &nsize);
+        if (ndata) {
+            int ines = nsize >= 16 && !memcmp(ndata, "NES\x1a", 4);
+            free(ndata);
+            if (ines) {
+                char *av[12] = {"deepeel", "nes", "explore", (char *)path};
+                int n = 4;
+                if (cfg.max_steps_total) {
+                    static char tot[32];
+                    snprintf(tot, sizeof tot, "%llu", (unsigned long long)cfg.max_steps_total);
+                    av[n++] = "--max-total";
+                    av[n++] = tot;
+                }
+                if (text) { av[n++] = "--text"; av[n++] = (char *)text; }
+                return cmd_nes(n, av);
+            }
+        }
+    }
+
     DpCart *cart = dp_cart_load(path, err, sizeof err);
     if (!cart) {
         fprintf(stderr, "deepeel: %s\n", err);
@@ -884,6 +909,92 @@ static int cmd_map(int argc, char **argv) {
     return 0;
 }
 
+// NES branch: a self-contained 6502 explorer; options mirror the z80 names.
+static uint8_t *nes_read_file(const char *path, size_t *size) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (n < 16) { fclose(f); return NULL; }
+    uint8_t *data = malloc((size_t)n);
+    if (!data) { fclose(f); return NULL; }
+    if (fread(data, 1, (size_t)n, f) != (size_t)n) {
+        free(data);
+        fclose(f);
+        return NULL;
+    }
+    fclose(f);
+    *size = (size_t)n;
+    return data;
+}
+
+static int cmd_nes(int argc, char **argv) {
+    if (argc < 4 || strcmp(argv[2], "explore")) {
+        fprintf(stderr, "deepeel nes explore ROM [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N] [--mapper auto|nrom|uxrom] "
+                        "[--max-total N] [--max-steps N] [--max-paths N] [--queue N] "
+                        "[--loop-cap N] [--fork-cap N] [--no-irq-fork] [--text FILE] [--map FILE]\n");
+        return 2;
+    }
+    const char *path = NULL, *text = NULL, *map = NULL, *mapper_name = "auto";
+    DpNesOptions opt = dp_nes_options();
+    for (int i = 3; i < argc; i++) {
+        const char *a = argv[i];
+        if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
+        else if (!strcmp(a, "--map") && i + 1 < argc) map = argv[++i];
+        else if (!strcmp(a, "--tas") && i + 1 < argc) {
+            if (opt.tas_count < 8) snprintf(opt.tas_paths[opt.tas_count++], 512, "%s", argv[++i]);
+            else { fprintf(stderr, "deepeel: at most 8 TAS movies\n"); return 2; }
+        }
+        else if (!strcmp(a, "--mapper") && i + 1 < argc) mapper_name = argv[++i];
+        else if (!strcmp(a, "--max-total") && i + 1 < argc) opt.max_total = strtoull(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--max-steps") && i + 1 < argc) opt.max_steps = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--max-paths") && i + 1 < argc) opt.max_paths = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--queue") && i + 1 < argc) opt.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--loop-cap") && i + 1 < argc) opt.loop_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--fork-cap") && i + 1 < argc) opt.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--no-irq-fork")) opt.seed_irq = 0;
+        else if (!strcmp(a, "--play") && i + 1 < argc) opt.play_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--sessions") && i + 1 < argc) opt.play_sessions = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--seed") && i + 1 < argc) opt.play_seed = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!path) path = a;
+        else { fprintf(stderr, "deepeel: unknown option %s\n", a); return 2; }
+    }
+    int mapper = -1; /* auto: the iNES header's mapper */
+    if (!strcmp(mapper_name, "nrom")) mapper = 0;
+    else if (!strcmp(mapper_name, "uxrom")) mapper = 2;
+    else if (strcmp(mapper_name, "auto")) {
+        fprintf(stderr, "deepeel: unknown mapper %s (the m0boy NES runtime boards NROM and UxROM)\n", mapper_name);
+        return 2;
+    }
+    size_t size;
+    uint8_t *data = nes_read_file(path, &size);
+    if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", path); return 1; }
+    DpNesResults res;
+    if (!dp_nes_explore(data, size, mapper, &opt, &res)) {
+        fprintf(stderr, "deepeel: not an iNES image the explorer accepts (%s)\n", path);
+        free(data);
+        return 1;
+    }
+    fprintf(stderr, "deepeel: nes explore done — steps %llu, paths %llu, forks %llu, "
+                    "sections %u, copies %u\n",
+            (unsigned long long)res.steps, (unsigned long long)res.paths,
+            (unsigned long long)res.forks, res.section_count, res.copy_count);
+    if (text) {
+        FILE *f = fopen(text, "w");
+        if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", text); }
+        else { dp_nes_report(f, &res); fclose(f); }
+    }
+    if (map) {
+        FILE *f = fopen(map, "w");
+        if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", map); }
+        else { dp_nes_map(f, &res); fclose(f); }
+    }
+    dp_nes_results_free(&res);
+    free(data);
+    return 0;
+}
+
 static void md_regs_print(void);
 static int cmd_regs(int argc, char **argv) {
     if (argc >= 3 && !strcmp(argv[2], "md")) { md_regs_print(); return 0; }
@@ -1059,6 +1170,7 @@ static int cmd_md(int argc, char **argv) {
 int main(int argc, char **argv) {
     if (argc < 2) return usage(), 2;
     if (!strcmp(argv[1], "md")) return cmd_md(argc, argv);
+    if (!strcmp(argv[1], "nes")) return cmd_nes(argc, argv);
     if (!strcmp(argv[1], "z80") && argc > 2 && !strcmp(argv[2], "explore"))
         return dp_sega_explore_command(argc, argv);
     if (!strcmp(argv[1], "z80")) return dp_z80_command(argc, argv);

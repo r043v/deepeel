@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.27.0 LANGUAGES C)
+project(deepeel VERSION 0.28.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -353,7 +353,50 @@ add_custom_target(dp_gg2_runtime DEPENDS ${DP_GG2_ARCHIVE})
 add_dependencies(deepeel_gg2 dp_gg2_runtime)
 target_link_libraries(deepeel_sega PUBLIC deepeel_sg deepeel_gg deepeel_msx deepeel_sg2 deepeel_gg2 Threads::Threads)
 target_link_libraries(deepeel PRIVATE deepeel_sega)
-target_link_libraries(deepeel PRIVATE deepeel_z80)
+# --- the m0boy NES machine (6502 + PPU + APU runtime) ------------------------
+# The runtime's globals (`machine`, nes_*/apu_*/ppu_*) are namespaced with
+# objcopy — the MSX/Sega technique — so they cannot collide with the other
+# embedded runtimes (the GG runtime exports its own `machine`).
+set(DP_NES_RUNTIME "${M0BOY_DIR}/targets/nes/runtime")
+if(NOT EXISTS "${DP_NES_RUNTIME}/nes_trace.h" OR NOT EXISTS "${DP_NES_RUNTIME}/6502.c")
+  message(FATAL_ERROR "M0BOY_DIR must provide targets/nes/runtime with the NES_TRACE hooks")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${DP_NES_RUNTIME}/6502.c" "${DP_NES_RUNTIME}/nes.c")
+file(READ "${DP_NES_RUNTIME}/6502.c" DP_NES_CPU)
+file(READ "${DP_NES_RUNTIME}/nes.c" DP_NES_NES)
+if(NOT DP_NES_CPU MATCHES "if \\(nes_trace\\.stop\\)")
+  message(FATAL_ERROR "m0boy NES core lost the trace stop point; update deepeel's machine bridge")
+endif()
+if(NOT DP_NES_NES MATCHES "nes_frame_rest")
+  message(FATAL_ERROR "m0boy NES frame lost the resumable entry point; update deepeel's machine bridge")
+endif()
+add_library(deepeel_nes_raw STATIC
+  src/cpu/m6502/m6502.c
+  src/mach/nesmach.c
+  src/platform/nes/registry.c
+  src/platform/nes/explore.c
+  src/platform/nes/tas.c
+  ${DP_NES_RUNTIME}/6502.c
+  ${DP_NES_RUNTIME}/nes.c
+  ${DP_NES_RUNTIME}/apu.c
+  ${DP_NES_RUNTIME}/ppu.c)
+target_compile_definitions(deepeel_nes_raw PRIVATE NES_TRACE)
+target_include_directories(deepeel_nes_raw PUBLIC src
+  ${DP_NES_RUNTIME} "${M0BOY_DIR}/targets/common/runtime")
+set(DP_NES_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_nes.a)
+add_custom_command(OUTPUT ${DP_NES_ARCHIVE}
+  BYPRODUCTS ${DP_NES_ARCHIVE}.syms
+  COMMAND ${CMAKE_COMMAND} -DNM=${DP_NM} -DOBJCOPY=${DP_OBJCOPY}
+    -DINPUT=$<TARGET_FILE:deepeel_nes_raw> -DOUTPUT=${DP_NES_ARCHIVE}
+    -DPREFIX=dp_nesrt_ -DPATTERNS=machine|nes_[A-Za-z0-9_]*|apu_[A-Za-z0-9_]*|ppu_[A-Za-z0-9_]*
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_sega_prefix.cmake
+  DEPENDS deepeel_nes_raw cmake/dp_sega_prefix.cmake VERBATIM)
+add_custom_target(dp_nes_runtime DEPENDS ${DP_NES_ARCHIVE})
+add_library(deepeel_nes STATIC IMPORTED GLOBAL)
+set_target_properties(deepeel_nes PROPERTIES IMPORTED_LOCATION ${DP_NES_ARCHIVE})
+add_dependencies(deepeel_nes dp_nes_runtime)
+target_link_libraries(deepeel PRIVATE deepeel_z80 deepeel_nes)
 target_link_libraries(deepeel PRIVATE deepeel_core m ${DP_GUI_LIBS})
 
 option(BUILD_TESTS "Build the test suite" ON)

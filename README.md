@@ -166,6 +166,9 @@ python3 tools/scan_all.py digest-z80 --out output/batch-z80/sms
   m0boy (`MdFull`) — registre, désassembleur, deux issues des conditionnels,
   fork V-int, copies DMA ROM→VRAM. Pas encore de GUI. Voir
   `docs/MD.fr.md`.
+- **NES** (0.28.0) : le runtime NES de m0boy embarqué (NROM, UxROM),
+  exploration à fourches avec snapshots exacts pris au milieu d'une frame,
+  rejeu TAS `.fm2`/`.bk2` et sessions jouées. Voir `docs/NES.fr.md`.
 - Autres plateformes : l'architecture est prête (`src/platform/platform.h`,
   `src/cpu/`) — une plateforme = une table de registres + des hooks ; un CPU
   = un décodeur/exécuteur qui journalise ses effets. Z80, 6502, HuC6280,
