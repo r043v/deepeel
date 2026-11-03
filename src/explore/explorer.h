@@ -274,6 +274,8 @@ typedef struct DpResults {
     uint32_t prov_unresolved, prov_sat, prov_steps; // partial proofs, caps hit, walk steps
     uint32_t data_contradictions; // bytes both executed and proven data (kept code)
     DpRtCode *rt;                 // runtime-code archive (open addressing), guarded by rec_mtx
+    uint8_t *rt_pcseen;           // variants seen per pc (saturating), for the polymorphic count
+    uint32_t rt_poly;             // variants that replace an earlier one at the same pc (SMC)
     uint32_t rt_cap, rt_n, rt_attached; // table size, distinct (pc,bytes) variants, those with a ROM source
 } DpResults;
 

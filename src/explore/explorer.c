@@ -232,6 +232,7 @@ void dp_results_free(DpResults *res) {
     free(res->clo_bank_entries);
     free(res->bad_ops);
     free(res->rt);
+    free(res->rt_pcseen);
     pthread_mutex_destroy(&res->sec_mtx);
     pthread_mutex_destroy(&res->rec_mtx);
     memset(res, 0, sizeof *res);

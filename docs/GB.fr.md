@@ -2043,3 +2043,10 @@ recompilé à embarquer un interpréteur ; tout code exécuté doit donc être c
   lorsque tous les threads sont inactifs, le pool vide et le spool épuisé.
 - Le piège « BUG NULL write in ring window » ne s'applique plus aux graines
   prioritaires (faux positifs).
+
+## 0.136.1
+
+L'archive du code exécuté en RAM compte les variantes qui réécrivent une
+instruction déjà vue à la même adresse (code auto-modifiant ou polymorphe) :
+ligne « … N rewrote an earlier instruction at the same address ». Sur la
+fixture `fix_wramexec`, 1 réécriture (`ld a,$00` devenu `ld a,$42`).

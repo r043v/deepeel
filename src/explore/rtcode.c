@@ -46,6 +46,11 @@ void dp_rtcode_add(DpResults *res, uint16_t pc, const uint8_t *b, int len, int32
         memcpy(e->b, b, (size_t)len);
         e->rom_src = rom_src;
         res->rt_n++;
+        if (!res->rt_pcseen) res->rt_pcseen = calloc(0x10000, 1);
+        if (res->rt_pcseen) {
+            if (res->rt_pcseen[pc]) res->rt_poly++; // same pc, other bytes: rewritten code
+            if (res->rt_pcseen[pc] < 255) res->rt_pcseen[pc]++;
+        }
         if (rom_src >= 0) res->rt_attached++;
     }
     if (e->hits != 0xFFFFFFFFu) e->hits++;
