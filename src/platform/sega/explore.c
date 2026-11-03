@@ -127,6 +127,7 @@ static DpZ80Origin valid_origin(Run *x,DpZ80Origin origin,uint8_t value) {
 static void section_live_ram(Run *x,int32_t ram);
 static void section_live_port(Run *x,uint16_t port);
 static void static_scan(Run *x);
+static void siblings(Run *x);
 // sources are OR-ed atomically: worker sessions share nothing but merge later
 static inline void src_or(DpSegaResults *r,size_t i,uint32_t bits) {
     if(r->src_flags) dp_cov_mark(&r->first,r->src_flags,(uint32_t)i,bits,r->steps,0);
@@ -1391,6 +1392,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     // distinct observed indirect sites, counted whatever the pass budgets did
     for(size_t i=0;i<x.indirect_hash;i++) if(x.indirect[i].site) r->indirect_sites++;
     static_scan(&x);
+    siblings(&x);
     r->rom=malloc(size);
     if(r->rom) memcpy(r->rom,image,size);
     if(o->tree_path && r->tree_count) {
@@ -1477,6 +1479,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     uint32_t sec_base=d->section_count,tree_base=d->tree_count;
     for(size_t i=0;i<d->size;i++) {
         d->flags[i]|=s->flags[i];
+        d->static_flags[i]|=s->static_flags[i];
         d->exec_hits[i]=hit_add(d->exec_hits[i],s->exec_hits[i]);
         d->data_hits[i]=hit_add(d->data_hits[i],s->data_hits[i]);
         if(s->src_flags[i]) dp_cov_mark(&d->first,d->src_flags,(uint32_t)i,s->src_flags[i],d->steps,1); // actor 1: a merged worker
@@ -1543,6 +1546,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     DP_MR_SUM(exec_outside); DP_MR_SUM(data_reads); DP_MR_SUM(vdp_copies); DP_MR_SUM(ram_copies);
     DP_MR_SUM(steps_deferred); DP_MR_SUM(loop_deferred); DP_MR_SUM(defer_resumed); DP_MR_SUM(steps_final);
     DP_MR_SUM(loop_final); DP_MR_SUM(defer_dropped); DP_MR_SUM(defer_pending); DP_MR_SUM(fork_deferred); DP_MR_SUM(defer_spooled); DP_MR_SUM(fork_final);
+    DP_MR_SUM(sib_tables); DP_MR_SUM(sib_ranges); DP_MR_SUM(sib_refused); DP_MR_SUM(sib_caps); DP_MR_SUM(sib_bytes);
     DP_MR_SUM(step_cuts); DP_MR_SUM(loop_cuts); DP_MR_SUM(fork_cuts); DP_MR_SUM(queue_cuts);
     DP_MR_SUM(global_cuts); DP_MR_SUM(path_cuts); DP_MR_SUM(faults); DP_MR_SUM(decode_cuts); DP_MR_SUM(pad_cuts);
     DP_MR_SUM(stagnation_cuts);
@@ -1680,6 +1684,7 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
     fprintf(out,"}},\"counters\":{\"steps\":%"PRIu64",\"paths\":%"PRIu64",\"forks\":%"PRIu64",\"irq_forks\":%"PRIu64
         ",\"exec_outside\":%"PRIu64",\"loop_cuts\":%"PRIu64",\"fork_cuts\":%"PRIu64",\"queue_cuts\":%"PRIu64
         ",\"global_cuts\":%"PRIu64",\"path_cuts\":%"PRIu64",\"faults\":%"PRIu64",\"decode_cuts\":%"PRIu64",\"pad_cuts\":%"PRIu64
+        ",\"sib_tables\":%"PRIu64",\"sib_ranges\":%"PRIu64",\"sib_refused\":%"PRIu64",\"sib_caps\":%"PRIu64",\"sib_bytes\":%"PRIu64
         ",\"queue_growths\":%"PRIu64",\"spool_writes\":%"PRIu64",\"spool_reads\":%"PRIu64",\"spool_refused\":%"PRIu64
         ",\"seeds_pointer\":%"PRIu64",\"seeds_bank\":%"PRIu64",\"seeds_entry\":%"PRIu64",\"seeds_admitted\":%"PRIu64
         ",\"seeds_refused_cap\":%"PRIu64",\"seeds_refused_view\":%"PRIu64",\"seeds_pending\":%"PRIu64
@@ -1690,7 +1695,7 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
         ",\"jobs_capped\":%"PRIu64",\"seeds_offlane\":%"PRIu64",\"merge_conflicts\":%"PRIu64
         ",\"bank_changes\":%"PRIu64",\"data_reads\":%"PRIu64",\"steps_deferred\":%"PRIu64",\"loop_deferred\":%"PRIu64",\"defer_resumed\":%"PRIu64",\"steps_final\":%"PRIu64",\"loop_final\":%"PRIu64",\"defer_dropped\":%"PRIu64",\"defer_pending\":%"PRIu64",\"fork_deferred\":%"PRIu64",\"fork_final\":%"PRIu64"}",
         r->steps,r->paths,r->forks,r->irq_forks,r->exec_outside,r->loop_cuts,r->fork_cuts,
-        r->queue_cuts,r->global_cuts,r->path_cuts,r->faults,r->decode_cuts,r->pad_cuts,r->queue_growths,
+        r->queue_cuts,r->global_cuts,r->path_cuts,r->faults,r->decode_cuts,r->pad_cuts,r->sib_tables,r->sib_ranges,r->sib_refused,r->sib_caps,r->sib_bytes,r->queue_growths,
         r->spool_writes,r->spool_reads,r->spool_refused,r->seeds_pointer,r->seeds_bank,
         r->seeds_entry,r->seeds_admitted,r->seeds_refused_cap,r->seeds_refused_view,
         r->seeds_pending,r->evicted_ctx,r->indirect_sites,r->indirect_targets,
@@ -1732,6 +1737,85 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
 // static scan (GB dp_static_scan parity): padding runs of 8+ identical
 // $00/$FF bytes, and pointer-table words — a word in a switchable window
 // flanked by two other window words — marked on the observed flag bytes
+// S5 copy siblings (GB dp_copy_siblings parity).  A verbatim ROM copy of at
+// least 16 bytes proves its source is data; when the source's CPU address is
+// stored as a word in a table the game read (fixed bank 0 or the copy's own
+// bank), the table's other entries are the same loader's other sources: they
+// get the observed length, in the copy's bank (an assumption: the loader
+// switches banks around the copy, so same-bank is the usual case), marked as
+// inferred data.  Bounded: tables hold at most SIB_MAX_ENTRIES words, ranges
+// are clipped to the 16 KiB bank, refused ranges over executed code and
+// tables cut at the cap are counted.  Observations always win in the map.
+#define SIB_MAX_ENTRIES 64
+#define SIB_MIN_LEN 16
+// anchor: a word the game read as data (or the pointer scan flagged); a
+// neighbour only needs to be an unexecuted, non-padding pointer-shaped word
+static int sib_unexecuted(const DpSegaResults *r,size_t k) {
+    if(k+1>=r->size) return 0;
+    for(size_t i=k;i<k+2;i++)
+        if((r->flags[i]&(DP_SEGA_NATURAL|DP_SEGA_FORCED|DP_SEGA_STATIC)) || (r->static_flags[i]&DP_SEGA_PAD)) return 0;
+    return 1;
+}
+static int sib_anchor_ok(const DpSegaResults *r,size_t k) {
+    if(!sib_unexecuted(r,k)) return 0;
+    // the pointer-table scan flags the word's low byte only
+    if(r->static_flags[k]&DP_SEGA_TABLE) return 1;
+    for(size_t i=k;i<k+2;i++)
+        if(!(r->flags[i]&(DP_SEGA_DATA|DP_SEGA_STATIC_DATA))) return 0;
+    return 1;
+}
+static void siblings(Run *x) {
+    DpSegaResults *r=x->r;
+    DpSegaSeedGeometry g;
+    if(!r->static_flags || !(x->b->seed_geometry && x->b->seed_geometry(&g)) || !g.banks) return;
+    // window 0 (the fixed bank) is a pointer target too, unlike the seed scan
+    uint16_t hi=(uint16_t)(g.window_hi+0x4000);
+    const uint8_t *img=x->image;
+    DpHashSet seen; dp_set_init(&seen,1<<10);
+    for(unsigned c=0;c<r->copy_count;c++) {
+        const DpSegaCopy *rec=&r->copies[c];
+        if(!rec->verbatim || rec->source_stride!=1 || rec->length<SIB_MIN_LEN || rec->source>=r->size) continue;
+        size_t bank=rec->source>>14; uint32_t off=rec->source&0x3fff;
+        for(unsigned tb=0;tb<2;tb++) {
+            size_t tbank=tb?bank:0;
+            if(tb && bank==0) break;
+            size_t bs=tbank<<14,be=bs+0x4000<r->size?bs+0x4000:r->size;
+            for(size_t k=bs;k+1<be;k++) {
+                uint16_t v=(uint16_t)(img[k]|img[k+1]<<8);
+                if(v>=hi || (v&0x3fff)!=off || (v<0x4000 && bank!=0) || !v || !sib_anchor_ok(r,k)) continue;
+                unsigned win=v>>14,entries=1;
+                size_t t0=k,t1=k+2;
+                #define SIB_IN(p) ({ uint16_t w=(uint16_t)(img[p]|img[(p)+1]<<8); w && w<hi && (unsigned)(w>>14)==win; })
+                while(t0>=bs+2 && sib_unexecuted(r,t0-2) && SIB_IN(t0-2) && entries<SIB_MAX_ENTRIES) { t0-=2; entries++; }
+                while(t1+1<be && sib_unexecuted(r,t1) && SIB_IN(t1) && entries<SIB_MAX_ENTRIES) { t1+=2; entries++; }
+                #undef SIB_IN
+                if(entries>=SIB_MAX_ENTRIES) r->sib_caps++;
+                if(entries<2) continue;
+                uint64_t key=((uint64_t)t0<<20)^((uint64_t)rec->length<<4)^bank;
+                if(dp_set_insert(&seen,key)<=0) continue;
+                r->sib_tables++;
+                for(size_t e=t0;e<t1;e+=2) {
+                    uint16_t w=(uint16_t)(img[e]|img[e+1]<<8);
+                    if((w&0x3fff)==off) continue;
+                    size_t wb=win?bank:0; // window 0 always shows the fixed bank
+                    size_t base=(wb<<14)+(w&0x3fff),wend=(wb<<14)+0x4000;
+                    size_t end=base+rec->length>wend?wend:base+rec->length;
+                    if(end>r->size) end=r->size;
+                    int natural=0;
+                    for(size_t i=base;i<end && !natural;i++) if(r->flags[i]&DP_SEGA_NATURAL) natural=1; // forced execution is speculative: GB parity
+                    if(natural) { r->sib_refused++; continue; }
+                    r->sib_ranges++;
+                    for(size_t i=base;i<end;i++) {
+                        if(!(r->static_flags[i]&DP_SEGA_SIBLING)) r->sib_bytes++;
+                        r->static_flags[i]|=DP_SEGA_SIBLING;
+                        src_or(r,i,DP_SRC_SIBLING);
+                    }
+                }
+            }
+        }
+    }
+    dp_set_free(&seen);
+}
 static void static_scan(Run *x) {
     DpSegaResults *r=x->r;
     if(!r->static_flags) return;
@@ -1910,6 +1994,7 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
     fprintf(out,"frontier: deferred steps %"PRIu64" loop %"PRIu64"; resumed %"PRIu64"; final steps %"PRIu64" loop %"PRIu64"; dropped %"PRIu64"; pending %"PRIu64"; forks deferred %"PRIu64" final %"PRIu64"\n",
         r->steps_deferred,r->loop_deferred,r->defer_resumed,r->steps_final,r->loop_final,r->defer_dropped,r->defer_pending,r->fork_deferred,r->fork_final);
     fprintf(out,"cuts: steps %"PRIu64"; loop %"PRIu64"; fork %"PRIu64"; queue %"PRIu64"; paths %"PRIu64"; global-pending %"PRIu64"; decode %"PRIu64"; padding %"PRIu64"; faults %"PRIu64"\n",r->step_cuts,r->loop_cuts,r->fork_cuts,r->queue_cuts,r->path_cuts,r->global_cuts,r->decode_cuts,r->pad_cuts,r->faults);
+    fprintf(out,"copy siblings: %"PRIu64" tables; %"PRIu64" ranges (%"PRIu64" bytes); %"PRIu64" refused over executed code; %"PRIu64" tables cut at the entry cap\n",r->sib_tables,r->sib_ranges,r->sib_bytes,r->sib_refused,r->sib_caps);
     fprintf(out,"seeds: pointer %"PRIu64"; bank sweep %"PRIu64"; entries %"PRIu64"; admitted %"PRIu64"; skipped padding %"PRIu64"; refused view %"PRIu64", queue %"PRIu64", cap %"PRIu64"; pending %"PRIu64"\n",
         r->seeds_pointer,r->seeds_bank,r->seeds_entry,r->seeds_admitted,r->seeds_skipped_padding,r->seeds_refused_view,r->seeds_refused_queue,r->seeds_refused_cap,r->seeds_pending);
     fprintf(out,"sections: %u; cap cuts %"PRIu64"; contexts evicted %"PRIu64"; grew %"PRIu64"; full %"PRIu64"\n",

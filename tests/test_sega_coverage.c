@@ -11,6 +11,7 @@ static int legacy_class(uint8_t f, uint8_t st) {
     if (f & DP_SEGA_COPIED) return DP_SMAP_DATA_COPIED;
     if (f & DP_SEGA_STATIC_DATA) return DP_SMAP_DATA_STATIC;
     if (f & DP_SEGA_DATA) return DP_SMAP_DATA_READ;
+    if (st & DP_SEGA_SIBLING) return DP_SMAP_INF_DATA; // S5: inferred sibling, above table/padding
     if (st & DP_SEGA_TABLE) return DP_SMAP_TABLE;
     if (st & DP_SEGA_PAD) return DP_SMAP_PAD;
     return DP_SMAP_UNKNOWN;

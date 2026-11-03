@@ -7,7 +7,9 @@
 #include <stddef.h>
 #include <stdint.h>
 enum { DP_SEGA_NATURAL=1, DP_SEGA_FORCED=2, DP_SEGA_DATA=4, DP_SEGA_COPIED=8, DP_SEGA_STATIC=16, DP_SEGA_STATIC_DATA=32,
-    DP_SEGA_TABLE=64, DP_SEGA_PAD=128 }; // static scan: pointer table, padding run
+    DP_SEGA_TABLE=64, DP_SEGA_PAD=128 };
+// bit of static_flags (own byte, not the flags above): inferred sibling of a copy source
+enum { DP_SEGA_SIBLING=1 }; // static scan: pointer table, padding run
 // map classes mirror the GB names so maprender renders z80 maps unchanged;
 // inferred-* classes are deduced from neighbours, never observed
 enum {
@@ -124,6 +126,7 @@ static inline uint16_t dp_sega_nature(uint8_t f,uint8_t st) {
     if(f&DP_SEGA_COPIED) n|=DP_NAT_DATA_COPIED;
     if(f&DP_SEGA_STATIC_DATA) n|=DP_NAT_DATA_STATIC;
     if(f&DP_SEGA_DATA) n|=DP_NAT_DATA_READ;
+    if(st&DP_SEGA_SIBLING) n|=DP_NAT_DATA_INF;
     if(st&DP_SEGA_TABLE) n|=DP_NAT_TABLE;
     if(st&DP_SEGA_PAD) n|=DP_NAT_PAD;
     return n;
@@ -159,6 +162,8 @@ typedef struct {
     uint64_t play_steps,play_epochs;
     // TAS replay (GB tas.c parity): natural coverage from a movie, priority
     uint64_t tas_frames,tas_frames_refused,tas_steps;
+    // copy siblings (S5): tables found, ranges marked, ranges refused over executed code, tables cut at the entry cap, bytes newly marked
+    uint64_t sib_tables,sib_ranges,sib_refused,sib_caps,sib_bytes;
     int tas_identity;        // 0 no movie, 1 same ROM, 2 different ROM, 3 movie records none
     // parallel drain (--jobs): seeds routed to another worker, requests capped
     uint64_t seeds_offlane,jobs_capped,merge_conflicts;

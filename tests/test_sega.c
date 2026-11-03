@@ -257,10 +257,30 @@ static void cov_output(void) {
     dp_sega_results_free(&r);
     free(rom);
 }
+// S5: a verbatim 16-byte ROM->VRAM copy whose source is a word of a pointer
+// table; the other entries become inferred data of the same length
+static void copy_siblings(void) {
+    uint8_t *rom=calloc(1,0x10000); CHECK(rom); if(!rom) exit(1);
+    const uint8_t code[]={0x21,0x01,0x10,0x01,0x01,0x10,0x09,0x23,0x23,0x23, // hl=$2002, never a literal
+        0x23,0x5e,0x23,0x56,0xeb,                                            // de=(hl+1): entry 2
+        0x3e,0x00,0xd3,0xbf,0x3e,0x40,0xd3,0xbf,                             // VDP write address 0
+        0x06,0x10,0x0e,0xbe,0xed,0xb3,0x76};                                 // otir 16 bytes
+    memcpy(rom,(const uint8_t[]){0xc3,0x00,0x01},3); memcpy(rom+0x100,code,sizeof code);
+    const uint16_t table[3]={0x3000,0x3100,0x3200};
+    for(int i=0;i<3;i++) { rom[0x2002+2*i]=(uint8_t)table[i]; rom[0x2003+2*i]=(uint8_t)(table[i]>>8); }
+    for(int t=0;t<3;t++) for(int k=0;k<32;k++) rom[table[t]+k]=(uint8_t)(0x11+k);
+    DpSegaOptions o=dp_sega_options(); DpSegaResults r;
+    CHECK(dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r));
+    CHECK(r.sib_tables>=1 && r.sib_ranges==2 && r.sib_bytes==32);
+    CHECK((r.static_flags[0x3000]&DP_SEGA_SIBLING) && (r.static_flags[0x3100]&DP_SEGA_SIBLING));
+    CHECK(!(r.static_flags[0x3200]&DP_SEGA_SIBLING)); // the observed copy source itself
+    dp_sega_results_free(&r);
+    free(rom);
+}
 int main(void) {
     test_machine(dp_sega_backend_sg(),0,1);
     test_machine(dp_sega_backend_gg(),0,0);
     test_machine(dp_sega_backend_gg(),1,0);
-    exploration(); deferral(); fork_deferral(); padding_cut(); cov_output();
+    exploration(); deferral(); fork_deferral(); padding_cut(); cov_output(); copy_siblings();
     TEST_DONE("sega");
 }

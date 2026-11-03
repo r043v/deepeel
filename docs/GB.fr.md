@@ -920,3 +920,16 @@ le verdict est consigné dans le résumé JSON (`tas_identity` : 1 même ROM,
 2 ROM différente, 3 identité absente). Observation de l'outil, pas une preuve
 de synchronisation du film.
 
+## 0.50.0
+
+J4 : frères de copie (S5) pour SMS/GG/MSX. Une copie ROM→VRAM/RAM verbatim d'au
+moins 16 octets dont l'adresse source (CPU) figure comme mot dans une table lue
+(banque 0 ou banque de la copie) marque les autres entrées de la table avec la
+même longueur, classe `inferred-data` (jamais prioritaire sur une observation).
+Hypothèse : les entrées pointent dans la banque de la copie (fenêtre 0 = banque
+fixe). Bornes : 64 entrées par table (`sib_caps`), plage coupée à la banque de
+16 Kio, plage sur du code exécuté naturellement refusée (`sib_refused`) ;
+compteurs `sib_tables/ranges/bytes` dans le résumé JSON et le rapport texte.
+La fusion `--jobs 2` fait maintenant aussi l'OU des drapeaux statiques.
+Observations de l'outil, pas des mesures de matériel.
+
