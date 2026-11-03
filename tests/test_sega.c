@@ -277,10 +277,30 @@ static void copy_siblings(void) {
     dp_sega_results_free(&r);
     free(rom);
 }
+// S4: two jp (hl) sites load their target from adjacent words of one table;
+// provenance names the words and the table grows over executed entries
+static void jump_table(void) {
+    uint8_t *rom=calloc(1,0x10000); CHECK(rom); if(!rom) exit(1);
+    #define SEQ(at,tbl) do { unsigned d=(tbl)-0x1001; const uint8_t q[]={0x21,0x01,0x10,0x01,(uint8_t)d,(uint8_t)(d>>8),0x09,0x5e,0x23,0x56,0xeb,0xe9}; memcpy(rom+(at),q,sizeof q); } while(0)
+    memcpy(rom,(const uint8_t[]){0xc3,0x00,0x01},3);
+    SEQ(0x100,0x2002);
+    memcpy(rom+0x200,(const uint8_t[]){0xc3,0x20,0x01},3);  // stub 0 -> second dispatch
+    SEQ(0x120,0x2004);
+    rom[0x210]=0x76; rom[0x220]=0x76;                         // stubs 1 and 2: halt
+    const uint16_t t[3]={0x0200,0x0210,0x0220};
+    for(int i=0;i<3;i++) { rom[0x2002+2*i]=(uint8_t)t[i]; rom[0x2003+2*i]=(uint8_t)(t[i]>>8); }
+    #undef SEQ
+    DpSegaOptions o=dp_sega_options(); DpSegaResults r;
+    CHECK(dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r));
+    CHECK(r.jt_tables==1 && r.jt_entries>=2);
+    for(size_t k=0x2002;k<0x2006;k++) CHECK(r.static_flags[k]&DP_SEGA_TABLE);
+    dp_sega_results_free(&r);
+    free(rom);
+}
 int main(void) {
     test_machine(dp_sega_backend_sg(),0,1);
     test_machine(dp_sega_backend_gg(),0,0);
     test_machine(dp_sega_backend_gg(),1,0);
-    exploration(); deferral(); fork_deferral(); padding_cut(); cov_output(); copy_siblings();
+    exploration(); deferral(); fork_deferral(); padding_cut(); cov_output(); copy_siblings(); jump_table();
     TEST_DONE("sega");
 }

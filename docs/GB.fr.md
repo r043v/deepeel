@@ -933,3 +933,16 @@ compteurs `sib_tables/ranges/bytes` dans le résumé JSON et le rapport texte.
 La fusion `--jobs 2` fait maintenant aussi l'OU des drapeaux statiques.
 Observations de l'outil, pas des mesures de matériel.
 
+## 0.51.0
+
+J4 : tables de sauts (S4) pour SMS/GG/MSX. Le Z80 n'a pas de saut indirect
+indexé : l'opérande est remplacé par la **provenance** — sur un `jp (hl)/(ix)/(iy)`
+observé, si les deux octets de la paire viennent d'octets ROM consécutifs dont
+le mot vaut la cible, on connaît le mot de table. La table s'étend des deux
+côtés tant que les mots pointent sur du code exécuté de la même fenêtre
+(fenêtre 0 = banque fixe), 64 entrées au plus (`jt_caps`). Les octets sont
+marqués `table` (source provenance) ; compteurs `jt_tables/entries/bytes` dans
+le résumé JSON et le rapport texte. Limite assumée : seules les entrées déjà
+exécutées sont admises, une table dont une seule entrée a été prise n'est pas
+reconnue. Observations de l'outil.
+

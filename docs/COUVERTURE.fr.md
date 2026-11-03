@@ -105,7 +105,7 @@ Pour chaque technique, la fiche indique :
 | S1 | Scan padding + tables de pointeurs | ✅ | ✅ | ✅ | ✗ | ✅ inf. | ✗ |
 | S2 | Fermeture statique de flot | ✅ | ✅ vues | ✅ slots | ✗ | ◐ fenêtre MPR | ✗ |
 | S3 | Suivi de constantes / provenance | ◐ HL/A | ✅ complet | ✅ | ✗ | ✗ | ◐ témoin An |
-| S4 | Tables de sauts depuis l'opérande | ✗ | ✗ | ✗ | ✗ | ✅ `JMP (abs,X)` | ✗ |
+| S4 | Tables de sauts depuis l'opérande | ✗ | ✅ provenance | ✅ provenance | ✗ | ✅ `JMP (abs,X)` | ✗ |
 | S5 | Frères de copie | ✅ | ✅ | ✅ | ✗ | ✗ | ✗ |
 | S6 | Rejeu de décodeurs sur tables de flux | ✗ | ✗ | ✗ | ✗ | ✗ | ✅ |
 | S7 | Inférence de voisins à la carte | ✅ | ✅ | ✅ | ✗ | ✅ | ✗ |

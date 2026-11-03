@@ -164,6 +164,8 @@ typedef struct {
     uint64_t tas_frames,tas_frames_refused,tas_steps;
     // copy siblings (S5): tables found, ranges marked, ranges refused over executed code, tables cut at the entry cap, bytes newly marked
     uint64_t sib_tables,sib_ranges,sib_refused,sib_caps,sib_bytes;
+    // jump tables (S4): dispatch tables found around provenance-proven jp (hl) loads
+    uint64_t jt_tables,jt_entries,jt_caps,jt_bytes;
     int tas_identity;        // 0 no movie, 1 same ROM, 2 different ROM, 3 movie records none
     // parallel drain (--jobs): seeds routed to another worker, requests capped
     uint64_t seeds_offlane,jobs_capped,merge_conflicts;

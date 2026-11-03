@@ -25,7 +25,7 @@ typedef struct { void *state; uint8_t *cart; Origins *origins; int forced,skip_i
 // keeps the boot view untouched.
 typedef struct { uint16_t pc; uint16_t bank; uint8_t exact,kind; } SeedSpec;
 // observed indirect jump site: up to 8 distinct physical targets
-typedef struct { uint32_t site; uint8_t n,overflow; uint32_t target[8]; uint32_t hits; } DpSegaIndirectRec;
+typedef struct { uint32_t site; uint8_t n,overflow; uint32_t target[8]; uint32_t hits; uint32_t table; /* physical index+1 of the ROM word the jump target was loaded from, 0 unknown */ } DpSegaIndirectRec;
 static uint64_t fnv1a(uint64_t h,const void *p,size_t n) {
     const uint8_t *b=p;
     for(size_t i=0;i<n;i++) { h^=b[i]; h*=1099511628211ull; }
@@ -88,9 +88,22 @@ typedef struct {
     DpSegaVisits play_visits;      // loop guard of the play session
 } Run;
 
+// S4: the ROM word a jp (hl)/(ix)/(iy) target was loaded from, by register
+// provenance: both bytes of a pair come from consecutive ROM bytes and that
+// word equals the jump target.  Physical index + 1, 0 when unproven.
+static uint32_t jump_table_word(Run *x,uint16_t target) {
+    static const unsigned pairs[3][2]={{DP_Z80_TAG_H,DP_Z80_TAG_L},{DP_Z80_TAG_IXH,DP_Z80_TAG_IXL},{DP_Z80_TAG_IYH,DP_Z80_TAG_IYL}};
+    const DpZ80Origin *reg=x->origins->cpu.reg;
+    for(unsigned p=0;p<3;p++) {
+        DpZ80Origin lo=reg[pairs[p][1]],hi=reg[pairs[p][0]];
+        if(!lo || !hi || hi!=lo+1 || (size_t)hi>x->r->size) continue;
+        if((uint16_t)(x->image[lo-1]|x->image[lo]<<8)==target) return lo;
+    }
+    return 0;
+}
 // observed indirect targets without execution evidence seed a further pass
 // (GB dp_seed_indirect parity); every cap hit is counted, never silent
-static void record_indirect(Run *x,size_t at,uint16_t target) {
+static void record_indirect(Run *x,size_t at,uint16_t target,uint32_t table) {
     DpSegaResults *r=x->r;
     if(!x->indirect_hash) return;
     size_t bucket=(at*2654435761u)&(x->indirect_hash-1);
@@ -101,6 +114,7 @@ static void record_indirect(Run *x,size_t at,uint16_t target) {
             rec->site=(uint32_t)at;
         }
         rec->hits++;
+        if(table && !rec->table) rec->table=table;
         int64_t index=x->b->rom_index(target);
         if(index<0 || (uint64_t)index>=r->size) break; // target outside the ROM
         for(unsigned i=0;i<rec->n;i++) if(rec->target[i]==(uint32_t)index) return;
@@ -128,6 +142,7 @@ static void section_live_ram(Run *x,int32_t ram);
 static void section_live_port(Run *x,uint16_t port);
 static void static_scan(Run *x);
 static void siblings(Run *x);
+static void jump_tables(Run *x);
 // sources are OR-ed atomically: worker sessions share nothing but merge later
 static inline void src_or(DpSegaResults *r,size_t i,uint32_t bits) {
     if(r->src_flags) dp_cov_mark(&r->first,r->src_flags,(uint32_t)i,bits,r->steps,0);
@@ -1351,7 +1366,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
                     dp_sega_closure_observe(x.closure);
                     dp_z80_provenance_begin(&x.origins->cpu,c,&d,origin_read,&x);
                     cycles=z80_execute_decoded(c,&d); z80_finish(c,cycles);
-                    if(in.flow==DP_Z80_INDIRECT) record_indirect(&x,at,c->pc);
+                    if(in.flow==DP_Z80_INDIRECT) record_indirect(&x,at,c->pc,jump_table_word(&x,c->pc));
                 }
                 r->steps++; x.b->advance(cycles);
                 quiet=x.discoveries==before_discoveries?quiet+1:0;
@@ -1393,6 +1408,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     for(size_t i=0;i<x.indirect_hash;i++) if(x.indirect[i].site) r->indirect_sites++;
     static_scan(&x);
     siblings(&x);
+    jump_tables(&x);
     r->rom=malloc(size);
     if(r->rom) memcpy(r->rom,image,size);
     if(o->tree_path && r->tree_count) {
@@ -1547,6 +1563,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     DP_MR_SUM(steps_deferred); DP_MR_SUM(loop_deferred); DP_MR_SUM(defer_resumed); DP_MR_SUM(steps_final);
     DP_MR_SUM(loop_final); DP_MR_SUM(defer_dropped); DP_MR_SUM(defer_pending); DP_MR_SUM(fork_deferred); DP_MR_SUM(defer_spooled); DP_MR_SUM(fork_final);
     DP_MR_SUM(sib_tables); DP_MR_SUM(sib_ranges); DP_MR_SUM(sib_refused); DP_MR_SUM(sib_caps); DP_MR_SUM(sib_bytes);
+    DP_MR_SUM(jt_tables); DP_MR_SUM(jt_entries); DP_MR_SUM(jt_caps); DP_MR_SUM(jt_bytes);
     DP_MR_SUM(step_cuts); DP_MR_SUM(loop_cuts); DP_MR_SUM(fork_cuts); DP_MR_SUM(queue_cuts);
     DP_MR_SUM(global_cuts); DP_MR_SUM(path_cuts); DP_MR_SUM(faults); DP_MR_SUM(decode_cuts); DP_MR_SUM(pad_cuts);
     DP_MR_SUM(stagnation_cuts);
@@ -1685,6 +1702,7 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
         ",\"exec_outside\":%"PRIu64",\"loop_cuts\":%"PRIu64",\"fork_cuts\":%"PRIu64",\"queue_cuts\":%"PRIu64
         ",\"global_cuts\":%"PRIu64",\"path_cuts\":%"PRIu64",\"faults\":%"PRIu64",\"decode_cuts\":%"PRIu64",\"pad_cuts\":%"PRIu64
         ",\"sib_tables\":%"PRIu64",\"sib_ranges\":%"PRIu64",\"sib_refused\":%"PRIu64",\"sib_caps\":%"PRIu64",\"sib_bytes\":%"PRIu64
+        ",\"jt_tables\":%"PRIu64",\"jt_entries\":%"PRIu64",\"jt_caps\":%"PRIu64",\"jt_bytes\":%"PRIu64
         ",\"queue_growths\":%"PRIu64",\"spool_writes\":%"PRIu64",\"spool_reads\":%"PRIu64",\"spool_refused\":%"PRIu64
         ",\"seeds_pointer\":%"PRIu64",\"seeds_bank\":%"PRIu64",\"seeds_entry\":%"PRIu64",\"seeds_admitted\":%"PRIu64
         ",\"seeds_refused_cap\":%"PRIu64",\"seeds_refused_view\":%"PRIu64",\"seeds_pending\":%"PRIu64
@@ -1695,7 +1713,7 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
         ",\"jobs_capped\":%"PRIu64",\"seeds_offlane\":%"PRIu64",\"merge_conflicts\":%"PRIu64
         ",\"bank_changes\":%"PRIu64",\"data_reads\":%"PRIu64",\"steps_deferred\":%"PRIu64",\"loop_deferred\":%"PRIu64",\"defer_resumed\":%"PRIu64",\"steps_final\":%"PRIu64",\"loop_final\":%"PRIu64",\"defer_dropped\":%"PRIu64",\"defer_pending\":%"PRIu64",\"fork_deferred\":%"PRIu64",\"fork_final\":%"PRIu64"}",
         r->steps,r->paths,r->forks,r->irq_forks,r->exec_outside,r->loop_cuts,r->fork_cuts,
-        r->queue_cuts,r->global_cuts,r->path_cuts,r->faults,r->decode_cuts,r->pad_cuts,r->sib_tables,r->sib_ranges,r->sib_refused,r->sib_caps,r->sib_bytes,r->queue_growths,
+        r->queue_cuts,r->global_cuts,r->path_cuts,r->faults,r->decode_cuts,r->pad_cuts,r->sib_tables,r->sib_ranges,r->sib_refused,r->sib_caps,r->sib_bytes,r->jt_tables,r->jt_entries,r->jt_caps,r->jt_bytes,r->queue_growths,
         r->spool_writes,r->spool_reads,r->spool_refused,r->seeds_pointer,r->seeds_bank,
         r->seeds_entry,r->seeds_admitted,r->seeds_refused_cap,r->seeds_refused_view,
         r->seeds_pending,r->evicted_ctx,r->indirect_sites,r->indirect_targets,
@@ -1812,6 +1830,43 @@ static void siblings(Run *x) {
                     }
                 }
             }
+        }
+    }
+    dp_set_free(&seen);
+}
+// S4 jump tables (PCE tables() parity, driven by provenance rather than an
+// indexed-indirect operand): around the ROM word an observed indirect jump
+// loaded its target from, contiguous words that point at executed code in the
+// same window form the dispatch table.  Window 0 is the fixed bank; another
+// window is assumed to show the bank of the observed target.  Bounded by
+// SIB_MAX_ENTRIES per table, caps counted.
+static void jump_tables(Run *x) {
+    DpSegaResults *r=x->r;
+    DpSegaSeedGeometry g;
+    if(!r->static_flags || !(x->b->seed_geometry && x->b->seed_geometry(&g)) || !g.banks) return;
+    uint16_t hi=(uint16_t)(g.window_hi+0x4000);
+    const uint8_t *img=x->image;
+    DpHashSet seen; dp_set_init(&seen,256); // two sites may share one table
+    for(size_t i=0;i<x->indirect_hash;i++) {
+        const DpSegaIndirectRec *rec=&x->indirect[i];
+        if(!rec->site || !rec->table || !rec->n) continue;
+        size_t P=rec->table-1,bank=P>>14,bs=bank<<14,be=bs+0x4000<r->size?bs+0x4000:r->size;
+        uint32_t t0=rec->target[0];
+        uint16_t first=(uint16_t)(img[P]|img[P+1]<<8);
+        unsigned win=first>>14;
+        size_t tb=win?(t0>>14):0; // bank the entries' targets live in
+        #define JT_OK(p) ({ uint16_t w=(uint16_t)(img[p]|img[(p)+1]<<8); size_t t=(tb<<14)+(w&0x3fff); \
+            (p)+1<be && w && w<hi && (unsigned)(w>>14)==win && t<r->size && (r->flags[t]&(DP_SEGA_NATURAL|DP_SEGA_FORCED|DP_SEGA_STATIC)); })
+        size_t a=P,b=P+2; unsigned entries=1;
+        while(a>=bs+2 && entries<SIB_MAX_ENTRIES && JT_OK(a-2)) { a-=2; entries++; }
+        while(b+1<be && entries<SIB_MAX_ENTRIES && JT_OK(b)) { b+=2; entries++; }
+        #undef JT_OK
+        if(entries>=SIB_MAX_ENTRIES) r->jt_caps++;
+        if(entries<2 || dp_set_insert(&seen,((uint64_t)a<<20)|(b-a))<=0) continue;
+        r->jt_tables++; r->jt_entries+=entries;
+        for(size_t k=a;k<b;k++) {
+            if(!(r->static_flags[k]&DP_SEGA_TABLE)) r->jt_bytes++;
+            r->static_flags[k]|=DP_SEGA_TABLE; src_or(r,k,DP_SRC_PROVENANCE);
         }
     }
     dp_set_free(&seen);
@@ -1995,6 +2050,7 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
         r->steps_deferred,r->loop_deferred,r->defer_resumed,r->steps_final,r->loop_final,r->defer_dropped,r->defer_pending,r->fork_deferred,r->fork_final);
     fprintf(out,"cuts: steps %"PRIu64"; loop %"PRIu64"; fork %"PRIu64"; queue %"PRIu64"; paths %"PRIu64"; global-pending %"PRIu64"; decode %"PRIu64"; padding %"PRIu64"; faults %"PRIu64"\n",r->step_cuts,r->loop_cuts,r->fork_cuts,r->queue_cuts,r->path_cuts,r->global_cuts,r->decode_cuts,r->pad_cuts,r->faults);
     fprintf(out,"copy siblings: %"PRIu64" tables; %"PRIu64" ranges (%"PRIu64" bytes); %"PRIu64" refused over executed code; %"PRIu64" tables cut at the entry cap\n",r->sib_tables,r->sib_ranges,r->sib_bytes,r->sib_refused,r->sib_caps);
+    fprintf(out,"jump tables: %"PRIu64" tables; %"PRIu64" entries (%"PRIu64" new bytes); %"PRIu64" tables cut at the entry cap\n",r->jt_tables,r->jt_entries,r->jt_bytes,r->jt_caps);
     fprintf(out,"seeds: pointer %"PRIu64"; bank sweep %"PRIu64"; entries %"PRIu64"; admitted %"PRIu64"; skipped padding %"PRIu64"; refused view %"PRIu64", queue %"PRIu64", cap %"PRIu64"; pending %"PRIu64"\n",
         r->seeds_pointer,r->seeds_bank,r->seeds_entry,r->seeds_admitted,r->seeds_skipped_padding,r->seeds_refused_view,r->seeds_refused_queue,r->seeds_refused_cap,r->seeds_pending);
     fprintf(out,"sections: %u; cap cuts %"PRIu64"; contexts evicted %"PRIu64"; grew %"PRIu64"; full %"PRIu64"\n",
