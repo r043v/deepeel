@@ -23,6 +23,7 @@
 #include "explore.h"
 #include "../../explore/lots.h"
 #include "../../core/hashset.h"
+#include "../../explore/tree.h"
 #include "pce.h"
 #include "tas.h"
 #include <math.h>
@@ -34,6 +35,7 @@ typedef struct {
     uint8_t *z;            // compressed bridge state
     uLongf zlen;
     uint8_t forced;
+    uint32_t choice;       // choice-tree node (0: none)
 } PceQueued;
 
 enum { LOOP_SLOTS = 4096 };
@@ -49,6 +51,8 @@ typedef struct {
     PceQueued *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
     DpLotFile *lot;            // disk lot: park overflow, wall leftovers, --lot resume
     uint64_t *seen;        // open-addressed dedup set
+    DpTree tree;           // --tree: every queued state is a choice
+    uint32_t cur_choice;
     DpHashSet ind_sites, ind_pairs;   // observed indirect jumps (D12)
     DpHashSet ctx_seen;    // per-context admission counters (C2)
     size_t seen_cap, seen_len;
@@ -317,7 +321,11 @@ static int lot_spill(PceRun *x, uint8_t *z, uLongf zlen, uint8_t forced) {
 // queue the live machine state (dedup on its control-state hash)
 static int push_live(PceRun *x, int forced) {
     DpPceResults *r = x->r;
-    if (!seen_insert(x, dp_pce_state_hash())) { r->evicted++; return 0; }
+    uint32_t node = 0;
+    if (x->opt.tree_path) {
+        node = dp_tree_add(&x->tree, x->cur_choice, 4 /* fork */, 0, 0, dp_pce_cpu().pc);
+    }
+    if (!seen_insert(x, dp_pce_state_hash())) { r->evicted++; if (node) dp_tree_close(&x->tree, node, DP_ISSUE_MERGED); return 0; }
     if (x->opt.ctx_cap) {
         // coarse same-context eviction: registers, pc, MPR and interrupt mask; the
         // k-th admission of a context is the key hash(ctx, k), past ctx_cap it is closed
@@ -328,7 +336,7 @@ static int push_live(PceRun *x, int forced) {
         for (unsigned i = 0; i < sizeof raw; i++) h = (h ^ raw[i]) * 0x100000001b3ull;
         unsigned k = 0;
         while (k < x->opt.ctx_cap && dp_set_insert(&x->ctx_seen, (h ^ (k * 0x9E3779B97F4A7C15ull)) | 1) == 0) k++;
-        if (k >= x->opt.ctx_cap) { r->ctx_evicted++; return 0; }
+        if (k >= x->opt.ctx_cap) { r->ctx_evicted++; if (node) dp_tree_close(&x->tree, node, DP_ISSUE_CAPPED); return 0; }
     }
     int full = x->queue_len >= x->opt.queue_cap;
     dp_pce_save(x->tmp2);
@@ -338,7 +346,7 @@ static int push_live(PceRun *x, int forced) {
     if (!z) { x->failed = 1; return 0; }
     memcpy(z, x->ztmp, zl);
     if (full && x->park_len >= 4096) { // the holding area is full: the state goes to the disk lot
-        if (lot_spill(x, z, zl, (uint8_t)forced)) { r->parked++; return 1; }
+        if (lot_spill(x, z, zl, (uint8_t)forced)) { r->parked++; if (node) dp_tree_close(&x->tree, node, DP_ISSUE_SPOOLED); return 1; }
         free(z); r->queue_cuts++; r->parked_lost++; return 0;
     }
     if (full) { // a full queue is not a loss: the state waits aside (bounded, counted)
@@ -349,12 +357,14 @@ static int push_live(PceRun *x, int forced) {
             x->park = g; x->park_cap = nc;
         }
         x->park[x->park_len].z = z; x->park[x->park_len].zlen = zl; x->park[x->park_len].forced = (uint8_t)forced;
+        x->park[x->park_len].choice = node;
         x->park_len++; r->parked++;
         return 1;
     }
     x->queue[x->queue_len].z = z;
     x->queue[x->queue_len].zlen = zl;
     x->queue[x->queue_len].forced = (uint8_t)forced;
+    x->queue[x->queue_len].choice = node;
     x->queue_len++;
     r->state_bytes_peak += zl;
     return 1;
@@ -603,6 +613,7 @@ static void run_path(PceRun *x, PceQueued q) {
     x->path_steps = 0;
     x->was_outside = 0;
     x->forced = q.forced;
+    x->cur_choice = q.choice;
     x->path_id = r->paths++;
     r->forced_paths += q.forced != 0;
     x->last_read_cell = -1;
@@ -612,6 +623,8 @@ static void run_path(PceRun *x, PceQueued q) {
         int frame;
         if (!step_one(x, &frame)) break;
     }
+    if (q.choice) dp_tree_close(&x->tree, q.choice, DP_ISSUE_DONE);
+    x->cur_choice = 0;
 }
 
 // --- play / TAS sessions --------------------------------------------------------------
@@ -1151,6 +1164,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     DpPceResults *r = results;
     dp_set_init(&x->ctx_seen, 1 << 10);
     for (unsigned i = 0; i < 0x8000; i++) x->ram_src[i] = -1;
+    dp_tree_init(&x->tree);
     dp_set_init(&x->ind_sites, 1 << 8);
     dp_set_init(&x->ind_pairs, 1 << 10);
     memset(r, 0, sizeof *r);
@@ -1235,7 +1249,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
                 uint8_t *z = malloc(zl);
                 if (z && compress2(z, &zl, blob, bl, 1) == Z_OK) {
                     x->queue[x->queue_len].z = z; x->queue[x->queue_len].zlen = zl;
-                    x->queue[x->queue_len].forced = forced; x->queue_len++;
+                    x->queue[x->queue_len].forced = forced; x->queue[x->queue_len].choice = 0; x->queue_len++;
                 } else free(z);
                 free(blob); blob = NULL;
             } else free(blob);
@@ -1262,6 +1276,8 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     dp_pce_observe(NULL);
     // states still queued when the global wall stopped the drain: counted
     // (saved in the lot when there is one: the next run resumes them)
+    for (uint32_t i = 0; i < x->park_len; i++) if (x->park[i].choice) dp_tree_close(&x->tree, x->park[i].choice, DP_ISSUE_BUDGET);
+    for (uint32_t i = 0; i < x->queue_len; i++) if (x->queue[i].choice) dp_tree_close(&x->tree, x->queue[i].choice, DP_ISSUE_BUDGET);
     for (uint32_t i = 0; i < x->park_len; i++)
         if (!lot_spill(x, x->park[i].z, x->park[i].zlen, x->park[i].forced)) { r->pending_dropped++; free(x->park[i].z); }
     free(x->park);
@@ -1272,6 +1288,11 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
         r->lot_pending = dp_lf_pending(x->lot);
         dp_lf_close(x->lot, x->opt.lot_path);
     }
+    if (x->opt.tree_path) {
+        r->tree_nodes = x->tree.n;
+        if (!dp_tree_save(&x->tree, x->opt.tree_path)) x->failed = 1;
+    }
+    dp_tree_free(&x->tree);
     free(x->queue);
     dp_set_free(&x->ctx_seen);
     dp_set_free(&x->ind_sites);
@@ -1373,6 +1394,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
     if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/MPR context past the cap)\n", (unsigned long long)r->ctx_evicted);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  provenance: %llu jump-table words traced from ROM reads\n", (unsigned long long)r->prov_sites);
+    if (r->tree_nodes) fprintf(out, "  choice tree: %llu nodes\n", (unsigned long long)r->tree_nodes);
     fprintf(out, "  copy siblings: %llu tables, %llu entries, %llu bytes typed, %llu table caps\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_entries, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_caps);
     fprintf(out, "  entries: %llu seeded, %llu refused (outside the ROM mapping)\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);

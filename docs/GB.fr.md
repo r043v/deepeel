@@ -1694,3 +1694,13 @@ caps`) sont comptées comme flux frères de même longueur. Rapport : `copy
 siblings: N tables, N entries, N bytes, N table caps`. Fixture `fix_md_sib.md`,
 test `md_sibling`. Reste ◐ : comptage seulement (pas de typage par octet dans
 la carte), copies 68000 vers VRAM par CPU non traitées.
+
+## 0.111.0
+
+PCE : arbre de choix (F2, partielle). `--tree FICHIER` écrit l'arbre commun
+`DpTree` : chaque état mis en file est un choix (parent = chemin qui l'a
+produit) clos avec son issue : `done` (chemin joué), `merged` (déjà vu),
+`capped` (éviction `--ctx-cap`), `spooled` (disque), `budget` (restant à l'arrêt
+global). Rapport : `choice tree: N nodes`. Test `pce_tree`. Reste ◐ : site de
+branchement non renseigné, pas de reprise depuis `tree.bin`, états repris du
+lot sans nœud.
