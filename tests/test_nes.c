@@ -100,10 +100,10 @@ static void test_machine_uxrom(void) {
 
 static void test_unsupported_mappers(void) {
     uint8_t *rom = calloc(1, 16 + 4 * 0x4000 + 1 * 0x2000);
-    set_header(rom, 4, 1, 1);
+    set_header(rom, 4, 1, 9);
     char err[256];
     DpNesMach *m = dp_nesmach_open(rom, 16 + 4 * 0x4000 + 0x2000, -1, err, sizeof err);
-    CHECK(!m, "MMC1 refused");
+    CHECK(!m, "mapper 9 refused");
     CHECK(err[0], "a message explains why");
     rom[6] = (5 & 0x0F) << 4; // mapper 5 (MMC5)
     m = dp_nesmach_open(rom, 16 + 4 * 0x4000 + 0x2000, -1, err, sizeof err);
@@ -126,15 +126,15 @@ static void test_cnrom_axrom(void) {
     if (m) {
         dp_nesmach_reset(m);
         unsigned o, n;
-        CHECK(dp_nesmach_mapper_write(m, 2, &o, &n) == 2 && o == 0 && n == 2, "chr bank 0 -> 2");
+        CHECK(dp_nesmach_mapper_write(m, 0x8000, 2, &o, &n) == 2 && o == 0 && n == 2, "chr bank 0 -> 2");
         dp_nesmach_run(m, 3);
-        CHECK(dp_nesmach_mapper_write(m, 3, &o, &n) == 2 && o == 2, "register latched");
+        CHECK(dp_nesmach_mapper_write(m, 0x8000, 3, &o, &n) == 2 && o == 2, "register latched");
         static uint8_t st[65536];
         dp_nesmach_save(m, st);
         dp_nesmach_reset(m);
-        CHECK(dp_nesmach_mapper_write(m, 1, &o, &n) == 2 && o == 0, "reset clears the bank");
+        CHECK(dp_nesmach_mapper_write(m, 0x8000, 1, &o, &n) == 2 && o == 0, "reset clears the bank");
         dp_nesmach_load(m, st);
-        CHECK(dp_nesmach_mapper_write(m, 1, &o, &n) == 2 && o == 2, "state carries the bank");
+        CHECK(dp_nesmach_mapper_write(m, 0x8000, 1, &o, &n) == 2 && o == 2, "state carries the bank");
         dp_nesmach_close(m);
     }
     free(rom);
@@ -172,11 +172,62 @@ static void test_cnrom_axrom(void) {
         CHECK(dp_nesmach_rom_index(m, 0x8000) == 0, "bank 0 at $8000");
         dp_nesmach_run(m, 1);  // LDA #1
         unsigned o, n;
-        CHECK(dp_nesmach_mapper_write(m, 1, &o, &n) == 1 && o == 0 && n == 2, "slot 0 -> 2");
+        CHECK(dp_nesmach_mapper_write(m, 0x8000, 1, &o, &n) == 1 && o == 0 && n == 2, "slot 0 -> 2");
         dp_nesmach_run(m, 1);  // STA $8000
         CHECK(dp_nesmach_rom_index(m, 0x8000) == 2 * 0x4000, "32 KiB bank 1 at $8000");
         CHECK(dp_nesmach_rom_index(m, 0xC000) == 3 * 0x4000, "and its upper half at $C000");
         CHECK(dp_nesmach_read(m, 0x8000) == 0x5A, "bank 1 content");
+        dp_nesmach_close(m);
+    }
+    free(rom);
+}
+
+// MMC1 (serial port, 16 KiB switch) and MMC3 (8 KiB windows) composed in the bridge
+static void test_mmc1_mmc3(void) {
+    char err[256];
+    unsigned sz = 16 + 4 * 0x4000 + 0x2000;
+    uint8_t *rom = calloc(1, sz);
+    set_header(rom, 4, 1, 1);
+    // $C000: LDA #1 / STA $E000 / LSR A / STA $E000 x4 : PRG bank 1 at $8000
+    put(rom, 3, 0, 0xA9, 0x01, 0x8D, 0x00, 0xE0, 0x4A, 0x8D, 0x00, 0xE0, 0x8D, 0x00, 0xE0,
+                   0x8D, 0x00, 0xE0, 0x8D, 0x00, 0xE0, 0x4C, 0x14, 0xC0, -1);
+    put(rom, 1, 0, 0x77, -1);
+    set_vector(rom, 3, 0xFFFC, 0xC000);
+    DpNesMach *m = dp_nesmach_open(rom, sz, -1, err, sizeof err);
+    CHECK(m, "MMC1 opens: %s", err);
+    if (m) {
+        dp_nesmach_reset(m);
+        CHECK(dp_nesmach_rom_index(m, 0xC000) == 3 * 0x4000, "last bank fixed at $C000");
+        CHECK(dp_nesmach_rom_index(m, 0x8000) == 0, "bank 0 at $8000 after reset");
+        unsigned o, n;
+        dp_nesmach_run(m, 6);
+        CHECK(dp_nesmach_rom_index(m, 0x8000) == 0, "four bits in: unchanged");
+        CHECK(dp_nesmach_mapper_write(m, 0xE000, 0, &o, &n) == 1 && o == 0 && n == 1, "fifth write: 0 -> 1");
+        dp_nesmach_run(m, 1);
+        CHECK(dp_nesmach_rom_index(m, 0x8000) == 0x4000, "MMC1 bank 1 at $8000");
+        CHECK(dp_nesmach_read(m, 0x8000) == 0x77, "its content");
+        CHECK(dp_nesmach_rom_index(m, 0xC000) == 3 * 0x4000, "fixed bank unchanged");
+        dp_nesmach_close(m);
+    }
+    free(rom);
+    sz = 16 + 4 * 0x4000 + 0x2000;
+    rom = calloc(1, sz);
+    set_header(rom, 4, 1, 4);
+    // $E000: LDA #6 / STA $8000 / LDA #3 / STA $8001 : R6 = 8 KiB bank 3
+    put(rom, 3, 0x2000, 0xA9, 0x06, 0x8D, 0x00, 0x80, 0xA9, 0x03, 0x8D, 0x01, 0x80,
+                        0x4C, 0x0A, 0xE0, -1);
+    put(rom, 1, 0, 0x99, -1);                // 8 KiB slot 2 starts $99; slot 3 = +0x2000
+    rom[16 + 3 * 0x2000] = 0x66;
+    set_vector(rom, 3, 0xFFFC, 0xE000);
+    m = dp_nesmach_open(rom, sz, -1, err, sizeof err);
+    CHECK(m, "MMC3 opens: %s", err);
+    if (m) {
+        dp_nesmach_reset(m);
+        CHECK(dp_nesmach_rom_index(m, 0xE000) == 7 * 0x2000, "last 8 KiB fixed at $E000");
+        CHECK(dp_nesmach_rom_index(m, 0xC000) == 6 * 0x2000, "second to last at $C000");
+        dp_nesmach_run(m, 4);
+        CHECK(dp_nesmach_rom_index(m, 0x8000) == 3 * 0x2000, "R6 = 3 at $8000");
+        CHECK(dp_nesmach_read(m, 0x8000) == 0x66, "its content");
         dp_nesmach_close(m);
     }
     free(rom);
@@ -370,6 +421,7 @@ int main(void) {
     test_machine_uxrom();
     test_unsupported_mappers();
     test_cnrom_axrom();
+    test_mmc1_mmc3();
     test_snapshot();
     test_explorer();
     test_loop_bound();

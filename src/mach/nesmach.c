@@ -6,6 +6,8 @@
 #include "nes_native.h"
 #include "nes_trace.h"
 
+typedef struct { uint8_t v[10]; uint8_t shift, cnt; } DpNesMapRegs;
+
 /* the runtime's one machine (like MdFull, one ROM live per process) */
 struct DpNesMach {
     DpNesHooks h;
@@ -13,27 +15,108 @@ struct DpNesMach {
     int in_frame;      /* a frame is part-run: resume with nes_frame_rest */
     /* offsets into the state blob excluded from the exact-state hash */
     size_t off_cycles, off_frames;
-    /* bridge-side mapper: 0 NROM, 2 UxROM (runtime), 3 CNROM, 7 AxROM */
+    /* bridge-side mappers: 0 NROM, 2 UxROM (runtime), 1 MMC1, 3 CNROM,
+     * 4 MMC3, 7 AxROM (composed windows) */
     unsigned mapper;
-    const uint8_t *chr_rom;
-    unsigned chr_banks;      /* 8 KiB CHR banks (CNROM) */
-    unsigned reg;            /* CNROM chr bank / AxROM prg bank */
+    const uint8_t *prg_rom, *chr_rom;
+    unsigned prg8k, chr1k;   /* ROM sizes in 8 KiB PRG / 1 KiB CHR units */
+    DpNesMapRegs rg;
+    uint8_t prgbuf[32768];   /* composed $8000-$FFFF */
+    uint8_t chrbuf[8192];    /* composed pattern space */
+    uint8_t prg_map[4];      /* 8 KiB ROM slot behind each 8 KiB of $8000+ */
+    uint16_t chr_map[8];     /* 1 KiB ROM slot behind each 1 KiB of CHR */
 };
 
-#define MAPPER_TAIL 4u  /* register bytes appended to a state image */
+#define MAPPER_TAIL ((unsigned)sizeof(DpNesMapRegs))
+
+/* pure: the maps a register set implies */
+static void maps_of(const DpNesMach *d, const DpNesMapRegs *r, uint8_t prg[4], uint16_t chr[8]) {
+    unsigned n = d->prg8k ? d->prg8k : 1u, c = d->chr1k ? d->chr1k : 1u;
+    unsigned last = n - 1u;
+    switch (d->mapper) {
+    case 7: {
+        unsigned b = (r->v[0] & 7u) * 4u;
+        for (unsigned i = 0; i < 4; i++) prg[i] = (uint8_t)((b + i) % n);
+        break;
+    }
+    case 3:
+        for (unsigned i = 0; i < 8; i++) chr[i] = (uint16_t)(((r->v[0] * 8u) + i) % c);
+        for (unsigned i = 0; i < 4; i++) prg[i] = (uint8_t)(i % n);
+        return;
+    case 1: {
+        unsigned ctrl = r->v[0], mode = (ctrl >> 2) & 3, p = r->v[3] & 15u;
+        if (mode < 2) { for (unsigned i = 0; i < 4; i++) prg[i] = (uint8_t)((((p & ~1u) * 2u) + i) % n); }
+        else if (mode == 2) {
+            prg[0] = 0; prg[1] = (uint8_t)(1u % n);
+            prg[2] = (uint8_t)((p * 2u) % n); prg[3] = (uint8_t)((p * 2u + 1u) % n);
+        } else {
+            prg[0] = (uint8_t)((p * 2u) % n); prg[1] = (uint8_t)((p * 2u + 1u) % n);
+            prg[2] = (uint8_t)(last - 1u + (n < 2)); prg[3] = (uint8_t)last;
+        }
+        if (d->chr_rom) {
+            if (ctrl & 16) {
+                for (unsigned i = 0; i < 4; i++) {
+                    chr[i] = (uint16_t)((r->v[1] * 4u + i) % c);
+                    chr[4 + i] = (uint16_t)((r->v[2] * 4u + i) % c);
+                }
+            } else for (unsigned i = 0; i < 8; i++) chr[i] = (uint16_t)((((r->v[1] & ~1u) * 4u) + i) % c);
+        }
+        return;
+    }
+    case 4: {
+        unsigned cmd = r->v[0], R[8];
+        for (unsigned i = 0; i < 8; i++) R[i] = r->v[2 + i];
+        unsigned s6 = R[6] & 63u, s7 = R[7] & 63u, pen = last - 1u + (n < 2);
+        if (cmd & 0x40) { prg[0] = (uint8_t)(pen); prg[1] = (uint8_t)(s7 % n); prg[2] = (uint8_t)(s6 % n); }
+        else { prg[0] = (uint8_t)(s6 % n); prg[1] = (uint8_t)(s7 % n); prg[2] = (uint8_t)pen; }
+        prg[3] = (uint8_t)last;
+        if (d->chr_rom) {
+            unsigned k[8] = { R[0] & ~1u, R[0] | 1u, R[1] & ~1u, R[1] | 1u, R[2], R[3], R[4], R[5] };
+            for (unsigned i = 0; i < 8; i++) chr[i] = (uint16_t)(k[(cmd & 0x80) ? (i + 4) & 7 : i] % c);
+        }
+        return;
+    }
+    default: return;
+    }
+}
 
 static void mapper_apply(DpNesMach *d) {
-    if (d->mapper == 3 && d->chr_rom) {
-        unsigned b = d->reg % (d->chr_banks ? d->chr_banks : 1u);
-        machine.chr = d->chr_rom + (size_t)b * 8192u;
-        machine.ppu.chr = machine.chr;
-    } else if (d->mapper == 7) {
-        unsigned n32 = (unsigned)(machine.prg_size / 32768u);
-        unsigned b = d->reg & 7u;
-        if (n32) b %= n32;
-        machine.cpu.bank_base = b * 32768u;
-        machine.cpu.fixed_base = b * 32768u + 16384u;
-        machine.cpu.bank = (uint8_t)(b * 2u);
+    if (d->mapper < 3 && d->mapper != 1) return;  /* 0/2: the runtime's own */
+    maps_of(d, &d->rg, d->prg_map, d->chr_map);
+    if (d->mapper != 3) {
+        for (unsigned i = 0; i < 4; i++)
+            memcpy(d->prgbuf + i * 8192u, d->prg_rom + (size_t)d->prg_map[i] * 8192u, 8192u);
+        machine.prg = machine.cpu.prg = d->prgbuf;
+        machine.cpu.bank_base = 0;
+        machine.cpu.fixed_base = 16384u;
+        machine.cpu.bank = (uint8_t)(d->prg_map[0] / 2u);
+    }
+    if (d->chr_rom && d->mapper != 7) {
+        for (unsigned i = 0; i < 8; i++)
+            memcpy(d->chrbuf + i * 1024u, d->chr_rom + (size_t)d->chr_map[i] * 1024u, 1024u);
+        machine.chr = machine.ppu.chr = d->chrbuf;
+    }
+}
+
+/* a $8000+ write against a register set (MMC1 serial port, MMC3 pairs) */
+static void regs_write(const DpNesMach *d, DpNesMapRegs *r, unsigned a, unsigned v) {
+    switch (d->mapper) {
+    case 3: case 7: r->v[0] = (uint8_t)v; break;
+    case 1:
+        if (v & 0x80) { r->shift = 0x10; r->cnt = 0; r->v[0] |= 0x0C; break; }
+        r->shift = (uint8_t)((r->shift >> 1) | ((v & 1) << 4));
+        if (++r->cnt == 5) {
+            unsigned reg = (a >> 13) & 3;  /* ctrl, chr0, chr1, prg */
+            r->v[reg] = r->shift;
+            r->shift = 0x10; r->cnt = 0;
+        }
+        break;
+    case 4:
+        if (!(a & 0x6000)) {
+            if (!(a & 1)) r->v[0] = (uint8_t)v;
+            else r->v[2 + (r->v[0] & 7)] = (uint8_t)v;
+        }
+        break;
     }
 }
 
@@ -64,8 +147,8 @@ static void t_rd(void *u, unsigned a) {
 static void t_wr(void *u, unsigned a, unsigned v) {
     DpNesMach *d = u;
     if (d->h.on_write) d->h.on_write(d->h.user, a, v);
-    if (a >= 0x8000u && (d->mapper == 3 || d->mapper == 7)) {
-        d->reg = v;  /* bus conflicts ignored, as for UxROM */
+    if (a >= 0x8000u && (d->mapper == 1 || d->mapper == 3 || d->mapper == 4 || d->mapper == 7)) {
+        regs_write(d, &d->rg, a, v);
         mapper_apply(d);
     }
 }
@@ -88,9 +171,10 @@ DpNesMach *dp_nesmach_open(const uint8_t *data, size_t size, int mapper,
     }
     unsigned mapper_id = (unsigned)((data[6] >> 4) | (data[7] & 0xF0));
     if (mapper >= 0) mapper_id = (unsigned)mapper;
-    if (mapper_id != 0 && mapper_id != 2 && mapper_id != 3 && mapper_id != 7) {
-        snprintf(err, errsz, "mapper %u: supported boards are NROM (0), "
-                 "UxROM (2), CNROM (3) and AxROM (7)", mapper_id);
+    if (mapper_id != 0 && mapper_id != 1 && mapper_id != 2 && mapper_id != 3 &&
+        mapper_id != 4 && mapper_id != 7) {
+        snprintf(err, errsz, "mapper %u: supported boards are NROM (0), MMC1 (1), "
+                 "UxROM (2), CNROM (3), MMC3 (4) and AxROM (7)", mapper_id);
         return NULL;
     }
     size_t body = size - 16;
@@ -107,6 +191,10 @@ DpNesMach *dp_nesmach_open(const uint8_t *data, size_t size, int mapper,
     if (mapper_id == 3 && (chr == 0 || prg != 16384u * (prg / 16384u) ||
                            (prg != 16384u && prg != 32768u))) {
         snprintf(err, errsz, "CNROM wants 16/32 KiB PRG and CHR ROM");
+        return NULL;
+    }
+    if ((mapper_id == 1 || mapper_id == 4) && (prg % 16384u || prg < 32768u)) {
+        snprintf(err, errsz, "MMC1/MMC3 want >=32 KiB of PRG in 16 KiB units");
         return NULL;
     }
     if (mapper_id == 7 && (prg % 32768u)) {
@@ -130,8 +218,13 @@ DpNesMach *dp_nesmach_open(const uint8_t *data, size_t size, int mapper,
     d->off_frames = offsetof(nes_t, frames);
     d->mapper = mapper_id;
     d->chr_rom = chr ? data + 16 + prg : NULL;
-    d->chr_banks = chr / 8192u;
-    if (mapper_id == 7) machine.cpu.banked = 0;  /* ours, not the UxROM write */
+    d->prg_rom = data + 16;
+    d->prg8k = prg / 8192u;
+    d->chr1k = chr / 1024u;
+    if (mapper_id == 1 || mapper_id == 3 || mapper_id == 4 || mapper_id == 7)
+        machine.cpu.banked = 0;  /* the bridge owns the windows, not the UxROM write */
+    memset(&d->rg, 0, sizeof d->rg);
+    if (mapper_id == 1) { d->rg.v[0] = 0x0C; d->rg.shift = 0x10; }
     mapper_apply(d);
     return d;
 }
@@ -143,7 +236,8 @@ void dp_nesmach_close(DpNesMach *d) {
 
 void dp_nesmach_reset(DpNesMach *d) {
     nes_reset();
-    d->reg = 0;
+    memset(&d->rg, 0, sizeof d->rg);
+    if (d->mapper == 1) { d->rg.v[0] = 0x0C; d->rg.shift = 0x10; }
     mapper_apply(d);
     d->in_frame = 0;
     d->steps = 0;
@@ -201,13 +295,13 @@ void dp_nesmach_save(const DpNesMach *d, void *buf) {
     (void)d;
     uint8_t *p = buf;
     nes_state_io(io_copy, &p, 0);
-    memcpy(p, &d->reg, MAPPER_TAIL);
+    memcpy(p, &d->rg, MAPPER_TAIL);
 }
 
 void dp_nesmach_load(DpNesMach *d, const void *buf) {
     const uint8_t *p = buf;
     nes_state_io(io_paste, &p, 1);
-    memcpy(&d->reg, p, MAPPER_TAIL);
+    memcpy(&d->rg, p, MAPPER_TAIL);
     mapper_apply(d);
 }
 
@@ -229,8 +323,9 @@ uint64_t dp_nesmach_state_hash(const void *buf) {
 }
 
 int64_t dp_nesmach_rom_index(const DpNesMach *d, unsigned addr) {
-    (void)d;
     if (addr < 0x8000u) return -1;
+    if (d->mapper == 1 || d->mapper == 3 || d->mapper == 4 || d->mapper == 7)
+        return (int64_t)d->prg_map[(addr - 0x8000u) >> 13] * 8192 + (addr & 0x1FFF);
     return (int64_t)(addr >= 0xC000u ? machine.cpu.fixed_base : machine.cpu.bank_base)
          + (addr & 0x3FFF);
 }
@@ -266,34 +361,41 @@ uint8_t *dp_nesmach_state_nmi_edge(void *buf) {
 /* what a write to $8000+ would change, evaluated before the runtime or the
  * bridge applies it: the PRG window (UxROM/AxROM, in 16 KiB slots) or the
  * CHR bank (CNROM).  Returns 0 none, 1 PRG window, 2 CHR bank. */
-int dp_nesmach_mapper_write(const DpNesMach *d, unsigned value,
+int dp_nesmach_mapper_write(const DpNesMach *d, unsigned addr, unsigned value,
                             unsigned *old_slot, unsigned *new_slot) {
     if (d->mapper == 2) {
         *old_slot = machine.cpu.bank;
         *new_slot = value & (machine.cpu.bank_count - 1u);
-        return 1;
+        return *old_slot != *new_slot ? 1 : 0;
     }
-    if (d->mapper == 7) {
-        unsigned n32 = (unsigned)(machine.prg_size / 32768u);
-        *old_slot = machine.cpu.bank_base / 16384u;
-        *new_slot = ((value & 7u) % (n32 ? n32 : 1u)) * 2u;
-        return 1;
-    }
-    if (d->mapper == 3) {
-        unsigned n = d->chr_banks ? d->chr_banks : 1u;
-        *old_slot = d->reg % n;
-        *new_slot = value % n;
-        return 2;
-    }
+    if (d->mapper == 0) return 0;
+    DpNesMapRegs r = d->rg;
+    uint8_t p0[4], p1[4];
+    uint16_t c0[8], c1[8];
+    memcpy(p0, d->prg_map, 4);
+    memcpy(c0, d->chr_map, sizeof c0);
+    memcpy(p1, p0, 4);
+    memcpy(c1, c0, sizeof c1);
+    regs_write(d, &r, addr, value);
+    maps_of(d, &r, p1, c1);
+    for (unsigned w = 0; w < 2; w++)
+        if (p0[w * 2] != p1[w * 2]) {
+            *old_slot = p0[w * 2] / 2u; *new_slot = p1[w * 2] / 2u;
+            return 1 + (int)w * 2;
+        }
+    for (unsigned i = 0; i < 8; i++)
+        if (c0[i] != c1[i]) { *old_slot = c0[i] / 8u; *new_slot = c1[i] / 8u; return 2; }
     return 0;
 }
 unsigned dp_nesmach_mapper(const DpNesMach *d) { return d->mapper; }
 
-size_t dp_nesmach_chr_size(const DpNesMach *d) { return d->chr_rom ? (size_t)d->chr_banks * 8192u : 0; }
+size_t dp_nesmach_chr_size(const DpNesMach *d) { return d->chr_rom ? (size_t)d->chr1k * 1024u : 0; }
 
 /* canonical CHR cell behind a PPU pattern address under the live bank */
 int64_t dp_nesmach_chr_index(const DpNesMach *d, unsigned addr) {
     if (!d->chr_rom) return -1;
+    if (d->mapper == 1 || d->mapper == 3 || d->mapper == 4)
+        return (int64_t)d->chr_map[(addr >> 10) & 7] * 1024 + (addr & 0x3FF);
     return (int64_t)(machine.chr - d->chr_rom) + (addr & 0x1FFFu);
 }
 

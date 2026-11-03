@@ -282,10 +282,10 @@ static void hook_write(void *user, unsigned addr, unsigned value) {
     if (addr >= 0x8000) {
         // mapper register write (fires before the runtime/bridge applies it)
         unsigned os, ns;
-        int kind = dp_nesmach_mapper_write(x->m, value, &os, &ns);
+        int kind = dp_nesmach_mapper_write(x->m, addr, value, &os, &ns);
         if (kind && os != ns)
-            record_bank(x, 0, x->total_steps, (uint16_t)x->cur_pc, (uint8_t)(kind == 2),
-                        (uint8_t)os, (uint8_t)ns);  // window 1 = CHR bank
+            record_bank(x, 0, x->total_steps, (uint16_t)x->cur_pc, (uint8_t)(kind == 3 ? 1 : kind == 2 ? 2 : 0),
+                        (uint8_t)os, (uint8_t)ns);  // window 0/1 = PRG, 2 = CHR
         return;
     }
     if (addr >= 0x2000 && addr < 0x4020) {

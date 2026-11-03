@@ -68,7 +68,7 @@ uint8_t *dp_nesmach_state_nmi_edge(void *buf);
 /* mapper the bridge runs (0, 2, 3, 7) and what a $8000+ write changes:
  * 0 nothing, 1 the PRG window (16 KiB slots), 2 the CHR bank (CNROM) */
 unsigned dp_nesmach_mapper(const DpNesMach *m);
-int dp_nesmach_mapper_write(const DpNesMach *m, unsigned value,
+int dp_nesmach_mapper_write(const DpNesMach *m, unsigned addr, unsigned value,
                             unsigned *old_slot, unsigned *new_slot);
 
 /* CHR ROM as an indexed space (bank * 8 KiB + pattern address; size 0 and

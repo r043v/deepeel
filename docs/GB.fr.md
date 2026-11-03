@@ -978,3 +978,16 @@ quand le fond est activé, OAM quand les sprites le sont, pages de
 `banque CHR * 8 Kio + adresse de motif`, donc stable sous CNROM. Les
 cartouches CHR-RAM n'ont pas de carte CHR. Observation de l'outil : une
 tile affichée à un instant donné, pas une mesure du matériel.
+
+## 0.55.0
+
+J5 (suite) : MMC1 (mapper 1) et MMC3 (mapper 4) au pont NES. Les fenêtres
+sont composées côté deepeel : tranches de 8 Kio pour la PRG, de 1 Kio pour
+la CHR ; `rom_index` et la CHR indexée suivent ces tranches (clé =
+décalage linéaire dans la ROM). Registres : port série MMC1 (modes PRG
+16/32 Kio, CHR 4/8 Kio), paires MMC3 (R0–R7, inversions PRG/CHR). Le
+journal des banques distingue la fenêtre PRG $8000 (0), $C000 (1) et la
+CHR (2). Le runtime m0boy gagne 8 Kio de PRG-RAM en $6000-$7FFF (modif
+locale du dépôt voisin, non poussée). **Non modélisés** : le compteur
+d'IRQ de scanline MMC3 (`$C000-$E001`) et le miroir MMC1/MMC3 ; les IRQ
+MMC3 ne sont donc pas explorées. Observation de l'outil.
