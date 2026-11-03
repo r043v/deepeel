@@ -1194,3 +1194,16 @@ J12 (partiel) : libretro niveau B (§8.2), côté outil.
 - Pas encore fait : callbacks `dma`/`bank`, le patch d'un vrai cœur (hors
   dépôt), le branchement sur l'explorateur à fourches et la **parité de
   fourches avec le backend m0boy** sur une fixture (critère J12).
+
+## 0.70.0
+
+J13 (partiel) : campagne multi-plateforme sur fixtures générées.
+`tools/campaign_fixtures.py BUILD OUT.md` lance l'outil sur chaque fixture
+(Game Boy, Mega Drive, Master System) et écrit `docs/CAMPAGNE.fr.md` : un
+tableau par fixture (code retour, pas explorés, octets connus, durée) et une
+synthèse par plateforme. Observations de l'outil, pas des mesures de matériel,
+et pas des ROMs réelles (aucune dans le dépôt). Limites : NES et PC Engine
+n'ont pas de fixtures fichier (leurs ROMs sont construites en mémoire par
+`test_nes`/`test_pce`) ; certaines valeurs sont `n/d` quand le rapport texte
+de la plateforme ne les expose pas. L'audit de la matrice et la campagne sur
+ROMs réelles hors dépôt (`tools/scan_all.py`) restent à faire.
