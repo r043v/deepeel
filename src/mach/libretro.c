@@ -62,6 +62,8 @@ struct DpLibretro {
     void *(*r_mem)(unsigned);
     size_t (*r_msize)(unsigned);
     uint8_t *rom;
+    DpLrTraceApi trace; // filled by the core at level B
+    int level;
 };
 
 // libretro callbacks carry no user pointer: one active instance per thread of
@@ -82,6 +84,16 @@ static bool env_cb_fn(unsigned cmd, void *data) {
     case RETRO_ENV_GET_SAVE_DIRECTORY:
         if (data) *(const char **)data = ".";
         return true;
+    case DP_LR_ENV_TRACE:
+        if (!data) return false;
+        // the core fills the table; only a complete one of our version is accepted
+        {
+            DpLrTraceApi *t = data;
+            if (t->version != DP_LR_TRACE_VERSION || !t->step || !t->set_observers || !t->pc) return false;
+            lr->trace = *t;
+            lr->level = 1;
+            return true;
+        }
     case RETRO_ENV_SET_MEMORY_MAPS:
         lr->memmaps = 1;
         return true;
@@ -201,6 +213,12 @@ int dp_lr_load_rom(DpLibretro *lr, const char *rom_path, char *err, size_t errn)
     struct retro_game_info gi = { rom_path, lr->rom, (size_t)n, NULL };
     if (!lr->r_load(&gi)) { seterr(err, errn, "libretro: the core refused %s", rom_path); return 0; }
     lr->loaded = 1;
+    if (lr->level)
+        snprintf(lr->degr, sizeof lr->degr,
+                 "level B (%s): trace extension negotiated (step, observers, forced branch %s, rom index %s)",
+                 lr->name, lr->trace.force_branch ? "available" : "unavailable",
+                 lr->trace.rom_index ? "available" : "unavailable");
+    else
     snprintf(lr->degr, sizeof lr->degr,
              "level A (%s): no instruction step, no forced branch (D7-D11), no bus observers "
              "(exec/read/write/dma/bank), no precise ROM coverage; ROM coverage by memory maps %s",
@@ -277,4 +295,21 @@ unsigned dp_lr_replay(DpLibretro *lr, const uint16_t *masks, unsigned n, uint64_
     }
     dp_lr_set_input(lr, 0, 0);
     return n;
+}
+
+int dp_lr_level(const DpLibretro *lr) { return lr->level; }
+int dp_lr_step(DpLibretro *lr) {
+    if (!lr->level) return 0;
+    g_cur = lr;
+    return lr->trace.step();
+}
+uint32_t dp_lr_pc(DpLibretro *lr) { return lr->level ? lr->trace.pc() : 0; }
+int dp_lr_force_branch(DpLibretro *lr, int taken) {
+    return lr->level && lr->trace.force_branch ? lr->trace.force_branch(taken) : 0;
+}
+int64_t dp_lr_rom_index(DpLibretro *lr, uint32_t addr) {
+    return lr->level && lr->trace.rom_index ? lr->trace.rom_index(addr) : -1;
+}
+void dp_lr_observe(DpLibretro *lr, const DpLrObservers *obs) {
+    if (lr->level) lr->trace.set_observers(obs);
 }

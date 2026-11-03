@@ -8,6 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+static struct { uint32_t pcs[16]; int npc; uint32_t wr[8]; int nwr; } T;
+static void ex(void *u, uint32_t pc) { (void)u; T.pcs[T.npc++] = pc; }
+static void wr(void *u, uint32_t a, uint8_t v) { (void)u; (void)v; T.wr[T.nwr++] = a; }
+
 int main(int argc, char **argv) {
     CHECK(argc == 3); // core path, a scratch ROM path
     if (argc != 3) return 2;
@@ -16,6 +20,7 @@ int main(int argc, char **argv) {
     fclose(f);
 
     char err[256] = "";
+    setenv("DPMOCK_NOTRACE", "1", 1); // the level-A checks below run the core without the extension
     CHECK(dp_lr_open("/nonexistent/core.so", err, sizeof err) == NULL && err[0]);
     DpLibretro *lr = dp_lr_open(argv[1], err, sizeof err);
     CHECK_MSG(lr != NULL, err);
@@ -86,6 +91,42 @@ int main(int argc, char **argv) {
         }
         dp_lr_close(a);
         dp_lr_close(b);
+    }
+
+    CHECK(dp_lr_level(lr) == 0 && dp_lr_step(lr) == 0); // level A: no step
+    unsetenv("DPMOCK_NOTRACE");
+
+    // --- level B: the trace extension is negotiated -------------------------------------
+    {
+        // program: 0: A=5 / 2: jz 8 / 4: [10]=A / 6: halt / 8: [12]=A / 10: halt
+        const uint8_t prog[12] = { 1, 5, 4, 8, 2, 0x10, 5, 0, 2, 0x12, 5, 0 };
+        FILE *pf = fopen(argv[2], "wb");
+        fwrite(prog, 1, sizeof prog, pf);
+        fclose(pf);
+        DpLrObservers o = { &T, ex, NULL, wr };
+        for (int side = 0; side < 3; side++) { // natural, forced taken, forced not taken
+            DpLibretro *b = dp_lr_open_copy(argv[1], err, sizeof err);
+            CHECK_MSG(b != NULL, err);
+            if (!b) continue;
+            CHECK_MSG(dp_lr_load_rom(b, argv[2], err, sizeof err), err);
+            CHECK(dp_lr_level(b) == 1 && strstr(dp_lr_degradations(b), "level B"));
+            memset(&T, 0, sizeof T);
+            dp_lr_observe(b, &o);
+            if (side == 1) CHECK(dp_lr_force_branch(b, 1));
+            if (side == 2) CHECK(dp_lr_force_branch(b, 0));
+            int guard = 0;
+            while (dp_lr_step(b) && ++guard < 100) {}
+            CHECK(guard < 100);
+            CHECK(dp_lr_rom_index(b, 4) == 4 && dp_lr_rom_index(b, 40) < 0);
+            if (side == 0) { // A=5, so the jump is not taken: falls through to the store at 4
+                CHECK(T.npc == 4 && T.pcs[2] == 4 && T.nwr == 1 && T.wr[0] == 0x10);
+            } else if (side == 1) { // forced taken: the other side runs
+                CHECK(T.npc == 4 && T.pcs[2] == 8 && T.nwr == 1 && T.wr[0] == 0x12);
+            } else { // forced not taken matches the natural path here
+                CHECK(T.npc == 4 && T.pcs[2] == 4 && T.wr[0] == 0x10);
+            }
+            dp_lr_close(b);
+        }
     }
 
     free(snap);

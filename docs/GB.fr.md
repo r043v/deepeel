@@ -1176,3 +1176,21 @@ des singletons par bibliothèque). Test `libretro` : deux instances du cœur
 factice, entrées et images indépendantes. Reste pour J11 : branchement sur
 les sessions de l'explorateur, vrai cœur hors dépôt, Go-Explore/mode
 humain/`--watch`.
+
+## 0.69.0
+
+J12 (partiel) : libretro niveau B (§8.2), côté outil.
+- **ABI de l'extension de trace** (`src/mach/libretro.h`) : appel
+  d'environnement privé `DP_LR_ENV_TRACE` (`0x7DEE0001`) par lequel un cœur
+  remplit `DpLrTraceApi` (`step`, `set_observers`, `pc`, `force_branch`,
+  `rom_index`, version 1). Un cœur sans l'extension refuse l'appel : le
+  backend reste au niveau A, et `dp_lr_degradations` le dit.
+- Le backend expose `dp_lr_level`, `dp_lr_step`, `dp_lr_pc`,
+  `dp_lr_force_branch`, `dp_lr_rom_index`, `dp_lr_observe` (exec/read/write).
+- Test `libretro` : le cœur factice implémente l'extension avec un petit CPU ;
+  la fourche (les deux issues d'un conditionnel par `force_branch`) donne des
+  chemins d'exécution et d'écriture différents, observés par callbacks ;
+  chaque instance est chargée par copie du `.so`.
+- Pas encore fait : callbacks `dma`/`bank`, le patch d'un vrai cœur (hors
+  dépôt), le branchement sur l'explorateur à fourches et la **parité de
+  fourches avec le backend m0boy** sur une fixture (critère J12).

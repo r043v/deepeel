@@ -52,4 +52,34 @@ const char *dp_lr_degradations(const DpLibretro *lr);
 // writing the per-frame RAM hash to hashes[] (may be NULL); returns frames run
 unsigned dp_lr_replay(DpLibretro *lr, const uint16_t *masks, unsigned n, uint64_t *hashes);
 
+// --- level B (docs/COUVERTURE.fr.md §8.2): trace extension --------------------------
+// A core that implements the private environment call DP_LR_ENV_TRACE fills a
+// DpLrTraceApi: one-instruction step, observers, pc, forced branch, rom index.
+// The extension lives in a small patch kept outside this repository.
+#define DP_LR_ENV_TRACE 0x7DEE0001u
+#define DP_LR_TRACE_VERSION 1
+
+typedef struct DpLrObservers {
+    void *user;
+    void (*exec)(void *user, uint32_t pc);
+    void (*read)(void *user, uint32_t addr, uint8_t val);
+    void (*write)(void *user, uint32_t addr, uint8_t val);
+} DpLrObservers;
+
+typedef struct DpLrTraceApi {
+    uint32_t version;
+    int (*step)(void);                            // one instruction; 0 = the CPU is halted
+    void (*set_observers)(const DpLrObservers *); // NULL clears
+    uint32_t (*pc)(void);
+    int (*force_branch)(int taken);               // the next conditional goes this way (1/0); -1 = natural; returns 0 if unsupported
+    int64_t (*rom_index)(uint32_t addr);          // compact ROM offset, < 0 when not ROM
+} DpLrTraceApi;
+
+int dp_lr_level(const DpLibretro *lr);            // 0 = level A, 1 = level B (trace extension negotiated)
+int dp_lr_step(DpLibretro *lr);                   // level B only; 0 at level A or when halted
+uint32_t dp_lr_pc(DpLibretro *lr);
+int dp_lr_force_branch(DpLibretro *lr, int taken);
+int64_t dp_lr_rom_index(DpLibretro *lr, uint32_t addr);
+void dp_lr_observe(DpLibretro *lr, const DpLrObservers *obs);
+
 #endif
