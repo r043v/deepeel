@@ -160,6 +160,15 @@ typedef struct DpDiscEntry {
     uint32_t known;      // ROM bytes carrying any evidence after the step
 } DpDiscEntry;
 
+// one distinct instruction executed from RAM (pc >= $8000), see rtcode.c
+typedef struct DpRtCode {
+    uint64_t key;     // 0 = empty slot
+    uint32_t hits;
+    int32_t rom_src;  // ROM index of the verbatim-copy source, -1 when unattached
+    uint16_t pc;
+    uint8_t len, b[4];
+} DpRtCode;
+
 typedef struct DpResults {
     const DpCart *cart;
     const DpPlatform *plat;
@@ -264,6 +273,8 @@ typedef struct DpResults {
     uint32_t prov_jp_hl, prov_data;  // provenance: jp-hl targets proven, bytes proven data
     uint32_t prov_unresolved, prov_sat, prov_steps; // partial proofs, caps hit, walk steps
     uint32_t data_contradictions; // bytes both executed and proven data (kept code)
+    DpRtCode *rt;                 // runtime-code archive (open addressing), guarded by rec_mtx
+    uint32_t rt_cap, rt_n, rt_attached; // table size, distinct (pc,bytes) variants, those with a ROM source
 } DpResults;
 
 // --- exploration config -------------------------------------------------------
@@ -371,6 +382,7 @@ typedef struct DpSharedPool {
     pthread_mutex_t mtx;
     DpPathState *q;
     uint32_t cap, head, len, max;
+    int nthreads, idle; // drain threads in all / currently waiting for work (guarded by mtx)
 } DpSharedPool;
 
 // the engine state is shared with the sibling modules (sections.c, copies.c)
@@ -515,6 +527,8 @@ void dp_record_copy(DpExplorer *ex, const DpCopyRec *rec, uint32_t attrib_key);
 void dp_copy_on_rom_read(DpExplorer *ex, uint8_t bank, uint16_t addr, uint8_t v);
 void dp_copy_on_vram_write(DpExplorer *ex, uint8_t bank, uint16_t addr, uint8_t v);
 void dp_copy_flush_for_exec(DpExplorer *ex, uint16_t pc);
+void dp_rtcode_add(DpResults *res, uint16_t pc, const uint8_t *b, int len, int32_t rom_src);
+DpRtCode *dp_rtcode_sorted(const DpResults *res, uint32_t *n);
 void dp_copy_on_wram_write(DpExplorer *ex, uint16_t addr, uint8_t v);
 void dp_copy_on_back_edge(DpCopyTracker *ct, uint16_t site, uint32_t site_key);
 void dp_copy_flush_path(DpExplorer *ex, DpCopyTracker *ct);

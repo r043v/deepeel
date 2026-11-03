@@ -2022,3 +2022,24 @@ nouveaux emplacements non remis à zéro. Observé sur Zelda en `--unbounded` :
 SIGSEGV dans `dp_mach_load`, le pointeur d'image contenait des octets d'image.
 L'anneau est recopié dans l'ordre logique, tête à 0, reste mis à zéro. Bug
 antérieur à `--unbounded`, déclenché bien plus souvent par lui.
+
+## 0.136.0
+
+But final du projet : la recompilation statique complète, sans interpréteur
+annexe. Un octet exécuté en RAM sans trace dans l'archive obligerait le binaire
+recompilé à embarquer un interpréteur ; tout code exécuté doit donc être connu.
+
+- **Archive du code exécuté en RAM** (`src/explore/rtcode.c`) : chaque
+  instruction distincte exécutée à pc ≥ $8000 (WRAM, écho, VRAM, HRAM) est
+  gardée avec ses octets, une entrée par variante `(pc, octets)` — un emplacement
+  réécrit donne plusieurs variantes (code polymorphe). Compteur d'exécutions et
+  index ROM de la copie verbatim quand elle existe (`-1` = code généré, sans
+  source ROM). Ligne de rapport « runtime code archive », option
+  `--rtcode FILE` (une ligne `pc octets hits rom_index`).
+- **Correctif drain parallèle** (`--jobs N`) : un pool momentanément vide
+  terminait le worker même quand le spool contenait encore des enregistrements
+  (lot entièrement rejeté par la dédup à la reprise) ; Zelda s'arrêtait ainsi
+  après 3 min avec 1,24 M d'états en attente. Le drain ne finit plus que
+  lorsque tous les threads sont inactifs, le pool vide et le spool épuisé.
+- Le piège « BUG NULL write in ring window » ne s'applique plus aux graines
+  prioritaires (faux positifs).

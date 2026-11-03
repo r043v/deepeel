@@ -242,7 +242,26 @@ static void closure_rounds(DpExplorer *ex, DpResults *res, uint32_t *seed_spent,
 
 static int cmd_md(int argc, char **argv);
 static int g_drain_only; // frontier drain: no root seeding, only the saved frontier runs
+// the runtime-code archive: one line per distinct instruction run from RAM, input of the recompiler
+static void write_rtcode(const DpResults *res, const char *path) {
+    if (!path) return;
+    uint32_t rn;
+    DpRtCode *rt = dp_rtcode_sorted(res, &rn);
+    FILE *rf = fopen(path, "w");
+    if (rf) {
+        fprintf(rf, "# deepeel rtcode v1: pc bytes hits rom_index(-1=generated)\n");
+        for (uint32_t i = 0; i < rn; i++) {
+            fprintf(rf, "%04x ", rt[i].pc);
+            for (int k = 0; k < rt[i].len; k++) fprintf(rf, "%02x", rt[i].b[k]);
+            fprintf(rf, " %u %d\n", rt[i].hits, rt[i].rom_src);
+        }
+        fclose(rf);
+    }
+    free(rt);
+}
+
 static int cmd_explore(int argc, char **argv) {
+    const char *rtcode_path = NULL;
     const char *json = NULL, *text = NULL, *cov = NULL, *romdata = NULL, *map = NULL, *html = NULL, *path = NULL;
     const char *from_png = NULL, *export_dir = NULL, *summary = NULL;
     const char *tas_dirs[8];
@@ -263,6 +282,7 @@ static int cmd_explore(int argc, char **argv) {
         const char *a = argv[i];
         if (!strcmp(a, "--json") && i + 1 < argc) json = argv[++i];
         else if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
+        else if (!strcmp(a, "--rtcode") && i + 1 < argc) rtcode_path = argv[++i];
         else if (!strcmp(a, "--summary") && i + 1 < argc) summary = argv[++i];
         else if (!strcmp(a, "--cov") && i + 1 < argc) cov = argv[++i];
         else if (!strcmp(a, "--romdata") && i + 1 < argc) romdata = argv[++i];
@@ -610,6 +630,7 @@ static int cmd_explore(int argc, char **argv) {
         }
         fwrite(out.p, 1, out.len, stdout);
         dp_buf_free(&out);
+        write_rtcode(&res, rtcode_path);
         if (scfg.state_dir) {
             char tpath[540];
             snprintf(tpath, sizeof tpath, "%s/tree.bin", scfg.state_dir);
@@ -671,6 +692,7 @@ static int cmd_explore(int argc, char **argv) {
         dp_report_text(&res, &cfg, &out);
         fwrite(out.p, 1, out.len, stdout);
         dp_buf_free(&out);
+        write_rtcode(&res, rtcode_path);
         fprintf(stderr, "deepeel: done in %.2fs\n", secs);
     }
     if (json) {

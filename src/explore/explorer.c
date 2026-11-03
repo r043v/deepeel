@@ -231,6 +231,7 @@ void dp_results_free(DpResults *res) {
     free(res->clo_entries);
     free(res->clo_bank_entries);
     free(res->bad_ops);
+    free(res->rt);
     pthread_mutex_destroy(&res->sec_mtx);
     pthread_mutex_destroy(&res->rec_mtx);
     memset(res, 0, sizeof *res);
@@ -1136,6 +1137,19 @@ bad_done:
             // put these bytes in WRAM from the ROM, the ROM source is executed code
             u32_add(&res->exec_outside, 1);
             int32_t rk = wram_rom_source(ex, pc);
+            {   // archive the executed bytes themselves (generated code has no ROM source)
+                int ilen = dp_isa_sm83()->length(op);
+                uint8_t ib[4];
+                const DpGblApi *ga = ex->mach->api;
+                for (int i = 0; i < ilen && i < 4; i++) {
+                    uint16_t a = (uint16_t)(pc + i);
+                    if (a >= 0xE000 && a < 0xFE00) a -= 0x2000;
+                    ib[i] = a >= 0xC000 && a < 0xE000 ? ga->wram[a - 0xC000]
+                          : a >= 0x8000 && a < 0xA000 ? ga->vram[a - 0x8000]
+                          : a >= 0xFF80 && a < 0xFFFF ? ga->hram[a - 0xFF80] : 0xFF;
+                }
+                dp_rtcode_add(res, pc, ib, ilen, rk);
+            }
             if (rk >= 0) {
                 uint8_t nf = (uint8_t)(ex->cur_forced ? DP_XF_FORCED : DP_XF_NATURAL);
                 uint32_t xs = ex->session ? DP_SRC_SESSION : (ex->cur_forced ? DP_SRC_FORK_FORCED : DP_SRC_FORK_NATURAL);
@@ -1255,7 +1269,37 @@ static int pseed_feed(DpExplorer *ex) {
     return n != 0 || ex->pseed_len != 0;
 }
 
+static int explore_step_inner(DpExplorer *ex);
+// In a parallel drain a momentarily empty pool is not the end: another thread may be
+// mid-path and about to push, or the spool may still hold records (a batch that dedup
+// rejected entirely leaves the pool empty). The drain ends only when every thread is idle,
+// the pool is empty and nothing is left on disk.
 int dp_explore_step(DpExplorer *ex) {
+    int r = explore_step_inner(ex);
+    if (r || !ex->sh) return r;
+    DpSharedPool *sh = ex->sh;
+    pthread_mutex_lock(&sh->mtx);
+    sh->idle++;
+    pthread_mutex_unlock(&sh->mtx);
+    for (;;) {
+        pthread_mutex_lock(&sh->mtx);
+        int work = sh->len != 0;
+        int all_idle = sh->idle >= sh->nthreads;
+        pthread_mutex_unlock(&sh->mtx);
+        if (ex->stop) { r = 0; break; }
+        if (work || dp_explorer_spool_pending(ex)) { r = 1; break; }
+        if (all_idle) { r = 0; break; }
+        usleep(1000);
+    }
+    if (r) { // a thread that ends stays counted idle, or its siblings would wait for it forever
+        pthread_mutex_lock(&sh->mtx);
+        sh->idle--;
+        pthread_mutex_unlock(&sh->mtx);
+    }
+    return r;
+}
+
+static int explore_step_inner(DpExplorer *ex) {
     DpResults *res = ex->res;
     // any free worklist slot: pull the spooled overflow back in (also covers
     // the everything-drained case, so a spool keeps dp_explore going)
@@ -1332,7 +1376,7 @@ int dp_explore_step(DpExplorer *ex) {
     dp_mach_attach(ex->mach, ex, hook_step, hook_read, hook_write, NULL);
     dp_mach_load(ex->mach, img); // execution starts at the image's pc
     free(img);
-    if (p != &tmp && ex->sh) { // trap: a NULL written into a live ring slot?
+    if (p != &tmp && !from_pq && ex->sh) { // trap: a NULL written into a live ring slot?
         long idx = p - ex->queue;
         long rel = (idx - (long)ex->q_head + (long)ex->q_cap) % (long)ex->q_cap;
         if (rel < (long)ex->q_len)
@@ -1477,6 +1521,7 @@ int dp_explore(DpExplorer *ex) {
     sh.q = xrealloc(NULL, sizeof(DpPathState) * sh.cap);
     pthread_mutex_init(&sh.mtx, NULL);
     ex->sh = &sh;
+    sh.nthreads = 1; // the leader; the workers add themselves below
     ex->res->mt = 1; // the record lists are shared from now on: take the mutexes
     // the seeds queued before the drain sit in the leader's local worklist:
     // hand them to the pool, the workers cannot see the local ring
@@ -1509,6 +1554,7 @@ int dp_explore(DpExplorer *ex) {
         w[nw] = dp_explorer_new(&ex->cfg, ex->res, m);
         w[nw]->tree = ex->tree;
         dp_explorer_share(w[nw], ex);
+        sh.nthreads++;
         pthread_create(&th[nw], NULL, drain_thread, w[nw]);
         nw++;
     }

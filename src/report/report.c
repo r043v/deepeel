@@ -128,6 +128,10 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
                  "%u seed refusals retried\n",
                  res->closure_bank_seeds, res->indirect_seeds, res->closure_seeds_refused);
         dp_buf_str(out, line);
+        snprintf(line, sizeof line,
+                 "runtime code archive: %u distinct instructions executed from RAM/VRAM/HRAM, %u attached to a ROM copy source, %u generated (no ROM source)\n",
+                 res->rt_n, res->rt_attached, res->rt_n - res->rt_attached);
+        dp_buf_str(out, line);
         {
             DpMapSummary rsum;
             uint8_t *rmap = dp_map_build(res, &rsum);
