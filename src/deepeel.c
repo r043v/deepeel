@@ -1021,16 +1021,18 @@ static int cmd_nes(int argc, char **argv) {
     if (argc < 4 || strcmp(argv[2], "explore")) {
         fprintf(stderr, "deepeel nes explore ROM [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N] [--mapper auto|nrom|uxrom] "
                         "[--max-total N] [--max-steps N] [--max-paths N] [--queue N] "
-                        "[--loop-cap N] [--fork-cap N] [--no-irq-fork] [--entry bank:addr]... [--seed-banks] [--text FILE] [--map FILE] [--evidence FILE]\n");
+                        "[--loop-cap N] [--fork-cap N] [--no-irq-fork] [--entry bank:addr]... [--seed-banks] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE]\n");
         return 2;
     }
-    const char *path = NULL, *text = NULL, *map = NULL, *evidence = NULL, *mapper_name = "auto";
+    const char *path = NULL, *text = NULL, *map = NULL, *evidence = NULL, *cov = NULL, *romdata = NULL, *mapper_name = "auto";
     DpNesOptions opt = dp_nes_options();
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
         if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
         else if (!strcmp(a, "--map") && i + 1 < argc) map = argv[++i];
         else if (!strcmp(a, "--evidence") && i + 1 < argc) evidence = argv[++i];
+        else if (!strcmp(a, "--cov") && i + 1 < argc) cov = argv[++i];
+        else if (!strcmp(a, "--romdata") && i + 1 < argc) romdata = argv[++i];
         else if (!strcmp(a, "--tas") && i + 1 < argc) {
             if (opt.tas_count < 8) snprintf(opt.tas_paths[opt.tas_count++], 512, "%s", argv[++i]);
             else { fprintf(stderr, "deepeel: at most 8 TAS movies\n"); return 2; }
@@ -1093,6 +1095,16 @@ static int cmd_nes(int argc, char **argv) {
         FILE *f = fopen(evidence, "w");
         if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", evidence); }
         else { dp_nes_evidence(f, &res); fclose(f); }
+    }
+    if (cov) {
+        FILE *f = fopen(cov, "w");
+        if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", cov); }
+        else { dp_nes_cov(f, &res); fclose(f); }
+    }
+    if (romdata) {
+        FILE *f = fopen(romdata, "w");
+        if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", romdata); }
+        else { dp_nes_romdata(f, &res); fclose(f); }
     }
     dp_nes_results_free(&res);
     free(data);

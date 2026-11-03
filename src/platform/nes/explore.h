@@ -103,6 +103,7 @@ typedef struct {
     uint8_t *chr_flags;        // one byte per CHR ROM cell (DP_NES_CHR_*), NULL on CHR-RAM
     size_t chr_size;
     uint64_t chr_tiles_bg, chr_tiles_spr, chr_reads; // distinct 16-byte tiles / $2007 reads
+    uint32_t *exec_hits, *data_hits; // per PRG cell: executions of the opcode byte / data reads (saturating)
     uint8_t *flags;            // one byte per physical PRG cell
     size_t prg_size;
     uint64_t steps, paths, forks, irq_forks, exec_outside, data_reads, oam_copies;
@@ -147,6 +148,9 @@ void dp_nes_results_free(DpNesResults *results);
 uint8_t *dp_nes_map_build(const DpNesResults *r);
 void dp_nes_report(FILE *out, const DpNesResults *results);
 void dp_nes_map(FILE *out, const DpNesResults *results);
+// coverage (.cov: "bank offset flags hits") and the 256-byte-page data-read profile (romdata)
+void dp_nes_cov(FILE *out, const DpNesResults *results);
+void dp_nes_romdata(FILE *out, const DpNesResults *results);
 // per-run evidence ranges, "bank start end mask" in 16 KiB PRG banks (mask = the cell flags)
 void dp_nes_evidence(FILE *out, const DpNesResults *results);
 

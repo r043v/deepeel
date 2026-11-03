@@ -1451,3 +1451,13 @@ de cellule : 01 naturel, 02 forcé, 04 lu en données, 08 copié, 10 IRQ,
 20 padding, 40 échantillon, 80 statique), au même format que Sega. Les cellules
 sans drapeau ne sont pas listées. `.cov` et romdata restent absents : le
 moteur NES ne tient pas de compteurs de coups par cellule. Test `nes_evidence`.
+
+## 0.92.0
+
+NES : `--cov FILE` et `--romdata FILE` (O2). Le moteur tient désormais des
+compteurs saturants par cellule PRG : exécutions de l'octet d'opcode
+(chemins explorés et joués) et lectures de données. `.cov` : lignes
+`banque offset drapeaux coups` (1 exécuté, 4 spéculatif, 8 donnée), même forme
+que Sega ; romdata : `page coups` par page de 256 octets lue en données. Les
+octets d'opérande d'une instruction portent 0 coup (seul l'opcode compte).
+Observations de l'outil, pas des mesures matérielles. Test `nes_cov`.

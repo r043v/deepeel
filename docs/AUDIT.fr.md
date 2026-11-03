@@ -11,11 +11,11 @@ remesure pas l'outil.
 | GB | 34 | 1 | 3 | 1 |
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
-| NES | 10 | 15 | 12 | 2 |
+| NES | 11 | 14 | 12 | 2 |
 | PCE | 15 | 7 | 16 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 94.
+Cellules ouvertes (◐ ou ✗) : 93.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -105,7 +105,6 @@ Cellules ouvertes (◐ ou ✗) : 94.
 | J5 | Mode humain, export `.sta` | MD | ✗ |
 | O1 | `.map` texte, PNG, JSON, heat | NES | ◐ |
 | O1 | `.map` texte, PNG, JSON, heat | MD | ✗ dump brut |
-| O2 | `.cov`, romdata, `--evidence` | NES | ◐ `--evidence` (pas de `.cov` ni romdata : pas de compteurs par cellule) |
 | O2 | `.cov`, romdata, `--evidence` | PCE | ✗ |
 | O2 | `.cov`, romdata, `--evidence` | MD | ✗ |
 | O3 | `--watch` (SDL2) | SMS/GG | ✗ |

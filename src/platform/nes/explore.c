@@ -187,6 +187,10 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
         if (c0 >= 0 && (size_t)c0 < x->r->prg_size) { x->ipc[c0] = (uint16_t)pc; x->istart[c0] = 1; }
     }
 
+    {   // opcode-byte hit counter (saturating), both explored and played paths
+        int64_t oc = dp_nesmach_rom_index(x->m, pc);
+        if (oc >= 0 && r->exec_hits && r->exec_hits[oc] != UINT32_MAX) r->exec_hits[oc]++;
+    }
     // executed PRG cells (before execution, from this exact state)
     if (!x->play_mode) {
         for (unsigned i = 0; i < in.length; i++) {
@@ -331,6 +335,7 @@ static void hook_read(void *user, unsigned addr) {
         int64_t cell = dp_nesmach_rom_index(x->m, addr);
         if (cell >= 0) {
             x->r->data_reads++;
+            if (x->r->data_hits && x->r->data_hits[cell] != UINT32_MAX) x->r->data_hits[cell]++;
             if (!x->r->flags[cell]) x->r->flags[cell] = DP_NES_DATA;
             x->last_read_cell = cell; x->last_read_step = x->total_steps;
         }
@@ -651,6 +656,9 @@ static void table_scan(DpNesRun *x);
 void dp_nes_results_free(DpNesResults *r) {
     if (!r) return;
     free(r->flags);
+    free(r->exec_hits);
+    free(r->data_hits);
+    r->exec_hits = r->data_hits = NULL;
     free(r->chr_flags);
     free(r->inferred);
     r->inferred = NULL;
@@ -696,6 +704,8 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     r->options = x.opt;
     r->prg_size = dp_nesmach_prg_size(x.m);
     r->flags = calloc(r->prg_size, 1);
+    r->exec_hits = calloc(r->prg_size, sizeof(uint32_t));
+    r->data_hits = calloc(r->prg_size, sizeof(uint32_t));
     r->chr_size = dp_nesmach_chr_size(x.m);
     if (r->chr_size) r->chr_flags = calloc(r->chr_size, 1);
     if (!r->flags) { dp_nesmach_close(x.m); return 0; }
@@ -1057,6 +1067,25 @@ void dp_nes_map(FILE *out, const DpNesResults *r) {
         fputc('0' + map[i], out);
     fputc('\n', out);
     free(map);
+}
+
+void dp_nes_cov(FILE *out, const DpNesResults *r) {
+    fputs("# deepeel nes coverage v1: bank offset flags(1=exec,4=speculative,8=data) hits\n", out);
+    for (size_t k = 0; k < r->prg_size; k++) {
+        uint8_t f = r->flags[k]; unsigned flags; uint32_t hits;
+        if (f & (DP_NES_NATURAL | DP_NES_FORCED)) { flags = 1u | ((f & DP_NES_NATURAL) ? 0u : 4u); hits = r->exec_hits ? r->exec_hits[k] : 0; }
+        else if (f & (DP_NES_DATA | DP_NES_COPIED | DP_NES_STATIC)) { flags = 8; hits = r->data_hits ? r->data_hits[k] : 0; }
+        else continue;
+        fprintf(out, "%02zx %04zx %x %x\n", k >> 14, k & 0x3fff, flags, (unsigned)hits);
+    }
+}
+
+void dp_nes_romdata(FILE *out, const DpNesResults *r) {
+    for (size_t p = 0; p < (r->prg_size + 255) / 256; p++) {
+        uint64_t n = 0;
+        for (size_t i = p * 256; i < p * 256 + 256 && i < r->prg_size; i++) n += r->data_hits ? r->data_hits[i] : 0;
+        if (n) fprintf(out, "%zx %llu\n", p, (unsigned long long)n);
+    }
 }
 
 void dp_nes_evidence(FILE *out, const DpNesResults *r) {
