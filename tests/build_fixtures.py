@@ -258,6 +258,16 @@ def build(out):
     w(r, 0x4000, 0x3E, 0x42, 0xEA, 0x00, 0xD0, 0xC9)   # ld a,$42 ; ld ($D000),a ; ret
     save(out, "fix_wramexec", r)
 
+    # --- jptable: ld hl,table ; ld a,[hl+] ; ld h,[hl] ; ld l,a ; jp hl.  Only the first
+    # entry runs; the other two handlers are reached by the S4 operand table scan ---
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x21, 0x70, 0x01, 0x2A, 0x66, 0x6F, 0xE9)
+    w(r, 0x170, 0x80, 0x01, 0x90, 0x01, 0xA0, 0x01)
+    for t in (0x180, 0x190, 0x1A0):
+        w(r, t, 0x3C, 0x00, 0x18, 0xFE)          # inc a ; nop ; jr $
+    save(out, "fix_jptable", r)
+
     # --- hdma: CGB general-purpose HDMA, 256 bytes $4000 -> $8000 -------------
     r = rom(2)
     w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)

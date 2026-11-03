@@ -116,11 +116,12 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
                  "%u seeds (%u dropped), %u stopped by data/padding, %u by undefined opcodes\n"
                  "  unresolved: %u bank-0 edges into $4000+ with no bank evidence, "
                  "%llu JP HL sites observed (%llu with more than 8 targets)\n"
+                 "  S4 operand tables of executed JP HL: %u tables, %u entries\n"
                  "forks pruned (both sides covered): %u\n",
                  res->closure_rounds, (unsigned long long)stat_only, res->closure_starts,
                  res->closure_seeds, res->closure_seeds_dropped, res->closure_stopped_data,
                  res->closure_stopped_illegal, res->closure_unresolved_bank,
-                 (unsigned long long)ind_sites, (unsigned long long)ind_over, res->forks_covered_pruned);
+                 (unsigned long long)ind_sites, (unsigned long long)ind_over, res->closure_jp_tables, res->closure_jp_entries, res->forks_covered_pruned);
         dp_buf_str(out, line);
         snprintf(line, sizeof line,
                  "  seeding: %u bank candidates on the ambiguous edges, %u JP HL targets seeded, "

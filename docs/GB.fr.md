@@ -1988,3 +1988,13 @@ de 4 minutes (limite `ulimit -f` atteinte, SIGXFSZ) ; les images machine sont
 presque toutes des zéros. Sur la fixture `fix_branch.gb`, 21 états tiennent en
 5,5 Kio. La reprise recompte les enregistrements entiers en parcourant les
 en-têtes. Le débit réel de croissance sur ROM réelle est à mesurer (J13).
+
+## 0.134.0
+
+GB S4 : à chaque `jp hl` exécuté, si un `ld hl,nn` exécuté le précède de moins
+de 24 octets, la table de mots à `nn` (≤ 64 entrées, adresses ROM, instruction
+légale, hors padding, même banque que le saut) devient des racines de la
+fermeture statique. Ligne de rapport `S4 operand tables of executed JP HL`.
+Test `gb_jp_table` (fixture `fix_jptable`). Limite : seul le motif `ld hl,nn`
+proche est reconnu ; une base calculée (`add hl,de` depuis une autre origine)
+n'est pas suivie.

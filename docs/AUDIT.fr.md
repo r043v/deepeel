@@ -8,7 +8,7 @@ remesure pas l'outil.
 
 | Plateforme | ✅ fait | ◐ partiel | ✗ absent | — sans objet |
 |---|---|---|---|---|
-| GB | 34 | 1 | 3 | 1 |
+| GB | 34 | 2 | 2 | 1 |
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 24 | 1 | 2 |
@@ -43,7 +43,7 @@ Cellules ouvertes (◐ ou ✗) : 89.
 | S3 | Suivi de constantes / provenance | NES | ◐ provenance RAM→`jmp (zp)` depuis la PRG |
 | S3 | Suivi de constantes / provenance | PCE | ◐ provenance ROM→WRAM→`jmp (abs)` (comptée, sans graine) |
 | S3 | Suivi de constantes / provenance | MD | ◐ témoin An |
-| S4 | Tables de sauts depuis l'opérande | GB | ✗ |
+| S4 | Tables de sauts depuis l'opérande | GB | ◐ 0.134 `ld hl,nn` → `jp hl` (≤ 64 mots, même banque) |
 | S4 | Tables de sauts depuis l'opérande | NES | ◐ tables de mots lues en données |
 | S4 | Tables de sauts depuis l'opérande | MD | ✗ |
 | S5 | Frères de copie | NES | ◐ copies OAM DMA / boucle CPU, tables du même flux |

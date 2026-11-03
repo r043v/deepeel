@@ -175,6 +175,40 @@ uint32_t dp_static_closure(DpResults *res) {
                 push(&st, tk, tk >= 0x4000 ? NO_HINT : thint, tr);
             }
         }
+        // S4: an executed `jp hl` preceded (within 24 bytes of straight code) by an executed
+        // `ld hl,nn` reads a table of code pointers at nn: its entries are static roots in
+        // the same bank view as the jump (up to 64 words, each a ROM address, stopping at
+        // padding or an address that does not start a legal instruction)
+        if (executed && op == 0xE9 && k >= 24) {
+            for (uint32_t b = k - 1; b + 24 > k && b < k; b--) {
+                if (c->rom[b] != 0x21 || !(res->exec_flags[b] & DP_XF_START)) { if (b == 0) break; continue; }
+                uint16_t base = (uint16_t)(c->rom[b + 1] | c->rom[b + 2] << 8);
+                uint32_t tb = bank ? bank : it.hint;
+                uint32_t bk = ~0u;
+                if (base < 0x4000) bk = base;
+                else if (base < 0x8000 && tb != NO_HINT && tb < (uint32_t)res->banks) bk = tb * 0x4000 + (base & 0x3FFF);
+                if (bk == ~0u || bk + 6 > c->rom_size) break;
+                int cnt = 0;
+                for (int e = 0; e < 64 && bk + (uint32_t)e * 2 + 1 < c->rom_size; e++) {
+                    uint16_t t = (uint16_t)(c->rom[bk + e * 2] | c->rom[bk + e * 2 + 1] << 8);
+                    if (t < 0x150 || t >= 0x8000 || illegal(c->rom[t < 0x4000 ? t : (tb != NO_HINT && tb < (uint32_t)res->banks ? tb * 0x4000 + (t & 0x3FFF) : 0)])) break;
+                    uint32_t tk = ~0u;
+                    if (t < 0x4000) tk = t;
+                    else if (tb != NO_HINT && tb < (uint32_t)res->banks) tk = tb * 0x4000 + (t & 0x3FFF);
+                    if (tk == ~0u || tk >= n || (res->static_flags[tk] & DP_SF_PAD)) break;
+                    cnt++;
+                    res->closure_jp_entries++;
+                    if (!(res->exec_flags[tk] & (DP_XF_NATURAL | DP_XF_FORCED))) {
+                        res->exec_flags[tk] |= DP_XF_ENTRY;
+                        dp_cov_mark(&res->first, res->src_flags, tk, DP_SRC_CLOSURE, res->steps_total, 0);
+                        if (dp_set_insert(&listed, tk) > 0) entry_add(res, tk);
+                    }
+                    push(&st, tk, tk >= 0x4000 ? NO_HINT : it.hint, 0);
+                }
+                if (cnt) res->closure_jp_tables++;
+                break;
+            }
+        }
         if (fall) {
             uint32_t npc = pc + (uint32_t)len;
             if (bank == 0 ? off + (uint32_t)len < 0x4000 : npc < 0x8000)

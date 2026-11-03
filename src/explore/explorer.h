@@ -207,6 +207,7 @@ typedef struct DpResults {
     // control flow out of executed instructions, never executed itself
     uint32_t closure_rounds, closure_starts, closure_bytes;
     uint32_t closure_unresolved_bank;   // bank-0 edge into $4000+ with no bank evidence
+    uint32_t closure_jp_tables, closure_jp_entries; // S4: operand tables of executed jp hl
     uint32_t closure_stopped_data;      // flow stopped by padding / proven data
     uint32_t closure_stopped_illegal;   // flow stopped by an undefined opcode
     uint32_t closure_seeds, closure_seeds_dropped;

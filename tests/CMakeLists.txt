@@ -390,3 +390,5 @@ add_test(NAME unbounded_spool COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE
 set_tests_properties(unbounded_spool PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 90)
 add_test(NAME md_static_layer COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_static.md --fork-cap 0 --text $D/ms.txt --map $D/ms.map >/dev/null 2>&1; grep -Eq 'static layer \\(S1/S2, no machine\\): [0-9]+ padding, 20 table, [1-9][0-9]* code bytes' $D/ms.txt && [ \"$(sed -n 2p $D/ms.map | cut -c517-520)\" = '3333' ] && [ \"$(sed -n 2p $D/ms.map | cut -c1025-1028)\" = '7777' ]")
 set_tests_properties(md_static_layer PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME gb_jp_table COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_jptable.gb --cov $D/jt2.cov --text $D/jt2.txt >/dev/null 2>&1; grep -Eq 'S4 operand tables of executed JP HL: [1-9][0-9]* tables, [1-9][0-9]* entries' $D/jt2.txt && grep -Eq '^00 0190 [1-9]' $D/jt2.cov && grep -Eq '^00 01a0 [1-9]' $D/jt2.cov")
+set_tests_properties(gb_jp_table PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
