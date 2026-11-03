@@ -911,3 +911,12 @@ format `gbl coverage v1` de m0boy, qui suppose les adresses CPU de la GB.
 `--romdata` : `page count` par page de 256 octets, comme côté GB. Observations
 de l'outil.
 
+## 0.49.0
+
+J4 : identité ROM des films pour Sega/MSX. `--tas` lit la ligne `SHA1` de
+l'en-tête du `.bk2` et la compare au SHA-1 de la ROM : une ROM différente ou
+un film sans identité est signalé sur stderr (le rejeu continue, au mieux) et
+le verdict est consigné dans le résumé JSON (`tas_identity` : 1 même ROM,
+2 ROM différente, 3 identité absente). Observation de l'outil, pas une preuve
+de synchronisation du film.
+

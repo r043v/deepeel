@@ -1,5 +1,6 @@
 #include "../src/platform/sega/explore.h"
 #include "../src/platform/sega/tas.h"
+#include "../src/core/sha1.h"
 #include "test_util.h"
 #include <stdio.h>
 #include <string.h>
@@ -88,6 +89,29 @@ static void loader_bk2_zip(void) {
     dp_sega_tas_free(&t);
     unlink(path);
 }
+// header SHA1 line -> ROM identity verdict (1 same, 0 different, -1 none)
+static void rom_identity(void) {
+    uint8_t rom[64]; memset(rom,0x5a,sizeof rom);
+    uint8_t h[20]; dp_sha1(rom,sizeof rom,h);
+    char good[128],bad[128]; int g=snprintf(good,sizeof good,"SHA1 "),b=snprintf(bad,sizeof bad,"SHA1 ");
+    for(int k=0;k<20;k++) { g+=snprintf(good+g,4,"%02x",h[k]); b+=snprintf(bad+b,4,"%02x",(uint8_t)(h[k]^1)); }
+    snprintf(good+g,8,"\n"); snprintf(bad+b,8,"\n");
+    static const char log[]="|....B...\n";
+    const char *hdrs[3]={good,bad,"Author x\n"}; int want[3]={1,0,-1};
+    for(int i=0;i<3;i++) {
+        uint8_t zip[1024];
+        size_t n=zip_write2("Header.txt",(const uint8_t *)hdrs[i],strlen(hdrs[i]),
+                            "Input Log.txt",(const uint8_t *)log,sizeof(log)-1,zip);
+        char path[]="/tmp/dp_tas_id_XXXXXX";
+        int fd=mkstemp(path); CHECK(fd>=0);
+        CHECK(write(fd,zip,n)==(ssize_t)n); close(fd);
+        DpSegaTas t; char err[256],why[256];
+        CHECK(dp_sega_tas_load(path,&t,err,sizeof err));
+        CHECK(dp_sega_tas_rom_match(&t,rom,sizeof rom,why,sizeof why)==want[i]);
+        dp_sega_tas_free(&t);
+        unlink(path);
+    }
+}
 static void loader_rejects_garbage(void) {
     char path[]="/tmp/dp_tas_bad_XXXXXX";
     int fd=mkstemp(path); CHECK(fd>=0);
@@ -153,6 +177,7 @@ static void replay_reaches_movie_code(void) {
 int main(void) {
     loader_plain_log();
     loader_bk2_zip();
+    rom_identity();
     loader_rejects_garbage();
     replay_reaches_movie_code();
     TEST_DONE("sega_tas");

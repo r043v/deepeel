@@ -121,7 +121,7 @@ Pour chaque technique, la fiche indique :
 | F3 | `--jobs` par instances clonées | ✅ | ✅ | ✅ | ✗ | ✗ | ✗ |
 | J1 | Sessions jouées multi-thread + pool | ✅ | ◐ | ◐ | ◐ xorshift | ◐ | ✗ |
 | J2 | Rejeu TAS prioritaire + shoots | ✅ | ✅ | ✅ | ✅ | ✅ | ◐ GMV |
-| J3 | Identité ROM des films | ✅ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| J3 | Identité ROM des films | ✅ | ✅ SHA-1 | ✅ SHA-1 | ✗ | ✗ | ✗ |
 | J4 | Go-Explore (cellules écran) | ✗ | ✗ | ✗ | ✗ | ✅ | ✗ |
 | J5 | Mode humain, export `.sta` | ✅ | ✗ | ✗ | ✗ | ✗ | ✗ |
 | O1 | `.map` texte, PNG, JSON, heat | ✅ | ✅ `.map`, maprender | ✅ | ◐ | ✅ via maprender | ✗ dump brut |

@@ -159,6 +159,7 @@ typedef struct {
     uint64_t play_steps,play_epochs;
     // TAS replay (GB tas.c parity): natural coverage from a movie, priority
     uint64_t tas_frames,tas_frames_refused,tas_steps;
+    int tas_identity;        // 0 no movie, 1 same ROM, 2 different ROM, 3 movie records none
     // parallel drain (--jobs): seeds routed to another worker, requests capped
     uint64_t seeds_offlane,jobs_capped,merge_conflicts;
     size_t loop_context_peak,loop_context_capacity;

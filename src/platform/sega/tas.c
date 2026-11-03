@@ -4,6 +4,7 @@
 #define _GNU_SOURCE
 #include "tas.h"
 #include "../../../src/core/zip.h"
+#include "../../../src/core/sha1.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -92,6 +93,17 @@ static int tas_load_buf(uint8_t *d,size_t n,DpSegaTas *out,char *err,size_t errs
         uint8_t *hdr=dp_zip_read(d,n,"header",&hn,NULL);
         if(hdr) {
             if(strcasestr((const char *)hdr,"startsfromsavestate true")) out->anchored=1;
+            for(size_t i=0;i+45<=hn;i++) { // line "SHA1 <40 hex>"
+                if((i==0 || hdr[i-1]=='\n') && !strncmp((const char *)hdr+i,"SHA1 ",5)) {
+                    uint8_t h[20]; int ok=1;
+                    for(int k=0;k<20 && ok;k++) {
+                        char b[3]={(char)hdr[i+5+2*k],(char)hdr[i+6+2*k],0},*e;
+                        h[k]=(uint8_t)strtoul(b,&e,16); if(*e) ok=0;
+                    }
+                    if(ok) { memcpy(out->sha1,h,20); out->has_sha1=1; }
+                    break;
+                }
+            }
             free(hdr);
         }
         size_t ln=0;
@@ -141,4 +153,12 @@ void dp_sega_tas_free(DpSegaTas *t) {
     if(!t) return;
     free(t->masks);
     memset(t,0,sizeof *t);
+}
+int dp_sega_tas_rom_match(const DpSegaTas *t,const uint8_t *rom,size_t size,char *why,size_t whysz) {
+    if(!t->has_sha1) { snprintf(why,whysz,"movie records no ROM identity"); return -1; }
+    uint8_t h[20]; dp_sha1(rom,size,h);
+    char a[41],b[41];
+    for(int k=0;k<20;k++) { snprintf(a+2*k,3,"%02x",t->sha1[k]); snprintf(b+2*k,3,"%02x",h[k]); }
+    snprintf(why,whysz,"movie SHA-1 %s, ROM SHA-1 %s",a,b);
+    return !memcmp(h,t->sha1,20);
 }

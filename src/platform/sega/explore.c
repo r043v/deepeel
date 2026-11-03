@@ -890,6 +890,13 @@ static int tas_replay(Run *x) {
         fprintf(stderr,"deepeel: --tas %s: %s\n",o->tas_path,err);
         return 0;
     }
+    {
+        char why[256];
+        int m=dp_sega_tas_rom_match(&t,x->image,r->size,why,sizeof why);
+        if(m==0) fprintf(stderr,"deepeel: --tas %s: different ROM (%s); replaying anyway\n",o->tas_path,why);
+        else if(m<0) fprintf(stderr,"deepeel: --tas %s: %s\n",o->tas_path,why);
+        r->tas_identity=m>0?1:m==0?2:3;
+    }
     pass_begin(x);
     int gg=!strcmp(x->system->id,"gg"),msx=!strcmp(x->system->id,"msx");
     for(uint32_t f=0;f<t.frames && r->steps<o->tas_total;f++) {
@@ -1549,6 +1556,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     DP_MR_SUM(indirect_target_overflow); DP_MR_SUM(indirect_seeds);
     DP_MR_SUM(indirect_refused_budget); DP_MR_SUM(indirect_pending);
     DP_MR_SUM(play_steps); DP_MR_SUM(play_epochs);
+    if(s->tas_identity) d->tas_identity=s->tas_identity;
     DP_MR_SUM(tas_frames); DP_MR_SUM(tas_frames_refused); DP_MR_SUM(tas_steps);
     DP_MR_SUM(jobs_capped); DP_MR_SUM(merge_conflicts);
     DP_MR_SUM(vram_copies); DP_MR_SUM(cram_copies); DP_MR_SUM(sram_copies);
@@ -1678,7 +1686,7 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
         ",\"evicted_ctx\":%"PRIu64",\"indirect_sites\":%"PRIu64",\"indirect_targets\":%"PRIu64
         ",\"indirect_seeds\":%"PRIu64",\"indirect_pending\":%"PRIu64
         ",\"play_steps\":%"PRIu64",\"play_epochs\":%"PRIu64
-        ",\"tas_frames\":%"PRIu64",\"tas_frames_refused\":%"PRIu64
+        ",\"tas_frames\":%"PRIu64",\"tas_frames_refused\":%"PRIu64",\"tas_identity\":%d"
         ",\"jobs_capped\":%"PRIu64",\"seeds_offlane\":%"PRIu64",\"merge_conflicts\":%"PRIu64
         ",\"bank_changes\":%"PRIu64",\"data_reads\":%"PRIu64",\"steps_deferred\":%"PRIu64",\"loop_deferred\":%"PRIu64",\"defer_resumed\":%"PRIu64",\"steps_final\":%"PRIu64",\"loop_final\":%"PRIu64",\"defer_dropped\":%"PRIu64",\"defer_pending\":%"PRIu64",\"fork_deferred\":%"PRIu64",\"fork_final\":%"PRIu64"}",
         r->steps,r->paths,r->forks,r->irq_forks,r->exec_outside,r->loop_cuts,r->fork_cuts,
@@ -1687,7 +1695,7 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
         r->seeds_entry,r->seeds_admitted,r->seeds_refused_cap,r->seeds_refused_view,
         r->seeds_pending,r->evicted_ctx,r->indirect_sites,r->indirect_targets,
         r->indirect_seeds,r->indirect_pending,r->play_steps,r->play_epochs,
-        r->tas_frames,r->tas_frames_refused,r->jobs_capped,r->seeds_offlane,
+        r->tas_frames,r->tas_frames_refused,r->tas_identity,r->jobs_capped,r->seeds_offlane,
         r->merge_conflicts,r->bank_changes,r->data_reads,
         r->steps_deferred,r->loop_deferred,r->defer_resumed,r->steps_final,r->loop_final,r->defer_dropped,r->defer_pending,r->fork_deferred,r->fork_final);
     fprintf(out,",\"limits\":{\"base\":%"PRIu64",\"inputs\":%"PRIu64",\"indirect\":%"PRIu64"}",
