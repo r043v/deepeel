@@ -29,6 +29,7 @@ typedef struct {
     uint32_t watch_write; /* 24-bit address, UINT32_MAX disables */
     uint32_t exclude_read_pc; /* exclude one CPU read site from the separate union */
     const DpMdMovie *movie; /* optional Gens movie, replayed on the natural path */
+    int lot_drain; /* with a lot backlog: run only the saved states (no root) */
     const char *lot_path; /* disk lot of deferred states (NULL: memory only); an existing file is resumed */
 } DpMdOptions;
 

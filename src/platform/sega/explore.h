@@ -68,6 +68,7 @@ typedef struct {
     uint32_t queue_max;    // queue growth ceiling (0: no growth past queue_cap)
     const char *spool_path; // overflow states survive here (--resume re-reads)
     int resume;             // continue from spool_path instead of truncating it
+    int lot_drain;          // with a lot backlog: run only the saved states (no root, no seeds)
     const char *lot_path;   // portable frontier lot: imported into the spool at start, the unread spool saved back at the end
     uint32_t spool_cap_mb;  // 0: unbounded
     const char *tree_path;  // choice tree record (--tree FILE)

@@ -1015,6 +1015,7 @@ static int cmd_nes(int argc, char **argv) {
         else if (!strcmp(a, "--max-paths") && i + 1 < argc) opt.max_paths = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--queue") && i + 1 < argc) opt.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--lot") && i + 1 < argc) opt.lot_path = argv[++i];
+        else if (!strcmp(a, "--lot-drain")) opt.lot_drain = 1;
         else if (!strcmp(a, "--loop-cap") && i + 1 < argc) opt.loop_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--fork-cap") && i + 1 < argc) opt.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--no-irq-fork")) opt.seed_irq = 0;
@@ -1083,6 +1084,7 @@ static int cmd_pce(int argc, char **argv) {
         else if (!strcmp(a, "--max-steps") && i + 1 < argc) opt.max_steps = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--queue") && i + 1 < argc) opt.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--lot") && i + 1 < argc) opt.lot_path = argv[++i];
+        else if (!strcmp(a, "--lot-drain")) opt.lot_drain = 1;
         else if (!strcmp(a, "--loop-cap") && i + 1 < argc) opt.loop_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--fork-cap") && i + 1 < argc) opt.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--pad-fork-cap") && i + 1 < argc) opt.pad_fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
@@ -1288,11 +1290,12 @@ static int cmd_md(int argc, char **argv) {
         const char *text = NULL, *map = NULL, *ev = NULL, *movie_path = NULL;
         for (int i = 4; i < argc; i++) {
             const char *a = argv[i];
-            if (i + 1 >= argc) { fprintf(stderr, "deepeel: bad option %s\n", a); rc = 2; break; }
+            if (i + 1 >= argc && strcmp(a, "--lot-drain")) { fprintf(stderr, "deepeel: bad option %s\n", a); rc = 2; break; }
             if (!strcmp(a, "--max-total")) o.max_total = strtoull(argv[++i], NULL, 0);
             else if (!strcmp(a, "--path-steps")) o.path_steps = strtoull(argv[++i], NULL, 0);
             else if (!strcmp(a, "--queue")) o.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--lot")) o.lot_path = argv[++i];
+            else if (!strcmp(a, "--lot-drain")) o.lot_drain = 1;
             else if (!strcmp(a, "--queue-max")) o.queue_max = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--fork-cap")) o.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--visit-cap")) o.visit_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
@@ -1340,15 +1343,19 @@ int main(int argc, char **argv) {
         struct stat lst;
         if (!stat(argv[3], &lst) && S_ISREG(lst.st_mode)) {
             // a portable lot (--lot of NES/PCE/MD/Sega): records and sizes
-            DpLotFile *lot = dp_lf_open(argv[3], 1);
-            if (!lot) { printf("frontier: cannot read %s\n", argv[3]); return 1; }
-            uint64_t raw = 0, zb = 0, n = 0, off = 0;
-            uint32_t h[4];
-            while (fseek(lot->f, (long)off, SEEK_SET) == 0 && fread(h, sizeof h, 1, lot->f) == 1 &&
-                   h[0] == DP_LF_MAGIC) { raw += h[2]; zb += h[3]; off += sizeof h + h[1] + h[3]; n++; }
-            printf("frontier lot: %llu records pending (%llu bytes raw, %llu compressed)\n",
-                   (unsigned long long)n, (unsigned long long)raw, (unsigned long long)zb);
-            dp_lf_close(lot, NULL);
+            FILE *lf = fopen(argv[3], "rb");
+            uint32_t h[4]; char pl[5] = {0};
+            if (!lf || fread(h, sizeof h, 1, lf) != 1 || h[0] != DP_LF_MAGIC || fread(pl, 1, 4, lf) != 4) {
+                printf("frontier: %s is not a lot\n", argv[3]); if (lf) fclose(lf); return 1;
+            }
+            uint64_t raw = 0, zb = 0, n = 0, off = sizeof h + 4 + h[3];
+            uint32_t rh[4];
+            while (fseek(lf, (long)off, SEEK_SET) == 0 && fread(rh, sizeof rh, 1, lf) == 1 && rh[0] == DP_LF_REC) {
+                raw += rh[2]; zb += rh[3]; off += sizeof rh + rh[1] + rh[3]; n++;
+            }
+            printf("frontier lot (%s, image %u bytes): %llu records pending (%llu bytes raw, %llu compressed XOR deltas)\n",
+                   pl, h[2], (unsigned long long)n, (unsigned long long)raw, (unsigned long long)zb);
+            fclose(lf);
             return 0;
         }
         snprintf(p, sizeof p, "%s/frontier/frontier.idx", argv[3]);
@@ -1391,6 +1398,34 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (!strcmp(argv[1], "frontier") && argc > 4 && !strcmp(argv[2], "drain")) {
+        struct stat dst;
+        if (!stat(argv[4], &dst) && S_ISREG(dst.st_mode)) {
+            // a portable lot: resume its saved states only on the platform that wrote it
+            FILE *lf = fopen(argv[4], "rb");
+            uint32_t h[4]; char pl[5] = {0};
+            if (!lf || fread(h, sizeof h, 1, lf) != 1 || h[0] != DP_LF_MAGIC || fread(pl, 1, 4, lf) != 4) {
+                fprintf(stderr, "deepeel: %s is not a lot\n", argv[4]); if (lf) fclose(lf); return 1;
+            }
+            fclose(lf);
+            const char *sys = NULL;
+            for (int i = 5; i + 1 < argc; i++) if (!strcmp(argv[i], "--sys")) sys = argv[i + 1];
+            char *av[16]; int n = 0;
+            av[n++] = argv[0];
+            if (!strcmp(pl, "NES")) { av[n++] = (char *)"nes"; av[n++] = (char *)"explore"; av[n++] = argv[3]; }
+            else if (!strcmp(pl, "PCE")) { av[n++] = (char *)"pce"; av[n++] = (char *)"explore"; av[n++] = argv[3]; }
+            else if (!strcmp(pl, "MD")) { av[n++] = (char *)"md"; av[n++] = (char *)"explore"; av[n++] = argv[3]; }
+            else if (!strcmp(pl, "SEG")) {
+                if (!sys) { fprintf(stderr, "deepeel: a Sega/MSX lot needs --sys sms|gg|sg1000|msx\n"); return 2; }
+                av[n++] = (char *)"z80"; av[n++] = (char *)"explore"; av[n++] = (char *)sys; av[n++] = argv[3];
+            } else { fprintf(stderr, "deepeel: unknown lot platform %s\n", pl); return 2; }
+            av[n++] = (char *)"--lot"; av[n++] = argv[4]; av[n++] = (char *)"--lot-drain";
+            fprintf(stderr, "deepeel: draining the %s lot %s\n", pl, argv[4]);
+            argc = n; argv = av;
+            if (!strcmp(argv[1], "md")) return cmd_md(argc, argv);
+            if (!strcmp(argv[1], "nes")) return cmd_nes(argc, argv);
+            if (!strcmp(argv[1], "pce")) return cmd_pce(argc, argv);
+            return dp_sega_explore_command(argc, argv);
+        }
         // frontier drain <rom> <state-dir> [--tier N] [--time-limit S]: resume the
         // saved continuations only (an explore --resume run on the same state dir)
         char **av = calloc((size_t)argc + 4, sizeof *av);

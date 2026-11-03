@@ -444,6 +444,7 @@ void dp_md_options_default(DpMdOptions *o) {
     o->exclude_read_pc = UINT32_MAX;
     o->movie = NULL;
     o->lot_path = NULL;
+    o->lot_drain = 0;
 }
 
 static void run_path(X *x, Item *it, uint64_t budget, int *cut) {
@@ -598,7 +599,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     r->copies = calloc(DP_MD_COPY_CAP, sizeof *r->copies);
     X x = {.c = c, .o = o, .r = r, .qcap = o->queue_cap};
     x.q = calloc(o->queue_cap ? o->queue_cap : 1, sizeof *x.q);
-    if (o->lot_path && !(x.lot = dp_lf_open(o->lot_path, 1)))
+    if (o->lot_path && !(x.lot = dp_lf_open(o->lot_path, "MD", 1)))
         fprintf(stderr, "deepeel: cannot open the lot %s\n", o->lot_path);
     x.gen = calloc(c->size / 2 + 1, sizeof *x.gen);
     x.vis = calloc(c->size / 2 + 1, sizeof *x.vis);
@@ -620,10 +621,11 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         dp_mdmach_set_pad(x.m, o->movie->pads[0]);
     }
     int cut = 0;
-    run_path(&x, NULL, o->max_total, &cut);
+    int drain = o->lot_drain && dp_lf_pending(x.lot); // saved states only: no reset path, no stream replay
+    if (!drain) run_path(&x, NULL, o->max_total, &cut);
     x.movie_active = 0;
     r->decoders = x.ndec;
-    if (r->steps < o->max_total) replay_streams(&x, (o->max_total - r->steps) / 2);
+    if (!drain && r->steps < o->max_total) replay_streams(&x, (o->max_total - r->steps) / 2);
     for (unsigned d = 0; d < x.ndec; d++) free(x.dec[d].snap);
     for (;;) {
         spill_flush(&x);

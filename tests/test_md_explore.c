@@ -169,6 +169,20 @@ int main(int argc, char **argv) {
         CHECK(dp_md_explore(&c, &o, &r) == 0);
         CHECK(r.lot_read >= left && r.lot_pending == 0 && access(lp, F_OK) != 0);
         dp_md_results_free(&r); dp_md_cart_free(&c);
+
+        // drain: the saved states only, the reset path is not run again
+        for (uint64_t wall = 1; wall < 2000; wall++) {
+            CHECK(dp_md_cart_load(&c, path, err, sizeof err) == 0);
+            DpMdOptions ow; dp_md_options_default(&ow); ow.lot_path = lp; ow.max_total = wall; unlink(lp);
+            CHECK(dp_md_explore(&c, &ow, &r) == 0);
+            uint64_t l2 = r.lot_pending; dp_md_results_free(&r); dp_md_cart_free(&c);
+            if (l2) break;
+        }
+        CHECK(dp_md_cart_load(&c, path, err, sizeof err) == 0);
+        DpMdOptions od; dp_md_options_default(&od); od.lot_path = lp; od.lot_drain = 1; od.max_total = 100000;
+        CHECK(dp_md_explore(&c, &od, &r) == 0);
+        CHECK(r.lot_read >= 1 && r.lot_pending == 0);
+        dp_md_results_free(&r); dp_md_cart_free(&c);
         unlink(lp);
     }
 

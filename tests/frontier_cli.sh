@@ -9,3 +9,11 @@ test -s "$W/spool.bin"
 "$D" frontier stats "$W" | grep -q "^frontier:"
 "$D" frontier drain "$ROM" "$W" --tier inf >/dev/null 2>&1
 "$D" frontier stats "$W" | grep -q "^frontier:"
+# portable lots (Sega): a walled run leaves a lot, `frontier stats` reads it, `frontier drain` empties it
+if [ -n "$2" ] && [ -n "$SEGA_ROM" ]; then
+  L="$W/sega.dpl"
+  "$D" z80 explore sms "$SEGA_ROM" --lot "$L" --max-total 5 >/dev/null 2>&1
+  "$D" frontier stats "$L" | grep -q "1 records pending"
+  "$D" frontier drain "$SEGA_ROM" "$L" --sys sms >/dev/null 2>&1
+  "$D" frontier stats "$L" | grep -q "^frontier: empty"
+fi

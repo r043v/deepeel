@@ -79,6 +79,7 @@ typedef struct {
     // each movie is one session, its end state seeds the fork queue
     char tas_paths[8][512];
     int tas_count;
+    int lot_drain;         // with a lot backlog: run only the saved states (no root, no seeds)
     const char *lot_path;  // disk lot of deferred states (NULL: memory only); an existing file is resumed
 } DpNesOptions;
 

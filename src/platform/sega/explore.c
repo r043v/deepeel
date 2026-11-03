@@ -1123,7 +1123,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     }
     if(o->lot_path && x.spool) {
         // the lot's backlog (portable records) is replayed into the spool, which the drain reads
-        DpLotFile *lot=dp_lf_open(o->lot_path,1);
+        DpLotFile *lot=dp_lf_open(o->lot_path,"SEG",1);
         if(lot) {
             uint64_t meta[3]; uint32_t ml,bl; uint8_t *blob;
             while(dp_lf_pending(lot)) {
@@ -1152,9 +1152,10 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
         if(!x.closure || (o->target_closure && !dp_sega_closure_targets(x.closure,&r->target_closure)) ||
            (o->target_closure && o->block_closure && !dp_sega_closure_blocks(x.closure,&r->block_closure))) { ok=0; goto cleanup; }
     }
+    int drain=o->lot_drain && x.spool_wr>x.spool_rd; // saved states only: no root, no seeds
     // Seed base: the reset state every seed starts from. Generation reads the
     // boot view through rom_index while the machine has not run yet.
-    if(o->seed_cap || o->entry_count || o->seed_banks || o->indirect_total || o->play_total || o->tas_path) {
+    if((o->seed_cap || o->entry_count || o->seed_banks || o->indirect_total || o->play_total || o->tas_path)) {
         x.seed_capacity=o->seed_cap+o->entry_count+3*256+8192;
         x.seeds=malloc((size_t)x.seed_capacity*sizeof(*x.seeds));
         x.seed_state=malloc(x.b->state_size); x.seed_scratch=malloc(x.b->state_size);
@@ -1167,12 +1168,13 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
         memcpy(x.seed_origins,x.origins,x.origin_size);
         generate_seed_specs(&x,image,size);
     }
-    if(!worker) {
+    if(!worker && !drain) {
         if(!tas_replay(&x)) { ok=0; goto cleanup; }
         play_session(&x);
     }
     if(!worker && push_to(&x,0,0,0,DP_SEGA_TREE_RESET)<0) { ok=0; goto cleanup; }
-    if(o->seed_vectors && !msx) {
+
+    if(!drain && o->seed_vectors && !msx) {
         const uint16_t entries[]={8,16,24,32,40,48,56,0x66};
         for(unsigned j=0;j<sizeof(entries)/sizeof(entries[0]);j++) {
             if(j%jobs!=worker) continue; // this worker's vector entries only
@@ -1419,7 +1421,7 @@ cleanup:
     free(x.seed_scratch); free(x.seed_scratch_cart); free(x.seed_scratch_origins);
     if(o->lot_path && x.spool) {
         // the spool records not read back yet are saved as portable lot records
-        DpLotFile *lot=dp_lf_open(o->lot_path,0);
+        DpLotFile *lot=dp_lf_open(o->lot_path,"SEG",0);
         while(lot && x.spool_rd<x.spool_wr) {
             uint64_t hdr[4];
             if(fseek(x.spool,(long)x.spool_rd,SEEK_SET) || fread(hdr,sizeof hdr,1,x.spool)!=1 || hdr[0]!=DP_SPOOL_MAGIC) break;
@@ -1968,6 +1970,7 @@ int dp_sega_explore_command(int argc,char **argv) {
             o.spool_path=argv[++i]; o.resume=argv[i-1][2]=='r';
             continue;
         }
+        if(!strcmp(argv[i],"--lot-drain")) { o.lot_drain=1; continue; }
         if(!strcmp(argv[i],"--lot")) {
             static char lot_spool[600];
             if(i+1>=argc) goto usage;

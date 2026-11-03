@@ -592,7 +592,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     }
 
     if (x.opt.lot_path) {
-        x.lot = dp_lf_open(x.opt.lot_path, 1);
+        x.lot = dp_lf_open(x.opt.lot_path, "NES", 1);
         if (!x.lot) fprintf(stderr, "deepeel: cannot open the lot %s\n", x.opt.lot_path);
     }
     x.queue_cap = x.opt.queue_cap;
@@ -637,7 +637,8 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
             dp_nesmach_save(x.m, snap);
             DpNesPathState root = { snap, 0, 0, 0, 0, 0 };
             r->seeds_reset = 1;
-            queue_push(&x, &root);
+            if (x.opt.lot_drain && dp_lf_pending(x.lot)) { free(snap); r->seeds_reset = 0; } // drain: saved states only
+            else queue_push(&x, &root);
             for (;;) {
                 if (x.failed) break;
                 if (x.queue_len == 0 && x.park_len > 0) { x.queue[x.queue_len++] = x.park[--x.park_len]; r->parked_resumed++; }

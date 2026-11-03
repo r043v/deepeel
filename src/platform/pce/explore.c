@@ -217,7 +217,10 @@ static int seen_insert(PceRun *x, uint64_t h) {
 
 // one compressed state to the disk lot (takes z on success)
 static int lot_spill(PceRun *x, uint8_t *z, uLongf zlen, uint8_t forced) {
-    if (!x->lot || !dp_lf_put(x->lot, &forced, 1, z, (uint32_t)zlen)) return 0;
+    if (!x->lot) return 0;
+    uLongf rl = x->state_size;
+    if (uncompress(x->tmp2, &rl, z, zlen) != Z_OK || rl != x->state_size) return 0;
+    if (!dp_lf_put(x->lot, &forced, 1, x->tmp2, (uint32_t)rl)) return 0; // raw state: XOR deltas need fixed-size images
     free(z);
     return 1;
 }
@@ -955,7 +958,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     memset(r, 0, sizeof *r);
     x->opt = options ? *options : dp_pce_options();
     r->options = x->opt;
-    if (x->opt.lot_path && !(x->lot = dp_lf_open(x->opt.lot_path, 1)))
+    if (x->opt.lot_path && !(x->lot = dp_lf_open(x->opt.lot_path, "PCE", 1)))
         fprintf(stderr, "deepeel: cannot open the lot %s\n", x->opt.lot_path);
     x->r = r;
     x->rom = dp_pce_rom();
@@ -985,7 +988,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     }
 
     // the power-on state first: the root of the fork exploration
-    if (!x->failed && x->opt.queue_cap) push_live(x, 0);
+    if (!x->failed && x->opt.queue_cap && !(x->opt.lot_drain && dp_lf_pending(x->lot))) push_live(x, 0);
 
     // TAS movies, then the play sessions; their checkpoints join the queue
     for (int i = 0; i < x->opt.tas_count && !x->failed; i++) {
@@ -1014,8 +1017,13 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
         if (!x->queue_len && dp_lf_pending(x->lot)) { // the disk backlog comes back
             uint8_t forced = 0, *blob = NULL; uint32_t ml = 0, bl = 0;
             if (dp_lf_get(x->lot, &forced, &ml, &blob, &bl) && ml == 1) {
-                x->queue[x->queue_len].z = blob; x->queue[x->queue_len].zlen = bl;
-                x->queue[x->queue_len].forced = forced; x->queue_len++;
+                uLongf zl = x->zcap;
+                uint8_t *z = malloc(zl);
+                if (z && compress2(z, &zl, blob, bl, 1) == Z_OK) {
+                    x->queue[x->queue_len].z = z; x->queue[x->queue_len].zlen = zl;
+                    x->queue[x->queue_len].forced = forced; x->queue_len++;
+                } else free(z);
+                free(blob); blob = NULL;
             } else free(blob);
             if (!x->queue_len) continue;
         }
