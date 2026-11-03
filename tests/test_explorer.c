@@ -1,6 +1,7 @@
 // test_explorer.c: end-to-end assertions on the synthetic fixtures.
 #include <sys/stat.h>
 #include "../src/core/cart.h"
+#include "../src/core/snapshot_png.h"
 #include "../src/explore/explorer.h"
 #include "../src/report/report.h"
 #include "mach_util.h"
@@ -238,6 +239,20 @@ int main(int argc, char **argv) {
     CHECK(res.data_flags[dp_rom_index(2, 0x4007)] & DP_DF_READ);
     CHECK(copy_of(0, 2, 0x4000, 0x4007, 0x8000, 0x8007) != NULL);
     CHECK(bank_events_of(0, 2) >= 1); // MBC5 boots on bank 0
+
+    // --- dpFr: the map PNG carries the frontier summary --------------------------------
+    {
+        DpConfig c2;
+        dp_config_defaults(&c2);
+        char png[600];
+        snprintf(png, sizeof png, "%s/test_dpfr.png", dir);
+        CHECK(dp_report_map_png(&res, &c2, "x.gb", png));
+        size_t fl = 0;
+        char *fr = dp_png_text(png, "dpFr", &fl);
+        CHECK(fr != NULL && strstr(fr, "\"deferred\"") && strstr(fr, "\"pending\""));
+        free(fr);
+        remove(png);
+    }
 
     // --- hdma: a CGB HDMA is read from HDMA1-5, the ROM source is data -----------------
     run(dir, "hdma");

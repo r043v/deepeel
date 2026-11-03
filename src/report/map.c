@@ -543,14 +543,28 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
         while (b > rom_path && b[-1] != '/' && b[-1] != '\\') b--;
         snprintf(file, sizeof file, "%s", b);
     } else file[0] = 0;
-    DpPngText extra[3] = {
+    // dpFr: frontier summary — deferred / cut-for-good counts per reason
+    DpBuf fr_txt;
+    dp_buf_init(&fr_txt);
+    dp_buf_fmt(&fr_txt, "{\"deferred\":{");
+    for (int r = 1; r < DP_R_COUNT; r++)
+        dp_buf_fmt(&fr_txt, "%s\"%s\":%llu", r > 1 ? "," : "", dp_reason_name(r), (unsigned long long)res->defer_by[r]);
+    dp_buf_fmt(&fr_txt, "},\"final\":{");
+    for (int r = 1; r < DP_R_COUNT; r++)
+        dp_buf_fmt(&fr_txt, "%s\"%s\":%llu", r > 1 ? "," : "", dp_reason_name(r), (unsigned long long)res->defer_final[r]);
+    dp_buf_fmt(&fr_txt, "},\"resumed\":%llu,\"pending\":%llu,\"on_disk\":%llu,\"dropped\":%llu}",
+               (unsigned long long)res->defer_resumed, (unsigned long long)res->defer_pending,
+               (unsigned long long)res->defer_on_disk, (unsigned long long)res->defer_dropped);
+    DpPngText extra[4] = {
         { "deepeel_heat", heat_txt.p, heat_txt.len, 0 },
         { "deepeel_cov", cov_txt.p, cov_txt.len, 0 },
         { "deepeel_rom", rom_txt.p, rom_txt.len, 0 },
+        { "dpFr", fr_txt.p, fr_txt.len, 0 },
     };
     int ok = map_png_render(m, (int)res->banks, title, &s, (const char *)txt.p, txt.len,
                             meta, path, res->plat ? res->plat->name : "gb", file,
-                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 3, meth);
+                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 4, meth);
+    dp_buf_free(&fr_txt);
     free(hb);
     if (have_heat) dp_heat_free(&heat);
     dp_buf_free(&heat_txt);

@@ -1134,3 +1134,14 @@ la ROM) et re-rendu, donc une carte réduite par le budget de pixels se
 re-rend sans perte. Un PNG sans `dpCv` ou de taille incohérente est refusé.
 Test `maprender_cv` (aller-retour `dpCv` identique). Reste pour J10 : `dpFr`,
 `dpIx`, `dpTb`, rendu en flux.
+
+## 0.66.0
+
+J10 (partiel) : mot-clé `dpFr` dans le PNG de carte : JSON du résumé de
+frontière (différés et coupures définitives par raison, repris, en attente,
+sur disque, abandonnés). Test dans `explorer`.
+
+Écart assumé avec COUVERTURE §9.3 : `dpCv` est aujourd'hui le **vecteur de
+classes** (RLE), pas encore le format binaire complet (nature, types, sources,
+hits par octet), et les segments sont des mots-clés zTXt, pas des chunks PNG
+privés. Reste pour J10 : `dpIx`, `dpTb`, `dpCv` complet, rendu en flux.
