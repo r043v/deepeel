@@ -707,6 +707,8 @@ DpNesOptions dp_nes_options(void) {
     o.seed_irq = 1;
     o.play_frames = 0;
     o.play_sessions = 8;
+    o.skip_root = o.no_finalize = 0;
+    o.pre_finalize = NULL; o.pre_user = NULL;
     o.play_seed = 1;
     return o;
 }
@@ -846,6 +848,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
 
     // fork exploration: one root state (reset), depth-first drain
     if (!x.failed && x.opt.queue_cap > 0) {
+        int sk = x.opt.skip_root;
         uint8_t *snap = malloc(dp_nesmach_state_size());
         if (!snap) { x.failed = 1; }
         else {
@@ -853,12 +856,12 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
             dp_nesmach_save(x.m, snap);
             DpNesPathState root = { snap, 0, 0, 0, 0, 0, 0, DP_NES_TREE_RESET };
             r->seeds_reset = 1;
-            if (x.opt.lot_drain && dp_lf_pending(x.lot)) { free(snap); r->seeds_reset = 0; } // drain: saved states only
+            if ((x.opt.lot_drain && dp_lf_pending(x.lot)) || sk) { free(snap); r->seeds_reset = 0; } // drain: saved states only; secondary: no root
             else queue_push(&x, &root);
             // explicit entries: each is a root state with the bank and PC set
             // --seed-banks adds one entry per switchable bank at $8000 (UxROM)
             unsigned nb = (x.opt.seed_banks && dp_nesmach_mapper(x.m) == 2) ? dp_nesmach_bank_count(x.m) : 0;
-            for (int i = 0; i < x.opt.entry_count + (int)nb && !x.opt.lot_drain; i++) {
+            for (int i = 0; i < x.opt.entry_count + (int)nb && !x.opt.lot_drain && !sk; i++) {
                 unsigned eb = i < x.opt.entry_count ? x.opt.entry_bank[i] : (unsigned)(i - x.opt.entry_count);
                 unsigned ea = i < x.opt.entry_count ? x.opt.entry_addr[i] : 0x8000u;
                 uint8_t *es = malloc(dp_nesmach_state_size());
@@ -872,7 +875,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                 if (queue_push(&x, &er)) r->entries_seeded++; else { free(es); r->seeds_refused_queue++; }
             }
             // --seed-vectors: the NMI ($FFFA) and IRQ/BRK ($FFFE) targets as roots
-            for (int v = 0; v < 2 && x.opt.seed_vectors && !x.opt.lot_drain; v++) {
+            for (int v = 0; v < 2 && x.opt.seed_vectors && !x.opt.lot_drain && !sk; v++) {
                 const uint8_t *prg = dp_nesmach_prg_rom(x.m);
                 if (!prg || r->prg_size < 16384) break;
                 unsigned va = prg[r->prg_size - (v ? 2 : 6)] | (prg[r->prg_size - (v ? 2 : 6) + 1] << 8);
@@ -915,7 +918,8 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
         }
     }
 
-    sections_build(&x);
+    if (x.opt.pre_finalize) x.opt.pre_finalize(r, x.opt.pre_user);
+    if (!x.opt.no_finalize) sections_build(&x);
 
     // states still queued when a wall stopped the drain: saved in the lot when
     // there is one (the next run resumes them), else counted, not silent
@@ -933,7 +937,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
         dp_lf_close(x.lot, x.opt.lot_path);
     }
     free(x.park);
-    if (x.opt.tree_path && r->tree_count) {
+    if (x.opt.tree_path && r->tree_count && !x.opt.no_finalize) {
         FILE *tf = fopen(x.opt.tree_path, "wb");
         if (tf) {
             // 'DPTZ', version 2, node count; records parent, site, pc, kind, issue
@@ -949,10 +953,10 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
             if (fclose(tf)) x.failed = 1;
         } else x.failed = 1;
     }
-    if (!x.failed) static_closure(&x);
-    if (!x.failed) table_scan(&x);
-    if (!x.failed) copy_siblings(&x);
-    if (!x.failed) infer_gaps(&x);
+    if (!x.failed && !x.opt.no_finalize) static_closure(&x);
+    if (!x.failed && !x.opt.no_finalize) table_scan(&x);
+    if (!x.failed && !x.opt.no_finalize) copy_siblings(&x);
+    if (!x.failed && !x.opt.no_finalize) infer_gaps(&x);
     free(x.prov_anchor);
     free(x.ipc);
     free(x.istart);
@@ -1404,6 +1408,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->exec_outside);
     fprintf(out, "  play: %llu sessions x frames %llu\n",
         (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run);
+    if (r->jobs_folded) fprintf(out, "  jobs: %u secondary instance folded (TAS/play phases)\n", r->jobs_folded);
     if (r->lot_written || r->lot_read || r->lot_pending)
         fprintf(out, "  lot: %llu written, %llu read back, %llu left on disk\n", (unsigned long long)r->lot_written,
             (unsigned long long)r->lot_read, (unsigned long long)r->lot_pending);

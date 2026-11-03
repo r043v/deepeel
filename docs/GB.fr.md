@@ -1789,3 +1789,18 @@ que sur la primaire (ils demandent l'union). Rapport : `jobs: 1 secondary
 instance folded`. Test `md_jobs` (rapport identique à `--jobs 1` hors cette
 ligne). Reste ◐ : pas de file partagée ; les fourches d'une instance ne sont
 pas redistribuées à l'autre.
+
+## 0.119.0
+
+NES : `--jobs 2` (F3, partielle). La pile NES (machine, explorateur) est globale :
+elle est recompilée une seconde fois, chaque symbole défini préfixé `dp_nes2_`
+(objcopy, comme PCE). Partage par phase : l'instance secondaire prend les
+sessions TAS / `--play` et draine les points de contrôle qu'elles laissent ; la
+primaire draine l'arbre de fourches de la mise sous tension, puis joint les
+observations brutes de la secondaire (drapeaux PRG et CHR, compteurs d'exécution
+et de lecture, registres, journaux) avant les sections et la clôture statique :
+le rapport décrit l'union (tuiles CHR recomptées sur l'union). Il faut `--tas` ou
+`--play` (sinon message et une seule instance). Rapport : `jobs: 1 secondary
+instance folded`. Test `nes_jobs` (même résumé que `--jobs 1` hors cette ligne).
+Reste ◐ : pas de file partagée ; les journaux de copies sont fusionnés par site
+(les occurrences par événement diffèrent de l'exécution à une instance).

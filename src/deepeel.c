@@ -1026,6 +1026,7 @@ static int cmd_nes(int argc, char **argv) {
     }
     const char *path = NULL, *text = NULL, *map = NULL, *evidence = NULL, *cov = NULL, *romdata = NULL, *mapper_name = "auto";
     DpNesOptions opt = dp_nes_options();
+    int nes_jobs = 1;
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
         if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
@@ -1051,6 +1052,7 @@ static int cmd_nes(int argc, char **argv) {
         else if (!strcmp(a, "--fork-cap") && i + 1 < argc) opt.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--no-irq-fork")) opt.seed_irq = 0;
         else if (!strcmp(a, "--seed-banks")) opt.seed_banks = 1;
+        else if (!strcmp(a, "--jobs") && i + 1 < argc) nes_jobs = atoi(argv[++i]);
         else if (!strcmp(a, "--seed-vectors")) opt.seed_vectors = 1;
         else if (!strcmp(a, "--ctx-cap") && i + 1 < argc) opt.ctx_cap = (unsigned)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--second-pass")) opt.second_pass = 1;
@@ -1078,7 +1080,7 @@ static int cmd_nes(int argc, char **argv) {
     uint8_t *data = nes_read_file(path, &size);
     if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", path); return 1; }
     DpNesResults res;
-    if (!dp_nes_explore(data, size, mapper, &opt, &res)) {
+    if (!dp_nes_explore_jobs(data, size, mapper, &opt, &res, nes_jobs)) {
         fprintf(stderr, "deepeel: not an iNES image the explorer accepts (%s)\n", path);
         free(data);
         return 1;

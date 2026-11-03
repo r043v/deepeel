@@ -86,6 +86,7 @@ typedef struct {
     uint8_t verdict;       // DP_NES_VERDICT_*
 } DpNesSection;
 
+struct DpNesResults_;
 typedef struct {
     uint64_t max_total;
     uint32_t max_steps, max_paths, queue_cap, loop_cap, fork_cap;
@@ -109,11 +110,19 @@ typedef struct {
     int lot_drain;         // with a lot backlog: run only the saved states (no root, no seeds)
     const char *tree_path; // write the choice tree here (binary DPTZ records), NULL: none
     const char *lot_path;  // disk lot of deferred states (NULL: memory only); an existing file is resumed
+    // --jobs 2 partition (set by dp_nes_explore_jobs): the secondary instance skips the
+    // power-on root, the entries and the finalization; the primary calls
+    // pre_finalize(results, user) once its drain is done, before the sections, to fold
+    // the secondary's findings in
+    int skip_root;
+    int no_finalize;
+    void (*pre_finalize)(struct DpNesResults_ *r, void *user);
+    void *pre_user;
 } DpNesOptions;
 
 enum { DP_NES_CHR_BG = 1, DP_NES_CHR_SPR = 2, DP_NES_CHR_READ = 4 };
 
-typedef struct {
+typedef struct DpNesResults_ {
     uint8_t *inferred;         // per PRG cell: DP_NMAP_INF_* for unclassified gaps, 0 otherwise
     uint8_t *chr_flags;        // one byte per CHR ROM cell (DP_NES_CHR_*), NULL on CHR-RAM
     size_t chr_size;
@@ -154,6 +163,7 @@ typedef struct {
     unsigned register_count;
     uint64_t register_overflow;
     uint64_t irq_counts[2];    // NMI, IRQ dispatched
+    unsigned jobs_folded;      // --jobs 2: secondary instances folded into this report
     DpNesOptions options;
 } DpNesResults;
 
@@ -161,6 +171,9 @@ DpNesOptions dp_nes_options(void);
 int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                    const DpNesOptions *options, DpNesResults *results);
 void dp_nes_results_free(DpNesResults *results);
+// --jobs 2: TAS/play phases on a second instance (own machine), see jobs.c
+int dp_nes_explore_jobs(const uint8_t *data, size_t size, int mapper, const DpNesOptions *options,
+                        DpNesResults *results, int jobs);
 uint8_t *dp_nes_map_build(const DpNesResults *r);
 void dp_nes_report(FILE *out, const DpNesResults *results);
 void dp_nes_map(FILE *out, const DpNesResults *results);

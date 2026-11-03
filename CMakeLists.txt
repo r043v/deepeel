@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.118.0 LANGUAGES C)
+project(deepeel VERSION 0.119.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -465,6 +465,7 @@ add_library(deepeel_nes_raw STATIC
   src/platform/nes/registry.c
   src/platform/nes/explore.c
   src/platform/nes/tas.c
+  src/platform/nes/jobs.c
   ${DP_NES_RUNTIME}/6502.c
   ${DP_NES_RUNTIME}/nes.c
   ${DP_NES_RUNTIME}/apu.c
@@ -484,7 +485,27 @@ add_custom_target(dp_nes_runtime DEPENDS ${DP_NES_ARCHIVE})
 add_library(deepeel_nes STATIC IMPORTED GLOBAL)
 set_target_properties(deepeel_nes PROPERTIES IMPORTED_LOCATION ${DP_NES_ARCHIVE})
 add_dependencies(deepeel_nes dp_nes_runtime)
-target_link_libraries(deepeel PRIVATE deepeel_z80 deepeel_nes)
+# second NES instance for --jobs 2: the whole stack compiled again, every defined global
+# namespaced dp_nes2_ (the explorer and m0boy's machine are process globals)
+add_library(deepeel_nes2_raw STATIC
+  src/cpu/m6502/m6502.c src/mach/nesmach.c src/platform/nes/registry.c
+  src/platform/nes/explore.c src/platform/nes/tas.c
+  ${DP_NES_RUNTIME}/6502.c ${DP_NES_RUNTIME}/nes.c ${DP_NES_RUNTIME}/apu.c ${DP_NES_RUNTIME}/ppu.c)
+target_compile_definitions(deepeel_nes2_raw PRIVATE NES_TRACE)
+target_include_directories(deepeel_nes2_raw PRIVATE src ${DP_NES_RUNTIME} "${M0BOY_DIR}/targets/common/runtime")
+set(DP_NES2_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_nes2.a)
+add_custom_command(OUTPUT ${DP_NES2_ARCHIVE}
+  BYPRODUCTS ${DP_NES2_ARCHIVE}.syms
+  COMMAND ${CMAKE_COMMAND} -DNM=${DP_NM} -DOBJCOPY=${DP_OBJCOPY}
+    -DINPUT=$<TARGET_FILE:deepeel_nes2_raw> -DOUTPUT=${DP_NES2_ARCHIVE}
+    -DPREFIX=dp_nes2_ "-DPATTERNS=[A-Za-z_][A-Za-z0-9_]*"
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_sega_prefix.cmake
+  DEPENDS deepeel_nes2_raw cmake/dp_sega_prefix.cmake VERBATIM)
+add_custom_target(dp_nes2_runtime DEPENDS ${DP_NES2_ARCHIVE})
+add_library(deepeel_nes2 STATIC IMPORTED GLOBAL)
+set_target_properties(deepeel_nes2 PROPERTIES IMPORTED_LOCATION ${DP_NES2_ARCHIVE})
+add_dependencies(deepeel_nes2 dp_nes2_runtime)
+target_link_libraries(deepeel PRIVATE deepeel_z80 deepeel_nes deepeel_nes2 deepeel_core)
 set(DP_PCE_RUNTIME "${M0BOY_DIR}/targets/pce/runtime")
 add_library(deepeel_pce STATIC
   src/platform/pce/hucdec.c
