@@ -13,7 +13,7 @@ remesure pas l'outil.
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 20 | 5 | 2 |
 | PCE | 16 | 16 | 6 | 1 |
-| MD | 8 | 11 | 19 | 1 |
+| MD | 8 | 12 | 18 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
 
@@ -34,7 +34,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | D13 | Coupes de non-sens | PCE | ◐ illégal |
 | D13 | Coupes de non-sens | MD | ◐ faute |
 | D14 | Chien de garde HALT, glissade de padding | PCE | ◐ glissade $00/$FF coupée (`padding cuts`) + opcode illégal ; pas de HALT/WAI attribué |
-| D14 | Chien de garde HALT, glissade de padding | MD | ✗ |
+| D14 | Chien de garde HALT, glissade de padding | MD | ◐ glissade `ori.b #0,d0` coupée sur option (`--cut-padding`, 16 octets nuls) ; fautes d'opcode déjà rapportées |
 | S1 | Scan padding + tables de pointeurs | NES | ◐ padding + tables, sans pointeurs ROM→ROM hors fenêtre |
 | S1 | Scan padding + tables de pointeurs | MD | ✗ |
 | S2 | Fermeture statique de flot | NES | ◐ saut/appel/branche, fenêtre propre |

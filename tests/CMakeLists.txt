@@ -337,3 +337,5 @@ add_test(NAME pce_provenance COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore $
 set_tests_properties(pce_provenance PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME md_indirect COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ind.md --max-total 200000 --text ${CMAKE_CURRENT_BINARY_DIR}/md_ind.txt >/dev/null 2>&1; grep -q 'indirect jumps: 1 sites, 1 targets, overflow 0' ${CMAKE_CURRENT_BINARY_DIR}/md_ind.txt")
 set_tests_properties(md_indirect PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME md_padding COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_zeros.md --cut-padding --max-total 200000 --text ${CMAKE_CURRENT_BINARY_DIR}/md_pad.txt >/dev/null 2>&1; grep -q 'padding cuts: 1$' ${CMAKE_CURRENT_BINARY_DIR}/md_pad.txt")
+set_tests_properties(md_padding PROPERTIES FIXTURES_REQUIRED fixtures)

@@ -1674,3 +1674,12 @@ sites et paires (site, cible) distinctes comptés, bornés à 65 536 paires
 (`overflow` rapporté). Rapport : `indirect jumps: N sites, N targets, overflow
 N`. Fixture `fix_md_ind.md`, test `md_indirect`. Reste ◐ : observation, pas de
 second passage.
+
+## 0.109.0
+
+MD : coupe de padding (D14, partielle). Avec `--cut-padding`, un chemin qui
+exécute un mot nul (`ori.b #0,d0`) dont les 16 octets suivants sont tous nuls
+est arrêté et compté (`padding cuts: N`). Désactivée par défaut : les tests
+`md_explore` épinglent des comportements qui traversent du padding. Fixture
+`fix_md_zeros.md`, test `md_padding`. Reste ◐ : option, pas de glissade `$FFFF`
+(déjà une faute d'opcode) ni de HALT/STOP attribué.

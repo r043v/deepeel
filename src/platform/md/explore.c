@@ -250,6 +250,17 @@ static void on_step(void *u, uint32_t pc, uint16_t op) {
         dp_mdmach_halt(x->m);
         return;
     }
+    if (x->o->pad_cut && !x->replay && op == 0 && x->pc + 16 <= x->r->rom_size && dp_mdmach_rom_visible(x->m, x->pc)) {
+        // D14: ori.b #0,d0 slide through zero padding: cut once 16 bytes are all zero
+        unsigned z = 0;
+        while (z < 16 && x->c->rom[x->pc + z] == 0) z++;
+        if (z == 16) {
+            x->r->pad_cuts++;
+            x->halted = 1;
+            dp_mdmach_halt(x->m);
+            return;
+        }
+    }
     if (!x->movie_active && !x->replay && x->pc < x->r->rom_size && dp_mdmach_rom_visible(x->m, x->pc)) {
         size_t i = x->pc >> 1;
         if (x->gen[i] != x->cur_gen) { x->gen[i] = x->cur_gen; x->vis[i] = 0; }
@@ -529,6 +540,7 @@ void dp_md_options_default(DpMdOptions *o) {
     o->lot_path = NULL;
     o->lot_drain = 0;
     o->entry_count = 0;
+    o->pad_cut = 0;
 }
 
 static void run_path(X *x, Item *it, uint64_t budget, int *cut) {
@@ -826,6 +838,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
             (unsigned long long)r->sat_site);
     fprintf(out, "  queue growths: %llu (initial %u, ceiling %u)\n", (unsigned long long)r->queue_growths,
             o->queue_cap, o->queue_max > o->queue_cap ? o->queue_max : o->queue_cap);
+    fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  copy records dropped: %llu\n", (unsigned long long)r->copy_overflow);
     fprintf(out, "  stream replay: step cap %llu  total budget %llu  consumers dropped %llu  starts dropped %llu  call frames dropped %llu\n",
