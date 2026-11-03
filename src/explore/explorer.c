@@ -340,8 +340,12 @@ void dp_explorer_free(DpExplorer *ex) {
     for (uint32_t i = 0; i < ex->q_cap; i++) free(ex->queue[i].img);
     free(ex->queue);
     ex->res->defer_pending += ex->defer_len; // left at a wall: counted, never silent
+    ex->res->defer_on_disk = dp_explorer_frontier_disk(ex);
     for (uint32_t i = 0; i < ex->defer_len; i++) free(ex->defer[i].p.img);
     free(ex->defer);
+    free(ex->pseed);
+    free(ex->lots);
+    free(ex->fdir);
     for (uint32_t i = 0; i < ex->pq_cap; i++) free(ex->pqueue[i].img);
     free(ex->pqueue);
     free(ex->seed_base);
@@ -424,6 +428,8 @@ static int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int k
 static void tree_close_g(DpExplorer *ex, uint32_t choice, int issue);
 static uint32_t tree_add_g(DpExplorer *ex, uint32_t parent, int kind, uint32_t site, int bank,
                            int pc);
+static int defer_push(DpExplorer *ex, uint8_t *img, int forced, int kind, int from_reset,
+                      uint32_t choice, int reason);
 static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, int from_reset,
                           uint32_t choice, int pri) {
     uint64_t h = image_hash(ex, img);
@@ -441,8 +447,12 @@ static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, in
         free(img);
         return 0;
     }
-    if (ins < 0) { // dedup set full: surfaced, the state is dropped
+    if (ins < 0) { // dedup set full: surfaced; the state waits in the frontier (not for the shared pool)
         u32_add(&ex->res->queue_overflows, 1);
+        if (!ex->sh && defer_push(ex, img, forced, kind, from_reset, choice, DP_R_DEDUP_FULL)) {
+            tree_close_g(ex, choice, DP_ISSUE_SPOOLED);
+            return 0;
+        }
         tree_close_g(ex, choice, DP_ISSUE_BUDGET);
         free(img);
         return 0;
@@ -495,8 +505,13 @@ static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, in
             free(img);
             return 0;
         } else {
-            if (pri) ex->res->closure_seeds_refused++; // saturation surfaced, retried later
+            if (pri) ex->res->closure_seeds_refused++; // saturation surfaced
             else ex->res->queue_overflows++;
+            // no room and no spool: the state waits in the frontier instead of dying
+            if (defer_push(ex, img, forced, kind, from_reset, choice, pri ? DP_R_PRIORITY : DP_R_PATHS)) {
+                if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_SPOOLED);
+                return 0;
+            }
             if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_BUDGET);
             free(img);
             return 0;
@@ -745,28 +760,86 @@ static void emit_pend_map(DpExplorer *ex) {
     }
 }
 
-// A path cut by its step budget is not lost: its machine state is kept and
-// resumed later with a budget four times larger, up to DP_TIER_MAX.  Past the
-// last tier, or when the holding area is full, the cut stays final and is
-// counted (steps_final / defer_dropped) — never silent.
-static void defer_cut(DpExplorer *ex, DpMach *m, int loop) {
+const char *dp_reason_name(int r) {
+    static const char *n[DP_R_COUNT] = { "none", "priority", "dedup-full", "paths", "fork-cap",
+                                         "steps", "loop", "wall", "covered" };
+    return r >= 0 && r < DP_R_COUNT ? n[r] : "?";
+}
+
+// Every state a budget would have thrown away is kept here instead: a path
+// cut by its step budget, a fork past the per-site cap, a full dedup set, ...
+// Each deferral raises the tier by one (the resumed path gets a bigger budget);
+// past DP_TIER_MAX, or when the holding area is full, the loss stays final
+// and is counted per reason — never silent.  The noisy reasons (fork-cap,
+// covered) hold at most a quarter of the area each so they cannot starve the rest.
+static int defer_room(DpExplorer *ex, int reason) {
     DpResults *res = ex->res;
-    if (ex->cur_tier >= DP_TIER_MAX) { if (loop) res->loop_final++; else res->steps_final++; return; }
-    if (ex->defer_len >= DP_DEFER_CAP) { res->defer_dropped++; return; }
+    if (ex->cur_tier >= DP_TIER_MAX) { res->defer_final[reason]++; return 0; }
+    uint32_t lim = (reason == DP_R_FORK_CAP || reason == DP_R_COVERED) ? DP_DEFER_CAP / 4 : DP_DEFER_CAP;
+    if (ex->defer_len >= DP_DEFER_CAP || ex->defer_by_reason[reason] >= lim) {
+        res->defer_final[reason]++;
+        res->defer_dropped++;
+        return 0;
+    }
+    return 1;
+}
+
+// takes ownership of img on success; 0 = counted final loss (img untouched)
+static int defer_push(DpExplorer *ex, uint8_t *img, int forced, int kind, int from_reset,
+                      uint32_t choice, int reason) {
+    if (!defer_room(ex, reason)) return 0;
     if (ex->defer_len >= ex->defer_cap) {
         uint32_t nc = ex->defer_cap ? ex->defer_cap * 2 : 64;
         ex->defer = xrealloc(ex->defer, sizeof *ex->defer * nc);
         ex->defer_cap = nc;
+    }
+    ex->defer[ex->defer_len++] = (DpDeferred){
+        { img, (uint8_t)forced, (uint8_t)kind, (uint8_t)from_reset, choice },
+        (uint8_t)(ex->cur_tier + 1), (uint8_t)reason };
+    ex->defer_by_reason[reason]++;
+    ex->res->defer_by[reason]++;
+    if (reason == DP_R_STEPS) ex->res->steps_deferred++;
+    else if (reason == DP_R_LOOP) ex->res->loop_deferred++;
+    return 1;
+}
+
+// the running path, cut by a budget: snapshot it here and resume it later
+static void defer_cut_reason(DpExplorer *ex, DpMach *m, int reason) {
+    DpResults *res = ex->res;
+    if (!defer_room(ex, reason)) {
+        if (reason == DP_R_LOOP) res->loop_final++;
+        else if (reason == DP_R_STEPS) res->steps_final++;
+        return;
     }
     uint8_t *img = xrealloc(NULL, ex->sb);
     dp_mach_save(m, img);
     uint16_t pc = image_pc(img);
     uint16_t bank = (uint16_t)(pc < 0x4000 ? 0 : ((const gbl_cpu_t *)img)->rom_bank);
     uint32_t choice = choice_new(ex, ex->cur_choice, ex->cur_kind, dp_rom_index(bank, pc), bank, pc);
-    ex->defer[ex->defer_len++] = (DpDeferred){
-        { img, ex->cur_forced, ex->cur_kind, ex->cur_from_reset, choice }, (uint8_t)(ex->cur_tier + 1) };
-    if (loop) res->loop_deferred++;
-    else res->steps_deferred++;
+    defer_push(ex, img, ex->cur_forced, ex->cur_kind, ex->cur_from_reset, choice, reason);
+}
+
+static void defer_cut(DpExplorer *ex, DpMach *m, int loop) {
+    defer_cut_reason(ex, m, loop ? DP_R_LOOP : DP_R_STEPS);
+}
+
+// a fork variant that the per-site cap / covered prune would have dropped
+static void fork_deferred(DpExplorer *ex, uint8_t *fimg, int reason, uint32_t site, uint16_t tpc) {
+    if (!defer_room(ex, reason)) { free(fimg); return; }
+    uint32_t choice = choice_new(ex, ex->cur_choice, DP_PATH_FORK, site, (int)cur_bank(ex, tpc), tpc);
+    if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_SPOOLED);
+    defer_push(ex, fimg, 1, DP_PATH_FORK, ex->cur_kind == DP_SEED_RESET || ex->cur_from_reset, choice, reason);
+}
+
+// a seed the caps held back; the list is bounded and its overflow counted
+static void pseed_add(DpExplorer *ex, int bank, uint16_t pc, int kind, int forced) {
+    if (ex->pseed_len >= 65536) { ex->res->seeds_lost++; return; }
+    if (ex->pseed_len >= ex->pseed_cap) {
+        ex->pseed_cap = ex->pseed_cap ? ex->pseed_cap * 2 : 256;
+        ex->pseed = xrealloc(ex->pseed, sizeof *ex->pseed * ex->pseed_cap);
+    }
+    ex->pseed[ex->pseed_len++] = (DpPendingSeed){ (uint16_t)bank, pc, (uint8_t)kind, (uint8_t)forced };
+    ex->res->seeds_deferred++;
 }
 
 static void hook_step(DpMach *m, uint16_t pc, uint8_t op, int entry) {
@@ -787,6 +860,7 @@ static void hook_step(DpMach *m, uint16_t pc, uint8_t op, int entry) {
         if (ex->steps_own >= ex->cfg.max_steps_total) {
             res->budget_steps++;
             ex->stop = 1;
+            defer_cut_reason(ex, m, DP_R_WALL); // the running path waits for the next run
             dp_mach_cut(m, DP_CUT_QUIT);
         }
         uint64_t cap = (uint64_t)ex->cfg.max_steps_path << (2 * ex->cur_tier);
@@ -1082,14 +1156,20 @@ static void fork_branch(DpExplorer *ex, int cond, uint32_t site, uint16_t pc, ui
     // the extra variants are data drift, not new map information
     uint32_t *cnt = fork_slot(ex, site);
     if (!cnt) return;
+    int defer = 0; // the variant is built anyway and parked under its reason
     if (*cnt >= ex->cfg.fork_site_cap) {
         ex->res->forks_capped++;
-        return;
-    }
-    if (!ex->cfg.no_covered_prune && *cnt >= ex->cfg.covered_fork_keep &&
-        both_sides_covered(ex, pc, op)) {
+        defer = DP_R_FORK_CAP;
+    } else if (!ex->cfg.no_covered_prune && *cnt >= ex->cfg.covered_fork_keep &&
+               both_sides_covered(ex, pc, op)) {
         ex->res->forks_covered_pruned++;
-        return;
+        defer = DP_R_COVERED;
+    }
+    // a deferred variant spends the site's counter too: each site parks at most
+    // as many variants as its cap again (a loop body cannot flood the frontier)
+    if (defer && (*cnt >= 2 * ex->cfg.fork_site_cap || !defer_room(ex, defer))) {
+        if (*cnt >= 2 * ex->cfg.fork_site_cap) ex->res->defer_final[defer]++;
+        return; // counted final, no snapshot paid
     }
     (*cnt)++;
     DpMach *m = ex->mach;
@@ -1104,6 +1184,7 @@ static void fork_branch(DpExplorer *ex, int cond, uint32_t site, uint16_t pc, ui
     free(img);
     // the fork keeps the reset lineage of its parent path
     uint16_t tpc = ex->mach->api->gbr->pc;
+    if (defer) { fork_deferred(ex, fimg, defer, site, tpc); return; }
     queue_push(ex, fimg, 1, DP_PATH_FORK,
                ex->cur_kind == DP_SEED_RESET || ex->cur_from_reset,
                choice_new(ex, ex->cur_choice, DP_PATH_FORK, site, (int)cur_bank(ex, tpc), tpc));
@@ -1144,9 +1225,12 @@ static void fork_key(DpExplorer *ex, uint32_t site) {
     // re-run known code: one round of presses per site is enough
     uint32_t kcap = (ex->res->exec_flags[0x60] & DP_XF_START) ? 1 : ex->cfg.fork_site_cap;
     if (ex->cfg.no_covered_prune) kcap = ex->cfg.fork_site_cap;
+    int kdefer = 0;
     if (*cnt >= kcap) {
         ex->res->forks_capped++;
-        return;
+        if (*cnt >= 2 * kcap) { ex->res->defer_final[DP_R_FORK_CAP]++; return; }
+        if (!defer_room(ex, DP_R_FORK_CAP)) return;
+        kdefer = DP_R_FORK_CAP;
     }
     (*cnt)++;
     static const uint8_t keys[8] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80};
@@ -1163,6 +1247,7 @@ static void fork_key(DpExplorer *ex, uint32_t site) {
             uint8_t *fimg = xrealloc(NULL, ex->sb);
             dp_mach_save(m, fimg);
             uint16_t tpc = m->api->gbr->pc;
+            if (kdefer) { fork_deferred(ex, fimg, kdefer, site, tpc); continue; }
             queue_push(ex, fimg, 1, DP_PATH_FORK,
                        ex->cur_kind == DP_SEED_RESET || ex->cur_from_reset,
                        choice_new(ex, ex->cur_choice, DP_PATH_FORK, site,
@@ -1190,9 +1275,12 @@ static void fork_p1(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op) {
     }
     uint32_t *cnt = fork_slot(ex, site ^ 0xC0000000u);
     if (!cnt) return;
+    int pdefer = 0;
     if (*cnt >= ex->cfg.fork_site_cap) {
         ex->res->forks_capped++;
-        return;
+        if (*cnt >= 2 * ex->cfg.fork_site_cap) { ex->res->defer_final[DP_R_FORK_CAP]++; return; }
+        if (!defer_room(ex, DP_R_FORK_CAP)) return;
+        pdefer = DP_R_FORK_CAP;
     }
     (*cnt)++;
     static const uint8_t keys[8] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80};
@@ -1205,6 +1293,7 @@ static void fork_p1(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op) {
         uint8_t *fimg = xrealloc(NULL, ex->sb);
         dp_mach_save(m, fimg);
         uint16_t tpc = m->api->gbr->pc;
+        if (pdefer) { fork_deferred(ex, fimg, pdefer, site, tpc); continue; }
         queue_push(ex, fimg, 1, DP_PATH_FORK,
                    ex->cur_kind == DP_SEED_RESET || ex->cur_from_reset,
                    choice_new(ex, ex->cur_choice, DP_PATH_FORK, site,
@@ -1506,100 +1595,365 @@ int dp_explorer_exact_load(DpExplorer *ex, const char *path) {
 }
 
 
-// ---- on-disk frontier (docs/COUVERTURE.fr.md §6.3, single-batch form) ------
-// <dir>/frontier/frontier.dpf : 'DPFB', sb, count, then per record
-// tier/forced/kind/from_reset (4 bytes) + zlib length + zlib image.
-// <dir>/frontier/frontier.idx : text summary (count, per-tier counts).
-// Saving takes the deferred continuations out of memory (they are no longer
-// "pending" at exit: they wait on disk); loading puts them back with their tier.
-int dp_explorer_frontier_save(DpExplorer *ex, const char *dir) {
-    char path[600], idx[600];
-    snprintf(path, sizeof path, "%s/frontier", dir);
-    mkdir(path, 0777);
-    snprintf(idx, sizeof idx, "%s/frontier/frontier.idx", dir);
-    snprintf(path, sizeof path, "%s/frontier/frontier.dpf", dir);
-    if (!ex->defer_len) { unlink(path); unlink(idx); return 0; }
-    FILE *f = fopen(path, "wb");
-    if (!f) { perror("deepeel frontier"); return 0; }
-    uint32_t hdr[3] = { 0x42465044u /* 'DPFB' */, (uint32_t)ex->sb, ex->defer_len };
-    fwrite(hdr, sizeof hdr, 1, f);
-    uint64_t per[DP_TIER_MAX + 2] = {0};
-    uLongf cap = compressBound((uLong)ex->sb);
-    uint8_t *z = xrealloc(NULL, cap);
-    uint32_t saved = 0;
-    for (uint32_t i = 0; i < ex->defer_len; i++) {
-        DpDeferred *d = &ex->defer[i];
-        uLongf zl = cap;
-        if (compress2(z, &zl, d->p.img, (uLong)ex->sb, 6) != Z_OK) continue;
-        uint8_t h[4] = { d->tier, d->p.forced, d->p.kind, d->p.from_reset };
-        uint32_t l = (uint32_t)zl;
-        fwrite(h, 4, 1, f); fwrite(&l, 4, 1, f); fwrite(z, 1, zl, f);
-        per[d->tier <= DP_TIER_MAX ? d->tier : DP_TIER_MAX + 1]++;
-        saved++;
-        free(d->p.img);
-    }
-    free(z);
-    // the count in the header is the number actually written
-    fseek(f, 8, SEEK_SET); fwrite(&saved, 4, 1, f);
-    fclose(f);
-    FILE *x = fopen(idx, "w");
-    if (x) {
-        fprintf(x, "records %u\nimage_bytes %zu\n", saved, (size_t)ex->sb);
-        for (int t = 1; t <= DP_TIER_MAX; t++) fprintf(x, "tier%d %llu\n", t, (unsigned long long)per[t]);
-        fclose(x);
-    }
-    ex->defer_len = 0; // owned by the file now
-    return (int)saved;
+// ---- on-disk frontier (docs/COUVERTURE.fr.md §6.3) ---------------------------
+// <dir>/frontier/frontier.idx                      text index, one line per lot
+// <dir>/frontier/b<bank>-s<sec>-<reason>-<seq>.dpf one lot: 'DPFB', version,
+//   platform, image size, count, base image (zlib), then per record 8 header
+//   bytes (tier, forced, kind, from_reset, reason) + zlib length + the zlib XOR
+//   delta against the base.  A lot is read sequentially; the byte offset read so
+//   far is persisted in the index, so a resume never replays nor skips a record.
+// <dir>/frontier/seeds.bin                         seeds held back by the caps
+#define DP_LOT_MAX_BYTES (64u << 20)
+#define DP_LOT_MAGIC 0x42465044u /* 'DPFB' */
+
+static void frontier_path(const DpExplorer *ex, char *out, size_t n, const char *name) {
+    snprintf(out, n, "%s/frontier/%s", ex->fdir, name);
 }
 
-int dp_explorer_frontier_load(DpExplorer *ex, const char *dir) {
-    char path[600];
-    snprintf(path, sizeof path, "%s/frontier/frontier.dpf", dir);
-    FILE *f = fopen(path, "rb");
-    if (!f) return 0;
-    uint32_t hdr[3];
-    if (fread(hdr, sizeof hdr, 1, f) != 1 || hdr[0] != 0x42465044u || hdr[1] != (uint32_t)ex->sb) {
-        fprintf(stderr, "deepeel: frontier unusable (%s), ignored\n", path);
-        fclose(f);
-        return 0;
+static void idx_write(DpExplorer *ex) {
+    char p[700];
+    frontier_path(ex, p, sizeof p, "frontier.idx");
+    if (!ex->nlots) {
+        unlink(p);
+        return;
     }
-    int n = 0;
-    for (uint32_t i = 0; i < hdr[2] && ex->defer_len < DP_DEFER_CAP; i++) {
-        uint8_t h[4]; uint32_t l;
-        if (fread(h, 4, 1, f) != 1 || fread(&l, 4, 1, f) != 1 || l > 4 * (uint32_t)ex->sb + 1024) break;
-        uint8_t *z = xrealloc(NULL, l), *img = xrealloc(NULL, ex->sb);
-        uLongf out = (uLongf)ex->sb;
-        if (fread(z, 1, l, f) != l || uncompress(img, &out, z, l) != Z_OK || out != (uLongf)ex->sb) {
-            free(z); free(img); break;
+    FILE *f = fopen(p, "w");
+    if (!f) { perror("deepeel frontier.idx"); return; }
+    fprintf(f, "deepeel-frontier 1\nplatform gb\nimage_bytes %u\n", (unsigned)ex->sb);
+    for (uint32_t i = 0; i < ex->nlots; i++) {
+        const DpLot *l = &ex->lots[i];
+        fprintf(f, "lot %s count=%u off=%llu reason=%s bank=%d sec=%d t1=%u t2=%u t3=%u read=%u\n", l->name,
+                l->count, (unsigned long long)l->off, dp_reason_name(l->reason), l->bank, l->sec,
+                l->tier_n[1], l->tier_n[2], l->tier_n[3], l->read);
+    }
+    fclose(f);
+}
+
+static int reason_of_name(const char *s) {
+    for (int r = 1; r < DP_R_COUNT; r++) if (!strcmp(s, dp_reason_name(r))) return r;
+    return 0;
+}
+
+static void idx_read(DpExplorer *ex) {
+    char p[700], line[400];
+    frontier_path(ex, p, sizeof p, "frontier.idx");
+    FILE *f = fopen(p, "r");
+    if (!f) return;
+    while (fgets(line, sizeof line, f)) {
+        DpLot l;
+        memset(&l, 0, sizeof l);
+        char name[96], rs[32];
+        unsigned long long off;
+        if (sscanf(line, "lot %95s count=%u off=%llu reason=%31s bank=%d sec=%d t1=%u t2=%u t3=%u read=%u", name,
+                   &l.count, &off, rs, &l.bank, &l.sec, &l.tier_n[1], &l.tier_n[2], &l.tier_n[3], &l.read) == 10) {
+            snprintf(l.name, sizeof l.name, "%s", name);
+            l.off = off;
+            l.reason = reason_of_name(rs);
+            if (!l.reason) continue;
+            if (ex->nlots >= ex->lotcap) {
+                ex->lotcap = ex->lotcap ? ex->lotcap * 2 : 16;
+                ex->lots = xrealloc(ex->lots, sizeof *ex->lots * ex->lotcap);
+            }
+            ex->lots[ex->nlots++] = l;
+            unsigned sq = 0;
+            const char *dash = strrchr(name, '-');
+            if (dash && sscanf(dash + 1, "%u", &sq) == 1 && sq >= ex->lot_seq) ex->lot_seq = sq + 1;
+        }
+    }
+    fclose(f);
+}
+
+static void lot_remove(DpExplorer *ex, uint32_t i) {
+    char p[700];
+    frontier_path(ex, p, sizeof p, ex->lots[i].name);
+    unlink(p);
+    memmove(&ex->lots[i], &ex->lots[i + 1], sizeof *ex->lots * (ex->nlots - i - 1));
+    ex->nlots--;
+}
+
+// records still on disk (unread)
+uint64_t dp_explorer_frontier_disk(const DpExplorer *ex) {
+    uint64_t n = 0;
+    for (uint32_t i = 0; i < ex->nlots; i++) n += ex->lots[i].count - ex->lots[i].read;
+    return n;
+}
+
+static int reason_eligible(const DpExplorer *ex, int reason) {
+    return reason < DP_R_COVERED || ex->defer_all;
+}
+
+// reads the next records of the cheapest eligible lot into the holding area
+static int frontier_refill(DpExplorer *ex) {
+    if (!ex->fdir || !ex->nlots) return 0;
+    int best = -1;
+    for (uint32_t i = 0; i < ex->nlots; i++) {
+        const DpLot *l = &ex->lots[i];
+        if (l->read >= l->count || !reason_eligible(ex, l->reason)) continue;
+        if (best < 0 || l->reason < ex->lots[best].reason) best = (int)i;
+    }
+    if (best < 0) return 0;
+    DpLot *l = &ex->lots[best];
+    char p[700];
+    frontier_path(ex, p, sizeof p, l->name);
+    FILE *f = fopen(p, "rb");
+    if (!f) { fprintf(stderr, "deepeel: frontier lot %s missing, dropped\n", l->name); lot_remove(ex, (uint32_t)best); return 1; }
+    uint32_t h[5];
+    uint8_t *base = xrealloc(NULL, ex->sb);
+    int ok = fread(h, sizeof h, 1, f) == 1 && h[0] == DP_LOT_MAGIC && h[1] == 1 && h[3] == (uint32_t)ex->sb;
+    uint32_t bl = 0;
+    uint8_t *z = NULL;
+    if (ok) {
+        ok = fread(&bl, 4, 1, f) == 1 && bl <= 4 * (uint32_t)ex->sb + 1024;
+        if (ok) { z = xrealloc(NULL, bl); uLongf o = (uLongf)ex->sb;
+                  ok = fread(z, 1, bl, f) == bl && uncompress(base, &o, z, bl) == Z_OK && o == (uLongf)ex->sb; }
+        free(z);
+    }
+    if (!ok) {
+        fprintf(stderr, "deepeel: frontier lot %s unusable, dropped (%u records)\n", l->name, l->count - l->read);
+        ex->res->defer_dropped += l->count - l->read;
+        fclose(f); free(base); lot_remove(ex, (uint32_t)best);
+        return 1;
+    }
+    if (l->off) fseek(f, (long)l->off, SEEK_SET);
+    int got = 0;
+    while (l->read < l->count && ex->defer_len < DP_DEFER_CAP) {
+        uint8_t hd[8];
+        uint32_t zl;
+        if (fread(hd, 8, 1, f) != 1 || fread(&zl, 4, 1, f) != 1 || zl > 4 * (uint32_t)ex->sb + 1024) { l->read = l->count; break; }
+        z = xrealloc(NULL, zl);
+        uint8_t *img = xrealloc(NULL, ex->sb);
+        uLongf o = (uLongf)ex->sb;
+        if (fread(z, 1, zl, f) != zl || uncompress(img, &o, z, zl) != Z_OK || o != (uLongf)ex->sb) {
+            free(z); free(img); l->read = l->count; break;
         }
         free(z);
+        for (uint32_t i = 0; i < (uint32_t)ex->sb; i++) img[i] ^= base[i];
         if (ex->defer_len >= ex->defer_cap) {
             uint32_t nc = ex->defer_cap ? ex->defer_cap * 2 : 64;
             ex->defer = xrealloc(ex->defer, sizeof *ex->defer * nc);
             ex->defer_cap = nc;
         }
-        ex->defer[ex->defer_len++] = (DpDeferred){ { img, h[1], h[2], h[3], 0 }, h[0] };
-        n++;
+        ex->defer[ex->defer_len++] = (DpDeferred){ { img, hd[1], hd[2], hd[3], 0 }, hd[0], hd[4] };
+        ex->defer_by_reason[hd[4] < DP_R_COUNT ? hd[4] : 0]++;
+        l->read++;
+        l->off = (uint64_t)ftell(f);
+        got++;
     }
     fclose(f);
-    return n;
+    free(base);
+    if (l->read >= l->count) lot_remove(ex, (uint32_t)best);
+    idx_write(ex);
+    return got ? got : 1;
 }
 
-// next deferred continuation into *out (its tier goes to ex->defer_tier_next); 0 when none
+typedef struct { uint32_t i; int reason, bank, sec; } LotKey;
+static int lotkey_cmp(const void *a, const void *b) {
+    const LotKey *x = a, *y = b;
+    if (x->reason != y->reason) return x->reason - y->reason;
+    if (x->bank != y->bank) return x->bank - y->bank;
+    if (x->sec != y->sec) return x->sec - y->sec;
+    return (int)x->i - (int)y->i;
+}
+
+static int section_of(const DpResults *res, int bank, uint16_t pc) {
+    for (int i = 0; i < res->section_count; i++) {
+        const DpSection *s = &res->sections[i];
+        if (s->bank == bank && s->lo <= pc && pc <= s->hi) return (int)s->id;
+    }
+    return 0;
+}
+
+// the states still in the worklists at a stop (a path wall) join the frontier
+static void adopt_queues(DpExplorer *ex) {
+    DpPathState *q[2] = { ex->queue, ex->pqueue };
+    uint32_t cap[2] = { ex->q_cap, ex->pq_cap }, len[2] = { ex->q_len, ex->pq_len }, head[2] = { ex->q_head, ex->pq_head };
+    for (int w = 0; w < 2; w++) {
+        for (uint32_t i = 0; i < len[w]; i++) {
+            DpPathState *p = &q[w][(head[w] + i) % cap[w]];
+            if (!p->img) continue;
+            int save_tier = ex->cur_tier;
+            ex->cur_tier = 0; // never refused by the tier cap: a parked path, not a retry
+            if (defer_push(ex, p->img, p->forced, p->kind, p->from_reset, p->choice, w ? DP_R_PRIORITY : DP_R_PATHS))
+                p->img = NULL;
+            ex->cur_tier = (uint8_t)save_tier;
+            if (p->img) { ex->res->defer_dropped++; free(p->img); p->img = NULL; }
+        }
+        if (w) ex->pq_len = 0; else ex->q_len = 0;
+    }
+}
+
+// writes the whole holding area as lots (one per bank x section x reason, closed at 64 MiB)
+int dp_explorer_frontier_save(DpExplorer *ex, const char *dir) {
+    if (!ex->fdir) { ex->fdir = strdup(dir); }
+    char p[700];
+    snprintf(p, sizeof p, "%s/frontier", dir);
+    mkdir(p, 0777);
+    adopt_queues(ex);
+    int saved = 0;
+    if (ex->defer_len) {
+        LotKey *k = xrealloc(NULL, sizeof *k * ex->defer_len);
+        for (uint32_t i = 0; i < ex->defer_len; i++) {
+            uint16_t pc = image_pc(ex->defer[i].p.img);
+            int bank = pc < 0x4000 ? 0 : (int)((const gbl_cpu_t *)ex->defer[i].p.img)->rom_bank;
+            k[i] = (LotKey){ i, ex->defer[i].reason, bank, section_of(ex->res, bank, pc) };
+        }
+        qsort(k, ex->defer_len, sizeof *k, lotkey_cmp);
+        uLongf cap = compressBound((uLong)ex->sb);
+        uint8_t *z = xrealloc(NULL, cap), *d = xrealloc(NULL, ex->sb);
+        uint32_t a = 0;
+        while (a < ex->defer_len) {
+            uint32_t b = a;
+            while (b < ex->defer_len && k[b].reason == k[a].reason && k[b].bank == k[a].bank && k[b].sec == k[a].sec) b++;
+            // [a,b) is one group: cut it into lots
+            for (uint32_t s = a; s < b;) {
+                DpLot l;
+                memset(&l, 0, sizeof l);
+                l.reason = k[a].reason; l.bank = k[a].bank; l.sec = k[a].sec;
+                snprintf(l.name, sizeof l.name, "b%d-s%d-%s-%u.dpf", l.bank, l.sec, dp_reason_name(l.reason), ex->lot_seq++);
+                char lp[700];
+                frontier_path(ex, lp, sizeof lp, l.name);
+                FILE *f = fopen(lp, "wb");
+                if (!f) { perror("deepeel frontier"); ex->res->defer_dropped += b - s; break; }
+                const uint8_t *base = ex->defer[k[s].i].p.img;
+                uLongf zl = cap;
+                compress2(z, &zl, base, (uLong)ex->sb, 6);
+                uint32_t hdr[5] = { DP_LOT_MAGIC, 1, 1 /* gb */, (uint32_t)ex->sb, 0 };
+                fwrite(hdr, sizeof hdr, 1, f);
+                uint32_t bl = (uint32_t)zl;
+                fwrite(&bl, 4, 1, f); fwrite(z, 1, zl, f);
+                uint64_t bytes = zl;
+                uint32_t n = 0;
+                while (s < b && bytes < DP_LOT_MAX_BYTES) {
+                    DpDeferred *r = &ex->defer[k[s].i];
+                    for (uint32_t j = 0; j < (uint32_t)ex->sb; j++) d[j] = r->p.img[j] ^ base[j];
+                    zl = cap;
+                    if (compress2(z, &zl, d, (uLong)ex->sb, 6) == Z_OK) {
+                        uint8_t hd[8] = { r->tier, r->p.forced, r->p.kind, r->p.from_reset, r->reason, 0, 0, 0 };
+                        uint32_t l32 = (uint32_t)zl;
+                        fwrite(hd, 8, 1, f); fwrite(&l32, 4, 1, f); fwrite(z, 1, zl, f);
+                        bytes += 12 + zl;
+                        l.tier_n[r->tier <= DP_TIER_MAX ? r->tier : DP_TIER_MAX]++;
+                        n++;
+                    } else {
+                        ex->res->defer_dropped++;
+                    }
+                    s++;
+                }
+                fseek(f, 16, SEEK_SET);
+                fwrite(&n, 4, 1, f);
+                fclose(f);
+                // the offset of the first record (after header + base)
+                l.count = n;
+                l.off = 0; // 0 = start at the first record
+                if (ex->nlots >= ex->lotcap) {
+                    ex->lotcap = ex->lotcap ? ex->lotcap * 2 : 16;
+                    ex->lots = xrealloc(ex->lots, sizeof *ex->lots * ex->lotcap);
+                }
+                ex->lots[ex->nlots++] = l;
+                saved += (int)n;
+            }
+            a = b;
+        }
+        free(k); free(z); free(d);
+        for (uint32_t i = 0; i < ex->defer_len; i++) free(ex->defer[i].p.img);
+        ex->defer_len = 0;
+        memset(ex->defer_by_reason, 0, sizeof ex->defer_by_reason);
+    }
+    idx_write(ex);
+    // seeds held back by the caps
+    char sp[700];
+    frontier_path(ex, sp, sizeof sp, "seeds.bin");
+    if (ex->pseed_len) {
+        FILE *f = fopen(sp, "wb");
+        if (f) { fwrite(ex->pseed, sizeof *ex->pseed, ex->pseed_len, f); fclose(f); }
+        saved += (int)ex->pseed_len;
+        ex->res->seeds_pending_disk = ex->pseed_len;
+        ex->pseed_len = 0;
+    } else {
+        unlink(sp);
+    }
+    ex->res->defer_on_disk = dp_explorer_frontier_disk(ex);
+    return saved;
+}
+
+// attaches the frontier directory: reads the index and loads the first records
+int dp_explorer_frontier_load(DpExplorer *ex, const char *dir) {
+    free(ex->fdir);
+    ex->fdir = strdup(dir);
+    ex->nlots = 0;
+    idx_read(ex);
+    char sp[700];
+    frontier_path(ex, sp, sizeof sp, "seeds.bin");
+    FILE *f = fopen(sp, "rb");
+    if (f) {
+        DpPendingSeed s;
+        while (fread(&s, sizeof s, 1, f) == 1) pseed_add(ex, s.bank, s.pc, s.kind, s.forced);
+        fclose(f);
+        unlink(sp);
+        ex->res->seeds_deferred -= ex->pseed_len; // reloaded, not new
+    }
+    uint32_t before = ex->defer_len;
+    while (ex->defer_len < DP_DEFER_CAP && frontier_refill(ex)) {
+        if (!dp_explorer_frontier_disk(ex)) break;
+        int more = 0;
+        for (uint32_t i = 0; i < ex->nlots; i++)
+            if (ex->lots[i].read < ex->lots[i].count && reason_eligible(ex, ex->lots[i].reason)) more = 1;
+        if (!more) break;
+    }
+    return (int)(ex->defer_len - before) + (int)ex->pseed_len;
+}
+
+static int defer_eligible(const DpExplorer *ex) {
+    for (uint32_t i = 0; i < ex->defer_len; i++)
+        if (reason_eligible(ex, ex->defer[i].reason) && (!ex->defer_tier_limit || ex->defer[i].tier <= ex->defer_tier_limit))
+            return 1;
+    return 0;
+}
+
+// anything left that a pop could still resume (memory, disk lots, held seeds)
+static int frontier_has_work(DpExplorer *ex) {
+    if (defer_eligible(ex) || ex->pseed_len) return 1;
+    for (uint32_t i = 0; i < ex->nlots; i++)
+        if (ex->lots[i].read < ex->lots[i].count && reason_eligible(ex, ex->lots[i].reason)) return 1;
+    return 0;
+}
+
+// next deferred continuation into *out (its tier goes to ex->defer_tier_next); 0 when none.
+// Order: lowest reason first (cheapest), newest first within it.
 static int defer_pop(DpExplorer *ex, DpPathState *out) {
-    // the newest eligible continuation (a tier above the drain limit stays held)
-    int at = -1;
-    for (int i = (int)ex->defer_len - 1; i >= 0; i--)
-        if (!ex->defer_tier_limit || ex->defer[i].tier <= ex->defer_tier_limit) { at = i; break; }
-    if (at < 0) return 0;
-    DpDeferred dd = ex->defer[at];
-    memmove(&ex->defer[at], &ex->defer[at + 1], sizeof dd * (ex->defer_len - at - 1));
-    ex->defer_len--;
-    DpDeferred *d = &dd;
-    *out = d->p;
-    ex->defer_tier_next = d->tier;
-    ex->res->defer_resumed++;
-    return 1;
+    for (int attempt = 0; attempt < 2; attempt++) {
+        int at = -1;
+        for (int i = (int)ex->defer_len - 1; i >= 0; i--) {
+            const DpDeferred *d = &ex->defer[i];
+            if (!reason_eligible(ex, d->reason)) continue;
+            if (ex->defer_tier_limit && d->tier > ex->defer_tier_limit) continue;
+            if (at < 0 || d->reason < ex->defer[at].reason) at = i;
+        }
+        if (at >= 0) {
+            DpDeferred dd = ex->defer[at];
+            memmove(&ex->defer[at], &ex->defer[at + 1], sizeof dd * (ex->defer_len - at - 1));
+            ex->defer_len--;
+            if (dd.reason < DP_R_COUNT && ex->defer_by_reason[dd.reason]) ex->defer_by_reason[dd.reason]--;
+            *out = dd.p;
+            ex->defer_tier_next = dd.tier;
+            ex->res->defer_resumed++;
+            return 1;
+        }
+        if (attempt || !frontier_refill(ex)) break;
+    }
+    return 0;
+}
+
+// seeds the caps held back come back in batches of seed_cap once the worklists are empty
+static int pseed_feed(DpExplorer *ex) {
+    if (!ex->pseed_len) return 0;
+    uint32_t batch = ex->cfg.seed_cap ? ex->cfg.seed_cap : 4096, n = 0;
+    while (ex->pseed_len && n < batch) {
+        DpPendingSeed s = ex->pseed[--ex->pseed_len];
+        if (dp_explorer_seed_pc(ex, s.bank, s.pc, s.kind, s.forced)) n++;
+        ex->res->seeds_resumed++;
+    }
+    return n != 0 || ex->pseed_len != 0;
 }
 
 int dp_explore_step(DpExplorer *ex) {
@@ -1630,7 +1984,11 @@ int dp_explore_step(DpExplorer *ex) {
         pthread_mutex_unlock(&ex->sh->mtx);
         if (!p->img && !defer_pop(ex, &tmp)) return 0;
     } else {
-        if (!ex->q_len && !ex->pq_len && !defer_pop(ex, &tmp)) return 0;
+        if (!ex->q_len && !ex->pq_len && !defer_pop(ex, &tmp)) {
+            // nothing resumable: held seeds come back before the run ends
+            if (pseed_feed(ex) && (ex->q_len || ex->pq_len)) return 1;
+            return 0;
+        }
         if (tmp.img) { /* resumed from the deferred frontier */ }
         else if (from_pq) { // priority seeds first, FIFO: they must not starve
             p = &ex->pqueue[ex->pq_head % ex->pq_cap];
@@ -1723,7 +2081,7 @@ int dp_explore_step(DpExplorer *ex) {
         else if (cut != DP_CUT_NONE) issue = DP_ISSUE_BUDGET;
         tree_close_g(ex, choice, issue);
     }
-    return (ex->q_len || ex->pq_len || ex->sh || ex->defer_len || dp_explorer_spool_pending(ex)) ? 1 : 0;
+    return (ex->q_len || ex->pq_len || ex->sh || frontier_has_work(ex) || dp_explorer_spool_pending(ex)) ? 1 : 0;
 }
 
 int dp_explore_slice(DpExplorer *ex, int ms) {
@@ -1943,8 +2301,8 @@ void dp_seed_gb(DpExplorer *ex) {
         int seeded = 0;
         DpHashSet seen;
         dp_set_init(&seen, 65536);
-        for (int bank = 0; bank < res->banks && seeded < (int)ex->cfg.seed_cap; bank++) {
-            for (int off = 0; off + 1 < 0x4000 && seeded < (int)ex->cfg.seed_cap; off++) {
+        for (int bank = 0; bank < res->banks; bank++) {
+            for (int off = 0; off + 1 < 0x4000; off++) {
                 uint32_t a = (uint32_t)bank * 0x4000 + (uint32_t)off;
                 if (a + 1 >= c->rom_size) break;
                 uint16_t v = (uint16_t)(c->rom[a] | (c->rom[a + 1] << 8));
@@ -1967,7 +2325,10 @@ void dp_seed_gb(DpExplorer *ex) {
                         continue;
                     }
                     if (dp_set_insert(&seen, tk) == 0) continue;
-                    if (seeded >= (int)ex->cfg.seed_cap) break;
+                    if (seeded >= (int)ex->cfg.seed_cap) { // the cap holds the seed back, never drops it
+                        pseed_add(ex, tbank, v, DP_SEED_POINTER, 1);
+                        continue;
+                    }
                     dp_explorer_seed_pc(ex, tbank, v, DP_SEED_POINTER, 1);
                     seeded++;
                 }
@@ -1997,8 +2358,9 @@ int dp_seed_indirect(DpExplorer *ex, uint32_t cap) {
             uint32_t k = dp_rom_index(ind->tbank[t], ind->target[t]);
             if (res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED)) continue;
             if (res->static_flags[k] & (DP_SF_PAD | DP_SF_POINTER)) continue;
-            if (seeded >= (int)cap) { // the phase's solde is spent: counted, retried next phase
+            if (seeded >= (int)cap) { // the phase's solde is spent: counted, held for later
                 res->seeds_refused_budget++;
+                pseed_add(ex, ind->tbank[t], ind->target[t], DP_SEED_POINTER, 1);
                 continue;
             }
             if (!dp_explorer_seed_pc_pri(ex, ind->tbank[t], ind->target[t], DP_SEED_POINTER, 1, 1))

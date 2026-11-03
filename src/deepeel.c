@@ -5,6 +5,7 @@
 //   deepeel map rom.gb [--json f] [--text f]        static map only
 //   deepeel regs gb                                 dump the GB register registry
 //   deepeel dis rom.gb bank:addr [n]                disassemble n instructions
+#include <sys/stat.h>
 #include "core/cart.h"
 #include "core/cart_md.h"
 #include "explore/md_trace.h"
@@ -248,7 +249,7 @@ static int cmd_explore(int argc, char **argv) {
     dp_config_defaults(&cfg);
     DpSessionCfg scfg;
     dp_session_cfg_defaults(&scfg);
-    uint8_t tier_limit = 0;
+    uint8_t tier_limit = 0, defer_all = 0;
     uint8_t eb[32];
     uint16_t ea[32];
     int entries = 0;
@@ -279,7 +280,11 @@ static int cmd_explore(int argc, char **argv) {
             scfg.mem_cap_mb = strtoull(argv[++i], NULL, 0);
             cfg.mem_cap_mb = scfg.mem_cap_mb;
         }
-        else if (!strcmp(a, "--tier") && i + 1 < argc) tier_limit = (uint8_t)atoi(argv[++i]);
+        else if (!strcmp(a, "--tier") && i + 1 < argc) {
+            const char *t = argv[++i];
+            if (!strcmp(t, "inf")) defer_all = 1; // the last tier: covered forks resume too
+            else tier_limit = (uint8_t)atoi(t);
+        }
         else if (!strcmp(a, "--time-limit") && i + 1 < argc) scfg.time_limit_secs = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--spool-cap-mb") && i + 1 < argc) cfg.spool_cap_mb = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--jobs") && i + 1 < argc) cfg.jobs = atoi(argv[++i]);
@@ -446,6 +451,16 @@ static int cmd_explore(int argc, char **argv) {
             fprintf(stderr, "deepeel: resumed tree (%u choices, depth %u)\n", tree.n - 1,
                     tree.max_depth);
     }
+    ex->defer_tier_limit = tier_limit;
+    ex->defer_all = defer_all;
+    // the frontier directory exists whatever the options: next to the outputs
+    // when there is no --state-dir
+    char fdir_auto[600];
+    const char *fdir = scfg.state_dir;
+    if (!fdir) {
+        const char *base = json ? json : text ? text : html ? html : summary ? summary : NULL;
+        if (base) { snprintf(fdir_auto, sizeof fdir_auto, "%s.frontier", base); fdir = fdir_auto; }
+    }
     // the disk spool: overflow states survive any stop, --resume continues
     // where the previous run stopped (worklist + exact dedup)
     char spool_path[540], exact_path[540];
@@ -458,12 +473,12 @@ static int cmd_explore(int argc, char **argv) {
             fprintf(stderr, "deepeel: spool unavailable (%s), overflow states are refused and counted (spool_refused)\n",
                     spool_path);
         if (scfg.resume) dp_explorer_exact_load(ex, exact_path);
-        if (scfg.resume) {
-            int fl = dp_explorer_frontier_load(ex, scfg.state_dir);
-            if (fl) fprintf(stderr, "deepeel: resumed frontier (%d deferred continuations)\n", fl);
-        }
     }
-    ex->defer_tier_limit = tier_limit;
+    if (scfg.resume && fdir) {
+        int fl = dp_explorer_frontier_load(ex, fdir);
+        if (fl) fprintf(stderr, "deepeel: resumed frontier (%d continuations/seeds loaded, %llu more on disk)\n", fl,
+                        (unsigned long long)dp_explorer_frontier_disk(ex));
+    }
     dp_seed_gb(ex);
     for (int i = 0; i < entries; i++)
         dp_explorer_seed_pc(ex, ea[i] >= 0x4000 ? (eb[i] ? eb[i] : 1) : 0, ea[i], DP_SEED_POINTER, 1);
@@ -716,9 +731,10 @@ static int cmd_explore(int argc, char **argv) {
                     (unsigned long long)(pend >> 20));
         dp_explorer_exact_save(ex, exact_path);
     }
-    if (scfg.state_dir) {
-        int fr = dp_explorer_frontier_save(ex, scfg.state_dir);
-        if (fr) fprintf(stderr, "deepeel: %d deferred continuations saved for --resume (frontier/)\n", fr);
+    if (fdir) {
+        if (!scfg.state_dir) mkdir(fdir, 0777);
+        int fr = dp_explorer_frontier_save(ex, fdir);
+        if (fr) fprintf(stderr, "deepeel: %d continuations/seeds saved in %s/frontier for --resume\n", fr, fdir);
     }
     dp_explorer_free(ex);
     if (play_engine) dp_play_free(play_engine);
@@ -1307,12 +1323,45 @@ static int cmd_md(int argc, char **argv) {
 int main(int argc, char **argv) {
     if (argc < 2) return usage(), 2;
     if (!strcmp(argv[1], "frontier") && argc > 3 && !strcmp(argv[2], "stats")) {
-        char p[700], line[128];
+        // pending records by reason, tier and bank (the unread part of each lot)
+        char p[700], line[400];
         snprintf(p, sizeof p, "%s/frontier/frontier.idx", argv[3]);
         FILE *f = fopen(p, "r");
         if (!f) { printf("frontier: empty (no %s)\n", p); return 0; }
-        while (fgets(line, sizeof line, f)) fputs(line, stdout);
+        uint64_t by_reason[16][4] = {{0}}, by_bank[1024] = {0}, total = 0;
+        char names[16][24] = {{0}};
+        int lots = 0;
+        while (fgets(line, sizeof line, f)) {
+            char name[96], rs[32];
+            unsigned long long off;
+            unsigned cnt, t1, t2, t3, rd;
+            int bank, sec;
+            if (sscanf(line, "lot %95s count=%u off=%llu reason=%31s bank=%d sec=%d t1=%u t2=%u t3=%u read=%u", name,
+                       &cnt, &off, rs, &bank, &sec, &t1, &t2, &t3, &rd) != 10) continue;
+            lots++;
+            uint64_t left = cnt - rd, tn = (uint64_t)t1 + t2 + t3 ? (uint64_t)t1 + t2 + t3 : 1;
+            int ri = 0;
+            while (ri < 15 && names[ri][0] && strcmp(names[ri], rs)) ri++;
+            snprintf(names[ri], sizeof names[ri], "%s", rs);
+            // the per-tier split is of the whole lot: scaled to what is still unread
+            by_reason[ri][0] += left;
+            by_reason[ri][1] += left * t1 / tn;
+            by_reason[ri][2] += left * t2 / tn;
+            by_reason[ri][3] += left * t3 / tn;
+            if (bank >= 0 && bank < 1024) by_bank[bank] += left;
+            total += left;
+        }
         fclose(f);
+        printf("frontier: %d lots, %llu records pending\n", lots, (unsigned long long)total);
+        for (int i = 0; i < 16 && names[i][0]; i++)
+            printf("  %-11s %8llu   (tier1 %llu, tier2 %llu, tier3 %llu)\n", names[i], (unsigned long long)by_reason[i][0],
+                   (unsigned long long)by_reason[i][1], (unsigned long long)by_reason[i][2],
+                   (unsigned long long)by_reason[i][3]);
+        for (int b = 0; b < 1024; b++)
+            if (by_bank[b]) printf("  bank %-4d   %8llu\n", b, (unsigned long long)by_bank[b]);
+        snprintf(p, sizeof p, "%s/frontier/seeds.bin", argv[3]);
+        struct stat st;
+        if (!stat(p, &st)) printf("  held seeds  %8llu\n", (unsigned long long)(st.st_size / 6));
         return 0;
     }
     if (!strcmp(argv[1], "frontier") && argc > 4 && !strcmp(argv[2], "drain")) {

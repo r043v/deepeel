@@ -262,6 +262,20 @@ static void json_esc(DpBuf *out, const char *s) {
 
 // Per-source byte counts (a byte counts once per source that proved it) and
 // the bytes proved by several sources: the coverage model's sources field.
+static void cov_frontier_json(DpBuf *o, const DpResults *res) {
+    dp_buf_str(o, "\"frontier\": {\"deferred\":{");
+    for (int r = 1; r < DP_R_COUNT; r++)
+        dp_buf_fmt(o, "%s\"%s\":%llu", r > 1 ? "," : "", dp_reason_name(r), (unsigned long long)res->defer_by[r]);
+    dp_buf_str(o, "},\"final\":{");
+    for (int r = 1; r < DP_R_COUNT; r++)
+        dp_buf_fmt(o, "%s\"%s\":%llu", r > 1 ? "," : "", dp_reason_name(r), (unsigned long long)res->defer_final[r]);
+    dp_buf_fmt(o, "},\"seeds_deferred\":%llu,\"seeds_resumed\":%llu,\"seeds_lost\":%llu,"
+                  "\"seeds_on_disk\":%llu,\"records_on_disk\":%llu},\n",
+               (unsigned long long)res->seeds_deferred, (unsigned long long)res->seeds_resumed,
+               (unsigned long long)res->seeds_lost, (unsigned long long)res->seeds_pending_disk,
+               (unsigned long long)res->defer_on_disk);
+}
+
 static void cov_sources_json(DpBuf *o, const DpResults *res) {
     uint64_t per[DP_SRC_COUNT] = {0}, multi = 0, any = 0;
     size_t n = (size_t)res->banks * 0x4000;
@@ -366,6 +380,7 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
         free(hm);
     }
     cov_sources_json(o, res);
+    cov_frontier_json(o, res);
     dp_buf_fmt(o, "\"closure\": {\"rounds\":%u,\"starts\":%u,\"unresolved_bank\":%u,"
                   "\"stopped_data\":%u,\"stopped_illegal\":%u,\"seeds\":%u,\"seeds_dropped\":%u,"
                   "\"seeds_refused\":%u,\"bank_seeds\":%u,\"indirect_seeds\":%u},\n",
@@ -578,6 +593,7 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
                (unsigned long long)res->loop_final, (unsigned long long)res->defer_dropped,
                (unsigned long long)res->defer_pending);
     cov_sources_json(o, res);
+    cov_frontier_json(o, res);
     dp_buf_fmt(o, "\"closure\": {\"rounds\":%u,\"starts\":%u,\"unresolved_bank\":%u,"
                   "\"stopped_data\":%u,\"stopped_illegal\":%u,\"seeds\":%u,\"seeds_dropped\":%u,"
                   "\"seeds_refused\":%u,\"bank_seeds\":%u,\"indirect_seeds\":%u},\n",

@@ -16,9 +16,16 @@ static uint64_t g_wall; // 0 = default budget
 static const char *g_fsave; // save the deferred frontier here after the run
 static const char *g_fload; // load it before the run
 static int g_fsaved, g_floaded;
+static uint32_t g_forkcap, g_seedcap, g_maxpaths; // 0 = default
 static uint32_t g_psteps; // 0 = default per-path step budget
 static uint32_t g_loopcap; // 0 = default backward-edge cap
 static int g_full_forks;  // 1 = the per-site fork table starts full
+
+static uint64_t res_deferred_total(void) {
+    uint64_t n = 0;
+    for (int r = 1; r < DP_R_COUNT; r++) n += res.defer_by[r];
+    return n;
+}
 
 static void run(const char *dir, const char *name) {
     char path[512];
@@ -38,6 +45,9 @@ static void run(const char *dir, const char *name) {
     dp_config_defaults(&cfg);
     if (g_wall) cfg.max_steps_total = g_wall;
     if (g_psteps) cfg.max_steps_path = g_psteps;
+    if (g_forkcap) cfg.fork_site_cap = g_forkcap;
+    if (g_seedcap) cfg.seed_cap = g_seedcap;
+    if (g_maxpaths) cfg.max_paths = g_maxpaths;
     if (g_loopcap) cfg.loop_back_cap = g_loopcap;
     if (g_mach) dp_mach_close(g_mach);
     g_mach = mach_for(g_cart);
@@ -465,7 +475,7 @@ int main(int argc, char **argv) {
         for (size_t k = 0; k < total; k++) { small += !!res.exec_flags[k]; lost += fl[k] && !res.exec_flags[k]; }
         CHECK(res.step_cuts > 0);          // the budget really bit
         CHECK(res.steps_deferred > 0);     // ... and the cuts were deferred,
-        CHECK(res.defer_resumed == res.steps_deferred + res.loop_deferred); // ... all resumed
+        CHECK(res.defer_resumed + res.defer_pending == res_deferred_total()); // ... all resumed or counted pending
         CHECK(lost == 0 && small >= full); // no code lost (resumed paths may wander further)
         CHECK(res.steps_final + res.defer_dropped == 0 || small >= 1);
         g_psteps = 0;
@@ -482,7 +492,7 @@ int main(int argc, char **argv) {
         for (size_t k = 0; k < total; k++) lost += fl2[k] && !res.exec_flags[k];
         CHECK(res.loop_deferred > 0);
         // the fixture loops forever: what the wall leaves unresumed is counted
-        CHECK(res.defer_resumed + res.defer_pending == res.steps_deferred + res.loop_deferred);
+        CHECK(res.defer_resumed + res.defer_pending == res_deferred_total());
         CHECK(lost == 0);
         g_loopcap = 0;
     }
@@ -522,6 +532,42 @@ int main(int argc, char **argv) {
         for (size_t k = 0; k < total; k++) lost += ref[k] && !(acc[k] | res.exec_flags[k]);
         CHECK(lost == 0);
         g_fload = NULL;
+    }
+
+    // --- J2 over all reasons: any budget, then the saved frontier drained, loses no code
+    {
+        uint64_t seen_fc = 0, seen_paths = 0, seen_seeds = 0, seen_disk = 0;
+        static const char *fx[] = { "branch", "keyirq", "p1poll", "irq", "jumptable", "bankdata", "closure", "loop", "vblank" };
+        for (size_t i = 0; i < sizeof fx / sizeof *fx; i++) {
+            for (int mode = 0; mode < 4; mode++) {
+                char fd[600];
+                snprintf(fd, sizeof fd, "%s/fall_%s_%d", dir, fx[i], mode);
+                mkdir(fd, 0777);
+                g_fsave = g_fload = NULL;
+                run(dir, fx[i]);
+                static uint8_t rf[1 << 20];
+                size_t total = (size_t)res.banks * 0x4000, lost = 0;
+                for (size_t k = 0; k < total; k++) rf[k] = res.exec_flags[k];
+                g_forkcap = mode == 0 ? 1 : 0;
+                g_seedcap = mode == 1 ? 1 : 0;
+                g_maxpaths = mode == 2 ? 2 : 0;
+                g_psteps = mode == 3 ? 4 : 0;
+                g_fsave = fd;
+                run(dir, fx[i]);
+                static uint8_t ac[1 << 20];
+                for (size_t k = 0; k < total; k++) ac[k] = res.exec_flags[k];
+                seen_fc += res.defer_by[DP_R_FORK_CAP]; seen_paths += res.defer_by[DP_R_PATHS];
+                seen_seeds += res.seeds_deferred; seen_disk += res.defer_on_disk;
+                g_forkcap = g_seedcap = g_maxpaths = 0; g_psteps = 0;
+                g_fsave = NULL; g_fload = fd;
+                run(dir, fx[i]);
+                for (size_t k = 0; k < total; k++) lost += rf[k] && !(ac[k] | res.exec_flags[k]);
+                if (lost) fprintf(stderr, "lost %zu bytes: fixture %s mode %d\n", lost, fx[i], mode);
+                CHECK(lost == 0);
+                g_fload = NULL;
+            }
+        }
+        CHECK(seen_fc > 0 && seen_paths > 0 && seen_seeds > 0 && seen_disk > 0); // every mechanism really ran
     }
 
     if (g_mach) dp_mach_close(g_mach);
