@@ -1070,3 +1070,13 @@ J9 (partiel) : deux surfaces matérielles de plus.
   coupé à la fenêtre. Fixture `fix_hdma`.
 - Observations de l'outil sur les registres écrits, pas des mesures de
   matériel.
+
+## 0.60.0
+
+J9 (partiel) : typage APU des données ROM sur Game Boy. Un octet de ROM lu
+puis écrit tel quel dans la wave RAM (`$FF30-$FF3F`) est marqué `sample`
+(`DP_DF_SAMPLE`) ; écrit dans un registre APU (`$FF10-$FF25`), `music`
+(`DP_DF_MUSIC`). L'attribution est par égalité de valeur avec la dernière
+lecture de ROM (heuristique : une coïncidence de valeur peut sur-marquer).
+Rapport : ligne « apu typing ». Fixture `fix_apu`. Observation de l'outil,
+pas une mesure de matériel.

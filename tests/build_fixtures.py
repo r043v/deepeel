@@ -255,6 +255,14 @@ def build(out):
         r[0x4000 + i] = (i * 7 + 3) & 0xFF
     save(out, "fix_hdma", r)
 
+    # --- apu: a ROM byte stored to wave RAM, another to NR12 -------------------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0xFA, 0x00, 0x40, 0xE0, 0x30, 0xFA, 0x01, 0x40, 0xE0, 0x12, 0x76)
+    r[0x4000] = 0x5A
+    r[0x4001] = 0xC4
+    save(out, "fix_apu", r)
+
     # --- copyx: same loop but every byte is XOR-transformed -------------------
     # (a decompressor shape: the ranges match, the bytes do not)
     r = rom(2)

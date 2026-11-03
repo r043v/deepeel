@@ -35,6 +35,8 @@ enum {
     DP_DF_VERBATIM = 1 << 2, // source range of a verbatim copy (byte for byte)
     DP_DF_STATIC = 1 << 3, // read by statically proven code (provenance pass)
     DP_DF_SIBLING = 1 << 4, // inferred: sibling entry of a verbatim copy's source table
+    DP_DF_SAMPLE = 1 << 5, // read, then written to the APU wave RAM ($FF30-$FF3F)
+    DP_DF_MUSIC = 1 << 6, // read, then written to an APU register ($FF10-$FF25)
 };
 enum {
     DP_SF_POINTER = 1 << 0, // static: part of a plausible pointer table
@@ -248,6 +250,7 @@ typedef struct DpResults {
     uint64_t vram_write_pages[2], sram_write_pages; // page bitmaps
     uint8_t oam_written;
     // data proven by exploration, for the m0boy bridge
+    uint64_t apu_sample_bytes, apu_music_bytes; // bytes with DP_DF_SAMPLE / DP_DF_MUSIC
     uint64_t data_verbatim_bytes; // bytes with DP_DF_VERBATIM
     uint32_t seeds_refused_budget; // seeds dropped: the phase's cascade solde was spent
     uint32_t sib_tables, sib_ranges, sib_bytes, sib_refused, sib_caps; // copy-sibling inference
@@ -425,6 +428,7 @@ struct DpExplorer {
     uint8_t cur_tier, defer_tier_next;
     uint8_t defer_tier_limit; // frontier drain: only tiers <= limit resume (0 = all)
     uint64_t steps_own;  // fork-explorer steps (the wall); sessions share res->steps_total
+    uint32_t last_rom_key; uint8_t last_rom_val; int last_rom_valid; // last ROM data read (APU typing)
     uint8_t hdma[4];  // HDMA1-4 as last written (source / destination of a CGB HDMA)
     int last_io_slot; // io registry slot of the last register write (copy attribution)
     int stop; // set when a hard budget wall is hit

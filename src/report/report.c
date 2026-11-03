@@ -92,6 +92,8 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
              res->copy_count, res->copy_window_breaks, res->copies_dropped,
              res->prov_jp_hl, res->prov_data, res->prov_unresolved, res->prov_sat);
     dp_buf_str(out, line);
+    dp_buf_fmt(out, "apu typing: %llu ROM bytes written to wave RAM (samples), %llu to APU registers (music)\n",
+               (unsigned long long)res->apu_sample_bytes, (unsigned long long)res->apu_music_bytes);
     {
         uint64_t stat_only = 0, ind_sites = 0, ind_over = 0;
         size_t nb = (size_t)res->banks * 0x4000;

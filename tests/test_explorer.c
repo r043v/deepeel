@@ -244,6 +244,12 @@ int main(int argc, char **argv) {
     const DpCopyRec *ch = copy_of(2, 1, 0x4000, 0x40FF, 0x8000, 0x80FF);
     CHECK(ch != NULL && ch->verbatim && ch->bytes == 256);
 
+    // --- apu: ROM bytes stored to wave RAM / an APU register are typed ------------------
+    run(dir, "apu");
+    CHECK(res.data_flags[dp_rom_index(1, 0x4000)] & DP_DF_SAMPLE);
+    CHECK(res.data_flags[dp_rom_index(1, 0x4001)] & DP_DF_MUSIC);
+    CHECK(res.apu_sample_bytes == 1 && res.apu_music_bytes == 1);
+
     // --- copy1: a pure 1:1 ROM->VRAM copy is proven verbatim --------------------------
     run(dir, "copy1");
     const DpCopyRec *cv = copy_of(0, 1, 0x4000, 0x40FF, 0x8000, 0x80FF);
