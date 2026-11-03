@@ -229,9 +229,11 @@ int dp_lr_load_rom(DpLibretro *lr, const char *rom_path, char *err, size_t errn)
 void dp_lr_close(DpLibretro *lr) {
     if (!lr) return;
     g_cur = lr;
-    if (lr->loaded) lr->r_unload();
-    lr->r_deinit();
-    dlclose(lr->h);
+    if (lr->h) { // native instances have no shared object behind them
+        if (lr->loaded) lr->r_unload();
+        lr->r_deinit();
+        dlclose(lr->h);
+    }
     free(lr->rom);
     free(lr);
 }
@@ -322,7 +324,7 @@ static uint64_t lr_fnv(const uint8_t *p, size_t n) {
 typedef struct { uint8_t *snap; int force; } LrItem;
 typedef struct {
     DpLibretro *lr; uint8_t *map; size_t n; DpLrExploreStats *st;
-    int branch_hit; uint32_t branch_pc; uint8_t *sites; size_t site_n;
+    int branch_hit; uint32_t branch_pc; uint8_t *sites; size_t site_n; uint32_t *site_forks;
 } LrExpCtx;
 static void lrx_exec(void *u, uint32_t pc) {
     LrExpCtx *c = u;
@@ -340,7 +342,8 @@ int dp_lr_explore(DpLibretro *lr, uint8_t *exec_map, size_t rom_size,
     LrItem *q = calloc(cap, sizeof *q);
     uint64_t *seen = calloc(65536, sizeof *seen); // (state hash, force) dedup of fork items
     uint8_t *cur = malloc(sz), *pre = malloc(sz);
-    LrExpCtx c = { lr, exec_map, rom_size, st, 0, 0, calloc(65536, 1), 65536 };
+    LrExpCtx c = { lr, exec_map, rom_size, st, 0, 0, calloc(65536, 1), 65536, calloc(65536, sizeof(uint32_t)) };
+    uint32_t site_cap = lim->site_cap ? lim->site_cap : 2;
     DpLrObservers o = { &c, lrx_exec, NULL, NULL, NULL, NULL, lrx_branch };
     lr->trace.set_observers(&o);
     uint32_t nq = 0;
@@ -365,6 +368,9 @@ int dp_lr_explore(DpLibretro *lr, uint8_t *exec_map, size_t rom_size,
             if (!c.branch_hit || (it.force >= 0 && ps == 1)) continue; // a forced item replays its own branch
             // conditional: abandon this run and queue both sides from the pre-step state
             if (!c.sites[c.branch_pc & 0xFFFF]) { c.sites[c.branch_pc & 0xFFFF] = 1; st->branch_sites++; }
+            uint32_t *sf = &c.site_forks[c.branch_pc & 0xFFFF];
+            if (*sf >= site_cap) { st->capped_forks++; continue; } // per-site cap, reported; the run goes on naturally
+            (*sf)++;
             uint64_t h = lr_fnv(pre, sz);
             for (int f = 0; f < 2; f++) {
                 uint64_t key = (h ^ (uint64_t)(f + 1) * 0x9E3779B97F4A7C15ull) | 1;
@@ -379,6 +385,28 @@ int dp_lr_explore(DpLibretro *lr, uint8_t *exec_map, size_t rom_size,
         }
     }
     lr->trace.set_observers(NULL);
-    free(q); free(seen); free(cur); free(pre); free(c.sites);
+    free(q); free(seen); free(cur); free(pre); free(c.sites); free(c.site_forks);
     return 1;
+}
+
+// In-process level-B backend: the trace table and the state image functions
+// come from the caller instead of a shared object (a machine linked into the
+// host, e.g. the m0boy GB machine used for the fork-parity test).
+DpLibretro *dp_lr_open_native(const char *name, size_t (*ssize)(void), bool (*ser)(void *, size_t),
+                              bool (*unser)(const void *, size_t), const DpLrTraceApi *trace) {
+    if (!ssize || !ser || !unser || !trace || trace->version != DP_LR_TRACE_VERSION || !trace->step ||
+        !trace->set_observers || !trace->pc)
+        return NULL;
+    DpLibretro *lr = calloc(1, sizeof *lr);
+    if (!lr) return NULL;
+    snprintf(lr->name, sizeof lr->name, "%s", name ? name : "native");
+    lr->r_ssize = ssize;
+    lr->r_ser = ser;
+    lr->r_unser = unser;
+    lr->trace = *trace;
+    lr->level = 1;
+    lr->loaded = 1;
+    snprintf(lr->degr, sizeof lr->degr, "level B (%s): in-process native backend (trace extension, state images)",
+             lr->name);
+    return lr;
 }

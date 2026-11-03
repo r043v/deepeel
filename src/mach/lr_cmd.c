@@ -26,7 +26,7 @@ int dp_lr_command(int argc, char **argv) {
         return 2;
     }
     const char *core = argv[3], *rom = argv[4], *text = NULL, *map = NULL, *png = NULL;
-    DpLrExploreLimits lim = { 100000, 20000000, 4096 };
+    DpLrExploreLimits lim = { 100000, 20000000, 4096, 2 };
     for (int i = 5; i + 1 < argc; i += 2) {
         if (!strcmp(argv[i], "--text")) text = argv[i + 1];
         else if (!strcmp(argv[i], "--map")) map = argv[i + 1];
@@ -63,9 +63,9 @@ int dp_lr_command(int argc, char **argv) {
             (unsigned long long)st.forks, (unsigned long long)st.deduped, st.branch_sites);
     fprintf(f, "code starts reached: %u of %zu bytes\n", st.covered, rn);
     fprintf(f, "saturation (a non-zero line means the exploration is incomplete):\n");
-    fprintf(f, "  path step budget cuts: %llu\n  global step wall cuts: %llu\n  dropped fork items (queue full): %llu\n",
-            (unsigned long long)st.cut_path_steps, (unsigned long long)st.cut_total,
-            (unsigned long long)st.dropped_items);
+    fprintf(f, "  fork site cap hits: %llu\n  path step budget cuts: %llu\n  global step wall cuts: %llu\n  dropped fork items (queue full): %llu\n",
+            (unsigned long long)st.capped_forks, (unsigned long long)st.cut_path_steps,
+            (unsigned long long)st.cut_total, (unsigned long long)st.dropped_items);
     if (f != stdout) fclose(f);
     if (map || png) {
         // GB-bank layout ("bank start end class", CPU-view addresses) so the
@@ -99,5 +99,5 @@ int dp_lr_command(int argc, char **argv) {
     }
     dp_lr_close(lr);
     free(exec);
-    return st.dropped_items || st.cut_total || st.cut_path_steps ? 3 : 0;
+    return st.dropped_items || st.capped_forks || st.cut_total || st.cut_path_steps ? 3 : 0;
 }

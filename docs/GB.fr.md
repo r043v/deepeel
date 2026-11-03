@@ -1256,3 +1256,28 @@ produite par le moteur de carte existant à partir d'une carte texte au format
 même format. Seuls les débuts d'opcode sont marqués : l'extension de trace ne
 donne pas la longueur des instructions, donc la carte est creuse par
 construction. Test : signature PNG vérifiée dans `lr_explore_cli`.
+
+## 0.75.0
+
+J12 (partiel) : **parité de fourches** entre le backend m0boy de l'explorateur
+et le pilote de fourches libretro de niveau B.
+- `dp_lr_open_native` : backend de niveau B en processus (pas de `.so`), dont
+  la table de trace et les images d'état viennent de l'appelant.
+- `tests/test_lr_parity.c` : la machine GB m0boy est exposée derrière l'ABI de
+  trace (un pas = une instruction, `force_branch` retourne la condition en
+  modifiant le drapeau Z/C, observateurs exec/read/write/branch) et pilotée
+  par `dp_lr_explore` ; la même machine est explorée par `dp_explore`
+  (graine de reset seule, sans fermeture statique ni scan de pointeurs, sans
+  forks IRQ/touches/P1). Résultat sur 11 fixtures générées (branch, loop,
+  vblank, irq, copy1, copyx, unreach, jumptable, nsdata, pal, probes) : les
+  ensembles de débuts d'opcode sont identiques (0 manquant, 0 en trop).
+  Observation de l'outil sur ROM ROM-only de 32 KiB.
+- Hors périmètre de la comparaison, dit tel quel : les vecteurs RST/IRQ
+  (< $100, graines froides de l'explorateur, pas des fourches) et le padding
+  exécuté (non enregistré par l'explorateur).
+- Nouveau garde du pilote : plafond de fourches par site (`site_cap`, défaut
+  2), compteur `capped_forks` rapporté par `deepeel lr explore` (code retour 3
+  s'il est non nul) ; sans lui, une boucle à état changeant noyait la file.
+- Reste : un vrai cœur patché hors dépôt, le rapport complet (typage, copies,
+  longueurs d'instruction), cartes multi-banques (la parité ne couvre que les
+  ROM 32 KiB sans bancs).

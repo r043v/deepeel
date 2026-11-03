@@ -87,6 +87,11 @@ void dp_lr_observe(DpLibretro *lr, const DpLrObservers *obs);
 
 #endif
 
+// In-process level-B backend (no shared object): see libretro.c
+#include <stdbool.h>
+DpLibretro *dp_lr_open_native(const char *name, size_t (*ssize)(void), bool (*ser)(void *, size_t),
+                              bool (*unser)(const void *, size_t), const DpLrTraceApi *trace);
+
 // Forking exploration over a level-B core: both sides of every conditional are
 // explored from a saved state. Every bound is explicit and its saturation is
 // reported (never silent).
@@ -94,10 +99,11 @@ typedef struct DpLrExploreLimits {
     uint64_t path_steps;  // per-path step budget
     uint64_t total_steps; // global step wall
     uint32_t max_items;   // pending fork items (queue cap)
+    uint32_t site_cap;    // forks one conditional site may spawn (0 = 2)
 } DpLrExploreLimits;
 typedef struct DpLrExploreStats {
     uint64_t steps, forks, paths, deduped;
-    uint64_t cut_path_steps, cut_total, dropped_items; // saturation counters
+    uint64_t cut_path_steps, cut_total, dropped_items, capped_forks; // saturation counters
     uint32_t covered;                                   // distinct ROM bytes executed (opcode starts)
     uint32_t branch_sites;                              // distinct conditional pcs
 } DpLrExploreStats;

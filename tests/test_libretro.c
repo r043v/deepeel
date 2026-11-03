@@ -162,7 +162,7 @@ int main(int argc, char **argv) {
             uint8_t *init = malloc(zn);
             dp_lr_save(b, init, zn); // every exploration starts from this state
             uint8_t map[12] = { 0 };
-            DpLrExploreLimits lim = { 100, 10000, 64 };
+            DpLrExploreLimits lim = { 100, 10000, 64, 0 };
             DpLrExploreStats st;
             CHECK(dp_lr_explore(b, map, sizeof map, &lim, &st));
             // opcode starts 0,2,4,6,8,10 all reached: the natural run alone misses 8 and 10
@@ -172,12 +172,12 @@ int main(int argc, char **argv) {
             // a tiny queue is reported, never silent
             dp_lr_load(b, init, zn);
             uint8_t map2[12] = { 0 };
-            DpLrExploreLimits tiny = { 100, 10000, 1 };
+            DpLrExploreLimits tiny = { 100, 10000, 1, 0 };
             CHECK(dp_lr_explore(b, map2, sizeof map2, &tiny, &st) && st.dropped_items > 0);
             // a tiny step wall is reported too
             dp_lr_load(b, init, zn);
             uint8_t map3[12] = { 0 };
-            DpLrExploreLimits wall = { 100, 2, 64 };
+            DpLrExploreLimits wall = { 100, 2, 64, 0 };
             CHECK(dp_lr_explore(b, map3, sizeof map3, &wall, &st) && st.cut_total > 0);
             free(init);
             dp_lr_close(b);
