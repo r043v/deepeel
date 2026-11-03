@@ -234,3 +234,7 @@ add_executable(test_dpmachine test_dpmachine.c)
 target_link_libraries(test_dpmachine PRIVATE deepeel_core m)
 add_dependencies(test_dpmachine fixtures)
 add_test(NAME dpmachine COMMAND test_dpmachine ${CMAKE_CURRENT_BINARY_DIR})
+
+add_executable(test_map_png test_map_png.c)
+target_link_libraries(test_map_png PRIVATE deepeel_core m)
+add_test(NAME map_png COMMAND test_map_png)

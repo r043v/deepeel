@@ -86,6 +86,11 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
 int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char *title,
                             const char *meta, const char *path, const char *sysname,
                             const char *filename, unsigned rom_size);
+// dpCv: lossless class vector (RLE) embedded in the map PNG; decode returns 1
+// when the runs fill exactly n bytes
+void dp_map_cv_encode(const uint8_t *m, size_t n, DpBuf *out);
+int dp_map_cv_decode(const uint8_t *p, size_t len, uint8_t *m, size_t n);
+extern unsigned dp_map_png_budget; // pixel budget of the squares image (default 16 Mpx)
 void dp_report_html(const DpResults *res, DpBuf *out);
 
 #endif

@@ -1106,3 +1106,22 @@ port de données de palette `BCPD` (`$FF69`) ou `OCPD` (`$FF6B`) est marqué
 (sur-marquage possible sur coïncidence). Rapport : ligne « cgb typing ».
 Fixture `fix_pal`. Observation de l'outil ; l'exécution reste DMG, les ports
 ne sont pas émulés.
+
+## 0.64.0
+
+J10 (partiel) : PNG de carte adaptatif et vecteur de classes `dpCv`.
+- **Échelle adaptative** : au-delà d'un budget de pixels (16 Mpx par défaut,
+  `dp_map_png_budget`), un pixel couvre 2, 4… jusqu'à 128 octets. La classe
+  affichée est la dominante du groupe (à égalité, une classe connue l'emporte),
+  la chaleur est celle de l'octet le plus chaud. Le pied de l'image indique
+  « 1 px = N o ». Sous le budget, le rendu reste exact (1 px = 1 o) : les
+  cartes existantes ne changent pas.
+- **`dpCv`** : mot-clé zTXt contenant le vecteur de classes complet de la ROM,
+  codé en séquences (classe, longueur LEB128). Il rend le PNG sans perte même
+  quand le rendu est réduit ; décodage `dp_map_cv_decode` (refuse une taille
+  inexacte).
+- Test `map_png` : ROM synthétique de 32 Mio (2048 banques) rendue sous le
+  budget, `dpCv` relu identique octet pour octet. Ce sont des observations de
+  l'outil.
+- **Reste pour J10** : segments `dpFr`/`dpIx`/`dpTb`, rendu en flux (le tampon
+  RGB est encore alloué en entier), `maprender` relisant `dpCv`.

@@ -9,6 +9,49 @@
 #include <string.h>
 #include <stdlib.h>
 
+// --- dpCv: the lossless class vector, run-length coded ------------------------------
+// (class byte, LEB128 run length) pairs over the whole ROM, one entry per run
+void dp_map_cv_encode(const uint8_t *m, size_t n, DpBuf *out) {
+    for (size_t i = 0; i < n;) {
+        size_t j = i;
+        while (j < n && m[j] == m[i]) j++;
+        uint8_t b = m[i];
+        dp_buf_push(out, &b, 1);
+        for (size_t r = j - i; ; ) {
+            uint8_t v = (uint8_t)(r & 0x7F);
+            r >>= 7;
+            if (r) v |= 0x80;
+            dp_buf_push(out, &v, 1);
+            if (!r) break;
+        }
+        i = j;
+    }
+}
+
+// 1 when the runs fill exactly n bytes of m
+int dp_map_cv_decode(const uint8_t *p, size_t len, uint8_t *m, size_t n) {
+    size_t pos = 0, i = 0;
+    while (pos < len) {
+        uint8_t c = p[pos++];
+        size_t run = 0;
+        int sh = 0;
+        for (;;) {
+            if (pos >= len || sh > 56) return 0;
+            uint8_t v = p[pos++];
+            run |= (size_t)(v & 0x7F) << sh;
+            sh += 7;
+            if (!(v & 0x80)) break;
+        }
+        if (c >= DP_MAP_COUNT || run > n - i) return 0;
+        memset(m + i, c, run);
+        i += run;
+    }
+    return i == n;
+}
+
+// pixel budget of the squares image: past it, one pixel covers several bytes
+unsigned dp_map_png_budget = 16u << 20;
+
 const char *dp_map_class_name(int c) {
     static const char *nm[DP_MAP_COUNT] = { "unknown", "code-natural", "code-forced",
         "code-static", "data-copied", "data-read", "data-static", "table", "padding",
@@ -574,9 +617,25 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     // the ROM grid, then (with heat) a separate heat grid of the same
     // geometry below it, under its own caption
     const int BANK_PX = TILE;
-    const int BANK_H = TILE;
     const int PER_ROW = 8;
     (void)TGAP;
+    // adaptive scale: bytes per pixel (power of two, 1 = the exact render)
+    // doubles until the image fits the pixel budget, or one bank tile is a
+    // single row (128 bytes per pixel)
+    int bpp = 1;
+    {
+        int bc = banks < PER_ROW ? banks : PER_ROW, br = (banks + PER_ROW - 1) / PER_ROW;
+        if (bc < 1) bc = 1;
+        if (br < 1) br = 1;
+        for (;;) {
+            double pw = GAP + bc * (double)(BANK_PX + GAP);
+            double ph = GAP + br * (double)(TILE / bpp + GAP);
+            if (heat) ph *= 2;
+            if (pw * ph <= (double)dp_map_png_budget || bpp >= 128) break;
+            bpp <<= 1;
+        }
+    }
+    const int BANK_H = TILE / bpp;
     static const char *fr[DP_MAP_COUNT] = {
         "inconnu", "code naturel", "code forcé", "code statique",
         "donnée copiée", "donnée lue", "donnée statique", "table", "padding",
@@ -657,15 +716,28 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     }
     for (int b = 0; b < banks; b++) {
         int ox = GAP + (b % PER_ROW) * (BANK_PX + GAP), oy = GAP + (b / PER_ROW) * (BANK_H + GAP);
-        for (int a = 0; a < 0x4000; a++) {
-            size_t k = (size_t)b * 0x4000 + (size_t)a;
-            int x = a % TILE, y = a / TILE;
+        for (int g = 0; g < 0x4000 / bpp; g++) {
+            size_t k = (size_t)b * 0x4000 + (size_t)g * (size_t)bpp;
+            int x = g % TILE, y = g / TILE;
             uint8_t *px = rgb + ((size_t)(oy + y) * w + ox + x) * 3;
-            const uint8_t *c = map_rgb[m[k]];
+            int cls = m[k];
+            uint32_t hv = heat ? heat[k] : 0;
+            if (bpp > 1) { // dominant class of the group (a known class wins a tie); hottest byte
+                unsigned cnt[DP_MAP_COUNT] = {0};
+                for (int q = 0; q < bpp; q++) {
+                    cnt[m[k + (size_t)q]]++;
+                    if (heat && heat[k + (size_t)q] > hv) hv = heat[k + (size_t)q];
+                }
+                cls = 0;
+                for (int c2 = 1; c2 < DP_MAP_COUNT; c2++)
+                    if (cnt[c2] >= cnt[cls] && cnt[c2]) cls = c2;
+                if (cnt[0] > cnt[cls]) cls = 0;
+            }
+            const uint8_t *c = map_rgb[cls];
             px[0] = c[0]; px[1] = c[1]; px[2] = c[2];
             if (heat) {
                 uint8_t *hp = rgb + ((size_t)(heat_oy + oy + y) * w + ox + x) * 3;
-                if (heat[k] && hlog > 0.0) heat_rgb(log2((double)heat[k] + 1.0) / hlog, hp);
+                if (hv && hlog > 0.0) heat_rgb(log2((double)hv + 1.0) / hlog, hp);
                 else { hp[0] = 0x22; hp[1] = 0x22; hp[2] = 0x28; }
             }
         }
@@ -728,7 +800,9 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
             x += 64 + 4;
             legend_text(rgb, w, h, x, fy, rt, col, 1);
         }
-        const char *px_note = "1 px = 1 o";
+        char note_buf[24];
+        snprintf(note_buf, sizeof note_buf, "1 px = %d o", bpp);
+        const char *px_note = note_buf;
         int total = legend_text_width(px_note, 1) + 4 + legend_text_width("/", 1) + 4 +
                     legend_text_width(sig, 1);
         int x = w - GAP - total;
@@ -738,13 +812,18 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
         x += legend_text_width("/", 1) + 4;
         legend_text(rgb, w, h, x, fy, sig, col, 1);
     }
-    DpPngText items[2 + 8];
+    DpBuf cv;
+    dp_buf_init(&cv);
+    dp_map_cv_encode(m, (size_t)banks * 0x4000, &cv);
+    DpPngText items[3 + 8];
     int ni = 0;
+    items[ni++] = (DpPngText){ "dpCv", cv.p, cv.len, 0 };
     items[ni++] = (DpPngText){ "deepeel_map", map_text, map_len, 0 };
     items[ni++] = (DpPngText){ "deepeel_meta", meta, strlen(meta), 0 };
     for (int i = 0; i < n_extra && ni < (int)(sizeof items / sizeof items[0]); i++)
         items[ni++] = extra[i];
     int ok = dp_png_save_chunks(path, w, h, rgb, items, ni);
+    dp_buf_free(&cv);
     free(rgb);
     return ok;
 }
