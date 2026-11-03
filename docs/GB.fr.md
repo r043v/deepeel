@@ -2013,3 +2013,12 @@ pool puis du spool) et `spool_feed` (spool puis pool) avec `--jobs 2` et un
 spool non vide. Constaté sur Zelda et Mario Land 2 en `--unbounded` : les deux
 processus dormaient à 1 % CPU, sans écriture, après 8 min. `spool_feed` prend
 maintenant le pool avant le spool.
+
+## 0.135.2
+
+Correctif : la croissance du pool partagé (`--jobs 2`) faisait un `realloc` sans
+réordonner l'anneau ; une file enroulée (tête ≠ 0) était brouillée, et les
+nouveaux emplacements non remis à zéro. Observé sur Zelda en `--unbounded` :
+SIGSEGV dans `dp_mach_load`, le pointeur d'image contenait des octets d'image.
+L'anneau est recopié dans l'ordre logique, tête à 0, reste mis à zéro. Bug
+antérieur à `--unbounded`, déclenché bien plus souvent par lui.

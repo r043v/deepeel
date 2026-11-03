@@ -468,7 +468,14 @@ static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, in
             if (ncap > sh->max) ncap = sh->max;
             if (sh->cap < sh->max &&
                 !(ex->cfg.mem_cap_mb && dp_rss_mb() >= ex->cfg.mem_cap_mb)) {
-                sh->q = xrealloc(sh->q, sizeof(DpPathState) * (size_t)ncap);
+                // ring order must survive the growth: rebase the head to 0 (a plain
+                // realloc scrambles a wrapped ring and leaves the new slots unzeroed)
+                DpPathState *nq = xrealloc(NULL, sizeof(DpPathState) * (size_t)ncap);
+                for (uint32_t i = 0; i < sh->len; i++) nq[i] = sh->q[(sh->head + i) % sh->cap];
+                memset(nq + sh->len, 0, sizeof(DpPathState) * (size_t)(ncap - sh->len));
+                free(sh->q);
+                sh->q = nq;
+                sh->head = 0;
                 sh->cap = ncap;
                 u32_add(&ex->res->queue_growths, 1);
             } else if (spool_write_rec(ex, img, forced, kind, from_reset, choice)) {
