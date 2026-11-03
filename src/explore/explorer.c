@@ -300,11 +300,13 @@ void dp_static_scan(DpResults *res) {
 
 // --- engine hooks (wired in dp_explorer_new) ----------------------------------------
 static void hook_step(DpMach *m, uint16_t pc, uint8_t op, int entry);
+static void probe_site(DpResults *res, int which, uint16_t pc);
 static void hook_read(DpMach *m, uint16_t a, uint8_t v);
 // count a probe once per code site (cap 16 sites per probe, parallel-safe)
 static void probe_site(DpResults *res, int which, uint16_t pc) {
     if (res->mt) pthread_mutex_lock(&res->rec_mtx);
-    uint32_t *cnt = which ? &res->rtc_selects : &res->serial_starts;
+    uint32_t *cnt = which == 1 ? &res->rtc_selects : which == 2 ? &res->div_reads
+                  : which == 3 ? &res->stat_reads : which == 4 ? &res->ly_reads : &res->serial_starts;
     uint32_t i;
     for (i = 0; i < *cnt; i++)
         if (res->probe_pc[which][i] == pc) break;
@@ -651,6 +653,8 @@ static void hook_read(DpMach *m, uint16_t a, uint8_t v) {
         ex->last_rom_key = key; ex->last_rom_val = v; ex->last_rom_valid = 1;
     }
     section_live_access(ex, a);
+    if (a == 0xFF04 || a == 0xFF41 || a == 0xFF44)
+        probe_site(res, a == 0xFF04 ? 2 : a == 0xFF41 ? 3 : 4, m->api->gbr->pc);
     if (a >= 0xFF00 && a < 0xFF80) {
         int slot = dp_io_slot(res, a);
         if (slot >= 0) {

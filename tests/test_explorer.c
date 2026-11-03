@@ -253,6 +253,7 @@ int main(int argc, char **argv) {
     // --- probes: serial start and RTC register select are counted ------------------------
     run(dir, "probes");
     CHECK(res.serial_starts == 1 && res.rtc_selects == 1);
+    CHECK(res.div_reads == 1 && res.stat_reads == 1 && res.ly_reads == 1);
 
     // --- copy1: a pure 1:1 ROM->VRAM copy is proven verbatim --------------------------
     run(dir, "copy1");

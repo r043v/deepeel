@@ -94,6 +94,8 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
     dp_buf_str(out, line);
     dp_buf_fmt(out, "probes: serial start sites %u, RTC register-select sites %u\n", res->serial_starts,
                res->rtc_selects);
+    dp_buf_fmt(out, "timing probes (read sites): DIV %u, STAT %u, LY %u\n", res->div_reads, res->stat_reads,
+               res->ly_reads);
     dp_buf_fmt(out, "apu typing: %llu ROM bytes written to wave RAM (samples), %llu to APU registers (music)\n",
                (unsigned long long)res->apu_sample_bytes, (unsigned long long)res->apu_music_bytes);
     {

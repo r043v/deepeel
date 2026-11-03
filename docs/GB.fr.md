@@ -1089,3 +1089,11 @@ code distinct (cap 16 chacun) : les démarrages de transfert série
 de la valeur 8 à `$C`). Rapport : ligne « probes ». Fixture `fix_probes`.
 Les registres ne sont pas émulés : c'est l'observation des écritures, pas du
 comportement matériel.
+
+## 0.62.0
+
+J9 (partiel) : sondes de lecture temporelles Game Boy. Les sites de code
+distincts (cap 16 chacun) qui lisent `DIV` (`$FF04`), `STAT` (`$FF41`) et `LY`
+(`$FF44`) sont comptés : ce sont les boucles d'attente de synchronisation.
+Rapport : ligne « timing probes ». Fixture `fix_probes` étendue. Observation
+de l'outil sur les lectures, pas une mesure de matériel.

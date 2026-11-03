@@ -251,7 +251,8 @@ typedef struct DpResults {
     uint8_t oam_written;
     // data proven by exploration, for the m0boy bridge
     uint32_t serial_starts, rtc_selects; // distinct code sites: $FF02 bit-7 starts, MBC3 RAM-bank selects of 8-$C (RTC)
-    uint16_t probe_pc[2][16]; // site tables behind the two counters above (cap 16 each)
+    uint32_t div_reads, stat_reads, ly_reads; // distinct code sites reading $FF04 / $FF41 / $FF44 (timing probes)
+    uint16_t probe_pc[5][16]; // site tables behind the two counters above (cap 16 each)
     uint64_t apu_sample_bytes, apu_music_bytes; // bytes with DP_DF_SAMPLE / DP_DF_MUSIC
     uint64_t data_verbatim_bytes; // bytes with DP_DF_VERBATIM
     uint32_t seeds_refused_budget; // seeds dropped: the phase's cascade solde was spent
