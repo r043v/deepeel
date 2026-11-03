@@ -1,23 +1,36 @@
-// deepeel lr explore CORE ROM [--text FILE] [--map FILE] [--path-steps N] [--max-total N] [--queue N]
+// deepeel lr explore CORE ROM [--text FILE] [--map FILE] [--png FILE] [--path-steps N] [--max-total N] [--queue N]
 // Forking exploration of a level-B libretro core (see libretro.h). Level-A
 // cores cannot fork: the command says so and exits non-zero.
 #include "mach/libretro.h"
+#include "common.h"
+#include "report/report.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
+static void lr_pf(DpBuf *b, const char *fmt, ...) {
+    char t[256];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(t, sizeof t, fmt, ap);
+    va_end(ap);
+    if (n > 0) dp_buf_push(b, t, (size_t)n < sizeof t ? (size_t)n : sizeof t - 1);
+}
+
 int dp_lr_command(int argc, char **argv) {
     if (argc < 5 || strcmp(argv[2], "explore")) {
         fprintf(stderr, "usage: deepeel lr explore CORE ROM [--text FILE] [--map FILE] "
-                        "[--path-steps N] [--max-total N] [--queue N]\n");
+                        "[--png FILE] [--path-steps N] [--max-total N] [--queue N]\n");
         return 2;
     }
-    const char *core = argv[3], *rom = argv[4], *text = NULL, *map = NULL;
+    const char *core = argv[3], *rom = argv[4], *text = NULL, *map = NULL, *png = NULL;
     DpLrExploreLimits lim = { 100000, 20000000, 4096 };
     for (int i = 5; i + 1 < argc; i += 2) {
         if (!strcmp(argv[i], "--text")) text = argv[i + 1];
         else if (!strcmp(argv[i], "--map")) map = argv[i + 1];
+        else if (!strcmp(argv[i], "--png")) png = argv[i + 1];
         else if (!strcmp(argv[i], "--path-steps")) lim.path_steps = strtoull(argv[i + 1], NULL, 0);
         else if (!strcmp(argv[i], "--max-total")) lim.total_steps = strtoull(argv[i + 1], NULL, 0);
         else if (!strcmp(argv[i], "--queue")) lim.max_items = (uint32_t)strtoul(argv[i + 1], NULL, 0);
@@ -54,19 +67,35 @@ int dp_lr_command(int argc, char **argv) {
             (unsigned long long)st.cut_path_steps, (unsigned long long)st.cut_total,
             (unsigned long long)st.dropped_items);
     if (f != stdout) fclose(f);
-    if (map) { // run-length map: one range per class change, compact ROM indices
-        FILE *m = fopen(map, "w");
-        if (m) {
-            fprintf(m, "# deepeel libretro map v1: code-start bytes reached (1) or not (0)\n");
+    if (map || png) {
+        // GB-bank layout ("bank start end class", CPU-view addresses) so the
+        // existing map text/PNG tools read it: only opcode starts the fork
+        // exploration reached are "code-natural"; everything else is unknown
+        size_t banks = (rn + 0x3FFF) / 0x4000;
+        if (!banks) banks = 1;
+        DpBuf mt;
+        dp_buf_init(&mt);
+        lr_pf(&mt, "# deepeel libretro map v1: opcode starts reached by the forking exploration\n");
+        for (size_t b = 0; b < banks; b++) {
+            unsigned win = b ? 0x4000u : 0u;
             size_t a = 0;
-            while (a < rn) {
-                size_t b = a;
-                while (b + 1 < rn && exec[b + 1] == exec[a]) b++;
-                fprintf(m, "%04zX %04zX %s\n", a, b, exec[a] ? "code-start" : "unreached");
-                a = b + 1;
+            while (a < 0x4000) {
+                size_t base = b * 0x4000;
+                int v = base + a < rn ? exec[base + a] : 0;
+                size_t e = a;
+                while (e + 1 < 0x4000 && (base + e + 1 < rn ? exec[base + e + 1] : 0) == v) e++;
+                lr_pf(&mt, "%zu %04zX %04zX %s\n", b, win + a, win + e, v ? "code-natural" : "unknown");
+                a = e + 1;
             }
-            fclose(m);
         }
+        if (map) {
+            FILE *m = fopen(map, "w");
+            if (m) { fwrite(mt.p, 1, mt.len, m); fclose(m); }
+        }
+        if (png && !dp_map_png_from_maptext((const char *)mt.p, mt.len, (int)banks, "libretro", "{}", png,
+                                            "libretro", rom, (unsigned)rn))
+            fprintf(stderr, "deepeel lr: cannot write %s\n", png);
+        dp_buf_free(&mt);
     }
     dp_lr_close(lr);
     free(exec);

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.73.0 LANGUAGES C)
+project(deepeel VERSION 0.74.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -271,6 +271,7 @@ add_library(deepeel_core STATIC
   src/cpu/sm83/sm83_isa.c
   src/mach/gb_machine.c
   src/mach/m0boy.c
+  src/mach/lr_cmd.c
   ${GEN}/dp_gbl_instances.c
   src/explore/explorer.c
   src/explore/frontier.c
@@ -294,7 +295,7 @@ add_library(deepeel_core STATIC
 )
 find_package(Threads REQUIRED)
 find_package(ZLIB REQUIRED) # PNG maps and snapshots: compressed image and zTXt chunks
-target_link_libraries(deepeel_core PUBLIC Threads::Threads ZLIB::ZLIB m dp_gblmach_lib dp_mdmach_lib)
+target_link_libraries(deepeel_core PUBLIC Threads::Threads ZLIB::ZLIB m dp_gblmach_lib dp_mdmach_lib deepeel_libretro ${CMAKE_DL_LIBS})
 target_include_directories(deepeel_core PUBLIC
   src include ${GEN} ${DP_GBL_RUNTIME} ${SDL2_INCLUDE_DIRS})
 if(SDL2_FOUND AND BUILD_GUI)
@@ -303,7 +304,7 @@ if(SDL2_FOUND AND BUILD_GUI)
 endif()
 
 add_executable(deepeel src/deepeel.c)
-add_library(deepeel_libretro STATIC src/mach/libretro.c src/mach/lr_cmd.c)
+add_library(deepeel_libretro STATIC src/mach/libretro.c)
 target_include_directories(deepeel_libretro PUBLIC src)
 target_link_libraries(deepeel PRIVATE deepeel_libretro ${CMAKE_DL_LIBS})
 add_library(deepeel_z80 STATIC

@@ -1246,3 +1246,13 @@ chemin), 1 cœur sans extension de trace (le niveau A ne peut pas fourcher) ou
 erreur. Test `lr_explore_cli` sur le cœur factice. La bibliothèque
 `deepeel_libretro` est maintenant liée au binaire principal (`libdl`).
 Observations de l'outil ; le rapport ne fait pas encore de carte PNG.
+
+## 0.74.0
+
+J12 (partiel) : `deepeel lr explore` accepte `--png FILE` : carte PNG des
+octets de début d'opcode atteints (classe `code-natural`, le reste `unknown`),
+produite par le moteur de carte existant à partir d'une carte texte au format
+« banque début fin classe » (banques de 16 KiB). `--map` écrit désormais ce
+même format. Seuls les débuts d'opcode sont marqués : l'extension de trace ne
+donne pas la longueur des instructions, donc la carte est creuse par
+construction. Test : signature PNG vérifiée dans `lr_explore_cli`.
