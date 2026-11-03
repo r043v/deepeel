@@ -1866,3 +1866,17 @@ active, VCE appliquée) et un crochet d'image publie la copie (`dp_pce_render`,
 `pce_watch_dump` (le fixture PCE n'active pas l'affichage : on ne vérifie que le
 flux d'images et le format). Reste ◐ : pas de bandeau d'état, `--jobs`
 secondaire sans publication, image PCE jamais vérifiée sur un vrai affichage.
+
+## 0.124.0
+
+NES, PCE, MD : `--export-state FILE` (J5, partielle). Avec `--novelty`, la
+cellule d'archive la plus profonde (images depuis la mise sous tension) est
+écrite telle quelle dans un fichier `DPST` (`src/core/statefile.[ch]`) :
+en-tête de 36 octets (magie, version 1, plateforme, CRC-32 et taille de la ROM,
+profondeur, taille du blob, taille compressée) puis le blob zlib de la machine.
+C'est le format interne de deepeel (la machine m0boy recompilée de la
+plateforme) : aucun émulateur tiers ne le lit, ce n'est donc pas encore un
+`.sta` de convertisseur. Rapport : `state exported: deepest cell, N frames`.
+Test `export_state` (en-tête, taille décompressée, profondeur > 0 sur les trois
+plateformes). Reste ◐ : mode humain, rechargement du fichier (reprise), format
+d'émulateur. Sans `--novelty`, rien n'est écrit.

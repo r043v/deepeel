@@ -1066,6 +1066,7 @@ static int cmd_nes(int argc, char **argv) {
             opt.watch_every = (unsigned)(60 / fps);
             nes_watch = 1;
         }
+        else if (!strcmp(a, "--export-state") && i + 1 < argc) opt.export_state = argv[++i];
         else if (!strcmp(a, "--watch-dump") && i + 1 < argc) { nes_dump = argv[++i]; if (!opt.watch_every) opt.watch_every = 2; }
         else if (!strcmp(a, "--novelty-archive") && i + 1 < argc) opt.novelty_archive = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed-vectors")) opt.seed_vectors = 1;
@@ -1186,6 +1187,7 @@ static int cmd_pce(int argc, char **argv) {
             opt.watch_every = (unsigned)(60 / fps);
             pce_watch = 1;
         }
+        else if (!strcmp(a, "--export-state") && i + 1 < argc) opt.export_state = argv[++i];
         else if (!strcmp(a, "--watch-dump") && i + 1 < argc) { pce_dump = argv[++i]; if (!opt.watch_every) opt.watch_every = 2; }
         else if (!strcmp(a, "--novelty-cells")) opt.novelty_cells = 1;
         else if (!strcmp(a, "--novelty-archive") && i + 1 < argc) opt.novelty_archive = (uint32_t)strtoul(argv[++i], NULL, 0);
@@ -1420,6 +1422,7 @@ static int cmd_md(int argc, char **argv) {
                 o.watch_every = (unsigned)(60 / fps);
                 md_watch = 1;
             }
+            else if (!strcmp(a, "--export-state") && i + 1 < argc) o.export_state = argv[++i];
             else if (!strcmp(a, "--watch-dump") && i + 1 < argc) { md_dump = argv[++i]; if (!o.watch_every) o.watch_every = 2; }
             else if (!strcmp(a, "--novelty-archive") && i + 1 < argc) o.novelty_archive = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--jobs") && i + 1 < argc) md_jobs = atoi(argv[++i]);

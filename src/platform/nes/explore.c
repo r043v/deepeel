@@ -17,6 +17,7 @@
 #include <math.h>
 #include <zlib.h>
 #include "../../gui/fbwatch.h"
+#include "../../core/statefile.h"
 
 // one queued exploration state: a machine snapshot plus its provenance
 typedef struct {
@@ -915,6 +916,16 @@ static void novelty_search(DpNesRun *x) {
         DpNesPathState s = { snap, 0, 0, 0, 0, 0, 0, DP_NES_TREE_ENTRY };
         if (snap_push(x, &s)) r->seeds_play++;
     }
+    if (x->opt.export_state && n) {
+        uint32_t d = 0;
+        for (uint32_t i = 1; i < n; i++) if (a[i].depth > a[d].depth) d = i;
+        // the PRG image identifies the ROM (the iNES header is not kept by the machine)
+        if (!dp_state_export(x->opt.export_state, "nes", dp_nesmach_prg_rom(x->m), dp_nesmach_prg_size(x->m),
+                             a[d].depth, a[d].z, (uint32_t)a[d].zlen, (uint32_t)ssz)) {
+            r->state_exported = 1;
+            r->state_exported_depth = a[d].depth;
+        }
+    }
     for (uint32_t i = 0; i < n; i++) free(a[i].z);
     free(a); free(L); free(keys); free(tmp); free(tmp2); free(ztmp);
 }
@@ -1638,6 +1649,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->exec_outside);
     fprintf(out, "  play: %llu sessions x frames %llu\n",
         (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run);
+    if (r->state_exported) fprintf(out, "  state exported: deepest cell, %u frames from power-on\n", r->state_exported_depth);
     if (r->watch_frames) fprintf(out, "  watch: %llu frames published\n", (unsigned long long)r->watch_frames);
     if (r->novelty_trials)
         fprintf(out, "  novelty: depth %u frames, %llu trials, %llu frames, %llu hits, %llu deaths, %llu archived (%llu replaced)\n",

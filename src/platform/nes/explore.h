@@ -120,6 +120,7 @@ typedef struct {
     uint32_t novelty_frames;    // frames per trial
     uint32_t novelty_archive;   // archive capacity
     int novelty_cells;          // key the archive on the screen fingerprint and lives
+    const char *export_state;   // write the deepest novelty cell here (DPST file, needs --novelty)
     unsigned watch_every;       // publish a frame to the watch buffer every N frames (0: off)
     int skip_root;
     int no_finalize;
@@ -173,6 +174,7 @@ typedef struct DpNesResults_ {
     uint64_t novelty_trials, novelty_hits, novelty_archived, novelty_replaced, novelty_frames_run, novelty_deaths;
     uint32_t novelty_depth;
     uint64_t watch_frames;
+    uint32_t state_exported_depth; int state_exported;
     unsigned jobs_folded;      // --jobs 2: secondary instances folded into this report
     DpNesOptions options;
 } DpNesResults;

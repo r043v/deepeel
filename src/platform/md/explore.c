@@ -5,6 +5,7 @@
 #include <math.h>
 #include <zlib.h>
 #include "../../gui/fbwatch.h"
+#include "../../core/statefile.h"
 #include "../../cpu/m68k/m68k.h"
 #include "../../mach/mdmach.h"
 #include "md_registry.h"
@@ -985,6 +986,14 @@ static void novelty_search(X *x) {
         dp_mdmach_load(x->m, tmp2);
         if (push(x, dp_mdmach_pc(x->m), 0, 0)) r->novelty_seeded++;
     }
+    if (o->export_state && N->n) {
+        uint32_t d = 0;
+        for (uint32_t i = 1; i < N->n; i++) if (N->a[i].depth > N->a[d].depth) d = i;
+        if (!dp_state_export(o->export_state, "md", x->c->rom, x->c->size, N->a[d].depth, N->a[d].z, (uint32_t)N->a[d].zlen, (uint32_t)ssz)) {
+            r->state_exported = 1;
+            r->state_exported_depth = N->a[d].depth;
+        }
+    }
     for (uint32_t i = 0; i < N->n; i++) free(N->a[i].z);
     free(N->a); free(N->L); free(N->keys); free(N->tmp); free(tmp2); free(N->ztmp); free(N);
 }
@@ -1288,6 +1297,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/SR context past the cap)\n", (unsigned long long)r->ctx_evicted);
     if (r->pass2_seeds || r->pass2_refused || r->pass2_capped) fprintf(out, "  second pass: %llu seeds, %llu refused, %llu capped\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     if (r->disp_tables) fprintf(out, "  dispatch tables: %llu tables, %llu seeds, %llu refused targets\n", (unsigned long long)r->disp_tables, (unsigned long long)r->disp_seeds, (unsigned long long)r->disp_refused_view);
+    if (r->state_exported) fprintf(out, "  state exported: deepest cell, %u frames from power-on\n", r->state_exported_depth);
     if (r->watch_frames) fprintf(out, "  watch: %llu frames published\n", (unsigned long long)r->watch_frames);
     if (r->novelty_trials)
         fprintf(out, "  novelty: depth %u frames, %llu trials, %llu frames, %llu hits, %llu deaths, %llu archived (%llu replaced), %llu seeded, %llu stalled\n",

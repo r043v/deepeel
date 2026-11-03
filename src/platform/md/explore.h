@@ -52,6 +52,7 @@ typedef struct {
     uint32_t novelty_archive;  /* archive capacity */
     int novelty_cells;         /* key the archive on the screen fingerprint and lives */
     uint32_t play_seed;
+    const char *export_state;  /* write the deepest novelty cell here (DPST file, needs --novelty) */
     unsigned watch_every;      /* publish a frame to the watch buffer every N frames (0: off) */
     int skip_root;
     int no_finalize;
@@ -130,6 +131,7 @@ typedef struct DpMdResults_ {
     uint64_t sat_replay_steps, sat_replay_total, replay_faults;
     uint32_t replay_only_bytes; /* bytes read only by replays */
     uint64_t novelty_trials, novelty_hits, novelty_archived, novelty_replaced, novelty_frames_run, novelty_deaths, novelty_seeded, novelty_stalled, watch_frames;
+    uint32_t state_exported_depth; int state_exported;
     uint32_t novelty_depth;
     unsigned jobs_folded;   /* --jobs 2: instances folded into this report (secondary) */
     uint8_t z80_bank_seen_out[128]; /* secondary instance only: banks the Z80 read (merged by the primary) */

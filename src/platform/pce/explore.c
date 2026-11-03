@@ -31,6 +31,7 @@
 #include <string.h>
 #include <zlib.h>
 #include "../../gui/fbwatch.h"
+#include "../../core/statefile.h"
 
 typedef struct {
     uint8_t *z;            // compressed bridge state
@@ -921,6 +922,14 @@ static void novelty_search(PceRun *x) {
             push_live(x, 0);
         }
     }
+    if (x->opt.export_state && n) {
+        uint32_t d = 0;
+        for (uint32_t i = 1; i < n; i++) if (a[i].depth > a[d].depth) d = i;
+        if (!dp_state_export(x->opt.export_state, "pce", x->rom, x->rom_size, a[d].depth, a[d].z, (uint32_t)a[d].zlen, (uint32_t)x->state_size)) {
+            r->state_exported = 1;
+            r->state_exported_depth = a[d].depth;
+        }
+    }
     for (uint32_t i = 0; i < n; i++) free(a[i].z);
     free(a);
     free(L);
@@ -1541,6 +1550,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run,
             (unsigned long long)r->tas_frames_run);
     fprintf(out, "  tas identity: %llu same ROM, %llu different, %llu unrecorded\n", (unsigned long long)r->tas_same, (unsigned long long)r->tas_different, (unsigned long long)r->tas_unrecorded);
+    if (r->state_exported) fprintf(out, "  state exported: deepest cell, %u frames from power-on\n", r->state_exported_depth);
     if (r->watch_frames) fprintf(out, "  watch: %llu frames published\n", (unsigned long long)r->watch_frames);
     fprintf(out, "  novelty: depth %u frames, %llu trials, %llu frames, %llu hits, %llu deaths, %llu archived (%llu replaced)\n",
             r->novelty_depth, (unsigned long long)r->novelty_trials, (unsigned long long)r->novelty_frames_run,

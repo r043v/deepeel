@@ -76,6 +76,7 @@ typedef struct {
     uint32_t novelty_frames; // frames per trial
     uint32_t novelty_archive; // archive cap (the least productive leaves first)
     int novelty_cells;       // Go-Explore cells: screen fingerprints, learned lives, depth bias
+    const char *export_state; // write the deepest novelty cell here (DPST file, needs --novelty)
     unsigned watch_every;    // publish a frame to the watch buffer every N frames (0: off)
     char tas_paths[8][512];
     int tas_count;
@@ -127,6 +128,7 @@ typedef struct DpPceResults_ {
     uint64_t novelty_trials, novelty_hits, novelty_archived, novelty_replaced, novelty_frames_run,
              novelty_deaths;
     uint64_t watch_frames;
+    uint32_t state_exported_depth; int state_exported;
     uint32_t novelty_depth;  // deepest archived cell, frames from power-on
     uint64_t io_writes, vdc_data_writes, copied_bytes;
     uint64_t static_bytes, padding_bytes, inferred_code, inferred_data, inferred_pad,
