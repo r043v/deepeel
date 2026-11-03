@@ -1233,6 +1233,35 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         }
         free(claimed);
     }
+    // S7 map inference (render only, tagged apart from observations): unobserved
+    // runs of one byte value (00/FF from 8 bytes, others from 32) are padding; a
+    // gap of <= 3 bytes between executed bytes is code; a gap of <= 1024 bytes next
+    // to observed bytes is data.
+    r->inferred = calloc(c->size, 1);
+    if (r->inferred) {
+        const uint8_t M = DP_MDF_NATURAL | DP_MDF_FORCED | DP_MDF_DATA | DP_MDF_DMA_READ | DP_MDF_CPU_VRAM;
+        size_t n = c->size;
+        for (size_t i = 0; i < n;) {
+            size_t j = i;
+            while (j < n && c->rom[j] == c->rom[i] && !(r->flags[j] & M)) j++;
+            if (j - i >= ((c->rom[i] == 0 || c->rom[i] == 0xFF) ? 8u : 32u)) {
+                memset(r->inferred + i, 1, j - i);
+                r->inf_pad += j - i;
+            }
+            i = j > i ? j : i + 1;
+        }
+        for (size_t i = 0; i < n;) {
+            if ((r->flags[i] & M) || r->inferred[i]) { i++; continue; }
+            size_t j = i;
+            while (j < n && !(r->flags[j] & M) && !r->inferred[j]) j++;
+            size_t len = j - i;
+            uint8_t lf = i ? r->flags[i - 1] : 0, rf = j < n ? r->flags[j] : 0, cl = 0;
+            if (len <= 3 && (lf & (DP_MDF_NATURAL | DP_MDF_FORCED)) && (rf & (DP_MDF_NATURAL | DP_MDF_FORCED))) { cl = 2; r->inf_code += len; }
+            else if (len <= 1024 && ((lf & M) || (rf & M))) { cl = 3; r->inf_data += len; }
+            if (cl) memset(r->inferred + i, cl, len);
+            i = j;
+        }
+    }
     for (size_t i = 0; i < c->size; i++) {
         uint8_t f = r->flags[i];
         if (f & (DP_MDF_NATURAL | DP_MDF_FORCED)) r->exec_bytes++;
@@ -1269,6 +1298,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
 }
 
 void dp_md_results_free(DpMdResults *r) {
+    free(r->inferred);
     free(r->flags);
     free(r->nonexcluded_reads);
     free(r->z80_flags);
@@ -1316,6 +1346,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
                 (unsigned long long)r->novelty_hits, (unsigned long long)r->novelty_deaths,
                 (unsigned long long)r->novelty_archived, (unsigned long long)r->novelty_replaced, (unsigned long long)r->novelty_seeded, (unsigned long long)r->novelty_stalled);
     if (r->jobs_folded) fprintf(out, "  jobs: %u secondary instance folded (entries split even/odd)\n", r->jobs_folded);
+    fprintf(out, "  map inference (S7, not observations): %llu padding, %llu code, %llu data bytes\n", (unsigned long long)r->inf_pad, (unsigned long long)r->inf_code, (unsigned long long)r->inf_data);
     fprintf(out, "  copy siblings: %llu tables, %llu entries, %llu bytes, %llu table caps\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_entries, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_caps);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);

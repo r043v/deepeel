@@ -1892,3 +1892,14 @@ abandonnée et comptée : `exact dedup: N forks dropped`. Sur `fix_md_pad_effect
 Le coût est un hachage d'environ 200 Kio par fourche : option désactivée par
 défaut. Reste ◐ : l'ensemble n'est pas persisté (`exact.bin`), un ensemble plein
 n'est pas reporté (il grossit), le Z80 interne n'est pas dans le hachage.
+
+## 0.126.0
+
+Mega Drive : inférence de voisins S7 (partielle). Après l'exploration, les
+plages non observées d'un même octet (00/FF dès 8 octets, autres dès 32) sont
+du remplissage inféré ; un trou de 3 octets au plus entre deux octets exécutés
+est du code inféré ; un trou de 1024 octets au plus voisin d'octets observés est
+de la donnée inférée. Le résultat vit dans `inferred`, jamais dans `flags` : une
+inférence ne masque pas une observation. Ligne de rapport `map inference (S7,
+not observations)`. Reste ◐ : pas de carte `.map` classée ni de rendu PNG pour
+le MD (O1), donc l'inférence n'est visible que par ses compteurs.

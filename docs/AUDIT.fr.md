@@ -13,7 +13,7 @@ remesure pas l'outil.
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 24 | 1 | 2 |
 | PCE | 16 | 21 | 1 | 1 |
-| MD | 8 | 22 | 8 | 1 |
+| MD | 8 | 23 | 7 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
 
@@ -56,7 +56,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | S6 | Rejeu de décodeurs sur tables de flux | NES | ✗ |
 | S6 | Rejeu de décodeurs sur tables de flux | PCE | ✗ |
 | S7 | Inférence de voisins à la carte | NES | ◐ trous ≤ 1024 |
-| S7 | Inférence de voisins à la carte | MD | ✗ |
+| S7 | Inférence de voisins à la carte | MD | ◐ remplissage ≥ 8 (00/FF) ou ≥ 32, code ≤ 3 o, données ≤ 1024 o ; rendu seulement |
 | G1 | Graines reset/RST/IRQ | NES | ◐ reset + NMI/IRQ (`--seed-vectors`) |
 | G1 | Graines reset/RST/IRQ | PCE | ◐ reset |
 | G1 | Graines reset/RST/IRQ | MD | ◐ reset |

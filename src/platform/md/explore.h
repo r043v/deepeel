@@ -80,6 +80,8 @@ typedef struct {
 
 typedef struct DpMdResults_ {
     uint8_t *flags;       /* per ROM byte, DP_MDF_* */
+    uint8_t *inferred;    /* S7 map inference per ROM byte: 1 pad, 2 code, 3 data, 0 none (never an observation) */
+    uint64_t inf_pad, inf_code, inf_data, pad_runs_bytes;
     uint8_t *z80_flags;   /* per ROM byte, DP_MDZ_* */
     uint64_t z80_steps, z80_exec_ram, z80_exec_bank, z80_exec_other, z80_rom_reads;
     uint64_t z80_ram_copied;   /* 68000 stores into Z80 RAM whose byte came from the ROM */
