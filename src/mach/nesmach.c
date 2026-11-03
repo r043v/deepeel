@@ -288,3 +288,41 @@ int dp_nesmach_mapper_write(const DpNesMach *d, unsigned value,
     return 0;
 }
 unsigned dp_nesmach_mapper(const DpNesMach *d) { return d->mapper; }
+
+size_t dp_nesmach_chr_size(const DpNesMach *d) { return d->chr_rom ? (size_t)d->chr_banks * 8192u : 0; }
+
+/* canonical CHR cell behind a PPU pattern address under the live bank */
+int64_t dp_nesmach_chr_index(const DpNesMach *d, unsigned addr) {
+    if (!d->chr_rom) return -1;
+    return (int64_t)(machine.chr - d->chr_rom) + (addr & 0x1FFFu);
+}
+
+/* tiles the PPU state refers to right now: background tiles of the two
+ * nametables (when BG rendering is on) and OAM sprites (when sprites are
+ * on).  Fills out[] with (cell << 1 | is_sprite); returns the count. */
+size_t dp_nesmach_chr_tiles(const DpNesMach *d, uint64_t *out, size_t cap) {
+    if (!d->chr_rom) return 0;
+    size_t n = 0;
+    const nes_ppu_t *p = &machine.ppu;
+    if (p->mask & 0x08) {
+        unsigned page = (p->ctrl & 0x10) ? 0x1000u : 0u;
+        for (unsigned nt = 0; nt < 2; nt++)
+            for (unsigned i = 0; i < 960 && n < cap; i++) {
+                int64_t c = dp_nesmach_chr_index(d, page + p->nametable[nt * 1024u + i] * 16u);
+                out[n++] = (uint64_t)c << 1;
+            }
+    }
+    if (p->mask & 0x10) {
+        int tall = (p->ctrl & 0x20) != 0;
+        for (unsigned s = 0; s < 64 && n < cap; s++) {
+            const uint8_t *o = p->oam + s * 4;
+            if (o[0] >= 0xEF) continue;
+            unsigned a = tall ? ((o[1] & 1) ? 0x1000u : 0u) + (o[1] & 0xFEu) * 16u
+                              : o[1] * 16u + ((p->ctrl & 0x08) ? 0x1000u : 0u);
+            for (unsigned t = 0; t < (tall ? 2u : 1u) && n < cap; t++)
+                out[n++] = ((uint64_t)dp_nesmach_chr_index(d, a + t * 16u) << 1) | 1u;
+        }
+    }
+    return n;
+}
+unsigned dp_nesmach_ppu_v(const DpNesMach *d) { (void)d; return machine.ppu.v & 0x3FFF; }

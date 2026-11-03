@@ -967,3 +967,14 @@ fenêtres réelles (`bank_base`/`fixed_base`), toujours en tranches de
 (fenêtre 1). Les cartouches MMC1 et MMC3 restent refusées avec un
 message : le runtime m0boy n'a que deux fenêtres PRG de 16 Kio et un CHR
 plat de 8 Kio, il faut l'étendre (dépôt voisin). Observation de l'outil.
+
+## 0.54.0
+
+J5 (suite) : CHR ROM indexée côté NES. Le rapport gagne une ligne `chr:`
+(taille, tiles de fond et de sprites référencées, lectures `$2007`). Les
+tiles sont déduites à chaque fin de frame de l'état du PPU (nametables
+quand le fond est activé, OAM quand les sprites le sont, pages de
+`$2000`), sans modifier le runtime m0boy ; la clé est
+`banque CHR * 8 Kio + adresse de motif`, donc stable sous CNROM. Les
+cartouches CHR-RAM n'ont pas de carte CHR. Observation de l'outil : une
+tile affichée à un instant donné, pas une mesure du matériel.

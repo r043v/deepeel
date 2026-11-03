@@ -71,4 +71,13 @@ unsigned dp_nesmach_mapper(const DpNesMach *m);
 int dp_nesmach_mapper_write(const DpNesMach *m, unsigned value,
                             unsigned *old_slot, unsigned *new_slot);
 
+/* CHR ROM as an indexed space (bank * 8 KiB + pattern address; size 0 and
+ * index -1 on CHR-RAM boards).  chr_tiles fills out[] with
+ * (cell << 1 | is_sprite) for the tiles the PPU state refers to now. */
+size_t dp_nesmach_chr_size(const DpNesMach *m);
+int64_t dp_nesmach_chr_index(const DpNesMach *m, unsigned addr);
+size_t dp_nesmach_chr_tiles(const DpNesMach *m, uint64_t *out, size_t cap);
+
+unsigned dp_nesmach_ppu_v(const DpNesMach *m);  /* the PPU address ($2006/$2007) */
+
 #endif

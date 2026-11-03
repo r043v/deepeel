@@ -83,7 +83,12 @@ typedef struct {
     const char *lot_path;  // disk lot of deferred states (NULL: memory only); an existing file is resumed
 } DpNesOptions;
 
+enum { DP_NES_CHR_BG = 1, DP_NES_CHR_SPR = 2, DP_NES_CHR_READ = 4 };
+
 typedef struct {
+    uint8_t *chr_flags;        // one byte per CHR ROM cell (DP_NES_CHR_*), NULL on CHR-RAM
+    size_t chr_size;
+    uint64_t chr_tiles_bg, chr_tiles_spr, chr_reads; // distinct 16-byte tiles / $2007 reads
     uint8_t *flags;            // one byte per physical PRG cell
     size_t prg_size;
     uint64_t steps, paths, forks, irq_forks, exec_outside, data_reads, oam_copies;

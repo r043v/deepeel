@@ -260,6 +260,13 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
 
 static void hook_read(void *user, unsigned addr) {
     DpNesRun *x = user;
+    if (addr == 0x2007 && x->r->chr_flags) {
+        int64_t c = dp_nesmach_chr_index(x->m, dp_nesmach_ppu_v(x->m));
+        if (c >= 0 && (size_t)c < x->r->chr_size && dp_nesmach_ppu_v(x->m) < 0x2000) {
+            x->r->chr_flags[c] |= DP_NES_CHR_READ;
+            x->r->chr_reads++;
+        }
+    }
     if (addr < x->cur_pc || addr >= x->cur_pc + x->cur_len) {
         int64_t cell = dp_nesmach_rom_index(x->m, addr);
         if (cell >= 0) {
@@ -311,8 +318,23 @@ static void hook_interrupt(void *user, unsigned vector) {
     x->r->irq_counts[vector == 0xFFFA ? 0 : 1]++;
 }
 
+static void chr_note_tiles(DpNesRun *x) {
+    DpNesResults *r = x->r;
+    if (!r->chr_flags) return;
+    uint64_t t[2048 + 128];
+    size_t n = dp_nesmach_chr_tiles(x->m, t, sizeof t / sizeof *t);
+    for (size_t i = 0; i < n; i++) {
+        uint64_t c = t[i] >> 1;
+        uint8_t bit = (t[i] & 1) ? DP_NES_CHR_SPR : DP_NES_CHR_BG;
+        if (c + 16 > r->chr_size || (r->chr_flags[c] & bit)) continue;
+        for (unsigned k = 0; k < 16; k++) r->chr_flags[c + k] |= bit;
+        if (bit == DP_NES_CHR_BG) r->chr_tiles_bg++; else r->chr_tiles_spr++;
+    }
+}
+
 static void hook_frame(void *user) {
     DpNesRun *x = user;
+    chr_note_tiles(x);
     if (!x->play_mode) return;
     x->frame_count++;
     x->r->play_frames_run++;
@@ -530,6 +552,7 @@ DpNesOptions dp_nes_options(void) {
 void dp_nes_results_free(DpNesResults *r) {
     if (!r) return;
     free(r->flags);
+    free(r->chr_flags);
     free(r->sections);
     free(r->section_of);
     r->flags = NULL;
@@ -571,6 +594,8 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     r->options = x.opt;
     r->prg_size = dp_nesmach_prg_size(x.m);
     r->flags = calloc(r->prg_size, 1);
+    r->chr_size = dp_nesmach_chr_size(x.m);
+    if (r->chr_size) r->chr_flags = calloc(r->chr_size, 1);
     if (!r->flags) { dp_nesmach_close(x.m); return 0; }
     if (dp_nesmach_state_size() > DP_NES_STATE_MAX) { dp_nesmach_close(x.m); return 0; }
 
@@ -758,6 +783,11 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->seeds_reset, (unsigned long long)r->seeds_irq,
         (unsigned long long)r->seeds_bank, (unsigned long long)r->seeds_play,
         (unsigned long long)r->seeds_refused_queue);
+    if (r->chr_size)
+        fprintf(out, "  chr: %zu KiB ROM, tiles referenced: background %llu sprites %llu"
+                     " (of %zu), $2007 reads %llu\n", r->chr_size / 1024,
+                (unsigned long long)r->chr_tiles_bg, (unsigned long long)r->chr_tiles_spr,
+                r->chr_size / 16, (unsigned long long)r->chr_reads);
     fprintf(out, "  sections %u: %s\n", r->section_count, dp_nmap_names[0]);
     for (uint32_t i = 0; i < r->section_count; i++) {
         const DpNesSection *s = &r->sections[i];

@@ -138,6 +138,25 @@ static void test_cnrom_axrom(void) {
         dp_nesmach_close(m);
     }
     free(rom);
+    // CNROM CHR typing: BG on, switch to CHR bank 2, tile 0 of bank 2 is referenced
+    rom = calloc(1, sz);
+    set_header(rom, 2, 4, 3);
+    put(rom, 0, 0, 0xA9, 0x08, 0x8D, 0x01, 0x20, 0xA9, 0x02, 0x8D, 0x00, 0x80,
+                   0x4C, 0x0C, 0x80, -1);
+    set_vector(rom, 1, 0xFFFC, 0x8000);
+    m = dp_nesmach_open(rom, sz, -1, err, sizeof err);
+    CHECK(m, "CNROM (typing) opens");
+    if (m) {
+        dp_nesmach_reset(m);
+        dp_nesmach_run(m, 5);
+        static uint64_t t[4096];
+        size_t n = dp_nesmach_chr_tiles(m, t, 4096);
+        CHECK(dp_nesmach_chr_size(m) == 4 * 8192u, "chr size");
+        CHECK(n == 1920 && (t[0] >> 1) == 2 * 8192u && !(t[0] & 1), "bg tiles on bank 2 (%zu, %llu)", n,
+              (unsigned long long)(t[0] >> 1));
+        dp_nesmach_close(m);
+    }
+    free(rom);
     // AxROM, 64 KiB PRG = 2 banks of 32 KiB
     sz = 16 + 4 * 0x4000;
     rom = calloc(1, sz);
