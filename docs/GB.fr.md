@@ -1424,3 +1424,12 @@ ligne `reg $XXXX reads R writes W` par registre touché. Corrige l'ancien
 compteur d'écritures, dont l'indice `(addr − $2000) & $3F` mélangeait le
 registre `$2000` et `$4000`. Test `nes_ioreg`. Observations de l'outil (le
 nombre de lectures suit les chemins explorés, pas une fréquence matérielle).
+
+## 0.89.0
+
+NES : identité ROM des films (J3). `dp_nes_tas_identity` compare le SHA-1 du
+film (bk2) à celui de la ROM, fichier entier ou sans l'en-tête iNES de 16
+octets (majuscules acceptées). Verdict : même ROM, ROM différente (le film est
+rejoué quand même, avec un avertissement), ou SHA-1 non enregistré (fm2). Le
+rapport imprime `tas identity: same ROM N, different ROM N, not recorded N`.
+Test unitaire `test_tas_identity` dans `nes`.

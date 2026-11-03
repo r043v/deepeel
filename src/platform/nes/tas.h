@@ -27,4 +27,9 @@ typedef struct DpNesTas {
 int dp_nes_tas_load(const char *path, DpNesTas *out, char *err, size_t errsz);
 void dp_nes_tas_free(DpNesTas *t);
 
+/* does the movie belong to this ROM?  1 same (its SHA-1 matches the whole
+ * file or the file without the 16-byte iNES header), 2 different ROM, 3 the
+ * movie records no SHA-1 (fm2, or a bk2 without one) */
+int dp_nes_tas_identity(const DpNesTas *t, const uint8_t *rom, size_t size);
+
 #endif

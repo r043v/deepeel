@@ -744,6 +744,12 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                 fprintf(stderr, "deepeel: TAS %s: %s\n", x.opt.tas_paths[i], err);
                 continue;
             }
+            int id = dp_nes_tas_identity(&t, data, size);
+            if (id == 1) r->tas_same++;
+            else if (id == 2) {
+                r->tas_different++;
+                fprintf(stderr, "deepeel: TAS %s: recorded for a different ROM (SHA-1 mismatch); played anyway\n", x.opt.tas_paths[i]);
+            } else r->tas_unrecorded++;
             uint32_t frames = x.opt.play_frames ? x.opt.play_frames : t.frames;
             if (t.rom_name[0])
                 fprintf(stderr, "deepeel: TAS %s: rom '%s', %u frames\n",
@@ -1078,6 +1084,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->parked_resumed, (unsigned long long)r->parked_lost);
     fprintf(out, "  pending paths dropped at the wall %llu\n",
         (unsigned long long)r->pending_dropped);
+    fprintf(out, "  tas identity: same ROM %llu, different ROM %llu, not recorded %llu\n", (unsigned long long)r->tas_same, (unsigned long long)r->tas_different, (unsigned long long)r->tas_unrecorded);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
     fprintf(out, "  pointer tables: %llu tables, %llu bytes (inferred)\n", (unsigned long long)r->table_count, (unsigned long long)r->table_bytes);
     fprintf(out, "  static closure: %llu bytes from %llu roots, cap hits %llu\n", (unsigned long long)r->static_bytes, (unsigned long long)r->static_roots, (unsigned long long)r->static_cap_hits);

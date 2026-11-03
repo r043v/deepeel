@@ -4,6 +4,7 @@
 #include <string.h>
 #include <ctype.h>
 #include "../../../src/core/zip.h"
+#include "../../../src/core/sha1.h"
 
 /* fm2 controller characters, in the movie's column order, to nes.input
  * bits (A=1 B=2 Select=4 Start=8 Up=16 Down=32 Left=64 Right=128):
@@ -219,4 +220,22 @@ void dp_nes_tas_free(DpNesTas *t) {
     free(t->cmds);
     t->masks = NULL;
     t->cmds = NULL;
+}
+
+static void sha1_hex(const uint8_t *d, size_t n, char out[41]) {
+    uint8_t h[20];
+    dp_sha1(d, n, h);
+    for (int i = 0; i < 20; i++) snprintf(out + 2 * i, 3, "%02x", h[i]);
+}
+
+int dp_nes_tas_identity(const DpNesTas *t, const uint8_t *rom, size_t size) {
+    if (!t || !t->sha1[0]) return 3;
+    char want[41], a[41], b[41];
+    size_t n = 0;
+    for (; t->sha1[n] && n < 40; n++) want[n] = (char)tolower((unsigned char)t->sha1[n]);
+    want[n] = 0;
+    sha1_hex(rom, size, a);
+    if (!strcmp(want, a)) return 1;
+    if (size > 16) { sha1_hex(rom + 16, size - 16, b); if (!strcmp(want, b)) return 1; }
+    return 2;
 }

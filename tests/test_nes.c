@@ -438,6 +438,25 @@ static void test_tas_load(void) {
     remove("test_tas.fm2");
 }
 
+static void test_tas_identity(void) {
+    uint8_t rom[64];
+    for (unsigned i = 0; i < sizeof rom; i++) rom[i] = (uint8_t)(i * 7);
+    DpNesTas t;
+    memset(&t, 0, sizeof t);
+    CHECK(dp_nes_tas_identity(&t, rom, sizeof rom) == 3, "a movie without SHA-1 records no identity");
+    // SHA-1 of the whole file, then of the file without the 16-byte header
+    extern void dp_sha1(const uint8_t *, size_t, uint8_t[20]);
+    uint8_t h[20];
+    dp_sha1(rom, sizeof rom, h);
+    for (int i = 0; i < 20; i++) snprintf(t.sha1 + 2 * i, 3, "%02X", h[i]);   // upper case is accepted
+    CHECK(dp_nes_tas_identity(&t, rom, sizeof rom) == 1, "whole-file SHA-1 matches");
+    dp_sha1(rom + 16, sizeof rom - 16, h);
+    for (int i = 0; i < 20; i++) snprintf(t.sha1 + 2 * i, 3, "%02x", h[i]);
+    CHECK(dp_nes_tas_identity(&t, rom, sizeof rom) == 1, "headerless SHA-1 matches");
+    rom[40] ^= 1;
+    CHECK(dp_nes_tas_identity(&t, rom, sizeof rom) == 2, "a changed ROM is a different ROM");
+}
+
 int main(void) {
     test_machine_nrom();
     test_machine_uxrom();
@@ -449,6 +468,7 @@ int main(void) {
     test_explorer();
     test_loop_bound();
     test_tas_load();
+    test_tas_identity();
     if (fails) printf("%d failures\n", fails);
     else printf("test_nes: all green\n");
     return fails != 0;
