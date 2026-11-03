@@ -1054,3 +1054,19 @@ J8 (partiel) : inférence par index (§5), tranche 6502/HuC6280.
 - Limites : seulement PCE ; pas de rejeu par index (§5.4), pas de
   provenance « base + index » sur le treillis, pas de classe dans la
   carte PNG. Test : `test_index` (table à trous, table biaisée).
+
+## 0.59.0
+
+J9 (partiel) : deux surfaces matérielles de plus.
+- **NES, DMA du canal DMC** : `$4012` (adresse `$C000 + A·64`, repli sur
+  `$8000`) et `$4013` (longueur `L·16+1`) sont suivis ; une écriture
+  `$4015` bit 4 consigne une copie (canal 2) et marque les octets de ROM
+  `DP_NES_SAMPLE` (type samples). Rapport : « DMC DMA starts … distinct
+  sample bytes from ROM ». Test `test_dmc`.
+- **GB, HDMA CGB** : l'exécution reste DMG (rien n'est émulé), mais les
+  registres `$FF51-$FF54` donnent source et destination et `$FF55` la
+  longueur : une copie ROM→VRAM (canal 2, `hdma`, verbatim) est consignée et
+  la source marquée donnée. Un transfert à cheval sur deux fenêtres est
+  coupé à la fenêtre. Fixture `fix_hdma`.
+- Observations de l'outil sur les registres écrits, pas des mesures de
+  matériel.

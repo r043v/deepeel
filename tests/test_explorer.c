@@ -239,6 +239,11 @@ int main(int argc, char **argv) {
     CHECK(copy_of(0, 2, 0x4000, 0x4007, 0x8000, 0x8007) != NULL);
     CHECK(bank_events_of(0, 2) >= 1); // MBC5 boots on bank 0
 
+    // --- hdma: a CGB HDMA is read from HDMA1-5, the ROM source is data -----------------
+    run(dir, "hdma");
+    const DpCopyRec *ch = copy_of(2, 1, 0x4000, 0x40FF, 0x8000, 0x80FF);
+    CHECK(ch != NULL && ch->verbatim && ch->bytes == 256);
+
     // --- copy1: a pure 1:1 ROM->VRAM copy is proven verbatim --------------------------
     run(dir, "copy1");
     const DpCopyRec *cv = copy_of(0, 1, 0x4000, 0x40FF, 0x8000, 0x80FF);

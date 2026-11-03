@@ -10,7 +10,8 @@
 #include <stdio.h>
 
 enum { DP_NES_NATURAL = 1, DP_NES_FORCED = 2, DP_NES_DATA = 4, DP_NES_COPIED = 8,
-       DP_NES_IRQ = 16, DP_NES_PAD = 32 };
+       DP_NES_IRQ = 16, DP_NES_PAD = 32,
+       DP_NES_SAMPLE = 64 }; // read by the DMC channel (delta-modulation sample DMA)
 
 // map classes mirror the GB names so maprender renders nes maps unchanged
 enum {
@@ -92,6 +93,7 @@ typedef struct {
     uint8_t *flags;            // one byte per physical PRG cell
     size_t prg_size;
     uint64_t steps, paths, forks, irq_forks, exec_outside, data_reads, oam_copies;
+    uint64_t dmc_starts, dmc_bytes; // $4015 bit 4 starts (copy channel 2) / distinct sample bytes
     uint64_t forced_paths;
     uint64_t step_cuts, loop_cuts, fork_cuts, queue_cuts, global_cuts, path_cuts,
              faults, decode_cuts;

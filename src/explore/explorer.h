@@ -425,6 +425,7 @@ struct DpExplorer {
     uint8_t cur_tier, defer_tier_next;
     uint8_t defer_tier_limit; // frontier drain: only tiers <= limit resume (0 = all)
     uint64_t steps_own;  // fork-explorer steps (the wall); sessions share res->steps_total
+    uint8_t hdma[4];  // HDMA1-4 as last written (source / destination of a CGB HDMA)
     int last_io_slot; // io registry slot of the last register write (copy attribution)
     int stop; // set when a hard budget wall is hit
     // play-session mode: set by a session worker that owns this explorer

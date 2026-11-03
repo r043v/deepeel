@@ -246,6 +246,15 @@ def build(out):
         r[0x4000 + i] = (i * 13 + 5) & 0xFF
     save(out, "fix_copy1", r)
 
+    # --- hdma: CGB general-purpose HDMA, 256 bytes $4000 -> $8000 -------------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x3E, 0x40, 0xE0, 0x51, 0xAF, 0xE0, 0x52, 0xAF, 0xE0, 0x53, 0xAF, 0xE0, 0x54,
+       0x3E, 0x0F, 0xE0, 0x55, 0x76)
+    for i in range(0x100):
+        r[0x4000 + i] = (i * 7 + 3) & 0xFF
+    save(out, "fix_hdma", r)
+
     # --- copyx: same loop but every byte is XOR-transformed -------------------
     # (a decompressor shape: the ranges match, the bytes do not)
     r = rom(2)

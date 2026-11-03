@@ -31,6 +31,7 @@ typedef struct {
 typedef struct { uint64_t key; uint32_t count; } DpNesLoop;
 
 typedef struct {
+    uint8_t dmc_addr, dmc_len;   // $4012 / $4013 as last written
     DpNesMach *m;
     const uint8_t *image;
     size_t image_size;
@@ -305,6 +306,25 @@ static void hook_write(void *user, unsigned addr, unsigned value) {
                 : src_page;
             record_copy(x, 0, x->total_steps, (uint16_t)x->cur_pc,
                         (uint32_t)base, 0, 1);
+        }
+        if (addr == 0x4012) x->dmc_addr = (uint8_t)value;
+        if (addr == 0x4013) x->dmc_len = (uint8_t)value;
+        if (addr == 0x4015 && (value & 0x10)) {
+            // DMC DMA: sample at $C000 + A*64 (wrapping into $8000), L*16+1 bytes
+            unsigned len = (unsigned)x->dmc_len * 16u + 1u;
+            uint32_t base = 0xC000u + (uint32_t)x->dmc_addr * 64u;
+            int64_t first = -1;
+            for (unsigned i = 0; i < len; i++) {
+                uint32_t a = base + i;
+                if (a > 0xFFFFu) a = 0x8000u + (a - 0x10000u);
+                int64_t cell = dp_nesmach_rom_index(x->m, a);
+                if (cell < 0) continue;
+                if (first < 0) first = cell;
+                if (!(r->flags[cell] & DP_NES_SAMPLE)) r->dmc_bytes++;
+                r->flags[cell] |= DP_NES_SAMPLE | DP_NES_COPIED;
+            }
+            r->dmc_starts++;
+            if (first >= 0) record_copy(x, 0, x->total_steps, (uint16_t)x->cur_pc, (uint32_t)first, 0, 2);
         }
         record_register(x, 0, x->total_steps, (uint16_t)x->cur_pc, (uint16_t)addr,
                         (uint8_t)value);
@@ -767,6 +787,8 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  data reads %llu, OAM DMA copies %llu, ram writes %llu, io writes %llu\n",
         (unsigned long long)r->data_reads, (unsigned long long)r->oam_copies,
         (unsigned long long)r->ram_writes, (unsigned long long)r->io_writes);
+    fprintf(out, "  DMC DMA starts %llu, distinct sample bytes from ROM %llu\n",
+        (unsigned long long)r->dmc_starts, (unsigned long long)r->dmc_bytes);
     fprintf(out, "  faults %llu decode cuts %llu exec outside PRG %llu\n",
         (unsigned long long)r->faults, (unsigned long long)r->decode_cuts,
         (unsigned long long)r->exec_outside);

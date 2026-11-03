@@ -703,6 +703,33 @@ static void hook_write(DpMach *m, uint16_t a, uint8_t v) {
             }
             if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
         }
+        if (a >= 0xFF51 && a <= 0xFF54) ex->hdma[a - 0xFF51] = v;
+        if (a == 0xFF55) {
+            // CGB HDMA: source/destination come from HDMA1-4, length from the
+            // written value (bit 7 selects H-blank mode: same source range)
+            unsigned src = (((unsigned)ex->hdma[0] << 8) | ex->hdma[1]) & 0xFFF0u;
+            unsigned dst = 0x8000u | ((((unsigned)ex->hdma[2] << 8) | ex->hdma[3]) & 0x1FF0u);
+            unsigned len = ((v & 0x7Fu) + 1u) * 16u;
+            if (src < 0x8000u) {
+                DpCopyRec rec;
+                memset(&rec, 0, sizeof rec);
+                rec.channel = 2;
+                rec.verbatim = 1;
+                rec.src_space = DP_SPACE_ROM;
+                rec.dst_space = DP_SPACE_VRAM;
+                rec.src_bank = src >= 0x4000 ? cur_bank(ex, 0x4000) : 0;
+                // one record per bank window: a transfer crossing it is clipped
+                unsigned room = 0x4000u - (src & 0x3FFFu);
+                unsigned n = len < room ? len : room;
+                rec.src_lo = (uint16_t)src;
+                rec.src_hi = (uint16_t)(src + n - 1);
+                rec.dst_lo = (uint16_t)dst;
+                rec.dst_hi = (uint16_t)(dst + n - 1);
+                rec.bytes = n;
+                rec.pc = m->api->gbr->pc;
+                dp_record_copy(ex, &rec, 0);
+            }
+        }
         if (a == 0xFF46 && v * 0x100u < 0x8000u) {
             // OAM DMA: 160 bytes land verbatim in the OAM
             DpCopyRec rec;

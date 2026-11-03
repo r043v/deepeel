@@ -183,6 +183,28 @@ static void test_cnrom_axrom(void) {
 }
 
 // MMC1 (serial port, 16 KiB switch) and MMC3 (8 KiB windows) composed in the bridge
+// DMC DMA: $4012 = $40 (sample at $D000), $4013 = 1 (17 bytes), $4015 bit 4
+static void test_dmc(void) {
+    unsigned sz = 16 + 2 * 0x4000 + 0x2000;
+    uint8_t *rom = calloc(1, sz);
+    set_header(rom, 2, 1, 0);
+    put(rom, 1, 0, 0xA9, 0x40, 0x8D, 0x12, 0x40, 0xA9, 0x01, 0x8D, 0x13, 0x40,
+                   0xA9, 0x10, 0x8D, 0x15, 0x40, 0x4C, 0x0F, 0xC0, -1);
+    set_vector(rom, 1, 0xFFFC, 0xC000);
+    DpNesOptions o = dp_nes_options();
+    o.max_total = 20000;
+    DpNesResults r;
+    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "dmc explore runs");
+    CHECK(r.dmc_starts >= 1 && r.dmc_bytes == 17, "17 sample bytes (%llu)", (unsigned long long)r.dmc_bytes);
+    CHECK((r.flags[0x4000 + 0x1000] & DP_NES_SAMPLE) && (r.flags[0x4000 + 0x1010] & DP_NES_SAMPLE), "sample range flagged");
+    CHECK(!(r.flags[0x4000 + 0x1011] & DP_NES_SAMPLE) && !(r.flags[0x4000 + 0x0FFF] & DP_NES_SAMPLE), "and only it");
+    int dmc = 0;
+    for (unsigned i = 0; i < r.copy_count; i++) dmc |= r.copies[i].channel == 2 && r.copies[i].source == 0x5000;
+    CHECK(dmc, "copy record on channel 2");
+    dp_nes_results_free(&r);
+    free(rom);
+}
+
 static void test_mmc1_mmc3(void) {
     char err[256];
     unsigned sz = 16 + 4 * 0x4000 + 0x2000;
@@ -422,6 +444,7 @@ int main(void) {
     test_unsupported_mappers();
     test_cnrom_axrom();
     test_mmc1_mmc3();
+    test_dmc();
     test_snapshot();
     test_explorer();
     test_loop_bound();
