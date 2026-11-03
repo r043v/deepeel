@@ -11,7 +11,7 @@ remesure pas l'outil.
 | GB | 34 | 1 | 3 | 1 |
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
-| NES | 11 | 20 | 6 | 2 |
+| NES | 11 | 21 | 5 | 2 |
 | PCE | 15 | 7 | 16 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
@@ -72,7 +72,7 @@ Cellules ouvertes (◐ ou ✗) : 93.
 | C1 | Sections, liveness, verdicts | NES | ◐ req/forced |
 | C1 | Sections, liveness, verdicts | PCE | ◐ req/forced |
 | C1 | Sections, liveness, verdicts | MD | ✗ |
-| C2 | Éviction par contexte | NES | ✗ |
+| C2 | Éviction par contexte | NES | ◐ contexte grossier opt-in (`--ctx-cap`) |
 | C2 | Éviction par contexte | PCE | ✗ |
 | C2 | Éviction par contexte | MD | ✗ |
 | C3 | Dédup exacte hors horloges | MD | ✗ |

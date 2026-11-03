@@ -66,6 +66,8 @@ const uint8_t *dp_nesmach_oam(const DpNesMach *m);
 /* the saved state's P flag byte (a fork force patches it in place) */
 uint8_t *dp_nesmach_state_p(void *buf);
 unsigned dp_nesmach_state_pc(const void *buf);
+/* coarse context hash (registers, pc, mapper registers; RAM and clocks excluded) */
+uint64_t dp_nesmach_state_ctx_hash(const void *buf);
 /* the saved state's pending-NMI edge (an interrupt fork clears it) */
 uint8_t *dp_nesmach_state_nmi_edge(void *buf);
 

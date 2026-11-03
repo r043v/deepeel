@@ -47,6 +47,7 @@ typedef struct {
     int32_t ram_src[0x800];            // last ROM cell whose read fed the store to each RAM byte (-1 none)
     int64_t *prov_anchor; uint32_t prov_len; // table-word cells that fed an indirect jmp pointer
     uint32_t cur_choice;               // tree node of the path being run
+    DpHashSet ctx_seen;                // per-context admission counters (C2)
     DpHashSet seen;                    // exact state dedup
     DpHashSet ind_sites, ind_pairs;    // observed jmp (ind): sites and (site,target) pairs
     DpHashSet probe_seen;              // strobe-write sites already probed
@@ -529,6 +530,18 @@ static int snap_push(DpNesRun *x, DpNesPathState *s) {
         tree_close(x, tree_add(x, s), DP_NES_ISSUE_EVICTED);
         free(s->state); return 0;
     }
+    if (x->opt.ctx_cap) {
+        // coarse same-context eviction: the k-th admission of a context is the
+        // key hash(ctx, k); a context past ctx_cap admissions is closed unrun
+        uint64_t c = dp_nesmach_state_ctx_hash(s->state);
+        unsigned k = 0;
+        while (k < x->opt.ctx_cap && dp_set_insert(&x->ctx_seen, (c ^ (k * 0x9E3779B97F4A7C15ull)) | 1) == 0) k++;
+        if (k >= x->opt.ctx_cap) {
+            x->r->ctx_evicted++;
+            tree_close(x, tree_add(x, s), DP_NES_ISSUE_EVICTED);
+            free(s->state); return 0;
+        }
+    }
     if (!s->choice) s->choice = tree_add(x, s);
     if (x->queue_len >= x->opt.queue_cap) {
         // a full queue is not a loss: the state waits aside (bounded, counted)
@@ -794,6 +807,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     x.fork_sites = calloc(x.fork_sites_len ? x.fork_sites_len : 1, sizeof(uint32_t));
     dp_set_init(&x.seen, 1 << 22);
     dp_set_init(&x.probe_seen, 1 << 10);
+    dp_set_init(&x.ctx_seen, 1 << 10);
     dp_set_init(&x.ind_sites, 1 << 10);
     dp_set_init(&x.ind_pairs, 1 << 12);
     if (!x.queue || !x.fork_sites) x.failed = 1;
@@ -950,6 +964,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     free(x.ring);
     dp_set_free(&x.seen);
     dp_set_free(&x.probe_seen);
+    dp_set_free(&x.ctx_seen);
     dp_set_free(&x.ind_sites);
     dp_set_free(&x.ind_pairs);
     int ok = !x.failed;
@@ -1407,6 +1422,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  copy siblings: %llu tables; %llu ranges (%llu bytes); %llu refused over executed code; %llu tables cut at the cap\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_ranges, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_refused, (unsigned long long)r->sib_caps);
     fprintf(out, "  choice tree: %u nodes\n", r->tree_count);
     fprintf(out, "  provenance: %llu jump-table words traced from PRG reads, %llu roots seeded\n", (unsigned long long)r->prov_sites, (unsigned long long)r->prov_roots);
+    if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/mapper context past the cap)\n", (unsigned long long)r->ctx_evicted);
     fprintf(out, "  bank dispatch: %llu tables, %llu seeds, %llu bank views refused (not code)\n", (unsigned long long)r->dispatch_tables, (unsigned long long)r->dispatch_seeds, (unsigned long long)r->dispatch_refused_view);
     fprintf(out, "  second pass: %llu seeds, %llu refused, %llu roots over the cap\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     fprintf(out, "  vector seeds: %llu\n", (unsigned long long)r->vectors_seeded);

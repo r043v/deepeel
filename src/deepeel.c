@@ -1052,6 +1052,7 @@ static int cmd_nes(int argc, char **argv) {
         else if (!strcmp(a, "--no-irq-fork")) opt.seed_irq = 0;
         else if (!strcmp(a, "--seed-banks")) opt.seed_banks = 1;
         else if (!strcmp(a, "--seed-vectors")) opt.seed_vectors = 1;
+        else if (!strcmp(a, "--ctx-cap") && i + 1 < argc) opt.ctx_cap = (unsigned)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--second-pass")) opt.second_pass = 1;
         else if (!strcmp(a, "--bank-dispatch")) opt.second_pass = opt.bank_dispatch = 1;
         else if (!strcmp(a, "--no-p1-fork")) opt.no_pad_probe = 1;

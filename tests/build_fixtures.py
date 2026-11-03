@@ -594,6 +594,17 @@ def build_nes_pce(out):
         d[q:q + 2] = bytes([0x00, 0xC0])
     with open(os.path.join(out, "fix_nes_dispatch.nes"), "wb") as f:
         f.write(d)
+    # NES context loop: INC $10 / LDA #0 / BEQ back; every pass differs only in RAM,
+    # so the exact dedup keeps all of them and a context cap closes the surplus
+    k = bytearray(16 + 2 * 0x4000)
+    k[0:4] = b"NES\x1a"
+    k[4], k[5] = 2, 0
+    k[16:16 + 6] = bytes([0xE6, 0x10, 0xA9, 0x00, 0xF0, 0xFA])
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        q = 16 + 0x4000 + 0x3FFA + (v - 0xFFFA)
+        k[q:q + 2] = bytes([0x00, 0x80])
+    with open(os.path.join(out, "fix_nes_ctx.nes"), "wb") as f:
+        f.write(k)
     # NES static closure: jsr $8020 whose subroutine a 2-step budget never reaches
     n = bytearray(16 + 2 * 0x4000 + 0x2000)
     n[0:4] = b"NES\x1a"

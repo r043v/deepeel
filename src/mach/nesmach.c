@@ -363,6 +363,19 @@ unsigned dp_nesmach_state_pc(const void *buf) {
     memcpy(&pc, (const uint8_t *)buf + offsetof(nes_t, cpu) + offsetof(nes6502_t, pc), sizeof pc);
     return pc;
 }
+uint64_t dp_nesmach_state_ctx_hash(const void *buf) {
+    // coarse context: CPU registers, pc and the mapper registers; RAM and clocks excluded
+    uint64_t h = 0xcbf29ce484222325ull;
+    const uint8_t *b = buf;
+    size_t o = offsetof(nes_t, cpu);
+    const unsigned f[] = { offsetof(nes6502_t, a), offsetof(nes6502_t, x), offsetof(nes6502_t, y),
+                           offsetof(nes6502_t, s), offsetof(nes6502_t, p), offsetof(nes6502_t, pc),
+                           offsetof(nes6502_t, pc) + 1 };
+    for (unsigned i = 0; i < sizeof f / sizeof *f; i++) h = (h ^ b[o + f[i]]) * 0x100000001b3ull;
+    size_t size = (size_t)nes_state_bytes();
+    for (unsigned i = 0; i < MAPPER_TAIL; i++) h = (h ^ b[size + i]) * 0x100000001b3ull;
+    return h;
+}
 uint8_t *dp_nesmach_state_nmi_edge(void *buf) {
     return (uint8_t *)buf + offsetof(nes_t, cpu) + offsetof(nes6502_t, nmi_edge);
 }

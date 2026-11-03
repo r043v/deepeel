@@ -1539,3 +1539,14 @@ graines du second passage. Rapport : `bank dispatch: N tables, N seeds, N bank
 views refused (not code)`. Fixture `fix_nes_dispatch.nes` (3 cibles × 4
 banques : 7 graines, 5 vues refusées), test `nes_bank_dispatch`. Reste ◐ :
 UxROM seulement, pas de tables hors banque fixe, pas de vue à bascule dynamique.
+
+## 0.99.0
+
+NES : éviction par contexte grossier (C2, partielle). `--ctx-cap N` : un état
+qui a passé la dédup exacte mais dont le contexte (pc, A/X/Y/S/P, registres de
+mapper ; RAM et horloges exclues) a déjà été admis N fois est clos sans être
+exécuté, compté (`context eviction: N states closed`) et marqué évincé dans
+l'arbre. Désactivée par défaut. Ce n'est pas l'éviction GB : il n'y a pas de
+liveness par section, donc un chemin dépendant de la RAM peut être coupé à
+tort — d'où l'option explicite. Fixture `fix_nes_ctx.nes` (boucle qui ne
+varie que par la RAM), test `nes_ctx_cap`.
