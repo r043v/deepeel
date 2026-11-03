@@ -13,7 +13,7 @@ remesure pas l'outil.
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 20 | 5 | 2 |
 | PCE | 16 | 13 | 9 | 1 |
-| MD | 8 | 8 | 22 | 1 |
+| MD | 8 | 10 | 20 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
 
@@ -77,7 +77,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | C3 | Dédup exacte hors horloges | MD | ✗ |
 | F1 | File croissante + spool + `--resume` | NES | ◐ `--spool`/`--resume` (lot disque), file bornée + parc |
 | F1 | File croissante + spool + `--resume` | PCE | ◐ `--lot`/`--lot-drain` + parc ; pas de `--resume` ni de file croissante |
-| F1 | File croissante + spool + `--resume` | MD | ✗ |
+| F1 | File croissante + spool + `--resume` | MD | ◐ `--lot`/`--lot-drain` + parc (`parked`, `lot_*`) ; pas de `--resume` ni de file croissante bornée par option |
 | F2 | Arbre de choix persistant | NES | ◐ `--tree` (nœuds, parents, issues ; site non renseigné) |
 | F2 | Arbre de choix persistant | PCE | ✗ |
 | F2 | Arbre de choix persistant | MD | ✗ |
@@ -104,7 +104,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | O1 | `.map` texte, PNG, JSON, heat | NES | ◐ |
 | O1 | `.map` texte, PNG, JSON, heat | MD | ✗ dump brut |
 | O2 | `.cov`, romdata, `--evidence` | PCE | ◐ `--evidence` (pas de `.cov` ni romdata : pas de compteurs de coups) |
-| O2 | `.cov`, romdata, `--evidence` | MD | ✗ |
+| O2 | `.cov`, romdata, `--evidence` | MD | ◐ `--evidence` ; pas de `.cov` ni romdata |
 | O3 | `--watch` (SDL2) | SMS/GG | ✗ |
 | O3 | `--watch` (SDL2) | MSX | ✗ |
 | O3 | `--watch` (SDL2) | NES | ✗ |

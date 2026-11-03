@@ -1623,3 +1623,10 @@ entrée 0 octet exécuté par fourche, avec `--entry 0x2f0` des milliers (le
 code est la plage de zéros exécutée comme `ori`). Reste ◐ : pas de
 `--seed-banks` (mapper SRAM/bankswitch SSF2), pas d'entrée dans une vue
 de banque.
+
+## 0.104.1
+
+Correction de la matrice (aucun changement de code) : MD F1 (lot disque,
+`--lot-drain`, parc `parked`) et MD O2 (`--evidence`) existent déjà ; elles
+passent ◐ avec leur reste explicite (pas de `--resume`, pas de `.cov` ni
+romdata).
