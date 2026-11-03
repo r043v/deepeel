@@ -11,7 +11,7 @@ remesure pas l'outil.
 | GB | 34 | 1 | 3 | 1 |
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
-| NES | 11 | 15 | 11 | 2 |
+| NES | 11 | 16 | 10 | 2 |
 | PCE | 15 | 7 | 16 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
@@ -66,7 +66,7 @@ Cellules ouvertes (◐ ou ✗) : 93.
 | G2 | Scan de dispatch par vues de banques | MD | ✗ |
 | G3 | `--seed-banks`, `--entry` | PCE | ✗ |
 | G3 | `--seed-banks`, `--entry` | MD | ✗ |
-| G4 | Semis indirect + budgets en cascade | NES | ✗ |
+| G4 | Semis indirect + budgets en cascade | NES | ◐ second passage sur racines statiques (`--second-pass`) |
 | G4 | Semis indirect + budgets en cascade | PCE | ✗ |
 | G4 | Semis indirect + budgets en cascade | MD | ✗ |
 | C1 | Sections, liveness, verdicts | NES | ◐ req/forced |

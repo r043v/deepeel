@@ -296,3 +296,5 @@ add_test(NAME nes_cov COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_
 set_tests_properties(nes_cov PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_sibling COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_sibling.nes --max-total 20000 --max-steps 2000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_sib.txt >/dev/null 2>&1; grep -Eq 'copy siblings: 1 tables; 2 ranges .32 bytes.' ${CMAKE_CURRENT_BINARY_DIR}/nes_sib.txt")
 set_tests_properties(nes_sibling PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME nes_second_pass COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_static.nes --second-pass --max-total 20000 --max-steps 2 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_p2.txt >/dev/null 2>&1; grep -Eq 'second pass: 1 seeds, 0 refused' ${CMAKE_CURRENT_BINARY_DIR}/nes_p2.txt && grep -Eq 'static closure: 0 bytes from 0 roots' ${CMAKE_CURRENT_BINARY_DIR}/nes_p2.txt")
+set_tests_properties(nes_second_pass PROPERTIES FIXTURES_REQUIRED fixtures)

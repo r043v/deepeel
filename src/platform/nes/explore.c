@@ -651,6 +651,7 @@ DpNesOptions dp_nes_options(void) {
 
 static void infer_gaps(DpNesRun *x);
 static void static_closure(DpNesRun *x);
+static void second_pass_seed(DpNesRun *x);
 static void table_scan(DpNesRun *x);
 static void copy_siblings(DpNesRun *x);
 
@@ -818,26 +819,31 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                 DpNesPathState er = { es, 0, 0, 0, 0, 0 };
                 if (queue_push(&x, &er)) r->vectors_seeded++; else { free(es); r->seeds_refused_queue++; }
             }
-            for (;;) {
-                if (x.failed) break;
-                if (x.queue_len == 0 && x.park_len > 0) { x.queue[x.queue_len++] = x.park[--x.park_len]; r->parked_resumed++; }
-                if (x.queue_len == 0 && dp_lf_pending(x.lot)) { // the disk backlog comes back
-                    DpNesPathState m; uint32_t ml = 0, bl = 0; uint8_t *blob = NULL;
-                    if (dp_lf_get(x.lot, &m, &ml, &blob, &bl)) {
-                        if (ml == sizeof m && bl == dp_nesmach_state_size()) { m.state = blob; x.queue[x.queue_len++] = m; }
-                        else free(blob);
+            for (int pass = 0; pass < 2; pass++) {
+                for (;;) {
+                    if (x.failed) break;
+                    if (x.queue_len == 0 && x.park_len > 0) { x.queue[x.queue_len++] = x.park[--x.park_len]; r->parked_resumed++; }
+                    if (x.queue_len == 0 && dp_lf_pending(x.lot)) { // the disk backlog comes back
+                        DpNesPathState m; uint32_t ml = 0, bl = 0; uint8_t *blob = NULL;
+                        if (dp_lf_get(x.lot, &m, &ml, &blob, &bl)) {
+                            if (ml == sizeof m && bl == dp_nesmach_state_size()) { m.state = blob; x.queue[x.queue_len++] = m; }
+                            else free(blob);
+                        }
+                        if (x.queue_len == 0) continue; // unreadable record: next one
                     }
-                    if (x.queue_len == 0) continue; // unreadable record: next one
+                    if (x.queue_len == 0) break;
+                    uint32_t slot = x.queue_len - 1;
+                    run_path(&x, slot);
+                    // the slot is drained (run_path cleared its state); the
+                    // forks it queued sit above it — take the last one's place
+                    if (x.queue_len - 1 > slot)
+                        x.queue[slot] = x.queue[x.queue_len - 1];
+                    x.queue_len--;
+                    if (x.total_steps >= x.opt.max_total) break;
                 }
-                if (x.queue_len == 0) break;
-                uint32_t slot = x.queue_len - 1;
-                run_path(&x, slot);
-                // the slot is drained (run_path cleared its state); the
-                // forks it queued sit above it — take the last one's place
-                if (x.queue_len - 1 > slot)
-                    x.queue[slot] = x.queue[x.queue_len - 1];
-                x.queue_len--;
-                if (x.total_steps >= x.opt.max_total) break;
+                if (pass == 1 || !x.opt.second_pass || x.failed || x.queue_len || x.total_steps >= x.opt.max_total) break;
+                second_pass_seed(&x);
+                if (x.queue_len == 0) break;   // nothing seeded: no second drain
             }
         }
     }
@@ -879,6 +885,48 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     int ok = !x.failed;
     dp_nesmach_close(x.m);
     return ok;
+}
+
+// --- second pass (G4) -----------------------------------------------------------
+//
+// Targets of executed jmp/jsr/branch instructions that no path executed (the
+// static closure's roots) are entered as forced roots and the queue drains
+// again, under the same total budget.  At most NES_PASS2_MAX seeds; roots over
+// the cap, refused entries and seeds are all counted.
+#define NES_PASS2_MAX 256
+static void second_pass_seed(DpNesRun *x) {
+    DpNesResults *r = x->r;
+    const uint8_t *rom = dp_nesmach_prg_rom(x->m);
+    size_t n = r->prg_size;
+    if (!rom || !x->ipc || !x->istart) return;
+    uint8_t *sd = calloc(n, 1);
+    if (!sd) return;
+    for (size_t c = 0; c < n; c++) {
+        if (!x->istart[c]) continue;
+        uint8_t b[3] = { rom[c], c + 1 < n ? rom[c + 1] : 0, c + 2 < n ? rom[c + 2] : 0 };
+        DpM6502Instruction in;
+        if (!dp_m6502_decode(b, 3, x->ipc[c], &in)) continue;
+        if (in.flow != DP_M6502_JUMP && in.flow != DP_M6502_CALL && in.flow != DP_M6502_BRANCH) continue;
+        unsigned t = in.target;
+        if (t < 0x8000u) continue;
+        int64_t tc;
+        if ((t & 0xC000u) == (x->ipc[c] & 0xC000u)) tc = (int64_t)(c - (x->ipc[c] & 0x3FFFu)) + (int64_t)(t & 0x3FFFu);
+        else tc = dp_nesmach_rom_index(x->m, t);
+        if (tc < 0 || (size_t)tc >= n || (r->flags[tc] & (DP_NES_NATURAL | DP_NES_FORCED)) || sd[tc]) continue;
+        sd[tc] = 1;
+        if (r->pass2_seeds + r->pass2_refused >= NES_PASS2_MAX) { r->pass2_capped++; continue; }
+        // the machine enters the target's bank (window $8000-$BFFF) or the fixed one
+        unsigned bank = (t < 0xC000u) ? (unsigned)((size_t)tc >> 14) : 0;
+        uint8_t *es = malloc(dp_nesmach_state_size());
+        if (!es) { x->failed = 1; free(sd); return; }
+        dp_nesmach_reset(x->m);
+        if (!dp_nesmach_enter(x->m, bank, t)) { free(es); r->pass2_refused++; continue; }
+        dp_nesmach_save(x->m, es);
+        DpNesPathState er = { es, 1, 0, 0, 0, 0 };
+        if (queue_push(x, &er)) r->pass2_seeds++;
+        else { free(es); r->seeds_refused_queue++; }
+    }
+    free(sd);
 }
 
 // --- static flow closure ----------------------------------------------------------
@@ -1214,6 +1262,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  pad probes: %llu forks at %llu sites, refused %llu\n", (unsigned long long)r->pad_probes, (unsigned long long)r->pad_probe_sites, (unsigned long long)r->pad_probe_refused);
     fprintf(out, "  copy siblings: %llu tables; %llu ranges (%llu bytes); %llu refused over executed code; %llu tables cut at the cap\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_ranges, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_refused, (unsigned long long)r->sib_caps);
+    fprintf(out, "  second pass: %llu seeds, %llu refused, %llu roots over the cap\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     fprintf(out, "  vector seeds: %llu\n", (unsigned long long)r->vectors_seeded);
     fprintf(out, "  entries: seeded %llu refused %llu\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  seeds: reset %llu irq %llu bank %llu play %llu refused %llu\n",

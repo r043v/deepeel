@@ -1474,3 +1474,16 @@ sur code naturel refusées et comptées, l'observation gagne toujours. Rapport :
 `copy siblings: N tables; N ranges (N bytes); N refused…; N tables cut at the
 cap`. Fixture `fix_nes_sibling.nes`, test `nes_sibling`. Reste ◐ : pas les
 copies DMC, pas de résolution pour les mappeurs à pont (1/3/4/7).
+
+## 0.94.0
+
+NES : second passage (G4, partielle). `--second-pass` : après le premier
+drainage, les cibles des `jmp`/`jsr`/branches exécutés que nul chemin n'a
+exécutées (les racines de la fermeture statique) sont entrées comme racines
+forcées (banque de la cible dans la fenêtre `$8000–$BFFF`, banque fixe
+au-delà), puis la file est drainée une seconde fois sous le même budget total.
+Au plus 256 graines ; refus d'entrée, racines au-delà du plafond et graines
+sont comptés : `second pass: N seeds, N refused, N roots over the cap`.
+Sur `fix_nes_static.nes` (2 pas) la racine statique devient exécutée (forcée)
+et la fermeture statique n'a plus de racine. Reste ◐ : un seul second passage,
+pas de budgets en cascade, indirects non semés. Test `nes_second_pass`.
