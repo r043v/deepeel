@@ -682,6 +682,12 @@ def build_nes_pce(out):
     p[0x1FFE], p[0x1FFF] = 0x00, 0xE0
     with open(os.path.join(out, "fix_pce_branch.pce"), "wb") as f:
         f.write(p)
+    # PC Engine padding slide: LDA #1 ; JMP $E020 into a zero-filled run
+    w = bytearray(0x4000)
+    w[0:5] = bytes([0xA9, 0x01, 0x4C, 0x20, 0xE0])
+    w[0x1FFE], w[0x1FFF] = 0x00, 0xE0
+    with open(os.path.join(out, "fix_pce_slide.pce"), "wb") as f:
+        f.write(w)
 
 if __name__ == "__main__":
     build_nes_pce(sys.argv[1] if len(sys.argv) > 1 else ".")

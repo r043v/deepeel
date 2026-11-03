@@ -163,6 +163,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_z80.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_slide.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_uxrom.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_pad.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ind.nes
@@ -316,3 +317,5 @@ add_test(NAME nes_jam COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_
 set_tests_properties(nes_jam PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME pce_evidence COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce --max-total 20000 --max-steps 100 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_ev.txt --evidence ${CMAKE_CURRENT_BINARY_DIR}/pce_ev.ev >/dev/null 2>&1; grep -q '^0000 0018 001A 02' ${CMAKE_CURRENT_BINARY_DIR}/pce_ev.ev")
 set_tests_properties(pce_evidence PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME pce_slide COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_slide.pce --max-total 20000 --max-steps 100 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_sl.txt >/dev/null 2>&1; grep -Eq 'padding cuts: [1-9]' ${CMAKE_CURRENT_BINARY_DIR}/pce_sl.txt")
+set_tests_properties(pce_slide PROPERTIES FIXTURES_REQUIRED fixtures)

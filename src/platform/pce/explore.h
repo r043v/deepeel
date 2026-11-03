@@ -110,7 +110,7 @@ typedef struct DpPceResults_ {
     uint64_t vce_data_writes, palette_bytes; // VCE colour-data stores / distinct palette cells
     size_t rom_size;
     uint64_t steps, paths, forks, irq_forks, pad_forks, exec_outside, data_reads;
-    uint64_t forced_paths, evicted, faults, illegal_cuts;
+    uint64_t forced_paths, evicted, faults, illegal_cuts, pad_cuts;
     uint64_t step_cuts, loop_cuts, fork_cuts, pad_fork_cuts, irq_fork_cuts, queue_cuts,
              global_cuts;
     uint64_t lot_written, lot_read, lot_pending; // disk lot (--lot)

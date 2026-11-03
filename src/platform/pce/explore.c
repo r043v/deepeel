@@ -479,6 +479,13 @@ static int step_one(PceRun *x, int *frame_done) {
     DpHucIns in;
     dp_huc_decode(b, 7, c.pc, &in);
     int64_t site = dp_pce_rom_index(c.pc);
+    // padding slide: a natural/forced path running into 8 identical $00/$FF bytes
+    // of the ROM has left the code; cut it, counted in pad_cuts
+    if (x->mode == 0 && site >= 0 && (b[0] == 0x00 || b[0] == 0xFF) && (size_t)site + 8 <= x->rom_size) {
+        unsigned same = 1;
+        for (unsigned k = 1; k < 8; k++) if (x->rom[site + k] == b[0]) same++;
+        if (same == 8) { r->pad_cuts++; return 0; }
+    }
     if (in.flow == DP_HUC_ILLEGAL) {
         // the machine runs it as a NOP; exploration takes it as data run as
         // code and ends the path (play keeps running, unmarked)
@@ -1246,6 +1253,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             r->nidx, r->idx_declared, r->idx_refused_code, r->idx_biased,
             (unsigned long long)r->idx_cross_page, (unsigned long long)r->idx_forced_ignored,
             (unsigned long long)r->idx_overflow);
+    fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
     fprintf(out, "  faults %llu, exec outside ROM %llu, queued state bytes %llu\n",
             (unsigned long long)r->faults, (unsigned long long)r->exec_outside,
             (unsigned long long)r->state_bytes_peak);

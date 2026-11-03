@@ -1583,3 +1583,13 @@ copiée, `10` IRQ, `20` padding, `40` statique, `80` table), banques physiques
 de 8 KiB. Fixture `fix_pce_branch.pce`, test `pce_evidence` (la plage forcée
 `0018–001A` est épinglée). Pas de `.cov` ni de romdata côté PCE : il n'y a pas
 de compteurs de coups par cellule.
+
+## 0.101.0
+
+PCE : coupe de glissade de padding (D14, partielle). Un chemin naturel ou
+forcé qui arrive sur 8 octets identiques `$00`/`$FF` de la ROM est coupé et
+compté (`padding cuts: N`) ; avant, il les exécutait comme du code jusqu'au
+plafond de pas. Les opcodes illégaux étaient déjà coupés (`illegal_cuts`).
+Fixture `fix_pce_slide.pce` (`LDA #1 ; JMP $E020` vers une plage de zéros :
+2 pas, 1 coupe), test `pce_slide`. Reste ◐ : pas de chien de garde HALT/WAI
+attribué, et les sessions de jeu (`play`) ne coupent pas.

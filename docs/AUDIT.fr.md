@@ -12,7 +12,7 @@ remesure pas l'outil.
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 20 | 5 | 2 |
-| PCE | 16 | 10 | 12 | 1 |
+| PCE | 16 | 11 | 11 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
@@ -33,7 +33,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | D13 | Coupes de non-sens | NES | ◐ illégal |
 | D13 | Coupes de non-sens | PCE | ◐ illégal |
 | D13 | Coupes de non-sens | MD | ◐ faute |
-| D14 | Chien de garde HALT, glissade de padding | PCE | ✗ |
+| D14 | Chien de garde HALT, glissade de padding | PCE | ◐ glissade $00/$FF coupée (`padding cuts`) + opcode illégal ; pas de HALT/WAI attribué |
 | D14 | Chien de garde HALT, glissade de padding | MD | ✗ |
 | S1 | Scan padding + tables de pointeurs | NES | ◐ padding + tables, sans pointeurs ROM→ROM hors fenêtre |
 | S1 | Scan padding + tables de pointeurs | MD | ✗ |
