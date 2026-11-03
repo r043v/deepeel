@@ -1281,3 +1281,15 @@ et le pilote de fourches libretro de niveau B.
 - Reste : un vrai cœur patché hors dépôt, le rapport complet (typage, copies,
   longueurs d'instruction), cartes multi-banques (la parité ne couvre que les
   ROM 32 KiB sans bancs).
+
+## 0.76.0
+
+J13 (partiel) : fixtures NES (`fix_nes_branch.nes`, NROM 32 KiB : conditionnel
++ OAM DMA) et PC Engine (`fix_pce_branch.pce`, 16 Kio : MPR, conditionnel sur
+WRAM, écriture VDC) générées par `tests/build_fixtures.py` ; la campagne
+(`tools/campaign_fixtures.py`, aussi test `campaign_fixtures`) couvre
+maintenant GB, MD, SMS, NES et PCE (45 runs). Pour NES/PCE la colonne « octets
+connus » est la couverture observée, pas une classification complète ; les pas
+(1 000 000 / 1 200 000) sont le mur du budget par chemin sur la boucle d'attente.
+Observations de l'outil. Reste : ROMs réelles hors dépôt, audit de la matrice,
+fixtures Game Gear/MSX/SG-1000.

@@ -481,7 +481,35 @@ def build_md_z80(out):
     r[0x320] = 0xAB
     save_md(out, "fix_md_z80", r)
 
+def build_nes_pce(out):
+    # NES NROM-256 (2 x 16 KiB PRG + 8 KiB CHR): LDA $9000 / BNE (both sides) /
+    # STA $4014 (OAM DMA from page $80); vectors -> $8000
+    rom = bytearray(16 + 2 * 0x4000 + 0x2000)
+    rom[0:4] = b"NES\x1a"
+    rom[4], rom[5] = 2, 1
+    code = bytes([0xAD, 0x00, 0x90, 0xD0, 0x05, 0xA9, 0x11, 0x4C, 0x0C, 0x80, 0xA9, 0x22, 0x85, 0x10,
+                  0xA9, 0x80, 0x8D, 0x14, 0x40, 0x4C, 0x13, 0x80])
+    rom[16:16 + len(code)] = code
+    rom[16 + 0x1000] = 0x01
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):  # vectors live at the end of the last 16 KiB PRG bank
+        o = 16 + 0x4000 + (v - 0xFFFA) + 0x3FFA
+        rom[o:o + 2] = bytes([0x00, 0x80])
+    with open(os.path.join(out, "fix_nes_branch.nes"), "wb") as f:
+        f.write(rom)
+    # PC Engine 16 KiB HuCard (same program as test_pce): MPR setup, WRAM branch, VDC write
+    p = bytearray(0x4000)
+    code = bytes([0x78, 0xD4, 0xA9, 0xFF, 0x53, 0x01, 0xA9, 0xF8, 0x53, 0x02, 0xA9, 0x01, 0x53, 0x04,
+                  0xAD, 0x00, 0x20, 0xD0, 0x05, 0xAD, 0x00, 0x40, 0x80, 0x03, 0xAD, 0x08, 0x40,
+                  0x03, 0x02, 0xAD, 0x10, 0x40, 0x8D, 0x02, 0x00, 0x80, 0xFE])
+    p[0:len(code)] = code
+    for i in range(0x20):
+        p[0x2000 + i] = 0x40 + i
+    p[0x1FFE], p[0x1FFF] = 0x00, 0xE0
+    with open(os.path.join(out, "fix_pce_branch.pce"), "wb") as f:
+        f.write(p)
+
 if __name__ == "__main__":
+    build_nes_pce(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_md_z80(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_md(sys.argv[1] if len(sys.argv) > 1 else ".")
     build(sys.argv[1] if len(sys.argv) > 1 else ".")

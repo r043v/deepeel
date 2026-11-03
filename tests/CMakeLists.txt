@@ -161,6 +161,8 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nsstack.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_dma.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_z80.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce
 )
 
 add_custom_command(
@@ -251,3 +253,5 @@ add_executable(test_lr_parity test_lr_parity.c)
 target_link_libraries(test_lr_parity PRIVATE deepeel_core m)
 add_dependencies(test_lr_parity fixtures)
 add_test(NAME lr_parity COMMAND test_lr_parity ${CMAKE_CURRENT_BINARY_DIR})
+add_test(NAME campaign_fixtures COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/campaign_fixtures.py ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/campaign.md)
+set_tests_properties(campaign_fixtures PROPERTIES TIMEOUT 300)

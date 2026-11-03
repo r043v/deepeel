@@ -14,19 +14,25 @@ fx = os.path.join(build, "tests")
 PLATFORMS = [  # name, glob, command builder
     ("Game Boy", "fix_*.gb", lambda rom, t, m: [exe, "explore", rom, "--text", t, "--map", m]),
     ("Mega Drive", "fix_md_*.md", lambda rom, t, m: [exe, "md", "explore", rom, "--text", t, "--map", m]),
+    ("NES", "fix_nes_*.nes", lambda rom, t, m: [exe, "nes", "explore", rom, "--text", t, "--map", m]),
+    ("PC Engine", "fix_pce_*.pce", lambda rom, t, m: [exe, "pce", "explore", rom, "--text", t, "--map", m]),
     ("Master System", "fix_*.sms", lambda rom, t, m: [exe, "z80", "explore", "sms", rom, "--text", t, "--map", m]),
 ]
 
 def parse(text, mapfile):
     steps = None
-    m = re.search(r"exploration: (\d+) steps in (\d+) paths", text) or re.search(r"steps: (\d+) in (\d+) paths", text)
+    m = (re.search(r"exploration: (\d+) steps in (\d+) paths", text) or re.search(r"steps: (\d+) in (\d+) paths", text)
+         or re.search(r"steps (\d+) paths (\d+)", text))
     if m:
         steps = int(m.group(1))
     known = None
     m = re.search(r"known +(\d+(?:\.\d+)?)%", text) or re.search(r"known \d+ \((\d+(?:\.\d+)?)%\)", text)
     mm = re.search(r"map \(tool observation, \d+ bytes\): known \d+ \((\d+(?:\.\d+)?)%\)", text)
+    mn = re.search(r"coverage (\d+(?:\.\d+)?)%", text) or re.search(r"observed \d+ bytes \((\d+(?:\.\d+)?)%\)", text)
     if mm:
         known = mm.group(1)
+    elif mn:
+        known = mn.group(1) + " (observé)"
     elif os.path.exists(mapfile):
         mp = open(mapfile, errors="replace").read()
         m2 = re.search(r"#\s+known\s+(\d+(?:\.\d+)?)%", mp)
@@ -67,7 +73,7 @@ with open(out, "w") as f:
     for name, rs in per.items():
         f.write(f"| {name} | {len(rs)} | {sum(1 for r in rs if r[2])} | {sum(r[3] or 0 for r in rs)} |\n")
     f.write("\n`n/d` : valeur non exposée par le rapport texte de la plateforme.\n")
-    f.write("NES et PC Engine n'ont pas de fixtures fichier : leurs ROMs sont construites\n")
-    f.write("en mémoire par `test_nes` et `test_pce`, hors de cette campagne.\n")
+    f.write("Pour NES et PC Engine la colonne « octets connus » est la couverture observée\n")
+    f.write("(octets touchés), pas une classification complète de la ROM.\n")
 print(f"{len(rows)} runs, {fails} failures -> {out}")
 sys.exit(1 if fails else 0)
