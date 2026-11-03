@@ -389,7 +389,7 @@ static int spool_write_path(Run *x,const Path *p,int flushed) {
         x->r->spool_refused++; return 0;
     }
     uint64_t hdr[4]={DP_SPOOL_MAGIC,
-        (uint64_t)(p->forced?1:0)|((uint64_t)(p->skip_irq?1:0)<<1)|((uint64_t)p->choice<<32),
+        (uint64_t)(p->forced?1:0)|((uint64_t)(p->skip_irq?1:0)<<1)|((uint64_t)p->tier<<8)|((uint64_t)p->choice<<32),
         (uint64_t)x->b->state_size,(uint64_t)x->origin_size};
     // one file, two cursors: records are appended at spool_wr, reads replay
     // from spool_rd — the explicit seek keeps writes from landing where the
@@ -1193,7 +1193,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
                    fread(hdr,sizeof hdr,1,x.spool)!=1 || hdr[0]!=DP_SPOOL_MAGIC) break;
                 if(hdr[2]!=x.b->state_size || hdr[3]!=x.origin_size) break;
                 Path p={malloc(x.b->state_size),malloc(0x8000),malloc(x.origin_size),
-                    (int)(hdr[1]&1),(int)((hdr[1]>>1)&1),(uint32_t)(hdr[1]>>32)};
+                    (int)(hdr[1]&1),(int)((hdr[1]>>1)&1),(uint32_t)(hdr[1]>>32),(uint8_t)((hdr[1]>>8)&0xff)};
                 if(!p.state||!p.cart||!p.origins) { free_path(p); break; }
                 if(fread(p.state,1,x.b->state_size,x.spool)!=x.b->state_size ||
                    fread(p.cart,1,0x8000,x.spool)!=0x8000 ||
