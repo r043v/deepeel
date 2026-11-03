@@ -105,9 +105,61 @@ static void test_unsupported_mappers(void) {
     DpNesMach *m = dp_nesmach_open(rom, 16 + 4 * 0x4000 + 0x2000, -1, err, sizeof err);
     CHECK(!m, "MMC1 refused");
     CHECK(err[0], "a message explains why");
-    rom[6] = (3 & 0x0F) << 4; // mapper 3
+    rom[6] = (5 & 0x0F) << 4; // mapper 5 (MMC5)
     m = dp_nesmach_open(rom, 16 + 4 * 0x4000 + 0x2000, -1, err, sizeof err);
-    CHECK(!m, "CNROM refused");
+    CHECK(!m, "MMC5 refused");
+    free(rom);
+}
+
+// CNROM: a write to $8000+ picks the 8 KiB CHR bank; AxROM: a 32 KiB PRG bank
+static void test_cnrom_axrom(void) {
+    char err[256];
+    unsigned sz = 16 + 2 * 0x4000 + 4 * 0x2000;
+    uint8_t *rom = calloc(1, sz);
+    set_header(rom, 2, 4, 3);
+    for (unsigned b = 0; b < 4; b++) rom[16 + 2 * 0x4000 + b * 0x2000] = (uint8_t)(0xA0 + b);
+    // LDA #2 / STA $8000 / JMP self
+    put(rom, 0, 0, 0xA9, 0x02, 0x8D, 0x00, 0x80, 0x4C, 0x05, 0x80, -1);
+    set_vector(rom, 1, 0xFFFC, 0x8000);
+    DpNesMach *m = dp_nesmach_open(rom, sz, -1, err, sizeof err);
+    CHECK(m, "CNROM opens: %s", err);
+    if (m) {
+        dp_nesmach_reset(m);
+        unsigned o, n;
+        CHECK(dp_nesmach_mapper_write(m, 2, &o, &n) == 2 && o == 0 && n == 2, "chr bank 0 -> 2");
+        dp_nesmach_run(m, 3);
+        CHECK(dp_nesmach_mapper_write(m, 3, &o, &n) == 2 && o == 2, "register latched");
+        static uint8_t st[65536];
+        dp_nesmach_save(m, st);
+        dp_nesmach_reset(m);
+        CHECK(dp_nesmach_mapper_write(m, 1, &o, &n) == 2 && o == 0, "reset clears the bank");
+        dp_nesmach_load(m, st);
+        CHECK(dp_nesmach_mapper_write(m, 1, &o, &n) == 2 && o == 2, "state carries the bank");
+        dp_nesmach_close(m);
+    }
+    free(rom);
+    // AxROM, 64 KiB PRG = 2 banks of 32 KiB
+    sz = 16 + 4 * 0x4000;
+    rom = calloc(1, sz);
+    set_header(rom, 4, 0, 7);
+    put(rom, 0, 0, 0xA9, 0x01, 0x8D, 0x00, 0x80, 0x4C, 0x05, 0x80, -1);
+    put(rom, 2, 0, 0x5A, -1);                  // bank 1 starts with $5A
+    set_vector(rom, 1, 0xFFFC, 0x8000);
+    set_vector(rom, 3, 0xFFFC, 0x8000);
+    m = dp_nesmach_open(rom, sz, -1, err, sizeof err);
+    CHECK(m, "AxROM opens: %s", err);
+    if (m) {
+        dp_nesmach_reset(m);
+        CHECK(dp_nesmach_rom_index(m, 0x8000) == 0, "bank 0 at $8000");
+        dp_nesmach_run(m, 1);  // LDA #1
+        unsigned o, n;
+        CHECK(dp_nesmach_mapper_write(m, 1, &o, &n) == 1 && o == 0 && n == 2, "slot 0 -> 2");
+        dp_nesmach_run(m, 1);  // STA $8000
+        CHECK(dp_nesmach_rom_index(m, 0x8000) == 2 * 0x4000, "32 KiB bank 1 at $8000");
+        CHECK(dp_nesmach_rom_index(m, 0xC000) == 3 * 0x4000, "and its upper half at $C000");
+        CHECK(dp_nesmach_read(m, 0x8000) == 0x5A, "bank 1 content");
+        dp_nesmach_close(m);
+    }
     free(rom);
 }
 
@@ -298,6 +350,7 @@ int main(void) {
     test_machine_nrom();
     test_machine_uxrom();
     test_unsupported_mappers();
+    test_cnrom_axrom();
     test_snapshot();
     test_explorer();
     test_loop_bound();

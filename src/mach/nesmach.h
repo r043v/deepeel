@@ -24,8 +24,8 @@ typedef struct {
     void (*on_frame)(void *user);
 } DpNesHooks;
 
-/* iNES image (header + PRG + CHR); mapper 0 (NROM) and 2 (UxROM) — the
- * runtime's boards.  Returns NULL with a human message in `err`. */
+/* iNES image (header + PRG + CHR); mappers 0 (NROM), 2 (UxROM) — the
+ * runtime's boards — and 3 (CNROM), 7 (AxROM) — the bridge's.  Returns NULL with a human message in `err`. */
 DpNesMach *dp_nesmach_open(const uint8_t *data, size_t size, int mapper,
                            char *err, size_t errsz);
 void dp_nesmach_close(DpNesMach *m);
@@ -64,5 +64,11 @@ const uint8_t *dp_nesmach_oam(const DpNesMach *m);
 uint8_t *dp_nesmach_state_p(void *buf);
 /* the saved state's pending-NMI edge (an interrupt fork clears it) */
 uint8_t *dp_nesmach_state_nmi_edge(void *buf);
+
+/* mapper the bridge runs (0, 2, 3, 7) and what a $8000+ write changes:
+ * 0 nothing, 1 the PRG window (16 KiB slots), 2 the CHR bank (CNROM) */
+unsigned dp_nesmach_mapper(const DpNesMach *m);
+int dp_nesmach_mapper_write(const DpNesMach *m, unsigned value,
+                            unsigned *old_slot, unsigned *new_slot);
 
 #endif

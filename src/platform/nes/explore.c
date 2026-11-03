@@ -273,13 +273,12 @@ static void hook_write(void *user, unsigned addr, unsigned value) {
     DpNesRun *x = user;
     DpNesResults *r = x->r;
     if (addr >= 0x8000) {
-        // UxROM bank switch (fires before the runtime applies it)
-        if (dp_nesmach_banked(x->m)) {
-            uint8_t old = (uint8_t)dp_nesmach_bank(x->m);
-            uint8_t nb = (uint8_t)(value & (dp_nesmach_bank_count(x->m) - 1));
-            if (old != nb)
-                record_bank(x, 0, x->total_steps, (uint16_t)x->cur_pc, 0, old, nb);
-        }
+        // mapper register write (fires before the runtime/bridge applies it)
+        unsigned os, ns;
+        int kind = dp_nesmach_mapper_write(x->m, value, &os, &ns);
+        if (kind && os != ns)
+            record_bank(x, 0, x->total_steps, (uint16_t)x->cur_pc, (uint8_t)(kind == 2),
+                        (uint8_t)os, (uint8_t)ns);  // window 1 = CHR bank
         return;
     }
     if (addr >= 0x2000 && addr < 0x4020) {

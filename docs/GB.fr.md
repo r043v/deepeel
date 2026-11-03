@@ -955,3 +955,15 @@ dans le résumé JSON et la ligne `cuts:` du rapport. Pas de seuil de vblanks
 comme sur GB : le plafond de visites par site borne déjà le HALT, et les
 réveils par IRQ sont explorés par les fourches d'IRQ. Observation de l'outil.
 
+
+## 0.53.0
+
+J5 (partiel) : le pont NES (`src/mach/nesmach.c`) gère désormais CNROM
+(mapper 3 : écriture en $8000+ = banque CHR 8 Kio) et AxROM (mapper 7 :
+banque PRG de 32 Kio) en plus de NROM/UxROM. Le registre est ajouté à
+l'image d'état (4 octets) et au hash d'état exact ; `rom_index` suit les
+fenêtres réelles (`bank_base`/`fixed_base`), toujours en tranches de
+16 Kio. Le journal des banques note un changement de banque CHR
+(fenêtre 1). Les cartouches MMC1 et MMC3 restent refusées avec un
+message : le runtime m0boy n'a que deux fenêtres PRG de 16 Kio et un CHR
+plat de 8 Kio, il faut l'étendre (dépôt voisin). Observation de l'outil.
