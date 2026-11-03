@@ -297,10 +297,20 @@ static void jump_table(void) {
     dp_sega_results_free(&r);
     free(rom);
 }
+// D14: a HALT nothing can wake spins inside the loop cap; the cut is attributed
+static void halt_watchdog(void) {
+    uint8_t *rom=calloc(1,0x10000); CHECK(rom); if(!rom) exit(1);
+    rom[0]=0xf3; rom[1]=0x76; // di ; halt
+    DpSegaOptions o=dp_sega_options(); DpSegaResults r;
+    CHECK(dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r));
+    CHECK(r.halt_cuts>=1 && r.halt_cuts<=r.loop_cuts);
+    dp_sega_results_free(&r);
+    free(rom);
+}
 int main(void) {
     test_machine(dp_sega_backend_sg(),0,1);
     test_machine(dp_sega_backend_gg(),0,0);
     test_machine(dp_sega_backend_gg(),1,0);
-    exploration(); deferral(); fork_deferral(); padding_cut(); cov_output(); copy_siblings(); jump_table();
+    exploration(); deferral(); fork_deferral(); padding_cut(); cov_output(); copy_siblings(); jump_table(); halt_watchdog();
     TEST_DONE("sega");
 }

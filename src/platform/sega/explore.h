@@ -163,6 +163,7 @@ typedef struct {
     // TAS replay (GB tas.c parity): natural coverage from a movie, priority
     uint64_t tas_frames,tas_frames_refused,tas_steps;
     // copy siblings (S5): tables found, ranges marked, ranges refused over executed code, tables cut at the entry cap, bytes newly marked
+    uint64_t halt_cuts; // loop cuts at a HALT: the D14 watchdog, bounded by the loop cap
     uint64_t sib_tables,sib_ranges,sib_refused,sib_caps,sib_bytes;
     // jump tables (S4): dispatch tables found around provenance-proven jp (hl) loads
     uint64_t jt_tables,jt_entries,jt_caps,jt_bytes;

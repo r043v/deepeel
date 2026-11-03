@@ -946,3 +946,12 @@ le résumé JSON et le rapport texte. Limite assumée : seules les entrées déj
 exécutées sont admises, une table dont une seule entrée a été prise n'est pas
 reconnue. Observations de l'outil.
 
+## 0.52.0
+
+J4 : chien de garde HALT (D14) pour SMS/GG/MSX. Un HALT que rien ne réveille
+tourne dans le plafond de boucle (`--loop-cap`) puis la branche est coupée ;
+la coupe est désormais **attribuée** : `halt_cuts` (inclus dans `loop_cuts`),
+dans le résumé JSON et la ligne `cuts:` du rapport. Pas de seuil de vblanks
+comme sur GB : le plafond de visites par site borne déjà le HALT, et les
+réveils par IRQ sont explorés par les fourches d'IRQ. Observation de l'outil.
+

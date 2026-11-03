@@ -101,7 +101,7 @@ Pour chaque technique, la fiche indique :
 | D11 | Fourches de répétition (blocs) | — | ✅ ED | ✅ ED | — | ✅ BBR/BBS | ✅ DBcc |
 | D12 | Cibles indirectes observées | ✅ `jp hl` | ✅ `jp (hl/ix/iy)` | ✅ | ✗ | ✗ | ✗ |
 | D13 | Coupes de non-sens | ✅ | ✅ padding `pad_cuts` | ✅ | ◐ illégal | ◐ illégal | ◐ faute |
-| D14 | Chien de garde HALT, glissade de padding | ✅ | ◐ | ◐ | ✗ | ✗ | ✗ |
+| D14 | Chien de garde HALT, glissade de padding | ✅ | ✅ | ✅ | ✗ | ✗ | ✗ |
 | S1 | Scan padding + tables de pointeurs | ✅ | ✅ | ✅ | ✗ | ✅ inf. | ✗ |
 | S2 | Fermeture statique de flot | ✅ | ✅ vues | ✅ slots | ✗ | ◐ fenêtre MPR | ✗ |
 | S3 | Suivi de constantes / provenance | ◐ HL/A | ✅ complet | ✅ | ✗ | ✗ | ◐ témoin An |

@@ -1285,7 +1285,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
                 size_t at=site(&x,c->pc);
                 int admitted=dp_sega_visits_enter(&visits,(uint32_t)at,c->pc,o->loop_cap<<(2*x.cur_tier));
                 if(admitted<0) { ok=0; goto cleanup; }
-                if(!admitted) { r->loop_cuts++; defer_cut(&x,1); break; }
+                if(!admitted) { r->loop_cuts++; if(c->halted) r->halt_cuts++; defer_cut(&x,1); break; } // halt_cuts: HALT spin with nothing to wake it inside the loop cap (D14), also in loop_cuts
                 if(c->halted && (sg || !strcmp(s->id,"sms")) && probe_inputs(&x,INPUT_HALT_PAUSE,0,at,p.skip_irq)<0) { ok=0; goto cleanup; }
                 int interrupt=c->nmi || (c->irq&&c->iff1&&!c->ei_delay);
                 DpSegaInterrupt irq_event={.path=r->paths,.step=r->steps,.pc=c->pc,.sp=c->sp,
@@ -1565,7 +1565,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     DP_MR_SUM(sib_tables); DP_MR_SUM(sib_ranges); DP_MR_SUM(sib_refused); DP_MR_SUM(sib_caps); DP_MR_SUM(sib_bytes);
     DP_MR_SUM(jt_tables); DP_MR_SUM(jt_entries); DP_MR_SUM(jt_caps); DP_MR_SUM(jt_bytes);
     DP_MR_SUM(step_cuts); DP_MR_SUM(loop_cuts); DP_MR_SUM(fork_cuts); DP_MR_SUM(queue_cuts);
-    DP_MR_SUM(global_cuts); DP_MR_SUM(path_cuts); DP_MR_SUM(faults); DP_MR_SUM(decode_cuts); DP_MR_SUM(pad_cuts);
+    DP_MR_SUM(global_cuts); DP_MR_SUM(path_cuts); DP_MR_SUM(faults); DP_MR_SUM(decode_cuts); DP_MR_SUM(pad_cuts); DP_MR_SUM(halt_cuts);
     DP_MR_SUM(stagnation_cuts);
     DP_MR_SUM(seeds_pointer); DP_MR_SUM(seeds_bank); DP_MR_SUM(seeds_entry); DP_MR_SUM(seeds_admitted);
     DP_MR_SUM(seeds_skipped_padding); DP_MR_SUM(seeds_refused_view); DP_MR_SUM(seeds_refused_queue);
@@ -1700,7 +1700,7 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
         fprintf(out,"%s\"%s\":%"PRIu64,i?",":"",dp_smap_names[i],class_bytes[i]);
     fprintf(out,"}},\"counters\":{\"steps\":%"PRIu64",\"paths\":%"PRIu64",\"forks\":%"PRIu64",\"irq_forks\":%"PRIu64
         ",\"exec_outside\":%"PRIu64",\"loop_cuts\":%"PRIu64",\"fork_cuts\":%"PRIu64",\"queue_cuts\":%"PRIu64
-        ",\"global_cuts\":%"PRIu64",\"path_cuts\":%"PRIu64",\"faults\":%"PRIu64",\"decode_cuts\":%"PRIu64",\"pad_cuts\":%"PRIu64
+        ",\"global_cuts\":%"PRIu64",\"path_cuts\":%"PRIu64",\"faults\":%"PRIu64",\"decode_cuts\":%"PRIu64",\"pad_cuts\":%"PRIu64",\"halt_cuts\":%"PRIu64
         ",\"sib_tables\":%"PRIu64",\"sib_ranges\":%"PRIu64",\"sib_refused\":%"PRIu64",\"sib_caps\":%"PRIu64",\"sib_bytes\":%"PRIu64
         ",\"jt_tables\":%"PRIu64",\"jt_entries\":%"PRIu64",\"jt_caps\":%"PRIu64",\"jt_bytes\":%"PRIu64
         ",\"queue_growths\":%"PRIu64",\"spool_writes\":%"PRIu64",\"spool_reads\":%"PRIu64",\"spool_refused\":%"PRIu64
@@ -1713,7 +1713,7 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
         ",\"jobs_capped\":%"PRIu64",\"seeds_offlane\":%"PRIu64",\"merge_conflicts\":%"PRIu64
         ",\"bank_changes\":%"PRIu64",\"data_reads\":%"PRIu64",\"steps_deferred\":%"PRIu64",\"loop_deferred\":%"PRIu64",\"defer_resumed\":%"PRIu64",\"steps_final\":%"PRIu64",\"loop_final\":%"PRIu64",\"defer_dropped\":%"PRIu64",\"defer_pending\":%"PRIu64",\"fork_deferred\":%"PRIu64",\"fork_final\":%"PRIu64"}",
         r->steps,r->paths,r->forks,r->irq_forks,r->exec_outside,r->loop_cuts,r->fork_cuts,
-        r->queue_cuts,r->global_cuts,r->path_cuts,r->faults,r->decode_cuts,r->pad_cuts,r->sib_tables,r->sib_ranges,r->sib_refused,r->sib_caps,r->sib_bytes,r->jt_tables,r->jt_entries,r->jt_caps,r->jt_bytes,r->queue_growths,
+        r->queue_cuts,r->global_cuts,r->path_cuts,r->faults,r->decode_cuts,r->pad_cuts,r->halt_cuts,r->sib_tables,r->sib_ranges,r->sib_refused,r->sib_caps,r->sib_bytes,r->jt_tables,r->jt_entries,r->jt_caps,r->jt_bytes,r->queue_growths,
         r->spool_writes,r->spool_reads,r->spool_refused,r->seeds_pointer,r->seeds_bank,
         r->seeds_entry,r->seeds_admitted,r->seeds_refused_cap,r->seeds_refused_view,
         r->seeds_pending,r->evicted_ctx,r->indirect_sites,r->indirect_targets,
@@ -2048,7 +2048,7 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
         r->indirect_sites,r->indirect_targets,r->indirect_seeds,r->indirect_refused_budget,r->indirect_pending,r->indirect_site_overflow,r->indirect_target_overflow);
     fprintf(out,"frontier: deferred steps %"PRIu64" loop %"PRIu64"; resumed %"PRIu64"; final steps %"PRIu64" loop %"PRIu64"; dropped %"PRIu64"; pending %"PRIu64"; forks deferred %"PRIu64" final %"PRIu64"\n",
         r->steps_deferred,r->loop_deferred,r->defer_resumed,r->steps_final,r->loop_final,r->defer_dropped,r->defer_pending,r->fork_deferred,r->fork_final);
-    fprintf(out,"cuts: steps %"PRIu64"; loop %"PRIu64"; fork %"PRIu64"; queue %"PRIu64"; paths %"PRIu64"; global-pending %"PRIu64"; decode %"PRIu64"; padding %"PRIu64"; faults %"PRIu64"\n",r->step_cuts,r->loop_cuts,r->fork_cuts,r->queue_cuts,r->path_cuts,r->global_cuts,r->decode_cuts,r->pad_cuts,r->faults);
+    fprintf(out,"cuts: steps %"PRIu64"; loop %"PRIu64"; fork %"PRIu64"; queue %"PRIu64"; paths %"PRIu64"; global-pending %"PRIu64"; decode %"PRIu64"; padding %"PRIu64"; faults %"PRIu64"; of the loop cuts, HALT spins %"PRIu64"\n",r->step_cuts,r->loop_cuts,r->fork_cuts,r->queue_cuts,r->path_cuts,r->global_cuts,r->decode_cuts,r->pad_cuts,r->faults,r->halt_cuts);
     fprintf(out,"copy siblings: %"PRIu64" tables; %"PRIu64" ranges (%"PRIu64" bytes); %"PRIu64" refused over executed code; %"PRIu64" tables cut at the entry cap\n",r->sib_tables,r->sib_ranges,r->sib_bytes,r->sib_refused,r->sib_caps);
     fprintf(out,"jump tables: %"PRIu64" tables; %"PRIu64" entries (%"PRIu64" new bytes); %"PRIu64" tables cut at the entry cap\n",r->jt_tables,r->jt_entries,r->jt_bytes,r->jt_caps);
     fprintf(out,"seeds: pointer %"PRIu64"; bank sweep %"PRIu64"; entries %"PRIu64"; admitted %"PRIu64"; skipped padding %"PRIu64"; refused view %"PRIu64", queue %"PRIu64", cap %"PRIu64"; pending %"PRIu64"\n",
