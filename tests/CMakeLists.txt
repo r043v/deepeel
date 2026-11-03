@@ -285,3 +285,5 @@ add_test(NAME nes_table COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAK
 set_tests_properties(nes_table PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_slide COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_slide.nes --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_sl.txt >/dev/null 2>&1; grep -Eq 'padding cuts: [1-9]' ${CMAKE_CURRENT_BINARY_DIR}/nes_sl.txt")
 set_tests_properties(nes_slide PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME nes_ioreg COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_pad.nes --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_io.txt >/dev/null 2>&1; grep -Eq 'reg .4016 reads [1-9][0-9]* writes [1-9][0-9]*' ${CMAKE_CURRENT_BINARY_DIR}/nes_io.txt")
+set_tests_properties(nes_ioreg PROPERTIES FIXTURES_REQUIRED fixtures)

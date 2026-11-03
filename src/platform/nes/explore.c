@@ -319,6 +319,7 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
 
 static void hook_read(void *user, unsigned addr) {
     DpNesRun *x = user;
+    if (dp_nes_io_slot(addr) >= 0) { x->r->io_reads++; x->r->io_reg_reads[dp_nes_io_slot(addr)]++; }
     if (addr == 0x2007 && x->r->chr_flags) {
         int64_t c = dp_nesmach_chr_index(x->m, dp_nesmach_ppu_v(x->m));
         if (c >= 0 && (size_t)c < x->r->chr_size && dp_nesmach_ppu_v(x->m) < 0x2000) {
@@ -350,8 +351,7 @@ static void hook_write(void *user, unsigned addr, unsigned value) {
     }
     if (addr >= 0x2000 && addr < 0x4020) {
         r->io_writes++;
-        unsigned idx = (addr - 0x2000) & 0x3F;
-        r->io_writes_io_reg[idx < 32 ? idx : 31]++;
+        r->io_reg_writes[dp_nes_io_slot(addr)]++;
         if (addr == 0x2007 && x->last_read_cell >= 0 && x->total_steps - x->last_read_step <= 4) {
             // CPU loop copy: a PRG data read right before a PPUDATA write.  A
             // run at the same pc whose source continues is one record.
@@ -1058,6 +1058,12 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  data reads %llu, OAM DMA copies %llu, ram writes %llu, io writes %llu\n",
         (unsigned long long)r->data_reads, (unsigned long long)r->oam_copies,
         (unsigned long long)r->ram_writes, (unsigned long long)r->io_writes);
+    fprintf(out, "  io reads %llu\n", (unsigned long long)r->io_reads);
+    for (int k = 0; k < 40; k++) {
+        if (!r->io_reg_reads[k] && !r->io_reg_writes[k]) continue;
+        fprintf(out, "   reg $%04X reads %llu writes %llu\n", k < 8 ? 0x2000 + k : 0x4000 + (k - 8),
+            (unsigned long long)r->io_reg_reads[k], (unsigned long long)r->io_reg_writes[k]);
+    }
     fprintf(out, "  DMC DMA starts %llu, distinct sample bytes from ROM %llu\n",
         (unsigned long long)r->dmc_starts, (unsigned long long)r->dmc_bytes);
     fprintf(out, "  faults %llu decode cuts %llu exec outside PRG %llu\n",

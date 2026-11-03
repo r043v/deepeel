@@ -24,6 +24,12 @@ static const char *const dp_nmap_names[DP_NMAP_COUNT] = { "unknown", "code-natur
     "code-forced", "code-static", "data-copied", "data-read", "data-static",
     "table", "padding", "inferred-data", "inferred-code", "inferred-padding" };
 
+static inline int dp_nes_io_slot(unsigned addr) {
+    if (addr >= 0x2000 && addr < 0x4000) return (int)(addr & 7);
+    if (addr >= 0x4000 && addr < 0x4020) return 8 + (int)(addr & 0x1F);
+    return -1;
+}
+
 enum { DP_NES_COPY_CAP = 4096 };
 enum { DP_NES_BANK_LOG_CAP = 1024 };
 enum { DP_NES_IRQ_LOG_CAP = 1024 };
@@ -109,8 +115,9 @@ typedef struct {
     uint64_t lot_written, lot_read, lot_pending; // disk lot (--lot): spilled / read back / left on disk
     uint64_t parked, parked_resumed, parked_lost; // queue-full states held aside (§6), resumed, lost at the holding cap
     uint64_t pending_dropped;  // queued states left undrained at a wall
-    uint64_t ram_writes, io_writes, io_writes_io_reg[32];
-    uint64_t io_reg_writes[256]; // $2000-$2007 + $4000-$401F + mapper pages collapsed
+    uint64_t ram_writes, io_writes, io_reads;
+    // per-register access counts: slots 0-7 PPU $2000-$2007 (mirrors folded), 8-39 $4000-$401F
+    uint64_t io_reg_writes[40], io_reg_reads[40];
     // sections
     DpNesSection *sections;
     uint32_t section_count, section_capacity;

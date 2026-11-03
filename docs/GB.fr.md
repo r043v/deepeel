@@ -1413,3 +1413,14 @@ code : il est coupé et compté (`padding cuts: N`), jamais silencieusement. Les
 plages de `$EA` (nop) ne sont pas coupées (traînes de nop légitimes). Pas de
 HALT sur 6502, donc pas de chien de garde équivalent : D14 reste ◐. Fixture
 `fix_nes_slide.nes`, test `nes_slide`.
+
+## 0.88.0
+
+NES : accès aux registres par registre (D3). Les lectures et les écritures de
+`$2000–$3FFF` (PPU, miroirs repliés sur `$2000–$2007`) et de `$4000–$401F`
+(APU, DMA, manettes) sont comptées par registre (`io_reg_reads`,
+`io_reg_writes`, 40 emplacements) ; le rapport imprime `io reads N` et une
+ligne `reg $XXXX reads R writes W` par registre touché. Corrige l'ancien
+compteur d'écritures, dont l'indice `(addr − $2000) & $3F` mélangeait le
+registre `$2000` et `$4000`. Test `nes_ioreg`. Observations de l'outil (le
+nombre de lectures suit les chemins explorés, pas une fréquence matérielle).

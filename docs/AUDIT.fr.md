@@ -11,18 +11,17 @@ remesure pas l'outil.
 | GB | 34 | 1 | 3 | 1 |
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
-| NES | 8 | 15 | 14 | 2 |
+| NES | 9 | 14 | 14 | 2 |
 | PCE | 15 | 7 | 16 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 96.
+Cellules ouvertes (◐ ou ✗) : 95.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
 | D1 | Marquage exec natural/forced/entry/irq/start | NES | ◐ |
 | D1 | Marquage exec natural/forced/entry/irq/start | PCE | ◐ |
 | D1 | Marquage exec natural/forced/entry/irq/start | MD | ◐ |
-| D3 | Accès registres par registre (`DpIoStat`) | NES | ◐ |
 | D3 | Accès registres par registre (`DpIoStat`) | PCE | ◐ |
 | D3 | Accès registres par registre (`DpIoStat`) | MD | ◐ |
 | D4 | Copies par boucle CPU | NES | ◐ boucle → PPUDATA |
