@@ -466,6 +466,13 @@ def build_md(out):
     r = md_rom()
     r[0x200:0x202] = bytes([0x4E, 0x71])
     save_md(out, "fix_md_zeros", r)
+    # --- dispatch: never-read table {$300,$310,$320} of code pointers at $400 ---
+    r = md_rom()
+    r[0x200:0x202] = bytes([0x60, 0xFE])
+    for t in (0x300, 0x310, 0x320):
+        r[t:t + 6] = bytes([0x70, 0x01, 0x4E, 0x71, 0x60, 0xFE])
+    r[0x400:0x40C] = bytes([0, 0, 3, 0, 0, 0, 3, 0x10, 0, 0, 3, 0x20])
+    save_md(out, "fix_md_disp", r)
     # --- siblings: DMA of $400 (16 words) + a longword table {$400,$600,$800} read at $300
     r = md_rom()
     pc = 0x200

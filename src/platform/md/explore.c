@@ -74,6 +74,7 @@ typedef struct {
     int z80_last_valid;
     uint32_t zfetch_lo, zfetch_hi;      /* ROM range of the instruction being fetched */
     uint8_t z80_bank_seen[128];         /* bitmap of 32 KiB banks (4 MiB / 32 KiB) */
+    int disp_done;
     DpHashSet ctx_seen;     // --ctx-cap: admissions per coarse context
     DpTree tree;            // --tree: every pushed state is a choice
     uint32_t cur_choice;
@@ -562,6 +563,7 @@ void dp_md_options_default(DpMdOptions *o) {
     o->entry_count = 0;
     o->pad_cut = 0;
     o->second_pass = 0;
+    o->bank_dispatch = 0;
     o->ctx_cap = 0;
     o->tree_path = NULL;
 }
@@ -602,6 +604,70 @@ static unsigned second_pass_seed(X *x) {
             }
             a = next;
         }
+    }
+    free(sd);
+    return seeded;
+}
+
+/* G2 dispatch tables: a run of >= 3 aligned longwords (>= 3 distinct) that are all even
+ * ROM addresses >= $200 whose first 6 instructions decode (no run of 8 equal bytes) is a
+ * candidate table of code pointers; unexecuted targets are seeded as forced paths
+ * (256-seed cap shared with the second pass). */
+static int md_target_ok(const X *x, uint32_t t) {
+    size_t n = x->r->rom_size;
+    uint32_t a = t;
+    for (unsigned k = 0; k < 6; k++) {
+        if (a >= n) return k > 0;
+        DpM68kInsn in;
+        unsigned len = dp_m68k_decode(x->c->rom + a, n - a, a, &in);
+        if (!len) return 0;
+        if (a + 8 <= n) {
+            unsigned same = 1;
+            while (same < 8 && x->c->rom[a + same] == x->c->rom[a]) same++;
+            if (same == 8) return 0;
+        }
+        if (in.cls == DP_M68K_BRA || in.cls == DP_M68K_JMP || in.cls == DP_M68K_RTS || in.cls == DP_M68K_RTE ||
+            in.cls == DP_M68K_RTR || in.cls == DP_M68K_STOP) return 1;
+        a += len;
+    }
+    return 1;
+}
+
+static unsigned dispatch_seed(X *x) {
+    DpMdResults *r = x->r;
+    size_t n = r->rom_size;
+    uint8_t *sd = calloc(n, 1);
+    if (!sd) return 0;
+    unsigned seeded = 0;
+    for (size_t i = 0x200; i + 4 <= n;) {
+        size_t j = i;
+        while (j + 4 <= n) {
+            uint32_t v = (uint32_t)x->c->rom[j] << 24 | (uint32_t)x->c->rom[j + 1] << 16 | (uint32_t)x->c->rom[j + 2] << 8 | x->c->rom[j + 3];
+            if ((v & 1) || v < 0x200 || v >= n) break;
+            j += 4;
+        }
+        unsigned cnt = (unsigned)((j - i) / 4);
+        if (cnt < 3) { i += 4; continue; }
+        uint32_t vs[64]; unsigned nd = 0;
+        for (size_t e = i; e < j && nd < 64; e += 4) {
+            uint32_t v = (uint32_t)x->c->rom[e] << 24 | (uint32_t)x->c->rom[e + 1] << 16 | (uint32_t)x->c->rom[e + 2] << 8 | x->c->rom[e + 3];
+            unsigned k;
+            for (k = 0; k < nd && vs[k] != v; k++) {}
+            if (k == nd) vs[nd++] = v;
+        }
+        if (nd >= 3) {
+            r->disp_tables++;
+            for (unsigned k = 0; k < nd; k++) {
+                uint32_t t = vs[k];
+                if (sd[t] || (r->flags[t] & (DP_MDF_NATURAL | DP_MDF_FORCED))) continue;
+                if (!md_target_ok(x, t)) { r->disp_refused_view++; continue; }
+                sd[t] = 1;
+                if (r->pass2_seeds + r->pass2_refused >= MD_PASS2_MAX) { r->pass2_capped++; continue; }
+                dp_mdmach_reset(x->m);
+                if (push(x, t, 0, 0)) { seeded++; r->pass2_seeds++; r->disp_seeds++; } else r->pass2_refused++;
+            }
+        }
+        i = j;
     }
     free(sd);
     return seeded;
@@ -816,6 +882,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
             if (!x.nq) continue;
         }
         if (!x.nq) {
+            if (o->bank_dispatch && !x.disp_done && r->steps < o->max_total) { x.disp_done = 1; if (dispatch_seed(&x)) continue; }
             if (o->second_pass && r->steps < o->max_total && second_pass_seed(&x)) continue;
             break;
         }
@@ -963,6 +1030,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     if (r->tree_nodes) fprintf(out, "  choice tree: %llu nodes\n", (unsigned long long)r->tree_nodes);
     if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/SR context past the cap)\n", (unsigned long long)r->ctx_evicted);
     if (r->pass2_seeds || r->pass2_refused || r->pass2_capped) fprintf(out, "  second pass: %llu seeds, %llu refused, %llu capped\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
+    if (r->disp_tables) fprintf(out, "  dispatch tables: %llu tables, %llu seeds, %llu refused targets\n", (unsigned long long)r->disp_tables, (unsigned long long)r->disp_seeds, (unsigned long long)r->disp_refused_view);
     fprintf(out, "  copy siblings: %llu tables, %llu entries, %llu bytes, %llu table caps\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_entries, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_caps);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);

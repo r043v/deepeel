@@ -1761,3 +1761,14 @@ partagé avec `--second-pass`). Rapport : `bank dispatch: N tables, N seeds, N
 refused views`. Test `pce_bank_dispatch` (`fix_pce_disp` : 1 table, 3 graines,
 3 vues refusées). Reste ◐ : le mapping des autres fenêtres est celui de la mise
 sous tension, tables en pile/zéro-page non lues.
+
+## 0.117.0
+
+MD : tables de dispatch (G2, partielle). `--bank-dispatch` : une suite d'au
+moins 3 mots longs alignés, tous pairs, ≥ `$200` et dans la ROM (≥ 3 distincts),
+est une table candidate de pointeurs de code ; chaque cible non exécutée dont
+les 6 premières instructions se décodent (sans suite de 8 octets identiques)
+est semée comme chemin forcé (plafond de 256 graines partagé avec
+`--second-pass`). Rapport : `dispatch tables: N tables, N seeds, N refused
+targets`. Test `md_dispatch` (`fix_md_disp` : 1 table, 3 graines, 2 → 20 octets
+exécutés). Reste ◐ : tables d'offsets 16 bits relatifs, tables en RAM.
