@@ -1574,3 +1574,12 @@ notées ✗ alors que `--jobs 2` par instances `dp_pce2_` (0.56, `test_jobs`) et
 le lot disque avec parc (`--lot`, `--lot-drain`) existent. Elles passent ◐ avec
 leur reste explicite : pas de file de fourches partagée entre instances, pas
 de `--resume` ni de file croissante côté PCE.
+
+## 0.100.0
+
+PCE : `--evidence FILE` (O2, partielle). Même format que NES : plages de
+cellules de même masque (`01` code naturel, `02` forcé, `04` donnée, `08`
+copiée, `10` IRQ, `20` padding, `40` statique, `80` table), banques physiques
+de 8 KiB. Fixture `fix_pce_branch.pce`, test `pce_evidence` (la plage forcée
+`0018–001A` est épinglée). Pas de `.cov` ni de romdata côté PCE : il n'y a pas
+de compteurs de coups par cellule.

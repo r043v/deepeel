@@ -155,4 +155,6 @@ uint8_t *dp_pce_map_build(const DpPceResults *r);
 void dp_pce_report(FILE *out, const DpPceResults *results);
 // the "bank start end class" text maprender --z80 reads (16 KiB physical banks)
 void dp_pce_map(FILE *out, const DpPceResults *results);
+// physical-bank offset-start offset-end evidence-mask (8 KiB banks), like the NES file
+void dp_pce_evidence(FILE *out, const DpPceResults *results);
 #endif

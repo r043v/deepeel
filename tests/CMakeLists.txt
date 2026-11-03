@@ -314,3 +314,5 @@ add_test(NAME nes_ctx_cap COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CUR
 set_tests_properties(nes_ctx_cap PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_jam COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_jam.nes --max-total 5000 --max-steps 40 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_jam.txt >/dev/null 2>&1; grep -Eq 'faults 1 ' ${CMAKE_CURRENT_BINARY_DIR}/nes_jam.txt")
 set_tests_properties(nes_jam PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME pce_evidence COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce --max-total 20000 --max-steps 100 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_ev.txt --evidence ${CMAKE_CURRENT_BINARY_DIR}/pce_ev.ev >/dev/null 2>&1; grep -q '^0000 0018 001A 02' ${CMAKE_CURRENT_BINARY_DIR}/pce_ev.ev")
+set_tests_properties(pce_evidence PROPERTIES FIXTURES_REQUIRED fixtures)

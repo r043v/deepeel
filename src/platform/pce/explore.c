@@ -1289,3 +1289,16 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
     fprintf(out, "  register writes %u logged (overflow %llu)\n", r->register_count,
             (unsigned long long)r->register_overflow);
 }
+
+void dp_pce_evidence(FILE *out, const DpPceResults *r) {
+    fputs("# physical-bank offset-start offset-end evidence-mask (inclusive, 8 KiB banks)\n"
+          "# 01=code-natural 02=code-forced 04=data-read 08=data-copied 10=irq 20=padding\n"
+          "# 40=static 80=table (unflagged cells are not listed)\n", out);
+    for (size_t at = 0; at < r->rom_size;) {
+        size_t end = at + 1;
+        while (end < r->rom_size && (end >> 13) == (at >> 13) && r->flags[end] == r->flags[at]) end++;
+        if (r->flags[at])
+            fprintf(out, "%04zX %04zX %04zX %02X\n", at >> 13, at & 0x1fff, (end - 1) & 0x1fff, (unsigned)r->flags[at]);
+        at = end;
+    }
+}

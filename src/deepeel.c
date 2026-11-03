@@ -1123,15 +1123,16 @@ static int cmd_pce(int argc, char **argv) {
         fprintf(stderr, "deepeel pce explore ROM [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N] "
                         "[--max-total N] [--max-steps N] [--queue N] [--loop-cap N] [--fork-cap N] "
                         "[--novelty STEPS] [--novelty-frames N] [--novelty-archive N] [--novelty-cells] [--pad-fork-cap N] [--irq-fork-cap N] [--no-irq-fork] [--no-static] [--no-infer] [--jobs 2] "
-                        "[--text FILE] [--map FILE] [--png FILE]\n");
+                        "[--text FILE] [--map FILE] [--png FILE] [--evidence FILE]\n");
         return 2;
     }
-    const char *path = NULL, *text = NULL, *map = NULL, *png = NULL;
+    const char *path = NULL, *text = NULL, *map = NULL, *png = NULL, *pce_ev = NULL;
     DpPceOptions opt = dp_pce_options();
     int pce_jobs = 1;
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
         if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
+        else if (!strcmp(a, "--evidence") && i + 1 < argc) pce_ev = argv[++i];
         else if (!strcmp(a, "--map") && i + 1 < argc) map = argv[++i];
         else if (!strcmp(a, "--png") && i + 1 < argc) png = argv[++i];
         else if (!strcmp(a, "--tas") && i + 1 < argc) {
@@ -1190,6 +1191,11 @@ static int cmd_pce(int argc, char **argv) {
         FILE *f = fopen(map, "w");
         if (!f) fprintf(stderr, "deepeel: cannot write %s\n", map);
         else { dp_pce_map(f, res); fclose(f); }
+    }
+    if (pce_ev) {
+        FILE *f = fopen(pce_ev, "w");
+        if (!f) fprintf(stderr, "deepeel: cannot write %s\n", pce_ev);
+        else { dp_pce_evidence(f, res); fclose(f); }
     }
     dp_pce_results_free(res);
     free(res);
