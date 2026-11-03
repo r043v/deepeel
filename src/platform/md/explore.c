@@ -599,6 +599,88 @@ void dp_md_options_default(DpMdOptions *o) {
     o->tree_path = NULL;
 }
 
+/* S1/S2 static layer, no machine.  S1: runs of >= 8 bytes 00/FF are padding; runs of >= 4
+ * aligned big-endian longwords, even, in [$200, size), >= 3 distinct, outside padding, are
+ * pointer tables.  S2: from every executed run, follow branch/jump/call targets and the
+ * fall-through of non-terminal instructions over unexecuted bytes (both sides of Bcc/DBcc);
+ * confidence is lost after BSR/JSR (inline data idiom): their fall-through is not followed
+ * and is counted.  Every instruction must decode, stay in the ROM, sit on an even address
+ * and not cross padding.  Observed bytes are never overwritten by the caller. */
+static void md_static_scan(const uint8_t *rom, size_t n, DpMdResults *r) {
+    const uint8_t live = DP_MDF_NATURAL | DP_MDF_FORCED;
+    for (size_t i = 0; i < n;) {
+        size_t j = i;
+        while (j < n && rom[j] == rom[i]) j++;
+        if (j - i >= 8 && (rom[i] == 0 || rom[i] == 0xFF)) {
+            memset(r->stat + i, 8, j - i);
+            r->stat_pad += j - i;
+        }
+        i = j > i ? j : i + 1;
+    }
+    for (size_t i = 0x200 & ~3u; i + 4 <= n;) {
+        size_t j = i;
+        while (j + 4 <= n && !r->stat[j]) {
+            uint32_t v = (uint32_t)rom[j] << 24 | (uint32_t)rom[j + 1] << 16 | (uint32_t)rom[j + 2] << 8 | rom[j + 3];
+            if ((v & 1) || v < 0x200 || v >= n) break;
+            j += 4;
+        }
+        unsigned cnt = (unsigned)((j - i) / 4), nd = 0;
+        uint32_t vs[8];
+        for (size_t e = i; e < j && nd < 3; e += 4) {
+            uint32_t v = (uint32_t)rom[e] << 24 | (uint32_t)rom[e + 1] << 16 | (uint32_t)rom[e + 2] << 8 | rom[e + 3];
+            unsigned k;
+            for (k = 0; k < nd && vs[k] != v; k++) {}
+            if (k == nd) vs[nd++] = v;
+        }
+        if (cnt >= 4 && nd >= 3) {
+            for (size_t e = i; e < j; e++) if (!(r->flags[e] & live)) r->stat[e] = 7;
+            r->stat_table += j - i;
+            i = j;
+        } else i += 4;
+    }
+    uint32_t *wl = malloc(sizeof(uint32_t) * (n / 2 + 1));
+    if (!wl) return;
+    size_t nw = 0;
+    #define MD_PUSH(t) do { uint32_t t_ = (t); if (!(t_ & 1) && t_ >= 0x200 && t_ < n && !(r->flags[t_] & live) && r->stat[t_] != 3 && r->stat[t_] != 8 && r->stat[t_] != 7 && nw < n / 2) wl[nw++] = t_; } while (0)
+    for (size_t i = 0; i < n; i += 2) {
+        if (!(r->flags[i] & live) || (i && (r->flags[i - 1] & live))) continue;
+        size_t a = i;
+        while (a < n && (r->flags[a] & live)) {
+            DpM68kInsn in;
+            unsigned len = dp_m68k_decode(rom + a, n - a, (uint32_t)a, &in);
+            if (!len) break;
+            int term = in.cls == DP_M68K_BRA || in.cls == DP_M68K_JMP || in.cls == DP_M68K_RTS || in.cls == DP_M68K_RTE ||
+                       in.cls == DP_M68K_RTR || in.cls == DP_M68K_STOP;
+            if ((in.cls == DP_M68K_BRA || in.cls == DP_M68K_BSR || in.cls == DP_M68K_BCC || in.cls == DP_M68K_DBCC ||
+                 in.cls == DP_M68K_JMP || in.cls == DP_M68K_JSR) && in.has_target) MD_PUSH(in.target & 0xFFFFFFu);
+            if (!term) { if (in.cls == DP_M68K_BSR || in.cls == DP_M68K_JSR) r->stat_conf_lost++; else MD_PUSH((uint32_t)(a + len)); }
+            a += len;
+        }
+    }
+    while (nw) {
+        uint32_t a = wl[--nw];
+        while (a < n && !(r->flags[a] & live) && r->stat[a] != 3) {
+            if (r->stat[a] == 8 || r->stat[a] == 7) break;
+            DpM68kInsn in;
+            unsigned len = dp_m68k_decode(rom + a, n - a, a, &in);
+            if (!len || (a & 1) || a + len > n) break;
+            int bad = 0;
+            for (unsigned k = 0; k < len; k++) if (r->stat[a + k] == 8 || r->stat[a + k] == 7) bad = 1;
+            if (bad) break;
+            for (unsigned k = 0; k < len; k++) if (!(r->flags[a + k] & live)) { r->stat[a + k] = 3; r->stat_code++; }
+            int term = in.cls == DP_M68K_BRA || in.cls == DP_M68K_JMP || in.cls == DP_M68K_RTS || in.cls == DP_M68K_RTE ||
+                       in.cls == DP_M68K_RTR || in.cls == DP_M68K_STOP;
+            if ((in.cls == DP_M68K_BRA || in.cls == DP_M68K_BSR || in.cls == DP_M68K_BCC || in.cls == DP_M68K_DBCC ||
+                 in.cls == DP_M68K_JMP || in.cls == DP_M68K_JSR) && in.has_target) MD_PUSH(in.target & 0xFFFFFFu);
+            if (term) break;
+            if (in.cls == DP_M68K_BSR || in.cls == DP_M68K_JSR) { r->stat_conf_lost++; break; }
+            a += len;
+        }
+    }
+    #undef MD_PUSH
+    free(wl);
+}
+
 /* G4 second pass: static successors (branch/jump/call targets, the fall-through at the
  * end of an executed run) of executed code that no path reached are seeded as forced
  * paths from the power-on machine.  Runs of executed bytes are walked instruction by
@@ -1235,6 +1317,9 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         }
         free(claimed);
     }
+    // S1/S2 static layer (no machine, tagged apart from observations)
+    r->stat = calloc(c->size, 1);
+    if (r->stat) md_static_scan(c->rom, c->size, r);
     // S7 map inference (render only, tagged apart from observations): unobserved
     // runs of one byte value (00/FF from 8 bytes, others from 32) are padding; a
     // gap of <= 3 bytes between executed bytes is code; a gap of <= 1024 bytes next
@@ -1243,9 +1328,10 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     if (r->inferred) {
         const uint8_t M = DP_MDF_NATURAL | DP_MDF_FORCED | DP_MDF_DATA | DP_MDF_DMA_READ | DP_MDF_CPU_VRAM;
         size_t n = c->size;
+        for (size_t i = 0; i < n; i++) if (r->stat && r->stat[i] && !(r->flags[i] & M)) r->inferred[i] = 0xFF; /* placeholder: owned by the static layer */
         for (size_t i = 0; i < n;) {
             size_t j = i;
-            while (j < n && c->rom[j] == c->rom[i] && !(r->flags[j] & M)) j++;
+            while (j < n && c->rom[j] == c->rom[i] && !(r->flags[j] & M) && r->inferred[j] != 0xFF) j++;
             if (j - i >= ((c->rom[i] == 0 || c->rom[i] == 0xFF) ? 8u : 32u)) {
                 memset(r->inferred + i, 1, j - i);
                 r->inf_pad += j - i;
@@ -1263,6 +1349,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
             if (cl) memset(r->inferred + i, cl, len);
             i = j;
         }
+        for (size_t i = 0; i < n; i++) if (r->inferred[i] == 0xFF) r->inferred[i] = 0;
     }
     for (size_t i = 0; i < c->size; i++) {
         uint8_t f = r->flags[i];
@@ -1301,6 +1388,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
 
 void dp_md_results_free(DpMdResults *r) {
     free(r->inferred);
+    free(r->stat);
     free(r->flags);
     free(r->nonexcluded_reads);
     free(r->exec_hits);
@@ -1349,7 +1437,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
                 (unsigned long long)r->novelty_hits, (unsigned long long)r->novelty_deaths,
                 (unsigned long long)r->novelty_archived, (unsigned long long)r->novelty_replaced, (unsigned long long)r->novelty_seeded, (unsigned long long)r->novelty_stalled);
     if (r->jobs_folded) fprintf(out, "  jobs: %u secondary instance folded (entries split even/odd)\n", r->jobs_folded);
-    fprintf(out, "  map inference (S7, not observations): %llu padding, %llu code, %llu data bytes\n", (unsigned long long)r->inf_pad, (unsigned long long)r->inf_code, (unsigned long long)r->inf_data);
+    fprintf(out, "  static layer (S1/S2, no machine): %llu padding, %llu table, %llu code bytes, %llu calls with lost confidence\n  map inference (S7, not observations): %llu padding, %llu code, %llu data bytes\n", (unsigned long long)r->stat_pad, (unsigned long long)r->stat_table, (unsigned long long)r->stat_code, (unsigned long long)r->stat_conf_lost, (unsigned long long)r->inf_pad, (unsigned long long)r->inf_code, (unsigned long long)r->inf_data);
     fprintf(out, "  copy siblings: %llu tables, %llu entries, %llu bytes, %llu table caps\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_entries, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_caps);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
@@ -1467,6 +1555,9 @@ uint8_t *dp_md_map_build(const DpMdResults *r) {
         else if (f & DP_MDF_FORCED) c = 2;                     // code-forced
         else if (f & (DP_MDF_DMA_READ | DP_MDF_CPU_VRAM)) c = 4;   // data-copied
         else if (f & DP_MDF_DATA) c = 5;                       // data-read
+        else if (r->stat && r->stat[i] == 3) c = 3;            // code-static (S2)
+        else if (r->stat && r->stat[i] == 7) c = 7;            // table (S1)
+        else if (r->stat && r->stat[i] == 8) c = 8;            // padding (S1)
         else if (r->inferred && r->inferred[i] == 1) c = 11;   // inferred-padding
         else if (r->inferred && r->inferred[i] == 2) c = 10;   // inferred-code
         else if (r->inferred && r->inferred[i] == 3) c = 9;    // inferred-data

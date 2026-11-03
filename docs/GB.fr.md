@@ -1965,3 +1965,16 @@ l'espace d'états à compteurs de données est infini. `--unbounded` s'arrête d
 à l'épuisement ou à SIGINT (reprise par `--resume`), pas forcément vite, et il
 faut un disque en face. Je n'ai pas relancé Zelda en `--unbounded` : la
 campagne reste à faire (J13).
+
+## 0.132.0
+
+MD : couche statique S1/S2 sans machine (`md_static_scan`), étiquetée à part des
+observations. S1 : padding (≥ 8 octets `00`/`FF`, classe 8) et tables de
+pointeurs (≥ 4 longs grand boutiste pairs, dans la ROM, ≥ 3 valeurs distinctes,
+classe 7). S2 : depuis chaque plage exécutée, suivi de BRA/Bcc/DBcc/JMP/JSR/BSR
+et du fall-through des instructions non terminales sur octets non exécutés
+(classe 3 `code-static`) ; après BSR/JSR la confiance est perdue (idiome des
+données en ligne) : le fall-through n'est pas suivi et le rapport le compte
+(`calls with lost confidence`). L'inférence S7 ne recouvre jamais cette couche.
+Ligne de rapport `static layer (S1/S2, no machine)`. Test `md_static_layer`
+(fixture `fix_md_static`, `--fork-cap 0`). Non validé sur ROM MD réelle : voir J13.

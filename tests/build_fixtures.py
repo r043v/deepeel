@@ -485,6 +485,15 @@ def build_md(out):
         r[t:t + 6] = bytes([0x70, 0x01, 0x4E, 0x71, 0x60, 0xFE])
     r[0x400:0x40C] = bytes([0, 0, 3, 0, 0, 0, 3, 0x10, 0, 0, 3, 0x20])
     save_md(out, "fix_md_disp", r)
+    # --- static: beq.s taken (fall-through never forked with --fork-cap 0) + an unread
+    # pointer table at $400 whose targets are not code ---
+    r = md_rom()
+    r[0x200:0x20A] = bytes([0x70, 0x00, 0x67, 0x04, 0x70, 0x01, 0x4E, 0x71, 0x60, 0xFE])
+    for i, t in enumerate((0x500, 0x504, 0x508, 0x50C, 0x510)):
+        r[0x400 + i * 4:0x404 + i * 4] = t.to_bytes(4, "big")
+    r[0x3F8:0x400] = bytes([0x11]) * 8
+    r[0x500:0x520] = bytes([0xAA]) * 0x20
+    save_md(out, "fix_md_static", r)
     # --- siblings: DMA of $400 (16 words) + a longword table {$400,$600,$800} read at $300
     r = md_rom()
     pc = 0x200

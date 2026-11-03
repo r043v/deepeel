@@ -81,6 +81,8 @@ typedef struct {
 typedef struct DpMdResults_ {
     uint8_t *flags;       /* per ROM byte, DP_MDF_* */
     uint32_t *exec_hits;  /* per ROM byte: natural-path instruction starts (heat) */
+    uint8_t *stat;        /* S1/S2 static layer per ROM byte: 3 code (flow closure), 7 pointer table, 8 padding; 0 none */
+    uint64_t stat_pad, stat_table, stat_code, stat_code_roots, stat_conf_lost;
     uint8_t *inferred;    /* S7 map inference per ROM byte: 1 pad, 2 code, 3 data, 0 none (never an observation) */
     uint64_t inf_pad, inf_code, inf_data, pad_runs_bytes;
     uint8_t *z80_flags;   /* per ROM byte, DP_MDZ_* */

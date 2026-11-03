@@ -13,9 +13,9 @@ remesure pas l'outil.
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 24 | 1 | 2 |
 | PCE | 16 | 21 | 1 | 1 |
-| MD | 9 | 23 | 6 | 1 |
+| MD | 10 | 24 | 4 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 90.
+Cellules ouvertes (◐ ou ✗) : 89.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -36,10 +36,9 @@ Cellules ouvertes (◐ ou ✗) : 90.
 | D14 | Chien de garde HALT, glissade de padding | PCE | ◐ glissade $00/$FF coupée (`padding cuts`) + opcode illégal ; pas de HALT/WAI attribué |
 | D14 | Chien de garde HALT, glissade de padding | MD | ◐ glissade `ori.b #0,d0` coupée sur option (`--cut-padding`, 16 octets nuls) ; fautes d'opcode déjà rapportées |
 | S1 | Scan padding + tables de pointeurs | NES | ◐ padding + tables, sans pointeurs ROM→ROM hors fenêtre |
-| S1 | Scan padding + tables de pointeurs | MD | ✗ |
 | S2 | Fermeture statique de flot | NES | ◐ saut/appel/branche, fenêtre propre |
 | S2 | Fermeture statique de flot | PCE | ◐ fenêtre MPR |
-| S2 | Fermeture statique de flot | MD | ✗ |
+| S2 | Fermeture statique de flot | MD | ◐ 0.132 Bcc/DBcc/BRA/JMP/JSR depuis les plages exécutées, confiance perdue après BSR/JSR ; pas de vues |
 | S3 | Suivi de constantes / provenance | GB | ◐ HL/A |
 | S3 | Suivi de constantes / provenance | NES | ◐ provenance RAM→`jmp (zp)` depuis la PRG |
 | S3 | Suivi de constantes / provenance | PCE | ◐ provenance ROM→WRAM→`jmp (abs)` (comptée, sans graine) |
