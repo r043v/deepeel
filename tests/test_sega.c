@@ -49,7 +49,7 @@ static void test_machine(const DpSegaBackend *b,int sms,int sg) {
 static void deferral(void) {
     uint8_t *rom=calloc(1,0x10000); CHECK(rom); if(!rom) exit(1);
     const uint8_t start[]={0xc3,0x00,0x01}; memcpy(rom,start,sizeof(start));
-    memset(rom+0x100,0x00,100);              // 100 NOPs, then a marker and HALT
+    memset(rom+0x100,0x40,100);              // 100 "ld b,b", then a marker and HALT (a $00 run would be a padding cut)
     const uint8_t tail[]={0x3e,0x07,0x76}; memcpy(rom+0x100+100,tail,sizeof(tail));
     DpSegaOptions o=dp_sega_options(); o.seed_cap=0; o.max_total=100000; o.max_steps=5; o.seed_vectors=0; o.input_masks=0;
     DpSegaResults r;
@@ -212,10 +212,22 @@ static void exploration(void) {
     dp_sega_results_free(&r);
     free(rom);
 }
+// a path sliding into a $00 run is a non-sense path: cut, counted, never silent
+static void padding_cut(void) {
+    uint8_t *rom=calloc(1,0x10000); CHECK(rom); if(!rom) exit(1);
+    const uint8_t start[]={0xc3,0x00,0x01}; memcpy(rom,start,sizeof(start));
+    memset(rom+0x100,0x00,64);               // 64 NOPs: padding
+    rom[0x100+64]=0x76;
+    DpSegaOptions o=dp_sega_options(); DpSegaResults r;
+    CHECK(dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r));
+    CHECK(r.pad_cuts>0 && !(r.flags[0x100+64]&DP_SEGA_NATURAL));
+    dp_sega_results_free(&r);
+    free(rom);
+}
 int main(void) {
     test_machine(dp_sega_backend_sg(),0,1);
     test_machine(dp_sega_backend_gg(),0,0);
     test_machine(dp_sega_backend_gg(),1,0);
-    exploration(); deferral(); fork_deferral();
+    exploration(); deferral(); fork_deferral(); padding_cut();
     TEST_DONE("sega");
 }

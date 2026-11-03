@@ -100,7 +100,7 @@ Pour chaque technique, la fiche indique :
 | D10 | Sondes de lecture manette | ✅ P1 8 masques | ✅ 128 comb. | ✅ | ✗ | ✅ 12 | ◐ 4 |
 | D11 | Fourches de répétition (blocs) | — | ✅ ED | ✅ ED | — | ✅ BBR/BBS | ✅ DBcc |
 | D12 | Cibles indirectes observées | ✅ `jp hl` | ✅ `jp (hl/ix/iy)` | ✅ | ✗ | ✗ | ✗ |
-| D13 | Coupes de non-sens | ✅ | ✗ | ✗ | ◐ illégal | ◐ illégal | ◐ faute |
+| D13 | Coupes de non-sens | ✅ | ✅ padding `pad_cuts` | ✅ | ◐ illégal | ◐ illégal | ◐ faute |
 | D14 | Chien de garde HALT, glissade de padding | ✅ | ◐ | ◐ | ✗ | ✗ | ✗ |
 | S1 | Scan padding + tables de pointeurs | ✅ | ✅ | ✅ | ✗ | ✅ inf. | ✗ |
 | S2 | Fermeture statique de flot | ✅ | ✅ vues | ✅ slots | ✗ | ◐ fenêtre MPR | ✗ |

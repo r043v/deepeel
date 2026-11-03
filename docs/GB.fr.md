@@ -892,3 +892,11 @@ l'état de mapper, l'observateur et le test de trappe BIOS via le backend
 mono-cœur `jobs_capped` n'existe plus pour MSX ; `test_sega_jobs` compare le
 parcours à 2 instances au parcours mono-cœur.
 
+## 0.47.0
+
+J4 : coupe de non-sens Sega/MSX (D13). Un chemin qui glisse dans une plage de
+8 octets identiques `$00`/`$FF` de la ROM est coupé et compté (`pad_cuts`,
+JSON `counters` et ligne `cuts:` du texte), comme `is_padding_at` côté GB. Le
+Z80 n'a pas d'opcode illégal : seul le décodage impossible (`decode_cuts`) et
+le padding restent à couper.
+

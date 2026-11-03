@@ -133,7 +133,7 @@ typedef struct {
     size_t size;
     uint64_t steps,paths,forks,irq_forks,exec_outside,data_reads,vdp_copies,ram_copies;
     uint64_t defer_spooled, fork_deferred, fork_final, steps_deferred,loop_deferred,defer_resumed,steps_final,loop_final,defer_dropped,defer_pending; // §6
-    uint64_t step_cuts,loop_cuts,fork_cuts,queue_cuts,global_cuts,path_cuts,faults,decode_cuts,stagnation_cuts;
+    uint64_t step_cuts,loop_cuts,fork_cuts,queue_cuts,global_cuts,path_cuts,faults,decode_cuts,pad_cuts,stagnation_cuts;
     // Seeds (GB parity): generated specs by kind, admissions, bounded refusals.
     uint64_t seeds_pointer,seeds_bank,seeds_entry,seeds_admitted,seeds_skipped_padding;
     uint64_t seeds_refused_view,seeds_refused_queue,seeds_refused_cap,seeds_pending;
