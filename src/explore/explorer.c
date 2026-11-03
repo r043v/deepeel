@@ -14,7 +14,7 @@
 #include <zlib.h>
 #include <sys/stat.h>
 #include "explorer.h"
-#include "../cpu/sm83/sm83.h"
+#include "../core/dpmachine.h"
 #include "tree.h"
 #include <time.h>
 #include <unistd.h>
@@ -945,7 +945,7 @@ bad_done:
     // forking: both sides of every conditional, and the road not taken when
     // an IRQ is about to dispatch (the machine takes the IRQ naturally)
     if (!ex->session) {
-        int cond = sm83_cond_of(op);
+        int cond = dp_isa_sm83()->cond_of(op);
         if (cond >= 0) fork_branch(ex, cond, pk, pc, op);
         if (!ex->cfg.no_irq_fork && api->gbr->ime && (*api->ie & api->io[0x0F] & 0x1F))
             fork_irq(ex);
@@ -1059,7 +1059,7 @@ bad_done:
             if (ex->session) hits_add(res, &res->play_exec_hits[pk]);
             if (is_entry) flags_or(&res->exec_flags[pk], DP_XF_ENTRY);
             if (ex->irq_depth) flags_or(&res->exec_flags[pk], DP_XF_IRQ);
-            int len = sm83_len(op);
+            int len = dp_isa_sm83()->length(op);
             uint16_t hi = pc;
             for (int i = 1; i < len; i++) { // operand bytes count as executed code
                 uint16_t a = (uint16_t)(pc + i);
@@ -1079,9 +1079,9 @@ bad_done:
     }
     ex->last_pc = pc;
     ex->last_bank = bank;
-    ex->last_len = (uint8_t)sm83_len(op);
+    ex->last_len = (uint8_t)dp_isa_sm83()->length(op);
     ex->have_last = 1;
-    ex->prev_was_cond = (uint8_t)(sm83_cond_of(op) >= 0 && !ex->session);
+    ex->prev_was_cond = (uint8_t)(dp_isa_sm83()->cond_of(op) >= 0 && !ex->session);
     ex->prev_target = target;
     ex->prev_site_bank = bank;
     ex->prev_site_pc = pc;
@@ -1120,7 +1120,7 @@ static int both_sides_covered(DpExplorer *ex, uint16_t pc, uint8_t op) {
     default:
         return 0; // RET cc: the taken side depends on the stack
     }
-    uint16_t fall = (uint16_t)(pc + sm83_len(op));
+    uint16_t fall = (uint16_t)(pc + dp_isa_sm83()->length(op));
     uint16_t sides[2] = { taken, fall };
     for (int i = 0; i < 2; i++) {
         uint16_t a = sides[i];
@@ -1167,7 +1167,7 @@ static void fork_branch(DpExplorer *ex, int cond, uint32_t site, uint16_t pc, ui
     }
     (*cnt)++;
     DpMach *m = ex->mach;
-    uint8_t flag = sm83_cond_flag(cond); // 0x80 = Z, 0x10 = C
+    uint8_t flag = dp_isa_sm83()->cond_flag(cond); // 0x80 = Z, 0x10 = C
     uint8_t *img = xrealloc(NULL, ex->sb);
     dp_mach_save(m, img);
     if (flag == 0x80) m->api->gbr->zr = m->api->gbr->zr ? 0 : 1; // Z set <=> zr == 0

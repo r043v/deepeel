@@ -12,7 +12,6 @@
 // becomes bounded forks instead of a dead end.
 #include "explorer.h"
 #include "../core/dpmachine.h"
-#include "../cpu/sm83/sm83.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -52,15 +51,7 @@ static void bank_edge_add(DpResults *res, DpHashSet *seen, uint16_t target) {
     }
 }
 
-static int illegal(uint8_t op) {
-    switch (op) {
-    case 0xD3: case 0xDB: case 0xDD: case 0xE3: case 0xE4:
-    case 0xEB: case 0xEC: case 0xED: case 0xF4: case 0xFC: case 0xFD:
-        return 1;
-    default:
-        return 0;
-    }
-}
+static int illegal(uint8_t op) { return dp_isa_sm83()->illegal(op); }
 
 // the bank the $4000 window holds right after reset
 static uint16_t boot_bank(const DpResults *res) {

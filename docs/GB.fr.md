@@ -870,3 +870,7 @@ encore de frontière disque. Chiffres = observations de l'outil.
 ## 0.43.1
 
 - J3 : la politique de la frontière différée (raisons, paliers, plafonds, pertes finales comptées) vit dans `src/explore/frontier.{h,c}` ; `explorer.c` ne fait plus que l'appliquer. Aucun changement de rapport.
+
+## 0.44.0
+
+- J3 : `DpIsa` complet pour le SM83 (condition, effets de registres, illégal). Le moteur GB, la closure et la provenance passent par l'ISA ; la provenance est générique (flot + `regs_effect` sur un treillis paire-pointeur/accumulateur). Carte identique à 0.43.1 sur Zelda à budget égal.

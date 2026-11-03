@@ -13,7 +13,7 @@
 // visited (pc, HL, A) states, total steps and run marks all capped, every
 // saturation counted.
 #include "explorer.h"
-#include "../cpu/sm83/sm83.h"
+#include "../core/dpmachine.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -38,37 +38,6 @@ static void ppush(ProvStack *s, ProvState st) {
         if (!s->v) abort();
     }
     s->v[s->n++] = st;
-}
-
-// conservative kill tables: anything not proven kept is lost, never guessed
-static int hl_writes(uint8_t op) {
-    if (op == 0xCB) return 1; // rot/shift/bit ops on h/l: untracked
-    if (op >= 0x60 && op <= 0x66) return 1; // ld h,r except ld h,(hl) handled
-    if (op >= 0x68 && op <= 0x6E) return 1; // ld l,r except ld l,(hl) handled
-    switch (op) {
-    case 0x09: case 0x19: case 0x29: case 0x39: // add hl,rr
-    case 0x22:                                  // ldi (hl),a
-    case 0xE1:                                  // pop hl
-    case 0xEB:                                  // ex de,hl
-    case 0xF8:                                  // ld hl,sp+r8
-        return 1;
-    default:
-        return 0;
-    }
-}
-
-static int a_writes(uint8_t op) {
-    if (op == 0xCB) return 1;
-    if ((op >= 0x80 && op <= 0xBF)) return 1;         // alu (except handled (hl) reads)
-    if (op >= 0x04 && op <= 0x3D && op != 0x76) return 1; // single-arg alu/rot/daa/cpl/scf..
-    switch (op) {
-    case 0x0A: case 0x1A:      // ld a,(bc) / ld a,(de)
-    case 0xF0: case 0xF2:      // ldh a,(n) / ld a,(C)
-    case 0x07: case 0x0F: case 0x17: case 0x1F: // rotates through a
-        return 1;
-    default:
-        return 0;
-    }
 }
 
 // proof of a ROM byte at a fully known address: bank 0 directly, the $4000
@@ -103,6 +72,18 @@ static void prov_data_mark(DpResults *res, uint16_t addr) {
     }
 }
 
+typedef struct { DpResults *res; int unused; } ProvRead;
+
+// a ROM byte at a provable address: the proof is recorded as static data
+static int prov_rom_read(void *ctx, uint16_t addr, uint8_t *v) {
+    ProvRead *pr = ctx;
+    uint32_t k = prov_addr_key(pr->res, addr);
+    if (k == ~0u) return 0;
+    *v = pr->res->cart->rom[k];
+    prov_data_mark(pr->res, addr);
+    return 1;
+}
+
 uint32_t dp_provenance(DpResults *res) {
     const DpCart *c = res->cart;
     size_t n = (size_t)res->banks * 0x4000;
@@ -130,65 +111,26 @@ uint32_t dp_provenance(DpResults *res) {
         if (s.k >= n || s.k >= c->rom_size) continue;
         uint32_t bank = s.k / 0x4000, off = s.k % 0x4000;
         uint16_t pc = bank ? (uint16_t)(0x4000 + off) : (uint16_t)off;
-        uint8_t op = c->rom[s.k];
-        int len = sm83_len(op);
+        const DpIsa *isa = dp_isa_sm83();
+        int len = isa->length(c->rom[s.k]);
         if ((uint32_t)s.k + (uint32_t)len > c->rom_size) continue;
         res->prov_steps++;
         steps++;
 
-        uint32_t rd = ~0u; // a (hl)/(nn) read at a provable address
-        int fall = 1;
-        switch (op) {
-        case 0x21: s.hl = c->rom[s.k + 1] | (c->rom[s.k + 2] << 8); s.hlmask = 3; break;
-        case 0x26: s.hl = (uint16_t)((s.hl & 0x00FF) | (c->rom[s.k + 1] << 8)); s.hlmask |= 2; break;
-        case 0x2E: s.hl = (uint16_t)((s.hl & 0xFF00) | c->rom[s.k + 1]); s.hlmask |= 1; break;
-        case 0x23: if (s.hlmask == 3) s.hl++; break;
-        case 0x2B: if (s.hlmask == 3) s.hl--; break;
-        case 0x2A: // ld a,(hli)
-            if (s.hlmask == 3) {
-                rd = prov_addr_key(res, s.hl);
-                if (rd != ~0u) { s.a = c->rom[rd]; s.aknown = 1; } else s.aknown = 0;
-                s.hl++;
-            } else s.aknown = 0;
-            break;
-        case 0x7E: // ld a,(hl)
-            if (s.hlmask == 3) {
-                rd = prov_addr_key(res, s.hl);
-                if (rd != ~0u) { s.a = c->rom[rd]; s.aknown = 1; } else s.aknown = 0;
-            } else s.aknown = 0;
-            break;
-        case 0x66: // ld h,(hl)
-            if (s.hlmask == 3 && (rd = prov_addr_key(res, s.hl)) != ~0u) {
-                s.hl = (uint16_t)((s.hl & 0x00FF) | (c->rom[rd] << 8));
-                s.hlmask |= 2;
-            } else s.hlmask &= (uint8_t)~2;
-            break;
-        case 0x6E: // ld l,(hl)
-            if (s.hlmask == 3 && (rd = prov_addr_key(res, s.hl)) != ~0u) {
-                s.hl = (uint16_t)((s.hl & 0xFF00) | c->rom[rd]);
-                s.hlmask |= 1;
-            } else s.hlmask &= (uint8_t)~1;
-            break;
-        case 0x3E: s.a = c->rom[s.k + 1]; s.aknown = 1; break; // ld a,n
-        case 0x67: // ld h,a
-            if (s.aknown) { s.hl = (uint16_t)((s.hl & 0x00FF) | (s.a << 8)); s.hlmask |= 2; }
-            else s.hlmask &= (uint8_t)~2;
-            break;
-        case 0x6F: // ld l,a
-            if (s.aknown) { s.hl = (uint16_t)((s.hl & 0xFF00) | s.a); s.hlmask |= 1; }
-            else s.hlmask &= (uint8_t)~1;
-            break;
-        case 0xFA: // ld a,(nn): a word read at an absolute address
-            rd = prov_addr_key(res, (uint16_t)(c->rom[s.k + 1] | (c->rom[s.k + 2] << 8)));
-            if (rd != ~0u) { s.a = c->rom[rd]; s.aknown = 1; } else s.aknown = 0;
-            break;
-        case 0xE9: // jp hl
-            fall = 0;
+        DpFlowInfo fi;
+        isa->flow(&c->rom[s.k], pc, &fi);
+        DpProvRegs r = { s.hl, s.hlmask, s.a, s.aknown };
+        ProvRead pr = { res, 0 };
+        DpProvRom rom = { &pr, prov_rom_read };
+        isa->regs_effect(&c->rom[s.k], &r, &rom);
+        s.hl = r.p; s.hlmask = r.pmask; s.a = r.a; s.aknown = r.aknown;
+
+        int fall = fi.fall;
+        if (fi.halt) fall = 0; // halt/stop: the run ends here
+        if (fi.kind == DP_FLOW_INDIRECT) { // jp hl
             if (s.hlmask != 3) {
                 res->prov_unresolved++;
-                break;
-            }
-            if (s.hl < 0x4000 && s.hl < c->rom_size) {
+            } else if (s.hl < 0x4000 && s.hl < c->rom_size) {
                 uint32_t tk = s.hl;
                 if (!(res->exec_flags[tk] & (DP_XF_NATURAL | DP_XF_FORCED))) {
                     uint8_t *f = &res->exec_flags[tk];
@@ -203,48 +145,22 @@ uint32_t dp_provenance(DpResults *res) {
             } else {
                 res->prov_unresolved++; // $4000 window: no static bank evidence
             }
-            break;
-        case 0x18: case 0x20: case 0x28: case 0x30: case 0x38: {
-            uint16_t t = (uint16_t)(pc + 2 + (int8_t)c->rom[s.k + 1]);
-            fall = op != 0x18;
+        } else if (fi.target >= 0 && fi.rst) { // restart vector: bank 0, no forgetting continuation
             ProvState ns = s;
-            ns.k = prov_target(res, bank, t);
+            ns.k = (uint32_t)fi.target;
+            ppush(&st, ns);
+        } else if (fi.target >= 0) { // direct jump / call / conditional
+            ProvState ns = s;
+            ns.k = prov_target(res, bank, (uint32_t)fi.target);
             if (ns.k != ~0u) ppush(&st, ns);
             else res->prov_unresolved++;
-            break;
-        }
-        case 0xC3: case 0xC2: case 0xCA: case 0xD2: case 0xDA:
-        case 0xCD: case 0xC4: case 0xCC: case 0xD4: case 0xDC: {
-            uint16_t t = (uint16_t)(c->rom[s.k + 1] | (c->rom[s.k + 2] << 8));
-            fall = op != 0xC3;
-            ProvState ns = s;
-            ns.k = prov_target(res, bank, t);
-            if (ns.k != ~0u) ppush(&st, ns);
-            else res->prov_unresolved++;
-            if (op == 0xCD || op == 0xC4 || op == 0xCC || op == 0xD4 || op == 0xDC) {
+            if (fi.call) {
                 // the callee may clobber everything: the continuation forgets
                 ProvState rs = { 0, 0, 0, 0, 0 };
                 rs.k = prov_target(res, bank, (uint32_t)pc + 3);
                 if (rs.k != ~0u) ppush(&st, rs);
             }
-            break;
         }
-        case 0xC9: case 0xD9: case 0x76: case 0x10:
-            fall = 0; // ret/reti/halt/stop: the run ends here
-            break;
-        case 0xC7: case 0xCF: case 0xD7: case 0xDF:
-        case 0xE7: case 0xEF: case 0xF7: case 0xFF: { // RST
-            ProvState ns = s;
-            ns.k = (uint32_t)(op & 0x38);
-            ppush(&st, ns);
-            break;
-        }
-        default:
-            if (hl_writes(op)) { s.hlmask = 0; }
-            if (a_writes(op)) s.aknown = 0;
-            break;
-        }
-        if (rd != ~0u) prov_data_mark(res, rd);
         if (fall) {
             uint32_t nk = s.k + (uint32_t)len;
             uint16_t npc = pc + (uint32_t)len;

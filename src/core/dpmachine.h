@@ -29,7 +29,25 @@ typedef struct DpFlowInfo {
     uint8_t call;      // 1 when the transfer pushes a return address
     int32_t target;    // absolute CPU address of a direct transfer, -1 if none
     int8_t cond;       // condition index (CPU specific), -1 if unconditional
+    uint8_t rst;       // 1 for a restart vector (call to a fixed address)
+    uint8_t halt;      // 1 when the run ends here (HALT / STOP)
 } DpFlowInfo;
+
+// register provenance lattice (spec §7.3 regs_effects): the pointer pair
+// (HL on the SM83/Z80) and the accumulator, each either a proven value or
+// unknown.  pmask: bit0 = low byte known, bit1 = high byte known.
+typedef struct DpProvRegs {
+    uint16_t p;
+    uint8_t pmask, a, aknown;
+} DpProvRegs;
+
+// ROM access given to the effect function: read(ctx, addr, &v) returns 1 and
+// the byte when `addr` is a provable ROM address (the caller records the
+// proof), 0 otherwise
+typedef struct DpProvRom {
+    void *ctx;
+    int (*read)(void *ctx, uint16_t addr, uint8_t *v);
+} DpProvRom;
 
 typedef struct DpIsa {
     const char *name;                      // "sm83", "z80", ...
@@ -40,6 +58,14 @@ typedef struct DpIsa {
     // classify the instruction at `bytes` (at least `length` readable bytes)
     // located at CPU address `pc`
     int (*flow)(const uint8_t *bytes, uint16_t pc, DpFlowInfo *out);
+    // condition index of a conditional opcode, -1 otherwise
+    int (*cond_of)(uint8_t op);
+    // state mask of the flag a condition tests (polarity in the low bit of cond)
+    uint8_t (*cond_flag)(int cond);
+    // micro-effects of the instruction on the provenance lattice
+    void (*regs_effect)(const uint8_t *bytes, DpProvRegs *r, const DpProvRom *rom);
+    // 1 when `op` is an undefined opcode
+    int (*illegal)(uint8_t op);
     // textual form; returns the length or 0 when undefined
     int (*disasm)(const uint8_t *rom, uint32_t rom_size, uint16_t addr, char *out, size_t outsz);
 } DpIsa;
