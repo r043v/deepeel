@@ -11,7 +11,7 @@ remesure pas l'outil.
 | GB | 34 | 1 | 3 | 1 |
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
-| NES | 11 | 19 | 7 | 2 |
+| NES | 11 | 20 | 6 | 2 |
 | PCE | 15 | 7 | 16 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
@@ -61,7 +61,7 @@ Cellules ouvertes (◐ ou ✗) : 93.
 | G1 | Graines reset/RST/IRQ | NES | ◐ reset + NMI/IRQ (`--seed-vectors`) |
 | G1 | Graines reset/RST/IRQ | PCE | ◐ reset |
 | G1 | Graines reset/RST/IRQ | MD | ◐ reset |
-| G2 | Scan de dispatch par vues de banques | NES | ✗ |
+| G2 | Scan de dispatch par vues de banques | NES | ◐ UxROM, banque fixe (`--bank-dispatch`) |
 | G2 | Scan de dispatch par vues de banques | PCE | ✗ |
 | G2 | Scan de dispatch par vues de banques | MD | ✗ |
 | G3 | `--seed-banks`, `--entry` | PCE | ✗ |

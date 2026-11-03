@@ -1022,6 +1022,53 @@ static void second_pass_seed(DpNesRun *x) {
             }
         }
     }
+    // G2: UxROM dispatch by bank views.  Runs of >= 3 aligned words in the
+    // fixed bank that all point into $8000-$BFFF are a dispatch table; each
+    // distinct target is entered in every bank view whose bytes there decode
+    // as code (6 instructions without a jam, not an 8-byte constant run).
+    unsigned mp = dp_nesmach_mapper(x->m);
+    if (x->opt.bank_dispatch && mp == 2 && n >= 0x8000) {
+        size_t fixed = n - 0x4000;
+        unsigned banks = (unsigned)(n >> 14);
+        for (size_t k = fixed; k + 1 < n;) {
+            size_t e = k;
+            while (e + 1 < n && (rom[e + 1] & 0xC0) == 0x80) e += 2;   // word high byte in $80-$BF
+            if (e - k >= 6) {
+                r->dispatch_tables++;
+                for (size_t w = k; w < e; w += 2) {
+                    unsigned v = rom[w] | (rom[w + 1] << 8);
+                    for (unsigned b = 0; b < banks; b++) {
+                        size_t cell = (size_t)b * 0x4000 + (v & 0x3FFF);
+                        if (sd[cell] || (r->flags[cell] & (DP_NES_NATURAL | DP_NES_FORCED))) continue;
+                        // plausibility: decodes as code, not a padding run
+                        int ok = 1, run = 1;
+                        for (unsigned q = 1; q < 8 && cell + q < n; q++) run += rom[cell + q] == rom[cell];
+                        if (run >= 8) ok = 0;
+                        size_t c = cell; unsigned pcv = v;
+                        for (unsigned ins = 0; ok && ins < 6; ins++) {
+                            uint8_t bb[3] = { rom[c], c + 1 < n ? rom[c + 1] : 0, c + 2 < n ? rom[c + 2] : 0 };
+                            DpM6502Instruction in;
+                            if (!dp_m6502_decode(bb, 3, (uint16_t)pcv, &in) || in.flow == DP_M6502_JAM || (c & 0x3FFF) + in.length > 0x4000) { ok = 0; break; }
+                            if (in.flow == DP_M6502_JUMP || in.flow == DP_M6502_RETURN) break;
+                            c += in.length; pcv += in.length;
+                        }
+                        if (!ok) { r->dispatch_refused_view++; continue; }
+                        sd[cell] = 1;
+                        if (r->pass2_seeds + r->pass2_refused >= NES_PASS2_MAX) { r->pass2_capped++; continue; }
+                        uint8_t *es = malloc(dp_nesmach_state_size());
+                        if (!es) { x->failed = 1; free(sd); return; }
+                        dp_nesmach_reset(x->m);
+                        if (!dp_nesmach_enter(x->m, b, v)) { free(es); r->pass2_refused++; continue; }
+                        dp_nesmach_save(x->m, es);
+                        DpNesPathState er = { es, 1, 0, 0, 0, 0, 0, DP_NES_TREE_PASS2 };
+                        if (queue_push(x, &er)) { r->pass2_seeds++; r->dispatch_seeds++; }
+                        else { free(es); r->seeds_refused_queue++; }
+                    }
+                }
+            }
+            k = e > k ? e + 2 : k + 1;
+        }
+    }
     free(sd);
 }
 
@@ -1360,6 +1407,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  copy siblings: %llu tables; %llu ranges (%llu bytes); %llu refused over executed code; %llu tables cut at the cap\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_ranges, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_refused, (unsigned long long)r->sib_caps);
     fprintf(out, "  choice tree: %u nodes\n", r->tree_count);
     fprintf(out, "  provenance: %llu jump-table words traced from PRG reads, %llu roots seeded\n", (unsigned long long)r->prov_sites, (unsigned long long)r->prov_roots);
+    fprintf(out, "  bank dispatch: %llu tables, %llu seeds, %llu bank views refused (not code)\n", (unsigned long long)r->dispatch_tables, (unsigned long long)r->dispatch_seeds, (unsigned long long)r->dispatch_refused_view);
     fprintf(out, "  second pass: %llu seeds, %llu refused, %llu roots over the cap\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     fprintf(out, "  vector seeds: %llu\n", (unsigned long long)r->vectors_seeded);
     fprintf(out, "  entries: seeded %llu refused %llu\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);

@@ -576,6 +576,24 @@ def build_nes_pce(out):
         n3[q:q + 2] = bytes([0x00, 0x80])
     with open(os.path.join(out, "fix_nes_prov.nes"), "wb") as f:
         f.write(n3)
+    # NES bank dispatch: UxROM, 4 banks; the fixed bank idles at $C000 and holds a
+    # word table ($8010, $8020, $8030) at $C100; banks 0 and 1 hold code at all
+    # three targets, bank 2 only at $8010, bank 3 (the fixed bank) none
+    d = bytearray(16 + 4 * 0x4000)
+    d[0:4] = b"NES\x1a"
+    d[4], d[5], d[6] = 4, 0, 0x20
+    for b, ts in ((0, (0x10, 0x20, 0x30)), (1, (0x10, 0x20, 0x30)), (2, (0x10,))):
+        for t in ts:
+            q = 16 + b * 0x4000 + t
+            d[q:q + 3] = bytes([0x4C, t, 0x80])
+    o = 16 + 3 * 0x4000
+    d[o:o + 3] = bytes([0x4C, 0x00, 0xC0])
+    d[o + 0x100:o + 0x106] = bytes([0x10, 0x80, 0x20, 0x80, 0x30, 0x80])
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        q = o + 0x3FFA + (v - 0xFFFA)
+        d[q:q + 2] = bytes([0x00, 0xC0])
+    with open(os.path.join(out, "fix_nes_dispatch.nes"), "wb") as f:
+        f.write(d)
     # NES static closure: jsr $8020 whose subroutine a 2-step budget never reaches
     n = bytearray(16 + 2 * 0x4000 + 0x2000)
     n[0:4] = b"NES\x1a"

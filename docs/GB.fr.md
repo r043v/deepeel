@@ -1526,3 +1526,16 @@ seeded`. Fixture `fix_nes_prov.nes` (table `$8020,$8030,$8040`, seule la
 première prise : 2 racines semées), test `nes_provenance`. Reste ◐ : pas de
 suivi de constantes arithmétiques, pas de provenance par chemin ni de
 propagation registre→registre au-delà de la lecture immédiate.
+
+## 0.98.0
+
+NES : dispatch par vues de banques (G2, partielle, UxROM). `--bank-dispatch`
+(implique `--second-pass`) : dans la banque fixe, une suite d'au moins 3 mots
+alignés dont l'octet haut tombe en `$80–$BF` est une table de dispatch ; chaque
+cible distincte est entrée dans chaque vue de banque dont les octets s'y
+décodent en code (6 instructions sans jam, pas une plage de 8 octets
+identiques) ; les vues refusées sont comptées. Bornée par le plafond de 256
+graines du second passage. Rapport : `bank dispatch: N tables, N seeds, N bank
+views refused (not code)`. Fixture `fix_nes_dispatch.nes` (3 cibles × 4
+banques : 7 graines, 5 vues refusées), test `nes_bank_dispatch`. Reste ◐ :
+UxROM seulement, pas de tables hors banque fixe, pas de vue à bascule dynamique.
