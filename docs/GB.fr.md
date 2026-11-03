@@ -848,3 +848,8 @@ encore de frontière disque. Chiffres = observations de l'outil.
 - `--spool-to-frontier` (avec `--resume --state-dir`) convertit un spool `DPSR` en lots `.dpf` de raison `paths`.
 - Tests : `frontier_cli` (spool → conversion → `frontier stats` → `drain`), Sega « report en attente au mur ».
 - Observations de l'outil, pas des mesures matériel.
+
+## 0.41.0
+
+- `--lot FICHIER` pour NES, PCE, MD et Sega/MSX : lot disque portable (`src/explore/lots.h`) des états différés. Trop-plein de la zone parquée et restes d'un mur y sont écrits, relus quand la file se vide ; une relance avec le même fichier reprend le reliquat. Sega : import dans le spool au départ, export du spool non lu à la fin.
+- Compteurs `lot_written`, `lot_read`, `lot_pending` (rapports texte NES/PCE/MD). Observations de l'outil, pas des mesures matériel.

@@ -1,5 +1,8 @@
 // Mega Drive milestone 2: 68000 decoder + forking explorer.
+#define _DEFAULT_SOURCE
+#include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <string.h>
 #include "../src/cpu/m68k/m68k.h"
 #include "../src/core/cart_md.h"
@@ -143,6 +146,30 @@ int main(int argc, char **argv) {
         CHECK(dp_md_explore(&c, &o, &r) == 0);
         CHECK(r.sat_queue > 0 && r.parked > 0 && r.parked_resumed == r.parked && r.parked_lost == 0 && r.pad_forks == 4);
         dp_md_results_free(&r); dp_md_cart_free(&c);
+    }
+
+    {   // a wall leaves states: they go to the disk lot, the next run resumes them (§6)
+        char path[512], err[128], lp[] = "/tmp/dp_md_lotXXXXXX";
+        snprintf(path, sizeof path, "%s/fix_md_pad.md", dir);
+        int fd = mkstemp(lp); if (fd >= 0) close(fd);
+        uint64_t left = 0;
+        for (uint64_t wall = 1; wall < 2000 && !left; wall++) {
+            CHECK(dp_md_cart_load(&c, path, err, sizeof err) == 0);
+            DpMdOptions o; dp_md_options_default(&o);
+            o.lot_path = lp; o.max_total = wall; unlink(lp);
+            CHECK(dp_md_explore(&c, &o, &r) == 0);
+            left = r.lot_pending;
+            if (left) CHECK(r.dropped_pending == 0);
+            dp_md_results_free(&r); dp_md_cart_free(&c);
+        }
+        CHECK(left > 0);
+        CHECK(dp_md_cart_load(&c, path, err, sizeof err) == 0);
+        DpMdOptions o; dp_md_options_default(&o);
+        o.lot_path = lp; o.max_total = 100000;
+        CHECK(dp_md_explore(&c, &o, &r) == 0);
+        CHECK(r.lot_read >= left && r.lot_pending == 0 && access(lp, F_OK) != 0);
+        dp_md_results_free(&r); dp_md_cart_free(&c);
+        unlink(lp);
     }
 
     {

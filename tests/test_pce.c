@@ -4,6 +4,7 @@
 // (one side natural, the other forced), data reads from the mapped page, a
 // copy into the VDC data port and an idle loop that must be cut and counted.
 #include <stdio.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include "../src/platform/pce/pce.h"
@@ -103,6 +104,26 @@ static void test_explore(const uint8_t *rom) {
         }
         dp_pce_results_free(rp);
         free(rp);
+        // a wall leaves states: they go to the disk lot, the next run resumes them (§6)
+        char lp[] = "/tmp/dp_pce_lotXXXXXX"; int fd = mkstemp(lp); if (fd >= 0) close(fd);
+        uint64_t left = 0;
+        for (uint64_t wall = 1; wall < 600 && !left; wall++) {
+            DpPceOptions ow = o; ow.queue_cap = 1; ow.lot_path = lp; ow.max_total = wall;
+            unlink(lp);
+            DpPceResults *rw = calloc(1, sizeof *rw);
+            CHECK(dp_pce_explore(rom2, ROM_SIZE, &ow, rw), "walled run");
+            left = rw->lot_pending;
+            if (left) CHECK(rw->pending_dropped == 0, "wall leftovers saved, none dropped");
+            dp_pce_results_free(rw); free(rw);
+        }
+        CHECK(left > 0, "a wall leaves states in the lot");
+        DpPceOptions orr = o; orr.queue_cap = 1; orr.lot_path = lp;
+        DpPceResults *rr = calloc(1, sizeof *rr);
+        CHECK(dp_pce_explore(rom2, ROM_SIZE, &orr, rr), "resumed run");
+        CHECK(rr->lot_read >= left && rr->lot_pending == 0, "the lot is resumed and emptied");
+        CHECK(access(lp, F_OK) != 0, "the emptied lot file is removed");
+        dp_pce_results_free(rr); free(rr);
+        unlink(lp);
         free(rom2);
     }
 }

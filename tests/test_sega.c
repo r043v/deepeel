@@ -83,6 +83,25 @@ static void deferral(void) {
         if(ok) { CHECK(r.flags[0x164]&DP_SEGA_NATURAL); dp_sega_results_free(&r); }
         o.resume=0; o.spool_path=NULL; unlink(sp);
     }
+    {   // the portable lot: a wall exports the unread spool, the next run imports it and empties the file
+        char sp[]="/tmp/dp_sega_lspXXXXXX", lp[]="/tmp/dp_sega_lotXXXXXX";
+        int fd=mkstemp(sp); if(fd>=0) close(fd);
+        fd=mkstemp(lp); if(fd>=0) close(fd);
+        unlink(lp);
+        o.defer_tiers=3; o.spool_path=sp; o.lot_path=lp; o.max_total=5; o.input_total=0; o.indirect_total=0;
+        int ok=dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r);
+        CHECK(ok);
+        uint64_t left=0;
+        if(ok) { left=r.lot_pending; CHECK(r.lot_written==left); dp_sega_results_free(&r); }
+        CHECK(left>0);
+        CHECK(access(lp,F_OK)==0);
+        o.max_total=100000;
+        ok=dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r);
+        CHECK(ok);
+        if(ok) { CHECK(r.lot_read==left); CHECK(r.flags[0x164]&DP_SEGA_NATURAL); dp_sega_results_free(&r); }
+        CHECK(access(lp,F_OK)!=0);
+        o.spool_path=NULL; o.lot_path=NULL; unlink(sp); unlink(lp);
+    }
     // too few tiers: the final cut is counted, never silent
     o.defer_tiers=1;
     CHECK(dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r));

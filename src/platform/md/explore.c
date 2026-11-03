@@ -1,4 +1,5 @@
 #include "explore.h"
+#include "../../explore/lots.h"
 #include <stdlib.h>
 #include <string.h>
 #include "../../cpu/m68k/m68k.h"
@@ -24,6 +25,8 @@ typedef struct {
     Item *q;
     uint32_t nq, qcap;
     Item *park; uint32_t npark, parkcap; // deferred holding area (queue full)
+    void *spill_state; Item spill_item; // state waiting for its post-edits before going to the lot
+    DpLot *lot;         // disk lot: park overflow, wall leftovers, --lot resume
     void *last_state;   // blob of the state the last push() produced (queued or parked)
     uint32_t *gen;       /* per even rom address: path generation */
     uint32_t *vis;       /* per even rom address: visits in that generation */
@@ -94,8 +97,22 @@ static void mark(X *x, uint32_t pc, unsigned len) {
         if (dp_mdmach_rom_visible(x->m, pc + i)) x->r->flags[pc + i] |= f;
 }
 
+// one queued item to the disk lot (the state blob stays owned by the caller)
+static int lot_spill(X *x, const Item *it) {
+    Item m = *it; m.state = NULL;
+    return x->lot && dp_lot_put(x->lot, &m, sizeof m, it->state, (uint32_t)ssz);
+}
+
+static void spill_flush(X *x) {
+    if (!x->spill_state) return;
+    if (!lot_spill(x, &x->spill_item)) x->r->parked_lost++;
+    free(x->spill_state);
+    x->spill_state = NULL;
+}
+
 static int push(X *x, uint32_t pc, int vint, int hint) {
     int full = 0;
+    spill_flush(x);
     if (x->nq >= x->qcap) {
         uint32_t limit = x->o->queue_max > x->qcap ? x->o->queue_max : x->qcap;
         uint32_t ncap = x->qcap > limit / 2 ? limit : x->qcap * 2;
@@ -103,7 +120,27 @@ static int push(X *x, uint32_t pc, int vint, int hint) {
         Item *q = ncap > x->qcap ? realloc(x->q, (size_t)ncap * sizeof *q) : NULL;
         if (!q) { // saturation counted; the state waits aside instead of dying (§6)
             x->r->sat_queue++;
-            if (x->npark >= 4096) { x->r->parked_lost++; return 0; }
+            if (x->npark >= 4096) { // holding area full: the new state goes straight to the disk lot
+                void *ls = x->lot ? malloc(ssz) : NULL;
+                if (ls) {
+                    dp_mdmach_save(x->m, ls);
+                    dp_mdmach_state_set_pc(ls, pc);
+                    dp_mdmach_state_set_irq(ls, vint, hint);
+                    Item *li = &x->spill_item; memset(li, 0, sizeof *li);
+                    li->state = ls; li->forced = 1; li->origin = x->pc;
+                    memcpy(li->an_writer, x->an_writer, sizeof li->an_writer);
+                    li->watch_pc = x->watch_pc; li->watch_addr = x->watch_addr;
+                    li->watch_value = x->watch_value; li->watch_size = x->watch_size;
+                    li->watch_d0 = x->watch_d0; li->watch_a1 = x->watch_a1; li->watch_a2 = x->watch_a2;
+                    x->spill_state = ls;   // written by spill_flush once the caller's post-edits are done
+                    x->last_state = ls;
+                    x->r->parked++;
+                    if (pc < x->r->rom_size) x->r->flags[pc] |= DP_MDF_QUEUED;
+                    return 1;
+                }
+                free(ls);
+                x->r->parked_lost++; return 0;
+            }
             if (x->npark == x->parkcap) {
                 uint32_t nc = x->parkcap ? x->parkcap * 2 : 64;
                 Item *g = realloc(x->park, (size_t)nc * sizeof *g);
@@ -406,6 +443,7 @@ void dp_md_options_default(DpMdOptions *o) {
     o->watch_write = UINT32_MAX;
     o->exclude_read_pc = UINT32_MAX;
     o->movie = NULL;
+    o->lot_path = NULL;
 }
 
 static void run_path(X *x, Item *it, uint64_t budget, int *cut) {
@@ -560,6 +598,8 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     r->copies = calloc(DP_MD_COPY_CAP, sizeof *r->copies);
     X x = {.c = c, .o = o, .r = r, .qcap = o->queue_cap};
     x.q = calloc(o->queue_cap ? o->queue_cap : 1, sizeof *x.q);
+    if (o->lot_path && !(x.lot = dp_lot_open(o->lot_path, 1)))
+        fprintf(stderr, "deepeel: cannot open the lot %s\n", o->lot_path);
     x.gen = calloc(c->size / 2 + 1, sizeof *x.gen);
     x.vis = calloc(c->size / 2 + 1, sizeof *x.vis);
     x.site = calloc(c->size / 2 + 1, sizeof *x.site);
@@ -585,17 +625,38 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     r->decoders = x.ndec;
     if (r->steps < o->max_total) replay_streams(&x, (o->max_total - r->steps) / 2);
     for (unsigned d = 0; d < x.ndec; d++) free(x.dec[d].snap);
-    while (x.nq || x.npark) {
+    for (;;) {
+        spill_flush(&x);
         if (r->steps >= o->max_total) break;
-        if (!x.nq) { x.q[x.nq++] = x.park[--x.npark]; r->parked_resumed++; }
+        if (!x.nq && x.npark) { x.q[x.nq++] = x.park[--x.npark]; r->parked_resumed++; }
+        if (!x.nq && dp_lot_pending(x.lot)) { // the disk backlog comes back
+            Item m; uint32_t ml = 0, bl = 0; uint8_t *blob = NULL;
+            if (dp_lot_get(x.lot, &m, &ml, &blob, &bl)) {
+                if (ml == sizeof m && bl == ssz) { m.state = blob; x.q[x.nq++] = m; r->parked_resumed++; }
+                else free(blob);
+            }
+            if (!x.nq) continue;
+        }
+        if (!x.nq) break;
         Item it = x.q[--x.nq];
         run_path(&x, &it, o->max_total - r->steps, &cut);
         free(it.state);
     }
-    r->dropped_pending = x.nq + x.npark;
-    for (uint32_t i = 0; i < x.npark; i++) free(x.park[i].state);
+    // leftovers of a wall go to the lot when there is one (the next run resumes them)
+    for (uint32_t i = 0; i < x.npark; i++) {
+        if (!lot_spill(&x, &x.park[i])) r->dropped_pending++;
+        free(x.park[i].state);
+    }
     free(x.park);
-    for (uint32_t i = 0; i < x.nq; i++) free(x.q[i].state);
+    for (uint32_t i = 0; i < x.nq; i++) {
+        if (!lot_spill(&x, &x.q[i])) r->dropped_pending++;
+        free(x.q[i].state);
+    }
+    if (x.lot) {
+        r->lot_written = x.lot->written; r->lot_read = x.lot->read_back;
+        r->lot_pending = dp_lot_pending(x.lot);
+        dp_lot_close(x.lot, o->lot_path);
+    }
     for (size_t i = 0; i < c->size; i++) {
         uint8_t f = r->flags[i];
         if (f & (DP_MDF_NATURAL | DP_MDF_FORCED)) r->exec_bytes++;
@@ -640,6 +701,9 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     if (o->movie) fprintf(out, "GMV replay: %u / %u frames%s\n", r->movie_frames, o->movie->frames,
                           r->movie_frames == o->movie->frames ? "" : " (incomplete)");
     fprintf(out, "saturation (a non-zero line means the exploration is incomplete):\n");
+    if (r->lot_written || r->lot_read || r->lot_pending)
+        fprintf(out, "  lot: %llu written, %llu read back, %llu left on disk\n", (unsigned long long)r->lot_written,
+                (unsigned long long)r->lot_read, (unsigned long long)r->lot_pending);
     fprintf(out, "  frontier: parked %llu resumed %llu lost %llu\n", (unsigned long long)r->parked,
             (unsigned long long)r->parked_resumed, (unsigned long long)r->parked_lost);
     fprintf(out, "  total budget: %llu  pending forks unrun: %llu\n", (unsigned long long)r->sat_total,

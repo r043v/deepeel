@@ -68,6 +68,7 @@ typedef struct {
     uint32_t queue_max;    // queue growth ceiling (0: no growth past queue_cap)
     const char *spool_path; // overflow states survive here (--resume re-reads)
     int resume;             // continue from spool_path instead of truncating it
+    const char *lot_path;   // portable frontier lot: imported into the spool at start, the unread spool saved back at the end
     uint32_t spool_cap_mb;  // 0: unbounded
     const char *tree_path;  // choice tree record (--tree FILE)
     struct { uint32_t bank; uint16_t addr; } entry[32]; // extra --entry seeds
@@ -142,6 +143,7 @@ typedef struct {
     uint64_t evicted_ctx,ctx_grew,ctx_full,section_cuts;
     // growing queue, disk spool and choice tree (GB parity)
     uint64_t queue_growths,spool_writes,spool_reads,spool_refused,spool_flushed;
+    uint64_t lot_written,lot_read,lot_pending; // disk lot (--lot): imported at start, rewritten with the unread spool at the end
     DpSegaTreeNode *tree_nodes;
     uint32_t tree_count,tree_capacity;
     const uint8_t *rom;        // ROM image copy for static map classes

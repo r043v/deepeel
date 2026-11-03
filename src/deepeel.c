@@ -1013,6 +1013,7 @@ static int cmd_nes(int argc, char **argv) {
         else if (!strcmp(a, "--max-steps") && i + 1 < argc) opt.max_steps = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--max-paths") && i + 1 < argc) opt.max_paths = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--queue") && i + 1 < argc) opt.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--lot") && i + 1 < argc) opt.lot_path = argv[++i];
         else if (!strcmp(a, "--loop-cap") && i + 1 < argc) opt.loop_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--fork-cap") && i + 1 < argc) opt.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--no-irq-fork")) opt.seed_irq = 0;
@@ -1080,6 +1081,7 @@ static int cmd_pce(int argc, char **argv) {
         else if (!strcmp(a, "--max-total") && i + 1 < argc) opt.max_total = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--max-steps") && i + 1 < argc) opt.max_steps = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--queue") && i + 1 < argc) opt.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--lot") && i + 1 < argc) opt.lot_path = argv[++i];
         else if (!strcmp(a, "--loop-cap") && i + 1 < argc) opt.loop_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--fork-cap") && i + 1 < argc) opt.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--pad-fork-cap") && i + 1 < argc) opt.pad_fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
@@ -1289,6 +1291,7 @@ static int cmd_md(int argc, char **argv) {
             if (!strcmp(a, "--max-total")) o.max_total = strtoull(argv[++i], NULL, 0);
             else if (!strcmp(a, "--path-steps")) o.path_steps = strtoull(argv[++i], NULL, 0);
             else if (!strcmp(a, "--queue")) o.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--lot")) o.lot_path = argv[++i];
             else if (!strcmp(a, "--queue-max")) o.queue_max = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--fork-cap")) o.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--visit-cap")) o.visit_cap = (uint32_t)strtoul(argv[++i], NULL, 0);

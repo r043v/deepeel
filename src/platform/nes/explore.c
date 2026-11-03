@@ -7,6 +7,7 @@
 // lands on physical PRG cells (bank * $4000 + (addr & $3FFF)); execution
 // outside PRG counts as exec_outside and never enters the cartridge maps.
 #include "explore.h"
+#include "../../explore/lots.h"
 #include "../../mach/nesmach.h"
 #include "../../cpu/m6502/m6502.h"
 #include "nes_trace.h"
@@ -39,6 +40,7 @@ typedef struct {
     DpNesPathState *queue;
     uint32_t queue_len, queue_cap;
     DpNesPathState *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
+    DpLot *lot;                        // disk lot: park overflow, wall leftovers, --lot resume
     DpHashSet seen;                    // exact state dedup
     DpNesLoop *loops;                  // back-branch counters
     size_t loop_len, loop_cap;
@@ -348,6 +350,15 @@ static int queue_push(DpNesRun *x, const DpNesPathState *s) {
 }
 
 // exact-state dedup: the snapshot hash (volatile clocks excluded)
+// state to the disk lot (takes the blob); 0 = no lot or write failed (blob kept)
+static int lot_spill(DpNesRun *x, DpNesPathState *s) {
+    if (!x->lot) return 0;
+    DpNesPathState m = *s; m.state = NULL;
+    if (!dp_lot_put(x->lot, &m, sizeof m, s->state, (uint32_t)dp_nesmach_state_size())) return 0;
+    free(s->state); s->state = NULL;
+    return 1;
+}
+
 // returns 1 when the state was queued, 2 when parked (queue full), 0 when not kept
 static int snap_push(DpNesRun *x, DpNesPathState *s) {
     uint64_t h = dp_nesmach_state_hash(s->state);
@@ -362,6 +373,7 @@ static int snap_push(DpNesRun *x, DpNesPathState *s) {
             }
             if (x->park_len < x->park_cap) { x->park[x->park_len++] = *s; x->r->parked++; return 2; }
         }
+        if (lot_spill(x, s)) { x->r->parked++; return 2; }
         x->r->parked_lost++;
     }
     if (!queue_push(x, s)) { x->r->seeds_refused_queue++; free(s->state); return 0; }
@@ -579,6 +591,10 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
         if (!x.frame_masks || !x.frame_cmds || !x.ring) x.failed = 1;
     }
 
+    if (x.opt.lot_path) {
+        x.lot = dp_lot_open(x.opt.lot_path, 1);
+        if (!x.lot) fprintf(stderr, "deepeel: cannot open the lot %s\n", x.opt.lot_path);
+    }
     x.queue_cap = x.opt.queue_cap;
     x.queue = calloc(x.queue_cap ? x.queue_cap : 1, sizeof(DpNesPathState));
     x.fork_sites_len = r->prg_size;
@@ -622,8 +638,18 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
             DpNesPathState root = { snap, 0, 0, 0, 0, 0 };
             r->seeds_reset = 1;
             queue_push(&x, &root);
-            while ((x.queue_len > 0 || x.park_len > 0) && !x.failed) {
-                if (x.queue_len == 0) { x.queue[x.queue_len++] = x.park[--x.park_len]; r->parked_resumed++; }
+            for (;;) {
+                if (x.failed) break;
+                if (x.queue_len == 0 && x.park_len > 0) { x.queue[x.queue_len++] = x.park[--x.park_len]; r->parked_resumed++; }
+                if (x.queue_len == 0 && dp_lot_pending(x.lot)) { // the disk backlog comes back
+                    DpNesPathState m; uint32_t ml = 0, bl = 0; uint8_t *blob = NULL;
+                    if (dp_lot_get(x.lot, &m, &ml, &blob, &bl)) {
+                        if (ml == sizeof m && bl == dp_nesmach_state_size()) { m.state = blob; x.queue[x.queue_len++] = m; }
+                        else free(blob);
+                    }
+                    if (x.queue_len == 0) continue; // unreadable record: next one
+                }
+                if (x.queue_len == 0) break;
                 uint32_t slot = x.queue_len - 1;
                 run_path(&x, slot);
                 // the slot is drained (run_path cleared its state); the
@@ -638,12 +664,21 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
 
     sections_build(&x);
 
-    // states still queued when a wall stopped the drain: counted, not silent
+    // states still queued when a wall stopped the drain: saved in the lot when
+    // there is one (the next run resumes them), else counted, not silent
     for (uint32_t i = 0; i < x.queue_len; i++) {
-        if (x.queue[i].state) r->pending_dropped++;
+        if (x.queue[i].state && !lot_spill(&x, &x.queue[i])) r->pending_dropped++;
         free(x.queue[i].state);
     }
-    for (uint32_t i = 0; i < x.park_len; i++) { r->pending_dropped++; free(x.park[i].state); }
+    for (uint32_t i = 0; i < x.park_len; i++) {
+        if (!lot_spill(&x, &x.park[i])) r->pending_dropped++;
+        free(x.park[i].state);
+    }
+    if (x.lot) {
+        r->lot_written = x.lot->written; r->lot_read = x.lot->read_back;
+        r->lot_pending = dp_lot_pending(x.lot);
+        dp_lot_close(x.lot, x.opt.lot_path);
+    }
     free(x.park);
     free(x.queue);
     free(x.loops);
@@ -712,6 +747,9 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->exec_outside);
     fprintf(out, "  play: %llu sessions x frames %llu\n",
         (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run);
+    if (r->lot_written || r->lot_read || r->lot_pending)
+        fprintf(out, "  lot: %llu written, %llu read back, %llu left on disk\n", (unsigned long long)r->lot_written,
+            (unsigned long long)r->lot_read, (unsigned long long)r->lot_pending);
     fprintf(out, "  frontier: parked %llu resumed %llu lost %llu\n", (unsigned long long)r->parked,
         (unsigned long long)r->parked_resumed, (unsigned long long)r->parked_lost);
     fprintf(out, "  pending paths dropped at the wall %llu\n",

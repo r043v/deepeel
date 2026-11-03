@@ -21,6 +21,7 @@
 // observed code inside each page's observed window, then padding and gap
 // inference classify what is left (reported apart from the observations).
 #include "explore.h"
+#include "../../explore/lots.h"
 #include "pce.h"
 #include "tas.h"
 #include <math.h>
@@ -45,6 +46,7 @@ typedef struct {
     PceQueued *queue;
     uint32_t queue_len;
     PceQueued *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
+    DpLot *lot;            // disk lot: park overflow, wall leftovers, --lot resume
     uint64_t *seen;        // open-addressed dedup set
     size_t seen_cap, seen_len;
     uint8_t *fork_sites, *pad_sites, *irq_sites; // per-cell counters (saturating)
@@ -213,18 +215,28 @@ static int seen_insert(PceRun *x, uint64_t h) {
     return 1;
 }
 
+// one compressed state to the disk lot (takes z on success)
+static int lot_spill(PceRun *x, uint8_t *z, uLongf zlen, uint8_t forced) {
+    if (!x->lot || !dp_lot_put(x->lot, &forced, 1, z, (uint32_t)zlen)) return 0;
+    free(z);
+    return 1;
+}
+
 // queue the live machine state (dedup on its control-state hash)
 static int push_live(PceRun *x, int forced) {
     DpPceResults *r = x->r;
     if (!seen_insert(x, dp_pce_state_hash())) { r->evicted++; return 0; }
     int full = x->queue_len >= x->opt.queue_cap;
-    if (full && x->park_len >= 4096) { r->queue_cuts++; r->parked_lost++; return 0; }
     dp_pce_save(x->tmp2);
     uLongf zl = x->zcap;
     if (compress2(x->ztmp, &zl, x->tmp2, x->state_size, 1) != Z_OK) { x->failed = 1; return 0; }
     uint8_t *z = malloc(zl);
     if (!z) { x->failed = 1; return 0; }
     memcpy(z, x->ztmp, zl);
+    if (full && x->park_len >= 4096) { // the holding area is full: the state goes to the disk lot
+        if (lot_spill(x, z, zl, (uint8_t)forced)) { r->parked++; return 1; }
+        free(z); r->queue_cuts++; r->parked_lost++; return 0;
+    }
     if (full) { // a full queue is not a loss: the state waits aside (bounded, counted)
         if (x->park_len == x->park_cap) {
             uint32_t nc = x->park_cap ? x->park_cap * 2 : 64;
@@ -943,6 +955,8 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     memset(r, 0, sizeof *r);
     x->opt = options ? *options : dp_pce_options();
     r->options = x->opt;
+    if (x->opt.lot_path && !(x->lot = dp_lot_open(x->opt.lot_path, 1)))
+        fprintf(stderr, "deepeel: cannot open the lot %s\n", x->opt.lot_path);
     x->r = r;
     x->rom = dp_pce_rom();
     x->rom_size = r->rom_size = dp_pce_rom_size();
@@ -994,8 +1008,18 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     novelty_search(x);
 
     // depth-first drain of the fork queue
-    while ((x->queue_len || x->park_len) && !x->failed) {
-        if (!x->queue_len) { x->queue[x->queue_len++] = x->park[--x->park_len]; r->parked_resumed++; }
+    for (;;) {
+        if (x->failed) break;
+        if (!x->queue_len && x->park_len) { x->queue[x->queue_len++] = x->park[--x->park_len]; r->parked_resumed++; }
+        if (!x->queue_len && dp_lot_pending(x->lot)) { // the disk backlog comes back
+            uint8_t forced = 0, *blob = NULL; uint32_t ml = 0, bl = 0;
+            if (dp_lot_get(x->lot, &forced, &ml, &blob, &bl) && ml == 1) {
+                x->queue[x->queue_len].z = blob; x->queue[x->queue_len].zlen = bl;
+                x->queue[x->queue_len].forced = forced; x->queue_len++;
+            } else free(blob);
+            if (!x->queue_len) continue;
+        }
+        if (!x->queue_len) break;
         if (x->total_steps >= x->opt.max_total) { r->global_cuts++; break; }
         PceQueued q = x->queue[--x->queue_len];
         run_path(x, q);
@@ -1011,10 +1035,17 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
 
     dp_pce_observe(NULL);
     // states still queued when the global wall stopped the drain: counted
-    r->pending_dropped += x->queue_len + x->park_len;
-    for (uint32_t i = 0; i < x->park_len; i++) free(x->park[i].z);
+    // (saved in the lot when there is one: the next run resumes them)
+    for (uint32_t i = 0; i < x->park_len; i++)
+        if (!lot_spill(x, x->park[i].z, x->park[i].zlen, x->park[i].forced)) { r->pending_dropped++; free(x->park[i].z); }
     free(x->park);
-    for (uint32_t i = 0; i < x->queue_len; i++) free(x->queue[i].z);
+    for (uint32_t i = 0; i < x->queue_len; i++)
+        if (!lot_spill(x, x->queue[i].z, x->queue[i].zlen, x->queue[i].forced)) { r->pending_dropped++; free(x->queue[i].z); }
+    if (x->lot) {
+        r->lot_written = x->lot->written; r->lot_read = x->lot->read_back;
+        r->lot_pending = dp_lot_pending(x->lot);
+        dp_lot_close(x->lot, x->opt.lot_path);
+    }
     free(x->queue);
     free(x->seen);
     free(x->fork_sites);
@@ -1093,6 +1124,9 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             (unsigned long long)r->fork_cuts, (unsigned long long)r->pad_fork_cuts,
             (unsigned long long)r->irq_fork_cuts, (unsigned long long)r->queue_cuts,
             (unsigned long long)r->global_cuts, (unsigned long long)r->illegal_cuts);
+    if (r->lot_written || r->lot_read || r->lot_pending)
+        fprintf(out, "  lot: %llu written, %llu read back, %llu left on disk\n", (unsigned long long)r->lot_written,
+                (unsigned long long)r->lot_read, (unsigned long long)r->lot_pending);
     fprintf(out, "  frontier: parked %llu resumed %llu lost %llu\n", (unsigned long long)r->parked,
             (unsigned long long)r->parked_resumed, (unsigned long long)r->parked_lost);
     fprintf(out, "  pending paths dropped at the wall %llu\n", (unsigned long long)r->pending_dropped);

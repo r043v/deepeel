@@ -6,6 +6,7 @@
 // loading.  Unsupported mappers are refused with a message.
 #include <stdarg.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
 #include "../src/mach/nesmach.h"
@@ -169,6 +170,27 @@ static void test_explorer(void) {
         CHECK(rp.parked >= 1 && rp.parked_resumed == rp.parked && rp.parked_lost == 0, "parked then resumed");
         CHECK(rp.flags[0x0005] && rp.flags[0x000A] && rp.forks >= 1, "both sides reached despite the queue wall");
         dp_nes_results_free(&rp);
+    }
+    {   // a wall leaves states: they go to the disk lot and the next run resumes them (§6)
+        char lp[] = "/tmp/dp_nes_lotXXXXXX"; int fd = mkstemp(lp); if (fd >= 0) close(fd);
+        unlink(lp);
+        uint64_t left = 0;
+        for (uint64_t wall = 1; wall < 400 && !left; wall++) {
+            DpNesResults rw; DpNesOptions ow = o;
+            ow.lot_path = lp; ow.max_total = wall;
+            unlink(lp);
+            CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &ow, &rw), "walled run");
+            left = rw.lot_pending;
+            if (left) {  CHECK(rw.pending_dropped == 0 && rw.lot_written >= left, "wall leftovers saved, none dropped"); }
+            dp_nes_results_free(&rw);
+        }
+        CHECK(left > 0, "a wall leaves states in the lot");
+        DpNesResults rr; DpNesOptions orr = o; orr.lot_path = lp;
+        CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &orr, &rr), "resumed run");
+        CHECK(rr.lot_read >= left && rr.lot_pending == 0, "the lot is resumed and emptied");
+        CHECK(access(lp, F_OK) != 0, "the emptied lot file is removed");
+        dp_nes_results_free(&rr);
+        unlink(lp);
     }
     CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &o, &r), "explore runs");
     CHECK(r.paths >= 2, "both branch sides explored: %llu paths", (unsigned long long)r.paths);

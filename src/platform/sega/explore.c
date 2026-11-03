@@ -6,6 +6,7 @@
 #include "../msx/explore.h"
 #include "../../cpu/z80/provenance.h"
 #include "../../core/hashset.h"
+#include "../../explore/lots.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1120,6 +1121,27 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
         }
         if(!x.spool) { ok=0; goto cleanup; }
     }
+    if(o->lot_path && x.spool) {
+        // the lot's backlog (portable records) is replayed into the spool, which the drain reads
+        DpLot *lot=dp_lot_open(o->lot_path,1);
+        if(lot) {
+            uint64_t meta[3]; uint32_t ml,bl; uint8_t *blob;
+            while(dp_lot_pending(lot)) {
+                blob=NULL;
+                if(!dp_lot_get(lot,meta,&ml,&blob,&bl)) { if(!dp_lot_pending(lot)) break; free(blob); continue; }
+                if(ml==sizeof meta && meta[1]==x.b->state_size && meta[2]==x.origin_size &&
+                   bl==x.b->state_size+0x8000+x.origin_size) {
+                    uint64_t hdr[4]={DP_SPOOL_MAGIC,meta[0],meta[1],meta[2]};
+                    if(!fseek(x.spool,(long)x.spool_wr,SEEK_SET) && fwrite(hdr,sizeof hdr,1,x.spool)==1 &&
+                       fwrite(blob,1,bl,x.spool)==bl) {
+                        x.spool_wr+=sizeof hdr+bl; x.spool_bytes+=sizeof hdr+bl; r->lot_read++;
+                    }
+                }
+                free(blob);
+            }
+            dp_lot_close(lot,NULL); // the file stays until the end of the run rewrites it
+        }
+    }
     if(msx) { r->msx_mapper=dp_msx_info().mapper; dp_msx_observe(msx_event,&x); }
     r->closure.limits=o->closure; r->target_closure.limits=o->closure;
     if(!o->target_closure) r->target_closure.limits.nodes=0;
@@ -1395,6 +1417,26 @@ cleanup:
     free(x.indirect);
     free(x.seeds); free(x.seed_state); free(x.seed_cart); free(x.seed_origins);
     free(x.seed_scratch); free(x.seed_scratch_cart); free(x.seed_scratch_origins);
+    if(o->lot_path && x.spool) {
+        // the spool records not read back yet are saved as portable lot records
+        DpLot *lot=dp_lot_open(o->lot_path,0);
+        while(lot && x.spool_rd<x.spool_wr) {
+            uint64_t hdr[4];
+            if(fseek(x.spool,(long)x.spool_rd,SEEK_SET) || fread(hdr,sizeof hdr,1,x.spool)!=1 || hdr[0]!=DP_SPOOL_MAGIC) break;
+            uint64_t bl=hdr[2]+0x8000+hdr[3];
+            uint8_t *blob=malloc(bl);
+            if(!blob || fread(blob,1,bl,x.spool)!=bl) { free(blob); break; }
+            uint64_t meta[3]={hdr[1],hdr[2],hdr[3]};
+            if(!dp_lot_put(lot,meta,sizeof meta,blob,(uint32_t)bl)) { free(blob); break; }
+            free(blob);
+            x.spool_rd+=sizeof hdr+bl;
+        }
+        if(lot) {
+            r->lot_written=lot->written; r->lot_pending=dp_lot_pending(lot);
+            dp_lot_close(lot,o->lot_path);
+        }
+        if(x.spool_rd<x.spool_wr) r->spool_refused++; // counted, never silent: records the lot could not take
+    }
     if(x.spool) fclose(x.spool);
     if(!ok) dp_sega_results_free(r); // frees every results-owned block exactly once
     return ok;
@@ -1490,7 +1532,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     DP_MR_SUM(seeds_refused_cap); DP_MR_SUM(seeds_pending); DP_MR_SUM(seeds_offlane);
     DP_MR_SUM(evicted_ctx); DP_MR_SUM(ctx_grew); DP_MR_SUM(ctx_full); DP_MR_SUM(section_cuts);
     DP_MR_SUM(queue_growths); DP_MR_SUM(spool_writes); DP_MR_SUM(spool_reads);
-    DP_MR_SUM(spool_refused); DP_MR_SUM(spool_flushed);
+    DP_MR_SUM(spool_refused); DP_MR_SUM(spool_flushed); DP_MR_SUM(lot_written); DP_MR_SUM(lot_read); DP_MR_SUM(lot_pending);
     DP_MR_SUM(indirect_sites); DP_MR_SUM(indirect_targets); DP_MR_SUM(indirect_site_overflow);
     DP_MR_SUM(indirect_target_overflow); DP_MR_SUM(indirect_seeds);
     DP_MR_SUM(indirect_refused_budget); DP_MR_SUM(indirect_pending);
@@ -1924,6 +1966,13 @@ int dp_sega_explore_command(int argc,char **argv) {
         if(!strcmp(argv[i],"--spool") || !strcmp(argv[i],"--resume")) {
             if(i+1>=argc) goto usage;
             o.spool_path=argv[++i]; o.resume=argv[i-1][2]=='r';
+            continue;
+        }
+        if(!strcmp(argv[i],"--lot")) {
+            static char lot_spool[600];
+            if(i+1>=argc) goto usage;
+            o.lot_path=argv[++i];
+            if(!o.spool_path) { snprintf(lot_spool,sizeof lot_spool,"%s.spool",o.lot_path); o.spool_path=lot_spool; }
             continue;
         }
         if(!strcmp(argv[i],"--tree")) { if(i+1>=argc) goto usage; o.tree_path=argv[++i]; continue; }

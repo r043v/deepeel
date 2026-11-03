@@ -79,6 +79,7 @@ typedef struct {
     // each movie is one session, its end state seeds the fork queue
     char tas_paths[8][512];
     int tas_count;
+    const char *lot_path;  // disk lot of deferred states (NULL: memory only); an existing file is resumed
 } DpNesOptions;
 
 typedef struct {
@@ -91,6 +92,7 @@ typedef struct {
     uint64_t seeds_reset, seeds_irq, seeds_bank, seeds_refused_queue;
     uint64_t play_frames_run, play_sessions_run, play_steps_accounted, seeds_play;
     uint64_t evicted;          // exact-state dedup admissions refused
+    uint64_t lot_written, lot_read, lot_pending; // disk lot (--lot): spilled / read back / left on disk
     uint64_t parked, parked_resumed, parked_lost; // queue-full states held aside (§6), resumed, lost at the holding cap
     uint64_t pending_dropped;  // queued states left undrained at a wall
     uint64_t ram_writes, io_writes, io_writes_io_reg[32];
