@@ -563,6 +563,9 @@ void dp_md_options_default(DpMdOptions *o) {
     o->entry_count = 0;
     o->pad_cut = 0;
     o->second_pass = 0;
+    o->skip_root = o->no_finalize = 0;
+    o->entry_from = 0; o->entry_step = 1;
+    o->pre_finalize = NULL; o->pre_user = NULL;
     o->bank_dispatch = 0;
     o->ctx_cap = 0;
     o->tree_path = NULL;
@@ -856,7 +859,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     }
     int cut = 0;
     int drain = o->lot_drain && dp_lf_pending(x.lot); // saved states only: no reset path, no stream replay
-    if (!drain) run_path(&x, NULL, o->max_total, &cut);
+    if (!drain && !o->skip_root) run_path(&x, NULL, o->max_total, &cut);
     x.movie_active = 0;
     r->decoders = x.ndec;
     if (!drain && r->steps < o->max_total) replay_streams(&x, (o->max_total - r->steps) / 2);
@@ -864,6 +867,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     // explicit entries (G3): each starts a forced path from the power-on machine
     if (!drain)
         for (unsigned e = 0; e < o->entry_count; e++) {
+            if (o->entry_step > 1 && e % o->entry_step != o->entry_from) continue;
             uint32_t a = o->entries[e];
             if ((a & 1) || a >= r->rom_size) { r->entries_refused++; continue; }
             dp_mdmach_reset(x.m);
@@ -915,6 +919,13 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         r->lot_pending = dp_lf_pending(x.lot);
         dp_lf_close(x.lot, o->lot_path);
     }
+    if (o->no_finalize) {   // secondary instance: the primary folds the raw findings in
+        memcpy(r->z80_bank_seen_out, x.z80_bank_seen, sizeof x.z80_bank_seen);
+        dp_mdmach_close(x.m);
+        free(x.q); free(x.gen); free(x.vis); free(x.site); free(x.pad_sites); dp_set_free(&x.ind_sites); dp_set_free(&x.ind_pairs);
+        return 0;
+    }
+    if (o->pre_finalize) o->pre_finalize(r, x.z80_bank_seen, o->pre_user);
     // S5 copy siblings: a longword table entry (read as data) naming the source of a
     // recorded copy of >= 16 bytes marks a table of streams; neighbouring entries
     // that point at unobserved ROM are sibling streams of the same length.
@@ -1031,6 +1042,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/SR context past the cap)\n", (unsigned long long)r->ctx_evicted);
     if (r->pass2_seeds || r->pass2_refused || r->pass2_capped) fprintf(out, "  second pass: %llu seeds, %llu refused, %llu capped\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     if (r->disp_tables) fprintf(out, "  dispatch tables: %llu tables, %llu seeds, %llu refused targets\n", (unsigned long long)r->disp_tables, (unsigned long long)r->disp_seeds, (unsigned long long)r->disp_refused_view);
+    if (r->jobs_folded) fprintf(out, "  jobs: %u secondary instance folded (entries split even/odd)\n", r->jobs_folded);
     fprintf(out, "  copy siblings: %llu tables, %llu entries, %llu bytes, %llu table caps\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_entries, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_caps);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);

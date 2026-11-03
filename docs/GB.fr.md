@@ -1772,3 +1772,20 @@ est semée comme chemin forcé (plafond de 256 graines partagé avec
 `--second-pass`). Rapport : `dispatch tables: N tables, N seeds, N refused
 targets`. Test `md_dispatch` (`fix_md_disp` : 1 table, 3 graines, 2 → 20 octets
 exécutés). Reste ◐ : tables d'offsets 16 bits relatifs, tables en RAM.
+
+## 0.118.0
+
+MD : `--jobs 2` (F3, partielle). Le moteur MD (machine m0boy, explorateur) est
+global au processus : la pile est recompilée une seconde fois, chaque symbole
+défini préfixé `dp_md2_` (objcopy, comme PCE/Sega). Partage par entrées
+explicites : l'instance secondaire saute le chemin de mise sous tension et prend
+les `--entry` impairs, la primaire garde le chemin natif (film, fourches,
+rejeux) et les `--entry` pairs ; la primaire joint ensuite les observations
+brutes de la secondaire (drapeaux, lectures, compteurs, copies, lecteurs,
+sites de faute, banques Z80) avant les passes de frères et les comptes
+d'octets : le rapport décrit l'union. Il faut au moins 2 `--entry` (sinon
+message et une seule instance). Le second passage et le dispatch ne tournent
+que sur la primaire (ils demandent l'union). Rapport : `jobs: 1 secondary
+instance folded`. Test `md_jobs` (rapport identique à `--jobs 1` hors cette
+ligne). Reste ◐ : pas de file partagée ; les fourches d'une instance ne sont
+pas redistribuées à l'autre.

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.117.0 LANGUAGES C)
+project(deepeel VERSION 0.118.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -261,6 +261,7 @@ add_library(deepeel_core STATIC
   src/explore/md_trace.c
   src/cpu/m68k/m68k_disasm.c
   src/platform/md/explore.c
+  src/platform/md/jobs.c
   src/platform/md/movie.c
   src/core/snapshot_png.c
   src/core/zip.c
@@ -524,6 +525,32 @@ set_target_properties(deepeel_pce2 PROPERTIES IMPORTED_LOCATION ${DP_PCE2_ARCHIV
 add_dependencies(deepeel_pce2 dp_pce2_runtime)
 target_link_libraries(deepeel_pce PUBLIC deepeel_pce2)
 target_link_libraries(deepeel PRIVATE deepeel_pce)
+
+# second MD instance for --jobs 2: the machine (generated CPU/bus/audio copies, video,
+# YM2612, Z80, mdmach) and the explorer compiled again, every defined global namespaced
+# dp_md2_ (m0boy's machine and the explorer state are process globals)
+add_library(deepeel_md2_raw STATIC
+  ${CMAKE_CURRENT_BINARY_DIR}/dp_md_full_cpu.c ${CMAKE_CURRENT_BINARY_DIR}/dp_md_full_bus.c
+  ${DP_MD_RUNTIME}/md_full_video.c ${CMAKE_CURRENT_BINARY_DIR}/dp_md_full_audio.c
+  ${DP_MD_RUNTIME}/md_ym2612.c ${DP_MD_Z80}/z80.c
+  src/mach/mdmach.c src/mach/mdrom.c src/platform/md/explore.c src/explore/md_trace.c)
+target_compile_definitions(deepeel_md2_raw PRIVATE MD_TRACE)
+target_include_directories(deepeel_md2_raw PRIVATE src src/mach ${DP_MD_RUNTIME} ${DP_MD_Z80})
+target_compile_options(deepeel_md2_raw PRIVATE -w)
+set(DP_MD2_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_md2.a)
+add_custom_command(OUTPUT ${DP_MD2_ARCHIVE}
+  BYPRODUCTS ${DP_MD2_ARCHIVE}.syms
+  COMMAND ${CMAKE_COMMAND} -DNM=${DP_NM} -DOBJCOPY=${DP_OBJCOPY}
+    -DINPUT=$<TARGET_FILE:deepeel_md2_raw> -DOUTPUT=${DP_MD2_ARCHIVE}
+    -DPREFIX=dp_md2_ "-DPATTERNS=[A-Za-z_][A-Za-z0-9_]*"
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_sega_prefix.cmake
+  DEPENDS deepeel_md2_raw cmake/dp_sega_prefix.cmake VERBATIM)
+add_custom_target(dp_md2_runtime DEPENDS ${DP_MD2_ARCHIVE})
+add_library(deepeel_md2 STATIC IMPORTED GLOBAL)
+set_target_properties(deepeel_md2 PROPERTIES IMPORTED_LOCATION ${DP_MD2_ARCHIVE}
+  INTERFACE_LINK_LIBRARIES deepeel_core)
+add_dependencies(deepeel_md2 dp_md2_runtime)
+target_link_libraries(deepeel_core PUBLIC deepeel_md2)
 
 target_link_libraries(deepeel PRIVATE deepeel_core m ${DP_GUI_LIBS})
 

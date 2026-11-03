@@ -13,7 +13,7 @@ remesure pas l'outil.
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 20 | 5 | 2 |
 | PCE | 16 | 19 | 3 | 1 |
-| MD | 8 | 17 | 13 | 1 |
+| MD | 8 | 18 | 12 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
 
@@ -83,7 +83,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | F2 | Arbre de choix persistant | MD | ◐ `--tree` (DpTree commun ; site non renseigné ; pas de reprise) |
 | F3 | `--jobs` par instances clonées | NES | ✗ |
 | F3 | `--jobs` par instances clonées | PCE | ◐ `--jobs 2` par phase (`dp_pce2_`, `test_jobs`), pas de file partagée |
-| F3 | `--jobs` par instances clonées | MD | ✗ |
+| F3 | `--jobs` par instances clonées | MD | ◐ `--jobs 2` par entrées explicites (`dp_md2_`, `md_jobs`), pas de file partagée |
 | J1 | Sessions jouées multi-thread + pool | SMS/GG | ◐ |
 | J1 | Sessions jouées multi-thread + pool | MSX | ◐ |
 | J1 | Sessions jouées multi-thread + pool | NES | ◐ xorshift |

@@ -1359,6 +1359,7 @@ static int cmd_md(int argc, char **argv) {
         }
     } else if (!strcmp(argv[2], "explore")) {
         DpMdOptions o;
+        int md_jobs = 1;
         dp_md_options_default(&o);
         const char *text = NULL, *map = NULL, *ev = NULL, *movie_path = NULL;
         for (int i = 4; i < argc; i++) {
@@ -1372,6 +1373,7 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--cut-padding")) o.pad_cut = 1;
             else if (!strcmp(a, "--second-pass")) o.second_pass = 1;
             else if (!strcmp(a, "--bank-dispatch")) o.bank_dispatch = 1;
+            else if (!strcmp(a, "--jobs") && i + 1 < argc) md_jobs = atoi(argv[++i]);
             else if (!strcmp(a, "--ctx-cap") && i + 1 < argc) o.ctx_cap = (unsigned)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--tree") && i + 1 < argc) o.tree_path = argv[++i];
             else if (!strcmp(a, "--entry")) {
@@ -1397,7 +1399,7 @@ static int cmd_md(int argc, char **argv) {
         }
         if (!rc) {
             DpMdResults r;
-            if (dp_md_explore(&c, &o, &r)) {
+            if (dp_md_explore_jobs(&c, &o, &r, md_jobs)) {
                 fprintf(stderr, "deepeel: md explore failed\n");
                 rc = 1;
             } else {

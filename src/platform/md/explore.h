@@ -26,6 +26,7 @@ enum { DP_MDZ_COPIED = 1,    /* 68000 copied it into Z80 RAM */
 #define DP_MD_DECODER_CAP 64
 #define DP_MD_DECODER_STARTS 256
 
+struct DpMdResults_;
 typedef struct {
     uint64_t max_total;   /* instructions over all paths */
     uint64_t path_steps;  /* instructions per path */
@@ -43,6 +44,14 @@ typedef struct {
     int bank_dispatch;      // seed the targets of longword dispatch tables (G2)
     int second_pass;        // seed the unexecuted static successors of executed code (G4)
     int pad_cut;           // cut paths sliding through 16+ zero bytes (default off)
+    /* --jobs 2 partition (set by dp_md_explore_jobs): the secondary instance skips the
+     * power-on path and the finalization; the primary calls pre_finalize(results, bank_seen,
+     * user) once its drain is done, before the sibling pass and the byte counts */
+    int skip_root;
+    int no_finalize;
+    unsigned entry_from, entry_step;  /* this instance takes entries[i] with i % step == from (0: all) */
+    void (*pre_finalize)(struct DpMdResults_ *r, uint8_t *bank_seen, void *user);
+    void *pre_user;
     int lot_drain; /* with a lot backlog: run only the saved states (no root) */
     const char *lot_path; /* disk lot of deferred states (NULL: memory only); an existing file is resumed */
 } DpMdOptions;
@@ -61,7 +70,7 @@ typedef struct {
     unsigned watch_size;
 } DpMdFaultSite;
 
-typedef struct {
+typedef struct DpMdResults_ {
     uint8_t *flags;       /* per ROM byte, DP_MDF_* */
     uint8_t *z80_flags;   /* per ROM byte, DP_MDZ_* */
     uint64_t z80_steps, z80_exec_ram, z80_exec_bank, z80_exec_other, z80_rom_reads;
@@ -114,11 +123,15 @@ typedef struct {
     uint64_t replay_tables, replay_candidates, replay_runs, replay_steps;
     uint64_t sat_replay_steps, sat_replay_total, replay_faults;
     uint32_t replay_only_bytes; /* bytes read only by replays */
+    unsigned jobs_folded;   /* --jobs 2: instances folded into this report (secondary) */
+    uint8_t z80_bank_seen_out[128]; /* secondary instance only: banks the Z80 read (merged by the primary) */
 } DpMdResults;
 
 void dp_md_options_default(DpMdOptions *o);
 int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r);
 void dp_md_results_free(DpMdResults *r);
+/* --jobs 2: entries split between two instances (own machine each); see jobs.c */
+int dp_md_explore_jobs(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r, int jobs);
 void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdResults *r, FILE *out);
 /* One byte per ROM byte: the DP_MDF_* flags. */
 int dp_md_explore_map(const DpMdResults *r, const char *path);
