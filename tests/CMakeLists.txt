@@ -335,3 +335,5 @@ add_test(NAME pce_indirect COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${C
 set_tests_properties(pce_indirect PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME pce_provenance COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_prov.pce --max-total 20000 --max-steps 100 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_prov.txt >/dev/null 2>&1; grep -q 'provenance: 1 jump-table words' ${CMAKE_CURRENT_BINARY_DIR}/pce_prov.txt")
 set_tests_properties(pce_provenance PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME md_indirect COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ind.md --max-total 200000 --text ${CMAKE_CURRENT_BINARY_DIR}/md_ind.txt >/dev/null 2>&1; grep -q 'indirect jumps: 1 sites, 1 targets, overflow 0' ${CMAKE_CURRENT_BINARY_DIR}/md_ind.txt")
+set_tests_properties(md_indirect PROPERTIES FIXTURES_REQUIRED fixtures)

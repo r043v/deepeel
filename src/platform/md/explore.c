@@ -5,6 +5,7 @@
 #include "../../cpu/m68k/m68k.h"
 #include "../../mach/mdmach.h"
 #include "md_registry.h"
+#include "../../core/hashset.h"
 
 
 typedef struct {
@@ -71,6 +72,7 @@ typedef struct {
     int z80_last_valid;
     uint32_t zfetch_lo, zfetch_hi;      /* ROM range of the instruction being fetched */
     uint8_t z80_bank_seen[128];         /* bitmap of 32 KiB banks (4 MiB / 32 KiB) */
+    DpHashSet ind_sites, ind_pairs;   // observed indirect jmp/jsr (D12)
 } X;
 
 static size_t ssz;
@@ -319,6 +321,14 @@ static void on_end(void *u, uint32_t pc, uint32_t next, unsigned len) {
         }
     }
     if (!decoded) return;
+    if ((in.cls == DP_M68K_JMP || in.cls == DP_M68K_JSR) && !in.has_target && decoded == len && !x->replay) {
+        // observed indirect target: the next pc after a jmp/jsr through An/(d,An)/(An,Xn)
+        if (x->ind_pairs.cnt >= 65536) r->indirect_overflow++;
+        else {
+            if (dp_set_insert(&x->ind_sites, (uint64_t)pc + 1) > 0) r->indirect_sites++;
+            if (dp_set_insert(&x->ind_pairs, ((uint64_t)(pc + 1) << 24) | (next & 0xFFFFFFu)) > 0) r->indirect_targets++;
+        }
+    }
     if ((in.cls != DP_M68K_BCC && in.cls != DP_M68K_DBCC) || !in.has_target) return;
     if (decoded != len) return; /* do not invent a fall-through from a disputed length */
     if (in.cls == DP_M68K_DBCC && in.cond == 0) return; /* DBT cannot branch */
@@ -678,12 +688,14 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         fprintf(stderr, "deepeel: cannot open the lot %s\n", o->lot_path);
     x.gen = calloc(c->size / 2 + 1, sizeof *x.gen);
     x.vis = calloc(c->size / 2 + 1, sizeof *x.vis);
+    dp_set_init(&x.ind_sites, 1 << 8);
+    dp_set_init(&x.ind_pairs, 1 << 10);
     x.site = calloc(c->size / 2 + 1, sizeof *x.site);
     x.pad_sites = calloc(c->size / 2 + 1, 1);
     x.m = dp_mdmach_open(c->rom, c->size);
     if (!r->flags || !r->z80_flags || !r->nonexcluded_reads || !r->copies || !x.q || !x.gen || !x.vis || !x.site || !x.pad_sites || !x.m) {
         dp_mdmach_close(x.m);
-        free(x.q); free(x.gen); free(x.vis); free(x.site); free(x.pad_sites);
+        free(x.q); free(x.gen); free(x.vis); free(x.site); free(x.pad_sites); dp_set_free(&x.ind_sites); dp_set_free(&x.ind_pairs);
         dp_md_results_free(r);
         return -1;
     }
@@ -775,7 +787,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     for (unsigned b = 0; b < sizeof x.z80_bank_seen * 8; b++)
         if (x.z80_bank_seen[b >> 3] & (1u << (b & 7))) r->z80_banks_read++;
     dp_mdmach_close(x.m);
-    free(x.q); free(x.gen); free(x.vis); free(x.site); free(x.pad_sites);
+    free(x.q); free(x.gen); free(x.vis); free(x.site); free(x.pad_sites); dp_set_free(&x.ind_sites); dp_set_free(&x.ind_pairs);
     return 0;
 }
 
@@ -814,6 +826,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
             (unsigned long long)r->sat_site);
     fprintf(out, "  queue growths: %llu (initial %u, ceiling %u)\n", (unsigned long long)r->queue_growths,
             o->queue_cap, o->queue_max > o->queue_cap ? o->queue_max : o->queue_cap);
+    fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  copy records dropped: %llu\n", (unsigned long long)r->copy_overflow);
     fprintf(out, "  stream replay: step cap %llu  total budget %llu  consumers dropped %llu  starts dropped %llu  call frames dropped %llu\n",
             (unsigned long long)r->sat_replay_steps, (unsigned long long)r->sat_replay_total,

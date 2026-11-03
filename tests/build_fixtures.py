@@ -457,6 +457,11 @@ def build_md(out):
     r = md_rom()
     r[0x200:0x202] = bytes([0x60, 0xFE])
     save_md(out, "fix_md_loop", r)
+    # --- indirect: movea.l #$300,a0 / jmp (a0) -> bra.s * at $300 -------------
+    r = md_rom()
+    r[0x200:0x208] = bytes([0x20, 0x7C, 0x00, 0x00, 0x03, 0x00, 0x4E, 0xD0])
+    r[0x300:0x302] = bytes([0x60, 0xFE])
+    save_md(out, "fix_md_ind", r)
     # --- vint: enable V-int (reg1 bit 5), vector 30 -> $300, main loop bra.s * --
     r = md_rom()
     r[30 * 4:30 * 4 + 4] = (0x300).to_bytes(4, "big")

@@ -13,7 +13,7 @@ remesure pas l'outil.
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 20 | 5 | 2 |
 | PCE | 16 | 16 | 6 | 1 |
-| MD | 8 | 10 | 20 | 1 |
+| MD | 8 | 11 | 19 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
 
@@ -29,7 +29,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | D10 | Sondes de lecture manette | MD | ◐ 4 |
 | D12 | Cibles indirectes observées | NES | ◐ observé, sans second passage |
 | D12 | Cibles indirectes observées | PCE | ◐ observé (`jmp (abs)`, `jmp (abs,X)`), sans second passage |
-| D12 | Cibles indirectes observées | MD | ✗ |
+| D12 | Cibles indirectes observées | MD | ◐ observé (`jmp/jsr` par An), sans second passage |
 | D13 | Coupes de non-sens | NES | ◐ illégal |
 | D13 | Coupes de non-sens | PCE | ◐ illégal |
 | D13 | Coupes de non-sens | MD | ◐ faute |

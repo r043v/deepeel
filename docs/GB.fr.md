@@ -1665,3 +1665,12 @@ cellules ROM consécutives compte un mot de table (`provenance: N jump-table
 words traced from ROM reads`). Fixture `fix_pce_prov.pce`, test
 `pce_provenance`. Reste ◐ : comptage seulement, pas de graine de second
 passage pour les cibles, pas de suivi à travers registres ni piles.
+
+## 0.108.0
+
+MD : cibles indirectes observées (D12, partielle). Un `jmp`/`jsr` sans cible
+statique (An, (d,An), (An,Xn)) enregistre le pc suivant réellement exécuté ;
+sites et paires (site, cible) distinctes comptés, bornés à 65 536 paires
+(`overflow` rapporté). Rapport : `indirect jumps: N sites, N targets, overflow
+N`. Fixture `fix_md_ind.md`, test `md_indirect`. Reste ◐ : observation, pas de
+second passage.
