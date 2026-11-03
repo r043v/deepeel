@@ -8,6 +8,15 @@
 #include "../src/mach/m0boy.h"
 #include "test_util.h"
 
+static unsigned obs_steps, obs_reads;
+static DpMach *obs_mach;
+static void obs_step(void *u, uint16_t pc, uint8_t op, int entry) {
+    (void)u; (void)pc; (void)op; (void)entry;
+    if (++obs_steps >= 3000) dp_mach_cut(obs_mach, DP_CUT_QUIT);
+}
+static void obs_read(void *u, uint16_t a, uint8_t v) { (void)u; (void)a; (void)v; obs_reads++; }
+static void obs_write(void *u, uint16_t a, uint8_t v) { (void)u; (void)a; (void)v; obs_reads++; }
+
 int main(int argc, char **argv) {
     const DpIsa *isa = dp_isa_sm83();
     CHECK_MSG(isa && !strcmp(isa->name, "sm83"), "isa named");
@@ -79,6 +88,37 @@ int main(int argc, char **argv) {
     for (int r = 1; r < DP_R_COUNT; r++) CHECK_MSG(dp_reason_from_name(dp_reason_name(r)) == r, "reason names round trip");
     CHECK_MSG(!dp_reason_eligible(DP_R_COVERED, 0) && dp_reason_eligible(DP_R_COVERED, 1), "covered needs tier inf");
 
+    // mem_operand
+    {
+        DpMemOp o;
+        uint8_t ld_hl_a[] = { 0x77 }, ldh[] = { 0xE0, 0x40 }, abs_r[] = { 0xFA, 0x34, 0xC2 };
+        uint8_t hli[] = { 0x2A }, bit_hl[] = { 0xCB, 0x46 }, set_hl[] = { 0xCB, 0xC6 };
+        uint8_t push[] = { 0xC5 }, nop[] = { 0x00 }, ld_ab[] = { 0x78 }, cb_b[] = { 0xCB, 0x40 };
+        CHECK_MSG(isa->mem_operand(ld_hl_a, &o) && o.access == DP_MA_WRITE && o.mode == DP_AM_PAIR && o.pair == 2, "ld (hl),a");
+        CHECK_MSG(isa->mem_operand(ldh, &o) && o.mode == DP_AM_HIGH_IMM && o.addr == 0xFF40 && o.access == DP_MA_WRITE, "ldh (n),a");
+        CHECK_MSG(isa->mem_operand(abs_r, &o) && o.mode == DP_AM_ABS && o.addr == 0xC234 && o.access == DP_MA_READ, "ld a,(nn)");
+        CHECK_MSG(isa->mem_operand(hli, &o) && o.post == 1 && o.access == DP_MA_READ, "ld a,(hl+)");
+        CHECK_MSG(isa->mem_operand(bit_hl, &o) && o.access == DP_MA_READ, "bit (hl) reads");
+        CHECK_MSG(isa->mem_operand(set_hl, &o) && o.access == DP_MA_RW, "set (hl) is rmw");
+        CHECK_MSG(isa->mem_operand(push, &o) && o.mode == DP_AM_STACK && o.access == DP_MA_WRITE, "push");
+        CHECK_MSG(!isa->mem_operand(nop, &o) && !isa->mem_operand(ld_ab, &o) && !isa->mem_operand(cb_b, &o), "register-only forms");
+        // every opcode agrees with the disassembler: an operand mentioning (hl)/(bc)/(de)/(nn)/($ff..)
+        // exists exactly when mem_operand says so (cb prefix and stack forms aside)
+        int bad = 0;
+        for (int op = 0; op < 256; op++) {
+            if (isa->illegal((uint8_t)op) || op == 0xCB || op == 0x76) continue; // 0x76 is HALT (the disassembler prints ld (hl),(hl))
+            uint8_t rom[4] = { (uint8_t)op, 0x12, 0x34, 0 };
+            char txt[64];
+            if (!isa->disasm(rom, sizeof rom, 0, txt, sizeof txt)) continue;
+            int mem = strchr(txt, '(') != NULL;
+            int stk = op == 0xC5 || op == 0xD5 || op == 0xE5 || op == 0xF5 || op == 0xC1 || op == 0xD1 ||
+                      op == 0xE1 || op == 0xF1 || op == 0xC9 || op == 0xD9 || (op & 7) == 7 ||
+                      ((op & 0xC7) == 0xC4) || op == 0xCD || ((op & 0xE7) == 0xC0) || ((op & 0xE7) == 0xC8 && 0);
+            int got = isa->mem_operand(rom, &(DpMemOp){ 0 });
+            if (!stk && mem != got) { bad++; fprintf(stderr, "mem_operand %02x '%s' mem=%d got=%d\n", op, txt, mem, got); }
+        }
+        CHECK_MSG(bad == 0, "mem_operand agrees with the disassembler on all opcodes");
+    }
     // machine: save/load round trip through the generic view
     if (argc > 1) {
         char path[512], err[256];
@@ -104,6 +144,18 @@ int main(int argc, char **argv) {
         CHECK_MSG(m->fetch(m, 0x0100) == c->rom[0x0100], "fetch sees the ROM");
         CHECK_MSG(m->rom_index(m, 0x0100) == 0x0100 && m->rom_index(m, 0x8000) < 0, "rom_index");
         free(a); free(b);
+        // ctx_components / probes / observe
+        const DpCtxComp *cc; const DpProbe *pr;
+        int ncc = m->ctx_components(m, &cc), npr = m->probes(m, &pr);
+        CHECK_MSG(ncc >= 14 && cc[0].kind == DP_CC_REG && cc[ncc - 1].kind == DP_CC_PAGES, "ctx components");
+        CHECK_MSG(npr >= 1 && !strcmp(pr[0].name, "buttons") && pr[0].values == 256, "probe catalog");
+        pr[0].apply(m, 0x01);
+        DpObservers ob = { obs_step, obs_read, obs_write };
+        obs_mach = raw;
+        m->observe(m, &ob, NULL);
+        m->run(m);
+        CHECK_MSG(obs_steps > 0 && obs_steps <= 3000, "observe sees executed instructions");
+        CHECK_MSG(obs_reads > 0, "observe sees data accesses");
         m->close(m);
         dp_cart_free(c);
     }

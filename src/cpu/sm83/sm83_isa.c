@@ -141,5 +141,49 @@ static int isa_flow(const uint8_t *b, uint16_t pc, DpFlowInfo *o) {
     return len;
 }
 
-static const DpIsa isa = { "sm83", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag, isa_effect, isa_illegal, sm83_disasm };
+// data operand of an SM83 instruction (spec §7.3 mem_operand)
+static int isa_mem_operand(const uint8_t *b, DpMemOp *o) {
+    uint8_t op = b[0];
+    *o = (DpMemOp){ 0 };
+    o->width = 1;
+    #define PAIR(acc, pr, po) do { o->access = (acc); o->mode = DP_AM_PAIR; o->pair = (pr); o->post = (po); return 1; } while (0)
+    switch (op) {
+    case 0x02: PAIR(DP_MA_WRITE, 0, 0);
+    case 0x12: PAIR(DP_MA_WRITE, 1, 0);
+    case 0x0A: PAIR(DP_MA_READ, 0, 0);
+    case 0x1A: PAIR(DP_MA_READ, 1, 0);
+    case 0x22: PAIR(DP_MA_WRITE, 2, 1);
+    case 0x32: PAIR(DP_MA_WRITE, 2, -1);
+    case 0x2A: PAIR(DP_MA_READ, 2, 1);
+    case 0x3A: PAIR(DP_MA_READ, 2, -1);
+    case 0x34: case 0x35: PAIR(DP_MA_RW, 2, 0);
+    case 0x36: PAIR(DP_MA_WRITE, 2, 0);
+    case 0xEA: o->access = DP_MA_WRITE; o->mode = DP_AM_ABS; o->addr = (uint16_t)(b[1] | b[2] << 8); return 1;
+    case 0xFA: o->access = DP_MA_READ; o->mode = DP_AM_ABS; o->addr = (uint16_t)(b[1] | b[2] << 8); return 1;
+    case 0x08: o->access = DP_MA_WRITE; o->mode = DP_AM_ABS; o->width = 2; o->addr = (uint16_t)(b[1] | b[2] << 8); return 1;
+    case 0xE0: o->access = DP_MA_WRITE; o->mode = DP_AM_HIGH_IMM; o->addr = (uint16_t)(0xFF00 + b[1]); return 1;
+    case 0xF0: o->access = DP_MA_READ; o->mode = DP_AM_HIGH_IMM; o->addr = (uint16_t)(0xFF00 + b[1]); return 1;
+    case 0xE2: o->access = DP_MA_WRITE; o->mode = DP_AM_HIGH_REG; return 1;
+    case 0xF2: o->access = DP_MA_READ; o->mode = DP_AM_HIGH_REG; return 1;
+    case 0xC5: case 0xD5: case 0xE5: case 0xF5:
+    case 0xC4: case 0xCC: case 0xCD: case 0xD4: case 0xDC:
+        o->access = DP_MA_WRITE; o->mode = DP_AM_STACK; o->pair = 3; o->width = 2; return 1;
+    case 0xC1: case 0xD1: case 0xE1: case 0xF1:
+    case 0xC9: case 0xD9: case 0xC0: case 0xC8: case 0xD0: case 0xD8:
+        o->access = DP_MA_READ; o->mode = DP_AM_STACK; o->pair = 3; o->width = 2; return 1;
+    case 0xCB: // (HL) forms: BIT only reads, the rest read-modify-write
+        if ((b[1] & 7) != 6) return 0;
+        PAIR((b[1] >= 0x40 && b[1] < 0x80) ? DP_MA_READ : DP_MA_RW, 2, 0);
+    }
+    if (op >= 0xC7 && (op & 7) == 7) { // rst
+        o->access = DP_MA_WRITE; o->mode = DP_AM_STACK; o->pair = 3; o->width = 2; return 1;
+    }
+    if (op >= 0x40 && op < 0xC0 && (op & 7) == 6 && op != 0x76) // ld r,(hl) / alu a,(hl)
+        PAIR(DP_MA_READ, 2, 0);
+    if (op >= 0x70 && op <= 0x77 && op != 0x76) PAIR(DP_MA_WRITE, 2, 0);
+    #undef PAIR
+    return 0;
+}
+
+static const DpIsa isa = { "sm83", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag, isa_effect, isa_illegal, sm83_disasm, isa_mem_operand };
 const DpIsa *dp_isa_sm83(void) { return &isa; }

@@ -874,3 +874,11 @@ encore de frontière disque. Chiffres = observations de l'outil.
 ## 0.44.0
 
 - J3 : `DpIsa` complet pour le SM83 (condition, effets de registres, illégal). Le moteur GB, la closure et la provenance passent par l'ISA ; la provenance est générique (flot + `regs_effect` sur un treillis paire-pointeur/accumulateur). Carte identique à 0.43.1 sur Zelda à budget égal.
+
+## 0.45.0
+
+Fin de J3 : `DpIsa.mem_operand` (opérande mémoire du SM83), `DpMachine.observe`,
+`ctx_components` et `probes` pour la GB, et découpage de `explorer.c`
+(`forks.c`, `seeds.c`, `ctxproj.c`, `frontier_disk.c`, `explorer_priv.h`).
+Aucun changement de comportement : carte de Zelda (3 M pas) identique octet
+pour octet à 0.43.1. Observation de l'outil, pas une mesure matérielle.

@@ -49,6 +49,19 @@ typedef struct DpProvRom {
     int (*read)(void *ctx, uint16_t addr, uint8_t *v);
 } DpProvRom;
 
+// data-memory operand of an instruction (spec §7.3 mem_operand), the input of
+// the access typing of §5: what is touched and how the address is formed
+enum { DP_MA_NONE = 0, DP_MA_READ = 1, DP_MA_WRITE = 2, DP_MA_RW = 3 };
+enum { DP_AM_NONE = 0, DP_AM_ABS, DP_AM_HIGH_IMM, DP_AM_HIGH_REG, DP_AM_PAIR, DP_AM_STACK };
+typedef struct DpMemOp {
+    uint8_t access;   // DP_MA_*
+    uint8_t mode;     // DP_AM_*
+    uint8_t pair;     // DP_AM_PAIR: 0 BC, 1 DE, 2 HL, 3 SP
+    int8_t post;      // pair post-increment (+1/-1), 0 otherwise
+    uint8_t width;    // bytes touched
+    uint16_t addr;    // DP_AM_ABS: the address; DP_AM_HIGH_IMM: $FF00 + n
+} DpMemOp;
+
 typedef struct DpIsa {
     const char *name;                      // "sm83", "z80", ...
     uint8_t ptr_width;                     // bytes of a code pointer
@@ -68,6 +81,8 @@ typedef struct DpIsa {
     int (*illegal)(uint8_t op);
     // textual form; returns the length or 0 when undefined
     int (*disasm)(const uint8_t *rom, uint32_t rom_size, uint16_t addr, char *out, size_t outsz);
+    // data operand of the instruction at `bytes`; 1 when it touches memory
+    int (*mem_operand)(const uint8_t *bytes, DpMemOp *out);
 } DpIsa;
 
 const DpIsa *dp_isa_sm83(void);
@@ -79,7 +94,36 @@ typedef struct DpRegs {
     uint16_t reg[8];
 } DpRegs;
 
-typedef struct DpMachine {
+// observation hooks (spec §7.2 observe): every executed instruction and every
+// CPU data access, as the engine sees them
+typedef struct DpObservers {
+    void (*on_step)(void *user, uint16_t pc, uint8_t op, int entry);
+    void (*on_read)(void *user, uint16_t addr, uint8_t v);
+    void (*on_write)(void *user, uint16_t addr, uint8_t v);
+} DpObservers;
+
+// a component of the incoming state a section's behaviour may depend on
+// (spec §7.2 ctx_components): the bit index is the platform's DP_CTX_* value
+enum { DP_CC_REG = 0, DP_CC_PAGES };
+typedef struct DpCtxComp {
+    const char *name;
+    uint8_t kind;      // DP_CC_REG (one bit of ctx_mask) or DP_CC_PAGES (256-byte pages)
+    int bit;           // ctx_mask bit for DP_CC_REG, -1 otherwise
+    uint32_t bytes;    // size of the component
+} DpCtxComp;
+
+// an input the explorer can inject to open the other side of a data-dependent
+// branch (spec §7.2 probes)
+struct DpMachine;
+typedef struct DpProbe {
+    const char *name;
+    const char *desc;
+    uint32_t values;                         // number of distinct values
+    void (*apply)(struct DpMachine *, uint32_t value);
+} DpProbe;
+
+typedef struct DpMachine DpMachine;
+struct DpMachine {
     const char *name;                      // "gb", "sms", "nes", ...
     const DpPlatform *plat;
     const DpIsa *isa;
@@ -93,8 +137,11 @@ typedef struct DpMachine {
     uint8_t (*fetch)(struct DpMachine *, uint32_t addr);      // opcode view
     // execution (NULL when the backend only advances by frames)
     int (*run)(struct DpMachine *);
+    void (*observe)(struct DpMachine *, const DpObservers *, void *user);
+    int (*ctx_components)(struct DpMachine *, const DpCtxComp **out);   // count
+    int (*probes)(struct DpMachine *, const DpProbe **out);             // count
     void (*close)(struct DpMachine *);
-} DpMachine;
+};
 
 struct DpMach;
 // the GB backend (src/mach/gb_machine.c); takes ownership of the DpMach
