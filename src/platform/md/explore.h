@@ -40,6 +40,7 @@ typedef struct {
     uint32_t entries[16]; /* explicit 68000 entry points (ROM addresses, even) */
     unsigned entry_count;
     const char *tree_path;  // write the choice tree (DpTree file) here, NULL: none
+    int exact_dedup;        // C3: drop a fork whose clock-free machine hash was already queued
     unsigned ctx_cap;       // admissions per coarse context (0: off)
     int bank_dispatch;      // seed the targets of longword dispatch tables (G2)
     int second_pass;        // seed the unexecuted static successors of executed code (G4)
@@ -118,7 +119,7 @@ typedef struct DpMdResults_ {
     DpMdReader readers[DP_MD_READER_CAP];
     unsigned nreaders;
     uint64_t reader_overflow;
-    uint64_t disp_tables, disp_seeds, disp_refused_view, pass2_seeds, pass2_refused, pass2_capped, ctx_evicted, tree_nodes, sib_tables, sib_entries, sib_bytes, sib_caps, pad_cuts, indirect_sites, indirect_targets, indirect_overflow;
+    uint64_t disp_tables, disp_seeds, disp_refused_view, pass2_seeds, pass2_refused, pass2_capped, ctx_evicted, exact_dups, tree_nodes, sib_tables, sib_entries, sib_bytes, sib_caps, pad_cuts, indirect_sites, indirect_targets, indirect_overflow;
     uint32_t exec_bytes, forced_only_bytes, dread_bytes, natural_data_bytes, dma_source_bytes, dma_read_bytes,
              cpu_vram_bytes, observed_bytes, code_or_vram_bytes, data_only_bytes, filtered_observed_bytes;
     /* stream replay: a called routine whose first ROM read is at the address

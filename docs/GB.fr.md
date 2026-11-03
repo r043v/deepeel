@@ -1880,3 +1880,15 @@ plateforme) : aucun émulateur tiers ne le lit, ce n'est donc pas encore un
 Test `export_state` (en-tête, taille décompressée, profondeur > 0 sur les trois
 plateformes). Reste ◐ : mode humain, rechargement du fichier (reprise), format
 d'émulateur. Sans `--novelty`, rien n'est écrit.
+
+## 0.125.0
+
+Mega Drive : `--exact-dedup` (C3, partielle). `dp_mdmach_state_hash` hache la
+machine sans ses horloges, son audio ni ses compteurs (registres, RAM, VRAM,
+VSRAM, CRAM, registres VDP, RAM Z80, SRAM, pad, lignes) ; une fourche dont le
+hachage (avec pc d'entrée et nature d'interruption) a déjà été empilé est
+abandonnée et comptée : `exact dedup: N forks dropped`. Sur `fix_md_pad_effect`
+95 fourches de moins, couverture exécutée identique (test `md_exact_dedup`).
+Le coût est un hachage d'environ 200 Kio par fourche : option désactivée par
+défaut. Reste ◐ : l'ensemble n'est pas persisté (`exact.bin`), un ensemble plein
+n'est pas reporté (il grossit), le Z80 interne n'est pas dans le hachage.

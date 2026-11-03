@@ -1414,6 +1414,7 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--novelty") && i + 1 < argc) o.novelty_steps = strtoull(argv[++i], NULL, 0);
             else if (!strcmp(a, "--novelty-frames") && i + 1 < argc) o.novelty_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--novelty-cells")) o.novelty_cells = 1;
+            else if (!strcmp(a, "--exact-dedup")) o.exact_dedup = 1;
             else if (!strcmp(a, "--watch")) {
                 int fps = 30;
                 if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') fps = atoi(argv[++i]);

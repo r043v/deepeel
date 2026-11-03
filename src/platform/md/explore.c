@@ -82,6 +82,7 @@ typedef struct {
     uint64_t wframe;     // frames seen (watch sampling)
     void *nov;           // novelty search state (NULL: off); the frame hook drives it
     uint64_t novel;      // ROM bytes executed for the first time (novelty gain)
+    DpHashSet exact_seen;   // --exact-dedup: clock-free machine hashes
     DpHashSet ctx_seen;     // --ctx-cap: admissions per coarse context
     DpTree tree;            // --tree: every pushed state is a choice
     uint32_t cur_choice;
@@ -161,6 +162,13 @@ static int push(X *x, uint32_t pc, int vint, int hint) {
         unsigned k = 0;
         while (k < x->o->ctx_cap && dp_set_insert(&x->ctx_seen, (h ^ (k * 0x9E3779B97F4A7C15ull)) | 1) == 0) k++;
         if (k >= x->o->ctx_cap) { x->r->ctx_evicted++; return 0; }
+    }
+    if (x->o->exact_dedup) {
+        // C3: the machine without clocks/audio/counters, plus the entry pc and interrupt kind
+        uint64_t h = dp_mdmach_state_hash(x->m);
+        h = (h ^ pc) * 0x100000001b3ull;
+        h = (h ^ (uint64_t)(vint | hint << 1)) * 0x100000001b3ull;
+        if (dp_set_insert(&x->exact_seen, h | 1) == 0) { x->r->exact_dups++; return 0; }
     }
     if (x->nq >= x->qcap) {
         uint32_t limit = x->o->queue_max > x->qcap ? x->o->queue_max : x->qcap;
@@ -1090,6 +1098,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     x.vis = calloc(c->size / 2 + 1, sizeof *x.vis);
     dp_tree_init(&x.tree);
     dp_set_init(&x.ctx_seen, 1 << 10);
+    dp_set_init(&x.exact_seen, 1 << 10);
     dp_set_init(&x.ind_sites, 1 << 8);
     dp_set_init(&x.ind_pairs, 1 << 10);
     x.site = calloc(c->size / 2 + 1, sizeof *x.site);
@@ -1165,6 +1174,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     }
     dp_tree_free(&x.tree);
     dp_set_free(&x.ctx_seen);
+    dp_set_free(&x.exact_seen);
     for (uint32_t i = 0; i < x.nq; i++) {
         if (!lot_spill(&x, &x.q[i])) r->dropped_pending++;
         free(x.q[i].state);
@@ -1298,6 +1308,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     if (r->pass2_seeds || r->pass2_refused || r->pass2_capped) fprintf(out, "  second pass: %llu seeds, %llu refused, %llu capped\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     if (r->disp_tables) fprintf(out, "  dispatch tables: %llu tables, %llu seeds, %llu refused targets\n", (unsigned long long)r->disp_tables, (unsigned long long)r->disp_seeds, (unsigned long long)r->disp_refused_view);
     if (r->state_exported) fprintf(out, "  state exported: deepest cell, %u frames from power-on\n", r->state_exported_depth);
+    if (r->exact_dups) fprintf(out, "  exact dedup: %llu forks dropped (same clock-free machine)\n", (unsigned long long)r->exact_dups);
     if (r->watch_frames) fprintf(out, "  watch: %llu frames published\n", (unsigned long long)r->watch_frames);
     if (r->novelty_trials)
         fprintf(out, "  novelty: depth %u frames, %llu trials, %llu frames, %llu hits, %llu deaths, %llu archived (%llu replaced), %llu seeded, %llu stalled\n",

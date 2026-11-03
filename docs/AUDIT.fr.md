@@ -13,7 +13,7 @@ remesure pas l'outil.
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 24 | 1 | 2 |
 | PCE | 16 | 21 | 1 | 1 |
-| MD | 8 | 21 | 9 | 1 |
+| MD | 8 | 22 | 8 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
 
@@ -74,7 +74,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | C2 | Éviction par contexte | NES | ◐ contexte grossier opt-in (`--ctx-cap`) |
 | C2 | Éviction par contexte | PCE | ◐ contexte grossier opt-in (`--ctx-cap`) |
 | C2 | Éviction par contexte | MD | ◐ contexte grossier opt-in (`--ctx-cap`) |
-| C3 | Dédup exacte hors horloges | MD | ✗ |
+| C3 | Dédup exacte hors horloges | MD | ◐ `--exact-dedup` (hors horloges, en mémoire) |
 | F1 | File croissante + spool + `--resume` | NES | ◐ `--spool`/`--resume` (lot disque), file bornée + parc |
 | F1 | File croissante + spool + `--resume` | PCE | ◐ `--lot`/`--lot-drain` + parc ; pas de `--resume` ni de file croissante |
 | F1 | File croissante + spool + `--resume` | MD | ◐ `--lot`/`--lot-drain` + parc (`parked`, `lot_*`) ; pas de `--resume` ni de file croissante bornée par option |

@@ -216,6 +216,30 @@ int dp_mdmach_rom_visible(const DpMdMach *d, uint32_t addr) {
 }
 const uint8_t *dp_mdmach_ram(const DpMdMach *d) { return d->m->ram; }
 void dp_mdmach_render(const DpMdMach *d, uint32_t *pixels) { md_full_render(d->m, pixels, 320); }
+static uint64_t fnv_bytes(uint64_t h, const void *p, size_t n) {
+    const uint8_t *b = p;
+    for (size_t i = 0; i < n; i++) h = (h ^ b[i]) * 0x100000001b3ull;
+    return h;
+}
+uint64_t dp_mdmach_state_hash(const DpMdMach *d) {
+    const MdFull *m = d->m;
+    uint64_t h = 0xcbf29ce484222325ull;
+    h = fnv_bytes(h, m->d, sizeof m->d); h = fnv_bytes(h, m->a, sizeof m->a);
+    h = fnv_bytes(h, &m->pc, sizeof m->pc); h = fnv_bytes(h, &m->usp, sizeof m->usp);
+    h = fnv_bytes(h, &m->sr, sizeof m->sr);
+    h = fnv_bytes(h, m->ram, sizeof m->ram); h = fnv_bytes(h, m->vram, sizeof m->vram);
+    h = fnv_bytes(h, m->vsram, sizeof m->vsram); h = fnv_bytes(h, m->cram, sizeof m->cram);
+    h = fnv_bytes(h, m->vdp_reg, sizeof m->vdp_reg);
+    h = fnv_bytes(h, &m->vdp_addr, sizeof m->vdp_addr); h = fnv_bytes(h, &m->vdp_first, sizeof m->vdp_first);
+    uint8_t flags[] = { m->vdp_code, m->vdp_pending, m->dma_fill, m->pad, m->pad_th, m->pad_control,
+                        m->z80_bus, m->z80_reset, m->sram_enable, m->sram_protect, m->stopped, m->fault,
+                        m->irq_pending, m->hint_pending, m->hint_counter };
+    h = fnv_bytes(h, flags, sizeof flags);
+    h = fnv_bytes(h, &m->line, sizeof m->line);
+    h = fnv_bytes(h, m->sram, sizeof m->sram); h = fnv_bytes(h, m->zram, sizeof m->zram);
+    h = fnv_bytes(h, &m->z80_bank, sizeof m->z80_bank);
+    return h;
+}
 uint64_t dp_mdmach_screen_key(const DpMdMach *d) {
     const MdFull *m = d->m;
     unsigned wsel = m->vdp_reg[16] & 3, w = wsel == 0 ? 32 : wsel == 1 ? 64 : 128;
