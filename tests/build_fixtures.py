@@ -553,6 +553,14 @@ def build_nes_pce(out):
         n[q:q + 2] = bytes([0x00, 0x80])
     with open(os.path.join(out, "fix_nes_cpucopy.nes"), "wb") as f:
         f.write(n)
+    # NES copy siblings: the loader reads the pointer word at $8200 first; the
+    # table ($8100, $8300, $8400) names the other 16-byte sources
+    n2 = bytearray(n)
+    code2 = bytes([0xAD, 0x00, 0x82]) + code[:-3] + bytes([0x4C, 0x1A, 0x80])
+    n2[16:16 + len(code2)] = code2
+    n2[16 + 0x200:16 + 0x200 + 6] = bytes([0x00, 0x81, 0x00, 0x83, 0x00, 0x84])
+    with open(os.path.join(out, "fix_nes_sibling.nes"), "wb") as f:
+        f.write(n2)
     # NES static closure: jsr $8020 whose subroutine a 2-step budget never reaches
     n = bytearray(16 + 2 * 0x4000 + 0x2000)
     n[0:4] = b"NES\x1a"

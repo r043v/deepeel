@@ -652,6 +652,7 @@ DpNesOptions dp_nes_options(void) {
 static void infer_gaps(DpNesRun *x);
 static void static_closure(DpNesRun *x);
 static void table_scan(DpNesRun *x);
+static void copy_siblings(DpNesRun *x);
 
 void dp_nes_results_free(DpNesResults *r) {
     if (!r) return;
@@ -861,6 +862,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     free(x.park);
     if (!x.failed) static_closure(&x);
     if (!x.failed) table_scan(&x);
+    if (!x.failed) copy_siblings(&x);
     if (!x.failed) infer_gaps(&x);
     free(x.ipc);
     free(x.istart);
@@ -989,6 +991,68 @@ static void table_scan(DpNesRun *x) {
             r->table_count++;
         }
     }
+}
+
+// --- copy siblings (S5) ----------------------------------------------------------
+//
+// A ROM->VRAM/OAM copy of >= 16 bytes proves its source is data.  When the
+// source's CPU address is stored as a word in a table the game read as data,
+// the table's other entries are the same loader's other sources: they get the
+// observed length (clipped to the 16 KiB bank on UxROM) and class
+// inf-data.  Entries are capped at 64 per table (cap counted), ranges over
+// natural code are refused and counted; observations always win.
+#define NES_SIB_MAX 64
+static int nes_sib_word(const DpNesRun *x, const uint8_t *rom, size_t a) {
+    size_t n = x->r->prg_size;
+    if (a + 1 >= n) return 0;
+    for (size_t i = a; i < a + 2; i++)
+        if (x->r->flags[i] & (DP_NES_NATURAL | DP_NES_FORCED | DP_NES_STATIC)) return 0;
+    int64_t t = table_target(x, a, (unsigned)(rom[a] | rom[a + 1] << 8));
+    return t >= 0 && (size_t)t < n;
+}
+
+static void copy_siblings(DpNesRun *x) {
+    DpNesResults *r = x->r;
+    const uint8_t *rom = dp_nesmach_prg_rom(x->m);
+    size_t n = r->prg_size;
+    if (!rom || !n) return;
+    if (!r->inferred) r->inferred = calloc(n, 1);
+    if (!r->inferred) return;
+    DpHashSet seen;
+    dp_set_init(&seen, 256);
+    for (unsigned c = 0; c < r->copy_count; c++) {
+        const DpNesCopy *rec = &r->copies[c];
+        uint32_t len = rec->channel == 1 ? 256u : rec->channel == 3 ? rec->length : 0;
+        if (len < 16 || rec->source >= n) continue;
+        for (size_t k = 0; k + 1 < n; k++) {
+            if (!(r->flags[k] & DP_NES_DATA) && !(k && (r->flags[k - 1] & DP_NES_DATA))) continue;
+            if (!nes_sib_word(x, rom, k)) continue;
+            int64_t t = table_target(x, k, (unsigned)(rom[k] | rom[k + 1] << 8));
+            if (t != (int64_t)rec->source) continue;
+            size_t t0 = k, t1 = k + 2;
+            unsigned entries = 1;
+            while (t0 >= 2 && entries < NES_SIB_MAX && nes_sib_word(x, rom, t0 - 2)) { t0 -= 2; entries++; }
+            while (t1 + 1 < n && entries < NES_SIB_MAX && nes_sib_word(x, rom, t1)) { t1 += 2; entries++; }
+            if (entries >= NES_SIB_MAX) r->sib_caps++;
+            if (entries < 2) continue;
+            if (dp_set_insert(&seen, ((uint64_t)t0 << 20) ^ ((uint64_t)len << 4) ^ rec->channel) <= 0) continue;
+            r->sib_tables++;
+            for (size_t e = t0; e < t1; e += 2) {
+                int64_t b = table_target(x, e, (unsigned)(rom[e] | rom[e + 1] << 8));
+                if (b < 0 || b == (int64_t)rec->source) continue;
+                size_t lim = dp_nesmach_mapper(x->m) == 2 ? ((size_t)b & ~(size_t)0x3FFF) + 0x4000 : n;
+                size_t end = (size_t)b + len > lim ? lim : (size_t)b + len;
+                if (end > n) end = n;
+                int code = 0;
+                for (size_t i = (size_t)b; i < end && !code; i++) if (r->flags[i] & DP_NES_NATURAL) code = 1;
+                if (code) { r->sib_refused++; continue; }
+                r->sib_ranges++;
+                for (size_t i = (size_t)b; i < end; i++)
+                    if (!r->flags[i] && !r->inferred[i]) { r->inferred[i] = DP_NMAP_INF_DATA; r->sib_bytes++; }
+            }
+        }
+    }
+    dp_set_free(&seen);
 }
 
 // --- padding and gap inference (static, over the classified map) ---------------
@@ -1149,6 +1213,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  cpu loop copy bytes %llu\n", (unsigned long long)r->cpu_copy_bytes);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  pad probes: %llu forks at %llu sites, refused %llu\n", (unsigned long long)r->pad_probes, (unsigned long long)r->pad_probe_sites, (unsigned long long)r->pad_probe_refused);
+    fprintf(out, "  copy siblings: %llu tables; %llu ranges (%llu bytes); %llu refused over executed code; %llu tables cut at the cap\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_ranges, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_refused, (unsigned long long)r->sib_caps);
     fprintf(out, "  vector seeds: %llu\n", (unsigned long long)r->vectors_seeded);
     fprintf(out, "  entries: seeded %llu refused %llu\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  seeds: reset %llu irq %llu bank %llu play %llu refused %llu\n",

@@ -169,6 +169,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_static.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_table.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_slide.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_sibling.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_cpucopy.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.gg
@@ -293,3 +294,5 @@ add_test(NAME nes_evidence COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${C
 set_tests_properties(nes_evidence PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_cov COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes --max-total 20000 --max-steps 1000 --cov ${CMAKE_CURRENT_BINARY_DIR}/nes.cov --romdata ${CMAKE_CURRENT_BINARY_DIR}/nes.rd >/dev/null 2>&1; grep -Eq '^00 0000 1 1$' ${CMAKE_CURRENT_BINARY_DIR}/nes.cov && grep -Eq '^[0-9a-f]+ [1-9][0-9]*$' ${CMAKE_CURRENT_BINARY_DIR}/nes.rd")
 set_tests_properties(nes_cov PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME nes_sibling COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_sibling.nes --max-total 20000 --max-steps 2000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_sib.txt >/dev/null 2>&1; grep -Eq 'copy siblings: 1 tables; 2 ranges .32 bytes.' ${CMAKE_CURRENT_BINARY_DIR}/nes_sib.txt")
+set_tests_properties(nes_sibling PROPERTIES FIXTURES_REQUIRED fixtures)

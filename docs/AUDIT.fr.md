@@ -11,7 +11,7 @@ remesure pas l'outil.
 | GB | 34 | 1 | 3 | 1 |
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
-| NES | 11 | 14 | 12 | 2 |
+| NES | 11 | 15 | 11 | 2 |
 | PCE | 15 | 7 | 16 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
@@ -48,7 +48,7 @@ Cellules ouvertes (◐ ou ✗) : 93.
 | S4 | Tables de sauts depuis l'opérande | GB | ✗ |
 | S4 | Tables de sauts depuis l'opérande | NES | ◐ tables de mots lues en données |
 | S4 | Tables de sauts depuis l'opérande | MD | ✗ |
-| S5 | Frères de copie | NES | ✗ |
+| S5 | Frères de copie | NES | ◐ copies OAM DMA / boucle CPU, tables du même flux |
 | S5 | Frères de copie | PCE | ✗ |
 | S5 | Frères de copie | MD | ✗ |
 | S6 | Rejeu de décodeurs sur tables de flux | GB | ✗ |

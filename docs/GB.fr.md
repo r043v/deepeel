@@ -1461,3 +1461,16 @@ compteurs saturants par cellule PRG : exécutions de l'octet d'opcode
 que Sega ; romdata : `page coups` par page de 256 octets lue en données. Les
 octets d'opérande d'une instruction portent 0 coup (seul l'opcode compte).
 Observations de l'outil, pas des mesures matérielles. Test `nes_cov`.
+
+## 0.93.0
+
+NES : frères de copie (S5, partielle). Une copie ROM→VRAM/OAM d'au moins 16
+octets (OAM DMA : 256 ; boucle CPU : longueur coalescée) prouve que sa source
+est de la donnée. Si l'adresse CPU de la source est un mot d'une table lue en
+données, les autres entrées sont les sources du même chargeur : elles
+reçoivent la longueur observée (bornée à la banque de 16 Kio sur UxROM) et la
+classe `inf-data`. Au plus 64 entrées par table (saturation comptée), plages
+sur code naturel refusées et comptées, l'observation gagne toujours. Rapport :
+`copy siblings: N tables; N ranges (N bytes); N refused…; N tables cut at the
+cap`. Fixture `fix_nes_sibling.nes`, test `nes_sibling`. Reste ◐ : pas les
+copies DMC, pas de résolution pour les mappeurs à pont (1/3/4/7).
