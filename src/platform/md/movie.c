@@ -4,6 +4,48 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int hexval(int c) { return c >= '0' && c <= '9' ? c - '0' : (c | 32) >= 'a' && (c | 32) <= 'f' ? (c | 32) - 'a' + 10 : -1; }
+
+/* BK2 Input Log: "|pr|UDLRABCSXYZM|...|" per frame; pad byte as in GMV (bit0 U, 1 D, 2 L,
+ * 3 R, 4 B, 5 C, 6 A, 7 Start).  X/Y/Z/Mode are not modelled by the 3-button replay. */
+static int bk2_parse(const uint8_t *log, size_t n, const uint8_t *hdr, size_t hn,
+                     DpMdMovie *out, char *err, size_t errsz) {
+    if (hdr && hn) {
+        const char *h = (const char *)hdr;
+        for (size_t i = 0; i + 5 < hn; i++)
+            if ((i == 0 || h[i - 1] == '\n') && (!strncmp(h + i, "SHA1 ", 5) || !strncmp(h + i, "MD5 ", 4))) {
+                const char *v = h + i + (h[i] == 'S' ? 5 : 4);
+                size_t k = 0; uint8_t d[16];
+                while (k < 32 && i + (size_t)(v - h - i) + k < hn && hexval(v[k]) >= 0) k++;
+                if (k == 32) {
+                    for (int j = 0; j < 16; j++) d[j] = (uint8_t)(hexval(v[2 * j]) * 16 + hexval(v[2 * j + 1]));
+                    memcpy(out->md5, d, 16); out->has_md5 = 1;
+                }
+                break;
+            }
+    }
+    uint32_t cap = 1024; out->pads = malloc(cap);
+    if (!out->pads) { snprintf(err, errsz, "out of memory"); return 0; }
+    for (size_t i = 0; i < n;) {
+        size_t e = i; while (e < n && log[e] != '\n') e++;
+        if (log[i] == '|' && e - i >= 16) {
+            const uint8_t *p = log + i + 4; /* after "|pr|" */
+            static const int bit[8] = {0, 1, 2, 3, 6, 4, 5, 7}; /* U D L R A B C Start */
+            uint8_t v = 0;
+            for (int k = 0; k < 8; k++) if (p[k] != '.') v |= (uint8_t)(1u << bit[k]);
+            if (out->frames == cap) {
+                cap *= 2; uint8_t *np = realloc(out->pads, cap);
+                if (!np) { snprintf(err, errsz, "out of memory"); return 0; }
+                out->pads = np;
+            }
+            out->pads[out->frames++] = v;
+        }
+        i = e + 1;
+    }
+    if (!out->frames) { dp_md_movie_free(out); snprintf(err, errsz, "BK2 has no input frames"); return 0; }
+    return 1;
+}
+
 int dp_md_movie_load(const char *path, DpMdMovie *out, char *err, size_t errsz) {
     memset(out, 0, sizeof *out);
     FILE *f = fopen(path, "rb");
@@ -17,6 +59,16 @@ int dp_md_movie_load(const char *path, DpMdMovie *out, char *err, size_t errsz) 
     fclose(f);
     size_t size = (size_t)n;
     if (dp_zip_is(data, size)) {
+        size_t ilen = 0;
+        uint8_t *ilog = dp_zip_read(data, size, "input log", &ilen, NULL);
+        if (ilog) { /* BizHawk BK2 */
+            size_t hn = 0;
+            uint8_t *hdr = dp_zip_read(data, size, "header", &hn, NULL);
+            free(data);
+            int ok = bk2_parse(ilog, ilen, hdr, hn, out, err, errsz);
+            free(ilog); free(hdr);
+            return ok;
+        }
         size_t len = 0;
         uint8_t *raw = dp_zip_read(data, size, ".gmv", &len, NULL);
         free(data); data = raw; size = len;

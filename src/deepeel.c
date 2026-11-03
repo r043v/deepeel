@@ -6,6 +6,7 @@
 //   deepeel regs gb                                 dump the GB register registry
 //   deepeel dis rom.gb bank:addr [n]                disassemble n instructions
 #include <sys/stat.h>
+#include "core/md5.h"
 #include "core/cart.h"
 #include "core/cart_md.h"
 #include "explore/md_trace.h"
@@ -1453,7 +1454,7 @@ static int cmd_md(int argc, char **argv) {
         }
     } else if (!strcmp(argv[2], "explore")) {
         DpMdOptions o;
-        int md_jobs = 1, md_watch = 0;
+        int md_jobs = 1, md_watch = 0, md_any_rom = 0;
         const char *md_dump = NULL;
         dp_md_options_default(&o);
         const char *text = NULL, *map = NULL, *ev = NULL, *movie_path = NULL, *md_summary = NULL, *md_heat = NULL;
@@ -1496,6 +1497,7 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--watch-write")) o.watch_write = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--exclude-read-pc")) o.exclude_read_pc = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--tas")) movie_path = argv[++i];
+            else if (!strcmp(a, "--tas-any-rom")) md_any_rom = 1;
             else if (!strcmp(a, "--text")) text = argv[++i];
             else if (!strcmp(a, "--map")) map = argv[++i];
             else if (!strcmp(a, "--evidence")) ev = argv[++i];
@@ -1507,6 +1509,14 @@ static int cmd_md(int argc, char **argv) {
         if (!rc && movie_path) {
             if (!dp_md_movie_load(movie_path, &movie, err, sizeof err)) {
                 fprintf(stderr, "deepeel: GMV: %s\n", err); rc = 1;
+            } else if (movie.has_md5) {
+                uint8_t h[16]; dp_md5(c.rom, c.size, h);
+                /* BizHawk's Genesis header hash is not a reliable ROM digest (a movie that
+                 * replays to its last frame can carry a different value): warn, never refuse */
+                if (!md_any_rom && memcmp(h, movie.md5, 16))
+                    fprintf(stderr, "deepeel: warning: BK2 header hash differs from the ROM MD5 "
+                            "(the replay will show whether the movie matches)\n");
+                o.movie = &movie;
             } else o.movie = &movie;
         }
         if (!rc) {

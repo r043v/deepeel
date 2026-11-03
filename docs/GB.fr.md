@@ -2078,3 +2078,14 @@ Deux cartes de plus sur le pont mapper NES : Color Dreams (11) et GxROM (66),
 un seul registre `$8000+` choisissant une banque PRG de 32 Kio et une banque CHR de
 8 Kio (CHR-ROM exigée, PRG par 32 Kio). Les mappers restant refusés (MMC2/5/…)
 gardent leur message explicite. Test `test_gxrom` dans `test_nes`.
+
+## 0.140.0 (MD)
+
+Films BizHawk `.bk2` pour Mega Drive (`--tas`) : le journal d'entrées est converti
+en octets de manette 3 boutons (X/Y/Z/Mode ignorés), l'en-tête (clé `SHA1`/`MD5`
+de 32 hex) est comparé au MD5 de la ROM (`src/core/md5.c`). Une différence donne
+un **avertissement**, pas un refus : le film réel essayé (Sonic 1, 60 053 images)
+porte une valeur d'en-tête différente du MD5 de la ROM jouée et se rejoue pourtant
+jusqu'à la dernière image (« GMV replay: 60053 / 60053 frames », observation de
+l'outil : 51 716 octets de ROM exécutés, 9,9 %, en 2 min avec `--max-total 2e9`).
+Test `md_bk2_movie`. Option `--tas-any-rom` acceptée côté MD (supprime l'avertissement).

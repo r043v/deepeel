@@ -121,7 +121,7 @@ Pour chaque technique, la fiche indique :
 | F3 | `--jobs` par instances clonées | ✅ | ✅ | ✅ | ◐ `--jobs 2` par phase (`dp_nes2_`, `nes_jobs`), pas de file partagée | ◐ `--jobs 2` par phase (`dp_pce2_`, `test_jobs`), pas de file partagée | ◐ `--jobs 2` par entrées explicites (`dp_md2_`, `md_jobs`), pas de file partagée |
 | J1 | Sessions jouées multi-thread + pool | ✅ | ◐ | ◐ | ◐ xorshift | ◐ | ✗ |
 | J2 | Rejeu TAS prioritaire + shoots | ✅ | ✅ | ✅ | ✅ | ✅ | ◐ GMV |
-| J3 | Identité ROM des films | ✅ | ✅ SHA-1 | ✅ SHA-1 | ✅ SHA-1 | ✅ SHA-1 | ✗ |
+| J3 | Identité ROM des films | ✅ | ✅ SHA-1 | ✅ SHA-1 | ✅ SHA-1 | ✅ SHA-1 | ◐ BK2 : MD5 d'en-tête comparé au ROM (avertissement seulement, le hash BizHawk MD n'est pas fiable) ; GMV sans identité |
 | J4 | Go-Explore (cellules écran) | ✗ | ✗ | ✗ | ◐ `--novelty` (archive de cellules écran, vies sans connaissance du jeu) | ✅ | ◐ `--novelty` (archive de cellules plans A/B, vies sans connaissance du jeu) |
 | J5 | Mode humain, export `.sta` | ✅ | ✗ | ✗ | ◐ `--export-state` (cellule la plus profonde, fichier DPST) | ◐ `--export-state` (cellule la plus profonde, fichier DPST) | ◐ `--export-state` (cellule la plus profonde, fichier DPST) |
 | O1 | `.map` texte, PNG, JSON, heat | ✅ | ✅ `.map`, maprender | ✅ | ◐ | ✅ via maprender | ✅ `.map` classé, PNG (`maprender --sys md`), `--summary` JSON, `--heat` par zone |

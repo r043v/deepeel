@@ -408,6 +408,11 @@ def build_md(out):
     header[20:22] = b"33"
     with open(os.path.join(out, "fix_md_movie.gmv"), "wb") as f:
         f.write(header + bytes([0x7F, 0xFF, 0xFF, 0xF7, 0xFF, 0xFF]))
+    import zipfile
+    with zipfile.ZipFile(os.path.join(out, "fix_md_movie.bk2"), "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("Header.txt", "MovieVersion BizHawk v2.0\nPlatform GEN\nSHA1 00000000000000000000000000000000\n")
+        z.writestr("Input Log.txt", "[Input]\nLogKey:#Power|Reset|#P1 Up|P1 Down|P1 Left|P1 Right|P1 A|P1 B|P1 C|P1 Start|P1 X|P1 Y|P1 Z|P1 Mode|\n"
+                   + "|..|............|............|\n" * 3 + "|..|.......S....|............|\n" + "[/Input]\n")
     header[22] = 0x40
     with open(os.path.join(out, "fix_md_movie_state.gmv"), "wb") as f:
         f.write(header + bytes([0xFF, 0xFF, 0xFF]))

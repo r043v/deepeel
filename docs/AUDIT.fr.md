@@ -13,7 +13,7 @@ remesure pas l'outil.
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 24 | 1 | 2 |
 | PCE | 16 | 21 | 1 | 1 |
-| MD | 10 | 25 | 3 | 1 |
+| MD | 10 | 26 | 2 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 89.
 
@@ -89,7 +89,7 @@ Cellules ouvertes (◐ ou ✗) : 89.
 | J1 | Sessions jouées multi-thread + pool | PCE | ◐ |
 | J1 | Sessions jouées multi-thread + pool | MD | ✗ |
 | J2 | Rejeu TAS prioritaire + shoots | MD | ◐ GMV |
-| J3 | Identité ROM des films | MD | ✗ |
+| J3 | Identité ROM des films | MD | ◐ BK2 : MD5 d'en-tête comparé au ROM (avertissement seulement, le hash BizHawk MD n'est pas fiable) ; GMV sans identité |
 | J4 | Go-Explore (cellules écran) | GB | ✗ |
 | J4 | Go-Explore (cellules écran) | SMS/GG | ✗ |
 | J4 | Go-Explore (cellules écran) | MSX | ✗ |
