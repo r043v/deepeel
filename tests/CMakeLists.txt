@@ -166,6 +166,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_uxrom.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_pad.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ind.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_static.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_cpucopy.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.gg
@@ -276,3 +277,5 @@ add_test(NAME nes_cpu_copy COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${C
 set_tests_properties(nes_cpu_copy PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_padding COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_pad.txt --map ${CMAKE_CURRENT_BINARY_DIR}/nes_pad.map >/dev/null 2>&1; grep -Eq 'padding [1-9][0-9]* bytes' ${CMAKE_CURRENT_BINARY_DIR}/nes_pad.txt && sed -n 2p ${CMAKE_CURRENT_BINARY_DIR}/nes_pad.map | grep -q 8")
 set_tests_properties(nes_padding PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME nes_static COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_static.nes --max-total 20000 --max-steps 2 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_st.txt --map ${CMAKE_CURRENT_BINARY_DIR}/nes_st.map >/dev/null 2>&1; grep -q 'static closure: 7 bytes from 1 roots' ${CMAKE_CURRENT_BINARY_DIR}/nes_st.txt && sed -n 2p ${CMAKE_CURRENT_BINARY_DIR}/nes_st.map | grep -q 3")
+set_tests_properties(nes_static PROPERTIES FIXTURES_REQUIRED fixtures)

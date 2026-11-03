@@ -1377,3 +1377,18 @@ du classé des données inférées. Ce sont des inférences, jamais des
 observations (classes `inferred-*`). Rapport :
 `padding N bytes; inferred code/data/padding`. Pas encore de tables de
 pointeurs (S1 reste ◐). Test `nes_padding`.
+
+## 0.85.0
+
+NES : fermeture statique de flot (S2, partielle). Pour chaque instruction
+exécutée dont la cible (`jmp`, `jsr`, branche) n'a jamais été exécutée,
+l'explorateur décode linéairement depuis la cible jusqu'à un `jmp`/`rts`/`rti`/
+indirect/jam et marque les cellules `DP_NES_STATIC` (classe `code-static`),
+sans jamais les compter comme observées (la couverture « touched » les exclut,
+ainsi que le padding). Une cible dans la fenêtre 16 Kio de la source se résout
+dans la banque de la source ; les autres fenêtres utilisent le mapping final.
+Bornes : une visite par cellule, 4096 instructions par balayage ; les
+saturations sont comptées (`cap hits`). Rapport : `static closure: N bytes
+from M roots, cap hits K`. Limites : pas de suivi de constantes (S3), pas de
+tables de sauts (S4), les cibles inter-banques UxROM dépendent du mapping
+final. Fixture `fix_nes_static.nes`, test `nes_static`.

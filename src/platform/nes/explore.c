@@ -52,6 +52,8 @@ typedef struct {
     uint64_t total_steps, path_steps, paths_opened;
     unsigned cur_pc, cur_len;          // current instruction's fetch window
     int64_t last_read_cell; uint64_t last_read_step; // newest PRG data read (CPU-loop copy source)
+    uint16_t *ipc;                     // per PRG cell: CPU address of an executed instruction start
+    uint8_t *istart;                   // per PRG cell: 1 when an instruction started there
     int was_outside;                   // previous step ran outside PRG
     // play/TAS session state (the on_frame hook drives it)
     int play_mode;                     // 0: fork exploration, 1: play/TAS
@@ -169,6 +171,10 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
     }
     x->cur_pc = pc;
     x->cur_len = in.length;
+    if (x->ipc && x->istart && !x->play_mode) {
+        int64_t c0 = dp_nesmach_rom_index(x->m, pc);
+        if (c0 >= 0 && (size_t)c0 < x->r->prg_size) { x->ipc[c0] = (uint16_t)pc; x->istart[c0] = 1; }
+    }
 
     // executed PRG cells (before execution, from this exact state)
     if (!x->play_mode) {
@@ -628,6 +634,7 @@ DpNesOptions dp_nes_options(void) {
 }
 
 static void infer_gaps(DpNesRun *x);
+static void static_closure(DpNesRun *x);
 
 void dp_nes_results_free(DpNesResults *r) {
     if (!r) return;
@@ -704,6 +711,8 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     }
     x.queue_cap = x.opt.queue_cap;
     x.queue = calloc(x.queue_cap ? x.queue_cap : 1, sizeof(DpNesPathState));
+    x.ipc = calloc(r->prg_size ? r->prg_size : 1, sizeof *x.ipc);
+    x.istart = calloc(r->prg_size ? r->prg_size : 1, 1);
     x.fork_sites_len = r->prg_size;
     x.fork_sites = calloc(x.fork_sites_len ? x.fork_sites_len : 1, sizeof(uint32_t));
     dp_set_init(&x.seen, 1 << 22);
@@ -807,7 +816,10 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
         dp_lf_close(x.lot, x.opt.lot_path);
     }
     free(x.park);
+    if (!x.failed) static_closure(&x);
     if (!x.failed) infer_gaps(&x);
+    free(x.ipc);
+    free(x.istart);
     free(x.queue);
     free(x.loops);
     free(x.fork_sites);
@@ -821,6 +833,68 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     int ok = !x.failed;
     dp_nesmach_close(x.m);
     return ok;
+}
+
+// --- static flow closure ----------------------------------------------------------
+//
+// From every executed instruction with a known target (jmp, jsr, branch) whose
+// target cell no path executed, decode linearly until a jmp/rts/rti/indirect/
+// jam; the swept cells are tagged DP_NES_STATIC (code reached statically, never
+// observed).  A target in the source's own 16 KiB window resolves inside the
+// source's bank; other windows use the final live mapping.  Bounded by a
+// work cap (one visit per cell) and by an instruction cap per sweep; hits of the
+// cap are counted in static_cap_hits.
+static void static_closure(DpNesRun *x) {
+    DpNesResults *r = x->r;
+    const uint8_t *rom = dp_nesmach_prg_rom(x->m);
+    size_t n = r->prg_size;
+    if (!rom || !n || !x->ipc || !x->istart) return;
+    uint8_t *seen = calloc(n, 1);
+    size_t *work = malloc(n * sizeof *work);
+    uint16_t *wpc = malloc(n * sizeof *wpc);
+    if (!seen || !work || !wpc) { free(seen); free(work); free(wpc); return; }
+    size_t wl = 0;
+    // roots: targets of executed instructions
+    for (size_t c = 0; c < n; c++) {
+        if (!x->istart[c]) continue;
+        uint8_t b[3] = { rom[c], c + 1 < n ? rom[c + 1] : 0, c + 2 < n ? rom[c + 2] : 0 };
+        DpM6502Instruction in;
+        if (!dp_m6502_decode(b, 3, x->ipc[c], &in)) continue;
+        if (in.flow != DP_M6502_JUMP && in.flow != DP_M6502_CALL && in.flow != DP_M6502_BRANCH) continue;
+        unsigned t = in.target;
+        if (t < 0x8000u) continue;
+        int64_t tc;
+        if ((t & 0xC000u) == (x->ipc[c] & 0xC000u)) tc = (int64_t)(c - (x->ipc[c] & 0x3FFFu)) + (int64_t)(t & 0x3FFFu);
+        else tc = dp_nesmach_rom_index(x->m, t);
+        if (tc < 0 || (size_t)tc >= n || (r->flags[tc] & (DP_NES_NATURAL | DP_NES_FORCED | DP_NES_STATIC)) || seen[tc]) continue;
+        if (wl >= n) { r->static_cap_hits++; continue; }
+        seen[tc] = 1; work[wl] = (size_t)tc; wpc[wl++] = (uint16_t)t; r->static_roots++;
+    }
+    while (wl) {
+        size_t c = work[--wl]; uint16_t pc = wpc[wl];
+        for (unsigned guard = 0; guard < 4096 && c < n; guard++) {
+            if (r->flags[c] & (DP_NES_NATURAL | DP_NES_FORCED)) break;
+            uint8_t b[3] = { rom[c], c + 1 < n ? rom[c + 1] : 0, c + 2 < n ? rom[c + 2] : 0 };
+            DpM6502Instruction in;
+            if (!dp_m6502_decode(b, 3, pc, &in) || in.flow == DP_M6502_JAM || c + in.length > n) break;
+            for (unsigned k = 0; k < in.length; k++)
+                if (!(r->flags[c + k] & DP_NES_STATIC)) { r->flags[c + k] |= DP_NES_STATIC; r->static_bytes++; }
+            if (in.flow == DP_M6502_JUMP || in.flow == DP_M6502_CALL || in.flow == DP_M6502_BRANCH) {
+                unsigned t = in.target;
+                if (t >= 0x8000u && (t & 0xC000u) == (pc & 0xC000u)) {
+                    size_t tc = (size_t)((int64_t)(c) - (int64_t)(pc & 0x3FFFu) + (int64_t)(t & 0x3FFFu));
+                    if (tc < n && !seen[tc] && !(r->flags[tc] & (DP_NES_NATURAL | DP_NES_FORCED | DP_NES_STATIC))) {
+                        if (wl < n) { seen[tc] = 1; work[wl] = tc; wpc[wl++] = (uint16_t)t; }
+                        else r->static_cap_hits++;
+                    }
+                }
+            }
+            if (in.flow == DP_M6502_JUMP || in.flow == DP_M6502_RETURN || in.flow == DP_M6502_INDIRECT) break;
+            c += in.length; pc = (uint16_t)(pc + in.length);
+            if (guard == 4095) r->static_cap_hits++;
+        }
+    }
+    free(seen); free(work); free(wpc);
 }
 
 // --- padding and gap inference (static, over the classified map) ---------------
@@ -877,6 +951,7 @@ uint8_t *dp_nes_map_build(const DpNesResults *r) {
         uint8_t f = r->flags[i];
         uint8_t cls;
         if (f & DP_NES_COPIED) cls = DP_NMAP_DATA_COPIED;
+        else if ((f & DP_NES_STATIC) && !(f & (DP_NES_NATURAL | DP_NES_FORCED))) cls = DP_NMAP_CODE_STATIC;
         else if ((f & (DP_NES_NATURAL | DP_NES_FORCED)) && (f & DP_NES_DATA)) cls = DP_NMAP_CODE_STATIC;
         else if (f & DP_NES_FORCED) cls = DP_NMAP_CODE_FORCED;
         else if (f & DP_NES_NATURAL) cls = DP_NMAP_CODE_NAT;
@@ -902,7 +977,7 @@ void dp_nes_map(FILE *out, const DpNesResults *r) {
 void dp_nes_report(FILE *out, const DpNesResults *r) {
     uint64_t touched = 0;
     for (size_t i = 0; i < r->prg_size; i++)
-        if (r->flags[i]) touched++;
+        if (r->flags[i] & ~(DP_NES_STATIC | DP_NES_PAD)) touched++;
     fprintf(out, "NES exploration report\n");
     fprintf(out, "  prg %zu KiB, touched %llu bytes, coverage %.2f%%\n",
         r->prg_size / 1024, (unsigned long long)touched,
@@ -933,6 +1008,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->parked_resumed, (unsigned long long)r->parked_lost);
     fprintf(out, "  pending paths dropped at the wall %llu\n",
         (unsigned long long)r->pending_dropped);
+    fprintf(out, "  static closure: %llu bytes from %llu roots, cap hits %llu\n", (unsigned long long)r->static_bytes, (unsigned long long)r->static_roots, (unsigned long long)r->static_cap_hits);
     fprintf(out, "  padding %llu bytes; inferred code %llu data %llu padding %llu\n", (unsigned long long)r->padding_bytes, (unsigned long long)r->inferred_code, (unsigned long long)r->inferred_data, (unsigned long long)r->inferred_pad);
     fprintf(out, "  cpu loop copy bytes %llu\n", (unsigned long long)r->cpu_copy_bytes);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
