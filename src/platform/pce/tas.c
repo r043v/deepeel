@@ -1,6 +1,7 @@
 // tas.c: PC Engine movie loading (see tas.h).
 #include "tas.h"
 #include "../../core/zip.h"
+#include "../../core/sha1.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -157,4 +158,22 @@ void dp_pce_tas_free(DpPceTas *t) {
     free(t->pads);
     free(t->resets);
     t->pads = t->resets = NULL;
+}
+
+static void pce_sha1_hex(const uint8_t *d, size_t n, char out[41]) {
+    uint8_t h[20];
+    dp_sha1(d, n, h);
+    for (int i = 0; i < 20; i++) snprintf(out + 2 * i, 3, "%02x", h[i]);
+}
+
+int dp_pce_tas_identity(const DpPceTas *t, const uint8_t *rom, size_t size) {
+    if (!t || !t->sha1[0]) return 3;
+    char want[41], a[41], b[41];
+    size_t n = 0;
+    for (; t->sha1[n] && n < 40; n++) want[n] = (char)tolower((unsigned char)t->sha1[n]);
+    want[n] = 0;
+    pce_sha1_hex(rom, size, a);
+    if (!strcmp(want, a)) return 1;
+    if (size > 512 && size % 1024 == 512) { pce_sha1_hex(rom + 512, size - 512, b); if (!strcmp(want, b)) return 1; }
+    return 2;
 }

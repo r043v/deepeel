@@ -1090,6 +1090,9 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
             continue;
         }
         fprintf(stderr, "deepeel: TAS %s: %u frames\n", x->opt.tas_paths[i], t.frames);
+        int id = dp_pce_tas_identity(&t, x->rom, x->rom_size);
+        if (id == 1) x->r->tas_same++; else if (id == 2) x->r->tas_different++; else x->r->tas_unrecorded++;
+        if (id == 2) fprintf(stderr, "deepeel: TAS %s: recorded for a different ROM\n", x->opt.tas_paths[i]);
         play_session(x, x->opt.play_frames > t.frames ? x->opt.play_frames : t.frames, 0, &t);
         dp_pce_tas_free(&t);
     }
@@ -1249,6 +1252,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
     fprintf(out, "  play: %llu sessions, %llu frames (TAS %llu)\n",
             (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run,
             (unsigned long long)r->tas_frames_run);
+    fprintf(out, "  tas identity: %llu same ROM, %llu different, %llu unrecorded\n", (unsigned long long)r->tas_same, (unsigned long long)r->tas_different, (unsigned long long)r->tas_unrecorded);
     fprintf(out, "  novelty: depth %u frames, %llu trials, %llu frames, %llu hits, %llu deaths, %llu archived (%llu replaced)\n",
             r->novelty_depth, (unsigned long long)r->novelty_trials, (unsigned long long)r->novelty_frames_run,
             (unsigned long long)r->novelty_hits, (unsigned long long)r->novelty_deaths,

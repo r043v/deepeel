@@ -1557,3 +1557,12 @@ NES : D14 pinglé. Le 6502 n'a pas d'instruction HALT ; son équivalent est le
 jam (famille KIL), qui verrouille le CPU. L'explorateur y clôt le chemin et le
 compte (`faults`). Fixture `fix_nes_jam.nes` (`LDA #1 ; KIL`) : 2 pas, 1 faute,
 test `nes_jam`. Avec la glissade de padding (0.89.0), la cellule D14 NES passe ✅.
+
+## 0.99.2
+
+PCE : identité ROM des films (J3). `dp_pce_tas_identity` compare le SHA-1
+enregistré par le film (BK2 `HeaderTable`/`SHA1`) à celui de l'image, ou de
+l'image privée de son en-tête de 512 octets. Le rapport affiche
+`tas identity: N same ROM, N different, N unrecorded` et un film d'une autre
+ROM est signalé sur stderr. Test unitaire dans `test_pce`. Un film d'une autre
+ROM est quand même rejoué (comme sur NES) : l'identité informe, elle ne bloque pas.

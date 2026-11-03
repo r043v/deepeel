@@ -12,10 +12,10 @@ remesure pas l'outil.
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 20 | 5 | 2 |
-| PCE | 15 | 7 | 16 | 1 |
+| PCE | 16 | 7 | 15 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 92.
+Cellules ouvertes (◐ ou ✗) : 91.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -90,7 +90,6 @@ Cellules ouvertes (◐ ou ✗) : 92.
 | J1 | Sessions jouées multi-thread + pool | PCE | ◐ |
 | J1 | Sessions jouées multi-thread + pool | MD | ✗ |
 | J2 | Rejeu TAS prioritaire + shoots | MD | ◐ GMV |
-| J3 | Identité ROM des films | PCE | ✗ |
 | J3 | Identité ROM des films | MD | ✗ |
 | J4 | Go-Explore (cellules écran) | GB | ✗ |
 | J4 | Go-Explore (cellules écran) | SMS/GG | ✗ |

@@ -9,6 +9,7 @@
 #include <string.h>
 #include "../src/platform/pce/pce.h"
 #include "../src/platform/pce/explore.h"
+#include "../src/platform/pce/tas.h"
 
 static int fails;
 #define CHECK(cond, ...) do { if (!(cond)) { fails++; printf("FAIL %s:%d: ", __func__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
@@ -221,6 +222,24 @@ static void test_jobs(const uint8_t *rom) {
     free(a); free(b);
 }
 
+static void test_tas_identity(void) {
+    extern void dp_sha1(const uint8_t *, size_t, uint8_t[20]);
+    uint8_t rom[2048 + 512];
+    for (unsigned i = 0; i < sizeof rom; i++) rom[i] = (uint8_t)(i * 5);
+    DpPceTas t;
+    memset(&t, 0, sizeof t);
+    CHECK(dp_pce_tas_identity(&t, rom, sizeof rom) == 3, "a movie without SHA-1 records no identity");
+    uint8_t h[20];
+    dp_sha1(rom, sizeof rom, h);
+    for (int i = 0; i < 20; i++) snprintf(t.sha1 + 2 * i, 3, "%02X", h[i]);
+    CHECK(dp_pce_tas_identity(&t, rom, sizeof rom) == 1, "whole-image SHA-1 matches");
+    dp_sha1(rom + 512, sizeof rom - 512, h);
+    for (int i = 0; i < 20; i++) snprintf(t.sha1 + 2 * i, 3, "%02x", h[i]);
+    CHECK(dp_pce_tas_identity(&t, rom, sizeof rom) == 1, "headerless SHA-1 matches");
+    rom[900] ^= 1;
+    CHECK(dp_pce_tas_identity(&t, rom, sizeof rom) == 2, "a changed ROM is a different ROM");
+}
+
 int main(void) {
     uint8_t *rom = malloc(ROM_SIZE);
     build(rom);
@@ -230,6 +249,7 @@ int main(void) {
     test_palette(rom);
     test_index(rom);
     test_jobs(rom);
+    test_tas_identity();
     free(rom);
     if (fails) { printf("%d failure(s)\n", fails); return 1; }
     printf("pce: ok\n");

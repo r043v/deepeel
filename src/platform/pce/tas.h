@@ -20,4 +20,6 @@ typedef struct {
 
 int dp_pce_tas_load(const char *path, DpPceTas *out, char *err, size_t errsz);
 void dp_pce_tas_free(DpPceTas *t);
+/* 1 same ROM (SHA-1 of the image, or of it minus a 512-byte header), 2 different, 3 movie records none */
+int dp_pce_tas_identity(const DpPceTas *t, const uint8_t *rom, size_t size);
 #endif
