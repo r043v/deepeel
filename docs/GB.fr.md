@@ -1304,3 +1304,12 @@ compte 49 runs sur 8 plateformes (GB, MD, SMS, GG, SG-1000, MSX, NES, PCE),
 complète (le padding et l'inféré y sont classés) ; les 20 000 000 de pas sont le
 mur global consommé par la boucle d'attente. Observations de l'outil. Reste :
 ROMs réelles hors dépôt, audit de la matrice §2.1.
+
+## 0.78.0
+
+J13 (partiel) : audit de la matrice §2.1 par `tools/audit_matrix.py` (aussi test
+`audit_matrix`) : vérifie la forme (8 cellules par ligne, marques connues) et
+produit `docs/AUDIT.fr.md` (totaux par plateforme et liste des 97 cellules
+ouvertes ◐/✗ sur 39 techniques × 6 plateformes). Les marques sont celles du
+document ; l'audit n'en remesure pas l'outil. Reste : campagne sur ROMs réelles
+hors dépôt, et fermeture des cellules ouvertes listées.
