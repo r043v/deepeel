@@ -81,6 +81,7 @@ typedef struct {
     char tas_paths[8][512];
     int tas_count;
     uint8_t entry_bank[32]; uint16_t entry_addr[32]; int entry_count; // --entry bank:addr seeds
+    int no_pad_probe;      // disable the strobe-site pad probes
     int seed_banks;        // also seed every switchable bank at $8000 (UxROM)
     int lot_drain;         // with a lot backlog: run only the saved states (no root, no seeds)
     const char *lot_path;  // disk lot of deferred states (NULL: memory only); an existing file is resumed
@@ -99,7 +100,7 @@ typedef struct {
     uint64_t forced_paths;
     uint64_t step_cuts, loop_cuts, fork_cuts, queue_cuts, global_cuts, path_cuts,
              faults, decode_cuts;
-    uint64_t entries_seeded, entries_refused, seeds_reset, seeds_irq, seeds_bank, seeds_refused_queue;
+    uint64_t pad_probes, pad_probe_sites, pad_probe_refused, entries_seeded, entries_refused, seeds_reset, seeds_irq, seeds_bank, seeds_refused_queue;
     uint64_t play_frames_run, play_sessions_run, play_steps_accounted, seeds_play;
     uint64_t evicted;          // exact-state dedup admissions refused
     uint64_t lot_written, lot_read, lot_pending; // disk lot (--lot): spilled / read back / left on disk

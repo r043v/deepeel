@@ -287,6 +287,8 @@ void dp_nesmach_set_input(DpNesMach *d, uint8_t pad0, uint8_t pad1) {
     machine.input = pad0; /* pad 1 has no read path in the runtime yet */
 }
 
+unsigned dp_nesmach_input(const DpNesMach *d) { (void)d; return machine.input; }
+
 size_t dp_nesmach_state_size(void) {
     return (size_t)nes_state_bytes() + MAPPER_TAIL;
 }

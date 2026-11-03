@@ -37,6 +37,7 @@ void dp_nesmach_set_hooks(DpNesMach *m, const DpNesHooks *h);
 uint64_t dp_nesmach_run(DpNesMach *m, uint64_t max_steps);
 /* One full frame: finishes the current one, then runs a new one. */
 void dp_nesmach_frame(DpNesMach *m);
+unsigned dp_nesmach_input(const DpNesMach *m);   /* live pad 0 mask */
 void dp_nesmach_set_input(DpNesMach *m, uint8_t pad0, uint8_t pad1);
 
 size_t dp_nesmach_state_size(void);

@@ -43,6 +43,7 @@ typedef struct {
     DpNesPathState *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
     DpLotFile *lot;                        // disk lot: park overflow, wall leftovers, --lot resume
     DpHashSet seen;                    // exact state dedup
+    DpHashSet probe_seen;              // strobe-write sites already probed
     DpNesLoop *loops;                  // back-branch counters
     size_t loop_len, loop_cap;
     uint32_t *fork_sites;              // per-cell fork counts (parallel to flags)
@@ -241,6 +242,28 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
                 nes_trace.stop = 1;
                 return;
             }
+        }
+    }
+
+    // pad probes: the first strobe write ($4016) at a site forks one state per
+    // single button, so the code that reads the pad is seen under each mask.
+    // One visit per site (bounded by the PRG size); refusals are counted.
+    if ((op == 0x8D || op == 0x8E || op == 0x8C) && bytes[1] == 0x16 && bytes[2] == 0x40 &&
+        !x->opt.no_pad_probe) {
+        int64_t site = dp_nesmach_rom_index(x->m, pc);
+        if (site >= 0 && dp_set_insert(&x->probe_seen, (uint64_t)site + 1) > 0) {
+            r->pad_probe_sites++;
+            unsigned keep = dp_nesmach_input(x->m);
+            for (unsigned b = 0; b < 8; b++) {
+                if ((1u << b) == keep) continue;
+                uint8_t *snap = malloc(dp_nesmach_state_size());
+                if (!snap) { r->pad_probe_refused++; continue; }
+                dp_nesmach_set_input(x->m, (uint8_t)(1u << b), 0);
+                dp_nesmach_save(x->m, snap);
+                DpNesPathState f = { snap, 0, 0, x->paths_opened, x->total_steps, 0 };
+                if (snap_push(x, &f)) r->pad_probes++; else r->pad_probe_refused++;
+            }
+            dp_nesmach_set_input(x->m, (uint8_t)keep, 0);
         }
     }
 
@@ -644,6 +667,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     x.fork_sites_len = r->prg_size;
     x.fork_sites = calloc(x.fork_sites_len ? x.fork_sites_len : 1, sizeof(uint32_t));
     dp_set_init(&x.seen, 1 << 22);
+    dp_set_init(&x.probe_seen, 1 << 10);
     if (!x.queue || !x.fork_sites) x.failed = 1;
     hooks_install(&x);
 
@@ -748,6 +772,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     free(x.frame_cmds);
     free(x.ring);
     dp_set_free(&x.seen);
+    dp_set_free(&x.probe_seen);
     int ok = !x.failed;
     dp_nesmach_close(x.m);
     return ok;
@@ -817,6 +842,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->parked_resumed, (unsigned long long)r->parked_lost);
     fprintf(out, "  pending paths dropped at the wall %llu\n",
         (unsigned long long)r->pending_dropped);
+    fprintf(out, "  pad probes: %llu forks at %llu sites, refused %llu\n", (unsigned long long)r->pad_probes, (unsigned long long)r->pad_probe_sites, (unsigned long long)r->pad_probe_refused);
     fprintf(out, "  entries: seeded %llu refused %llu\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  seeds: reset %llu irq %llu bank %llu play %llu refused %llu\n",
         (unsigned long long)r->seeds_reset, (unsigned long long)r->seeds_irq,

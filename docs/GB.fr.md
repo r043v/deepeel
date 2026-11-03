@@ -1332,3 +1332,15 @@ par les cartes ponteuses, compté dans `entries`). Fixture `fix_nes_uxrom.nes`
 (4 banques, CHR-RAM) : sans l'option 1 chemin / 1 section, avec 5 chemins /
 4 sections. Test `nes_seed_banks`. Cellule G3 NES de la matrice §2.1 passée
 à ✅. Observations de l'outil (`--max-steps 1000`, boucle d'attente).
+
+## 0.81.0
+
+NES : sondes de lecture manette (D10). Au premier `STA/STX/STY $4016` d'un site
+(une visite par site, borné par la taille de la PRG), l'explorateur forke un
+état par bouton isolé (A, B, Select, Start, haut, bas, gauche, droite) ; le
+masque courant est sauté ; la déduplication par état exact élimine les
+doublons. Rapport : `pad probes: N forks at M sites, refused K` ; `--no-p1-fork`
+les désactive. Limite : le runtime NES ne lit que la manette 0 (port 1 sans
+chemin de lecture), et les combinaisons de boutons ne sont pas sondées, donc
+D10 NES reste ◐. Fixture `fix_nes_pad.nes`, test `nes_pad_probe` (16 forks sur
+2 sites : strobe à 1 puis à 0).
