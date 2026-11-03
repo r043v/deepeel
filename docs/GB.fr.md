@@ -2071,3 +2071,10 @@ les valeurs significatives (LY 0/143/144/153, mode STAT 0–3, DIV 00/40/80/FF),
 bornées par site comme les fourches P1. Ligne de rapport « event probes … forced
 variants », option `--no-event-fork`. Fixture `fix_lywait`, test `event_probe_ly`.
 Les valeurs sont forcées, pas rythmées : observation de l'outil, pas mesure matériel.
+
+## 0.139.0 (NES)
+
+Deux cartes de plus sur le pont mapper NES : Color Dreams (11) et GxROM (66),
+un seul registre `$8000+` choisissant une banque PRG de 32 Kio et une banque CHR de
+8 Kio (CHR-ROM exigée, PRG par 32 Kio). Les mappers restant refusés (MMC2/5/…)
+gardent leur message explicite. Test `test_gxrom` dans `test_nes`.

@@ -111,6 +111,30 @@ static void test_unsupported_mappers(void) {
     free(rom);
 }
 
+// GxROM (66): one write picks a 32 KiB PRG bank (bits 4-5) and an 8 KiB CHR bank (bits 0-1)
+static void test_gxrom(void) {
+    char err[256];
+    unsigned sz = 16 + 4 * 0x8000 + 4 * 0x2000;
+    uint8_t *rom = calloc(1, sz);
+    set_header(rom, 8, 4, 66);
+    for (unsigned b = 0; b < 4; b++) rom[16 + b * 0x8000] = (uint8_t)(0x10 + b);
+    set_vector(rom, 0, 0xFFFC, 0x8000);
+    rom[16 + 3 * 0x8000 + 0x7FFC] = 0x00; rom[16 + 3 * 0x8000 + 0x7FFD] = 0x80;
+    DpNesMach *m = dp_nesmach_open(rom, sz, -1, err, sizeof err);
+    CHECK(m, "GxROM opens: %s", err);
+    if (m) {
+        unsigned o, n;
+        CHECK(dp_nesmach_mapper_write(m, 0x8000, 0x21, &o, &n) != 0, "a write moves the windows");
+        CHECK(dp_nesmach_rom_index(m, 0x8000) == 0, "bank 0 at reset");
+        dp_nesmach_close(m);
+    }
+    free(rom);
+    rom = calloc(1, 16 + 0x8000);
+    set_header(rom, 2, 0, 66);
+    CHECK(!dp_nesmach_open(rom, 16 + 0x8000, -1, err, sizeof err), "GxROM without CHR ROM refused");
+    free(rom);
+}
+
 // CNROM: a write to $8000+ picks the 8 KiB CHR bank; AxROM: a 32 KiB PRG bank
 static void test_cnrom_axrom(void) {
     char err[256];
@@ -462,6 +486,7 @@ int main(void) {
     test_machine_uxrom();
     test_unsupported_mappers();
     test_cnrom_axrom();
+    test_gxrom();
     test_mmc1_mmc3();
     test_dmc();
     test_snapshot();
