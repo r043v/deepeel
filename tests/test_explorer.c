@@ -12,6 +12,7 @@ static DpMach *g_mach;
 
 // runs the full pipeline on one fixture; the results stay in `res` until cleanup
 static uint64_t g_wall; // 0 = default budget
+static uint32_t g_psteps; // 0 = default per-path step budget
 static int g_full_forks;  // 1 = the per-site fork table starts full
 
 static void run(const char *dir, const char *name) {
@@ -31,6 +32,7 @@ static void run(const char *dir, const char *name) {
     DpConfig cfg;
     dp_config_defaults(&cfg);
     if (g_wall) cfg.max_steps_total = g_wall;
+    if (g_psteps) cfg.max_steps_path = g_psteps;
     if (g_mach) dp_mach_close(g_mach);
     g_mach = mach_for(g_cart);
     DpExplorer *ex = dp_explorer_new(&cfg, &res, g_mach);
@@ -431,7 +433,26 @@ int main(int argc, char **argv) {
     }
 
     if (res.cart) dp_results_free(&res);
+    // --- deferred frontier: a tiny per-path budget loses no code -----------------
+    {
+        run(dir, "branch");
+        static uint8_t fl[1<<20];
+        size_t full = 0, total = (size_t)res.banks * 0x4000;
+        for (size_t k = 0; k < total; k++) { full += !!res.exec_flags[k]; fl[k] = res.exec_flags[k]; }
+        g_psteps = 3;
+        run(dir, "branch");
+        size_t small = 0, lost = 0;
+        for (size_t k = 0; k < total; k++) { small += !!res.exec_flags[k]; lost += fl[k] && !res.exec_flags[k]; }
+        CHECK(res.step_cuts > 0);          // the budget really bit
+        CHECK(res.steps_deferred > 0);     // ... and the cuts were deferred,
+        CHECK(res.steps_resumed == res.steps_deferred); // ... all resumed
+        CHECK(lost == 0 && small >= full); // no code lost (resumed paths may wander further)
+        CHECK(res.steps_final + res.defer_dropped == 0 || small >= 1);
+        g_psteps = 0;
+    }
+
     if (g_mach) dp_mach_close(g_mach);
     if (g_cart) dp_cart_free(g_cart);
+
     TEST_DONE("test_explorer");
 }

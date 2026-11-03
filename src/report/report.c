@@ -298,7 +298,8 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
                   "\"forks_key\":%u,\"forks_p1\":%u,\"forks_capped\":%u,\"forks_table_full\":%u,\"forks_covered_pruned\":%u,"
                   "\"sections\":%u,\"evicted_exact\":%u,\"evicted_ctx\":%u,\"cycle_cuts\":%u,"
                   "\"step_cuts\":%u,\"pad_cuts\":%u,\"halt_cuts\":%u,\"nonsense_echo\":%u,\"nonsense_data\":%u,\"nonsense_stack\":%u,\"budget_paths\":%u,\"budget_steps\":%u,\"queue_overflows\":%u,\"queue_growths\":%u,\"spool_writes\":%u,\"spool_reads\":%u,\"spool_refused\":%u,"
-                  "\"exec_outside\":%u,\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_refused_budget\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u,\"prov_jp_hl\":%u,\"prov_data\":%u,\"prov_partial\":%u,\"prov_sat\":%u},\n",
+                  "\"exec_outside\":%u,\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_refused_budget\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u,\"prov_jp_hl\":%u,\"prov_data\":%u,\"prov_partial\":%u,\"prov_sat\":%u,"
+                  "\"steps_deferred\":%llu,\"steps_resumed\":%llu,\"steps_final\":%llu,\"defer_dropped\":%llu},\n",
                (unsigned long long)res->steps_total, (unsigned long long)res->paths_run, res->forks_branch, res->forks_irq,
                res->forks_key, res->forks_p1, res->forks_capped, res->forks_table_full, res->forks_covered_pruned,
                (unsigned)res->section_count, res->evicted_exact, res->evicted_ctx, res->cycle_cuts,
@@ -308,7 +309,9 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
                res->exec_outside, res->seeds_natural, res->seeds_spec,
                res->seeds_refused_budget, res->seeds_skipped_data,
                (unsigned)res->bad_op_count, res->prov_jp_hl,
-               res->prov_data, res->prov_unresolved, res->prov_sat);
+               res->prov_data, res->prov_unresolved, res->prov_sat,
+               (unsigned long long)res->steps_deferred, (unsigned long long)res->steps_resumed,
+               (unsigned long long)res->steps_final, (unsigned long long)res->defer_dropped);
     {
         // played usage (sessions only): totals and the hot set
         DpMapSummary hs;
@@ -536,7 +539,8 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
                   "\"pad_cuts\":%u,\"halt_cuts\":%u,\"nonsense_echo\":%u,\"nonsense_data\":%u,"
                   "\"nonsense_stack\":%u,\"budget_paths\":%u,\"budget_steps\":%u,"
                   "\"queue_overflows\":%u,\"queue_growths\":%u,\"spool_writes\":%u,\"spool_reads\":%u,\"spool_refused\":%u,\"exec_outside\":%u,"
-                  "\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_refused_budget\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u,\"prov_jp_hl\":%u,\"prov_data\":%u,\"prov_partial\":%u,\"prov_sat\":%u},\n",
+                  "\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_refused_budget\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u,\"prov_jp_hl\":%u,\"prov_data\":%u,\"prov_partial\":%u,\"prov_sat\":%u,"
+                  "\"steps_deferred\":%llu,\"steps_resumed\":%llu,\"steps_final\":%llu,\"defer_dropped\":%llu},\n",
                (unsigned long long)res->steps_total, (unsigned long long)res->paths_run,
                res->forks_branch, res->forks_irq, res->forks_key, res->forks_p1, res->forks_capped,
                res->forks_table_full, res->forks_covered_pruned, (unsigned)res->section_count, res->evicted_exact,
@@ -546,7 +550,9 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
                res->spool_reads, res->spool_refused, res->exec_outside,
                res->seeds_natural, res->seeds_spec, res->seeds_refused_budget,
                res->seeds_skipped_data, (unsigned)res->bad_op_count, res->prov_jp_hl, res->prov_data,
-               res->prov_unresolved, res->prov_sat);
+               res->prov_unresolved, res->prov_sat,
+               (unsigned long long)res->steps_deferred, (unsigned long long)res->steps_resumed,
+               (unsigned long long)res->steps_final, (unsigned long long)res->defer_dropped);
     cov_sources_json(o, res);
     dp_buf_fmt(o, "\"closure\": {\"rounds\":%u,\"starts\":%u,\"unresolved_bank\":%u,"
                   "\"stopped_data\":%u,\"stopped_illegal\":%u,\"seeds\":%u,\"seeds_dropped\":%u,"

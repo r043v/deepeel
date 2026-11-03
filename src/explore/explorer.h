@@ -176,6 +176,7 @@ typedef struct DpResults {
     uint32_t *play_exec_hits;
     uint32_t *play_data_hits;
     uint8_t *static_flags;
+    uint64_t steps_deferred, steps_resumed, steps_final, defer_dropped; // §6 frontier
     uint32_t *src_flags;  // DP_SRC_* per ROM byte, OR-ed (every proving source)
     uint32_t *section_of; // rom key -> section id + 1
     // sections
@@ -312,6 +313,8 @@ typedef struct DpCopyTracker {
 } DpCopyTracker;
 
 // queue entry: a machine state image plus path bookkeeping
+#define DP_TIER_MAX 3        // last budget tier (4^3 x); beyond it: counted, kept off
+#define DP_DEFER_CAP 4096    // deferred snapshots held per explorer
 typedef struct DpPathState {
     uint8_t *img;        // gbl state image (dp_mach_state_bytes bytes)
     uint8_t forced;      // reached through a fork or speculative seed
@@ -319,6 +322,11 @@ typedef struct DpPathState {
     uint8_t from_reset;  // descends from the reset flow (necessity verdicts)
     uint32_t choice;     // the tree choice this path answers
 } DpPathState;
+
+typedef struct DpDeferred {
+    DpPathState p;
+    uint8_t tier;
+} DpDeferred;
 
 // disk spool of the overflow: appended at wr, fed back from rd.  The read
 // cursor is persisted beside the file (<spool>.rd, written at each flush) so a
@@ -387,6 +395,11 @@ struct DpExplorer {
     struct { uint16_t pc; uint32_t count; } back_ring[8];
     int back_idx;
     uint32_t steps_this_path;
+    // deferred frontier (docs/COUVERTURE.fr.md §6): paths cut by the per-path
+    // step budget keep a snapshot and resume later with a 4x larger budget
+    struct DpDeferred *defer;
+    uint32_t defer_len, defer_cap;
+    uint8_t cur_tier, defer_tier_next;
     uint64_t steps_own;  // fork-explorer steps (the wall); sessions share res->steps_total
     int last_io_slot; // io registry slot of the last register write (copy attribution)
     int stop; // set when a hard budget wall is hit

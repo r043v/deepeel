@@ -335,6 +335,8 @@ void dp_explorer_free(DpExplorer *ex) {
     if (!ex) return;
     for (uint32_t i = 0; i < ex->q_cap; i++) free(ex->queue[i].img);
     free(ex->queue);
+    for (uint32_t i = 0; i < ex->defer_len; i++) free(ex->defer[i].p.img);
+    free(ex->defer);
     for (uint32_t i = 0; i < ex->pq_cap; i++) free(ex->pqueue[i].img);
     free(ex->pqueue);
     free(ex->seed_base);
@@ -738,6 +740,29 @@ static void emit_pend_map(DpExplorer *ex) {
     }
 }
 
+// A path cut by its step budget is not lost: its machine state is kept and
+// resumed later with a budget four times larger, up to DP_TIER_MAX.  Past the
+// last tier, or when the holding area is full, the cut stays final and is
+// counted (steps_final / defer_dropped) — never silent.
+static void defer_steps(DpExplorer *ex, DpMach *m) {
+    DpResults *res = ex->res;
+    if (ex->cur_tier >= DP_TIER_MAX) { res->steps_final++; return; }
+    if (ex->defer_len >= DP_DEFER_CAP) { res->defer_dropped++; return; }
+    if (ex->defer_len >= ex->defer_cap) {
+        uint32_t nc = ex->defer_cap ? ex->defer_cap * 2 : 64;
+        ex->defer = xrealloc(ex->defer, sizeof *ex->defer * nc);
+        ex->defer_cap = nc;
+    }
+    uint8_t *img = xrealloc(NULL, ex->sb);
+    dp_mach_save(m, img);
+    uint16_t pc = image_pc(img);
+    uint16_t bank = (uint16_t)(pc < 0x4000 ? 0 : ((const gbl_cpu_t *)img)->rom_bank);
+    uint32_t choice = choice_new(ex, ex->cur_choice, ex->cur_kind, dp_rom_index(bank, pc), bank, pc);
+    ex->defer[ex->defer_len++] = (DpDeferred){
+        { img, ex->cur_forced, ex->cur_kind, ex->cur_from_reset, choice }, (uint8_t)(ex->cur_tier + 1) };
+    res->steps_deferred++;
+}
+
 static void hook_step(DpMach *m, uint16_t pc, uint8_t op, int entry) {
     (void)entry;
     DpExplorer *ex = m->owner;
@@ -758,8 +783,10 @@ static void hook_step(DpMach *m, uint16_t pc, uint8_t op, int entry) {
             ex->stop = 1;
             dp_mach_cut(m, DP_CUT_QUIT);
         }
-        if (++ex->steps_this_path > ex->cfg.max_steps_path) {
+        uint64_t cap = (uint64_t)ex->cfg.max_steps_path << (2 * ex->cur_tier);
+        if (++ex->steps_this_path > cap) {
             res->step_cuts++;
+            defer_steps(ex, m);
             dp_mach_cut(m, DP_CUT_STEPS);
         }
     }
@@ -1470,6 +1497,16 @@ int dp_explorer_exact_load(DpExplorer *ex, const char *path) {
     return n == cnt;
 }
 
+// next deferred continuation into *out (its tier goes to ex->defer_tier_next); 0 when none
+static int defer_pop(DpExplorer *ex, DpPathState *out) {
+    if (!ex->defer_len) return 0;
+    DpDeferred *d = &ex->defer[--ex->defer_len];
+    *out = d->p;
+    ex->defer_tier_next = d->tier;
+    ex->res->steps_resumed++;
+    return 1;
+}
+
 int dp_explore_step(DpExplorer *ex) {
     DpResults *res = ex->res;
     // any free worklist slot: pull the spooled overflow back in (also covers
@@ -1483,6 +1520,7 @@ int dp_explore_step(DpExplorer *ex) {
     }
     DpPathState tmp;
     memset(&tmp, 0, sizeof tmp); // the pool may stay empty: img must start NULL
+    ex->defer_tier_next = 0;
     DpPathState *p = &tmp;
     int from_pq = ex->pq_len != 0;
     if (ex->sh && !from_pq) { // the parallel drain: pops come from the pool
@@ -1495,10 +1533,11 @@ int dp_explore_step(DpExplorer *ex) {
             p->img = NULL;
         }
         pthread_mutex_unlock(&ex->sh->mtx);
-        if (!p->img) return 0;
+        if (!p->img && !defer_pop(ex, &tmp)) return 0;
     } else {
-        if (!ex->q_len && !ex->pq_len) return 0;
-        if (from_pq) { // priority seeds first, FIFO: they must not starve
+        if (!ex->q_len && !ex->pq_len && !defer_pop(ex, &tmp)) return 0;
+        if (tmp.img) { /* resumed from the deferred frontier */ }
+        else if (from_pq) { // priority seeds first, FIFO: they must not starve
             p = &ex->pqueue[ex->pq_head % ex->pq_cap];
             ex->pq_head = (ex->pq_head + 1) % ex->pq_cap;
             ex->pq_len--;
@@ -1514,10 +1553,12 @@ int dp_explore_step(DpExplorer *ex) {
     uint8_t *img = p->img;
     int forced = p->forced, kind = p->kind, from_reset = p->from_reset;
     uint32_t choice = p->choice;
+    uint8_t from_defer = p == &tmp ? ex->defer_tier_next : 0;
     ex->cur_forced = forced;
     ex->cur_kind = (uint8_t)kind;
     ex->cur_from_reset = (uint8_t)from_reset;
     ex->cur_choice = choice;
+    ex->cur_tier = from_defer;
     ex->path_dead = 0;
     ex->path_reset = 0;
     ex->steps_no_credit = 0;
@@ -1586,7 +1627,7 @@ int dp_explore_step(DpExplorer *ex) {
         else if (cut != DP_CUT_NONE) issue = DP_ISSUE_BUDGET;
         tree_close_g(ex, choice, issue);
     }
-    return (ex->q_len || ex->pq_len || ex->sh || dp_explorer_spool_pending(ex)) ? 1 : 0;
+    return (ex->q_len || ex->pq_len || ex->sh || ex->defer_len || dp_explorer_spool_pending(ex)) ? 1 : 0;
 }
 
 int dp_explore_slice(DpExplorer *ex, int ms) {

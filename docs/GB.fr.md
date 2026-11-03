@@ -746,3 +746,15 @@ Le rapport JSON expose `"sources"` (octets par source, `bytes_any`,
 `bytes_multi`) pour GB et pour Sega/MSX. Différé : la table creuse
 `(source, horodatage, id film/worker)` et la projection `types`.
 Ces nombres sont des observations de l'outil, pas des mesures de matériel.
+
+## Frontière différée, palier `steps` (0.31.0, J2 partiel)
+
+Un chemin coupé par `--max-steps` par chemin n'est plus perdu : son état
+machine est conservé (4096 reports au plus par explorateur) puis repris quand
+la file est vide, avec un budget ×4 (3 paliers). Au-delà, la coupe reste
+définitive mais comptée (`steps_final`) ; une frontière pleine est comptée
+(`defer_dropped`). Rapporté dans `counters` : `steps_deferred`,
+`steps_resumed`, `steps_final`, `defer_dropped`. La reprise repart avec des
+transitoires remis à zéro (glissade de padding, tampon d'arrière-branche) :
+elle peut donc aller un peu plus loin qu'un run sans budget, jamais moins
+(test `explorer`). Différé : frontière disque, autres paliers, Sega.
