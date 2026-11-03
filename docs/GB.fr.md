@@ -1724,3 +1724,16 @@ Désactivée par défaut. Le compteur peut compter plusieurs fois la même
 tentative de pad-fork rejouée sur un site de boucle (bornée par le budget de
 pas). Test `md_ctx_cap` (`fix_md_pad` : 5 chemins sans cap, 2 avec cap 1).
 Reste ◐ : pas de liveness par section.
+
+## 0.114.0
+
+PCE : second passage (G4, partielle). `--second-pass` : après le drainage, les
+successeurs statiques non exécutés d'instructions exécutées (fall-through,
+branchement, saut, appel, dans la même fenêtre) sont semés comme chemins forcés
+depuis la machine de mise sous tension, la page ROM étant mappée sous la
+fenêtre (`dp_pce_enter`) ; le drainage reprend jusqu'à épuisement des graines.
+Borné à 256 graines au total, refus (page non mappable) et saturation
+rapportés : `second pass: N seeds, N refused, N capped`. Test `pce_second_pass`
+(`fix_pce_slide` : 1 graine). Reste ◐ : pas de graines depuis les tables de
+saut (G2 PCE), pas de semis indirect, le mapping des autres fenêtres est celui
+de la mise sous tension.

@@ -1162,6 +1162,7 @@ static int cmd_pce(int argc, char **argv) {
         else if (!strcmp(a, "--no-infer")) opt.infer = 0;
         else if (!strcmp(a, "--jobs") && i + 1 < argc) pce_jobs = atoi(argv[++i]);
         else if (!strcmp(a, "--tree") && i + 1 < argc) opt.tree_path = argv[++i];
+        else if (!strcmp(a, "--second-pass")) opt.second_pass = 1;
         else if (!strcmp(a, "--play") && i + 1 < argc) opt.play_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--sessions") && i + 1 < argc) opt.play_sessions = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed") && i + 1 < argc) opt.play_seed = (uint32_t)strtoul(argv[++i], NULL, 0);

@@ -966,6 +966,49 @@ static void static_closure(PceRun *x) {
     free(work);
 }
 
+// G4 second pass: the unexecuted static successors of executed instructions (branch,
+// jump, call targets and fall-throughs in the same window) are seeded as forced paths
+// from the power-on machine with the page mapped under the window.  Bounded.
+enum { PCE_PASS2_MAX = 256 };
+static unsigned second_pass_seed(PceRun *x) {
+    DpPceResults *r = x->r;
+    size_t n = x->rom_size;
+    uint8_t *sd = calloc(n, 1);
+    if (!sd) { x->failed = 1; return 0; }
+    unsigned seeded = 0;
+    for (size_t cell = 0; cell < n && !x->failed; cell++) {
+        if (x->istart[cell] != 1) continue;
+        uint32_t page = (uint32_t)(cell >> 13);
+        if (page >= 128 || x->page_win[page] == 0xFF) continue;
+        uint16_t addr = (uint16_t)(x->page_win[page] * 0x2000 + (cell & 0x1FFF));
+        size_t avail = 0x2000 - (cell & 0x1FFF);
+        DpHucIns in;
+        if (!dp_huc_decode(x->rom + cell, avail < 7 ? avail : 7, addr, &in) || in.flow == DP_HUC_ILLEGAL || in.mapchange) continue;
+        uint16_t succ[2];
+        int ns = 0;
+        switch (in.flow) {
+        case DP_HUC_NEXT: succ[ns++] = (uint16_t)(addr + in.length); break;
+        case DP_HUC_BRANCH: succ[ns++] = (uint16_t)(addr + in.length); succ[ns++] = in.target; break;
+        case DP_HUC_JUMP: succ[ns++] = in.target; break;
+        case DP_HUC_CALL: succ[ns++] = (uint16_t)(addr + in.length); succ[ns++] = in.target; break;
+        default: break;
+        }
+        for (int k = 0; k < ns; k++) {
+            if ((succ[k] >> 13) != x->page_win[page]) continue;
+            uint32_t t = (page << 13) | (succ[k] & 0x1FFF);
+            if (t >= n || x->istart[t] || sd[t] || (r->flags[t] & (DP_PCE_DATA | DP_PCE_COPIED))) continue;
+            sd[t] = 1;
+            if (r->pass2_seeds + r->pass2_refused >= PCE_PASS2_MAX) { r->pass2_capped++; continue; }
+            dp_pce_reset();
+            if (!dp_pce_enter(page, succ[k])) { r->pass2_refused++; continue; }
+            if (push_live(x, 1)) { seeded++; r->pass2_seeds++; }
+        }
+    }
+    free(sd);
+    dp_pce_reset();
+    return seeded;
+}
+
 // jump tables: JMP [abs,X] in an observed window — the words that point into
 // observed code of the same window are table entries
 static void tables(PceRun *x) {
@@ -1239,6 +1282,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     novelty_search(x);
 
     // depth-first drain of the fork queue
+drain:
     for (;;) {
         if (x->failed) break;
         if (!x->queue_len && x->park_len) { x->queue[x->queue_len++] = x->park[--x->park_len]; r->parked_resumed++; }
@@ -1260,6 +1304,8 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
         PceQueued q = x->queue[--x->queue_len];
         run_path(x, q);
     }
+
+    if (x->opt.second_pass && !x->failed && x->total_steps < x->opt.max_total && second_pass_seed(x)) goto drain;
 
     if (x->opt.pre_finalize) x->opt.pre_finalize(r, x->opt.pre_user);
     if (!x->opt.no_finalize) {
@@ -1395,6 +1441,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  provenance: %llu jump-table words traced from ROM reads\n", (unsigned long long)r->prov_sites);
     if (r->tree_nodes) fprintf(out, "  choice tree: %llu nodes\n", (unsigned long long)r->tree_nodes);
+    if (r->pass2_seeds || r->pass2_refused || r->pass2_capped) fprintf(out, "  second pass: %llu seeds, %llu refused (page unmappable), %llu capped\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     fprintf(out, "  copy siblings: %llu tables, %llu entries, %llu bytes typed, %llu table caps\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_entries, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_caps);
     fprintf(out, "  entries: %llu seeded, %llu refused (outside the ROM mapping)\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);

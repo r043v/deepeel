@@ -119,6 +119,17 @@ DpPceCpu dp_pce_cpu(void) {
 void dp_pce_set_flags(uint8_t p) { machine.cpu.p = p; }
 void dp_pce_set_pc(uint16_t pc) { machine.cpu.pc = pc; }
 
+// map the physical ROM page into the window of pc and start there; 0 when no MPR value maps it
+int dp_pce_enter(uint32_t rom_page, uint16_t pc) {
+    for (unsigned v = 0; v < 0x80; v++)
+        if (page_valid[v] && page_map[v] == rom_page) {
+            machine.cpu.mpr[pc >> 13] = (uint8_t)v;
+            machine.cpu.pc = pc;
+            return 1;
+        }
+    return 0;
+}
+
 int64_t dp_pce_rom_index_mpr(const uint8_t *mpr, uint16_t addr) {
     uint8_t v = mpr[addr >> 13];
     if (!page_valid[v]) return -1;
