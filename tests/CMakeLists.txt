@@ -287,3 +287,5 @@ add_test(NAME nes_slide COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAK
 set_tests_properties(nes_slide PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_ioreg COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_pad.nes --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_io.txt >/dev/null 2>&1; grep -Eq 'reg .4016 reads [1-9][0-9]* writes [1-9][0-9]*' ${CMAKE_CURRENT_BINARY_DIR}/nes_io.txt")
 set_tests_properties(nes_ioreg PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME nes_seed_vectors COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_uxrom.nes --seed-vectors --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_sv.txt >/dev/null 2>&1; grep -Eq 'vector seeds: 2' ${CMAKE_CURRENT_BINARY_DIR}/nes_sv.txt")
+set_tests_properties(nes_seed_vectors PROPERTIES FIXTURES_REQUIRED fixtures)

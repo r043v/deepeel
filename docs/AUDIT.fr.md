@@ -58,7 +58,7 @@ Cellules ouvertes (◐ ou ✗) : 94.
 | S6 | Rejeu de décodeurs sur tables de flux | PCE | ✗ |
 | S7 | Inférence de voisins à la carte | NES | ◐ trous ≤ 1024 |
 | S7 | Inférence de voisins à la carte | MD | ✗ |
-| G1 | Graines reset/RST/IRQ | NES | ◐ reset |
+| G1 | Graines reset/RST/IRQ | NES | ◐ reset + NMI/IRQ (`--seed-vectors`) |
 | G1 | Graines reset/RST/IRQ | PCE | ◐ reset |
 | G1 | Graines reset/RST/IRQ | MD | ◐ reset |
 | G2 | Scan de dispatch par vues de banques | NES | ✗ |

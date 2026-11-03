@@ -792,6 +792,21 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                 DpNesPathState er = { es, 0, 0, 0, 0, 0 };
                 if (queue_push(&x, &er)) r->entries_seeded++; else { free(es); r->seeds_refused_queue++; }
             }
+            // --seed-vectors: the NMI ($FFFA) and IRQ/BRK ($FFFE) targets as roots
+            for (int v = 0; v < 2 && x.opt.seed_vectors && !x.opt.lot_drain; v++) {
+                const uint8_t *prg = dp_nesmach_prg_rom(x.m);
+                if (!prg || r->prg_size < 16384) break;
+                unsigned va = prg[r->prg_size - (v ? 2 : 6)] | (prg[r->prg_size - (v ? 2 : 6) + 1] << 8);
+                if (va < 0x8000) { r->entries_refused++; continue; }
+                unsigned vb = 0; // vectors live in the fixed last bank; the switchable window starts at bank 0
+                uint8_t *es = malloc(dp_nesmach_state_size());
+                if (!es) { x.failed = 1; break; }
+                dp_nesmach_reset(x.m);
+                if (!dp_nesmach_enter(x.m, vb, va)) { free(es); r->entries_refused++; continue; }
+                dp_nesmach_save(x.m, es);
+                DpNesPathState er = { es, 0, 0, 0, 0, 0 };
+                if (queue_push(&x, &er)) r->vectors_seeded++; else { free(es); r->seeds_refused_queue++; }
+            }
             for (;;) {
                 if (x.failed) break;
                 if (x.queue_len == 0 && x.park_len > 0) { x.queue[x.queue_len++] = x.park[--x.park_len]; r->parked_resumed++; }
@@ -1092,6 +1107,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  cpu loop copy bytes %llu\n", (unsigned long long)r->cpu_copy_bytes);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  pad probes: %llu forks at %llu sites, refused %llu\n", (unsigned long long)r->pad_probes, (unsigned long long)r->pad_probe_sites, (unsigned long long)r->pad_probe_refused);
+    fprintf(out, "  vector seeds: %llu\n", (unsigned long long)r->vectors_seeded);
     fprintf(out, "  entries: seeded %llu refused %llu\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  seeds: reset %llu irq %llu bank %llu play %llu refused %llu\n",
         (unsigned long long)r->seeds_reset, (unsigned long long)r->seeds_irq,

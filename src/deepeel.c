@@ -1045,6 +1045,7 @@ static int cmd_nes(int argc, char **argv) {
         else if (!strcmp(a, "--fork-cap") && i + 1 < argc) opt.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--no-irq-fork")) opt.seed_irq = 0;
         else if (!strcmp(a, "--seed-banks")) opt.seed_banks = 1;
+        else if (!strcmp(a, "--seed-vectors")) opt.seed_vectors = 1;
         else if (!strcmp(a, "--no-p1-fork")) opt.no_pad_probe = 1;
         else if (!strcmp(a, "--entry") && i + 1 < argc && opt.entry_count < 32) {
             uint8_t eb; uint16_t ea;

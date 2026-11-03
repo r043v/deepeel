@@ -1433,3 +1433,12 @@ octets (majuscules acceptées). Verdict : même ROM, ROM différente (le film es
 rejoué quand même, avec un avertissement), ou SHA-1 non enregistré (fm2). Le
 rapport imprime `tas identity: same ROM N, different ROM N, not recorded N`.
 Test unitaire `test_tas_identity` dans `nes`.
+
+## 0.90.0
+
+NES : graines de vecteurs (G1, partielle). `--seed-vectors` ajoute comme
+racines les cibles des vecteurs NMI (`$FFFA`) et IRQ/BRK (`$FFFE`), lus dans
+la dernière banque (fixe sur UxROM). Une cible sous `$8000` est refusée et
+comptée. Rapport : `vector seeds: N`. Le vecteur de reset reste la racine par
+défaut ; les vecteurs dépendant d'une bascule de banque ne sont pas résolus.
+Test `nes_seed_vectors`.
