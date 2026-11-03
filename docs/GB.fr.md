@@ -1612,3 +1612,14 @@ d'IRQ ; RAM et horloges exclues) a déjà été admis N fois est clos, compté
 par section, donc un chemin dépendant de la RAM peut être coupé à tort.
 Fixture `fix_pce_ctx.pce` (WRAM en MPR1, boucle ne variant que par la RAM :
 1 état clos avec `--ctx-cap 3`, aucun sans), test `pce_ctx_cap`.
+
+## 0.104.0
+
+MD : `--entry ADDR` (G3, partielle), jusqu'à 16 fois. Chaque adresse (ROM,
+paire) est empilée comme un état forcé depuis la machine de mise sous
+tension ; une adresse impaire ou hors ROM est refusée et comptée. Rapport :
+`entries: N seeded, N refused`. Test `md_entry` sur `fix_md_loop.md` : sans
+entrée 0 octet exécuté par fourche, avec `--entry 0x2f0` des milliers (le
+code est la plage de zéros exécutée comme `ori`). Reste ◐ : pas de
+`--seed-banks` (mapper SRAM/bankswitch SSF2), pas d'entrée dans une vue
+de banque.

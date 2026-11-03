@@ -518,6 +518,7 @@ void dp_md_options_default(DpMdOptions *o) {
     o->movie = NULL;
     o->lot_path = NULL;
     o->lot_drain = 0;
+    o->entry_count = 0;
 }
 
 static void run_path(X *x, Item *it, uint64_t budget, int *cut) {
@@ -703,6 +704,14 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     r->decoders = x.ndec;
     if (!drain && r->steps < o->max_total) replay_streams(&x, (o->max_total - r->steps) / 2);
     for (unsigned d = 0; d < x.ndec; d++) free(x.dec[d].snap);
+    // explicit entries (G3): each starts a forced path from the power-on machine
+    if (!drain)
+        for (unsigned e = 0; e < o->entry_count; e++) {
+            uint32_t a = o->entries[e];
+            if ((a & 1) || a >= r->rom_size) { r->entries_refused++; continue; }
+            dp_mdmach_reset(x.m);
+            if (push(&x, a, 0, 0)) r->entries_seeded++; else r->entries_refused++;
+        }
     for (;;) {
         spill_flush(&x);
         if (r->steps >= o->max_total) break;
@@ -794,6 +803,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     if (r->lot_written || r->lot_read || r->lot_pending)
         fprintf(out, "  lot: %llu written, %llu read back, %llu left on disk\n", (unsigned long long)r->lot_written,
                 (unsigned long long)r->lot_read, (unsigned long long)r->lot_pending);
+    fprintf(out, "  entries: %llu seeded, %llu refused (odd or outside the ROM)\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  frontier: parked %llu resumed %llu lost %llu\n", (unsigned long long)r->parked,
             (unsigned long long)r->parked_resumed, (unsigned long long)r->parked_lost);
     fprintf(out, "  total budget: %llu  pending forks unrun: %llu\n", (unsigned long long)r->sat_total,

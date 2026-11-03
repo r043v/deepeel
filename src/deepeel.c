@@ -48,7 +48,7 @@ static void usage(void) {
             "  deepeel z80 explore <sg|sms|gg|msx> ROM [--input-total N] [--input-forks N] [--text FILE] [--map FILE] [--evidence FILE]\n"
             "  deepeel z80 dis ROM hex-offset [instruction-count]\n"
             "  deepeel lr explore CORE ROM [--text FILE] [--map FILE] [--path-steps N] [--max-total N] [--queue N]\n"
-            "  deepeel md explore ROM [--tas GMV] [--max-total N] [--path-steps N] [--queue N] [--queue-max N] [--fork-cap N] [--visit-cap N] [--watch-write ADDR] [--exclude-read-pc ADDR] [--text FILE] [--map FILE] [--evidence FILE]\n"
+            "  deepeel md explore ROM [--tas GMV] [--max-total N] [--path-steps N] [--queue N] [--queue-max N] [--fork-cap N] [--visit-cap N] [--entry ADDR]... [--watch-write ADDR] [--exclude-read-pc ADDR] [--text FILE] [--map FILE] [--evidence FILE]\n"
             "  deepeel md dis ROM hex-offset [instruction-count]\n"
             "  deepeel regs <gb|sg|sms|gg|msx|md>\n"
             "    --max-steps N        per-path step budget (default 100000)\n"
@@ -1366,6 +1366,10 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--queue")) o.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--lot")) o.lot_path = argv[++i];
             else if (!strcmp(a, "--lot-drain")) o.lot_drain = 1;
+            else if (!strcmp(a, "--entry")) {
+                if (o.entry_count >= 16) { fprintf(stderr, "deepeel: at most 16 --entry\n"); rc = 2; break; }
+                o.entries[o.entry_count++] = (uint32_t)strtoul(argv[++i], NULL, 0);
+            }
             else if (!strcmp(a, "--queue-max")) o.queue_max = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--fork-cap")) o.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--visit-cap")) o.visit_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
