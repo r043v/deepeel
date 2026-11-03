@@ -65,7 +65,7 @@ Cellules ouvertes (◐ ou ✗) : 97.
 | G2 | Scan de dispatch par vues de banques | NES | ✗ |
 | G2 | Scan de dispatch par vues de banques | PCE | ✗ |
 | G2 | Scan de dispatch par vues de banques | MD | ✗ |
-| G3 | `--seed-banks`, `--entry` | NES | ◐ options mortes |
+| G3 | `--seed-banks`, `--entry` | NES | ◐ `--entry` ok, `--seed-banks` absent |
 | G3 | `--seed-banks`, `--entry` | PCE | ✗ |
 | G3 | `--seed-banks`, `--entry` | MD | ✗ |
 | G4 | Semis indirect + budgets en cascade | NES | ✗ |

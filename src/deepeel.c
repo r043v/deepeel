@@ -1021,7 +1021,7 @@ static int cmd_nes(int argc, char **argv) {
     if (argc < 4 || strcmp(argv[2], "explore")) {
         fprintf(stderr, "deepeel nes explore ROM [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N] [--mapper auto|nrom|uxrom] "
                         "[--max-total N] [--max-steps N] [--max-paths N] [--queue N] "
-                        "[--loop-cap N] [--fork-cap N] [--no-irq-fork] [--text FILE] [--map FILE]\n");
+                        "[--loop-cap N] [--fork-cap N] [--no-irq-fork] [--entry bank:addr]... [--text FILE] [--map FILE]\n");
         return 2;
     }
     const char *path = NULL, *text = NULL, *map = NULL, *mapper_name = "auto";
@@ -1044,6 +1044,11 @@ static int cmd_nes(int argc, char **argv) {
         else if (!strcmp(a, "--loop-cap") && i + 1 < argc) opt.loop_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--fork-cap") && i + 1 < argc) opt.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--no-irq-fork")) opt.seed_irq = 0;
+        else if (!strcmp(a, "--entry") && i + 1 < argc && opt.entry_count < 32) {
+            uint8_t eb; uint16_t ea;
+            if (!parse_entry(argv[++i], &eb, &ea)) { fprintf(stderr, "deepeel: bad --entry '%s' (bank:addr)\n", argv[i]); return 2; }
+            opt.entry_bank[opt.entry_count] = eb; opt.entry_addr[opt.entry_count++] = ea;
+        }
         else if (!strcmp(a, "--play") && i + 1 < argc) opt.play_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--sessions") && i + 1 < argc) opt.play_sessions = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed") && i + 1 < argc) opt.play_seed = (uint32_t)strtoul(argv[++i], NULL, 0);

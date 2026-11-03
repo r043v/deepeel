@@ -683,6 +683,18 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
             r->seeds_reset = 1;
             if (x.opt.lot_drain && dp_lf_pending(x.lot)) { free(snap); r->seeds_reset = 0; } // drain: saved states only
             else queue_push(&x, &root);
+            // explicit entries: each is a root state with the bank and PC set
+            for (int i = 0; i < x.opt.entry_count && !x.opt.lot_drain; i++) {
+                uint8_t *es = malloc(dp_nesmach_state_size());
+                if (!es) { x.failed = 1; break; }
+                dp_nesmach_reset(x.m);
+                if (!dp_nesmach_enter(x.m, x.opt.entry_bank[i], x.opt.entry_addr[i])) {
+                    free(es); r->entries_refused++; continue;
+                }
+                dp_nesmach_save(x.m, es);
+                DpNesPathState er = { es, 0, 0, 0, 0, 0 };
+                if (queue_push(&x, &er)) r->entries_seeded++; else { free(es); r->seeds_refused_queue++; }
+            }
             for (;;) {
                 if (x.failed) break;
                 if (x.queue_len == 0 && x.park_len > 0) { x.queue[x.queue_len++] = x.park[--x.park_len]; r->parked_resumed++; }
@@ -801,6 +813,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->parked_resumed, (unsigned long long)r->parked_lost);
     fprintf(out, "  pending paths dropped at the wall %llu\n",
         (unsigned long long)r->pending_dropped);
+    fprintf(out, "  entries: seeded %llu refused %llu\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  seeds: reset %llu irq %llu bank %llu play %llu refused %llu\n",
         (unsigned long long)r->seeds_reset, (unsigned long long)r->seeds_irq,
         (unsigned long long)r->seeds_bank, (unsigned long long)r->seeds_play,

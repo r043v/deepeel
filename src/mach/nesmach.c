@@ -389,6 +389,19 @@ int dp_nesmach_mapper_write(const DpNesMach *d, unsigned addr, unsigned value,
 }
 unsigned dp_nesmach_mapper(const DpNesMach *d) { return d->mapper; }
 
+/* Puts the CPU at `addr` with PRG bank `bank` in the switchable window
+ * (UxROM; NROM accepts bank 0 only).  Bridged boards (3, 7) are refused:
+ * their windows belong to the bridge.  Returns 1 on success. */
+int dp_nesmach_enter(DpNesMach *d, unsigned bank, unsigned addr) {
+    if (d->mapper == 2) {
+        if (bank >= machine.cpu.bank_count) return 0;
+        machine.cpu.bank = (uint8_t)bank;
+        machine.cpu.bank_base = (uint32_t)bank * 16384u;
+    } else if (d->mapper != 0 || bank != 0) return 0;
+    machine.cpu.pc = (uint16_t)addr;
+    return 1;
+}
+
 size_t dp_nesmach_chr_size(const DpNesMach *d) { return d->chr_rom ? (size_t)d->chr1k * 1024u : 0; }
 
 /* canonical CHR cell behind a PPU pattern address under the live bank */

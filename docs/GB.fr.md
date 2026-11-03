@@ -1313,3 +1313,13 @@ produit `docs/AUDIT.fr.md` (totaux par plateforme et liste des 97 cellules
 ouvertes ◐/✗ sur 39 techniques × 6 plateformes). Les marques sont celles du
 document ; l'audit n'en remesure pas l'outil. Reste : campagne sur ROMs réelles
 hors dépôt, et fermeture des cellules ouvertes listées.
+
+## 0.79.0
+
+NES : `--entry bank:addr` (répétable, 32 max) n'est plus une option morte.
+Chaque entrée est une graine racine (reset, banque commutable et PC posés par
+`dp_nesmach_enter`) ; NROM n'accepte que la banque 0, UxROM toute banque
+valide, les cartes ponteuses (CNROM, AxROM) refusent. Le rapport indique
+`entries: seeded N refused M` : un refus n'est jamais silencieux. Test
+`nes_entry`. Cellule G3 NES de la matrice §2.1 : reste ◐ (`--seed-banks`
+absent sur NES, seul `--entry` est acquis).
