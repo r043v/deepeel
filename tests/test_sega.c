@@ -45,6 +45,31 @@ static void test_machine(const DpSegaBackend *b,int sms,int sg) {
     CHECK(b->cpu()->irq); CHECK(b->in(0xbf)&0x80); CHECK(!b->cpu()->irq);
     free(snapshot); free(cart); free(rom);
 }
+static void deferral(void) {
+    uint8_t *rom=calloc(1,0x10000); CHECK(rom); if(!rom) exit(1);
+    const uint8_t start[]={0xc3,0x00,0x01}; memcpy(rom,start,sizeof(start));
+    memset(rom+0x100,0x00,100);              // 100 NOPs, then a marker and HALT
+    const uint8_t tail[]={0x3e,0x07,0x76}; memcpy(rom+0x100+100,tail,sizeof(tail));
+    DpSegaOptions o=dp_sega_options(); o.seed_cap=0; o.max_total=100000; o.max_steps=5; o.seed_vectors=0; o.input_masks=0;
+    DpSegaResults r;
+    // deferral off: the step budget is a final wall
+    o.defer_tiers=0;
+    CHECK(dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r));
+    CHECK(r.step_cuts>0 && !(r.flags[0x164]&DP_SEGA_NATURAL) && r.steps_deferred==0);
+    dp_sega_results_free(&r);
+    // deferral on: the cut resumes with a 4x cap and reaches the marker
+    o.defer_tiers=3;
+    CHECK(dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r));
+    CHECK(r.steps_deferred>=3 && r.defer_resumed==r.steps_deferred && r.defer_pending==0);
+    CHECK(r.flags[0x164]&DP_SEGA_NATURAL);
+    dp_sega_results_free(&r);
+    // too few tiers: the final cut is counted, never silent
+    o.defer_tiers=1;
+    CHECK(dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r));
+    CHECK(r.steps_final>0 && !(r.flags[0x164]&DP_SEGA_NATURAL));
+    dp_sega_results_free(&r);
+    free(rom);
+}
 static void exploration(void) {
     uint8_t *rom=calloc(1,0x10000); CHECK(rom); if(!rom) exit(1);
     // The natural side copies ROM to RAM; the forced side copies ROM to VDP.
@@ -117,6 +142,6 @@ int main(void) {
     test_machine(dp_sega_backend_sg(),0,1);
     test_machine(dp_sega_backend_gg(),0,0);
     test_machine(dp_sega_backend_gg(),1,0);
-    exploration();
+    exploration(); deferral();
     TEST_DONE("sega");
 }

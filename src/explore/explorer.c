@@ -1595,7 +1595,8 @@ int dp_explore_step(DpExplorer *ex) {
     // "same context" eviction: entering a section start with a context the
     // section cannot distinguish from one already explored.  A priority seed
     // bypasses it: it is a deliberate probe of a specific entry, few by cap.
-    if (!ex->cfg.no_context_evict && !from_pq) {
+    // (a deferred continuation is the same path, mid-section: never evicted)
+    if (!ex->cfg.no_context_evict && !from_pq && !from_defer) {
         const DpGblApi *api = ex->mach->api;
         uint32_t key = key_at(ex, api->gbr->pc);
         uint32_t sid1 = res->section_of[key];

@@ -18,7 +18,7 @@ typedef struct {
     DpZ80Origin cram_latch;
     DpZ80Origin ram[];
 } Origins;
-typedef struct { void *state; uint8_t *cart; Origins *origins; int forced,skip_irq; uint32_t choice; } Path;
+typedef struct { void *state; uint8_t *cart; Origins *origins; int forced,skip_irq; uint32_t choice; uint8_t tier; } Path;
 // A seed spec: pc in a mapper view. exact=1 applies seed_window(pc,bank) and
 // refuses any view where rom_index(pc) is not bank*0x4000+(pc&0x3FFF); exact=0
 // keeps the boot view untouched.
@@ -35,6 +35,7 @@ static uint64_t fnv1a_u32(uint64_t h,uint32_t v) { return fnv1a(h,&v,sizeof v); 
 enum { INPUT_PAD1, INPUT_PAD2, INPUT_START, INPUT_HALT_PAUSE, INPUT_PAD2_UD, INPUT_GROUP_COUNT };
 typedef struct { uint32_t key; uint8_t accepted,seen[16]; uint64_t blocked_epoch; } InputSite;
 typedef struct {
+    Path *defer; uint32_t defer_n,defer_cap; uint8_t cur_tier; // deferred frontier (COUVERTURE §6)
     const DpSegaBackend *b;
     const DpSegaSystem *system;
     const DpSegaOptions *opt;
@@ -417,6 +418,29 @@ static int queue_room(Run *x,int input) {
         if(grown) { x->queue=grown; x->queue_capacity=want; x->r->queue_growths++; }
     }
     return x->queued<x->queue_capacity;
+}
+// A path cut by its step budget or its backward-edge cap keeps its machine
+// state and resumes later with a cap four times larger, up to DP_SEGA_TIER_MAX.
+// Past the last tier or a full holding area the cut stays final and counted.
+#define DP_SEGA_TIER_MAX 3
+#define DP_SEGA_DEFER_CAP 4096
+static void defer_cut(Run *x,int loop) {
+    DpSegaResults *r=x->r;
+    if(!x->opt->defer_tiers) return; // deferral off: the cut stays final (step_cuts / loop_cuts)
+    if(x->cur_tier>=x->opt->defer_tiers) { if(loop) r->loop_final++; else r->steps_final++; return; }
+    if(x->defer_n>=DP_SEGA_DEFER_CAP) { r->defer_dropped++; return; }
+    if(x->defer_n>=x->defer_cap) {
+        uint32_t nc=x->defer_cap?x->defer_cap*2:64;
+        Path *g=realloc(x->defer,(size_t)nc*sizeof(*g));
+        if(!g) { r->defer_dropped++; return; }
+        x->defer=g; x->defer_cap=nc;
+    }
+    Path p={malloc(x->b->state_size),malloc(0x8000),malloc(x->origin_size),x->forced,0,x->cur_choice,(uint8_t)(x->cur_tier+1)};
+    if(!p.state||!p.cart||!p.origins) { free_path(p); r->defer_dropped++; return; }
+    x->b->save(p.state); memcpy(p.cart,x->cart,0x8000);
+    memcpy(p.origins,x->origins,x->origin_size);
+    x->defer[x->defer_n++]=p;
+    if(loop) r->loop_deferred++; else r->steps_deferred++;
 }
 static int push_to(Run *x,int forced,int skip_irq,int input,unsigned kind) {
     unsigned phase=input?1:x->phase;
@@ -1119,7 +1143,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
         uint64_t start_steps=r->steps,start_paths=r->paths,budget=r->phase_limits[phase];
         if(phase==2 && budget) generate_indirect_specs(&x);
         if(phase && budget) { memset(x.forks,0,sites); memset(x.sides,0,sites); memset(x.irq_forks,0,sites); }
-        while((x.queued || (phase && x.input_queued) ||
+        while((x.queued || x.defer_n || (phase && x.input_queued) ||
                (phase!=1 && x.seed_next<x.seed_count) ||
                (!phase && x.spool_rd<x.spool_wr)) && r->steps-start_steps<budget) {
             // Seeds materialize below the pending frontier while the base
@@ -1153,18 +1177,22 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
                 x.queue[0]=p; x.queued++;
             }
                         int from_input=phase && x.input_queued && (!x.queued || ((r->paths-start_paths)&1)==0);
+            // the live frontier first; deferred cuts resume once it is empty
+            if(!from_input && !x.queued && x.defer_n && queue_room(&x,0)) { x.queue[x.queued++]=x.defer[--x.defer_n]; r->defer_resumed++; }
+            if(!from_input && !x.queued) break;
             Path p=from_input?x.input_queue[--x.input_queued]:x.queue[--x.queued];
             if(from_input) x.input_epoch++;
             x.b->load(p.state); memcpy(x.cart,p.cart,0x8000);
             dp_sega_closure_invalidate(x.closure);
             memcpy(x.origins,p.origins,x.origin_size);
-            free_path(p); hook(&x); x.forced=p.forced;
+            free_path(p); hook(&x); x.forced=p.forced; x.cur_tier=p.tier;
             dp_sega_visits_reset(&visits); r->paths++;
             x.cur_choice=p.choice;
             x.boot_path=r->paths==1 && !p.forced; // natural work on the reset path
             // same-context eviction: the entry section of an already admitted
             // incoming context is closed without running (counted, GB parity)
-            if(!context_admitted(&x,site(&x,x.b->cpu()->pc))) {
+            // a deferred continuation is the same path, mid-section: never evicted by context
+            if(!x.cur_tier && !context_admitted(&x,site(&x,x.b->cpu()->pc))) {
                 x.boot_path=0;
                 tree_close(&x,p.choice,DP_SEGA_ISSUE_EVICTED);
                 continue;
@@ -1172,15 +1200,15 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
             x.cur_sec=NULL;
             uint32_t n=0,quiet=0;
             int closed=0;
-            for(;n<o->max_steps && r->steps-start_steps<budget;n++) {
+            for(;n<((uint64_t)o->max_steps<<(2*x.cur_tier)) && r->steps-start_steps<budget;n++) {
                 uint64_t before_discoveries=x.discoveries;
                 z80_t *c=x.b->cpu(); x.pc=c->pc; x.fetching=0;
                 dp_z80_provenance_clear_plan(&x.origins->cpu);
                 if(c->fault) { r->faults++; break; }
                 size_t at=site(&x,c->pc);
-                int admitted=dp_sega_visits_enter(&visits,(uint32_t)at,c->pc,o->loop_cap);
+                int admitted=dp_sega_visits_enter(&visits,(uint32_t)at,c->pc,o->loop_cap<<(2*x.cur_tier));
                 if(admitted<0) { ok=0; goto cleanup; }
-                if(!admitted) { r->loop_cuts++; break; }
+                if(!admitted) { r->loop_cuts++; defer_cut(&x,1); break; }
                 if(c->halted && (sg || !strcmp(s->id,"sms")) && probe_inputs(&x,INPUT_HALT_PAUSE,0,at,p.skip_irq)<0) { ok=0; goto cleanup; }
                 int interrupt=c->nmi || (c->irq&&c->iff1&&!c->ei_delay);
                 DpSegaInterrupt irq_event={.path=r->paths,.step=r->steps,.pc=c->pc,.sp=c->sp,
@@ -1265,11 +1293,11 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
                 // can contain long delay loops. Forced probes yield on stagnation.
                 if(x.forced && o->stagnation && quiet>=o->stagnation) { r->stagnation_cuts++; closed=1; break; }
             }
-            if(n==o->max_steps) r->step_cuts++;
+            if(n==((uint64_t)o->max_steps<<(2*x.cur_tier))) { r->step_cuts++; defer_cut(&x,0); }
             // The first successor after a concrete budget cut still has an
             // observed mapping, including a mapper write or interrupt push.
             dp_sega_closure_observe(x.closure);
-            if(r->steps-start_steps==budget && n<o->max_steps && !closed) r->phase_pending[phase]++;
+            if(r->steps-start_steps==budget && n<((uint64_t)o->max_steps<<(2*x.cur_tier)) && !closed) r->phase_pending[phase]++;
             flush_copy(&x);
             tree_close(&x,x.cur_choice,DP_SEGA_ISSUE_DONE);
             x.cur_choice=0;
@@ -1324,7 +1352,9 @@ cleanup:
     dp_sega_closure_free(x.closure);
     if(x.queue) for(uint32_t i=0;i<x.queued;i++) free_path(x.queue[i]);
     if(x.input_queue) for(uint32_t i=0;i<x.input_queued;i++) free_path(x.input_queue[i]);
-    free(x.queue); free(x.forks); free(x.sides); free(x.irq_forks); free(x.cart); free(image);
+    r->defer_pending+=x.defer_n;
+    for(uint32_t i=0;i<x.defer_n;i++) free_path(x.defer[i]);
+    free(x.defer); free(x.queue); free(x.forks); free(x.sides); free(x.irq_forks); free(x.cart); free(image);
     r->loop_context_peak=visits.peak; r->loop_context_capacity=visits.capacity; r->loop_context_growths=visits.growths;
     dp_sega_visits_free(&visits);
     free(x.origins);
@@ -1419,6 +1449,8 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
 #define DP_MR_SUM(f) d->f+=s->f
     DP_MR_SUM(steps); DP_MR_SUM(paths); DP_MR_SUM(forks); DP_MR_SUM(irq_forks);
     DP_MR_SUM(exec_outside); DP_MR_SUM(data_reads); DP_MR_SUM(vdp_copies); DP_MR_SUM(ram_copies);
+    DP_MR_SUM(steps_deferred); DP_MR_SUM(loop_deferred); DP_MR_SUM(defer_resumed); DP_MR_SUM(steps_final);
+    DP_MR_SUM(loop_final); DP_MR_SUM(defer_dropped); DP_MR_SUM(defer_pending);
     DP_MR_SUM(step_cuts); DP_MR_SUM(loop_cuts); DP_MR_SUM(fork_cuts); DP_MR_SUM(queue_cuts);
     DP_MR_SUM(global_cuts); DP_MR_SUM(path_cuts); DP_MR_SUM(faults); DP_MR_SUM(decode_cuts);
     DP_MR_SUM(stagnation_cuts);
@@ -1571,7 +1603,7 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
         ",\"play_steps\":%"PRIu64",\"play_epochs\":%"PRIu64
         ",\"tas_frames\":%"PRIu64",\"tas_frames_refused\":%"PRIu64
         ",\"jobs_capped\":%"PRIu64",\"seeds_offlane\":%"PRIu64",\"merge_conflicts\":%"PRIu64
-        ",\"bank_changes\":%"PRIu64",\"data_reads\":%"PRIu64"}",
+        ",\"bank_changes\":%"PRIu64",\"data_reads\":%"PRIu64",\"steps_deferred\":%"PRIu64",\"loop_deferred\":%"PRIu64",\"defer_resumed\":%"PRIu64",\"steps_final\":%"PRIu64",\"loop_final\":%"PRIu64",\"defer_dropped\":%"PRIu64",\"defer_pending\":%"PRIu64"}",
         r->steps,r->paths,r->forks,r->irq_forks,r->exec_outside,r->loop_cuts,r->fork_cuts,
         r->queue_cuts,r->global_cuts,r->path_cuts,r->faults,r->decode_cuts,r->queue_growths,
         r->spool_writes,r->spool_reads,r->spool_refused,r->seeds_pointer,r->seeds_bank,
@@ -1579,7 +1611,8 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
         r->seeds_pending,r->evicted_ctx,r->indirect_sites,r->indirect_targets,
         r->indirect_seeds,r->indirect_pending,r->play_steps,r->play_epochs,
         r->tas_frames,r->tas_frames_refused,r->jobs_capped,r->seeds_offlane,
-        r->merge_conflicts,r->bank_changes,r->data_reads);
+        r->merge_conflicts,r->bank_changes,r->data_reads,
+        r->steps_deferred,r->loop_deferred,r->defer_resumed,r->steps_final,r->loop_final,r->defer_dropped,r->defer_pending);
     fprintf(out,",\"limits\":{\"base\":%"PRIu64",\"inputs\":%"PRIu64",\"indirect\":%"PRIu64"}",
         r->phase_limits[0],r->phase_limits[1],r->phase_limits[2]);
     {   // per-source byte counts: a byte proven by several sources counts in each
@@ -1762,6 +1795,8 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
         r->jobs_capped,r->seeds_offlane,r->merge_conflicts);
     fprintf(out,"indirect jumps: sites %"PRIu64"; targets %"PRIu64"; seeded %"PRIu64"; refused budget %"PRIu64"; pending %"PRIu64"; site overflow %"PRIu64"; target overflow %"PRIu64"\n",
         r->indirect_sites,r->indirect_targets,r->indirect_seeds,r->indirect_refused_budget,r->indirect_pending,r->indirect_site_overflow,r->indirect_target_overflow);
+    fprintf(out,"frontier: deferred steps %"PRIu64" loop %"PRIu64"; resumed %"PRIu64"; final steps %"PRIu64" loop %"PRIu64"; dropped %"PRIu64"; pending %"PRIu64"\n",
+        r->steps_deferred,r->loop_deferred,r->defer_resumed,r->steps_final,r->loop_final,r->defer_dropped,r->defer_pending);
     fprintf(out,"cuts: steps %"PRIu64"; loop %"PRIu64"; fork %"PRIu64"; queue %"PRIu64"; paths %"PRIu64"; global-pending %"PRIu64"; decode %"PRIu64"; faults %"PRIu64"\n",r->step_cuts,r->loop_cuts,r->fork_cuts,r->queue_cuts,r->path_cuts,r->global_cuts,r->decode_cuts,r->faults);
     fprintf(out,"seeds: pointer %"PRIu64"; bank sweep %"PRIu64"; entries %"PRIu64"; admitted %"PRIu64"; skipped padding %"PRIu64"; refused view %"PRIu64", queue %"PRIu64", cap %"PRIu64"; pending %"PRIu64"\n",
         r->seeds_pointer,r->seeds_bank,r->seeds_entry,r->seeds_admitted,r->seeds_skipped_padding,r->seeds_refused_view,r->seeds_refused_queue,r->seeds_refused_cap,r->seeds_pending);
@@ -1846,7 +1881,7 @@ static int parse_entry(const char *s,DpSegaOptions *o) {
 int dp_sega_explore_command(int argc,char **argv) {
     if(argc<5) goto usage;
     const DpSegaSystem *s=!strcmp(argv[3],"msx")?dp_msx_system():dp_sega_system(argv[3]); if(!s) goto usage;
-    DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); const char *text=NULL,*map=NULL,*evidence=NULL,*summary=NULL;
+    DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); o.defer_tiers=DP_SEGA_TIER_MAX; const char *text=NULL,*map=NULL,*evidence=NULL,*summary=NULL;
     for(int i=5;i<argc;i++) {
         if(!strcmp(argv[i],"--no-vector-seeds")) { o.seed_vectors=0; continue; }
         if(!strcmp(argv[i],"--no-context-evict")) { o.no_context_evict=1; continue; }
@@ -1891,7 +1926,7 @@ int dp_sega_explore_command(int argc,char **argv) {
         }
         else {
             uint64_t n; if(!number(value,&n)) goto usage;
-            if(!n && strcmp(key,"--fork-cap") && strcmp(key,"--stagnation") && strcmp(key,"--copy-cap") && strcmp(key,"--input-forks") && strcmp(key,"--input-sites") && strcmp(key,"--input-total") && strcmp(key,"--closure-nodes") && strcmp(key,"--seed-cap")) goto usage;
+            if(!n && strcmp(key,"--fork-cap") && strcmp(key,"--stagnation") && strcmp(key,"--copy-cap") && strcmp(key,"--input-forks") && strcmp(key,"--input-sites") && strcmp(key,"--input-total") && strcmp(key,"--closure-nodes") && strcmp(key,"--seed-cap") && strcmp(key,"--defer-tiers")) goto usage;
             if(!strcmp(key,"--max-total")) o.max_total=n;
             else if(!strcmp(key,"--input-total")) o.input_total=n;
             else if(!strcmp(key,"--tas-total")) o.tas_total=n;
@@ -1901,6 +1936,7 @@ int dp_sega_explore_command(int argc,char **argv) {
             else if(!strcmp(key,"--max-paths")) o.max_paths=(uint32_t)n;
             else if(!strcmp(key,"--queue")) o.queue_cap=(uint32_t)n;
             else if(!strcmp(key,"--loop-cap")) o.loop_cap=(uint32_t)n;
+            else if(!strcmp(key,"--defer-tiers")) o.defer_tiers=n>DP_SEGA_TIER_MAX?DP_SEGA_TIER_MAX:(uint32_t)n;
             else if(!strcmp(key,"--stagnation")) o.stagnation=(uint32_t)n;
             else if(!strcmp(key,"--copy-cap")) o.copy_cap=(uint32_t)n;
             else if(!strcmp(key,"--input-forks")) o.input_masks=(uint32_t)n;

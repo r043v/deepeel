@@ -762,3 +762,10 @@ elle peut donc aller un peu plus loin qu'un run sans budget, jamais moins
 Palier `loop` (0.32.0) : la coupe d'arrière-branche (`cycle_cuts`) est
 désormais aussi reportée, avec un cap ×4 par palier. Ce qu'un mur global
 (`--max-total`) laisse non repris est compté dans `defer_pending`.
+
+Sega/MSX (0.33.0) : mêmes paliers `steps` et `loop` (option `--defer-tiers N`,
+défaut CLI 3, défaut bibliothèque 0 : les coupes y restent définitives). Une
+continuation reportée n'est jamais évincée par contexte (même chemin, en
+milieu de section) ; elle apparaît dans le résumé (`frontier:`) et dans le
+JSON (`steps_deferred`, `loop_deferred`, `defer_resumed`, `*_final`,
+`defer_dropped`, `defer_pending`). Même correctif côté GB.

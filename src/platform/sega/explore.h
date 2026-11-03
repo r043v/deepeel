@@ -57,6 +57,7 @@ typedef struct {
     uint32_t tas_frame_steps; // per-frame step cap of the TAS replay
     const char *tas_path;    // TAS movie (.bk2 or plain input log, sega/tas.h)
     int jobs;                // parallel drain workers (2 max: prefixed instances)
+    uint32_t defer_tiers; // 0: budget cuts stay final; N: resume them up to N times with a 4x cap (CLI default 3)
     uint32_t max_steps,max_paths,queue_cap,loop_cap,fork_cap,stagnation,copy_cap,input_masks,input_sites;
     int target_closure,block_closure;
     int seed_vectors;
@@ -129,6 +130,7 @@ typedef struct {
     uint8_t *flags;
     size_t size;
     uint64_t steps,paths,forks,irq_forks,exec_outside,data_reads,vdp_copies,ram_copies;
+    uint64_t steps_deferred,loop_deferred,defer_resumed,steps_final,loop_final,defer_dropped,defer_pending; // §6
     uint64_t step_cuts,loop_cuts,fork_cuts,queue_cuts,global_cuts,path_cuts,faults,decode_cuts,stagnation_cuts;
     // Seeds (GB parity): generated specs by kind, admissions, bounded refusals.
     uint64_t seeds_pointer,seeds_bank,seeds_entry,seeds_admitted,seeds_skipped_padding;
