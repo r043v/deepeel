@@ -12,7 +12,7 @@ remesure pas l'outil.
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 20 | 5 | 2 |
-| PCE | 16 | 15 | 7 | 1 |
+| PCE | 16 | 16 | 6 | 1 |
 | MD | 8 | 10 | 20 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
@@ -42,7 +42,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | S2 | Fermeture statique de flot | MD | ✗ |
 | S3 | Suivi de constantes / provenance | GB | ◐ HL/A |
 | S3 | Suivi de constantes / provenance | NES | ◐ provenance RAM→`jmp (zp)` depuis la PRG |
-| S3 | Suivi de constantes / provenance | PCE | ✗ |
+| S3 | Suivi de constantes / provenance | PCE | ◐ provenance ROM→WRAM→`jmp (abs)` (comptée, sans graine) |
 | S3 | Suivi de constantes / provenance | MD | ◐ témoin An |
 | S4 | Tables de sauts depuis l'opérande | GB | ✗ |
 | S4 | Tables de sauts depuis l'opérande | NES | ◐ tables de mots lues en données |

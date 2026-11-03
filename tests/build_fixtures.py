@@ -716,6 +716,15 @@ def build_nes_pce(out):
     ij[0x1FFE], ij[0x1FFF] = 0x00, 0xE0
     with open(os.path.join(out, "fix_pce_ind.pce"), "wb") as f:
         f.write(ij)
+    # PC Engine provenance: pointer loaded from a ROM table into zero page, then JMP ($2020)
+    pv = bytearray(0x4000)
+    code = bytes([0xA9, 0xF8, 0x53, 0x02, 0xAD, 0x00, 0xE1, 0x85, 0x20, 0xAD, 0x01, 0xE1, 0x85, 0x21, 0x6C, 0x20, 0x20])
+    pv[0:len(code)] = code
+    pv[0x20:0x22] = bytes([0x80, 0xFE])
+    pv[0x100:0x102] = bytes([0x20, 0xE0])
+    pv[0x1FFE], pv[0x1FFF] = 0x00, 0xE0
+    with open(os.path.join(out, "fix_pce_prov.pce"), "wb") as f:
+        f.write(pv)
 
 if __name__ == "__main__":
     build_nes_pce(sys.argv[1] if len(sys.argv) > 1 else ".")

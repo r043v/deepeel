@@ -61,6 +61,8 @@ typedef struct {
     int forced;            // current path entered through a flipped side
     uint16_t cur_pc;
     uint8_t cur_len, cur_op;
+    int32_t ram_src[0x8000];   // last ROM cell whose read fed the store to each WRAM byte (-1 none)
+    int64_t *prov_anchor; uint32_t prov_len; // table-word cells that fed an indirect jmp pointer (S3)
     int64_t last_read_cell;
     uint64_t last_read_step;
     int was_outside;
@@ -516,12 +518,32 @@ static int step_one(PceRun *x, int *frame_done) {
         uint32_t page = (uint32_t)(site >> 13);
         if (page < 128 && x->page_win[page] == 0xFF) x->page_win[page] = (uint8_t)(c.pc >> 13);
     }
+    // S3 provenance: a store right after a ROM data read carries that cell to WRAM
+    if (site >= 0 && (b[0] == 0x85 || b[0] == 0x86 || b[0] == 0x84 || b[0] == 0x8D || b[0] == 0x8E || b[0] == 0x8C)) {
+        unsigned sa = b[0] < 0x88 ? (0x2000u | b[1]) : (unsigned)(b[1] | b[2] << 8);
+        unsigned pg = c.mpr[sa >> 13];
+        if (pg >= 0xF8 && pg <= 0xFB)
+            x->ram_src[(pg - 0xF8) * 0x2000u + (sa & 0x1FFF)] =
+                (x->last_read_cell >= 0 && x->total_steps - x->last_read_step <= 4) ? (int32_t)x->last_read_cell : -1;
+    }
     // observed indirect jumps: jmp (abs) / jmp (abs,X) read their target from the
     // live bus; sites and distinct (site, target) pairs are counted, bounded
     if (in.flow == DP_HUC_INDIRECT && in.length == 3 && site >= 0 && (b[0] == 0x6C || b[0] == 0x7C)) {
         uint16_t ptr = (uint16_t)(b[1] | b[2] << 8);
         if (b[0] == 0x7C) ptr = (uint16_t)(ptr + c.x);
         uint16_t tgt = (uint16_t)(dp_pce_peek(ptr) | dp_pce_peek((uint16_t)(ptr + 1)) << 8);
+        unsigned ppg = c.mpr[ptr >> 13];
+        if (ppg >= 0xF8 && ppg <= 0xFB && (ptr & 0x1FFF) != 0x1FFF) {
+            unsigned pi = (ppg - 0xF8) * 0x2000u + (ptr & 0x1FFF);
+            if (x->ram_src[pi] >= 0 && x->ram_src[pi + 1] == x->ram_src[pi] + 1 && x->prov_len < 4096) {
+                uint32_t a;
+                for (a = 0; a < x->prov_len && x->prov_anchor[a] != x->ram_src[pi]; a++) {}
+                if (a == x->prov_len) {
+                    int64_t *g = realloc(x->prov_anchor, (x->prov_len + 1) * sizeof *g);
+                    if (g) { x->prov_anchor = g; x->prov_anchor[x->prov_len++] = x->ram_src[pi]; r->prov_sites++; }
+                }
+            }
+        }
         if (x->ind_pairs.cnt >= 65536) r->indirect_overflow++;
         else {
             if (dp_set_insert(&x->ind_sites, (uint64_t)site + 1) > 0) r->indirect_sites++;
@@ -1128,6 +1150,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     if (!x) return 0;
     DpPceResults *r = results;
     dp_set_init(&x->ctx_seen, 1 << 10);
+    for (unsigned i = 0; i < 0x8000; i++) x->ram_src[i] = -1;
     dp_set_init(&x->ind_sites, 1 << 8);
     dp_set_init(&x->ind_pairs, 1 << 10);
     memset(r, 0, sizeof *r);
@@ -1253,6 +1276,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     dp_set_free(&x->ctx_seen);
     dp_set_free(&x->ind_sites);
     dp_set_free(&x->ind_pairs);
+    free(x->prov_anchor);
     free(x->seen);
     free(x->fork_sites);
     free(x->pad_sites);
@@ -1348,6 +1372,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             (unsigned long long)r->idx_overflow);
     if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/MPR context past the cap)\n", (unsigned long long)r->ctx_evicted);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
+    fprintf(out, "  provenance: %llu jump-table words traced from ROM reads\n", (unsigned long long)r->prov_sites);
     fprintf(out, "  copy siblings: %llu tables, %llu entries, %llu bytes typed, %llu table caps\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_entries, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_caps);
     fprintf(out, "  entries: %llu seeded, %llu refused (outside the ROM mapping)\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);

@@ -1654,3 +1654,14 @@ PCE : cibles indirectes observées (D12, partielle). `jmp (abs)` et
 Fixture `fix_pce_ind.pce` (deux sauts, deux cibles), test `pce_indirect`.
 Comme sur NES, la cellule reste ◐ : les cibles sont observées, pas semées en
 second passage.
+
+## 0.107.0
+
+PCE : provenance de constantes (S3, partielle). Un store (`sta/stx/sty`,
+zéro-page ou absolu) qui suit de moins de 4 pas une lecture de donnée ROM
+retient la cellule source pour l'octet de WRAM visé ; un `jmp (abs)` /
+`jmp (abs,X)` dont le pointeur est en WRAM et dont les deux octets viennent de
+cellules ROM consécutives compte un mot de table (`provenance: N jump-table
+words traced from ROM reads`). Fixture `fix_pce_prov.pce`, test
+`pce_provenance`. Reste ◐ : comptage seulement, pas de graine de second
+passage pour les cibles, pas de suivi à travers registres ni piles.
