@@ -22,6 +22,39 @@ void dp_md_dma_observe(MdFull *m, uint32_t addr) {
         cur->h.on_dma_read(cur->h.user, addr, 2);
 }
 
+static uint8_t z80_peek(void *u, uint16_t a) {
+    MdFull *m = u;
+    if (a < 0x4000u) return m->zram[a & 0x1fffu];
+    if (a >= 0x8000u) {
+        uint32_t r = (m->z80_bank | (a & 0x7fffu)) & 0xffffffu;
+        return r < md_rom_size ? md_rom[r] : 0xff;
+    }
+    return 0xff;
+}
+void dp_md_z80_begin(MdFull *m, z80_t *z) {
+    if (!cur || cur->m != m || !cur->h.on_z80_step) return;
+    z80_t t = *z;   /* decode on a copy with a side-effect-free bus */
+    t.user = m; t.read = z80_peek; t.in = z80_peek;
+    z80_decoded_t d;
+    unsigned len = z80_decode(&t, &d) ? d.length : 1;
+    uint32_t rom_pc = UINT32_MAX;
+    if (z->pc >= 0x8000u) rom_pc = (m->z80_bank | (z->pc & 0x7fffu)) & 0xffffffu;
+    cur->h.on_z80_step(cur->h.user, z->pc, len, rom_pc);
+}
+void dp_md_z80_end(MdFull *m) {
+    if (cur && cur->m == m && cur->h.on_z80_end) cur->h.on_z80_end(cur->h.user);
+}
+void dp_md_z80_rom_read(MdFull *m, uint32_t a) {
+    if (cur && cur->m == m && cur->h.on_z80_rom) cur->h.on_z80_rom(cur->h.user, a);
+}
+void dp_md_sound_store(MdFull *m, uint16_t addr, uint8_t value) {
+    if (!cur || cur->m != m || !cur->h.on_sound_store) return;
+    int ymreg = -1;
+    if (addr >= 0x4000u && addr < 0x6000u && (addr & 1u)) ymreg = m->ym.addr[(addr >> 1) & 1u];
+    else if ((addr & 0xfff9u) == 0x7f11u) ymreg = -2;
+    cur->h.on_sound_store(cur->h.user, addr, value, ymreg);
+}
+
 static void t_step(void *u, MdFull *m, uint32_t pc, uint16_t op) {
     DpMdMach *d = u;
     if (d->steps >= d->budget) {

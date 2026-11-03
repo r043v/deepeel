@@ -1010,3 +1010,27 @@ J6 : PC Engine.
   déplacement de bloc) est typée **palette** : `pal_flags` par cellule,
   canaux de copie 3 et 4, ligne `VCE colour-data writes … palette bytes`
   dans le rapport. Observation de l'outil.
+
+## 0.57.0
+
+J7 (partiel) : Mega Drive, observation du Z80 son.
+- Le Z80 de m0boy tournait déjà mais n'était pas observé. Des crochets sont
+  injectés à la construction dans une copie générée de `md_full_audio.c`
+  (même technique que le DMA) : avant/après chaque pas Z80, lectures de ROM
+  par la fenêtre de banque `$8000`, tout store sur le bus son (RAM Z80,
+  YM2612, PSG).
+- Nouveau tableau `z80_flags` (un octet par octet de ROM) : `COPIED` (copié
+  par le 68000 dans la RAM Z80), `CODE_RAM` (…puis exécuté par le Z80 :
+  **code-ramcopy**), `EXEC_ROM`, `DATA` (lu par la fenêtre de banque, hors
+  fetch), `SAMPLE` (octet lu puis écrit sur le DAC YM2612, registre $2A),
+  `MUSIC` (écrit sur un autre registre YM2612 ou le PSG). Rapport : bloc
+  « z80 sound cpu », et lignes `z80-*` dans le fichier d'évidences.
+- Limites assumées : le Z80 s'exécute **concrètement** (pas de fourche sur
+  ses conditionnels, il avance avec l'horloge du 68000 et n'entre pas dans le
+  budget de pas) ; la provenance d'un octet de RAM Z80 (`zsrc`) est globale à
+  l'exploration, pas restaurée par les fourches ; la copie 68000→RAM Z80 est
+  reconnue par égalité de valeur avec le dernier octet de ROM lu (preuve
+  heuristique) ; la classe n'est pas encore dans la carte PNG. Observations
+  de l'outil, pas des mesures de matériel.
+- Test : `fix_md_z80` (68000 copie un programme Z80 de 13 octets, le Z80 lit
+  `$8320` et l'écrit sur le DAC).

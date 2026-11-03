@@ -298,6 +298,15 @@ int main(int argc, char **argv) {
     CHECK(!(r.flags[0x408] & DP_MDF_CPU_VRAM));
     dp_md_results_free(&r); dp_md_cart_free(&c);
 
+    CHECK(run("fix_md_z80", 300000, &r, &c) == 0);
+    CHECK(r.z80_steps > 0 && r.z80_exec_ram > 0);
+    CHECK(r.z80_copied_bytes == 13 && r.z80_code_bytes == 13 && r.z80_ram_copied == 13);
+    CHECK((r.z80_flags[0x400] & (DP_MDZ_COPIED | DP_MDZ_CODE_RAM)) == (DP_MDZ_COPIED | DP_MDZ_CODE_RAM));
+    CHECK(!(r.z80_flags[0x40D] & DP_MDZ_COPIED));
+    CHECK(r.z80_data_bytes == 1 && (r.z80_flags[0x320] & (DP_MDZ_DATA | DP_MDZ_SAMPLE)) == (DP_MDZ_DATA | DP_MDZ_SAMPLE));
+    CHECK(r.z80_sample_bytes == 1 && r.z80_music_bytes == 0 && r.z80_ym_writes == 1 && r.z80_banks_read == 1);
+    dp_md_results_free(&r); dp_md_cart_free(&c);
+
     CHECK(run("fix_md_cpu_vram_reg", 100000, &r, &c) == 0);
     CHECK(r.cpu_vram_words == 4 && r.cpu_vram_bytes == 8);
     CHECK((r.flags[0x400] & DP_MDF_CPU_VRAM) && (r.flags[0x407] & DP_MDF_CPU_VRAM));

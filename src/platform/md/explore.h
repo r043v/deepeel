@@ -13,6 +13,13 @@
 enum { DP_MDF_NATURAL = 1, DP_MDF_FORCED = 2, DP_MDF_DATA = 4, DP_MDF_QUEUED = 8,
        DP_MDF_DATA_NATURAL = 16, DP_MDF_DMA_SOURCE = 32, DP_MDF_DMA_READ = 64,
        DP_MDF_CPU_VRAM = 128 };
+/* Z80 sound CPU evidence, one byte per ROM byte (DpMdResults.z80_flags). */
+enum { DP_MDZ_COPIED = 1,    /* 68000 copied it into Z80 RAM */
+       DP_MDZ_CODE_RAM = 2,  /* ... and the Z80 executed it there (code-ramcopy) */
+       DP_MDZ_EXEC_ROM = 4,  /* executed by the Z80 from the banked window */
+       DP_MDZ_DATA = 8,      /* read by the Z80 through the bank window (not fetch) */
+       DP_MDZ_SAMPLE = 16,   /* ... and written to the YM2612 DAC (reg $2A) */
+       DP_MDZ_MUSIC = 32 };  /* ... and written to another YM2612 register or the PSG */
 #define DP_MD_COPY_CAP 4096
 #define DP_MD_READER_CAP 64
 #define DP_MD_FAULT_SITE_CAP 64
@@ -49,6 +56,12 @@ typedef struct {
 
 typedef struct {
     uint8_t *flags;       /* per ROM byte, DP_MDF_* */
+    uint8_t *z80_flags;   /* per ROM byte, DP_MDZ_* */
+    uint64_t z80_steps, z80_exec_ram, z80_exec_bank, z80_exec_other, z80_rom_reads;
+    uint64_t z80_ram_copied;   /* 68000 stores into Z80 RAM whose byte came from the ROM */
+    uint64_t z80_ym_writes, z80_psg_writes, z80_typed_sample, z80_typed_music;
+    uint32_t z80_copied_bytes, z80_code_bytes, z80_exec_rom_bytes, z80_data_bytes, z80_sample_bytes,
+             z80_music_bytes, z80_banks_read; /* distinct 32 KiB banks */
     uint8_t *nonexcluded_reads; /* per-byte CPU evidence from other read sites */
     size_t rom_size;
     uint64_t steps, paths, forks, irq_forks, pad_forks;

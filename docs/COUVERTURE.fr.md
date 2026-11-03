@@ -630,7 +630,7 @@ CGB sont mensongères.
 |---|---|---|
 | 68000, VDP + DMA, SSF2 | ✅ | DMA typée par destination VRAM/CRAM/VSRAM |
 | YM2612 | compilé, non observé | **Type** music ; DAC → samples |
-| Z80 son | **tourne mais non exploré** | Exploration Z80 (le moteur z80 existe) : code du driver copié en RAM Z80 (**Copie** ROM→RAM Z80), lectures ROM par la fenêtre de banque `$8000` (**Type** samples/music) |
+| Z80 son | observé concrètement (0.57), sans fourches | Exploration Z80 (le moteur z80 existe) : code du driver copié en RAM Z80 (**Copie** ROM→RAM Z80), lectures ROM par la fenêtre de banque `$8000` (**Type** samples/music) |
 | Pad 3 boutons | sondes de 4 motifs | catalogue complet + 6 boutons |
 | SRAM/EEPROM, mappers > SSF2, SVP, 32X, Sega CD | absents | limites ou libretro |
 
@@ -1357,7 +1357,7 @@ Chaque jalon remplit trois conditions :
 | **J4** ◐ 0.52.0 | Sega/MSX sur le noyau | L | matrice §2.1 ✅ pour SMS/GG/MSX ; `--jobs` MSX — **fait** : `--jobs 2` MSX (0.46), coupe de padding (0.47), `.cov`/romdata (0.48), identité ROM des films SHA-1 (0.49), frères de copie S5 (0.50), tables de sauts par provenance S4 (0.51), chien de garde HALT attribué D14 (0.52). **Reste (donc non ✅)** : J1 pool de checkpoints commun aux sessions jouées, Go-Explore (J4 de §2.7), mode humain/`.sta` et `--watch` (O3, J5 de §2.7) — ces trois dépendent d'une interface framebuffer commune (libretro niveau A, J11) —, S6 décodeurs (J8) |
 | **J5** ◐ 0.55.0 | NES sur le noyau, mappers MMC1/MMC3/CNROM/AxROM, CHR indexée | L | fixtures par mapper ; tiles typés sur la CHR — **fait** : CNROM et AxROM dans le pont, fixtures en code (`test_nes`), CHR ROM indexée avec tiles de fond/sprites typés (0.54), MMC1 et MMC3 (0.55). **Reste (donc non ✅)** : IRQ de scanline MMC3 et miroir MMC1/MMC3, NES sur le noyau commun |
 | **J6** ◐ 0.56.0 | PCE sur le noyau, 2 instances, VCE | M | `--jobs 2` PCE — **fait** : 2 instances par préfixage, partage par phase, fusion (test `pce` : l'union couvre le sériel) ; VCE typée palette (canaux 3/4). **Reste (donc non ✅)** : partage de file de fourches entre les deux instances (aujourd'hui par phase), classe palette dans la carte PNG, PCE sur le noyau commun |
-| **J7** | MD sur le noyau + exploration du Z80 son | XL | code du driver Z80 marqué `code-ramcopy`, lectures ROM par la fenêtre Z80 typées |
+| **J7** ◐ 0.57.0 | MD sur le noyau + exploration du Z80 son | XL | code du driver Z80 marqué `code-ramcopy`, lectures ROM par la fenêtre Z80 typées — **fait** : observation concrète du Z80 (copie 68000→RAM Z80, exécution RAM/ROM, lectures de banque, typage sample/music, test `fix_md_z80`). **Reste (donc non ✅)** : fourches sur les conditionnels Z80, `zsrc` restauré par fourche, classe Z80 dans la carte PNG, MD sur le noyau commun |
 | **J8** | Typage par provenance §4.2 + index 0 §5 + rejeu par index §5.4 + décodeurs génériques | L | fixtures « table indexée biaisée », « table de musique jamais jouée » |
 | **J9** | Matériel manquant §3 (sondes événementielles, CGB/HDMA, RTC, série, DMC, YM…) | L | une fixture par surface |
 | **J10** | PNG adaptatif + chunks `dpCv`/`dpFr`/`dpIx`/`dpTb`, rendu en flux | M | ROM synthétique de 32 Mo rendue sous le budget de pixels ; aller-retour `dpCv` → `maprender` identique |

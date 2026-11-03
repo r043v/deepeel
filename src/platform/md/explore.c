@@ -61,6 +61,16 @@ typedef struct {
     unsigned ndec;
     int replay;          /* running a stream replay */
     uint32_t replay_sp;  /* A7 at the replayed entry: above it, the routine returned */
+    /* Z80 sound CPU. zsrc: ROM address of the byte a 68000 store put in each
+     * Z80 RAM cell (-1: none). It is global to the exploration, not forked
+     * with the machine, so it is evidence from the last store seen. */
+    int in_z80;
+    int32_t zsrc[8192];
+    uint32_t lr[4]; unsigned nlr;       /* ROM bytes of the last 68000 data read */
+    uint32_t z80_last_read;             /* ROM address of the last Z80 data read */
+    int z80_last_valid;
+    uint32_t zfetch_lo, zfetch_hi;      /* ROM range of the instruction being fetched */
+    uint8_t z80_bank_seen[128];         /* bitmap of 32 KiB banks (4 MiB / 32 KiB) */
 } X;
 
 static size_t ssz;
@@ -343,6 +353,8 @@ static void on_read(void *u, uint32_t a, unsigned size) {
             x->move_src = a;
             x->move_src_valid = 1;
         }
+        x->nlr = 0;
+        for (unsigned i = 0; i < size && i < 4 && a + i < r->rom_size; i++) x->lr[x->nlr++] = a + i;
         unsigned k;
         for (k = 0; k < r->nreaders && r->readers[k].pc != x->pc; k++) {}
         if (k == r->nreaders && k < DP_MD_READER_CAP) {
@@ -431,6 +443,67 @@ static void on_write(void *u, uint32_t a, unsigned size, uint32_t v) {
         if (r->ncopy >= DP_MD_COPY_CAP) { r->copy_overflow++; return; }
         r->copies[r->ncopy++] = c;
     }
+}
+
+static void on_z80_step(void *u, uint16_t pc, unsigned len, uint32_t rom_pc) {
+    X *x = u;
+    DpMdResults *r = x->r;
+    if (x->halted) return;
+    x->in_z80 = 1;
+    r->z80_steps++;
+    x->zfetch_lo = x->zfetch_hi = UINT32_MAX;
+    if (pc < 0x4000u) {
+        r->z80_exec_ram++;
+        for (unsigned i = 0; i < len; i++) {
+            int32_t s = x->zsrc[(pc + i) & 0x1FFFu];
+            if (s >= 0 && (size_t)s < r->rom_size) r->z80_flags[s] |= DP_MDZ_CODE_RAM;
+        }
+    } else if (rom_pc != UINT32_MAX) {
+        r->z80_exec_bank++;
+        x->zfetch_lo = rom_pc;
+        x->zfetch_hi = rom_pc + len;
+        for (unsigned i = 0; i < len && rom_pc + i < r->rom_size; i++) r->z80_flags[rom_pc + i] |= DP_MDZ_EXEC_ROM;
+    } else r->z80_exec_other++;
+}
+
+static void on_z80_end(void *u) { ((X *)u)->in_z80 = 0; }
+
+static void on_z80_rom(void *u, uint32_t a) {
+    X *x = u;
+    DpMdResults *r = x->r;
+    if (x->halted || a >= r->rom_size) return;
+    r->z80_rom_reads++;
+    if (a >= x->zfetch_lo && a < x->zfetch_hi) return;   /* instruction fetch */
+    r->z80_flags[a] |= DP_MDZ_DATA;
+    x->z80_last_read = a;
+    x->z80_last_valid = 1;
+    if ((a >> 15) < sizeof x->z80_bank_seen * 8) x->z80_bank_seen[a >> 18] |= (uint8_t)(1u << ((a >> 15) & 7));
+}
+
+static void on_sound_store(void *u, uint16_t addr, uint8_t v, int ymreg) {
+    X *x = u;
+    DpMdResults *r = x->r;
+    if (x->halted) return;
+    if (addr < 0x4000u) {
+        int32_t src = -1;
+        if (!x->in_z80)
+            for (unsigned i = x->nlr; i-- > 0;)
+                if (x->lr[i] < r->rom_size && x->c->rom[x->lr[i]] == v) { src = (int32_t)x->lr[i]; break; }
+        x->zsrc[addr & 0x1FFFu] = src;
+        if (src >= 0) { r->z80_flags[src] |= DP_MDZ_COPIED; r->z80_ram_copied++; }
+        return;
+    }
+    if (ymreg == -1 || (ymreg >= 0 && !(addr & 1u))) return;
+    if (ymreg == -2) r->z80_psg_writes++; else r->z80_ym_writes++;
+    uint32_t src = UINT32_MAX;
+    if (x->in_z80) {
+        if (x->z80_last_valid && x->c->rom[x->z80_last_read] == v) src = x->z80_last_read;
+    } else
+        for (unsigned i = x->nlr; i-- > 0;)
+            if (x->lr[i] < r->rom_size && x->c->rom[x->lr[i]] == v) { src = x->lr[i]; break; }
+    if (src == UINT32_MAX) return;
+    if (ymreg == 0x2A) { r->z80_flags[src] |= DP_MDZ_SAMPLE; r->z80_typed_sample++; }
+    else { r->z80_flags[src] |= DP_MDZ_MUSIC; r->z80_typed_music++; }
 }
 
 void dp_md_options_default(DpMdOptions *o) {
@@ -596,6 +669,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     r->rom_size = c->size;
     r->flags = calloc(c->size, 1);
     r->nonexcluded_reads = calloc(c->size, 1);
+    r->z80_flags = calloc(c->size, 1);
     r->copies = calloc(DP_MD_COPY_CAP, sizeof *r->copies);
     X x = {.c = c, .o = o, .r = r, .qcap = o->queue_cap};
     x.q = calloc(o->queue_cap ? o->queue_cap : 1, sizeof *x.q);
@@ -606,14 +680,16 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     x.site = calloc(c->size / 2 + 1, sizeof *x.site);
     x.pad_sites = calloc(c->size / 2 + 1, 1);
     x.m = dp_mdmach_open(c->rom, c->size);
-    if (!r->flags || !r->nonexcluded_reads || !r->copies || !x.q || !x.gen || !x.vis || !x.site || !x.pad_sites || !x.m) {
+    if (!r->flags || !r->z80_flags || !r->nonexcluded_reads || !r->copies || !x.q || !x.gen || !x.vis || !x.site || !x.pad_sites || !x.m) {
         dp_mdmach_close(x.m);
         free(x.q); free(x.gen); free(x.vis); free(x.site); free(x.pad_sites);
         dp_md_results_free(r);
         return -1;
     }
     ssz = dp_mdmach_state_size();
-    DpMdHooks h = {&x, on_step, on_end, on_read, on_write, on_frame, on_dma_read};
+    for (unsigned i = 0; i < 8192; i++) x.zsrc[i] = -1;
+    DpMdHooks h = {&x, on_step, on_end, on_read, on_write, on_frame, on_dma_read,
+                   on_z80_step, on_z80_end, on_z80_rom, on_sound_store};
     dp_mdmach_set_hooks(x.m, &h);
     dp_mdmach_reset(x.m);
     if (o->movie && o->movie->frames) {
@@ -678,6 +754,17 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         if (!(f & (DP_MDF_NATURAL | DP_MDF_FORCED | DP_MDF_DMA_READ | DP_MDF_CPU_VRAM)) && r->nonexcluded_reads[i] == 2)
             r->replay_only_bytes++;
     }
+    for (size_t i = 0; i < c->size; i++) {
+        uint8_t z = r->z80_flags[i];
+        if (z & DP_MDZ_COPIED) r->z80_copied_bytes++;
+        if (z & DP_MDZ_CODE_RAM) r->z80_code_bytes++;
+        if (z & DP_MDZ_EXEC_ROM) r->z80_exec_rom_bytes++;
+        if (z & DP_MDZ_DATA) r->z80_data_bytes++;
+        if (z & DP_MDZ_SAMPLE) r->z80_sample_bytes++;
+        if (z & DP_MDZ_MUSIC) r->z80_music_bytes++;
+    }
+    for (unsigned b = 0; b < sizeof x.z80_bank_seen * 8; b++)
+        if (x.z80_bank_seen[b >> 3] & (1u << (b & 7))) r->z80_banks_read++;
     dp_mdmach_close(x.m);
     free(x.q); free(x.gen); free(x.vis); free(x.site); free(x.pad_sites);
     return 0;
@@ -686,6 +773,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
 void dp_md_results_free(DpMdResults *r) {
     free(r->flags);
     free(r->nonexcluded_reads);
+    free(r->z80_flags);
     free(r->copies);
     memset(r, 0, sizeof *r);
 }
@@ -802,6 +890,16 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     if (r->unmapped_r || r->unmapped_w)
         fprintf(out, "  unmapped: r=%llu w=%llu\n", (unsigned long long)r->unmapped_r,
                 (unsigned long long)r->unmapped_w);
+    fprintf(out, "z80 sound cpu: %llu steps (RAM %llu, bank window %llu, other %llu); inside the 68000 budget, not counted in it\n",
+            (unsigned long long)r->z80_steps, (unsigned long long)r->z80_exec_ram,
+            (unsigned long long)r->z80_exec_bank, (unsigned long long)r->z80_exec_other);
+    fprintf(out, "  ROM bytes copied to Z80 RAM by the 68000: %u (%llu stores); executed there (code-ramcopy): %u\n",
+            r->z80_copied_bytes, (unsigned long long)r->z80_ram_copied, r->z80_code_bytes);
+    fprintf(out, "  executed from the bank window: %u bytes; data read through it: %u bytes in %u bank(s) of 32 KiB (%llu reads)\n",
+            r->z80_exec_rom_bytes, r->z80_data_bytes, r->z80_banks_read, (unsigned long long)r->z80_rom_reads);
+    fprintf(out, "  YM2612 stores %llu, PSG stores %llu; ROM bytes typed sample (DAC): %u, music (FM/PSG data): %u\n",
+            (unsigned long long)r->z80_ym_writes, (unsigned long long)r->z80_psg_writes,
+            r->z80_sample_bytes, r->z80_music_bytes);
     fprintf(out, "rom->vdp copies: %d\n", r->ncopy);
     for (int i = 0; i < r->ncopy; i++)
         fprintf(out, "  pc %06X src %06X len %u words code %02X\n", r->copies[i].pc, r->copies[i].src,
@@ -832,6 +930,19 @@ int dp_md_explore_evidence(const DpMdResults *r, const char *path) {
         }
         fprintf(f, "exec %06zX-%06zX %c\n", i, j - 1, nat ? 'N' : 'F');
         i = j;
+    }
+    static const struct { uint8_t bit; const char *name; } zk[] = {
+        {DP_MDZ_CODE_RAM, "z80-code-ramcopy"}, {DP_MDZ_EXEC_ROM, "z80-code-rom"}, {DP_MDZ_SAMPLE, "z80-sample"},
+        {DP_MDZ_MUSIC, "z80-music"}, {DP_MDZ_DATA, "z80-data"}, {DP_MDZ_COPIED, "z80-ram-source"}};
+    for (unsigned k = 0; k < sizeof zk / sizeof *zk; k++) {
+        size_t a = 0;
+        while (a < r->rom_size) {
+            if (!(r->z80_flags[a] & zk[k].bit)) { a++; continue; }
+            size_t b = a;
+            while (b < r->rom_size && (r->z80_flags[b] & zk[k].bit)) b++;
+            fprintf(f, "%s %06zX-%06zX\n", zk[k].name, a, b - 1);
+            a = b;
+        }
     }
     for (int k = 0; k < r->ncopy; k++)
         fprintf(f, "copy pc=%06X src=%06X words=%u code=%02X\n", r->copies[k].pc, r->copies[k].src,

@@ -156,6 +156,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nsdata.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nsstack.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_dma.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_md_z80.md
 )
 
 add_custom_command(

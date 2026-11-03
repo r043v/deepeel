@@ -26,6 +26,16 @@ typedef struct {
     void (*on_frame)(void *user);
     /* Successful 68k-bus word read by VDP DMA, not a CPU read. */
     void (*on_dma_read)(void *user, uint32_t addr, unsigned size);
+    /* Z80 sound CPU. Before an instruction: pc, length, ROM address of pc
+     * when it executes from the banked window (UINT32_MAX otherwise). */
+    void (*on_z80_step)(void *user, uint16_t pc, unsigned len, uint32_t rom_pc);
+    void (*on_z80_end)(void *user);
+    /* Z80 read of a ROM byte through the $8000 bank window (fetches included). */
+    void (*on_z80_rom)(void *user, uint32_t rom_addr);
+    /* Store on the sound bus (Z80 RAM, YM2612, bank register, PSG), from the
+     * 68000 or from the Z80. ymreg: YM register selected by a data-port
+     * store, -1 otherwise, -2 PSG. */
+    void (*on_sound_store)(void *user, uint16_t addr, uint8_t value, int ymreg);
 } DpMdHooks;
 
 DpMdMach *dp_mdmach_open(const uint8_t *rom, size_t size); /* copies the ROM */

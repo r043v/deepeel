@@ -437,6 +437,20 @@ def build_md(out):
     r[0x208:0x20C] = bytes([0x60, 0xFE, 0x4E, 0x71])     # keep reset SR interrupt mask
     save_md(out, "fix_md_vint_masked", r)
 
+def build_md_z80(out):
+    # 68000 stops the Z80 bus, copies a 13-byte Z80 program from ROM $400 into
+    # Z80 RAM, releases the bus. The Z80 reads ROM $320 through the bank window
+    # and writes it to the YM2612 DAC (register $2A).
+    r = md_rom()
+    code = bytes.fromhex("33fc 0100 00a1 1100 33fc 0100 00a1 1200 "
+                         "41f9 0000 0400 43f9 00a0 0000 700c 12d8 51c8 fffc "
+                         "33fc 0000 00a1 1100" + " 4e71" * 64 + " 1039 00a0 0000 60fe")
+    r[0x200:0x200 + len(code)] = code
+    r[0x400:0x40D] = bytes.fromhex("3e2a 32 0040 3a 2083 32 0140 18fe")
+    r[0x320] = 0xAB
+    save_md(out, "fix_md_z80", r)
+
 if __name__ == "__main__":
+    build_md_z80(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_md(sys.argv[1] if len(sys.argv) > 1 else ".")
     build(sys.argv[1] if len(sys.argv) > 1 else ".")

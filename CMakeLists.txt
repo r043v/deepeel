@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.56.0 LANGUAGES C)
+project(deepeel VERSION 0.57.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -58,9 +58,29 @@ if(DP_MD_DMA_POS EQUAL -1)
 endif()
 string(REPLACE "${DP_MD_DMA_READ}" "uint32_t dma_addr = (source++ << 1) & 0xffffffu;\n            uint16_t v = md_full_read16(m, dma_addr);\n            if (!m->fault) dp_md_dma_observe(m, dma_addr);" DP_MD_BUS "${DP_MD_BUS}")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/dp_md_full_bus.c" "#include \"md_full.h\"\nvoid dp_md_dma_observe(MdFull *, uint32_t);\n${DP_MD_BUS}")
+# Z80 sound CPU observation: hooks around its step, its ROM-window reads and
+# every sound-bus store (generated copy of md_full_audio.c).
+file(READ "${DP_MD_RUNTIME}/md_full_audio.c" DP_MD_AUDIO)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${DP_MD_RUNTIME}/md_full_audio.c")
+function(dp_md_audio_patch old new)
+  string(FIND "${DP_MD_AUDIO}" "${old}" pos)
+  if(pos EQUAL -1)
+    message(FATAL_ERROR "m0boy MD audio changed; update Z80 observation hooks: ${old}")
+  endif()
+  string(REPLACE "${old}" "${new}" patched "${DP_MD_AUDIO}")
+  set(DP_MD_AUDIO "${patched}" PARENT_SCOPE)
+endfunction()
+dp_md_audio_patch("at += z80_step(z) * 15u;"
+  "dp_md_z80_begin(m, z); { unsigned dp_c = z80_step(z); dp_md_z80_end(m); at += dp_c * 15u; }")
+dp_md_audio_patch("if (a < md_rom_size) return md_rom[a];"
+  "if (a < md_rom_size) { dp_md_z80_rom_read(m, a); return md_rom[a]; }")
+dp_md_audio_patch("static void sound_store(MdFull *m, uint16_t addr, uint8_t value, uint64_t at) {"
+  "static void sound_store(MdFull *m, uint16_t addr, uint8_t value, uint64_t at) {\n    dp_md_sound_store(m, addr, value);")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/dp_md_full_audio.c"
+  "#include \"md_full.h\"\nvoid dp_md_z80_begin(MdFull *, z80_t *);\nvoid dp_md_z80_end(MdFull *);\nvoid dp_md_z80_rom_read(MdFull *, uint32_t);\nvoid dp_md_sound_store(MdFull *, uint16_t, uint8_t);\n${DP_MD_AUDIO}")
 add_library(dp_mdmach_lib STATIC
   ${CMAKE_CURRENT_BINARY_DIR}/dp_md_full_cpu.c ${CMAKE_CURRENT_BINARY_DIR}/dp_md_full_bus.c
-  ${DP_MD_RUNTIME}/md_full_video.c ${DP_MD_RUNTIME}/md_full_audio.c
+  ${DP_MD_RUNTIME}/md_full_video.c ${CMAKE_CURRENT_BINARY_DIR}/dp_md_full_audio.c
   ${DP_MD_RUNTIME}/md_ym2612.c ${DP_MD_Z80}/z80.c
   src/mach/mdmach.c src/mach/mdrom.c)
 target_compile_definitions(dp_mdmach_lib PRIVATE MD_TRACE)
