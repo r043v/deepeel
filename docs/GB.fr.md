@@ -1125,3 +1125,12 @@ J10 (partiel) : PNG de carte adaptatif et vecteur de classes `dpCv`.
   l'outil.
 - **Reste pour J10** : segments `dpFr`/`dpIx`/`dpTb`, rendu en flux (le tampon
   RGB est encore alloué en entier), `maprender` relisant `dpCv`.
+
+## 0.65.0
+
+J10 (partiel) : `deepeel maprender rom carte.map.png out.png` accepte aussi un
+PNG de carte en entrée : son vecteur `dpCv` est décodé (taille vérifiée contre
+la ROM) et re-rendu, donc une carte réduite par le budget de pixels se
+re-rend sans perte. Un PNG sans `dpCv` ou de taille incohérente est refusé.
+Test `maprender_cv` (aller-retour `dpCv` identique). Reste pour J10 : `dpFr`,
+`dpIx`, `dpTb`, rendu en flux.

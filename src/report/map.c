@@ -49,6 +49,26 @@ int dp_map_cv_decode(const uint8_t *p, size_t len, uint8_t *m, size_t n) {
     return i == n;
 }
 
+// dpCv -> .map text ("bank start end class", CPU-view addresses); 0 on a size mismatch
+int dp_map_cv_to_text(const uint8_t *cv, size_t len, int banks, DpBuf *out) {
+    size_t n = (size_t)banks * 0x4000;
+    uint8_t *m = malloc(n ? n : 1);
+    if (!m) return 0;
+    int ok = dp_map_cv_decode(cv, len, m, n);
+    for (int b = 0; ok && b < banks; b++) {
+        unsigned win = b ? 0x4000u : 0u;
+        const uint8_t *q = m + (size_t)b * 0x4000;
+        for (int i = 0; i < 0x4000;) {
+            int j = i;
+            while (j < 0x4000 && q[j] == q[i]) j++;
+            dp_buf_fmt(out, "%d %x %x %s\n", b, win + (unsigned)i, win + (unsigned)j - 1, dp_map_class_name(q[i]));
+            i = j;
+        }
+    }
+    free(m);
+    return ok;
+}
+
 // pixel budget of the squares image: past it, one pixel covers several bytes
 unsigned dp_map_png_budget = 16u << 20;
 

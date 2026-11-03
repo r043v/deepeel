@@ -90,6 +90,7 @@ int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char 
 // when the runs fill exactly n bytes
 void dp_map_cv_encode(const uint8_t *m, size_t n, DpBuf *out);
 int dp_map_cv_decode(const uint8_t *p, size_t len, uint8_t *m, size_t n);
+int dp_map_cv_to_text(const uint8_t *cv, size_t len, int banks, DpBuf *out);
 extern unsigned dp_map_png_budget; // pixel budget of the squares image (default 16 Mpx)
 void dp_report_html(const DpResults *res, DpBuf *out);
 

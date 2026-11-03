@@ -808,7 +808,14 @@ static int cmd_maprender(int argc, char **argv) {
     if (!text || fread(text, 1, (size_t)ln, f) != (size_t)ln) { fclose(f); free(text); perror(inmap); return 1; }
     text[ln] = 0;
     fclose(f);
-    if (z80_map) {
+    size_t cv_len = 0;
+    uint8_t *cv_in = (ln > 8 && !memcmp(text, "\x89PNG", 4)) ? (uint8_t *)dp_png_text(inmap, "dpCv", &cv_len) : NULL;
+    if (ln > 8 && !memcmp(text, "\x89PNG", 4) && !cv_in) {
+        fprintf(stderr, "deepeel: %s: PNG without a dpCv class vector\n", inmap);
+        free(text);
+        return 1;
+    }
+    if (z80_map && !cv_in) {
         // z80 maps list physical 16 KiB banks and whole-ROM offsets; rewrite
         // each run into the windowed "bank start end class" form the renderer
         // expects (bank 0 from 0, the others from 0x4000), splitting at the
@@ -856,6 +863,22 @@ static int cmd_maprender(int argc, char **argv) {
         rom_size = (unsigned)ftell(rf);
         fclose(rf);
         rom_banks = (int)((rom_size + 0x3FFF) / 0x4000);
+    }
+    if (cv_in) { // a map PNG as input: its dpCv vector, expanded for the renderer
+        DpBuf t2;
+        dp_buf_init(&t2);
+        if (!dp_map_cv_to_text(cv_in, cv_len, rom_banks, &t2)) {
+            fprintf(stderr, "deepeel: %s: dpCv does not match the ROM (%d banks)\n", inmap, rom_banks);
+            dp_buf_free(&t2);
+            free(cv_in);
+            free(text);
+            dp_cart_free(cart);
+            return 1;
+        }
+        free(cv_in);
+        free(text);
+        text = t2.p;
+        ln = (long)t2.len;
     }
     if (title_arg) {
         snprintf(title, sizeof title, "%.16s", title_arg);
