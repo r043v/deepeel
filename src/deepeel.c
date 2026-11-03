@@ -19,6 +19,7 @@
 #include "explore/tree.h"
 #include "report/report.h"
 #include "gui/gui.h"
+#include "gui/fbwatch.h"
 #include "cpu/sm83/sm83.h"
 #include "platform/sega/sega.h"
 #include "platform/msx/msx.h"
@@ -1365,7 +1366,8 @@ static int cmd_md(int argc, char **argv) {
         }
     } else if (!strcmp(argv[2], "explore")) {
         DpMdOptions o;
-        int md_jobs = 1;
+        int md_jobs = 1, md_watch = 0;
+        const char *md_dump = NULL;
         dp_md_options_default(&o);
         const char *text = NULL, *map = NULL, *ev = NULL, *movie_path = NULL;
         for (int i = 4; i < argc; i++) {
@@ -1382,6 +1384,15 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--novelty") && i + 1 < argc) o.novelty_steps = strtoull(argv[++i], NULL, 0);
             else if (!strcmp(a, "--novelty-frames") && i + 1 < argc) o.novelty_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--novelty-cells")) o.novelty_cells = 1;
+            else if (!strcmp(a, "--watch")) {
+                int fps = 30;
+                if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') fps = atoi(argv[++i]);
+                if (fps < 1) fps = 1;
+                if (fps > 30) fps = 30;
+                o.watch_every = (unsigned)(60 / fps);
+                md_watch = 1;
+            }
+            else if (!strcmp(a, "--watch-dump") && i + 1 < argc) { md_dump = argv[++i]; if (!o.watch_every) o.watch_every = 2; }
             else if (!strcmp(a, "--novelty-archive") && i + 1 < argc) o.novelty_archive = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--jobs") && i + 1 < argc) md_jobs = atoi(argv[++i]);
             else if (!strcmp(a, "--ctx-cap") && i + 1 < argc) o.ctx_cap = (unsigned)strtoul(argv[++i], NULL, 0);
@@ -1409,7 +1420,11 @@ static int cmd_md(int argc, char **argv) {
         }
         if (!rc) {
             DpMdResults r;
-            if (dp_md_explore_jobs(&c, &o, &r, md_jobs)) {
+            if (md_watch && dp_fbwatch_start("deepeel md watch")) o.watch_every = o.watch_every ? o.watch_every : 0;
+            int mrc = dp_md_explore_jobs(&c, &o, &r, md_jobs);
+            if (md_watch) dp_fbwatch_stop();
+            if (md_dump && dp_fb_dump_ppm(md_dump)) fprintf(stderr, "deepeel: no frame to dump (the ROM never completed a frame)\n");
+            if (mrc) {
                 fprintf(stderr, "deepeel: md explore failed\n");
                 rc = 1;
             } else {

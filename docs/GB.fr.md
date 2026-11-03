@@ -1837,3 +1837,17 @@ phase et incrémentent `stalled`, rapporté. Rapport : `novelty: depth N frames,
 … N stalled`. Test `md_novelty`. Reste ◐ : sprites absents de la clé, pas de
 mode humain, pas de reprise d'archive, pas de `--jobs` pour cette phase
 (l'instance secondaire ne la joue pas).
+
+## 0.122.0
+
+Mega Drive : `--watch [FPS]` et `--watch-dump FILE` (O3, partielle). Le crochet
+d'image de l'explorateur rend le VDP (`dp_mdmach_render`, 320×224 ARGB) toutes
+les 60/FPS images et publie la copie dans un tampon commun
+(`src/gui/fbwatch.[ch]`, mutex : aucun état de machine n'est partagé avec le
+thread de la fenêtre). La fenêtre SDL2 affiche la dernière image
+(`dp_fbwatch_*`, Échap ou fermeture) ; sans SDL2 un message l'indique.
+`--watch-dump` écrit la dernière image en PPM (utilisable sans écran ; testé :
+`md_watch_dump`). Rapport : `watch: N frames published`. Le tampon est
+indépendant de la plateforme : NES/PCE n'ont qu'à publier. Reste ◐ : pas de
+bandeau d'état (vitesse, film), l'instance secondaire de `--jobs` ne publie
+pas, NES/PCE/J5 (`.sta`, mode humain) non faits.

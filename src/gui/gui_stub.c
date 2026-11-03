@@ -23,3 +23,12 @@ int dp_watch_start(DpPlay *play, int fps) {
 }
 
 void dp_watch_stop(void) {}
+
+#include "fbwatch.h"
+int dp_fbwatch_available(void) { return 0; }
+int dp_fbwatch_start(const char *title) {
+    (void)title;
+    fprintf(stderr, "deepeel: built without SDL2, the watch window is unavailable (--watch-dump still works)\n");
+    return 1;
+}
+void dp_fbwatch_stop(void) {}

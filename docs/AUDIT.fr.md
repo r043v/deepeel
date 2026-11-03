@@ -13,7 +13,7 @@ remesure pas l'outil.
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 22 | 3 | 2 |
 | PCE | 16 | 19 | 3 | 1 |
-| MD | 8 | 19 | 11 | 1 |
+| MD | 8 | 20 | 10 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
 
@@ -109,6 +109,6 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | O3 | `--watch` (SDL2) | MSX | ✗ |
 | O3 | `--watch` (SDL2) | NES | ✗ |
 | O3 | `--watch` (SDL2) | PCE | ✗ |
-| O3 | `--watch` (SDL2) | MD | ✗ |
+| O3 | `--watch` (SDL2) | MD | ◐ `--watch [FPS]` (fenêtre SDL2) et `--watch-dump FILE` (PPM) |
 
 Problèmes de forme : aucun.

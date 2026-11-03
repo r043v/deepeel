@@ -632,3 +632,69 @@ void dp_watch_stop(void) {
     pthread_join(watch_th, NULL);
     watch_running = 0;
 }
+
+// --- framebuffer watch window (NES/PCE/MD --watch): shows the latest published frame ---
+#include "fbwatch.h"
+static pthread_t fb_th;
+static int fb_running;
+static atomic_int fb_quit;
+static char fb_title[64];
+
+static void *fb_main(void *arg) {
+    (void)arg;
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+        fprintf(stderr, "deepeel: watch: SDL_Init: %s\n", SDL_GetError());
+        return NULL;
+    }
+    SDL_Window *win = SDL_CreateWindow(fb_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 480,
+                                       SDL_WINDOW_RESIZABLE);
+    SDL_Renderer *ren = win ? SDL_CreateRenderer(win, -1, 0) : NULL;
+    if (!win || !ren) {
+        fprintf(stderr, "deepeel: watch: %s\n", SDL_GetError());
+        if (win) SDL_DestroyWindow(win);
+        SDL_Quit();
+        return NULL;
+    }
+    static uint32_t px[DP_FB_MAX_W * DP_FB_MAX_H];
+    SDL_Texture *tex = NULL;
+    int tw = 0, th = 0;
+    while (!atomic_load(&fb_quit)) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e))
+            if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)) atomic_store(&fb_quit, 1);
+        int w, h;
+        uint64_t f;
+        if (dp_fb_read(px, DP_FB_MAX_W * DP_FB_MAX_H, &w, &h, &f)) {
+            if (!tex || w != tw || h != th) {
+                if (tex) SDL_DestroyTexture(tex);
+                tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, w, h);
+                tw = w; th = h;
+            }
+            if (tex) SDL_UpdateTexture(tex, NULL, px, w * 4);
+        }
+        SDL_RenderClear(ren);
+        if (tex) SDL_RenderCopy(ren, tex, NULL, NULL);
+        SDL_RenderPresent(ren);
+        SDL_Delay(16);
+    }
+    if (tex) SDL_DestroyTexture(tex);
+    SDL_DestroyRenderer(ren);
+    SDL_DestroyWindow(win);
+    SDL_Quit();
+    return NULL;
+}
+int dp_fbwatch_available(void) { return 1; }
+int dp_fbwatch_start(const char *title) {
+    if (fb_running) return 0;
+    snprintf(fb_title, sizeof fb_title, "%s", title ? title : "deepeel watch");
+    atomic_store(&fb_quit, 0);
+    if (pthread_create(&fb_th, NULL, fb_main, NULL) != 0) return 1;
+    fb_running = 1;
+    return 0;
+}
+void dp_fbwatch_stop(void) {
+    if (!fb_running) return;
+    atomic_store(&fb_quit, 1);
+    pthread_join(fb_th, NULL);
+    fb_running = 0;
+}

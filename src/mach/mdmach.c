@@ -215,6 +215,7 @@ int dp_mdmach_rom_visible(const DpMdMach *d, uint32_t addr) {
     return !(d->m->sram_enable && addr >= 0x200000u && addr < 0x210000u);
 }
 const uint8_t *dp_mdmach_ram(const DpMdMach *d) { return d->m->ram; }
+void dp_mdmach_render(const DpMdMach *d, uint32_t *pixels) { md_full_render(d->m, pixels, 320); }
 uint64_t dp_mdmach_screen_key(const DpMdMach *d) {
     const MdFull *m = d->m;
     unsigned wsel = m->vdp_reg[16] & 3, w = wsel == 0 ? 32 : wsel == 1 ? 64 : 128;

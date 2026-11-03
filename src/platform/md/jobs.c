@@ -108,7 +108,7 @@ int dp_md_explore_jobs(const DpMdCart *c, const DpMdOptions *options, DpMdResult
     j->opt.no_finalize = 1;
     j->opt.entry_from = 1; j->opt.entry_step = 2;
     j->opt.lot_path = NULL; j->opt.lot_drain = 0;
-    j->opt.movie = NULL; j->opt.novelty_steps = 0; j->opt.tree_path = NULL;
+    j->opt.movie = NULL; j->opt.novelty_steps = 0; j->opt.watch_every = 0; j->opt.tree_path = NULL;
     j->opt.second_pass = j->opt.bank_dispatch = 0;
     j->opt.pre_finalize = NULL;
     o.entry_from = 0; o.entry_step = 2;

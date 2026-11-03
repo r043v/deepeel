@@ -4,6 +4,7 @@
 #include <string.h>
 #include <math.h>
 #include <zlib.h>
+#include "../../gui/fbwatch.h"
 #include "../../cpu/m68k/m68k.h"
 #include "../../mach/mdmach.h"
 #include "md_registry.h"
@@ -77,6 +78,7 @@ typedef struct {
     uint32_t zfetch_lo, zfetch_hi;      /* ROM range of the instruction being fetched */
     uint8_t z80_bank_seen[128];         /* bitmap of 32 KiB banks (4 MiB / 32 KiB) */
     int disp_done;
+    uint64_t wframe;     // frames seen (watch sampling)
     void *nov;           // novelty search state (NULL: off); the frame hook drives it
     uint64_t novel;      // ROM bytes executed for the first time (novelty gain)
     DpHashSet ctx_seen;     // --ctx-cap: admissions per coarse context
@@ -100,6 +102,12 @@ static void novelty_frame(X *x);
 static void on_frame(void *u) {
     X *x = u;
     next_generation(x);
+    if (x->o->watch_every && ++x->wframe % x->o->watch_every == 0) {
+        static uint32_t px[320 * 224];
+        dp_mdmach_render(x->m, px);
+        dp_fb_publish(px, 320, 224, x->wframe);
+        x->r->watch_frames++;
+    }
     if (x->nov) novelty_frame(x);
     if (x->movie_active) {
         x->r->movie_frames++;
@@ -1280,6 +1288,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/SR context past the cap)\n", (unsigned long long)r->ctx_evicted);
     if (r->pass2_seeds || r->pass2_refused || r->pass2_capped) fprintf(out, "  second pass: %llu seeds, %llu refused, %llu capped\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     if (r->disp_tables) fprintf(out, "  dispatch tables: %llu tables, %llu seeds, %llu refused targets\n", (unsigned long long)r->disp_tables, (unsigned long long)r->disp_seeds, (unsigned long long)r->disp_refused_view);
+    if (r->watch_frames) fprintf(out, "  watch: %llu frames published\n", (unsigned long long)r->watch_frames);
     if (r->novelty_trials)
         fprintf(out, "  novelty: depth %u frames, %llu trials, %llu frames, %llu hits, %llu deaths, %llu archived (%llu replaced), %llu seeded, %llu stalled\n",
                 r->novelty_depth, (unsigned long long)r->novelty_trials, (unsigned long long)r->novelty_frames_run,
