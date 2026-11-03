@@ -866,3 +866,7 @@ encore de frontière disque. Chiffres = observations de l'outil.
 ## 0.43.0
 
 - J3 (début) : `src/core/dpmachine.h` définit `DpIsa` et `DpMachine`. Le SM83 et le backend GB (m0boy) les implémentent ; la closure GB classe le flot des instructions par l'ISA. Pas de changement de rapport attendu ; test `dpmachine`. Le reste de J3 (extraction du noyau) est ouvert.
+
+## 0.43.1
+
+- J3 : la politique de la frontière différée (raisons, paliers, plafonds, pertes finales comptées) vit dans `src/explore/frontier.{h,c}` ; `explorer.c` ne fait plus que l'appliquer. Aucun changement de rapport.

@@ -766,28 +766,16 @@ static void emit_pend_map(DpExplorer *ex) {
     }
 }
 
-const char *dp_reason_name(int r) {
-    static const char *n[DP_R_COUNT] = { "none", "priority", "dedup-full", "paths", "fork-cap",
-                                         "steps", "loop", "wall", "covered" };
-    return r >= 0 && r < DP_R_COUNT ? n[r] : "?";
-}
-
 // Every state a budget would have thrown away is kept here instead: a path
 // cut by its step budget, a fork past the per-site cap, a full dedup set, ...
-// Each deferral raises the tier by one (the resumed path gets a bigger budget);
-// past DP_TIER_MAX, or when the holding area is full, the loss stays final
-// and is counted per reason — never silent.  The noisy reasons (fork-cap,
-// covered) hold at most a quarter of the area each so they cannot starve the rest.
+// The policy (tiers, caps, final losses) is in frontier.c.
 static int defer_room(DpExplorer *ex, int reason) {
     DpResults *res = ex->res;
-    if (ex->cur_tier >= DP_TIER_MAX) { res->defer_final[reason]++; return 0; }
-    uint32_t lim = (reason == DP_R_FORK_CAP || reason == DP_R_COVERED) ? DP_DEFER_CAP / 4 : DP_DEFER_CAP;
-    if (ex->defer_len >= DP_DEFER_CAP || ex->defer_by_reason[reason] >= lim) {
-        res->defer_final[reason]++;
-        res->defer_dropped++;
-        return 0;
+    switch (dp_frontier_room(ex->cur_tier, ex->defer_len, ex->defer_by_reason[reason], reason)) {
+    case DP_ROOM_TIER_FINAL: res->defer_final[reason]++; return 0;
+    case DP_ROOM_FULL: res->defer_final[reason]++; res->defer_dropped++; return 0;
+    default: return 1;
     }
-    return 1;
 }
 
 // takes ownership of img on success; 0 = counted final loss (img untouched)
@@ -1653,11 +1641,6 @@ static void idx_write(DpExplorer *ex) {
     fclose(f);
 }
 
-static int reason_of_name(const char *s) {
-    for (int r = 1; r < DP_R_COUNT; r++) if (!strcmp(s, dp_reason_name(r))) return r;
-    return 0;
-}
-
 static void idx_read(DpExplorer *ex) {
     char p[700], line[400];
     frontier_path(ex, p, sizeof p, "frontier.idx");
@@ -1672,7 +1655,7 @@ static void idx_read(DpExplorer *ex) {
                    &l.count, &off, rs, &l.bank, &l.sec, &l.tier_n[1], &l.tier_n[2], &l.tier_n[3], &l.read) == 10) {
             snprintf(l.name, sizeof l.name, "%s", name);
             l.off = off;
-            l.reason = reason_of_name(rs);
+            l.reason = dp_reason_from_name(rs);
             if (!l.reason) continue;
             if (ex->nlots >= ex->lotcap) {
                 ex->lotcap = ex->lotcap ? ex->lotcap * 2 : 16;
@@ -1703,7 +1686,7 @@ uint64_t dp_explorer_frontier_disk(const DpExplorer *ex) {
 }
 
 static int reason_eligible(const DpExplorer *ex, int reason) {
-    return reason < DP_R_COVERED || ex->defer_all;
+    return dp_reason_eligible(reason, ex->defer_all);
 }
 
 // reads the next records of the cheapest eligible lot into the holding area

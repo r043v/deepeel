@@ -15,6 +15,7 @@
 #include "../mach/m0boy.h"
 #include "../core/coverage.h"
 #include "../platform/platform.h"
+#include "frontier.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -156,7 +157,6 @@ typedef struct DpDiscEntry {
     uint32_t known;      // ROM bytes carrying any evidence after the step
 } DpDiscEntry;
 
-#define DP_R_COUNT_ 9 /* = DP_R_COUNT, needed before the enum */
 typedef struct DpResults {
     const DpCart *cart;
     const DpPlatform *plat;
@@ -177,8 +177,8 @@ typedef struct DpResults {
     uint32_t *play_exec_hits;
     uint32_t *play_data_hits;
     uint8_t *static_flags;
-    uint64_t defer_by[DP_R_COUNT_];   // deferred per reason
-    uint64_t defer_final[DP_R_COUNT_]; // cut for good per reason (tier cap / holding area full)
+    uint64_t defer_by[DP_R_COUNT];   // deferred per reason
+    uint64_t defer_final[DP_R_COUNT]; // cut for good per reason (tier cap / holding area full)
     uint64_t seeds_deferred, seeds_resumed, seeds_lost, seeds_pending_disk, defer_on_disk, inbox_dropped;
     uint64_t steps_deferred, loop_deferred, defer_resumed, steps_final, loop_final, defer_dropped, defer_pending; // §6 frontier
     uint32_t *src_flags;  // DP_SRC_* per ROM byte, OR-ed (every proving source)
@@ -320,8 +320,6 @@ typedef struct DpCopyTracker {
 } DpCopyTracker;
 
 // queue entry: a machine state image plus path bookkeeping
-#define DP_TIER_MAX 3        // last budget tier (4^3 x); beyond it: counted, kept off
-#define DP_DEFER_CAP 4096    // deferred snapshots held per explorer
 typedef struct DpPathState {
     uint8_t *img;        // gbl state image (dp_mach_state_bytes bytes)
     uint8_t forced;      // reached through a fork or speculative seed
@@ -330,12 +328,6 @@ typedef struct DpPathState {
     uint32_t choice;     // the tree choice this path answers
 } DpPathState;
 
-// why a continuation was deferred (docs/COUVERTURE.fr.md §6.4); the numeric
-// order is the resume order, cheapest first.  COVERED is the last tier and is
-// resumed only by an explicit `frontier drain --tier inf`.
-enum { DP_R_NONE = 0, DP_R_PRIORITY, DP_R_DEDUP_FULL, DP_R_PATHS, DP_R_FORK_CAP, DP_R_STEPS,
-       DP_R_LOOP, DP_R_WALL, DP_R_COVERED, DP_R_COUNT };
-const char *dp_reason_name(int r);
 // one on-disk frontier lot (see explorer.c): bank x section x reason
 typedef struct DpLot {
     char name[96];
@@ -348,7 +340,6 @@ typedef struct DpDeferred {
     uint8_t tier;
     uint8_t reason;
 } DpDeferred;
-_Static_assert(DP_R_COUNT == DP_R_COUNT_, "reason count");
 // a seed (bank, pc) the seed cap or the phase budget held back: cheap, no image
 typedef struct DpPendingSeed { uint16_t bank, pc; uint8_t kind, forced; } DpPendingSeed;
 
@@ -423,7 +414,7 @@ struct DpExplorer {
     // step budget keep a snapshot and resume later with a 4x larger budget
     struct DpDeferred *defer;
     uint32_t defer_len, defer_cap;
-    uint32_t defer_by_reason[DP_R_COUNT_]; // held per reason (per-reason cap for the noisy ones)
+    uint32_t defer_by_reason[DP_R_COUNT]; // held per reason (per-reason cap for the noisy ones)
     uint8_t defer_all;        // frontier drain --tier inf: COVERED resumes too
     uint64_t fbytes;          // bytes written to frontier lots so far
     char *fdir;               // frontier directory (<state-dir>), NULL when none

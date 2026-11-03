@@ -3,6 +3,7 @@
 #include <string.h>
 #include "../src/core/cart.h"
 #include "../src/core/dpmachine.h"
+#include "../src/explore/frontier.h"
 #include "../src/cpu/sm83/sm83.h"
 #include "../src/mach/m0boy.h"
 #include "test_util.h"
@@ -51,6 +52,15 @@ int main(int argc, char **argv) {
     uint8_t bad[1] = { 0xDD };
     isa->flow(bad, 0, &f);
     CHECK_MSG(f.kind == DP_FLOW_ILLEGAL, "illegal opcode");
+
+    // frontier policy (spec §6): tiers, caps, names
+    CHECK_MSG(dp_frontier_room(0, 0, 0, DP_R_STEPS) == DP_ROOM_OK, "room at tier 0");
+    CHECK_MSG(dp_frontier_room(DP_TIER_MAX, 0, 0, DP_R_STEPS) == DP_ROOM_TIER_FINAL, "past the last tier");
+    CHECK_MSG(dp_frontier_room(0, DP_DEFER_CAP, 0, DP_R_PATHS) == DP_ROOM_FULL, "area full");
+    CHECK_MSG(dp_frontier_room(0, 0, DP_DEFER_CAP / 4, DP_R_FORK_CAP) == DP_ROOM_FULL, "noisy reason capped");
+    CHECK_MSG(dp_frontier_room(0, 0, DP_DEFER_CAP / 4, DP_R_PATHS) == DP_ROOM_OK, "quiet reason not capped");
+    for (int r = 1; r < DP_R_COUNT; r++) CHECK_MSG(dp_reason_from_name(dp_reason_name(r)) == r, "reason names round trip");
+    CHECK_MSG(!dp_reason_eligible(DP_R_COVERED, 0) && dp_reason_eligible(DP_R_COVERED, 1), "covered needs tier inf");
 
     // machine: save/load round trip through the generic view
     if (argc > 1) {
