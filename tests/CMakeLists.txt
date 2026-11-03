@@ -243,7 +243,7 @@ add_test(NAME maprender_cv COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/maprender_cv.s
 # J11: level-A libretro backend, tested on a mock core built here (no binary committed)
 add_library(dpmock_libretro SHARED mock_libretro.c)
 set_target_properties(dpmock_libretro PROPERTIES PREFIX "" OUTPUT_NAME "dpmock_libretro")
-add_library(deepeel_libretro STATIC ${CMAKE_SOURCE_DIR}/src/mach/libretro.c)
 add_executable(test_libretro test_libretro.c)
 target_link_libraries(test_libretro PRIVATE deepeel_libretro ${CMAKE_DL_LIBS})
 add_test(NAME libretro COMMAND test_libretro $<TARGET_FILE:dpmock_libretro> ${CMAKE_CURRENT_BINARY_DIR}/mock_rom.bin)
+add_test(NAME lr_explore_cli COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/lr_explore_cli.sh $<TARGET_FILE:deepeel> $<TARGET_FILE:dpmock_libretro> ${CMAKE_CURRENT_BINARY_DIR}/mock_rom.bin)

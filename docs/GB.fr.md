@@ -1233,3 +1233,16 @@ J12 (partiel) : exploration à fourches sur un cœur libretro de niveau B.
   pas minuscule remontent leur saturation.
 - Reste : exécution sur un vrai cœur, intégration à l'explorateur existant
   (rapport, cartes PNG), parité de fourches avec le backend m0boy.
+
+## 0.73.0
+
+J12 (partiel) : commande `deepeel lr explore CORE ROM [--text F] [--map F]
+[--path-steps N] [--max-total N] [--queue N]`. Elle charge un cœur libretro
+(copie du `.so`), lance `dp_lr_explore` et écrit un rapport texte (pas,
+chemins, fourches, sites de branchement, octets de début de code atteints,
+saturation) et une carte par plages sur les index ROM compacts. Code retour :
+0 exploration complète, 3 saturation (file pleine, mur de pas, budget de
+chemin), 1 cœur sans extension de trace (le niveau A ne peut pas fourcher) ou
+erreur. Test `lr_explore_cli` sur le cœur factice. La bibliothèque
+`deepeel_libretro` est maintenant liée au binaire principal (`libdl`).
+Observations de l'outil ; le rapport ne fait pas encore de carte PNG.

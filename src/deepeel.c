@@ -31,6 +31,7 @@
 #include "platform/pce/pce.h"
 
 static uint8_t *nes_read_file(const char *path, size_t *size);
+int dp_lr_command(int argc, char **argv);
 static int cmd_nes(int argc, char **argv);
 static int cmd_pce(int argc, char **argv);
 static int cmd_maprender(int argc, char **argv);
@@ -46,6 +47,7 @@ static void usage(void) {
             "  deepeel explore rom.gb [options]\n"
             "  deepeel z80 explore <sg|sms|gg|msx> ROM [--input-total N] [--input-forks N] [--text FILE] [--map FILE] [--evidence FILE]\n"
             "  deepeel z80 dis ROM hex-offset [instruction-count]\n"
+            "  deepeel lr explore CORE ROM [--text FILE] [--map FILE] [--path-steps N] [--max-total N] [--queue N]\n"
             "  deepeel md explore ROM [--tas GMV] [--max-total N] [--path-steps N] [--queue N] [--queue-max N] [--fork-cap N] [--visit-cap N] [--watch-write ADDR] [--exclude-read-pc ADDR] [--text FILE] [--map FILE] [--evidence FILE]\n"
             "  deepeel md dis ROM hex-offset [instruction-count]\n"
             "  deepeel regs <gb|sg|sms|gg|msx|md>\n"
@@ -1461,6 +1463,7 @@ int main(int argc, char **argv) {
         g_drain_only = 1;
         return cmd_explore(n, av);
     }
+    if (!strcmp(argv[1], "lr")) return dp_lr_command(argc, argv);
     if (!strcmp(argv[1], "md")) return cmd_md(argc, argv);
     if (!strcmp(argv[1], "nes")) return cmd_nes(argc, argv);
     if (!strcmp(argv[1], "pce")) return cmd_pce(argc, argv);
