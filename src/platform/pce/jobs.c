@@ -114,6 +114,24 @@ static void fold(DpPceResults *a, void *user) {
             a->palette_bytes += a->pal_flags[i];
         }
     }
+    for (unsigned i = 0; i < b->nidx; i++) {   // indexed sites: union by (site, base, cell0)
+        unsigned k;
+        for (k = 0; k < a->nidx; k++)
+            if (a->idx[k].site == b->idx[i].site && a->idx[k].base == b->idx[i].base &&
+                a->idx[k].cell0 == b->idx[i].cell0) break;
+        if (k == a->nidx) {
+            if (k >= DP_PCE_IDX_CAP) { a->idx_overflow++; continue; }
+            a->idx[k] = b->idx[i];
+            a->nidx++;
+        } else {
+            if (b->idx[i].idx_min < a->idx[k].idx_min) a->idx[k].idx_min = b->idx[i].idx_min;
+            if (b->idx[i].idx_max > a->idx[k].idx_max) a->idx[k].idx_max = b->idx[i].idx_max;
+            a->idx[k].n_obs += b->idx[i].n_obs;
+        }
+    }
+    a->idx_overflow += b->idx_overflow;
+    a->idx_cross_page += b->idx_cross_page;
+    a->idx_forced_ignored += b->idx_forced_ignored;
     merge_counts(a, b);
     merge_logs(a, b);
 }

@@ -166,6 +166,34 @@ static void test_palette(const uint8_t *rom) {
     free(r2);
 }
 
+// index inference: abs,X reads at indexes 0,2,3 of $4100 (gap at 1 declared)
+// and 1,3 of the biased base $41FF (gap at 2 declared, element before the
+// table and index 0 never declared)
+static void test_index(const uint8_t *rom) {
+    uint8_t *r2 = malloc(ROM_SIZE);
+    memcpy(r2, rom, ROM_SIZE);
+    static const uint8_t tail[] = { 0xA2, 0x00, 0xBD, 0x00, 0x41, 0xE8, 0xE8, 0xE0, 0x06, 0xD0, 0xF7,
+                                    0xA2, 0x01, 0xBD, 0xFF, 0x41, 0xE8, 0xE8, 0xE0, 0x07, 0xD0, 0xF7,
+                                    0x80, 0xFE };
+    memcpy(r2 + 0x23, tail, sizeof tail);
+    DpPceOptions o = dp_pce_options();
+    o.max_total = 2000000;
+    o.max_steps = 20000;
+    DpPceResults *r = calloc(1, sizeof *r);
+    CHECK(dp_pce_explore(r2, ROM_SIZE, &o, r), "index explore");
+    if (r->flags) {
+        CHECK(r->nidx == 2, "two sites (%u)", r->nidx);
+        CHECK(r->idx_flags[0x2101] == 1 && r->idx_flags[0x2103] == 1, "gaps of the first table declared");
+        CHECK(!r->idx_flags[0x2100] && !r->idx_flags[0x2102] && !r->idx_flags[0x2105], "observed or out-of-range bytes are not inferred");
+        CHECK(r->idx_flags[0x2201] == 1 && r->idx_flags[0x2203] == 1, "gaps of the biased table declared");
+        CHECK(!r->idx_flags[0x21FF] && !r->idx_flags[0x2200], "nothing before the biased index range");
+        CHECK(r->idx_declared == 4 && r->idx_biased == 1, "counts (%u, %u)", r->idx_declared, r->idx_biased);
+    }
+    dp_pce_results_free(r);
+    free(r);
+    free(r2);
+}
+
 // --jobs 2: the secondary instance plays random sessions while the primary
 // drains the power-on forks; the union covers what the serial run covers
 static void test_jobs(const uint8_t *rom) {
@@ -200,6 +228,7 @@ int main(void) {
     test_bridge(rom);
     test_explore(rom);
     test_palette(rom);
+    test_index(rom);
     test_jobs(rom);
     free(rom);
     if (fails) { printf("%d failure(s)\n", fails); return 1; }

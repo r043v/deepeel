@@ -88,7 +88,23 @@ typedef struct {
     void *pre_user;
 } DpPceOptions;
 
+// An indexed read site (lda/adc/... abs,X or abs,Y): the base is the operand,
+// the index is the 8-bit X/Y. See docs/COUVERTURE.fr.md section 5.
+typedef struct {
+    uint32_t site;        // cell of the instruction
+    uint16_t base;        // CPU address operand
+    int32_t cell0;        // cell of base (element 0), same 8 KiB page as base
+    uint16_t idx_min, idx_max;
+    uint64_t n_obs;
+} DpPceIndexed;
+enum { DP_PCE_IDX_CAP = 256 };
+
 typedef struct DpPceResults_ {
+    uint8_t *idx_flags;    // 1: declared by index inference (gaps inside the observed index range)
+    DpPceIndexed idx[DP_PCE_IDX_CAP];
+    unsigned nidx;
+    uint64_t idx_overflow, idx_cross_page, idx_forced_ignored;      // records dropped (cap), reads on another page than the base
+    uint32_t idx_declared, idx_refused_code, idx_biased; // bytes inferred / refused over code / sites starting at index >= 1
     uint8_t *flags;        // one byte per physical cell
     uint8_t *pal_flags;    // 1: the cell was copied into the VCE palette (HuC6260)
     uint64_t vce_data_writes, palette_bytes; // VCE colour-data stores / distinct palette cells

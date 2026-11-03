@@ -142,10 +142,75 @@ static void log_copy(PceRun *x, uint32_t cell, uint8_t channel) {
 
 // --- bus observer -----------------------------------------------------------------
 
+// abs,X / abs,Y data-read opcodes of the 6502 family (HuC6280 included)
+static int indexed_read_op(uint8_t op) {
+    switch (op) {
+    case 0xBD: case 0xB9: case 0xBE: case 0xBC: // lda,x lda,y ldx,y ldy,x
+    case 0x7D: case 0x79: case 0xFD: case 0xF9: // adc sbc
+    case 0x3D: case 0x39: case 0x1D: case 0x19: // and ora
+    case 0x5D: case 0x59: case 0xDD: case 0xD9: // eor cmp
+        return 1;
+    }
+    return 0;
+}
+
+// Records the index of an abs,X/Y read against its operand base. The base is
+// proven (it is the operand); the index is bounded by 8 bits.
+static void index_note(PceRun *x, uint32_t cell, uint16_t addr) {
+    DpPceResults *r = x->r;
+    if (!indexed_read_op(x->cur_op)) return;
+    int64_t c1 = dp_pce_rom_index((uint16_t)(x->cur_pc + 1)), c2 = dp_pce_rom_index((uint16_t)(x->cur_pc + 2));
+    int64_t site = dp_pce_rom_index(x->cur_pc);
+    if (c1 < 0 || c2 < 0 || site < 0 || (size_t)c2 >= x->rom_size) return;
+    uint16_t base = (uint16_t)(x->rom[c1] | x->rom[c2] << 8);
+    uint16_t idx = (uint16_t)(addr - base);
+    if (idx > 255) return;
+    // a forced fork can run an index loop far past what the game does: the
+    // range comes from natural paths only
+    if (x->forced) { r->idx_forced_ignored++; return; }
+    if ((base >> 13) != (addr >> 13)) { r->idx_cross_page++; return; }
+    int32_t cell0 = (int32_t)cell - idx;
+    unsigned k;
+    for (k = 0; k < r->nidx; k++)
+        if (r->idx[k].site == (uint32_t)site && r->idx[k].base == base && r->idx[k].cell0 == cell0) break;
+    if (k == r->nidx) {
+        if (k >= DP_PCE_IDX_CAP) { r->idx_overflow++; return; }
+        r->idx[k] = (DpPceIndexed){ (uint32_t)site, base, cell0, idx, idx, 0 };
+        r->nidx++;
+    }
+    DpPceIndexed *e = &r->idx[k];
+    if (idx < e->idx_min) e->idx_min = idx;
+    if (idx > e->idx_max) e->idx_max = idx;
+    e->n_obs++;
+}
+
+// Declares the unobserved elements between the lowest and the highest index
+// seen at each site. Never below idx_min (a biased base such as tbl-1 starts
+// at index 1; its element 0 lies before the table), never above idx_max
+// without a proven bound, never over executed code, never past the 8 KiB page.
+static void index_declare(PceRun *x) {
+    DpPceResults *r = x->r;
+    if (!r->idx_flags) return;
+    for (unsigned k = 0; k < r->nidx; k++) {
+        const DpPceIndexed *e = &r->idx[k];
+        if (e->idx_min >= 1) r->idx_biased++;
+        unsigned room = 0x2000u - (e->base & 0x1FFFu);
+        for (unsigned i = e->idx_min; i <= e->idx_max && i < room; i++) {
+            int64_t c = (int64_t)e->cell0 + i;
+            if (c < 0 || (size_t)c >= x->rom_size) continue;
+            uint8_t f = r->flags[c];
+            if (f & (DP_PCE_DATA | DP_PCE_COPIED)) continue;     // already observed
+            if (f & (DP_PCE_NATURAL | DP_PCE_FORCED | DP_PCE_STATIC)) { r->idx_refused_code++; continue; }
+            if (!r->idx_flags[c]) { r->idx_flags[c] = 1; r->idx_declared++; }
+        }
+    }
+}
+
 static void obs_rom_read(void *user, uint32_t cell, uint16_t addr) {
     PceRun *x = user;
     if (addr >= x->cur_pc && (unsigned)addr < (unsigned)x->cur_pc + x->cur_len) return; // fetch
     if (cell >= x->rom_size) return;
+    index_note(x, cell, addr);
     x->r->data_reads++;
     mark(x, cell, DP_PCE_DATA);
     x->last_read_cell = cell;
@@ -957,6 +1022,8 @@ void dp_pce_results_free(DpPceResults *r) {
     if (!r) return;
     free(r->flags);
     free(r->pal_flags);
+    free(r->idx_flags);
+    r->idx_flags = NULL;
     free(r->sections);
     r->pal_flags = NULL;
     r->flags = NULL;
@@ -988,6 +1055,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     memset(x->page_win, 0xFF, sizeof x->page_win);
     r->flags = calloc(x->rom_size, 1);
     r->pal_flags = calloc(x->rom_size, 1);
+    r->idx_flags = calloc(x->rom_size, 1);
     x->fork_sites = calloc(x->rom_size, 1);
     x->pad_sites = calloc(x->rom_size, 1);
     x->irq_sites = calloc(x->rom_size, 1);
@@ -1059,6 +1127,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     if (x->opt.pre_finalize) x->opt.pre_finalize(r, x->opt.pre_user);
     if (!x->opt.no_finalize) {
         if (x->opt.static_closure) static_closure(x);
+        index_declare(x);
         tables(x);
         sections_build(x);
         free(g_inferred);
@@ -1169,6 +1238,11 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             (unsigned long long)r->copied_bytes, (unsigned long long)r->io_writes);
     fprintf(out, "  VCE colour-data writes %llu, palette bytes from ROM %llu\n",
             (unsigned long long)r->vce_data_writes, (unsigned long long)r->palette_bytes);
+    fprintf(out, "  index inference (abs,X/Y): %u sites, %u bytes declared, %u refused over code, %u sites biased (start at index >= 1), "
+            "%llu reads off the base page, %llu on forced paths (ignored), %llu sites dropped (cap)\n",
+            r->nidx, r->idx_declared, r->idx_refused_code, r->idx_biased,
+            (unsigned long long)r->idx_cross_page, (unsigned long long)r->idx_forced_ignored,
+            (unsigned long long)r->idx_overflow);
     fprintf(out, "  faults %llu, exec outside ROM %llu, queued state bytes %llu\n",
             (unsigned long long)r->faults, (unsigned long long)r->exec_outside,
             (unsigned long long)r->state_bytes_peak);

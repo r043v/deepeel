@@ -1034,3 +1034,23 @@ J7 (partiel) : Mega Drive, observation du Z80 son.
   de l'outil, pas des mesures de matériel.
 - Test : `fix_md_z80` (68000 copie un programme Z80 de 13 octets, le Z80 lit
   `$8320` et l'écrit sur le DAC).
+
+## 0.58.0
+
+J8 (partiel) : inférence par index (§5), tranche 6502/HuC6280.
+- Les lectures `lda/ldx/ldy/adc/sbc/and/ora/eor/cmp abs,X|Y` ont une base
+  **prouvée** (l'opérande) et un index borné à 8 bits. Par site, l'outil
+  consigne `base`, `idx_min`, `idx_max`, `n_obs` (cap 256 sites, débordement
+  compté).
+- À la finalisation, les octets **non observés** entre `idx_min` et `idx_max`
+  sont déclarés `idx_flags` (« index-inference »), sans jamais :
+  descendre sous `idx_min` (base biaisée `tbl-1` : l'élément avant la table
+  n'est pas déclaré, le site est compté `biased`), dépasser `idx_max`
+  (aucune borne haute prouvée n'est encore exploitée), couvrir du code
+  (`refused over code`), ni franchir la page de 8 Kio de la base.
+- Les lectures des chemins **forcés** sont ignorées pour la plage (une
+  fourche forcée peut boucler sur tout l'index) et comptées.
+- `--jobs 2` fusionne les sites des deux instances.
+- Limites : seulement PCE ; pas de rejeu par index (§5.4), pas de
+  provenance « base + index » sur le treillis, pas de classe dans la
+  carte PNG. Test : `test_index` (table à trous, table biaisée).
