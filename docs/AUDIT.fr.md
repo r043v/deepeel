@@ -11,8 +11,8 @@ remesure pas l'outil.
 | GB | 34 | 1 | 3 | 1 |
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
-| NES | 12 | 22 | 3 | 2 |
-| PCE | 16 | 19 | 3 | 1 |
+| NES | 12 | 23 | 2 | 2 |
+| PCE | 16 | 20 | 2 | 1 |
 | MD | 8 | 20 | 10 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
@@ -107,8 +107,8 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | O2 | `.cov`, romdata, `--evidence` | MD | ◐ `--evidence` ; pas de `.cov` ni romdata |
 | O3 | `--watch` (SDL2) | SMS/GG | ✗ |
 | O3 | `--watch` (SDL2) | MSX | ✗ |
-| O3 | `--watch` (SDL2) | NES | ✗ |
-| O3 | `--watch` (SDL2) | PCE | ✗ |
+| O3 | `--watch` (SDL2) | NES | ◐ `--watch`/`--watch-dump` (panneau 160×128) |
+| O3 | `--watch` (SDL2) | PCE | ◐ `--watch`/`--watch-dump` (rangées VDC) |
 | O3 | `--watch` (SDL2) | MD | ◐ `--watch [FPS]` (fenêtre SDL2) et `--watch-dump FILE` (PPM) |
 
 Problèmes de forme : aucun.

@@ -30,6 +30,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <zlib.h>
+#include "../../gui/fbwatch.h"
 
 typedef struct {
     uint8_t *z;            // compressed bridge state
@@ -40,6 +41,18 @@ typedef struct {
 
 enum { LOOP_SLOTS = 4096 };
 typedef struct { uint64_t key; uint32_t count; } PceLoop;
+
+static unsigned g_watch_every;
+static DpPceResults *g_watch_r;
+static uint64_t g_watch_n;
+static void watch_frame_hook(void) {
+    if (!g_watch_every || ++g_watch_n % g_watch_every) return;
+    static uint32_t px[352 * 256];
+    int w, h;
+    if (!dp_pce_render(px, 352 * 256, &w, &h)) return;
+    dp_fb_publish(px, w, h, g_watch_n);
+    g_watch_r->watch_frames++;
+}
 
 typedef struct {
     DpPceOptions opt;
@@ -1267,6 +1280,9 @@ static size_t g_inferred_size;
 int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options,
                    DpPceResults *results) {
     if (!data || !results) return 0;
+    g_watch_every = options ? options->watch_every : 0;
+    g_watch_r = results;
+    g_watch_n = 0;
     if (!dp_pce_init(data, size)) {
         fprintf(stderr, "deepeel: not a HuCard image (size %zu)\n", size);
         return 0;
@@ -1282,6 +1298,8 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     memset(r, 0, sizeof *r);
     x->opt = options ? *options : dp_pce_options();
     r->options = x->opt;
+    dp_pce_set_frame_hook(watch_frame_hook);
+    dp_pce_watch_enable(g_watch_every != 0);
     if (x->opt.lot_path && !(x->lot = dp_lf_open(x->opt.lot_path, "PCE", 1)))
         fprintf(stderr, "deepeel: cannot open the lot %s\n", x->opt.lot_path);
     x->r = r;
@@ -1523,6 +1541,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run,
             (unsigned long long)r->tas_frames_run);
     fprintf(out, "  tas identity: %llu same ROM, %llu different, %llu unrecorded\n", (unsigned long long)r->tas_same, (unsigned long long)r->tas_different, (unsigned long long)r->tas_unrecorded);
+    if (r->watch_frames) fprintf(out, "  watch: %llu frames published\n", (unsigned long long)r->watch_frames);
     fprintf(out, "  novelty: depth %u frames, %llu trials, %llu frames, %llu hits, %llu deaths, %llu archived (%llu replaced)\n",
             r->novelty_depth, (unsigned long long)r->novelty_trials, (unsigned long long)r->novelty_frames_run,
             (unsigned long long)r->novelty_hits, (unsigned long long)r->novelty_deaths,

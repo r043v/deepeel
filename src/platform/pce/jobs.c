@@ -160,6 +160,7 @@ int dp_pce_explore_jobs(const uint8_t *data, size_t size, const DpPceOptions *op
     o.play_frames = 0;
     o.play_sessions = 0;
     o.novelty_steps = 0;
+    o.watch_every = 0;
     o.tas_count = 0;
     o.pre_finalize = fold;
     o.pre_user = j;

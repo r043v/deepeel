@@ -1027,7 +1027,8 @@ static int cmd_nes(int argc, char **argv) {
     }
     const char *path = NULL, *text = NULL, *map = NULL, *evidence = NULL, *cov = NULL, *romdata = NULL, *mapper_name = "auto";
     DpNesOptions opt = dp_nes_options();
-    int nes_jobs = 1;
+    int nes_jobs = 1, nes_watch = 0;
+    const char *nes_dump = NULL;
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
         if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
@@ -1057,6 +1058,15 @@ static int cmd_nes(int argc, char **argv) {
         else if (!strcmp(a, "--novelty") && i + 1 < argc) opt.novelty_steps = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--novelty-frames") && i + 1 < argc) opt.novelty_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--novelty-cells")) opt.novelty_cells = 1;
+        else if (!strcmp(a, "--watch")) {
+            int fps = 30;
+            if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') fps = atoi(argv[++i]);
+            if (fps < 1) fps = 1;
+            if (fps > 30) fps = 30;
+            opt.watch_every = (unsigned)(60 / fps);
+            nes_watch = 1;
+        }
+        else if (!strcmp(a, "--watch-dump") && i + 1 < argc) { nes_dump = argv[++i]; if (!opt.watch_every) opt.watch_every = 2; }
         else if (!strcmp(a, "--novelty-archive") && i + 1 < argc) opt.novelty_archive = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed-vectors")) opt.seed_vectors = 1;
         else if (!strcmp(a, "--ctx-cap") && i + 1 < argc) opt.ctx_cap = (unsigned)strtoul(argv[++i], NULL, 0);
@@ -1085,7 +1095,11 @@ static int cmd_nes(int argc, char **argv) {
     uint8_t *data = nes_read_file(path, &size);
     if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", path); return 1; }
     DpNesResults res;
-    if (!dp_nes_explore_jobs(data, size, mapper, &opt, &res, nes_jobs)) {
+    if (nes_watch) dp_fbwatch_start("deepeel nes watch");
+    int nes_ok = dp_nes_explore_jobs(data, size, mapper, &opt, &res, nes_jobs);
+    if (nes_watch) dp_fbwatch_stop();
+    if (nes_dump && dp_fb_dump_ppm(nes_dump)) fprintf(stderr, "deepeel: no frame to dump\n");
+    if (!nes_ok) {
         fprintf(stderr, "deepeel: not an iNES image the explorer accepts (%s)\n", path);
         free(data);
         return 1;
@@ -1135,7 +1149,8 @@ static int cmd_pce(int argc, char **argv) {
     }
     const char *path = NULL, *text = NULL, *map = NULL, *png = NULL, *pce_ev = NULL;
     DpPceOptions opt = dp_pce_options();
-    int pce_jobs = 1;
+    int pce_jobs = 1, pce_watch = 0;
+    const char *pce_dump = NULL;
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
         if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
@@ -1163,6 +1178,15 @@ static int cmd_pce(int argc, char **argv) {
         else if (!strcmp(a, "--no-irq-fork")) opt.seed_irq = 0;
         else if (!strcmp(a, "--novelty") && i + 1 < argc) opt.novelty_steps = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--novelty-frames") && i + 1 < argc) opt.novelty_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--watch")) {
+            int fps = 30;
+            if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') fps = atoi(argv[++i]);
+            if (fps < 1) fps = 1;
+            if (fps > 30) fps = 30;
+            opt.watch_every = (unsigned)(60 / fps);
+            pce_watch = 1;
+        }
+        else if (!strcmp(a, "--watch-dump") && i + 1 < argc) { pce_dump = argv[++i]; if (!opt.watch_every) opt.watch_every = 2; }
         else if (!strcmp(a, "--novelty-cells")) opt.novelty_cells = 1;
         else if (!strcmp(a, "--novelty-archive") && i + 1 < argc) opt.novelty_archive = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--no-static")) opt.static_closure = 0;
@@ -1184,7 +1208,11 @@ static int cmd_pce(int argc, char **argv) {
     uint8_t *data = nes_read_file(path, &size);
     if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", path); return 1; }
     DpPceResults *res = calloc(1, sizeof *res);
-    if (!res || !dp_pce_explore_jobs(data, size, &opt, res, pce_jobs)) {
+    if (pce_watch) dp_fbwatch_start("deepeel pce watch");
+    int pce_ok = res && dp_pce_explore_jobs(data, size, &opt, res, pce_jobs);
+    if (pce_watch) dp_fbwatch_stop();
+    if (pce_dump && dp_fb_dump_ppm(pce_dump)) fprintf(stderr, "deepeel: no frame to dump\n");
+    if (!pce_ok) {
         fprintf(stderr, "deepeel: pce explore failed (%s)\n", path);
         free(res);
         free(data);

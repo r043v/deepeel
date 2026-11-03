@@ -18,6 +18,23 @@
 #undef pce_bus_read
 #undef pce_bus_write
 #include "pce.h"
+static void (*frame_hook_fn)(void);
+
+// the display side of pce_frame's line loop, which the stepper replaces: first active line,
+// then the row callback (watch picture) with the VCE applied
+static void emit_row(unsigned line) {
+    pce_t *p = &machine;
+    if (line == 0) p->have_frame = 0;
+    if (p->vdc.active_started && !p->have_frame) {
+        p->first_active_line = line;
+        p->have_frame = 1;
+    }
+    if (!p->row) return;
+    const unsigned width = p->vdc.row_width < 1024 ? p->vdc.row_width : 1024;
+    const uint16_t *lut = p->vce_final;
+    for (unsigned x = 0; x < width; x++) p->rowbuf[x] = lut[p->vdc.linebuf[x] & 0x1FF];
+    p->row(p->host, line, p->rowbuf, width);
+}
 #include <stdlib.h>
 
 uint8_t pce_bus_read(uint16_t at);
@@ -185,6 +202,7 @@ unsigned dp_pce_step(int *frame_done) {
     line_left -= (int)spent;
     if (line_left <= 0) {
         vdc_line(&machine.vdc, line_no);
+        emit_row(line_no);
         machine.timer_clock += line_budget_;
         while (machine.timer_clock >= 1024) {
             machine.timer_clock -= 1024;
@@ -194,6 +212,7 @@ unsigned dp_pce_step(int *frame_done) {
         if (++line_no == 262) {
             line_no = 0;
             machine.frames++;
+            if (frame_hook_fn) frame_hook_fn();
             if (frame_done) *frame_done = 1;
         }
         line_start();
@@ -210,6 +229,31 @@ void dp_pce_raise(int source) {
 void dp_pce_input(uint8_t buttons) { machine.input = buttons; }
 uint8_t dp_pce_input_get(void) { return machine.input; }
 uint32_t dp_pce_frames(void) { return machine.frames; }
+
+// --- watch picture: the VDC's rows (RGB565, 256 or 352 wide) of the last frame ---
+static uint16_t watch_pix[262 * 352];
+static unsigned watch_w;
+static void watch_row(void *host, unsigned line, const uint16_t *px, unsigned width) {
+    (void)host;
+    if (line >= 262 || width > 352) return;
+    memcpy(watch_pix + (size_t)line * 352, px, width * sizeof *px);
+    watch_w = width;
+}
+void dp_pce_watch_enable(int on) { machine.row = on ? watch_row : 0; machine.row_raw = 0; }
+void dp_pce_set_frame_hook(void (*fn)(void)) { frame_hook_fn = fn; }
+// the visible rows as ARGB (w x h); returns 0 before the first frame
+int dp_pce_render(uint32_t *argb, unsigned cap, int *w, int *h) {
+    unsigned ww = watch_w ? watch_w : machine.vdc.row_width, y0 = machine.first_active_line, hh = machine.vdc.active_height;
+    if (!ww || !hh || y0 + hh > 262 || ww * hh > cap) return 0;
+    for (unsigned y = 0; y < hh; y++)
+        for (unsigned x = 0; x < ww; x++) {
+            uint16_t v = watch_pix[(size_t)(y0 + y) * 352 + x];
+            unsigned r = (v >> 11) & 31, g = (v >> 5) & 63, b = v & 31;
+            argb[y * ww + x] = 0xFF000000u | ((r << 3 | r >> 2) << 16) | ((g << 2 | g >> 4) << 8) | (b << 3 | b >> 2);
+        }
+    *w = (int)ww; *h = (int)hh;
+    return 1;
+}
 
 size_t dp_pce_state_size(void) { return sizeof(PceBridgeState); }
 
@@ -295,6 +339,7 @@ void dp_pce_run_frame(void) {
         line_left -= (int)(c->cycles - before);
         if (line_left > 0) continue;
         vdc_line(&machine.vdc, line_no);
+        emit_row(line_no);
         machine.timer_clock += line_budget_;
         while (machine.timer_clock >= 1024) {
             machine.timer_clock -= 1024;
@@ -305,6 +350,7 @@ void dp_pce_run_frame(void) {
         if (++line_no == 262) {
             line_no = 0;
             machine.frames++;
+            if (frame_hook_fn) frame_hook_fn();
             done = 1;
         }
         line_start();

@@ -659,6 +659,27 @@ def build_nes_pce(out):
         n[q:q + 2] = bytes([0x00, 0x80])
     with open(os.path.join(out, "fix_nes_static.nes"), "wb") as f:
         f.write(n)
+    # NES picture: palette ($0F, $30), 64 nametable tiles of tile 1 (solid colour 1), rendering on
+    n = bytearray(16 + 2 * 0x4000 + 0x2000)
+    n[0:4] = b"NES\x1a"
+    n[4], n[5] = 2, 1
+    code = bytes([0xA9, 0x3F, 0x8D, 0x06, 0x20, 0xA9, 0x00, 0x8D, 0x06, 0x20,
+                  0xA9, 0x0F, 0x8D, 0x07, 0x20, 0xA9, 0x30, 0x8D, 0x07, 0x20,
+                  0xA9, 0x20, 0x8D, 0x06, 0x20, 0xA9, 0x00, 0x8D, 0x06, 0x20, 0xA2, 0x00,
+                  0xA9, 0x01, 0x8D, 0x07, 0x20, 0xE8, 0xE0, 0x40, 0xD0, 0xF6,
+                  0xA9, 0x00, 0x8D, 0x05, 0x20, 0x8D, 0x05, 0x20, 0xA9, 0x0A, 0x8D, 0x01, 0x20])
+    code += bytes([0x4C, 0x00 + (16 + 0) , 0x80])
+    n[16:16 + len(code)] = code
+    # jump to itself (the 4C is the last instruction): patch its address
+    at = len(code) - 3
+    code = code[:at + 1] + bytes([at & 0xFF, 0x80])
+    n[16:16 + len(code)] = code
+    n[16 + 2 * 0x4000 + 16:16 + 2 * 0x4000 + 24] = bytes([0xFF] * 8)   # CHR tile 1, plane 0
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        q = 16 + 0x4000 + (v - 0xFFFA) + 0x3FFA
+        n[q:q + 2] = bytes([0x00, 0x80])
+    with open(os.path.join(out, "fix_nes_picture.nes"), "wb") as f:
+        f.write(n)
     # NES pointer table: three executed subroutines, then the table of their
     # addresses is read as data ($8100: $8040, $8050, $8060)
     n = bytearray(16 + 2 * 0x4000 + 0x2000)

@@ -16,6 +16,7 @@
 #include <string.h>
 #include <math.h>
 #include <zlib.h>
+#include "../../gui/fbwatch.h"
 
 // one queued exploration state: a machine snapshot plus its provenance
 typedef struct {
@@ -72,6 +73,7 @@ typedef struct {
     uint8_t snapshot[DP_NES_STATE_MAX];
     int jam_pending, failed;
     uint32_t rng;
+    uint64_t wframe;                   // frames seen (watch sampling)
     int nov;                           // novelty search running (frame hook stops it, counts apart)
     uint64_t novel;                    // PRG cells executed for the first time (novelty gain)
 } DpNesRun;
@@ -456,6 +458,12 @@ static void chr_note_tiles(DpNesRun *x) {
 static void hook_frame(void *user) {
     DpNesRun *x = user;
     chr_note_tiles(x);
+    if (x->opt.watch_every && ++x->wframe % x->opt.watch_every == 0) {
+        static uint32_t px[160 * 128];
+        dp_nesmach_render(x->m, px);
+        dp_fb_publish(px, 160, 128, x->wframe);
+        x->r->watch_frames++;
+    }
     if (!x->play_mode) return;
     x->frame_count++;
     if (!x->nov) x->r->play_frames_run++;
@@ -967,6 +975,7 @@ static void hooks_install(DpNesRun *x) {
     h.on_interrupt = hook_interrupt;
     h.on_frame = hook_frame;
     dp_nesmach_set_hooks(x->m, &h);
+    dp_nesmach_watch_enable(x->m, x->opt.watch_every != 0);
 }
 
 int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
@@ -1629,6 +1638,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->exec_outside);
     fprintf(out, "  play: %llu sessions x frames %llu\n",
         (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run);
+    if (r->watch_frames) fprintf(out, "  watch: %llu frames published\n", (unsigned long long)r->watch_frames);
     if (r->novelty_trials)
         fprintf(out, "  novelty: depth %u frames, %llu trials, %llu frames, %llu hits, %llu deaths, %llu archived (%llu replaced)\n",
                 r->novelty_depth, (unsigned long long)r->novelty_trials, (unsigned long long)r->novelty_frames_run,

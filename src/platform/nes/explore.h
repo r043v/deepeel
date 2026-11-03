@@ -120,6 +120,7 @@ typedef struct {
     uint32_t novelty_frames;    // frames per trial
     uint32_t novelty_archive;   // archive capacity
     int novelty_cells;          // key the archive on the screen fingerprint and lives
+    unsigned watch_every;       // publish a frame to the watch buffer every N frames (0: off)
     int skip_root;
     int no_finalize;
     void (*pre_finalize)(struct DpNesResults_ *r, void *user);
@@ -171,6 +172,7 @@ typedef struct DpNesResults_ {
     uint64_t irq_counts[2];    // NMI, IRQ dispatched
     uint64_t novelty_trials, novelty_hits, novelty_archived, novelty_replaced, novelty_frames_run, novelty_deaths;
     uint32_t novelty_depth;
+    uint64_t watch_frames;
     unsigned jobs_folded;      // --jobs 2: secondary instances folded into this report
     DpNesOptions options;
 } DpNesResults;

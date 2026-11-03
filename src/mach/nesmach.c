@@ -120,6 +120,9 @@ static void regs_write(const DpNesMach *d, DpNesMapRegs *r, unsigned a, unsigned
     }
 }
 
+static uint16_t watch_buf[160 * 128];   /* panel picture, see dp_nesmach_watch_enable */
+static int watch_on;
+
 static void io_copy(void *data, uint32_t bytes, void *ctx) {
     uint8_t **p = ctx;
     memcpy(*p, data, bytes);
@@ -256,7 +259,10 @@ uint64_t dp_nesmach_run(DpNesMach *d, uint64_t max_steps) {
     d->budget = max_steps;
     while (d->steps < max_steps) {
         if (d->in_frame) nes_frame_rest();
-        else nes_frame();
+        else {
+            if (watch_on) machine.ppu.panel_out = watch_buf;
+            nes_frame();
+        }
         /* a completed frame (line 262) reports on_frame even when a hook
          * stop raced its end; a mid-frame stop resumes through rest() */
         if (machine.line >= 262u) {
@@ -461,6 +467,24 @@ size_t dp_nesmach_chr_tiles(const DpNesMach *d, uint64_t *out, size_t cap) {
         }
     }
     return n;
+}
+static void watch_row(void *host, unsigned row) {
+    (void)host;
+    machine.ppu.panel_out = watch_buf + (size_t)((row + 1) % 128) * 160;
+}
+void dp_nesmach_watch_enable(DpNesMach *d, int on) {
+    (void)d;
+    watch_on = on;
+    machine.ppu.panel = on ? watch_row : 0;
+    machine.ppu.panel_out = watch_buf;
+}
+void dp_nesmach_render(const DpNesMach *d, uint32_t *argb) {
+    (void)d;
+    for (unsigned i = 0; i < 160 * 128; i++) {
+        uint16_t v = watch_buf[i];
+        unsigned r = (v >> 11) & 31, g = (v >> 5) & 63, b = v & 31;
+        argb[i] = 0xFF000000u | ((r << 3 | r >> 2) << 16) | ((g << 2 | g >> 4) << 8) | (b << 3 | b >> 2);
+    }
 }
 const uint8_t *dp_nesmach_ram(const DpNesMach *d) { (void)d; return machine.ram; }
 uint64_t dp_nesmach_screen_key(const DpNesMach *d) {

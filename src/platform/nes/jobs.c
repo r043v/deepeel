@@ -142,6 +142,7 @@ int dp_nes_explore_jobs(const uint8_t *data, size_t size, int mapper, const DpNe
     o.play_sessions = 0;
     o.tas_count = 0;
     o.novelty_steps = 0;
+    o.watch_every = 0;
     o.pre_finalize = fold;
     o.pre_user = j;
     if (pthread_create(&j->th, NULL, job_main, j)) {

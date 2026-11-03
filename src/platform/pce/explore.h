@@ -76,6 +76,7 @@ typedef struct {
     uint32_t novelty_frames; // frames per trial
     uint32_t novelty_archive; // archive cap (the least productive leaves first)
     int novelty_cells;       // Go-Explore cells: screen fingerprints, learned lives, depth bias
+    unsigned watch_every;    // publish a frame to the watch buffer every N frames (0: off)
     char tas_paths[8][512];
     int tas_count;
     uint16_t entries[16];   // explicit entry points (CPU addresses in the power-on mapping)
@@ -125,6 +126,7 @@ typedef struct DpPceResults_ {
     uint64_t disp_tables, disp_seeds, disp_refused_view, pass2_seeds, pass2_refused, pass2_capped, tree_nodes, prov_sites, indirect_sites, indirect_targets, indirect_overflow, sib_tables, sib_entries, sib_bytes, sib_caps, ctx_evicted, entries_seeded, entries_refused, tas_same, tas_different, tas_unrecorded, play_frames_run, play_sessions_run, tas_frames_run;
     uint64_t novelty_trials, novelty_hits, novelty_archived, novelty_replaced, novelty_frames_run,
              novelty_deaths;
+    uint64_t watch_frames;
     uint32_t novelty_depth;  // deepest archived cell, frames from power-on
     uint64_t io_writes, vdc_data_writes, copied_bytes;
     uint64_t static_bytes, padding_bytes, inferred_code, inferred_data, inferred_pad,

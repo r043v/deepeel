@@ -88,6 +88,10 @@ size_t dp_nesmach_chr_tiles(const DpNesMach *m, uint64_t *out, size_t cap);
 
 /* the 2 KiB CPU RAM, and a coarse screen fingerprint (nametable tiles >> 3 sampled every 4th,
  * coarse scroll, nametable select): equal keys = the same screen cell (Go-Explore) */
+/* the 160x128 panel picture of the last frame (RGB565 words as the renderer writes them);
+ * enabling it makes the PPU render rows, which costs time: off by default */
+void dp_nesmach_watch_enable(DpNesMach *m, int on);
+void dp_nesmach_render(const DpNesMach *m, uint32_t *argb);   /* 160x128 */
 const uint8_t *dp_nesmach_ram(const DpNesMach *m);
 uint64_t dp_nesmach_screen_key(const DpNesMach *m);
 unsigned dp_nesmach_ppu_v(const DpNesMach *m);  /* the PPU address ($2006/$2007) */

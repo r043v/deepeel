@@ -1851,3 +1851,18 @@ thread de la fenêtre). La fenêtre SDL2 affiche la dernière image
 indépendant de la plateforme : NES/PCE n'ont qu'à publier. Reste ◐ : pas de
 bandeau d'état (vitesse, film), l'instance secondaire de `--jobs` ne publie
 pas, NES/PCE/J5 (`.sta`, mode humain) non faits.
+
+## 0.123.0
+
+NES et PCE : `--watch [FPS]` et `--watch-dump FILE` (O3, partielle), sur le
+tampon commun de 0.122.0. NES : le panneau 160×128 du PPU
+(`dp_nesmach_watch_enable`/`dp_nesmach_render`, RGB565 → ARGB) ; le rendu n'est
+activé que sous `--watch`. PCE : le pas-à-pas remplaçait la boucle de lignes de
+`pce_frame` sans rangées d'affichage ; `emit_row` les rétablit (première ligne
+active, VCE appliquée) et un crochet d'image publie la copie (`dp_pce_render`,
+256 ou 352 de large). L'image publiée est celle du dernier chemin exécuté
+(un chemin forcé peut dessiner autrement que le chemin naturel). Fixture
+`fix_nes_picture.nes` (palette, tuiles, rendu actif) ; tests `nes_watch_dump`,
+`pce_watch_dump` (le fixture PCE n'active pas l'affichage : on ne vérifie que le
+flux d'images et le format). Reste ◐ : pas de bandeau d'état, `--jobs`
+secondaire sans publication, image PCE jamais vérifiée sur un vrai affichage.

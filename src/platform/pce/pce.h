@@ -94,6 +94,9 @@ void dp_pce_raise(int source);
 void dp_pce_input(uint8_t buttons);  // PCE_BTN_* layout of m0boy
 uint8_t dp_pce_input_get(void);
 uint32_t dp_pce_frames(void);
+void dp_pce_watch_enable(int on);               // capture the VDC rows (costs time: off by default)
+void dp_pce_set_frame_hook(void (*fn)(void));   // called when a frame completes in dp_pce_step
+int dp_pce_render(uint32_t *argb, unsigned cap, int *w, int *h);
 // whole-machine snapshot (CPU, WRAM, VDC with VRAM, VCE, PSG, timer, pad,
 // line clock); dp_pce_state_hash covers the control state only (CPU, WRAM,
 // VDC registers, timer, pad, line phase) — the dedup key
