@@ -1903,3 +1903,11 @@ de la donnée inférée. Le résultat vit dans `inferred`, jamais dans `flags` :
 inférence ne masque pas une observation. Ligne de rapport `map inference (S7,
 not observations)`. Reste ◐ : pas de carte `.map` classée ni de rendu PNG pour
 le MD (O1), donc l'inférence n'est visible que par ses compteurs.
+
+## 0.127.0
+
+Mega Drive : `--map` écrit désormais une carte classée, `md map v1`, un chiffre
+par octet de ROM, mêmes classes que le NES (`code-natural`, `code-forced`,
+`data-copied` pour DMA/VRAM, `data-read`, puis les trois inférences S7). Avant,
+le fichier était un vidage brut des drapeaux. Une inférence ne remplace jamais
+une observation. Reste ◐ : pas encore de rendu PNG, JSON ni heat pour le MD.

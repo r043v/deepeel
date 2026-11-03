@@ -1452,12 +1452,39 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
                 r->copies[i].len, r->copies[i].code);
 }
 
+// One class per ROM byte (same digits as the NES map, DP_NMAP_*): observed
+// evidence first, then S7 inferences; nothing inferred overrides an observation.
+uint8_t *dp_md_map_build(const DpMdResults *r) {
+    if (!r || !r->flags) return NULL;
+    uint8_t *m = malloc(r->rom_size ? r->rom_size : 1);
+    if (!m) return NULL;
+    for (size_t i = 0; i < r->rom_size; i++) {
+        uint8_t f = r->flags[i], c;
+        if (f & DP_MDF_NATURAL) c = 1;                         // code-natural
+        else if (f & DP_MDF_FORCED) c = 2;                     // code-forced
+        else if (f & (DP_MDF_DMA_READ | DP_MDF_CPU_VRAM)) c = 4;   // data-copied
+        else if (f & DP_MDF_DATA) c = 5;                       // data-read
+        else if (r->inferred && r->inferred[i] == 1) c = 11;   // inferred-padding
+        else if (r->inferred && r->inferred[i] == 2) c = 10;   // inferred-code
+        else if (r->inferred && r->inferred[i] == 3) c = 9;    // inferred-data
+        else c = 0;
+        m[i] = c;
+    }
+    return m;
+}
+
 int dp_md_explore_map(const DpMdResults *r, const char *path) {
+    uint8_t *m = dp_md_map_build(r);
+    if (!m) return -1;
     FILE *f = fopen(path, "wb");
-    if (!f) return -1;
-    size_t n = fwrite(r->flags, 1, r->rom_size, f);
-    fclose(f);
-    return n == r->rom_size ? 0 : -1;
+    if (!f) { free(m); return -1; }
+    fputs("md map v1\n", f);
+    for (size_t i = 0; i < r->rom_size; i++) fputc('0' + m[i], f);   // same encoding as the NES map
+    fputc('\n', f);
+    int rc = 0;
+    if (fclose(f)) rc = -1;
+    free(m);
+    return rc;
 }
 
 int dp_md_explore_evidence(const DpMdResults *r, const char *path) {
