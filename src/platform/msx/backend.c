@@ -183,6 +183,7 @@ const DpSegaBackend *dp_msx_backend(void) {
     static const DpSegaBackend ops={explore_init,dp_msx_cpu,dp_msx_read,dp_msx_write,
         dp_msx_in,dp_msx_out,dp_msx_advance,dp_msx_rom_index,sizeof(Snapshot),explore_save,explore_load,
         dp_msx_ram_index,explore_target,explore_input,explore_set_input,explore_mapper,explore_command,
-        explore_irq,65536,65536,0xff,0x98,0x99,dp_msx_close,explore_windows,NULL,NULL,explore_geometry,explore_window};
+        explore_irq,65536,65536,0xff,0x98,0x99,dp_msx_close,explore_windows,NULL,NULL,explore_geometry,explore_window,
+        dp_msx_info,dp_msx_observe,dp_msx_bios_trap};
     return &ops;
 }

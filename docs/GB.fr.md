@@ -882,3 +882,13 @@ Fin de J3 : `DpIsa.mem_operand` (opérande mémoire du SM83), `DpMachine.observe
 (`forks.c`, `seeds.c`, `ctxproj.c`, `frontier_disk.c`, `explorer_priv.h`).
 Aucun changement de comportement : carte de Zelda (3 M pas) identique octet
 pour octet à 0.43.1. Observation de l'outil, pas une mesure matérielle.
+
+## 0.46.0
+
+J4 (début) : `--jobs 2` sur MSX. Le runtime MSX est recompilé une seconde fois
+(`dp_msx_backend2`, symboles préfixés `dp_msx2_`) ; l'explorateur Sega/MSX lit
+l'état de mapper, l'observateur et le test de trappe BIOS via le backend
+(`msx_info`/`msx_observe`/`msx_bios_trap`) au lieu de singletons. Le repli
+mono-cœur `jobs_capped` n'existe plus pour MSX ; `test_sega_jobs` compare le
+parcours à 2 instances au parcours mono-cœur.
+

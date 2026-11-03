@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.45.0 LANGUAGES C)
+project(deepeel VERSION 0.46.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -388,7 +388,33 @@ add_library(deepeel_gg2 STATIC IMPORTED GLOBAL)
 set_target_properties(deepeel_gg2 PROPERTIES IMPORTED_LOCATION ${DP_GG2_ARCHIVE})
 add_custom_target(dp_gg2_runtime DEPENDS ${DP_GG2_ARCHIVE})
 add_dependencies(deepeel_gg2 dp_gg2_runtime)
-target_link_libraries(deepeel_sega PUBLIC deepeel_sg deepeel_gg deepeel_msx deepeel_sg2 deepeel_gg2 Threads::Threads)
+# MSX second instance for --jobs 2: backend.c and the instrumented msx.c
+# recompiled with the backend getter renamed, then every global (runtime and
+# dp_msx_* alike, except the renamed getter) namespaced with dp_msx2_.
+add_library(deepeel_msx2_raw STATIC
+  ${M0BOY_DIR}/targets/sg1000/runtime/sg1000.c
+  ${M0BOY_DIR}/targets/sg1000/runtime/tms9918.c
+  ${DP_MSX_SOURCE}
+  ${M0BOY_DIR}/targets/msx/runtime/msx_ay.c
+  src/platform/msx/backend.c)
+target_compile_definitions(deepeel_msx2_raw PRIVATE SG_MSX=1 SG_MSX_RAM=65536 dp_msx_backend=dp_msx_backend2)
+target_include_directories(deepeel_msx2_raw PRIVATE
+  ${M0BOY_DIR}/targets/sg1000/runtime ${M0BOY_DIR}/targets/common/runtime
+  ${M0BOY_DIR}/targets/msx/runtime ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/msx)
+set(DP_MSX2_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_msx2.a)
+add_custom_command(OUTPUT ${DP_MSX2_ARCHIVE}
+  BYPRODUCTS ${DP_MSX2_ARCHIVE}.syms
+  COMMAND ${CMAKE_COMMAND} -DNM=${DP_NM} -DOBJCOPY=${DP_OBJCOPY}
+    -DINPUT=$<TARGET_FILE:deepeel_msx2_raw> -DOUTPUT=${DP_MSX2_ARCHIVE}
+    "-DPREFIX=dp_msx2_" "-DPATTERNS=machine|sg_[A-Za-z0-9_]*|sg1000_[A-Za-z0-9_]*|tms[A-Za-z0-9_]*|msx_[A-Za-z0-9_]*|dp_msx_(info|observe|bios_[a-z_]*|init|close|cpu|read|write|in|out|advance|rom_index|ram_index|state_size|save|load|buttons|return)"
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_sega_prefix.cmake
+  DEPENDS deepeel_msx2_raw cmake/dp_sega_prefix.cmake VERBATIM)
+add_library(deepeel_msx2 STATIC IMPORTED GLOBAL)
+set_target_properties(deepeel_msx2 PROPERTIES IMPORTED_LOCATION ${DP_MSX2_ARCHIVE}
+  INTERFACE_LINK_LIBRARIES deepeel_z80)
+add_custom_target(dp_msx2_runtime DEPENDS ${DP_MSX2_ARCHIVE})
+add_dependencies(deepeel_msx2 dp_msx2_runtime)
+target_link_libraries(deepeel_sega PUBLIC deepeel_sg deepeel_gg deepeel_msx deepeel_msx2 deepeel_sg2 deepeel_gg2 Threads::Threads)
 target_link_libraries(deepeel PRIVATE deepeel_sega)
 # --- the m0boy NES machine (6502 + PPU + APU runtime) ------------------------
 # The runtime's globals (`machine`, nes_*/apu_*/ppu_*) are namespaced with

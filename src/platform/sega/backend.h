@@ -2,6 +2,7 @@
 #define DP_SEGA_BACKEND_H
 #include "../../cpu/z80/z80.h"
 #include "sega.h"
+#include "../msx/msx.h"
 #include <stddef.h>
 #include <stdint.h>
 // Runtime instances are singletons: exploration is sequential, not threaded.
@@ -69,11 +70,17 @@ typedef struct {
     // latches were applied, 0 when this window/bank is not switchable. The
     // caller verifies the resulting view with rom_index before seeding.
     int (*seed_window)(uint16_t addr, unsigned bank);
+    // MSX only (NULL elsewhere): the instance's mapper/slot view, its event
+    // observer and the BIOS OUT-stub test — per instance so a clone has its own.
+    DpMsxInfo (*msx_info)(void);
+    void (*msx_observe)(DpMsxObserver observer, void *user);
+    int (*msx_bios_trap)(uint16_t pc, uint16_t port);
 } DpSegaBackend;
 const DpSegaBackend *dp_sega_backend_sg(void);
 const DpSegaBackend *dp_sega_backend_gg(void);
 // Second instances (objcopy-namespaced runtime clones): the --jobs parallel
-// drain runs one worker per instance. MSX has no clone: jobs fall back.
+// drain runs one worker per instance. MSX has dp_msx_backend2.
 const DpSegaBackend *dp_sega_backend_sg2(void);
 const DpSegaBackend *dp_sega_backend_gg2(void);
+const DpSegaBackend *dp_msx_backend2(void);
 #endif

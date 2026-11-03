@@ -60,14 +60,19 @@ int main(void) {
     CHECK(dp_sega_explore(dp_sega_system("sms"),rom,sizeof(rom),&o,&three));
     same_flags(&one,&three);
     CHECK(three.jobs_capped==1);
-    // MSX has no prefixed clone: jobs fall back single core, still complete
+    // MSX runs on its prefixed second instance: two workers, merged evidence
+    // equal to the single-core run, nothing capped
     memset(rom,0xff,sizeof(rom));
     rom[0]='A'; rom[1]='B'; rom[2]=0x10; rom[3]=0x40;
     rom[0x4010]=0x31; rom[0x4011]=0x00; rom[0x4012]=0xf0; rom[0x4013]=0x76;
     DpSegaOptions mo=options(); mo.msx_mapper=DP_MSX_ASCII8; mo.jobs=2; mo.seed_cap=0; mo.seed_banks=1;
     dp_sega_results_free(&two); dp_sega_results_free(&three);
     CHECK(dp_sega_explore(dp_msx_system(),rom,sizeof(rom),&mo,&two));
-    CHECK(two.jobs_capped==1 && two.seeds_admitted>=1);
+    DpSegaOptions m1=mo; m1.jobs=1;
+    CHECK(dp_sega_explore(dp_msx_system(),rom,sizeof(rom),&m1,&three));
+    CHECK(two.jobs_capped==0 && two.seeds_admitted>=1);
+    CHECK(known(&two)==known(&three));
+    same_flags(&three,&two);
     dp_sega_results_free(&one); dp_sega_results_free(&two); dp_sega_results_free(&three);
     TEST_DONE("sega_jobs");
 }

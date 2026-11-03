@@ -216,13 +216,13 @@ static void copied(Run *x,DpZ80Origin origin,uint8_t value,unsigned space,uint32
 static const uint16_t mapping_probe[]={0,0x400,0x2000,0x4000,0x6000,0x8000,0xa000,0x9800};
 static void mapping_before(Run *x,int64_t before[10]) {
     for(unsigned i=0;i<8;i++) before[i]=x->b->rom_index(mapping_probe[i]);
-    before[8]=x->msx?dp_msx_info().slots:0;
+    before[8]=x->msx?x->b->msx_info().slots:0;
     before[9]=x->b->ram_index(0xc000);
 }
 static void mapping_after(Run *x,const int64_t before[10],uint16_t address,uint8_t value,unsigned kind) {
     int changed=0;
     for(unsigned i=0;i<8;i++) changed|=before[i]!=x->b->rom_index(mapping_probe[i]);
-    changed|=x->msx && before[8]!=dp_msx_info().slots;
+    changed|=x->msx && before[8]!=x->b->msx_info().slots;
     changed|=before[9]!=x->b->ram_index(0xc000);
     if(!changed) return;
     dp_sega_closure_invalidate(x->closure);
@@ -261,7 +261,7 @@ static void msx_event(void *user,DpMsxEvent event) {
         if(event.address<64) r->bios_calls[event.address]++;
         break;
     case DP_MSX_BIOS_END:
-        mapping_after(x,x->bios_mapping,(uint16_t)x->bios_id,dp_msx_info().slots,2);
+        mapping_after(x,x->bios_mapping,(uint16_t)x->bios_id,x->b->msx_info().slots,2);
         // C helpers change registers outside the Z80 executor. Only explicit
         // pure transfers below may establish new origins after the call.
         memset(&x->origins->cpu,0,sizeof(x->origins->cpu));
@@ -305,7 +305,7 @@ static uint8_t in_bus(void *user,uint16_t p) {
 }
 static void out_bus(void *user,uint16_t p,uint8_t v) {
     Run *x=user;
-    if(x->msx && dp_msx_bios_trap((uint16_t)(x->b->cpu()->pc-2),p)) { x->b->out(p,v); return; }
+    if(x->msx && x->b->msx_bios_trap((uint16_t)(x->b->cpu()->pc-2),p)) { x->b->out(p,v); return; }
     uint8_t previous=0,effect_mask=0;
     int memory=x->b->memory_control && x->b->memory_control(p,&previous,&effect_mask);
     int remap=memory || (x->msx && (p&255)==0xa8);
@@ -657,7 +657,7 @@ static uint64_t project_ctx(Run *x,const DpSegaSection *s) {
     // mapper/slot views through passive physical probes
     for(unsigned i=0;i<sizeof(mapping_probe)/sizeof(mapping_probe[0]);i++)
         h=fnv1a_u32(h,(uint32_t)x->b->rom_index(mapping_probe[i]));
-    if(x->msx) h=fnv1a_u32(h,dp_msx_info().slots);
+    if(x->msx) h=fnv1a_u32(h,x->b->msx_info().slots);
     h=fnv1a_u32(h,(uint32_t)x->b->ram_index(0xc000));
     for(unsigned pg=0;pg<32;pg++)
         if(s->page_mask_wram&(1ull<<pg))
@@ -778,8 +778,8 @@ static int probe_inputs(Run *x,unsigned group,uint16_t port,size_t at,int skip_i
 static int fork_inputs(Run *x,const z80_decoded_t *d,size_t at,int skip_irq) {
     if(!x->opt->input_masks || !x->opt->input_total) return 1;
     if(x->msx) {
-        z80_t *cpu=x->b->cpu(); DpMsxInfo info=dp_msx_info();
-        if(!d->group && d->opcode==0xd3 && dp_msx_bios_trap(cpu->pc,d->immediate)) {
+        z80_t *cpu=x->b->cpu(); DpMsxInfo info=x->b->msx_info();
+        if(!d->group && d->opcode==0xd3 && x->b->msx_bios_trap(cpu->pc,d->immediate)) {
             unsigned id=d->immediate&255,group;
             if(id==31) group=cpu->a==2?INPUT_PAD2:INPUT_PAD1;
             else if(id==32) group=cpu->a==2 || cpu->a==4?INPUT_PAD2:INPUT_PAD1;
@@ -1054,7 +1054,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     memset(r,0,sizeof(*r)); r->size=size;
     size_t padded=(size+0x3fff)&~(size_t)0x3fff, sites=size+65536;
     uint8_t *image=malloc(padded); DpSegaVisits visits={0};
-    Run x={0}; x.b=msx?dp_msx_backend():worker?(sg?dp_sega_backend_sg2():dp_sega_backend_gg2()):(sg?dp_sega_backend_sg():dp_sega_backend_gg());
+    Run x={0}; x.b=msx?(worker?dp_msx_backend2():dp_msx_backend()):worker?(sg?dp_sega_backend_sg2():dp_sega_backend_gg2()):(sg?dp_sega_backend_sg():dp_sega_backend_gg());
     x.msx=msx; x.system=s; x.opt=o; x.r=r; x.input_epoch=1;
     r->input_site_capacity=o->input_sites; r->input_mask_limit=o->input_masks;
     r->phase_limits[0]=o->max_total; r->phase_limits[1]=o->input_masks?o->input_total:0;
@@ -1142,7 +1142,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
             dp_lf_close(lot,NULL); // the file stays until the end of the run rewrites it
         }
     }
-    if(msx) { r->msx_mapper=dp_msx_info().mapper; dp_msx_observe(msx_event,&x); }
+    if(msx) { r->msx_mapper=x.b->msx_info().mapper; x.b->msx_observe(msx_event,&x); }
     r->closure.limits=o->closure; r->target_closure.limits=o->closure;
     if(!o->target_closure) r->target_closure.limits.nodes=0;
     r->block_closure.limits=o->closure;
@@ -1597,14 +1597,6 @@ static void *drain_thread(void *arg) {
 int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *o,DpSegaResults *r) {
     int jobs=o?o->jobs:1;
     if(jobs<=1) return sega_explore_one(s,rom,size,o,r,0,1);
-    if(!strcmp(s->id,"msx")) {
-        // the MSX runtime has no prefixed clone yet: the request is refused,
-        // counted, and the exploration runs single core
-        DpSegaOptions one=*o; one.jobs=1;
-        int ok=sega_explore_one(s,rom,size,&one,r,0,1);
-        if(ok) { r->jobs_capped=1; }
-        return ok;
-    }
     if(jobs>2) jobs=2;
     DpSegaResults second;
     DpSegaWorker w={s,rom,size,o,&second,1,jobs,0};

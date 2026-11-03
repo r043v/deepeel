@@ -118,7 +118,7 @@ Pour chaque technique, la fiche indique :
 | C3 | Dédup exacte hors horloges | ✅ | ✅ | ✅ | ✅ | ✅ | ✗ |
 | F1 | File croissante + spool + `--resume` | ✅ | ✅ | ✅ | ✗ | ✗ | ✗ |
 | F2 | Arbre de choix persistant | ✅ | ✅ | ✅ | ✗ | ✗ | ✗ |
-| F3 | `--jobs` par instances clonées | ✅ | ✅ | ✗ | ✗ | ✗ | ✗ |
+| F3 | `--jobs` par instances clonées | ✅ | ✅ | ✅ | ✗ | ✗ | ✗ |
 | J1 | Sessions jouées multi-thread + pool | ✅ | ◐ | ◐ | ◐ xorshift | ◐ | ✗ |
 | J2 | Rejeu TAS prioritaire + shoots | ✅ | ✅ | ✅ | ✅ | ✅ | ◐ GMV |
 | J3 | Identité ROM des films | ✅ | ✗ | ✗ | ✗ | ✗ | ✗ |
