@@ -1737,3 +1737,15 @@ rapportés : `second pass: N seeds, N refused, N capped`. Test `pce_second_pass`
 (`fix_pce_slide` : 1 graine). Reste ◐ : pas de graines depuis les tables de
 saut (G2 PCE), pas de semis indirect, le mapping des autres fenêtres est celui
 de la mise sous tension.
+
+## 0.115.0
+
+MD : second passage (G4, partielle). `--second-pass` : les plages d'octets
+exécutés sont parcourues instruction par instruction ; les cibles statiques
+(BRA/BSR/Bcc/DBcc/JMP/JSR absolus) et la suite en fin de plage qu'aucun chemin
+n'a atteintes (paires, ≥ `$200`, dans la ROM) sont semées comme chemins forcés
+depuis la machine de mise sous tension ; le drainage reprend jusqu'à épuisement
+des graines, 256 au total (`second pass: N seeds, N refused, N capped`). Test
+`md_second_pass` (`fix_md_fork_fault` : 1 graine, 14 → 3584 octets exécutés,
+la graine glisse dans le padding nul : c'est là que `--cut-padding` sert).
+Reste ◐ : pas de semis depuis les tables (G2 MD) ni les cibles indirectes.

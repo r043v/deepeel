@@ -13,7 +13,7 @@ remesure pas l'outil.
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 20 | 5 | 2 |
 | PCE | 16 | 18 | 4 | 1 |
-| MD | 8 | 15 | 15 | 1 |
+| MD | 8 | 16 | 14 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
 
@@ -67,7 +67,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | G3 | `--seed-banks`, `--entry` | MD | ◐ `--entry ADDR` (ROM, pair) ; pas de `--seed-banks` ni de vue de banque |
 | G4 | Semis indirect + budgets en cascade | NES | ◐ second passage sur racines statiques (`--second-pass`) |
 | G4 | Semis indirect + budgets en cascade | PCE | ◐ second passage sur successeurs statiques non exécutés (`--second-pass`) |
-| G4 | Semis indirect + budgets en cascade | MD | ✗ |
+| G4 | Semis indirect + budgets en cascade | MD | ◐ second passage sur successeurs statiques non exécutés (`--second-pass`) |
 | C1 | Sections, liveness, verdicts | NES | ◐ req/forced |
 | C1 | Sections, liveness, verdicts | PCE | ◐ req/forced |
 | C1 | Sections, liveness, verdicts | MD | ✗ |

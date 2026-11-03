@@ -561,8 +561,50 @@ void dp_md_options_default(DpMdOptions *o) {
     o->lot_drain = 0;
     o->entry_count = 0;
     o->pad_cut = 0;
+    o->second_pass = 0;
     o->ctx_cap = 0;
     o->tree_path = NULL;
+}
+
+/* G4 second pass: static successors (branch/jump/call targets, the fall-through at the
+ * end of an executed run) of executed code that no path reached are seeded as forced
+ * paths from the power-on machine.  Runs of executed bytes are walked instruction by
+ * instruction; bounded to MD_PASS2_MAX seeds in all. */
+enum { MD_PASS2_MAX = 256 };
+static unsigned second_pass_seed(X *x) {
+    DpMdResults *r = x->r;
+    size_t n = r->rom_size;
+    uint8_t *sd = calloc(n, 1);
+    if (!sd) return 0;
+    unsigned seeded = 0;
+    const uint8_t live = DP_MDF_NATURAL | DP_MDF_FORCED;
+    for (size_t i = 0; i < n; i += 2) {
+        if (!(r->flags[i] & live) || (i && (r->flags[i - 1] & live))) continue; /* run starts only */
+        size_t a = i;
+        while (a < n && (r->flags[a] & live)) {
+            DpM68kInsn in;
+            unsigned len = dp_m68k_decode(x->c->rom + a, n - a, (uint32_t)a, &in);
+            if (!len) break;
+            uint32_t cand[2]; int nc = 0;
+            int terminal = in.cls == DP_M68K_BRA || in.cls == DP_M68K_JMP || in.cls == DP_M68K_RTS ||
+                           in.cls == DP_M68K_RTE || in.cls == DP_M68K_RTR || in.cls == DP_M68K_STOP;
+            if ((in.cls == DP_M68K_BRA || in.cls == DP_M68K_BSR || in.cls == DP_M68K_BCC || in.cls == DP_M68K_DBCC ||
+                 in.cls == DP_M68K_JMP || in.cls == DP_M68K_JSR) && in.has_target) cand[nc++] = in.target & 0xFFFFFFu;
+            size_t next = a + len;
+            if (!terminal && (next >= n || !(r->flags[next] & live))) cand[nc++] = (uint32_t)next;
+            for (int k = 0; k < nc; k++) {
+                uint32_t t = cand[k];
+                if ((t & 1) || t < 0x200 || t >= n || (r->flags[t] & live) || sd[t]) continue;
+                sd[t] = 1;
+                if (r->pass2_seeds + r->pass2_refused >= MD_PASS2_MAX) { r->pass2_capped++; continue; }
+                dp_mdmach_reset(x->m);
+                if (push(x, t, 0, 0)) { seeded++; r->pass2_seeds++; } else r->pass2_refused++;
+            }
+            a = next;
+        }
+    }
+    free(sd);
+    return seeded;
 }
 
 static void run_path(X *x, Item *it, uint64_t budget, int *cut) {
@@ -773,7 +815,10 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
             }
             if (!x.nq) continue;
         }
-        if (!x.nq) break;
+        if (!x.nq) {
+            if (o->second_pass && r->steps < o->max_total && second_pass_seed(&x)) continue;
+            break;
+        }
         Item it = x.q[--x.nq];
         run_path(&x, &it, o->max_total - r->steps, &cut);
         if (it.choice) dp_tree_close(&x.tree, it.choice, DP_ISSUE_DONE);
@@ -917,6 +962,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
             o->queue_cap, o->queue_max > o->queue_cap ? o->queue_max : o->queue_cap);
     if (r->tree_nodes) fprintf(out, "  choice tree: %llu nodes\n", (unsigned long long)r->tree_nodes);
     if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/SR context past the cap)\n", (unsigned long long)r->ctx_evicted);
+    if (r->pass2_seeds || r->pass2_refused || r->pass2_capped) fprintf(out, "  second pass: %llu seeds, %llu refused, %llu capped\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     fprintf(out, "  copy siblings: %llu tables, %llu entries, %llu bytes, %llu table caps\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_entries, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_caps);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);

@@ -40,6 +40,7 @@ typedef struct {
     unsigned entry_count;
     const char *tree_path;  // write the choice tree (DpTree file) here, NULL: none
     unsigned ctx_cap;       // admissions per coarse context (0: off)
+    int second_pass;        // seed the unexecuted static successors of executed code (G4)
     int pad_cut;           // cut paths sliding through 16+ zero bytes (default off)
     int lot_drain; /* with a lot backlog: run only the saved states (no root) */
     const char *lot_path; /* disk lot of deferred states (NULL: memory only); an existing file is resumed */
@@ -100,7 +101,7 @@ typedef struct {
     DpMdReader readers[DP_MD_READER_CAP];
     unsigned nreaders;
     uint64_t reader_overflow;
-    uint64_t ctx_evicted, tree_nodes, sib_tables, sib_entries, sib_bytes, sib_caps, pad_cuts, indirect_sites, indirect_targets, indirect_overflow;
+    uint64_t pass2_seeds, pass2_refused, pass2_capped, ctx_evicted, tree_nodes, sib_tables, sib_entries, sib_bytes, sib_caps, pad_cuts, indirect_sites, indirect_targets, indirect_overflow;
     uint32_t exec_bytes, forced_only_bytes, dread_bytes, natural_data_bytes, dma_source_bytes, dma_read_bytes,
              cpu_vram_bytes, observed_bytes, code_or_vram_bytes, data_only_bytes, filtered_observed_bytes;
     /* stream replay: a called routine whose first ROM read is at the address
