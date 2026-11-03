@@ -1602,3 +1602,13 @@ toutes les pages sur la banque 0). Une adresse hors ROM est refusée et
 comptée. Rapport : `entries: N seeded, N refused`. Nouveau pont
 `dp_pce_set_pc`. Test `pce_entry`. Reste ◐ : pas de `--seed-banks`, pas
 d'entrée dans une autre vue de banque (il faudrait fixer les MPR).
+
+## 0.103.0
+
+PCE : `--ctx-cap N` (C2, partielle), même principe que NES (0.99.0). Un état
+qui passe la dédup exacte mais dont le contexte (A/X/Y/S/P, pc, 8 MPR, masque
+d'IRQ ; RAM et horloges exclues) a déjà été admis N fois est clos, compté
+(`context eviction: N states closed`). Désactivée par défaut ; pas de liveness
+par section, donc un chemin dépendant de la RAM peut être coupé à tort.
+Fixture `fix_pce_ctx.pce` (WRAM en MPR1, boucle ne variant que par la RAM :
+1 état clos avec `--ctx-cap 3`, aucun sans), test `pce_ctx_cap`.

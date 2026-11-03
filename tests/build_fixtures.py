@@ -688,6 +688,12 @@ def build_nes_pce(out):
     w[0x1FFE], w[0x1FFF] = 0x00, 0xE0
     with open(os.path.join(out, "fix_pce_slide.pce"), "wb") as f:
         f.write(w)
+    # PC Engine context loop: WRAM at MPR1, INC zp / LDA #0 / BEQ back; only the RAM differs
+    z = bytearray(0x4000)
+    z[0:11] = bytes([0x78, 0xA9, 0xF8, 0x53, 0x02, 0xE6, 0x10, 0xA9, 0x00, 0xF0, 0xFA])
+    z[0x1FFE], z[0x1FFF] = 0x00, 0xE0
+    with open(os.path.join(out, "fix_pce_ctx.pce"), "wb") as f:
+        f.write(z)
 
 if __name__ == "__main__":
     build_nes_pce(sys.argv[1] if len(sys.argv) > 1 else ".")

@@ -164,6 +164,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_slide.pce
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_ctx.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_uxrom.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_pad.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ind.nes
@@ -321,3 +322,5 @@ add_test(NAME pce_slide COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAK
 set_tests_properties(pce_slide PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME pce_entry COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce --entry 0xE018 --entry 0xE025 --max-total 20000 --max-steps 100 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_en.txt >/dev/null 2>&1; grep -q 'entries: 2 seeded, 0 refused' ${CMAKE_CURRENT_BINARY_DIR}/pce_en.txt")
 set_tests_properties(pce_entry PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME pce_ctx_cap COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_ctx.pce; $B pce explore $F --ctx-cap 3 --max-total 5000 --max-steps 60 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_cc1.txt >/dev/null 2>&1; $B pce explore $F --max-total 5000 --max-steps 60 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_cc0.txt >/dev/null 2>&1; grep -q 'context eviction: [1-9]' ${CMAKE_CURRENT_BINARY_DIR}/pce_cc1.txt && ! grep -q 'context eviction' ${CMAKE_CURRENT_BINARY_DIR}/pce_cc0.txt")
+set_tests_properties(pce_ctx_cap PROPERTIES FIXTURES_REQUIRED fixtures)

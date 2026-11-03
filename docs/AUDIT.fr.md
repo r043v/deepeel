@@ -12,7 +12,7 @@ remesure pas l'outil.
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 20 | 5 | 2 |
-| PCE | 16 | 12 | 10 | 1 |
+| PCE | 16 | 13 | 9 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
@@ -72,7 +72,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | C1 | Sections, liveness, verdicts | PCE | ◐ req/forced |
 | C1 | Sections, liveness, verdicts | MD | ✗ |
 | C2 | Éviction par contexte | NES | ◐ contexte grossier opt-in (`--ctx-cap`) |
-| C2 | Éviction par contexte | PCE | ✗ |
+| C2 | Éviction par contexte | PCE | ◐ contexte grossier opt-in (`--ctx-cap`) |
 | C2 | Éviction par contexte | MD | ✗ |
 | C3 | Dédup exacte hors horloges | MD | ✗ |
 | F1 | File croissante + spool + `--resume` | NES | ◐ `--spool`/`--resume` (lot disque), file bornée + parc |

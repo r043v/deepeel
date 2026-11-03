@@ -22,6 +22,7 @@
 // inference classify what is left (reported apart from the observations).
 #include "explore.h"
 #include "../../explore/lots.h"
+#include "../../core/hashset.h"
 #include "pce.h"
 #include "tas.h"
 #include <math.h>
@@ -48,6 +49,7 @@ typedef struct {
     PceQueued *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
     DpLotFile *lot;            // disk lot: park overflow, wall leftovers, --lot resume
     uint64_t *seen;        // open-addressed dedup set
+    DpHashSet ctx_seen;    // per-context admission counters (C2)
     size_t seen_cap, seen_len;
     uint8_t *fork_sites, *pad_sites, *irq_sites; // per-cell counters (saturating)
     uint8_t *istart;       // instruction starts (for the static closure)
@@ -313,6 +315,18 @@ static int lot_spill(PceRun *x, uint8_t *z, uLongf zlen, uint8_t forced) {
 static int push_live(PceRun *x, int forced) {
     DpPceResults *r = x->r;
     if (!seen_insert(x, dp_pce_state_hash())) { r->evicted++; return 0; }
+    if (x->opt.ctx_cap) {
+        // coarse same-context eviction: registers, pc, MPR and interrupt mask; the
+        // k-th admission of a context is the key hash(ctx, k), past ctx_cap it is closed
+        DpPceCpu c = dp_pce_cpu();
+        uint64_t h = 0xcbf29ce484222325ull;
+        uint8_t raw[16] = { c.a, c.x, c.y, c.s, c.p, (uint8_t)c.pc, (uint8_t)(c.pc >> 8), c.irq_mask };
+        memcpy(raw + 8, c.mpr, 8);
+        for (unsigned i = 0; i < sizeof raw; i++) h = (h ^ raw[i]) * 0x100000001b3ull;
+        unsigned k = 0;
+        while (k < x->opt.ctx_cap && dp_set_insert(&x->ctx_seen, (h ^ (k * 0x9E3779B97F4A7C15ull)) | 1) == 0) k++;
+        if (k >= x->opt.ctx_cap) { r->ctx_evicted++; return 0; }
+    }
     int full = x->queue_len >= x->opt.queue_cap;
     dp_pce_save(x->tmp2);
     uLongf zl = x->zcap;
@@ -1050,6 +1064,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     PceRun *x = calloc(1, sizeof *x);
     if (!x) return 0;
     DpPceResults *r = results;
+    dp_set_init(&x->ctx_seen, 1 << 10);
     memset(r, 0, sizeof *r);
     x->opt = options ? *options : dp_pce_options();
     r->options = x->opt;
@@ -1170,6 +1185,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
         dp_lf_close(x->lot, x->opt.lot_path);
     }
     free(x->queue);
+    dp_set_free(&x->ctx_seen);
     free(x->seen);
     free(x->fork_sites);
     free(x->pad_sites);
@@ -1263,6 +1279,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             r->nidx, r->idx_declared, r->idx_refused_code, r->idx_biased,
             (unsigned long long)r->idx_cross_page, (unsigned long long)r->idx_forced_ignored,
             (unsigned long long)r->idx_overflow);
+    if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/MPR context past the cap)\n", (unsigned long long)r->ctx_evicted);
     fprintf(out, "  entries: %llu seeded, %llu refused (outside the ROM mapping)\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
     fprintf(out, "  faults %llu, exec outside ROM %llu, queued state bytes %llu\n",
