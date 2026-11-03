@@ -1404,3 +1404,12 @@ la table ; autres cartes ignorées. Les cibles non exécutées ne sont pas
 retenues (ancrage sur l'observé), donc une table dont les cibles n'ont jamais
 tourné n'est pas vue. Rapport : `pointer tables: N tables, M bytes`. Fixture
 `fix_nes_table.nes`, test `nes_table`.
+
+## 0.87.0
+
+NES : glissade de padding (D14, partielle). Un chemin qui exécute `$00` (brk)
+ou `$FF` au début d'une plage de 8 octets identiques de la PRG a quitté le
+code : il est coupé et compté (`padding cuts: N`), jamais silencieusement. Les
+plages de `$EA` (nop) ne sont pas coupées (traînes de nop légitimes). Pas de
+HALT sur 6502, donc pas de chien de garde équivalent : D14 reste ◐. Fixture
+`fix_nes_slide.nes`, test `nes_slide`.

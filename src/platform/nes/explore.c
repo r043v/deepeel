@@ -171,6 +171,17 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
     }
     x->cur_pc = pc;
     x->cur_len = in.length;
+    // padding slide: a path that runs into a run of 8+ $00/$FF bytes in PRG has
+    // left the code (brk / isc sleds); cut it, counted in pad_cuts
+    if ((op == 0x00 || op == 0xFF) && !x->play_mode) {
+        int64_t pc0 = dp_nesmach_rom_index(x->m, pc);
+        const uint8_t *prg = dp_nesmach_prg_rom(x->m);
+        if (pc0 >= 0 && prg && (size_t)pc0 + 8 <= r->prg_size) {
+            unsigned same = 1;
+            for (unsigned k = 1; k < 8; k++) if (prg[pc0 + k] == (uint8_t)op) same++;
+            if (same == 8) { r->pad_cuts++; nes_trace.stop = 1; return; }
+        }
+    }
     if (x->ipc && x->istart && !x->play_mode) {
         int64_t c0 = dp_nesmach_rom_index(x->m, pc);
         if (c0 >= 0 && (size_t)c0 < x->r->prg_size) { x->ipc[c0] = (uint16_t)pc; x->istart[c0] = 1; }
@@ -1061,6 +1072,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->parked_resumed, (unsigned long long)r->parked_lost);
     fprintf(out, "  pending paths dropped at the wall %llu\n",
         (unsigned long long)r->pending_dropped);
+    fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
     fprintf(out, "  pointer tables: %llu tables, %llu bytes (inferred)\n", (unsigned long long)r->table_count, (unsigned long long)r->table_bytes);
     fprintf(out, "  static closure: %llu bytes from %llu roots, cap hits %llu\n", (unsigned long long)r->static_bytes, (unsigned long long)r->static_roots, (unsigned long long)r->static_cap_hits);
     fprintf(out, "  padding %llu bytes; inferred code %llu data %llu padding %llu\n", (unsigned long long)r->padding_bytes, (unsigned long long)r->inferred_code, (unsigned long long)r->inferred_data, (unsigned long long)r->inferred_pad);
