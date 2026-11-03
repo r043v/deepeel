@@ -13,7 +13,7 @@ remesure pas l'outil.
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 24 | 1 | 2 |
 | PCE | 16 | 21 | 1 | 1 |
-| MD | 10 | 24 | 4 | 1 |
+| MD | 10 | 25 | 3 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 89.
 
@@ -69,7 +69,7 @@ Cellules ouvertes (◐ ou ✗) : 89.
 | G4 | Semis indirect + budgets en cascade | MD | ◐ second passage sur successeurs statiques non exécutés (`--second-pass`) |
 | C1 | Sections, liveness, verdicts | NES | ◐ req/forced |
 | C1 | Sections, liveness, verdicts | PCE | ◐ req/forced |
-| C1 | Sections, liveness, verdicts | MD | ✗ |
+| C1 | Sections, liveness, verdicts | MD | ◐ 0.135 req/forced par plage exécutée (sans liveness) |
 | C2 | Éviction par contexte | NES | ◐ contexte grossier opt-in (`--ctx-cap`) |
 | C2 | Éviction par contexte | PCE | ◐ contexte grossier opt-in (`--ctx-cap`) |
 | C2 | Éviction par contexte | MD | ◐ contexte grossier opt-in (`--ctx-cap`) |

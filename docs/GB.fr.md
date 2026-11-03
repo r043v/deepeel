@@ -1998,3 +1998,10 @@ fermeture statique. Ligne de rapport `S4 operand tables of executed JP HL`.
 Test `gb_jp_table` (fixture `fix_jptable`). Limite : seul le motif `ld hl,nn`
 proche est reconnu ; une base calculée (`add hl,de` depuis une autre origine)
 n'est pas suivie.
+
+## 0.135.0
+
+MD C1 : le rapport donne `sections: N executed runs, R required (natural path), F
+forced only` (une section = plage exécutée maximale ; requise si un octet a
+tourné sur le chemin naturel) et le `--summary` JSON ajoute `sections` et
+`sections_required`. Test `md_sections`. Pas de liveness par section.

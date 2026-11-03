@@ -392,3 +392,5 @@ add_test(NAME md_static_layer COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE
 set_tests_properties(md_static_layer PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME gb_jp_table COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_jptable.gb --cov $D/jt2.cov --text $D/jt2.txt >/dev/null 2>&1; grep -Eq 'S4 operand tables of executed JP HL: [1-9][0-9]* tables, [1-9][0-9]* entries' $D/jt2.txt && grep -Eq '^00 0190 [1-9]' $D/jt2.cov && grep -Eq '^00 01a0 [1-9]' $D/jt2.cov")
 set_tests_properties(gb_jp_table PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME md_sections COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_disp.md --max-total 100000 --bank-dispatch --text $D/msec.txt --summary $D/msec.json >/dev/null 2>&1; grep -Eq '^sections: [1-9][0-9]* executed runs, [0-9]+ required \\(natural path\\), [1-9][0-9]* forced only' $D/msec.txt && grep -q '\"sections_required\"' $D/msec.json")
+set_tests_properties(md_sections PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)

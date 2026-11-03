@@ -1351,6 +1351,15 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         }
         for (size_t i = 0; i < n; i++) if (r->inferred[i] == 0xFF) r->inferred[i] = 0;
     }
+    // C1: sections = maximal executed runs; required when some byte ran on a natural path
+    for (size_t i = 0; i < c->size;) {
+        const uint8_t L = DP_MDF_NATURAL | DP_MDF_FORCED;
+        if (!(r->flags[i] & L)) { i++; continue; }
+        int nat = 0;
+        while (i < c->size && (r->flags[i] & L)) { nat |= (r->flags[i] & DP_MDF_NATURAL) != 0; i++; }
+        r->sec_n++;
+        if (nat) r->sec_req++;
+    }
     for (size_t i = 0; i < c->size; i++) {
         uint8_t f = r->flags[i];
         if (f & (DP_MDF_NATURAL | DP_MDF_FORCED)) r->exec_bytes++;
@@ -1484,6 +1493,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     }
     fprintf(out, "executed rom bytes: %u (%.1f%%), of which only via forks: %u; data-read: %u\n", r->exec_bytes,
             100.0 * r->exec_bytes / r->rom_size, r->forced_only_bytes, r->dread_bytes);
+    fprintf(out, "sections: %u executed runs, %u required (natural path), %u forced only\n", r->sec_n, r->sec_req, r->sec_n - r->sec_req);
     fprintf(out, "data-read on natural path: %u; commanded DMA source bytes: %u (may include an interrupted transfer)\n",
             r->natural_data_bytes, r->dma_source_bytes);
     fprintf(out, "DMA ROM bytes actually read: %u\n", r->dma_read_bytes);
@@ -1595,12 +1605,12 @@ int dp_md_explore_summary(const DpMdResults *r, const char *path) {
     for (int k = 0; k < 12; k++) fprintf(f, "%s\"%s\":%llu", k ? "," : "", nm[k], (unsigned long long)cls[k]);
     fprintf(f, "},\"known_pct\":%.3f,\"counters\":{\"steps\":%llu,\"paths\":%llu,\"forks\":%llu,"
                "\"sat_total\":%llu,\"sat_path\":%llu,\"sat_visit\":%llu,\"sat_queue\":%llu,\"sat_site\":%llu,"
-               "\"exec_bytes\":%llu,\"forced_only_bytes\":%llu}}\n",
+               "\"exec_bytes\":%llu,\"forced_only_bytes\":%llu,\"sections\":%u,\"sections_required\":%u}}\n",
             r->rom_size ? 100.0 * (double)(r->rom_size - cls[0]) / (double)r->rom_size : 0.0,
             (unsigned long long)r->steps, (unsigned long long)r->paths, (unsigned long long)r->forks,
             (unsigned long long)r->sat_total, (unsigned long long)r->sat_path, (unsigned long long)r->sat_visit,
             (unsigned long long)r->sat_queue, (unsigned long long)r->sat_site,
-            (unsigned long long)r->exec_bytes, (unsigned long long)r->forced_only_bytes);
+            (unsigned long long)r->exec_bytes, (unsigned long long)r->forced_only_bytes, r->sec_n, r->sec_req);
     return fclose(f) ? -1 : 0;
 }
 
