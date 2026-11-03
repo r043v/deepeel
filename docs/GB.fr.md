@@ -1919,3 +1919,11 @@ une observation. Reste ◐ : pas encore de rendu PNG, JSON ni heat pour le MD.
 entière, fenêtrées par 16 Kio comme pour les plateformes Z80, puis rendues par
 le moteur de carte commun. Le MD a donc sa carte PNG. Reste ◐ pour O1 MD :
 pas de JSON de synthèse ni de carte de chaleur.
+
+## 0.129.0
+
+Mega Drive : `--summary FILE` écrit un profil JSON compact de la run : octets
+par classe de la carte (somme égale à la taille de la ROM), part connue,
+compteurs de recherche (pas, chemins, fourches) et de saturation
+(`sat_total/path/visit/queue/site`). Observations de l'outil, pas des mesures
+de matériel. Reste ◐ pour O1 MD : pas de carte de chaleur.

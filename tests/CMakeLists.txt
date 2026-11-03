@@ -379,3 +379,5 @@ add_test(NAME md_class_map COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CU
 set_tests_properties(md_class_map PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_map_png COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_pad_effect.md --map $D/md_mp.map >/dev/null 2>&1; $B maprender $D/fix_md_pad_effect.md $D/md_mp.map $D/md_mp.png --sys md && [ \"$(head -c 4 $D/md_mp.png | tail -c 3)\" = PNG ]")
 set_tests_properties(md_map_png PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME md_summary COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_pad_effect.md --summary $D/md_sum.json >/dev/null 2>&1; python3 -I -c \"import json,sys; d=json.load(open('$D/md_sum.json')); assert d['platform']=='md' and sum(d['classes'].values())==d['rom_size'] and d['counters']['paths']>0\"")
+set_tests_properties(md_summary PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)

@@ -1487,6 +1487,29 @@ int dp_md_explore_map(const DpMdResults *r, const char *path) {
     return rc;
 }
 
+int dp_md_explore_summary(const DpMdResults *r, const char *path) {
+    uint8_t *m = dp_md_map_build(r);
+    if (!m) return -1;
+    static const char *const nm[12] = { "unknown", "code-natural", "code-forced", "code-static", "data-copied",
+        "data-read", "data-static", "table", "padding", "inferred-data", "inferred-code", "inferred-padding" };
+    uint64_t cls[12] = { 0 };
+    for (size_t i = 0; i < r->rom_size; i++) cls[m[i] < 12 ? m[i] : 0]++;
+    free(m);
+    FILE *f = fopen(path, "w");
+    if (!f) return -1;
+    fprintf(f, "{\"deepeel\":\"%s\",\"platform\":\"md\",\"rom_size\":%zu,\"classes\":{", DEEPEEL_VERSION, r->rom_size);
+    for (int k = 0; k < 12; k++) fprintf(f, "%s\"%s\":%llu", k ? "," : "", nm[k], (unsigned long long)cls[k]);
+    fprintf(f, "},\"known_pct\":%.3f,\"counters\":{\"steps\":%llu,\"paths\":%llu,\"forks\":%llu,"
+               "\"sat_total\":%llu,\"sat_path\":%llu,\"sat_visit\":%llu,\"sat_queue\":%llu,\"sat_site\":%llu,"
+               "\"exec_bytes\":%llu,\"forced_only_bytes\":%llu}}\n",
+            r->rom_size ? 100.0 * (double)(r->rom_size - cls[0]) / (double)r->rom_size : 0.0,
+            (unsigned long long)r->steps, (unsigned long long)r->paths, (unsigned long long)r->forks,
+            (unsigned long long)r->sat_total, (unsigned long long)r->sat_path, (unsigned long long)r->sat_visit,
+            (unsigned long long)r->sat_queue, (unsigned long long)r->sat_site,
+            (unsigned long long)r->exec_bytes, (unsigned long long)r->forced_only_bytes);
+    return fclose(f) ? -1 : 0;
+}
+
 int dp_md_explore_evidence(const DpMdResults *r, const char *path) {
     FILE *f = fopen(path, "w");
     if (!f) return -1;

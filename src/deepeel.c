@@ -1419,7 +1419,7 @@ static int cmd_md(int argc, char **argv) {
         int md_jobs = 1, md_watch = 0;
         const char *md_dump = NULL;
         dp_md_options_default(&o);
-        const char *text = NULL, *map = NULL, *ev = NULL, *movie_path = NULL;
+        const char *text = NULL, *map = NULL, *ev = NULL, *movie_path = NULL, *md_summary = NULL;
         for (int i = 4; i < argc; i++) {
             const char *a = argv[i];
             if (i + 1 >= argc && strcmp(a, "--lot-drain")) { fprintf(stderr, "deepeel: bad option %s\n", a); rc = 2; break; }
@@ -1462,6 +1462,7 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--text")) text = argv[++i];
             else if (!strcmp(a, "--map")) map = argv[++i];
             else if (!strcmp(a, "--evidence")) ev = argv[++i];
+            else if (!strcmp(a, "--summary")) md_summary = argv[++i];
             else { fprintf(stderr, "deepeel: unknown option %s\n", a); rc = 2; break; }
         }
         DpMdMovie movie = {0};
@@ -1487,6 +1488,7 @@ static int cmd_md(int argc, char **argv) {
                 }
                 if (map) dp_md_explore_map(&r, map);
                 if (ev) dp_md_explore_evidence(&r, ev);
+                if (md_summary) dp_md_explore_summary(&r, md_summary);
                 dp_md_results_free(&r);
             }
         }

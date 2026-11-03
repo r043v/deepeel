@@ -148,6 +148,8 @@ int dp_md_explore_jobs(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r, 
 void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdResults *r, FILE *out);
 /* One byte per ROM byte: the DP_MDF_* flags. */
 int dp_md_explore_map(const DpMdResults *r, const char *path);
+/* compact JSON profile of the run (class counts, search and saturation counters) */
+int dp_md_explore_summary(const DpMdResults *r, const char *path);
 uint8_t *dp_md_map_build(const DpMdResults *r);   /* DP_NMAP_* digits, caller frees */
 /* Text: executed ranges and copies. */
 int dp_md_explore_evidence(const DpMdResults *r, const char *path);
