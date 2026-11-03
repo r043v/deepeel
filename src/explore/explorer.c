@@ -335,6 +335,7 @@ void dp_explorer_free(DpExplorer *ex) {
     if (!ex) return;
     for (uint32_t i = 0; i < ex->q_cap; i++) free(ex->queue[i].img);
     free(ex->queue);
+    ex->res->defer_pending += ex->defer_len; // left at a wall: counted, never silent
     for (uint32_t i = 0; i < ex->defer_len; i++) free(ex->defer[i].p.img);
     free(ex->defer);
     for (uint32_t i = 0; i < ex->pq_cap; i++) free(ex->pqueue[i].img);
@@ -744,9 +745,9 @@ static void emit_pend_map(DpExplorer *ex) {
 // resumed later with a budget four times larger, up to DP_TIER_MAX.  Past the
 // last tier, or when the holding area is full, the cut stays final and is
 // counted (steps_final / defer_dropped) — never silent.
-static void defer_steps(DpExplorer *ex, DpMach *m) {
+static void defer_cut(DpExplorer *ex, DpMach *m, int loop) {
     DpResults *res = ex->res;
-    if (ex->cur_tier >= DP_TIER_MAX) { res->steps_final++; return; }
+    if (ex->cur_tier >= DP_TIER_MAX) { if (loop) res->loop_final++; else res->steps_final++; return; }
     if (ex->defer_len >= DP_DEFER_CAP) { res->defer_dropped++; return; }
     if (ex->defer_len >= ex->defer_cap) {
         uint32_t nc = ex->defer_cap ? ex->defer_cap * 2 : 64;
@@ -760,7 +761,8 @@ static void defer_steps(DpExplorer *ex, DpMach *m) {
     uint32_t choice = choice_new(ex, ex->cur_choice, ex->cur_kind, dp_rom_index(bank, pc), bank, pc);
     ex->defer[ex->defer_len++] = (DpDeferred){
         { img, ex->cur_forced, ex->cur_kind, ex->cur_from_reset, choice }, (uint8_t)(ex->cur_tier + 1) };
-    res->steps_deferred++;
+    if (loop) res->loop_deferred++;
+    else res->steps_deferred++;
 }
 
 static void hook_step(DpMach *m, uint16_t pc, uint8_t op, int entry) {
@@ -786,7 +788,7 @@ static void hook_step(DpMach *m, uint16_t pc, uint8_t op, int entry) {
         uint64_t cap = (uint64_t)ex->cfg.max_steps_path << (2 * ex->cur_tier);
         if (++ex->steps_this_path > cap) {
             res->step_cuts++;
-            defer_steps(ex, m);
+            defer_cut(ex, m, 0);
             dp_mach_cut(m, DP_CUT_STEPS);
         }
     }
@@ -940,8 +942,10 @@ bad_done:
         }
         ex->back_ring[found].count++;
         dp_copy_on_back_edge(&ex->ct, target, pk);
-        if (ex->back_ring[found].count > ex->cfg.loop_back_cap && !ex->session) {
+        if (ex->back_ring[found].count > (uint64_t)ex->cfg.loop_back_cap << (2 * ex->cur_tier) &&
+            !ex->session) {
             res->cycle_cuts++;
+            defer_cut(ex, m, 1);
             dp_mach_cut(m, DP_CUT_CYCLES);
         }
     }
@@ -1503,7 +1507,7 @@ static int defer_pop(DpExplorer *ex, DpPathState *out) {
     DpDeferred *d = &ex->defer[--ex->defer_len];
     *out = d->p;
     ex->defer_tier_next = d->tier;
-    ex->res->steps_resumed++;
+    ex->res->defer_resumed++;
     return 1;
 }
 

@@ -176,7 +176,7 @@ typedef struct DpResults {
     uint32_t *play_exec_hits;
     uint32_t *play_data_hits;
     uint8_t *static_flags;
-    uint64_t steps_deferred, steps_resumed, steps_final, defer_dropped; // §6 frontier
+    uint64_t steps_deferred, loop_deferred, defer_resumed, steps_final, loop_final, defer_dropped, defer_pending; // §6 frontier
     uint32_t *src_flags;  // DP_SRC_* per ROM byte, OR-ed (every proving source)
     uint32_t *section_of; // rom key -> section id + 1
     // sections

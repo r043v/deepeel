@@ -758,3 +758,7 @@ définitive mais comptée (`steps_final`) ; une frontière pleine est comptée
 transitoires remis à zéro (glissade de padding, tampon d'arrière-branche) :
 elle peut donc aller un peu plus loin qu'un run sans budget, jamais moins
 (test `explorer`). Différé : frontière disque, autres paliers, Sega.
+
+Palier `loop` (0.32.0) : la coupe d'arrière-branche (`cycle_cuts`) est
+désormais aussi reportée, avec un cap ×4 par palier. Ce qu'un mur global
+(`--max-total`) laisse non repris est compté dans `defer_pending`.

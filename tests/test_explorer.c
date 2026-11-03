@@ -13,6 +13,7 @@ static DpMach *g_mach;
 // runs the full pipeline on one fixture; the results stay in `res` until cleanup
 static uint64_t g_wall; // 0 = default budget
 static uint32_t g_psteps; // 0 = default per-path step budget
+static uint32_t g_loopcap; // 0 = default backward-edge cap
 static int g_full_forks;  // 1 = the per-site fork table starts full
 
 static void run(const char *dir, const char *name) {
@@ -33,6 +34,7 @@ static void run(const char *dir, const char *name) {
     dp_config_defaults(&cfg);
     if (g_wall) cfg.max_steps_total = g_wall;
     if (g_psteps) cfg.max_steps_path = g_psteps;
+    if (g_loopcap) cfg.loop_back_cap = g_loopcap;
     if (g_mach) dp_mach_close(g_mach);
     g_mach = mach_for(g_cart);
     DpExplorer *ex = dp_explorer_new(&cfg, &res, g_mach);
@@ -445,10 +447,26 @@ int main(int argc, char **argv) {
         for (size_t k = 0; k < total; k++) { small += !!res.exec_flags[k]; lost += fl[k] && !res.exec_flags[k]; }
         CHECK(res.step_cuts > 0);          // the budget really bit
         CHECK(res.steps_deferred > 0);     // ... and the cuts were deferred,
-        CHECK(res.steps_resumed == res.steps_deferred); // ... all resumed
+        CHECK(res.defer_resumed == res.steps_deferred + res.loop_deferred); // ... all resumed
         CHECK(lost == 0 && small >= full); // no code lost (resumed paths may wander further)
         CHECK(res.steps_final + res.defer_dropped == 0 || small >= 1);
         g_psteps = 0;
+    }
+
+    // --- deferred frontier, loop tier: a tiny back-edge cap loses no code ---------
+    {
+        run(dir, "loop");
+        static uint8_t fl2[1 << 20];
+        size_t total = (size_t)res.banks * 0x4000, lost = 0;
+        for (size_t k = 0; k < total; k++) fl2[k] = res.exec_flags[k];
+        g_loopcap = 1;
+        run(dir, "loop");
+        for (size_t k = 0; k < total; k++) lost += fl2[k] && !res.exec_flags[k];
+        CHECK(res.loop_deferred > 0);
+        // the fixture loops forever: what the wall leaves unresumed is counted
+        CHECK(res.defer_resumed + res.defer_pending == res.steps_deferred + res.loop_deferred);
+        CHECK(lost == 0);
+        g_loopcap = 0;
     }
 
     if (g_mach) dp_mach_close(g_mach);
