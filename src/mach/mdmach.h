@@ -78,5 +78,8 @@ void dp_mdmach_set_pad(DpMdMach *m, uint8_t pad);
 uint32_t dp_mdmach_pc(const DpMdMach *m);
 uint32_t dp_mdmach_fault_pc(const DpMdMach *m);
 uint32_t dp_mdmach_peek32(const DpMdMach *m, uint32_t addr);
+const uint8_t *dp_mdmach_ram(const DpMdMach *m);   /* the 64 KiB work RAM */
+/* coarse screen fingerprint (plane A/B name tables: tile >> 3 sampled every 4th, scroll >> 5) */
+uint64_t dp_mdmach_screen_key(const DpMdMach *m);
 uint8_t dp_mdmach_ram8(const DpMdMach *m, uint32_t addr); /* work RAM byte */
 #endif

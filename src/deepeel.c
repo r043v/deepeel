@@ -1379,6 +1379,10 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--cut-padding")) o.pad_cut = 1;
             else if (!strcmp(a, "--second-pass")) o.second_pass = 1;
             else if (!strcmp(a, "--bank-dispatch")) o.bank_dispatch = 1;
+            else if (!strcmp(a, "--novelty") && i + 1 < argc) o.novelty_steps = strtoull(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--novelty-frames") && i + 1 < argc) o.novelty_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--novelty-cells")) o.novelty_cells = 1;
+            else if (!strcmp(a, "--novelty-archive") && i + 1 < argc) o.novelty_archive = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--jobs") && i + 1 < argc) md_jobs = atoi(argv[++i]);
             else if (!strcmp(a, "--ctx-cap") && i + 1 < argc) o.ctx_cap = (unsigned)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--tree") && i + 1 < argc) o.tree_path = argv[++i];

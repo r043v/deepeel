@@ -1821,3 +1821,19 @@ cellules les plus récentes amorcent la file de fourches (dédup d'état exact).
 Rapport : `novelty: depth N frames, N trials, …`. `--jobs 2` donne cette phase
 à la secondaire. Test `nes_novelty`. Reste ◐ : le mode humain et la reprise
 d'archive entre exécutions, la clé d'écran ne voit pas les sprites.
+
+## 0.121.0
+
+Mega Drive : recherche de nouveauté, Go-Explore (J4, partielle). Mêmes options
+que NES/PCE : `--novelty STEPS`, `--novelty-frames`, `--novelty-archive`,
+`--novelty-cells`. Archive d'instantanés compressés, essais à touches
+aléatoires (pas de directions opposées) pilotés par le crochet d'image ;
+nouvelle empreinte d'écran (`dp_mdmach_screen_key` : noms de plans A/B, tuile
+÷ 8 une sur quatre, défilement ÷ 32) ou nouveaux octets ROM exécutés archivent
+la cellule ; vies détectées dans la RAM de travail sans connaissance du jeu ;
+les 64 cellules les plus récentes amorcent la file de fourches. Garde : 8
+essais consécutifs sans aucune image (ROM sans boucle d'image) arrêtent la
+phase et incrémentent `stalled`, rapporté. Rapport : `novelty: depth N frames,
+… N stalled`. Test `md_novelty`. Reste ◐ : sprites absents de la clé, pas de
+mode humain, pas de reprise d'archive, pas de `--jobs` pour cette phase
+(l'instance secondaire ne la joue pas).

@@ -214,5 +214,24 @@ uint8_t dp_mdmach_vdp_code(const DpMdMach *d) { return d->m->vdp_code; }
 int dp_mdmach_rom_visible(const DpMdMach *d, uint32_t addr) {
     return !(d->m->sram_enable && addr >= 0x200000u && addr < 0x210000u);
 }
+const uint8_t *dp_mdmach_ram(const DpMdMach *d) { return d->m->ram; }
+uint64_t dp_mdmach_screen_key(const DpMdMach *d) {
+    const MdFull *m = d->m;
+    unsigned wsel = m->vdp_reg[16] & 3, w = wsel == 0 ? 32 : wsel == 1 ? 64 : 128;
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (unsigned pl = 0; pl < 2; pl++) {
+        unsigned base = pl ? (unsigned)(m->vdp_reg[4] & 7) << 13 : (unsigned)(m->vdp_reg[2] & 0x38) << 10;
+        h ^= (uint64_t)(((m->vsram[pl * 2] << 8 | m->vsram[pl * 2 + 1]) & 0x3FF) >> 5);
+        h *= 0x100000001b3ull;
+        for (unsigned r = 0; r < 28; r += 4)
+            for (unsigned c = 0; c < 32; c += 4) {
+                unsigned at = (base + (r * w + c) * 2u) & 0xFFFEu;
+                unsigned word = m->vram[at] << 8 | m->vram[at + 1];
+                h ^= (uint64_t)((word & 0x7FF) >> 3);
+                h *= 0x100000001b3ull;
+            }
+    }
+    return h;
+}
 uint8_t dp_mdmach_ram8(const DpMdMach *d, uint32_t a) { return d->m->ram[a & 0xFFFFu]; }
 

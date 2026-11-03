@@ -2,6 +2,8 @@
 #include "../../explore/lots.h"
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
+#include <zlib.h>
 #include "../../cpu/m68k/m68k.h"
 #include "../../mach/mdmach.h"
 #include "md_registry.h"
@@ -75,6 +77,8 @@ typedef struct {
     uint32_t zfetch_lo, zfetch_hi;      /* ROM range of the instruction being fetched */
     uint8_t z80_bank_seen[128];         /* bitmap of 32 KiB banks (4 MiB / 32 KiB) */
     int disp_done;
+    void *nov;           // novelty search state (NULL: off); the frame hook drives it
+    uint64_t novel;      // ROM bytes executed for the first time (novelty gain)
     DpHashSet ctx_seen;     // --ctx-cap: admissions per coarse context
     DpTree tree;            // --tree: every pushed state is a choice
     uint32_t cur_choice;
@@ -92,9 +96,11 @@ static void next_generation(X *x) {
 
 /* Per-frame loop detection permits legitimate polling across V-blank;
  * path_steps and max_total still bound paths that run forever. */
+static void novelty_frame(X *x);
 static void on_frame(void *u) {
     X *x = u;
     next_generation(x);
+    if (x->nov) novelty_frame(x);
     if (x->movie_active) {
         x->r->movie_frames++;
         if (x->r->movie_frames >= x->o->movie->frames) {
@@ -112,7 +118,10 @@ static void on_dma_read(void *u, uint32_t addr, unsigned size) {
 static void mark(X *x, uint32_t pc, unsigned len) {
     uint8_t f = x->forced ? DP_MDF_FORCED : DP_MDF_NATURAL;
     for (unsigned i = 0; i < len && pc + i < x->r->rom_size; i++)
-        if (dp_mdmach_rom_visible(x->m, pc + i)) x->r->flags[pc + i] |= f;
+        if (dp_mdmach_rom_visible(x->m, pc + i)) {
+            if (!(x->r->flags[pc + i] & (DP_MDF_NATURAL | DP_MDF_FORCED))) x->novel++;
+            x->r->flags[pc + i] |= f;
+        }
 }
 
 // one queued item to the disk lot (the state blob stays owned by the caller)
@@ -563,6 +572,7 @@ void dp_md_options_default(DpMdOptions *o) {
     o->entry_count = 0;
     o->pad_cut = 0;
     o->second_pass = 0;
+    o->novelty_steps = 0; o->novelty_frames = 240; o->novelty_archive = 256; o->novelty_cells = 0; o->play_seed = 1;
     o->skip_root = o->no_finalize = 0;
     o->entry_from = 0; o->entry_step = 1;
     o->pre_finalize = NULL; o->pre_user = NULL;
@@ -744,6 +754,233 @@ static void run_path(X *x, Item *it, uint64_t budget, int *cut) {
     }
 }
 
+
+/* --- novelty search (Go-Explore) --------------------------------------------------------
+ * An archive of compressed machine snapshots; each trial restarts from a cell picked among
+ * eight random ones (gain per try, depth, square root of its picks) and plays random pad
+ * bytes for N frames as a natural path (the frame hook drives it).  With --novelty-cells a new
+ * coarse screen fingerprint, or new ROM bytes executed, archive the cell; lives are found
+ * without game knowledge (a RAM byte <= 9 that only drops by 1, >= 200 frames apart) and the
+ * cells archived just before a death are doomed.  The freshest cells seed the fork queue. */
+typedef struct {
+    uint8_t *z; uLongf zlen;
+    uint64_t gain; uint32_t picks, depth;
+    uint8_t lives[65536];
+} MdCell;
+typedef struct {
+    uint8_t prev[65536], maxv[65536], bad[65536];
+    uint16_t dec[65536], inc[65536];
+    uint32_t last_dec[65536], frame;
+    int lives_byte;
+} MdLives;
+enum { MD_KEY_SET = 1 << 18 };
+typedef struct {
+    MdCell *a; uint32_t n;
+    MdLives *L;
+    uint64_t *keys;
+    uint8_t *tmp; Bytef *ztmp; uLongf zcap;
+    uint32_t rng, left, f, best, hold, frames_since;
+    uint8_t held;
+    uint64_t before;
+    int died, learn, cells;
+    int recent[64]; uint32_t recent_f[64]; unsigned nrecent;
+} MdNov;
+
+static uint32_t md_rng(uint32_t *s) { uint32_t v = *s; v ^= v << 13; v ^= v >> 17; v ^= v << 5; return *s = v; }
+static int md_key_seen(const uint64_t *set, uint64_t k) {
+    k |= 1;
+    for (uint32_t i = (uint32_t)(k >> 7) & (MD_KEY_SET - 1);; i = (i + 1) & (MD_KEY_SET - 1)) {
+        if (!set[i]) return 0;
+        if (set[i] == k) return 1;
+    }
+}
+static void md_key_add(uint64_t *set, uint64_t k) {
+    k |= 1;
+    for (uint32_t i = (uint32_t)(k >> 7) & (MD_KEY_SET - 1);; i = (i + 1) & (MD_KEY_SET - 1)) {
+        if (set[i] == k) return;
+        if (!set[i]) { set[i] = k; return; }
+    }
+}
+static int md_lives_frame(MdLives *L, const uint8_t *w, int learn) {
+    int died = 0;
+    for (int i = 0; i < 65536; i++) {
+        uint8_t a = L->prev[i], b = w[i];
+        if (b > L->maxv[i]) L->maxv[i] = b;
+        if (a == b) continue;
+        if (b + 1 == a) {
+            int cand = !L->bad[i] && L->dec[i] >= 2 && L->maxv[i] <= 9 && L->inc[i] <= 1 + L->dec[i] / 4;
+            if (cand && !learn) { died = 1; L->lives_byte = i; }
+            if (L->frame - L->last_dec[i] < 200) L->bad[i] = 1;
+            L->dec[i]++;
+            L->last_dec[i] = L->frame;
+        } else if (b < a) L->bad[i] = 1;
+        else if (b == a + 1 && L->inc[i] < 0xFFFF) L->inc[i]++;
+    }
+    memcpy(L->prev, w, 65536);
+    L->frame++;
+    return died;
+}
+static int md_archive_add(X *x, MdNov *N, uint64_t gain) {
+    DpMdResults *r = x->r;
+    dp_mdmach_save(x->m, N->tmp);
+    uLongf zl = N->zcap;
+    if (compress2(N->ztmp, &zl, N->tmp, (uLong)ssz, 1) != Z_OK) return -1;
+    uint8_t *z = malloc(zl);
+    if (!z) return -1;
+    memcpy(z, N->ztmp, zl);
+    uint32_t slot = N->n;
+    if (N->n >= x->o->novelty_archive) {
+        double worst = 1e300;
+        for (uint32_t i = 0; i < N->n; i++) {
+            double sc = (double)N->a[i].gain / (1.0 + N->a[i].picks);
+            if (sc < worst) { worst = sc; slot = i; }
+        }
+        free(N->a[slot].z);
+        r->novelty_replaced++;
+    } else N->n++;
+    N->a[slot].z = z;
+    N->a[slot].zlen = zl;
+    memcpy(N->a[slot].lives, dp_mdmach_ram(x->m), 65536);
+    N->a[slot].gain = gain;
+    N->a[slot].picks = 0;
+    r->novelty_archived++;
+    return (int)slot;
+}
+static uint8_t md_random_pad(MdNov *N) {   /* bits: U D L R B C A S; no opposing directions */
+    if (!N->hold) {
+        uint32_t v = md_rng(&N->rng);
+        uint8_t h = (uint8_t)(v & 0xFF);
+        if ((h & 0x03) == 0x03) h &= (uint8_t)~0x02;
+        if ((h & 0x0C) == 0x0C) h &= (uint8_t)~0x04;
+        N->held = h;
+        N->hold = 4 + (v >> 16) % 40;
+    }
+    N->hold--;
+    return N->held;
+}
+// called after every frame of a trial: score it, maybe archive it, pick the next pad, stop at the end
+static void novelty_frame(X *x) {
+    MdNov *N = x->nov;
+    DpMdResults *r = x->r;
+    r->novelty_frames_run++;
+    if (N->cells && md_lives_frame(N->L, dp_mdmach_ram(x->m), N->learn)) {
+        for (unsigned k = 0; k < N->nrecent; k++)
+            if (N->recent[k] >= 0 && N->f - N->recent_f[k] < 120) { N->a[N->recent[k]].picks = 1u << 30; N->a[N->recent[k]].gain = 0; }
+        r->novelty_deaths++;
+        N->died = 1;
+        dp_mdmach_halt(x->m);
+        return;
+    }
+    N->frames_since++;
+    if (N->f % 8 == 7) {
+        uint64_t k = N->cells ? dp_mdmach_screen_key(x->m) : 0;
+        int fresh = N->cells && !md_key_seen(N->keys, k);
+        if (fresh || (x->novel > N->before && N->frames_since >= 60)) {
+            uint64_t g = x->novel - N->before;
+            N->a[N->best].gain += g;
+            int slot = md_archive_add(x, N, N->cells ? g + (fresh ? 1 : 0) : g + 1);
+            if (N->nrecent < 64) { N->recent[N->nrecent] = slot; N->recent_f[N->nrecent++] = N->f; }
+            if (slot >= 0) {
+                N->a[slot].depth = N->a[N->best].depth + N->f + 1;
+                if (N->a[slot].depth > r->novelty_depth) r->novelty_depth = N->a[slot].depth;
+            }
+            md_key_add(N->keys, k);
+            if (g) r->novelty_hits++;
+            N->before = x->novel;
+            N->frames_since = 0;
+        }
+    }
+    N->f++;
+    if (N->f >= x->o->novelty_frames || r->steps >= x->o->max_total) { dp_mdmach_halt(x->m); return; }
+    dp_mdmach_set_pad(x->m, md_random_pad(N));
+}
+static void novelty_search(X *x) {
+    DpMdResults *r = x->r;
+    const DpMdOptions *o = x->o;
+    if (!o->novelty_steps || !o->novelty_archive) return;
+    MdNov *N = calloc(1, sizeof *N);
+    if (!N) return;
+    N->a = calloc(o->novelty_archive, sizeof *N->a);
+    N->L = calloc(1, sizeof *N->L);
+    N->keys = calloc(MD_KEY_SET, sizeof *N->keys);
+    N->tmp = malloc(ssz);
+    uint8_t *tmp2 = malloc(ssz);
+    N->zcap = compressBound((uLong)ssz);
+    N->ztmp = malloc(N->zcap);
+    if (!N->a || !N->L || !N->keys || !N->tmp || !tmp2 || !N->ztmp) {
+        free(N->a); free(N->L); free(N->keys); free(N->tmp); free(tmp2); free(N->ztmp); free(N);
+        return;
+    }
+    N->L->lives_byte = -1;
+    N->cells = o->novelty_cells;
+    N->rng = o->play_seed * 0x2545F491u + 7;
+    dp_mdmach_reset(x->m);
+    md_archive_add(x, N, 1);
+    x->nov = N;
+    x->forced = 0;
+    uint64_t stop = r->steps + o->novelty_steps;
+    unsigned idle = 0;   // consecutive trials that never reached a frame: the ROM has no frame loop here
+    while (r->steps < stop && r->steps < o->max_total) {
+        if (idle >= 8) { r->novelty_stalled++; break; }
+        uint8_t maxl = 0;
+        if (N->L->lives_byte >= 0)
+            for (uint32_t i = 0; i < N->n; i++)
+                if (N->a[i].lives[N->L->lives_byte] > maxl && N->a[i].lives[N->L->lives_byte] <= 9) maxl = N->a[i].lives[N->L->lives_byte];
+        uint32_t best = N->n - 1;
+        double bs = -1;
+        for (int k = 0; k < 8; k++) {
+            uint32_t i = k ? md_rng(&N->rng) % N->n : N->n - 1;
+            if (!N->cells) {
+                double g = (double)N->a[i].gain / (1.0 + N->a[i].picks);
+                if (g > bs) { bs = g; best = i; }
+                continue;
+            }
+            double lf = (N->L->lives_byte >= 0 && N->a[i].lives[N->L->lives_byte] < maxl) ? 1e-3 : 1.0;
+            double sc = lf * (1.0 + (double)N->a[i].gain) * (1.0 + N->a[i].depth / 200.0) / sqrt(1.0 + N->a[i].picks);
+            if (sc > bs) { bs = sc; best = i; }
+        }
+        uLongf sz = (uLongf)ssz;
+        if (uncompress(tmp2, &sz, N->a[best].z, N->a[best].zlen) != Z_OK) break;
+        N->a[best].picks++;
+        r->novelty_trials++;
+        N->best = best; N->f = 0; N->hold = 0; N->held = 0; N->frames_since = 0; N->nrecent = 0;
+        N->died = 0; N->before = x->novel;
+        N->learn = r->novelty_trials < 64;
+        // restore, then the trial runs as one natural path whose frame hook plays and scores
+        x->halted = 0;
+        x->previous_move_valid = x->register_move_valid = 0;
+        x->cur_choice = 0;
+        x->origin = UINT32_MAX;
+        for (unsigned i = 0; i < 8; i++) x->an_writer[i] = UINT32_MAX;
+        x->watch_pc = UINT32_MAX;
+        x->trace_pos = x->trace_len = 0;
+        next_generation(x);
+        dp_mdmach_load(x->m, tmp2);
+        memcpy(N->L->prev, dp_mdmach_ram(x->m), 65536);
+        N->L->frame += 200;   // a restore is no decrement sequence
+        dp_mdmach_set_pad(x->m, md_random_pad(N));
+        int cut = 0, fault = 0;
+        r->paths++;
+        uint64_t left = stop - r->steps < o->max_total - r->steps ? stop - r->steps : o->max_total - r->steps;
+        uint64_t fr0 = r->novelty_frames_run;
+        r->steps += dp_mdmach_run(x->m, left, &cut, &fault);
+        if (fault) r->faults++;
+        idle = r->novelty_frames_run == fr0 ? idle + 1 : 0;
+    }
+    x->nov = NULL;
+    dp_mdmach_set_pad(x->m, 0);
+    // the archive's freshest cells seed the fork queue (64 at most)
+    for (uint32_t i = N->n; i > 0; i--) {
+        if (i + 64 < N->n) break;
+        uLongf sz = (uLongf)ssz;
+        if (uncompress(tmp2, &sz, N->a[i - 1].z, N->a[i - 1].zlen) != Z_OK) continue;
+        dp_mdmach_load(x->m, tmp2);
+        if (push(x, dp_mdmach_pc(x->m), 0, 0)) r->novelty_seeded++;
+    }
+    for (uint32_t i = 0; i < N->n; i++) free(N->a[i].z);
+    free(N->a); free(N->L); free(N->keys); free(N->tmp); free(tmp2); free(N->ztmp); free(N);
+}
+
 static uint32_t rd32(const uint8_t *p) {
     return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
 }
@@ -864,6 +1101,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     r->decoders = x.ndec;
     if (!drain && r->steps < o->max_total) replay_streams(&x, (o->max_total - r->steps) / 2);
     for (unsigned d = 0; d < x.ndec; d++) free(x.dec[d].snap);
+    if (!drain) novelty_search(&x);
     // explicit entries (G3): each starts a forced path from the power-on machine
     if (!drain)
         for (unsigned e = 0; e < o->entry_count; e++) {
@@ -1042,6 +1280,11 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/SR context past the cap)\n", (unsigned long long)r->ctx_evicted);
     if (r->pass2_seeds || r->pass2_refused || r->pass2_capped) fprintf(out, "  second pass: %llu seeds, %llu refused, %llu capped\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     if (r->disp_tables) fprintf(out, "  dispatch tables: %llu tables, %llu seeds, %llu refused targets\n", (unsigned long long)r->disp_tables, (unsigned long long)r->disp_seeds, (unsigned long long)r->disp_refused_view);
+    if (r->novelty_trials)
+        fprintf(out, "  novelty: depth %u frames, %llu trials, %llu frames, %llu hits, %llu deaths, %llu archived (%llu replaced), %llu seeded, %llu stalled\n",
+                r->novelty_depth, (unsigned long long)r->novelty_trials, (unsigned long long)r->novelty_frames_run,
+                (unsigned long long)r->novelty_hits, (unsigned long long)r->novelty_deaths,
+                (unsigned long long)r->novelty_archived, (unsigned long long)r->novelty_replaced, (unsigned long long)r->novelty_seeded, (unsigned long long)r->novelty_stalled);
     if (r->jobs_folded) fprintf(out, "  jobs: %u secondary instance folded (entries split even/odd)\n", r->jobs_folded);
     fprintf(out, "  copy siblings: %llu tables, %llu entries, %llu bytes, %llu table caps\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_entries, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_caps);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);

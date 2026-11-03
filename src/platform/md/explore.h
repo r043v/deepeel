@@ -47,6 +47,11 @@ typedef struct {
     /* --jobs 2 partition (set by dp_md_explore_jobs): the secondary instance skips the
      * power-on path and the finalization; the primary calls pre_finalize(results, bank_seen,
      * user) once its drain is done, before the sibling pass and the byte counts */
+    uint64_t novelty_steps;    /* novelty search (Go-Explore): instruction budget (0: off) */
+    uint32_t novelty_frames;   /* frames per trial */
+    uint32_t novelty_archive;  /* archive capacity */
+    int novelty_cells;         /* key the archive on the screen fingerprint and lives */
+    uint32_t play_seed;
     int skip_root;
     int no_finalize;
     unsigned entry_from, entry_step;  /* this instance takes entries[i] with i % step == from (0: all) */
@@ -123,6 +128,8 @@ typedef struct DpMdResults_ {
     uint64_t replay_tables, replay_candidates, replay_runs, replay_steps;
     uint64_t sat_replay_steps, sat_replay_total, replay_faults;
     uint32_t replay_only_bytes; /* bytes read only by replays */
+    uint64_t novelty_trials, novelty_hits, novelty_archived, novelty_replaced, novelty_frames_run, novelty_deaths, novelty_seeded, novelty_stalled;
+    uint32_t novelty_depth;
     unsigned jobs_folded;   /* --jobs 2: instances folded into this report (secondary) */
     uint8_t z80_bank_seen_out[128]; /* secondary instance only: banks the Z80 read (merged by the primary) */
 } DpMdResults;
