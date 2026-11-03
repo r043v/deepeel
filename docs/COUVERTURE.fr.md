@@ -125,7 +125,7 @@ Pour chaque technique, la fiche indique :
 | J4 | Go-Explore (cellules écran) | ✗ | ✗ | ✗ | ✗ | ✅ | ✗ |
 | J5 | Mode humain, export `.sta` | ✅ | ✗ | ✗ | ✗ | ✗ | ✗ |
 | O1 | `.map` texte, PNG, JSON, heat | ✅ | ✅ `.map`, maprender | ✅ | ◐ | ✅ via maprender | ✗ dump brut |
-| O2 | `.cov`, romdata, `--evidence` | ✅/✅/✗ | ✗/✗/✅ | ✗/✗/✅ | ✗ | ✗ | ✗ |
+| O2 | `.cov`, romdata, `--evidence` | ✅/✅/✗ | ✅/✅/✅ | ✅/✅/✅ | ✗ | ✗ | ✗ |
 | O3 | `--watch` (SDL2) | ✅ | ✗ | ✗ | ✗ | ✗ | ✗ |
 
 **Norme** : toutes les lignes passent à ✅ sur toutes les plateformes, sauf

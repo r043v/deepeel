@@ -130,6 +130,7 @@ static inline uint16_t dp_sega_nature(uint8_t f,uint8_t st) {
 }
 typedef struct {
     uint8_t *flags;
+    uint32_t *exec_hits,*data_hits; // per ROM byte, saturating: how often it was executed / read as data
     size_t size;
     uint64_t steps,paths,forks,irq_forks,exec_outside,data_reads,vdp_copies,ram_copies;
     uint64_t defer_spooled, fork_deferred, fork_final, steps_deferred,loop_deferred,defer_resumed,steps_final,loop_final,defer_dropped,defer_pending; // §6
@@ -206,6 +207,8 @@ void dp_sega_report(FILE *out,const DpSegaSystem *system,const DpSegaResults *re
 void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *results);
 void dp_sega_map(FILE *out,const DpSegaResults *results);
 // Lossless per-byte evidence flags, including overlapping code/data proofs.
+void dp_sega_cov(FILE *out,const DpSegaResults *r);
+void dp_sega_romdata(FILE *out,const DpSegaResults *r);
 void dp_sega_evidence(FILE *out,const DpSegaResults *results);
 int dp_sega_explore_command(int argc,char **argv);
 #endif

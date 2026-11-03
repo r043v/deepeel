@@ -224,10 +224,43 @@ static void padding_cut(void) {
     dp_sega_results_free(&r);
     free(rom);
 }
+// .cov / romdata: hit counts come from the exploration, one line per known byte
+static void cov_output(void) {
+    uint8_t *rom=calloc(1,0x10000); CHECK(rom); if(!rom) exit(1);
+    const uint8_t start[]={0xc3,0x00,0x01}; memcpy(rom,start,sizeof(start));
+    // ld hl,$2000 ; ld a,(hl) ; halt   (one data read at $2000)
+    const uint8_t code[]={0x21,0x00,0x20,0x7e,0x76}; memcpy(rom+0x100,code,sizeof(code));
+    rom[0x2000]=0x42;
+    DpSegaOptions o=dp_sega_options(); o.seed_cap=0; o.seed_banks=0; DpSegaResults r;
+    CHECK(dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r));
+    CHECK(r.exec_hits[0x100]>=1 && r.data_hits[0x2000]>=1);
+    FILE *f=tmpfile(); CHECK(f);
+    if(f) {
+        dp_sega_cov(f,&r); rewind(f);
+        char line[128]; int exec=0,data=0;
+        while(fgets(line,sizeof line,f)) {
+            unsigned b,a,fl,h;
+            if(sscanf(line,"%x %x %x %x",&b,&a,&fl,&h)==4) {
+                if(b==0 && a==0x100 && fl==1 && h>=1) exec=1;
+                if(b==0 && a==0x2000 && fl==8 && h>=1) data=1;
+            }
+        }
+        CHECK(exec && data);
+        rewind(f); fclose(f);
+    }
+    f=tmpfile();
+    if(f) {
+        dp_sega_romdata(f,&r); rewind(f);
+        unsigned page; unsigned long long n; CHECK(fscanf(f,"%x %llu",&page,&n)==2 && page==0x20 && n>=1);
+        fclose(f);
+    }
+    dp_sega_results_free(&r);
+    free(rom);
+}
 int main(void) {
     test_machine(dp_sega_backend_sg(),0,1);
     test_machine(dp_sega_backend_gg(),0,0);
     test_machine(dp_sega_backend_gg(),1,0);
-    exploration(); deferral(); fork_deferral(); padding_cut();
+    exploration(); deferral(); fork_deferral(); padding_cut(); cov_output();
     TEST_DONE("sega");
 }

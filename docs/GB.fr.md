@@ -900,3 +900,14 @@ JSON `counters` et ligne `cuts:` du texte), comme `is_padding_at` côté GB. Le
 Z80 n'a pas d'opcode illégal : seul le décodage impossible (`decode_cuts`) et
 le padding restent à couper.
 
+## 0.48.0
+
+J4 : `deepeel z80 explore … --cov F --romdata F`. Le moteur Sega/MSX compte
+maintenant les passages en exécution et les lectures de données par octet de
+ROM (`exec_hits`/`data_hits`, saturants, sommés à la fusion des workers).
+`.cov` : `bank offset flags hits` en banques physiques de 16 Kio (flags 1 =
+exécuté, 4 = spéculatif, 8 = donnée ; l'exécution l'emporte) — ce n'est pas le
+format `gbl coverage v1` de m0boy, qui suppose les adresses CPU de la GB.
+`--romdata` : `page count` par page de 256 octets, comme côté GB. Observations
+de l'outil.
+

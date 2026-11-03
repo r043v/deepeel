@@ -131,12 +131,14 @@ static void static_scan(Run *x);
 static inline void src_or(DpSegaResults *r,size_t i,uint32_t bits) {
     if(r->src_flags) dp_cov_mark(&r->first,r->src_flags,(uint32_t)i,bits,r->steps,0);
 }
+static inline uint32_t hit_add(uint32_t a,uint32_t b) { return a+b<a?0xFFFFFFFFu:a+b; }
+static inline void hit_inc(uint32_t *h,size_t i) { if(h && h[i]!=0xFFFFFFFFu) h[i]++; }
 static uint8_t read_bus(void *user,uint16_t a) {
     Run *x=user; uint8_t v=x->b->read(a);
     int64_t index=x->b->rom_index(a);
     if(!x->fetching && index>=0 && (uint64_t)index<x->r->size) {
         if(!(x->r->flags[index]&DP_SEGA_DATA)) x->discoveries++;
-        x->r->flags[index]|=DP_SEGA_DATA; x->r->data_reads++;
+        x->r->flags[index]|=DP_SEGA_DATA; x->r->data_reads++; hit_inc(x->r->data_hits,(size_t)index);
         src_or(x->r,index,x->forced?DP_SRC_FORK_FORCED:DP_SRC_FORK_NATURAL);
     }
     if(!x->fetching) section_live_ram(x,x->b->ram_index(a));
@@ -271,7 +273,7 @@ static void msx_event(void *user,DpMsxEvent event) {
     case DP_MSX_ROM_READ:
         if(event.address<r->size) {
             if(!(r->flags[event.address]&DP_SEGA_DATA)) x->discoveries++;
-            r->flags[event.address]|=DP_SEGA_DATA; r->data_reads++;
+            r->flags[event.address]|=DP_SEGA_DATA; r->data_reads++; hit_inc(r->data_hits,event.address);
             src_or(r,event.address,x->forced?DP_SRC_FORK_FORCED:DP_SRC_FORK_NATURAL);
             if(x->bios_active && x->bios_id==1)
                 x->bios_return=valid_origin(x,event.address+1,event.value);
@@ -1027,7 +1029,7 @@ void dp_sega_results_free(DpSegaResults *r) {
     for(uint32_t i=0;i<r->section_count;i++) dp_set_free(&r->sections[i].ctx_seen);
     free(r->sections); free(r->section_of); free(r->tree_nodes); free((void *)r->rom);
     free(r->static_flags); free(r->src_flags); dp_first_free(&r->first);
-    free(r->flags); free(r->copies); memset(r,0,sizeof(*r));
+    free(r->flags); free(r->exec_hits); free(r->data_hits); free(r->copies); memset(r,0,sizeof(*r));
 }
 // One exploration worker. worker 0 runs everything: the TAS replay, the play
 // session, the reset path. Higher workers own every jobs-th seed spec and an
@@ -1079,6 +1081,8 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     while(x.copy_hash_size<(size_t)o->copy_cap*2) x.copy_hash_size*=2;
     x.copy_hash=calloc(x.copy_hash_size,sizeof(*x.copy_hash));
     r->flags=calloc(size,1);
+    r->exec_hits=calloc(size,sizeof(uint32_t));
+    r->data_hits=calloc(size,sizeof(uint32_t));
     r->static_flags=calloc(size,1);
     r->src_flags=calloc(size,sizeof(*r->src_flags));
     dp_first_init(&r->first,1u<<20);
@@ -1330,6 +1334,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
                         if(index>=0 && (uint64_t)index<size) {
                             if(!(r->flags[index]&(DP_SEGA_NATURAL|DP_SEGA_FORCED))) x.discoveries++;
                             r->flags[index]|=x.forced?DP_SEGA_FORCED:DP_SEGA_NATURAL;
+                            hit_inc(r->exec_hits,(size_t)index);
                             src_or(r,index,x.forced?DP_SRC_FORK_FORCED:DP_SRC_FORK_NATURAL);
                         }
                         else outside=1;
@@ -1465,6 +1470,8 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     uint32_t sec_base=d->section_count,tree_base=d->tree_count;
     for(size_t i=0;i<d->size;i++) {
         d->flags[i]|=s->flags[i];
+        d->exec_hits[i]=hit_add(d->exec_hits[i],s->exec_hits[i]);
+        d->data_hits[i]=hit_add(d->data_hits[i],s->data_hits[i]);
         if(s->src_flags[i]) dp_cov_mark(&d->first,d->src_flags,(uint32_t)i,s->src_flags[i],d->steps,1); // actor 1: a merged worker
         if(s->section_of[i]) {
             if(d->section_of[i]) d->merge_conflicts++;
@@ -1784,6 +1791,28 @@ void dp_sega_map(FILE *out,const DpSegaResults *r) {
     }
     free(m);
 }
+// coverage in physical-bank form ("bank offset flags hits", 16 KiB banks): the
+// Z80 platforms have no single CPU-address convention, so the physical ROM
+// position is the key.  flags: 1=executed 4=speculative (forced) 8=data
+// (read, copied or static data); execution wins over data on a byte.
+void dp_sega_cov(FILE *out,const DpSegaResults *r) {
+    fputs("# deepeel z80 coverage v1: bank offset flags(1=exec,4=speculative,8=data) hits\n",out);
+    for(size_t k=0;k<r->size;k++) {
+        uint8_t f=r->flags[k]; unsigned flags; uint32_t hits;
+        if(f&(DP_SEGA_NATURAL|DP_SEGA_FORCED)) { flags=1u|((f&DP_SEGA_NATURAL)?0u:4u); hits=r->exec_hits[k]; }
+        else if(f&(DP_SEGA_DATA|DP_SEGA_COPIED|DP_SEGA_STATIC_DATA)) { flags=8; hits=r->data_hits[k]; }
+        else continue;
+        fprintf(out,"%02zx %04zx %x %x\n",k>>14,k&0x3fff,flags,(unsigned)hits);
+    }
+}
+// ROM data-read profile, "page count" per touched 256-byte page (m0boy romdata form)
+void dp_sega_romdata(FILE *out,const DpSegaResults *r) {
+    for(size_t p=0;p<(r->size+255)/256;p++) {
+        uint64_t n=0;
+        for(size_t i=p*256;i<p*256+256 && i<r->size;i++) n+=r->data_hits[i];
+        if(n) fprintf(out,"%zx %llu\n",p,(unsigned long long)n);
+    }
+}
 void dp_sega_evidence(FILE *out,const DpSegaResults *r) {
     fputs("# physical-bank offset-start offset-end evidence-mask (inclusive, 16 KiB banks)\n"
           "# 01=code-natural 02=code-forced 04=data-read 08=data-copied 10=code-static 20=data-static\n"
@@ -1956,7 +1985,7 @@ static int parse_entry(const char *s,DpSegaOptions *o) {
 int dp_sega_explore_command(int argc,char **argv) {
     if(argc<5) goto usage;
     const DpSegaSystem *s=!strcmp(argv[3],"msx")?dp_msx_system():dp_sega_system(argv[3]); if(!s) goto usage;
-    DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); o.defer_tiers=DP_SEGA_TIER_MAX; const char *text=NULL,*map=NULL,*evidence=NULL,*summary=NULL;
+    DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); o.defer_tiers=DP_SEGA_TIER_MAX; const char *text=NULL,*map=NULL,*evidence=NULL,*summary=NULL,*cov=NULL,*romdata=NULL;
     for(int i=5;i<argc;i++) {
         if(!strcmp(argv[i],"--no-vector-seeds")) { o.seed_vectors=0; continue; }
         if(!strcmp(argv[i],"--no-context-evict")) { o.no_context_evict=1; continue; }
@@ -1995,6 +2024,8 @@ int dp_sega_explore_command(int argc,char **argv) {
         else if(!strcmp(key,"--map")) map=value;
         else if(!strcmp(key,"--summary")) summary=value;
         else if(!strcmp(key,"--evidence")) evidence=value;
+        else if(!strcmp(key,"--cov")) cov=value;
+        else if(!strcmp(key,"--romdata")) romdata=value;
         else if(!strcmp(key,"--mapper") && (!strcmp(s->id,"sms") || !strcmp(s->id,"gg"))) {
             const char *names[]={"auto","sega","codemasters","korean150"};
             int found=0;
@@ -2048,16 +2079,18 @@ int dp_sega_explore_command(int argc,char **argv) {
     int ok=dp_sega_explore(s,image+header,(size_t)end-header,&o,&r); free(image);
     if(!ok) { fprintf(stderr,"invalid machine profile/budgets/ROM size, or allocation failure\n"); return 1; }
     dp_sega_report(stdout,s,&r);
-    const char *paths[]={text,map,evidence,summary};
-    for(unsigned i=0;i<4;i++) if(paths[i]) {
+    const char *paths[]={text,map,evidence,summary,cov,romdata};
+    for(unsigned i=0;i<6;i++) if(paths[i]) {
         FILE *out=fopen(paths[i],"w"); if(!out) { perror(paths[i]); ok=0; continue; }
         if(i==2) dp_sega_evidence(out,&r); else if(i==1) dp_sega_map(out,&r);
         else if(i==3) dp_sega_summary(out,s,&r);
+        else if(i==4) dp_sega_cov(out,&r);
+        else if(i==5) dp_sega_romdata(out,&r);
         else dp_sega_report(out,s,&r);
         if(ferror(out)) ok=0;
         if(fclose(out)) ok=0;
     }
     dp_sega_results_free(&r); return ok?0:1;
 usage:
-    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--summary FILE]\n"); return 2;
+    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE]\n"); return 2;
 }
