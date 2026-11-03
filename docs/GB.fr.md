@@ -1166,3 +1166,13 @@ J11 (partiel) : backend libretro niveau A (`src/mach/libretro.[ch]`, §8.1).
   mode humain/`--watch`, multi-instances par copie du `.so` (§8.3), essai sur
   un vrai cœur chargé hors dépôt. Les cœurs sont des singletons : une
   instance active par fil.
+
+## 0.68.0
+
+J11 (partiel) : multi-instances libretro (§8.3). `dp_lr_open_copy` copie le
+`.so` dans un fichier temporaire, le `dlopen` en `RTLD_LOCAL` puis le délie :
+chaque instance a ses propres globales, donc son propre état (les cœurs sont
+des singletons par bibliothèque). Test `libretro` : deux instances du cœur
+factice, entrées et images indépendantes. Reste pour J11 : branchement sur
+les sessions de l'explorateur, vrai cœur hors dépôt, Go-Explore/mode
+humain/`--watch`.

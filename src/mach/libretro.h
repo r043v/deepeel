@@ -16,6 +16,9 @@ enum { DP_LR_FMT_0RGB1555 = 0, DP_LR_FMT_XRGB8888 = 1, DP_LR_FMT_RGB565 = 2 };
 
 // opens `core_path` (dlopen, RTLD_LOCAL) and initializes it; NULL + err on failure
 DpLibretro *dp_lr_open(const char *core_path, char *err, size_t errn);
+// same, but from a private copy of the .so (§8.3): cores are process-wide
+// singletons, so each independent instance needs its own copy of the library
+DpLibretro *dp_lr_open_copy(const char *core_path, char *err, size_t errn);
 // loads a ROM (read from disk by the backend; the path is also given to cores that need it)
 int dp_lr_load_rom(DpLibretro *lr, const char *rom_path, char *err, size_t errn);
 void dp_lr_close(DpLibretro *lr);

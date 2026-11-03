@@ -66,6 +66,28 @@ int main(int argc, char **argv) {
     CHECK(memcmp(ha, hb, sizeof ha) == 0);
     CHECK(ha[0] != ha[1]); // the hash follows the run
 
+    // two independent instances from private copies of the same core (§8.3)
+    {
+        DpLibretro *a = dp_lr_open_copy(argv[1], err, sizeof err);
+        DpLibretro *b = dp_lr_open_copy(argv[1], err, sizeof err);
+        CHECK_MSG(a && b, err);
+        if (a && b) {
+            CHECK_MSG(dp_lr_load_rom(a, argv[2], err, sizeof err), err);
+            CHECK_MSG(dp_lr_load_rom(b, argv[2], err, sizeof err), err);
+            dp_lr_set_input(a, 0, 7);
+            dp_lr_advance(a, 2);
+            dp_lr_advance(b, 5);
+            size_t na, nb;
+            const uint8_t *ra = dp_lr_memory(a, DP_LR_MEM_SYSTEM_RAM, &na);
+            const uint8_t *rb = dp_lr_memory(b, DP_LR_MEM_SYSTEM_RAM, &nb);
+            CHECK(ra && rb && ra != rb);
+            CHECK(ra[0] == 14 && ra[1] == 2); // a saw its own input and frames
+            CHECK(rb[0] == 0 && rb[1] == 5);  // b is untouched by a's input
+        }
+        dp_lr_close(a);
+        dp_lr_close(b);
+    }
+
     free(snap);
     dp_lr_close(lr);
     remove(argv[2]);

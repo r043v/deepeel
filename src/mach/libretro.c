@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 // the subset of libretro.h this backend uses (public, stable ABI)
 #define RETRO_ENV_GET_CAN_DUPE 3
@@ -119,6 +120,26 @@ static void seterr(char *err, size_t n, const char *fmt, const char *a) {
             return NULL;                                                                         \
         }                                                                                        \
     } while (0)
+
+DpLibretro *dp_lr_open_copy(const char *core_path, char *err, size_t errn) {
+    FILE *in = fopen(core_path, "rb");
+    if (!in) { seterr(err, errn, "libretro: cannot read %s", core_path); return NULL; }
+    char tmp[] = "/tmp/dpcore_XXXXXX";
+    int fd = mkstemp(tmp);
+    if (fd < 0) { fclose(in); seterr(err, errn, "libretro: %s", "cannot create a temporary copy"); return NULL; }
+    FILE *out = fdopen(fd, "wb");
+    char buf[65536];
+    size_t n;
+    int ok = out != NULL;
+    while (ok && (n = fread(buf, 1, sizeof buf, in)) > 0)
+        if (fwrite(buf, 1, n, out) != n) ok = 0;
+    fclose(in);
+    if (out) fclose(out);
+    DpLibretro *lr = ok ? dp_lr_open(tmp, err, errn) : NULL;
+    if (!ok) seterr(err, errn, "libretro: %s", "copy failed");
+    unlink(tmp); // the mapping stays valid after dlopen
+    return lr;
+}
 
 DpLibretro *dp_lr_open(const char *core_path, char *err, size_t errn) {
     DpLibretro *lr = calloc(1, sizeof *lr);
