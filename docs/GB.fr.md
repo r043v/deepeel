@@ -1145,3 +1145,24 @@ sur disque, abandonnés). Test dans `explorer`.
 classes** (RLE), pas encore le format binaire complet (nature, types, sources,
 hits par octet), et les segments sont des mots-clés zTXt, pas des chunks PNG
 privés. Reste pour J10 : `dpIx`, `dpTb`, `dpCv` complet, rendu en flux.
+
+## 0.67.0
+
+J11 (partiel) : backend libretro niveau A (`src/mach/libretro.[ch]`, §8.1).
+- `dlopen` d'un cœur non modifié (`RTLD_LOCAL`), API publique seulement :
+  `retro_run` (avance), `retro_serialize`/`unserialize` (état), entrées
+  joypad, mémoire (`SYSTEM_RAM`, `SAVE_RAM`, `VIDEO_RAM`), framebuffer.
+- Hachages d'état (`dp_lr_state_hash` : état sérialisé complet, horloges
+  comprises ; `dp_lr_ram_hash` : SYSTEM_RAM seule) et rejeu TAS
+  (`dp_lr_replay` : un masque par image, hachage RAM par image).
+- **Dégradations rapportées** (`dp_lr_degradations`) : ni pas à pas, ni
+  fourche forcée D7-D11, ni observateurs de bus, ni couverture ROM précise ;
+  les memory maps déclarées par le cœur sont signalées, pas décodées.
+- Test `libretro` sur un **cœur factice construit par les tests**
+  (`tests/mock_libretro.c`, aucun binaire dans le dépôt) : chargement, entrées,
+  aller-retour de sérialisation, rejeu TAS déterministe, framebuffer, rapport
+  de dégradations.
+- Non fait : branchement sur les sessions/TAS de l'explorateur, Go-Explore,
+  mode humain/`--watch`, multi-instances par copie du `.so` (§8.3), essai sur
+  un vrai cœur chargé hors dépôt. Les cœurs sont des singletons : une
+  instance active par fil.

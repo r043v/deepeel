@@ -842,7 +842,7 @@ static int cmd_maprender(int argc, char **argv) {
             p = nl < end ? nl + 1 : end;
         }
         free(text);
-        text = cv.p;
+        text = (char *)cv.p;
         ln = (long)cv.len;
     }
     unsigned rom_size = 0;
@@ -877,7 +877,7 @@ static int cmd_maprender(int argc, char **argv) {
         }
         free(cv_in);
         free(text);
-        text = t2.p;
+        text = (char *)t2.p;
         ln = (long)t2.len;
     }
     if (title_arg) {
