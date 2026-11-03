@@ -466,6 +466,21 @@ def build_md(out):
     r = md_rom()
     r[0x200:0x202] = bytes([0x4E, 0x71])
     save_md(out, "fix_md_zeros", r)
+    # --- siblings: DMA of $400 (16 words) + a longword table {$400,$600,$800} read at $300
+    r = md_rom()
+    pc = 0x200
+    for v in (0x8114, 0x9310, 0x9400, 0x9500, 0x9602):
+        r[pc:pc + 8] = bytes([0x33, 0xFC, v >> 8, v & 0xFF, 0x00, 0xC0, 0x00, 0x04])
+        pc += 8
+    r[pc:pc + 10] = bytes([0x23, 0xFC, 0x40, 0x00, 0x00, 0x80, 0x00, 0xC0, 0x00, 0x04])
+    pc += 10
+    r[pc:pc + 6] = bytes([0x20, 0x39, 0x00, 0x00, 0x03, 0x00])   # move.l ($300).l,d0
+    pc += 6
+    r[pc:pc + 2] = bytes([0x60, 0xFE])
+    r[0x300:0x30C] = bytes([0, 0, 4, 0, 0, 0, 6, 0, 0, 0, 8, 0])
+    for i in range(0x20):
+        r[0x400 + i] = i
+    save_md(out, "fix_md_sib", r)
     # --- vint: enable V-int (reg1 bit 5), vector 30 -> $300, main loop bra.s * --
     r = md_rom()
     r[30 * 4:30 * 4 + 4] = (0x300).to_bytes(4, "big")

@@ -339,3 +339,5 @@ add_test(NAME md_indirect COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMA
 set_tests_properties(md_indirect PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME md_padding COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_zeros.md --cut-padding --max-total 200000 --text ${CMAKE_CURRENT_BINARY_DIR}/md_pad.txt >/dev/null 2>&1; grep -q 'padding cuts: 1$' ${CMAKE_CURRENT_BINARY_DIR}/md_pad.txt")
 set_tests_properties(md_padding PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME md_sibling COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_sib.md --max-total 200000 --text ${CMAKE_CURRENT_BINARY_DIR}/md_sib.txt >/dev/null 2>&1; grep -q 'copy siblings: 1 tables, 2 entries, 64 bytes, 0 table caps' ${CMAKE_CURRENT_BINARY_DIR}/md_sib.txt")
+set_tests_properties(md_sibling PROPERTIES FIXTURES_REQUIRED fixtures)

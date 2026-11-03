@@ -98,7 +98,7 @@ typedef struct {
     DpMdReader readers[DP_MD_READER_CAP];
     unsigned nreaders;
     uint64_t reader_overflow;
-    uint64_t pad_cuts, indirect_sites, indirect_targets, indirect_overflow;
+    uint64_t sib_tables, sib_entries, sib_bytes, sib_caps, pad_cuts, indirect_sites, indirect_targets, indirect_overflow;
     uint32_t exec_bytes, forced_only_bytes, dread_bytes, natural_data_bytes, dma_source_bytes, dma_read_bytes,
              cpu_vram_bytes, observed_bytes, code_or_vram_bytes, data_only_bytes, filtered_observed_bytes;
     /* stream replay: a called routine whose first ROM read is at the address

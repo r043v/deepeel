@@ -1683,3 +1683,14 @@ est arrêté et compté (`padding cuts: N`). Désactivée par défaut : les test
 `md_explore` épinglent des comportements qui traversent du padding. Fixture
 `fix_md_zeros.md`, test `md_padding`. Reste ◐ : option, pas de glissade `$FFFF`
 (déjà une faute d'opcode) ni de HALT/STOP attribué.
+
+## 0.110.0
+
+MD : frères de copie (S5, partielle). Un longword de table de la ROM (lu
+comme donnée) égal à la source d'une copie DMA ROM→VRAM d'au moins 16 octets
+désigne une table de flux ; les entrées voisines (paires, ≥ `$200`, dans la
+ROM, vers des octets non observés ; 64 max par table, saturation en `table
+caps`) sont comptées comme flux frères de même longueur. Rapport : `copy
+siblings: N tables, N entries, N bytes, N table caps`. Fixture `fix_md_sib.md`,
+test `md_sibling`. Reste ◐ : comptage seulement (pas de typage par octet dans
+la carte), copies 68000 vers VRAM par CPU non traitées.

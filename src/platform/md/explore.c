@@ -768,6 +768,48 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         r->lot_pending = dp_lf_pending(x.lot);
         dp_lf_close(x.lot, o->lot_path);
     }
+    // S5 copy siblings: a longword table entry (read as data) naming the source of a
+    // recorded copy of >= 16 bytes marks a table of streams; neighbouring entries
+    // that point at unobserved ROM are sibling streams of the same length.
+    // Counted (bitmap local to this pass); at most 64 entries a table.
+    {
+        uint8_t *claimed = calloc(c->size, 1);
+        for (int k = 0; claimed && k < r->ncopy && k < DP_MD_COPY_CAP; k++) {
+            uint32_t src = r->copies[k].src, len = r->copies[k].len * 2u;   // words -> bytes
+            if (len < 16 || src >= c->size) continue;
+            for (size_t t = 0; t + 4 <= c->size; t += 2) {
+                if (!(r->flags[t] & DP_MDF_DATA)) continue;
+                uint32_t v = (uint32_t)c->rom[t] << 24 | (uint32_t)c->rom[t + 1] << 16 | (uint32_t)c->rom[t + 2] << 8 | c->rom[t + 3];
+                if (v != src) continue;
+                size_t t0 = t, t1 = t + 4;
+                unsigned n = 1;
+                for (;;) {   // walk down
+                    if (t0 < 4 || n >= 64) break;
+                    uint32_t w = (uint32_t)c->rom[t0 - 4] << 24 | (uint32_t)c->rom[t0 - 3] << 16 | (uint32_t)c->rom[t0 - 2] << 8 | c->rom[t0 - 1];
+                    if (w < 0x200 || w >= c->size || (w & 1) || r->flags[w]) break;
+                    t0 -= 4; n++;
+                }
+                for (;;) {   // walk up
+                    if (t1 + 4 > c->size || n >= 64) break;
+                    uint32_t w = (uint32_t)c->rom[t1] << 24 | (uint32_t)c->rom[t1 + 1] << 16 | (uint32_t)c->rom[t1 + 2] << 8 | c->rom[t1 + 3];
+                    if (w < 0x200 || w >= c->size || (w & 1) || r->flags[w]) break;
+                    t1 += 4; n++;
+                }
+                if (n >= 64) r->sib_caps++;
+                if (n < 2) continue;
+                r->sib_tables++;
+                for (size_t e = t0; e < t1; e += 4) {
+                    uint32_t w = (uint32_t)c->rom[e] << 24 | (uint32_t)c->rom[e + 1] << 16 | (uint32_t)c->rom[e + 2] << 8 | c->rom[e + 3];
+                    if (w == src) continue;
+                    r->sib_entries++;
+                    for (uint32_t q = w; q < w + len && q < c->size; q++)
+                        if (!r->flags[q] && !claimed[q]) { claimed[q] = 1; r->sib_bytes++; }
+                }
+                break;
+            }
+        }
+        free(claimed);
+    }
     for (size_t i = 0; i < c->size; i++) {
         uint8_t f = r->flags[i];
         if (f & (DP_MDF_NATURAL | DP_MDF_FORCED)) r->exec_bytes++;
@@ -838,6 +880,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
             (unsigned long long)r->sat_site);
     fprintf(out, "  queue growths: %llu (initial %u, ceiling %u)\n", (unsigned long long)r->queue_growths,
             o->queue_cap, o->queue_max > o->queue_cap ? o->queue_max : o->queue_cap);
+    fprintf(out, "  copy siblings: %llu tables, %llu entries, %llu bytes, %llu table caps\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_entries, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_caps);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  copy records dropped: %llu\n", (unsigned long long)r->copy_overflow);
