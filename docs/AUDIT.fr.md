@@ -13,9 +13,9 @@ remesure pas l'outil.
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 24 | 1 | 2 |
 | PCE | 16 | 21 | 1 | 1 |
-| MD | 8 | 24 | 6 | 1 |
+| MD | 9 | 23 | 6 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 91.
+Cellules ouvertes (◐ ou ✗) : 90.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -102,7 +102,6 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | J5 | Mode humain, export `.sta` | PCE | ◐ `--export-state` (cellule la plus profonde, fichier DPST) |
 | J5 | Mode humain, export `.sta` | MD | ◐ `--export-state` (cellule la plus profonde, fichier DPST) |
 | O1 | `.map` texte, PNG, JSON, heat | NES | ◐ |
-| O1 | `.map` texte, PNG, JSON, heat | MD | ◐ `.map` classé + PNG (`maprender --sys md`) + `--summary` JSON ; pas de heat |
 | O2 | `.cov`, romdata, `--evidence` | PCE | ◐ `--evidence` (pas de `.cov` ni romdata : pas de compteurs de coups) |
 | O2 | `.cov`, romdata, `--evidence` | MD | ◐ `--evidence` ; pas de `.cov` ni romdata |
 | O3 | `--watch` (SDL2) | SMS/GG | ✗ |

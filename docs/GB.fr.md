@@ -1927,3 +1927,14 @@ par classe de la carte (somme égale à la taille de la ROM), part connue,
 compteurs de recherche (pas, chemins, fourches) et de saturation
 (`sat_total/path/visit/queue/site`). Observations de l'outil, pas des mesures
 de matériel. Reste ◐ pour O1 MD : pas de carte de chaleur.
+
+## 0.130.0
+
+Mega Drive : `--heat FILE` (O1). Chaque début d'instruction exécuté par un
+chemin **naturel** (jamais par une fourche) incrémente un compteur par octet de
+ROM ; le fichier `md heat v1` liste, par zone de 256 octets, le nombre
+d'instructions jouées. Même sémantique que la chaleur GB : l'usage joué, pas la
+couverture d'exploration. La cellule O1 du MD passe ✅ : carte classée, PNG,
+JSON et chaleur sont tous là (fixtures seulement, aucune ROM réelle essayée).
+Limite : avec `--jobs 2` l'instance secondaire ne reverse pas ses compteurs de
+chaleur ; la chaleur ne reflète que l'instance principale.

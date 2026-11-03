@@ -381,3 +381,5 @@ add_test(NAME md_map_png COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURR
 set_tests_properties(md_map_png PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_summary COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_pad_effect.md --summary $D/md_sum.json >/dev/null 2>&1; python3 -I -c \"import json,sys; d=json.load(open('$D/md_sum.json')); assert d['platform']=='md' and sum(d['classes'].values())==d['rom_size'] and d['counters']['paths']>0\"")
 set_tests_properties(md_summary PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME md_heat COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_pad_effect.md --heat $D/md_heat.txt >/dev/null 2>&1; head -1 $D/md_heat.txt | grep -q 'md heat v1' && grep -v '^#' $D/md_heat.txt | awk '{s+=$3} END {exit !(s>0)}'")
+set_tests_properties(md_heat PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)

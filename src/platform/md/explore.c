@@ -127,6 +127,7 @@ static void on_dma_read(void *u, uint32_t addr, unsigned size) {
 
 static void mark(X *x, uint32_t pc, unsigned len) {
     uint8_t f = x->forced ? DP_MDF_FORCED : DP_MDF_NATURAL;
+    if (!x->forced && x->r->exec_hits && pc < x->r->rom_size && x->r->exec_hits[pc] != UINT32_MAX) x->r->exec_hits[pc]++;   // heat: played instruction starts
     for (unsigned i = 0; i < len && pc + i < x->r->rom_size; i++)
         if (dp_mdmach_rom_visible(x->m, pc + i)) {
             if (!(x->r->flags[pc + i] & (DP_MDF_NATURAL | DP_MDF_FORCED))) x->novel++;
@@ -1088,6 +1089,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     r->rom_size = c->size;
     r->flags = calloc(c->size, 1);
     r->nonexcluded_reads = calloc(c->size, 1);
+    r->exec_hits = calloc(c->size, sizeof(uint32_t));
     r->z80_flags = calloc(c->size, 1);
     r->copies = calloc(DP_MD_COPY_CAP, sizeof *r->copies);
     X x = {.c = c, .o = o, .r = r, .qcap = o->queue_cap};
@@ -1301,6 +1303,7 @@ void dp_md_results_free(DpMdResults *r) {
     free(r->inferred);
     free(r->flags);
     free(r->nonexcluded_reads);
+    free(r->exec_hits);
     free(r->z80_flags);
     free(r->copies);
     memset(r, 0, sizeof *r);
@@ -1507,6 +1510,23 @@ int dp_md_explore_summary(const DpMdResults *r, const char *path) {
             (unsigned long long)r->sat_total, (unsigned long long)r->sat_path, (unsigned long long)r->sat_visit,
             (unsigned long long)r->sat_queue, (unsigned long long)r->sat_site,
             (unsigned long long)r->exec_bytes, (unsigned long long)r->forced_only_bytes);
+    return fclose(f) ? -1 : 0;
+}
+
+// Heat (O1): played usage per 256-byte zone, natural paths only (forks excluded).
+int dp_md_explore_heat(const DpMdResults *r, const char *path) {
+    if (!r->exec_hits) return -1;
+    FILE *f = fopen(path, "w");
+    if (!f) return -1;
+    uint64_t total = 0;
+    for (size_t i = 0; i < r->rom_size; i++) total += r->exec_hits[i];
+    fprintf(f, "# deepeel md heat v1: played instruction starts per 256-byte zone (natural paths only)\n# exec %llu instructions\n# columns: start end(inclusive) exec\n", (unsigned long long)total);
+    for (size_t z = 0; z < r->rom_size; z += 256) {
+        uint64_t n = 0;
+        size_t e = z + 256 < r->rom_size ? z + 256 : r->rom_size;
+        for (size_t i = z; i < e; i++) n += r->exec_hits[i];
+        fprintf(f, "%06zx %06zx %llu\n", z, e - 1, (unsigned long long)n);
+    }
     return fclose(f) ? -1 : 0;
 }
 

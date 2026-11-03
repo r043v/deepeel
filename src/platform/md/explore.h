@@ -80,6 +80,7 @@ typedef struct {
 
 typedef struct DpMdResults_ {
     uint8_t *flags;       /* per ROM byte, DP_MDF_* */
+    uint32_t *exec_hits;  /* per ROM byte: natural-path instruction starts (heat) */
     uint8_t *inferred;    /* S7 map inference per ROM byte: 1 pad, 2 code, 3 data, 0 none (never an observation) */
     uint64_t inf_pad, inf_code, inf_data, pad_runs_bytes;
     uint8_t *z80_flags;   /* per ROM byte, DP_MDZ_* */
@@ -149,6 +150,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
 /* One byte per ROM byte: the DP_MDF_* flags. */
 int dp_md_explore_map(const DpMdResults *r, const char *path);
 /* compact JSON profile of the run (class counts, search and saturation counters) */
+int dp_md_explore_heat(const DpMdResults *r, const char *path);   /* per-zone played usage */
 int dp_md_explore_summary(const DpMdResults *r, const char *path);
 uint8_t *dp_md_map_build(const DpMdResults *r);   /* DP_NMAP_* digits, caller frees */
 /* Text: executed ranges and copies. */
