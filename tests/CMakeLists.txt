@@ -163,6 +163,10 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_z80.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sms
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.gg
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sg
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.msx
 )
 
 add_custom_command(

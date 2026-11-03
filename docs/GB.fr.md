@@ -1293,3 +1293,14 @@ connus » est la couverture observée, pas une classification complète ; les pa
 (1 000 000 / 1 200 000) sont le mur du budget par chemin sur la boucle d'attente.
 Observations de l'outil. Reste : ROMs réelles hors dépôt, audit de la matrice,
 fixtures Game Gear/MSX/SG-1000.
+
+## 0.77.0
+
+J13 (partiel) : fixtures `fix_z80_branch.{sms,gg,sg,msx}` (même programme Z80 :
+lecture RAM, conditionnel `jr z` aux deux issues, `out` VDP, boucle d'attente ;
+en-tête « AB » pour MSX) générées par `tests/build_fixtures.py`. La campagne
+compte 49 runs sur 8 plateformes (GB, MD, SMS, GG, SG-1000, MSX, NES, PCE),
+0 échec. Pour les plateformes Z80 la colonne « octets connus » est la carte
+complète (le padding et l'inféré y sont classés) ; les 20 000 000 de pas sont le
+mur global consommé par la boucle d'attente. Observations de l'outil. Reste :
+ROMs réelles hors dépôt, audit de la matrice §2.1.

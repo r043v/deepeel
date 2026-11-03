@@ -19,14 +19,14 @@ construites par `tests/build_fixtures.py` ; **pas** des mesures de matériel,
 | Game Boy | `fix_keyirq.gb` | 0 | 32792 | 100.0 | 0.01 |
 | Game Boy | `fix_loop.gb` | 0 | 696330 | 100.0 | 0.04 |
 | Game Boy | `fix_mbc5.gb` | 0 | 28 | 100.0 | 0.01 |
-| Game Boy | `fix_nsdata.gb` | 0 | 79999996 | 100.0 | 4.11 |
+| Game Boy | `fix_nsdata.gb` | 0 | 79999996 | 100.0 | 4.06 |
 | Game Boy | `fix_nsecho.gb` | 0 | 8 | 100.0 | 0.01 |
 | Game Boy | `fix_nsstack.gb` | 0 | 6 | 100.0 | 0.01 |
 | Game Boy | `fix_p1poll.gb` | 0 | 3481683 | 100.0 | 0.19 |
 | Game Boy | `fix_pal.gb` | 0 | 4106 | 100.0 | 0.16 |
 | Game Boy | `fix_probes.gb` | 0 | 22 | 100.0 | 0.01 |
-| Game Boy | `fix_unreach.gb` | 0 | 11 | 99.2 | 0.00 |
-| Game Boy | `fix_vblank.gb` | 0 | 13376707 | 100.0 | 2.59 |
+| Game Boy | `fix_unreach.gb` | 0 | 11 | 99.2 | 0.01 |
+| Game Boy | `fix_vblank.gb` | 0 | 13376707 | 100.0 | 2.73 |
 | Mega Drive | `fix_md_cpu_vram.md` | 0 | 207 | n/d | 0.00 |
 | Mega Drive | `fix_md_cpu_vram_gap.md` | 0 | 216 | n/d | 0.00 |
 | Mega Drive | `fix_md_cpu_vram_reg.md` | 0 | 212 | n/d | 0.00 |
@@ -36,21 +36,25 @@ construites par `tests/build_fixtures.py` ; **pas** des mesures de matériel,
 | Mega Drive | `fix_md_fault.md` | 0 | 1 | n/d | 0.00 |
 | Mega Drive | `fix_md_fault_reg.md` | 0 | 2 | n/d | 0.00 |
 | Mega Drive | `fix_md_fork.md` | 0 | 134 | n/d | 0.00 |
-| Mega Drive | `fix_md_fork_fault.md` | 0 | 69 | n/d | 0.01 |
+| Mega Drive | `fix_md_fork_fault.md` | 0 | 69 | n/d | 0.00 |
 | Mega Drive | `fix_md_loop.md` | 0 | 65 | n/d | 0.00 |
 | Mega Drive | `fix_md_pad.md` | 0 | 645 | n/d | 0.00 |
-| Mega Drive | `fix_md_pad_effect.md` | 0 | 853 | n/d | 0.01 |
+| Mega Drive | `fix_md_pad_effect.md` | 0 | 853 | n/d | 0.00 |
 | Mega Drive | `fix_md_reader.md` | 0 | 202 | n/d | 0.00 |
 | Mega Drive | `fix_md_reader_overlap.md` | 0 | 205 | n/d | 0.00 |
 | Mega Drive | `fix_md_revisit.md` | 0 | 338 | n/d | 0.00 |
-| Mega Drive | `fix_md_sram_overlay.md` | 0 | 10000000 | n/d | 0.71 |
+| Mega Drive | `fix_md_sram_overlay.md` | 0 | 10000000 | n/d | 0.69 |
 | Mega Drive | `fix_md_vint.md` | 0 | 133 | n/d | 0.00 |
 | Mega Drive | `fix_md_vint_masked.md` | 0 | 66 | n/d | 0.00 |
 | Mega Drive | `fix_md_watch.md` | 0 | 2 | n/d | 0.00 |
 | Mega Drive | `fix_md_z80.md` | 0 | 424 | n/d | 0.00 |
 | NES | `fix_nes_branch.nes` | 0 | 1000000 | 0.78 (observé) | 0.04 |
 | PC Engine | `fix_pce_branch.pce` | 0 | 1200000 | 0.26 (observé) | 0.08 |
-| Master System | `fix_sega_mapper.sms` | 0 | n/d | 99.98 | 1.20 |
+| Master System | `fix_sega_mapper.sms` | 0 | 20000002 | 99.98 | 1.16 |
+| Master System | `fix_z80_branch.sms` | 0 | 20000000 | 100.00 | 5.49 |
+| Game Gear | `fix_z80_branch.gg` | 0 | 20000000 | 100.00 | 5.46 |
+| SG-1000 | `fix_z80_branch.sg` | 0 | 20000000 | 100.00 | 5.09 |
+| MSX | `fix_z80_branch.msx` | 0 | 20000000 | 99.99 | 5.29 |
 
 ## Synthèse par plateforme
 
@@ -60,7 +64,10 @@ construites par `tests/build_fixtures.py` ; **pas** des mesures de matériel,
 | Mega Drive | 21 | 0 | 10004053 |
 | NES | 1 | 0 | 1000000 |
 | PC Engine | 1 | 0 | 1200000 |
-| Master System | 1 | 0 | 0 |
+| Master System | 2 | 0 | 40000002 |
+| Game Gear | 1 | 0 | 20000000 |
+| SG-1000 | 1 | 0 | 20000000 |
+| MSX | 1 | 0 | 20000000 |
 
 `n/d` : valeur non exposée par le rapport texte de la plateforme.
 Pour NES et PC Engine la colonne « octets connus » est la couverture observée

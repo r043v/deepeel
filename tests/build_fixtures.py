@@ -481,6 +481,25 @@ def build_md_z80(out):
     r[0x320] = 0xAB
     save_md(out, "fix_md_z80", r)
 
+def build_z80_family(out):
+    # one Z80 branch program per Sega/MSX target: ld a,(RAM) / or a / jr z (both sides) /
+    # out (VDP data) / idle loop. SMS, Game Gear and SG-1000 start at $0000, MSX at the
+    # INIT of an "AB" cartridge header ($4000).
+    prog = bytes([0x3A, 0x00, 0xC0, 0xB7, 0x28, 0x04, 0x06, 0x01, 0x18, 0x02, 0x06, 0x02,
+                  0x78, 0xD3, 0xBE, 0x18, 0xFE])
+    for ext in ("sms", "gg", "sg"):
+        z = bytearray([0xFF]) * 0x8000
+        z[0:len(prog)] = prog
+        with open(os.path.join(out, "fix_z80_branch." + ext), "wb") as f:
+            f.write(z)
+    m = bytearray([0xFF]) * 0x8000
+    m[0:2] = b"AB"
+    m[2:4] = (0x4010).to_bytes(2, "little")
+    m[4:16] = bytes(12)
+    m[0x10:0x10 + len(prog)] = prog
+    with open(os.path.join(out, "fix_z80_branch.msx"), "wb") as f:
+        f.write(m)
+
 def build_nes_pce(out):
     # NES NROM-256 (2 x 16 KiB PRG + 8 KiB CHR): LDA $9000 / BNE (both sides) /
     # STA $4014 (OAM DMA from page $80); vectors -> $8000
@@ -510,6 +529,7 @@ def build_nes_pce(out):
 
 if __name__ == "__main__":
     build_nes_pce(sys.argv[1] if len(sys.argv) > 1 else ".")
+    build_z80_family(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_md_z80(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_md(sys.argv[1] if len(sys.argv) > 1 else ".")
     build(sys.argv[1] if len(sys.argv) > 1 else ".")

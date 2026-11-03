@@ -17,12 +17,15 @@ PLATFORMS = [  # name, glob, command builder
     ("NES", "fix_nes_*.nes", lambda rom, t, m: [exe, "nes", "explore", rom, "--text", t, "--map", m]),
     ("PC Engine", "fix_pce_*.pce", lambda rom, t, m: [exe, "pce", "explore", rom, "--text", t, "--map", m]),
     ("Master System", "fix_*.sms", lambda rom, t, m: [exe, "z80", "explore", "sms", rom, "--text", t, "--map", m]),
+    ("Game Gear", "fix_*.gg", lambda rom, t, m: [exe, "z80", "explore", "gg", rom, "--text", t, "--map", m]),
+    ("SG-1000", "fix_*.sg", lambda rom, t, m: [exe, "z80", "explore", "sg", rom, "--text", t, "--map", m]),
+    ("MSX", "fix_*.msx", lambda rom, t, m: [exe, "z80", "explore", "msx", rom, "--text", t, "--map", m]),
 ]
 
 def parse(text, mapfile):
     steps = None
     m = (re.search(r"exploration: (\d+) steps in (\d+) paths", text) or re.search(r"steps: (\d+) in (\d+) paths", text)
-         or re.search(r"steps (\d+) paths (\d+)", text))
+         or re.search(r"steps (\d+) paths (\d+)", text) or re.search(r"^steps (\d+); paths (\d+)", text, re.M))
     if m:
         steps = int(m.group(1))
     known = None
