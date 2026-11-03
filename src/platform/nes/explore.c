@@ -627,10 +627,14 @@ DpNesOptions dp_nes_options(void) {
     return o;
 }
 
+static void infer_gaps(DpNesRun *x);
+
 void dp_nes_results_free(DpNesResults *r) {
     if (!r) return;
     free(r->flags);
     free(r->chr_flags);
+    free(r->inferred);
+    r->inferred = NULL;
     free(r->sections);
     free(r->section_of);
     r->flags = NULL;
@@ -803,6 +807,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
         dp_lf_close(x.lot, x.opt.lot_path);
     }
     free(x.park);
+    if (!x.failed) infer_gaps(&x);
     free(x.queue);
     free(x.loops);
     free(x.fork_sites);
@@ -816,6 +821,50 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     int ok = !x.failed;
     dp_nesmach_close(x.m);
     return ok;
+}
+
+// --- padding and gap inference (static, over the classified map) ---------------
+
+static int nes_cls_code(uint8_t f) { return (f & (DP_NES_NATURAL | DP_NES_FORCED)) != 0; }
+
+// Runs of one byte value ($00/$FF from 8 bytes, others from 32) that no path
+// touched are padding; small unclassified gaps between classified cells are
+// inferred code/padding/data.  Every cell stays tagged as an inference, never
+// as an observation.
+static void infer_gaps(DpNesRun *x) {
+    DpNesResults *r = x->r;
+    const uint8_t *rom = dp_nesmach_prg_rom(x->m);
+    size_t n = r->prg_size;
+    if (!rom || !n) return;
+    r->inferred = calloc(n, 1);
+    if (!r->inferred) return;
+    for (size_t i = 0; i < n;) {
+        size_t j = i;
+        while (j < n && rom[j] == rom[i] && !r->flags[j]) j++;
+        size_t len = j - i;
+        if (len >= ((rom[i] == 0 || rom[i] == 0xFF) ? 8u : 32u)) {
+            for (size_t k = i; k < j; k++) r->flags[k] |= DP_NES_PAD;
+            r->padding_bytes += len;
+        }
+        i = j > i ? j : i + 1;
+    }
+    for (size_t i = 0; i < n;) {
+        if (r->flags[i]) { i++; continue; }
+        size_t j = i;
+        while (j < n && !r->flags[j]) j++;
+        size_t len = j - i;
+        uint8_t lf = i ? r->flags[i - 1] : 0, rf = j < n ? r->flags[j] : 0, c = 0;
+        if (len <= 3 && nes_cls_code(lf) && nes_cls_code(rf)) c = DP_NMAP_INF_CODE;
+        else if (len <= 1024 && (lf & DP_NES_PAD) && (!rf || (rf & DP_NES_PAD))) c = DP_NMAP_INF_PAD;
+        else if (len <= 1024 && (lf || rf)) c = DP_NMAP_INF_DATA;
+        if (c) {
+            for (size_t k = i; k < j; k++) r->inferred[k] = c;
+            if (c == DP_NMAP_INF_CODE) r->inferred_code += len;
+            else if (c == DP_NMAP_INF_PAD) r->inferred_pad += len;
+            else r->inferred_data += len;
+        }
+        i = j;
+    }
 }
 
 // --- outputs ------------------------------------------------------------------------
@@ -832,6 +881,8 @@ uint8_t *dp_nes_map_build(const DpNesResults *r) {
         else if (f & DP_NES_FORCED) cls = DP_NMAP_CODE_FORCED;
         else if (f & DP_NES_NATURAL) cls = DP_NMAP_CODE_NAT;
         else if (f & DP_NES_DATA) cls = DP_NMAP_DATA_READ;
+        else if (f & DP_NES_PAD) cls = DP_NMAP_PAD;
+        else if (r->inferred && r->inferred[i]) cls = r->inferred[i];
         else cls = DP_NMAP_UNKNOWN;
         map[i] = cls;
     }
@@ -882,6 +933,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->parked_resumed, (unsigned long long)r->parked_lost);
     fprintf(out, "  pending paths dropped at the wall %llu\n",
         (unsigned long long)r->pending_dropped);
+    fprintf(out, "  padding %llu bytes; inferred code %llu data %llu padding %llu\n", (unsigned long long)r->padding_bytes, (unsigned long long)r->inferred_code, (unsigned long long)r->inferred_data, (unsigned long long)r->inferred_pad);
     fprintf(out, "  cpu loop copy bytes %llu\n", (unsigned long long)r->cpu_copy_bytes);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  pad probes: %llu forks at %llu sites, refused %llu\n", (unsigned long long)r->pad_probes, (unsigned long long)r->pad_probe_sites, (unsigned long long)r->pad_probe_refused);

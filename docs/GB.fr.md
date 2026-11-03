@@ -1365,3 +1365,15 @@ les octets contigus du même `pc` sont fusionnés en un seul enregistrement
 l'adresse PPU au moment de l'écriture ; les boucles vers la RAM (WRAM/OAM par
 le CPU) et les sources RAM ne sont pas suivies, d'où ◐. Fixture
 `fix_nes_cpucopy.nes` (16 octets), test `nes_cpu_copy`.
+
+## 0.84.0
+
+NES : scan de padding et inférence de trous (S1/S7, partiels). Après
+l'exploration, les plages d'un même octet non touchées (`$00`/`$FF` dès 8
+octets, autres dès 32) sont du padding (`DP_NES_PAD`, classe `padding`) ; les
+trous ≤ 3 octets entre cellules de code sont du code inféré, les trous ≤ 1024
+adjacents à du padding du padding inféré, les autres trous ≤ 1024 adjacents à
+du classé des données inférées. Ce sont des inférences, jamais des
+observations (classes `inferred-*`). Rapport :
+`padding N bytes; inferred code/data/padding`. Pas encore de tables de
+pointeurs (S1 reste ◐). Test `nes_padding`.

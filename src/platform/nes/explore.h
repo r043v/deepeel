@@ -91,6 +91,7 @@ typedef struct {
 enum { DP_NES_CHR_BG = 1, DP_NES_CHR_SPR = 2, DP_NES_CHR_READ = 4 };
 
 typedef struct {
+    uint8_t *inferred;         // per PRG cell: DP_NMAP_INF_* for unclassified gaps, 0 otherwise
     uint8_t *chr_flags;        // one byte per CHR ROM cell (DP_NES_CHR_*), NULL on CHR-RAM
     size_t chr_size;
     uint64_t chr_tiles_bg, chr_tiles_spr, chr_reads; // distinct 16-byte tiles / $2007 reads
@@ -101,7 +102,7 @@ typedef struct {
     uint64_t forced_paths;
     uint64_t step_cuts, loop_cuts, fork_cuts, queue_cuts, global_cuts, path_cuts,
              faults, decode_cuts;
-    uint64_t cpu_copy_bytes, indirect_sites, indirect_targets, indirect_overflow, pad_probes, pad_probe_sites, pad_probe_refused, entries_seeded, entries_refused, seeds_reset, seeds_irq, seeds_bank, seeds_refused_queue;
+    uint64_t padding_bytes, inferred_code, inferred_data, inferred_pad, cpu_copy_bytes, indirect_sites, indirect_targets, indirect_overflow, pad_probes, pad_probe_sites, pad_probe_refused, entries_seeded, entries_refused, seeds_reset, seeds_irq, seeds_bank, seeds_refused_queue;
     uint64_t play_frames_run, play_sessions_run, play_steps_accounted, seeds_play;
     uint64_t evicted;          // exact-state dedup admissions refused
     uint64_t lot_written, lot_read, lot_pending; // disk lot (--lot): spilled / read back / left on disk

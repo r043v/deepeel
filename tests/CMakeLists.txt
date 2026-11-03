@@ -274,3 +274,5 @@ add_test(NAME nes_indirect COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${C
 set_tests_properties(nes_indirect PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_cpu_copy COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_cpucopy.nes --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_cc.txt >/dev/null 2>&1; grep -q 'ch3 src .* len 16' ${CMAKE_CURRENT_BINARY_DIR}/nes_cc.txt")
 set_tests_properties(nes_cpu_copy PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME nes_padding COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_pad.txt --map ${CMAKE_CURRENT_BINARY_DIR}/nes_pad.map >/dev/null 2>&1; grep -Eq 'padding [1-9][0-9]* bytes' ${CMAKE_CURRENT_BINARY_DIR}/nes_pad.txt && sed -n 2p ${CMAKE_CURRENT_BINARY_DIR}/nes_pad.map | grep -q 8")
+set_tests_properties(nes_padding PROPERTIES FIXTURES_REQUIRED fixtures)

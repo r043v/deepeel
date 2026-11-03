@@ -11,7 +11,7 @@ remesure pas l'outil.
 | GB | 34 | 1 | 3 | 1 |
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
-| NES | 8 | 10 | 19 | 2 |
+| NES | 8 | 12 | 17 | 2 |
 | PCE | 15 | 7 | 16 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
@@ -37,7 +37,7 @@ Cellules ouvertes (◐ ou ✗) : 96.
 | D14 | Chien de garde HALT, glissade de padding | NES | ✗ |
 | D14 | Chien de garde HALT, glissade de padding | PCE | ✗ |
 | D14 | Chien de garde HALT, glissade de padding | MD | ✗ |
-| S1 | Scan padding + tables de pointeurs | NES | ✗ |
+| S1 | Scan padding + tables de pointeurs | NES | ◐ padding, sans tables |
 | S1 | Scan padding + tables de pointeurs | MD | ✗ |
 | S2 | Fermeture statique de flot | NES | ✗ |
 | S2 | Fermeture statique de flot | PCE | ◐ fenêtre MPR |
@@ -57,7 +57,7 @@ Cellules ouvertes (◐ ou ✗) : 96.
 | S6 | Rejeu de décodeurs sur tables de flux | MSX | ✗ |
 | S6 | Rejeu de décodeurs sur tables de flux | NES | ✗ |
 | S6 | Rejeu de décodeurs sur tables de flux | PCE | ✗ |
-| S7 | Inférence de voisins à la carte | NES | ✗ |
+| S7 | Inférence de voisins à la carte | NES | ◐ trous ≤ 1024 |
 | S7 | Inférence de voisins à la carte | MD | ✗ |
 | G1 | Graines reset/RST/IRQ | NES | ◐ reset |
 | G1 | Graines reset/RST/IRQ | PCE | ◐ reset |
