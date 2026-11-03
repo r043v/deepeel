@@ -26,7 +26,7 @@ typedef struct {
     uint32_t nq, qcap;
     Item *park; uint32_t npark, parkcap; // deferred holding area (queue full)
     void *spill_state; Item spill_item; // state waiting for its post-edits before going to the lot
-    DpLot *lot;         // disk lot: park overflow, wall leftovers, --lot resume
+    DpLotFile *lot;         // disk lot: park overflow, wall leftovers, --lot resume
     void *last_state;   // blob of the state the last push() produced (queued or parked)
     uint32_t *gen;       /* per even rom address: path generation */
     uint32_t *vis;       /* per even rom address: visits in that generation */
@@ -100,7 +100,7 @@ static void mark(X *x, uint32_t pc, unsigned len) {
 // one queued item to the disk lot (the state blob stays owned by the caller)
 static int lot_spill(X *x, const Item *it) {
     Item m = *it; m.state = NULL;
-    return x->lot && dp_lot_put(x->lot, &m, sizeof m, it->state, (uint32_t)ssz);
+    return x->lot && dp_lf_put(x->lot, &m, sizeof m, it->state, (uint32_t)ssz);
 }
 
 static void spill_flush(X *x) {
@@ -598,7 +598,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     r->copies = calloc(DP_MD_COPY_CAP, sizeof *r->copies);
     X x = {.c = c, .o = o, .r = r, .qcap = o->queue_cap};
     x.q = calloc(o->queue_cap ? o->queue_cap : 1, sizeof *x.q);
-    if (o->lot_path && !(x.lot = dp_lot_open(o->lot_path, 1)))
+    if (o->lot_path && !(x.lot = dp_lf_open(o->lot_path, 1)))
         fprintf(stderr, "deepeel: cannot open the lot %s\n", o->lot_path);
     x.gen = calloc(c->size / 2 + 1, sizeof *x.gen);
     x.vis = calloc(c->size / 2 + 1, sizeof *x.vis);
@@ -629,9 +629,9 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         spill_flush(&x);
         if (r->steps >= o->max_total) break;
         if (!x.nq && x.npark) { x.q[x.nq++] = x.park[--x.npark]; r->parked_resumed++; }
-        if (!x.nq && dp_lot_pending(x.lot)) { // the disk backlog comes back
+        if (!x.nq && dp_lf_pending(x.lot)) { // the disk backlog comes back
             Item m; uint32_t ml = 0, bl = 0; uint8_t *blob = NULL;
-            if (dp_lot_get(x.lot, &m, &ml, &blob, &bl)) {
+            if (dp_lf_get(x.lot, &m, &ml, &blob, &bl)) {
                 if (ml == sizeof m && bl == ssz) { m.state = blob; x.q[x.nq++] = m; r->parked_resumed++; }
                 else free(blob);
             }
@@ -654,8 +654,8 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     }
     if (x.lot) {
         r->lot_written = x.lot->written; r->lot_read = x.lot->read_back;
-        r->lot_pending = dp_lot_pending(x.lot);
-        dp_lot_close(x.lot, o->lot_path);
+        r->lot_pending = dp_lf_pending(x.lot);
+        dp_lf_close(x.lot, o->lot_path);
     }
     for (size_t i = 0; i < c->size; i++) {
         uint8_t f = r->flags[i];

@@ -430,6 +430,41 @@ int main(int argc, char **argv) {
         unlink(exactf);
     }
 
+    // --- parallel drain, spool at its wall: workers defer the refused states, ----
+    // the leader merges them at the join (nothing lost without a count)
+    {
+        char p[512], err[256], spool[512];
+        snprintf(p, sizeof p, "%s/fix_branch.gb", dir);
+        snprintf(spool, sizeof spool, "%s/spool_par.bin", dir);
+        unlink(spool);
+        if (g_cart) dp_cart_free(g_cart);
+        g_cart = dp_cart_load(p, err, sizeof err);
+        if (!g_cart) exit(2);
+        DpConfig cfg;
+        dp_config_defaults(&cfg);
+        cfg.queue_cap = 2; cfg.queue_max = 2; cfg.fork_site_cap = 1000;
+        cfg.no_covered_prune = 1; cfg.max_steps_total = 2000000;
+        cfg.jobs = 2;
+        cfg.spool_cap_bytes = 1; // the spool refuses everything
+        if (res.cart) dp_results_free(&res);
+        memset(&res, 0, sizeof res);
+        dp_results_init(&res, g_cart, dp_platform_gb());
+        dp_static_scan(&res);
+        if (g_mach) dp_mach_close(g_mach);
+        g_mach = mach_for(g_cart);
+        DpExplorer *ex = dp_explorer_new(&cfg, &res, g_mach);
+        CHECK(dp_explorer_spool_attach(ex, spool, 0));
+        dp_seed_gb(ex);
+        dp_explore(ex);
+        CHECK(res.spool_refused >= 1);            // the wall was really hit
+        // refused by the spool, deferred by the workers, merged, none lost on that reason
+        CHECK(res.defer_by[DP_R_PATHS] >= 1);
+        CHECK(res.defer_final[DP_R_PATHS] == 0);
+        CHECK(ex->defer_len == 0); // the held states were resumed before the end
+        dp_explorer_free(ex);
+        unlink(spool);
+    }
+
     // --- reports produce output -------------------------------------------------------
     {
         DpConfig cfg;

@@ -40,7 +40,7 @@ typedef struct {
     DpNesPathState *queue;
     uint32_t queue_len, queue_cap;
     DpNesPathState *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
-    DpLot *lot;                        // disk lot: park overflow, wall leftovers, --lot resume
+    DpLotFile *lot;                        // disk lot: park overflow, wall leftovers, --lot resume
     DpHashSet seen;                    // exact state dedup
     DpNesLoop *loops;                  // back-branch counters
     size_t loop_len, loop_cap;
@@ -354,7 +354,7 @@ static int queue_push(DpNesRun *x, const DpNesPathState *s) {
 static int lot_spill(DpNesRun *x, DpNesPathState *s) {
     if (!x->lot) return 0;
     DpNesPathState m = *s; m.state = NULL;
-    if (!dp_lot_put(x->lot, &m, sizeof m, s->state, (uint32_t)dp_nesmach_state_size())) return 0;
+    if (!dp_lf_put(x->lot, &m, sizeof m, s->state, (uint32_t)dp_nesmach_state_size())) return 0;
     free(s->state); s->state = NULL;
     return 1;
 }
@@ -592,7 +592,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     }
 
     if (x.opt.lot_path) {
-        x.lot = dp_lot_open(x.opt.lot_path, 1);
+        x.lot = dp_lf_open(x.opt.lot_path, 1);
         if (!x.lot) fprintf(stderr, "deepeel: cannot open the lot %s\n", x.opt.lot_path);
     }
     x.queue_cap = x.opt.queue_cap;
@@ -641,9 +641,9 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
             for (;;) {
                 if (x.failed) break;
                 if (x.queue_len == 0 && x.park_len > 0) { x.queue[x.queue_len++] = x.park[--x.park_len]; r->parked_resumed++; }
-                if (x.queue_len == 0 && dp_lot_pending(x.lot)) { // the disk backlog comes back
+                if (x.queue_len == 0 && dp_lf_pending(x.lot)) { // the disk backlog comes back
                     DpNesPathState m; uint32_t ml = 0, bl = 0; uint8_t *blob = NULL;
-                    if (dp_lot_get(x.lot, &m, &ml, &blob, &bl)) {
+                    if (dp_lf_get(x.lot, &m, &ml, &blob, &bl)) {
                         if (ml == sizeof m && bl == dp_nesmach_state_size()) { m.state = blob; x.queue[x.queue_len++] = m; }
                         else free(blob);
                     }
@@ -676,8 +676,8 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     }
     if (x.lot) {
         r->lot_written = x.lot->written; r->lot_read = x.lot->read_back;
-        r->lot_pending = dp_lot_pending(x.lot);
-        dp_lot_close(x.lot, x.opt.lot_path);
+        r->lot_pending = dp_lf_pending(x.lot);
+        dp_lf_close(x.lot, x.opt.lot_path);
     }
     free(x.park);
     free(x.queue);

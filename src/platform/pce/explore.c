@@ -46,7 +46,7 @@ typedef struct {
     PceQueued *queue;
     uint32_t queue_len;
     PceQueued *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
-    DpLot *lot;            // disk lot: park overflow, wall leftovers, --lot resume
+    DpLotFile *lot;            // disk lot: park overflow, wall leftovers, --lot resume
     uint64_t *seen;        // open-addressed dedup set
     size_t seen_cap, seen_len;
     uint8_t *fork_sites, *pad_sites, *irq_sites; // per-cell counters (saturating)
@@ -217,7 +217,7 @@ static int seen_insert(PceRun *x, uint64_t h) {
 
 // one compressed state to the disk lot (takes z on success)
 static int lot_spill(PceRun *x, uint8_t *z, uLongf zlen, uint8_t forced) {
-    if (!x->lot || !dp_lot_put(x->lot, &forced, 1, z, (uint32_t)zlen)) return 0;
+    if (!x->lot || !dp_lf_put(x->lot, &forced, 1, z, (uint32_t)zlen)) return 0;
     free(z);
     return 1;
 }
@@ -955,7 +955,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     memset(r, 0, sizeof *r);
     x->opt = options ? *options : dp_pce_options();
     r->options = x->opt;
-    if (x->opt.lot_path && !(x->lot = dp_lot_open(x->opt.lot_path, 1)))
+    if (x->opt.lot_path && !(x->lot = dp_lf_open(x->opt.lot_path, 1)))
         fprintf(stderr, "deepeel: cannot open the lot %s\n", x->opt.lot_path);
     x->r = r;
     x->rom = dp_pce_rom();
@@ -1011,9 +1011,9 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     for (;;) {
         if (x->failed) break;
         if (!x->queue_len && x->park_len) { x->queue[x->queue_len++] = x->park[--x->park_len]; r->parked_resumed++; }
-        if (!x->queue_len && dp_lot_pending(x->lot)) { // the disk backlog comes back
+        if (!x->queue_len && dp_lf_pending(x->lot)) { // the disk backlog comes back
             uint8_t forced = 0, *blob = NULL; uint32_t ml = 0, bl = 0;
-            if (dp_lot_get(x->lot, &forced, &ml, &blob, &bl) && ml == 1) {
+            if (dp_lf_get(x->lot, &forced, &ml, &blob, &bl) && ml == 1) {
                 x->queue[x->queue_len].z = blob; x->queue[x->queue_len].zlen = bl;
                 x->queue[x->queue_len].forced = forced; x->queue_len++;
             } else free(blob);
@@ -1043,8 +1043,8 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
         if (!lot_spill(x, x->queue[i].z, x->queue[i].zlen, x->queue[i].forced)) { r->pending_dropped++; free(x->queue[i].z); }
     if (x->lot) {
         r->lot_written = x->lot->written; r->lot_read = x->lot->read_back;
-        r->lot_pending = dp_lot_pending(x->lot);
-        dp_lot_close(x->lot, x->opt.lot_path);
+        r->lot_pending = dp_lf_pending(x->lot);
+        dp_lf_close(x->lot, x->opt.lot_path);
     }
     free(x->queue);
     free(x->seen);

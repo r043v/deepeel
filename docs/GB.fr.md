@@ -853,3 +853,4 @@ encore de frontière disque. Chiffres = observations de l'outil.
 
 - `--lot FICHIER` pour NES, PCE, MD et Sega/MSX : lot disque portable (`src/explore/lots.h`) des états différés. Trop-plein de la zone parquée et restes d'un mur y sont écrits, relus quand la file se vide ; une relance avec le même fichier reprend le reliquat. Sega : import dans le spool au départ, export du spool non lu à la fin.
 - Compteurs `lot_written`, `lot_read`, `lot_pending` (rapports texte NES/PCE/MD). Observations de l'outil, pas des mesures matériel.
+- `frontier stats FICHIER.dpl` lit un lot portable ; test du pool parallèle avec spool plein (reports des workers fusionnés dans le chef).

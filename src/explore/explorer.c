@@ -1359,8 +1359,8 @@ static int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int k
     DpSpool *sp = ex->spool;
     if (!sp) return 0;
     pthread_mutex_lock(&sp->mtx);
-    if (ex->cfg.spool_cap_mb &&
-        (sp->wr - sp->rd) / (1024 * 1024) >= ex->cfg.spool_cap_mb) {
+    if ((ex->cfg.spool_cap_bytes && sp->wr - sp->rd >= ex->cfg.spool_cap_bytes) ||
+        (ex->cfg.spool_cap_mb && (sp->wr - sp->rd) / (1024 * 1024) >= ex->cfg.spool_cap_mb)) {
         pthread_mutex_unlock(&sp->mtx);
         u32_add(&ex->res->spool_refused, 1);
         return 0;

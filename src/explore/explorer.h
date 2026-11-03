@@ -268,6 +268,7 @@ typedef struct DpConfig {
     uint64_t mem_cap_mb;      // queue growth stops once RSS exceeds this MiB (0 = off;
                               // same wall as the sessions' --mem-cap)
     uint64_t frontier_cap_mb; // disk budget of the frontier lots (0 = unbounded)
+    uint64_t spool_cap_bytes; // finer disk budget (tests); 0 = off
     uint64_t spool_cap_mb;    // disk budget of the spool file (0 = off; default 4096)
     uint32_t loop_back_cap;   // iterations of one backward edge before cut
     uint32_t fork_site_cap;   // max forks per branch site (loop bodies fork

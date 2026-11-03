@@ -12,19 +12,19 @@
 #include <unistd.h>
 #include <zlib.h>
 
-#define DP_LOT_MAGIC 0x4c4c5044u /* 'DPLL' */
-#define DP_LOT_META_MAX 256
+#define DP_LF_MAGIC 0x4c4c5044u /* 'DPLL' */
+#define DP_LF_META_MAX 256
 
 typedef struct {
     FILE *f;
     uint64_t rd, wr;      // byte offsets: next record to read, end of file
     uint64_t written, read_back; // records
     uint64_t unread;             // records not yet read back
-} DpLot;
+} DpLotFile;
 
 // open (resume=1 keeps the previous content as the unread backlog)
-static inline DpLot *dp_lot_open(const char *path, int resume) {
-    DpLot *l = calloc(1, sizeof *l);
+static inline DpLotFile *dp_lf_open(const char *path, int resume) {
+    DpLotFile *l = calloc(1, sizeof *l);
     if (!l) return NULL;
     l->f = fopen(path, resume ? "r+b" : "wb+");
     if (!l->f && resume) l->f = fopen(path, "wb+");
@@ -35,7 +35,7 @@ static inline DpLot *dp_lot_open(const char *path, int resume) {
         uint64_t off = 0;
         uint32_t h[4];
         while (off + sizeof h <= l->wr && fseek(l->f, (long)off, SEEK_SET) == 0 &&
-               fread(h, sizeof h, 1, l->f) == 1 && h[0] == DP_LOT_MAGIC) {
+               fread(h, sizeof h, 1, l->f) == 1 && h[0] == DP_LF_MAGIC) {
             off += sizeof h + h[1] + h[3];
             if (off > l->wr) break;
             l->unread++;
@@ -50,7 +50,7 @@ static inline DpLot *dp_lot_open(const char *path, int resume) {
 }
 
 // close: the unread backlog is compacted to the file start (nothing left: the file goes away)
-static inline void dp_lot_close(DpLot *l, const char *path) {
+static inline void dp_lf_close(DpLotFile *l, const char *path) {
     if (!l) return;
     if (l->unread == 0 || l->rd >= l->wr) {
         fclose(l->f);
@@ -73,16 +73,16 @@ static inline void dp_lot_close(DpLot *l, const char *path) {
     free(l);
 }
 
-static inline uint64_t dp_lot_pending(const DpLot *l) { return l ? l->unread : 0; }
+static inline uint64_t dp_lf_pending(const DpLotFile *l) { return l ? l->unread : 0; }
 
 // record: magic, metalen, rawlen, zlen, meta, z
-static inline int dp_lot_put(DpLot *l, const void *meta, uint32_t mlen, const void *blob, uint32_t len) {
-    if (!l || mlen > DP_LOT_META_MAX) return 0;
+static inline int dp_lf_put(DpLotFile *l, const void *meta, uint32_t mlen, const void *blob, uint32_t len) {
+    if (!l || mlen > DP_LF_META_MAX) return 0;
     uLongf zl = compressBound(len);
     uint8_t *z = malloc(zl ? zl : 1);
     if (!z) return 0;
     if (compress2(z, &zl, blob, len, 1) != Z_OK) { free(z); return 0; }
-    uint32_t h[4] = { DP_LOT_MAGIC, mlen, len, (uint32_t)zl };
+    uint32_t h[4] = { DP_LF_MAGIC, mlen, len, (uint32_t)zl };
     int ok = fseek(l->f, (long)l->wr, SEEK_SET) == 0 && fwrite(h, sizeof h, 1, l->f) == 1 &&
              (!mlen || fwrite(meta, 1, mlen, l->f) == mlen) && fwrite(z, 1, zl, l->f) == zl;
     free(z);
@@ -93,12 +93,12 @@ static inline int dp_lot_put(DpLot *l, const void *meta, uint32_t mlen, const vo
     return 1;
 }
 
-// next unread record: meta copied out (cap DP_LOT_META_MAX), blob malloc'ed; 0 = none / corrupt
-static inline int dp_lot_get(DpLot *l, void *meta, uint32_t *mlen, uint8_t **blob, uint32_t *len) {
+// next unread record: meta copied out (cap DP_LF_META_MAX), blob malloc'ed; 0 = none / corrupt
+static inline int dp_lf_get(DpLotFile *l, void *meta, uint32_t *mlen, uint8_t **blob, uint32_t *len) {
     if (!l || l->rd >= l->wr) return 0;
     uint32_t h[4];
     if (fseek(l->f, (long)l->rd, SEEK_SET) || fread(h, sizeof h, 1, l->f) != 1 ||
-        h[0] != DP_LOT_MAGIC || h[1] > DP_LOT_META_MAX || h[2] > (1u << 26)) {
+        h[0] != DP_LF_MAGIC || h[1] > DP_LF_META_MAX || h[2] > (1u << 26)) {
         fprintf(stderr, "deepeel: lot corrupt at %llu, dropping the rest\n", (unsigned long long)l->rd);
         l->rd = l->wr;
         l->unread = 0;

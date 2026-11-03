@@ -14,6 +14,7 @@
 #include "mach/m0boy.h"
 #include "core/snapshot_png.h"
 #include "explore/explorer.h"
+#include "explore/lots.h"
 #include "explore/sessions.h"
 #include "explore/tree.h"
 #include "report/report.h"
@@ -1336,6 +1337,20 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "frontier") && argc > 3 && !strcmp(argv[2], "stats")) {
         // pending records by reason, tier and bank (the unread part of each lot)
         char p[700], line[400];
+        struct stat lst;
+        if (!stat(argv[3], &lst) && S_ISREG(lst.st_mode)) {
+            // a portable lot (--lot of NES/PCE/MD/Sega): records and sizes
+            DpLotFile *lot = dp_lf_open(argv[3], 1);
+            if (!lot) { printf("frontier: cannot read %s\n", argv[3]); return 1; }
+            uint64_t raw = 0, zb = 0, n = 0, off = 0;
+            uint32_t h[4];
+            while (fseek(lot->f, (long)off, SEEK_SET) == 0 && fread(h, sizeof h, 1, lot->f) == 1 &&
+                   h[0] == DP_LF_MAGIC) { raw += h[2]; zb += h[3]; off += sizeof h + h[1] + h[3]; n++; }
+            printf("frontier lot: %llu records pending (%llu bytes raw, %llu compressed)\n",
+                   (unsigned long long)n, (unsigned long long)raw, (unsigned long long)zb);
+            dp_lf_close(lot, NULL);
+            return 0;
+        }
         snprintf(p, sizeof p, "%s/frontier/frontier.idx", argv[3]);
         FILE *f = fopen(p, "r");
         if (!f) { printf("frontier: empty (no %s)\n", p); return 0; }

@@ -1123,12 +1123,12 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     }
     if(o->lot_path && x.spool) {
         // the lot's backlog (portable records) is replayed into the spool, which the drain reads
-        DpLot *lot=dp_lot_open(o->lot_path,1);
+        DpLotFile *lot=dp_lf_open(o->lot_path,1);
         if(lot) {
             uint64_t meta[3]; uint32_t ml,bl; uint8_t *blob;
-            while(dp_lot_pending(lot)) {
+            while(dp_lf_pending(lot)) {
                 blob=NULL;
-                if(!dp_lot_get(lot,meta,&ml,&blob,&bl)) { if(!dp_lot_pending(lot)) break; free(blob); continue; }
+                if(!dp_lf_get(lot,meta,&ml,&blob,&bl)) { if(!dp_lf_pending(lot)) break; free(blob); continue; }
                 if(ml==sizeof meta && meta[1]==x.b->state_size && meta[2]==x.origin_size &&
                    bl==x.b->state_size+0x8000+x.origin_size) {
                     uint64_t hdr[4]={DP_SPOOL_MAGIC,meta[0],meta[1],meta[2]};
@@ -1139,7 +1139,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
                 }
                 free(blob);
             }
-            dp_lot_close(lot,NULL); // the file stays until the end of the run rewrites it
+            dp_lf_close(lot,NULL); // the file stays until the end of the run rewrites it
         }
     }
     if(msx) { r->msx_mapper=dp_msx_info().mapper; dp_msx_observe(msx_event,&x); }
@@ -1419,7 +1419,7 @@ cleanup:
     free(x.seed_scratch); free(x.seed_scratch_cart); free(x.seed_scratch_origins);
     if(o->lot_path && x.spool) {
         // the spool records not read back yet are saved as portable lot records
-        DpLot *lot=dp_lot_open(o->lot_path,0);
+        DpLotFile *lot=dp_lf_open(o->lot_path,0);
         while(lot && x.spool_rd<x.spool_wr) {
             uint64_t hdr[4];
             if(fseek(x.spool,(long)x.spool_rd,SEEK_SET) || fread(hdr,sizeof hdr,1,x.spool)!=1 || hdr[0]!=DP_SPOOL_MAGIC) break;
@@ -1427,13 +1427,13 @@ cleanup:
             uint8_t *blob=malloc(bl);
             if(!blob || fread(blob,1,bl,x.spool)!=bl) { free(blob); break; }
             uint64_t meta[3]={hdr[1],hdr[2],hdr[3]};
-            if(!dp_lot_put(lot,meta,sizeof meta,blob,(uint32_t)bl)) { free(blob); break; }
+            if(!dp_lf_put(lot,meta,sizeof meta,blob,(uint32_t)bl)) { free(blob); break; }
             free(blob);
             x.spool_rd+=sizeof hdr+bl;
         }
         if(lot) {
-            r->lot_written=lot->written; r->lot_pending=dp_lot_pending(lot);
-            dp_lot_close(lot,o->lot_path);
+            r->lot_written=lot->written; r->lot_pending=dp_lf_pending(lot);
+            dp_lf_close(lot,o->lot_path);
         }
         if(x.spool_rd<x.spool_wr) r->spool_refused++; // counted, never silent: records the lot could not take
     }
