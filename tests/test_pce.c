@@ -106,8 +106,9 @@ static void test_explore(const uint8_t *rom) {
         free(rp);
         // a wall leaves states: they go to the disk lot, the next run resumes them (§6)
         char lp[] = "/tmp/dp_pce_lotXXXXXX"; int fd = mkstemp(lp); if (fd >= 0) close(fd);
-        uint64_t left = 0;
+        uint64_t left = 0, found = 0;
         for (uint64_t wall = 1; wall < 600 && !left; wall++) {
+            found = wall;
             DpPceOptions ow = o; ow.queue_cap = 1; ow.lot_path = lp; ow.max_total = wall;
             unlink(lp);
             DpPceResults *rw = calloc(1, sizeof *rw);
@@ -117,6 +118,18 @@ static void test_explore(const uint8_t *rom) {
             dp_pce_results_free(rw); free(rw);
         }
         CHECK(left > 0, "a wall leaves states in the lot");
+        {   // drain: only the saved states run (no root), the lot empties
+            DpPceOptions od = o; od.queue_cap = 1; od.lot_path = lp; od.lot_drain = 1;
+            DpPceResults *rd = calloc(1, sizeof *rd);
+            CHECK(dp_pce_explore(rom2, ROM_SIZE, &od, rd), "drain run");
+            CHECK(rd->lot_read >= left && rd->lot_pending == 0, "drain empties the lot");
+            CHECK(access(lp, F_OK) != 0, "the drained lot file is removed");
+            dp_pce_results_free(rd); free(rd);
+            DpPceOptions ow = o; ow.queue_cap = 1; ow.lot_path = lp; ow.max_total = found;
+            DpPceResults *rw = calloc(1, sizeof *rw);
+            CHECK(dp_pce_explore(rom2, ROM_SIZE, &ow, rw), "walled run again");
+            dp_pce_results_free(rw); free(rw);
+        }
         DpPceOptions orr = o; orr.queue_cap = 1; orr.lot_path = lp;
         DpPceResults *rr = calloc(1, sizeof *rr);
         CHECK(dp_pce_explore(rom2, ROM_SIZE, &orr, rr), "resumed run");

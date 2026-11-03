@@ -853,7 +853,7 @@ encore de frontière disque. Chiffres = observations de l'outil.
 
 - `--lot FICHIER` pour NES, PCE, MD et Sega/MSX : lot disque portable (`src/explore/lots.h`) des états différés. Trop-plein de la zone parquée et restes d'un mur y sont écrits, relus quand la file se vide ; une relance avec le même fichier reprend le reliquat. Sega : import dans le spool au départ, export du spool non lu à la fin.
 - Compteurs `lot_written`, `lot_read`, `lot_pending` (rapports texte NES/PCE/MD). Observations de l'outil, pas des mesures matériel.
-- `frontier stats FICHIER.dpl` lit un lot portable ; test du pool parallèle avec spool plein (reports des workers fusionnés dans le chef).
+- `frontier stats FICHIER.dpf` lit un lot portable ; test du pool parallèle avec spool plein (reports des workers fusionnés dans le chef).
 
 ## 0.42.0
 
@@ -861,3 +861,4 @@ encore de frontière disque. Chiffres = observations de l'outil.
 - `frontier drain ROM LOT [--sys X]` vide aussi un lot NES/PCE/MD/Sega : seuls les états sauvés sont rejoués (ni racine, ni graines). Équivalent plateforme : `--lot FICHIER --lot-drain`.
 - PCE verse l'état décompressé et le recompresse au rechargement (taille variable, incompatible avec un delta XOR fixe).
 - Tests : drain MD (`test_md_explore`), drain Sega (`frontier_cli`). Observations de l'outil, pas des mesures matériel.
+- Les lots portables s'écrivent en `.dpf` (même magie `DPFB` que les lots GB) ; tests de drain NES/PCE ajoutés.

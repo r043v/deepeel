@@ -174,9 +174,9 @@ static void test_explorer(void) {
     {   // a wall leaves states: they go to the disk lot and the next run resumes them (§6)
         char lp[] = "/tmp/dp_nes_lotXXXXXX"; int fd = mkstemp(lp); if (fd >= 0) close(fd);
         unlink(lp);
-        uint64_t left = 0;
+        uint64_t left = 0, found = 0;
         for (uint64_t wall = 1; wall < 400 && !left; wall++) {
-            DpNesResults rw; DpNesOptions ow = o;
+            DpNesResults rw; DpNesOptions ow = o; found = wall;
             ow.lot_path = lp; ow.max_total = wall;
             unlink(lp);
             CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &ow, &rw), "walled run");
@@ -185,6 +185,16 @@ static void test_explorer(void) {
             dp_nes_results_free(&rw);
         }
         CHECK(left > 0, "a wall leaves states in the lot");
+        {   // drain: only the saved states run (no root), the lot empties
+            DpNesResults rd; DpNesOptions od = o; od.lot_path = lp; od.lot_drain = 1;
+            CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &od, &rd), "drain run");
+            CHECK(rd.lot_read >= left && rd.lot_pending == 0, "drain empties the lot");
+            CHECK(access(lp, F_OK) != 0, "the drained lot file is removed");
+            dp_nes_results_free(&rd);
+            DpNesResults rw; DpNesOptions ow = o; ow.lot_path = lp; ow.max_total = found;
+            CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &ow, &rw), "walled run again");
+            dp_nes_results_free(&rw);
+        }
         DpNesResults rr; DpNesOptions orr = o; orr.lot_path = lp;
         CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &orr, &rr), "resumed run");
         CHECK(rr.lot_read >= left && rr.lot_pending == 0, "the lot is resumed and emptied");
