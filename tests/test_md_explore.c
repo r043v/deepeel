@@ -49,6 +49,23 @@ int main(int argc, char **argv) {
     DpMdResults r;
     DpMdCart c;
 
+    {
+        char path[512], err[128];
+        DpMdMovie movie;
+        snprintf(path, sizeof path, "%s/fix_md_movie.gmv", dir);
+        CHECK(dp_md_movie_load(path, &movie, err, sizeof err));
+        CHECK(movie.frames == 2 && movie.pads[0] == 0x80 && movie.pads[1] == 0x08);
+        snprintf(path, sizeof path, "%s/fix_md_loop.md", dir);
+        CHECK(dp_md_cart_load(&c, path, err, sizeof err) == 0);
+        DpMdOptions o; dp_md_options_default(&o);
+        o.movie = &movie; o.max_total = 100000; o.path_steps = 1000;
+        CHECK(dp_md_explore(&c, &o, &r) == 0);
+        CHECK(r.movie_frames == 2 && r.sat_path == 0 && r.sat_visit == 0);
+        dp_md_results_free(&r); dp_md_cart_free(&c); dp_md_movie_free(&movie);
+        snprintf(path, sizeof path, "%s/fix_md_movie_state.gmv", dir);
+        CHECK(!dp_md_movie_load(path, &movie, err, sizeof err));
+    }
+
     // both outcomes of a conditional branch
     CHECK(run("fix_md_fork", 100000, &r, &c) == 0);
     CHECK(executed(&r, 0x204));        // natural side (fall-through)
@@ -57,9 +74,107 @@ int main(int argc, char **argv) {
     CHECK(r.forks >= 1);
     dp_md_results_free(&r); dp_md_cart_free(&c);
 
+    CHECK(run("fix_md_reader", 100000, &r, &c) == 0);
+    CHECK(r.data_only_bytes == 2 && r.code_or_vram_bytes == r.exec_bytes);
+    CHECK(r.observed_bytes == r.exec_bytes + 2);
+    {
+        unsigned i;
+        for (i = 0; i < r.nreaders && r.readers[i].pc != 0x202; i++) {}
+        CHECK(i < r.nreaders);
+        if (i < r.nreaders) {
+            CHECK(r.readers[i].lo == 0x400 && r.readers[i].hi == 0x401);
+            CHECK(r.readers[i].natural_accesses == 2);
+        }
+    }
+    dp_md_results_free(&r); dp_md_cart_free(&c);
+
+    {
+        char path[512], err[128];
+        snprintf(path, sizeof path, "%s/fix_md_reader.md", dir);
+        CHECK(dp_md_cart_load(&c, path, err, sizeof err) == 0);
+        DpMdOptions o; dp_md_options_default(&o); o.exclude_read_pc = 0x202;
+        CHECK(dp_md_explore(&c, &o, &r) == 0);
+        CHECK(r.dread_bytes == 2 && r.observed_bytes == r.exec_bytes + 2);
+        CHECK(r.filtered_observed_bytes == r.exec_bytes && !r.nonexcluded_reads[0x400]);
+        dp_md_results_free(&r); dp_md_cart_free(&c);
+        snprintf(path, sizeof path, "%s/fix_md_reader_overlap.md", dir);
+        CHECK(dp_md_cart_load(&c, path, err, sizeof err) == 0);
+        CHECK(dp_md_explore(&c, &o, &r) == 0);
+        CHECK(r.filtered_observed_bytes == r.exec_bytes + 2 && r.nonexcluded_reads[0x400]);
+        dp_md_results_free(&r); dp_md_cart_free(&c);
+    }
+
+    CHECK(run("fix_md_revisit", 100000, &r, &c) == 0);
+    CHECK(r.forks >= 2); // includes the alternative to the already executed $202
+    dp_md_results_free(&r); dp_md_cart_free(&c);
+
+    CHECK(run("fix_md_pad", 100000, &r, &c) == 0);
+    CHECK(r.pad_forks == 4 && r.paths == 5);
+    dp_md_results_free(&r); dp_md_cart_free(&c);
+
+    CHECK(run("fix_md_fault", 100000, &r, &c) == 0);
+    CHECK(r.faults == 1 && r.nfault_sites == 1 && r.fault_sites_overflow == 0);
+    if (r.nfault_sites) {
+        CHECK(r.fault_sites[0].code == 1 && r.fault_sites[0].pc == 0x200);
+        CHECK(r.fault_sites[0].natural == 1 && r.fault_sites[0].count == 1);
+        CHECK(r.fault_sites[0].trace_len == 1 && r.fault_sites[0].trace[0] == 0x200);
+    }
+    dp_md_results_free(&r); dp_md_cart_free(&c);
+
+    {
+        char path[512], err[128];
+        snprintf(path, sizeof path, "%s/fix_md_pad.md", dir);
+        CHECK(dp_md_cart_load(&c, path, err, sizeof err) == 0);
+        DpMdOptions o;
+        dp_md_options_default(&o);
+        o.queue_cap = 1; o.queue_max = 4; o.max_total = 100000;
+        CHECK(dp_md_explore(&c, &o, &r) == 0);
+        CHECK(r.queue_growths == 2 && r.sat_queue == 0 && r.pad_forks == 4);
+        dp_md_results_free(&r); dp_md_cart_free(&c);
+    }
+
+    {
+        char path[512], err[128];
+        snprintf(path, sizeof path, "%s/fix_md_pad_effect.md", dir);
+        CHECK(dp_md_cart_load(&c, path, err, sizeof err) == 0);
+        DpMdOptions o;
+        dp_md_options_default(&o);
+        o.fork_cap = 0; // only a real input change can take the exit
+        o.max_total = 100000;
+        CHECK(dp_md_explore(&c, &o, &r) == 0);
+        CHECK(r.pad_forks == 4 && executed(&r, 0x20c));
+        CHECK(!(r.flags[0x20c] & DP_MDF_NATURAL));
+        dp_md_results_free(&r); dp_md_cart_free(&c);
+    }
+
+    CHECK(run("fix_md_fork_fault", 100000, &r, &c) == 0);
+    CHECK(r.faults >= 1 && r.nfault_sites >= 1);
+    if (r.nfault_sites) CHECK(r.fault_sites[0].pc == 0x208 && r.fault_sites[0].origin == 0x202);
+    dp_md_results_free(&r); dp_md_cart_free(&c);
+
+    CHECK(run("fix_md_fault_reg", 100000, &r, &c) == 0);
+    CHECK(r.nfault_sites == 1);
+    if (r.nfault_sites) CHECK(r.fault_sites[0].an[3] == 0x1234 && r.fault_sites[0].an_writer[3] == 0x200);
+    dp_md_results_free(&r); dp_md_cart_free(&c);
+
+    {
+        char path[512], err[128];
+        snprintf(path, sizeof path, "%s/fix_md_watch.md", dir);
+        CHECK(dp_md_cart_load(&c, path, err, sizeof err) == 0);
+        DpMdOptions o; dp_md_options_default(&o); o.watch_write = 0xff1001;
+        CHECK(dp_md_explore(&c, &o, &r) == 0);
+        CHECK(r.nfault_sites == 1);
+        if (r.nfault_sites) {
+            CHECK(r.fault_sites[0].watch_pc == 0x200 && r.fault_sites[0].watch_addr == 0xff1000);
+            CHECK(r.fault_sites[0].watch_size == 2 && r.fault_sites[0].watch_value == 0x1234);
+        }
+        dp_md_results_free(&r); dp_md_cart_free(&c);
+    }
+
     // dbcc: loop exit and loop body both reached
     CHECK(run("fix_md_dbcc", 100000, &r, &c) == 0);
     CHECK(executed(&r, 0x206));
+    CHECK(executed(&r, 0x204) && executed(&r, 0x205)); // DBcc displacement, including when branch is taken
     dp_md_results_free(&r); dp_md_cart_free(&c);
 
     // a self loop is bounded and its saturation is reported
@@ -68,16 +183,81 @@ int main(int argc, char **argv) {
     CHECK(r.steps < 100000);
     dp_md_results_free(&r); dp_md_cart_free(&c);
 
+    // Visit limits above 255 must not wrap and turn a loop into a path cut.
+    {
+        char path[512], err[128];
+        snprintf(path, sizeof path, "%s/fix_md_loop.md", dir);
+        CHECK(dp_md_cart_load(&c, path, err, sizeof err) == 0);
+        DpMdOptions o;
+        dp_md_options_default(&o);
+        o.visit_cap = 300;
+        o.max_total = 100000;
+        CHECK(dp_md_explore(&c, &o, &r) == 0);
+        CHECK(r.sat_visit == 1 && r.sat_total == 0 && r.steps < 1000);
+        dp_md_results_free(&r); dp_md_cart_free(&c);
+    }
+
+    // A loop spanning several frames is bounded by the path budget, not by
+    // accumulated visits from earlier frames.
+    {
+        char path[512], err[128];
+        snprintf(path, sizeof path, "%s/fix_md_loop.md", dir);
+        CHECK(dp_md_cart_load(&c, path, err, sizeof err) == 0);
+        DpMdOptions o;
+        dp_md_options_default(&o);
+        o.visit_cap = 15000;
+        o.path_steps = 50000;
+        o.max_total = 100000;
+        CHECK(dp_md_explore(&c, &o, &r) == 0);
+        CHECK(r.sat_path == 1 && r.sat_visit == 0 && r.steps == 50000);
+        dp_md_results_free(&r); dp_md_cart_free(&c);
+    }
+
     // V-int enabled: an interrupt fork reaches the handler
     CHECK(run("fix_md_vint", 100000, &r, &c) == 0);
     CHECK(r.irq_forks >= 1);
     CHECK(executed(&r, 0x300));
     dp_md_results_free(&r); dp_md_cart_free(&c);
 
+    CHECK(run("fix_md_vint_masked", 100000, &r, &c) == 0);
+    CHECK(r.irq_forks == 0 && !executed(&r, 0x300));
+    dp_md_results_free(&r); dp_md_cart_free(&c);
+
     // ROM -> VDP DMA is recorded
     CHECK(run("fix_md_dma", 100000, &r, &c) == 0);
     CHECK(r.ncopy >= 1);
     if (r.ncopy >= 1) { CHECK(r.copies[0].src == 0x400); CHECK(r.copies[0].len == 0x10); }
+    CHECK((r.flags[0x400] & DP_MDF_DMA_SOURCE) && (r.flags[0x41f] & DP_MDF_DMA_SOURCE));
+    CHECK((r.flags[0x400] & DP_MDF_DMA_READ) && (r.flags[0x41f] & DP_MDF_DMA_READ));
+    CHECK(r.dma_read_bytes == 0x20);
+    CHECK(!(r.flags[0x420] & DP_MDF_DMA_SOURCE));
+    dp_md_results_free(&r); dp_md_cart_free(&c);
+
+    CHECK(run("fix_md_dma_fault", 100000, &r, &c) == 0);
+    CHECK(r.faults == 1 && r.dma_read_bytes == 0x10);
+    CHECK((r.flags[0xff0] & DP_MDF_DMA_READ) && (r.flags[0xfff] & DP_MDF_DMA_READ));
+    dp_md_results_free(&r); dp_md_cart_free(&c);
+
+    CHECK(run("fix_md_cpu_vram", 100000, &r, &c) == 0);
+    CHECK(r.cpu_vram_words == 4 && r.cpu_vram_bytes == 8);
+    CHECK(r.code_or_vram_bytes == r.exec_bytes + 8 && r.data_only_bytes == 0);
+    CHECK((r.flags[0x400] & DP_MDF_CPU_VRAM) && (r.flags[0x407] & DP_MDF_CPU_VRAM));
+    CHECK(!(r.flags[0x408] & DP_MDF_CPU_VRAM));
+    dp_md_results_free(&r); dp_md_cart_free(&c);
+
+    CHECK(run("fix_md_cpu_vram_reg", 100000, &r, &c) == 0);
+    CHECK(r.cpu_vram_words == 4 && r.cpu_vram_bytes == 8);
+    CHECK((r.flags[0x400] & DP_MDF_CPU_VRAM) && (r.flags[0x407] & DP_MDF_CPU_VRAM));
+    dp_md_results_free(&r); dp_md_cart_free(&c);
+
+    CHECK(run("fix_md_cpu_vram_gap", 100000, &r, &c) == 0);
+    CHECK(r.cpu_vram_words == 0 && r.cpu_vram_bytes == 0);
+    dp_md_results_free(&r); dp_md_cart_free(&c);
+
+    CHECK(run("fix_md_sram_overlay", 1000, &r, &c) == 0);
+    CHECK(r.sram_reads >= 1 && r.sram_exec >= 1 && r.exec_outside >= r.sram_exec);
+    CHECK(!(r.flags[0x200000] & (DP_MDF_NATURAL | DP_MDF_FORCED | DP_MDF_DATA)));
+    CHECK(!(r.flags[0x200002] & DP_MDF_DATA));
     dp_md_results_free(&r); dp_md_cart_free(&c);
 
     puts(fails ? "md_explore: FAILED" : "md_explore: ok");

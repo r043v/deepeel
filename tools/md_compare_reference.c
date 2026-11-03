@@ -1,0 +1,104 @@
+/* Standalone differential probe: run one raw GMV against the external
+ * ClownMDEmu library and deepeel's m0boy bridge. The printed RAM offsets
+ * describe Sonic 1 World Rev 00, not a platform-wide ABI. The cores expose
+ * different frame boundaries, so differences are observations, not proofs
+ * of the first divergent instruction. No reference implementation is copied. */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include "clownmdemu.h"
+#include "md_full.h"
+void dp_mdrom_set(const uint8_t *, size_t);
+static unsigned pad;
+static cc_bool input(void *u, cc_u8f p, ClownMDEmu_Button b) {
+    (void)u;
+    unsigned n = b == CLOWNMDEMU_BUTTON_START ? 7 : (unsigned)b;
+    return p == 0 && (b <= CLOWNMDEMU_BUTTON_C || b == CLOWNMDEMU_BUTTON_START) && ((pad >> n) & 1);
+}
+static void colour(void *u, cc_u16f i, cc_u16f c) { (void)u; (void)i; (void)c; }
+static void line(void *u, cc_u16f y, const cc_u8l *p, cc_u16f l, cc_u16f r, cc_u16f w, cc_u16f h) {
+    (void)u;(void)y;(void)p;(void)l;(void)r;(void)w;(void)h;
+}
+static void audio(void *u, ClownMDEmu *m, size_t n, void (*gen)(ClownMDEmu *, cc_s16l *, size_t)) {
+    cc_s16l buf[2048]; (void)u;
+    while (n) { size_t k = n > 1024 ? 1024 : n; gen(m, buf, k); n -= k; }
+}
+static uint8_t ref_byte(const ClownMDEmu *m, unsigned addr) {
+    uint16_t word = m->state.m68k.ram[(addr & 0xffff) >> 1];
+    return (addr & 1) ? word : word >> 8;
+}
+static unsigned ref_word(const ClownMDEmu *m, unsigned addr) {
+    return ((unsigned)ref_byte(m, addr) << 8) | ref_byte(m, addr + 1);
+}
+static unsigned dut_word(const MdFull *m, unsigned addr) {
+    return ((unsigned)m->ram[addr & 0xffff] << 8) | m->ram[(addr + 1) & 0xffff];
+}
+int main(int argc, char **argv) {
+    if (argc != 4) {
+        fprintf(stderr, "usage: md_compare_reference ROM raw.gmv frames\n");
+        return 2;
+    }
+    FILE *f = fopen(argv[1], "rb"), *movie = fopen(argv[2], "rb");
+    if (!f || !movie) { fprintf(stderr, "cannot open ROM or movie\n"); return 2; }
+    fseek(f, 0, SEEK_END); long n = ftell(f); rewind(f);
+    if (n < 512 || n > 0x400000 || (n & 1)) { fprintf(stderr, "invalid ROM size\n"); return 2; }
+    uint8_t *rom = malloc(n); cc_u16l *words = malloc((n / 2) * sizeof *words);
+    if (!rom || !words || fread(rom, 1, n, f) != (size_t)n) return 2;
+    for (long i = 0; i < n / 2; i++) words[i] = (rom[2*i] << 8) | rom[2*i+1];
+    fclose(f);
+    unsigned char header[64];
+    if (fread(header, 1, sizeof header, movie) != sizeof header || memcmp(header, "Gens Movie ", 11) ||
+        header[20] != '3' || header[21] != '3' || (header[15] >= 'A' && (header[22] & 0xe0))) {
+        fprintf(stderr, "unsupported GMV\n"); return 2;
+    }
+    ClownMDEmu *ref = calloc(1, sizeof *ref); MdFull *dut = calloc(1, sizeof *dut);
+    ClownMDEmu_InitialConfiguration config = {0}; ClownMDEmu_Callbacks cb = {0};
+    config.general.region = CLOWNMDEMU_REGION_OVERSEAS;
+    config.general.tv_standard = CLOWNMDEMU_TV_STANDARD_NTSC;
+    cb.input_requested = input; cb.colour_updated = colour; cb.scanline_rendered = line;
+    cb.fm_audio_to_be_generated = audio; cb.psg_audio_to_be_generated = audio;
+    cb.pcm_audio_to_be_generated = audio; cb.cdda_audio_to_be_generated = audio;
+    ClownMDEmu_Constant_Initialise(); ClownMDEmu_Initialise(ref, &config, &cb);
+    ClownMDEmu_SetCartridge(ref, words, n/2); ClownMDEmu_HardReset(ref, 1, 0);
+    dp_mdrom_set(rom, n); md_full_reset(dut);
+    unsigned limit = (unsigned)strtoul(argv[3], NULL, 0);
+    unsigned trace_begin = 1, trace_end = 0;
+    const char *range = getenv("DP_MD_TRACE_RANGE");
+    if (range && sscanf(range, "%u:%u", &trace_begin, &trace_end) != 2) {
+        fprintf(stderr, "DP_MD_TRACE_RANGE must be start:end\n"); return 2;
+    }
+    unsigned prev_ref_x = 0, prev_dut_x = 0, mismatch_streak = 0;
+    for (unsigned frame = 0; frame < limit; frame++) {
+        unsigned char b[3]; if (fread(b, 1, 3, movie) != 3) break;
+        if (b[1] != 0xff || b[2] != 0xff) { fprintf(stderr, "unsupported GMV input at frame %u\n", frame); return 2; }
+        pad = (uint8_t)~b[0]; dut->pad = pad;
+        ClownMDEmu_Iterate(ref); md_full_frame(dut, 0);
+        if (frame + 1 >= trace_begin && frame + 1 <= trace_end)
+            printf("detail %u pad=%02x x=%04x/%04x y=%04x/%04x vx=%04x/%04x vy=%04x/%04x inertia=%04x/%04x status=%02x/%02x\n",
+                   frame + 1, pad, ref_word(ref, 0xd008), dut_word(dut, 0xd008),
+                   ref_word(ref, 0xd00c), dut_word(dut, 0xd00c), ref_word(ref, 0xd010), dut_word(dut, 0xd010),
+                   ref_word(ref, 0xd012), dut_word(dut, 0xd012), ref_word(ref, 0xd014), dut_word(dut, 0xd014),
+                   ref_byte(ref, 0xd022), dut->ram[0xd022]);
+        unsigned ref_x = ((unsigned)ref_byte(ref, 0xd008) << 8) | ref_byte(ref, 0xd009);
+        unsigned dut_x = ((unsigned)dut->ram[0xd008] << 8) | dut->ram[0xd009];
+        if (ref_byte(ref, 0xf600) == 0x0c && dut->ram[0xf600] == 0x0c &&
+            ref_x && dut_x && ref_x != dut_x && ref_x != prev_dut_x && dut_x != prev_ref_x) mismatch_streak++;
+        else mismatch_streak = 0;
+        prev_ref_x = ref_x; prev_dut_x = dut_x;
+        if (frame < 20 || (frame + 1) % 300 == 0 || mismatch_streak == 20 || dut->fault) {
+            unsigned diff = 0;
+            for (unsigned i = 0; i < 0x10000; i++) diff += ref_byte(ref, i) != dut->ram[i];
+            printf("%u mode=%02x/%02x zone=%02x%02x/%02x%02x playerx=%02x%02x/%02x%02x pc=%06x/%06x diff=%u fault=%u\n",
+                   frame + 1, ref_byte(ref, 0xf600), dut->ram[0xf600],
+                   ref_byte(ref, 0xfe10), ref_byte(ref, 0xfe11), dut->ram[0xfe10], dut->ram[0xfe11],
+                   ref_byte(ref, 0xd008), ref_byte(ref, 0xd009), dut->ram[0xd008], dut->ram[0xd009],
+                   (unsigned)ref->m68k.program_counter, dut->pc, diff, dut->fault);
+            fflush(stdout);
+            if (mismatch_streak == 20)
+                fprintf(stderr, "player X differs for 20 frames even with a one-frame offset at frame %u\n", frame + 1);
+        }
+        if (dut->fault) break;
+    }
+    fclose(movie); free(rom); free(words); free(ref); free(dut); return 0;
+}

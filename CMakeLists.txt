@@ -30,8 +30,36 @@ set(DP_MD_Z80 "${M0BOY_DIR}/targets/sg1000/runtime")
 if(NOT EXISTS "${DP_MD_RUNTIME}/md_full_cpu.c" OR NOT EXISTS "${DP_MD_RUNTIME}/md_trace.h")
   message(FATAL_ERROR "M0BOY_DIR must provide targets/megadrive/runtime with the MD_TRACE hooks")
 endif()
+# Keep the upstream runtime intact; add a resumable frame entry point to a
+# build-tree copy so snapshots taken inside a scanline do not replay events.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${DP_MD_RUNTIME}/md_full_cpu.c")
+file(READ "${DP_MD_RUNTIME}/md_full_cpu.c" DP_MD_CPU)
+set(DP_MD_FRAME_HEAD "void md_full_frame(MdFull *m, int native) {\n    for (unsigned line = 0; line < FRAME_LINES && !m->fault; ++line) {")
+set(DP_MD_FRAME_RESUME "void dp_md_full_frame(MdFull *m, int native, int resume) {\n    unsigned first = resume ? m->line : 0;\n    for (unsigned line = first; line < FRAME_LINES && !m->fault; ++line) {")
+string(FIND "${DP_MD_CPU}" "${DP_MD_FRAME_HEAD}" DP_MD_FRAME_POS)
+if(DP_MD_FRAME_POS EQUAL -1)
+  message(FATAL_ERROR "m0boy MD frame implementation changed; update resumable-frame adaptation")
+endif()
+string(REPLACE "${DP_MD_FRAME_HEAD}" "${DP_MD_FRAME_RESUME}" DP_MD_CPU "${DP_MD_CPU}")
+string(FIND "${DP_MD_CPU}" "if (line == ACTIVE_LINES) m->irq_pending = 1;" DP_MD_VBLANK_POS)
+string(FIND "${DP_MD_CPU}" "    m->frame_cycles -= FRAME_LINES * LINE_CYCLES;" DP_MD_FRAME_END_POS)
+if(DP_MD_VBLANK_POS EQUAL -1 OR DP_MD_FRAME_END_POS EQUAL -1)
+  message(FATAL_ERROR "m0boy MD frame events changed; update resumable-frame adaptation")
+endif()
+string(REPLACE "if (line == ACTIVE_LINES) m->irq_pending = 1;" "if (line == ACTIVE_LINES && !(resume && line == first)) m->irq_pending = 1;" DP_MD_CPU "${DP_MD_CPU}")
+string(REPLACE "    m->frame_cycles -= FRAME_LINES * LINE_CYCLES;" "    if (m->fault) return;\n    m->frame_cycles -= FRAME_LINES * LINE_CYCLES;" DP_MD_CPU "${DP_MD_CPU}")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/dp_md_full_cpu.c" "${DP_MD_CPU}\nvoid md_full_frame(MdFull *m, int native) { dp_md_full_frame(m, native, 0); }\n")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${DP_MD_RUNTIME}/md_full_bus.c")
+file(READ "${DP_MD_RUNTIME}/md_full_bus.c" DP_MD_BUS)
+set(DP_MD_DMA_READ "uint16_t v = md_full_read16(m, (source++ << 1) & 0xffffffu);")
+string(FIND "${DP_MD_BUS}" "${DP_MD_DMA_READ}" DP_MD_DMA_POS)
+if(DP_MD_DMA_POS EQUAL -1)
+  message(FATAL_ERROR "m0boy MD DMA implementation changed; update DMA observation hook")
+endif()
+string(REPLACE "${DP_MD_DMA_READ}" "uint32_t dma_addr = (source++ << 1) & 0xffffffu;\n            uint16_t v = md_full_read16(m, dma_addr);\n            if (!m->fault) dp_md_dma_observe(m, dma_addr);" DP_MD_BUS "${DP_MD_BUS}")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/dp_md_full_bus.c" "#include \"md_full.h\"\nvoid dp_md_dma_observe(MdFull *, uint32_t);\n${DP_MD_BUS}")
 add_library(dp_mdmach_lib STATIC
-  ${DP_MD_RUNTIME}/md_full_cpu.c ${DP_MD_RUNTIME}/md_full_bus.c
+  ${CMAKE_CURRENT_BINARY_DIR}/dp_md_full_cpu.c ${CMAKE_CURRENT_BINARY_DIR}/dp_md_full_bus.c
   ${DP_MD_RUNTIME}/md_full_video.c ${DP_MD_RUNTIME}/md_full_audio.c
   ${DP_MD_RUNTIME}/md_ym2612.c ${DP_MD_Z80}/z80.c
   src/mach/mdmach.c src/mach/mdrom.c)
@@ -213,6 +241,7 @@ add_library(deepeel_core STATIC
   src/explore/md_trace.c
   src/cpu/m68k/m68k_disasm.c
   src/platform/md/explore.c
+  src/platform/md/movie.c
   src/core/snapshot_png.c
   src/core/zip.c
   src/core/sha1.c
@@ -397,6 +426,22 @@ add_library(deepeel_nes STATIC IMPORTED GLOBAL)
 set_target_properties(deepeel_nes PROPERTIES IMPORTED_LOCATION ${DP_NES_ARCHIVE})
 add_dependencies(deepeel_nes dp_nes_runtime)
 target_link_libraries(deepeel PRIVATE deepeel_z80 deepeel_nes)
+set(DP_PCE_RUNTIME "${M0BOY_DIR}/targets/pce/runtime")
+add_library(deepeel_pce STATIC
+  src/platform/pce/hucdec.c
+  src/platform/pce/pcemach.c
+  src/platform/pce/registry.c
+  src/platform/pce/explore.c
+  src/platform/pce/tas.c
+  ${DP_PCE_RUNTIME}/huc6280.c
+  ${DP_PCE_RUNTIME}/vdc.c
+  ${DP_PCE_RUNTIME}/psg.c)
+target_include_directories(deepeel_pce PUBLIC src ${DP_PCE_RUNTIME}
+  "${M0BOY_DIR}/targets/common/runtime")
+target_compile_definitions(deepeel_pce PRIVATE PCE_TRACE)
+target_link_libraries(deepeel_pce PUBLIC deepeel_core)
+target_link_libraries(deepeel PRIVATE deepeel_pce)
+
 target_link_libraries(deepeel PRIVATE deepeel_core m ${DP_GUI_LIBS})
 
 option(BUILD_TESTS "Build the test suite" ON)

@@ -25,9 +25,13 @@
 #include "platform/md/md_registry.h"
 #include "cpu/m68k/m68k.h"
 #include "platform/nes/explore.h"
+#include "platform/pce/explore.h"
+#include "platform/pce/pce.h"
 
 static uint8_t *nes_read_file(const char *path, size_t *size);
 static int cmd_nes(int argc, char **argv);
+static int cmd_pce(int argc, char **argv);
+static int cmd_maprender(int argc, char **argv);
 
 #include <dirent.h>
 #include <ctype.h>
@@ -40,7 +44,7 @@ static void usage(void) {
             "  deepeel explore rom.gb [options]\n"
             "  deepeel z80 explore <sg|sms|gg|msx> ROM [--input-total N] [--input-forks N] [--text FILE] [--map FILE] [--evidence FILE]\n"
             "  deepeel z80 dis ROM hex-offset [instruction-count]\n"
-            "  deepeel md explore ROM [--max-total N] [--path-steps N] [--queue N] [--fork-cap N] [--visit-cap N] [--text FILE] [--map FILE] [--evidence FILE]\n"
+            "  deepeel md explore ROM [--tas GMV] [--max-total N] [--path-steps N] [--queue N] [--queue-max N] [--fork-cap N] [--visit-cap N] [--watch-write ADDR] [--exclude-read-pc ADDR] [--text FILE] [--map FILE] [--evidence FILE]\n"
             "  deepeel md dis ROM hex-offset [instruction-count]\n"
             "  deepeel regs <gb|sg|sms|gg|msx|md>\n"
             "    --max-steps N        per-path step budget (default 100000)\n"
@@ -342,8 +346,13 @@ static int cmd_explore(int argc, char **argv) {
         if (dp_md_cart_load(&mc, path, err, sizeof err) == 0) {
             dp_md_cart_free(&mc);
             char tot[32];
-            char *av[10] = {"deepeel", "md", "explore", (char *)path};
+            char *av[12] = {"deepeel", "md", "explore", (char *)path};
             int n = 4;
+            if (scfg.tas_n > 1) {
+                fprintf(stderr, "deepeel: Mega Drive currently accepts one GMV movie\n");
+                return 2;
+            }
+            if (scfg.tas_n == 1) { av[n++] = "--tas"; av[n++] = (char *)scfg.tas[0]; }
             if (cfg.max_steps_total) {
                 snprintf(tot, sizeof tot, "%llu", (unsigned long long)cfg.max_steps_total);
                 av[n++] = "--max-total";
@@ -354,6 +363,21 @@ static int cmd_explore(int argc, char **argv) {
                 av[n++] = (char *)text;
             }
             return cmd_md(n, av);
+        }
+    }
+    {   // HuCard images (.pce): alias of `deepeel pce explore`
+        size_t pl = strlen(path);
+        if (pl > 4 && !strcasecmp(path + pl - 4, ".pce")) {
+            char *av[12] = {"deepeel", "pce", "explore", (char *)path};
+            int n = 4;
+            if (cfg.max_steps_total) {
+                static char tot[32];
+                snprintf(tot, sizeof tot, "%llu", (unsigned long long)cfg.max_steps_total);
+                av[n++] = "--max-total";
+                av[n++] = tot;
+            }
+            if (text) { av[n++] = "--text"; av[n++] = (char *)text; }
+            return cmd_pce(n, av);
         }
     }
     {   // iNES images: alias of `deepeel nes explore` (6502 forking exploration)
@@ -376,7 +400,6 @@ static int cmd_explore(int argc, char **argv) {
             }
         }
     }
-
     DpCart *cart = dp_cart_load(path, err, sizeof err);
     if (!cart) {
         fprintf(stderr, "deepeel: %s\n", err);
@@ -995,14 +1018,97 @@ static int cmd_nes(int argc, char **argv) {
     return 0;
 }
 
+// PC Engine branch: the HuC6280 forking explorer over m0boy's machine.
+static int cmd_pce(int argc, char **argv) {
+    if (argc < 4 || strcmp(argv[2], "explore")) {
+        fprintf(stderr, "deepeel pce explore ROM [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N] "
+                        "[--max-total N] [--max-steps N] [--queue N] [--loop-cap N] [--fork-cap N] "
+                        "[--novelty STEPS] [--novelty-frames N] [--novelty-archive N] [--novelty-cells] [--pad-fork-cap N] [--irq-fork-cap N] [--no-irq-fork] [--no-static] [--no-infer] "
+                        "[--text FILE] [--map FILE] [--png FILE]\n");
+        return 2;
+    }
+    const char *path = NULL, *text = NULL, *map = NULL, *png = NULL;
+    DpPceOptions opt = dp_pce_options();
+    for (int i = 3; i < argc; i++) {
+        const char *a = argv[i];
+        if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
+        else if (!strcmp(a, "--map") && i + 1 < argc) map = argv[++i];
+        else if (!strcmp(a, "--png") && i + 1 < argc) png = argv[++i];
+        else if (!strcmp(a, "--tas") && i + 1 < argc) {
+            if (opt.tas_count < 8) snprintf(opt.tas_paths[opt.tas_count++], 512, "%s", argv[++i]);
+            else { fprintf(stderr, "deepeel: at most 8 TAS movies\n"); return 2; }
+        }
+        else if (!strcmp(a, "--max-total") && i + 1 < argc) opt.max_total = strtoull(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--max-steps") && i + 1 < argc) opt.max_steps = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--queue") && i + 1 < argc) opt.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--loop-cap") && i + 1 < argc) opt.loop_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--fork-cap") && i + 1 < argc) opt.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--pad-fork-cap") && i + 1 < argc) opt.pad_fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--irq-fork-cap") && i + 1 < argc) opt.irq_fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--no-irq-fork")) opt.seed_irq = 0;
+        else if (!strcmp(a, "--novelty") && i + 1 < argc) opt.novelty_steps = strtoull(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--novelty-frames") && i + 1 < argc) opt.novelty_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--novelty-cells")) opt.novelty_cells = 1;
+        else if (!strcmp(a, "--novelty-archive") && i + 1 < argc) opt.novelty_archive = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--no-static")) opt.static_closure = 0;
+        else if (!strcmp(a, "--no-infer")) opt.infer = 0;
+        else if (!strcmp(a, "--play") && i + 1 < argc) opt.play_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--sessions") && i + 1 < argc) opt.play_sessions = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--seed") && i + 1 < argc) opt.play_seed = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!path) path = a;
+        else { fprintf(stderr, "deepeel: unknown option %s\n", a); return 2; }
+    }
+    if (opt.fork_cap > 255) opt.fork_cap = 255; // per-site counters are bytes
+    if (opt.pad_fork_cap > 255) opt.pad_fork_cap = 255;
+    if (opt.irq_fork_cap > 255) opt.irq_fork_cap = 255;
+    size_t size;
+    uint8_t *data = nes_read_file(path, &size);
+    if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", path); return 1; }
+    DpPceResults *res = calloc(1, sizeof *res);
+    if (!res || !dp_pce_explore(data, size, &opt, res)) {
+        fprintf(stderr, "deepeel: pce explore failed (%s)\n", path);
+        free(res);
+        free(data);
+        return 1;
+    }
+    fprintf(stderr, "deepeel: pce explore done — steps %llu, paths %llu, forks %llu, sections %u, copies %u\n",
+            (unsigned long long)res->steps, (unsigned long long)res->paths,
+            (unsigned long long)res->forks, res->section_count, res->copy_count);
+    if (text) {
+        FILE *f = fopen(text, "w");
+        if (!f) fprintf(stderr, "deepeel: cannot write %s\n", text);
+        else { dp_pce_report(f, res); fclose(f); }
+    } else {
+        dp_pce_report(stdout, res);
+    }
+    char mapbuf[1024];
+    if (png && !map) { snprintf(mapbuf, sizeof mapbuf, "%s.map", png); map = mapbuf; }
+    if (map) {
+        FILE *f = fopen(map, "w");
+        if (!f) fprintf(stderr, "deepeel: cannot write %s\n", map);
+        else { dp_pce_map(f, res); fclose(f); }
+    }
+    dp_pce_results_free(res);
+    free(res);
+    free(data);
+    if (png) {
+        char *av[] = {"deepeel", "maprender", (char *)path, (char *)map, (char *)png,
+                      "--z80", "--sys", "pce"};
+        return cmd_maprender(8, av);
+    }
+    return 0;
+}
+
 static void md_regs_print(void);
 static int cmd_regs(int argc, char **argv) {
     if (argc >= 3 && !strcmp(argv[2], "md")) { md_regs_print(); return 0; }
     if(argc>=3 && !strcmp(argv[2],"msx")) { dp_msx_regs(stdout); return 0; }
+    if (argc >= 3 && !strcmp(argv[2], "nes")) { dp_nes_regs(stdout); return 0; }
+    if (argc >= 3 && !strcmp(argv[2], "pce")) { dp_pce_regs(stdout); return 0; }
     const DpSegaSystem *sega = argc >= 3 ? dp_sega_system(argv[2]) : NULL;
     if (sega) { dp_sega_regs(stdout, sega); return 0; }
     if (argc < 3 || strcmp(argv[2], "gb")) {
-        fprintf(stderr, "deepeel regs <platform> — platforms: gb, sg, sms, gg, msx\n");
+        fprintf(stderr, "deepeel regs <platform> — platforms: gb, sg, sms, gg, msx, nes, pce\n");
         return 2;
     }
     const DpPlatform *p = dp_platform_gb();
@@ -1132,19 +1238,29 @@ static int cmd_md(int argc, char **argv) {
     } else if (!strcmp(argv[2], "explore")) {
         DpMdOptions o;
         dp_md_options_default(&o);
-        const char *text = NULL, *map = NULL, *ev = NULL;
+        const char *text = NULL, *map = NULL, *ev = NULL, *movie_path = NULL;
         for (int i = 4; i < argc; i++) {
             const char *a = argv[i];
             if (i + 1 >= argc) { fprintf(stderr, "deepeel: bad option %s\n", a); rc = 2; break; }
             if (!strcmp(a, "--max-total")) o.max_total = strtoull(argv[++i], NULL, 0);
             else if (!strcmp(a, "--path-steps")) o.path_steps = strtoull(argv[++i], NULL, 0);
             else if (!strcmp(a, "--queue")) o.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--queue-max")) o.queue_max = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--fork-cap")) o.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--visit-cap")) o.visit_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--watch-write")) o.watch_write = (uint32_t)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--exclude-read-pc")) o.exclude_read_pc = (uint32_t)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--tas")) movie_path = argv[++i];
             else if (!strcmp(a, "--text")) text = argv[++i];
             else if (!strcmp(a, "--map")) map = argv[++i];
             else if (!strcmp(a, "--evidence")) ev = argv[++i];
             else { fprintf(stderr, "deepeel: unknown option %s\n", a); rc = 2; break; }
+        }
+        DpMdMovie movie = {0};
+        if (!rc && movie_path) {
+            if (!dp_md_movie_load(movie_path, &movie, err, sizeof err)) {
+                fprintf(stderr, "deepeel: GMV: %s\n", err); rc = 1;
+            } else o.movie = &movie;
         }
         if (!rc) {
             DpMdResults r;
@@ -1162,6 +1278,7 @@ static int cmd_md(int argc, char **argv) {
                 dp_md_results_free(&r);
             }
         }
+        dp_md_movie_free(&movie);
     } else rc = (usage(), 2);
     dp_md_cart_free(&c);
     return rc;
@@ -1171,6 +1288,7 @@ int main(int argc, char **argv) {
     if (argc < 2) return usage(), 2;
     if (!strcmp(argv[1], "md")) return cmd_md(argc, argv);
     if (!strcmp(argv[1], "nes")) return cmd_nes(argc, argv);
+    if (!strcmp(argv[1], "pce")) return cmd_pce(argc, argv);
     if (!strcmp(argv[1], "z80") && argc > 2 && !strcmp(argv[2], "explore"))
         return dp_sega_explore_command(argc, argv);
     if (!strcmp(argv[1], "z80")) return dp_z80_command(argc, argv);

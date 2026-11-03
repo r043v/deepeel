@@ -6,14 +6,21 @@
 
 void dp_mdrom_set(const uint8_t *rom, size_t size);
 uint32_t dp_mdrom_peek32(uint32_t a);
+void dp_md_full_frame(MdFull *m, int native, int resume);
 
 struct DpMdMach {
     MdFull *m;
     DpMdHooks h;
     uint64_t steps, budget;
+    int resume_frame;
 };
 
 static DpMdMach *cur;
+void dp_md_dma_observe(MdFull *m, uint32_t addr) {
+    if (cur && cur->m == m && cur->h.on_dma_read &&
+        !(m->sram_enable && addr >= 0x200000u && addr < 0x210000u))
+        cur->h.on_dma_read(cur->h.user, addr, 2);
+}
 
 static void t_step(void *u, MdFull *m, uint32_t pc, uint16_t op) {
     DpMdMach *d = u;
@@ -31,7 +38,7 @@ static void t_end(void *u, MdFull *m, uint32_t pc, uint32_t next) {
     DpMdMach *d = u;
     (void)m;
     if (!d->h.on_end) return;
-    unsigned len = (next > pc && next - pc <= 12u) ? (unsigned)(next - pc) : 2u;
+    unsigned len = 2u + md_trace.fetched;
     d->h.on_end(d->h.user, pc, next, len);
 }
 
@@ -68,6 +75,7 @@ void dp_mdmach_set_hooks(DpMdMach *d, const DpMdHooks *h) { d->h = *h; }
 
 void dp_mdmach_reset(DpMdMach *d) {
     md_full_reset(d->m);
+    d->resume_frame = 0;
     d->steps = 0;
 }
 
@@ -82,22 +90,66 @@ uint64_t dp_mdmach_run(DpMdMach *d, uint64_t max_steps, int *cut, int *fault) {
     d->steps = 0;
     d->budget = max_steps;
     d->m->fault = 0;
-    while (!d->m->fault && d->steps < d->budget)
-        md_full_frame(d->m, 0);
+    while (!d->m->fault && d->steps < d->budget) {
+        dp_md_full_frame(d->m, 0, d->resume_frame);
+        d->resume_frame = 1;
+        if (!d->m->fault) d->resume_frame = 0;
+        if (!d->m->fault && d->h.on_frame) d->h.on_frame(d->h.user);
+    }
     if (cut) *cut = d->m->fault == DP_MD_FAULT_BUDGET || (!d->m->fault && d->steps >= d->budget);
     if (fault) *fault = (d->m->fault == DP_MD_FAULT_BUDGET || d->m->fault == DP_MD_FAULT_HALT) ? 0 : d->m->fault;
     return d->steps;
 }
 
 uint32_t dp_mdmach_pc(const DpMdMach *d) { return d->m->pc; }
+uint32_t dp_mdmach_fault_pc(const DpMdMach *d) { return d->m->fault_pc; }
 
 size_t dp_mdmach_state_size(void) { return sizeof(MdFull); }
 void dp_mdmach_save(const DpMdMach *d, void *buf) { memcpy(buf, d->m, sizeof(MdFull)); }
 void dp_mdmach_load(DpMdMach *d, const void *buf) {
     memcpy(d->m, buf, sizeof(MdFull));
+    d->resume_frame = 1;
     md_full_cram_sync(d->m);
 }
 void dp_mdmach_state_set_pc(void *buf, uint32_t pc) { ((MdFull *)buf)->pc = pc; }
+void dp_mdmach_state_set_an(void *buf, unsigned n, uint32_t v) { ((MdFull *)buf)->a[n & 7] = v; }
+void dp_mdmach_state_set_pad(void *buf, uint8_t pad) { ((MdFull *)buf)->pad = pad; }
+static int condition_true(unsigned cc, unsigned f) {
+    int c = !!(f & 1), v = !!(f & 2), z = !!(f & 4), n = !!(f & 8);
+    switch (cc & 15) {
+    case 0: return 1; case 1: return 0; case 2: return !c && !z; case 3: return c || z;
+    case 4: return !c; case 5: return c; case 6: return !z; case 7: return z;
+    case 8: return !v; case 9: return v; case 10: return !n; case 11: return n;
+    case 12: return n == v; case 13: return n != v; case 14: return !z && n == v;
+    default: return z || n != v;
+    }
+}
+void dp_mdmach_state_force_cc(void *buf, unsigned condition, int taken) {
+    MdFull *s = buf;
+    unsigned old = s->sr & 15, best = old, cost = 5;
+    for (unsigned f = 0; f < 16; f++) {
+        unsigned bits = old ^ f, n = 0;
+        for (; bits; bits >>= 1) n += bits & 1;
+        if (condition_true(condition, f) == !!taken && n < cost) { best = f; cost = n; }
+    }
+    s->sr = (uint16_t)((s->sr & ~15u) | best);
+}
+void dp_mdmach_state_force_dbcc(void *buf, unsigned condition, unsigned reg, int taken,
+                                uint32_t old_dn, uint16_t old_sr) {
+    MdFull *s = buf;
+    s->sr = old_sr;
+    s->d[reg & 7] = old_dn;
+    if (taken) {
+        dp_mdmach_state_force_cc(s, condition, 0);
+        uint16_t old = (uint16_t)old_dn;
+        dp_mdmach_state_set_dn_word(s, reg, old ? (uint16_t)(old - 1) : 0);
+    } else if (condition == 1) {
+        dp_mdmach_state_set_dn_word(s, reg, 0xFFFF);
+    } else {
+        dp_mdmach_state_force_cc(s, condition, 1);
+        s->d[reg & 7] = old_dn;
+    }
+}
 void dp_mdmach_state_set_dn_word(void *buf, unsigned n, uint16_t w) {
     MdFull *s = buf;
     s->d[n & 7] = (s->d[n & 7] & 0xFFFF0000u) | w;
@@ -110,6 +162,7 @@ void dp_mdmach_halt(DpMdMach *d) {
 uint16_t dp_mdmach_vdp_reg(const DpMdMach *d, unsigned r) { return d->m->vdp_reg[r % 24]; }
 uint16_t dp_mdmach_sr(const DpMdMach *d) { return d->m->sr; }
 uint32_t dp_mdmach_dn(const DpMdMach *d, unsigned n) { return d->m->d[n & 7]; }
+uint32_t dp_mdmach_an(const DpMdMach *d, unsigned n) { return d->m->a[n & 7]; }
 void dp_mdmach_set_pad(DpMdMach *d, uint8_t pad) { d->m->pad = pad; }
 
 uint32_t dp_mdmach_peek32(const DpMdMach *d, uint32_t a) {
@@ -124,3 +177,9 @@ void dp_mdmach_state_set_irq(void *buf, int vint, int hint) {
 }
 int dp_mdmach_vdp_pending(const DpMdMach *d) { return d->m->vdp_pending; }
 uint16_t dp_mdmach_vdp_first(const DpMdMach *d) { return (uint16_t)d->m->vdp_first; }
+uint8_t dp_mdmach_vdp_code(const DpMdMach *d) { return d->m->vdp_code; }
+int dp_mdmach_rom_visible(const DpMdMach *d, uint32_t addr) {
+    return !(d->m->sram_enable && addr >= 0x200000u && addr < 0x210000u);
+}
+uint8_t dp_mdmach_ram8(const DpMdMach *d, uint32_t a) { return d->m->ram[a & 0xFFFFu]; }
+

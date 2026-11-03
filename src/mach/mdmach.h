@@ -22,6 +22,10 @@ typedef struct {
     /* data accesses only (instruction fetches are filtered out) */
     void (*on_read)(void *user, uint32_t addr, unsigned size);
     void (*on_write)(void *user, uint32_t addr, unsigned size, uint32_t value);
+    /* Called after a completed frame, never after a cut or machine fault. */
+    void (*on_frame)(void *user);
+    /* Successful 68k-bus word read by VDP DMA, not a CPU read. */
+    void (*on_dma_read)(void *user, uint32_t addr, unsigned size);
 } DpMdHooks;
 
 DpMdMach *dp_mdmach_open(const uint8_t *rom, size_t size); /* copies the ROM */
@@ -40,18 +44,29 @@ void dp_mdmach_save(const DpMdMach *m, void *buf);
 void dp_mdmach_load(DpMdMach *m, const void *buf);
 void dp_mdmach_state_set_pc(void *buf, uint32_t pc);
 void dp_mdmach_state_set_dn_word(void *buf, unsigned n, uint16_t w);
+/* Force a 68000 condition by changing the fewest CCR bits possible. */
+void dp_mdmach_state_force_cc(void *buf, unsigned condition, int taken);
+void dp_mdmach_state_force_dbcc(void *buf, unsigned condition, unsigned reg, int taken,
+                                uint32_t old_dn, uint16_t old_sr);
 uint32_t dp_mdmach_state_pc(const void *buf);
 void dp_mdmach_state_set_irq(void *buf, int vint, int hint);
+void dp_mdmach_state_set_pad(void *buf, uint8_t pad);
+void dp_mdmach_state_set_an(void *buf, unsigned n, uint32_t v);
 /* VDP command latch: 1 if the next ctrl-port word is the second one. */
 int dp_mdmach_vdp_pending(const DpMdMach *m);
 uint16_t dp_mdmach_vdp_first(const DpMdMach *m);
+uint8_t dp_mdmach_vdp_code(const DpMdMach *m);
+int dp_mdmach_rom_visible(const DpMdMach *m, uint32_t addr);
 /* Stops the current run after the instruction in progress (fault HALT). */
 void dp_mdmach_halt(DpMdMach *m);
 /* Live-state accessors used by the fork logic. */
 uint16_t dp_mdmach_vdp_reg(const DpMdMach *m, unsigned r);
 uint16_t dp_mdmach_sr(const DpMdMach *m);
 uint32_t dp_mdmach_dn(const DpMdMach *m, unsigned n);
+uint32_t dp_mdmach_an(const DpMdMach *m, unsigned n);
 void dp_mdmach_set_pad(DpMdMach *m, uint8_t pad);
 uint32_t dp_mdmach_pc(const DpMdMach *m);
+uint32_t dp_mdmach_fault_pc(const DpMdMach *m);
 uint32_t dp_mdmach_peek32(const DpMdMach *m, uint32_t addr);
+uint8_t dp_mdmach_ram8(const DpMdMach *m, uint32_t addr); /* work RAM byte */
 #endif

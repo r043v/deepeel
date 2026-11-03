@@ -94,7 +94,7 @@ int dp_md_trace_run(const DpMdCart *c, uint64_t max_steps, DpMdTrace *t) {
     DpMdMach *m = dp_mdmach_open(c->rom, c->size);
     if (!t->exec || !t->dread || !m) { dp_mdmach_close(m); dp_md_trace_free(t); return -1; }
     Ctx x = {.t = t};
-    DpMdHooks h = {&x, on_step, on_end, on_read, on_write};
+    DpMdHooks h = {&x, on_step, on_end, on_read, on_write, NULL, NULL};
     dp_mdmach_set_hooks(m, &h);
     dp_mdmach_reset(m);
     t->steps = dp_mdmach_run(m, max_steps, &t->cut, &t->fault);

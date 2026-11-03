@@ -324,6 +324,14 @@ def save_md(out, name, r):
     print("wrote", path, len(r))
 
 def build_md(out):
+    header = bytearray(64)
+    header[:16] = b"Gens Movie TESTA"
+    header[20:22] = b"33"
+    with open(os.path.join(out, "fix_md_movie.gmv"), "wb") as f:
+        f.write(header + bytes([0x7F, 0xFF, 0xFF, 0xF7, 0xFF, 0xFF]))
+    header[22] = 0x40
+    with open(os.path.join(out, "fix_md_movie_state.gmv"), "wb") as f:
+        f.write(header + bytes([0xFF, 0xFF, 0xFF]))
     # --- dma: VDP regs, then a ROM->VRAM DMA of 16 words from $000400 ---------
     r = md_rom()
     pc = 0x200
@@ -336,11 +344,80 @@ def build_md(out):
     for i in range(0x20):
         r[0x400 + i] = i
     save_md(out, "fix_md_dma", r)
+    # Start 16 bytes before the end of ROM, so the DMA faults halfway through.
+    r[0x21A:0x21C] = bytes([0x95, 0xF8])
+    r[0x222:0x224] = bytes([0x96, 0x07])
+    save_md(out, "fix_md_dma_fault", r)
+    # Four words copied by MOVE.W directly from ROM to the VDP data port.
+    r = md_rom()
+    code = bytes.fromhex("33fc 8f02 00c0 0004 23fc 4000 0000 00c0 0004 "
+                         "41f9 0000 0400 7003 33d8 00c0 0000 51c8 fff8 60fe")
+    r[0x200:0x200 + len(code)] = code
+    r[0x400:0x408] = bytes.fromhex("1234 5678 9abc def0")
+    save_md(out, "fix_md_cpu_vram", r)
+    r = md_rom()
+    code = bytes.fromhex("33fc 8f02 00c0 0004 23fc 4000 0000 00c0 0004 "
+                         "41f9 0000 0400 43f9 00c0 0000 7203 3018 3280 51c9 fffa 60fe")
+    r[0x200:0x200 + len(code)] = code
+    r[0x400:0x408] = bytes.fromhex("1234 5678 9abc def0")
+    save_md(out, "fix_md_cpu_vram_reg", r)
+    code = bytes.fromhex("33fc 8f02 00c0 0004 23fc 4000 0000 00c0 0004 "
+                         "41f9 0000 0400 43f9 00c0 0000 7203 3018 4e71 3280 51c9 fff8 60fe")
+    r[0x200:0x200 + len(code)] = code
+    save_md(out, "fix_md_cpu_vram_gap", r)
+    # A 2 MiB+ cartridge with SRAM overlay: execute and read SRAM without
+    # accidentally attributing those accesses to the covered ROM bytes.
+    r = md_rom()
+    r.extend(bytes(0x200004 - len(r)))
+    code = bytes.fromhex("13fc 0001 00a1 30f1 33fc 60fe 0020 0000 "
+                         "1039 0020 0002 4ef9 0020 0000")
+    r[0x200:0x200 + len(code)] = code
+    r[0x200000:0x200004] = bytes.fromhex("4e71 1234")
+    save_md(out, "fix_md_sram_overlay", r)
 
     # --- fork: tst.w d0 / bne.s (not taken naturally) / both sides end in bra.s * -
     r = md_rom()
     r[0x200:0x20C] = bytes([0x4A, 0x40, 0x66, 0x04, 0x4E, 0x71, 0x60, 0xFE, 0x4E, 0x71, 0x60, 0xFE])
     save_md(out, "fix_md_fork", r)
+    # Two natural ROM reads from one instruction in a counted loop.
+    r = md_rom()
+    r[0x200:0x20E] = bytes([0x70, 0x01, 0x32, 0x39, 0, 0, 0x04, 0x00,
+                            0x51, 0xC8, 0xFF, 0xF8, 0x60, 0xFE])
+    save_md(out, "fix_md_reader", r)
+    r[0x20C:0x214] = bytes.fromhex("3239 0000 0400 60fe")
+    save_md(out, "fix_md_reader_overlap", r)
+    # The second branch's alternative returns to an already executed PC with
+    # a different D0. Address-only eviction must not discard the snapshot.
+    r = md_rom()
+    r[0x200:0x20E] = bytes([0x70, 0x00, 0x4A, 0x00, 0x66, 0x0A,
+                            0x70, 0x01, 0x4A, 0x00, 0x67, 0xF6, 0x60, 0xFE])
+    r[0x210:0x212] = bytes([0x60, 0xFE])
+    save_md(out, "fix_md_revisit", r)
+    # Poll controller 1 repeatedly; probes apply to the next poll.
+    r = md_rom()
+    r[0x200:0x208] = bytes([0x10, 0x39, 0x00, 0xA1, 0x00, 0x03, 0x60, 0xF8])
+    save_md(out, "fix_md_pad", r)
+    # Continue only when Right is read as pressed (active low).
+    r = md_rom()
+    r[0x200:0x210] = bytes([0x10, 0x39, 0x00, 0xA1, 0x00, 0x03,
+                            0x08, 0x00, 0x00, 0x03, 0x66, 0xF4,
+                            0x4E, 0x71, 0x60, 0xFE])
+    save_md(out, "fix_md_pad_effect", r)
+    r = md_rom()
+    r[0x200:0x206] = bytes([0x10, 0x39, 0x00, 0xA2, 0x00, 0x00])
+    save_md(out, "fix_md_fault", r)
+    r = md_rom()
+    r[0x200:0x20C] = bytes([0x26, 0x7C, 0x00, 0x00, 0x12, 0x34,
+                            0x10, 0x39, 0x00, 0xA2, 0x00, 0x00])
+    save_md(out, "fix_md_fault_reg", r)
+    r = md_rom()
+    r[0x200:0x20E] = bytes([0x33, 0xFC, 0x12, 0x34, 0x00, 0xFF, 0x10, 0x00,
+                            0x10, 0x39, 0x00, 0xA2, 0x00, 0x00])
+    save_md(out, "fix_md_watch", r)
+    r = md_rom()
+    r[0x200:0x20E] = bytes([0x4A, 0x40, 0x66, 0x04, 0x4E, 0x71, 0x60, 0xFE,
+                            0x10, 0x39, 0x00, 0xA2, 0x00, 0x00])
+    save_md(out, "fix_md_fork_fault", r)
     # --- dbcc: moveq #0,d0 / dbf d0,* / nop / bra.s * ---------------------------
     r = md_rom()
     r[0x200:0x20A] = bytes([0x70, 0x00, 0x51, 0xC8, 0xFF, 0xFE, 0x4E, 0x71, 0x60, 0xFE])
@@ -357,6 +434,8 @@ def build_md(out):
     r[0x20C:0x20E] = bytes([0x60, 0xFE])
     r[0x300:0x302] = bytes([0x4E, 0x73])                 # rte
     save_md(out, "fix_md_vint", r)
+    r[0x208:0x20C] = bytes([0x60, 0xFE, 0x4E, 0x71])     # keep reset SR interrupt mask
+    save_md(out, "fix_md_vint_masked", r)
 
 if __name__ == "__main__":
     build_md(sys.argv[1] if len(sys.argv) > 1 else ".")

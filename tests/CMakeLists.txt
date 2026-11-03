@@ -212,3 +212,8 @@ if(TARGET deepeel AND DP_HAS_GUI)
   add_dependencies(test_gui fixtures)
   add_test(NAME gui COMMAND test_gui ${CMAKE_CURRENT_BINARY_DIR})
 endif()
+
+add_executable(test_pce test_pce.c)
+target_link_libraries(test_pce PRIVATE deepeel_pce deepeel_core)
+add_test(NAME pce COMMAND test_pce)
+set_tests_properties(pce PROPERTIES TIMEOUT 60)
