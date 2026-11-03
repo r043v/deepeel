@@ -5,6 +5,8 @@
 #ifndef DP_COVERAGE_H
 #define DP_COVERAGE_H
 #include <stdint.h>
+#include <stdlib.h>
+#include <pthread.h>
 
 enum { // nature (u16)
     DP_NAT_CODE_NAT = 1 << 0,   // executed by natural flow
@@ -43,6 +45,49 @@ static inline const char *dp_src_name(int bit) {
     static const char *n[DP_SRC_COUNT] = { "session", "fork-natural", "fork-forced",
         "static-closure", "provenance", "static-scan", "copy", "sibling" };
     return bit >= 0 && bit < DP_SRC_COUNT ? n[bit] : "?";
+}
+
+// Sparse table of first discoveries (docs/COUVERTURE.fr.md §4.3): the first
+// time a ROM byte gains any source, one row (byte key, source bit, stamp,
+// actor).  The stamp is the platform's step counter; the actor is a worker or
+// movie id (0 when unknown).  Bounded: rows past `max` are counted, not kept.
+typedef struct { uint32_t key, src; uint64_t stamp; uint32_t actor; } DpFirstSeen;
+typedef struct {
+    DpFirstSeen *e;
+    uint32_t n, cap, max;
+    uint64_t dropped;
+    pthread_mutex_t mtx;
+} DpFirstLog;
+static inline void dp_first_init(DpFirstLog *l, uint32_t max) {
+    l->e = NULL; l->n = l->cap = 0; l->max = max; l->dropped = 0;
+    pthread_mutex_init(&l->mtx, NULL);
+}
+static inline void dp_first_free(DpFirstLog *l) {
+    free(l->e); l->e = NULL; l->n = l->cap = 0;
+    pthread_mutex_destroy(&l->mtx);
+}
+// ORs `bits` into flags[k]; the byte's first proof is logged.  Returns the old bits.
+static inline uint32_t dp_cov_mark(DpFirstLog *l, uint32_t *flags, uint32_t k, uint32_t bits,
+                                   uint64_t stamp, uint32_t actor) {
+    uint32_t old = __atomic_fetch_or(&flags[k], bits, __ATOMIC_RELAXED);
+    if (old || !bits || !l->max) return old;
+    pthread_mutex_lock(&l->mtx);
+    if (l->n < l->max) {
+        if (l->n == l->cap) {
+            uint32_t nc = l->cap ? l->cap * 2 : 1024;
+            DpFirstSeen *g = (DpFirstSeen *)realloc(l->e, sizeof *g * nc);
+            if (g) { l->e = g; l->cap = nc; }
+        }
+        if (l->n < l->cap) l->e[l->n++] = (DpFirstSeen){ k, bits & (~bits + 1), stamp, actor };
+        else l->dropped++;
+    } else l->dropped++;
+    pthread_mutex_unlock(&l->mtx);
+    return old;
+}
+// legacy flags -> types (second projection): start / entry / irq / verbatim
+static inline uint32_t dp_types_of(int start, int entry, int irq, int verbatim) {
+    return (start ? DP_T_START : 0) | (entry ? DP_T_ENTRY : 0) | (irq ? DP_T_IRQ : 0) |
+           (verbatim ? DP_T_VERBATIM : 0);
 }
 
 // Map class from nature, with the historical precedence of dp_map_build.

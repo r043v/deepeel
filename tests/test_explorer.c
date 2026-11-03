@@ -435,6 +435,18 @@ int main(int argc, char **argv) {
     }
 
     if (res.cart) dp_results_free(&res);
+    // --- sparse first-discovery table: one row per proven byte, consistent --------
+    {
+        run(dir, "branch");
+        size_t total = (size_t)res.banks * 0x4000, any = 0;
+        for (size_t k = 0; k < total; k++) any += !!res.src_flags[k];
+        CHECK(res.first.n > 0 && res.first.n + res.first.dropped == any);
+        int bad = 0;
+        for (uint32_t i = 0; i < res.first.n; i++)
+            bad += !(res.src_flags[res.first.e[i].key] & res.first.e[i].src);
+        CHECK(bad == 0);
+    }
+
     // --- deferred frontier: a tiny per-path budget loses no code -----------------
     {
         run(dir, "branch");

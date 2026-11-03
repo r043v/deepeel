@@ -277,6 +277,26 @@ static void cov_sources_json(DpBuf *o, const DpResults *res) {
     for (int b = 0; b < DP_SRC_COUNT; b++)
         dp_buf_fmt(o, ",\"%s\":%llu", dp_src_name(b), (unsigned long long)per[b]);
     dp_buf_str(o, "},\n");
+    // second projection: types derived from the per-platform flags
+    uint64_t t_start = 0, t_entry = 0, t_irq = 0, t_verb = 0;
+    for (size_t k = 0; k < n; k++) {
+        uint32_t t = dp_types_of(res->exec_flags[k] & DP_XF_START, res->exec_flags[k] & DP_XF_ENTRY,
+                                 res->exec_flags[k] & DP_XF_IRQ, res->data_flags[k] & DP_DF_VERBATIM);
+        t_start += !!(t & DP_T_START); t_entry += !!(t & DP_T_ENTRY);
+        t_irq += !!(t & DP_T_IRQ); t_verb += !!(t & DP_T_VERBATIM);
+    }
+    dp_buf_fmt(o, "\"types\": {\"start\":%llu,\"entry\":%llu,\"irq\":%llu,\"verbatim\":%llu},\n",
+               (unsigned long long)t_start, (unsigned long long)t_entry,
+               (unsigned long long)t_irq, (unsigned long long)t_verb);
+    // sparse first-discovery table: rows per source of the byte's first proof
+    uint64_t first[DP_SRC_COUNT] = {0};
+    for (uint32_t i = 0; i < res->first.n; i++)
+        for (int b = 0; b < DP_SRC_COUNT; b++) if (res->first.e[i].src == (1u << b)) first[b]++;
+    dp_buf_fmt(o, "\"first_seen\": {\"rows\":%u,\"dropped\":%llu",
+               res->first.n, (unsigned long long)res->first.dropped);
+    for (int b = 0; b < DP_SRC_COUNT; b++)
+        dp_buf_fmt(o, ",\"%s\":%llu", dp_src_name(b), (unsigned long long)first[b]);
+    dp_buf_str(o, "},\n");
 }
 
 void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {

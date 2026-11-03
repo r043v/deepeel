@@ -128,7 +128,7 @@ static void section_live_port(Run *x,uint16_t port);
 static void static_scan(Run *x);
 // sources are OR-ed atomically: worker sessions share nothing but merge later
 static inline void src_or(DpSegaResults *r,size_t i,uint32_t bits) {
-    if(r->src_flags) __atomic_or_fetch(&r->src_flags[i],bits,__ATOMIC_RELAXED);
+    if(r->src_flags) dp_cov_mark(&r->first,r->src_flags,(uint32_t)i,bits,r->steps,0);
 }
 static uint8_t read_bus(void *user,uint16_t a) {
     Run *x=user; uint8_t v=x->b->read(a);
@@ -1000,7 +1000,7 @@ static void generate_seed_specs(Run *x,const uint8_t *image,size_t size) {
 void dp_sega_results_free(DpSegaResults *r) {
     for(uint32_t i=0;i<r->section_count;i++) dp_set_free(&r->sections[i].ctx_seen);
     free(r->sections); free(r->section_of); free(r->tree_nodes); free((void *)r->rom);
-    free(r->static_flags); free(r->src_flags);
+    free(r->static_flags); free(r->src_flags); dp_first_free(&r->first);
     free(r->flags); free(r->copies); memset(r,0,sizeof(*r));
 }
 // One exploration worker. worker 0 runs everything: the TAS replay, the play
@@ -1055,6 +1055,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     r->flags=calloc(size,1);
     r->static_flags=calloc(size,1);
     r->src_flags=calloc(size,sizeof(*r->src_flags));
+    dp_first_init(&r->first,1u<<20);
     x.cart=calloc(0x8000,1);
     r->section_of=calloc(size,sizeof(*r->section_of));
     r->section_capacity=256;
@@ -1387,7 +1388,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     uint32_t sec_base=d->section_count,tree_base=d->tree_count;
     for(size_t i=0;i<d->size;i++) {
         d->flags[i]|=s->flags[i];
-        d->src_flags[i]|=s->src_flags[i];
+        if(s->src_flags[i]) dp_cov_mark(&d->first,d->src_flags,(uint32_t)i,s->src_flags[i],d->steps,1); // actor 1: a merged worker
         if(s->section_of[i]) {
             if(d->section_of[i]) d->merge_conflicts++;
             else d->section_of[i]=s->section_of[i]+sec_base;
@@ -1625,6 +1626,11 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
         }
         fprintf(out,",\"sources\":{\"bytes_any\":%"PRIu64",\"bytes_multi\":%"PRIu64,any,multi);
         for(int b=0;b<DP_SRC_COUNT;b++) fprintf(out,",\"%s\":%"PRIu64,dp_src_name(b),per[b]);
+        fputc('}',out);
+        uint64_t first[DP_SRC_COUNT]={0};
+        for(uint32_t i=0;i<r->first.n;i++) for(int b=0;b<DP_SRC_COUNT;b++) if(r->first.e[i].src==(1u<<b)) first[b]++;
+        fprintf(out,",\"first_seen\":{\"rows\":%u,\"dropped\":%"PRIu64,r->first.n,r->first.dropped);
+        for(int b=0;b<DP_SRC_COUNT;b++) fprintf(out,",\"%s\":%"PRIu64,dp_src_name(b),first[b]);
         fputc('}',out);
     }
     fputs(",\"sections\":[",out);

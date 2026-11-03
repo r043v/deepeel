@@ -147,6 +147,7 @@ typedef struct {
     const uint8_t *rom;        // ROM image copy for static map classes
     uint8_t *static_flags;     // static scan: DP_SEGA_TABLE|DP_SEGA_PAD per byte
     uint32_t *src_flags;       // DP_SRC_* per byte, OR-ed (every proving source)
+    DpFirstLog first;          // sparse first-discovery table (bounded)
     // observed indirect jumps and their seeding pass (GB dp_seed_indirect)
     uint64_t indirect_sites,indirect_targets,indirect_site_overflow,indirect_target_overflow;
     uint64_t indirect_seeds,indirect_refused_budget,indirect_pending;

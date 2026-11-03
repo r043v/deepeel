@@ -96,7 +96,7 @@ static uint32_t prov_target(const DpResults *res, uint32_t bank, uint32_t t) {
 static void prov_data_mark(DpResults *res, uint16_t addr) {
     uint32_t k = prov_addr_key(res, addr);
     if (k == ~0u) return;
-    res->src_flags[k] |= DP_SRC_PROVENANCE;
+    dp_cov_mark(&res->first, res->src_flags, k, DP_SRC_PROVENANCE, res->steps_total, 0);
     if (!(res->data_flags[k] & DP_DF_STATIC)) {
         res->data_flags[k] |= DP_DF_STATIC;
         res->prov_data++;
@@ -194,7 +194,7 @@ uint32_t dp_provenance(DpResults *res) {
                     uint8_t *f = &res->exec_flags[tk];
                     if (!(*f & DP_XF_STATIC)) marked++;
                     *f |= DP_XF_STATIC | DP_XF_START | DP_XF_ENTRY;
-                    res->src_flags[tk] |= DP_SRC_PROVENANCE;
+                    dp_cov_mark(&res->first, res->src_flags, tk, DP_SRC_PROVENANCE, res->steps_total, 0);
                 }
                 res->prov_jp_hl++;
                 ProvState ns = s;

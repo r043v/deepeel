@@ -769,3 +769,12 @@ continuation reportée n'est jamais évincée par contexte (même chemin, en
 milieu de section) ; elle apparaît dans le résumé (`frontier:`) et dans le
 JSON (`steps_deferred`, `loop_deferred`, `defer_resumed`, `*_final`,
 `defer_dropped`, `defer_pending`). Même correctif côté GB.
+
+## J1 terminé (0.34.0)
+
+Table creuse de première découverte (`DpFirstLog`, `coverage.h`) : une ligne
+`(clé d'octet, source, horodatage en pas, acteur)` la première fois qu'un octet
+de ROM gagne une source ; bornée à 2^20 lignes (au-delà : `dropped`). Exposée
+dans le JSON (`first_seen`, lignes par source) pour GB et Sega ; acteur 1 =
+résultat d'un worker fusionné (Sega). Projection `types` (GB, JSON `types`) :
+start, entry, irq, verbatim. Les types sémantiques (tiles, music…) sont J8.

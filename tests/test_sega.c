@@ -62,6 +62,11 @@ static void deferral(void) {
     CHECK(dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r));
     CHECK(r.steps_deferred>=3 && r.defer_resumed==r.steps_deferred && r.defer_pending==0);
     CHECK(r.flags[0x164]&DP_SEGA_NATURAL);
+    {   // sparse first-discovery rows: one per proven byte, each consistent
+        size_t any=0; for(size_t i=0;i<r.size;i++) any+=!!r.src_flags[i];
+        int bad=0; for(uint32_t i=0;i<r.first.n;i++) bad+=!(r.src_flags[r.first.e[i].key]&r.first.e[i].src);
+        CHECK(r.first.n>0 && r.first.n+r.first.dropped==any && !bad);
+    }
     dp_sega_results_free(&r);
     // too few tiers: the final cut is counted, never silent
     o.defer_tiers=1;

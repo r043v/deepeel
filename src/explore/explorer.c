@@ -28,7 +28,7 @@ static void fork_p1(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op);
 
 // --- shared-map primitives -----------------------------------------------------
 static inline void src_or(DpResults *res, uint32_t k, uint32_t bits) {
-    __atomic_or_fetch(&res->src_flags[k], bits, __ATOMIC_RELAXED);
+    dp_cov_mark(&res->first, res->src_flags, k, bits, res->steps_total, 0);
 }
 static inline uint8_t flags_or(uint8_t *p, uint8_t bit) {
     return __atomic_or_fetch(p, bit, __ATOMIC_RELAXED); // returns the old bits
@@ -164,6 +164,7 @@ void dp_results_init(DpResults *res, const DpCart *cart, const DpPlatform *plat)
     res->section_of = xrealloc(NULL, n * sizeof(uint32_t));
     res->src_flags = xrealloc(NULL, n * sizeof(uint32_t));
     memset(res->src_flags, 0, n * sizeof(uint32_t));
+    dp_first_init(&res->first, 1u << 20);
     memset(res->play_exec_hits, 0, n * sizeof(uint32_t));
     memset(res->play_data_hits, 0, n * sizeof(uint32_t));
     memset(res->exec_flags, 0, n);
@@ -220,6 +221,7 @@ void dp_results_free(DpResults *res) {
     free(res->static_flags);
     free(res->section_of);
     free(res->src_flags);
+    dp_first_free(&res->first);
     for (int i = 0; i < res->section_count; i++) dp_set_free(&res->sections[i].ctx_seen);
     free(res->sections);
     free(res->io);
@@ -260,8 +262,8 @@ void dp_static_scan(DpResults *res) {
             if (!run) rstart = i;
             run++;
             if (run == 8)
-                for (size_t j = rstart; j <= i; j++) { res->static_flags[j] |= DP_SF_PAD; res->src_flags[j] |= DP_SRC_STATIC_SCAN; }
-            else if (run > 8) { res->static_flags[i] |= DP_SF_PAD; res->src_flags[i] |= DP_SRC_STATIC_SCAN; }
+                for (size_t j = rstart; j <= i; j++) { res->static_flags[j] |= DP_SF_PAD; dp_cov_mark(&res->first, res->src_flags, (uint32_t)j, DP_SRC_STATIC_SCAN, 0, 0); }
+            else if (run > 8) { res->static_flags[i] |= DP_SF_PAD; dp_cov_mark(&res->first, res->src_flags, (uint32_t)i, DP_SRC_STATIC_SCAN, 0, 0); }
         } else {
             run = 0;
         }
@@ -289,8 +291,8 @@ void dp_static_scan(DpResults *res) {
                 if (a + 1 < n) {
                     res->static_flags[a] |= DP_SF_POINTER;
                     res->static_flags[a + 1] |= DP_SF_POINTER;
-                    res->src_flags[a] |= DP_SRC_STATIC_SCAN;
-                    res->src_flags[a + 1] |= DP_SRC_STATIC_SCAN;
+                    dp_cov_mark(&res->first, res->src_flags, (uint32_t)a, DP_SRC_STATIC_SCAN, 0, 0);
+                    dp_cov_mark(&res->first, res->src_flags, (uint32_t)a + 1, DP_SRC_STATIC_SCAN, 0, 0);
                 }
             }
             off += 6; // skip past the table we just marked

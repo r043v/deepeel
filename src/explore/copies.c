@@ -109,7 +109,7 @@ void dp_record_copy(DpExplorer *ex, const DpCopyRec *rec, uint32_t attrib_key) {
             if (base + i >= (uint32_t)res->banks * 0x4000) break;
             uint8_t old = __atomic_or_fetch(&res->data_flags[base + i], bit, __ATOMIC_RELAXED);
             if (!(old & bit)) ex->credit_data++;
-            __atomic_or_fetch(&res->src_flags[base + i], DP_SRC_COPY, __ATOMIC_RELAXED);
+            dp_cov_mark(&res->first, res->src_flags, base + i, DP_SRC_COPY, res->steps_total, 0);
             __atomic_add_fetch(&res->data_hits[base + i], 1, __ATOMIC_RELAXED);
         }
     }
@@ -177,7 +177,7 @@ static void flush(DpExplorer *ex, DpCopyTracker *ct, int force) {
                         if (k >= (uint32_t)res->banks * 0x4000) break;
                         uint8_t old = __atomic_or_fetch(&res->data_flags[k], bit, __ATOMIC_RELAXED);
                         if (!(old & bit)) ex->credit_data++;
-                        __atomic_or_fetch(&res->src_flags[k], DP_SRC_COPY, __ATOMIC_RELAXED);
+                        dp_cov_mark(&res->first, res->src_flags, k, DP_SRC_COPY, res->steps_total, 0);
                         __atomic_add_fetch(&res->data_hits[k], 1, __ATOMIC_RELAXED);
                     }
                 }
@@ -291,7 +291,7 @@ uint32_t dp_copy_siblings(DpResults *res) {
                     for (uint32_t i = base; i < end; i++) {
                         if (!(res->data_flags[i] & DP_DF_SIBLING)) marked++;
                         res->data_flags[i] |= DP_DF_SIBLING;
-                        res->src_flags[i] |= DP_SRC_SIBLING;
+                        dp_cov_mark(&res->first, res->src_flags, i, DP_SRC_SIBLING, res->steps_total, 0);
                     }
                 }
             }

@@ -1351,7 +1351,7 @@ Chaque jalon remplit trois conditions :
 | Jalon | Contenu | Taille | Critère d'acceptation |
 |---|---|---|---|
 | **J0** ✅ 0.29.0 | Correctifs §10.12 | S | test de reprise de spool qui relit tous les enregistrements ; test de saturation `fork_counts` |
-| **J1** ✅ 0.30.0 | Modèle de couverture commun §4 (nature/sources branchés sur GB puis Sega ; `types` déclarés, table creuse **différée**) | M | les classes de carte sont identiques avant/après (projection) ; sources multiples visibles dans le JSON |
+| **J1** ✅ 0.34.0 | Modèle de couverture commun §4 (nature, sources, table creuse de première découverte, projection `types` start/entry/irq/verbatim ; les types sémantiques tiles/music/… relèvent de J8) | M | les classes de carte sont identiques avant/après (projection) ; sources multiples visibles dans le JSON |
 | **J2** ◐ 0.33.0 (GB + Sega/MSX) | Frontière différée §6 (GB puis Sega) — **fait** : paliers `steps` et `loop` GB en mémoire (×4, 3 paliers, 4096 reports, compteurs `steps_deferred`, `loop_deferred`, `defer_resumed`, `*_final`, `defer_dropped`, `defer_pending`) ; **reste** : frontière sur disque `.dpf`, autres paliers (`dedup-full`, `paths`, `fork-cap`, `covered`…), NES/PCE/MD, `frontier drain` | L | test : un run au budget minuscule puis `frontier drain` donne la même couverture qu'un run sans budget sur la fixture ; aucun compteur `*_dropped` non nul hors non-sens |
 | **J3** | `DpMachine`/`DpIsa`, noyau extrait de `src/explore/`, GB migré | XL | comportement identique (tests + campagne GB à budgets égaux) |
 | **J4** | Sega/MSX sur le noyau | L | matrice §2.1 ✅ pour SMS/GG/MSX ; `--jobs` MSX |
