@@ -57,6 +57,7 @@ typedef struct {
     uint64_t play_total;     // instrumented play session steps (0: no session)
     uint64_t novelty_total;  // Go-Explore novelty search: instruction budget (0: off)
     uint32_t novelty_frames, novelty_archive, novelty_frame_steps; // frames per trial, archive size, instructions per frame
+    unsigned watch_every;    // publish a frame to the watch buffer every N frames (0: off; forces one worker)
     const char *export_state; // write the deepest novelty cell here (DPST file, needs --novelty)
     int novelty_cells;       // key the archive on the screen fingerprint and learned lives
     uint64_t tas_total;      // TAS replay budget, steps (bounded whatever the movie length)
@@ -166,6 +167,7 @@ typedef struct {
     uint64_t play_steps,play_epochs;
     // novelty search (Go-Explore)
     uint64_t novelty_trials,novelty_hits,novelty_archived,novelty_replaced,novelty_frames_run,novelty_deaths;
+    uint64_t watch_frames;
     uint32_t novelty_depth,state_exported_depth; int state_exported;
     // TAS replay (GB tas.c parity): natural coverage from a movie, priority
     uint64_t tas_frames,tas_frames_refused,tas_steps;

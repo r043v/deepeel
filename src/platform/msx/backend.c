@@ -91,12 +91,23 @@ int dp_msx_save(void *state,size_t size) {
     if(!image || !state || size!=sizeof(Snapshot)) return 0;
     Snapshot *saved=state; memset(saved,0,size); saved->machine=machine; saved->generation=generation; return 1;
 }
+#include "../sega/backend.h"
+static DpSegaWatch W;
+static uint16_t watch_buf[SG_OUT_WIDTH];
+static int watch_draw(void *u,unsigned y) { (void)u; (void)y; return 1; }
+static void watch_row(void *u,unsigned y,uint16_t *p) { (void)u; dp_sega_watch_row(&W,y,p,SG_OUT_WIDTH,SG_HEIGHT); }
+static void watch_frame(void *u) { (void)u; dp_sega_watch_frame(&W); }
+static void dp_msx_watch_hook(void) {
+    if(!W.every) return;
+    machine.row_out=watch_buf; machine.draw_line=watch_draw; machine.row=watch_row; machine.frame=watch_frame;
+}
+static void explore_watch(unsigned every,uint64_t *published) { W.every=every; W.published=published; dp_msx_watch_hook(); }
 int dp_msx_load(const void *state,size_t size) {
     if(!image || !state || size!=sizeof(Snapshot)) return 0;
     // Snapshots are private to this ROM instance, never a portable file format.
     const Snapshot *saved=state;
     if(saved->generation!=generation || saved->machine.rom!=image || saved->machine.rom_size!=image_size) return 0;
-    machine=saved->machine; msx_state_loaded(); sg1000_palette_changed(); return 1;
+    machine=saved->machine; dp_msx_watch_hook(); msx_state_loaded(); sg1000_palette_changed(); return 1;
 }
 void dp_msx_buttons(unsigned player,uint8_t pressed) { if(image && player<2) sg1000_buttons(player,pressed&63); }
 void dp_msx_return(int pressed) { if(image) sg1000_pause(pressed); }
@@ -186,6 +197,6 @@ const DpSegaBackend *dp_msx_backend(void) {
         dp_msx_in,dp_msx_out,dp_msx_advance,dp_msx_rom_index,sizeof(Snapshot),explore_save,explore_load,
         dp_msx_ram_index,explore_target,explore_input,explore_set_input,explore_mapper,explore_command,
         explore_irq,65536,65536,0xff,0x98,0x99,dp_msx_close,explore_windows,NULL,NULL,explore_geometry,explore_window,
-        dp_msx_info,dp_msx_observe,dp_msx_bios_trap,explore_screen_key,explore_ram_view};
+        dp_msx_info,dp_msx_observe,dp_msx_bios_trap,explore_screen_key,explore_ram_view,explore_watch};
     return &ops;
 }

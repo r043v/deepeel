@@ -16,6 +16,9 @@
 #include "../../core/statefile.h"
 #include <zlib.h>
 #include <math.h>
+// the SDL window lives in the main binary's GUI unit; absent in the library-only tests
+int dp_fbwatch_start(const char *title) __attribute__((weak));
+void dp_fbwatch_stop(void) __attribute__((weak));
 
 typedef struct {
     DpZ80Provenance cpu;
@@ -1292,6 +1295,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     memset(image,0xff,padded); memcpy(image,rom,size);
     // Baseline SG boards have no cartridge RAM; larger board profiles are explicit future work.
     if(!x.b->init(image,size,sg?NULL:x.cart,msx?o->msx_mapper:!strcmp(s->id,"sms"))) { ok=0; goto cleanup; }
+    if(o->watch_every && x.b->watch) x.b->watch(o->watch_every,&r->watch_frames);
     if(o->sega_mapper && (!x.b->select_mapper || !x.b->select_mapper((unsigned)o->sega_mapper))) { ok=0; goto cleanup; }
     if(!sg && !msx) { r->sega_mapper=x.b->mapper(); r->sega_mapper_explicit=!!o->sega_mapper; }
     hook(&x);
@@ -1744,6 +1748,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     DP_MR_SUM(indirect_target_overflow); DP_MR_SUM(indirect_seeds);
     DP_MR_SUM(indirect_refused_budget); DP_MR_SUM(indirect_pending);
     DP_MR_SUM(play_steps); DP_MR_SUM(play_epochs);
+    DP_MR_SUM(watch_frames);
     DP_MR_SUM(novelty_trials); DP_MR_SUM(novelty_hits); DP_MR_SUM(novelty_archived); DP_MR_SUM(novelty_replaced); DP_MR_SUM(novelty_frames_run); DP_MR_SUM(novelty_deaths);
     if(s->novelty_depth>d->novelty_depth) d->novelty_depth=s->novelty_depth;
     if(s->state_exported && (!d->state_exported || s->state_exported_depth>d->state_exported_depth)) { d->state_exported=1; d->state_exported_depth=s->state_exported_depth; }
@@ -2215,6 +2220,7 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
         fprintf(out,"novelty: depth %u frames, %"PRIu64" trials, %"PRIu64" frames, %"PRIu64" hits, %"PRIu64" deaths, %"PRIu64" archived (%"PRIu64" replaced)\n",
                 r->novelty_depth,r->novelty_trials,r->novelty_frames_run,r->novelty_hits,r->novelty_deaths,r->novelty_archived,r->novelty_replaced);
     if(r->state_exported) fprintf(out,"state exported: deepest cell, %u frames from power-on\n",r->state_exported_depth);
+    if(r->watch_frames) fprintf(out,"watch: %"PRIu64" frames published\n",r->watch_frames);
     fprintf(out,"tas replay: %"PRIu64" frames; %"PRIu64" steps; frames refused %"PRIu64"\n",r->tas_frames,r->tas_steps,r->tas_frames_refused);
     fprintf(out,"drain: jobs capped %"PRIu64"; seeds off-lane %"PRIu64"; section attribution conflicts %"PRIu64" (record paths and parent paths are per-worker with --jobs 2)\n",
         r->jobs_capped,r->seeds_offlane,r->merge_conflicts);
@@ -2308,7 +2314,7 @@ static int parse_entry(const char *s,DpSegaOptions *o) {
 int dp_sega_explore_command(int argc,char **argv) {
     if(argc<5) goto usage;
     const DpSegaSystem *s=!strcmp(argv[3],"msx")?dp_msx_system():dp_sega_system(argv[3]); if(!s) goto usage;
-    DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); o.defer_tiers=DP_SEGA_TIER_MAX; const char *text=NULL,*map=NULL,*evidence=NULL,*summary=NULL,*cov=NULL,*romdata=NULL;
+    DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); o.defer_tiers=DP_SEGA_TIER_MAX; int watch=0; const char *dump=NULL,*text=NULL,*map=NULL,*evidence=NULL,*summary=NULL,*cov=NULL,*romdata=NULL;
     for(int i=5;i<argc;i++) {
         if(!strcmp(argv[i],"--no-vector-seeds")) { o.seed_vectors=0; continue; }
         if(!strcmp(argv[i],"--no-context-evict")) { o.no_context_evict=1; continue; }
@@ -2336,6 +2342,14 @@ int dp_sega_explore_command(int argc,char **argv) {
         if(!strcmp(argv[i],"--no-target-closure")) { o.target_closure=0; continue; }
         if(!strcmp(argv[i],"--no-closure")) { o.closure.nodes=0; continue; }
         if(!strcmp(argv[i],"--export-state")) { if(i+1>=argc) goto usage; o.export_state=argv[++i]; continue; }
+        if(!strcmp(argv[i],"--watch")) {
+            int fps=30;
+            if(i+1<argc && argv[i+1][0]>='0' && argv[i+1][0]<='9') fps=atoi(argv[++i]);
+            if(fps<1) fps=1;
+            if(fps>30) fps=30;
+            o.watch_every=(unsigned)(60/fps); watch=1; continue;
+        }
+        if(!strcmp(argv[i],"--watch-dump")) { if(i+1>=argc) goto usage; dump=argv[++i]; if(!o.watch_every) o.watch_every=2; continue; }
         if(!strcmp(argv[i],"--tas")) { if(i+1>=argc) goto usage; o.tas_path=argv[++i]; continue; }
         if(!strcmp(argv[i],"--jobs")) {
             if(i+1>=argc) goto usage;
@@ -2405,7 +2419,11 @@ int dp_sega_explore_command(int argc,char **argv) {
     if(!read_ok) { free(image); return 1; }
     size_t header=(!strcmp(s->id,"sms") || !strcmp(s->id,"gg")) && ((size_t)end&0x3fff)==512?512:0;
     DpSegaResults r;
+    if(o.watch_every) o.jobs=1; // one framebuffer: the instances would share it
+    if(watch && dp_fbwatch_start) dp_fbwatch_start("deepeel sega watch");
     int ok=dp_sega_explore(s,image+header,(size_t)end-header,&o,&r); free(image);
+    if(watch && dp_fbwatch_stop) dp_fbwatch_stop();
+    if(dump && dp_fb_dump_ppm(dump)) fprintf(stderr,"no frame to dump\n");
     if(!ok) { fprintf(stderr,"invalid machine profile/budgets/ROM size, or allocation failure\n"); return 1; }
     dp_sega_report(stdout,s,&r);
     const char *paths[]={text,map,evidence,summary,cov,romdata};
@@ -2421,5 +2439,5 @@ int dp_sega_explore_command(int argc,char **argv) {
     }
     dp_sega_results_free(&r); return ok?0:1;
 usage:
-    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--novelty N] [--novelty-frames N] [--novelty-archive N] [--novelty-frame-steps N] [--novelty-cells 1] [--export-state FILE] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE]\n"); return 2;
+    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--novelty N] [--novelty-frames N] [--novelty-archive N] [--novelty-frame-steps N] [--novelty-cells 1] [--export-state FILE] [--watch [FPS]] [--watch-dump FILE.ppm] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE]\n"); return 2;
 }

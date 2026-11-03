@@ -5,6 +5,7 @@
 #include "../msx/msx.h"
 #include <stddef.h>
 #include <stdint.h>
+#include "../../gui/fbwatch.h"
 // Runtime instances are singletons: exploration is sequential, not threaded.
 enum { DP_SEGA_WRAM, DP_SEGA_SRAM, DP_SEGA_VRAM, DP_SEGA_CRAM };
 enum { DP_SEGA_RAM_TAGS=8192+32768 };
@@ -79,7 +80,27 @@ typedef struct {
     // + scroll registers) and the work RAM, both without side effects. NULL: unsupported.
     uint64_t (*screen_key)(void);
     const uint8_t *(*ram_view)(size_t *n);
+    // --watch: publish every Nth completed frame (0: off) through the platform-neutral
+    // framebuffer; rendering is only switched on while watching (it sets sprite status).
+    void (*watch)(unsigned every,uint64_t *published);
 } DpSegaBackend;
+// weak: standalone runtime tests link the backends without the framebuffer watch
+void dp_fb_publish(const uint32_t *argb, int w, int h, uint64_t frame) __attribute__((weak));
+typedef struct { uint32_t px[256*192]; int w,h; unsigned every,n; uint64_t *published; } DpSegaWatch;
+static inline void dp_sega_watch_row(DpSegaWatch *k,unsigned y,const uint16_t *p,int w,int h) {
+    if(y>=(unsigned)h || w>256) return;
+    k->w=w; k->h=h;
+    for(int i=0;i<w;i++) {
+        uint16_t c=p[i];
+        uint32_t r=(uint32_t)((c>>11)&31)*255/31,g=(uint32_t)((c>>5)&63)*255/63,b=(uint32_t)(c&31)*255/31;
+        k->px[y*(unsigned)w+(unsigned)i]=0xff000000u|r<<16|g<<8|b;
+    }
+}
+static inline void dp_sega_watch_frame(DpSegaWatch *k) {
+    if(!dp_fb_publish || !k->every || !k->w || ++k->n%k->every) return;
+    dp_fb_publish(k->px,k->w,k->h,k->n);
+    if(k->published) ++*k->published;
+}
 // FNV-1a over the background name table: every other byte of a 2-byte SMS/GG entry
 // (the tile index; attributes are ignored) or each TMS9918 name byte, plus scroll.
 static inline uint64_t dp_sega_name_key(const uint8_t *vram,unsigned name_base,unsigned bytes,unsigned stride,

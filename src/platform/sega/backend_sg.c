@@ -12,7 +12,17 @@ static int64_t rom_index(uint16_t a) {
     return a<machine.rom_size ? a : -1;
 }
 static void save(void *out) { memcpy(out,&machine,sizeof(machine)); }
-static void load(const void *in) { memcpy(&machine,in,sizeof(machine)); sg1000_palette_changed(); }
+static DpSegaWatch W;
+static uint16_t watch_buf[SG_OUT_WIDTH];
+static int watch_draw(void *u,unsigned y) { (void)u; (void)y; return 1; }
+static void watch_row(void *u,unsigned y,uint16_t *p) { (void)u; dp_sega_watch_row(&W,y,p,SG_OUT_WIDTH,SG_HEIGHT); }
+static void watch_frame(void *u) { (void)u; dp_sega_watch_frame(&W); }
+static void hook(void) {
+    if(!W.every) return;
+    machine.row_out=watch_buf; machine.draw_line=watch_draw; machine.row=watch_row; machine.frame=watch_frame;
+}
+static void watch(unsigned every,uint64_t *published) { W.every=every; W.published=published; hook(); }
+static void load(const void *in) { memcpy(&machine,in,sizeof(machine)); hook(); sg1000_palette_changed(); }
 static int32_t ram_index(uint16_t a) {
     if(a>=0xc000) return a&1023;
     if(a>=0x8000 && machine.cart_ram) return 8192+(a&(SG_CART_RAM_SIZE-1));
@@ -41,6 +51,6 @@ static int seed_window(uint16_t addr, unsigned bank) { (void)addr; (void)bank; r
 static uint64_t screen_key(void) { return dp_sega_name_key(machine.vram,(machine.vdp[2]&15u)<<10,768,1,0,0); }
 static const uint8_t *ram_view(size_t *n) { *n=sizeof(machine.ram); return machine.ram; }
 const DpSegaBackend *dp_sega_backend_sg(void) {
-    static const DpSegaBackend ops={init,cpu,sg1000_read,sg1000_write,in,out,advance,rom_index,sizeof(sg1000_t),save,load,ram_index,vdp_target,input,set_input,mapper,vdp_command,irq_sources,DP_SEGA_RAM_TAGS,8192,0xc1,0x80,0x81,NULL,NULL,NULL,NULL,seed_geometry,seed_window,NULL,NULL,NULL,screen_key,ram_view};
+    static const DpSegaBackend ops={init,cpu,sg1000_read,sg1000_write,in,out,advance,rom_index,sizeof(sg1000_t),save,load,ram_index,vdp_target,input,set_input,mapper,vdp_command,irq_sources,DP_SEGA_RAM_TAGS,8192,0xc1,0x80,0x81,NULL,NULL,NULL,NULL,seed_geometry,seed_window,NULL,NULL,NULL,screen_key,ram_view,watch};
     return &ops;
 }

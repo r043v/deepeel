@@ -2112,3 +2112,13 @@ profonde au format DPST (`platform` = `sms`/`gg`/`sg`/`msx`, blob = état machin
 + RAM cartouche, zlib). Blob propre à la machine m0boy de la plateforme, lisible
 par aucun émulateur tiers. Rapport : `state exported: deepest cell, N frames`.
 Reste : `--watch` / `--watch-dump` (O3).
+
+## 0.143.0 (SMS / GG / SG-1000 / MSX)
+
+`--watch [FPS]` et `--watch-dump FICHIER.ppm` (O3) sur le backend Sega : le
+rendu de lignes du VDP de la machine (SG/MSX : 160x192 ; GG : 160x144 ; SMS :
+160x192, fenêtre de la runtime) alimente le tampon d'images commun
+(`fbwatch`), affiché par la fenêtre SDL ou écrit en PPM. Le rendu n'est activé
+que sous `--watch` (il met à jour l'état des sprites) ; `--watch` force un seul
+travailleur. Rapport : `watch: N frames published`. Reste : J5/O3 hors
+Sega (GB), mode humain/`.sta`.
