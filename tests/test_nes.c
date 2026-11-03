@@ -161,6 +161,15 @@ static void test_explorer(void) {
     DpNesResults r;
     DpNesOptions o = dp_nes_options();
     o.max_steps = 2000;
+    {   // a queue of one slot: the fork waits aside, runs later, same coverage (§6)
+        DpNesResults rp;
+        DpNesOptions op = o;
+        op.queue_cap = 1;
+        CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &op, &rp), "tiny queue runs");
+        CHECK(rp.parked >= 1 && rp.parked_resumed == rp.parked && rp.parked_lost == 0, "parked then resumed");
+        CHECK(rp.flags[0x0005] && rp.flags[0x000A] && rp.forks >= 1, "both sides reached despite the queue wall");
+        dp_nes_results_free(&rp);
+    }
     CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &o, &r), "explore runs");
     CHECK(r.paths >= 2, "both branch sides explored: %llu paths", (unsigned long long)r.paths);
     CHECK(r.forks >= 1, "at least one fork");

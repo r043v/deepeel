@@ -93,12 +93,20 @@ static void fork_deferral(void) {
     CHECK(r.fork_deferred>0 && r.defer_pending==0 && (r.flags[0x103]&DP_SEGA_FORCED));
     dp_sega_results_free(&r);
     {   // a wall with deferred forks still waiting: they are spooled, not lost
+        // (the fixture usually resumes them in-run; the spooled == pending identity
+        // and the resumed coverage hold either way)
         char sp[]="/tmp/dp_sega_deferXXXXXX"; int fd=mkstemp(sp); CHECK(fd>=0); if(fd>=0) close(fd);
         o.spool_path=sp; o.max_total=3;
         int ok=dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r);
         CHECK(ok);
-        if(ok) { CHECK(r.defer_pending==0 || r.defer_spooled==r.defer_pending); dp_sega_results_free(&r); }
-        o.spool_path=NULL; o.max_total=100000;
+        uint64_t spooled=0;
+        if(ok) { CHECK(r.defer_spooled==r.defer_pending); spooled=r.defer_spooled; dp_sega_results_free(&r); }
+        // --resume replays the spooled deferrals: the forced side is reached
+        o.resume=1; o.max_total=100000;
+        ok=dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r);
+        CHECK(ok);
+        if(ok) { CHECK(r.flags[0x103]&DP_SEGA_FORCED); dp_sega_results_free(&r); }
+        o.resume=0; o.spool_path=NULL;
         unlink(sp);
     }
     free(rom);

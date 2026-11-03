@@ -85,6 +85,26 @@ static void test_explore(const uint8_t *rom) {
     CHECK(r->exec_outside == 0, "no execution outside ROM");
     dp_pce_results_free(r);
     free(r);
+    {   // a one-slot queue and two successive branches: the second fork waits
+        // aside, runs later, and the coverage is unchanged (§6)
+        uint8_t *rom2 = malloc(ROM_SIZE);
+        memcpy(rom2, rom, ROM_SIZE);
+        static const uint8_t tail[] = { 0xAD, 0x00, 0x20, 0xD0, 0x02, 0xEA, 0xEA, 0x80, 0xFE };
+        memcpy(rom2 + 0x23, tail, sizeof tail);
+        DpPceOptions op = o;
+        op.queue_cap = 1;
+        DpPceResults *rp = calloc(1, sizeof *rp);
+        CHECK(dp_pce_explore(rom2, ROM_SIZE, &op, rp), "tiny queue explore");
+        if (rp->flags) {
+            CHECK(rp->parked >= 1 && rp->parked_resumed == rp->parked && rp->parked_lost == 0, "parked then resumed");
+            CHECK(rp->flags[0x13] & DP_PCE_NATURAL, "natural side kept");
+            CHECK(rp->flags[0x18] & DP_PCE_FORCED, "forced side reached despite the queue wall");
+            CHECK(rp->flags[0x28] & DP_PCE_FORCED, "second fork's side reached");
+        }
+        dp_pce_results_free(rp);
+        free(rp);
+        free(rom2);
+    }
 }
 
 int main(void) {

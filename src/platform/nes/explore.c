@@ -348,7 +348,7 @@ static int queue_push(DpNesRun *x, const DpNesPathState *s) {
 }
 
 // exact-state dedup: the snapshot hash (volatile clocks excluded)
-// returns 1 when the state was queued
+// returns 1 when the state was queued, 2 when parked (queue full), 0 when not kept
 static int snap_push(DpNesRun *x, DpNesPathState *s) {
     uint64_t h = dp_nesmach_state_hash(s->state);
     if (!dp_set_insert(&x->seen, h)) { x->r->evicted++; free(s->state); return 0; }
@@ -360,7 +360,7 @@ static int snap_push(DpNesRun *x, DpNesPathState *s) {
                 DpNesPathState *g = realloc(x->park, nc * sizeof *g);
                 if (g) { x->park = g; x->park_cap = nc; }
             }
-            if (x->park_len < x->park_cap) { x->park[x->park_len++] = *s; x->r->parked++; return 0; }
+            if (x->park_len < x->park_cap) { x->park[x->park_len++] = *s; x->r->parked++; return 2; }
         }
         x->r->parked_lost++;
     }
