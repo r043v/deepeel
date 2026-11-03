@@ -605,6 +605,16 @@ def build_nes_pce(out):
         k[q:q + 2] = bytes([0x00, 0x80])
     with open(os.path.join(out, "fix_nes_ctx.nes"), "wb") as f:
         f.write(k)
+    # NES jam: a KIL opcode after a short run ends the path (the 6502 has no HALT)
+    q = bytearray(16 + 2 * 0x4000)
+    q[0:4] = b"NES\x1a"
+    q[4], q[5] = 2, 0
+    q[16:16 + 4] = bytes([0xA9, 0x01, 0x02, 0xEA])
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        o2 = 16 + 0x4000 + 0x3FFA + (v - 0xFFFA)
+        q[o2:o2 + 2] = bytes([0x00, 0x80])
+    with open(os.path.join(out, "fix_nes_jam.nes"), "wb") as f:
+        f.write(q)
     # NES static closure: jsr $8020 whose subroutine a 2-step budget never reaches
     n = bytearray(16 + 2 * 0x4000 + 0x2000)
     n[0:4] = b"NES\x1a"

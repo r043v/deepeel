@@ -1550,3 +1550,10 @@ l'arbre. Désactivée par défaut. Ce n'est pas l'éviction GB : il n'y a pas de
 liveness par section, donc un chemin dépendant de la RAM peut être coupé à
 tort — d'où l'option explicite. Fixture `fix_nes_ctx.nes` (boucle qui ne
 varie que par la RAM), test `nes_ctx_cap`.
+
+## 0.99.1
+
+NES : D14 pinglé. Le 6502 n'a pas d'instruction HALT ; son équivalent est le
+jam (famille KIL), qui verrouille le CPU. L'explorateur y clôt le chemin et le
+compte (`faults`). Fixture `fix_nes_jam.nes` (`LDA #1 ; KIL`) : 2 pas, 1 faute,
+test `nes_jam`. Avec la glissade de padding (0.89.0), la cellule D14 NES passe ✅.

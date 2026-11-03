@@ -11,11 +11,11 @@ remesure pas l'outil.
 | GB | 34 | 1 | 3 | 1 |
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
-| NES | 11 | 21 | 5 | 2 |
+| NES | 12 | 20 | 5 | 2 |
 | PCE | 15 | 7 | 16 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 93.
+Cellules ouvertes (◐ ou ✗) : 92.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -33,7 +33,6 @@ Cellules ouvertes (◐ ou ✗) : 93.
 | D13 | Coupes de non-sens | NES | ◐ illégal |
 | D13 | Coupes de non-sens | PCE | ◐ illégal |
 | D13 | Coupes de non-sens | MD | ◐ faute |
-| D14 | Chien de garde HALT, glissade de padding | NES | ◐ glissade $00/$FF, pas de HALT |
 | D14 | Chien de garde HALT, glissade de padding | PCE | ✗ |
 | D14 | Chien de garde HALT, glissade de padding | MD | ✗ |
 | S1 | Scan padding + tables de pointeurs | NES | ◐ padding + tables, sans pointeurs ROM→ROM hors fenêtre |
