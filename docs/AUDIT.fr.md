@@ -12,7 +12,7 @@ remesure pas l'outil.
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 20 | 5 | 2 |
-| PCE | 16 | 18 | 4 | 1 |
+| PCE | 16 | 19 | 3 | 1 |
 | MD | 8 | 16 | 14 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
@@ -61,7 +61,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | G1 | Graines reset/RST/IRQ | PCE | ◐ reset |
 | G1 | Graines reset/RST/IRQ | MD | ◐ reset |
 | G2 | Scan de dispatch par vues de banques | NES | ◐ UxROM, banque fixe (`--bank-dispatch`) |
-| G2 | Scan de dispatch par vues de banques | PCE | ✗ |
+| G2 | Scan de dispatch par vues de banques | PCE | ◐ tables de mots par fenêtre, vues de pages (`--bank-dispatch`) |
 | G2 | Scan de dispatch par vues de banques | MD | ✗ |
 | G3 | `--seed-banks`, `--entry` | PCE | ◐ `--entry ADDR` (mapping de mise sous tension) ; pas de `--seed-banks` ni de vue de banque |
 | G3 | `--seed-banks`, `--entry` | MD | ◐ `--entry ADDR` (ROM, pair) ; pas de `--seed-banks` ni de vue de banque |

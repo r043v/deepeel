@@ -1749,3 +1749,15 @@ des graines, 256 au total (`second pass: N seeds, N refused, N capped`). Test
 `md_second_pass` (`fix_md_fork_fault` : 1 graine, 14 → 3584 octets exécutés,
 la graine glisse dans le padding nul : c'est là que `--cut-padding` sert).
 Reste ◐ : pas de semis depuis les tables (G2 MD) ni les cibles indirectes.
+
+## 0.116.0
+
+PCE : dispatch par vues de pages (G2, partielle). `--bank-dispatch` : une suite
+d'au moins 3 mots alignés (≥ 3 distincts) dont les trois bits hauts désignent
+une même fenêtre CPU est une table candidate ; chaque cible est entrée sous
+chaque page ROM où 6 instructions se décodent sans opcode indéfini ni suite de
+8 octets identiques, puis semée comme chemin forcé (plafond de 256 graines
+partagé avec `--second-pass`). Rapport : `bank dispatch: N tables, N seeds, N
+refused views`. Test `pce_bank_dispatch` (`fix_pce_disp` : 1 table, 3 graines,
+3 vues refusées). Reste ◐ : le mapping des autres fenêtres est celui de la mise
+sous tension, tables en pile/zéro-page non lues.
