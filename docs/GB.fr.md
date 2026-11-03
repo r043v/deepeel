@@ -1392,3 +1392,15 @@ saturations sont comptées (`cap hits`). Rapport : `static closure: N bytes
 from M roots, cap hits K`. Limites : pas de suivi de constantes (S3), pas de
 tables de sauts (S4), les cibles inter-banques UxROM dépendent du mapping
 final. Fixture `fix_nes_static.nes`, test `nes_static`.
+
+## 0.86.0
+
+NES : tables de pointeurs / de sauts (S1/S4, partielles). Autour d'une cellule
+lue comme donnée, une suite d'au moins 2 mots 16 bits alignés dont chacun
+pointe sur une instruction exécutée par un chemin est une table (classe
+`table`, inférence, 256 entrées max par table). Résolution d'un mot : NROM
+linéaire ; UxROM `$C000+` dans la banque fixe, `$8000–$BFFF` dans la banque de
+la table ; autres cartes ignorées. Les cibles non exécutées ne sont pas
+retenues (ancrage sur l'observé), donc une table dont les cibles n'ont jamais
+tourné n'est pas vue. Rapport : `pointer tables: N tables, M bytes`. Fixture
+`fix_nes_table.nes`, test `nes_table`.

@@ -635,6 +635,7 @@ DpNesOptions dp_nes_options(void) {
 
 static void infer_gaps(DpNesRun *x);
 static void static_closure(DpNesRun *x);
+static void table_scan(DpNesRun *x);
 
 void dp_nes_results_free(DpNesResults *r) {
     if (!r) return;
@@ -817,6 +818,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     }
     free(x.park);
     if (!x.failed) static_closure(&x);
+    if (!x.failed) table_scan(&x);
     if (!x.failed) infer_gaps(&x);
     free(x.ipc);
     free(x.istart);
@@ -897,6 +899,56 @@ static void static_closure(DpNesRun *x) {
     free(seen); free(work); free(wpc);
 }
 
+// --- pointer tables ----------------------------------------------------------------
+//
+// A run of >= 2 aligned little-endian words, each pointing at an instruction
+// that a path executed, around a cell the program read as data, is a jump /
+// pointer table.  Resolution of a word to a PRG cell: NROM linearly, UxROM
+// with $C000+ in the fixed bank and $8000-$BFFF in the table's own bank;
+// other boards are skipped.  Tables are inferences (class `table`), bounded to
+// 256 entries each.
+static int64_t table_target(const DpNesRun *x, size_t a, unsigned v) {
+    size_t n = x->r->prg_size;
+    unsigned mp = dp_nesmach_mapper(x->m);
+    if (v < 0x8000u) return -1;
+    if (mp == 0) return n == 0x4000 ? (int64_t)(v & 0x3FFFu) : (int64_t)(v - 0x8000u);
+    if (mp == 2) return v >= 0xC000u ? (int64_t)(n - 0x4000 + (v & 0x3FFFu)) : (int64_t)((a & ~(size_t)0x3FFF) + (v & 0x3FFFu));
+    return -1;
+}
+
+static int table_word(const DpNesRun *x, const uint8_t *rom, size_t a) {
+    size_t n = x->r->prg_size;
+    if (a + 1 >= n) return 0;
+    int64_t t = table_target(x, a, (unsigned)(rom[a] | rom[a + 1] << 8));
+    return t >= 0 && (size_t)t < n && x->istart[t] && (x->r->flags[t] & (DP_NES_NATURAL | DP_NES_FORCED));
+}
+
+static void table_scan(DpNesRun *x) {
+    DpNesResults *r = x->r;
+    const uint8_t *rom = dp_nesmach_prg_rom(x->m);
+    size_t n = r->prg_size;
+    if (!rom || !n || !x->istart) return;
+    if (!r->inferred) r->inferred = calloc(n, 1);
+    if (!r->inferred) return;
+    for (size_t i = 0; i < n; i++) {
+        if (!(r->flags[i] & DP_NES_DATA) || (r->flags[i] & (DP_NES_NATURAL | DP_NES_FORCED))) continue;
+        for (unsigned al = 0; al < 2; al++) {
+            if (i < al) continue;
+            size_t a = i - al;
+            if (!table_word(x, rom, a) || r->inferred[a] == DP_NMAP_TABLE) continue;
+            size_t lo = a, hi = a;
+            while (lo >= 2 && (a - lo) / 2 < 256 && table_word(x, rom, lo - 2)) lo -= 2;
+            while ((hi - a) / 2 < 256 && table_word(x, rom, hi + 2)) hi += 2;
+            if ((hi - lo) / 2 + 1 < 2) continue;
+            for (size_t k = lo; k < hi + 2; k++) {
+                if (r->flags[k] & (DP_NES_NATURAL | DP_NES_FORCED)) continue;
+                if (r->inferred[k] != DP_NMAP_TABLE) { r->inferred[k] = DP_NMAP_TABLE; r->table_bytes++; }
+            }
+            r->table_count++;
+        }
+    }
+}
+
 // --- padding and gap inference (static, over the classified map) ---------------
 
 static int nes_cls_code(uint8_t f) { return (f & (DP_NES_NATURAL | DP_NES_FORCED)) != 0; }
@@ -910,7 +962,7 @@ static void infer_gaps(DpNesRun *x) {
     const uint8_t *rom = dp_nesmach_prg_rom(x->m);
     size_t n = r->prg_size;
     if (!rom || !n) return;
-    r->inferred = calloc(n, 1);
+    if (!r->inferred) r->inferred = calloc(n, 1);
     if (!r->inferred) return;
     for (size_t i = 0; i < n;) {
         size_t j = i;
@@ -923,9 +975,9 @@ static void infer_gaps(DpNesRun *x) {
         i = j > i ? j : i + 1;
     }
     for (size_t i = 0; i < n;) {
-        if (r->flags[i]) { i++; continue; }
+        if (r->flags[i] || r->inferred[i]) { i++; continue; }
         size_t j = i;
-        while (j < n && !r->flags[j]) j++;
+        while (j < n && !r->flags[j] && !r->inferred[j]) j++;
         size_t len = j - i;
         uint8_t lf = i ? r->flags[i - 1] : 0, rf = j < n ? r->flags[j] : 0, c = 0;
         if (len <= 3 && nes_cls_code(lf) && nes_cls_code(rf)) c = DP_NMAP_INF_CODE;
@@ -955,6 +1007,7 @@ uint8_t *dp_nes_map_build(const DpNesResults *r) {
         else if ((f & (DP_NES_NATURAL | DP_NES_FORCED)) && (f & DP_NES_DATA)) cls = DP_NMAP_CODE_STATIC;
         else if (f & DP_NES_FORCED) cls = DP_NMAP_CODE_FORCED;
         else if (f & DP_NES_NATURAL) cls = DP_NMAP_CODE_NAT;
+        else if (r->inferred && r->inferred[i] == DP_NMAP_TABLE && !(f & (DP_NES_NATURAL | DP_NES_FORCED))) cls = DP_NMAP_TABLE;
         else if (f & DP_NES_DATA) cls = DP_NMAP_DATA_READ;
         else if (f & DP_NES_PAD) cls = DP_NMAP_PAD;
         else if (r->inferred && r->inferred[i]) cls = r->inferred[i];
@@ -1008,6 +1061,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->parked_resumed, (unsigned long long)r->parked_lost);
     fprintf(out, "  pending paths dropped at the wall %llu\n",
         (unsigned long long)r->pending_dropped);
+    fprintf(out, "  pointer tables: %llu tables, %llu bytes (inferred)\n", (unsigned long long)r->table_count, (unsigned long long)r->table_bytes);
     fprintf(out, "  static closure: %llu bytes from %llu roots, cap hits %llu\n", (unsigned long long)r->static_bytes, (unsigned long long)r->static_roots, (unsigned long long)r->static_cap_hits);
     fprintf(out, "  padding %llu bytes; inferred code %llu data %llu padding %llu\n", (unsigned long long)r->padding_bytes, (unsigned long long)r->inferred_code, (unsigned long long)r->inferred_data, (unsigned long long)r->inferred_pad);
     fprintf(out, "  cpu loop copy bytes %llu\n", (unsigned long long)r->cpu_copy_bytes);

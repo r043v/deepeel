@@ -11,7 +11,7 @@ remesure pas l'outil.
 | GB | 34 | 1 | 3 | 1 |
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
-| NES | 8 | 13 | 16 | 2 |
+| NES | 8 | 14 | 15 | 2 |
 | PCE | 15 | 7 | 16 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
@@ -37,7 +37,7 @@ Cellules ouvertes (◐ ou ✗) : 96.
 | D14 | Chien de garde HALT, glissade de padding | NES | ✗ |
 | D14 | Chien de garde HALT, glissade de padding | PCE | ✗ |
 | D14 | Chien de garde HALT, glissade de padding | MD | ✗ |
-| S1 | Scan padding + tables de pointeurs | NES | ◐ padding, sans tables |
+| S1 | Scan padding + tables de pointeurs | NES | ◐ padding + tables, sans pointeurs ROM→ROM hors fenêtre |
 | S1 | Scan padding + tables de pointeurs | MD | ✗ |
 | S2 | Fermeture statique de flot | NES | ◐ saut/appel/branche, fenêtre propre |
 | S2 | Fermeture statique de flot | PCE | ◐ fenêtre MPR |
@@ -47,7 +47,7 @@ Cellules ouvertes (◐ ou ✗) : 96.
 | S3 | Suivi de constantes / provenance | PCE | ✗ |
 | S3 | Suivi de constantes / provenance | MD | ◐ témoin An |
 | S4 | Tables de sauts depuis l'opérande | GB | ✗ |
-| S4 | Tables de sauts depuis l'opérande | NES | ✗ |
+| S4 | Tables de sauts depuis l'opérande | NES | ◐ tables de mots lues en données |
 | S4 | Tables de sauts depuis l'opérande | MD | ✗ |
 | S5 | Frères de copie | NES | ✗ |
 | S5 | Frères de copie | PCE | ✗ |

@@ -566,6 +566,23 @@ def build_nes_pce(out):
         n[q:q + 2] = bytes([0x00, 0x80])
     with open(os.path.join(out, "fix_nes_static.nes"), "wb") as f:
         f.write(n)
+    # NES pointer table: three executed subroutines, then the table of their
+    # addresses is read as data ($8100: $8040, $8050, $8060)
+    n = bytearray(16 + 2 * 0x4000 + 0x2000)
+    n[0:4] = b"NES\x1a"
+    n[4], n[5] = 2, 1
+    code = bytes([0x20, 0x40, 0x80, 0x20, 0x50, 0x80, 0x20, 0x60, 0x80,
+                  0xAD, 0x00, 0x81, 0xAD, 0x02, 0x81, 0xAD, 0x04, 0x81, 0x4C, 0x12, 0x80])
+    n[16:16 + len(code)] = code
+    for a in (0x40, 0x50, 0x60):
+        n[16 + a] = 0x60
+    for k, a in enumerate((0x40, 0x50, 0x60)):
+        n[16 + 0x100 + 2 * k:16 + 0x100 + 2 * k + 2] = bytes([a, 0x80])
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        q = 16 + 0x4000 + (v - 0xFFFA) + 0x3FFA
+        n[q:q + 2] = bytes([0x00, 0x80])
+    with open(os.path.join(out, "fix_nes_table.nes"), "wb") as f:
+        f.write(n)
     # NES UxROM (4 x 16 KiB PRG, CHR-RAM): the fixed bank spins at $C000; banks 0-2
     # hold code reachable only by an explicit entry or --seed-banks
     u = bytearray(16 + 4 * 0x4000)
