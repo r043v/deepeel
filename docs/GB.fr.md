@@ -1344,3 +1344,13 @@ les désactive. Limite : le runtime NES ne lit que la manette 0 (port 1 sans
 chemin de lecture), et les combinaisons de boutons ne sont pas sondées, donc
 D10 NES reste ◐. Fixture `fix_nes_pad.nes`, test `nes_pad_probe` (16 forks sur
 2 sites : strobe à 1 puis à 0).
+
+## 0.82.0
+
+NES : cibles indirectes observées (D12, partiel). Chaque `JMP ($xxxx)`
+exécuté lit sa cible sur le bus (alias de page 6502 compris) ; sites et
+couples (site, cible) distincts sont comptés, ensembles bornés à 65 536 couples
+avec un compteur de débordement. Rapport : `indirect jumps: N sites, M
+targets, overflow K`. Les cibles sont déjà exécutées par le chemin naturel ;
+il n'y a pas encore de second passage qui les sème depuis d'autres états, d'où
+◐. Fixture `fix_nes_ind.nes`, test `nes_indirect`.

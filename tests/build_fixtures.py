@@ -527,6 +527,18 @@ def build_nes_pce(out):
         n[q:q + 2] = bytes([0x00, 0x80])
     with open(os.path.join(out, "fix_nes_pad.nes"), "wb") as f:
         f.write(n)
+    # NES indirect jump: pointer in RAM -> $8010, jmp ($0200); target spins
+    n = bytearray(16 + 2 * 0x4000 + 0x2000)
+    n[0:4] = b"NES\x1a"
+    n[4], n[5] = 2, 1
+    code = bytes([0xA9, 0x10, 0x8D, 0x00, 0x02, 0xA9, 0x80, 0x8D, 0x01, 0x02, 0x6C, 0x00, 0x02])
+    n[16:16 + len(code)] = code
+    n[16 + 0x10:16 + 0x10 + 3] = bytes([0x4C, 0x10, 0x80])
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        q = 16 + 0x4000 + (v - 0xFFFA) + 0x3FFA
+        n[q:q + 2] = bytes([0x00, 0x80])
+    with open(os.path.join(out, "fix_nes_ind.nes"), "wb") as f:
+        f.write(n)
     # NES UxROM (4 x 16 KiB PRG, CHR-RAM): the fixed bank spins at $C000; banks 0-2
     # hold code reachable only by an explicit entry or --seed-banks
     u = bytearray(16 + 4 * 0x4000)

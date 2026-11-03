@@ -43,6 +43,7 @@ typedef struct {
     DpNesPathState *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
     DpLotFile *lot;                        // disk lot: park overflow, wall leftovers, --lot resume
     DpHashSet seen;                    // exact state dedup
+    DpHashSet ind_sites, ind_pairs;    // observed jmp (ind): sites and (site,target) pairs
     DpHashSet probe_seen;              // strobe-write sites already probed
     DpNesLoop *loops;                  // back-branch counters
     size_t loop_len, loop_cap;
@@ -241,6 +242,22 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
                 r->loop_cuts++;
                 nes_trace.stop = 1;
                 return;
+            }
+        }
+    }
+
+    // observed indirect jumps: jmp ($xxxx) reads its target from the live bus
+    // (with the 6502 page-wrap alias); sites and distinct targets are counted,
+    // the sets are bounded and an overflow is reported
+    if (in.flow == DP_M6502_INDIRECT && in.length == 3) {
+        int64_t site = dp_nesmach_rom_index(x->m, pc);
+        unsigned ptr = bytes[1] | (bytes[2] << 8);
+        unsigned tgt = dp_nesmach_read(x->m, ptr) | (dp_nesmach_read(x->m, (ptr & 0xFF00u) | ((ptr + 1) & 0xFFu)) << 8);
+        if (site >= 0) {
+            if (x->ind_pairs.cnt >= 65536) r->indirect_overflow++;
+            else {
+                if (dp_set_insert(&x->ind_sites, (uint64_t)site + 1) > 0) r->indirect_sites++;
+                if (dp_set_insert(&x->ind_pairs, ((uint64_t)(site + 1) << 16) | tgt) > 0) r->indirect_targets++;
             }
         }
     }
@@ -668,6 +685,8 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     x.fork_sites = calloc(x.fork_sites_len ? x.fork_sites_len : 1, sizeof(uint32_t));
     dp_set_init(&x.seen, 1 << 22);
     dp_set_init(&x.probe_seen, 1 << 10);
+    dp_set_init(&x.ind_sites, 1 << 10);
+    dp_set_init(&x.ind_pairs, 1 << 12);
     if (!x.queue || !x.fork_sites) x.failed = 1;
     hooks_install(&x);
 
@@ -773,6 +792,8 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     free(x.ring);
     dp_set_free(&x.seen);
     dp_set_free(&x.probe_seen);
+    dp_set_free(&x.ind_sites);
+    dp_set_free(&x.ind_pairs);
     int ok = !x.failed;
     dp_nesmach_close(x.m);
     return ok;
@@ -842,6 +863,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->parked_resumed, (unsigned long long)r->parked_lost);
     fprintf(out, "  pending paths dropped at the wall %llu\n",
         (unsigned long long)r->pending_dropped);
+    fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  pad probes: %llu forks at %llu sites, refused %llu\n", (unsigned long long)r->pad_probes, (unsigned long long)r->pad_probe_sites, (unsigned long long)r->pad_probe_refused);
     fprintf(out, "  entries: seeded %llu refused %llu\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  seeds: reset %llu irq %llu bank %llu play %llu refused %llu\n",

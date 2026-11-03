@@ -11,7 +11,7 @@ remesure pas l'outil.
 | GB | 34 | 1 | 3 | 1 |
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
-| NES | 8 | 8 | 21 | 2 |
+| NES | 8 | 9 | 20 | 2 |
 | PCE | 15 | 7 | 16 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
@@ -28,7 +28,7 @@ Cellules ouvertes (◐ ou ✗) : 96.
 | D4 | Copies par boucle CPU | NES | ✗ |
 | D10 | Sondes de lecture manette | NES | ◐ 8 boutons, port 1 absent |
 | D10 | Sondes de lecture manette | MD | ◐ 4 |
-| D12 | Cibles indirectes observées | NES | ✗ |
+| D12 | Cibles indirectes observées | NES | ◐ observé, sans second passage |
 | D12 | Cibles indirectes observées | PCE | ✗ |
 | D12 | Cibles indirectes observées | MD | ✗ |
 | D13 | Coupes de non-sens | NES | ◐ illégal |
