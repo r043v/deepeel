@@ -1713,3 +1713,14 @@ chemin qui l'a produit, clos en `done`, `spooled` (lot disque) ou `budget`
 (restant à l'arrêt). Rapport : `choice tree: N nodes`. Test `md_tree` (dbcc :
 2 forks, 3 nœuds). Reste ◐ : site de branchement non renseigné, pas de reprise
 depuis le fichier, états repris du lot sans nœud.
+
+## 0.113.0
+
+MD : éviction par contexte grossier (C2, partielle). `--ctx-cap N` : le
+contexte d'un état poussé est (pc, D0–D7, A0–A7, SR, genre d'IRQ), RAM exclue ;
+la k-ième admission d'un contexte est la clé `hash(ctx, k)` d'un `DpHashSet`, et
+au-delà de N l'état est clos et compté (`context eviction: N states closed`).
+Désactivée par défaut. Le compteur peut compter plusieurs fois la même
+tentative de pad-fork rejouée sur un site de boucle (bornée par le budget de
+pas). Test `md_ctx_cap` (`fix_md_pad` : 5 chemins sans cap, 2 avec cap 1).
+Reste ◐ : pas de liveness par section.

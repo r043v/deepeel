@@ -74,6 +74,7 @@ typedef struct {
     int z80_last_valid;
     uint32_t zfetch_lo, zfetch_hi;      /* ROM range of the instruction being fetched */
     uint8_t z80_bank_seen[128];         /* bitmap of 32 KiB banks (4 MiB / 32 KiB) */
+    DpHashSet ctx_seen;     // --ctx-cap: admissions per coarse context
     DpTree tree;            // --tree: every pushed state is a choice
     uint32_t cur_choice;
     DpHashSet ind_sites, ind_pairs;   // observed indirect jmp/jsr (D12)
@@ -129,6 +130,19 @@ static void spill_flush(X *x) {
 static int push(X *x, uint32_t pc, int vint, int hint) {
     int full = 0;
     spill_flush(x);
+    if (x->o->ctx_cap) {
+        // coarse same-context eviction: pc, D0-D7, A0-A7, SR and the interrupt kind; RAM
+        // excluded.  The k-th admission of a context is the key hash(ctx, k); past
+        // ctx_cap the state is closed and counted
+        uint64_t h = 0xcbf29ce484222325ull;
+        uint32_t raw[20];
+        raw[0] = pc; raw[1] = dp_mdmach_sr(x->m) | (uint32_t)vint << 16 | (uint32_t)hint << 17;
+        for (unsigned i = 0; i < 8; i++) { raw[2 + i] = dp_mdmach_dn(x->m, i); raw[10 + i] = dp_mdmach_an(x->m, i); }
+        for (unsigned i = 0; i < 18; i++) h = (h ^ raw[i]) * 0x100000001b3ull;
+        unsigned k = 0;
+        while (k < x->o->ctx_cap && dp_set_insert(&x->ctx_seen, (h ^ (k * 0x9E3779B97F4A7C15ull)) | 1) == 0) k++;
+        if (k >= x->o->ctx_cap) { x->r->ctx_evicted++; return 0; }
+    }
     if (x->nq >= x->qcap) {
         uint32_t limit = x->o->queue_max > x->qcap ? x->o->queue_max : x->qcap;
         uint32_t ncap = x->qcap > limit / 2 ? limit : x->qcap * 2;
@@ -547,6 +561,7 @@ void dp_md_options_default(DpMdOptions *o) {
     o->lot_drain = 0;
     o->entry_count = 0;
     o->pad_cut = 0;
+    o->ctx_cap = 0;
     o->tree_path = NULL;
 }
 
@@ -709,6 +724,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     x.gen = calloc(c->size / 2 + 1, sizeof *x.gen);
     x.vis = calloc(c->size / 2 + 1, sizeof *x.vis);
     dp_tree_init(&x.tree);
+    dp_set_init(&x.ctx_seen, 1 << 10);
     dp_set_init(&x.ind_sites, 1 << 8);
     dp_set_init(&x.ind_pairs, 1 << 10);
     x.site = calloc(c->size / 2 + 1, sizeof *x.site);
@@ -777,6 +793,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         dp_tree_save(&x.tree, o->tree_path);
     }
     dp_tree_free(&x.tree);
+    dp_set_free(&x.ctx_seen);
     for (uint32_t i = 0; i < x.nq; i++) {
         if (!lot_spill(&x, &x.q[i])) r->dropped_pending++;
         free(x.q[i].state);
@@ -899,6 +916,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     fprintf(out, "  queue growths: %llu (initial %u, ceiling %u)\n", (unsigned long long)r->queue_growths,
             o->queue_cap, o->queue_max > o->queue_cap ? o->queue_max : o->queue_cap);
     if (r->tree_nodes) fprintf(out, "  choice tree: %llu nodes\n", (unsigned long long)r->tree_nodes);
+    if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/SR context past the cap)\n", (unsigned long long)r->ctx_evicted);
     fprintf(out, "  copy siblings: %llu tables, %llu entries, %llu bytes, %llu table caps\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_entries, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_caps);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);

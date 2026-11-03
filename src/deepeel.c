@@ -1368,6 +1368,7 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--lot")) o.lot_path = argv[++i];
             else if (!strcmp(a, "--lot-drain")) o.lot_drain = 1;
             else if (!strcmp(a, "--cut-padding")) o.pad_cut = 1;
+            else if (!strcmp(a, "--ctx-cap") && i + 1 < argc) o.ctx_cap = (unsigned)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--tree") && i + 1 < argc) o.tree_path = argv[++i];
             else if (!strcmp(a, "--entry")) {
                 if (o.entry_count >= 16) { fprintf(stderr, "deepeel: at most 16 --entry\n"); rc = 2; break; }
