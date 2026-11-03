@@ -51,6 +51,7 @@ typedef struct {
     size_t fork_sites_len;
     uint64_t total_steps, path_steps, paths_opened;
     unsigned cur_pc, cur_len;          // current instruction's fetch window
+    int64_t last_read_cell; uint64_t last_read_step; // newest PRG data read (CPU-loop copy source)
     int was_outside;                   // previous step ran outside PRG
     // play/TAS session state (the on_frame hook drives it)
     int play_mode;                     // 0: fork exploration, 1: play/TAS
@@ -313,6 +314,7 @@ static void hook_read(void *user, unsigned addr) {
         if (cell >= 0) {
             x->r->data_reads++;
             if (!x->r->flags[cell]) x->r->flags[cell] = DP_NES_DATA;
+            x->last_read_cell = cell; x->last_read_step = x->total_steps;
         }
     }
 }
@@ -333,6 +335,22 @@ static void hook_write(void *user, unsigned addr, unsigned value) {
         r->io_writes++;
         unsigned idx = (addr - 0x2000) & 0x3F;
         r->io_writes_io_reg[idx < 32 ? idx : 31]++;
+        if (addr == 0x2007 && x->last_read_cell >= 0 && x->total_steps - x->last_read_step <= 4) {
+            // CPU loop copy: a PRG data read right before a PPUDATA write.  A
+            // run at the same pc whose source continues is one record.
+            uint32_t src = (uint32_t)x->last_read_cell, dst = dp_nesmach_ppu_v(x->m);
+            DpNesCopy *l = r->copy_count ? &r->copies[r->copy_count - 1] : NULL;
+            if (l && l->channel == 3 && l->pc == (uint16_t)x->cur_pc && l->source + l->length == src) {
+                l->length++; l->last_step = x->total_steps; l->occurrences++;
+            } else {
+                record_copy(x, 0, x->total_steps, (uint16_t)x->cur_pc, src, dst, 3);
+                if (r->copy_count && r->copies[r->copy_count - 1].channel == 3 &&
+                    r->copies[r->copy_count - 1].source == src) r->copies[r->copy_count - 1].length = 1;
+            }
+            r->flags[x->last_read_cell] |= DP_NES_COPIED;
+            r->cpu_copy_bytes++;
+            x->last_read_cell = -1;
+        }
         if (addr == 0x4014) {
             // OAM DMA: a full page lands in OAM; pages at or above $80 read PRG
             uint32_t src_page = value << 8;
@@ -636,6 +654,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                    const DpNesOptions *options, DpNesResults *results) {
     DpNesRun x;
     memset(&x, 0, sizeof(x));
+    x.last_read_cell = -1;
     if (!data || !results) return 0;
     char err[256];
     x.m = dp_nesmach_open(data, size, mapper, err, sizeof err);
@@ -863,6 +882,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->parked_resumed, (unsigned long long)r->parked_lost);
     fprintf(out, "  pending paths dropped at the wall %llu\n",
         (unsigned long long)r->pending_dropped);
+    fprintf(out, "  cpu loop copy bytes %llu\n", (unsigned long long)r->cpu_copy_bytes);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  pad probes: %llu forks at %llu sites, refused %llu\n", (unsigned long long)r->pad_probes, (unsigned long long)r->pad_probe_sites, (unsigned long long)r->pad_probe_refused);
     fprintf(out, "  entries: seeded %llu refused %llu\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
@@ -889,9 +909,11 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->copy_overflow);
     for (unsigned i = 0; i < r->copy_count; i++) {
         const DpNesCopy *c = &r->copies[i];
-        fprintf(out, "   ch%u src $%08X dst $%08X pc $%04X step %llu\n",
+        fprintf(out, "   ch%u src $%08X dst $%08X pc $%04X step %llu",
             c->channel, c->source, c->destination, c->pc,
             (unsigned long long)c->first_step);
+        if (c->channel == 3) fprintf(out, " len %u", c->length);
+        fputc('\n', out);
     }
     fprintf(out, "  banks %u (overflow %llu):\n", r->bank_count,
         (unsigned long long)r->bank_overflow);

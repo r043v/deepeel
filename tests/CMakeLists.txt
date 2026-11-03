@@ -166,6 +166,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_uxrom.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_pad.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ind.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_cpucopy.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.gg
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sg
@@ -271,3 +272,5 @@ add_test(NAME nes_pad_probe COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${
 set_tests_properties(nes_pad_probe PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_indirect COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ind.nes --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_ind.txt >/dev/null 2>&1; grep -q 'indirect jumps: 1 sites, 1 targets, overflow 0' ${CMAKE_CURRENT_BINARY_DIR}/nes_ind.txt")
 set_tests_properties(nes_indirect PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME nes_cpu_copy COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_cpucopy.nes --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_cc.txt >/dev/null 2>&1; grep -q 'ch3 src .* len 16' ${CMAKE_CURRENT_BINARY_DIR}/nes_cc.txt")
+set_tests_properties(nes_cpu_copy PROPERTIES FIXTURES_REQUIRED fixtures)

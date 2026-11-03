@@ -539,6 +539,20 @@ def build_nes_pce(out):
         n[q:q + 2] = bytes([0x00, 0x80])
     with open(os.path.join(out, "fix_nes_ind.nes"), "wb") as f:
         f.write(n)
+    # NES CPU-loop copy: $2006 <- $2000, then 16x (lda $8100,x / sta $2007 / inx)
+    n = bytearray(16 + 2 * 0x4000 + 0x2000)
+    n[0:4] = b"NES\x1a"
+    n[4], n[5] = 2, 1
+    code = bytes([0xA9, 0x20, 0x8D, 0x06, 0x20, 0xA9, 0x00, 0x8D, 0x06, 0x20, 0xA2, 0x00,
+                  0xBD, 0x00, 0x81, 0x8D, 0x07, 0x20, 0xE8, 0xE0, 0x10, 0xD0, 0xF5, 0x4C, 0x17, 0x80])
+    n[16:16 + len(code)] = code
+    for i in range(16):
+        n[16 + 0x100 + i] = 0x40 + i
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        q = 16 + 0x4000 + (v - 0xFFFA) + 0x3FFA
+        n[q:q + 2] = bytes([0x00, 0x80])
+    with open(os.path.join(out, "fix_nes_cpucopy.nes"), "wb") as f:
+        f.write(n)
     # NES UxROM (4 x 16 KiB PRG, CHR-RAM): the fixed bank spins at $C000; banks 0-2
     # hold code reachable only by an explicit entry or --seed-banks
     u = bytearray(16 + 4 * 0x4000)

@@ -1354,3 +1354,14 @@ avec un compteur de débordement. Rapport : `indirect jumps: N sites, M
 targets, overflow K`. Les cibles sont déjà exécutées par le chemin naturel ;
 il n'y a pas encore de second passage qui les sème depuis d'autres états, d'où
 ◐. Fixture `fix_nes_ind.nes`, test `nes_indirect`.
+
+## 0.83.0
+
+NES : copies par boucle CPU (D4, partiel). Une écriture `$2007` (PPUDATA)
+précédée, dans les 4 pas, d'une lecture de donnée PRG est une copie ROM→VRAM :
+les octets contigus du même `pc` sont fusionnés en un seul enregistrement
+(canal 3, champ `len`), les cellules source portent `DP_NES_COPIED`. Rapport :
+`cpu loop copy bytes N` et `ch3 src … len L`. Limites : la destination est
+l'adresse PPU au moment de l'écriture ; les boucles vers la RAM (WRAM/OAM par
+le CPU) et les sources RAM ne sont pas suivies, d'où ◐. Fixture
+`fix_nes_cpucopy.nes` (16 octets), test `nes_cpu_copy`.

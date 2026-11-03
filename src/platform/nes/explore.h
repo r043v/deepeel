@@ -46,7 +46,8 @@ typedef struct {
     uint64_t path, first_step, last_step, occurrences;
     uint32_t source, destination; // physical PRG/RAM cells; source is the page base
     uint16_t pc;
-    uint8_t channel;   // 1 = OAM DMA ($4014)
+    uint32_t length;   // bytes covered by a coalesced CPU loop copy (channel 3)
+    uint8_t channel;   // 1 = OAM DMA ($4014), 2 = DMC, 3 = CPU loop to PPUDATA ($2007)
     uint8_t verbatim;
 } DpNesCopy;
 
@@ -100,7 +101,7 @@ typedef struct {
     uint64_t forced_paths;
     uint64_t step_cuts, loop_cuts, fork_cuts, queue_cuts, global_cuts, path_cuts,
              faults, decode_cuts;
-    uint64_t indirect_sites, indirect_targets, indirect_overflow, pad_probes, pad_probe_sites, pad_probe_refused, entries_seeded, entries_refused, seeds_reset, seeds_irq, seeds_bank, seeds_refused_queue;
+    uint64_t cpu_copy_bytes, indirect_sites, indirect_targets, indirect_overflow, pad_probes, pad_probe_sites, pad_probe_refused, entries_seeded, entries_refused, seeds_reset, seeds_irq, seeds_bank, seeds_refused_queue;
     uint64_t play_frames_run, play_sessions_run, play_steps_accounted, seeds_play;
     uint64_t evicted;          // exact-state dedup admissions refused
     uint64_t lot_written, lot_read, lot_pending; // disk lot (--lot): spilled / read back / left on disk
