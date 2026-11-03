@@ -1,5 +1,5 @@
 // copies.c: ROM→VRAM/OAM copy-loop detection.
-// Hardware channels (OAM DMA, HDMA) produce records directly from the
+// Hardware channels (OAM DMA; HDMA once a CGB runtime exists) produce records directly from the
 // platform hooks; this tracker catches the CPU loops: a backward edge whose
 // body reads a ROM range and writes a VRAM range with drifting pointers.
 // While the ranges accumulate, it also hashes the bytes flowing through both

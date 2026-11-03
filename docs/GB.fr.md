@@ -120,15 +120,18 @@ matériels sont ceux de m0boy.
 
 ## Limites (documentées, pas cachées)
 
-- **Pas de PPU/APU/timer** : les registres marqués `event` (LY, STAT, TIMA,
-  DIV, PCM…) restent statiques. Le code qui attend LY ne sort pas de sa
-  boucle d'attente autrement que par les gardes ; les handlers d'IRQ sont
-  eux atteints par les graines de vecteurs et les forks d'IRQ. C'est le
-  compromis assumé : la carte cherchée est celle de la ROM, pas le timing.
+- **Registres événementiels** : la machine est celle de m0boy (PPU, APU et
+  timer réels), mais les fourches ne portent pas sur les valeurs de LY,
+  STAT, DIV ou TIMA : une boucle d'attente sort au rythme de la machine
+  concrète, pas sur chaque valeur possible. Les handlers d'IRQ sont atteints
+  par les graines de vecteurs (semées comme forcées depuis J0) et les forks
+  d'IRQ.
 - **RAM initiale à zéro**, registres au reset DMG ($01B0…) — l'exploration
   est déterministe ; deux exécutions donnent la même carte.
-- **SVBK** (banques WRAM CGB) stocké mais une seule banque simulée ; VBK est
-  lui réellement commuté (2 banques VRAM).
+- **CGB non modélisé** : le runtime m0boy GB est DMG — une seule banque VRAM,
+  pas de HDMA, une seule banque WRAM. VBK, SVBK et HDMA1-5 figurent au
+  registre pour mémoire, sans le drapeau `modelled` (corrigé en J0 : ils
+  étaient annoncés modélisés).
 - RTC MBC3 : sélecteur journalisé, horloge non simulée.
 - L'exploration est un superset du jeu réel : les chemins forcés explorent
   des cas qu'aucune partie ne produit (c'est le but — la nécessité par
@@ -694,3 +697,39 @@ l'ancien format, qui ne portait qu'une image par cellules de 64 octets et le
 `.map` (image + carte : 26 Ko au lieu de 155 Ko) ; l'ensemble chaud tient en
 23 zones, 7 241 octets (moteur en banque 0, banque 3). Observations de
 l'outil, pas des mesures de matériel.
+
+## Correctifs J0 (0.29.0)
+
+Les correctifs relevés par la norme (`docs/COUVERTURE.fr.md` §10.12) :
+
+- **Reprise du spool** : le curseur de lecture est sauvé à côté du spool
+  (`spool.bin.rd`). Un `--resume` relit maintenant tous les enregistrements
+  encore non lus ; avant, il repartait du bout du fichier et ne relisait
+  rien. Sans annexe valide, la relecture repart du début et le signale sur
+  stderr. `--resume` sans spool crée le spool au lieu d'échouer.
+- **Table de fourches pleine** : quand la table des compteurs par site est
+  pleine, la fourche est refusée et comptée. Nouveau compteur
+  `forks_table_full` dans le texte et le JSON, inclus dans `forks_capped`.
+  Avant, une table pleine levait le plafond par site.
+- **`--max-paths`** : l'état qui atteint le mur reste en file au lieu d'être
+  libéré, et il est compté dans `budget_paths`.
+- **Contexte VRAM** : le hash de contexte ne lit plus que la banque VRAM
+  réelle du runtime DMG.
+- **Provenance** : les cibles de saut sont ramenées sur la banque de leur
+  fenêtre. Une cible au-delà de $8000, ou dans une banque inconnue, est
+  comptée `prov_unresolved` au lieu d'être indexée de travers. Le budget de
+  pas est désormais par appel, et non plus cumulé sur les rondes.
+- **Options** : `--no-provenance` et `--no-siblings` coupent chacune leur
+  passe. `--no-closure` ne coupe plus que la fermeture.
+- **Graines d'IRQ** : les vecteurs RST et IRQ sont semés comme forcés, et non
+  plus comme flux naturel.
+- **Registre** : VBK, SVBK et HDMA1-5 ne sont plus marqués `modelled`. Le
+  runtime est DMG (voir §Limites).
+- **Autres plateformes**, même jalon :
+  - Sega : `tree.bin` passe en version 2 et porte enfin le nombre de nœuds,
+    que la version 1 écrasait ; `--resume` sans spool démarre à neuf ;
+    `seeds_refused_cap` ne compte plus les doublons.
+  - NES : un site de fourche n'use son budget que si l'état a bien été mis en
+    file. Nouveau compteur `pending dropped` pour les états restés en file au
+    mur. Les champs d'options morts `seed_banks` et `entry_*` sont retirés.
+  - PCE : nouveau compteur `pending dropped`, sur le même principe.

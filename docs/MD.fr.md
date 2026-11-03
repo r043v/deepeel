@@ -183,9 +183,10 @@ Codes du cœur actuel : 1 accès bus
 inconnu, 2 opérande invalide, 3 accès mot impair, 4 opération VDP non prise en
 charge, 6 limite interne d'instructions.
 
-Pas de sondes de manette, pas de fermeture statique (`jmp (An)`, tables de
-sauts), Z80 du MD non exploré,
-pas de GUI/sessions/TAS, validation DMA en direct non vérifiée.
+Sondes de manette limitées à quatre combinaisons sur la manette 1 (voir
+plus haut), pas de fermeture statique (`jmp (An)`, tables de sauts), Z80 du
+MD non exploré, pas de GUI ni de sessions jouées ; TAS limité aux films GMV
+(pas de BK2) ; validation DMA en direct non vérifiée.
 
 ## Modifications côté m0boy
 

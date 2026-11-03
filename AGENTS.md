@@ -4,7 +4,9 @@ deepeel découvre la memory map des ROMs : registre matériel par plateforme,
 exploration autonome à fourches (les deux issues de chaque conditionnel, forks
 d'IRQ), tout consigné (exécution, lectures de données, accès registres, copies
 ROM→VRAM, changements de banque), stats de nécessité par section, fenêtre SDL2
-temps réel. Démarrer par `README.md`, puis `docs/GB.fr.md`.
+temps réel. Démarrer par `README.md`, puis `docs/GB.fr.md`. La norme de
+couverture commune à toutes les plateformes (techniques exigées, typage,
+sources, frontière différée, feuille de route) est `docs/COUVERTURE.fr.md`.
 
 ## Règles
 

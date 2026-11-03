@@ -97,7 +97,7 @@ Options d'exploration : `--max-steps` (par chemin), `--max-paths`,
 **double** jusqu'au plafond au lieu de jeter des chemins entiers ; la
 croissance s'arrête au mur `--mem-cap` et chaque croissance est comptée),
 `--loop-cap`, `--seed-cap`, `--seed-banks`, `--closure-rounds` (défaut 12),
-`--covered-keep`, `--no-pointer-scan`, `--no-context-evict`, `--no-irq-fork`, `--no-key-fork`, `--no-p1-fork` (sondes manette : presses par IRQ joypad et lectures directes de `$FF00`).
+`--covered-keep`, `--no-pointer-scan`, `--no-closure`, `--no-provenance`, `--no-siblings`, `--no-context-evict`, `--no-irq-fork`, `--no-key-fork`, `--no-p1-fork` (sondes manette : presses par IRQ joypad et lectures directes de `$FF00`).
 
 La **provenance statique** (portage de la branche z80) prouve sans machine
 les cibles des `jp hl` (chargements immédiats, tables parcourues pointeur en
@@ -140,6 +140,11 @@ python3 tools/scan_all.py digest-z80 --out output/batch-z80/sms
 ```
 
 ## État
+
+La norme visée pour toutes les plateformes (techniques de couverture
+exigées, typage et sources par octet, frontière différée, mutualisation,
+libretro, PNG adaptatif) et sa feuille de route sont décrites dans
+[docs/COUVERTURE.fr.md](docs/COUVERTURE.fr.md).
 
 - **Game Boy** : la machine est celle de m0boy (MBC0/1/2/3/5, PPU/APU/timer
   réels, CPU interprété) — 17 variantes MBC×RAM compilées au build, un

@@ -71,7 +71,7 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
              "exploration: %llu steps in %llu paths (%llu forks: %u branch, %u irq, %u key, %u p1), %u sections\n"
              "evicted: %u exact states, %u same-context entries; cuts: %u cycles, %u step-budget, %u padding\n"
              "nonsense evictions: %u echo/OAM, %u verbatim data, %u incoherent stack\n"
-             "budgets: %u paths cap hit, %u step-wall hit, %u queue overflows (%u growths), %u forks capped, %u outside-rom exec\n"
+             "budgets: %u paths cap hit, %u step-wall hit, %u queue overflows (%u growths), %u forks capped (%u table full), %u outside-rom exec\n"
              "spool: %u written, %u read back, %u refused, %llu bytes pending\n"
              "seeds: %u natural, %u speculative (%u refused: cascade solde spent)\n"
              "data: %llu bytes proven verbatim (cov flag 8), %u exec∩data contradictions\n"
@@ -84,7 +84,7 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
              res->section_count, res->evicted_exact, res->evicted_ctx, res->cycle_cuts,
              res->step_cuts, res->pad_cuts, res->nonsense_echo, res->nonsense_data,
              res->nonsense_stack, res->budget_paths, res->budget_steps, res->queue_overflows,
-             res->queue_growths, res->forks_capped, res->exec_outside,
+             res->queue_growths, res->forks_capped, res->forks_table_full, res->exec_outside,
              res->spool_writes, res->spool_reads, res->spool_refused,
              (unsigned long long)res->spool_bytes,
              res->seeds_natural, res->seeds_spec, res->seeds_refused_budget,
@@ -276,12 +276,12 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
                cfg->loop_back_cap, cfg->seed_cap, cfg->max_copies, cfg->closure_rounds,
                cfg->covered_fork_keep, cfg->seed_banks);
     dp_buf_fmt(o, "\"counters\": {\"steps\":%llu,\"paths\":%u,\"forks_branch\":%u,\"forks_irq\":%u,"
-                  "\"forks_key\":%u,\"forks_p1\":%u,\"forks_capped\":%u,\"forks_covered_pruned\":%u,"
+                  "\"forks_key\":%u,\"forks_p1\":%u,\"forks_capped\":%u,\"forks_table_full\":%u,\"forks_covered_pruned\":%u,"
                   "\"sections\":%u,\"evicted_exact\":%u,\"evicted_ctx\":%u,\"cycle_cuts\":%u,"
                   "\"step_cuts\":%u,\"pad_cuts\":%u,\"halt_cuts\":%u,\"nonsense_echo\":%u,\"nonsense_data\":%u,\"nonsense_stack\":%u,\"budget_paths\":%u,\"budget_steps\":%u,\"queue_overflows\":%u,\"queue_growths\":%u,\"spool_writes\":%u,\"spool_reads\":%u,\"spool_refused\":%u,"
                   "\"exec_outside\":%u,\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_refused_budget\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u,\"prov_jp_hl\":%u,\"prov_data\":%u,\"prov_partial\":%u,\"prov_sat\":%u},\n",
                (unsigned long long)res->steps_total, (unsigned long long)res->paths_run, res->forks_branch, res->forks_irq,
-               res->forks_key, res->forks_p1, res->forks_capped, res->forks_covered_pruned,
+               res->forks_key, res->forks_p1, res->forks_capped, res->forks_table_full, res->forks_covered_pruned,
                (unsigned)res->section_count, res->evicted_exact, res->evicted_ctx, res->cycle_cuts,
                res->step_cuts, res->pad_cuts, res->halt_cuts, res->nonsense_echo, res->nonsense_data,
                res->nonsense_stack, res->budget_paths, res->budget_steps, res->queue_overflows,
@@ -511,7 +511,7 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
         dp_buf_str(o, "},\n");
     }
     dp_buf_fmt(o, "\"counters\": {\"steps\":%llu,\"paths\":%u,\"forks_branch\":%u,\"forks_irq\":%u,"
-                  "\"forks_key\":%u,\"forks_p1\":%u,\"forks_capped\":%u,\"forks_covered_pruned\":%u,\"sections\":%u,"
+                  "\"forks_key\":%u,\"forks_p1\":%u,\"forks_capped\":%u,\"forks_table_full\":%u,\"forks_covered_pruned\":%u,\"sections\":%u,"
                   "\"evicted_exact\":%u,\"evicted_ctx\":%u,\"cycle_cuts\":%u,\"step_cuts\":%u,"
                   "\"pad_cuts\":%u,\"halt_cuts\":%u,\"nonsense_echo\":%u,\"nonsense_data\":%u,"
                   "\"nonsense_stack\":%u,\"budget_paths\":%u,\"budget_steps\":%u,"
@@ -519,7 +519,7 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
                   "\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_refused_budget\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u,\"prov_jp_hl\":%u,\"prov_data\":%u,\"prov_partial\":%u,\"prov_sat\":%u},\n",
                (unsigned long long)res->steps_total, (unsigned long long)res->paths_run,
                res->forks_branch, res->forks_irq, res->forks_key, res->forks_p1, res->forks_capped,
-               res->forks_covered_pruned, (unsigned)res->section_count, res->evicted_exact,
+               res->forks_table_full, res->forks_covered_pruned, (unsigned)res->section_count, res->evicted_exact,
                res->evicted_ctx, res->cycle_cuts, res->step_cuts, res->pad_cuts, res->halt_cuts,
                res->nonsense_echo, res->nonsense_data, res->nonsense_stack, res->budget_paths,
                res->budget_steps, res->queue_overflows, res->queue_growths, res->spool_writes,

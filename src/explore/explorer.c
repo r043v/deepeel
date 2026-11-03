@@ -336,6 +336,7 @@ void dp_explorer_free(DpExplorer *ex) {
     if (ex->spool && ex->spool_owned) {
         fclose(ex->spool->f);
         pthread_mutex_destroy(&ex->spool->mtx);
+        free(ex->spool->cursor_path);
         free(ex->spool);
     }
     free(ex);
@@ -1018,20 +1019,32 @@ static int both_sides_covered(DpExplorer *ex, uint16_t pc, uint8_t op) {
     return 1;
 }
 
+/* per-site fork counter; a full counter table must not lift the cap (the
+ * NULL slot used to skip it): the fork is refused and the saturation counted */
+static uint32_t *fork_slot(DpExplorer *ex, uint32_t key) {
+    uint32_t *cnt = dp_map_get_or_add(&ex->res->fork_counts, key);
+    if (!cnt) {
+        ex->res->forks_table_full++;
+        ex->res->forks_capped++;
+    }
+    return cnt;
+}
+
 static void fork_branch(DpExplorer *ex, int cond, uint32_t site, uint16_t pc, uint8_t op) {
     // per-site cap: loop bodies reach their conditional every iteration and
     // the extra variants are data drift, not new map information
-    uint32_t *cnt = dp_map_get_or_add(&ex->res->fork_counts, site);
-    if (cnt && *cnt >= ex->cfg.fork_site_cap) {
+    uint32_t *cnt = fork_slot(ex, site);
+    if (!cnt) return;
+    if (*cnt >= ex->cfg.fork_site_cap) {
         ex->res->forks_capped++;
         return;
     }
-    if (cnt && !ex->cfg.no_covered_prune && *cnt >= ex->cfg.covered_fork_keep &&
+    if (!ex->cfg.no_covered_prune && *cnt >= ex->cfg.covered_fork_keep &&
         both_sides_covered(ex, pc, op)) {
         ex->res->forks_covered_pruned++;
         return;
     }
-    if (cnt) (*cnt)++;
+    (*cnt)++;
     DpMach *m = ex->mach;
     uint8_t flag = sm83_cond_flag(cond); // 0x80 = Z, 0x10 = C
     uint8_t *img = xrealloc(NULL, ex->sb);
@@ -1078,16 +1091,17 @@ static void fork_irq(DpExplorer *ex) {
 static void fork_key(DpExplorer *ex, uint32_t site) {
     const DpGblApi *api = ex->mach->api;
     if (api->io[0x0F] & 0x10) return; // already pending: the natural IRQ fires
-    uint32_t *cnt = dp_map_get_or_add(&ex->res->fork_counts, site ^ 0x80000000u);
+    uint32_t *cnt = fork_slot(ex, site ^ 0x80000000u);
+    if (!cnt) return;
     // once the joypad handler ($60) has run, more key variants at a site only
     // re-run known code: one round of presses per site is enough
     uint32_t kcap = (ex->res->exec_flags[0x60] & DP_XF_START) ? 1 : ex->cfg.fork_site_cap;
     if (ex->cfg.no_covered_prune) kcap = ex->cfg.fork_site_cap;
-    if (cnt && *cnt >= kcap) {
+    if (*cnt >= kcap) {
         ex->res->forks_capped++;
         return;
     }
-    if (cnt) (*cnt)++;
+    (*cnt)++;
     static const uint8_t keys[8] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80};
     // the keys the machine already holds, read back from P1 (bits low = pressed)
     DpMach *m = ex->mach;
@@ -1127,12 +1141,13 @@ static void fork_p1(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op) {
     } else if (api->gbr->c != 0x00) { // ld a,(C): P1 only when C == $FF00
         return;
     }
-    uint32_t *cnt = dp_map_get_or_add(&ex->res->fork_counts, site ^ 0xC0000000u);
-    if (cnt && *cnt >= ex->cfg.fork_site_cap) {
+    uint32_t *cnt = fork_slot(ex, site ^ 0xC0000000u);
+    if (!cnt) return;
+    if (*cnt >= ex->cfg.fork_site_cap) {
         ex->res->forks_capped++;
         return;
     }
-    if (cnt) (*cnt)++;
+    (*cnt)++;
     static const uint8_t keys[8] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80};
     DpMach *m = ex->mach;
     uint8_t *img = xrealloc(NULL, ex->sb);
@@ -1172,8 +1187,11 @@ static uint64_t project_ctx(DpExplorer *ex, const DpSection *s) {
     if (s->ctx_mask & (1ull << DP_CTX_VBK)) h = dp_fnv1a(h, &api->io[0x4F], 1);
     for (int pg = 0; pg < 32; pg++) {
         if (s->page_mask_wram & (1ull << pg)) h = dp_fnv1a(h, api->wram + pg * 256, 256);
-        if (s->page_mask_vram[0] & (1ull << pg)) h = dp_fnv1a(h, api->vram + pg * 256, 256);
-        if (s->page_mask_vram[1] & (1ull << pg)) h = dp_fnv1a(h, api->vram + 0x2000 + pg * 256, 256);
+        // the runtime holds a single VRAM bank (gbl_vram[0x2000]): reads under
+        // VBK=1 land in it too, so both page masks hash the same 8 KiB
+        // (reading vram + 0x2000 ran past the array)
+        if ((s->page_mask_vram[0] | s->page_mask_vram[1]) & (1ull << pg))
+            h = dp_fnv1a(h, api->vram + pg * 256, 256);
     }
     uint32_t eram_bytes = dp_gbl_variant_eram[ex->mach->vi];
     for (int pg = 0; pg < 64 && (uint32_t)(pg * 256) < eram_bytes; pg++)
@@ -1214,6 +1232,7 @@ static int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int k
     if (ok) {
         sp->wr += sizeof hdr + ex->sb;
         u32_add(&ex->res->spool_writes, 1);
+        ex->res->spool_bytes = sp->wr - sp->rd;
     } else {
         perror("deepeel spool");
     }
@@ -1257,6 +1276,7 @@ static void spool_feed(DpExplorer *ex) {
         }
         sp->rd += sizeof hdr + ex->sb;
         u32_add(&ex->res->spool_reads, 1);
+        ex->res->spool_bytes = sp->wr - sp->rd;
         DpPathState p;
         memset(&p, 0, sizeof p);
         p.img = img;
@@ -1277,12 +1297,32 @@ static void spool_feed(DpExplorer *ex) {
     }
 }
 
+// read-cursor sidecar: 'DPSC', image size, rd, wr (the wr it was taken at)
+#define DP_SPOOL_CURSOR 0x43535044ull // 'DPSC' little-endian
+
+static void spool_save_cursor(DpExplorer *ex) {
+    DpSpool *sp = ex->spool;
+    if (!sp || !sp->cursor_path) return;
+    pthread_mutex_lock(&sp->mtx);
+    uint64_t c[4] = { DP_SPOOL_CURSOR, ex->sb, sp->rd, sp->wr };
+    pthread_mutex_unlock(&sp->mtx);
+    FILE *f = fopen(sp->cursor_path, "wb");
+    if (!f || fwrite(c, sizeof c, 1, f) != 1) perror("deepeel spool cursor");
+    if (f) fclose(f);
+}
+
 int dp_explorer_spool_attach(DpExplorer *ex, const char *path, int resume) {
     DpSpool *sp = calloc(1, sizeof *sp);
     if (!sp) return 0;
     sp->f = fopen(path, resume ? "r+b" : "wb+");
+    // --resume without a previous spool starts an empty one
+    if (!sp->f && resume) sp->f = fopen(path, "wb+");
     if (!sp->f) { free(sp); return 0; }
     pthread_mutex_init(&sp->mtx, NULL);
+    size_t pl = strlen(path);
+    sp->cursor_path = xrealloc(NULL, pl + 4);
+    memcpy(sp->cursor_path, path, pl);
+    memcpy(sp->cursor_path + pl, ".rd", 4);
     ex->spool = sp;
     ex->spool_owned = 1;
     if (resume && fseek(sp->f, 0, SEEK_END) == 0) {
@@ -1290,8 +1330,25 @@ int dp_explorer_spool_attach(DpExplorer *ex, const char *path, int resume) {
         if (sz >= 0) {
             // only whole records count: a killed process may have truncated one
             size_t rec = sizeof(uint64_t) * 3 + ex->sb;
-            sp->wr = sp->rd = (uint64_t)((long)sz / (long)rec * (long)rec);
+            sp->wr = (uint64_t)((long)sz / (long)rec * (long)rec);
+            // pending records start at the persisted read cursor; without one
+            // (older spool, or a kill before the first flush) every record is
+            // fed back again: re-running a state costs time, skipping one
+            // loses it
+            sp->rd = 0;
+            uint64_t c[4];
+            FILE *cf = fopen(sp->cursor_path, "rb");
+            if (cf && fread(c, sizeof c, 1, cf) == 1 && c[0] == DP_SPOOL_CURSOR &&
+                c[1] == ex->sb && c[2] <= sp->wr && c[2] % rec == 0)
+                sp->rd = c[2];
+            else if (sp->wr)
+                fprintf(stderr, "deepeel: spool read cursor missing, feeding back all %llu records\n",
+                        (unsigned long long)(sp->wr / rec));
+            if (cf) fclose(cf);
+            ex->res->spool_bytes = sp->wr - sp->rd;
         }
+    } else {
+        unlink(sp->cursor_path); // a fresh spool: a stale cursor would skip records
     }
     return 1;
 }
@@ -1355,6 +1412,7 @@ uint64_t dp_explorer_spool_flush(DpExplorer *ex) {
     ex->pq_len = 0;
     ex->pq_head = 0;
     fflush(ex->spool->f);
+    spool_save_cursor(ex);
     return dp_explorer_spool_pending(ex);
 }
 
@@ -1405,6 +1463,12 @@ int dp_explore_step(DpExplorer *ex) {
     // any free worklist slot: pull the spooled overflow back in (also covers
     // the everything-drained case, so a spool keeps dp_explore going)
     if (ex->q_len < ex->q_cap && dp_explorer_spool_pending(ex)) spool_feed(ex);
+    // the path wall stops before popping: the pending state stays in the
+    // worklist (a flush spools it for --resume) instead of being freed unrun
+    if (ex->cfg.max_paths && res->paths_run >= ex->cfg.max_paths) {
+        u32_add(&res->budget_paths, 1);
+        return 0;
+    }
     DpPathState tmp;
     memset(&tmp, 0, sizeof tmp); // the pool may stay empty: img must start NULL
     DpPathState *p = &tmp;
@@ -1434,18 +1498,6 @@ int dp_explore_step(DpExplorer *ex) {
             ex->q_head = (ex->q_head + 1) % ex->q_cap;
             ex->q_len--;
         }
-    }
-    if (ex->cfg.max_paths && res->paths_run >= ex->cfg.max_paths) {
-        u32_add(&res->budget_paths, 1);
-        free(p->img);
-        if (p != &tmp && ex->sh) {
-            long idx = p - ex->queue;
-            long rel = (idx - (long)ex->q_head + (long)ex->q_cap) % (long)ex->q_cap;
-            if (rel < (long)ex->q_len)
-                fprintf(stderr, "deepeel: BUG budget NULL in window\n");
-        }
-        p->img = NULL;
-        return 0;
     }
     uint8_t *img = p->img;
     int forced = p->forced, kind = p->kind, from_reset = p->from_reset;
@@ -1723,12 +1775,15 @@ void dp_seed_gb(DpExplorer *ex) {
         memcpy(img, seed_base(ex), ex->sb);
         dp_explorer_seed(ex, img, DP_SEED_RESET, 0);
     }
-    // RST and IRQ vectors when they hold something that is not padding
+    // RST and IRQ vectors when they hold something that is not padding.  Both
+    // are entered cold, from a synthetic state no natural flow produced: the
+    // code they reach is forced until the reset flow (or a session) gets
+    // there for real
     for (int i = 0; i < plat->entry_count; i++) {
         const DpEntry *e = &plat->entries[i];
         if (e->kind == DP_SEED_RESET) continue;
         if (is_padding_at(c, 0, e->addr)) continue;
-        dp_explorer_seed_pc(ex, 0, e->addr, e->kind, e->kind == DP_SEED_RST ? 1 : 0);
+        dp_explorer_seed_pc(ex, 0, e->addr, e->kind, 1);
     }
     // pointer-table scan: every ROM word pointing at plausible code; targets
     // inside padding or pointer tables are evicted (static view — the

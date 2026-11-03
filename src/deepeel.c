@@ -73,6 +73,8 @@ static void usage(void) {
             "    --no-context-evict   disable same-context eviction\n"
             "    --no-irq-fork        disable IRQ forking\n"
             "    --no-closure         disable the static flow closure (and its seeds)\n"
+            "    --no-provenance      disable the static HL/A provenance (jp hl targets)\n"
+            "    --no-siblings        disable the copy-sibling table inference\n"
             "    --closure-rounds N   closure -> seed -> search loops (default 12; each\n"
             "                         round exits early once it seeds nothing)\n"
             "    --no-covered-prune   keep forking sites whose both sides are covered\n"
@@ -287,6 +289,8 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--no-key-fork")) cfg.no_key_fork = 1;
         else if (!strcmp(a, "--no-p1-fork")) cfg.no_p1_fork = 1;
         else if (!strcmp(a, "--no-closure")) cfg.no_closure = 1;
+        else if (!strcmp(a, "--no-provenance")) cfg.no_provenance = 1;
+        else if (!strcmp(a, "--no-siblings")) cfg.no_siblings = 1;
         else if (!strcmp(a, "--closure-rounds") && i + 1 < argc) cfg.closure_rounds = atoi(argv[++i]);
         else if (!strcmp(a, "--no-covered-prune")) cfg.no_covered_prune = 1;
         else if (!strcmp(a, "--covered-keep") && i + 1 < argc) cfg.covered_fork_keep = (uint32_t)strtoul(argv[++i], NULL, 0);
@@ -1177,8 +1181,9 @@ static int cmd_dis(int argc, char **argv) {
 // Each search gets a fresh wall.
 static void closure_rounds(DpExplorer *ex, DpResults *res, uint32_t *seed_spent,
                            uint32_t seed_total) {
-    if (ex->cfg.no_closure) return;
-    for (int r = 0; r < ex->cfg.closure_rounds; r++) {
+    // --no-closure stops the flow closure and its seeds only: provenance and
+    // copy siblings have their own switches
+    for (int r = 0; !ex->cfg.no_closure && r < ex->cfg.closure_rounds; r++) {
         uint32_t marked = dp_static_closure(res);
         uint32_t ref0 = res->closure_seeds_refused;
         int seeded = dp_closure_seed(ex, seed_total - *seed_spent); // the cascade solde
@@ -1199,14 +1204,18 @@ static void closure_rounds(DpExplorer *ex, DpResults *res, uint32_t *seed_spent,
             if (res->disc_n) res->disc[res->disc_n - 1].credit = res->disc[res->disc_n - 1].known - k0;
         }
     }
-    uint32_t prov = dp_provenance(res);
-    fprintf(stderr, "deepeel: provenance: %u jp-hl targets, %u data bytes proven (%u partial, %u caps)\n",
-            res->prov_jp_hl, res->prov_data, res->prov_unresolved, res->prov_sat);
-    (void)prov;
-    uint32_t sib = dp_copy_siblings(res);
-    fprintf(stderr, "deepeel: copy siblings: %u tables, %u ranges, %u bytes inferred (%u refused, %u caps)\n",
-            res->sib_tables, res->sib_ranges, sib, res->sib_refused, res->sib_caps);
-    dp_static_closure(res); // the last search may have opened more direct flow
+    if (!ex->cfg.no_provenance) {
+        dp_provenance(res);
+        fprintf(stderr, "deepeel: provenance: %u jp-hl targets, %u data bytes proven (%u partial, %u caps)\n",
+                res->prov_jp_hl, res->prov_data, res->prov_unresolved, res->prov_sat);
+    }
+    if (!ex->cfg.no_siblings) {
+        uint32_t sib = dp_copy_siblings(res);
+        fprintf(stderr, "deepeel: copy siblings: %u tables, %u ranges, %u bytes inferred (%u refused, %u caps)\n",
+                res->sib_tables, res->sib_ranges, sib, res->sib_refused, res->sib_caps);
+    }
+    // the last search may have opened more direct flow
+    if (!ex->cfg.no_closure) dp_static_closure(res);
 }
 
 static void md_regs_print(void) {

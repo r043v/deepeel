@@ -79,6 +79,20 @@ static uint32_t prov_addr_key(DpResults *res, uint16_t addr) {
     return (uint32_t)addr;
 }
 
+// ROM key of a direct branch target seen from `bank`: $0000-$3FFF is bank 0
+// whatever the caller's bank, the $4000 window stays the caller's bank, and
+// bank 0 reaching into the window has no static bank evidence (a fixed
+// 32 KiB cart excepted).  ~0u = no provable key (unbanked window, RAM code).
+static uint32_t prov_target(const DpResults *res, uint32_t bank, uint32_t t) {
+    uint32_t k;
+    if (t < 0x4000) k = t;
+    else if (t >= 0x8000) return ~0u;
+    else if (bank) k = bank * 0x4000 + (t - 0x4000);
+    else if (res->banks == 2) k = t;
+    else return ~0u;
+    return k < res->cart->rom_size ? k : ~0u;
+}
+
 static void prov_data_mark(DpResults *res, uint16_t addr) {
     uint32_t k = prov_addr_key(res, addr);
     if (k == ~0u) return;
@@ -102,8 +116,10 @@ uint32_t dp_provenance(DpResults *res) {
         ProvState s0 = { (uint32_t)k, 0, 0, 0, 0 };
         ppush(&st, s0);
     }
+    uint32_t steps = 0;
     while (st.n) {
-        if (res->prov_steps >= DP_PROV_STEPS || vis.cnt >= DP_PROV_STATES) {
+        // per-call budget: a later call is not starved by the earlier ones
+        if (steps >= DP_PROV_STEPS || vis.cnt >= DP_PROV_STATES) {
             res->prov_sat++;
             break;
         }
@@ -117,6 +133,7 @@ uint32_t dp_provenance(DpResults *res) {
         int len = sm83_len(op);
         if ((uint32_t)s.k + (uint32_t)len > c->rom_size) continue;
         res->prov_steps++;
+        steps++;
 
         uint32_t rd = ~0u; // a (hl)/(nn) read at a provable address
         int fall = 1;
@@ -189,8 +206,9 @@ uint32_t dp_provenance(DpResults *res) {
             uint16_t t = (uint16_t)(pc + 2 + (int8_t)c->rom[s.k + 1]);
             fall = op != 0x18;
             ProvState ns = s;
-            ns.k = bank * 0x4000 + (uint32_t)(t & 0x3FFF);
-            ppush(&st, ns);
+            ns.k = prov_target(res, bank, t);
+            if (ns.k != ~0u) ppush(&st, ns);
+            else res->prov_unresolved++;
             break;
         }
         case 0xC3: case 0xC2: case 0xCA: case 0xD2: case 0xDA:
@@ -198,13 +216,14 @@ uint32_t dp_provenance(DpResults *res) {
             uint16_t t = (uint16_t)(c->rom[s.k + 1] | (c->rom[s.k + 2] << 8));
             fall = op != 0xC3;
             ProvState ns = s;
-            ns.k = bank * 0x4000 + (uint32_t)(t & 0x3FFF);
-            ppush(&st, ns);
+            ns.k = prov_target(res, bank, t);
+            if (ns.k != ~0u) ppush(&st, ns);
+            else res->prov_unresolved++;
             if (op == 0xCD || op == 0xC4 || op == 0xCC || op == 0xD4 || op == 0xDC) {
                 // the callee may clobber everything: the continuation forgets
                 ProvState rs = { 0, 0, 0, 0, 0 };
-                rs.k = bank * 0x4000 + (uint32_t)((pc + 3) & 0x3FFF);
-                ppush(&st, rs);
+                rs.k = prov_target(res, bank, (uint32_t)pc + 3);
+                if (rs.k != ~0u) ppush(&st, rs);
             }
             break;
         }

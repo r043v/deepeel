@@ -12,6 +12,7 @@ static DpMach *g_mach;
 
 // runs the full pipeline on one fixture; the results stay in `res` until cleanup
 static uint64_t g_wall; // 0 = default budget
+static int g_full_forks;  // 1 = the per-site fork table starts full
 
 static void run(const char *dir, const char *name) {
     char path[512];
@@ -33,6 +34,12 @@ static void run(const char *dir, const char *name) {
     if (g_mach) dp_mach_close(g_mach);
     g_mach = mach_for(g_cart);
     DpExplorer *ex = dp_explorer_new(&cfg, &res, g_mach);
+    if (g_full_forks) {
+        // fill the table to its growth threshold with keys no site uses,
+        // then forbid growth: every real site finds no counter slot
+        res.fork_counts.cap_abs = res.fork_counts.cap;
+        for (uint32_t k = 0; dp_map_get_or_add(&res.fork_counts, 0x7F000000u + k); k++) {}
+    }
     dp_seed_gb(ex);
     dp_explore(ex);
     dp_explorer_free(ex);
@@ -89,6 +96,15 @@ int main(int argc, char **argv) {
     }
     // the rom data never runs on the natural flow (forked wandering may touch it)
     CHECK(!(res.exec_flags[0x300] & DP_XF_NATURAL));
+
+    // --- full per-site fork table: the cap holds, the saturation is counted ------
+    g_full_forks = 1;
+    run(dir, "branch");
+    g_full_forks = 0;
+    CHECK(res.forks_table_full > 0);
+    CHECK(res.forks_capped >= res.forks_table_full);
+    CHECK(res.forks_branch == 0); // no branch fork escaped the cap
+    CHECK(!(res.exec_flags[0x156] & DP_XF_FORCED)); // the not-taken side stayed unforked
 
     // --- mbc5: bank timeline + cross-bank code -----------------------------------
     run(dir, "mbc5");
@@ -363,6 +379,8 @@ int main(int argc, char **argv) {
         CHECK(res.queue_overflows == 0); // nothing was dropped
         uint64_t pend = dp_explorer_spool_flush(ex);
         CHECK(pend >= 1); // the stop left pending states for the next run
+        uint32_t pend_recs = res.spool_writes - res.spool_reads;
+        CHECK(pend_recs >= 1);
         CHECK(dp_explorer_exact_save(ex, exactf));
         dp_explorer_free(ex);
 
@@ -384,6 +402,9 @@ int main(int argc, char **argv) {
         CHECK(res.spool_reads >= 1); // the spooled states really came back
         CHECK(res.paths_run > paths_run1); // the resumed run went further
         CHECK(pend2 == 0); // the resumed run drained the spool completely
+        // every record left pending by run 1 was fed back, on top of the
+        // records run 2 spooled and drained itself (the read cursor survived)
+        CHECK(res.spool_reads == pend_recs + res.spool_writes);
         CHECK(res.queue_overflows == 0);
         unlink(spool);
         unlink(exactf);

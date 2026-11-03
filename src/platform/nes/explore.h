@@ -70,7 +70,6 @@ typedef struct {
     uint64_t max_total;
     uint32_t max_steps, max_paths, queue_cap, loop_cap, fork_cap;
     int seed_irq;          // fork the NMI/IRQ entries when enabled (default on)
-    int seed_banks;        // seed every switchable window/bank pair
     // play sessions: random-input frames before the fork exploration.  The
     // visited bytes land in the same physical map as the exploration.
     uint32_t play_frames;  // frames per session (0: no play pass)
@@ -80,8 +79,6 @@ typedef struct {
     // each movie is one session, its end state seeds the fork queue
     char tas_paths[8][512];
     int tas_count;
-    unsigned entry_extra[8];
-    unsigned entry_count;
 } DpNesOptions;
 
 typedef struct {
@@ -94,6 +91,7 @@ typedef struct {
     uint64_t seeds_reset, seeds_irq, seeds_bank, seeds_refused_queue;
     uint64_t play_frames_run, play_sessions_run, play_steps_accounted, seeds_play;
     uint64_t evicted;          // exact-state dedup admissions refused
+    uint64_t pending_dropped;  // queued states left undrained at a wall
     uint64_t ram_writes, io_writes, io_writes_io_reg[32];
     uint64_t io_reg_writes[256]; // $2000-$2007 + $4000-$401F + mapper pages collapsed
     // sections

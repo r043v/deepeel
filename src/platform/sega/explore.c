@@ -930,8 +930,9 @@ static void generate_seed_specs(Run *x,const uint8_t *image,size_t size) {
                     uint64_t key=(uint64_t)b*0x4000+(v&0x3fff);
                     if(key>=size) continue; // a view into the padded tail
                     if(seed_padding(image,size,key)) { r->seeds_skipped_padding++; continue; }
-                    if(x->seed_count>=x->seed_capacity || r->seeds_pointer>=o->seed_cap) { r->seeds_refused_cap++; continue; }
+                    // duplicates first: a view already seeded is not a refusal
                     if(dp_set_insert(&seen,key)!=1) continue;
+                    if(x->seed_count>=x->seed_capacity || r->seeds_pointer>=o->seed_cap) { r->seeds_refused_cap++; continue; }
                     x->seeds[x->seed_count++]=(SeedSpec){v,(uint16_t)b,1,DP_SEGA_TREE_POINTER};
                     r->seeds_pointer++;
                 }
@@ -939,8 +940,9 @@ static void generate_seed_specs(Run *x,const uint8_t *image,size_t size) {
                 int64_t key=x->b->rom_index(v); // the boot view, machine at reset
                 if(key<0 || (uint64_t)key>=size) continue;
                 if(seed_padding(image,size,(uint64_t)key)) { r->seeds_skipped_padding++; continue; }
-                if(x->seed_count>=x->seed_capacity || r->seeds_pointer>=o->seed_cap) { r->seeds_refused_cap++; continue; }
+                // duplicates first: a view already seeded is not a refusal
                 if(dp_set_insert(&seen,(uint64_t)key)!=1) continue;
+                if(x->seed_count>=x->seed_capacity || r->seeds_pointer>=o->seed_cap) { r->seeds_refused_cap++; continue; }
                 x->seeds[x->seed_count++]=(SeedSpec){v,0,0,DP_SEGA_TREE_POINTER};
                 r->seeds_pointer++;
             }
@@ -1047,7 +1049,13 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
             x.spool=fopen(o->spool_path,"r+b");
             resume=x.spool && !fseek(x.spool,0,SEEK_END) && (x.spool_wr=(uint64_t)ftell(x.spool))>0;
             if(resume) x.spool_bytes=x.spool_wr;
-            else { if(x.spool) fclose(x.spool); x.spool=NULL; }
+            else {
+                // nothing to resume (no spool, or an empty one): start a
+                // fresh spool instead of failing the run
+                if(x.spool) fclose(x.spool);
+                x.spool=fopen(o->spool_path,"w+b");
+                x.spool_wr=0;
+            }
         } else {
             x.spool=fopen(o->spool_path,"w+b");
             resume=0;
@@ -1284,8 +1292,9 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     if(o->tree_path && r->tree_count) {
         FILE *t=fopen(o->tree_path,"wb");
         if(t) {
-            uint32_t hdr[2]={0x5a545044u,r->tree_count}; // 'DPTZ' + version 1 in low bits
-            hdr[1]=1;
+            // 'DPTZ', version 2, node count (version 1 lost the count: the
+            // version was written over it)
+            uint32_t hdr[3]={0x5a545044u,2,r->tree_count};
             if(fwrite(hdr,sizeof hdr,1,t)==1) {
                 for(uint32_t i=0;i<r->tree_count;i++) {
                     const DpSegaTreeNode *n=&r->tree_nodes[i];

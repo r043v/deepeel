@@ -203,6 +203,7 @@ typedef struct DpResults {
     uint64_t hits_saturated; // per-byte hit counters held at UINT32_MAX (never wrap)
     uint32_t forks_branch, forks_irq, forks_key, forks_p1, evicted_exact, evicted_ctx;
     uint32_t forks_capped; // forks dropped by the per-site cap
+    uint32_t forks_table_full; // forks refused: the per-site counter table is full (also in forks_capped)
     uint32_t cycle_cuts, step_cuts, budget_paths, budget_steps, queue_overflows;
     uint32_t queue_growths;   // times the full worklist grew instead of dropping paths
     uint32_t copy_window_breaks; // copy windows emitted when a touch left them (not at path end)
@@ -256,6 +257,8 @@ typedef struct DpConfig {
     int no_key_fork;          // disable the simulated joypad-IRQ key forks
     int no_p1_fork;           // disable the P1-polling read forks
     int no_closure;           // disable the static flow closure
+    int no_provenance;        // disable the static HL/A provenance pass
+    int no_siblings;          // disable the copy-sibling inference
     int closure_rounds;       // closure -> seed -> explore loops (default 4)
     int no_covered_prune;     // keep forking sites whose both sides are known
     uint32_t covered_fork_keep; // forks a fully-known site still gets (default 2)
@@ -300,13 +303,15 @@ typedef struct DpPathState {
     uint32_t choice;     // the tree choice this path answers
 } DpPathState;
 
-// disk spool of the overflow: appended at wr, fed back from rd, both cursors
-// in one file so a stopped run resumes without a rewrite.  Shared (mutex, one
-// struct) by the parallel workers: the spool doubles as the shared worklist.
+// disk spool of the overflow: appended at wr, fed back from rd.  The read
+// cursor is persisted beside the file (<spool>.rd, written at each flush) so a
+// resumed run continues at the first record not yet fed back.  Shared (mutex,
+// one struct) by the parallel workers: the spool doubles as the shared worklist.
 typedef struct DpSpool {
     FILE *f;
     uint64_t rd, wr;
     pthread_mutex_t mtx;
+    char *cursor_path; // <spool>.rd
 } DpSpool;
 
 // shared work pool of a parallel drain (--jobs N): ordinary pushes go here,

@@ -84,7 +84,8 @@ typedef struct DpPlatform {
     int entry_count;
 } DpPlatform;
 
-// only platform implemented so far; more CPUs/consoles plug in here
+// the GB registry; the other platforms expose theirs from their own
+// headers (dp_nes_platform, dp_pce_platform, ...)
 const DpPlatform *dp_platform_gb(void);
 
 #endif

@@ -84,6 +84,10 @@ static void spool_resume_identical(void) {
     CHECK(result.spool_reads>0);
     CHECK(known()==reference); // spool + resume = one unconstrained run
     unlink(spool);
+    // --resume with no spool on disk starts fresh instead of failing
+    run(o);
+    CHECK(known()==reference);
+    unlink(spool);
 }
 static void choice_tree(void) {
     fixture();
@@ -103,9 +107,9 @@ static void choice_tree(void) {
     // the binary record round-trips
     FILE *f=fopen(tree,"rb"); CHECK(f);
     if(f) {
-        uint32_t hdr[2];
-        CHECK(fread(hdr,sizeof hdr,1,f)==1 && hdr[0]==0x5a545044u && hdr[1]==1);
-        CHECK(hdr[1]==1 && hdr[0]==0x5a545044u);
+        uint32_t hdr[3];
+        CHECK(fread(hdr,sizeof hdr,1,f)==1 && hdr[0]==0x5a545044u && hdr[1]==2);
+        CHECK(hdr[2]==result.tree_count); // the header carries the node count
         unsigned nodes=0;
         for(;;) {
             uint32_t rec[2]; uint16_t pc; uint8_t ki[2];

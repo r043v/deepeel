@@ -58,7 +58,7 @@ typedef struct {
 } DpNesRun;
 
 static uint32_t loop_bump(DpNesRun *x, uint64_t key);
-static void snap_push(DpNesRun *x, DpNesPathState *s);
+static int snap_push(DpNesRun *x, DpNesPathState *s);
 
 static void record_copy(DpNesRun *x, uint64_t path, uint64_t step, uint16_t pc,
                         uint32_t source, uint32_t destination, uint8_t channel) {
@@ -220,9 +220,8 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
                 dp_m6502_force(in.condition, &t, !taken);
                 *dp_nesmach_state_p(snap) = t.p;
                 DpNesPathState f = { snap, 1, 0, x->paths_opened, x->total_steps, 0 };
-                x->fork_sites[site]++;
-                snap_push(x, &f);
-                r->forks++;
+                // the per-site budget only pays for forks that were queued
+                if (snap_push(x, &f)) { x->fork_sites[site]++; r->forks++; }
             }
         } else if (site >= 0) {
             r->fork_cuts++;
@@ -348,10 +347,12 @@ static int queue_push(DpNesRun *x, const DpNesPathState *s) {
 }
 
 // exact-state dedup: the snapshot hash (volatile clocks excluded)
-static void snap_push(DpNesRun *x, DpNesPathState *s) {
+// returns 1 when the state was queued
+static int snap_push(DpNesRun *x, DpNesPathState *s) {
     uint64_t h = dp_nesmach_state_hash(s->state);
-    if (!dp_set_insert(&x->seen, h)) { x->r->evicted++; free(s->state); return; }
-    if (!queue_push(x, s)) { x->r->seeds_refused_queue++; free(s->state); }
+    if (!dp_set_insert(&x->seen, h)) { x->r->evicted++; free(s->state); return 0; }
+    if (!queue_push(x, s)) { x->r->seeds_refused_queue++; free(s->state); return 0; }
+    return 1;
 }
 
 // --- per-path execution ---------------------------------------------------------
@@ -623,7 +624,11 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
 
     sections_build(&x);
 
-    for (uint32_t i = 0; i < x.queue_len; i++) free(x.queue[i].state);
+    // states still queued when a wall stopped the drain: counted, not silent
+    for (uint32_t i = 0; i < x.queue_len; i++) {
+        if (x.queue[i].state) r->pending_dropped++;
+        free(x.queue[i].state);
+    }
     free(x.queue);
     free(x.loops);
     free(x.fork_sites);
@@ -691,6 +696,8 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->exec_outside);
     fprintf(out, "  play: %llu sessions x frames %llu\n",
         (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run);
+    fprintf(out, "  pending paths dropped at the wall %llu\n",
+        (unsigned long long)r->pending_dropped);
     fprintf(out, "  seeds: reset %llu irq %llu bank %llu play %llu refused %llu\n",
         (unsigned long long)r->seeds_reset, (unsigned long long)r->seeds_irq,
         (unsigned long long)r->seeds_bank, (unsigned long long)r->seeds_play,

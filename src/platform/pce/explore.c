@@ -996,6 +996,8 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     if (g_inferred && x->opt.infer) infer(x, g_inferred);
 
     dp_pce_observe(NULL);
+    // states still queued when the global wall stopped the drain: counted
+    r->pending_dropped += x->queue_len;
     for (uint32_t i = 0; i < x->queue_len; i++) free(x->queue[i].z);
     free(x->queue);
     free(x->seen);
@@ -1075,6 +1077,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             (unsigned long long)r->fork_cuts, (unsigned long long)r->pad_fork_cuts,
             (unsigned long long)r->irq_fork_cuts, (unsigned long long)r->queue_cuts,
             (unsigned long long)r->global_cuts, (unsigned long long)r->illegal_cuts);
+    fprintf(out, "  pending paths dropped at the wall %llu\n", (unsigned long long)r->pending_dropped);
     fprintf(out, "  data reads %llu, VDC data writes %llu, ROM->VRAM bytes %llu, io writes %llu\n",
             (unsigned long long)r->data_reads, (unsigned long long)r->vdc_data_writes,
             (unsigned long long)r->copied_bytes, (unsigned long long)r->io_writes);
