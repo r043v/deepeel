@@ -13,6 +13,7 @@
 #include <inttypes.h>
 #include <errno.h>
 #include <pthread.h>
+#include "../../core/statefile.h"
 #include <zlib.h>
 #include <math.h>
 
@@ -1118,6 +1119,14 @@ static void novelty_session(Run *x) {
         memcpy(x->origins,x->seed_origins,x->origin_size);
         push_to(x,0,0,0,DP_SEGA_TREE_BRANCH);
     }
+    if(o->export_state && n) {
+        uint32_t d=0;
+        for(uint32_t i=1;i<n;i++) if(a[i].depth>a[d].depth) d=i;
+        // blob = machine state || cartridge RAM, compressed
+        if(!dp_state_export(o->export_state,x->system->id,x->image,r->size,a[d].depth,a[d].z,(uint32_t)a[d].zlen,(uint32_t)tot)) {
+            r->state_exported=1; r->state_exported_depth=a[d].depth;
+        }
+    }
     pass_end(x);
     for(uint32_t i=0;i<n;i++) free(a[i].z);
     free(a); free(L); free(keys); free(img); free(img2); free(ztmp);
@@ -1737,6 +1746,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     DP_MR_SUM(play_steps); DP_MR_SUM(play_epochs);
     DP_MR_SUM(novelty_trials); DP_MR_SUM(novelty_hits); DP_MR_SUM(novelty_archived); DP_MR_SUM(novelty_replaced); DP_MR_SUM(novelty_frames_run); DP_MR_SUM(novelty_deaths);
     if(s->novelty_depth>d->novelty_depth) d->novelty_depth=s->novelty_depth;
+    if(s->state_exported && (!d->state_exported || s->state_exported_depth>d->state_exported_depth)) { d->state_exported=1; d->state_exported_depth=s->state_exported_depth; }
     if(s->tas_identity) d->tas_identity=s->tas_identity;
     DP_MR_SUM(tas_frames); DP_MR_SUM(tas_frames_refused); DP_MR_SUM(tas_steps);
     DP_MR_SUM(jobs_capped); DP_MR_SUM(merge_conflicts);
@@ -2204,6 +2214,7 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
     if(r->novelty_trials)
         fprintf(out,"novelty: depth %u frames, %"PRIu64" trials, %"PRIu64" frames, %"PRIu64" hits, %"PRIu64" deaths, %"PRIu64" archived (%"PRIu64" replaced)\n",
                 r->novelty_depth,r->novelty_trials,r->novelty_frames_run,r->novelty_hits,r->novelty_deaths,r->novelty_archived,r->novelty_replaced);
+    if(r->state_exported) fprintf(out,"state exported: deepest cell, %u frames from power-on\n",r->state_exported_depth);
     fprintf(out,"tas replay: %"PRIu64" frames; %"PRIu64" steps; frames refused %"PRIu64"\n",r->tas_frames,r->tas_steps,r->tas_frames_refused);
     fprintf(out,"drain: jobs capped %"PRIu64"; seeds off-lane %"PRIu64"; section attribution conflicts %"PRIu64" (record paths and parent paths are per-worker with --jobs 2)\n",
         r->jobs_capped,r->seeds_offlane,r->merge_conflicts);
@@ -2324,6 +2335,7 @@ int dp_sega_explore_command(int argc,char **argv) {
         if(!strcmp(argv[i],"--no-block-closure")) { o.block_closure=0; continue; }
         if(!strcmp(argv[i],"--no-target-closure")) { o.target_closure=0; continue; }
         if(!strcmp(argv[i],"--no-closure")) { o.closure.nodes=0; continue; }
+        if(!strcmp(argv[i],"--export-state")) { if(i+1>=argc) goto usage; o.export_state=argv[++i]; continue; }
         if(!strcmp(argv[i],"--tas")) { if(i+1>=argc) goto usage; o.tas_path=argv[++i]; continue; }
         if(!strcmp(argv[i],"--jobs")) {
             if(i+1>=argc) goto usage;
@@ -2409,5 +2421,5 @@ int dp_sega_explore_command(int argc,char **argv) {
     }
     dp_sega_results_free(&r); return ok?0:1;
 usage:
-    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--novelty N] [--novelty-frames N] [--novelty-archive N] [--novelty-frame-steps N] [--novelty-cells 1] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE]\n"); return 2;
+    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--novelty N] [--novelty-frames N] [--novelty-archive N] [--novelty-frame-steps N] [--novelty-cells 1] [--export-state FILE] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE]\n"); return 2;
 }

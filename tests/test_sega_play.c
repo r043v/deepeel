@@ -1,6 +1,7 @@
 #include "../src/platform/sega/explore.h"
 #include "test_util.h"
 #include <string.h>
+#include <stdio.h>
 
 // GB sessions parity: an instrumented play session runs the machine from
 // reset with held inputs changing every epoch; its natural coverage carries
@@ -88,6 +89,9 @@ static void novelty_reaches_pause(void) {
     run(o);
     CHECK(result.novelty_trials>0 && result.novelty_frames_run>0 && result.novelty_archived>=1);
     CHECK((result.flags[0x150]&DP_SEGA_NATURAL));
+    o.export_state="sega_novelty.dpst"; run(o);
+    CHECK(result.state_exported);
+    FILE *f=fopen("sega_novelty.dpst","rb"); CHECK(f); char magic[4]={0}; CHECK(f && fread(magic,1,4,f)==4 && !memcmp(magic,"DPST",4)); if(f) fclose(f); remove("sega_novelty.dpst");
 }
 int main(void) {
     novelty_reaches_pause();

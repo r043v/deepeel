@@ -2104,3 +2104,11 @@ fourches. Options : `--novelty-frames` (240), `--novelty-archive` (4096),
 `--novelty-frame-steps`, `--novelty-cells 1`. Rapport : ligne `novelty: …`.
 Ce sont des observations de l'outil, pas des mesures de matériel. Reste :
 mesures sur ROMs réelles, GB (J4 GB).
+
+## 0.142.0 (SMS / GG / SG-1000 / MSX)
+
+`--export-state FICHIER` (avec `--novelty`) : écrit la cellule d'archive la plus
+profonde au format DPST (`platform` = `sms`/`gg`/`sg`/`msx`, blob = état machine
++ RAM cartouche, zlib). Blob propre à la machine m0boy de la plateforme, lisible
+par aucun émulateur tiers. Rapport : `state exported: deepest cell, N frames`.
+Reste : `--watch` / `--watch-dump` (O3).
