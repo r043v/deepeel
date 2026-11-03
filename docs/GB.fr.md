@@ -778,3 +778,17 @@ de ROM gagne une source ; bornée à 2^20 lignes (au-delà : `dropped`). Exposé
 dans le JSON (`first_seen`, lignes par source) pour GB et Sega ; acteur 1 =
 résultat d'un worker fusionné (Sega). Projection `types` (GB, JSON `types`) :
 start, entry, irq, verbatim. Les types sémantiques (tiles, music…) sont J8.
+
+## Frontière sur disque (0.35.0)
+
+À la sortie avec `--state-dir`, les continuations différées en mémoire sont
+écrites dans `<state-dir>/frontier/frontier.dpf` (en-tête `'DPFB'`, un
+enregistrement par continuation : palier, forced, kind, from_reset, image
+zlib) avec un résumé `frontier.idx`. `--resume` les recharge avec leur palier
+(elles ne sont alors plus comptées en `defer_pending`). `deepeel frontier stats
+<state-dir>` affiche le résumé. **Pas encore fait** (J2 reste ◐) : lots par
+banque/section, deltas XOR, lecture séquentielle à position persistée,
+`frontier drain`, paliers `priority`/`dedup-full`/`paths`/`fork-cap`/`covered`/
+`wall`, NES/PCE/MD. Le contexte dur complet par enregistrement n'est pas
+persisté : le chemin repris repart avec transitoires à zéro (peut couvrir un
+peu plus, jamais moins).

@@ -456,6 +456,10 @@ static int cmd_explore(int argc, char **argv) {
             fprintf(stderr, "deepeel: spool unavailable (%s), overflow states are dropped\n",
                     spool_path);
         if (scfg.resume) dp_explorer_exact_load(ex, exact_path);
+        if (scfg.resume) {
+            int fl = dp_explorer_frontier_load(ex, scfg.state_dir);
+            if (fl) fprintf(stderr, "deepeel: resumed frontier (%d deferred continuations)\n", fl);
+        }
     }
     dp_seed_gb(ex);
     for (int i = 0; i < entries; i++)
@@ -708,6 +712,10 @@ static int cmd_explore(int argc, char **argv) {
                     (unsigned long long)(res.spool_writes - res.spool_reads),
                     (unsigned long long)(pend >> 20));
         dp_explorer_exact_save(ex, exact_path);
+    }
+    if (scfg.state_dir) {
+        int fr = dp_explorer_frontier_save(ex, scfg.state_dir);
+        if (fr) fprintf(stderr, "deepeel: %d deferred continuations saved for --resume (frontier/)\n", fr);
     }
     dp_explorer_free(ex);
     if (play_engine) dp_play_free(play_engine);
@@ -1295,6 +1303,15 @@ static int cmd_md(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     if (argc < 2) return usage(), 2;
+    if (!strcmp(argv[1], "frontier") && argc > 3 && !strcmp(argv[2], "stats")) {
+        char p[700], line[128];
+        snprintf(p, sizeof p, "%s/frontier/frontier.idx", argv[3]);
+        FILE *f = fopen(p, "r");
+        if (!f) { printf("frontier: empty (no %s)\n", p); return 0; }
+        while (fgets(line, sizeof line, f)) fputs(line, stdout);
+        fclose(f);
+        return 0;
+    }
     if (!strcmp(argv[1], "md")) return cmd_md(argc, argv);
     if (!strcmp(argv[1], "nes")) return cmd_nes(argc, argv);
     if (!strcmp(argv[1], "pce")) return cmd_pce(argc, argv);

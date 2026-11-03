@@ -11,6 +11,8 @@
 // builtins, and their section/record updates take the results mutexes while
 // res->mt is set.  The fork explorer only runs while the sessions wait at
 // the epoch barrier, so its own updates stay lock-free.
+#include <zlib.h>
+#include <sys/stat.h>
 #include "explorer.h"
 #include "../cpu/sm83/sm83.h"
 #include "tree.h"
@@ -1501,6 +1503,86 @@ int dp_explorer_exact_load(DpExplorer *ex, const char *path) {
     fclose(f);
     fprintf(stderr, "deepeel: resumed dedup (%zu states known)\n", n);
     return n == cnt;
+}
+
+
+// ---- on-disk frontier (docs/COUVERTURE.fr.md §6.3, single-batch form) ------
+// <dir>/frontier/frontier.dpf : 'DPFB', sb, count, then per record
+// tier/forced/kind/from_reset (4 bytes) + zlib length + zlib image.
+// <dir>/frontier/frontier.idx : text summary (count, per-tier counts).
+// Saving takes the deferred continuations out of memory (they are no longer
+// "pending" at exit: they wait on disk); loading puts them back with their tier.
+int dp_explorer_frontier_save(DpExplorer *ex, const char *dir) {
+    char path[600], idx[600];
+    snprintf(path, sizeof path, "%s/frontier", dir);
+    mkdir(path, 0777);
+    snprintf(idx, sizeof idx, "%s/frontier/frontier.idx", dir);
+    snprintf(path, sizeof path, "%s/frontier/frontier.dpf", dir);
+    if (!ex->defer_len) { unlink(path); unlink(idx); return 0; }
+    FILE *f = fopen(path, "wb");
+    if (!f) { perror("deepeel frontier"); return 0; }
+    uint32_t hdr[3] = { 0x42465044u /* 'DPFB' */, (uint32_t)ex->sb, ex->defer_len };
+    fwrite(hdr, sizeof hdr, 1, f);
+    uint64_t per[DP_TIER_MAX + 2] = {0};
+    uLongf cap = compressBound((uLong)ex->sb);
+    uint8_t *z = xrealloc(NULL, cap);
+    uint32_t saved = 0;
+    for (uint32_t i = 0; i < ex->defer_len; i++) {
+        DpDeferred *d = &ex->defer[i];
+        uLongf zl = cap;
+        if (compress2(z, &zl, d->p.img, (uLong)ex->sb, 6) != Z_OK) continue;
+        uint8_t h[4] = { d->tier, d->p.forced, d->p.kind, d->p.from_reset };
+        uint32_t l = (uint32_t)zl;
+        fwrite(h, 4, 1, f); fwrite(&l, 4, 1, f); fwrite(z, 1, zl, f);
+        per[d->tier <= DP_TIER_MAX ? d->tier : DP_TIER_MAX + 1]++;
+        saved++;
+        free(d->p.img);
+    }
+    free(z);
+    // the count in the header is the number actually written
+    fseek(f, 8, SEEK_SET); fwrite(&saved, 4, 1, f);
+    fclose(f);
+    FILE *x = fopen(idx, "w");
+    if (x) {
+        fprintf(x, "records %u\nimage_bytes %zu\n", saved, (size_t)ex->sb);
+        for (int t = 1; t <= DP_TIER_MAX; t++) fprintf(x, "tier%d %llu\n", t, (unsigned long long)per[t]);
+        fclose(x);
+    }
+    ex->defer_len = 0; // owned by the file now
+    return (int)saved;
+}
+
+int dp_explorer_frontier_load(DpExplorer *ex, const char *dir) {
+    char path[600];
+    snprintf(path, sizeof path, "%s/frontier/frontier.dpf", dir);
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    uint32_t hdr[3];
+    if (fread(hdr, sizeof hdr, 1, f) != 1 || hdr[0] != 0x42465044u || hdr[1] != (uint32_t)ex->sb) {
+        fprintf(stderr, "deepeel: frontier unusable (%s), ignored\n", path);
+        fclose(f);
+        return 0;
+    }
+    int n = 0;
+    for (uint32_t i = 0; i < hdr[2] && ex->defer_len < DP_DEFER_CAP; i++) {
+        uint8_t h[4]; uint32_t l;
+        if (fread(h, 4, 1, f) != 1 || fread(&l, 4, 1, f) != 1 || l > 4 * (uint32_t)ex->sb + 1024) break;
+        uint8_t *z = xrealloc(NULL, l), *img = xrealloc(NULL, ex->sb);
+        uLongf out = (uLongf)ex->sb;
+        if (fread(z, 1, l, f) != l || uncompress(img, &out, z, l) != Z_OK || out != (uLongf)ex->sb) {
+            free(z); free(img); break;
+        }
+        free(z);
+        if (ex->defer_len >= ex->defer_cap) {
+            uint32_t nc = ex->defer_cap ? ex->defer_cap * 2 : 64;
+            ex->defer = xrealloc(ex->defer, sizeof *ex->defer * nc);
+            ex->defer_cap = nc;
+        }
+        ex->defer[ex->defer_len++] = (DpDeferred){ { img, h[1], h[2], h[3], 0 }, h[0] };
+        n++;
+    }
+    fclose(f);
+    return n;
 }
 
 // next deferred continuation into *out (its tier goes to ex->defer_tier_next); 0 when none

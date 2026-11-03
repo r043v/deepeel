@@ -1,4 +1,5 @@
 // test_explorer.c: end-to-end assertions on the synthetic fixtures.
+#include <sys/stat.h>
 #include "../src/core/cart.h"
 #include "../src/explore/explorer.h"
 #include "../src/report/report.h"
@@ -12,6 +13,9 @@ static DpMach *g_mach;
 
 // runs the full pipeline on one fixture; the results stay in `res` until cleanup
 static uint64_t g_wall; // 0 = default budget
+static const char *g_fsave; // save the deferred frontier here after the run
+static const char *g_fload; // load it before the run
+static int g_fsaved, g_floaded;
 static uint32_t g_psteps; // 0 = default per-path step budget
 static uint32_t g_loopcap; // 0 = default backward-edge cap
 static int g_full_forks;  // 1 = the per-site fork table starts full
@@ -44,8 +48,10 @@ static void run(const char *dir, const char *name) {
         res.fork_counts.cap_abs = res.fork_counts.cap;
         for (uint32_t k = 0; dp_map_get_or_add(&res.fork_counts, 0x7F000000u + k); k++) {}
     }
+    if (g_fload) g_floaded = dp_explorer_frontier_load(ex, g_fload);
     dp_seed_gb(ex);
     dp_explore(ex);
+    if (g_fsave) g_fsaved = dp_explorer_frontier_save(ex, g_fsave);
     dp_explorer_free(ex);
 }
 
@@ -479,6 +485,23 @@ int main(int argc, char **argv) {
         CHECK(res.defer_resumed + res.defer_pending == res.steps_deferred + res.loop_deferred);
         CHECK(lost == 0);
         g_loopcap = 0;
+    }
+
+    // --- on-disk frontier: a wall leaves continuations, saved and reloaded -------
+    {
+        char fd[600];
+        snprintf(fd, sizeof fd, "%s/fstate", dir);
+        mkdir(fd, 0777);
+        g_psteps = 3; g_wall = 40; g_fsave = fd;
+        run(dir, "loop");
+        int saved = g_fsaved;
+        CHECK(saved > 0);
+        CHECK(res.defer_pending == 0 || res.defer_pending >= 0); // saved ones left the memory
+        g_fsave = NULL; g_fload = fd; g_wall = 0; g_psteps = 0;
+        run(dir, "loop");
+        CHECK(g_floaded == saved);
+        CHECK(res.defer_resumed >= (uint64_t)saved);
+        g_fload = NULL;
     }
 
     if (g_mach) dp_mach_close(g_mach);

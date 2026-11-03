@@ -524,6 +524,9 @@ int dp_explorer_spool_attach(DpExplorer *ex, const char *path, int resume);
 void dp_explorer_share(DpExplorer *worker, DpExplorer *leader);
 // pours queue + priority inbox into the spool; returns states still pending
 uint64_t dp_explorer_spool_flush(DpExplorer *ex);
+// deferred frontier on disk: <dir>/frontier/frontier.{dpf,idx}; save returns the records written
+int dp_explorer_frontier_save(DpExplorer *ex, const char *dir);
+int dp_explorer_frontier_load(DpExplorer *ex, const char *dir);
 uint64_t dp_explorer_spool_pending(const DpExplorer *ex);
 // exact-state dedup persistence: without it a resumed run would re-explore
 // every spooled state from scratch
