@@ -803,3 +803,22 @@ puis le rechargement de la frontière ne perd aucun code par rapport au run sans
 budget. Le message de spool indisponible dit maintenant « refused and counted ».
 Reste différé : lots par banque/section et deltas, paliers `priority`,
 `dedup-full`, `paths`, `fork-cap`, `covered`, `wall` en frontière, NES/PCE/MD.
+
+## Frontière complète (0.37.0)
+
+Toutes les raisons de perte GB passent par la frontière différée : un état
+qu'un budget abandonnerait est conservé (palier +1, budgets ×4, 3 paliers max).
+Ordre de reprise : `priority < dedup-full < paths < fork-cap < steps < loop <
+wall < covered` ; `covered` n'est repris que par `frontier drain --tier inf`.
+
+- Disque : lots `b<banque>-s<section>-<raison>-<n>.dpf` (base zlib + deltas XOR,
+  clos à 64 Mio), index `frontier.idx` avec la position de lecture, graines
+  retenues dans `seeds.bin`.
+- `deepeel frontier stats <dir>` : enregistrements en attente par raison,
+  palier et banque. `frontier drain <rom> <dir> [--tier N|inf]` reprend.
+- Rapport JSON : bloc `frontier` (`deferred`, `final`, `seeds_*`).
+- Un site de bifurcation ne parque que `2*fork_site_cap` variantes ; au-delà la
+  perte est finale et comptée.
+
+Limites : Sega/MSX ne couvrent que `steps`/`loop` ; NES/PCE/MD n'ont pas
+encore de frontière disque. Chiffres = observations de l'outil.
