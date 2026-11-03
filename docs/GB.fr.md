@@ -2122,3 +2122,12 @@ rendu de lignes du VDP de la machine (SG/MSX : 160x192 ; GG : 160x144 ; SMS :
 que sous `--watch` (il met à jour l'état des sprites) ; `--watch` force un seul
 travailleur. Rapport : `watch: N frames published`. Reste : J5/O3 hors
 Sega (GB), mode humain/`.sta`.
+
+## 0.144.0 (GB)
+
+`--session-cells` (J4 GB) : les sessions jouées archivent dans le pool de
+checkpoints chaque fond d'écran jamais vu (empreinte FNV de la carte de tuiles
+choisie par LCDC + défilement grossier, échantillonnée toutes les 8 images en
+jeu aléatoire). Le pool choisit déjà le point le moins tiré, donc une nouvelle
+cellule est reprise en priorité. Rapport : `N screen cells archived into the
+checkpoint pool`. Observation de l'outil, pas une mesure de matériel.

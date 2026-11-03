@@ -298,6 +298,9 @@ struct DpPlay {
     const DpCart *cart;
     const DpPlatform *plat;
     DpPool pool;
+    pthread_mutex_t cell_mtx;
+    uint64_t *cell_keys;   // open-addressing set of seen screen fingerprints
+    uint64_t cells_archived;
     DpWorker w[DP_MAX_SESSIONS];
     int nworkers;
     // human takeover lane (driven by the GUI thread, not threaded)
@@ -542,6 +545,36 @@ static void watch_sample(DpPlay *p, DpWorker *w, DpMach *m) {
 }
 
 // --- the vblank hook (one frame) ---------------------------------------------------
+// --- Go-Explore screen cells (J4) ---------------------------------------------------
+// FNV-1a over the background map the LCDC selects (tile indices only) plus the coarse
+// scroll: what the player sees changes it, animation and sprites do not.
+enum { CELL_SET = 1 << 16 };
+static uint64_t screen_key(const DpGblApi *api) {
+    uint8_t lcdc = api->io[0x40];
+    if (!(lcdc & 0x80)) return 0; // LCD off: nothing shown
+    const uint8_t *map = api->vram + ((lcdc & 8) ? 0x1C00 : 0x1800);
+    uint64_t h = 1469598103934665603ull;
+    for (int i = 0; i < 1024; i++) { h ^= map[i]; h *= 1099511628211ull; }
+    h ^= (uint64_t)(api->io[0x43] >> 3); h *= 1099511628211ull;
+    h ^= (uint64_t)(api->io[0x42] >> 3); h *= 1099511628211ull;
+    return h | 1;
+}
+// 1 when the key is new (and now recorded)
+static int cell_new(DpPlay *p, uint64_t k) {
+    int fresh = 0;
+    pthread_mutex_lock(&p->cell_mtx);
+    if (!p->cell_keys) p->cell_keys = calloc(CELL_SET, sizeof *p->cell_keys);
+    if (p->cell_keys) {
+        for (uint32_t i = (uint32_t)(k >> 7) & (CELL_SET - 1);; i = (i + 1) & (CELL_SET - 1)) {
+            if (p->cell_keys[i] == k) break;
+            if (!p->cell_keys[i]) { p->cell_keys[i] = k; fresh = 1; break; }
+        }
+    }
+    pthread_mutex_unlock(&p->cell_mtx);
+    return fresh;
+}
+uint64_t dp_play_cells(const DpPlay *p) { return p->cells_archived; }
+
 static void worker_vblank(DpMach *m) {
     DpWorker *w = ((DpExplorer *)m->owner)->session_ctx;
     DpPlay *p = w->p;
@@ -601,6 +634,20 @@ static void worker_vblank(DpMach *m) {
                     pthread_mutex_unlock(&p->tsn_mtx);
                 }
                 free(img);
+            }
+        }
+    }
+    if (p->cfg.cells && w->mode == IN_RNG && (w->frames_done & 7) == 0) {
+        uint64_t k = screen_key(m->api);
+        if (k && cell_new(p, k)) {
+            DpCheckpoint *c = calloc(1, sizeof *c);
+            if (c) {
+                c->img = worker_image(w);
+                c->sb = w->ex->sb;
+                c->frame = (uint32_t)w->frames_done;
+                c->credit = worker_credit(w);
+                if (c->img) { pool_insert(p, c); __atomic_fetch_add(&p->cells_archived, 1, __ATOMIC_RELAXED); }
+                else free(c);
             }
         }
     }
@@ -879,6 +926,7 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
     pthread_mutex_init(&p->bar_mtx, NULL);
     pthread_cond_init(&p->cv, NULL);
     pthread_mutex_init(&p->pool.mtx, NULL);
+    pthread_mutex_init(&p->cell_mtx, NULL);
     pthread_mutex_init(&p->inb_mtx, NULL);
     pthread_mutex_init(&p->preview_mtx, NULL);
     pthread_mutex_init(&p->watch_mtx, NULL);
@@ -1103,6 +1151,8 @@ void dp_play_free(DpPlay *p) {
     pthread_mutex_destroy(&p->bar_mtx);
     pthread_cond_destroy(&p->cv);
     pthread_mutex_destroy(&p->pool.mtx);
+    pthread_mutex_destroy(&p->cell_mtx);
+    free(p->cell_keys);
     pthread_mutex_destroy(&p->inb_mtx);
     pthread_mutex_destroy(&p->preview_mtx);
     pthread_mutex_destroy(&p->watch_mtx);

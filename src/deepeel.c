@@ -115,6 +115,7 @@ static void usage(void) {
             "    --tas-ckpt-max N     TAS replay: snapshot cap per movie (default 1024); the\n"
             "                         interval is min(movie/S, S secs), so a long movie stays at\n"
             "                         one snapshot per S seconds\n"
+            "    --session-cells      Go-Explore: sessions archive every new background screen as a checkpoint\n"
             "    --tas-ckpt-live      feed the TAS snapshots to the fork explorer during the\n"
             "                         replay instead of the default: save them, then seed the\n"
             "                         whole set after the coverage exploration\n"
@@ -364,6 +365,7 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--tas-ckpt-secs") && i + 1 < argc) scfg.tas_ckpt_secs = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--tas-ckpt-max") && i + 1 < argc) scfg.tas_ckpt_max = atoi(argv[++i]);
         else if (!strcmp(a, "--tas-ckpt-live")) scfg.tas_ckpt_live = 1;
+        else if (!strcmp(a, "--session-cells")) scfg.cells = 1;
         else if (!strcmp(a, "--tas-solo")) scfg.tas_solo = 1;
         else if (!strcmp(a, "--tas-any-rom")) scfg.tas_any_rom = 1;
         else if (!strcmp(a, "--inputs") && i + 1 < argc && !strcmp(argv[++i], "m0x")) scfg.uniform = 0;
@@ -570,6 +572,8 @@ static int cmd_explore(int argc, char **argv) {
                         (unsigned long long)dp_play_tas_snap_files(play_engine),
                         (unsigned long long)dp_play_tas_ckpts(play_engine));
         }
+        if (scfg.cells)
+            fprintf(stderr, "deepeel: %llu screen cells archived into the checkpoint pool\n", (unsigned long long)dp_play_cells(play_engine));
         if (scfg.tas_n)
             fprintf(stderr, "deepeel: TAS cuts absorbed (movie kept) %llu, wedged-machine fallbacks %llu\n",
                     (unsigned long long)dp_play_tas_cuts(play_engine),

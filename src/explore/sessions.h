@@ -50,6 +50,7 @@ typedef struct DpSessionCfg {
                                 // derived from tas_ckpt_secs and tas_ckpt_max)
     uint32_t tas_ckpt_secs;     // TAS replay: save a checkpoint snapshot every n seconds of game
                                 // time (0 = off; default 30)
+    int cells;                  // Go-Explore screen cells (J4): a never-seen background fingerprint joins the pool
     int tas_ckpt_max;           // TAS replay: checkpoint snapshots kept per movie (default 1024)
     int tas_ckpt_live;          // 1: the old behavior — the captures feed the fork explorer's
                                 // inbox during the replay instead of waiting for the post-play
@@ -103,6 +104,8 @@ int dp_play_save(const DpPlay *p);
 int dp_play_done(const DpPlay *p);
 // TAS gameplay states handed to the fork explorer so far
 uint64_t dp_play_tas_ckpts(const DpPlay *p);
+// screen cells archived into the pool (--session-cells)
+uint64_t dp_play_cells(const DpPlay *p);
 // TAS checkpoint snapshots saved on disk during the replays
 uint64_t dp_play_tas_snap_files(const DpPlay *p);
 // seed the fork explorer from every saved TAS checkpoint snapshot (in movie
