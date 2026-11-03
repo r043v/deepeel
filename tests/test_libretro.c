@@ -106,7 +106,7 @@ int main(int argc, char **argv) {
         FILE *pf = fopen(argv[2], "wb");
         fwrite(prog, 1, sizeof prog, pf);
         fclose(pf);
-        DpLrObservers o = { &T, ex, NULL, wr, dm, bk };
+        DpLrObservers o = { &T, ex, NULL, wr, dm, bk, NULL };
         for (int side = 0; side < 3; side++) { // natural, forced taken, forced not taken
             DpLibretro *b = dp_lr_open_copy(argv[1], err, sizeof err);
             CHECK_MSG(b != NULL, err);
@@ -138,13 +138,48 @@ int main(int argc, char **argv) {
         FILE *pf = fopen(argv[2], "wb");
         fwrite(prog2, 1, sizeof prog2, pf);
         fclose(pf);
-        DpLrObservers o = { &T, NULL, NULL, NULL, dm, bk };
+        DpLrObservers o = { &T, NULL, NULL, NULL, dm, bk, NULL };
         DpLibretro *b = dp_lr_open_copy(argv[1], err, sizeof err);
         CHECK_MSG(b && dp_lr_load_rom(b, argv[2], err, sizeof err), err);
         if (b) {
             dp_lr_observe(b, &o);
             while (dp_lr_step(b)) {}
             CHECK(g_bank == 3 && g_dma_src == 0x40 && g_dma_len == 4);
+            dp_lr_close(b);
+        }
+    }
+
+    // forking exploration: both sides of the conditional of the first program are covered
+    {
+        const uint8_t prog[12] = { 1, 5, 4, 8, 2, 0x10, 5, 0, 2, 0x12, 5, 0 };
+        FILE *pf = fopen(argv[2], "wb");
+        fwrite(prog, 1, sizeof prog, pf);
+        fclose(pf);
+        DpLibretro *b = dp_lr_open_copy(argv[1], err, sizeof err);
+        CHECK_MSG(b && dp_lr_load_rom(b, argv[2], err, sizeof err), err);
+        if (b) {
+            size_t zn = dp_lr_state_size(b);
+            uint8_t *init = malloc(zn);
+            dp_lr_save(b, init, zn); // every exploration starts from this state
+            uint8_t map[12] = { 0 };
+            DpLrExploreLimits lim = { 100, 10000, 64 };
+            DpLrExploreStats st;
+            CHECK(dp_lr_explore(b, map, sizeof map, &lim, &st));
+            // opcode starts 0,2,4,6,8,10 all reached: the natural run alone misses 8 and 10
+            CHECK(map[0] && map[2] && map[4] && map[6] && map[8] && map[10]);
+            CHECK(st.covered == 6 && st.branch_sites == 1 && st.forks == 2);
+            CHECK(st.cut_path_steps == 0 && st.cut_total == 0 && st.dropped_items == 0);
+            // a tiny queue is reported, never silent
+            dp_lr_load(b, init, zn);
+            uint8_t map2[12] = { 0 };
+            DpLrExploreLimits tiny = { 100, 10000, 1 };
+            CHECK(dp_lr_explore(b, map2, sizeof map2, &tiny, &st) && st.dropped_items > 0);
+            // a tiny step wall is reported too
+            dp_lr_load(b, init, zn);
+            uint8_t map3[12] = { 0 };
+            DpLrExploreLimits wall = { 100, 2, 64 };
+            CHECK(dp_lr_explore(b, map3, sizeof map3, &wall, &st) && st.cut_total > 0);
+            free(init);
             dp_lr_close(b);
         }
     }

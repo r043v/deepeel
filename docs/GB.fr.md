@@ -1215,3 +1215,21 @@ J12 (partiel) : l'extension de trace libretro porte aussi les callbacks `dma`
 banque : fenêtre, banque) dans `DpLrObservers`. Le cœur factice les émet et le
 test `libretro` les vérifie. Reste pour J12 : patch d'un vrai cœur hors dépôt,
 branchement sur l'explorateur, parité de fourches avec le backend m0boy.
+
+## 0.72.0
+
+J12 (partiel) : exploration à fourches sur un cœur libretro de niveau B.
+- Nouveau callback `branch` (un conditionnel est tranché à `pc`) dans
+  `DpLrObservers`.
+- `dp_lr_explore` : à chaque conditionnel, l'état d'avant le pas est
+  sauvegardé (serialize) puis les deux issues sont mises en file avec
+  `force_branch(0/1)` ; déduplication des items de fourche par hash d'état.
+  Bornes explicites avec compteurs de saturation rapportés : pas par chemin
+  (`cut_path_steps`), mur global (`cut_total`), file pleine (`dropped_items`).
+  Résultat : carte d'exécution par index ROM compact, sites de branchement,
+  fourches, chemins.
+- Test : sur le cœur factice, les deux côtés du conditionnel sont couverts
+  (le chemin naturel seul manque 8 et 10) ; une file minuscule et un mur de
+  pas minuscule remontent leur saturation.
+- Reste : exécution sur un vrai cœur, intégration à l'explorateur existant
+  (rapport, cartes PNG), parité de fourches avec le backend m0boy.

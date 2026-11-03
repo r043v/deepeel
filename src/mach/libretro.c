@@ -313,3 +313,72 @@ int64_t dp_lr_rom_index(DpLibretro *lr, uint32_t addr) {
 void dp_lr_observe(DpLibretro *lr, const DpLrObservers *obs) {
     if (lr->level) lr->trace.set_observers(obs);
 }
+
+static uint64_t lr_fnv(const uint8_t *p, size_t n) {
+    uint64_t h = 1469598103934665603ull;
+    while (n--) h = (h ^ *p++) * 1099511628211ull;
+    return h;
+}
+typedef struct { uint8_t *snap; int force; } LrItem;
+typedef struct {
+    DpLibretro *lr; uint8_t *map; size_t n; DpLrExploreStats *st;
+    int branch_hit; uint32_t branch_pc; uint8_t *sites; size_t site_n;
+} LrExpCtx;
+static void lrx_exec(void *u, uint32_t pc) {
+    LrExpCtx *c = u;
+    int64_t i = c->lr->trace.rom_index ? c->lr->trace.rom_index(pc) : (int64_t)pc;
+    if (i >= 0 && (size_t)i < c->n && !c->map[i]) { c->map[i] = 1; c->st->covered++; }
+}
+static void lrx_branch(void *u, uint32_t pc) { LrExpCtx *c = u; c->branch_hit = 1; c->branch_pc = pc; }
+
+int dp_lr_explore(DpLibretro *lr, uint8_t *exec_map, size_t rom_size,
+                  const DpLrExploreLimits *lim, DpLrExploreStats *st) {
+    memset(st, 0, sizeof *st);
+    if (!lr->level || !lr->trace.force_branch) return 0;
+    size_t sz = dp_lr_state_size(lr);
+    uint32_t cap = lim->max_items ? lim->max_items : 1024;
+    LrItem *q = calloc(cap, sizeof *q);
+    uint64_t *seen = calloc(65536, sizeof *seen); // (state hash, force) dedup of fork items
+    uint8_t *cur = malloc(sz), *pre = malloc(sz);
+    LrExpCtx c = { lr, exec_map, rom_size, st, 0, 0, calloc(65536, 1), 65536 };
+    DpLrObservers o = { &c, lrx_exec, NULL, NULL, NULL, NULL, lrx_branch };
+    lr->trace.set_observers(&o);
+    uint32_t nq = 0;
+    dp_lr_save(lr, cur, sz);
+    q[nq].snap = malloc(sz); memcpy(q[nq].snap, cur, sz); q[nq].force = -1; nq++;
+    while (nq) {
+        LrItem it = q[--nq];
+        dp_lr_load(lr, it.snap, sz);
+        free(it.snap);
+        st->paths++;
+        if (it.force >= 0) lr->trace.force_branch(it.force);
+        uint64_t ps = 0;
+        for (;;) {
+            if (st->steps >= lim->total_steps) { st->cut_total++; break; }
+            if (ps >= lim->path_steps) { st->cut_path_steps++; break; }
+            dp_lr_save(lr, pre, sz);
+            c.branch_hit = 0;
+            g_cur = lr;
+            int ok = lr->trace.step();
+            st->steps++; ps++;
+            if (!ok) break;
+            if (!c.branch_hit || (it.force >= 0 && ps == 1)) continue; // a forced item replays its own branch
+            // conditional: abandon this run and queue both sides from the pre-step state
+            if (!c.sites[c.branch_pc & 0xFFFF]) { c.sites[c.branch_pc & 0xFFFF] = 1; st->branch_sites++; }
+            uint64_t h = lr_fnv(pre, sz);
+            for (int f = 0; f < 2; f++) {
+                uint64_t key = (h ^ (uint64_t)(f + 1) * 0x9E3779B97F4A7C15ull) | 1;
+                uint64_t slot = key & 0xFFFF;
+                if (seen[slot] == key) { st->deduped++; continue; }
+                if (nq >= cap) { st->dropped_items++; continue; }
+                seen[slot] = key;
+                q[nq].snap = malloc(sz); memcpy(q[nq].snap, pre, sz); q[nq].force = f; nq++;
+                st->forks++;
+            }
+            break;
+        }
+    }
+    lr->trace.set_observers(NULL);
+    free(q); free(seen); free(cur); free(pre); free(c.sites);
+    return 1;
+}

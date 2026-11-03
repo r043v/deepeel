@@ -23,7 +23,7 @@ static int16_t (*input)(unsigned, unsigned, unsigned, unsigned);
 #define DP_LR_ENV_TRACE 0x7DEE0001u
 typedef struct { void *user; void (*exec)(void *, uint32_t); void (*read)(void *, uint32_t, uint8_t);
                  void (*write)(void *, uint32_t, uint8_t); void (*dma)(void *, uint32_t, uint32_t, uint32_t);
-                 void (*bank)(void *, uint32_t, uint32_t); } Obs;
+                 void (*bank)(void *, uint32_t, uint32_t); void (*branch)(void *, uint32_t); } Obs;
 typedef struct { uint32_t version; int (*step)(void); void (*set_observers)(const Obs *);
                  uint32_t (*pc)(void); int (*force_branch)(int); int64_t (*rom_index)(uint32_t); } Trace;
 static uint8_t ram[64];
@@ -35,13 +35,14 @@ static int force = -1;
 #define ACC ram[5]
 static int t_step(void) {
     if ((size_t)PC >= rom_n) return 0;
-    uint8_t op = rom[PC], arg = PC + 1 < rom_n ? rom[PC + 1] : 0;
+    uint8_t op = rom[PC], arg = (size_t)PC + 1 < rom_n ? rom[PC + 1] : 0;
     if (obs.exec) obs.exec(obs.user, PC);
     switch (op) {
     case 1: ACC = arg; PC += 2; return 1;
     case 2: ram[arg & 0x3F] = ACC; if (obs.write) obs.write(obs.user, arg & 0x3F, ACC); PC += 2; return 1;
     case 3: ACC = ram[arg & 0x3F]; if (obs.read) obs.read(obs.user, arg & 0x3F, ACC); PC += 2; return 1;
     case 4: {
+        if (obs.branch) obs.branch(obs.user, PC);
         int taken = force >= 0 ? force : (ACC == 0);
         force = -1;
         PC = taken ? arg : (uint8_t)(PC + 2);

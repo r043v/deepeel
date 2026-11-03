@@ -66,6 +66,7 @@ typedef struct DpLrObservers {
     void (*write)(void *user, uint32_t addr, uint8_t val);
     void (*dma)(void *user, uint32_t src, uint32_t dst, uint32_t len); // a hardware copy (OAM DMA, HDMA, ...)
     void (*bank)(void *user, uint32_t window, uint32_t bank);          // a mapper bank switch
+    void (*branch)(void *user, uint32_t pc);                           // a conditional is decided at pc
 } DpLrObservers;
 
 typedef struct DpLrTraceApi {
@@ -85,3 +86,21 @@ int64_t dp_lr_rom_index(DpLibretro *lr, uint32_t addr);
 void dp_lr_observe(DpLibretro *lr, const DpLrObservers *obs);
 
 #endif
+
+// Forking exploration over a level-B core: both sides of every conditional are
+// explored from a saved state. Every bound is explicit and its saturation is
+// reported (never silent).
+typedef struct DpLrExploreLimits {
+    uint64_t path_steps;  // per-path step budget
+    uint64_t total_steps; // global step wall
+    uint32_t max_items;   // pending fork items (queue cap)
+} DpLrExploreLimits;
+typedef struct DpLrExploreStats {
+    uint64_t steps, forks, paths, deduped;
+    uint64_t cut_path_steps, cut_total, dropped_items; // saturation counters
+    uint32_t covered;                                   // distinct ROM bytes executed (opcode starts)
+    uint32_t branch_sites;                              // distinct conditional pcs
+} DpLrExploreStats;
+// exec_map: one byte per ROM index (rom_size bytes), set to 1 where code starts.
+int dp_lr_explore(DpLibretro *lr, uint8_t *exec_map, size_t rom_size,
+                  const DpLrExploreLimits *lim, DpLrExploreStats *st);
