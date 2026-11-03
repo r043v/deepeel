@@ -476,6 +476,12 @@ static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, in
             } else {
                 u32_add(&ex->res->queue_overflows, 1);
                 pthread_mutex_unlock(&sh->mtx);
+                // the pool and the spool are both at their wall: the worker keeps the
+                // state in its own holding area (merged into the leader's at the join)
+                if (defer_push(ex, img, forced, kind, from_reset, choice, DP_R_PATHS)) {
+                    tree_close_g(ex, choice, DP_ISSUE_SPOOLED);
+                    return 0;
+                }
                 tree_close_g(ex, choice, DP_ISSUE_BUDGET);
                 free(img);
                 return 0;
@@ -1801,6 +1807,44 @@ static void adopt_queues(DpExplorer *ex) {
 }
 
 // writes the whole holding area as lots (one per bank x section x reason, closed at 64 MiB)
+// Converts the records of an old state spool ('DPSR') into frontier lots
+// (reason paths): the spool is drained into the holding area, which is flushed
+// to .dpf lots every DP_DEFER_CAP records. Returns the number converted.
+uint64_t dp_explorer_spool_convert(DpExplorer *ex) {
+    DpSpool *sp = ex->spool;
+    if (!sp || !ex->fdir) return 0;
+    uint64_t n = 0;
+    for (;;) {
+        while (sp->rd < sp->wr && ex->defer_len < DP_DEFER_CAP) {
+            uint64_t hdr[3];
+            if (fseek(sp->f, (long)sp->rd, SEEK_SET) || fread(hdr, sizeof hdr, 1, sp->f) != 1 ||
+                hdr[0] != DP_SPOOL_REC || hdr[2] != ex->sb) {
+                fprintf(stderr, "deepeel: spool corrupt at %llu, conversion stops\n", (unsigned long long)sp->rd);
+                sp->rd = sp->wr;
+                break;
+            }
+            uint8_t *img = xrealloc(NULL, ex->sb);
+            if (fread(img, 1, ex->sb, sp->f) != ex->sb) { free(img); sp->rd = sp->wr; break; }
+            sp->rd += sizeof hdr + ex->sb;
+            if (ex->defer_len >= ex->defer_cap) {
+                uint32_t nc = ex->defer_cap ? ex->defer_cap * 2 : 64;
+                ex->defer = xrealloc(ex->defer, sizeof *ex->defer * nc);
+                ex->defer_cap = nc;
+            }
+            ex->defer[ex->defer_len++] = (DpDeferred){
+                { img, (uint8_t)(hdr[1] & 1), (uint8_t)(hdr[1] >> 8), (uint8_t)((hdr[1] >> 16) & 1),
+                  (uint32_t)(hdr[1] >> 32) },
+                1, DP_R_PATHS };
+            n++;
+        }
+        if (!ex->defer_len) break;
+        dp_explorer_frontier_save(ex, ex->fdir);
+    }
+    ex->res->spool_bytes = 0;
+    spool_save_cursor(ex);
+    return n;
+}
+
 int dp_explorer_frontier_save(DpExplorer *ex, const char *dir) {
     if (!ex->fdir) { ex->fdir = strdup(dir); }
     char p[700];
@@ -2240,6 +2284,24 @@ int dp_explore(DpExplorer *ex) {
     for (int i = 0; i < nw; i++) pthread_join(th[i], NULL);
     for (int i = 0; i < nw; i++) {
         DpMach *m = w[i]->mach;
+        // states a worker still held aside move to the leader (never silently freed)
+        for (uint32_t k = 0; k < w[i]->defer_len; k++) {
+            DpDeferred *d = &w[i]->defer[k];
+            if (ex->defer_len < DP_DEFER_CAP) {
+                if (ex->defer_len >= ex->defer_cap) {
+                    uint32_t nc = ex->defer_cap ? ex->defer_cap * 2 : 64;
+                    ex->defer = xrealloc(ex->defer, sizeof *ex->defer * nc);
+                    ex->defer_cap = nc;
+                }
+                ex->defer[ex->defer_len++] = *d;
+                ex->defer_by_reason[d->reason]++;
+            } else {
+                ex->res->defer_final[d->reason]++;
+                ex->res->defer_dropped++;
+                free(d->p.img);
+            }
+        }
+        w[i]->defer_len = 0;
         dp_explorer_free(w[i]);
         dp_mach_close(m);
     }

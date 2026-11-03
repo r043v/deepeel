@@ -841,3 +841,10 @@ encore de frontière disque. Chiffres = observations de l'outil.
   `parked_resumed`, `parked_lost` dans le rapport texte.
 - Sega/MSX : les reports encore en attente en fin de run sont écrits dans le
   spool (`defer_spooled`).
+
+## 0.40.0
+
+- Pool parallèle : si le spool est plein, le worker reporte l'état dans sa zone (fusionnée dans celle du chef à la jointure) au lieu de le perdre ; `queue_overflows` reste compté.
+- `--spool-to-frontier` (avec `--resume --state-dir`) convertit un spool `DPSR` en lots `.dpf` de raison `paths`.
+- Tests : `frontier_cli` (spool → conversion → `frontier stats` → `drain`), Sega « report en attente au mur ».
+- Observations de l'outil, pas des mesures matériel.

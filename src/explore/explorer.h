@@ -556,6 +556,7 @@ void dp_explorer_share(DpExplorer *worker, DpExplorer *leader);
 // pours queue + priority inbox into the spool; returns states still pending
 uint64_t dp_explorer_spool_flush(DpExplorer *ex);
 // deferred frontier on disk: <dir>/frontier/frontier.{dpf,idx}; save returns the records written
+uint64_t dp_explorer_spool_convert(DpExplorer *ex);
 int dp_explorer_frontier_save(DpExplorer *ex, const char *dir);
 int dp_explorer_frontier_load(DpExplorer *ex, const char *dir);
 uint64_t dp_explorer_frontier_disk(const DpExplorer *ex);

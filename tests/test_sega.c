@@ -69,6 +69,20 @@ static void deferral(void) {
         CHECK(r.first.n>0 && r.first.n+r.first.dropped==any && !bad);
     }
     dp_sega_results_free(&r);
+    {   // a wall with a deferred cut still waiting: spooled with its tier, resumed by --resume
+        char sp[]="/tmp/dp_sega_wallXXXXXX"; int fd=mkstemp(sp); CHECK(fd>=0); if(fd>=0) close(fd);
+        o.defer_tiers=3; o.spool_path=sp; o.max_total=5; o.input_total=0; o.indirect_total=0;
+        int ok=dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r);
+        CHECK(ok);
+        uint64_t pend=0;
+        if(ok) { pend=r.defer_pending; CHECK(r.defer_spooled==r.defer_pending); CHECK(!(r.flags[0x164]&DP_SEGA_NATURAL)); dp_sega_results_free(&r); }
+        CHECK(pend>0); // the wall left a deferral behind: the case is really exercised
+        o.resume=1; o.max_total=100000;
+        ok=dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r);
+        CHECK(ok);
+        if(ok) { CHECK(r.flags[0x164]&DP_SEGA_NATURAL); dp_sega_results_free(&r); }
+        o.resume=0; o.spool_path=NULL; unlink(sp);
+    }
     // too few tiers: the final cut is counted, never silent
     o.defer_tiers=1;
     CHECK(dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r));

@@ -252,6 +252,7 @@ static int cmd_explore(int argc, char **argv) {
     dp_session_cfg_defaults(&scfg);
     uint8_t tier_limit = 0, defer_all = 0;
     uint8_t eb[32];
+    int spool_to_frontier = 0;
     uint16_t ea[32];
     int entries = 0;
     for (int i = 2; i < argc; i++) {
@@ -323,6 +324,7 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--stall") && i + 1 < argc) scfg.stall_epochs = atoi(argv[++i]);
         else if (!strcmp(a, "--state-dir") && i + 1 < argc) scfg.state_dir = argv[++i];
         else if (!strcmp(a, "--resume")) scfg.resume = 1;
+        else if (!strcmp(a, "--spool-to-frontier")) spool_to_frontier = 1;
         else if (!strcmp(a, "--input") && i + 1 < argc && scfg.inputs_n < 8) scfg.inputs[scfg.inputs_n++] = argv[++i];
         else if (!strcmp(a, "--tas") && i + 1 < argc && scfg.tas_n < 8) scfg.tas[scfg.tas_n++] = argv[++i];
         else if (!strcmp(a, "--tas-dir") && i + 1 < argc && tas_dirs_n < 8) tas_dirs[tas_dirs_n++] = argv[++i];
@@ -480,6 +482,10 @@ static int cmd_explore(int argc, char **argv) {
         int fl = dp_explorer_frontier_load(ex, fdir);
         if (fl) fprintf(stderr, "deepeel: resumed frontier (%d continuations/seeds loaded, %llu more on disk)\n", fl,
                         (unsigned long long)dp_explorer_frontier_disk(ex));
+    }
+    if (spool_to_frontier && fdir) {
+        uint64_t cv = dp_explorer_spool_convert(ex);
+        fprintf(stderr, "deepeel: %llu spool records converted to frontier lots in %s/frontier\n", (unsigned long long)cv, fdir);
     }
     if (!g_drain_only) dp_seed_gb(ex); // a drain runs the saved continuations only
     for (int i = 0; !g_drain_only && i < entries; i++)
