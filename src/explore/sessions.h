@@ -28,6 +28,7 @@ typedef struct DpSessionCfg {
     uint32_t seed;              // input RNG base
     uint64_t max_frames;        // stop after this many frames total (0 = unlimited)
     uint64_t stagnation_frames; // stop after this many frames with no discovery (0 = never)
+    int unbounded;              // --unbounded: the memory cap no longer stops the run (overflow goes to disk)
     uint64_t mem_cap_mb;        // stop (gracefully) once resident memory exceeds this (0 = off)
     uint64_t time_limit_secs;   // stop (gracefully) after this many wall-clock seconds of
                                 // play (0 = off) — a campaign wall: it outranks even the

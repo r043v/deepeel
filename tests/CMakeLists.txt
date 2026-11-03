@@ -151,6 +151,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_bankdata.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_vblank.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_copy1.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_wramexec.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_hdma.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_apu.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pal.gb
@@ -383,3 +384,7 @@ add_test(NAME md_summary COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURR
 set_tests_properties(md_summary PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_heat COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_pad_effect.md --heat $D/md_heat.txt >/dev/null 2>&1; head -1 $D/md_heat.txt | grep -q 'md heat v1' && grep -v '^#' $D/md_heat.txt | awk '{s+=$3} END {exit !(s>0)}'")
 set_tests_properties(md_heat PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME wram_exec_trace COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_wramexec.gb --cov $D/we2.cov --text $D/we2.txt >/dev/null 2>&1; grep -q '^01 4000 [1357]' $D/we2.cov && grep -q 'traced to ROM copy sources' $D/we2.txt && ! grep -q '(0 traced' $D/we2.txt")
+set_tests_properties(wram_exec_trace PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME unbounded_spool COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; (ulimit -f 400000; timeout 60 $B explore $D/fix_branch.gb --queue 1 --queue-max 1 --max-paths 2 --unbounded --text $D/ub.txt >/dev/null 2>&1); grep -q '^budgets: 0 paths cap hit, 0 step-wall hit, 0 queue overflows' $D/ub.txt && grep -Eq '^spool: [1-9][0-9]* written, [1-9][0-9]* read back, 0 refused, 0 bytes pending' $D/ub.txt")
+set_tests_properties(unbounded_spool PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 90)

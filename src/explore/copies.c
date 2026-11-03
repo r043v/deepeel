@@ -69,6 +69,21 @@ void dp_copy_on_vram_write(DpExplorer *ex, uint8_t bank, uint16_t addr, uint8_t 
     vram_touch(ex, &ex->ct, bank, addr, v);
 }
 
+// WRAM writes feed the same tracker under the pseudo bank 0xFE, so a ROM->WRAM
+// copy loop (code run from WRAM later) is recorded with dst_space WRAM
+#define DP_COPY_WRAM_BANK 0xFE
+void dp_copy_on_wram_write(DpExplorer *ex, uint16_t addr, uint8_t v) {
+    vram_touch(ex, &ex->ct, DP_COPY_WRAM_BANK, addr, v);
+}
+
+// code is about to run from WRAM: a loop that has just filled it may not have
+// been emitted yet (records leave at window breaks) — emit it now
+void dp_copy_flush_for_exec(DpExplorer *ex, uint16_t pc) {
+    DpCopyTracker *ct = &ex->ct;
+    if (ct->dst_valid && ct->dst_bank == DP_COPY_WRAM_BANK && pc >= ct->dst_lo && pc <= ct->dst_hi)
+        flush(ex, ct, 1);
+}
+
 void dp_copy_on_back_edge(DpCopyTracker *ct, uint16_t site, uint32_t site_key) {
     if (ct->loop_active && ct->loop_pc == site) {
         ct->iter++;
@@ -183,7 +198,7 @@ static void flush(DpExplorer *ex, DpCopyTracker *ct, int force) {
                 }
             } else {
                 if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
-                DpCopyRec r = { 0, verb, DP_SPACE_ROM, DP_SPACE_VRAM, ct->src_bank, ct->dst_bank,
+                DpCopyRec r = { 0, verb, DP_SPACE_ROM, ct->dst_bank == DP_COPY_WRAM_BANK ? DP_SPACE_WRAM : DP_SPACE_VRAM, ct->src_bank, ct->dst_bank,
                                 ct->src_lo, ct->src_hi, ct->dst_lo, ct->dst_hi, bytes, ct->loop_pc };
                 dp_record_copy(ex, &r, ct->loop_key);
             }

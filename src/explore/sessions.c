@@ -1249,7 +1249,7 @@ int dp_play_poll(DpPlay *p) {
     else if (p->cfg.max_frames && !tas_left && p->total_frames >= p->cfg.max_frames) reason = 0;
     else if (p->cfg.stagnation_frames && !tas_left && p->stagnation >= p->cfg.stagnation_frames) reason = 1;
     else if (p->cfg.until_static && !tas_left && p->unexplained == 0 && frames) reason = 3;
-    else if (p->cfg.mem_cap_mb && dp_rss_mb() > p->cfg.mem_cap_mb) reason = 4;
+    else if (p->cfg.mem_cap_mb && !p->cfg.unbounded && dp_rss_mb() > p->cfg.mem_cap_mb) reason = 4;
     else if (p->cfg.time_limit_secs &&
              (uint64_t)(time(NULL) - p->t_start) >= p->cfg.time_limit_secs) reason = 6;
     else if (p->cfg.tas_solo && !tas_left && p->epoch > 0) reason = 5;

@@ -246,6 +246,18 @@ def build(out):
         r[0x4000 + i] = (i * 13 + 5) & 0xFF
     save(out, "fix_copy1", r)
 
+    # --- wramexec: a 16-byte routine copied ROM->WRAM, then called there -------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x21, 0x00, 0x40)                # ld hl,$4000
+    w(r, 0x153, 0x11, 0x00, 0xC0)                # ld de,$C000
+    w(r, 0x156, 0x01, 0x10, 0x00)                # ld bc,$0010
+    w(r, 0x159, 0x2A, 0x12, 0x13, 0x0B, 0x78, 0xB1, 0x20, 0xF8)   # copy loop
+    w(r, 0x161, 0xCD, 0x00, 0xC0)                # call $C000 (the copy)
+    w(r, 0x164, 0x76)                            # halt
+    w(r, 0x4000, 0x3E, 0x42, 0xEA, 0x00, 0xD0, 0xC9)   # ld a,$42 ; ld ($D000),a ; ret
+    save(out, "fix_wramexec", r)
+
     # --- hdma: CGB general-purpose HDMA, 256 bytes $4000 -> $8000 -------------
     r = rom(2)
     w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)

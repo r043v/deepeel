@@ -19,15 +19,20 @@ sources, frontière différée, feuille de route) est `docs/COUVERTURE.fr.md`.
   comportements contractuels : les deux côtés d'un conditionnel, l'éviction
   par contexte, les enregistrements de copie (boucle CPU, OAM DMA), la
   timeline de banques, le verdict `required`/`forced`, le bornage des boucles.
-- Un fork d'exploration est toujours borné : si un nouveau chemin peut
-  boucler, il lui faut un garde (budget de pas, cap d'arrière-branche, cap de
-  forks par site) et son compteur de saturation rapporté. Rien ne doit
-  tourner sans fin, et une saturation ne doit jamais être silencieuse.
+- Un fork d'exploration est borné par défaut (budget de pas, cap d'arrière-branche,
+  cap de forks par site, compteur de saturation rapporté, jamais silencieux). Exception
+  décidée par le propriétaire : `--unbounded` lève ces plafonds (cap de forks, file,
+  spool, chemins, pas, arrêt mémoire) ; ce que la RAM ne tient pas va sur le disque
+  (`spool.bin` dans `<sortie>.state`) pour exploration ultérieure. La couverture prime
+  sur le temps et les ressources ; le seul arrêt est l'épuisement ou SIGINT. Le
+  pruning « les deux côtés déjà couverts » reste : il n'ajoute aucun code.
 - Les clés ROM sont des index compacts `bank * 0x4000 + (addr & 0x3FFF)`
   (`dp_rom_index`) — jamais `bank << 16`. Toute nouvelle structure indexée par
   la ROM utilise cet index.
 - L'exécution hors ROM (pc ≥ $8000, code en VRAM/WRAM) est comptée
-  (`exec_outside`) mais ne pénètre pas les cartes de la ROM.
+  (`exec_outside`). Quand une boucle de copie verbatim ROM→WRAM a produit ces
+  octets, l'exécution est rattachée à leurs octets source en ROM
+  (`exec_wram_rom`) : le code copié puis exécuté en WRAM est du code de la ROM.
 - Un changement visible dans les rapports ou la fenêtre incrémente la version
   dans `CMakeLists.txt` (projet) ou est noté dans `docs/GB.fr.md`.
 - Les nombres produits sur ROMs réelles sont des observations de l'outil

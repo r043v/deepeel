@@ -1938,3 +1938,30 @@ couverture d'exploration. La cellule O1 du MD passe ✅ : carte classée, PNG,
 JSON et chaleur sont tous là (fixtures seulement, aucune ROM réelle essayée).
 Limite : avec `--jobs 2` l'instance secondaire ne reverse pas ses compteurs de
 chaleur ; la chaleur ne reflète que l'instance principale.
+
+## 0.131.0
+
+Deux changements décidés par le propriétaire : la couverture prime sur le temps
+et les ressources.
+
+- **Code exécuté en WRAM (GB).** Les écritures en WRAM alimentent le traqueur
+  de copies ; une boucle ROM→WRAM verbatim est enregistrée (`-> wram`). Quand le
+  pc est dans cette plage WRAM, l'instruction compte comme exécutée aux octets
+  source de la ROM (`exec_wram_rom`, ligne `outside-rom exec (N traced to ROM
+  copy sources)`). Avant, ce code était seulement compté. Test `wram_exec_trace`
+  (fixture `fix_wramexec`). Limite : seulement les copies verbatim observées ;
+  un code WRAM construit autrement (décompression, patch) reste non rattaché.
+- **`--unbounded`.** Aucun plafond de forks par site, de chemins, de pas, de
+  file, de spool, ni arrêt sur plafond mémoire. La file qui déborde, la zone
+  d'attente pleine et l'échelle de paliers épuisée écrivent dans `spool.bin`
+  (`<sortie>.state`, créé si absent), relu quand la file se vide. Le pruning
+  « deux côtés déjà couverts » est conservé. Test `unbounded_spool` : file de
+  taille 1, 21 états écrits puis relus, 0 débordement, même résidu que sans
+  budget.
+
+Mise en garde mesurée : sans le pruning « couvert », un essai sur
+`fix_branch.gb` a écrit plusieurs Gio de spool en 20 s (quota tmpfs atteint) :
+l'espace d'états à compteurs de données est infini. `--unbounded` s'arrête donc
+à l'épuisement ou à SIGINT (reprise par `--resume`), pas forcément vite, et il
+faut un disque en face. Je n'ai pas relancé Zelda en `--unbounded` : la
+campagne reste à faire (J13).

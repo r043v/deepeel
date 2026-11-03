@@ -225,6 +225,7 @@ typedef struct DpResults {
     // counters (fork-explorer ones are main-thread only; steps_total and the
     // discovery counters move under every session worker)
     uint64_t steps_total, paths_run;
+    uint32_t exec_wram_rom; // WRAM-executed instructions traced to the ROM bytes a verbatim copy loop put there
     uint32_t exec_outside; // instructions executed outside ROM (VRAM/RAM code)
     uint64_t hits_saturated; // per-byte hit counters held at UINT32_MAX (never wrap)
     uint32_t forks_branch, forks_irq, forks_key, forks_p1, evicted_exact, evicted_ctx;
@@ -293,6 +294,7 @@ typedef struct DpConfig {
     int no_provenance;        // disable the static HL/A provenance pass
     int no_siblings;          // disable the copy-sibling inference
     int closure_rounds;       // closure -> seed -> explore loops (default 4)
+    int unbounded;            // coverage over resources: no fork/queue/tier/disk cap, overflow goes to the disk spool
     int no_covered_prune;     // keep forking sites whose both sides are known
     uint32_t covered_fork_keep; // forks a fully-known site still gets (default 2)
     int seed_banks;           // seed every switchable bank at $4000
@@ -372,6 +374,7 @@ typedef struct DpSharedPool {
 
 // the engine state is shared with the sibling modules (sections.c, copies.c)
 struct DpExplorer {
+    struct { uint32_t gen; int32_t rk; } wram_src[0x2000]; // WRAM pc -> ROM index of its copy source (cache, per copy_count)
     DpConfig cfg;
     DpResults *res;
     DpMach *mach;      // the live machine (instance 0 during fork drains)
@@ -510,6 +513,8 @@ void dp_copy_reset(DpCopyTracker *ct);
 void dp_record_copy(DpExplorer *ex, const DpCopyRec *rec, uint32_t attrib_key);
 void dp_copy_on_rom_read(DpExplorer *ex, uint8_t bank, uint16_t addr, uint8_t v);
 void dp_copy_on_vram_write(DpExplorer *ex, uint8_t bank, uint16_t addr, uint8_t v);
+void dp_copy_flush_for_exec(DpExplorer *ex, uint16_t pc);
+void dp_copy_on_wram_write(DpExplorer *ex, uint16_t addr, uint8_t v);
 void dp_copy_on_back_edge(DpCopyTracker *ct, uint16_t site, uint32_t site_key);
 void dp_copy_flush_path(DpExplorer *ex, DpCopyTracker *ct);
 // copy-sibling inference (after the runs): a verbatim ROM->VRAM copy whose

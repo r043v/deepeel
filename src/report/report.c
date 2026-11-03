@@ -71,7 +71,7 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
              "exploration: %llu steps in %llu paths (%llu forks: %u branch, %u irq, %u key, %u p1), %u sections\n"
              "evicted: %u exact states, %u same-context entries; cuts: %u cycles, %u step-budget, %u padding\n"
              "nonsense evictions: %u echo/OAM, %u verbatim data, %u incoherent stack\n"
-             "budgets: %u paths cap hit, %u step-wall hit, %u queue overflows (%u growths), %u forks capped (%u table full), %u outside-rom exec\n"
+             "budgets: %u paths cap hit, %u step-wall hit, %u queue overflows (%u growths), %u forks capped (%u table full), %u outside-rom exec (%u traced to ROM copy sources)\n"
              "spool: %u written, %u read back, %u refused, %llu bytes pending\n"
              "seeds: %u natural, %u speculative (%u refused: cascade solde spent)\n"
              "data: %llu bytes proven verbatim (cov flag 8), %u exec∩data contradictions\n"
@@ -84,7 +84,7 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
              res->section_count, res->evicted_exact, res->evicted_ctx, res->cycle_cuts,
              res->step_cuts, res->pad_cuts, res->nonsense_echo, res->nonsense_data,
              res->nonsense_stack, res->budget_paths, res->budget_steps, res->queue_overflows,
-             res->queue_growths, res->forks_capped, res->forks_table_full, res->exec_outside,
+             res->queue_growths, res->forks_capped, res->forks_table_full, res->exec_outside, res->exec_wram_rom,
              res->spool_writes, res->spool_reads, res->spool_refused,
              (unsigned long long)res->spool_bytes,
              res->seeds_natural, res->seeds_spec, res->seeds_refused_budget,
@@ -218,7 +218,7 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
             const DpCopyRec *r = &res->copies[i];
             snprintf(line, sizeof line, "  %-8s rom b%u:%04x-%04x -> %s b%u:%04x-%04x (%u bytes)%s at %04x\n",
                      chan_name(r->channel), r->src_bank, r->src_lo, r->src_hi,
-                     r->dst_space == DP_SPACE_VRAM ? "vram" : "oam", r->dst_bank, r->dst_lo, r->dst_hi,
+                     r->dst_space == DP_SPACE_VRAM ? "vram" : r->dst_space == DP_SPACE_WRAM ? "wram" : "oam", r->dst_bank, r->dst_lo, r->dst_hi,
                      r->bytes, r->verbatim ? " verbatim" : "", r->pc);
             dp_buf_str(out, line);
         }
@@ -484,7 +484,7 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
                    chan_name(r->channel), r->verbatim ? "true" : "false",
                    r->src_space == DP_SPACE_ROM ? "rom" : (r->src_space == DP_SPACE_WRAM ? "wram" : "vram"),
                    r->src_bank, r->src_lo, r->src_hi,
-                   r->dst_space == DP_SPACE_VRAM ? "vram" : "oam", r->dst_bank, r->dst_lo, r->dst_hi,
+                   r->dst_space == DP_SPACE_VRAM ? "vram" : r->dst_space == DP_SPACE_WRAM ? "wram" : "oam", r->dst_bank, r->dst_lo, r->dst_hi,
                    r->bytes, r->pc);
         if (i + 1 < res->copy_count) dp_buf_ch(o, ',');
         dp_buf_ch(o, '\n');

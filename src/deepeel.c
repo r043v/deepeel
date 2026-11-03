@@ -329,6 +329,12 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--state-dir") && i + 1 < argc) scfg.state_dir = argv[++i];
         else if (!strcmp(a, "--resume")) scfg.resume = 1;
         else if (!strcmp(a, "--spool-to-frontier")) spool_to_frontier = 1;
+        else if (!strcmp(a, "--unbounded")) {
+            // coverage first: no per-site fork cap (covered-both-sides pruning stays: it adds no code), no spool or
+            // queue ceiling, no memory stop; whatever RAM cannot hold goes to the disk
+            cfg.unbounded = scfg.unbounded = 1; cfg.fork_site_cap = 0x7FFFFFFFu;
+            cfg.spool_cap_mb = 0; cfg.spool_cap_bytes = 0;
+        }
         else if (!strcmp(a, "--input") && i + 1 < argc && scfg.inputs_n < 8) scfg.inputs[scfg.inputs_n++] = argv[++i];
         else if (!strcmp(a, "--tas") && i + 1 < argc && scfg.tas_n < 8) scfg.tas[scfg.tas_n++] = argv[++i];
         else if (!strcmp(a, "--tas-dir") && i + 1 < argc && tas_dirs_n < 8) tas_dirs[tas_dirs_n++] = argv[++i];
@@ -446,6 +452,7 @@ static int cmd_explore(int argc, char **argv) {
     }
     DpMach *mach = dp_mach_open(vi, 0);
     dp_mach_set_rom(mach, cart->rom, cart->rom_size);
+    if (cfg.unbounded) { cfg.max_paths = UINT32_MAX; cfg.max_steps_total = UINT64_MAX; }   // no path/step wall: the run ends when nothing is left
     DpExplorer *ex = dp_explorer_new(&cfg, &res, mach);
     // the common exploration tree: every seed, fork and session deposit is
     // one choice; --resume reloads it from tree.bin
@@ -464,6 +471,13 @@ static int cmd_explore(int argc, char **argv) {
     // the frontier directory exists whatever the options: next to the outputs
     // when there is no --state-dir
     char fdir_auto[600];
+    char ub_dir[600];
+    if (cfg.unbounded && !scfg.state_dir) {   // the spool needs a directory: next to the outputs
+        const char *b = json ? json : text ? text : html ? html : summary ? summary : "deepeel-unbounded";
+        snprintf(ub_dir, sizeof ub_dir, "%s.state", b);
+        mkdir(ub_dir, 0777);
+        scfg.state_dir = ub_dir;
+    }
     const char *fdir = scfg.state_dir;
     if (!fdir) {
         const char *base = json ? json : text ? text : html ? html : summary ? summary : NULL;

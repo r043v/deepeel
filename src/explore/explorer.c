@@ -696,7 +696,8 @@ static void hook_write(DpMach *m, uint16_t a, uint8_t v) {
                1ull << (((a - 0xA000) & (DP_CRAM_PAGES * 256 - 1)) >> 8));
         return;
     }
-    if (a < 0xFE00) return; // WRAM and its echo: no per-byte map
+    if (a < 0xE000) { dp_copy_on_wram_write(ex, a, v); return; }   // WRAM: copy destination (code run from WRAM)
+    if (a < 0xFE00) return; // echo: no per-byte map
     if (a < 0xFF00) { // OAM
         __atomic_store_n(&res->oam_written, 1, __ATOMIC_RELAXED);
         return;
@@ -774,6 +775,32 @@ static void hook_write(DpMach *m, uint16_t a, uint8_t v) {
     }
 }
 
+// ROM index whose byte a verbatim copy loop wrote at WRAM address pc, or -1.
+// The newest matching record wins; the answer is cached until a new record arrives.
+static int32_t wram_rom_source(DpExplorer *ex, uint16_t pc) {
+    if (pc < 0xC000 || pc >= 0xE000) return -1;
+    DpResults *res = ex->res;
+    uint32_t gen = (uint32_t)res->copy_count + 1;
+    if (ex->wram_src[pc - 0xC000].gen == gen) return ex->wram_src[pc - 0xC000].rk;
+    int32_t rk = -1;
+    dp_copy_flush_for_exec(ex, pc);
+    gen = (uint32_t)res->copy_count + 1;
+    if (res->mt) pthread_mutex_lock(&res->rec_mtx);
+    for (int i = res->copy_count - 1; i >= 0; i--) {
+        const DpCopyRec *c = &res->copies[i];
+        if (c->channel != 0 || !c->verbatim || c->src_space != DP_SPACE_ROM) continue;
+        if (pc < c->dst_lo || pc > c->dst_hi) continue;
+        uint32_t sa = (uint32_t)c->src_lo + (uint32_t)(pc - c->dst_lo);
+        if (sa > c->src_hi || sa >= 0x8000) continue;
+        uint32_t k = dp_rom_index(sa < 0x4000 ? 0 : c->src_bank, (uint16_t)sa);
+        if (k < (uint32_t)res->banks * 0x4000) { rk = (int32_t)k; break; }
+    }
+    if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
+    ex->wram_src[pc - 0xC000].gen = gen;
+    ex->wram_src[pc - 0xC000].rk = rk;
+    return rk;
+}
+
 // --- the per-instruction hook ---------------------------------------------------------
 static void emit_pend_map(DpExplorer *ex) {
     if (!ex->pend_map) return;
@@ -812,6 +839,7 @@ static void emit_pend_map(DpExplorer *ex) {
 // The policy (tiers, caps, final losses) is in frontier.c.
 int defer_room(DpExplorer *ex, int reason) {
     DpResults *res = ex->res;
+    if (ex->cfg.unbounded) return 1;   // never refused: defer_push parks it in memory or on the disk spool
     switch (dp_frontier_room(ex->cur_tier, ex->defer_len, ex->defer_by_reason[reason], reason)) {
     case DP_ROOM_TIER_FINAL: res->defer_final[reason]++; return 0;
     case DP_ROOM_FULL: res->defer_final[reason]++; res->defer_dropped++; return 0;
@@ -823,6 +851,17 @@ int defer_room(DpExplorer *ex, int reason) {
 int defer_push(DpExplorer *ex, uint8_t *img, int forced, int kind, int from_reset,
                       uint32_t choice, int reason) {
     if (!defer_room(ex, reason)) return 0;
+    if (ex->cfg.unbounded && ex->spool &&
+        (ex->cur_tier >= DP_TIER_MAX || ex->defer_len >= DP_DEFER_CAP ||
+         ex->defer_by_reason[reason] >= DP_DEFER_CAP)) {
+        // holding area or tier ladder exhausted: the state waits on the disk spool
+        // (it resumes at the base budget; it has still advanced, so no loop)
+        if (spool_write_rec(ex, img, forced, kind, from_reset, choice)) {
+            ex->res->defer_by[reason]++;
+            free(img);
+            return 1;
+        }
+    }
     if (ex->defer_len >= ex->defer_cap) {
         uint32_t nc = ex->defer_cap ? ex->defer_cap * 2 : 64;
         ex->defer = xrealloc(ex->defer, sizeof *ex->defer * nc);
@@ -1086,9 +1125,23 @@ bad_done:
     // exec marking + section touch (padding slides are never classified)
     if (!ex->cur_pad) {
         if (pc >= 0x8000) {
-            // executing VRAM/WRAM/HRAM code: real hardware allows it, but it
-            // is not ROM map information — count it and move on
+            // executing VRAM/WRAM/HRAM code: counted, and when a verbatim copy loop
+            // put these bytes in WRAM from the ROM, the ROM source is executed code
             u32_add(&res->exec_outside, 1);
+            int32_t rk = wram_rom_source(ex, pc);
+            if (rk >= 0) {
+                uint8_t nf = (uint8_t)(ex->cur_forced ? DP_XF_FORCED : DP_XF_NATURAL);
+                uint32_t xs = ex->session ? DP_SRC_SESSION : (ex->cur_forced ? DP_SRC_FORK_FORCED : DP_SRC_FORK_NATURAL);
+                uint32_t nbytes = (uint32_t)res->banks * 0x4000;
+                int len = dp_isa_sm83()->length(op);
+                for (int i = 0; i < len && (uint32_t)rk + (uint32_t)i < nbytes; i++) {
+                    uint32_t k = (uint32_t)rk + (uint32_t)i;
+                    uint8_t o2 = flags_or(&res->exec_flags[k], i ? nf : (uint8_t)(nf | DP_XF_START));
+                    src_or(res, k, xs);
+                    if (!(o2 & nf)) ex->credit_exec++;
+                }
+                u32_add(&res->exec_wram_rom, 1);
+            }
         } else {
             uint8_t nf = (uint8_t)(ex->cur_forced ? DP_XF_FORCED : DP_XF_NATURAL);
             uint8_t old = flags_or(&res->exec_flags[pk], nf);
