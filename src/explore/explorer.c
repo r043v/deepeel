@@ -301,6 +301,17 @@ void dp_static_scan(DpResults *res) {
 // --- engine hooks (wired in dp_explorer_new) ----------------------------------------
 static void hook_step(DpMach *m, uint16_t pc, uint8_t op, int entry);
 static void hook_read(DpMach *m, uint16_t a, uint8_t v);
+// count a probe once per code site (cap 16 sites per probe, parallel-safe)
+static void probe_site(DpResults *res, int which, uint16_t pc) {
+    if (res->mt) pthread_mutex_lock(&res->rec_mtx);
+    uint32_t *cnt = which ? &res->rtc_selects : &res->serial_starts;
+    uint32_t i;
+    for (i = 0; i < *cnt; i++)
+        if (res->probe_pc[which][i] == pc) break;
+    if (i == *cnt && *cnt < 16) res->probe_pc[which][(*cnt)++] = pc;
+    if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
+}
+
 static void hook_write(DpMach *m, uint16_t a, uint8_t v);
 
 DpExplorer *dp_explorer_new(const DpConfig *cfg, DpResults *res, DpMach *mach) {
@@ -661,6 +672,8 @@ static void hook_write(DpMach *m, uint16_t a, uint8_t v) {
     DpExplorer *ex = m->owner;
     DpResults *res = ex->res;
     if (a < 0x8000) { // mapper write: the bank flip resolves on the next step
+        if (a >= 0x4000 && a < 0x6000 && v >= 8 && v <= 0x0C)
+            probe_site(res, 1, m->api->gbr->pc);
         ex->pend_map = 1;
         ex->pend_pc = m->api->gbr->pc;
         ex->pend_addr = a;
@@ -707,6 +720,7 @@ static void hook_write(DpMach *m, uint16_t a, uint8_t v) {
         if (ex->last_rom_valid && ex->last_rom_val == v && ((a >= 0xFF30 && a <= 0xFF3F) ||
                                                            (a >= 0xFF10 && a <= 0xFF25)))
             flags_or(&res->data_flags[ex->last_rom_key], a >= 0xFF30 ? DP_DF_SAMPLE : DP_DF_MUSIC);
+        if (a == 0xFF02 && (v & 0x80)) probe_site(res, 0, m->api->gbr->pc);
         if (a >= 0xFF51 && a <= 0xFF54) ex->hdma[a - 0xFF51] = v;
         if (a == 0xFF55) {
             // CGB HDMA: source/destination come from HDMA1-4, length from the

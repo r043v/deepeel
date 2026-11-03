@@ -250,6 +250,10 @@ int main(int argc, char **argv) {
     CHECK(res.data_flags[dp_rom_index(1, 0x4001)] & DP_DF_MUSIC);
     CHECK(res.apu_sample_bytes == 1 && res.apu_music_bytes == 1);
 
+    // --- probes: serial start and RTC register select are counted ------------------------
+    run(dir, "probes");
+    CHECK(res.serial_starts == 1 && res.rtc_selects == 1);
+
     // --- copy1: a pure 1:1 ROM->VRAM copy is proven verbatim --------------------------
     run(dir, "copy1");
     const DpCopyRec *cv = copy_of(0, 1, 0x4000, 0x40FF, 0x8000, 0x80FF);

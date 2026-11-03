@@ -263,6 +263,13 @@ def build(out):
     r[0x4001] = 0xC4
     save(out, "fix_apu", r)
 
+    # --- probes: serial start + MBC3 RTC register select -----------------------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x3E, 0x41, 0xE0, 0x01, 0x3E, 0x81, 0xE0, 0x02,
+       0x3E, 0x08, 0xEA, 0x00, 0x40, 0x76)
+    save(out, "fix_probes", r)
+
     # --- copyx: same loop but every byte is XOR-transformed -------------------
     # (a decompressor shape: the ranges match, the bytes do not)
     r = rom(2)

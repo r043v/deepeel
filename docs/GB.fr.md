@@ -1080,3 +1080,12 @@ puis écrit tel quel dans la wave RAM (`$FF30-$FF3F`) est marqué `sample`
 lecture de ROM (heuristique : une coïncidence de valeur peut sur-marquer).
 Rapport : ligne « apu typing ». Fixture `fix_apu`. Observation de l'outil,
 pas une mesure de matériel.
+
+## 0.61.0
+
+J9 (partiel) : sondes événementielles Game Boy. Sont comptés, par site de
+code distinct (cap 16 chacun) : les démarrages de transfert série
+(`$FF02` bit 7) et les sélections de registre RTC MBC3 (écriture `$4000-$5FFF`
+de la valeur 8 à `$C`). Rapport : ligne « probes ». Fixture `fix_probes`.
+Les registres ne sont pas émulés : c'est l'observation des écritures, pas du
+comportement matériel.
