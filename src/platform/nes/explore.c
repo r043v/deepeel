@@ -14,6 +14,8 @@
 #include "tas.h"
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
+#include <zlib.h>
 
 // one queued exploration state: a machine snapshot plus its provenance
 typedef struct {
@@ -70,6 +72,8 @@ typedef struct {
     uint8_t snapshot[DP_NES_STATE_MAX];
     int jam_pending, failed;
     uint32_t rng;
+    int nov;                           // novelty search running (frame hook stops it, counts apart)
+    uint64_t novel;                    // PRG cells executed for the first time (novelty gain)
 } DpNesRun;
 
 static uint32_t loop_bump(DpNesRun *x, uint64_t key);
@@ -213,7 +217,7 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
         for (unsigned i = 0; i < in.length; i++) {
             int64_t cell = dp_nesmach_rom_index(x->m, pc + i);
             if (cell >= 0) {
-                if (!r->flags[cell]) r->flags[cell] = DP_NES_NATURAL;
+                if (!r->flags[cell]) { r->flags[cell] = DP_NES_NATURAL; x->novel++; }
             } else {
                 r->exec_outside++;
             }
@@ -454,7 +458,7 @@ static void hook_frame(void *user) {
     chr_note_tiles(x);
     if (!x->play_mode) return;
     x->frame_count++;
-    x->r->play_frames_run++;
+    if (!x->nov) x->r->play_frames_run++;
     if (x->frame_count >= x->frame_target) { nes_trace.stop = 1; return; }
     // next frame's inputs (TAS command byte may demand a reset first)
     if (x->frame_cmds && x->frame_cmds[x->frame_count] & 2) dp_nesmach_reset(x->m);
@@ -694,6 +698,219 @@ static void play_session(DpNesRun *x, uint32_t frames, uint32_t seed,
     r->play_sessions_run++;
 }
 
+// --- novelty search (Go-Explore) ------------------------------------------------------
+
+typedef struct {
+    uint8_t *z;
+    uLongf zlen;
+    uint64_t gain;         // cells found by the trial that produced it + its children
+    uint32_t picks;
+    uint32_t depth;        // frames played from power-on along its chain
+    uint8_t lives[2048];   // CPU RAM at archiving (the lives byte is learned later)
+} NesCell;
+
+// a pad byte held 4..43 frames; no opposing directions (bits: A B Sel Start U D L R)
+static uint8_t nes_random_input(DpNesRun *x, uint8_t *held, uint32_t *hold) {
+    if (!*hold) {
+        uint32_t v = nes_rng(&x->rng);
+        uint8_t h = (uint8_t)(v & 0xFF);
+        if ((h & 0x30) == 0x30) h &= (uint8_t)~0x20;
+        if ((h & 0xC0) == 0xC0) h &= (uint8_t)~0x40;
+        *held = h;
+        *hold = 4 + (v >> 16) % 40;
+    }
+    (*hold)--;
+    return *held;
+}
+
+// one frame of play with the given pad; 0 when the budget stops it
+static int nes_nov_frame(DpNesRun *x, uint8_t in) {
+    x->frame_count = 0;
+    x->frame_target = 1;
+    x->jam_pending = 0;
+    dp_nesmach_set_input(x->m, in, 0);
+    dp_nesmach_run(x->m, UINT64_MAX);
+    return !x->jam_pending;
+}
+
+static int nes_archive_add(DpNesRun *x, NesCell *a, uint32_t *n, uint64_t gain, uint8_t *tmp, Bytef *ztmp, uLongf zcap) {
+    DpNesResults *r = x->r;
+    dp_nesmach_save(x->m, tmp);
+    uLongf zl = zcap;
+    if (compress2(ztmp, &zl, tmp, (uLong)dp_nesmach_state_size(), 1) != Z_OK) return -1;
+    uint8_t *z = malloc(zl);
+    if (!z) return -1;
+    memcpy(z, ztmp, zl);
+    uint32_t slot = *n;
+    if (*n >= x->opt.novelty_archive) {
+        double worst = 1e300;
+        for (uint32_t i = 0; i < *n; i++) {
+            double sc = (double)a[i].gain / (1.0 + a[i].picks);
+            if (sc < worst) { worst = sc; slot = i; }
+        }
+        free(a[slot].z);
+        r->novelty_replaced++;
+    } else (*n)++;
+    a[slot].z = z;
+    a[slot].zlen = zl;
+    memcpy(a[slot].lives, dp_nesmach_ram(x->m), 2048);
+    a[slot].gain = gain;
+    a[slot].picks = 0;
+    r->novelty_archived++;
+    return (int)slot;
+}
+
+// lives without game knowledge: a RAM byte <= 9 whose only decreases are single steps at
+// least 200 frames apart and which rarely increases; a trial where such a byte drops lost a life
+typedef struct {
+    uint8_t prev[2048], maxv[2048], bad[2048];
+    uint16_t dec[2048], inc[2048];
+    uint32_t last_dec[2048], frame;
+    int lives_byte;
+} NesLives;
+
+static int nes_lives_frame(NesLives *L, const uint8_t *w, int learn) {
+    int died = 0;
+    for (int i = 0; i < 2048; i++) {
+        uint8_t a = L->prev[i], b = w[i];
+        if (b > L->maxv[i]) L->maxv[i] = b;
+        if (a == b) continue;
+        if (b + 1 == a) {
+            int cand = !L->bad[i] && L->dec[i] >= 2 && L->maxv[i] <= 9 && L->inc[i] <= 1 + L->dec[i] / 4;
+            if (cand && !learn) { died = 1; L->lives_byte = i; }
+            if (L->frame - L->last_dec[i] < 200) L->bad[i] = 1;
+            L->dec[i]++;
+            L->last_dec[i] = L->frame;
+        } else if (b < a) L->bad[i] = 1;
+        else if (b == a + 1 && L->inc[i] < 0xFFFF) L->inc[i]++;
+    }
+    memcpy(L->prev, w, 2048);
+    L->frame++;
+    return died;
+}
+
+enum { NES_KEY_SET = 1 << 18 };
+static int nes_key_seen(const uint64_t *set, uint64_t k) {
+    k |= 1;
+    for (uint32_t i = (uint32_t)(k >> 7) & (NES_KEY_SET - 1);; i = (i + 1) & (NES_KEY_SET - 1)) {
+        if (!set[i]) return 0;
+        if (set[i] == k) return 1;
+    }
+}
+static void nes_key_add(uint64_t *set, uint64_t k) {
+    k |= 1;
+    for (uint32_t i = (uint32_t)(k >> 7) & (NES_KEY_SET - 1);; i = (i + 1) & (NES_KEY_SET - 1)) {
+        if (set[i] == k) return;
+        if (!set[i]) { set[i] = k; return; }
+    }
+}
+
+static void novelty_search(DpNesRun *x) {
+    DpNesResults *r = x->r;
+    if (!x->opt.novelty_steps || !x->opt.novelty_archive) return;
+    size_t ssz = dp_nesmach_state_size();
+    uLongf zcap = compressBound((uLong)ssz);
+    NesCell *a = calloc(x->opt.novelty_archive, sizeof *a);
+    NesLives *L = calloc(1, sizeof *L);
+    uint64_t *keys = calloc(NES_KEY_SET, sizeof *keys);
+    uint8_t *tmp = malloc(ssz), *tmp2 = malloc(ssz);
+    Bytef *ztmp = malloc(zcap);
+    if (!a || !L || !keys || !tmp || !tmp2 || !ztmp) {
+        free(a); free(L); free(keys); free(tmp); free(tmp2); free(ztmp);
+        x->failed = 1;
+        return;
+    }
+    L->lives_byte = -1;
+    uint32_t n = 0;
+    const int cells = x->opt.novelty_cells;
+    x->play_mode = 1;
+    x->nov = 1;
+    x->rng = x->opt.play_seed * 0x2545F491u + 7;
+    dp_nesmach_reset(x->m);
+    nes_archive_add(x, a, &n, 1, tmp, ztmp, zcap);
+    uint64_t stop = x->total_steps + x->opt.novelty_steps;
+    while (!x->failed) {
+        if (x->total_steps >= stop) break;
+        if (x->total_steps >= x->opt.max_total) { r->global_cuts++; break; }
+        uint8_t maxl = 0;
+        if (L->lives_byte >= 0)
+            for (uint32_t i = 0; i < n; i++)
+                if (a[i].lives[L->lives_byte] > maxl && a[i].lives[L->lives_byte] <= 9) maxl = a[i].lives[L->lives_byte];
+        uint32_t best = n - 1;
+        double bs = -1;
+        for (int k = 0; k < 8; k++) {
+            uint32_t i = k ? nes_rng(&x->rng) % n : n - 1;
+            if (!cells) {
+                double g = (double)a[i].gain / (1.0 + a[i].picks);
+                if (g > bs) { bs = g; best = i; }
+                continue;
+            }
+            double lf = (L->lives_byte >= 0 && a[i].lives[L->lives_byte] < maxl) ? 1e-3 : 1.0;
+            double sc = lf * (1.0 + (double)a[i].gain) * (1.0 + a[i].depth / 200.0) / sqrt(1.0 + a[i].picks);
+            if (sc > bs) { bs = sc; best = i; }
+        }
+        uLongf sz = (uLongf)ssz;
+        if (uncompress(tmp2, &sz, a[best].z, a[best].zlen) != Z_OK) { x->failed = 1; break; }
+        dp_nesmach_load(x->m, tmp2);
+        a[best].picks++;
+        r->novelty_trials++;
+        uint64_t before = x->novel;
+        uint8_t held = 0;
+        uint32_t hold = 0, frames_since = 0;
+        memcpy(L->prev, dp_nesmach_ram(x->m), 2048);
+        L->frame += 200;   // a restore is no decrement sequence
+        int learn = r->novelty_trials < 64;
+        int recent[64];
+        uint32_t recent_f[64];
+        unsigned nrecent = 0;
+        for (uint32_t f = 0; f < x->opt.novelty_frames; f++) {
+            if (x->total_steps >= stop || x->total_steps >= x->opt.max_total) break;
+            if (!nes_nov_frame(x, nes_random_input(x, &held, &hold))) break;
+            r->novelty_frames_run++;
+            if (cells && nes_lives_frame(L, dp_nesmach_ram(x->m), learn)) {
+                for (unsigned k = 0; k < nrecent; k++)
+                    if (recent[k] >= 0 && f - recent_f[k] < 120) { a[recent[k]].picks = 1u << 30; a[recent[k]].gain = 0; }
+                r->novelty_deaths++;
+                break;
+            }
+            frames_since++;
+            if (f % 8 == 7) {
+                uint64_t k = cells ? dp_nesmach_screen_key(x->m) : 0;
+                int fresh = cells && !nes_key_seen(keys, k);
+                if (fresh || (x->novel > before && frames_since >= 60)) {
+                    uint64_t g = x->novel - before;
+                    a[best].gain += g;
+                    int slot = nes_archive_add(x, a, &n, cells ? g + (fresh ? 1 : 0) : g + 1, tmp, ztmp, zcap);
+                    if (nrecent < 64) { recent[nrecent] = slot; recent_f[nrecent++] = f; }
+                    if (slot >= 0) {
+                        a[slot].depth = a[best].depth + f + 1;
+                        if (a[slot].depth > r->novelty_depth) r->novelty_depth = a[slot].depth;
+                    }
+                    nes_key_add(keys, k);
+                    if (g) r->novelty_hits++;
+                    before = x->novel;
+                    frames_since = 0;
+                }
+            }
+        }
+    }
+    x->nov = 0;
+    x->play_mode = 0;
+    // the archive's freshest checkpoints seed the fork queue (exact-state dedup applies)
+    for (uint32_t i = n; i > 0 && x->opt.queue_cap && !x->failed; i--) {
+        if (i + 64 < n) break;
+        uLongf sz = (uLongf)ssz;
+        if (uncompress(tmp2, &sz, a[i - 1].z, a[i - 1].zlen) != Z_OK) continue;
+        uint8_t *snap = malloc(ssz);
+        if (!snap) { x->failed = 1; break; }
+        memcpy(snap, tmp2, ssz);
+        DpNesPathState s = { snap, 0, 0, 0, 0, 0, 0, DP_NES_TREE_ENTRY };
+        if (snap_push(x, &s)) r->seeds_play++;
+    }
+    for (uint32_t i = 0; i < n; i++) free(a[i].z);
+    free(a); free(L); free(keys); free(tmp); free(tmp2); free(ztmp);
+}
+
 // --- driver -----------------------------------------------------------------------
 
 DpNesOptions dp_nes_options(void) {
@@ -707,6 +924,8 @@ DpNesOptions dp_nes_options(void) {
     o.seed_irq = 1;
     o.play_frames = 0;
     o.play_sessions = 8;
+    o.novelty_frames = 240;
+    o.novelty_archive = 4096;
     o.skip_root = o.no_finalize = 0;
     o.pre_finalize = NULL; o.pre_user = NULL;
     o.play_seed = 1;
@@ -845,6 +1064,8 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
             }
         }
     }
+
+    if (!x.failed) novelty_search(&x);
 
     // fork exploration: one root state (reset), depth-first drain
     if (!x.failed && x.opt.queue_cap > 0) {
@@ -1408,6 +1629,11 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->exec_outside);
     fprintf(out, "  play: %llu sessions x frames %llu\n",
         (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run);
+    if (r->novelty_trials)
+        fprintf(out, "  novelty: depth %u frames, %llu trials, %llu frames, %llu hits, %llu deaths, %llu archived (%llu replaced)\n",
+                r->novelty_depth, (unsigned long long)r->novelty_trials, (unsigned long long)r->novelty_frames_run,
+                (unsigned long long)r->novelty_hits, (unsigned long long)r->novelty_deaths,
+                (unsigned long long)r->novelty_archived, (unsigned long long)r->novelty_replaced);
     if (r->jobs_folded) fprintf(out, "  jobs: %u secondary instance folded (TAS/play phases)\n", r->jobs_folded);
     if (r->lot_written || r->lot_read || r->lot_pending)
         fprintf(out, "  lot: %llu written, %llu read back, %llu left on disk\n", (unsigned long long)r->lot_written,

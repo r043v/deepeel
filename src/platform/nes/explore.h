@@ -114,6 +114,12 @@ typedef struct {
     // power-on root, the entries and the finalization; the primary calls
     // pre_finalize(results, user) once its drain is done, before the sections, to fold
     // the secondary's findings in
+    // novelty search (Go-Explore): archive of screen cells, random trials from the least
+    // played ones; the freshest cells seed the fork queue
+    uint64_t novelty_steps;     // instruction budget of the search (0: off)
+    uint32_t novelty_frames;    // frames per trial
+    uint32_t novelty_archive;   // archive capacity
+    int novelty_cells;          // key the archive on the screen fingerprint and lives
     int skip_root;
     int no_finalize;
     void (*pre_finalize)(struct DpNesResults_ *r, void *user);
@@ -163,6 +169,8 @@ typedef struct DpNesResults_ {
     unsigned register_count;
     uint64_t register_overflow;
     uint64_t irq_counts[2];    // NMI, IRQ dispatched
+    uint64_t novelty_trials, novelty_hits, novelty_archived, novelty_replaced, novelty_frames_run, novelty_deaths;
+    uint32_t novelty_depth;
     unsigned jobs_folded;      // --jobs 2: secondary instances folded into this report
     DpNesOptions options;
 } DpNesResults;

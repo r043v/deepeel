@@ -61,6 +61,9 @@ static void fold(DpNesResults *a, void *user) {
     ADD(parked_lost); ADD(pending_dropped); ADD(ram_writes); ADD(io_writes); ADD(io_reads); ADD(chr_reads);
     ADD(play_frames_run); ADD(play_sessions_run); ADD(play_steps_accounted); ADD(seeds_play);
     ADD(tas_same); ADD(tas_different); ADD(tas_unrecorded); ADD(cpu_copy_bytes);
+    ADD(novelty_trials); ADD(novelty_hits); ADD(novelty_archived); ADD(novelty_replaced);
+    ADD(novelty_frames_run); ADD(novelty_deaths);
+    if (b->novelty_depth > a->novelty_depth) a->novelty_depth = b->novelty_depth;
     ADD(seeds_irq); ADD(seeds_refused_queue);
     for (int i = 0; i < 40; i++) { a->io_reg_writes[i] += b->io_reg_writes[i]; a->io_reg_reads[i] += b->io_reg_reads[i]; }
     for (int i = 0; i < 2; i++) a->irq_counts[i] += b->irq_counts[i];
@@ -113,10 +116,10 @@ static void fold(DpNesResults *a, void *user) {
 int dp_nes_explore_jobs(const uint8_t *data, size_t size, int mapper, const DpNesOptions *options,
                         DpNesResults *results, int jobs) {
     DpNesOptions o = options ? *options : dp_nes_options();
-    int phases = o.tas_count || o.play_frames;
+    int phases = o.tas_count || o.play_frames || o.novelty_steps;
     if (jobs < 2 || !phases) {
         if (jobs >= 2)
-            fprintf(stderr, "deepeel: nes --jobs 2 needs --tas or --play-frames to split the work; "
+            fprintf(stderr, "deepeel: nes --jobs 2 needs --tas, --play or --novelty to split the work; "
                             "running on one instance\n");
         return dp_nes_explore(data, size, mapper, &o, results);
     }
@@ -138,6 +141,7 @@ int dp_nes_explore_jobs(const uint8_t *data, size_t size, int mapper, const DpNe
     o.play_frames = 0;
     o.play_sessions = 0;
     o.tas_count = 0;
+    o.novelty_steps = 0;
     o.pre_finalize = fold;
     o.pre_user = j;
     if (pthread_create(&j->th, NULL, job_main, j)) {

@@ -1804,3 +1804,20 @@ le rapport décrit l'union (tuiles CHR recomptées sur l'union). Il faut `--tas`
 instance folded`. Test `nes_jobs` (même résumé que `--jobs 1` hors cette ligne).
 Reste ◐ : pas de file partagée ; les journaux de copies sont fusionnés par site
 (les occurrences par événement diffèrent de l'exécution à une instance).
+
+## 0.120.0
+
+NES : recherche de nouveauté, Go-Explore (J4, partielle). `--novelty STEPS`
+(`--novelty-frames N`, `--novelty-archive N`, `--novelty-cells`) : une archive
+d'instantanés compressés ; chaque essai repart d'une cellule choisie parmi huit
+tirées au hasard (gain par essai, profondeur, racine carrée des tirages) et joue
+des touches aléatoires (pas de directions opposées). Avec `--novelty-cells`, une
+nouvelle empreinte d'écran grossière (tuiles de nametable ÷ 8 échantillonnées,
+défilement grossier, nametable choisie : `dp_nesmach_screen_key`) ou de
+nouveaux octets PRG exécutés archivent la cellule ; les vies sont détectées sans
+connaissance du jeu (octet de RAM ≤ 9 qui ne baisse que de 1 à 200 images
+d'écart) et les cellules archivées peu avant une mort sont condamnées. Les 64
+cellules les plus récentes amorcent la file de fourches (dédup d'état exact).
+Rapport : `novelty: depth N frames, N trials, …`. `--jobs 2` donne cette phase
+à la secondaire. Test `nes_novelty`. Reste ◐ : le mode humain et la reprise
+d'archive entre exécutions, la clé d'écran ne voit pas les sprites.

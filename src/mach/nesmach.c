@@ -462,4 +462,20 @@ size_t dp_nesmach_chr_tiles(const DpNesMach *d, uint64_t *out, size_t cap) {
     }
     return n;
 }
+const uint8_t *dp_nesmach_ram(const DpNesMach *d) { (void)d; return machine.ram; }
+uint64_t dp_nesmach_screen_key(const DpNesMach *d) {
+    (void)d;
+    const nes_ppu_t *p = &machine.ppu;
+    uint64_t h = 0xcbf29ce484222325ull ^ (uint64_t)(p->ctrl & 3);
+    h *= 0x100000001b3ull;
+    h ^= (uint64_t)(((p->t & 0x1F) >> 3) | (((p->t >> 5) & 0x1F) >> 3) << 2);
+    h *= 0x100000001b3ull;
+    for (unsigned nt = 0; nt < 2; nt++)
+        for (unsigned r = 0; r < 30; r += 4)
+            for (unsigned c = 0; c < 32; c += 4) {
+                h ^= (uint64_t)(p->nametable[nt * 1024u + r * 32u + c] >> 3);
+                h *= 0x100000001b3ull;
+            }
+    return h;
+}
 unsigned dp_nesmach_ppu_v(const DpNesMach *d) { (void)d; return machine.ppu.v & 0x3FFF; }

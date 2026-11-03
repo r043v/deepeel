@@ -11,7 +11,7 @@ remesure pas l'outil.
 | GB | 34 | 1 | 3 | 1 |
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
-| NES | 12 | 21 | 4 | 2 |
+| NES | 12 | 22 | 3 | 2 |
 | PCE | 16 | 19 | 3 | 1 |
 | MD | 8 | 18 | 12 | 1 |
 
@@ -94,7 +94,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | J4 | Go-Explore (cellules écran) | GB | ✗ |
 | J4 | Go-Explore (cellules écran) | SMS/GG | ✗ |
 | J4 | Go-Explore (cellules écran) | MSX | ✗ |
-| J4 | Go-Explore (cellules écran) | NES | ✗ |
+| J4 | Go-Explore (cellules écran) | NES | ◐ `--novelty` (archive de cellules écran, vies sans connaissance du jeu) |
 | J4 | Go-Explore (cellules écran) | MD | ✗ |
 | J5 | Mode humain, export `.sta` | SMS/GG | ✗ |
 | J5 | Mode humain, export `.sta` | MSX | ✗ |

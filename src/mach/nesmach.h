@@ -86,6 +86,10 @@ size_t dp_nesmach_chr_size(const DpNesMach *m);
 int64_t dp_nesmach_chr_index(const DpNesMach *m, unsigned addr);
 size_t dp_nesmach_chr_tiles(const DpNesMach *m, uint64_t *out, size_t cap);
 
+/* the 2 KiB CPU RAM, and a coarse screen fingerprint (nametable tiles >> 3 sampled every 4th,
+ * coarse scroll, nametable select): equal keys = the same screen cell (Go-Explore) */
+const uint8_t *dp_nesmach_ram(const DpNesMach *m);
+uint64_t dp_nesmach_screen_key(const DpNesMach *m);
 unsigned dp_nesmach_ppu_v(const DpNesMach *m);  /* the PPU address ($2006/$2007) */
 
 #endif

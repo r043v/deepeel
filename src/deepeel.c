@@ -1053,6 +1053,10 @@ static int cmd_nes(int argc, char **argv) {
         else if (!strcmp(a, "--no-irq-fork")) opt.seed_irq = 0;
         else if (!strcmp(a, "--seed-banks")) opt.seed_banks = 1;
         else if (!strcmp(a, "--jobs") && i + 1 < argc) nes_jobs = atoi(argv[++i]);
+        else if (!strcmp(a, "--novelty") && i + 1 < argc) opt.novelty_steps = strtoull(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--novelty-frames") && i + 1 < argc) opt.novelty_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--novelty-cells")) opt.novelty_cells = 1;
+        else if (!strcmp(a, "--novelty-archive") && i + 1 < argc) opt.novelty_archive = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed-vectors")) opt.seed_vectors = 1;
         else if (!strcmp(a, "--ctx-cap") && i + 1 < argc) opt.ctx_cap = (unsigned)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--second-pass")) opt.second_pass = 1;
