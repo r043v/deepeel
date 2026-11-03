@@ -64,6 +64,8 @@ typedef struct DpLrObservers {
     void (*exec)(void *user, uint32_t pc);
     void (*read)(void *user, uint32_t addr, uint8_t val);
     void (*write)(void *user, uint32_t addr, uint8_t val);
+    void (*dma)(void *user, uint32_t src, uint32_t dst, uint32_t len); // a hardware copy (OAM DMA, HDMA, ...)
+    void (*bank)(void *user, uint32_t window, uint32_t bank);          // a mapper bank switch
 } DpLrObservers;
 
 typedef struct DpLrTraceApi {

@@ -1207,3 +1207,11 @@ n'ont pas de fixtures fichier (leurs ROMs sont construites en mémoire par
 `test_nes`/`test_pce`) ; certaines valeurs sont `n/d` quand le rapport texte
 de la plateforme ne les expose pas. L'audit de la matrice et la campagne sur
 ROMs réelles hors dépôt (`tools/scan_all.py`) restent à faire.
+
+## 0.71.0
+
+J12 (partiel) : l'extension de trace libretro porte aussi les callbacks `dma`
+(copie matérielle : source, destination, longueur) et `bank` (bascule de
+banque : fenêtre, banque) dans `DpLrObservers`. Le cœur factice les émet et le
+test `libretro` les vérifie. Reste pour J12 : patch d'un vrai cœur hors dépôt,
+branchement sur l'explorateur, parité de fourches avec le backend m0boy.

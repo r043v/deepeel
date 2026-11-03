@@ -22,7 +22,8 @@ static int16_t (*input)(unsigned, unsigned, unsigned, unsigned);
 // 04 tt jump to tt if A==0, 05 halt) running the loaded ROM, one step at a time
 #define DP_LR_ENV_TRACE 0x7DEE0001u
 typedef struct { void *user; void (*exec)(void *, uint32_t); void (*read)(void *, uint32_t, uint8_t);
-                 void (*write)(void *, uint32_t, uint8_t); } Obs;
+                 void (*write)(void *, uint32_t, uint8_t); void (*dma)(void *, uint32_t, uint32_t, uint32_t);
+                 void (*bank)(void *, uint32_t, uint32_t); } Obs;
 typedef struct { uint32_t version; int (*step)(void); void (*set_observers)(const Obs *);
                  uint32_t (*pc)(void); int (*force_branch)(int); int64_t (*rom_index)(uint32_t); } Trace;
 static uint8_t ram[64];
@@ -46,6 +47,8 @@ static int t_step(void) {
         PC = taken ? arg : (uint8_t)(PC + 2);
         return 1;
     }
+    case 6: if (obs.bank) obs.bank(obs.user, 1, arg); PC += 2; return 1; // bank switch of window 1
+    case 7: if (obs.dma) obs.dma(obs.user, arg, 0x20, 4); PC += 2; return 1; // DMA of 4 bytes from arg
     default: return 0; // 05 and anything else: halted
     }
 }

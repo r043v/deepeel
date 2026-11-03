@@ -11,6 +11,9 @@
 static struct { uint32_t pcs[16]; int npc; uint32_t wr[8]; int nwr; } T;
 static void ex(void *u, uint32_t pc) { (void)u; T.pcs[T.npc++] = pc; }
 static void wr(void *u, uint32_t a, uint8_t v) { (void)u; (void)v; T.wr[T.nwr++] = a; }
+static uint32_t g_bank, g_dma_src, g_dma_len;
+static void bk(void *u, uint32_t w, uint32_t b) { (void)u; (void)w; g_bank = b; }
+static void dm(void *u, uint32_t s, uint32_t d, uint32_t n) { (void)u; (void)d; g_dma_src = s; g_dma_len = n; }
 
 int main(int argc, char **argv) {
     CHECK(argc == 3); // core path, a scratch ROM path
@@ -103,7 +106,7 @@ int main(int argc, char **argv) {
         FILE *pf = fopen(argv[2], "wb");
         fwrite(prog, 1, sizeof prog, pf);
         fclose(pf);
-        DpLrObservers o = { &T, ex, NULL, wr };
+        DpLrObservers o = { &T, ex, NULL, wr, dm, bk };
         for (int side = 0; side < 3; side++) { // natural, forced taken, forced not taken
             DpLibretro *b = dp_lr_open_copy(argv[1], err, sizeof err);
             CHECK_MSG(b != NULL, err);
@@ -125,6 +128,23 @@ int main(int argc, char **argv) {
             } else { // forced not taken matches the natural path here
                 CHECK(T.npc == 4 && T.pcs[2] == 4 && T.wr[0] == 0x10);
             }
+            dp_lr_close(b);
+        }
+    }
+
+    // dma / bank observers: program 06 03 / 07 40 / halt
+    {
+        const uint8_t prog2[8] = { 6, 3, 7, 0x40, 5, 0, 0, 0 };
+        FILE *pf = fopen(argv[2], "wb");
+        fwrite(prog2, 1, sizeof prog2, pf);
+        fclose(pf);
+        DpLrObservers o = { &T, NULL, NULL, NULL, dm, bk };
+        DpLibretro *b = dp_lr_open_copy(argv[1], err, sizeof err);
+        CHECK_MSG(b && dp_lr_load_rom(b, argv[2], err, sizeof err), err);
+        if (b) {
+            dp_lr_observe(b, &o);
+            while (dp_lr_step(b)) {}
+            CHECK(g_bank == 3 && g_dma_src == 0x40 && g_dma_len == 4);
             dp_lr_close(b);
         }
     }
