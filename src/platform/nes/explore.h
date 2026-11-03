@@ -65,6 +65,17 @@ typedef struct {
     uint8_t old_bank, new_bank;
 } DpNesBankEvent;
 
+// choice tree (F2): one node per queued state, parented on the path that queued it
+enum { DP_NES_TREE_RESET = 1, DP_NES_TREE_ENTRY, DP_NES_TREE_VECTOR, DP_NES_TREE_BRANCH,
+       DP_NES_TREE_IRQ, DP_NES_TREE_PROBE, DP_NES_TREE_PASS2 };
+enum { DP_NES_ISSUE_NONE = 0, DP_NES_ISSUE_DONE, DP_NES_ISSUE_EVICTED, DP_NES_ISSUE_SPOOLED, DP_NES_ISSUE_BUDGET };
+typedef struct {
+    uint32_t parent;   // 0 for roots
+    uint32_t site;     // PRG cell of the entry pc (0xFFFFFFFF outside the ROM)
+    uint16_t pc;
+    uint8_t kind, issue;
+} DpNesTreeNode;
+
 typedef struct {
     uint32_t id;
     uint8_t bank;          // physical 16 KiB bank
@@ -94,6 +105,7 @@ typedef struct {
     int seed_vectors;      // also seed the NMI and IRQ/BRK vector targets as roots (G1)
     int seed_banks;        // also seed every switchable bank at $8000 (UxROM)
     int lot_drain;         // with a lot backlog: run only the saved states (no root, no seeds)
+    const char *tree_path; // write the choice tree here (binary DPTZ records), NULL: none
     const char *lot_path;  // disk lot of deferred states (NULL: memory only); an existing file is resumed
 } DpNesOptions;
 
@@ -105,6 +117,7 @@ typedef struct {
     size_t chr_size;
     uint64_t chr_tiles_bg, chr_tiles_spr, chr_reads; // distinct 16-byte tiles / $2007 reads
     uint32_t *exec_hits, *data_hits; // per PRG cell: executions of the opcode byte / data reads (saturating)
+    DpNesTreeNode *tree_nodes; uint32_t tree_count, tree_capacity;
     uint8_t *flags;            // one byte per physical PRG cell
     size_t prg_size;
     uint64_t steps, paths, forks, irq_forks, exec_outside, data_reads, oam_copies;

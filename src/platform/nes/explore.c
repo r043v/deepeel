@@ -22,6 +22,8 @@ typedef struct {
     uint8_t from_irq;    // entered through a cleared NMI edge
     uint64_t parent_path, parent_step;
     uint32_t steps;
+    uint32_t choice;     // choice-tree node id (0: not yet registered)
+    uint8_t kind;        // DP_NES_TREE_* when the creator set it, else derived
 } DpNesPathState;
 
 #define DP_NES_STATE_MAX 65536
@@ -42,6 +44,7 @@ typedef struct {
     uint32_t queue_len, queue_cap;
     DpNesPathState *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
     DpLotFile *lot;                        // disk lot: park overflow, wall leftovers, --lot resume
+    uint32_t cur_choice;               // tree node of the path being run
     DpHashSet seen;                    // exact state dedup
     DpHashSet ind_sites, ind_pairs;    // observed jmp (ind): sites and (site,target) pairs
     DpHashSet probe_seen;              // strobe-write sites already probed
@@ -463,10 +466,34 @@ static uint32_t loop_bump(DpNesRun *x, uint64_t key) {
 
 // --- queue --------------------------------------------------------------------
 
+static uint32_t tree_add(DpNesRun *x, const DpNesPathState *s) {
+    DpNesResults *r = x->r;
+    if (!x->opt.tree_path) return 0;
+    if (r->tree_count == r->tree_capacity) {
+        uint32_t cap = r->tree_capacity ? r->tree_capacity * 2 : 256;
+        DpNesTreeNode *g = realloc(r->tree_nodes, (size_t)cap * sizeof *g);
+        if (!g) return 0;
+        r->tree_nodes = g; r->tree_capacity = cap;
+    }
+    DpNesTreeNode *n = &r->tree_nodes[r->tree_count];
+    memset(n, 0, sizeof *n);
+    n->parent = x->cur_choice;
+    n->kind = s->kind ? s->kind : s->from_irq ? DP_NES_TREE_IRQ : s->forced ? DP_NES_TREE_BRANCH : DP_NES_TREE_PROBE;
+    n->pc = s->state ? (uint16_t)dp_nesmach_state_pc(s->state) : 0;
+    n->site = 0xFFFFFFFFu;
+    return ++r->tree_count;
+}
+
+static void tree_close(DpNesRun *x, uint32_t id, int issue) {
+    if (id && id <= x->r->tree_count) x->r->tree_nodes[id - 1].issue = (uint8_t)issue;
+}
+
 static int queue_push(DpNesRun *x, const DpNesPathState *s) {
     if (x->queue_len >= x->opt.queue_cap) { x->r->queue_cuts++; return 0; }
     if (x->queue_len == x->queue_cap) return 0;
-    x->queue[x->queue_len++] = *s;
+    DpNesPathState c = *s;
+    if (!c.choice) c.choice = tree_add(x, &c);
+    x->queue[x->queue_len++] = c;
     return 1;
 }
 
@@ -475,6 +502,7 @@ static int queue_push(DpNesRun *x, const DpNesPathState *s) {
 static int lot_spill(DpNesRun *x, DpNesPathState *s) {
     if (!x->lot) return 0;
     DpNesPathState m = *s; m.state = NULL;
+    tree_close(x, s->choice, DP_NES_ISSUE_SPOOLED);
     if (!dp_lf_put(x->lot, &m, sizeof m, s->state, (uint32_t)dp_nesmach_state_size())) return 0;
     free(s->state); s->state = NULL;
     return 1;
@@ -483,7 +511,12 @@ static int lot_spill(DpNesRun *x, DpNesPathState *s) {
 // returns 1 when the state was queued, 2 when parked (queue full), 0 when not kept
 static int snap_push(DpNesRun *x, DpNesPathState *s) {
     uint64_t h = dp_nesmach_state_hash(s->state);
-    if (!dp_set_insert(&x->seen, h)) { x->r->evicted++; free(s->state); return 0; }
+    if (!dp_set_insert(&x->seen, h)) {
+        x->r->evicted++;
+        tree_close(x, tree_add(x, s), DP_NES_ISSUE_EVICTED);
+        free(s->state); return 0;
+    }
+    if (!s->choice) s->choice = tree_add(x, s);
     if (x->queue_len >= x->opt.queue_cap) {
         // a full queue is not a loss: the state waits aside (bounded, counted)
         if (x->park_len < 4096) {
@@ -517,6 +550,7 @@ static void run_path(DpNesRun *x, uint32_t slot) {
     x->jam_pending = 0;
     uint64_t path = x->paths_opened++;
     r->paths++;
+    x->cur_choice = self->choice;
     if (self->from_irq) {
         r->irq_forks++;
         record_interrupt(x, path, self->parent_step,
@@ -527,6 +561,8 @@ static void run_path(DpNesRun *x, uint32_t slot) {
 
     // runs until the hook's budgets stop it (step, global, jam, loop)
     dp_nesmach_run(x->m, UINT64_MAX);
+    tree_close(x, x->cur_choice, DP_NES_ISSUE_DONE);
+    x->cur_choice = 0;
     free(own);
 }
 
@@ -658,6 +694,8 @@ static void copy_siblings(DpNesRun *x);
 void dp_nes_results_free(DpNesResults *r) {
     if (!r) return;
     free(r->flags);
+    free(r->tree_nodes);
+    r->tree_nodes = NULL;
     free(r->exec_hits);
     free(r->data_hits);
     r->exec_hits = r->data_hits = NULL;
@@ -784,7 +822,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
         else {
             dp_nesmach_reset(x.m);
             dp_nesmach_save(x.m, snap);
-            DpNesPathState root = { snap, 0, 0, 0, 0, 0 };
+            DpNesPathState root = { snap, 0, 0, 0, 0, 0, 0, DP_NES_TREE_RESET };
             r->seeds_reset = 1;
             if (x.opt.lot_drain && dp_lf_pending(x.lot)) { free(snap); r->seeds_reset = 0; } // drain: saved states only
             else queue_push(&x, &root);
@@ -801,7 +839,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                     free(es); r->entries_refused++; continue;
                 }
                 dp_nesmach_save(x.m, es);
-                DpNesPathState er = { es, 0, 0, 0, 0, 0 };
+                DpNesPathState er = { es, 0, 0, 0, 0, 0, 0, DP_NES_TREE_ENTRY };
                 if (queue_push(&x, &er)) r->entries_seeded++; else { free(es); r->seeds_refused_queue++; }
             }
             // --seed-vectors: the NMI ($FFFA) and IRQ/BRK ($FFFE) targets as roots
@@ -816,7 +854,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                 dp_nesmach_reset(x.m);
                 if (!dp_nesmach_enter(x.m, vb, va)) { free(es); r->entries_refused++; continue; }
                 dp_nesmach_save(x.m, es);
-                DpNesPathState er = { es, 0, 0, 0, 0, 0 };
+                DpNesPathState er = { es, 0, 0, 0, 0, 0, 0, DP_NES_TREE_VECTOR };
                 if (queue_push(&x, &er)) r->vectors_seeded++; else { free(es); r->seeds_refused_queue++; }
             }
             for (int pass = 0; pass < 2; pass++) {
@@ -853,11 +891,11 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     // states still queued when a wall stopped the drain: saved in the lot when
     // there is one (the next run resumes them), else counted, not silent
     for (uint32_t i = 0; i < x.queue_len; i++) {
-        if (x.queue[i].state && !lot_spill(&x, &x.queue[i])) r->pending_dropped++;
+        if (x.queue[i].state && !lot_spill(&x, &x.queue[i])) { r->pending_dropped++; tree_close(&x, x.queue[i].choice, DP_NES_ISSUE_BUDGET); }
         free(x.queue[i].state);
     }
     for (uint32_t i = 0; i < x.park_len; i++) {
-        if (!lot_spill(&x, &x.park[i])) r->pending_dropped++;
+        if (!lot_spill(&x, &x.park[i])) { r->pending_dropped++; tree_close(&x, x.park[i].choice, DP_NES_ISSUE_BUDGET); }
         free(x.park[i].state);
     }
     if (x.lot) {
@@ -866,6 +904,22 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
         dp_lf_close(x.lot, x.opt.lot_path);
     }
     free(x.park);
+    if (x.opt.tree_path && r->tree_count) {
+        FILE *tf = fopen(x.opt.tree_path, "wb");
+        if (tf) {
+            // 'DPTZ', version 2, node count; records parent, site, pc, kind, issue
+            uint32_t hdr[3] = { 0x5a545044u, 2, r->tree_count };
+            if (fwrite(hdr, sizeof hdr, 1, tf) == 1)
+                for (uint32_t i = 0; i < r->tree_count; i++) {
+                    const DpNesTreeNode *tn = &r->tree_nodes[i];
+                    uint32_t rec[2] = { tn->parent, tn->site };
+                    uint8_t ki[2] = { tn->kind, tn->issue };
+                    if (fwrite(rec, sizeof rec, 1, tf) != 1 || fwrite(&tn->pc, 2, 1, tf) != 1 ||
+                        fwrite(ki, 1, 2, tf) != 2) break;
+                }
+            if (fclose(tf)) x.failed = 1;
+        } else x.failed = 1;
+    }
     if (!x.failed) static_closure(&x);
     if (!x.failed) table_scan(&x);
     if (!x.failed) copy_siblings(&x);
@@ -922,7 +976,7 @@ static void second_pass_seed(DpNesRun *x) {
         dp_nesmach_reset(x->m);
         if (!dp_nesmach_enter(x->m, bank, t)) { free(es); r->pass2_refused++; continue; }
         dp_nesmach_save(x->m, es);
-        DpNesPathState er = { es, 1, 0, 0, 0, 0 };
+        DpNesPathState er = { es, 1, 0, 0, 0, 0, 0, DP_NES_TREE_PASS2 };
         if (queue_push(x, &er)) r->pass2_seeds++;
         else { free(es); r->seeds_refused_queue++; }
     }
@@ -1262,6 +1316,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  pad probes: %llu forks at %llu sites, refused %llu\n", (unsigned long long)r->pad_probes, (unsigned long long)r->pad_probe_sites, (unsigned long long)r->pad_probe_refused);
     fprintf(out, "  copy siblings: %llu tables; %llu ranges (%llu bytes); %llu refused over executed code; %llu tables cut at the cap\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_ranges, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_refused, (unsigned long long)r->sib_caps);
+    fprintf(out, "  choice tree: %u nodes\n", r->tree_count);
     fprintf(out, "  second pass: %llu seeds, %llu refused, %llu roots over the cap\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     fprintf(out, "  vector seeds: %llu\n", (unsigned long long)r->vectors_seeded);
     fprintf(out, "  entries: seeded %llu refused %llu\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);

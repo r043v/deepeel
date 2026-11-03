@@ -65,6 +65,7 @@ unsigned dp_nesmach_frames(const DpNesMach *m);
 const uint8_t *dp_nesmach_oam(const DpNesMach *m);
 /* the saved state's P flag byte (a fork force patches it in place) */
 uint8_t *dp_nesmach_state_p(void *buf);
+unsigned dp_nesmach_state_pc(const void *buf);
 /* the saved state's pending-NMI edge (an interrupt fork clears it) */
 uint8_t *dp_nesmach_state_nmi_edge(void *buf);
 

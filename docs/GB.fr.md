@@ -1497,3 +1497,16 @@ restes d'un mur écrits sur disque), `--resume` = `--lot` + `--lot-drain`
 laisse 1 état ; `--resume` le relit et vide le lot. Reste ◐ : la file reste
 bornée (avec parc), l'ensemble de déduplication n'est pas persisté entre
 runs. Test `nes_spool_resume`.
+
+## 0.96.0
+
+NES : arbre de choix (`--tree FILE`, F2, partielle). Un nœud par état mis en
+file (racine de reset, entrée `--entry`, vecteur, fourche de branche, fourche
+NMI, sonde manette, graine du second passage), rattaché au chemin qui l'a
+mis en file, avec son issue : terminé, évincé par déduplication, déversé sur
+le lot disque, ou abandonné au budget (jamais silencieux). Format binaire
+`DPTZ` version 2, identique à Sega : en-tête (magie, version, nombre), puis
+par nœud `parent u32, site u32, pc u16, kind u8, issue u8`. Le champ `site`
+vaut `0xFFFFFFFF` (cellule d'entrée non renseignée côté NES) ; le rapport
+imprime `choice tree: N nodes`. Test `nes_tree` : 5 nœuds, 72 octets sur
+`fix_nes_branch.nes`. Reste ◐ : pas de reprise de l'arbre entre runs.

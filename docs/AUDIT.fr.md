@@ -11,7 +11,7 @@ remesure pas l'outil.
 | GB | 34 | 1 | 3 | 1 |
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
-| NES | 11 | 17 | 9 | 2 |
+| NES | 11 | 18 | 8 | 2 |
 | PCE | 15 | 7 | 16 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
@@ -79,7 +79,7 @@ Cellules ouvertes (◐ ou ✗) : 93.
 | F1 | File croissante + spool + `--resume` | NES | ◐ `--spool`/`--resume` (lot disque), file bornée + parc |
 | F1 | File croissante + spool + `--resume` | PCE | ✗ |
 | F1 | File croissante + spool + `--resume` | MD | ✗ |
-| F2 | Arbre de choix persistant | NES | ✗ |
+| F2 | Arbre de choix persistant | NES | ◐ `--tree` (nœuds, parents, issues ; site non renseigné) |
 | F2 | Arbre de choix persistant | PCE | ✗ |
 | F2 | Arbre de choix persistant | MD | ✗ |
 | F3 | `--jobs` par instances clonées | NES | ✗ |

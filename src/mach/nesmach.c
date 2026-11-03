@@ -358,6 +358,11 @@ const uint8_t *dp_nesmach_oam(const DpNesMach *d) { (void)d; return machine.oam;
 uint8_t *dp_nesmach_state_p(void *buf) {
     return (uint8_t *)buf + offsetof(nes_t, cpu) + offsetof(nes6502_t, p);
 }
+unsigned dp_nesmach_state_pc(const void *buf) {
+    uint16_t pc;
+    memcpy(&pc, (const uint8_t *)buf + offsetof(nes_t, cpu) + offsetof(nes6502_t, pc), sizeof pc);
+    return pc;
+}
 uint8_t *dp_nesmach_state_nmi_edge(void *buf) {
     return (uint8_t *)buf + offsetof(nes_t, cpu) + offsetof(nes6502_t, nmi_edge);
 }
