@@ -270,6 +270,13 @@ def build(out):
        0x3E, 0x08, 0xEA, 0x00, 0x40, 0xF0, 0x04, 0xF0, 0x41, 0xF0, 0x44, 0x76)
     save(out, "fix_probes", r)
 
+    # --- pal: a ROM byte stored to BCPD ----------------------------------------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0xFA, 0x00, 0x40, 0xE0, 0x69, 0x76)
+    r[0x4000] = 0x1F
+    save(out, "fix_pal", r)
+
     # --- copyx: same loop but every byte is XOR-transformed -------------------
     # (a decompressor shape: the ranges match, the bytes do not)
     r = rom(2)

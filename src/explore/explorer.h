@@ -36,6 +36,7 @@ enum {
     DP_DF_STATIC = 1 << 3, // read by statically proven code (provenance pass)
     DP_DF_SIBLING = 1 << 4, // inferred: sibling entry of a verbatim copy's source table
     DP_DF_SAMPLE = 1 << 5, // read, then written to the APU wave RAM ($FF30-$FF3F)
+    DP_DF_PALETTE = 1 << 7, // read, then written to BCPD/OCPD ($FF69 / $FF6B)
     DP_DF_MUSIC = 1 << 6, // read, then written to an APU register ($FF10-$FF25)
 };
 enum {
@@ -253,6 +254,7 @@ typedef struct DpResults {
     uint32_t serial_starts, rtc_selects; // distinct code sites: $FF02 bit-7 starts, MBC3 RAM-bank selects of 8-$C (RTC)
     uint32_t div_reads, stat_reads, ly_reads; // distinct code sites reading $FF04 / $FF41 / $FF44 (timing probes)
     uint16_t probe_pc[5][16]; // site tables behind the two counters above (cap 16 each)
+    uint64_t palette_bytes; // bytes with DP_DF_PALETTE
     uint64_t apu_sample_bytes, apu_music_bytes; // bytes with DP_DF_SAMPLE / DP_DF_MUSIC
     uint64_t data_verbatim_bytes; // bytes with DP_DF_VERBATIM
     uint32_t seeds_refused_budget; // seeds dropped: the phase's cascade solde was spent

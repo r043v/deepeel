@@ -153,6 +153,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_copy1.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_hdma.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_apu.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pal.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_probes.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_copyx.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nsecho.gb

@@ -96,6 +96,8 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
                res->rtc_selects);
     dp_buf_fmt(out, "timing probes (read sites): DIV %u, STAT %u, LY %u\n", res->div_reads, res->stat_reads,
                res->ly_reads);
+    dp_buf_fmt(out, "cgb typing: %llu ROM bytes written to palette data ports\n",
+               (unsigned long long)res->palette_bytes);
     dp_buf_fmt(out, "apu typing: %llu ROM bytes written to wave RAM (samples), %llu to APU registers (music)\n",
                (unsigned long long)res->apu_sample_bytes, (unsigned long long)res->apu_music_bytes);
     {

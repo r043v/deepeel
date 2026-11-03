@@ -250,6 +250,9 @@ int main(int argc, char **argv) {
     CHECK(res.data_flags[dp_rom_index(1, 0x4001)] & DP_DF_MUSIC);
     CHECK(res.apu_sample_bytes == 1 && res.apu_music_bytes == 1);
 
+    run(dir, "pal");
+    CHECK((res.data_flags[dp_rom_index(1, 0x4000)] & DP_DF_PALETTE) && res.palette_bytes == 1);
+
     // --- probes: serial start and RTC register select are counted ------------------------
     run(dir, "probes");
     CHECK(res.serial_starts == 1 && res.rtc_selects == 1);

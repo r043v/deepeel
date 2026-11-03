@@ -725,6 +725,8 @@ static void hook_write(DpMach *m, uint16_t a, uint8_t v) {
                                                            (a >= 0xFF10 && a <= 0xFF25)))
             flags_or(&res->data_flags[ex->last_rom_key], a >= 0xFF30 ? DP_DF_SAMPLE : DP_DF_MUSIC);
         if (a == 0xFF02 && (v & 0x80)) probe_site(res, 0, m->api->gbr->pc);
+        if (ex->last_rom_valid && ex->last_rom_val == v && (a == 0xFF69 || a == 0xFF6B))
+            flags_or(&res->data_flags[ex->last_rom_key], DP_DF_PALETTE);
         if (a >= 0xFF51 && a <= 0xFF54) ex->hdma[a - 0xFF51] = v;
         if (a == 0xFF55) {
             // CGB HDMA: source/destination come from HDMA1-4, length from the
@@ -1371,11 +1373,12 @@ void dp_explore_finalize(DpExplorer *ex) {
     // execution wins there, the data mark is dropped at export
     {
         uint32_t contra = 0;
-        uint64_t verb = 0, smp = 0, mus = 0;
+        uint64_t verb = 0, smp = 0, mus = 0, pal = 0;
         size_t n = (size_t)res->banks * 0x4000;
         for (size_t k = 0; k < n; k++) {
             smp += (res->data_flags[k] & DP_DF_SAMPLE) != 0;
             mus += (res->data_flags[k] & DP_DF_MUSIC) != 0;
+            pal += (res->data_flags[k] & DP_DF_PALETTE) != 0;
             if (res->data_flags[k] & DP_DF_VERBATIM) {
                 verb++;
                 if (res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED)) contra++;
@@ -1384,6 +1387,7 @@ void dp_explore_finalize(DpExplorer *ex) {
         res->data_verbatim_bytes = verb;
         res->apu_sample_bytes = smp;
         res->apu_music_bytes = mus;
+        res->palette_bytes = pal;
         res->data_contradictions = contra;
     }
 }

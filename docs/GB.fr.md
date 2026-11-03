@@ -1097,3 +1097,12 @@ distincts (cap 16 chacun) qui lisent `DIV` (`$FF04`), `STAT` (`$FF41`) et `LY`
 (`$FF44`) sont comptés : ce sont les boucles d'attente de synchronisation.
 Rapport : ligne « timing probes ». Fixture `fix_probes` étendue. Observation
 de l'outil sur les lectures, pas une mesure de matériel.
+
+## 0.63.0
+
+J9 (partiel) : typage palette CGB. Un octet de ROM lu puis écrit tel quel au
+port de données de palette `BCPD` (`$FF69`) ou `OCPD` (`$FF6B`) est marqué
+`DP_DF_PALETTE`. Même heuristique d'égalité de valeur que le typage APU
+(sur-marquage possible sur coïncidence). Rapport : ligne « cgb typing ».
+Fixture `fix_pal`. Observation de l'outil ; l'exécution reste DMG, les ports
+ne sont pas émulés.
