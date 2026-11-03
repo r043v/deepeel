@@ -1644,3 +1644,13 @@ tables, N entries, N bytes typed, N table caps`. Fixture `fix_pce_sibling.pce`
 (table de 3 mots, 1 copie, 2 frères de 32 octets : 64 octets), test
 `pce_sibling`. Reste ◐ : tables dans la même page que la cible seulement, pas
 de copies CPU→VCE ni de tables inter-banques.
+
+## 0.106.0
+
+PCE : cibles indirectes observées (D12, partielle). `jmp (abs)` et
+`jmp (abs,X)` lisent leur cible sur le bus vivant ; les sites et les paires
+(site, cible) distinctes sont comptées, bornées à 65 536 paires avec
+`overflow` rapporté. Rapport : `indirect jumps: N sites, N targets, overflow N`.
+Fixture `fix_pce_ind.pce` (deux sauts, deux cibles), test `pce_indirect`.
+Comme sur NES, la cellule reste ◐ : les cibles sont observées, pas semées en
+second passage.

@@ -166,6 +166,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_slide.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_ctx.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_sibling.pce
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_ind.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_uxrom.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_pad.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ind.nes
@@ -329,3 +330,5 @@ add_test(NAME md_entry COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURREN
 set_tests_properties(md_entry PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME pce_sibling COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_sibling.pce --max-total 20000 --max-steps 100 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_sib.txt >/dev/null 2>&1; grep -q 'copy siblings: 1 tables, 2 entries, 64 bytes typed' ${CMAKE_CURRENT_BINARY_DIR}/pce_sib.txt")
 set_tests_properties(pce_sibling PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME pce_indirect COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_ind.pce --max-total 20000 --max-steps 100 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_ind.txt >/dev/null 2>&1; grep -q 'indirect jumps: 2 sites, 2 targets, overflow 0' ${CMAKE_CURRENT_BINARY_DIR}/pce_ind.txt")
+set_tests_properties(pce_indirect PROPERTIES FIXTURES_REQUIRED fixtures)

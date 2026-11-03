@@ -707,6 +707,15 @@ def build_nes_pce(out):
     g[0x1FFE], g[0x1FFF] = 0x00, 0xE0
     with open(os.path.join(out, "fix_pce_sibling.pce"), "wb") as f:
         f.write(g)
+    # PC Engine indirect jumps: JMP ($E100) then LDX #2 ; JMP ($E100,X), two distinct targets
+    ij = bytearray(0x4000)
+    ij[0:3] = bytes([0x6C, 0x00, 0xE1])
+    ij[8:13] = bytes([0xA2, 0x02, 0x7C, 0x00, 0xE1])
+    ij[0x10:0x12] = bytes([0x80, 0xFE])
+    ij[0x100:0x104] = bytes([0x08, 0xE0, 0x10, 0xE0])
+    ij[0x1FFE], ij[0x1FFF] = 0x00, 0xE0
+    with open(os.path.join(out, "fix_pce_ind.pce"), "wb") as f:
+        f.write(ij)
 
 if __name__ == "__main__":
     build_nes_pce(sys.argv[1] if len(sys.argv) > 1 else ".")

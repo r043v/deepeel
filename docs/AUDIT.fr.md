@@ -12,7 +12,7 @@ remesure pas l'outil.
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 20 | 5 | 2 |
-| PCE | 16 | 14 | 8 | 1 |
+| PCE | 16 | 15 | 7 | 1 |
 | MD | 8 | 10 | 20 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
@@ -28,7 +28,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | D10 | Sondes de lecture manette | NES | ◐ 8 boutons, port 1 absent |
 | D10 | Sondes de lecture manette | MD | ◐ 4 |
 | D12 | Cibles indirectes observées | NES | ◐ observé, sans second passage |
-| D12 | Cibles indirectes observées | PCE | ✗ |
+| D12 | Cibles indirectes observées | PCE | ◐ observé (`jmp (abs)`, `jmp (abs,X)`), sans second passage |
 | D12 | Cibles indirectes observées | MD | ✗ |
 | D13 | Coupes de non-sens | NES | ◐ illégal |
 | D13 | Coupes de non-sens | PCE | ◐ illégal |

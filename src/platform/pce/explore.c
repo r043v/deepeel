@@ -49,6 +49,7 @@ typedef struct {
     PceQueued *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
     DpLotFile *lot;            // disk lot: park overflow, wall leftovers, --lot resume
     uint64_t *seen;        // open-addressed dedup set
+    DpHashSet ind_sites, ind_pairs;   // observed indirect jumps (D12)
     DpHashSet ctx_seen;    // per-context admission counters (C2)
     size_t seen_cap, seen_len;
     uint8_t *fork_sites, *pad_sites, *irq_sites; // per-cell counters (saturating)
@@ -514,6 +515,18 @@ static int step_one(PceRun *x, int *frame_done) {
         x->istart[site] = 1;
         uint32_t page = (uint32_t)(site >> 13);
         if (page < 128 && x->page_win[page] == 0xFF) x->page_win[page] = (uint8_t)(c.pc >> 13);
+    }
+    // observed indirect jumps: jmp (abs) / jmp (abs,X) read their target from the
+    // live bus; sites and distinct (site, target) pairs are counted, bounded
+    if (in.flow == DP_HUC_INDIRECT && in.length == 3 && site >= 0 && (b[0] == 0x6C || b[0] == 0x7C)) {
+        uint16_t ptr = (uint16_t)(b[1] | b[2] << 8);
+        if (b[0] == 0x7C) ptr = (uint16_t)(ptr + c.x);
+        uint16_t tgt = (uint16_t)(dp_pce_peek(ptr) | dp_pce_peek((uint16_t)(ptr + 1)) << 8);
+        if (x->ind_pairs.cnt >= 65536) r->indirect_overflow++;
+        else {
+            if (dp_set_insert(&x->ind_sites, (uint64_t)site + 1) > 0) r->indirect_sites++;
+            if (dp_set_insert(&x->ind_pairs, ((uint64_t)(site + 1) << 16) | tgt) > 0) r->indirect_targets++;
+        }
     }
     int outside = site < 0;
     if (outside && !x->was_outside) r->exec_outside++;
@@ -1115,6 +1128,8 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     if (!x) return 0;
     DpPceResults *r = results;
     dp_set_init(&x->ctx_seen, 1 << 10);
+    dp_set_init(&x->ind_sites, 1 << 8);
+    dp_set_init(&x->ind_pairs, 1 << 10);
     memset(r, 0, sizeof *r);
     x->opt = options ? *options : dp_pce_options();
     r->options = x->opt;
@@ -1236,6 +1251,8 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     }
     free(x->queue);
     dp_set_free(&x->ctx_seen);
+    dp_set_free(&x->ind_sites);
+    dp_set_free(&x->ind_pairs);
     free(x->seen);
     free(x->fork_sites);
     free(x->pad_sites);
@@ -1330,6 +1347,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             (unsigned long long)r->idx_cross_page, (unsigned long long)r->idx_forced_ignored,
             (unsigned long long)r->idx_overflow);
     if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/MPR context past the cap)\n", (unsigned long long)r->ctx_evicted);
+    fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  copy siblings: %llu tables, %llu entries, %llu bytes typed, %llu table caps\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_entries, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_caps);
     fprintf(out, "  entries: %llu seeded, %llu refused (outside the ROM mapping)\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
