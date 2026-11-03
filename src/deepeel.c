@@ -248,6 +248,7 @@ static int cmd_explore(int argc, char **argv) {
     dp_config_defaults(&cfg);
     DpSessionCfg scfg;
     dp_session_cfg_defaults(&scfg);
+    uint8_t tier_limit = 0;
     uint8_t eb[32];
     uint16_t ea[32];
     int entries = 0;
@@ -278,6 +279,7 @@ static int cmd_explore(int argc, char **argv) {
             scfg.mem_cap_mb = strtoull(argv[++i], NULL, 0);
             cfg.mem_cap_mb = scfg.mem_cap_mb;
         }
+        else if (!strcmp(a, "--tier") && i + 1 < argc) tier_limit = (uint8_t)atoi(argv[++i]);
         else if (!strcmp(a, "--time-limit") && i + 1 < argc) scfg.time_limit_secs = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--spool-cap-mb") && i + 1 < argc) cfg.spool_cap_mb = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--jobs") && i + 1 < argc) cfg.jobs = atoi(argv[++i]);
@@ -453,7 +455,7 @@ static int cmd_explore(int argc, char **argv) {
         snprintf(exact_path, sizeof exact_path, "%s/exact.bin", scfg.state_dir);
         spool_on = dp_explorer_spool_attach(ex, spool_path, scfg.resume);
         if (!spool_on)
-            fprintf(stderr, "deepeel: spool unavailable (%s), overflow states are dropped\n",
+            fprintf(stderr, "deepeel: spool unavailable (%s), overflow states are refused and counted (spool_refused)\n",
                     spool_path);
         if (scfg.resume) dp_explorer_exact_load(ex, exact_path);
         if (scfg.resume) {
@@ -461,6 +463,7 @@ static int cmd_explore(int argc, char **argv) {
             if (fl) fprintf(stderr, "deepeel: resumed frontier (%d deferred continuations)\n", fl);
         }
     }
+    ex->defer_tier_limit = tier_limit;
     dp_seed_gb(ex);
     for (int i = 0; i < entries; i++)
         dp_explorer_seed_pc(ex, ea[i] >= 0x4000 ? (eb[i] ? eb[i] : 1) : 0, ea[i], DP_SEED_POINTER, 1);
@@ -1311,6 +1314,16 @@ int main(int argc, char **argv) {
         while (fgets(line, sizeof line, f)) fputs(line, stdout);
         fclose(f);
         return 0;
+    }
+    if (!strcmp(argv[1], "frontier") && argc > 4 && !strcmp(argv[2], "drain")) {
+        // frontier drain <rom> <state-dir> [--tier N] [--time-limit S]: resume the
+        // saved continuations only (an explore --resume run on the same state dir)
+        char **av = calloc((size_t)argc + 4, sizeof *av);
+        int n = 0;
+        av[n++] = argv[0]; av[n++] = (char *)"explore"; av[n++] = argv[3];
+        av[n++] = (char *)"--state-dir"; av[n++] = argv[4]; av[n++] = (char *)"--resume";
+        for (int i = 5; i < argc; i++) av[n++] = argv[i];
+        return cmd_explore(n, av);
     }
     if (!strcmp(argv[1], "md")) return cmd_md(argc, argv);
     if (!strcmp(argv[1], "nes")) return cmd_nes(argc, argv);

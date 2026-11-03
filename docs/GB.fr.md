@@ -792,3 +792,14 @@ banque/section, deltas XOR, lecture séquentielle à position persistée,
 `wall`, NES/PCE/MD. Le contexte dur complet par enregistrement n'est pas
 persisté : le chemin repris repart avec transitoires à zéro (peut couvrir un
 peu plus, jamais moins).
+
+## frontier drain et critère J2 (0.36.0)
+
+`deepeel frontier drain <rom> <state-dir> [--tier N] [--time-limit S]` reprend
+les continuations sauvegardées (équivaut à `explore --resume` sur le même
+`state-dir`) ; `--tier N` ne reprend que les paliers ≤ N, les autres restent
+tenues. Le test `test_explorer` vérifie le critère : un run à budget minuscule
+puis le rechargement de la frontière ne perd aucun code par rapport au run sans
+budget. Le message de spool indisponible dit maintenant « refused and counted ».
+Reste différé : lots par banque/section et deltas, paliers `priority`,
+`dedup-full`, `paths`, `fork-cap`, `covered`, `wall` en frontière, NES/PCE/MD.

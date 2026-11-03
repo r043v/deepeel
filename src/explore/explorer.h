@@ -401,6 +401,7 @@ struct DpExplorer {
     struct DpDeferred *defer;
     uint32_t defer_len, defer_cap;
     uint8_t cur_tier, defer_tier_next;
+    uint8_t defer_tier_limit; // frontier drain: only tiers <= limit resume (0 = all)
     uint64_t steps_own;  // fork-explorer steps (the wall); sessions share res->steps_total
     int last_io_slot; // io registry slot of the last register write (copy attribution)
     int stop; // set when a hard budget wall is hit

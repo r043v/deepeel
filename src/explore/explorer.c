@@ -1587,8 +1587,15 @@ int dp_explorer_frontier_load(DpExplorer *ex, const char *dir) {
 
 // next deferred continuation into *out (its tier goes to ex->defer_tier_next); 0 when none
 static int defer_pop(DpExplorer *ex, DpPathState *out) {
-    if (!ex->defer_len) return 0;
-    DpDeferred *d = &ex->defer[--ex->defer_len];
+    // the newest eligible continuation (a tier above the drain limit stays held)
+    int at = -1;
+    for (int i = (int)ex->defer_len - 1; i >= 0; i--)
+        if (!ex->defer_tier_limit || ex->defer[i].tier <= ex->defer_tier_limit) { at = i; break; }
+    if (at < 0) return 0;
+    DpDeferred dd = ex->defer[at];
+    memmove(&ex->defer[at], &ex->defer[at + 1], sizeof dd * (ex->defer_len - at - 1));
+    ex->defer_len--;
+    DpDeferred *d = &dd;
     *out = d->p;
     ex->defer_tier_next = d->tier;
     ex->res->defer_resumed++;

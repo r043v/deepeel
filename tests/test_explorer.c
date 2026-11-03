@@ -504,6 +504,26 @@ int main(int argc, char **argv) {
         g_fload = NULL;
     }
 
+    // --- J2 criterion: a tiny budget, then a drain of the saved frontier, covers
+    // what the unbudgeted run covers
+    {
+        char fd[600];
+        snprintf(fd, sizeof fd, "%s/fcrit", dir);
+        mkdir(fd, 0777);
+        run(dir, "branch");
+        static uint8_t ref[1 << 20], acc[1 << 20];
+        size_t total = (size_t)res.banks * 0x4000, lost = 0;
+        for (size_t k = 0; k < total; k++) ref[k] = res.exec_flags[k];
+        g_psteps = 3; g_wall = 12; g_fsave = fd;
+        run(dir, "branch");
+        for (size_t k = 0; k < total; k++) acc[k] = res.exec_flags[k];
+        g_fsave = NULL; g_fload = fd; g_wall = 0; g_psteps = 0;
+        run(dir, "branch");
+        for (size_t k = 0; k < total; k++) lost += ref[k] && !(acc[k] | res.exec_flags[k]);
+        CHECK(lost == 0);
+        g_fload = NULL;
+    }
+
     if (g_mach) dp_mach_close(g_mach);
     if (g_cart) dp_cart_free(g_cart);
 
