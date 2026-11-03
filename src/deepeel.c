@@ -237,6 +237,7 @@ static int write_file(const char *path, const DpBuf *b) {
 static void closure_rounds(DpExplorer *ex, DpResults *res, uint32_t *seed_spent, uint32_t seed_total);
 
 static int cmd_md(int argc, char **argv);
+static int g_drain_only; // frontier drain: no root seeding, only the saved frontier runs
 static int cmd_explore(int argc, char **argv) {
     const char *json = NULL, *text = NULL, *cov = NULL, *romdata = NULL, *map = NULL, *html = NULL, *path = NULL;
     const char *from_png = NULL, *export_dir = NULL, *summary = NULL;
@@ -286,6 +287,7 @@ static int cmd_explore(int argc, char **argv) {
             else tier_limit = (uint8_t)atoi(t);
         }
         else if (!strcmp(a, "--time-limit") && i + 1 < argc) scfg.time_limit_secs = strtoull(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--frontier-cap-gb") && i + 1 < argc) cfg.frontier_cap_mb = strtoull(argv[++i], NULL, 0) * 1024;
         else if (!strcmp(a, "--spool-cap-mb") && i + 1 < argc) cfg.spool_cap_mb = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--jobs") && i + 1 < argc) cfg.jobs = atoi(argv[++i]);
         else if (!strcmp(a, "--seed-cap") && i + 1 < argc) cfg.seed_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
@@ -479,8 +481,8 @@ static int cmd_explore(int argc, char **argv) {
         if (fl) fprintf(stderr, "deepeel: resumed frontier (%d continuations/seeds loaded, %llu more on disk)\n", fl,
                         (unsigned long long)dp_explorer_frontier_disk(ex));
     }
-    dp_seed_gb(ex);
-    for (int i = 0; i < entries; i++)
+    if (!g_drain_only) dp_seed_gb(ex); // a drain runs the saved continuations only
+    for (int i = 0; !g_drain_only && i < entries; i++)
         dp_explorer_seed_pc(ex, ea[i] >= 0x4000 ? (eb[i] ? eb[i] : 1) : 0, ea[i], DP_SEED_POINTER, 1);
     DpPlay *play_engine = NULL;
     if (play) {
@@ -1372,6 +1374,7 @@ int main(int argc, char **argv) {
         av[n++] = argv[0]; av[n++] = (char *)"explore"; av[n++] = argv[3];
         av[n++] = (char *)"--state-dir"; av[n++] = argv[4]; av[n++] = (char *)"--resume";
         for (int i = 5; i < argc; i++) av[n++] = argv[i];
+        g_drain_only = 1;
         return cmd_explore(n, av);
     }
     if (!strcmp(argv[1], "md")) return cmd_md(argc, argv);

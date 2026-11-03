@@ -1518,7 +1518,13 @@ uint64_t dp_explorer_spool_flush(DpExplorer *ex) {
         for (uint32_t i = 0; i < ex->sh->len; i++) {
             DpPathState *p = &ex->sh->q[(ex->sh->head + i) % ex->sh->cap];
             if (p->img) {
-                spool_write_rec(ex, p->img, p->forced, p->kind, p->from_reset, p->choice);
+                if (!spool_write_rec(ex, p->img, p->forced, p->kind, p->from_reset, p->choice)) {
+                if (defer_push(ex, p->img, p->forced, p->kind, p->from_reset, p->choice, DP_R_PATHS)) {
+                    memset(p, 0, sizeof *p);
+                    continue;
+                }
+                ex->res->queue_overflows++; // frontier full too: final and counted
+            }
                 free(p->img);
                 memset(p, 0, sizeof *p);
             }
@@ -1530,7 +1536,13 @@ uint64_t dp_explorer_spool_flush(DpExplorer *ex) {
     for (uint32_t i = 0; i < ex->q_len; i++) {
         DpPathState *p = &ex->queue[(ex->q_head + i) % ex->q_cap];
         if (p->img) {
-            spool_write_rec(ex, p->img, p->forced, p->kind, p->from_reset, p->choice);
+            if (!spool_write_rec(ex, p->img, p->forced, p->kind, p->from_reset, p->choice)) {
+                if (defer_push(ex, p->img, p->forced, p->kind, p->from_reset, p->choice, DP_R_PATHS)) {
+                    memset(p, 0, sizeof *p);
+                    continue;
+                }
+                ex->res->queue_overflows++; // frontier full too: final and counted
+            }
             free(p->img);
             memset(p, 0, sizeof *p);
         }
@@ -1540,7 +1552,13 @@ uint64_t dp_explorer_spool_flush(DpExplorer *ex) {
     for (uint32_t i = 0; i < ex->pq_len; i++) {
         DpPathState *p = &ex->pqueue[(ex->pq_head + i) % ex->pq_cap];
         if (p->img) {
-            spool_write_rec(ex, p->img, p->forced, p->kind, p->from_reset, p->choice);
+            if (!spool_write_rec(ex, p->img, p->forced, p->kind, p->from_reset, p->choice)) {
+                if (defer_push(ex, p->img, p->forced, p->kind, p->from_reset, p->choice, DP_R_PATHS)) {
+                    memset(p, 0, sizeof *p);
+                    continue;
+                }
+                ex->res->queue_overflows++; // frontier full too: final and counted
+            }
             free(p->img);
             memset(p, 0, sizeof *p);
         }
@@ -1786,6 +1804,7 @@ static void adopt_queues(DpExplorer *ex) {
 int dp_explorer_frontier_save(DpExplorer *ex, const char *dir) {
     if (!ex->fdir) { ex->fdir = strdup(dir); }
     char p[700];
+    mkdir(dir, 0777); // the state directory itself may not exist yet
     snprintf(p, sizeof p, "%s/frontier", dir);
     mkdir(p, 0777);
     adopt_queues(ex);
@@ -1825,6 +1844,13 @@ int dp_explorer_frontier_save(DpExplorer *ex, const char *dir) {
                 uint32_t n = 0;
                 while (s < b && bytes < DP_LOT_MAX_BYTES) {
                     DpDeferred *r = &ex->defer[k[s].i];
+                    if (ex->cfg.frontier_cap_mb && ex->fbytes >> 20 >= ex->cfg.frontier_cap_mb) {
+                        // --frontier-cap-gb reached: the loss is final, counted per reason
+                        ex->res->defer_final[r->reason]++;
+                        ex->res->defer_dropped++;
+                        s++;
+                        continue;
+                    }
                     for (uint32_t j = 0; j < (uint32_t)ex->sb; j++) d[j] = r->p.img[j] ^ base[j];
                     zl = cap;
                     if (compress2(z, &zl, d, (uLong)ex->sb, 6) == Z_OK) {
@@ -1832,6 +1858,7 @@ int dp_explorer_frontier_save(DpExplorer *ex, const char *dir) {
                         uint32_t l32 = (uint32_t)zl;
                         fwrite(hd, 8, 1, f); fwrite(&l32, 4, 1, f); fwrite(z, 1, zl, f);
                         bytes += 12 + zl;
+                        ex->fbytes += 12 + zl;
                         l.tier_n[r->tier <= DP_TIER_MAX ? r->tier : DP_TIER_MAX]++;
                         n++;
                     } else {

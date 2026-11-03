@@ -822,3 +822,14 @@ wall < covered` ; `covered` n'est repris que par `frontier drain --tier inf`.
 
 Limites : Sega/MSX ne couvrent que `steps`/`loop` ; NES/PCE/MD n'ont pas
 encore de frontière disque. Chiffres = observations de l'outil.
+
+## 0.38.0
+
+- `--frontier-cap-gb N` : plafond disque des lots ; au-delà, la perte est finale
+  et comptée par raison (`frontier.final`).
+- `frontier drain` ne réamorce plus la racine : seules les continuations
+  sauvegardées tournent. Le dossier d'état est créé s'il manque.
+- Un spool plein au flush reporte l'état dans la frontière au lieu de le jeter.
+- JSON : `frontier.inbox_dropped` (inbox de sessions pleine).
+- Sega : `fork_deferred`/`fork_final` (plafond de chemins, file pleine).
+- Les anciens spools `DPSR` restent lus tels quels (pas de conversion nécessaire).

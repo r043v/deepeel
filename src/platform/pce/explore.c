@@ -264,7 +264,7 @@ static int branch_taken(const DpHucIns *in, const DpPceCpu *c, int *bit_out, int
 static void fork_branch(PceRun *x, const DpHucIns *in, int64_t site) {
     DpPceResults *r = x->r;
     if (site < 0) return;
-    if (x->fork_sites[site] >= x->opt.fork_cap) { r->fork_cuts++; return; }
+    if (x->fork_sites[site] >= (x->opt.fork_cap > 255 ? 255u : x->opt.fork_cap)) /* uint8 counter: cap saturates at 255 */ { r->fork_cuts++; return; }
     DpPceCpu c = dp_pce_cpu();
     int bit, woff;
     if (branch_taken(in, &c, &bit, &woff) < 0) return;
@@ -297,7 +297,7 @@ static int reads_pad(const DpHucIns *in, const DpPceCpu *c) {
 static void fork_pad(PceRun *x, int64_t site) {
     DpPceResults *r = x->r;
     if (site < 0) return;
-    if (x->pad_sites[site] >= x->opt.pad_fork_cap) { r->pad_fork_cuts++; return; }
+    if (x->pad_sites[site] >= (x->opt.pad_fork_cap > 255 ? 255u : x->opt.pad_fork_cap)) /* uint8 counter: cap saturates at 255 */ { r->pad_fork_cuts++; return; }
     x->pad_sites[site]++;
     uint8_t now = dp_pce_input_get();
     dp_pce_save(x->tmp);
@@ -318,7 +318,7 @@ static void fork_irq(PceRun *x, const DpHucIns *in, int64_t site) {
         (in->op == 0x8D || in->op == 0x9C))
         unmask = 1;
     if (!unmask) return;
-    if (x->irq_sites[site] >= x->opt.irq_fork_cap) { r->irq_fork_cuts++; return; }
+    if (x->irq_sites[site] >= (x->opt.irq_fork_cap > 255 ? 255u : x->opt.irq_fork_cap)) /* uint8 counter: cap saturates at 255 */ { r->irq_fork_cuts++; return; }
     x->irq_sites[site]++;
     dp_pce_save(x->tmp);
     for (int src = 1; src <= 2; src++) {

@@ -390,6 +390,7 @@ static void deposit_img(DpPlay *p, const uint8_t *img) {
     } else {
         free(copy);
         p->inb_dropped++;
+        if (p->res) p->res->inbox_dropped++; // surfaced in the frontier report block
     }
     pthread_mutex_unlock(&p->inb_mtx);
 }

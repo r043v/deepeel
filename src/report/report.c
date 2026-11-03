@@ -269,10 +269,10 @@ static void cov_frontier_json(DpBuf *o, const DpResults *res) {
     dp_buf_str(o, "},\"final\":{");
     for (int r = 1; r < DP_R_COUNT; r++)
         dp_buf_fmt(o, "%s\"%s\":%llu", r > 1 ? "," : "", dp_reason_name(r), (unsigned long long)res->defer_final[r]);
-    dp_buf_fmt(o, "},\"seeds_deferred\":%llu,\"seeds_resumed\":%llu,\"seeds_lost\":%llu,"
+    dp_buf_fmt(o, "},\"seeds_deferred\":%llu,\"seeds_resumed\":%llu,\"seeds_lost\":%llu,\"inbox_dropped\":%llu,"
                   "\"seeds_on_disk\":%llu,\"records_on_disk\":%llu},\n",
                (unsigned long long)res->seeds_deferred, (unsigned long long)res->seeds_resumed,
-               (unsigned long long)res->seeds_lost, (unsigned long long)res->seeds_pending_disk,
+               (unsigned long long)res->seeds_lost, (unsigned long long)res->inbox_dropped, (unsigned long long)res->seeds_pending_disk,
                (unsigned long long)res->defer_on_disk);
 }
 

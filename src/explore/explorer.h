@@ -179,7 +179,7 @@ typedef struct DpResults {
     uint8_t *static_flags;
     uint64_t defer_by[DP_R_COUNT_];   // deferred per reason
     uint64_t defer_final[DP_R_COUNT_]; // cut for good per reason (tier cap / holding area full)
-    uint64_t seeds_deferred, seeds_resumed, seeds_lost, seeds_pending_disk, defer_on_disk;
+    uint64_t seeds_deferred, seeds_resumed, seeds_lost, seeds_pending_disk, defer_on_disk, inbox_dropped;
     uint64_t steps_deferred, loop_deferred, defer_resumed, steps_final, loop_final, defer_dropped, defer_pending; // §6 frontier
     uint32_t *src_flags;  // DP_SRC_* per ROM byte, OR-ed (every proving source)
     DpFirstLog first;     // sparse first-discovery table (bounded)
@@ -267,6 +267,7 @@ typedef struct DpConfig {
                               // dropping whole paths
     uint64_t mem_cap_mb;      // queue growth stops once RSS exceeds this MiB (0 = off;
                               // same wall as the sessions' --mem-cap)
+    uint64_t frontier_cap_mb; // disk budget of the frontier lots (0 = unbounded)
     uint64_t spool_cap_mb;    // disk budget of the spool file (0 = off; default 4096)
     uint32_t loop_back_cap;   // iterations of one backward edge before cut
     uint32_t fork_site_cap;   // max forks per branch site (loop bodies fork
@@ -423,6 +424,7 @@ struct DpExplorer {
     uint32_t defer_len, defer_cap;
     uint32_t defer_by_reason[DP_R_COUNT_]; // held per reason (per-reason cap for the noisy ones)
     uint8_t defer_all;        // frontier drain --tier inf: COVERED resumes too
+    uint64_t fbytes;          // bytes written to frontier lots so far
     char *fdir;               // frontier directory (<state-dir>), NULL when none
     DpLot *lots;
     uint32_t nlots, lotcap, lot_seq;

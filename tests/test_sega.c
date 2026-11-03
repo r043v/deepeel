@@ -75,6 +75,24 @@ static void deferral(void) {
     dp_sega_results_free(&r);
     free(rom);
 }
+static void fork_deferral(void) {
+    uint8_t *rom=calloc(1,0x10000); CHECK(rom); if(!rom) exit(1);
+    const uint8_t start[]={0xc3,0x00,0x01}; memcpy(rom,start,sizeof(start));
+    // xor a ; jr z,+3 ; ld a,7 (only the forced side) ; halt ; halt
+    const uint8_t body[]={0xaf,0x28,0x03,0x3e,0x07,0x76,0x76}; memcpy(rom+0x100,body,sizeof(body));
+    DpSegaOptions o=dp_sega_options(); o.seed_cap=0; o.max_total=100000; o.seed_vectors=0; o.input_masks=0;
+    o.max_paths=1;
+    DpSegaResults r;
+    o.defer_tiers=0;   // no holding area: the path cap drops the fork, counted
+    CHECK(dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r));
+    CHECK(r.path_cuts>0 && !(r.flags[0x103]&DP_SEGA_FORCED));
+    dp_sega_results_free(&r);
+    o.defer_tiers=3;   // the fork waits and runs later
+    CHECK(dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r));
+    CHECK(r.fork_deferred>0 && r.defer_pending==0 && (r.flags[0x103]&DP_SEGA_FORCED));
+    dp_sega_results_free(&r);
+    free(rom);
+}
 static void exploration(void) {
     uint8_t *rom=calloc(1,0x10000); CHECK(rom); if(!rom) exit(1);
     // The natural side copies ROM to RAM; the forced side copies ROM to VDP.
@@ -147,6 +165,6 @@ int main(void) {
     test_machine(dp_sega_backend_sg(),0,1);
     test_machine(dp_sega_backend_gg(),0,0);
     test_machine(dp_sega_backend_gg(),1,0);
-    exploration(); deferral();
+    exploration(); deferral(); fork_deferral();
     TEST_DONE("sega");
 }
