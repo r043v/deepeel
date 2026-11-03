@@ -27,6 +27,9 @@ static void fork_key(DpExplorer *ex, uint32_t site);
 static void fork_p1(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op);
 
 // --- shared-map primitives -----------------------------------------------------
+static inline void src_or(DpResults *res, uint32_t k, uint32_t bits) {
+    __atomic_or_fetch(&res->src_flags[k], bits, __ATOMIC_RELAXED);
+}
 static inline uint8_t flags_or(uint8_t *p, uint8_t bit) {
     return __atomic_or_fetch(p, bit, __ATOMIC_RELAXED); // returns the old bits
 }
@@ -159,6 +162,8 @@ void dp_results_init(DpResults *res, const DpCart *cart, const DpPlatform *plat)
     res->play_data_hits = xrealloc(NULL, n * sizeof(uint32_t));
     res->static_flags = xrealloc(NULL, n);
     res->section_of = xrealloc(NULL, n * sizeof(uint32_t));
+    res->src_flags = xrealloc(NULL, n * sizeof(uint32_t));
+    memset(res->src_flags, 0, n * sizeof(uint32_t));
     memset(res->play_exec_hits, 0, n * sizeof(uint32_t));
     memset(res->play_data_hits, 0, n * sizeof(uint32_t));
     memset(res->exec_flags, 0, n);
@@ -214,6 +219,7 @@ void dp_results_free(DpResults *res) {
     free(res->play_data_hits);
     free(res->static_flags);
     free(res->section_of);
+    free(res->src_flags);
     for (int i = 0; i < res->section_count; i++) dp_set_free(&res->sections[i].ctx_seen);
     free(res->sections);
     free(res->io);
@@ -254,8 +260,8 @@ void dp_static_scan(DpResults *res) {
             if (!run) rstart = i;
             run++;
             if (run == 8)
-                for (size_t j = rstart; j <= i; j++) res->static_flags[j] |= DP_SF_PAD;
-            else if (run > 8) res->static_flags[i] |= DP_SF_PAD;
+                for (size_t j = rstart; j <= i; j++) { res->static_flags[j] |= DP_SF_PAD; res->src_flags[j] |= DP_SRC_STATIC_SCAN; }
+            else if (run > 8) { res->static_flags[i] |= DP_SF_PAD; res->src_flags[i] |= DP_SRC_STATIC_SCAN; }
         } else {
             run = 0;
         }
@@ -283,6 +289,8 @@ void dp_static_scan(DpResults *res) {
                 if (a + 1 < n) {
                     res->static_flags[a] |= DP_SF_POINTER;
                     res->static_flags[a + 1] |= DP_SF_POINTER;
+                    res->src_flags[a] |= DP_SRC_STATIC_SCAN;
+                    res->src_flags[a + 1] |= DP_SRC_STATIC_SCAN;
                 }
             }
             off += 6; // skip past the table we just marked
@@ -606,6 +614,7 @@ static void hook_read(DpMach *m, uint16_t a, uint8_t v) {
     if (a < 0x8000) { // ROM data read (opcode fetches never take this path)
         uint32_t key = key_at(ex, a);
         uint8_t old = flags_or(&res->data_flags[key], DP_DF_READ);
+        src_or(res, key, ex->session ? DP_SRC_SESSION : (ex->cur_forced ? DP_SRC_FORK_FORCED : DP_SRC_FORK_NATURAL));
         if (!(old & DP_DF_READ)) ex->credit_data++;
         hits_add(res, &res->data_hits[key]);
         if (ex->session) hits_add(res, &res->play_data_hits[key]);
@@ -939,6 +948,8 @@ bad_done:
         } else {
             uint8_t nf = (uint8_t)(ex->cur_forced ? DP_XF_FORCED : DP_XF_NATURAL);
             uint8_t old = flags_or(&res->exec_flags[pk], nf);
+            uint32_t xs = ex->session ? DP_SRC_SESSION : (ex->cur_forced ? DP_SRC_FORK_FORCED : DP_SRC_FORK_NATURAL);
+            src_or(res, pk, xs);
             if (!(old & nf)) ex->credit_exec++;
             if (!(old & DP_XF_START)) flags_or(&res->exec_flags[pk], DP_XF_START);
             hits_add(res, &res->exec_hits[pk]);
@@ -952,6 +963,7 @@ bad_done:
                 if (pc < 0x4000 && a >= 0x4000) break; // crossed the window edge
                 uint32_t k = dp_rom_index(bank, a);
                 uint8_t o2 = flags_or(&res->exec_flags[k], nf);
+                src_or(res, k, xs);
                 if (!(o2 & nf)) ex->credit_exec++;
                 hi = a;
             }

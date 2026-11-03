@@ -125,12 +125,17 @@ static DpZ80Origin valid_origin(Run *x,DpZ80Origin origin,uint8_t value) {
 static void section_live_ram(Run *x,int32_t ram);
 static void section_live_port(Run *x,uint16_t port);
 static void static_scan(Run *x);
+// sources are OR-ed atomically: worker sessions share nothing but merge later
+static inline void src_or(DpSegaResults *r,size_t i,uint32_t bits) {
+    if(r->src_flags) __atomic_or_fetch(&r->src_flags[i],bits,__ATOMIC_RELAXED);
+}
 static uint8_t read_bus(void *user,uint16_t a) {
     Run *x=user; uint8_t v=x->b->read(a);
     int64_t index=x->b->rom_index(a);
     if(!x->fetching && index>=0 && (uint64_t)index<x->r->size) {
         if(!(x->r->flags[index]&DP_SEGA_DATA)) x->discoveries++;
         x->r->flags[index]|=DP_SEGA_DATA; x->r->data_reads++;
+        src_or(x->r,index,x->forced?DP_SRC_FORK_FORCED:DP_SRC_FORK_NATURAL);
     }
     if(!x->fetching) section_live_ram(x,x->b->ram_index(a));
     if(x->bios_active && x->bios_id==15) x->bios_read=valid_origin(x,origin_read(x,a),v);
@@ -178,6 +183,7 @@ static void copied(Run *x,DpZ80Origin origin,uint8_t value,unsigned space,uint32
     if(verbatim) {
         if(!(r->flags[source]&DP_SEGA_COPIED)) x->discoveries++;
         r->flags[source]|=DP_SEGA_COPIED;
+        src_or(r,source,DP_SRC_COPY);
     } else r->copy_transformed++;
     if(space==DP_SEGA_VRAM || space==DP_SEGA_CRAM) {
         r->vdp_copies++;
@@ -264,6 +270,7 @@ static void msx_event(void *user,DpMsxEvent event) {
         if(event.address<r->size) {
             if(!(r->flags[event.address]&DP_SEGA_DATA)) x->discoveries++;
             r->flags[event.address]|=DP_SEGA_DATA; r->data_reads++;
+            src_or(r,event.address,x->forced?DP_SRC_FORK_FORCED:DP_SRC_FORK_NATURAL);
             if(x->bios_active && x->bios_id==1)
                 x->bios_return=valid_origin(x,event.address+1,event.value);
         }
@@ -792,7 +799,7 @@ static int play_step(Run *x) {
         if(x->cur_sec) x->cur_sec->played_hits++;
         for(unsigned j=0;j<d.length;j++) {
             int64_t index=x->b->rom_index((uint16_t)(c->pc+j));
-            if(index>=0 && (uint64_t)index<r->size) r->flags[index]|=DP_SEGA_NATURAL;
+            if(index>=0 && (uint64_t)index<r->size) { r->flags[index]|=DP_SEGA_NATURAL; src_or(r,index,DP_SRC_SESSION); }
             else r->exec_outside++;
         }
         dp_sega_closure_observe(x->closure);
@@ -969,7 +976,7 @@ static void generate_seed_specs(Run *x,const uint8_t *image,size_t size) {
 void dp_sega_results_free(DpSegaResults *r) {
     for(uint32_t i=0;i<r->section_count;i++) dp_set_free(&r->sections[i].ctx_seen);
     free(r->sections); free(r->section_of); free(r->tree_nodes); free((void *)r->rom);
-    free(r->static_flags);
+    free(r->static_flags); free(r->src_flags);
     free(r->flags); free(r->copies); memset(r,0,sizeof(*r));
 }
 // One exploration worker. worker 0 runs everything: the TAS replay, the play
@@ -1023,6 +1030,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     x.copy_hash=calloc(x.copy_hash_size,sizeof(*x.copy_hash));
     r->flags=calloc(size,1);
     r->static_flags=calloc(size,1);
+    r->src_flags=calloc(size,sizeof(*r->src_flags));
     x.cart=calloc(0x8000,1);
     r->section_of=calloc(size,sizeof(*r->section_of));
     r->section_capacity=256;
@@ -1034,7 +1042,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     x.queue=calloc(o->queue_cap,sizeof(*x.queue));
     x.input_queue=calloc(o->queue_cap,sizeof(*x.input_queue));
     int ok=image&&r->flags&&r->copies&&x.origins&&x.copy_hash&&x.cart&&x.forks&&x.sides&&x.irq_forks&&x.queue&&x.input_queue&&
-        r->section_of&&r->sections&&x.indirect&&r->static_flags&&
+        r->section_of&&r->sections&&x.indirect&&r->static_flags&&r->src_flags&&
         (!o->input_masks || !o->input_total || (x.input_sites&&x.input_scratch));
     if(!ok) goto cleanup;
     memset(image,0xff,padded); memcpy(image,rom,size);
@@ -1241,6 +1249,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
                         if(index>=0 && (uint64_t)index<size) {
                             if(!(r->flags[index]&(DP_SEGA_NATURAL|DP_SEGA_FORCED))) x.discoveries++;
                             r->flags[index]|=x.forced?DP_SEGA_FORCED:DP_SEGA_NATURAL;
+                            src_or(r,index,x.forced?DP_SRC_FORK_FORCED:DP_SRC_FORK_NATURAL);
                         }
                         else outside=1;
                     }
@@ -1283,6 +1292,8 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
         x.queued=0;
     }
     dp_sega_closure_run(x.closure);
+    // the closure only marks STATIC / STATIC_DATA, so those bits are its source
+    for(size_t i=0;i<size;i++) if(r->flags[i]&(DP_SEGA_STATIC|DP_SEGA_STATIC_DATA)) src_or(r,i,DP_SRC_CLOSURE);
     sections_finalize(r);
     // distinct observed indirect sites, counted whatever the pass budgets did
     for(size_t i=0;i<x.indirect_hash;i++) if(x.indirect[i].site) r->indirect_sites++;
@@ -1346,6 +1357,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     uint32_t sec_base=d->section_count,tree_base=d->tree_count;
     for(size_t i=0;i<d->size;i++) {
         d->flags[i]|=s->flags[i];
+        d->src_flags[i]|=s->src_flags[i];
         if(s->section_of[i]) {
             if(d->section_of[i]) d->merge_conflicts++;
             else d->section_of[i]=s->section_of[i]+sec_base;
@@ -1570,6 +1582,18 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
         r->merge_conflicts,r->bank_changes,r->data_reads);
     fprintf(out,",\"limits\":{\"base\":%"PRIu64",\"inputs\":%"PRIu64",\"indirect\":%"PRIu64"}",
         r->phase_limits[0],r->phase_limits[1],r->phase_limits[2]);
+    {   // per-source byte counts: a byte proven by several sources counts in each
+        uint64_t per[DP_SRC_COUNT]={0},any=0,multi=0;
+        for(size_t i=0;i<r->size;i++) {
+            uint32_t v=r->src_flags[i];
+            if(v) any++;
+            if(v&(v-1)) multi++;
+            for(int b=0;b<DP_SRC_COUNT;b++) per[b]+=(v>>b)&1;
+        }
+        fprintf(out,",\"sources\":{\"bytes_any\":%"PRIu64",\"bytes_multi\":%"PRIu64,any,multi);
+        for(int b=0;b<DP_SRC_COUNT;b++) fprintf(out,",\"%s\":%"PRIu64,dp_src_name(b),per[b]);
+        fputc('}',out);
+    }
     fputs(",\"sections\":[",out);
     unsigned printed=r->section_count<4096?r->section_count:4096;
     for(unsigned i=0;i<printed;i++) {
@@ -1593,7 +1617,7 @@ static void static_scan(Run *x) {
         if(!seed_padding(x->image,r->size,at)) continue;
         size_t end=at+1;
         while(end<r->size && seed_padding(x->image,r->size,end)) end++;
-        for(size_t i=at;i<end;i++) r->static_flags[i]|=DP_SEGA_PAD;
+        for(size_t i=at;i<end;i++) { r->static_flags[i]|=DP_SEGA_PAD; src_or(r,i,DP_SRC_STATIC_SCAN); }
         at=end-1;
     }
     DpSegaSeedGeometry g;
@@ -1604,7 +1628,7 @@ static void static_scan(Run *x) {
         if(v<lo || v>=hi) continue;
         uint16_t pv=a>=2?(uint16_t)(x->image[a-2]|(x->image[a-1]<<8)):0;
         uint16_t nv=a+3<r->size?(uint16_t)(x->image[a+2]|(x->image[a+3]<<8)):0;
-        if(pv>=lo && pv<hi && nv>=lo && nv<hi) r->static_flags[a]|=r->static_flags[a+1]|DP_SEGA_TABLE;
+        if(pv>=lo && pv<hi && nv>=lo && nv<hi) { r->static_flags[a]|=r->static_flags[a+1]|DP_SEGA_TABLE; src_or(r,a,DP_SRC_STATIC_SCAN); }
     }
 }
 static int smap_is_code(int c) { return c==DP_SMAP_CODE_NAT||c==DP_SMAP_CODE_FORCED||c==DP_SMAP_CODE_STATIC||c==DP_SMAP_INF_CODE; }
@@ -1616,16 +1640,7 @@ uint8_t *dp_sega_map_build(const DpSegaResults *r) {
     if(!m) return NULL;
     for(size_t k=0;k<r->size;k++) {
         uint8_t f=r->flags[k], st=r->static_flags?r->static_flags[k]:0;
-        int c;
-        if(f&DP_SEGA_NATURAL) c=DP_SMAP_CODE_NAT;
-        else if(f&DP_SEGA_FORCED) c=DP_SMAP_CODE_FORCED;
-        else if(f&DP_SEGA_STATIC) c=DP_SMAP_CODE_STATIC;
-        else if(f&DP_SEGA_COPIED) c=DP_SMAP_DATA_COPIED;
-        else if(f&DP_SEGA_STATIC_DATA) c=DP_SMAP_DATA_STATIC;
-        else if(f&DP_SEGA_DATA) c=DP_SMAP_DATA_READ;
-        else if(st&DP_SEGA_TABLE) c=DP_SMAP_TABLE;
-        else if(st&DP_SEGA_PAD) c=DP_SMAP_PAD;
-        else c=DP_SMAP_UNKNOWN;
+        int c=dp_nature_class(dp_sega_nature(f,st)); // DP_SMAP_* == DP_MAP_* numbering
         m[k]=(uint8_t)c;
     }
     if(!r->rom) return m;

@@ -24,17 +24,7 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
     uint8_t *m = malloc(n ? n : 1);
     for (size_t k = 0; k < n; k++) {
         uint8_t x = res->exec_flags[k], d = res->data_flags[k], s = res->static_flags[k];
-        int c;
-        if (x & DP_XF_NATURAL) c = DP_MAP_CODE_NAT;
-        else if (x & DP_XF_FORCED) c = DP_MAP_CODE_FORCED;
-        else if (x & DP_XF_STATIC) c = DP_MAP_CODE_STATIC;
-        else if (d & (DP_DF_COPIED | DP_DF_VERBATIM)) c = DP_MAP_DATA_COPIED;
-        else if (d & DP_DF_STATIC) c = DP_MAP_DATA_STATIC;
-        else if (d & DP_DF_READ) c = DP_MAP_DATA_READ;
-        else if (d & DP_DF_SIBLING) c = DP_MAP_INF_DATA; // inferred, labelled so
-        else if (s & DP_SF_POINTER) c = DP_MAP_TABLE;
-        else if (s & DP_SF_PAD) c = DP_MAP_PAD;
-        else c = DP_MAP_UNKNOWN;
+        int c = dp_nature_class(dp_gb_nature(x, d, s));
         m[k] = (uint8_t)c;
     }
     // inference over the unknown runs of each bank (never crossing a bank)

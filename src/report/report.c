@@ -260,6 +260,25 @@ static void json_esc(DpBuf *out, const char *s) {
     }
 }
 
+// Per-source byte counts (a byte counts once per source that proved it) and
+// the bytes proved by several sources: the coverage model's sources field.
+static void cov_sources_json(DpBuf *o, const DpResults *res) {
+    uint64_t per[DP_SRC_COUNT] = {0}, multi = 0, any = 0;
+    size_t n = (size_t)res->banks * 0x4000;
+    for (size_t k = 0; res->src_flags && k < n; k++) {
+        uint32_t v = res->src_flags[k];
+        if (!v) continue;
+        any++;
+        if (v & (v - 1)) multi++;
+        for (int b = 0; b < DP_SRC_COUNT; b++) if (v & (1u << b)) per[b]++;
+    }
+    dp_buf_fmt(o, "\"sources\": {\"bytes_any\":%llu,\"bytes_multi\":%llu",
+               (unsigned long long)any, (unsigned long long)multi);
+    for (int b = 0; b < DP_SRC_COUNT; b++)
+        dp_buf_fmt(o, ",\"%s\":%llu", dp_src_name(b), (unsigned long long)per[b]);
+    dp_buf_str(o, "},\n");
+}
+
 void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
     const DpCart *c = res->cart;
     dp_buf_str(o, "{\n\"rom\": {");
@@ -321,6 +340,7 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
         }
         free(hm);
     }
+    cov_sources_json(o, res);
     dp_buf_fmt(o, "\"closure\": {\"rounds\":%u,\"starts\":%u,\"unresolved_bank\":%u,"
                   "\"stopped_data\":%u,\"stopped_illegal\":%u,\"seeds\":%u,\"seeds_dropped\":%u,"
                   "\"seeds_refused\":%u,\"bank_seeds\":%u,\"indirect_seeds\":%u},\n",
@@ -527,6 +547,7 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
                res->seeds_natural, res->seeds_spec, res->seeds_refused_budget,
                res->seeds_skipped_data, (unsigned)res->bad_op_count, res->prov_jp_hl, res->prov_data,
                res->prov_unresolved, res->prov_sat);
+    cov_sources_json(o, res);
     dp_buf_fmt(o, "\"closure\": {\"rounds\":%u,\"starts\":%u,\"unresolved_bank\":%u,"
                   "\"stopped_data\":%u,\"stopped_illegal\":%u,\"seeds\":%u,\"seeds_dropped\":%u,"
                   "\"seeds_refused\":%u,\"bank_seeds\":%u,\"indirect_seeds\":%u},\n",

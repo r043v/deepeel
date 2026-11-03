@@ -1351,7 +1351,7 @@ Chaque jalon remplit trois conditions :
 | Jalon | Contenu | Taille | Critère d'acceptation |
 |---|---|---|---|
 | **J0** ✅ 0.29.0 | Correctifs §10.12 | S | test de reprise de spool qui relit tous les enregistrements ; test de saturation `fork_counts` |
-| **J1** | Modèle de couverture commun §4 (nature/types/sources, table creuse) branché sur GB, puis Sega | M | les classes de carte sont identiques avant/après (projection) ; sources multiples visibles dans le JSON |
+| **J1** ✅ 0.30.0 | Modèle de couverture commun §4 (nature/sources branchés sur GB puis Sega ; `types` déclarés, table creuse **différée**) | M | les classes de carte sont identiques avant/après (projection) ; sources multiples visibles dans le JSON |
 | **J2** | Frontière différée §6 (GB puis Sega) | L | test : un run au budget minuscule puis `frontier drain` donne la même couverture qu'un run sans budget sur la fixture ; aucun compteur `*_dropped` non nul hors non-sens |
 | **J3** | `DpMachine`/`DpIsa`, noyau extrait de `src/explore/`, GB migré | XL | comportement identique (tests + campagne GB à budgets égaux) |
 | **J4** | Sega/MSX sur le noyau | L | matrice §2.1 ✅ pour SMS/GG/MSX ; `--jobs` MSX |

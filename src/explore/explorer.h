@@ -13,6 +13,7 @@
 
 #include "../core/machine.h"
 #include "../mach/m0boy.h"
+#include "../core/coverage.h"
 #include "../platform/platform.h"
 
 #include <pthread.h>
@@ -38,6 +39,21 @@ enum {
     DP_SF_POINTER = 1 << 0, // static: part of a plausible pointer table
     DP_SF_PAD = 1 << 1,     // static: padding run (8+ identical 00/FF bytes)
 };
+
+// legacy GB flags -> common nature (docs/COUVERTURE.fr.md annexe A)
+static inline uint16_t dp_gb_nature(uint8_t x, uint8_t d, uint8_t s) {
+    uint16_t n = 0;
+    if (x & DP_XF_NATURAL) n |= DP_NAT_CODE_NAT;
+    if (x & DP_XF_FORCED) n |= DP_NAT_CODE_FORCED;
+    if (x & DP_XF_STATIC) n |= DP_NAT_CODE_STATIC;
+    if (d & (DP_DF_COPIED | DP_DF_VERBATIM)) n |= DP_NAT_DATA_COPIED;
+    if (d & DP_DF_STATIC) n |= DP_NAT_DATA_STATIC;
+    if (d & DP_DF_READ) n |= DP_NAT_DATA_READ;
+    if (d & DP_DF_SIBLING) n |= DP_NAT_DATA_INF;
+    if (s & DP_SF_POINTER) n |= DP_NAT_TABLE;
+    if (s & DP_SF_PAD) n |= DP_NAT_PAD;
+    return n;
+}
 
 // --- open-addressing u64 set (shared implementation) ---------------------------
 #include "../core/hashset.h"
@@ -160,6 +176,7 @@ typedef struct DpResults {
     uint32_t *play_exec_hits;
     uint32_t *play_data_hits;
     uint8_t *static_flags;
+    uint32_t *src_flags;  // DP_SRC_* per ROM byte, OR-ed (every proving source)
     uint32_t *section_of; // rom key -> section id + 1
     // sections
     DpSection *sections;

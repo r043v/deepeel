@@ -145,6 +145,7 @@ uint32_t dp_static_closure(DpResults *res) {
                 uint8_t *f = &res->exec_flags[k + i];
                 if (!(*f & (DP_XF_NATURAL | DP_XF_FORCED | DP_XF_STATIC))) marked++;
                 *f |= DP_XF_STATIC;
+                res->src_flags[k + i] |= DP_SRC_CLOSURE;
             }
             res->exec_flags[k] |= DP_XF_START;
         }
@@ -192,6 +193,7 @@ uint32_t dp_static_closure(DpResults *res) {
             if (tk != ~0u && tk < n) {
                 if (!(res->exec_flags[tk] & (DP_XF_NATURAL | DP_XF_FORCED))) {
                     res->exec_flags[tk] |= DP_XF_ENTRY;
+                    res->src_flags[tk] |= DP_SRC_CLOSURE;
                     if (dp_set_insert(&listed, tk) > 0) entry_add(res, tk);
                 }
                 push(&st, tk, tk >= 0x4000 ? NO_HINT : thint, tr);

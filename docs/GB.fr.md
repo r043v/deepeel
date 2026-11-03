@@ -733,3 +733,16 @@ Les correctifs relevés par la norme (`docs/COUVERTURE.fr.md` §10.12) :
     file. Nouveau compteur `pending dropped` pour les états restés en file au
     mur. Les champs d'options morts `seed_banks` et `entry_*` sont retirés.
   - PCE : nouveau compteur `pending dropped`, sur le même principe.
+
+## Modèle de couverture commun (0.30.0, J1)
+
+Chaque octet de ROM porte désormais, en plus des drapeaux historiques, un
+masque de **sources** (`DP_SRC_*`, OR-ées, jamais de « gagnante ») :
+session jouée, fork naturel, fork forcé, fermeture statique, provenance,
+scan statique, copie, inférence de voisin. La classe de carte est une
+projection de la nature (`dp_nature_class`, `src/core/coverage.h`) : les
+cartes sont identiques à celles d'avant (tests `coverage` et `sega_coverage`).
+Le rapport JSON expose `"sources"` (octets par source, `bytes_any`,
+`bytes_multi`) pour GB et pour Sega/MSX. Différé : la table creuse
+`(source, horodatage, id film/worker)` et la projection `types`.
+Ces nombres sont des observations de l'outil, pas des mesures de matériel.

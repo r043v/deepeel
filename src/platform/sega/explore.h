@@ -1,5 +1,6 @@
 #ifndef DP_SEGA_EXPLORE_H
 #define DP_SEGA_EXPLORE_H
+#include "../../core/coverage.h"
 #include "sega.h"
 #include "closure.h"
 #include "../../../src/core/hashset.h"
@@ -111,6 +112,19 @@ typedef struct {
     uint64_t ctx_count;        // distinct incoming contexts admitted
     DpHashSet ctx_seen;
 } DpSegaSection;
+// legacy Sega flags -> common nature (docs/COUVERTURE.fr.md annexe A)
+static inline uint16_t dp_sega_nature(uint8_t f,uint8_t st) {
+    uint16_t n=0;
+    if(f&DP_SEGA_NATURAL) n|=DP_NAT_CODE_NAT;
+    if(f&DP_SEGA_FORCED) n|=DP_NAT_CODE_FORCED;
+    if(f&DP_SEGA_STATIC) n|=DP_NAT_CODE_STATIC;
+    if(f&DP_SEGA_COPIED) n|=DP_NAT_DATA_COPIED;
+    if(f&DP_SEGA_STATIC_DATA) n|=DP_NAT_DATA_STATIC;
+    if(f&DP_SEGA_DATA) n|=DP_NAT_DATA_READ;
+    if(st&DP_SEGA_TABLE) n|=DP_NAT_TABLE;
+    if(st&DP_SEGA_PAD) n|=DP_NAT_PAD;
+    return n;
+}
 typedef struct {
     uint8_t *flags;
     size_t size;
@@ -130,6 +144,7 @@ typedef struct {
     uint32_t tree_count,tree_capacity;
     const uint8_t *rom;        // ROM image copy for static map classes
     uint8_t *static_flags;     // static scan: DP_SEGA_TABLE|DP_SEGA_PAD per byte
+    uint32_t *src_flags;       // DP_SRC_* per byte, OR-ed (every proving source)
     // observed indirect jumps and their seeding pass (GB dp_seed_indirect)
     uint64_t indirect_sites,indirect_targets,indirect_site_overflow,indirect_target_overflow;
     uint64_t indirect_seeds,indirect_refused_budget,indirect_pending;
