@@ -179,11 +179,13 @@ static int explore_window(uint16_t addr, unsigned bank) {
     default: return 0;
     }
 }
+static uint64_t explore_screen_key(void) { return dp_sega_name_key(machine.vram,(machine.vdp[2]&15u)<<10,768,1,0,0); }
+static const uint8_t *explore_ram_view(size_t *n) { *n=sizeof(machine.ram)<8192?sizeof(machine.ram):8192; return machine.ram; }
 const DpSegaBackend *dp_msx_backend(void) {
     static const DpSegaBackend ops={explore_init,dp_msx_cpu,dp_msx_read,dp_msx_write,
         dp_msx_in,dp_msx_out,dp_msx_advance,dp_msx_rom_index,sizeof(Snapshot),explore_save,explore_load,
         dp_msx_ram_index,explore_target,explore_input,explore_set_input,explore_mapper,explore_command,
         explore_irq,65536,65536,0xff,0x98,0x99,dp_msx_close,explore_windows,NULL,NULL,explore_geometry,explore_window,
-        dp_msx_info,dp_msx_observe,dp_msx_bios_trap};
+        dp_msx_info,dp_msx_observe,dp_msx_bios_trap,explore_screen_key,explore_ram_view};
     return &ops;
 }

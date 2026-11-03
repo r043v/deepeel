@@ -2089,3 +2089,18 @@ porte une valeur d'en-tête différente du MD5 de la ROM jouée et se rejoue pou
 jusqu'à la dernière image (« GMV replay: 60053 / 60053 frames », observation de
 l'outil : 51 716 octets de ROM exécutés, 9,9 %, en 2 min avec `--max-total 2e9`).
 Test `md_bk2_movie`. Option `--tas-any-rom` acceptée côté MD (supprime l'avertissement).
+
+## 0.141.0 (SMS / GG / SG-1000 / MSX)
+
+`--novelty N` : recherche de nouveauté de type Go-Explore sur le backend Sega
+(même principe que NES/MD). Une archive de points de contrôle compressés
+(machine + RAM cartouche) ; chaque essai restaure le point le plus prometteur,
+joue des manettes aléatoires maintenues quelques « images » (une image =
+`--novelty-frame-steps` instructions, 10 000 par défaut) et archive les écrans
+nouveaux (empreinte de la table de noms VDP) ou la couverture ROM nouvelle. Les
+vies sont apprises sans connaissance du jeu (petit octet de RAM qui ne fait que
+décroître par pas isolés) ; les derniers points d'archive amorcent la file de
+fourches. Options : `--novelty-frames` (240), `--novelty-archive` (4096),
+`--novelty-frame-steps`, `--novelty-cells 1`. Rapport : ligne `novelty: …`.
+Ce sont des observations de l'outil, pas des mesures de matériel. Reste :
+mesures sur ROMs réelles, GB (J4 GB).

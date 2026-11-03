@@ -9,8 +9,8 @@ remesure pas l'outil.
 | Plateforme | ✅ fait | ◐ partiel | ✗ absent | — sans objet |
 |---|---|---|---|---|
 | GB | 34 | 2 | 2 | 1 |
-| SMS/GG | 32 | 1 | 4 | 2 |
-| MSX | 32 | 1 | 4 | 2 |
+| SMS/GG | 32 | 2 | 3 | 2 |
+| MSX | 32 | 2 | 3 | 2 |
 | NES | 12 | 24 | 1 | 2 |
 | PCE | 16 | 21 | 1 | 1 |
 | MD | 10 | 26 | 2 | 1 |
@@ -91,8 +91,8 @@ Cellules ouvertes (◐ ou ✗) : 89.
 | J2 | Rejeu TAS prioritaire + shoots | MD | ◐ GMV |
 | J3 | Identité ROM des films | MD | ◐ BK2 : MD5 d'en-tête comparé au ROM (avertissement seulement, le hash BizHawk MD n'est pas fiable) ; GMV sans identité |
 | J4 | Go-Explore (cellules écran) | GB | ✗ |
-| J4 | Go-Explore (cellules écran) | SMS/GG | ✗ |
-| J4 | Go-Explore (cellules écran) | MSX | ✗ |
+| J4 | Go-Explore (cellules écran) | SMS/GG | ◐ `--novelty` 0.141.0 (SMS/GG/SG) |
+| J4 | Go-Explore (cellules écran) | MSX | ◐ `--novelty` 0.141.0 (MSX) |
 | J4 | Go-Explore (cellules écran) | NES | ◐ `--novelty` (archive de cellules écran, vies sans connaissance du jeu) |
 | J4 | Go-Explore (cellules écran) | MD | ◐ `--novelty` (archive de cellules plans A/B, vies sans connaissance du jeu) |
 | J5 | Mode humain, export `.sta` | SMS/GG | ✗ |

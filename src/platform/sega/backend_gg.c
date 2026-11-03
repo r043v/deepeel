@@ -145,7 +145,12 @@ static int seed_window(uint16_t addr, unsigned bank) {
     if(addr<0x400) return 0; // fixed bank 0
     write((uint16_t)(0xfffd+(addr>>14)),(uint8_t)bank); return 1;
 }
+static uint64_t screen_key(void) {
+    if(!machine.sms) return dp_sega_name_key(machine.vram,(machine.vdp[2]&14u)<<10,1792,2,machine.vdp[8],machine.vdp[9]);
+    return dp_sega_name_key(machine.vram,(machine.vdp[2]&14u)<<10,1792,2,machine.vdp[8],machine.vdp[9]);
+}
+static const uint8_t *ram_view(size_t *n) { *n=sizeof(machine.ram); return machine.ram; }
 const DpSegaBackend *dp_sega_backend_gg(void) {
-    static const DpSegaBackend ops={init,cpu,read,write,in,out,advance,rom_index,sizeof(State),save,load,ram_index,vdp_target,input,set_input,mapper,vdp_command,irq_sources,DP_SEGA_RAM_TAGS,8192,0xc1,0x80,0x81,NULL,NULL,control_state,select_mapper,seed_geometry,seed_window};
+    static const DpSegaBackend ops={init,cpu,read,write,in,out,advance,rom_index,sizeof(State),save,load,ram_index,vdp_target,input,set_input,mapper,vdp_command,irq_sources,DP_SEGA_RAM_TAGS,8192,0xc1,0x80,0x81,NULL,NULL,control_state,select_mapper,seed_geometry,seed_window,NULL,NULL,NULL,screen_key,ram_view};
     return &ops;
 }

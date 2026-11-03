@@ -13,6 +13,8 @@
 #include <inttypes.h>
 #include <errno.h>
 #include <pthread.h>
+#include <zlib.h>
+#include <math.h>
 
 typedef struct {
     DpZ80Provenance cpu;
@@ -86,6 +88,8 @@ typedef struct {
     DpSegaIndirectRec *indirect;
     size_t indirect_hash;
     DpSegaVisits play_visits;      // loop guard of the play session
+    uint64_t novel;                // ROM bytes executed for the first time by play (novelty gain)
+    uint32_t rng;
 } Run;
 
 // S4: the ROM word a jp (hl)/(ix)/(iy) target was loaded from, by register
@@ -831,7 +835,7 @@ static int fork_inputs(Run *x,const z80_decoded_t *d,size_t at,int skip_irq) {
 }
 DpSegaOptions dp_sega_options(void) {
     // Boot code often runs nested 16-bit delay loops before touching the VDP.
-    DpSegaOptions o={.max_total=20000000,.input_total=20000000,.indirect_total=20000000,.play_total=0,.tas_total=2000000,.tas_frame_steps=1000,.max_steps=2000000,.max_paths=4096,.queue_cap=128,
+    DpSegaOptions o={.novelty_frames=240,.novelty_archive=4096,.novelty_frame_steps=10000,.max_total=20000000,.input_total=20000000,.indirect_total=20000000,.play_total=0,.tas_total=2000000,.tas_frame_steps=1000,.max_steps=2000000,.max_paths=4096,.queue_cap=128,
         .loop_cap=262144,.fork_cap=2,.stagnation=32768,.copy_cap=DP_SEGA_COPY_CAP,
         .input_masks=8,.input_sites=4096,.seed_vectors=1,.seed_cap=1024,.queue_max=4096,.target_closure=1,.block_closure=1,.msx_mapper=DP_MSX_AUTO,.closure={262144,65536,256,8},.jobs=1}; return o;
 }
@@ -867,7 +871,7 @@ static int play_step(Run *x) {
         if(x->cur_sec) x->cur_sec->played_hits++;
         for(unsigned j=0;j<d.length;j++) {
             int64_t index=x->b->rom_index((uint16_t)(c->pc+j));
-            if(index>=0 && (uint64_t)index<r->size) { r->flags[index]|=DP_SEGA_NATURAL; src_or(r,index,DP_SRC_SESSION); }
+            if(index>=0 && (uint64_t)index<r->size) { if(!(r->flags[index]&DP_SEGA_NATURAL)) x->novel++; r->flags[index]|=DP_SEGA_NATURAL; src_or(r,index,DP_SRC_SESSION); }
             else r->exec_outside++;
         }
         dp_sega_closure_observe(x->closure);
@@ -964,6 +968,159 @@ static void play_session(Run *x) {
     }
     r->play_steps=r->steps-start;
     pass_end(x);
+}
+// --- novelty search (Go-Explore, GB/NES/MD parity) ----------------------------------
+// An archive of compressed machine checkpoints; each trial restores the most promising
+// one, plays random held pads for a few frames (one frame = novelty_frame_steps
+// instructions) and archives new screens (name-table fingerprint) or new ROM coverage.
+// Lives are learned without game knowledge as in the NES search: a small RAM byte that
+// only decreases by single steps far apart.
+typedef struct { uint8_t *z; uLongf zlen; uint64_t gain; uint32_t picks,depth; uint8_t lives[8192]; } SegaCell;
+typedef struct { uint8_t prev[8192],maxv[8192],bad[8192]; uint16_t dec[8192],inc[8192]; uint32_t last_dec[8192],frame; int lives_byte; } SegaLives;
+static uint32_t sega_rng(uint32_t *s) { *s^=*s<<13; *s^=*s>>17; *s^=*s<<5; return *s; }
+static int sega_lives_frame(SegaLives *L,const uint8_t *w,size_t n,int learn) {
+    int died=0;
+    for(size_t i=0;i<n;i++) {
+        uint8_t a=L->prev[i],b=w[i];
+        if(b>L->maxv[i]) L->maxv[i]=b;
+        if(a==b) continue;
+        if(b+1==a) {
+            int cand=!L->bad[i] && L->dec[i]>=2 && L->maxv[i]<=9 && L->inc[i]<=1+L->dec[i]/4;
+            if(cand && !learn) { died=1; L->lives_byte=(int)i; }
+            if(L->frame-L->last_dec[i]<200) L->bad[i]=1;
+            L->dec[i]++; L->last_dec[i]=L->frame;
+        } else if(b<a) L->bad[i]=1;
+        else if(b==a+1 && L->inc[i]<0xFFFF) L->inc[i]++;
+    }
+    memcpy(L->prev,w,n); L->frame++;
+    return died;
+}
+enum { SEGA_KEY_SET=1<<18 };
+static int sega_key_seen(const uint64_t *set,uint64_t k) {
+    k|=1;
+    for(uint32_t i=(uint32_t)(k>>7)&(SEGA_KEY_SET-1);;i=(i+1)&(SEGA_KEY_SET-1)) { if(!set[i]) return 0; if(set[i]==k) return 1; }
+}
+static void sega_key_add(uint64_t *set,uint64_t k) {
+    k|=1;
+    for(uint32_t i=(uint32_t)(k>>7)&(SEGA_KEY_SET-1);;i=(i+1)&(SEGA_KEY_SET-1)) { if(set[i]==k) return; if(!set[i]) { set[i]=k; return; } }
+}
+// state||cart image of the machine, compressed; slot reuse follows gain/(1+picks)
+static int sega_cell_add(Run *x,SegaCell *a,uint32_t *n,uint64_t gain,uint8_t *img,Bytef *ztmp,uLongf zcap,uint32_t cap) {
+    size_t ssz=x->b->state_size;
+    x->b->save(img); memcpy(img+ssz,x->cart,0x8000);
+    uLongf zl=zcap;
+    if(compress2(ztmp,&zl,img,(uLong)(ssz+0x8000),1)!=Z_OK) return -1;
+    uint8_t *z=malloc(zl); if(!z) return -1;
+    memcpy(z,ztmp,zl);
+    uint32_t slot=*n;
+    if(*n>=cap) {
+        double worst=1e300;
+        for(uint32_t i=0;i<*n;i++) { double sc=(double)a[i].gain/(1.0+a[i].picks); if(sc<worst) { worst=sc; slot=i; } }
+        free(a[slot].z); x->r->novelty_replaced++;
+    } else (*n)++;
+    a[slot].z=z; a[slot].zlen=zl; a[slot].gain=gain; a[slot].picks=0; a[slot].depth=0;
+    size_t rn=0; const uint8_t *ram=x->b->ram_view(&rn);
+    memset(a[slot].lives,0,sizeof a[slot].lives);
+    memcpy(a[slot].lives,ram,rn<sizeof a[slot].lives?rn:sizeof a[slot].lives);
+    x->r->novelty_archived++;
+    return (int)slot;
+}
+static int sega_nov_frame(Run *x,DpSegaInput in) {
+    x->b->set_input(in);
+    for(uint32_t i=0;i<x->opt->novelty_frame_steps;i++) if(!play_step(x)) return 0;
+    return 1;
+}
+static void novelty_session(Run *x) {
+    const DpSegaOptions *o=x->opt; DpSegaResults *r=x->r;
+    if(!o->novelty_total || !o->novelty_archive || !x->b->screen_key || !x->b->ram_view) return;
+    size_t ssz=x->b->state_size, tot=ssz+0x8000;
+    uLongf zcap=compressBound((uLong)tot);
+    SegaCell *a=calloc(o->novelty_archive,sizeof *a);
+    SegaLives *L=calloc(1,sizeof *L);
+    uint64_t *keys=calloc(SEGA_KEY_SET,sizeof *keys);
+    uint8_t *img=malloc(tot),*img2=malloc(tot); Bytef *ztmp=malloc(zcap);
+    if(!a||!L||!keys||!img||!img2||!ztmp) { free(a); free(L); free(keys); free(img); free(img2); free(ztmp); return; }
+    L->lives_byte=-1;
+    uint32_t n=0; const int cells=o->novelty_cells;
+    uint64_t stop=r->steps+o->novelty_total;
+    x->rng=0x2545F491u*7u+11u;
+    pass_begin(x);
+    sega_cell_add(x,a,&n,1,img,ztmp,zcap,o->novelty_archive);
+    const int gg=!strcmp(x->system->id,"gg"),msx=!strcmp(x->system->id,"msx");
+    while(r->steps<stop) {
+        uint8_t maxl=0;
+        if(L->lives_byte>=0) for(uint32_t i=0;i<n;i++) if(a[i].lives[L->lives_byte]>maxl && a[i].lives[L->lives_byte]<=9) maxl=a[i].lives[L->lives_byte];
+        uint32_t best=n-1; double bs=-1;
+        for(int k=0;k<8;k++) {
+            uint32_t i=k?sega_rng(&x->rng)%n:n-1;
+            double sc;
+            if(!cells) sc=(double)a[i].gain/(1.0+a[i].picks);
+            else {
+                double lf=(L->lives_byte>=0 && a[i].lives[L->lives_byte]<maxl)?1e-3:1.0;
+                sc=lf*(1.0+(double)a[i].gain)*(1.0+a[i].depth/200.0)/sqrt(1.0+a[i].picks);
+            }
+            if(sc>bs) { bs=sc; best=i; }
+        }
+        uLongf sz=(uLongf)tot;
+        if(uncompress(img2,&sz,a[best].z,a[best].zlen)!=Z_OK) break;
+        x->b->load(img2); memcpy(x->cart,img2+ssz,0x8000);
+        memcpy(x->origins,x->seed_origins,x->origin_size);
+        dp_sega_visits_reset(&x->play_visits);
+        x->cur_sec=NULL; x->prev_at=0;
+        a[best].picks++; r->novelty_trials++;
+        uint64_t before=x->novel; uint32_t hold=0,frames_since=0; uint8_t held=0;
+        size_t rn=0; const uint8_t *ram=x->b->ram_view(&rn); if(rn>sizeof L->prev) rn=sizeof L->prev;
+        memcpy(L->prev,ram,rn); L->frame+=200;
+        int learn=r->novelty_trials<64;
+        int recent[64]; uint32_t recent_f[64]; unsigned nrecent=0;
+        for(uint32_t f=0;f<o->novelty_frames && r->steps<stop;f++) {
+            if(!hold) {
+                uint32_t v=sega_rng(&x->rng);
+                held=(uint8_t)(v&0x7f);
+                if((held&3)==3) held&=(uint8_t)~2; // no opposing directions
+                if((held&12)==12) held&=(uint8_t)~8;
+                hold=4+(v>>16)%40;
+            }
+            hold--;
+            DpSegaInput in={{0,0},0,0,0};
+            in.pad[0]=(uint8_t)(held&63);
+            if(held&64) { if(gg||msx) in.start=1; else in.pause=1; }
+            if(!sega_nov_frame(x,in)) break;
+            r->novelty_frames_run++;
+            ram=x->b->ram_view(&rn); if(rn>sizeof L->prev) rn=sizeof L->prev;
+            if(cells && sega_lives_frame(L,ram,rn,learn)) {
+                for(unsigned k=0;k<nrecent;k++) if(recent[k]>=0 && f-recent_f[k]<120) { a[recent[k]].picks=1u<<30; a[recent[k]].gain=0; }
+                r->novelty_deaths++; break;
+            }
+            frames_since++;
+            if(f%8==7) {
+                uint64_t k=cells?x->b->screen_key():0;
+                int fresh=cells && !sega_key_seen(keys,k);
+                if(fresh || (x->novel>before && frames_since>=60)) {
+                    uint64_t g=x->novel-before;
+                    a[best].gain+=g;
+                    int slot=sega_cell_add(x,a,&n,cells?g+(fresh?1:0):g+1,img,ztmp,zcap,o->novelty_archive);
+                    if(nrecent<64) { recent[nrecent]=slot; recent_f[nrecent++]=f; }
+                    if(slot>=0) { a[slot].depth=a[best].depth+f+1; if(a[slot].depth>r->novelty_depth) r->novelty_depth=a[slot].depth; }
+                    sega_key_add(keys,k);
+                    if(g) r->novelty_hits++;
+                    before=x->novel; frames_since=0;
+                }
+            }
+        }
+    }
+    // the freshest checkpoints seed the fork queue
+    for(uint32_t i=n;i>0 && o->queue_cap;i--) {
+        if(i+64<n) break;
+        uLongf sz=(uLongf)tot;
+        if(uncompress(img2,&sz,a[i-1].z,a[i-1].zlen)!=Z_OK) continue;
+        x->b->load(img2); memcpy(x->cart,img2+ssz,0x8000);
+        memcpy(x->origins,x->seed_origins,x->origin_size);
+        push_to(x,0,0,0,DP_SEGA_TREE_BRANCH);
+    }
+    pass_end(x);
+    for(uint32_t i=0;i<n;i++) free(a[i].z);
+    free(a); free(L); free(keys); free(img); free(img2); free(ztmp);
 }
 // GB dp_seed_indirect parity: every jp (hl)/(ix)/(iy) target observed at
 // runtime without execution evidence seeds a further pass; the phase's
@@ -1182,7 +1339,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     int drain=o->lot_drain && x.spool_wr>x.spool_rd; // saved states only: no root, no seeds
     // Seed base: the reset state every seed starts from. Generation reads the
     // boot view through rom_index while the machine has not run yet.
-    if((o->seed_cap || o->entry_count || o->seed_banks || o->indirect_total || o->play_total || o->tas_path)) {
+    if((o->seed_cap || o->entry_count || o->seed_banks || o->indirect_total || o->play_total || o->novelty_total || o->tas_path)) {
         x.seed_capacity=o->seed_cap+o->entry_count+3*256+8192;
         x.seeds=malloc((size_t)x.seed_capacity*sizeof(*x.seeds));
         x.seed_state=malloc(x.b->state_size); x.seed_scratch=malloc(x.b->state_size);
@@ -1198,6 +1355,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     if(!worker && !drain) {
         if(!tas_replay(&x)) { ok=0; goto cleanup; }
         play_session(&x);
+        novelty_session(&x);
     }
     if(!worker && push_to(&x,0,0,0,DP_SEGA_TREE_RESET)<0) { ok=0; goto cleanup; }
 
@@ -1577,6 +1735,8 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     DP_MR_SUM(indirect_target_overflow); DP_MR_SUM(indirect_seeds);
     DP_MR_SUM(indirect_refused_budget); DP_MR_SUM(indirect_pending);
     DP_MR_SUM(play_steps); DP_MR_SUM(play_epochs);
+    DP_MR_SUM(novelty_trials); DP_MR_SUM(novelty_hits); DP_MR_SUM(novelty_archived); DP_MR_SUM(novelty_replaced); DP_MR_SUM(novelty_frames_run); DP_MR_SUM(novelty_deaths);
+    if(s->novelty_depth>d->novelty_depth) d->novelty_depth=s->novelty_depth;
     if(s->tas_identity) d->tas_identity=s->tas_identity;
     DP_MR_SUM(tas_frames); DP_MR_SUM(tas_frames_refused); DP_MR_SUM(tas_steps);
     DP_MR_SUM(jobs_capped); DP_MR_SUM(merge_conflicts);
@@ -2041,6 +2201,9 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
         r->phase_steps[1],r->phase_limits[1],r->phase_paths[1],r->phase_known[1],r->phase_pending[1],
         r->phase_steps[2],r->phase_limits[2],r->phase_paths[2],r->phase_known[2],r->phase_pending[2]);
     fprintf(out,"play session: %"PRIu64" steps; %"PRIu64" input epochs\n",r->play_steps,r->play_epochs);
+    if(r->novelty_trials)
+        fprintf(out,"novelty: depth %u frames, %"PRIu64" trials, %"PRIu64" frames, %"PRIu64" hits, %"PRIu64" deaths, %"PRIu64" archived (%"PRIu64" replaced)\n",
+                r->novelty_depth,r->novelty_trials,r->novelty_frames_run,r->novelty_hits,r->novelty_deaths,r->novelty_archived,r->novelty_replaced);
     fprintf(out,"tas replay: %"PRIu64" frames; %"PRIu64" steps; frames refused %"PRIu64"\n",r->tas_frames,r->tas_steps,r->tas_frames_refused);
     fprintf(out,"drain: jobs capped %"PRIu64"; seeds off-lane %"PRIu64"; section attribution conflicts %"PRIu64" (record paths and parent paths are per-worker with --jobs 2)\n",
         r->jobs_capped,r->seeds_offlane,r->merge_conflicts);
@@ -2189,7 +2352,7 @@ int dp_sega_explore_command(int argc,char **argv) {
         }
         else {
             uint64_t n; if(!number(value,&n)) goto usage;
-            if(!n && strcmp(key,"--fork-cap") && strcmp(key,"--stagnation") && strcmp(key,"--copy-cap") && strcmp(key,"--input-forks") && strcmp(key,"--input-sites") && strcmp(key,"--input-total") && strcmp(key,"--closure-nodes") && strcmp(key,"--seed-cap") && strcmp(key,"--defer-tiers")) goto usage;
+            if(!n && strcmp(key,"--fork-cap") && strcmp(key,"--stagnation") && strcmp(key,"--copy-cap") && strcmp(key,"--input-forks") && strcmp(key,"--input-sites") && strcmp(key,"--input-total") && strcmp(key,"--closure-nodes") && strcmp(key,"--seed-cap") && strcmp(key,"--defer-tiers") && strcmp(key,"--novelty-cells")) goto usage;
             if(!strcmp(key,"--max-total")) o.max_total=n;
             else if(!strcmp(key,"--input-total")) o.input_total=n;
             else if(!strcmp(key,"--tas-total")) o.tas_total=n;
@@ -2211,6 +2374,11 @@ int dp_sega_explore_command(int argc,char **argv) {
             else if(!strcmp(key,"--fork-cap") && n<=255) o.fork_cap=(uint32_t)n;
             else if(!strcmp(key,"--indirect-total")) o.indirect_total=n;
             else if(!strcmp(key,"--play-steps")) o.play_total=n;
+            else if(!strcmp(key,"--novelty")) o.novelty_total=n;
+            else if(!strcmp(key,"--novelty-frames")) o.novelty_frames=(uint32_t)n;
+            else if(!strcmp(key,"--novelty-archive")) o.novelty_archive=(uint32_t)n;
+            else if(!strcmp(key,"--novelty-frame-steps")) { if(n>1000000) goto usage; o.novelty_frame_steps=(uint32_t)n; }
+            else if(!strcmp(key,"--novelty-cells")) o.novelty_cells=n!=0;
             else if(!strcmp(key,"--tas-frame-steps")) { if(!n || n>1000000) goto usage; o.tas_frame_steps=(uint32_t)n; }
             else if(!strcmp(key,"--queue-max")) { if(n>65536 || n<o.queue_cap) goto usage; o.queue_max=(uint32_t)n; }
             else if(!strcmp(key,"--spool-cap-mb") && n<=1048576) o.spool_cap_mb=(uint32_t)n;
@@ -2241,5 +2409,5 @@ int dp_sega_explore_command(int argc,char **argv) {
     }
     dp_sega_results_free(&r); return ok?0:1;
 usage:
-    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE]\n"); return 2;
+    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--novelty N] [--novelty-frames N] [--novelty-archive N] [--novelty-frame-steps N] [--novelty-cells 1] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE]\n"); return 2;
 }

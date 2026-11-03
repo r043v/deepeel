@@ -80,7 +80,17 @@ static void no_play_no_coverage(void) {
     DpSegaSection *nmi=section_at(0x150);
     CHECK(!nmi || nmi->verdict!=DP_SEGA_VERDICT_PLAYED);
 }
+// J4: the novelty search runs, archives checkpoints and reaches the Pause NMI
+// handler (session-only coverage) without any game knowledge.
+static void novelty_reaches_pause(void) {
+    fixture();
+    DpSegaOptions o=options(); o.novelty_total=400000; o.novelty_frames=40; o.novelty_frame_steps=200; o.novelty_archive=32;
+    run(o);
+    CHECK(result.novelty_trials>0 && result.novelty_frames_run>0 && result.novelty_archived>=1);
+    CHECK((result.flags[0x150]&DP_SEGA_NATURAL));
+}
 int main(void) {
+    novelty_reaches_pause();
     play_reaches_held_input_code();
     no_play_no_coverage();
     dp_sega_results_free(&result);

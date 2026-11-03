@@ -75,7 +75,21 @@ typedef struct {
     DpMsxInfo (*msx_info)(void);
     void (*msx_observe)(DpMsxObserver observer, void *user);
     int (*msx_bios_trap)(uint16_t pc, uint16_t port);
+    // Go-Explore cells (--novelty): fingerprint of what the screen shows (name table
+    // + scroll registers) and the work RAM, both without side effects. NULL: unsupported.
+    uint64_t (*screen_key)(void);
+    const uint8_t *(*ram_view)(size_t *n);
 } DpSegaBackend;
+// FNV-1a over the background name table: every other byte of a 2-byte SMS/GG entry
+// (the tile index; attributes are ignored) or each TMS9918 name byte, plus scroll.
+static inline uint64_t dp_sega_name_key(const uint8_t *vram,unsigned name_base,unsigned bytes,unsigned stride,
+                                        unsigned scroll_x,unsigned scroll_y) {
+    uint64_t h=1469598103934665603ull;
+    for(unsigned i=0;i<bytes;i+=stride) { h^=vram[(name_base+i)&0x3fff]; h*=1099511628211ull; }
+    h^=(scroll_x>>3); h*=1099511628211ull;
+    h^=(scroll_y>>3); h*=1099511628211ull;
+    return h;
+}
 const DpSegaBackend *dp_sega_backend_sg(void);
 const DpSegaBackend *dp_sega_backend_gg(void);
 // Second instances (objcopy-namespaced runtime clones): the --jobs parallel

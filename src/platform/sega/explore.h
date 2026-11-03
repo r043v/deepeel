@@ -55,6 +55,9 @@ typedef struct {
     uint64_t input_total;
     uint64_t indirect_total; // second pass seeding observed jp (hl) targets
     uint64_t play_total;     // instrumented play session steps (0: no session)
+    uint64_t novelty_total;  // Go-Explore novelty search: instruction budget (0: off)
+    uint32_t novelty_frames, novelty_archive, novelty_frame_steps; // frames per trial, archive size, instructions per frame
+    int novelty_cells;       // key the archive on the screen fingerprint and learned lives
     uint64_t tas_total;      // TAS replay budget, steps (bounded whatever the movie length)
     uint32_t tas_frame_steps; // per-frame step cap of the TAS replay
     const char *tas_path;    // TAS movie (.bk2 or plain input log, sega/tas.h)
@@ -160,6 +163,9 @@ typedef struct {
     uint64_t indirect_seeds,indirect_refused_budget,indirect_pending;
     // play session (GB sessions parity): natural coverage from held inputs
     uint64_t play_steps,play_epochs;
+    // novelty search (Go-Explore)
+    uint64_t novelty_trials,novelty_hits,novelty_archived,novelty_replaced,novelty_frames_run,novelty_deaths;
+    uint32_t novelty_depth;
     // TAS replay (GB tas.c parity): natural coverage from a movie, priority
     uint64_t tas_frames,tas_frames_refused,tas_steps;
     // copy siblings (S5): tables found, ranges marked, ranges refused over executed code, tables cut at the entry cap, bytes newly marked
