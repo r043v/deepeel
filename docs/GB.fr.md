@@ -1911,3 +1911,11 @@ par octet de ROM, mêmes classes que le NES (`code-natural`, `code-forced`,
 `data-copied` pour DMA/VRAM, `data-read`, puis les trois inférences S7). Avant,
 le fichier était un vidage brut des drapeaux. Une inférence ne remplace jamais
 une observation. Reste ◐ : pas encore de rendu PNG, JSON ni heat pour le MD.
+
+## 0.128.0
+
+`deepeel maprender ROM in.map out.png --sys md` accepte une carte `md map v1`
+(et `nes map v1`) : chaque chiffre de classe est converti en plages sur la ROM
+entière, fenêtrées par 16 Kio comme pour les plateformes Z80, puis rendues par
+le moteur de carte commun. Le MD a donc sa carte PNG. Reste ◐ pour O1 MD :
+pas de JSON de synthèse ni de carte de chaleur.

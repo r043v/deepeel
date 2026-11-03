@@ -377,3 +377,5 @@ add_test(NAME md_map_inference COMMAND sh -c "$<TARGET_FILE:deepeel> md explore 
 set_tests_properties(md_map_inference PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_class_map COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_pad_effect.md --map $D/md_cm.map >/dev/null 2>&1; [ \"$(head -1 $D/md_cm.map)\" = 'md map v1' ] && [ \"$(sed -n 2p $D/md_cm.map | tr -d '\\n' | wc -c)\" = \"$(wc -c < $D/fix_md_pad_effect.md)\" ] && sed -n 2p $D/md_cm.map | grep -q '[12]'")
 set_tests_properties(md_class_map PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME md_map_png COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_pad_effect.md --map $D/md_mp.map >/dev/null 2>&1; $B maprender $D/fix_md_pad_effect.md $D/md_mp.map $D/md_mp.png --sys md && [ \"$(head -c 4 $D/md_mp.png | tail -c 3)\" = PNG ]")
+set_tests_properties(md_map_png PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)

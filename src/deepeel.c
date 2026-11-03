@@ -818,6 +818,26 @@ static int cmd_maprender(int argc, char **argv) {
         free(text);
         return 1;
     }
+    // "md map v1" / "nes map v1" (one class digit per ROM byte): rewrite as
+    // whole-ROM runs "0 start end class" and let the z80 splitter below window them
+    if (!cv_in && ln > 11 && (!strncmp(text, "md map v1\n", 10) || !strncmp(text, "nes map v1\n", 11))) {
+        char *d = text + (text[0] == 'm' ? 10 : 11);
+        char *dend = memchr(d, '\n', (size_t)(text + ln - d));
+        if (!dend) dend = text + ln;
+        DpBuf runs;
+        dp_buf_init(&runs);
+        for (char *q = d; q < dend;) {
+            char *r2 = q;
+            while (r2 < dend && *r2 == *q) r2++;
+            int k = *q - '0';
+            dp_buf_fmt(&runs, "0 %x %x %s\n", (unsigned)(q - d), (unsigned)(r2 - d) - 1, dp_map_class_name(k));
+            q = r2;
+        }
+        free(text);
+        text = (char *)runs.p;
+        ln = (long)runs.len;
+        z80_map = 1;
+    }
     if (z80_map && !cv_in) {
         // z80 maps list physical 16 KiB banks and whole-ROM offsets; rewrite
         // each run into the windowed "bank start end class" form the renderer
