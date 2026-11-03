@@ -81,6 +81,7 @@ typedef struct {
     char tas_paths[8][512];
     int tas_count;
     uint8_t entry_bank[32]; uint16_t entry_addr[32]; int entry_count; // --entry bank:addr seeds
+    int seed_banks;        // also seed every switchable bank at $8000 (UxROM)
     int lot_drain;         // with a lot backlog: run only the saved states (no root, no seeds)
     const char *lot_path;  // disk lot of deferred states (NULL: memory only); an existing file is resumed
 } DpNesOptions;

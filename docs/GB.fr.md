@@ -1323,3 +1323,12 @@ valide, les cartes ponteuses (CNROM, AxROM) refusent. Le rapport indique
 `entries: seeded N refused M` : un refus n'est jamais silencieux. Test
 `nes_entry`. Cellule G3 NES de la matrice §2.1 : reste ◐ (`--seed-banks`
 absent sur NES, seul `--entry` est acquis).
+
+## 0.80.0
+
+NES : `--seed-banks` sème chaque banque commutable à `$8000` (UxROM ; une
+graine par banque, y compris la banque fixe ; sans effet sur NROM et refusé
+par les cartes ponteuses, compté dans `entries`). Fixture `fix_nes_uxrom.nes`
+(4 banques, CHR-RAM) : sans l'option 1 chemin / 1 section, avec 5 chemins /
+4 sections. Test `nes_seed_banks`. Cellule G3 NES de la matrice §2.1 passée
+à ✅. Observations de l'outil (`--max-steps 1000`, boucle d'attente).

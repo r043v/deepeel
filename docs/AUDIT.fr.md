@@ -11,11 +11,11 @@ remesure pas l'outil.
 | GB | 34 | 1 | 3 | 1 |
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
-| NES | 7 | 8 | 22 | 2 |
+| NES | 8 | 7 | 22 | 2 |
 | PCE | 15 | 7 | 16 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 97.
+Cellules ouvertes (◐ ou ✗) : 96.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -65,7 +65,6 @@ Cellules ouvertes (◐ ou ✗) : 97.
 | G2 | Scan de dispatch par vues de banques | NES | ✗ |
 | G2 | Scan de dispatch par vues de banques | PCE | ✗ |
 | G2 | Scan de dispatch par vues de banques | MD | ✗ |
-| G3 | `--seed-banks`, `--entry` | NES | ◐ `--entry` ok, `--seed-banks` absent |
 | G3 | `--seed-banks`, `--entry` | PCE | ✗ |
 | G3 | `--seed-banks`, `--entry` | MD | ✗ |
 | G4 | Semis indirect + budgets en cascade | NES | ✗ |

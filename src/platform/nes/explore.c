@@ -684,11 +684,15 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
             if (x.opt.lot_drain && dp_lf_pending(x.lot)) { free(snap); r->seeds_reset = 0; } // drain: saved states only
             else queue_push(&x, &root);
             // explicit entries: each is a root state with the bank and PC set
-            for (int i = 0; i < x.opt.entry_count && !x.opt.lot_drain; i++) {
+            // --seed-banks adds one entry per switchable bank at $8000 (UxROM)
+            unsigned nb = (x.opt.seed_banks && dp_nesmach_mapper(x.m) == 2) ? dp_nesmach_bank_count(x.m) : 0;
+            for (int i = 0; i < x.opt.entry_count + (int)nb && !x.opt.lot_drain; i++) {
+                unsigned eb = i < x.opt.entry_count ? x.opt.entry_bank[i] : (unsigned)(i - x.opt.entry_count);
+                unsigned ea = i < x.opt.entry_count ? x.opt.entry_addr[i] : 0x8000u;
                 uint8_t *es = malloc(dp_nesmach_state_size());
                 if (!es) { x.failed = 1; break; }
                 dp_nesmach_reset(x.m);
-                if (!dp_nesmach_enter(x.m, x.opt.entry_bank[i], x.opt.entry_addr[i])) {
+                if (!dp_nesmach_enter(x.m, eb, ea)) {
                     free(es); r->entries_refused++; continue;
                 }
                 dp_nesmach_save(x.m, es);

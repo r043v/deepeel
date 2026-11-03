@@ -163,6 +163,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_z80.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_uxrom.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.gg
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sg
@@ -262,3 +263,5 @@ set_tests_properties(campaign_fixtures PROPERTIES TIMEOUT 300)
 add_test(NAME audit_matrix COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/audit_matrix.py ${CMAKE_SOURCE_DIR}/docs/COUVERTURE.fr.md ${CMAKE_CURRENT_BINARY_DIR}/audit.md)
 add_test(NAME nes_entry COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes --max-total 200000 --entry 0:8150 --entry 3:8000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_entry.txt >/dev/null 2>&1; grep -q 'entries: seeded 1 refused 1' ${CMAKE_CURRENT_BINARY_DIR}/nes_entry.txt")
 set_tests_properties(nes_entry PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME nes_seed_banks COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_uxrom.nes --max-total 200000 --max-steps 1000 --seed-banks --text ${CMAKE_CURRENT_BINARY_DIR}/nes_sb.txt >/dev/null 2>&1; grep -q 'entries: seeded 4 refused 0' ${CMAKE_CURRENT_BINARY_DIR}/nes_sb.txt && grep -q 'sections 4:' ${CMAKE_CURRENT_BINARY_DIR}/nes_sb.txt")
+set_tests_properties(nes_seed_banks PROPERTIES FIXTURES_REQUIRED fixtures)

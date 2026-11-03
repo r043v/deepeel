@@ -515,6 +515,21 @@ def build_nes_pce(out):
         rom[o:o + 2] = bytes([0x00, 0x80])
     with open(os.path.join(out, "fix_nes_branch.nes"), "wb") as f:
         f.write(rom)
+    # NES UxROM (4 x 16 KiB PRG, CHR-RAM): the fixed bank spins at $C000; banks 0-2
+    # hold code reachable only by an explicit entry or --seed-banks
+    u = bytearray(16 + 4 * 0x4000)
+    u[0:4] = b"NES\x1a"
+    u[4], u[5], u[6] = 4, 0, 0x20
+    for b in range(3):
+        c = bytes([0xA9, b + 1, 0x85, 0x10, 0x4C, 0x04, 0x80])
+        u[16 + b * 0x4000:16 + b * 0x4000 + len(c)] = c
+    o = 16 + 3 * 0x4000
+    u[o:o + 3] = bytes([0x4C, 0x00, 0xC0])
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        q = o + 0x3FFA + (v - 0xFFFA)
+        u[q:q + 2] = bytes([0x00, 0xC0])
+    with open(os.path.join(out, "fix_nes_uxrom.nes"), "wb") as f:
+        f.write(u)
     # PC Engine 16 KiB HuCard (same program as test_pce): MPR setup, WRAM branch, VDC write
     p = bytearray(0x4000)
     code = bytes([0x78, 0xD4, 0xA9, 0xFF, 0x53, 0x01, 0xA9, 0xF8, 0x53, 0x02, 0xA9, 0x01, 0x53, 0x04,
