@@ -1978,3 +1978,13 @@ données en ligne) : le fall-through n'est pas suivi et le rapport le compte
 (`calls with lost confidence`). L'inférence S7 ne recouvre jamais cette couche.
 Ligne de rapport `static layer (S1/S2, no machine)`. Test `md_static_layer`
 (fixture `fix_md_static`, `--fork-cap 0`). Non validé sur ROM MD réelle : voir J13.
+
+## 0.133.0
+
+Le spool disque (`spool.bin`) écrit désormais des enregistrements zlib de taille
+variable (`DPSZ`) ; les anciens enregistrements bruts (`DPSR`) restent lisibles.
+Raison : une run `--unbounded` sur Mario Land 2 a écrit 7,7 Gio de spool en moins
+de 4 minutes (limite `ulimit -f` atteinte, SIGXFSZ) ; les images machine sont
+presque toutes des zéros. Sur la fixture `fix_branch.gb`, 21 états tiennent en
+5,5 Kio. La reprise recompte les enregistrements entiers en parcourant les
+en-têtes. Le débit réel de croissance sur ROM réelle est à mesurer (J13).

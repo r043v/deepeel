@@ -18,7 +18,17 @@
 // continue exactly where the run stopped.  Record: magic 'DPSR', flags byte,
 // u32 choice, u32 img length, image bytes.  One file, two cursors: records are
 // appended at spool_wr and read back from spool_rd.
-#define DP_SPOOL_REC 0x52535044ull // 'DPSR' little-endian
+#define DP_SPOOL_REC 0x52535044ull // 'DPSR' little-endian: raw image (older spools)
+#define DP_SPOOL_ZREC 0x5A535044ull // 'DPSZ': zlib image; hdr[2] = image size | clen << 32
+// records are variable-size now: the byte length of the record starting at `at`
+// (0: truncated or unknown)
+static uint64_t spool_rec_len(FILE *f, uint64_t at, uint64_t end, uint64_t sb) {
+    uint64_t h[3];
+    if (at + sizeof h > end || fseek(f, (long)at, SEEK_SET) || fread(h, sizeof h, 1, f) != 1) return 0;
+    uint64_t body = h[0] == DP_SPOOL_REC ? sb : (h[0] == DP_SPOOL_ZREC ? (h[2] >> 32) : 0);
+    if (!body || at + sizeof h + body > end) return 0;
+    return sizeof h + body;
+}
 
 int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int kind,
                            int from_reset, uint32_t choice) {
@@ -31,14 +41,25 @@ int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int kind,
         u32_add(&ex->res->spool_refused, 1);
         return 0;
     }
-    uint64_t hdr[3] = { DP_SPOOL_REC,
+    // machine images are mostly zeros and repeats: a fast zlib pass cuts the spool a lot
+    uLongf clen = compressBound((uLong)ex->sb);
+    uint8_t *cb = malloc(clen);
+    uint64_t magic = DP_SPOOL_REC, body = ex->sb;
+    const uint8_t *src = img;
+    if (cb && compress2(cb, &clen, img, (uLong)ex->sb, 1) == Z_OK && clen < ex->sb) {
+        magic = DP_SPOOL_ZREC;
+        body = clen;
+        src = cb;
+    }
+    uint64_t hdr[3] = { magic,
                         (uint64_t)(forced ? 1 : 0) | ((uint64_t)kind << 8) |
                             ((uint64_t)(from_reset ? 1 : 0) << 16) | ((uint64_t)choice << 32),
-                        ex->sb };
+                        magic == DP_SPOOL_ZREC ? (ex->sb | (body << 32)) : ex->sb };
     int ok = !fseek(sp->f, (long)sp->wr, SEEK_SET) &&
-             fwrite(hdr, sizeof hdr, 1, sp->f) == 1 && fwrite(img, 1, ex->sb, sp->f) == ex->sb;
+             fwrite(hdr, sizeof hdr, 1, sp->f) == 1 && fwrite(src, 1, body, sp->f) == body;
+    free(cb);
     if (ok) {
-        sp->wr += sizeof hdr + ex->sb;
+        sp->wr += sizeof hdr + body;
         u32_add(&ex->res->spool_writes, 1);
         ex->res->spool_bytes = sp->wr - sp->rd;
     } else {
@@ -68,8 +89,10 @@ void spool_feed(DpExplorer *ex) {
         }
         uint64_t hdr[3];
         if (fseek(sp->f, (long)sp->rd, SEEK_SET) ||
-            fread(hdr, sizeof hdr, 1, sp->f) != 1 || hdr[0] != DP_SPOOL_REC ||
-            hdr[2] != ex->sb) {
+            fread(hdr, sizeof hdr, 1, sp->f) != 1 ||
+            !((hdr[0] == DP_SPOOL_REC && hdr[2] == ex->sb) ||
+              (hdr[0] == DP_SPOOL_ZREC && (hdr[2] & 0xFFFFFFFFull) == ex->sb && (hdr[2] >> 32) > 0 &&
+               (hdr[2] >> 32) <= compressBound((uLong)ex->sb)))) {
             fprintf(stderr, "deepeel: spool corrupt at %llu, dropping the rest\n",
                     (unsigned long long)sp->rd);
             sp->rd = sp->wr;
@@ -77,12 +100,22 @@ void spool_feed(DpExplorer *ex) {
             return;
         }
         uint8_t *img = xrealloc(NULL, ex->sb);
-        if (!img || fread(img, 1, ex->sb, sp->f) != ex->sb) {
+        uint64_t body = hdr[0] == DP_SPOOL_ZREC ? (hdr[2] >> 32) : ex->sb;
+        int rok = 0;
+        if (img && hdr[0] == DP_SPOOL_REC) rok = fread(img, 1, ex->sb, sp->f) == ex->sb;
+        else if (img) {
+            uint8_t *cb = malloc(body);
+            uLongf dl = (uLongf)ex->sb;
+            rok = cb && fread(cb, 1, body, sp->f) == body && uncompress(img, &dl, cb, (uLong)body) == Z_OK &&
+                  dl == ex->sb;
+            free(cb);
+        }
+        if (!rok) {
             free(img);
             pthread_mutex_unlock(&sp->mtx);
             return;
         }
-        sp->rd += sizeof hdr + ex->sb;
+        sp->rd += sizeof hdr + body;
         u32_add(&ex->res->spool_reads, 1);
         ex->res->spool_bytes = sp->wr - sp->rd;
         DpPathState p;
@@ -137,8 +170,9 @@ int dp_explorer_spool_attach(DpExplorer *ex, const char *path, int resume) {
         long sz = ftell(sp->f);
         if (sz >= 0) {
             // only whole records count: a killed process may have truncated one
-            size_t rec = sizeof(uint64_t) * 3 + ex->sb;
-            sp->wr = (uint64_t)((long)sz / (long)rec * (long)rec);
+            uint64_t end = (uint64_t)sz, at = 0, rl;
+            while ((rl = spool_rec_len(sp->f, at, end, ex->sb))) at += rl;
+            sp->wr = at;
             // pending records start at the persisted read cursor; without one
             // (older spool, or a kill before the first flush) every record is
             // fed back again: re-running a state costs time, skipping one
@@ -147,11 +181,11 @@ int dp_explorer_spool_attach(DpExplorer *ex, const char *path, int resume) {
             uint64_t c[4];
             FILE *cf = fopen(sp->cursor_path, "rb");
             if (cf && fread(c, sizeof c, 1, cf) == 1 && c[0] == DP_SPOOL_CURSOR &&
-                c[1] == ex->sb && c[2] <= sp->wr && c[2] % rec == 0)
+                c[1] == ex->sb && c[2] <= sp->wr)
                 sp->rd = c[2];
             else if (sp->wr)
-                fprintf(stderr, "deepeel: spool read cursor missing, feeding back all %llu records\n",
-                        (unsigned long long)(sp->wr / rec));
+                fprintf(stderr, "deepeel: spool read cursor missing, feeding back all records (%llu bytes)\n",
+                        (unsigned long long)sp->wr);
             if (cf) fclose(cf);
             ex->res->spool_bytes = sp->wr - sp->rd;
         }
