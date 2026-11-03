@@ -1566,3 +1566,11 @@ l'image privée de son en-tête de 512 octets. Le rapport affiche
 `tas identity: N same ROM, N different, N unrecorded` et un film d'une autre
 ROM est signalé sur stderr. Test unitaire dans `test_pce`. Un film d'une autre
 ROM est quand même rejoué (comme sur NES) : l'identité informe, elle ne bloque pas.
+
+## 0.99.3
+
+Correction de la matrice (aucun changement de code) : PCE F3 et F1 étaient
+notées ✗ alors que `--jobs 2` par instances `dp_pce2_` (0.56, `test_jobs`) et
+le lot disque avec parc (`--lot`, `--lot-drain`) existent. Elles passent ◐ avec
+leur reste explicite : pas de file de fourches partagée entre instances, pas
+de `--resume` ni de file croissante côté PCE.

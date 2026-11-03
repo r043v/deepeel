@@ -12,7 +12,7 @@ remesure pas l'outil.
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 20 | 5 | 2 |
-| PCE | 16 | 7 | 15 | 1 |
+| PCE | 16 | 9 | 13 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
@@ -76,13 +76,13 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | C2 | Éviction par contexte | MD | ✗ |
 | C3 | Dédup exacte hors horloges | MD | ✗ |
 | F1 | File croissante + spool + `--resume` | NES | ◐ `--spool`/`--resume` (lot disque), file bornée + parc |
-| F1 | File croissante + spool + `--resume` | PCE | ✗ |
+| F1 | File croissante + spool + `--resume` | PCE | ◐ `--lot`/`--lot-drain` + parc ; pas de `--resume` ni de file croissante |
 | F1 | File croissante + spool + `--resume` | MD | ✗ |
 | F2 | Arbre de choix persistant | NES | ◐ `--tree` (nœuds, parents, issues ; site non renseigné) |
 | F2 | Arbre de choix persistant | PCE | ✗ |
 | F2 | Arbre de choix persistant | MD | ✗ |
 | F3 | `--jobs` par instances clonées | NES | ✗ |
-| F3 | `--jobs` par instances clonées | PCE | ✗ |
+| F3 | `--jobs` par instances clonées | PCE | ◐ `--jobs 2` par phase (`dp_pce2_`, `test_jobs`), pas de file partagée |
 | F3 | `--jobs` par instances clonées | MD | ✗ |
 | J1 | Sessions jouées multi-thread + pool | SMS/GG | ◐ |
 | J1 | Sessions jouées multi-thread + pool | MSX | ◐ |
