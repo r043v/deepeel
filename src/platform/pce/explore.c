@@ -983,6 +983,56 @@ static void infer(PceRun *x, uint8_t *inf) {
     }
 }
 
+// S5 copy siblings: a table word that names the source of a recorded VDC block
+// copy (>= 16 bytes) marks a table of streams; every neighbouring word of the same
+// window that points at unclassified cells of the same page is a sibling stream of
+// the same length, typed inferred data.  Same-page tables only (the window is
+// known from the observed code); at most 64 entries a table, saturation counted.
+enum { PCE_SIB_MAX = 64 };
+static int pce_sib_word(const PceRun *x, size_t k, uint32_t page, uint8_t w) {
+    if (k + 1 >= x->rom_size || (k >> 13) != page) return 0;
+    uint16_t v = (uint16_t)(x->rom[k] | x->rom[k + 1] << 8);
+    if ((v >> 13) != w) return 0;
+    uint32_t t = (page << 13) | (v & 0x1FFF);
+    return t < x->rom_size && !x->r->flags[t] && !x->istart[t];
+}
+static void siblings(PceRun *x, uint8_t *inf) {
+    DpPceResults *r = x->r;
+    for (unsigned c = 0; c < r->copy_count && c < DP_PCE_COPY_CAP; c++) {
+        const DpPceCopy *rec = &r->copies[c];
+        if (rec->channel != 2 || rec->length < 16 || rec->source >= x->rom_size) continue;
+        uint32_t page = rec->source >> 13;
+        if (page >= 128 || x->page_win[page] == 0xFF) continue;
+        uint8_t w = x->page_win[page];
+        for (size_t k = (size_t)page << 13; k + 1 < ((size_t)(page + 1) << 13) && k + 1 < x->rom_size; k++) {
+            if (!(r->flags[k] & DP_PCE_DATA)) continue;
+            uint16_t v = (uint16_t)(x->rom[k] | x->rom[k + 1] << 8);
+            if ((v >> 13) != w || ((page << 13) | (v & 0x1FFF)) != rec->source) continue;
+            size_t t0 = k, t1 = k + 2;
+            unsigned entries = 1;
+            while (t0 >= 2 && entries < PCE_SIB_MAX && ((t0 - 2) >> 13) == page && pce_sib_word(x, t0 - 2, page, w)) { t0 -= 2; entries++; }
+            while (entries < PCE_SIB_MAX && pce_sib_word(x, t1, page, w)) { t1 += 2; entries++; }
+            if (entries >= PCE_SIB_MAX) r->sib_caps++;
+            if (entries < 2) continue;
+            r->sib_tables++;
+            for (size_t e = t0; e < t1; e += 2) {
+                uint16_t sv = (uint16_t)(x->rom[e] | x->rom[e + 1] << 8);
+                uint32_t b = (page << 13) | (sv & 0x1FFF);
+                if (b == rec->source) continue;
+                r->sib_entries++;
+                for (uint32_t q = b; q < b + rec->length && (q >> 13) == page && q < x->rom_size; q++) {
+                    if (r->flags[q] & ~DP_PCE_PAD) break;
+                    if (inf[q] == DP_PMAP_INF_PAD) r->inferred_pad--;
+                    else if (inf[q] == DP_PMAP_INF_DATA) { r->inferred_data--; }
+                    else if (inf[q]) continue;
+                    inf[q] = DP_PMAP_INF_DATA; r->inferred_data++; r->sib_bytes++;
+                }
+            }
+            k = t1;
+        }
+    }
+}
+
 // --- sections ---------------------------------------------------------------------------
 
 static void sections_build(PceRun *x) {
@@ -1168,7 +1218,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
         free(g_inferred);
         g_inferred = calloc(x->rom_size, 1);
         g_inferred_size = x->rom_size;
-        if (g_inferred && x->opt.infer) infer(x, g_inferred);
+        if (g_inferred && x->opt.infer) { infer(x, g_inferred); siblings(x, g_inferred); }
     }
 
     dp_pce_observe(NULL);
@@ -1280,6 +1330,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             (unsigned long long)r->idx_cross_page, (unsigned long long)r->idx_forced_ignored,
             (unsigned long long)r->idx_overflow);
     if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/MPR context past the cap)\n", (unsigned long long)r->ctx_evicted);
+    fprintf(out, "  copy siblings: %llu tables, %llu entries, %llu bytes typed, %llu table caps\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_entries, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_caps);
     fprintf(out, "  entries: %llu seeded, %llu refused (outside the ROM mapping)\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
     fprintf(out, "  faults %llu, exec outside ROM %llu, queued state bytes %llu\n",

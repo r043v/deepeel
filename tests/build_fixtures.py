@@ -694,6 +694,19 @@ def build_nes_pce(out):
     z[0x1FFE], z[0x1FFF] = 0x00, 0xE0
     with open(os.path.join(out, "fix_pce_ctx.pce"), "wb") as f:
         f.write(z)
+    # PC Engine copy siblings: reads a table word, block-moves 32 bytes from $E200 to the VDC;
+    # the table ($E100) also names $F000 and $F800 (32-byte streams never copied, far apart)
+    g = bytearray(0x4000)
+    code = bytes([0x78, 0xD4, 0xA9, 0xFF, 0x53, 0x01, 0xAD, 0x00, 0xE1, 0xAD, 0x01, 0xE1,
+                  0xE3, 0x00, 0xE2, 0x02, 0x00, 0x20, 0x00, 0x80, 0xFE])
+    g[0:len(code)] = code
+    g[0x100:0x106] = bytes([0x00, 0xE2, 0x00, 0xF0, 0x00, 0xF8])
+    for t, base in ((0x200, 0x11), (0x1000, 0x41), (0x1800, 0x71)):
+        for k in range(32):
+            g[t + k] = base + k * 3
+    g[0x1FFE], g[0x1FFF] = 0x00, 0xE0
+    with open(os.path.join(out, "fix_pce_sibling.pce"), "wb") as f:
+        f.write(g)
 
 if __name__ == "__main__":
     build_nes_pce(sys.argv[1] if len(sys.argv) > 1 else ".")

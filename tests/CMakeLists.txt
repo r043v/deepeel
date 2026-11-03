@@ -165,6 +165,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_slide.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_ctx.pce
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_sibling.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_uxrom.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_pad.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ind.nes
@@ -326,3 +327,5 @@ add_test(NAME pce_ctx_cap COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CUR
 set_tests_properties(pce_ctx_cap PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME md_entry COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_md_loop.md; $B md explore $F --entry 0x2f0 --entry 0x1 --max-total 200000 --text ${CMAKE_CURRENT_BINARY_DIR}/md_en1.txt >/dev/null 2>&1; $B md explore $F --max-total 200000 --text ${CMAKE_CURRENT_BINARY_DIR}/md_en0.txt >/dev/null 2>&1; grep -q 'entries: 1 seeded, 1 refused' ${CMAKE_CURRENT_BINARY_DIR}/md_en1.txt && grep -q 'only via forks: 0;' ${CMAKE_CURRENT_BINARY_DIR}/md_en0.txt && ! grep -q 'only via forks: 0;' ${CMAKE_CURRENT_BINARY_DIR}/md_en1.txt")
 set_tests_properties(md_entry PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME pce_sibling COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_sibling.pce --max-total 20000 --max-steps 100 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_sib.txt >/dev/null 2>&1; grep -q 'copy siblings: 1 tables, 2 entries, 64 bytes typed' ${CMAKE_CURRENT_BINARY_DIR}/pce_sib.txt")
+set_tests_properties(pce_sibling PROPERTIES FIXTURES_REQUIRED fixtures)

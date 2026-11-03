@@ -1630,3 +1630,17 @@ Correction de la matrice (aucun changement de code) : MD F1 (lot disque,
 `--lot-drain`, parc `parked`) et MD O2 (`--evidence`) existent déjà ; elles
 passent ◐ avec leur reste explicite (pas de `--resume`, pas de `.cov` ni
 romdata).
+
+## 0.105.0
+
+PCE : frères de copie (S5, partielle). Un mot de table de la ROM (cellule lue
+comme donnée) qui nomme la source d'une copie VDC par bloc d'au moins 16
+octets désigne une table de flux ; les mots voisins de la même fenêtre qui
+pointent sur des cellules non classées de la même page sont typés `inferred
+data` sur la longueur de la copie (jusqu'à 64 entrées par table, saturation
+comptée en `table caps`). Cela corrige aussi le typage `inferred padding` qu'une
+plage isolée entre deux zones de padding recevait. Rapport : `copy siblings: N
+tables, N entries, N bytes typed, N table caps`. Fixture `fix_pce_sibling.pce`
+(table de 3 mots, 1 copie, 2 frères de 32 octets : 64 octets), test
+`pce_sibling`. Reste ◐ : tables dans la même page que la cible seulement, pas
+de copies CPU→VCE ni de tables inter-banques.
