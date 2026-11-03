@@ -289,3 +289,5 @@ add_test(NAME nes_ioreg COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAK
 set_tests_properties(nes_ioreg PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_seed_vectors COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_uxrom.nes --seed-vectors --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_sv.txt >/dev/null 2>&1; grep -Eq 'vector seeds: 2' ${CMAKE_CURRENT_BINARY_DIR}/nes_sv.txt")
 set_tests_properties(nes_seed_vectors PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME nes_evidence COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes --max-total 20000 --max-steps 1000 --evidence ${CMAKE_CURRENT_BINARY_DIR}/nes_ev.txt >/dev/null 2>&1; grep -Eq '^0000 0000 0002 09$' ${CMAKE_CURRENT_BINARY_DIR}/nes_ev.txt")
+set_tests_properties(nes_evidence PROPERTIES FIXTURES_REQUIRED fixtures)

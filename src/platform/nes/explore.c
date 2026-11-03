@@ -1059,6 +1059,19 @@ void dp_nes_map(FILE *out, const DpNesResults *r) {
     free(map);
 }
 
+void dp_nes_evidence(FILE *out, const DpNesResults *r) {
+    fputs("# physical-bank offset-start offset-end evidence-mask (inclusive, 16 KiB banks)\n"
+          "# 01=code-natural 02=code-forced 04=data-read 08=data-copied 10=irq 20=padding\n"
+          "# 40=sampled 80=static (unflagged cells are not listed)\n", out);
+    for (size_t at = 0; at < r->prg_size;) {
+        size_t end = at + 1;
+        while (end < r->prg_size && (end >> 14) == (at >> 14) && r->flags[end] == r->flags[at]) end++;
+        if (r->flags[at])
+            fprintf(out, "%04zX %04zX %04zX %02X\n", at >> 14, at & 0x3fff, (end - 1) & 0x3fff, (unsigned)r->flags[at]);
+        at = end;
+    }
+}
+
 void dp_nes_report(FILE *out, const DpNesResults *r) {
     uint64_t touched = 0;
     for (size_t i = 0; i < r->prg_size; i++)

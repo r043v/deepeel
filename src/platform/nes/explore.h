@@ -147,6 +147,8 @@ void dp_nes_results_free(DpNesResults *results);
 uint8_t *dp_nes_map_build(const DpNesResults *r);
 void dp_nes_report(FILE *out, const DpNesResults *results);
 void dp_nes_map(FILE *out, const DpNesResults *results);
+// per-run evidence ranges, "bank start end mask" in 16 KiB PRG banks (mask = the cell flags)
+void dp_nes_evidence(FILE *out, const DpNesResults *results);
 
 // the hardware registry (src/platform/nes/registry.c)
 struct DpPlatform;

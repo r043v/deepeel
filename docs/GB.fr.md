@@ -1442,3 +1442,12 @@ la dernière banque (fixe sur UxROM). Une cible sous `$8000` est refusée et
 comptée. Rapport : `vector seeds: N`. Le vecteur de reset reste la racine par
 défaut ; les vecteurs dépendant d'une bascule de banque ne sont pas résolus.
 Test `nes_seed_vectors`.
+
+## 0.91.0
+
+NES : `--evidence FILE` (O2, partielle). Écrit les plages de cellules PRG de
+même drapeau, `banque début fin masque` (banques de 16 Kio, masque = drapeaux
+de cellule : 01 naturel, 02 forcé, 04 lu en données, 08 copié, 10 IRQ,
+20 padding, 40 échantillon, 80 statique), au même format que Sega. Les cellules
+sans drapeau ne sont pas listées. `.cov` et romdata restent absents : le
+moteur NES ne tient pas de compteurs de coups par cellule. Test `nes_evidence`.
