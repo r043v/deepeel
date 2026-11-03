@@ -343,3 +343,5 @@ add_test(NAME md_sibling COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAK
 set_tests_properties(md_sibling PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME pce_tree COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce --max-total 20000 --max-steps 200 --tree ${CMAKE_CURRENT_BINARY_DIR}/pce_tree.bin --text ${CMAKE_CURRENT_BINARY_DIR}/pce_tree.txt >/dev/null 2>&1; grep -q 'choice tree: 5 nodes' ${CMAKE_CURRENT_BINARY_DIR}/pce_tree.txt && test -s ${CMAKE_CURRENT_BINARY_DIR}/pce_tree.bin")
 set_tests_properties(pce_tree PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME md_tree COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_dbcc.md --max-total 100000 --tree ${CMAKE_CURRENT_BINARY_DIR}/md_tree.bin --text ${CMAKE_CURRENT_BINARY_DIR}/md_tree.txt >/dev/null 2>&1; grep -q 'choice tree: 3 nodes' ${CMAKE_CURRENT_BINARY_DIR}/md_tree.txt && test -s ${CMAKE_CURRENT_BINARY_DIR}/md_tree.bin")
+set_tests_properties(md_tree PROPERTIES FIXTURES_REQUIRED fixtures)

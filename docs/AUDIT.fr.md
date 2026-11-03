@@ -13,7 +13,7 @@ remesure pas l'outil.
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 20 | 5 | 2 |
 | PCE | 16 | 17 | 5 | 1 |
-| MD | 8 | 13 | 17 | 1 |
+| MD | 8 | 14 | 16 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
 
@@ -80,7 +80,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | F1 | File croissante + spool + `--resume` | MD | ◐ `--lot`/`--lot-drain` + parc (`parked`, `lot_*`) ; pas de `--resume` ni de file croissante bornée par option |
 | F2 | Arbre de choix persistant | NES | ◐ `--tree` (nœuds, parents, issues ; site non renseigné) |
 | F2 | Arbre de choix persistant | PCE | ◐ `--tree` (DpTree commun : nœuds, parents, issues ; site non renseigné ; pas de reprise) |
-| F2 | Arbre de choix persistant | MD | ✗ |
+| F2 | Arbre de choix persistant | MD | ◐ `--tree` (DpTree commun ; site non renseigné ; pas de reprise) |
 | F3 | `--jobs` par instances clonées | NES | ✗ |
 | F3 | `--jobs` par instances clonées | PCE | ◐ `--jobs 2` par phase (`dp_pce2_`, `test_jobs`), pas de file partagée |
 | F3 | `--jobs` par instances clonées | MD | ✗ |

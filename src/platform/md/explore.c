@@ -6,10 +6,12 @@
 #include "../../mach/mdmach.h"
 #include "md_registry.h"
 #include "../../core/hashset.h"
+#include "../../explore/tree.h"
 
 
 typedef struct {
     void *state;
+    uint32_t choice;        // choice-tree node (0: none)
     int forced;
     uint32_t origin;
     uint32_t an_writer[8];
@@ -72,6 +74,8 @@ typedef struct {
     int z80_last_valid;
     uint32_t zfetch_lo, zfetch_hi;      /* ROM range of the instruction being fetched */
     uint8_t z80_bank_seen[128];         /* bitmap of 32 KiB banks (4 MiB / 32 KiB) */
+    DpTree tree;            // --tree: every pushed state is a choice
+    uint32_t cur_choice;
     DpHashSet ind_sites, ind_pairs;   // observed indirect jmp/jsr (D12)
 } X;
 
@@ -147,6 +151,7 @@ static int push(X *x, uint32_t pc, int vint, int hint) {
                     x->spill_state = ls;   // written by spill_flush once the caller's post-edits are done
                     x->last_state = ls;
                     x->r->parked++;
+                    if (x->o->tree_path) dp_tree_close(&x->tree, dp_tree_add(&x->tree, x->cur_choice, 4, 0, 0, (int)(pc & 0xFFFF)), DP_ISSUE_SPOOLED);
                     if (pc < x->r->rom_size) x->r->flags[pc] |= DP_MDF_QUEUED;
                     return 1;
                 }
@@ -171,6 +176,7 @@ static int push(X *x, uint32_t pc, int vint, int hint) {
     if (full) x->r->parked++;
     x->last_state = s;
     item->state = s; item->forced = 1; item->origin = x->pc;
+    item->choice = x->o->tree_path ? dp_tree_add(&x->tree, x->cur_choice, 4, 0, 0, (int)(pc & 0xFFFF)) : 0;
     memcpy(item->an_writer, x->an_writer, sizeof item->an_writer);
     item->watch_pc = x->watch_pc; item->watch_addr = x->watch_addr;
     item->watch_value = x->watch_value; item->watch_size = x->watch_size;
@@ -541,6 +547,7 @@ void dp_md_options_default(DpMdOptions *o) {
     o->lot_drain = 0;
     o->entry_count = 0;
     o->pad_cut = 0;
+    o->tree_path = NULL;
 }
 
 static void run_path(X *x, Item *it, uint64_t budget, int *cut) {
@@ -549,6 +556,7 @@ static void run_path(X *x, Item *it, uint64_t budget, int *cut) {
     x->halted = 0;
     x->previous_move_valid = x->register_move_valid = 0;
     x->forced = it ? it->forced : 0;
+    x->cur_choice = it ? it->choice : 0;
     x->origin = it ? it->origin : UINT32_MAX;
     for (unsigned i = 0; i < 8; i++) x->an_writer[i] = it ? it->an_writer[i] : UINT32_MAX;
     x->watch_pc = it ? it->watch_pc : UINT32_MAX;
@@ -700,6 +708,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         fprintf(stderr, "deepeel: cannot open the lot %s\n", o->lot_path);
     x.gen = calloc(c->size / 2 + 1, sizeof *x.gen);
     x.vis = calloc(c->size / 2 + 1, sizeof *x.vis);
+    dp_tree_init(&x.tree);
     dp_set_init(&x.ind_sites, 1 << 8);
     dp_set_init(&x.ind_pairs, 1 << 10);
     x.site = calloc(c->size / 2 + 1, sizeof *x.site);
@@ -743,7 +752,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         if (!x.nq && dp_lf_pending(x.lot)) { // the disk backlog comes back
             Item m; uint32_t ml = 0, bl = 0; uint8_t *blob = NULL;
             if (dp_lf_get(x.lot, &m, &ml, &blob, &bl)) {
-                if (ml == sizeof m && bl == ssz) { m.state = blob; x.q[x.nq++] = m; r->parked_resumed++; }
+                if (ml == sizeof m && bl == ssz) { m.state = blob; m.choice = 0; x.q[x.nq++] = m; r->parked_resumed++; }
                 else free(blob);
             }
             if (!x.nq) continue;
@@ -751,14 +760,23 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         if (!x.nq) break;
         Item it = x.q[--x.nq];
         run_path(&x, &it, o->max_total - r->steps, &cut);
+        if (it.choice) dp_tree_close(&x.tree, it.choice, DP_ISSUE_DONE);
+        x.cur_choice = 0;
         free(it.state);
     }
     // leftovers of a wall go to the lot when there is one (the next run resumes them)
+    for (uint32_t i = 0; i < x.npark; i++) if (x.park[i].choice) dp_tree_close(&x.tree, x.park[i].choice, DP_ISSUE_BUDGET);
+    for (uint32_t i = 0; i < x.nq; i++) if (x.q[i].choice) dp_tree_close(&x.tree, x.q[i].choice, DP_ISSUE_BUDGET);
     for (uint32_t i = 0; i < x.npark; i++) {
         if (!lot_spill(&x, &x.park[i])) r->dropped_pending++;
         free(x.park[i].state);
     }
     free(x.park);
+    if (o->tree_path) {
+        r->tree_nodes = x.tree.n;
+        dp_tree_save(&x.tree, o->tree_path);
+    }
+    dp_tree_free(&x.tree);
     for (uint32_t i = 0; i < x.nq; i++) {
         if (!lot_spill(&x, &x.q[i])) r->dropped_pending++;
         free(x.q[i].state);
@@ -880,6 +898,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
             (unsigned long long)r->sat_site);
     fprintf(out, "  queue growths: %llu (initial %u, ceiling %u)\n", (unsigned long long)r->queue_growths,
             o->queue_cap, o->queue_max > o->queue_cap ? o->queue_max : o->queue_cap);
+    if (r->tree_nodes) fprintf(out, "  choice tree: %llu nodes\n", (unsigned long long)r->tree_nodes);
     fprintf(out, "  copy siblings: %llu tables, %llu entries, %llu bytes, %llu table caps\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_entries, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_caps);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);

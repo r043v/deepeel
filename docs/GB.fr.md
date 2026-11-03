@@ -1704,3 +1704,12 @@ produit) clos avec son issue : `done` (chemin joué), `merged` (déjà vu),
 global). Rapport : `choice tree: N nodes`. Test `pce_tree`. Reste ◐ : site de
 branchement non renseigné, pas de reprise depuis `tree.bin`, états repris du
 lot sans nœud.
+
+## 0.112.0
+
+MD : arbre de choix (F2, partielle). `--tree FICHIER` écrit l'arbre commun
+`DpTree` : chaque état poussé (fork, entrée, IRQ) est un choix de parent le
+chemin qui l'a produit, clos en `done`, `spooled` (lot disque) ou `budget`
+(restant à l'arrêt). Rapport : `choice tree: N nodes`. Test `md_tree` (dbcc :
+2 forks, 3 nœuds). Reste ◐ : site de branchement non renseigné, pas de reprise
+depuis le fichier, états repris du lot sans nœud.
