@@ -76,6 +76,8 @@ typedef struct {
     int novelty_cells;       // Go-Explore cells: screen fingerprints, learned lives, depth bias
     char tas_paths[8][512];
     int tas_count;
+    uint16_t entries[16];   // explicit entry points (CPU addresses in the power-on mapping)
+    unsigned entry_count;
     int lot_drain;         // with a lot backlog: run only the saved states (no root, no seeds)
     const char *lot_path;  // disk lot of deferred states (NULL: memory only); an existing file is resumed
     // --jobs 2 partition (set by dp_pce_explore_jobs): the secondary instance
@@ -116,7 +118,7 @@ typedef struct DpPceResults_ {
     uint64_t lot_written, lot_read, lot_pending; // disk lot (--lot)
     uint64_t parked, parked_resumed, parked_lost; // queue-full states held aside (§6)
     uint64_t pending_dropped;  // queued states left undrained at the global wall
-    uint64_t tas_same, tas_different, tas_unrecorded, play_frames_run, play_sessions_run, tas_frames_run;
+    uint64_t entries_seeded, entries_refused, tas_same, tas_different, tas_unrecorded, play_frames_run, play_sessions_run, tas_frames_run;
     uint64_t novelty_trials, novelty_hits, novelty_archived, novelty_replaced, novelty_frames_run,
              novelty_deaths;
     uint32_t novelty_depth;  // deepest archived cell, frames from power-on

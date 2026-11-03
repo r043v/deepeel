@@ -12,7 +12,7 @@ remesure pas l'outil.
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
 | NES | 12 | 20 | 5 | 2 |
-| PCE | 16 | 11 | 11 | 1 |
+| PCE | 16 | 12 | 10 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
@@ -63,7 +63,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | G2 | Scan de dispatch par vues de banques | NES | ◐ UxROM, banque fixe (`--bank-dispatch`) |
 | G2 | Scan de dispatch par vues de banques | PCE | ✗ |
 | G2 | Scan de dispatch par vues de banques | MD | ✗ |
-| G3 | `--seed-banks`, `--entry` | PCE | ✗ |
+| G3 | `--seed-banks`, `--entry` | PCE | ◐ `--entry ADDR` (mapping de mise sous tension) ; pas de `--seed-banks` ni de vue de banque |
 | G3 | `--seed-banks`, `--entry` | MD | ✗ |
 | G4 | Semis indirect + budgets en cascade | NES | ◐ second passage sur racines statiques (`--second-pass`) |
 | G4 | Semis indirect + budgets en cascade | PCE | ✗ |

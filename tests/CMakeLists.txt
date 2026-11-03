@@ -319,3 +319,5 @@ add_test(NAME pce_evidence COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${C
 set_tests_properties(pce_evidence PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME pce_slide COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_slide.pce --max-total 20000 --max-steps 100 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_sl.txt >/dev/null 2>&1; grep -Eq 'padding cuts: [1-9]' ${CMAKE_CURRENT_BINARY_DIR}/pce_sl.txt")
 set_tests_properties(pce_slide PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME pce_entry COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce --entry 0xE018 --entry 0xE025 --max-total 20000 --max-steps 100 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_en.txt >/dev/null 2>&1; grep -q 'entries: 2 seeded, 0 refused' ${CMAKE_CURRENT_BINARY_DIR}/pce_en.txt")
+set_tests_properties(pce_entry PROPERTIES FIXTURES_REQUIRED fixtures)

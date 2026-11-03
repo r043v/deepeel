@@ -117,6 +117,7 @@ DpPceCpu dp_pce_cpu(void) {
 }
 
 void dp_pce_set_flags(uint8_t p) { machine.cpu.p = p; }
+void dp_pce_set_pc(uint16_t pc) { machine.cpu.pc = pc; }
 
 int64_t dp_pce_rom_index_mpr(const uint8_t *mpr, uint16_t addr) {
     uint8_t v = mpr[addr >> 13];

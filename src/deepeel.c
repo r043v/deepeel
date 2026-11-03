@@ -1123,7 +1123,7 @@ static int cmd_pce(int argc, char **argv) {
         fprintf(stderr, "deepeel pce explore ROM [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N] "
                         "[--max-total N] [--max-steps N] [--queue N] [--loop-cap N] [--fork-cap N] "
                         "[--novelty STEPS] [--novelty-frames N] [--novelty-archive N] [--novelty-cells] [--pad-fork-cap N] [--irq-fork-cap N] [--no-irq-fork] [--no-static] [--no-infer] [--jobs 2] "
-                        "[--text FILE] [--map FILE] [--png FILE] [--evidence FILE]\n");
+                        "[--text FILE] [--map FILE] [--png FILE] [--evidence FILE] [--entry ADDR]...\n");
         return 2;
     }
     const char *path = NULL, *text = NULL, *map = NULL, *png = NULL, *pce_ev = NULL;
@@ -1133,6 +1133,10 @@ static int cmd_pce(int argc, char **argv) {
         const char *a = argv[i];
         if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
         else if (!strcmp(a, "--evidence") && i + 1 < argc) pce_ev = argv[++i];
+        else if (!strcmp(a, "--entry") && i + 1 < argc) {
+            if (opt.entry_count >= 16) { fprintf(stderr, "deepeel: at most 16 --entry\n"); return 2; }
+            opt.entries[opt.entry_count++] = (uint16_t)strtoul(argv[++i], NULL, 0);
+        }
         else if (!strcmp(a, "--map") && i + 1 < argc) map = argv[++i];
         else if (!strcmp(a, "--png") && i + 1 < argc) png = argv[++i];
         else if (!strcmp(a, "--tas") && i + 1 < argc) {

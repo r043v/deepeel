@@ -1593,3 +1593,12 @@ plafond de pas. Les opcodes illégaux étaient déjà coupés (`illegal_cuts`).
 Fixture `fix_pce_slide.pce` (`LDA #1 ; JMP $E020` vers une plage de zéros :
 2 pas, 1 coupe), test `pce_slide`. Reste ◐ : pas de chien de garde HALT/WAI
 attribué, et les sessions de jeu (`play`) ne coupent pas.
+
+## 0.102.0
+
+PCE : `--entry ADDR` (G3, partielle), jusqu'à 16 fois. Chaque adresse démarre
+un chemin forcé depuis l'état de mise sous tension (mapping MPR du reset :
+toutes les pages sur la banque 0). Une adresse hors ROM est refusée et
+comptée. Rapport : `entries: N seeded, N refused`. Nouveau pont
+`dp_pce_set_pc`. Test `pce_entry`. Reste ◐ : pas de `--seed-banks`, pas
+d'entrée dans une autre vue de banque (il faudrait fixer les MPR).

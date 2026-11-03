@@ -1088,6 +1088,16 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     if (!x->failed && x->opt.queue_cap && !x->opt.skip_root &&
         !(x->opt.lot_drain && dp_lf_pending(x->lot))) push_live(x, 0);
 
+    // explicit entries (G3): each starts a forced path from the power-on mapping;
+    // an address outside the ROM mapping is refused and counted
+    for (unsigned e = 0; e < x->opt.entry_count && !x->failed; e++) {
+        dp_pce_reset();
+        if (dp_pce_rom_index(x->opt.entries[e]) < 0) { r->entries_refused++; continue; }
+        dp_pce_set_pc(x->opt.entries[e]);
+        if (push_live(x, 1)) r->entries_seeded++;
+    }
+    if (x->opt.entry_count) dp_pce_reset();
+
     // TAS movies, then the play sessions; their checkpoints join the queue
     for (int i = 0; i < x->opt.tas_count && !x->failed; i++) {
         DpPceTas t;
@@ -1253,6 +1263,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             r->nidx, r->idx_declared, r->idx_refused_code, r->idx_biased,
             (unsigned long long)r->idx_cross_page, (unsigned long long)r->idx_forced_ignored,
             (unsigned long long)r->idx_overflow);
+    fprintf(out, "  entries: %llu seeded, %llu refused (outside the ROM mapping)\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
     fprintf(out, "  faults %llu, exec outside ROM %llu, queued state bytes %llu\n",
             (unsigned long long)r->faults, (unsigned long long)r->exec_outside,
