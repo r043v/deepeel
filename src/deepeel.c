@@ -1044,6 +1044,8 @@ static int cmd_nes(int argc, char **argv) {
         else if (!strcmp(a, "--queue") && i + 1 < argc) opt.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--lot") && i + 1 < argc) opt.lot_path = argv[++i];
         else if (!strcmp(a, "--lot-drain")) opt.lot_drain = 1;
+        else if (!strcmp(a, "--spool") && i + 1 < argc) opt.lot_path = argv[++i];
+        else if (!strcmp(a, "--resume") && i + 1 < argc) { opt.lot_path = argv[++i]; opt.lot_drain = 1; }
         else if (!strcmp(a, "--loop-cap") && i + 1 < argc) opt.loop_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--fork-cap") && i + 1 < argc) opt.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--no-irq-fork")) opt.seed_irq = 0;

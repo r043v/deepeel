@@ -1487,3 +1487,13 @@ sont comptés : `second pass: N seeds, N refused, N roots over the cap`.
 Sur `fix_nes_static.nes` (2 pas) la racine statique devient exécutée (forcée)
 et la fermeture statique n'a plus de racine. Reste ◐ : un seul second passage,
 pas de budgets en cascade, indirects non semés. Test `nes_second_pass`.
+
+## 0.95.0
+
+NES : `--spool FILE` et `--resume FILE` (F1, partielle). Alias de forme Sega
+sur le lot disque existant : `--spool` = `--lot` (débordement du parc et
+restes d'un mur écrits sur disque), `--resume` = `--lot` + `--lot-drain`
+(seuls les états sauvegardés tournent, sans racine). Un run à mur de 3 pas
+laisse 1 état ; `--resume` le relit et vide le lot. Reste ◐ : la file reste
+bornée (avec parc), l'ensemble de déduplication n'est pas persisté entre
+runs. Test `nes_spool_resume`.
