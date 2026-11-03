@@ -1050,6 +1050,8 @@ bad_done:
         // propose each pressed key as its own variant
         if (!ex->cfg.no_p1_fork && (op == 0xF0 || op == 0xF2))
             fork_p1(ex, pk, pc, op);
+        if (!ex->cfg.no_event_fork && (op == 0xF0 || op == 0xF2 || op == 0xFA))
+            fork_event(ex, pk, pc, op);
     }
 
     // backward edges and call sites (operand bytes read through the map)

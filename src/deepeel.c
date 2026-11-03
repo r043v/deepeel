@@ -322,6 +322,7 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--no-irq-fork")) cfg.no_irq_fork = 1;
         else if (!strcmp(a, "--no-key-fork")) cfg.no_key_fork = 1;
         else if (!strcmp(a, "--no-p1-fork")) cfg.no_p1_fork = 1;
+        else if (!strcmp(a, "--no-event-fork")) cfg.no_event_fork = 1;
         else if (!strcmp(a, "--no-closure")) cfg.no_closure = 1;
         else if (!strcmp(a, "--no-provenance")) cfg.no_provenance = 1;
         else if (!strcmp(a, "--no-siblings")) cfg.no_siblings = 1;

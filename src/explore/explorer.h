@@ -273,6 +273,7 @@ typedef struct DpResults {
     uint32_t sib_tables, sib_ranges, sib_bytes, sib_refused, sib_caps; // copy-sibling inference
     uint32_t prov_jp_hl, prov_data;  // provenance: jp-hl targets proven, bytes proven data
     uint32_t prov_unresolved, prov_sat, prov_steps; // partial proofs, caps hit, walk steps
+    uint32_t forks_event;         // read-value probes on LY / STAT / DIV (3.7)
     uint32_t data_contradictions; // bytes both executed and proven data (kept code)
     DpRtCode *rt;                 // runtime-code archive (open addressing), guarded by rec_mtx
     uint8_t *rt_pcseen;           // variants seen per pc (saturating), for the polymorphic count
@@ -306,6 +307,7 @@ typedef struct DpConfig {
     int no_irq_fork;          // disable IRQ forking
     int no_key_fork;          // disable the simulated joypad-IRQ key forks
     int no_p1_fork;           // disable the P1-polling read forks
+    int no_event_fork;        // disable the LY/STAT/DIV read-value probes (docs/COUVERTURE.fr.md 3.7)
     int no_closure;           // disable the static flow closure
     int no_provenance;        // disable the static HL/A provenance pass
     int no_siblings;          // disable the copy-sibling inference

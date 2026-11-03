@@ -92,6 +92,7 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
              res->copy_count, res->copy_window_breaks, res->copies_dropped,
              res->prov_jp_hl, res->prov_data, res->prov_unresolved, res->prov_sat);
     dp_buf_str(out, line);
+    dp_buf_fmt(out, "event probes (LY/STAT/DIV read values): %u forced variants\n", res->forks_event);
     dp_buf_fmt(out, "probes: serial start sites %u, RTC register-select sites %u\n", res->serial_starts,
                res->rtc_selects);
     dp_buf_fmt(out, "timing probes (read sites): DIV %u, STAT %u, LY %u\n", res->div_reads, res->stat_reads,

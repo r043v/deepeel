@@ -19,6 +19,7 @@ void fork_branch(DpExplorer *ex, int cond, uint32_t site, uint16_t pc, uint8_t o
 void fork_irq(DpExplorer *ex);
 void fork_key(DpExplorer *ex, uint32_t site);
 void fork_p1(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op);
+void fork_event(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op);
 int both_sides_covered(DpExplorer *ex, uint16_t pc, uint8_t op);
 int is_padding_at(const DpCart *c, uint32_t bank, uint16_t addr);
 int is_illegal_op(uint8_t op);

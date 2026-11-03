@@ -206,3 +206,58 @@ void fork_p1(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op) {
     m->api->set_buttons(0); // recompute the derived P1 register (not in the image)
     free(img);
 }
+
+/* Event-register read probes (docs/COUVERTURE.fr.md 3.7).  LY, STAT and DIV are
+ * static for the explorer, so a wait loop on them only leaves through the
+ * guards.  Before an instruction that reads one of them, each significant value
+ * the register is not holding becomes its own forced variant:
+ *   LY   : 0, 143, 144, 153 (line 0, last visible, first vblank, last line)
+ *   STAT : the four PPU modes (low two bits)
+ *   DIV  : 0x00, 0x40, 0x80, 0xFF
+ * Capped per site and per register like the P1 forks. */
+void fork_event(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op) {
+    const DpGblApi *api = ex->mach->api;
+    uint8_t reg;
+    if (op == 0xF0) reg = dp_mach_op(ex->mach, (uint16_t)(pc + 1));       // ldh a,(n)
+    else if (op == 0xF2) { if (api->gbr->c == 0) return; reg = api->gbr->c; } // ld a,(C)
+    else if (op == 0xFA) {                                                  // ld a,(nn)
+        if (dp_mach_op(ex->mach, (uint16_t)(pc + 2)) != 0xFF) return;
+        reg = dp_mach_op(ex->mach, (uint16_t)(pc + 1));
+    } else return;
+    static const uint8_t ly[] = {0, 143, 144, 153}, st[] = {0, 1, 2, 3}, dv[] = {0x00, 0x40, 0x80, 0xFF};
+    const uint8_t *vals; int n;
+    if (reg == 0x44) { vals = ly; n = 4; }
+    else if (reg == 0x41) { vals = st; n = 4; }
+    else if (reg == 0x04) { vals = dv; n = 4; }
+    else return;
+    uint32_t *cnt = fork_slot(ex, site ^ 0xE0000000u ^ ((uint32_t)reg << 20));
+    if (!cnt) return;
+    int edefer = 0;
+    if (*cnt >= ex->cfg.fork_site_cap) {
+        ex->res->forks_capped++;
+        if (*cnt >= 2 * ex->cfg.fork_site_cap) { ex->res->defer_final[DP_R_FORK_CAP]++; return; }
+        if (!defer_room(ex, DP_R_FORK_CAP)) return;
+        edefer = DP_R_FORK_CAP;
+    }
+    (*cnt)++;
+    DpMach *m = ex->mach;
+    uint8_t *img = xrealloc(NULL, ex->sb);
+    dp_mach_save(m, img);
+    uint8_t cur = api->io[reg];
+    for (int k = 0; k < n; k++) {
+        uint8_t v = reg == 0x41 ? (uint8_t)((cur & ~3) | vals[k]) : vals[k];
+        if (v == cur) continue;
+        api->io[reg] = v;
+        uint8_t *fimg = xrealloc(NULL, ex->sb);
+        dp_mach_save(m, fimg);
+        api->io[reg] = cur;
+        uint16_t tpc = m->api->gbr->pc;
+        if (edefer) { fork_deferred(ex, fimg, edefer, site, tpc); continue; }
+        queue_push(ex, fimg, 1, DP_PATH_FORK,
+                   ex->cur_kind == DP_SEED_RESET || ex->cur_from_reset,
+                   choice_new(ex, ex->cur_choice, DP_PATH_FORK, site,
+                              (int)cur_bank(ex, tpc), tpc));
+        ex->res->forks_event++;
+    }
+    free(img);
+}

@@ -2062,3 +2062,12 @@ lecture ROM avant l'écriture, remise à zéro à chaque chemin), pas une preuve
 de dépendance : elle désigne la région ROM à examiner (flux compressé et
 décodeur), pas l'octet exact. Fixture `fix_wramgen` (routine stockée XOR $5A),
 test `rtcode_generated`.
+
+## 0.138.0
+
+Sondes événementielles §3.7 : avant `ldh a,(n)` / `ld a,(C)` / `ld a,(nn)` lisant
+`LY` ($FF44), `STAT` ($FF41) ou `DIV` ($FF04), des variantes forcées portent
+les valeurs significatives (LY 0/143/144/153, mode STAT 0–3, DIV 00/40/80/FF),
+bornées par site comme les fourches P1. Ligne de rapport « event probes … forced
+variants », option `--no-event-fork`. Fixture `fix_lywait`, test `event_probe_ly`.
+Les valeurs sont forcées, pas rythmées : observation de l'outil, pas mesure matériel.

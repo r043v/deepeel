@@ -272,6 +272,18 @@ def build(out):
     w(r, 0x4000, *[b ^ 0x5A for b in (0x3E, 0x42, 0xEA, 0x00, 0xD0, 0xC9)])
     save(out, "fix_wramgen", r)
 
+    # --- lywait: a vblank wait loop on LY; LY is static for the explorer, only the
+    # event probe (LY = 144 variant) gets out of it to the code at $0180 ----------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0xF0, 0x44)                      # wait: ldh a,($44)
+    w(r, 0x152, 0xFE, 0x90)                      # cp 144
+    w(r, 0x154, 0x20, 0xFA)                      # jr nz,wait
+    w(r, 0x156, 0xCD, 0x80, 0x01)                # call $0180 (after vblank)
+    w(r, 0x159, 0x76)                            # halt
+    w(r, 0x180, 0x3E, 0x77, 0xEA, 0x00, 0x80, 0xC9)   # ld a,$77 ; ld ($8000),a ; ret
+    save(out, "fix_lywait", r)
+
     # --- jptable: ld hl,table ; ld a,[hl+] ; ld h,[hl] ; ld l,a ; jp hl.  Only the first
     # entry runs; the other two handlers are reached by the S4 operand table scan ---
     r = rom(2)
