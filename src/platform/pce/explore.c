@@ -170,6 +170,25 @@ static void obs_io_write(void *user, uint16_t reg, uint8_t value) {
     } else {
         r->register_overflow++;
     }
+    // the VCE colour-data port ($0404-$0405): a ROM byte copied here is
+    // palette data (typed apart from the VRAM copies)
+    if ((reg & 0x1C00) == 0x0400 && (reg & 7) >= 4 && (reg & 7) <= 5) {
+        r->vce_data_writes++;
+        if (x->last_read_cell >= 0) {
+            int block = is_block(x->cur_op);
+            uint64_t age = x->total_steps - x->last_read_step;
+            if ((block && age == 0) ||
+                (!block && age <= 3 && x->rom[x->last_read_cell] == value)) {
+                if (r->pal_flags && !r->pal_flags[x->last_read_cell]) {
+                    r->pal_flags[x->last_read_cell] = 1;
+                    r->palette_bytes++;
+                }
+                log_copy(x, (uint32_t)x->last_read_cell, block ? 4 : 3);
+                mark(x, (size_t)x->last_read_cell, DP_PCE_COPIED);
+                x->last_read_cell = -1;
+            }
+        }
+    }
     // the VDC data port: a ROM byte read just before and written here is a
     // ROM -> VRAM copy (block moves: the read of this very transfer)
     if ((reg & 0x1C00) == 0 && (reg & 3) >= 2) {
@@ -937,7 +956,9 @@ DpPceOptions dp_pce_options(void) {
 void dp_pce_results_free(DpPceResults *r) {
     if (!r) return;
     free(r->flags);
+    free(r->pal_flags);
     free(r->sections);
+    r->pal_flags = NULL;
     r->flags = NULL;
     r->sections = NULL;
 }
@@ -966,6 +987,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     x->last_read_cell = -1;
     memset(x->page_win, 0xFF, sizeof x->page_win);
     r->flags = calloc(x->rom_size, 1);
+    r->pal_flags = calloc(x->rom_size, 1);
     x->fork_sites = calloc(x->rom_size, 1);
     x->pad_sites = calloc(x->rom_size, 1);
     x->irq_sites = calloc(x->rom_size, 1);
@@ -988,7 +1010,8 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     }
 
     // the power-on state first: the root of the fork exploration
-    if (!x->failed && x->opt.queue_cap && !(x->opt.lot_drain && dp_lf_pending(x->lot))) push_live(x, 0);
+    if (!x->failed && x->opt.queue_cap && !x->opt.skip_root &&
+        !(x->opt.lot_drain && dp_lf_pending(x->lot))) push_live(x, 0);
 
     // TAS movies, then the play sessions; their checkpoints join the queue
     for (int i = 0; i < x->opt.tas_count && !x->failed; i++) {
@@ -1033,13 +1056,16 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
         run_path(x, q);
     }
 
-    if (x->opt.static_closure) static_closure(x);
-    tables(x);
-    sections_build(x);
-    free(g_inferred);
-    g_inferred = calloc(x->rom_size, 1);
-    g_inferred_size = x->rom_size;
-    if (g_inferred && x->opt.infer) infer(x, g_inferred);
+    if (x->opt.pre_finalize) x->opt.pre_finalize(r, x->opt.pre_user);
+    if (!x->opt.no_finalize) {
+        if (x->opt.static_closure) static_closure(x);
+        tables(x);
+        sections_build(x);
+        free(g_inferred);
+        g_inferred = calloc(x->rom_size, 1);
+        g_inferred_size = x->rom_size;
+        if (g_inferred && x->opt.infer) infer(x, g_inferred);
+    }
 
     dp_pce_observe(NULL);
     // states still queued when the global wall stopped the drain: counted
@@ -1141,6 +1167,8 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
     fprintf(out, "  data reads %llu, VDC data writes %llu, ROM->VRAM bytes %llu, io writes %llu\n",
             (unsigned long long)r->data_reads, (unsigned long long)r->vdc_data_writes,
             (unsigned long long)r->copied_bytes, (unsigned long long)r->io_writes);
+    fprintf(out, "  VCE colour-data writes %llu, palette bytes from ROM %llu\n",
+            (unsigned long long)r->vce_data_writes, (unsigned long long)r->palette_bytes);
     fprintf(out, "  faults %llu, exec outside ROM %llu, queued state bytes %llu\n",
             (unsigned long long)r->faults, (unsigned long long)r->exec_outside,
             (unsigned long long)r->state_bytes_peak);
@@ -1170,7 +1198,8 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
     fprintf(out, "  copies %u (overflow %llu):\n", r->copy_count, (unsigned long long)r->copy_overflow);
     for (unsigned i = 0; i < r->copy_count; i++) {
         const DpPceCopy *c = &r->copies[i];
-        fprintf(out, "   %s src $%05X len %u pc $%04X x%llu\n", c->channel == 2 ? "block" : "cpu",
+        fprintf(out, "   %s src $%05X len %u pc $%04X x%llu\n", c->channel == 2 ? "block" : c->channel == 3 ? "cpu->vce" :
+                c->channel == 4 ? "block->vce" : "cpu",
                 c->source, c->length, c->pc, (unsigned long long)c->occurrences);
     }
     fprintf(out, "  MPR changes %u (overflow %llu):\n", r->bank_count, (unsigned long long)r->bank_overflow);

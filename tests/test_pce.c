@@ -141,12 +141,66 @@ static void test_explore(const uint8_t *rom) {
     }
 }
 
+// VCE: a ROM byte stored to the colour-data port is palette data
+static void test_palette(const uint8_t *rom) {
+    uint8_t *r2 = malloc(ROM_SIZE);
+    memcpy(r2, rom, ROM_SIZE);
+    static const uint8_t tail[] = { 0xAD, 0x14, 0x40, 0x8D, 0x04, 0x04, 0x80, 0xFE };
+    memcpy(r2 + 0x23, tail, sizeof tail);
+    DpPceOptions o = dp_pce_options();
+    o.max_total = 2000000;
+    o.max_steps = 20000;
+    DpPceResults *r = calloc(1, sizeof *r);
+    CHECK(dp_pce_explore(r2, ROM_SIZE, &o, r), "palette explore");
+    if (r->flags) {
+        CHECK(r->pal_flags && r->pal_flags[0x2014] == 1, "cell typed as palette");
+        CHECK(r->pal_flags && !r->pal_flags[0x2010], "VDC copy source is not palette");
+        CHECK(r->palette_bytes == 1 && r->vce_data_writes >= 1, "counted (%llu, %llu)",
+              (unsigned long long)r->palette_bytes, (unsigned long long)r->vce_data_writes);
+        int pal = 0;
+        for (unsigned i = 0; i < r->copy_count; i++) pal |= r->copies[i].channel == 3;
+        CHECK(pal, "copy record on the VCE channel");
+    }
+    dp_pce_results_free(r);
+    free(r);
+    free(r2);
+}
+
+// --jobs 2: the secondary instance plays random sessions while the primary
+// drains the power-on forks; the union covers what the serial run covers
+static void test_jobs(const uint8_t *rom) {
+    DpPceOptions o = dp_pce_options();
+    o.max_total = 2000000;
+    o.max_steps = 20000;
+    o.play_frames = 30;
+    o.play_sessions = 2;
+    DpPceResults *a = calloc(1, sizeof *a), *b = calloc(1, sizeof *b);
+    CHECK(dp_pce_explore(rom, ROM_SIZE, &o, a), "serial run");
+    CHECK(dp_pce_explore_jobs(rom, ROM_SIZE, &o, b, 2), "jobs 2 run");
+    if (a->flags && b->flags) {
+        size_t miss = 0;
+        for (size_t i = 0; i < a->rom_size; i++)
+            if ((a->flags[i] & (DP_PCE_NATURAL | DP_PCE_FORCED)) &&
+                !(b->flags[i] & (DP_PCE_NATURAL | DP_PCE_FORCED))) miss++;
+        CHECK(miss == 0, "jobs 2 covers every code cell of the serial run (%zu missing)", miss);
+        CHECK(b->flags[0x18] & DP_PCE_FORCED, "forced side reached");
+        CHECK(b->flags[0x2010] & DP_PCE_COPIED, "ROM -> VDC copy kept");
+        CHECK(b->play_sessions_run == a->play_sessions_run, "sessions counted once (%llu vs %llu)",
+              (unsigned long long)b->play_sessions_run, (unsigned long long)a->play_sessions_run);
+        CHECK(b->section_count > 0, "sections built on the union");
+    }
+    dp_pce_results_free(a); dp_pce_results_free(b);
+    free(a); free(b);
+}
+
 int main(void) {
     uint8_t *rom = malloc(ROM_SIZE);
     build(rom);
     test_decoder();
     test_bridge(rom);
     test_explore(rom);
+    test_palette(rom);
+    test_jobs(rom);
     free(rom);
     if (fails) { printf("%d failure(s)\n", fails); return 1; }
     printf("pce: ok\n");

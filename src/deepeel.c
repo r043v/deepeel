@@ -1065,12 +1065,13 @@ static int cmd_pce(int argc, char **argv) {
     if (argc < 4 || strcmp(argv[2], "explore")) {
         fprintf(stderr, "deepeel pce explore ROM [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N] "
                         "[--max-total N] [--max-steps N] [--queue N] [--loop-cap N] [--fork-cap N] "
-                        "[--novelty STEPS] [--novelty-frames N] [--novelty-archive N] [--novelty-cells] [--pad-fork-cap N] [--irq-fork-cap N] [--no-irq-fork] [--no-static] [--no-infer] "
+                        "[--novelty STEPS] [--novelty-frames N] [--novelty-archive N] [--novelty-cells] [--pad-fork-cap N] [--irq-fork-cap N] [--no-irq-fork] [--no-static] [--no-infer] [--jobs 2] "
                         "[--text FILE] [--map FILE] [--png FILE]\n");
         return 2;
     }
     const char *path = NULL, *text = NULL, *map = NULL, *png = NULL;
     DpPceOptions opt = dp_pce_options();
+    int pce_jobs = 1;
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
         if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
@@ -1096,6 +1097,7 @@ static int cmd_pce(int argc, char **argv) {
         else if (!strcmp(a, "--novelty-archive") && i + 1 < argc) opt.novelty_archive = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--no-static")) opt.static_closure = 0;
         else if (!strcmp(a, "--no-infer")) opt.infer = 0;
+        else if (!strcmp(a, "--jobs") && i + 1 < argc) pce_jobs = atoi(argv[++i]);
         else if (!strcmp(a, "--play") && i + 1 < argc) opt.play_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--sessions") && i + 1 < argc) opt.play_sessions = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed") && i + 1 < argc) opt.play_seed = (uint32_t)strtoul(argv[++i], NULL, 0);
@@ -1109,7 +1111,7 @@ static int cmd_pce(int argc, char **argv) {
     uint8_t *data = nes_read_file(path, &size);
     if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", path); return 1; }
     DpPceResults *res = calloc(1, sizeof *res);
-    if (!res || !dp_pce_explore(data, size, &opt, res)) {
+    if (!res || !dp_pce_explore_jobs(data, size, &opt, res, pce_jobs)) {
         fprintf(stderr, "deepeel: pce explore failed (%s)\n", path);
         free(res);
         free(data);

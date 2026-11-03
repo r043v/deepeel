@@ -991,3 +991,22 @@ CHR (2). Le runtime m0boy gagne 8 Kio de PRG-RAM en $6000-$7FFF (modif
 locale du dépôt voisin, non poussée). **Non modélisés** : le compteur
 d'IRQ de scanline MMC3 (`$C000-$E001`) et le miroir MMC1/MMC3 ; les IRQ
 MMC3 ne sont donc pas explorées. Observation de l'outil.
+
+## 0.56.0
+
+J6 : PC Engine.
+- **`--jobs 2`** (`deepeel pce explore ... --jobs 2`) : le runtime m0boy, le
+  pont et l'explorateur étant des globales de processus, la pile PCE est
+  compilée une seconde fois et préfixée `dp_pce2_` (objcopy, comme les
+  clones Sega/MSX). Le partage est **par phase** : l'instance secondaire
+  prend TAS, sessions jouées et recherche de nouveauté, puis vide les
+  points de contrôle qu'elles laissent ; la primaire vide l'arbre de
+  fourches du démarrage puis lance la finalisation (clôture statique,
+  tables, sections, inférence) sur l'**union** des cartes. Les compteurs
+  sont sommés, les journaux fusionnés (dédoublonnés, débordements
+  comptés). Sans phase à répartir, le mode retombe sur une instance, avec
+  un message. Les budgets (`--max-total`) sont par instance.
+- **VCE** : une copie ROM→port de couleur `$0404-$0405` (store CPU ou
+  déplacement de bloc) est typée **palette** : `pal_flags` par cellule,
+  canaux de copie 3 et 4, ligne `VCE colour-data writes … palette bytes`
+  dans le rapport. Observation de l'outil.

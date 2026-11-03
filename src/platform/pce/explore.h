@@ -42,7 +42,8 @@ typedef struct {
     uint32_t source;       // first physical ROM cell of the run
     uint32_t length;       // bytes copied in the run
     uint16_t pc;
-    uint8_t channel;       // 1 CPU store to VDC data, 2 block move to VDC data
+    uint8_t channel;       // 1 CPU store to VDC data, 2 block move to VDC data,
+                           // 3 CPU store to VCE colour data, 4 block move to it (palette)
 } DpPceCopy;
 
 typedef struct {
@@ -59,6 +60,7 @@ typedef struct {
     uint8_t verdict;
 } DpPceSection;
 
+struct DpPceResults_;
 typedef struct {
     uint64_t max_total;
     uint32_t max_steps, queue_cap, loop_cap, fork_cap, pad_fork_cap, irq_fork_cap;
@@ -76,10 +78,20 @@ typedef struct {
     int tas_count;
     int lot_drain;         // with a lot backlog: run only the saved states (no root, no seeds)
     const char *lot_path;  // disk lot of deferred states (NULL: memory only); an existing file is resumed
+    // --jobs 2 partition (set by dp_pce_explore_jobs): the secondary instance
+    // skips the power-on root and the finalization; the primary calls
+    // pre_finalize(results, user) once its drain is done, before the static
+    // closure, to fold the secondary's findings in
+    int skip_root;
+    int no_finalize;
+    void (*pre_finalize)(struct DpPceResults_ *r, void *user);
+    void *pre_user;
 } DpPceOptions;
 
-typedef struct {
+typedef struct DpPceResults_ {
     uint8_t *flags;        // one byte per physical cell
+    uint8_t *pal_flags;    // 1: the cell was copied into the VCE palette (HuC6260)
+    uint64_t vce_data_writes, palette_bytes; // VCE colour-data stores / distinct palette cells
     size_t rom_size;
     uint64_t steps, paths, forks, irq_forks, pad_forks, exec_outside, data_reads;
     uint64_t forced_paths, evicted, faults, illegal_cuts;
@@ -115,6 +127,11 @@ typedef struct {
 } DpPceResults;
 
 DpPceOptions dp_pce_options(void);
+// --jobs N (N >= 2): a second complete copy of the explorer (namespaced
+// runtime) takes the play/TAS/novelty phases while the primary drains the
+// power-on fork tree; findings are merged before the shared finalization.
+int dp_pce_explore_jobs(const uint8_t *data, size_t size, const DpPceOptions *options,
+                        DpPceResults *results, int jobs);
 int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options,
                    DpPceResults *results);
 void dp_pce_results_free(DpPceResults *results);

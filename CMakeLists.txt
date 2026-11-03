@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.55.0 LANGUAGES C)
+project(deepeel VERSION 0.56.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -467,6 +467,7 @@ add_library(deepeel_pce STATIC
   src/platform/pce/registry.c
   src/platform/pce/explore.c
   src/platform/pce/tas.c
+  src/platform/pce/jobs.c
   ${DP_PCE_RUNTIME}/huc6280.c
   ${DP_PCE_RUNTIME}/vdc.c
   ${DP_PCE_RUNTIME}/psg.c)
@@ -474,6 +475,30 @@ target_include_directories(deepeel_pce PUBLIC src ${DP_PCE_RUNTIME}
   "${M0BOY_DIR}/targets/common/runtime")
 target_compile_definitions(deepeel_pce PRIVATE PCE_TRACE)
 target_link_libraries(deepeel_pce PUBLIC deepeel_core)
+# second PCE instance for --jobs 2: the whole stack compiled again, every
+# defined global namespaced dp_pce2_ (the explorer, the bridge and m0boy's
+# machine are process globals)
+add_library(deepeel_pce2_raw STATIC
+  src/platform/pce/hucdec.c src/platform/pce/pcemach.c src/platform/pce/explore.c
+  src/platform/pce/tas.c
+  ${DP_PCE_RUNTIME}/huc6280.c ${DP_PCE_RUNTIME}/vdc.c ${DP_PCE_RUNTIME}/psg.c)
+target_include_directories(deepeel_pce2_raw PRIVATE src ${DP_PCE_RUNTIME}
+  "${M0BOY_DIR}/targets/common/runtime")
+target_compile_definitions(deepeel_pce2_raw PRIVATE PCE_TRACE)
+set(DP_PCE2_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_pce2.a)
+add_custom_command(OUTPUT ${DP_PCE2_ARCHIVE}
+  BYPRODUCTS ${DP_PCE2_ARCHIVE}.syms
+  COMMAND ${CMAKE_COMMAND} -DNM=${DP_NM} -DOBJCOPY=${DP_OBJCOPY}
+    -DINPUT=$<TARGET_FILE:deepeel_pce2_raw> -DOUTPUT=${DP_PCE2_ARCHIVE}
+    -DPREFIX=dp_pce2_ "-DPATTERNS=[A-Za-z_][A-Za-z0-9_]*"
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_sega_prefix.cmake
+  DEPENDS deepeel_pce2_raw cmake/dp_sega_prefix.cmake VERBATIM)
+add_custom_target(dp_pce2_runtime DEPENDS ${DP_PCE2_ARCHIVE})
+add_library(deepeel_pce2 STATIC IMPORTED GLOBAL)
+set_target_properties(deepeel_pce2 PROPERTIES IMPORTED_LOCATION ${DP_PCE2_ARCHIVE}
+  INTERFACE_LINK_LIBRARIES deepeel_core)
+add_dependencies(deepeel_pce2 dp_pce2_runtime)
+target_link_libraries(deepeel_pce PUBLIC deepeel_pce2)
 target_link_libraries(deepeel PRIVATE deepeel_pce)
 
 target_link_libraries(deepeel PRIVATE deepeel_core m ${DP_GUI_LIBS})

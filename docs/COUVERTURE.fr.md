@@ -618,11 +618,11 @@ CGB sont mensongères.
 | Surface | État | Exigé |
 |---|---|---|
 | HuC6280, VDC, PSG, MPR, timer, IRQ VDC, pad `$1000` | ✅ | — |
-| VCE (palette) | absent | **Type** palette |
+| VCE (palette) | copies ROM→VCE typées palette (0.56) ; classe PNG à venir | **Type** palette |
 | ADPCM, CD-ROM², System Card | absents | limites ou libretro |
 | Mapper SF2 (> 384 Ko), SuperGrafx (VPC, 2ᵉ VDC) | absents (modulo des pages) | **Banque** |
 | Multitap | absent | **Sonde** |
-| Instance unique (pas de préfixage) | — | 2 instances pour `--jobs` (F3) |
+| Instance unique (pas de préfixage) | 2 instances `dp_pce2_` (0.56), partage par phase | file de fourches partagée (F3) |
 
 ### 3.6 Mega Drive
 
@@ -1356,7 +1356,7 @@ Chaque jalon remplit trois conditions :
 | **J3** ✅ 0.45.0 | `DpMachine`/`DpIsa`, noyau extrait de `src/explore/`, GB migré | XL | comportement identique (tests + campagne GB à budgets égaux) — **fait** : interfaces `src/core/dpmachine.h` — `DpIsa` (longueur, flot, condition, effets de registres sur le treillis HL/A, illégal, désassemblage, `mem_operand` : accès lecture/écriture/RW, mode absolu/haut/paire avec post-incr./pile) ; `DpMachine` (état, ROM, exécution, `observe`, `ctx_components`, `probes`). `DpIsa` SM83 et `DpMachine` GB ; le moteur, la closure et la provenance n'ont plus de connaissance directe du SM83. `explorer.c` découpé : `forks.c` (fourches conditionnelles/IRQ/touches/P1), `seeds.c` (graines et cascade indirecte), `ctxproj.c` (projection de contexte), `frontier_disk.c` (spool, ensemble exact, lots disque), `frontier.c` (politique), avec `explorer_priv.h` pour les internes partagés (2092 → 1458 lignes). Vérifié : 41/41 tests, carte `.map` octet pour octet identique à 0.43.1 sur Zelda (3 M pas, closure 6 rounds), 11,6 s. Les consommateurs de `mem_operand` (typage §5) et des sondes/observateurs génériques sont J8/J9 ; la généralisation des modules à d'autres plateformes est J4-J7 (§7.5) |
 | **J4** ◐ 0.52.0 | Sega/MSX sur le noyau | L | matrice §2.1 ✅ pour SMS/GG/MSX ; `--jobs` MSX — **fait** : `--jobs 2` MSX (0.46), coupe de padding (0.47), `.cov`/romdata (0.48), identité ROM des films SHA-1 (0.49), frères de copie S5 (0.50), tables de sauts par provenance S4 (0.51), chien de garde HALT attribué D14 (0.52). **Reste (donc non ✅)** : J1 pool de checkpoints commun aux sessions jouées, Go-Explore (J4 de §2.7), mode humain/`.sta` et `--watch` (O3, J5 de §2.7) — ces trois dépendent d'une interface framebuffer commune (libretro niveau A, J11) —, S6 décodeurs (J8) |
 | **J5** ◐ 0.55.0 | NES sur le noyau, mappers MMC1/MMC3/CNROM/AxROM, CHR indexée | L | fixtures par mapper ; tiles typés sur la CHR — **fait** : CNROM et AxROM dans le pont, fixtures en code (`test_nes`), CHR ROM indexée avec tiles de fond/sprites typés (0.54), MMC1 et MMC3 (0.55). **Reste (donc non ✅)** : IRQ de scanline MMC3 et miroir MMC1/MMC3, NES sur le noyau commun |
-| **J6** | PCE sur le noyau, 2 instances, VCE | M | `--jobs 2` PCE |
+| **J6** ◐ 0.56.0 | PCE sur le noyau, 2 instances, VCE | M | `--jobs 2` PCE — **fait** : 2 instances par préfixage, partage par phase, fusion (test `pce` : l'union couvre le sériel) ; VCE typée palette (canaux 3/4). **Reste (donc non ✅)** : partage de file de fourches entre les deux instances (aujourd'hui par phase), classe palette dans la carte PNG, PCE sur le noyau commun |
 | **J7** | MD sur le noyau + exploration du Z80 son | XL | code du driver Z80 marqué `code-ramcopy`, lectures ROM par la fenêtre Z80 typées |
 | **J8** | Typage par provenance §4.2 + index 0 §5 + rejeu par index §5.4 + décodeurs génériques | L | fixtures « table indexée biaisée », « table de musique jamais jouée » |
 | **J9** | Matériel manquant §3 (sondes événementielles, CGB/HDMA, RTC, série, DMC, YM…) | L | une fixture par surface |
