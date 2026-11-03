@@ -2005,3 +2005,11 @@ MD C1 : le rapport donne `sections: N executed runs, R required (natural path), 
 forced only` (une section = plage exécutée maximale ; requise si un octet a
 tourné sur le chemin naturel) et le `--summary` JSON ajoute `sections` et
 `sections_required`. Test `md_sections`. Pas de liveness par section.
+
+## 0.135.1
+
+Correctif : interblocage (ordre de verrous inversé) entre `queue_push` (verrou du
+pool puis du spool) et `spool_feed` (spool puis pool) avec `--jobs 2` et un
+spool non vide. Constaté sur Zelda et Mario Land 2 en `--unbounded` : les deux
+processus dormaient à 1 % CPU, sans écriture, après 8 min. `spool_feed` prend
+maintenant le pool avant le spool.

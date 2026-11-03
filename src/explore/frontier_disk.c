@@ -77,10 +77,15 @@ void spool_feed(DpExplorer *ex) {
     DpSpool *sp = ex->spool;
     if (!sp) return;
     for (;;) {
-        pthread_mutex_lock(&sp->mtx);
-        if (sp->rd >= sp->wr) { pthread_mutex_unlock(&sp->mtx); return; }
-        // room checked under the pool lock when shared (the push must not overflow)
+        // lock order: pool before spool (queue_push holds the pool while it writes the spool)
         if (ex->sh) pthread_mutex_lock(&ex->sh->mtx);
+        pthread_mutex_lock(&sp->mtx);
+        if (sp->rd >= sp->wr) {
+            pthread_mutex_unlock(&sp->mtx);
+            if (ex->sh) pthread_mutex_unlock(&ex->sh->mtx);
+            return;
+        }
+        // room checked under the pool lock when shared (the push must not overflow)
         int room = ex->sh ? (ex->sh->len < ex->sh->cap) : (ex->q_len < ex->q_cap);
         if (!room) {
             if (ex->sh) pthread_mutex_unlock(&ex->sh->mtx);
@@ -97,6 +102,7 @@ void spool_feed(DpExplorer *ex) {
                     (unsigned long long)sp->rd);
             sp->rd = sp->wr;
             pthread_mutex_unlock(&sp->mtx);
+            if (ex->sh) pthread_mutex_unlock(&ex->sh->mtx);
             return;
         }
         uint8_t *img = xrealloc(NULL, ex->sb);
@@ -113,6 +119,7 @@ void spool_feed(DpExplorer *ex) {
         if (!rok) {
             free(img);
             pthread_mutex_unlock(&sp->mtx);
+            if (ex->sh) pthread_mutex_unlock(&ex->sh->mtx);
             return;
         }
         sp->rd += sizeof hdr + body;
