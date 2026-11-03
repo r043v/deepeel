@@ -1510,3 +1510,19 @@ par nœud `parent u32, site u32, pc u16, kind u8, issue u8`. Le champ `site`
 vaut `0xFFFFFFFF` (cellule d'entrée non renseignée côté NES) ; le rapport
 imprime `choice tree: N nodes`. Test `nes_tree` : 5 nœuds, 72 octets sur
 `fix_nes_branch.nes`. Reste ◐ : pas de reprise de l'arbre entre runs.
+
+## 0.97.0
+
+NES : provenance des octets de RAM (S3, partielle). Chaque écriture en RAM
+(`$0000–$07FF`) faite dans les 4 pas qui suivent une lecture de donnée PRG
+retient la cellule PRG d'origine (dernier écrivain, tous chemins confondus :
+approximation, pas une provenance par chemin). Un `jmp ($zp)` dont les deux
+octets de pointeur viennent de deux cellules PRG consécutives désigne un mot
+de table de sauts ; avec `--second-pass`, les mots voisins de la table
+(64 par côté) qui pointent sur de la PRG non exécutée deviennent des racines
+forcées du second passage (bornées par le plafond de 256 graines, compté).
+Rapport : `provenance: N jump-table words traced from PRG reads, N roots
+seeded`. Fixture `fix_nes_prov.nes` (table `$8020,$8030,$8040`, seule la
+première prise : 2 racines semées), test `nes_provenance`. Reste ◐ : pas de
+suivi de constantes arithmétiques, pas de provenance par chemin ni de
+propagation registre→registre au-delà de la lecture immédiate.

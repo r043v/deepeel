@@ -44,6 +44,8 @@ typedef struct {
     uint32_t queue_len, queue_cap;
     DpNesPathState *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
     DpLotFile *lot;                        // disk lot: park overflow, wall leftovers, --lot resume
+    int32_t ram_src[0x800];            // last ROM cell whose read fed the store to each RAM byte (-1 none)
+    int64_t *prov_anchor; uint32_t prov_len; // table-word cells that fed an indirect jmp pointer
     uint32_t cur_choice;               // tree node of the path being run
     DpHashSet seen;                    // exact state dedup
     DpHashSet ind_sites, ind_pairs;    // observed jmp (ind): sites and (site,target) pairs
@@ -278,6 +280,15 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
         int64_t site = dp_nesmach_rom_index(x->m, pc);
         unsigned ptr = bytes[1] | (bytes[2] << 8);
         unsigned tgt = dp_nesmach_read(x->m, ptr) | (dp_nesmach_read(x->m, (ptr & 0xFF00u) | ((ptr + 1) & 0xFFu)) << 8);
+        if (ptr + 1 < 0x800 && x->ram_src[ptr] >= 0 && x->ram_src[ptr + 1] == x->ram_src[ptr] + 1 && x->prov_len < 4096) {
+            // S3: both pointer bytes were loaded from consecutive PRG cells: a table word
+            uint32_t a;
+            for (a = 0; a < x->prov_len && x->prov_anchor[a] != x->ram_src[ptr]; a++) {}
+            if (a == x->prov_len) {
+                int64_t *g = realloc(x->prov_anchor, (x->prov_len + 1) * sizeof *g);
+                if (g) { x->prov_anchor = g; x->prov_anchor[x->prov_len++] = x->ram_src[ptr]; r->prov_sites++; }
+            }
+        }
         if (site >= 0) {
             if (x->ind_pairs.cnt >= 65536) r->indirect_overflow++;
             else {
@@ -348,6 +359,8 @@ static void hook_read(void *user, unsigned addr) {
 static void hook_write(void *user, unsigned addr, unsigned value) {
     DpNesRun *x = user;
     DpNesResults *r = x->r;
+    if (addr < 0x800)   // provenance: a store right after a PRG data read carries that cell
+        x->ram_src[addr] = (x->last_read_cell >= 0 && x->total_steps - x->last_read_step <= 4) ? (int32_t)x->last_read_cell : -1;
     if (addr >= 0x8000) {
         // mapper register write (fires before the runtime/bridge applies it)
         unsigned os, ns;
@@ -688,6 +701,7 @@ DpNesOptions dp_nes_options(void) {
 static void infer_gaps(DpNesRun *x);
 static void static_closure(DpNesRun *x);
 static void second_pass_seed(DpNesRun *x);
+static int64_t table_target(const DpNesRun *x, size_t a, unsigned v);
 static void table_scan(DpNesRun *x);
 static void copy_siblings(DpNesRun *x);
 
@@ -726,6 +740,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     DpNesRun x;
     memset(&x, 0, sizeof(x));
     x.last_read_cell = -1;
+    for (unsigned i = 0; i < 0x800; i++) x.ram_src[i] = -1;
     if (!data || !results) return 0;
     char err[256];
     x.m = dp_nesmach_open(data, size, mapper, err, sizeof err);
@@ -924,6 +939,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     if (!x.failed) table_scan(&x);
     if (!x.failed) copy_siblings(&x);
     if (!x.failed) infer_gaps(&x);
+    free(x.prov_anchor);
     free(x.ipc);
     free(x.istart);
     free(x.queue);
@@ -979,6 +995,32 @@ static void second_pass_seed(DpNesRun *x) {
         DpNesPathState er = { es, 1, 0, 0, 0, 0, 0, DP_NES_TREE_PASS2 };
         if (queue_push(x, &er)) r->pass2_seeds++;
         else { free(es); r->seeds_refused_queue++; }
+    }
+    // S3: neighbours of a provenance-traced table word (aligned words in the
+    // same table, up to 64 each way) that point at unexecuted PRG are roots too
+    for (uint32_t pa = 0; pa < x->prov_len; pa++) {
+        size_t a0 = (size_t)x->prov_anchor[pa];
+        for (int dir = -1; dir <= 1; dir += 2) {
+            size_t a = a0;
+            for (unsigned e = 0; e < 64; e++) {
+                if (dir < 0) { if (a < 2) break; a -= 2; } else { a += 2; if (a + 1 >= n) break; }
+                unsigned v = rom[a] | (rom[a + 1] << 8);
+                int64_t tc = table_target(x, a, v);
+                if (tc < 0 || (size_t)tc >= n) break;
+                if ((r->flags[tc] & (DP_NES_NATURAL | DP_NES_FORCED)) || sd[tc]) continue;
+                sd[tc] = 1;
+                if (r->pass2_seeds + r->pass2_refused >= NES_PASS2_MAX) { r->pass2_capped++; continue; }
+                unsigned bank = (v < 0xC000u) ? (unsigned)((size_t)tc >> 14) : 0;
+                uint8_t *es = malloc(dp_nesmach_state_size());
+                if (!es) { x->failed = 1; free(sd); return; }
+                dp_nesmach_reset(x->m);
+                if (!dp_nesmach_enter(x->m, bank, v)) { free(es); r->pass2_refused++; continue; }
+                dp_nesmach_save(x->m, es);
+                DpNesPathState er = { es, 1, 0, 0, 0, 0, 0, DP_NES_TREE_PASS2 };
+                if (queue_push(x, &er)) { r->pass2_seeds++; r->prov_roots++; }
+                else { free(es); r->seeds_refused_queue++; }
+            }
+        }
     }
     free(sd);
 }
@@ -1317,6 +1359,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  pad probes: %llu forks at %llu sites, refused %llu\n", (unsigned long long)r->pad_probes, (unsigned long long)r->pad_probe_sites, (unsigned long long)r->pad_probe_refused);
     fprintf(out, "  copy siblings: %llu tables; %llu ranges (%llu bytes); %llu refused over executed code; %llu tables cut at the cap\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_ranges, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_refused, (unsigned long long)r->sib_caps);
     fprintf(out, "  choice tree: %u nodes\n", r->tree_count);
+    fprintf(out, "  provenance: %llu jump-table words traced from PRG reads, %llu roots seeded\n", (unsigned long long)r->prov_sites, (unsigned long long)r->prov_roots);
     fprintf(out, "  second pass: %llu seeds, %llu refused, %llu roots over the cap\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     fprintf(out, "  vector seeds: %llu\n", (unsigned long long)r->vectors_seeded);
     fprintf(out, "  entries: seeded %llu refused %llu\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);

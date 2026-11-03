@@ -170,6 +170,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_table.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_slide.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_sibling.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_prov.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_cpucopy.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.gg
@@ -302,3 +303,5 @@ add_test(NAME nes_spool_resume COMMAND sh -c "rm -f ${CMAKE_CURRENT_BINARY_DIR}/
 set_tests_properties(nes_spool_resume PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_tree COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes --max-total 20000 --max-steps 1000 --tree ${CMAKE_CURRENT_BINARY_DIR}/nes.tree --text ${CMAKE_CURRENT_BINARY_DIR}/nes_tr.txt >/dev/null 2>&1; grep -Eq 'choice tree: 5 nodes' ${CMAKE_CURRENT_BINARY_DIR}/nes_tr.txt && test \"$(head -c 4 ${CMAKE_CURRENT_BINARY_DIR}/nes.tree)\" = DPTZ && test $(wc -c < ${CMAKE_CURRENT_BINARY_DIR}/nes.tree) -eq 72")
 set_tests_properties(nes_tree PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME nes_provenance COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_prov.nes --second-pass --max-total 20000 --max-steps 50 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_pv.txt >/dev/null 2>&1; grep -Eq 'provenance: 1 jump-table words traced from PRG reads, 2 roots seeded' ${CMAKE_CURRENT_BINARY_DIR}/nes_pv.txt")
+set_tests_properties(nes_provenance PROPERTIES FIXTURES_REQUIRED fixtures)

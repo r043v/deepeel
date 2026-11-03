@@ -561,6 +561,21 @@ def build_nes_pce(out):
     n2[16 + 0x200:16 + 0x200 + 6] = bytes([0x00, 0x81, 0x00, 0x83, 0x00, 0x84])
     with open(os.path.join(out, "fix_nes_sibling.nes"), "wb") as f:
         f.write(n2)
+    # NES provenance: lda $8100 / sta $00 / lda $8101 / sta $01 / jmp ($0000);
+    # the table at $8100 is ($8020, $8030, $8040), only the first is taken
+    n3 = bytearray(16 + 2 * 0x4000 + 0x2000)
+    n3[0:4] = b"NES\x1a"
+    n3[4], n3[5] = 2, 1
+    code3 = bytes([0xAD, 0x00, 0x81, 0x85, 0x00, 0xAD, 0x01, 0x81, 0x85, 0x01, 0x6C, 0x00, 0x00])
+    n3[16:16 + len(code3)] = code3
+    n3[16 + 0x100:16 + 0x106] = bytes([0x20, 0x80, 0x30, 0x80, 0x40, 0x80])
+    for t in (0x20, 0x30, 0x40):
+        n3[16 + t:16 + t + 3] = bytes([0x4C, t, 0x80])
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        q = 16 + 0x4000 + (v - 0xFFFA) + 0x3FFA
+        n3[q:q + 2] = bytes([0x00, 0x80])
+    with open(os.path.join(out, "fix_nes_prov.nes"), "wb") as f:
+        f.write(n3)
     # NES static closure: jsr $8020 whose subroutine a 2-step budget never reaches
     n = bytearray(16 + 2 * 0x4000 + 0x2000)
     n[0:4] = b"NES\x1a"

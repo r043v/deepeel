@@ -11,7 +11,7 @@ remesure pas l'outil.
 | GB | 34 | 1 | 3 | 1 |
 | SMS/GG | 32 | 1 | 4 | 2 |
 | MSX | 32 | 1 | 4 | 2 |
-| NES | 11 | 18 | 8 | 2 |
+| NES | 11 | 19 | 7 | 2 |
 | PCE | 15 | 7 | 16 | 1 |
 | MD | 8 | 7 | 23 | 1 |
 
@@ -42,7 +42,7 @@ Cellules ouvertes (◐ ou ✗) : 93.
 | S2 | Fermeture statique de flot | PCE | ◐ fenêtre MPR |
 | S2 | Fermeture statique de flot | MD | ✗ |
 | S3 | Suivi de constantes / provenance | GB | ◐ HL/A |
-| S3 | Suivi de constantes / provenance | NES | ✗ |
+| S3 | Suivi de constantes / provenance | NES | ◐ provenance RAM→`jmp (zp)` depuis la PRG |
 | S3 | Suivi de constantes / provenance | PCE | ✗ |
 | S3 | Suivi de constantes / provenance | MD | ◐ témoin An |
 | S4 | Tables de sauts depuis l'opérande | GB | ✗ |
