@@ -152,6 +152,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_vblank.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_copy1.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_wramexec.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_wramgen.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_hdma.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_apu.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pal.gb
@@ -386,8 +387,10 @@ add_test(NAME md_heat COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT
 set_tests_properties(md_heat PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME wram_exec_trace COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_wramexec.gb --cov $D/we2.cov --text $D/we2.txt >/dev/null 2>&1; grep -q '^01 4000 [1357]' $D/we2.cov && grep -q 'traced to ROM copy sources' $D/we2.txt && ! grep -q '(0 traced' $D/we2.txt")
 set_tests_properties(wram_exec_trace PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
-add_test(NAME rtcode_archive COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_wramexec.gb --rtcode $D/we.rt --text $D/we3.txt >/dev/null 2>&1; grep -Eq '^runtime code archive: [1-9][0-9]* distinct.*, [1-9][0-9]* rewrote an earlier' $D/we3.txt && grep -q '^# deepeel rtcode v1' $D/we.rt && grep -Eq '^c[0-9a-f]{3} [0-9a-f]+ [0-9]+ [0-9]+$' $D/we.rt")
+add_test(NAME rtcode_archive COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_wramexec.gb --rtcode $D/we.rt --text $D/we3.txt >/dev/null 2>&1; grep -Eq '^runtime code archive: [1-9][0-9]* distinct.*, [1-9][0-9]* rewrote an earlier' $D/we3.txt && grep -q '^# deepeel rtcode v1' $D/we.rt && grep -Eq '^c[0-9a-f]{3} [0-9a-f]+ [0-9]+ -?[0-9]+ -?[0-9]+$' $D/we.rt")
 set_tests_properties(rtcode_archive PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME rtcode_generated COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_wramgen.gb --rtcode $D/wg.rt --text $D/wg.txt >/dev/null 2>&1; grep -Eq '0 attached to a ROM copy source, [1-9][0-9]* generated .no ROM source; [1-9][0-9]* with an approximate ROM producer' $D/wg.txt && grep -Eq '^c000 3e42 [0-9]+ -1 16384$' $D/wg.rt")
+set_tests_properties(rtcode_generated PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME unbounded_spool COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; (ulimit -f 400000; timeout 60 $B explore $D/fix_branch.gb --queue 1 --queue-max 1 --max-paths 2 --unbounded --text $D/ub.txt >/dev/null 2>&1); grep -q '^budgets: 0 paths cap hit, 0 step-wall hit, 0 queue overflows' $D/ub.txt && grep -Eq '^spool: [1-9][0-9]* written, [1-9][0-9]* read back, 0 refused, 0 bytes pending' $D/ub.txt")
 set_tests_properties(unbounded_spool PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 90)
 add_test(NAME md_static_layer COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_static.md --fork-cap 0 --text $D/ms.txt --map $D/ms.map >/dev/null 2>&1; grep -Eq 'static layer \\(S1/S2, no machine\\): [0-9]+ padding, 20 table, [1-9][0-9]* code bytes' $D/ms.txt && [ \"$(sed -n 2p $D/ms.map | cut -c517-520)\" = '3333' ] && [ \"$(sed -n 2p $D/ms.map | cut -c1025-1028)\" = '7777' ]")

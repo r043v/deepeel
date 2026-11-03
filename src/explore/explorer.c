@@ -705,7 +705,11 @@ static void hook_write(DpMach *m, uint16_t a, uint8_t v) {
                1ull << (((a - 0xA000) & (DP_CRAM_PAGES * 256 - 1)) >> 8));
         return;
     }
-    if (a < 0xE000) { dp_copy_on_wram_write(ex, a, v); return; }   // WRAM: copy destination (code run from WRAM)
+    if (a < 0xE000) {
+        ex->wram_taint[a - 0xC000] = ex->last_rom_valid ? ex->last_rom_key + 1 : 0;
+        dp_copy_on_wram_write(ex, a, v);
+        return;
+    }   // WRAM: copy destination (code run from WRAM)
     if (a < 0xFE00) return; // echo: no per-byte map
     if (a < 0xFF00) { // OAM
         __atomic_store_n(&res->oam_written, 1, __ATOMIC_RELAXED);
@@ -1149,7 +1153,9 @@ bad_done:
                           : a >= 0x8000 && a < 0xA000 ? ga->vram[a - 0x8000]
                           : a >= 0xFF80 && a < 0xFFFF ? ga->hram[a - 0xFF80] : 0xFF;
                 }
-                dp_rtcode_add(res, pc, ib, ilen, rk);
+                int32_t dv = -1;
+                if (pc >= 0xC000 && pc < 0xE000 && ex->wram_taint[pc - 0xC000]) dv = (int32_t)(ex->wram_taint[pc - 0xC000] - 1);
+                dp_rtcode_add(res, pc, ib, ilen, rk, dv);
             }
             if (rk >= 0) {
                 uint8_t nf = (uint8_t)(ex->cur_forced ? DP_XF_FORCED : DP_XF_NATURAL);
@@ -1375,6 +1381,7 @@ static int explore_step_inner(DpExplorer *ex) {
     ex->back_idx = 0;
     dp_copy_reset(&ex->ct);
     dp_mach_attach(ex->mach, ex, hook_step, hook_read, hook_write, NULL);
+    memset(ex->wram_taint, 0, sizeof ex->wram_taint); // producer tracking restarts per path
     dp_mach_load(ex->mach, img); // execution starts at the image's pc
     free(img);
     if (p != &tmp && !from_pq && ex->sh) { // trap: a NULL written into a live ring slot?

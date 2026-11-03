@@ -2050,3 +2050,15 @@ L'archive du code exécuté en RAM compte les variantes qui réécrivent une
 instruction déjà vue à la même adresse (code auto-modifiant ou polymorphe) :
 ligne « … N rewrote an earlier instruction at the same address ». Sur la
 fixture `fix_wramexec`, 1 réécriture (`ld a,$00` devenu `ld a,$42`).
+
+## 0.137.0
+
+Code généré en RAM sans copie verbatim (décodé, XOR, décompressé) : chaque
+octet WRAM écrit retient l'index du dernier octet de ROM lu avant l'écriture
+(`wram_taint`). À l'exécution, une instruction sans source verbatim reçoit ce
+**producteur approximatif** (ligne de rapport « N with an approximate ROM
+producer », 5ᵉ colonne de `--rtcode`). C'est une approximation (plus proche
+lecture ROM avant l'écriture, remise à zéro à chaque chemin), pas une preuve
+de dépendance : elle désigne la région ROM à examiner (flux compressé et
+décodeur), pas l'octet exact. Fixture `fix_wramgen` (routine stockée XOR $5A),
+test `rtcode_generated`.

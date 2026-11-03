@@ -249,11 +249,11 @@ static void write_rtcode(const DpResults *res, const char *path) {
     DpRtCode *rt = dp_rtcode_sorted(res, &rn);
     FILE *rf = fopen(path, "w");
     if (rf) {
-        fprintf(rf, "# deepeel rtcode v1: pc bytes hits rom_index(-1=generated)\n");
+        fprintf(rf, "# deepeel rtcode v1: pc bytes hits rom_index(-1=generated) producer(-1=none)\n");
         for (uint32_t i = 0; i < rn; i++) {
             fprintf(rf, "%04x ", rt[i].pc);
             for (int k = 0; k < rt[i].len; k++) fprintf(rf, "%02x", rt[i].b[k]);
-            fprintf(rf, " %u %d\n", rt[i].hits, rt[i].rom_src);
+            fprintf(rf, " %u %d %d\n", rt[i].hits, rt[i].rom_src, rt[i].derived);
         }
         fclose(rf);
     }

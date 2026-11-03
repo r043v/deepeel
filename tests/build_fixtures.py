@@ -258,6 +258,20 @@ def build(out):
     w(r, 0x4000, 0x3E, 0x42, 0xEA, 0x00, 0xD0, 0xC9)   # ld a,$42 ; ld ($D000),a ; ret
     save(out, "fix_wramexec", r)
 
+    # --- wramgen: the routine is stored XOR $5A and decoded while copied to WRAM:
+    # no verbatim ROM source, but the producer region is the data read -----------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x21, 0x00, 0x40)                # ld hl,$4000
+    w(r, 0x153, 0x11, 0x00, 0xC0)                # ld de,$C000
+    w(r, 0x156, 0x06, 0x06)                      # ld b,6
+    w(r, 0x158, 0x00)
+    w(r, 0x159, 0x2A, 0xEE, 0x5A, 0x12, 0x13, 0x05, 0x20, 0xF8)   # ld a,(hl+) ; xor $5A ; ld (de),a ; inc de ; dec b ; jr nz
+    w(r, 0x161, 0xCD, 0x00, 0xC0)                # call $C000 (the decoded routine)
+    w(r, 0x164, 0x76)                            # halt
+    w(r, 0x4000, *[b ^ 0x5A for b in (0x3E, 0x42, 0xEA, 0x00, 0xD0, 0xC9)])
+    save(out, "fix_wramgen", r)
+
     # --- jptable: ld hl,table ; ld a,[hl+] ; ld h,[hl] ; ld l,a ; jp hl.  Only the first
     # entry runs; the other two handlers are reached by the S4 operand table scan ---
     r = rom(2)

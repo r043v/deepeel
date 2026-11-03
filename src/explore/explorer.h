@@ -165,6 +165,7 @@ typedef struct DpRtCode {
     uint64_t key;     // 0 = empty slot
     uint32_t hits;
     int32_t rom_src;  // ROM index of the verbatim-copy source, -1 when unattached
+    int32_t derived;  // unattached code: ROM index of the last ROM byte read before its RAM byte was written (approximate producer), -1 none
     uint16_t pc;
     uint8_t len, b[4];
 } DpRtCode;
@@ -276,6 +277,7 @@ typedef struct DpResults {
     DpRtCode *rt;                 // runtime-code archive (open addressing), guarded by rec_mtx
     uint8_t *rt_pcseen;           // variants seen per pc (saturating), for the polymorphic count
     uint32_t rt_poly;             // variants that replace an earlier one at the same pc (SMC)
+    uint32_t rt_derived;          // generated variants with an approximate ROM producer
     uint32_t rt_cap, rt_n, rt_attached; // table size, distinct (pc,bytes) variants, those with a ROM source
 } DpResults;
 
@@ -451,6 +453,7 @@ struct DpExplorer {
     uint8_t cur_tier, defer_tier_next;
     uint8_t defer_tier_limit; // frontier drain: only tiers <= limit resume (0 = all)
     uint64_t steps_own;  // fork-explorer steps (the wall); sessions share res->steps_total
+    uint32_t wram_taint[0x2000]; // WRAM byte -> 1 + ROM index of the last ROM data read before it was written (0 = none)
     uint32_t last_rom_key; uint8_t last_rom_val; int last_rom_valid; // last ROM data read (APU typing)
     uint8_t hdma[4];  // HDMA1-4 as last written (source / destination of a CGB HDMA)
     int last_io_slot; // io registry slot of the last register write (copy attribution)
@@ -529,7 +532,7 @@ void dp_record_copy(DpExplorer *ex, const DpCopyRec *rec, uint32_t attrib_key);
 void dp_copy_on_rom_read(DpExplorer *ex, uint8_t bank, uint16_t addr, uint8_t v);
 void dp_copy_on_vram_write(DpExplorer *ex, uint8_t bank, uint16_t addr, uint8_t v);
 void dp_copy_flush_for_exec(DpExplorer *ex, uint16_t pc);
-void dp_rtcode_add(DpResults *res, uint16_t pc, const uint8_t *b, int len, int32_t rom_src);
+void dp_rtcode_add(DpResults *res, uint16_t pc, const uint8_t *b, int len, int32_t rom_src, int32_t derived);
 DpRtCode *dp_rtcode_sorted(const DpResults *res, uint32_t *n);
 void dp_copy_on_wram_write(DpExplorer *ex, uint16_t addr, uint8_t v);
 void dp_copy_on_back_edge(DpCopyTracker *ct, uint16_t site, uint32_t site_key);
