@@ -224,3 +224,8 @@ add_executable(test_sega_coverage test_sega_coverage.c)
 target_link_libraries(test_sega_coverage PRIVATE deepeel_sega)
 add_test(NAME sega_coverage COMMAND test_sega_coverage)
 add_test(NAME frontier_cli COMMAND ${CMAKE_COMMAND} -E env SEGA_ROM=${CMAKE_CURRENT_BINARY_DIR}/fix_sega_mapper.sms sh ${CMAKE_CURRENT_SOURCE_DIR}/frontier_cli.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_branch.gb)
+
+add_executable(test_dpmachine test_dpmachine.c)
+target_link_libraries(test_dpmachine PRIVATE deepeel_core m)
+add_dependencies(test_dpmachine fixtures)
+add_test(NAME dpmachine COMMAND test_dpmachine ${CMAKE_CURRENT_BINARY_DIR})

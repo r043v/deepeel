@@ -862,3 +862,7 @@ encore de frontière disque. Chiffres = observations de l'outil.
 - PCE verse l'état décompressé et le recompresse au rechargement (taille variable, incompatible avec un delta XOR fixe).
 - Tests : drain MD (`test_md_explore`), drain Sega (`frontier_cli`). Observations de l'outil, pas des mesures matériel.
 - Les lots portables s'écrivent en `.dpf` (même magie `DPFB` que les lots GB) ; tests de drain NES/PCE ajoutés.
+
+## 0.43.0
+
+- J3 (début) : `src/core/dpmachine.h` définit `DpIsa` et `DpMachine`. Le SM83 et le backend GB (m0boy) les implémentent ; la closure GB classe le flot des instructions par l'ISA. Pas de changement de rapport attendu ; test `dpmachine`. Le reste de J3 (extraction du noyau) est ouvert.

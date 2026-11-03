@@ -11,6 +11,7 @@
 // seeded as speculative exploration (dp_closure_seed), so the ambiguity
 // becomes bounded forks instead of a dead end.
 #include "explorer.h"
+#include "../core/dpmachine.h"
 #include "../cpu/sm83/sm83.h"
 
 #include <stdlib.h>
@@ -125,7 +126,7 @@ uint32_t dp_static_closure(DpResults *res) {
         uint32_t pc = bank ? 0x4000 + off : off;
         if (k >= c->rom_size) continue;
         uint8_t op = c->rom[k];
-        int len = sm83_len(op);
+        int len = dp_isa_sm83()->length(op);
         if (k + (uint32_t)len > c->rom_size) continue;
         int executed = (res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED)) != 0;
         if (!executed) {
@@ -153,27 +154,11 @@ uint32_t dp_static_closure(DpResults *res) {
         // successors: executed or trusted code hands trust to its targets and
         // to its fall-through, except after a call (inline data idiom)
         uint8_t tr = (uint8_t)(executed || it.trust);
-        int is_call = op == 0xCD || op == 0xC4 || op == 0xCC || op == 0xD4 || op == 0xDC ||
-                      (op & 0xC7) == 0xC7;
-        int target = -1;          // absolute address of a direct transfer
-        int fall = 1;
-        switch (op) {
-        case 0x18: case 0x20: case 0x28: case 0x30: case 0x38:
-            target = (int)((pc + 2 + (int8_t)c->rom[k + 1]) & 0xFFFF);
-            fall = op != 0x18;
-            break;
-        case 0xC3: case 0xC2: case 0xCA: case 0xD2: case 0xDA:
-        case 0xCD: case 0xC4: case 0xCC: case 0xD4: case 0xDC:
-            target = c->rom[k + 1] | (c->rom[k + 2] << 8);
-            fall = op != 0xC3;
-            break;
-        case 0xC9: case 0xD9: case 0xE9:
-            fall = 0;
-            break;
-        default:
-            if ((op & 0xC7) == 0xC7) target = op & 0x38; // RST
-            break;
-        }
+        DpFlowInfo fi;
+        dp_isa_sm83()->flow(&c->rom[k], (uint16_t)pc, &fi);
+        int is_call = fi.call;
+        int target = fi.target;    // absolute address of a direct transfer
+        int fall = fi.fall;
         if (target >= 0) {
             uint32_t tk = ~0u;
             uint16_t thint = it.hint;
