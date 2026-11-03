@@ -1379,7 +1379,12 @@ cleanup:
     if(x.queue) for(uint32_t i=0;i<x.queued;i++) free_path(x.queue[i]);
     if(x.input_queue) for(uint32_t i=0;i<x.input_queued;i++) free_path(x.input_queue[i]);
     r->defer_pending+=x.defer_n;
-    for(uint32_t i=0;i<x.defer_n;i++) free_path(x.defer[i]);
+    // deferred states still waiting go to the spool (resumable by --resume); the
+    // tier is not persisted by the spool record, a resumed state restarts at tier 0
+    for(uint32_t i=0;i<x.defer_n;i++) {
+        if(x.spool && spool_write_path(&x,&x.defer[i],1)) r->defer_spooled++;
+        free_path(x.defer[i]);
+    }
     free(x.defer); free(x.queue); free(x.forks); free(x.sides); free(x.irq_forks); free(x.cart); free(image);
     r->loop_context_peak=visits.peak; r->loop_context_capacity=visits.capacity; r->loop_context_growths=visits.growths;
     dp_sega_visits_free(&visits);
@@ -1476,7 +1481,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     DP_MR_SUM(steps); DP_MR_SUM(paths); DP_MR_SUM(forks); DP_MR_SUM(irq_forks);
     DP_MR_SUM(exec_outside); DP_MR_SUM(data_reads); DP_MR_SUM(vdp_copies); DP_MR_SUM(ram_copies);
     DP_MR_SUM(steps_deferred); DP_MR_SUM(loop_deferred); DP_MR_SUM(defer_resumed); DP_MR_SUM(steps_final);
-    DP_MR_SUM(loop_final); DP_MR_SUM(defer_dropped); DP_MR_SUM(defer_pending); DP_MR_SUM(fork_deferred); DP_MR_SUM(fork_final);
+    DP_MR_SUM(loop_final); DP_MR_SUM(defer_dropped); DP_MR_SUM(defer_pending); DP_MR_SUM(fork_deferred); DP_MR_SUM(defer_spooled); DP_MR_SUM(fork_final);
     DP_MR_SUM(step_cuts); DP_MR_SUM(loop_cuts); DP_MR_SUM(fork_cuts); DP_MR_SUM(queue_cuts);
     DP_MR_SUM(global_cuts); DP_MR_SUM(path_cuts); DP_MR_SUM(faults); DP_MR_SUM(decode_cuts);
     DP_MR_SUM(stagnation_cuts);

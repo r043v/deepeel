@@ -1,3 +1,4 @@
+#include <unistd.h>
 #include "../src/platform/sega/backend.h"
 #include "../src/platform/sega/explore.h"
 #include "test_util.h"
@@ -91,6 +92,15 @@ static void fork_deferral(void) {
     CHECK(dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r));
     CHECK(r.fork_deferred>0 && r.defer_pending==0 && (r.flags[0x103]&DP_SEGA_FORCED));
     dp_sega_results_free(&r);
+    {   // a wall with deferred forks still waiting: they are spooled, not lost
+        char sp[]="/tmp/dp_sega_deferXXXXXX"; int fd=mkstemp(sp); CHECK(fd>=0); if(fd>=0) close(fd);
+        o.spool_path=sp; o.max_total=3;
+        int ok=dp_sega_explore(dp_sega_system("sms"),rom,0x10000,&o,&r);
+        CHECK(ok);
+        if(ok) { CHECK(r.defer_pending==0 || r.defer_spooled==r.defer_pending); dp_sega_results_free(&r); }
+        o.spool_path=NULL; o.max_total=100000;
+        unlink(sp);
+    }
     free(rom);
 }
 static void exploration(void) {

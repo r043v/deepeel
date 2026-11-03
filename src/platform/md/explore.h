@@ -59,6 +59,7 @@ typedef struct {
     uint64_t sat_site;         /* forks dropped, per-site cap */
     uint64_t fork_seen;        /* alternative already executed/queued (not a loss) */
     uint64_t fork_off_rom;     /* alternative target outside the ROM */
+    uint64_t parked, parked_resumed, parked_lost; /* queue-full forks held aside (§6) */
     uint64_t dropped_pending;  /* forks left unrun when the total budget ended */
     uint64_t faults;
     DpMdFaultSite fault_sites[DP_MD_FAULT_SITE_CAP];

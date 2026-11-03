@@ -833,3 +833,11 @@ encore de frontière disque. Chiffres = observations de l'outil.
 - JSON : `frontier.inbox_dropped` (inbox de sessions pleine).
 - Sega : `fork_deferred`/`fork_final` (plafond de chemins, file pleine).
 - Les anciens spools `DPSR` restent lus tels quels (pas de conversion nécessaire).
+
+## 0.39.0
+
+- NES / PCE / MD : une file pleine ne jette plus l'état, il attend dans une zone
+  bornée (4096) et reprend quand la file est vide ; compteurs `parked`,
+  `parked_resumed`, `parked_lost` dans le rapport texte.
+- Sega/MSX : les reports encore en attente en fin de run sont écrits dans le
+  spool (`defer_spooled`).

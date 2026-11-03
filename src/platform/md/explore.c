@@ -23,6 +23,8 @@ typedef struct {
     DpMdMach *m;
     Item *q;
     uint32_t nq, qcap;
+    Item *park; uint32_t npark, parkcap; // deferred holding area (queue full)
+    void *last_state;   // blob of the state the last push() produced (queued or parked)
     uint32_t *gen;       /* per even rom address: path generation */
     uint32_t *vis;       /* per even rom address: visits in that generation */
     uint32_t *site;      /* per even rom address: forks made from that site */
@@ -93,21 +95,32 @@ static void mark(X *x, uint32_t pc, unsigned len) {
 }
 
 static int push(X *x, uint32_t pc, int vint, int hint) {
+    int full = 0;
     if (x->nq >= x->qcap) {
         uint32_t limit = x->o->queue_max > x->qcap ? x->o->queue_max : x->qcap;
         uint32_t ncap = x->qcap > limit / 2 ? limit : x->qcap * 2;
         if (!ncap && limit) ncap = 1;
-        if (ncap <= x->qcap) { x->r->sat_queue++; return 0; }
-        Item *q = realloc(x->q, (size_t)ncap * sizeof *q);
-        if (!q) { x->r->sat_queue++; return 0; }
-        x->q = q; x->qcap = ncap; x->r->queue_growths++;
+        Item *q = ncap > x->qcap ? realloc(x->q, (size_t)ncap * sizeof *q) : NULL;
+        if (!q) { // saturation counted; the state waits aside instead of dying (§6)
+            x->r->sat_queue++;
+            if (x->npark >= 4096) { x->r->parked_lost++; return 0; }
+            if (x->npark == x->parkcap) {
+                uint32_t nc = x->parkcap ? x->parkcap * 2 : 64;
+                Item *g = realloc(x->park, (size_t)nc * sizeof *g);
+                if (!g) { x->r->parked_lost++; return 0; }
+                x->park = g; x->parkcap = nc;
+            }
+            full = 1;
+        } else { x->q = q; x->qcap = ncap; x->r->queue_growths++; }
     }
     void *s = malloc(ssz);
     if (!s) { x->r->sat_queue++; return 0; }
     dp_mdmach_save(x->m, s);
     dp_mdmach_state_set_pc(s, pc);
     dp_mdmach_state_set_irq(s, vint, hint);
-    Item *item = &x->q[x->nq++];
+    Item *item = full ? &x->park[x->npark++] : &x->q[x->nq++];
+    if (full) x->r->parked++;
+    x->last_state = s;
     item->state = s; item->forced = 1; item->origin = x->pc;
     memcpy(item->an_writer, x->an_writer, sizeof item->an_writer);
     item->watch_pc = x->watch_pc; item->watch_addr = x->watch_addr;
@@ -252,7 +265,7 @@ static void on_end(void *u, uint32_t pc, uint32_t next, unsigned len) {
         for (unsigned i = 0; i < sizeof pads; i++) {
             uint8_t bit = (uint8_t)(1u << i);
             if (!(*seen & bit) && push(x, next & 0xFFFFFFu, 0, 0)) {
-                dp_mdmach_state_set_pad(x->q[x->nq - 1].state, pads[i]);
+                dp_mdmach_state_set_pad(x->last_state, pads[i]);
                 *seen |= bit;
                 r->pad_forks++;
             }
@@ -272,9 +285,9 @@ static void on_end(void *u, uint32_t pc, uint32_t next, unsigned len) {
         x->site[si]++;
         r->forks++;
         if (in.cls == DP_M68K_BCC)
-            dp_mdmach_state_force_cc(x->q[x->nq - 1].state, x->c->rom[pc] & 15, alt != fall);
+            dp_mdmach_state_force_cc(x->last_state, x->c->rom[pc] & 15, alt != fall);
         if (in.cls == DP_M68K_DBCC)
-            dp_mdmach_state_force_dbcc(x->q[x->nq - 1].state, (unsigned)in.cond,
+            dp_mdmach_state_force_dbcc(x->last_state, (unsigned)in.cond,
                                        x->c->rom[pc + 1] & 7, alt != fall,
                                        x->dbcc_dn_before, x->sr_before);
     }
@@ -572,13 +585,16 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     r->decoders = x.ndec;
     if (r->steps < o->max_total) replay_streams(&x, (o->max_total - r->steps) / 2);
     for (unsigned d = 0; d < x.ndec; d++) free(x.dec[d].snap);
-    while (x.nq) {
+    while (x.nq || x.npark) {
         if (r->steps >= o->max_total) break;
+        if (!x.nq) { x.q[x.nq++] = x.park[--x.npark]; r->parked_resumed++; }
         Item it = x.q[--x.nq];
         run_path(&x, &it, o->max_total - r->steps, &cut);
         free(it.state);
     }
-    r->dropped_pending = x.nq;
+    r->dropped_pending = x.nq + x.npark;
+    for (uint32_t i = 0; i < x.npark; i++) free(x.park[i].state);
+    free(x.park);
     for (uint32_t i = 0; i < x.nq; i++) free(x.q[i].state);
     for (size_t i = 0; i < c->size; i++) {
         uint8_t f = r->flags[i];
@@ -624,6 +640,8 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     if (o->movie) fprintf(out, "GMV replay: %u / %u frames%s\n", r->movie_frames, o->movie->frames,
                           r->movie_frames == o->movie->frames ? "" : " (incomplete)");
     fprintf(out, "saturation (a non-zero line means the exploration is incomplete):\n");
+    fprintf(out, "  frontier: parked %llu resumed %llu lost %llu\n", (unsigned long long)r->parked,
+            (unsigned long long)r->parked_resumed, (unsigned long long)r->parked_lost);
     fprintf(out, "  total budget: %llu  pending forks unrun: %llu\n", (unsigned long long)r->sat_total,
             (unsigned long long)r->dropped_pending);
     fprintf(out, "  path budget: %llu  loop bound: %llu\n", (unsigned long long)r->sat_path,

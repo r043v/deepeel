@@ -91,6 +91,7 @@ typedef struct {
     uint64_t seeds_reset, seeds_irq, seeds_bank, seeds_refused_queue;
     uint64_t play_frames_run, play_sessions_run, play_steps_accounted, seeds_play;
     uint64_t evicted;          // exact-state dedup admissions refused
+    uint64_t parked, parked_resumed, parked_lost; // queue-full states held aside (§6), resumed, lost at the holding cap
     uint64_t pending_dropped;  // queued states left undrained at a wall
     uint64_t ram_writes, io_writes, io_writes_io_reg[32];
     uint64_t io_reg_writes[256]; // $2000-$2007 + $4000-$401F + mapper pages collapsed

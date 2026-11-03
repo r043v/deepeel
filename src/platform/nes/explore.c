@@ -38,6 +38,7 @@ typedef struct {
     DpNesResults *r;
     DpNesPathState *queue;
     uint32_t queue_len, queue_cap;
+    DpNesPathState *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
     DpHashSet seen;                    // exact state dedup
     DpNesLoop *loops;                  // back-branch counters
     size_t loop_len, loop_cap;
@@ -351,6 +352,18 @@ static int queue_push(DpNesRun *x, const DpNesPathState *s) {
 static int snap_push(DpNesRun *x, DpNesPathState *s) {
     uint64_t h = dp_nesmach_state_hash(s->state);
     if (!dp_set_insert(&x->seen, h)) { x->r->evicted++; free(s->state); return 0; }
+    if (x->queue_len >= x->opt.queue_cap) {
+        // a full queue is not a loss: the state waits aside (bounded, counted)
+        if (x->park_len < 4096) {
+            if (x->park_len == x->park_cap) {
+                uint32_t nc = x->park_cap ? x->park_cap * 2 : 64;
+                DpNesPathState *g = realloc(x->park, nc * sizeof *g);
+                if (g) { x->park = g; x->park_cap = nc; }
+            }
+            if (x->park_len < x->park_cap) { x->park[x->park_len++] = *s; x->r->parked++; return 0; }
+        }
+        x->r->parked_lost++;
+    }
     if (!queue_push(x, s)) { x->r->seeds_refused_queue++; free(s->state); return 0; }
     return 1;
 }
@@ -609,7 +622,8 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
             DpNesPathState root = { snap, 0, 0, 0, 0, 0 };
             r->seeds_reset = 1;
             queue_push(&x, &root);
-            while (x.queue_len > 0 && !x.failed) {
+            while ((x.queue_len > 0 || x.park_len > 0) && !x.failed) {
+                if (x.queue_len == 0) { x.queue[x.queue_len++] = x.park[--x.park_len]; r->parked_resumed++; }
                 uint32_t slot = x.queue_len - 1;
                 run_path(&x, slot);
                 // the slot is drained (run_path cleared its state); the
@@ -629,6 +643,8 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
         if (x.queue[i].state) r->pending_dropped++;
         free(x.queue[i].state);
     }
+    for (uint32_t i = 0; i < x.park_len; i++) { r->pending_dropped++; free(x.park[i].state); }
+    free(x.park);
     free(x.queue);
     free(x.loops);
     free(x.fork_sites);
@@ -696,6 +712,8 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->exec_outside);
     fprintf(out, "  play: %llu sessions x frames %llu\n",
         (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run);
+    fprintf(out, "  frontier: parked %llu resumed %llu lost %llu\n", (unsigned long long)r->parked,
+        (unsigned long long)r->parked_resumed, (unsigned long long)r->parked_lost);
     fprintf(out, "  pending paths dropped at the wall %llu\n",
         (unsigned long long)r->pending_dropped);
     fprintf(out, "  seeds: reset %llu irq %llu bank %llu play %llu refused %llu\n",

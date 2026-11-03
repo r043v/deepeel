@@ -44,6 +44,7 @@ typedef struct {
     size_t rom_size;
     PceQueued *queue;
     uint32_t queue_len;
+    PceQueued *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
     uint64_t *seen;        // open-addressed dedup set
     size_t seen_cap, seen_len;
     uint8_t *fork_sites, *pad_sites, *irq_sites; // per-cell counters (saturating)
@@ -216,13 +217,25 @@ static int seen_insert(PceRun *x, uint64_t h) {
 static int push_live(PceRun *x, int forced) {
     DpPceResults *r = x->r;
     if (!seen_insert(x, dp_pce_state_hash())) { r->evicted++; return 0; }
-    if (x->queue_len >= x->opt.queue_cap) { r->queue_cuts++; return 0; }
+    int full = x->queue_len >= x->opt.queue_cap;
+    if (full && x->park_len >= 4096) { r->queue_cuts++; r->parked_lost++; return 0; }
     dp_pce_save(x->tmp2);
     uLongf zl = x->zcap;
     if (compress2(x->ztmp, &zl, x->tmp2, x->state_size, 1) != Z_OK) { x->failed = 1; return 0; }
     uint8_t *z = malloc(zl);
     if (!z) { x->failed = 1; return 0; }
     memcpy(z, x->ztmp, zl);
+    if (full) { // a full queue is not a loss: the state waits aside (bounded, counted)
+        if (x->park_len == x->park_cap) {
+            uint32_t nc = x->park_cap ? x->park_cap * 2 : 64;
+            PceQueued *g = realloc(x->park, nc * sizeof *g);
+            if (!g) { free(z); r->queue_cuts++; r->parked_lost++; return 0; }
+            x->park = g; x->park_cap = nc;
+        }
+        x->park[x->park_len].z = z; x->park[x->park_len].zlen = zl; x->park[x->park_len].forced = (uint8_t)forced;
+        x->park_len++; r->parked++;
+        return 1;
+    }
     x->queue[x->queue_len].z = z;
     x->queue[x->queue_len].zlen = zl;
     x->queue[x->queue_len].forced = (uint8_t)forced;
@@ -981,7 +994,8 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     novelty_search(x);
 
     // depth-first drain of the fork queue
-    while (x->queue_len && !x->failed) {
+    while ((x->queue_len || x->park_len) && !x->failed) {
+        if (!x->queue_len) { x->queue[x->queue_len++] = x->park[--x->park_len]; r->parked_resumed++; }
         if (x->total_steps >= x->opt.max_total) { r->global_cuts++; break; }
         PceQueued q = x->queue[--x->queue_len];
         run_path(x, q);
@@ -997,7 +1011,9 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
 
     dp_pce_observe(NULL);
     // states still queued when the global wall stopped the drain: counted
-    r->pending_dropped += x->queue_len;
+    r->pending_dropped += x->queue_len + x->park_len;
+    for (uint32_t i = 0; i < x->park_len; i++) free(x->park[i].z);
+    free(x->park);
     for (uint32_t i = 0; i < x->queue_len; i++) free(x->queue[i].z);
     free(x->queue);
     free(x->seen);
@@ -1077,6 +1093,8 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             (unsigned long long)r->fork_cuts, (unsigned long long)r->pad_fork_cuts,
             (unsigned long long)r->irq_fork_cuts, (unsigned long long)r->queue_cuts,
             (unsigned long long)r->global_cuts, (unsigned long long)r->illegal_cuts);
+    fprintf(out, "  frontier: parked %llu resumed %llu lost %llu\n", (unsigned long long)r->parked,
+            (unsigned long long)r->parked_resumed, (unsigned long long)r->parked_lost);
     fprintf(out, "  pending paths dropped at the wall %llu\n", (unsigned long long)r->pending_dropped);
     fprintf(out, "  data reads %llu, VDC data writes %llu, ROM->VRAM bytes %llu, io writes %llu\n",
             (unsigned long long)r->data_reads, (unsigned long long)r->vdc_data_writes,

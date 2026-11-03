@@ -83,6 +83,7 @@ typedef struct {
     uint64_t forced_paths, evicted, faults, illegal_cuts;
     uint64_t step_cuts, loop_cuts, fork_cuts, pad_fork_cuts, irq_fork_cuts, queue_cuts,
              global_cuts;
+    uint64_t parked, parked_resumed, parked_lost; // queue-full states held aside (§6)
     uint64_t pending_dropped;  // queued states left undrained at the global wall
     uint64_t play_frames_run, play_sessions_run, tas_frames_run;
     uint64_t novelty_trials, novelty_hits, novelty_archived, novelty_replaced, novelty_frames_run,

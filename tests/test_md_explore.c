@@ -133,6 +133,18 @@ int main(int argc, char **argv) {
         dp_md_results_free(&r); dp_md_cart_free(&c);
     }
 
+    {   // saturated queue: forks wait aside and run later, same coverage (§6)
+        char path[512], err[128];
+        snprintf(path, sizeof path, "%s/fix_md_pad.md", dir);
+        CHECK(dp_md_cart_load(&c, path, err, sizeof err) == 0);
+        DpMdOptions o;
+        dp_md_options_default(&o);
+        o.queue_cap = 1; o.queue_max = 1; o.max_total = 100000;
+        CHECK(dp_md_explore(&c, &o, &r) == 0);
+        CHECK(r.sat_queue > 0 && r.parked > 0 && r.parked_resumed == r.parked && r.parked_lost == 0 && r.pad_forks == 4);
+        dp_md_results_free(&r); dp_md_cart_free(&c);
+    }
+
     {
         char path[512], err[128];
         snprintf(path, sizeof path, "%s/fix_md_pad_effect.md", dir);
