@@ -162,6 +162,32 @@ uint8_t dp_pce_peek(uint16_t addr) {
     return 0xFF;
 }
 
+// --- multitap (opt-in): the five-pad adapter, as the tool models it.  CLR (bit 1 of the
+// $1000 write) high resets the scan to pad 1; each rising SEL while CLR is low steps to the
+// next pad (up to 5); a read returns the current pad's nibble chosen by SEL.  The scan
+// state is kept beside the machine, outside the snapshot: it is an observation model, not
+// a hardware measurement, and forks that read the port restart from the scan they find.
+static int tap_on, tap_idx, tap_prev_sel;
+static uint8_t tap_pad[5];
+void dp_pce_multitap(int on) { tap_on = on; tap_idx = 0; tap_prev_sel = 0; }
+void dp_pce_pad_n(unsigned n, uint8_t buttons) { if (n < 5) tap_pad[n] = buttons; }
+unsigned dp_pce_tap_index(void) { return (unsigned)tap_idx; }
+uint8_t dp_pce_pad_port_read(void) {
+    if (!tap_on) return dp_pce_hw_read(0x1000);
+    uint8_t in = tap_idx ? tap_pad[tap_idx] : machine.input;
+    unsigned nibble = machine.pad_sel ? (in >> 4) & 0x0F : in & 0x0F;
+    return (uint8_t)((0x0F ^ nibble) | 0x30 | 0x80);
+}
+void dp_pce_pad_port_write(uint8_t v) {
+    if (tap_on) {
+        int sel = v & 1, clr = (v >> 1) & 1;
+        if (clr) tap_idx = 0;
+        else if (sel && !tap_prev_sel && tap_idx < 4) tap_idx++;
+        tap_prev_sel = sel;
+    }
+    dp_pce_hw_write(0x1000, v);
+}
+
 uint8_t pce_bus_read(uint16_t at) {
     uint8_t v = machine.cpu.mpr[at >> 13];
     if (page_valid[v]) {
@@ -170,7 +196,7 @@ uint8_t pce_bus_read(uint16_t at) {
         return rom[cell];
     }
     if (v == 0xFF) {
-        uint8_t r = dp_pce_hw_read(at & 0x1FFF);
+        uint8_t r = (at & 0x1C00) == 0x1000 ? dp_pce_pad_port_read() : dp_pce_hw_read(at & 0x1FFF);
         if (obs.io_read) obs.io_read(obs.user, at & 0x1FFF, r);
         return r;
     }
@@ -181,7 +207,8 @@ void pce_bus_write(uint16_t at, uint8_t v) {
     uint8_t page = st_port ? 0xFF : machine.cpu.mpr[at >> 13];
     if (page == 0xFF) {
         if (obs.io_write) obs.io_write(obs.user, at & 0x1FFF, v);
-        dp_pce_hw_write(at & 0x1FFF, v);
+        if ((at & 0x1C00) == 0x1000) dp_pce_pad_port_write(v);
+        else dp_pce_hw_write(at & 0x1FFF, v);
     }
     // ROM pages and open bus ignore writes (HuCards without a mapper)
 }

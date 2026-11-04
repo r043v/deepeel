@@ -69,6 +69,31 @@ static void test_bridge(const uint8_t *rom) {
     dp_pce_close();
 }
 
+static void test_multitap(const uint8_t *rom) {
+    CHECK(dp_pce_init(rom, ROM_SIZE), "init");
+    dp_pce_input(0x01);                 // pad 1: I
+    dp_pce_pad_n(1, 0x02);              // pad 2: II
+    dp_pce_pad_n(2, 0x04);              // pad 3: Select
+    uint8_t a = dp_pce_pad_port_read();
+    dp_pce_multitap(1);
+    dp_pce_pad_port_write(0x03);        // SEL+CLR: scan to pad 1
+    dp_pce_pad_port_write(0x00);
+    uint8_t p1 = dp_pce_pad_port_read();
+    CHECK(dp_pce_tap_index() == 0 && (p1 & 0x0F) == (0x0F ^ 0x01), "pad 1 nibble %02x", p1);
+    dp_pce_pad_port_write(0x01);        // SEL rises with CLR low: pad 2
+    dp_pce_pad_port_write(0x00);
+    CHECK(dp_pce_tap_index() == 1, "pad 2 selected");
+    uint8_t p2 = dp_pce_pad_port_read();
+    CHECK((p2 & 0x0F) == (0x0F ^ 0x02), "pad 2 nibble %02x", p2);
+    dp_pce_pad_port_write(0x01); dp_pce_pad_port_write(0x00);
+    CHECK(dp_pce_tap_index() == 2 && (dp_pce_pad_port_read() & 0x0F) == (0x0F ^ 0x04), "pad 3");
+    dp_pce_pad_port_write(0x02);        // CLR: back to pad 1
+    CHECK(dp_pce_tap_index() == 0, "CLR resets the scan");
+    dp_pce_multitap(0);
+    CHECK(dp_pce_pad_port_read() == a, "adapter off: the plain pad again");
+    dp_pce_close();
+}
+
 static void test_explore(const uint8_t *rom) {
     DpPceOptions o = dp_pce_options();
     o.max_total = 2000000;
@@ -298,6 +323,7 @@ int main(void) {
     build(rom);
     test_decoder();
     test_bridge(rom);
+    test_multitap(rom);
     test_explore(rom);
     test_palette(rom);
     test_index(rom);

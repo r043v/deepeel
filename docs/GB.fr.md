@@ -2265,3 +2265,10 @@ Omis au-delà de ~4 Mo de ROM. Extraction : `deepeel mapx carte.png out --chunk 
 à un deflate incrémental (niveau 9) et les IDAT sortent par blocs de 64 Kio. Flux identique octet pour
 octet à l'ancien `compress2`. Le tampon RVB de la grille reste complet (au plus le budget de pixels, 16 M
 par défaut) : le rendu par rangée de tuiles du §9.2 n'est donc que partiel.
+
+## 0.155.0 (J9 — multitap PCE)
+
+Le pont PCE modélise l'adaptateur 5 manettes, désactivé par défaut (`dp_pce_multitap(1)`). Les écritures
+`$1000` pilotent un balayage (CLR haut → pad 1 ; SEL montant avec CLR bas → pad suivant) ; la lecture rend
+le quartet du pad courant selon SEL. C'est un modèle de l'outil, pas une mesure de matériel : le balayage
+n'est pas dans le snapshot et l'exploration n'ouvre pas encore de fourches par pad. Test `pce` (`test_multitap`).

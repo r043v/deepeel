@@ -93,6 +93,11 @@ unsigned dp_pce_step(int *frame_done);
 void dp_pce_raise(int source);
 void dp_pce_input(uint8_t buttons);  // PCE_BTN_* layout of m0boy
 uint8_t dp_pce_input_get(void);
+void dp_pce_multitap(int on);                    // five-pad adapter model (opt-in, scan outside the snapshot)
+void dp_pce_pad_n(unsigned n, uint8_t buttons);  // pads 2..5 (n = 1..4); pad 1 is dp_pce_input
+unsigned dp_pce_tap_index(void);
+uint8_t dp_pce_pad_port_read(void);
+void dp_pce_pad_port_write(uint8_t v);
 uint32_t dp_pce_frames(void);
 void dp_pce_watch_enable(int on);               // capture the VDC rows (costs time: off by default)
 void dp_pce_set_frame_hook(void (*fn)(void));   // called when a frame completes in dp_pce_step
