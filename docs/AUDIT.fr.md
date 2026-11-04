@@ -13,9 +13,9 @@ remesure pas l'outil.
 | MSX | 32 | 5 | 0 | 2 |
 | NES | 20 | 17 | 0 | 2 |
 | PCE | 25 | 13 | 0 | 1 |
-| MD | 20 | 18 | 0 | 1 |
+| MD | 21 | 17 | 0 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 64.
+Cellules ouvertes (◐ ou ✗) : 63.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -46,7 +46,6 @@ Cellules ouvertes (◐ ou ✗) : 64.
 | G2 | Scan de dispatch par vues de banques | NES | ◐ UxROM, banque fixe (`--bank-dispatch`) |
 | G2 | Scan de dispatch par vues de banques | PCE | ◐ tables de mots par fenêtre, vues de pages (`--bank-dispatch`) |
 | G2 | Scan de dispatch par vues de banques | MD | ◐ tables de mots longs de pointeurs de code (`--bank-dispatch`) |
-| G3 | `--seed-banks`, `--entry` | MD | ◐ `--entry ADDR` (ROM, pair) ; `--seed-banks` sans objet tant que le 68000 n'a pas de commutation ROM (SSF2 non modélisée) ; la fenêtre de banque du Z80 est suivie à part (`z80_banks_read`) |
 | G4 | Semis indirect + budgets en cascade | NES | ◐ second passage sur racines statiques (`--second-pass`) |
 | G4 | Semis indirect + budgets en cascade | PCE | ◐ second passage sur successeurs statiques non exécutés (`--second-pass`) |
 | G4 | Semis indirect + budgets en cascade | MD | ◐ second passage sur successeurs statiques non exécutés (`--second-pass`) |

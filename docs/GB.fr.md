@@ -3589,3 +3589,9 @@ de 256 octets dont le bit est levé (test `nes` `test_ctx_projection`). Elle n'e
 `nes_ctx_cap` pose que ce mode exclut toute la RAM, et le brancher sur la liveness par instruction (0.249.24) le rendait plus
 fin (plus d'éviction sur sa fixture). Le branchement sûr demande la liveness par section entière, calculée avant l'éviction
 (les sections ne sont construites qu'à la fin du run) : C2 NES reste ◐.
+
+## 0.249.27 (G3 MD ✅)
+
+G3 MD : `--entry ADDR` est fait ; `--seed-banks` est sans objet tant que la machine MD ne modélise pas de commutation de banque
+ROM du 68000 (SSF2 non modélisée, la fenêtre de banque du Z80 est suivie à part). La cellule passe ✅ sur ce périmètre ;
+elle sera rouverte si SSF2 est modélisée. Aucun changement de code.
