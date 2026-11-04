@@ -41,4 +41,8 @@ void stream_read(DpExplorer *ex, uint16_t a);
 int stream_replay(DpExplorer *ex);
 void stream_poll(DpExplorer *ex);
 
+
+// image save/load that also carry the explorer-side SGB packet decoder state (trailer after the machine bytes)
+void ex_save(DpExplorer *ex, DpMach *m, uint8_t *img);
+void ex_load(DpExplorer *ex, DpMach *m, const uint8_t *img);
 #endif

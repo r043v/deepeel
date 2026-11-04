@@ -3,6 +3,7 @@
 #include "../src/core/cart.h"
 #include "../src/core/snapshot_png.h"
 #include "../src/explore/explorer.h"
+#include "../src/explore/explorer_priv.h"
 #include "../src/report/report.h"
 #include "mach_util.h"
 #include <unistd.h>
@@ -125,6 +126,21 @@ int main(int argc, char **argv) {
     // --- SGB: a command packet written on P1 is decoded
     run(dir, "sgb");
     CHECK(res.sgb_packets >= 1 && res.sgb_cmd[0x11] >= 1);
+    {   // a fork taken mid-packet resumes the decoder where it stood (state rides in the image trailer)
+        DpConfig c2; dp_config_defaults(&c2);
+        DpExplorer *e2 = dp_explorer_new(&c2, &res, g_mach);
+        uint8_t *img = malloc(e2->sb);
+        e2->sgb_bit = 37; memset(e2->sgb_buf, 0xA5, sizeof e2->sgb_buf);
+        ex_save(e2, g_mach, img);
+        e2->sgb_bit = -1; memset(e2->sgb_buf, 0, sizeof e2->sgb_buf);
+        ex_load(e2, g_mach, img);
+        CHECK(e2->sgb_bit == 37 && e2->sgb_buf[15] == 0xA5);
+        memset(img + e2->mb, 0, 8);   // an image with no trailer reads as idle
+        ex_load(e2, g_mach, img);
+        CHECK(e2->sgb_bit == -1);
+        free(img);
+        dp_explorer_free(e2);
+    }
 
     // --- S6: a decoder called with HL from a pointer table; the unplayed stream is replayed
     run(dir, "streams");

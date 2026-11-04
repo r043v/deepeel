@@ -2291,7 +2291,7 @@ les limites, pas par une émulation.
 Un décodeur observe les écritures `$FF00` : impulsion `00` (début), 128 bits LSB d'abord (`10` = 1,
 `20` = 0, chacun suivi de `30`), bit d'arrêt. Le rapport liste « SGB packets on P1 » avec le compte par
 commande (octet 0 >> 3). Observation seule : aucune bordure ni palette SGB n'est rendue ni typée ; l'état
-du décodeur est par explorateur (non restauré par les fourches). Test `explorer` (fixture `sgb`).
+du décodeur est par explorateur (restauré par les fourches depuis 0.187.9, cf. fin du document). Test `explorer` (fixture `sgb`).
 
 ## 0.159.0 (archive RAM — événements SMC, GB)
 
@@ -2778,3 +2778,13 @@ vivants (attribution d'exécution, cibles de fourche, voies de session, flux d'a
 contractuel `mbc1m1` dans `test_explorer` (code avant le basculement en banque 0, après en banque `$20`).
 Reste : les sites qui lisent une image d'état différée (`explorer.c` graines, `frontier_disk.c`) supposent encore la
 banque 0 pour `pc < $4000` ; ils n'affectent que la priorité/dédup des graines différées d'une ROM MBC1 ≥ 1 Mio.
+
+## 0.187.9 — état du décodeur SGB porté par les images de fourche
+
+Le décodeur de paquets SGB (`sgb_bit`, `sgb_buf`, écritures sur `$FF00`) vit dans l'explorateur, pas dans la machine :
+une fourche prise en plein paquet repartait avec un décodeur au repos. Chaque image d'état porte désormais un
+trailer de 24 octets (magic `SGB1`, bit courant, 16 octets) écrit par `ex_save` et relu par `ex_load` (`explorer.c`) ;
+`ex->sb = ex->mb + 24`, le hash de dédup ne couvre que la partie machine (`ex->mb`). Une image sans trailer valide
+(autres chemins d'écriture) se lit « décodeur au repos ». Les fichiers spool/lot existants sont refusés (taille
+d'image différente) : ils se relancent à neuf. Test `explorer` : aller-retour mi-paquet et image sans trailer.
+Non fait : rendu bordure/palettes SGB et typage associé.

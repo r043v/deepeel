@@ -341,13 +341,15 @@ static void probe_site(DpResults *res, int which, uint16_t pc) {
 
 static void hook_write(DpMach *m, uint16_t a, uint8_t v);
 
+#define DP_IMG_TRAILER 24u
 DpExplorer *dp_explorer_new(const DpConfig *cfg, DpResults *res, DpMach *mach) {
     DpExplorer *ex = calloc(1, sizeof *ex);
     if (ex) ex->sgb_bit = -1;
     ex->cfg = *cfg;
     ex->res = res;
     ex->mach = mach;
-    ex->sb = dp_mach_state_bytes(mach);
+    ex->mb = (uint32_t)dp_mach_state_bytes(mach);
+    ex->sb = ex->mb + DP_IMG_TRAILER;
     ex->q_cap = cfg->queue_cap ? cfg->queue_cap : 2048;
     ex->q_max = cfg->queue_max ? cfg->queue_max : ex->q_cap * 4;
     if (ex->q_max < ex->q_cap) ex->q_max = ex->q_cap;
@@ -438,12 +440,31 @@ static uint64_t hash_lanes(uint64_t h, const uint8_t *p, size_t n) {
     return h;
 }
 
+
+// Trailer: the SGB packet decoder lives in the explorer, not in the machine, so a fork would resume
+// with the decoder idle. The magic keeps images written by other paths (no trailer) reading as idle.
+#define DP_IMG_MAGIC 0x53474231u   // "SGB1"
+void ex_save(DpExplorer *ex, DpMach *m, uint8_t *img) {
+    dp_mach_save(m, img);
+    uint8_t *t = img + ex->mb;
+    uint32_t magic = DP_IMG_MAGIC; int32_t bit = ex->sgb_bit;
+    memcpy(t, &magic, 4); memcpy(t + 4, &bit, 4); memcpy(t + 8, ex->sgb_buf, 16);
+}
+void ex_load(DpExplorer *ex, DpMach *m, const uint8_t *img) {
+    dp_mach_load(m, img);
+    const uint8_t *t = img + ex->mb;
+    uint32_t magic; int32_t bit;
+    memcpy(&magic, t, 4); memcpy(&bit, t + 4, 4);
+    if (magic == DP_IMG_MAGIC && bit >= -1 && bit <= 128) { ex->sgb_bit = bit; memcpy(ex->sgb_buf, t + 8, 16); }
+    else { ex->sgb_bit = -1; memset(ex->sgb_buf, 0, sizeof ex->sgb_buf); }
+}
+
 static uint64_t image_hash(DpExplorer *ex, const uint8_t *img) {
     // gbr.cyc/next_evt ride at the head of the image and only encode where
     // time stood: skip them so equal machine states dedup across frames
     uint64_t h = 0xcbf29ce484222325ull;
     h = hash_lanes(h, img, offsetof(gbl_cpu_t, cyc));
-    h = hash_lanes(h, img + sizeof(gbl_cpu_t), ex->sb - sizeof(gbl_cpu_t));
+    h = hash_lanes(h, img + sizeof(gbl_cpu_t), ex->mb - sizeof(gbl_cpu_t));
     h ^= h >> 32;
     return h * 0x9e3779b97f4a7c15ull;
 }
@@ -638,7 +659,7 @@ uint8_t *seed_base(DpExplorer *ex) {
     if (ex->seed_base) return ex->seed_base;
     uint8_t *img = xrealloc(NULL, ex->sb);
     dp_mach_reset(ex->mach);
-    dp_mach_save(ex->mach, img);
+    ex_save(ex, ex->mach, img);
     ex->seed_base = img;
     return img;
 }
@@ -997,7 +1018,7 @@ static void defer_cut_reason(DpExplorer *ex, DpMach *m, int reason) {
         return;
     }
     uint8_t *img = xrealloc(NULL, ex->sb);
-    dp_mach_save(m, img);
+    ex_save(ex, m, img);
     uint16_t pc = image_pc(img);
     uint16_t bank = (uint16_t)(pc < 0x4000 ? 0 : ((const gbl_cpu_t *)img)->rom_bank);
     uint32_t choice = choice_new(ex, ex->cur_choice, ex->cur_kind, dp_rom_index(bank, pc), bank, pc);
@@ -1491,7 +1512,7 @@ static int explore_step_inner(DpExplorer *ex) {
     dp_copy_reset(&ex->ct);
     dp_mach_attach(ex->mach, ex, hook_step, hook_read, hook_write, NULL);
     memset(ex->wram_taint, 0, sizeof ex->wram_taint); // producer tracking restarts per path
-    dp_mach_load(ex->mach, img); // execution starts at the image's pc
+    ex_load(ex, ex->mach, img); // execution starts at the image's pc
     free(img);
     if (p != &tmp && !from_pq && ex->sh) { // trap: a NULL written into a live ring slot?
         long idx = p - ex->queue;

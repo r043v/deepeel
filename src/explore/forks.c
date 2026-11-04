@@ -77,12 +77,12 @@ void fork_branch(DpExplorer *ex, int cond, uint32_t site, uint16_t pc, uint8_t o
     DpMach *m = ex->mach;
     uint8_t flag = dp_isa_sm83()->cond_flag(cond); // 0x80 = Z, 0x10 = C
     uint8_t *img = xrealloc(NULL, ex->sb);
-    dp_mach_save(m, img);
+    ex_save(ex, m, img);
     if (flag == 0x80) m->api->gbr->zr = m->api->gbr->zr ? 0 : 1; // Z set <=> zr == 0
     else m->api->gbr->cf ^= 1;
     uint8_t *fimg = xrealloc(NULL, ex->sb);
-    dp_mach_save(m, fimg);
-    dp_mach_load(m, img); // the natural side keeps running
+    ex_save(ex, m, fimg);
+    ex_load(ex, m, img); // the natural side keeps running
     free(img);
     // the fork keeps the reset lineage of its parent path
     uint16_t tpc = ex->mach->api->gbr->pc;
@@ -99,11 +99,11 @@ void fork_irq(DpExplorer *ex) {
     if (!pending) return;
     DpMach *m = ex->mach;
     uint8_t *img = xrealloc(NULL, ex->sb);
-    dp_mach_save(m, img);
+    ex_save(ex, m, img);
     api->io[0x0F] &= (uint8_t)~pending; // the variant: the IRQ never fires
     uint8_t *fimg = xrealloc(NULL, ex->sb);
-    dp_mach_save(m, fimg);
-    dp_mach_load(m, img);
+    ex_save(ex, m, fimg);
+    ex_load(ex, m, img);
     free(img);
     uint16_t tpc = m->api->gbr->pc;
     queue_push(ex, fimg, 1, DP_PATH_FORK,
@@ -139,15 +139,15 @@ void fork_key(DpExplorer *ex, uint32_t site) {
     // the keys the machine already holds, read back from P1 (bits low = pressed)
     DpMach *m = ex->mach;
     uint8_t *img = xrealloc(NULL, ex->sb);
-    dp_mach_save(m, img);
+    ex_save(ex, m, img);
     // the fork explorer never holds keys, so every key press is "new":
     // set_buttons raises IF bit 4, which is exactly the console behaviour
     for (int k = 0; k < 8; k++) {
-        if (k) { dp_mach_load(m, img); }
+        if (k) { ex_load(ex, m, img); }
         m->api->set_buttons(keys[k]);
         if (api->io[0x0F] & 0x10) { // this key raised the joypad IRQ
             uint8_t *fimg = xrealloc(NULL, ex->sb);
-            dp_mach_save(m, fimg);
+            ex_save(ex, m, fimg);
             uint16_t tpc = m->api->gbr->pc;
             if (kdefer) { fork_deferred(ex, fimg, kdefer, site, tpc); continue; }
             queue_push(ex, fimg, 1, DP_PATH_FORK,
@@ -157,7 +157,7 @@ void fork_key(DpExplorer *ex, uint32_t site) {
             ex->res->forks_key++;
         }
     }
-    dp_mach_load(m, img); // the natural side continues, untouched
+    ex_load(ex, m, img); // the natural side continues, untouched
     m->api->set_buttons(0); // recompute the derived P1 register (not in the image)
     free(img);
 }
@@ -188,12 +188,12 @@ void fork_p1(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op) {
     static const uint8_t keys[8] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80};
     DpMach *m = ex->mach;
     uint8_t *img = xrealloc(NULL, ex->sb);
-    dp_mach_save(m, img);
+    ex_save(ex, m, img);
     for (int k = 0; k < 8; k++) {
         m->api->set_buttons(keys[k]);
         api->io[0x0F] &= (uint8_t)~0x10; // the value fork: no IRQ side effect
         uint8_t *fimg = xrealloc(NULL, ex->sb);
-        dp_mach_save(m, fimg);
+        ex_save(ex, m, fimg);
         uint16_t tpc = m->api->gbr->pc;
         if (pdefer) { fork_deferred(ex, fimg, pdefer, site, tpc); continue; }
         queue_push(ex, fimg, 1, DP_PATH_FORK,
@@ -202,7 +202,7 @@ void fork_p1(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op) {
                               (int)cur_bank(ex, tpc), tpc));
         ex->res->forks_p1++;
     }
-    dp_mach_load(m, img); // the natural side continues, untouched
+    ex_load(ex, m, img); // the natural side continues, untouched
     m->api->set_buttons(0); // recompute the derived P1 register (not in the image)
     free(img);
 }
@@ -242,14 +242,14 @@ void fork_event(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op) {
     (*cnt)++;
     DpMach *m = ex->mach;
     uint8_t *img = xrealloc(NULL, ex->sb);
-    dp_mach_save(m, img);
+    ex_save(ex, m, img);
     uint8_t cur = api->io[reg];
     for (int k = 0; k < n; k++) {
         uint8_t v = reg == 0x41 ? (uint8_t)((cur & ~3) | vals[k]) : vals[k];
         if (v == cur) continue;
         api->io[reg] = v;
         uint8_t *fimg = xrealloc(NULL, ex->sb);
-        dp_mach_save(m, fimg);
+        ex_save(ex, m, fimg);
         api->io[reg] = cur;
         uint16_t tpc = m->api->gbr->pc;
         if (edefer) { fork_deferred(ex, fimg, edefer, site, tpc); continue; }

@@ -419,7 +419,8 @@ struct DpExplorer {
     DpConfig cfg;
     DpResults *res;
     DpMach *mach;      // the live machine (instance 0 during fork drains)
-    uint32_t sb;       // state image size
+    uint32_t sb;       // state image size: machine bytes (mb) + the explorer trailer
+    uint32_t mb;       // machine part of the image
     // worklist
     DpPathState *queue;
     uint32_t q_cap, q_head, q_len;
