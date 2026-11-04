@@ -13,9 +13,9 @@ remesure pas l'outil.
 | MSX | 32 | 5 | 0 | 2 |
 | NES | 12 | 25 | 0 | 2 |
 | PCE | 17 | 21 | 0 | 1 |
-| MD | 10 | 28 | 0 | 1 |
+| MD | 11 | 27 | 0 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 90.
+Cellules ouvertes (◐ ou ✗) : 89.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -75,7 +75,6 @@ Cellules ouvertes (◐ ou ✗) : 90.
 | C3 | Dédup exacte hors horloges | MD | ◐ `--exact-dedup` (hors horloges, en mémoire) |
 | F1 | File croissante + spool + `--resume` | NES | ◐ `--spool`/`--resume` (lot disque), file bornée + parc |
 | F1 | File croissante + spool + `--resume` | PCE | ◐ `--lot`/`--lot-drain` + parc ; `--spool`/`--resume` (0.224.0) ; pas de file croissante |
-| F1 | File croissante + spool + `--resume` | MD | ◐ `--lot`/`--lot-drain` + parc (`parked`, `lot_*`) ; `--spool`/`--resume` (0.224.0) ; pas de de file croissante bornée par option |
 | F2 | Arbre de choix persistant | NES | ◐ `--tree` (nœuds, parents, issues ; site renseigné pour les fourches de branchement ; reprise de l'arbre avec `--resume` (0.220.0)) |
 | F2 | Arbre de choix persistant | PCE | ◐ `--tree` (DpTree commun ; site renseigné pour les fourches ; reprise de l'arbre avec `--resume` (0.221.0)) |
 | F2 | Arbre de choix persistant | MD | ◐ `--tree` (DpTree commun ; site renseigné pour les fourches de branchement ; reprise de l'arbre avec `--resume` (0.222.0)) |
