@@ -3255,3 +3255,10 @@ Une fenêtre qui a vu plusieurs pages reste ambiguë et l'arête est toujours ab
 Le motif `jmp d8(pc,Xn)` vers une table de `bra.s`/`bra.w` (0.190.0) est reconnu aussi pour
 `jsr d8(pc,Xn)` (appel indexé, très courant). Fixture `fix_md_s4j`, test `md_s4_jsr` (contrôle
 négatif fait). Toujours pas de tables de mots ni de `jmp (An)`.
+
+## MD : tables de sauts `jmp/jsr d8(An,Xn)` (S4) (0.234.0)
+
+Quand l'instruction indexée part d'un registre d'adresse (`lea table,A0 ; jmp 0(A0,D0.w)`), la base
+de la table est la valeur vivante de `An` plus le déplacement : lue sur la machine à l'exécution,
+sans provenance symbolique. Même format de table (`bra.s`/`bra.w`) que `d8(pc,Xn)`. Fixture
+`fix_md_s4a`, test `md_s4_an` (contrôle négatif fait). Reste : tables de mots et `jmp (An)` nu.

@@ -934,10 +934,15 @@ static void s4_table(X *x, uint32_t pc) {
     DpMdResults *r = x->r;
     const uint8_t *rom = x->c->rom;
     size_t n = r->rom_size;
-    if ((size_t)pc + 4 > n || rom[pc] != 0x4E || (rom[pc + 1] != 0xFB && rom[pc + 1] != 0xBB)) return;   // jmp / jsr d8(pc,Xn)
+    if ((size_t)pc + 4 > n || rom[pc] != 0x4E) return;
+    unsigned o2 = rom[pc + 1];
+    int pcrel = o2 == 0xFB || o2 == 0xBB;                 // jmp / jsr d8(pc,Xn)
+    int anrel = (o2 & 0xF8) == 0xF0 || (o2 & 0xF8) == 0xB0;   // jmp / jsr d8(An,Xn): An read live
+    if (!pcrel && !anrel) return;
     if (rom[pc + 2] & 0x07) return;                       // brief extension word only (no full-format bits)
     if (dp_set_insert(&x->ind_sites, ((uint64_t)pc + 1) | (1ull << 40)) == 0) return;
-    uint32_t base = pc + 2 + (uint32_t)(int32_t)(int8_t)rom[pc + 3];
+    uint32_t base = pcrel ? pc + 2 : dp_mdmach_an(x->m, o2 & 7) & 0xFFFFFFu;
+    base += (uint32_t)(int32_t)(int8_t)rom[pc + 3];
     uint32_t tg[128];
     unsigned nt = 0;
     for (uint32_t e = base; nt < 128 && (size_t)e + 4 <= n && !(e & 1);) {
