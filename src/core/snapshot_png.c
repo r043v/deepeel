@@ -97,21 +97,37 @@ int dp_png_save_chunks(const char *path, int w, int h, const uint8_t *rgb, const
     ihdr[12] = 0; // interlace
     wr_chunk(f, "IHDR", ihdr, 13);
 
-    // raw scanlines with filter byte 0, zlib level 9
-    size_t stride = 1 + (size_t)w * 3, raw_len = (size_t)h * stride;
-    uint8_t *raw = malloc(raw_len ? raw_len : 1);
-    if (!raw) { fclose(f); return 0; }
-    for (int y = 0; y < h; y++) {
-        raw[y * stride] = 0;
-        memcpy(raw + y * stride + 1, rgb + (size_t)y * (size_t)w * 3, (size_t)w * 3);
+    // scanlines (filter byte 0) fed one by one to an incremental deflate (level 9): no full
+    // raw copy of the image, the IDAT chunks are written as the compressed bytes come out
+    {
+        z_stream zs;
+        memset(&zs, 0, sizeof zs);
+        if (deflateInit(&zs, 9) != Z_OK) { fclose(f); return 0; }
+        enum { OUTSZ = 1 << 16 };
+        uint8_t *ob = malloc(OUTSZ), *line = malloc(1 + (size_t)w * 3);
+        if (!ob || !line) { free(ob); free(line); deflateEnd(&zs); fclose(f); return 0; }
+        for (int y = 0; y <= h; y++) {
+            int last = y == h;
+            if (!last) {
+                line[0] = 0;
+                memcpy(line + 1, rgb + (size_t)y * (size_t)w * 3, (size_t)w * 3);
+                zs.next_in = line;
+                zs.avail_in = (uInt)(1 + (size_t)w * 3);
+            } else {
+                zs.next_in = line;
+                zs.avail_in = 0;
+            }
+            int r;
+            do {
+                zs.next_out = ob;
+                zs.avail_out = OUTSZ;
+                r = deflate(&zs, last ? Z_FINISH : Z_NO_FLUSH);
+                size_t got = OUTSZ - zs.avail_out;
+                if (got) wr_chunk(f, "IDAT", ob, got);
+            } while (zs.avail_out == 0 || (last && r != Z_STREAM_END));
+        }
+        free(ob); free(line); deflateEnd(&zs);
     }
-    uint8_t *z;
-    size_t zl;
-    int ok = zpack(raw, raw_len, &z, &zl);
-    free(raw);
-    if (!ok) { fclose(f); return 0; }
-    wr_chunk(f, "IDAT", z, zl);
-    free(z);
 
     // zTXt: keyword NUL method(0) zlib(text); hex-encoded for binary payloads
     for (int i = 0; i < n; i++) {

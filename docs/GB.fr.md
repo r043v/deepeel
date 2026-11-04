@@ -2258,3 +2258,10 @@ Le PNG de carte GB porte un chunk privé `dpCh` : en-tête `DPCH` (version, plat
 masque de sections) puis, par section non nulle, les `exec_flags`, `data_flags`, `static_flags` (1 octet
 par octet de ROM) et les compteurs `exec_hits`, `data_hits`, `play_exec_hits`, `play_data_hits` (u32 LE).
 Omis au-delà de ~4 Mo de ROM. Extraction : `deepeel mapx carte.png out --chunk dpCh`. Test `explorer`.
+
+## 0.154.0 (J10 — écriture PNG incrémentale)
+
+`dp_png_save_chunks` ne construit plus la copie brute (filtre + lignes) de l'image : chaque ligne passe
+à un deflate incrémental (niveau 9) et les IDAT sortent par blocs de 64 Kio. Flux identique octet pour
+octet à l'ancien `compress2`. Le tampon RVB de la grille reste complet (au plus le budget de pixels, 16 M
+par défaut) : le rendu par rangée de tuiles du §9.2 n'est donc que partiel.
