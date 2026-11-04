@@ -202,3 +202,7 @@ Ces chiffres sont des essais courts, pas une campagne : ni saturation levée, ni
   carte connue **90,71 %** contre 77,83 % à l'essai court sans vraie phase de jeu (carte précédente : 77,96 % sans jeu).
   C'est une compilation multi-jeux : le menu puis les jeux dépendent d'entrées, donc la phase de jeu aide ici, contrairement
   à GG/Batman Returns (84,58 %). Un seul run, sans répétition : écart non attribué avec certitude à la seule nouveauté.
+- MSX, Aleste avec `--max-total 2000000 --novelty 100000000 --novelty-cells 1` (110 s, un run, observation de l'outil) :
+  42 essais, 10 000 trames, profondeur 96 trames, 2 touches, 3 points archivés, 142 000 000 pas ; carte connue
+  **81,48 %** contre 76,21 % (essai court) et 74,35 % (sans jeu). Peu de nouveauté trouvée (2 touches) : gain modeste,
+  un seul run. `exec_outside` 4 651 185 pas (code hors ROM, à examiner avant d'en tirer une conclusion).
