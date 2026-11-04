@@ -585,7 +585,9 @@ static int cmd_explore(int argc, char **argv) {
         alarm((unsigned)scfg.time_limit_secs);
     }
     int rc = 0;
-    if (mapwin_on) dp_mapwin_start(&res, mapwin);
+    if (mapwin_on && play_engine && !gui && dp_play_watch_enable(play_engine, 4)) { /* the game screen beside the map */ }
+    else if (mapwin_on && play_engine && !gui) fprintf(stderr, "deepeel: --mapwin: no game screen without a --tas movie\n");
+    if (mapwin_on) dp_mapwin_start(&res, mapwin, mapwin_on && play_engine && !gui ? play_engine : NULL);
     if (gui && dp_gui_available()) {
         if (human) dp_play_human_begin(play_engine, human_slot);
         rc = dp_gui_run(&res, &cfg, ex, play_engine);

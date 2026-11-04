@@ -28,7 +28,7 @@ void dp_watch_stop(void);
 // the same palette), redrawn from the live results about twice a second in its own thread. Read-only
 // observation of the results while the explorers run; closing the window does not stop the run.
 // returns 0 on success; 1 and a message without SDL2
-int dp_mapwin_start(const DpResults *res, int scale);
+int dp_mapwin_start(const DpResults *res, int scale, DpPlay *play);   // play: optional, its game screen is shown beside the map
 void dp_mapwin_stop(void);
 
 #endif

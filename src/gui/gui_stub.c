@@ -34,8 +34,8 @@ int dp_fbwatch_start(const char *title) {
 void dp_fbwatch_stop(void) {}
 
 #include "gui.h"
-int dp_mapwin_start(const DpResults *res, int scale) {
-    (void)res; (void)scale;
+int dp_mapwin_start(const DpResults *res, int scale, DpPlay *play) {
+    (void)res; (void)scale; (void)play;
     fprintf(stderr, "deepeel: built without SDL2, --mapwin unavailable\n");
     return 1;
 }

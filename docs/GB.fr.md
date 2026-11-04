@@ -2517,3 +2517,10 @@ résultats vivants environ deux fois par seconde : on voit le rouge (inconnu) se
 sans `--play`, `--jobs` ou `--unbounded`. Lecture seule : fermer la fenêtre (Q/Échap) n'arrête pas l'exploration. Sans
 échelle, l'échelle entière maximale qui tient dans l'écran est choisie. Crochet de test : `DEEPEEL_MAPWIN_DUMP=<fichier>`
 écrit la dernière carte dessinée en PPM (test `mapwin_cli`). Sans SDL2 l'option est signalée et ignorée.
+
+## 0.180.0 (`--mapwin` : l'écran de jeu à côté de la carte)
+
+Avec `--play` et un film `--tas`, `--mapwin` affiche aussi l'écran de la Game Boy (160×144 en ×2, quatre nuances) à droite
+de la carte, avec le nom du film et sa position (film i/n, image/total). L'écran se rafraîchit environ quatre fois par
+seconde, la carte environ une fois par seconde. Sans film, la carte seule. Une exploration peut être arrêtée (SIGINT) et
+reprise avec `--state-dir D --resume` : la fenêtre se rouvre avec la même option.

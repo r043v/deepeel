@@ -706,9 +706,10 @@ static atomic_int mw_quit;
 static const DpResults *mw_res;
 static int mw_scale;
 
+static DpPlay *mw_play;   // optional: the replay engine whose game screen is shown beside the map
 static void *mw_main(void *arg) {
     (void)arg;
-    enum { TILE = 128, GAP = 4, PER_ROW = 8, LEG_H = 30 };
+    enum { TILE = 128, GAP = 4, PER_ROW = 8, LEG_H = 30, PANEL_W = 2 * DP_GB_SCREEN_W + 2 * GAP };
     const DpResults *res = mw_res;
     int banks = (int)res->banks;
     if (banks < 1) return NULL;
@@ -720,7 +721,7 @@ static void *mw_main(void *arg) {
     }
     int W = GAP + cols * (TILE * sc + GAP), H = GAP + rows * (TILE * sc + GAP) + LEG_H;
     if (SDL_Init(SDL_INIT_VIDEO) != 0) { fprintf(stderr, "deepeel: mapwin: SDL_Init: %s\n", SDL_GetError()); return NULL; }
-    SDL_Window *win = SDL_CreateWindow("deepeel ROM map", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, W, H, SDL_WINDOW_RESIZABLE);
+    SDL_Window *win = SDL_CreateWindow("deepeel ROM map", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, W + (mw_play ? PANEL_W : 0), H, SDL_WINDOW_RESIZABLE);
     SDL_Renderer *ren = win ? SDL_CreateRenderer(win, -1, 0) : NULL;
     SDL_Texture *tex = ren ? SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, W, H - LEG_H) : NULL;
     if (!tex) {
@@ -732,13 +733,24 @@ static void *mw_main(void *arg) {
     }
     uint32_t *px = malloc((size_t)W * (H - LEG_H) * 4);
     if (!px) { SDL_DestroyTexture(tex); SDL_DestroyRenderer(ren); SDL_DestroyWindow(win); SDL_Quit(); return NULL; }
-    for (int first = 1; first || !atomic_load(&mw_quit); first = 0) {   // always one draw, even for a run that ends at once
+    uint8_t shades[DP_GB_SCREEN_W * DP_GB_SCREEN_H];
+    memset(shades, 0, sizeof shades);
+    DpWatchInfo info;
+    memset(&info, 0, sizeof info);
+    int have_fb = 0;
+    DpMapSummary sum;
+    memset(&sum, 0, sizeof sum);
+    int have_map = 0;
+    for (int first = 1, tick = 0; first || !atomic_load(&mw_quit); first = 0, tick++) {   // always one draw, even for a run that ends at once
         SDL_Event e;
         while (SDL_PollEvent(&e))
             if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && (e.key.keysym.sym == SDLK_ESCAPE || e.key.keysym.sym == SDLK_q))) atomic_store(&mw_quit, 1);
-        DpMapSummary sum;
-        uint8_t *m = dp_map_build(res, &sum);
+        uint8_t tmp[DP_GB_SCREEN_W * DP_GB_SCREEN_H];
+        DpWatchInfo ni;
+        if (mw_play && dp_play_watch_read(mw_play, tmp, &ni)) { memcpy(shades, tmp, sizeof shades); info = ni; have_fb = 1; }
+        uint8_t *m = (tick % 4 == 0 || !have_map) ? dp_map_build(res, &sum) : NULL;   // the map every ~1 s, the screen every ~0.25 s
         if (m) {
+            have_map = 1;
             for (size_t i = 0; i < (size_t)W * (H - LEG_H); i++) px[i] = 0xff18181c;
             for (int b = 0; b < banks; b++) {
                 int ox = GAP + (b % PER_ROW) * (TILE * sc + GAP), oy = GAP + (b / PER_ROW) * (TILE * sc + GAP);
@@ -751,6 +763,9 @@ static void *mw_main(void *arg) {
                 }
             }
             SDL_UpdateTexture(tex, NULL, px, W * 4);
+            free(m);
+        }
+        if (have_map) {
             const char *dump = getenv("DEEPEEL_MAPWIN_DUMP");   // test hook: the last drawn map as a binary PPM
             if (dump) {
                 FILE *f = fopen(dump, "wb");
@@ -782,10 +797,32 @@ static void *mw_main(void *arg) {
                 draw_text(ren, lx + 12, H - LEG_H + 16, t, 1, tc);
                 lx += 12 + text_w(t, 1) + 10;
             }
+            if (mw_play) {   // the game screen as the replay shows it, 2x, with the movie position
+                int gx = W + GAP, gy = GAP;
+                if (have_fb) {
+                    for (int y = 0; y < DP_GB_SCREEN_H; y++)
+                        for (int x = 0; x < DP_GB_SCREEN_W; x++) {
+                            uint8_t v = (uint8_t)(255 - shades[y * DP_GB_SCREEN_W + x] * 85);
+                            SDL_SetRenderDrawColor(ren, v, v, v, 255);
+                            SDL_Rect r = { gx + x * 2, gy + y * 2, 2, 2 };
+                            SDL_RenderFillRect(ren, &r);
+                        }
+                    char t[96];
+                    const char *base = strrchr(info.name, '/');
+                    base = base ? base + 1 : info.name;
+                    snprintf(t, sizeof t, "%.34s", base);
+                    SDL_Color c1 = { 0xe0, 0xe0, 0xe0, 255 }, c2 = { 0xb0, 0xb0, 0xb8, 255 };
+                    draw_text(ren, gx, gy + 2 * DP_GB_SCREEN_H + 6, t, 1, c1);
+                    snprintf(t, sizeof t, "movie %d/%d  frame %u/%u", info.movie + 1, info.movies, (unsigned)info.frame, (unsigned)info.total);
+                    draw_text(ren, gx, gy + 2 * DP_GB_SCREEN_H + 18, t, 1, c2);
+                } else {
+                    SDL_Color c2 = { 0xb0, 0xb0, 0xb8, 255 };
+                    draw_text(ren, gx, gy, "waiting for the first image...", 1, c2);
+                }
+            }
             SDL_RenderPresent(ren);
-            free(m);
         }
-        for (int i = 0; i < 25 && !atomic_load(&mw_quit); i++) {   // ~0.5 s between redraws, responsive to events
+        for (int i = 0; i < 12 && !atomic_load(&mw_quit); i++) {   // ~0.5 s between redraws, responsive to events
             SDL_Event e2;
             while (SDL_PollEvent(&e2))
                 if (e2.type == SDL_QUIT || (e2.type == SDL_KEYDOWN && (e2.key.keysym.sym == SDLK_ESCAPE || e2.key.keysym.sym == SDLK_q))) atomic_store(&mw_quit, 1);
@@ -799,9 +836,9 @@ static void *mw_main(void *arg) {
     SDL_Quit();
     return NULL;
 }
-int dp_mapwin_start(const DpResults *res, int scale) {
+int dp_mapwin_start(const DpResults *res, int scale, DpPlay *play) {
     if (mw_running) return 0;
-    mw_res = res; mw_scale = scale;
+    mw_res = res; mw_scale = scale; mw_play = play;
     atomic_store(&mw_quit, 0);
     if (pthread_create(&mw_th, NULL, mw_main, NULL) != 0) return 1;
     mw_running = 1;
