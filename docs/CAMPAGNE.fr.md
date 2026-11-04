@@ -125,3 +125,9 @@ Lecture honnête : sans plafond de pas par chemin, le chemin naturel (la boucle 
 jamais, donc le spool grossit sans être exploré : `--unbounded` MD ne gagne ici aucune couverture dynamique par
 rapport au run borné. Écart à combler : relire le spool pendant l'exécution (entrelacer), ou garder un plafond de
 pas par chemin même en mode illimité. Pas une fermeture.
+
+Diagnostic complémentaire (même ROM, observations de l'outil) : `perf` montre plus de 80 % du temps dans l'écriture
+du spool (`dp_lf_put` et zlib), pas dans l'émulation ; `--exact-dedup` ne change rien (136 322 fourches en 100 s,
+toujours 0 relue) ; plafonner `path_steps` ou le budget du chemin naturel n'a pas changé le compteur de pas non plus
+(32 161 858 à chaque arrêt), ce qui laisse la cause du premier chemin sans fin **non élucidée** : à tracer dans
+`run_path`/`run_sliced` avant de toucher aux plafonds.
