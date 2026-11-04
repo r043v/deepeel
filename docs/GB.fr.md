@@ -3185,3 +3185,9 @@ autres cartes. **Non pris en charge** : RAM mappée dans les fenêtres PRG (bit 
 `$5205`/`$5206`, IRQ de scanline `$5203`/`$5204`, découpage d'écran, jeux CHR distincts fond/sprites.
 Un jeu qui en dépend sera exploré avec ces fonctions inertes (observation de l'outil, pas du matériel).
 Test `nes` : `test_mmc5`.
+
+## `--spool` / `--resume` pour PCE et MD (0.224.0)
+
+Les options communes acceptent `--spool FICHIER` (alias de `--lot`) et `--resume FICHIER` (lot repris
+et vidé, alias de `--lot --lot-drain`), comme NES. Test `resume_cli` (MD : un run borné laisse un lot,
+`--resume` le relit).

@@ -43,6 +43,8 @@ static inline void dp_cli_arm_stop(unsigned time_limit) {
     else if (!strcmp(a, "--second-pass")) (opt).second_pass = 1; \
     else if (!strcmp(a, "--lot") && i + 1 < argc) (opt).lot_path = argv[++i]; \
     else if (!strcmp(a, "--lot-drain")) (opt).lot_drain = 1; \
+    else if (!strcmp(a, "--spool") && i + 1 < argc) (opt).lot_path = argv[++i]; \
+    else if (!strcmp(a, "--resume") && i + 1 < argc) { (opt).lot_path = argv[++i]; (opt).lot_drain = 1; } \
     else if (!strcmp(a, "--tree") && i + 1 < argc) (opt).tree_path = argv[++i]; \
     else if (!strcmp(a, "--jobs") && i + 1 < argc) (cc).jobs = atoi(argv[++i]); \
     else if (!strcmp(a, "--export-state") && i + 1 < argc) (opt).export_state = argv[++i]; \
