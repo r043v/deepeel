@@ -1377,7 +1377,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                 dp_nesmach_reset(x.m);
                 if (!dp_nesmach_enter(x.m, vb, va)) { free(es); r->entries_refused++; continue; }
                 dp_nesmach_save(x.m, es);
-                DpNesPathState er = { es, 0, 0, 0, 0, 0, 0, DP_NES_TREE_VECTOR };
+                DpNesPathState er = { es, 1, 0, 0, 0, 0, 0, DP_NES_TREE_VECTOR };
                 if (queue_push(&x, &er)) r->vectors_seeded++; else { free(es); r->seeds_refused_queue++; }
             }
             for (int pass = 0; pass < 2; pass++) {

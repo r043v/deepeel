@@ -417,6 +417,7 @@ static void test_seed_vectors(void) {
         if (seeded) {
             CHECK(r->vectors_seeded == 2, "two vector roots (%llu)", (unsigned long long)r->vectors_seeded);
             CHECK(r->flags[0x100] != 0 && r->flags[0x120] != 0, "vector code reached");
+            CHECK((r->flags[0x100] & DP_PCE_FORCED) && !(r->flags[0x100] & DP_PCE_NATURAL), "vector code is forced, not natural (%02x)", r->flags[0x100]);
         } else CHECK(r->flags[0x100] == 0, "not reached without the option");
         dp_pce_results_free(r);
         free(r);

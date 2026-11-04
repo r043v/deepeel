@@ -25,7 +25,7 @@ int dp_mach_pick_variant(const uint8_t *header) {
     uint32_t eram = header[0x149] < 6 ? ram_of[header[0x149]] : 0;
     if (mbc == 0) eram = 0;
     if (mbc == 2) eram = 0x200; /* fixed 512x4-bit */
-    if (mbc == 1 && eram > 0x2000) eram = 0x2000;
+    if (mbc == 1 && eram > 0x8000) eram = 0x8000; /* MBC1 banks 32 KiB at most */
     for (int v = 0; v < DP_GBL_VARIANTS; v++)
         if (dp_gbl_variant_mbc[v] == mbc && dp_gbl_variant_eram[v] == eram) return v;
     return -1;
@@ -75,6 +75,14 @@ void dp_mach_set_rom(DpMach *m, const uint8_t *rom, uint32_t size) {
     uint32_t banks = 2;
     while (banks * 0x4000u < size) banks <<= 1;
     *m->api->rom_banks = banks;
+    /* MBC1M: a 1 MiB cartridge carrying the Nintendo logo in two or more of
+     * its 256 KiB sub-games (banks 0x10, 0x20, 0x30) is wired as a multicart */
+    static const uint8_t logo[4] = {0xCE, 0xED, 0x66, 0x66};
+    int games = 0;
+    if (size == 0x100000)
+        for (int g = 1; g < 4; g++)
+            if (!memcmp(rom + (size_t)g * 0x40000 + 0x104, logo, 4)) games++;
+    *m->api->mbc1m = (uint8_t)(games >= 2);
 }
 
 void dp_mach_reset(DpMach *m) {

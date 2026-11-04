@@ -11,11 +11,11 @@ remesure pas l'outil.
 | GB | 32 | 6 | 0 | 1 |
 | SMS/GG | 32 | 5 | 0 | 2 |
 | MSX | 32 | 5 | 0 | 2 |
-| NES | 13 | 24 | 0 | 2 |
-| PCE | 21 | 17 | 0 | 1 |
-| MD | 12 | 26 | 0 | 1 |
+| NES | 14 | 23 | 0 | 2 |
+| PCE | 22 | 16 | 0 | 1 |
+| MD | 13 | 25 | 0 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 83.
+Cellules ouvertes (◐ ou ✗) : 80.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -51,9 +51,6 @@ Cellules ouvertes (◐ ou ✗) : 83.
 | S6 | Rejeu de décodeurs sur tables de flux | PCE | ◐ 0.149 `JSR` + mot de page zéro, page ROM de 8 Kio ; 0.206 entrées (page, ptr) |
 | S7 | Inférence de voisins à la carte | NES | ◐ trous ≤ 1024 |
 | S7 | Inférence de voisins à la carte | MD | ◐ remplissage ≥ 8 (00/FF) ou ≥ 32, code ≤ 3 o, données ≤ 1024 o ; rendu seulement |
-| G1 | Graines reset/RST/IRQ | NES | ◐ reset + NMI/IRQ (`--seed-vectors`) |
-| G1 | Graines reset/RST/IRQ | PCE | ◐ reset + IRQ2/IRQ1/TIMER/NMI (`--seed-vectors`, 0.216) |
-| G1 | Graines reset/RST/IRQ | MD | ◐ reset + autovecteurs et TRAP (`--seed-vectors`) |
 | G2 | Scan de dispatch par vues de banques | NES | ◐ UxROM, banque fixe (`--bank-dispatch`) |
 | G2 | Scan de dispatch par vues de banques | PCE | ◐ tables de mots par fenêtre, vues de pages (`--bank-dispatch`) |
 | G2 | Scan de dispatch par vues de banques | MD | ◐ tables de mots longs de pointeurs de code (`--bank-dispatch`) |

@@ -3204,3 +3204,10 @@ Le rapport PCE compte les lectures et écritures de la page matérielle registre
 (`reg $0002 reads N writes M`, 27 registres du registre matériel + « other ») ; `io reads` s'ajoute
 à `io writes`. Les compteurs sont fusionnés par `--jobs 2`. Test `pce` : les sommes par registre
 égalent les totaux. Observation de l'outil, pas une mesure de matériel.
+
+## NES : racines `--seed-vectors` en forcé (G1) (0.227.0)
+
+Les racines NMI et IRQ/BRK semées par `--seed-vectors` étaient marquées *naturelles* alors que rien ne
+les atteint depuis le reset ; elles sont maintenant forcées, comme sur PCE et MD (la norme G1 :
+reset naturel, le reste forcé). Test `nes` : `test_seed_vectors` ; PCE et MD vérifient aussi
+désormais le caractère forcé.

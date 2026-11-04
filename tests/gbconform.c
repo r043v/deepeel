@@ -19,6 +19,7 @@ static long nstep, nwr;
 static void step(DpMach *m, uint16_t pc, uint8_t op, int e) {
     nstep++; if (getenv("GBC_TRACE") && (nstep < 4 || (getenv("GBC_FROM") && nstep >= (unsigned long)atol(getenv("GBC_FROM")) && nstep < (unsigned long)atol(getenv("GBC_FROM")) + 40) || (pc>=0xFD00 && pc<0xFF00))) fprintf(stderr, "%04x %02x b=%02x c=%02x d=%02x e=%02x h=%02x l=%02x\n", pc, op, m->api->gbr->b, m->api->gbr->c, m->api->gbr->d, m->api->gbr->e, m->api->gbr->h, m->api->gbr->l);
     (void)pc; (void)e;
+    if (getenv("GBC_OP") && op == (uint8_t)strtol(getenv("GBC_OP"), 0, 16)) fprintf(stderr, "op %02x pc=%04x a=%02x b=%02x c=%02x d=%02x e=%02x h=%02x l=%02x\n", op, pc, m->api->gbr->a, m->api->gbr->b, m->api->gbr->c, m->api->gbr->d, m->api->gbr->e, m->api->gbr->h, m->api->gbr->l);
     if (op == 0x40 || op == 0x52) {
         const gbl_cpu_t *g = m->api->gbr;
         // ld b,b (mooneye) / ld d,d (wilbertpol): only the register triple decides
