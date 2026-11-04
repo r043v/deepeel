@@ -83,8 +83,8 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | F3 | `--jobs` par instances clonées | NES | ◐ `--jobs 2` par phase (`dp_nes2_`, `nes_jobs`), pas de file partagée |
 | F3 | `--jobs` par instances clonées | PCE | ◐ `--jobs 2` par phase (`dp_pce2_`, `test_jobs`), pas de file partagée |
 | F3 | `--jobs` par instances clonées | MD | ◐ `--jobs 2` par entrées explicites (`dp_md2_`, `md_jobs`), pas de file partagée |
-| J1 | Sessions jouées multi-thread + pool | SMS/GG | ◐ |
-| J1 | Sessions jouées multi-thread + pool | MSX | ◐ |
+| J1 | Sessions jouées multi-thread + pool | SMS/GG | ◐ 0.210 pool `--play-pool` |
+| J1 | Sessions jouées multi-thread + pool | MSX | ◐ 0.210 pool `--play-pool` |
 | J1 | Sessions jouées multi-thread + pool | NES | ◐ 0.207 xorshift + pool de checkpoints `--play-pool` |
 | J1 | Sessions jouées multi-thread + pool | PCE | ◐ 0.208 pool `--play-pool` |
 | J1 | Sessions jouées multi-thread + pool | MD | ◐ 0.209 pool `--play-pool` ; 0.189.0 `--play-frames/--play-sessions/--play-seed` (xorshift, sessions depuis la mise sous tension ; ni pool de checkpoints ni multi-thread) |

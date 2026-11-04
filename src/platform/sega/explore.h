@@ -56,6 +56,8 @@ typedef struct {
     uint64_t input_total;
     uint64_t indirect_total; // second pass seeding observed jp (hl) targets
     uint64_t play_total;     // instrumented play session steps (0: no session)
+    uint32_t play_sessions;  // J1: split play_total into this many sessions (0/1: one)
+    uint32_t play_pool;      // J1: shared checkpoint pool size (<= 64): later sessions restart from an earlier session's epoch checkpoint
     uint64_t novelty_total;  // Go-Explore novelty search: instruction budget (0: off)
     uint32_t novelty_frames, novelty_archive, novelty_frame_steps; // frames per trial, archive size, instructions per frame
     unsigned watch_every;    // publish a frame to the watch buffer every N frames (0: off; forces one worker)
@@ -167,7 +169,7 @@ typedef struct {
     uint64_t indirect_sites,indirect_targets,indirect_site_overflow,indirect_target_overflow;
     uint64_t indirect_seeds,indirect_refused_budget,indirect_pending;
     // play session (GB sessions parity): natural coverage from held inputs
-    uint64_t play_steps,play_epochs;
+    uint64_t play_steps,play_epochs,pool_saved,pool_starts;
     // novelty search (Go-Explore)
     uint64_t novelty_trials,novelty_hits,novelty_archived,novelty_replaced,novelty_frames_run,novelty_deaths;
     uint64_t watch_frames;

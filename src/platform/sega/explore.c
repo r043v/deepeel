@@ -1111,23 +1111,49 @@ done:
 }
 // play session (GB sessions parity): the machine runs from reset with held
 // inputs changing every epoch.
+static uint32_t sega_rng(uint32_t *s) { *s^=*s<<13; *s^=*s>>17; *s^=*s<<5; return *s; }
 static void play_session(Run *x) {
     DpSegaResults *r=x->r;
     const DpSegaOptions *o=x->opt;
     if(!o->play_total) return;
-    uint64_t start=r->steps; // the TAS replay may have run before
+    const unsigned nsess=o->play_sessions?o->play_sessions:1;
+    const unsigned pool_cap=o->play_pool<64?o->play_pool:64;
+    Path pool[64]; unsigned pool_n=0; uint32_t prng=0x9E3779B9u;
+    memset(pool,0,sizeof pool);
+    uint64_t play_start=r->steps; // the TAS replay may have run before
+    for(unsigned sess=0;sess<nsess;sess++) {
+    uint64_t start=r->steps;
+    const uint64_t budget=o->play_total/nsess;
     pass_begin(x);
+    if(pool_cap && pool_n) {   // continue from a checkpoint an earlier session kept
+        Path *p=&pool[sega_rng(&prng)%pool_n];
+        x->b->load(p->state); memcpy(x->cart,p->cart,0x8000);
+        dp_sega_closure_invalidate(x->closure);
+        memcpy(x->origins,p->origins,x->origin_size);
+        r->pool_starts++;
+    }
     const uint8_t catalog[]={0,16,64,32,1,2,4,8};
-    uint64_t epoch_len=o->play_total/9;
+    uint64_t epoch_len=budget/9;
     if(!epoch_len) epoch_len=1;
     unsigned epoch=0; // 0: released; 1..8: input catalog masks
-    while(r->steps-start<o->play_total) {
+    while(r->steps-start<budget) {
         if(epoch_len && (r->steps-start)/epoch_len!=epoch) {
             epoch=(unsigned)((r->steps-start)/epoch_len);
             if(epoch>8) break;
+            if(pool_cap) {   // keep a checkpoint at each epoch boundary (random replacement when full)
+                unsigned slot=pool_n<pool_cap?pool_n:sega_rng(&prng)%pool_cap;
+                if(!pool[slot].state) {
+                    pool[slot].state=malloc(x->b->state_size); pool[slot].cart=malloc(0x8000); pool[slot].origins=malloc(x->origin_size);
+                }
+                if(pool[slot].state&&pool[slot].cart&&pool[slot].origins) {
+                    x->b->save(pool[slot].state); memcpy(pool[slot].cart,x->cart,0x8000); memcpy(pool[slot].origins,x->origins,x->origin_size);
+                    if(slot==pool_n) pool_n++;
+                    r->pool_saved++;
+                }
+            }
             DpSegaInput in={{0,0},0,0,0};
             if(epoch) {
-                unsigned mask=catalog[epoch-1];
+                unsigned mask=catalog[(epoch-1+sess)%8];
                 in.pad[0]=(uint8_t)(mask&63);
                 // the pad-1 system key: Start on GG, Pause (NMI) on SG/SMS
                 if(!strcmp(x->system->id,"gg")) in.start=!!(mask&64);
@@ -1137,8 +1163,10 @@ static void play_session(Run *x) {
         }
         if(!play_step(x)) break;
     }
-    r->play_steps=r->steps-start;
     pass_end(x);
+    }
+    for(unsigned i=0;i<64;i++) free_path(pool[i]);
+    r->play_steps=r->steps-play_start;
 }
 // --- novelty search (Go-Explore, GB/NES/MD parity) ----------------------------------
 // An archive of compressed machine checkpoints; each trial restores the most promising
@@ -1148,7 +1176,6 @@ static void play_session(Run *x) {
 // only decreases by single steps far apart.
 typedef struct { uint8_t *z; uLongf zlen; uint64_t gain; uint32_t picks,depth; uint8_t lives[8192]; } SegaCell;
 typedef struct { uint8_t prev[8192],maxv[8192],bad[8192]; uint16_t dec[8192],inc[8192]; uint32_t last_dec[8192],frame; int lives_byte; } SegaLives;
-static uint32_t sega_rng(uint32_t *s) { *s^=*s<<13; *s^=*s>>17; *s^=*s<<5; return *s; }
 static int sega_lives_frame(SegaLives *L,const uint8_t *w,size_t n,int learn) {
     int died=0;
     for(size_t i=0;i<n;i++) {
@@ -1933,7 +1960,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     DP_MR_SUM(indirect_sites); DP_MR_SUM(indirect_targets); DP_MR_SUM(indirect_site_overflow);
     DP_MR_SUM(indirect_target_overflow); DP_MR_SUM(indirect_seeds);
     DP_MR_SUM(indirect_refused_budget); DP_MR_SUM(indirect_pending);
-    DP_MR_SUM(play_steps); DP_MR_SUM(play_epochs);
+    DP_MR_SUM(play_steps); DP_MR_SUM(play_epochs); DP_MR_SUM(pool_saved); DP_MR_SUM(pool_starts);
     DP_MR_SUM(watch_frames);
     DP_MR_SUM(novelty_trials); DP_MR_SUM(novelty_hits); DP_MR_SUM(novelty_archived); DP_MR_SUM(novelty_replaced); DP_MR_SUM(novelty_frames_run); DP_MR_SUM(novelty_deaths);
     if(s->novelty_depth>d->novelty_depth) d->novelty_depth=s->novelty_depth;
@@ -2402,6 +2429,7 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
         r->phase_steps[1],r->phase_limits[1],r->phase_paths[1],r->phase_known[1],r->phase_pending[1],
         r->phase_steps[2],r->phase_limits[2],r->phase_paths[2],r->phase_known[2],r->phase_pending[2]);
     fprintf(out,"play session: %"PRIu64" steps; %"PRIu64" input epochs\n",r->play_steps,r->play_epochs);
+    if(r->pool_saved) fprintf(out,"checkpoint pool: %"PRIu64" kept, %"PRIu64" sessions started from one\n",r->pool_saved,r->pool_starts);
     if(r->novelty_trials)
         fprintf(out,"novelty: depth %u frames, %"PRIu64" trials, %"PRIu64" frames, %"PRIu64" hits, %"PRIu64" deaths, %"PRIu64" archived (%"PRIu64" replaced)\n",
                 r->novelty_depth,r->novelty_trials,r->novelty_frames_run,r->novelty_hits,r->novelty_deaths,r->novelty_archived,r->novelty_replaced);
@@ -2598,6 +2626,8 @@ int dp_sega_explore_command(int argc,char **argv) {
             else if(!strcmp(key,"--fork-cap") && n<=255) o.fork_cap=(uint32_t)n;
             else if(!strcmp(key,"--indirect-total")) o.indirect_total=n;
             else if(!strcmp(key,"--play-steps")) o.play_total=n;
+            else if(!strcmp(key,"--play-sessions")) o.play_sessions=(uint32_t)n;
+            else if(!strcmp(key,"--play-pool")) o.play_pool=(uint32_t)n;
             else if(!strcmp(key,"--novelty")) o.novelty_total=n;
             else if(!strcmp(key,"--novelty-frames")) o.novelty_frames=(uint32_t)n;
             else if(!strcmp(key,"--novelty-archive")) o.novelty_archive=(uint32_t)n;

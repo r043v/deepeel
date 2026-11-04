@@ -3037,3 +3037,12 @@ GB/Z80, multi-thread. Observation de l'outil, pas une mesure matérielle.
 frames jouées (hors démo), chaque session suivante repart d'un checkpoint tiré au hasard au lieu de
 la mise sous tension. Test : `md_play_pool` (« checkpoint pool: K kept, S sessions started from
 one »). Reste : GB/Z80, multi-thread. Observation de l'outil, pas une mesure matérielle.
+
+## 0.210.0 : J1 famille Z80, pool de checkpoints partagé (2026-11-04)
+
+`--play-sessions N` découpe le budget `--play-steps` en N sessions ; `--play-pool P` (P ≤ 64) garde
+un checkpoint à chaque frontière d'époque d'entrée (remplacement aléatoire quand le pool est
+plein) et chaque session suivante repart d'un checkpoint tiré au hasard ; le catalogue d'entrées est
+décalé d'une position par session. Rapport : « checkpoint pool: K kept, S sessions started from
+one ». Test : `sms_play_pool`. Reste : GB, multi-thread. Observation de l'outil, pas une mesure
+matérielle.
