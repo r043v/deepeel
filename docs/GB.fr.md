@@ -3262,3 +3262,10 @@ Quand l'instruction indexée part d'un registre d'adresse (`lea table,A0 ; jmp 0
 de la table est la valeur vivante de `An` plus le déplacement : lue sur la machine à l'exécution,
 sans provenance symbolique. Même format de table (`bra.s`/`bra.w`) que `d8(pc,Xn)`. Fixture
 `fix_md_s4a`, test `md_s4_an` (contrôle négatif fait). Reste : tables de mots et `jmp (An)` nu.
+
+## MD : tables de mots à déplacements (S4) (0.235.0)
+
+L'idiome `move.w tbl(pc,d0.w),d1 ; jmp tbl(pc,d1.w)` : quand la table n'est pas faite de `bra`, ses
+entrées sont lues comme des déplacements 16 bits depuis la base. La table n'est admise que si la cible
+observée du `jmp` est l'une de ses entrées, et elle s'arrête là où commence la première cible (le
+code). Fixture `fix_md_s4w`, test `md_s4_words` (contrôle négatif fait). Reste : `jmp (An)` nu.

@@ -121,7 +121,7 @@ static void next_generation(X *x) {
 /* Per-frame loop detection permits legitimate polling across V-blank;
  * path_steps and max_total still bound paths that run forever. */
 static void novelty_frame(X *x);
-static void s4_table(X *x, uint32_t pc);
+static void s4_table(X *x, uint32_t pc, uint32_t obs);
 static uint8_t play_pad(X *x);
 static uint32_t md_rng(uint32_t *s);
 static void on_frame(void *u) {
@@ -546,7 +546,7 @@ static void on_end(void *u, uint32_t pc, uint32_t next, unsigned len) {
             if (dp_set_insert(&x->ind_pairs, ((uint64_t)(pc + 1) << 24) | (next & 0xFFFFFFu)) > 0) r->indirect_targets++;
         }
     }
-    if ((in.cls == DP_M68K_JMP || in.cls == DP_M68K_JSR) && !in.has_target && decoded == len && !x->replay) s4_table(x, pc);
+    if ((in.cls == DP_M68K_JMP || in.cls == DP_M68K_JSR) && !in.has_target && decoded == len && !x->replay) s4_table(x, pc, next & 0xFFFFFFu);
     if ((in.cls != DP_M68K_BCC && in.cls != DP_M68K_DBCC) || !in.has_target) return;
     if (decoded != len) return; /* do not invent a fall-through from a disputed length */
     if (in.cls == DP_M68K_DBCC && in.cond == 0) return; /* DBT cannot branch */
@@ -930,7 +930,7 @@ static int md_target_ok(const X *x, uint32_t t) {
 // statically (pc + 2 + d8); each entry is a `bra.s`/`bra.w` to a handler.  Every handler no run
 // has reached is seeded from the current machine state, like the other side of a conditional.
 // Entries stop at the first word that is not a branch; at least two are needed to call it a table.
-static void s4_table(X *x, uint32_t pc) {
+static void s4_table(X *x, uint32_t pc, uint32_t obs) {
     DpMdResults *r = x->r;
     const uint8_t *rom = x->c->rom;
     size_t n = r->rom_size;
@@ -954,7 +954,22 @@ static void s4_table(X *x, uint32_t pc) {
         } else break;
         tg[nt++] = t;
     }
-    if (nt < 2) return;
+    if (nt < 2) {
+        // word-offset table: move.w tbl(pc,d0.w),d1 ; jmp tbl(pc,d1.w).  Entries are int16 offsets
+        // from the table base; accepted only when the observed target is one of them, and the
+        // table ends where the first target (code) begins.
+        nt = 0;
+        uint32_t lim = n < 0x1000000 ? (uint32_t)n : 0xFFFFFF, hit = 0;
+        for (uint32_t e = base; nt < 128 && e < lim && (size_t)e + 2 <= n && !(e & 1); e += 2) {
+            int16_t off = (int16_t)((uint16_t)rom[e] << 8 | rom[e + 1]);
+            uint32_t t = base + (uint32_t)(int32_t)off;
+            if ((t & 1) || t < 0x200 || t >= n || t <= e) break;
+            if (t < lim) lim = t;
+            if (t == obs) hit = 1;
+            tg[nt++] = t;
+        }
+        if (nt < 2 || !hit) return;
+    }
     r->s4_tables++;
     for (unsigned k = 0; k < nt; k++) {
         uint32_t t = tg[k];

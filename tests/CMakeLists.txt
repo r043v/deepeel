@@ -172,6 +172,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_s4.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_s4j.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_s4a.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_md_s4w.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_longloop.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_jptable_de.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ramgen.md
@@ -417,6 +418,8 @@ add_test(NAME md_s4_jsr COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRE
 set_tests_properties(md_s4_jsr PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_s4_an COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_s4a.md --text $D/md_s4a.txt >/dev/null 2>&1; grep -q ': 1 tables, 2 handlers seeded' $D/md_s4a.txt")
 set_tests_properties(md_s4_an PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME md_s4_words COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_s4w.md --text $D/md_s4w.txt >/dev/null 2>&1; grep -q ': 1 tables, 2 handlers seeded' $D/md_s4w.txt")
+set_tests_properties(md_s4_words PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME z80_novelty_cells COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; for s in sms msx; do $B z80 explore $s $D/fix_z80_branch.$s --novelty 300000 --novelty-frames 30 --novelty-cells 1 --text $D/zc_$s.txt >/dev/null 2>&1; grep -q 'novelty: depth [1-9][0-9]* frames, [1-9][0-9]* trials' $D/zc_$s.txt || exit 1; done")
 set_tests_properties(z80_novelty_cells PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME gb_jp_table_de COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_jptable_de.gb --cov $D/jtd.cov --text $D/jtd.txt >/dev/null 2>&1; grep -Eq 'S4 operand tables of executed JP HL: [1-9][0-9]* tables, [1-9][0-9]* entries' $D/jtd.txt && grep -Eq '^00 0190 [1-9]' $D/jtd.cov && grep -Eq '^00 01a0 [1-9]' $D/jtd.cov")
