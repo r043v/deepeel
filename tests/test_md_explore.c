@@ -1,5 +1,6 @@
 // Mega Drive milestone 2: 68000 decoder + forking explorer.
 #define _DEFAULT_SOURCE
+#include "../src/platform/md/md_registry.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -314,6 +315,10 @@ int main(int argc, char **argv) {
 
     CHECK(run("fix_md_cpu_vram", 100000, &r, &c) == 0);
     CHECK(r.cpu_vram_words == 4 && r.cpu_vram_bytes == 8);
+    {   // D3: the explorer counts bus accesses per hardware register
+        int k = dp_md_reg_find(0xC00000);
+        CHECK(k >= 0 && k < 64 && r.reg_w[k] >= 4);   // VDC data port writes counted per register
+    }
     CHECK(r.code_or_vram_bytes == r.exec_bytes + 8 && r.data_only_bytes == 0);
     CHECK((r.flags[0x400] & DP_MDF_CPU_VRAM) && (r.flags[0x407] & DP_MDF_CPU_VRAM));
     CHECK(!(r.flags[0x408] & DP_MDF_CPU_VRAM));

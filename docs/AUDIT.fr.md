@@ -13,16 +13,15 @@ remesure pas l'outil.
 | MSX | 32 | 5 | 0 | 2 |
 | NES | 12 | 25 | 0 | 2 |
 | PCE | 19 | 19 | 0 | 1 |
-| MD | 11 | 27 | 0 | 1 |
+| MD | 12 | 26 | 0 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 87.
+Cellules ouvertes (◐ ou ✗) : 86.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
 | D1 | Marquage exec natural/forced/entry/irq/start | NES | ◐ |
 | D1 | Marquage exec natural/forced/entry/irq/start | PCE | ◐ |
 | D1 | Marquage exec natural/forced/entry/irq/start | MD | ◐ |
-| D3 | Accès registres par registre (`DpIoStat`) | MD | ◐ |
 | D4 | Copies par boucle CPU | NES | ◐ boucle → PPUDATA |
 | D10 | Sondes de lecture manette | NES | ◐ 8 boutons, port 1 absent |
 | D10 | Sondes de lecture manette | MD | ◐ 4 |
