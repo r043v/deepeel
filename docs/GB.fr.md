@@ -2368,3 +2368,14 @@ sans rapport ni état (deux runs `--unbounded` de ~2 h 30 ont ainsi été perdus
 désormais un drapeau persistant (`dp_explore_interrupt`) que la boucle d'exploration teste ; les phases
 qui remettent `ex->stop` à zéro ne l'effacent plus. Vérifié : run `--unbounded` interrompu au bout de
 20 s, rapport écrit, processus terminé. Le `--time-limit` n'est pas appliqué hors `--play` : à traiter.
+
+## 0.169.0 (`--time-limit` global, `--jobs auto`)
+
+- `--time-limit N` s'applique maintenant à toute exploration (alarme + arrêt propre identique à SIGINT),
+  plus seulement à `--play`.
+- `--jobs auto` : un explorateur par cœur libre (tous sauf deux), borné par la RAM disponible
+  (~1,5 Gio par explorateur) ; choix fait une fois au lancement, pas réajusté en cours de route.
+  Essai de 15 s sur Mario Land 2 en `--unbounded` : 1 explorateur 870 890 pas, `auto` (6 explorateurs, limité
+  par la RAM) 1 863 201 pas (observations de l'outil, un seul essai chacun). Correction d'une affirmation
+  antérieure : le disque des runs est un NVMe, pas un support externe lent ; la cause du CPU à 38 % n'est pas établie.
+Reste : réglage dynamique du nombre d'explorateurs, tampon RAM de tête de spool.

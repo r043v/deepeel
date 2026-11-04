@@ -6,6 +6,7 @@
 //   deepeel regs gb                                 dump the GB register registry
 //   deepeel dis rom.gb bank:addr [n]                disassemble n instructions
 #include <signal.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include "core/md5.h"
 #include "core/cart.h"
@@ -41,6 +42,27 @@ static void on_explore_sigint(int sig) {
     if (g_sig_ex) g_sig_ex->stop = 1;
 }
 
+// --jobs auto: one explorer per core left free (all but two), bounded by available RAM at ~1.5 GiB
+// per explorer. Decided once at launch (not re-tuned while running); stderr says what was chosen.
+static int auto_jobs(void) {
+    long cpus = sysconf(_SC_NPROCESSORS_ONLN);
+    long n = cpus > 2 ? cpus - 2 : 1;
+    FILE *f = fopen("/proc/meminfo", "r");
+    char ln[128];
+    while (f && fgets(ln, sizeof ln, f)) {
+        unsigned long kb;
+        if (sscanf(ln, "MemAvailable: %lu kB", &kb) == 1) {
+            long byram = (long)(kb / (1536ul * 1024ul));
+            if (byram < n) n = byram;
+            break;
+        }
+    }
+    if (f) fclose(f);
+    if (n < 1) n = 1;
+    fprintf(stderr, "deepeel: --jobs auto -> %ld explorers (%ld cores online)\n", n, cpus);
+    return (int)n;
+}
+
 int dp_lr_command(int argc, char **argv);
 static int cmd_nes(int argc, char **argv);
 static int cmd_pce(int argc, char **argv);
@@ -70,7 +92,7 @@ static void usage(void) {
             "                         dropping paths, stopped by --mem-cap when set\n"
             "    --mem-cap MB         wall shared by the play and the queue growth:\n"
             "                         stop/grow no more once RSS exceeds MB MiB\n"
-            "    --jobs N             parallel drain: N explorers (own machine each) share\n"
+            "    --jobs N|auto        parallel drain: N explorers (own machine each) share\n"
             "                         one work pool, exact dedup and spool; the RAM wall\n"
             "                         bounds the shared pool, the spool keeps the excess\n"
             "    --spool-cap-mb MB    disk budget of the state spool (default 4096): with\n"
@@ -324,7 +346,7 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--time-limit") && i + 1 < argc) scfg.time_limit_secs = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--frontier-cap-gb") && i + 1 < argc) cfg.frontier_cap_mb = strtoull(argv[++i], NULL, 0) * 1024;
         else if (!strcmp(a, "--spool-cap-mb") && i + 1 < argc) cfg.spool_cap_mb = strtoull(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--jobs") && i + 1 < argc) cfg.jobs = atoi(argv[++i]);
+        else if (!strcmp(a, "--jobs") && i + 1 < argc) { ++i; cfg.jobs = !strcmp(argv[i], "auto") ? auto_jobs() : atoi(argv[i]); }
         else if (!strcmp(a, "--seed-cap") && i + 1 < argc) cfg.seed_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed-banks")) cfg.seed_banks = 1;
         else if (!strcmp(a, "--no-pointer-scan")) cfg.no_pointer_scan = 1;
@@ -550,6 +572,10 @@ static int cmd_explore(int argc, char **argv) {
     // written) instead of killing the process; --play installs its own cooperative handler below
     g_sig_ex = ex;
     signal(SIGINT, on_explore_sigint);
+    if (scfg.time_limit_secs) { // wall-clock limit for the whole run, play or not: same clean stop as SIGINT
+        signal(SIGALRM, on_explore_sigint);
+        alarm((unsigned)scfg.time_limit_secs);
+    }
     int rc = 0;
     if (gui && dp_gui_available()) {
         if (human) dp_play_human_begin(play_engine, human_slot);
