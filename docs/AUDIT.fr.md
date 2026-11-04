@@ -27,7 +27,7 @@ Cellules ouvertes (◐ ou ✗) : 75.
 | D12 | Cibles indirectes observées | MD | ◐ observé (`jmp/jsr` par An), sans second passage |
 | S1 | Scan padding + tables de pointeurs | NES | ◐ padding + tables, sans pointeurs ROM→ROM hors fenêtre |
 | S2 | Fermeture statique de flot | NES | ◐ saut/appel/branche, fenêtre propre |
-| S2 | Fermeture statique de flot | PCE | ◐ fenêtre MPR ; 0.232.0 arêtes inter-fenêtres résolues vers la page unique observée (test `pce`), pas de vues multiples |
+| S2 | Fermeture statique de flot | PCE | ◐ fenêtre MPR ; 0.232.0 arêtes inter-fenêtres résolues vers la page unique observée (test `pce`), 0.242.0 vues multiples : l'arête est suivie dans chaque page observée de la fenêtre cible (≤ 16) ; reste le mapping qui change en cours de page (TAM) |
 | S2 | Fermeture statique de flot | MD | ◐ 0.132 Bcc/DBcc/BRA/JMP/JSR depuis les plages exécutées, confiance perdue après BSR/JSR ; bus 68000 plat : une seule vue par construction ; reste le raffinement des écritures indirectes et le budget en cascade |
 | S3 | Suivi de constantes / provenance | GB | ◐ HL/A |
 | S3 | Suivi de constantes / provenance | NES | ◐ provenance RAM→`jmp (zp)` depuis la PRG |

@@ -3322,3 +3322,10 @@ longs est connue (Am vivant, ou pc + 2) ; la table (≤ 128 entrées, adresses p
 acceptée quand la cible observée en est une entrée, et ses autres cibles sont semées. Test
 `md_s4_ptr` (fixture `fix_md_s4p`, contrôle négatif fait). Restent hors portée : An chargé autrement
 (arithmétique, pile, RAM).
+
+## PCE : vues multiples dans la fermeture statique (S2) (0.242.0)
+
+Une arête qui quitte sa fenêtre était résolue seulement si une seule page avait été observée dans la
+fenêtre cible. Elle est maintenant suivie dans chacune des pages observées (jusqu'à 16 ; au-delà,
+inconnue). C'est une sur-approximation, marquée `STATIC` comme le reste de la fermeture. Test `pce`
+(`test_static_views` : deux pages en fenêtre 2, l'arête atteint l'autre page, contrôle négatif fait).

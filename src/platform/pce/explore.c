@@ -1191,12 +1191,14 @@ static void static_closure(PceRun *x) {
     for (size_t i = 0; i < n; i++) if (x->istart[i]) work[top++] = (uint32_t)i;
     // S2 views: an edge leaving its window is resolved to the ROM page observed in the
     // target window when exactly one page was ever seen there (a fixed mapping such as MPR7)
-    int win_page[8];
-    for (int w = 0; w < 8; w++) win_page[w] = -1;
+    // (several observed pages in a window: the edge is followed into each of them, up to 16)
+    uint8_t win_pages[8][16];
+    int win_n[8] = { 0 };
     for (unsigned pg = 0; pg < 128 && (size_t)pg * 0x2000 < n; pg++) {
         unsigned w = x->page_win[pg];
         if (w >= 8) continue;
-        win_page[w] = win_page[w] == -1 ? (int)pg : -2;
+        if (win_n[w] >= 0 && win_n[w] < 16) win_pages[w][win_n[w]++] = (uint8_t)pg;
+        else win_n[w] = -1;                                      // more than 16 pages: unknown
     }
     while (top) {
         uint32_t cell = work[--top];
@@ -1218,29 +1220,32 @@ static void static_closure(PceRun *x) {
         }
         if (in.mapchange) ns = 0; // TAM: the windows may move under the next bytes
         for (int k = 0; k < ns; k++) {
-            uint32_t tpage = page;
-            if ((succ[k] >> 13) != x->page_win[page]) {          // another window: the unique observed page, else unknown
-                int wp = win_page[succ[k] >> 13];
-                if (wp < 0) continue;
-                tpage = (uint32_t)wp;
+            uint32_t tps[16];
+            int ntp = 0;
+            if ((succ[k] >> 13) == x->page_win[page]) tps[ntp++] = page;
+            else {                                               // another window: every observed page there
+                int wn = win_n[succ[k] >> 13];
+                for (int q = 0; q < wn; q++) tps[ntp++] = win_pages[succ[k] >> 13][q];
             }
-            uint32_t t = (tpage << 13) | (succ[k] & 0x1FFF);
-            if (t >= n || x->istart[t]) continue;
-            size_t tav = 0x2000 - (t & 0x1FFF);
-            DpHucIns ti;
-            if (!dp_huc_decode(x->rom + t, tav < 7 ? tav : 7, succ[k], &ti)) continue;
-            if (ti.flow == DP_HUC_ILLEGAL) continue;
-            int clash = 0;
-            for (unsigned j = 0; j < ti.length; j++)
-                if (r->flags[t + j] & (DP_PCE_DATA | DP_PCE_COPIED)) clash = 1;
-            if (clash) continue;
-            x->istart[t] = 2;
-            for (unsigned j = 0; j < ti.length; j++)
-                if (!(r->flags[t + j] & (DP_PCE_NATURAL | DP_PCE_FORCED | DP_PCE_STATIC))) {
-                    r->flags[t + j] |= DP_PCE_STATIC;
-                    r->static_bytes++;
-                }
-            work[top++] = t;
+            for (int q = 0; q < ntp; q++) {
+                uint32_t t = (tps[q] << 13) | (succ[k] & 0x1FFF);
+                if (t >= n || x->istart[t]) continue;
+                size_t tav = 0x2000 - (t & 0x1FFF);
+                DpHucIns ti;
+                if (!dp_huc_decode(x->rom + t, tav < 7 ? tav : 7, succ[k], &ti)) continue;
+                if (ti.flow == DP_HUC_ILLEGAL) continue;
+                int clash = 0;
+                for (unsigned j = 0; j < ti.length; j++)
+                    if (r->flags[t + j] & (DP_PCE_DATA | DP_PCE_COPIED)) clash = 1;
+                if (clash) continue;
+                x->istart[t] = 2;
+                for (unsigned j = 0; j < ti.length; j++)
+                    if (!(r->flags[t + j] & (DP_PCE_NATURAL | DP_PCE_FORCED | DP_PCE_STATIC))) {
+                        r->flags[t + j] |= DP_PCE_STATIC;
+                        r->static_bytes++;
+                    }
+                work[top++] = t;
+            }
         }
     }
     free(work);

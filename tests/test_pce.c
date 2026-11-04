@@ -469,6 +469,28 @@ static void test_static_views(void) {
     dp_pce_results_free(r);
     free(r);
     free(rom);
+
+    // several pages observed in the target window: the edge is followed into each of them
+    rom = calloc(1, 0x8000);
+    {   // reset maps page 1 then page 2 in window 2, calls $4000 each time, then calls $4100 (page 2)
+        static const uint8_t c2[] = { 0xA9, 0xF8, 0x53, 0x02, 0xA9, 0x01, 0x53, 0x04, 0x20, 0x00, 0x40, 0xA9, 0x02, 0x53, 0x04,
+                                      0x20, 0x00, 0x40, 0x20, 0x00, 0x41, 0x80, 0xFE };
+        memcpy(rom, c2, sizeof c2);
+    }
+    rom[0x1FFE] = 0x00; rom[0x1FFF] = 0xE0;
+    rom[0x2000] = 0x60; rom[0x4000] = 0x60;                // rts in pages 1 and 2
+    rom[0x2100] = 0xEA; rom[0x2101] = 0xEA;                // page 1 $4100: never executed, only the multi-page view reaches it
+    rom[0x4100] = 0xEA; rom[0x4101] = 0x60;                // page 2 $4100: nop; rts
+    o = dp_pce_options();
+    o.max_steps = 2000;
+    r = calloc(1, sizeof *r);
+    CHECK(dp_pce_explore(rom, 0x8000, &o, r), "multi-page views explore");
+    CHECK(r->flags[0x4100] & DP_PCE_NATURAL, "page 2 $4100 ran (%02x)", r->flags[0x4100]);
+    CHECK((r->flags[0x2100] & DP_PCE_STATIC) && !(r->flags[0x2100] & (DP_PCE_NATURAL | DP_PCE_FORCED)),
+          "S2: the other page of the window reached statically (%02x)", r->flags[0x2100]);
+    dp_pce_results_free(r);
+    free(r);
+    free(rom);
 }
 
 // RAM-code archive: bytes built by immediates in WRAM, then run
