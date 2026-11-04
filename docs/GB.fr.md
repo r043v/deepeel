@@ -2684,3 +2684,8 @@ Limites connues : `rom_index` sans mapper seulement, valeur lue passée à 0, ca
 un seul registre épinglée par `fix_md_ramexg`, test `rtcode_md_exg_movem`). Limites : listes de plusieurs registres
 approchées par le registre le plus récemment teinté trouvé dans le texte, `movem` mémoire→registres et pré-décrément
 non modélisés.
+
+## 0.187.2 — MD : `movem` mémoire→registres
+
+Les registres listés (bornes de plage comprises, les registres intermédiaires d'une plage `d0-d3` ne sont pas
+teintés) prennent la teinte de la cellule lue. Non épinglé par une fixture dédiée ; le pré-décrément reste non modélisé.

@@ -399,6 +399,12 @@ static void taint_step(X *x, uint32_t pc, unsigned len) {
         int a0; int dr = dst ? op_reg(dst, &a0) : -1;
         if (src && dst && dr < 0 && strchr(src, ',') == NULL && regs_taint(x, src) >= -1 && (src[0] == 'd' || src[0] == 'a')) {
             v = regs_taint(x, src); has_v = 1;
+        } else if (src && dst && (dst[0] == 'd' || dst[0] == 'a') && src[0] != 'd' && src[0] != 'a') {
+            // memory -> register list: every listed register (range ends included) takes what was read
+            for (const char *c = dst; *c; c++)
+                if ((*c == 'd' || *c == 'a') && c[1] >= '0' && c[1] <= '7') {
+                    if (*c == 'a') x->ataint[c[1] - '0'] = x->ins_rd; else x->dtaint[c[1] - '0'] = x->ins_rd;
+                }
         }
     } else if (!strcmp(mn, "exg") && src && dst) {
         int ia, ib, ra = op_reg(src, &ia), rb = op_reg(dst, &ib);
