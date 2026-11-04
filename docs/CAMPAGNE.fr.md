@@ -166,3 +166,8 @@ Ces chiffres sont des essais courts, pas une campagne : ni saturation levée, ni
   2 002 chemins, 512 forks de sondes de manette, 1 graine de seconde passe, 0 mot de table tracé. Ni la manette ni la
   seconde passe ne débloquent la ROM : la cause du plateau à 6,51 % reste à déterminer (le rapport compte 164 NMI et
   1 340 IRQ, donc les interruptions ont lieu ; 101 fautes et 495 exécutions hors PRG sont à examiner).
+- NES, DuckTales : l'en-tête est NES 2.0, mapper 2 (UxROM, PRG 128 Kio). Avec `--seed-banks` : 4 469 octets touchés
+  (3,41 %), moins que sans (6,51 %), 0 graine de dispatch de banques ; la timeline compte 1 024 changements de banque
+  conservés pour 1 953 en débordement, donc le jeu bascule bien de banque pendant l'exploration. Piste non explorée :
+  les 128 Kio ne se découvrent pas par les seules bascules vues ; les cellules de vue de banque (G2) ne trouvent pas
+  de table de dispatch reconnaissable. À reprendre avec un `--tas` ou une séquence de jeu avant de conclure.
