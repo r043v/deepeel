@@ -81,6 +81,7 @@ int dp_nesmach_enter(DpNesMach *m, unsigned bank, unsigned addr);
 /* MMC3: an 8 KiB bank under the R6/R7 slot holding addr (PRG mode 0); 1 on success */
 /* boards whose 16 KiB $8000 slot dp_nesmach_enter can set (UxROM, MMC1, Camerica, UN1ROM) */
 int dp_nesmach_cross16(const DpNesMach *m);
+void dp_nesmach_window(const DpNesMach *m, unsigned *lo, unsigned *hi);   /* switchable PRG window [lo, hi) */
 int dp_nesmach_mmc3_mode1(const DpNesMach *m);   /* MMC3 in PRG mode 1 ($C000 window switchable) */
 int dp_nesmach_map_8k(DpNesMach *m, unsigned addr, unsigned bank8);
 unsigned dp_nesmach_mapper(const DpNesMach *m);

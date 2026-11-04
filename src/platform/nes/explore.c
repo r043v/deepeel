@@ -211,7 +211,8 @@ static void nstm_read(DpNesRun *x, unsigned a) {
             unsigned j;
             for (j = 0; j < d->nstarts && d->starts[j] != a; j++) {}
             if (j == d->nstarts && j < NS_START && a >= 0x8000) d->starts[d->nstarts++] = (uint16_t)a;
-            if (a >= (dp_nesmach_mmc3_mode1(x->m) ? 0xC000u : 0x8000u) && a < (dp_nesmach_mmc3_mode1(x->m) ? 0xE000u : 0xC000u) && (dp_nesmach_cross16(x->m) || dp_nesmach_mapper(x->m) == 4)) {   // UxROM: the bank rides with the address
+            unsigned wl, wh; dp_nesmach_window(x->m, &wl, &wh);
+            if (a >= wl && a < wh && (dp_nesmach_cross16(x->m) || dp_nesmach_mapper(x->m) == 4)) {   // UxROM: the bank rides with the address
                 int64_t ri = dp_nesmach_rom_index(x->m, a);
                 if (ri >= 0) {
                     unsigned sb = (unsigned)(ri >> (dp_nesmach_mapper(x->m) == 4 ? 13 : 14)), q;
@@ -248,7 +249,7 @@ static int nstm_cross(DpNesRun *x, NDec *d) {
         for (unsigned j = 0; j < d->nx; j++) if (d->xs[j].bank == x->image[at] && d->xs[j].addr == v) { pos[np++] = at; break; }
     }
     unsigned cands = 0;
-    const unsigned wlo = dp_nesmach_mmc3_mode1(x->m) ? 0xC000u : 0x8000u, whi = dp_nesmach_mmc3_mode1(x->m) ? 0xE000u : 0xC000u;
+    unsigned wlo, whi; dp_nesmach_window(x->m, &wlo, &whi);
 #define NOKE(at) ((at) >= blo && (at) + 3 <= bhi && x->image[at] < nb && \
     (uint16_t)(x->image[(at) + 1] | x->image[(at) + 2] << 8) >= wlo && \
     (uint16_t)(x->image[(at) + 1] | x->image[(at) + 2] << 8) < whi)

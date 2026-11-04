@@ -3077,3 +3077,11 @@ dernière banque fixe en `$C000`) et mapper 94 (banque en bits 2-4 d'une écritu
 S6 inter-banques les couvre via `dp_nesmach_cross16` (UxROM, MMC1, 71, 94 partagent l'entrée
 `dp_nesmach_enter`). Fixtures : `test_streams_uxlike(71/94)` dans `test_nes`. Mapper 180 (banque
 commutable en `$C000`) reste à faire. Observation de l'outil, pas une mesure matérielle.
+
+## 0.215.0 : NES, mapper 180, fenêtre de pointeurs générique (2026-11-04)
+
+Mapper 180 (Crazy Climber : banque 0 fixe en `$8000`, 16 Kio commutables en `$C000`) rejoint le pont
+et le rejeu S6 inter-banques. La plage des pointeurs de table n'est plus codée en dur :
+`dp_nesmach_window` la donne par carte (`$8000-$BFFF`, `$C000-$DFFF` pour MMC3 en mode 1,
+`$C000-$FFFF` pour le 180). Fixture : `test_streams_180`. Reste : MMC5 et autres mappers.
+Observation de l'outil, pas une mesure matérielle.

@@ -28,7 +28,7 @@ struct DpNesMach {
 };
 
 /* boards whose windows the bridge owns; 66 (GxROM) and 11 (Color Dreams) switch a 32 KiB PRG + 8 KiB CHR pair */
-#define BRIDGED(m) ((m) == 1 || (m) == 3 || (m) == 4 || (m) == 7 || (m) == 11 || (m) == 66 || (m) == 71 || (m) == 94)
+#define BRIDGED(m) ((m) == 1 || (m) == 3 || (m) == 4 || (m) == 7 || (m) == 11 || (m) == 66 || (m) == 71 || (m) == 94 || (m) == 180)
 
 #define MAPPER_TAIL ((unsigned)sizeof(DpNesMapRegs))
 
@@ -47,6 +47,13 @@ static void maps_of(const DpNesMach *d, const DpNesMapRegs *r, uint8_t prg[4], u
         b %= n16 ? n16 : 1u;
         prg[0] = (uint8_t)((b * 2u) % n); prg[1] = (uint8_t)((b * 2u + 1u) % n);
         prg[2] = (uint8_t)(last - 1u + (n < 2)); prg[3] = (uint8_t)last;
+        return;
+    }
+    case 180: {   /* Crazy Climber: bank 0 fixed at $8000, 16 KiB switchable at $C000 */
+        unsigned b = r->v[0] & 7u, n16 = (n + 1u) / 2u;
+        b %= n16 ? n16 : 1u;
+        prg[0] = 0; prg[1] = (uint8_t)(1u % n);
+        prg[2] = (uint8_t)((b * 2u) % n); prg[3] = (uint8_t)((b * 2u + 1u) % n);
         return;
     }
     case 66: case 11: {
@@ -118,7 +125,7 @@ static void mapper_apply(DpNesMach *d) {
 /* a $8000+ write against a register set (MMC1 serial port, MMC3 pairs) */
 static void regs_write(const DpNesMach *d, DpNesMapRegs *r, unsigned a, unsigned v) {
     switch (d->mapper) {
-    case 3: case 7: case 11: case 66: case 94: r->v[0] = (uint8_t)v; break;
+    case 3: case 7: case 11: case 66: case 94: case 180: r->v[0] = (uint8_t)v; break;
     case 71: if (a >= 0xC000u) r->v[0] = (uint8_t)v; break;
     case 1:
         if (v & 0x80) { r->shift = 0x10; r->cnt = 0; r->v[0] |= 0x0C; break; }
@@ -193,9 +200,9 @@ DpNesMach *dp_nesmach_open(const uint8_t *data, size_t size, int mapper,
     unsigned mapper_id = (unsigned)((data[6] >> 4) | (data[7] & 0xF0));
     if (mapper >= 0) mapper_id = (unsigned)mapper;
     if (mapper_id != 0 && mapper_id != 1 && mapper_id != 2 && mapper_id != 3 &&
-        mapper_id != 4 && mapper_id != 7 && mapper_id != 11 && mapper_id != 66 && mapper_id != 71 && mapper_id != 94) {
+        mapper_id != 4 && mapper_id != 7 && mapper_id != 11 && mapper_id != 66 && mapper_id != 71 && mapper_id != 94 && mapper_id != 180) {
         snprintf(err, errsz, "mapper %u: supported boards are NROM (0), MMC1 (1), "
-                 "UxROM (2), CNROM (3), MMC3 (4), AxROM (7), Color Dreams (11), GxROM (66), Camerica (71) and UN1ROM (94)", mapper_id);
+                 "UxROM (2), CNROM (3), MMC3 (4), AxROM (7), Color Dreams (11), GxROM (66), Camerica (71), UN1ROM (94) and 180", mapper_id);
         return NULL;
     }
     size_t body = size - 16;
@@ -214,7 +221,7 @@ DpNesMach *dp_nesmach_open(const uint8_t *data, size_t size, int mapper,
         snprintf(err, errsz, "CNROM wants 16/32 KiB PRG and CHR ROM");
         return NULL;
     }
-    if ((mapper_id == 1 || mapper_id == 4 || mapper_id == 71 || mapper_id == 94) && (prg % 16384u || prg < 32768u)) {
+    if ((mapper_id == 1 || mapper_id == 4 || mapper_id == 71 || mapper_id == 94 || mapper_id == 180) && (prg % 16384u || prg < 32768u)) {
         snprintf(err, errsz, "MMC1/MMC3 want >=32 KiB of PRG in 16 KiB units");
         return NULL;
     }
@@ -453,7 +460,7 @@ int dp_nesmach_enter(DpNesMach *d, unsigned bank, unsigned addr) {
         if (bank >= (unsigned)(machine.prg_size >> 14) || bank > 15) return 0;
         d->rg.v[0] |= 0x0C; d->rg.v[3] = (uint8_t)bank;
         mapper_apply(d);
-    } else if (d->mapper == 71 || d->mapper == 94) {   /* Camerica / UN1ROM: a 16 KiB switchable $8000 slot */
+    } else if (d->mapper == 71 || d->mapper == 94 || d->mapper == 180) {   /* Camerica / UN1ROM: a 16 KiB switchable $8000 slot */
         if (bank >= (unsigned)(machine.prg_size >> 14) || bank > 7) return 0;
         d->rg.v[0] = (uint8_t)(d->mapper == 94 ? bank << 2 : bank);
         mapper_apply(d);
@@ -463,8 +470,14 @@ int dp_nesmach_enter(DpNesMach *d, unsigned bank, unsigned addr) {
 }
 
 /* MMC3: map an 8 KiB PRG bank under the switchable slot `addr` falls in ($8000-$BFFF in PRG mode 0, $C000-$DFFF in mode 1) */
-int dp_nesmach_cross16(const DpNesMach *d) { return d->mapper == 1 || d->mapper == 2 || d->mapper == 71 || d->mapper == 94; }
+int dp_nesmach_cross16(const DpNesMach *d) { return d->mapper == 1 || d->mapper == 2 || d->mapper == 71 || d->mapper == 94 || d->mapper == 180; }
 int dp_nesmach_mmc3_mode1(const DpNesMach *d) { return d->mapper == 4 && (d->rg.v[0] & 0x40); }
+/* the switchable PRG window a stream pointer must fall in: [lo, hi) */
+void dp_nesmach_window(const DpNesMach *d, unsigned *lo, unsigned *hi) {
+    *lo = 0x8000u; *hi = 0xC000u;
+    if (d->mapper == 180) { *lo = 0xC000u; *hi = 0x10000u; }
+    else if (dp_nesmach_mmc3_mode1(d)) { *lo = 0xC000u; *hi = 0xE000u; }
+}
 int dp_nesmach_map_8k(DpNesMach *d, unsigned addr, unsigned bank8) {
     if (d->mapper != 4 || addr < 0x8000u || addr >= 0xE000u || bank8 >= (unsigned)(machine.prg_size >> 13) || bank8 > 63) return 0;
     if (d->rg.v[0] & 0x40) {   /* PRG mode 1: R6 is the $C000 window, $8000 is fixed */
