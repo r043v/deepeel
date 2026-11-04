@@ -34,13 +34,6 @@ int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int kind,
                            int from_reset, uint32_t choice) {
     DpSpool *sp = ex->spool;
     if (!sp) return 0;
-    pthread_mutex_lock(&sp->mtx);
-    if ((ex->cfg.spool_cap_bytes && sp->wr - sp->rd >= ex->cfg.spool_cap_bytes) ||
-        (ex->cfg.spool_cap_mb && (sp->wr - sp->rd) / (1024 * 1024) >= ex->cfg.spool_cap_mb)) {
-        pthread_mutex_unlock(&sp->mtx);
-        u32_add(&ex->res->spool_refused, 1);
-        return 0;
-    }
     // machine images are mostly zeros and repeats: a fast zlib pass cuts the spool a lot
     uLongf clen = compressBound((uLong)ex->sb);
     uint8_t *cb = malloc(clen);
@@ -50,6 +43,14 @@ int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int kind,
         magic = DP_SPOOL_ZREC;
         body = clen;
         src = cb;
+    }
+    pthread_mutex_lock(&sp->mtx);
+    if ((ex->cfg.spool_cap_bytes && sp->wr - sp->rd >= ex->cfg.spool_cap_bytes) ||
+        (ex->cfg.spool_cap_mb && (sp->wr - sp->rd) / (1024 * 1024) >= ex->cfg.spool_cap_mb)) {
+        pthread_mutex_unlock(&sp->mtx);
+        free(cb);
+        u32_add(&ex->res->spool_refused, 1);
+        return 0;
     }
     uint64_t hdr[3] = { magic,
                         (uint64_t)(forced ? 1 : 0) | ((uint64_t)kind << 8) |

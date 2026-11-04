@@ -485,14 +485,16 @@ static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, in
                 sh->head = 0;
                 sh->cap = ncap;
                 u32_add(&ex->res->queue_growths, 1);
-            } else if (spool_write_rec(ex, img, forced, kind, from_reset, choice)) {
-                pthread_mutex_unlock(&sh->mtx);
-                tree_close_g(ex, choice, DP_ISSUE_SPOOLED);
-                free(img);
-                return 0;
             } else {
-                u32_add(&ex->res->queue_overflows, 1);
+                // the pool mutex is released before the spool write: zlib and the disk
+                // write must not serialize every worker behind the pool
                 pthread_mutex_unlock(&sh->mtx);
+                if (spool_write_rec(ex, img, forced, kind, from_reset, choice)) {
+                    tree_close_g(ex, choice, DP_ISSUE_SPOOLED);
+                    free(img);
+                    return 0;
+                }
+                u32_add(&ex->res->queue_overflows, 1);
                 // the pool and the spool are both at their wall: the worker keeps the
                 // state in its own holding area (merged into the leader's at the join)
                 if (defer_push(ex, img, forced, kind, from_reset, choice, DP_R_PATHS)) {

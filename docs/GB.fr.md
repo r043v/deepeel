@@ -2414,3 +2414,13 @@ plages (run antérieur `output/batch/marioland2` non relu ici). Spool : 71,5 M �
 22,9 Gio en attente. Hors ROM : 1 023 294 pas, 1 550 rattachés à une copie ROM (≈ 0,15 %) ; archive RAM :
 24 899 instructions distinctes, 12 rattachées à une copie ROM, 24 887 « générées », 282 auto-modifiées ;
 240 235 écritures SMC (premier au pc $0048). Même réserve que pour Zelda sur les fourches « key ».
+
+## 0.171.0 (moteur : le spool ne sérialise plus les explorateurs)
+
+Profil `perf` (`--unbounded --jobs 6`, Zelda) : `queue_push_pri` 27 % et `adler32_z` (zlib) 14 % du CPU, les six
+threads à ≈ 25 % chacun. Cause : quand le pool partagé débordait, `spool_write_rec` — compression zlib puis
+écriture — s'exécutait **sous le mutex du pool**, donc un explorateur à la fois. Correctif : le mutex du pool
+est relâché avant l'écriture, et la compression est faite avant de prendre le mutex du spool (seul `fseek`/
+`fwrite` reste sérialisé). Observation de l'outil sur 60 s de Zelda : 18,0 M pas contre 11,8 M avec 0.169.0
+(+53 %), 2,24 M états écrits contre 1,07 M. Le passage à l'échelle reste partiel (écriture et ensemble exact
+partagé toujours sous verrou) ; piste suivante : tampon RAM de tête de spool et ensemble exact découpé.
