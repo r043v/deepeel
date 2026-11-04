@@ -2946,3 +2946,18 @@ couvrent tout ce qu'une partie réelle exécute.
   (somme de contrôle) : ce n'est pas une couverture, la mesure à retenir est le code exécuté.
 - Limite : une seule graine, pas de progression volontaire dans les niveaux ; boucles réellement
   infinies sans trame bornées seulement par le budget total.
+
+## 0.200.0 : MD, démo (aucune touche) prioritaire, plafond de 2^24 pas corrigé (2026-11-04)
+
+- `deepeel md explore ROM --demo-frames N` : avant toute fourche, la console tourne N trames depuis
+  la mise sous tension **sans bouton pressé** (mode attract / démo), chemin naturel. Le rapport ajoute
+  `demo (no button pressed, from power-on): N frames, K ROM bytes executed`. Ordre voulu :
+  démo, puis TAS, puis le reste. Test `md_demo_frames`.
+- Bogue (touchait tout chemin long) : `dp_mdmach_run` renvoie `cut = 1` quand une tranche de 2^24 pas
+  est épuisée ; `run_sliced` s'arrêtait donc à la première tranche, plafonnant en silence tout chemin
+  naturel à 16,7 M de pas (≈ 2 434 trames de Sonic 1). Seul le budget de l'appelant termine désormais le chemin.
+- Bogue de test révélé : `demo_frames` non initialisé dans les options par défaut (échec aléatoire de `md_explore`).
+- Observations de l'outil, Sonic 1 (USA, Europe), démo seule (une exécution chacune) :
+  7 200 trames, 29 s, 31 648 octets exécutés par la démo (6,0 %) ; 30 000 trames, 119 s, 37 266 octets
+  (7,1 %). La démo plafonne vite : l'attract de Sonic 1 ne montre qu'un niveau ; le reste du code
+  demande des touches (TAS) ou des fourches. Total avec fourches : 48 004 octets (9,2 %).

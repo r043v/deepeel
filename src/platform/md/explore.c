@@ -61,6 +61,7 @@ typedef struct {
     int pad_read;
     int movie_active;
     int play_active;                 /* random played session running */
+    int play_idle;                   /* the played session presses nothing (demo / attract mode) */
     uint32_t play_left, play_rng, play_hold;
     uint8_t play_held;
     uint16_t op;
@@ -734,7 +735,7 @@ void dp_md_options_default(DpMdOptions *o) {
     o->entry_count = 0;
     o->pad_cut = 0;
     o->second_pass = 0;
-    o->novelty_steps = 0; o->novelty_frames = 240; o->novelty_archive = 256; o->novelty_cells = 0; o->play_seed = 1; o->play_frames = 0; o->play_sessions = 8; o->play_from = 0; o->play_step = 1;
+    o->novelty_steps = 0; o->novelty_frames = 240; o->novelty_archive = 256; o->novelty_cells = 0; o->play_seed = 1; o->play_frames = 0; o->demo_frames = 0; o->play_sessions = 8; o->play_from = 0; o->play_step = 1;
     o->skip_root = o->no_finalize = 0;
     o->entry_from = 0; o->entry_step = 1;
     o->pre_finalize = NULL; o->pre_user = NULL;
@@ -971,7 +972,8 @@ static uint64_t run_sliced(DpMdMach *m, uint64_t budget, int *cut, int *fault) {
         *cut = 0;
         uint64_t k = dp_mdmach_run(m, slice, cut, fault);
         n += k;
-        if (*cut || k < slice || n >= budget || dp_stop || *fault) break;
+        // a full slice reports cut (its own budget ran out): only the caller's budget ends the path
+        if (k < slice || n >= budget || dp_stop || *fault) break;
     }
     return n;
 }
@@ -1138,6 +1140,7 @@ static int md_archive_add(X *x, MdNov *N, uint64_t gain) {
 }
 // pad held 4..43 frames, no opposing directions (bits: U D L R B C A S): same shape as novelty trials
 static uint8_t play_pad(X *x) {
+    if (x->play_idle) return 0;
     if (!x->play_hold) {
         uint32_t v = md_rng(&x->play_rng);
         uint8_t h = (uint8_t)(v & 0xFF);
@@ -1412,6 +1415,19 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     }
     int cut = 0;
     int drain = o->lot_drain && dp_lf_pending(x.lot); // saved states only: no reset path, no stream replay
+    // demo: the console left alone from power-on, no button pressed (attract mode): the cheapest
+    // large natural coverage, so it runs before the forking exploration
+    if (!drain && o->demo_frames) {
+        uint64_t f0 = r->play_frames_run, e0 = 0, e1 = 0;
+        for (uint32_t k = 0; k < r->rom_size; k++) e0 += (r->flags[k] & DP_MDF_NATURAL) != 0;
+        dp_mdmach_reset(x.m);
+        x.play_active = 1; x.play_idle = 1; x.play_left = o->demo_frames;
+        run_path(&x, NULL, o->max_total, &cut);
+        x.play_active = 0; x.play_idle = 0;
+        for (uint32_t k = 0; k < r->rom_size; k++) e1 += (r->flags[k] & DP_MDF_NATURAL) != 0;
+        r->demo_run = r->play_frames_run - f0; r->demo_exec = e1 - e0;
+        dp_mdmach_reset(x.m);
+    }
     if (!drain && !o->skip_root) run_path(&x, NULL, o->max_total, &cut);
     x.movie_active = 0;
     r->decoders = x.ndec;
@@ -1667,6 +1683,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     if (r->disp_tables) fprintf(out, "  dispatch tables: %llu tables, %llu seeds, %llu refused targets\n", (unsigned long long)r->disp_tables, (unsigned long long)r->disp_seeds, (unsigned long long)r->disp_refused_view);
     if (r->state_exported) fprintf(out, "  state exported: deepest cell, %u frames from power-on\n", r->state_exported_depth);
     if (r->exact_dups) fprintf(out, "  exact dedup: %llu forks dropped (same clock-free machine)\n", (unsigned long long)r->exact_dups);
+    if (r->demo_run) fprintf(out, "  demo (no button pressed, from power-on): %llu frames, %llu ROM bytes executed\n", (unsigned long long)r->demo_run, (unsigned long long)r->demo_exec);
     if (r->play_sessions_run) fprintf(out, "  played sessions: %llu, %llu frames\n", (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run);
     if (r->watch_frames) fprintf(out, "  watch: %llu frames published\n", (unsigned long long)r->watch_frames);
     if (r->novelty_trials)

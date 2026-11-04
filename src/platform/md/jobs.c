@@ -45,7 +45,7 @@ static void fold(DpMdResults *a, uint8_t *bank_seen, void *user) {
     }
     a->jobs_folded++;
     for (unsigned i = 0; i < 128; i++) bank_seen[i] |= b->z80_bank_seen_out[i];
-    ADD(play_sessions_run); ADD(play_frames_run); ADD(s4_tables); ADD(s4_seeds); ADD(s4_refused); ADD(steps); ADD(paths); ADD(forks); ADD(irq_forks); ADD(pad_forks); ADD(sat_total); ADD(sat_path);
+    ADD(demo_run); ADD(demo_exec); ADD(play_sessions_run); ADD(play_frames_run); ADD(s4_tables); ADD(s4_seeds); ADD(s4_refused); ADD(steps); ADD(paths); ADD(forks); ADD(irq_forks); ADD(pad_forks); ADD(sat_total); ADD(sat_path);
     ADD(sat_visit); ADD(sat_queue); ADD(queue_growths); ADD(sat_site); ADD(fork_seen); ADD(fork_off_rom);
     ADD(entries_seeded); ADD(entries_refused); ADD(parked); ADD(parked_resumed); ADD(parked_lost);
     dp_ramarch_merge(&a->ra, &b->ra);
@@ -110,7 +110,7 @@ int dp_md_explore_jobs(const DpMdCart *c, const DpMdOptions *options, DpMdResult
     j->opt.no_finalize = 1;
     j->opt.entry_from = 1; j->opt.entry_step = 2;
     j->opt.lot_path = NULL; j->opt.lot_drain = 0;
-    j->opt.movie = NULL; j->opt.play_from = 1; j->opt.play_step = 2; j->opt.novelty_steps = 0; j->opt.watch_every = 0; j->opt.tree_path = NULL;
+    j->opt.movie = NULL; j->opt.demo_frames = 0; j->opt.play_from = 1; j->opt.play_step = 2; j->opt.novelty_steps = 0; j->opt.watch_every = 0; j->opt.tree_path = NULL;
     j->opt.second_pass = j->opt.bank_dispatch = 0;
     j->opt.pre_finalize = NULL;
     o.entry_from = 0; o.entry_step = 2; o.play_from = 0; o.play_step = 2;
