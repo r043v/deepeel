@@ -56,14 +56,16 @@ int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int kind,
                         (uint64_t)(forced ? 1 : 0) | ((uint64_t)kind << 8) |
                             ((uint64_t)(from_reset ? 1 : 0) << 16) | ((uint64_t)choice << 32),
                         magic == DP_SPOOL_ZREC ? (ex->sb | (body << 32)) : ex->sb };
-    int ok = !fseek(sp->f, (long)sp->wr, SEEK_SET) &&
+    int ok = (sp->wpos == sp->wr || !fseek(sp->f, (long)sp->wr, SEEK_SET)) &&
              fwrite(hdr, sizeof hdr, 1, sp->f) == 1 && fwrite(src, 1, body, sp->f) == body;
     free(cb);
     if (ok) {
         sp->wr += sizeof hdr + body;
+        sp->wpos = sp->wr;
         u32_add(&ex->res->spool_writes, 1);
         ex->res->spool_bytes = sp->wr - sp->rd;
     } else {
+        sp->wpos = UINT64_MAX;
         perror("deepeel spool");
     }
     pthread_mutex_unlock(&sp->mtx);
@@ -94,6 +96,7 @@ void spool_feed(DpExplorer *ex) {
             return;
         }
         uint64_t hdr[3];
+        sp->wpos = UINT64_MAX;
         if (fseek(sp->f, (long)sp->rd, SEEK_SET) ||
             fread(hdr, sizeof hdr, 1, sp->f) != 1 ||
             !((hdr[0] == DP_SPOOL_REC && hdr[2] == ex->sb) ||
@@ -168,6 +171,7 @@ int dp_explorer_spool_attach(DpExplorer *ex, const char *path, int resume) {
     if (!sp->f && resume) sp->f = fopen(path, "wb+");
     if (!sp->f) { free(sp); return 0; }
     pthread_mutex_init(&sp->mtx, NULL);
+    sp->wpos = UINT64_MAX;
     size_t pl = strlen(path);
     sp->cursor_path = xrealloc(NULL, pl + 4);
     memcpy(sp->cursor_path, path, pl);
@@ -520,6 +524,7 @@ uint64_t dp_explorer_spool_convert(DpExplorer *ex) {
     for (;;) {
         while (sp->rd < sp->wr && ex->defer_len < DP_DEFER_CAP) {
             uint64_t hdr[3];
+            sp->wpos = UINT64_MAX;
             if (fseek(sp->f, (long)sp->rd, SEEK_SET) || fread(hdr, sizeof hdr, 1, sp->f) != 1 ||
                 hdr[0] != DP_SPOOL_REC || hdr[2] != ex->sb) {
                 fprintf(stderr, "deepeel: spool corrupt at %llu, conversion stops\n", (unsigned long long)sp->rd);

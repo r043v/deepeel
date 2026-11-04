@@ -2433,3 +2433,12 @@ défaut), compteur `loop bound cuts` rapporté. Avec le cœur Genesis Plus GX pa
 `fix_md_fork` garde ses 2 fourches et ses 6 débuts d'opcode. `DBF` n'est pas un conditionnel de Musashi
 (`dbra`) : il n'est pas forcé, aucune fourche n'est attendue sur `fix_md_dbcc` ; parité de contrat avec le
 backend `m0boy` sur ces trois fixtures, pas de parité d'état complète.
+
+## 0.173.0 (moteur : écritures de spool consécutives sans `fseek`)
+
+Chaque `spool_write_rec` faisait un `fseek` vers la fin, ce qui vide le tampon stdio à chaque enregistrement
+même quand la position est déjà bonne. Le spool retient maintenant la position après la dernière écriture
+(`wpos`) et ne repositionne qu'après une lecture. Observation de l'outil, 60 s de Zelda, 6 explorateurs :
+36,9 M pas (18,0 M en 0.171.0, 11,8 M en 0.169.0), 5,64 M états écrits. Le spool grossit à ≈ 2 Gio/min dans ce
+régime : le garde-fou disque reste nécessaire pour les runs longs. Pas encore fait : tampon RAM de tête de
+spool (les lectures ne sont pas le goulot : 7 798 relus contre 5,64 M écrits) et ensemble exact découpé.

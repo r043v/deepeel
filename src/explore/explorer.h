@@ -384,6 +384,7 @@ typedef struct DpPendingSeed { uint16_t bank, pc; uint8_t kind, forced; } DpPend
 typedef struct DpSpool {
     FILE *f;
     uint64_t rd, wr;
+    uint64_t wpos; // file position after the last write (UINT64_MAX: a read moved it): consecutive appends skip the fseek
     pthread_mutex_t mtx;
     char *cursor_path; // <spool>.rd
 } DpSpool;
