@@ -143,3 +143,13 @@ Correction (0.247.1) : les « 32 161 858 pas » venaient du découpage en tranch
 fin de tranche), pas d'une boucle sans fin. Avec des tranches de 2^20, un run de 20 s s'arrête à 1 048 576 pas :
 le débit réel est ~45 000 pas/s, une fourche spoolée pour ~18 pas. Le spool n'est relu qu'à l'épuisement du chemin
 courant ; sur cette ROM, le coût est le nombre de fourches par pas, pas un blocage.
+
+## J13 : premiers essais NES, GG, PCE sur ROMs réelles (0.247.1)
+
+Observations de l'outil (machine concrète, RAM à zéro, ≤ 100 s, ROMs hors dépôt, sorties sur la partition Windows) :
+- NES, DuckTales (Europe), `--max-total 400000000` : PRG 128 Kio, 8 531 octets touchés (6,51 %), 1 958 188 pas, 1 527
+  chemins dont 1 488 forcés, 101 fautes, exécution hors PRG 496, 1 276 écritures dans des octets exécutés (code en RAM
+  auto-modifié, premier à $C1BA).
+- GG, Batman Returns (USA) : carte de 262 144 octets, connu 85,01 % (inféré 156 655), 60 000 000 pas, 1 520 chemins,
+  931 forks d'IRQ, `exec_outside` 89 680 ; 18 922 octets `data-copied`.
+Ces chiffres sont des essais courts, pas une campagne : ni saturation levée, ni comparaison à un autre outil.
