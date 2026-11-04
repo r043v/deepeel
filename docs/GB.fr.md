@@ -2586,3 +2586,9 @@ nulles). Résultat observé sur la même campagne : plus de 9 000 trames de film
 La fourche avance donc surtout après la fin des films (vidage parallèle). Le compteur « unknown » peut remonter : la
 passe d'inférence (`map.c`) classe un trou selon ses voisins (code–code ≤ 3 octets, données–données ≤ 1024, remplissage) ;
 un nouvel octet de code découvert au milieu d'un trou supprime l'inférence des deux moitiés, qui redeviennent inconnues.
+
+## 0.181.4 (`--mapwin` suit un film encore en cours)
+
+Quand le film affiché se termine (le film SML2 `mugg_masterjun_alyosha` n'a que 2 752 trames : c'est un enchaînement
+court qui finit aux crédits, pas une troncature), la fenêtre passe au film suivant encore en cours au lieu de
+figer sa dernière image (2704/2752).

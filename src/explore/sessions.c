@@ -1334,6 +1334,18 @@ int dp_play_poll(DpPlay *p) {
     if (frames) p->stagnation = glob_new ? 0 : p->stagnation + frames;
     p->unexplained = p->cfg.until_static ? dp_results_unexplained(p->res) : 0;
 
+    // the window follows a movie that is still playing: a finished one would freeze its last image
+    if (__atomic_load_n(&p->watch_fps, __ATOMIC_RELAXED)) {
+        int sel = __atomic_load_n(&p->watch_sel, __ATOMIC_RELAXED), alive_sel = 0, other = -1;
+        for (int i = 0; i < p->nworkers; i++) {
+            DpWorker *w = &p->w[i];
+            if (w->mode != IN_TAS || w->frames_done >= w->tas.frames) continue;
+            int mi = tas_movie_index(p, w);
+            if (mi == sel) alive_sel = 1;
+            else if (other < 0) other = mi;
+        }
+        if (!alive_sel && other >= 0) __atomic_store_n(&p->watch_sel, other, __ATOMIC_RELAXED);
+    }
     // sessions -> fork explorer: real play states become exploration seeds
     drain_inbox(p);
     // TAS captures -> snapshot PNGs (the seeding waits for the post-play phase)
