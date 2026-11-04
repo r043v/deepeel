@@ -2560,3 +2560,9 @@ versions 0.25.0 et 0.181.1 rejouent la même chose, donc ce n'est pas une régre
 du cœur V7, ou film qui joue vraiment ainsi) n'est **pas établie** faute d'un VBA 1.7.2 de référence compilé
 sans affichage (l'arbre `vba-rerecording` n'a pas le script de construction Unix, la maquette précédente était
 temporaire). Prochaine étape : reconstruire cette référence et comparer les hachages de WRAM par trame.
+
+## 0.181.2 (`--mapwin` : repeinture incrémentale)
+
+La fenêtre `--mapwin` garde les classes déjà peintes et ne repeint, à chaque rafraîchissement, que les octets dont la
+classe a changé (le tampon RVB persiste). `dp_map_build` recalcule encore la carte entière toutes les ~1 s : le calcul
+incrémental de la carte elle-même (bitmap de pages sales) reste à faire.

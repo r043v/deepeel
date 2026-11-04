@@ -741,6 +741,10 @@ static void *mw_main(void *arg) {
     DpMapSummary sum;
     memset(&sum, 0, sizeof sum);
     int have_map = 0;
+    uint8_t *prev = calloc((size_t)banks * 0x4000, 1);   // classes already painted: a refresh repaints only the bytes that changed
+    if (!prev) { free(px); SDL_DestroyTexture(tex); SDL_DestroyRenderer(ren); SDL_DestroyWindow(win); SDL_Quit(); return NULL; }
+    for (size_t i = 0; i < (size_t)W * (H - LEG_H); i++) px[i] = 0xff18181c;
+    int painted = 0;
     for (int first = 1, tick = 0; first || !atomic_load(&mw_quit); first = 0, tick++) {   // always one draw, even for a run that ends at once
         SDL_Event e;
         while (SDL_PollEvent(&e))
@@ -751,17 +755,20 @@ static void *mw_main(void *arg) {
         uint8_t *m = (tick % 4 == 0 || !have_map) ? dp_map_build(res, &sum) : NULL;   // the map every ~1 s, the screen every ~0.25 s
         if (m) {
             have_map = 1;
-            for (size_t i = 0; i < (size_t)W * (H - LEG_H); i++) px[i] = 0xff18181c;
             for (int b = 0; b < banks; b++) {
                 int ox = GAP + (b % PER_ROW) * (TILE * sc + GAP), oy = GAP + (b / PER_ROW) * (TILE * sc + GAP);
                 for (int g = 0; g < 0x4000; g++) {
-                    const uint8_t *c = dp_map_rgb(m[(size_t)b * 0x4000 + g]);
+                    size_t gi = (size_t)b * 0x4000 + g;
+                    if (painted && prev[gi] == m[gi]) continue;
+                    prev[gi] = m[gi];
+                    const uint8_t *c = dp_map_rgb(m[gi]);
                     uint32_t v = 0xff000000u | (uint32_t)c[0] << 16 | (uint32_t)c[1] << 8 | c[2];
                     int x = ox + (g % TILE) * sc, y = oy + (g / TILE) * sc;
                     for (int dy = 0; dy < sc; dy++)
                         for (int dx = 0; dx < sc; dx++) px[(size_t)(y + dy) * W + x + dx] = v;
                 }
             }
+            painted = 1;
             SDL_UpdateTexture(tex, NULL, px, W * 4);
             free(m);
         }
@@ -829,7 +836,7 @@ static void *mw_main(void *arg) {
             SDL_Delay(20);
         }
     }
-    free(px);
+    free(px); free(prev);
     SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
