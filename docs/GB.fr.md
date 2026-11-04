@@ -3151,3 +3151,11 @@ mappée dans la fenêtre `$4000` (la valeur MPR qui la désigne) et entrée à s
 forcée. Les pages qu'aucune valeur MPR ne désigne sont refusées et comptées (`entries_refused`).
 Le rapport affiche `bank roots: N pages seeded`. Observation de l'outil sur fixture, pas une
 mesure de matériel. Test : `test_seed_banks` (`tests/test_pce.c`).
+
+## NES : reprise de l'arbre de choix avec `--resume` (F2) (0.220.0)
+
+Avec `--tree FICHIER` et `--spool`/`--resume`, la reprise recharge l'arbre sauvegardé par le run
+précédent quand un lot disque est en attente. Les états relus portent des identifiants de nœud :
+sans rechargement, leurs parents pointaient dans le vide et la numérotation repartait de zéro.
+Le test `nes` (`tests/test_nes.c`) vérifie que le nombre de nœuds ne diminue pas et que la racine
+`reset` survit ; il échoue si le chargement est désactivé. NES seulement : MD et PCE restent à faire.

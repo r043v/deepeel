@@ -368,6 +368,21 @@ static void test_explorer(void) {
         CHECK(rr.lot_read >= left && rr.lot_pending == 0, "the lot is resumed and emptied");
         CHECK(access(lp, F_OK) != 0, "the emptied lot file is removed");
         dp_nes_results_free(&rr);
+        {   // F2 resume: the drain reloads the saved tree, the ids of the queued states stay valid
+            char tp[] = "/tmp/dp_nes_treeXXXXXX"; int tfd = mkstemp(tp); if (tfd >= 0) close(tfd);
+            DpNesResults rw; DpNesOptions ow = o; ow.lot_path = lp; ow.tree_path = tp; ow.max_total = found;
+            unlink(lp);
+            CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &ow, &rw), "walled run with tree");
+            uint32_t saved = rw.tree_count;
+            CHECK(rw.lot_pending > 0 && saved > 0, "tree saved with states pending");
+            dp_nes_results_free(&rw);
+            DpNesResults rd; DpNesOptions od = o; od.lot_path = lp; od.lot_drain = 1; od.tree_path = tp;
+            CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &od, &rd), "drain with tree");
+            CHECK(rd.tree_count >= saved, "resumed tree keeps its nodes (%u >= %u)", rd.tree_count, saved);
+            CHECK(rd.tree_nodes && rd.tree_count && rd.tree_nodes[0].kind == DP_NES_TREE_RESET, "the reset root survives the resume");
+            dp_nes_results_free(&rd);
+            unlink(tp);
+        }
         unlink(lp);
     }
     CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &o, &r), "explore runs");

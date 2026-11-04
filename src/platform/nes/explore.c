@@ -713,6 +713,28 @@ static uint32_t tree_add(DpNesRun *x, const DpNesPathState *s) {
     return ++r->tree_count;
 }
 
+// Resume: reload the choice tree a previous run saved, so the queued states read back from the
+// lot (which carry choice ids) keep valid parents and new nodes continue the numbering.
+static void tree_load(DpNesRun *x) {
+    DpNesResults *r = x->r;
+    FILE *tf = x->opt.tree_path ? fopen(x->opt.tree_path, "rb") : NULL;
+    if (!tf) return;
+    uint32_t hdr[3];
+    if (fread(hdr, sizeof hdr, 1, tf) == 1 && hdr[0] == 0x5a545044u && hdr[1] == 2 && hdr[2] < (1u << 28)) {
+        DpNesTreeNode *g = calloc(hdr[2] ? hdr[2] : 1, sizeof *g);
+        uint32_t n = 0;
+        while (g && n < hdr[2]) {
+            uint32_t rec[2]; uint16_t pc; uint8_t ki[2];
+            if (fread(rec, sizeof rec, 1, tf) != 1 || fread(&pc, 2, 1, tf) != 1 || fread(ki, 1, 2, tf) != 2) break;
+            g[n].parent = rec[0]; g[n].site = rec[1]; g[n].pc = pc; g[n].kind = ki[0]; g[n].issue = ki[1];
+            n++;
+        }
+        if (g && n == hdr[2]) { free(r->tree_nodes); r->tree_nodes = g; r->tree_count = n; r->tree_capacity = hdr[2] ? hdr[2] : 1; }
+        else free(g);
+    }
+    fclose(tf);
+}
+
 static void tree_close(DpNesRun *x, uint32_t id, int issue) {
     if (id && id <= x->r->tree_count) x->r->tree_nodes[id - 1].issue = (uint8_t)issue;
 }
@@ -1324,6 +1346,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
             dp_nesmach_save(x.m, snap);
             DpNesPathState root = { snap, 0, 0, 0, 0, 0, 0, DP_NES_TREE_RESET };
             r->seeds_reset = 1;
+            if (dp_lf_pending(x.lot)) tree_load(&x); // resumed lot: its states carry ids of the saved tree
             if ((x.opt.lot_drain && dp_lf_pending(x.lot)) || sk) { free(snap); r->seeds_reset = 0; } // drain: saved states only; secondary: no root
             else queue_push(&x, &root);
             // explicit entries: each is a root state with the bank and PC set
