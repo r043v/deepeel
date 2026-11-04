@@ -509,6 +509,32 @@ static void test_streams(void) {
     free(rom);
 }
 
+// S6 across UxROM banks: (bank, ptr) table in the fixed bank; bank 0's stream is only in the table
+static void test_streams_banked(void) {
+    unsigned sz = 16 + 4 * 0x4000;
+    uint8_t *rom = calloc(1, sz);
+    set_header(rom, 4, 0, 2);
+    put(rom, 3, 0x0000, 0xA9, 1, 0x8D, 0x00, 0x80, 0xA9, 0x00, 0x85, 0x10, 0xA9, 0x90, 0x85, 0x11, 0x20, 0x00, 0xC1,
+                        0xA9, 2, 0x8D, 0x00, 0x80, 0xA9, 0x10, 0x85, 0x10, 0xA9, 0x90, 0x85, 0x11, 0x20, 0x00, 0xC1,
+                        0x4C, 0x20, 0xC0, -1);
+    put(rom, 3, 0x0100, 0xA0, 0x00, 0xB1, 0x10, 0x60, -1);
+    put(rom, 1, 0x1000, 5, -1);
+    put(rom, 2, 0x1010, 6, -1);
+    put(rom, 0, 0x1020, 7, -1);
+    put(rom, 3, 0x1100, 1, 0x00, 0x90, 2, 0x10, 0x90, 0, 0x20, 0x90, -1);
+    set_vector(rom, 3, 0xFFFA, 0xC000);
+    set_vector(rom, 3, 0xFFFC, 0xC000);
+    set_vector(rom, 3, 0xFFFE, 0xC000);
+    DpNesResults r;
+    DpNesOptions o = dp_nes_options();
+    o.max_steps = 2000;
+    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "banked streams explore runs");
+    CHECK(r.s6_tables >= 1 && r.s6_runs >= 1, "banked table found and replayed");
+    CHECK(r.flags[0x1020] != 0, "bank 0's unplayed stream was read");
+    dp_nes_results_free(&r);
+    free(rom);
+}
+
 // RAM-code archive: bytes built by immediates, then run from $0300
 static void test_ramcode(void) {
     unsigned sz = 16 + 2 * 0x4000 + 0x2000;
@@ -562,6 +588,7 @@ int main(void) {
     test_snapshot();
     test_explorer();
     test_streams();
+    test_streams_banked();
     test_ramcode();
     test_smc();
     test_loop_bound();

@@ -2997,3 +2997,11 @@ registre de slot ($FFFE/$FFFF) puis HL/DE/BC = pointeur. Le rejeu est aussi déc
 sortie de la phase 0 quand la file est vidée (il ne l'était que sur une clôture à file vide).
 Fixture : `test_sega_streams` (flux de la banque 3 jamais appelé, lu par la table).
 Observation de l'outil, pas une mesure matérielle.
+
+## 0.205.0 : S6 NES (UxROM), tables de flux inter-banques (2026-11-04)
+
+Le rejeu de décodeurs NES lit aussi, sur UxROM (mapper 2), les tables `(banque, ptr lo, ptr hi)`
+au pas de 3 : deux départs observés avec leur banque physique localisent la table ; chaque entrée
+est rejouée depuis l'instantané avec la banque sélectionnée (`dp_nesmach_enter`) et le mot de page
+zéro réglé sur le pointeur. Fixture : `test_nes` (`test_streams_banked`, flux de la banque 0 jamais
+appelé). MMC1 et PCE restent à faire. Observation de l'outil, pas une mesure matérielle.

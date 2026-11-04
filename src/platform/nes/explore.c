@@ -162,7 +162,7 @@ static void record_register(DpNesRun *x, uint64_t path, uint64_t step,
 // table (same 16 KiB cell block, pointers in the same CPU slot); every other entry is
 // replayed from the pre-call snapshot with that zero-page word set to the pointer.
 enum { NS_DEC = 64, NS_START = 16, NS_FR = 16, NS_CAND = 2048 };
-typedef struct { uint32_t key; uint8_t zp, nstarts, replayed; uint16_t starts[NS_START]; uint8_t *snap; } NDec;
+typedef struct { uint32_t key; uint8_t zp, nstarts, replayed; uint16_t starts[NS_START]; uint8_t nx, xreplayed; struct { uint16_t bank, addr; } xs[NS_START]; uint8_t *snap; } NDec;
 typedef struct NStm {
     NDec dec[NS_DEC]; unsigned ndec;
     struct { uint32_t key; uint8_t sp, open; uint8_t zp[256]; } fr[NS_FR]; unsigned nfr;
@@ -210,6 +210,14 @@ static void nstm_read(DpNesRun *x, unsigned a) {
             unsigned j;
             for (j = 0; j < d->nstarts && d->starts[j] != a; j++) {}
             if (j == d->nstarts && j < NS_START && a >= 0x8000) d->starts[d->nstarts++] = (uint16_t)a;
+            if (a >= 0x8000 && a < 0xC000 && dp_nesmach_mapper(x->m) == 2) {   // UxROM: the bank rides with the address
+                int64_t ri = dp_nesmach_rom_index(x->m, a);
+                if (ri >= 0) {
+                    unsigned sb = (unsigned)(ri >> 14), q;
+                    for (q = 0; q < d->nx && !(d->xs[q].bank == sb && d->xs[q].addr == a); q++) {}
+                    if (q == d->nx && q < NS_START) { d->xs[q].bank = (uint16_t)sb; d->xs[q].addr = (uint16_t)a; d->nx++; }
+                }
+            }
             break;
         }
     }
@@ -219,13 +227,65 @@ static int nstm_ptr(const DpNesRun *x, size_t at, size_t lo, size_t hi, unsigned
     *v = (uint16_t)(x->image[at] | x->image[at + 1] << 8);
     return *v >= 0x8000 && (unsigned)(*v >> 14) == slot;
 }
+// UxROM banked streams: (bank, ptr lo, ptr hi) entries at stride 3; each is replayed with its
+// bank selected in the snapshot and the zero-page word set to the pointer.
+static int nstm_cross(DpNesRun *x, NDec *d) {
+    if (d->nx < 2 || d->nx <= d->xreplayed || dp_nesmach_mapper(x->m) != 2) return 0;
+    d->xreplayed = d->nx;
+    DpNesResults *r = x->r; int pushed = 0;
+    const unsigned nb = dp_nesmach_bank_count(x->m);
+    uint8_t *tried = calloc(x->image_size ? x->image_size : 1, 1);
+    if (!tried) return 0;
+    for (unsigned j = 0; j < d->nx; j++) {
+        size_t i = (size_t)d->xs[j].bank * 0x4000 + (d->xs[j].addr & 0x3FFF);
+        if (i < x->image_size) tried[i] = 1;
+    }
+    size_t pos[64]; unsigned np = 0;
+    for (size_t at = 0; at + 3 <= x->image_size && np < 64; at++) {
+        uint16_t v = (uint16_t)(x->image[at + 1] | x->image[at + 2] << 8);
+        for (unsigned j = 0; j < d->nx; j++) if (d->xs[j].bank == x->image[at] && d->xs[j].addr == v) { pos[np++] = at; break; }
+    }
+    unsigned cands = 0;
+#define NOKE(at) ((at) >= blo && (at) + 3 <= bhi && x->image[at] < nb && \
+    (uint16_t)(x->image[(at) + 1] | x->image[(at) + 2] << 8) >= 0x8000 && \
+    (uint16_t)(x->image[(at) + 1] | x->image[(at) + 2] << 8) < 0xC000)
+    for (unsigned i = 0; i + 1 < np; i++) {
+        if (pos[i + 1] - pos[i] != 3 || (pos[i] >> 14) != (pos[i + 1] >> 14)) continue;
+        size_t blo = (pos[i] >> 14) << 14, bhi = blo + 0x4000, lo = pos[i], hi = pos[i + 1];
+        while (lo >= blo + 3 && NOKE(lo - 3)) lo -= 3;
+        while (NOKE(hi + 3)) hi += 3;
+        r->s6_tables++;
+        for (size_t at = lo; at <= hi; at += 3) {
+            unsigned b = x->image[at]; uint16_t v = (uint16_t)(x->image[at + 1] | x->image[at + 2] << 8);
+            size_t idx = (size_t)b * 0x4000 + (v & 0x3FFF);
+            if (idx >= x->image_size || tried[idx]) continue;
+            tried[idx] = 1;
+            if (cands >= NS_CAND) { r->s6_sat++; break; }
+            cands++; r->s6_candidates++;
+            uint8_t *img = malloc(dp_nesmach_state_size());
+            if (!img) continue;
+            dp_nesmach_load(x->m, d->snap);
+            dp_nesmach_enter(x->m, b, dp_nesmach_pc(x->m));
+            dp_nesmach_save(x->m, img);
+            uint8_t *ram = dp_nesmach_state_ram(img);
+            ram[d->zp] = (uint8_t)v; ram[d->zp + 1] = (uint8_t)(v >> 8);
+            DpNesPathState ps = { img, 1, 0, 0, 0, 0, 0, DP_NES_TREE_BRANCH };
+            if (snap_push(x, &ps)) { r->s6_runs++; pushed++; }
+        }
+    }
+#undef NOKE
+    free(tried);
+    return pushed;
+}
 static int nstm_replay(DpNesRun *x) {
     NStm *s = x->stm;
     if (!s) return 0;
     DpNesResults *r = x->r; int pushed = 0;
     for (unsigned di = 0; di < s->ndec; di++) {
         NDec *d = &s->dec[di];
-        if (d->nstarts < 2 || d->nstarts <= d->replayed || !d->snap) continue;
+        if (!d->snap) continue;
+        pushed += nstm_cross(x, d);
+        if (d->nstarts < 2 || d->nstarts <= d->replayed) continue;
         d->replayed = d->nstarts;
         unsigned slot = d->starts[0] >> 14;
         uint8_t *tried = calloc(65536, 1);
