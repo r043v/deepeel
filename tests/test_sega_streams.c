@@ -25,6 +25,25 @@ int main(void) {
     CHECK(r.s6_runs >= 1);
     CHECK(r.flags[0x330] & DP_SEGA_DATA);
     dp_sega_results_free(&r);
+    {   // S6 across banks: (bank, ptr) table, streams read through slot 2; bank 3's is only in the table
+        static uint8_t big[0x10000];
+        memset(big, 0xFF, sizeof big);
+        memset(big, 0, 0x500);
+        const uint8_t mc[] = {0x3E, 1, 0x32, 0xFF, 0xFF, 0x21, 0x00, 0x80, 0xCD, 0x00, 0x02,
+                              0x3E, 2, 0x32, 0xFF, 0xFF, 0x21, 0x10, 0x80, 0xCD, 0x00, 0x02, 0x76};
+        memcpy(big, mc, sizeof mc);
+        memcpy(big + 0x200, dec, sizeof dec);
+        const uint8_t b1[] = {1, 2, 3, 0}, b2[] = {5, 0}, b3[] = {7, 8, 0};
+        memcpy(big + 0x4000, b1, sizeof b1); memcpy(big + 0x8010, b2, sizeof b2); memcpy(big + 0xC020, b3, sizeof b3);
+        const uint8_t tb[] = {1, 0x00, 0x80, 2, 0x10, 0x80, 3, 0x20, 0x80};
+        memcpy(big + 0x400, tb, sizeof tb);
+        DpSegaResults rb;
+        memset(&rb, 0, sizeof rb);
+        CHECK(dp_sega_explore(dp_sega_system("sms"), big, sizeof big, &o, &rb));
+        CHECK(rb.s6_tables >= 1 && rb.s6_runs >= 1);
+        CHECK(rb.flags[0xC020] & DP_SEGA_DATA);
+        dp_sega_results_free(&rb);
+    }
     {   // typed audio: PSG and YM2413 port writes show in the report
         static uint8_t rom3[0x8000];
         memset(rom3, 0xFF, sizeof rom3);

@@ -547,7 +547,7 @@ static int push(Run *x,int forced,int skip_irq) { return push_to(x,forced,skip_i
 // 16 KiB physical block, pointers in the same CPU region); every other entry is replayed
 // from the pre-call snapshot with the register set to the pointer.
 enum { ZS_DEC=64, ZS_START=16, ZS_FR=16, ZS_CAND=2048 };
-typedef struct { uint32_t key; uint8_t reg,nstarts,replayed; uint16_t starts[ZS_START]; Path snap; } ZDec;
+typedef struct { uint32_t key; uint8_t reg,nstarts,replayed; uint16_t starts[ZS_START]; uint8_t nx,xreplayed; struct { uint16_t bank,addr; } xs[ZS_START]; Path snap; } ZDec;
 typedef struct ZStm {
     ZDec dec[ZS_DEC]; unsigned ndec;
     struct { uint32_t key; uint16_t sp,reg[3]; uint8_t open; } fr[ZS_FR]; unsigned nfr;
@@ -593,7 +593,12 @@ static void zstm_read(Run *x,uint16_t a,int64_t index) {
             }
             unsigned j; for(j=0;j<d->nstarts && d->starts[j]!=a;j++) {}
             if(j==d->nstarts && j<ZS_START && a>=0x40) d->starts[d->nstarts++]=a;
-            (void)index; break;
+            if(index>=0 && a>=0x4000) {   // cross-bank starts: the physical bank rides with the address
+                const uint16_t sb=(uint16_t)(index>>14); unsigned q;
+                for(q=0;q<d->nx && !(d->xs[q].bank==sb && d->xs[q].addr==a);q++) {}
+                if(q==d->nx && q<ZS_START) { d->xs[q].bank=sb; d->xs[q].addr=a; d->nx++; }
+            }
+            break;
         }
     }
 }
@@ -602,13 +607,57 @@ static int zstm_ptr(const Run *x,size_t at,size_t lo,size_t hi,unsigned region,u
     *v=(uint16_t)(x->image[at]|x->image[at+1]<<8);
     return (*v>>14)==region && *v>=0x40;
 }
+// Banked streams (Sega mapper): (bank, ptr lo, ptr hi) entries, two at stride 3 locate the table;
+// each entry is replayed with its bank written to the slot register ($FFFE slot 1, $FFFF slot 2).
+static int zstm_cross(Run *x,ZDec *d) {
+    if(d->nx<2 || d->nx<=d->xreplayed || x->b->mapper()!=DP_SEGA_MAPPER_SEGA) return 0;
+    d->xreplayed=d->nx;
+    DpSegaResults *r=x->r; int pushed=0;
+    const size_t nb=r->size>>14;
+    uint8_t *tried=calloc(r->size?r->size:1,1); if(!tried) return 0;
+    for(unsigned j=0;j<d->nx;j++) { size_t i=(size_t)d->xs[j].bank*0x4000+(d->xs[j].addr&0x3FFF); if(i<r->size) tried[i]=1; }
+    size_t pos[64]; unsigned np=0;
+    for(size_t at=0;at+3<=r->size && np<64;at++) {
+        unsigned b=x->image[at]; uint16_t v=(uint16_t)(x->image[at+1]|x->image[at+2]<<8);
+        for(unsigned j=0;j<d->nx;j++) if(d->xs[j].bank==b && d->xs[j].addr==v) { pos[np++]=at; break; }
+    }
+    unsigned cands=0;
+    for(unsigned i=0;i+1<np;i++) {
+        if(pos[i+1]-pos[i]!=3 || (pos[i]>>14)!=(pos[i+1]>>14)) continue;
+        size_t blo=(pos[i]>>14)<<14,bhi=blo+0x4000,lo=pos[i],hi=pos[i+1];
+#define OKE(at) ((at)>=blo && (at)+3<=bhi && x->image[at]>=1 && x->image[at]<nb && (uint16_t)(x->image[(at)+1]|x->image[(at)+2]<<8)>=0x4000 && (uint16_t)(x->image[(at)+1]|x->image[(at)+2]<<8)<0xC000)
+        while(lo>=blo+3 && OKE(lo-3)) lo-=3;
+        while(OKE(hi+3)) hi+=3;
+#undef OKE
+        r->s6_tables++;
+        for(size_t at=lo;at<=hi;at+=3) {
+            unsigned b=x->image[at]; uint16_t v=(uint16_t)(x->image[at+1]|x->image[at+2]<<8);
+            size_t idx=(size_t)b*0x4000+(v&0x3FFF);
+            if(tried[idx]) continue;
+            tried[idx]=1;
+            if(cands>=ZS_CAND) { r->s6_sat++; break; }
+            cands++; r->s6_candidates++;
+            x->b->load(d->snap.state); memcpy(x->cart,d->snap.cart,0x8000);
+            dp_sega_closure_invalidate(x->closure);
+            memcpy(x->origins,d->snap.origins,x->origin_size);
+            x->b->write(v>=0x8000?0xFFFF:0xFFFE,(uint8_t)b);
+            z80_t *c=x->b->cpu();
+            if(d->reg==0) c->hl=v; else if(d->reg==1) c->de=v; else c->bc=v;
+            if(push_to(x,1,0,0,DP_SEGA_TREE_BRANCH)>0) { r->s6_runs++; pushed++; }
+        }
+    }
+    free(tried);
+    return pushed;
+}
 // the worklists are empty: replay every decoder over its pointer tables
 static int zstm_replay(Run *x) {
     ZStm *s=x->stm; if(!s) return 0;
     DpSegaResults *r=x->r; int pushed=0;
     for(unsigned di=0;di<s->ndec;di++) {
         ZDec *d=&s->dec[di];
-        if(d->nstarts<2 || d->nstarts<=d->replayed || !d->snap.state) continue;
+        if(!d->snap.state) continue;
+        pushed+=zstm_cross(x,d);
+        if(d->nstarts<2 || d->nstarts<=d->replayed) continue;
         d->replayed=d->nstarts;
         unsigned region=d->starts[0]>>14;
         uint8_t *tried=calloc(65536,1); if(!tried) continue;
@@ -1510,6 +1559,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
         uint64_t start_steps=r->steps,start_paths=r->paths,budget=r->phase_limits[phase];
         if(phase==2 && budget) generate_indirect_specs(&x);
         if(phase && budget) { memset(x.forks,0,sites); memset(x.sides,0,sites); memset(x.irq_forks,0,sites); }
+        again:
         while((x.queued || x.defer_n || (phase && x.input_queued) ||
                (phase!=1 && x.seed_next<x.seed_count) ||
                (!phase && x.spool_rd<x.spool_wr)) && r->steps-start_steps<budget) {
@@ -1685,6 +1735,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
             x.cur_choice=0;
             if(!phase && !x.queued && !x.defer_n) zstm_replay(&x); // S6: decoders over their pointer tables
         }
+        if(!phase && r->steps-start_steps<budget && zstm_replay(&x)>0) goto again;   // S6 once the frontier is drained
         r->phase_steps[phase]=r->steps-start_steps; r->phase_paths[phase]=r->paths-start_paths;
         if(phase!=1) r->seeds_pending=x.seed_count-x.seed_next;
         if(phase==2) r->indirect_pending=r->seeds_pending;

@@ -2987,3 +2987,13 @@ couvrent tout ce qu'une partie réelle exécute.
   ($2000) avant l'appel. Fixture `fix_streams_bank` : le flux de la banque 3, jamais appelé par la ROM, est lu.
   Rapport `stream replay (S6)` : 1 table, 1 candidat (0 sans le correctif).
 - Limite restante : tables à stride ≠ 3, banque codée ailleurs que dans l'entrée (octet séparé), registre de banque autre que $2000.
+
+## 0.204.0 : S6 Sega/Z80, tables de flux inter-banques (2026-11-04)
+
+Le rejeu de décodeurs de la famille Z80 (SMS/GG/SG-1000) lit aussi les tables
+`(banque, ptr lo, ptr hi)` au pas de 3 : deux départs observés avec leur banque physique
+localisent la table, chaque entrée est rejouée depuis l'instantané avec la banque écrite au
+registre de slot ($FFFE/$FFFF) puis HL/DE/BC = pointeur. Le rejeu est aussi déclenché à la
+sortie de la phase 0 quand la file est vidée (il ne l'était que sur une clôture à file vide).
+Fixture : `test_sega_streams` (flux de la banque 3 jamais appelé, lu par la table).
+Observation de l'outil, pas une mesure matérielle.
