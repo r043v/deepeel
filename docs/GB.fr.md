@@ -2677,3 +2677,10 @@ inter-registres non modélisés. J14 « provenance exacte » reste donc ouvert s
 pokemon-speedrunning) et `tools/gambatte_lr.cpp` (adaptateur `DpLrTraceApi` en processus) compilent et
 s'éditent de liens, mais **n'ont jamais été exécutés** : aucune parité n'est donc établie, J11/J12 restent ouverts.
 Limites connues : `rom_index` sans mapper seulement, valeur lue passée à 0, callbacks `dma`/`bank` non branchés.
+
+## 0.187.1 — MD : le producteur traverse `exg` et `movem`
+
+`exg Rx,Ry` échange les teintes ; `movem` registres→mémoire écrit la teinte du premier registre de la liste (forme à
+un seul registre épinglée par `fix_md_ramexg`, test `rtcode_md_exg_movem`). Limites : listes de plusieurs registres
+approchées par le registre le plus récemment teinté trouvé dans le texte, `movem` mémoire→registres et pré-décrément
+non modélisés.

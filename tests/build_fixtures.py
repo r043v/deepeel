@@ -508,6 +508,12 @@ def build_md(out):
     r[0x200:0x200 + len(code)] = code
     r[0x400:0x402] = bytes.fromhex("8fbd")
     save_md(out, "fix_md_ramgen", r)
+    # taint through exg and movem: word read from ROM, swapped between registers, stored by movem, executed
+    r = md_rom()
+    code = bytes.fromhex("41f9 0000 0400 43f9 00ff 0000 3210 c342 4891 0004 4eb9 00ff 0000 60fe")
+    r[0x200:0x200 + len(code)] = code
+    r[0x400:0x402] = bytes.fromhex("4e75")
+    save_md(out, "fix_md_ramexg", r)
     # A 2 MiB+ cartridge with SRAM overlay: execute and read SRAM without
     # accidentally attributing those accesses to the covered ROM bytes.
     r = md_rom()

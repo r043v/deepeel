@@ -167,6 +167,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nsstack.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_dma.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ramgen.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ramexg.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ramsrc.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_z80.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes
@@ -441,3 +442,6 @@ set_tests_properties(rtcode_md_source PROPERTIES FIXTURES_REQUIRED fixtures TIME
 
 add_test(NAME rtcode_md_generated COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_ramgen.md --rtcode $D/mg.rt --text $D/mg.txt >/dev/null 2>&1; grep -Eq '^0000 7042 [0-9]+ -1 1024$' $D/mg.rt && grep -Eq '^0002 4e75 [0-9]+ -1 -1$' $D/mg.rt && grep -Eq 'runtime code archive: .* [1-9][0-9]* generated with an approximate ROM producer' $D/mg.txt")
 set_tests_properties(rtcode_md_generated PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+
+add_test(NAME rtcode_md_exg_movem COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_ramexg.md --rtcode $D/me.rt --text $D/me.txt >/dev/null 2>&1; grep -Eq '^0000 4e75 [0-9]+ -1 1024$' $D/me.rt")
+set_tests_properties(rtcode_md_exg_movem PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)

@@ -393,7 +393,20 @@ static void taint_step(X *x, uint32_t pc, unsigned len) {
     char mn[96]; snprintf(mn, sizeof mn, "%s", buf);
     char *dot = strchr(mn, '.'); if (dot) *dot = 0;
     int32_t v = -1; int has_v = 0;   // has_v: the destination receives v
-    if (!strncmp(mn, "movem", 5)) { has_v = 0; v = -1; }
+    if (!strncmp(mn, "movem", 5)) {
+        // register list -> memory: the stored words take the first tainted register of the list;
+        // memory -> registers: the registers take what the instruction read.
+        int a0; int dr = dst ? op_reg(dst, &a0) : -1;
+        if (src && dst && dr < 0 && strchr(src, ',') == NULL && regs_taint(x, src) >= -1 && (src[0] == 'd' || src[0] == 'a')) {
+            v = regs_taint(x, src); has_v = 1;
+        }
+    } else if (!strcmp(mn, "exg") && src && dst) {
+        int ia, ib, ra = op_reg(src, &ia), rb = op_reg(dst, &ib);
+        if (ra >= 0 && rb >= 0) {
+            int32_t *pa = ia ? &x->ataint[ra] : &x->dtaint[ra], *pb = ib ? &x->ataint[rb] : &x->dtaint[rb];
+            int32_t t = *pa; *pa = *pb; *pb = t;
+        }
+    }
     else if (!strcmp(mn, "move") || !strcmp(mn, "movea")) { v = src ? op_taint(x, src) : -1; has_v = 1; }
     else if (!strcmp(mn, "moveq") || !strcmp(mn, "clr")) { v = -1; has_v = 1; if (!dst) dst = src; }
     else if (!strcmp(mn, "lea")) { v = src ? regs_taint(x, src) : -1; has_v = 1; }
