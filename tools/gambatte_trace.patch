@@ -16,15 +16,25 @@ index 195c98a..9fb2f9f 100644
  	/**
  	  * Saves emulator state to the state slot selected with selectState().
 diff --git a/libgambatte/src/cpu.cpp b/libgambatte/src/cpu.cpp
-index fee1741..d98bf77 100644
+index fee1741..9e87b98 100644
 --- a/libgambatte/src/cpu.cpp
 +++ b/libgambatte/src/cpu.cpp
-@@ -502,6 +502,18 @@ void CPU::loadState(SaveState const &state) {
+@@ -17,6 +17,7 @@
+ //
+ 
+ #include "cpu.h"
++#include "dp_trace.h"
+ #include "memory.h"
+ #include "savestate.h"
+ 
+@@ -502,6 +503,20 @@ void CPU::loadState(SaveState const &state) {
  	PC_MOD(high << 8 | low); \
  } while (0)
  
 +
 +// ---- deepeel trace extension: branch observation / forcing (see tools/gambatte_trace.patch) ----
++void (*dp_dma_cb)(unsigned, unsigned, unsigned) = 0;
++void (*dp_bank_cb)(unsigned, unsigned) = 0;
 +int dp_force_cond = -1;                 // -1 natural, 0/1 force the next conditional
 +void (*dp_branch_cb)(unsigned pc) = 0;  // a conditional is decided at pc (opcode address)
 +unsigned dp_op_pc = 0;
@@ -38,7 +48,7 @@ index fee1741..d98bf77 100644
  namespace {
  
  unsigned long freeze(Memory &mem, unsigned long cc) {
-@@ -571,6 +583,7 @@ void CPU::process(unsigned long const cycles) {
+@@ -571,6 +586,7 @@ void CPU::process(unsigned long const cycles) {
  				result[13] = mem_.ff_read<false>(0x44, cc());
  			}
  
@@ -46,7 +56,7 @@ index fee1741..d98bf77 100644
  			if (!prefetched_) {
  				PC_READ_OPCODE(opcode);
  			} else {
-@@ -737,7 +750,7 @@ void CPU::process(unsigned long const cycles) {
+@@ -737,7 +753,7 @@ void CPU::process(unsigned long const cycles) {
  				// jr nz,disp (12;8 cycles):
  				// Jump to value of next (signed) byte in memory+current address if ZF is unset:
  			case 0x20:
@@ -55,7 +65,7 @@ index fee1741..d98bf77 100644
  					jr_disp();
  				} else {
  					unsigned char temp;
-@@ -806,7 +819,7 @@ void CPU::process(unsigned long const cycles) {
+@@ -806,7 +822,7 @@ void CPU::process(unsigned long const cycles) {
  				// jr z,disp (12;8 cycles):
  				// Jump to value of next (signed) byte in memory+current address if ZF is set:
  			case 0x28:
@@ -64,7 +74,7 @@ index fee1741..d98bf77 100644
  					unsigned char temp;
  					PC_READ_OPERAND(temp, operandHigh);
  				} else {
-@@ -856,7 +869,7 @@ void CPU::process(unsigned long const cycles) {
+@@ -856,7 +872,7 @@ void CPU::process(unsigned long const cycles) {
  				// jr nc,disp (12;8 cycles):
  				// Jump to value of next (signed) byte in memory+current address if CF is unset:
  			case 0x30:
@@ -73,7 +83,7 @@ index fee1741..d98bf77 100644
  					unsigned char temp;
  					PC_READ_OPERAND(temp, operandHigh);
  				} else {
-@@ -944,7 +957,7 @@ void CPU::process(unsigned long const cycles) {
+@@ -944,7 +960,7 @@ void CPU::process(unsigned long const cycles) {
  				// jr c,disp (12;8 cycles):
  				// Jump to value of next (signed) byte in memory+current address if CF is set:
  			case 0x38:
@@ -82,7 +92,7 @@ index fee1741..d98bf77 100644
  					jr_disp();
  				} else {
  					unsigned char temp;
-@@ -1190,7 +1203,7 @@ void CPU::process(unsigned long const cycles) {
+@@ -1190,7 +1206,7 @@ void CPU::process(unsigned long const cycles) {
  			case 0xC0:
  				cc() += 4;
  
@@ -91,7 +101,7 @@ index fee1741..d98bf77 100644
  					ret();
  
  				break;
-@@ -1202,7 +1215,7 @@ void CPU::process(unsigned long const cycles) {
+@@ -1202,7 +1218,7 @@ void CPU::process(unsigned long const cycles) {
  				// jp nz,nn (16;12 cycles):
  				// Jump to address stored in next two bytes in memory if ZF is unset:
  			case 0xC2:
@@ -100,7 +110,7 @@ index fee1741..d98bf77 100644
  					jp_nn();
  				} else {
  					unsigned char temp;
-@@ -1220,7 +1233,7 @@ void CPU::process(unsigned long const cycles) {
+@@ -1220,7 +1236,7 @@ void CPU::process(unsigned long const cycles) {
  				// Push address of next instruction onto stack and then jump to
  				// address stored in next two bytes in memory, if ZF is unset:
  			case 0xC4:
@@ -109,7 +119,7 @@ index fee1741..d98bf77 100644
  					call_nn();
  				} else {
  					unsigned char temp;
-@@ -1251,7 +1264,7 @@ void CPU::process(unsigned long const cycles) {
+@@ -1251,7 +1267,7 @@ void CPU::process(unsigned long const cycles) {
  			case 0xC8:
  				cc() += 4;
  
@@ -118,7 +128,7 @@ index fee1741..d98bf77 100644
  					ret();
  
  				break;
-@@ -1265,7 +1278,7 @@ void CPU::process(unsigned long const cycles) {
+@@ -1265,7 +1281,7 @@ void CPU::process(unsigned long const cycles) {
  				// jp z,nn (16;12 cycles):
  				// Jump to address stored in next two bytes in memory if ZF is set:
  			case 0xCA:
@@ -127,7 +137,7 @@ index fee1741..d98bf77 100644
  					unsigned char temp;
  					PC_READ_OPERAND(temp, operandHigh);
  					PC_READ_OPERAND(temp, operandLow);
-@@ -1697,7 +1710,7 @@ void CPU::process(unsigned long const cycles) {
+@@ -1697,7 +1713,7 @@ void CPU::process(unsigned long const cycles) {
  				// Push address of next instruction onto stack and then jump to
  				// address stored in next two bytes in memory, if ZF is set:
  			case 0xCC:
@@ -136,7 +146,7 @@ index fee1741..d98bf77 100644
  					unsigned char temp;
  					PC_READ_OPERAND(temp, operandHigh);
  					PC_READ_OPERAND(temp, operandLow);
-@@ -1729,7 +1742,7 @@ void CPU::process(unsigned long const cycles) {
+@@ -1729,7 +1745,7 @@ void CPU::process(unsigned long const cycles) {
  			case 0xD0:
  				cc() += 4;
  
@@ -145,7 +155,7 @@ index fee1741..d98bf77 100644
  					ret();
  
  				break;
-@@ -1741,7 +1754,7 @@ void CPU::process(unsigned long const cycles) {
+@@ -1741,7 +1757,7 @@ void CPU::process(unsigned long const cycles) {
  				// jp nc,nn (16;12 cycles):
  				// Jump to address stored in next two bytes in memory if CF is unset:
  			case 0xD2:
@@ -154,7 +164,7 @@ index fee1741..d98bf77 100644
  					unsigned char temp;
  					PC_READ_OPERAND(temp, operandHigh);
  					PC_READ_OPERAND(temp, operandLow);
-@@ -1759,7 +1772,7 @@ void CPU::process(unsigned long const cycles) {
+@@ -1759,7 +1775,7 @@ void CPU::process(unsigned long const cycles) {
  				// Push address of next instruction onto stack and then jump to
  				// address stored in next two bytes in memory, if CF is unset:
  			case 0xD4:
@@ -163,7 +173,7 @@ index fee1741..d98bf77 100644
  					unsigned char temp;
  					PC_READ_OPERAND(temp, operandHigh);
  					PC_READ_OPERAND(temp, operandLow);
-@@ -1791,7 +1804,7 @@ void CPU::process(unsigned long const cycles) {
+@@ -1791,7 +1807,7 @@ void CPU::process(unsigned long const cycles) {
  			case 0xD8:
  				cc() += 4;
  
@@ -172,7 +182,7 @@ index fee1741..d98bf77 100644
  					ret();
  
  				break;
-@@ -1811,7 +1824,7 @@ void CPU::process(unsigned long const cycles) {
+@@ -1811,7 +1827,7 @@ void CPU::process(unsigned long const cycles) {
  				// jp c,nn (16;12 cycles):
  				// Jump to address stored in next two bytes in memory if CF is set:
  			case 0xDA:
@@ -181,7 +191,7 @@ index fee1741..d98bf77 100644
  					jp_nn();
  				} else {
  					unsigned char temp;
-@@ -1829,7 +1842,7 @@ void CPU::process(unsigned long const cycles) {
+@@ -1829,7 +1845,7 @@ void CPU::process(unsigned long const cycles) {
  				// Push address of next instruction onto stack and then jump to
  				// address stored in next two bytes in memory, if CF is set:
  			case 0xDC:
@@ -203,6 +213,20 @@ index 0a496a0..7112f06 100644
  	bool getMemoryArea(int which, unsigned char **data, int *length) { return mem_.getMemoryArea(which, data, length); }
  
  	void setVideoBuffer(uint_least32_t *videoBuf, std::ptrdiff_t pitch) {
+diff --git a/libgambatte/src/dp_trace.h b/libgambatte/src/dp_trace.h
+new file mode 100644
+index 0000000..5873574
+--- /dev/null
++++ b/libgambatte/src/dp_trace.h
+@@ -0,0 +1,8 @@
++#ifndef DP_TRACE_H
++#define DP_TRACE_H
++// deepeel trace extension: hardware copy / bank switch observers (defined in cpu.cpp)
++namespace gambatte {
++extern void (*dp_dma_cb)(unsigned src, unsigned dst, unsigned len);
++extern void (*dp_bank_cb)(unsigned window, unsigned bank);
++}
++#endif
 diff --git a/libgambatte/src/gambatte.cpp b/libgambatte/src/gambatte.cpp
 index af1d06f..eb2e034 100644
 --- a/libgambatte/src/gambatte.cpp
@@ -230,6 +254,62 @@ index 5cca6dc..7d15044 100644
  	unsigned char * wramdata(unsigned area) const { return memptrs_.wramdata(area); }
  	unsigned char const * rdisabledRam() const { return memptrs_.rdisabledRam(); }
  	unsigned char const * rsrambankptr() const { return memptrs_.rsrambankptr(); }
+diff --git a/libgambatte/src/mem/memptrs.cpp b/libgambatte/src/mem/memptrs.cpp
+index 23c7ce6..5225890 100644
+--- a/libgambatte/src/mem/memptrs.cpp
++++ b/libgambatte/src/mem/memptrs.cpp
+@@ -17,6 +17,7 @@
+ //
+ 
+ #include "memptrs.h"
++#include "../dp_trace.h"
+ 
+ #include <algorithm>
+ 
+@@ -212,6 +213,7 @@ void MemPtrs::setAddrBank(unsigned short addr, unsigned bank) {
+ }
+ 
+ void MemPtrs::setRombank0(unsigned bank) {
++	if (dp_bank_cb) dp_bank_cb(0, bank);
+ 	banks_[ROM0_BANK] = bank;
+ 	romdata_[0] = romdata() + bank * rombank_size();
+ 	rmem_[0x3] = rmem_[0x2] = rmem_[0x1] = rmem_[0x0] = romdata_[0];
+@@ -219,6 +221,7 @@ void MemPtrs::setRombank0(unsigned bank) {
+ }
+ 
+ void MemPtrs::setRombank(unsigned bank) {
++	if (dp_bank_cb) dp_bank_cb(1, bank);
+ 	banks_[ROMX_BANK] = bank;
+ 	romdata_[1] = romdata() + bank * rombank_size() - mm_rom1_begin;
+ 	rmem_[0x7] = rmem_[0x6] = rmem_[0x5] = rmem_[0x4] = romdata_[1];
+diff --git a/libgambatte/src/memory.cpp b/libgambatte/src/memory.cpp
+index 3e73668..22e857d 100644
+--- a/libgambatte/src/memory.cpp
++++ b/libgambatte/src/memory.cpp
+@@ -17,6 +17,7 @@
+ //
+ 
+ #include "memory.h"
++#include "dp_trace.h"
+ #include "gambatte.h"
+ #include "inputgetter.h"
+ #include "savestate.h"
+@@ -331,6 +332,7 @@ unsigned long Memory::dma(unsigned long cc) {
+ 	unsigned dmaDest = dmaDestination_;
+ 	unsigned dmaLength = ((ioamhram_[0x155] & 0x7F) + 1) * 0x10;
+ 	unsigned length = hdmaReqFlagged(intreq_) ? 0x10 : dmaLength;
++	if (dp_dma_cb) dp_dma_cb(dmaSrc, dmaDest, length);
+ 
+ 	if (1ul * dmaDest + length >= 0x10000) {
+ 		length = 0x10000 - dmaDest;
+@@ -1181,6 +1183,7 @@ void Memory::nontrivial_ff_write(unsigned const p, unsigned data, unsigned long
+ 		lcd_.lycRegChange(data, cc);
+ 		break;
+ 	case 0x46:
++		if (dp_dma_cb) dp_dma_cb(data << 8, 0xFE00, 0xA0);
+ 		lastOamDmaUpdate_ = cc;
+ 		oamDmaStartPos_ = (oamDmaPos_ + 2) & 0xFF;
+ 		intreq_.setEventTime<intevent_oam>(std::min(intreq_.eventTime(intevent_oam), cc + 8));
 diff --git a/libgambatte/src/memory.h b/libgambatte/src/memory.h
 index e9dc8ba..70919b4 100644
 --- a/libgambatte/src/memory.h

@@ -12,7 +12,8 @@ extern "C" {
 }
 #include "gambatte.h"
 
-namespace gambatte { extern int dp_force_cond; extern void (*dp_branch_cb)(unsigned); }
+namespace gambatte { extern int dp_force_cond; extern void (*dp_branch_cb)(unsigned);
+  extern void (*dp_dma_cb)(unsigned, unsigned, unsigned); extern void (*dp_bank_cb)(unsigned, unsigned); }
 using gambatte::dp_force_cond;
 using gambatte::dp_branch_cb;
 
@@ -33,6 +34,9 @@ static void on_exec(int32_t a, int64_t) {
 }
 static void on_read(int32_t a, int64_t) { if (have_obs && obs.read) obs.read(obs.user, (uint32_t)a, (uint8_t)gb->dpPeek((unsigned)a)); }
 static void on_write(int32_t a, int64_t) { if (have_obs && obs.write) obs.write(obs.user, (uint32_t)a, 0); }
+static unsigned ndma, nbank;
+static void on_dma(unsigned src, unsigned dst, unsigned len) { ndma++; if (have_obs && obs.dma) obs.dma(obs.user, src, dst, len); }
+static void on_bank(unsigned w, unsigned b) { nbank++; if (have_obs && obs.bank) obs.bank(obs.user, w, b); }
 static unsigned nbr;
 static void on_branch(unsigned pc) { nbr++; if (have_obs && obs.branch) obs.branch(obs.user, pc); }
 
@@ -69,6 +73,8 @@ int main(int argc, char **argv) {
     gb->setReadCallback(on_read);
     gb->setWriteCallback(on_write);
     dp_branch_cb = on_branch;
+    gambatte::dp_dma_cb = on_dma;
+    gambatte::dp_bank_cb = on_bank;
     DpLrTraceApi api = {DP_LR_TRACE_VERSION, t_step, t_set, t_pc, t_force, t_rom_index};
     DpLibretro *lr = dp_lr_open_native("gambatte", t_ssize, t_ser, t_unser, &api);
     if (!lr) { fprintf(stderr, "native backend refused\n"); return 1; }
@@ -84,7 +90,7 @@ int main(int argc, char **argv) {
     printf("cut: path_steps %llu total %llu items %llu forks %llu loop %llu\n", (unsigned long long)st.cut_path_steps,
            (unsigned long long)st.cut_total, (unsigned long long)st.dropped_items, (unsigned long long)st.capped_forks, (unsigned long long)st.cut_loop);
     if (getenv("GLR_STARTS")) { unsigned n = 0; for (size_t i = 0x100; i < rom_size; i++) if (map[i]) { printf("%04zx ", i); n++; } printf("\nstarts>=0100: %u\n", n); }
-    fprintf(stderr, "branch callbacks seen: %u\n", nbr);
+    fprintf(stderr, "branch callbacks seen: %u, dma %u, bank %u\n", nbr, ndma, nbank);
     dp_lr_close(lr);
     return 0;
 }

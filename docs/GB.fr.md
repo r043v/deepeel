@@ -2687,4 +2687,7 @@ la ROM (le parité m0boy ne la voit pas : pas de second VBlank, et il exclut le 
 `rom_index` suit les banques (`GB::dpRomIndex` ajouté au patch) : sur `mbc5` et `closure` les débuts de banque 2/3
 sortent à $8000/$C000, l'index compact de l'explorateur. La valeur lue est transmise (`GB::dpPeek`, sans effet de bord, ROM/WRAM/HRAM seulement ; 0 ailleurs, et 0 pour les écritures). Test : `lr_gambatte_parity` (ctest) compare les décomptes de débuts d'opcode ci-dessus ; il se saute (code 77) sans
 `DEEPEEL_GAMBATTE_LR` (binaire produit par `tools/gambatte_lr_build.sh DIR`, qui clone le cœur et applique le patch).
-Limites : `dma`/`bank` non branchés. J11/J12 restent donc ◐.
+Les callbacks `dma` (OAM DMA par $FF46, HDMA/GDMA à `Memory::dma`) et `bank` (`setRombank0`/`setRombank`) sont branchés
+(`dp_trace.h` dans le patch) : `fix_dma` voit 1 copie, `mbc5` 3 bascules, `closure` 16 ; `fix_hdma` n'en voit aucune
+(fixture CGB : le cœur est chargé sans `CGB_MODE`, à régler). Limites : pas de parité de copies/banques contre
+m0boy, seulement des décomptes. J11/J12 restent donc ◐.

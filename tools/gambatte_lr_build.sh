@@ -8,8 +8,9 @@ mkdir -p "$O/obj"
 G=$O/core/libgambatte
 cd "$G"
 for f in $(find src -name '*.cpp' | grep -v 'unzip\|cinterface\|file_zip'); do
-  inc=; case $f in *snes_spc*) inc="-include cstdint";; esac
-  echo "g++ -std=c++17 -O1 -w $inc -Iinclude -Isrc -I../common -c $f -o $O/obj/$(echo $f | tr / _).o"
+  o=$O/obj/$(echo $f | tr / _).o
+  # some files need <cstdint> forced in, others clash with it: try both
+  echo "g++ -std=c++17 -O1 -w -include cstdint -Iinclude -Isrc -I../common -c $f -o $o 2>/dev/null || g++ -std=c++17 -O1 -w -Iinclude -Isrc -I../common -c $f -o $o"
 done | xargs -P"$(nproc)" -I{} sh -c "{}"
 g++ -std=c++17 -O1 -w -include cstdint -I"$R/src" -Iinclude -c "$R/tools/gambatte_lr.cpp" -o "$O/obj/zz_lr.o"
 g++ "$O"/obj/*.o "$B/libdeepeel_libretro.a" "$B/libdeepeel_core.a" -ldl -lm -lz -o "$O/gambatte_lr"
