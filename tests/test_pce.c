@@ -340,6 +340,31 @@ static void test_play_pool(void) {
     free(r); free(rom);
 }
 
+// G1: the NMI and TIMER vector targets are seeded as roots with --seed-vectors
+static void test_seed_vectors(void) {
+    uint8_t *rom = calloc(1, ROM_SIZE);
+    static const uint8_t code[] = { 0x78, 0x80, 0xFE };   // sei; bra *
+    memcpy(rom, code, sizeof code);
+    rom[0x1FFE] = 0x00; rom[0x1FFF] = 0xE0;               // reset -> $E000
+    rom[0x1FFC] = 0x00; rom[0x1FFD] = 0xE1;               // NMI -> $E100
+    rom[0x1FFA] = 0x20; rom[0x1FFB] = 0xE1;               // TIMER -> $E120
+    rom[0x100] = 0xEA; rom[0x101] = 0x80; rom[0x102] = 0xFE;
+    rom[0x120] = 0xEA; rom[0x121] = 0x80; rom[0x122] = 0xFE;
+    for (int seeded = 0; seeded < 2; seeded++) {
+        DpPceOptions o = dp_pce_options();
+        o.max_steps = 2000; o.seed_vectors = seeded;
+        DpPceResults *r = calloc(1, sizeof *r);
+        CHECK(dp_pce_explore(rom, ROM_SIZE, &o, r), "vector explore");
+        if (seeded) {
+            CHECK(r->vectors_seeded == 2, "two vector roots (%llu)", (unsigned long long)r->vectors_seeded);
+            CHECK(r->flags[0x100] != 0 && r->flags[0x120] != 0, "vector code reached");
+        } else CHECK(r->flags[0x100] == 0, "not reached without the option");
+        dp_pce_results_free(r);
+        free(r);
+    }
+    free(rom);
+}
+
 // RAM-code archive: bytes built by immediates in WRAM, then run
 static void test_ramcode(void) {
     uint8_t *rom = calloc(1, ROM_SIZE);
@@ -377,6 +402,7 @@ int main(void) {
     test_streams();
     test_streams_banked();
     test_play_pool();
+    test_seed_vectors();
     test_ramcode();
     test_tas_identity();
     free(rom);

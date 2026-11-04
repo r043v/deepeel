@@ -3085,3 +3085,11 @@ et le rejeu S6 inter-banques. La plage des pointeurs de table n'est plus codée 
 `dp_nesmach_window` la donne par carte (`$8000-$BFFF`, `$C000-$DFFF` pour MMC3 en mode 1,
 `$C000-$FFFF` pour le 180). Fixture : `test_streams_180`. Reste : MMC5 et autres mappers.
 Observation de l'outil, pas une mesure matérielle.
+
+## 0.216.0 : PCE, `--seed-vectors` (G1) (2026-11-04)
+
+`--seed-vectors` existait pour NES ; la PC Engine l'a aussi : les cibles des vecteurs IRQ2/BRK
+(`$FFF6`), IRQ1 (`$FFF8`), TIMER (`$FFFA`) et NMI (`$FFFC`) partent comme racines forcées (vecteur
+hors de la page haute ou hors du mapping ROM : refusé et compté). Le rapport indique
+« vector roots ». Fixture : `test_seed_vectors` dans `test_pce` (cibles atteintes avec l'option,
+absentes sans). Observation de l'outil, pas une mesure matérielle.
