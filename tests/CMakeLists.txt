@@ -155,6 +155,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_copy1.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_wramexec.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_wramgen.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_sms_ramsrc.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_lywait.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_hdma.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_apu.gb
@@ -429,3 +430,6 @@ add_executable(test_tas_logkey test_tas_logkey.c)
 target_link_libraries(test_tas_logkey PRIVATE deepeel_core)
 add_test(NAME tas_logkey COMMAND test_tas_logkey)
 set_tests_properties(tas_logkey PROPERTIES TIMEOUT 30)
+
+add_test(NAME rtcode_sms_source COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B z80 explore sms $D/fix_sms_ramsrc.sms --rtcode $D/sr.rt --text $D/sr.txt >/dev/null 2>&1; grep -Eq '^c000 3e42 [0-9]+ 512$' $D/sr.rt && grep -Eq '^c002 c9 [0-9]+ 514$' $D/sr.rt")
+set_tests_properties(rtcode_sms_source PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)

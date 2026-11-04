@@ -42,6 +42,16 @@ def build(out):
     with open(os.path.join(out, "fix_sega_mapper.sms"), "wb") as f:
         f.write(z80)
 
+    # SMS: a routine in ROM ($0200) copied verbatim to RAM ($C000) then called (rtcode ROM source)
+    z80 = bytearray([0xff]) * 0x8000
+    w(z80, 0, 0xc3, 0x00, 0x01)                   # jp $0100
+    w(z80, 0x100, 0x21, 0x00, 0x02, 0x11, 0x00, 0xc0, 0x06, 0x03)   # ld hl,$0200; ld de,$c000; ld b,3
+    w(z80, 0x108, 0x7e, 0x12, 0x23, 0x13, 0x05, 0x20, 0xf9)          # loop: ld a,(hl); ld (de),a; inc hl; inc de; dec b; jr nz
+    w(z80, 0x10f, 0xcd, 0x00, 0xc0, 0x76)                            # call $c000; halt
+    w(z80, 0x200, 0x3e, 0x42, 0xc9)                                  # ld a,$42; ret
+    with open(os.path.join(out, "fix_sms_ramsrc.sms"), "wb") as f:
+        f.write(z80)
+
     # --- branch: cp/jr z with both sides + copy loop -------------------------
     r = rom(2)
     w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)          # nop; jp $0150

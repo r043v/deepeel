@@ -2630,4 +2630,4 @@ que le rattachement des copies NES), pas une dépendance exacte.
 
 Le code exécuté hors ROM renseigne l'index ROM du premier octet quand la provenance Z80 (copie contrôlée par
 valeur, `valid_origin`) le rattache à la ROM ; `-1` sinon. Les tests existants passent ; aucune fixture SMS/MSX
-n'affirme encore la valeur de la source (à ajouter).
+n’affirmait la valeur de la source en 0.184.0 ; le test `rtcode_sms_source` (0.184.1, fixture `fix_sms_ramsrc.sms`) épingle `c000 3e42 → ROM 512`.
