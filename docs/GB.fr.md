@@ -2155,13 +2155,20 @@ Ce qui a été corrigé :
   mêmes lectures sur ce film) rend la première lecture 0x1d comme Gambatte au
   lieu de 0x1c.
 
-Limite connue : vers l'image 32 150 puis l'image 41 340, des compteurs du moteur
-son en HRAM (FF99, FFC0, FFC6, FFC8) s'écartent de 1 à 5 unités. Ils se
-résorbent la première fois ; la seconde, la référence éteint le LCD à l'image
-41 870 alors que deepeel reste à l'écran d'attente jusqu'à l'image 51 251. Le
-film complet n'est donc pas encore rejoué à l'identique ; la cause (déphasage
-cumulé du moteur son, sans lecture de registre d'E/S dans cette fenêtre) n'est
-pas élucidée.
+Limite connue : vers l'image 32 150 puis l'image 41 340, des compteurs en HRAM
+(FF99, FFC0, FFC6, FFC8) s'écartent de 1 à 5 unités. Ils se résorbent la
+première fois ; la seconde, la référence éteint le LCD à l'image 41 870 alors
+que deepeel reste à l'écran d'attente jusqu'à l'image 51 251. Le film complet
+n'est donc pas encore rejoué à l'identique.
+
+Pistes écartées (observations de l'outil) : FFC0/FFC1 est une position de
+scroll du jeu et non un compteur son ; à l'image 32 150 les traces
+d'exécution (PC) des deux côtés sont identiques sur 1 113 instructions puis
+divergent sur un `jr c` après `cp $48` qui dépend d'un octet de SRAM
+(`$A8EF`, tampon de carte) lu à une adresse calculée depuis FFB7/FFB8 ; la
+WRAM et la SRAM concordent au début de l'image, hors deux octets de pile
+résiduelle (`$A8FB/$A8FC`, qui diffèrent dès l'image 18 sans conséquence
+visible). La cause exacte du premier écart n'est pas élucidée.
 
 Diagnostics (variables d'environnement, hors usage normal) :
 `DEEPEEL_TAS_DUMP=<fichier>` (hash par image), `DEEPEEL_TAS_DUMPFRAME=<n>`,
