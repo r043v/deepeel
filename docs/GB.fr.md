@@ -2490,3 +2490,10 @@ Le PNG de carte GB porte un chunk privé `dpIx` (JSON) : pour chaque site de cod
 Chaque site de `dpIx` porte `stride` : le PGCD des écarts successifs entre index ROM lus par ce site (0 = un seul
 index distinct vu). Pour une table lue entrée par entrée c'est le pas de la table ; sous concurrence la valeur est
 approchée (observation de l'outil). La base reste `kmin` ; la déclaration `index-inference` n'est pas faite.
+
+## 0.178.0 (`dpCh` : sources)
+
+`dpCh` gagne la section 7 (bit 7 du masque) : `src_flags` u32 par octet de ROM, toutes les sources qui prouvent
+l'octet (`DP_SRC_*` : fourche naturelle/forcée, session, …). Avec les drapeaux et les compteurs de coups déjà
+présents, `dpCh` porte la nature d'exécution/données/statique, les sources et les hits de §9.3 ; les « types »
+par octet (`dpCv` §9.3) restent absents du chunk.

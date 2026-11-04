@@ -152,9 +152,9 @@ int main(int argc, char **argv) {
         if (ch && cl >= 28) {
             uint32_t mask = ch[24] | ch[25] << 8 | ch[26] << 16 | (uint32_t)ch[27] << 24;
             size_t n = (size_t)res.banks * 0x4000, want = 28;
-            static const int w[7] = { 1, 1, 1, 4, 4, 4, 4 };
-            for (int i = 0; i < 7; i++) if (mask & (1u << i)) want += n * (size_t)w[i];
-            CHECK(want == cl && (mask & 1u) && (mask & 8u));   // exec flags and exec hits are present
+            static const int w[8] = { 1, 1, 1, 4, 4, 4, 4, 4 };
+            for (int i = 0; i < 8; i++) if (mask & (1u << i)) want += n * (size_t)w[i];
+            CHECK(want == cl && (mask & 1u) && (mask & 8u) && (mask & 128u));   // exec flags and exec hits are present
         }
         free(ch);
         remove(png);

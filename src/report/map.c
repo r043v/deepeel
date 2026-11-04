@@ -52,7 +52,8 @@ int dp_map_cv_decode(const uint8_t *p, size_t len, uint8_t *m, size_t n) {
 // dpCh: the per-byte evidence next to the class vector (spec 9.3). Layout, little endian:
 // 'DPCH' u32 version(1) u32 platform(0 = GB) u64 n u32 bank unit u32 mask, then for each set
 // mask bit, in order, n entries: bit0 exec_flags u8, bit1 data_flags u8, bit2 static_flags u8,
-// bit3 exec_hits u32, bit4 data_hits u32, bit5 play_exec_hits u32, bit6 play_data_hits u32.
+// bit3 exec_hits u32, bit4 data_hits u32, bit5 play_exec_hits u32, bit6 play_data_hits u32,
+// bit7 src_flags u32 (every proving source, DP_SRC_*).
 // All-zero sections are omitted; the chunk is zlib-compressed by the PNG writer.
 static int ch_nonzero(const void *p, size_t bytes) {
     const uint8_t *q = p;
@@ -65,14 +66,14 @@ static void ch_put(DpBuf *o, uint64_t v, int bytes) {
 int dp_map_ch_encode(const DpResults *res, DpBuf *out) {
     size_t n = (size_t)res->banks * 0x4000;
     if (n > (64u << 20) / 15) return 0;   // bounded: past it the chunk is left out
-    const void *sec[7] = { res->exec_flags, res->data_flags, res->static_flags, res->exec_hits,
-                           res->data_hits, res->play_exec_hits, res->play_data_hits };
-    static const int w[7] = { 1, 1, 1, 4, 4, 4, 4 };
+    const void *sec[8] = { res->exec_flags, res->data_flags, res->static_flags, res->exec_hits,
+                           res->data_hits, res->play_exec_hits, res->play_data_hits, res->src_flags };
+    static const int w[8] = { 1, 1, 1, 4, 4, 4, 4, 4 };
     uint32_t mask = 0;
-    for (int i = 0; i < 7; i++) if (sec[i] && ch_nonzero(sec[i], n * (size_t)w[i])) mask |= 1u << i;
+    for (int i = 0; i < 8; i++) if (sec[i] && ch_nonzero(sec[i], n * (size_t)w[i])) mask |= 1u << i;
     dp_buf_push(out, "DPCH", 4);
     ch_put(out, 1, 4); ch_put(out, 0, 4); ch_put(out, n, 8); ch_put(out, 0x4000, 4); ch_put(out, mask, 4);
-    for (int i = 0; i < 7; i++) if (mask & (1u << i)) dp_buf_push(out, sec[i], n * (size_t)w[i]);
+    for (int i = 0; i < 8; i++) if (mask & (1u << i)) dp_buf_push(out, sec[i], n * (size_t)w[i]);
     return 1;
 }
 
