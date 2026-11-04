@@ -2331,3 +2331,11 @@ PCE, SMS/GG/SG/MSX et MD. La RAM du Z80 son MD n'est pas suivie. Test `md_explor
 état sérialisé de 1 036 288 octets, rejeu de 20 trames identique après rechargement de l'état, RAM système
 de 64 Kio exposée. `deepeel lr explore` refuse proprement sur ce cœur (niveau A : pas de trace) et rapporte
 les dégradations. Le branchement sur les sessions de l'explorateur reste à faire.
+
+## 0.165.0 (J11 — session libretro en ligne de commande)
+
+`deepeel lr play CORE ROM [--frames N] [--tas FILE] [--ppm FILE]` : session sur n'importe quel cœur libretro
+(niveau A suffit) : N trames avec entrées d'un fichier texte (un masque hexadécimal par ligne), sauvegarde,
+rejeu, rechargement, rejeu et comparaison des hashes d'état (code retour 3 si divergence), dump PPM du
+framebuffer. Essayé sur Genesis Plus GX (observation de l'outil). Test `lr_play_cli` sur le cœur factice.
+Restent : branchement sur l'explorateur, Go-Explore, mode humain, `--watch`.
