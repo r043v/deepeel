@@ -197,3 +197,8 @@ Ces chiffres sont des essais courts, pas une campagne : ni saturation levée, ni
   `jmp d(pc,Xn)` (66 gestionnaires). Même schéma que NES/PCE sans jeu : l'exploration s'épuise sur un état de RAM
   initial ; la cause précise (porte d'état de jeu ou boucle d'attente d'IRQ) n'est pas isolée. À comparer avec un GMV
   quand J3 sera débloqué.
+- SMS, « 20-em-1 (B) » avec `--max-total 2000000 --novelty 100000000 --novelty-cells 1` (110 s, un run, observation de
+  l'outil) : 42 essais, 10 000 trames, profondeur 2 088 trames, 58 touches, 118 points archivés, 142 000 528 pas ;
+  carte connue **90,71 %** contre 77,83 % à l'essai court sans vraie phase de jeu (carte précédente : 77,96 % sans jeu).
+  C'est une compilation multi-jeux : le menu puis les jeux dépendent d'entrées, donc la phase de jeu aide ici, contrairement
+  à GG/Batman Returns (84,58 %). Un seul run, sans répétition : écart non attribué avec certitude à la seule nouveauté.
