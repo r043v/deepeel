@@ -68,6 +68,8 @@ int main(int argc, char **argv) {
     std::vector<char> rom((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     rom_size = rom.size();
     gb = new gambatte::GB;
+    // GLR_CGB: also flag the header so the core leaves DMG-compatibility mode (HDMA/VBK/SVBK need it)
+    if (getenv("GLR_CGB") && rom.size() > 0x143) rom[0x143] |= 0x80;
     if (gb->load(rom.data(), rom.size(), gambatte::GB::NO_BIOS | ((getenv("GLR_CGB") || (rom.size() > 0x143 && (rom[0x143] & 0x80))) ? gambatte::GB::CGB_MODE : 0))) { fprintf(stderr, "load failed\n"); return 1; }
     gb->setExecCallback(on_exec);
     gb->setReadCallback(on_read);
@@ -90,7 +92,7 @@ int main(int argc, char **argv) {
     printf("cut: path_steps %llu total %llu items %llu forks %llu loop %llu\n", (unsigned long long)st.cut_path_steps,
            (unsigned long long)st.cut_total, (unsigned long long)st.dropped_items, (unsigned long long)st.capped_forks, (unsigned long long)st.cut_loop);
     if (getenv("GLR_STARTS")) { unsigned n = 0; for (size_t i = 0x100; i < rom_size; i++) if (map[i]) { printf("%04zx ", i); n++; } printf("\nstarts>=0100: %u\n", n); }
-    fprintf(stderr, "FF55=%02x FF4D=%02x ", gb->dpPeek(0xFF55), gb->dpPeek(0xFF4D)); fprintf(stderr, "branch callbacks seen: %u, dma %u, bank %u\n", nbr, ndma, nbank);
+    fprintf(stderr, "branch callbacks seen: %u, dma %u, bank %u\n", nbr, ndma, nbank);
     dp_lr_close(lr);
     return 0;
 }
