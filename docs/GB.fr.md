@@ -2670,3 +2670,10 @@ stocké en immédiat n'a plus de producteur (`-1`), le mot ROM lu puis inversé 
 Limites : un seul index représentatif (pas l'ensemble des dépendances) ; modes d'adressage lus seulement comme
 texte ; teintes des registres non remises à zéro entre chemins ; `movem`, `DIV/MUL` à paires, `exg`, `swap`
 inter-registres non modélisés. J14 « provenance exacte » reste donc ouvert sur les autres plateformes et sur ces cas.
+
+## Ébauche J11/J12 : adaptateur gambatte niveau B (non exécuté)
+
+`tools/gambatte_trace.patch` (observation/forçage des 16 conditionnels de `cpu.cpp`, gambatte-core de
+pokemon-speedrunning) et `tools/gambatte_lr.cpp` (adaptateur `DpLrTraceApi` en processus) compilent et
+s'éditent de liens, mais **n'ont jamais été exécutés** : aucune parité n'est donc établie, J11/J12 restent ouverts.
+Limites connues : `rom_index` sans mapper seulement, valeur lue passée à 0, callbacks `dma`/`bank` non branchés.
