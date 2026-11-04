@@ -49,6 +49,7 @@ typedef struct {
     DpNesPathState *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
     DpLotFile *lot;                        // disk lot: park overflow, wall leftovers, --lot resume
     uint8_t ram_exec[0x800];           // RAM bytes executed since their last write (SMC tracking)
+    int32_t ram_prod[0x800];           // last ROM cell read at any earlier time before the store (approximate producer, -1 none)
     int32_t ram_src[0x800];            // last ROM cell whose read fed the store to each RAM byte (-1 none)
     int64_t *prov_anchor; uint32_t prov_len; // table-word cells that fed an indirect jmp pointer
     uint32_t cur_choice;               // tree node of the path being run
@@ -350,8 +351,8 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
     int outside = dp_nesmach_rom_index(x->m, pc) < 0;
     if (outside && !x->was_outside) r->exec_outside++;
     x->was_outside = outside;
-    if (outside && !x->play_mode) dp_ramarch_add(&r->ra, (uint16_t)pc, bytes, (int)in.length,
-                                                   pc < 0x800 ? x->ram_src[pc] : -1);   // RAM-code archive, ROM source of the first byte
+    if (outside && !x->play_mode) dp_ramarch_add_p(&r->ra, (uint16_t)pc, bytes, (int)in.length,
+                                                   pc < 0x800 ? x->ram_src[pc] : -1, pc < 0x800 ? x->ram_prod[pc] : -1);   // RAM-code archive, ROM source of the first byte
     if (outside && pc < 0x2000)
         for (int i = 0; i < (int)in.length; i++) x->ram_exec[(pc + (unsigned)i) & 0x7FF] = 1;
 
@@ -496,7 +497,10 @@ static void hook_write(void *user, unsigned addr, unsigned value) {
         if (!r->smc_writes++) r->smc_first_pc = (uint16_t)x->cur_pc;
     }
     if (addr < 0x800)   // provenance: a store right after a PRG data read carries that cell
-        x->ram_src[addr] = (x->last_read_cell >= 0 && x->total_steps - x->last_read_step <= 4) ? (int32_t)x->last_read_cell : -1;
+        {
+            x->ram_src[addr] = (x->last_read_cell >= 0 && x->total_steps - x->last_read_step <= 4) ? (int32_t)x->last_read_cell : -1;
+            x->ram_prod[addr] = x->ram_src[addr] >= 0 ? x->ram_src[addr] : (x->last_read_cell >= 0 ? (int32_t)x->last_read_cell : -1);
+        }
     if (addr >= 0x8000) {
         // mapper register write (fires before the runtime/bridge applies it)
         unsigned os, ns;
@@ -1125,7 +1129,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     DpNesRun x;
     memset(&x, 0, sizeof(x));
     x.last_read_cell = -1;
-    for (unsigned i = 0; i < 0x800; i++) x.ram_src[i] = -1;
+    for (unsigned i = 0; i < 0x800; i++) { x.ram_src[i] = -1; x.ram_prod[i] = -1; }
     if (!data || !results) return 0;
     char err[256];
     x.m = dp_nesmach_open(data, size, mapper, err, sizeof err);

@@ -2640,3 +2640,11 @@ n’affirmait la valeur de la source en 0.184.0 ; le test `rtcode_sms_source` (0
   dans la RAM de travail. Fixture `fix_md_ramsrc.md`, test `rtcode_md_source`.
 - Seules les copies d'un seul `MOVE` (ROM → RAM, même taille) sont rattachées ; `MOVEM`, blocs DMA et copies
   transformées ne le sont pas.
+
+## 0.186.0 — archive neutre `rtcode` : colonne producteur (MD, NES)
+
+Le fichier `--rtcode` des plateformes à archive neutre gagne une 5e colonne `producteur` : dernier octet ROM lu
+avant le store de l'octet (approximation, comme `rt_derived` sur GB), `-1` sinon ; il vaut la source quand la copie
+est verbatim. Câblé sur MD et NES ; SMS/MSX/PCE écrivent `-1`. Le compteur `derived` de l'archive existe mais
+n'est pas encore rapporté dans le texte. Les tests `rtcode_md_source` (producteur = source sur copie verbatim) et
+`rtcode_sms_source` suivent le nouveau format ; aucune fixture de code généré (non verbatim) sur MD/NES encore.
