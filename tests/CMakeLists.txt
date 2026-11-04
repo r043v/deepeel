@@ -429,6 +429,8 @@ add_test(NAME md_play_longloop COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAK
 set_tests_properties(md_play_longloop PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_demo_frames COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_longloop.md --demo-frames 40 --text $D/dm.txt >/dev/null 2>&1; grep -q 'demo (no button pressed, from power-on): 40 frames' $D/dm.txt")
 set_tests_properties(md_demo_frames PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME md_play_pool COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_longloop.md --play-frames 600 --play-sessions 3 --play-pool 8 --text $D/pp.txt >/dev/null 2>&1; grep -Eq 'checkpoint pool: [1-9][0-9]* kept, [1-9][0-9]* sessions started from one' $D/pp.txt")
+set_tests_properties(md_play_pool PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 120)
 add_test(NAME md_exact_dedup COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_pad_effect.md --text $D/md_ed0.txt >/dev/null 2>&1; $B md explore $D/fix_md_pad_effect.md --exact-dedup --text $D/md_ed1.txt >/dev/null 2>&1; grep -q 'exact dedup: [1-9][0-9]* forks dropped' $D/md_ed1.txt && ! grep -q 'exact dedup' $D/md_ed0.txt && [ \"$(grep -E 'executed|exec ' $D/md_ed0.txt)\" = \"$(grep -E 'executed|exec ' $D/md_ed1.txt)\" ]")
 set_tests_properties(md_exact_dedup PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_map_inference COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_pad_effect.md --text ${CMAKE_CURRENT_BINARY_DIR}/md_inf.txt >/dev/null 2>&1; grep -q 'map inference (S7, not observations): [0-9]* padding' ${CMAKE_CURRENT_BINARY_DIR}/md_inf.txt")

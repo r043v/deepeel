@@ -3030,3 +3030,10 @@ MD, GB/Z80, multi-thread. Observation de l'outil, pas une mesure matérielle.
 256 frames des sessions aléatoires, chaque session suivante repart d'un checkpoint tiré au hasard ;
 TAS et démo depuis la mise sous tension. Fixture : `test_pce` (`test_play_pool`). Reste : MD,
 GB/Z80, multi-thread. Observation de l'outil, pas une mesure matérielle.
+
+## 0.209.0 : J1 MD, pool de checkpoints partagé (2026-11-04)
+
+`--play-pool N` (MD, N ≤ 64, 0 par défaut), même schéma que NES et PCE : checkpoint toutes les 256
+frames jouées (hors démo), chaque session suivante repart d'un checkpoint tiré au hasard au lieu de
+la mise sous tension. Test : `md_play_pool` (« checkpoint pool: K kept, S sessions started from
+one »). Reste : GB/Z80, multi-thread. Observation de l'outil, pas une mesure matérielle.

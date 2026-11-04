@@ -62,7 +62,8 @@ typedef struct {
     int movie_active;
     int play_active;                 /* random played session running */
     int play_idle;                   /* the played session presses nothing (demo / attract mode) */
-    uint32_t play_left, play_rng, play_hold;
+    uint32_t play_left, play_rng, play_hold, play_f;
+    uint8_t *pool[64]; unsigned pool_n;   // J1 shared checkpoint pool
     uint8_t play_held;
     uint16_t op;
     uint32_t move_src;
@@ -119,6 +120,7 @@ static void next_generation(X *x) {
 static void novelty_frame(X *x);
 static void s4_table(X *x, uint32_t pc);
 static uint8_t play_pad(X *x);
+static uint32_t md_rng(uint32_t *s);
 static void on_frame(void *u) {
     X *x = u;
     next_generation(x);
@@ -131,6 +133,16 @@ static void on_frame(void *u) {
     if (x->nov) novelty_frame(x);
     if (x->play_active) {
         x->r->play_frames_run++;
+        const unsigned pc_ = x->o->play_pool < 64 ? x->o->play_pool : 64;
+        if (pc_ && !x->play_idle && ++x->play_f % 256 == 0) {   // keep a checkpoint (random replacement when full)
+            unsigned slot = x->pool_n < pc_ ? x->pool_n : md_rng(&x->play_rng) % pc_;
+            if (!x->pool[slot]) x->pool[slot] = malloc(dp_mdmach_state_size());
+            if (x->pool[slot]) {
+                dp_mdmach_save(x->m, x->pool[slot]);
+                if (slot == x->pool_n) x->pool_n++;
+                x->r->pool_saved++;
+            }
+        }
         if (--x->play_left == 0) {
             x->play_active = 0;
             dp_mdmach_halt(x->m);
@@ -1437,17 +1449,21 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     for (uint32_t s = 0; !drain && o->play_frames && s < o->play_sessions; s++) {
         if (r->steps >= o->max_total || dp_stop) break;
         if (o->play_step > 1 && s % o->play_step != o->play_from) continue;
-        dp_mdmach_reset(x.m);
-        x.play_active = 1;
-        x.play_left = o->play_frames;
-        x.play_hold = 0;
+        x.play_hold = 0; x.play_f = 0;
         x.play_rng = (o->play_seed + s * 0x2545F491u) * 0x9E3779B1u + 7;
         if (!x.play_rng) x.play_rng = 1;
+        if (o->play_pool && x.pool_n) {   // continue from a checkpoint an earlier session kept
+            dp_mdmach_load(x.m, x.pool[md_rng(&x.play_rng) % x.pool_n]);
+            r->pool_starts++;
+        } else dp_mdmach_reset(x.m);
+        x.play_active = 1;
+        x.play_left = o->play_frames;
         dp_mdmach_set_pad(x.m, play_pad(&x));
         run_path(&x, NULL, o->max_total - r->steps, &cut);
         x.play_active = 0;
         r->play_sessions_run++;
     }
+    for (unsigned i = 0; i < 64; i++) free(x.pool[i]);
     if (!drain) novelty_search(&x);
     // explicit entries (G3): each starts a forced path from the power-on machine
     if (!drain)
@@ -1684,6 +1700,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     if (r->state_exported) fprintf(out, "  state exported: deepest cell, %u frames from power-on\n", r->state_exported_depth);
     if (r->exact_dups) fprintf(out, "  exact dedup: %llu forks dropped (same clock-free machine)\n", (unsigned long long)r->exact_dups);
     if (r->demo_run) fprintf(out, "  demo (no button pressed, from power-on): %llu frames, %llu ROM bytes executed\n", (unsigned long long)r->demo_run, (unsigned long long)r->demo_exec);
+    if (r->pool_saved) fprintf(out, "  checkpoint pool: %llu kept, %llu sessions started from one\n", (unsigned long long)r->pool_saved, (unsigned long long)r->pool_starts);
     if (r->play_sessions_run) fprintf(out, "  played sessions: %llu, %llu frames\n", (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run);
     if (r->watch_frames) fprintf(out, "  watch: %llu frames published\n", (unsigned long long)r->watch_frames);
     if (r->novelty_trials)

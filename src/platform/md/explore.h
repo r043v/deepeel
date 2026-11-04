@@ -54,6 +54,7 @@ typedef struct {
     uint32_t novelty_archive;  /* archive capacity */
     int novelty_cells;         /* key the archive on the screen fingerprint and lives */
     uint32_t play_seed;
+    uint32_t play_pool;     // J1 shared checkpoint pool size: played sessions restart from earlier sessions' checkpoints (0: from power-on)
     uint32_t play_frames;      /* random played sessions: frames per session (0: off) */
     uint32_t demo_frames;      /* attract-mode session: no button pressed, runs before everything else (0: off) */
     uint32_t play_sessions;    /* number of sessions, each from power-on with its own seed */
@@ -143,7 +144,7 @@ typedef struct DpMdResults_ {
     uint64_t replay_tables, replay_candidates, replay_runs, replay_steps;
     uint64_t sat_replay_steps, sat_replay_total, replay_faults;
     uint32_t replay_only_bytes; /* bytes read only by replays */
-    uint64_t novelty_trials, novelty_hits, novelty_archived, novelty_replaced, novelty_frames_run, novelty_deaths, novelty_seeded, novelty_stalled, watch_frames, play_sessions_run, play_frames_run, demo_run, demo_exec;
+    uint64_t novelty_trials, novelty_hits, novelty_archived, novelty_replaced, novelty_frames_run, novelty_deaths, novelty_seeded, novelty_stalled, watch_frames, play_sessions_run, play_frames_run, demo_run, demo_exec, pool_saved, pool_starts;
     uint32_t state_exported_depth; int state_exported;
     uint32_t novelty_depth;
     unsigned jobs_folded;   /* --jobs 2: instances folded into this report (secondary) */

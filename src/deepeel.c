@@ -1520,6 +1520,7 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--play-frames")) o.play_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--play-sessions")) o.play_sessions = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--play-seed")) o.play_seed = (uint32_t)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--play-pool")) o.play_pool = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--tas-any-rom")) md_any_rom = 1;
             else if (!strcmp(a, "--summary")) md_summary = argv[++i];
             else if (!strcmp(a, "--heat")) md_heat = argv[++i];
