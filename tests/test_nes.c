@@ -105,9 +105,9 @@ static void test_unsupported_mappers(void) {
     DpNesMach *m = dp_nesmach_open(rom, 16 + 4 * 0x4000 + 0x2000, -1, err, sizeof err);
     CHECK(!m, "mapper 9 refused");
     CHECK(err[0], "a message explains why");
-    rom[6] = (5 & 0x0F) << 4; // mapper 5 (MMC5)
+    rom[6] = (19 & 0x0F) << 4; rom[7] = 19 & 0xF0; // mapper 19 (Namco 163)
     m = dp_nesmach_open(rom, 16 + 4 * 0x4000 + 0x2000, -1, err, sizeof err);
-    CHECK(!m, "MMC5 refused");
+    CHECK(!m, "mapper 19 refused");
     free(rom);
 }
 
@@ -274,6 +274,35 @@ static void test_mmc1_mmc3(void) {
         dp_nesmach_run(m, 4);
         CHECK(dp_nesmach_rom_index(m, 0x8000) == 3 * 0x2000, "R6 = 3 at $8000");
         CHECK(dp_nesmach_read(m, 0x8000) == 0x66, "its content");
+        dp_nesmach_close(m);
+    }
+    free(rom);
+}
+
+// MMC5 (bridged subset): PRG modes and the $5114-$5117 registers
+static void test_mmc5(void) {
+    char err[256];
+    unsigned sz = 16 + 4 * 0x4000 + 0x2000;
+    uint8_t *rom = calloc(1, sz);
+    set_header(rom, 4, 1, 5);
+    // $E000: LDA #3 / STA $5114 / LDA #0 / STA $5100 / LDA #$84 / STA $5117 / JMP *
+    put(rom, 3, 0x2000, 0xA9, 0x03, 0x8D, 0x14, 0x51, 0xA9, 0x00, 0x8D, 0x00, 0x51,
+                        0xA9, 0x84, 0x8D, 0x17, 0x51, 0x4C, 0x11, 0xE0, -1);
+    set_vector(rom, 3, 0xFFFC, 0xE000);
+    rom[16 + 3 * 0x2000] = 0x66;
+    DpNesMach *m = dp_nesmach_open(rom, sz, -1, err, sizeof err);
+    CHECK(m, "MMC5 opens: %s", err);
+    if (m) {
+        unsigned o, n;
+        dp_nesmach_reset(m);
+        CHECK(dp_nesmach_rom_index(m, 0xE000) == 7 * 0x2000, "MMC5: last 8 KiB under $E000 at power-on");
+        CHECK(dp_nesmach_mapper_write(m, 0x5114, 3, &o, &n) == 1 && o == 0 && n == 3, "MMC5: $5114 write seen as a PRG change");
+        dp_nesmach_run(m, 2);
+        CHECK(dp_nesmach_rom_index(m, 0x8000) == 3 * 0x2000, "MMC5 mode 3: $5114 = 3 at $8000");
+        CHECK(dp_nesmach_read(m, 0x8000) == 0x66, "its content");
+        dp_nesmach_run(m, 4);   // mode 0 then $5117 = $84: 32 KiB from slot 4
+        CHECK(dp_nesmach_rom_index(m, 0x8000) == 4 * 0x2000 && dp_nesmach_rom_index(m, 0xE000) == 7 * 0x2000,
+              "MMC5 mode 0: 32 KiB from $5117 (%llu)", (unsigned long long)dp_nesmach_rom_index(m, 0x8000));
         dp_nesmach_close(m);
     }
     free(rom);
@@ -756,6 +785,7 @@ int main(void) {
     test_cnrom_axrom();
     test_gxrom();
     test_mmc1_mmc3();
+    test_mmc5();
     test_dmc();
     test_snapshot();
     test_explorer();

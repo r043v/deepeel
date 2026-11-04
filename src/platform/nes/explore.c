@@ -571,7 +571,7 @@ static void hook_write(void *user, unsigned addr, unsigned value) {
             x->ram_src[addr] = (x->last_read_cell >= 0 && x->total_steps - x->last_read_step <= 4) ? (int32_t)x->last_read_cell : -1;
             x->ram_prod[addr] = x->ram_src[addr] >= 0 ? x->ram_src[addr] : (x->last_read_cell >= 0 ? (int32_t)x->last_read_cell : -1);
         }
-    if (addr >= 0x8000) {
+    if (addr >= 0x8000 || (addr >= 0x5100 && addr < 0x5128 && dp_nesmach_mapper(x->m) == 5)) {
         // mapper register write (fires before the runtime/bridge applies it)
         unsigned os, ns;
         int kind = dp_nesmach_mapper_write(x->m, addr, value, &os, &ns);

@@ -3175,3 +3175,13 @@ est en attente ; les éléments du lot portaient déjà leur identifiant de nœu
 à la relecture : il est maintenant conservé (ramené à 0 s'il dépasse l'arbre rechargé). Rapport :
 `choice tree resumed: N nodes reloaded`. Test `md_explore` : il échoue si le chargement est
 désactivé.
+
+## NES : mapper MMC5 (sous-ensemble) (0.223.0)
+
+Le pont NES prend en charge le mapper 5 : modes PRG 0 à 3 (`$5100`, registres `$5114`–`$5117`,
+dernier banc sous `$E000` à la mise sous tension) et modes CHR 0 à 3 (`$5101`, `$5120`–`$5127`).
+Les écritures `$5100`–`$5127` produisent des événements de banque comme celles de `$8000+` sur les
+autres cartes. **Non pris en charge** : RAM mappée dans les fenêtres PRG (bit 7), ExRAM, multiplicateur
+`$5205`/`$5206`, IRQ de scanline `$5203`/`$5204`, découpage d'écran, jeux CHR distincts fond/sprites.
+Un jeu qui en dépend sera exploré avec ces fonctions inertes (observation de l'outil, pas du matériel).
+Test `nes` : `test_mmc5`.
