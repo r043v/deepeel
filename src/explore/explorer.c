@@ -728,6 +728,11 @@ static void hook_write(DpMach *m, uint16_t a, uint8_t v) {
     }
     if (a < 0xE000) {
         ex->wram_taint[a - 0xC000] = ex->last_rom_valid ? ex->last_rom_key + 1 : 0;
+        if (ex->wram_exec[a - 0xC000]) {   // a byte that ran is rewritten: a code version change
+            ex->wram_exec[a - 0xC000] = 0;
+            if (!__atomic_fetch_add(&res->smc_writes, 1, __ATOMIC_RELAXED))
+                __atomic_store_n(&res->smc_first_pc, m->api->gbr->pc, __ATOMIC_RELAXED);
+        }
         dp_copy_on_wram_write(ex, a, v);
         return;
     }   // WRAM: copy destination (code run from WRAM)
@@ -1182,6 +1187,8 @@ bad_done:
                 int32_t dv = -1;
                 if (pc >= 0xC000 && pc < 0xE000 && ex->wram_taint[pc - 0xC000]) dv = (int32_t)(ex->wram_taint[pc - 0xC000] - 1);
                 dp_rtcode_add(res, pc, ib, ilen, rk, dv);
+                if (pc >= 0xC000 && pc < 0xE000)
+                    for (int i = 0; i < ilen && pc + i < 0xE000; i++) ex->wram_exec[pc + i - 0xC000] = 1;
             }
             if (rk >= 0) {
                 uint8_t nf = (uint8_t)(ex->cur_forced ? DP_XF_FORCED : DP_XF_NATURAL);

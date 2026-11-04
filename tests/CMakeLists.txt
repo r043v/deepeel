@@ -142,6 +142,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_sega_mapper.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_branch.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_sgb.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_smc.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_mbc5.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_dma.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_irq.gb

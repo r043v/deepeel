@@ -281,6 +281,7 @@ typedef struct DpResults {
     uint32_t data_contradictions; // bytes both executed and proven data (kept code)
     DpRtCode *rt;                 // runtime-code archive (open addressing), guarded by rec_mtx
     uint8_t *rt_pcseen;           // variants seen per pc (saturating), for the polymorphic count
+    uint32_t smc_writes, smc_first_pc; // writes into WRAM bytes already executed (self-modifying code)
     uint32_t rt_poly;             // variants that replace an earlier one at the same pc (SMC)
     uint32_t rt_derived;          // generated variants with an approximate ROM producer
     uint32_t rt_cap, rt_n, rt_attached; // table size, distinct (pc,bytes) variants, those with a ROM source
@@ -476,6 +477,7 @@ struct DpExplorer {
     int reti_pending;          // a RETI executes this step: drop the depth after
     // mapper write seen on the previous step: resolve old->new banks now
     uint8_t pend_map;
+    uint8_t wram_exec[0x2000];    // WRAM bytes executed since their last write (W^X tracking)
     int sgb_bit;                  // SGB packet decoder over $FF00 writes: -1 idle, else bits taken
     uint8_t sgb_buf[16];
     uint16_t pend_pc;

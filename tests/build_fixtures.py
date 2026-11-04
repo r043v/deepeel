@@ -90,6 +90,15 @@ def build(out):
     w(r, 0x150, *code)
     save(out, "fix_sgb", r)
 
+    # --- smc: code built in WRAM, executed, then one of its bytes is rewritten -
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)          # nop; jp $0150
+    w(r, 0x150, 0x21, 0x00, 0xC0, 0x36, 0x00, 0x23, 0x36, 0xC9)   # ld hl,$C000; ld (hl),0; inc hl; ld (hl),$C9
+    w(r, 0x158, 0xCD, 0x00, 0xC0)                # call $C000 (nop; ret)
+    w(r, 0x15B, 0x21, 0x00, 0xC0, 0x36, 0x3C)    # ld hl,$C000; ld (hl),$3C  (rewrites an executed byte)
+    w(r, 0x160, 0x76)                            # halt
+    save(out, "fix_smc", r)
+
     # --- mbc5: switch to bank 2, call, switch to bank 3, call ----------------
     r = rom(4, mbc=0x19)
     w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)

@@ -118,6 +118,10 @@ int main(int argc, char **argv) {
     // the rom data never runs on the natural flow (forked wandering may touch it)
     CHECK(!(res.exec_flags[0x300] & DP_XF_NATURAL));
 
+    // --- SMC: a WRAM byte that ran is rewritten
+    run(dir, "smc");
+    CHECK(res.smc_writes >= 1 && res.rt_n >= 1);
+
     // --- SGB: a command packet written on P1 is decoded
     run(dir, "sgb");
     CHECK(res.sgb_packets >= 1 && res.sgb_cmd[0x11] >= 1);

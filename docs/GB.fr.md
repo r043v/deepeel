@@ -2292,3 +2292,11 @@ Un décodeur observe les écritures `$FF00` : impulsion `00` (début), 128 bits 
 `20` = 0, chacun suivi de `30`), bit d'arrêt. Le rapport liste « SGB packets on P1 » avec le compte par
 commande (octet 0 >> 3). Observation seule : aucune bordure ni palette SGB n'est rendue ni typée ; l'état
 du décodeur est par explorateur (non restauré par les fourches). Test `explorer` (fixture `sgb`).
+
+## 0.159.0 (archive RAM — événements SMC, GB)
+
+Chaque octet de WRAM exécuté est marqué ; une écriture ultérieure dans un octet marqué compte comme un
+événement SMC (W^X) : le rapport affiche « self-modifying WRAM code: N writes… (first at pc $…) »,
+en plus du compteur de variantes polymorphes de l'archive. Un octet réécrit puis ré-exécuté compte à
+nouveau. HRAM/VRAM ne sont pas suivis ; les autres plateformes n'ont pas encore ce compteur. Test
+`explorer` (fixture `smc`).
