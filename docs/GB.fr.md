@@ -2741,3 +2741,23 @@ deux défauts distincts apparaissent :
 
 Après correction : 0 échec sur 12 lancements, 8 lancements sous AddressSanitizer sans erreur, 125 tests verts.
 Les campagnes J13 antérieures en `--jobs` pouvaient donc être faussées par ces courses.
+
+## J13 : campagne sur ROMs réelles, GB (observations de l'outil)
+
+Binaire 0.187.5, `--jobs 4 --time-limit 240`, ROMs de `m0boy/roms` (hors dépôt), machine concrète DMG, RAM à zéro,
+registres événementiels statiques. Ce sont des observations de l'outil, pas des mesures de matériel ; les trois runs
+s'arrêtent au mur de temps, donc ce sont des bornes basses de couverture, pas des fermetures.
+
+| ROM | pas | chemins | forks (branche / irq / touche / p1) | sections | exécution hors ROM (rattachée à une copie ROM) | résidu inconnu |
+|---|---|---|---|---|---|---|
+| Super Mario Land 2 | 80,0 M | 12 080 | 214 628 (10 866 / 3 / 201 263 / 2 496) | 8 773 | 1 162 167 (2 109) | 65 333 o en 2 790 plages |
+| Tetris DX (mode compat. DMG) | 160,0 M | 83 330 | 287 050 (9 959 / 443 / 273 400 / 3 248) | 7 621 | 18 787 660 (278 972) | 58 313 o en 1 983 plages |
+| Pokémon Jaune (mode DMG) | 500,8 M | 40 848 | 119 527 (20 431 / 73 / 95 823 / 3 200) | 17 026 | 27 025 048 (194 231) | 149 263 o en 2 159 plages |
+
+Saturations déclarées, jamais silencieuses : 4 / 8 / 26 murs de pas, 201 348 / 193 540 / 61 870 débordements de file,
+18,5 M / 14,9 M / 67,5 M forks plafonnés par site. Les trois ROMs sont donc loin d'être épuisées.
+
+Limites : m0boy est DMG-only, donc Tetris DX et Pokémon Jaune sont explorés dans leur mode de compatibilité DMG
+(pas de VBK/SVBK/HDMA réels) ; le niveau B gambatte, borné par défaut, sature très tôt sur ces deux ROMs
+(884 / 385 pas). Cette campagne a révélé les courses de données de `--jobs` corrigées en 0.187.5.
+Reste pour J13 : MD, NES, PCE, MSX sur ROMs réelles, et l'audit complet de la matrice §2.1.
