@@ -3403,3 +3403,10 @@ Avec `--second-pass`, les mots alignés voisins (même page de 8 Kio, ≤ 64 de 
 jusqu'à un `jmp (zp)` et qui nomment du code non exécuté dans la fenêtre de leur page deviennent des racines forcées
 (comme le fait déjà le NES). Le rapport PCE affiche `, N roots seeded` après le nombre de mots tracés. Test
 `pce_provenance_roots` (fixture `fix_pce_prov` : un second mot voisin) : 1 racine. Les tests existants sont inchangés.
+
+## 0.249.1 — J4 : Sega sur les helpers d'archive partagés
+
+`sega_cell_add` et le tirage de `novelty_session` utilisent `dp_zdup`, `dp_cell_victim`, `dp_cell_yield` et
+`dp_cell_score` (`src/explore/novelty.h`) comme NES, PCE et MD : plus aucune copie du score ni du remplacement. Sans
+changement de comportement : 152 tests passent. Le format de la cellule Sega (état || image cartouche) reste propre
+au cœur.
