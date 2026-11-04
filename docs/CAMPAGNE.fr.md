@@ -158,3 +158,7 @@ Ces chiffres sont des essais courts, pas une campagne : ni saturation levée, ni
 - MSX1, Aleste (Compile, 1988) : connu 2,53 % par l'exécution, carte 74,35 % (inféré 117 626), 40 524 637 pas,
   1 025 chemins, `exec_outside` 10 324 290 — l'écart entre le connu et la carte inférée est grand ; la valeur
   `exec_outside` élevée dit que l'essentiel de l'exécution se fait hors ROM (RAM/BIOS), à analyser avant de conclure.
+- NES, DuckTales, second run (`--max-total 4000000000 --max-steps 2000000`, limite 900 s) : résultat identique au run
+  de 100 s (1 958 188 pas, 1 527 chemins, 6,51 % du PRG touché). L'exploration s'épuise donc d'elle-même sur cette
+  ROM avec ces réglages ; le plafond n'est pas le temps. 6,51 % est le résultat de l'outil à RAM nulle et entrées
+  par défaut, sans `--second-pass` ni jeu : un autre mode d'entrée serait nécessaire pour aller plus loin.
