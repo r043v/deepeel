@@ -734,7 +734,7 @@ void dp_md_options_default(DpMdOptions *o) {
     o->entry_count = 0;
     o->pad_cut = 0;
     o->second_pass = 0;
-    o->novelty_steps = 0; o->novelty_frames = 240; o->novelty_archive = 256; o->novelty_cells = 0; o->play_seed = 1; o->play_frames = 0; o->play_sessions = 8;
+    o->novelty_steps = 0; o->novelty_frames = 240; o->novelty_archive = 256; o->novelty_cells = 0; o->play_seed = 1; o->play_frames = 0; o->play_sessions = 8; o->play_from = 0; o->play_step = 1;
     o->skip_root = o->no_finalize = 0;
     o->entry_from = 0; o->entry_step = 1;
     o->pre_finalize = NULL; o->pre_user = NULL;
@@ -1420,6 +1420,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     // played sessions: random pad from power-on, each a natural path bounded in frames
     for (uint32_t s = 0; !drain && o->play_frames && s < o->play_sessions; s++) {
         if (r->steps >= o->max_total || dp_stop) break;
+        if (o->play_step > 1 && s % o->play_step != o->play_from) continue;
         dp_mdmach_reset(x.m);
         x.play_active = 1;
         x.play_left = o->play_frames;

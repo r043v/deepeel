@@ -2879,3 +2879,11 @@ couvrent tout ce qu'une partie réelle exécute.
 - Fixture `fix_jptable_de`, test `gb_jp_table_de` (échoue sans le correctif, vérifié).
 - Limite : la fenêtre reste de 24 octets de code droit, l'index n'est pas évalué (toutes les
   entrées, ≤ 64, sont prises) ; une base calculée par arithmétique autre que `add hl,rr` n'est pas suivie.
+
+## 0.192.0 : MD, sessions jouées réparties sur `--jobs 2` (2026-11-04)
+
+- `--jobs 2` accepte désormais une seule entrée si `--play-frames` et `--play-sessions ≥ 2` : l'instance
+  primaire joue les sessions paires, la secondaire les impaires (`play_from/play_step`), puis fusion.
+- Le rapport additionne `played sessions` des deux instances ; test `md_play_jobs` (union observée
+  identique à l'exécution mono-instance sur la fixture).
+- Limite : pas de pool de checkpoints partagé entre instances ; deux instances seulement.

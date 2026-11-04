@@ -60,6 +60,7 @@ typedef struct {
     unsigned watch_every;      /* publish a frame to the watch buffer every N frames (0: off) */
     int skip_root;
     int no_finalize;
+    unsigned play_from, play_step;    /* this instance runs play sessions with s % step == from */
     unsigned entry_from, entry_step;  /* this instance takes entries[i] with i % step == from (0: all) */
     void (*pre_finalize)(struct DpMdResults_ *r, uint8_t *bank_seen, void *user);
     void *pre_user;
