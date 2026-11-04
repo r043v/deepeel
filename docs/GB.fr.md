@@ -2424,3 +2424,12 @@ est relâché avant l'écriture, et la compression est faite avant de prendre le
 `fwrite` reste sérialisé). Observation de l'outil sur 60 s de Zelda : 18,0 M pas contre 11,8 M avec 0.169.0
 (+53 %), 2,24 M états écrits contre 1,07 M. Le passage à l'échelle reste partiel (écriture et ensemble exact
 partagé toujours sous verrou) ; piste suivante : tampon RAM de tête de spool et ensemble exact découpé.
+
+## 0.172.0 (J12 : borne de boucle du mode `lr explore`)
+
+`deepeel lr explore` coupe désormais un chemin quand un même pc est exécuté plus de `--loop-bound N` fois (3 par
+défaut), compteur `loop bound cuts` rapporté. Avec le cœur Genesis Plus GX patché (observation de l'outil) :
+`fix_md_loop` passe de 100 000 pas à 4 (1 coupe), `fix_md_dbcc` atteint la sortie de boucle (4 débuts d'opcode),
+`fix_md_fork` garde ses 2 fourches et ses 6 débuts d'opcode. `DBF` n'est pas un conditionnel de Musashi
+(`dbra`) : il n'est pas forcé, aucune fourche n'est attendue sur `fix_md_dbcc` ; parité de contrat avec le
+backend `m0boy` sur ces trois fixtures, pas de parité d'état complète.

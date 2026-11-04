@@ -1,4 +1,4 @@
-// deepeel lr explore CORE ROM [--text FILE] [--map FILE] [--png FILE] [--path-steps N] [--max-total N] [--queue N]
+// deepeel lr explore CORE ROM [--text FILE] [--map FILE] [--png FILE] [--path-steps N] [--loop-bound N] [--max-total N] [--queue N]
 // Forking exploration of a level-B libretro core (see libretro.h). Level-A
 // cores cannot fork: the command says so and exits non-zero.
 #include "mach/libretro.h"
@@ -234,13 +234,14 @@ int dp_lr_command(int argc, char **argv) {
         return 2;
     }
     const char *core = argv[3], *rom = argv[4], *text = NULL, *map = NULL, *png = NULL;
-    DpLrExploreLimits lim = { 100000, 20000000, 4096, 2 };
+    DpLrExploreLimits lim = { 100000, 20000000, 4096, 2, 3 };
     for (int i = 5; i + 1 < argc; i += 2) {
         if (!strcmp(argv[i], "--text")) text = argv[i + 1];
         else if (!strcmp(argv[i], "--map")) map = argv[i + 1];
         else if (!strcmp(argv[i], "--png")) png = argv[i + 1];
         else if (!strcmp(argv[i], "--path-steps")) lim.path_steps = strtoull(argv[i + 1], NULL, 0);
         else if (!strcmp(argv[i], "--max-total")) lim.total_steps = strtoull(argv[i + 1], NULL, 0);
+        else if (!strcmp(argv[i], "--loop-bound")) lim.loop_bound = (uint32_t)strtoul(argv[i + 1], NULL, 0);
         else if (!strcmp(argv[i], "--queue")) lim.max_items = (uint32_t)strtoul(argv[i + 1], NULL, 0);
         else { fprintf(stderr, "deepeel lr: unknown option %s\n", argv[i]); return 2; }
     }
@@ -271,9 +272,10 @@ int dp_lr_command(int argc, char **argv) {
             (unsigned long long)st.forks, (unsigned long long)st.deduped, st.branch_sites);
     fprintf(f, "code starts reached: %u of %zu bytes\n", st.covered, rn);
     fprintf(f, "saturation (a non-zero line means the exploration is incomplete):\n");
-    fprintf(f, "  fork site cap hits: %llu\n  path step budget cuts: %llu\n  global step wall cuts: %llu\n  dropped fork items (queue full): %llu\n",
+    fprintf(f, "  fork site cap hits: %llu\n  path step budget cuts: %llu\n  global step wall cuts: %llu\n  dropped fork items (queue full): %llu\n  loop bound cuts: %llu\n",
             (unsigned long long)st.capped_forks, (unsigned long long)st.cut_path_steps,
-            (unsigned long long)st.cut_total, (unsigned long long)st.dropped_items);
+            (unsigned long long)st.cut_total, (unsigned long long)st.dropped_items,
+            (unsigned long long)st.cut_loop);
     if (f != stdout) fclose(f);
     if (map || png) {
         // GB-bank layout ("bank start end class", CPU-view addresses) so the

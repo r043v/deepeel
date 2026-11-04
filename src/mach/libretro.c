@@ -325,9 +325,11 @@ typedef struct { uint8_t *snap; int force; } LrItem;
 typedef struct {
     DpLibretro *lr; uint8_t *map; size_t n; DpLrExploreStats *st;
     int branch_hit; uint32_t branch_pc; uint8_t *sites; size_t site_n; uint32_t *site_forks;
+    uint16_t *visits; uint32_t loop_bound; int loop_cut; // per-path pc visit counts
 } LrExpCtx;
 static void lrx_exec(void *u, uint32_t pc) {
     LrExpCtx *c = u;
+    if (++c->visits[pc & 0xFFFF] > c->loop_bound) c->loop_cut = 1;
     int64_t i = c->lr->trace.rom_index ? c->lr->trace.rom_index(pc) : (int64_t)pc;
     if (i >= 0 && (size_t)i < c->n && !c->map[i]) { c->map[i] = 1; c->st->covered++; }
 }
@@ -342,7 +344,8 @@ int dp_lr_explore(DpLibretro *lr, uint8_t *exec_map, size_t rom_size,
     LrItem *q = calloc(cap, sizeof *q);
     uint64_t *seen = calloc(65536, sizeof *seen); // (state hash, force) dedup of fork items
     uint8_t *cur = malloc(sz), *pre = malloc(sz);
-    LrExpCtx c = { lr, exec_map, rom_size, st, 0, 0, calloc(65536, 1), 65536, calloc(65536, sizeof(uint32_t)) };
+    LrExpCtx c = { lr, exec_map, rom_size, st, 0, 0, calloc(65536, 1), 65536, calloc(65536, sizeof(uint32_t)),
+                   calloc(65536, sizeof(uint16_t)), lim->loop_bound ? lim->loop_bound : 3, 0 };
     uint32_t site_cap = lim->site_cap ? lim->site_cap : 2;
     DpLrObservers o = { &c, lrx_exec, NULL, NULL, NULL, NULL, lrx_branch };
     lr->trace.set_observers(&o);
@@ -356,6 +359,8 @@ int dp_lr_explore(DpLibretro *lr, uint8_t *exec_map, size_t rom_size,
         st->paths++;
         if (it.force >= 0) lr->trace.force_branch(it.force);
         uint64_t ps = 0;
+        memset(c.visits, 0, 65536 * sizeof(uint16_t));
+        c.loop_cut = 0;
         for (;;) {
             if (st->steps >= lim->total_steps) { st->cut_total++; break; }
             if (ps >= lim->path_steps) { st->cut_path_steps++; break; }
@@ -365,6 +370,7 @@ int dp_lr_explore(DpLibretro *lr, uint8_t *exec_map, size_t rom_size,
             int ok = lr->trace.step();
             st->steps++; ps++;
             if (!ok) break;
+            if (c.loop_cut) { st->cut_loop++; break; } // loop bound: reported, never silent
             if (!c.branch_hit || (it.force >= 0 && ps == 1)) continue; // a forced item replays its own branch
             // conditional: abandon this run and queue both sides from the pre-step state
             if (!c.sites[c.branch_pc & 0xFFFF]) { c.sites[c.branch_pc & 0xFFFF] = 1; st->branch_sites++; }
@@ -385,7 +391,7 @@ int dp_lr_explore(DpLibretro *lr, uint8_t *exec_map, size_t rom_size,
         }
     }
     lr->trace.set_observers(NULL);
-    free(q); free(seen); free(cur); free(pre); free(c.sites); free(c.site_forks);
+    free(q); free(seen); free(cur); free(pre); free(c.sites); free(c.site_forks); free(c.visits);
     return 1;
 }
 

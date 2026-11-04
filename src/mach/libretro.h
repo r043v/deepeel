@@ -100,10 +100,11 @@ typedef struct DpLrExploreLimits {
     uint64_t total_steps; // global step wall
     uint32_t max_items;   // pending fork items (queue cap)
     uint32_t site_cap;    // forks one conditional site may spawn (0 = 2)
+    uint32_t loop_bound;  // executions of one pc per path before the path is cut (0 = 3)
 } DpLrExploreLimits;
 typedef struct DpLrExploreStats {
     uint64_t steps, forks, paths, deduped;
-    uint64_t cut_path_steps, cut_total, dropped_items, capped_forks; // saturation counters
+    uint64_t cut_path_steps, cut_total, dropped_items, capped_forks, cut_loop; // saturation counters
     uint32_t covered;                                   // distinct ROM bytes executed (opcode starts)
     uint32_t branch_sites;                              // distinct conditional pcs
 } DpLrExploreStats;
