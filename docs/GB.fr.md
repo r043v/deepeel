@@ -2497,3 +2497,13 @@ approchée (observation de l'outil). La base reste `kmin` ; la déclaration `ind
 l'octet (`DP_SRC_*` : fourche naturelle/forcée, session, …). Avec les drapeaux et les compteurs de coups déjà
 présents, `dpCh` porte la nature d'exécution/données/statique, les sources et les hits de §9.3 ; les « types »
 par octet (`dpCv` §9.3) restent absents du chunk.
+
+### Divergence TAS à l'image 41 775 : ce que la trace de registres montre (observations de l'outil)
+
+Trace BizHawk (libgambatte) de l'image 42109 : 10 217 instructions, dont 1 413 tours d'une boucle de remplissage
+`$039E…$03A2` (l'image démarre au milieu de la boucle, SP=`$A8FB`) ; aucune touche pressée (42104…42111 vides).
+La trace deepeel de l'image correspondante (`DEEPEEL_TAS_DUMP` + `DEEPEEL_TAS_TRACEFRAME=41774`) ne visite jamais
+`$03A1` : ses flux de ~3 000 instructions sont d'autres chemins. Donc, à WRAM identique à 42108, la référence est au
+milieu d'un remplissage que deepeel n'a pas (ou pas à cette image) : la différence est d'état matériel/temps (position dans
+l'image, LCD éteint, IME/IF), pas de touches. Cause non identifiée ; prochaine étape : tracer aussi l'image 42108 des
+deux côtés et comparer le PC de fin d'image.
