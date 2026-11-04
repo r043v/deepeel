@@ -48,6 +48,10 @@ typedef struct DpGblApi {
     void (*sync_ppu_apply)(void);
     /* bank shown in the $0000-$3FFF window: 0 except on a large MBC1 in mode 1 */
     const uint16_t *rom0_bank;
+    /* ROM size in 16 KiB banks (power of two): the mapper's bank mask */
+    uint32_t *rom_banks;
+    /* MBC1M multicart wiring flag */
+    uint8_t *mbc1m;
 } DpGblApi;
 
 /* the ROM bank behind a pc/address of the fixed-or-switchable windows */

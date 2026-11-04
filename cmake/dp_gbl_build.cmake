@@ -46,6 +46,7 @@ foreach(v RANGE ${nv})
 #define GBL_CONFIG_H
 #define GBL_MBC ${mbc}
 #define GBL_ROM_BANKS 512
+#define GBL_ROM_BANKS_VAR 1
 #define GBL_ERAM_SIZE ${eram}
 #define GBL_ERAM_ON_SD 0
 #define GBL_BATTERY 0
