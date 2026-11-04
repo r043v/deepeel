@@ -2379,3 +2379,17 @@ qui remettent `ex->stop` à zéro ne l'effacent plus. Vérifié : run `--unbound
   par la RAM) 1 863 201 pas (observations de l'outil, un seul essai chacun). Correction d'une affirmation
   antérieure : le disque des runs est un NVMe, pas un support externe lent ; la cause du CPU à 38 % n'est pas établie.
 Reste : réglage dynamique du nombre d'explorateurs, tampon RAM de tête de spool.
+
+## 0.170.0 (J12 — premier cœur réel de niveau B : Genesis Plus GX patché)
+
+`tools/gpgx_trace.patch` (181 lignes, s'applique sur le dépôt Genesis Plus GX, cœur hors dépôt) ajoute
+l'extension `DP_LR_ENV_TRACE` : pas à pas du 68000 (`dp_m68k_step`), observateurs exec/read/write via le
+`cpu_hook` existant (build `make -f Makefile.libretro HOOK_CPU=1`), observateur de branchement et
+**forçage des conditionnels** en enveloppant les macros `COND_*` de Musashi (Bcc, DBcc, Scc : « pris » = le
+corps du `if` s'exécute), index ROM = adresse. Correction d'un défaut de l'amont : `cpu_hook` défini dans
+l'en-tête (échec d'édition de liens avec gcc récent), maintenant `extern`.
+Résultat (observation de l'outil) : sur `fix_md_fork`, `deepeel lr explore` négocie le niveau B, trouve 1 site
+de branchement, 2 fourches et atteint les 6 débuts d'opcode attendus (les deux côtés du `bne.s`).
+Test `lr_gpgx_trace` (variable `DP_GPGX_TRACE_CORE`, ignoré sans cœur). Limites : pas d'observateurs
+`dma`/`bank` ; pendant un pas, le VDP, les IRQ et le Z80 n'avancent pas (seul `retro_run` les fait avancer) ;
+parité avec le backend m0boy vérifiée sur une fixture seulement, pas sur les 11 de GB.

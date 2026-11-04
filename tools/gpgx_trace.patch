@@ -1,0 +1,181 @@
+diff --git a/core/debug/cpuhook.c b/core/debug/cpuhook.c
+index 1e58835..c52a7c8 100644
+--- a/core/debug/cpuhook.c
++++ b/core/debug/cpuhook.c
+@@ -50,4 +50,60 @@ void set_cpu_hook(void(*hook)(hook_type_t type, int width, unsigned int address,
+ 	cpu_hook = hook;
+ }
+ 
+-#endif /* HOOK_CPU */
+\ No newline at end of file
++#endif /* HOOK_CPU */
++
++/* ---- deepeel trace extension (level B, DP_LR_ENV_TRACE) -------------------------------- */
++#include <stdint.h>
++#include "shared.h"
++#include "libretro.h"
++
++#define DP_LR_ENV_TRACE 0x7DEE0001u
++typedef struct {
++  void *user;
++  void (*exec)(void *, uint32_t);
++  void (*read)(void *, uint32_t, uint8_t);
++  void (*write)(void *, uint32_t, uint8_t);
++  void (*dma)(void *, uint32_t, uint32_t, uint32_t);
++  void (*bank)(void *, uint32_t, uint32_t);
++  void (*branch)(void *, uint32_t);
++} dp_obs_t;
++typedef struct {
++  uint32_t version;
++  int (*step)(void);
++  void (*set_observers)(const dp_obs_t *);
++  uint32_t (*pc)(void);
++  int (*force_branch)(int);
++  int64_t (*rom_index)(uint32_t);
++} dp_trace_t;
++
++extern int dp_m68k_step(void);
++int dp_force_cond = -1;
++void (*dp_branch_cb)(void);
++static dp_obs_t obs;
++static uint32_t cur_pc;
++
++static void dp_branch(void) { if (obs.branch) obs.branch(obs.user, cur_pc); }
++static void dp_hook(hook_type_t type, int width, unsigned int address, unsigned int value)
++{
++  int i;
++  if (type == HOOK_M68K_E) { cur_pc = address; if (obs.exec) obs.exec(obs.user, address); }
++  else if (type == HOOK_M68K_R && obs.read)
++    for (i = 0; i < width; i++) obs.read(obs.user, address + i, (uint8_t)(value >> (8 * (width - 1 - i))));
++  else if (type == HOOK_M68K_W && obs.write)
++    for (i = 0; i < width; i++) obs.write(obs.user, address + i, (uint8_t)(value >> (8 * (width - 1 - i))));
++}
++static int t_step(void) { return dp_m68k_step(); }
++static void t_set(const dp_obs_t *o)
++{
++  if (o) { obs = *o; set_cpu_hook(dp_hook); dp_branch_cb = o->branch ? dp_branch : NULL; }
++  else { memset(&obs, 0, sizeof obs); set_cpu_hook(NULL); dp_branch_cb = NULL; }
++}
++static uint32_t t_pc(void) { return cur_pc; }
++static int t_force(int taken) { dp_force_cond = taken; return 1; }
++static int64_t t_rom_index(uint32_t a) { return a < cart.romsize ? (int64_t)a : -1; }
++
++void dp_trace_register(int (*env)(unsigned, void *))
++{
++  dp_trace_t t = { 1, t_step, t_set, t_pc, t_force, t_rom_index };
++  env(DP_LR_ENV_TRACE, &t);
++}
+diff --git a/core/debug/cpuhook.h b/core/debug/cpuhook.h
+index 1fea3ec..a890266 100644
+--- a/core/debug/cpuhook.h
++++ b/core/debug/cpuhook.h
+@@ -80,7 +80,7 @@ typedef enum {
+ 
+ /* CPU hook is called on read, write, and execute.
+  */
+-void (*cpu_hook)(hook_type_t type, int width, unsigned int address, unsigned int value);
++extern void (*cpu_hook)(hook_type_t type, int width, unsigned int address, unsigned int value);
+ 
+ /* Use set_cpu_hook() to assign a callback that can process the data provided
+  * by cpu_hook().
+diff --git a/core/m68k/m68kcpu.c b/core/m68k/m68kcpu.c
+index 07d2514..9c1392e 100644
+--- a/core/m68k/m68kcpu.c
++++ b/core/m68k/m68kcpu.c
+@@ -318,6 +318,14 @@ void m68k_run(unsigned int cycles)
+   m68k.cycle_end = 0;
+ }
+ 
++/* deepeel: execute exactly one instruction; 0 when the CPU is stopped */
++int dp_m68k_step(void)
++{
++  if (CPU_STOPPED) return 0;
++  m68k_run(m68k.cycles + 1);
++  return 1;
++}
++
+ int m68k_cycles(void)
+ {
+   return CYC_INSTRUCTION[REG_IR];
+diff --git a/core/m68k/m68kcpu.h b/core/m68k/m68kcpu.h
+index 3bf06e8..0c38ec8 100644
+--- a/core/m68k/m68kcpu.h
++++ b/core/m68k/m68kcpu.h
+@@ -462,20 +462,49 @@
+ 
+ 
+ /* Conditions */
+-#define COND_CS() (FLAG_C&0x100)
+-#define COND_CC() (!COND_CS())
+-#define COND_VS() (FLAG_V&0x80)
+-#define COND_VC() (!COND_VS())
+-#define COND_NE() FLAG_Z
+-#define COND_EQ() (!COND_NE())
+-#define COND_MI() (FLAG_N&0x80)
+-#define COND_PL() (!COND_MI())
+-#define COND_LT() ((FLAG_N^FLAG_V)&0x80)
+-#define COND_GE() (!COND_LT())
+-#define COND_HI() (COND_CC() && COND_NE())
+-#define COND_LS() (COND_CS() || COND_EQ())
+-#define COND_GT() (COND_GE() && COND_NE())
+-#define COND_LE() (COND_LT() || COND_EQ())
++/* deepeel trace extension: a conditional can be forced and observed (see tools/gpgx_trace.patch) */
++#ifdef HOOK_CPU
++extern int dp_force_cond;
++extern void (*dp_branch_cb)(void);
++static inline int dp_cond_fn(int v) {
++  if (dp_branch_cb) dp_branch_cb();
++  if (dp_force_cond >= 0) { v = dp_force_cond; dp_force_cond = -1; }
++  return v;
++}
++#define DP_COND(x) dp_cond_fn((x) != 0)
++#else
++#define DP_COND(x) (x)
++#endif
++#define RAW_COND_CS() (FLAG_C&0x100)
++#define RAW_COND_CC() (!RAW_COND_CS())
++#define RAW_COND_VS() (FLAG_V&0x80)
++#define RAW_COND_VC() (!RAW_COND_VS())
++#define RAW_COND_NE() FLAG_Z
++#define RAW_COND_EQ() (!RAW_COND_NE())
++#define RAW_COND_MI() (FLAG_N&0x80)
++#define RAW_COND_PL() (!RAW_COND_MI())
++#define RAW_COND_LT() ((FLAG_N^FLAG_V)&0x80)
++#define RAW_COND_GE() (!RAW_COND_LT())
++#define RAW_COND_HI() (RAW_COND_CC() && RAW_COND_NE())
++#define RAW_COND_LS() (RAW_COND_CS() || RAW_COND_EQ())
++#define RAW_COND_GT() (RAW_COND_GE() && RAW_COND_NE())
++#define RAW_COND_LE() (RAW_COND_LT() || RAW_COND_EQ())
++
++
++#define COND_CS() DP_COND(RAW_COND_CS())
++#define COND_CC() DP_COND(RAW_COND_CC())
++#define COND_VS() DP_COND(RAW_COND_VS())
++#define COND_VC() DP_COND(RAW_COND_VC())
++#define COND_NE() DP_COND(RAW_COND_NE())
++#define COND_EQ() DP_COND(RAW_COND_EQ())
++#define COND_MI() DP_COND(RAW_COND_MI())
++#define COND_PL() DP_COND(RAW_COND_PL())
++#define COND_LT() DP_COND(RAW_COND_LT())
++#define COND_GE() DP_COND(RAW_COND_GE())
++#define COND_HI() DP_COND(RAW_COND_HI())
++#define COND_LS() DP_COND(RAW_COND_LS())
++#define COND_GT() DP_COND(RAW_COND_GT())
++#define COND_LE() DP_COND(RAW_COND_LE())
+ 
+ /* Reversed conditions */
+ #define COND_NOT_CS() COND_CC()
+diff --git a/libretro/libretro.c b/libretro/libretro.c
+index 3e63862..9ae1153 100644
+--- a/libretro/libretro.c
++++ b/libretro/libretro.c
+@@ -3585,6 +3585,9 @@ bool retro_load_game(const struct retro_game_info *info)
+ 
+    init_frameskip();
+ 
++#ifdef HOOK_CPU
++   { extern void dp_trace_register(int (*)(unsigned, void *)); dp_trace_register((int (*)(unsigned, void *))environ_cb); }
++#endif
+    return true;
+ }
+ 
