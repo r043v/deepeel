@@ -3555,3 +3555,9 @@ Le second passage (`--second-pass`) de NES, PCE et MD plafonnait à 256 racines 
 (`capped`). Ce plafond est levé quand `max_total` vaut `UINT64_MAX` (aujourd'hui seulement MD `--unbounded` le positionne ;
 NES et PCE n'ont pas encore d'option `--unbounded`). Les cellules G4 NES/PCE/MD restent ◐ : hors mode illimité, une racine
 au-delà du plafond n'est pas reportée dans la frontière (§6), elle est comptée.
+
+## 0.249.22 (second passage : plafond levé quand un lot disque existe)
+
+Le plafond de 256 racines du second passage (NES, PCE, MD) est aussi levé dès qu'un lot disque (`--lot`) est ouvert : les
+racines en excès sont parquées puis écrites dans le lot (reprise possible) au lieu d'être comptées `capped` et abandonnées.
+Sans lot ni mode illimité, le plafond et le comptage restent ; G4 reste donc ◐ pour ces cas.

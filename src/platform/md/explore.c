@@ -927,7 +927,7 @@ static unsigned second_pass_seed(X *x) {
                 uint32_t t = cand[k];
                 if ((t & 1) || t < 0x200 || t >= n || (r->flags[t] & live) || sd[t]) continue;
                 sd[t] = 1;
-                if (r->pass2_seeds + r->pass2_refused >= (x->o->max_total == UINT64_MAX ? UINT32_MAX : (uint32_t)MD_PASS2_MAX)) { r->pass2_capped++; continue; }
+                if (r->pass2_seeds + r->pass2_refused >= ((x->o->max_total == UINT64_MAX || x->lot) ? UINT32_MAX : (uint32_t)MD_PASS2_MAX)) { r->pass2_capped++; continue; }
                 dp_mdmach_reset(x->m);
                 if (push(x, t, 0, 0)) { seeded++; r->pass2_seeds++; } else r->pass2_refused++;
             }
@@ -1100,7 +1100,7 @@ static unsigned dispatch_seed(X *x) {
                 if (sd[t] || (r->flags[t] & (DP_MDF_NATURAL | DP_MDF_FORCED))) continue;
                 if (!md_target_ok(x, t)) { r->disp_refused_view++; continue; }
                 sd[t] = 1;
-                if (r->pass2_seeds + r->pass2_refused >= (x->o->max_total == UINT64_MAX ? UINT32_MAX : (uint32_t)MD_PASS2_MAX)) { r->pass2_capped++; continue; }
+                if (r->pass2_seeds + r->pass2_refused >= ((x->o->max_total == UINT64_MAX || x->lot) ? UINT32_MAX : (uint32_t)MD_PASS2_MAX)) { r->pass2_capped++; continue; }
                 dp_mdmach_reset(x->m);
                 if (push(x, t, 0, 0)) { seeded++; r->pass2_seeds++; r->disp_seeds++; } else r->pass2_refused++;
             }
