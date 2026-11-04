@@ -2770,3 +2770,13 @@ conforme. Observation de m0boy/deepeel : les écritures `MODE` et `RAMB` sont vu
 dans la banque 0 (13 octets de code en banque 0, 2 sections) : **le remappage de la fenêtre ROM0 n'est pas modélisé**,
 donc le code placé en banque `$20/$40/$60` d'une grosse ROM MBC1 est mal attribué. Écart réel, non corrigé : la
 correction touche le runtime généré de m0boy (hors de ce dépôt). Le test ne fige pas le comportement fautif de m0boy.
+
+Analyse de la correction (non appliquée) : la machine embarquée (`m0boy/targets/meta/runtime/gbl_core.c`,
+`map_rom_bank`) ne remappe que `gbl_rmap[4..7]` (fenêtre ROMX) ; `gbl_rmap[0..3]` reste figé sur la banque 0 et
+l'écriture du registre `MODE` (`case 3`) ne touche que la RAM. Corriger demande : (1) côté m0boy, un remappage de
+`gbl_rmap[0..3]` sous garde `GBL_MBC == 1 && GBL_ROM_BANKS > 32` (aucun coût pour les cibles DMG de petite ROM) et un
+champ « banque de la fenêtre ROM0 » exposé par l'API ; (2) côté deepeel, remplacer la dizaine de sites qui codent
+`pc < 0x4000 ? 0 : rom_bank` (`explorer.c`, `forks.c`, `sessions.c`, `frontier_disk.c`, `ctxproj.c`) par un assistant
+unique. `gbl_cpu_t` est partagée avec les cibles matérielles et sert aux fichiers d'état : y ajouter un champ change leur
+format, d'où un champ séparé hors de la structure. Changement transverse sur deux dépôts, dont l'un a des modifications
+non commitées étrangères à ce sujet : à valider avant de le faire.
