@@ -129,6 +129,16 @@ static void test_explore(const uint8_t *rom) {
             CHECK(rp->flags[0x28] & DP_PCE_FORCED, "second fork's side reached");
         }
         dp_pce_results_free(rp);
+        // the queue grows up to queue_max instead of parking
+        op.queue_max = 8;
+        memset(rp, 0, sizeof *rp);
+        CHECK(dp_pce_explore(rom2, ROM_SIZE, &op, rp), "growing queue explore");
+        if (rp->flags) {
+            CHECK(rp->queue_grown >= 1 && rp->parked == 0, "queue grew (%llu) instead of parking (%llu)",
+                  (unsigned long long)rp->queue_grown, (unsigned long long)rp->parked);
+            CHECK(rp->flags[0x18] & DP_PCE_FORCED && rp->flags[0x28] & DP_PCE_FORCED, "both forced sides reached");
+        }
+        dp_pce_results_free(rp);
         free(rp);
         // a wall leaves states: they go to the disk lot, the next run resumes them (§6)
         char lp[] = "/tmp/dp_pce_lotXXXXXX"; int fd = mkstemp(lp); if (fd >= 0) close(fd);

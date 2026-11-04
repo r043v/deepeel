@@ -1266,6 +1266,7 @@ static int cmd_pce(int argc, char **argv) {
         if (0) {}
         DP_CLI_COMMON(opt, cc)
         DP_CLI_PLAYED(opt)
+        else if (!strcmp(a, "--queue-max") && i + 1 < argc) opt.queue_max = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--play-pool") && i + 1 < argc) opt.play_pool = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed-vectors")) opt.seed_vectors = 1;
         else if (!strcmp(a, "--seed-banks")) opt.seed_banks = 1;

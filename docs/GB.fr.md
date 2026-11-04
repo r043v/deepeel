@@ -3191,3 +3191,9 @@ Test `nes` : `test_mmc5`.
 Les options communes acceptent `--spool FICHIER` (alias de `--lot`) et `--resume FICHIER` (lot repris
 et vidé, alias de `--lot --lot-drain`), comme NES. Test `resume_cli` (MD : un run borné laisse un lot,
 `--resume` le relit).
+
+## PCE : file croissante `--queue-max` (0.225.0)
+
+La file d'états en attente de PCE grandit (doublement) jusqu'à `queue_max` / `--queue-max N` avant de
+déborder vers le parc puis le lot disque ; le rapport affiche `queue grown N times`. Défaut 0
+(comportement inchangé). Test `pce` : la file grandit au lieu de parquer.

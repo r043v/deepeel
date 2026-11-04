@@ -62,7 +62,7 @@ typedef struct {
     const uint8_t *rom;
     size_t rom_size;
     PceQueued *queue;
-    uint32_t queue_len;
+    uint32_t queue_len, qcap; // qcap: live capacity, grown up to opt.queue_max
     PceQueued *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
     DpLotFile *lot;            // disk lot: park overflow, wall leftovers, --lot resume
     uint64_t *seen;        // open-addressed dedup set
@@ -362,7 +362,12 @@ static int push_live(PceRun *x, int forced) {
         while (k < x->opt.ctx_cap && dp_set_insert(&x->ctx_seen, (h ^ (k * 0x9E3779B97F4A7C15ull)) | 1) == 0) k++;
         if (k >= x->opt.ctx_cap) { r->ctx_evicted++; if (node) dp_tree_close(&x->tree, node, DP_ISSUE_CAPPED); return 0; }
     }
-    int full = x->queue_len >= x->opt.queue_cap;
+    if (x->queue_len >= x->qcap && x->opt.queue_max > x->qcap) { // adaptive worklist: grow before parking
+        uint32_t nc = x->qcap > x->opt.queue_max / 2 ? x->opt.queue_max : (x->qcap ? x->qcap * 2 : 1);
+        PceQueued *g = realloc(x->queue, (size_t)nc * sizeof *g);
+        if (g) { x->queue = g; x->qcap = nc; r->queue_grown++; }
+    }
+    int full = x->queue_len >= x->qcap;
     dp_pce_save(x->tmp2);
     uLongf zl = x->zcap;
     if (compress2(x->ztmp, &zl, x->tmp2, x->state_size, 1) != Z_OK) { x->failed = 1; return 0; }
@@ -605,7 +610,7 @@ static int pstm_cross(PceRun *x, PDec *d) {
             size_t idx = (size_t)pg * 0x2000 + (v & 0x1FFF);
             if (idx >= x->rom_size || tried[idx]) continue;
             tried[idx] = 1;
-            if (cands >= PS_CAND || x->queue_len >= x->opt.queue_cap) { r->s6_sat++; break; }
+            if (cands >= PS_CAND || x->queue_len >= x->qcap) { r->s6_sat++; break; }
             dp_pce_load(d->snap);
             uint16_t pc = dp_pce_cpu().pc;
             if (!dp_pce_enter(pg, v)) continue;
@@ -659,7 +664,7 @@ static int pstm_replay(PceRun *x) {
             for (size_t at = lo; at <= hi; at += k) {
                 if (!pstm_ptr(x, at, blo, bhi, slot, &v) || tried[v]) continue;
                 tried[v] = 1;
-                if (cands >= PS_CAND || x->queue_len >= x->opt.queue_cap) { r->s6_sat++; break; }
+                if (cands >= PS_CAND || x->queue_len >= x->qcap) { r->s6_sat++; break; }
                 cands++; r->s6_candidates++;
                 dp_pce_load(d->snap);
                 uint8_t *w = dp_pce_wram();
@@ -1471,6 +1476,7 @@ DpPceOptions dp_pce_options(void) {
     o.max_total = 60000000;
     o.max_steps = 400000;
     o.queue_cap = 8192;
+    o.queue_max = 0;
     o.loop_cap = 2048;
     o.fork_cap = 4;
     o.pad_fork_cap = 2;
@@ -1547,7 +1553,8 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     x->tmp2 = malloc(x->state_size);
     x->zcap = compressBound(x->state_size);
     x->ztmp = malloc(x->zcap);
-    x->queue = calloc(x->opt.queue_cap ? x->opt.queue_cap : 1, sizeof *x->queue);
+    x->qcap = x->opt.queue_cap ? x->opt.queue_cap : 1;
+    x->queue = calloc(x->qcap, sizeof *x->queue);
     if (!r->flags || !x->fork_sites || !x->pad_sites || !x->irq_sites || !x->istart ||
         !x->tmp || !x->tmp2 || !x->ztmp || !x->queue)
         x->failed = 1;
@@ -1793,6 +1800,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             (unsigned long long)r->s6_decoders, (unsigned long long)r->s6_tables, (unsigned long long)r->s6_candidates,
             (unsigned long long)r->s6_runs, (unsigned long long)r->s6_sat);
     fprintf(out, "  provenance: %llu jump-table words traced from ROM reads\n", (unsigned long long)r->prov_sites);
+    if (r->queue_grown) fprintf(out, "  queue grown %llu times\n", (unsigned long long)r->queue_grown);
     if (r->tree_nodes) fprintf(out, "  choice tree: %llu nodes\n", (unsigned long long)r->tree_nodes);
     if (r->tree_loaded) fprintf(out, "  choice tree resumed: %llu nodes reloaded\n", (unsigned long long)r->tree_loaded);
     if (r->pass2_seeds || r->pass2_refused || r->pass2_capped) fprintf(out, "  second pass: %llu seeds, %llu refused (page unmappable), %llu capped\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
