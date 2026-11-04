@@ -1152,11 +1152,11 @@ static uint8_t *nes_read_file(const char *path, size_t *size) {
 static int cmd_nes(int argc, char **argv) {
     if (argc < 4 || strcmp(argv[2], "explore")) {
         fprintf(stderr, "deepeel nes explore ROM [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N] [--mapper auto|nrom|uxrom] "
-                        "[--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--queue-max N] "
+                        "[--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--queue-max N] [--summary FILE] [--heat FILE] "
                         "[--loop-cap N] [--fork-cap N] [--no-irq-fork] [--entry bank:addr]... [--seed-banks] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--rtcode FILE]\n");
         return 2;
     }
-    const char *path = NULL, *text = NULL, *map = NULL, *evidence = NULL, *cov = NULL, *romdata = NULL, *mapper_name = "auto";
+    const char *path = NULL, *text = NULL, *map = NULL, *evidence = NULL, *cov = NULL, *romdata = NULL, *mapper_name = "auto", *nes_summary = NULL, *nes_heat = NULL;
     DpNesOptions opt = dp_nes_options();
     DpCliCommon cc = { .jobs = 1 };
     for (int i = 3; i < argc; i++) {
@@ -1167,6 +1167,8 @@ static int cmd_nes(int argc, char **argv) {
         else if (!strcmp(a, "--play-pool") && i + 1 < argc) opt.play_pool = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--cov") && i + 1 < argc) cov = argv[++i];
         else if (!strcmp(a, "--romdata") && i + 1 < argc) romdata = argv[++i];
+        else if (!strcmp(a, "--summary") && i + 1 < argc) nes_summary = argv[++i];
+        else if (!strcmp(a, "--heat") && i + 1 < argc) nes_heat = argv[++i];
         else if (!strcmp(a, "--tas") && i + 1 < argc) {
             if (opt.tas_count < 8) snprintf(opt.tas_paths[opt.tas_count++], 512, "%s", argv[++i]);
             else { fprintf(stderr, "deepeel: at most 8 TAS movies\n"); return 2; }
@@ -1237,6 +1239,8 @@ static int cmd_nes(int argc, char **argv) {
         if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", cov); }
         else { dp_nes_cov(f, &res); fclose(f); }
     }
+    if (nes_summary && dp_nes_summary(&res, nes_summary)) fprintf(stderr, "deepeel: cannot write %s\n", nes_summary);
+    if (nes_heat && dp_nes_heat(&res, nes_heat)) fprintf(stderr, "deepeel: cannot write %s\n", nes_heat);
     if (romdata) {
         FILE *f = fopen(romdata, "w");
         if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", romdata); }

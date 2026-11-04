@@ -1865,6 +1865,41 @@ void dp_nes_map(FILE *out, const DpNesResults *r) {
     free(map);
 }
 
+int dp_nes_summary(const DpNesResults *r, const char *path) {
+    uint8_t *m = dp_nes_map_build(r);
+    if (!m) return -1;
+    uint64_t cls[DP_NMAP_COUNT] = { 0 };
+    for (size_t i = 0; i < r->prg_size; i++) cls[m[i] < DP_NMAP_COUNT ? m[i] : 0]++;
+    free(m);
+    FILE *f = fopen(path, "w");
+    if (!f) return -1;
+    fprintf(f, "{\"deepeel\":\"%s\",\"platform\":\"nes\",\"prg_size\":%zu,\"classes\":{", DEEPEEL_VERSION, r->prg_size);
+    for (int k = 0; k < DP_NMAP_COUNT; k++) fprintf(f, "%s\"%s\":%llu", k ? "," : "", dp_nmap_names[k], (unsigned long long)cls[k]);
+    fprintf(f, "},\"known_pct\":%.3f,\"counters\":{\"steps\":%llu,\"paths\":%llu,\"forks\":%llu,"
+               "\"step_cuts\":%llu,\"loop_cuts\":%llu,\"fork_cuts\":%llu,\"queue_cuts\":%llu,\"sections\":%u}}\n",
+            r->prg_size ? 100.0 * (double)(r->prg_size - cls[0]) / (double)r->prg_size : 0.0,
+            (unsigned long long)r->steps, (unsigned long long)r->paths, (unsigned long long)r->forks,
+            (unsigned long long)r->step_cuts, (unsigned long long)r->loop_cuts, (unsigned long long)r->fork_cuts,
+            (unsigned long long)r->queue_cuts, r->section_count);
+    return fclose(f) ? -1 : 0;
+}
+
+int dp_nes_heat(const DpNesResults *r, const char *path) {
+    if (!r->exec_hits) return -1;
+    FILE *f = fopen(path, "w");
+    if (!f) return -1;
+    uint64_t total = 0;
+    for (size_t i = 0; i < r->prg_size; i++) total += r->exec_hits[i];
+    fprintf(f, "# deepeel nes heat v1: instruction starts per 256-byte PRG zone\n# exec %llu instructions\n# columns: start end(inclusive) exec\n", (unsigned long long)total);
+    for (size_t z = 0; z < r->prg_size; z += 256) {
+        uint64_t n = 0;
+        size_t e = z + 256 < r->prg_size ? z + 256 : r->prg_size;
+        for (size_t i = z; i < e; i++) n += r->exec_hits[i];
+        fprintf(f, "%06zx %06zx %llu\n", z, e - 1, (unsigned long long)n);
+    }
+    return fclose(f) ? -1 : 0;
+}
+
 void dp_nes_cov(FILE *out, const DpNesResults *r) {
     fputs("# deepeel nes coverage v1: bank offset flags(1=exec,4=speculative,8=data) hits\n", out);
     for (size_t k = 0; k < r->prg_size; k++) {

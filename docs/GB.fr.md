@@ -3458,3 +3458,10 @@ disque). Rapport : `queue grown N times`. Les deux options sont lues par `deepee
 annoncée dans l'aide sans être lue). Le pointeur de l'état en cours n'est plus utilisé après le premier fork, donc le
 `realloc` de la file est sûr. Test `nes_queue_grow` (fixture `fix_nes_pad`, `--queue 1 --queue-max 64` : file
 agrandie, rien en parc ; sans `--queue-max`, 42 états en parc). 157 tests passent (un ignoré).
+
+## 0.249.8 (NES, O1 : `--summary` et `--heat`)
+
+`deepeel nes explore` écrit comme MD un résumé JSON (`--summary FILE` : taille PRG, comptes par classe de la carte,
+`known_pct`, compteurs de pas/chemins/forks/coupures/sections) et une carte de chaleur (`--heat FILE` : instructions
+démarrées par zone de 256 octets de PRG, d'après `exec_hits`, y compris les forks). Le PNG passe déjà par `maprender`.
+Test `nes_summary_heat`.

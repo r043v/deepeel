@@ -204,6 +204,8 @@ void dp_nes_report(FILE *out, const DpNesResults *results);
 void dp_nes_map(FILE *out, const DpNesResults *results);
 // coverage (.cov: "bank offset flags hits") and the 256-byte-page data-read profile (romdata)
 void dp_nes_cov(FILE *out, const DpNesResults *results);
+int dp_nes_summary(const DpNesResults *results, const char *path);   // O1: JSON class counts + counters
+int dp_nes_heat(const DpNesResults *results, const char *path);      // O1: played usage per 256-byte PRG zone
 void dp_nes_romdata(FILE *out, const DpNesResults *results);
 // per-run evidence ranges, "bank start end mask" in 16 KiB PRG banks (mask = the cell flags)
 void dp_nes_evidence(FILE *out, const DpNesResults *results);
