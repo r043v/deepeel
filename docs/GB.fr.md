@@ -2718,3 +2718,9 @@ sont comparés à ceux de l'explorateur m0boy et épinglés dans `lr_gambatte_pa
 et HDMA `$4000→$8000` (256 octets), identiques des deux côtés. La destination HDMA de gambatte, relative à la VRAM,
 est rebasée en `$8000` dans le patch. Reste : banques ROM comparées une à une (seuls les décomptes le sont) et
 fixtures à plusieurs copies.
+
+## J11/J12 : parité de la séquence de banques ROM
+
+Sur `fix_mbc5`, la séquence de banques de la fenêtre ROMX vue par gambatte (après la banque initiale 1 posée au chargement)
+est `2 3`, celle que `explore` consigne pour m0boy (`romN 0 -> 2`, `romN 2 -> 3`). Épinglé côté gambatte dans
+`lr_gambatte_parity`, côté m0boy par `test_explorer`. Reste : fixtures à banques multiples en fenêtre ROM0 (MBC1 mode 1).
