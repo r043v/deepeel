@@ -510,6 +510,12 @@ def build_md(out):
     r[0x21A:0x21C] = bytes([0x4E, 0x71]); r[0x21C:0x21E] = bytes([0x60, 0xFE])
     r[0x226:0x228] = bytes([0x4E, 0x71]); r[0x228:0x22A] = bytes([0x4E, 0x71]); r[0x22A:0x22C] = bytes([0x60, 0xFE])
     save_md(out, "fix_md_s4", r)
+    # --- longloop: a 5000-iteration boot loop before the idle loop (visit cap must not cut played sessions) ----
+    r = md_rom()
+    r[0x200:0x204] = bytes([0x30, 0x3C, 0x13, 0x88])     # move.w #5000,d0
+    r[0x204:0x206] = bytes([0x51, 0xC8]); r[0x206:0x208] = bytes([0xFF, 0xFE])   # loop: dbf d0,loop
+    r[0x208:0x20A] = bytes([0x60, 0xFE])                 # bra.s *
+    save_md(out, "fix_md_longloop", r)
     # --- dma: VDP regs, then a ROM->VRAM DMA of 16 words from $000400 ---------
     r = md_rom()
     pc = 0x200

@@ -2932,3 +2932,17 @@ couvrent tout ce qu'une partie réelle exécute.
   second VDC (`$0010-$0017`) de la page matérielle : un jeu SuperGrafx est signalé, pas confondu avec
   un jeu PC Engine standard. Ni VPC ni second VDC ne sont émulés ; observation du journal plafonné.
 - Fixture `fix_pce_sgx`, test `pce_sgx_typed`.
+
+## 0.199.0 : MD, les sessions jouées ne sont plus coupées par le plafond de visites (2026-11-04)
+
+- Bogue : le plafond de visites par instruction (64 par trame) coupait les sessions jouées avant la
+  première trame dès qu'une boucle d'initialisation dépassait 64 tours (Sonic 1 : « played sessions: 6,
+  0 frames »). Le plafond est levé pendant une session jouée (comme pour un film TAS) ; la session reste
+  bornée par `--play-frames` et `--max-total`.
+- Fixture `fix_md_longloop`, test `md_play_longloop` (échoue sans le correctif, vérifié).
+- Observation de l'outil sur Sonic 1 (USA, Europe), `--play-frames 1800 --play-sessions 6`, 35 s :
+  10 800 trames jouées, **octets exécutés 31 740 (6,1 %)** contre 4 506 (0,9 %) avant, dont 9 996
+  seulement par fourches. L'union « observée » affiche 99,96 % parce que le jeu lit toute la ROM
+  (somme de contrôle) : ce n'est pas une couverture, la mesure à retenir est le code exécuté.
+- Limite : une seule graine, pas de progression volontaire dans les niveaux ; boucles réellement
+  infinies sans trame bornées seulement par le budget total.

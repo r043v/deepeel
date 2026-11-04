@@ -336,7 +336,7 @@ static void on_step(void *u, uint32_t pc, uint16_t op) {
             return;
         }
     }
-    if (!x->movie_active && !x->replay && x->pc < x->r->rom_size && dp_mdmach_rom_visible(x->m, x->pc)) {
+    if (!x->movie_active && !x->play_active && !x->replay && x->pc < x->r->rom_size && dp_mdmach_rom_visible(x->m, x->pc)) {
         size_t i = x->pc >> 1;
         if (x->gen[i] != x->cur_gen) { x->gen[i] = x->cur_gen; x->vis[i] = 0; }
         if (x->vis[i] >= x->o->visit_cap) {
