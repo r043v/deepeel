@@ -11,7 +11,7 @@ remesure pas l'outil.
 | GB | 34 | 4 | 0 | 1 |
 | SMS/GG | 32 | 3 | 2 | 2 |
 | MSX | 32 | 3 | 2 | 2 |
-| NES | 12 | 24 | 1 | 2 |
+| NES | 12 | 25 | 0 | 2 |
 | PCE | 16 | 21 | 1 | 1 |
 | MD | 10 | 26 | 2 | 1 |
 
@@ -52,7 +52,7 @@ Cellules ouvertes (◐ ou ✗) : 89.
 | S6 | Rejeu de décodeurs sur tables de flux | GB | ◐ 0.146 `CALL` + HL/DE/BC, tables de mots même banque |
 | S6 | Rejeu de décodeurs sur tables de flux | SMS/GG | ◐ 0.147 idem (SMS/GG/SG) |
 | S6 | Rejeu de décodeurs sur tables de flux | MSX | ◐ 0.147 idem |
-| S6 | Rejeu de décodeurs sur tables de flux | NES | ✗ |
+| S6 | Rejeu de décodeurs sur tables de flux | NES | ◐ 0.148 `JSR` + mot de page zéro, tables de mots même bloc |
 | S6 | Rejeu de décodeurs sur tables de flux | PCE | ✗ |
 | S7 | Inférence de voisins à la carte | NES | ◐ trous ≤ 1024 |
 | S7 | Inférence de voisins à la carte | MD | ◐ remplissage ≥ 8 (00/FF) ou ≥ 32, code ≤ 3 o, données ≤ 1024 o ; rendu seulement |

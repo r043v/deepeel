@@ -139,6 +139,7 @@ typedef struct DpNesResults_ {
     DpNesTreeNode *tree_nodes; uint32_t tree_count, tree_capacity;
     uint8_t *flags;            // one byte per physical PRG cell
     size_t prg_size;
+    uint64_t s6_decoders, s6_tables, s6_candidates, s6_runs, s6_sat;   // S6 decoder replay
     uint64_t steps, paths, forks, irq_forks, exec_outside, data_reads, oam_copies;
     uint64_t dmc_starts, dmc_bytes; // $4015 bit 4 starts (copy channel 2) / distinct sample bytes
     uint64_t forced_paths;

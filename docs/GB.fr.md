@@ -2207,3 +2207,13 @@ Test `sega_streams` : le flux jamais appelé est lu. Observation : sur deux ROMs
 (Sonic 2 Rebirth, Ace of Aces), 8 et 16 décodeurs détectés mais 0 table trouvée au budget par
 défaut — le gain réel n'est pas démontré sur ces ROMs. Reste : NES/PCE, plafond non levé par
 `--unbounded` côté Z80 (cap fixe de 2048 candidats, compté).
+
+## 0.148.0 (NES — S6)
+
+Même détecteur sur l'explorateur 6502 : un `JSR` vers la PRG dont la première lecture de données
+ROM égale un mot de page zéro (le pointeur posé par l'appelant) désigne un décodeur ; deux départs
+à pas constant (2 à 16 octets, même bloc de 16 Kio, même fenêtre CPU) donnent une table de mots,
+étendue dans les deux sens ; chaque autre entrée est rejouée depuis l'instantané d'avant l'appel avec
+le mot de page zéro remplacé. Tables séparées octet bas / octet haut, indexées par `X` : non couvertes.
+Test `nes` (`test_streams`). Observation : DuckTales — 4 décodeurs, 0 table au budget par défaut.
+Rapport : ligne `stream replay (S6)`.

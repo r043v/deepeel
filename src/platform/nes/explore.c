@@ -77,6 +77,7 @@ typedef struct {
     uint64_t wframe;                   // frames seen (watch sampling)
     int nov;                           // novelty search running (frame hook stops it, counts apart)
     uint64_t novel;                    // PRG cells executed for the first time (novelty gain)
+    struct NStm *stm;                  // S6 decoder replay state
 } DpNesRun;
 
 static uint32_t loop_bump(DpNesRun *x, uint64_t key);
@@ -150,6 +151,115 @@ static void record_register(DpNesRun *x, uint64_t path, uint64_t step,
 
 // --- hooks over m0boy's NES_TRACE ---------------------------------------------
 
+
+// --- S6: decoder replay on pointer tables ---------------------------------------------
+// A JSR into PRG whose routine's first ROM data read equals a zero-page word (the pointer
+// the caller set) is a decoder; two starts at a constant table stride locate a pointer
+// table (same 16 KiB cell block, pointers in the same CPU slot); every other entry is
+// replayed from the pre-call snapshot with that zero-page word set to the pointer.
+enum { NS_DEC = 64, NS_START = 16, NS_FR = 16, NS_CAND = 2048 };
+typedef struct { uint32_t key; uint8_t zp, nstarts, replayed; uint16_t starts[NS_START]; uint8_t *snap; } NDec;
+typedef struct NStm {
+    NDec dec[NS_DEC]; unsigned ndec;
+    struct { uint32_t key; uint8_t sp, open; uint8_t zp[256]; } fr[NS_FR]; unsigned nfr;
+} NStm;
+static void nstm_free(DpNesRun *x) {
+    if (!x->stm) return;
+    for (unsigned i = 0; i < x->stm->ndec; i++) free(x->stm->dec[i].snap);
+    free(x->stm); x->stm = NULL;
+}
+static void nstm_call(DpNesRun *x, uint32_t key) {
+    if (!x->stm && !(x->stm = calloc(1, sizeof *x->stm))) return;
+    NStm *s = x->stm;
+    for (unsigned i = 0; i < s->ndec; i++)
+        if (s->dec[i].key == key && !s->dec[i].snap) {
+            s->dec[i].snap = malloc(dp_nesmach_state_size());
+            if (s->dec[i].snap) dp_nesmach_save(x->m, s->dec[i].snap);
+        }
+    if (s->nfr == NS_FR) return;
+    s->fr[s->nfr].key = key; s->fr[s->nfr].sp = (uint8_t)(dp_nesmach_sp(x->m) - 2); s->fr[s->nfr].open = 1;
+    memcpy(s->fr[s->nfr].zp, dp_nesmach_ram(x->m), 256);
+    s->nfr++;
+}
+static void nstm_step(DpNesRun *x) {
+    NStm *s = x->stm;
+    if (!s) return;
+    uint8_t sp = (uint8_t)dp_nesmach_sp(x->m);
+    while (s->nfr && sp > s->fr[s->nfr - 1].sp) s->nfr--;
+}
+static void nstm_read(DpNesRun *x, unsigned a) {
+    NStm *s = x->stm;
+    if (!s || !s->nfr) return;
+    for (unsigned k = s->nfr; k-- > 0;) {
+        if (!s->fr[k].open) break;
+        s->fr[k].open = 0;
+        for (unsigned p = 0; p < 255; p++) {
+            if ((unsigned)(s->fr[k].zp[p] | s->fr[k].zp[p + 1] << 8) != a) continue;
+            NDec *d = NULL;
+            for (unsigned i = 0; i < s->ndec; i++)
+                if (s->dec[i].key == s->fr[k].key && s->dec[i].zp == p) d = &s->dec[i];
+            if (!d) {
+                if (s->ndec == NS_DEC) break;
+                d = &s->dec[s->ndec++]; memset(d, 0, sizeof *d);
+                d->key = s->fr[k].key; d->zp = (uint8_t)p; x->r->s6_decoders++;
+            }
+            unsigned j;
+            for (j = 0; j < d->nstarts && d->starts[j] != a; j++) {}
+            if (j == d->nstarts && j < NS_START && a >= 0x8000) d->starts[d->nstarts++] = (uint16_t)a;
+            break;
+        }
+    }
+}
+static int nstm_ptr(const DpNesRun *x, size_t at, size_t lo, size_t hi, unsigned slot, uint16_t *v) {
+    if (at < lo || at + 2 > hi) return 0;
+    *v = (uint16_t)(x->image[at] | x->image[at + 1] << 8);
+    return *v >= 0x8000 && (unsigned)(*v >> 14) == slot;
+}
+static int nstm_replay(DpNesRun *x) {
+    NStm *s = x->stm;
+    if (!s) return 0;
+    DpNesResults *r = x->r; int pushed = 0;
+    for (unsigned di = 0; di < s->ndec; di++) {
+        NDec *d = &s->dec[di];
+        if (d->nstarts < 2 || d->nstarts <= d->replayed || !d->snap) continue;
+        d->replayed = d->nstarts;
+        unsigned slot = d->starts[0] >> 14;
+        uint8_t *tried = calloc(65536, 1);
+        if (!tried) continue;
+        for (unsigned j = 0; j < d->nstarts; j++) tried[d->starts[j]] = 1;
+        size_t pos[256]; unsigned np = 0;
+        for (size_t at = 0; at + 2 <= x->image_size && np < 256; at++) {
+            uint16_t v = (uint16_t)(x->image[at] | x->image[at + 1] << 8);
+            for (unsigned j = 0; j < d->nstarts; j++) if (d->starts[j] == v) { pos[np++] = at; break; }
+        }
+        unsigned cands = 0;
+        for (unsigned i = 0; i + 1 < np; i++) {
+            size_t k = pos[i + 1] - pos[i];
+            if (k < 2 || k > 16 || (pos[i] >> 14) != (pos[i + 1] >> 14)) continue;
+            r->s6_tables++;
+            size_t blo = (pos[i] >> 14) << 14, bhi = blo + 0x4000, lo = pos[i], hi = pos[i + 1];
+            uint16_t v;
+            while (lo >= k && nstm_ptr(x, lo - k, blo, bhi, slot, &v)) lo -= k;
+            while (nstm_ptr(x, hi + k, blo, bhi, slot, &v)) hi += k;
+            for (size_t at = lo; at <= hi; at += k) {
+                if (!nstm_ptr(x, at, blo, bhi, slot, &v) || tried[v]) continue;
+                tried[v] = 1;
+                if (cands >= NS_CAND) { r->s6_sat++; break; }
+                cands++; r->s6_candidates++;
+                uint8_t *img = malloc(dp_nesmach_state_size());
+                if (!img) continue;
+                memcpy(img, d->snap, dp_nesmach_state_size());
+                uint8_t *ram = dp_nesmach_state_ram(img);
+                ram[d->zp] = (uint8_t)v; ram[d->zp + 1] = (uint8_t)(v >> 8);
+                DpNesPathState ps = { img, 1, 0, 0, 0, 0, 0, DP_NES_TREE_BRANCH };
+                if (snap_push(x, &ps)) { r->s6_runs++; pushed++; }
+            }
+        }
+        free(tried);
+    }
+    return pushed;
+}
+
 static void hook_step(void *user, unsigned pc, unsigned op) {
     DpNesRun *x = user;
     DpNesResults *r = x->r;
@@ -184,6 +294,13 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
     }
     x->cur_pc = pc;
     x->cur_len = in.length;
+    if (!x->play_mode) {
+        nstm_step(x);
+        if (op == 0x20) {
+            int64_t tk = dp_nesmach_rom_index(x->m, bytes[1] | bytes[2] << 8);
+            if (tk >= 0) nstm_call(x, (uint32_t)tk);
+        }
+    }
     // padding slide: a path that runs into a run of 8+ $00/$FF bytes in PRG has
     // left the code (brk / isc sleds); cut it, counted in pad_cuts
     if ((op == 0x00 || op == 0xFF) && !x->play_mode) {
@@ -360,6 +477,7 @@ static void hook_read(void *user, unsigned addr) {
             if (x->r->data_hits && x->r->data_hits[cell] != UINT32_MAX) x->r->data_hits[cell]++;
             if (!x->r->flags[cell]) x->r->flags[cell] = DP_NES_DATA;
             x->last_read_cell = cell; x->last_read_step = x->total_steps;
+            if (!x->play_mode) nstm_read(x, addr);
         }
     }
 }
@@ -1142,6 +1260,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                         }
                         if (x.queue_len == 0) continue; // unreadable record: next one
                     }
+                    if (x.queue_len == 0 && x.total_steps < x.opt.max_total && nstm_replay(&x)) continue;
                     if (x.queue_len == 0) break;
                     uint32_t slot = x.queue_len - 1;
                     run_path(&x, slot);
@@ -1201,6 +1320,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     free(x.prov_anchor);
     free(x.ipc);
     free(x.istart);
+    nstm_free(&x);
     free(x.queue);
     free(x.loops);
     free(x.fork_sites);
@@ -1624,6 +1744,9 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  prg %zu KiB, touched %llu bytes, coverage %.2f%%\n",
         r->prg_size / 1024, (unsigned long long)touched,
         r->prg_size ? 100.0 * (double)touched / (double)r->prg_size : 0.0);
+    fprintf(out, "  stream replay (S6): %llu decoders, %llu tables, %llu candidates, %llu queued replays, %llu saturated\n",
+        (unsigned long long)r->s6_decoders, (unsigned long long)r->s6_tables, (unsigned long long)r->s6_candidates,
+        (unsigned long long)r->s6_runs, (unsigned long long)r->s6_sat);
     fprintf(out, "  steps %llu paths %llu (forced %llu) forks %llu irq-forks %llu evicted %llu\n",
         (unsigned long long)r->steps, (unsigned long long)r->paths,
         (unsigned long long)r->forced_paths,

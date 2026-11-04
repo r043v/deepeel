@@ -481,6 +481,34 @@ static void test_tas_identity(void) {
     CHECK(dp_nes_tas_identity(&t, rom, sizeof rom) == 2, "a changed ROM is a different ROM");
 }
 
+// S6: a decoder called with a zero-page pointer taken from a table; the stream the ROM
+// never calls is read through the replay
+static void test_streams(void) {
+    unsigned sz = 16 + 2 * 0x4000 + 0x2000;
+    uint8_t *rom = calloc(1, sz);
+    set_header(rom, 2, 1, 0);
+    put(rom, 0, 0x0000, 0xA9, 0x00, 0x85, 0x10, 0xA9, 0x90, 0x85, 0x11, 0x20, 0x00, 0x81,   // ptr $9000; jsr
+                        0xA9, 0x10, 0x85, 0x10, 0xA9, 0x90, 0x85, 0x11, 0x20, 0x00, 0x81,   // ptr $9010; jsr
+                        0x4C, 0x16, 0x80, -1);                                              // idle
+    put(rom, 0, 0x0100, 0xA0, 0x00, 0xB1, 0x10, 0x60, -1);   // ldy #0; lda ($10),y; rts
+    put(rom, 0, 0x1000, 5, -1);
+    put(rom, 0, 0x1010, 6, -1);
+    put(rom, 0, 0x1030, 7, -1);
+    put(rom, 0, 0x1100, 0x00, 0x90, 0x10, 0x90, 0x30, 0x90, -1);
+    set_vector(rom, 1, 0xFFFA, 0x8000);
+    set_vector(rom, 1, 0xFFFC, 0x8000);
+    set_vector(rom, 1, 0xFFFE, 0x8000);
+    DpNesResults r;
+    DpNesOptions o = dp_nes_options();
+    o.max_steps = 2000;
+    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "streams explore runs");
+    CHECK(r.s6_decoders >= 1, "decoder detected");
+    CHECK(r.s6_tables >= 1 && r.s6_runs >= 1, "table found and replayed");
+    CHECK(r.flags[0x1030] != 0, "the unplayed stream was read");
+    dp_nes_results_free(&r);
+    free(rom);
+}
+
 int main(void) {
     test_machine_nrom();
     test_machine_uxrom();
@@ -491,6 +519,7 @@ int main(void) {
     test_dmc();
     test_snapshot();
     test_explorer();
+    test_streams();
     test_loop_bound();
     test_tas_load();
     test_tas_identity();
