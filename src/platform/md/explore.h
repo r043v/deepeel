@@ -39,6 +39,7 @@ typedef struct {
     uint32_t watch_write; /* 24-bit address, UINT32_MAX disables */
     uint32_t exclude_read_pc; /* exclude one CPU read site from the separate union */
     const DpMdMovie *movie; /* optional Gens movie, replayed on the natural path */
+    int pad_full;         /* D10: probe all 256 pad masks at each pad-read site */
     int seed_vectors;     /* also seed the autovector and TRAP vector targets as roots (G1) */
     uint32_t entries[16]; /* explicit 68000 entry points (ROM addresses, even) */
     unsigned entry_count;

@@ -3343,3 +3343,9 @@ Les clés de cellules écran (`--session-cells`) sont écrites en fin de `pool.b
 `--resume` : une reprise ne ré-archive plus les écrans déjà vus (ce qui évinçait des checkpoints
 utiles du pool). Anciens fichiers sans cette fin : tolérés. Test `gb_session_cells_resume`
 (1 cellule au premier run, 0 à la reprise). Reste J4 : pool commun aux autres plateformes.
+
+## MD : `--pad-full`, les 256 masques du pad (D10) (0.245.0)
+
+Même option que NES : à chaque site de lecture du pad (`$A10002/3`), les 244 masques à trois
+boutons absents du catalogue de 14 sondes sont proposés (clé site × masque, une fois). Hors
+défaut. Test `md_pad_full` (258 sondes sur le site de la fixture : 14 + 244).

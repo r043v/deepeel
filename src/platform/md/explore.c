@@ -44,6 +44,7 @@ typedef struct {
     uint32_t *gen;       /* per even rom address: path generation */
     uint32_t *vis;       /* per even rom address: visits in that generation */
     uint32_t *site;      /* per even rom address: forks made from that site */
+    DpHashSet pad_full_seen; /* (pc, mask) probes of --pad-full */
     uint16_t *pad_sites; /* input probes already queued at each instruction */
     uint32_t cur_gen;
     int forced, halted;
@@ -541,6 +542,17 @@ static void on_end(void *u, uint32_t pc, uint32_t next, unsigned len) {
                 r->pad_forks++;
             }
         }
+        if (x->o->pad_full)
+            for (unsigned m = 0; m < 256; m++) {
+                int known = 0;
+                for (unsigned i = 0; i < 12; i++) known |= pads[i] == m;
+                if (known || dp_set_insert(&x->pad_full_seen, ((uint64_t)pc << 8) | m) <= 0) continue;
+                if (push(x, next & 0xFFFFFFu, 0, 0)) {
+                    dp_mdmach_state_set_pad(x->last_state, (uint8_t)m);
+                    dp_mdmach_state_set_pad_ext(x->last_state, 0);
+                    r->pad_forks++;
+                }
+            }
     }
     if (!decoded) return;
     if ((in.cls == DP_M68K_JMP || in.cls == DP_M68K_JSR) && !in.has_target && decoded == len && !x->replay) {
@@ -1493,13 +1505,14 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     dp_set_init(&x.ctx_seen, 1 << 10);
     dp_set_init(&x.exact_seen, 1 << 10);
     dp_set_init(&x.ind_sites, 1 << 8);
+    dp_set_init(&x.pad_full_seen, 1 << 20);
     dp_set_init(&x.ind_pairs, 1 << 10);
     x.site = calloc(c->size / 2 + 1, sizeof *x.site);
     x.pad_sites = calloc(c->size / 2 + 1, sizeof *x.pad_sites);
     x.m = dp_mdmach_open(c->rom, c->size);
     if (!r->flags || !r->z80_flags || !r->nonexcluded_reads || !r->copies || !x.q || !x.gen || !x.vis || !x.site || !x.pad_sites || !x.m) {
         dp_mdmach_close(x.m);
-        free(x.q); free(x.gen); free(x.vis); free(x.site); free(x.pad_sites); dp_set_free(&x.ind_sites); dp_set_free(&x.ind_pairs);
+        free(x.q); free(x.gen); free(x.vis); free(x.site); free(x.pad_sites); dp_set_free(&x.ind_sites); dp_set_free(&x.pad_full_seen); dp_set_free(&x.ind_pairs);
         dp_md_results_free(r);
         return -1;
     }
@@ -1627,7 +1640,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     if (o->no_finalize) {   // secondary instance: the primary folds the raw findings in
         memcpy(r->z80_bank_seen_out, x.z80_bank_seen, sizeof x.z80_bank_seen);
         dp_mdmach_close(x.m);
-        free(x.q); free(x.gen); free(x.vis); free(x.site); free(x.pad_sites); dp_set_free(&x.ind_sites); dp_set_free(&x.ind_pairs);
+        free(x.q); free(x.gen); free(x.vis); free(x.site); free(x.pad_sites); dp_set_free(&x.ind_sites); dp_set_free(&x.pad_full_seen); dp_set_free(&x.ind_pairs);
         return 0;
     }
     if (o->pre_finalize) o->pre_finalize(r, x.z80_bank_seen, o->pre_user);
@@ -1747,7 +1760,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     for (unsigned b = 0; b < sizeof x.z80_bank_seen * 8; b++)
         if (x.z80_bank_seen[b >> 3] & (1u << (b & 7))) r->z80_banks_read++;
     dp_mdmach_close(x.m);
-    free(x.q); free(x.gen); free(x.vis); free(x.site); free(x.pad_sites); dp_set_free(&x.ind_sites); dp_set_free(&x.ind_pairs);
+    free(x.q); free(x.gen); free(x.vis); free(x.site); free(x.pad_sites); dp_set_free(&x.ind_sites); dp_set_free(&x.pad_full_seen); dp_set_free(&x.ind_pairs);
     return 0;
 }
 
