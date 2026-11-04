@@ -2710,3 +2710,11 @@ compilation qui laisse la cible DMG inchangée.
 Le rapport du niveau B ajoute deux masques : banques VRAM (VBK) et WRAM (SVBK) sélectionnées sur l'ensemble
 des chemins (`fix_cgbbank` : VRAM 02, WRAM 08). Test `lr_gambatte_parity` étendu. Observation de l'outil ; les copies
 ne sont pas encore étiquetées par banque.
+
+## J11/J12 : parité des copies tuple à tuple
+
+L'adaptateur gambatte imprime chaque copie matérielle (`GLR_COPIES=1`). Les tuples source→destination→longueur
+sont comparés à ceux de l'explorateur m0boy et épinglés dans `lr_gambatte_parity` : OAM DMA `$3000→$FE00` (160 octets)
+et HDMA `$4000→$8000` (256 octets), identiques des deux côtés. La destination HDMA de gambatte, relative à la VRAM,
+est rebasée en `$8000` dans le patch. Reste : banques ROM comparées une à une (seuls les décomptes le sont) et
+fixtures à plusieurs copies.

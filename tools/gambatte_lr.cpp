@@ -35,7 +35,7 @@ static void on_exec(int32_t a, int64_t) {
 static void on_read(int32_t a, int64_t) { if (have_obs && obs.read) obs.read(obs.user, (uint32_t)a, (uint8_t)gb->dpPeek((unsigned)a)); }
 static void on_write(int32_t a, int64_t) { if (have_obs && obs.write) obs.write(obs.user, (uint32_t)a, 0); }
 static unsigned ndma, nbank;
-static void on_dma(unsigned src, unsigned dst, unsigned len) { ndma++; if (have_obs && obs.dma) obs.dma(obs.user, src, dst, len); }
+static void on_dma(unsigned src, unsigned dst, unsigned len) { ndma++; if (getenv("GLR_COPIES")) fprintf(stderr, "copy %04x -> %04x len %u\n", src, dst, len); if (have_obs && obs.dma) obs.dma(obs.user, src, dst, len); }
 static void on_bank(unsigned w, unsigned b) { nbank++; if (have_obs && obs.bank) obs.bank(obs.user, w, b); }
 static unsigned nbr;
 static void on_branch(unsigned pc) { nbr++; if (have_obs && obs.branch) obs.branch(obs.user, pc); }

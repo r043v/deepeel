@@ -283,7 +283,7 @@ index 23c7ce6..5225890 100644
  	romdata_[1] = romdata() + bank * rombank_size() - mm_rom1_begin;
  	rmem_[0x7] = rmem_[0x6] = rmem_[0x5] = rmem_[0x4] = romdata_[1];
 diff --git a/libgambatte/src/memory.cpp b/libgambatte/src/memory.cpp
-index 3e73668..de34c14 100644
+index 3e73668..5d7754f 100644
 --- a/libgambatte/src/memory.cpp
 +++ b/libgambatte/src/memory.cpp
 @@ -17,6 +17,7 @@
@@ -298,7 +298,7 @@ index 3e73668..de34c14 100644
  	unsigned dmaDest = dmaDestination_;
  	unsigned dmaLength = ((ioamhram_[0x155] & 0x7F) + 1) * 0x10;
  	unsigned length = hdmaReqFlagged(intreq_) ? 0x10 : dmaLength;
-+	if (dp_dma_cb) dp_dma_cb(dmaSrc, dmaDest, length);
++	if (dp_dma_cb) dp_dma_cb(dmaSrc, 0x8000 | (dmaDest & 0x1FFF), length);
  
  	if (1ul * dmaDest + length >= 0x10000) {
  		length = 0x10000 - dmaDest;
