@@ -450,11 +450,17 @@ int dp_nesmach_enter(DpNesMach *d, unsigned bank, unsigned addr) {
     return 1;
 }
 
-/* MMC3: map an 8 KiB PRG bank under the $8000-$BFFF slot that `addr` falls in (R6 / R7), PRG mode 0 */
+/* MMC3: map an 8 KiB PRG bank under the switchable slot `addr` falls in ($8000-$BFFF in PRG mode 0, $C000-$DFFF in mode 1) */
+int dp_nesmach_mmc3_mode1(const DpNesMach *d) { return d->mapper == 4 && (d->rg.v[0] & 0x40); }
 int dp_nesmach_map_8k(DpNesMach *d, unsigned addr, unsigned bank8) {
-    if (d->mapper != 4 || addr < 0x8000u || addr >= 0xC000u || bank8 >= (unsigned)(machine.prg_size >> 13) || bank8 > 63) return 0;
-    d->rg.v[0] &= (uint8_t)~0x40;
-    d->rg.v[2 + (addr >= 0xA000u ? 7 : 6)] = (uint8_t)bank8;
+    if (d->mapper != 4 || addr < 0x8000u || addr >= 0xE000u || bank8 >= (unsigned)(machine.prg_size >> 13) || bank8 > 63) return 0;
+    if (d->rg.v[0] & 0x40) {   /* PRG mode 1: R6 is the $C000 window, $8000 is fixed */
+        if (addr < 0xC000u) return 0;
+        d->rg.v[2 + (addr >= 0xE000u ? 7 : 6)] = (uint8_t)bank8;
+    } else {
+        if (addr >= 0xC000u) return 0;
+        d->rg.v[2 + (addr >= 0xA000u ? 7 : 6)] = (uint8_t)bank8;
+    }
     mapper_apply(d);
     return 1;
 }

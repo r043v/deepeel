@@ -3062,3 +3062,10 @@ Le rejeu inter-banques NES couvre MMC3 (mapper 4, fenêtre R6/R7 de 8 Kio, mode 
 l'unité de banque des tables est 8 Kio pour MMC3 (16 Kio pour UxROM/MMC1). Fixture : `test_nes`
 (`test_streams_mmc3`, banque posée par écritures `$8000/$8001`). Reste : MMC5 et autres mappers,
 mode PRG 1 de MMC3. Observation de l'outil, pas une mesure matérielle.
+
+## 0.213.0 : S6 NES, MMC3 en mode PRG 1 (2026-11-04)
+
+Le rejeu inter-banques MMC3 suit le mode PRG courant : en mode 1 la fenêtre commutable est
+`$C000-$DFFF` (R6, `$8000` fixe) ; `dp_nesmach_mmc3_mode1` l'indique, `dp_nesmach_map_8k` conserve
+le bit de mode et la plage des pointeurs de table suit la fenêtre. Fixture : `test_streams_mmc3_mode1`
+(code dans les banques hautes fixes). Reste : MMC5 et autres mappers. Observation de l'outil.

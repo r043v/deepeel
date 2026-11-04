@@ -590,6 +590,33 @@ static void test_streams_mmc3(void) {
     free(rom);
 }
 
+// S6 across MMC3 banks in PRG mode 1: $C000 is the switchable window, code sits in the fixed top banks
+static void test_streams_mmc3_mode1(void) {
+    unsigned sz = 16 + 4 * 0x4000;
+    uint8_t *rom = calloc(1, sz);
+    set_header(rom, 4, 0, 4);
+    put(rom, 3, 0x2000, 0xA9, 0x46, 0x8D, 0x00, 0x80, 0xA9, 1, 0x20, 0x00, 0xE2, 0xA9, 0x00, 0x85, 0x10, 0xA9, 0xD0, 0x85, 0x11, 0x20, 0x00, 0xE1,
+                        0xA9, 2, 0x20, 0x00, 0xE2, 0xA9, 0x10, 0x85, 0x10, 0xA9, 0xD0, 0x85, 0x11, 0x20, 0x00, 0xE1,
+                        0x4C, 0x07, 0xE0, -1);
+    put(rom, 3, 0x2100, 0xA0, 0x00, 0xB1, 0x10, 0x60, -1);
+    put(rom, 3, 0x2200, 0xA2, 0x46, 0x8E, 0x00, 0x80, 0x8D, 0x01, 0x80, 0x60, -1);
+    put(rom, 0, 0x3000, 5, -1);
+    put(rom, 1, 0x1010, 6, -1);
+    put(rom, 0, 0x1020, 7, -1);
+    put(rom, 3, 0x3100, 1, 0x00, 0xD0, 2, 0x10, 0xD0, 0, 0x20, 0xD0, -1);
+    set_vector(rom, 3, 0xFFFA, 0xE000);
+    set_vector(rom, 3, 0xFFFC, 0xE000);
+    set_vector(rom, 3, 0xFFFE, 0xE000);
+    DpNesResults r;
+    DpNesOptions o = dp_nes_options();
+    o.max_steps = 2000;
+    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "MMC3 mode 1 explore runs");
+    CHECK(r.s6_tables >= 1 && r.s6_runs >= 1, "MMC3 mode 1 banked table found and replayed");
+    CHECK(r.flags[0x1020] != 0, "MMC3 mode 1 bank 0's unplayed stream was read");
+    dp_nes_results_free(&r);
+    free(rom);
+}
+
 // J1: random sessions restart from checkpoints earlier sessions kept
 static void test_play_pool(void) {
     unsigned sz = 16 + 2 * 0x4000 + 0x2000;
@@ -666,6 +693,7 @@ int main(void) {
     test_streams_banked();
     test_streams_mmc1();
     test_streams_mmc3();
+    test_streams_mmc3_mode1();
     test_play_pool();
     test_ramcode();
     test_smc();

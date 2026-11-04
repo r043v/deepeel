@@ -79,6 +79,7 @@ uint8_t *dp_nesmach_state_nmi_edge(void *buf);
 /* explicit entry: PC + switchable bank (UxROM/NROM only), 1 on success */
 int dp_nesmach_enter(DpNesMach *m, unsigned bank, unsigned addr);
 /* MMC3: an 8 KiB bank under the R6/R7 slot holding addr (PRG mode 0); 1 on success */
+int dp_nesmach_mmc3_mode1(const DpNesMach *m);   /* MMC3 in PRG mode 1 ($C000 window switchable) */
 int dp_nesmach_map_8k(DpNesMach *m, unsigned addr, unsigned bank8);
 unsigned dp_nesmach_mapper(const DpNesMach *m);
 int dp_nesmach_mapper_write(const DpNesMach *m, unsigned addr, unsigned value,
