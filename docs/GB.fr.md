@@ -2961,3 +2961,12 @@ couvrent tout ce qu'une partie réelle exécute.
   7 200 trames, 29 s, 31 648 octets exécutés par la démo (6,0 %) ; 30 000 trames, 119 s, 37 266 octets
   (7,1 %). La démo plafonne vite : l'attract de Sonic 1 ne montre qu'un niveau ; le reste du code
   demande des touches (TAS) ou des fourches. Total avec fourches : 48 004 octets (9,2 %).
+
+## 0.201.0 : `gbconform`, tableau de passage de m0boy sur les ROMs de test (2026-11-04)
+
+- Nouvel outil d'observation `tests/gbconform.c` (cible `gbconform`, hors `ctest`) : exécute des ROMs de test GB
+  sur le cœur m0boy tel que deepeel le pilote et décide par protocole (registres Mooneye, texte série ou RAM de
+  cartouche Blargg, `$FF82` gbmicrotest).
+- Résultats consignés dans `m0boy/docs/GB_CONFORMANCE.fr.md` (observations de l'outil sur un cœur DMG sans boot ROM) :
+  948 ROMs à protocole machine, 430 passent, 291 échouent, 227 sans verdict ; Mooneye 31/115, gbmicrotest 354/513,
+  Blargg 20/58 (cpu_instrs individuels tous passés). Gambatte, mealybug et acid2 attendent une comparaison de captures.

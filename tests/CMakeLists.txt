@@ -223,6 +223,8 @@ add_executable(test_core test_core.c)
 target_link_libraries(test_core PRIVATE deepeel_core m)
 add_test(NAME core COMMAND test_core)
 
+add_executable(gbconform gbconform.c)
+target_link_libraries(gbconform PRIVATE deepeel_core m)
 add_executable(test_exec test_exec.c)
 target_link_libraries(test_exec PRIVATE deepeel_core m)
 add_test(NAME exec COMMAND test_exec)
