@@ -597,8 +597,8 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
         uint32_t nix = 0;
         for (uint32_t i = 0; i < DP_IX_CAP; i++) {
             if (!res->ix[i].site1) continue;
-            dp_buf_fmt(&ix_txt, "%s{\"site\":%u,\"kmin\":%u,\"kmax\":%u,\"n\":%u}", nix ? "," : "",
-                       res->ix[i].site1 - 1, res->ix[i].kmin - 1, res->ix[i].kmax - 1, res->ix[i].n);
+            dp_buf_fmt(&ix_txt, "%s{\"site\":%u,\"kmin\":%u,\"kmax\":%u,\"n\":%u,\"stride\":%u}", nix ? "," : "",
+                       res->ix[i].site1 - 1, res->ix[i].kmin - 1, res->ix[i].kmax - 1, res->ix[i].n, res->ix[i].g);
             nix++;
         }
         dp_buf_fmt(&ix_txt, "],\"dropped\":%u}", res->ix_full);

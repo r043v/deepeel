@@ -2484,3 +2484,9 @@ Le PNG de carte GB porte un chunk privé `dpIx` (JSON) : pour chaque site de cod
 (`kmin`…`kmax`) et le nombre de lectures. C'est une observation par site : aucune base ni aucun pas n'est inféré
 (les `DpIndexed` complets de COUVERTURE §5 — base+index, `idx_max`, déclaration `index-inference` — restent à faire).
 `deepeel mapx --chunk dpIx` l'exporte.
+
+## 0.177.0 (`dpIx` : pas observé)
+
+Chaque site de `dpIx` porte `stride` : le PGCD des écarts successifs entre index ROM lus par ce site (0 = un seul
+index distinct vu). Pour une table lue entrée par entrée c'est le pas de la table ; sous concurrence la valeur est
+approchée (observation de l'outil). La base reste `kmin` ; la déclaration `index-inference` n'est pas faite.

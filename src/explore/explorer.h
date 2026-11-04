@@ -248,7 +248,8 @@ typedef struct DpResults {
     struct { uint32_t at; uint16_t stride, count; } tb[128]; uint32_t tb_n;   // S6 pointer tables found (dpTb)
     // dpIx: ROM data-read sites (lock-free open-addressed table): site = rom index of the reading pc,
     // [kmin,kmax] = rom index range read, n = reads. Observation only: no base/stride is inferred.
-    struct { uint32_t site1, kmin, kmax, n; } ix[DP_IX_CAP]; uint32_t ix_full; // site1 = site + 1 (0 = free slot)
+    struct { uint32_t site1, kmin, kmax, n, last, g; } ix[DP_IX_CAP]; // g = gcd of successive read-index deltas (0 = none yet)
+     uint32_t ix_full; // site1 = site + 1 (0 = free slot)
     uint32_t forks_capped; // forks dropped by the per-site cap
     uint32_t forks_table_full; // forks refused: the per-site counter table is full (also in forks_capped)
     uint32_t cycle_cuts, step_cuts, budget_paths, budget_steps, queue_overflows;

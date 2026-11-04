@@ -674,6 +674,13 @@ static void ix_record(DpResults *res, uint32_t site, uint32_t key) {
         while ((!lo || key + 1 < lo) && !__atomic_compare_exchange_n(&res->ix[h].kmin, &lo, key + 1, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {}
         uint32_t hi = __atomic_load_n(&res->ix[h].kmax, __ATOMIC_RELAXED);
         while (key + 1 > hi && !__atomic_compare_exchange_n(&res->ix[h].kmax, &hi, key + 1, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {}
+        // stride: gcd of the successive deltas between reads of this site (best effort under concurrency)
+        uint32_t last = __atomic_exchange_n(&res->ix[h].last, key + 1, __ATOMIC_RELAXED);
+        if (last && last != key + 1) {
+            uint32_t d = last > key + 1 ? last - key - 1 : key + 1 - last, g = __atomic_load_n(&res->ix[h].g, __ATOMIC_RELAXED);
+            while (g) { uint32_t t = d % g; d = g; g = t; }
+            __atomic_store_n(&res->ix[h].g, d, __ATOMIC_RELAXED);
+        }
         __atomic_fetch_add(&res->ix[h].n, 1, __ATOMIC_RELAXED);
         return;
     }
