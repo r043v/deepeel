@@ -1059,12 +1059,10 @@ static int nes_archive_add(DpNesRun *x, NesCell *a, uint32_t *n, uint64_t gain, 
     uLongf zl;
     uint8_t *z = dp_zdup(ztmp, zcap, tmp, (uLong)dp_nesmach_state_size(), &zl);
     if (!z) return -1;
-    uint32_t slot = *n;
-    if (*n >= x->opt.novelty_archive) {
-        slot = dp_cell_victim(a, sizeof *a, offsetof(NesCell, gain), offsetof(NesCell, picks), *n);
-        free(a[slot].z);
-        r->novelty_replaced++;
-    } else (*n)++;
+    int repl;
+    uint32_t slot = dp_cell_slot(a, sizeof *a, offsetof(NesCell, gain), offsetof(NesCell, picks), offsetof(NesCell, z),
+                                 n, x->opt.novelty_archive, &repl);
+    r->novelty_replaced += repl;
     a[slot].z = z;
     a[slot].zlen = zl;
     memcpy(a[slot].lives, dp_nesmach_ram(x->m), 2048);

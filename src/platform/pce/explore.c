@@ -992,15 +992,10 @@ static int archive_add(PceRun *x, PceCell *a, uint32_t *n, uint64_t gain) {
     uLongf zl;
     uint8_t *z = dp_zdup(x->ztmp, x->zcap, x->tmp2, x->state_size, &zl);
     if (!z) return -1;
-    uint32_t slot = *n;
-    if (*n >= x->opt.novelty_archive) {
-        // replace the least productive entry (gain per pick)
-        slot = dp_cell_victim(a, sizeof *a, offsetof(PceCell, gain), offsetof(PceCell, picks), *n);
-        free(a[slot].z);
-        r->novelty_replaced++;
-    } else {
-        (*n)++;
-    }
+    int repl;
+    uint32_t slot = dp_cell_slot(a, sizeof *a, offsetof(PceCell, gain), offsetof(PceCell, picks), offsetof(PceCell, z),
+                                 n, x->opt.novelty_archive, &repl);
+    r->novelty_replaced += repl;
     a[slot].z = z;
     a[slot].zlen = zl;
     memcpy(a[slot].lives, dp_pce_wram(), 8192);

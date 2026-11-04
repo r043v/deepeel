@@ -1208,12 +1208,10 @@ static int md_archive_add(X *x, MdNov *N, uint64_t gain) {
     uLongf zl;
     uint8_t *z = dp_zdup(N->ztmp, N->zcap, N->tmp, (uLong)ssz, &zl);
     if (!z) return -1;
-    uint32_t slot = N->n;
-    if (N->n >= x->o->novelty_archive) {
-        slot = dp_cell_victim(N->a, sizeof *N->a, offsetof(MdCell, gain), offsetof(MdCell, picks), N->n);
-        free(N->a[slot].z);
-        r->novelty_replaced++;
-    } else N->n++;
+    int repl;
+    uint32_t slot = dp_cell_slot(N->a, sizeof *N->a, offsetof(MdCell, gain), offsetof(MdCell, picks), offsetof(MdCell, z),
+                                 &N->n, x->o->novelty_archive, &repl);
+    r->novelty_replaced += repl;
     N->a[slot].z = z;
     N->a[slot].zlen = zl;
     memcpy(N->a[slot].lives, dp_mdmach_ram(x->m), 65536);

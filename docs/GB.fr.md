@@ -3435,3 +3435,10 @@ l'écrivain est relu pour chaque Dx). Le résultat reste validé par la cible ob
 sans qu'une des entrées lues soit la cible réellement atteinte. Fixture `fix_md_s4p4`, test `md_s4_ptr_dn_copy`.
 Limite : `dn_writer` ne garde que le dernier écrivain, donc un Dx réécrit entre la copie et l'usage est mal attribué
 (la validation par la cible évite alors la fausse table). Reste : An calculé par ALU (`adda`).
+
+## 0.249.5 (J4 : choix du slot d'archive commun)
+
+`dp_cell_slot` (`src/explore/novelty.h`) choisit le slot d'une nouvelle cellule (ajout tant que l'archive n'est pas
+pleine, sinon éviction de la moins productive avec libération de son `z`) et signale le remplacement. NES, PCE, MD et
+Sega l'utilisent à la place de leurs quatre copies de cette logique ; les champs propres à chaque cœur (RAM de vies,
+profondeur, image cartouche) restent dans leur `*_archive_add`. Sans changement de comportement : 155 tests passent.

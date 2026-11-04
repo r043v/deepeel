@@ -103,6 +103,17 @@ static inline uint32_t dp_cell_victim(const void *cells, size_t stride, size_t g
     }
     return slot;
 }
+// slot for a new cell: append while `*n < cap`, else evict the least productive one (its `z` is freed and
+// *replaced is set).  The caller then stores z/zlen/gain/picks and its own per-core fields.
+static inline uint32_t dp_cell_slot(void *cells, size_t stride, size_t gain_off, size_t picks_off, size_t z_off,
+                                    uint32_t *n, uint32_t cap, int *replaced) {
+    *replaced = 0;
+    if (*n < cap) return (*n)++;
+    uint32_t slot = dp_cell_victim(cells, stride, gain_off, picks_off, *n);
+    free(*(void **)((char *)cells + (size_t)slot * stride + z_off));
+    *replaced = 1;
+    return slot;
+}
 // compress `n` bytes of state (level 1) through the caller's scratch `ztmp` (capacity zcap) and
 // return an exact-size malloc'ed copy; NULL on failure.  Shared by every core's cell archive.
 #include <zlib.h>

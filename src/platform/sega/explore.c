@@ -1182,11 +1182,9 @@ static int sega_cell_add(Run *x,SegaCell *a,uint32_t *n,uint64_t gain,uint8_t *i
     x->b->save(img); memcpy(img+ssz,x->cart,0x8000);
     uLongf zl;
     uint8_t *z=dp_zdup(ztmp,zcap,img,(uLong)(ssz+0x8000),&zl); if(!z) return -1;
-    uint32_t slot=*n;
-    if(*n>=cap) {
-        slot=dp_cell_victim(a,sizeof *a,offsetof(SegaCell,gain),offsetof(SegaCell,picks),*n);
-        free(a[slot].z); x->r->novelty_replaced++;
-    } else (*n)++;
+    int repl;
+    uint32_t slot=dp_cell_slot(a,sizeof *a,offsetof(SegaCell,gain),offsetof(SegaCell,picks),offsetof(SegaCell,z),n,cap,&repl);
+    x->r->novelty_replaced+=repl;
     a[slot].z=z; a[slot].zlen=zl; a[slot].gain=gain; a[slot].picks=0; a[slot].depth=0;
     size_t rn=0; const uint8_t *ram=x->b->ram_view(&rn);
     memset(a[slot].lives,0,sizeof a[slot].lives);
