@@ -1077,7 +1077,7 @@ static unsigned dispatch_seed(X *x) {
 static uint64_t run_sliced(DpMdMach *m, uint64_t budget, int *cut, int *fault) {
     uint64_t n = 0;
     for (;;) {
-        uint64_t left = budget - n, slice = left < (1u << 24) ? left : (1u << 24);
+        uint64_t left = budget - n, slice = left < (1u << 20) ? left : (1u << 20);
         *cut = 0;
         uint64_t k = dp_mdmach_run(m, slice, cut, fault);
         n += k;

@@ -138,3 +138,8 @@ aussitôt. Le chemin naturel n'est donc pas sans fin : le premier chemin consomm
 (écriture du spool), et SIGINT n'est observé qu'en fin de tranche. Le plafond reste le débit du spool
 (`dp_lf_put` + zlib), pas la boucle principale ; à améliorer : écriture du spool par lots non compressés, ou
 vérification de `dp_stop` plus fréquente.
+
+Correction (0.247.1) : les « 32 161 858 pas » venaient du découpage en tranches de 2^24 pas (l'arrêt n'était vu qu'en
+fin de tranche), pas d'une boucle sans fin. Avec des tranches de 2^20, un run de 20 s s'arrête à 1 048 576 pas :
+le débit réel est ~45 000 pas/s, une fourche spoolée pour ~18 pas. Le spool n'est relu qu'à l'épuisement du chemin
+courant ; sur cette ROM, le coût est le nombre de fourches par pas, pas un blocage.

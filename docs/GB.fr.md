@@ -3367,3 +3367,11 @@ Les enregistrements du spool (`src/explore/lots.h`, version de fichier 3) sont c
 temps dans `dp_lf_put` et zlib, adler32 en tête. Les anciens spools ne sont plus relus (version 2 refusée).
 Observation de l'outil : 154 021 fourches spoolées en 60 s contre 126 928 avant ; la cause du premier chemin qui
 accapare le run reste ouverte (voir `docs/CAMPAGNE.fr.md`).
+
+## 0.247.1 — MD : arrêt vérifié toutes les 2^20 instructions
+
+`run_sliced` (MD) découpait le chemin en tranches de 2^24 pas et ne regardait SIGINT/limite de temps qu'entre deux
+tranches : un `--unbounded` arrêté ne répondait qu'après la tranche en cours. Tranches ramenées à 2^20 pas.
+Observation de l'outil (Castle of Illusion, `--unbounded`, SIGINT à 20 s) : 1 048 576 pas, 57 389 fourches spoolées,
+soit une fourche pour 18 pas environ ; le « chemin sans fin » du diagnostic J13 n'était donc pas un blocage mais un
+débit de ~45 000 pas/s dominé par l'écriture du spool.
