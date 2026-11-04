@@ -197,3 +197,9 @@ Hooks `MD_TRACE` commités dans m0boy (`md_trace.h`, `md_m68k_ops.h`,
 
 `tests/test_md.c` (jalon 1) et `tests/test_md_explore.c` (fourches Bcc,
 DBcc, boucle bornée, V-int, DMA), fixtures générées au build.
+
+## 0.187.6 — `md explore --time-limit SEC`
+
+Arrêt gracieux au mur d'horloge (alarme → drapeau vérifié par la boucle principale ; le rapport est écrit, comme
+pour un mur de pas). Vérifié sur Sonic : `--time-limit 30` s'arrête à 30,6 s réelles, 62,5 M pas. Limite connue : seul
+le chemin séquentiel teste le drapeau ; `--jobs N` ne l'honore pas encore. `--unbounded` reste absent de MD.

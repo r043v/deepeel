@@ -1500,6 +1500,8 @@ static void md_regs_print(void) {
                dp_md_regs[i].category);
 }
 
+extern volatile sig_atomic_t dp_md_stop;
+static void md_on_alarm(int sig) { (void)sig; dp_md_stop = 1; }
 static int cmd_md(int argc, char **argv) {
     const char *md_rtcode = NULL;
     if (argc < 4) return usage(), 2;
@@ -1523,6 +1525,7 @@ static int cmd_md(int argc, char **argv) {
     } else if (!strcmp(argv[2], "explore")) {
         DpMdOptions o;
         int md_jobs = 1, md_watch = 0, md_any_rom = 0;
+        unsigned md_time_limit = 0;
         const char *md_dump = NULL;
         dp_md_options_default(&o);
         const char *text = NULL, *map = NULL, *ev = NULL, *movie_path = NULL, *md_summary = NULL, *md_heat = NULL;
@@ -1531,6 +1534,7 @@ static int cmd_md(int argc, char **argv) {
             if (i + 1 >= argc && strcmp(a, "--lot-drain")) { fprintf(stderr, "deepeel: bad option %s\n", a); rc = 2; break; }
             if (!strcmp(a, "--max-total")) o.max_total = strtoull(argv[++i], NULL, 0);
             else if (!strcmp(a, "--path-steps")) o.path_steps = strtoull(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--time-limit")) md_time_limit = (unsigned)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--queue")) o.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--lot")) o.lot_path = argv[++i];
             else if (!strcmp(a, "--lot-drain")) o.lot_drain = 1;
@@ -1591,6 +1595,7 @@ static int cmd_md(int argc, char **argv) {
         if (!rc) {
             DpMdResults r;
             if (md_watch && dp_fbwatch_start("deepeel md watch")) o.watch_every = o.watch_every ? o.watch_every : 0;
+            if (md_time_limit) { signal(SIGALRM, md_on_alarm); alarm(md_time_limit); }
             int mrc = dp_md_explore_jobs(&c, &o, &r, md_jobs);
             if (md_watch) dp_fbwatch_stop();
             if (md_dump && dp_fb_dump_ppm(md_dump)) fprintf(stderr, "deepeel: no frame to dump (the ROM never completed a frame)\n");

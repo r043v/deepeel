@@ -4,6 +4,10 @@
 #include <string.h>
 #include <math.h>
 #include <zlib.h>
+#include <signal.h>
+
+// set by the --time-limit alarm: the main loop stops cleanly and the report is still written
+volatile sig_atomic_t dp_md_stop;
 #include "../../gui/fbwatch.h"
 #include "../../core/statefile.h"
 #include "../../cpu/m68k/m68k.h"
@@ -1351,7 +1355,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         }
     for (;;) {
         spill_flush(&x);
-        if (r->steps >= o->max_total) break;
+        if (r->steps >= o->max_total || dp_md_stop) break;
         if (!x.nq && x.npark) { x.q[x.nq++] = x.park[--x.npark]; r->parked_resumed++; }
         if (!x.nq && dp_lf_pending(x.lot)) { // the disk backlog comes back
             Item m; uint32_t ml = 0, bl = 0; uint8_t *blob = NULL;
