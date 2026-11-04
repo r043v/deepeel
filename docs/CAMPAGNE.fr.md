@@ -92,3 +92,11 @@ Lecture honnête : MD s'arrête très tôt par les plafonds par défaut (plafond
 couverture MD obtenue ici est une borne basse faible ; un run `--unbounded` reste à faire. NES et PCE mesurent des
 octets touchés, pas une classification complète. MSX est limité par le profil (BIOS simulé partiel, pas de MSX2/SCC).
 Reste pour J13 : runs `--unbounded` MD, SMS/GG sur ROMs réelles, audit complet de la matrice §2.1.
+
+### J13 : MD Sonic avec plafonds relevés (observation de l'outil)
+
+`md explore` n'a ni `--unbounded` ni `--time-limit` (l'option est refusée) : c'est un écart de J1/J13 à combler.
+Avec plafonds relevés à la main (`--max-total 100000000 --path-steps 5000000 --queue-max 262144 --fork-cap 16
+--visit-cap 1024`), Sonic atteint le mur de pas (100 M pas, 849 chemins, 2 687 forks, 1 852 forks non lancés),
+le plafond par site reste saturé (6,9 M), le code statique passe de 140 à 1 728 octets. Un essai avec `--fork-cap 64
+--queue-max 4194304` a été tué (code 137, probablement mémoire). Toujours une borne basse, jamais une fermeture.
