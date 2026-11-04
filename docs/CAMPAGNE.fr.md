@@ -72,3 +72,23 @@ construites par `tests/build_fixtures.py` ; **pas** des mesures de matériel,
 `n/d` : valeur non exposée par le rapport texte de la plateforme.
 Pour NES et PC Engine la colonne « octets connus » est la couverture observée
 (octets touchés), pas une classification complète de la ROM.
+
+## J13 : ROMs réelles hors GB (0.187.5, observations de l'outil)
+
+ROMs de `m0boy/roms` (hors dépôt), réglages par défaut (bornés), un seul run chacun, RAM à zéro, registres
+événementiels statiques. Observations de l'outil, pas des mesures de matériel ; aucun run n'est une fermeture.
+
+| ROM | pas | chemins | forks | autres observations |
+|---|---|---|---|---|
+| MD Sonic the Hedgehog | 250 061 | 529 | 519 (irq 1) | plafond par site atteint 67 191 fois, borne de boucle 495 ; couche statique 19 882 o de bourrage, 1 484 de table, 140 de code |
+| MD Castle of Illusion | 175 901 | 173 | 162 (irq 2) | plafond par site 25 404, borne de boucle 168 ; exécution hors ROM 49 (RAM) |
+| NES Super Mario Bros. | 3 045 225 | 865 | 848 | 11 sections, 294 copies, 6 fautes |
+| NES DuckTales | 1 941 468 | 1 505 | 1 488 | 99 sections, 1 511 copies, 101 fautes, 496 exécutions hors PRG |
+| PCE Raiden | 11 360 967 | 973 | 836 | observé 8,72 %, classé 21,30 %, inconnu 78,70 % ; 41 535 exécutions hors ROM |
+| MSX Aleste | 40 524 637 | 1 025 | 692 (irq 458) | carte : connu 74,35 %, inconnu 25,65 % ; 10,3 M exécutions hors ROM, 482 écritures dans du code exécuté |
+| MSX Gradius 2 | 60 000 000 | 1 763 | 3 313 (irq 2 698) | carte : connu 89,58 %, inconnu 10,42 % ; 14,6 M exécutions hors ROM, 129 440 écritures dans du code exécuté |
+
+Lecture honnête : MD s'arrête très tôt par les plafonds par défaut (plafond de forks par site saturé), donc la
+couverture MD obtenue ici est une borne basse faible ; un run `--unbounded` reste à faire. NES et PCE mesurent des
+octets touchés, pas une classification complète. MSX est limité par le profil (BIOS simulé partiel, pas de MSX2/SCC).
+Reste pour J13 : runs `--unbounded` MD, SMS/GG sur ROMs réelles, audit complet de la matrice §2.1.
