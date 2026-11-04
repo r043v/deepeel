@@ -2685,5 +2685,6 @@ $0158 se réveille, le gestionnaire revient en $0159 et la traîne de `nop` du r
 la ROM (le parité m0boy ne la voit pas : pas de second VBlank, et il exclut le remplissage par `DP_SF_PAD`). Fourches de gambatte :
 `branch` 6, `copy1` 4, `jumptable` 2.
 `rom_index` suit les banques (`GB::dpRomIndex` ajouté au patch) : sur `mbc5` et `closure` les débuts de banque 2/3
-sortent à $8000/$C000, l'index compact de l'explorateur. La valeur lue est transmise (`GB::dpPeek`, sans effet de bord, ROM/WRAM/HRAM seulement ; 0 ailleurs, et 0 pour les écritures). Limites : `dma`/`bank` non branchés, pas encore de test
-automatique (le cœur est cloné hors dépôt). J11/J12 restent donc ◐.
+sortent à $8000/$C000, l'index compact de l'explorateur. La valeur lue est transmise (`GB::dpPeek`, sans effet de bord, ROM/WRAM/HRAM seulement ; 0 ailleurs, et 0 pour les écritures). Test : `lr_gambatte_parity` (ctest) compare les décomptes de débuts d'opcode ci-dessus ; il se saute (code 77) sans
+`DEEPEEL_GAMBATTE_LR` (binaire produit par `tools/gambatte_lr_build.sh DIR`, qui clone le cœur et applique le patch).
+Limites : `dma`/`bank` non branchés. J11/J12 restent donc ◐.

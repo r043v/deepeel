@@ -445,3 +445,9 @@ set_tests_properties(rtcode_md_generated PROPERTIES FIXTURES_REQUIRED fixtures T
 
 add_test(NAME rtcode_md_exg_movem COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_ramexg.md --rtcode $D/me.rt --text $D/me.txt >/dev/null 2>&1; grep -Eq '^0000 4e75 [0-9]+ -1 1024$' $D/me.rt")
 set_tests_properties(rtcode_md_exg_movem PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+
+# Level-B parity against a real core (patched gambatte). Optional: needs DEEPEEL_GAMBATTE_LR (path to the built
+# tools/gambatte_lr, see tools/gambatte_lr_build.sh); skipped (exit 77) otherwise. Start counts >= $0100 equal the
+# m0boy counts plus the entry nop at $0100.
+add_test(NAME lr_gambatte_parity COMMAND sh -c "L=\"\$DEEPEEL_GAMBATTE_LR\"; D=${CMAKE_CURRENT_BINARY_DIR}; [ -x \"$L\" ] || exit 77; for p in branch:20 loop:3 copy1:13 copyx:14 jumptable:17 nsdata:28 vblank:28 probes:12; do n=\${p%%:*}; w=\${p##*:}; g=$(GLR_STARTS=1 \"$L\" $D/fix_$n.gb 200000 50000000 2>/dev/null | sed -n 's/^starts>=0100: //p'); [ \"$g\" = \"$w\" ] || { echo \"$n: $g != $w\"; exit 1; }; done")
+set_tests_properties(lr_gambatte_parity PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 120 SKIP_RETURN_CODE 77)
