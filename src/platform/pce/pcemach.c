@@ -169,6 +169,7 @@ uint8_t dp_pce_peek(uint16_t addr) {
 // a hardware measurement, and forks that read the port restart from the scan they find.
 static int tap_on, tap_idx, tap_prev_sel;
 static uint8_t tap_pad[5];
+int dp_pce_multitap_enabled(void) { return tap_on; }
 void dp_pce_multitap(int on) { tap_on = on; tap_idx = 0; tap_prev_sel = 0; }
 void dp_pce_pad_n(unsigned n, uint8_t buttons) { if (n < 5) tap_pad[n] = buttons; }
 unsigned dp_pce_tap_index(void) { return (unsigned)tap_idx; }

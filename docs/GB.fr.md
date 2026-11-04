@@ -2902,3 +2902,11 @@ couvrent tout ce qu'une partie réelle exécute.
   (palette) ou `$9B` (registre indirect) : un jeu MSX2 n'est plus silencieusement pris pour MSX1.
 - Observation des écritures seulement ; le V9938 (modes graphiques, blitter, palette) n'est pas émulé.
   Fixture `fix_msx_v9938`, test `msx_v9938_ports`.
+
+## 0.195.0 : PCE, option `--multitap` (2026-11-04)
+
+- `deepeel pce explore ROM --multitap` active le modèle d'adaptateur cinq manettes déjà présent dans
+  `pcemach.c` (CLR remet le balayage à la manette 1, chaque SEL montant avance) ; le rapport l'indique.
+- Les manettes 2 à 5 restent au repos : modèle d'observation, pas une mesure de matériel. L'état du
+  balayage est global au processus, donc `--multitap` force une seule instance (`--jobs` ignoré, signalé).
+- Test `pce_multitap_option`. Limite : aucune entrée jouée sur les manettes 2-5.

@@ -93,6 +93,7 @@ unsigned dp_pce_step(int *frame_done);
 void dp_pce_raise(int source);
 void dp_pce_input(uint8_t buttons);  // PCE_BTN_* layout of m0boy
 uint8_t dp_pce_input_get(void);
+int dp_pce_multitap_enabled(void);
 void dp_pce_multitap(int on);                    // five-pad adapter model (opt-in, scan outside the snapshot)
 void dp_pce_pad_n(unsigned n, uint8_t buttons);  // pads 2..5 (n = 1..4); pad 1 is dp_pce_input
 unsigned dp_pce_tap_index(void);

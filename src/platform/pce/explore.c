@@ -1640,6 +1640,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
     free(map);
     double sz = r->rom_size ? (double)r->rom_size : 1.0;
     fprintf(out, "PC Engine exploration report\n");
+    if (dp_pce_multitap_enabled()) fprintf(out, "Input: five-pad multitap model on (pads 2-5 held at rest; observation model, not a hardware measurement)\n");
     fprintf(out, "  rom %zu KiB (%zu pages of 8 KiB)\n", r->rom_size / 1024, r->rom_size / 0x2000);
     fprintf(out, "  observed %llu bytes (%.2f%%), classified %llu bytes (%.2f%%)\n",
             (unsigned long long)observed, 100.0 * (double)observed / sz,

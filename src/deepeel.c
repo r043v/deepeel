@@ -1252,13 +1252,14 @@ static int cmd_pce(int argc, char **argv) {
     if (argc < 4 || strcmp(argv[2], "explore")) {
         fprintf(stderr, "deepeel pce explore ROM [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N] "
                         "[--max-total N] [--max-steps N] [--queue N] [--loop-cap N] [--fork-cap N] "
-                        "[--novelty STEPS] [--novelty-frames N] [--novelty-archive N] [--novelty-cells] [--pad-fork-cap N] [--irq-fork-cap N] [--no-irq-fork] [--no-static] [--no-infer] [--jobs 2] "
+                        "[--novelty STEPS] [--novelty-frames N] [--novelty-archive N] [--novelty-cells] [--pad-fork-cap N] [--irq-fork-cap N] [--no-irq-fork] [--no-static] [--no-infer] [--multitap] [--jobs 2] "
                         "[--text FILE] [--map FILE] [--png FILE] [--evidence FILE] [--entry ADDR]... [--ctx-cap N]\n");
         return 2;
     }
     const char *path = NULL, *text = NULL, *map = NULL, *png = NULL, *pce_ev = NULL;
     DpPceOptions opt = dp_pce_options();
     DpCliCommon cc = { .jobs = 1 };
+    int multitap = 0;
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
         if (0) {}
@@ -1277,6 +1278,7 @@ static int cmd_pce(int argc, char **argv) {
         else if (!strcmp(a, "--irq-fork-cap") && i + 1 < argc) opt.irq_fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--no-static")) opt.static_closure = 0;
         else if (!strcmp(a, "--no-infer")) opt.infer = 0;
+        else if (!strcmp(a, "--multitap")) multitap = 1;
         else if (!strcmp(a, "--bank-dispatch")) opt.bank_dispatch = 1;
         else if (!path) path = a;
         else { fprintf(stderr, "deepeel: unknown option %s\n", a); return 2; }
@@ -1287,6 +1289,11 @@ static int cmd_pce(int argc, char **argv) {
     if (opt.fork_cap > 255) opt.fork_cap = 255; // per-site counters are bytes
     if (opt.pad_fork_cap > 255) opt.pad_fork_cap = 255;
     if (opt.irq_fork_cap > 255) opt.irq_fork_cap = 255;
+    if (multitap && pce_jobs > 1) { // the scan state is process-global: one instance only
+        fprintf(stderr, "deepeel: --multitap keeps its scan state process-wide; running on one instance\n");
+        pce_jobs = 1;
+    }
+    dp_pce_multitap(multitap);
     size_t size;
     uint8_t *data = nes_read_file(path, &size);
     if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", path); return 1; }
