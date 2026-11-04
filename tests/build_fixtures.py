@@ -931,6 +931,14 @@ def build_nes_pce(out):
     p[0x1FFE], p[0x1FFF] = 0x00, 0xE0
     with open(os.path.join(out, "fix_pce_adpcm.pce"), "wb") as f:
         f.write(p)
+    # PC Engine: SuperGrafx VPC ($0008) and second VDC ($0010) writes
+    p = bytearray(0x4000)
+    code = bytes([0x78, 0xD4, 0xA9, 0xFF, 0x53, 0x01, 0xA9, 0x00, 0x8D, 0x08, 0x00, 0x8D, 0x10, 0x00,
+                  0x8D, 0x12, 0x00, 0x80, 0xFE])
+    p[0:len(code)] = code
+    p[0x1FFE], p[0x1FFF] = 0x00, 0xE0
+    with open(os.path.join(out, "fix_pce_sgx.pce"), "wb") as f:
+        f.write(p)
     # PC Engine padding slide: LDA #1 ; JMP $E020 into a zero-filled run
     w = bytearray(0x4000)
     w[0:5] = bytes([0xA9, 0x01, 0x4C, 0x20, 0xE0])

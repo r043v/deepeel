@@ -1734,6 +1734,16 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
                                (unsigned long long)r->smc_writes, r->smc_first_pc);
     fprintf(out, "  register writes %u logged (overflow %llu)\n", r->register_count,
             (unsigned long long)r->register_overflow);
+    {   // SuperGrafx: VPC ($0008-$000F) and the second VDC ($0010-$0017) of the hardware page
+        unsigned vpc = 0, vdc2 = 0;
+        for (unsigned i = 0; i < r->register_count; i++) {
+            unsigned g = r->register_writes[i].reg;
+            if (g >= 0x0008 && g <= 0x000F) vpc++;
+            else if (g >= 0x0010 && g <= 0x0017) vdc2++;
+        }
+        if (vpc || vdc2)
+            fprintf(out, "  SuperGrafx writes (logged; no VPC/second VDC emulated): VPC %u, VDC2 %u\n", vpc, vdc2);
+    }
     {   // CD-ROM interface ($1800-$1BFF of the hardware page): ADPCM ($180A-$180E, $1860-$1869) vs the rest
         unsigned adpcm = 0, cd = 0;
         for (unsigned i = 0; i < r->register_count; i++) {

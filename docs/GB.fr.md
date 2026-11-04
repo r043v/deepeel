@@ -2925,3 +2925,10 @@ couvrent tout ce qu'une partie réelle exécute.
   les atteint est signalé au lieu d'être silencieusement pris pour du HuCard pur.
 - Observation du journal (plafonné, débordement rapporté) ; aucun CD-ROM2 ni ADPCM n'est émulé.
   Fixture `fix_pce_adpcm`, test `pce_adpcm_typed`.
+
+## 0.198.0 : PCE, écritures SuperGrafx typées (2026-11-04)
+
+- Le rapport `deepeel pce explore` compte les écritures journalisées vers le VPC (`$0008-$000F`) et le
+  second VDC (`$0010-$0017`) de la page matérielle : un jeu SuperGrafx est signalé, pas confondu avec
+  un jeu PC Engine standard. Ni VPC ni second VDC ne sont émulés ; observation du journal plafonné.
+- Fixture `fix_pce_sgx`, test `pce_sgx_typed`.

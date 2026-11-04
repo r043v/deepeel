@@ -178,6 +178,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_adpcm.pce
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_sgx.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_slide.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_ctx.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_sibling.pce
@@ -419,6 +420,8 @@ add_test(NAME pce_multitap_option COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${C
 set_tests_properties(pce_multitap_option PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME pce_adpcm_typed COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B pce explore $D/fix_pce_adpcm.pce --text $D/pa.txt >/dev/null 2>&1; grep -Eq 'CD-ROM2 interface writes .*: ADPCM [1-9][0-9]*, other [1-9][0-9]*' $D/pa.txt")
 set_tests_properties(pce_adpcm_typed PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME pce_sgx_typed COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B pce explore $D/fix_pce_sgx.pce --text $D/px.txt >/dev/null 2>&1; grep -Eq 'SuperGrafx writes .*: VPC [1-9][0-9]*, VDC2 [1-9][0-9]*' $D/px.txt")
+set_tests_properties(pce_sgx_typed PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_exact_dedup COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_pad_effect.md --text $D/md_ed0.txt >/dev/null 2>&1; $B md explore $D/fix_md_pad_effect.md --exact-dedup --text $D/md_ed1.txt >/dev/null 2>&1; grep -q 'exact dedup: [1-9][0-9]* forks dropped' $D/md_ed1.txt && ! grep -q 'exact dedup' $D/md_ed0.txt && [ \"$(grep -E 'executed|exec ' $D/md_ed0.txt)\" = \"$(grep -E 'executed|exec ' $D/md_ed1.txt)\" ]")
 set_tests_properties(md_exact_dedup PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_map_inference COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_pad_effect.md --text ${CMAKE_CURRENT_BINARY_DIR}/md_inf.txt >/dev/null 2>&1; grep -q 'map inference (S7, not observations): [0-9]* padding' ${CMAKE_CURRENT_BINARY_DIR}/md_inf.txt")
