@@ -242,6 +242,7 @@ typedef struct DpResults {
     uint32_t forks_branch, forks_irq, forks_key, forks_p1, evicted_exact, evicted_ctx;
     uint32_t decoders, decoders_without_snapshot, decoder_overflow, start_overflow, frame_overflow; // S6 stream consumers
     uint32_t replay_tables, replay_candidates, replay_runs, sat_replay_total; // S6 replays
+    struct { uint32_t at; uint16_t stride, count; } tb[128]; uint32_t tb_n;   // S6 pointer tables found (dpTb)
     uint32_t forks_capped; // forks dropped by the per-site cap
     uint32_t forks_table_full; // forks refused: the per-site counter table is full (also in forks_capped)
     uint32_t cycle_cuts, step_cuts, budget_paths, budget_steps, queue_overflows;

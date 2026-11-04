@@ -2237,3 +2237,10 @@ archivé, `pc` tronqué à 16 bits, octets relus après exécution. NES : toute 
 sur des chemins forcés dans des données (l'archive NES de DuckTales compte ~1400 variantes : bruit de
 chemins forcés, pas du code de jeu). PCE : WRAM uniquement, source ROM par `ram_src`. Tests : `nes`,
 `pce`, `sega_streams`. Observations de l'outil.
+
+## 0.151.0 (J10 — chunk `dpTb`)
+
+Le PNG de carte GB porte un chunk `dpTb` (JSON versionné) : les tables de pointeurs que le rejeu S6 a
+localisées (`at` = index ROM compact, `stride`, `n` entrées), 128 tables au plus. Les tables de sauts S4
+et les frères de copie n'y figurent pas encore ; `dpIx` reste à faire (la GB n'a pas d'enregistrements
+indexés). Test `explorer` (fixture `streams`).

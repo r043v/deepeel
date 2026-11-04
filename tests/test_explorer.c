@@ -124,6 +124,18 @@ int main(int argc, char **argv) {
     CHECK(res.replay_tables >= 1);
     CHECK(res.replay_runs >= 1);
     CHECK(res.data_flags[0x330] & DP_DF_READ); // the third stream was never called by the ROM
+    {   // dpTb: the map PNG lists the pointer table the replay located ($0400, stride 2)
+        DpConfig c3;
+        dp_config_defaults(&c3);
+        char png[600];
+        snprintf(png, sizeof png, "%s/test_dptb.png", dir);
+        CHECK(dp_report_map_png(&res, &c3, "x.gb", png));
+        size_t tl = 0;
+        char *tb = dp_png_text(png, "dpTb", &tl);
+        CHECK(tb != NULL && strstr(tb, "\"at\":1024") && strstr(tb, "\"stride\":2"));
+        free(tb);
+        remove(png);
+    }
 
     // --- full per-site fork table: the cap holds, the saturation is counted ------
     g_full_forks = 1;

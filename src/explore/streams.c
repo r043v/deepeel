@@ -155,6 +155,11 @@ int stream_replay(DpExplorer *ex) {
             uint16_t v;
             while (lo >= k && ptr_ok(ex, lo - k, blo, bhi, banked, &v)) lo -= k;
             while (ptr_ok(ex, hi + k, blo, bhi, banked, &v)) hi += k;
+            {   // record the table once (dpTb chunk of the map PNG)
+                DpResults *R = ex->res; uint32_t t;
+                for (t = 0; t < R->tb_n && R->tb[t].at != lo; t++) {}
+                if (t == R->tb_n && t < 128) { R->tb[t].at = (uint32_t)lo; R->tb[t].stride = (uint16_t)k; R->tb[t].count = (uint16_t)((hi - lo) / k + 1); R->tb_n++; }
+            }
             for (size_t at = lo; at <= hi; at += k) {
                 if (!ptr_ok(ex, at, blo, bhi, banked, &v) || tried[v]) continue;
                 tried[v] = 1;

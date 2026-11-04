@@ -555,15 +555,24 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
     dp_buf_fmt(&fr_txt, "},\"resumed\":%llu,\"pending\":%llu,\"on_disk\":%llu,\"dropped\":%llu}",
                (unsigned long long)res->defer_resumed, (unsigned long long)res->defer_pending,
                (unsigned long long)res->defer_on_disk, (unsigned long long)res->defer_dropped);
-    DpPngText extra[4] = {
+    // dpTb: pointer tables located by the decoder replay (S6): rom index, stride, entries
+    DpBuf tb_txt;
+    dp_buf_init(&tb_txt);
+    dp_buf_fmt(&tb_txt, "{\"v\":1,\"stream_tables\":[");
+    for (uint32_t t = 0; t < res->tb_n; t++)
+        dp_buf_fmt(&tb_txt, "%s{\"at\":%u,\"stride\":%u,\"n\":%u}", t ? "," : "", res->tb[t].at, res->tb[t].stride, res->tb[t].count);
+    dp_buf_fmt(&tb_txt, "]}");
+    DpPngText extra[5] = {
         { "deepeel_heat", heat_txt.p, heat_txt.len, 0 },
         { "deepeel_cov", cov_txt.p, cov_txt.len, 0 },
         { "deepeel_rom", rom_txt.p, rom_txt.len, 0 },
         { "dpFr", fr_txt.p, fr_txt.len, 0 },
+        { "dpTb", tb_txt.p, tb_txt.len, 0 },
     };
     int ok = map_png_render(m, (int)res->banks, title, &s, (const char *)txt.p, txt.len,
                             meta, path, res->plat ? res->plat->name : "gb", file,
-                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 4, meth);
+                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 5, meth);
+    dp_buf_free(&tb_txt);
     dp_buf_free(&fr_txt);
     free(hb);
     if (have_heat) dp_heat_free(&heat);
