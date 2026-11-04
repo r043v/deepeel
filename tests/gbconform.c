@@ -23,7 +23,7 @@ static void step(DpMach *m, uint16_t pc, uint8_t op, int e) {
         const gbl_cpu_t *g = m->api->gbr;
         // ld b,b (mooneye) / ld d,d (wilbertpol): only the register triple decides
         if (g->b == 3 && g->c == 5 && g->d == 8 && g->e == 13 && g->h == 21 && g->l == 34) { verdict = 1; dp_mach_cut(M, DP_CUT_QUIT); }
-        else if (op == 0x40 && g->b == 0x42 && g->c == 0x42 && g->d == 0x42 && g->e == 0x42 && g->h == 0x42 && g->l == 0x42) { verdict = -1; dp_mach_cut(M, DP_CUT_QUIT); }
+        else if (op == 0x40 && g->b == 0x42 && g->c == 0x42 && g->d == 0x42 && g->e == 0x42 && g->h == 0x42 && g->l == 0x42) { verdict = -1; if (getenv("GBC_REGS")) fprintf(stderr, "fail at pc=%04x\n", pc); dp_mach_cut(M, DP_CUT_QUIT); }
     }
 }
 static void wr(DpMach *m, uint16_t a, uint8_t v) {

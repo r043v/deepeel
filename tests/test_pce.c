@@ -39,6 +39,30 @@ static void build(uint8_t *rom) {
     rom[0x1FFE] = 0x00; rom[0x1FFF] = 0xE0; // reset -> $E000 (MPR7 = page 0)
 }
 
+// D13: an illegal opcode on a natural path is cut and counted, not followed
+static void test_illegal_cut(void) {
+    uint8_t ill = 0;
+    for (unsigned op = 1; op < 256 && !ill; op++) {
+        uint8_t b[3] = { (uint8_t)op, 0, 0 };
+        DpHucIns in;
+        if (dp_huc_decode(b, 3, 0, &in) && in.flow == DP_HUC_ILLEGAL) ill = (uint8_t)op;
+    }
+    CHECK(ill != 0, "the decoder has an illegal opcode");
+    uint8_t *rom = calloc(1, ROM_SIZE);
+    static const uint8_t code[] = { 0x78, 0xEA, 0xEA, 0x00, 0x80, 0xFE };
+    memcpy(rom, code, sizeof code);
+    rom[3] = ill;
+    rom[0x1FFE] = 0x00; rom[0x1FFF] = 0xE0;
+    DpPceOptions o = dp_pce_options();
+    o.max_total = 1000; o.max_steps = 100;
+    DpPceResults *r = calloc(1, sizeof *r);
+    CHECK(dp_pce_explore(rom, ROM_SIZE, &o, r), "illegal explore runs");
+    CHECK(r->illegal_cuts >= 1 && r->faults >= 1, "illegal cut counted (%llu)", (unsigned long long)r->illegal_cuts);
+    CHECK(!(r->flags[4] & DP_PCE_NATURAL), "the byte after the illegal opcode was not followed");
+    dp_pce_results_free(r);
+    free(r); free(rom);
+}
+
 static void test_decoder(void) {
     CHECK(dp_huc_length(0x53) == 2, "TAM length");
     CHECK(dp_huc_length(0x03) == 2, "ST0 length");
@@ -450,6 +474,7 @@ int main(void) {
     uint8_t *rom = malloc(ROM_SIZE);
     build(rom);
     test_decoder();
+    test_illegal_cut();
     test_bridge(rom);
     test_multitap(rom);
     test_explore(rom);

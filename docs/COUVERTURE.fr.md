@@ -100,7 +100,7 @@ Pour chaque technique, la fiche indique :
 | D10 | Sondes de lecture manette | ✅ P1 8 masques | ✅ 128 comb. | ✅ | ◐ 8 boutons, port 1 absent | ✅ 12 | ◐ 4 |
 | D11 | Fourches de répétition (blocs) | — | ✅ ED | ✅ ED | — | ✅ BBR/BBS | ✅ DBcc |
 | D12 | Cibles indirectes observées | ✅ `jp hl` | ✅ `jp (hl/ix/iy)` | ✅ | ◐ observé, sans second passage | ◐ observé (`jmp (abs)`, `jmp (abs,X)`), sans second passage | ◐ observé (`jmp/jsr` par An), sans second passage |
-| D13 | Coupes de non-sens | ✅ | ✅ padding `pad_cuts` | ✅ | ◐ illégal | ◐ illégal | ◐ faute |
+| D13 | Coupes de non-sens | ✅ | ✅ padding `pad_cuts` | ✅ | ✅ glissade `pad_cuts` (test `nes_slide`) + arrêt sur KIL (test `nes`, `test_jam_cut`) | ✅ glissade `pad_cuts` (test `pce_slide`) + opcode illégal coupé (test `pce`, `test_illegal_cut`) | ◐ faute |
 | D14 | Chien de garde HALT, glissade de padding | ✅ | ✅ | ✅ | ✅ glissade $00/$FF + arrêt sur jam KIL (le 6502 n'a pas de HALT) | ◐ glissade $00/$FF coupée (`padding cuts`) + opcode illégal ; pas de HALT/WAI attribué | ◐ glissade `ori.b #0,d0` coupée sur option (`--cut-padding`, 16 octets nuls) ; fautes d'opcode déjà rapportées |
 | S1 | Scan padding + tables de pointeurs | ✅ | ✅ | ✅ | ◐ padding + tables, sans pointeurs ROM→ROM hors fenêtre | ✅ inf. | ✅ 0.132 padding ≥8 `00/FF` + tables de ≥4 longs 32 bits grand boutiste (≥3 distincts, pairs, dans la ROM) |
 | S2 | Fermeture statique de flot | ✅ | ✅ vues | ✅ slots | ◐ saut/appel/branche, fenêtre propre | ◐ fenêtre MPR | ◐ 0.132 Bcc/DBcc/BRA/JMP/JSR depuis les plages exécutées, confiance perdue après BSR/JSR ; pas de vues |

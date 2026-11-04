@@ -308,6 +308,23 @@ static void test_mmc5(void) {
     free(rom);
 }
 
+// D13: a KIL (jam) on a natural path ends it; the bytes behind it are not followed
+static void test_jam_cut(void) {
+    unsigned sz = 16 + 2 * 0x4000 + 0x2000;
+    uint8_t *rom = calloc(1, sz);
+    set_header(rom, 2, 1, 0);
+    put(rom, 0, 0, 0xEA, 0xEA, 0x02, 0xEA, 0x4C, 0x03, 0x80, -1);   // NOP NOP KIL NOP JMP $8003
+    set_vector(rom, 1, 0xFFFC, 0x8000);
+    DpNesOptions o = dp_nes_options();
+    o.max_total = 20000;
+    DpNesResults r;
+    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "jam explore runs");
+    CHECK(r.faults >= 1, "jam counted (%llu)", (unsigned long long)r.faults);
+    CHECK((r.flags[2] & DP_NES_NATURAL) && !(r.flags[3] & DP_NES_NATURAL), "the KIL is reached, the NOP behind it is not");
+    dp_nes_results_free(&r);
+    free(rom);
+}
+
 static void test_snapshot(void) {
     uint8_t *rom = calloc(1, 16 + 2 * 0x4000 + 1 * 0x2000);
     set_header(rom, 2, 1, 0);
@@ -786,6 +803,7 @@ int main(void) {
     test_gxrom();
     test_mmc1_mmc3();
     test_mmc5();
+    test_jam_cut();
     test_dmc();
     test_snapshot();
     test_explorer();
