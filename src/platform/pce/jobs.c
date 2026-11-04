@@ -110,6 +110,7 @@ static void fold(DpPceResults *a, void *user) {
     const DpPceResults *b = j->res;
     for (size_t i = 0; i < a->rom_size && i < b->rom_size; i++) { a->flags[i] |= b->flags[i]; if (a->exec_kind && b->exec_kind) a->exec_kind[i] |= b->exec_kind[i];
         if (a->exec_hits && b->exec_hits) { uint64_t s = (uint64_t)a->exec_hits[i] + b->exec_hits[i]; a->exec_hits[i] = s > UINT32_MAX ? UINT32_MAX : (uint32_t)s; }
+        if (a->live_io && b->live_io) a->live_io[i] |= b->live_io[i];
         if (a->data_hits && b->data_hits) { uint64_t s = (uint64_t)a->data_hits[i] + b->data_hits[i]; a->data_hits[i] = s > UINT32_MAX ? UINT32_MAX : (uint32_t)s; } }
     if (a->pal_flags && b->pal_flags) {
         a->palette_bytes = 0;

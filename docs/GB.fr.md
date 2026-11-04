@@ -3574,3 +3574,10 @@ Chaque section NES porte désormais `ram_pages` (masque des 8 pages de 256 octet
 `io_reads` (classes de registres lues : PPU `$2000-$3FFF`, pads `$4016/7`, autres `$4000-$5FFF`). Le rapport texte les
 affiche (`ram-pages $XX io $X`). Les deux instances de `--jobs 2` fusionnent leurs masques. Test : `test_liveness`
 (`nes`). Ce suivi n'alimente pas encore l'éviction par contexte (C2) : C1 NES reste ◐.
+
+## 0.249.25 (PCE : liveness par section, C1)
+
+Chaque section PCE porte `io_reads` : un bit par bloc matériel lu par son code (registre `>> 10` : VDC, VCE, PSG, timer, pad,
+IRQ). Le rapport texte l'affiche (`io $XX`) ; `--jobs 2` fusionne les masques. Les pages de RAM lues ne sont pas suivies
+(le cœur n'expose pas de hook de lecture RAM) : C1 PCE reste ◐. Test : `test_liveness` (`pce`). MD n'a pas de structure de
+section par plage (seulement des compteurs) : son liveness reste à faire.

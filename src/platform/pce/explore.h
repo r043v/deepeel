@@ -85,6 +85,7 @@ typedef struct {
     uint32_t id;
     uint32_t lo, hi;       // physical cells, inclusive, within one 8 KiB page
     uint64_t natural_hits, forced_hits;
+    uint8_t io_reads;      // C1 liveness: hardware blocks the section's code read, bit = (register >> 10): VDC VCE PSG timer pad IRQ
     uint8_t verdict;
 } DpPceSection;
 
@@ -144,6 +145,7 @@ typedef struct DpPceResults_ {
     uint64_t idx_overflow, idx_cross_page, idx_forced_ignored;      // records dropped (cap), reads on another page than the base
     uint32_t idx_declared, idx_refused_code, idx_biased; // bytes inferred / refused over code / sites starting at index >= 1
     uint8_t *flags;        // one byte per physical cell
+    uint8_t *live_io;    // C1: per ROM cell of an executed opcode, hardware blocks it read
     uint32_t *exec_hits, *data_hits;   // per cell: natural-path opcode starts / ROM data reads (saturating)
     uint8_t *exec_kind;    // per cell, opcode byte: DP_PCE_X_ENTRY (non-sequential arrival) | DP_PCE_X_IRQ (ran inside a handler)
     uint8_t *pal_flags;    // 1: the cell was copied into the VCE palette (HuC6260)

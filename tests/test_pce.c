@@ -517,6 +517,31 @@ static void test_ramcode(void) {
     free(r); free(rom);
 }
 
+// C1 liveness: a section records the hardware blocks its code read (VDC status, pad port)
+static void test_liveness(void) {
+    uint8_t *rom = calloc(1, ROM_SIZE);
+    static const uint8_t code[] = {
+        0x78, 0xD4,
+        0xA9, 0xFF, 0x53, 0x01,   // MPR0 = $FF (hardware)
+        0xAD, 0x00, 0x00,         // LDA $0000 (VDC status: block 0)
+        0xAD, 0x00, 0x10,         // LDA $1000 (pad port: block 4)
+        0x80, 0xFE,               // idle
+    };
+    memcpy(rom, code, sizeof code);
+    rom[0x1FFE] = 0x00; rom[0x1FFF] = 0xE0;
+    DpPceOptions o = dp_pce_options();
+    o.max_total = 20000; o.max_steps = 2000;
+    DpPceResults *r = calloc(1, sizeof *r);
+    CHECK(dp_pce_explore(rom, ROM_SIZE, &o, r), "liveness run");
+    int ok = 0;
+    for (uint32_t i = 0; r->flags && i < r->section_count; i++)
+        if (r->sections[i].lo == 0 && (r->sections[i].io_reads & 1) && (r->sections[i].io_reads & 16)) ok = 1;
+    CHECK(ok, "section liveness: VDC and pad reads");
+    dp_pce_results_free(r);
+    free(r);
+    free(rom);
+}
+
 int main(void) {
     uint8_t *rom = malloc(ROM_SIZE);
     build(rom);
@@ -536,6 +561,7 @@ int main(void) {
     test_static_views();
     test_ramcode();
     test_tas_identity();
+    test_liveness();
     free(rom);
     if (fails) { printf("%d failure(s)\n", fails); return 1; }
     printf("pce: ok\n");

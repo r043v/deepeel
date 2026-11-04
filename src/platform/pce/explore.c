@@ -260,6 +260,7 @@ static int is_block(uint8_t op) {
 static void obs_io_read(void *user, uint16_t reg, uint8_t value) {
     PceRun *x = user;
     (void)value;
+    if (x->r->live_io) { int64_t c = dp_pce_rom_index(x->cur_pc); if (c >= 0 && (size_t)c < x->rom_size) x->r->live_io[c] |= (uint8_t)(1u << ((reg >> 10) & 7)); }
     x->r->io_reads++;
     x->r->io_reg_reads[dp_pce_io_slot(reg)]++;
 }
@@ -1466,6 +1467,7 @@ static void sections_build(PceRun *x) {
         for (size_t k = i; k < j; k++) {
             if (r->flags[k] & DP_PCE_NATURAL) s->natural_hits++;
             else s->forced_hits++;
+            if (r->live_io) s->io_reads |= r->live_io[k];
         }
         s->verdict = s->natural_hits ? DP_PCE_VERDICT_REQUIRED : DP_PCE_VERDICT_FORCED;
         i = j;
@@ -1523,6 +1525,7 @@ void dp_pce_results_free(DpPceResults *r) {
     free(r->exec_kind); r->exec_kind = NULL;
     free(r->exec_hits); r->exec_hits = NULL;
     free(r->data_hits); r->data_hits = NULL;
+    free(r->live_io); r->live_io = NULL;
     free(r->pal_flags);
     free(r->idx_flags);
     r->idx_flags = NULL;
@@ -1571,6 +1574,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     r->exec_kind = calloc(x->rom_size, 1);
     r->exec_hits = calloc(x->rom_size, sizeof(uint32_t));
     r->data_hits = calloc(x->rom_size, sizeof(uint32_t));
+    r->live_io = calloc(x->rom_size, 1);
     r->pal_flags = calloc(x->rom_size, 1);
     r->idx_flags = calloc(x->rom_size, 1);
     x->fork_sites = calloc(x->rom_size, 1);
@@ -1872,9 +1876,9 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
     fprintf(out, "  sections %u:\n", r->section_count);
     for (uint32_t i = 0; i < r->section_count; i++) {
         const DpPceSection *s = &r->sections[i];
-        fprintf(out, "   section %u page $%02X $%05X-$%05X natural %llu forced %llu verdict %s\n",
+        fprintf(out, "   section %u page $%02X $%05X-$%05X natural %llu forced %llu verdict %s io $%02X\n",
                 s->id, s->lo >> 13, s->lo, s->hi, (unsigned long long)s->natural_hits,
-                (unsigned long long)s->forced_hits, dp_pce_verdict_names[s->verdict]);
+                (unsigned long long)s->forced_hits, dp_pce_verdict_names[s->verdict], s->io_reads);
     }
     fprintf(out, "  copies %u (overflow %llu):\n", r->copy_count, (unsigned long long)r->copy_overflow);
     for (unsigned i = 0; i < r->copy_count; i++) {
