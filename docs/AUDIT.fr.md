@@ -11,15 +11,14 @@ remesure pas l'outil.
 | GB | 32 | 6 | 0 | 1 |
 | SMS/GG | 32 | 5 | 0 | 2 |
 | MSX | 32 | 5 | 0 | 2 |
-| NES | 14 | 23 | 0 | 2 |
+| NES | 15 | 22 | 0 | 2 |
 | PCE | 22 | 16 | 0 | 1 |
 | MD | 15 | 23 | 0 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 78.
+Cellules ouvertes (◐ ou ✗) : 77.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
-| D1 | Marquage exec natural/forced/entry/irq/start | NES | ◐ 0.228.0 ENTRY/IRQ/START par cellule (`exec_kind`) ; IRQ perdu pour une fourche reprise dans un handler |
 | D1 | Marquage exec natural/forced/entry/irq/start | PCE | ◐ 0.229.0 ENTRY/IRQ par cellule (`exec_kind`) ; IRQ perdu pour une fourche reprise dans un handler |
 | D1 | Marquage exec natural/forced/entry/irq/start | MD | ◐ 0.229.0 ENTRY/IRQ par cellule (`exec_kind`) ; IRQ perdu pour une fourche reprise dans un handler |
 | D4 | Copies par boucle CPU | NES | ◐ boucle → PPUDATA |

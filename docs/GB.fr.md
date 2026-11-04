@@ -3276,3 +3276,10 @@ code). Fixture `fix_md_s4w`, test `md_s4_words` (contrôle négatif fait). Reste
 les autres boutons seuls et deux accords) au lieu de 4. Les tests épinglés sur 4 forks (`md_explore`,
 `md_ctx_cap`) passent à 12 forks / 13 chemins. Reste : le pad 6 boutons (séquence TH) et le catalogue
 de 128 combinaisons.
+
+## NES : l'état « dans un handler » suit les fourches (D1) (0.237.0)
+
+Chaque état en file porte `in_handler` (copié à la création de la fourche) ; le chemin repris
+l'adopte. Une fourche prise dans un handler NMI/IRQ garde donc le marquage IRQ. L'enregistrement de
+file grossit d'un octet : un lot disque écrit par une version antérieure n'est pas relisible. Test
+`nes` (`test_seed_vectors`, contrôle négatif fait). PCE et MD gardent la limite.

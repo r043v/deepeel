@@ -29,6 +29,7 @@ typedef struct {
     uint32_t steps;
     uint32_t choice;     // choice-tree node id (0: not yet registered)
     uint8_t kind;        // DP_NES_TREE_* when the creator set it, else derived
+    uint8_t in_handler;  // forked inside an NMI/IRQ handler: its code keeps the IRQ mark
 } DpNesPathState;
 
 #define DP_NES_STATE_MAX 65536
@@ -69,6 +70,7 @@ typedef struct {
     uint8_t *istart;                   // per PRG cell: 1 when an instruction started there
     int was_outside;                   // previous step ran outside PRG
     int32_t exp_pc;                    // address the next instruction should start at (-1: unknown)
+    int in_run;                        // inside run_path (forks inherit the handler state)
     int in_handler;                    // between an NMI/IRQ vector entry and its RTI
     // play/TAS session state (the on_frame hook drives it)
     int play_mode;                     // 0: fork exploration, 1: play/TAS
@@ -796,6 +798,7 @@ static int lot_spill(DpNesRun *x, DpNesPathState *s) {
 
 // returns 1 when the state was queued, 2 when parked (queue full), 0 when not kept
 static int snap_push(DpNesRun *x, DpNesPathState *s) {
+    if (x->in_run) s->in_handler = (uint8_t)x->in_handler;
     uint64_t h = dp_nesmach_state_hash(s->state);
     if (!dp_set_insert(&x->seen, h)) {
         x->r->evicted++;
@@ -835,7 +838,13 @@ static int snap_push(DpNesRun *x, DpNesPathState *s) {
 // --- per-path execution ---------------------------------------------------------
 
 // run one path from its snapshot; forks enqueue new states
+static void run_path_inner(DpNesRun *x, uint32_t slot);
 static void run_path(DpNesRun *x, uint32_t slot) {
+    x->in_run = 1;
+    run_path_inner(x, slot);
+    x->in_run = 0; x->in_handler = 0;
+}
+static void run_path_inner(DpNesRun *x, uint32_t slot) {
     DpNesPathState *self = &x->queue[slot];
     DpNesResults *r = x->r;
     // the snapshot blob stays owned by the slot until a fork needs a copy
@@ -843,7 +852,7 @@ static void run_path(DpNesRun *x, uint32_t slot) {
     self->state = NULL;
 
     dp_nesmach_load(x->m, own);
-    x->path_steps = 0; x->exp_pc = -1; x->in_handler = 0;
+    x->path_steps = 0; x->exp_pc = -1; x->in_handler = self->in_handler;
     x->was_outside = 0;
     x->jam_pending = 0;
     uint64_t path = x->paths_opened++;

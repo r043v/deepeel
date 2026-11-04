@@ -332,7 +332,7 @@ static void test_seed_vectors(void) {
         uint8_t *rom = calloc(1, sz);
         set_header(rom, 2, 1, 0);
         put(rom, 0, 0, 0x78, 0x4C, 0x01, 0x80, -1);                 // sei; jmp $8001
-        put(rom, 0, 0x100, 0xEA, 0x4C, 0x00, 0x81, -1);             // NMI handler
+        put(rom, 0, 0x100, 0xEA, 0xA9, 0x00, 0xD0, 0x03, 0x4C, 0x00, 0x81, 0xEA, 0x4C, 0x00, 0x81, -1);   // NMI handler: lda #0; bne +3 (forced side only at $8108)
         put(rom, 0, 0x120, 0xEA, 0x4C, 0x20, 0x81, -1);             // IRQ handler
         set_vector(rom, 1, 0xFFFC, 0x8000);
         set_vector(rom, 1, 0xFFFA, 0x8100);
@@ -346,6 +346,7 @@ static void test_seed_vectors(void) {
             CHECK((r.flags[0x100] & DP_NES_FORCED) && !(r.flags[0x100] & DP_NES_NATURAL), "NMI code reached, forced (flags %02x)", r.flags[0x100]);
             CHECK((r.exec_kind[0x100] & DP_NES_X_ENTRY) && (r.exec_kind[0x100] & DP_NES_X_IRQ), "D1: NMI handler is entry + irq (%d)", r.exec_kind[0x100]);
             CHECK((r.exec_kind[0x120] & DP_NES_X_IRQ), "D1: IRQ handler is irq");
+            CHECK((r.flags[0x108] & DP_NES_FORCED) && (r.exec_kind[0x108] & DP_NES_X_IRQ), "D1: a fork taken inside a handler keeps the irq mark (%d)", r.exec_kind[0x108]);
             CHECK((r.exec_kind[0] & DP_NES_X_ENTRY) && !(r.exec_kind[0] & DP_NES_X_IRQ), "D1: reset is entry, not irq");
             
             CHECK((r.flags[0x120] & DP_NES_FORCED) && !(r.flags[0x120] & DP_NES_NATURAL), "IRQ code reached, forced");
