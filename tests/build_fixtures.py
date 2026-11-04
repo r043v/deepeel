@@ -1029,6 +1029,23 @@ def build_nes_pce(out):
         n[q:q + 2] = bytes([0x00, 0x80])
     with open(os.path.join(out, "fix_nes_table.nes"), "wb") as f:
         f.write(n)
+    # NES MMC1 (4 x 16 KiB PRG): the same pointer table in the fixed last bank, $C100 -> $C040/$C050/$C060
+    m1 = bytearray(16 + 4 * 0x4000)
+    m1[0:4] = b"NES\x1a"
+    m1[4], m1[5], m1[6] = 4, 0, 0x10
+    o = 16 + 3 * 0x4000
+    code = bytes([0x20, 0x40, 0xC0, 0x20, 0x50, 0xC0, 0x20, 0x60, 0xC0,
+                  0xAD, 0x00, 0xC1, 0xAD, 0x02, 0xC1, 0xAD, 0x04, 0xC1, 0x4C, 0x12, 0xC0])
+    m1[o:o + len(code)] = code
+    for a in (0x40, 0x50, 0x60):
+        m1[o + a] = 0x60
+    for k, a in enumerate((0x40, 0x50, 0x60)):
+        m1[o + 0x100 + 2 * k:o + 0x100 + 2 * k + 2] = bytes([a, 0xC0])
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        q = o + 0x3FFA + (v - 0xFFFA)
+        m1[q:q + 2] = bytes([0x00, 0xC0])
+    with open(os.path.join(out, "fix_nes_mmc1table.nes"), "wb") as f:
+        f.write(m1)
     # NES padding slide: lda #1; jmp $8100 into a zero-filled PRG
     n = bytearray(16 + 2 * 0x4000 + 0x2000)
     n[0:4] = b"NES\x1a"

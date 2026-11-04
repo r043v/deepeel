@@ -1259,7 +1259,7 @@ DpNesOptions dp_nes_options(void) {
 static void infer_gaps(DpNesRun *x);
 static void static_closure(DpNesRun *x);
 static void second_pass_seed(DpNesRun *x);
-static int64_t table_target(const DpNesRun *x, size_t a, unsigned v);
+static int64_t table_target(const DpNesRun *x, size_t a, unsigned v, int loose);
 static void table_scan(DpNesRun *x);
 static void copy_siblings(DpNesRun *x);
 
@@ -1586,7 +1586,7 @@ static void second_pass_seed(DpNesRun *x) {
             for (unsigned e = 0; e < 64; e++) {
                 if (dir < 0) { if (a < 2) break; a -= 2; } else { a += 2; if (a + 1 >= n) break; }
                 unsigned v = rom[a] | (rom[a + 1] << 8);
-                int64_t tc = table_target(x, a, v);
+                int64_t tc = table_target(x, a, v, 0);
                 if (tc < 0 || (size_t)tc >= n) break;
                 if ((r->flags[tc] & (DP_NES_NATURAL | DP_NES_FORCED)) || sd[tc]) continue;
                 sd[tc] = 1;
@@ -1721,19 +1721,24 @@ static void static_closure(DpNesRun *x) {
 // with $C000+ in the fixed bank and $8000-$BFFF in the table's own bank;
 // other boards are skipped.  Tables are inferences (class `table`), bounded to
 // 256 entries each.
-static int64_t table_target(const DpNesRun *x, size_t a, unsigned v) {
+// loose = 1: any other board (MMC1, MMC3, ...) resolves $C000+ to the last 16 KiB bank and
+// $8000-$BFFF to the table's own 16 KiB bank; table_word then requires the target to be an
+// executed instruction start, which is the proof that keeps the guess honest.
+static int64_t table_target(const DpNesRun *x, size_t a, unsigned v, int loose) {
     size_t n = x->r->prg_size;
     unsigned mp = dp_nesmach_mapper(x->m);
     if (v < 0x8000u) return -1;
-    if (mp == 0) return n == 0x4000 ? (int64_t)(v & 0x3FFFu) : (int64_t)(v - 0x8000u);
+    if (mp == 0 || mp == 3) return n == 0x4000 ? (int64_t)(v & 0x3FFFu) : (int64_t)(v - 0x8000u);
     if (mp == 2) return v >= 0xC000u ? (int64_t)(n - 0x4000 + (v & 0x3FFFu)) : (int64_t)((a & ~(size_t)0x3FFF) + (v & 0x3FFFu));
+    if (loose && mp != 7 && n >= 0x8000)
+        return v >= 0xC000u ? (int64_t)(n - 0x4000 + (v & 0x3FFFu)) : (int64_t)((a & ~(size_t)0x3FFF) + (v & 0x3FFFu));
     return -1;
 }
 
 static int table_word(const DpNesRun *x, const uint8_t *rom, size_t a) {
     size_t n = x->r->prg_size;
     if (a + 1 >= n) return 0;
-    int64_t t = table_target(x, a, (unsigned)(rom[a] | rom[a + 1] << 8));
+    int64_t t = table_target(x, a, (unsigned)(rom[a] | rom[a + 1] << 8), 1);
     return t >= 0 && (size_t)t < n && x->istart[t] && (x->r->flags[t] & (DP_NES_NATURAL | DP_NES_FORCED));
 }
 
@@ -1777,7 +1782,7 @@ static int nes_sib_word(const DpNesRun *x, const uint8_t *rom, size_t a) {
     if (a + 1 >= n) return 0;
     for (size_t i = a; i < a + 2; i++)
         if (x->r->flags[i] & (DP_NES_NATURAL | DP_NES_FORCED | DP_NES_STATIC)) return 0;
-    int64_t t = table_target(x, a, (unsigned)(rom[a] | rom[a + 1] << 8));
+    int64_t t = table_target(x, a, (unsigned)(rom[a] | rom[a + 1] << 8), 0);
     return t >= 0 && (size_t)t < n;
 }
 
@@ -1797,7 +1802,7 @@ static void copy_siblings(DpNesRun *x) {
         for (size_t k = 0; k + 1 < n; k++) {
             if (!(r->flags[k] & DP_NES_DATA) && !(k && (r->flags[k - 1] & DP_NES_DATA))) continue;
             if (!nes_sib_word(x, rom, k)) continue;
-            int64_t t = table_target(x, k, (unsigned)(rom[k] | rom[k + 1] << 8));
+            int64_t t = table_target(x, k, (unsigned)(rom[k] | rom[k + 1] << 8), 0);
             if (t != (int64_t)rec->source) continue;
             size_t t0 = k, t1 = k + 2;
             unsigned entries = 1;
@@ -1808,7 +1813,7 @@ static void copy_siblings(DpNesRun *x) {
             if (dp_set_insert(&seen, ((uint64_t)t0 << 20) ^ ((uint64_t)len << 4) ^ rec->channel) <= 0) continue;
             r->sib_tables++;
             for (size_t e = t0; e < t1; e += 2) {
-                int64_t b = table_target(x, e, (unsigned)(rom[e] | rom[e + 1] << 8));
+                int64_t b = table_target(x, e, (unsigned)(rom[e] | rom[e + 1] << 8), 0);
                 if (b < 0 || b == (int64_t)rec->source) continue;
                 size_t lim = dp_nesmach_mapper(x->m) == 2 ? ((size_t)b & ~(size_t)0x3FFF) + 0x4000 : n;
                 size_t end = (size_t)b + len > lim ? lim : (size_t)b + len;

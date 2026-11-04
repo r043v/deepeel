@@ -196,6 +196,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ind.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_static.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_table.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_mmc1table.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_slide.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_sibling.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_prov.nes
@@ -554,3 +555,5 @@ add_test(NAME nes_oam_chain COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${
 set_tests_properties(nes_oam_chain PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_exact_persist COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -f $D/md_ex.lot*; $B md explore $D/fix_md_s4.md --exact-dedup --spool $D/md_ex.lot --text $D/md_ex1.txt >/dev/null 2>&1; $B md explore $D/fix_md_s4.md --exact-dedup --spool $D/md_ex.lot --text $D/md_ex2.txt >/dev/null 2>&1; test -s $D/md_ex.lot.exact && grep -q 'hashes loaded from the previous run' $D/md_ex2.txt && grep -q 'exact dedup: [1-9][0-9]* forks dropped' $D/md_ex2.txt")
 set_tests_properties(md_exact_persist PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME nes_table_mmc1 COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_mmc1table.nes --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_t1.txt >/dev/null 2>&1; grep -q 'pointer tables: 1 tables' ${CMAKE_CURRENT_BINARY_DIR}/nes_t1.txt")
+set_tests_properties(nes_table_mmc1 PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)

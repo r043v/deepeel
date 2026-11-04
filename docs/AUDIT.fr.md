@@ -24,7 +24,7 @@ Cellules ouvertes (◐ ou ✗) : 69.
 | D12 | Cibles indirectes observées | NES | ◐ observé, sans second passage |
 | D12 | Cibles indirectes observées | PCE | ◐ observé (`jmp (abs)`, `jmp (abs,X)`), sans second passage |
 | D12 | Cibles indirectes observées | MD | ◐ observé (`jmp/jsr` par An), sans second passage |
-| S1 | Scan padding + tables de pointeurs | NES | ◐ padding + tables, sans pointeurs ROM→ROM hors fenêtre |
+| S1 | Scan padding + tables de pointeurs | NES | ◐ padding + tables ; 0.249.15 tables de pointeurs aussi sur CNROM et sur les autres cartes (MMC1, MMC3… : `$C000+` → dernière banque de 16 Kio, `$8000-$BFFF` → banque propre, cible exigée exécutée ; test `nes_table_mmc1`) ; reste les pointeurs vers une banque commutable autre que la propre |
 | S2 | Fermeture statique de flot | NES | ◐ saut/appel/branche, fenêtre propre |
 | S2 | Fermeture statique de flot | PCE | ◐ fenêtre MPR ; 0.232.0 arêtes inter-fenêtres résolues vers la page unique observée (test `pce`), 0.242.0 vues multiples : l'arête est suivie dans chaque page observée de la fenêtre cible (≤ 16) ; reste le mapping qui change en cours de page (TAM) |
 | S2 | Fermeture statique de flot | MD | ◐ 0.132 Bcc/DBcc/BRA/JMP/JSR depuis les plages exécutées, confiance perdue après BSR/JSR ; bus 68000 plat : une seule vue par construction ; reste le raffinement des écritures indirectes et le budget en cascade |

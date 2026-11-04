@@ -3508,3 +3508,12 @@ Avec `--exact-dedup` et `--spool`/`--resume`, MD écrit l'ensemble des hachages 
 à la reprise ; le rapport ajoute « N hashes loaded from the previous run ». Plafond de l'ensemble porté de 2^10 à 2^22 clés ;
 un ensemble plein renvoie -1 et l'état est conservé (jamais jeté). Test `md_exact_persist`. L'étiquette ne contrôle que la
 taille de la ROM, pas son contenu : reprendre avec une autre ROM de même taille chargerait des hachages sans rapport.
+
+## 0.249.15 (NES, S1 : tables de pointeurs hors NROM/UxROM)
+
+Le scan de tables de pointeurs NES (mots 16 bits petit boutiste vers des débuts d'instruction exécutés) résolvait seulement
+NROM et UxROM. CNROM (mapper 3) suit désormais NROM, et les autres cartes sauf AxROM (MMC1, MMC3…) résolvent
+`$C000+` vers la dernière banque de 16 Kio et `$8000-$BFFF` vers la banque de la table elle-même. Le mapping réel dépend de la
+carte et de ses registres : c'est une hypothèse, gardée honnête par l'exigence que la cible soit un début d'instruction
+exécuté. Les frères de copie (S5) restent sur NROM/UxROM. Fixture `fix_nes_mmc1table`, test `nes_table_mmc1`. Non vérifié :
+que le test échoue sans ce changement (la résolution renvoyait -1 pour ces cartes).
