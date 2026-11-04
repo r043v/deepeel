@@ -60,6 +60,9 @@ typedef struct {
     int irq6_done, irq4_done;
     int pad_read;
     int movie_active;
+    int play_active;                 /* random played session running */
+    uint32_t play_left, play_rng, play_hold;
+    uint8_t play_held;
     uint16_t op;
     uint32_t move_src;
     int move_src_valid;
@@ -113,6 +116,7 @@ static void next_generation(X *x) {
 /* Per-frame loop detection permits legitimate polling across V-blank;
  * path_steps and max_total still bound paths that run forever. */
 static void novelty_frame(X *x);
+static uint8_t play_pad(X *x);
 static void on_frame(void *u) {
     X *x = u;
     next_generation(x);
@@ -123,6 +127,13 @@ static void on_frame(void *u) {
         x->r->watch_frames++;
     }
     if (x->nov) novelty_frame(x);
+    if (x->play_active) {
+        x->r->play_frames_run++;
+        if (--x->play_left == 0) {
+            x->play_active = 0;
+            dp_mdmach_halt(x->m);
+        } else dp_mdmach_set_pad(x->m, play_pad(x));
+    }
     if (x->movie_active) {
         x->r->movie_frames++;
         if (x->r->movie_frames >= x->o->movie->frames) {
@@ -721,7 +732,7 @@ void dp_md_options_default(DpMdOptions *o) {
     o->entry_count = 0;
     o->pad_cut = 0;
     o->second_pass = 0;
-    o->novelty_steps = 0; o->novelty_frames = 240; o->novelty_archive = 256; o->novelty_cells = 0; o->play_seed = 1;
+    o->novelty_steps = 0; o->novelty_frames = 240; o->novelty_archive = 256; o->novelty_cells = 0; o->play_seed = 1; o->play_frames = 0; o->play_sessions = 8;
     o->skip_root = o->no_finalize = 0;
     o->entry_from = 0; o->entry_step = 1;
     o->pre_finalize = NULL; o->pre_user = NULL;
@@ -1090,6 +1101,19 @@ static int md_archive_add(X *x, MdNov *N, uint64_t gain) {
     r->novelty_archived++;
     return (int)slot;
 }
+// pad held 4..43 frames, no opposing directions (bits: U D L R B C A S): same shape as novelty trials
+static uint8_t play_pad(X *x) {
+    if (!x->play_hold) {
+        uint32_t v = md_rng(&x->play_rng);
+        uint8_t h = (uint8_t)(v & 0xFF);
+        if ((h & 0x03) == 0x03) h &= (uint8_t)~0x02;
+        if ((h & 0x0C) == 0x0C) h &= (uint8_t)~0x04;
+        x->play_held = h;
+        x->play_hold = 4 + (v >> 16) % 40;
+    }
+    x->play_hold--;
+    return x->play_held;
+}
 static uint8_t md_random_pad(MdNov *N) {   /* bits: U D L R B C A S; no opposing directions */
     if (!N->hold) {
         uint32_t v = md_rng(&N->rng);
@@ -1358,6 +1382,20 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     r->decoders = x.ndec;
     if (!drain && r->steps < o->max_total) replay_streams(&x, (o->max_total - r->steps) / 2);
     for (unsigned d = 0; d < x.ndec; d++) free(x.dec[d].snap);
+    // played sessions: random pad from power-on, each a natural path bounded in frames
+    for (uint32_t s = 0; !drain && o->play_frames && s < o->play_sessions; s++) {
+        if (r->steps >= o->max_total || dp_stop) break;
+        dp_mdmach_reset(x.m);
+        x.play_active = 1;
+        x.play_left = o->play_frames;
+        x.play_hold = 0;
+        x.play_rng = (o->play_seed + s * 0x2545F491u) * 0x9E3779B1u + 7;
+        if (!x.play_rng) x.play_rng = 1;
+        dp_mdmach_set_pad(x.m, play_pad(&x));
+        run_path(&x, NULL, o->max_total - r->steps, &cut);
+        x.play_active = 0;
+        r->play_sessions_run++;
+    }
     if (!drain) novelty_search(&x);
     // explicit entries (G3): each starts a forced path from the power-on machine
     if (!drain)
@@ -1592,6 +1630,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     if (r->disp_tables) fprintf(out, "  dispatch tables: %llu tables, %llu seeds, %llu refused targets\n", (unsigned long long)r->disp_tables, (unsigned long long)r->disp_seeds, (unsigned long long)r->disp_refused_view);
     if (r->state_exported) fprintf(out, "  state exported: deepest cell, %u frames from power-on\n", r->state_exported_depth);
     if (r->exact_dups) fprintf(out, "  exact dedup: %llu forks dropped (same clock-free machine)\n", (unsigned long long)r->exact_dups);
+    if (r->play_sessions_run) fprintf(out, "  played sessions: %llu, %llu frames\n", (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run);
     if (r->watch_frames) fprintf(out, "  watch: %llu frames published\n", (unsigned long long)r->watch_frames);
     if (r->novelty_trials)
         fprintf(out, "  novelty: depth %u frames, %llu trials, %llu frames, %llu hits, %llu deaths, %llu archived (%llu replaced), %llu seeded, %llu stalled\n",

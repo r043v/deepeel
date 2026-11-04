@@ -119,7 +119,7 @@ Pour chaque technique, la fiche indique :
 | F1 | File croissante + spool + `--resume` | ✅ | ✅ | ✅ | ◐ `--spool`/`--resume` (lot disque), file bornée + parc | ◐ `--lot`/`--lot-drain` + parc ; pas de `--resume` ni de file croissante | ◐ `--lot`/`--lot-drain` + parc (`parked`, `lot_*`) ; pas de `--resume` ni de file croissante bornée par option |
 | F2 | Arbre de choix persistant | ✅ | ✅ | ✅ | ◐ `--tree` (nœuds, parents, issues ; site non renseigné) | ◐ `--tree` (DpTree commun : nœuds, parents, issues ; site non renseigné ; pas de reprise) | ◐ `--tree` (DpTree commun ; site non renseigné ; pas de reprise) |
 | F3 | `--jobs` par instances clonées | ✅ | ✅ | ✅ | ◐ `--jobs 2` par phase (`dp_nes2_`, `nes_jobs`), pas de file partagée | ◐ `--jobs 2` par phase (`dp_pce2_`, `test_jobs`), pas de file partagée | ◐ `--jobs 2` par entrées explicites (`dp_md2_`, `md_jobs`), pas de file partagée |
-| J1 | Sessions jouées multi-thread + pool | ✅ | ◐ | ◐ | ◐ xorshift | ◐ | ✗ |
+| J1 | Sessions jouées multi-thread + pool | ✅ | ◐ | ◐ | ◐ xorshift | ◐ | ◐ 0.189.0 `--play-frames/--play-sessions/--play-seed` (xorshift, sessions depuis la mise sous tension ; ni pool de checkpoints ni multi-thread) |
 | J2 | Rejeu TAS prioritaire + shoots | ✅ | ✅ | ✅ | ✅ | ✅ | ◐ GMV |
 | J3 | Identité ROM des films | ✅ | ✅ SHA-1 | ✅ SHA-1 | ✅ SHA-1 | ✅ SHA-1 | ◐ BK2 : MD5 d'en-tête comparé au ROM (avertissement seulement, le hash BizHawk MD n'est pas fiable) ; GMV sans identité |
 | J4 | Go-Explore (cellules écran) | ◐ `--session-cells` 0.144.0 (pool de sessions) | ◐ `--novelty` 0.141.0 (SMS/GG/SG) | ◐ `--novelty` 0.141.0 (MSX) | ◐ `--novelty` (archive de cellules écran, vies sans connaissance du jeu) | ✅ | ◐ `--novelty` (archive de cellules plans A/B, vies sans connaissance du jeu) |

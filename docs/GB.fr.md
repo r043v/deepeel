@@ -2847,3 +2847,13 @@ couvrent tout ce qu'une partie réelle exécute.
 - Run Sonic `--unbounded` (10 min, disque Windows) : 1 chemin, 16 777 216 pas, 642 301 états
   écrits sur le lot, 0 relu ; 4,3 % des octets ROM exécutés. Arrêt sur la limite de temps, pas une
   exploration terminée : l'ordre « lot relu après épuisement de la file » reste à valider sur un run plus long.
+
+## 0.189.0 : MD sessions jouées (2026-11-04)
+
+- `md explore ROM --play-frames N [--play-sessions K] [--play-seed S]` : K sessions (8 par défaut)
+  de N frames depuis la mise sous tension, manette aléatoire tenue 4..43 frames (xorshift,
+  directions opposées exclues), chacune un chemin naturel borné en frames. Déterministe à graine égale.
+  Rapport : `played sessions: K, F frames`. Avec `--jobs 2` elles restent sur l'instance primaire.
+- Limites (cellule MD J1 : ◐) : pas de pool de checkpoints partagé, pas de multi-thread des
+  sessions, pas de scénarios attract/script ; une ROM sans boucle de frame (fixture `pad_effect`)
+  donne 0 frame jouée.
