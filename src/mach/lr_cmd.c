@@ -316,6 +316,8 @@ int dp_lr_command(int argc, char **argv) {
     fprintf(f, "steps: %llu in %llu paths, forks %llu (deduped %llu), branch sites %u\n",
             (unsigned long long)st.steps, (unsigned long long)st.paths,
             (unsigned long long)st.forks, (unsigned long long)st.deduped, st.branch_sites);
+    fprintf(f, "hardware copies seen: %u, bank switches rom0/romx/vram/wram: %u/%u/%u/%u\n", st.hw_copies,
+            st.bank_switches[0], st.bank_switches[1], st.bank_switches[2], st.bank_switches[3]);
     fprintf(f, "code starts reached: %u of %zu bytes\n", st.covered, rn);
     fprintf(f, "saturation (a non-zero line means the exploration is incomplete):\n");
     fprintf(f, "  fork site cap hits: %llu\n  path step budget cuts: %llu\n  global step wall cuts: %llu\n  dropped fork items (queue full): %llu\n  loop bound cuts: %llu\n",

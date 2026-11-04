@@ -107,6 +107,8 @@ typedef struct DpLrExploreStats {
     uint64_t cut_path_steps, cut_total, dropped_items, capped_forks, cut_loop; // saturation counters
     uint32_t covered;                                   // distinct ROM bytes executed (opcode starts)
     uint32_t branch_sites;                              // distinct conditional pcs
+    uint32_t hw_copies;                                 // hardware copies seen (OAM DMA, HDMA/GDMA), all paths
+    uint32_t bank_switches[4];                          // by window: 0/1 ROM, 2 VRAM (VBK), 3 WRAM (SVBK)
 } DpLrExploreStats;
 // exec_map: one byte per ROM index (rom_size bytes), set to 1 where code starts.
 int dp_lr_explore(DpLibretro *lr, uint8_t *exec_map, size_t rom_size,

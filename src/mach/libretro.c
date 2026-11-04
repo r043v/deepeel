@@ -333,6 +333,8 @@ static void lrx_exec(void *u, uint32_t pc) {
     int64_t i = c->lr->trace.rom_index ? c->lr->trace.rom_index(pc) : (int64_t)pc;
     if (i >= 0 && (size_t)i < c->n && !c->map[i]) { c->map[i] = 1; c->st->covered++; }
 }
+static void lrx_dma(void *u, uint32_t s, uint32_t d, uint32_t n) { (void)s; (void)d; (void)n; ((LrExpCtx *)u)->st->hw_copies++; }
+static void lrx_bank(void *u, uint32_t w, uint32_t b) { (void)b; if (w < 4) ((LrExpCtx *)u)->st->bank_switches[w]++; }
 static void lrx_branch(void *u, uint32_t pc) { LrExpCtx *c = u; c->branch_hit = 1; c->branch_pc = pc; }
 
 int dp_lr_explore(DpLibretro *lr, uint8_t *exec_map, size_t rom_size,
@@ -347,7 +349,7 @@ int dp_lr_explore(DpLibretro *lr, uint8_t *exec_map, size_t rom_size,
     LrExpCtx c = { lr, exec_map, rom_size, st, 0, 0, calloc(65536, 1), 65536, calloc(65536, sizeof(uint32_t)),
                    calloc(65536, sizeof(uint16_t)), lim->loop_bound ? lim->loop_bound : 3, 0 };
     uint32_t site_cap = lim->site_cap ? lim->site_cap : 2;
-    DpLrObservers o = { &c, lrx_exec, NULL, NULL, NULL, NULL, lrx_branch };
+    DpLrObservers o = { &c, lrx_exec, NULL, NULL, lrx_dma, lrx_bank, lrx_branch };
     lr->trace.set_observers(&o);
     uint32_t nq = 0;
     dp_lr_save(lr, cur, sz);

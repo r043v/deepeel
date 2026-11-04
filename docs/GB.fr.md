@@ -2693,3 +2693,14 @@ Les callbacks `dma` (OAM DMA par $FF46, HDMA/GDMA à `Memory::dma`) et `bank` (`
 désactivé ; l'adaptateur pose alors le drapeau dans sa copie de la ROM). Le callback `bank` signale aussi VBK (fenêtre 2) et SVBK (fenêtre 3), observés
 seulement en mode CGB (fixture `fix_cgbbank`, 2 changements ; m0boy, DMG, n'en voit aucun). Limites : pas de parité de copies/banques contre
 m0boy, seulement des décomptes. J11/J12 restent donc ◐.
+
+## 0.187.3 — rapport du niveau B : copies matérielles et bascules de banque
+
+`dp_lr_explore` branche enfin les observateurs `dma` et `bank` : le rapport
+`--libretro` affiche « hardware copies seen » et les bascules par fenêtre
+(rom0/romx/vram/wram). Sur gambatte en mode CGB : `fix_dma` 1 copie, `fix_hdma`
+1 copie, `fix_cgbbank` vram 1 / wram 1, `mbc5` romx 3. Observations de l'outil,
+cumulées sur tous les chemins ; ce ne sont pas encore des enregistrements
+typés dans l'archive de copies. m0boy reste DMG-only par conception (Gamebuino
+Meta, 32 Ko de RAM) : un éventuel CGB dans m0boy devra être une option de
+compilation qui laisse la cible DMG inchangée.
