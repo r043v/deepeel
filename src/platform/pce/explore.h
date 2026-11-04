@@ -132,6 +132,7 @@ typedef struct DpPceResults_ {
     uint32_t state_exported_depth; int state_exported;
     uint32_t novelty_depth;  // deepest archived cell, frames from power-on
     uint64_t io_writes, vdc_data_writes, copied_bytes;
+    uint64_t smc_writes; uint16_t smc_first_pc; // stores into already executed WRAM bytes
     uint64_t static_bytes, padding_bytes, inferred_code, inferred_data, inferred_pad,
              table_bytes;
     uint64_t irq_counts[3];

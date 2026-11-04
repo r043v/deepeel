@@ -80,6 +80,7 @@ typedef struct {
     int forced;            // current path entered through a flipped side
     uint16_t cur_pc;
     uint8_t cur_len, cur_op;
+    uint8_t ram_exec[0x8000];  // WRAM bytes executed since their last write (SMC tracking)
     int32_t ram_src[0x8000];   // last ROM cell whose read fed the store to each WRAM byte (-1 none)
     int64_t *prov_anchor; uint32_t prov_len; // table-word cells that fed an indirect jmp pointer (S3)
     int64_t last_read_cell;
@@ -667,6 +668,10 @@ static int step_one(PceRun *x, int *frame_done) {
     if (site >= 0 && (b[0] == 0x85 || b[0] == 0x86 || b[0] == 0x84 || b[0] == 0x8D || b[0] == 0x8E || b[0] == 0x8C)) {
         unsigned sa = b[0] < 0x88 ? (0x2000u | b[1]) : (unsigned)(b[1] | b[2] << 8);
         unsigned pg = c.mpr[sa >> 13];
+        if (pg >= 0xF8 && pg <= 0xFB && x->ram_exec[(pg - 0xF8) * 0x2000u + (sa & 0x1FFF)]) {
+            x->ram_exec[(pg - 0xF8) * 0x2000u + (sa & 0x1FFF)] = 0;   // an executed WRAM byte is rewritten
+            if (!r->smc_writes++) r->smc_first_pc = c.pc;
+        }
         if (pg >= 0xF8 && pg <= 0xFB)
             x->ram_src[(pg - 0xF8) * 0x2000u + (sa & 0x1FFF)] =
                 (x->last_read_cell >= 0 && x->total_steps - x->last_read_step <= 4) ? (int32_t)x->last_read_cell : -1;
@@ -702,6 +707,9 @@ static int step_one(PceRun *x, int *frame_done) {
         unsigned pg = c.mpr[c.pc >> 13];
         if (pg >= 0xF8 && pg <= 0xFB)
             dp_ramarch_add(&r->ra, c.pc, b, in.length, x->ram_src[(pg - 0xF8) * 0x2000u + (c.pc & 0x1FFF)]);
+        if (pg >= 0xF8 && pg <= 0xFB)
+            for (int i = 0; i < (int)in.length; i++)
+                x->ram_exec[(pg - 0xF8) * 0x2000u + ((c.pc + (unsigned)i) & 0x1FFF)] = 1;
     }
 
     if (x->mode == 0) {
@@ -1718,6 +1726,8 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
         fprintf(out, "   MPR%u $%02X -> $%02X pc $%04X step %llu\n", b->window, b->old_page,
                 b->new_page, b->pc, (unsigned long long)b->step);
     }
+    if (r->smc_writes) fprintf(out, "  self-modifying WRAM code: %llu stores into executed bytes (first at pc $%04X)\n",
+                               (unsigned long long)r->smc_writes, r->smc_first_pc);
     fprintf(out, "  register writes %u logged (overflow %llu)\n", r->register_count,
             (unsigned long long)r->register_overflow);
     fputs("Limits: HuCard only. No CD-ROM2/Super CD (System Card, ADPCM, CD audio), no SF2 mapper beyond the "

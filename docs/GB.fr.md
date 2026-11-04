@@ -2306,3 +2306,9 @@ nouveau. HRAM/VRAM ne sont pas suivis ; les autres plateformes n'ont pas encore 
 Même compteur que la GB (0.159.0) sur la RAM interne NES (`$0000-$1FFF`, miroirs repliés) : une écriture dans
 un octet déjà exécuté est un événement SMC, rapporté « self-modifying RAM code ». Reste à porter sur
 MD, PCE, SMS/MSX. Test `nes` (`test_smc`).
+
+## 0.161.0 (archive RAM — événements SMC, PCE)
+
+Compteur SMC sur les pages WRAM `$F8-$FB` de la PCE, pour les stores `STA/STX/STY` (zéro page et absolu)
+exécutés depuis la ROM ; les stores des blocs de transfert ne sont pas vus. Reste à porter : MD, SMS/MSX.
+Test `pce` (`test_ramcode`).
