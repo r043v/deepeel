@@ -108,6 +108,7 @@ typedef struct DpLrExploreStats {
     uint32_t covered;                                   // distinct ROM bytes executed (opcode starts)
     uint32_t branch_sites;                              // distinct conditional pcs
     uint32_t hw_copies;                                 // hardware copies seen (OAM DMA, HDMA/GDMA), all paths
+    uint8_t vram_banks_seen, wram_banks_seen;           // bit n = bank n was selected (VBK 0-1, SVBK 1-7)
     uint32_t bank_switches[4];                          // by window: 0/1 ROM, 2 VRAM (VBK), 3 WRAM (SVBK)
 } DpLrExploreStats;
 // exec_map: one byte per ROM index (rom_size bytes), set to 1 where code starts.

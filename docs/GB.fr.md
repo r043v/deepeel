@@ -2704,3 +2704,9 @@ cumulées sur tous les chemins ; ce ne sont pas encore des enregistrements
 typés dans l'archive de copies. m0boy reste DMG-only par conception (Gamebuino
 Meta, 32 Ko de RAM) : un éventuel CGB dans m0boy devra être une option de
 compilation qui laisse la cible DMG inchangée.
+
+## 0.187.4 — banques VRAM/WRAM sélectionnées
+
+Le rapport du niveau B ajoute deux masques : banques VRAM (VBK) et WRAM (SVBK) sélectionnées sur l'ensemble
+des chemins (`fix_cgbbank` : VRAM 02, WRAM 08). Test `lr_gambatte_parity` étendu. Observation de l'outil ; les copies
+ne sont pas encore étiquetées par banque.

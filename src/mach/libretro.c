@@ -334,7 +334,10 @@ static void lrx_exec(void *u, uint32_t pc) {
     if (i >= 0 && (size_t)i < c->n && !c->map[i]) { c->map[i] = 1; c->st->covered++; }
 }
 static void lrx_dma(void *u, uint32_t s, uint32_t d, uint32_t n) { (void)s; (void)d; (void)n; ((LrExpCtx *)u)->st->hw_copies++; }
-static void lrx_bank(void *u, uint32_t w, uint32_t b) { (void)b; if (w < 4) ((LrExpCtx *)u)->st->bank_switches[w]++; }
+static void lrx_bank(void *u, uint32_t w, uint32_t b) { DpLrExploreStats *st = ((LrExpCtx *)u)->st;
+    if (w < 4) st->bank_switches[w]++;
+    if (w == 2 && b < 8) st->vram_banks_seen |= (uint8_t)(1u << b);
+    if (w == 3 && b < 8) st->wram_banks_seen |= (uint8_t)(1u << b); }
 static void lrx_branch(void *u, uint32_t pc) { LrExpCtx *c = u; c->branch_hit = 1; c->branch_pc = pc; }
 
 int dp_lr_explore(DpLibretro *lr, uint8_t *exec_map, size_t rom_size,

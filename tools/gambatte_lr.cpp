@@ -89,7 +89,7 @@ int main(int argc, char **argv) {
     int rc = dp_lr_explore(lr, map.data(), rom_size, &lim, &st);
     printf("gambatte level B: steps %llu forks %llu paths %llu covered %u branch_sites %u rc %d\n",
            (unsigned long long)st.steps, (unsigned long long)st.forks, (unsigned long long)st.paths, st.covered, st.branch_sites, rc);
-    printf("explorer observed: hw_copies %u, banks %u/%u/%u/%u\n", st.hw_copies, st.bank_switches[0], st.bank_switches[1], st.bank_switches[2], st.bank_switches[3]);
+    printf("explorer observed: vram mask %02x wram mask %02x hw_copies %u, banks %u/%u/%u/%u\n", st.vram_banks_seen, st.wram_banks_seen, st.hw_copies, st.bank_switches[0], st.bank_switches[1], st.bank_switches[2], st.bank_switches[3]);
     printf("cut: path_steps %llu total %llu items %llu forks %llu loop %llu\n", (unsigned long long)st.cut_path_steps,
            (unsigned long long)st.cut_total, (unsigned long long)st.dropped_items, (unsigned long long)st.capped_forks, (unsigned long long)st.cut_loop);
     if (getenv("GLR_STARTS")) { unsigned n = 0; for (size_t i = 0x100; i < rom_size; i++) if (map[i]) { printf("%04zx ", i); n++; } printf("\nstarts>=0100: %u\n", n); }
