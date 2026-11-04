@@ -3384,3 +3384,9 @@ pour ne pas toucher B/C/D/E conservent les paires ; toute autre les oublie (jama
 visités mélange BC/DE (une collision ne fait qu'élaguer). Test `gb_prov_de` (fixture `fix_provde`) : avant, 0 cible
 `jp hl` prouvée ; après, 1 cible et 2 octets de données statiques (témoin négatif vérifié). Reste pour S3 GB : les
 autres registres 8 bits et la RAM (le z80 les suit déjà).
+
+## 0.248.1 — J4 : score et remplacement des archives de cellules partagés
+
+`dp_cell_yield`, `dp_cell_score` et `dp_cell_victim` (`src/explore/novelty.h`) remplacent les trois copies du calcul de
+rendement, du score de tirage avec vies et du choix de la cellule à remplacer dans NES, PCE et MD. Sans changement de
+comportement observé : 151 tests passent. Reste dupliqué : la compression/copie de l'état (`*_archive_add`).

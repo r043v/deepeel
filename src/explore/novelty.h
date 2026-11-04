@@ -82,4 +82,25 @@ static inline int dp_keys_add(DpKeys *s, uint64_t k) {
         if (!s->k[i]) { s->k[i] = k; s->n++; return 1; }
     }
 }
+
+// --- cell archive scoring, shared by every core's Go-Explore archive ---
+#include <math.h>
+#include <stddef.h>
+// yield of a cell (gain per pick): the plain archive's pick score and the replacement score
+static inline double dp_cell_yield(uint64_t gain, uint32_t picks) { return (double)gain / (1.0 + picks); }
+// pick score of the cell archive: lives-behind cells are damped, deeper and less-picked ones favoured
+static inline double dp_cell_score(int behind_on_lives, uint64_t gain, uint32_t depth, uint32_t picks) {
+    return (behind_on_lives ? 1e-3 : 1.0) * (1.0 + (double)gain) * (1.0 + depth / 200.0) / sqrt(1.0 + picks);
+}
+// index of the least productive cell among `n` (array of structs with a uint64 gain and a uint32 picks)
+static inline uint32_t dp_cell_victim(const void *cells, size_t stride, size_t gain_off, size_t picks_off, uint32_t n) {
+    double worst = 1e300;
+    uint32_t slot = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        const char *c = (const char *)cells + (size_t)i * stride;
+        double sc = dp_cell_yield(*(const uint64_t *)(c + gain_off), *(const uint32_t *)(c + picks_off));
+        if (sc < worst) { worst = sc; slot = i; }
+    }
+    return slot;
+}
 #endif

@@ -997,11 +997,7 @@ static int archive_add(PceRun *x, PceCell *a, uint32_t *n, uint64_t gain) {
     uint32_t slot = *n;
     if (*n >= x->opt.novelty_archive) {
         // replace the least productive entry (gain per pick)
-        double worst = 1e300;
-        for (uint32_t i = 0; i < *n; i++) {
-            double sc = (double)a[i].gain / (1.0 + a[i].picks);
-            if (sc < worst) { worst = sc; slot = i; }
-        }
+        slot = dp_cell_victim(a, sizeof *a, offsetof(PceCell, gain), offsetof(PceCell, picks), *n);
         free(a[slot].z);
         r->novelty_replaced++;
     } else {
@@ -1052,12 +1048,11 @@ static void novelty_search(PceRun *x) {
         for (int k = 0; k < 8; k++) {
             uint32_t i = k ? rng_next(&x->rng) % n : n - 1;
             if (!cells) {
-                double g = (double)a[i].gain / (1.0 + a[i].picks);
+                double g = dp_cell_yield(a[i].gain, a[i].picks);
                 if (g > bs) { bs = g; best = i; }
                 continue;
             }
-            double lf = (L->lives_byte >= 0 && a[i].lives[L->lives_byte] < maxl) ? 1e-3 : 1.0;
-            double sc = lf * (1.0 + (double)a[i].gain) * (1.0 + a[i].depth / 200.0) / sqrt(1.0 + a[i].picks);
+            double sc = dp_cell_score(L->lives_byte >= 0 && a[i].lives[L->lives_byte] < maxl, a[i].gain, a[i].depth, a[i].picks);
             if (sc > bs) { bs = sc; best = i; }
         }
         uLongf sz = x->state_size;

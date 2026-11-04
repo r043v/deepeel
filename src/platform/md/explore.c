@@ -1192,11 +1192,7 @@ static int md_archive_add(X *x, MdNov *N, uint64_t gain) {
     memcpy(z, N->ztmp, zl);
     uint32_t slot = N->n;
     if (N->n >= x->o->novelty_archive) {
-        double worst = 1e300;
-        for (uint32_t i = 0; i < N->n; i++) {
-            double sc = (double)N->a[i].gain / (1.0 + N->a[i].picks);
-            if (sc < worst) { worst = sc; slot = i; }
-        }
+        slot = dp_cell_victim(N->a, sizeof *N->a, offsetof(MdCell, gain), offsetof(MdCell, picks), N->n);
         free(N->a[slot].z);
         r->novelty_replaced++;
     } else N->n++;
@@ -1306,12 +1302,11 @@ static void novelty_search(X *x) {
         for (int k = 0; k < 8; k++) {
             uint32_t i = k ? md_rng(&N->rng) % N->n : N->n - 1;
             if (!N->cells) {
-                double g = (double)N->a[i].gain / (1.0 + N->a[i].picks);
+                double g = dp_cell_yield(N->a[i].gain, N->a[i].picks);
                 if (g > bs) { bs = g; best = i; }
                 continue;
             }
-            double lf = (N->L->lives_byte >= 0 && N->a[i].lives[N->L->lives_byte] < maxl) ? 1e-3 : 1.0;
-            double sc = lf * (1.0 + (double)N->a[i].gain) * (1.0 + N->a[i].depth / 200.0) / sqrt(1.0 + N->a[i].picks);
+            double sc = dp_cell_score(N->L->lives_byte >= 0 && N->a[i].lives[N->L->lives_byte] < maxl, N->a[i].gain, N->a[i].depth, N->a[i].picks);
             if (sc > bs) { bs = sc; best = i; }
         }
         uLongf sz = (uLongf)ssz;
