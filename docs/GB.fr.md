@@ -2348,3 +2348,7 @@ Restent : branchement sur l'explorateur, Go-Explore, mode humain, `--watch`.
 100 000 états (dépassement compté, code retour 3). Essayé sur Genesis Plus GX avec une fixture statique
 (1 cellule : attendu). Observation de l'outil ; test dans `lr_play_cli`. Restent : mode humain, `--watch`,
 branchement sur l'explorateur.
+
+Essai 0.166.0 sur jeu réel (hors dépôt) : Castle of Illusion (MD) sur Genesis Plus GX, `lr novelty
+--rounds 300 --hold 30` : 7 cellules d'écran atteintes en 9,6 s, aucun état écarté. Observation de l'outil
+(entrées aléatoires depuis le démarrage, sans TAS ; pas une mesure de couverture).
