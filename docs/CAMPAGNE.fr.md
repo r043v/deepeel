@@ -176,3 +176,6 @@ Ces chiffres sont des essais courts, pas une campagne : ni saturation levée, ni
   plateau de l'exploration seule venait donc d'un état de jeu jamais avancé (RAM à zéro, aucune entrée), pas d'un
   défaut du moteur de fourches : les sessions jouées (Go-Explore / manette aléatoire) font évoluer la RAM qui
   choisit les banques. C'est le mode à utiliser pour les campagnes longues NES.
+- PCE, Raiden (USA) avec `--play 3000 --sessions 4 --max-total 400000000` (110 s, observation de l'outil) : observé
+  198 938 octets (25,30 %) contre 8,72 % sans jeu, classé 39,30 % ; 12 000 trames jouées, 113 chemins, 285 forks,
+  319 sections, 1 146 copies. Même constat que le NES : le jeu fait évoluer l'état que l'exploration seule laisse nul.
