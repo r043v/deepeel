@@ -3536,3 +3536,9 @@ spéculative. Les sections existantes et leurs numéros sont inchangés (les nou
 Même définition que NES 0.249.17 : une plage atteinte uniquement par la fermeture statique (`DP_PCE_STATIC`, ni exécutée ni
 forcée), dans une page de 8 Kio, devient une section `speculative` ajoutée après les autres. Test `pce_speculative`
 (`fix_pce_slide`). C1 PCE reste ◐ : pas de liveness.
+
+## 0.249.19 (MD, C1 : `speculative` compté)
+
+Le rapport MD ajoute « N speculative (static closure only) » : plages maximales d'octets marquées par la fermeture statique
+(`stat` 3) mais jamais exécutées ni forcées ; le `--summary` JSON gagne `sections_speculative`. MD n'a pas de liste de
+sections typée : seul le compte est exposé. Test `md_speculative` (`fix_md_dma_fault`). C1 MD reste ◐ : pas de liveness.

@@ -563,3 +563,5 @@ add_test(NAME nes_speculative COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore 
 set_tests_properties(nes_speculative PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME pce_speculative COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_slide.pce --max-total 20000 --max-steps 200 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_sp.txt >/dev/null 2>&1; grep -q 'verdict speculative' ${CMAKE_CURRENT_BINARY_DIR}/pce_sp.txt && grep -q 'verdict required' ${CMAKE_CURRENT_BINARY_DIR}/pce_sp.txt")
 set_tests_properties(pce_speculative PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME md_speculative COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_dma_fault.md --max-total 20000 --text ${CMAKE_CURRENT_BINARY_DIR}/md_sp.txt >/dev/null 2>&1; grep -q '1 speculative (static closure only)' ${CMAKE_CURRENT_BINARY_DIR}/md_sp.txt")
+set_tests_properties(md_speculative PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
