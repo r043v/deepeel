@@ -2324,3 +2324,10 @@ Test `sega_streams`.
 Compteur SMC sur la RAM de travail MD (`$E00000+`, miroir 64 Kio) : un store (octet, mot ou long) dans des
 octets déjà exécutés est rapporté « self-modifying RAM code ». Le compteur existe désormais sur GB, NES,
 PCE, SMS/GG/SG/MSX et MD. La RAM du Z80 son MD n'est pas suivie. Test `md_explore` (fixture `fix_md_smc`).
+
+## 0.164.0 (J11 — essai sur un vrai cœur)
+
+`tools/lr_trial.c` charge un vrai cœur libretro (Genesis Plus GX, hors dépôt) sur une ROM fixture MD :
+état sérialisé de 1 036 288 octets, rejeu de 20 trames identique après rechargement de l'état, RAM système
+de 64 Kio exposée. `deepeel lr explore` refuse proprement sur ce cœur (niveau A : pas de trace) et rapporte
+les dégradations. Le branchement sur les sessions de l'explorateur reste à faire.
