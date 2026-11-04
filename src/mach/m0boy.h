@@ -48,6 +48,7 @@ struct DpMach {
     /* screen, filled when render is on (gbl_skip_render == 0) */
     uint16_t line[160];
     uint8_t screen[144][160];
+    uint16_t screen16[144][160]; /* the line's raw pixels (RGB565 in CGB colour mode) */
     int lines;
     int render;
 

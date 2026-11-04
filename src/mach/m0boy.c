@@ -210,7 +210,7 @@ void dp_gbl_hook_line_end(int v, int i, uint8_t ly) {
     DpMach *m = mach_at[v][i];
     if (!m || !m->render) return;
     if (ly < 144) {
-        for (int x = 0; x < 160; x++) m->screen[ly][x] = (uint8_t)m->line[x];
+        for (int x = 0; x < 160; x++) { m->screen[ly][x] = (uint8_t)m->line[x]; m->screen16[ly][x] = m->line[x]; }
         m->lines++;
     }
 }
