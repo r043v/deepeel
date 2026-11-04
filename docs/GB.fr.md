@@ -3487,3 +3487,10 @@ NES enregistre aussi les copies par boucle CPU vers la WRAM (`$0000-$07FF`) : un
 (même provenance que `ram_src`) fusionne les octets contigus d'un même pc en un enregistrement canal 4 (`chN src dst pc len`),
 compteur « to WRAM » dans le rapport. Non enregistré en mode joué. Fixture `fix_nes_wramcopy`, test `nes_wram_copy`.
 D4 NES reste ◐ : SRAM `$6000` et registres son non suivis.
+
+## 0.249.12 (NES, D4 : boucle CPU ROM→SRAM et ROM→APU)
+
+Même mécanisme que le canal 4 : un store en `$6000-$7FFF` (canal 5) ou `$4000-$4013` (canal 6) juste après une lecture PRG
+fusionne en un enregistrement `len N` (canal 6 : la destination peut rester fixe, les octets sources sont contigus). Le
+compteur « to SRAM/APU » apparaît dans le rapport. Fixtures `fix_nes_sramcopy`, `fix_nes_apucopy`, test `nes_sram_apu_copy`.
+D4 NES reste ◐ : la chaîne ROM→WRAM→OAM n'est pas suivie.

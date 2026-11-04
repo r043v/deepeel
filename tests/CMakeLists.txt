@@ -204,6 +204,8 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_jam.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_cpucopy.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_wramcopy.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_sramcopy.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_apucopy.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.gg
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sg
@@ -545,3 +547,5 @@ add_test(NAME pce_cov_romdata COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE
 set_tests_properties(pce_cov_romdata PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME nes_wram_copy COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_wramcopy.nes --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_wc.txt >/dev/null 2>&1; grep -q 'ch4 src .* len 16' ${CMAKE_CURRENT_BINARY_DIR}/nes_wc.txt")
 set_tests_properties(nes_wram_copy PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME nes_sram_apu_copy COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B nes explore $D/fix_nes_sramcopy.nes --max-total 20000 --max-steps 1000 --text $D/nes_sc.txt >/dev/null 2>&1; grep -q 'ch5 src .* len 16' $D/nes_sc.txt && $B nes explore $D/fix_nes_apucopy.nes --max-total 20000 --max-steps 1000 --text $D/nes_ac.txt >/dev/null 2>&1; grep -q 'ch6 src .* len 16' $D/nes_ac.txt")
+set_tests_properties(nes_sram_apu_copy PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)

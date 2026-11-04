@@ -901,6 +901,15 @@ def build_nes_pce(out):
     nw[16:16 + len(cw)] = cw
     with open(os.path.join(out, "fix_nes_wramcopy.nes"), "wb") as f:
         f.write(nw)
+    # NES CPU loop ROM -> SRAM ($6000) and ROM -> APU ($4000..)
+    ns = bytearray(nw)
+    ns[16 + 5:16 + 8] = bytes([0x9D, 0x00, 0x60])
+    with open(os.path.join(out, "fix_nes_sramcopy.nes"), "wb") as f:
+        f.write(ns)
+    na = bytearray(nw)
+    na[16 + 5:16 + 8] = bytes([0x9D, 0x00, 0x40])
+    with open(os.path.join(out, "fix_nes_apucopy.nes"), "wb") as f:
+        f.write(na)
     # NES copy siblings: the loader reads the pointer word at $8200 first; the
     # table ($8100, $8300, $8400) names the other 16-byte sources
     n2 = bytearray(n)

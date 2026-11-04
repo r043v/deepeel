@@ -57,7 +57,7 @@ typedef struct {
     uint32_t source, destination; // physical PRG/RAM cells; source is the page base
     uint16_t pc;
     uint32_t length;   // bytes covered by a coalesced CPU loop copy (channel 3)
-    uint8_t channel;   // 1 = OAM DMA ($4014), 2 = DMC, 3 = CPU loop to PPUDATA ($2007), 4 = CPU loop to WRAM
+    uint8_t channel;   // 1 = OAM DMA ($4014), 2 = DMC, 3 = CPU loop to PPUDATA ($2007), 4 = CPU loop to WRAM, 5 = to SRAM ($6000-$7FFF), 6 = to APU registers ($4000-$4013)
     uint8_t verbatim;
 } DpNesCopy;
 
@@ -154,7 +154,7 @@ typedef struct DpNesResults_ {
     uint64_t queue_grown;
     uint64_t step_cuts, loop_cuts, fork_cuts, queue_cuts, global_cuts, path_cuts,
              faults, decode_cuts;
-    uint64_t ctx_evicted, dispatch_tables, dispatch_seeds, dispatch_refused_view, prov_sites, prov_roots, pass2_seeds, pass2_refused, pass2_capped, sib_tables, sib_ranges, sib_bytes, sib_refused, sib_caps, vectors_seeded, tas_same, tas_different, tas_unrecorded, pad_cuts, table_bytes, table_count, static_bytes, static_roots, static_cap_hits, padding_bytes, inferred_code, inferred_data, inferred_pad, cpu_copy_bytes, wram_copy_bytes, indirect_sites, indirect_targets, indirect_overflow, pad_probes, pad_probe_sites, pad_probe_refused, entries_seeded, entries_refused, seeds_reset, seeds_irq, seeds_bank, seeds_refused_queue;
+    uint64_t ctx_evicted, dispatch_tables, dispatch_seeds, dispatch_refused_view, prov_sites, prov_roots, pass2_seeds, pass2_refused, pass2_capped, sib_tables, sib_ranges, sib_bytes, sib_refused, sib_caps, vectors_seeded, tas_same, tas_different, tas_unrecorded, pad_cuts, table_bytes, table_count, static_bytes, static_roots, static_cap_hits, padding_bytes, inferred_code, inferred_data, inferred_pad, cpu_copy_bytes, wram_copy_bytes, aux_copy_bytes, indirect_sites, indirect_targets, indirect_overflow, pad_probes, pad_probe_sites, pad_probe_refused, entries_seeded, entries_refused, seeds_reset, seeds_irq, seeds_bank, seeds_refused_queue;
     uint64_t demo_frames_run, play_frames_run, play_sessions_run, play_steps_accounted, seeds_play;
     uint64_t evicted;          // exact-state dedup admissions refused
     uint64_t lot_written, lot_read, lot_pending; // disk lot (--lot): spilled / read back / left on disk
