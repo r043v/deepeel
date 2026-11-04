@@ -624,6 +624,20 @@ static void hook_write(void *user, unsigned addr, unsigned value) {
         {
             x->ram_src[addr] = (x->last_read_cell >= 0 && x->total_steps - x->last_read_step <= 4) ? (int32_t)x->last_read_cell : -1;
             x->ram_prod[addr] = x->ram_src[addr] >= 0 ? x->ram_src[addr] : (x->last_read_cell >= 0 ? (int32_t)x->last_read_cell : -1);
+            if (x->ram_src[addr] >= 0 && !x->play_mode) {
+                // CPU loop copy ROM -> WRAM (channel 4): one record per run at the same pc with a contiguous source
+                uint32_t src = (uint32_t)x->ram_src[addr];
+                DpNesCopy *l = r->copy_count ? &r->copies[r->copy_count - 1] : NULL;
+                if (l && l->channel == 4 && l->pc == (uint16_t)x->cur_pc && l->source + l->length == src &&
+                    l->destination + l->length == addr) {
+                    l->length++; l->last_step = x->total_steps; l->occurrences++;
+                } else {
+                    record_copy(x, 0, x->total_steps, (uint16_t)x->cur_pc, src, addr, 4);
+                    if (r->copy_count && r->copies[r->copy_count - 1].channel == 4 &&
+                        r->copies[r->copy_count - 1].source == src) r->copies[r->copy_count - 1].length = 1;
+                }
+                r->wram_copy_bytes++;
+            }
         }
     if (addr >= 0x8000 || (addr >= 0x5100 && addr < 0x5128 && dp_nesmach_mapper(x->m) == 5)) {
         // mapper register write (fires before the runtime/bridge applies it)
@@ -1995,7 +2009,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  pointer tables: %llu tables, %llu bytes (inferred)\n", (unsigned long long)r->table_count, (unsigned long long)r->table_bytes);
     fprintf(out, "  static closure: %llu bytes from %llu roots, cap hits %llu\n", (unsigned long long)r->static_bytes, (unsigned long long)r->static_roots, (unsigned long long)r->static_cap_hits);
     fprintf(out, "  padding %llu bytes; inferred code %llu data %llu padding %llu\n", (unsigned long long)r->padding_bytes, (unsigned long long)r->inferred_code, (unsigned long long)r->inferred_data, (unsigned long long)r->inferred_pad);
-    fprintf(out, "  cpu loop copy bytes %llu\n", (unsigned long long)r->cpu_copy_bytes);
+    fprintf(out, "  cpu loop copy bytes %llu, to WRAM %llu\n", (unsigned long long)r->cpu_copy_bytes, (unsigned long long)r->wram_copy_bytes);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  pad probes: %llu forks at %llu sites, refused %llu\n", (unsigned long long)r->pad_probes, (unsigned long long)r->pad_probe_sites, (unsigned long long)r->pad_probe_refused);
     fprintf(out, "  copy siblings: %llu tables; %llu ranges (%llu bytes); %llu refused over executed code; %llu tables cut at the cap\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_ranges, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_refused, (unsigned long long)r->sib_caps);
@@ -2032,7 +2046,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         fprintf(out, "   ch%u src $%08X dst $%08X pc $%04X step %llu",
             c->channel, c->source, c->destination, c->pc,
             (unsigned long long)c->first_step);
-        if (c->channel == 3) fprintf(out, " len %u", c->length);
+        if (c->channel == 3 || c->channel == 4) fprintf(out, " len %u", c->length);
         fputc('\n', out);
     }
     fprintf(out, "  banks %u (overflow %llu):\n", r->bank_count,

@@ -475,8 +475,10 @@ static void test_explorer(void) {
     CHECK(r.flags[0x1000] & DP_NES_DATA, "flag byte flagged data");
     // OAM DMA from a ROM page produced a copy record
     CHECK(r.oam_copies >= 1, "OAM DMA counted");
-    CHECK(r.copy_count >= 1 && r.copies[0].channel == 1, "copy record channel");
-    CHECK(r.copies[0].source == 0, "DMA source cell is page $80 base");
+    const DpNesCopy *dma = NULL;
+    for (unsigned i = 0; i < r.copy_count && !dma; i++) if (r.copies[i].channel == 1) dma = &r.copies[i];
+    CHECK(dma != NULL, "copy record channel");
+    CHECK(dma && dma->source == 0, "DMA source cell is page $80 base");
     // a register write landed in the log
     unsigned dma_writes = 0;
     for (unsigned i = 0; i < r.register_count; i++)

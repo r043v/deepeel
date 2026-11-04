@@ -19,7 +19,7 @@ Cellules ouvertes (◐ ou ✗) : 71.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
-| D4 | Copies par boucle CPU | NES | ◐ boucle → PPUDATA |
+| D4 | Copies par boucle CPU | NES | ◐ boucle → PPUDATA ; 0.249.11 boucle → WRAM (canal 4, test `nes_wram_copy`) ; reste SRAM `$6000` et registres son |
 | D10 | Sondes de lecture manette | NES | ◐ 0.230.0 8 boutons port 1 + 8 port 2 + 10 combinaisons ; 0.243.0 `--pad-full` : les 256 masques du port 1 (test `nes_pad_full`), hors défaut ; pas de multitap |
 | D10 | Sondes de lecture manette | MD | ◐ 0.240.0 14 sondes dont pad 6 boutons (runtime m0boy `pad_ext`) ; 0.245.0 `--pad-full` : les 256 masques à trois boutons (test `md_pad_full`), hors défaut ; pas de multitap ni de masques 6 boutons complets |
 | D12 | Cibles indirectes observées | NES | ◐ observé, sans second passage |

@@ -3480,3 +3480,10 @@ PCE compte les départs d'opcode (`exec_hits`) et les lectures de données ROM (
 fusionnés par `--jobs 2`. `--cov FILE` : « banque(8 Kio) décalage drapeaux coups » (1 exécution, 4 spéculatif, 8 donnée) ;
 `--romdata FILE` : « page coups » par page de 256 octets. Test `pce_cov_romdata`. Observations de l'outil, pas des mesures
 matérielles ; les lectures DMA/CD ne sont pas comptées.
+
+## 0.249.11 (NES, D4 : boucle CPU ROM→WRAM)
+
+NES enregistre aussi les copies par boucle CPU vers la WRAM (`$0000-$07FF`) : un store juste après une lecture PRG
+(même provenance que `ram_src`) fusionne les octets contigus d'un même pc en un enregistrement canal 4 (`chN src dst pc len`),
+compteur « to WRAM » dans le rapport. Non enregistré en mode joué. Fixture `fix_nes_wramcopy`, test `nes_wram_copy`.
+D4 NES reste ◐ : SRAM `$6000` et registres son non suivis.
