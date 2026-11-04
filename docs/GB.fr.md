@@ -3449,3 +3449,12 @@ profondeur, image cartouche) restent dans leur `*_archive_add`. Sans changement 
 longs qui la suivent sont les entrées voisines. Même validation (la cible observée doit être une des entrées lues, au
 moins deux entrées valides en ROM). Les entrées *avant* l'entrée lue ne sont pas explorées (la base de la table n'est
 pas connue dans ce cas). Fixture `fix_md_s4p5`, test `md_s4_ptr_disp`. Reste : An calculé par ALU (`adda`).
+
+## 0.249.7 (NES, F1 : file croissante `--queue-max`)
+
+La file d'états en attente du NES grandit comme celles de PCE et MD : `--queue N` fixe la capacité de départ,
+`--queue-max N` le plafond de croissance (doublement jusqu'au plafond avant de mettre l'état en parc ou sur le
+disque). Rapport : `queue grown N times`. Les deux options sont lues par `deepeel nes explore` (`--queue` était
+annoncée dans l'aide sans être lue). Le pointeur de l'état en cours n'est plus utilisé après le premier fork, donc le
+`realloc` de la file est sûr. Test `nes_queue_grow` (fixture `fix_nes_pad`, `--queue 1 --queue-max 64` : file
+agrandie, rien en parc ; sans `--queue-max`, 42 états en parc). 157 tests passent (un ignoré).

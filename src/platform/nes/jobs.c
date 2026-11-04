@@ -57,7 +57,7 @@ static void fold(DpNesResults *a, void *user) {
     }
     dp_ramarch_merge(&a->ra, &b->ra);
     ADD(s6_decoders); ADD(s6_tables); ADD(s6_candidates); ADD(s6_runs); ADD(s6_sat); ADD(steps); ADD(paths); ADD(forks); ADD(irq_forks); ADD(exec_outside); ADD(data_reads); ADD(oam_copies);
-    ADD(dmc_starts); ADD(forced_paths); ADD(step_cuts); ADD(loop_cuts); ADD(fork_cuts); ADD(queue_cuts);
+    ADD(dmc_starts); ADD(forced_paths); ADD(step_cuts); ADD(loop_cuts); ADD(fork_cuts); ADD(queue_cuts); ADD(queue_grown);
     ADD(global_cuts); ADD(path_cuts); ADD(faults); ADD(decode_cuts); ADD(ctx_evicted); ADD(pad_probes);
     ADD(pad_probe_sites); ADD(pad_probe_refused); ADD(evicted); ADD(parked); ADD(parked_resumed);
     ADD(parked_lost); ADD(pending_dropped); ADD(ram_writes); ADD(smc_writes); ADD(io_writes); ADD(io_reads); ADD(chr_reads);

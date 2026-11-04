@@ -534,3 +534,5 @@ set_tests_properties(gb_prov_de PROPERTIES FIXTURES_REQUIRED fixtures)
 
 add_test(NAME pce_provenance_roots COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_prov.pce --second-pass --max-total 20000 --max-steps 100 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_provr.txt >/dev/null 2>&1; grep -q 'provenance: 1 jump-table words traced from ROM reads, 1 roots seeded' ${CMAKE_CURRENT_BINARY_DIR}/pce_provr.txt")
 set_tests_properties(pce_provenance_roots PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME nes_queue_grow COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B nes explore $D/fix_nes_pad.nes --max-total 400000 --max-steps 1000 --queue 1 --queue-max 64 --text $D/nes_qg.txt >/dev/null 2>&1; grep -q 'queue grown [1-9]' $D/nes_qg.txt && grep -q 'parked 0 ' $D/nes_qg.txt")
+set_tests_properties(nes_queue_grow PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)

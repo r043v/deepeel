@@ -92,7 +92,7 @@ typedef struct {
 struct DpNesResults_;
 typedef struct {
     uint64_t max_total;
-    uint32_t max_steps, max_paths, queue_cap, loop_cap, fork_cap;
+    uint32_t max_steps, max_paths, queue_cap, queue_max, loop_cap, fork_cap;   // queue_max: adaptive growth ceiling (0: fixed queue_cap)
     int seed_irq;          // fork the NMI/IRQ entries when enabled (default on)
     // play sessions: random-input frames before the fork exploration.  The
     // visited bytes land in the same physical map as the exploration.
@@ -151,6 +151,7 @@ typedef struct DpNesResults_ {
     uint64_t steps, paths, forks, irq_forks, exec_outside, data_reads, oam_copies;
     uint64_t dmc_starts, dmc_bytes; // $4015 bit 4 starts (copy channel 2) / distinct sample bytes
     uint64_t forced_paths;
+    uint64_t queue_grown;
     uint64_t step_cuts, loop_cuts, fork_cuts, queue_cuts, global_cuts, path_cuts,
              faults, decode_cuts;
     uint64_t ctx_evicted, dispatch_tables, dispatch_seeds, dispatch_refused_view, prov_sites, prov_roots, pass2_seeds, pass2_refused, pass2_capped, sib_tables, sib_ranges, sib_bytes, sib_refused, sib_caps, vectors_seeded, tas_same, tas_different, tas_unrecorded, pad_cuts, table_bytes, table_count, static_bytes, static_roots, static_cap_hits, padding_bytes, inferred_code, inferred_data, inferred_pad, cpu_copy_bytes, indirect_sites, indirect_targets, indirect_overflow, pad_probes, pad_probe_sites, pad_probe_refused, entries_seeded, entries_refused, seeds_reset, seeds_irq, seeds_bank, seeds_refused_queue;

@@ -1152,7 +1152,7 @@ static uint8_t *nes_read_file(const char *path, size_t *size) {
 static int cmd_nes(int argc, char **argv) {
     if (argc < 4 || strcmp(argv[2], "explore")) {
         fprintf(stderr, "deepeel nes explore ROM [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N] [--mapper auto|nrom|uxrom] "
-                        "[--max-total N] [--max-steps N] [--max-paths N] [--queue N] "
+                        "[--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--queue-max N] "
                         "[--loop-cap N] [--fork-cap N] [--no-irq-fork] [--entry bank:addr]... [--seed-banks] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--rtcode FILE]\n");
         return 2;
     }
@@ -1173,6 +1173,8 @@ static int cmd_nes(int argc, char **argv) {
         }
         else if (!strcmp(a, "--mapper") && i + 1 < argc) mapper_name = argv[++i];
         else if (!strcmp(a, "--max-paths") && i + 1 < argc) opt.max_paths = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--queue") && i + 1 < argc) opt.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--queue-max") && i + 1 < argc) opt.queue_max = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--spool") && i + 1 < argc) opt.lot_path = argv[++i];
         else if (!strcmp(a, "--resume") && i + 1 < argc) { opt.lot_path = argv[++i]; opt.lot_drain = 1; }
         else if (!strcmp(a, "--seed-banks")) opt.seed_banks = 1;

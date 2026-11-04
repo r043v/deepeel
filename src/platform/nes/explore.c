@@ -793,9 +793,19 @@ static void tree_close(DpNesRun *x, uint32_t id, int issue) {
     if (id && id <= x->r->tree_count) x->r->tree_nodes[id - 1].issue = (uint8_t)issue;
 }
 
+// room for one more pending state: the live capacity doubles up to --queue-max before the state parks
+static int queue_room(DpNesRun *x) {
+    if (x->queue_len < x->queue_cap) return 1;
+    if (x->opt.queue_max > x->queue_cap) {
+        uint32_t nc = x->queue_cap > x->opt.queue_max / 2 ? x->opt.queue_max : (x->queue_cap ? x->queue_cap * 2 : 1);
+        DpNesPathState *g = realloc(x->queue, (size_t)nc * sizeof *g);
+        if (g) { memset(g + x->queue_cap, 0, (size_t)(nc - x->queue_cap) * sizeof *g); x->queue = g; x->queue_cap = nc; x->r->queue_grown++; }
+    }
+    return x->queue_len < x->queue_cap;
+}
+
 static int queue_push(DpNesRun *x, const DpNesPathState *s) {
-    if (x->queue_len >= x->opt.queue_cap) { x->r->queue_cuts++; return 0; }
-    if (x->queue_len == x->queue_cap) return 0;
+    if (!queue_room(x)) { x->r->queue_cuts++; return 0; }
     DpNesPathState c = *s;
     if (!c.choice) c.choice = tree_add(x, &c);
     x->queue[x->queue_len++] = c;
@@ -835,7 +845,7 @@ static int snap_push(DpNesRun *x, DpNesPathState *s) {
         }
     }
     if (!s->choice) s->choice = tree_add(x, s);
-    if (x->queue_len >= x->opt.queue_cap) {
+    if (!queue_room(x)) {
         // a full queue is not a loss: the state waits aside (bounded, counted)
         if (x->park_len < 4096) {
             if (x->park_len == x->park_cap) {
@@ -1903,6 +1913,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->forced_paths,
         (unsigned long long)r->forks, (unsigned long long)r->irq_forks,
         (unsigned long long)r->evicted);
+    if (r->queue_grown) fprintf(out, "  queue grown %llu times\n", (unsigned long long)r->queue_grown);
     fprintf(out, "  cuts: step %llu loop %llu fork %llu queue %llu global %llu path %llu\n",
         (unsigned long long)r->step_cuts, (unsigned long long)r->loop_cuts,
         (unsigned long long)r->fork_cuts, (unsigned long long)r->queue_cuts,
