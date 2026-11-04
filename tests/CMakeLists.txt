@@ -177,6 +177,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_pad6.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_longloop.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_jptable_de.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_provde.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ramgen.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ramexg.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ramsrc.md
@@ -519,3 +520,6 @@ set_tests_properties(nes_demo_frames PROPERTIES FIXTURES_REQUIRED fixtures TIMEO
 add_test(NAME pce_demo_frames COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_adpcm.pce --max-total 200000 --demo 30 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_dm.txt >/dev/null 2>&1; grep -q 'demo (no button pressed, from power-on): 30 frames' ${CMAKE_CURRENT_BINARY_DIR}/pce_dm.txt")
 set_tests_properties(pce_demo_frames PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME resume_cli COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/resume_cli.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_md_dbcc.md)
+
+add_test(NAME gb_prov_de COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_provde.gb --text $D/pvde.txt >/dev/null 2>&1; grep -Eq 'provenance: 1 jp-hl targets, 2 data bytes static' $D/pvde.txt")
+set_tests_properties(gb_prov_de PROPERTIES FIXTURES_REQUIRED fixtures)

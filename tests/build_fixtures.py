@@ -386,6 +386,15 @@ def build(out):
         w(r, t, 0x3C, 0x00, 0x18, 0xFE)
     save(out, "fix_jptable_de", r)
 
+    # --- provde: pointer read through DE (ld de,tbl ; ld a,(de) ; ld l,a ; inc de ; ld a,(de) ; ld h,a ; jp hl)
+    # followed by an unreachable-by-execution branch: the jp hl target is proven statically (S3 BC/DE) ---
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x11, 0x70, 0x01, 0x1A, 0x6F, 0x13, 0x1A, 0x67, 0xE9)
+    w(r, 0x170, 0x80, 0x01)
+    w(r, 0x180, 0x3C, 0x00, 0x18, 0xFE)
+    save(out, "fix_provde", r)
+
     # --- hdma: CGB general-purpose HDMA, 256 bytes $4000 -> $8000 -------------
     r = rom(2)
     w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)

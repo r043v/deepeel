@@ -3375,3 +3375,12 @@ tranches : un `--unbounded` arrêté ne répondait qu'après la tranche en cours
 Observation de l'outil (Castle of Illusion, `--unbounded`, SIGINT à 20 s) : 1 048 576 pas, 57 389 fourches spoolées,
 soit une fourche pour 18 pas environ ; le « chemin sans fin » du diagnostic J13 n'était donc pas un blocage mais un
 débit de ~45 000 pas/s dominé par l'écriture du spool.
+
+## 0.248.0 — S3 GB : provenance de BC et DE
+
+`dp_provenance` (GB) suit désormais BC et DE comme paires entières à côté de HL (`ld rr,nn`, `inc/dec rr`,
+`ld a,(de|bc)` sur un octet de ROM prouvable, `ld a,b|c|d|e`, `ld h,d|b`, `ld l,e|c`). Seules les instructions connues
+pour ne pas toucher B/C/D/E conservent les paires ; toute autre les oublie (jamais de valeur périmée). La clé des états
+visités mélange BC/DE (une collision ne fait qu'élaguer). Test `gb_prov_de` (fixture `fix_provde`) : avant, 0 cible
+`jp hl` prouvée ; après, 1 cible et 2 octets de données statiques (témoin négatif vérifié). Reste pour S3 GB : les
+autres registres 8 bits et la RAM (le z80 les suit déjà).

@@ -27,6 +27,8 @@ typedef struct {
     uint8_t hlmask;  // bit0 = l known, bit1 = h known
     uint8_t a;
     uint8_t aknown;
+    uint16_t de, bc; // whole-pair values (S3: BC/DE beside HL)
+    uint8_t pm2;     // bit0 = DE known, bit1 = BC known
 } ProvState;
 
 typedef struct { ProvState *v; size_t n, cap; } ProvStack;
@@ -84,6 +86,56 @@ static int prov_rom_read(void *ctx, uint16_t addr, uint8_t *v) {
     return 1;
 }
 
+// S3: BC/DE tracked as whole pairs beside HL.  Only instructions known not to touch B/C/D/E keep
+// them; anything else forgets both pairs (never a stale value).  Runs after the ISA effect, which
+// already treated the opcode as an unknown write to HL/A where it applies.
+static void prov_pairs(DpResults *res, ProvRead *pr, ProvState *s, uint8_t op,
+                       uint16_t old_hl, uint8_t old_mask, DpProvRegs *r) {
+    uint8_t v;
+    switch (op) {
+    case 0x11: s->de = (uint16_t)(res->cart->rom[s->k + 1] | (res->cart->rom[s->k + 2] << 8)); s->pm2 |= 1; return;
+    case 0x01: s->bc = (uint16_t)(res->cart->rom[s->k + 1] | (res->cart->rom[s->k + 2] << 8)); s->pm2 |= 2; return;
+    case 0x13: if (s->pm2 & 1) s->de++; return;
+    case 0x1B: if (s->pm2 & 1) s->de--; return;
+    case 0x03: if (s->pm2 & 2) s->bc++; return;
+    case 0x0B: if (s->pm2 & 2) s->bc--; return;
+    case 0x1A: case 0x0A: { // ld a,(de) / ld a,(bc)
+        int bit = op == 0x1A ? 1 : 2;
+        uint16_t addr = op == 0x1A ? s->de : s->bc;
+        if ((s->pm2 & bit) && prov_rom_read(pr, addr, &v)) { r->a = v; r->aknown = 1; }
+        else r->aknown = 0;
+        return;
+    }
+    case 0x7A: case 0x7B: case 0x78: case 0x79: { // ld a,d|e|b|c
+        int bit = (op == 0x7A || op == 0x7B) ? 1 : 2;
+        uint16_t pair = bit == 1 ? s->de : s->bc;
+        if (s->pm2 & bit) { r->a = (op == 0x7A || op == 0x78) ? (uint8_t)(pair >> 8) : (uint8_t)pair; r->aknown = 1; }
+        else r->aknown = 0;
+        return;
+    }
+    case 0x62: case 0x60: { // ld h,d / ld h,b
+        int bit = op == 0x62 ? 1 : 2;
+        uint16_t pair = bit == 1 ? s->de : s->bc;
+        if (s->pm2 & bit) { r->p = (uint16_t)((old_hl & 0x00FF) | (pair & 0xFF00)); r->pmask = old_mask | 2; }
+        return;
+    }
+    case 0x6B: case 0x69: { // ld l,e / ld l,c
+        int bit = op == 0x6B ? 1 : 2;
+        uint16_t pair = bit == 1 ? s->de : s->bc;
+        if (s->pm2 & bit) { r->p = (uint16_t)((old_hl & 0xFF00) | (pair & 0x00FF)); r->pmask = old_mask | 1; }
+        return;
+    }
+    // instructions that provably leave B/C/D/E alone
+    case 0x00: case 0x3E: case 0x21: case 0x23: case 0x2B: case 0x2A: case 0x7E: case 0x66: case 0x6E:
+    case 0x67: case 0x6F: case 0xFA: case 0x18: case 0x20: case 0x28: case 0x30: case 0x38:
+    case 0xC3: case 0xC2: case 0xCA: case 0xD2: case 0xDA: case 0xE9:
+        return;
+    default:
+        s->pm2 = 0;
+        return;
+    }
+}
+
 uint32_t dp_provenance(DpResults *res) {
     const DpCart *c = res->cart;
     size_t n = (size_t)res->banks * 0x4000;
@@ -95,7 +147,7 @@ uint32_t dp_provenance(DpResults *res) {
         if (!(res->exec_flags[k] & DP_XF_START) ||
             !(res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED | DP_XF_STATIC)))
             continue;
-        ProvState s0 = { (uint32_t)k, 0, 0, 0, 0 };
+        ProvState s0 = { (uint32_t)k, 0, 0, 0, 0, 0, 0, 0 };
         ppush(&st, s0);
     }
     uint32_t steps = 0;
@@ -107,6 +159,8 @@ uint32_t dp_provenance(DpResults *res) {
         }
         ProvState s = st.v[--st.n];
         uint64_t vk = ((uint64_t)s.k << 17) | ((uint64_t)(s.hlmask ? s.hl : 0) << 1) | s.aknown;
+        // BC/DE join the key through a mix: a collision only prunes a state, never invents one
+        vk ^= (((uint64_t)(s.pm2 & 1 ? s.de : 0) << 16 | (s.pm2 & 2 ? s.bc : 0)) * 4 + s.pm2) * 0x9E3779B97F4A7C15ull << 20;
         if (dp_set_insert(&vis, vk) <= 0) continue;
         if (s.k >= n || s.k >= c->rom_size) continue;
         uint32_t bank = s.k / 0x4000, off = s.k % 0x4000;
@@ -122,7 +176,10 @@ uint32_t dp_provenance(DpResults *res) {
         DpProvRegs r = { s.hl, s.hlmask, s.a, s.aknown };
         ProvRead pr = { res, 0 };
         DpProvRom rom = { &pr, prov_rom_read };
+        uint16_t old_hl = r.p;
+        uint8_t old_mask = r.pmask;
         isa->regs_effect(&c->rom[s.k], &r, &rom);
+        prov_pairs(res, &pr, &s, c->rom[s.k], old_hl, old_mask, &r);
         s.hl = r.p; s.hlmask = r.pmask; s.a = r.a; s.aknown = r.aknown;
 
         int fall = fi.fall;
@@ -156,7 +213,7 @@ uint32_t dp_provenance(DpResults *res) {
             else res->prov_unresolved++;
             if (fi.call) {
                 // the callee may clobber everything: the continuation forgets
-                ProvState rs = { 0, 0, 0, 0, 0 };
+                ProvState rs = { 0, 0, 0, 0, 0, 0, 0, 0 };
                 rs.k = prov_target(res, bank, (uint32_t)pc + 3);
                 if (rs.k != ~0u) ppush(&st, rs);
             }
