@@ -43,7 +43,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | S3 | Suivi de constantes / provenance | NES | ◐ provenance RAM→`jmp (zp)` depuis la PRG |
 | S3 | Suivi de constantes / provenance | PCE | ◐ provenance ROM→WRAM→`jmp (abs)` (comptée, sans graine) |
 | S3 | Suivi de constantes / provenance | MD | ◐ témoin An |
-| S4 | Tables de sauts depuis l'opérande | GB | ◐ 0.134 `ld hl,nn` → `jp hl` (≤ 64 mots, même banque) |
+| S4 | Tables de sauts depuis l'opérande | GB | ◐ 0.134 `ld hl,nn` → `jp hl` (≤ 64 mots, même banque) + 0.191.0 base dans DE/BC (`add hl,rr`) |
 | S4 | Tables de sauts depuis l'opérande | NES | ◐ tables de mots lues en données |
 | S4 | Tables de sauts depuis l'opérande | MD | ◐ 0.190.0 `jmp d8(pc,Xn)` → table de `bra.s`/`bra.w` (≤ 128 entrées, fixture `md_s4`) ; pas de tables de mots ni `jmp (An)` |
 | S5 | Frères de copie | NES | ◐ copies OAM DMA / boucle CPU, tables du même flux |

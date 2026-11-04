@@ -169,6 +169,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nsstack.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_dma.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_s4.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_jptable_de.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ramgen.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ramexg.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ramsrc.md
@@ -403,6 +404,8 @@ add_test(NAME md_s4_table COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CUR
 set_tests_properties(md_s4_table PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME z80_novelty_cells COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; for s in sms msx; do $B z80 explore $s $D/fix_z80_branch.$s --novelty 300000 --novelty-frames 30 --novelty-cells 1 --text $D/zc_$s.txt >/dev/null 2>&1; grep -q 'novelty: depth [1-9][0-9]* frames, [1-9][0-9]* trials' $D/zc_$s.txt || exit 1; done")
 set_tests_properties(z80_novelty_cells PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME gb_jp_table_de COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_jptable_de.gb --cov $D/jtd.cov --text $D/jtd.txt >/dev/null 2>&1; grep -Eq 'S4 operand tables of executed JP HL: [1-9][0-9]* tables, [1-9][0-9]* entries' $D/jtd.txt && grep -Eq '^00 0190 [1-9]' $D/jtd.cov && grep -Eq '^00 01a0 [1-9]' $D/jtd.cov")
+set_tests_properties(gb_jp_table_de PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_exact_dedup COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_pad_effect.md --text $D/md_ed0.txt >/dev/null 2>&1; $B md explore $D/fix_md_pad_effect.md --exact-dedup --text $D/md_ed1.txt >/dev/null 2>&1; grep -q 'exact dedup: [1-9][0-9]* forks dropped' $D/md_ed1.txt && ! grep -q 'exact dedup' $D/md_ed0.txt && [ \"$(grep -E 'executed|exec ' $D/md_ed0.txt)\" = \"$(grep -E 'executed|exec ' $D/md_ed1.txt)\" ]")
 set_tests_properties(md_exact_dedup PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_map_inference COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_pad_effect.md --text ${CMAKE_CURRENT_BINARY_DIR}/md_inf.txt >/dev/null 2>&1; grep -q 'map inference (S7, not observations): [0-9]* padding' ${CMAKE_CURRENT_BINARY_DIR}/md_inf.txt")

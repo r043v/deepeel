@@ -181,13 +181,22 @@ uint32_t dp_static_closure(DpResults *res) {
         // padding or an address that does not start a legal instruction)
         if (executed && op == 0xE9 && k >= 24) {
             for (uint32_t b = k - 1; b + 24 > k && b < k; b--) {
-                if (c->rom[b] != 0x21 || !(res->exec_flags[b] & DP_XF_START)) { if (b == 0) break; continue; }
+                // base register: `ld hl,nn` itself, or `ld de,nn` / `ld bc,nn` added to HL by an
+                // executed `add hl,de` / `add hl,bc` between the load and the jump
+                uint8_t lop = c->rom[b];
+                int base_ok = lop == 0x21;
+                if (lop == 0x11 || lop == 0x01) {
+                    uint8_t addop = lop == 0x11 ? 0x19 : 0x09;
+                    for (uint32_t q = b + 3; q < k; q++)
+                        if (c->rom[q] == addop && (res->exec_flags[q] & DP_XF_START)) { base_ok = 1; break; }
+                }
+                if (!base_ok || !(res->exec_flags[b] & DP_XF_START)) { if (b == 0) break; continue; }
                 uint16_t base = (uint16_t)(c->rom[b + 1] | c->rom[b + 2] << 8);
                 uint32_t tb = bank ? bank : it.hint;
                 uint32_t bk = ~0u;
                 if (base < 0x4000) bk = base;
                 else if (base < 0x8000 && tb != NO_HINT && tb < (uint32_t)res->banks) bk = tb * 0x4000 + (base & 0x3FFF);
-                if (bk == ~0u || bk + 6 > c->rom_size) break;
+                if (bk == ~0u || bk + 6 > c->rom_size) { if (b == 0) break; continue; }
                 int cnt = 0;
                 for (int e = 0; e < 64 && bk + (uint32_t)e * 2 + 1 < c->rom_size; e++) {
                     uint16_t t = (uint16_t)(c->rom[bk + e * 2] | c->rom[bk + e * 2 + 1] << 8);
@@ -205,8 +214,8 @@ uint32_t dp_static_closure(DpResults *res) {
                     }
                     push(&st, tk, tk >= 0x4000 ? NO_HINT : it.hint, 0);
                 }
-                if (cnt) res->closure_jp_tables++;
-                break;
+                if (cnt) { res->closure_jp_tables++; break; }
+                if (b == 0) break;
             }
         }
         if (fall) {

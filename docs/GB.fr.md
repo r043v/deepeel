@@ -2870,3 +2870,12 @@ couvrent tout ce qu'une partie réelle exécute.
   vies appris) existaient sans test ; `z80_novelty_cells` les épingle sur SMS et MSX (fixture
   `fix_z80_branch`). Matrice J4 SMS/MSX mise à jour (toujours ◐ : pas de stratégie de choix de segment
   du pool de sessions).
+
+## 0.191.0 : GB S4, base de table dans DE/BC (2026-11-04)
+
+- Le `jp hl` exécuté reconnaît aussi `ld de,nn` / `ld bc,nn` suivi d'un `add hl,de` / `add hl,bc`
+  exécuté avant le saut ; un `ld hl,nn` proche qui ne donne aucune entrée n'arrête plus la recherche
+  (le motif `ld hl,0 ; add hl,de` ne cachait la vraie base que dans l'ancienne version).
+- Fixture `fix_jptable_de`, test `gb_jp_table_de` (échoue sans le correctif, vérifié).
+- Limite : la fenêtre reste de 24 octets de code droit, l'index n'est pas évalué (toutes les
+  entrées, ≤ 64, sont prises) ; une base calculée par arithmétique autre que `add hl,rr` n'est pas suivie.
