@@ -3290,3 +3290,11 @@ Même mécanisme que NES (0.237.0) : chaque état en file porte `in_handler`, ad
 repris. Les lots disque (`--unbounded`) ne persistent pas ce champ (format inchangé, anciens lots
 relisibles) : une fourche relue depuis le disque perd le marquage IRQ. Tests `pce` et `md_explore`
 (fourche dans un handler, contrôle négatif fait).
+
+## NES : une file pleine ne refuse plus de graine (G4) (0.239.0)
+
+Les racines (entrées, vecteurs, second passage, dispatch de banque) passaient par `queue_push` et
+étaient abandonnées (`seeds_refused_queue`) quand la file était pleine. Elles passent maintenant par
+`seed_push` : file, sinon mise de côté (tampon, puis lot disque), comme les fourches. Le compteur ne
+compte plus que les vrais refus. Test `nes` (`queue_cap = 1`, contrôle négatif fait). PCE et MD
+gardent l'ancien comportement ; la cellule G4 reste ◐ (le second passage sur successeurs statiques).

@@ -837,6 +837,17 @@ static int snap_push(DpNesRun *x, DpNesPathState *s) {
 
 // --- per-path execution ---------------------------------------------------------
 
+// a seed: queued when there is room, else parked or spooled (G4) -- a full queue
+// never drops a root.  Returns 1 when kept; on 0 the blob is freed, and the seed is
+// counted refused unless dedup/eviction closed it.
+static int seed_push(DpNesRun *x, DpNesPathState *s) {
+    if (queue_push(x, s)) return 1;
+    uint64_t ev = x->r->evicted + x->r->ctx_evicted;
+    if (snap_push(x, s)) return 1;
+    if (x->r->evicted + x->r->ctx_evicted == ev) x->r->seeds_refused_queue++;
+    return 0;
+}
+
 // run one path from its snapshot; forks enqueue new states
 static void run_path_inner(DpNesRun *x, uint32_t slot);
 static void run_path(DpNesRun *x, uint32_t slot) {
@@ -1410,7 +1421,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                 }
                 dp_nesmach_save(x.m, es);
                 DpNesPathState er = { es, 0, 0, 0, 0, 0, 0, DP_NES_TREE_ENTRY };
-                if (queue_push(&x, &er)) r->entries_seeded++; else { free(es); r->seeds_refused_queue++; }
+                if (seed_push(&x, &er)) r->entries_seeded++;
             }
             // --seed-vectors: the NMI ($FFFA) and IRQ/BRK ($FFFE) targets as roots
             for (int v = 0; v < 2 && x.opt.seed_vectors && !x.opt.lot_drain && !sk; v++) {
@@ -1425,7 +1436,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                 if (!dp_nesmach_enter(x.m, vb, va)) { free(es); r->entries_refused++; continue; }
                 dp_nesmach_save(x.m, es);
                 DpNesPathState er = { es, 1, 0, 0, 0, 0, 0, DP_NES_TREE_VECTOR };
-                if (queue_push(&x, &er)) r->vectors_seeded++; else { free(es); r->seeds_refused_queue++; }
+                if (seed_push(&x, &er)) r->vectors_seeded++;
             }
             for (int pass = 0; pass < 2; pass++) {
                 for (;;) {
@@ -1553,8 +1564,7 @@ static void second_pass_seed(DpNesRun *x) {
         if (!dp_nesmach_enter(x->m, bank, t)) { free(es); r->pass2_refused++; continue; }
         dp_nesmach_save(x->m, es);
         DpNesPathState er = { es, 1, 0, 0, 0, 0, 0, DP_NES_TREE_PASS2 };
-        if (queue_push(x, &er)) r->pass2_seeds++;
-        else { free(es); r->seeds_refused_queue++; }
+        if (seed_push(x, &er)) r->pass2_seeds++;
     }
     // S3: neighbours of a provenance-traced table word (aligned words in the
     // same table, up to 64 each way) that point at unexecuted PRG are roots too
@@ -1577,8 +1587,7 @@ static void second_pass_seed(DpNesRun *x) {
                 if (!dp_nesmach_enter(x->m, bank, v)) { free(es); r->pass2_refused++; continue; }
                 dp_nesmach_save(x->m, es);
                 DpNesPathState er = { es, 1, 0, 0, 0, 0, 0, DP_NES_TREE_PASS2 };
-                if (queue_push(x, &er)) { r->pass2_seeds++; r->prov_roots++; }
-                else { free(es); r->seeds_refused_queue++; }
+                if (seed_push(x, &er)) { r->pass2_seeds++; r->prov_roots++; }
             }
         }
     }
@@ -1621,8 +1630,7 @@ static void second_pass_seed(DpNesRun *x) {
                         if (!dp_nesmach_enter(x->m, b, v)) { free(es); r->pass2_refused++; continue; }
                         dp_nesmach_save(x->m, es);
                         DpNesPathState er = { es, 1, 0, 0, 0, 0, 0, DP_NES_TREE_PASS2 };
-                        if (queue_push(x, &er)) { r->pass2_seeds++; r->dispatch_seeds++; }
-                        else { free(es); r->seeds_refused_queue++; }
+                        if (seed_push(x, &er)) { r->pass2_seeds++; r->dispatch_seeds++; }
                     }
                 }
             }

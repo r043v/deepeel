@@ -328,7 +328,7 @@ static void test_jam_cut(void) {
 // G1: --seed-vectors roots the NMI and IRQ targets as forced code
 static void test_seed_vectors(void) {
     unsigned sz = 16 + 2 * 0x4000 + 0x2000;
-    for (int seeded = 0; seeded < 2; seeded++) {
+    for (int seeded = 0; seeded < 3; seeded++) {   // 2: seeded with a one-slot queue (G4)
         uint8_t *rom = calloc(1, sz);
         set_header(rom, 2, 1, 0);
         put(rom, 0, 0, 0x78, 0x4C, 0x01, 0x80, -1);                 // sei; jmp $8001
@@ -338,11 +338,13 @@ static void test_seed_vectors(void) {
         set_vector(rom, 1, 0xFFFA, 0x8100);
         set_vector(rom, 1, 0xFFFE, 0x8120);
         DpNesOptions o = dp_nes_options();
-        o.max_total = 20000; o.max_steps = 1000; o.seed_vectors = seeded;
+        o.max_total = 20000; o.max_steps = 1000; o.seed_vectors = seeded != 0;
+        if (seeded == 2) o.queue_cap = 1;
         DpNesResults r;
         CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "vector explore runs");
         if (seeded) {
             CHECK(r.vectors_seeded == 2, "two vector roots (%llu)", (unsigned long long)r.vectors_seeded);
+            CHECK(r.seeds_refused_queue == 0, "G4: no seed refused by the queue (%llu)", (unsigned long long)r.seeds_refused_queue);
             CHECK((r.flags[0x100] & DP_NES_FORCED) && !(r.flags[0x100] & DP_NES_NATURAL), "NMI code reached, forced (flags %02x)", r.flags[0x100]);
             CHECK((r.exec_kind[0x100] & DP_NES_X_ENTRY) && (r.exec_kind[0x100] & DP_NES_X_IRQ), "D1: NMI handler is entry + irq (%d)", r.exec_kind[0x100]);
             CHECK((r.exec_kind[0x120] & DP_NES_X_IRQ), "D1: IRQ handler is irq");
