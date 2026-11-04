@@ -3197,3 +3197,10 @@ et vidé, alias de `--lot --lot-drain`), comme NES. Test `resume_cli` (MD : un r
 La file d'états en attente de PCE grandit (doublement) jusqu'à `queue_max` / `--queue-max N` avant de
 déborder vers le parc puis le lot disque ; le rapport affiche `queue grown N times`. Défaut 0
 (comportement inchangé). Test `pce` : la file grandit au lieu de parquer.
+
+## PCE : accès par registre matériel (D3) (0.226.0)
+
+Le rapport PCE compte les lectures et écritures de la page matérielle registre par registre
+(`reg $0002 reads N writes M`, 27 registres du registre matériel + « other ») ; `io reads` s'ajoute
+à `io writes`. Les compteurs sont fusionnés par `--jobs 2`. Test `pce` : les sommes par registre
+égalent les totaux. Observation de l'outil, pas une mesure de matériel.

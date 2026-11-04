@@ -90,7 +90,7 @@ Pour chaque technique, la fiche indique :
 |---|---|---|---|---|---|---|---|
 | D1 | Marquage exec natural/forced/entry/irq/start | ✅ | ✅ | ✅ | ◐ | ◐ | ◐ |
 | D2 | Lectures de données ROM + hits | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| D3 | Accès registres par registre (`DpIoStat`) | ✅ | ✅ | ✅ | ✅ lectures + écritures par registre | ◐ | ◐ |
+| D3 | Accès registres par registre (`DpIoStat`) | ✅ | ✅ | ✅ | ✅ lectures + écritures par registre | ✅ lectures + écritures par registre (0.226.0, test `pce`) | ◐ |
 | D4 | Copies par boucle CPU | ✅ VRAM | ✅ | ✅ | ◐ boucle → PPUDATA | ✅ port VDC | ✅ MOVE→VDP |
 | D5 | Copies DMA | ✅ OAM | — | — | ✅ OAM | ✅ TII/TDD… | ✅ DMA VDP |
 | D6 | Timeline de banques | ✅ | ✅ | ✅ | ✅ UxROM | ✅ MPR | ✅ SSF2 |

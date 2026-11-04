@@ -71,6 +71,10 @@ void dp_mach_close(DpMach *m) {
 void dp_mach_set_rom(DpMach *m, const uint8_t *rom, uint32_t size) {
     if (size > m->api->rom_max) size = m->api->rom_max; // the caller checked
     memcpy(m->api->rom, rom, size);
+    /* the mapper wraps bank numbers at the cartridge's real size */
+    uint32_t banks = 2;
+    while (banks * 0x4000u < size) banks <<= 1;
+    *m->api->rom_banks = banks;
 }
 
 void dp_mach_reset(DpMach *m) {

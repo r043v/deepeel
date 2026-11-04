@@ -23,6 +23,31 @@ static const char *const dp_pmap_names[DP_PMAP_COUNT] = { "unknown", "code-natur
 
 enum { DP_PCE_COPY_CAP = 4096, DP_PCE_BANK_LOG_CAP = 1024, DP_PCE_IRQ_LOG_CAP = 1024,
        DP_PCE_REG_LOG_CAP = 256 };
+// hardware-page register slot: the registry offsets one by one, 27 = anything else
+enum { DP_PCE_IO_SLOTS = 28 };
+static inline int dp_pce_io_slot(unsigned reg) {
+    reg &= 0x1FFFu;
+    if (reg < 4) return (int)reg;
+    if (reg >= 0x400 && reg < 0x408) return 4 + (int)(reg - 0x400);
+    if (reg >= 0x800 && reg < 0x80A) return 12 + (int)(reg - 0x800);
+    if (reg == 0xC00 || reg == 0xC01) return 22 + (int)(reg - 0xC00);
+    if (reg == 0x1000) return 24;
+    if (reg == 0x1402) return 25;
+    if (reg == 0x1403) return 26;
+    return 27;
+}
+static inline unsigned dp_pce_io_slot_reg(int k) {
+    static const unsigned other = 0xFFFF;
+    if (k < 4) return (unsigned)k;
+    if (k < 12) return 0x400u + (unsigned)(k - 4);
+    if (k < 22) return 0x800u + (unsigned)(k - 12);
+    if (k < 24) return 0xC00u + (unsigned)(k - 22);
+    if (k == 24) return 0x1000u;
+    if (k == 25) return 0x1402u;
+    if (k == 26) return 0x1403u;
+    return other;
+}
+
 enum { DP_PCE_VERDICT_NONE = 0, DP_PCE_VERDICT_REQUIRED, DP_PCE_VERDICT_FORCED };
 static const char *const dp_pce_verdict_names[] = { "none", "required", "forced" };
 
@@ -133,6 +158,7 @@ typedef struct DpPceResults_ {
     uint64_t watch_frames;
     uint32_t state_exported_depth; int state_exported;
     uint32_t novelty_depth;  // deepest archived cell, frames from power-on
+    uint64_t io_reads, io_reg_reads[DP_PCE_IO_SLOTS], io_reg_writes[DP_PCE_IO_SLOTS];
     uint64_t io_writes, vdc_data_writes, copied_bytes;
     uint64_t smc_writes; uint16_t smc_first_pc; // stores into already executed WRAM bytes
     uint64_t static_bytes, padding_bytes, inferred_code, inferred_data, inferred_pad,

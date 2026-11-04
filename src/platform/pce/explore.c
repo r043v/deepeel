@@ -252,10 +252,18 @@ static int is_block(uint8_t op) {
     return op == 0x73 || op == 0xC3 || op == 0xD3 || op == 0xE3 || op == 0xF3;
 }
 
+static void obs_io_read(void *user, uint16_t reg, uint8_t value) {
+    PceRun *x = user;
+    (void)value;
+    x->r->io_reads++;
+    x->r->io_reg_reads[dp_pce_io_slot(reg)]++;
+}
+
 static void obs_io_write(void *user, uint16_t reg, uint8_t value) {
     PceRun *x = user;
     DpPceResults *r = x->r;
     r->io_writes++;
+    r->io_reg_writes[dp_pce_io_slot(reg)]++;
     if (r->register_count < DP_PCE_REG_LOG_CAP) {
         DpPceRegisterWrite *w = &r->register_writes[r->register_count++];
         w->path = x->path_id;
@@ -1558,7 +1566,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     if (!r->flags || !x->fork_sites || !x->pad_sites || !x->irq_sites || !x->istart ||
         !x->tmp || !x->tmp2 || !x->ztmp || !x->queue)
         x->failed = 1;
-    DpPceObserver o = { x, obs_rom_read, obs_io_write, NULL };
+    DpPceObserver o = { x, obs_rom_read, obs_io_write, obs_io_read };
     dp_pce_observe(&o);
     // the reset vector cells are data the machine reads
     {
@@ -1787,6 +1795,12 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
     fprintf(out, "  data reads %llu, VDC data writes %llu, ROM->VRAM bytes %llu, io writes %llu\n",
             (unsigned long long)r->data_reads, (unsigned long long)r->vdc_data_writes,
             (unsigned long long)r->copied_bytes, (unsigned long long)r->io_writes);
+    fprintf(out, "  io reads %llu\n", (unsigned long long)r->io_reads);
+    for (int k = 0; k < DP_PCE_IO_SLOTS; k++) {
+        if (!r->io_reg_reads[k] && !r->io_reg_writes[k]) continue;
+        if (k == DP_PCE_IO_SLOTS - 1) fprintf(out, "   reg other reads %llu writes %llu\n", (unsigned long long)r->io_reg_reads[k], (unsigned long long)r->io_reg_writes[k]);
+        else fprintf(out, "   reg $%04X reads %llu writes %llu\n", dp_pce_io_slot_reg(k), (unsigned long long)r->io_reg_reads[k], (unsigned long long)r->io_reg_writes[k]);
+    }
     fprintf(out, "  VCE colour-data writes %llu, palette bytes from ROM %llu\n",
             (unsigned long long)r->vce_data_writes, (unsigned long long)r->palette_bytes);
     fprintf(out, "  index inference (abs,X/Y): %u sites, %u bytes declared, %u refused over code, %u sites biased (start at index >= 1), "

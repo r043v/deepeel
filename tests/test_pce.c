@@ -108,6 +108,13 @@ static void test_explore(const uint8_t *rom) {
     CHECK(r->flags[0x2008] & DP_PCE_DATA, "forced data read");
     CHECK(r->flags[0x2010] & DP_PCE_COPIED, "ROM -> VDC copy");
     CHECK(r->copy_count >= 1, "copy record");
+    {   // D3: per-register counters add up to the totals, and the VDC ports saw the writes
+        uint64_t sw = 0, sr = 0;
+        for (int k = 0; k < DP_PCE_IO_SLOTS; k++) { sw += r->io_reg_writes[k]; sr += r->io_reg_reads[k]; }
+        CHECK(r->io_writes > 0 && sw == r->io_writes, "register writes add up (%llu vs %llu)", (unsigned long long)sw, (unsigned long long)r->io_writes);
+        CHECK(sr == r->io_reads, "register reads add up (%llu vs %llu)", (unsigned long long)sr, (unsigned long long)r->io_reads);
+        CHECK(r->io_reg_writes[2] + r->io_reg_writes[3] > 0, "VDC data port written");
+    }
     CHECK(r->step_cuts + r->loop_cuts + r->global_cuts > 0, "idle loop cut and counted");
     CHECK(r->exec_outside == 0, "no execution outside ROM");
     dp_pce_results_free(r);
