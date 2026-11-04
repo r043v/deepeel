@@ -51,8 +51,8 @@ static uint32_t t_pc(void) {
 }
 static int t_force(int taken) { dp_force_cond = taken; return 1; }
 static int64_t t_rom_index(uint32_t a) {
-    // ROM-only cartridges: the address is the index (bank tracking is the open item).
-    return a < 0x8000 && a < rom_size ? (int64_t)a : -1;
+    // compact index from the core's current bank mapping (patched GB::dpRomIndex)
+    long i = gb->dpRomIndex(a); return i >= 0 && (size_t)i < rom_size ? (int64_t)i : -1;
 }
 static size_t t_ssize(void) { return gb->saveState(NULL, 0, NULL); }
 static bool t_ser(void *p, size_t n) { return gb->saveState(NULL, 0, (char *)p) <= n; }

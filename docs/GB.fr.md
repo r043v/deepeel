@@ -2680,8 +2680,10 @@ l'outil). Un pas = un `runFor` d'un échantillon ; sur HALT l'horloge avance (bo
 prefetch du HALT n'est pas compté comme exécution. Débuts d'opcode ≥ $0100, gambatte contre m0boy :
 `branch` 20/19, `loop` 3/2, `copy1` 13/12, `copyx` 14/13, `unreach` 5/4, `pal` 5/4, `jumptable` 17/16,
 `nsdata` 28/27, `vblank` 28/27, `probes` 12/11 : l'écart constant de 1 est le `nop` en $0100, exécuté par gambatte
-(PC initial $0100) et non compté par le parité m0boy. `irq` diverge (32 431 débuts : traîne de `nop` dans le
-remplissage, que la parité m0boy exclut par `DP_SF_PAD`) : à rapprocher avant de conclure. Fourches de gambatte :
+(PC initial $0100) et non compté par le parité m0boy. `irq` : 32 431 débuts, et ce n'est pas un défaut de l'adaptateur : gambatte émet de vrais VBlank, donc le HALT en
+$0158 se réveille, le gestionnaire revient en $0159 et la traîne de `nop` du remplissage s'exécute jusqu'à la fin de
+la ROM (le parité m0boy ne la voit pas : pas de second VBlank, et il exclut le remplissage par `DP_SF_PAD`). Fourches de gambatte :
 `branch` 6, `copy1` 4, `jumptable` 2.
-Limites : `rom_index` sans mapper seulement, valeur lue passée à 0, `dma`/`bank` non branchés, pas encore de test
+`rom_index` suit les banques (`GB::dpRomIndex` ajouté au patch) : sur `mbc5` et `closure` les débuts de banque 2/3
+sortent à $8000/$C000, l'index compact de l'explorateur. Limites : valeur lue passée à 0, `dma`/`bank` non branchés, pas encore de test
 automatique (le cœur est cloné hors dépôt). J11/J12 restent donc ◐.

@@ -2,6 +2,18 @@
 # (jr/jp/call/ret cc) to observe and force them. Apply: git apply tools/gambatte_trace.patch (in the gambatte-core tree).
 # Build: compile libgambatte/src/*.cpp (not cinterface, file_zip) with -include cstdint, then link tools/gambatte_lr.cpp
 # with build/libdeepeel_libretro.a build/libdeepeel_core.a -ldl -lm -lz. Not yet run: see docs/GB.fr.md.
+diff --git a/libgambatte/include/gambatte.h b/libgambatte/include/gambatte.h
+index 195c98a..d182947 100644
+--- a/libgambatte/include/gambatte.h
++++ b/libgambatte/include/gambatte.h
+@@ -273,6 +273,7 @@ public:
+ 
+ 	/** 0 = vram, 1 = rom, 2 = wram, 3 = cartram, 4 = oam, 5 = hram */
+ 	bool getMemoryArea(int which, unsigned char **data, int *length);
++	long dpRomIndex(unsigned addr) const; // deepeel trace extension
+ 
+ 	/**
+ 	  * Saves emulator state to the state slot selected with selectState().
 diff --git a/libgambatte/src/cpu.cpp b/libgambatte/src/cpu.cpp
 index fee1741..d98bf77 100644
 --- a/libgambatte/src/cpu.cpp
@@ -177,3 +189,53 @@ index fee1741..d98bf77 100644
  					call_nn();
  				} else {
  					unsigned char temp;
+diff --git a/libgambatte/src/cpu.h b/libgambatte/src/cpu.h
+index 0a496a0..0458b99 100644
+--- a/libgambatte/src/cpu.h
++++ b/libgambatte/src/cpu.h
+@@ -38,6 +38,7 @@ public:
+ 	void loadSavedata() { mem_.loadSavedata(cycleCounter_); }
+ 	void saveSavedata() { mem_.saveSavedata(cycleCounter_); }
+ 
++	long dpRomIndex(unsigned a) const { return mem_.dpRomIndex(a); }
+ 	bool getMemoryArea(int which, unsigned char **data, int *length) { return mem_.getMemoryArea(which, data, length); }
+ 
+ 	void setVideoBuffer(uint_least32_t *videoBuf, std::ptrdiff_t pitch) {
+diff --git a/libgambatte/src/gambatte.cpp b/libgambatte/src/gambatte.cpp
+index af1d06f..f4011f8 100644
+--- a/libgambatte/src/gambatte.cpp
++++ b/libgambatte/src/gambatte.cpp
+@@ -326,6 +326,8 @@ void GB::saveSavedata(char *dest) {
+ 		p_->cpu.saveSavedata(dest);
+ }
+ 
++long GB::dpRomIndex(unsigned addr) const { return p_->cpu.dpRomIndex(addr); }
++
+ bool GB::getMemoryArea(int which, unsigned char **data, int *length) {
+ 	if (p_->cpu.loaded())
+ 		return p_->cpu.getMemoryArea(which, data, length);
+diff --git a/libgambatte/src/mem/cartridge.h b/libgambatte/src/mem/cartridge.h
+index 5cca6dc..7d15044 100644
+--- a/libgambatte/src/mem/cartridge.h
++++ b/libgambatte/src/mem/cartridge.h
+@@ -42,6 +42,7 @@ public:
+ 	unsigned char * wmem(unsigned area) const { return memptrs_.wmem(area); }
+ 	unsigned char * vramdata() const { return memptrs_.vramdata(); }
+ 	unsigned char * romdata(unsigned area) const { return memptrs_.romdata(area); }
++	unsigned char * dpRomBase() const { return memptrs_.romdata(); }  // deepeel trace extension
+ 	unsigned char * wramdata(unsigned area) const { return memptrs_.wramdata(area); }
+ 	unsigned char const * rdisabledRam() const { return memptrs_.rdisabledRam(); }
+ 	unsigned char const * rsrambankptr() const { return memptrs_.rsrambankptr(); }
+diff --git a/libgambatte/src/memory.h b/libgambatte/src/memory.h
+index e9dc8ba..b044b97 100644
+--- a/libgambatte/src/memory.h
++++ b/libgambatte/src/memory.h
+@@ -62,6 +62,8 @@ public:
+ 	}
+ 
+ 	bool getMemoryArea(int which, unsigned char **data, int *length);
++	// deepeel trace extension: compact ROM index (bank * 0x4000 + (addr & 0x3FFF)) of a CPU address, -1 if not ROM
++	long dpRomIndex(unsigned a) const { return a >= 0x8000 ? -1 : (long)(cart_.romdata((a >> 14) & 1) + a - cart_.dpRomBase()); }
+ 
+ 	unsigned long stop(unsigned long cycleCounter, bool &prefetched);
+ 	void stall(unsigned long cycleCounter, unsigned long cycles);
