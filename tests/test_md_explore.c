@@ -326,6 +326,27 @@ int main(int argc, char **argv) {
     CHECK(r.ram_exec >= 1 && r.ra.n >= 1 && r.smc_writes >= 1);
     dp_md_results_free(&r); dp_md_cart_free(&c);
 
+    {   // G1: the V-int vector target is a root with --seed-vectors only
+        uint8_t rom[0x1000];
+        memset(rom, 0, sizeof rom);
+        memcpy(rom + 0x100, "SEGA MEGA DRIVE ", 16);
+        rom[1] = 0xFF;                                          // SSP $FF0000
+        rom[6] = 0x02;                                          // reset -> $200
+        rom[0x7A] = 0x03;                                       // level 6 (V-int) -> $300
+        rom[0x200] = 0x60; rom[0x201] = 0xFE;                   // bra *
+        rom[0x300] = 0x4E; rom[0x301] = 0x71; rom[0x302] = 0x60; rom[0x303] = 0xFE;   // nop; bra *
+        char err[128];
+        for (int s = 0; s < 2; s++) {
+            CHECK(dp_md_cart_from_mem(&c, rom, sizeof rom, err, sizeof err) == 0);
+            DpMdOptions o; dp_md_options_default(&o);
+            o.max_total = 100000; o.seed_vectors = s;
+            CHECK(dp_md_explore(&c, &o, &r) == 0);
+            if (s) CHECK(r.vectors_seeded == 1 && executed(&r, 0x300));
+            else CHECK(r.vectors_seeded == 0 && !executed(&r, 0x300));
+            dp_md_results_free(&r); dp_md_cart_free(&c);
+        }
+    }
+
     puts(fails ? "md_explore: FAILED" : "md_explore: ok");
     return fails != 0;
 }

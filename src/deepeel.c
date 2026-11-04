@@ -1505,6 +1505,7 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--path-steps")) o.path_steps = strtoull(argv[++i], NULL, 0);
             else if (!strcmp(a, "--unbounded")) md_unbounded = 1;
             else if (!strcmp(a, "--cut-padding")) o.pad_cut = 1;
+            else if (!strcmp(a, "--seed-vectors")) o.seed_vectors = 1;
             else if (!strcmp(a, "--bank-dispatch")) o.bank_dispatch = 1;
             else if (!strcmp(a, "--exact-dedup")) o.exact_dedup = 1;
             else if (!strcmp(a, "--entry")) {

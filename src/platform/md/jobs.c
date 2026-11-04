@@ -47,7 +47,7 @@ static void fold(DpMdResults *a, uint8_t *bank_seen, void *user) {
     for (unsigned i = 0; i < 128; i++) bank_seen[i] |= b->z80_bank_seen_out[i];
     ADD(demo_run); ADD(demo_exec); ADD(play_sessions_run); ADD(pool_saved); ADD(pool_starts); ADD(play_frames_run); ADD(s4_tables); ADD(s4_seeds); ADD(s4_refused); ADD(steps); ADD(paths); ADD(forks); ADD(irq_forks); ADD(pad_forks); ADD(sat_total); ADD(sat_path);
     ADD(sat_visit); ADD(sat_queue); ADD(queue_growths); ADD(sat_site); ADD(fork_seen); ADD(fork_off_rom);
-    ADD(entries_seeded); ADD(entries_refused); ADD(parked); ADD(parked_resumed); ADD(parked_lost);
+    ADD(entries_seeded); ADD(entries_refused); ADD(vectors_seeded); ADD(parked); ADD(parked_resumed); ADD(parked_lost);
     dp_ramarch_merge(&a->ra, &b->ra);
     ADD(dropped_pending); ADD(faults); ADD(exec_outside); ADD(ram_exec); ADD(smc_writes); ADD(sram_exec); ADD(sram_reads);
     ADD(decode_length_mismatches); ADD(unmapped_r); ADD(unmapped_w); ADD(cpu_vram_words);

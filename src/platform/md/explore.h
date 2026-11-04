@@ -38,6 +38,7 @@ typedef struct {
     uint32_t watch_write; /* 24-bit address, UINT32_MAX disables */
     uint32_t exclude_read_pc; /* exclude one CPU read site from the separate union */
     const DpMdMovie *movie; /* optional Gens movie, replayed on the natural path */
+    int seed_vectors;     /* also seed the autovector and TRAP vector targets as roots (G1) */
     uint32_t entries[16]; /* explicit 68000 entry points (ROM addresses, even) */
     unsigned entry_count;
     const char *tree_path;  // write the choice tree (DpTree file) here, NULL: none
@@ -110,7 +111,7 @@ typedef struct DpMdResults_ {
     uint64_t fork_seen;        /* alternative already executed/queued (not a loss) */
     uint64_t fork_off_rom;     /* alternative target outside the ROM */
     uint64_t lot_written, lot_read, lot_pending; /* disk lot (--lot) */
-    uint64_t entries_seeded, entries_refused; /* explicit entries queued / refused (odd or outside the ROM) */
+    uint64_t entries_seeded, entries_refused, vectors_seeded; /* explicit entries queued / refused (odd or outside the ROM) */
     uint64_t parked, parked_resumed, parked_lost; /* queue-full forks held aside (§6) */
     uint64_t dropped_pending;  /* forks left unrun when the total budget ended */
     uint64_t faults;

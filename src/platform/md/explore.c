@@ -733,6 +733,7 @@ static void on_sound_store(void *u, uint16_t addr, uint8_t v, int ymreg) {
 }
 
 void dp_md_options_default(DpMdOptions *o) {
+    o->seed_vectors = 0;
     o->max_total = 20000000;
     o->path_steps = 2000000;
     o->queue_cap = 256;
@@ -1474,6 +1475,21 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
             dp_mdmach_reset(x.m);
             if (push(&x, a, 0, 0)) r->entries_seeded++; else r->entries_refused++;
         }
+    // --seed-vectors (G1): the autovector (level 1-7) and TRAP #0-15 targets of the vector table
+    if (!drain && o->seed_vectors) {
+        uint32_t seen[24]; unsigned ns = 0;
+        for (unsigned v = 0; v < 23; v++) {
+            unsigned at = v < 7 ? 0x64u + v * 4u : 0x80u + (v - 7) * 4u;   /* 7 autovectors, then TRAP #0-15 */
+            if (at + 4 > c->size) break;
+            uint32_t a = (uint32_t)c->rom[at] << 24 | (uint32_t)c->rom[at + 1] << 16 | (uint32_t)c->rom[at + 2] << 8 | c->rom[at + 3];
+            unsigned k; for (k = 0; k < ns && seen[k] != a; k++) {}
+            if (k < ns || a < 0x200u) continue;
+            seen[ns++] = a;
+            if ((a & 1) || a >= r->rom_size) { r->entries_refused++; continue; }
+            dp_mdmach_reset(x.m);
+            if (push(&x, a, 0, 0)) r->vectors_seeded++; else r->entries_refused++;
+        }
+    }
     for (;;) {
         spill_flush(&x);
         if (r->steps >= o->max_total || dp_stop) break;
@@ -1681,6 +1697,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     if (r->lot_written || r->lot_read || r->lot_pending)
         fprintf(out, "  lot: %llu written, %llu read back, %llu left on disk\n", (unsigned long long)r->lot_written,
                 (unsigned long long)r->lot_read, (unsigned long long)r->lot_pending);
+    if (r->vectors_seeded) fprintf(out, "  vector roots: %llu seeded (autovectors, TRAP #n)\n", (unsigned long long)r->vectors_seeded);
     fprintf(out, "  entries: %llu seeded, %llu refused (odd or outside the ROM)\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  frontier: parked %llu resumed %llu lost %llu\n", (unsigned long long)r->parked,
             (unsigned long long)r->parked_resumed, (unsigned long long)r->parked_lost);

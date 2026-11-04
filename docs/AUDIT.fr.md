@@ -58,7 +58,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | S7 | Inférence de voisins à la carte | MD | ◐ remplissage ≥ 8 (00/FF) ou ≥ 32, code ≤ 3 o, données ≤ 1024 o ; rendu seulement |
 | G1 | Graines reset/RST/IRQ | NES | ◐ reset + NMI/IRQ (`--seed-vectors`) |
 | G1 | Graines reset/RST/IRQ | PCE | ◐ reset + IRQ2/IRQ1/TIMER/NMI (`--seed-vectors`, 0.216) |
-| G1 | Graines reset/RST/IRQ | MD | ◐ reset |
+| G1 | Graines reset/RST/IRQ | MD | ◐ reset + autovecteurs et TRAP (`--seed-vectors`) |
 | G2 | Scan de dispatch par vues de banques | NES | ◐ UxROM, banque fixe (`--bank-dispatch`) |
 | G2 | Scan de dispatch par vues de banques | PCE | ◐ tables de mots par fenêtre, vues de pages (`--bank-dispatch`) |
 | G2 | Scan de dispatch par vues de banques | MD | ◐ tables de mots longs de pointeurs de code (`--bank-dispatch`) |

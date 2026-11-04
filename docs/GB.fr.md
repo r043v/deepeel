@@ -3093,3 +3093,11 @@ Observation de l'outil, pas une mesure matérielle.
 hors de la page haute ou hors du mapping ROM : refusé et compté). Le rapport indique
 « vector roots ». Fixture : `test_seed_vectors` dans `test_pce` (cibles atteintes avec l'option,
 absentes sans). Observation de l'outil, pas une mesure matérielle.
+
+## MD : `--seed-vectors` (G1) (2026-11-04, sans changement de version : CMakeLists.txt porte un chantier TAS non committé)
+
+`--seed-vectors` existe aussi pour la Mega Drive : les cibles des sept autovecteurs (`$64`-`$7C`,
+dont HINT et V-int) et des TRAP #0-15 (`$80`-`$BC`) de la table de vecteurs partent comme racines
+(doublons, adresses impaires ou hors ROM écartés et comptés ; ligne « vector roots » du rapport).
+Fixture : bloc G1 de `test_md_explore` (ROM en mémoire, handler V-int atteint avec l'option
+seulement). Observation de l'outil, pas une mesure matérielle.
