@@ -20,7 +20,7 @@ Cellules ouvertes (◐ ou ✗) : 69.
 | # | Technique | Plateforme | État |
 |---|---|---|---|
 | D10 | Sondes de lecture manette | NES | ◐ 0.230.0 8 boutons port 1 + 8 port 2 + 10 combinaisons ; 0.243.0 `--pad-full` : les 256 masques du port 1 (test `nes_pad_full`), hors défaut ; pas de multitap |
-| D10 | Sondes de lecture manette | MD | ◐ 0.240.0 14 sondes dont pad 6 boutons (runtime m0boy `pad_ext`) ; 0.245.0 `--pad-full` : les 256 masques à trois boutons (test `md_pad_full`), hors défaut ; pas de multitap ni de masques 6 boutons complets |
+| D10 | Sondes de lecture manette | MD | ◐ 0.240.0 14 sondes dont pad 6 boutons (runtime m0boy `pad_ext`) ; 0.245.0 `--pad-full` : les 256 masques à trois boutons (test `md_pad_full`), hors défaut ; 0.249.16 `--pad-full6` : les 256 masques × 16 combinaisons X/Y/Z/Mode du pad 6 boutons (test `md_pad_full6`) ; pas de multitap |
 | D12 | Cibles indirectes observées | NES | ◐ observé, sans second passage |
 | D12 | Cibles indirectes observées | PCE | ◐ observé (`jmp (abs)`, `jmp (abs,X)`), sans second passage |
 | D12 | Cibles indirectes observées | MD | ◐ observé (`jmp/jsr` par An), sans second passage |

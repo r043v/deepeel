@@ -561,6 +561,16 @@ static void on_end(void *u, uint32_t pc, uint32_t next, unsigned len) {
                     r->pad_forks++;
                 }
             }
+        if (x->o->pad_full6)   // six-button pad: ext bit 7 = present, low nibble = X Y Z Mode
+            for (unsigned e = 0; e < 16; e++)
+                for (unsigned m = 0; m < 256; m++) {
+                    if (dp_set_insert(&x->pad_full_seen, (1ull << 40) | ((uint64_t)pc << 16) | 0x8000u | (e << 8) | m) <= 0) continue;
+                    if (push(x, next & 0xFFFFFFu, 0, 0)) {
+                        dp_mdmach_state_set_pad(x->last_state, (uint8_t)m);
+                        dp_mdmach_state_set_pad_ext(x->last_state, (uint8_t)(0x80 | e));
+                        r->pad_forks++;
+                    }
+                }
     }
     if (!decoded) return;
     if ((in.cls == DP_M68K_JMP || in.cls == DP_M68K_JSR) && !in.has_target && decoded == len && !x->replay) {

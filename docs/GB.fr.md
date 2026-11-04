@@ -3517,3 +3517,9 @@ NROM et UxROM. CNROM (mapper 3) suit désormais NROM, et les autres cartes sauf 
 carte et de ses registres : c'est une hypothèse, gardée honnête par l'exigence que la cible soit un début d'instruction
 exécuté. Les frères de copie (S5) restent sur NROM/UxROM. Fixture `fix_nes_mmc1table`, test `nes_table_mmc1`. Non vérifié :
 que le test échoue sans ce changement (la résolution renvoyait -1 pour ces cartes).
+
+## 0.249.16 (MD, D10 : `--pad-full6`)
+
+`--pad-full6` (implique `--pad-full`) sonde, à chaque site de lecture de manette, les 256 masques du pad 3 boutons combinés
+aux 16 états X/Y/Z/Mode du pad 6 boutons (4 096 forks par site, dédupliqués par (pc, masque, ext)). Hors défaut : coûteux.
+Test `md_pad_full6` (4 352 sondes sur `fix_md_pad6`). Le multitap n'est toujours pas modélisé : D10 MD reste ◐.

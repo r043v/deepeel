@@ -1531,6 +1531,7 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--bank-dispatch")) o.bank_dispatch = 1;
             else if (!strcmp(a, "--exact-dedup")) o.exact_dedup = 1;
             else if (!strcmp(a, "--pad-full")) o.pad_full = 1;
+            else if (!strcmp(a, "--pad-full6")) o.pad_full = o.pad_full6 = 1;
             else if (!strcmp(a, "--entry")) {
                 if (o.entry_count >= 16) { fprintf(stderr, "deepeel: at most 16 --entry\n"); rc = 2; break; }
                 o.entries[o.entry_count++] = (uint32_t)strtoul(argv[++i], NULL, 0);
