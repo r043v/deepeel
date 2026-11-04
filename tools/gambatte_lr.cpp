@@ -24,16 +24,26 @@ static unsigned execs;                 // opcode fetches seen during the current
 static std::vector<gambatte::uint_least32_t> video(160 * 144), audio(2064 + 64);
 static size_t rom_size;
 
-static void on_exec(int32_t a, int64_t) { execs++; cur_pc = (uint32_t)a; if (have_obs && obs.exec) obs.exec(obs.user, (uint32_t)a); }
+static void on_exec(int32_t a, int64_t) {
+    if (getenv("GLR_TRACE")) fprintf(stderr, "%04x%s ", (unsigned)a, execs ? "'" : "");
+    // HALT reads the next opcode as a prefetch inside the same step: only the first fetch of a step is an execution
+    if (execs++) return;
+    cur_pc = (uint32_t)a;
+    if (have_obs && obs.exec) obs.exec(obs.user, (uint32_t)a);
+}
 static void on_read(int32_t a, int64_t) { if (have_obs && obs.read) obs.read(obs.user, (uint32_t)a, 0); }
 static void on_write(int32_t a, int64_t) { if (have_obs && obs.write) obs.write(obs.user, (uint32_t)a, 0); }
-static void on_branch(unsigned pc) { if (have_obs && obs.branch) obs.branch(obs.user, pc); }
+static unsigned nbr;
+static void on_branch(unsigned pc) { nbr++; if (have_obs && obs.branch) obs.branch(obs.user, pc); }
 
 static int t_step(void) {
     execs = 0;
-    size_t samples = 1;
-    gb->runFor(video.data(), 160, audio.data(), samples);
-    return execs ? 1 : 0;              // no opcode fetched = halted
+    // HALT: keep the clock running (bounded, ~4 frames) until an interrupt wakes the CPU and an opcode is fetched
+    for (unsigned i = 0; i < 20000 && !execs; i++) {
+        size_t samples = 1;
+        gb->runFor(video.data(), 160, audio.data(), samples);
+    }
+    return execs ? 1 : 0;              // nothing fetched within the bound = halted for good
 }
 static void t_set(const DpLrObservers *o) { have_obs = o != NULL; if (o) obs = *o; }
 static uint32_t t_pc(void) {
@@ -54,7 +64,7 @@ int main(int argc, char **argv) {
     std::vector<char> rom((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     rom_size = rom.size();
     gb = new gambatte::GB;
-    if (gb->load(rom.data(), rom.size(), 0)) { fprintf(stderr, "load failed\n"); return 1; }
+    if (gb->load(rom.data(), rom.size(), gambatte::GB::NO_BIOS)) { fprintf(stderr, "load failed\n"); return 1; }
     gb->setExecCallback(on_exec);
     gb->setReadCallback(on_read);
     gb->setWriteCallback(on_write);
@@ -73,6 +83,8 @@ int main(int argc, char **argv) {
            (unsigned long long)st.steps, (unsigned long long)st.forks, (unsigned long long)st.paths, st.covered, st.branch_sites, rc);
     printf("cut: path_steps %llu total %llu items %llu forks %llu loop %llu\n", (unsigned long long)st.cut_path_steps,
            (unsigned long long)st.cut_total, (unsigned long long)st.dropped_items, (unsigned long long)st.capped_forks, (unsigned long long)st.cut_loop);
+    if (getenv("GLR_STARTS")) { unsigned n = 0; for (size_t i = 0x100; i < rom_size; i++) if (map[i]) { printf("%04zx ", i); n++; } printf("\nstarts>=0100: %u\n", n); }
+    fprintf(stderr, "branch callbacks seen: %u\n", nbr);
     dp_lr_close(lr);
     return 0;
 }

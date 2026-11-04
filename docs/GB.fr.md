@@ -2671,21 +2671,17 @@ Limites : un seul index représentatif (pas l'ensemble des dépendances) ; modes
 texte ; teintes des registres non remises à zéro entre chemins ; `movem`, `DIV/MUL` à paires, `exg`, `swap`
 inter-registres non modélisés. J14 « provenance exacte » reste donc ouvert sur les autres plateformes et sur ces cas.
 
-## Ébauche J11/J12 : adaptateur gambatte niveau B (non exécuté)
+## J11/J12 : adaptateur gambatte niveau B (exécuté)
 
 `tools/gambatte_trace.patch` (observation/forçage des 16 conditionnels de `cpu.cpp`, gambatte-core de
-pokemon-speedrunning) et `tools/gambatte_lr.cpp` (adaptateur `DpLrTraceApi` en processus) compilent et
-s'éditent de liens, mais **n'ont jamais été exécutés** : aucune parité n'est donc établie, J11/J12 restent ouverts.
-Limites connues : `rom_index` sans mapper seulement, valeur lue passée à 0, callbacks `dma`/`bank` non branchés.
-
-## 0.187.1 — MD : le producteur traverse `exg` et `movem`
-
-`exg Rx,Ry` échange les teintes ; `movem` registres→mémoire écrit la teinte du premier registre de la liste (forme à
-un seul registre épinglée par `fix_md_ramexg`, test `rtcode_md_exg_movem`). Limites : listes de plusieurs registres
-approchées par le registre le plus récemment teinté trouvé dans le texte, `movem` mémoire→registres et pré-décrément
-non modélisés.
-
-## 0.187.2 — MD : `movem` mémoire→registres
-
-Les registres listés (bornes de plage comprises, les registres intermédiaires d'une plage `d0-d3` ne sont pas
-teintés) prennent la teinte de la cellule lue. Non épinglé par une fixture dédiée ; le pré-décrément reste non modélisé.
+pokemon-speedrunning) et `tools/gambatte_lr.cpp` (adaptateur `DpLrTraceApi` en processus, démarrage `NO_BIOS`)
+ont été exécutés sur les fixtures de `test_lr_parity` avec le pilote de fourches `dp_lr_explore` (observations de
+l'outil). Un pas = un `runFor` d'un échantillon ; sur HALT l'horloge avance (borne ~4 trames) jusqu'au réveil ; le
+prefetch du HALT n'est pas compté comme exécution. Débuts d'opcode ≥ $0100, gambatte contre m0boy :
+`branch` 20/19, `loop` 3/2, `copy1` 13/12, `copyx` 14/13, `unreach` 5/4, `pal` 5/4, `jumptable` 17/16,
+`nsdata` 28/27, `vblank` 28/27, `probes` 12/11 : l'écart constant de 1 est le `nop` en $0100, exécuté par gambatte
+(PC initial $0100) et non compté par le parité m0boy. `irq` diverge (32 431 débuts : traîne de `nop` dans le
+remplissage, que la parité m0boy exclut par `DP_SF_PAD`) : à rapprocher avant de conclure. Fourches de gambatte :
+`branch` 6, `copy1` 4, `jumptable` 2.
+Limites : `rom_index` sans mapper seulement, valeur lue passée à 0, `dma`/`bank` non branchés, pas encore de test
+automatique (le cœur est cloné hors dépôt). J11/J12 restent donc ◐.
