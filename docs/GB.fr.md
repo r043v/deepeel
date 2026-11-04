@@ -3159,3 +3159,11 @@ précédent quand un lot disque est en attente. Les états relus portent des ide
 sans rechargement, leurs parents pointaient dans le vide et la numérotation repartait de zéro.
 Le test `nes` (`tests/test_nes.c`) vérifie que le nombre de nœuds ne diminue pas et que la racine
 `reset` survit ; il échoue si le chargement est désactivé. NES seulement : MD et PCE restent à faire.
+
+## PCE : reprise de l'arbre de choix avec `--resume` (F2) (0.221.0)
+
+Comme pour NES (0.220.0), la reprise PCE recharge l'arbre sauvegardé par le run précédent quand un
+lot disque est en attente. En plus, les états écrits dans le lot portent maintenant leur identifiant
+de nœud (méta de 5 octets : manette forcée + id ; les anciens lots à 1 octet se relisent avec
+l'id 0). Le rapport affiche `choice tree resumed: N nodes reloaded`. Test `pce`
+(`tree_loaded`) : il échoue si le chargement est désactivé. MD reste à faire.

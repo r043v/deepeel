@@ -331,11 +331,12 @@ static int seen_insert(PceRun *x, uint64_t h) {
 }
 
 // one compressed state to the disk lot (takes z on success)
-static int lot_spill(PceRun *x, uint8_t *z, uLongf zlen, uint8_t forced) {
+static int lot_spill(PceRun *x, uint8_t *z, uLongf zlen, uint8_t forced, uint32_t choice) {
     if (!x->lot) return 0;
     uLongf rl = x->state_size;
     if (uncompress(x->tmp2, &rl, z, zlen) != Z_OK || rl != x->state_size) return 0;
-    if (!dp_lf_put(x->lot, &forced, 1, x->tmp2, (uint32_t)rl)) return 0; // raw state: XOR deltas need fixed-size images
+    uint8_t meta[5] = { forced, (uint8_t)choice, (uint8_t)(choice >> 8), (uint8_t)(choice >> 16), (uint8_t)(choice >> 24) };
+    if (!dp_lf_put(x->lot, meta, 5, x->tmp2, (uint32_t)rl)) return 0; // raw state: XOR deltas need fixed-size images
     free(z);
     return 1;
 }
@@ -369,7 +370,7 @@ static int push_live(PceRun *x, int forced) {
     if (!z) { x->failed = 1; return 0; }
     memcpy(z, x->ztmp, zl);
     if (full && x->park_len >= 4096) { // the holding area is full: the state goes to the disk lot
-        if (lot_spill(x, z, zl, (uint8_t)forced)) { r->parked++; if (node) dp_tree_close(&x->tree, node, DP_ISSUE_SPOOLED); return 1; }
+        if (lot_spill(x, z, zl, (uint8_t)forced, node)) { r->parked++; if (node) dp_tree_close(&x->tree, node, DP_ISSUE_SPOOLED); return 1; }
         free(z); r->queue_cuts++; r->parked_lost++; return 0;
     }
     if (full) { // a full queue is not a loss: the state waits aside (bounded, counted)
@@ -1527,6 +1528,8 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     dp_pce_watch_enable(g_watch_every != 0);
     if (x->opt.lot_path && !(x->lot = dp_lf_open(x->opt.lot_path, "PCE", 1)))
         fprintf(stderr, "deepeel: cannot open the lot %s\n", x->opt.lot_path);
+    // resumed lot: its states carry ids of the tree the previous run saved
+    if (x->lot && dp_lf_pending(x->lot) && x->opt.tree_path && dp_tree_load(&x->tree, x->opt.tree_path)) r->tree_loaded = x->tree.n;
     x->r = r;
     x->rom = dp_pce_rom();
     x->rom_size = r->rom_size = dp_pce_rom_size();
@@ -1624,13 +1627,16 @@ drain:
         if (x->failed) break;
         if (!x->queue_len && x->park_len) { x->queue[x->queue_len++] = x->park[--x->park_len]; r->parked_resumed++; }
         if (!x->queue_len && dp_lf_pending(x->lot)) { // the disk backlog comes back
-            uint8_t forced = 0, *blob = NULL; uint32_t ml = 0, bl = 0;
-            if (dp_lf_get(x->lot, &forced, &ml, &blob, &bl) && ml == 1) {
+            uint8_t meta[DP_LF_META_MAX] = { 0 }, *blob = NULL; uint32_t ml = 0, bl = 0;
+            if (dp_lf_get(x->lot, meta, &ml, &blob, &bl) && (ml == 1 || ml == 5)) {
+                uint8_t forced = meta[0];
+                uint32_t choice = ml == 5 ? (uint32_t)meta[1] | (uint32_t)meta[2] << 8 | (uint32_t)meta[3] << 16 | (uint32_t)meta[4] << 24 : 0;
+                if (choice >= x->tree.n) choice = 0; // an id the reloaded tree does not hold
                 uLongf zl = x->zcap;
                 uint8_t *z = malloc(zl);
                 if (z && compress2(z, &zl, blob, bl, 1) == Z_OK) {
                     x->queue[x->queue_len].z = z; x->queue[x->queue_len].zlen = zl;
-                    x->queue[x->queue_len].forced = forced; x->queue[x->queue_len].choice = 0; x->queue_len++;
+                    x->queue[x->queue_len].forced = forced; x->queue[x->queue_len].choice = choice; x->queue_len++;
                 } else free(z);
                 free(blob); blob = NULL;
             } else free(blob);
@@ -1666,10 +1672,10 @@ drain:
     for (uint32_t i = 0; i < x->park_len; i++) if (x->park[i].choice) dp_tree_close(&x->tree, x->park[i].choice, DP_ISSUE_BUDGET);
     for (uint32_t i = 0; i < x->queue_len; i++) if (x->queue[i].choice) dp_tree_close(&x->tree, x->queue[i].choice, DP_ISSUE_BUDGET);
     for (uint32_t i = 0; i < x->park_len; i++)
-        if (!lot_spill(x, x->park[i].z, x->park[i].zlen, x->park[i].forced)) { r->pending_dropped++; free(x->park[i].z); }
+        if (!lot_spill(x, x->park[i].z, x->park[i].zlen, x->park[i].forced, x->park[i].choice)) { r->pending_dropped++; free(x->park[i].z); }
     free(x->park);
     for (uint32_t i = 0; i < x->queue_len; i++)
-        if (!lot_spill(x, x->queue[i].z, x->queue[i].zlen, x->queue[i].forced)) { r->pending_dropped++; free(x->queue[i].z); }
+        if (!lot_spill(x, x->queue[i].z, x->queue[i].zlen, x->queue[i].forced, x->queue[i].choice)) { r->pending_dropped++; free(x->queue[i].z); }
     if (x->lot) {
         r->lot_written = x->lot->written; r->lot_read = x->lot->read_back;
         r->lot_pending = dp_lf_pending(x->lot);
@@ -1788,6 +1794,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             (unsigned long long)r->s6_runs, (unsigned long long)r->s6_sat);
     fprintf(out, "  provenance: %llu jump-table words traced from ROM reads\n", (unsigned long long)r->prov_sites);
     if (r->tree_nodes) fprintf(out, "  choice tree: %llu nodes\n", (unsigned long long)r->tree_nodes);
+    if (r->tree_loaded) fprintf(out, "  choice tree resumed: %llu nodes reloaded\n", (unsigned long long)r->tree_loaded);
     if (r->pass2_seeds || r->pass2_refused || r->pass2_capped) fprintf(out, "  second pass: %llu seeds, %llu refused (page unmappable), %llu capped\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     if (r->disp_tables) fprintf(out, "  bank dispatch: %llu tables, %llu seeds, %llu refused views\n", (unsigned long long)r->disp_tables, (unsigned long long)r->disp_seeds, (unsigned long long)r->disp_refused_view);
     fprintf(out, "  copy siblings: %llu tables, %llu entries, %llu bytes typed, %llu table caps\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_entries, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_caps);

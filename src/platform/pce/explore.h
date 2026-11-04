@@ -127,7 +127,7 @@ typedef struct DpPceResults_ {
     uint64_t lot_written, lot_read, lot_pending; // disk lot (--lot)
     uint64_t parked, parked_resumed, parked_lost; // queue-full states held aside (§6)
     uint64_t pending_dropped;  // queued states left undrained at the global wall
-    uint64_t disp_tables, disp_seeds, disp_refused_view, pass2_seeds, pass2_refused, pass2_capped, tree_nodes, prov_sites, indirect_sites, indirect_targets, indirect_overflow, sib_tables, sib_entries, sib_bytes, sib_caps, ctx_evicted, entries_seeded, entries_refused, vectors_seeded, seeds_bank, tas_same, tas_different, tas_unrecorded, demo_frames_run, play_frames_run, play_sessions_run, tas_frames_run, s6_decoders, s6_tables, s6_candidates, s6_runs, s6_sat, pool_saved, pool_starts;
+    uint64_t disp_tables, disp_seeds, disp_refused_view, pass2_seeds, pass2_refused, pass2_capped, tree_nodes, prov_sites, indirect_sites, indirect_targets, indirect_overflow, sib_tables, sib_entries, sib_bytes, sib_caps, ctx_evicted, entries_seeded, entries_refused, vectors_seeded, seeds_bank, tree_loaded, tas_same, tas_different, tas_unrecorded, demo_frames_run, play_frames_run, play_sessions_run, tas_frames_run, s6_decoders, s6_tables, s6_candidates, s6_runs, s6_sat, pool_saved, pool_starts;
     uint64_t novelty_trials, novelty_hits, novelty_archived, novelty_replaced, novelty_frames_run,
              novelty_deaths;
     uint64_t watch_frames;

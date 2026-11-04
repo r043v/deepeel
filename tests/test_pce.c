@@ -162,6 +162,24 @@ static void test_explore(const uint8_t *rom) {
         CHECK(rr->lot_read >= left && rr->lot_pending == 0, "the lot is resumed and emptied");
         CHECK(access(lp, F_OK) != 0, "the emptied lot file is removed");
         dp_pce_results_free(rr); free(rr);
+        {   // F2 resume: the drain reloads the saved tree; the ids of the queued states stay valid
+            char tp[] = "/tmp/dp_pce_treeXXXXXX"; int tfd = mkstemp(tp); if (tfd >= 0) close(tfd);
+            DpPceOptions ow = o; ow.queue_cap = 1; ow.lot_path = lp; ow.tree_path = tp; ow.max_total = found;
+            unlink(lp);
+            DpPceResults *rw = calloc(1, sizeof *rw);
+            CHECK(dp_pce_explore(rom2, ROM_SIZE, &ow, rw), "walled run with tree");
+            uint64_t saved = rw->tree_nodes;
+            CHECK(rw->lot_pending > 0 && saved > 1, "tree saved with states pending");
+            dp_pce_results_free(rw); free(rw);
+            DpPceOptions od = o; od.queue_cap = 1; od.lot_path = lp; od.lot_drain = 1; od.tree_path = tp;
+            DpPceResults *rd = calloc(1, sizeof *rd);
+            CHECK(dp_pce_explore(rom2, ROM_SIZE, &od, rd), "drain with tree");
+            CHECK(rd->tree_loaded == saved, "the saved tree was reloaded (%llu vs %llu)", (unsigned long long)rd->tree_loaded, (unsigned long long)saved);
+            CHECK(rd->tree_nodes >= saved, "resumed tree keeps its nodes (%llu >= %llu)",
+                  (unsigned long long)rd->tree_nodes, (unsigned long long)saved);
+            dp_pce_results_free(rd); free(rd);
+            unlink(tp);
+        }
         unlink(lp);
         free(rom2);
     }
