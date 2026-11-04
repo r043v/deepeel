@@ -95,6 +95,7 @@ typedef struct {
     uint64_t novel;                // ROM bytes executed for the first time by play (novelty gain)
     uint32_t rng;
     struct ZStm *stm;              // S6 decoder replay state
+    uint8_t ram_exec[0x10000];   // RAM bytes executed since their last write (SMC tracking)
 } Run;
 
 // S4: the ROM word a jp (hl)/(ix)/(iy) target was loaded from, by register
@@ -275,6 +276,10 @@ static void write_bus(void *user,uint16_t a,uint8_t v) {
     DpZ80Origin origin=dp_z80_provenance_write(&x->origins->cpu,a);
     int32_t ram=x->b->ram_index(a); int64_t before[10];
     mapping_before(x,before); x->b->write(a,v);
+    if(ram>=0 && ram<0x10000 && x->ram_exec[ram]) {   // an executed RAM byte is rewritten
+        x->ram_exec[ram]=0;
+        if(!x->r->smc_writes++) x->r->smc_first_pc=x->pc;
+    }
     ram_written(x,ram,v,origin); mapping_after(x,before,a,v,0);
 }
 static void msx_event(void *user,DpMsxEvent event) {
@@ -1645,7 +1650,10 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
                         }
                         else outside=1;
                     }
-                    if(outside) { r->exec_outside++; dp_ramarch_add(&r->ra,c->pc,bytes,(int)d.length,-1); }
+                    if(outside) {
+                        r->exec_outside++; dp_ramarch_add(&r->ra,c->pc,bytes,(int)d.length,-1);
+                        for(int q=0;q<(int)d.length;q++) { int32_t ri=x.b->ram_index((uint16_t)(c->pc+q)); if(ri>=0 && ri<0x10000) x.ram_exec[ri]=1; }
+                    }
                     dp_sega_closure_observe(x.closure);
                     dp_z80_provenance_begin(&x.origins->cpu,c,&d,origin_read,&x);
                     cycles=z80_execute_decoded(c,&d); z80_finish(c,cycles);
@@ -1845,7 +1853,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     dp_ramarch_merge(&d->ra,&s->ra);
 #define DP_MR_SUM(f) d->f+=s->f
     DP_MR_SUM(steps); DP_MR_SUM(paths); DP_MR_SUM(forks); DP_MR_SUM(irq_forks);
-    DP_MR_SUM(exec_outside); DP_MR_SUM(data_reads); DP_MR_SUM(vdp_copies); DP_MR_SUM(ram_copies);
+    DP_MR_SUM(exec_outside); DP_MR_SUM(smc_writes); DP_MR_SUM(data_reads); DP_MR_SUM(vdp_copies); DP_MR_SUM(ram_copies);
     DP_MR_SUM(steps_deferred); DP_MR_SUM(loop_deferred); DP_MR_SUM(defer_resumed); DP_MR_SUM(steps_final);
     DP_MR_SUM(loop_final); DP_MR_SUM(defer_dropped); DP_MR_SUM(defer_pending); DP_MR_SUM(fork_deferred); DP_MR_SUM(defer_spooled); DP_MR_SUM(fork_final);
     DP_MR_SUM(s6_decoders); DP_MR_SUM(s6_tables); DP_MR_SUM(s6_candidates); DP_MR_SUM(s6_runs); DP_MR_SUM(s6_sat);
@@ -2403,6 +2411,7 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
         const DpSegaPort *rd=dp_sega_port(s,p,0), *wr=dp_sega_port(s,p,1);
         fprintf(out,"  port $%02X read %"PRIu64" (%s), write %"PRIu64" (%s)\n",p,r->io_read[p],rd?rd->name:"unmapped",r->io_write[p],wr?wr->name:"unmapped");
     }
+    if(r->smc_writes) fprintf(out,"  self-modifying RAM code: %"PRIu64" stores into executed bytes (first at pc $%04X)\n",r->smc_writes,r->smc_first_pc);
     if(strcmp(s->id,"msx")) {   // typed audio: PSG ($7E/$7F writes) and the Japanese FM ($F0/$F1, YM2413)
         uint64_t psg=r->io_write[0x7E]+r->io_write[0x7F], fm=r->io_write[0xF0]+r->io_write[0xF1];
         if(psg||fm) fprintf(out,"  audio (music data, observed writes; the FM chip is not emulated): PSG %"PRIu64", YM2413 FM %"PRIu64"\n",psg,fm);

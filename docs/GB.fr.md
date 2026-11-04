@@ -2312,3 +2312,9 @@ MD, PCE, SMS/MSX. Test `nes` (`test_smc`).
 Compteur SMC sur les pages WRAM `$F8-$FB` de la PCE, pour les stores `STA/STX/STY` (zéro page et absolu)
 exécutés depuis la ROM ; les stores des blocs de transfert ne sont pas vus. Reste à porter : MD, SMS/MSX.
 Test `pce` (`test_ramcode`).
+
+## 0.162.0 (archive RAM — événements SMC, SMS/GG/SG/MSX)
+
+Compteur SMC sur la RAM Z80 des systèmes Sega et du MSX : une écriture dans un octet déjà exécuté
+depuis la RAM est rapportée « self-modifying RAM code » (compte + premier pc). Reste à porter : MD.
+Test `sega_streams`.

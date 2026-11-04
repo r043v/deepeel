@@ -47,7 +47,8 @@ int main(void) {
         static uint8_t rom2[0x8000];
         memset(rom2, 0xFF, sizeof rom2);
         const uint8_t code[] = {0x21, 0x00, 0xC1, 0x36, 0x3E, 0x23, 0x36, 0x07, 0x23, 0x36, 0xC9,   // ld hl,$C100; ld (hl),$3E; inc hl; ld (hl),7; inc hl; ld (hl),$C9
-                                0xCD, 0x00, 0xC1, 0x76};
+                                0xCD, 0x00, 0xC1,
+                                0x21, 0x00, 0xC1, 0x36, 0x00, 0x76};   // call; ld hl,$C100; ld (hl),0 (rewrites a byte that ran); halt
         memcpy(rom2, code, sizeof code);
         DpSegaResults r2;
         memset(&r2, 0, sizeof r2);
@@ -56,6 +57,7 @@ int main(void) {
         for (uint32_t i = 0; i < r2.ra.cap; i++)
             if (r2.ra.e[i].key && r2.ra.e[i].len == 2 && r2.ra.e[i].pc == 0xC100 && r2.ra.e[i].b[0] == 0x3E && r2.ra.e[i].b[1] == 0x07) found = 1;
         CHECK(found);
+        CHECK(r2.smc_writes >= 1);
         dp_sega_results_free(&r2);
     }
     TEST_DONE("sega_streams");
