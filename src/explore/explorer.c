@@ -12,6 +12,9 @@
 // res->mt is set.  The fork explorer only runs while the sessions wait at
 // the epoch barrier, so its own updates stay lock-free.
 #include <zlib.h>
+
+#include <signal.h>
+volatile sig_atomic_t dp_explore_interrupt;
 #include <sys/stat.h>
 #include "explorer.h"
 #include "../core/dpmachine.h"
@@ -1326,7 +1329,7 @@ int dp_explore_step(DpExplorer *ex) {
         int work = sh->len != 0;
         int all_idle = sh->idle >= sh->nthreads;
         pthread_mutex_unlock(&sh->mtx);
-        if (ex->stop) { r = 0; break; }
+        if (ex->stop || dp_explore_interrupt) { r = 0; break; }
         if (work || dp_explorer_spool_pending(ex)) { r = 1; break; }
         if (all_idle) { r = 0; break; }
         usleep(1000);
@@ -1477,7 +1480,7 @@ int dp_explore_slice(DpExplorer *ex, int ms) {
     int more = 1;
     while (more) {
         more = dp_explore_step(ex);
-        if (ex->stop) return 0;
+        if (ex->stop || dp_explore_interrupt) return 0;
         if ((uint64_t)clock() * 1000000ull / CLOCKS_PER_SEC >= deadline) break;
     }
     return more;

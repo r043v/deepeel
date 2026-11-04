@@ -5,6 +5,7 @@
 //   deepeel map rom.gb [--json f] [--text f]        static map only
 //   deepeel regs gb                                 dump the GB register registry
 //   deepeel dis rom.gb bank:addr [n]                disassemble n instructions
+#include <signal.h>
 #include <sys/stat.h>
 #include "core/md5.h"
 #include "core/cart.h"
@@ -33,6 +34,13 @@
 #include "platform/pce/pce.h"
 
 static uint8_t *nes_read_file(const char *path, size_t *size);
+static DpExplorer *volatile g_sig_ex;
+static void on_explore_sigint(int sig) {
+    (void)sig;
+    dp_explore_interrupt = 1;
+    if (g_sig_ex) g_sig_ex->stop = 1;
+}
+
 int dp_lr_command(int argc, char **argv);
 static int cmd_nes(int argc, char **argv);
 static int cmd_pce(int argc, char **argv);
@@ -538,6 +546,10 @@ static int cmd_explore(int argc, char **argv) {
         if (from_png) png_slot = dp_play_load_png(play_engine, from_png);
         if (from_png && png_slot < 0) return 1;
     }
+    // plain fork exploration: SIGINT asks the explorer to stop cleanly (state, spool and report are
+    // written) instead of killing the process; --play installs its own cooperative handler below
+    g_sig_ex = ex;
+    signal(SIGINT, on_explore_sigint);
     int rc = 0;
     if (gui && dp_gui_available()) {
         if (human) dp_play_human_begin(play_engine, human_slot);

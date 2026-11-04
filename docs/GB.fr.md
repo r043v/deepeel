@@ -2360,3 +2360,11 @@ sur n'importe quel cœur ; flèches = croix, Z = B, X = A, A = Y, S = X, Entrée
 Q/Échap quitte. Essayé en pilote vidéo `dummy` sur le cœur factice et Genesis Plus GX (60 trames) ; la
 jouabilité réelle au clavier n'a pas été éprouvée ici. Test dans `lr_play_cli`. Restent : branchement sur
 l'explorateur, mode `--watch` d'une exploration en cours.
+
+## 0.168.0 (correctif : SIGINT sur `explore`)
+
+Sans `--play`, `deepeel explore` n'installait aucun gestionnaire de SIGINT : un SIGINT tuait le processus
+sans rapport ni état (deux runs `--unbounded` de ~2 h 30 ont ainsi été perdus). Le gestionnaire pose
+désormais un drapeau persistant (`dp_explore_interrupt`) que la boucle d'exploration teste ; les phases
+qui remettent `ex->stop` à zéro ne l'effacent plus. Vérifié : run `--unbounded` interrompu au bout de
+20 s, rapport écrit, processus terminé. Le `--time-limit` n'est pas appliqué hors `--play` : à traiter.

@@ -11,6 +11,7 @@
 #ifndef DP_EXPLORER_H
 #define DP_EXPLORER_H
 
+#include <signal.h>
 #include "../core/machine.h"
 #include "../mach/m0boy.h"
 #include "../core/coverage.h"
@@ -619,5 +620,8 @@ typedef struct DpProgress {
     uint32_t sections;
 } DpProgress;
 void dp_explorer_progress(DpExplorer *ex, DpProgress *out);
+
+// set by the SIGINT handler of `deepeel explore`: sticky (unlike ex->stop, which phases reset)
+extern volatile sig_atomic_t dp_explore_interrupt;
 
 #endif
