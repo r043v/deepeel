@@ -12,10 +12,10 @@ remesure pas l'outil.
 | SMS/GG | 32 | 5 | 0 | 2 |
 | MSX | 32 | 5 | 0 | 2 |
 | NES | 13 | 24 | 0 | 2 |
-| PCE | 20 | 18 | 0 | 1 |
+| PCE | 21 | 17 | 0 | 1 |
 | MD | 12 | 26 | 0 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 84.
+Cellules ouvertes (◐ ou ✗) : 83.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -29,7 +29,6 @@ Cellules ouvertes (◐ ou ✗) : 84.
 | D12 | Cibles indirectes observées | PCE | ◐ observé (`jmp (abs)`, `jmp (abs,X)`), sans second passage |
 | D12 | Cibles indirectes observées | MD | ◐ observé (`jmp/jsr` par An), sans second passage |
 | D13 | Coupes de non-sens | MD | ◐ faute |
-| D14 | Chien de garde HALT, glissade de padding | PCE | ◐ glissade $00/$FF coupée (`padding cuts`) + opcode illégal ; pas de HALT/WAI attribué |
 | D14 | Chien de garde HALT, glissade de padding | MD | ◐ glissade `ori.b #0,d0` coupée sur option (`--cut-padding`, 16 octets nuls) ; fautes d'opcode déjà rapportées |
 | S1 | Scan padding + tables de pointeurs | NES | ◐ padding + tables, sans pointeurs ROM→ROM hors fenêtre |
 | S2 | Fermeture statique de flot | NES | ◐ saut/appel/branche, fenêtre propre |
