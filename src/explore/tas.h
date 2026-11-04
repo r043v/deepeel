@@ -36,7 +36,15 @@ typedef struct DpTas {
     // VBM header minor version ($30): 0 = VBA 1.7.2 based recorders (up to
     // VBA-rr v23.0), 1 = later (VBA-rr v23.1+, v24 "V8" core)
     int recorder_rev;
+    // movie frames the DMG boot ROM ran before the cartridge's first
+    // instruction (BizHawk Gambatte with the original boot ROM; the masks of
+    // those frames are dropped at load, frame 0 is the first with the game)
+    int boot_frames;
 } DpTas;
+
+// Gambatte, original DMG boot ROM: $0100 is reached 4496 cycles into movie
+// frame 334 (observed on libgambatte, both Mario Land 2 movies)
+#define DP_TAS_GAMBATTE_DMG_BOOT_FRAMES 334
 
 enum { DP_TAS_REC_UNKNOWN = 0, DP_TAS_REC_VBA, DP_TAS_REC_BIZHAWK };
 

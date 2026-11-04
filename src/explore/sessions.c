@@ -11,6 +11,8 @@
 // and the results mutexes (res->mt stays 1 for the whole play).  A segment
 // ends inside the vblank hook: the next checkpoint loads straight into the
 // running machine and play continues without leaving gbl_run.
+#include <zlib.h>
+#include "gambatte_init.h"
 #include "sessions.h"
 #include "../core/snapshot_png.h"
 #include "../mach/m0boy.h"
@@ -582,6 +584,41 @@ static void worker_vblank(DpMach *m) {
         dp_mach_cut(m, DP_CUT_QUIT);
         return;
     }
+    // desync diagnostics: DEEPEEL_TAS_DUMP=<file> logs "<frame> <fnv(WRAM $C000..$DFFF)> ..."
+    // at every movie vblank (compare against a reference emulator's run);
+    // DEEPEEL_TAS_DUMPFRAME=<n> writes WRAM+SRAM+HRAM at that frame to /tmp/dp_tas_wram.bin;
+    // DEEPEEL_TAS_TRACEFRAME=<n> traces the next frame
+    if (w->mode == IN_TAS && w->tas_idx == 0) {
+        static FILE *dumpf;
+        static int dump_init;
+        if (!dump_init) {
+            const char *dn = getenv("DEEPEEL_TAS_DUMP");
+            dump_init = 1;
+            if (dn) dumpf = fopen(dn, "w");
+        }
+        if (dumpf) {
+            uint64_t h = 1469598103934665603ull;
+            for (int i = 0; i < 0x2000; i++) h = (h ^ m->api->wram[i]) * 1099511628211ull;
+            uint32_t hh = 2166136261u;
+            for (int i = 0; i < 0x7F; i++) if (i != 0x04 && i != 0x05) hh = (hh ^ m->api->hram[i]) * 16777619u;
+            fprintf(dumpf, "%u %016llx pc=%04x ime=%u if=%02x ie=%02x 82=%02x 40=%02x LY=%02x hh=%08x h97=%02x\n", (unsigned)w->frames_done, (unsigned long long)h,
+                    m->api->gbr->pc, m->api->gbr->ime, m->api->io ? m->api->io[0x0F] : 0, m->api->ie ? *m->api->ie : 0, m->api->hram[0x82 - 0x80 + 0], m->api->io[0x40], m->api->io[0x44], hh, m->api->hram[0x17]);
+            fflush(dumpf);
+            extern int dp_dbg_trace;
+            extern FILE *dp_dbg_trace_f;
+            const char *tf = getenv("DEEPEEL_TAS_TRACEFRAME");
+            if (tf) {
+                if (!dp_dbg_trace_f) dp_dbg_trace_f = fopen("/tmp/dp_tas_trace.txt", "w");
+                fflush(dp_dbg_trace_f);
+                dp_dbg_trace = (unsigned)atoi(tf) == w->frames_done; // trace the frame that follows
+            }
+            const char *df = getenv("DEEPEEL_TAS_DUMPFRAME");
+            if (df && (unsigned)atoi(df) == w->frames_done) {
+                FILE *rf = fopen("/tmp/dp_tas_wram.bin", "wb");
+                if (rf) { fwrite(m->api->wram, 1, 0x2000, rf); fwrite(m->api->eram, 1, 0x8000, rf); fwrite(m->api->hram, 1, 0x80, rf); fclose(rf); }
+            }
+        }
+    }
     // input for this frame
     uint8_t mask;
     if (w->mode == IN_ATTRACT) mask = 0;
@@ -1067,6 +1104,24 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
             // the recording emulator's timing quirks (gbl.h movie sync
             // knobs), for this worker's machine only and while the movie
             // plays: random play after it runs on hardware timing again
+            // BizHawk (Gambatte) powers a cartridge up with blank battery RAM
+            // filled with $FF: games that read their save slot (Mario Land 2)
+            // branch on it, so a zeroed RAM replays another game
+            if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->mach->api->eram)
+                memset(w->mach->api->eram, 0xFF, dp_gbl_variant_eram[w->mach->api->variant]);
+            // BizHawk's Gambatte starts from a fixed power-on RAM dump, not zeros
+            if (w->tas.recorder == DP_TAS_REC_BIZHAWK && !getenv("DEEPEEL_TAS_NOINIT")) {
+                memcpy(w->mach->api->wram, dp_gambatte_wram, 0x2000);
+                memcpy(w->mach->api->hram, dp_gambatte_hram, 0x7F);
+            }
+            // BizHawk's frame clock (gbl.h, sync_vba_off_clock 3): a frame ends at
+            // the video frame or when its sample budget runs out
+            if (w->tas.recorder == DP_TAS_REC_BIZHAWK && !w->tas.equal_frames && !getenv("DEEPEEL_TAS_NOMODE3"))
+                *w->mach->api->sync_vba_off_clock = 3;
+            // Gambatte's DIV phase against the m0boy clock, measured on SML2 (DIV
+            // reads that seed its RNG): any skew in 25..64 matches, 40 is mid-range.
+            if (w->tas.recorder == DP_TAS_REC_BIZHAWK)
+                *w->mach->api->sync_div_skew = getenv("DEEPEEL_TAS_DIVSKEW") ? (uint8_t)atoi(getenv("DEEPEEL_TAS_DIVSKEW")) : 40;
             int vba_old = w->tas.recorder == DP_TAS_REC_VBA && w->tas.recorder_rev == 0;
             if (vba_old) {
                 // VBA 1.7.2 based recorders (VBM minor version 0): input

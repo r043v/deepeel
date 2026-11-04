@@ -196,6 +196,11 @@ static void bk2_header(const uint8_t *h, size_t n, DpTas *out) {
                 else out->sha1[k] = (uint8_t)(a << 4 | b);
             }
             out->has_sha1 = ok;
+        } else if (len > 40 && !strncmp(l, "GB_Firmware", 11) &&
+                   memmem(l, len, "4ED31EC6B0B175BB109C0EB5FD3D193DA823339F", 40)) {
+            // the original DMG boot ROM: the movie starts at power-on and the
+            // cartridge's code only begins at $0100 once it has run
+            out->boot_frames = DP_TAS_GAMBATTE_DMG_BOOT_FRAMES;
         } else if (len > 9 && !strncmp(l, "GameName ", 9)) {
             size_t g = len - 9 < sizeof out->game - 1 ? len - 9 : sizeof out->game - 1;
             memcpy(out->game, l + 9, g);
@@ -319,6 +324,12 @@ int dp_tas_load(const char *path, DpTas *out, char *err, size_t errsz) {
     int ok = tas_load_buf(d, (size_t)sz, out, err, errsz, 0);
     free(d);
     if (!ok) dp_tas_free(out);
+    else if (out->boot_frames > 0 && out->masks && out->frames > (uint32_t)out->boot_frames) {
+        // the frames the boot ROM spent are not the cartridge's: drop their
+        // (idle) input so frame 0 is the one that holds $0100
+        memmove(out->masks, out->masks + out->boot_frames, (out->frames - (uint32_t)out->boot_frames) * sizeof *out->masks);
+        out->frames -= (uint32_t)out->boot_frames;
+    } else out->boot_frames = 0;
     return ok;
 }
 

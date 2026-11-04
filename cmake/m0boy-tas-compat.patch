@@ -1,6 +1,6 @@
 --- a/gbl.h
 +++ b/gbl.h
-@@ -387,6 +387,31 @@
+@@ -387,6 +387,37 @@
  extern uint8_t gbl_safe_request;
  void gbl_platform_safe_point(void); /* weak default: nothing */
  
@@ -23,6 +23,12 @@
 + *    while the LCD is off (one every 600 frame lengths at most, so a host
 + *    frame hook still runs), and an enable keeps LY at 0 in mode 0 for ten
 + *    lines (VBA loads the mode-1 length) without the LYC=0 STAT edge.
++ *    3 = BizHawk (Gambatte core, VBlankDrivenFrames): a host frame ends at
++ *    the video frame's completion or when its 35112-sample budget (one frame
++ *    length) runs out, whichever comes first.  With the LCD off no video
++ *    frame completes until about 1828 cycles (4 lines) after the switch-off, so
++ *    frames then end on the budget alone (an enable late in a frame ends it
++ *    on the budget too, before the first vblank of the new frame).
 + *    There is no vblank on hardware with the LCD off: these are frame-clock
 + *    conventions, the movie's.  Value 2 needs the C timing path (the ARM
 + *    assembly gbl_ppu_advance_off ignores the pending enable). */
@@ -54,7 +60,7 @@
      case 0x0F: gbl_sync(); return IF | 0xE0;
 --- a/gbl_ppu.c
 +++ b/gbl_ppu.c
-@@ -837,10 +837,23 @@
+@@ -837,10 +837,42 @@
   * calls (register polls, VRAM writes) land between two transitions. */
  uint32_t gbl_ppu_due;
  
@@ -66,20 +72,39 @@
 +/* LCD-off frames left silent under gbl_sync_vba_off_clock == 2 (bounded) */
 +static uint32_t off_silent;
 +#define OFF_SILENT_MAX 600u
++/* gbl_sync_vba_off_clock == 3 (gbl.h): BizHawk frames.  gam_last is the time
++ * of the last frame boundary; the next one is the earlier of gam_last + one
++ * frame length (the host's sample budget) and the next video-frame
++ * completion: an LY 144 step with the LCD on, gam_v0 after a switch-off. */
++static uint32_t gam_last, gam_v0;
++static uint8_t gam_v0_pend, gam_stage;
++static uint32_t gam_a; /* the running frame's budget end (the real first hook) */
++#define GAM_K 1822u /* LCD off write -> first video-frame completion */
++static uint32_t gam_next(void) {
++    uint32_t nb = gam_last + FRAME_CYCLES;
++    if (gam_v0_pend && (int32_t)(gam_v0 - nb) < 0) nb = gam_v0;
++    return nb;
++}
 +static uint32_t off_due(void) {
++    if (gbl_sync_vba_off_clock == 3) return gam_next();
 +    uint32_t f = off_start + FRAME_CYCLES;
 +    return (on_pend && (int32_t)(on_at - f) < 0) ? on_at : f;
 +}
  static void update_due(void) {
 -    gbl_ppu_due = lcd_on ? line_start + next_stage_off : off_start + FRAME_CYCLES;
-+    gbl_ppu_due = lcd_on ? line_start + next_stage_off : off_due();
++    uint32_t d = lcd_on ? line_start + next_stage_off : off_due();
++    if (lcd_on && gbl_sync_vba_off_clock == 3) {
++        uint32_t nb = gam_last + FRAME_CYCLES;
++        if ((int32_t)(nb - d) < 0) d = nb;
++    }
++    gbl_ppu_due = d;
  }
  
 +static void lcd_enable_at(uint32_t at, int lyc_edge);
  /* LCD off: a virtual frame clock (the assembly version jumps here too). */
  #if GBL_TIMING_ASM
  void gbl_ppu_advance_off(uint32_t now);
-@@ -848,10 +861,25 @@
+@@ -848,10 +880,50 @@
  static
  #endif
  void gbl_ppu_advance_off(uint32_t now) {
@@ -91,6 +116,31 @@
 +        P.evt_dirty = 1;
 +        update_due();
 +        gbl_ppu_advance(now);
++        return;
++    }
++    if (gbl_sync_vba_off_clock == 3) {
++        for (;;) {
++            uint32_t nb = gam_next();
++            if ((int32_t)(now - nb) < 0) break;
++            if (gam_v0_pend && nb == gam_v0) {
++                if (gam_stage == 1) {
++                    /* stands for the budget end gam_a; the completion that
++                     * follows it stays one frame after this hook, and a
++                     * switch-on before it cancels that completion */
++                    gam_stage = 2;
++                    gam_last = gam_a;
++                    gam_v0 = nb + FRAME_CYCLES;
++                    goto gam_fired;
++                }
++                gam_v0_pend = 0;
++            }
++            gam_last = nb;
++        gam_fired:
++            ppu_moved = 1;
++            P.evt_dirty = 1;
++            gbl_frame++;
++            gbl_platform_vblank();
++        }
 +        return;
 +    }
 +    /* signed: with gbl_sync_vba_off_clock == 1 the first virtual frame may
@@ -106,7 +156,41 @@
          gbl_frame++;
          gbl_platform_vblank();
      }
-@@ -977,12 +1005,12 @@
+@@ -916,6 +988,25 @@
+     }
+     for (;;) {
+         uint32_t off = now - line_start;
++        if (gbl_sync_vba_off_clock == 3) {
++            /* a frame the host's budget ends before the LCD completes one
++             * (an enable late in the frame) */
++            uint32_t nb = gam_last + FRAME_CYCLES;
++            if ((int32_t)(now - gam_last) > (int32_t)(4u * FRAME_CYCLES)) {
++                gam_last = now; /* a restored state: the clock restarts */
++            } else if ((int32_t)(now - nb) >= 0 &&
++                       (int32_t)(nb - (line_start + (uint32_t)(ly < 144 ? 144 - ly : 298 - ly) * LINE_CYCLES)) < 0) {
++                /* the budget ends before the next LY 144 step (which sets
++                 * gam_last itself); now may be well past it when the CPU
++                 * halted, hence the explicit vblank time */
++                ppu_moved = 1;
++                P.evt_dirty = 1;
++                gam_last = nb;
++                gbl_frame++;
++                gbl_platform_vblank();
++                continue;
++            }
++        }
+         if (ly < 144) {
+             if (stage == 0) {
+                 if (off < MODE3_START) break;
+@@ -963,6 +1054,7 @@
+             mode = 1;
+             IF |= 0x01;
+             stat_update();
++            gam_last = line_start;
+             gbl_frame++;
+             gbl_platform_vblank();
+         } else {
+@@ -977,12 +1069,12 @@
  #endif
  
  uint32_t gbl_ppu_stable_until(void) {
@@ -121,7 +205,7 @@
      uint8_t s = STAT;
  #if GBL_TIMING_ASM
      if (ly < 144 && stage < 2 && (s & 0x08)) return line_start + MODE0_START;
-@@ -1055,6 +1083,28 @@
+@@ -1055,6 +1147,28 @@
      return gbl_io[n];
  }
  
@@ -150,7 +234,7 @@
  void gbl_ppu_write(uint8_t n, uint8_t v) {
      gbl_ppu_sync(gbr.cyc);
  #if GBL_FRAME_SIGNATURE
-@@ -1063,33 +1113,33 @@
+@@ -1063,33 +1177,43 @@
  #endif
      switch (n) {
      case 0x40:
@@ -172,6 +256,7 @@
 -             * mode sources stay quiet: the first line after enable starts
 -             * without a mode-2 OAM search. */
 +        if ((v & 0x80) && !lcd_on && !on_pend) {
++            gam_v0_pend = 0;
              LCDC = v;
 -            lyc_refresh();
 -            if (P.lyc_line) IF |= 0x02;
@@ -192,6 +277,15 @@
              stat_line = 0;
              off_start = gbr.cyc;
 +            off_silent = 0;
++            if (gbl_sync_vba_off_clock == 3) {
++                /* gbl.h: a write the movie's frames see: the budget ends the
++                 * running frame, a video frame completes GAM_K later */
++                gam_v0 = gbr.cyc + GAM_K;
++                gam_v0_pend = 1;
++                gam_stage = 1;
++                if ((int32_t)(gbr.cyc - gam_last) > (int32_t)(4u * FRAME_CYCLES)) gam_last = gbr.cyc;
++                gam_a = gam_last + FRAME_CYCLES;
++            }
 +            if (gbl_sync_vba_off_clock == 1) {
 +                /* gbl.h: the first frame ends at the line clock's next LY
 +                 * 144->145 step after the white screen; off_start is the
@@ -204,10 +298,12 @@
          }
          LCDC = v;
          update_due();
-@@ -1109,6 +1159,8 @@
+@@ -1109,6 +1233,10 @@
  }
  
  void gbl_ppu_reset(void) {
++    gam_v0_pend = 0;
++    gam_last = 0;
 +    on_pend = 0;
 +    off_silent = 0;
      LCDC = 0x91;

@@ -2131,3 +2131,39 @@ choisie par LCDC + défilement grossier, échantillonnée toutes les 8 images en
 jeu aléatoire). Le pool choisit déjà le point le moins tiré, donc une nouvelle
 cellule est reprise en priorité. Rapport : `N screen cells archived into the
 checkpoint pool`. Observation de l'outil, pas une mesure de matériel.
+
+## 0.145.0 (GB — rejeu des films BizHawk Gambatte)
+
+Le rejeu des films `.bk2` GB reste calé sur BizHawk Gambatte bien plus loin.
+Mesuré sur `dadinfinitum-supermarioland2.bk2` (SML2, 74 317 images jouées), en
+comparant à chaque image un hash de la WRAM $C000–$DFFF avec libgambatte :
+la concordance passait de ~18 800 images à **41 774 images** (56 %). Observation
+de l'outil, pas une mesure de matériel.
+
+Ce qui a été corrigé :
+
+- Le film démarre à la mise sous tension chez BizHawk : `$0100` arrive à
+  l'image 334. Deepeel décale donc les masques d'entrée de 334 images.
+- Horloge d'images « mode 3 » (`gbl_sync_vba_off_clock = 3`) : une image dure
+  35 112 échantillons ou s'arrête au vblank, comme `gambatte_runfor`. Les
+  périodes LCD éteint/rallumé comptent comme dans Gambatte.
+- État initial : WRAM/HRAM issues de l'état post-boot Gambatte
+  (`gambatte_init.c`), SRAM à $FF.
+- Phase de la DIV : le jeu en tire sa graine aléatoire (SML2 lit DIV deux fois
+  avant l'écran d'attente). Un décalage de lecture de **40 cycles** (valeur
+  par défaut pour les films BizHawk ; toute valeur entre 25 et 64 donne les
+  mêmes lectures sur ce film) rend la première lecture 0x1d comme Gambatte au
+  lieu de 0x1c.
+
+Limite connue : vers l'image 32 150 puis l'image 41 340, des compteurs du moteur
+son en HRAM (FF99, FFC0, FFC6, FFC8) s'écartent de 1 à 5 unités. Ils se
+résorbent la première fois ; la seconde, la référence éteint le LCD à l'image
+41 870 alors que deepeel reste à l'écran d'attente jusqu'à l'image 51 251. Le
+film complet n'est donc pas encore rejoué à l'identique ; la cause (déphasage
+cumulé du moteur son, sans lecture de registre d'E/S dans cette fenêtre) n'est
+pas élucidée.
+
+Diagnostics (variables d'environnement, hors usage normal) :
+`DEEPEEL_TAS_DUMP=<fichier>` (hash par image), `DEEPEEL_TAS_DUMPFRAME=<n>`,
+`DEEPEEL_TAS_TRACEFRAME=<n>`, `DEEPEEL_TAS_DIVSKEW=<k>`, `DEEPEEL_TAS_NOINIT`,
+`DEEPEEL_TAS_NOMODE3`, `DEEPEEL_DEBUG_WATCHR/WATCHW=<adresse hex>`.

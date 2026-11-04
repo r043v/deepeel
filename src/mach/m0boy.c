@@ -4,6 +4,7 @@
  * symbol of that instance. */
 #include "m0boy.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -134,19 +135,41 @@ void dp_gbl_hook_coverage(int v, int i, uint16_t bank, uint16_t addr, int entry)
     (void)entry; /* exec marking happens in the engine's on_step */
 }
 
+int dp_dbg_trace;
+FILE *dp_dbg_trace_f;
 void dp_gbl_hook_trace(int v, int i, uint16_t pc) {
     DpMach *m = mach_at[v][i];
+    if (dp_dbg_trace && dp_dbg_trace_f) { // desync diagnostics: one frame's pc sequence
+        const gbl_cpu_t *c = m->api->gbr;
+        fprintf(dp_dbg_trace_f, "%04x %02x %04x %04x %04x %04x\n", pc, c->a, c->bc, c->de, c->hl, c->sp);
+    }
     if (!m || !m->on_step) return;
     m->on_step(m, pc, dp_mach_op(m, pc), 0);
 }
 
 void dp_gbl_hook_read(int v, int i, uint16_t a, uint8_t val) {
     DpMach *m = mach_at[v][i];
+    static long watchr = -2;
+    if (watchr == -2) {
+        const char *e = getenv("DEEPEEL_DEBUG_WATCHR"); // desync diagnostics
+        watchr = e ? strtol(e, NULL, 16) : -1;
+    }
+    if (m && watchr == a) fprintf(stderr, "R v=%u a=%04x val=%02x pc=%04x\n", (unsigned)*m->api->frame, a, val, m->api->gbr->pc);
     if (m && m->on_read) m->on_read(m, a, val);
 }
 
 void dp_gbl_hook_write(int v, int i, uint16_t a, uint8_t val) {
     DpMach *m = mach_at[v][i];
+    static long watchw = -2;
+    if (watchw == -2) {
+        const char *e = getenv("DEEPEEL_DEBUG_WATCHW"); // desync diagnostics
+        watchw = e ? strtol(e, NULL, 16) : -1;
+    }
+    if (m && watchw == a) {
+        const gbl_cpu_t *c = m->api->gbr;
+        fprintf(stderr, "W v=%u a=%04x val=%02x pc=%04x af=%02x bc=%04x de=%04x hl=%04x sp=%04x bank=%u\n",
+                (unsigned)*m->api->frame, a, val, c->pc, c->a, c->bc, c->de, c->hl, c->sp, c->rom_bank);
+    }
     if (m && m->on_write) m->on_write(m, a, val);
 }
 
