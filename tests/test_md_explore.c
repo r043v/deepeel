@@ -360,14 +360,14 @@ int main(int argc, char **argv) {
         rom[6] = 0x02;                                          // reset -> $200
         rom[0x7A] = 0x03;                                       // level 6 (V-int) -> $300
         rom[0x200] = 0x60; rom[0x201] = 0xFE;                   // bra *
-        rom[0x300] = 0x4E; rom[0x301] = 0x71; rom[0x302] = 0x60; rom[0x303] = 0xFE;   // nop; bra *
+        { static const uint8_t h[] = { 0x4E,0x71, 0x70,0x00, 0x66,0x04, 0x60,0xFE, 0x4E,0x71, 0x60,0xFE }; memcpy(rom + 0x300, h, sizeof h); }   // nop; moveq #0,d0; bne.s +4: the taken side ($30A) is the fork
         char err[128];
         for (int s = 0; s < 2; s++) {
             CHECK(dp_md_cart_from_mem(&c, rom, sizeof rom, err, sizeof err) == 0);
             DpMdOptions o; dp_md_options_default(&o);
             o.max_total = 100000; o.seed_vectors = s;
             CHECK(dp_md_explore(&c, &o, &r) == 0);
-            if (s) { CHECK(r.vectors_seeded == 1 && executed(&r, 0x300)); CHECK((r.flags[0x300] & DP_MDF_FORCED) && !(r.flags[0x300] & DP_MDF_NATURAL)); CHECK((r.exec_kind[0x300] & DP_MDX_ENTRY) && (r.exec_kind[0x300] & DP_MDX_IRQ)); CHECK((r.exec_kind[0x200] & DP_MDX_ENTRY) && !(r.exec_kind[0x200] & DP_MDX_IRQ)); }
+            if (s) { CHECK(r.vectors_seeded == 1 && executed(&r, 0x300)); CHECK((r.flags[0x300] & DP_MDF_FORCED) && !(r.flags[0x300] & DP_MDF_NATURAL)); CHECK((r.exec_kind[0x300] & DP_MDX_ENTRY) && (r.exec_kind[0x300] & DP_MDX_IRQ)); CHECK((r.exec_kind[0x200] & DP_MDX_ENTRY) && !(r.exec_kind[0x200] & DP_MDX_IRQ)); CHECK((r.flags[0x30A] & DP_MDF_FORCED) && (r.exec_kind[0x30A] & DP_MDX_IRQ)); }
             else CHECK(r.vectors_seeded == 0 && !executed(&r, 0x300));
             dp_md_results_free(&r); dp_md_cart_free(&c);
         }

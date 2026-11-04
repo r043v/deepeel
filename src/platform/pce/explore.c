@@ -39,6 +39,7 @@ typedef struct {
     uLongf zlen;
     uint8_t forced;
     uint32_t choice;       // choice-tree node (0: none)
+    uint8_t in_handler;    // forked inside an interrupt handler (not persisted in disk lots)
 } PceQueued;
 
 enum { LOOP_SLOTS = 4096 };
@@ -396,14 +397,14 @@ static int push_live(PceRun *x, int forced) {
             x->park = g; x->park_cap = nc;
         }
         x->park[x->park_len].z = z; x->park[x->park_len].zlen = zl; x->park[x->park_len].forced = (uint8_t)forced;
-        x->park[x->park_len].choice = node;
+        x->park[x->park_len].choice = node; x->park[x->park_len].in_handler = (uint8_t)x->in_handler;
         x->park_len++; r->parked++;
         return 1;
     }
     x->queue[x->queue_len].z = z;
     x->queue[x->queue_len].zlen = zl;
     x->queue[x->queue_len].forced = (uint8_t)forced;
-    x->queue[x->queue_len].choice = node;
+    x->queue[x->queue_len].choice = node; x->queue[x->queue_len].in_handler = (uint8_t)x->in_handler;
     x->queue_len++;
     r->state_bytes_peak += zl;
     return 1;
@@ -635,7 +636,7 @@ static int pstm_cross(PceRun *x, PDec *d) {
             if (!z) continue;
             memcpy(z, x->ztmp, zl);
             x->queue[x->queue_len].z = z; x->queue[x->queue_len].zlen = zl;
-            x->queue[x->queue_len].forced = 1; x->queue[x->queue_len].choice = 0;
+            x->queue[x->queue_len].forced = 1; x->queue[x->queue_len].choice = 0; x->queue[x->queue_len].in_handler = 0;
             x->queue_len++; r->s6_runs++; pushed++;
         }
     }
@@ -686,7 +687,7 @@ static int pstm_replay(PceRun *x) {
                 if (!z) continue;
                 memcpy(z, x->ztmp, zl);
                 x->queue[x->queue_len].z = z; x->queue[x->queue_len].zlen = zl;
-                x->queue[x->queue_len].forced = 1; x->queue[x->queue_len].choice = 0;
+                x->queue[x->queue_len].forced = 1; x->queue[x->queue_len].choice = 0; x->queue[x->queue_len].in_handler = 0;
                 x->queue_len++; r->s6_runs++; pushed++;
             }
         }
@@ -853,7 +854,7 @@ static void run_path(PceRun *x, PceQueued q) {
     dp_pce_load(x->tmp);
     memset(x->loops, 0, sizeof x->loops);
     x->path_steps = 0;
-    x->was_outside = 0; x->exp_pc = -1; x->in_handler = 0;
+    x->was_outside = 0; x->exp_pc = -1; x->in_handler = q.in_handler;
     x->forced = q.forced;
     x->cur_choice = q.choice;
     x->path_id = r->paths++;
@@ -1680,7 +1681,7 @@ drain:
                 uint8_t *z = malloc(zl);
                 if (z && compress2(z, &zl, blob, bl, 1) == Z_OK) {
                     x->queue[x->queue_len].z = z; x->queue[x->queue_len].zlen = zl;
-                    x->queue[x->queue_len].forced = forced; x->queue[x->queue_len].choice = choice; x->queue_len++;
+                    x->queue[x->queue_len].forced = forced; x->queue[x->queue_len].choice = choice; x->queue[x->queue_len].in_handler = 0; x->queue_len++;
                 } else free(z);
                 free(blob); blob = NULL;
             } else free(blob);

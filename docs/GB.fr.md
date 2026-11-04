@@ -3283,3 +3283,10 @@ Chaque état en file porte `in_handler` (copié à la création de la fourche) ;
 l'adopte. Une fourche prise dans un handler NMI/IRQ garde donc le marquage IRQ. L'enregistrement de
 file grossit d'un octet : un lot disque écrit par une version antérieure n'est pas relisible. Test
 `nes` (`test_seed_vectors`, contrôle négatif fait). PCE et MD gardent la limite.
+
+## PCE et MD : l'état de handler suit les fourches (D1) (0.238.0)
+
+Même mécanisme que NES (0.237.0) : chaque état en file porte `in_handler`, adopté par le chemin
+repris. Les lots disque (`--unbounded`) ne persistent pas ce champ (format inchangé, anciens lots
+relisibles) : une fourche relue depuis le disque perd le marquage IRQ. Tests `pce` et `md_explore`
+(fourche dans un handler, contrôle négatif fait).

@@ -407,7 +407,7 @@ static void test_seed_vectors(void) {
     rom[0x1FFE] = 0x00; rom[0x1FFF] = 0xE0;               // reset -> $E000
     rom[0x1FFC] = 0x00; rom[0x1FFD] = 0xE1;               // NMI -> $E100
     rom[0x1FFA] = 0x20; rom[0x1FFB] = 0xE1;               // TIMER -> $E120
-    rom[0x100] = 0xEA; rom[0x101] = 0x80; rom[0x102] = 0xFE;
+    { static const uint8_t h[] = { 0xEA, 0xA9, 0x00, 0xD0, 0x03, 0x80, 0xFE, 0xEA, 0x80, 0xFE }; memcpy(rom + 0x100, h, sizeof h); } // lda #0; bne +3: the taken side ($108) is the fork
     rom[0x120] = 0xEA; rom[0x121] = 0x80; rom[0x122] = 0xFE;
     for (int seeded = 0; seeded < 2; seeded++) {
         DpPceOptions o = dp_pce_options();
@@ -419,6 +419,7 @@ static void test_seed_vectors(void) {
             CHECK(r->flags[0x100] != 0 && r->flags[0x120] != 0, "vector code reached");
             CHECK((r->exec_kind[0x100] & DP_PCE_X_ENTRY) && (r->exec_kind[0x100] & DP_PCE_X_IRQ), "D1: NMI handler entry + irq (%d)", r->exec_kind[0x100]);
             CHECK((r->exec_kind[0] & DP_PCE_X_ENTRY) && !(r->exec_kind[0] & DP_PCE_X_IRQ), "D1: reset entry, not irq");
+            CHECK((r->flags[0x108] & DP_PCE_FORCED) && (r->exec_kind[0x108] & DP_PCE_X_IRQ), "D1: a fork taken inside a handler keeps the irq mark (%d)", r->exec_kind[0x108]);
             CHECK((r->flags[0x100] & DP_PCE_FORCED) && !(r->flags[0x100] & DP_PCE_NATURAL), "vector code is forced, not natural (%02x)", r->flags[0x100]);
         } else CHECK(r->flags[0x100] == 0, "not reached without the option");
         dp_pce_results_free(r);

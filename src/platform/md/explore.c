@@ -22,6 +22,7 @@ typedef struct {
     void *state;
     uint32_t choice;        // choice-tree node (0: none)
     int forced;
+    int in_handler;         // forked inside an exception handler (not persisted in disk lots)
     uint32_t origin;
     uint32_t an_writer[8];
     uint32_t watch_pc, watch_addr, watch_value;
@@ -258,7 +259,7 @@ static int push(X *x, uint32_t pc, int vint, int hint) {
     Item *item = full ? &x->park[x->npark++] : &x->q[x->nq++];
     if (full) x->r->parked++;
     x->last_state = s;
-    item->state = s; item->forced = 1; item->origin = x->pc;
+    item->state = s; item->forced = 1; item->origin = x->pc; item->in_handler = x->in_handler;
     item->choice = x->o->tree_path ? dp_tree_add(&x->tree, x->cur_choice, 4, x->push_site, 0, (int)(pc & 0xFFFF)) : 0;
     x->push_site = 0;
     memcpy(item->an_writer, x->an_writer, sizeof item->an_writer);
@@ -1040,7 +1041,7 @@ static void run_path(X *x, Item *it, uint64_t budget, int *cut) {
     x->halted = 0;
     x->previous_move_valid = x->register_move_valid = 0;
     x->forced = it ? it->forced : 0;
-    x->exp_pc = -1; x->in_handler = 0;
+    x->exp_pc = -1; x->in_handler = it ? it->in_handler : 0;
     x->cur_choice = it ? it->choice : 0;
     x->origin = it ? it->origin : UINT32_MAX;
     for (unsigned i = 0; i < 8; i++) x->an_writer[i] = it ? it->an_writer[i] : UINT32_MAX;
