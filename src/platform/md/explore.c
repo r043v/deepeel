@@ -105,6 +105,7 @@ typedef struct {
     void *nov;           // novelty search state (NULL: off); the frame hook drives it
     uint64_t novel;      // ROM bytes executed for the first time (novelty gain)
     DpHashSet exact_seen;   // --exact-dedup: clock-free machine hashes
+    char exact_path[600];   // <lot>.exact when the lot is on (persisted set)
     DpHashSet ctx_seen;     // --ctx-cap: admissions per coarse context
     DpTree tree;            // --tree: every pushed state is a choice
     uint32_t cur_choice;
@@ -1483,7 +1484,12 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     // resumed lot: its items carry ids of the tree the previous run saved
     if (x.lot && dp_lf_pending(x.lot) && o->tree_path && dp_tree_load(&x.tree, o->tree_path)) r->tree_loaded = x.tree.n;
     dp_set_init(&x.ctx_seen, 1 << 10);
-    dp_set_init(&x.exact_seen, 1 << 10);
+    dp_set_init(&x.exact_seen, 1 << 22);
+    if (o->exact_dedup && o->lot_path) {   // C3: the clock-free hashes persist next to the lot (resume skips them)
+        snprintf(x.exact_path, sizeof x.exact_path, "%s.exact", o->lot_path);
+        long n = dp_set_load(&x.exact_seen, x.exact_path, c->size);
+        if (n > 0) r->exact_loaded = (uint64_t)n;
+    }
     dp_set_init(&x.ind_sites, 1 << 8);
     dp_set_init(&x.pad_full_seen, 1 << 20);
     dp_set_init(&x.ind_pairs, 1 << 10);
@@ -1607,6 +1613,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     }
     dp_tree_free(&x.tree);
     dp_set_free(&x.ctx_seen);
+    if (o->exact_dedup && x.exact_path[0]) dp_set_save(&x.exact_seen, x.exact_path, c->size);
     dp_set_free(&x.exact_seen);
     for (uint32_t i = 0; i < x.nq; i++) {
         if (!lot_spill(&x, &x.q[i])) r->dropped_pending++;
@@ -1798,7 +1805,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     if (r->s4_tables) fprintf(out, "  jump tables (S4, jmp d(pc,Xn)): %llu tables, %llu handlers seeded, %llu refused\n", (unsigned long long)r->s4_tables, (unsigned long long)r->s4_seeds, (unsigned long long)r->s4_refused);
     if (r->disp_tables) fprintf(out, "  dispatch tables: %llu tables, %llu seeds, %llu refused targets\n", (unsigned long long)r->disp_tables, (unsigned long long)r->disp_seeds, (unsigned long long)r->disp_refused_view);
     if (r->state_exported) fprintf(out, "  state exported: deepest cell, %u frames from power-on\n", r->state_exported_depth);
-    if (r->exact_dups) fprintf(out, "  exact dedup: %llu forks dropped (same clock-free machine)\n", (unsigned long long)r->exact_dups);
+    if (r->exact_dups || r->exact_loaded) fprintf(out, "  exact dedup: %llu forks dropped (same clock-free machine), %llu hashes loaded from the previous run\n", (unsigned long long)r->exact_dups, (unsigned long long)r->exact_loaded);
     if (r->demo_run) fprintf(out, "  demo (no button pressed, from power-on): %llu frames, %llu ROM bytes executed\n", (unsigned long long)r->demo_run, (unsigned long long)r->demo_exec);
     if (r->pool_saved) fprintf(out, "  checkpoint pool: %llu kept, %llu sessions started from one\n", (unsigned long long)r->pool_saved, (unsigned long long)r->pool_starts);
     if (r->play_sessions_run) fprintf(out, "  played sessions: %llu, %llu frames\n", (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run);

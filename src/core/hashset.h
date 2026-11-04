@@ -57,6 +57,18 @@ static inline void dp_set_free(DpHashSet *s) {
     s->cap = s->cnt = s->cap_abs = 0;
 }
 
+// persistence (C3 exact.bin): header "DPXS", tag, count, then the keys
+#include <stdio.h>
+#include <string.h>
+static inline int dp_set_save(const DpHashSet *s, const char *path, uint64_t tag) {
+    FILE *f = fopen(path, "wb");
+    if (!f) return -1;
+    uint64_t n = s->cnt;
+    int ok = fwrite("DPXS", 1, 4, f) == 4 && fwrite(&tag, 8, 1, f) == 1 && fwrite(&n, 8, 1, f) == 1;
+    for (size_t i = 0; ok && i < s->cap; i++)
+        if (s->used[i]) ok = fwrite(&s->keys[i], 8, 1, f) == 1;
+    return (fclose(f) == 0 && ok) ? 0 : -1;
+}
 // returns 1 if inserted, 0 if already present; returns -1 when full
 static inline int dp_set_insert(DpHashSet *s, uint64_t key) {
     if (s->cnt >= s->cap * 3 / 4) {
@@ -69,5 +81,21 @@ static inline int dp_set_insert(DpHashSet *s, uint64_t key) {
     s->cnt++;
     return 1;
 }
+
+// returns the number of keys loaded, -1 when absent or for another tag
+static inline long dp_set_load(DpHashSet *s, const char *path, uint64_t tag) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    char m[4]; uint64_t t = 0, n = 0; long got = 0;
+    if (fread(m, 1, 4, f) != 4 || memcmp(m, "DPXS", 4) || fread(&t, 8, 1, f) != 1 || t != tag || fread(&n, 8, 1, f) != 1) { fclose(f); return -1; }
+    for (uint64_t i = 0; i < n; i++) {
+        uint64_t k;
+        if (fread(&k, 8, 1, f) != 1) break;
+        if (dp_set_insert(s, k) == 1) got++;
+    }
+    fclose(f);
+    return got;
+}
+
 
 #endif

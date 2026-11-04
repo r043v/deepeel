@@ -13,9 +13,9 @@ remesure pas l'outil.
 | MSX | 32 | 5 | 0 | 2 |
 | NES | 18 | 19 | 0 | 2 |
 | PCE | 24 | 14 | 0 | 1 |
-| MD | 17 | 21 | 0 | 1 |
+| MD | 18 | 20 | 0 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 70.
+Cellules ouvertes (◐ ou ✗) : 69.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -58,7 +58,6 @@ Cellules ouvertes (◐ ou ✗) : 70.
 | C2 | Éviction par contexte | NES | ◐ contexte grossier opt-in (`--ctx-cap`) |
 | C2 | Éviction par contexte | PCE | ◐ contexte grossier opt-in (`--ctx-cap`) |
 | C2 | Éviction par contexte | MD | ◐ contexte grossier opt-in (`--ctx-cap`) |
-| C3 | Dédup exacte hors horloges | MD | ◐ `--exact-dedup` (hors horloges, en mémoire) |
 | F2 | Arbre de choix persistant | NES | ◐ `--tree` (nœuds, parents, issues ; site renseigné pour les fourches de branchement ; reprise de l'arbre avec `--resume` (0.220.0)) |
 | F2 | Arbre de choix persistant | PCE | ◐ `--tree` (DpTree commun ; site renseigné pour les fourches ; reprise de l'arbre avec `--resume` (0.221.0)) |
 | F2 | Arbre de choix persistant | MD | ◐ `--tree` (DpTree commun ; site renseigné pour les fourches de branchement ; reprise de l'arbre avec `--resume` (0.222.0)) |

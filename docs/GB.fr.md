@@ -3500,3 +3500,11 @@ D4 NES reste ◐ : la chaîne ROM→WRAM→OAM n'est pas suivie.
 Un OAM DMA depuis une page de RAM (`$00-$1F`) marque `copied` les cellules PRG dont les octets ont été copiés vers ces
 octets de RAM par une boucle (provenance `ram_src`) ; compteur « ROM->WRAM->OAM » dans le rapport. Fixture
 `fix_nes_oamchain`, test `nes_oam_chain`. Avec 0.249.11–12, D4 NES couvre toutes les destinations de la norme : cellule ✅.
+
+## 0.249.14 (MD, C3 : dédup exacte persistée)
+
+Avec `--exact-dedup` et `--spool`/`--resume`, MD écrit l'ensemble des hachages « hors horloges » dans `<spool>.exact`
+(en-tête `DPXS`, étiquette = taille de la ROM, helpers `dp_set_save`/`dp_set_load` dans `src/core/hashset.h`) et le recharge
+à la reprise ; le rapport ajoute « N hashes loaded from the previous run ». Plafond de l'ensemble porté de 2^10 à 2^22 clés ;
+un ensemble plein renvoie -1 et l'état est conservé (jamais jeté). Test `md_exact_persist`. L'étiquette ne contrôle que la
+taille de la ROM, pas son contenu : reprendre avec une autre ROM de même taille chargerait des hachages sans rapport.

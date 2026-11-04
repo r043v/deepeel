@@ -552,3 +552,5 @@ add_test(NAME nes_sram_apu_copy COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMA
 set_tests_properties(nes_sram_apu_copy PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME nes_oam_chain COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_oamchain.nes --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_oc.txt >/dev/null 2>&1; grep -q 'ROM->WRAM->OAM 16' ${CMAKE_CURRENT_BINARY_DIR}/nes_oc.txt")
 set_tests_properties(nes_oam_chain PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME md_exact_persist COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -f $D/md_ex.lot*; $B md explore $D/fix_md_s4.md --exact-dedup --spool $D/md_ex.lot --text $D/md_ex1.txt >/dev/null 2>&1; $B md explore $D/fix_md_s4.md --exact-dedup --spool $D/md_ex.lot --text $D/md_ex2.txt >/dev/null 2>&1; test -s $D/md_ex.lot.exact && grep -q 'hashes loaded from the previous run' $D/md_ex2.txt && grep -q 'exact dedup: [1-9][0-9]* forks dropped' $D/md_ex2.txt")
+set_tests_properties(md_exact_persist PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
