@@ -345,7 +345,8 @@ static int push_live(PceRun *x, int forced) {
     DpPceResults *r = x->r;
     uint32_t node = 0;
     if (x->opt.tree_path) {
-        node = dp_tree_add(&x->tree, x->cur_choice, 4 /* fork */, 0, 0, dp_pce_cpu().pc);
+        int64_t fs = dp_pce_rom_index(x->cur_pc);
+        node = dp_tree_add(&x->tree, x->cur_choice, 4 /* fork */, fs < 0 ? 0 : (uint32_t)fs + 1, 0, dp_pce_cpu().pc);
     }
     if (!seen_insert(x, dp_pce_state_hash())) { r->evicted++; if (node) dp_tree_close(&x->tree, node, DP_ISSUE_MERGED); return 0; }
     if (x->opt.ctx_cap) {

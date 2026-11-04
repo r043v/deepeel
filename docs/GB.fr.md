@@ -3107,3 +3107,9 @@ seulement). Observation de l'outil, pas une mesure matérielle.
 Les nœuds d'arbre créés par une fourche de branchement MD (`--tree`) portent désormais l'adresse ROM
 du site (champ `site` de `DpChoice`) ; les autres graines (IRQ, pad, entrées) restent sans site.
 Observation de l'outil : sur `fix_md_dbcc`, le nœud fils porte le site `0x202`.
+
+## NES et PCE : site de bifurcation dans l'arbre de choix (F2) (2026-11-04, sans changement de version)
+
+Comme pour MD : les nœuds créés par une fourche de branchement NES (cellule PRG du branchement ;
+`0xFFFFFFFF` pour les autres graines) et PCE (index ROM + 1 du `pc` de la fourche ; 0 hors ROM)
+portent leur site. Observation de l'outil ; pas de reprise depuis l'arbre, F2 reste ◐.

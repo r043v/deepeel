@@ -83,6 +83,7 @@ typedef struct {
     int nov;                           // novelty search running (frame hook stops it, counts apart)
     uint64_t novel;                    // PRG cells executed for the first time (novelty gain)
     struct NStm *stm;                  // S6 decoder replay state
+    int64_t push_site;   // PRG cell of the branch being forked (tree site), -1 none
 } DpNesRun;
 
 static uint32_t loop_bump(DpNesRun *x, uint64_t key);
@@ -452,7 +453,10 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
                 *dp_nesmach_state_p(snap) = t.p;
                 DpNesPathState f = { snap, 1, 0, x->paths_opened, x->total_steps, 0 };
                 // the per-site budget only pays for forks that were queued
-                if (snap_push(x, &f)) { x->fork_sites[site]++; r->forks++; }
+                x->push_site = site;
+                int pushed = snap_push(x, &f);
+                x->push_site = -1;
+                if (pushed) { x->fork_sites[site]++; r->forks++; }
             }
         } else if (site >= 0) {
             r->fork_cuts++;
@@ -705,7 +709,7 @@ static uint32_t tree_add(DpNesRun *x, const DpNesPathState *s) {
     n->parent = x->cur_choice;
     n->kind = s->kind ? s->kind : s->from_irq ? DP_NES_TREE_IRQ : s->forced ? DP_NES_TREE_BRANCH : DP_NES_TREE_PROBE;
     n->pc = s->state ? (uint16_t)dp_nesmach_state_pc(s->state) : 0;
-    n->site = 0xFFFFFFFFu;
+    n->site = x->push_site >= 0 ? (uint32_t)x->push_site : 0xFFFFFFFFu;
     return ++r->tree_count;
 }
 
@@ -1209,6 +1213,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                    const DpNesOptions *options, DpNesResults *results) {
     DpNesRun x;
     memset(&x, 0, sizeof(x));
+    x.push_site = -1;
     x.last_read_cell = -1;
     for (unsigned i = 0; i < 0x800; i++) { x.ram_src[i] = -1; x.ram_prod[i] = -1; }
     if (!data || !results) return 0;
