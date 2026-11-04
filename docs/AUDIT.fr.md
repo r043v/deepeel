@@ -8,14 +8,14 @@ remesure pas l'outil.
 
 | Plateforme | ✅ fait | ◐ partiel | ✗ absent | — sans objet |
 |---|---|---|---|---|
-| GB | 34 | 4 | 0 | 1 |
-| SMS/GG | 32 | 3 | 2 | 2 |
+| GB | 32 | 6 | 0 | 1 |
+| SMS/GG | 32 | 5 | 0 | 2 |
 | MSX | 32 | 3 | 2 | 2 |
 | NES | 12 | 25 | 0 | 2 |
 | PCE | 16 | 22 | 0 | 1 |
 | MD | 10 | 26 | 2 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 89.
+Cellules ouvertes (◐ ou ✗) : 91.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -95,7 +95,8 @@ Cellules ouvertes (◐ ou ✗) : 89.
 | J4 | Go-Explore (cellules écran) | MSX | ◐ `--novelty` 0.141.0 (MSX) |
 | J4 | Go-Explore (cellules écran) | NES | ◐ `--novelty` (archive de cellules écran, vies sans connaissance du jeu) |
 | J4 | Go-Explore (cellules écran) | MD | ◐ `--novelty` (archive de cellules plans A/B, vies sans connaissance du jeu) |
-| J5 | Mode humain, export `.sta` | SMS/GG | ✗ |
+| J5 | Mode humain, export `.sta` | GB | ◐ 0.142 `--export-state` (cellule la plus profonde, fichier DPST) |
+| J5 | Mode humain, export `.sta` | SMS/GG | ◐ 0.142 `--export-state` (idem) |
 | J5 | Mode humain, export `.sta` | MSX | ✗ |
 | J5 | Mode humain, export `.sta` | NES | ◐ `--export-state` (cellule la plus profonde, fichier DPST) |
 | J5 | Mode humain, export `.sta` | PCE | ◐ `--export-state` (cellule la plus profonde, fichier DPST) |
@@ -103,7 +104,8 @@ Cellules ouvertes (◐ ou ✗) : 89.
 | O1 | `.map` texte, PNG, JSON, heat | NES | ◐ |
 | O2 | `.cov`, romdata, `--evidence` | PCE | ◐ `--evidence` (pas de `.cov` ni romdata : pas de compteurs de coups) |
 | O2 | `.cov`, romdata, `--evidence` | MD | ◐ `--evidence` ; pas de `.cov` ni romdata |
-| O3 | `--watch` (SDL2) | SMS/GG | ✗ |
+| O3 | `--watch` (SDL2) | GB | ◐ 0.142 `--watch [FPS]` et `--watch-dump FILE.ppm` (framebuffer VDP) |
+| O3 | `--watch` (SDL2) | SMS/GG | ◐ 0.142 `--watch [FPS]` et `--watch-dump FILE.ppm` (framebuffer VDP) |
 | O3 | `--watch` (SDL2) | MSX | ✗ |
 | O3 | `--watch` (SDL2) | NES | ◐ `--watch`/`--watch-dump` (panneau 160×128) |
 | O3 | `--watch` (SDL2) | PCE | ◐ `--watch`/`--watch-dump` (rangées VDC) |
