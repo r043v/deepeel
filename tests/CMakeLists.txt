@@ -198,6 +198,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.gg
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sg
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.msx
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_msx_v9938.msx
 )
 
 add_custom_command(
@@ -411,6 +412,8 @@ add_test(NAME md_play_jobs COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CU
 set_tests_properties(md_play_jobs PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME sms_ym2413_typed COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B z80 explore sms $D/fix_sms_ym2413.sms --text $D/ym.txt >/dev/null 2>&1; grep -Eq 'YM2413 typed writes: user instrument 0, rhythm [1-9][0-9]*, F-number 0, key/block [1-9][0-9]*, instrument/volume [1-9][0-9]*, other 0' $D/ym.txt")
 set_tests_properties(sms_ym2413_typed PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME msx_v9938_ports COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B z80 explore msx $D/fix_msx_v9938.msx --text $D/v99.txt >/dev/null 2>&1; grep -Eq 'MSX2 V9938 ports .*palette .9A [1-9][0-9]*, indirect register .9B [1-9][0-9]*' $D/v99.txt")
+set_tests_properties(msx_v9938_ports PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_exact_dedup COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_pad_effect.md --text $D/md_ed0.txt >/dev/null 2>&1; $B md explore $D/fix_md_pad_effect.md --exact-dedup --text $D/md_ed1.txt >/dev/null 2>&1; grep -q 'exact dedup: [1-9][0-9]* forks dropped' $D/md_ed1.txt && ! grep -q 'exact dedup' $D/md_ed0.txt && [ \"$(grep -E 'executed|exec ' $D/md_ed0.txt)\" = \"$(grep -E 'executed|exec ' $D/md_ed1.txt)\" ]")
 set_tests_properties(md_exact_dedup PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_map_inference COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_pad_effect.md --text ${CMAKE_CURRENT_BINARY_DIR}/md_inf.txt >/dev/null 2>&1; grep -q 'map inference (S7, not observations): [0-9]* padding' ${CMAKE_CURRENT_BINARY_DIR}/md_inf.txt")

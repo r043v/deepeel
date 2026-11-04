@@ -2895,3 +2895,10 @@ couvrent tout ce qu'une partie réelle exécute.
   F-number 10-18, key/block 20-28, instrument/volume 30-38, autre).
 - Observation de l'outil sur les chemins explorés (naturels et forcés comptés) ; la puce FM n'est
   toujours pas émulée. Fixture `fix_sms_ym2413`, test `sms_ym2413_typed`.
+
+## 0.194.0 : MSX, ports V9938 signalés (2026-11-04)
+
+- Le rapport `deepeel z80 explore msx` ajoute `MSX2 V9938 ports` quand le programme écrit sur `$9A`
+  (palette) ou `$9B` (registre indirect) : un jeu MSX2 n'est plus silencieusement pris pour MSX1.
+- Observation des écritures seulement ; le V9938 (modes graphiques, blitter, palette) n'est pas émulé.
+  Fixture `fix_msx_v9938`, test `msx_v9938_ports`.

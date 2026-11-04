@@ -711,6 +711,14 @@ def build_z80_family(out):
     m[0x10:0x10 + len(prog)] = prog
     with open(os.path.join(out, "fix_z80_branch.msx"), "wb") as f:
         f.write(m)
+    # MSX: V9938 palette ($9A) and indirect register ($9B) writes
+    m = bytearray([0xFF]) * 0x8000
+    m[0:2] = b"AB"
+    m[2:4] = (0x4010).to_bytes(2, "little")
+    m[4:16] = bytes(12)
+    m[0x10:0x18] = bytes([0x3E, 0x0F, 0xD3, 0x9A, 0xD3, 0x9B, 0x18, 0xFE])
+    with open(os.path.join(out, "fix_msx_v9938.msx"), "wb") as f:
+        f.write(m)
 
 def build_nes_pce(out):
     # NES NROM-256 (2 x 16 KiB PRG + 8 KiB CHR): LDA $9000 / BNE (both sides) /

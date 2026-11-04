@@ -2430,6 +2430,8 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
             fprintf(out,"  YM2413 typed writes: user instrument %"PRIu64", rhythm %"PRIu64", F-number %"PRIu64", key/block %"PRIu64", instrument/volume %"PRIu64", other %"PRIu64"\n",
                     r->ym_class[0],r->ym_class[1],r->ym_class[2],r->ym_class[3],r->ym_class[4],r->ym_class[5]);
     }
+    if(!strcmp(s->id,"msx") && (r->io_write[0x9A]||r->io_write[0x9B]))
+        fprintf(out,"  MSX2 V9938 ports (observed writes; the V9938 is not emulated): palette $9A %"PRIu64", indirect register $9B %"PRIu64"\n",r->io_write[0x9A],r->io_write[0x9B]);
     if(!strcmp(s->id,"msx")) {
         fputs("Limits: partial simulated BIOS, zero RAM and fixed primary-slot profile; no real BIOS, expanded slots, RAM mapper, disk/tape, FM-PAC, SCC sound or MSX2 (V9938). Sessions and TAS replay record machine state only, no screen snapshots. Context projection hashes registers, held input, mapper views and the pages/ports a section read; IN port values are not hashed. Static closure uses observed slot/bank views and stops at BIOS, RAM, indirect jumps its constants cannot prove and mapping barriers; targets observed at runtime are seeded in the indirect pass. Pure CPU/RAM and selected BIOS copies only; VRAM read-back and transformed data have no origin. RETURN is polled, never NMI. Forced reachability is speculative.\n",out);
         return;
