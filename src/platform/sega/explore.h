@@ -185,6 +185,8 @@ typedef struct {
     size_t loop_context_peak,loop_context_capacity;
     uint64_t loop_context_growths;
     uint64_t io_read[256],io_write[256],bank_changes,bank_log_overflow;
+    uint8_t ym_latch;                 // YM2413 register latched by the last $F0 write
+    uint64_t ym_class[6];             // YM2413 data writes: user instrument, rhythm, F-number low, key/block, instrument/volume, other
     uint64_t vram_copies,cram_copies,sram_copies,copy_transformed,copy_log_overflow,provenance_mismatches;
     DpSegaCopy *copies;
     unsigned copy_count,copy_capacity;

@@ -157,6 +157,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_wramexec.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_wramgen.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_sms_ramsrc.sms
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_sms_ym2413.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_lywait.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_hdma.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_cgbbank.gb
@@ -408,6 +409,8 @@ add_test(NAME gb_jp_table_de COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_
 set_tests_properties(gb_jp_table_de PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_play_jobs COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_sram_overlay.md --play-frames 60 --play-sessions 4 --text $D/md_pj1.txt >/dev/null 2>&1; $B md explore $D/fix_md_sram_overlay.md --play-frames 60 --play-sessions 4 --jobs 2 --text $D/md_pj2.txt >/dev/null 2>&1; grep -q 'played sessions: 4, 240 frames' $D/md_pj2.txt && grep -q 'secondary instance folded' $D/md_pj2.txt && [ \"$(grep -E 'observed union' $D/md_pj1.txt)\" = \"$(grep -E 'observed union' $D/md_pj2.txt)\" ]")
 set_tests_properties(md_play_jobs PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME sms_ym2413_typed COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B z80 explore sms $D/fix_sms_ym2413.sms --text $D/ym.txt >/dev/null 2>&1; grep -Eq 'YM2413 typed writes: user instrument 0, rhythm [1-9][0-9]*, F-number 0, key/block [1-9][0-9]*, instrument/volume [1-9][0-9]*, other 0' $D/ym.txt")
+set_tests_properties(sms_ym2413_typed PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_exact_dedup COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_pad_effect.md --text $D/md_ed0.txt >/dev/null 2>&1; $B md explore $D/fix_md_pad_effect.md --exact-dedup --text $D/md_ed1.txt >/dev/null 2>&1; grep -q 'exact dedup: [1-9][0-9]* forks dropped' $D/md_ed1.txt && ! grep -q 'exact dedup' $D/md_ed0.txt && [ \"$(grep -E 'executed|exec ' $D/md_ed0.txt)\" = \"$(grep -E 'executed|exec ' $D/md_ed1.txt)\" ]")
 set_tests_properties(md_exact_dedup PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_map_inference COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_pad_effect.md --text ${CMAKE_CURRENT_BINARY_DIR}/md_inf.txt >/dev/null 2>&1; grep -q 'map inference (S7, not observations): [0-9]* padding' ${CMAKE_CURRENT_BINARY_DIR}/md_inf.txt")

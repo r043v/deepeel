@@ -354,6 +354,13 @@ static void out_bus(void *user,uint16_t p,uint8_t v) {
     if(remap) mapping_before(x,before);
     if(!x->r->io_write[p&255]) x->discoveries++;
     x->r->io_write[p&255]++;
+    if(!x->msx) {
+        if((p&255)==0xF0) x->r->ym_latch=v;
+        else if((p&255)==0xF1) {
+            uint8_t g=x->r->ym_latch;
+            x->r->ym_class[g<=7?0:g==0x0E?1:(g>=0x10&&g<=0x18)?2:(g>=0x20&&g<=0x28)?3:(g>=0x30&&g<=0x38)?4:5]++;
+        }
+    }
     if((p&x->b->vdp_port_mask)==x->b->vdp_control_port) {
         uint8_t reg=0,value=0;
         unsigned command=x->b->vdp_command(v,&reg,&value);
@@ -1843,6 +1850,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     append_log(d->ay_log,&d->ay_count,DP_SEGA_HARDWARE_LOG_CAP,s->ay_log,s->ay_count,
                &d->ay_log_overflow,sizeof(DpSegaRegisterWrite));
     for(unsigned i=0;i<256;i++) { d->io_read[i]+=s->io_read[i]; d->io_write[i]+=s->io_write[i]; }
+    for(unsigned i=0;i<6;i++) d->ym_class[i]+=s->ym_class[i];
     for(unsigned i=0;i<16;i++) {
         d->vdp_register_writes[i]+=s->vdp_register_writes[i];
         d->ay_writes[i]+=s->ay_writes[i];
@@ -2418,6 +2426,9 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
     if(strcmp(s->id,"msx")) {   // typed audio: PSG ($7E/$7F writes) and the Japanese FM ($F0/$F1, YM2413)
         uint64_t psg=r->io_write[0x7E]+r->io_write[0x7F], fm=r->io_write[0xF0]+r->io_write[0xF1];
         if(psg||fm) fprintf(out,"  audio (music data, observed writes; the FM chip is not emulated): PSG %"PRIu64", YM2413 FM %"PRIu64"\n",psg,fm);
+        if(r->ym_class[0]+r->ym_class[1]+r->ym_class[2]+r->ym_class[3]+r->ym_class[4]+r->ym_class[5])
+            fprintf(out,"  YM2413 typed writes: user instrument %"PRIu64", rhythm %"PRIu64", F-number %"PRIu64", key/block %"PRIu64", instrument/volume %"PRIu64", other %"PRIu64"\n",
+                    r->ym_class[0],r->ym_class[1],r->ym_class[2],r->ym_class[3],r->ym_class[4],r->ym_class[5]);
     }
     if(!strcmp(s->id,"msx")) {
         fputs("Limits: partial simulated BIOS, zero RAM and fixed primary-slot profile; no real BIOS, expanded slots, RAM mapper, disk/tape, FM-PAC, SCC sound or MSX2 (V9938). Sessions and TAS replay record machine state only, no screen snapshots. Context projection hashes registers, held input, mapper views and the pages/ports a section read; IN port values are not hashed. Static closure uses observed slot/bank views and stops at BIOS, RAM, indirect jumps its constants cannot prove and mapping barriers; targets observed at runtime are seeded in the indirect pass. Pure CPU/RAM and selected BIOS copies only; VRAM read-back and transformed data have no origin. RETURN is polled, never NMI. Forced reachability is speculative.\n",out);

@@ -42,6 +42,14 @@ def build(out):
     with open(os.path.join(out, "fix_sega_mapper.sms"), "wb") as f:
         f.write(z80)
 
+    # SMS: YM2413 writes (key-on register $20, instrument register $30, rhythm $0E)
+    z80 = bytearray([0xff]) * 0x8000
+    w(z80, 0, 0xc3, 0x00, 0x01)
+    w(z80, 0x100, 0x3e, 0x20, 0xd3, 0xf0, 0x3e, 0x10, 0xd3, 0xf1,
+      0x3e, 0x30, 0xd3, 0xf0, 0xd3, 0xf1, 0x3e, 0x0e, 0xd3, 0xf0, 0xd3, 0xf1, 0x76)
+    with open(os.path.join(out, "fix_sms_ym2413.sms"), "wb") as f:
+        f.write(z80)
+
     # SMS: a routine in ROM ($0200) copied verbatim to RAM ($C000) then called (rtcode ROM source)
     z80 = bytearray([0xff]) * 0x8000
     w(z80, 0, 0xc3, 0x00, 0x01)                   # jp $0100

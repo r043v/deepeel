@@ -2887,3 +2887,11 @@ couvrent tout ce qu'une partie réelle exécute.
 - Le rapport additionne `played sessions` des deux instances ; test `md_play_jobs` (union observée
   identique à l'exécution mono-instance sur la fixture).
 - Limite : pas de pool de checkpoints partagé entre instances ; deux instances seulement.
+
+## 0.193.0 : SMS/GG, écritures YM2413 typées (2026-11-04)
+
+- Le rapport `deepeel z80 explore sms|gg` ajoute `YM2413 typed writes` : les écritures de données `$F1`
+  sont classées selon le registre verrouillé par `$F0` (instrument utilisateur 00-07, rythme 0E,
+  F-number 10-18, key/block 20-28, instrument/volume 30-38, autre).
+- Observation de l'outil sur les chemins explorés (naturels et forcés comptés) ; la puce FM n'est
+  toujours pas émulée. Fixture `fix_sms_ym2413`, test `sms_ym2413_typed`.
