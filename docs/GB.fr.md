@@ -2476,3 +2476,11 @@ chaque saut d'exploration : on regarde la recherche Go-Explore sur écran en cou
 l'exploration continue. Sans GUI, l'option est acceptée et ignorée. Limite : l'exploration à fourches
 (`lr explore`, niveau B) avance le CPU instruction par instruction sans produire de vidéo, donc elle n'a pas de
 vue en direct ; son branchement dans l'explorateur complet (typage, copies, longueurs d'instruction) reste à faire.
+
+## 0.176.0 (J10 : chunk `dpIx`)
+
+Le PNG de carte GB porte un chunk privé `dpIx` (JSON) : pour chaque site de code qui lit la ROM comme donnée
+(table lock-free de 2048 sites, débordement compté dans `dropped`), l'index ROM du site, la plage d'index ROM lue
+(`kmin`…`kmax`) et le nombre de lectures. C'est une observation par site : aucune base ni aucun pas n'est inféré
+(les `DpIndexed` complets de COUVERTURE §5 — base+index, `idx_max`, déclaration `index-inference` — restent à faire).
+`deepeel mapx --chunk dpIx` l'exporte.

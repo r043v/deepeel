@@ -142,6 +142,10 @@ int main(int argc, char **argv) {
         char *tb = dp_png_text(png, "dpTb", &tl);
         CHECK(tb != NULL && strstr(tb, "\"at\":1024") && strstr(tb, "\"stride\":2"));
         free(tb);
+        size_t il = 0;   // dpIx: the decoder's ROM data reads are recorded per reading site
+        char *ix = dp_png_text(png, "dpIx", &il);
+        CHECK(ix != NULL && strstr(ix, "\"kind\":\"read-site-range\"") && strstr(ix, "\"site\":") && strstr(ix, "\"dropped\":0"));
+        free(ix);
         size_t cl = 0;
         uint8_t *ch = (uint8_t *)dp_png_text(png, "dpCh", &cl);
         CHECK(ch != NULL && cl >= 28 && !memcmp(ch, "DPCH", 4));

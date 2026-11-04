@@ -589,20 +589,36 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
     for (uint32_t t = 0; t < res->tb_n; t++)
         dp_buf_fmt(&tb_txt, "%s{\"at\":%u,\"stride\":%u,\"n\":%u}", t ? "," : "", res->tb[t].at, res->tb[t].stride, res->tb[t].count);
     dp_buf_fmt(&tb_txt, "]}");
+    // dpIx: ROM data-read sites (observed range, no inferred base/stride), sorted by site
+    DpBuf ix_txt;
+    dp_buf_init(&ix_txt);
+    dp_buf_fmt(&ix_txt, "{\"v\":1,\"kind\":\"read-site-range\",\"sites\":[");
+    {
+        uint32_t nix = 0;
+        for (uint32_t i = 0; i < DP_IX_CAP; i++) {
+            if (!res->ix[i].site1) continue;
+            dp_buf_fmt(&ix_txt, "%s{\"site\":%u,\"kmin\":%u,\"kmax\":%u,\"n\":%u}", nix ? "," : "",
+                       res->ix[i].site1 - 1, res->ix[i].kmin - 1, res->ix[i].kmax - 1, res->ix[i].n);
+            nix++;
+        }
+        dp_buf_fmt(&ix_txt, "],\"dropped\":%u}", res->ix_full);
+    }
     DpBuf ch;
     dp_buf_init(&ch);
     int have_ch = dp_map_ch_encode(res, &ch);
-    DpPngText extra[6] = {
+    DpPngText extra[7] = {
         { "deepeel_heat", heat_txt.p, heat_txt.len, 0 },
         { "deepeel_cov", cov_txt.p, cov_txt.len, 0 },
         { "deepeel_rom", rom_txt.p, rom_txt.len, 0 },
         { "dpFr", fr_txt.p, fr_txt.len, 0 },
         { "dpTb", tb_txt.p, tb_txt.len, 0 },
         { "dpCh", ch.p, have_ch ? ch.len : 0, 0 },
+        { "dpIx", ix_txt.p, ix_txt.len, 0 },
     };
     int ok = map_png_render(m, (int)res->banks, title, &s, (const char *)txt.p, txt.len,
                             meta, path, res->plat ? res->plat->name : "gb", file,
-                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 6, meth);
+                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 7, meth);
+    dp_buf_free(&ix_txt);
     dp_buf_free(&ch);
     dp_buf_free(&tb_txt);
     dp_buf_free(&fr_txt);

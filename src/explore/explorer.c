@@ -655,6 +655,31 @@ static void section_live_access(DpExplorer *ex, uint16_t a) {
     else if (a == 0xFFFF) dp_section_live_small(s, 2);
 }
 
+// dpIx: record a ROM data read per reading site. Lock-free: slots are claimed by CAS on site1, the range
+// is widened by CAS loops, the count is atomic. A full table is counted (ix_full), never silent.
+static void ix_record(DpResults *res, uint32_t site, uint32_t key) {
+    uint32_t h = (site * 2654435761u) % DP_IX_CAP;
+    for (uint32_t probe = 0; probe < 32; probe++, h = (h + 1) % DP_IX_CAP) {
+        uint32_t cur = __atomic_load_n(&res->ix[h].site1, __ATOMIC_ACQUIRE);
+        if (!cur) {
+            uint32_t zero = 0;
+            if (__atomic_compare_exchange_n(&res->ix[h].site1, &zero, site + 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+                uint32_t mn = 0;   // first claimant seeds the range; later ones only ever narrow/widen it
+                __atomic_compare_exchange_n(&res->ix[h].kmin, &mn, key + 1, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+                cur = site + 1;
+            } else cur = zero;
+        }
+        if (cur != site + 1) continue;
+        uint32_t lo = __atomic_load_n(&res->ix[h].kmin, __ATOMIC_RELAXED);
+        while ((!lo || key + 1 < lo) && !__atomic_compare_exchange_n(&res->ix[h].kmin, &lo, key + 1, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {}
+        uint32_t hi = __atomic_load_n(&res->ix[h].kmax, __ATOMIC_RELAXED);
+        while (key + 1 > hi && !__atomic_compare_exchange_n(&res->ix[h].kmax, &hi, key + 1, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {}
+        __atomic_fetch_add(&res->ix[h].n, 1, __ATOMIC_RELAXED);
+        return;
+    }
+    __atomic_fetch_add(&res->ix_full, 1, __ATOMIC_RELAXED);
+}
+
 static void hook_read(DpMach *m, uint16_t a, uint8_t v) {
     DpExplorer *ex = m->owner;
     DpResults *res = ex->res;
@@ -664,6 +689,7 @@ static void hook_read(DpMach *m, uint16_t a, uint8_t v) {
         src_or(res, key, ex->session ? DP_SRC_SESSION : (ex->cur_forced ? DP_SRC_FORK_FORCED : DP_SRC_FORK_NATURAL));
         if (!(old & DP_DF_READ)) ex->credit_data++;
         hits_add(res, &res->data_hits[key]);
+        ix_record(res, key_at(ex, m->api->gbr->pc), key);
         if (ex->session) hits_add(res, &res->play_data_hits[key]);
         dp_copy_on_rom_read(ex, (uint8_t)cur_bank(ex, a), a, v);
         ex->last_rom_key = key; ex->last_rom_val = v; ex->last_rom_valid = 1;

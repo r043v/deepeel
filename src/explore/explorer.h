@@ -172,6 +172,7 @@ typedef struct DpRtCode {
     uint8_t natural;  // executed at least once on a non-forced path (no fork decision made it reachable)
 } DpRtCode;
 
+#define DP_IX_CAP 2048
 typedef struct DpResults {
     const DpCart *cart;
     const DpPlatform *plat;
@@ -245,6 +246,9 @@ typedef struct DpResults {
     uint32_t decoders, decoders_without_snapshot, decoder_overflow, start_overflow, frame_overflow; // S6 stream consumers
     uint32_t replay_tables, replay_candidates, replay_runs, sat_replay_total; // S6 replays
     struct { uint32_t at; uint16_t stride, count; } tb[128]; uint32_t tb_n;   // S6 pointer tables found (dpTb)
+    // dpIx: ROM data-read sites (lock-free open-addressed table): site = rom index of the reading pc,
+    // [kmin,kmax] = rom index range read, n = reads. Observation only: no base/stride is inferred.
+    struct { uint32_t site1, kmin, kmax, n; } ix[DP_IX_CAP]; uint32_t ix_full; // site1 = site + 1 (0 = free slot)
     uint32_t forks_capped; // forks dropped by the per-site cap
     uint32_t forks_table_full; // forks refused: the per-site counter table is full (also in forks_capped)
     uint32_t cycle_cuts, step_cuts, budget_paths, budget_steps, queue_overflows;
