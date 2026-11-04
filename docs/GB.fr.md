@@ -3359,3 +3359,11 @@ cœurs. Le détecteur s'adapte à la taille de la RAM de chaque cœur ; l'ensemb
 d'ajouter au-delà de la moitié de sa table (avant : boucle infinie possible sur table pleine).
 Sans changement de comportement observé : les 150 tests passent. Le détecteur de vies
 du PCE perd son affichage `DP_PCE_LIVES_DEBUG`.
+
+## 0.247.0 — spool : deflate brut sans adler32
+
+Les enregistrements du spool (`src/explore/lots.h`, version de fichier 3) sont compressés en deflate brut
+(`Z_RLE`, sans en-tête ni somme adler32) : en `--unbounded` sur Castle of Illusion, `perf` plaçait plus de 80 % du
+temps dans `dp_lf_put` et zlib, adler32 en tête. Les anciens spools ne sont plus relus (version 2 refusée).
+Observation de l'outil : 154 021 fourches spoolées en 60 s contre 126 928 avant ; la cause du premier chemin qui
+accapare le run reste ouverte (voir `docs/CAMPAGNE.fr.md`).

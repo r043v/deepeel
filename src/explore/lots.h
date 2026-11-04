@@ -16,7 +16,7 @@
 
 #define DP_LF_MAGIC 0x42465044u  /* 'DPFB' */
 #define DP_LF_REC   0x4c4c5044u  /* 'DPLL' record */
-#define DP_LF_VERSION 2
+#define DP_LF_VERSION 3
 #define DP_LF_META_MAX 256
 
 typedef struct {
@@ -28,6 +28,31 @@ typedef struct {
     uint64_t rd, wr;            // byte offsets: next record to read, end of file
     uint64_t written, read_back, unread; // records
 } DpLotFile;
+
+// raw deflate (no zlib header, no adler32) for the records: the checksum was a sixth of the run when
+// every fork went to the spool (Castle of Illusion --unbounded, perf)
+static inline int dp_lf_zraw(uint8_t *dst, uLongf *dlen, const uint8_t *src, uLong n) {
+    z_stream z;
+    memset(&z, 0, sizeof z);
+    if (deflateInit2(&z, 1, Z_DEFLATED, -15, 8, Z_RLE) != Z_OK) return Z_MEM_ERROR;
+    z.next_in = (Bytef *)src; z.avail_in = (uInt)n;
+    z.next_out = dst; z.avail_out = (uInt)*dlen;
+    int r = deflate(&z, Z_FINISH);
+    *dlen = z.total_out;
+    deflateEnd(&z);
+    return r == Z_STREAM_END ? Z_OK : Z_BUF_ERROR;
+}
+static inline int dp_lf_unraw(uint8_t *dst, uLongf *dlen, const uint8_t *src, uLong n) {
+    z_stream z;
+    memset(&z, 0, sizeof z);
+    if (inflateInit2(&z, -15) != Z_OK) return Z_MEM_ERROR;
+    z.next_in = (Bytef *)src; z.avail_in = (uInt)n;
+    z.next_out = dst; z.avail_out = (uInt)*dlen;
+    int r = inflate(&z, Z_FINISH);
+    *dlen = z.total_out;
+    inflateEnd(&z);
+    return r == Z_STREAM_END ? Z_OK : Z_DATA_ERROR;
+}
 
 // header: magic, version, platform(4), image size, zlen, then the zlib base image
 static inline int dp_lf_write_header(DpLotFile *l, const uint8_t *img, uint32_t len) {
@@ -133,7 +158,7 @@ static inline int dp_lf_put(DpLotFile *l, const void *meta, uint32_t mlen, const
     uLongf zl = compressBound(len);
     uint8_t *z = malloc(zl ? zl : 1);
     if (!z) { free(d); return 0; }
-    int cr = compress2(z, &zl, d, len, 1);
+    int cr = dp_lf_zraw(z, &zl, d, len);
     free(d);
     if (cr != Z_OK) { free(z); return 0; }
     uint32_t h[4] = { DP_LF_REC, mlen, len, (uint32_t)zl };
@@ -160,7 +185,7 @@ static inline int dp_lf_get(DpLotFile *l, void *meta, uint32_t *mlen, uint8_t **
     uint8_t *z = malloc(h[3] ? h[3] : 1), *raw = malloc(h[2] ? h[2] : 1);
     uLongf rl = h[2];
     if (!z || !raw || (h[1] && fread(meta, 1, h[1], l->f) != h[1]) ||
-        fread(z, 1, h[3], l->f) != h[3] || uncompress(raw, &rl, z, h[3]) != Z_OK || rl != h[2]) {
+        fread(z, 1, h[3], l->f) != h[3] || dp_lf_unraw(raw, &rl, z, h[3]) != Z_OK || rl != h[2]) {
         free(z); free(raw);
         l->rd = l->wr; l->unread = 0;
         return 0;
