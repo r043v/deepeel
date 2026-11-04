@@ -59,7 +59,7 @@ static void fold(DpNesResults *a, void *user) {
     ADD(dmc_starts); ADD(forced_paths); ADD(step_cuts); ADD(loop_cuts); ADD(fork_cuts); ADD(queue_cuts);
     ADD(global_cuts); ADD(path_cuts); ADD(faults); ADD(decode_cuts); ADD(ctx_evicted); ADD(pad_probes);
     ADD(pad_probe_sites); ADD(pad_probe_refused); ADD(evicted); ADD(parked); ADD(parked_resumed);
-    ADD(parked_lost); ADD(pending_dropped); ADD(ram_writes); ADD(io_writes); ADD(io_reads); ADD(chr_reads);
+    ADD(parked_lost); ADD(pending_dropped); ADD(ram_writes); ADD(smc_writes); ADD(io_writes); ADD(io_reads); ADD(chr_reads);
     ADD(play_frames_run); ADD(play_sessions_run); ADD(play_steps_accounted); ADD(seeds_play);
     ADD(tas_same); ADD(tas_different); ADD(tas_unrecorded); ADD(cpu_copy_bytes);
     ADD(novelty_trials); ADD(novelty_hits); ADD(novelty_archived); ADD(novelty_replaced);

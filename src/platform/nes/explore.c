@@ -48,6 +48,7 @@ typedef struct {
     uint32_t queue_len, queue_cap;
     DpNesPathState *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
     DpLotFile *lot;                        // disk lot: park overflow, wall leftovers, --lot resume
+    uint8_t ram_exec[0x800];           // RAM bytes executed since their last write (SMC tracking)
     int32_t ram_src[0x800];            // last ROM cell whose read fed the store to each RAM byte (-1 none)
     int64_t *prov_anchor; uint32_t prov_len; // table-word cells that fed an indirect jmp pointer
     uint32_t cur_choice;               // tree node of the path being run
@@ -350,6 +351,8 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
     if (outside && !x->was_outside) r->exec_outside++;
     x->was_outside = outside;
     if (outside && !x->play_mode) dp_ramarch_add(&r->ra, (uint16_t)pc, bytes, (int)in.length, -1);   // RAM-code archive
+    if (outside && pc < 0x2000)
+        for (int i = 0; i < (int)in.length; i++) x->ram_exec[(pc + (unsigned)i) & 0x7FF] = 1;
 
 
     // a jam ends the path (the runtime runs illegals as NOPs; the explorer
@@ -487,6 +490,10 @@ static void hook_read(void *user, unsigned addr) {
 static void hook_write(void *user, unsigned addr, unsigned value) {
     DpNesRun *x = user;
     DpNesResults *r = x->r;
+    if (addr < 0x2000 && x->ram_exec[addr & 0x7FF]) {   // an executed RAM byte is rewritten
+        x->ram_exec[addr & 0x7FF] = 0;
+        if (!r->smc_writes++) r->smc_first_pc = (uint16_t)x->cur_pc;
+    }
     if (addr < 0x800)   // provenance: a store right after a PRG data read carries that cell
         x->ram_src[addr] = (x->last_read_cell >= 0 && x->total_steps - x->last_read_step <= 4) ? (int32_t)x->last_read_cell : -1;
     if (addr >= 0x8000) {
@@ -1761,6 +1768,8 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->step_cuts, (unsigned long long)r->loop_cuts,
         (unsigned long long)r->fork_cuts, (unsigned long long)r->queue_cuts,
         (unsigned long long)r->global_cuts, (unsigned long long)r->path_cuts);
+    if (r->smc_writes) fprintf(out, "  self-modifying RAM code: %llu writes into executed bytes (first at pc $%04X)\n",
+                               (unsigned long long)r->smc_writes, r->smc_first_pc);
     fprintf(out, "  data reads %llu, OAM DMA copies %llu, ram writes %llu, io writes %llu\n",
         (unsigned long long)r->data_reads, (unsigned long long)r->oam_copies,
         (unsigned long long)r->ram_writes, (unsigned long long)r->io_writes);

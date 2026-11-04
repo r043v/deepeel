@@ -153,6 +153,7 @@ typedef struct DpNesResults_ {
     uint64_t parked, parked_resumed, parked_lost; // queue-full states held aside (§6), resumed, lost at the holding cap
     uint64_t pending_dropped;  // queued states left undrained at a wall
     uint64_t ram_writes, io_writes, io_reads;
+    uint64_t smc_writes; uint16_t smc_first_pc; // writes into already executed RAM bytes
     // per-register access counts: slots 0-7 PPU $2000-$2007 (mirrors folded), 8-39 $4000-$401F
     uint64_t io_reg_writes[40], io_reg_reads[40];
     // sections

@@ -532,6 +532,25 @@ static void test_ramcode(void) {
     free(rom);
 }
 
+static void test_smc(void) {
+    unsigned sz = 16 + 2 * 0x4000 + 0x2000;
+    uint8_t *rom = calloc(1, sz);
+    set_header(rom, 2, 1, 0);
+    put(rom, 0, 0x0000, 0xA9, 0xA9, 0x8D, 0x00, 0x03, 0xA9, 0x07, 0x8D, 0x01, 0x03,
+                        0xA9, 0x60, 0x8D, 0x02, 0x03, 0x20, 0x00, 0x03,
+                        0xA9, 0xEA, 0x8D, 0x00, 0x03, 0x4C, 0x17, 0x80, -1);   // rewrite $0300 after it ran
+    set_vector(rom, 1, 0xFFFA, 0x8000);
+    set_vector(rom, 1, 0xFFFC, 0x8000);
+    set_vector(rom, 1, 0xFFFE, 0x8000);
+    DpNesResults r;
+    DpNesOptions o = dp_nes_options();
+    o.max_steps = 500;
+    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "smc explore runs");
+    CHECK(r.smc_writes >= 1, "SMC write counted (%llu)", (unsigned long long)r.smc_writes);
+    dp_nes_results_free(&r);
+    free(rom);
+}
+
 int main(void) {
     test_machine_nrom();
     test_machine_uxrom();
@@ -544,6 +563,7 @@ int main(void) {
     test_explorer();
     test_streams();
     test_ramcode();
+    test_smc();
     test_loop_bound();
     test_tas_load();
     test_tas_identity();

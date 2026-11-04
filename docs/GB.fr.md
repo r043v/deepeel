@@ -2300,3 +2300,9 @@ Chaque octet de WRAM exécuté est marqué ; une écriture ultérieure dans un o
 en plus du compteur de variantes polymorphes de l'archive. Un octet réécrit puis ré-exécuté compte à
 nouveau. HRAM/VRAM ne sont pas suivis ; les autres plateformes n'ont pas encore ce compteur. Test
 `explorer` (fixture `smc`).
+
+## 0.160.0 (archive RAM — événements SMC, NES)
+
+Même compteur que la GB (0.159.0) sur la RAM interne NES (`$0000-$1FFF`, miroirs repliés) : une écriture dans
+un octet déjà exécuté est un événement SMC, rapporté « self-modifying RAM code ». Reste à porter sur
+MD, PCE, SMS/MSX. Test `nes` (`test_smc`).
