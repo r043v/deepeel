@@ -962,10 +962,15 @@ static void s4_ptr_table(X *x, uint32_t pc, unsigned an, uint32_t obs) {
     if (w == UINT32_MAX || (size_t)w + 4 > n || (w & 1)) return;
     unsigned op = (unsigned)rom[w] << 8 | rom[w + 1];
     if ((op & 0xF1F8) == 0x2040 && ((op >> 9) & 7) == an) {            // movea.l Dm,An: follow Dm to its loader
-        w = x->dn_writer[op & 7];
-        if (w == UINT32_MAX || (size_t)w + 4 > n || (w & 1)) return;
-        unsigned lop = (unsigned)rom[w] << 8 | rom[w + 1];             // move.l d8(Am|pc,Xn),Dm
-        if (((lop >> 9) & 7) != (op & 7)) return;
+        unsigned dm = op & 7, lop = 0;
+        for (int hop = 0; hop < 4; hop++) {                            // skip `move.l Dx,Dm` copies (each hop re-reads Dx's writer)
+            w = x->dn_writer[dm];
+            if (w == UINT32_MAX || (size_t)w + 4 > n || (w & 1)) return;
+            lop = (unsigned)rom[w] << 8 | rom[w + 1];                  // move.l d8(Am|pc,Xn),Dm
+            if (((lop >> 9) & 7) != dm) return;
+            if ((lop & 0xF1F8) != 0x2000) break;                       // not move.l Dx,Dm
+            dm = lop & 7;
+        }
         if ((lop & 0xF1F8) != 0x2030 && (lop & 0xF1FF) != 0x203B) return;
         op = 0x2040u | (an << 9) | (lop & 0x3Fu);                      // same EA, destination An: the movea form below
     }

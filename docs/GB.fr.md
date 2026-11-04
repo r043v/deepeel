@@ -3427,3 +3427,11 @@ Le moteur MD retient désormais, comme pour An (`an_writer`), le pc de la derni�
 base, acceptée si la cible observée en est une entrée, ses autres cibles ROM valides sont ensemencées. Fixture
 `fix_md_s4p3` (`move.l 0(a2,d0.w),d1 ; movea.l d1,a1 ; jmp (a1)`), test `md_s4_ptr_dn`. Reste : chaînes plus longues
 (plusieurs copies/ALU entre le chargement et l'usage), `jmp (An)` dont An est calculé par `adda`.
+
+## 0.249.4 (MD, S3 : copies `move.l Dx,Dm` dans la chaîne)
+
+`s4_ptr_table` saute jusqu'à 4 copies `move.l Dx,Dm` entre le chargement de la table et le `movea.l Dm,An` (le pc de
+l'écrivain est relu pour chaque Dx). Le résultat reste validé par la cible observée : l'inférence ne crée pas de table
+sans qu'une des entrées lues soit la cible réellement atteinte. Fixture `fix_md_s4p4`, test `md_s4_ptr_dn_copy`.
+Limite : `dn_writer` ne garde que le dernier écrivain, donc un Dx réécrit entre la copie et l'usage est mal attribué
+(la validation par la cible évite alors la fausse table). Reste : An calculé par ALU (`adda`).
