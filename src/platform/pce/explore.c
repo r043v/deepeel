@@ -1734,6 +1734,16 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
                                (unsigned long long)r->smc_writes, r->smc_first_pc);
     fprintf(out, "  register writes %u logged (overflow %llu)\n", r->register_count,
             (unsigned long long)r->register_overflow);
+    {   // CD-ROM interface ($1800-$1BFF of the hardware page): ADPCM ($180A-$180E, $1860-$1869) vs the rest
+        unsigned adpcm = 0, cd = 0;
+        for (unsigned i = 0; i < r->register_count; i++) {
+            unsigned g = r->register_writes[i].reg;
+            if (g < 0x1800 || g > 0x1BFF) continue;
+            if ((g >= 0x180A && g <= 0x180E) || (g >= 0x1860 && g <= 0x1869)) adpcm++; else cd++;
+        }
+        if (adpcm || cd)
+            fprintf(out, "  CD-ROM2 interface writes (logged; no CD-ROM2 emulated, a HuCard run must not reach them): ADPCM %u, other %u\n", adpcm, cd);
+    }
     fputs("Limits: HuCard only. No CD-ROM2/Super CD (System Card, ADPCM, CD audio), no SF2 mapper beyond the "
           "modelled pages, no SuperGrafx (VPC, second VDC); the multitap is an opt-in model. Observations of "
           "the tool on a concrete machine, not hardware measurements.\n", out);

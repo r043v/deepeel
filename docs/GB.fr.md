@@ -2917,3 +2917,11 @@ couvrent tout ce qu'une partie réelle exécute.
   elles diffèrent entre elles et restent déterministes. Sans `--multitap`, rien ne change.
 - Modèle d'observation arbitraire (pas des entrées de joueurs réels) ; le test `pce_multitap_option`
   couvre maintenant une session jouée avec l'option.
+
+## 0.197.0 : PCE, écritures CD-ROM2/ADPCM typées (2026-11-04)
+
+- Le rapport `deepeel pce explore` compte, parmi les écritures de registres journalisées, celles de
+  l'interface CD-ROM2 (`$1800-$1BFF`) : ADPCM (`$180A-$180E`, `$1860-$1869`) et autres. Un code qui
+  les atteint est signalé au lieu d'être silencieusement pris pour du HuCard pur.
+- Observation du journal (plafonné, débordement rapporté) ; aucun CD-ROM2 ni ADPCM n'est émulé.
+  Fixture `fix_pce_adpcm`, test `pce_adpcm_typed`.
