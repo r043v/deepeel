@@ -322,6 +322,10 @@ int main(int argc, char **argv) {
     CHECK(!(r.flags[0x200002] & DP_MDF_DATA));
     dp_md_results_free(&r); dp_md_cart_free(&c);
 
+    CHECK(run("fix_md_smc", 100000, &r, &c) == 0);
+    CHECK(r.ram_exec >= 1 && r.ra.n >= 1 && r.smc_writes >= 1);
+    dp_md_results_free(&r); dp_md_cart_free(&c);
+
     puts(fails ? "md_explore: FAILED" : "md_explore: ok");
     return fails != 0;
 }

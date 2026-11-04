@@ -2318,3 +2318,9 @@ Test `pce` (`test_ramcode`).
 Compteur SMC sur la RAM Z80 des systèmes Sega et du MSX : une écriture dans un octet déjà exécuté
 depuis la RAM est rapportée « self-modifying RAM code » (compte + premier pc). Reste à porter : MD.
 Test `sega_streams`.
+
+## 0.163.0 (archive RAM — événements SMC, MD)
+
+Compteur SMC sur la RAM de travail MD (`$E00000+`, miroir 64 Kio) : un store (octet, mot ou long) dans des
+octets déjà exécutés est rapporté « self-modifying RAM code ». Le compteur existe désormais sur GB, NES,
+PCE, SMS/GG/SG/MSX et MD. La RAM du Z80 son MD n'est pas suivie. Test `md_explore` (fixture `fix_md_smc`).

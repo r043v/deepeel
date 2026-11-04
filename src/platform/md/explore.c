@@ -42,6 +42,7 @@ typedef struct {
     uint32_t cur_gen;
     int forced, halted;
     uint32_t pc;         /* instruction being run */
+    uint8_t ram_exec[0x10000]; /* work-RAM bytes executed since their last write (SMC tracking) */
     uint32_t origin;     /* site that created the current path */
     uint32_t trace[8];
     unsigned trace_pos, trace_len;
@@ -356,6 +357,7 @@ static void on_end(void *u, uint32_t pc, uint32_t next, unsigned len) {
                 ib[k] = (uint8_t)(w >> 24); ib[k + 1] = (uint8_t)(w >> 16); ib[k + 2] = (uint8_t)(w >> 8); ib[k + 3] = (uint8_t)w;
             }
             dp_ramarch_add(&r->ra, (uint16_t)pc, ib, len > 10 ? 10 : (int)len, -1);
+            for (unsigned k = 0; k < (len > 10 ? 10 : len); k++) x->ram_exec[(pc + k) & 0xFFFF] = 1;
         }
         if (!dp_mdmach_rom_visible(x->m, pc)) r->sram_exec++;
         irq_forks(x, next);
@@ -468,6 +470,12 @@ static void on_write(void *u, uint32_t a, unsigned size, uint32_t v) {
     DpMdResults *r = x->r;
     if (x->halted) return;
     a &= 0xFFFFFFu;
+    if (a >= 0xE00000)   // a store into RAM bytes that already ran is self-modifying code
+        for (unsigned k = 0; k < size; k++)
+            if (x->ram_exec[(a + k) & 0xFFFF]) {
+                x->ram_exec[(a + k) & 0xFFFF] = 0;
+                if (!r->smc_writes++) r->smc_first_pc = x->pc;
+            }
     if (x->register_move_valid && size == 2 && a >= 0xC00000 && a <= 0xC00003 && !(a & 1) &&
         (dp_mdmach_vdp_code(x->m) & 15) == 1 &&
         v == ((uint32_t)x->c->rom[x->previous_move_src] << 8 | x->c->rom[x->previous_move_src + 1])) {
@@ -1538,6 +1546,8 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     }
     fprintf(out, "exec outside rom: %llu (ram: %llu)\n", (unsigned long long)r->exec_outside,
             (unsigned long long)r->ram_exec);
+    if (r->smc_writes) fprintf(out, "self-modifying RAM code: %llu stores into executed bytes (first at pc %06X)\n",
+                               (unsigned long long)r->smc_writes, r->smc_first_pc);
     fprintf(out, "SRAM: %llu instructions, %llu CPU reads\n",
             (unsigned long long)r->sram_exec, (unsigned long long)r->sram_reads);
     fprintf(out, "decoder/execution length mismatches: %llu\n", (unsigned long long)r->decode_length_mismatches);

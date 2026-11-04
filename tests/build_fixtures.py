@@ -496,6 +496,13 @@ def build_md(out):
     r[0x200000:0x200004] = bytes.fromhex("4e71 1234")
     save_md(out, "fix_md_sram_overlay", r)
 
+    # --- smc: code written to work RAM, executed, then rewritten ------------------
+    r = md_rom()
+    code = bytes.fromhex("33fc 4e71 00ff 0000 33fc 4e75 00ff 0002 4eb9 00ff 0000 "
+                         "33fc 4e71 00ff 0000 60fe")
+    r[0x200:0x200 + len(code)] = code
+    save_md(out, "fix_md_smc", r)
+
     # --- fork: tst.w d0 / bne.s (not taken naturally) / both sides end in bra.s * -
     r = md_rom()
     r[0x200:0x20C] = bytes([0x4A, 0x40, 0x66, 0x04, 0x4E, 0x71, 0x60, 0xFE, 0x4E, 0x71, 0x60, 0xFE])

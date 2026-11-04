@@ -116,6 +116,7 @@ typedef struct DpMdResults_ {
     unsigned nfault_origins;
     uint64_t fault_origins_overflow;
     uint64_t exec_outside, ram_exec, sram_exec, sram_reads;
+    uint64_t smc_writes; uint32_t smc_first_pc; // stores into work-RAM bytes that already ran
     uint64_t decode_length_mismatches;
     uint64_t reg_r[64], reg_w[64], unmapped_r, unmapped_w;
     DpMdCopyRec *copies;
