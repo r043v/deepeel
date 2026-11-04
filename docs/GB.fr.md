@@ -2660,3 +2660,13 @@ stocké en immédiat reçoit aussi `1024` alors qu'il n'en dérive pas. Seule un
 ## 0.186.2 — NES : résumé de l'archive rtcode dans le rapport
 
 Même ligne que MD (`runtime code archive: …`). Pas de fixture NES de code généré encore.
+
+## 0.187.0 — MD : producteur par propagation à travers les registres
+
+Le producteur de l'archive `rtcode` MD n'est plus « le dernier octet ROM lu » : une teinte (index ROM) suit D0–D7/A0–A7
+et la RAM de travail, propagée instruction par instruction d'après le texte du désassemblage (`move`/`movea`,
+`moveq`/`clr`, `lea`, ALU à deux opérandes, formes à un opérande ; `movem` et les pushs ne propagent rien). Le `rts`
+stocké en immédiat n'a plus de producteur (`-1`), le mot ROM lu puis inversé puis stocké garde `1024`.
+Limites : un seul index représentatif (pas l'ensemble des dépendances) ; modes d'adressage lus seulement comme
+texte ; teintes des registres non remises à zéro entre chemins ; `movem`, `DIV/MUL` à paires, `exg`, `swap`
+inter-registres non modélisés. J14 « provenance exacte » reste donc ouvert sur les autres plateformes et sur ces cas.

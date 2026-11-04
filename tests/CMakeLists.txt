@@ -439,5 +439,5 @@ set_tests_properties(rtcode_sms_source PROPERTIES FIXTURES_REQUIRED fixtures TIM
 add_test(NAME rtcode_md_source COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_ramsrc.md --rtcode $D/mr.rt --text $D/mr.txt >/dev/null 2>&1; grep -Eq '^0000 7042 [0-9]+ 1024 1024$' $D/mr.rt && grep -Eq '^0002 4e75 [0-9]+ 1026 1026$' $D/mr.rt")
 set_tests_properties(rtcode_md_source PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 
-add_test(NAME rtcode_md_generated COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_ramgen.md --rtcode $D/mg.rt --text $D/mg.txt >/dev/null 2>&1; grep -Eq '^0000 7042 [0-9]+ -1 1024$' $D/mg.rt && grep -Eq '^0002 4e75 [0-9]+ -1 1024$' $D/mg.rt && grep -Eq 'runtime code archive: .* [1-9][0-9]* generated with an approximate ROM producer' $D/mg.txt")
+add_test(NAME rtcode_md_generated COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_ramgen.md --rtcode $D/mg.rt --text $D/mg.txt >/dev/null 2>&1; grep -Eq '^0000 7042 [0-9]+ -1 1024$' $D/mg.rt && grep -Eq '^0002 4e75 [0-9]+ -1 -1$' $D/mg.rt && grep -Eq 'runtime code archive: .* [1-9][0-9]* generated with an approximate ROM producer' $D/mg.txt")
 set_tests_properties(rtcode_md_generated PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)

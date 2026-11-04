@@ -76,8 +76,10 @@ typedef struct {
     int32_t zsrc[8192];
     uint32_t lr[4]; unsigned nlr;       /* ROM bytes of the last 68000 data read */
     uint32_t lr_pc;                     /* pc of the instruction that made that read */
-    int32_t last_rom_read;              /* ROM address of the last 68000 data read (-1 none) */
-    int32_t ram_prod[0x10000];          /* work-RAM byte -> last ROM address read before it was stored */
+    int32_t ins_rd;                     /* ROM cell (or RAM producer) the current instruction read (-1 none) */
+    int32_t dtaint[8], ataint[8];       /* register -> a ROM cell its value derives from (-1 none) */
+    unsigned nwr; uint32_t wr_a[16]; uint8_t wr_n[16];   /* RAM stores of the current instruction */
+    int32_t ram_prod[0x10000];          /* work-RAM byte -> a ROM cell its value derives from (taint through registers) */
     int32_t ram_src[0x10000];           /* work-RAM byte -> ROM index of the byte a store copied (-1 none) */
     uint32_t z80_last_read;             /* ROM address of the last Z80 data read */
     int z80_last_valid;
@@ -288,6 +290,8 @@ static void on_step(void *u, uint32_t pc, uint16_t op) {
     x->dbcc_dn_before = dp_mdmach_dn(x->m, op & 7);
     x->sr_before = dp_mdmach_sr(x->m);
     x->pad_read = 0;
+    x->ins_rd = -1;
+    x->nwr = 0;
     x->op = op;
     x->register_move_valid = x->previous_move_valid && (op & 0xF038) == 0x3000 &&
                              (op & 7) == x->previous_move_reg;
@@ -344,6 +348,79 @@ static void irq_forks(X *x, uint32_t next) {
     }
 }
 
+
+// Taint through registers: which ROM cell a stored value derives from. Works on the disassembly text of the
+// instruction (move/lea/ALU forms); a single representative cell, not the full dependency set.
+static int op_reg(const char *o, int *is_a) {
+    if ((o[0] == 'd' || o[0] == 'a') && o[1] >= '0' && o[1] <= '7' && !o[2]) { *is_a = o[0] == 'a'; return o[1] - '0'; }
+    if (!strcmp(o, "sp")) { *is_a = 1; return 7; }
+    return -1;
+}
+static int32_t op_taint(const X *x, const char *o) {
+    int a, r = op_reg(o, &a);
+    if (r >= 0) return a ? x->ataint[r] : x->dtaint[r];
+    if (o[0] == '#') return -1;
+    return x->ins_rd;
+}
+static int32_t regs_taint(const X *x, const char *o) {
+    int32_t t = -1;
+    for (const char *c = o; *c; c++)
+        if ((*c == 'd' || *c == 'a') && c[1] >= '0' && c[1] <= '7' && !(c[2] >= '0' && c[2] <= '9') && (c == o || !(c[-1] >= 'a' && c[-1] <= 'z'))) {
+            int32_t v = *c == 'a' ? x->ataint[c[1] - '0'] : x->dtaint[c[1] - '0'];
+            if (v >= 0) t = v;
+        }
+    return t;
+}
+static void taint_step(X *x, uint32_t pc, unsigned len) {
+    uint8_t code[12];
+    for (unsigned k = 0; k < 12; k++)
+        code[k] = pc >= 0xE00000 ? dp_mdmach_ram8(x->m, pc + k) : (pc + k < x->r->rom_size ? x->c->rom[pc + k] : 0);
+    DpM68kInsn in;
+    if (!dp_m68k_decode(code, 12, pc, &in)) { x->nwr = 0; return; }
+    char buf[96], *src = NULL, *dst = NULL, *sp;
+    snprintf(buf, sizeof buf, "%s", in.text);
+    char *ops = strchr(buf, ' ');
+    if (ops) { *ops++ = 0; src = ops; }
+    if (src) {
+        int depth = 0;
+        for (char *c = src; *c; c++) {
+            if (*c == '(') depth++;
+            else if (*c == ')') depth--;
+            else if (*c == ',' && !depth) { *c = 0; dst = c + 1; break; }
+        }
+    }
+    (void)sp;
+    char mn[96]; snprintf(mn, sizeof mn, "%s", buf);
+    char *dot = strchr(mn, '.'); if (dot) *dot = 0;
+    int32_t v = -1; int has_v = 0;   // has_v: the destination receives v
+    if (!strncmp(mn, "movem", 5)) { has_v = 0; v = -1; }
+    else if (!strcmp(mn, "move") || !strcmp(mn, "movea")) { v = src ? op_taint(x, src) : -1; has_v = 1; }
+    else if (!strcmp(mn, "moveq") || !strcmp(mn, "clr")) { v = -1; has_v = 1; if (!dst) dst = src; }
+    else if (!strcmp(mn, "lea")) { v = src ? regs_taint(x, src) : -1; has_v = 1; }
+    else if (dst && (!strcmp(mn, "add") || !strcmp(mn, "adda") || !strcmp(mn, "addi") || !strcmp(mn, "addq") || !strcmp(mn, "sub") ||
+                     !strcmp(mn, "suba") || !strcmp(mn, "subi") || !strcmp(mn, "subq") || !strcmp(mn, "and") || !strcmp(mn, "andi") ||
+                     !strcmp(mn, "or") || !strcmp(mn, "ori") || !strcmp(mn, "eor") || !strcmp(mn, "eori") || !strcmp(mn, "mulu") ||
+                     !strcmp(mn, "muls") || !strcmp(mn, "divu") || !strcmp(mn, "divs") || !strcmp(mn, "lsl") || !strcmp(mn, "lsr") ||
+                     !strcmp(mn, "asl") || !strcmp(mn, "asr") || !strcmp(mn, "rol") || !strcmp(mn, "ror") || !strcmp(mn, "addx") ||
+                     !strcmp(mn, "subx"))) {
+        int32_t sv = op_taint(x, src), dv = op_taint(x, dst);
+        v = sv >= 0 ? sv : dv; has_v = 1;
+    } else if (src && !dst && (!strcmp(mn, "not") || !strcmp(mn, "neg") || !strcmp(mn, "negx") || !strcmp(mn, "swap") ||
+                                !strcmp(mn, "ext") || !strcmp(mn, "tst") || !strcmp(mn, "lsl") || !strcmp(mn, "lsr"))) {
+        v = op_taint(x, src); has_v = 1; dst = src;
+        if (!strcmp(mn, "tst")) has_v = 0;
+    }
+    if (has_v && dst) {
+        int a, r = op_reg(dst, &a);
+        if (r >= 0) { if (a) x->ataint[r] = v; else x->dtaint[r] = v; }
+    }
+    // the RAM bytes this instruction stored take the value's taint (unknown mnemonic or push: none)
+    int32_t sv = has_v && dst && op_reg(dst, &(int){0}) < 0 ? v : -1;
+    for (unsigned i = 0; i < x->nwr; i++)
+        for (unsigned k = 0; k < x->wr_n[i]; k++) x->ram_prod[(x->wr_a[i] + k) & 0xFFFF] = sv;
+    x->nwr = 0;
+}
+
 static void on_end(void *u, uint32_t pc, uint32_t next, unsigned len) {
     X *x = u;
     DpMdResults *r = x->r;
@@ -351,6 +428,7 @@ static void on_end(void *u, uint32_t pc, uint32_t next, unsigned len) {
     for (unsigned i = 0; i < 8; i++)
         if (dp_mdmach_an(x->m, i) != x->an_before[i]) x->an_writer[i] = pc & 0xFFFFFFu;
     pc &= 0xFFFFFFu;
+    taint_step(x, pc, len);
     if (pc >= r->rom_size || !dp_mdmach_rom_visible(x->m, pc)) {
         r->exec_outside++;
         if (pc >= 0xE00000) {
@@ -427,6 +505,7 @@ static void on_read(void *u, uint32_t a, unsigned size) {
     a &= 0xFFFFFFu;
     if ((a == 0xA10002 || a == 0xA10003) && x->pc < r->rom_size) x->pad_read = 1;
     if (!dp_mdmach_rom_visible(x->m, a)) { r->sram_reads++; return; }
+    if (a >= 0xE00000 && x->ins_rd < 0) x->ins_rd = x->ram_prod[a & 0xFFFF];   // RAM read: its producer
     if (a < r->rom_size) {
         if ((x->op & 0xF000) == 0x3000 && size == 2 && a + 1 < r->rom_size &&
             dp_mdmach_rom_visible(x->m, a) && dp_mdmach_rom_visible(x->m, a + 1)) {
@@ -435,7 +514,7 @@ static void on_read(void *u, uint32_t a, unsigned size) {
         }
         x->nlr = 0;
         x->lr_pc = x->pc;
-        x->last_rom_read = (int32_t)a;
+        if (x->ins_rd < 0) x->ins_rd = (int32_t)a;
         for (unsigned i = 0; i < size && i < 4 && a + i < r->rom_size; i++) x->lr[x->nlr++] = a + i;
         unsigned k;
         for (k = 0; k < r->nreaders && r->readers[k].pc != x->pc; k++) {}
@@ -479,8 +558,8 @@ static void on_write(void *u, uint32_t a, unsigned size, uint32_t v) {
             if (x->nlr == size && x->lr_pc == x->pc && x->lr[k] < r->rom_size &&
                 x->c->rom[x->lr[k]] == (uint8_t)(v >> (8 * (size - 1 - k)))) src = (int32_t)x->lr[k];
             x->ram_src[(a + k) & 0xFFFF] = src;
-            x->ram_prod[(a + k) & 0xFFFF] = src >= 0 ? src : x->last_rom_read;
         }
+    if (a >= 0xE00000 && x->nwr < 16) { x->wr_a[x->nwr] = a; x->wr_n[x->nwr++] = (uint8_t)size; }
     if (a >= 0xE00000)   // a store into RAM bytes that already ran is self-modifying code
         for (unsigned k = 0; k < size; k++)
             if (x->ram_exec[(a + k) & 0xFFFF]) {
@@ -1202,7 +1281,8 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     r->z80_flags = calloc(c->size, 1);
     r->copies = calloc(DP_MD_COPY_CAP, sizeof *r->copies);
     X x = {.c = c, .o = o, .r = r, .qcap = o->queue_cap};
-    x.last_rom_read = -1;
+    x.ins_rd = -1;
+    for (unsigned i = 0; i < 8; i++) x.dtaint[i] = x.ataint[i] = -1;
     for (unsigned i = 0; i < 0x10000; i++) { x.ram_src[i] = -1; x.ram_prod[i] = -1; }
     x.q = calloc(o->queue_cap ? o->queue_cap : 1, sizeof *x.q);
     if (o->lot_path && !(x.lot = dp_lf_open(o->lot_path, "MD", 1)))
