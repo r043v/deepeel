@@ -23,6 +23,7 @@
 #include "explore.h"
 #include "../../explore/stop.h"
 #include "../../explore/lots.h"
+#include "../../explore/novelty.h"
 #include "../../core/hashset.h"
 #include "../../explore/tree.h"
 #include "pce.h"
@@ -1015,57 +1016,7 @@ static int archive_add(PceRun *x, PceCell *a, uint32_t *n, uint64_t gain) {
     return (int)slot;
 }
 
-// lives detection without game knowledge: a WRAM byte <= 9 whose only
-// decreases are single steps at least 200 frames apart and which rarely
-// increases (a new game, a bonus life); a trial in which such a byte drops has lost a life
-typedef struct {
-    uint8_t prev[8192], maxv[8192];
-    uint16_t dec[8192], inc[8192];
-    uint8_t bad[8192];
-    uint32_t last_dec[8192];
-    uint32_t frame;
-    int lives_byte;        // the byte whose drops were last seen as deaths (-1: none)
-} PceLives;
 
-static int lives_frame(PceLives *L, const uint8_t *w, int learn) {
-    int died = 0;
-    for (int i = 0; i < 8192; i++) {
-        uint8_t a = L->prev[i], b = w[i];
-        if (b > L->maxv[i]) L->maxv[i] = b;
-        if (a == b) continue;
-        if (b + 1 == a) {
-            int cand = !L->bad[i] && L->dec[i] >= 2 && L->maxv[i] <= 9 &&
-                       L->inc[i] <= 1 + L->dec[i] / 4;
-            if (cand && !learn) { died = 1; L->lives_byte = i; if (getenv("DP_PCE_LIVES_DEBUG")) fprintf(stderr, "death $%04X %u->%u\n", 0x2000 + i, a, b); }
-            if (L->frame - L->last_dec[i] < 200) L->bad[i] = 1;
-            L->dec[i]++;
-            L->last_dec[i] = L->frame;
-        } else if (b < a) {
-            L->bad[i] = 1;
-        } else if (b == a + 1 && L->inc[i] < 0xFFFF) {
-            L->inc[i]++; // a jump of more than one is a new game, not counted
-        }
-    }
-    memcpy(L->prev, w, 8192);
-    L->frame++;
-    return died;
-}
-
-enum { KEY_SET = 1 << 18 };
-static int key_seen(const uint64_t *set, uint64_t k) {
-    k |= 1;
-    for (uint32_t i = (uint32_t)(k >> 7) & (KEY_SET - 1);; i = (i + 1) & (KEY_SET - 1)) {
-        if (!set[i]) return 0;
-        if (set[i] == k) return 1;
-    }
-}
-static void key_add(uint64_t *set, uint64_t k) {
-    k |= 1;
-    for (uint32_t i = (uint32_t)(k >> 7) & (KEY_SET - 1);; i = (i + 1) & (KEY_SET - 1)) {
-        if (set[i] == k) return;
-        if (!set[i]) { set[i] = k; return; }
-    }
-}
 
 static void novelty_search(PceRun *x) {
     DpPceResults *r = x->r;
@@ -1073,10 +1024,9 @@ static void novelty_search(PceRun *x) {
     PceCell *a = calloc(x->opt.novelty_archive, sizeof *a);
     if (!a) { x->failed = 1; return; }
     uint32_t n = 0;
-    PceLives *L = calloc(1, sizeof *L);
-    uint64_t *keys = calloc(KEY_SET, sizeof *keys);
-    if (!L || !keys) { free(a); free(L); free(keys); x->failed = 1; return; }
-    L->lives_byte = -1;
+    DpLives *L = dp_lives_new(8192);
+    DpKeys keys; dp_keys_init(&keys, 1u << 18);
+    if (!L || !keys.k) { free(a); free(L); dp_keys_free(&keys); x->failed = 1; return; }
     const int cells = x->opt.novelty_cells;
     x->mode = 1;
     x->forced = 0;
@@ -1119,8 +1069,7 @@ static void novelty_search(PceRun *x) {
         uint8_t held = 0;
         uint32_t hold = 0;
         uint64_t frames_since = 0;
-        memcpy(L->prev, dp_pce_wram(), 8192);
-        L->frame += 200; // a restore is no decrement sequence
+        dp_lives_restore(L, dp_pce_wram(), 8192); // a restore is no decrement sequence
         int learn = r->novelty_trials < 64;
         int died = 0;
         int recent[64];        // slots added by this trial, with their frame
@@ -1129,7 +1078,7 @@ static void novelty_search(PceRun *x) {
         for (uint32_t f = 0; f < x->opt.novelty_frames; f++) {
             if (!play_frame(x, random_input(x, &held, &hold))) break;
             r->novelty_frames_run++;
-            if (cells && lives_frame(L, dp_pce_wram(), learn)) {
+            if (cells && dp_lives_frame(L, dp_pce_wram(), learn)) {
                 // the cells archived shortly before a death are doomed
                 for (unsigned k = 0; k < nrecent; k++)
                     if (recent[k] >= 0 && f - recent_f[k] < 120) { a[recent[k]].picks = 1u << 30; a[recent[k]].gain = 0; }
@@ -1141,14 +1090,14 @@ static void novelty_search(PceRun *x) {
             // a new screen cell, or new ROM cells, joins the archive
             if (f % 8 == 7) {
                 uint64_t k = cells ? dp_pce_screen_key() : 0;
-                int fresh = cells && !key_seen(keys, k);
+                int fresh = cells && !dp_keys_seen(&keys, k);
                 if (fresh || (x->novel > before && frames_since >= 60)) {
                     uint64_t g = x->novel - before;
                     a[best].gain += g;
                     int slot = archive_add(x, a, &n, cells ? g + (fresh ? 1 : 0) : g + 1);
                     if (nrecent < 64) { recent[nrecent] = slot; recent_f[nrecent++] = f; }
                     if (slot >= 0) { a[slot].key = k; a[slot].depth = a[best].depth + f + 1; if (a[slot].depth > r->novelty_depth) r->novelty_depth = a[slot].depth; }
-                    key_add(keys, k);
+                    dp_keys_add(&keys, k);
                     if (g) r->novelty_hits++;
                     before = x->novel;
                     frames_since = 0;
@@ -1176,7 +1125,7 @@ static void novelty_search(PceRun *x) {
     for (uint32_t i = 0; i < n; i++) free(a[i].z);
     free(a);
     free(L);
-    free(keys);
+    dp_keys_free(&keys);
     x->mode = 0;
 }
 

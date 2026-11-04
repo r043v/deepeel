@@ -14,6 +14,7 @@
 #include <zlib.h>
 #include "gambatte_init.h"
 #include "sessions.h"
+#include "novelty.h"
 #include "../core/snapshot_png.h"
 #include "../mach/m0boy.h"
 #include "tas.h"
@@ -301,7 +302,7 @@ struct DpPlay {
     const DpPlatform *plat;
     DpPool pool;
     pthread_mutex_t cell_mtx;
-    uint64_t *cell_keys;   // open-addressing set of seen screen fingerprints
+    DpKeys cell_keys;      // set of seen screen fingerprints (novelty.h)
     uint64_t cells_archived;
     DpWorker w[DP_MAX_SESSIONS];
     int nworkers;
@@ -565,13 +566,8 @@ static uint64_t screen_key(const DpGblApi *api) {
 static int cell_new(DpPlay *p, uint64_t k) {
     int fresh = 0;
     pthread_mutex_lock(&p->cell_mtx);
-    if (!p->cell_keys) p->cell_keys = calloc(CELL_SET, sizeof *p->cell_keys);
-    if (p->cell_keys) {
-        for (uint32_t i = (uint32_t)(k >> 7) & (CELL_SET - 1);; i = (i + 1) & (CELL_SET - 1)) {
-            if (p->cell_keys[i] == k) break;
-            if (!p->cell_keys[i]) { p->cell_keys[i] = k; fresh = 1; break; }
-        }
-    }
+    if (!p->cell_keys.k) dp_keys_init(&p->cell_keys, CELL_SET);
+    if (p->cell_keys.k) fresh = dp_keys_add(&p->cell_keys, k);
     pthread_mutex_unlock(&p->cell_mtx);
     return fresh;
 }
@@ -856,12 +852,11 @@ int dp_play_save(const DpPlay *p) {
     // Go-Explore cell keys (J4) as a trailer: a resumed run keeps the cells already seen
     pthread_mutex_lock(&p->cell_mtx);
     uint32_t cn = 0;
-    if (p->cell_keys)
-        for (uint32_t i = 0; i < CELL_SET; i++) cn += p->cell_keys[i] != 0;
+    if (p->cell_keys.k) cn = p->cell_keys.n;
     fwrite(&cn, sizeof cn, 1, f);
-    if (p->cell_keys)
+    if (p->cell_keys.k)
         for (uint32_t i = 0; i < CELL_SET; i++)
-            if (p->cell_keys[i]) fwrite(&p->cell_keys[i], sizeof p->cell_keys[i], 1, f);
+            if (p->cell_keys.k[i]) fwrite(&p->cell_keys.k[i], sizeof p->cell_keys.k[i], 1, f);
     pthread_mutex_unlock(&p->cell_mtx);
     fclose(f);
     return 1;
@@ -1260,7 +1255,7 @@ void dp_play_free(DpPlay *p) {
     pthread_cond_destroy(&p->cv);
     pthread_mutex_destroy(&p->pool.mtx);
     pthread_mutex_destroy(&p->cell_mtx);
-    free(p->cell_keys);
+    dp_keys_free(&p->cell_keys);
     pthread_mutex_destroy(&p->inb_mtx);
     pthread_mutex_destroy(&p->preview_mtx);
     pthread_mutex_destroy(&p->watch_mtx);

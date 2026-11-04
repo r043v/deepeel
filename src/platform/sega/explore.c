@@ -7,6 +7,7 @@
 #include "../../cpu/z80/provenance.h"
 #include "../../core/hashset.h"
 #include "../../explore/lots.h"
+#include "../../explore/novelty.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1175,33 +1176,6 @@ static void play_session(Run *x) {
 // Lives are learned without game knowledge as in the NES search: a small RAM byte that
 // only decreases by single steps far apart.
 typedef struct { uint8_t *z; uLongf zlen; uint64_t gain; uint32_t picks,depth; uint8_t lives[8192]; } SegaCell;
-typedef struct { uint8_t prev[8192],maxv[8192],bad[8192]; uint16_t dec[8192],inc[8192]; uint32_t last_dec[8192],frame; int lives_byte; } SegaLives;
-static int sega_lives_frame(SegaLives *L,const uint8_t *w,size_t n,int learn) {
-    int died=0;
-    for(size_t i=0;i<n;i++) {
-        uint8_t a=L->prev[i],b=w[i];
-        if(b>L->maxv[i]) L->maxv[i]=b;
-        if(a==b) continue;
-        if(b+1==a) {
-            int cand=!L->bad[i] && L->dec[i]>=2 && L->maxv[i]<=9 && L->inc[i]<=1+L->dec[i]/4;
-            if(cand && !learn) { died=1; L->lives_byte=(int)i; }
-            if(L->frame-L->last_dec[i]<200) L->bad[i]=1;
-            L->dec[i]++; L->last_dec[i]=L->frame;
-        } else if(b<a) L->bad[i]=1;
-        else if(b==a+1 && L->inc[i]<0xFFFF) L->inc[i]++;
-    }
-    memcpy(L->prev,w,n); L->frame++;
-    return died;
-}
-enum { SEGA_KEY_SET=1<<18 };
-static int sega_key_seen(const uint64_t *set,uint64_t k) {
-    k|=1;
-    for(uint32_t i=(uint32_t)(k>>7)&(SEGA_KEY_SET-1);;i=(i+1)&(SEGA_KEY_SET-1)) { if(!set[i]) return 0; if(set[i]==k) return 1; }
-}
-static void sega_key_add(uint64_t *set,uint64_t k) {
-    k|=1;
-    for(uint32_t i=(uint32_t)(k>>7)&(SEGA_KEY_SET-1);;i=(i+1)&(SEGA_KEY_SET-1)) { if(set[i]==k) return; if(!set[i]) { set[i]=k; return; } }
-}
 // state||cart image of the machine, compressed; slot reuse follows gain/(1+picks)
 static int sega_cell_add(Run *x,SegaCell *a,uint32_t *n,uint64_t gain,uint8_t *img,Bytef *ztmp,uLongf zcap,uint32_t cap) {
     size_t ssz=x->b->state_size;
@@ -1234,11 +1208,10 @@ static void novelty_session(Run *x) {
     size_t ssz=x->b->state_size, tot=ssz+0x8000;
     uLongf zcap=compressBound((uLong)tot);
     SegaCell *a=calloc(o->novelty_archive,sizeof *a);
-    SegaLives *L=calloc(1,sizeof *L);
-    uint64_t *keys=calloc(SEGA_KEY_SET,sizeof *keys);
+    DpLives *L=dp_lives_new(8192);
+    DpKeys keys; dp_keys_init(&keys,1u<<18);
     uint8_t *img=malloc(tot),*img2=malloc(tot); Bytef *ztmp=malloc(zcap);
-    if(!a||!L||!keys||!img||!img2||!ztmp) { free(a); free(L); free(keys); free(img); free(img2); free(ztmp); return; }
-    L->lives_byte=-1;
+    if(!a||!L||!keys.k||!img||!img2||!ztmp) { free(a); free(L); dp_keys_free(&keys); free(img); free(img2); free(ztmp); return; }
     uint32_t n=0; const int cells=o->novelty_cells;
     uint64_t stop=r->steps+o->novelty_total;
     x->rng=0x2545F491u*7u+11u;
@@ -1267,8 +1240,8 @@ static void novelty_session(Run *x) {
         x->cur_sec=NULL; x->prev_at=0;
         a[best].picks++; r->novelty_trials++;
         uint64_t before=x->novel; uint32_t hold=0,frames_since=0; uint8_t held=0;
-        size_t rn=0; const uint8_t *ram=x->b->ram_view(&rn); if(rn>sizeof L->prev) rn=sizeof L->prev;
-        memcpy(L->prev,ram,rn); L->frame+=200;
+        size_t rn=0; const uint8_t *ram=x->b->ram_view(&rn); if(rn>DP_LIVES_MAX) rn=DP_LIVES_MAX; L->n=rn;
+        dp_lives_restore(L,ram,rn);
         int learn=r->novelty_trials<64;
         int recent[64]; uint32_t recent_f[64]; unsigned nrecent=0;
         for(uint32_t f=0;f<o->novelty_frames && r->steps<stop;f++) {
@@ -1285,22 +1258,22 @@ static void novelty_session(Run *x) {
             if(held&64) { if(gg||msx) in.start=1; else in.pause=1; }
             if(!sega_nov_frame(x,in)) break;
             r->novelty_frames_run++;
-            ram=x->b->ram_view(&rn); if(rn>sizeof L->prev) rn=sizeof L->prev;
-            if(cells && sega_lives_frame(L,ram,rn,learn)) {
+            ram=x->b->ram_view(&rn); if(rn>DP_LIVES_MAX) rn=DP_LIVES_MAX; L->n=rn;
+            if(cells && dp_lives_frame(L,ram,learn)) {
                 for(unsigned k=0;k<nrecent;k++) if(recent[k]>=0 && f-recent_f[k]<120) { a[recent[k]].picks=1u<<30; a[recent[k]].gain=0; }
                 r->novelty_deaths++; break;
             }
             frames_since++;
             if(f%8==7) {
                 uint64_t k=cells?x->b->screen_key():0;
-                int fresh=cells && !sega_key_seen(keys,k);
+                int fresh=cells && !dp_keys_seen(&keys,k);
                 if(fresh || (x->novel>before && frames_since>=60)) {
                     uint64_t g=x->novel-before;
                     a[best].gain+=g;
                     int slot=sega_cell_add(x,a,&n,cells?g+(fresh?1:0):g+1,img,ztmp,zcap,o->novelty_archive);
                     if(nrecent<64) { recent[nrecent]=slot; recent_f[nrecent++]=f; }
                     if(slot>=0) { a[slot].depth=a[best].depth+f+1; if(a[slot].depth>r->novelty_depth) r->novelty_depth=a[slot].depth; }
-                    sega_key_add(keys,k);
+                    dp_keys_add(&keys,k);
                     if(g) r->novelty_hits++;
                     before=x->novel; frames_since=0;
                 }
@@ -1326,7 +1299,7 @@ static void novelty_session(Run *x) {
     }
     pass_end(x);
     for(uint32_t i=0;i<n;i++) free(a[i].z);
-    free(a); free(L); free(keys); free(img); free(img2); free(ztmp);
+    free(a); free(L); dp_keys_free(&keys); free(img); free(img2); free(ztmp);
 }
 // GB dp_seed_indirect parity: every jp (hl)/(ix)/(iy) target observed at
 // runtime without execution evidence seeds a further pass; the phase's

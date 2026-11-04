@@ -1,5 +1,6 @@
 #include "explore.h"
 #include "../../explore/lots.h"
+#include "../../explore/novelty.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -1169,16 +1170,9 @@ typedef struct {
     uint8_t lives[65536];
 } MdCell;
 typedef struct {
-    uint8_t prev[65536], maxv[65536], bad[65536];
-    uint16_t dec[65536], inc[65536];
-    uint32_t last_dec[65536], frame;
-    int lives_byte;
-} MdLives;
-enum { MD_KEY_SET = 1 << 18 };
-typedef struct {
     MdCell *a; uint32_t n;
-    MdLives *L;
-    uint64_t *keys;
+    DpLives *L;
+    DpKeys keys;
     uint8_t *tmp; Bytef *ztmp; uLongf zcap;
     uint32_t rng, left, f, best, hold, frames_since;
     uint8_t held;
@@ -1188,39 +1182,6 @@ typedef struct {
 } MdNov;
 
 static uint32_t md_rng(uint32_t *s) { uint32_t v = *s; v ^= v << 13; v ^= v >> 17; v ^= v << 5; return *s = v; }
-static int md_key_seen(const uint64_t *set, uint64_t k) {
-    k |= 1;
-    for (uint32_t i = (uint32_t)(k >> 7) & (MD_KEY_SET - 1);; i = (i + 1) & (MD_KEY_SET - 1)) {
-        if (!set[i]) return 0;
-        if (set[i] == k) return 1;
-    }
-}
-static void md_key_add(uint64_t *set, uint64_t k) {
-    k |= 1;
-    for (uint32_t i = (uint32_t)(k >> 7) & (MD_KEY_SET - 1);; i = (i + 1) & (MD_KEY_SET - 1)) {
-        if (set[i] == k) return;
-        if (!set[i]) { set[i] = k; return; }
-    }
-}
-static int md_lives_frame(MdLives *L, const uint8_t *w, int learn) {
-    int died = 0;
-    for (int i = 0; i < 65536; i++) {
-        uint8_t a = L->prev[i], b = w[i];
-        if (b > L->maxv[i]) L->maxv[i] = b;
-        if (a == b) continue;
-        if (b + 1 == a) {
-            int cand = !L->bad[i] && L->dec[i] >= 2 && L->maxv[i] <= 9 && L->inc[i] <= 1 + L->dec[i] / 4;
-            if (cand && !learn) { died = 1; L->lives_byte = i; }
-            if (L->frame - L->last_dec[i] < 200) L->bad[i] = 1;
-            L->dec[i]++;
-            L->last_dec[i] = L->frame;
-        } else if (b < a) L->bad[i] = 1;
-        else if (b == a + 1 && L->inc[i] < 0xFFFF) L->inc[i]++;
-    }
-    memcpy(L->prev, w, 65536);
-    L->frame++;
-    return died;
-}
 static int md_archive_add(X *x, MdNov *N, uint64_t gain) {
     DpMdResults *r = x->r;
     dp_mdmach_save(x->m, N->tmp);
@@ -1278,7 +1239,7 @@ static void novelty_frame(X *x) {
     MdNov *N = x->nov;
     DpMdResults *r = x->r;
     r->novelty_frames_run++;
-    if (N->cells && md_lives_frame(N->L, dp_mdmach_ram(x->m), N->learn)) {
+    if (N->cells && dp_lives_frame(N->L, dp_mdmach_ram(x->m), N->learn)) {
         for (unsigned k = 0; k < N->nrecent; k++)
             if (N->recent[k] >= 0 && N->f - N->recent_f[k] < 120) { N->a[N->recent[k]].picks = 1u << 30; N->a[N->recent[k]].gain = 0; }
         r->novelty_deaths++;
@@ -1289,7 +1250,7 @@ static void novelty_frame(X *x) {
     N->frames_since++;
     if (N->f % 8 == 7) {
         uint64_t k = N->cells ? dp_mdmach_screen_key(x->m) : 0;
-        int fresh = N->cells && !md_key_seen(N->keys, k);
+        int fresh = N->cells && !dp_keys_seen(&N->keys, k);
         if (fresh || (x->novel > N->before && N->frames_since >= 60)) {
             uint64_t g = x->novel - N->before;
             N->a[N->best].gain += g;
@@ -1299,7 +1260,7 @@ static void novelty_frame(X *x) {
                 N->a[slot].depth = N->a[N->best].depth + N->f + 1;
                 if (N->a[slot].depth > r->novelty_depth) r->novelty_depth = N->a[slot].depth;
             }
-            md_key_add(N->keys, k);
+            dp_keys_add(&N->keys, k);
             if (g) r->novelty_hits++;
             N->before = x->novel;
             N->frames_since = 0;
@@ -1316,17 +1277,16 @@ static void novelty_search(X *x) {
     MdNov *N = calloc(1, sizeof *N);
     if (!N) return;
     N->a = calloc(o->novelty_archive, sizeof *N->a);
-    N->L = calloc(1, sizeof *N->L);
-    N->keys = calloc(MD_KEY_SET, sizeof *N->keys);
+    N->L = dp_lives_new(65536);
+    dp_keys_init(&N->keys, 1u << 18);
     N->tmp = malloc(ssz);
     uint8_t *tmp2 = malloc(ssz);
     N->zcap = compressBound((uLong)ssz);
     N->ztmp = malloc(N->zcap);
-    if (!N->a || !N->L || !N->keys || !N->tmp || !tmp2 || !N->ztmp) {
-        free(N->a); free(N->L); free(N->keys); free(N->tmp); free(tmp2); free(N->ztmp); free(N);
+    if (!N->a || !N->L || !N->keys.k || !N->tmp || !tmp2 || !N->ztmp) {
+        free(N->a); free(N->L); dp_keys_free(&N->keys); free(N->tmp); free(tmp2); free(N->ztmp); free(N);
         return;
     }
-    N->L->lives_byte = -1;
     N->cells = o->novelty_cells;
     N->rng = o->play_seed * 0x2545F491u + 7;
     dp_mdmach_reset(x->m);
@@ -1371,8 +1331,7 @@ static void novelty_search(X *x) {
         x->trace_pos = x->trace_len = 0;
         next_generation(x);
         dp_mdmach_load(x->m, tmp2);
-        memcpy(N->L->prev, dp_mdmach_ram(x->m), 65536);
-        N->L->frame += 200;   // a restore is no decrement sequence
+        dp_lives_restore(N->L, dp_mdmach_ram(x->m), 65536);   // a restore is no decrement sequence
         dp_mdmach_set_pad(x->m, md_random_pad(N));
         int cut = 0, fault = 0;
         r->paths++;
@@ -1401,7 +1360,7 @@ static void novelty_search(X *x) {
         }
     }
     for (uint32_t i = 0; i < N->n; i++) free(N->a[i].z);
-    free(N->a); free(N->L); free(N->keys); free(N->tmp); free(tmp2); free(N->ztmp); free(N);
+    free(N->a); free(N->L); dp_keys_free(&N->keys); free(N->tmp); free(tmp2); free(N->ztmp); free(N);
 }
 
 static uint32_t rd32(const uint8_t *p) {

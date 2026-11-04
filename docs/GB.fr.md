@@ -3349,3 +3349,13 @@ utiles du pool). Anciens fichiers sans cette fin : tolérés. Test `gb_session_c
 Même option que NES : à chaque site de lecture du pad (`$A10002/3`), les 244 masques à trois
 boutons absents du catalogue de 14 sondes sont proposés (clé site × masque, une fois). Hors
 défaut. Test `md_pad_full` (258 sondes sur le site de la fixture : 14 + 244).
+
+## Novelty : détecteur de vies et clés de cellules mutualisés (J4) (0.246.0)
+
+Le détecteur de vies sans connaissance du jeu et l'ensemble de clés de cellules écran étaient
+copiés quatre fois (NES, PCE, MD, Sega) plus une cinquième version dans les sessions. Ils vivent
+maintenant dans `src/explore/novelty.h` (`DpLives`, `DpKeys`) : un correctif porte sur tous les
+cœurs. Le détecteur s'adapte à la taille de la RAM de chaque cœur ; l'ensemble de clés refuse
+d'ajouter au-delà de la moitié de sa table (avant : boucle infinie possible sur table pleine).
+Sans changement de comportement observé : les 150 tests passent. Le détecteur de vies
+du PCE perd son affichage `DP_PCE_LIVES_DEBUG`.
