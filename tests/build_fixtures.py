@@ -129,6 +129,21 @@ def build(out):
     w(r, 0xC005, 0xC9)                           # ret
     save(out, "fix_mbc5", r)
 
+    # --- mbc1m1: MBC1 mode 1 remaps the ROM0 window ($0000-$3FFF) --------------
+    # 1 MiB (64 banks).  Mode 1 + upper register 1 makes the window show bank
+    # $20 while the code runs there: the instruction after the switch lives in
+    # bank $20 at the same address.
+    r = rom(64, mbc=0x01)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x3E, 0x01)                      # ld a,1
+    w(r, 0x152, 0xEA, 0x00, 0x60)                # ld ($6000),a -> mode 1
+    w(r, 0x155, 0xEA, 0x00, 0x40)                # ld ($4000),a -> upper=1: window shows bank $20
+    w(r, 0x158, 0x3E, 0x56)                      # (bank 0 copy, never reached once switched)
+    w(r, 0x20 * 0x4000 + 0x158, 0x3E, 0x78)      # bank $20: ld a,$78
+    w(r, 0x20 * 0x4000 + 0x15A, 0xEA, 0x02, 0x80) # ld ($8002),a
+    w(r, 0x20 * 0x4000 + 0x15D, 0x76)            # halt
+    save(out, "fix_mbc1m1", r)
+
     # --- closure: code the budget never reaches, found by direct flow ---------
     r = rom(4, mbc=0x19)
     w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)

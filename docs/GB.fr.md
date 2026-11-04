@@ -2723,7 +2723,7 @@ fixtures à plusieurs copies.
 
 Sur `fix_mbc5`, la séquence de banques de la fenêtre ROMX vue par gambatte (après la banque initiale 1 posée au chargement)
 est `2 3`, celle que `explore` consigne pour m0boy (`romN 0 -> 2`, `romN 2 -> 3`). Épinglé côté gambatte dans
-`lr_gambatte_parity`, côté m0boy par `test_explorer`. Reste : fixtures à banques multiples en fenêtre ROM0 (MBC1 mode 1).
+`lr_gambatte_parity`, côté m0boy par `test_explorer`. Fixture `fix_mbc1m1` ajoutée (voir « Écart MBC1 mode 1 »).
 
 ## 0.187.5 — courses de données de `--jobs` (trouvées par la campagne J13)
 
@@ -2761,3 +2761,12 @@ Limites : m0boy est DMG-only, donc Tetris DX et Pokémon Jaune sont explorés da
 (pas de VBK/SVBK/HDMA réels) ; le niveau B gambatte, borné par défaut, sature très tôt sur ces deux ROMs
 (884 / 385 pas). Cette campagne a révélé les courses de données de `--jobs` corrigées en 0.187.5.
 Reste pour J13 : MD, NES, PCE, MSX sur ROMs réelles, et l'audit complet de la matrice §2.1.
+
+## Écart MBC1 mode 1 : fenêtre ROM0 (J11/J12, trouvé par fixture)
+
+`fix_mbc1m1` (1 Mio, MBC1) écrit `$6000=1` (mode 1) puis `$4000=1` : la fenêtre ROM0 (`$0000-$3FFF`) affiche alors la
+banque `$20` et ROMX la banque `$21`. Observation de gambatte (`lr_gambatte_parity`, assertion fenêtre ROM0 = 32) :
+conforme. Observation de m0boy/deepeel : les écritures `MODE` et `RAMB` sont vues (2 chacune) mais l'exécution reste
+dans la banque 0 (13 octets de code en banque 0, 2 sections) : **le remappage de la fenêtre ROM0 n'est pas modélisé**,
+donc le code placé en banque `$20/$40/$60` d'une grosse ROM MBC1 est mal attribué. Écart réel, non corrigé : la
+correction touche le runtime généré de m0boy (hors de ce dépôt). Le test ne fige pas le comportement fautif de m0boy.
