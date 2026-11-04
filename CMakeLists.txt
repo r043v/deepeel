@@ -76,6 +76,10 @@ dp_md_audio_patch("if (a < md_rom_size) return md_rom[a];"
   "if (a < md_rom_size) { dp_md_z80_rom_read(m, a); return md_rom[a]; }")
 dp_md_audio_patch("static void sound_store(MdFull *m, uint16_t addr, uint8_t value, uint64_t at) {"
   "static void sound_store(MdFull *m, uint16_t addr, uint8_t value, uint64_t at) {\n    dp_md_sound_store(m, addr, value);")
+# MdFull::no_audio/no_z80 exist only in MD_PERF builds; drop the bench-only
+# short-circuits from the generated copy when upstream uses them unguarded.
+string(REPLACE "    if (m->no_audio) return;\n" "" DP_MD_AUDIO "${DP_MD_AUDIO}")
+string(REPLACE "    if (m->no_z80) return;\n" "" DP_MD_AUDIO "${DP_MD_AUDIO}")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/dp_md_full_audio.c"
   "#include \"md_full.h\"\nvoid dp_md_z80_begin(MdFull *, z80_t *);\nvoid dp_md_z80_end(MdFull *);\nvoid dp_md_z80_rom_read(MdFull *, uint32_t);\nvoid dp_md_sound_store(MdFull *, uint16_t, uint8_t);\n${DP_MD_AUDIO}")
 add_library(dp_mdmach_lib STATIC
