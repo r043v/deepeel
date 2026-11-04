@@ -15,5 +15,9 @@ if [ $rc -eq 0 ]; then
   w=$?
   [ $w -eq 0 ] || [ $w -eq 2 ] || rc=1
 fi
+if [ $rc -eq 0 ]; then
+  # live view of a novelty run (dummy video driver): must still report its cells
+  SDL_VIDEODRIVER=dummy "$1" lr novelty "$2" "$rom" --rounds 20 --watch 1 | grep -q "cells reached: [1-9]" || rc=1
+fi
 rm -f "$rom"
 exit $rc

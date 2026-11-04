@@ -2468,3 +2468,11 @@ cycle, PC, SP, A, B, C, D, E, F, H, L) :
   un écart de phase image/vblank pendant une période LCD éteint, pas une erreur de CPU. Non élucidé.
 - Diagnostic : la trace `DEEPEEL_TAS_TRACEFRAME` est préfixée `<variante>.<machine>` pour isoler le flux du film
   des autres machines de l'exploration (le fichier mélange sinon plusieurs machines).
+
+## 0.175.0 (J11 : `lr novelty --watch`)
+
+`deepeel lr novelty CORE ROM --watch SCALE` ouvre une fenêtre SDL2 rafraîchie depuis le framebuffer du cœur à
+chaque saut d'exploration : on regarde la recherche Go-Explore sur écran en cours. Q/Échap ferme l'affichage,
+l'exploration continue. Sans GUI, l'option est acceptée et ignorée. Limite : l'exploration à fourches
+(`lr explore`, niveau B) avance le CPU instruction par instruction sans produire de vidéo, donc elle n'a pas de
+vue en direct ; son branchement dans l'explorateur complet (typage, copies, longueurs d'instruction) reste à faire.

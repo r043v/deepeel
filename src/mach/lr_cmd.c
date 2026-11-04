@@ -99,16 +99,60 @@ static uint64_t lr_cell(DpLibretro *lr) {
 
 typedef struct { void *st; uint64_t cell; } LrCellState;
 
-// deepeel lr novelty CORE ROM [--rounds N] [--seed N] [--hold N]: Go-Explore over screen cells on any
+#ifdef DP_HAS_GUI
+#include <SDL.h>
+// live view of an exploring core (deepeel lr novelty --watch SCALE): a window refreshed from the core's
+// framebuffer every few frames; closing it (or Q/Escape) stops the display, not the exploration.
+typedef struct { SDL_Window *win; SDL_Renderer *rd; SDL_Texture *tx; int tw, th, scale, off; } LrView;
+static void lr_view_show(LrView *v, DpLibretro *lr) {
+    if (!v->scale || v->off) return;
+    int w, h, pitch, fmt;
+    const uint8_t *fb = dp_lr_framebuffer(lr, &w, &h, &pitch, &fmt);
+    if (!fb) return;
+    if (!v->win) {
+        if (SDL_Init(SDL_INIT_VIDEO) != 0) { v->off = 1; return; }
+        v->win = SDL_CreateWindow("deepeel lr novelty", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w * v->scale, h * v->scale, 0);
+        v->rd = v->win ? SDL_CreateRenderer(v->win, -1, 0) : NULL;
+        if (!v->rd) { v->off = 1; return; }
+    }
+    SDL_Event e;
+    while (SDL_PollEvent(&e))
+        if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && (e.key.keysym.sym == SDLK_q || e.key.keysym.sym == SDLK_ESCAPE))) {
+            v->off = 1;
+            return;
+        }
+    if (!v->tx || v->tw != w || v->th != h) {
+        if (v->tx) SDL_DestroyTexture(v->tx);
+        v->tx = SDL_CreateTexture(v->rd, fmt == DP_LR_FMT_XRGB8888 ? SDL_PIXELFORMAT_ARGB8888 : fmt == DP_LR_FMT_RGB565 ? SDL_PIXELFORMAT_RGB565 : SDL_PIXELFORMAT_ARGB1555,
+                                  SDL_TEXTUREACCESS_STREAMING, w, h);
+        v->tw = w; v->th = h;
+    }
+    if (v->tx) { SDL_UpdateTexture(v->tx, NULL, fb, pitch); SDL_RenderClear(v->rd); SDL_RenderCopy(v->rd, v->tx, NULL, NULL); SDL_RenderPresent(v->rd); }
+}
+static void lr_view_close(LrView *v) {
+    if (v->tx) SDL_DestroyTexture(v->tx);
+    if (v->rd) SDL_DestroyRenderer(v->rd);
+    if (v->win) { SDL_DestroyWindow(v->win); SDL_Quit(); }
+}
+#else
+typedef struct { int scale; } LrView;
+static void lr_view_show(LrView *v, DpLibretro *lr) { (void)v; (void)lr; }
+static void lr_view_close(LrView *v) { (void)v; }
+#endif
+
+
+// deepeel lr novelty CORE ROM [--rounds N] [--seed N] [--hold N] [--watch SCALE]: Go-Explore over screen cells on any
 // (level A) core: archive of states keyed by screen cell, random held inputs from a random archived state.
 static int lr_novelty(int argc, char **argv) {
     const char *core = argv[3], *rom = argv[4];
     unsigned long rounds = 2000, hold = 8;
     uint64_t rng = 88172645463325252ull;
+    LrView view = {0};
     for (int i = 5; i + 1 < argc; i += 2) {
         if (!strcmp(argv[i], "--rounds")) rounds = strtoul(argv[i + 1], NULL, 0);
         else if (!strcmp(argv[i], "--seed")) rng ^= strtoull(argv[i + 1], NULL, 0) * 0x9E3779B97F4A7C15ull;
         else if (!strcmp(argv[i], "--hold")) hold = strtoul(argv[i + 1], NULL, 0);
+        else if (!strcmp(argv[i], "--watch")) view.scale = atoi(argv[i + 1]) > 0 && atoi(argv[i + 1]) <= 8 ? atoi(argv[i + 1]) : 2;
         else { fprintf(stderr, "deepeel lr: unknown option %s\n", argv[i]); return 2; }
     }
     if (!hold) hold = 8;
@@ -131,6 +175,7 @@ static int lr_novelty(int argc, char **argv) {
         for (unsigned long f = 0; f < 3; f++) {
             dp_lr_set_input(lr, 0, mask);
             dp_lr_advance(lr, (unsigned)hold);
+            lr_view_show(&view, lr);
             uint64_t c = lr_cell(lr);
             size_t i = 0;
             while (i < cnt && ar[i].cell != c) i++;
@@ -147,6 +192,7 @@ static int lr_novelty(int argc, char **argv) {
     }
     printf("deepeel libretro novelty (Go-Explore over screen cells, tool observation)\ncore: %s\n%s\n", dp_lr_core_name(lr), dp_lr_degradations(lr));
     printf("rounds %lu, hold %lu frames, cells reached: %zu, archive states dropped (cap 100000): %lu\n", rounds, hold, cnt, dropped);
+    lr_view_close(&view);
     for (size_t i = 0; i < cnt; i++) free(ar[i].st);
     free(ar); free(tmp);
     dp_lr_close(lr);
@@ -229,7 +275,7 @@ int dp_lr_command(int argc, char **argv) {
     if (argc >= 5 && !strcmp(argv[2], "novelty")) return lr_novelty(argc, argv);
     if (argc >= 5 && !strcmp(argv[2], "play")) return lr_play(argc, argv);
     if (argc < 5 || strcmp(argv[2], "explore")) {
-        fprintf(stderr, "usage: deepeel lr play CORE ROM [--frames N] [--tas FILE] [--ppm FILE]\n       deepeel lr watch CORE ROM [--scale N] [--max-frames N]\n       deepeel lr novelty CORE ROM [--rounds N] [--seed N] [--hold N]\n       deepeel lr explore CORE ROM [--text FILE] [--map FILE] "
+        fprintf(stderr, "usage: deepeel lr play CORE ROM [--frames N] [--tas FILE] [--ppm FILE]\n       deepeel lr watch CORE ROM [--scale N] [--max-frames N]\n       deepeel lr novelty CORE ROM [--rounds N] [--seed N] [--hold N] [--watch SCALE]\n       deepeel lr explore CORE ROM [--text FILE] [--map FILE] "
                         "[--png FILE] [--path-steps N] [--max-total N] [--queue N]\n");
         return 2;
     }
