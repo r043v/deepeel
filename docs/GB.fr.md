@@ -2566,3 +2566,12 @@ temporaire). Prochaine étape : reconstruire cette référence et comparer les h
 La fenêtre `--mapwin` garde les classes déjà peintes et ne repeint, à chaque rafraîchissement, que les octets dont la
 classe a changé (le tampon RVB persiste). `dp_map_build` recalcule encore la carte entière toutes les ~1 s : le calcul
 incrémental de la carte elle-même (bitmap de pages sales) reste à faire.
+
+### Film Zelda contre les cores libretro (observation, sans changement de code)
+
+Rejeu des entrées de `bobmario511-zeldagb-playaround.vbm` (ROM USA/Europe rév. 0, somme `47B7` recalculée = celle du
+film) dans `gambatte_libretro` et `sameboy_libretro` (une trame de film par `retro_run`, sans boot ROM) : à la trame 1800
+Gambatte est encore à la saisie du nom, SameBoy à l'écran-titre puis à la saisie, alors que deepeel (profil VBA 1.7.2)
+est dans la maison après « Shield back! ». Aucun des deux cores précis ne suit ce film : il dépend de la temporisation
+de VBA 1.7.2 (démarrage, introduction), donc ce test ne départage pas « désynchronisation de deepeel » et « film qui
+joue vraiment ainsi ». Seul un VBA 1.7.2 de référence le ferait.
