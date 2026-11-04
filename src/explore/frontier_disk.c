@@ -30,6 +30,31 @@ static uint64_t spool_rec_len(FILE *f, uint64_t at, uint64_t end, uint64_t sb) {
     return sizeof h + body;
 }
 
+// raw deflate (no zlib header, no adler32): the checksum alone was a fifth of the leader thread
+// when every overflowing fork went to the spool.  Same call shape as compress2/uncompress.
+static int zraw_compress(uint8_t *dst, uLongf *dlen, const uint8_t *src, uLong n, int level) {
+    z_stream z;
+    memset(&z, 0, sizeof z);
+    if (deflateInit2(&z, level, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY) != Z_OK) return Z_MEM_ERROR;
+    z.next_in = (Bytef *)src; z.avail_in = (uInt)n;
+    z.next_out = dst; z.avail_out = (uInt)*dlen;
+    int r = deflate(&z, Z_FINISH);
+    *dlen = z.total_out;
+    deflateEnd(&z);
+    return r == Z_STREAM_END ? Z_OK : Z_BUF_ERROR;
+}
+static int zraw_uncompress(uint8_t *dst, uLongf *dlen, const uint8_t *src, uLong n) {
+    z_stream z;
+    memset(&z, 0, sizeof z);
+    if (inflateInit2(&z, -15) != Z_OK) return Z_MEM_ERROR;
+    z.next_in = (Bytef *)src; z.avail_in = (uInt)n;
+    z.next_out = dst; z.avail_out = (uInt)*dlen;
+    int r = inflate(&z, Z_FINISH);
+    *dlen = z.total_out;
+    inflateEnd(&z);
+    return r == Z_STREAM_END ? Z_OK : Z_DATA_ERROR;
+}
+
 int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int kind,
                            int from_reset, uint32_t choice) {
     DpSpool *sp = ex->spool;
@@ -39,7 +64,7 @@ int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int kind,
     uint8_t *cb = malloc(clen);
     uint64_t magic = DP_SPOOL_REC, body = ex->sb;
     const uint8_t *src = img;
-    if (cb && compress2(cb, &clen, img, (uLong)ex->sb, 1) == Z_OK && clen < ex->sb) {
+    if (cb && zraw_compress(cb, &clen, img, (uLong)ex->sb, 1) == Z_OK && clen < ex->sb) {
         magic = DP_SPOOL_ZREC;
         body = clen;
         src = cb;
@@ -116,7 +141,7 @@ void spool_feed(DpExplorer *ex) {
         else if (img) {
             uint8_t *cb = malloc(body);
             uLongf dl = (uLongf)ex->sb;
-            rok = cb && fread(cb, 1, body, sp->f) == body && uncompress(img, &dl, cb, (uLong)body) == Z_OK &&
+            rok = cb && fread(cb, 1, body, sp->f) == body && zraw_uncompress(img, &dl, cb, (uLong)body) == Z_OK &&
                   dl == ex->sb;
             free(cb);
         }
@@ -436,7 +461,7 @@ int frontier_refill(DpExplorer *ex) {
     if (ok) {
         ok = fread(&bl, 4, 1, f) == 1 && bl <= 4 * (uint32_t)ex->sb + 1024;
         if (ok) { z = xrealloc(NULL, bl); uLongf o = (uLongf)ex->sb;
-                  ok = fread(z, 1, bl, f) == bl && uncompress(base, &o, z, bl) == Z_OK && o == (uLongf)ex->sb; }
+                  ok = fread(z, 1, bl, f) == bl && zraw_uncompress(base, &o, z, bl) == Z_OK && o == (uLongf)ex->sb; }
         free(z);
     }
     if (!ok) {
@@ -454,7 +479,7 @@ int frontier_refill(DpExplorer *ex) {
         z = xrealloc(NULL, zl);
         uint8_t *img = xrealloc(NULL, ex->sb);
         uLongf o = (uLongf)ex->sb;
-        if (fread(z, 1, zl, f) != zl || uncompress(img, &o, z, zl) != Z_OK || o != (uLongf)ex->sb) {
+        if (fread(z, 1, zl, f) != zl || zraw_uncompress(img, &o, z, zl) != Z_OK || o != (uLongf)ex->sb) {
             free(z); free(img); l->read = l->count; break;
         }
         free(z);
@@ -587,7 +612,7 @@ int dp_explorer_frontier_save(DpExplorer *ex, const char *dir) {
                 if (!f) { perror("deepeel frontier"); ex->res->defer_dropped += b - s; break; }
                 const uint8_t *base = ex->defer[k[s].i].p.img;
                 uLongf zl = cap;
-                compress2(z, &zl, base, (uLong)ex->sb, 6);
+                zraw_compress(z, &zl, base, (uLong)ex->sb, 6);
                 uint32_t hdr[5] = { DP_LOT_MAGIC, 1, 1 /* gb */, (uint32_t)ex->sb, 0 };
                 fwrite(hdr, sizeof hdr, 1, f);
                 uint32_t bl = (uint32_t)zl;
@@ -605,7 +630,7 @@ int dp_explorer_frontier_save(DpExplorer *ex, const char *dir) {
                     }
                     for (uint32_t j = 0; j < (uint32_t)ex->sb; j++) d[j] = r->p.img[j] ^ base[j];
                     zl = cap;
-                    if (compress2(z, &zl, d, (uLong)ex->sb, 6) == Z_OK) {
+                    if (zraw_compress(z, &zl, d, (uLong)ex->sb, 6) == Z_OK) {
                         uint8_t hd[8] = { r->tier, r->p.forced, r->p.kind, r->p.from_reset, r->reason, 0, 0, 0 };
                         uint32_t l32 = (uint32_t)zl;
                         fwrite(hd, 8, 1, f); fwrite(&l32, 4, 1, f); fwrite(z, 1, zl, f);

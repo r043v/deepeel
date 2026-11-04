@@ -2534,3 +2534,15 @@ hash de WRAM[:$F00] reste constant des deux côtés sur des dizaines de milliers
 images est donc ambigu, et la divergence observée tient à la sortie de cette attente (référence à l'image 42109, en plein
 remplissage `$039E-$03A2` ; deepeel reste en `pc=$0300` jusqu'à l'image 51252). Observation de l'outil, cause non
 établie : il faut tracer ce qui fait sortir la référence de l'attente (état de `IE/IF/$FFFF`, DIV/timer, HRAM).
+
+## 0.181.0 (vitesse du mode `--unbounded --play`)
+
+Profil du thread principal (`perf`, Zelda `--unbounded --play --jobs auto`) : un seul thread travaillait (94 % de CPU),
+les autres explorateurs attendaient la barrière d'époque pendant que le meneur exécutait les pas de la fourche, hachait
+chaque image d'état (FNV-1a octet par octet, 27 %) et compressait chaque état débordé vers le spool (zlib, `adler32` 20 %).
+Changements : hachage d'image par blocs de 8 octets (l'ensemble exact n'est pas persisté, la fonction peut changer) ;
+spool et frontière disque en deflate brut sans en-tête ni `adler32` (**les `spool.bin` / frontières d'une version
+antérieure ne sont plus relisibles**) ; en `--unbounded`, les pas de la fourche tournent après la libération des
+sessions, donc en même temps que l'époque suivante (la reproductibilité à graine fixe n'est pas promise dans ce mode).
+Le rejeu du film Zelda (`bobmario511-zeldagb-playaround.vbm`) seul donne les mêmes images avec 0.25.0 et 0.181.0 :
+le suivi des films n'a pas régressé. Mesures : observations de l'outil.

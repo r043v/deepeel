@@ -405,13 +405,27 @@ uint16_t image_pc(const uint8_t *img) {
     return g.pc;
 }
 
+// 8 bytes per multiply (the byte-wise FNV-1a spent a quarter of the leader thread on every
+// pushed state image); the set is never persisted, so the function can change freely
+static uint64_t hash_lanes(uint64_t h, const uint8_t *p, size_t n) {
+    for (; n >= 8; n -= 8, p += 8) {
+        uint64_t v;
+        memcpy(&v, p, 8);
+        h = (h ^ v) * 0x9e3779b97f4a7c15ull;
+        h ^= h >> 29;
+    }
+    for (; n; n--, p++) h = (h ^ *p) * 0x100000001b3ull;
+    return h;
+}
+
 static uint64_t image_hash(DpExplorer *ex, const uint8_t *img) {
     // gbr.cyc/next_evt ride at the head of the image and only encode where
     // time stood: skip them so equal machine states dedup across frames
     uint64_t h = 0xcbf29ce484222325ull;
-    h = dp_fnv1a(h, img, offsetof(gbl_cpu_t, cyc));
-    h = dp_fnv1a(h, img + sizeof(gbl_cpu_t), ex->sb - sizeof(gbl_cpu_t));
-    return h;
+    h = hash_lanes(h, img, offsetof(gbl_cpu_t, cyc));
+    h = hash_lanes(h, img + sizeof(gbl_cpu_t), ex->sb - sizeof(gbl_cpu_t));
+    h ^= h >> 32;
+    return h * 0x9e3779b97f4a7c15ull;
 }
 
 // bounded adaptive growth of the main worklist: a full queue used to drop

@@ -1340,8 +1340,11 @@ int dp_play_poll(DpPlay *p) {
     drain_tas_snaps(p);
     // the fork advances while the sessions wait; bounded by paths, not time,
     // so a fixed-seed run is reproducible
-    for (int i = 0; i < p->cfg.fork_paths_per_epoch && p->fork->q_len && !p->fork->stop; i++)
-        dp_explore_step(p->fork);
+    // (--unbounded: the steps run after the workers are released instead, so the sessions
+    // keep playing while the fork explores; reproducibility is not promised in that mode)
+    if (!p->cfg.unbounded)
+        for (int i = 0; i < p->cfg.fork_paths_per_epoch && p->fork->q_len && !p->fork->stop; i++)
+            dp_explore_step(p->fork);
 
     // stop conditions.  TAS priority: a movie covers a whole playthrough, it
     // outruns every frame budget — max_frames and stagnation wait until every
@@ -1371,6 +1374,9 @@ int dp_play_poll(DpPlay *p) {
     p->epoch_no++;
     pthread_cond_broadcast(&p->cv);
     pthread_mutex_unlock(&p->bar_mtx);
+    if (p->cfg.unbounded)   // overlapped with the next epoch of the sessions
+        for (int i = 0; i < p->cfg.fork_paths_per_epoch && p->fork->q_len && !p->fork->stop; i++)
+            dp_explore_step(p->fork);
     return 1;
 }
 
