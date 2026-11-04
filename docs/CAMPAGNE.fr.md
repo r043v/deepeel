@@ -115,3 +115,13 @@ Réglages par défaut (bornés, mur de 60 M pas atteint), un run chacun ; « car
 Le mur de pas est atteint partout : ce sont des bornes basses. Seul Bomb Jack est entièrement classé, ce qui reste
 une classification de l'outil (une ROM de 32 Kio), pas une preuve de couverture du comportement.
 Reste pour J13 : audit complet de la matrice §2.1, `--unbounded` MD.
+
+### J13 : MD Castle of Illusion en `--unbounded` (0.246.0, observation de l'outil)
+
+ROM de `m0boy/roms` (hors dépôt), `md explore --unbounded`, spool sur disque, arrêt par SIGINT après 600 s,
+un run. Résultat : **32 161 858 pas dans un seul chemin**, 566 660 fourches, toutes écrites dans le spool
+(566 707 écrites, **0 relues**, 4,7 Gio sur disque) ; couche statique 17 630 o de bourrage, 984 de table, 3 758 de code.
+Lecture honnête : sans plafond de pas par chemin, le chemin naturel (la boucle principale du jeu) ne se termine
+jamais, donc le spool grossit sans être exploré : `--unbounded` MD ne gagne ici aucune couverture dynamique par
+rapport au run borné. Écart à combler : relire le spool pendant l'exécution (entrelacer), ou garder un plafond de
+pas par chemin même en mode illimité. Pas une fermeture.
