@@ -9,5 +9,11 @@ if [ $rc -eq 0 ]; then
   "$1" lr novelty "$2" "$rom" --rounds 20 | grep -q "cells reached: [1-9]"
   rc=$?
 fi
+if [ $rc -eq 0 ]; then
+  # human mode exists only in GUI builds (usage error 2 otherwise); dummy video driver, 10 frames
+  SDL_VIDEODRIVER=dummy "$1" lr watch "$2" "$rom" --max-frames 10 >/dev/null 2>&1
+  w=$?
+  [ $w -eq 0 ] || [ $w -eq 2 ] || rc=1
+fi
 rm -f "$rom"
 exit $rc

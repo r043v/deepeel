@@ -2352,3 +2352,11 @@ branchement sur l'explorateur.
 Essai 0.166.0 sur jeu réel (hors dépôt) : Castle of Illusion (MD) sur Genesis Plus GX, `lr novelty
 --rounds 300 --hold 30` : 7 cellules d'écran atteintes en 9,6 s, aucun état écarté. Observation de l'outil
 (entrées aléatoires depuis le démarrage, sans TAS ; pas une mesure de couverture).
+
+## 0.167.0 (J11 — mode humain libretro)
+
+`deepeel lr watch CORE ROM [--scale N] [--max-frames N]` (builds avec SDL2) : fenêtre temps réel (~60 trames/s)
+sur n'importe quel cœur ; flèches = croix, Z = B, X = A, A = Y, S = X, Entrée = start, Maj droite = select,
+Q/Échap quitte. Essayé en pilote vidéo `dummy` sur le cœur factice et Genesis Plus GX (60 trames) ; la
+jouabilité réelle au clavier n'a pas été éprouvée ici. Test dans `lr_play_cli`. Restent : branchement sur
+l'explorateur, mode `--watch` d'une exploration en cours.

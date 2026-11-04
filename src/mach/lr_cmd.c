@@ -153,11 +153,83 @@ static int lr_novelty(int argc, char **argv) {
     return dropped ? 3 : 0;
 }
 
+#ifdef DP_HAS_GUI
+#include <SDL.h>
+// deepeel lr watch CORE ROM [--scale N] [--max-frames N]: human mode on any core. Arrows = d-pad, Z = B,
+// X = A, A = Y, S = X, Enter = start, right shift = select, Q/Escape quits. Real time at ~60 fps.
+static int lr_watch(int argc, char **argv) {
+    const char *core = argv[3], *rom = argv[4];
+    int scale = 2;
+    unsigned long maxf = 0;
+    for (int i = 5; i + 1 < argc; i += 2) {
+        if (!strcmp(argv[i], "--scale")) scale = atoi(argv[i + 1]);
+        else if (!strcmp(argv[i], "--max-frames")) maxf = strtoul(argv[i + 1], NULL, 0);
+        else { fprintf(stderr, "deepeel lr: unknown option %s\n", argv[i]); return 2; }
+    }
+    if (scale < 1 || scale > 8) scale = 2;
+    char err[256] = "";
+    DpLibretro *lr = dp_lr_open_copy(core, err, sizeof err);
+    if (!lr || !dp_lr_load_rom(lr, rom, err, sizeof err)) { fprintf(stderr, "deepeel lr: %s\n", err); return 1; }
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) { fprintf(stderr, "deepeel lr: SDL: %s\n", SDL_GetError()); return 1; }
+    dp_lr_advance(lr, 1);
+    int w, h, pitch, fmt;
+    if (!dp_lr_framebuffer(lr, &w, &h, &pitch, &fmt)) { fprintf(stderr, "deepeel lr: core produced no video\n"); return 1; }
+    SDL_Window *win = SDL_CreateWindow("deepeel lr watch", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w * scale, h * scale, 0);
+    SDL_Renderer *rd = win ? SDL_CreateRenderer(win, -1, 0) : NULL;
+    if (!rd) { fprintf(stderr, "deepeel lr: SDL: %s\n", SDL_GetError()); return 1; }
+    SDL_Texture *tx = NULL;
+    int tw = 0, th = 0;
+    int quit = 0;
+    unsigned long fr = 0;
+    while (!quit && (!maxf || fr < maxf)) {
+        Uint32 t0 = SDL_GetTicks();
+        SDL_Event e;
+        while (SDL_PollEvent(&e))
+            if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && (e.key.keysym.sym == SDLK_q || e.key.keysym.sym == SDLK_ESCAPE))) quit = 1;
+        const Uint8 *k = SDL_GetKeyboardState(NULL);
+        uint16_t m = 0;
+        if (k[SDL_SCANCODE_Z]) m |= 1u << 0;
+        if (k[SDL_SCANCODE_A]) m |= 1u << 1;
+        if (k[SDL_SCANCODE_RSHIFT]) m |= 1u << 2;
+        if (k[SDL_SCANCODE_RETURN]) m |= 1u << 3;
+        if (k[SDL_SCANCODE_UP]) m |= 1u << 4;
+        if (k[SDL_SCANCODE_DOWN]) m |= 1u << 5;
+        if (k[SDL_SCANCODE_LEFT]) m |= 1u << 6;
+        if (k[SDL_SCANCODE_RIGHT]) m |= 1u << 7;
+        if (k[SDL_SCANCODE_X]) m |= 1u << 8;
+        if (k[SDL_SCANCODE_S]) m |= 1u << 9;
+        dp_lr_set_input(lr, 0, m);
+        dp_lr_advance(lr, 1);
+        fr++;
+        const uint8_t *fb = dp_lr_framebuffer(lr, &w, &h, &pitch, &fmt);
+        if (fb) {
+            if (!tx || tw != w || th != h) {
+                if (tx) SDL_DestroyTexture(tx);
+                tx = SDL_CreateTexture(rd, fmt == DP_LR_FMT_XRGB8888 ? SDL_PIXELFORMAT_ARGB8888 : fmt == DP_LR_FMT_RGB565 ? SDL_PIXELFORMAT_RGB565 : SDL_PIXELFORMAT_ARGB1555,
+                                       SDL_TEXTUREACCESS_STREAMING, w, h);
+                tw = w; th = h;
+            }
+            if (tx) { SDL_UpdateTexture(tx, NULL, fb, pitch); SDL_RenderClear(rd); SDL_RenderCopy(rd, tx, NULL, NULL); SDL_RenderPresent(rd); }
+        }
+        Uint32 dt = SDL_GetTicks() - t0;
+        if (dt < 16) SDL_Delay(16 - dt);
+    }
+    printf("deepeel lr watch: %lu frames (tool observation, %s)\n", fr, dp_lr_core_name(lr));
+    if (tx) SDL_DestroyTexture(tx);
+    SDL_DestroyRenderer(rd); SDL_DestroyWindow(win); SDL_Quit();
+    dp_lr_close(lr);
+    return 0;
+}
+#endif
+
 int dp_lr_command(int argc, char **argv) {
+#ifdef DP_HAS_GUI
+    if (argc >= 5 && !strcmp(argv[2], "watch")) return lr_watch(argc, argv);
+#endif
     if (argc >= 5 && !strcmp(argv[2], "novelty")) return lr_novelty(argc, argv);
     if (argc >= 5 && !strcmp(argv[2], "play")) return lr_play(argc, argv);
     if (argc < 5 || strcmp(argv[2], "explore")) {
-        fprintf(stderr, "usage: deepeel lr play CORE ROM [--frames N] [--tas FILE] [--ppm FILE]\n       deepeel lr novelty CORE ROM [--rounds N] [--seed N] [--hold N]\n       deepeel lr explore CORE ROM [--text FILE] [--map FILE] "
+        fprintf(stderr, "usage: deepeel lr play CORE ROM [--frames N] [--tas FILE] [--ppm FILE]\n       deepeel lr watch CORE ROM [--scale N] [--max-frames N]\n       deepeel lr novelty CORE ROM [--rounds N] [--seed N] [--hold N]\n       deepeel lr explore CORE ROM [--text FILE] [--map FILE] "
                         "[--png FILE] [--path-steps N] [--max-total N] [--queue N]\n");
         return 2;
     }
