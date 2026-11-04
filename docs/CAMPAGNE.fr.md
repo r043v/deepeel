@@ -153,3 +153,8 @@ Observations de l'outil (machine concrète, RAM à zéro, ≤ 100 s, ROMs hors d
 - GG, Batman Returns (USA) : carte de 262 144 octets, connu 85,01 % (inféré 156 655), 60 000 000 pas, 1 520 chemins,
   931 forks d'IRQ, `exec_outside` 89 680 ; 18 922 octets `data-copied`.
 Ces chiffres sont des essais courts, pas une campagne : ni saturation levée, ni comparaison à un autre outil.
+- SMS, « 20-em-1 (B) » (multicart, 262 144 octets) : connu 31,60 % par l'exécution, carte 77,96 % (inféré 56 884),
+  60 000 000 pas, 1 285 chemins, 918 forks d'IRQ, `exec_outside` 264 344.
+- MSX1, Aleste (Compile, 1988) : connu 2,53 % par l'exécution, carte 74,35 % (inféré 117 626), 40 524 637 pas,
+  1 025 chemins, `exec_outside` 10 324 290 — l'écart entre le connu et la carte inférée est grand ; la valeur
+  `exec_outside` élevée dit que l'essentiel de l'exécution se fait hors ROM (RAM/BIOS), à analyser avant de conclure.
