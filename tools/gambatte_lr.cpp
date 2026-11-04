@@ -43,7 +43,7 @@ static void on_branch(unsigned pc) { nbr++; if (have_obs && obs.branch) obs.bran
 static int t_step(void) {
     execs = 0;
     // HALT: keep the clock running (bounded, ~4 frames) until an interrupt wakes the CPU and an opcode is fetched
-    for (unsigned i = 0; i < 20000 && !execs; i++) {
+    for (unsigned i = 0; i < (unsigned)(getenv("GLR_BOUND") ? atoi(getenv("GLR_BOUND")) : 20000) && !execs; i++) {
         size_t samples = 1;
         gb->runFor(video.data(), 160, audio.data(), samples);
     }
@@ -90,7 +90,7 @@ int main(int argc, char **argv) {
     printf("cut: path_steps %llu total %llu items %llu forks %llu loop %llu\n", (unsigned long long)st.cut_path_steps,
            (unsigned long long)st.cut_total, (unsigned long long)st.dropped_items, (unsigned long long)st.capped_forks, (unsigned long long)st.cut_loop);
     if (getenv("GLR_STARTS")) { unsigned n = 0; for (size_t i = 0x100; i < rom_size; i++) if (map[i]) { printf("%04zx ", i); n++; } printf("\nstarts>=0100: %u\n", n); }
-    fprintf(stderr, "branch callbacks seen: %u, dma %u, bank %u\n", nbr, ndma, nbank);
+    fprintf(stderr, "FF55=%02x FF4D=%02x ", gb->dpPeek(0xFF55), gb->dpPeek(0xFF4D)); fprintf(stderr, "branch callbacks seen: %u, dma %u, bank %u\n", nbr, ndma, nbank);
     dp_lr_close(lr);
     return 0;
 }

@@ -2689,6 +2689,6 @@ sortent à $8000/$C000, l'index compact de l'explorateur. La valeur lue est tran
 `DEEPEEL_GAMBATTE_LR` (binaire produit par `tools/gambatte_lr_build.sh DIR`, qui clone le cœur et applique le patch).
 Les callbacks `dma` (OAM DMA par $FF46, HDMA/GDMA à `Memory::dma`) et `bank` (`setRombank0`/`setRombank`) sont branchés
 (`dp_trace.h` dans le patch) : `fix_dma` voit 1 copie, `mbc5` 3 bascules, `closure` 16 ; `fix_hdma` n'en voit aucune,
-même avec `GLR_CGB=1` (chargement en `CGB_MODE`) : le GDMA lancé juste avant un HALT n'atteint pas `Memory::dma` dans
-la borne de ~4 trames de l'adaptateur ; cause non élucidée. Limites : pas de parité de copies/banques contre
+même avec `GLR_CGB=1` (chargement en `CGB_MODE`) : `Memory::dma` n'est jamais appelé. La borne de HALT de l'adaptateur n'est pas en cause
+(`GLR_BOUND=2000000` ne change rien) et FF55 lit 0 en fin de course ; cause non élucidée. Limites : pas de parité de copies/banques contre
 m0boy, seulement des décomptes. J11/J12 restent donc ◐.
