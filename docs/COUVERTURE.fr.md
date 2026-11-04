@@ -97,7 +97,7 @@ Pour chaque technique, la fiche indique :
 | D7 | Fourches deux issues des conditionnels | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ Bcc/DBcc |
 | D8 | Fourches IRQ/NMI | ✅ | ✅ | ✅ | ✅ NMI | ✅ | ✅ V-int |
 | D9 | Fourches d'IRQ manette (touche → IF) | ✅ | — | — | — | — | — |
-| D10 | Sondes de lecture manette | ✅ P1 8 masques | ✅ 128 comb. | ✅ | ◐ 0.230.0 8 boutons port 1 + 8 port 2 + 10 combinaisons ; pas de catalogue de 128 | ✅ 12 | ◐ 4 |
+| D10 | Sondes de lecture manette | ✅ P1 8 masques | ✅ 128 comb. | ✅ | ◐ 0.230.0 8 boutons port 1 + 8 port 2 + 10 combinaisons ; pas de catalogue de 128 | ✅ 12 | ◐ 0.236.0 12 motifs ; pas de pad 6 boutons ni de catalogue de 128 |
 | D11 | Fourches de répétition (blocs) | — | ✅ ED | ✅ ED | — | ✅ BBR/BBS | ✅ DBcc |
 | D12 | Cibles indirectes observées | ✅ `jp hl` | ✅ `jp (hl/ix/iy)` | ✅ | ◐ observé, sans second passage | ◐ observé (`jmp (abs)`, `jmp (abs,X)`), sans second passage | ◐ observé (`jmp/jsr` par An), sans second passage |
 | D13 | Coupes de non-sens | ✅ | ✅ padding `pad_cuts` | ✅ | ✅ glissade `pad_cuts` (test `nes_slide`) + arrêt sur KIL (test `nes`, `test_jam_cut`) | ✅ glissade `pad_cuts` (test `pce_slide`) + opcode illégal coupé (test `pce`, `test_illegal_cut`) | ✅ 0.231.0 glissade `ori.b #0,d0` (16 octets nuls) coupée par défaut, `--no-cut-padding` pour l'ancien comportement (test `md_padding`) ; fautes d'opcode déjà rapportées |

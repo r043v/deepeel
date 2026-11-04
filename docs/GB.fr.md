@@ -3269,3 +3269,10 @@ L'idiome `move.w tbl(pc,d0.w),d1 ; jmp tbl(pc,d1.w)` : quand la table n'est pas 
 entrées sont lues comme des déplacements 16 bits depuis la base. La table n'est admise que si la cible
 observée du `jmp` est l'une de ses entrées, et elle s'arrête là où commence la première cible (le
 code). Fixture `fix_md_s4w`, test `md_s4_words` (contrôle négatif fait). Reste : `jmp (An)` nu.
+
+## MD : douze motifs de manette par site de lecture (D10) (0.236.0)
+
+À chaque site lisant `$A10003`, on propose maintenant 12 motifs (Start, A, Droite, A+Droite, puis
+les autres boutons seuls et deux accords) au lieu de 4. Les tests épinglés sur 4 forks (`md_explore`,
+`md_ctx_cap`) passent à 12 forks / 13 chemins. Reste : le pad 6 boutons (séquence TH) et le catalogue
+de 128 combinaisons.

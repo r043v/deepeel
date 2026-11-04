@@ -113,7 +113,7 @@ int main(int argc, char **argv) {
     dp_md_results_free(&r); dp_md_cart_free(&c);
 
     CHECK(run("fix_md_pad", 100000, &r, &c) == 0);
-    CHECK(r.pad_forks == 4 && r.paths == 5);
+    CHECK(r.pad_forks == 12 && r.paths == 13);
     dp_md_results_free(&r); dp_md_cart_free(&c);
 
     CHECK(run("fix_md_fault", 100000, &r, &c) == 0);
@@ -131,9 +131,9 @@ int main(int argc, char **argv) {
         CHECK(dp_md_cart_load(&c, path, err, sizeof err) == 0);
         DpMdOptions o;
         dp_md_options_default(&o);
-        o.queue_cap = 1; o.queue_max = 4; o.max_total = 100000;
+        o.queue_cap = 1; o.queue_max = 16; o.max_total = 100000;
         CHECK(dp_md_explore(&c, &o, &r) == 0);
-        CHECK(r.queue_growths == 2 && r.sat_queue == 0 && r.pad_forks == 4);
+        CHECK(r.queue_growths == 4 && r.sat_queue == 0 && r.pad_forks == 12);
         dp_md_results_free(&r); dp_md_cart_free(&c);
     }
 
@@ -145,7 +145,7 @@ int main(int argc, char **argv) {
         dp_md_options_default(&o);
         o.queue_cap = 1; o.queue_max = 1; o.max_total = 100000;
         CHECK(dp_md_explore(&c, &o, &r) == 0);
-        CHECK(r.sat_queue > 0 && r.parked > 0 && r.parked_resumed == r.parked && r.parked_lost == 0 && r.pad_forks == 4);
+        CHECK(r.sat_queue > 0 && r.parked > 0 && r.parked_resumed == r.parked && r.parked_lost == 0 && r.pad_forks == 12);
         dp_md_results_free(&r); dp_md_cart_free(&c);
     }
 
@@ -217,7 +217,7 @@ int main(int argc, char **argv) {
         o.fork_cap = 0; // only a real input change can take the exit
         o.max_total = 100000;
         CHECK(dp_md_explore(&c, &o, &r) == 0);
-        CHECK(r.pad_forks == 4 && executed(&r, 0x20c));
+        CHECK(r.pad_forks == 12 && executed(&r, 0x20c));
         CHECK(!(r.flags[0x20c] & DP_MDF_NATURAL));
         dp_md_results_free(&r); dp_md_cart_free(&c);
     }
