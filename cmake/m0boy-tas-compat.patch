@@ -346,14 +346,14 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
 +     * mode sources stay quiet: the first line after enable starts
 +     * without a mode-2 OAM search. */
 +    lyc_refresh();
-+    if (lyc_edge && P.lyc_line) IF |= 0x02;
++    if (lyc_edge && P.lyc_line && !(GBL_PPU_REF && off_cmp)) IF |= 0x02;
 +    stat_line = P.lyc_line;
 +}
 +
  void gbl_ppu_write(uint8_t n, uint8_t v) {
      gbl_ppu_sync(gbr.cyc);
  #if GBL_FRAME_SIGNATURE
-@@ -1063,33 +1177,43 @@
+@@ -1063,34 +1177,44 @@
  #endif
      switch (n) {
      case 0x40:
@@ -378,7 +378,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
 +            gam_v0_pend = 0;
              LCDC = v;
 -            lyc_refresh();
--            if (P.lyc_line) IF |= 0x02;
+-            if (P.lyc_line && !(GBL_PPU_REF && off_cmp)) IF |= 0x02; /* the line was already high: no edge */
 -            stat_line = P.lyc_line;
 +            if (gbl_sync_vba_off_clock == 2) {
 +                /* gbl.h: line 0 runs ten lines of mode 0, LY 0, no STAT edge */
@@ -389,6 +389,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
 +        } else if (!(v & 0x80) && on_pend) {
 +            on_pend = 0;
          } else if (!(v & 0x80) && lcd_on) {
+             if (GBL_PPU_REF) off_cmp = (uint8_t)(ly_visible() == LYC); /* the LY=LYC bit is kept while the LCD is off */
 +            uint32_t off_ly = ly, off_line = line_start;
              lcd_on = 0;
              ly = 0;
