@@ -142,6 +142,11 @@ int main(int argc, char **argv) {
         dp_explorer_free(e2);
     }
 
+    // --- S6 across banks: (bank, ptr) entries; the stream of bank 3 is only in the table
+    run(dir, "streams_bank");
+    CHECK(res.replay_tables >= 1);
+    CHECK(res.replay_runs >= 1);
+    CHECK(res.data_flags[3 * 0x4000 + 0x20] & DP_DF_READ);
     // --- S6: a decoder called with HL from a pointer table; the unplayed stream is replayed
     run(dir, "streams");
     CHECK(res.decoders >= 1);

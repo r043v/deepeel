@@ -2977,3 +2977,13 @@ couvrent tout ce qu'une partie réelle exécute.
   jouées **avant** le TAS, les parties aléatoires, la novelty et les fourches. Rapport : `demo (no button pressed,
   from power-on): N frames`. Même ordre que MD (0.200.0) : démo, TAS, le reste. Tests `nes_demo_frames`, `pce_demo_frames`.
 - Les instances secondaires de `--jobs 2` ne rejouent pas la démo. GB, SMS/MSX : non faits (parties jouées sans équivalent).
+
+## 0.203.0 : GB S6, tables de flux inter-banques (2026-11-04)
+
+- Le rejeu de décodeurs ne se limitait qu'aux tables de pointeurs de 2 octets dont les flux sont dans la **même banque**.
+  Il reconnaît maintenant les tables à entrées de 3 octets (banque, ptr) ou (ptr, banque) : les départs observés
+  gardent leur banque, deux entrées à pas 3 situent la table, qui est étendue dans les deux sens (banque valide,
+  pointeur en $4000-$7FFF), puis chaque entrée est rejouée en sélectionnant la banque par une écriture mapper
+  ($2000) avant l'appel. Fixture `fix_streams_bank` : le flux de la banque 3, jamais appelé par la ROM, est lu.
+  Rapport `stream replay (S6)` : 1 table, 1 candidat (0 sans le correctif).
+- Limite restante : tables à stride ≠ 3, banque codée ailleurs que dans l'entrée (octet séparé), registre de banque autre que $2000.

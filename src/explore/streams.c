@@ -20,6 +20,8 @@ typedef struct {
     uint8_t reg, nstarts, replayed; // replayed: nstarts at the last replay
     uint16_t bank;
     uint16_t starts[DEC_STARTS];
+    uint8_t nx, xreplayed;       // cross-bank starts (any bank), replayed: nx at the last cross-bank replay
+    struct { uint16_t bank, addr; } xs[DEC_STARTS];
     uint8_t *snap;              // machine image before the call
 } Dec;
 
@@ -87,6 +89,12 @@ void stream_read(DpExplorer *ex, uint16_t a) {
                 d->key = f->key; d->reg = (uint8_t)n; d->bank = cur_bank(ex, a);
                 ex->res->decoders++;
             }
+            if (a >= 0x4000) {   // cross-bank starts: the stream's own bank rides with its address
+                const uint16_t sb = cur_bank(ex, a);
+                unsigned q;
+                for (q = 0; q < d->nx && !(d->xs[q].bank == sb && d->xs[q].addr == a); q++) {}
+                if (q == d->nx && q < DEC_STARTS) { d->xs[q].bank = sb; d->xs[q].addr = a; d->nx++; }
+            }
             unsigned j;
             for (j = 0; j < d->nstarts && d->starts[j] != a; j++) {}
             if (j == d->nstarts && d->bank == cur_bank(ex, a)) {
@@ -105,11 +113,19 @@ static int ptr_ok(const DpExplorer *ex, size_t at, size_t lo, size_t hi, int ban
     return banked ? (*v >= 0x4000 && *v < 0x8000) : (*v >= 0x150 && *v < 0x4000);
 }
 
-static void replay_one(DpExplorer *ex, Dec *d, uint16_t v) {
+static int entry_ok(const DpCart *c, size_t at, int lay, size_t nb) {
+    const uint8_t *e = c->rom + at;
+    unsigned b = lay ? e[2] : e[0];
+    uint16_t v = lay ? (uint16_t)(e[0] | e[1] << 8) : (uint16_t)(e[1] | e[2] << 8);
+    return b >= 1 && b < nb && v >= 0x4000 && v < 0x8000;
+}
+
+static void replay_one(DpExplorer *ex, Dec *d, uint16_t v, int bank) {
     DpMach *m = ex->mach;
     uint8_t *cur = xrealloc(NULL, ex->sb);
     dp_mach_save(m, cur);               // the live machine comes back afterwards
     dp_mach_load(m, d->snap);
+    if (bank >= 0) m->api->wr(0x2000, (uint8_t)bank);   // the table names the stream's bank: select it like the ROM would
     if (d->reg == 0) m->api->gbr->hl = v;
     else if (d->reg == 1) m->api->gbr->de = v;
     else m->api->gbr->bc = v;
@@ -123,6 +139,59 @@ static void replay_one(DpExplorer *ex, Dec *d, uint16_t v) {
         ex->res->replay_runs++;
 }
 
+// Tables of banked streams: entries of 3 bytes (bank, ptr lo, ptr hi) or (ptr lo, ptr hi, bank)
+// whose observed starts carry different banks.  Two matching entries at a constant stride locate
+// the table; every entry is replayed with its bank selected.
+static int replay_cross(DpExplorer *ex, Dec *d) {
+    if (d->nx < 2 || d->nx <= d->xreplayed) return 0;
+    d->xreplayed = d->nx;
+    const DpCart *c = ex->res->cart;
+    const size_t nb = c->rom_size >> 14;
+    uint8_t *tried = calloc(c->rom_size ? c->rom_size : 1, 1);
+    if (!tried) return 0;
+    for (unsigned j = 0; j < d->nx; j++) {
+        size_t idx = (size_t)d->xs[j].bank * 0x4000 + (d->xs[j].addr & 0x3FFF);
+        if (idx < c->rom_size) tried[idx] = 1;
+    }
+    int pushed = 0;
+    for (int lay = 0; lay < 2; lay++) {   // 0: bank first, 1: bank last
+        size_t pos[64]; unsigned np = 0;
+        for (size_t at = 0; at + 3 <= c->rom_size && np < 64; at++) {
+            const uint8_t *e = c->rom + at;
+            unsigned b = lay ? e[2] : e[0];
+            uint16_t v = lay ? (uint16_t)(e[0] | e[1] << 8) : (uint16_t)(e[1] | e[2] << 8);
+            for (unsigned j = 0; j < d->nx; j++)
+                if (d->xs[j].bank == b && d->xs[j].addr == v) { pos[np++] = at; break; }
+        }
+        unsigned cands = 0;
+        for (unsigned i = 0; i + 1 < np; i++) {
+            size_t k = pos[i + 1] - pos[i];
+            if (k != 3 || (pos[i] >> 14) != (pos[i + 1] >> 14)) continue;
+            size_t blo = (pos[i] >> 14) << 14, bhi = blo + 0x4000;
+            size_t lo = pos[i], hi = pos[i + 1];
+#define ENTRY_OK(at) ((at) >= blo && (at) + 3 <= bhi && entry_ok(c, (at), lay, nb))
+            while (lo >= blo + k && ENTRY_OK(lo - k)) lo -= k;
+            while (ENTRY_OK(hi + k)) hi += k;
+            ex->res->replay_tables++;
+            for (size_t at = lo; at <= hi; at += k) {
+                const uint8_t *e = c->rom + at;
+                unsigned b = lay ? e[2] : e[0];
+                uint16_t v = lay ? (uint16_t)(e[0] | e[1] << 8) : (uint16_t)(e[1] | e[2] << 8);
+                size_t idx = (size_t)b * 0x4000 + (v & 0x3FFF);
+                if (tried[idx]) continue;
+                tried[idx] = 1;
+                if (!ex->cfg.unbounded && cands >= CAND_CAP) { ex->res->sat_replay_total++; break; }
+                cands++;
+                ex->res->replay_candidates++;
+                replay_one(ex, d, v, (int)b);
+                pushed++;
+            }
+        }
+    }
+    free(tried);
+    return pushed;
+}
+
 // the worklists are empty: replay every decoder over its pointer tables
 int stream_replay(DpExplorer *ex) {
     struct DpStreams *s = ex->stm;
@@ -132,8 +201,9 @@ int stream_replay(DpExplorer *ex) {
     int pushed = 0;
     for (unsigned di = 0; di < s->ndec; di++) {
         Dec *d = &s->dec[di];
-        if (d->nstarts < 2 || d->nstarts <= d->replayed) continue;
         if (!d->snap) continue;   // a later call takes the snapshot, then the next poll retries
+        pushed += replay_cross(ex, d);
+        if (d->nstarts < 2 || d->nstarts <= d->replayed) continue;
         d->replayed = d->nstarts;
         int banked = d->starts[0] >= 0x4000;
         uint8_t *tried = calloc(65536, 1);
@@ -166,7 +236,7 @@ int stream_replay(DpExplorer *ex) {
                 if (!ex->cfg.unbounded && cands >= CAND_CAP) { ex->res->sat_replay_total++; break; }
                 cands++;
                 ex->res->replay_candidates++;
-                replay_one(ex, d, v);
+                replay_one(ex, d, v, -1);
                 pushed++;
             }
         }

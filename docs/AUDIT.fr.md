@@ -49,7 +49,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | S5 | Frères de copie | NES | ◐ copies OAM DMA / boucle CPU, tables du même flux |
 | S5 | Frères de copie | PCE | ◐ tables du même flux, même page/fenêtre (VDC block move) |
 | S5 | Frères de copie | MD | ◐ tables de longwords ROM, copies DMA ROM→VRAM (comptées) |
-| S6 | Rejeu de décodeurs sur tables de flux | GB | ◐ 0.146 `CALL` + HL/DE/BC, tables de mots même banque |
+| S6 | Rejeu de décodeurs sur tables de flux | GB | ◐ 0.146 `CALL` + HL/DE/BC, tables de mots même banque ; 0.203 entrées (banque, ptr) inter-banques |
 | S6 | Rejeu de décodeurs sur tables de flux | SMS/GG | ◐ 0.147 idem (SMS/GG/SG) |
 | S6 | Rejeu de décodeurs sur tables de flux | MSX | ◐ 0.147 idem |
 | S6 | Rejeu de décodeurs sur tables de flux | NES | ◐ 0.148 `JSR` + mot de page zéro, tables de mots même bloc |
