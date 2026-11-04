@@ -3298,3 +3298,7 @@ Les racines (entrées, vecteurs, second passage, dispatch de banque) passaient p
 `seed_push` : file, sinon mise de côté (tampon, puis lot disque), comme les fourches. Le compteur ne
 compte plus que les vrais refus. Test `nes` (`queue_cap = 1`, contrôle négatif fait). PCE et MD
 gardent l'ancien comportement ; la cellule G4 reste ◐ (le second passage sur successeurs statiques).
+
+Note G4 (0.239.0) : PCE et MD n'avaient pas ce défaut. Leurs racines passent par `push_live` /
+`push`, qui agrandissent la file puis mettent de côté (tampon, lot disque) ; seuls la dédup et le
+plafond de contexte écartent une graine. Il n'y a donc rien à porter.
