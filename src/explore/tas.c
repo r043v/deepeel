@@ -210,6 +210,7 @@ static void bk2_header(const uint8_t *h, size_t n, DpTas *out) {
             out->gambatte = 1;
         } else if (len >= 11 && !strncmp(l, "Core GBHawk", 11)) {
             gbhawk = 1;
+            out->gbhawk = 1;
         } else if (len > 9 && !strncmp(l, "GameName ", 9)) {
             size_t g = len - 9 < sizeof out->game - 1 ? len - 9 : sizeof out->game - 1;
             memcpy(out->game, l + 9, g);

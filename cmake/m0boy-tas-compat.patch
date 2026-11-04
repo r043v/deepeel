@@ -1,27 +1,89 @@
 diff -ruN a/gbl_core.c b/gbl_core.c
---- a/gbl_core.c
-+++ b/gbl_core.c
-@@ -25,6 +25,8 @@
+--- a/gbl_core.c	2026-11-04 17:19:32.075412511 +0100
++++ b/gbl_core.c	2026-11-04 17:27:05.770096378 +0100
+@@ -25,6 +25,10 @@
  uint8_t *gbl_wmap[16];
  
  uint8_t gbl_interp_only;
 +uint8_t gbl_sync_div_skew;      /* gbl.h: movie sync compatibility */
 +uint8_t gbl_sync_vba_off_clock;
++uint32_t gbl_sync_pad_delay;
++uint16_t gbl_sync_div_extra;
  uint32_t gbl_frame;
  uint32_t gbl_interp_instrs;
  uintptr_t gbl_stack_limit;
-@@ -1262,7 +1264,7 @@
+@@ -1248,6 +1252,22 @@
+     gbl_joyp = (uint8_t)(0xC0 | (sel & 0x30) | (v & 0x0F));
+ }
+ 
++/* gbl.h (gbl_sync_pad_delay): GBHawk latches the movie's pad at its vblank
++ * edge, 79,505 cycles into the m0boy frame that carries it; a set before
++ * then stays pending (the previous buttons remain visible).  Resolved at
++ * instruction fetch, on P1 reads/writes and in gbl_set_buttons. */
++static uint8_t pad_pending, pad_queued;
++static uint32_t pad_at;
++
++void gbl_pad_pending_check(uint32_t now) {
++    if (pad_queued && (int32_t)(now - pad_at) >= 0) {
++        pad_queued = 0;
++        if (pad_pending & ~buttons) IF |= 0x10; /* GBHawk: IRQ at the latch edge */
++        buttons = pad_pending;
++        joypad_update();
++    }
++}
++
+ void gbl_set_buttons(uint8_t pressed) {
+ #if GBL_DEBUG_RESTART
+     if (pressed != gbl_dbg_restart.buttons[(gbl_dbg_restart.pos - 1u) & 15u]) {
+@@ -1257,6 +1277,16 @@
+     }
+     if ((pressed & 0x0F) == 0x0F) gbl_dbg_restart.combo_frames++; /* A+B+Select+Start */
+ #endif
++    if (gbl_sync_pad_delay) {
++        gbl_pad_pending_check(gbr.cyc);
++        /* the previous set may still be pending (a set every 70224 cycles,
++         * a delay longer than that): the newest one wins, as GBHawk's latch
++         * overwrites the movie's previous frame pad */
++        pad_pending = pressed;
++        pad_queued = 1;
++        pad_at = gbr.cyc + gbl_sync_pad_delay;
++        return;
++    }
+     if (pressed & ~buttons) IF |= 0x10;
+     buttons = pressed;
+     joypad_update();
+@@ -1279,9 +1309,9 @@
+ #endif
+ uint8_t gbl_io_rd(uint8_t n) {
      switch (n) {
-     case 0x00: return gbl_joyp;
+-    case 0x00: return gbl_joyp;
++    case 0x00: gbl_pad_pending_check(gbr.cyc); return gbl_joyp;
      case 0x02: return gbl_io[0x02] | 0x7E;
 -    case 0x04: return (uint8_t)((gbr.cyc - div_base) >> 8);
-+    case 0x04: return (uint8_t)((gbr.cyc + gbl_sync_div_skew - div_base) >> 8);
++    case 0x04: return (uint8_t)((gbr.cyc + gbl_sync_div_skew + gbl_sync_div_extra - div_base) >> 8);
      case 0x05: timer_sync(gbr.cyc); return TIMA;
      case 0x07: return TAC | 0xF8;
      case 0x0F: gbl_sync(); return IF | 0xE0;
+@@ -1303,7 +1333,7 @@
+ #endif
+ void gbl_io_wr(uint8_t n, uint8_t v) {
+     switch (n) {
+-    case 0x00: gbl_io[0x00] = v & 0x30; joypad_update(); return;
++    case 0x00: gbl_pad_pending_check(gbr.cyc); gbl_io[0x00] = v & 0x30; joypad_update(); return;
+     case 0x02:
+         gbl_io[0x02] = v;
+         if ((v & 0x81) == 0x81) {
+@@ -1914,6 +1944,7 @@
+     gbr.sp = 0xFFFE; gbr.pc = 0x0100;
+     gbl_ie = 0;
+     gbl_io[0x00] = 0x30;
++    pad_queued = 0;
+     joypad_update();
+     IF = 0x01;
+     TAC = 0; TIMA = 0; TMA = 0;
 diff -ruN a/gbl_cpu.c b/gbl_cpu.c
---- a/gbl_cpu.c
-+++ b/gbl_cpu.c
+--- a/gbl_cpu.c	2026-11-04 17:19:32.075486069 +0100
++++ b/gbl_cpu.c	2026-11-04 17:27:05.769623009 +0100
 @@ -266,6 +266,8 @@
          uint32_t r = n8 & 7, grp = n8 >> 6, bit = (n8 >> 3) & 7;
          gbr.pc++;
@@ -31,10 +93,20 @@ diff -ruN a/gbl_cpu.c b/gbl_cpu.c
          uint8_t v = get_r(r);
          if (grp == 0) set_r(r, gbl_cbop((uint8_t)n8, v));
          else if (grp == 1) { gbr.zr = v & (1u << bit); gbr.nf = 0; gbr.hf = 1; }
+@@ -363,6 +365,9 @@
+ #ifdef GBL_TRACE
+         gbl_trace_hook(pc);
+ #endif
++#ifdef GBL_TRACE
++        gbl_pad_pending_check(gbr.cyc); /* gbl.h: GBHawk pad latch mid-frame */
++#endif
+ #ifdef GBL_ROM_TRACE
+         extern uint8_t gbl_rom_fetch; /* opcode fetches are not data reads */
+         gbl_rom_fetch = 1;
 diff -ruN a/gbl.h b/gbl.h
---- a/gbl.h
-+++ b/gbl.h
-@@ -387,6 +387,38 @@
+--- a/gbl.h	2026-11-04 17:19:32.075717524 +0100
++++ b/gbl.h	2026-11-04 17:27:05.769851458 +0100
+@@ -399,6 +399,56 @@
  extern uint8_t gbl_safe_request;
  void gbl_platform_safe_point(void); /* weak default: nothing */
  
@@ -69,13 +141,31 @@ diff -ruN a/gbl.h b/gbl.h
 + *    assembly gbl_ppu_advance_off ignores the pending enable). */
 +extern uint8_t gbl_sync_div_skew;
 +extern uint8_t gbl_sync_vba_off_clock;
++/* GBHawk (BizHawk's own core) pad and divider schedule, for its .bk2 movies.
++ *  - gbl_sync_pad_delay: cycles between the host's gbl_set_buttons (at the
++ *    frame boundary) and the pad becoming readable.  GBHawk advances one
++ *    fixed 70224-cycle frame per movie frame but only latches the movie's
++ *    pad at the vblank edge inside it (LY hitting 144, cycle 65664), and its
++ *    its boot reaches $0100 14,481 cycles before the 334 dropped movie
++ *    frames end, so the pad the movie latched for frame f must become
++ *    readable 14,481 cycles later than deepeel's vblank-edge set (deepeel
++ *    drops the 334 boot frames and sets the delay).  0 = readable at once (hardware behaviour).
++ *    While a delayed set is pending, the previous buttons stay visible.
++ *  - gbl_sync_div_extra: cycles added to the clock when DIV is read, on top
++ *    of gbl_sync_div_skew.  GBHawk's divider starts at 0xFFFE and counts
++ *    from power-on, so at the movie's $0100 (23,440,335 cycles) the low 16
++ *    bits of the phase are 0xFE4D (uint8_t gbl_sync_div_skew cannot hold
++ *    it). */
++void gbl_pad_pending_check(uint32_t now); /* gbl_core.c, GBHawk pad latch */
++extern uint32_t gbl_sync_pad_delay;
++extern uint16_t gbl_sync_div_extra;
 +
  /* ---- diagnostics -------------------------------------------------------- */
  extern uint8_t gbl_interp_only;     /* ignore compiled code (reference mode) */
  extern uint32_t gbl_frame;
 diff -ruN a/gbl_ppu.c b/gbl_ppu.c
---- a/gbl_ppu.c
-+++ b/gbl_ppu.c
+--- a/gbl_ppu.c	2026-11-04 17:19:32.075528439 +0100
++++ b/gbl_ppu.c	2026-11-04 17:27:05.769807185 +0100
 @@ -837,10 +837,42 @@
   * calls (register polls, VRAM writes) land between two transitions. */
  uint32_t gbl_ppu_due;

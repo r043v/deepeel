@@ -42,6 +42,8 @@ typedef struct DpTas {
     int boot_frames;
     // BizHawk header "Core Gambatte": the sync profile calibrated on libgambatte applies
     int gambatte;
+    // BizHawk header "Core GBHawk": the GBHawk pad-latch/DIV profile applies
+    int gbhawk;
 } DpTas;
 
 // Gambatte, original DMG boot ROM: $0100 is reached 4496 cycles into movie

@@ -1126,6 +1126,22 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
                 memcpy(w->mach->api->wram, dp_gambatte_wram, 0x2000);
                 memcpy(w->mach->api->hram, dp_gambatte_hram, 0x7F);
             }
+            // BizHawk's GBHawk (gbl.h): the pad is latched at the vblank
+            // edge inside its fixed frame (65,664 cycles to LY 144); the
+            // worker applies the next mask just after the m0boy vblank, so
+            // the pad only needs the 14,481 cycles its shorter boot runs
+            // ahead of the 334 dropped movie frames.  The divider phase at
+            // $0100 is 0xFE4D.  GBHawk keeps the WRAM zero (no power-on
+            // dump) and its frames are always 70224 cycles, like the
+            // vblank clock: no mode-3 clock change applies.
+            if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gbhawk) {
+                *w->mach->api->sync_pad_delay = getenv("DEEPEEL_TAS_PADDELAY")
+                    ? (uint32_t)strtoul(getenv("DEEPEEL_TAS_PADDELAY"), NULL, 0) : 14481u;
+                *w->mach->api->sync_div_extra = getenv("DEEPEEL_TAS_DIVEXTRA")
+                    ? (uint16_t)strtoul(getenv("DEEPEEL_TAS_DIVEXTRA"), NULL, 0) : 0xFE4Du;
+                fprintf(stderr, "deepeel: TAS %s: GBHawk sync profile (pad latch +14481 cycles, DIV phase $FE4D)\n",
+                        w->tas.source);
+            }
             // BizHawk's frame clock (gbl.h, sync_vba_off_clock 3): a frame ends at
             // the video frame or when its sample budget runs out
             if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gambatte && !w->tas.equal_frames && !getenv("DEEPEEL_TAS_NOMODE3"))

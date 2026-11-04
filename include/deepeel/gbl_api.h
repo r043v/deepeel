@@ -38,6 +38,9 @@ typedef struct DpGblApi {
     void (*wr)(uint16_t a, uint8_t v);
     /* movie sync compatibility knobs (gbl.h): 0 = hardware behaviour */
     uint8_t *sync_div_skew, *sync_vba_off_clock;
+    /* GBHawk profile (gbl.h): pad latch delay in cycles, extra DIV skew */
+    uint32_t *sync_pad_delay;
+    uint16_t *sync_div_extra;
     /* bank shown in the $0000-$3FFF window: 0 except on a large MBC1 in mode 1 */
     const uint16_t *rom0_bank;
 } DpGblApi;
