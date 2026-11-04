@@ -62,7 +62,7 @@ static void fold(DpNesResults *a, void *user) {
     ADD(pad_probe_sites); ADD(pad_probe_refused); ADD(evicted); ADD(parked); ADD(parked_resumed);
     ADD(parked_lost); ADD(pending_dropped); ADD(ram_writes); ADD(smc_writes); ADD(io_writes); ADD(io_reads); ADD(chr_reads);
     ADD(demo_frames_run); ADD(play_frames_run); ADD(play_sessions_run); ADD(pool_saved); ADD(pool_starts); ADD(play_steps_accounted); ADD(seeds_play);
-    ADD(tas_same); ADD(tas_different); ADD(tas_unrecorded); ADD(cpu_copy_bytes); ADD(wram_copy_bytes); ADD(aux_copy_bytes);
+    ADD(tas_same); ADD(tas_different); ADD(tas_unrecorded); ADD(cpu_copy_bytes); ADD(wram_copy_bytes); ADD(aux_copy_bytes); ADD(oam_chain_bytes);
     ADD(novelty_trials); ADD(novelty_hits); ADD(novelty_archived); ADD(novelty_replaced);
     ADD(novelty_frames_run); ADD(novelty_deaths);
     if (b->novelty_depth > a->novelty_depth) a->novelty_depth = b->novelty_depth;

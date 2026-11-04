@@ -901,6 +901,12 @@ def build_nes_pce(out):
     nw[16:16 + len(cw)] = cw
     with open(os.path.join(out, "fix_nes_wramcopy.nes"), "wb") as f:
         f.write(nw)
+    # NES chain ROM -> WRAM ($0200) -> OAM DMA
+    nc = bytearray(nw)
+    nc[16 + 5:16 + 8] = bytes([0x9D, 0x00, 0x02])
+    nc[16 + 13:16 + 13 + 8] = bytes([0xA9, 0x02, 0x8D, 0x14, 0x40, 0x4C, 0x12, 0x80])
+    with open(os.path.join(out, "fix_nes_oamchain.nes"), "wb") as f:
+        f.write(nc)
     # NES CPU loop ROM -> SRAM ($6000) and ROM -> APU ($4000..)
     ns = bytearray(nw)
     ns[16 + 5:16 + 8] = bytes([0x9D, 0x00, 0x60])

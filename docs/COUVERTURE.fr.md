@@ -91,7 +91,7 @@ Pour chaque technique, la fiche indique :
 | D1 | Marquage exec natural/forced/entry/irq/start | ✅ | ✅ | ✅ | ✅ ENTRY/IRQ/START par cellule (`exec_kind`), état de handler hérité par les fourches (0.237.0, test `nes`) | ✅ ENTRY/IRQ par cellule (`exec_kind`), état de handler hérité par les fourches (0.238.0) ; limite : fourche relue d'un lot disque | ✅ ENTRY/IRQ par cellule (`exec_kind`), état de handler hérité par les fourches (0.238.0) ; limite : fourche relue d'un lot disque |
 | D2 | Lectures de données ROM + hits | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | D3 | Accès registres par registre (`DpIoStat`) | ✅ | ✅ | ✅ | ✅ lectures + écritures par registre | ✅ lectures + écritures par registre (0.226.0, test `pce`) | ✅ lectures + écritures par registre (`reg_r`/`reg_w`, test `md_explore`) |
-| D4 | Copies par boucle CPU | ✅ VRAM | ✅ | ✅ | ◐ boucle → PPUDATA ; 0.249.11 boucle → WRAM (canal 4, test `nes_wram_copy`), 0.249.12 → SRAM `$6000` (canal 5) et registres APU `$4000-$4013` (canal 6, test `nes_sram_apu_copy`) ; reste les chaînes ROM→WRAM→OAM | ✅ port VDC | ✅ MOVE→VDP |
+| D4 | Copies par boucle CPU | ✅ VRAM | ✅ | ✅ | ✅ boucle → PPUDATA, WRAM (canal 4), SRAM `$6000` (5), APU `$4000-$4013` (6), chaîne ROM→WRAM→OAM ; 0.249.11–13, tests `nes_wram_copy`, `nes_sram_apu_copy`, `nes_oam_chain` | ✅ port VDC | ✅ MOVE→VDP |
 | D5 | Copies DMA | ✅ OAM | — | — | ✅ OAM | ✅ TII/TDD… | ✅ DMA VDP |
 | D6 | Timeline de banques | ✅ | ✅ | ✅ | ✅ UxROM | ✅ MPR | ✅ SSF2 |
 | D7 | Fourches deux issues des conditionnels | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ Bcc/DBcc |

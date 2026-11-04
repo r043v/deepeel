@@ -690,6 +690,14 @@ static void hook_write(void *user, unsigned addr, unsigned value) {
                 int64_t cell = dp_nesmach_rom_index(x->m, 0x8000u | ((src_page + i) & 0x7FFF));
                 if (cell >= 0) r->flags[cell] |= DP_NES_COPIED;
             }
+            if (value < 0x20) {   // RAM page: bytes that a loop copied from PRG chain ROM -> WRAM -> OAM
+                for (unsigned i = 0; i < 256; i++) {
+                    int32_t s = x->ram_src[(src_page + i) & 0x7FF];
+                    if (s < 0) continue;
+                    if (!(r->flags[s] & DP_NES_COPIED)) r->oam_chain_bytes++;
+                    r->flags[s] |= DP_NES_COPIED;
+                }
+            }
             if (value >= 0x80) r->oam_copies++;
             int64_t base = value >= 0x80
                 ? (uint32_t)dp_nesmach_rom_index(x->m, 0x8000u | (src_page & 0x7FFF))
@@ -2025,7 +2033,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  pointer tables: %llu tables, %llu bytes (inferred)\n", (unsigned long long)r->table_count, (unsigned long long)r->table_bytes);
     fprintf(out, "  static closure: %llu bytes from %llu roots, cap hits %llu\n", (unsigned long long)r->static_bytes, (unsigned long long)r->static_roots, (unsigned long long)r->static_cap_hits);
     fprintf(out, "  padding %llu bytes; inferred code %llu data %llu padding %llu\n", (unsigned long long)r->padding_bytes, (unsigned long long)r->inferred_code, (unsigned long long)r->inferred_data, (unsigned long long)r->inferred_pad);
-    fprintf(out, "  cpu loop copy bytes %llu, to WRAM %llu, to SRAM/APU %llu\n", (unsigned long long)r->cpu_copy_bytes, (unsigned long long)r->wram_copy_bytes, (unsigned long long)r->aux_copy_bytes);
+    fprintf(out, "  cpu loop copy bytes %llu, to WRAM %llu, to SRAM/APU %llu, ROM->WRAM->OAM %llu\n", (unsigned long long)r->cpu_copy_bytes, (unsigned long long)r->wram_copy_bytes, (unsigned long long)r->aux_copy_bytes, (unsigned long long)r->oam_chain_bytes);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  pad probes: %llu forks at %llu sites, refused %llu\n", (unsigned long long)r->pad_probes, (unsigned long long)r->pad_probe_sites, (unsigned long long)r->pad_probe_refused);
     fprintf(out, "  copy siblings: %llu tables; %llu ranges (%llu bytes); %llu refused over executed code; %llu tables cut at the cap\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_ranges, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_refused, (unsigned long long)r->sib_caps);

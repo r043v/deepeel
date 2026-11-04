@@ -3494,3 +3494,9 @@ Même mécanisme que le canal 4 : un store en `$6000-$7FFF` (canal 5) ou `$4000-
 fusionne en un enregistrement `len N` (canal 6 : la destination peut rester fixe, les octets sources sont contigus). Le
 compteur « to SRAM/APU » apparaît dans le rapport. Fixtures `fix_nes_sramcopy`, `fix_nes_apucopy`, test `nes_sram_apu_copy`.
 D4 NES reste ◐ : la chaîne ROM→WRAM→OAM n'est pas suivie.
+
+## 0.249.13 (NES, D4 : chaîne ROM→WRAM→OAM)
+
+Un OAM DMA depuis une page de RAM (`$00-$1F`) marque `copied` les cellules PRG dont les octets ont été copiés vers ces
+octets de RAM par une boucle (provenance `ram_src`) ; compteur « ROM->WRAM->OAM » dans le rapport. Fixture
+`fix_nes_oamchain`, test `nes_oam_chain`. Avec 0.249.11–12, D4 NES couvre toutes les destinations de la norme : cellule ✅.
