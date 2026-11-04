@@ -77,6 +77,7 @@ typedef struct {
     uint8_t snapshot[DP_NES_STATE_MAX];
     int jam_pending, failed;
     uint32_t rng;
+    int idle;              // demo session: no button pressed
     uint64_t wframe;                   // frames seen (watch sampling)
     int nov;                           // novelty search running (frame hook stops it, counts apart)
     uint64_t novel;                    // PRG cells executed for the first time (novelty gain)
@@ -811,8 +812,8 @@ static void play_session(DpNesRun *x, uint32_t frames, uint32_t seed,
             x->frame_masks[f][1] = (uint8_t)(tas->masks[f] >> 4);
             x->frame_cmds[f] = tas->cmds ? tas->cmds[f] : 0;
         } else {
-            x->frame_masks[f][0] = (uint8_t)(nes_rng(&x->rng) & 0xFF);
-            x->frame_masks[f][1] = (uint8_t)(nes_rng(&x->rng) & 0xFF);
+            x->frame_masks[f][0] = x->idle ? 0 : (uint8_t)(nes_rng(&x->rng) & 0xFF);
+            x->frame_masks[f][1] = x->idle ? 0 : (uint8_t)(nes_rng(&x->rng) & 0xFF);
             x->frame_cmds[f] = 0;
         }
     }
@@ -1074,7 +1075,7 @@ DpNesOptions dp_nes_options(void) {
     o.loop_cap = 4096;
     o.fork_cap = 4;
     o.seed_irq = 1;
-    o.play_frames = 0;
+    o.play_frames = 0; o.demo_frames = 0;
     o.play_sessions = 8;
     o.novelty_frames = 240;
     o.novelty_archive = 4096;
@@ -1157,7 +1158,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     if (dp_nesmach_state_size() > DP_NES_STATE_MAX) { dp_nesmach_close(x.m); return 0; }
 
     // play/TAS scratch
-    uint32_t fmax = x.opt.play_frames;
+    uint32_t fmax = x.opt.play_frames > x.opt.demo_frames ? x.opt.play_frames : x.opt.demo_frames;
     for (int i = 0; i < x.opt.tas_count; i++) {
         DpNesTas t;
         if (dp_nes_tas_load(x.opt.tas_paths[i], &t, err, sizeof err)) {
@@ -1193,6 +1194,12 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     // play and TAS sessions first: their visited bytes land in the shared
     // map, their end states seed the fork queue
     if (!x.failed) {
+        if (x.opt.demo_frames) { // the attract mode first: no button, from power-on
+            x.idle = 1;
+            play_session(&x, x.opt.demo_frames, 0, NULL);
+            x.idle = 0;
+            r->demo_frames_run = x.opt.demo_frames;
+        }
         for (int i = 0; i < x.opt.tas_count && !x.failed; i++) {
             if ((x.total_steps >= x.opt.max_total || dp_stop)) break;
             DpNesTas t;
@@ -1792,6 +1799,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->exec_outside);
     if (r->ra.n) fprintf(out, "  runtime code archive: %u variants, %u attached to a ROM copy source, %u generated with an approximate ROM producer, %u rewrote an earlier variant\n",
         r->ra.n, r->ra.attached, r->ra.derived, r->ra.poly);
+    if (r->demo_frames_run) fprintf(out, "  demo (no button pressed, from power-on): %llu frames\n", (unsigned long long)r->demo_frames_run);
     fprintf(out, "  play: %llu sessions x frames %llu\n",
         (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run);
     if (r->state_exported) fprintf(out, "  state exported: deepest cell, %u frames from power-on\n", r->state_exported_depth);

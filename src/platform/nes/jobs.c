@@ -60,7 +60,7 @@ static void fold(DpNesResults *a, void *user) {
     ADD(global_cuts); ADD(path_cuts); ADD(faults); ADD(decode_cuts); ADD(ctx_evicted); ADD(pad_probes);
     ADD(pad_probe_sites); ADD(pad_probe_refused); ADD(evicted); ADD(parked); ADD(parked_resumed);
     ADD(parked_lost); ADD(pending_dropped); ADD(ram_writes); ADD(smc_writes); ADD(io_writes); ADD(io_reads); ADD(chr_reads);
-    ADD(play_frames_run); ADD(play_sessions_run); ADD(play_steps_accounted); ADD(seeds_play);
+    ADD(demo_frames_run); ADD(play_frames_run); ADD(play_sessions_run); ADD(play_steps_accounted); ADD(seeds_play);
     ADD(tas_same); ADD(tas_different); ADD(tas_unrecorded); ADD(cpu_copy_bytes);
     ADD(novelty_trials); ADD(novelty_hits); ADD(novelty_archived); ADD(novelty_replaced);
     ADD(novelty_frames_run); ADD(novelty_deaths);
@@ -117,7 +117,7 @@ static void fold(DpNesResults *a, void *user) {
 int dp_nes_explore_jobs(const uint8_t *data, size_t size, int mapper, const DpNesOptions *options,
                         DpNesResults *results, int jobs) {
     DpNesOptions o = options ? *options : dp_nes_options();
-    int phases = o.tas_count || o.play_frames || o.novelty_steps;
+    int phases = o.tas_count || o.demo_frames || o.play_frames || o.novelty_steps;
     if (jobs < 2 || !phases) {
         if (jobs >= 2)
             fprintf(stderr, "deepeel: nes --jobs 2 needs --tas, --play or --novelty to split the work; "
@@ -139,7 +139,7 @@ int dp_nes_explore_jobs(const uint8_t *data, size_t size, int mapper, const DpNe
     j->opt.tree_path = NULL;
     j->opt.second_pass = 0;
     j->opt.pre_finalize = NULL;
-    o.play_frames = 0;
+    o.play_frames = 0; o.demo_frames = 0;
     o.play_sessions = 0;
     o.tas_count = 0;
     o.novelty_steps = 0;

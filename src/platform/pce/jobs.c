@@ -37,7 +37,7 @@ static void merge_counts(DpPceResults *a, const DpPceResults *b) {
     ADD(data_reads); ADD(forced_paths); ADD(evicted); ADD(faults); ADD(illegal_cuts);
     ADD(step_cuts); ADD(loop_cuts); ADD(fork_cuts); ADD(pad_fork_cuts); ADD(irq_fork_cuts);
     ADD(queue_cuts); ADD(global_cuts); ADD(parked); ADD(parked_resumed); ADD(parked_lost);
-    ADD(pending_dropped); ADD(play_frames_run); ADD(play_sessions_run); ADD(tas_frames_run);
+    ADD(pending_dropped); ADD(demo_frames_run); ADD(play_frames_run); ADD(play_sessions_run); ADD(tas_frames_run);
     ADD(novelty_trials); ADD(novelty_hits); ADD(novelty_archived); ADD(novelty_replaced);
     ADD(novelty_frames_run); ADD(novelty_deaths); ADD(io_writes); ADD(smc_writes); ADD(vdc_data_writes);
     ADD(copied_bytes); ADD(vce_data_writes);
@@ -141,7 +141,7 @@ static void fold(DpPceResults *a, void *user) {
 int dp_pce_explore_jobs(const uint8_t *data, size_t size, const DpPceOptions *options,
                         DpPceResults *results, int jobs) {
     DpPceOptions o = options ? *options : dp_pce_options();
-    int phases = o.tas_count || (o.play_frames && o.play_sessions) || o.novelty_steps;
+    int phases = o.tas_count || o.demo_frames || (o.play_frames && o.play_sessions) || o.novelty_steps;
     if (jobs < 2 || !phases) {
         if (jobs >= 2)
             fprintf(stderr, "deepeel: pce --jobs 2 needs --tas, --play/--sessions or --novelty "
@@ -159,7 +159,7 @@ int dp_pce_explore_jobs(const uint8_t *data, size_t size, const DpPceOptions *op
     j->opt.lot_path = NULL;
     j->opt.lot_drain = 0;
     j->opt.pre_finalize = NULL;
-    o.play_frames = 0;
+    o.play_frames = 0; o.demo_frames = 0;
     o.play_sessions = 0;
     o.novelty_steps = 0;
     o.watch_every = 0;

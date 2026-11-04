@@ -92,6 +92,7 @@ typedef struct {
     uLongf zcap;
     size_t state_size;
     uint32_t rng;
+    int idle;              // demo session: no button pressed
     uint64_t novel;        // cells observed for the first time (novelty search)
     int failed;
     struct PStm *stm;      // S6 decoder replay state
@@ -856,7 +857,7 @@ static void play_session(PceRun *x, uint32_t frames, uint32_t seed, const DpPceT
             if (tas->resets && tas->resets[f]) dp_pce_reset();
             r->tas_frames_run++;
         } else {
-            in = random_input(x, &held, &hold);
+            in = x->idle ? 0 : random_input(x, &held, &hold);
         }
         play_frame(x, in);
         if (x->opt.queue_cap && f % seed_every == seed_every - 1) push_live(x, 0);
@@ -1398,7 +1399,7 @@ DpPceOptions dp_pce_options(void) {
     o.seed_irq = 1;
     o.static_closure = 1;
     o.infer = 1;
-    o.play_frames = 0;
+    o.play_frames = 0; o.demo_frames = 0;
     o.play_sessions = 8;
     o.play_seed = 1;
     o.novelty_steps = 0;
@@ -1492,6 +1493,12 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     if (x->opt.entry_count) dp_pce_reset();
 
     // TAS movies, then the play sessions; their checkpoints join the queue
+    if (x->opt.demo_frames) { // the attract mode first: no button, from power-on
+        x->idle = 1;
+        play_session(x, x->opt.demo_frames, 0, NULL);
+        x->idle = 0;
+        x->r->demo_frames_run = x->opt.demo_frames;
+    }
     for (int i = 0; i < x->opt.tas_count && !x->failed; i++) {
         DpPceTas t;
         char err[256];
@@ -1691,6 +1698,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
     fprintf(out, "  faults %llu, exec outside ROM %llu, queued state bytes %llu\n",
             (unsigned long long)r->faults, (unsigned long long)r->exec_outside,
             (unsigned long long)r->state_bytes_peak);
+    if (r->demo_frames_run) fprintf(out, "  demo (no button pressed, from power-on): %llu frames\n", (unsigned long long)r->demo_frames_run);
     fprintf(out, "  play: %llu sessions, %llu frames (TAS %llu)\n",
             (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run,
             (unsigned long long)r->tas_frames_run);

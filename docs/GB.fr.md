@@ -2970,3 +2970,10 @@ couvrent tout ce qu'une partie réelle exécute.
 - Résultats consignés dans `m0boy/docs/GB_CONFORMANCE.fr.md` (observations de l'outil sur un cœur DMG sans boot ROM) :
   948 ROMs à protocole machine, 430 passent, 291 échouent, 227 sans verdict ; Mooneye 31/115, gbmicrotest 354/513,
   Blargg 20/58 (cpu_instrs individuels tous passés). Gambatte, mealybug et acid2 attendent une comparaison de captures.
+
+## 0.202.0 : NES et PCE, `--demo N` (aucune touche) avant le TAS et les parties (2026-11-04)
+
+- `deepeel nes|pce explore ROM --demo N` : N trames depuis la mise sous tension, manettes au repos (mode attract),
+  jouées **avant** le TAS, les parties aléatoires, la novelty et les fourches. Rapport : `demo (no button pressed,
+  from power-on): N frames`. Même ordre que MD (0.200.0) : démo, TAS, le reste. Tests `nes_demo_frames`, `pce_demo_frames`.
+- Les instances secondaires de `--jobs 2` ne rejouent pas la démo. GB, SMS/MSX : non faits (parties jouées sans équivalent).
