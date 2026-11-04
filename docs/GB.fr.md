@@ -2631,3 +2631,12 @@ que le rattachement des copies NES), pas une dépendance exacte.
 Le code exécuté hors ROM renseigne l'index ROM du premier octet quand la provenance Z80 (copie contrôlée par
 valeur, `valid_origin`) le rattache à la ROM ; `-1` sinon. Les tests existants passent ; aucune fixture SMS/MSX
 n’affirmait la valeur de la source en 0.184.0 ; le test `rtcode_sms_source` (0.184.1, fixture `fix_sms_ramsrc.sms`) épingle `c000 3e42 → ROM 512`.
+
+## 0.185.0 — MD : source ROM dans l'archive `rtcode`, octets RAM corrigés
+
+- Une écriture en RAM 68000 du même `MOVE` qui vient de lire la ROM (valeur contrôlée octet par octet) enregistre
+  l'index ROM source ; l'archive `--rtcode` MD le porte pour le premier octet du code exécuté en RAM (`-1` sinon).
+- Correctif : les octets archivés du code RAM venaient d'un `peek` de la ROM (donc faux, souvent 0) ; ils sont lus
+  dans la RAM de travail. Fixture `fix_md_ramsrc.md`, test `rtcode_md_source`.
+- Seules les copies d'un seul `MOVE` (ROM → RAM, même taille) sont rattachées ; `MOVEM`, blocs DMA et copies
+  transformées ne le sont pas.

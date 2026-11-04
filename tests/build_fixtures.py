@@ -496,6 +496,12 @@ def build_md(out):
                          "41f9 0000 0400 43f9 00c0 0000 7203 3018 4e71 3280 51c9 fff8 60fe")
     r[0x200:0x200 + len(code)] = code
     save_md(out, "fix_md_cpu_vram_gap", r)
+    # A 4-byte routine ($0400) copied word by word to work RAM, then called there (rtcode ROM source).
+    r = md_rom()
+    code = bytes.fromhex("41f9 0000 0400 43f9 00ff 0000 7201 32d8 51c9 fffc 4eb9 00ff 0000 60fe")
+    r[0x200:0x200 + len(code)] = code
+    r[0x400:0x404] = bytes.fromhex("7042 4e75")
+    save_md(out, "fix_md_ramsrc", r)
     # A 2 MiB+ cartridge with SRAM overlay: execute and read SRAM without
     # accidentally attributing those accesses to the covered ROM bytes.
     r = md_rom()

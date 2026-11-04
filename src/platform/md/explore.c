@@ -75,6 +75,8 @@ typedef struct {
     int in_z80;
     int32_t zsrc[8192];
     uint32_t lr[4]; unsigned nlr;       /* ROM bytes of the last 68000 data read */
+    uint32_t lr_pc;                     /* pc of the instruction that made that read */
+    int32_t ram_src[0x10000];           /* work-RAM byte -> ROM index of the byte a store copied (-1 none) */
     uint32_t z80_last_read;             /* ROM address of the last Z80 data read */
     int z80_last_valid;
     uint32_t zfetch_lo, zfetch_hi;      /* ROM range of the instruction being fetched */
@@ -351,12 +353,9 @@ static void on_end(void *u, uint32_t pc, uint32_t next, unsigned len) {
         r->exec_outside++;
         if (pc >= 0xE00000) {
             r->ram_exec++;
-            uint8_t ib[12];   // the instruction as the RAM holds it after its execution
-            for (unsigned k = 0; k < 12; k += 4) {
-                uint32_t w = dp_mdmach_peek32(x->m, pc + k);
-                ib[k] = (uint8_t)(w >> 24); ib[k + 1] = (uint8_t)(w >> 16); ib[k + 2] = (uint8_t)(w >> 8); ib[k + 3] = (uint8_t)w;
-            }
-            dp_ramarch_add(&r->ra, (uint16_t)pc, ib, len > 10 ? 10 : (int)len, -1);
+            uint8_t ib[12];   // the instruction as the work RAM holds it after its execution
+            for (unsigned k = 0; k < 12; k++) ib[k] = dp_mdmach_ram8(x->m, pc + k);
+            dp_ramarch_add(&r->ra, (uint16_t)pc, ib, len > 10 ? 10 : (int)len, x->ram_src[pc & 0xFFFF]);
             for (unsigned k = 0; k < (len > 10 ? 10 : len); k++) x->ram_exec[(pc + k) & 0xFFFF] = 1;
         }
         if (!dp_mdmach_rom_visible(x->m, pc)) r->sram_exec++;
@@ -433,6 +432,7 @@ static void on_read(void *u, uint32_t a, unsigned size) {
             x->move_src_valid = 1;
         }
         x->nlr = 0;
+        x->lr_pc = x->pc;
         for (unsigned i = 0; i < size && i < 4 && a + i < r->rom_size; i++) x->lr[x->nlr++] = a + i;
         unsigned k;
         for (k = 0; k < r->nreaders && r->readers[k].pc != x->pc; k++) {}
@@ -470,6 +470,13 @@ static void on_write(void *u, uint32_t a, unsigned size, uint32_t v) {
     DpMdResults *r = x->r;
     if (x->halted) return;
     a &= 0xFFFFFFu;
+    if (a >= 0xE00000)   // provenance: a store of the bytes the same instruction just read from ROM
+        for (unsigned k = 0; k < size && k < 4; k++) {
+            int32_t src = -1;
+            if (x->nlr == size && x->lr_pc == x->pc && x->lr[k] < r->rom_size &&
+                x->c->rom[x->lr[k]] == (uint8_t)(v >> (8 * (size - 1 - k)))) src = (int32_t)x->lr[k];
+            x->ram_src[(a + k) & 0xFFFF] = src;
+        }
     if (a >= 0xE00000)   // a store into RAM bytes that already ran is self-modifying code
         for (unsigned k = 0; k < size; k++)
             if (x->ram_exec[(a + k) & 0xFFFF]) {
@@ -1191,6 +1198,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     r->z80_flags = calloc(c->size, 1);
     r->copies = calloc(DP_MD_COPY_CAP, sizeof *r->copies);
     X x = {.c = c, .o = o, .r = r, .qcap = o->queue_cap};
+    for (unsigned i = 0; i < 0x10000; i++) x.ram_src[i] = -1;
     x.q = calloc(o->queue_cap ? o->queue_cap : 1, sizeof *x.q);
     if (o->lot_path && !(x.lot = dp_lf_open(o->lot_path, "MD", 1)))
         fprintf(stderr, "deepeel: cannot open the lot %s\n", o->lot_path);
