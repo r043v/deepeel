@@ -827,6 +827,8 @@ static void trace_cb(void *user, uint16_t pc, uint8_t op) {
 // one frame of play with this input (the native loop, traced)
 static int play_frame(PceRun *x, uint8_t input) {
     dp_pce_input(input);
+    if (dp_pce_multitap_enabled()) // pads 2-5 replay the played input rotated by their number: distinct, deterministic
+        for (unsigned n = 1; n < 5; n++) dp_pce_pad_n(n, (uint8_t)((input << n) | (input >> (8 - n))));
     dp_pce_trace(trace_cb, x);
     dp_pce_run_frame();
     dp_pce_trace(NULL, NULL);

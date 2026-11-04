@@ -2910,3 +2910,10 @@ couvrent tout ce qu'une partie réelle exécute.
 - Les manettes 2 à 5 restent au repos : modèle d'observation, pas une mesure de matériel. L'état du
   balayage est global au processus, donc `--multitap` force une seule instance (`--jobs` ignoré, signalé).
 - Test `pce_multitap_option`. Limite : aucune entrée jouée sur les manettes 2-5.
+
+## 0.196.0 : PCE, manettes 2-5 jouées avec `--multitap` (2026-11-04)
+
+- En jeu (`--play`, sessions), les manettes 2 à 5 rejouent l'entrée de la manette 1 tournée de n bits :
+  elles diffèrent entre elles et restent déterministes. Sans `--multitap`, rien ne change.
+- Modèle d'observation arbitraire (pas des entrées de joueurs réels) ; le test `pce_multitap_option`
+  couvre maintenant une session jouée avec l'option.
