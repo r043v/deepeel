@@ -348,7 +348,15 @@ static void on_end(void *u, uint32_t pc, uint32_t next, unsigned len) {
     pc &= 0xFFFFFFu;
     if (pc >= r->rom_size || !dp_mdmach_rom_visible(x->m, pc)) {
         r->exec_outside++;
-        if (pc >= 0xE00000) r->ram_exec++;
+        if (pc >= 0xE00000) {
+            r->ram_exec++;
+            uint8_t ib[12];   // the instruction as the RAM holds it after its execution
+            for (unsigned k = 0; k < 12; k += 4) {
+                uint32_t w = dp_mdmach_peek32(x->m, pc + k);
+                ib[k] = (uint8_t)(w >> 24); ib[k + 1] = (uint8_t)(w >> 16); ib[k + 2] = (uint8_t)(w >> 8); ib[k + 3] = (uint8_t)w;
+            }
+            dp_ramarch_add(&r->ra, (uint16_t)pc, ib, len > 10 ? 10 : (int)len, -1);
+        }
         if (!dp_mdmach_rom_visible(x->m, pc)) r->sram_exec++;
         irq_forks(x, next);
         return;
@@ -1395,7 +1403,13 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     return 0;
 }
 
+void dp_md_explore_rtcode(const DpMdResults *r, const char *path) {
+    FILE *f = fopen(path, "w");
+    if (f) { dp_ramarch_write(&r->ra, f, "md"); fclose(f); }
+}
+
 void dp_md_results_free(DpMdResults *r) {
+    dp_ramarch_free(&r->ra);
     free(r->inferred);
     free(r->stat);
     free(r->flags);

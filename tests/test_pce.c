@@ -270,6 +270,29 @@ static void test_streams(void) {
     free(r); free(rom);
 }
 
+// RAM-code archive: bytes built by immediates in WRAM, then run
+static void test_ramcode(void) {
+    uint8_t *rom = calloc(1, ROM_SIZE);
+    static const uint8_t code[] = {
+        0x78, 0xD4, 0xA9, 0xFF, 0x53, 0x01, 0xA9, 0xF8, 0x53, 0x02,
+        0xA9, 0xA9, 0x8D, 0x00, 0x22, 0xA9, 0x07, 0x8D, 0x01, 0x22, 0xA9, 0x60, 0x8D, 0x02, 0x22,
+        0x20, 0x00, 0x22, 0x80, 0xFE,
+    };
+    memcpy(rom, code, sizeof code);
+    rom[0x1FFE] = 0x00; rom[0x1FFF] = 0xE0;
+    DpPceOptions o = dp_pce_options();
+    o.max_total = 20000; o.max_steps = 500;
+    DpPceResults *r = calloc(1, sizeof *r);
+    CHECK(dp_pce_explore(rom, ROM_SIZE, &o, r), "ramcode explore");
+    CHECK(r->ra.n >= 2, "RAM instructions archived (%u)", r->ra.n);
+    int found = 0;
+    for (uint32_t i = 0; i < r->ra.cap; i++)
+        if (r->ra.e[i].key && r->ra.e[i].len == 2 && r->ra.e[i].pc == 0x2200 && r->ra.e[i].b[1] == 0x07) found = 1;
+    CHECK(found, "LDA #$07 at $2200 kept");
+    dp_pce_results_free(r);
+    free(r); free(rom);
+}
+
 int main(void) {
     uint8_t *rom = malloc(ROM_SIZE);
     build(rom);
@@ -280,6 +303,7 @@ int main(void) {
     test_index(rom);
     test_jobs(rom);
     test_streams();
+    test_ramcode();
     test_tas_identity();
     free(rom);
     if (fails) { printf("%d failure(s)\n", fails); return 1; }

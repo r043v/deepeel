@@ -1324,6 +1324,7 @@ static void generate_seed_specs(Run *x,const uint8_t *image,size_t size) {
     dp_set_free(&seen);
 }
 void dp_sega_results_free(DpSegaResults *r) {
+    dp_ramarch_free(&r->ra);
     for(uint32_t i=0;i<r->section_count;i++) dp_set_free(&r->sections[i].ctx_seen);
     free(r->sections); free(r->section_of); free(r->tree_nodes); free((void *)r->rom);
     free(r->static_flags); free(r->src_flags); dp_first_free(&r->first);
@@ -1644,7 +1645,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
                         }
                         else outside=1;
                     }
-                    if(outside) r->exec_outside++;
+                    if(outside) { r->exec_outside++; dp_ramarch_add(&r->ra,c->pc,bytes,(int)d.length,-1); }
                     dp_sega_closure_observe(x.closure);
                     dp_z80_provenance_begin(&x.origins->cpu,c,&d,origin_read,&x);
                     cycles=z80_execute_decoded(c,&d); z80_finish(c,cycles);
@@ -1841,6 +1842,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
         d->phase_pending[i]+=s->phase_pending[i]; d->phase_known[i]+=s->phase_known[i];
     }
     d->closure.limits=s->closure.limits;
+    dp_ramarch_merge(&d->ra,&s->ra);
 #define DP_MR_SUM(f) d->f+=s->f
     DP_MR_SUM(steps); DP_MR_SUM(paths); DP_MR_SUM(forks); DP_MR_SUM(irq_forks);
     DP_MR_SUM(exec_outside); DP_MR_SUM(data_reads); DP_MR_SUM(vdp_copies); DP_MR_SUM(ram_copies);
@@ -2429,7 +2431,7 @@ static int parse_entry(const char *s,DpSegaOptions *o) {
 int dp_sega_explore_command(int argc,char **argv) {
     if(argc<5) goto usage;
     const DpSegaSystem *s=!strcmp(argv[3],"msx")?dp_msx_system():dp_sega_system(argv[3]); if(!s) goto usage;
-    DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); o.defer_tiers=DP_SEGA_TIER_MAX; int watch=0; const char *dump=NULL,*text=NULL,*map=NULL,*evidence=NULL,*summary=NULL,*cov=NULL,*romdata=NULL;
+    DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); o.defer_tiers=DP_SEGA_TIER_MAX; int watch=0; const char *dump=NULL,*text=NULL,*map=NULL,*evidence=NULL,*summary=NULL,*cov=NULL,*romdata=NULL,*rtcode=NULL;
     for(int i=5;i<argc;i++) {
         if(!strcmp(argv[i],"--no-vector-seeds")) { o.seed_vectors=0; continue; }
         if(!strcmp(argv[i],"--no-context-evict")) { o.no_context_evict=1; continue; }
@@ -2476,6 +2478,7 @@ int dp_sega_explore_command(int argc,char **argv) {
         if(!strcmp(key,"--text")) text=value;
         else if(!strcmp(key,"--map")) map=value;
         else if(!strcmp(key,"--summary")) summary=value;
+        else if(!strcmp(key,"--rtcode")) rtcode=value;
         else if(!strcmp(key,"--evidence")) evidence=value;
         else if(!strcmp(key,"--cov")) cov=value;
         else if(!strcmp(key,"--romdata")) romdata=value;
@@ -2552,7 +2555,8 @@ int dp_sega_explore_command(int argc,char **argv) {
         if(ferror(out)) ok=0;
         if(fclose(out)) ok=0;
     }
+    if(rtcode) { FILE *rf=fopen(rtcode,"w"); if(rf) { dp_ramarch_write(&r.ra,rf,s->id); fclose(rf); } }
     dp_sega_results_free(&r); return ok?0:1;
 usage:
-    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--novelty N] [--novelty-frames N] [--novelty-archive N] [--novelty-frame-steps N] [--novelty-cells 1] [--export-state FILE] [--watch [FPS]] [--watch-dump FILE.ppm] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE]\n"); return 2;
+    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--novelty N] [--novelty-frames N] [--novelty-archive N] [--novelty-frame-steps N] [--novelty-cells 1] [--export-state FILE] [--watch [FPS]] [--watch-dump FILE.ppm] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE] [--rtcode FILE]\n"); return 2;
 }

@@ -4,6 +4,7 @@
 // and register logs, every guard saturation counted.
 #ifndef DP_PCE_EXPLORE_H
 #define DP_PCE_EXPLORE_H
+#include "../../explore/ramarch.h"
 #include <stdint.h>
 #include <stdio.h>
 
@@ -150,6 +151,7 @@ typedef struct DpPceResults_ {
     unsigned register_count;
     uint64_t register_overflow;
     DpPceOptions options;
+    DpRamArch ra;          // code executed from RAM (archive)
 } DpPceResults;
 
 DpPceOptions dp_pce_options(void);
@@ -160,6 +162,7 @@ int dp_pce_explore_jobs(const uint8_t *data, size_t size, const DpPceOptions *op
                         DpPceResults *results, int jobs);
 int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options,
                    DpPceResults *results);
+void dp_pce_rtcode(FILE *out, const DpPceResults *r);
 void dp_pce_results_free(DpPceResults *results);
 uint8_t *dp_pce_map_build(const DpPceResults *r);
 void dp_pce_report(FILE *out, const DpPceResults *results);

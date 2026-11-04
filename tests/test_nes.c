@@ -509,6 +509,29 @@ static void test_streams(void) {
     free(rom);
 }
 
+// RAM-code archive: bytes built by immediates, then run from $0300
+static void test_ramcode(void) {
+    unsigned sz = 16 + 2 * 0x4000 + 0x2000;
+    uint8_t *rom = calloc(1, sz);
+    set_header(rom, 2, 1, 0);
+    put(rom, 0, 0x0000, 0xA9, 0xA9, 0x8D, 0x00, 0x03, 0xA9, 0x07, 0x8D, 0x01, 0x03,
+                        0xA9, 0x60, 0x8D, 0x02, 0x03, 0x20, 0x00, 0x03, 0x4C, 0x14, 0x80, -1);
+    set_vector(rom, 1, 0xFFFA, 0x8000);
+    set_vector(rom, 1, 0xFFFC, 0x8000);
+    set_vector(rom, 1, 0xFFFE, 0x8000);
+    DpNesResults r;
+    DpNesOptions o = dp_nes_options();
+    o.max_steps = 500;
+    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "ramcode explore runs");
+    CHECK(r.ra.n >= 2, "RAM instructions archived (%u)", r.ra.n);
+    int found = 0;
+    for (uint32_t i = 0; i < r.ra.cap; i++)
+        if (r.ra.e[i].key && r.ra.e[i].len == 2 && r.ra.e[i].pc == 0x0300 && r.ra.e[i].b[0] == 0xA9 && r.ra.e[i].b[1] == 0x07) found = 1;
+    CHECK(found, "LDA #$07 at $0300 kept");
+    dp_nes_results_free(&r);
+    free(rom);
+}
+
 int main(void) {
     test_machine_nrom();
     test_machine_uxrom();
@@ -520,6 +543,7 @@ int main(void) {
     test_snapshot();
     test_explorer();
     test_streams();
+    test_ramcode();
     test_loop_bound();
     test_tas_load();
     test_tas_identity();

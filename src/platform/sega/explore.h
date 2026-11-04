@@ -3,6 +3,7 @@
 #include "../../core/coverage.h"
 #include "sega.h"
 #include "closure.h"
+#include "../../explore/ramarch.h"
 #include "../../../src/core/hashset.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -214,6 +215,7 @@ typedef struct {
     unsigned ay_count;
     uint8_t msx_mapper,sega_mapper,sega_mapper_explicit;
     DpSegaClosureStats closure,target_closure,block_closure;
+    DpRamArch ra;          // code executed outside the ROM (archive)
 } DpSegaResults;
 DpSegaOptions dp_sega_options(void);
 int dp_sega_explore(const DpSegaSystem *system,const uint8_t *rom,size_t size,

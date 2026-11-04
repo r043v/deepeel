@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include "../../core/cart_md.h"
 #include "movie.h"
+#include "../../explore/ramarch.h"
 
 enum { DP_MDF_NATURAL = 1, DP_MDF_FORCED = 2, DP_MDF_DATA = 4, DP_MDF_QUEUED = 8,
        DP_MDF_DATA_NATURAL = 16, DP_MDF_DMA_SOURCE = 32, DP_MDF_DMA_READ = 64,
@@ -142,6 +143,7 @@ typedef struct DpMdResults_ {
     uint32_t novelty_depth;
     unsigned jobs_folded;   /* --jobs 2: instances folded into this report (secondary) */
     uint8_t z80_bank_seen_out[128]; /* secondary instance only: banks the Z80 read (merged by the primary) */
+    DpRamArch ra;          // code executed from RAM (archive, low 16 bits of the pc)
 } DpMdResults;
 
 void dp_md_options_default(DpMdOptions *o);
@@ -149,6 +151,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r);
 void dp_md_results_free(DpMdResults *r);
 /* --jobs 2: entries split between two instances (own machine each); see jobs.c */
 int dp_md_explore_jobs(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r, int jobs);
+void dp_md_explore_rtcode(const DpMdResults *r, const char *path);
 void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdResults *r, FILE *out);
 /* One byte per ROM byte: the DP_MDF_* flags. */
 int dp_md_explore_map(const DpMdResults *r, const char *path);

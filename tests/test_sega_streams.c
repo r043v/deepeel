@@ -25,5 +25,20 @@ int main(void) {
     CHECK(r.s6_runs >= 1);
     CHECK(r.flags[0x330] & DP_SEGA_DATA);
     dp_sega_results_free(&r);
+    {   // RAM-code archive: code built in RAM by immediates, then called
+        static uint8_t rom2[0x8000];
+        memset(rom2, 0xFF, sizeof rom2);
+        const uint8_t code[] = {0x21, 0x00, 0xC1, 0x36, 0x3E, 0x23, 0x36, 0x07, 0x23, 0x36, 0xC9,   // ld hl,$C100; ld (hl),$3E; inc hl; ld (hl),7; inc hl; ld (hl),$C9
+                                0xCD, 0x00, 0xC1, 0x76};
+        memcpy(rom2, code, sizeof code);
+        DpSegaResults r2;
+        memset(&r2, 0, sizeof r2);
+        CHECK(dp_sega_explore(dp_sega_system("sms"), rom2, sizeof rom2, &o, &r2));
+        int found = 0;
+        for (uint32_t i = 0; i < r2.ra.cap; i++)
+            if (r2.ra.e[i].key && r2.ra.e[i].len == 2 && r2.ra.e[i].pc == 0xC100 && r2.ra.e[i].b[0] == 0x3E && r2.ra.e[i].b[1] == 0x07) found = 1;
+        CHECK(found);
+        dp_sega_results_free(&r2);
+    }
     TEST_DONE("sega_streams");
 }

@@ -698,6 +698,11 @@ static int step_one(PceRun *x, int *frame_done) {
     int outside = site < 0;
     if (outside && !x->was_outside) r->exec_outside++;
     x->was_outside = outside;
+    if (outside && x->mode == 0 && in.flow != DP_HUC_ILLEGAL) {   // RAM-code archive (WRAM pages only)
+        unsigned pg = c.mpr[c.pc >> 13];
+        if (pg >= 0xF8 && pg <= 0xFB)
+            dp_ramarch_add(&r->ra, c.pc, b, in.length, x->ram_src[(pg - 0xF8) * 0x2000u + (c.pc & 0x1FFF)]);
+    }
 
     if (x->mode == 0) {
         if (in.flow == DP_HUC_BRANCH) {
@@ -1393,6 +1398,7 @@ DpPceOptions dp_pce_options(void) {
 
 void dp_pce_results_free(DpPceResults *r) {
     if (!r) return;
+    dp_ramarch_free(&r->ra);
     free(r->flags);
     free(r->pal_flags);
     free(r->idx_flags);
@@ -1598,6 +1604,8 @@ uint8_t *dp_pce_map_build(const DpPceResults *r) {
     }
     return map;
 }
+
+void dp_pce_rtcode(FILE *out, const DpPceResults *r) { dp_ramarch_write(&r->ra, out, "pce"); }
 
 void dp_pce_map(FILE *out, const DpPceResults *r) {
     uint8_t *map = dp_pce_map_build(r);

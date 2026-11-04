@@ -349,6 +349,8 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
     int outside = dp_nesmach_rom_index(x->m, pc) < 0;
     if (outside && !x->was_outside) r->exec_outside++;
     x->was_outside = outside;
+    if (outside && !x->play_mode) dp_ramarch_add(&r->ra, (uint16_t)pc, bytes, (int)in.length, -1);   // RAM-code archive
+
 
     // a jam ends the path (the runtime runs illegals as NOPs; the explorer
     // stops on the KIL family before the machine drifts)
@@ -1076,8 +1078,11 @@ static int64_t table_target(const DpNesRun *x, size_t a, unsigned v);
 static void table_scan(DpNesRun *x);
 static void copy_siblings(DpNesRun *x);
 
+void dp_nes_rtcode(FILE *out, const DpNesResults *r) { dp_ramarch_write(&r->ra, out, "nes"); }
+
 void dp_nes_results_free(DpNesResults *r) {
     if (!r) return;
+    dp_ramarch_free(&r->ra);
     free(r->flags);
     free(r->tree_nodes);
     r->tree_nodes = NULL;

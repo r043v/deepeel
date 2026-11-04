@@ -6,6 +6,7 @@
 #ifndef DP_NES_EXPLORE_H
 #define DP_NES_EXPLORE_H
 #include "../../core/hashset.h"
+#include "../../explore/ramarch.h"
 #include <stdint.h>
 #include <stdio.h>
 
@@ -178,11 +179,13 @@ typedef struct DpNesResults_ {
     uint32_t state_exported_depth; int state_exported;
     unsigned jobs_folded;      // --jobs 2: secondary instances folded into this report
     DpNesOptions options;
+    DpRamArch ra;          // code executed from RAM (archive)
 } DpNesResults;
 
 DpNesOptions dp_nes_options(void);
 int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                    const DpNesOptions *options, DpNesResults *results);
+void dp_nes_rtcode(FILE *out, const DpNesResults *r);
 void dp_nes_results_free(DpNesResults *results);
 // --jobs 2: TAS/play phases on a second instance (own machine), see jobs.c
 int dp_nes_explore_jobs(const uint8_t *data, size_t size, int mapper, const DpNesOptions *options,

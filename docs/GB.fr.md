@@ -2226,3 +2226,14 @@ Détecteur S6 sur l'explorateur HuC6280 : un `JSR` vers la ROM dont la première
 deux sens ; chaque autre entrée est rejouée depuis l'instantané d'avant l'appel avec le mot remplacé,
 poussée comme fourche forcée. Limites : pas de `BSR`, pas de pointeur `(zp),Y` hors page zéro, pas de
 tables séparées octet bas / octet haut. Test `pce` (`test_streams`). Rapport : ligne `stream replay (S6)`.
+
+## 0.150.0 (archive du code RAM sur MD, NES, SMS/MSX, PCE)
+
+Module neutre `src/explore/ramarch.c` : une entrée par variante distincte `(pc, octets)` exécutée hors
+ROM, avec compteur d'exécutions, source ROM éventuelle et compteur de polymorphisme (même `pc`, autres
+octets). Option `--rtcode FICHIER` sur `md explore`, `nes explore`, `pce explore` et `z80 explore`
+(même format que la GB : `pc octets hits rom_index`). MD : seul le code en RAM (`pc >= $E00000`) est
+archivé, `pc` tronqué à 16 bits, octets relus après exécution. NES : toute exécution hors PRG, y compris
+sur des chemins forcés dans des données (l'archive NES de DuckTales compte ~1400 variantes : bruit de
+chemins forcés, pas du code de jeu). PCE : WRAM uniquement, source ROM par `ram_src`. Tests : `nes`,
+`pce`, `sega_streams`. Observations de l'outil.

@@ -1084,16 +1084,18 @@ static int cmd_nes(int argc, char **argv) {
     if (argc < 4 || strcmp(argv[2], "explore")) {
         fprintf(stderr, "deepeel nes explore ROM [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N] [--mapper auto|nrom|uxrom] "
                         "[--max-total N] [--max-steps N] [--max-paths N] [--queue N] "
-                        "[--loop-cap N] [--fork-cap N] [--no-irq-fork] [--entry bank:addr]... [--seed-banks] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE]\n");
+                        "[--loop-cap N] [--fork-cap N] [--no-irq-fork] [--entry bank:addr]... [--seed-banks] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--rtcode FILE]\n");
         return 2;
     }
     const char *path = NULL, *text = NULL, *map = NULL, *evidence = NULL, *cov = NULL, *romdata = NULL, *mapper_name = "auto";
     DpNesOptions opt = dp_nes_options();
     int nes_jobs = 1, nes_watch = 0;
+    const char *rtcode_path = NULL;
     const char *nes_dump = NULL;
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
-        if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
+        if (!strcmp(a, "--rtcode") && i + 1 < argc) rtcode_path = argv[++i];
+        else if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
         else if (!strcmp(a, "--map") && i + 1 < argc) map = argv[++i];
         else if (!strcmp(a, "--evidence") && i + 1 < argc) evidence = argv[++i];
         else if (!strcmp(a, "--cov") && i + 1 < argc) cov = argv[++i];
@@ -1196,6 +1198,10 @@ static int cmd_nes(int argc, char **argv) {
         if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", romdata); }
         else { dp_nes_romdata(f, &res); fclose(f); }
     }
+    if (rtcode_path) {
+        FILE *f = fopen(rtcode_path, "w");
+        if (f) { dp_nes_rtcode(f, &res); fclose(f); }
+    }
     dp_nes_results_free(&res);
     free(data);
     return 0;
@@ -1213,10 +1219,12 @@ static int cmd_pce(int argc, char **argv) {
     const char *path = NULL, *text = NULL, *map = NULL, *png = NULL, *pce_ev = NULL;
     DpPceOptions opt = dp_pce_options();
     int pce_jobs = 1, pce_watch = 0;
+    const char *rtcode_path = NULL;
     const char *pce_dump = NULL;
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
-        if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
+        if (!strcmp(a, "--rtcode") && i + 1 < argc) rtcode_path = argv[++i];
+        else if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
         else if (!strcmp(a, "--evidence") && i + 1 < argc) pce_ev = argv[++i];
         else if (!strcmp(a, "--ctx-cap") && i + 1 < argc) opt.ctx_cap = (unsigned)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--entry") && i + 1 < argc) {
@@ -1303,6 +1311,10 @@ static int cmd_pce(int argc, char **argv) {
         FILE *f = fopen(pce_ev, "w");
         if (!f) fprintf(stderr, "deepeel: cannot write %s\n", pce_ev);
         else { dp_pce_evidence(f, res); fclose(f); }
+    }
+    if (rtcode_path) {
+        FILE *f = fopen(rtcode_path, "w");
+        if (f) { dp_pce_rtcode(f, res); fclose(f); }
     }
     dp_pce_results_free(res);
     free(res);
@@ -1438,6 +1450,7 @@ static void md_regs_print(void) {
 }
 
 static int cmd_md(int argc, char **argv) {
+    const char *md_rtcode = NULL;
     if (argc < 4) return usage(), 2;
     char err[256];
     DpMdCart c;
@@ -1503,6 +1516,7 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--tas")) movie_path = argv[++i];
             else if (!strcmp(a, "--tas-any-rom")) md_any_rom = 1;
             else if (!strcmp(a, "--text")) text = argv[++i];
+            else if (!strcmp(a, "--rtcode")) md_rtcode = argv[++i];
             else if (!strcmp(a, "--map")) map = argv[++i];
             else if (!strcmp(a, "--evidence")) ev = argv[++i];
             else if (!strcmp(a, "--summary")) md_summary = argv[++i];
@@ -1538,6 +1552,7 @@ static int cmd_md(int argc, char **argv) {
                     dp_md_explore_report(&c, &o, &r, f);
                     if (text) fclose(f);
                 }
+                if (md_rtcode) dp_md_explore_rtcode(&r, md_rtcode);
                 if (map) dp_md_explore_map(&r, map);
                 if (ev) dp_md_explore_evidence(&r, ev);
                 if (md_summary) dp_md_explore_summary(&r, md_summary);
