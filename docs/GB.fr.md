@@ -3418,3 +3418,12 @@ au cœur.
 `0xF1F8` pour le mode indexé, `0xF1FF` pour `pc`. Fixture `fix_md_s4p2` (`lea $210,a2 ; movea.l 0(a2,d0.w),a1 ;
 jmp (a1)`), test `md_s4_ptr_a2` : il échoue avant le correctif et passe après. 153 tests dont 152 passent (un ignoré). Reste S3
 MD : suivi de valeur 68k sur plusieurs registres (D0–D7), non commencé.
+
+## 0.249.3 (MD, S3 : témoin An à travers un registre de données)
+
+Le moteur MD retient désormais, comme pour An (`an_writer`), le pc de la dernière instruction qui a modifié chaque Dn
+(`dn_writer`, copié avec les points de reprise et les lots disque). `s4_ptr_table` suit `movea.l Dm,An` jusqu'à
+`move.l d8(Am|pc,Xn),Dm` et traite ce chargement comme le `movea.l` direct : la table de pointeurs longs est lue depuis la
+base, acceptée si la cible observée en est une entrée, ses autres cibles ROM valides sont ensemencées. Fixture
+`fix_md_s4p3` (`move.l 0(a2,d0.w),d1 ; movea.l d1,a1 ; jmp (a1)`), test `md_s4_ptr_dn`. Reste : chaînes plus longues
+(plusieurs copies/ALU entre le chargement et l'usage), `jmp (An)` dont An est calculé par `adda`.

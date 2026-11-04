@@ -25,7 +25,7 @@ typedef struct {
     int forced;
     int in_handler;         // forked inside an exception handler (not persisted in disk lots)
     uint32_t origin;
-    uint32_t an_writer[8];
+    uint32_t an_writer[8], dn_writer[8];
     uint32_t watch_pc, watch_addr, watch_value;
     uint32_t watch_d0, watch_a1, watch_a2;
     unsigned watch_size;
@@ -56,6 +56,7 @@ typedef struct {
     uint32_t trace[8];
     unsigned trace_pos, trace_len;
     uint32_t an_before[8], an_writer[8];
+    uint32_t dn_before[8], dn_writer[8];     // pc of the last instruction that changed Dn (UINT32_MAX: none)
     uint32_t dbcc_dn_before;
     uint16_t sr_before;
     uint32_t watch_pc, watch_addr, watch_value;
@@ -232,6 +233,7 @@ static int push(X *x, uint32_t pc, int vint, int hint) {
                     Item *li = &x->spill_item; memset(li, 0, sizeof *li);
                     li->state = ls; li->forced = 1; li->origin = x->pc;
                     memcpy(li->an_writer, x->an_writer, sizeof li->an_writer);
+                    memcpy(li->dn_writer, x->dn_writer, sizeof li->dn_writer);
                     li->watch_pc = x->watch_pc; li->watch_addr = x->watch_addr;
                     li->watch_value = x->watch_value; li->watch_size = x->watch_size;
                     li->watch_d0 = x->watch_d0; li->watch_a1 = x->watch_a1; li->watch_a2 = x->watch_a2;
@@ -266,6 +268,7 @@ static int push(X *x, uint32_t pc, int vint, int hint) {
     item->choice = x->o->tree_path ? dp_tree_add(&x->tree, x->cur_choice, 4, x->push_site, 0, (int)(pc & 0xFFFF)) : 0;
     x->push_site = 0;
     memcpy(item->an_writer, x->an_writer, sizeof item->an_writer);
+    memcpy(item->dn_writer, x->dn_writer, sizeof item->dn_writer);
     item->watch_pc = x->watch_pc; item->watch_addr = x->watch_addr;
     item->watch_value = x->watch_value; item->watch_size = x->watch_size;
     item->watch_d0 = x->watch_d0; item->watch_a1 = x->watch_a1; item->watch_a2 = x->watch_a2;
@@ -338,6 +341,7 @@ static void on_step(void *u, uint32_t pc, uint16_t op) {
     x->move_src_valid = 0;
     x->pc = pc & 0xFFFFFFu;
     for (unsigned i = 0; i < 8; i++) x->an_before[i] = dp_mdmach_an(x->m, i);
+    for (unsigned i = 0; i < 8; i++) x->dn_before[i] = dp_mdmach_dn(x->m, i);
     while (x->nframes && x->an_before[7] > x->frames[x->nframes - 1].sp) x->nframes--;
     x->trace[x->trace_pos++ % 8] = x->pc;
     if (x->trace_len < 8) x->trace_len++;
@@ -485,6 +489,8 @@ static void on_end(void *u, uint32_t pc, uint32_t next, unsigned len) {
     if (x->halted) return;
     for (unsigned i = 0; i < 8; i++)
         if (dp_mdmach_an(x->m, i) != x->an_before[i]) x->an_writer[i] = pc & 0xFFFFFFu;
+    for (unsigned i = 0; i < 8; i++)
+        if (dp_mdmach_dn(x->m, i) != x->dn_before[i]) x->dn_writer[i] = pc & 0xFFFFFFu;
     pc &= 0xFFFFFFu;
     taint_step(x, pc, len);
     if (pc >= r->rom_size || !dp_mdmach_rom_visible(x->m, pc)) {
@@ -955,6 +961,14 @@ static void s4_ptr_table(X *x, uint32_t pc, unsigned an, uint32_t obs) {
     uint32_t w = x->an_writer[an];
     if (w == UINT32_MAX || (size_t)w + 4 > n || (w & 1)) return;
     unsigned op = (unsigned)rom[w] << 8 | rom[w + 1];
+    if ((op & 0xF1F8) == 0x2040 && ((op >> 9) & 7) == an) {            // movea.l Dm,An: follow Dm to its loader
+        w = x->dn_writer[op & 7];
+        if (w == UINT32_MAX || (size_t)w + 4 > n || (w & 1)) return;
+        unsigned lop = (unsigned)rom[w] << 8 | rom[w + 1];             // move.l d8(Am|pc,Xn),Dm
+        if (((lop >> 9) & 7) != (op & 7)) return;
+        if ((lop & 0xF1F8) != 0x2030 && (lop & 0xF1FF) != 0x203B) return;
+        op = 0x2040u | (an << 9) | (lop & 0x3Fu);                      // same EA, destination An: the movea form below
+    }
     if ((op & 0xF1F8) != 0x2070 && (op & 0xF1FF) != 0x207B) return;      // movea.l d8(Am|pc,Xn),An (any Am)
     if (((op >> 9) & 7) != an) return;
     if (rom[w + 2] & 0x07) return;                                       // brief extension only
@@ -1097,6 +1111,7 @@ static void run_path(X *x, Item *it, uint64_t budget, int *cut) {
     x->cur_choice = it ? it->choice : 0;
     x->origin = it ? it->origin : UINT32_MAX;
     for (unsigned i = 0; i < 8; i++) x->an_writer[i] = it ? it->an_writer[i] : UINT32_MAX;
+    for (unsigned i = 0; i < 8; i++) x->dn_writer[i] = it ? it->dn_writer[i] : UINT32_MAX;
     x->watch_pc = it ? it->watch_pc : UINT32_MAX;
     x->watch_addr = it ? it->watch_addr : 0;
     x->watch_value = it ? it->watch_value : 0;
@@ -1320,6 +1335,7 @@ static void novelty_search(X *x) {
         x->cur_choice = 0;
         x->origin = UINT32_MAX;
         for (unsigned i = 0; i < 8; i++) x->an_writer[i] = UINT32_MAX;
+        for (unsigned i = 0; i < 8; i++) x->dn_writer[i] = UINT32_MAX;
         x->watch_pc = UINT32_MAX;
         x->trace_pos = x->trace_len = 0;
         next_generation(x);
