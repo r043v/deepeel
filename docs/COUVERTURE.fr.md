@@ -599,7 +599,7 @@ CGB sont mensongères.
 | BIOS | simulé par traps | BIOS réel optionnel (libretro ou ROM fournie hors dépôt) |
 | Matrice clavier (PPI port B) | ? | **Sonde** catalogue (touches utilisées par les jeux : espace, F1-F5, curseurs) |
 | SCC (ondes) | listé comme mapper | **Type** samples (RAM d'onde SCC) |
-| V9938 (MSX2), FM-PAC, disque, cassette | absents | limites ou libretro |
+| V9938 (MSX2), FM-PAC, disque, cassette | absents ; limites déclarées dans le rapport (0.157) | limites ou libretro |
 
 ### 3.4 NES
 
@@ -619,7 +619,7 @@ CGB sont mensongères.
 |---|---|---|
 | HuC6280, VDC, PSG, MPR, timer, IRQ VDC, pad `$1000` | ✅ | — |
 | VCE (palette) | copies ROM→VCE typées palette (0.56) ; classe PNG à venir | **Type** palette |
-| ADPCM, CD-ROM², System Card | absents | limites ou libretro |
+| ADPCM, CD-ROM², System Card | absents ; limites déclarées dans le rapport (0.157) | limites ou libretro |
 | Mapper SF2 (> 384 Ko), SuperGrafx (VPC, 2ᵉ VDC) | absents (modulo des pages) | **Banque** |
 | Multitap | absent | **Sonde** |
 | Instance unique (pas de préfixage) | 2 instances `dp_pce2_` (0.56), partage par phase | file de fourches partagée (F3) |

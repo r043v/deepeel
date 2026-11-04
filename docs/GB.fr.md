@@ -2278,3 +2278,10 @@ n'est pas dans le snapshot et l'exploration n'ouvre pas encore de fourches par p
 Le rapport Sega ajoute « audio (music data…) » avec le nombre d'écritures PSG (`$7E/$7F`) et YM2413
 (`$F0/$F1`) observées. La puce FM n'est pas émulée : c'est une observation d'accès, pas de la musique
 décodée. Test `sega_streams`.
+
+## 0.157.0 (J9 — limites déclarées)
+
+Le rapport PCE se termine par une ligne « Limits » (pas de CD-ROM²/ADPCM/System Card, pas de SF2, pas de
+SuperGrafx, multitap en modèle optionnel) ; le rapport MSX ajoute FM-PAC, son SCC et V9938/MSX2. Ces
+surfaces restent non émulées : la ligne « exigé » de la matrice (« limites ou libretro ») est remplie par
+les limites, pas par une émulation.

@@ -1720,6 +1720,9 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
     }
     fprintf(out, "  register writes %u logged (overflow %llu)\n", r->register_count,
             (unsigned long long)r->register_overflow);
+    fputs("Limits: HuCard only. No CD-ROM2/Super CD (System Card, ADPCM, CD audio), no SF2 mapper beyond the "
+          "modelled pages, no SuperGrafx (VPC, second VDC); the multitap is an opt-in model. Observations of "
+          "the tool on a concrete machine, not hardware measurements.\n", out);
 }
 
 void dp_pce_evidence(FILE *out, const DpPceResults *r) {
