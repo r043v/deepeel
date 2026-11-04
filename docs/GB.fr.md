@@ -3313,3 +3313,12 @@ tourne sur 4 fronts). Chaque site de lecture reçoit 14 sondes (12 trois boutons
 repos, + tout enfoncé). Tests : fixture `fix_md_pad6` (octet de données lu selon l'identification,
 aucun branchement ne dépend de la manette), `md_explore`, contrôle négatif fait ; `md_ctx_cap`
 passe à 15 chemins. L'état de la machine grossit de 2 octets : états disque antérieurs non relisibles.
+
+## MD : tables de pointeurs derrière `jmp (An)` (S4) (0.241.0)
+
+Un `jmp (An)` / `jsr (An)` observé remonte à l'instruction qui a écrit An en dernier
+(`an_writer`). Si c'est `movea.l d8(Am,Xn),An` ou `movea.l d8(pc,Xn),An`, la base de la table de
+longs est connue (Am vivant, ou pc + 2) ; la table (≤ 128 entrées, adresses paires dans la ROM) est
+acceptée quand la cible observée en est une entrée, et ses autres cibles sont semées. Test
+`md_s4_ptr` (fixture `fix_md_s4p`, contrôle négatif fait). Restent hors portée : An chargé autrement
+(arithmétique, pile, RAM).

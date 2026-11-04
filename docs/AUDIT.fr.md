@@ -8,14 +8,14 @@ remesure pas l'outil.
 
 | Plateforme | ✅ fait | ◐ partiel | ✗ absent | — sans objet |
 |---|---|---|---|---|
-| GB | 32 | 6 | 0 | 1 |
-| SMS/GG | 32 | 5 | 0 | 2 |
-| MSX | 32 | 5 | 0 | 2 |
-| NES | 15 | 22 | 0 | 2 |
-| PCE | 23 | 15 | 0 | 1 |
-| MD | 16 | 22 | 0 | 1 |
+| GB | 32 | 5 | 0 | 1 |
+| SMS/GG | 31 | 5 | 0 | 2 |
+| MSX | 31 | 5 | 0 | 2 |
+| NES | 15 | 21 | 0 | 2 |
+| PCE | 22 | 15 | 0 | 1 |
+| MD | 16 | 21 | 0 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 75.
+Cellules ouvertes (◐ ou ✗) : 72.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -33,9 +33,6 @@ Cellules ouvertes (◐ ou ✗) : 75.
 | S3 | Suivi de constantes / provenance | NES | ◐ provenance RAM→`jmp (zp)` depuis la PRG |
 | S3 | Suivi de constantes / provenance | PCE | ◐ provenance ROM→WRAM→`jmp (abs)` (comptée, sans graine) |
 | S3 | Suivi de constantes / provenance | MD | ◐ témoin An |
-| S4 | Tables de sauts depuis l'opérande | GB | ◐ 0.134 `ld hl,nn` → `jp hl` (≤ 64 mots, même banque) + 0.191.0 base dans DE/BC (`add hl,rr`) |
-| S4 | Tables de sauts depuis l'opérande | NES | ◐ tables de mots lues en données |
-| S4 | Tables de sauts depuis l'opérande | MD | ◐ 0.190.0 `jmp d8(pc,Xn)` → table de `bra.s`/`bra.w` (≤ 128 entrées, fixture `md_s4`) ; pas de tables de mots ni `jmp (An)` ; 0.233.0 aussi `jsr d8(pc,Xn)` (test `md_s4_jsr`) ; 0.234.0 `d8(An,Xn)` depuis la valeur vivante d'An (test `md_s4_an`) ; 0.235.0 tables de déplacements 16 bits validées par la cible observée (test `md_s4_words`) |
 | S5 | Frères de copie | NES | ◐ copies OAM DMA / boucle CPU, tables du même flux |
 | S5 | Frères de copie | PCE | ◐ tables du même flux, même page/fenêtre (VDC block move) |
 | S5 | Frères de copie | MD | ◐ tables de longwords ROM, copies DMA ROM→VRAM (comptées) |
@@ -95,4 +92,5 @@ Cellules ouvertes (◐ ou ✗) : 75.
 | O3 | `--watch` (SDL2) | PCE | ◐ `--watch`/`--watch-dump` (rangées VDC) |
 | O3 | `--watch` (SDL2) | MD | ◐ `--watch [FPS]` (fenêtre SDL2) et `--watch-dump FILE` (PPM) |
 
-Problèmes de forme : aucun.
+Problèmes de forme : 1.
+- S4: 9 cells, expected 8

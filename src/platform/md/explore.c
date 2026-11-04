@@ -123,6 +123,7 @@ static void next_generation(X *x) {
  * path_steps and max_total still bound paths that run forever. */
 static void novelty_frame(X *x);
 static void s4_table(X *x, uint32_t pc, uint32_t obs);
+static void s4_ptr_table(X *x, uint32_t pc, unsigned an, uint32_t obs);
 static uint8_t play_pad(X *x);
 static uint32_t md_rng(uint32_t *s);
 static void on_frame(void *u) {
@@ -930,6 +931,41 @@ static int md_target_ok(const X *x, uint32_t t) {
     return 1;
 }
 
+// S4 for a bare `jmp (An)` / `jsr (An)`: An was loaded by the instruction at an_writer[n]; when that is
+// `movea.l d8(Am,Xn),An` or `movea.l d8(pc,Xn),An` (a table of longword pointers), the table base is
+// known (Am read live, or pc + 2).  The table is accepted when the observed target is one of its
+// entries; its other valid ROM targets are seeded.
+static void s4_ptr_table(X *x, uint32_t pc, unsigned an, uint32_t obs) {
+    DpMdResults *r = x->r;
+    const uint8_t *rom = x->c->rom;
+    size_t n = r->rom_size;
+    uint32_t w = x->an_writer[an];
+    if (w == UINT32_MAX || (size_t)w + 4 > n || (w & 1)) return;
+    unsigned op = (unsigned)rom[w] << 8 | rom[w + 1];
+    if ((op & 0xF1FF) != 0x2070 && (op & 0xF1FF) != 0x207B) return;      // movea.l d8(Am|pc,Xn),An
+    if (((op >> 9) & 7) != an) return;
+    if (rom[w + 2] & 0x07) return;                                       // brief extension only
+    if (dp_set_insert(&x->ind_sites, ((uint64_t)pc + 1) | (2ull << 40)) == 0) return;
+    uint32_t base = (op & 0x3F) == 0x3B ? w + 2 : dp_mdmach_an(x->m, op & 7) & 0xFFFFFFu;
+    base += (uint32_t)(int32_t)(int8_t)rom[w + 3];
+    uint32_t tg[128];
+    unsigned nt = 0;
+    int hit = 0;
+    for (uint32_t e = base; nt < 128 && (size_t)e + 4 <= n && !(e & 1); e += 4) {
+        uint32_t t = (uint32_t)rom[e] << 24 | (uint32_t)rom[e + 1] << 16 | (uint32_t)rom[e + 2] << 8 | rom[e + 3];
+        if ((t & 1) || t < 0x200 || t >= n) break;
+        if (t == obs) hit = 1;
+        tg[nt++] = t;
+    }
+    if (nt < 2 || !hit) return;
+    r->s4_tables++;
+    for (unsigned k = 0; k < nt; k++) {
+        uint32_t t = tg[k];
+        if (r->flags[t] & (DP_MDF_NATURAL | DP_MDF_FORCED)) continue;
+        if (push(x, t, 0, 0)) r->s4_seeds++; else r->s4_refused++;
+    }
+}
+
 // S4 for the 68000: an observed `jmp d8(pc,Xn)` (4EFB + brief extension) names the table base
 // statically (pc + 2 + d8); each entry is a `bra.s`/`bra.w` to a handler.  Every handler no run
 // has reached is seeded from the current machine state, like the other side of a conditional.
@@ -942,6 +978,7 @@ static void s4_table(X *x, uint32_t pc, uint32_t obs) {
     unsigned o2 = rom[pc + 1];
     int pcrel = o2 == 0xFB || o2 == 0xBB;                 // jmp / jsr d8(pc,Xn)
     int anrel = (o2 & 0xF8) == 0xF0 || (o2 & 0xF8) == 0xB0;   // jmp / jsr d8(An,Xn): An read live
+    if ((o2 & 0xF8) == 0xD0 || (o2 & 0xF8) == 0x90) { s4_ptr_table(x, pc, o2 & 7, obs); return; }   // jmp / jsr (An)
     if (!pcrel && !anrel) return;
     if (rom[pc + 2] & 0x07) return;                       // brief extension word only (no full-format bits)
     if (dp_set_insert(&x->ind_sites, ((uint64_t)pc + 1) | (1ull << 40)) == 0) return;
