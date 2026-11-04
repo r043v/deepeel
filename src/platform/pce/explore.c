@@ -989,11 +989,9 @@ typedef struct {
 static int archive_add(PceRun *x, PceCell *a, uint32_t *n, uint64_t gain) {
     DpPceResults *r = x->r;
     dp_pce_save(x->tmp2);
-    uLongf zl = x->zcap;
-    if (compress2(x->ztmp, &zl, x->tmp2, x->state_size, 1) != Z_OK) return -1;
-    uint8_t *z = malloc(zl);
+    uLongf zl;
+    uint8_t *z = dp_zdup(x->ztmp, x->zcap, x->tmp2, x->state_size, &zl);
     if (!z) return -1;
-    memcpy(z, x->ztmp, zl);
     uint32_t slot = *n;
     if (*n >= x->opt.novelty_archive) {
         // replace the least productive entry (gain per pick)

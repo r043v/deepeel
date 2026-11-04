@@ -1185,11 +1185,9 @@ static uint32_t md_rng(uint32_t *s) { uint32_t v = *s; v ^= v << 13; v ^= v >> 1
 static int md_archive_add(X *x, MdNov *N, uint64_t gain) {
     DpMdResults *r = x->r;
     dp_mdmach_save(x->m, N->tmp);
-    uLongf zl = N->zcap;
-    if (compress2(N->ztmp, &zl, N->tmp, (uLong)ssz, 1) != Z_OK) return -1;
-    uint8_t *z = malloc(zl);
+    uLongf zl;
+    uint8_t *z = dp_zdup(N->ztmp, N->zcap, N->tmp, (uLong)ssz, &zl);
     if (!z) return -1;
-    memcpy(z, N->ztmp, zl);
     uint32_t slot = N->n;
     if (N->n >= x->o->novelty_archive) {
         slot = dp_cell_victim(N->a, sizeof *N->a, offsetof(MdCell, gain), offsetof(MdCell, picks), N->n);

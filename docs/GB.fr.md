@@ -3389,4 +3389,10 @@ autres registres 8 bits et la RAM (le z80 les suit déjà).
 
 `dp_cell_yield`, `dp_cell_score` et `dp_cell_victim` (`src/explore/novelty.h`) remplacent les trois copies du calcul de
 rendement, du score de tirage avec vies et du choix de la cellule à remplacer dans NES, PCE et MD. Sans changement de
-comportement observé : 151 tests passent. Reste dupliqué : la compression/copie de l'état (`*_archive_add`).
+comportement observé : 151 tests passent. 0.248.2 : `dp_zdup` factorise aussi la compression et la copie de l'état.
+
+## 0.248.2 — J4 : compression d'état des archives partagée
+
+`dp_zdup` (`src/explore/novelty.h`) remplace la compression zlib niveau 1 suivie d'une copie exacte, écrite trois fois
+dans `nes_archive_add`, `archive_add` (PCE) et `md_archive_add`. Sans changement de comportement : 151 tests passent.
+Le cœur Sega garde sa propre archive (format différent).

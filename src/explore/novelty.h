@@ -103,4 +103,14 @@ static inline uint32_t dp_cell_victim(const void *cells, size_t stride, size_t g
     }
     return slot;
 }
+// compress `n` bytes of state (level 1) through the caller's scratch `ztmp` (capacity zcap) and
+// return an exact-size malloc'ed copy; NULL on failure.  Shared by every core's cell archive.
+#include <zlib.h>
+static inline uint8_t *dp_zdup(Bytef *ztmp, uLongf zcap, const uint8_t *src, uLong n, uLongf *zl) {
+    *zl = zcap;
+    if (compress2(ztmp, zl, src, n, 1) != Z_OK) return NULL;
+    uint8_t *z = malloc(*zl ? *zl : 1);
+    if (z) memcpy(z, ztmp, *zl);
+    return z;
+}
 #endif

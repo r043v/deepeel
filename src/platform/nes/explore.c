@@ -1056,11 +1056,9 @@ static int nes_nov_frame(DpNesRun *x, uint8_t in) {
 static int nes_archive_add(DpNesRun *x, NesCell *a, uint32_t *n, uint64_t gain, uint8_t *tmp, Bytef *ztmp, uLongf zcap) {
     DpNesResults *r = x->r;
     dp_nesmach_save(x->m, tmp);
-    uLongf zl = zcap;
-    if (compress2(ztmp, &zl, tmp, (uLong)dp_nesmach_state_size(), 1) != Z_OK) return -1;
-    uint8_t *z = malloc(zl);
+    uLongf zl;
+    uint8_t *z = dp_zdup(ztmp, zcap, tmp, (uLong)dp_nesmach_state_size(), &zl);
     if (!z) return -1;
-    memcpy(z, ztmp, zl);
     uint32_t slot = *n;
     if (*n >= x->opt.novelty_archive) {
         slot = dp_cell_victim(a, sizeof *a, offsetof(NesCell, gain), offsetof(NesCell, picks), *n);
