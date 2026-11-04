@@ -2393,3 +2393,17 @@ de branchement, 2 fourches et atteint les 6 débuts d'opcode attendus (les deux 
 Test `lr_gpgx_trace` (variable `DP_GPGX_TRACE_CORE`, ignoré sans cœur). Limites : pas d'observateurs
 `dma`/`bank` ; pendant un pas, le VDP, les IRQ et le Z80 n'avancent pas (seul `retro_run` les fait avancer) ;
 parité avec le backend m0boy vérifiée sur une fixture seulement, pas sur les 11 de GB.
+
+## Campagne J13, Zelda (Link's Awakening FR), binaire 0.169.0 — observations de l'outil
+
+Run `--unbounded --jobs auto --time-limit 3600` (6 explorateurs, arrêt propre à la limite, rapport écrit) :
+311 580 269 pas, 31 323 chemins, 753 558 fourches (303 208 « key »), 7 302 sections ; résidu inconnu
+58 050 octets en 2 202 plages. Spool : 64 887 467 états écrits, **26 705 relus**, 21,8 Gio en attente — le
+moteur crée des fourches bien plus vite qu'il n'en consomme, ce qui explique la taille du fichier.
+Exécution hors ROM : 257 633 pas, dont 3 468 rattachés à une source de copie ROM (≈ 1,3 %) ; archive de code
+RAM : 16 273 instructions distinctes exécutées depuis la RAM, 1 rattachée à une copie ROM, 16 272 « générées »
+(9 avec producteur ROM approximatif), 8 auto-modifiées ; 25 096 écritures SMC.
+**À ne pas comparer tel quel** au run antérieur de `output/batch/zelda` (19,15 milliards de pas, résidu
+43 171 octets, 484 M pas hors ROM) : budgets et configuration différents, 60× moins de pas ici. Le résidu plus
+grand ici vient donc d'abord du budget ; la part de « générées » inclut probablement du code exécuté dans la
+WRAM après des fourches « key » (états de jeu non naturels), ce que ce rapport ne distingue pas.
