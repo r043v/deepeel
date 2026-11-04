@@ -3046,3 +3046,11 @@ plein) et chaque session suivante repart d'un checkpoint tiré au hasard ; le ca
 décalé d'une position par session. Rapport : « checkpoint pool: K kept, S sessions started from
 one ». Test : `sms_play_pool`. Reste : GB, multi-thread. Observation de l'outil, pas une mesure
 matérielle.
+
+## 0.211.0 : S6 NES, MMC1 (2026-11-04)
+
+Le rejeu inter-banques NES (0.205.0, UxROM) couvre aussi MMC1 (mapper 1, fenêtre de 16 Kio à $8000,
+mode de contrôle 3) : `dp_nesmach_enter` pose le registre PRG comme le port série le ferait
+(bank ≤ 15) puis réapplique le mapping ; la taille de banque vient de la taille PRG. Fixture :
+`test_nes` (`test_streams_mmc1`, banque posée par cinq écritures série, flux de la banque 0 jamais
+appelé). MMC3 et autres mappers restent à faire. Observation de l'outil, pas une mesure matérielle.

@@ -441,6 +441,10 @@ int dp_nesmach_enter(DpNesMach *d, unsigned bank, unsigned addr) {
         if (bank >= machine.cpu.bank_count) return 0;
         machine.cpu.bank = (uint8_t)bank;
         machine.cpu.bank_base = (uint32_t)bank * 16384u;
+    } else if (d->mapper == 1) {   /* MMC1: 16 KiB switchable $8000 slot (control mode 3), set as the serial port would */
+        if (bank >= (unsigned)(machine.prg_size >> 14) || bank > 15) return 0;
+        d->rg.v[0] |= 0x0C; d->rg.v[3] = (uint8_t)bank;
+        mapper_apply(d);
     } else if (d->mapper != 0 || bank != 0) return 0;
     machine.cpu.pc = (uint16_t)addr;
     return 1;

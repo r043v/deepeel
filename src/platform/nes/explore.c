@@ -211,7 +211,7 @@ static void nstm_read(DpNesRun *x, unsigned a) {
             unsigned j;
             for (j = 0; j < d->nstarts && d->starts[j] != a; j++) {}
             if (j == d->nstarts && j < NS_START && a >= 0x8000) d->starts[d->nstarts++] = (uint16_t)a;
-            if (a >= 0x8000 && a < 0xC000 && dp_nesmach_mapper(x->m) == 2) {   // UxROM: the bank rides with the address
+            if (a >= 0x8000 && a < 0xC000 && (dp_nesmach_mapper(x->m) == 2 || dp_nesmach_mapper(x->m) == 1)) {   // UxROM: the bank rides with the address
                 int64_t ri = dp_nesmach_rom_index(x->m, a);
                 if (ri >= 0) {
                     unsigned sb = (unsigned)(ri >> 14), q;
@@ -231,10 +231,10 @@ static int nstm_ptr(const DpNesRun *x, size_t at, size_t lo, size_t hi, unsigned
 // UxROM banked streams: (bank, ptr lo, ptr hi) entries at stride 3; each is replayed with its
 // bank selected in the snapshot and the zero-page word set to the pointer.
 static int nstm_cross(DpNesRun *x, NDec *d) {
-    if (d->nx < 2 || d->nx <= d->xreplayed || dp_nesmach_mapper(x->m) != 2) return 0;
+    if (d->nx < 2 || d->nx <= d->xreplayed || (dp_nesmach_mapper(x->m) != 2 && dp_nesmach_mapper(x->m) != 1)) return 0;
     d->xreplayed = d->nx;
     DpNesResults *r = x->r; int pushed = 0;
-    const unsigned nb = dp_nesmach_bank_count(x->m);
+    const unsigned nb = (unsigned)(dp_nesmach_prg_size(x->m) >> 14);
     uint8_t *tried = calloc(x->image_size ? x->image_size : 1, 1);
     if (!tried) return 0;
     for (unsigned j = 0; j < d->nx; j++) {
