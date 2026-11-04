@@ -3416,5 +3416,5 @@ au cœur.
 `s4_ptr_table` (`jmp (An)` / `jsr (An)` dont An vient de `movea.l d8(Am,Xn),An`) comparait l'opcode avec le masque
 `0xF1FF` : le champ du registre de base Am était inclus, donc seul A0 (et `d8(pc,Xn)`) était reconnu. Le masque devient
 `0xF1F8` pour le mode indexé, `0xF1FF` pour `pc`. Fixture `fix_md_s4p2` (`lea $210,a2 ; movea.l 0(a2,d0.w),a1 ;
-jmp (a1)`), test `md_s4_ptr_a2` : il échoue avant le correctif et passe après. 153 tests passent (un ignoré). Reste S3
+jmp (a1)`), test `md_s4_ptr_a2` : il échoue avant le correctif et passe après. 153 tests dont 152 passent (un ignoré). Reste S3
 MD : suivi de valeur 68k sur plusieurs registres (D0–D7), non commencé.
