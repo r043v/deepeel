@@ -201,5 +201,5 @@ DBcc, boucle bornée, V-int, DMA), fixtures générées au build.
 ## 0.187.6 — `md explore --time-limit SEC`
 
 Arrêt gracieux au mur d'horloge (alarme → drapeau vérifié par la boucle principale ; le rapport est écrit, comme
-pour un mur de pas). Vérifié sur Sonic : `--time-limit 30` s'arrête à 30,6 s réelles, 62,5 M pas. Limite connue : seul
-le chemin séquentiel teste le drapeau ; `--jobs N` ne l'honore pas encore. `--unbounded` reste absent de MD.
+pour un mur de pas). Vérifié sur Sonic : `--time-limit 30` s'arrête à 30,6 s réelles, 62,5 M pas. Vérifié aussi avec `--jobs 2` (21 s réelles pour 20 demandées, 42,5 M pas ; temps utilisateur ≈ temps réel, donc ce
+chemin ne paraît pas faire travailler deux cœurs sur Sonic — non analysé). `--unbounded` reste absent de MD.
