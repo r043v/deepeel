@@ -161,6 +161,7 @@ static void spill_flush(X *x) {
 
 static int push(X *x, uint32_t pc, int vint, int hint) {
     int full = 0;
+    if (dp_md_stop) return 0;   // stop requested: no new work
     spill_flush(x);
     if (x->o->ctx_cap) {
         // coarse same-context eviction: pc, D0-D7, A0-A7, SR and the interrupt kind; RAM
@@ -915,6 +916,19 @@ static unsigned dispatch_seed(X *x) {
     return seeded;
 }
 
+// dp_mdmach_run in slices so the --time-limit / SIGINT stop is seen inside unbounded runs
+static uint64_t run_sliced(DpMdMach *m, uint64_t budget, int *cut, int *fault) {
+    uint64_t n = 0;
+    for (;;) {
+        uint64_t left = budget - n, slice = left < (1u << 24) ? left : (1u << 24);
+        *cut = 0;
+        uint64_t k = dp_mdmach_run(m, slice, cut, fault);
+        n += k;
+        if (!*cut || k < slice || n >= budget || dp_md_stop || *fault) break;
+    }
+    return n;
+}
+
 static void run_path(X *x, Item *it, uint64_t budget, int *cut) {
     DpMdResults *r = x->r;
     int fault = 0;
@@ -935,7 +949,7 @@ static void run_path(X *x, Item *it, uint64_t budget, int *cut) {
     if (it) dp_mdmach_load(x->m, it->state);
     r->paths++;
     uint64_t pb = (x->movie_active || !x->forced) ? budget / 2 : (x->o->path_steps < budget ? x->o->path_steps : budget);
-    uint64_t n = dp_mdmach_run(x->m, pb, cut, &fault);
+    uint64_t n = run_sliced(x->m, pb, cut, &fault);
     r->steps += n;
     if (*cut) {
         if (n >= budget) r->sat_total++;
@@ -1192,7 +1206,7 @@ static void novelty_search(X *x) {
         r->paths++;
         uint64_t left = stop - r->steps < o->max_total - r->steps ? stop - r->steps : o->max_total - r->steps;
         uint64_t fr0 = r->novelty_frames_run;
-        r->steps += dp_mdmach_run(x->m, left, &cut, &fault);
+        r->steps += run_sliced(x->m, left, &cut, &fault);
         if (fault) r->faults++;
         idle = r->novelty_frames_run == fr0 ? idle + 1 : 0;
     }
@@ -1244,7 +1258,7 @@ static void replay_one(X *x, unsigned d, uint32_t start, uint64_t *left) {
     x->previous_move_valid = x->register_move_valid = 0;
     next_generation(x);
     int cut = 0, fault = 0;
-    uint64_t steps = dp_mdmach_run(x->m, cap, &cut, &fault);
+    uint64_t steps = run_sliced(x->m, cap, &cut, &fault);
     x->replay = 0;
     r->replay_runs++;
     r->replay_steps += steps;

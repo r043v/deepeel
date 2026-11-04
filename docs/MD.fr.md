@@ -202,4 +202,17 @@ DBcc, boucle bornée, V-int, DMA), fixtures générées au build.
 
 Arrêt gracieux au mur d'horloge (alarme → drapeau vérifié par la boucle principale ; le rapport est écrit, comme
 pour un mur de pas). Vérifié sur Sonic : `--time-limit 30` s'arrête à 30,6 s réelles, 62,5 M pas. Vérifié aussi avec `--jobs 2` (21 s réelles pour 20 demandées, 42,5 M pas ; temps utilisateur ≈ temps réel, donc ce
-chemin ne paraît pas faire travailler deux cœurs sur Sonic — non analysé). `--unbounded` reste absent de MD.
+chemin ne paraît pas faire travailler deux cœurs sur Sonic — non analysé). `--unbounded` est ajouté en 0.187.8 (ci-dessous).
+
+## 0.187.8 — `md explore --unbounded`
+
+Exception décidée par le propriétaire (cf. `AGENTS.md`) : lève les plafonds de pas total, de pas par chemin, de forks
+par site et de visites par instruction ; la file en RAM reste modeste (`--queue-max` ≥ 4096 par défaut) et l'excédent
+va dans un lot disque `<texte>.lot` (ou `--lot`), repris par un run ultérieur. Le seul arrêt est l'épuisement,
+`--time-limit` ou SIGINT. Le pruning « les deux côtés couverts » est conservé.
+
+Pour que l'arrêt soit honoré sans borne de pas : l'exécution est découpée en tranches de 2^24 pas (`run_sliced`) et
+`push` refuse tout nouveau travail une fois l'arrêt demandé. Vérifié sur Sonic : `--unbounded --time-limit 30` rend la
+main à 43 s réelles (rc 0, rapport écrit) ; 16,7 M pas, 65 024 forks écrits au lot. Observation de l'outil, pas une
+mesure de matériel. Attention : le lot grossit vite (≈ 3,4 Go en quelques minutes sur Sonic) — surveiller le disque.
+Non vérifié : un run `--unbounded` jusqu'à épuisement.

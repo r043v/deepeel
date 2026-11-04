@@ -1526,14 +1526,16 @@ static int cmd_md(int argc, char **argv) {
         DpMdOptions o;
         int md_jobs = 1, md_watch = 0, md_any_rom = 0;
         unsigned md_time_limit = 0;
+        int md_unbounded = 0;
         const char *md_dump = NULL;
         dp_md_options_default(&o);
         const char *text = NULL, *map = NULL, *ev = NULL, *movie_path = NULL, *md_summary = NULL, *md_heat = NULL;
         for (int i = 4; i < argc; i++) {
             const char *a = argv[i];
-            if (i + 1 >= argc && strcmp(a, "--lot-drain")) { fprintf(stderr, "deepeel: bad option %s\n", a); rc = 2; break; }
+            if (i + 1 >= argc && strcmp(a, "--lot-drain") && strcmp(a, "--unbounded")) { fprintf(stderr, "deepeel: bad option %s\n", a); rc = 2; break; }
             if (!strcmp(a, "--max-total")) o.max_total = strtoull(argv[++i], NULL, 0);
             else if (!strcmp(a, "--path-steps")) o.path_steps = strtoull(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--unbounded")) md_unbounded = 1;
             else if (!strcmp(a, "--time-limit")) md_time_limit = (unsigned)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--queue")) o.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--lot")) o.lot_path = argv[++i];
@@ -1595,6 +1597,16 @@ static int cmd_md(int argc, char **argv) {
         if (!rc) {
             DpMdResults r;
             if (md_watch && dp_fbwatch_start("deepeel md watch")) o.watch_every = o.watch_every ? o.watch_every : 0;
+            if (md_unbounded) { // owner-decided exception: coverage over time and resources; the RAM queue stays
+                // modest and the excess states go to the disk lot (resumable with --resume); stops on exhaustion,
+                // --time-limit or SIGINT
+                o.max_total = UINT64_MAX; o.path_steps = UINT64_MAX;
+                o.fork_cap = UINT32_MAX; o.visit_cap = UINT32_MAX;
+                if (!o.queue_max) o.queue_max = o.queue_cap < 4096 ? 4096 : o.queue_cap;
+                static char lotname[600];
+                if (!o.lot_path) { snprintf(lotname, sizeof lotname, "%s.lot", text ? text : "md-unbounded"); o.lot_path = lotname; }
+                fprintf(stderr, "deepeel: md --unbounded: caps lifted, excess states spooled to %s\n", o.lot_path);
+            }
             if (md_time_limit) { signal(SIGALRM, md_on_alarm); alarm(md_time_limit); }
             int mrc = dp_md_explore_jobs(&c, &o, &r, md_jobs);
             if (md_watch) dp_fbwatch_stop();
