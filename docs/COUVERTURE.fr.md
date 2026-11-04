@@ -111,7 +111,7 @@ Pour chaque technique, la fiche indique :
 | S7 | Inférence de voisins à la carte | ✅ | ✅ | ✅ | ◐ trous ≤ 1024 | ✅ | ◐ remplissage ≥ 8 (00/FF) ou ≥ 32, code ≤ 3 o, données ≤ 1024 o ; rendu seulement |
 | G1 | Graines reset/RST/IRQ | ✅ | ✅ | ✅ | ◐ reset + NMI/IRQ (`--seed-vectors`) | ◐ reset + IRQ2/IRQ1/TIMER/NMI (`--seed-vectors`, 0.216) | ◐ reset + autovecteurs et TRAP (`--seed-vectors`) |
 | G2 | Scan de dispatch par vues de banques | ✅ | ✅ | ✅ | ◐ UxROM, banque fixe (`--bank-dispatch`) | ◐ tables de mots par fenêtre, vues de pages (`--bank-dispatch`) | ◐ tables de mots longs de pointeurs de code (`--bank-dispatch`) |
-| G3 | `--seed-banks`, `--entry` | ✅ | ✅ | ✅ | ✅ `--entry`, `--seed-banks` UxROM | ✅ `--entry ADDR`, `--seed-banks` (pages de 8 Kio à $4000) | ◐ `--entry ADDR` (ROM, pair) ; pas de `--seed-banks` ni de vue de banque |
+| G3 | `--seed-banks`, `--entry` | ✅ | ✅ | ✅ | ✅ `--entry`, `--seed-banks` UxROM | ✅ `--entry ADDR`, `--seed-banks` (pages de 8 Kio à $4000) | ◐ `--entry ADDR` (ROM, pair) ; `--seed-banks` sans objet tant que le 68000 n'a pas de commutation ROM (SSF2 non modélisée) ; la fenêtre de banque du Z80 est suivie à part (`z80_banks_read`) |
 | G4 | Semis indirect + budgets en cascade | ✅ | ✅ | ✅ | ◐ second passage sur racines statiques (`--second-pass`) | ◐ second passage sur successeurs statiques non exécutés (`--second-pass`) | ◐ second passage sur successeurs statiques non exécutés (`--second-pass`) |
 | C1 | Sections, liveness, verdicts | ✅ | ✅ | ✅ | ◐ req/forced | ◐ req/forced | ◐ 0.135 req/forced par plage exécutée (sans liveness) |
 | C2 | Éviction par contexte | ✅ | ✅ | ✅ | ◐ contexte grossier opt-in (`--ctx-cap`) | ◐ contexte grossier opt-in (`--ctx-cap`) | ◐ contexte grossier opt-in (`--ctx-cap`) |
