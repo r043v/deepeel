@@ -80,10 +80,84 @@ static int lr_play(int argc, char **argv) {
     return same ? 0 : 3;
 }
 
+// Screen-cell key of the current frame: the framebuffer reduced to a 16x14 grid of 3-bit luma, hashed.
+static uint64_t lr_cell(DpLibretro *lr) {
+    int w, h, pitch, fmt;
+    const uint8_t *fb = dp_lr_framebuffer(lr, &w, &h, &pitch, &fmt);
+    uint64_t k = 1469598103934665603ull;
+    if (!fb || w < 16 || h < 14) return k;
+    for (int cy = 0; cy < 14; cy++)
+        for (int cx = 0; cx < 16; cx++) {
+            int x = cx * w / 16 + w / 32, y = cy * h / 14 + h / 28, g;
+            if (fmt == DP_LR_FMT_XRGB8888) { const uint8_t *q = fb + (size_t)y * pitch + x * 4; g = (q[0] + q[1] * 2 + q[2]) >> 2; }
+            else { uint16_t v = *(const uint16_t *)(fb + (size_t)y * pitch + x * 2);
+                   g = fmt == DP_LR_FMT_RGB565 ? ((v >> 5) & 63) << 2 : ((v >> 5) & 31) << 3; }
+            k = (k ^ (uint64_t)(g >> 5)) * 1099511628211ull;
+        }
+    return k;
+}
+
+typedef struct { void *st; uint64_t cell; } LrCellState;
+
+// deepeel lr novelty CORE ROM [--rounds N] [--seed N] [--hold N]: Go-Explore over screen cells on any
+// (level A) core: archive of states keyed by screen cell, random held inputs from a random archived state.
+static int lr_novelty(int argc, char **argv) {
+    const char *core = argv[3], *rom = argv[4];
+    unsigned long rounds = 2000, hold = 8;
+    uint64_t rng = 88172645463325252ull;
+    for (int i = 5; i + 1 < argc; i += 2) {
+        if (!strcmp(argv[i], "--rounds")) rounds = strtoul(argv[i + 1], NULL, 0);
+        else if (!strcmp(argv[i], "--seed")) rng ^= strtoull(argv[i + 1], NULL, 0) * 0x9E3779B97F4A7C15ull;
+        else if (!strcmp(argv[i], "--hold")) hold = strtoul(argv[i + 1], NULL, 0);
+        else { fprintf(stderr, "deepeel lr: unknown option %s\n", argv[i]); return 2; }
+    }
+    if (!hold) hold = 8;
+    char err[256] = "";
+    DpLibretro *lr = dp_lr_open_copy(core, err, sizeof err);
+    if (!lr || !dp_lr_load_rom(lr, rom, err, sizeof err)) { fprintf(stderr, "deepeel lr: %s\n", err); return 1; }
+    size_t n = dp_lr_state_size(lr);
+    size_t cap = 4096, cnt = 0;
+    LrCellState *ar = calloc(cap, sizeof *ar);
+    void *tmp = malloc(n ? n : 1);
+    if (!ar || !tmp || !dp_lr_save(lr, tmp, n)) { fprintf(stderr, "deepeel lr: core cannot serialize\n"); return 1; }
+    dp_lr_advance(lr, 1);
+    ar[cnt].st = malloc(n); dp_lr_save(lr, ar[cnt].st, n); ar[cnt++].cell = lr_cell(lr);
+    unsigned long dropped = 0;
+    for (unsigned long r = 0; r < rounds; r++) {
+        rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+        LrCellState *from = &ar[rng % cnt];
+        dp_lr_load(lr, from->st, n);
+        uint16_t mask = (uint16_t)(rng >> 20) & 0x0FFF;
+        for (unsigned long f = 0; f < 3; f++) {
+            dp_lr_set_input(lr, 0, mask);
+            dp_lr_advance(lr, (unsigned)hold);
+            uint64_t c = lr_cell(lr);
+            size_t i = 0;
+            while (i < cnt && ar[i].cell != c) i++;
+            if (i == cnt) {
+                if (cnt == cap) {
+                    if (cap >= 100000) { dropped++; continue; }
+                    cap *= 2; ar = realloc(ar, cap * sizeof *ar);
+                }
+                ar[cnt].st = malloc(n); dp_lr_save(lr, ar[cnt].st, n); ar[cnt++].cell = c;
+            }
+            rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+            mask = (uint16_t)(rng >> 20) & 0x0FFF;
+        }
+    }
+    printf("deepeel libretro novelty (Go-Explore over screen cells, tool observation)\ncore: %s\n%s\n", dp_lr_core_name(lr), dp_lr_degradations(lr));
+    printf("rounds %lu, hold %lu frames, cells reached: %zu, archive states dropped (cap 100000): %lu\n", rounds, hold, cnt, dropped);
+    for (size_t i = 0; i < cnt; i++) free(ar[i].st);
+    free(ar); free(tmp);
+    dp_lr_close(lr);
+    return dropped ? 3 : 0;
+}
+
 int dp_lr_command(int argc, char **argv) {
+    if (argc >= 5 && !strcmp(argv[2], "novelty")) return lr_novelty(argc, argv);
     if (argc >= 5 && !strcmp(argv[2], "play")) return lr_play(argc, argv);
     if (argc < 5 || strcmp(argv[2], "explore")) {
-        fprintf(stderr, "usage: deepeel lr play CORE ROM [--frames N] [--tas FILE] [--ppm FILE]\n       deepeel lr explore CORE ROM [--text FILE] [--map FILE] "
+        fprintf(stderr, "usage: deepeel lr play CORE ROM [--frames N] [--tas FILE] [--ppm FILE]\n       deepeel lr novelty CORE ROM [--rounds N] [--seed N] [--hold N]\n       deepeel lr explore CORE ROM [--text FILE] [--map FILE] "
                         "[--png FILE] [--path-steps N] [--max-total N] [--queue N]\n");
         return 2;
     }

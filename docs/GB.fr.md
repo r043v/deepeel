@@ -2339,3 +2339,12 @@ les dégradations. Le branchement sur les sessions de l'explorateur reste à fai
 rejeu, rechargement, rejeu et comparaison des hashes d'état (code retour 3 si divergence), dump PPM du
 framebuffer. Essayé sur Genesis Plus GX (observation de l'outil). Test `lr_play_cli` sur le cœur factice.
 Restent : branchement sur l'explorateur, Go-Explore, mode humain, `--watch`.
+
+## 0.166.0 (J11 — Go-Explore sur cellules d'écran, libretro)
+
+`deepeel lr novelty CORE ROM [--rounds N] [--seed N] [--hold N]` : Go-Explore sur n'importe quel cœur
+(niveau A) : archive d'états sérialisés indexée par cellule d'écran (framebuffer réduit à 16×14 en luma
+3 bits, haché), reprise depuis un état archivé tiré au hasard, entrées tenues `--hold` trames. Plafond de
+100 000 états (dépassement compté, code retour 3). Essayé sur Genesis Plus GX avec une fixture statique
+(1 cellule : attendu). Observation de l'outil ; test dans `lr_play_cli`. Restent : mode humain, `--watch`,
+branchement sur l'explorateur.
