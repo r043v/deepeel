@@ -73,6 +73,7 @@ static int cmd_maprender(int argc, char **argv);
 #include <ctype.h>
 #include <errno.h>
 #include <time.h>
+#include "cli_common.h"
 
 static void usage(void) {
     fprintf(stderr,
@@ -1140,15 +1141,12 @@ static int cmd_nes(int argc, char **argv) {
     }
     const char *path = NULL, *text = NULL, *map = NULL, *evidence = NULL, *cov = NULL, *romdata = NULL, *mapper_name = "auto";
     DpNesOptions opt = dp_nes_options();
-    int nes_jobs = 1, nes_watch = 0;
-    const char *rtcode_path = NULL;
-    const char *nes_dump = NULL;
+    DpCliCommon cc = { .jobs = 1 };
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
-        if (!strcmp(a, "--rtcode") && i + 1 < argc) rtcode_path = argv[++i];
-        else if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
-        else if (!strcmp(a, "--map") && i + 1 < argc) map = argv[++i];
-        else if (!strcmp(a, "--evidence") && i + 1 < argc) evidence = argv[++i];
+        if (0) {}
+        DP_CLI_COMMON(opt, cc)
+        DP_CLI_PLAYED(opt)
         else if (!strcmp(a, "--cov") && i + 1 < argc) cov = argv[++i];
         else if (!strcmp(a, "--romdata") && i + 1 < argc) romdata = argv[++i];
         else if (!strcmp(a, "--tas") && i + 1 < argc) {
@@ -1156,37 +1154,11 @@ static int cmd_nes(int argc, char **argv) {
             else { fprintf(stderr, "deepeel: at most 8 TAS movies\n"); return 2; }
         }
         else if (!strcmp(a, "--mapper") && i + 1 < argc) mapper_name = argv[++i];
-        else if (!strcmp(a, "--max-total") && i + 1 < argc) opt.max_total = strtoull(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--max-steps") && i + 1 < argc) opt.max_steps = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--max-paths") && i + 1 < argc) opt.max_paths = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--queue") && i + 1 < argc) opt.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--lot") && i + 1 < argc) opt.lot_path = argv[++i];
-        else if (!strcmp(a, "--lot-drain")) opt.lot_drain = 1;
-        else if (!strcmp(a, "--tree") && i + 1 < argc) opt.tree_path = argv[++i];
         else if (!strcmp(a, "--spool") && i + 1 < argc) opt.lot_path = argv[++i];
         else if (!strcmp(a, "--resume") && i + 1 < argc) { opt.lot_path = argv[++i]; opt.lot_drain = 1; }
-        else if (!strcmp(a, "--loop-cap") && i + 1 < argc) opt.loop_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--fork-cap") && i + 1 < argc) opt.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--no-irq-fork")) opt.seed_irq = 0;
         else if (!strcmp(a, "--seed-banks")) opt.seed_banks = 1;
-        else if (!strcmp(a, "--jobs") && i + 1 < argc) nes_jobs = atoi(argv[++i]);
-        else if (!strcmp(a, "--novelty") && i + 1 < argc) opt.novelty_steps = strtoull(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--novelty-frames") && i + 1 < argc) opt.novelty_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--novelty-cells")) opt.novelty_cells = 1;
-        else if (!strcmp(a, "--watch")) {
-            int fps = 30;
-            if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') fps = atoi(argv[++i]);
-            if (fps < 1) fps = 1;
-            if (fps > 30) fps = 30;
-            opt.watch_every = (unsigned)(60 / fps);
-            nes_watch = 1;
-        }
-        else if (!strcmp(a, "--export-state") && i + 1 < argc) opt.export_state = argv[++i];
-        else if (!strcmp(a, "--watch-dump") && i + 1 < argc) { nes_dump = argv[++i]; if (!opt.watch_every) opt.watch_every = 2; }
-        else if (!strcmp(a, "--novelty-archive") && i + 1 < argc) opt.novelty_archive = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed-vectors")) opt.seed_vectors = 1;
-        else if (!strcmp(a, "--ctx-cap") && i + 1 < argc) opt.ctx_cap = (unsigned)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--second-pass")) opt.second_pass = 1;
         else if (!strcmp(a, "--bank-dispatch")) opt.second_pass = opt.bank_dispatch = 1;
         else if (!strcmp(a, "--no-p1-fork")) opt.no_pad_probe = 1;
         else if (!strcmp(a, "--entry") && i + 1 < argc && opt.entry_count < 32) {
@@ -1194,12 +1166,12 @@ static int cmd_nes(int argc, char **argv) {
             if (!parse_entry(argv[++i], &eb, &ea)) { fprintf(stderr, "deepeel: bad --entry '%s' (bank:addr)\n", argv[i]); return 2; }
             opt.entry_bank[opt.entry_count] = eb; opt.entry_addr[opt.entry_count++] = ea;
         }
-        else if (!strcmp(a, "--play") && i + 1 < argc) opt.play_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--sessions") && i + 1 < argc) opt.play_sessions = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--seed") && i + 1 < argc) opt.play_seed = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!path) path = a;
         else { fprintf(stderr, "deepeel: unknown option %s\n", a); return 2; }
     }
+    const char *rtcode_path = cc.rtcode; int nes_jobs = cc.jobs, nes_watch = cc.watch; const char *nes_dump = cc.dump;
+    text = cc.text; map = cc.map; evidence = cc.evidence;
+    dp_cli_arm_stop(cc.time_limit);
     int mapper = -1; /* auto: the iNES header's mapper */
     if (!strcmp(mapper_name, "nrom")) mapper = 0;
     else if (!strcmp(mapper_name, "uxrom")) mapper = 2;
@@ -1269,61 +1241,32 @@ static int cmd_pce(int argc, char **argv) {
     }
     const char *path = NULL, *text = NULL, *map = NULL, *png = NULL, *pce_ev = NULL;
     DpPceOptions opt = dp_pce_options();
-    int pce_jobs = 1, pce_watch = 0;
-    const char *rtcode_path = NULL;
-    const char *pce_dump = NULL;
+    DpCliCommon cc = { .jobs = 1 };
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
-        if (!strcmp(a, "--rtcode") && i + 1 < argc) rtcode_path = argv[++i];
-        else if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
-        else if (!strcmp(a, "--evidence") && i + 1 < argc) pce_ev = argv[++i];
-        else if (!strcmp(a, "--ctx-cap") && i + 1 < argc) opt.ctx_cap = (unsigned)strtoul(argv[++i], NULL, 0);
+        if (0) {}
+        DP_CLI_COMMON(opt, cc)
+        DP_CLI_PLAYED(opt)
         else if (!strcmp(a, "--entry") && i + 1 < argc) {
             if (opt.entry_count >= 16) { fprintf(stderr, "deepeel: at most 16 --entry\n"); return 2; }
             opt.entries[opt.entry_count++] = (uint16_t)strtoul(argv[++i], NULL, 0);
         }
-        else if (!strcmp(a, "--map") && i + 1 < argc) map = argv[++i];
         else if (!strcmp(a, "--png") && i + 1 < argc) png = argv[++i];
         else if (!strcmp(a, "--tas") && i + 1 < argc) {
             if (opt.tas_count < 8) snprintf(opt.tas_paths[opt.tas_count++], 512, "%s", argv[++i]);
             else { fprintf(stderr, "deepeel: at most 8 TAS movies\n"); return 2; }
         }
-        else if (!strcmp(a, "--max-total") && i + 1 < argc) opt.max_total = strtoull(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--max-steps") && i + 1 < argc) opt.max_steps = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--queue") && i + 1 < argc) opt.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--lot") && i + 1 < argc) opt.lot_path = argv[++i];
-        else if (!strcmp(a, "--lot-drain")) opt.lot_drain = 1;
-        else if (!strcmp(a, "--loop-cap") && i + 1 < argc) opt.loop_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--fork-cap") && i + 1 < argc) opt.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--pad-fork-cap") && i + 1 < argc) opt.pad_fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--irq-fork-cap") && i + 1 < argc) opt.irq_fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--no-irq-fork")) opt.seed_irq = 0;
-        else if (!strcmp(a, "--novelty") && i + 1 < argc) opt.novelty_steps = strtoull(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--novelty-frames") && i + 1 < argc) opt.novelty_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--watch")) {
-            int fps = 30;
-            if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') fps = atoi(argv[++i]);
-            if (fps < 1) fps = 1;
-            if (fps > 30) fps = 30;
-            opt.watch_every = (unsigned)(60 / fps);
-            pce_watch = 1;
-        }
-        else if (!strcmp(a, "--export-state") && i + 1 < argc) opt.export_state = argv[++i];
-        else if (!strcmp(a, "--watch-dump") && i + 1 < argc) { pce_dump = argv[++i]; if (!opt.watch_every) opt.watch_every = 2; }
-        else if (!strcmp(a, "--novelty-cells")) opt.novelty_cells = 1;
-        else if (!strcmp(a, "--novelty-archive") && i + 1 < argc) opt.novelty_archive = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--no-static")) opt.static_closure = 0;
         else if (!strcmp(a, "--no-infer")) opt.infer = 0;
-        else if (!strcmp(a, "--jobs") && i + 1 < argc) pce_jobs = atoi(argv[++i]);
-        else if (!strcmp(a, "--tree") && i + 1 < argc) opt.tree_path = argv[++i];
-        else if (!strcmp(a, "--second-pass")) opt.second_pass = 1;
         else if (!strcmp(a, "--bank-dispatch")) opt.bank_dispatch = 1;
-        else if (!strcmp(a, "--play") && i + 1 < argc) opt.play_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--sessions") && i + 1 < argc) opt.play_sessions = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--seed") && i + 1 < argc) opt.play_seed = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!path) path = a;
         else { fprintf(stderr, "deepeel: unknown option %s\n", a); return 2; }
     }
+    const char *rtcode_path = cc.rtcode; int pce_jobs = cc.jobs, pce_watch = cc.watch; const char *pce_dump = cc.dump;
+    text = cc.text; map = cc.map; pce_ev = cc.evidence;
+    dp_cli_arm_stop(cc.time_limit);
     if (opt.fork_cap > 255) opt.fork_cap = 255; // per-site counters are bytes
     if (opt.pad_fork_cap > 255) opt.pad_fork_cap = 255;
     if (opt.irq_fork_cap > 255) opt.irq_fork_cap = 255;
@@ -1500,8 +1443,6 @@ static void md_regs_print(void) {
                dp_md_regs[i].category);
 }
 
-extern volatile sig_atomic_t dp_md_stop;
-static void md_on_alarm(int sig) { (void)sig; dp_md_stop = 1; }
 static int cmd_md(int argc, char **argv) {
     const char *md_rtcode = NULL;
     if (argc < 4) return usage(), 2;
@@ -1524,43 +1465,21 @@ static int cmd_md(int argc, char **argv) {
         }
     } else if (!strcmp(argv[2], "explore")) {
         DpMdOptions o;
-        int md_jobs = 1, md_watch = 0, md_any_rom = 0;
-        unsigned md_time_limit = 0;
+        int md_any_rom = 0;
+        DpCliCommon cc = { .jobs = 1 };
         int md_unbounded = 0;
-        const char *md_dump = NULL;
         dp_md_options_default(&o);
-        const char *text = NULL, *map = NULL, *ev = NULL, *movie_path = NULL, *md_summary = NULL, *md_heat = NULL;
+        const char *movie_path = NULL, *md_summary = NULL, *md_heat = NULL;
         for (int i = 4; i < argc; i++) {
             const char *a = argv[i];
             if (i + 1 >= argc && strcmp(a, "--lot-drain") && strcmp(a, "--unbounded")) { fprintf(stderr, "deepeel: bad option %s\n", a); rc = 2; break; }
-            if (!strcmp(a, "--max-total")) o.max_total = strtoull(argv[++i], NULL, 0);
+            if (0) {}
+            DP_CLI_COMMON(o, cc)
             else if (!strcmp(a, "--path-steps")) o.path_steps = strtoull(argv[++i], NULL, 0);
             else if (!strcmp(a, "--unbounded")) md_unbounded = 1;
-            else if (!strcmp(a, "--time-limit")) md_time_limit = (unsigned)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--queue")) o.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--lot")) o.lot_path = argv[++i];
-            else if (!strcmp(a, "--lot-drain")) o.lot_drain = 1;
             else if (!strcmp(a, "--cut-padding")) o.pad_cut = 1;
-            else if (!strcmp(a, "--second-pass")) o.second_pass = 1;
             else if (!strcmp(a, "--bank-dispatch")) o.bank_dispatch = 1;
-            else if (!strcmp(a, "--novelty") && i + 1 < argc) o.novelty_steps = strtoull(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--novelty-frames") && i + 1 < argc) o.novelty_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--novelty-cells")) o.novelty_cells = 1;
             else if (!strcmp(a, "--exact-dedup")) o.exact_dedup = 1;
-            else if (!strcmp(a, "--watch")) {
-                int fps = 30;
-                if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') fps = atoi(argv[++i]);
-                if (fps < 1) fps = 1;
-                if (fps > 30) fps = 30;
-                o.watch_every = (unsigned)(60 / fps);
-                md_watch = 1;
-            }
-            else if (!strcmp(a, "--export-state") && i + 1 < argc) o.export_state = argv[++i];
-            else if (!strcmp(a, "--watch-dump") && i + 1 < argc) { md_dump = argv[++i]; if (!o.watch_every) o.watch_every = 2; }
-            else if (!strcmp(a, "--novelty-archive") && i + 1 < argc) o.novelty_archive = (uint32_t)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--jobs") && i + 1 < argc) md_jobs = atoi(argv[++i]);
-            else if (!strcmp(a, "--ctx-cap") && i + 1 < argc) o.ctx_cap = (unsigned)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--tree") && i + 1 < argc) o.tree_path = argv[++i];
             else if (!strcmp(a, "--entry")) {
                 if (o.entry_count >= 16) { fprintf(stderr, "deepeel: at most 16 --entry\n"); rc = 2; break; }
                 o.entries[o.entry_count++] = (uint32_t)strtoul(argv[++i], NULL, 0);
@@ -1572,14 +1491,12 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--exclude-read-pc")) o.exclude_read_pc = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--tas")) movie_path = argv[++i];
             else if (!strcmp(a, "--tas-any-rom")) md_any_rom = 1;
-            else if (!strcmp(a, "--text")) text = argv[++i];
-            else if (!strcmp(a, "--rtcode")) md_rtcode = argv[++i];
-            else if (!strcmp(a, "--map")) map = argv[++i];
-            else if (!strcmp(a, "--evidence")) ev = argv[++i];
             else if (!strcmp(a, "--summary")) md_summary = argv[++i];
             else if (!strcmp(a, "--heat")) md_heat = argv[++i];
             else { fprintf(stderr, "deepeel: unknown option %s\n", a); rc = 2; break; }
         }
+        const char *text = cc.text, *map = cc.map, *ev = cc.evidence, *md_dump = cc.dump; md_rtcode = cc.rtcode;
+        int md_jobs = cc.jobs, md_watch = cc.watch; unsigned md_time_limit = cc.time_limit;
         DpMdMovie movie = {0};
         if (!rc && movie_path) {
             if (!dp_md_movie_load(movie_path, &movie, err, sizeof err)) {
@@ -1607,7 +1524,7 @@ static int cmd_md(int argc, char **argv) {
                 if (!o.lot_path) { snprintf(lotname, sizeof lotname, "%s.lot", text ? text : "md-unbounded"); o.lot_path = lotname; }
                 fprintf(stderr, "deepeel: md --unbounded: caps lifted, excess states spooled to %s\n", o.lot_path);
             }
-            if (md_time_limit) { signal(SIGALRM, md_on_alarm); alarm(md_time_limit); }
+            dp_cli_arm_stop(md_time_limit);
             int mrc = dp_md_explore_jobs(&c, &o, &r, md_jobs);
             if (md_watch) dp_fbwatch_stop();
             if (md_dump && dp_fb_dump_ppm(md_dump)) fprintf(stderr, "deepeel: no frame to dump (the ROM never completed a frame)\n");

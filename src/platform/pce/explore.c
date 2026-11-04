@@ -21,6 +21,7 @@
 // observed code inside each page's observed window, then padding and gap
 // inference classify what is left (reported apart from the observations).
 #include "explore.h"
+#include "../../explore/stop.h"
 #include "../../explore/lots.h"
 #include "../../core/hashset.h"
 #include "../../explore/tree.h"
@@ -767,7 +768,7 @@ static void run_path(PceRun *x, PceQueued q) {
     x->last_read_cell = -1;
     for (;;) {
         if (x->path_steps >= x->opt.max_steps) { r->step_cuts++; break; }
-        if (x->total_steps >= x->opt.max_total) { r->global_cuts++; break; }
+        if ((x->total_steps >= x->opt.max_total || dp_stop)) { r->global_cuts++; break; }
         int frame;
         if (!step_one(x, &frame)) break;
     }
@@ -846,7 +847,7 @@ static void play_session(PceRun *x, uint32_t frames, uint32_t seed, const DpPceT
     uint32_t hold = 0;
     const uint32_t seed_every = 300;
     for (uint32_t f = 0; f < frames; f++) {
-        if (x->total_steps >= x->opt.max_total) { r->global_cuts++; break; }
+        if ((x->total_steps >= x->opt.max_total || dp_stop)) { r->global_cuts++; break; }
         uint8_t in;
         if (tas && f < tas->frames) {
             in = tas->pads[f];
@@ -976,7 +977,7 @@ static void novelty_search(PceRun *x) {
     uint64_t stop = x->total_steps + x->opt.novelty_steps;
     while (!x->failed) {
         if (x->total_steps >= stop) break;
-        if (x->total_steps >= x->opt.max_total) { r->global_cuts++; break; }
+        if ((x->total_steps >= x->opt.max_total || dp_stop)) { r->global_cuts++; break; }
         // pick: the best of eight random cells, scored by gain and the
         // inverse square root of their picks (rarely tried cells first),
         // deeper cells (frames from power-on) favoured
@@ -1505,7 +1506,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     }
     if (x->opt.play_frames)
         for (uint32_t i = 0; i < x->opt.play_sessions && !x->failed; i++) {
-            if (x->total_steps >= x->opt.max_total) break;
+            if ((x->total_steps >= x->opt.max_total || dp_stop)) break;
             play_session(x, x->opt.play_frames, x->opt.play_seed + i * 0x2545F491u, NULL);
         }
 
@@ -1529,15 +1530,15 @@ drain:
             } else free(blob);
             if (!x->queue_len) continue;
         }
-        if (!x->queue_len && x->total_steps < x->opt.max_total && pstm_replay(x)) continue;
+        if (!x->queue_len && (x->total_steps < x->opt.max_total && !dp_stop) && pstm_replay(x)) continue;
         if (!x->queue_len) break;
-        if (x->total_steps >= x->opt.max_total) { r->global_cuts++; break; }
+        if ((x->total_steps >= x->opt.max_total || dp_stop)) { r->global_cuts++; break; }
         PceQueued q = x->queue[--x->queue_len];
         run_path(x, q);
     }
 
-    if (x->opt.bank_dispatch && !x->disp_done && !x->failed && x->total_steps < x->opt.max_total) { x->disp_done = 1; if (dispatch_seed(x)) goto drain; }
-    if (x->opt.second_pass && !x->failed && x->total_steps < x->opt.max_total && second_pass_seed(x)) goto drain;
+    if (x->opt.bank_dispatch && !x->disp_done && !x->failed && (x->total_steps < x->opt.max_total && !dp_stop)) { x->disp_done = 1; if (dispatch_seed(x)) goto drain; }
+    if (x->opt.second_pass && !x->failed && (x->total_steps < x->opt.max_total && !dp_stop) && second_pass_seed(x)) goto drain;
 
     if (x->opt.pre_finalize) x->opt.pre_finalize(r, x->opt.pre_user);
     if (!x->opt.no_finalize) {

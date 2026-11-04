@@ -5,9 +5,10 @@
 #include <math.h>
 #include <zlib.h>
 #include <signal.h>
+#include "../../explore/stop.h"
 
 // set by the --time-limit alarm: the main loop stops cleanly and the report is still written
-volatile sig_atomic_t dp_md_stop;
+
 #include "../../gui/fbwatch.h"
 #include "../../core/statefile.h"
 #include "../../cpu/m68k/m68k.h"
@@ -161,7 +162,7 @@ static void spill_flush(X *x) {
 
 static int push(X *x, uint32_t pc, int vint, int hint) {
     int full = 0;
-    if (dp_md_stop) return 0;   // stop requested: no new work
+    if (dp_stop) return 0;   // stop requested: no new work
     spill_flush(x);
     if (x->o->ctx_cap) {
         // coarse same-context eviction: pc, D0-D7, A0-A7, SR and the interrupt kind; RAM
@@ -924,7 +925,7 @@ static uint64_t run_sliced(DpMdMach *m, uint64_t budget, int *cut, int *fault) {
         *cut = 0;
         uint64_t k = dp_mdmach_run(m, slice, cut, fault);
         n += k;
-        if (!*cut || k < slice || n >= budget || dp_md_stop || *fault) break;
+        if (!*cut || k < slice || n >= budget || dp_stop || *fault) break;
     }
     return n;
 }
@@ -1369,7 +1370,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         }
     for (;;) {
         spill_flush(&x);
-        if (r->steps >= o->max_total || dp_md_stop) break;
+        if (r->steps >= o->max_total || dp_stop) break;
         if (!x.nq && x.npark) { x.q[x.nq++] = x.park[--x.npark]; r->parked_resumed++; }
         if (!x.nq && dp_lf_pending(x.lot)) { // the disk backlog comes back
             Item m; uint32_t ml = 0, bl = 0; uint8_t *blob = NULL;

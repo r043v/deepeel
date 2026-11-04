@@ -2788,3 +2788,18 @@ trailer de 24 octets (magic `SGB1`, bit courant, 16 octets) écrit par `ex_save`
 (autres chemins d'écriture) se lit « décodeur au repos ». Les fichiers spool/lot existants sont refusés (taille
 d'image différente) : ils se relancent à neuf. Test `explorer` : aller-retour mi-paquet et image sans trailer.
 Non fait : rendu bordure/palettes SGB et typage associé.
+
+## 0.188.0 — options communes mutualisées (nes, pce, md) et arrêt coopératif partagé
+
+Les trois analyseurs d'options `nes`/`pce`/`md explore` répétaient la même chaîne `else if` (`--max-total`, `--queue`,
+`--lot`, `--lot-drain`, `--tree`, `--jobs`, `--novelty*`, `--ctx-cap`, `--second-pass`, `--export-state`, `--watch`,
+`--watch-dump`, `--text`, `--map`, `--evidence`, `--rtcode`). Elle vit maintenant une fois dans `src/cli_common.h`
+(`DP_CLI_COMMON`, plus `DP_CLI_PLAYED` pour NES/PCE : `--max-steps`, `--loop-cap`, `--fork-cap`, `--play`, `--sessions`,
+`--seed`, `--no-irq-fork`). Ce que cela apporte de visible :
+- **`--time-limit SEC` pour NES et PCE** (jusque-là MD seul) ; SIGINT est aussi un arrêt propre pour ces trois commandes.
+  Vérifié : NES DuckTales `--time-limit 8` rend la main à 10 s, PCE Raiden à 8 s, rapport écrit, code 0.
+- Un drapeau d'arrêt unique `dp_stop` (`src/explore/stop.c`, dans `deepeel_core`, donc partagé par les clones
+  `--jobs`, qui avaient chacun leur copie préfixée de l'ancien `dp_md_stop`).
+Non mutualisé (réel, mais pas fait) : les boucles `run_path`/`novelty_search`/`second_pass_seed`/`lot_spill` des
+`explore.c` md/nes/pce/sega (≈ 8 000 lignes, états de machine différents) et le squelette de `jobs.c`
+(≈ 470 lignes pour 3 plateformes) ; GB et Sega gardent leur propre analyseur et leur propre arrêt.

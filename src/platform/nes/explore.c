@@ -7,6 +7,7 @@
 // lands on physical PRG cells (bank * $4000 + (addr & $3FFF)); execution
 // outside PRG counts as exec_outside and never enters the cartridge maps.
 #include "explore.h"
+#include "../../explore/stop.h"
 #include "../../explore/lots.h"
 #include "../../mach/nesmach.h"
 #include "../../cpu/m6502/m6502.h"
@@ -276,7 +277,7 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
         nes_trace.stop = 1;
         return;
     }
-    if (x->total_steps >= x->opt.max_total) {
+    if ((x->total_steps >= x->opt.max_total || dp_stop)) {
         r->global_cuts++;
         nes_trace.stop = 1;
         return;
@@ -820,7 +821,7 @@ static void play_session(DpNesRun *x, uint32_t frames, uint32_t seed,
     dp_nesmach_set_input(x->m, x->frame_masks[0][0], x->frame_masks[0][1]);
     uint32_t f = 0;
     while (f < frames) {
-        if (x->total_steps >= x->opt.max_total) { r->global_cuts++; break; }
+        if ((x->total_steps >= x->opt.max_total || dp_stop)) { r->global_cuts++; break; }
         dp_nesmach_save(x->m, x->ring[f % DP_NES_CKPT_RING]);
         x->jam_pending = 0;
         dp_nesmach_run(x->m, UINT64_MAX); // one frame (hook_frame stops it)
@@ -972,7 +973,7 @@ static void novelty_search(DpNesRun *x) {
     uint64_t stop = x->total_steps + x->opt.novelty_steps;
     while (!x->failed) {
         if (x->total_steps >= stop) break;
-        if (x->total_steps >= x->opt.max_total) { r->global_cuts++; break; }
+        if ((x->total_steps >= x->opt.max_total || dp_stop)) { r->global_cuts++; break; }
         uint8_t maxl = 0;
         if (L->lives_byte >= 0)
             for (uint32_t i = 0; i < n; i++)
@@ -1005,7 +1006,7 @@ static void novelty_search(DpNesRun *x) {
         uint32_t recent_f[64];
         unsigned nrecent = 0;
         for (uint32_t f = 0; f < x->opt.novelty_frames; f++) {
-            if (x->total_steps >= stop || x->total_steps >= x->opt.max_total) break;
+            if (x->total_steps >= stop || (x->total_steps >= x->opt.max_total || dp_stop)) break;
             if (!nes_nov_frame(x, nes_random_input(x, &held, &hold))) break;
             r->novelty_frames_run++;
             if (cells && nes_lives_frame(L, dp_nesmach_ram(x->m), learn)) {
@@ -1193,7 +1194,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     // map, their end states seed the fork queue
     if (!x.failed) {
         for (int i = 0; i < x.opt.tas_count && !x.failed; i++) {
-            if (x.total_steps >= x.opt.max_total) break;
+            if ((x.total_steps >= x.opt.max_total || dp_stop)) break;
             DpNesTas t;
             if (!dp_nes_tas_load(x.opt.tas_paths[i], &t, err, sizeof err)) {
                 fprintf(stderr, "deepeel: TAS %s: %s\n", x.opt.tas_paths[i], err);
@@ -1214,7 +1215,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
         }
         if (x.opt.play_frames) {
             for (uint32_t i = 0; i < x.opt.play_sessions; i++) {
-                if (x.total_steps >= x.opt.max_total) break;
+                if ((x.total_steps >= x.opt.max_total || dp_stop)) break;
                 play_session(&x, x.opt.play_frames, x.opt.play_seed + i * 0x2545F491u, NULL);
             }
         }
@@ -1277,7 +1278,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                         }
                         if (x.queue_len == 0) continue; // unreadable record: next one
                     }
-                    if (x.queue_len == 0 && x.total_steps < x.opt.max_total && nstm_replay(&x)) continue;
+                    if (x.queue_len == 0 && (x.total_steps < x.opt.max_total && !dp_stop) && nstm_replay(&x)) continue;
                     if (x.queue_len == 0) break;
                     uint32_t slot = x.queue_len - 1;
                     run_path(&x, slot);
@@ -1286,9 +1287,9 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                     if (x.queue_len - 1 > slot)
                         x.queue[slot] = x.queue[x.queue_len - 1];
                     x.queue_len--;
-                    if (x.total_steps >= x.opt.max_total) break;
+                    if ((x.total_steps >= x.opt.max_total || dp_stop)) break;
                 }
-                if (pass == 1 || !x.opt.second_pass || x.failed || x.queue_len || x.total_steps >= x.opt.max_total) break;
+                if (pass == 1 || !x.opt.second_pass || x.failed || x.queue_len || (x.total_steps >= x.opt.max_total || dp_stop)) break;
                 second_pass_seed(&x);
                 if (x.queue_len == 0) break;   // nothing seeded: no second drain
             }
