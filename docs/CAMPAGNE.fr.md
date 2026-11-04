@@ -171,3 +171,8 @@ Ces chiffres sont des essais courts, pas une campagne : ni saturation levée, ni
   conservés pour 1 953 en débordement, donc le jeu bascule bien de banque pendant l'exploration. Piste non explorée :
   les 128 Kio ne se découvrent pas par les seules bascules vues ; les cellules de vue de banque (G2) ne trouvent pas
   de table de dispatch reconnaissable. À reprendre avec un `--tas` ou une séquence de jeu avant de conclure.
+- NES, DuckTales avec `--play 3000 --sessions 4` (110 s, observation de l'outil) : 31 200 octets touchés (**23,80 %**
+  contre 6,51 % sans jeu), 254 906 387 pas, 23 996 trames jouées, 100 021 changements de banque en débordement. Le
+  plateau de l'exploration seule venait donc d'un état de jeu jamais avancé (RAM à zéro, aucune entrée), pas d'un
+  défaut du moteur de fourches : les sessions jouées (Go-Explore / manette aléatoire) font évoluer la RAM qui
+  choisit les banques. C'est le mode à utiliser pour les campagnes longues NES.
