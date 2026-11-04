@@ -1266,6 +1266,7 @@ static int cmd_pce(int argc, char **argv) {
         if (0) {}
         DP_CLI_COMMON(opt, cc)
         DP_CLI_PLAYED(opt)
+        else if (!strcmp(a, "--play-pool") && i + 1 < argc) opt.play_pool = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--entry") && i + 1 < argc) {
             if (opt.entry_count >= 16) { fprintf(stderr, "deepeel: at most 16 --entry\n"); return 2; }
             opt.entries[opt.entry_count++] = (uint16_t)strtoul(argv[++i], NULL, 0);

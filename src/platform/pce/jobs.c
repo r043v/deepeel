@@ -37,7 +37,7 @@ static void merge_counts(DpPceResults *a, const DpPceResults *b) {
     ADD(data_reads); ADD(forced_paths); ADD(evicted); ADD(faults); ADD(illegal_cuts);
     ADD(step_cuts); ADD(loop_cuts); ADD(fork_cuts); ADD(pad_fork_cuts); ADD(irq_fork_cuts);
     ADD(queue_cuts); ADD(global_cuts); ADD(parked); ADD(parked_resumed); ADD(parked_lost);
-    ADD(pending_dropped); ADD(demo_frames_run); ADD(play_frames_run); ADD(play_sessions_run); ADD(tas_frames_run);
+    ADD(pending_dropped); ADD(demo_frames_run); ADD(play_frames_run); ADD(play_sessions_run); ADD(pool_saved); ADD(pool_starts); ADD(tas_frames_run);
     ADD(novelty_trials); ADD(novelty_hits); ADD(novelty_archived); ADD(novelty_replaced);
     ADD(novelty_frames_run); ADD(novelty_deaths); ADD(io_writes); ADD(smc_writes); ADD(vdc_data_writes);
     ADD(copied_bytes); ADD(vce_data_writes);

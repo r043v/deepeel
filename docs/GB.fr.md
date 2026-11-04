@@ -3023,3 +3023,10 @@ repart d'un checkpoint tiré au hasard au lieu de la mise sous tension, donc plu
 sessions TAS et la démo restent depuis la mise sous tension. Le rapport affiche « checkpoint
 pool: K kept, S sessions started from one ». Fixture : `test_nes` (`test_play_pool`). Reste : PCE,
 MD, GB/Z80, multi-thread. Observation de l'outil, pas une mesure matérielle.
+
+## 0.208.0 : J1 PCE, pool de checkpoints partagé (2026-11-04)
+
+`--play-pool N` (PCE, N ≤ 64, 0 par défaut), même schéma que NES (0.207.0) : checkpoint toutes les
+256 frames des sessions aléatoires, chaque session suivante repart d'un checkpoint tiré au hasard ;
+TAS et démo depuis la mise sous tension. Fixture : `test_pce` (`test_play_pool`). Reste : MD,
+GB/Z80, multi-thread. Observation de l'outil, pas une mesure matérielle.

@@ -324,6 +324,22 @@ static void test_streams_banked(void) {
     free(r); free(rom);
 }
 
+// J1: random sessions restart from checkpoints earlier sessions kept
+static void test_play_pool(void) {
+    uint8_t *rom = calloc(1, ROM_SIZE);
+    static const uint8_t code[] = { 0x78, 0x80, 0xFE };   // sei; bra *
+    memcpy(rom, code, sizeof code);
+    rom[0x1FFE] = 0x00; rom[0x1FFF] = 0xE0;
+    DpPceOptions o = dp_pce_options();
+    o.max_total = 50000000; o.max_steps = 2000; o.play_frames = 600; o.play_sessions = 4; o.play_pool = 8;
+    DpPceResults *r = calloc(1, sizeof *r);
+    CHECK(dp_pce_explore(rom, ROM_SIZE, &o, r), "pool explore");
+    CHECK(r->pool_saved >= 2, "checkpoints kept");
+    CHECK(r->pool_starts >= 1, "a session started from the pool");
+    dp_pce_results_free(r);
+    free(r); free(rom);
+}
+
 // RAM-code archive: bytes built by immediates in WRAM, then run
 static void test_ramcode(void) {
     uint8_t *rom = calloc(1, ROM_SIZE);
@@ -360,6 +376,7 @@ int main(void) {
     test_jobs(rom);
     test_streams();
     test_streams_banked();
+    test_play_pool();
     test_ramcode();
     test_tas_identity();
     free(rom);

@@ -92,6 +92,7 @@ typedef struct {
     uLongf zcap;
     size_t state_size;
     uint32_t rng;
+    uint8_t *pool[64]; unsigned pool_n;   // J1 shared checkpoint pool
     int idle;              // demo session: no button pressed
     uint64_t novel;        // cells observed for the first time (novelty search)
     int failed;
@@ -908,7 +909,11 @@ static void play_session(PceRun *x, uint32_t frames, uint32_t seed, const DpPceT
     x->forced = 0;
     x->path_id = r->paths;
     x->rng = seed ? seed : 0x9E3779B9u;
-    dp_pce_reset();
+    const unsigned pool_cap = x->opt.play_pool < 64 ? x->opt.play_pool : 64;
+    if (!tas && pool_cap && x->pool_n && !x->idle) {   // continue from a checkpoint an earlier session kept
+        dp_pce_load(x->pool[rng_next(&x->rng) % x->pool_n]);
+        r->pool_starts++;
+    } else dp_pce_reset();
     uint8_t held = 0;
     uint32_t hold = 0;
     const uint32_t seed_every = 300;
@@ -923,6 +928,15 @@ static void play_session(PceRun *x, uint32_t frames, uint32_t seed, const DpPceT
             in = x->idle ? 0 : random_input(x, &held, &hold);
         }
         play_frame(x, in);
+        if (!tas && pool_cap && f % 256 == 255 && !x->idle) {   // every 256 frames: keep a checkpoint (random replacement when full)
+            unsigned slot = x->pool_n < pool_cap ? x->pool_n : rng_next(&x->rng) % pool_cap;
+            if (!x->pool[slot]) x->pool[slot] = malloc(x->state_size);
+            if (x->pool[slot]) {
+                dp_pce_save(x->pool[slot]);
+                if (slot == x->pool_n) x->pool_n++;
+                r->pool_saved++;
+            }
+        }
         if (x->opt.queue_cap && f % seed_every == seed_every - 1) push_live(x, 0);
     }
     if (x->opt.queue_cap) push_live(x, 0);
@@ -1625,6 +1639,7 @@ drain:
     }
 
     pstm_free(x);
+    for (unsigned i = 0; i < 64; i++) free(x->pool[i]);
     dp_pce_observe(NULL);
     // states still queued when the global wall stopped the drain: counted
     // (saved in the lot when there is one: the next run resumes them)
@@ -1762,6 +1777,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             (unsigned long long)r->faults, (unsigned long long)r->exec_outside,
             (unsigned long long)r->state_bytes_peak);
     if (r->demo_frames_run) fprintf(out, "  demo (no button pressed, from power-on): %llu frames\n", (unsigned long long)r->demo_frames_run);
+    if (r->pool_saved) fprintf(out, "  checkpoint pool: %llu kept, %llu sessions started from one\n", (unsigned long long)r->pool_saved, (unsigned long long)r->pool_starts);
     fprintf(out, "  play: %llu sessions, %llu frames (TAS %llu)\n",
             (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run,
             (unsigned long long)r->tas_frames_run);
