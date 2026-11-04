@@ -141,7 +141,7 @@ void dp_gbl_hook_trace(int v, int i, uint16_t pc) {
     DpMach *m = mach_at[v][i];
     if (dp_dbg_trace && dp_dbg_trace_f) { // desync diagnostics: one frame's pc sequence
         const gbl_cpu_t *c = m->api->gbr;
-        fprintf(dp_dbg_trace_f, "%04x %02x %04x %04x %04x %04x\n", pc, c->a, c->bc, c->de, c->hl, c->sp);
+        fprintf(dp_dbg_trace_f, "%d.%d %04x %02x %04x %04x %04x %04x\n", v, i, pc, c->a, c->bc, c->de, c->hl, c->sp);
     }
     if (!m || !m->on_step) return;
     m->on_step(m, pc, dp_mach_op(m, pc), 0);

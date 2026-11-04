@@ -2452,3 +2452,19 @@ seulement après une décision de fourche (branche, IRQ, key, P1). Observation d
 dans ce budget, aucune exécution RAM sans source n'est atteinte sans décision forcée ; cela ne dit pas que le
 jeu n'exécute pas de code RAM en jeu réel (le chemin naturel de 60 s n'atteint peut-être pas la routine
 OAM-DMA en HRAM), ni que ce code est faux : il est atteint depuis un état contrefactuel. À relire sur un run long.
+
+## Divergence TAS Gambatte : état au 0.174.0 (observations de l'outil)
+
+Film `dadinfinitum-supermarioland2.bk2`, comparé à `libgambatte` de BizHawk (callback de trace de registres :
+cycle, PC, SP, A, B, C, D, E, F, H, L) :
+
+- **Image 32 150 (note de 0.145.0) : ne se reproduit plus.** Les 2 957 instructions de l'image concordent sur PC,
+  A, BC, DE, HL et SP ; la WRAM concorde aux images 32 140, 32 151 et 32 160. La divergence `jr c` sur `$A8EF`
+  décrite plus haut vient d'états antérieurs du moteur (corrigés depuis) ou d'un mauvais alignement des flux.
+- **Première divergence de WRAM : image deepeel 41 775 (BizHawk 42 109).** À 42 108 la WRAM est identique ; à
+  42 109, 734 octets diffèrent : la référence a rempli `$C000…` de `$36` (tampon vidé) là où deepeel garde encore
+  d'anciennes données. C'est une routine de remplissage qui s'exécute une image plus tôt (ou plus tard) côté
+  référence, cohérent avec l'extinction du LCD de la référence à l'image 41 870 vs 51 251 chez deepeel :
+  un écart de phase image/vblank pendant une période LCD éteint, pas une erreur de CPU. Non élucidé.
+- Diagnostic : la trace `DEEPEEL_TAS_TRACEFRAME` est préfixée `<variante>.<machine>` pour isoler le flux du film
+  des autres machines de l'exploration (le fichier mélange sinon plusieurs machines).
