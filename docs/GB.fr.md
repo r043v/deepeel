@@ -3542,3 +3542,9 @@ forcée), dans une page de 8 Kio, devient une section `speculative` ajoutée apr
 Le rapport MD ajoute « N speculative (static closure only) » : plages maximales d'octets marquées par la fermeture statique
 (`stat` 3) mais jamais exécutées ni forcées ; le `--summary` JSON gagne `sections_speculative`. MD n'a pas de liste de
 sections typée : seul le compte est exposé. Test `md_speculative` (`fix_md_dma_fault`). C1 MD reste ◐ : pas de liveness.
+
+## 0.249.20 (arbre de choix : `budget` devient `deferred`)
+
+Conformément à `docs/COUVERTURE.fr.md` F2 / §6, l'issue d'un nœud de `--tree` nommée `budget` s'appelle désormais `deferred`
+(`DP_ISSUE_DEFERRED`, valeur numérique 5 inchangée : les `tree.bin` existants se relisent). Elle désigne un état en attente non
+exploré (file ou parking vidés à l'arrêt sans disque). Cellules F2 NES, PCE et MD passées ✅.

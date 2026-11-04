@@ -1740,7 +1740,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
         // An open spool keeps the remainders resumable instead of dropping them.
         for(uint32_t i=0;i<x.queued;i++) {
             if(x.spool) spool_write_path(&x,&x.queue[i],1);
-            else tree_close(&x,x.queue[i].choice,DP_SEGA_ISSUE_BUDGET);
+            else tree_close(&x,x.queue[i].choice,DP_SEGA_ISSUE_DEFERRED);
             free_path(x.queue[i]);
         }
         x.queued=0;

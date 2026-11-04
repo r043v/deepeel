@@ -1610,8 +1610,8 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         free(it.state);
     }
     // leftovers of a wall go to the lot when there is one (the next run resumes them)
-    for (uint32_t i = 0; i < x.npark; i++) if (x.park[i].choice) dp_tree_close(&x.tree, x.park[i].choice, DP_ISSUE_BUDGET);
-    for (uint32_t i = 0; i < x.nq; i++) if (x.q[i].choice) dp_tree_close(&x.tree, x.q[i].choice, DP_ISSUE_BUDGET);
+    for (uint32_t i = 0; i < x.npark; i++) if (x.park[i].choice) dp_tree_close(&x.tree, x.park[i].choice, DP_ISSUE_DEFERRED);
+    for (uint32_t i = 0; i < x.nq; i++) if (x.q[i].choice) dp_tree_close(&x.tree, x.q[i].choice, DP_ISSUE_DEFERRED);
     for (uint32_t i = 0; i < x.npark; i++) {
         if (!lot_spill(&x, &x.park[i])) r->dropped_pending++;
         free(x.park[i].state);

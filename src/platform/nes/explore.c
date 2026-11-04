@@ -1486,11 +1486,11 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     // states still queued when a wall stopped the drain: saved in the lot when
     // there is one (the next run resumes them), else counted, not silent
     for (uint32_t i = 0; i < x.queue_len; i++) {
-        if (x.queue[i].state && !lot_spill(&x, &x.queue[i])) { r->pending_dropped++; tree_close(&x, x.queue[i].choice, DP_NES_ISSUE_BUDGET); }
+        if (x.queue[i].state && !lot_spill(&x, &x.queue[i])) { r->pending_dropped++; tree_close(&x, x.queue[i].choice, DP_NES_ISSUE_DEFERRED); }
         free(x.queue[i].state);
     }
     for (uint32_t i = 0; i < x.park_len; i++) {
-        if (!lot_spill(&x, &x.park[i])) { r->pending_dropped++; tree_close(&x, x.park[i].choice, DP_NES_ISSUE_BUDGET); }
+        if (!lot_spill(&x, &x.park[i])) { r->pending_dropped++; tree_close(&x, x.park[i].choice, DP_NES_ISSUE_DEFERRED); }
         free(x.park[i].state);
     }
     if (x.lot) {

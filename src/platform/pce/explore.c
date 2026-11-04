@@ -1705,8 +1705,8 @@ drain:
     dp_pce_observe(NULL);
     // states still queued when the global wall stopped the drain: counted
     // (saved in the lot when there is one: the next run resumes them)
-    for (uint32_t i = 0; i < x->park_len; i++) if (x->park[i].choice) dp_tree_close(&x->tree, x->park[i].choice, DP_ISSUE_BUDGET);
-    for (uint32_t i = 0; i < x->queue_len; i++) if (x->queue[i].choice) dp_tree_close(&x->tree, x->queue[i].choice, DP_ISSUE_BUDGET);
+    for (uint32_t i = 0; i < x->park_len; i++) if (x->park[i].choice) dp_tree_close(&x->tree, x->park[i].choice, DP_ISSUE_DEFERRED);
+    for (uint32_t i = 0; i < x->queue_len; i++) if (x->queue[i].choice) dp_tree_close(&x->tree, x->queue[i].choice, DP_ISSUE_DEFERRED);
     for (uint32_t i = 0; i < x->park_len; i++)
         if (!lot_spill(x, x->park[i].z, x->park[i].zlen, x->park[i].forced, x->park[i].choice)) { r->pending_dropped++; free(x->park[i].z); }
     free(x->park);

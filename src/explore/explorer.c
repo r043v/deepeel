@@ -518,7 +518,7 @@ static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, in
             tree_close_g(ex, choice, DP_ISSUE_SPOOLED);
             return 0;
         }
-        tree_close_g(ex, choice, DP_ISSUE_BUDGET);
+        tree_close_g(ex, choice, DP_ISSUE_DEFERRED);
         free(img);
         return 0;
     }
@@ -556,7 +556,7 @@ static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, in
                     tree_close_g(ex, choice, DP_ISSUE_SPOOLED);
                     return 0;
                 }
-                tree_close_g(ex, choice, DP_ISSUE_BUDGET);
+                tree_close_g(ex, choice, DP_ISSUE_DEFERRED);
                 free(img);
                 return 0;
             }
@@ -592,7 +592,7 @@ static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, in
                 if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_SPOOLED);
                 return 0;
             }
-            if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_BUDGET);
+            if (ex->tree) dp_tree_close(ex->tree, choice, DP_ISSUE_DEFERRED);
             free(img);
             return 0;
         }
@@ -1562,7 +1562,7 @@ static int explore_step_inner(DpExplorer *ex) {
         else if (cut == DP_CUT_HALT || ex->steps_no_credit > ex->cfg.max_steps_path / 4)
             issue = DP_ISSUE_MERGED; // a known loop, no way out found
         else if (cut == DP_CUT_CYCLES) issue = DP_ISSUE_CAPPED;
-        else if (cut != DP_CUT_NONE) issue = DP_ISSUE_BUDGET;
+        else if (cut != DP_CUT_NONE) issue = DP_ISSUE_DEFERRED;
         tree_close_g(ex, choice, issue);
     }
     if (ex->q_len || ex->pq_len || ex->sh || frontier_has_work(ex) || dp_explorer_spool_pending(ex)) return 1;

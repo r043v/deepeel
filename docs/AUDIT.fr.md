@@ -11,11 +11,11 @@ remesure pas l'outil.
 | GB | 32 | 6 | 0 | 1 |
 | SMS/GG | 32 | 5 | 0 | 2 |
 | MSX | 32 | 5 | 0 | 2 |
-| NES | 18 | 19 | 0 | 2 |
-| PCE | 24 | 14 | 0 | 1 |
-| MD | 18 | 20 | 0 | 1 |
+| NES | 19 | 18 | 0 | 2 |
+| PCE | 25 | 13 | 0 | 1 |
+| MD | 19 | 19 | 0 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 69.
+Cellules ouvertes (◐ ou ✗) : 66.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -58,9 +58,6 @@ Cellules ouvertes (◐ ou ✗) : 69.
 | C2 | Éviction par contexte | NES | ◐ contexte grossier opt-in (`--ctx-cap`) |
 | C2 | Éviction par contexte | PCE | ◐ contexte grossier opt-in (`--ctx-cap`) |
 | C2 | Éviction par contexte | MD | ◐ contexte grossier opt-in (`--ctx-cap`) |
-| F2 | Arbre de choix persistant | NES | ◐ `--tree` (nœuds, parents, issues ; site renseigné pour les fourches de branchement ; reprise de l'arbre avec `--resume` (0.220.0)) |
-| F2 | Arbre de choix persistant | PCE | ◐ `--tree` (DpTree commun ; site renseigné pour les fourches ; reprise de l'arbre avec `--resume` (0.221.0)) |
-| F2 | Arbre de choix persistant | MD | ◐ `--tree` (DpTree commun ; site renseigné pour les fourches de branchement ; reprise de l'arbre avec `--resume` (0.222.0)) |
 | F3 | `--jobs` par instances clonées | NES | ◐ `--jobs 2` par phase (`dp_nes2_`, `nes_jobs`), pas de file partagée |
 | F3 | `--jobs` par instances clonées | PCE | ◐ `--jobs 2` par phase (`dp_pce2_`, `test_jobs`), pas de file partagée |
 | F3 | `--jobs` par instances clonées | MD | ◐ `--jobs 2` par entrées explicites (`dp_md2_`, `md_jobs`), pas de file partagée |

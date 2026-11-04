@@ -96,7 +96,7 @@ enum {
 };
 enum {
     DP_SEGA_ISSUE_NONE=0, DP_SEGA_ISSUE_DONE, DP_SEGA_ISSUE_EVICTED,
-    DP_SEGA_ISSUE_SPOOLED, DP_SEGA_ISSUE_BUDGET
+    DP_SEGA_ISSUE_SPOOLED, DP_SEGA_ISSUE_DEFERRED
 };
 typedef struct {
     uint32_t parent;   // 0 for roots

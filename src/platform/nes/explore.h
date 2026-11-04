@@ -71,7 +71,7 @@ typedef struct {
 // choice tree (F2): one node per queued state, parented on the path that queued it
 enum { DP_NES_TREE_RESET = 1, DP_NES_TREE_ENTRY, DP_NES_TREE_VECTOR, DP_NES_TREE_BRANCH,
        DP_NES_TREE_IRQ, DP_NES_TREE_PROBE, DP_NES_TREE_PASS2 };
-enum { DP_NES_ISSUE_NONE = 0, DP_NES_ISSUE_DONE, DP_NES_ISSUE_EVICTED, DP_NES_ISSUE_SPOOLED, DP_NES_ISSUE_BUDGET };
+enum { DP_NES_ISSUE_NONE = 0, DP_NES_ISSUE_DONE, DP_NES_ISSUE_EVICTED, DP_NES_ISSUE_SPOOLED, DP_NES_ISSUE_DEFERRED };
 typedef struct {
     uint32_t parent;   // 0 for roots
     uint32_t site;     // PRG cell of the entry pc (0xFFFFFFFF outside the ROM)
