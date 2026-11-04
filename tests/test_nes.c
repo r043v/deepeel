@@ -830,6 +830,30 @@ static void test_smc(void) {
     free(rom);
 }
 
+// C1 liveness: a section records the work-RAM pages and register classes its code read
+static void test_liveness(void) {
+    uint8_t *rom = calloc(1, 16 + 2 * 0x4000 + 0x2000);
+    set_header(rom, 2, 1, 0);
+    put(rom, 0, 0x0000, 0xAD, 0x02, 0x20,       // $8000 LDA $2002 (PPU status)
+                        0xAD, 0x16, 0x40,       // $8003 LDA $4016 (pad)
+                        0xAD, 0x00, 0x03,       // $8006 LDA $0300 (RAM page 3)
+                        0x4C, 0x09, 0x80, -1);  // $8009 JMP $8009
+    set_vector(rom, 1, 0xFFFA, 0x8000);
+    set_vector(rom, 1, 0xFFFC, 0x8000);
+    set_vector(rom, 1, 0xFFFE, 0x8000);
+    DpNesOptions o = dp_nes_options();
+    o.max_total = 2000;
+    DpNesResults r;
+    CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &o, &r), "liveness run");
+    int ok = 0;
+    for (uint32_t i = 0; i < r.section_count; i++)
+        if (r.sections[i].lo <= 0 && r.sections[i].hi >= 9 && (r.sections[i].io_reads & DP_NES_LIVE_PPU) &&
+            (r.sections[i].io_reads & DP_NES_LIVE_PAD) && (r.sections[i].ram_pages & 8)) ok = 1;
+    CHECK(ok, "section liveness: PPU + pad reads and RAM page 3");
+    dp_nes_results_free(&r);
+    free(rom);
+}
+
 int main(void) {
     test_machine_nrom();
     test_machine_uxrom();
@@ -857,6 +881,7 @@ int main(void) {
     test_loop_bound();
     test_tas_load();
     test_tas_identity();
+    test_liveness();
     if (fails) printf("%d failures\n", fails);
     else printf("test_nes: all green\n");
     return fails != 0;

@@ -45,6 +45,7 @@ static void fold(DpNesResults *a, void *user) {
         uint64_t e = (uint64_t)a->exec_hits[i] + b->exec_hits[i], d = (uint64_t)a->data_hits[i] + b->data_hits[i];
         a->exec_hits[i] = e > 0xFFFFFFFFu ? 0xFFFFFFFFu : (uint32_t)e;
         a->data_hits[i] = d > 0xFFFFFFFFu ? 0xFFFFFFFFu : (uint32_t)d;
+        if (a->live_ram && b->live_ram) { a->live_ram[i] |= b->live_ram[i]; a->live_io[i] |= b->live_io[i]; }
     }
     if (a->chr_flags && b->chr_flags) {
         size_t m = a->chr_size < b->chr_size ? a->chr_size : b->chr_size;

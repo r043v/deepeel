@@ -50,7 +50,7 @@ Cellules ouvertes (◐ ou ✗) : 64.
 | G4 | Semis indirect + budgets en cascade | NES | ◐ second passage sur racines statiques (`--second-pass`) |
 | G4 | Semis indirect + budgets en cascade | PCE | ◐ second passage sur successeurs statiques non exécutés (`--second-pass`) |
 | G4 | Semis indirect + budgets en cascade | MD | ◐ second passage sur successeurs statiques non exécutés (`--second-pass`) |
-| C1 | Sections, liveness, verdicts | NES | ◐ req/forced + `speculative` (0.249.17, test `nes_speculative`), sans liveness |
+| C1 | Sections, liveness, verdicts | NES | ◐ req/forced + `speculative` (0.249.17, test `nes_speculative`) ; 0.249.24 liveness par section : pages de RAM et classes de registres lus (PPU, pads, autres), test `nes` (`test_liveness`) ; reste : banque/IRQ dans le contexte, non utilisée par l'éviction C2 |
 | C1 | Sections, liveness, verdicts | PCE | ◐ req/forced + `speculative` (0.249.18, test `pce_speculative`), sans liveness |
 | C1 | Sections, liveness, verdicts | MD | ◐ 0.135 req/forced par plage exécutée ; 0.249.19 compteur `speculative` (plages de la fermeture statique seule, test `md_speculative`) ; sans liveness |
 | C2 | Éviction par contexte | NES | ◐ contexte grossier opt-in (`--ctx-cap`) |

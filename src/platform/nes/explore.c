@@ -66,6 +66,7 @@ typedef struct {
     size_t fork_sites_len;
     uint64_t total_steps, path_steps, paths_opened;
     unsigned cur_pc, cur_len;          // current instruction's fetch window
+    int64_t cur_cell;   // PRG cell of the executing opcode (-1 outside the ROM)
     int64_t last_read_cell; uint64_t last_read_step; // newest PRG data read (CPU-loop copy source)
     uint16_t *ipc;                     // per PRG cell: CPU address of an executed instruction start
     uint8_t *istart;                   // per PRG cell: 1 when an instruction started there
@@ -367,6 +368,7 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
         return;
     }
     x->cur_pc = pc;
+    x->cur_cell = dp_nesmach_rom_index(x->m, pc);
     x->cur_len = in.length;
     if (!x->play_mode) {
         nstm_step(x);
@@ -593,6 +595,12 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
 
 static void hook_read(void *user, unsigned addr) {
     DpNesRun *x = user;
+    if (x->cur_cell >= 0 && x->r->live_ram) {
+        if (addr < 0x2000) x->r->live_ram[x->cur_cell] |= (uint8_t)(1u << ((addr & 0x7FFu) >> 8));
+        else if (addr < 0x4000) x->r->live_io[x->cur_cell] |= DP_NES_LIVE_PPU;
+        else if (addr == 0x4016 || addr == 0x4017) x->r->live_io[x->cur_cell] |= DP_NES_LIVE_PAD;
+        else if (addr < 0x6000) x->r->live_io[x->cur_cell] |= DP_NES_LIVE_OTHER;
+    }
     if (dp_nes_io_slot(addr) >= 0) { x->r->io_reads++; x->r->io_reg_reads[dp_nes_io_slot(addr)]++; }
     if (addr == 0x2007 && x->r->chr_flags) {
         int64_t c = dp_nesmach_chr_index(x->m, dp_nesmach_ppu_v(x->m));
@@ -981,6 +989,7 @@ static void sections_build(DpNesRun *x) {
             r->section_of[k] = s->id;
             if (r->flags[k] & DP_NES_FORCED) s->forced_hits++;
             else s->natural_hits++;
+            if (r->live_ram) { s->ram_pages |= r->live_ram[k]; s->io_reads |= r->live_io[k]; }
         }
         r->section_count++;
         i = j;
@@ -1275,6 +1284,7 @@ void dp_nes_results_free(DpNesResults *r) {
     free(r->exec_hits);
     free(r->exec_kind); r->exec_kind = NULL;
     free(r->data_hits);
+    free(r->live_ram); free(r->live_io); r->live_ram = r->live_io = NULL;
     r->exec_hits = r->data_hits = NULL;
     free(r->chr_flags);
     free(r->inferred);
@@ -1328,6 +1338,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     r->exec_kind = calloc(r->prg_size, 1);
     x.exp_pc = -1;
     r->data_hits = calloc(r->prg_size, sizeof(uint32_t));
+    r->live_ram = calloc(r->prg_size, 1); r->live_io = calloc(r->prg_size, 1);
     r->chr_size = dp_nesmach_chr_size(x.m);
     if (r->chr_size) r->chr_flags = calloc(r->chr_size, 1);
     if (!r->flags) { dp_nesmach_close(x.m); return 0; }
@@ -2095,11 +2106,11 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     for (uint32_t i = 0; i < r->section_count; i++) {
         const DpNesSection *s = &r->sections[i];
         fprintf(out, "  section %u bank %u $%04X-$%04X hits %llu natural %llu forced %llu"
-                     " copies %llu verdict %s\n",
+                     " copies %llu verdict %s ram-pages $%02X io $%X\n",
             s->id, s->bank, s->lo, s->hi,
             (unsigned long long)s->hits, (unsigned long long)s->natural_hits,
             (unsigned long long)s->forced_hits, (unsigned long long)s->copies,
-            dp_nes_verdict_names[s->verdict]);
+            dp_nes_verdict_names[s->verdict], s->ram_pages, s->io_reads);
     }
     fprintf(out, "  copies %u (overflow %llu):\n", r->copy_count,
         (unsigned long long)r->copy_overflow);

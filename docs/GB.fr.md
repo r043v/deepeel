@@ -3567,3 +3567,10 @@ Sans lot ni mode illimité, le plafond et le comptage restent ; G4 reste donc �
 Les inférences de voisins de la carte NES et MD (padding ≥ 8 octets 00/FF ou ≥ 32, code ≤ 3 octets entre deux codes, données
 ≤ 1024 octets) utilisent les mêmes seuils et le même balisage « inférence » que PCE, déjà ✅ : cellules S7 NES et MD passées ✅.
 Aucun changement de code.
+
+## 0.249.24 (NES : liveness par section, C1)
+
+Chaque section NES porte désormais `ram_pages` (masque des 8 pages de 256 octets de la RAM de travail lues par son code) et
+`io_reads` (classes de registres lues : PPU `$2000-$3FFF`, pads `$4016/7`, autres `$4000-$5FFF`). Le rapport texte les
+affiche (`ram-pages $XX io $X`). Les deux instances de `--jobs 2` fusionnent leurs masques. Test : `test_liveness`
+(`nes`). Ce suivi n'alimente pas encore l'éviction par contexte (C2) : C1 NES reste ◐.

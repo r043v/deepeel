@@ -79,12 +79,16 @@ typedef struct {
     uint8_t kind, issue;
 } DpNesTreeNode;
 
+enum { DP_NES_LIVE_PPU = 1, DP_NES_LIVE_PAD = 2, DP_NES_LIVE_OTHER = 4 };
+
 typedef struct {
     uint32_t id;
     uint8_t bank;          // physical 16 KiB bank
     uint16_t lo, hi;       // bank offsets, inclusive
     uint64_t hits, natural_hits, forced_hits, boot_hits, entries;
     uint64_t copies;
+    uint8_t ram_pages;     // C1 liveness: 256-byte pages of the 2 KiB work RAM the section's code read
+    uint8_t io_reads;      // C1 liveness: DP_NES_LIVE_* classes of register read ($2000 PPU, $4016/7 pads, other)
     uint8_t kind_bits;     // DP_NES_NATURAL | DP_NES_FORCED | DP_NES_IRQ
     uint8_t verdict;       // DP_NES_VERDICT_*
 } DpNesSection;
@@ -141,6 +145,7 @@ typedef struct DpNesResults_ {
     uint8_t *chr_flags;        // one byte per CHR ROM cell (DP_NES_CHR_*), NULL on CHR-RAM
     size_t chr_size;
     uint64_t chr_tiles_bg, chr_tiles_spr, chr_reads; // distinct 16-byte tiles / $2007 reads
+    uint8_t *live_ram, *live_io; // C1: per PRG cell of an executed opcode, RAM pages (bit per 256 B) and register classes it read
     uint32_t *exec_hits, *data_hits; // per PRG cell: executions of the opcode byte / data reads (saturating)
     DpNesTreeNode *tree_nodes; uint32_t tree_count, tree_capacity;
     uint8_t *flags;            // one byte per physical PRG cell
