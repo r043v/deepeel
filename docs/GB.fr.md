@@ -2803,3 +2803,22 @@ Les trois analyseurs d'options `nes`/`pce`/`md explore` répétaient la même ch
 Non mutualisé (réel, mais pas fait) : les boucles `run_path`/`novelty_search`/`second_pass_seed`/`lot_spill` des
 `explore.c` md/nes/pce/sega (≈ 8 000 lignes, états de machine différents) et le squelette de `jobs.c`
 (≈ 470 lignes pour 3 plateformes) ; GB et Sega gardent leur propre analyseur et leur propre arrêt.
+
+## Recompilation : répartition des rôles avec m0boy (note 2026-11-04)
+
+m0boy est le recompilateur (`gbrecomp ROM --coverage X.cov`, tables `gbl_tables`, repli interpréteur pour ce que la
+couverture ne prouve pas). deepeel n'en écrit pas un second : il fournit la couverture (`--cov`, format m0boy
+`bank addr flags hits`, 1 exec / 2 entrée / 4 spéculatif / 8 données) et l'archive `--rtcode`.
+
+Première mesure de bout en bout (observation de l'outil, Super Mario Land (World), `explore --time-limit 120`, 6,8 s
+réelles) : `gbrecomp --target pc --coverage sml.cov` compile **46 584 instructions en 234 régions, « interpreter only: 0 »**,
+10 602 enregistrements laissés en données (flag 8), 5 996 entrées de dispatch. (La cible Meta plafonne à 6 963 par budget
+flash : ce n'est pas un défaut de couverture.) Écart restant pour « sans interpréteur » :
+- **code exécuté en RAM/VRAM/HRAM** : 8 341 instructions distinctes, dont 8 263 sans source ROM (code généré). Le `.cov`
+  ne porte que des offsets ROM : `gbrecomp` n'a aujourd'hui aucun moyen de les recevoir, donc elles passeraient par
+  l'interpréteur (ou seraient fausses). C'est la prochaine interface à définir avec m0boy (format de l'archive `rtcode`
+  en entrée de `gbrecomp`) ;
+- **1 079 octets de ROM inconnus** en 122 plages (dont du code mixte aux frontières) ;
+- les trous matériel listés dans `docs/COUVERTURE.fr.md` §3 (un comportement non émulé ne se recompile pas).
+Non vérifié : que le binaire recompilé reproduise l'exécution (comparaison trace à trace) ; que ces 46 584 instructions
+couvrent tout ce qu'une partie réelle exécute.
