@@ -1231,6 +1231,30 @@ static unsigned second_pass_seed(PceRun *x) {
             if (push_live(x, 1)) { seeded++; r->pass2_seeds++; }
         }
     }
+    // S3: aligned words around a provenance-traced table word (same 8 KiB page, up to 64 each way)
+    // that name unexecuted code in the page's own window are roots too
+    for (uint32_t pa = 0; pa < x->prov_len && !x->failed; pa++) {
+        int64_t a0 = x->prov_anchor[pa];
+        if (a0 < 0 || (size_t)a0 >= n) continue;
+        uint32_t page = (uint32_t)(a0 >> 13);
+        if (page >= 128 || x->page_win[page] == 0xFF) continue;
+        for (int dir = -1; dir <= 1; dir += 2) {
+            int64_t a = a0;
+            for (unsigned e = 0; e < 64; e++) {
+                a += 2 * dir;
+                if (a < 0 || (size_t)a + 1 >= n || (uint32_t)(a >> 13) != page || ((a + 1) >> 13) != (int64_t)page) break;
+                uint16_t v = (uint16_t)(x->rom[a] | x->rom[a + 1] << 8);
+                if ((v >> 13) != x->page_win[page]) break;
+                uint32_t t = (page << 13) | (v & 0x1FFF);
+                if (t >= n || x->istart[t] || sd[t] || (r->flags[t] & (DP_PCE_DATA | DP_PCE_COPIED))) continue;
+                sd[t] = 1;
+                if (r->pass2_seeds + r->pass2_refused >= PCE_PASS2_MAX) { r->pass2_capped++; continue; }
+                dp_pce_reset();
+                if (!dp_pce_enter(page, v)) { r->pass2_refused++; continue; }
+                if (push_live(x, 1)) { seeded++; r->pass2_seeds++; r->prov_roots++; }
+            }
+        }
+    }
     free(sd);
     dp_pce_reset();
     return seeded;
@@ -1790,7 +1814,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
     fprintf(out, "  stream replay (S6): %llu decoders, %llu tables, %llu candidates, %llu queued replays (%llu saturated)\n",
             (unsigned long long)r->s6_decoders, (unsigned long long)r->s6_tables, (unsigned long long)r->s6_candidates,
             (unsigned long long)r->s6_runs, (unsigned long long)r->s6_sat);
-    fprintf(out, "  provenance: %llu jump-table words traced from ROM reads\n", (unsigned long long)r->prov_sites);
+    fprintf(out, "  provenance: %llu jump-table words traced from ROM reads, %llu roots seeded\n", (unsigned long long)r->prov_sites, (unsigned long long)r->prov_roots);
     if (r->queue_grown) fprintf(out, "  queue grown %llu times\n", (unsigned long long)r->queue_grown);
     if (r->tree_nodes) fprintf(out, "  choice tree: %llu nodes\n", (unsigned long long)r->tree_nodes);
     if (r->tree_loaded) fprintf(out, "  choice tree resumed: %llu nodes reloaded\n", (unsigned long long)r->tree_loaded);

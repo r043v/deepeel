@@ -31,7 +31,7 @@ Cellules ouvertes (◐ ou ✗) : 75.
 | S2 | Fermeture statique de flot | MD | ◐ 0.132 Bcc/DBcc/BRA/JMP/JSR depuis les plages exécutées, confiance perdue après BSR/JSR ; bus 68000 plat : une seule vue par construction ; reste le raffinement des écritures indirectes et le budget en cascade |
 | S3 | Suivi de constantes / provenance | GB | ◐ HL/A + BC/DE (0.248.0) |
 | S3 | Suivi de constantes / provenance | NES | ◐ provenance RAM→`jmp (zp)` depuis la PRG |
-| S3 | Suivi de constantes / provenance | PCE | ◐ provenance ROM→WRAM→`jmp (abs)` (comptée, sans graine) |
+| S3 | Suivi de constantes / provenance | PCE | ◐ provenance ROM→WRAM→`jmp (abs)` ; 0.249.0 graines voisines de la table (`--second-pass`, test `pce_provenance_roots`) |
 | S3 | Suivi de constantes / provenance | MD | ◐ témoin An |
 | S4 | Tables de sauts depuis l'opérande | GB | ◐ 0.134 `ld hl,nn` → `jp hl` (≤ 64 mots, même banque) + 0.191.0 base dans DE/BC (`add hl,rr`) |
 | S4 | Tables de sauts depuis l'opérande | NES | ◐ tables de mots lues en données |

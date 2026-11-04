@@ -523,3 +523,6 @@ add_test(NAME resume_cli COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/resume_cli.sh $<
 
 add_test(NAME gb_prov_de COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_provde.gb --text $D/pvde.txt >/dev/null 2>&1; grep -Eq 'provenance: 1 jp-hl targets, 2 data bytes static' $D/pvde.txt")
 set_tests_properties(gb_prov_de PROPERTIES FIXTURES_REQUIRED fixtures)
+
+add_test(NAME pce_provenance_roots COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_prov.pce --second-pass --max-total 20000 --max-steps 100 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_provr.txt >/dev/null 2>&1; grep -q 'provenance: 1 jump-table words traced from ROM reads, 1 roots seeded' ${CMAKE_CURRENT_BINARY_DIR}/pce_provr.txt")
+set_tests_properties(pce_provenance_roots PROPERTIES FIXTURES_REQUIRED fixtures)

@@ -3396,3 +3396,10 @@ comportement observé : 151 tests passent. 0.248.2 : `dp_zdup` factorise aussi l
 `dp_zdup` (`src/explore/novelty.h`) remplace la compression zlib niveau 1 suivie d'une copie exacte, écrite trois fois
 dans `nes_archive_add`, `archive_add` (PCE) et `md_archive_add`. Sans changement de comportement : 151 tests passent.
 Le cœur Sega garde sa propre archive (format différent).
+
+## 0.249.0 — S3 PCE : graines depuis les tables tracées par provenance
+
+Avec `--second-pass`, les mots alignés voisins (même page de 8 Kio, ≤ 64 de chaque côté) d'un mot de table tracé
+jusqu'à un `jmp (zp)` et qui nomment du code non exécuté dans la fenêtre de leur page deviennent des racines forcées
+(comme le fait déjà le NES). Le rapport PCE affiche `, N roots seeded` après le nombre de mots tracés. Test
+`pce_provenance_roots` (fixture `fix_pce_prov` : un second mot voisin) : 1 racine. Les tests existants sont inchangés.
