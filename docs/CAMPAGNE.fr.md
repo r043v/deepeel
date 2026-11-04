@@ -179,3 +179,8 @@ Ces chiffres sont des essais courts, pas une campagne : ni saturation levée, ni
 - PCE, Raiden (USA) avec `--play 3000 --sessions 4 --max-total 400000000` (110 s, observation de l'outil) : observé
   198 938 octets (25,30 %) contre 8,72 % sans jeu, classé 39,30 % ; 12 000 trames jouées, 113 chemins, 285 forks,
   319 sections, 1 146 copies. Même constat que le NES : le jeu fait évoluer l'état que l'exploration seule laisse nul.
+- GG, SMS, MSX avec `--novelty 3000 --novelty-cells 1` (35 s chacun) : **non concluant**. Le temps part dans
+  l'exploration bornée (60 010 000 pas) ; la recherche de nouveauté n'a fait qu'un essai (1 trial, 1 trame, 0 touche)
+  avant l'arrêt. Cartes à la fin : GG 87,29 % (contre 85,01 %), SMS 77,83 % (77,96 %), MSX 76,21 % (74,35 %) — des
+  écarts de l'ordre de la variation entre runs, sans signification. Il faut des runs d'une durée bien supérieure,
+  avec la phase de jeu seule (`--max-total` réduit), pour comparer au NES et au PCE.
