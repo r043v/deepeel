@@ -191,3 +191,9 @@ Ces chiffres sont des essais courts, pas une campagne : ni saturation levée, ni
   phase de jeu GG n'améliore pas la carte sur cette ROM dans ce budget (observation de l'outil, un seul run).
 - MD, Sonic 1 : le mode joué de MD passe uniquement par `--tas GMV` (pas de `--play`/`--novelty` comme NES/PCE/Z80) ;
   aucun GMV n'est disponible hors dépôt, donc pas de comparaison joué/non joué sur MD pour l'instant (lié à J3).
+- MD, Sonic 1 (USA, Europe), exploration seule, `--max-total 50000000` (observation de l'outil) : 410 513 pas, 932 chemins,
+  836 forks (1 fork d'IRQ), arrêt par épuisement de la file (rien en attente, aucun plafond saturé hors « loop bound
+  885 »). ROM exécutée 2,1 % (10 794 octets), union observée 3,16 %, 47 chemins terminés par une faute machine, 6 tables
+  `jmp d(pc,Xn)` (66 gestionnaires). Même schéma que NES/PCE sans jeu : l'exploration s'épuise sur un état de RAM
+  initial ; la cause précise (porte d'état de jeu ou boucle d'attente d'IRQ) n'est pas isolée. À comparer avec un GMV
+  quand J3 sera débloqué.
