@@ -2167,3 +2167,8 @@ Diagnostics (variables d'environnement, hors usage normal) :
 `DEEPEEL_TAS_DUMP=<fichier>` (hash par image), `DEEPEEL_TAS_DUMPFRAME=<n>`,
 `DEEPEEL_TAS_TRACEFRAME=<n>`, `DEEPEEL_TAS_DIVSKEW=<k>`, `DEEPEEL_TAS_NOINIT`,
 `DEEPEEL_TAS_NOMODE3`, `DEEPEEL_DEBUG_WATCHR/WATCHW=<adresse hex>`.
+
+Le décalage de 334 images, l'état initial Gambatte, l'horloge mode 3 et la phase
+DIV ne s'appliquent qu'aux films dont l'en-tête annonce `Core Gambatte`. Le film
+`mugg_masterjun` (BizHawk 2.0, cœur **GBHawk**) garde l'alignement simple et n'a
+pas de référence native ici : sa fidélité n'est pas validée.

@@ -1110,17 +1110,17 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
             if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->mach->api->eram)
                 memset(w->mach->api->eram, 0xFF, dp_gbl_variant_eram[w->mach->api->variant]);
             // BizHawk's Gambatte starts from a fixed power-on RAM dump, not zeros
-            if (w->tas.recorder == DP_TAS_REC_BIZHAWK && !getenv("DEEPEEL_TAS_NOINIT")) {
+            if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gambatte && !getenv("DEEPEEL_TAS_NOINIT")) {
                 memcpy(w->mach->api->wram, dp_gambatte_wram, 0x2000);
                 memcpy(w->mach->api->hram, dp_gambatte_hram, 0x7F);
             }
             // BizHawk's frame clock (gbl.h, sync_vba_off_clock 3): a frame ends at
             // the video frame or when its sample budget runs out
-            if (w->tas.recorder == DP_TAS_REC_BIZHAWK && !w->tas.equal_frames && !getenv("DEEPEEL_TAS_NOMODE3"))
+            if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gambatte && !w->tas.equal_frames && !getenv("DEEPEEL_TAS_NOMODE3"))
                 *w->mach->api->sync_vba_off_clock = 3;
             // Gambatte's DIV phase against the m0boy clock, measured on SML2 (DIV
             // reads that seed its RNG): any skew in 25..64 matches, 40 is mid-range.
-            if (w->tas.recorder == DP_TAS_REC_BIZHAWK)
+            if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gambatte)
                 *w->mach->api->sync_div_skew = getenv("DEEPEEL_TAS_DIVSKEW") ? (uint8_t)atoi(getenv("DEEPEEL_TAS_DIVSKEW")) : 40;
             int vba_old = w->tas.recorder == DP_TAS_REC_VBA && w->tas.recorder_rev == 0;
             if (vba_old) {
