@@ -2407,3 +2407,10 @@ RAM : 16 273 instructions distinctes exécutées depuis la RAM, 1 rattachée à 
 43 171 octets, 484 M pas hors ROM) : budgets et configuration différents, 60× moins de pas ici. Le résidu plus
 grand ici vient donc d'abord du budget ; la part de « générées » inclut probablement du code exécuté dans la
 WRAM après des fourches « key » (états de jeu non naturels), ce que ce rapport ne distingue pas.
+
+Campagne J13, Super Mario Land 2, même binaire et mêmes options (1 h, observations de l'outil) : 228 364 648 pas,
+18 004 chemins, 732 145 fourches (198 512 « key »), 7 903 sections ; résidu inconnu 68 578 octets en 2 902
+plages (run antérieur `output/batch/marioland2` non relu ici). Spool : 71,5 M états écrits, 18 098 relus,
+22,9 Gio en attente. Hors ROM : 1 023 294 pas, 1 550 rattachés à une copie ROM (≈ 0,15 %) ; archive RAM :
+24 899 instructions distinctes, 12 rattachées à une copie ROM, 24 887 « générées », 282 auto-modifiées ;
+240 235 écritures SMC (premier au pc $0048). Même réserve que pour Zelda sur les fourches « key ».
