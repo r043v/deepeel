@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.187.6 LANGUAGES C)
+project(deepeel VERSION 0.187.7 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -180,13 +180,14 @@ extern uint8_t ${p}gbl_eram[];
 extern void ${p}gbl_wr(uint16_t a, uint8_t v);
 extern const uint8_t *${p}gbl_rmap[16];
 extern uint32_t ${p}gbl_frame, ${p}gbl_interp_instrs;
+extern uint16_t ${p}gbl_rom0_bank;
 static const DpGblApi inst_${v}_${i} = {
     ${v}, ${p}gbl_reset, ${p}gbl_run, ${p}gbl_set_buttons, ${p}gbl_state_bytes, ${p}gbl_state_io,
     &${p}gbr, ${p}gbl_io, &${p}gbl_ie, ${p}gbl_wram, ${p}gbl_vram, ${p}gbl_oam, ${p}gbl_hram,
     &${p}gbl_joyp, ${eram_ref}, (const uint8_t *const *)&${p}gbl_rmap, &${p}gbl_frame,
     &${p}gbl_interp_instrs, &${p}gbl_interp_only, &${p}gbl_skip_render,
     (uint8_t *)${p}gbl_rom, ${rommax}, ${p}gbl_wr,
-    &${p}gbl_sync_div_skew, &${p}gbl_sync_vba_off_clock,
+    &${p}gbl_sync_div_skew, &${p}gbl_sync_vba_off_clock, &${p}gbl_rom0_bank,
 };
 ")
     string(APPEND g_rows "[${v}][${i}] = &inst_${v}_${i},

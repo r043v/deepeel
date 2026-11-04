@@ -407,7 +407,7 @@ void dp_explorer_progress(DpExplorer *ex, DpProgress *out) {
 // wild bank back into the cart (a bank register value beyond the cart reads
 // as a mirror on real hardware too).
 uint16_t cur_bank(DpExplorer *ex, uint16_t pc) {
-    uint32_t b = pc < 0x4000 ? 0 : ex->mach->api->gbr->rom_bank;
+    uint32_t b = dp_gbl_bank_of(ex->mach->api, pc);
     uint32_t banks = (uint32_t)ex->res->banks;
     if (banks && b >= banks) b %= banks;
     return (uint16_t)b;
@@ -903,7 +903,7 @@ static int32_t wram_rom_source(DpExplorer *ex, uint16_t pc) {
         if (pc < c->dst_lo || pc > c->dst_hi) continue;
         uint32_t sa = (uint32_t)c->src_lo + (uint32_t)(pc - c->dst_lo);
         if (sa > c->src_hi || sa >= 0x8000) continue;
-        uint32_t k = dp_rom_index(sa < 0x4000 ? 0 : c->src_bank, (uint16_t)sa);
+        uint32_t k = dp_rom_index(sa < 0x4000 ? (c->src_lo < 0x4000 ? c->src_bank : *ex->mach->api->rom0_bank) : c->src_bank, (uint16_t)sa);
         if (k < (uint32_t)res->banks * 0x4000) { rk = (int32_t)k; break; }
     }
     if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
@@ -1176,7 +1176,7 @@ bad_done:
             uint16_t t = api->gbr->hl;
             if (ind) {
                 ind->hits++;
-                uint8_t tb = (uint8_t)(t < 0x4000 ? 0 : cur_bank(ex, t));
+                uint8_t tb = (uint8_t)cur_bank(ex, t);
                 int have = 0;
                 for (int i = 0; i < ind->n; i++)
                     if (ind->target[i] == t && ind->tbank[i] == tb) have = 1;
@@ -1216,9 +1216,9 @@ bad_done:
     }
     if (!ex->session) stream_step(ex);
     if (op == 0xCD && !ex->session)
-        stream_call(ex, dp_rom_index(target < 0x4000 ? 0 : (uint32_t)cur_bank(ex, target), target));
+        stream_call(ex, dp_rom_index((uint32_t)cur_bank(ex, target), target));
     if (is_call && !ex->session) {
-        uint32_t tkey = dp_rom_index(target < 0x4000 ? 0 : (uint32_t)cur_bank(ex, target), target);
+        uint32_t tkey = dp_rom_index((uint32_t)cur_bank(ex, target), target);
         DpCallList *cl = dp_map_get_or_add(&res->callers, tkey);
         pthread_mutex_lock(&res->callers.mtx); // the list is edited in place by several drain workers
         if (cl && cl->n < 8) {

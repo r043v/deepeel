@@ -793,9 +793,7 @@ static void *worker_main(void *arg) {
         w->lane_frame = w->frames_done;
         w->lane_seg_left = w->seg_left;
         w->lane_pc = w->mach->api->gbr->pc;
-        w->lane_bank = (uint8_t)(w->mach->api->gbr->pc < 0x4000
-                                     ? 0
-                                     : w->mach->api->gbr->rom_bank);
+        w->lane_bank = (uint8_t)dp_gbl_bank_of(w->mach->api, w->mach->api->gbr->pc);
         w->lane_buttons = w->applied_mask;
         w->lane_dead = 0;
         w->lane_backtracked = (uint8_t)w->backtracked;
@@ -1690,9 +1688,7 @@ int dp_play_lanes(DpPlay *p, DpSessionLane *out, int max) {
         out[n].credit_total = worker_credit(w);
         out[n].credit_epoch = out[n].credit_total - w->credit_base;
         out[n].stagnant_epochs = 0;
-        out[n].bank = (uint8_t)(w->mach->api->gbr->pc < 0x4000
-                                    ? 0
-                                    : w->mach->api->gbr->rom_bank);
+        out[n].bank = (uint8_t)dp_gbl_bank_of(w->mach->api, w->mach->api->gbr->pc);
         out[n].pc = w->mach->api->gbr->pc;
         out[n].buttons = w->applied_mask;
         out[n].dead = 0;

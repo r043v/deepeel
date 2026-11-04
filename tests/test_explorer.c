@@ -182,6 +182,12 @@ int main(int argc, char **argv) {
         if (!strcmp(res.plat->io_regs[i].name, "ROMB0")) romb0 = i;
     CHECK(romb0 >= 0 && res.io[romb0].wr >= 2 && res.io[romb0].bank_events >= 2);
 
+    // --- mbc1m1: MBC1 mode 1 remaps the ROM0 window to bank $20 -----------------
+    run(dir, "mbc1m1");
+    CHECK(res.exec_flags[dp_rom_index(0, 0x0150)] & DP_XF_NATURAL);  // code before the switch: bank 0
+    CHECK(res.exec_flags[dp_rom_index(0x20, 0x0158)] & DP_XF_NATURAL); // code after it: bank $20, same address
+    CHECK(!(res.exec_flags[dp_rom_index(0, 0x015D)] & DP_XF_NATURAL)); // the bank-0 copy of the tail never ran
+
     // --- dma: OAM DMA record -------------------------------------------------------
     run(dir, "dma");
     CHECK(copy_of(1, 0, 0x3000, 0x309F, 0xFE00, 0xFE9F) != NULL);

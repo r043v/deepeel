@@ -38,7 +38,14 @@ typedef struct DpGblApi {
     void (*wr)(uint16_t a, uint8_t v);
     /* movie sync compatibility knobs (gbl.h): 0 = hardware behaviour */
     uint8_t *sync_div_skew, *sync_vba_off_clock;
+    /* bank shown in the $0000-$3FFF window: 0 except on a large MBC1 in mode 1 */
+    const uint16_t *rom0_bank;
 } DpGblApi;
+
+/* the ROM bank behind a pc/address of the fixed-or-switchable windows */
+static inline uint16_t dp_gbl_bank_of(const DpGblApi *a, uint16_t addr) {
+    return addr < 0x4000 ? *a->rom0_bank : a->gbr->rom_bank;
+}
 
 extern const DpGblApi *const dp_gbl_inst[DP_GBL_VARIANTS][DP_GBL_MACHINES];
 extern const uint8_t dp_gbl_variant_mbc[DP_GBL_VARIANTS];

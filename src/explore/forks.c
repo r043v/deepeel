@@ -33,7 +33,7 @@ int both_sides_covered(DpExplorer *ex, uint16_t pc, uint8_t op) {
     for (int i = 0; i < 2; i++) {
         uint16_t a = sides[i];
         if (a >= 0x8000) return 0;
-        uint32_t k = dp_rom_index(a < 0x4000 ? 0 : (a >= 0x4000 && pc < 0x4000 ? ex->mach->api->gbr->rom_bank
+        uint32_t k = dp_rom_index(a < 0x4000 ? *ex->mach->api->rom0_bank : (a >= 0x4000 && pc < 0x4000 ? ex->mach->api->gbr->rom_bank
                                                                               : bank), a);
         if (k >= (uint32_t)res->banks * 0x4000) return 0;
         uint8_t f = res->exec_flags[k];
