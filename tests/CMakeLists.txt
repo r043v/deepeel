@@ -431,6 +431,8 @@ add_test(NAME md_s4_an COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURREN
 set_tests_properties(md_s4_an PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_s4_ptr COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_s4p.md --text $D/md_s4p.txt >/dev/null 2>&1; grep -q ': 1 tables, 2 handlers seeded' $D/md_s4p.txt")
 set_tests_properties(md_s4_ptr PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME md_s4_ptr_a2 COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_s4p2.md --text $D/md_s4p2.txt >/dev/null 2>&1; grep -q ': 1 tables, 2 handlers seeded' $D/md_s4p2.txt")
+set_tests_properties(md_s4_ptr_a2 PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_s4_words COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_s4w.md --text $D/md_s4w.txt >/dev/null 2>&1; grep -q ': 1 tables, 2 handlers seeded' $D/md_s4w.txt")
 set_tests_properties(md_s4_words PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME z80_novelty_cells COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; for s in sms msx; do $B z80 explore $s $D/fix_z80_branch.$s --novelty 300000 --novelty-frames 30 --novelty-cells 1 --text $D/zc_$s.txt >/dev/null 2>&1; grep -q 'novelty: depth [1-9][0-9]* frames, [1-9][0-9]* trials' $D/zc_$s.txt || exit 1; done")

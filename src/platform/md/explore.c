@@ -955,7 +955,7 @@ static void s4_ptr_table(X *x, uint32_t pc, unsigned an, uint32_t obs) {
     uint32_t w = x->an_writer[an];
     if (w == UINT32_MAX || (size_t)w + 4 > n || (w & 1)) return;
     unsigned op = (unsigned)rom[w] << 8 | rom[w + 1];
-    if ((op & 0xF1FF) != 0x2070 && (op & 0xF1FF) != 0x207B) return;      // movea.l d8(Am|pc,Xn),An
+    if ((op & 0xF1F8) != 0x2070 && (op & 0xF1FF) != 0x207B) return;      // movea.l d8(Am|pc,Xn),An (any Am)
     if (((op >> 9) & 7) != an) return;
     if (rom[w + 2] & 0x07) return;                                       // brief extension only
     if (dp_set_insert(&x->ind_sites, ((uint64_t)pc + 1) | (2ull << 40)) == 0) return;
