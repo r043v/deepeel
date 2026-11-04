@@ -596,6 +596,20 @@ static void worker_vblank(DpMach *m) {
             dump_init = 1;
             if (dn) dumpf = fopen(dn, "w");
         }
+        // DEEPEEL_TAS_REGS=<file>: "<frame> <pc> <sp> <a> <bc> <de> <hl>" at every movie vblank (the
+        // frame number counts vblanks seen, 1-based), the format tools/gbhawk_ref/compare_regs.py reads
+        static FILE *regsf;
+        static int regs_init;
+        if (!regs_init) {
+            const char *rn = getenv("DEEPEEL_TAS_REGS");
+            regs_init = 1;
+            if (rn) regsf = fopen(rn, "w");
+        }
+        if (regsf) {
+            fprintf(regsf, "%u %04x %04x %02x %04x %04x %04x\n", (unsigned)w->frames_done + 1, m->api->gbr->pc,
+                    m->api->gbr->sp, m->api->gbr->a, m->api->gbr->bc, m->api->gbr->de, m->api->gbr->hl);
+            fflush(regsf);
+        }
         if (dumpf) {
             uint64_t h = 1469598103934665603ull;
             for (int i = 0; i < 0x2000; i++) h = (h ^ m->api->wram[i]) * 1099511628211ull;

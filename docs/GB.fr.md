@@ -2609,3 +2609,13 @@ rappels d'exécution, de lecture/écriture et de CD-logger : c'est un moteur ind
 `--ppm`, `--shot-every N PREFIXE`, `--bios`. Observation (SML2, `mugg_masterjun`, 2 752 trames, sans boot ROM,
 d'après l'outil) : 15 148 octets de ROM exécutés dont 7 894 opcodes. Limite : ce film a été enregistré avec le cœur
 GBHawk (`Core GBHawk` dans l'en-tête), pas avec Gambatte ; Gambatte le suit sans garantie d'exactitude trame à trame.
+
+## 0.182.1 — film GBHawk : profil de boot DMG, trace de registres
+
+- Un BK2 déclarant `Core GBHawk` avec boot ROM DMG reçoit le même alignement de trame que Gambatte
+  (334 trames de boot retirées). Avant, le film `mugg_masterjun` (SML2) partait avec 334 trames de décalage.
+- `DEEPEEL_TAS_REGS=<fichier>` : une ligne `trame pc sp a bc de hl` par vblank du film (worker TAS).
+- Comparaison avec la trace GBHawk (`tools/gbhawk_ref`, 2 752 trames) — observation de l'outil, non concluante :
+  à décalage 333 le SP coïncide sur de longues plages (p. ex. trames 531–1186) avec des écarts isolés ; les
+  captures d'écran coïncident parfois (trame 450 : 0 pixel de différence) et divergent ailleurs. L'échantillonnage
+  du registre au vblank dépend de la phase exacte du cycle : la première divergence réelle n'est pas établie.

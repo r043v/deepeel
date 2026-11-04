@@ -186,7 +186,7 @@ static int hexv(int c) {
 
 static void bk2_header(const uint8_t *h, size_t n, DpTas *out) {
     size_t i = 0;
-    int dmg_boot = 0;
+    int dmg_boot = 0, gbhawk = 0;
     while (i < n) {
         size_t j = i;
         while (j < n && h[j] != '\n') j++;
@@ -208,6 +208,8 @@ static void bk2_header(const uint8_t *h, size_t n, DpTas *out) {
             dmg_boot = 1;
         } else if (len >= 12 && !strncmp(l, "Core Gambatte", 13)) {
             out->gambatte = 1;
+        } else if (len >= 11 && !strncmp(l, "Core GBHawk", 11)) {
+            gbhawk = 1;
         } else if (len > 9 && !strncmp(l, "GameName ", 9)) {
             size_t g = len - 9 < sizeof out->game - 1 ? len - 9 : sizeof out->game - 1;
             memcpy(out->game, l + 9, g);
@@ -217,7 +219,7 @@ static void bk2_header(const uint8_t *h, size_t n, DpTas *out) {
     }
     // only Gambatte's boot timing is modelled (GBHawk and the other BizHawk
     // cores boot differently and keep the plain frame-0 alignment)
-    if (dmg_boot && out->gambatte) out->boot_frames = DP_TAS_GAMBATTE_DMG_BOOT_FRAMES;
+    if (dmg_boot && (out->gambatte || gbhawk)) out->boot_frames = DP_TAS_GAMBATTE_DMG_BOOT_FRAMES;
 }
 
 int dp_tas_rom_match(const DpTas *t, const uint8_t *rom, size_t rom_size, char *why, size_t whysz) {

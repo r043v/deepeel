@@ -46,7 +46,8 @@ static class P {
             gb.FrameAdvance(pad, true, false);
             var r = gb.GetCpuFlagsAndRegisters();
             uint h = 2166136261; foreach (int px in gb.GetVideoBuffer()) h = (h ^ (uint)px) * 16777619;
-            o.WriteLine($"{f + 1} {r["PC"].Value:x4} {r["SP"].Value:x4} {r["AF"].Value:x4} {r["BC"].Value:x4} {r["DE"].Value:x4} {r["HL"].Value:x4} {h:x8}");
+            int R(string n) => (int)r[n].Value;
+            o.WriteLine($"{f + 1} {R("PC"):x4} {R("SPh") << 8 | R("SPl"):x4} {R("A") << 8 | R("F"):x4} {R("B") << 8 | R("C"):x4} {R("D") << 8 | R("E"):x4} {R("H") << 8 | R("L"):x4} {h:x8}");
             if (shot != null && every > 0 && (f + 1) % every == 0) {
                 var vb = gb.GetVideoBuffer();
                 using var w = new BinaryWriter(File.Create($"{shot}{f + 1:D6}.ppm"));
