@@ -100,3 +100,18 @@ Avec plafonds relevés à la main (`--max-total 100000000 --path-steps 5000000 -
 --visit-cap 1024`), Sonic atteint le mur de pas (100 M pas, 849 chemins, 2 687 forks, 1 852 forks non lancés),
 le plafond par site reste saturé (6,9 M), le code statique passe de 140 à 1 728 octets. Un essai avec `--fork-cap 64
 --queue-max 4194304` a été tué (code 137, probablement mémoire). Toujours une borne basse, jamais une fermeture.
+
+### J13 : SMS / GG / SG sur ROMs réelles (0.187.6, observations de l'outil)
+
+Réglages par défaut (bornés, mur de 60 M pas atteint), un run chacun ; « carte » = classification de l'outil
+(connu = exécuté, lu ou inféré), pas une mesure de matériel.
+
+| ROM | pas | chemins | forks (branche / irq) | carte : connu / inconnu | hors ROM |
+|---|---|---|---|---|---|
+| SMS Ace of Aces | 60 M | 1 235 | 1 053 / 745 | 72,21 % / 27,79 % (exécuté seul : 29,90 %) | 1 200 193 |
+| GG Alien 3 | 60 M | 1 567 | 1 388 / 680 | 84,58 % / 15,42 % (exécuté seul : 25,41 %) | 12 602 501 |
+| SG Bomb Jack (32 Kio) | 60 M | 1 348 | 2 203 / 583 | 100 % / 0 % | 2 885 452 |
+
+Le mur de pas est atteint partout : ce sont des bornes basses. Seul Bomb Jack est entièrement classé, ce qui reste
+une classification de l'outil (une ROM de 32 Kio), pas une preuve de couverture du comportement.
+Reste pour J13 : audit complet de la matrice §2.1, `--unbounded` MD.
