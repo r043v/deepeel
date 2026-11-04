@@ -2656,3 +2656,7 @@ Fixture `fix_md_ramgen.md` (mot ROM lu, inversé, stocké en RAM + `rts` immédi
 Limite constatée, épinglée par le test : le producteur est le dernier octet ROM lu avant le store, donc l'`rts`
 stocké en immédiat reçoit aussi `1024` alors qu'il n'en dérive pas. Seule une provenance de dépendances exacte
 (J14, reste ouvert) lèverait cette imprécision.
+
+## 0.186.2 — NES : résumé de l'archive rtcode dans le rapport
+
+Même ligne que MD (`runtime code archive: …`). Pas de fixture NES de code généré encore.

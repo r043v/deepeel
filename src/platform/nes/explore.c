@@ -1789,6 +1789,8 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  faults %llu decode cuts %llu exec outside PRG %llu\n",
         (unsigned long long)r->faults, (unsigned long long)r->decode_cuts,
         (unsigned long long)r->exec_outside);
+    if (r->ra.n) fprintf(out, "  runtime code archive: %u variants, %u attached to a ROM copy source, %u generated with an approximate ROM producer, %u rewrote an earlier variant\n",
+        r->ra.n, r->ra.attached, r->ra.derived, r->ra.poly);
     fprintf(out, "  play: %llu sessions x frames %llu\n",
         (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run);
     if (r->state_exported) fprintf(out, "  state exported: deepest cell, %u frames from power-on\n", r->state_exported_depth);
