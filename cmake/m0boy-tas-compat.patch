@@ -1,7 +1,7 @@
 diff -ruN a/gbl_core.c b/gbl_core.c
---- a/gbl_core.c	2026-11-04 17:19:32.075412511 +0100
-+++ b/gbl_core.c	2026-11-04 17:27:05.770096378 +0100
-@@ -25,6 +25,10 @@
+--- a/gbl_core.c	2026-11-04 18:52:18.463852102 +0100
++++ b/gbl_core.c	2026-11-04 19:28:27.251582872 +0100
+@@ -25,6 +25,11 @@
  uint8_t *gbl_wmap[16];
  
  uint8_t gbl_interp_only;
@@ -9,10 +9,11 @@ diff -ruN a/gbl_core.c b/gbl_core.c
 +uint8_t gbl_sync_vba_off_clock;
 +uint32_t gbl_sync_pad_delay;
 +uint16_t gbl_sync_div_extra;
++uint16_t gbl_sync_ppu_phase;
  uint32_t gbl_frame;
  uint32_t gbl_interp_instrs;
  uintptr_t gbl_stack_limit;
-@@ -1248,6 +1252,22 @@
+@@ -1248,6 +1253,22 @@
      gbl_joyp = (uint8_t)(0xC0 | (sel & 0x30) | (v & 0x0F));
  }
  
@@ -35,7 +36,7 @@ diff -ruN a/gbl_core.c b/gbl_core.c
  void gbl_set_buttons(uint8_t pressed) {
  #if GBL_DEBUG_RESTART
      if (pressed != gbl_dbg_restart.buttons[(gbl_dbg_restart.pos - 1u) & 15u]) {
-@@ -1257,6 +1277,16 @@
+@@ -1257,6 +1278,16 @@
      }
      if ((pressed & 0x0F) == 0x0F) gbl_dbg_restart.combo_frames++; /* A+B+Select+Start */
  #endif
@@ -52,7 +53,7 @@ diff -ruN a/gbl_core.c b/gbl_core.c
      if (pressed & ~buttons) IF |= 0x10;
      buttons = pressed;
      joypad_update();
-@@ -1279,9 +1309,9 @@
+@@ -1279,9 +1310,9 @@
  #endif
  uint8_t gbl_io_rd(uint8_t n) {
      switch (n) {
@@ -64,7 +65,7 @@ diff -ruN a/gbl_core.c b/gbl_core.c
      case 0x05: timer_sync(gbr.cyc); return TIMA;
      case 0x07: return TAC | 0xF8;
      case 0x0F: gbl_sync(); return IF | 0xE0;
-@@ -1303,7 +1333,7 @@
+@@ -1303,7 +1334,7 @@
  #endif
  void gbl_io_wr(uint8_t n, uint8_t v) {
      switch (n) {
@@ -73,7 +74,7 @@ diff -ruN a/gbl_core.c b/gbl_core.c
      case 0x02:
          gbl_io[0x02] = v;
          if ((v & 0x81) == 0x81) {
-@@ -1914,6 +1944,7 @@
+@@ -1914,6 +1945,7 @@
      gbr.sp = 0xFFFE; gbr.pc = 0x0100;
      gbl_ie = 0;
      gbl_io[0x00] = 0x30;
@@ -82,8 +83,8 @@ diff -ruN a/gbl_core.c b/gbl_core.c
      IF = 0x01;
      TAC = 0; TIMA = 0; TMA = 0;
 diff -ruN a/gbl_cpu.c b/gbl_cpu.c
---- a/gbl_cpu.c	2026-11-04 17:19:32.075486069 +0100
-+++ b/gbl_cpu.c	2026-11-04 17:27:05.769623009 +0100
+--- a/gbl_cpu.c	2026-11-04 18:52:18.464434384 +0100
++++ b/gbl_cpu.c	2026-11-04 19:28:27.251556262 +0100
 @@ -266,6 +266,8 @@
          uint32_t r = n8 & 7, grp = n8 >> 6, bit = (n8 >> 3) & 7;
          gbr.pc++;
@@ -104,9 +105,9 @@ diff -ruN a/gbl_cpu.c b/gbl_cpu.c
          extern uint8_t gbl_rom_fetch; /* opcode fetches are not data reads */
          gbl_rom_fetch = 1;
 diff -ruN a/gbl.h b/gbl.h
---- a/gbl.h	2026-11-04 17:19:32.075717524 +0100
-+++ b/gbl.h	2026-11-04 17:27:05.769851458 +0100
-@@ -399,6 +399,56 @@
+--- a/gbl.h	2026-11-04 18:52:18.462738412 +0100
++++ b/gbl.h	2026-11-04 19:28:27.251635641 +0100
+@@ -399,6 +399,68 @@
  extern uint8_t gbl_safe_request;
  void gbl_platform_safe_point(void); /* weak default: nothing */
  
@@ -155,17 +156,29 @@ diff -ruN a/gbl.h b/gbl.h
 + *    of gbl_sync_div_skew.  GBHawk's divider starts at 0xFFFE and counts
 + *    from power-on, so at the movie's $0100 (23,440,335 cycles) the low 16
 + *    bits of the phase are 0xFE4D (uint8_t gbl_sync_div_skew cannot hold
-+ *    it). */
++ *    it).
++ *  - gbl_sync_ppu_phase: cycles of line 153 already elapsed at the movie's
++ *    $0100.  GBHawk's line 153 zeroes LY at cycle 6 and skips the next
++ *    boundary, so its 0->1 flip lands 912 cycles after the 153 boundary
++ *    (measured on SML2: flips at $0100-405 and $0100+507).  m0boy's reset
++ *    starts its line at $0100 instead; the host calls gbl_ppu_phase_apply
++ *    right after the movie machine's state is loaded to move the line start
++ *    back by this much and put LY in the zeroed 153 state, making every LY
++ *    read land on the same value (SML2's LY==0x94 poll loops read
++ *    identical values at identical cycles).  0 = phase 0 (hardware reset
++ *    behaviour). */
 +void gbl_pad_pending_check(uint32_t now); /* gbl_core.c, GBHawk pad latch */
++void gbl_ppu_phase_apply(void); /* gbl_ppu.c, GBHawk line-153 phase */
 +extern uint32_t gbl_sync_pad_delay;
 +extern uint16_t gbl_sync_div_extra;
++extern uint16_t gbl_sync_ppu_phase;
 +
  /* ---- diagnostics -------------------------------------------------------- */
  extern uint8_t gbl_interp_only;     /* ignore compiled code (reference mode) */
  extern uint32_t gbl_frame;
 diff -ruN a/gbl_ppu.c b/gbl_ppu.c
---- a/gbl_ppu.c	2026-11-04 17:19:32.075528439 +0100
-+++ b/gbl_ppu.c	2026-11-04 17:27:05.769807185 +0100
+--- a/gbl_ppu.c	2026-11-04 18:52:18.464365895 +0100
++++ b/gbl_ppu.c	2026-11-04 19:28:27.251670517 +0100
 @@ -837,10 +837,42 @@
   * calls (register polls, VRAM writes) land between two transitions. */
  uint32_t gbl_ppu_due;
@@ -404,9 +417,28 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
          }
          LCDC = v;
          update_due();
-@@ -1109,6 +1233,10 @@
+@@ -1108,7 +1232,29 @@
+     }
  }
  
++/* gbl.h (gbl_sync_ppu_phase): at the movie's $0100 GBHawk is that many
++ * cycles into line 153, with LY already zeroed by its cycle-6 rule.  Moving
++ * the line start there makes m0boy's 153->0 wrap land on GBHawk's skipped
++ * boundary and its 0->1 flip on GBHawk's, so every LY read matches; ly=153
++ * with stage 1 reads 0 through ly_visible, like GBHawk after the zeroing.
++ * Called by the host right after the movie machine's state is loaded (cyc
++ * still 0); a no-op without the knob. */
++void gbl_ppu_phase_apply(void) {
++    if (!gbl_sync_ppu_phase) return;
++    line_start = gbr.cyc - gbl_sync_ppu_phase;
++    off_start = gbr.cyc - gbl_sync_ppu_phase;
++    ly = 153;
++    stage = 1;
++    mode = 1;
++    next_stage_off = LINE_CYCLES;
++    update_due();
++}
++
  void gbl_ppu_reset(void) {
 +    gam_v0_pend = 0;
 +    gam_last = 0;
@@ -415,3 +447,11 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      LCDC = 0x91;
      STAT = 0x00;
      BGP = 0xFC;
+@@ -1123,6 +1269,7 @@
+     stat_line = 0;
+     off_start = gbr.cyc;
+     update_due();
++    gbl_ppu_phase_apply();
+     stat_refresh();
+     P.spr_ly = 0xFF;
+     bg_pairs_bgp = -1;

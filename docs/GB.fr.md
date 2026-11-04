@@ -3113,3 +3113,33 @@ Observation de l'outil : sur `fix_md_dbcc`, le nœud fils porte le site `0x202`.
 Comme pour MD : les nœuds créés par une fourche de branchement NES (cellule PRG du branchement ;
 `0xFFFFFFFF` pour les autres graines) et PCE (index ROM + 1 du `pc` de la fourche ; 0 hors ROM)
 portent leur site. Observation de l'outil ; pas de reprise depuis l'arbre, F2 reste ◐.
+
+## 0.218.0 : GB, phase PPU du profil GBHawk (lecture LY exacte)
+
+Complément au profil GBHawk de 0.217.0 : le dernier écart trace contre trace était la
+phase de ligne PPU à $0100. GBHawk gèle son compteur de ligne pendant le boot (LCD off)
+et la ligne 153 de sa trame remise à zéro du compteur `LY` au cycle 6 en sautant la
+frontière suivante (`GB_PPU.cs`), donc son front LY 0→1 tombe 912 cycles après la
+frontière de la ligne 153. Mesure sur SML2 (`tools/gbhawk_ref` étendu d'une colonne LY
+et d'un journal des écritures $FF40/$FF50) : frontières de ligne 153 à $0100−405 et
+0→1 à $0100+507 ; m0boy démarre sa ligne à $0100 (front à $0100+456), d'où les îles
+±52 cycles des boucles d'attente `LY==0x94` et la dérive −64 cycles.
+
+- Nouveau knob `gbl_sync_ppu_phase` (patch tas-compat, gbl.h) : cycles de la ligne 153
+  écoulés à $0100 ; le profil GBHawk pose 405 et la machine appelle
+  `gbl_ppu_phase_apply()` juste après le chargement de l'état initial (`DpGblApi`
+  gagne le pointeur ; deepeel l'appelle dans le chemin TAS GBHawk). Le wrap 153→0 de
+  m0boy tombe alors sur la frontière sautée de GBHawk et son front 0→1 sur le sien :
+  les lectures LY coïncident cycle par cycle (200 000 instructions comparées, écart 0).
+- Environnement : `DEEPEEL_TAS_PPUPHASE` (défaut 405). Le délai manette reste 14 481
+  (fenêtre mesurée 14 470..14 550) et la phase DIV $FE4D.
+- WRAM par trame : 2 406 des 2 418 trames du film identiques (m0 trame f = GBHawk
+  trame f+333). Écarts : trames 1-4 (boot) et 520-526 — la transition intro→titre écrit
+  la WRAM en continu et les deux côtés l'échantillonnent à ~51 235 cycles d'écart dans
+  la trame (m0 au bord vblank, GBHawk au budget FrameAdvance) : états intermédiaires
+  différents, point final identique (trames 527-2418 toutes conformes). Artefact
+  d'échantillonnage, pas une divergence de jeu.
+
+Observation de l'outil sur ROM réelle, pas une mesure matérielle. Reste ouvert : une
+lecture LY de m0boy en dehors du profil (matériel) n'est pas remise en cause — le knob
+ne touche que la machine TAS.

@@ -26,7 +26,8 @@ class Pad : IController {
 }
 class Mc : IMemoryCallback {
     public MemoryCallbackDelegate Cb;
-    public MemoryCallbackType Type => MemoryCallbackType.Execute;
+    public MemoryCallbackType TypeVal;
+    public MemoryCallbackType Type => TypeVal;
     public string Name => "instr trace";
     public MemoryCallbackDelegate Callback => Cb;
     public uint? Address => null;
@@ -59,10 +60,18 @@ static class P {
                 long cyc = gb.TotalExecutedCycles;
                 int im = r["Flag I"].Value != 0 ? 1 : 0;
                 int R2(string n) => (int)r[n].Value;
-                iw.WriteLine($"{cyc} {addr:x4} {R2("A"):x2} {R2("F"):x2} {R2("B"):x2} {R2("C"):x2} {R2("D"):x2} {R2("E"):x2} {R2("H"):x2} {R2("L"):x2} {R2("SPh"):x2}{R2("SPl"):x2} {im}");
+                iw.WriteLine($"{cyc} {addr:x4} {gb.ppu.LY:x2} {R2("A"):x2} {R2("F"):x2} {R2("B"):x2} {R2("C"):x2} {R2("D"):x2} {R2("E"):x2} {R2("H"):x2} {R2("L"):x2} {R2("SPh"):x2}{R2("SPl"):x2} {im}");
                 return null;
             }};
             gb.MemoryCallbacks.Add(mc);
+        if (iw != null) {
+            var wcb = new Mc { Cb = (addr, value, flags) => {
+                if (addr == 0xFF40 || addr == 0xFF50) iw.WriteLine($"W {gb.TotalExecutedCycles} {addr:x4} {value:x2}");
+                return null;
+            }, TypeVal = MemoryCallbackType.Write };
+            // Address filter only matches one addr; use two callbacks via flag check instead
+            gb.MemoryCallbacks.Add(new Mc { Cb = wcb.Cb, TypeVal = MemoryCallbackType.Write });
+        }
         }
         using var o = new StreamWriter(a[2]);
         string shot = a.Length > 4 && a[4] != "--instr" ? a[4] : null; int every = a.Length > 5 && a[4] != "--instr" ? int.Parse(a[5]) : 0;

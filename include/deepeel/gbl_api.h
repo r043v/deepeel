@@ -41,6 +41,11 @@ typedef struct DpGblApi {
     /* GBHawk profile (gbl.h): pad latch delay in cycles, extra DIV skew */
     uint32_t *sync_pad_delay;
     uint16_t *sync_div_extra;
+    /* GBHawk profile (gbl.h): PPU line-153 phase at the $0100 reset */
+    uint16_t *sync_ppu_phase;
+    /* applies sync_ppu_phase to the loaded PPU state (call right after the
+     * movie machine's power-on state is in, cyc still 0) */
+    void (*sync_ppu_apply)(void);
     /* bank shown in the $0000-$3FFF window: 0 except on a large MBC1 in mode 1 */
     const uint16_t *rom0_bank;
 } DpGblApi;
