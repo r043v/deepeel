@@ -137,11 +137,26 @@ void dp_gbl_hook_coverage(int v, int i, uint16_t bank, uint16_t addr, int entry)
 
 int dp_dbg_trace;
 FILE *dp_dbg_trace_f;
+static FILE *dp_instr_f;
 void dp_gbl_hook_trace(int v, int i, uint16_t pc) {
     DpMach *m = mach_at[v][i];
     if (dp_dbg_trace && dp_dbg_trace_f) { // desync diagnostics: one frame's pc sequence
         const gbl_cpu_t *c = m->api->gbr;
         fprintf(dp_dbg_trace_f, "%d.%d %04x %02x %04x %04x %04x %04x\n", v, i, pc, c->a, c->bc, c->de, c->hl, c->sp);
+    }
+    // DEEPEEL_TAS_INSTR=<file>: one "<cycle> <pc> <a> <f> <bc> <de> <hl> <sp> <ime>"
+    // per executed instruction (--tas-solo: the TAS worker's machine is the only
+    // one), the same columns tools/gbhawk_ref --instr writes
+    {
+        if (!dp_instr_f) {
+            const char *p = getenv("DEEPEEL_TAS_INSTR");
+            if (p) dp_instr_f = fopen(p, "w");
+        }
+        if (dp_instr_f) {
+            const gbl_cpu_t *c = m->api->gbr;
+            uint8_t f = (uint8_t)((c->zr == 0 ? 0x80 : 0) | (c->nf ? 0x40 : 0) | (c->hf ? 0x20 : 0) | (c->cf ? 0x10 : 0));
+            fprintf(dp_instr_f, "%u %04x %02x %02x %04x %04x %04x %04x %u\n", (unsigned)c->cyc, pc, c->a, f, c->bc, c->de, c->hl, c->sp, c->ime);
+        }
     }
     if (!m || !m->on_step) return;
     m->on_step(m, pc, dp_mach_op(m, pc), 0);

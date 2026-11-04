@@ -295,6 +295,35 @@ static void test_streams(void) {
     free(r); free(rom);
 }
 
+// S6 across ROM pages: (page, ptr) table; page 3's stream is only in the table
+static void test_streams_banked(void) {
+    uint8_t *rom = calloc(1, 0x8000);
+    static const uint8_t code[] = {
+        0x78, 0xD4,
+        0xA9, 0xFF, 0x53, 0x01,
+        0xA9, 0xF8, 0x53, 0x02,
+        0xA9, 0x01, 0x53, 0x04,                          // MPR2 = page 1
+        0xA9, 0x00, 0x85, 0x10, 0xA9, 0x40, 0x85, 0x11, 0x20, 0x00, 0xE1,
+        0xA9, 0x02, 0x53, 0x04,                          // MPR2 = page 2
+        0xA9, 0x10, 0x85, 0x10, 0xA9, 0x40, 0x85, 0x11, 0x20, 0x00, 0xE1,
+        0x80, 0xFE,
+    };
+    memcpy(rom, code, sizeof code);
+    rom[0x100] = 0xB2; rom[0x101] = 0x10; rom[0x102] = 0x60;
+    rom[0x2000] = 5; rom[0x4010] = 6; rom[0x6020] = 7;
+    static const uint8_t tab[] = { 1, 0x00, 0x40, 2, 0x10, 0x40, 3, 0x20, 0x40 };
+    memcpy(rom + 0x200, tab, sizeof tab);
+    rom[0x1FFE] = 0x00; rom[0x1FFF] = 0xE0;   // reset vector in page 0
+    DpPceOptions o = dp_pce_options();
+    o.max_total = 200000; o.max_steps = 2000;
+    DpPceResults *r = calloc(1, sizeof *r);
+    CHECK(dp_pce_explore(rom, 0x8000, &o, r), "banked streams explore");
+    CHECK(r->s6_tables >= 1 && r->s6_runs >= 1, "banked table found and replayed");
+    CHECK(r->flags && (r->flags[0x6020] & DP_PCE_DATA), "page 3's unplayed stream was read");
+    dp_pce_results_free(r);
+    free(r); free(rom);
+}
+
 // RAM-code archive: bytes built by immediates in WRAM, then run
 static void test_ramcode(void) {
     uint8_t *rom = calloc(1, ROM_SIZE);
@@ -330,6 +359,7 @@ int main(void) {
     test_index(rom);
     test_jobs(rom);
     test_streams();
+    test_streams_banked();
     test_ramcode();
     test_tas_identity();
     free(rom);

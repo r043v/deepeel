@@ -234,7 +234,7 @@ static void index_declare(PceRun *x) {
     }
 }
 
-static void pstm_read(PceRun *x, unsigned a);
+static void pstm_read(PceRun *x, unsigned a, uint32_t cell);
 static void obs_rom_read(void *user, uint32_t cell, uint16_t addr) {
     PceRun *x = user;
     if (addr >= x->cur_pc && (unsigned)addr < (unsigned)x->cur_pc + x->cur_len) return; // fetch
@@ -244,7 +244,7 @@ static void obs_rom_read(void *user, uint32_t cell, uint16_t addr) {
     mark(x, cell, DP_PCE_DATA);
     x->last_read_cell = cell;
     x->last_read_step = x->total_steps;
-    if (x->mode == 0) pstm_read(x, addr);
+    if (x->mode == 0) pstm_read(x, addr, cell);
 }
 
 static int is_block(uint8_t op) {
@@ -507,7 +507,7 @@ static uint32_t loop_bump(PceRun *x, uint64_t key) {
 // table (same 8 KiB cell page, pointers in the same CPU window); every other entry is
 // replayed from the pre-call snapshot with that zero-page word set to the pointer.
 enum { PS_DEC = 64, PS_START = 16, PS_FR = 16, PS_CAND = 2048 };
-typedef struct { uint32_t key; uint8_t zp, nstarts, replayed; uint16_t starts[PS_START]; uint8_t *snap; } PDec;
+typedef struct { uint32_t key; uint8_t zp, nstarts, replayed; uint16_t starts[PS_START]; uint8_t nx, xreplayed; struct { uint16_t page, addr; } xs[PS_START]; uint8_t *snap; } PDec;
 typedef struct PStm {
     PDec dec[PS_DEC]; unsigned ndec;
     struct { uint32_t key; uint8_t sp, open; uint8_t zp[256]; } fr[PS_FR]; unsigned nfr;
@@ -536,7 +536,7 @@ static void pstm_step(PceRun *x) {
     uint8_t sp = dp_pce_cpu().s;
     while (s->nfr && sp > s->fr[s->nfr - 1].sp) s->nfr--;
 }
-static void pstm_read(PceRun *x, unsigned a) {
+static void pstm_read(PceRun *x, unsigned a, uint32_t cell) {
     PStm *s = x->stm;
     if (!s || !s->nfr) return;
     for (unsigned k = s->nfr; k-- > 0;) {
@@ -555,6 +555,11 @@ static void pstm_read(PceRun *x, unsigned a) {
             unsigned j;
             for (j = 0; j < d->nstarts && d->starts[j] != a; j++) {}
             if (j == d->nstarts && j < PS_START && a >= 0x2000) d->starts[d->nstarts++] = (uint16_t)a;
+            if (a >= 0x2000 && a < 0xE000) {   // the 8 KiB ROM page rides with the address
+                unsigned sp = cell >> 13, q;
+                for (q = 0; q < d->nx && !(d->xs[q].page == sp && d->xs[q].addr == a); q++) {}
+                if (q == d->nx && q < PS_START) { d->xs[q].page = (uint16_t)sp; d->xs[q].addr = (uint16_t)a; d->nx++; }
+            }
             break;
         }
     }
@@ -564,13 +569,71 @@ static int pstm_ptr(const PceRun *x, size_t at, size_t lo, size_t hi, unsigned s
     *v = (uint16_t)(x->rom[at] | x->rom[at + 1] << 8);
     return *v >= 0x2000 && (unsigned)(*v >> 13) == slot;
 }
+// banked streams: (page, ptr lo, ptr hi) entries at stride 3; each is replayed with its page
+// mapped under the pointer's window (the MPR a TAM would set) and the zero-page word set.
+static int pstm_cross(PceRun *x, PDec *d) {
+    if (d->nx < 2 || d->nx <= d->xreplayed) return 0;
+    d->xreplayed = d->nx;
+    DpPceResults *r = x->r; int pushed = 0;
+    const size_t np_pages = x->rom_size >> 13;
+    uint8_t *tried = calloc(x->rom_size ? x->rom_size : 1, 1);
+    if (!tried) return 0;
+    for (unsigned j = 0; j < d->nx; j++) {
+        size_t i = (size_t)d->xs[j].page * 0x2000 + (d->xs[j].addr & 0x1FFF);
+        if (i < x->rom_size) tried[i] = 1;
+    }
+    size_t pos[64]; unsigned np = 0;
+    for (size_t at = 0; at + 3 <= x->rom_size && np < 64; at++) {
+        uint16_t v = (uint16_t)(x->rom[at + 1] | x->rom[at + 2] << 8);
+        for (unsigned j = 0; j < d->nx; j++) if (d->xs[j].page == x->rom[at] && d->xs[j].addr == v) { pos[np++] = at; break; }
+    }
+    unsigned cands = 0;
+#define POKE(at) ((at) >= blo && (at) + 3 <= bhi && x->rom[at] < np_pages && \
+    (uint16_t)(x->rom[(at) + 1] | x->rom[(at) + 2] << 8) >= 0x2000 && \
+    (uint16_t)(x->rom[(at) + 1] | x->rom[(at) + 2] << 8) < 0xE000)
+    for (unsigned i = 0; i + 1 < np; i++) {
+        if (pos[i + 1] - pos[i] != 3 || (pos[i] >> 13) != (pos[i + 1] >> 13)) continue;
+        size_t blo = (pos[i] >> 13) << 13, bhi = blo + 0x2000, lo = pos[i], hi = pos[i + 1];
+        while (lo >= blo + 3 && POKE(lo - 3)) lo -= 3;
+        while (POKE(hi + 3)) hi += 3;
+        r->s6_tables++;
+        for (size_t at = lo; at <= hi; at += 3) {
+            unsigned pg = x->rom[at]; uint16_t v = (uint16_t)(x->rom[at + 1] | x->rom[at + 2] << 8);
+            size_t idx = (size_t)pg * 0x2000 + (v & 0x1FFF);
+            if (idx >= x->rom_size || tried[idx]) continue;
+            tried[idx] = 1;
+            if (cands >= PS_CAND || x->queue_len >= x->opt.queue_cap) { r->s6_sat++; break; }
+            dp_pce_load(d->snap);
+            uint16_t pc = dp_pce_cpu().pc;
+            if (!dp_pce_enter(pg, v)) continue;
+            dp_pce_set_pc(pc);
+            cands++; r->s6_candidates++;
+            uint8_t *w = dp_pce_wram();
+            w[d->zp] = (uint8_t)v; w[d->zp + 1] = (uint8_t)(v >> 8);
+            dp_pce_save(x->tmp2);
+            uLongf zl = x->zcap;
+            if (compress2(x->ztmp, &zl, x->tmp2, x->state_size, 1) != Z_OK) continue;
+            uint8_t *z = malloc(zl);
+            if (!z) continue;
+            memcpy(z, x->ztmp, zl);
+            x->queue[x->queue_len].z = z; x->queue[x->queue_len].zlen = zl;
+            x->queue[x->queue_len].forced = 1; x->queue[x->queue_len].choice = 0;
+            x->queue_len++; r->s6_runs++; pushed++;
+        }
+    }
+#undef POKE
+    free(tried);
+    return pushed;
+}
 static int pstm_replay(PceRun *x) {
     PStm *s = x->stm;
     if (!s) return 0;
     DpPceResults *r = x->r; int pushed = 0;
     for (unsigned di = 0; di < s->ndec; di++) {
         PDec *d = &s->dec[di];
-        if (d->nstarts < 2 || d->nstarts <= d->replayed || !d->snap) continue;
+        if (!d->snap) continue;
+        pushed += pstm_cross(x, d);
+        if (d->nstarts < 2 || d->nstarts <= d->replayed) continue;
         d->replayed = d->nstarts;
         unsigned slot = d->starts[0] >> 13;
         uint8_t *tried = calloc(65536, 1);

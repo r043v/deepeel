@@ -3005,3 +3005,12 @@ au pas de 3 : deux départs observés avec leur banque physique localisent la ta
 est rejouée depuis l'instantané avec la banque sélectionnée (`dp_nesmach_enter`) et le mot de page
 zéro réglé sur le pointeur. Fixture : `test_nes` (`test_streams_banked`, flux de la banque 0 jamais
 appelé). MMC1 et PCE restent à faire. Observation de l'outil, pas une mesure matérielle.
+
+## 0.206.0 : S6 PCE, tables de flux inter-pages (2026-11-04)
+
+Le rejeu de décodeurs PCE lit aussi les tables `(page ROM de 8 Kio, ptr lo, ptr hi)` au pas de 3 :
+deux départs observés avec leur page physique localisent la table ; chaque entrée est rejouée
+depuis l'instantané avec la page montée sous la fenêtre du pointeur (`dp_pce_enter`, le MPR qu'un
+`TAM` poserait), le PC conservé et le mot de page zéro réglé sur le pointeur. Fixture : `test_pce`
+(`test_streams_banked`, flux de la page 3 jamais appelé). MMC1 NES reste à faire. Observation de
+l'outil, pas une mesure matérielle.
