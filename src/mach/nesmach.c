@@ -448,6 +448,18 @@ uint64_t dp_nesmach_state_ctx_hash(const void *buf) {
     for (unsigned i = 0; i < MAPPER_TAIL; i++) h = (h ^ b[size + i]) * 0x100000001b3ull;
     return h;
 }
+/* C2 projection: the coarse context plus only the 256-byte work-RAM pages whose bit is set in
+ * `pages` (what the section about to run was seen to read); mask 0xFF = the whole RAM */
+uint64_t dp_nesmach_state_ctx_hash_ram(const void *buf, unsigned pages) {
+    uint64_t h = dp_nesmach_state_ctx_hash(buf);
+    const uint8_t *ram = (const uint8_t *)buf + offsetof(nes_t, ram);
+    for (unsigned pg = 0; pg < 8; pg++) {
+        if (!(pages & (1u << pg))) continue;
+        for (unsigned i = 0; i < 256; i++) h = (h ^ ram[pg * 256 + i]) * 0x100000001b3ull;
+        h ^= pg + 1;
+    }
+    return h;
+}
 uint8_t *dp_nesmach_state_nmi_edge(void *buf) {
     return (uint8_t *)buf + offsetof(nes_t, cpu) + offsetof(nes6502_t, nmi_edge);
 }

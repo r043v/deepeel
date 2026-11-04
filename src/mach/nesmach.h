@@ -71,6 +71,7 @@ unsigned dp_nesmach_sp(const DpNesMach *m);
 unsigned dp_nesmach_state_pc(const void *buf);
 /* coarse context hash (registers, pc, mapper registers; RAM and clocks excluded) */
 uint64_t dp_nesmach_state_ctx_hash(const void *buf);
+uint64_t dp_nesmach_state_ctx_hash_ram(const void *buf, unsigned pages);
 /* the saved state's pending-NMI edge (an interrupt fork clears it) */
 uint8_t *dp_nesmach_state_nmi_edge(void *buf);
 

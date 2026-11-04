@@ -854,6 +854,31 @@ static void test_liveness(void) {
     free(rom);
 }
 
+// C2: the context hash projects on the RAM pages a section reads
+static void test_ctx_projection(void) {
+    uint8_t *rom = calloc(1, 16 + 2 * 0x4000 + 0x2000);
+    set_header(rom, 2, 1, 0);
+    put(rom, 0, 0x0000, 0x4C, 0x00, 0x80, -1);
+    set_vector(rom, 1, 0xFFFA, 0x8000);
+    set_vector(rom, 1, 0xFFFC, 0x8000);
+    set_vector(rom, 1, 0xFFFE, 0x8000);
+    char err[256];
+    DpNesMach *m = dp_nesmach_open(rom, 16 + 2 * 0x4000 + 0x2000, -1, err, sizeof err);
+    CHECK(m, "ctx open: %s", err);
+    if (m) {
+        dp_nesmach_reset(m);
+        uint8_t *a = malloc(dp_nesmach_state_size()), *b = malloc(dp_nesmach_state_size());
+        dp_nesmach_save(m, a); dp_nesmach_save(m, b);
+        dp_nesmach_state_ram(b)[5 * 256 + 7] ^= 0x5A;   // differs in RAM page 5 only
+        CHECK(dp_nesmach_state_ctx_hash_ram(a, 0x00) == dp_nesmach_state_ctx_hash_ram(b, 0x00), "no page read: same context");
+        CHECK(dp_nesmach_state_ctx_hash_ram(a, 0xDF) == dp_nesmach_state_ctx_hash_ram(b, 0xDF), "page 5 unread: same context");
+        CHECK(dp_nesmach_state_ctx_hash_ram(a, 0x20) != dp_nesmach_state_ctx_hash_ram(b, 0x20), "page 5 read: different context");
+        free(a); free(b);
+        dp_nesmach_close(m);
+    }
+    free(rom);
+}
+
 int main(void) {
     test_machine_nrom();
     test_machine_uxrom();
@@ -882,6 +907,7 @@ int main(void) {
     test_tas_load();
     test_tas_identity();
     test_liveness();
+    test_ctx_projection();
     if (fails) printf("%d failures\n", fails);
     else printf("test_nes: all green\n");
     return fails != 0;

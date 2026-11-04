@@ -3581,3 +3581,11 @@ Chaque section PCE porte `io_reads` : un bit par bloc matériel lu par son code 
 IRQ). Le rapport texte l'affiche (`io $XX`) ; `--jobs 2` fusionne les masques. Les pages de RAM lues ne sont pas suivies
 (le cœur n'expose pas de hook de lecture RAM) : C1 PCE reste ◐. Test : `test_liveness` (`pce`). MD n'a pas de structure de
 section par plage (seulement des compteurs) : son liveness reste à faire.
+
+## 0.249.26 (NES : projection de contexte par pages lues, brique de C2)
+
+`dp_nesmach_state_ctx_hash_ram(blob, pages)` ajoute au contexte grossier (registres, pc, mapper) seulement les pages de RAM
+de 256 octets dont le bit est levé (test `nes` `test_ctx_projection`). Elle n'est **pas** branchée dans `--ctx-cap` : le test
+`nes_ctx_cap` pose que ce mode exclut toute la RAM, et le brancher sur la liveness par instruction (0.249.24) le rendait plus
+fin (plus d'éviction sur sa fixture). Le branchement sûr demande la liveness par section entière, calculée avant l'éviction
+(les sections ne sont construites qu'à la fin du run) : C2 NES reste ◐.
