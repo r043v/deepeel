@@ -10,12 +10,12 @@ remesure pas l'outil.
 |---|---|---|---|---|
 | GB | 32 | 6 | 0 | 1 |
 | SMS/GG | 32 | 5 | 0 | 2 |
-| MSX | 31 | 6 | 0 | 2 |
+| MSX | 32 | 5 | 0 | 2 |
 | NES | 12 | 25 | 0 | 2 |
 | PCE | 16 | 22 | 0 | 1 |
 | MD | 10 | 28 | 0 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 92.
+Cellules ouvertes (◐ ou ✗) : 91.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -56,9 +56,8 @@ Cellules ouvertes (◐ ou ✗) : 92.
 | S6 | Rejeu de décodeurs sur tables de flux | PCE | ◐ 0.149 `JSR` + mot de page zéro, page ROM de 8 Kio ; 0.206 entrées (page, ptr) |
 | S7 | Inférence de voisins à la carte | NES | ◐ trous ≤ 1024 |
 | S7 | Inférence de voisins à la carte | MD | ◐ remplissage ≥ 8 (00/FF) ou ≥ 32, code ≤ 3 o, données ≤ 1024 o ; rendu seulement |
-| G1 | Graines reset/RST/IRQ | MSX | ◐ reset + IRQ2/IRQ1/TIMER/NMI (`--seed-vectors`, 0.216) |
 | G1 | Graines reset/RST/IRQ | NES | ◐ reset + NMI/IRQ (`--seed-vectors`) |
-| G1 | Graines reset/RST/IRQ | PCE | ◐ reset |
+| G1 | Graines reset/RST/IRQ | PCE | ◐ reset + IRQ2/IRQ1/TIMER/NMI (`--seed-vectors`, 0.216) |
 | G1 | Graines reset/RST/IRQ | MD | ◐ reset |
 | G2 | Scan de dispatch par vues de banques | NES | ◐ UxROM, banque fixe (`--bank-dispatch`) |
 | G2 | Scan de dispatch par vues de banques | PCE | ◐ tables de mots par fenêtre, vues de pages (`--bank-dispatch`) |
