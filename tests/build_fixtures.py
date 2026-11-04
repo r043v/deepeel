@@ -502,6 +502,12 @@ def build_md(out):
     r[0x200:0x200 + len(code)] = code
     r[0x400:0x404] = bytes.fromhex("7042 4e75")
     save_md(out, "fix_md_ramsrc", r)
+    # Generated code: a ROM word is read, inverted, and stored to RAM, then an immediate rts is stored; called there.
+    r = md_rom()
+    code = bytes.fromhex("41f9 0000 0400 3010 4640 33c0 00ff 0000 33fc 4e75 00ff 0002 4eb9 00ff 0000 60fe")
+    r[0x200:0x200 + len(code)] = code
+    r[0x400:0x402] = bytes.fromhex("8fbd")
+    save_md(out, "fix_md_ramgen", r)
     # A 2 MiB+ cartridge with SRAM overlay: execute and read SRAM without
     # accidentally attributing those accesses to the covered ROM bytes.
     r = md_rom()

@@ -1559,6 +1559,8 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     }
     fprintf(out, "exec outside rom: %llu (ram: %llu)\n", (unsigned long long)r->exec_outside,
             (unsigned long long)r->ram_exec);
+    if (r->ra.n) fprintf(out, "runtime code archive: %u variants, %u attached to a ROM copy source, %u generated with an approximate ROM producer, %u rewrote an earlier variant\n",
+            r->ra.n, r->ra.attached, r->ra.derived, r->ra.poly);
     if (r->smc_writes) fprintf(out, "self-modifying RAM code: %llu stores into executed bytes (first at pc %06X)\n",
                                (unsigned long long)r->smc_writes, r->smc_first_pc);
     fprintf(out, "SRAM: %llu instructions, %llu CPU reads\n",

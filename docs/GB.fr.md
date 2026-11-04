@@ -2648,3 +2648,11 @@ avant le store de l'octet (approximation, comme `rt_derived` sur GB), `-1` sinon
 est verbatim. Câblé sur MD et NES ; SMS/MSX/PCE écrivent `-1`. Le compteur `derived` de l'archive existe mais
 n'est pas encore rapporté dans le texte. Les tests `rtcode_md_source` (producteur = source sur copie verbatim) et
 `rtcode_sms_source` suivent le nouveau format ; aucune fixture de code généré (non verbatim) sur MD/NES encore.
+
+## 0.186.1 — MD : code généré, producteur rapporté
+
+Le rapport MD ajoute `runtime code archive: N variants, A attached…, D generated with an approximate ROM producer…`.
+Fixture `fix_md_ramgen.md` (mot ROM lu, inversé, stocké en RAM + `rts` immédiat), test `rtcode_md_generated`.
+Limite constatée, épinglée par le test : le producteur est le dernier octet ROM lu avant le store, donc l'`rts`
+stocké en immédiat reçoit aussi `1024` alors qu'il n'en dérive pas. Seule une provenance de dépendances exacte
+(J14, reste ouvert) lèverait cette imprécision.
