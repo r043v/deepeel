@@ -546,7 +546,7 @@ static void on_end(void *u, uint32_t pc, uint32_t next, unsigned len) {
             if (dp_set_insert(&x->ind_pairs, ((uint64_t)(pc + 1) << 24) | (next & 0xFFFFFFu)) > 0) r->indirect_targets++;
         }
     }
-    if (in.cls == DP_M68K_JMP && !in.has_target && decoded == len && !x->replay) s4_table(x, pc);
+    if ((in.cls == DP_M68K_JMP || in.cls == DP_M68K_JSR) && !in.has_target && decoded == len && !x->replay) s4_table(x, pc);
     if ((in.cls != DP_M68K_BCC && in.cls != DP_M68K_DBCC) || !in.has_target) return;
     if (decoded != len) return; /* do not invent a fall-through from a disputed length */
     if (in.cls == DP_M68K_DBCC && in.cond == 0) return; /* DBT cannot branch */
@@ -934,7 +934,7 @@ static void s4_table(X *x, uint32_t pc) {
     DpMdResults *r = x->r;
     const uint8_t *rom = x->c->rom;
     size_t n = r->rom_size;
-    if ((size_t)pc + 4 > n || rom[pc] != 0x4E || rom[pc + 1] != 0xFB) return;
+    if ((size_t)pc + 4 > n || rom[pc] != 0x4E || (rom[pc + 1] != 0xFB && rom[pc + 1] != 0xBB)) return;   // jmp / jsr d8(pc,Xn)
     if (rom[pc + 2] & 0x07) return;                       // brief extension word only (no full-format bits)
     if (dp_set_insert(&x->ind_sites, ((uint64_t)pc + 1) | (1ull << 40)) == 0) return;
     uint32_t base = pc + 2 + (uint32_t)(int32_t)(int8_t)rom[pc + 3];

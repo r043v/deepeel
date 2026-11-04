@@ -3249,3 +3249,9 @@ Une arête statique qui sort de sa fenêtre MPR est résolue vers la page ROM ob
 cible, quand une seule page y a été vue (mappage fixe, p. ex. MPR7). Avant, elle était abandonnée.
 Une fenêtre qui a vu plusieurs pages reste ambiguë et l'arête est toujours abandonnée (vues multiples
 à faire). Test `pce` : `test_static_views` (contrôle négatif fait).
+
+## MD : tables de sauts `jsr d8(pc,Xn)` (S4) (0.233.0)
+
+Le motif `jmp d8(pc,Xn)` vers une table de `bra.s`/`bra.w` (0.190.0) est reconnu aussi pour
+`jsr d8(pc,Xn)` (appel indexé, très courant). Fixture `fix_md_s4j`, test `md_s4_jsr` (contrôle
+négatif fait). Toujours pas de tables de mots ni de `jmp (An)`.
