@@ -407,6 +407,8 @@ set_tests_properties(sg_watch_dump PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT
 add_test(NAME msx_watch_dump COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -f $D/msx_w.ppm; $B z80 explore msx $D/fix_z80_branch.msx --play-steps 300000 --watch-dump $D/msx_w.ppm --text $D/msx_w.txt >/dev/null 2>&1; grep -q 'watch: [1-9][0-9]* frames published' $D/msx_w.txt && head -c 15 $D/msx_w.ppm | grep -q '160 192'")
 set_tests_properties(msx_watch_dump PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME gb_session_cells COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_branch.gb --play --session-cells --time-limit 8 2>&1 | grep -q 'screen cells archived into the checkpoint pool'")
+add_test(NAME gb_session_cells_resume COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -rf $D/cells_st; $B explore $D/fix_branch.gb --play --session-cells --state-dir $D/cells_st --time-limit 6 2>&1 | grep -q ': 1 screen cells archived'; $B explore $D/fix_branch.gb --play --session-cells --resume --state-dir $D/cells_st --time-limit 6 2>&1 | grep -q ': 0 screen cells archived'")
+set_tests_properties(gb_session_cells_resume PROPERTIES FIXTURES_REQUIRED fixtures)
 set_tests_properties(gb_session_cells PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME pce_watch_dump COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -f $D/pce_w.ppm; $B pce explore $D/fix_pce_branch.pce --play 100 --watch-dump $D/pce_w.ppm --text $D/pce_w.txt >/dev/null 2>&1; grep -q 'watch: [1-9][0-9]* frames published' $D/pce_w.txt && head -c 15 $D/pce_w.ppm | grep -q '^P6'")
 set_tests_properties(pce_watch_dump PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)

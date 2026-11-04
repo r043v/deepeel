@@ -3336,3 +3336,10 @@ Option explicite : à chaque site d'écriture de `$4016`, tous les masques de bo
 ne l'étaient pas déjà (singles, accords du catalogue) sont proposés, soit 256 fourches par site au
 lieu de 19. Un site par visite, refus comptés ; coûteux, donc hors défaut. Test `nes_pad_full`
 (512 fourches sur les 2 sites de la fixture). MD garde ses 14 sondes.
+
+## Go-Explore : l'archive de cellules survit à la reprise (J4) (0.244.0)
+
+Les clés de cellules écran (`--session-cells`) sont écrites en fin de `pool.bin` et relues par
+`--resume` : une reprise ne ré-archive plus les écrans déjà vus (ce qui évinçait des checkpoints
+utiles du pool). Anciens fichiers sans cette fin : tolérés. Test `gb_session_cells_resume`
+(1 cellule au premier run, 0 à la reprise). Reste J4 : pool commun aux autres plateformes.

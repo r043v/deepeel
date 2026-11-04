@@ -853,6 +853,16 @@ int dp_play_save(const DpPlay *p) {
         fwrite(&pl, sizeof pl, 1, f);
         fwrite(r->path, 1, pl, f);
     }
+    // Go-Explore cell keys (J4) as a trailer: a resumed run keeps the cells already seen
+    pthread_mutex_lock(&p->cell_mtx);
+    uint32_t cn = 0;
+    if (p->cell_keys)
+        for (uint32_t i = 0; i < CELL_SET; i++) cn += p->cell_keys[i] != 0;
+    fwrite(&cn, sizeof cn, 1, f);
+    if (p->cell_keys)
+        for (uint32_t i = 0; i < CELL_SET; i++)
+            if (p->cell_keys[i]) fwrite(&p->cell_keys[i], sizeof p->cell_keys[i], 1, f);
+    pthread_mutex_unlock(&p->cell_mtx);
     fclose(f);
     return 1;
 }
@@ -934,6 +944,14 @@ static int pool_load(DpPlay *p) {
                 if (r->tas >= DP_MAX_TAS) continue;
                 int cur = p->tas_resume_rec[r->tas];
                 if (cur < 0 || r->frame >= p->tasnaps[cur].frame) p->tas_resume_rec[r->tas] = i;
+            }
+        // the cell-key trailer (absent in older pool files: tolerated)
+        uint32_t cn = 0;
+        if (ok && fread(&cn, sizeof cn, 1, f) == 1 && cn <= CELL_SET / 2)
+            for (uint32_t i = 0; i < cn; i++) {
+                uint64_t k;
+                if (fread(&k, sizeof k, 1, f) != 1) break;
+                cell_new(p, k);
             }
     }
     fclose(f);
