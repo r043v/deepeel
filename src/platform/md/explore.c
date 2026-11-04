@@ -47,6 +47,7 @@ typedef struct {
     uint32_t cur_gen;
     int forced, halted;
     uint32_t pc;         /* instruction being run */
+    uint32_t push_site;  /* branch site (ROM address) recorded in the tree for the next push, 0 none */
     uint8_t ram_exec[0x10000]; /* work-RAM bytes executed since their last write (SMC tracking) */
     uint32_t origin;     /* site that created the current path */
     uint32_t trace[8];
@@ -231,7 +232,7 @@ static int push(X *x, uint32_t pc, int vint, int hint) {
                     x->spill_state = ls;   // written by spill_flush once the caller's post-edits are done
                     x->last_state = ls;
                     x->r->parked++;
-                    if (x->o->tree_path) dp_tree_close(&x->tree, dp_tree_add(&x->tree, x->cur_choice, 4, 0, 0, (int)(pc & 0xFFFF)), DP_ISSUE_SPOOLED);
+                    if (x->o->tree_path) dp_tree_close(&x->tree, dp_tree_add(&x->tree, x->cur_choice, 4, x->push_site, 0, (int)(pc & 0xFFFF)), DP_ISSUE_SPOOLED);
                     if (pc < x->r->rom_size) x->r->flags[pc] |= DP_MDF_QUEUED;
                     return 1;
                 }
@@ -256,7 +257,8 @@ static int push(X *x, uint32_t pc, int vint, int hint) {
     if (full) x->r->parked++;
     x->last_state = s;
     item->state = s; item->forced = 1; item->origin = x->pc;
-    item->choice = x->o->tree_path ? dp_tree_add(&x->tree, x->cur_choice, 4, 0, 0, (int)(pc & 0xFFFF)) : 0;
+    item->choice = x->o->tree_path ? dp_tree_add(&x->tree, x->cur_choice, 4, x->push_site, 0, (int)(pc & 0xFFFF)) : 0;
+    x->push_site = 0;
     memcpy(item->an_writer, x->an_writer, sizeof item->an_writer);
     item->watch_pc = x->watch_pc; item->watch_addr = x->watch_addr;
     item->watch_value = x->watch_value; item->watch_size = x->watch_size;
@@ -537,7 +539,10 @@ static void on_end(void *u, uint32_t pc, uint32_t next, unsigned len) {
     if (alt >= r->rom_size || (alt & 1)) { r->fork_off_rom++; return; }
     size_t si = pc >> 1;
     if (x->site[si] >= x->o->fork_cap) { r->sat_site++; return; }
-    if (push(x, alt, 0, 0)) {
+    x->push_site = pc;
+    int pushed_alt = push(x, alt, 0, 0);
+    x->push_site = 0;
+    if (pushed_alt) {
         x->site[si]++;
         r->forks++;
         if (in.cls == DP_M68K_BCC)

@@ -3101,3 +3101,9 @@ dont HINT et V-int) et des TRAP #0-15 (`$80`-`$BC`) de la table de vecteurs part
 (doublons, adresses impaires ou hors ROM écartés et comptés ; ligne « vector roots » du rapport).
 Fixture : bloc G1 de `test_md_explore` (ROM en mémoire, handler V-int atteint avec l'option
 seulement). Observation de l'outil, pas une mesure matérielle.
+
+## MD : site de bifurcation dans l'arbre de choix (F2) (2026-11-04, sans changement de version)
+
+Les nœuds d'arbre créés par une fourche de branchement MD (`--tree`) portent désormais l'adresse ROM
+du site (champ `site` de `DpChoice`) ; les autres graines (IRQ, pad, entrées) restent sans site.
+Observation de l'outil : sur `fix_md_dbcc`, le nœud fils porte le site `0x202`.
