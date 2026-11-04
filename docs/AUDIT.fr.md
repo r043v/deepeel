@@ -21,7 +21,7 @@ Cellules ouvertes (◐ ou ✗) : 75.
 |---|---|---|---|
 | D4 | Copies par boucle CPU | NES | ◐ boucle → PPUDATA |
 | D10 | Sondes de lecture manette | NES | ◐ 0.230.0 8 boutons port 1 + 8 port 2 + 10 combinaisons ; pas de catalogue de 128 |
-| D10 | Sondes de lecture manette | MD | ◐ 0.236.0 12 motifs ; pas de pad 6 boutons ni de catalogue de 128 |
+| D10 | Sondes de lecture manette | MD | ◐ 0.236.0 12 motifs ; pad 6 boutons bloqué : le runtime m0boy (`pad_read`) ne modélise que 3 boutons, et on n'y touche pas ; catalogue de 128 combinaisons absent |
 | D12 | Cibles indirectes observées | NES | ◐ observé, sans second passage |
 | D12 | Cibles indirectes observées | PCE | ◐ observé (`jmp (abs)`, `jmp (abs,X)`), sans second passage |
 | D12 | Cibles indirectes observées | MD | ◐ observé (`jmp/jsr` par An), sans second passage |
