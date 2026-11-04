@@ -116,6 +116,7 @@ static void usage(void) {
             "    --no-covered-prune   keep forking sites whose both sides are covered\n"
             "    --covered-keep N     forks such a site still gets (default 2)\n"
             "    --gui                SDL2 live viewer\n"
+            "    --mapwin [SCALE]     live ROM map window (1 px per byte like the .map.png), redrawn while exploring\n"
             "    --watch [FPS]        small window showing the replaying TAS movie, 1..30 img/s (default 30)\n"
             "    --json f / --text f / --cov f / --romdata f / --map f / --html f   outputs\n"
             "                         (--map: PNG by default, 1 px per ROM byte + played heat,\n"
@@ -300,6 +301,7 @@ static int cmd_explore(int argc, char **argv) {
     int tas_dirs_n = 0;
     const char *stop_txt = "explore-only";
     unsigned long long play_frames = 0;
+    int mapwin = 0, mapwin_on = 0;
     int watch = 0, gui = 0, play = 0, human = 0, human_slot = -1, export_slot = -1, png_slot = -1;
     DpConfig cfg;
     dp_config_defaults(&cfg);
@@ -321,6 +323,11 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--map") && i + 1 < argc) map = argv[++i];
         else if (!strcmp(a, "--html") && i + 1 < argc) html = argv[++i];
         else if (!strcmp(a, "--gui")) gui = 1;
+        else if (!strcmp(a, "--mapwin")) {
+            mapwin = 0;
+            if (i + 1 < argc && argv[i + 1][0] >= '1' && argv[i + 1][0] <= '8') mapwin = atoi(argv[++i]);
+            mapwin_on = 1;
+        }
         else if (!strcmp(a, "--watch")) {
             watch = 30;
             if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') watch = atoi(argv[++i]);
@@ -500,6 +507,7 @@ static int cmd_explore(int argc, char **argv) {
     int vi = dp_mach_pick_variant(cart->rom);
     if (vi < 0) {
         fprintf(stderr, "deepeel: no machine variant compiled for MBC %s\n", dp_mbc_name(cart->mbc));
+        dp_mapwin_stop();
         dp_results_free(&res);
         dp_cart_free(cart);
         return 1;
@@ -577,6 +585,7 @@ static int cmd_explore(int argc, char **argv) {
         alarm((unsigned)scfg.time_limit_secs);
     }
     int rc = 0;
+    if (mapwin_on) dp_mapwin_start(&res, mapwin);
     if (gui && dp_gui_available()) {
         if (human) dp_play_human_begin(play_engine, human_slot);
         rc = dp_gui_run(&res, &cfg, ex, play_engine);
@@ -831,6 +840,7 @@ static int cmd_explore(int argc, char **argv) {
     dp_explorer_free(ex);
     if (play_engine) dp_play_free(play_engine);
     dp_mach_close(mach);
+    dp_mapwin_stop();
     dp_results_free(&res);
     dp_cart_free(cart);
     return rc;

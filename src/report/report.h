@@ -52,6 +52,7 @@ typedef struct DpMapSummary {
 // malloc'd per-byte class array (banks*0x4000), caller frees
 uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum);
 const char *dp_map_class_name(int c);
+const uint8_t *dp_map_rgb(int cls); // the .map.png colour of a class (3 bytes)
 int dp_map_is_code(int c);
 int dp_map_is_data(int c);
 void dp_map_summary_text(const DpMapSummary *s, DpBuf *out);

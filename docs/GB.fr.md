@@ -2507,3 +2507,13 @@ La trace deepeel de l'image correspondante (`DEEPEEL_TAS_DUMP` + `DEEPEEL_TAS_TR
 milieu d'un remplissage que deepeel n'a pas (ou pas à cette image) : la différence est d'état matériel/temps (position dans
 l'image, LCD éteint, IME/IF), pas de touches. Cause non identifiée ; prochaine étape : tracer aussi l'image 42108 des
 deux côtés et comparer le PC de fin d'image.
+
+## 0.179.0 (`--mapwin` : la carte de la ROM en direct)
+
+`deepeel explore ROM --mapwin [ECHELLE]` ouvre une fenêtre SDL2 qui montre la ROM comme le PNG de carte : une tuile
+128×128 par banque (1 pixel par octet, 8 banques par ligne), la même palette de classes, une ligne de légende avec
+les pourcentages (connu / inconnu / par classe), les pas et les chemins. Un thread dédié reconstruit la carte depuis les
+résultats vivants environ deux fois par seconde : on voit le rouge (inconnu) se résorber pendant l'exploration, avec ou
+sans `--play`, `--jobs` ou `--unbounded`. Lecture seule : fermer la fenêtre (Q/Échap) n'arrête pas l'exploration. Sans
+échelle, l'échelle entière maximale qui tient dans l'écran est choisie. Crochet de test : `DEEPEEL_MAPWIN_DUMP=<fichier>`
+écrit la dernière carte dessinée en PPM (test `mapwin_cli`). Sans SDL2 l'option est signalée et ignorée.

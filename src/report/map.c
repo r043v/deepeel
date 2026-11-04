@@ -343,6 +343,7 @@ static const uint8_t map_rgb[DP_MAP_COUNT][3] = {
     { 0xb5, 0xd3, 0xf3 }, // inferred-code
     { 0xa0, 0xa0, 0xa0 }, // inferred-padding
 };
+const uint8_t *dp_map_rgb(int cls) { return map_rgb[cls >= 0 && cls < DP_MAP_COUNT ? cls : 0]; }
 
 // accented glyphs: the base lowercase letter (its top two rows are free in
 // this font) with the mark drawn in rows 0-1 — decoded from UTF-8 input

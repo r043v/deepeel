@@ -698,3 +698,118 @@ void dp_fbwatch_stop(void) {
     pthread_join(fb_th, NULL);
     fb_running = 0;
 }
+
+// ---- ROM map window (--mapwin)
+static pthread_t mw_th;
+static int mw_running;
+static atomic_int mw_quit;
+static const DpResults *mw_res;
+static int mw_scale;
+
+static void *mw_main(void *arg) {
+    (void)arg;
+    enum { TILE = 128, GAP = 4, PER_ROW = 8, LEG_H = 30 };
+    const DpResults *res = mw_res;
+    int banks = (int)res->banks;
+    if (banks < 1) return NULL;
+    int cols = banks < PER_ROW ? banks : PER_ROW, rows = (banks + PER_ROW - 1) / PER_ROW;
+    int sc = mw_scale;
+    if (sc < 1) { // fit a 1280x860 desktop by default
+        sc = 1;
+        while (sc < 4 && (GAP + cols * (TILE * (sc + 1) + GAP)) <= 1500 && (GAP + rows * (TILE * (sc + 1) + GAP) + LEG_H) <= 1000) sc++;
+    }
+    int W = GAP + cols * (TILE * sc + GAP), H = GAP + rows * (TILE * sc + GAP) + LEG_H;
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) { fprintf(stderr, "deepeel: mapwin: SDL_Init: %s\n", SDL_GetError()); return NULL; }
+    SDL_Window *win = SDL_CreateWindow("deepeel ROM map", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, W, H, SDL_WINDOW_RESIZABLE);
+    SDL_Renderer *ren = win ? SDL_CreateRenderer(win, -1, 0) : NULL;
+    SDL_Texture *tex = ren ? SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, W, H - LEG_H) : NULL;
+    if (!tex) {
+        fprintf(stderr, "deepeel: mapwin: %s\n", SDL_GetError());
+        if (ren) SDL_DestroyRenderer(ren);
+        if (win) SDL_DestroyWindow(win);
+        SDL_Quit();
+        return NULL;
+    }
+    uint32_t *px = malloc((size_t)W * (H - LEG_H) * 4);
+    if (!px) { SDL_DestroyTexture(tex); SDL_DestroyRenderer(ren); SDL_DestroyWindow(win); SDL_Quit(); return NULL; }
+    for (int first = 1; first || !atomic_load(&mw_quit); first = 0) {   // always one draw, even for a run that ends at once
+        SDL_Event e;
+        while (SDL_PollEvent(&e))
+            if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && (e.key.keysym.sym == SDLK_ESCAPE || e.key.keysym.sym == SDLK_q))) atomic_store(&mw_quit, 1);
+        DpMapSummary sum;
+        uint8_t *m = dp_map_build(res, &sum);
+        if (m) {
+            for (size_t i = 0; i < (size_t)W * (H - LEG_H); i++) px[i] = 0xff18181c;
+            for (int b = 0; b < banks; b++) {
+                int ox = GAP + (b % PER_ROW) * (TILE * sc + GAP), oy = GAP + (b / PER_ROW) * (TILE * sc + GAP);
+                for (int g = 0; g < 0x4000; g++) {
+                    const uint8_t *c = dp_map_rgb(m[(size_t)b * 0x4000 + g]);
+                    uint32_t v = 0xff000000u | (uint32_t)c[0] << 16 | (uint32_t)c[1] << 8 | c[2];
+                    int x = ox + (g % TILE) * sc, y = oy + (g / TILE) * sc;
+                    for (int dy = 0; dy < sc; dy++)
+                        for (int dx = 0; dx < sc; dx++) px[(size_t)(y + dy) * W + x + dx] = v;
+                }
+            }
+            SDL_UpdateTexture(tex, NULL, px, W * 4);
+            const char *dump = getenv("DEEPEEL_MAPWIN_DUMP");   // test hook: the last drawn map as a binary PPM
+            if (dump) {
+                FILE *f = fopen(dump, "wb");
+                if (f) {
+                    fprintf(f, "P6\n%d %d\n255\n", W, H - LEG_H);
+                    for (size_t i = 0; i < (size_t)W * (H - LEG_H); i++) { uint8_t t[3] = { (uint8_t)(px[i] >> 16), (uint8_t)(px[i] >> 8), (uint8_t)px[i] }; fwrite(t, 1, 3, f); }
+                    fclose(f);
+                }
+            }
+            SDL_SetRenderDrawColor(ren, 0x18, 0x18, 0x1c, 255);
+            SDL_RenderClear(ren);
+            SDL_Rect dst = { 0, 0, W, H - LEG_H };
+            SDL_RenderCopy(ren, tex, NULL, &dst);
+            char line[160];
+            snprintf(line, sizeof line, "%.1f%% known  %.1f%% unknown  %llu steps  %llu paths", sum.total ? 100.0 * (double)sum.known / (double)sum.total : 0.0,
+                     sum.total ? 100.0 * (double)sum.unknown / (double)sum.total : 0.0, (unsigned long long)res->steps_total, (unsigned long long)res->paths_run);
+            SDL_Color white = { 0xe0, 0xe0, 0xe0, 255 };
+            draw_text(ren, 6, H - LEG_H + 4, line, 1, white);
+            int lx = 6;
+            for (int c = 0; c < DP_MAP_COUNT; c++) {
+                if (!sum.cls[c]) continue;
+                const uint8_t *rgb = dp_map_rgb(c);
+                SDL_SetRenderDrawColor(ren, rgb[0], rgb[1], rgb[2], 255);
+                SDL_Rect r = { lx, H - LEG_H + 16, 8, 8 };
+                SDL_RenderFillRect(ren, &r);
+                char t[48];
+                snprintf(t, sizeof t, "%s %.1f%%", dp_map_class_name(c), sum.total ? 100.0 * (double)sum.cls[c] / (double)sum.total : 0.0);
+                SDL_Color tc = { 0xb0, 0xb0, 0xb8, 255 };
+                draw_text(ren, lx + 12, H - LEG_H + 16, t, 1, tc);
+                lx += 12 + text_w(t, 1) + 10;
+            }
+            SDL_RenderPresent(ren);
+            free(m);
+        }
+        for (int i = 0; i < 25 && !atomic_load(&mw_quit); i++) {   // ~0.5 s between redraws, responsive to events
+            SDL_Event e2;
+            while (SDL_PollEvent(&e2))
+                if (e2.type == SDL_QUIT || (e2.type == SDL_KEYDOWN && (e2.key.keysym.sym == SDLK_ESCAPE || e2.key.keysym.sym == SDLK_q))) atomic_store(&mw_quit, 1);
+            SDL_Delay(20);
+        }
+    }
+    free(px);
+    SDL_DestroyTexture(tex);
+    SDL_DestroyRenderer(ren);
+    SDL_DestroyWindow(win);
+    SDL_Quit();
+    return NULL;
+}
+int dp_mapwin_start(const DpResults *res, int scale) {
+    if (mw_running) return 0;
+    mw_res = res; mw_scale = scale;
+    atomic_store(&mw_quit, 0);
+    if (pthread_create(&mw_th, NULL, mw_main, NULL) != 0) return 1;
+    mw_running = 1;
+    return 0;
+}
+void dp_mapwin_stop(void) {
+    if (!mw_running) return;
+    atomic_store(&mw_quit, 1);
+    pthread_join(mw_th, NULL);
+    mw_running = 0;
+}

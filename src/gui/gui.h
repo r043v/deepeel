@@ -24,4 +24,11 @@ int dp_watch_start(DpPlay *play, int fps);
 // closes the window and joins the thread (idempotent)
 void dp_watch_stop(void);
 
+// --- ROM map window (--mapwin): the ROM as in the .map.png (one pixel per byte, one tile per bank,
+// the same palette), redrawn from the live results about twice a second in its own thread. Read-only
+// observation of the results while the explorers run; closing the window does not stop the run.
+// returns 0 on success; 1 and a message without SDL2
+int dp_mapwin_start(const DpResults *res, int scale);
+void dp_mapwin_stop(void);
+
 #endif
