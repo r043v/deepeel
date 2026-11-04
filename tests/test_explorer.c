@@ -134,6 +134,17 @@ int main(int argc, char **argv) {
         char *tb = dp_png_text(png, "dpTb", &tl);
         CHECK(tb != NULL && strstr(tb, "\"at\":1024") && strstr(tb, "\"stride\":2"));
         free(tb);
+        size_t cl = 0;
+        uint8_t *ch = (uint8_t *)dp_png_text(png, "dpCh", &cl);
+        CHECK(ch != NULL && cl >= 28 && !memcmp(ch, "DPCH", 4));
+        if (ch && cl >= 28) {
+            uint32_t mask = ch[24] | ch[25] << 8 | ch[26] << 16 | (uint32_t)ch[27] << 24;
+            size_t n = (size_t)res.banks * 0x4000, want = 28;
+            static const int w[7] = { 1, 1, 1, 4, 4, 4, 4 };
+            for (int i = 0; i < 7; i++) if (mask & (1u << i)) want += n * (size_t)w[i];
+            CHECK(want == cl && (mask & 1u) && (mask & 8u));   // exec flags and exec hits are present
+        }
+        free(ch);
         remove(png);
     }
 

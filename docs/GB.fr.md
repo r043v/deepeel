@@ -2251,3 +2251,10 @@ Les chunks binaires `dpCv`, `dpFr`, `dpTb` ne sont plus des zTXt : ce sont des c
 ancillaires de même nom (casse PNG respectée), contenant un flux zlib unique. `dp_png_text` lit les deux
 formes, donc les anciennes cartes restent lisibles. Les chunks texte (`deepeel_meta`, `deepeel_map`,
 `deepeel_heat`, `deepeel_cov`, `deepeel_rom`) restent en zTXt.
+
+## 0.153.0 (J10 — chunk `dpCh`)
+
+Le PNG de carte GB porte un chunk privé `dpCh` : en-tête `DPCH` (version, plateforme, nombre d'octets,
+masque de sections) puis, par section non nulle, les `exec_flags`, `data_flags`, `static_flags` (1 octet
+par octet de ROM) et les compteurs `exec_hits`, `data_hits`, `play_exec_hits`, `play_data_hits` (u32 LE).
+Omis au-delà de ~4 Mo de ROM. Extraction : `deepeel mapx carte.png out --chunk dpCh`. Test `explorer`.

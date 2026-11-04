@@ -997,7 +997,7 @@ static int cmd_mapx(int argc, char **argv) {
     if (argc >= 6 && !strcmp(argv[4], "--chunk")) chunk = argv[5];
     if (argc < 4) {
         fprintf(stderr, "usage: deepeel mapx in.map.png out [--chunk deepeel_map|deepeel_meta|"
-                        "deepeel_heat|deepeel_cov|deepeel_rom]\n");
+                        "deepeel_heat|deepeel_cov|deepeel_rom|dpCv|dpCh|dpFr|dpTb]\n");
         return 2;
     }
     size_t n = 0;

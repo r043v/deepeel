@@ -88,6 +88,7 @@ int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char 
                             const char *filename, unsigned rom_size);
 // dpCv: lossless class vector (RLE) embedded in the map PNG; decode returns 1
 // when the runs fill exactly n bytes
+int dp_map_ch_encode(const DpResults *res, DpBuf *out);   // dpCh: flags and hit counters
 void dp_map_cv_encode(const uint8_t *m, size_t n, DpBuf *out);
 int dp_map_cv_decode(const uint8_t *p, size_t len, uint8_t *m, size_t n);
 int dp_map_cv_to_text(const uint8_t *cv, size_t len, int banks, DpBuf *out);

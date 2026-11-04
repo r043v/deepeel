@@ -49,6 +49,33 @@ int dp_map_cv_decode(const uint8_t *p, size_t len, uint8_t *m, size_t n) {
     return i == n;
 }
 
+// dpCh: the per-byte evidence next to the class vector (spec 9.3). Layout, little endian:
+// 'DPCH' u32 version(1) u32 platform(0 = GB) u64 n u32 bank unit u32 mask, then for each set
+// mask bit, in order, n entries: bit0 exec_flags u8, bit1 data_flags u8, bit2 static_flags u8,
+// bit3 exec_hits u32, bit4 data_hits u32, bit5 play_exec_hits u32, bit6 play_data_hits u32.
+// All-zero sections are omitted; the chunk is zlib-compressed by the PNG writer.
+static int ch_nonzero(const void *p, size_t bytes) {
+    const uint8_t *q = p;
+    for (size_t i = 0; i < bytes; i++) if (q[i]) return 1;
+    return 0;
+}
+static void ch_put(DpBuf *o, uint64_t v, int bytes) {
+    for (int i = 0; i < bytes; i++) { uint8_t b = (uint8_t)(v >> (8 * i)); dp_buf_push(o, &b, 1); }
+}
+int dp_map_ch_encode(const DpResults *res, DpBuf *out) {
+    size_t n = (size_t)res->banks * 0x4000;
+    if (n > (64u << 20) / 15) return 0;   // bounded: past it the chunk is left out
+    const void *sec[7] = { res->exec_flags, res->data_flags, res->static_flags, res->exec_hits,
+                           res->data_hits, res->play_exec_hits, res->play_data_hits };
+    static const int w[7] = { 1, 1, 1, 4, 4, 4, 4 };
+    uint32_t mask = 0;
+    for (int i = 0; i < 7; i++) if (sec[i] && ch_nonzero(sec[i], n * (size_t)w[i])) mask |= 1u << i;
+    dp_buf_push(out, "DPCH", 4);
+    ch_put(out, 1, 4); ch_put(out, 0, 4); ch_put(out, n, 8); ch_put(out, 0x4000, 4); ch_put(out, mask, 4);
+    for (int i = 0; i < 7; i++) if (mask & (1u << i)) dp_buf_push(out, sec[i], n * (size_t)w[i]);
+    return 1;
+}
+
 // dpCv -> .map text ("bank start end class", CPU-view addresses); 0 on a size mismatch
 int dp_map_cv_to_text(const uint8_t *cv, size_t len, int banks, DpBuf *out) {
     size_t n = (size_t)banks * 0x4000;
@@ -562,16 +589,21 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
     for (uint32_t t = 0; t < res->tb_n; t++)
         dp_buf_fmt(&tb_txt, "%s{\"at\":%u,\"stride\":%u,\"n\":%u}", t ? "," : "", res->tb[t].at, res->tb[t].stride, res->tb[t].count);
     dp_buf_fmt(&tb_txt, "]}");
-    DpPngText extra[5] = {
+    DpBuf ch;
+    dp_buf_init(&ch);
+    int have_ch = dp_map_ch_encode(res, &ch);
+    DpPngText extra[6] = {
         { "deepeel_heat", heat_txt.p, heat_txt.len, 0 },
         { "deepeel_cov", cov_txt.p, cov_txt.len, 0 },
         { "deepeel_rom", rom_txt.p, rom_txt.len, 0 },
         { "dpFr", fr_txt.p, fr_txt.len, 0 },
         { "dpTb", tb_txt.p, tb_txt.len, 0 },
+        { "dpCh", ch.p, have_ch ? ch.len : 0, 0 },
     };
     int ok = map_png_render(m, (int)res->banks, title, &s, (const char *)txt.p, txt.len,
                             meta, path, res->plat ? res->plat->name : "gb", file,
-                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 5, meth);
+                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 6, meth);
+    dp_buf_free(&ch);
     dp_buf_free(&tb_txt);
     dp_buf_free(&fr_txt);
     free(hb);
