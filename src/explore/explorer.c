@@ -69,9 +69,12 @@ static int map_grow(DpMap32 *m) {
         nu[j] = 1;
         memcpy(nv + j * m->stride, m->vals + i * m->stride, m->stride);
     }
-    free(m->keys);
-    free(m->used);
-    free(m->vals);
+    void **r = realloc(m->retired, (m->nretired + 3) * sizeof *r);
+    if (!r) { free(nk); free(nu); free(nv); return 0; }
+    m->retired = r;
+    m->retired[m->nretired++] = m->keys;
+    m->retired[m->nretired++] = m->used;
+    m->retired[m->nretired++] = m->vals;
     m->keys = nk;
     m->used = nu;
     m->vals = nv;
@@ -87,16 +90,30 @@ void dp_map_init(DpMap32 *m, size_t stride, size_t cap_abs) {
     m->used = calloc(m->cap, 1);
     m->vals = calloc(m->cap, stride);
     m->cnt = 0;
+    m->retired = NULL;
+    m->nretired = 0;
+    pthread_mutex_init(&m->mtx, NULL);
 }
 
 void dp_map_free(DpMap32 *m) {
+    for (size_t i = 0; i < m->nretired; i++) free(m->retired[i]);
+    free(m->retired);
+    pthread_mutex_destroy(&m->mtx);
     free(m->keys);
     free(m->used);
     free(m->vals);
     memset(m, 0, sizeof *m);
 }
 
+static void *map_get_or_add_locked(DpMap32 *m, uint32_t key);
 void *dp_map_get_or_add(DpMap32 *m, uint32_t key) {
+    pthread_mutex_lock(&m->mtx);
+    void *r = map_get_or_add_locked(m, key);
+    pthread_mutex_unlock(&m->mtx);
+    return r;
+}
+
+static void *map_get_or_add_locked(DpMap32 *m, uint32_t key) {
     void *p = map_find(m, key);
     if (p) return p;
     if (m->cnt >= m->cap * 3 / 4) {
@@ -111,7 +128,10 @@ void *dp_map_get_or_add(DpMap32 *m, uint32_t key) {
 }
 
 void *dp_map_find(DpMap32 *m, uint32_t key) {
-    return map_find(m, key);
+    pthread_mutex_lock(&m->mtx);
+    void *r = map_find(m, key);
+    pthread_mutex_unlock(&m->mtx);
+    return r;
 }
 
 // --- config / results ------------------------------------------------------------
@@ -1200,12 +1220,14 @@ bad_done:
     if (is_call && !ex->session) {
         uint32_t tkey = dp_rom_index(target < 0x4000 ? 0 : (uint32_t)cur_bank(ex, target), target);
         DpCallList *cl = dp_map_get_or_add(&res->callers, tkey);
+        pthread_mutex_lock(&res->callers.mtx); // the list is edited in place by several drain workers
         if (cl && cl->n < 8) {
             int dup = 0;
             for (int i = 0; i < cl->n; i++)
                 if (cl->site[i] == pk) dup = 1;
             if (!dup) cl->site[cl->n++] = pk;
         }
+        pthread_mutex_unlock(&res->callers.mtx);
     }
     // branch-site outcome: the previous conditional's natural outcome shows now
     if (!ex->session && ex->prev_was_cond) {
@@ -1213,8 +1235,8 @@ bad_done:
         uint32_t skey = dp_rom_index(ex->prev_site_bank, ex->prev_site_pc);
         DpSiteStat *st = dp_map_get_or_add(&res->sites, skey);
         if (st) {
-            if (pc == ex->prev_target) st->taken++;
-            else st->nottaken++;
+            if (pc == ex->prev_target) __atomic_add_fetch(&st->taken, 1, __ATOMIC_RELAXED);
+            else __atomic_add_fetch(&st->nottaken, 1, __ATOMIC_RELAXED);
         }
     }
 

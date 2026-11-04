@@ -69,6 +69,12 @@ typedef struct DpMap32 {
     uint8_t *used;
     uint8_t *vals;
     size_t stride, cap, cnt, cap_abs;
+    // parallel drain workers share the result maps: one lock per map, and the arrays a growth replaces are kept
+    // until dp_map_free so a slot pointer another worker still holds never dangles (a count bumped on a retired
+    // array after a growth is lost: bounded, rare)
+    pthread_mutex_t mtx;
+    void **retired;
+    size_t nretired;
 } DpMap32;
 
 void dp_map_init(DpMap32 *m, size_t stride, size_t cap_abs);

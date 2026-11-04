@@ -2724,3 +2724,20 @@ fixtures à plusieurs copies.
 Sur `fix_mbc5`, la séquence de banques de la fenêtre ROMX vue par gambatte (après la banque initiale 1 posée au chargement)
 est `2 3`, celle que `explore` consigne pour m0boy (`romN 0 -> 2`, `romN 2 -> 3`). Épinglé côté gambatte dans
 `lr_gambatte_parity`, côté m0boy par `test_explorer`. Reste : fixtures à banques multiples en fenêtre ROM0 (MBC1 mode 1).
+
+## 0.187.5 — courses de données de `--jobs` (trouvées par la campagne J13)
+
+Un run `--jobs 4` sur Super Mario Land 2 abortait par intermittence (`double free or corruption`, 2 lancements sur 8
+à 15 s). Compilé avec AddressSanitizer (`-Wl,--allow-multiple-definition`, `ASAN_OPTIONS=detect_odr_violation=0`),
+deux défauts distincts apparaissent :
+
+- **Tables de hachage partagées** (`fork_counts`, `callers`, `sites`) : les explorateurs de vidage les agrandissaient
+  sans verrou et l'un libérait le tableau que l'autre lisait. Un verrou par table ; les tableaux remplacés par une
+  croissance sont conservés jusqu'à `dp_map_free` (un compteur incrémenté sur un tableau périmé juste après une
+  croissance est perdu : borné et rare). La liste d'appelants se modifie sous le verrou de sa table.
+- **Masques de vivacité des sections** (`dp_section_live_*`) : mise à jour du masque et reconstruction de `ctx_seen`
+  sans verrou, d'où un `double-free`. Chemin rapide sans verrou quand le bit est déjà posé ; sinon verrou, revérification,
+  une seule reconstruction.
+
+Après correction : 0 échec sur 12 lancements, 8 lancements sous AddressSanitizer sans erreur, 125 tests verts.
+Les campagnes J13 antérieures en `--jobs` pouvaient donc être faussées par ces courses.

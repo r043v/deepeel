@@ -60,48 +60,55 @@ uint32_t dp_section_touch(DpResults *res, uint8_t bank, uint16_t pc, uint16_t hi
     return id;
 }
 
+static pthread_mutex_t live_mtx = PTHREAD_MUTEX_INITIALIZER;
+
 static void ctx_grew(DpSection *s) {
     // the liveness mask grew: previously evicted contexts may now differ
     dp_set_free(&s->ctx_seen);
     dp_set_init(&s->ctx_seen, 4096);
 }
 
-// the live_* entry points run per memory access from the session workers;
-// only the fork explorer uses the liveness masks, but the records are shared,
-// so they are updated under the same lock discipline
-void dp_section_live_reg(DpSection *s, int bit) {
-    uint64_t old = s->ctx_mask;
-    s->ctx_mask |= 1ull << bit;
-    if (s->ctx_mask != old) ctx_grew(s);
+// The live_* entry points run per memory access, from several drain workers or
+// sessions at once.  The common case (bit already set) takes no lock; a change
+// takes live_mtx, rechecks, and rebuilds ctx_seen once, never twice.
+static void live_set(DpSection *s, uint64_t *mask, uint64_t bit) {
+    if (__atomic_load_n(mask, __ATOMIC_RELAXED) & bit) return;
+    pthread_mutex_lock(&live_mtx);
+    if (!(*mask & bit)) {
+        __atomic_store_n(mask, *mask | bit, __ATOMIC_RELAXED);
+        ctx_grew(s);
+    }
+    pthread_mutex_unlock(&live_mtx);
 }
+
+void dp_section_live_reg(DpSection *s, int bit) { live_set(s, &s->ctx_mask, 1ull << bit); }
 
 void dp_section_live_wram(DpSection *s, uint32_t page) {
     if (page > 31) return;
-    uint64_t old = s->page_mask_wram;
-    s->page_mask_wram |= 1ull << page;
-    if (s->page_mask_wram != old) ctx_grew(s);
+    live_set(s, &s->page_mask_wram, 1ull << page);
 }
 
 void dp_section_live_vram(DpSection *s, uint32_t bank, uint32_t page) {
     if (page > 31) return;
-    bank &= 1;
-    uint64_t old = s->page_mask_vram[bank];
-    s->page_mask_vram[bank] |= 1ull << page;
-    if (s->page_mask_vram[bank] != old) ctx_grew(s);
+    live_set(s, &s->page_mask_vram[bank & 1], 1ull << page);
 }
 
 void dp_section_live_sram(DpSection *s, uint32_t page) {
     if (page > 63) return;
-    uint64_t old = s->page_mask_sram;
-    s->page_mask_sram |= 1ull << page;
-    if (s->page_mask_sram != old) ctx_grew(s);
+    live_set(s, &s->page_mask_sram, 1ull << page);
 }
 
 void dp_section_live_small(DpSection *s, int what) {
     // what: 0 = hram, 1 = oam, 2 = ie, 3 = romN window, 4 = ramg, 5 = vbk
     switch (what) {
-    case 0: if (!s->ctx_hram) { s->ctx_hram = 1; ctx_grew(s); } break;
-    case 1: if (!s->ctx_oam) { s->ctx_oam = 1; ctx_grew(s); } break;
+    case 0: case 1: {
+        uint8_t *f = what ? &s->ctx_oam : &s->ctx_hram;
+        if (__atomic_load_n(f, __ATOMIC_RELAXED)) break;
+        pthread_mutex_lock(&live_mtx);
+        if (!*f) { __atomic_store_n(f, 1, __ATOMIC_RELAXED); ctx_grew(s); }
+        pthread_mutex_unlock(&live_mtx);
+        break;
+    }
     case 2: dp_section_live_reg(s, DP_CTX_IE); break;
     case 3: dp_section_live_reg(s, DP_CTX_ROMN); break;
     case 4: dp_section_live_reg(s, DP_CTX_RAMG); break;
@@ -110,9 +117,15 @@ void dp_section_live_small(DpSection *s, int what) {
 }
 
 void dp_section_live_io(DpSection *s, uint16_t io_off) {
-    uint32_t old = s->io_read_mask;
-    if (io_off < 0x80) s->io_read_mask |= 1u << io_off;
-    if (s->io_read_mask != old) ctx_grew(s);
+    if (io_off >= 0x80) return;
+    uint32_t bit = 1u << (io_off & 31); // the shift wrapped mod 32 on the targets in use; kept explicit
+    if (__atomic_load_n(&s->io_read_mask, __ATOMIC_RELAXED) & bit) return;
+    pthread_mutex_lock(&live_mtx);
+    if (!(s->io_read_mask & bit)) {
+        __atomic_store_n(&s->io_read_mask, s->io_read_mask | bit, __ATOMIC_RELAXED);
+        ctx_grew(s);
+    }
+    pthread_mutex_unlock(&live_mtx);
 }
 
 void dp_section_io_used(DpSection *s, int slot) {
