@@ -173,6 +173,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_s4j.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_s4a.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_s4w.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_md_pad6.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_longloop.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_jptable_de.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ramgen.md
@@ -370,7 +371,7 @@ add_test(NAME pce_tree COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE
 set_tests_properties(pce_tree PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME md_tree COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_dbcc.md --max-total 100000 --tree ${CMAKE_CURRENT_BINARY_DIR}/md_tree.bin --text ${CMAKE_CURRENT_BINARY_DIR}/md_tree.txt >/dev/null 2>&1; grep -q 'choice tree: 3 nodes' ${CMAKE_CURRENT_BINARY_DIR}/md_tree.txt && test -s ${CMAKE_CURRENT_BINARY_DIR}/md_tree.bin")
 set_tests_properties(md_tree PROPERTIES FIXTURES_REQUIRED fixtures)
-add_test(NAME md_ctx_cap COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_md_pad.md; $B md explore $F --max-total 100000 --ctx-cap 1 --text ${CMAKE_CURRENT_BINARY_DIR}/md_cc1.txt >/dev/null 2>&1; $B md explore $F --max-total 100000 --text ${CMAKE_CURRENT_BINARY_DIR}/md_cc0.txt >/dev/null 2>&1; grep -q 'context eviction' ${CMAKE_CURRENT_BINARY_DIR}/md_cc1.txt && grep -q 'in 2 paths' ${CMAKE_CURRENT_BINARY_DIR}/md_cc1.txt && grep -q 'in 13 paths' ${CMAKE_CURRENT_BINARY_DIR}/md_cc0.txt && ! grep -q 'context eviction' ${CMAKE_CURRENT_BINARY_DIR}/md_cc0.txt")
+add_test(NAME md_ctx_cap COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_md_pad.md; $B md explore $F --max-total 100000 --ctx-cap 1 --text ${CMAKE_CURRENT_BINARY_DIR}/md_cc1.txt >/dev/null 2>&1; $B md explore $F --max-total 100000 --text ${CMAKE_CURRENT_BINARY_DIR}/md_cc0.txt >/dev/null 2>&1; grep -q 'context eviction' ${CMAKE_CURRENT_BINARY_DIR}/md_cc1.txt && grep -q 'in 2 paths' ${CMAKE_CURRENT_BINARY_DIR}/md_cc1.txt && grep -q 'in 15 paths' ${CMAKE_CURRENT_BINARY_DIR}/md_cc0.txt && ! grep -q 'context eviction' ${CMAKE_CURRENT_BINARY_DIR}/md_cc0.txt")
 set_tests_properties(md_ctx_cap PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME pce_second_pass COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_slide.pce; $B pce explore $F --max-total 20000 --max-steps 200 --second-pass --text ${CMAKE_CURRENT_BINARY_DIR}/pce_p2.txt >/dev/null 2>&1; $B pce explore $F --max-total 20000 --max-steps 200 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_p0.txt >/dev/null 2>&1; grep -q 'second pass: 1 seeds, 0 refused' ${CMAKE_CURRENT_BINARY_DIR}/pce_p2.txt && ! grep -q 'second pass' ${CMAKE_CURRENT_BINARY_DIR}/pce_p0.txt")
 set_tests_properties(pce_second_pass PROPERTIES FIXTURES_REQUIRED fixtures)

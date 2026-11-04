@@ -653,6 +653,19 @@ def build_md(out):
                             0x08, 0x00, 0x00, 0x03, 0x66, 0xF4,
                             0x4E, 0x71, 0x60, 0xFE])
     save_md(out, "fix_md_pad_effect", r)
+    # Six-button detection: pulse TH three times, then read with TH low; bits 0-3 read
+    # as zero only on a six-button pad.  The probes apply to the next poll, hence the loop.
+    r = md_rom()
+    code = bytearray()
+    for v in (0, 0x40, 0, 0x40, 0, 0x40, 0):
+        code += bytes([0x13, 0xFC, 0x00, v, 0x00, 0xA1, 0x00, 0x03])
+    # moveq #0,d0 ; move.b $A10003,d0 ; andi.w #15,d0 ; move.b 8(pc,d0.w),d1 ; bra loop
+    # no branch depends on the pad (a branch forks both sides): the data byte read tells
+    code += bytes([0x70, 0x00, 0x10, 0x39, 0x00, 0xA1, 0x00, 0x03, 0x02, 0x40, 0x00, 0x0F,
+                   0x12, 0x3B, 0x00, 0x08, 0x60, 0xB6, 0x4E, 0x71, 0x4E, 0x71])
+    r[0x200:0x200 + len(code)] = code
+    r[0x24E] = 0xAA; r[0x251] = 0xBB
+    save_md(out, "fix_md_pad6", r)
     r = md_rom()
     r[0x200:0x206] = bytes([0x10, 0x39, 0x00, 0xA2, 0x00, 0x00])
     save_md(out, "fix_md_fault", r)

@@ -3302,3 +3302,14 @@ gardent l'ancien comportement ; la cellule G4 reste ◐ (le second passage sur s
 Note G4 (0.239.0) : PCE et MD n'avaient pas ce défaut. Leurs racines passent par `push_live` /
 `push`, qui agrandissent la file puis mettent de côté (tampon, lot disque) ; seuls la dédup et le
 plafond de contexte écartent une graine. Il n'y a donc rien à porter.
+
+## MD : pad 6 boutons (D10) (0.240.0)
+
+Le runtime m0boy (`md_full_bus.c`) modélise maintenant la manette 6 boutons : `pad_ext` (bit 7 =
+pad 6 boutons branché, bits 0-3 = Z, Y, X, Mode) et `pad_cnt` (fronts montants de TH). À la
+quatrième phase, TH bas lit 0 sur les bits 0-3 (identification), TH haut lit Z, Y, X, Mode. Avec
+`pad_ext == 0` le comportement trois boutons est inchangé. Pas de timeout de séquence (le compteur
+tourne sur 4 fronts). Chaque site de lecture reçoit 14 sondes (12 trois boutons + pad 6 boutons au
+repos, + tout enfoncé). Tests : fixture `fix_md_pad6` (octet de données lu selon l'identification,
+aucun branchement ne dépend de la manette), `md_explore`, contrôle négatif fait ; `md_ctx_cap`
+passe à 15 chemins. L'état de la machine grossit de 2 octets : états disque antérieurs non relisibles.

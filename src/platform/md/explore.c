@@ -528,12 +528,14 @@ static void on_end(void *u, uint32_t pc, uint32_t next, unsigned len) {
     irq_forks(x, next);
     if (x->pad_read) {
         /* Start, A, Right, A+Right, then the other single buttons and two chords */
-        static const uint8_t pads[] = {128, 16, 8, 24, 1, 2, 4, 32, 64, 144, 40, 33};
+        static const uint8_t pads[] = {128, 16, 8, 24, 1, 2, 4, 32, 64, 144, 40, 33, 0, 0};
+        static const uint8_t exts[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x80, 0x8F};   /* last two: a six-button pad, none / X Y Z Mode held */
         uint16_t *seen = &x->pad_sites[pc >> 1];
         for (unsigned i = 0; i < sizeof pads; i++) {
             uint16_t bit = (uint16_t)(1u << i);
             if (!(*seen & bit) && push(x, next & 0xFFFFFFu, 0, 0)) {
                 dp_mdmach_state_set_pad(x->last_state, pads[i]);
+                dp_mdmach_state_set_pad_ext(x->last_state, exts[i]);
                 *seen |= bit;
                 r->pad_forks++;
             }
@@ -1739,7 +1741,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
             o->visit_cap);
     fprintf(out, "steps: %llu in %llu paths, forks %llu (irq %llu)\n", (unsigned long long)r->steps,
             (unsigned long long)r->paths, (unsigned long long)r->forks, (unsigned long long)r->irq_forks);
-    fprintf(out, "pad probes: %llu (twelve button patterns per read site)\n", (unsigned long long)r->pad_forks);
+    fprintf(out, "pad probes: %llu (fourteen patterns per read site: twelve three-button, two six-button)\n", (unsigned long long)r->pad_forks);
     if (o->movie) fprintf(out, "GMV replay: %u / %u frames%s\n", r->movie_frames, o->movie->frames,
                           r->movie_frames == o->movie->frames ? "" : " (incomplete)");
     fprintf(out, "saturation (a non-zero line means the exploration is incomplete):\n");

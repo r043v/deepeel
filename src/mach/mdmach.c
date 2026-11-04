@@ -147,6 +147,8 @@ void dp_mdmach_load(DpMdMach *d, const void *buf) {
 void dp_mdmach_state_set_pc(void *buf, uint32_t pc) { ((MdFull *)buf)->pc = pc; }
 void dp_mdmach_state_set_an(void *buf, unsigned n, uint32_t v) { ((MdFull *)buf)->a[n & 7] = v; }
 void dp_mdmach_state_set_pad(void *buf, uint8_t pad) { ((MdFull *)buf)->pad = pad; }
+// ext: bit 7 = six-button pad plugged in, bits 0-3 = Z,Y,X,Mode pressed; resets the TH phase counter
+void dp_mdmach_state_set_pad_ext(void *buf, uint8_t ext) { MdFull *m = buf; m->pad_ext = ext; m->pad_cnt = 0; }
 static int condition_true(unsigned cc, unsigned f) {
     int c = !!(f & 1), v = !!(f & 2), z = !!(f & 4), n = !!(f & 8);
     switch (cc & 15) {
@@ -231,7 +233,7 @@ uint64_t dp_mdmach_state_hash(const DpMdMach *d) {
     h = fnv_bytes(h, m->vsram, sizeof m->vsram); h = fnv_bytes(h, m->cram, sizeof m->cram);
     h = fnv_bytes(h, m->vdp_reg, sizeof m->vdp_reg);
     h = fnv_bytes(h, &m->vdp_addr, sizeof m->vdp_addr); h = fnv_bytes(h, &m->vdp_first, sizeof m->vdp_first);
-    uint8_t flags[] = { m->vdp_code, m->vdp_pending, m->dma_fill, m->pad, m->pad_th, m->pad_control,
+    uint8_t flags[] = { m->vdp_code, m->vdp_pending, m->dma_fill, m->pad, m->pad_th, m->pad_control, m->pad_ext, m->pad_cnt,
                         m->z80_bus, m->z80_reset, m->sram_enable, m->sram_protect, m->stopped, m->fault,
                         m->irq_pending, m->hint_pending, m->hint_counter };
     h = fnv_bytes(h, flags, sizeof flags);
