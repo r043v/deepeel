@@ -3143,3 +3143,11 @@ et d'un journal des écritures $FF40/$FF50) : frontières de ligne 153 à $0100�
 Observation de l'outil sur ROM réelle, pas une mesure matérielle. Reste ouvert : une
 lecture LY de m0boy en dehors du profil (matériel) n'est pas remise en cause — le knob
 ne touche que la machine TAS.
+
+## PCE : `--seed-banks` (G3) (0.219.0)
+
+`--seed-banks` existe pour NES (UxROM) ; la PC Engine l'a aussi : chaque page ROM de 8 Kio est
+mappée dans la fenêtre `$4000` (la valeur MPR qui la désigne) et entrée à sa base, comme racine
+forcée. Les pages qu'aucune valeur MPR ne désigne sont refusées et comptées (`entries_refused`).
+Le rapport affiche `bank roots: N pages seeded`. Observation de l'outil sur fixture, pas une
+mesure de matériel. Test : `test_seed_banks` (`tests/test_pce.c`).

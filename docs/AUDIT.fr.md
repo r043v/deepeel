@@ -12,10 +12,10 @@ remesure pas l'outil.
 | SMS/GG | 32 | 5 | 0 | 2 |
 | MSX | 32 | 5 | 0 | 2 |
 | NES | 12 | 25 | 0 | 2 |
-| PCE | 16 | 22 | 0 | 1 |
+| PCE | 17 | 21 | 0 | 1 |
 | MD | 10 | 28 | 0 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 91.
+Cellules ouvertes (◐ ou ✗) : 90.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -62,7 +62,6 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | G2 | Scan de dispatch par vues de banques | NES | ◐ UxROM, banque fixe (`--bank-dispatch`) |
 | G2 | Scan de dispatch par vues de banques | PCE | ◐ tables de mots par fenêtre, vues de pages (`--bank-dispatch`) |
 | G2 | Scan de dispatch par vues de banques | MD | ◐ tables de mots longs de pointeurs de code (`--bank-dispatch`) |
-| G3 | `--seed-banks`, `--entry` | PCE | ◐ `--entry ADDR` (mapping de mise sous tension) ; pas de `--seed-banks` ni de vue de banque |
 | G3 | `--seed-banks`, `--entry` | MD | ◐ `--entry ADDR` (ROM, pair) ; pas de `--seed-banks` ni de vue de banque |
 | G4 | Semis indirect + budgets en cascade | NES | ◐ second passage sur racines statiques (`--second-pass`) |
 | G4 | Semis indirect + budgets en cascade | PCE | ◐ second passage sur successeurs statiques non exécutés (`--second-pass`) |

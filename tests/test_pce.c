@@ -365,6 +365,28 @@ static void test_seed_vectors(void) {
     free(rom);
 }
 
+// G3: --seed-banks enters every ROM page at $4000, reaching code no path calls
+static void test_seed_banks(void) {
+    uint8_t *rom = calloc(1, ROM_SIZE);
+    static const uint8_t code[] = { 0x78, 0x80, 0xFE };   // sei; bra *
+    memcpy(rom, code, sizeof code);
+    rom[0x1FFE] = 0x00; rom[0x1FFF] = 0xE0;               // reset -> $E000
+    rom[0x2000] = 0xEA; rom[0x2001] = 0x80; rom[0x2002] = 0xFE; // page 1, base: nop; bra *
+    for (int seeded = 0; seeded < 2; seeded++) {
+        DpPceOptions o = dp_pce_options();
+        o.max_steps = 2000; o.seed_banks = seeded;
+        DpPceResults *r = calloc(1, sizeof *r);
+        CHECK(dp_pce_explore(rom, ROM_SIZE, &o, r), "bank explore");
+        if (seeded) {
+            CHECK(r->seeds_bank >= 1, "bank roots seeded (%llu)", (unsigned long long)r->seeds_bank);
+            CHECK(r->flags[0x2000] != 0, "page 1 reached through its bank view");
+        } else CHECK(r->flags[0x2000] == 0 && r->seeds_bank == 0, "not reached without the option");
+        dp_pce_results_free(r);
+        free(r);
+    }
+    free(rom);
+}
+
 // RAM-code archive: bytes built by immediates in WRAM, then run
 static void test_ramcode(void) {
     uint8_t *rom = calloc(1, ROM_SIZE);
@@ -403,6 +425,7 @@ int main(void) {
     test_streams_banked();
     test_play_pool();
     test_seed_vectors();
+    test_seed_banks();
     test_ramcode();
     test_tas_identity();
     free(rom);

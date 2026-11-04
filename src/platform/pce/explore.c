@@ -1580,6 +1580,14 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
         if (push_live(x, 1)) r->vectors_seeded++;
     }
     if (x->opt.seed_vectors) dp_pce_reset();
+    // --seed-banks (G3): every ROM page mapped in the $4000 window, entered at its base
+    // (the bank view a banked HuCard presents); pages no MPR value maps are refused
+    for (uint32_t pg = 0; pg < (uint32_t)(x->rom_size / 0x2000) && x->opt.seed_banks && !x->opt.lot_drain && !x->failed; pg++) {
+        dp_pce_reset();
+        if (!dp_pce_enter(pg, 0x4000)) { r->entries_refused++; continue; }
+        if (push_live(x, 1)) r->seeds_bank++;
+    }
+    if (x->opt.seed_banks) dp_pce_reset();
 
     // TAS movies, then the play sessions; their checkpoints join the queue
     if (x->opt.demo_frames) { // the attract mode first: no button, from power-on
@@ -1783,6 +1791,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
     if (r->pass2_seeds || r->pass2_refused || r->pass2_capped) fprintf(out, "  second pass: %llu seeds, %llu refused (page unmappable), %llu capped\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     if (r->disp_tables) fprintf(out, "  bank dispatch: %llu tables, %llu seeds, %llu refused views\n", (unsigned long long)r->disp_tables, (unsigned long long)r->disp_seeds, (unsigned long long)r->disp_refused_view);
     fprintf(out, "  copy siblings: %llu tables, %llu entries, %llu bytes typed, %llu table caps\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_entries, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_caps);
+    if (r->seeds_bank) fprintf(out, "  bank roots: %llu pages seeded at $4000\n", (unsigned long long)r->seeds_bank);
     if (r->vectors_seeded) fprintf(out, "  vector roots: %llu seeded (IRQ2, IRQ1, TIMER, NMI targets)\n", (unsigned long long)r->vectors_seeded);
     fprintf(out, "  entries: %llu seeded, %llu refused (outside the ROM mapping)\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
