@@ -68,6 +68,8 @@ typedef struct {
     uint16_t *ipc;                     // per PRG cell: CPU address of an executed instruction start
     uint8_t *istart;                   // per PRG cell: 1 when an instruction started there
     int was_outside;                   // previous step ran outside PRG
+    int32_t exp_pc;                    // address the next instruction should start at (-1: unknown)
+    int in_handler;                    // between an NMI/IRQ vector entry and its RTI
     // play/TAS session state (the on_frame hook drives it)
     int play_mode;                     // 0: fork exploration, 1: play/TAS
     uint8_t (*frame_masks)[2];         // inputs per frame (TAS or generated)
@@ -384,6 +386,25 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
     if (x->ipc && x->istart && !x->play_mode) {
         int64_t c0 = dp_nesmach_rom_index(x->m, pc);
         if (c0 >= 0 && (size_t)c0 < x->r->prg_size) { x->ipc[c0] = (uint16_t)pc; x->istart[c0] = 1; }
+    }
+
+    if (r->exec_kind && !x->play_mode) {   // D1: ENTRY (non-sequential arrival) and IRQ (inside a handler)
+        int64_t ec = dp_nesmach_rom_index(x->m, pc);
+        int entry = x->exp_pc != (int32_t)pc;
+        if (entry && ec >= 0 && (size_t)ec < r->prg_size) {
+            const uint8_t *pr = dp_nesmach_prg_rom(x->m);
+            if (pr && r->prg_size >= 6) {
+                unsigned nmi = pr[r->prg_size - 6] | (pr[r->prg_size - 5] << 8);
+                unsigned irq = pr[r->prg_size - 2] | (pr[r->prg_size - 1] << 8);
+                if (pc == nmi || pc == irq) x->in_handler = 1;
+            }
+        }
+        if (ec >= 0 && (size_t)ec < r->prg_size) {
+            if (entry) r->exec_kind[ec] |= DP_NES_X_ENTRY;
+            if (x->in_handler) r->exec_kind[ec] |= DP_NES_X_IRQ;
+        }
+        if (op == 0x40) x->in_handler = 0;
+        x->exp_pc = (int32_t)(pc + in.length);
     }
 
     {   // opcode-byte hit counter (saturating), both explored and played paths
@@ -808,7 +829,7 @@ static void run_path(DpNesRun *x, uint32_t slot) {
     self->state = NULL;
 
     dp_nesmach_load(x->m, own);
-    x->path_steps = 0;
+    x->path_steps = 0; x->exp_pc = -1; x->in_handler = 0;
     x->was_outside = 0;
     x->jam_pending = 0;
     uint64_t path = x->paths_opened++;
@@ -1206,6 +1227,7 @@ void dp_nes_results_free(DpNesResults *r) {
     free(r->tree_nodes);
     r->tree_nodes = NULL;
     free(r->exec_hits);
+    free(r->exec_kind); r->exec_kind = NULL;
     free(r->data_hits);
     r->exec_hits = r->data_hits = NULL;
     free(r->chr_flags);
@@ -1257,6 +1279,8 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     r->prg_size = dp_nesmach_prg_size(x.m);
     r->flags = calloc(r->prg_size, 1);
     r->exec_hits = calloc(r->prg_size, sizeof(uint32_t));
+    r->exec_kind = calloc(r->prg_size, 1);
+    x.exp_pc = -1;
     r->data_hits = calloc(r->prg_size, sizeof(uint32_t));
     r->chr_size = dp_nesmach_chr_size(x.m);
     if (r->chr_size) r->chr_flags = calloc(r->chr_size, 1);

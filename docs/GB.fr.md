@@ -3211,3 +3211,11 @@ Les racines NMI et IRQ/BRK semées par `--seed-vectors` étaient marquées *natu
 les atteint depuis le reset ; elles sont maintenant forcées, comme sur PCE et MD (la norme G1 :
 reset naturel, le reste forcé). Test `nes` : `test_seed_vectors` ; PCE et MD vérifient aussi
 désormais le caractère forcé.
+
+## NES : marquage ENTRY / IRQ par cellule (D1) (0.228.0)
+
+`exec_kind` (un octet par cellule PRG, octet d'opcode) : `DP_NES_X_ENTRY` pour une arrivée non
+séquentielle, `DP_NES_X_IRQ` pour le code exécuté entre l'entrée d'un vecteur NMI/IRQ et son `RTI`.
+START reste `exec_hits > 0` (compteur sur l'octet d'opcode). Limite : une fourche reprise au milieu
+d'un handler perd le marquage IRQ (l'état n'est pas dans l'instantané). Test `nes` :
+`test_seed_vectors`.

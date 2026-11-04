@@ -19,7 +19,7 @@ Cellules ouvertes (◐ ou ✗) : 80.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
-| D1 | Marquage exec natural/forced/entry/irq/start | NES | ◐ |
+| D1 | Marquage exec natural/forced/entry/irq/start | NES | ◐ 0.228.0 ENTRY/IRQ/START par cellule (`exec_kind`) ; IRQ perdu pour une fourche reprise dans un handler |
 | D1 | Marquage exec natural/forced/entry/irq/start | PCE | ◐ |
 | D1 | Marquage exec natural/forced/entry/irq/start | MD | ◐ |
 | D4 | Copies par boucle CPU | NES | ◐ boucle → PPUDATA |

@@ -15,6 +15,8 @@ enum { DP_NES_NATURAL = 1, DP_NES_FORCED = 2, DP_NES_DATA = 4, DP_NES_COPIED = 8
        DP_NES_SAMPLE = 64, // read by the DMC channel (delta-modulation sample DMA)
        DP_NES_STATIC = 128 }; // reached by the static flow closure, never executed
 
+enum { DP_NES_X_ENTRY = 1, DP_NES_X_IRQ = 2 };
+
 // map classes mirror the GB names so maprender renders nes maps unchanged
 enum {
     DP_NMAP_UNKNOWN, DP_NMAP_CODE_NAT, DP_NMAP_CODE_FORCED, DP_NMAP_CODE_STATIC,
@@ -141,6 +143,7 @@ typedef struct DpNesResults_ {
     uint32_t *exec_hits, *data_hits; // per PRG cell: executions of the opcode byte / data reads (saturating)
     DpNesTreeNode *tree_nodes; uint32_t tree_count, tree_capacity;
     uint8_t *flags;            // one byte per physical PRG cell
+    uint8_t *exec_kind;        // per PRG cell, opcode byte: DP_NES_X_ENTRY (non-sequential arrival) | DP_NES_X_IRQ (ran inside a handler)
     size_t prg_size;
     uint64_t s6_decoders, s6_tables, s6_candidates, s6_runs, s6_sat;   // S6 decoder replay
     uint64_t pool_saved, pool_starts;   // J1 checkpoint pool: checkpoints kept / sessions started from one
