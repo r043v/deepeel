@@ -12,7 +12,7 @@ remesure pas l'outil.
 | SMS/GG | 32 | 3 | 2 | 2 |
 | MSX | 32 | 3 | 2 | 2 |
 | NES | 12 | 25 | 0 | 2 |
-| PCE | 16 | 21 | 1 | 1 |
+| PCE | 16 | 22 | 0 | 1 |
 | MD | 10 | 26 | 2 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 89.
@@ -53,7 +53,7 @@ Cellules ouvertes (◐ ou ✗) : 89.
 | S6 | Rejeu de décodeurs sur tables de flux | SMS/GG | ◐ 0.147 idem (SMS/GG/SG) |
 | S6 | Rejeu de décodeurs sur tables de flux | MSX | ◐ 0.147 idem |
 | S6 | Rejeu de décodeurs sur tables de flux | NES | ◐ 0.148 `JSR` + mot de page zéro, tables de mots même bloc |
-| S6 | Rejeu de décodeurs sur tables de flux | PCE | ✗ |
+| S6 | Rejeu de décodeurs sur tables de flux | PCE | ◐ 0.149 `JSR` + mot de page zéro, page ROM de 8 Kio |
 | S7 | Inférence de voisins à la carte | NES | ◐ trous ≤ 1024 |
 | S7 | Inférence de voisins à la carte | MD | ◐ remplissage ≥ 8 (00/FF) ou ≥ 32, code ≤ 3 o, données ≤ 1024 o ; rendu seulement |
 | G1 | Graines reset/RST/IRQ | NES | ◐ reset + NMI/IRQ (`--seed-vectors`) |

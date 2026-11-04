@@ -2217,3 +2217,12 @@ ROM égale un mot de page zéro (le pointeur posé par l'appelant) désigne un d
 le mot de page zéro remplacé. Tables séparées octet bas / octet haut, indexées par `X` : non couvertes.
 Test `nes` (`test_streams`). Observation : DuckTales — 4 décodeurs, 0 table au budget par défaut.
 Rapport : ligne `stream replay (S6)`.
+
+## 0.149.0 (PCE — S6)
+
+Détecteur S6 sur l'explorateur HuC6280 : un `JSR` vers la ROM dont la première lecture de données
+égale un mot de page zéro (WRAM `$2000-$20FF`) désigne un décodeur ; deux départs à pas constant
+(2 à 16 octets, même page ROM de 8 Kio, même fenêtre CPU) donnent une table de mots, étendue dans les
+deux sens ; chaque autre entrée est rejouée depuis l'instantané d'avant l'appel avec le mot remplacé,
+poussée comme fourche forcée. Limites : pas de `BSR`, pas de pointeur `(zp),Y` hors page zéro, pas de
+tables séparées octet bas / octet haut. Test `pce` (`test_streams`). Rapport : ligne `stream replay (S6)`.

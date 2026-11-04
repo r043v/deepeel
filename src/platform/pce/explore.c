@@ -92,6 +92,7 @@ typedef struct {
     uint32_t rng;
     uint64_t novel;        // cells observed for the first time (novelty search)
     int failed;
+    struct PStm *stm;      // S6 decoder replay state
 } PceRun;
 
 #define OBS_MASK (DP_PCE_NATURAL | DP_PCE_FORCED | DP_PCE_DATA | DP_PCE_COPIED)
@@ -230,6 +231,7 @@ static void index_declare(PceRun *x) {
     }
 }
 
+static void pstm_read(PceRun *x, unsigned a);
 static void obs_rom_read(void *user, uint32_t cell, uint16_t addr) {
     PceRun *x = user;
     if (addr >= x->cur_pc && (unsigned)addr < (unsigned)x->cur_pc + x->cur_len) return; // fetch
@@ -239,6 +241,7 @@ static void obs_rom_read(void *user, uint32_t cell, uint16_t addr) {
     mark(x, cell, DP_PCE_DATA);
     x->last_read_cell = cell;
     x->last_read_step = x->total_steps;
+    if (x->mode == 0) pstm_read(x, addr);
 }
 
 static int is_block(uint8_t op) {
@@ -495,6 +498,119 @@ static uint32_t loop_bump(PceRun *x, uint64_t key) {
 // --- one step -------------------------------------------------------------------------
 
 // returns 0 when the path ends here
+// --- S6: decoder replay on pointer tables ---------------------------------------------
+// A JSR into ROM whose routine's first ROM data read equals a zero-page word (the pointer
+// the caller set) is a decoder; two starts at a constant table stride locate a pointer
+// table (same 8 KiB cell page, pointers in the same CPU window); every other entry is
+// replayed from the pre-call snapshot with that zero-page word set to the pointer.
+enum { PS_DEC = 64, PS_START = 16, PS_FR = 16, PS_CAND = 2048 };
+typedef struct { uint32_t key; uint8_t zp, nstarts, replayed; uint16_t starts[PS_START]; uint8_t *snap; } PDec;
+typedef struct PStm {
+    PDec dec[PS_DEC]; unsigned ndec;
+    struct { uint32_t key; uint8_t sp, open; uint8_t zp[256]; } fr[PS_FR]; unsigned nfr;
+} PStm;
+static void pstm_free(PceRun *x) {
+    if (!x->stm) return;
+    for (unsigned i = 0; i < x->stm->ndec; i++) free(x->stm->dec[i].snap);
+    free(x->stm); x->stm = NULL;
+}
+static void pstm_call(PceRun *x, uint32_t key) {
+    if (!x->stm && !(x->stm = calloc(1, sizeof *x->stm))) return;
+    PStm *s = x->stm;
+    for (unsigned i = 0; i < s->ndec; i++)
+        if (s->dec[i].key == key && !s->dec[i].snap) {
+            s->dec[i].snap = malloc(x->state_size);
+            if (s->dec[i].snap) dp_pce_save(s->dec[i].snap);
+        }
+    if (s->nfr == PS_FR) return;
+    s->fr[s->nfr].key = key; s->fr[s->nfr].sp = (uint8_t)(dp_pce_cpu().s - 2); s->fr[s->nfr].open = 1;
+    memcpy(s->fr[s->nfr].zp, dp_pce_wram(), 256);
+    s->nfr++;
+}
+static void pstm_step(PceRun *x) {
+    PStm *s = x->stm;
+    if (!s) return;
+    uint8_t sp = dp_pce_cpu().s;
+    while (s->nfr && sp > s->fr[s->nfr - 1].sp) s->nfr--;
+}
+static void pstm_read(PceRun *x, unsigned a) {
+    PStm *s = x->stm;
+    if (!s || !s->nfr) return;
+    for (unsigned k = s->nfr; k-- > 0;) {
+        if (!s->fr[k].open) break;
+        s->fr[k].open = 0;
+        for (unsigned p = 0; p < 255; p++) {
+            if ((unsigned)(s->fr[k].zp[p] | s->fr[k].zp[p + 1] << 8) != a) continue;
+            PDec *d = NULL;
+            for (unsigned i = 0; i < s->ndec; i++)
+                if (s->dec[i].key == s->fr[k].key && s->dec[i].zp == p) d = &s->dec[i];
+            if (!d) {
+                if (s->ndec == PS_DEC) break;
+                d = &s->dec[s->ndec++]; memset(d, 0, sizeof *d);
+                d->key = s->fr[k].key; d->zp = (uint8_t)p; x->r->s6_decoders++;
+            }
+            unsigned j;
+            for (j = 0; j < d->nstarts && d->starts[j] != a; j++) {}
+            if (j == d->nstarts && j < PS_START && a >= 0x2000) d->starts[d->nstarts++] = (uint16_t)a;
+            break;
+        }
+    }
+}
+static int pstm_ptr(const PceRun *x, size_t at, size_t lo, size_t hi, unsigned slot, uint16_t *v) {
+    if (at < lo || at + 2 > hi) return 0;
+    *v = (uint16_t)(x->rom[at] | x->rom[at + 1] << 8);
+    return *v >= 0x2000 && (unsigned)(*v >> 13) == slot;
+}
+static int pstm_replay(PceRun *x) {
+    PStm *s = x->stm;
+    if (!s) return 0;
+    DpPceResults *r = x->r; int pushed = 0;
+    for (unsigned di = 0; di < s->ndec; di++) {
+        PDec *d = &s->dec[di];
+        if (d->nstarts < 2 || d->nstarts <= d->replayed || !d->snap) continue;
+        d->replayed = d->nstarts;
+        unsigned slot = d->starts[0] >> 13;
+        uint8_t *tried = calloc(65536, 1);
+        if (!tried) continue;
+        for (unsigned j = 0; j < d->nstarts; j++) tried[d->starts[j]] = 1;
+        size_t pos[256]; unsigned np = 0;
+        for (size_t at = 0; at + 2 <= x->rom_size && np < 256; at++) {
+            uint16_t v = (uint16_t)(x->rom[at] | x->rom[at + 1] << 8);
+            for (unsigned j = 0; j < d->nstarts; j++) if (d->starts[j] == v) { pos[np++] = at; break; }
+        }
+        unsigned cands = 0;
+        for (unsigned i = 0; i + 1 < np; i++) {
+            size_t k = pos[i + 1] - pos[i];
+            if (k < 2 || k > 16 || (pos[i] >> 13) != (pos[i + 1] >> 13)) continue;
+            r->s6_tables++;
+            size_t blo = (pos[i] >> 13) << 13, bhi = blo + 0x2000, lo = pos[i], hi = pos[i + 1];
+            uint16_t v;
+            while (lo >= k && pstm_ptr(x, lo - k, blo, bhi, slot, &v)) lo -= k;
+            while (pstm_ptr(x, hi + k, blo, bhi, slot, &v)) hi += k;
+            for (size_t at = lo; at <= hi; at += k) {
+                if (!pstm_ptr(x, at, blo, bhi, slot, &v) || tried[v]) continue;
+                tried[v] = 1;
+                if (cands >= PS_CAND || x->queue_len >= x->opt.queue_cap) { r->s6_sat++; break; }
+                cands++; r->s6_candidates++;
+                dp_pce_load(d->snap);
+                uint8_t *w = dp_pce_wram();
+                w[d->zp] = (uint8_t)v; w[d->zp + 1] = (uint8_t)(v >> 8);
+                dp_pce_save(x->tmp2);
+                uLongf zl = x->zcap;
+                if (compress2(x->ztmp, &zl, x->tmp2, x->state_size, 1) != Z_OK) continue;
+                uint8_t *z = malloc(zl);
+                if (!z) continue;
+                memcpy(z, x->ztmp, zl);
+                x->queue[x->queue_len].z = z; x->queue[x->queue_len].zlen = zl;
+                x->queue[x->queue_len].forced = 1; x->queue[x->queue_len].choice = 0;
+                x->queue_len++; r->s6_runs++; pushed++;
+            }
+        }
+        free(tried);
+    }
+    return pushed;
+}
+
 static int step_one(PceRun *x, int *frame_done) {
     DpPceResults *r = x->r;
     if (dp_pce_irq_due()) {
@@ -521,6 +637,10 @@ static int step_one(PceRun *x, int *frame_done) {
     DpHucIns in;
     dp_huc_decode(b, 7, c.pc, &in);
     int64_t site = dp_pce_rom_index(c.pc);
+    if (x->mode == 0) {
+        pstm_step(x);
+        if (b[0] == 0x20) { int64_t tk = dp_pce_rom_index(in.target); if (tk >= 0) pstm_call(x, (uint32_t)tk); }
+    }
     // padding slide: a natural/forced path running into 8 identical $00/$FF bytes
     // of the ROM has left the code; cut it, counted in pad_cuts
     if (x->mode == 0 && site >= 0 && (b[0] == 0x00 || b[0] == 0xFF) && (size_t)site + 8 <= x->rom_size) {
@@ -1395,6 +1515,7 @@ drain:
             } else free(blob);
             if (!x->queue_len) continue;
         }
+        if (!x->queue_len && x->total_steps < x->opt.max_total && pstm_replay(x)) continue;
         if (!x->queue_len) break;
         if (x->total_steps >= x->opt.max_total) { r->global_cuts++; break; }
         PceQueued q = x->queue[--x->queue_len];
@@ -1416,6 +1537,7 @@ drain:
         if (g_inferred && x->opt.infer) { infer(x, g_inferred); siblings(x, g_inferred); }
     }
 
+    pstm_free(x);
     dp_pce_observe(NULL);
     // states still queued when the global wall stopped the drain: counted
     // (saved in the lot when there is one: the next run resumes them)
@@ -1536,6 +1658,9 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             (unsigned long long)r->idx_overflow);
     if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/MPR context past the cap)\n", (unsigned long long)r->ctx_evicted);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
+    fprintf(out, "  stream replay (S6): %llu decoders, %llu tables, %llu candidates, %llu queued replays (%llu saturated)\n",
+            (unsigned long long)r->s6_decoders, (unsigned long long)r->s6_tables, (unsigned long long)r->s6_candidates,
+            (unsigned long long)r->s6_runs, (unsigned long long)r->s6_sat);
     fprintf(out, "  provenance: %llu jump-table words traced from ROM reads\n", (unsigned long long)r->prov_sites);
     if (r->tree_nodes) fprintf(out, "  choice tree: %llu nodes\n", (unsigned long long)r->tree_nodes);
     if (r->pass2_seeds || r->pass2_refused || r->pass2_capped) fprintf(out, "  second pass: %llu seeds, %llu refused (page unmappable), %llu capped\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);

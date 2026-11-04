@@ -31,6 +31,7 @@ static void *job_main(void *p) {
 
 #define ADD(f) a->f += b->f
 static void merge_counts(DpPceResults *a, const DpPceResults *b) {
+    ADD(s6_decoders); ADD(s6_tables); ADD(s6_candidates); ADD(s6_runs); ADD(s6_sat);
     ADD(steps); ADD(paths); ADD(forks); ADD(irq_forks); ADD(pad_forks); ADD(exec_outside);
     ADD(data_reads); ADD(forced_paths); ADD(evicted); ADD(faults); ADD(illegal_cuts);
     ADD(step_cuts); ADD(loop_cuts); ADD(fork_cuts); ADD(pad_fork_cuts); ADD(irq_fork_cuts);

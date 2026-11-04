@@ -240,6 +240,36 @@ static void test_tas_identity(void) {
     CHECK(dp_pce_tas_identity(&t, rom, sizeof rom) == 2, "a changed ROM is a different ROM");
 }
 
+// S6: a decoder called with a zero-page pointer taken from a table; the stream the ROM
+// never calls is read through the replay
+static void test_streams(void) {
+    uint8_t *rom = calloc(1, ROM_SIZE);
+    static const uint8_t code[] = {
+        0x78, 0xD4,
+        0xA9, 0xFF, 0x53, 0x01,
+        0xA9, 0xF8, 0x53, 0x02,
+        0xA9, 0x01, 0x53, 0x04,                          // MPR2 = page 1 at $4000
+        0xA9, 0x00, 0x85, 0x10, 0xA9, 0x40, 0x85, 0x11, 0x20, 0x00, 0xE1,   // ptr $4000; jsr
+        0xA9, 0x10, 0x85, 0x10, 0xA9, 0x40, 0x85, 0x11, 0x20, 0x00, 0xE1,   // ptr $4010; jsr
+        0x80, 0xFE,
+    };
+    memcpy(rom, code, sizeof code);
+    rom[0x100] = 0xB2; rom[0x101] = 0x10; rom[0x102] = 0x60;                  // lda ($10); rts
+    rom[0x2000] = 5; rom[0x2010] = 6; rom[0x2030] = 7;
+    static const uint8_t tab[] = { 0x00, 0x40, 0x10, 0x40, 0x30, 0x40 };
+    memcpy(rom + 0x2100, tab, sizeof tab);
+    rom[0x1FFE] = 0x00; rom[0x1FFF] = 0xE0;
+    DpPceOptions o = dp_pce_options();
+    o.max_total = 200000; o.max_steps = 2000;
+    DpPceResults *r = calloc(1, sizeof *r);
+    CHECK(dp_pce_explore(rom, ROM_SIZE, &o, r), "streams explore");
+    CHECK(r->s6_decoders >= 1, "decoder detected");
+    CHECK(r->s6_tables >= 1 && r->s6_runs >= 1, "table found and replayed");
+    CHECK(r->flags && (r->flags[0x2030] & DP_PCE_DATA), "the unplayed stream was read");
+    dp_pce_results_free(r);
+    free(r); free(rom);
+}
+
 int main(void) {
     uint8_t *rom = malloc(ROM_SIZE);
     build(rom);
@@ -249,6 +279,7 @@ int main(void) {
     test_palette(rom);
     test_index(rom);
     test_jobs(rom);
+    test_streams();
     test_tas_identity();
     free(rom);
     if (fails) { printf("%d failure(s)\n", fails); return 1; }
