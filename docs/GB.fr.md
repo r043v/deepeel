@@ -2442,3 +2442,13 @@ même quand la position est déjà bonne. Le spool retient maintenant la positio
 36,9 M pas (18,0 M en 0.171.0, 11,8 M en 0.169.0), 5,64 M états écrits. Le spool grossit à ≈ 2 Gio/min dans ce
 régime : le garde-fou disque reste nécessaire pour les runs longs. Pas encore fait : tampon RAM de tête de
 spool (les lectures ne sont pas le goulot : 7 798 relus contre 5,64 M écrits) et ensemble exact découpé.
+
+## 0.174.0 (J13 : le rapport sépare le code RAM « naturel » du code atteint après fourche)
+
+La ligne `runtime code archive` est suivie de `generated code by reachability` : parmi les instructions RAM sans
+source ROM, combien ont été exécutées au moins une fois sur un chemin **non forcé** (`!cur_forced`), combien
+seulement après une décision de fourche (branche, IRQ, key, P1). Observation de l'outil, 60 s de Zelda
+(0.174.0) : 16 085 « générées », **0 sur chemin non forcé**, 16 085 seulement après fourche. Lecture honnête :
+dans ce budget, aucune exécution RAM sans source n'est atteinte sans décision forcée ; cela ne dit pas que le
+jeu n'exécute pas de code RAM en jeu réel (le chemin naturel de 60 s n'atteint peut-être pas la routine
+OAM-DMA en HRAM), ni que ce code est faux : il est atteint depuis un état contrefactuel. À relire sur un run long.

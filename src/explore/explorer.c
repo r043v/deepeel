@@ -1191,7 +1191,7 @@ bad_done:
                 }
                 int32_t dv = -1;
                 if (pc >= 0xC000 && pc < 0xE000 && ex->wram_taint[pc - 0xC000]) dv = (int32_t)(ex->wram_taint[pc - 0xC000] - 1);
-                dp_rtcode_add(res, pc, ib, ilen, rk, dv);
+                dp_rtcode_add(res, pc, ib, ilen, rk, dv, !ex->cur_forced);
                 if (pc >= 0xC000 && pc < 0xE000)
                     for (int i = 0; i < ilen && pc + i < 0xE000; i++) ex->wram_exec[pc + i - 0xC000] = 1;
             }

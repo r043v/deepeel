@@ -169,6 +169,7 @@ typedef struct DpRtCode {
     int32_t derived;  // unattached code: ROM index of the last ROM byte read before its RAM byte was written (approximate producer), -1 none
     uint16_t pc;
     uint8_t len, b[4];
+    uint8_t natural;  // executed at least once on a non-forced path (no fork decision made it reachable)
 } DpRtCode;
 
 typedef struct DpResults {
@@ -284,6 +285,7 @@ typedef struct DpResults {
     uint8_t *rt_pcseen;           // variants seen per pc (saturating), for the polymorphic count
     uint32_t smc_writes, smc_first_pc; // writes into WRAM bytes already executed (self-modifying code)
     uint32_t rt_poly;             // variants that replace an earlier one at the same pc (SMC)
+    uint32_t rt_natural;          // generated variants executed at least once on a non-forced path
     uint32_t rt_derived;          // generated variants with an approximate ROM producer
     uint32_t rt_cap, rt_n, rt_attached; // table size, distinct (pc,bytes) variants, those with a ROM source
 } DpResults;
@@ -546,7 +548,8 @@ void dp_record_copy(DpExplorer *ex, const DpCopyRec *rec, uint32_t attrib_key);
 void dp_copy_on_rom_read(DpExplorer *ex, uint8_t bank, uint16_t addr, uint8_t v);
 void dp_copy_on_vram_write(DpExplorer *ex, uint8_t bank, uint16_t addr, uint8_t v);
 void dp_copy_flush_for_exec(DpExplorer *ex, uint16_t pc);
-void dp_rtcode_add(DpResults *res, uint16_t pc, const uint8_t *b, int len, int32_t rom_src, int32_t derived);
+void dp_rtcode_add(DpResults *res, uint16_t pc, const uint8_t *b, int len, int32_t rom_src, int32_t derived,
+                   int natural);
 DpRtCode *dp_rtcode_sorted(const DpResults *res, uint32_t *n);
 void dp_copy_on_wram_write(DpExplorer *ex, uint16_t addr, uint8_t v);
 void dp_copy_on_back_edge(DpCopyTracker *ct, uint16_t site, uint32_t site_key);

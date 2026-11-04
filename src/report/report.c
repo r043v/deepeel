@@ -141,8 +141,9 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
                  res->closure_bank_seeds, res->indirect_seeds, res->closure_seeds_refused);
         dp_buf_str(out, line);
         snprintf(line, sizeof line,
-                 "runtime code archive: %u distinct instructions executed from RAM/VRAM/HRAM, %u attached to a ROM copy source, %u generated (no ROM source; %u with an approximate ROM producer), %u rewrote an earlier instruction at the same address (self-modifying)\n",
-                 res->rt_n, res->rt_attached, res->rt_n - res->rt_attached, res->rt_derived, res->rt_poly);
+                 "runtime code archive: %u distinct instructions executed from RAM/VRAM/HRAM, %u attached to a ROM copy source, %u generated (no ROM source; %u with an approximate ROM producer), %u rewrote an earlier instruction at the same address (self-modifying)\n  generated code by reachability: %u executed on a non-forced path, %u only after a fork decision (branch/IRQ/key/P1)\n",
+                 res->rt_n, res->rt_attached, res->rt_n - res->rt_attached, res->rt_derived, res->rt_poly,
+                 res->rt_natural, (res->rt_n - res->rt_attached) - res->rt_natural);
         dp_buf_str(out, line);
         {
             DpMapSummary rsum;

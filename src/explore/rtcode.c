@@ -30,7 +30,8 @@ static int rt_grow(DpResults *res) {
 }
 
 // b: the instruction bytes (len 1..4); rom_src: ROM index of the copy source or -1
-void dp_rtcode_add(DpResults *res, uint16_t pc, const uint8_t *b, int len, int32_t rom_src, int32_t derived) {
+void dp_rtcode_add(DpResults *res, uint16_t pc, const uint8_t *b, int len, int32_t rom_src, int32_t derived,
+                   int natural) {
     if (len < 1) return;
     if (len > 4) len = 4;
     uint64_t key = rt_key(pc, b, len);
@@ -54,6 +55,10 @@ void dp_rtcode_add(DpResults *res, uint16_t pc, const uint8_t *b, int len, int32
             if (res->rt_pcseen[pc] < 255) res->rt_pcseen[pc]++;
         }
         if (rom_src >= 0) res->rt_attached++;
+    }
+    if (natural && !e->natural) {
+        e->natural = 1;
+        if (e->rom_src < 0) res->rt_natural++;
     }
     if (e->hits != 0xFFFFFFFFu) e->hits++;
 out:
