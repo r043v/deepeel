@@ -12,10 +12,10 @@ remesure pas l'outil.
 | SMS/GG | 32 | 5 | 0 | 2 |
 | MSX | 32 | 5 | 0 | 2 |
 | NES | 17 | 20 | 0 | 2 |
-| PCE | 23 | 15 | 0 | 1 |
+| PCE | 24 | 14 | 0 | 1 |
 | MD | 17 | 21 | 0 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 72.
+Cellules ouvertes (◐ ou ✗) : 71.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -84,7 +84,6 @@ Cellules ouvertes (◐ ou ✗) : 72.
 | J5 | Mode humain, export `.sta` | NES | ◐ `--export-state` (cellule la plus profonde, fichier DPST) |
 | J5 | Mode humain, export `.sta` | PCE | ◐ `--export-state` (cellule la plus profonde, fichier DPST) |
 | J5 | Mode humain, export `.sta` | MD | ◐ `--export-state` (cellule la plus profonde, fichier DPST) |
-| O2 | `.cov`, romdata, `--evidence` | PCE | ◐ `--evidence` (pas de `.cov` ni romdata : pas de compteurs de coups) |
 | O3 | `--watch` (SDL2) | GB | ◐ 0.142 `--watch [FPS]` et `--watch-dump FILE.ppm` (framebuffer VDP) |
 | O3 | `--watch` (SDL2) | SMS/GG | ◐ 0.142 `--watch [FPS]` et `--watch-dump FILE.ppm` (framebuffer VDP) |
 | O3 | `--watch` (SDL2) | MSX | ◐ 0.188.1 `--watch [FPS]` et `--watch-dump FILE.ppm` (framebuffer TMS9918, 160×192 ; test `msx_watch_dump`) |

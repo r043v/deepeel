@@ -540,3 +540,5 @@ add_test(NAME nes_summary_heat COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAK
 set_tests_properties(nes_summary_heat PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_cov_romdata COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_s4w.md --cov $D/md_c.cov --romdata $D/md_c.rd >/dev/null 2>&1; grep -q '^000200 1 1' $D/md_c.cov && grep -q '^[0-9a-f]* 8 [1-9]' $D/md_c.cov && grep -q '^2 [1-9]' $D/md_c.rd")
 set_tests_properties(md_cov_romdata PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME pce_cov_romdata COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B pce explore $D/fix_pce_ind.pce --cov $D/pce_c.cov --romdata $D/pce_c.rd >/dev/null 2>&1; grep -q '^00 0000 1 1' $D/pce_c.cov && grep -q '^[0-9a-f]* [0-9a-f]* 8 [1-9]' $D/pce_c.cov && grep -q '^1 [1-9]' $D/pce_c.rd")
+set_tests_properties(pce_cov_romdata PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)

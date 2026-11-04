@@ -246,6 +246,7 @@ static void obs_rom_read(void *user, uint32_t cell, uint16_t addr) {
     if (cell >= x->rom_size) return;
     index_note(x, cell, addr);
     x->r->data_reads++;
+    if (!x->forced && x->r->data_hits && x->r->data_hits[cell] != UINT32_MAX) x->r->data_hits[cell]++;
     mark(x, cell, DP_PCE_DATA);
     x->last_read_cell = cell;
     x->last_read_step = x->total_steps;
@@ -755,6 +756,7 @@ static int step_one(PceRun *x, int *frame_done) {
             int64_t cell = dp_pce_rom_index((uint16_t)(c.pc + i));
             if (cell < 0) continue;
             mark(x, (size_t)cell, x->forced ? DP_PCE_FORCED : DP_PCE_NATURAL);
+            if (i == 0 && !x->forced && r->exec_hits && r->exec_hits[cell] != UINT32_MAX) r->exec_hits[cell]++;
         }
         x->istart[site] = 1;
         uint32_t page = (uint32_t)(site >> 13);
@@ -1500,6 +1502,8 @@ void dp_pce_results_free(DpPceResults *r) {
     dp_ramarch_free(&r->ra);
     free(r->flags);
     free(r->exec_kind); r->exec_kind = NULL;
+    free(r->exec_hits); r->exec_hits = NULL;
+    free(r->data_hits); r->data_hits = NULL;
     free(r->pal_flags);
     free(r->idx_flags);
     r->idx_flags = NULL;
@@ -1546,6 +1550,8 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     memset(x->page_win, 0xFF, sizeof x->page_win);
     r->flags = calloc(x->rom_size, 1);
     r->exec_kind = calloc(x->rom_size, 1);
+    r->exec_hits = calloc(x->rom_size, sizeof(uint32_t));
+    r->data_hits = calloc(x->rom_size, sizeof(uint32_t));
     r->pal_flags = calloc(x->rom_size, 1);
     r->idx_flags = calloc(x->rom_size, 1);
     x->fork_sites = calloc(x->rom_size, 1);
@@ -1891,6 +1897,27 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
     fputs("Limits: HuCard only. No CD-ROM2/Super CD (System Card, ADPCM, CD audio), no SF2 mapper beyond the "
           "modelled pages, no SuperGrafx (VPC, second VDC); the multitap is an opt-in model. Observations of "
           "the tool on a concrete machine, not hardware measurements.\n", out);
+}
+
+void dp_pce_cov(FILE *out, const DpPceResults *r) {
+    fputs("# deepeel pce coverage v1: bank offset flags(1=exec,4=speculative,8=data) hits (natural paths)\n", out);
+    if (!r->exec_hits || !r->data_hits) return;
+    for (size_t k = 0; k < r->rom_size; k++) {
+        uint8_t f = r->flags[k]; unsigned flags; uint32_t hits;
+        if (f & (DP_PCE_NATURAL | DP_PCE_FORCED)) { flags = 1u | ((f & DP_PCE_NATURAL) ? 0u : 4u); hits = r->exec_hits[k]; }
+        else if (f & (DP_PCE_DATA | DP_PCE_COPIED)) { flags = 8; hits = r->data_hits[k]; }
+        else continue;
+        fprintf(out, "%02zx %04zx %x %x\n", k >> 13, k & 0x1fff, flags, (unsigned)hits);
+    }
+}
+
+void dp_pce_romdata(FILE *out, const DpPceResults *r) {
+    if (!r->data_hits) return;
+    for (size_t p = 0; p < (r->rom_size + 255) / 256; p++) {
+        uint64_t n = 0;
+        for (size_t i = p * 256; i < p * 256 + 256 && i < r->rom_size; i++) n += r->data_hits[i];
+        if (n) fprintf(out, "%zx %llu\n", p, (unsigned long long)n);
+    }
 }
 
 void dp_pce_evidence(FILE *out, const DpPceResults *r) {

@@ -3473,3 +3473,10 @@ d'instruction (`exec_hits`). `--cov FILE` écrit « décalage drapeaux coups » 
 coups ne comptent que les chemins naturels, un octet atteint seulement par un fork garde 0) ; `--romdata FILE` écrit
 « page coups » par page de 256 octets lue. Le format `.cov` MD n'a pas de colonne de banque (une seule fenêtre linéaire).
 Test `md_cov_romdata`. Les lectures DMA ne sont pas comptées.
+
+## 0.249.10 (PCE, O2 : `--cov` et `--romdata`)
+
+PCE compte les départs d'opcode (`exec_hits`) et les lectures de données ROM (`data_hits`) des chemins naturels, saturant,
+fusionnés par `--jobs 2`. `--cov FILE` : « banque(8 Kio) décalage drapeaux coups » (1 exécution, 4 spéculatif, 8 donnée) ;
+`--romdata FILE` : « page coups » par page de 256 octets. Test `pce_cov_romdata`. Observations de l'outil, pas des mesures
+matérielles ; les lectures DMA/CD ne sont pas comptées.

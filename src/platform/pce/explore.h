@@ -144,6 +144,7 @@ typedef struct DpPceResults_ {
     uint64_t idx_overflow, idx_cross_page, idx_forced_ignored;      // records dropped (cap), reads on another page than the base
     uint32_t idx_declared, idx_refused_code, idx_biased; // bytes inferred / refused over code / sites starting at index >= 1
     uint8_t *flags;        // one byte per physical cell
+    uint32_t *exec_hits, *data_hits;   // per cell: natural-path opcode starts / ROM data reads (saturating)
     uint8_t *exec_kind;    // per cell, opcode byte: DP_PCE_X_ENTRY (non-sequential arrival) | DP_PCE_X_IRQ (ran inside a handler)
     uint8_t *pal_flags;    // 1: the cell was copied into the VCE palette (HuC6260)
     uint64_t vce_data_writes, palette_bytes; // VCE colour-data stores / distinct palette cells
@@ -202,4 +203,6 @@ void dp_pce_report(FILE *out, const DpPceResults *results);
 void dp_pce_map(FILE *out, const DpPceResults *results);
 // physical-bank offset-start offset-end evidence-mask (8 KiB banks), like the NES file
 void dp_pce_evidence(FILE *out, const DpPceResults *results);
+void dp_pce_cov(FILE *out, const DpPceResults *results);       // O2: cell flags hits, natural paths
+void dp_pce_romdata(FILE *out, const DpPceResults *results);   // O2: 256-byte page read counts
 #endif

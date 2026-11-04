@@ -1264,7 +1264,7 @@ static int cmd_pce(int argc, char **argv) {
                         "[--text FILE] [--map FILE] [--png FILE] [--evidence FILE] [--entry ADDR]... [--ctx-cap N]\n");
         return 2;
     }
-    const char *path = NULL, *text = NULL, *map = NULL, *png = NULL, *pce_ev = NULL;
+    const char *path = NULL, *text = NULL, *map = NULL, *png = NULL, *pce_ev = NULL, *pce_cov = NULL, *pce_rd = NULL;
     DpPceOptions opt = dp_pce_options();
     DpCliCommon cc = { .jobs = 1 };
     int multitap = 0;
@@ -1282,6 +1282,8 @@ static int cmd_pce(int argc, char **argv) {
             opt.entries[opt.entry_count++] = (uint16_t)strtoul(argv[++i], NULL, 0);
         }
         else if (!strcmp(a, "--png") && i + 1 < argc) png = argv[++i];
+        else if (!strcmp(a, "--cov") && i + 1 < argc) pce_cov = argv[++i];
+        else if (!strcmp(a, "--romdata") && i + 1 < argc) pce_rd = argv[++i];
         else if (!strcmp(a, "--tas") && i + 1 < argc) {
             if (opt.tas_count < 8) snprintf(opt.tas_paths[opt.tas_count++], 512, "%s", argv[++i]);
             else { fprintf(stderr, "deepeel: at most 8 TAS movies\n"); return 2; }
@@ -1341,6 +1343,16 @@ static int cmd_pce(int argc, char **argv) {
         FILE *f = fopen(pce_ev, "w");
         if (!f) fprintf(stderr, "deepeel: cannot write %s\n", pce_ev);
         else { dp_pce_evidence(f, res); fclose(f); }
+    }
+    if (pce_cov) {
+        FILE *f = fopen(pce_cov, "w");
+        if (!f) fprintf(stderr, "deepeel: cannot write %s\n", pce_cov);
+        else { dp_pce_cov(f, res); fclose(f); }
+    }
+    if (pce_rd) {
+        FILE *f = fopen(pce_rd, "w");
+        if (!f) fprintf(stderr, "deepeel: cannot write %s\n", pce_rd);
+        else { dp_pce_romdata(f, res); fclose(f); }
     }
     if (rtcode_path) {
         FILE *f = fopen(rtcode_path, "w");
