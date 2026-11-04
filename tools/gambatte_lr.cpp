@@ -31,7 +31,7 @@ static void on_exec(int32_t a, int64_t) {
     cur_pc = (uint32_t)a;
     if (have_obs && obs.exec) obs.exec(obs.user, (uint32_t)a);
 }
-static void on_read(int32_t a, int64_t) { if (have_obs && obs.read) obs.read(obs.user, (uint32_t)a, 0); }
+static void on_read(int32_t a, int64_t) { if (have_obs && obs.read) obs.read(obs.user, (uint32_t)a, (uint8_t)gb->dpPeek((unsigned)a)); }
 static void on_write(int32_t a, int64_t) { if (have_obs && obs.write) obs.write(obs.user, (uint32_t)a, 0); }
 static unsigned nbr;
 static void on_branch(unsigned pc) { nbr++; if (have_obs && obs.branch) obs.branch(obs.user, pc); }
