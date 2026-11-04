@@ -162,3 +162,7 @@ Ces chiffres sont des essais courts, pas une campagne : ni saturation levée, ni
   de 100 s (1 958 188 pas, 1 527 chemins, 6,51 % du PRG touché). L'exploration s'épuise donc d'elle-même sur cette
   ROM avec ces réglages ; le plafond n'est pas le temps. 6,51 % est le résultat de l'outil à RAM nulle et entrées
   par défaut, sans `--second-pass` ni jeu : un autre mode d'entrée serait nécessaire pour aller plus loin.
+- NES, DuckTales avec `--second-pass --pad-full` (100 s) : toujours 8 531 octets touchés (6,51 %) ; 2 060 169 pas,
+  2 002 chemins, 512 forks de sondes de manette, 1 graine de seconde passe, 0 mot de table tracé. Ni la manette ni la
+  seconde passe ne débloquent la ROM : la cause à chercher est plutôt dans l'attente de l'interruption (0 fork d'IRQ,
+  voir la ligne `interrupts` du rapport), pas dans les entrées.
