@@ -350,7 +350,8 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
     int outside = dp_nesmach_rom_index(x->m, pc) < 0;
     if (outside && !x->was_outside) r->exec_outside++;
     x->was_outside = outside;
-    if (outside && !x->play_mode) dp_ramarch_add(&r->ra, (uint16_t)pc, bytes, (int)in.length, -1);   // RAM-code archive
+    if (outside && !x->play_mode) dp_ramarch_add(&r->ra, (uint16_t)pc, bytes, (int)in.length,
+                                                   pc < 0x800 ? x->ram_src[pc] : -1);   // RAM-code archive, ROM source of the first byte
     if (outside && pc < 0x2000)
         for (int i = 0; i < (int)in.length; i++) x->ram_exec[(pc + (unsigned)i) & 0x7FF] = 1;
 

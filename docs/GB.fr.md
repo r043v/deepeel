@@ -2619,3 +2619,9 @@ GBHawk (`Core GBHawk` dans l'en-tête), pas avec Gambatte ; Gambatte le suit san
   à décalage 333 le SP coïncide sur de longues plages (p. ex. trames 531–1186) avec des écarts isolés ; les
   captures d'écran coïncident parfois (trame 450 : 0 pixel de différence) et divergent ailleurs. L'échantillonnage
   du registre au vblank dépend de la phase exacte du cycle : la première divergence réelle n'est pas établie.
+
+## 0.183.0 — NES : source ROM dans l'archive `rtcode`
+
+Le code exécuté en RAM ($0000–$07FF) porte désormais, dans l'archive `--rtcode` NES, l'index ROM de la dernière
+lecture PRG ayant alimenté le store de son premier octet (`-1` sinon). Provenance approximative (même heuristique
+que le rattachement des copies NES), pas une dépendance exacte.
