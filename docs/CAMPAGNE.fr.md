@@ -131,3 +131,10 @@ du spool (`dp_lf_put` et zlib), pas dans l'émulation ; `--exact-dedup` ne chang
 toujours 0 relue) ; plafonner `path_steps` ou le budget du chemin naturel n'a pas changé le compteur de pas non plus
 (32 161 858 à chaque arrêt), ce qui laisse la cause du premier chemin sans fin **non élucidée** : à tracer dans
 `run_path`/`run_sliced` avant de toucher aux plafonds.
+
+Trace des tranches (`run_sliced`, observation de l'outil, run de 100 s) : la première tranche de 16 777 216 pas se
+termine avec `cut=1` et `dp_stop` déjà levé ; les chemins suivants sont courts (193 à 405 185 pas) et s'arrêtent
+aussitôt. Le chemin naturel n'est donc pas sans fin : le premier chemin consomme tout le temps du run
+(écriture du spool), et SIGINT n'est observé qu'en fin de tranche. Le plafond reste le débit du spool
+(`dp_lf_put` + zlib), pas la boucle principale ; à améliorer : écriture du spool par lots non compressés, ou
+vérification de `dp_stop` plus fréquente.
