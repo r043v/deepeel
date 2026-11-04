@@ -78,7 +78,7 @@ Cellules ouvertes (◐ ou ✗) : 90.
 | F1 | File croissante + spool + `--resume` | MD | ◐ `--lot`/`--lot-drain` + parc (`parked`, `lot_*`) ; pas de `--resume` ni de file croissante bornée par option |
 | F2 | Arbre de choix persistant | NES | ◐ `--tree` (nœuds, parents, issues ; site renseigné pour les fourches de branchement ; reprise de l'arbre avec `--resume` (0.220.0)) |
 | F2 | Arbre de choix persistant | PCE | ◐ `--tree` (DpTree commun ; site renseigné pour les fourches ; reprise de l'arbre avec `--resume` (0.221.0)) |
-| F2 | Arbre de choix persistant | MD | ◐ `--tree` (DpTree commun ; site renseigné pour les fourches de branchement ; pas de reprise) |
+| F2 | Arbre de choix persistant | MD | ◐ `--tree` (DpTree commun ; site renseigné pour les fourches de branchement ; reprise de l'arbre avec `--resume` (0.222.0)) |
 | F3 | `--jobs` par instances clonées | NES | ◐ `--jobs 2` par phase (`dp_nes2_`, `nes_jobs`), pas de file partagée |
 | F3 | `--jobs` par instances clonées | PCE | ◐ `--jobs 2` par phase (`dp_pce2_`, `test_jobs`), pas de file partagée |
 | F3 | `--jobs` par instances clonées | MD | ◐ `--jobs 2` par entrées explicites (`dp_md2_`, `md_jobs`), pas de file partagée |

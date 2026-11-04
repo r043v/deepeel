@@ -3167,3 +3167,11 @@ lot disque est en attente. En plus, les états écrits dans le lot portent maint
 de nœud (méta de 5 octets : manette forcée + id ; les anciens lots à 1 octet se relisent avec
 l'id 0). Le rapport affiche `choice tree resumed: N nodes reloaded`. Test `pce`
 (`tree_loaded`) : il échoue si le chargement est désactivé. MD reste à faire.
+
+## MD : reprise de l'arbre de choix avec `--resume` (F2) (0.222.0)
+
+Comme NES (0.220.0) et PCE (0.221.0), la reprise MD recharge l'arbre sauvegardé quand un lot disque
+est en attente ; les éléments du lot portaient déjà leur identifiant de nœud, qui était remis à zéro
+à la relecture : il est maintenant conservé (ramené à 0 s'il dépasse l'arbre rechargé). Rapport :
+`choice tree resumed: N nodes reloaded`. Test `md_explore` : il échoue si le chargement est
+désactivé.

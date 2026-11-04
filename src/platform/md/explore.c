@@ -1408,6 +1408,8 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     x.gen = calloc(c->size / 2 + 1, sizeof *x.gen);
     x.vis = calloc(c->size / 2 + 1, sizeof *x.vis);
     dp_tree_init(&x.tree);
+    // resumed lot: its items carry ids of the tree the previous run saved
+    if (x.lot && dp_lf_pending(x.lot) && o->tree_path && dp_tree_load(&x.tree, o->tree_path)) r->tree_loaded = x.tree.n;
     dp_set_init(&x.ctx_seen, 1 << 10);
     dp_set_init(&x.exact_seen, 1 << 10);
     dp_set_init(&x.ind_sites, 1 << 8);
@@ -1502,7 +1504,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         if (!x.nq && dp_lf_pending(x.lot)) { // the disk backlog comes back
             Item m; uint32_t ml = 0, bl = 0; uint8_t *blob = NULL;
             if (dp_lf_get(x.lot, &m, &ml, &blob, &bl)) {
-                if (ml == sizeof m && bl == ssz) { m.state = blob; m.choice = 0; x.q[x.nq++] = m; r->parked_resumed++; }
+                if (ml == sizeof m && bl == ssz) { m.state = blob; if (m.choice >= x.tree.n) m.choice = 0; x.q[x.nq++] = m; r->parked_resumed++; }
                 else free(blob);
             }
             if (!x.nq) continue;
@@ -1715,6 +1717,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     fprintf(out, "  queue growths: %llu (initial %u, ceiling %u)\n", (unsigned long long)r->queue_growths,
             o->queue_cap, o->queue_max > o->queue_cap ? o->queue_max : o->queue_cap);
     if (r->tree_nodes) fprintf(out, "  choice tree: %llu nodes\n", (unsigned long long)r->tree_nodes);
+    if (r->tree_loaded) fprintf(out, "  choice tree resumed: %llu nodes reloaded\n", (unsigned long long)r->tree_loaded);
     if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/SR context past the cap)\n", (unsigned long long)r->ctx_evicted);
     if (r->pass2_seeds || r->pass2_refused || r->pass2_capped) fprintf(out, "  second pass: %llu seeds, %llu refused, %llu capped\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     if (r->s4_tables) fprintf(out, "  jump tables (S4, jmp d(pc,Xn)): %llu tables, %llu handlers seeded, %llu refused\n", (unsigned long long)r->s4_tables, (unsigned long long)r->s4_seeds, (unsigned long long)r->s4_refused);

@@ -184,6 +184,27 @@ int main(int argc, char **argv) {
         CHECK(r.lot_read >= 1 && r.lot_pending == 0);
         dp_md_results_free(&r); dp_md_cart_free(&c);
         unlink(lp);
+
+        // F2 resume: the drain reloads the tree the walled run saved
+        {
+            char tp[] = "/tmp/dp_md_treeXXXXXX"; int tfd = mkstemp(tp); if (tfd >= 0) close(tfd);
+            uint64_t saved = 0;
+            for (uint64_t wall = 1; wall < 2000; wall++) {
+                CHECK(dp_md_cart_load(&c, path, err, sizeof err) == 0);
+                DpMdOptions ow; dp_md_options_default(&ow); ow.lot_path = lp; ow.tree_path = tp; ow.max_total = wall; unlink(lp);
+                CHECK(dp_md_explore(&c, &ow, &r) == 0);
+                uint64_t l2 = r.lot_pending; saved = r.tree_nodes; dp_md_results_free(&r); dp_md_cart_free(&c);
+                if (l2) break;
+            }
+            CHECK(saved > 1);
+            CHECK(dp_md_cart_load(&c, path, err, sizeof err) == 0);
+            DpMdOptions od2; dp_md_options_default(&od2); od2.lot_path = lp; od2.tree_path = tp; od2.lot_drain = 1; od2.max_total = 100000;
+            CHECK(dp_md_explore(&c, &od2, &r) == 0);
+            CHECK(r.tree_loaded == saved && r.tree_nodes >= saved);
+            dp_md_results_free(&r); dp_md_cart_free(&c);
+            unlink(tp);
+        }
+        unlink(lp);
     }
 
     {
