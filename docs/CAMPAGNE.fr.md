@@ -184,3 +184,8 @@ Ces chiffres sont des essais courts, pas une campagne : ni saturation levée, ni
   avant l'arrêt. Cartes à la fin : GG 87,29 % (contre 85,01 %), SMS 77,83 % (77,96 %), MSX 76,21 % (74,35 %) — des
   écarts de l'ordre de la variation entre runs, sans signification. Il faut des runs d'une durée bien supérieure,
   avec la phase de jeu seule (`--max-total` réduit), pour comparer au NES et au PCE.
+- Correction sur les essais Z80 ci-dessus : `--novelty N` est un budget de **pas** (une trame = 10 000 pas par défaut),
+  pas un nombre de trames ; avec 3000 ou 20 000 la recherche s'arrêtait après 1 ou 2 trames. GG, Batman Returns avec
+  `--max-total 2000000 --novelty 100000000 --novelty-cells 1` (100 s) : 58 essais, 9 969 trames, profondeur 168
+  trames, 8 touches, 9 points archivés, 142 005 745 pas au total ; carte 84,58 % (contre 85,01 % sans jeu) : la
+  phase de jeu GG n'améliore pas la carte sur cette ROM dans ce budget (observation de l'outil, un seul run).
