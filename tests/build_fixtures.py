@@ -62,6 +62,19 @@ def build(out):
     w(r, 0x300, *range(1, 17))                   # 16 bytes of "tile" data
     save(out, "fix_branch", r)
 
+    # --- streams: a decoder called with HL from a pointer table (S6) ---------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)          # nop; jp $0150
+    w(r, 0x150, 0x21, 0x00, 0x03, 0xCD, 0x00, 0x02)   # ld hl,$0300; call $0200
+    w(r, 0x156, 0x21, 0x10, 0x03, 0xCD, 0x00, 0x02)   # ld hl,$0310; call $0200
+    w(r, 0x15C, 0x76)                            # halt
+    w(r, 0x200, 0x2A, 0xB7, 0x20, 0xFC, 0xC9)    # decoder: ld a,(hl+); or a; jr nz,-4; ret
+    w(r, 0x300, 1, 2, 3, 0)                      # stream 0 (played)
+    w(r, 0x310, 5, 0)                            # stream 1 (played)
+    w(r, 0x330, 7, 8, 0)                         # stream 2 (only in the table)
+    w(r, 0x400, 0x00, 0x03, 0x10, 0x03, 0x30, 0x03)   # pointer table
+    save(out, "fix_streams", r)
+
     # --- mbc5: switch to bank 2, call, switch to bank 3, call ----------------
     r = rom(4, mbc=0x19)
     w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)

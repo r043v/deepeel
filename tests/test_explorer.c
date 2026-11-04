@@ -118,6 +118,13 @@ int main(int argc, char **argv) {
     // the rom data never runs on the natural flow (forked wandering may touch it)
     CHECK(!(res.exec_flags[0x300] & DP_XF_NATURAL));
 
+    // --- S6: a decoder called with HL from a pointer table; the unplayed stream is replayed
+    run(dir, "streams");
+    CHECK(res.decoders >= 1);
+    CHECK(res.replay_tables >= 1);
+    CHECK(res.replay_runs >= 1);
+    CHECK(res.data_flags[0x330] & DP_DF_READ); // the third stream was never called by the ROM
+
     // --- full per-site fork table: the cap holds, the saturation is counted ------
     g_full_forks = 1;
     run(dir, "branch");

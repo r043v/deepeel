@@ -2179,3 +2179,19 @@ Le décalage de 334 images, l'état initial Gambatte, l'horloge mode 3 et la pha
 DIV ne s'appliquent qu'aux films dont l'en-tête annonce `Core Gambatte`. Le film
 `mugg_masterjun` (BizHawk 2.0, cœur **GBHawk**) garde l'alignement simple et n'a
 pas de référence native ici : sa fidélité n'est pas validée.
+
+## 0.146.0 (GB — S6 : rejeu de décodeurs sur tables de flux)
+
+Un `CALL` inconditionnel dont la routine lit, en première lecture de données ROM,
+l'adresse contenue dans HL, DE ou BC à l'appel est un **décodeur** (`src/explore/streams.c`).
+Deux départs observés dont les positions dans la ROM sont à pas constant (2 à 16 octets)
+désignent une table de pointeurs (même banque 16 Kio) ; elle est étendue dans les deux sens.
+Chaque autre entrée est rejouée : l'image machine d'avant l'appel est restaurée, le registre
+reçoit le pointeur, et l'état est poussé comme fourche forcée. Les décodeurs dont les départs
+grandissent sont rejoués périodiquement et à la fin de l'exploration.
+
+Le rapport affiche `stream replay (S6)` : décodeurs, tables, candidats, rejeux en file,
+saturations (plafond de 2048 candidats par décodeur, levé par `--unbounded`).
+Fixture `streams` : le troisième flux, jamais appelé par la ROM, est lu grâce au rejeu.
+Observation de l'outil sur Zelda (100 M de pas) : 56 décodeurs, 913 tables, 245 rejeux ;
+l'inconnu résiduel passe de 53 783 à 51 837 octets. Reste : SMS/MSX/NES/PCE, bases calculées.

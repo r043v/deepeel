@@ -240,6 +240,8 @@ typedef struct DpResults {
     uint32_t exec_outside; // instructions executed outside ROM (VRAM/RAM code)
     uint64_t hits_saturated; // per-byte hit counters held at UINT32_MAX (never wrap)
     uint32_t forks_branch, forks_irq, forks_key, forks_p1, evicted_exact, evicted_ctx;
+    uint32_t decoders, decoders_without_snapshot, decoder_overflow, start_overflow, frame_overflow; // S6 stream consumers
+    uint32_t replay_tables, replay_candidates, replay_runs, sat_replay_total; // S6 replays
     uint32_t forks_capped; // forks dropped by the per-site cap
     uint32_t forks_table_full; // forks refused: the per-site counter table is full (also in forks_capped)
     uint32_t cycle_cuts, step_cuts, budget_paths, budget_steps, queue_overflows;
@@ -392,7 +394,9 @@ typedef struct DpSharedPool {
 } DpSharedPool;
 
 // the engine state is shared with the sibling modules (sections.c, copies.c)
+struct DpStreams;
 struct DpExplorer {
+    struct DpStreams *stm; // S6 decoder detection (streams.c)
     struct { uint32_t gen; int32_t rk; } wram_src[0x2000]; // WRAM pc -> ROM index of its copy source (cache, per copy_count)
     DpConfig cfg;
     DpResults *res;

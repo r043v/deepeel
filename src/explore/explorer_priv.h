@@ -34,4 +34,11 @@ void spool_feed(DpExplorer *ex);
 int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int kind,
                            int from_reset, uint32_t choice);
 
+void stream_free(DpExplorer *ex);
+void stream_call(DpExplorer *ex, uint32_t tkey);
+void stream_step(DpExplorer *ex);
+void stream_read(DpExplorer *ex, uint16_t a);
+int stream_replay(DpExplorer *ex);
+void stream_poll(DpExplorer *ex);
+
 #endif

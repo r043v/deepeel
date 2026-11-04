@@ -352,6 +352,7 @@ void dp_explorer_free(DpExplorer *ex) {
     ex->res->defer_on_disk = dp_explorer_frontier_disk(ex);
     for (uint32_t i = 0; i < ex->defer_len; i++) free(ex->defer[i].p.img);
     free(ex->defer);
+    stream_free(ex);
     free(ex->pseed);
     free(ex->lots);
     free(ex->fdir);
@@ -660,6 +661,7 @@ static void hook_read(DpMach *m, uint16_t a, uint8_t v) {
         if (ex->session) hits_add(res, &res->play_data_hits[key]);
         dp_copy_on_rom_read(ex, (uint8_t)cur_bank(ex, a), a, v);
         ex->last_rom_key = key; ex->last_rom_val = v; ex->last_rom_valid = 1;
+        if (!ex->session) stream_read(ex, a);
     }
     section_live_access(ex, a);
     if (a == 0xFF04 || a == 0xFF41 || a == 0xFF44)
@@ -1116,6 +1118,9 @@ bad_done:
             dp_mach_cut(m, DP_CUT_CYCLES);
         }
     }
+    if (!ex->session) stream_step(ex);
+    if (op == 0xCD && !ex->session)
+        stream_call(ex, dp_rom_index(target < 0x4000 ? 0 : (uint32_t)cur_bank(ex, target), target));
     if (is_call && !ex->session) {
         uint32_t tkey = dp_rom_index(target < 0x4000 ? 0 : (uint32_t)cur_bank(ex, target), target);
         DpCallList *cl = dp_map_get_or_add(&res->callers, tkey);
@@ -1319,6 +1324,7 @@ static int explore_step_inner(DpExplorer *ex) {
         u32_add(&res->budget_paths, 1);
         return 0;
     }
+    stream_poll(ex);
     DpPathState tmp;
     memset(&tmp, 0, sizeof tmp); // the pool may stay empty: img must start NULL
     ex->defer_tier_next = 0;
@@ -1334,11 +1340,12 @@ static int explore_step_inner(DpExplorer *ex) {
             p->img = NULL;
         }
         pthread_mutex_unlock(&ex->sh->mtx);
-        if (!p->img && !defer_pop(ex, &tmp)) return 0;
+        if (!p->img && !defer_pop(ex, &tmp)) return stream_replay(ex) ? 1 : 0;
     } else {
         if (!ex->q_len && !ex->pq_len && !defer_pop(ex, &tmp)) {
             // nothing resumable: held seeds come back before the run ends
             if (pseed_feed(ex) && (ex->q_len || ex->pq_len)) return 1;
+            if (stream_replay(ex)) return 1;
             return 0;
         }
         if (tmp.img) { /* resumed from the deferred frontier */ }
@@ -1434,7 +1441,9 @@ static int explore_step_inner(DpExplorer *ex) {
         else if (cut != DP_CUT_NONE) issue = DP_ISSUE_BUDGET;
         tree_close_g(ex, choice, issue);
     }
-    return (ex->q_len || ex->pq_len || ex->sh || frontier_has_work(ex) || dp_explorer_spool_pending(ex)) ? 1 : 0;
+    if (ex->q_len || ex->pq_len || ex->sh || frontier_has_work(ex) || dp_explorer_spool_pending(ex)) return 1;
+    // the last path closed: decoders seen with several starts replay over their tables
+    return stream_replay(ex) ? 1 : 0;
 }
 
 int dp_explore_slice(DpExplorer *ex, int ms) {
