@@ -2840,3 +2840,10 @@ couvrent tout ce qu'une partie réelle exécute.
   instructions d'archive, toutes forcées). Sur la fixture `wramexec`, une
   variante de 6 octets ; le binaire généré donne les mêmes empreintes avec et
   sans variante, instructions interprétées 5 → 2.
+- Matrice COUVERTURE : MSX J5 (`--export-state`) et O3 (`--watch-dump`) passent de ✗ à ◐ — les
+  options existaient (backend commun Sega/MSX) mais la cellule était périmée et `--export-state`
+  MSX n'avait aucun test ; `msx_export_state` l'épingle. Le nombre de cellules ouvertes reste 91
+  (◐ compte comme ouvert).
+- Run Sonic `--unbounded` (10 min, disque Windows) : 1 chemin, 16 777 216 pas, 642 301 états
+  écrits sur le lot, 0 relu ; 4,3 % des octets ROM exécutés. Arrêt sur la limite de temps, pas une
+  exploration terminée : l'ordre « lot relu après épuisement de la file » reste à valider sur un run plus long.

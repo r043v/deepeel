@@ -10,7 +10,7 @@ remesure pas l'outil.
 |---|---|---|---|---|
 | GB | 32 | 6 | 0 | 1 |
 | SMS/GG | 32 | 5 | 0 | 2 |
-| MSX | 32 | 3 | 2 | 2 |
+| MSX | 32 | 5 | 0 | 2 |
 | NES | 12 | 25 | 0 | 2 |
 | PCE | 16 | 22 | 0 | 1 |
 | MD | 10 | 26 | 2 | 1 |
@@ -97,7 +97,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | J4 | Go-Explore (cellules écran) | MD | ◐ `--novelty` (archive de cellules plans A/B, vies sans connaissance du jeu) |
 | J5 | Mode humain, export `.sta` | GB | ◐ 0.142 `--export-state` (cellule la plus profonde, fichier DPST) |
 | J5 | Mode humain, export `.sta` | SMS/GG | ◐ 0.142 `--export-state` (idem) |
-| J5 | Mode humain, export `.sta` | MSX | ✗ |
+| J5 | Mode humain, export `.sta` | MSX | ◐ 0.188.1 `--export-state` (cellule la plus profonde, fichier DPST ; test `msx_export_state`) |
 | J5 | Mode humain, export `.sta` | NES | ◐ `--export-state` (cellule la plus profonde, fichier DPST) |
 | J5 | Mode humain, export `.sta` | PCE | ◐ `--export-state` (cellule la plus profonde, fichier DPST) |
 | J5 | Mode humain, export `.sta` | MD | ◐ `--export-state` (cellule la plus profonde, fichier DPST) |
@@ -106,7 +106,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | O2 | `.cov`, romdata, `--evidence` | MD | ◐ `--evidence` ; pas de `.cov` ni romdata |
 | O3 | `--watch` (SDL2) | GB | ◐ 0.142 `--watch [FPS]` et `--watch-dump FILE.ppm` (framebuffer VDP) |
 | O3 | `--watch` (SDL2) | SMS/GG | ◐ 0.142 `--watch [FPS]` et `--watch-dump FILE.ppm` (framebuffer VDP) |
-| O3 | `--watch` (SDL2) | MSX | ✗ |
+| O3 | `--watch` (SDL2) | MSX | ◐ 0.188.1 `--watch [FPS]` et `--watch-dump FILE.ppm` (framebuffer TMS9918, 160×192 ; test `msx_watch_dump`) |
 | O3 | `--watch` (SDL2) | NES | ◐ `--watch`/`--watch-dump` (panneau 160×128) |
 | O3 | `--watch` (SDL2) | PCE | ◐ `--watch`/`--watch-dump` (rangées VDC) |
 | O3 | `--watch` (SDL2) | MD | ◐ `--watch [FPS]` (fenêtre SDL2) et `--watch-dump FILE` (PPM) |
