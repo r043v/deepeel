@@ -2865,3 +2865,8 @@ couvrent tout ce qu'une partie réelle exécute.
   l'autre côté d'un conditionnel (rapport : `jump tables (S4…)`). Fixture `fix_md_s4`, test `md_s4_table`.
 - Limites (cellule ◐) : pas de tables de mots/offsets (`move.w (pc,d0),d0 ; jmp (pc,d0)`), pas de
   `jmp (An)` à base calculée, entrées `jmp abs.l` non suivies.
+
+- Sega/MSX : les cellules d'écran de Go-Explore (`--novelty-cells 1`, empreinte d'écran + octet de
+  vies appris) existaient sans test ; `z80_novelty_cells` les épingle sur SMS et MSX (fixture
+  `fix_z80_branch`). Matrice J4 SMS/MSX mise à jour (toujours ◐ : pas de stratégie de choix de segment
+  du pool de sessions).

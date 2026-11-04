@@ -91,8 +91,8 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | J2 | Rejeu TAS prioritaire + shoots | MD | ◐ GMV |
 | J3 | Identité ROM des films | MD | ◐ BK2 : MD5 d'en-tête comparé au ROM (avertissement seulement, le hash BizHawk MD n'est pas fiable) ; GMV sans identité |
 | J4 | Go-Explore (cellules écran) | GB | ◐ `--session-cells` 0.144.0 (pool de sessions) |
-| J4 | Go-Explore (cellules écran) | SMS/GG | ◐ `--novelty` 0.141.0 (SMS/GG/SG) |
-| J4 | Go-Explore (cellules écran) | MSX | ◐ `--novelty` 0.141.0 (MSX) |
+| J4 | Go-Explore (cellules écran) | SMS/GG | ◐ `--novelty` 0.141.0 + `--novelty-cells 1` (cellules écran, vies apprises ; test `z80_novelty_cells`) (SMS/GG/SG) |
+| J4 | Go-Explore (cellules écran) | MSX | ◐ `--novelty` 0.141.0 + `--novelty-cells 1` (idem ; test `z80_novelty_cells`) (MSX) |
 | J4 | Go-Explore (cellules écran) | NES | ◐ `--novelty` (archive de cellules écran, vies sans connaissance du jeu) |
 | J4 | Go-Explore (cellules écran) | MD | ◐ `--novelty` (archive de cellules plans A/B, vies sans connaissance du jeu) |
 | J5 | Mode humain, export `.sta` | GB | ◐ 0.142 `--export-state` (cellule la plus profonde, fichier DPST) |
