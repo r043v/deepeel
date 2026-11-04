@@ -30,7 +30,7 @@ Cellules ouvertes (◐ ou ✗) : 78.
 | D12 | Cibles indirectes observées | MD | ◐ observé (`jmp/jsr` par An), sans second passage |
 | S1 | Scan padding + tables de pointeurs | NES | ◐ padding + tables, sans pointeurs ROM→ROM hors fenêtre |
 | S2 | Fermeture statique de flot | NES | ◐ saut/appel/branche, fenêtre propre |
-| S2 | Fermeture statique de flot | PCE | ◐ fenêtre MPR |
+| S2 | Fermeture statique de flot | PCE | ◐ fenêtre MPR ; 0.232.0 arêtes inter-fenêtres résolues vers la page unique observée (test `pce`), pas de vues multiples |
 | S2 | Fermeture statique de flot | MD | ◐ 0.132 Bcc/DBcc/BRA/JMP/JSR depuis les plages exécutées, confiance perdue après BSR/JSR ; pas de vues |
 | S3 | Suivi de constantes / provenance | GB | ◐ HL/A |
 | S3 | Suivi de constantes / provenance | NES | ◐ provenance RAM→`jmp (zp)` depuis la PRG |

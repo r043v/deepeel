@@ -1188,6 +1188,15 @@ static void static_closure(PceRun *x) {
     if (!work) { x->failed = 1; return; }
     size_t top = 0;
     for (size_t i = 0; i < n; i++) if (x->istart[i]) work[top++] = (uint32_t)i;
+    // S2 views: an edge leaving its window is resolved to the ROM page observed in the
+    // target window when exactly one page was ever seen there (a fixed mapping such as MPR7)
+    int win_page[8];
+    for (int w = 0; w < 8; w++) win_page[w] = -1;
+    for (unsigned pg = 0; pg < 128 && (size_t)pg * 0x2000 < n; pg++) {
+        unsigned w = x->page_win[pg];
+        if (w >= 8) continue;
+        win_page[w] = win_page[w] == -1 ? (int)pg : -2;
+    }
     while (top) {
         uint32_t cell = work[--top];
         uint32_t page = cell >> 13;
@@ -1208,8 +1217,13 @@ static void static_closure(PceRun *x) {
         }
         if (in.mapchange) ns = 0; // TAM: the windows may move under the next bytes
         for (int k = 0; k < ns; k++) {
-            if ((succ[k] >> 13) != x->page_win[page]) continue; // another window: unknown page
-            uint32_t t = (page << 13) | (succ[k] & 0x1FFF);
+            uint32_t tpage = page;
+            if ((succ[k] >> 13) != x->page_win[page]) {          // another window: the unique observed page, else unknown
+                int wp = win_page[succ[k] >> 13];
+                if (wp < 0) continue;
+                tpage = (uint32_t)wp;
+            }
+            uint32_t t = (tpage << 13) | (succ[k] & 0x1FFF);
             if (t >= n || x->istart[t]) continue;
             size_t tav = 0x2000 - (t & 0x1FFF);
             DpHucIns ti;

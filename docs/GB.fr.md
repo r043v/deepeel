@@ -3242,3 +3242,10 @@ compteur `padding cuts` reste rapporté. Risque assumé : une ROM dont du vrai c
 mots nuls consécutifs serait coupée (cas jamais observé en pratique, signalé par le compteur). Les
 fixtures `md_entry` et `md_second_pass`, qui exécutent volontairement des zéros, passent
 `--no-cut-padding`.
+
+## PCE : fermeture statique à vues de fenêtre (S2) (0.232.0)
+
+Une arête statique qui sort de sa fenêtre MPR est résolue vers la page ROM observée dans la fenêtre
+cible, quand une seule page y a été vue (mappage fixe, p. ex. MPR7). Avant, elle était abandonnée.
+Une fenêtre qui a vu plusieurs pages reste ambiguë et l'arête est toujours abandonnée (vues multiples
+à faire). Test `pce` : `test_static_views` (contrôle négatif fait).

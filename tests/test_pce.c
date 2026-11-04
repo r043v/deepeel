@@ -449,6 +449,27 @@ static void test_seed_banks(void) {
     free(rom);
 }
 
+// S2 views: a jump leaving its window is resolved to the page observed in the target window
+static void test_static_views(void) {
+    uint8_t *rom = calloc(1, ROM_SIZE);
+    static const uint8_t code[] = { 0x78, 0x80, 0xFE };   // sei; bra *
+    memcpy(rom, code, sizeof code);
+    rom[0x1FFE] = 0x00; rom[0x1FFF] = 0xE0;               // reset -> $E000 (page 0 in window 7)
+    rom[0x2000] = 0x20; rom[0x2001] = 0x00; rom[0x2002] = 0xE2;   // page 1 at $4000: jsr $E200 (never returns)
+    rom[0x2003] = 0x4C; rom[0x2004] = 0x00; rom[0x2005] = 0xE3;   // after the call: jmp $E300, statically only
+    rom[0x200] = 0x80; rom[0x201] = 0xFE;                 // $E200: bra *
+    rom[0x300] = 0xEA; rom[0x301] = 0xEA;                 // never executed: only the view resolves it
+    DpPceOptions o = dp_pce_options();
+    o.max_steps = 2000; o.seed_banks = 1;
+    DpPceResults *r = calloc(1, sizeof *r);
+    CHECK(dp_pce_explore(rom, ROM_SIZE, &o, r), "views explore");
+    CHECK((r->flags[0x300] & DP_PCE_STATIC) && !(r->flags[0x300] & (DP_PCE_NATURAL | DP_PCE_FORCED)),
+          "cross-window target reached statically (%02x)", r->flags[0x300]);
+    dp_pce_results_free(r);
+    free(r);
+    free(rom);
+}
+
 // RAM-code archive: bytes built by immediates in WRAM, then run
 static void test_ramcode(void) {
     uint8_t *rom = calloc(1, ROM_SIZE);
@@ -489,6 +510,7 @@ int main(void) {
     test_play_pool();
     test_seed_vectors();
     test_seed_banks();
+    test_static_views();
     test_ramcode();
     test_tas_identity();
     free(rom);
