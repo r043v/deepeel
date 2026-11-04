@@ -91,6 +91,7 @@ typedef struct DpMdResults_ {
     uint8_t *flags;       /* per ROM byte, DP_MDF_* */
     uint8_t *exec_kind;   /* per ROM byte, instruction start: DP_MDX_ENTRY (non-sequential arrival) | DP_MDX_IRQ (ran inside a handler) */
     uint32_t *exec_hits;  /* per ROM byte: natural-path instruction starts (heat) */
+    uint32_t *data_hits;  /* per ROM byte: natural-path CPU data reads (saturating) */
     uint8_t *stat;        /* S1/S2 static layer per ROM byte: 3 code (flow closure), 7 pointer table, 8 padding; 0 none */
     uint64_t stat_pad, stat_table, stat_code, stat_code_roots, stat_conf_lost;
     uint8_t *inferred;    /* S7 map inference per ROM byte: 1 pad, 2 code, 3 data, 0 none (never an observation) */
@@ -168,6 +169,8 @@ int dp_md_explore_map(const DpMdResults *r, const char *path);
 /* compact JSON profile of the run (class counts, search and saturation counters) */
 int dp_md_explore_heat(const DpMdResults *r, const char *path);   /* per-zone played usage */
 int dp_md_explore_summary(const DpMdResults *r, const char *path);
+int dp_md_explore_cov(const DpMdResults *r, const char *path);
+int dp_md_explore_romdata(const DpMdResults *r, const char *path);
 uint8_t *dp_md_map_build(const DpMdResults *r);   /* DP_NMAP_* digits, caller frees */
 /* Text: executed ranges and copies. */
 int dp_md_explore_evidence(const DpMdResults *r, const char *path);

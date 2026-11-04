@@ -1505,7 +1505,7 @@ static int cmd_md(int argc, char **argv) {
         DpCliCommon cc = { .jobs = 1 };
         int md_unbounded = 0;
         dp_md_options_default(&o);
-        const char *movie_path = NULL, *md_summary = NULL, *md_heat = NULL;
+        const char *movie_path = NULL, *md_summary = NULL, *md_heat = NULL, *md_cov = NULL, *md_romdata = NULL;
         for (int i = 4; i < argc; i++) {
             const char *a = argv[i];
             if (i + 1 >= argc && strcmp(a, "--lot-drain") && strcmp(a, "--unbounded")) { fprintf(stderr, "deepeel: bad option %s\n", a); rc = 2; break; }
@@ -1537,6 +1537,8 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--tas-any-rom")) md_any_rom = 1;
             else if (!strcmp(a, "--summary")) md_summary = argv[++i];
             else if (!strcmp(a, "--heat")) md_heat = argv[++i];
+            else if (!strcmp(a, "--cov")) md_cov = argv[++i];
+            else if (!strcmp(a, "--romdata")) md_romdata = argv[++i];
             else { fprintf(stderr, "deepeel: unknown option %s\n", a); rc = 2; break; }
         }
         const char *text = cc.text, *map = cc.map, *ev = cc.evidence, *md_dump = cc.dump; md_rtcode = cc.rtcode;
@@ -1586,6 +1588,8 @@ static int cmd_md(int argc, char **argv) {
                 if (ev) dp_md_explore_evidence(&r, ev);
                 if (md_summary) dp_md_explore_summary(&r, md_summary);
                 if (md_heat) dp_md_explore_heat(&r, md_heat);
+                if (md_cov) dp_md_explore_cov(&r, md_cov);
+                if (md_romdata) dp_md_explore_romdata(&r, md_romdata);
                 dp_md_results_free(&r);
             }
         }

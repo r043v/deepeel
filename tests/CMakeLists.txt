@@ -538,3 +538,5 @@ add_test(NAME nes_queue_grow COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_
 set_tests_properties(nes_queue_grow PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME nes_summary_heat COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B nes explore $D/fix_nes_branch.nes --max-total 20000 --max-steps 1000 --summary $D/nes_sum.json --heat $D/nes_heat.txt >/dev/null 2>&1; grep -q '\"platform\":\"nes\"' $D/nes_sum.json && grep -q '\"known_pct\"' $D/nes_sum.json && grep -q '^# exec [1-9]' $D/nes_heat.txt")
 set_tests_properties(nes_summary_heat PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME md_cov_romdata COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_s4w.md --cov $D/md_c.cov --romdata $D/md_c.rd >/dev/null 2>&1; grep -q '^000200 1 1' $D/md_c.cov && grep -q '^[0-9a-f]* 8 [1-9]' $D/md_c.cov && grep -q '^2 [1-9]' $D/md_c.rd")
+set_tests_properties(md_cov_romdata PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)

@@ -3465,3 +3465,11 @@ agrandie, rien en parc ; sans `--queue-max`, 42 états en parc). 157 tests passe
 `known_pct`, compteurs de pas/chemins/forks/coupures/sections) et une carte de chaleur (`--heat FILE` : instructions
 démarrées par zone de 256 octets de PRG, d'après `exec_hits`, y compris les forks). Le PNG passe déjà par `maprender`.
 Test `nes_summary_heat`.
+
+## 0.249.9 (MD, O2 : `--cov` et `--romdata`)
+
+MD compte les lectures de données du CPU par octet de ROM (`data_hits`, chemins naturels, saturant) à côté des départs
+d'instruction (`exec_hits`). `--cov FILE` écrit « décalage drapeaux coups » (1 exécution, 4 spéculatif, 8 donnée ; les
+coups ne comptent que les chemins naturels, un octet atteint seulement par un fork garde 0) ; `--romdata FILE` écrit
+« page coups » par page de 256 octets lue. Le format `.cov` MD n'a pas de colonne de banque (une seule fenêtre linéaire).
+Test `md_cov_romdata`. Les lectures DMA ne sont pas comptées.

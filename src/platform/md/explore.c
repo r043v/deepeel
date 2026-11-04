@@ -632,6 +632,7 @@ static void on_read(void *u, uint32_t a, unsigned size) {
         for (unsigned i = 0; i < size && a + i < r->rom_size; i++)
         {
             r->flags[a + i] |= DP_MDF_DATA | (x->forced ? 0 : DP_MDF_DATA_NATURAL);
+            if (!x->forced && r->data_hits && r->data_hits[a + i] != UINT32_MAX) r->data_hits[a + i]++;
             if (x->pc != x->o->exclude_read_pc) r->nonexcluded_reads[a + i] |= x->replay ? 2 : 1;
         }
         if (!x->forced && x->pc != x->o->exclude_read_pc) stream_read(x, a);
@@ -1466,6 +1467,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     r->exec_kind = calloc(c->size, 1);
     r->nonexcluded_reads = calloc(c->size, 1);
     r->exec_hits = calloc(c->size, sizeof(uint32_t));
+    r->data_hits = calloc(c->size, sizeof(uint32_t));
     r->z80_flags = calloc(c->size, 1);
     r->copies = calloc(DP_MD_COPY_CAP, sizeof *r->copies);
     X x = {.c = c, .o = o, .r = r, .qcap = o->queue_cap};
@@ -1755,6 +1757,7 @@ void dp_md_results_free(DpMdResults *r) {
     free(r->exec_kind); r->exec_kind = NULL;
     free(r->nonexcluded_reads);
     free(r->exec_hits);
+    free(r->data_hits);
     free(r->z80_flags);
     free(r->copies);
     memset(r, 0, sizeof *r);
@@ -1975,6 +1978,36 @@ int dp_md_explore_summary(const DpMdResults *r, const char *path) {
             (unsigned long long)r->sat_total, (unsigned long long)r->sat_path, (unsigned long long)r->sat_visit,
             (unsigned long long)r->sat_queue, (unsigned long long)r->sat_site,
             (unsigned long long)r->exec_bytes, (unsigned long long)r->forced_only_bytes, r->sec_n, r->sec_req);
+    return fclose(f) ? -1 : 0;
+}
+
+// Coverage (O2): same line format as the other cores, offsets are ROM byte offsets
+// (offset flags(1=exec,4=speculative,8=data) hits); hits count natural paths only.
+int dp_md_explore_cov(const DpMdResults *r, const char *path) {
+    if (!r->exec_hits || !r->data_hits) return -1;
+    FILE *f = fopen(path, "w");
+    if (!f) return -1;
+    fputs("# deepeel md coverage v1: offset flags(1=exec,4=speculative,8=data) hits (natural paths)\n", f);
+    for (size_t k = 0; k < r->rom_size; k++) {
+        uint8_t fl = r->flags[k]; unsigned flags; uint32_t hits;
+        if (fl & (DP_MDF_NATURAL | DP_MDF_FORCED)) { flags = 1u | ((fl & DP_MDF_NATURAL) ? 0u : 4u); hits = r->exec_hits[k]; }
+        else if (fl & DP_MDF_DATA) { flags = 8; hits = r->data_hits[k]; }
+        else continue;
+        fprintf(f, "%06zx %x %x\n", k, flags, (unsigned)hits);
+    }
+    return fclose(f) ? -1 : 0;
+}
+
+// ROM data read counts per 256-byte page: "page count" (hex page index), pages with reads only.
+int dp_md_explore_romdata(const DpMdResults *r, const char *path) {
+    if (!r->data_hits) return -1;
+    FILE *f = fopen(path, "w");
+    if (!f) return -1;
+    for (size_t p = 0; p < (r->rom_size + 255) / 256; p++) {
+        uint64_t n = 0;
+        for (size_t i = p * 256; i < p * 256 + 256 && i < r->rom_size; i++) n += r->data_hits[i];
+        if (n) fprintf(f, "%zx %llu\n", p, (unsigned long long)n);
+    }
     return fclose(f) ? -1 : 0;
 }
 
