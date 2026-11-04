@@ -94,6 +94,7 @@ typedef struct {
     DpSegaVisits play_visits;      // loop guard of the play session
     uint64_t novel;                // ROM bytes executed for the first time by play (novelty gain)
     uint32_t rng;
+    struct ZStm *stm;              // S6 decoder replay state
 } Run;
 
 // S4: the ROM word a jp (hl)/(ix)/(iy) target was loaded from, by register
@@ -157,10 +158,12 @@ static inline void src_or(DpSegaResults *r,size_t i,uint32_t bits) {
 }
 static inline uint32_t hit_add(uint32_t a,uint32_t b) { return a+b<a?0xFFFFFFFFu:a+b; }
 static inline void hit_inc(uint32_t *h,size_t i) { if(h && h[i]!=0xFFFFFFFFu) h[i]++; }
+static void zstm_read(Run *x,uint16_t a,int64_t index);
 static uint8_t read_bus(void *user,uint16_t a) {
     Run *x=user; uint8_t v=x->b->read(a);
     int64_t index=x->b->rom_index(a);
     if(!x->fetching && index>=0 && (uint64_t)index<x->r->size) {
+        zstm_read(x,a,index);
         if(!(x->r->flags[index]&DP_SEGA_DATA)) x->discoveries++;
         x->r->flags[index]|=DP_SEGA_DATA; x->r->data_reads++; hit_inc(x->r->data_hits,(size_t)index);
         src_or(x->r,index,x->forced?DP_SRC_FORK_FORCED:DP_SRC_FORK_NATURAL);
@@ -525,6 +528,109 @@ static int push_to(Run *x,int forced,int skip_irq,int input,unsigned kind) {
     x->created[phase]++; return 1;
 }
 static int push(Run *x,int forced,int skip_irq) { return push_to(x,forced,skip_irq,0,DP_SEGA_TREE_BRANCH); }
+
+// --- S6: decoder replay on pointer tables (Z80 family) ---------------------------------
+// A CALL nn whose routine first reads ROM data at the address HL/DE/BC held at the call
+// is a decoder; two starts at a constant table stride locate a pointer table (same
+// 16 KiB physical block, pointers in the same CPU region); every other entry is replayed
+// from the pre-call snapshot with the register set to the pointer.
+enum { ZS_DEC=64, ZS_START=16, ZS_FR=16, ZS_CAND=2048 };
+typedef struct { uint32_t key; uint8_t reg,nstarts,replayed; uint16_t starts[ZS_START]; Path snap; } ZDec;
+typedef struct ZStm {
+    ZDec dec[ZS_DEC]; unsigned ndec;
+    struct { uint32_t key; uint16_t sp,reg[3]; uint8_t open; } fr[ZS_FR]; unsigned nfr;
+} ZStm;
+static void zstm_free(Run *x) {
+    if(!x->stm) return;
+    for(unsigned i=0;i<x->stm->ndec;i++) free_path(x->stm->dec[i].snap);
+    free(x->stm); x->stm=NULL;
+}
+static void zstm_call(Run *x,uint32_t key) {
+    if(!x->stm && !(x->stm=calloc(1,sizeof *x->stm))) return;
+    ZStm *s=x->stm; z80_t *c=x->b->cpu();
+    for(unsigned i=0;i<s->ndec;i++)
+        if(s->dec[i].key==key && !s->dec[i].snap.state) {
+            Path p={malloc(x->b->state_size),malloc(0x8000),malloc(x->origin_size),1,0,0,0};
+            if(!p.state||!p.cart||!p.origins) { free_path(p); continue; }
+            x->b->save(p.state); memcpy(p.cart,x->cart,0x8000); memcpy(p.origins,x->origins,x->origin_size);
+            s->dec[i].snap=p;
+        }
+    if(s->nfr==ZS_FR) return;
+    s->fr[s->nfr].key=key; s->fr[s->nfr].sp=(uint16_t)(c->sp-2); s->fr[s->nfr].open=1;
+    s->fr[s->nfr].reg[0]=c->hl; s->fr[s->nfr].reg[1]=c->de; s->fr[s->nfr].reg[2]=c->bc;
+    s->nfr++;
+}
+static void zstm_step(Run *x) {
+    ZStm *s=x->stm; if(!s) return;
+    uint16_t sp=x->b->cpu()->sp;
+    while(s->nfr && sp>s->fr[s->nfr-1].sp) s->nfr--;
+}
+static void zstm_read(Run *x,uint16_t a,int64_t index) {
+    ZStm *s=x->stm; if(!s||!s->nfr) return;
+    for(unsigned k=s->nfr;k-->0;) {
+        if(!s->fr[k].open) break;
+        s->fr[k].open=0;
+        for(unsigned n=0;n<3;n++) {
+            if(s->fr[k].reg[n]!=a) continue;
+            ZDec *d=NULL;
+            for(unsigned i=0;i<s->ndec;i++) if(s->dec[i].key==s->fr[k].key && s->dec[i].reg==n) d=&s->dec[i];
+            if(!d) {
+                if(s->ndec==ZS_DEC) break;
+                d=&s->dec[s->ndec++]; memset(d,0,sizeof *d);
+                d->key=s->fr[k].key; d->reg=(uint8_t)n; x->r->s6_decoders++;
+            }
+            unsigned j; for(j=0;j<d->nstarts && d->starts[j]!=a;j++) {}
+            if(j==d->nstarts && j<ZS_START && a>=0x40) d->starts[d->nstarts++]=a;
+            (void)index; break;
+        }
+    }
+}
+static int zstm_ptr(const Run *x,size_t at,size_t lo,size_t hi,unsigned region,uint16_t *v) {
+    if(at<lo || at+2>hi) return 0;
+    *v=(uint16_t)(x->image[at]|x->image[at+1]<<8);
+    return (*v>>14)==region && *v>=0x40;
+}
+// the worklists are empty: replay every decoder over its pointer tables
+static int zstm_replay(Run *x) {
+    ZStm *s=x->stm; if(!s) return 0;
+    DpSegaResults *r=x->r; int pushed=0;
+    for(unsigned di=0;di<s->ndec;di++) {
+        ZDec *d=&s->dec[di];
+        if(d->nstarts<2 || d->nstarts<=d->replayed || !d->snap.state) continue;
+        d->replayed=d->nstarts;
+        unsigned region=d->starts[0]>>14;
+        uint8_t *tried=calloc(65536,1); if(!tried) continue;
+        for(unsigned j=0;j<d->nstarts;j++) tried[d->starts[j]]=1;
+        size_t pos[256]; unsigned np=0;
+        for(size_t at=0;at+2<=r->size && np<256;at++) {
+            uint16_t v=(uint16_t)(x->image[at]|x->image[at+1]<<8);
+            for(unsigned j=0;j<d->nstarts;j++) if(d->starts[j]==v) { pos[np++]=at; break; }
+        }
+        unsigned cands=0;
+        for(unsigned i=0;i+1<np;i++) {
+            size_t k=pos[i+1]-pos[i];
+            if(k<2||k>16||(pos[i]>>14)!=(pos[i+1]>>14)) continue;
+            r->s6_tables++;
+            size_t blo=(pos[i]>>14)<<14,bhi=blo+0x4000,lo=pos[i],hi=pos[i+1]; uint16_t v;
+            while(lo>=k && zstm_ptr(x,lo-k,blo,bhi,region,&v)) lo-=k;
+            while(zstm_ptr(x,hi+k,blo,bhi,region,&v)) hi+=k;
+            for(size_t at=lo;at<=hi;at+=k) {
+                if(!zstm_ptr(x,at,blo,bhi,region,&v)||tried[v]) continue;
+                tried[v]=1;
+                if(cands>=ZS_CAND) { r->s6_sat++; break; }
+                cands++; r->s6_candidates++;
+                x->b->load(d->snap.state); memcpy(x->cart,d->snap.cart,0x8000);
+                dp_sega_closure_invalidate(x->closure);
+                memcpy(x->origins,d->snap.origins,x->origin_size);
+                z80_t *c=x->b->cpu();
+                if(d->reg==0) c->hl=v; else if(d->reg==1) c->de=v; else c->bc=v;
+                if(push_to(x,1,0,0,DP_SEGA_TREE_BRANCH)>0) { r->s6_runs++; pushed++; }
+            }
+        }
+        free(tried);
+    }
+    return pushed;
+}
 static size_t site(Run *x,uint16_t pc) {
     int64_t i=x->b->rom_index(pc);
     return i>=0 && (uint64_t)i<x->r->size ? (size_t)i : x->r->size+pc;
@@ -1494,6 +1600,11 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
                     z80_decoded_t d;
                     if(!z80_decode(c,&d)) { x.fetching=0; r->decode_cuts++; break; }
                     x.fetching=0;
+                    zstm_step(&x);
+                    if(c->pc<0xFFFE && x.b->read(c->pc)==0xCD) {
+                        int64_t tk=x.b->rom_index((uint16_t)(x.b->read((uint16_t)(c->pc+1))|x.b->read((uint16_t)(c->pc+2))<<8));
+                        if(tk>=0 && (uint64_t)tk<size) zstm_call(&x,(uint32_t)tk);
+                    }
                     // Classification uses the exact bytes fetched from this machine view.
                     for(unsigned j=0;j<d.length;j++) bytes[j]=x.b->read((uint16_t)(c->pc+j));
                     if(!dp_z80_decode(bytes,d.length,c->pc,&in)) { r->decode_cuts++; break; }
@@ -1553,6 +1664,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
             flush_copy(&x);
             tree_close(&x,x.cur_choice,DP_SEGA_ISSUE_DONE);
             x.cur_choice=0;
+            if(!phase && !x.queued && !x.defer_n) zstm_replay(&x); // S6: decoders over their pointer tables
         }
         r->phase_steps[phase]=r->steps-start_steps; r->phase_paths[phase]=r->paths-start_paths;
         if(phase!=1) r->seeds_pending=x.seed_count-x.seed_next;
@@ -1613,6 +1725,7 @@ cleanup:
         if(x.spool && spool_write_path(&x,&x.defer[i],1)) r->defer_spooled++;
         free_path(x.defer[i]);
     }
+    zstm_free(&x);
     free(x.defer); free(x.queue); free(x.forks); free(x.sides); free(x.irq_forks); free(x.cart); free(image);
     r->loop_context_peak=visits.peak; r->loop_context_capacity=visits.capacity; r->loop_context_growths=visits.growths;
     dp_sega_visits_free(&visits);
@@ -1733,6 +1846,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     DP_MR_SUM(exec_outside); DP_MR_SUM(data_reads); DP_MR_SUM(vdp_copies); DP_MR_SUM(ram_copies);
     DP_MR_SUM(steps_deferred); DP_MR_SUM(loop_deferred); DP_MR_SUM(defer_resumed); DP_MR_SUM(steps_final);
     DP_MR_SUM(loop_final); DP_MR_SUM(defer_dropped); DP_MR_SUM(defer_pending); DP_MR_SUM(fork_deferred); DP_MR_SUM(defer_spooled); DP_MR_SUM(fork_final);
+    DP_MR_SUM(s6_decoders); DP_MR_SUM(s6_tables); DP_MR_SUM(s6_candidates); DP_MR_SUM(s6_runs); DP_MR_SUM(s6_sat);
     DP_MR_SUM(sib_tables); DP_MR_SUM(sib_ranges); DP_MR_SUM(sib_refused); DP_MR_SUM(sib_caps); DP_MR_SUM(sib_bytes);
     DP_MR_SUM(jt_tables); DP_MR_SUM(jt_entries); DP_MR_SUM(jt_caps); DP_MR_SUM(jt_bytes);
     DP_MR_SUM(step_cuts); DP_MR_SUM(loop_cuts); DP_MR_SUM(fork_cuts); DP_MR_SUM(queue_cuts);
@@ -2229,6 +2343,7 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
     fprintf(out,"frontier: deferred steps %"PRIu64" loop %"PRIu64"; resumed %"PRIu64"; final steps %"PRIu64" loop %"PRIu64"; dropped %"PRIu64"; pending %"PRIu64"; forks deferred %"PRIu64" final %"PRIu64"\n",
         r->steps_deferred,r->loop_deferred,r->defer_resumed,r->steps_final,r->loop_final,r->defer_dropped,r->defer_pending,r->fork_deferred,r->fork_final);
     fprintf(out,"cuts: steps %"PRIu64"; loop %"PRIu64"; fork %"PRIu64"; queue %"PRIu64"; paths %"PRIu64"; global-pending %"PRIu64"; decode %"PRIu64"; padding %"PRIu64"; faults %"PRIu64"; of the loop cuts, HALT spins %"PRIu64"\n",r->step_cuts,r->loop_cuts,r->fork_cuts,r->queue_cuts,r->path_cuts,r->global_cuts,r->decode_cuts,r->pad_cuts,r->faults,r->halt_cuts);
+    fprintf(out,"stream replay (S6): %"PRIu64" decoders, %"PRIu64" tables, %"PRIu64" candidates, %"PRIu64" queued replays (%"PRIu64" saturated)\n",r->s6_decoders,r->s6_tables,r->s6_candidates,r->s6_runs,r->s6_sat);
     fprintf(out,"copy siblings: %"PRIu64" tables; %"PRIu64" ranges (%"PRIu64" bytes); %"PRIu64" refused over executed code; %"PRIu64" tables cut at the entry cap\n",r->sib_tables,r->sib_ranges,r->sib_bytes,r->sib_refused,r->sib_caps);
     fprintf(out,"jump tables: %"PRIu64" tables; %"PRIu64" entries (%"PRIu64" new bytes); %"PRIu64" tables cut at the entry cap\n",r->jt_tables,r->jt_entries,r->jt_bytes,r->jt_caps);
     fprintf(out,"seeds: pointer %"PRIu64"; bank sweep %"PRIu64"; entries %"PRIu64"; admitted %"PRIu64"; skipped padding %"PRIu64"; refused view %"PRIu64", queue %"PRIu64", cap %"PRIu64"; pending %"PRIu64"\n",

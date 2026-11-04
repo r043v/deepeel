@@ -76,7 +76,7 @@ void stream_read(DpExplorer *ex, uint16_t a) {
         if (!f->open) break;
         f->open = 0;
         for (unsigned n = 0; n < 3; n++) {
-            if (f->reg[n] != a) continue;
+            if (f->reg[n] != a || a < 0x150) continue;
             Dec *d = NULL;
             for (unsigned i = 0; i < s->ndec; i++)
                 if (s->dec[i].key == f->key && s->dec[i].reg == n) d = &s->dec[i];

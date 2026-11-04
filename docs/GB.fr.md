@@ -2195,3 +2195,15 @@ saturations (plafond de 2048 candidats par décodeur, levé par `--unbounded`).
 Fixture `streams` : le troisième flux, jamais appelé par la ROM, est lu grâce au rejeu.
 Observation de l'outil sur Zelda (100 M de pas) : 56 décodeurs, 913 tables, 245 rejeux ;
 l'inconnu résiduel passe de 53 783 à 51 837 octets. Reste : SMS/MSX/NES/PCE, bases calculées.
+
+## 0.147.0 (SMS / GG / SG-1000 / MSX — S6)
+
+Même détecteur de décodeurs que GB 0.146.0, porté sur l'explorateur Z80 (`src/platform/sega/explore.c`) :
+`CALL nn` vers la ROM, première lecture de données égale à HL/DE/BC, deux départs à pas constant
+(2 à 16 octets, même bloc physique de 16 Kio, pointeurs dans la même région CPU de 16 Kio) → table
+étendue dans les deux sens, chaque autre entrée rejouée depuis l'instantané d'avant l'appel.
+Le rejeu se déclenche quand la file est vide (phase de base). Rapport : ligne `stream replay (S6)`.
+Test `sega_streams` : le flux jamais appelé est lu. Observation : sur deux ROMs SMS réelles
+(Sonic 2 Rebirth, Ace of Aces), 8 et 16 décodeurs détectés mais 0 table trouvée au budget par
+défaut — le gain réel n'est pas démontré sur ces ROMs. Reste : NES/PCE, plafond non levé par
+`--unbounded` côté Z80 (cap fixe de 2048 candidats, compté).

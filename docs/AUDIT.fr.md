@@ -9,8 +9,8 @@ remesure pas l'outil.
 | Plateforme | ✅ fait | ◐ partiel | ✗ absent | — sans objet |
 |---|---|---|---|---|
 | GB | 34 | 4 | 0 | 1 |
-| SMS/GG | 32 | 2 | 3 | 2 |
-| MSX | 32 | 2 | 3 | 2 |
+| SMS/GG | 32 | 3 | 2 | 2 |
+| MSX | 32 | 3 | 2 | 2 |
 | NES | 12 | 24 | 1 | 2 |
 | PCE | 16 | 21 | 1 | 1 |
 | MD | 10 | 26 | 2 | 1 |
@@ -50,8 +50,8 @@ Cellules ouvertes (◐ ou ✗) : 89.
 | S5 | Frères de copie | PCE | ◐ tables du même flux, même page/fenêtre (VDC block move) |
 | S5 | Frères de copie | MD | ◐ tables de longwords ROM, copies DMA ROM→VRAM (comptées) |
 | S6 | Rejeu de décodeurs sur tables de flux | GB | ◐ 0.146 `CALL` + HL/DE/BC, tables de mots même banque |
-| S6 | Rejeu de décodeurs sur tables de flux | SMS/GG | ✗ |
-| S6 | Rejeu de décodeurs sur tables de flux | MSX | ✗ |
+| S6 | Rejeu de décodeurs sur tables de flux | SMS/GG | ◐ 0.147 idem (SMS/GG/SG) |
+| S6 | Rejeu de décodeurs sur tables de flux | MSX | ◐ 0.147 idem |
 | S6 | Rejeu de décodeurs sur tables de flux | NES | ✗ |
 | S6 | Rejeu de décodeurs sur tables de flux | PCE | ✗ |
 | S7 | Inférence de voisins à la carte | NES | ◐ trous ≤ 1024 |

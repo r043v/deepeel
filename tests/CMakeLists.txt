@@ -414,3 +414,8 @@ add_test(NAME gb_jp_table COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CUR
 set_tests_properties(gb_jp_table PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_sections COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_disp.md --max-total 100000 --bank-dispatch --text $D/msec.txt --summary $D/msec.json >/dev/null 2>&1; grep -Eq '^sections: [1-9][0-9]* executed runs, [0-9]+ required \\(natural path\\), [1-9][0-9]* forced only' $D/msec.txt && grep -q '\"sections_required\"' $D/msec.json")
 set_tests_properties(md_sections PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+
+add_executable(test_sega_streams test_sega_streams.c)
+target_link_libraries(test_sega_streams PRIVATE deepeel_sega)
+add_test(NAME sega_streams COMMAND test_sega_streams)
+set_tests_properties(sega_streams PROPERTIES TIMEOUT 60)

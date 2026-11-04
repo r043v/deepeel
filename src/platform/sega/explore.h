@@ -140,6 +140,7 @@ typedef struct {
     uint8_t *flags;
     uint32_t *exec_hits,*data_hits; // per ROM byte, saturating: how often it was executed / read as data
     size_t size;
+    uint64_t s6_decoders,s6_tables,s6_candidates,s6_runs,s6_sat; // S6 decoder replay
     uint64_t steps,paths,forks,irq_forks,exec_outside,data_reads,vdp_copies,ram_copies;
     uint64_t defer_spooled, fork_deferred, fork_final, steps_deferred,loop_deferred,defer_resumed,steps_final,loop_final,defer_dropped,defer_pending; // §6
     uint64_t step_cuts,loop_cuts,fork_cuts,queue_cuts,global_cuts,path_cuts,faults,decode_cuts,pad_cuts,stagnation_cuts;
