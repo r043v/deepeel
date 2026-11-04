@@ -3226,3 +3226,10 @@ Même `exec_kind` que NES (0.228.0) : `DP_PCE_X_ENTRY`/`DP_PCE_X_IRQ` (vecteurs 
 et `DP_MDX_ENTRY`/`DP_MDX_IRQ` (vecteurs d'exception `$60-$BF`, fin au `RTE`), sur l'octet d'opcode.
 Même limite : une fourche reprise au milieu d'un handler perd le marquage IRQ. Tests `pce` et
 `md_explore` (`test_seed_vectors`).
+
+## NES : sondes de manette, port 2 et combinaisons (D10) (0.230.0)
+
+À chaque site d'écriture `$4016`, en plus des 8 boutons du port 1, on propose les 8 boutons du port 2
+et un catalogue de 10 combinaisons à deux boutons sur le port 1 (A+B, Start+Select, chaque direction
+avec A ou B). Un état identique à un état déjà vu (port non lu) est compté dans `refused`, comme
+tout doublon évincé. Le catalogue de 128 combinaisons du z80 et le multitap restent à faire.

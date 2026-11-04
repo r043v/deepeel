@@ -539,6 +539,20 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
                 DpNesPathState f = { snap, 0, 0, x->paths_opened, x->total_steps, 0 };
                 if (snap_push(x, &f)) r->pad_probes++; else r->pad_probe_refused++;
             }
+            // port 2 single buttons, then a catalog of two-button combinations on port 1
+            // (A/B/Start/Select with each direction): code that tests chords is reached
+            static const uint8_t combos[] = { 0x03, 0x0C, 0x11, 0x21, 0x41, 0x81, 0x12, 0x22, 0x42, 0x82 };
+            for (unsigned b = 0; b < 8 + sizeof combos; b++) {
+                uint8_t p0 = (uint8_t)keep, p1 = 0;
+                if (b < 8) p1 = (uint8_t)(1u << b); else p0 = combos[b - 8];
+                if (p0 == keep && !p1) continue;
+                uint8_t *snap = malloc(dp_nesmach_state_size());
+                if (!snap) { r->pad_probe_refused++; continue; }
+                dp_nesmach_set_input(x->m, p0, p1);
+                dp_nesmach_save(x->m, snap);
+                DpNesPathState f = { snap, 0, 0, x->paths_opened, x->total_steps, 0 };
+                if (snap_push(x, &f)) r->pad_probes++; else r->pad_probe_refused++;
+            }
             dp_nesmach_set_input(x->m, (uint8_t)keep, 0);
         }
     }
