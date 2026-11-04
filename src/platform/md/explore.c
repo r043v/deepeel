@@ -116,6 +116,7 @@ static void next_generation(X *x) {
 /* Per-frame loop detection permits legitimate polling across V-blank;
  * path_steps and max_total still bound paths that run forever. */
 static void novelty_frame(X *x);
+static void s4_table(X *x, uint32_t pc);
 static uint8_t play_pad(X *x);
 static void on_frame(void *u) {
     X *x = u;
@@ -513,6 +514,7 @@ static void on_end(void *u, uint32_t pc, uint32_t next, unsigned len) {
             if (dp_set_insert(&x->ind_pairs, ((uint64_t)(pc + 1) << 24) | (next & 0xFFFFFFu)) > 0) r->indirect_targets++;
         }
     }
+    if (in.cls == DP_M68K_JMP && !in.has_target && decoded == len && !x->replay) s4_table(x, pc);
     if ((in.cls != DP_M68K_BCC && in.cls != DP_M68K_DBCC) || !in.has_target) return;
     if (decoded != len) return; /* do not invent a fall-through from a disputed length */
     if (in.cls == DP_M68K_DBCC && in.cond == 0) return; /* DBT cannot branch */
@@ -886,6 +888,39 @@ static int md_target_ok(const X *x, uint32_t t) {
         a += len;
     }
     return 1;
+}
+
+// S4 for the 68000: an observed `jmp d8(pc,Xn)` (4EFB + brief extension) names the table base
+// statically (pc + 2 + d8); each entry is a `bra.s`/`bra.w` to a handler.  Every handler no run
+// has reached is seeded from the current machine state, like the other side of a conditional.
+// Entries stop at the first word that is not a branch; at least two are needed to call it a table.
+static void s4_table(X *x, uint32_t pc) {
+    DpMdResults *r = x->r;
+    const uint8_t *rom = x->c->rom;
+    size_t n = r->rom_size;
+    if ((size_t)pc + 4 > n || rom[pc] != 0x4E || rom[pc + 1] != 0xFB) return;
+    if (rom[pc + 2] & 0x07) return;                       // brief extension word only (no full-format bits)
+    if (dp_set_insert(&x->ind_sites, ((uint64_t)pc + 1) | (1ull << 40)) == 0) return;
+    uint32_t base = pc + 2 + (uint32_t)(int32_t)(int8_t)rom[pc + 3];
+    uint32_t tg[128];
+    unsigned nt = 0;
+    for (uint32_t e = base; nt < 128 && (size_t)e + 4 <= n && !(e & 1);) {
+        uint32_t t;
+        if (rom[e] == 0x60 && rom[e + 1] != 0x00 && rom[e + 1] != 0xFF) { t = e + 2 + (uint32_t)(int32_t)(int8_t)rom[e + 1]; e += 2; }
+        else if (rom[e] == 0x60 && rom[e + 1] == 0x00) {
+            int16_t d = (int16_t)((uint16_t)rom[e + 2] << 8 | rom[e + 3]);
+            t = e + 2 + (uint32_t)(int32_t)d; e += 4;
+        } else break;
+        tg[nt++] = t;
+    }
+    if (nt < 2) return;
+    r->s4_tables++;
+    for (unsigned k = 0; k < nt; k++) {
+        uint32_t t = tg[k];
+        if ((t & 1) || t < 0x200 || t >= n) { r->s4_refused++; continue; }
+        if (r->flags[t] & (DP_MDF_NATURAL | DP_MDF_FORCED)) continue;
+        if (push(x, t, 0, 0)) r->s4_seeds++; else r->s4_refused++;
+    }
 }
 
 static unsigned dispatch_seed(X *x) {
@@ -1627,6 +1662,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     if (r->tree_nodes) fprintf(out, "  choice tree: %llu nodes\n", (unsigned long long)r->tree_nodes);
     if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/SR context past the cap)\n", (unsigned long long)r->ctx_evicted);
     if (r->pass2_seeds || r->pass2_refused || r->pass2_capped) fprintf(out, "  second pass: %llu seeds, %llu refused, %llu capped\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
+    if (r->s4_tables) fprintf(out, "  jump tables (S4, jmp d(pc,Xn)): %llu tables, %llu handlers seeded, %llu refused\n", (unsigned long long)r->s4_tables, (unsigned long long)r->s4_seeds, (unsigned long long)r->s4_refused);
     if (r->disp_tables) fprintf(out, "  dispatch tables: %llu tables, %llu seeds, %llu refused targets\n", (unsigned long long)r->disp_tables, (unsigned long long)r->disp_seeds, (unsigned long long)r->disp_refused_view);
     if (r->state_exported) fprintf(out, "  state exported: deepest cell, %u frames from power-on\n", r->state_exported_depth);
     if (r->exact_dups) fprintf(out, "  exact dedup: %llu forks dropped (same clock-free machine)\n", (unsigned long long)r->exact_dups);

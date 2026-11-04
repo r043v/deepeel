@@ -484,6 +484,15 @@ def build_md(out):
     header[22] = 0x40
     with open(os.path.join(out, "fix_md_movie_state.gmv"), "wb") as f:
         f.write(header + bytes([0xFF, 0xFF, 0xFF]))
+    # --- s4: moveq #0,d0 ; jmp 4(pc,d0.w) -> table of two bra.w handlers; only entry 0 runs ----
+    r = md_rom()
+    r[0x200:0x202] = bytes([0x70, 0x00])                 # moveq #0,d0
+    r[0x202:0x206] = bytes([0x4E, 0xFB, 0x00, 0x04])     # jmp 4(pc,d0.w): base = $204 + 4 = $208
+    r[0x208:0x20C] = bytes([0x60, 0x00, 0x00, 0x10])     # bra.w $21A
+    r[0x20C:0x210] = bytes([0x60, 0x00, 0x00, 0x18])     # bra.w $226
+    r[0x21A:0x21C] = bytes([0x4E, 0x71]); r[0x21C:0x21E] = bytes([0x60, 0xFE])
+    r[0x226:0x228] = bytes([0x4E, 0x71]); r[0x228:0x22A] = bytes([0x4E, 0x71]); r[0x22A:0x22C] = bytes([0x60, 0xFE])
+    save_md(out, "fix_md_s4", r)
     # --- dma: VDP regs, then a ROM->VRAM DMA of 16 words from $000400 ---------
     r = md_rom()
     pc = 0x200

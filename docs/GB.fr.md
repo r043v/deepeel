@@ -2857,3 +2857,11 @@ couvrent tout ce qu'une partie réelle exécute.
 - Limites (cellule MD J1 : ◐) : pas de pool de checkpoints partagé, pas de multi-thread des
   sessions, pas de scénarios attract/script ; une ROM sans boucle de frame (fixture `pad_effect`)
   donne 0 frame jouée.
+
+## 0.190.0 : MD S4, tables de sauts `jmp d8(pc,Xn)` (2026-11-04)
+
+- Sur un `jmp d8(pc,Xn)` observé, la base de table est lue statiquement (`pc+2+d8`) ; les entrées
+  `bra.s`/`bra.w` consécutives (2 à 128) donnent des gestionnaires non encore atteints, semés comme
+  l'autre côté d'un conditionnel (rapport : `jump tables (S4…)`). Fixture `fix_md_s4`, test `md_s4_table`.
+- Limites (cellule ◐) : pas de tables de mots/offsets (`move.w (pc,d0),d0 ; jmp (pc,d0)`), pas de
+  `jmp (An)` à base calculée, entrées `jmp abs.l` non suivies.

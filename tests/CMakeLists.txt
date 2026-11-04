@@ -168,6 +168,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nsdata.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nsstack.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_dma.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_md_s4.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ramgen.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ramexg.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ramsrc.md
@@ -398,6 +399,8 @@ add_test(NAME msx_export_state COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAK
 set_tests_properties(msx_export_state PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_play_sessions COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_sram_overlay.md --play-frames 60 --play-sessions 3 --text $D/md_ps1.txt >/dev/null 2>&1; $B md explore $D/fix_md_sram_overlay.md --play-frames 60 --play-sessions 3 --text $D/md_ps2.txt >/dev/null 2>&1; grep -q 'played sessions: 3, 180 frames' $D/md_ps1.txt && [ \"$(grep -E 'executed|observed union' $D/md_ps1.txt)\" = \"$(grep -E 'executed|observed union' $D/md_ps2.txt)\" ]")
 set_tests_properties(md_play_sessions PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME md_s4_table COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_s4.md --text $D/md_s4.txt >/dev/null 2>&1; grep -q 'jump tables (S4, jmp d(pc,Xn)): 1 tables, 2 handlers seeded' $D/md_s4.txt && grep -q 'only via forks: [1-9]' $D/md_s4.txt")
+set_tests_properties(md_s4_table PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_exact_dedup COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_pad_effect.md --text $D/md_ed0.txt >/dev/null 2>&1; $B md explore $D/fix_md_pad_effect.md --exact-dedup --text $D/md_ed1.txt >/dev/null 2>&1; grep -q 'exact dedup: [1-9][0-9]* forks dropped' $D/md_ed1.txt && ! grep -q 'exact dedup' $D/md_ed0.txt && [ \"$(grep -E 'executed|exec ' $D/md_ed0.txt)\" = \"$(grep -E 'executed|exec ' $D/md_ed1.txt)\" ]")
 set_tests_properties(md_exact_dedup PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_map_inference COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_pad_effect.md --text ${CMAKE_CURRENT_BINARY_DIR}/md_inf.txt >/dev/null 2>&1; grep -q 'map inference (S7, not observations): [0-9]* padding' ${CMAKE_CURRENT_BINARY_DIR}/md_inf.txt")

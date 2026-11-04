@@ -13,7 +13,7 @@ remesure pas l'outil.
 | MSX | 32 | 5 | 0 | 2 |
 | NES | 12 | 25 | 0 | 2 |
 | PCE | 16 | 22 | 0 | 1 |
-| MD | 10 | 27 | 1 | 1 |
+| MD | 10 | 28 | 0 | 1 |
 
 Cellules ouvertes (◐ ou ✗) : 91.
 
@@ -45,7 +45,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | S3 | Suivi de constantes / provenance | MD | ◐ témoin An |
 | S4 | Tables de sauts depuis l'opérande | GB | ◐ 0.134 `ld hl,nn` → `jp hl` (≤ 64 mots, même banque) |
 | S4 | Tables de sauts depuis l'opérande | NES | ◐ tables de mots lues en données |
-| S4 | Tables de sauts depuis l'opérande | MD | ✗ |
+| S4 | Tables de sauts depuis l'opérande | MD | ◐ 0.190.0 `jmp d8(pc,Xn)` → table de `bra.s`/`bra.w` (≤ 128 entrées, fixture `md_s4`) ; pas de tables de mots ni `jmp (An)` |
 | S5 | Frères de copie | NES | ◐ copies OAM DMA / boucle CPU, tables du même flux |
 | S5 | Frères de copie | PCE | ◐ tables du même flux, même page/fenêtre (VDC block move) |
 | S5 | Frères de copie | MD | ◐ tables de longwords ROM, copies DMA ROM→VRAM (comptées) |
