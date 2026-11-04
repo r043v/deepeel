@@ -3233,3 +3233,12 @@ Même limite : une fourche reprise au milieu d'un handler perd le marquage IRQ. 
 et un catalogue de 10 combinaisons à deux boutons sur le port 1 (A+B, Start+Select, chaque direction
 avec A ou B). Un état identique à un état déjà vu (port non lu) est compté dans `refused`, comme
 tout doublon évincé. Le catalogue de 128 combinaisons du z80 et le multitap restent à faire.
+
+## MD : coupe de glissade de padding par défaut (D13/D14) (0.231.0)
+
+Seize octets nuls consécutifs exécutés comme code (`ori.b #0,d0` en glissade) coupent désormais le
+chemin par défaut, comme sur NES et PCE ; `--no-cut-padding` rétablit l'ancien comportement. Le
+compteur `padding cuts` reste rapporté. Risque assumé : une ROM dont du vrai code serait fait de 16
+mots nuls consécutifs serait coupée (cas jamais observé en pratique, signalé par le compteur). Les
+fixtures `md_entry` et `md_second_pass`, qui exécutent volontairement des zéros, passent
+`--no-cut-padding`.

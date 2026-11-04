@@ -47,7 +47,7 @@ typedef struct {
     unsigned ctx_cap;       // admissions per coarse context (0: off)
     int bank_dispatch;      // seed the targets of longword dispatch tables (G2)
     int second_pass;        // seed the unexecuted static successors of executed code (G4)
-    int pad_cut;           // cut paths sliding through 16+ zero bytes (default off)
+    int pad_cut;           // cut paths sliding through 16+ zero bytes (default on, --no-cut-padding disables)
     /* --jobs 2 partition (set by dp_md_explore_jobs): the secondary instance skips the
      * power-on path and the finalization; the primary calls pre_finalize(results, bank_seen,
      * user) once its drain is done, before the sibling pass and the byte counts */

@@ -768,7 +768,7 @@ void dp_md_options_default(DpMdOptions *o) {
     o->lot_path = NULL;
     o->lot_drain = 0;
     o->entry_count = 0;
-    o->pad_cut = 0;
+    o->pad_cut = 1;
     o->second_pass = 0;
     o->novelty_steps = 0; o->novelty_frames = 240; o->novelty_archive = 256; o->novelty_cells = 0; o->play_seed = 1; o->play_frames = 0; o->demo_frames = 0; o->play_sessions = 8; o->play_from = 0; o->play_step = 1;
     o->skip_root = o->no_finalize = 0;
