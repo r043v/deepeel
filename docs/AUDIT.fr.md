@@ -52,7 +52,7 @@ Cellules ouvertes (◐ ou ✗) : 69.
 | G4 | Semis indirect + budgets en cascade | NES | ◐ second passage sur racines statiques (`--second-pass`) |
 | G4 | Semis indirect + budgets en cascade | PCE | ◐ second passage sur successeurs statiques non exécutés (`--second-pass`) |
 | G4 | Semis indirect + budgets en cascade | MD | ◐ second passage sur successeurs statiques non exécutés (`--second-pass`) |
-| C1 | Sections, liveness, verdicts | NES | ◐ req/forced |
+| C1 | Sections, liveness, verdicts | NES | ◐ req/forced + `speculative` (0.249.17, test `nes_speculative`), sans liveness |
 | C1 | Sections, liveness, verdicts | PCE | ◐ req/forced |
 | C1 | Sections, liveness, verdicts | MD | ◐ 0.135 req/forced par plage exécutée (sans liveness) |
 | C2 | Éviction par contexte | NES | ◐ contexte grossier opt-in (`--ctx-cap`) |

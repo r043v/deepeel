@@ -1258,6 +1258,7 @@ DpNesOptions dp_nes_options(void) {
 
 static void infer_gaps(DpNesRun *x);
 static void static_closure(DpNesRun *x);
+static void sections_static(DpNesRun *x);
 static void second_pass_seed(DpNesRun *x);
 static int64_t table_target(const DpNesRun *x, size_t a, unsigned v, int loose);
 static void table_scan(DpNesRun *x);
@@ -1515,6 +1516,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
         } else x.failed = 1;
     }
     if (!x.failed && !x.opt.no_finalize) static_closure(&x);
+    if (!x.failed && !x.opt.no_finalize) sections_static(&x);
     if (!x.failed && !x.opt.no_finalize) table_scan(&x);
     if (!x.failed && !x.opt.no_finalize) copy_siblings(&x);
     if (!x.failed && !x.opt.no_finalize) infer_gaps(&x);
@@ -1765,6 +1767,37 @@ static void table_scan(DpNesRun *x) {
             }
             r->table_count++;
         }
+    }
+}
+
+// C1 "speculative": a run of cells reached only by the static flow closure (never executed,
+// not forced) is a section of its own, verdict speculative.  Observations never become speculative.
+static void sections_static(DpNesRun *x) {
+    DpNesResults *r = x->r;
+    size_t n = r->prg_size;
+    if (!r->sections || !r->section_of) return;
+    size_t i = 0;
+    while (i < n) {
+        if (!(r->flags[i] & DP_NES_STATIC) || (r->flags[i] & (DP_NES_NATURAL | DP_NES_FORCED))) { i++; continue; }
+        size_t j = i;
+        uint8_t bank = (uint8_t)(i / 0x4000);
+        while (j < n && (r->flags[j] & DP_NES_STATIC) && !(r->flags[j] & (DP_NES_NATURAL | DP_NES_FORCED)) && j / 0x4000 == bank) j++;
+        if (r->section_count == r->section_capacity) {
+            DpNesSection *g = realloc(r->sections, r->section_capacity * 2 * sizeof(DpNesSection));
+            if (!g) return;
+            r->sections = g; r->section_capacity *= 2;
+        }
+        DpNesSection *s = &r->sections[r->section_count];
+        memset(s, 0, sizeof(*s));
+        s->id = r->section_count + 1;
+        s->bank = bank;
+        s->lo = (uint16_t)(i - bank * 0x4000);
+        s->hi = (uint16_t)(j - 1 - bank * 0x4000);
+        s->entries = 1;
+        s->verdict = DP_NES_VERDICT_SPECULATIVE;
+        for (size_t k = i; k < j; k++) r->section_of[k] = s->id;
+        r->section_count++;
+        i = j;
     }
 }
 

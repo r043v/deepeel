@@ -36,8 +36,8 @@ static inline int dp_nes_io_slot(unsigned addr) {
 enum { DP_NES_COPY_CAP = 4096 };
 enum { DP_NES_BANK_LOG_CAP = 1024 };
 enum { DP_NES_IRQ_LOG_CAP = 1024 };
-enum { DP_NES_VERDICT_NONE = 0, DP_NES_VERDICT_REQUIRED, DP_NES_VERDICT_FORCED };
-static const char *const dp_nes_verdict_names[] = { "none", "required", "forced" };
+enum { DP_NES_VERDICT_NONE = 0, DP_NES_VERDICT_REQUIRED, DP_NES_VERDICT_FORCED, DP_NES_VERDICT_SPECULATIVE };
+static const char *const dp_nes_verdict_names[] = { "none", "required", "forced", "speculative" };
 
 typedef struct {
     uint64_t path, step;

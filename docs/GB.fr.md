@@ -3523,3 +3523,10 @@ que le test échoue sans ce changement (la résolution renvoyait -1 pour ces car
 `--pad-full6` (implique `--pad-full`) sonde, à chaque site de lecture de manette, les 256 masques du pad 3 boutons combinés
 aux 16 états X/Y/Z/Mode du pad 6 boutons (4 096 forks par site, dédupliqués par (pc, masque, ext)). Hors défaut : coûteux.
 Test `md_pad_full6` (4 352 sondes sur `fix_md_pad6`). Le multitap n'est toujours pas modélisé : D10 MD reste ◐.
+
+## 0.249.17 (NES, C1 : verdict `speculative`)
+
+Après la fermeture statique, NES crée une section par plage d'octets atteinte **uniquement** par le flot statique (jamais
+exécutée ni forcée) avec le verdict `speculative`, défini dans `docs/COUVERTURE.fr.md` C1. Une observation ne devient jamais
+spéculative. Les sections existantes et leurs numéros sont inchangés (les nouvelles sont ajoutées à la suite). Test
+`nes_speculative`. C1 NES reste ◐ : pas de liveness (`ctx_mask`, pages lues, `io_read_mask`).
