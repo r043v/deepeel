@@ -1122,7 +1122,10 @@ bad_done:
         if (pc >= 0xE000 && pc < 0xFE00) ns = DP_NS_ECHO; // echo RAM
         else if (pc >= 0xFE00 && pc < 0xFF00) ns = DP_NS_ECHO; // OAM
         else if ((res->data_flags[pk] & DP_DF_VERBATIM) &&
-                 !(res->exec_flags[pk] & DP_XF_NATURAL)) ns = DP_NS_DATA;
+                 !(res->exec_flags[pk] & DP_XF_NATURAL) &&
+                 // a natural path running code the game itself copied into WRAM is that code,
+                 // not data: cutting it after one instruction truncated the runtime archive
+                 !(pc >= 0xC000 && pc < 0xE000 && !ex->cur_forced)) ns = DP_NS_DATA;
         else if ((op == 0xC9 || op == 0xD9) &&
                  (api->gbr->sp < 0xC000 || api->gbr->sp > 0xFFFE)) ns = DP_NS_STACK;
         if (ns != DP_NS_NONE) {

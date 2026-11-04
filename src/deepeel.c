@@ -120,6 +120,7 @@ static void usage(void) {
             "    --gui                SDL2 live viewer\n"
             "    --mapwin [SCALE]     live ROM map window (1 px per byte like the .map.png), redrawn while exploring\n"
             "    --watch [FPS]        small window showing the replaying TAS movie, 1..30 img/s (default 30)\n"
+            "    --ram-code f         executed WRAM/HRAM code as byte variants (m0boy: gbrecomp --ram-code f)\n"
             "    --json f / --text f / --cov f / --romdata f / --map f / --html f   outputs\n"
             "                         (--map: PNG by default, 1 px per ROM byte + played heat,\n"
             "                          the .map, the played .cov and the usage per zone embedded;\n"
@@ -295,8 +296,20 @@ static void write_rtcode(const DpResults *res, const char *path) {
     free(rt);
 }
 
+// the executed WRAM/HRAM code as byte variants, input of m0boy's `gbrecomp --ram-code`
+static int g_ramcode_forced; // --ram-code-forced: also export code only forced forks reached
+static void write_ramcode(const DpResults *res, const char *path) {
+    if (!path) return;
+    uint32_t nv, ni, ns, nd, nf;
+    if (dp_rtcode_export_variants(res, path, g_ramcode_forced, &nv, &ni, &ns, &nd, &nf))
+        fprintf(stderr, "deepeel: cannot write %s\n", path);
+    else
+        printf("ram code: %u variants, %u instructions exported to %s (%u forced-only left out, %u outside WRAM/HRAM, "
+               "%u dropped)\n", nv, ni, path, nf, ns, nd);
+}
+
 static int cmd_explore(int argc, char **argv) {
-    const char *rtcode_path = NULL;
+    const char *rtcode_path = NULL, *ramcode_path = NULL;
     const char *json = NULL, *text = NULL, *cov = NULL, *romdata = NULL, *map = NULL, *html = NULL, *path = NULL;
     const char *from_png = NULL, *export_dir = NULL, *summary = NULL;
     const char *tas_dirs[8];
@@ -319,6 +332,8 @@ static int cmd_explore(int argc, char **argv) {
         if (!strcmp(a, "--json") && i + 1 < argc) json = argv[++i];
         else if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
         else if (!strcmp(a, "--rtcode") && i + 1 < argc) rtcode_path = argv[++i];
+        else if (!strcmp(a, "--ram-code") && i + 1 < argc) ramcode_path = argv[++i];
+        else if (!strcmp(a, "--ram-code-forced")) g_ramcode_forced = 1;
         else if (!strcmp(a, "--summary") && i + 1 < argc) summary = argv[++i];
         else if (!strcmp(a, "--cov") && i + 1 < argc) cov = argv[++i];
         else if (!strcmp(a, "--romdata") && i + 1 < argc) romdata = argv[++i];
@@ -688,6 +703,7 @@ static int cmd_explore(int argc, char **argv) {
         fwrite(out.p, 1, out.len, stdout);
         dp_buf_free(&out);
         write_rtcode(&res, rtcode_path);
+        write_ramcode(&res, ramcode_path);
         if (scfg.state_dir) {
             char tpath[540];
             snprintf(tpath, sizeof tpath, "%s/tree.bin", scfg.state_dir);
@@ -750,6 +766,7 @@ static int cmd_explore(int argc, char **argv) {
         fwrite(out.p, 1, out.len, stdout);
         dp_buf_free(&out);
         write_rtcode(&res, rtcode_path);
+        write_ramcode(&res, ramcode_path);
         fprintf(stderr, "deepeel: done in %.2fs\n", secs);
     }
     if (json) {

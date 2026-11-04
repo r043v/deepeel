@@ -84,3 +84,100 @@ DpRtCode *dp_rtcode_sorted(const DpResults *res, uint32_t *n) {
     *n = k;
     return o;
 }
+
+// ---- recompiler export: executed RAM code as contiguous byte variants --------
+// m0boy's `gbrecomp --ram-code` compiles each variant and enters it only while
+// the RAM holds exactly its bytes.  Instructions are packed into "layers": a
+// layer never holds two different bytes at one address and never starts an
+// instruction inside another, so rewritten code (same pc, other bytes) lands in
+// different layers.  A layer is then cut into runs of known contiguous bytes
+// (the bytes between two executed instructions are unknown, so nothing is
+// guessed across a gap).  WRAM $C000-$DFFF and HRAM $FF80-$FFFE only; other
+// pcs (VRAM, cartridge RAM, echo) are counted, not exported.
+#define RV_WRAM 0x2000
+#define RV_N (RV_WRAM + 0x7F)
+#define RV_LAYER_MAX 1024
+typedef struct { uint8_t have[RV_N], val[RV_N]; uint16_t owner[RV_N]; } RvLayer;
+
+static int rv_idx(uint32_t a) {
+    if (a >= 0xC000u && a < 0xE000u) return (int)(a - 0xC000u);
+    if (a >= 0xFF80u && a < 0xFFFFu) return RV_WRAM + (int)(a - 0xFF80u);
+    return -1;
+}
+static uint32_t rv_addr(int i) { return i < RV_WRAM ? 0xC000u + (uint32_t)i : 0xFF80u + (uint32_t)(i - RV_WRAM); }
+
+static int rv_fits(const RvLayer *l, const DpRtCode *c) {
+    for (int k = 0; k < c->len; k++) {
+        int i = rv_idx((uint32_t)c->pc + (uint32_t)k);
+        if (i < 0) return 0;
+        if (l->have[i] && (l->val[i] != c->b[k] || l->owner[i] != c->pc)) return 0;
+    }
+    return 1;
+}
+
+// writes `path`; fills the counters when non-NULL.  Returns 0 on success, -1 when the file cannot be written.
+int dp_rtcode_export_variants(const DpResults *res, const char *path, int forced_too, uint32_t *variants,
+                              uint32_t *instr, uint32_t *skipped, uint32_t *dropped, uint32_t *forced) {
+    uint32_t nv = 0, ni = 0, ns = 0, nd = 0, nf = 0, rn = 0;
+    DpRtCode *rt = dp_rtcode_sorted(res, &rn);
+    RvLayer **lay = NULL;
+    uint32_t nl = 0;
+    for (uint32_t i = 0; i < rn; i++) {
+        const DpRtCode *c = &rt[i];
+        if (rv_idx(c->pc) < 0 || rv_idx((uint32_t)c->pc + c->len - 1u) < 0) { ns++; continue; }
+        // code only a forced fork made reachable (typically a jump into zeroed RAM) is not game code
+        if (!c->natural && !forced_too) { nf++; continue; }
+        uint32_t L = 0;
+        while (L < nl && !rv_fits(lay[L], c)) L++;
+        if (L == nl) {
+            if (nl >= RV_LAYER_MAX) { nd++; continue; }
+            RvLayer **g = realloc(lay, sizeof *lay * (nl + 1));
+            RvLayer *n = calloc(1, sizeof *n);
+            if (!g || !n) { free(n); if (g) lay = g; nd++; continue; }
+            lay = g;
+            lay[nl++] = n;
+        }
+        RvLayer *l = lay[L];
+        for (int k = 0; k < c->len; k++) {
+            int ix = rv_idx((uint32_t)c->pc + (uint32_t)k);
+            l->have[ix] = 1;
+            l->val[ix] = c->b[k];
+            l->owner[ix] = c->pc;
+        }
+        ni++;
+    }
+    FILE *f = fopen(path, "w");
+    if (f) {
+        fprintf(f, "# gbl ram code v1: ram ADDR HEXBYTES OFFSETS (hex starts relative to ADDR, e = entered non-sequentially)\n");
+        for (uint32_t L = 0; L < nl; L++) {
+            const RvLayer *l = lay[L];
+            for (int i = 0; i < RV_N;) {
+                if (!l->have[i]) { i++; continue; }
+                int j = i;
+                while (j + 1 < RV_N && l->have[j + 1] && (j + 1 != RV_WRAM)) j++; // a run never spans WRAM into HRAM
+                fprintf(f, "ram %04x ", rv_addr(i));
+                for (int k = i; k <= j; k++) fprintf(f, "%02x", l->val[k]);
+                fputc(' ', f);
+                int first = 1;
+                for (int k = i; k <= j; k++) {
+                    if (l->owner[k] != rv_addr(k)) continue;
+                    fprintf(f, "%s%x%s", first ? "" : ",", k - i, first ? "e" : "");
+                    first = 0;
+                }
+                fputc('\n', f);
+                nv++;
+                i = j + 1;
+            }
+        }
+        fclose(f);
+    }
+    for (uint32_t L = 0; L < nl; L++) free(lay[L]);
+    free(lay);
+    free(rt);
+    if (variants) *variants = nv;
+    if (instr) *instr = ni;
+    if (skipped) *skipped = ns;
+    if (dropped) *dropped = nd;
+    if (forced) *forced = nf;
+    return f ? 0 : -1;
+}

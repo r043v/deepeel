@@ -2822,3 +2822,21 @@ flash : ce n'est pas un défaut de couverture.) Écart restant pour « sans inte
 - les trous matériel listés dans `docs/COUVERTURE.fr.md` §3 (un comportement non émulé ne se recompile pas).
 Non vérifié : que le binaire recompilé reproduise l'exécution (comparaison trace à trace) ; que ces 46 584 instructions
 couvrent tout ce qu'une partie réelle exécute.
+
+## 0.188.1 : export du code RAM pour m0boy, éviction corrigée (2026-11-04)
+
+- `deepeel explore ROM --ram-code f` écrit le code WRAM/HRAM exécuté en variantes
+  d'octets contigus (entrée de `gbrecomp --ram-code f`, m0boy 18639cd). Les
+  instructions que seule une fourche forcée a atteintes sont écartées
+  (`--ram-code-forced` pour les garder) ; les octets inconnus entre deux
+  instructions exécutées ne sont jamais devinés.
+- Correctif : la règle d'éviction « exécution dans des données verbatim »
+  coupait un chemin naturel après la première instruction d'un code copié
+  ROM→WRAM. L'archive `rtcode` était tronquée (fixture `wramexec` : 2 entrées au
+  lieu de 9). Elle ne s'applique plus qu'aux chemins forcés pour la WRAM.
+- Correctif : `run_sliced` (MD) ne s'arrêtait pas sur un budget non épuisé après
+  une tranche (`--unbounded` s'arrêtait après une tranche).
+- Observations de l'outil : sur *Super Mario Land*, 0 variante naturelle (8 124
+  instructions d'archive, toutes forcées). Sur la fixture `wramexec`, une
+  variante de 6 octets ; le binaire généré donne les mêmes empreintes avec et
+  sans variante, instructions interprétées 5 → 2.

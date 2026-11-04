@@ -563,6 +563,9 @@ void dp_copy_flush_for_exec(DpExplorer *ex, uint16_t pc);
 void dp_rtcode_add(DpResults *res, uint16_t pc, const uint8_t *b, int len, int32_t rom_src, int32_t derived,
                    int natural);
 DpRtCode *dp_rtcode_sorted(const DpResults *res, uint32_t *n);
+// executed WRAM/HRAM code as contiguous byte variants for m0boy's `gbrecomp --ram-code` (rtcode.c)
+int dp_rtcode_export_variants(const DpResults *res, const char *path, int forced_too, uint32_t *variants,
+                              uint32_t *instr, uint32_t *skipped, uint32_t *dropped, uint32_t *forced);
 void dp_copy_on_wram_write(DpExplorer *ex, uint16_t addr, uint8_t v);
 void dp_copy_on_back_edge(DpCopyTracker *ct, uint16_t site, uint32_t site_key);
 void dp_copy_flush_path(DpExplorer *ex, DpCopyTracker *ct);

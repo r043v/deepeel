@@ -925,7 +925,7 @@ static uint64_t run_sliced(DpMdMach *m, uint64_t budget, int *cut, int *fault) {
         *cut = 0;
         uint64_t k = dp_mdmach_run(m, slice, cut, fault);
         n += k;
-        if (!*cut || k < slice || n >= budget || dp_stop || *fault) break;
+        if (*cut || k < slice || n >= budget || dp_stop || *fault) break;
     }
     return n;
 }
