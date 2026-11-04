@@ -11,11 +11,11 @@ remesure pas l'outil.
 | GB | 32 | 6 | 0 | 1 |
 | SMS/GG | 32 | 5 | 0 | 2 |
 | MSX | 32 | 5 | 0 | 2 |
-| NES | 19 | 18 | 0 | 2 |
+| NES | 20 | 17 | 0 | 2 |
 | PCE | 25 | 13 | 0 | 1 |
-| MD | 19 | 19 | 0 | 1 |
+| MD | 20 | 18 | 0 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 66.
+Cellules ouvertes (◐ ou ✗) : 64.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -43,8 +43,6 @@ Cellules ouvertes (◐ ou ✗) : 66.
 | S6 | Rejeu de décodeurs sur tables de flux | MSX | ◐ 0.147 idem |
 | S6 | Rejeu de décodeurs sur tables de flux | NES | ◐ 0.148 `JSR` + mot de page zéro, tables de mots même bloc ; 0.205 UxROM, 0.211 MMC1, 0.212 MMC3 (modes 0 et 1, 0.213), Camerica 71, UN1ROM 94 (0.214), 180 (0.215) (banque, ptr) ; tous les mappers à PRG commutable du pont (1, 2, 4) sont couverts, 3/7/11/66 permutent tout le PRG ou seulement la CHR (rien à rejouer inter-banques), MMC5 (0.223.0, sous-ensemble : PRG/CHR) et le reste dépendent de leur prise en charge (J5) |
 | S6 | Rejeu de décodeurs sur tables de flux | PCE | ◐ 0.149 `JSR` + mot de page zéro, page ROM de 8 Kio ; 0.206 entrées (page, ptr) |
-| S7 | Inférence de voisins à la carte | NES | ◐ trous ≤ 1024 |
-| S7 | Inférence de voisins à la carte | MD | ◐ remplissage ≥ 8 (00/FF) ou ≥ 32, code ≤ 3 o, données ≤ 1024 o ; rendu seulement |
 | G2 | Scan de dispatch par vues de banques | NES | ◐ UxROM, banque fixe (`--bank-dispatch`) |
 | G2 | Scan de dispatch par vues de banques | PCE | ◐ tables de mots par fenêtre, vues de pages (`--bank-dispatch`) |
 | G2 | Scan de dispatch par vues de banques | MD | ◐ tables de mots longs de pointeurs de code (`--bank-dispatch`) |

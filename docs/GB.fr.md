@@ -3561,3 +3561,9 @@ au-delà du plafond n'est pas reportée dans la frontière (§6), elle est compt
 Le plafond de 256 racines du second passage (NES, PCE, MD) est aussi levé dès qu'un lot disque (`--lot`) est ouvert : les
 racines en excès sont parquées puis écrites dans le lot (reprise possible) au lieu d'être comptées `capped` et abandonnées.
 Sans lot ni mode illimité, le plafond et le comptage restent ; G4 reste donc ◐ pour ces cas.
+
+## 0.249.23 (S7 NES et MD ✅)
+
+Les inférences de voisins de la carte NES et MD (padding ≥ 8 octets 00/FF ou ≥ 32, code ≤ 3 octets entre deux codes, données
+≤ 1024 octets) utilisent les mêmes seuils et le même balisage « inférence » que PCE, déjà ✅ : cellules S7 NES et MD passées ✅.
+Aucun changement de code.
