@@ -3329,3 +3329,10 @@ Une arête qui quitte sa fenêtre était résolue seulement si une seule page av
 fenêtre cible. Elle est maintenant suivie dans chacune des pages observées (jusqu'à 16 ; au-delà,
 inconnue). C'est une sur-approximation, marquée `STATIC` comme le reste de la fermeture. Test `pce`
 (`test_static_views` : deux pages en fenêtre 2, l'arête atteint l'autre page, contrôle négatif fait).
+
+## NES : `--pad-full`, les 256 masques du port 1 (D10) (0.243.0)
+
+Option explicite : à chaque site d'écriture de `$4016`, tous les masques de boutons du port 1 qui
+ne l'étaient pas déjà (singles, accords du catalogue) sont proposés, soit 256 fourches par site au
+lieu de 19. Un site par visite, refus comptés ; coûteux, donc hors défaut. Test `nes_pad_full`
+(512 fourches sur les 2 sites de la fixture). MD garde ses 14 sondes.

@@ -555,6 +555,22 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
                 DpNesPathState f = { snap, 0, 0, x->paths_opened, x->total_steps, 0 };
                 if (snap_push(x, &f)) r->pad_probes++; else r->pad_probe_refused++;
             }
+            if (x->opt.pad_full) {
+                // the whole catalog: every port-1 mask not already probed (singles and the
+                // combos above, and the mask in force); zero is the no-button state
+                for (unsigned m = 0; m < 256; m++) {
+                    if (m == keep || (m && !(m & (m - 1)))) continue;
+                    int known = 0;
+                    for (unsigned k = 0; k < sizeof combos; k++) known |= combos[k] == m;
+                    if (known) continue;
+                    uint8_t *snap = malloc(dp_nesmach_state_size());
+                    if (!snap) { r->pad_probe_refused++; continue; }
+                    dp_nesmach_set_input(x->m, (uint8_t)m, 0);
+                    dp_nesmach_save(x->m, snap);
+                    DpNesPathState f = { snap, 0, 0, x->paths_opened, x->total_steps, 0 };
+                    if (snap_push(x, &f)) r->pad_probes++; else r->pad_probe_refused++;
+                }
+            }
             dp_nesmach_set_input(x->m, (uint8_t)keep, 0);
         }
     }

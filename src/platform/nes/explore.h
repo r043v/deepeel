@@ -107,6 +107,7 @@ typedef struct {
     int tas_count;
     uint8_t entry_bank[32]; uint16_t entry_addr[32]; int entry_count; // --entry bank:addr seeds
     int no_pad_probe;      // disable the strobe-site pad probes
+    int pad_full;          // D10: also probe every one of the 256 port-1 button masks at each strobe site
     int bank_dispatch;     // second pass also scans the fixed bank for jump tables and seeds every bank view (G2, UxROM)
     unsigned ctx_cap;      // max admitted states per coarse context (0 = off, C2)
     int second_pass;       // after the drain, enter static-closure roots that no path executed and drain again (G4)

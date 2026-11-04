@@ -1179,6 +1179,7 @@ static int cmd_nes(int argc, char **argv) {
         else if (!strcmp(a, "--seed-vectors")) opt.seed_vectors = 1;
         else if (!strcmp(a, "--bank-dispatch")) opt.second_pass = opt.bank_dispatch = 1;
         else if (!strcmp(a, "--no-p1-fork")) opt.no_pad_probe = 1;
+        else if (!strcmp(a, "--pad-full")) opt.pad_full = 1;
         else if (!strcmp(a, "--entry") && i + 1 < argc && opt.entry_count < 32) {
             uint8_t eb; uint16_t ea;
             if (!parse_entry(argv[++i], &eb, &ea)) { fprintf(stderr, "deepeel: bad --entry '%s' (bank:addr)\n", argv[i]); return 2; }
