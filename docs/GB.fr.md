@@ -2272,3 +2272,9 @@ Le pont PCE modélise l'adaptateur 5 manettes, désactivé par défaut (`dp_pce_
 `$1000` pilotent un balayage (CLR haut → pad 1 ; SEL montant avec CLR bas → pad suivant) ; la lecture rend
 le quartet du pad courant selon SEL. C'est un modèle de l'outil, pas une mesure de matériel : le balayage
 n'est pas dans le snapshot et l'exploration n'ouvre pas encore de fourches par pad. Test `pce` (`test_multitap`).
+
+## 0.156.0 (J9 — audio typé SMS/GG/SG)
+
+Le rapport Sega ajoute « audio (music data…) » avec le nombre d'écritures PSG (`$7E/$7F`) et YM2413
+(`$F0/$F1`) observées. La puce FM n'est pas émulée : c'est une observation d'accès, pas de la musique
+décodée. Test `sega_streams`.

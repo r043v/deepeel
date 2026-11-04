@@ -25,6 +25,24 @@ int main(void) {
     CHECK(r.s6_runs >= 1);
     CHECK(r.flags[0x330] & DP_SEGA_DATA);
     dp_sega_results_free(&r);
+    {   // typed audio: PSG and YM2413 port writes show in the report
+        static uint8_t rom3[0x8000];
+        memset(rom3, 0xFF, sizeof rom3);
+        const uint8_t au[] = {0x3E, 0x9F, 0xD3, 0x7F, 0xD3, 0xF1, 0x76};   // ld a,$9F; out ($7F),a; out ($F1),a; halt
+        memcpy(rom3, au, sizeof au);
+        DpSegaResults r3;
+        memset(&r3, 0, sizeof r3);
+        CHECK(dp_sega_explore(dp_sega_system("sms"), rom3, sizeof rom3, &o, &r3));
+        FILE *tf = tmpfile();
+        dp_sega_report(tf, dp_sega_system("sms"), &r3);
+        rewind(tf);
+        char buf[65536];
+        size_t nb = fread(buf, 1, sizeof buf - 1, tf);
+        buf[nb] = 0;
+        fclose(tf);
+        CHECK(strstr(buf, "audio (music data") && strstr(buf, "YM2413 FM 1"));
+        dp_sega_results_free(&r3);
+    }
     {   // RAM-code archive: code built in RAM by immediates, then called
         static uint8_t rom2[0x8000];
         memset(rom2, 0xFF, sizeof rom2);

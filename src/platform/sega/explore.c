@@ -2403,6 +2403,10 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
         const DpSegaPort *rd=dp_sega_port(s,p,0), *wr=dp_sega_port(s,p,1);
         fprintf(out,"  port $%02X read %"PRIu64" (%s), write %"PRIu64" (%s)\n",p,r->io_read[p],rd?rd->name:"unmapped",r->io_write[p],wr?wr->name:"unmapped");
     }
+    if(strcmp(s->id,"msx")) {   // typed audio: PSG ($7E/$7F writes) and the Japanese FM ($F0/$F1, YM2413)
+        uint64_t psg=r->io_write[0x7E]+r->io_write[0x7F], fm=r->io_write[0xF0]+r->io_write[0xF1];
+        if(psg||fm) fprintf(out,"  audio (music data, observed writes; the FM chip is not emulated): PSG %"PRIu64", YM2413 FM %"PRIu64"\n",psg,fm);
+    }
     if(!strcmp(s->id,"msx")) {
         fputs("Limits: partial simulated BIOS, zero RAM and fixed primary-slot profile; no real BIOS, expanded slots, RAM mapper, disk/tape or MSX2. Sessions and TAS replay record machine state only, no screen snapshots. Context projection hashes registers, held input, mapper views and the pages/ports a section read; IN port values are not hashed. Static closure uses observed slot/bank views and stops at BIOS, RAM, indirect jumps its constants cannot prove and mapping barriers; targets observed at runtime are seeded in the indirect pass. Pure CPU/RAM and selected BIOS copies only; VRAM read-back and transformed data have no origin. RETURN is polled, never NMI. Forced reachability is speculative.\n",out);
         return;
