@@ -974,12 +974,19 @@ static void s4_ptr_table(X *x, uint32_t pc, unsigned an, uint32_t obs) {
         if ((lop & 0xF1F8) != 0x2030 && (lop & 0xF1FF) != 0x203B) return;
         op = 0x2040u | (an << 9) | (lop & 0x3Fu);                      // same EA, destination An: the movea form below
     }
-    if ((op & 0xF1F8) != 0x2070 && (op & 0xF1FF) != 0x207B) return;      // movea.l d8(Am|pc,Xn),An (any Am)
+    int disp = (op & 0xF1F8) == 0x2068;                                  // movea.l d16(Am),An: Am already points into the table
+    if (!disp && (op & 0xF1F8) != 0x2070 && (op & 0xF1FF) != 0x207B) return;   // movea.l d8(Am|pc,Xn),An (any Am)
     if (((op >> 9) & 7) != an) return;
-    if (rom[w + 2] & 0x07) return;                                       // brief extension only
+    if (!disp && (rom[w + 2] & 0x07)) return;                            // brief extension only
     if (dp_set_insert(&x->ind_sites, ((uint64_t)pc + 1) | (2ull << 40)) == 0) return;
-    uint32_t base = (op & 0x3F) == 0x3B ? w + 2 : dp_mdmach_an(x->m, op & 7) & 0xFFFFFFu;
-    base += (uint32_t)(int32_t)(int8_t)rom[w + 3];
+    uint32_t base;
+    if (disp) {                                                          // the entry read, then the entries after it
+        base = dp_mdmach_an(x->m, op & 7) & 0xFFFFFFu;
+        base += (uint32_t)(int32_t)(int16_t)((unsigned)rom[w + 2] << 8 | rom[w + 3]);
+    } else {
+        base = (op & 0x3F) == 0x3B ? w + 2 : dp_mdmach_an(x->m, op & 7) & 0xFFFFFFu;
+        base += (uint32_t)(int32_t)(int8_t)rom[w + 3];
+    }
     uint32_t tg[128];
     unsigned nt = 0;
     int hit = 0;

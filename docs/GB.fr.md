@@ -3442,3 +3442,10 @@ Limite : `dn_writer` ne garde que le dernier écrivain, donc un Dx réécrit ent
 pleine, sinon éviction de la moins productive avec libération de son `z`) et signale le remplacement. NES, PCE, MD et
 Sega l'utilisent à la place de leurs quatre copies de cette logique ; les champs propres à chaque cœur (RAM de vies,
 profondeur, image cartouche) restent dans leur `*_archive_add`. Sans changement de comportement : 155 tests passent.
+
+## 0.249.6 (MD, S3 : `movea.l d16(Am),An`)
+
+`s4_ptr_table` accepte aussi `movea.l d16(Am),An ; jmp (An)` : Am (valeur vivante) + d16 désigne l'entrée lue, et les
+longs qui la suivent sont les entrées voisines. Même validation (la cible observée doit être une des entrées lues, au
+moins deux entrées valides en ROM). Les entrées *avant* l'entrée lue ne sont pas explorées (la base de la table n'est
+pas connue dans ce cas). Fixture `fix_md_s4p5`, test `md_s4_ptr_disp`. Reste : An calculé par ALU (`adda`).
