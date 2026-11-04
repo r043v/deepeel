@@ -2688,6 +2688,7 @@ la ROM (le parité m0boy ne la voit pas : pas de second VBlank, et il exclut le 
 sortent à $8000/$C000, l'index compact de l'explorateur. La valeur lue est transmise (`GB::dpPeek`, sans effet de bord, ROM/WRAM/HRAM seulement ; 0 ailleurs, et 0 pour les écritures). Test : `lr_gambatte_parity` (ctest) compare les décomptes de débuts d'opcode ci-dessus ; il se saute (code 77) sans
 `DEEPEEL_GAMBATTE_LR` (binaire produit par `tools/gambatte_lr_build.sh DIR`, qui clone le cœur et applique le patch).
 Les callbacks `dma` (OAM DMA par $FF46, HDMA/GDMA à `Memory::dma`) et `bank` (`setRombank0`/`setRombank`) sont branchés
-(`dp_trace.h` dans le patch) : `fix_dma` voit 1 copie, `mbc5` 3 bascules, `closure` 16 ; `fix_hdma` n'en voit aucune
-(fixture CGB : le cœur est chargé sans `CGB_MODE`, à régler). Limites : pas de parité de copies/banques contre
+(`dp_trace.h` dans le patch) : `fix_dma` voit 1 copie, `mbc5` 3 bascules, `closure` 16 ; `fix_hdma` n'en voit aucune,
+même avec `GLR_CGB=1` (chargement en `CGB_MODE`) : le GDMA lancé juste avant un HALT n'atteint pas `Memory::dma` dans
+la borne de ~4 trames de l'adaptateur ; cause non élucidée. Limites : pas de parité de copies/banques contre
 m0boy, seulement des décomptes. J11/J12 restent donc ◐.

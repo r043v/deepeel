@@ -68,7 +68,7 @@ int main(int argc, char **argv) {
     std::vector<char> rom((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     rom_size = rom.size();
     gb = new gambatte::GB;
-    if (gb->load(rom.data(), rom.size(), gambatte::GB::NO_BIOS)) { fprintf(stderr, "load failed\n"); return 1; }
+    if (gb->load(rom.data(), rom.size(), gambatte::GB::NO_BIOS | ((getenv("GLR_CGB") || (rom.size() > 0x143 && (rom[0x143] & 0x80))) ? gambatte::GB::CGB_MODE : 0))) { fprintf(stderr, "load failed\n"); return 1; }
     gb->setExecCallback(on_exec);
     gb->setReadCallback(on_read);
     gb->setWriteCallback(on_write);
