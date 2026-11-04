@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.244.0 LANGUAGES C)
+project(deepeel VERSION 0.245.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -92,6 +92,8 @@ target_include_directories(dp_mdmach_lib PUBLIC src/mach PRIVATE ${DP_MD_RUNTIME
 target_compile_options(dp_mdmach_lib PRIVATE -w)
 
 set(DP_MACHINES "18" CACHE STRING "compiled m0boy machine instances (session workers)")
+# GBL_CGB in the m0boy runtime (host, optional): -DDP_GBL_CGB=1
+set(DP_GBL_CGB 0 CACHE STRING "build the m0boy runtime with Game Boy Color support")
 set(DP_GBL_VARIANTS "0:0;1:0;1:0x800;1:0x2000;1:0x8000;2:0x200;3:0;3:0x800;3:0x2000;3:0x8000;3:0x10000;3:0x20000;5:0;5:0x800;5:0x2000;5:0x8000;5:0x10000;5:0x20000"
     CACHE STRING "cartridge shapes compiled into the machine (MBC:ERAM)")
 
@@ -240,6 +242,7 @@ add_custom_command(OUTPUT ${GBL_ARCH}
     -DOBJCOPY=${DP_OBJCOPY} -DNM=${DP_NM} -DAR=${DP_AR}
     -DBASE_FLAGS=${CMAKE_C_FLAGS}
     -DDP_GBL_VARIANTS=${DP_GBL_VARIANTS_COMMA}
+    -DDP_GBL_CGB=${DP_GBL_CGB}
     -DDP_MACHINES=${DP_MACHINES}
     -DDP_GBL_PATCH=${CMAKE_CURRENT_SOURCE_DIR}/cmake/m0boy-tas-compat.patch
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_gbl_build.cmake

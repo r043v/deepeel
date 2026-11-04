@@ -39,6 +39,11 @@ foreach(v RANGE ${nv})
   string(REPLACE ":" ";" kv "${spec}")
   list(GET kv 0 mbc)
   list(GET kv 1 eram)
+  if(DP_GBL_CGB)
+    set(cgbdef "#define GBL_CGB 1\n")
+  else()
+    set(cgbdef "")
+  endif()
   set(cfg ${DP_GBL_OUT}/cfg${v})
   file(MAKE_DIRECTORY ${cfg})
   file(WRITE ${cfg}/gbl_config.h "\
@@ -47,7 +52,7 @@ foreach(v RANGE ${nv})
 #define GBL_MBC ${mbc}
 #define GBL_ROM_BANKS 512
 #define GBL_ROM_BANKS_VAR 1
-#define GBL_ERAM_SIZE ${eram}
+${cgbdef}#define GBL_ERAM_SIZE ${eram}
 #define GBL_ERAM_ON_SD 0
 #define GBL_BATTERY 0
 #define GBL_ROM_STREAM 0
