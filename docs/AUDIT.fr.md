@@ -52,7 +52,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | S6 | Rejeu de décodeurs sur tables de flux | GB | ◐ 0.146 `CALL` + HL/DE/BC, tables de mots même banque ; 0.203 entrées (banque, ptr) inter-banques |
 | S6 | Rejeu de décodeurs sur tables de flux | SMS/GG | ◐ 0.147 idem (SMS/GG/SG) |
 | S6 | Rejeu de décodeurs sur tables de flux | MSX | ◐ 0.147 idem |
-| S6 | Rejeu de décodeurs sur tables de flux | NES | ◐ 0.148 `JSR` + mot de page zéro, tables de mots même bloc ; 0.205 UxROM, 0.211 MMC1, 0.212 MMC3 (modes 0 et 1, 0.213) (banque, ptr) ; tous les mappers à PRG commutable du pont (1, 2, 4) sont couverts, 3/7/11/66 permutent tout le PRG ou seulement la CHR (rien à rejouer inter-banques), MMC5 et le reste dépendent de leur prise en charge (J5) |
+| S6 | Rejeu de décodeurs sur tables de flux | NES | ◐ 0.148 `JSR` + mot de page zéro, tables de mots même bloc ; 0.205 UxROM, 0.211 MMC1, 0.212 MMC3 (modes 0 et 1, 0.213), Camerica 71 et UN1ROM 94 (0.214) (banque, ptr) ; tous les mappers à PRG commutable du pont (1, 2, 4) sont couverts, 3/7/11/66 permutent tout le PRG ou seulement la CHR (rien à rejouer inter-banques), MMC5 et le reste dépendent de leur prise en charge (J5) |
 | S6 | Rejeu de décodeurs sur tables de flux | PCE | ◐ 0.149 `JSR` + mot de page zéro, page ROM de 8 Kio ; 0.206 entrées (page, ptr) |
 | S7 | Inférence de voisins à la carte | NES | ◐ trous ≤ 1024 |
 | S7 | Inférence de voisins à la carte | MD | ◐ remplissage ≥ 8 (00/FF) ou ≥ 32, code ≤ 3 o, données ≤ 1024 o ; rendu seulement |

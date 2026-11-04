@@ -617,6 +617,34 @@ static void test_streams_mmc3_mode1(void) {
     free(rom);
 }
 
+// S6 across Camerica (71) / UN1ROM (94) banks: UxROM-like, bank written at $C000+ (71) or in bits 2-4 (94)
+static void test_streams_uxlike(unsigned mapper) {
+    unsigned sz = 16 + 4 * 0x4000;
+    uint8_t *rom = calloc(1, sz);
+    set_header(rom, 4, 0, mapper);
+    uint8_t s1 = mapper == 94 ? 1 << 2 : 1, s2 = mapper == 94 ? 2 << 2 : 2;
+    put(rom, 3, 0x0000, 0xA9, s1, 0x20, 0x00, 0xC2, 0xA9, 0x00, 0x85, 0x10, 0xA9, 0x90, 0x85, 0x11, 0x20, 0x00, 0xC1,
+                        0xA9, s2, 0x20, 0x00, 0xC2, 0xA9, 0x10, 0x85, 0x10, 0xA9, 0x90, 0x85, 0x11, 0x20, 0x00, 0xC1,
+                        0x4C, 0x20, 0xC0, -1);
+    put(rom, 3, 0x0100, 0xA0, 0x00, 0xB1, 0x10, 0x60, -1);
+    put(rom, 3, 0x0200, 0x8D, 0x00, 0xC0, 0x60, -1);   // bank write at $C000
+    put(rom, 1, 0x1000, 5, -1);
+    put(rom, 2, 0x1010, 6, -1);
+    put(rom, 0, 0x1020, 7, -1);
+    put(rom, 3, 0x1100, 1, 0x00, 0x90, 2, 0x10, 0x90, 0, 0x20, 0x90, -1);
+    set_vector(rom, 3, 0xFFFA, 0xC000);
+    set_vector(rom, 3, 0xFFFC, 0xC000);
+    set_vector(rom, 3, 0xFFFE, 0xC000);
+    DpNesResults r;
+    DpNesOptions o = dp_nes_options();
+    o.max_steps = 2000;
+    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "UxROM-like streams explore runs");
+    CHECK(r.s6_tables >= 1 && r.s6_runs >= 1, "UxROM-like banked table found and replayed");
+    CHECK(r.flags[0x1020] != 0, "UxROM-like bank 0's unplayed stream was read");
+    dp_nes_results_free(&r);
+    free(rom);
+}
+
 // J1: random sessions restart from checkpoints earlier sessions kept
 static void test_play_pool(void) {
     unsigned sz = 16 + 2 * 0x4000 + 0x2000;
@@ -694,6 +722,8 @@ int main(void) {
     test_streams_mmc1();
     test_streams_mmc3();
     test_streams_mmc3_mode1();
+    test_streams_uxlike(71);
+    test_streams_uxlike(94);
     test_play_pool();
     test_ramcode();
     test_smc();

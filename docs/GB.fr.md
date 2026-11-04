@@ -3069,3 +3069,11 @@ Le rejeu inter-banques MMC3 suit le mode PRG courant : en mode 1 la fenêtre com
 `$C000-$DFFF` (R6, `$8000` fixe) ; `dp_nesmach_mmc3_mode1` l'indique, `dp_nesmach_map_8k` conserve
 le bit de mode et la plage des pointeurs de table suit la fenêtre. Fixture : `test_streams_mmc3_mode1`
 (code dans les banques hautes fixes). Reste : MMC5 et autres mappers. Observation de l'outil.
+
+## 0.214.0 : NES, mappers Camerica (71) et UN1ROM (94) (2026-11-04)
+
+Deux cartes de type UxROM entrent dans le pont : mapper 71 (banque de 16 Kio écrite en `$C000+`,
+dernière banque fixe en `$C000`) et mapper 94 (banque en bits 2-4 d'une écriture `$8000+`). Le rejeu
+S6 inter-banques les couvre via `dp_nesmach_cross16` (UxROM, MMC1, 71, 94 partagent l'entrée
+`dp_nesmach_enter`). Fixtures : `test_streams_uxlike(71/94)` dans `test_nes`. Mapper 180 (banque
+commutable en `$C000`) reste à faire. Observation de l'outil, pas une mesure matérielle.
