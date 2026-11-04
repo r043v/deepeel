@@ -1374,8 +1374,10 @@ int dp_play_poll(DpPlay *p) {
     p->epoch_no++;
     pthread_cond_broadcast(&p->cv);
     pthread_mutex_unlock(&p->bar_mtx);
-    if (p->cfg.unbounded)   // overlapped with the next epoch of the sessions
-        for (int i = 0; i < p->cfg.fork_paths_per_epoch && p->fork->q_len && !p->fork->stop; i++)
+    if (p->cfg.unbounded)   // overlapped with the next epoch of the sessions; it yields as soon as they are
+        // done, so the fork never holds a movie back (the barrier waits for this thread)
+        for (int i = 0; i < p->cfg.fork_paths_per_epoch && p->fork->q_len && !p->fork->stop &&
+                        __atomic_load_n(&p->workers_done, __ATOMIC_ACQUIRE) < p->nworkers; i++)
             dp_explore_step(p->fork);
     return 1;
 }

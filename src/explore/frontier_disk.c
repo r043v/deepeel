@@ -35,7 +35,7 @@ static uint64_t spool_rec_len(FILE *f, uint64_t at, uint64_t end, uint64_t sb) {
 static int zraw_compress(uint8_t *dst, uLongf *dlen, const uint8_t *src, uLong n, int level) {
     z_stream z;
     memset(&z, 0, sizeof z);
-    if (deflateInit2(&z, level, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY) != Z_OK) return Z_MEM_ERROR;
+    if (deflateInit2(&z, level, Z_DEFLATED, -15, 8, Z_RLE) != Z_OK) return Z_MEM_ERROR;
     z.next_in = (Bytef *)src; z.avail_in = (uInt)n;
     z.next_out = dst; z.avail_out = (uInt)*dlen;
     int r = deflate(&z, Z_FINISH);

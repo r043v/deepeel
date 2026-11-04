@@ -2575,3 +2575,14 @@ Gambatte est encore à la saisie du nom, SameBoy à l'écran-titre puis à la sa
 est dans la maison après « Shield back! ». Aucun des deux cores précis ne suit ce film : il dépend de la temporisation
 de VBA 1.7.2 (démarrage, introduction), donc ce test ne départage pas « désynchronisation de deepeel » et « film qui
 joue vraiment ainsi ». Seul un VBA 1.7.2 de référence le ferait.
+
+## 0.181.3 (`--unbounded --play` : les films ne attendent plus la fourche)
+
+Observation (SML2, deux films, `--unbounded --play --mapwin`) : le thread principal tournait à 99 % (deflate du
+spool ≈ 50 %, `queue_push_pri` 12 %) et les sessions de film restaient à l'arrêt à la barrière d'époque : 3 600 trames
+de film en 5 minutes. Correctifs : les pas de la fourche, recouverts avec l'époque suivante, s'arrêtent dès que les
+sessions ont fini (la barrière n'attend plus ce thread) ; le spool compresse en `Z_RLE` (images machine surtout
+nulles). Résultat observé sur la même campagne : plus de 9 000 trames de film en 90 s, sessions à ~99 % de CPU.
+La fourche avance donc surtout après la fin des films (vidage parallèle). Le compteur « unknown » peut remonter : la
+passe d'inférence (`map.c`) classe un trou selon ses voisins (code–code ≤ 3 octets, données–données ≤ 1024, remplissage) ;
+un nouvel octet de code découvert au milieu d'un trou supprime l'inférence des deux moitiés, qui redeviennent inconnues.
