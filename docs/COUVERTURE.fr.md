@@ -572,7 +572,7 @@ Sinon elle est listée comme limite.
 | RTC MBC3 | **non simulé** (`gbl_core.c` : « no RTC on this target ») | **Sonde** des registres RTC |
 | MBC6/7, MMM01, HuC1/3, TAMA5, caméra | **refusés** | Machine ou libretro (§8) |
 | CGB : VBK, SVBK, HDMA1-5, palettes BCPS/OCPS, KEY1 | registres listés, **non émulés** ; la doc dit « VBK réellement commuté », ce qui est faux | **Copie** HDMA, **Banque** VBK/SVBK, **Type** palette |
-| SGB (commandes par P1) | absent | **Type** des paquets SGB (bordures, palettes) |
+| SGB (commandes par P1) | ◐ 0.158 : paquets décodés depuis les écritures `$FF00` (compte par commande, rapport) ; rien n'est rendu, bordures/palettes non typées | **Type** des paquets SGB (bordures, palettes) |
 | Boot ROM | absente (registres au reset DMG) | limite documentée |
 
 **Corrections de doc à faire** : `docs/GB.fr.md` §Limites (l.121-135) dit encore

@@ -75,6 +75,21 @@ def build(out):
     w(r, 0x400, 0x00, 0x03, 0x10, 0x03, 0x30, 0x03)   # pointer table
     save(out, "fix_streams", r)
 
+    # --- sgb: one MLT_REQ-like command packet written on P1 ($FF00) ---------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)          # nop; jp $0150
+    pkt = bytearray(16); pkt[0] = (0x11 << 3) | 1
+    seq = [0x00, 0x30]                           # reset pulse, idle
+    for i in range(128):
+        seq += [0x10 if (pkt[i >> 3] >> (i & 7)) & 1 else 0x20, 0x30]
+    seq += [0x20, 0x30]                          # stop bit
+    code = bytearray()
+    for v in seq:
+        code += bytes([0x3E, v, 0xE0, 0x00])     # ld a,v; ldh ($00),a
+    code += bytes([0x76])                        # halt
+    w(r, 0x150, *code)
+    save(out, "fix_sgb", r)
+
     # --- mbc5: switch to bank 2, call, switch to bank 3, call ----------------
     r = rom(4, mbc=0x19)
     w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)

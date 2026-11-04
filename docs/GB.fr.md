@@ -2285,3 +2285,10 @@ Le rapport PCE se termine par une ligne « Limits » (pas de CD-ROM²/ADPCM/Syst
 SuperGrafx, multitap en modèle optionnel) ; le rapport MSX ajoute FM-PAC, son SCC et V9938/MSX2. Ces
 surfaces restent non émulées : la ligne « exigé » de la matrice (« limites ou libretro ») est remplie par
 les limites, pas par une émulation.
+
+## 0.158.0 (J9 — paquets SGB)
+
+Un décodeur observe les écritures `$FF00` : impulsion `00` (début), 128 bits LSB d'abord (`10` = 1,
+`20` = 0, chacun suivi de `30`), bit d'arrêt. Le rapport liste « SGB packets on P1 » avec le compte par
+commande (octet 0 >> 3). Observation seule : aucune bordure ni palette SGB n'est rendue ni typée ; l'état
+du décodeur est par explorateur (non restauré par les fourches). Test `explorer` (fixture `sgb`).

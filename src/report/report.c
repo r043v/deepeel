@@ -95,6 +95,11 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
     dp_buf_fmt(out, "stream replay (S6): %u decoders, %u tables, %u candidates, %u queued replays (%u without snapshot, %u saturated)\n",
                res->decoders, res->replay_tables, res->replay_candidates, res->replay_runs,
                res->decoders_without_snapshot, res->sat_replay_total);
+    if (res->sgb_packets) {
+        dp_buf_fmt(out, "SGB packets on P1 (observed, nothing rendered): %u;", res->sgb_packets);
+        for (int c = 0; c < 32; c++) if (res->sgb_cmd[c]) dp_buf_fmt(out, " cmd $%02X x%u", c, res->sgb_cmd[c]);
+        dp_buf_str(out, "\n");
+    }
     dp_buf_fmt(out, "event probes (LY/STAT/DIV read values): %u forced variants\n", res->forks_event);
     dp_buf_fmt(out, "probes: serial start sites %u, RTC register-select sites %u\n", res->serial_starts,
                res->rtc_selects);

@@ -320,6 +320,7 @@ static void hook_write(DpMach *m, uint16_t a, uint8_t v);
 
 DpExplorer *dp_explorer_new(const DpConfig *cfg, DpResults *res, DpMach *mach) {
     DpExplorer *ex = calloc(1, sizeof *ex);
+    if (ex) ex->sgb_bit = -1;
     ex->cfg = *cfg;
     ex->res = res;
     ex->mach = mach;
@@ -683,9 +684,27 @@ static void hook_read(DpMach *m, uint16_t a, uint8_t v) {
     }
 }
 
+// Super Game Boy command packets travel on P1 ($FF00): a 00 pulse starts a packet, then 128 bits
+// LSB first (10 = 1, 20 = 0, each followed by 30), then a stop bit. Observation only: no SGB
+// border or palette is rendered.
+static void sgb_feed(DpExplorer *ex, DpResults *res, uint8_t v) {
+    v &= 0x30;
+    if (v == 0x00) { ex->sgb_bit = 0; memset(ex->sgb_buf, 0, sizeof ex->sgb_buf); return; }
+    if (ex->sgb_bit < 0 || v == 0x30) return;
+    if (ex->sgb_bit == 128) {   // the stop bit closes the packet
+        __atomic_fetch_add(&res->sgb_packets, 1, __ATOMIC_RELAXED);
+        __atomic_fetch_add(&res->sgb_cmd[ex->sgb_buf[0] >> 3 & 31], 1, __ATOMIC_RELAXED);
+        ex->sgb_bit = -1;
+        return;
+    }
+    if (v == 0x10) ex->sgb_buf[ex->sgb_bit >> 3] |= (uint8_t)(1u << (ex->sgb_bit & 7));
+    ex->sgb_bit++;
+}
+
 static void hook_write(DpMach *m, uint16_t a, uint8_t v) {
     DpExplorer *ex = m->owner;
     DpResults *res = ex->res;
+    if (a == 0xFF00) sgb_feed(ex, res, v);
     if (a < 0x8000) { // mapper write: the bank flip resolves on the next step
         if (a >= 0x4000 && a < 0x6000 && v >= 8 && v <= 0x0C)
             probe_site(res, 1, m->api->gbr->pc);
