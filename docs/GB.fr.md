@@ -2524,3 +2524,13 @@ Avec `--play` et un film `--tas`, `--mapwin` affiche aussi l'écran de la Game B
 de la carte, avec le nom du film et sa position (film i/n, image/total). L'écran se rafraîchit environ quatre fois par
 seconde, la carte environ une fois par seconde. Sans film, la carte seule. Une exploration peut être arrêtée (SIGINT) et
 reprise avec `--state-dir D --resume` : la fenêtre se rouvre avec la même option.
+
+### Observation TAS SML2 : WRAM identique, HRAM différente (image 41774 deepeel / 42108 référence)
+
+Dump complet à l'image 41774 côté deepeel et 42108 côté BizHawk/gambatte (décalage de 334 images) : les 8 Kio de WRAM
+sont **identiques octet pour octet**, mais 22 octets de HRAM diffèrent (compteurs et état temporaire : `$FF97`, `$FF99`,
+`$FFB7-$FFB9`, `$FFC0-$FFCE`, `$FFF0`, `$FFFF`), ainsi que la RAM de cartouche (782 à 7 387 octets par banque). Le
+hash de WRAM[:$F00] reste constant des deux côtés sur des dizaines de milliers d'images (attente) : le décalage de 334
+images est donc ambigu, et la divergence observée tient à la sortie de cette attente (référence à l'image 42109, en plein
+remplissage `$039E-$03A2` ; deepeel reste en `pc=$0300` jusqu'à l'image 51252). Observation de l'outil, cause non
+établie : il faut tracer ce qui fait sortir la référence de l'attente (état de `IE/IF/$FFFF`, DIV/timer, HRAM).
