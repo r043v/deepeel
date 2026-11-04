@@ -450,6 +450,15 @@ int dp_nesmach_enter(DpNesMach *d, unsigned bank, unsigned addr) {
     return 1;
 }
 
+/* MMC3: map an 8 KiB PRG bank under the $8000-$BFFF slot that `addr` falls in (R6 / R7), PRG mode 0 */
+int dp_nesmach_map_8k(DpNesMach *d, unsigned addr, unsigned bank8) {
+    if (d->mapper != 4 || addr < 0x8000u || addr >= 0xC000u || bank8 >= (unsigned)(machine.prg_size >> 13) || bank8 > 63) return 0;
+    d->rg.v[0] &= (uint8_t)~0x40;
+    d->rg.v[2 + (addr >= 0xA000u ? 7 : 6)] = (uint8_t)bank8;
+    mapper_apply(d);
+    return 1;
+}
+
 size_t dp_nesmach_chr_size(const DpNesMach *d) { return d->chr_rom ? (size_t)d->chr1k * 1024u : 0; }
 
 /* canonical CHR cell behind a PPU pattern address under the live bank */

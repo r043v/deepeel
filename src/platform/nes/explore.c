@@ -211,10 +211,10 @@ static void nstm_read(DpNesRun *x, unsigned a) {
             unsigned j;
             for (j = 0; j < d->nstarts && d->starts[j] != a; j++) {}
             if (j == d->nstarts && j < NS_START && a >= 0x8000) d->starts[d->nstarts++] = (uint16_t)a;
-            if (a >= 0x8000 && a < 0xC000 && (dp_nesmach_mapper(x->m) == 2 || dp_nesmach_mapper(x->m) == 1)) {   // UxROM: the bank rides with the address
+            if (a >= 0x8000 && a < 0xC000 && (dp_nesmach_mapper(x->m) == 2 || dp_nesmach_mapper(x->m) == 1 || dp_nesmach_mapper(x->m) == 4)) {   // UxROM: the bank rides with the address
                 int64_t ri = dp_nesmach_rom_index(x->m, a);
                 if (ri >= 0) {
-                    unsigned sb = (unsigned)(ri >> 14), q;
+                    unsigned sb = (unsigned)(ri >> (dp_nesmach_mapper(x->m) == 4 ? 13 : 14)), q;
                     for (q = 0; q < d->nx && !(d->xs[q].bank == sb && d->xs[q].addr == a); q++) {}
                     if (q == d->nx && q < NS_START) { d->xs[q].bank = (uint16_t)sb; d->xs[q].addr = (uint16_t)a; d->nx++; }
                 }
@@ -231,14 +231,15 @@ static int nstm_ptr(const DpNesRun *x, size_t at, size_t lo, size_t hi, unsigned
 // UxROM banked streams: (bank, ptr lo, ptr hi) entries at stride 3; each is replayed with its
 // bank selected in the snapshot and the zero-page word set to the pointer.
 static int nstm_cross(DpNesRun *x, NDec *d) {
-    if (d->nx < 2 || d->nx <= d->xreplayed || (dp_nesmach_mapper(x->m) != 2 && dp_nesmach_mapper(x->m) != 1)) return 0;
+    if (d->nx < 2 || d->nx <= d->xreplayed || (dp_nesmach_mapper(x->m) != 2 && dp_nesmach_mapper(x->m) != 1 && dp_nesmach_mapper(x->m) != 4)) return 0;
+    const unsigned sh = dp_nesmach_mapper(x->m) == 4 ? 13 : 14;   // bank unit: 8 KiB (MMC3) or 16 KiB
     d->xreplayed = d->nx;
     DpNesResults *r = x->r; int pushed = 0;
-    const unsigned nb = (unsigned)(dp_nesmach_prg_size(x->m) >> 14);
+    const unsigned nb = (unsigned)(dp_nesmach_prg_size(x->m) >> sh);
     uint8_t *tried = calloc(x->image_size ? x->image_size : 1, 1);
     if (!tried) return 0;
     for (unsigned j = 0; j < d->nx; j++) {
-        size_t i = (size_t)d->xs[j].bank * 0x4000 + (d->xs[j].addr & 0x3FFF);
+        size_t i = ((size_t)d->xs[j].bank << sh) + (d->xs[j].addr & ((1u << sh) - 1));
         if (i < x->image_size) tried[i] = 1;
     }
     size_t pos[64]; unsigned np = 0;
@@ -258,7 +259,7 @@ static int nstm_cross(DpNesRun *x, NDec *d) {
         r->s6_tables++;
         for (size_t at = lo; at <= hi; at += 3) {
             unsigned b = x->image[at]; uint16_t v = (uint16_t)(x->image[at + 1] | x->image[at + 2] << 8);
-            size_t idx = (size_t)b * 0x4000 + (v & 0x3FFF);
+            size_t idx = ((size_t)b << sh) + (v & ((1u << sh) - 1));
             if (idx >= x->image_size || tried[idx]) continue;
             tried[idx] = 1;
             if (cands >= NS_CAND) { r->s6_sat++; break; }
@@ -266,7 +267,7 @@ static int nstm_cross(DpNesRun *x, NDec *d) {
             uint8_t *img = malloc(dp_nesmach_state_size());
             if (!img) continue;
             dp_nesmach_load(x->m, d->snap);
-            dp_nesmach_enter(x->m, b, dp_nesmach_pc(x->m));
+            if (sh == 13) dp_nesmach_map_8k(x->m, v, b); else dp_nesmach_enter(x->m, b, dp_nesmach_pc(x->m));
             dp_nesmach_save(x->m, img);
             uint8_t *ram = dp_nesmach_state_ram(img);
             ram[d->zp] = (uint8_t)v; ram[d->zp + 1] = (uint8_t)(v >> 8);

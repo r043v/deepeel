@@ -3054,3 +3054,11 @@ mode de contrôle 3) : `dp_nesmach_enter` pose le registre PRG comme le port sé
 (bank ≤ 15) puis réapplique le mapping ; la taille de banque vient de la taille PRG. Fixture :
 `test_nes` (`test_streams_mmc1`, banque posée par cinq écritures série, flux de la banque 0 jamais
 appelé). MMC3 et autres mappers restent à faire. Observation de l'outil, pas une mesure matérielle.
+
+## 0.212.0 : S6 NES, MMC3 (2026-11-04)
+
+Le rejeu inter-banques NES couvre MMC3 (mapper 4, fenêtre R6/R7 de 8 Kio, mode PRG 0) :
+`dp_nesmach_map_8k` pose R6 ou R7 selon la fenêtre de l'adresse lue, puis réapplique le mapping ;
+l'unité de banque des tables est 8 Kio pour MMC3 (16 Kio pour UxROM/MMC1). Fixture : `test_nes`
+(`test_streams_mmc3`, banque posée par écritures `$8000/$8001`). Reste : MMC5 et autres mappers,
+mode PRG 1 de MMC3. Observation de l'outil, pas une mesure matérielle.
