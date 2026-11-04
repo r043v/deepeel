@@ -350,6 +350,12 @@ def build(out):
         r[0x4000 + i] = (i * 7 + 3) & 0xFF
     save(out, "fix_hdma", r)
 
+    # --- cgbbank: VBK=1 then SVBK=3 (only a CGB-mode core observes them) -------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x3E, 0x01, 0xE0, 0x4F, 0x3E, 0x03, 0xE0, 0x70, 0x76)
+    save(out, "fix_cgbbank", r)
+
     # --- apu: a ROM byte stored to wave RAM, another to NR12 -------------------
     r = rom(2)
     w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)

@@ -283,7 +283,7 @@ index 23c7ce6..5225890 100644
  	romdata_[1] = romdata() + bank * rombank_size() - mm_rom1_begin;
  	rmem_[0x7] = rmem_[0x6] = rmem_[0x5] = rmem_[0x4] = romdata_[1];
 diff --git a/libgambatte/src/memory.cpp b/libgambatte/src/memory.cpp
-index 3e73668..22e857d 100644
+index 3e73668..de34c14 100644
 --- a/libgambatte/src/memory.cpp
 +++ b/libgambatte/src/memory.cpp
 @@ -17,6 +17,7 @@
@@ -310,6 +310,22 @@ index 3e73668..22e857d 100644
  		lastOamDmaUpdate_ = cc;
  		oamDmaStartPos_ = (oamDmaPos_ + 2) & 0xFF;
  		intreq_.setEventTime<intevent_oam>(std::min(intreq_.eventTime(intevent_oam), cc + 8));
+@@ -1220,6 +1223,7 @@ void Memory::nontrivial_ff_write(unsigned const p, unsigned data, unsigned long
+ 		return;
+ 	case 0x4F:
+ 		if (isCgb() && !isCgbDmg()) {
++			if (dp_bank_cb) dp_bank_cb(2, data & 1);
+ 			cart_.setVrambank(data & 1);
+ 			ioamhram_[0x14F] = 0xFE | data;
+ 		}
+@@ -1328,6 +1332,7 @@ void Memory::nontrivial_ff_write(unsigned const p, unsigned data, unsigned long
+ 		return;
+ 	case 0x70:
+ 		if (isCgb() && !isCgbDmg()) {
++			if (dp_bank_cb) dp_bank_cb(3, data & 0x07 ? data & 0x07 : 1);
+ 			cart_.setWrambank(data & 0x07 ? data & 0x07 : 1);
+ 			ioamhram_[0x170] = data | 0xF8;
+ 		}
 diff --git a/libgambatte/src/memory.h b/libgambatte/src/memory.h
 index e9dc8ba..70919b4 100644
 --- a/libgambatte/src/memory.h

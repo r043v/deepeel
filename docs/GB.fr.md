@@ -2690,5 +2690,6 @@ sortent à $8000/$C000, l'index compact de l'explorateur. La valeur lue est tran
 Les callbacks `dma` (OAM DMA par $FF46, HDMA/GDMA à `Memory::dma`) et `bank` (`setRombank0`/`setRombank`) sont branchés
 (`dp_trace.h` dans le patch) : `fix_dma` voit 1 copie, `mbc5` 3 bascules, `closure` 16 ; `fix_hdma` en voit 1 avec `GLR_CGB=1`
 (cause du cas précédent : l'en-tête de la fixture sans drapeau CGB mettait le cœur en compatibilité DMG, où le HDMA est
-désactivé ; l'adaptateur pose alors le drapeau dans sa copie de la ROM). Limites : pas de parité de copies/banques contre
+désactivé ; l'adaptateur pose alors le drapeau dans sa copie de la ROM). Le callback `bank` signale aussi VBK (fenêtre 2) et SVBK (fenêtre 3), observés
+seulement en mode CGB (fixture `fix_cgbbank`, 2 changements ; m0boy, DMG, n'en voit aucun). Limites : pas de parité de copies/banques contre
 m0boy, seulement des décomptes. J11/J12 restent donc ◐.

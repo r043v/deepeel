@@ -158,6 +158,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_sms_ramsrc.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_lywait.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_hdma.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_cgbbank.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_apu.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pal.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_probes.gb
@@ -449,5 +450,5 @@ set_tests_properties(rtcode_md_exg_movem PROPERTIES FIXTURES_REQUIRED fixtures T
 # Level-B parity against a real core (patched gambatte). Optional: needs DEEPEEL_GAMBATTE_LR (path to the built
 # tools/gambatte_lr, see tools/gambatte_lr_build.sh); skipped (exit 77) otherwise. Start counts >= $0100 equal the
 # m0boy counts plus the entry nop at $0100.
-add_test(NAME lr_gambatte_parity COMMAND sh -c "L=\"\$DEEPEEL_GAMBATTE_LR\"; D=${CMAKE_CURRENT_BINARY_DIR}; [ -x \"$L\" ] || exit 77; for p in branch:20 loop:3 copy1:13 copyx:14 jumptable:17 nsdata:28 vblank:28 probes:12; do n=\${p%%:*}; w=\${p##*:}; g=$(GLR_STARTS=1 \"$L\" $D/fix_$n.gb 200000 50000000 2>/dev/null | sed -n 's/^starts>=0100: //p'); [ \"$g\" = \"$w\" ] || { echo \"$n: $g != $w\"; exit 1; }; done; for n in dma hdma; do c=$(GLR_CGB=1 \"$L\" $D/fix_$n.gb 200000 50000000 2>&1 >/dev/null | sed -n 's/.*dma \\([0-9]*\\),.*/\\1/p'); [ \"$c\" = 1 ] || { echo \"$n dma=$c\"; exit 1; }; done")
+add_test(NAME lr_gambatte_parity COMMAND sh -c "L=\"\$DEEPEEL_GAMBATTE_LR\"; D=${CMAKE_CURRENT_BINARY_DIR}; [ -x \"$L\" ] || exit 77; for p in branch:20 loop:3 copy1:13 copyx:14 jumptable:17 nsdata:28 vblank:28 probes:12; do n=\${p%%:*}; w=\${p##*:}; g=$(GLR_STARTS=1 \"$L\" $D/fix_$n.gb 200000 50000000 2>/dev/null | sed -n 's/^starts>=0100: //p'); [ \"$g\" = \"$w\" ] || { echo \"$n: $g != $w\"; exit 1; }; done; for n in dma hdma; do c=$(GLR_CGB=1 \"$L\" $D/fix_$n.gb 200000 50000000 2>&1 >/dev/null | sed -n 's/.*dma \\([0-9]*\\),.*/\\1/p'); [ \"$c\" = 1 ] || { echo \"$n dma=$c\"; exit 1; }; done; b=$(GLR_CGB=1 \"$L\" $D/fix_cgbbank.gb 2>&1 >/dev/null | sed -n 's/.*bank \\([0-9]*\\)$/\\1/p'); [ \"$b\" = 2 ] || { echo \"cgbbank bank=$b\"; exit 1; }")
 set_tests_properties(lr_gambatte_parity PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 120 SKIP_RETURN_CODE 77)
