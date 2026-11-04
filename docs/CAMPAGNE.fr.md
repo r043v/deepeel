@@ -189,3 +189,5 @@ Ces chiffres sont des essais courts, pas une campagne : ni saturation levée, ni
   `--max-total 2000000 --novelty 100000000 --novelty-cells 1` (100 s) : 58 essais, 9 969 trames, profondeur 168
   trames, 8 touches, 9 points archivés, 142 005 745 pas au total ; carte 84,58 % (contre 85,01 % sans jeu) : la
   phase de jeu GG n'améliore pas la carte sur cette ROM dans ce budget (observation de l'outil, un seul run).
+- MD, Sonic 1 : le mode joué de MD passe uniquement par `--tas GMV` (pas de `--play`/`--novelty` comme NES/PCE/Z80) ;
+  aucun GMV n'est disponible hors dépôt, donc pas de comparaison joué/non joué sur MD pour l'instant (lié à J3).
