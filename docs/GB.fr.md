@@ -2546,3 +2546,17 @@ antérieure ne sont plus relisibles**) ; en `--unbounded`, les pas de la fourche
 sessions, donc en même temps que l'époque suivante (la reproductibilité à graine fixe n'est pas promise dans ce mode).
 Le rejeu du film Zelda (`bobmario511-zeldagb-playaround.vbm`) seul donne les mêmes images avec 0.25.0 et 0.181.0 :
 le suivi des films n'a pas régressé. Mesures : observations de l'outil.
+
+## 0.181.1 (profil VBA 1.7.2 : RES/SET b,(HL))
+
+La table de cycles du cœur V7 de VBA (`gbCyclesCB`) facture `RES`/`SET b,(HL)` 3 cycles machine au lieu de 4 ; le
+cœur V8 l'a corrigé. Le profil VBA 1.7.2 (`gbl_sync_vba_off_clock == 2`, `cmake/m0boy-tas-compat.patch`) reproduit
+maintenant ce défaut, comme le reste de la table. Aucun effet visible sur le film Zelda
+`bobmario511-zeldagb-playaround.vbm` : les images de la trame 1800 à 4500 sont identiques avant et après.
+
+**Film Zelda, état de l'observation** : après « Shield back! », Link arrive sur la plage, reste presque immobile
+contre un mur (trames ~2300–3400) puis change d'écran sans jamais prendre l'épée (emplacement A vide). Les
+versions 0.25.0 et 0.181.1 rejouent la même chose, donc ce n'est pas une régression ; l'origine (désynchronisation
+du cœur V7, ou film qui joue vraiment ainsi) n'est **pas établie** faute d'un VBA 1.7.2 de référence compilé
+sans affichage (l'arbre `vba-rerecording` n'a pas le script de construction Unix, la maquette précédente était
+temporaire). Prochaine étape : reconstruire cette référence et comparer les hachages de WRAM par trame.

@@ -1,6 +1,40 @@
+diff -ruN a/gbl_core.c b/gbl_core.c
+--- a/gbl_core.c
++++ b/gbl_core.c
+@@ -25,6 +25,8 @@
+ uint8_t *gbl_wmap[16];
+ 
+ uint8_t gbl_interp_only;
++uint8_t gbl_sync_div_skew;      /* gbl.h: movie sync compatibility */
++uint8_t gbl_sync_vba_off_clock;
+ uint32_t gbl_frame;
+ uint32_t gbl_interp_instrs;
+ uintptr_t gbl_stack_limit;
+@@ -1262,7 +1264,7 @@
+     switch (n) {
+     case 0x00: return gbl_joyp;
+     case 0x02: return gbl_io[0x02] | 0x7E;
+-    case 0x04: return (uint8_t)((gbr.cyc - div_base) >> 8);
++    case 0x04: return (uint8_t)((gbr.cyc + gbl_sync_div_skew - div_base) >> 8);
+     case 0x05: timer_sync(gbr.cyc); return TIMA;
+     case 0x07: return TAC | 0xF8;
+     case 0x0F: gbl_sync(); return IF | 0xE0;
+diff -ruN a/gbl_cpu.c b/gbl_cpu.c
+--- a/gbl_cpu.c
++++ b/gbl_cpu.c
+@@ -266,6 +266,8 @@
+         uint32_t r = n8 & 7, grp = n8 >> 6, bit = (n8 >> 3) & 7;
+         gbr.pc++;
+         gbr.cyc += (r == 6) ? (grp == 1 ? 8 : 12) : 4;
++        /* VBA 1.7.2 cycle table: RES/SET b,(HL) cost 3 M-cycles, not 4 */
++        if (r == 6 && grp >= 2 && gbl_sync_vba_off_clock == 2) gbr.cyc -= 4;
+         uint8_t v = get_r(r);
+         if (grp == 0) set_r(r, gbl_cbop((uint8_t)n8, v));
+         else if (grp == 1) { gbr.zr = v & (1u << bit); gbr.nf = 0; gbr.hf = 1; }
+diff -ruN a/gbl.h b/gbl.h
 --- a/gbl.h
 +++ b/gbl.h
-@@ -387,6 +387,37 @@
+@@ -387,6 +387,38 @@
  extern uint8_t gbl_safe_request;
  void gbl_platform_safe_point(void); /* weak default: nothing */
  
@@ -23,6 +57,7 @@
 + *    while the LCD is off (one every 600 frame lengths at most, so a host
 + *    frame hook still runs), and an enable keeps LY at 0 in mode 0 for ten
 + *    lines (VBA loads the mode-1 length) without the LYC=0 STAT edge.
++ *    Its cycle table also charges RES/SET b,(HL) 3 M-cycles instead of 4.
 + *    3 = BizHawk (Gambatte core, VBlankDrivenFrames): a host frame ends at
 + *    the video frame's completion or when its 35112-sample budget (one frame
 + *    length) runs out, whichever comes first.  With the LCD off no video
@@ -38,26 +73,7 @@
  /* ---- diagnostics -------------------------------------------------------- */
  extern uint8_t gbl_interp_only;     /* ignore compiled code (reference mode) */
  extern uint32_t gbl_frame;
---- a/gbl_core.c
-+++ b/gbl_core.c
-@@ -25,6 +25,8 @@
- uint8_t *gbl_wmap[16];
- 
- uint8_t gbl_interp_only;
-+uint8_t gbl_sync_div_skew;      /* gbl.h: movie sync compatibility */
-+uint8_t gbl_sync_vba_off_clock;
- uint32_t gbl_frame;
- uint32_t gbl_interp_instrs;
- uintptr_t gbl_stack_limit;
-@@ -1262,7 +1264,7 @@
-     switch (n) {
-     case 0x00: return gbl_joyp;
-     case 0x02: return gbl_io[0x02] | 0x7E;
--    case 0x04: return (uint8_t)((gbr.cyc - div_base) >> 8);
-+    case 0x04: return (uint8_t)((gbr.cyc + gbl_sync_div_skew - div_base) >> 8);
-     case 0x05: timer_sync(gbr.cyc); return TIMA;
-     case 0x07: return TAC | 0xF8;
-     case 0x0F: gbl_sync(); return IF | 0xE0;
+diff -ruN a/gbl_ppu.c b/gbl_ppu.c
 --- a/gbl_ppu.c
 +++ b/gbl_ppu.c
 @@ -837,10 +837,42 @@
