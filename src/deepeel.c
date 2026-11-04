@@ -64,6 +64,7 @@ static int auto_jobs(void) {
 }
 
 int dp_lr_command(int argc, char **argv);
+int dp_bh_command(int argc, char **argv);
 static int cmd_nes(int argc, char **argv);
 static int cmd_pce(int argc, char **argv);
 static int cmd_maprender(int argc, char **argv);
@@ -1718,6 +1719,7 @@ int main(int argc, char **argv) {
         return cmd_explore(n, av);
     }
     if (!strcmp(argv[1], "lr")) return dp_lr_command(argc, argv);
+    if (!strcmp(argv[1], "bh")) return dp_bh_command(argc, argv);
     if (!strcmp(argv[1], "md")) return cmd_md(argc, argv);
     if (!strcmp(argv[1], "nes")) return cmd_nes(argc, argv);
     if (!strcmp(argv[1], "pce")) return cmd_pce(argc, argv);

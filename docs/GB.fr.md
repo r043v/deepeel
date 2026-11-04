@@ -2592,3 +2592,20 @@ un nouvel octet de code découvert au milieu d'un trou supprime l'inférence des
 Quand le film affiché se termine (le film SML2 `mugg_masterjun_alyosha` n'a que 2 752 trames : c'est un enchaînement
 court qui finit aux crédits, pas une troncature), la fenêtre passe au film suivant encore en cours au lieu de
 figer sa dernière image (2704/2752).
+
+## 0.182.0 (`deepeel bh` : référence BizHawk libgambatte ; correctif du LogKey BK2)
+
+**Correctif (le film `mugg_masterjun` n'était pas joué correctement depuis la 0.3.0).** Les BK2 de BizHawk 2.x
+écrivent le `LogKey` « `#P1 Up|P1 Down|…` ». Le chargeur coupait aussi sur l'espace : « P1 » devenait une touche à part
+et les caractères de chaque trame étaient décalés (812 trames « appuyées » au lieu de 1 220 sur ce film). Le
+découpage se fait maintenant sur `|` seul, le préfixe `P<n> ` est retiré. Test : `tas_logkey` (échoue sans le
+correctif). Les films au `LogKey` sans préfixe (par exemple `dadinfinitum`) n'étaient pas touchés. Tout résultat
+obtenu avec un BK2 à préfixe `P1` avant cette version est à refaire.
+
+**`deepeel bh LIBGAMBATTE ROM --tas FILE`.** Rejoue un film sur le `libgambatte.so` de BizHawk
+(`BizHawk/Assets/dll/`), chargé par `dlopen` (jamais copié dans le dépôt). L'API C de cette bibliothèque porte les
+rappels d'exécution, de lecture/écriture et de CD-logger : c'est un moteur indépendant de m0boy. Sorties :
+`--cov` (drapeaux par octet de ROM : 1 opcode, 2 opérande, 4 donnée), `--ranges` (plages exécutées `banque:adresse`),
+`--ppm`, `--shot-every N PREFIXE`, `--bios`. Observation (SML2, `mugg_masterjun`, 2 752 trames, sans boot ROM,
+d'après l'outil) : 15 148 octets de ROM exécutés dont 7 894 opcodes. Limite : ce film a été enregistré avec le cœur
+GBHawk (`Core GBHawk` dans l'en-tête), pas avec Gambatte ; Gambatte le suit sans garantie d'exactitude trame à trame.

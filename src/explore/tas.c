@@ -73,11 +73,15 @@ static int log_parse(const uint8_t *d, size_t n, DpTas *out, char *err, size_t e
         }
         if (!strncmp(line, "LogKey:", 7)) {
             nkey = 0;
-            char *tok = strtok(line + 7, "| \t#");
+            // one key per '|' field ("#P1 Up|P1 Down|..."): a field may hold a space ("P1 Up"), so only
+            // '|' separates; the controller prefix is dropped, the button name is what remains
+            char *tok = strtok(line + 7, "|");
             while (tok && nkey < 64) {
+                while (*tok == '#' || *tok == ' ' || *tok == '\t') tok++;
+                if ((tok[0] == 'P' || tok[0] == 'p') && isdigit((unsigned char)tok[1]) && tok[2] == ' ') tok += 3;
                 for (char *c = tok; *c; c++) *c = (char)tolower((unsigned char)*c);
                 key_mask[nkey++] = btn_mask(tok);
-                tok = strtok(NULL, "| \t#");
+                tok = strtok(NULL, "|");
             }
             continue;
         }

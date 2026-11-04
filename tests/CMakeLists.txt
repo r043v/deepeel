@@ -424,3 +424,8 @@ target_link_libraries(test_sega_streams PRIVATE deepeel_sega)
 add_test(NAME sega_streams COMMAND test_sega_streams)
 set_tests_properties(sega_streams PROPERTIES TIMEOUT 60)
 add_test(NAME lr_gpgx_trace COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/lr_gpgx_trace.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_md_fork.md)
+
+add_executable(test_tas_logkey test_tas_logkey.c)
+target_link_libraries(test_tas_logkey PRIVATE deepeel_core)
+add_test(NAME tas_logkey COMMAND test_tas_logkey)
+set_tests_properties(tas_logkey PROPERTIES TIMEOUT 30)
