@@ -164,5 +164,5 @@ Ces chiffres sont des essais courts, pas une campagne : ni saturation levée, ni
   par défaut, sans `--second-pass` ni jeu : un autre mode d'entrée serait nécessaire pour aller plus loin.
 - NES, DuckTales avec `--second-pass --pad-full` (100 s) : toujours 8 531 octets touchés (6,51 %) ; 2 060 169 pas,
   2 002 chemins, 512 forks de sondes de manette, 1 graine de seconde passe, 0 mot de table tracé. Ni la manette ni la
-  seconde passe ne débloquent la ROM : la cause à chercher est plutôt dans l'attente de l'interruption (0 fork d'IRQ,
-  voir la ligne `interrupts` du rapport), pas dans les entrées.
+  seconde passe ne débloquent la ROM : la cause du plateau à 6,51 % reste à déterminer (le rapport compte 164 NMI et
+  1 340 IRQ, donc les interruptions ont lieu ; 101 fautes et 495 exécutions hors PRG sont à examiner).
