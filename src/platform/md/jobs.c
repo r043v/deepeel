@@ -40,6 +40,7 @@ static void fold(DpMdResults *a, uint8_t *bank_seen, void *user) {
     size_t n = a->rom_size < b->rom_size ? a->rom_size : b->rom_size;
     for (size_t i = 0; i < n; i++) {
         a->flags[i] |= b->flags[i];
+        if (a->exec_kind && b->exec_kind) a->exec_kind[i] |= b->exec_kind[i];
         a->z80_flags[i] |= b->z80_flags[i];
         if (b->nonexcluded_reads[i] > a->nonexcluded_reads[i]) a->nonexcluded_reads[i] = b->nonexcluded_reads[i];
     }

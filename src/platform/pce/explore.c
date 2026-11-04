@@ -87,6 +87,8 @@ typedef struct {
     int64_t last_read_cell;
     uint64_t last_read_step;
     int was_outside;
+    int32_t exp_pc;        // address the next instruction should start at (-1: unknown)
+    int in_handler;        // between an interrupt vector entry and its RTI
     uint8_t *tmp, *tmp2;   // raw bridge states
     uint8_t *ztmp;
     uLongf zcap;
@@ -730,6 +732,17 @@ static int step_one(PceRun *x, int *frame_done) {
         for (unsigned k = 1; k < 8; k++) if (x->rom[site + k] == b[0]) same++;
         if (same == 8) { r->pad_cuts++; return 0; }
     }
+    if (x->mode == 0 && site >= 0 && r->exec_kind) {   // D1: ENTRY and IRQ marks on the opcode cell
+        int entry = x->exp_pc != (int32_t)c.pc;
+        if (entry) {
+            for (unsigned v = 0xFFF6; v <= 0xFFFC; v += 2)
+                if ((unsigned)(dp_pce_peek((uint16_t)v) | dp_pce_peek((uint16_t)(v + 1)) << 8) == c.pc) x->in_handler = 1;
+            r->exec_kind[site] |= DP_PCE_X_ENTRY;
+        }
+        if (x->in_handler) r->exec_kind[site] |= DP_PCE_X_IRQ;
+        if (b[0] == 0x40) x->in_handler = 0;
+    }
+    if (x->mode == 0) x->exp_pc = (int32_t)(uint16_t)(c.pc + in.length);
     if (in.flow == DP_HUC_ILLEGAL) {
         // the machine runs it as a NOP; exploration takes it as data run as
         // code and ends the path (play keeps running, unmarked)
@@ -840,7 +853,7 @@ static void run_path(PceRun *x, PceQueued q) {
     dp_pce_load(x->tmp);
     memset(x->loops, 0, sizeof x->loops);
     x->path_steps = 0;
-    x->was_outside = 0;
+    x->was_outside = 0; x->exp_pc = -1; x->in_handler = 0;
     x->forced = q.forced;
     x->cur_choice = q.choice;
     x->path_id = r->paths++;
@@ -1505,6 +1518,7 @@ void dp_pce_results_free(DpPceResults *r) {
     if (!r) return;
     dp_ramarch_free(&r->ra);
     free(r->flags);
+    free(r->exec_kind); r->exec_kind = NULL;
     free(r->pal_flags);
     free(r->idx_flags);
     r->idx_flags = NULL;
@@ -1550,6 +1564,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     x->last_read_cell = -1;
     memset(x->page_win, 0xFF, sizeof x->page_win);
     r->flags = calloc(x->rom_size, 1);
+    r->exec_kind = calloc(x->rom_size, 1);
     r->pal_flags = calloc(x->rom_size, 1);
     r->idx_flags = calloc(x->rom_size, 1);
     x->fork_sites = calloc(x->rom_size, 1);

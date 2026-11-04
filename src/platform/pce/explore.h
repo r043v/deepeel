@@ -11,6 +11,8 @@
 enum { DP_PCE_NATURAL = 1, DP_PCE_FORCED = 2, DP_PCE_DATA = 4, DP_PCE_COPIED = 8,
        DP_PCE_IRQ = 16, DP_PCE_PAD = 32, DP_PCE_STATIC = 64, DP_PCE_TABLE = 128 };
 
+enum { DP_PCE_X_ENTRY = 1, DP_PCE_X_IRQ = 2 };
+
 // map classes: the GB names, so maprender renders pce maps unchanged
 enum {
     DP_PMAP_UNKNOWN, DP_PMAP_CODE_NAT, DP_PMAP_CODE_FORCED, DP_PMAP_CODE_STATIC,
@@ -142,6 +144,7 @@ typedef struct DpPceResults_ {
     uint64_t idx_overflow, idx_cross_page, idx_forced_ignored;      // records dropped (cap), reads on another page than the base
     uint32_t idx_declared, idx_refused_code, idx_biased; // bytes inferred / refused over code / sites starting at index >= 1
     uint8_t *flags;        // one byte per physical cell
+    uint8_t *exec_kind;    // per cell, opcode byte: DP_PCE_X_ENTRY (non-sequential arrival) | DP_PCE_X_IRQ (ran inside a handler)
     uint8_t *pal_flags;    // 1: the cell was copied into the VCE palette (HuC6260)
     uint64_t vce_data_writes, palette_bytes; // VCE colour-data stores / distinct palette cells
     size_t rom_size;

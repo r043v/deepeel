@@ -11,6 +11,7 @@
 #include "movie.h"
 #include "../../explore/ramarch.h"
 
+enum { DP_MDX_ENTRY = 1, DP_MDX_IRQ = 2 };
 enum { DP_MDF_NATURAL = 1, DP_MDF_FORCED = 2, DP_MDF_DATA = 4, DP_MDF_QUEUED = 8,
        DP_MDF_DATA_NATURAL = 16, DP_MDF_DMA_SOURCE = 32, DP_MDF_DMA_READ = 64,
        DP_MDF_CPU_VRAM = 128 };
@@ -87,6 +88,7 @@ typedef struct {
 
 typedef struct DpMdResults_ {
     uint8_t *flags;       /* per ROM byte, DP_MDF_* */
+    uint8_t *exec_kind;   /* per ROM byte, instruction start: DP_MDX_ENTRY (non-sequential arrival) | DP_MDX_IRQ (ran inside a handler) */
     uint32_t *exec_hits;  /* per ROM byte: natural-path instruction starts (heat) */
     uint8_t *stat;        /* S1/S2 static layer per ROM byte: 3 code (flow closure), 7 pointer table, 8 padding; 0 none */
     uint64_t stat_pad, stat_table, stat_code, stat_code_roots, stat_conf_lost;

@@ -105,6 +105,8 @@ typedef struct {
     DpTree tree;            // --tree: every pushed state is a choice
     uint32_t cur_choice;
     DpHashSet ind_sites, ind_pairs;   // observed indirect jmp/jsr (D12)
+    int64_t exp_pc;          // address the next instruction should start at (-1: unknown)
+    int in_handler;          // between an exception vector entry and its RTE
 } X;
 
 static size_t ssz;
@@ -497,6 +499,21 @@ static void on_end(void *u, uint32_t pc, uint32_t next, unsigned len) {
     DpM68kInsn in;
     size_t avail = r->rom_size - pc;
     unsigned decoded = dp_m68k_decode(x->c->rom + pc, avail, pc, &in);
+    if (r->exec_kind) {   // D1: ENTRY and IRQ marks on the instruction start
+        int entry = x->exp_pc != (int64_t)pc;
+        if (entry) {
+            {
+                for (uint32_t v = 0x60; v <= 0xBC && v + 4 <= r->rom_size; v += 4) {
+                    const uint8_t *q = x->c->rom + v;
+                    if (((uint32_t)q[0] << 24 | q[1] << 16 | q[2] << 8 | q[3]) == pc) x->in_handler = 1;
+                }
+            }
+            r->exec_kind[pc] |= DP_MDX_ENTRY;
+        }
+        if (x->in_handler) r->exec_kind[pc] |= DP_MDX_IRQ;
+        if (x->c->rom[pc] == 0x4E && x->c->rom[pc + 1] == 0x73) x->in_handler = 0;
+    }
+    x->exp_pc = (int64_t)(pc + len);
     mark(x, pc, len);
     if (x->move_src_valid && (x->op & 0xF1C0) == 0x3000) {
         x->previous_move_src = x->move_src;
@@ -1002,6 +1019,7 @@ static void run_path(X *x, Item *it, uint64_t budget, int *cut) {
     x->halted = 0;
     x->previous_move_valid = x->register_move_valid = 0;
     x->forced = it ? it->forced : 0;
+    x->exp_pc = -1; x->in_handler = 0;
     x->cur_choice = it ? it->choice : 0;
     x->origin = it ? it->origin : UINT32_MAX;
     for (unsigned i = 0; i < 8; i++) x->an_writer[i] = it ? it->an_writer[i] : UINT32_MAX;
@@ -1394,6 +1412,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     memset(r, 0, sizeof *r);
     r->rom_size = c->size;
     r->flags = calloc(c->size, 1);
+    r->exec_kind = calloc(c->size, 1);
     r->nonexcluded_reads = calloc(c->size, 1);
     r->exec_hits = calloc(c->size, sizeof(uint32_t));
     r->z80_flags = calloc(c->size, 1);
@@ -1681,6 +1700,7 @@ void dp_md_results_free(DpMdResults *r) {
     free(r->inferred);
     free(r->stat);
     free(r->flags);
+    free(r->exec_kind); r->exec_kind = NULL;
     free(r->nonexcluded_reads);
     free(r->exec_hits);
     free(r->z80_flags);

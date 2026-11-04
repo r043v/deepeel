@@ -88,7 +88,7 @@ Pour chaque technique, la fiche indique :
 
 | # | Technique | GB | SMS/GG | MSX | NES | PCE | MD |
 |---|---|---|---|---|---|---|---|
-| D1 | Marquage exec natural/forced/entry/irq/start | ✅ | ✅ | ✅ | ◐ 0.228.0 ENTRY/IRQ/START par cellule (`exec_kind`) ; IRQ perdu pour une fourche reprise dans un handler | ◐ | ◐ |
+| D1 | Marquage exec natural/forced/entry/irq/start | ✅ | ✅ | ✅ | ◐ 0.228.0 ENTRY/IRQ/START par cellule (`exec_kind`) ; IRQ perdu pour une fourche reprise dans un handler | ◐ 0.229.0 ENTRY/IRQ par cellule (`exec_kind`) ; IRQ perdu pour une fourche reprise dans un handler | ◐ 0.229.0 ENTRY/IRQ par cellule (`exec_kind`) ; IRQ perdu pour une fourche reprise dans un handler |
 | D2 | Lectures de données ROM + hits | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | D3 | Accès registres par registre (`DpIoStat`) | ✅ | ✅ | ✅ | ✅ lectures + écritures par registre | ✅ lectures + écritures par registre (0.226.0, test `pce`) | ✅ lectures + écritures par registre (`reg_r`/`reg_w`, test `md_explore`) |
 | D4 | Copies par boucle CPU | ✅ VRAM | ✅ | ✅ | ◐ boucle → PPUDATA | ✅ port VDC | ✅ MOVE→VDP |

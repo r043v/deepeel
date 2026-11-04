@@ -20,8 +20,8 @@ Cellules ouvertes (◐ ou ✗) : 80.
 | # | Technique | Plateforme | État |
 |---|---|---|---|
 | D1 | Marquage exec natural/forced/entry/irq/start | NES | ◐ 0.228.0 ENTRY/IRQ/START par cellule (`exec_kind`) ; IRQ perdu pour une fourche reprise dans un handler |
-| D1 | Marquage exec natural/forced/entry/irq/start | PCE | ◐ |
-| D1 | Marquage exec natural/forced/entry/irq/start | MD | ◐ |
+| D1 | Marquage exec natural/forced/entry/irq/start | PCE | ◐ 0.229.0 ENTRY/IRQ par cellule (`exec_kind`) ; IRQ perdu pour une fourche reprise dans un handler |
+| D1 | Marquage exec natural/forced/entry/irq/start | MD | ◐ 0.229.0 ENTRY/IRQ par cellule (`exec_kind`) ; IRQ perdu pour une fourche reprise dans un handler |
 | D4 | Copies par boucle CPU | NES | ◐ boucle → PPUDATA |
 | D10 | Sondes de lecture manette | NES | ◐ 8 boutons, port 1 absent |
 | D10 | Sondes de lecture manette | MD | ◐ 4 |

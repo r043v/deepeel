@@ -367,7 +367,7 @@ int main(int argc, char **argv) {
             DpMdOptions o; dp_md_options_default(&o);
             o.max_total = 100000; o.seed_vectors = s;
             CHECK(dp_md_explore(&c, &o, &r) == 0);
-            if (s) { CHECK(r.vectors_seeded == 1 && executed(&r, 0x300)); CHECK((r.flags[0x300] & DP_MDF_FORCED) && !(r.flags[0x300] & DP_MDF_NATURAL)); }
+            if (s) { CHECK(r.vectors_seeded == 1 && executed(&r, 0x300)); CHECK((r.flags[0x300] & DP_MDF_FORCED) && !(r.flags[0x300] & DP_MDF_NATURAL)); CHECK((r.exec_kind[0x300] & DP_MDX_ENTRY) && (r.exec_kind[0x300] & DP_MDX_IRQ)); CHECK((r.exec_kind[0x200] & DP_MDX_ENTRY) && !(r.exec_kind[0x200] & DP_MDX_IRQ)); }
             else CHECK(r.vectors_seeded == 0 && !executed(&r, 0x300));
             dp_md_results_free(&r); dp_md_cart_free(&c);
         }

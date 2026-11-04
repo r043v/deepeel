@@ -108,7 +108,7 @@ static void fold(DpPceResults *a, void *user) {
         return;
     }
     const DpPceResults *b = j->res;
-    for (size_t i = 0; i < a->rom_size && i < b->rom_size; i++) a->flags[i] |= b->flags[i];
+    for (size_t i = 0; i < a->rom_size && i < b->rom_size; i++) { a->flags[i] |= b->flags[i]; if (a->exec_kind && b->exec_kind) a->exec_kind[i] |= b->exec_kind[i]; }
     if (a->pal_flags && b->pal_flags) {
         a->palette_bytes = 0;
         for (size_t i = 0; i < a->rom_size; i++) {

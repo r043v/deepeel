@@ -3219,3 +3219,10 @@ séquentielle, `DP_NES_X_IRQ` pour le code exécuté entre l'entrée d'un vecteu
 START reste `exec_hits > 0` (compteur sur l'octet d'opcode). Limite : une fourche reprise au milieu
 d'un handler perd le marquage IRQ (l'état n'est pas dans l'instantané). Test `nes` :
 `test_seed_vectors`.
+
+## PCE et MD : marquage ENTRY / IRQ par cellule (D1) (0.229.0)
+
+Même `exec_kind` que NES (0.228.0) : `DP_PCE_X_ENTRY`/`DP_PCE_X_IRQ` (vecteurs `$FFF6-$FFFD`, fin au `RTI`)
+et `DP_MDX_ENTRY`/`DP_MDX_IRQ` (vecteurs d'exception `$60-$BF`, fin au `RTE`), sur l'octet d'opcode.
+Même limite : une fourche reprise au milieu d'un handler perd le marquage IRQ. Tests `pce` et
+`md_explore` (`test_seed_vectors`).
