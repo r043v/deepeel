@@ -1222,7 +1222,7 @@ static unsigned second_pass_seed(PceRun *x) {
             uint32_t t = (page << 13) | (succ[k] & 0x1FFF);
             if (t >= n || x->istart[t] || sd[t] || (r->flags[t] & (DP_PCE_DATA | DP_PCE_COPIED))) continue;
             sd[t] = 1;
-            if (r->pass2_seeds + r->pass2_refused >= PCE_PASS2_MAX) { r->pass2_capped++; continue; }
+            if (r->pass2_seeds + r->pass2_refused >= (x->opt.max_total == UINT64_MAX ? UINT32_MAX : (uint32_t)PCE_PASS2_MAX)) { r->pass2_capped++; continue; }
             dp_pce_reset();
             if (!dp_pce_enter(page, succ[k])) { r->pass2_refused++; continue; }
             if (push_live(x, 1)) { seeded++; r->pass2_seeds++; }
@@ -1245,7 +1245,7 @@ static unsigned second_pass_seed(PceRun *x) {
                 uint32_t t = (page << 13) | (v & 0x1FFF);
                 if (t >= n || x->istart[t] || sd[t] || (r->flags[t] & (DP_PCE_DATA | DP_PCE_COPIED))) continue;
                 sd[t] = 1;
-                if (r->pass2_seeds + r->pass2_refused >= PCE_PASS2_MAX) { r->pass2_capped++; continue; }
+                if (r->pass2_seeds + r->pass2_refused >= (x->opt.max_total == UINT64_MAX ? UINT32_MAX : (uint32_t)PCE_PASS2_MAX)) { r->pass2_capped++; continue; }
                 dp_pce_reset();
                 if (!dp_pce_enter(page, v)) { r->pass2_refused++; continue; }
                 if (push_live(x, 1)) { seeded++; r->pass2_seeds++; r->prov_roots++; }
@@ -1311,7 +1311,7 @@ static unsigned dispatch_seed(PceRun *x) {
                         if (t >= n || sd[t] || x->istart[t] || (r->flags[t] & (DP_PCE_NATURAL | DP_PCE_FORCED | DP_PCE_STATIC))) continue;
                         if (!view_ok(x, t, vs[k])) { r->disp_refused_view++; continue; }
                         sd[t] = 1;
-                        if (r->pass2_seeds + r->pass2_refused >= PCE_PASS2_MAX) { r->pass2_capped++; continue; }
+                        if (r->pass2_seeds + r->pass2_refused >= (x->opt.max_total == UINT64_MAX ? UINT32_MAX : (uint32_t)PCE_PASS2_MAX)) { r->pass2_capped++; continue; }
                         dp_pce_reset();
                         if (!dp_pce_enter(q, vs[k])) { r->pass2_refused++; continue; }
                         if (push_live(x, 1)) { seeded++; r->pass2_seeds++; r->disp_seeds++; }

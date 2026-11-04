@@ -3548,3 +3548,10 @@ sections typée : seul le compte est exposé. Test `md_speculative` (`fix_md_dma
 Conformément à `docs/COUVERTURE.fr.md` F2 / §6, l'issue d'un nœud de `--tree` nommée `budget` s'appelle désormais `deferred`
 (`DP_ISSUE_DEFERRED`, valeur numérique 5 inchangée : les `tree.bin` existants se relisent). Elle désigne un état en attente non
 exploré (file ou parking vidés à l'arrêt sans disque). Cellules F2 NES, PCE et MD passées ✅.
+
+## 0.249.21 (second passage : plafond de racines levé si le pas total est illimité)
+
+Le second passage (`--second-pass`) de NES, PCE et MD plafonnait à 256 racines statiques, le surplus étant seulement compté
+(`capped`). Ce plafond est levé quand `max_total` vaut `UINT64_MAX` (aujourd'hui seulement MD `--unbounded` le positionne ;
+NES et PCE n'ont pas encore d'option `--unbounded`). Les cellules G4 NES/PCE/MD restent ◐ : hors mode illimité, une racine
+au-delà du plafond n'est pas reportée dans la frontière (§6), elle est comptée.

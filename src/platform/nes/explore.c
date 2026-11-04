@@ -1568,7 +1568,7 @@ static void second_pass_seed(DpNesRun *x) {
         else tc = dp_nesmach_rom_index(x->m, t);
         if (tc < 0 || (size_t)tc >= n || (r->flags[tc] & (DP_NES_NATURAL | DP_NES_FORCED)) || sd[tc]) continue;
         sd[tc] = 1;
-        if (r->pass2_seeds + r->pass2_refused >= NES_PASS2_MAX) { r->pass2_capped++; continue; }
+        if (r->pass2_seeds + r->pass2_refused >= (x->opt.max_total == UINT64_MAX ? UINT32_MAX : (uint32_t)NES_PASS2_MAX)) { r->pass2_capped++; continue; }
         // the machine enters the target's bank (window $8000-$BFFF) or the fixed one
         unsigned bank = (t < 0xC000u) ? (unsigned)((size_t)tc >> 14) : 0;
         uint8_t *es = malloc(dp_nesmach_state_size());
@@ -1592,7 +1592,7 @@ static void second_pass_seed(DpNesRun *x) {
                 if (tc < 0 || (size_t)tc >= n) break;
                 if ((r->flags[tc] & (DP_NES_NATURAL | DP_NES_FORCED)) || sd[tc]) continue;
                 sd[tc] = 1;
-                if (r->pass2_seeds + r->pass2_refused >= NES_PASS2_MAX) { r->pass2_capped++; continue; }
+                if (r->pass2_seeds + r->pass2_refused >= (x->opt.max_total == UINT64_MAX ? UINT32_MAX : (uint32_t)NES_PASS2_MAX)) { r->pass2_capped++; continue; }
                 unsigned bank = (v < 0xC000u) ? (unsigned)((size_t)tc >> 14) : 0;
                 uint8_t *es = malloc(dp_nesmach_state_size());
                 if (!es) { x->failed = 1; free(sd); return; }
@@ -1636,7 +1636,7 @@ static void second_pass_seed(DpNesRun *x) {
                         }
                         if (!ok) { r->dispatch_refused_view++; continue; }
                         sd[cell] = 1;
-                        if (r->pass2_seeds + r->pass2_refused >= NES_PASS2_MAX) { r->pass2_capped++; continue; }
+                        if (r->pass2_seeds + r->pass2_refused >= (x->opt.max_total == UINT64_MAX ? UINT32_MAX : (uint32_t)NES_PASS2_MAX)) { r->pass2_capped++; continue; }
                         uint8_t *es = malloc(dp_nesmach_state_size());
                         if (!es) { x->failed = 1; free(sd); return; }
                         dp_nesmach_reset(x->m);
