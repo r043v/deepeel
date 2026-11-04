@@ -535,6 +535,26 @@ static void test_streams_banked(void) {
     free(rom);
 }
 
+// J1: random sessions restart from checkpoints earlier sessions kept
+static void test_play_pool(void) {
+    unsigned sz = 16 + 2 * 0x4000 + 0x2000;
+    uint8_t *rom = calloc(1, sz);
+    set_header(rom, 2, 1, 0);
+    put(rom, 0, 0x0000, 0x4C, 0x00, 0x80, -1);   // idle loop
+    set_vector(rom, 1, 0xFFFA, 0x8000);
+    set_vector(rom, 1, 0xFFFC, 0x8000);
+    set_vector(rom, 1, 0xFFFE, 0x8000);
+    DpNesResults r;
+    DpNesOptions o = dp_nes_options();
+    o.max_steps = 2000; o.play_frames = 600; o.play_sessions = 4; o.play_pool = 8;
+    o.novelty_frames = 0;
+    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "pool explore runs");
+    CHECK(r.pool_saved >= 2, "checkpoints kept (%llu)", (unsigned long long)r.pool_saved);
+    CHECK(r.pool_starts >= 1, "a session started from the pool (%llu)", (unsigned long long)r.pool_starts);
+    dp_nes_results_free(&r);
+    free(rom);
+}
+
 // RAM-code archive: bytes built by immediates, then run from $0300
 static void test_ramcode(void) {
     unsigned sz = 16 + 2 * 0x4000 + 0x2000;
@@ -589,6 +609,7 @@ int main(void) {
     test_explorer();
     test_streams();
     test_streams_banked();
+    test_play_pool();
     test_ramcode();
     test_smc();
     test_loop_bound();

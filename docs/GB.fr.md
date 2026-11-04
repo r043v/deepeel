@@ -3014,3 +3014,12 @@ depuis l'instantané avec la page montée sous la fenêtre du pointeur (`dp_pce_
 `TAM` poserait), le PC conservé et le mot de page zéro réglé sur le pointeur. Fixture : `test_pce`
 (`test_streams_banked`, flux de la page 3 jamais appelé). MMC1 NES reste à faire. Observation de
 l'outil, pas une mesure matérielle.
+
+## 0.207.0 : J1 NES, pool de checkpoints partagé (2026-11-04)
+
+`--play-pool N` (NES, N ≤ 64, 0 par défaut) : les sessions jouées aléatoires gardent un checkpoint
+toutes les 256 frames (remplacement aléatoire quand le pool est plein) et chaque session suivante
+repart d'un checkpoint tiré au hasard au lieu de la mise sous tension, donc plus profond. Les
+sessions TAS et la démo restent depuis la mise sous tension. Le rapport affiche « checkpoint
+pool: K kept, S sessions started from one ». Fixture : `test_nes` (`test_play_pool`). Reste : PCE,
+MD, GB/Z80, multi-thread. Observation de l'outil, pas une mesure matérielle.

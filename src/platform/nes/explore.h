@@ -98,6 +98,7 @@ typedef struct {
     uint32_t demo_frames;  // idle-pad run from power-on before the TAS and play passes (0: none)
     uint32_t play_sessions; // restart count
     uint32_t play_seed;    // RNG seed
+    uint32_t play_pool;    // shared checkpoint pool size: random sessions restart from earlier sessions' checkpoints (0: from power-on)
     // TAS movies (fm2/bk2), played from power-on before the fork drain;
     // each movie is one session, its end state seeds the fork queue
     char tas_paths[8][512];
@@ -142,6 +143,7 @@ typedef struct DpNesResults_ {
     uint8_t *flags;            // one byte per physical PRG cell
     size_t prg_size;
     uint64_t s6_decoders, s6_tables, s6_candidates, s6_runs, s6_sat;   // S6 decoder replay
+    uint64_t pool_saved, pool_starts;   // J1 checkpoint pool: checkpoints kept / sessions started from one
     uint64_t steps, paths, forks, irq_forks, exec_outside, data_reads, oam_copies;
     uint64_t dmc_starts, dmc_bytes; // $4015 bit 4 starts (copy channel 2) / distinct sample bytes
     uint64_t forced_paths;

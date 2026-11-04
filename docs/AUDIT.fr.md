@@ -85,7 +85,7 @@ Cellules ouvertes (◐ ou ✗) : 91.
 | F3 | `--jobs` par instances clonées | MD | ◐ `--jobs 2` par entrées explicites (`dp_md2_`, `md_jobs`), pas de file partagée |
 | J1 | Sessions jouées multi-thread + pool | SMS/GG | ◐ |
 | J1 | Sessions jouées multi-thread + pool | MSX | ◐ |
-| J1 | Sessions jouées multi-thread + pool | NES | ◐ xorshift |
+| J1 | Sessions jouées multi-thread + pool | NES | ◐ 0.207 xorshift + pool de checkpoints `--play-pool` |
 | J1 | Sessions jouées multi-thread + pool | PCE | ◐ |
 | J1 | Sessions jouées multi-thread + pool | MD | ◐ 0.189.0 `--play-frames/--play-sessions/--play-seed` (xorshift, sessions depuis la mise sous tension ; ni pool de checkpoints ni multi-thread) |
 | J2 | Rejeu TAS prioritaire + shoots | MD | ◐ GMV |

@@ -1164,6 +1164,7 @@ static int cmd_nes(int argc, char **argv) {
         if (0) {}
         DP_CLI_COMMON(opt, cc)
         DP_CLI_PLAYED(opt)
+        else if (!strcmp(a, "--play-pool") && i + 1 < argc) opt.play_pool = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--cov") && i + 1 < argc) cov = argv[++i];
         else if (!strcmp(a, "--romdata") && i + 1 < argc) romdata = argv[++i];
         else if (!strcmp(a, "--tas") && i + 1 < argc) {

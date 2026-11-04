@@ -77,6 +77,7 @@ typedef struct {
     uint8_t snapshot[DP_NES_STATE_MAX];
     int jam_pending, failed;
     uint32_t rng;
+    uint8_t *pool[64]; unsigned pool_n;   // J1 shared checkpoint pool
     int idle;              // demo session: no button pressed
     uint64_t wframe;                   // frames seen (watch sampling)
     int nov;                           // novelty search running (frame hook stops it, counts apart)
@@ -877,12 +878,27 @@ static void play_session(DpNesRun *x, uint32_t frames, uint32_t seed,
             x->frame_cmds[f] = 0;
         }
     }
-    dp_nesmach_reset(x->m);
-    if (x->frame_cmds[0] & 2) dp_nesmach_reset(x->m);
+    const unsigned pool_cap = x->opt.play_pool < 64 ? x->opt.play_pool : 64;
+    if (!tas && pool_cap && x->pool_n && !x->idle) {   // continue from a checkpoint an earlier session kept
+        dp_nesmach_load(x->m, x->pool[nes_rng(&x->rng) % x->pool_n]);
+        r->pool_starts++;
+    } else {
+        dp_nesmach_reset(x->m);
+        if (x->frame_cmds[0] & 2) dp_nesmach_reset(x->m);
+    }
     dp_nesmach_set_input(x->m, x->frame_masks[0][0], x->frame_masks[0][1]);
     uint32_t f = 0;
     while (f < frames) {
         if ((x->total_steps >= x->opt.max_total || dp_stop)) { r->global_cuts++; break; }
+        if (!tas && pool_cap && f % 256 == 255 && !x->idle) {   // every 256 frames: keep a checkpoint (random replacement when full)
+            unsigned slot = x->pool_n < pool_cap ? x->pool_n : nes_rng(&x->rng) % pool_cap;
+            if (!x->pool[slot]) x->pool[slot] = malloc(dp_nesmach_state_size());
+            if (x->pool[slot]) {
+                dp_nesmach_save(x->m, x->pool[slot]);
+                if (slot == x->pool_n) x->pool_n++;
+                r->pool_saved++;
+            }
+        }
         dp_nesmach_save(x->m, x->ring[f % DP_NES_CKPT_RING]);
         x->jam_pending = 0;
         dp_nesmach_run(x->m, UINT64_MAX); // one frame (hook_frame stops it)
@@ -1406,6 +1422,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     free(x.ipc);
     free(x.istart);
     nstm_free(&x);
+    for (unsigned i = 0; i < 64; i++) free(x.pool[i]);
     free(x.queue);
     free(x.loops);
     free(x.fork_sites);
@@ -1860,6 +1877,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     if (r->ra.n) fprintf(out, "  runtime code archive: %u variants, %u attached to a ROM copy source, %u generated with an approximate ROM producer, %u rewrote an earlier variant\n",
         r->ra.n, r->ra.attached, r->ra.derived, r->ra.poly);
     if (r->demo_frames_run) fprintf(out, "  demo (no button pressed, from power-on): %llu frames\n", (unsigned long long)r->demo_frames_run);
+    if (r->pool_saved) fprintf(out, "  checkpoint pool: %llu kept, %llu sessions started from one\n", (unsigned long long)r->pool_saved, (unsigned long long)r->pool_starts);
     fprintf(out, "  play: %llu sessions x frames %llu\n",
         (unsigned long long)r->play_sessions_run, (unsigned long long)r->play_frames_run);
     if (r->state_exported) fprintf(out, "  state exported: deepest cell, %u frames from power-on\n", r->state_exported_depth);
