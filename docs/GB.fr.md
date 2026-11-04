@@ -2244,3 +2244,10 @@ Le PNG de carte GB porte un chunk `dpTb` (JSON versionné) : les tables de point
 localisées (`at` = index ROM compact, `stride`, `n` entrées), 128 tables au plus. Les tables de sauts S4
 et les frères de copie n'y figurent pas encore ; `dpIx` reste à faire (la GB n'a pas d'enregistrements
 indexés). Test `explorer` (fixture `streams`).
+
+## 0.152.0 (J10 — chunks privés)
+
+Les chunks binaires `dpCv`, `dpFr`, `dpTb` ne sont plus des zTXt : ce sont des chunks PNG privés
+ancillaires de même nom (casse PNG respectée), contenant un flux zlib unique. `dp_png_text` lit les deux
+formes, donc les anciennes cartes restent lisibles. Les chunks texte (`deepeel_meta`, `deepeel_map`,
+`deepeel_heat`, `deepeel_cov`, `deepeel_rom`) restent en zTXt.

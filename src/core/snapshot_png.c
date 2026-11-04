@@ -135,6 +135,12 @@ int dp_png_save_chunks(const char *path, int w, int h, const uint8_t *rgb, const
         size_t czl;
         if (zpack(src, body, &cz, &czl)) {
             size_t kl = strlen(t->key);
+            if (!t->hex && kl == 4 && t->key[0] == 'd' && t->key[1] == 'p') {
+                // private ancillary chunk (lowercase first two letters): the payload is one zlib stream
+                wr_chunk(f, t->key, cz, czl);
+                free(cz); free(hexbuf);
+                continue;
+            }
             uint8_t *c = malloc(kl + 2 + czl);
             if (c) {
                 memcpy(c, t->key, kl);
@@ -217,6 +223,16 @@ static int walk_chunks(const char *path, chunk_fn fn, void *ctx) {
 static char *chunk_text(const char *type, const uint8_t *d, uint32_t len, const char *key,
                         size_t *n_out) {
     size_t kl = strlen(key);
+    if (kl == 4 && !strcmp(type, key)) {   // private chunk named after the key
+        uint8_t *o;
+        size_t ol;
+        if (!zunpack(d, len, &o, &ol)) return NULL;
+        char *r = realloc(o, ol + 1);
+        if (!r) { free(o); return NULL; }
+        r[ol] = 0;
+        *n_out = ol;
+        return r;
+    }
     if (len <= kl || memcmp(d, key, kl) || d[kl] != 0) return NULL;
     if (!strcmp(type, "tEXt")) {
         size_t n = len - kl - 1;

@@ -11,6 +11,7 @@ def cv(f):
     d = open(f, 'rb').read(); i = 8
     while i < len(d):
         l, = struct.unpack('>I', d[i:i+4]); t = d[i+4:i+8]
+        if t == b'dpCv': return zlib.decompress(d[i+8:i+8+l])
         if t == b'zTXt' and d[i+8:i+12] == b'dpCv': return zlib.decompress(d[i+8+6:i+8+l])
         i += 12 + l
 a, b = cv(sys.argv[1]), cv(sys.argv[2])
