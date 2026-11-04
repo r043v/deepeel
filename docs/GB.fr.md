@@ -2625,3 +2625,9 @@ GBHawk (`Core GBHawk` dans l'en-tête), pas avec Gambatte ; Gambatte le suit san
 Le code exécuté en RAM ($0000–$07FF) porte désormais, dans l'archive `--rtcode` NES, l'index ROM de la dernière
 lecture PRG ayant alimenté le store de son premier octet (`-1` sinon). Provenance approximative (même heuristique
 que le rattachement des copies NES), pas une dépendance exacte.
+
+## 0.184.0 — SMS/GG/SG/MSX : source ROM dans l'archive `rtcode`
+
+Le code exécuté hors ROM renseigne l'index ROM du premier octet quand la provenance Z80 (copie contrôlée par
+valeur, `valid_origin`) le rattache à la ROM ; `-1` sinon. Les tests existants passent ; aucune fixture SMS/MSX
+n'affirme encore la valeur de la source (à ajouter).

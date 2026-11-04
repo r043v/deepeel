@@ -1651,7 +1651,10 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
                         else outside=1;
                     }
                     if(outside) {
-                        r->exec_outside++; dp_ramarch_add(&r->ra,c->pc,bytes,(int)d.length,-1);
+                        r->exec_outside++;
+                        // ROM source of the first byte when a copy (provenance, value-checked) fed it
+                        DpZ80Origin src_o=valid_origin(&x,origin_read(&x,c->pc),bytes[0]);
+                        dp_ramarch_add(&r->ra,c->pc,bytes,(int)d.length,src_o?(int32_t)(src_o-1):-1);
                         for(int q=0;q<(int)d.length;q++) { int32_t ri=x.b->ram_index((uint16_t)(c->pc+q)); if(ri>=0 && ri<0x10000) x.ram_exec[ri]=1; }
                     }
                     dp_sega_closure_observe(x.closure);
