@@ -50,8 +50,8 @@ static inline unsigned dp_pce_io_slot_reg(int k) {
     return other;
 }
 
-enum { DP_PCE_VERDICT_NONE = 0, DP_PCE_VERDICT_REQUIRED, DP_PCE_VERDICT_FORCED };
-static const char *const dp_pce_verdict_names[] = { "none", "required", "forced" };
+enum { DP_PCE_VERDICT_NONE = 0, DP_PCE_VERDICT_REQUIRED, DP_PCE_VERDICT_FORCED, DP_PCE_VERDICT_SPECULATIVE };
+static const char *const dp_pce_verdict_names[] = { "none", "required", "forced", "speculative" };
 
 typedef struct {
     uint64_t path, step;

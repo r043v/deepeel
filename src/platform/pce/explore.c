@@ -1470,6 +1470,25 @@ static void sections_build(PceRun *x) {
         s->verdict = s->natural_hits ? DP_PCE_VERDICT_REQUIRED : DP_PCE_VERDICT_FORCED;
         i = j;
     }
+    // C1 "speculative": runs reached only by the static flow closure (never executed, never forced)
+    for (size_t i = 0; i < x->rom_size;) {
+        if (!(r->flags[i] & DP_PCE_STATIC) || (r->flags[i] & code)) { i++; continue; }
+        size_t j = i;
+        while (j < x->rom_size && (r->flags[j] & DP_PCE_STATIC) && !(r->flags[j] & code) && (j >> 13) == (i >> 13)) j++;
+        if (r->section_count == cap) {
+            cap *= 2;
+            DpPceSection *ns = realloc(r->sections, cap * sizeof *ns);
+            if (!ns) { x->failed = 1; return; }
+            r->sections = ns;
+        }
+        DpPceSection *s = &r->sections[r->section_count];
+        memset(s, 0, sizeof *s);
+        s->id = ++r->section_count;
+        s->lo = (uint32_t)i;
+        s->hi = (uint32_t)(j - 1);
+        s->verdict = DP_PCE_VERDICT_SPECULATIVE;
+        i = j;
+    }
 }
 
 // --- driver --------------------------------------------------------------------------------

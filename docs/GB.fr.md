@@ -3530,3 +3530,9 @@ Après la fermeture statique, NES crée une section par plage d'octets atteinte 
 exécutée ni forcée) avec le verdict `speculative`, défini dans `docs/COUVERTURE.fr.md` C1. Une observation ne devient jamais
 spéculative. Les sections existantes et leurs numéros sont inchangés (les nouvelles sont ajoutées à la suite). Test
 `nes_speculative`. C1 NES reste ◐ : pas de liveness (`ctx_mask`, pages lues, `io_read_mask`).
+
+## 0.249.18 (PCE, C1 : verdict `speculative`)
+
+Même définition que NES 0.249.17 : une plage atteinte uniquement par la fermeture statique (`DP_PCE_STATIC`, ni exécutée ni
+forcée), dans une page de 8 Kio, devient une section `speculative` ajoutée après les autres. Test `pce_speculative`
+(`fix_pce_slide`). C1 PCE reste ◐ : pas de liveness.

@@ -561,3 +561,5 @@ add_test(NAME md_pad_full6 COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CM
 set_tests_properties(md_pad_full6 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_speculative COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_static.nes --max-total 20000 --max-steps 2 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_sp.txt >/dev/null 2>&1; grep -q 'section 2 bank 0 .0020-.0026 .* verdict speculative' ${CMAKE_CURRENT_BINARY_DIR}/nes_sp.txt && grep -q 'verdict required' ${CMAKE_CURRENT_BINARY_DIR}/nes_sp.txt")
 set_tests_properties(nes_speculative PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME pce_speculative COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_slide.pce --max-total 20000 --max-steps 200 --text ${CMAKE_CURRENT_BINARY_DIR}/pce_sp.txt >/dev/null 2>&1; grep -q 'verdict speculative' ${CMAKE_CURRENT_BINARY_DIR}/pce_sp.txt && grep -q 'verdict required' ${CMAKE_CURRENT_BINARY_DIR}/pce_sp.txt")
+set_tests_properties(pce_speculative PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
