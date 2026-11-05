@@ -226,3 +226,13 @@ Observation de l'outil (machine concrète, RAM à zéro, ROM hors dépôt), `--s
 2 054 396 pas hors ROM ; frontière 0 parqué / 0 perdu ; second passage : 3 racines semées, 0 refusée, 0 au-dessus du
 plafond ; 310 sections. Observé 102 748 octets (13,07 %), classé 205 935 (26,19 %), inconnu 73,81 %. Je n'ai pas vérifié si l'arrêt vient de la file vide
 ou du plafond de temps (2 coupes globales comptées). Ce n'est pas une mesure de matériel.
+
+## J13 — MSX Gradius 2 (ROM hors dépôt)
+
+Run `z80 explore msx … --max-total 1000000000` (observations de l'outil, RAM à zéro, BIOS partiel simulé). Arrêt sur la
+limite de pas, **pas** sur l'épuisement : 1 040 000 000 pas, 31 773 chemins (10 646 forks de branche, 24 501 forks
+d'IRQ), `exec_outside` 809 630 474 pas, 4 172 494 écritures dans des octets déjà exécutés (premier à `$A163`), 1 492
+états restants. Ce run a révélé le débordement de pile corrigé en 0.249.38.
+
+Sonic (MD, `--unbounded`) : le run a été interrompu avant tout rapport (limite externe) ; reprise de spool corrigée en
+0.249.39, aucun chiffre retenu. J13 reste ◐.
