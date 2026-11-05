@@ -1,4 +1,5 @@
 #include "cart.h"
+#include "zip.h"
 
 const char *dp_mbc_name(DpMbc mbc) {
     switch (mbc) {
@@ -75,27 +76,9 @@ static DpCart *finalize(uint8_t *rom, uint32_t size, char *err, size_t errsz) {
 }
 
 DpCart *dp_cart_load(const char *path, char *err, size_t errsz) {
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        snprintf(err, errsz, "cannot open %s", path);
-        return NULL;
-    }
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (sz <= 0) {
-        snprintf(err, errsz, "empty rom %s", path);
-        fclose(f);
-        return NULL;
-    }
-    uint8_t *rom = malloc((size_t)sz);
-    if (fread(rom, 1, (size_t)sz, f) != (size_t)sz) {
-        snprintf(err, errsz, "short read on %s", path);
-        fclose(f);
-        free(rom);
-        return NULL;
-    }
-    fclose(f);
+    size_t sz = 0;
+    uint8_t *rom = dp_read_rom_file(path, &sz, err, errsz);
+    if (!rom) return NULL;
     return finalize(rom, (uint32_t)sz, err, errsz);
 }
 

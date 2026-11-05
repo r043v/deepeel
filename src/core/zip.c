@@ -5,6 +5,7 @@
  * the stored (0) and deflate (8) methods, which is all TAS containers use. */
 #include "zip.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -232,7 +233,7 @@ uint8_t *dp_zip_read(const uint8_t *in, size_t in_len, const char *needle, size_
         uint16_t clen = (uint16_t)(in[cd + 32] | (in[cd + 33] << 8));
         uint32_t lho = in[cd + 42] | (in[cd + 43] << 8) |
                        ((uint32_t)(in[cd + 44] | in[cd + 45] << 8) << 16);
-        if (nlen < sizeof name && name) {
+        if (name && nlen < 128) {
             memcpy(name, in + cd + 46, nlen);
             name[nlen] = 0;
         }
@@ -275,4 +276,48 @@ uint8_t *dp_zip_read(const uint8_t *in, size_t in_len, const char *needle, size_
         return NULL;
     }
     return NULL;
+}
+
+// ---------------------------------------------------------------------------
+// ROM file reader: plain file, or the ROM entry of a .zip romset archive
+// ---------------------------------------------------------------------------
+uint8_t *dp_read_rom_file(const char *path, size_t *out_len, char *err, size_t errsz) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        if (err) snprintf(err, errsz, "cannot open %s", path);
+        return NULL;
+    }
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (sz <= 0) {
+        if (err) snprintf(err, errsz, "empty rom %s", path);
+        fclose(f);
+        return NULL;
+    }
+    uint8_t *buf = malloc((size_t)sz);
+    if (!buf || fread(buf, 1, (size_t)sz, f) != (size_t)sz) {
+        if (err) snprintf(err, errsz, "short read on %s", path);
+        fclose(f);
+        free(buf);
+        return NULL;
+    }
+    fclose(f);
+    if (!dp_zip_is(buf, (size_t)sz)) {
+        *out_len = (size_t)sz;
+        return buf;
+    }
+    char name[128] = {0};
+    size_t n = 0;
+    // prefer a Game Boy entry (".gb" also matches ".gbc"), else the first entry
+    uint8_t *rom = dp_zip_read(buf, (size_t)sz, ".gb", &n, name);
+    if (!rom) rom = dp_zip_read(buf, (size_t)sz, NULL, &n, name);
+    free(buf);
+    if (!rom || !n) {
+        free(rom);
+        if (err) snprintf(err, errsz, "no usable entry in zip %s", path);
+        return NULL;
+    }
+    *out_len = n;
+    return rom;
 }

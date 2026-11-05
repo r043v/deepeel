@@ -110,6 +110,51 @@ const char *dp_map_class_name(int c) {
 int dp_map_is_code(int c) { return c == DP_MAP_CODE_NAT || c == DP_MAP_CODE_FORCED || c == DP_MAP_CODE_STATIC || c == DP_MAP_INF_CODE; }
 int dp_map_is_data(int c) { return c == DP_MAP_DATA_COPIED || c == DP_MAP_DATA_READ || c == DP_MAP_DATA_STATIC || c == DP_MAP_TABLE || c == DP_MAP_INF_DATA; }
 
+// what each exploration method added, in % of the whole ROM (tas, rng, fork,
+// attract, static+inferred): the rise of the known-byte count over each
+// discovery entry, credited by source
+void dp_map_methods_pct(const DpResults *res, const DpMapSummary *sp, double mshare[5]) {
+    const DpMapSummary s = *sp;
+    double pct = s.total ? 100.0 / (double)s.total : 0.0;
+    for (int i = 0; i < 5; i++) mshare[i] = 0;
+    {
+        uint32_t prev = 0;
+        double tot = (double)res->banks * 0x4000;
+        for (uint32_t i = 0; i < (uint32_t)res->disc_n;) {
+            // one play epoch adds one entry per worker that found something,
+            // all with the epoch's final known count: split the rise by credit
+            uint32_t j = i + 1;
+            uint64_t csum = res->disc[i].credit;
+            if (res->disc[i].credit)
+                while (j < (uint32_t)res->disc_n && res->disc[j].credit &&
+                       res->disc[j].known == res->disc[i].known)
+                    csum += res->disc[j++].credit;
+            uint32_t k = res->disc[j - 1].known;
+            if (k > prev) {
+                for (uint32_t q = i; q < j; q++) {
+                    const char *src = res->disc[q].source;
+                    int c = !strncmp(src, "tas", 3) && strncmp(src, "tas-shoots", 10) ? 0
+                            : !strncmp(src, "rng", 3)                                 ? 1
+                            : !strncmp(src, "attract", 7)                             ? 3
+                            : (!strcmp(src, "start") || !strncmp(src, "script", 6) ||
+                               !strncmp(src, "fixed", 5) || !strncmp(src, "human", 5) ||
+                               !strncmp(src, "closure", 7) || !strncmp(src, "static", 6))
+                                ? 4
+                                : 2;
+                    double f = j - i > 1 && csum ? (double)res->disc[q].credit / (double)csum
+                                                 : 1.0 / (j - i);
+                    mshare[c] += (k - prev) * f * 100.0 / tot;
+                }
+                prev = k;
+            }
+            i = j;
+        }
+        double sum = mshare[0] + mshare[1] + mshare[2] + mshare[3] + mshare[4];
+        double rest = s.known * pct - sum; // provenance, final closure, inference
+        if (rest > 0) mshare[4] += rest;
+    }
+}
+
 uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
     size_t n = (size_t)res->banks * 0x4000;
     uint8_t *m = malloc(n ? n : 1);
@@ -499,43 +544,8 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
     // chunk next to the map itself
     // what each exploration method added, in % of the whole ROM: the rise of
     // the known-byte count over each discovery entry, credited by source
-    double mshare[5] = {0}; // tas, rng, fork, attract, other
-    {
-        uint32_t prev = 0;
-        double tot = (double)res->banks * 0x4000;
-        for (uint32_t i = 0; i < (uint32_t)res->disc_n;) {
-            // one play epoch adds one entry per worker that found something,
-            // all with the epoch's final known count: split the rise by credit
-            uint32_t j = i + 1;
-            uint64_t csum = res->disc[i].credit;
-            if (res->disc[i].credit)
-                while (j < (uint32_t)res->disc_n && res->disc[j].credit &&
-                       res->disc[j].known == res->disc[i].known)
-                    csum += res->disc[j++].credit;
-            uint32_t k = res->disc[j - 1].known;
-            if (k > prev) {
-                for (uint32_t q = i; q < j; q++) {
-                    const char *src = res->disc[q].source;
-                    int c = !strncmp(src, "tas", 3) && strncmp(src, "tas-shoots", 10) ? 0
-                            : !strncmp(src, "rng", 3)                                 ? 1
-                            : !strncmp(src, "attract", 7)                             ? 3
-                            : (!strcmp(src, "start") || !strncmp(src, "script", 6) ||
-                               !strncmp(src, "fixed", 5) || !strncmp(src, "human", 5) ||
-                               !strncmp(src, "closure", 7) || !strncmp(src, "static", 6))
-                                ? 4
-                                : 2;
-                    double f = j - i > 1 && csum ? (double)res->disc[q].credit / (double)csum
-                                                 : 1.0 / (j - i);
-                    mshare[c] += (k - prev) * f * 100.0 / tot;
-                }
-                prev = k;
-            }
-            i = j;
-        }
-        double sum = mshare[0] + mshare[1] + mshare[2] + mshare[3] + mshare[4];
-        double rest = s.known * pct - sum; // provenance, final closure, inference
-        if (rest > 0) mshare[4] += rest;
-    }
+    double mshare[5];
+    dp_map_methods_pct(res, &s, mshare);
     char meth[160];
     snprintf(meth, sizeof meth,
              "apport : tas %.1f%%  aleatoire %.1f%%  fourche %.1f%%  demo %.1f%%  "

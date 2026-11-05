@@ -9,3 +9,7 @@ test_state_*/
 output/
 build-watch/
 Testing/
+
+# romset batch: ROM copies and campaign results stay out of git
+/roms/
+/results/

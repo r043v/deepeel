@@ -557,6 +557,7 @@ static int cmd_explore(int argc, char **argv) {
         mkdir(ub_dir, 0777);
         scfg.state_dir = ub_dir;
     }
+    if (scfg.state_dir) mkdir(scfg.state_dir, 0777);   // a missing --state-dir must not silently disable the spool
     const char *fdir = scfg.state_dir;
     if (!fdir) {
         const char *base = json ? json : text ? text : html ? html : summary ? summary : NULL;

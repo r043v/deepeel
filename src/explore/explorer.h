@@ -165,6 +165,7 @@ typedef struct DpDiscEntry {
     char source[48];     // "tas:<file>", "rng", "fork-explorer", "total-search", "closure-N"...
     uint64_t credit;     // discovery credit gained by that source in the step
     uint32_t known;      // ROM bytes carrying any evidence after the step
+    uint32_t frame;      // play lane frame when the credit was gained (0 = not a lane entry)
 } DpDiscEntry;
 
 // one distinct instruction executed from RAM (pc >= $8000), see rtcode.c

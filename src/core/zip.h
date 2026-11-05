@@ -19,4 +19,8 @@ uint8_t *dp_zip_read(const uint8_t *in, size_t in_len, const char *needle,
 // true when the buffer starts with a zip local-file signature
 int dp_zip_is(const uint8_t *in, size_t in_len);
 
+// read a ROM file; a .zip archive is unpacked transparently (first ".gb"
+// entry, else first entry).  Malloc'd buffer, *out_len set, NULL + err on error.
+uint8_t *dp_read_rom_file(const char *path, size_t *out_len, char *err, size_t errsz);
+
 #endif

@@ -1,4 +1,5 @@
 #include "cart_md.h"
+#include "zip.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,16 +68,11 @@ int dp_md_cart_from_mem(DpMdCart *c, const uint8_t *buf, size_t size, char *err,
 }
 
 int dp_md_cart_load(DpMdCart *c, const char *path, char *err, size_t errsz) {
-    FILE *f = fopen(path, "rb");
-    if (!f) { err_set(err, errsz, "cannot open file"); return -1; }
-    fseek(f, 0, SEEK_END);
-    long n = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (n <= 0 || (size_t)n > MD_MAX + 0x200) { fclose(f); err_set(err, errsz, "bad ROM size"); return -1; }
-    uint8_t *b = malloc((size_t)n);
-    if (!b || fread(b, 1, (size_t)n, f) != (size_t)n) { free(b); fclose(f); err_set(err, errsz, "read error"); return -1; }
-    fclose(f);
-    int r = dp_md_cart_from_mem(c, b, (size_t)n, err, errsz);
+    size_t n = 0;
+    uint8_t *b = dp_read_rom_file(path, &n, err, errsz);
+    if (!b) return -1;
+    if (n > MD_MAX + 0x200) { free(b); err_set(err, errsz, "bad ROM size"); return -1; }
+    int r = dp_md_cart_from_mem(c, b, n, err, errsz);
     free(b);
     return r;
 }

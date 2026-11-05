@@ -1364,6 +1364,7 @@ int dp_play_poll(DpPlay *p) {
             else
                 snprintf(src, sizeof src, "%s s%d", (unsigned)w->mode < 6 ? mn[w->mode] : "?", w->id);
             dp_disc_add(p->res, src, w->credit_epoch);
+            if (p->res->disc_n) p->res->disc[p->res->disc_n - 1].frame = w->lane_frame;
         }
         glob_new += w->credit_epoch;
         frames += w->lane_frame - w->seen_frame;

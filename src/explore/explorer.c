@@ -227,6 +227,7 @@ void dp_disc_add(DpResults *res, const char *source, uint64_t credit) {
     snprintf(e->source, sizeof e->source, "%s", source);
     e->credit = credit;
     e->known = known;
+    e->frame = 0;
 }
 
 void dp_results_free(DpResults *res) {

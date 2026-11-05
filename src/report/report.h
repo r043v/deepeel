@@ -51,6 +51,8 @@ typedef struct DpMapSummary {
 } DpMapSummary;
 // malloc'd per-byte class array (banks*0x4000), caller frees
 uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum);
+// what each exploration method added, in % of the whole ROM: tas, random, fork, attract, static+inferred
+void dp_map_methods_pct(const DpResults *res, const DpMapSummary *s, double out[5]);
 const char *dp_map_class_name(int c);
 const uint8_t *dp_map_rgb(int cls); // the .map.png colour of a class (3 bytes)
 int dp_map_is_code(int c);

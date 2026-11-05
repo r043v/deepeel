@@ -578,6 +578,13 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
             dp_buf_fmt(o, "%s\"%s\":%llu", cl ? "," : "", dp_map_class_name(cl),
                        (unsigned long long)s.cls[cl]);
         dp_buf_str(o, "}");
+        {
+            double ms[5];
+            dp_map_methods_pct(res, &s, ms);
+            dp_buf_fmt(o, ",\"methods_pct\":{\"tas\":%.3f,\"random\":%.3f,\"fork\":%.3f,"
+                          "\"attract\":%.3f,\"static\":%.3f}",
+                       ms[0], ms[1], ms[2], ms[3], ms[4]);
+        }
         if (m) {
             int cap = 16384;
             DpResidualRange *rr = malloc((size_t)cap * sizeof *rr);
@@ -595,6 +602,47 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
             free(m);
         }
         dp_buf_str(o, "},\n");
+    }
+    {   // discovery log folded per source: who found what, and when it last did
+        enum { MAXSRC = 64 };
+        char names[MAXSRC][48];
+        uint64_t credit[MAXSRC], gain[MAXSRC];
+        uint32_t cnt[MAXSRC];
+        double first[MAXSRC], last[MAXSRC];
+        uint32_t lastcf[MAXSRC], maxf[MAXSRC];
+        int ns = 0;
+        uint32_t prev = 0;
+        for (int i = 0; i < res->disc_n; i++) {
+            const DpDiscEntry *d = &res->disc[i];
+            int k = 0;
+            while (k < ns && strcmp(names[k], d->source)) k++;
+            if (k == ns) {
+                if (ns == MAXSRC) continue;
+                snprintf(names[ns], sizeof names[ns], "%s", d->source);
+                credit[ns] = gain[ns] = 0;
+                cnt[ns] = 0;
+                first[ns] = d->t;
+                lastcf[ns] = maxf[ns] = 0;
+                ns++;
+            }
+            cnt[k]++;
+            credit[k] += d->credit;
+            if (d->credit && d->frame > lastcf[k]) lastcf[k] = d->frame;
+            if (d->frame > maxf[k]) maxf[k] = d->frame;
+            if (d->known > prev) gain[k] += d->known - prev, last[k] = d->t;
+            else if (!cnt[k] || cnt[k] == 1) last[k] = d->t;
+            if (d->known > prev) prev = d->known;
+        }
+        dp_buf_str(o, "\"discovery\": [");
+        for (int k = 0; k < ns; k++) {
+            dp_buf_fmt(o, "%s{\"source\":\"", k ? "," : "");
+            json_esc(o, names[k]);
+            dp_buf_fmt(o, "\",\"entries\":%u,\"credit\":%llu,\"bytes_gained\":%llu,"
+                          "\"first_t\":%.2f,\"last_gain_t\":%.2f,\"last_credit_frame\":%u,\"max_frame\":%u}",
+                       cnt[k], (unsigned long long)credit[k], (unsigned long long)gain[k],
+                       first[k], last[k], lastcf[k], maxf[k]);
+        }
+        dp_buf_str(o, "],\n");
     }
     dp_buf_fmt(o, "\"counters\": {\"steps\":%llu,\"paths\":%u,\"forks_branch\":%u,\"forks_irq\":%u,"
                   "\"forks_key\":%u,\"forks_p1\":%u,\"forks_capped\":%u,\"forks_table_full\":%u,\"forks_covered_pruned\":%u,\"sections\":%u,"
