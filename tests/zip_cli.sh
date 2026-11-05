@@ -15,8 +15,8 @@ PYEOF
 for z in deflate stored; do
   "$D" explore "$W/$z.zip" --text "$W/$z.txt" >/dev/null 2>&1
   # the report names the input path on some lines; compare the rest
-  grep -v -F -e "$ROM" -e "$W" "$W/raw.txt" > "$W/raw.cmp"
-  grep -v -F -e "$ROM" -e "$W" "$W/$z.txt" > "$W/$z.cmp"
+  grep -v -F -e "$ROM" -e "$W" "$W/raw.txt" | grep -v -E "^ +[0-9]+\.[0-9]+  " > "$W/raw.cmp"  # phase timings differ run to run
+  grep -v -F -e "$ROM" -e "$W" "$W/$z.txt" | grep -v -E "^ +[0-9]+\.[0-9]+  " > "$W/$z.cmp"
   cmp -s "$W/raw.cmp" "$W/$z.cmp" || { echo "zip ($z) report differs from raw ROM"; diff "$W/raw.cmp" "$W/$z.cmp" | head; exit 1; }
 done
 test -s "$W/raw.txt"
