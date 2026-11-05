@@ -15,6 +15,9 @@ typedef int (*bh_run_fn)(void *, int *, int, short *, unsigned *);
 typedef void (*bh_input_fn)(void *, unsigned (*)(void *), void *);
 typedef void (*bh_cd_fn)(void *, void (*)(int, int, int));
 typedef void (*bh_pal_fn)(void *, unsigned, unsigned, unsigned);
+typedef int (*bh_area_fn)(void *, int, void **, int *);
+typedef void (*bh_regs_fn)(void *, int *);
+typedef unsigned (*bh_read_fn)(void *, unsigned);
 
 enum { BH_ROM = 0, BH_OPCODE = 1, BH_OPERAND = 2, BH_DATA = 4, BH_MAXROM = 0x800000, BH_FRAME = 35112 };
 
@@ -37,11 +40,12 @@ static void bh_ppm(const char *path, const int *vid) {
 
 int dp_bh_command(int argc, char **argv) {
     const char *usage = "usage: deepeel bh LIBGAMBATTE ROM --tas FILE [--frames N] [--cov FILE] [--ranges FILE] "
-                        "[--ppm FILE] [--shot-every N PREFIX] [--bios]\n"
+                        "[--ppm FILE] [--shot-every N PREFIX] [--bios] [--dump FILE]\n"
                         "  --cov FILE     raw per-ROM-byte flags (1 opcode, 2 operand, 4 data)\n"
                         "  --ranges FILE  text list of executed ROM ranges (bank:addr, one per line)\n"
                         "  --bios         boot through the DMG boot ROM when the library has one (default: no boot ROM)\n";
     if (argc < 5) { fputs(usage, stderr); return 2; }
+    const char *dumpn = NULL;
     const char *lib = argv[2], *rom = argv[3], *tasf = NULL, *cov = NULL, *rng = NULL, *ppm = NULL, *shot = NULL;
     unsigned long frames = 0, every = 0;
     int bios = 0;
@@ -53,6 +57,7 @@ int dp_bh_command(int argc, char **argv) {
         else if (!strcmp(argv[i], "--ppm") && i + 1 < argc) ppm = argv[++i];
         else if (!strcmp(argv[i], "--shot-every") && i + 2 < argc) { every = strtoul(argv[i + 1], NULL, 0); shot = argv[i + 2]; i += 2; }
         else if (!strcmp(argv[i], "--bios")) bios = 1;
+        else if (!strcmp(argv[i], "--dump") && i + 1 < argc) dumpn = argv[++i];
         else { fprintf(stderr, "deepeel bh: unknown option %s\n%s", argv[i], usage); return 2; }
     }
     void *h = dlopen(lib, RTLD_NOW | RTLD_LOCAL);
@@ -101,10 +106,32 @@ int dp_bh_command(int argc, char **argv) {
     setcd(g, bh_cd);
     static int vid[160 * 144];
     static short snd[BH_FRAME + 2064 + 64];
+    // --dump: per frame "<n> <wram fnv> pc=<pc> if ie ff82 lcdc", the columns of DEEPEEL_TAS_DUMP, to
+    // find where deepeel's replay leaves the reference engine
+    bh_area_fn area = (bh_area_fn)dlsym(h, "gambatte_getmemoryarea");
+    bh_regs_fn gregs = (bh_regs_fn)dlsym(h, "gambatte_getregs");
+    bh_read_fn rdmem = (bh_read_fn)dlsym(h, "gambatte_cpuread");
+    FILE *dumpf = dumpn ? fopen(dumpn, "w") : NULL;
     for (unsigned long fr = 0; fr < frames; fr++) {
         g_pad = fr < tas.frames ? tas.masks[fr] : 0;
         unsigned s = BH_FRAME;
         run(g, vid, 160, snd, &s);
+        if (dumpf && area && gregs && rdmem) {
+            void *wp = NULL;
+            int wl = 0, rg[16] = {0};
+            area(g, 2, &wp, &wl);
+            gregs(g, rg);
+            uint64_t hh = 1469598103934665603ull;
+            for (int i = 0; wp && i < wl && i < 0x2000; i++) hh = (hh ^ ((uint8_t *)wp)[i]) * 1099511628211ull;
+            fprintf(dumpf, "%lu %016llx pc=%04x if=%02x ie=%02x 82=%02x 40=%02x\n", fr + 1, (unsigned long long)hh,
+                    (unsigned)rg[0] & 0xffff, rdmem(g, 0xFF0F) & 0xff, rdmem(g, 0xFFFF) & 0xff, rdmem(g, 0xFF82) & 0xff,
+                    rdmem(g, 0xFF40) & 0xff);
+            // cart-RAM bytes $A8E8..$A8FF (SML2 keeps its stack there)
+            fseek(dumpf, -1, SEEK_CUR);
+            fprintf(dumpf, " rg=%x,%x,%x,%x,%x,%x,%x,%x st=", rg[1] & 0xffff, rg[2] & 0xffff, rg[3] & 0xffff, rg[4] & 0xffff, rg[5] & 0xffff, rg[6] & 0xffff, rg[7] & 0xffff, rg[8] & 0xffff);
+            for (int a = 0xA8E8; a < 0xA900; a++) fprintf(dumpf, "%02x", rdmem(g, a) & 0xff);
+            fputc('\n', dumpf);
+        }
         if (every && shot && (fr + 1) % every == 0) {
             char nm[600];
             snprintf(nm, sizeof nm, "%s%06lu.ppm", shot, fr + 1);
@@ -133,6 +160,7 @@ int dp_bh_command(int argc, char **argv) {
             fclose(o);
         }
     }
+    if (dumpf) fclose(dumpf);
     free(g_cov); free(rd); dp_tas_free(&tas);
     return 0;
 }

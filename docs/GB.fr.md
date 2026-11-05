@@ -3760,3 +3760,22 @@ reprise de Sonic tourne ensuite sans plantage (observation de l'outil ; fin du r
   `--search-limit` : 569 s, 13 965 chemins, 43 M de forks élagués « côtés déjà couverts » (ils ne coûtent
   pas de code mais du temps). Le gain mesuré vient surtout de la fermeture statique (+20 417 octets au
   round 1). Les passes de reprise ajoutent du temps de recherche sans repasser sur le jeu.
+
+## 0.249.43 : coupure de tranche au milieu d'une instruction (2026-11-05)
+
+- **Bug** : le vblank se déclenche dans la synchronisation PPU d'une lecture de registre (`ldh a,[$41]`,
+  boucle d'attente du mode STAT). Une coupure de fin de tranche (`DP_CUT_SEGEND`, `run_epoch`) faite à cet
+  endroit laissait `pc` après l'opcode ; à la reprise, l'opérande était exécuté comme un opcode
+  (`$41` = `ld b,c`) et la pile recevait une adresse de retour décalée d'un octet. Le jeu partait en exécution
+  hors ROM. Cas observé : Super Mario Land 2, film `dadinfinitum` (enregistré sur Gambatte), blocage vers
+  la frame 41 750 (écran noir jusqu'à la fin).
+- **Correctif** (`src/mach/m0boy.c`) : pendant le hook vblank, `SEGEND` est différé jusqu'au début de
+  l'instruction suivante (`cut_pending`, pris dans `dp_gbl_hook_trace`) ; `QUIT` et le chien de garde de
+  halt restent immédiats.
+- **Vérification** (observation de l'outil) : sur le film complet (74 317 frames), le hash de la WRAM de
+  deepeel est identique à celui de libgambatte (`deepeel bh`) à 74 316 frames sur 74 317 (seule la
+  frame 2, pendant le démarrage, diffère). Les 174 tests passent (`lr_gambatte_parity` ignoré).
+- Outils de diagnostic ajoutés : `deepeel bh … --dump FICHIER` (hash WRAM, registres et octets de pile par
+  frame), `DEEPEEL_DEBUG_WATCHWR=lo-hi` (écritures sur une plage), et la trace `DEEPEEL_TAS_TRACEFRAME`
+  affiche cycles, IME, IF et le haut de pile. GBHawk n'est pas exécutable ici (pas de BIOS DMG, `gbh.dll`
+  non construit) : la référence est libgambatte, qui a enregistré ce film.

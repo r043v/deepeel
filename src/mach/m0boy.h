@@ -58,6 +58,8 @@ struct DpMach {
 
     jmp_buf jmp;
     int cut;
+    int in_vblank;     /* inside the vblank hook: the CPU may be mid-instruction (a STAT/LY read synced the PPU) */
+    int cut_pending;   /* SEGEND asked there; taken at the next instruction boundary */
 };
 
 /* Variant pick from a cartridge header (0x147 mapper, 0x149 RAM size);

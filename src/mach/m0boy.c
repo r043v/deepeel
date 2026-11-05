@@ -93,13 +93,24 @@ void dp_mach_reset(DpMach *m) {
 
 int dp_mach_run(DpMach *m) {
     m->cut = DP_CUT_NONE;
+    m->in_vblank = 0;
     if (setjmp(m->jmp)) return m->cut;
     m->api->run(); /* never returns; hooks longjmp */
     return DP_CUT_NONE;
 }
 
 void dp_mach_cut(DpMach *m, int reason) {
+    /* The vblank event fires inside the PPU sync of a register read, i.e. in the
+     * middle of an instruction (gbr.pc already past the opcode).  A slice end
+     * cut right there would resume on the operand byte (ldh a,[$41] -> ld b,c):
+     * defer it to the next instruction start, where pc is exact.  QUIT and the
+     * dead-halt watchdog stay immediate (nothing executes in a dead halt). */
+    if (m->in_vblank && reason == DP_CUT_SEGEND) {
+        m->cut_pending = reason;
+        return;
+    }
     m->cut = reason;
+    m->cut_pending = 0;
     longjmp(m->jmp, 1);
 }
 
@@ -152,9 +163,10 @@ FILE *dp_dbg_trace_f;
 static FILE *dp_instr_f;
 void dp_gbl_hook_trace(int v, int i, uint16_t pc) {
     DpMach *m = mach_at[v][i];
+    if (m && m->cut_pending) dp_mach_cut(m, m->cut_pending); /* instruction boundary: pc is exact */
     if (dp_dbg_trace && dp_dbg_trace_f) { // desync diagnostics: one frame's pc sequence
         const gbl_cpu_t *c = m->api->gbr;
-        fprintf(dp_dbg_trace_f, "%d.%d %04x %02x %04x %04x %04x %04x\n", v, i, pc, c->a, c->bc, c->de, c->hl, c->sp);
+        fprintf(dp_dbg_trace_f, "%d.%d %04x %02x %04x %04x %04x %04x cyc=%u ime=%u if=%02x s=%02x%02x%02x%02x\n", v, i, pc, c->a, c->bc, c->de, c->hl, c->sp, (unsigned)c->cyc, c->ime, m->api->io ? m->api->io[0x0F] : 0, m->api->eram[0x8f7], m->api->eram[0x8f8], m->api->eram[0x8f9], m->api->eram[0x8fa]);
     }
     // DEEPEEL_TAS_INSTR=<file>: one "<cycle> <pc> <a> <f> <bc> <de> <hl> <sp> <ime>"
     // per executed instruction (--tas-solo: the TAS worker's machine is the only
@@ -192,7 +204,13 @@ void dp_gbl_hook_write(int v, int i, uint16_t a, uint8_t val) {
         const char *e = getenv("DEEPEEL_DEBUG_WATCHW"); // desync diagnostics
         watchw = e ? strtol(e, NULL, 16) : -1;
     }
-    if (m && watchw == a) {
+    static long wlo = -2, whi = -1;
+    if (wlo == -2) {
+        const char *e = getenv("DEEPEEL_DEBUG_WATCHWR"); // "lo-hi" hex range, desync diagnostics
+        wlo = -1;
+        if (e && sscanf(e, "%lx-%lx", &wlo, &whi) != 2) wlo = -1;
+    }
+    if (m && (watchw == a || (wlo >= 0 && a >= wlo && a <= whi))) {
         const gbl_cpu_t *c = m->api->gbr;
         fprintf(stderr, "W v=%u a=%04x val=%02x pc=%04x af=%02x bc=%04x de=%04x hl=%04x sp=%04x bank=%u\n",
                 (unsigned)*m->api->frame, a, val, c->pc, c->a, c->bc, c->de, c->hl, c->sp, c->rom_bank);
@@ -218,6 +236,7 @@ void dp_gbl_hook_line_end(int v, int i, uint8_t ly) {
 void dp_gbl_hook_vblank(int v, int i) {
     DpMach *m = mach_at[v][i];
     if (!m) return;
+    if (dp_dbg_trace && dp_dbg_trace_f) fprintf(dp_dbg_trace_f, "VBLANK pc=%04x cyc=%u\n", m->api->gbr->pc, (unsigned)m->api->gbr->cyc);
     uint32_t instrs = *m->api->interp_instrs;
     if (instrs == m->last_instrs) {
         /* a frame without a single interpreted instruction: halted with
@@ -231,7 +250,10 @@ void dp_gbl_hook_vblank(int v, int i) {
         m->last_instrs = instrs;
         m->stalls = 0;
     }
+    m->in_vblank = 1;
     if (m->on_vblank) m->on_vblank(m);
+    m->in_vblank = 0;
+    if (dp_dbg_trace && dp_dbg_trace_f) fprintf(dp_dbg_trace_f, "VBLANK-END pc=%04x\n", m->api->gbr->pc);
 }
 
 void dp_gbl_hook_safe(int v, int i) {
