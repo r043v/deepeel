@@ -302,6 +302,16 @@ int dp_explorer_spool_attach(DpExplorer *ex, const char *path, int resume) {
         if (sz >= 0) {
             // only whole records count: a killed process may have truncated one
             uint64_t end = (uint64_t)sz, at = 0, rl;
+            // the cursor sidecar records the wr of the last flush, a record boundary: only the
+            // tail written after it needs the whole-record walk (not the whole multi-GB file)
+            {
+                uint64_t c0[4];
+                FILE *cf0 = fopen(sp->cursor_path, "rb");
+                if (cf0 && fread(c0, sizeof c0, 1, cf0) == 1 && c0[0] == DP_SPOOL_CURSOR && c0[1] == ex->sb &&
+                    c0[3] <= end && c0[2] <= c0[3])
+                    at = c0[3];
+                if (cf0) fclose(cf0);
+            }
             while ((rl = spool_rec_len(sp->f, at, end, ex->sb))) at += rl;
             sp->wr = at;
             // pending records start at the persisted read cursor; without one

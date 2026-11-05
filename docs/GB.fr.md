@@ -3897,3 +3897,11 @@ Journal du romset (`results/gb/ROMSET.log`, observation) : 0 arrêt `mem-guard`,
 garde-fou de **disque libre** (< 15 Gio sur le scratch), pas la RAM, et la ROM a ensuite fini sans arrêt
 (`time budget reached`, 99,912 %). L'entrée « noobow-japan 24 344 Mo » n'existe plus dans le journal : le
 dernier run se termine par `time budget reached` (7 875 Mo d'état).
+
+## 0.249.51 — reprise du spool sans balayage complet
+
+`--resume` vérifiait les enregistrements du spool depuis l'offset 0 : sur un spool de 53 Go (≈243 millions
+d'enregistrements, état SML2 sans limite) cela relit tout le fichier à ≈150 Mo/s avant de démarrer (≈6 min,
+observation). Le fichier curseur `<spool>.rd` contient déjà `wr` du dernier flush, une frontière
+d'enregistrement : le contrôle des enregistrements entiers part maintenant de là et ne parcourt que la
+queue écrite après. Sans curseur valide, le balayage complet reste le repli.
