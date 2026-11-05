@@ -186,25 +186,67 @@ static uint32_t prov_table_targets(DpResults *res, uint32_t bank, uint16_t base)
     return marked;
 }
 
-// rst-vector dispatchers (SML2's `rst $28`): the vector pops its return address, indexes the table
-// that follows the call site and jumps.  Recognised by shape: a `pop hl` then an `add hl,..`
-// before the first `jp hl`, no return or jump in between.
-static uint8_t prov_rst_dispatchers(const DpCart *c) {
-    uint8_t mask = 0;
-    for (int v = 0; v < 8; v++) {
-        uint32_t a = (uint32_t)v * 8;
-        if (a + 24 > c->rom_size) break;
-        int pop = 0, add = 0, ok = 0;
-        for (uint32_t i = a; i < a + 24; i++) {
-            uint8_t op = c->rom[i];
-            if (op == 0xC9 || op == 0xD9 || op == 0xC3) break;
-            if (op == 0xE1) pop = 1;
-            else if (pop && (op == 0x19 || op == 0x29)) add = 1;
-            else if (op == 0xE9) { ok = pop && add; break; }
-        }
-        if (ok) mask |= (uint8_t)(1u << v);
+// inline-table dispatchers (SML2's `rst $28` and `call` equivalents): the routine pops its return address,
+// indexes the table that follows the call site and jumps.  Recognised by shape: a `pop hl` then an
+// `add hl,..` before the first `jp hl`, no return or absolute jump in between.
+static int prov_is_dispatcher(const DpCart *c, uint32_t key) {
+    if (key == ~0u || key + 24 > c->rom_size) return 0;
+    int pop = 0, add = 0;
+    for (uint32_t i = key; i < key + 24; i++) {
+        uint8_t op = c->rom[i];
+        if (op == 0xC9 || op == 0xD9 || op == 0xC3) return 0;
+        if (op == 0xE1) pop = 1;
+        else if (pop && (op == 0x19 || op == 0x29)) add = 1;
+        else if (op == 0xE9) return pop && add;
     }
-    return mask;
+    return 0;
+}
+
+// Runtime-built dispatch tables: a verbatim ROM->WRAM copy whose source is a run of code pointers.  The
+// bytes land in RAM and are indexed there, so no static `jp hl` idiom sees them.  Proof by co-membership:
+// at least 3 consecutive words are plausible code entries and at least one of them is already a known
+// executed entry, so the copied block is a code-pointer table and its other entries are code too.
+static uint32_t prov_copied_tables(DpResults *res) {
+    const DpCart *c = res->cart;
+    uint32_t got = 0;
+    for (int ci = 0; ci < res->copy_count; ci++) {
+        const DpCopyRec *r = &res->copies[ci];
+        if (r->src_space != DP_SPACE_ROM || !r->verbatim || r->dst_space != DP_SPACE_WRAM) continue;
+        uint32_t len = (uint32_t)r->src_hi - r->src_lo + 1;
+        if (r->src_hi < r->src_lo || len < 6 || len > 512) continue;
+        uint32_t bank = r->src_bank;
+        uint32_t base = r->src_lo;
+        uint32_t tkey = base < 0x4000 ? base : bank * 0x4000 + (base - 0x4000);
+        if (base >= 0x8000 || tkey + len > c->rom_size) continue;
+        for (int par = 0; par < 2; par++) { // the table may start on the second byte of the block
+            uint32_t tk[256];
+            int nt = 0, anchored = 0;
+            for (uint32_t o = (uint32_t)par; o + 1 < len && nt < 256; o += 2) {
+                uint32_t t = c->rom[tkey + o] | (c->rom[tkey + o + 1] << 8);
+                uint32_t k = t < 0x8000 ? prov_target(res, bank, t) : ~0u;
+                if (k == ~0u || !prov_legal_op(c->rom[k]) || c->rom[k] == 0x00 || c->rom[k] == 0xFF) break;
+                tk[nt++] = k;
+                if (res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED) && res->exec_flags[k] & DP_XF_START) anchored = 1;
+            }
+            if (nt < 3 || !anchored) continue;
+            for (int i = 0; i < nt; i++) {
+                uint8_t *f = &res->exec_flags[tk[i]];
+                if (!(*f & DP_XF_NATURAL)) {
+                    if (!(*f & DP_XF_STATIC)) got++;
+                    *f |= DP_XF_STATIC | DP_XF_START | DP_XF_ENTRY;
+                    dp_cov_mark(&res->first, res->src_flags, tk[i], DP_SRC_PROVENANCE, res->steps_total, 0);
+                }
+            }
+            for (uint32_t o = (uint32_t)par; o < (uint32_t)par + 2u * (uint32_t)nt; o++) {
+                res->data_flags[tkey + o] |= DP_DF_STATIC;
+                dp_cov_mark(&res->first, res->src_flags, tkey + o, DP_SRC_PROVENANCE, res->steps_total, 0);
+            }
+            res->prov_data += 2u * (uint32_t)nt;
+            break;
+        }
+    }
+    res->prov_table_targets += got;
+    return got;
 }
 
 uint32_t dp_provenance(DpResults *res) {
@@ -214,13 +256,16 @@ uint32_t dp_provenance(DpResults *res) {
     ProvStack st = {0};
     uint32_t marked = 0;
     dp_set_init(&vis, 1 << 16);
-    uint8_t rstd = prov_rst_dispatchers(c);
-    for (size_t k = 0; rstd && k < n && k < c->rom_size; k++) { // inline tables after each `rst` call site
+    marked += prov_copied_tables(res);
+    for (size_t k = 0; k < n && k + 3 <= c->rom_size; k++) { // inline tables after each dispatcher call site
         uint8_t op = c->rom[k];
-        if ((op & 0xC7) != 0xC7 || !(rstd & (1u << ((op >> 3) & 7)))) continue;
+        int isrst = (op & 0xC7) == 0xC7;
+        if (op != 0xCD && !isrst) continue;
         if (!(res->exec_flags[k] & DP_XF_START) || !(res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED | DP_XF_STATIC))) continue;
         uint32_t bank = (uint32_t)(k / 0x4000);
-        uint32_t base = bank ? 0x4000 + (uint32_t)(k % 0x4000) + 1 : (uint32_t)k + 1;
+        uint32_t t = isrst ? (uint32_t)(op & 0x38) : (uint32_t)(c->rom[k + 1] | (c->rom[k + 2] << 8));
+        if (t >= 0x8000 || !prov_is_dispatcher(c, prov_target(res, bank, t))) continue;
+        uint32_t base = (bank ? 0x4000 + (uint32_t)(k % 0x4000) : (uint32_t)k) + (isrst ? 1u : 3u);
         if (base >= 0x8000 || (bank == 0 && base >= 0x4000)) continue;
         marked += prov_table_targets(res, bank, (uint16_t)base);
     }

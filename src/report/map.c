@@ -103,11 +103,11 @@ unsigned dp_map_png_budget = 16u << 20;
 const char *dp_map_class_name(int c) {
     static const char *nm[DP_MAP_COUNT] = { "unknown", "code-natural", "code-forced",
         "code-static", "data-copied", "data-read", "data-static", "table", "padding",
-        "inferred-data", "inferred-code", "inferred-padding" };
+        "inferred-data", "inferred-code", "inferred-padding", "probable-code" };
     return c >= 0 && c < DP_MAP_COUNT ? nm[c] : "?";
 }
 
-int dp_map_is_code(int c) { return c == DP_MAP_CODE_NAT || c == DP_MAP_CODE_FORCED || c == DP_MAP_CODE_STATIC || c == DP_MAP_INF_CODE; }
+int dp_map_is_code(int c) { return c == DP_MAP_CODE_NAT || c == DP_MAP_CODE_FORCED || c == DP_MAP_CODE_STATIC || c == DP_MAP_INF_CODE || c == DP_MAP_PROB_CODE; }
 int dp_map_is_data(int c) { return c == DP_MAP_DATA_COPIED || c == DP_MAP_DATA_READ || c == DP_MAP_DATA_STATIC || c == DP_MAP_TABLE || c == DP_MAP_INF_DATA; }
 
 // what each exploration method added, in % of the whole ROM (tas, rng, fork,
@@ -153,6 +153,63 @@ void dp_map_methods_pct(const DpResults *res, const DpMapSummary *sp, double msh
         double rest = s.known * pct - sum; // provenance, final closure, inference
         if (rest > 0) mshare[4] += rest;
     }
+}
+
+// ---- probable code: a linear decode of an unknown run between two known code blocks.  Uncertain by
+// nature (random data decodes too), so it is only accepted when the whole run decodes with legal opcodes,
+// ends exactly on an unconditional transfer, keeps every jump/call/load address plausible and every
+// relative jump on an instruction boundary or outside the run.
+static int map_op_len(uint8_t op) {
+    if (op == 0xCB) return 2;
+    if ((op & 0xC7) == 0x06 && op < 0x40) return 2;
+    if (op == 0x18 || (op & 0xE7) == 0x20 || op == 0x10 || op == 0xE0 || op == 0xF0 || op == 0xE8 || op == 0xF8 ||
+        op == 0xC6 || op == 0xCE || op == 0xD6 || op == 0xDE || op == 0xE6 || op == 0xEE || op == 0xF6 || op == 0xFE) return 2;
+    if ((op & 0xCF) == 0x01 || op == 0x08 || op == 0xC3 || op == 0xCD || (op & 0xE7) == 0xC2 || (op & 0xE7) == 0xC4 ||
+        op == 0xEA || op == 0xFA) return 3;
+    return 1;
+}
+static int map_op_legal(uint8_t op) {
+    switch (op) { case 0xD3: case 0xDB: case 0xDD: case 0xE3: case 0xE4: case 0xEB: case 0xEC: case 0xED: case 0xF4: case 0xFC: case 0xFD: return 0; }
+    return 1;
+}
+static int map_probable_code(const uint8_t *rom, size_t i, size_t j) {
+    size_t len = j - i;
+    if (len < 6 || len > 160) return 0;
+    uint8_t start[160 + 4] = {0};
+    size_t k = i, last = i;
+    int fill = 0;
+    while (k < j) {
+        uint8_t op = rom[k];
+        if (!map_op_legal(op)) return 0;
+        if (op == 0x00 || op == 0xFF) fill++;
+        int l = map_op_len(op);
+        if (op == 0xCB) { // prefix: any second byte is legal
+        }
+        if (k + (size_t)l > j) return 0; // an instruction straddles the end
+        start[k - i] = 1;
+        if (op == 0xC3 || op == 0xCD || (op & 0xE7) == 0xC2 || (op & 0xE7) == 0xC4) {
+            unsigned t = rom[k + 1] | (rom[k + 2] << 8);
+            if (t >= 0x8000 && t < 0xC000) return 0;
+        }
+        if (op == 0xEA || op == 0xFA) {
+            unsigned t = rom[k + 1] | (rom[k + 2] << 8);
+            if (t < 0x8000) return 0;
+        }
+        last = k;
+        k += (size_t)l;
+    }
+    if (fill * 3 > (int)len) return 0;
+    uint8_t lo = rom[last];
+    int term = lo == 0xC9 || lo == 0xD9 || lo == 0xE9 || lo == 0xC3 || lo == 0x18;
+    if (!term) return 0;
+    for (k = i; k < j; k += (size_t)map_op_len(rom[k])) {
+        uint8_t op = rom[k];
+        if (op == 0x18 || (op & 0xE7) == 0x20) {
+            long t = (long)(k - i) + 2 + (int8_t)rom[k + 1];
+            if (t >= 0 && (size_t)t < len && !start[t]) return 0;
+        }
+    }
+    return 1;
 }
 
 uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
@@ -201,6 +258,10 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
                 for (size_t k = i; k < j; k++) fl += rom[k] == 0x00 || rom[k] == 0xFF;
                 if (fl * 4 >= len * 3) c = DP_MAP_INF_PAD;
             }
+            // code-code run that decodes like code: probable, flagged apart because it is not proven
+            if (c == DP_MAP_UNKNOWN && rom && j <= rsz && before >= 0 && after >= 0 && dp_map_is_code(before) &&
+                dp_map_is_code(after) && map_probable_code(rom, i, j))
+                c = DP_MAP_PROB_CODE;
             if (c != DP_MAP_UNKNOWN) memset(m + i, c, len);
             i = j;
         }
@@ -218,6 +279,7 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
         }
         for (int c = 0; c < DP_MAP_COUNT; c++)
             if (c >= DP_MAP_INF_DATA) sum->inferred += sum->cls[c];
+        sum->probable = sum->cls[DP_MAP_PROB_CODE];
     }
     return m;
 }
@@ -228,6 +290,7 @@ void dp_map_summary_text(const DpMapSummary *s, DpBuf *out) {
     dp_buf_fmt(out, "  known    %5.1f%%   unknown %5.1f%%   (known includes %.1f%% inferred)\n",
                s->known * t, s->unknown * t, s->inferred * t);
     dp_buf_fmt(out, "  code     %5.1f%%   data    %5.1f%%   padding %5.1f%%\n", s->code * t, s->data * t, s->pad * t);
+    if (s->probable) dp_buf_fmt(out, "  (code includes %.1f%% probable, unproven: linear decode only)\n", s->probable * t);
     for (int c = 0; c < DP_MAP_COUNT; c++)
         dp_buf_fmt(out, "    %-17s %8llu  %5.1f%%\n", dp_map_class_name(c), (unsigned long long)s->cls[c], s->cls[c] * t);
 }
@@ -407,6 +470,7 @@ static const uint8_t map_rgb[DP_MAP_COUNT][3] = {
     { 0x8f, 0xd6, 0xa0 }, // inferred-data
     { 0xb5, 0xd3, 0xf3 }, // inferred-code
     { 0xa0, 0xa0, 0xa0 }, // inferred-padding
+    { 0xe8, 0xa0, 0x40 }, // probable-code (uncertain)
 };
 const uint8_t *dp_map_rgb(int cls) { return map_rgb[cls >= 0 && cls < DP_MAP_COUNT ? cls : 0]; }
 
@@ -790,7 +854,7 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     static const char *fr[DP_MAP_COUNT] = {
         "inconnu", "code naturel", "code forcé", "code statique",
         "donnée copiée", "donnée lue", "donnée statique", "table", "padding",
-        "donnée inférée", "code inféré", "padding inféré" };
+        "donnée inférée", "code inféré", "padding inféré", "code probable (incertain)" };
     int cols = banks < PER_ROW ? banks : PER_ROW;
     int rows = (banks + PER_ROW - 1) / PER_ROW;
     if (cols < 1) cols = 1;

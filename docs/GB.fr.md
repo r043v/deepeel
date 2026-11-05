@@ -3813,3 +3813,22 @@ Deux règles d'inférence ajoutées à `dp_map_build` (classes inférées, compt
 Observation de l'outil (SML2, relecture du film seul) : inconnu 46 923 → 26 117 octets, `code-data`
 31 475 → 10 770. C'est une inférence, pas une observation d'exécution : les plages `code-code`
 (dispatch non prouvé, 8 765 o) restent inconnues, faute de preuve.
+
+## 0.249.46 : dispatchs par `call`, tables copiées en WRAM, code probable (2026-11-05)
+
+- **Dispatcheur par `call`** (`provenance.c`) : la reconnaissance de forme du vecteur `rst` (`pop hl`,
+  `add hl,…`, `jp hl`, sans retour) s'applique à toute routine appelée par un `call` exécuté ; la table en
+  ligne qui suit le site d'appel est prouvée comme pour `rst`.
+- **Tables de pointeurs copiées ROM→WRAM** : une copie verbatim ROM→WRAM dont la source est une suite de
+  ≥ 3 mots, tous cibles plausibles (opcode légal, ni `00` ni `FF`), dont au moins une est déjà une entrée de
+  code exécutée, est une table de pointeurs de code : ses autres entrées sont du code (preuve par
+  co-appartenance), ses mots de la donnée.
+- **Classe `probable-code`** (couleur orange, « incertain ») : plage inconnue entre deux blocs de code qui se
+  décode linéairement sans opcode illégal, se termine exactement sur un transfert inconditionnel, a des
+  adresses de saut/chargement plausibles et des `jr` sur des frontières d'instruction. Heuristique : des
+  données aléatoires se décodent parfois ; la classe est comptée en code et en « inféré » mais reste séparée
+  (`summary.probable`, champ `probable-code` du JSON) et n'alimente jamais la fermeture.
+- **Observation de l'outil** (SML2, relecture du film seul) : le dispatch par `call` et les tables copiées ne
+  changent rien sur cette ROM (aucun site de ce type en plus) ; `probable-code` gagne 252 octets
+  (inconnu 26 117 → 25 865). Les ~8 500 octets de `code-code` restants sont en grande partie des données
+  graphiques bornées par du code : seule l'exécution (fourches) peut les trancher.

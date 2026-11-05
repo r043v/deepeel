@@ -76,7 +76,7 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
              "seeds: %u natural, %u speculative (%u refused: cascade solde spent)\n"
              "data: %llu bytes proven verbatim (cov flag 8), %u exec∩data contradictions\n"
              "copies: %d records, %u emitted at window breaks, %u dropped by the cap\n"
-             "provenance: %u jp-hl targets, %u data bytes static, %u partial, %u caps\n",
+             "provenance: %u jp-hl targets, %u data bytes static, %u partial, %u caps, %u table targets\n",
              (unsigned long long)res->steps_total, (unsigned long long)res->paths_run,
              (unsigned long long)(res->forks_branch + res->forks_irq + res->forks_key +
                                   res->forks_p1),
@@ -90,7 +90,7 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
              res->seeds_natural, res->seeds_spec, res->seeds_refused_budget,
              (unsigned long long)res->data_verbatim_bytes, res->data_contradictions,
              res->copy_count, res->copy_window_breaks, res->copies_dropped,
-             res->prov_jp_hl, res->prov_data, res->prov_unresolved, res->prov_sat);
+             res->prov_jp_hl, res->prov_data, res->prov_unresolved, res->prov_sat, res->prov_table_targets);
     dp_buf_str(out, line);
     dp_buf_fmt(out, "stream replay (S6): %u decoders, %u tables, %u candidates, %u queued replays (%u without snapshot, %u saturated)\n",
                res->decoders, res->replay_tables, res->replay_candidates, res->replay_runs,

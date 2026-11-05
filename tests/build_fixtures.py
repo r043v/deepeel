@@ -7,6 +7,8 @@ Every fixture is a minimal ROM exercising one exploration behaviour:
   dma        - OAM DMA from a ROM source ($FF46)
   irq        - IE/IF set by hand (IRQ forking) + a VBlank handler
   jumptable  - JP HL through a pointer table, both handlers reachable
+  calldispatch - inline table behind a plain call to a dispatcher routine
+  copytable  - code-pointer table copied ROM->WRAM then indexed there
   rstdispatch - rst $28 jump table inline after the call site
   dispatch   - indexed JP HL (ld hl,TABLE; add hl,de; ld h,(hl); jp hl): the table's other entries proven code
   loop       - infinite loop, must be contained by the guards
@@ -281,6 +283,28 @@ def build(out):
     w(r, 0x270, 0x3E, 0x02, 0x76)                # entry 1 (taken)
     w(r, 0x280, 0x3E, 0x03, 0x76)                # entry 2 (never taken)
     save(out, "fix_rstdispatch", r)
+
+    # --- calldispatch: the same inline-table dispatcher reached by a plain `call` --
+    r = rom(2)
+    w(r, 0x200, 0x87, 0xE1, 0x5F, 0x16, 0x00, 0x19, 0x5E, 0x23, 0x56, 0xD5, 0xE1, 0xE9)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x3E, 0x01, 0xCD, 0x00, 0x02)    # ld a,1; call $0200
+    w(r, 0x155, 0x60, 0x02, 0x70, 0x02, 0x80, 0x02)
+    w(r, 0x260, 0x3E, 0x01, 0x76)
+    w(r, 0x270, 0x3E, 0x02, 0x76)
+    w(r, 0x280, 0x3E, 0x03, 0x76)
+    save(out, "fix_calldispatch", r)
+
+    # --- copytable: a pointer table copied ROM->WRAM, then indexed there ----------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x21, 0x30, 0x02, 0x11, 0x00, 0xC0, 0x06, 0x06, 0x2A, 0x12, 0x13, 0x05, 0x20, 0xFA)
+    w(r, 0x15E, 0x21, 0x00, 0xC0, 0x2A, 0x66, 0x6F, 0xE9)   # ld hl,$C000; ld a,(hl+); ld h,(hl); ld l,a; jp hl
+    w(r, 0x230, 0x50, 0x02, 0x60, 0x02, 0x70, 0x02)
+    w(r, 0x250, 0x3E, 0x01, 0x76)
+    w(r, 0x260, 0x3E, 0x02, 0x76)
+    w(r, 0x270, 0x3E, 0x03, 0x76)
+    save(out, "fix_copytable", r)
 
     # --- loop: infinite tight loop -------------------------------------------
     r = rom(2)

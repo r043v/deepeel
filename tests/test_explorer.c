@@ -267,6 +267,22 @@ int main(int argc, char **argv) {
     CHECK(res.exec_flags[0x280] & (DP_XF_STATIC | DP_XF_FORCED));
     CHECK(res.data_flags[0x153] & DP_DF_STATIC);
 
+    // --- calldispatch: a plain `call` to a dispatcher routine, inline table proven ----
+    run(dir, "calldispatch");
+    CHECK(res.exec_hits[0x270] > 0);
+    dp_provenance(&res);
+    CHECK(res.prov_table_targets >= 3);
+    CHECK(res.exec_flags[0x260] & (DP_XF_STATIC | DP_XF_FORCED));
+    CHECK(res.exec_flags[0x280] & (DP_XF_STATIC | DP_XF_FORCED));
+
+    // --- copytable: pointer table copied to WRAM, indexed there: its other entries are code ----
+    run(dir, "copytable");
+    CHECK(res.exec_hits[0x250] > 0);
+    dp_provenance(&res);
+    CHECK(res.exec_flags[0x260] & (DP_XF_STATIC | DP_XF_FORCED));
+    CHECK(res.exec_flags[0x270] & (DP_XF_STATIC | DP_XF_FORCED));
+    CHECK(res.data_flags[0x230] & DP_DF_STATIC);
+
     // --- loop: infinite loop contained ----------------------------------------------
     run(dir, "loop");
     CHECK(res.cycle_cuts >= 1);
