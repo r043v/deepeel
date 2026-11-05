@@ -550,9 +550,18 @@ static int cmd_explore(int argc, char **argv) {
     if (scfg.resume && scfg.state_dir) {
         char tpath[540];
         snprintf(tpath, sizeof tpath, "%s/tree.bin", scfg.state_dir);
-        if (dp_tree_load(&tree, tpath))
+        if (dp_tree_load(&tree, tpath)) {
             fprintf(stderr, "deepeel: resumed tree (%u choices, depth %u)\n", tree.n - 1,
                     tree.max_depth);
+        } else if (access(tpath, F_OK) == 0) {
+            // unreadable or over the in-RAM cap: never let the next save overwrite it silently
+            char kept[560];
+            snprintf(kept, sizeof kept, "%s.prev", tpath);
+            if (rename(tpath, kept) == 0)
+                fprintf(stderr, "deepeel: tree.bin not reloaded (too large or invalid); kept as %s, starting a new tree\n", kept);
+            else
+                fprintf(stderr, "deepeel: tree.bin not reloaded and could not be set aside (%s)\n", tpath);
+        }
     }
     ex->defer_tier_limit = tier_limit;
     ex->defer_all = defer_all;

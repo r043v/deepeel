@@ -3905,3 +3905,11 @@ d'enregistrements, état SML2 sans limite) cela relit tout le fichier à ≈150 
 observation). Le fichier curseur `<spool>.rd` contient déjà `wr` du dernier flush, une frontière
 d'enregistrement : le contrôle des enregistrements entiers part maintenant de là et ne parcourt que la
 queue écrite après. Sans curseur valide, le balayage complet reste le repli.
+
+### Arbre trop grand pour la reprise (constat sur SML2)
+
+`tree.bin` de la passe 1 SML2 contenait 282 millions de choix (5,6 Go) ; le chargeur plafonne à 16,7 millions
+et abandonnait **sans message** : la reprise repartait d'un arbre vide et l'enregistrement final aurait écrasé
+l'ancien. Désormais le fichier refusé est mis de côté (`tree.bin.prev`) avec un message. L'arbre n'est qu'un
+journal de lignées : la couverture, la déduplication et le spool ne dépendent pas de lui. Le stockage compact
+des choix fermés reste à faire si l'on veut le recharger.
