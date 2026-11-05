@@ -3653,3 +3653,9 @@ PCE : même ajout que NES (0.249.34) pour `jmp (abs)` / `jmp (abs,X)` : `N table
 `$7C`, d'où la cible est lue). Test `pce_indirect` mis à jour. MD n'a pas d'équivalent : `jmp/jsr (An)` lit un registre,
 l'adresse de table est celle que S4 retrouve par `s4_table`. D12 reste ◐ pour PCE/MD : plafond et second passage à
 confirmer cœur par cœur avant de cocher.
+
+## 0.249.36 (D12 NES ✅)
+
+D12 NES passe à ✅ : cibles observées sans plafond à 8 (jusqu'à 65 536 paires site-cible, débordement compté), adresse de
+table gardée (0.249.34), cibles non exécutées semées par `--second-pass` (successeurs statiques, mots de table tracés par
+provenance). PCE et MD restent ◐. Audit : 61 cellules ouvertes.
