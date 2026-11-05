@@ -3659,3 +3659,8 @@ confirmer cœur par cœur avant de cocher.
 D12 NES passe à ✅ : cibles observées sans plafond à 8 (jusqu'à 65 536 paires site-cible, débordement compté), adresse de
 table gardée (0.249.34), cibles non exécutées semées par `--second-pass` (successeurs statiques, mots de table tracés par
 provenance). PCE et MD restent ◐. Audit : 61 cellules ouvertes.
+
+## 0.249.37 (D12 PCE et MD ✅)
+
+D12 passe à ✅ pour PCE (sans plafond à 8, adresse de table gardée en 0.249.35, second passage et provenance) et MD (sans
+plafond, l'adresse de table est celle que S4 retrouve, second passage). La ligne D12 est ✅ sur les six colonnes.

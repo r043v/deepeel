@@ -12,17 +12,15 @@ remesure pas l'outil.
 | SMS/GG | 32 | 5 | 0 | 2 |
 | MSX | 32 | 5 | 0 | 2 |
 | NES | 21 | 16 | 0 | 2 |
-| PCE | 25 | 13 | 0 | 1 |
-| MD | 22 | 16 | 0 | 1 |
+| PCE | 26 | 12 | 0 | 1 |
+| MD | 23 | 15 | 0 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 61.
+Cellules ouvertes (◐ ou ✗) : 59.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
 | D10 | Sondes de lecture manette | NES | ◐ 0.230.0 8 boutons port 1 + 8 port 2 + 10 combinaisons ; 0.243.0 `--pad-full` : les 256 masques du port 1 (test `nes_pad_full`), hors défaut ; pas de multitap |
 | D10 | Sondes de lecture manette | MD | ◐ 0.240.0 14 sondes dont pad 6 boutons (runtime m0boy `pad_ext`) ; 0.245.0 `--pad-full` : les 256 masques à trois boutons (test `md_pad_full`), hors défaut ; 0.249.16 `--pad-full6` : les 256 masques × 16 combinaisons X/Y/Z/Mode du pad 6 boutons (test `md_pad_full6`) ; pas de multitap |
-| D12 | Cibles indirectes observées | PCE | ◐ observé (`jmp (abs)`, `jmp (abs,X)`), sans second passage |
-| D12 | Cibles indirectes observées | MD | ◐ observé (`jmp/jsr` par An), sans second passage |
 | S1 | Scan padding + tables de pointeurs | NES | ◐ padding + tables ; 0.249.15 tables de pointeurs aussi sur CNROM et sur les autres cartes (MMC1, MMC3… : `$C000+` → dernière banque de 16 Kio, `$8000-$BFFF` → banque propre, cible exigée exécutée ; test `nes_table_mmc1`) ; reste les pointeurs vers une banque commutable autre que la propre |
 | S2 | Fermeture statique de flot | NES | ◐ saut/appel/branche, fenêtre propre |
 | S2 | Fermeture statique de flot | PCE | ◐ fenêtre MPR ; 0.232.0 arêtes inter-fenêtres résolues vers la page unique observée (test `pce`), 0.242.0 vues multiples : l'arête est suivie dans chaque page observée de la fenêtre cible (≤ 16) ; reste le mapping qui change en cours de page (TAM) |
