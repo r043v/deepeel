@@ -3923,3 +3923,10 @@ mis de côté (`tree.bin.prev`) avec un message au lieu d'être écrasé.
 `kill -USR1 <pid>` d'un `deepeel explore` en cours écrit sur stderr la taille de chaque structure en RAM :
 malloc total, file, pool partagé (images), différés, ensemble de dédup exact, arbre (blocs résidents, choix
 épinglés). Sert à savoir ce qui grossit sans arrêter le run (gdb est bloqué par ptrace_scope).
+
+### File d'exploration bornée en octets (0.249.54)
+
+Mesuré par `kill -USR1` sur SML2 (reprise, `--queue 60000`, `--jobs 8`) : file en RAM = 239 999 états de
+25 193 octets = 5,9 Go, soit 4 × `--queue` (croissance adaptative `queue_max`, qui n'était freinée que par
+`--mem-cap`, absent). La file est maintenant bornée aussi en octets : `--queue-mem MB` (défaut 1536). Au-delà,
+les états vont dans le spool disque (jamais jetés) et reviennent quand la RAM le permet.

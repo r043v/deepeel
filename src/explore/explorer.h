@@ -310,6 +310,7 @@ typedef struct DpConfig {
     uint32_t max_paths;       // hard cap on paths run
     uint64_t max_steps_total; // hard cap on steps across all paths
     uint32_t queue_cap;       // max pending states
+    uint32_t queue_mem_mb;    // RAM budget of the worklist images (0 = 1536): beyond it states go to the disk spool
     uint32_t queue_max;       // adaptive growth cap of the worklist (0 = 4x queue_cap):
                               // a full queue grows by doubling up to this instead of
                               // dropping whole paths

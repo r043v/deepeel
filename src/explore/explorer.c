@@ -450,6 +450,14 @@ DpExplorer *dp_explorer_new(const DpConfig *cfg, DpResults *res, DpMach *mach) {
     ex->q_cap = cfg->queue_cap ? cfg->queue_cap : 2048;
     ex->q_max = cfg->queue_max ? cfg->queue_max : ex->q_cap * 4;
     if (ex->q_max < ex->q_cap) ex->q_max = ex->q_cap;
+    {   // the worklist is bounded in bytes too: a state image is ~25 KB, so 240k queued states are 6 GB of RAM.
+        // What does not fit goes to the disk spool (never dropped); the budget is --queue-mem MB.
+        uint64_t budget = (uint64_t)(cfg->queue_mem_mb ? cfg->queue_mem_mb : 1536) << 20;
+        uint64_t by_mem = budget / ex->sb;
+        if (by_mem < 256) by_mem = 256;
+        if (ex->q_max > by_mem) ex->q_max = (uint32_t)by_mem;
+        if (ex->q_cap > ex->q_max) ex->q_cap = ex->q_max;
+    }
     ex->queue = xrealloc(NULL, sizeof(DpPathState) * ex->q_cap);
     memset(ex->queue, 0, sizeof(DpPathState) * ex->q_cap);
     // the priority inbox stays small: seeds are few, saturation is counted

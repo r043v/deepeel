@@ -114,6 +114,7 @@ static void usage(void) {
             "    --max-paths N        path cap (default 200000)\n"
             "    --max-total N        global step wall (default 20000000)\n"
             "    --queue N            pending-state cap (default 4096)\n"
+            "    --queue-mem MB       RAM budget of the pending state images (default 1536); the rest goes to the disk spool\n"
             "    --queue-max N        adaptive growth ceiling of the pending states\n"
             "                         (default 4x queue): a full queue doubles instead of\n"
             "                         dropping paths, stopped by --mem-cap when set\n"
@@ -383,6 +384,7 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--max-total") && i + 1 < argc) cfg.max_steps_total = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--queue") && i + 1 < argc) cfg.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--queue-max") && i + 1 < argc) cfg.queue_max = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--queue-mem") && i + 1 < argc) cfg.queue_mem_mb = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--loop-cap") && i + 1 < argc) cfg.loop_back_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--mem-cap") && i + 1 < argc) {
             // one wall for both consumers: the play sessions and the queue growth
