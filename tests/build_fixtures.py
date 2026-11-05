@@ -968,6 +968,18 @@ def build_nes_pce(out):
         k[q:q + 2] = bytes([0x00, 0x80])
     with open(os.path.join(out, "fix_nes_ctx.nes"), "wb") as f:
         f.write(k)
+    # NES cross-window context loop: the main loop in the $8000 window only forks (lda #0 / beq), the RAM
+    # counter is bumped by a subroutine in the $C000 window, so the loop's own window never reads RAM
+    k = bytearray(16 + 2 * 0x4000)
+    k[0:4] = b"NES\x1a"
+    k[4], k[5] = 2, 0
+    k[16:16 + 7] = bytes([0x20, 0x00, 0xC0, 0xA9, 0x00, 0xF0, 0xF9])
+    k[16 + 0x4000:16 + 0x4000 + 3] = bytes([0xE6, 0x10, 0x60])
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        q = 16 + 0x4000 + 0x3FFA + (v - 0xFFFA)
+        k[q:q + 2] = bytes([0x00, 0x80])
+    with open(os.path.join(out, "fix_nes_ctx2.nes"), "wb") as f:
+        f.write(k)
     # NES jam: a KIL opcode after a short run ends the path (the 6502 has no HALT)
     q = bytearray(16 + 2 * 0x4000)
     q[0:4] = b"NES\x1a"

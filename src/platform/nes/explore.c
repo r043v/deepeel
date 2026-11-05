@@ -52,6 +52,7 @@ typedef struct {
     DpNesResults *r;
     DpNesPathState *queue;
     uint32_t queue_len, queue_cap;
+    uint8_t live_half[64];                 // the same, per 16 KiB PRG window of the reading code
     uint8_t live_pages;                    // RAM pages (256 B each, 2 KiB mirrored) read by any code so far
     DpNesPathState *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
     DpLotFile *lot;                        // disk lot: park overflow, wall leftovers, --lot resume
@@ -599,7 +600,10 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
 
 static void hook_read(void *user, unsigned addr) {
     DpNesRun *x = user;
-    if (addr < 0x2000) x->live_pages |= (uint8_t)(1u << ((addr & 0x7FFu) >> 8));
+    if (addr < 0x2000) {
+        x->live_pages |= (uint8_t)(1u << ((addr & 0x7FFu) >> 8));
+        if (x->cur_cell >= 0) x->live_half[(x->cur_cell >> 14) & 63] |= (uint8_t)(1u << ((addr & 0x7FFu) >> 8));
+    }
     if (x->cur_cell >= 0 && x->r->live_ram) {
         if (addr < 0x2000) x->r->live_ram[x->cur_cell] |= (uint8_t)(1u << ((addr & 0x7FFu) >> 8));
         else if (addr < 0x4000) x->r->live_io[x->cur_cell] |= DP_NES_LIVE_PPU;
@@ -884,7 +888,7 @@ static int snap_push(DpNesRun *x, DpNesPathState *s) {
     if (x->opt.ctx_cap) {
         // coarse same-context eviction: the k-th admission of a context is the
         // key hash(ctx, k); a context past ctx_cap admissions is closed unrun
-        uint64_t c = x->opt.ctx_live ? dp_nesmach_state_ctx_hash_ram(s->state, x->live_pages) : dp_nesmach_state_ctx_hash(s->state);
+        uint64_t c = x->opt.ctx_live ? dp_nesmach_state_ctx_hash_ram(s->state, x->in_run && x->cur_cell >= 0 ? x->live_half[(x->cur_cell >> 14) & 63] : x->live_pages) : dp_nesmach_state_ctx_hash(s->state);
         unsigned k = 0;
         while (k < x->opt.ctx_cap && dp_set_insert(&x->ctx_seen, (c ^ (k * 0x9E3779B97F4A7C15ull)) | 1) == 0) k++;
         if (k >= x->opt.ctx_cap) {

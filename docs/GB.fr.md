@@ -3632,3 +3632,11 @@ diffèrent que par une page jamais lue restent donc dans le même contexte et so
 contextes. Sur `fix_nes_ctx` (boucle `INC $10`), `--ctx-cap 3` ferme 10 états, `--ctx-cap 3 --ctx-live` aucun (la page 0
 est lue), test `nes_ctx_live`. Hors option, comportement inchangé. C2 NES reste ◐ : la liveness utilisée est globale au
 run, pas par section, et l'option est opt-in. Observation de l'outil, pas une mesure de matériel.
+
+## 0.249.33 (C2 NES : liveness par fenêtre PRG de 16 Kio)
+
+`--ctx-live` projette le contexte sur les pages de RAM lues par du code de la **même fenêtre PRG de 16 Kio** que
+l'instruction courante (et non plus l'union de tout le run). Fixture `fix_nes_ctx2` : la boucle de la fenêtre `$8000` ne lit
+jamais la RAM, un sous-programme de la fenêtre `$C000` incrémente `$10` ; la RAM diffère à chaque passe mais le contexte de
+la boucle ne la voit pas, `--ctx-cap 3 --ctx-live` ferme 4 états (test `nes_ctx_live_window`). Une boucle qui lit elle-même
+la page (`fix_nes_ctx`) n'est toujours pas plafonnée. C2 NES reste ◐ : granularité = fenêtre, pas section ; opt-in.
