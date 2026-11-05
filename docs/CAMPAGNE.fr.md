@@ -217,3 +217,11 @@ Observation de l'outil (machine concrète, RAM à zéro, ROM hors dépôt, sorti
   second passage : 6 racines semées, 0 refusée, 0 au-dessus du plafond ; 112 sections.
 - Contraste avec la campagne courte de 0.187.6 (3 045 225 pas) : le run complet double les pas, sans saturation.
 Ce n'est pas une mesure de matériel, et le 41 % reste ce que l'outil atteint sans manette réelle ni TAS.
+
+## J13 : PCE Raiden, exploration seule (0.249.37)
+
+Observation de l'outil (machine concrète, RAM à zéro, ROM hors dépôt), `--second-pass --max-total 400000000 --queue 200000
+--time-limit 500`, sans session jouée : 66 001 646 pas, 2 024 chemins dont 1 860 forcés, 2 147 forks (88 de manette,
+111 d'IRQ), 402 évincés ; coupes : boucle 1 256, fourche 13 011 426, fourche d'IRQ 3 452 179, globales 2 ; 583 fautes ;
+2 054 396 pas hors ROM ; frontière 0 parqué / 0 perdu ; second passage : 3 racines semées, 0 refusée, 0 au-dessus du
+plafond ; 310 sections. Le run s'arrête par épuisement (coupes globales : 2, comptées). Ce n'est pas une mesure de matériel.
