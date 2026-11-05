@@ -224,4 +224,5 @@ Observation de l'outil (machine concrète, RAM à zéro, ROM hors dépôt), `--s
 --time-limit 500`, sans session jouée : 66 001 646 pas, 2 024 chemins dont 1 860 forcés, 2 147 forks (88 de manette,
 111 d'IRQ), 402 évincés ; coupes : boucle 1 256, fourche 13 011 426, fourche d'IRQ 3 452 179, globales 2 ; 583 fautes ;
 2 054 396 pas hors ROM ; frontière 0 parqué / 0 perdu ; second passage : 3 racines semées, 0 refusée, 0 au-dessus du
-plafond ; 310 sections. Le run s'arrête par épuisement (coupes globales : 2, comptées). Ce n'est pas une mesure de matériel.
+plafond ; 310 sections. Observé 102 748 octets (13,07 %), classé 205 935 (26,19 %), inconnu 73,81 %. Je n'ai pas vérifié si l'arrêt vient de la file vide
+ou du plafond de temps (2 coupes globales comptées). Ce n'est pas une mesure de matériel.
