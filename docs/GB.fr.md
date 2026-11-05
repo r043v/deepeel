@@ -3640,3 +3640,9 @@ l'instruction courante (et non plus l'union de tout le run). Fixture `fix_nes_ct
 jamais la RAM, un sous-programme de la fenêtre `$C000` incrémente `$10` ; la RAM diffère à chaque passe mais le contexte de
 la boucle ne la voit pas, `--ctx-cap 3 --ctx-live` ferme 4 états (test `nes_ctx_live_window`). Une boucle qui lit elle-même
 la page (`fix_nes_ctx`) n'est toujours pas plafonnée. C2 NES reste ◐ : granularité = fenêtre, pas section ; opt-in.
+
+## 0.249.34 (D12 NES : adresse de table gardée)
+
+NES : le rapport « indirect jumps » compte aussi les adresses de table distinctes par site (`jmp (abs)` : l'opérande
+d'où la cible est lue), `N table addresses`, gardées pour S4/§5. Il n'y a pas de plafond à 8 cibles (jusqu'à 65 536 paires
+site-cible, débordement compté) ; test `nes_indirect` mis à jour. La cellule D12 reste ◐ pour PCE/MD (même ajout à faire).

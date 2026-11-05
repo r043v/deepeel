@@ -63,7 +63,7 @@ typedef struct {
     uint32_t cur_choice;               // tree node of the path being run
     DpHashSet ctx_seen;                // per-context admission counters (C2)
     DpHashSet seen;                    // exact state dedup
-    DpHashSet ind_sites, ind_pairs;    // observed jmp (ind): sites and (site,target) pairs
+    DpHashSet ind_sites, ind_pairs, ind_ptrs;    // observed jmp (ind): sites and (site,target) pairs
     DpHashSet probe_seen;              // strobe-write sites already probed
     DpNesLoop *loops;                  // back-branch counters
     size_t loop_len, loop_cap;
@@ -527,6 +527,8 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
             else {
                 if (dp_set_insert(&x->ind_sites, (uint64_t)site + 1) > 0) r->indirect_sites++;
                 if (dp_set_insert(&x->ind_pairs, ((uint64_t)(site + 1) << 16) | tgt) > 0) r->indirect_targets++;
+                // D12: the table address the jump reads its target from (distinct per site), kept for S4
+                if (dp_set_insert(&x->ind_ptrs, ((uint64_t)(site + 1) << 16) | ptr) > 0) r->indirect_ptrs++;
             }
         }
     }
@@ -1367,6 +1369,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     dp_set_init(&x.ctx_seen, 1 << 10);
     dp_set_init(&x.ind_sites, 1 << 10);
     dp_set_init(&x.ind_pairs, 1 << 12);
+    dp_set_init(&x.ind_ptrs, 1 << 12);
     if (!x.queue || !x.fork_sites) x.failed = 1;
     hooks_install(&x);
 
@@ -1539,6 +1542,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     dp_set_free(&x.ctx_seen);
     dp_set_free(&x.ind_sites);
     dp_set_free(&x.ind_pairs);
+    dp_set_free(&x.ind_ptrs);
     int ok = !x.failed;
     dp_nesmach_close(x.m);
     return ok;
@@ -2075,7 +2079,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  static closure: %llu bytes from %llu roots, cap hits %llu\n", (unsigned long long)r->static_bytes, (unsigned long long)r->static_roots, (unsigned long long)r->static_cap_hits);
     fprintf(out, "  padding %llu bytes; inferred code %llu data %llu padding %llu\n", (unsigned long long)r->padding_bytes, (unsigned long long)r->inferred_code, (unsigned long long)r->inferred_data, (unsigned long long)r->inferred_pad);
     fprintf(out, "  cpu loop copy bytes %llu, to WRAM %llu, to SRAM/APU %llu, ROM->WRAM->OAM %llu\n", (unsigned long long)r->cpu_copy_bytes, (unsigned long long)r->wram_copy_bytes, (unsigned long long)r->aux_copy_bytes, (unsigned long long)r->oam_chain_bytes);
-    fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
+    fprintf(out, "  indirect jumps: %llu sites, %llu targets, %llu table addresses, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_ptrs, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  pad probes: %llu forks at %llu sites, refused %llu\n", (unsigned long long)r->pad_probes, (unsigned long long)r->pad_probe_sites, (unsigned long long)r->pad_probe_refused);
     fprintf(out, "  copy siblings: %llu tables; %llu ranges (%llu bytes); %llu refused over executed code; %llu tables cut at the cap\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_ranges, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_refused, (unsigned long long)r->sib_caps);
     fprintf(out, "  choice tree: %u nodes\n", r->tree_count);

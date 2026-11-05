@@ -322,7 +322,7 @@ add_test(NAME nes_pad_full COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${C
 set_tests_properties(nes_pad_full PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME md_pad_full COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_pad6.md --pad-full --max-total 3000000 --text ${CMAKE_CURRENT_BINARY_DIR}/md_pf.txt >/dev/null 2>&1; grep -q 'pad probes: 258 ' ${CMAKE_CURRENT_BINARY_DIR}/md_pf.txt")
 set_tests_properties(md_pad_full PROPERTIES FIXTURES_REQUIRED fixtures)
-add_test(NAME nes_indirect COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ind.nes --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_ind.txt >/dev/null 2>&1; grep -q 'indirect jumps: 1 sites, 1 targets, overflow 0' ${CMAKE_CURRENT_BINARY_DIR}/nes_ind.txt")
+add_test(NAME nes_indirect COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ind.nes --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_ind.txt >/dev/null 2>&1; grep -q 'indirect jumps: 1 sites, 1 targets, 1 table addresses, overflow 0' ${CMAKE_CURRENT_BINARY_DIR}/nes_ind.txt")
 set_tests_properties(nes_indirect PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_cpu_copy COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_cpucopy.nes --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_cc.txt >/dev/null 2>&1; grep -q 'ch3 src .* len 16' ${CMAKE_CURRENT_BINARY_DIR}/nes_cc.txt")
 set_tests_properties(nes_cpu_copy PROPERTIES FIXTURES_REQUIRED fixtures)
