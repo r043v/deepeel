@@ -3623,3 +3623,12 @@ La politique de croissance des tableaux d'états en attente (file vivante borné
 borne) est `dp_vec_grow` (`src/core/growvec.h`), utilisée par NES, PCE et MD (parking) et NES, PCE (file) ; la file de MD
 garde sa propre logique. Sorties inchangées, test unitaire dans `test_core`. J1 reste ◐ : l'enregistrement d'un état dans
 l'inbox (`push_live`, dédup, éviction de contexte, déversement sur disque) reste propre à chaque cœur.
+
+## 0.249.32 (C2 NES : contexte projeté sur les pages lues, `--ctx-live`)
+
+NES : `--ctx-live` (avec `--ctx-cap N`) ajoute au contexte grossier les pages de RAM (256 octets) qu'un code a lues
+jusque-là dans le run (union cumulée, alimentée par le hook de lecture de la liveness 0.249.24). Deux états qui ne
+diffèrent que par une page jamais lue restent donc dans le même contexte et sont plafonnés ; une page lue sépare les
+contextes. Sur `fix_nes_ctx` (boucle `INC $10`), `--ctx-cap 3` ferme 10 états, `--ctx-cap 3 --ctx-live` aucun (la page 0
+est lue), test `nes_ctx_live`. Hors option, comportement inchangé. C2 NES reste ◐ : la liveness utilisée est globale au
+run, pas par section, et l'option est opt-in. Observation de l'outil, pas une mesure de matériel.

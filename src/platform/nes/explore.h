@@ -114,6 +114,7 @@ typedef struct {
     int pad_full;          // D10: also probe every one of the 256 port-1 button masks at each strobe site
     int bank_dispatch;     // second pass also scans the fixed bank for jump tables and seeds every bank view (G2, UxROM)
     unsigned ctx_cap;      // max admitted states per coarse context (0 = off, C2)
+    int ctx_live;          // --ctx-live: the context also keys the RAM pages some code has read so far (C2 over C1 liveness)
     int second_pass;       // after the drain, enter static-closure roots that no path executed and drain again (G4)
     int seed_vectors;      // also seed the NMI and IRQ/BRK vector targets as roots (G1)
     int seed_banks;        // also seed every switchable bank at $8000 (UxROM)

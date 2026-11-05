@@ -1165,6 +1165,7 @@ static int cmd_nes(int argc, char **argv) {
         DP_CLI_COMMON(opt, cc)
         DP_CLI_PLAYED(opt)
         else if (!strcmp(a, "--play-pool") && i + 1 < argc) opt.play_pool = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--ctx-live")) opt.ctx_live = 1;
         else if (!strcmp(a, "--cov") && i + 1 < argc) cov = argv[++i];
         else if (!strcmp(a, "--romdata") && i + 1 < argc) romdata = argv[++i];
         else if (!strcmp(a, "--summary") && i + 1 < argc) nes_summary = argv[++i];
@@ -1261,7 +1262,7 @@ static int cmd_pce(int argc, char **argv) {
         fprintf(stderr, "deepeel pce explore ROM [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N] "
                         "[--max-total N] [--max-steps N] [--queue N] [--loop-cap N] [--fork-cap N] "
                         "[--novelty STEPS] [--novelty-frames N] [--novelty-archive N] [--novelty-cells] [--pad-fork-cap N] [--irq-fork-cap N] [--no-irq-fork] [--no-static] [--no-infer] [--multitap] [--jobs 2] "
-                        "[--text FILE] [--map FILE] [--png FILE] [--evidence FILE] [--entry ADDR]... [--ctx-cap N]\n");
+                        "[--text FILE] [--map FILE] [--png FILE] [--evidence FILE] [--entry ADDR]... [--ctx-cap N] [--ctx-live]\n");
         return 2;
     }
     const char *path = NULL, *text = NULL, *map = NULL, *png = NULL, *pce_ev = NULL, *pce_cov = NULL, *pce_rd = NULL;
