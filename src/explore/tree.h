@@ -18,6 +18,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <pthread.h>
 
 enum {
     DP_ISSUE_OPEN = 0,
@@ -41,17 +42,29 @@ typedef struct DpChoice {
     uint16_t bank, pc;          // where this choice's path starts
 } DpChoice;
 
+// Choices live in fixed chunks of 1<<DP_TREE_CHUNK_BITS entries. A chunk whose choices are all closed is
+// written to the spill file (when one is set) and its RAM freed: the tree grows on disk, never in RAM, past
+// the open frontier. Ids are indexes (id == position); the tree.bin format is unchanged.
+#define DP_TREE_CHUNK_BITS 16
 typedef struct DpTree {
-    DpChoice *v;
-    uint32_t n, cap;
+    DpChoice **ch;              // chunk pointers; NULL = evicted to the spill file
+    uint32_t *chopen;           // open choices per chunk
+    uint8_t *chev;              // 1 = evicted
+    uint32_t nch, chcap;
+    uint32_t n;
     uint32_t max_depth;
     uint32_t closed[DP_ISSUE_N];
     uint32_t open;
     uint32_t next_id;
+    int spill_fd;
+    char spill_path[560];
+    pthread_mutex_t mtx;        // leaf lock: add/close may come from any worker
 } DpTree;
 
 void dp_tree_init(DpTree *t);
 void dp_tree_free(DpTree *t);
+// optional: closed chunks spill to this file (call right after init, before load); NULL = all in RAM
+void dp_tree_set_spill(DpTree *t, const char *path);
 // add a choice (open); parent 0 = root; returns its id
 uint32_t dp_tree_add(DpTree *t, uint32_t parent, int kind, uint32_t site, int bank, int pc);
 void dp_tree_close(DpTree *t, uint32_t id, int issue);

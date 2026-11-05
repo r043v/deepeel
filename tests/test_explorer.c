@@ -3,6 +3,7 @@
 #include "../src/core/cart.h"
 #include "../src/core/snapshot_png.h"
 #include "../src/explore/explorer.h"
+#include "../src/explore/tree.h"
 #include "../src/explore/explorer_priv.h"
 #include "../src/report/report.h"
 #include "mach_util.h"
@@ -94,7 +95,48 @@ static int bank_events_of(uint32_t old_bank, uint32_t new_bank) {
     return n;
 }
 
+// spillable tree: closed chunks leave RAM, save/load round-trips, ids stay stable
+static void test_tree_spill(void) {
+    char sp[] = "/tmp/dp_tree_spill_XXXXXX", bin[64];
+    int fd = mkstemp(sp);
+    if (fd >= 0) close(fd);
+    snprintf(bin, sizeof bin, "%s.bin", sp);
+    DpTree a;
+    dp_tree_init(&a);
+    dp_tree_set_spill(&a, sp);
+    enum { N = 300000 };
+    uint32_t keep = 0;
+    for (uint32_t i = 1; i <= N; i++) {
+        uint32_t id = dp_tree_add(&a, i > 1 ? i - 1 : 0, 4, i, 0, 0x100);
+        CHECK(id == i);
+        if (i == 70000) keep = id;                 // stays open: pins its chunk in RAM
+        else dp_tree_close(&a, id, DP_ISSUE_DONE);
+    }
+    uint32_t resident = 0;
+    for (uint32_t c = 0; c < a.nch; c++) resident += a.ch[c] != NULL;
+    CHECK(resident < a.nch);                       // closed chunks were evicted
+    CHECK(a.open == 1);                            // the kept one (the root is not counted)
+    CHECK(dp_tree_save(&a, bin));
+    DpTree b;
+    dp_tree_init(&b);
+    char sp2[80];
+    snprintf(sp2, sizeof sp2, "%s.2", sp);
+    dp_tree_set_spill(&b, sp2);
+    CHECK(dp_tree_load(&b, bin));
+    CHECK(b.n == a.n && b.open == a.open && b.max_depth == a.max_depth);
+    CHECK(b.closed[DP_ISSUE_DONE] == a.closed[DP_ISSUE_DONE]);
+    dp_tree_close(&b, keep, DP_ISSUE_MERGED);      // the open one is still reachable after reload
+    CHECK(b.open == 0);
+    uint32_t id2 = dp_tree_add(&b, 5, 4, 1, 0, 0x100);   // parent in an evicted chunk: depth read from disk
+    CHECK(id2 == N + 1);
+    dp_tree_free(&a);
+    dp_tree_free(&b);
+    unlink(bin);
+    unlink(sp);
+}
+
 int main(int argc, char **argv) {
+    test_tree_spill();
     const char *dir = argc > 1 ? argv[1] : ".";
 
     // --- branch: both sides, verdicts, copy record ------------------------------

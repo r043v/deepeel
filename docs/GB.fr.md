@@ -3906,10 +3906,12 @@ observation). Le fichier curseur `<spool>.rd` contient déjà `wr` du dernier fl
 d'enregistrement : le contrôle des enregistrements entiers part maintenant de là et ne parcourt que la
 queue écrite après. Sans curseur valide, le balayage complet reste le repli.
 
-### Arbre trop grand pour la reprise (constat sur SML2)
+### Arbre sur disque (0.249.52)
 
-`tree.bin` de la passe 1 SML2 contenait 282 millions de choix (5,6 Go) ; le chargeur plafonne à 16,7 millions
-et abandonnait **sans message** : la reprise repartait d'un arbre vide et l'enregistrement final aurait écrasé
-l'ancien. Désormais le fichier refusé est mis de côté (`tree.bin.prev`) avec un message. L'arbre n'est qu'un
-journal de lignées : la couverture, la déduplication et le spool ne dépendent pas de lui. Le stockage compact
-des choix fermés reste à faire si l'on veut le recharger.
+L'arbre est maintenant stocké en blocs de 65 536 choix. Un bloc dont tous les choix sont fermés est écrit dans
+`<state>/tree.spill` et sa RAM libérée : la RAM ne porte plus que les choix ouverts (la frontière), quelle que
+soit la taille de l'arbre. Le rechargement de `tree.bin` fait de même bloc par bloc (le `tree.bin` SML2 de
+282 millions de choix, 5,6 Go, se recharge sans les 5,6 Go de RAM). Le format de `tree.bin` est inchangé :
+les anciens fichiers se lisent. Avant ce changement la croissance de l'arbre (20 octets par choix, sans plafond
+ni repli disque) était la principale consommation de RAM d'une exploration longue. Un `tree.bin` illisible reste
+mis de côté (`tree.bin.prev`) avec un message au lieu d'être écrasé.

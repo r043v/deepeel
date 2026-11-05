@@ -547,6 +547,11 @@ static int cmd_explore(int argc, char **argv) {
     DpTree tree;
     dp_tree_init(&tree);
     ex->tree = &tree;
+    if (scfg.state_dir) {                      // closed choices leave RAM: the tree grows on disk
+        char spath[540];
+        snprintf(spath, sizeof spath, "%s/tree.spill", scfg.state_dir);
+        dp_tree_set_spill(&tree, spath);
+    }
     if (scfg.resume && scfg.state_dir) {
         char tpath[540];
         snprintf(tpath, sizeof tpath, "%s/tree.bin", scfg.state_dir);
