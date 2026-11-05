@@ -179,7 +179,7 @@ def run_slice(cmd, logpath, state, seconds, guard, mem, pool=0):
                 except subprocess.TimeoutExpired:
                     os.killpg(p.pid, signal.SIGKILL)
                 break
-            if tick % 5 == 0 and dir_size(state) > guard:
+            if tick % 5 == 0 and shutil.disk_usage(state).free < guard:
                 os.killpg(p.pid, signal.SIGINT)
                 why = "state-guard"
                 try:
@@ -199,9 +199,9 @@ def run_slice(cmd, logpath, state, seconds, guard, mem, pool=0):
 def tas_info(logtext):
     """raw TAS facts from the run log; the verdict is an estimate"""
     movies = {}
-    for m in re.finditer(r"deepeel: TAS (\S+?): (\d+) frames", logtext):
+    for m in re.finditer(r"deepeel: TAS (.+?): (\d+) frames", logtext):
         movies[os.path.basename(m.group(1))] = {"frames": int(m.group(2))}
-    refused = len(re.findall(r"TAS \S+ refused: recorded on another ROM", logtext))
+    refused = len(re.findall(r"TAS .+? refused: recorded on another ROM", logtext))
     iv = re.search(r"checkpoint snapshot every (\d+) frames", logtext)
     caps = re.search(r"(\d+) TAS checkpoint snapshots saved", logtext)
     interval = int(iv.group(1)) if iv else 1800
@@ -295,12 +295,20 @@ def process(e, cat, a):
             base += ["--tas", m["path"]]
         logpath = os.path.join(res_dir, "run.log")
         open(logpath, "w").close()
-        # one run per ROM: --resume does not restore the coverage map, so a
-        # sliced run's reports would only describe its last slice.  The run
+        # one run per ROM (a resource-guard stop resumes it: coverage.bin keeps the map).  The run
         # stops by itself on exhaustion, on --stagnation (no discovery for N
         # play frames = negligible gain) or on the --time-limit cap.
-        cmd = base + ["--time-limit", str(int(a.cap)), "--stagnation", str(a.stagnation)]
-        el, rc, why = run_slice(cmd, logpath, state, a.cap, a.guard, int(a.ram_gb * (1 << 30) * 0.45), int(a.ram_gb * (1 << 30)))
+        cmd = base + ["--time-limit", str(int(a.cap)), "--stagnation", str(a.stagnation), "--until-static", "--search-limit", str(a.search)]
+        el, rc, why = run_slice(cmd, logpath, state, a.cap + a.search, a.guard, int(a.ram_gb * (1 << 30) * 0.45), int(a.ram_gb * (1 << 30)))
+        # a resource guard stops the run gracefully; the state dir now keeps the coverage map
+        # (coverage.bin), so --resume continues the same exploration without losing what is known
+        for _ in range(3):
+            if why not in ("mem-guard", "state-guard") or STOP.is_set() or not os.path.exists(os.path.join(state, "coverage.bin")):
+                break
+            log("%s: %s, resuming from the saved state" % (slug, why))
+            el2, rc, why = run_slice(cmd + ["--resume"], logpath, state, a.cap + a.search, a.guard,
+                                     int(a.ram_gb * (1 << 30) * 0.45), int(a.ram_gb * (1 << 30)))
+            el += el2
         s = json.load(open(summ)) if os.path.exists(summ) else {}
         reason = s.get("play", {}).get("stop_reason")
         wall_cut = (reason == "time budget reached")
@@ -386,7 +394,8 @@ def main():
     ap.add_argument("--ram-gb", type=float, default=10.0, help="total RAM ceiling for all deepeel runs (user limit: 10 GB)")
     ap.add_argument("--stagnation", type=int, default=30000, help="play frames without discovery before stopping")
     ap.add_argument("--cap", type=int, default=1200, help="max exploration wall per ROM (s)")
-    ap.add_argument("--guard", type=int, default=8 << 30, help="max state dir bytes per ROM")
+    ap.add_argument("--guard", type=int, default=15 << 30, help="stop a run only when the scratch disk has less than this many bytes free (the disk spool unloads the RAM; no per-ROM size cap)")
+    ap.add_argument("--search", type=int, default=600, help="seconds of fork search after the play budget (deepeel --search-limit); 0 = skip")
     ap.add_argument("--sessions", type=int, default=8, help="--sessions of each deepeel (CPU use comes in bursts at the epoch barriers, so 4 explorations x 8 interleave on 16 cores)")
     ap.add_argument("--queue", type=int, default=60000, help="exploration states kept in RAM before the disk spool (0 = engine default 4096)")
     ap.add_argument("--only", default="")
@@ -432,7 +441,7 @@ def main():
     idx_path = os.path.join(RES, "index.json")
     index = json.load(open(idx_path)) if os.path.exists(idx_path) else {}
     todo = [e for e in entries if index.get(e["sub"] + "/" + e["slug"]) not in
-            (("done", "capped", "negligible_gain") if not a.redo else ())]
+            (("done", "capped", "negligible_gain", "unsupported") if not a.redo else ())]
     if a.limit:
         todo = todo[:a.limit]
     print("%d zips, %d to do" % (len(entries), len(todo)))

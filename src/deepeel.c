@@ -36,8 +36,10 @@
 
 static uint8_t *nes_read_file(const char *path, size_t *size);
 static DpExplorer *volatile g_sig_ex;
+static volatile sig_atomic_t g_alarm_fired;   // the wall-clock alarm (not a user SIGINT) stopped the run
+static unsigned g_search_limit_secs;          // --search-limit: fresh wall budget for the post-play fork search
 static void on_explore_sigint(int sig) {
-    (void)sig;
+    if (sig == SIGALRM) g_alarm_fired = 1;
     dp_explore_interrupt = 1;
     if (g_sig_ex) g_sig_ex->stop = 1;
 }
@@ -137,6 +139,8 @@ static void usage(void) {
             "    --stagnation F       stop after F frames with no discovery (default never)\n"
             "    --mem-cap MB         stop (gracefully, resumable) once RSS exceeds MB MiB\n"
             "    --until-static       also stop when every byte is explained\n"
+            "    --search-limit S     after the play budget (--time-limit) ran out, give the fork search\n"
+            "                         (frontier drain) S more seconds instead of skipping it\n"
             "    --checkpoints N      checkpoint pool size (default 48)\n"
             "    --stall E            empty epochs before re-seeding from the best (default 3)\n"
             "    --state-dir D        persist the pool (pool.bin) and the PNG snapshots\n"
@@ -368,6 +372,7 @@ static int cmd_explore(int argc, char **argv) {
             else tier_limit = (uint8_t)atoi(t);
         }
         else if (!strcmp(a, "--time-limit") && i + 1 < argc) scfg.time_limit_secs = strtoull(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--search-limit") && i + 1 < argc) g_search_limit_secs = (unsigned)strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--frontier-cap-gb") && i + 1 < argc) cfg.frontier_cap_mb = strtoull(argv[++i], NULL, 0) * 1024;
         else if (!strcmp(a, "--spool-cap-mb") && i + 1 < argc) cfg.spool_cap_mb = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--jobs") && i + 1 < argc) { ++i; cfg.jobs = !strcmp(argv[i], "auto") ? auto_jobs() : atoi(argv[i]); }
@@ -575,6 +580,16 @@ static int cmd_explore(int argc, char **argv) {
             fprintf(stderr, "deepeel: spool unavailable (%s), overflow states are refused and counted (spool_refused)\n",
                     spool_path);
         if (scfg.resume) dp_explorer_exact_load(ex, exact_path);
+        if (scfg.resume) {
+            char cpath[540];
+            snprintf(cpath, sizeof cpath, "%s/coverage.bin", scfg.state_dir);
+            char dpath[540];
+            snprintf(dpath, sizeof dpath, "%s/disc.bin", scfg.state_dir);
+            long dl = dp_results_disc_load(&res, dpath);
+            if (dl >= 0) fprintf(stderr, "deepeel: resumed discovery log (%ld entries)\n", dl);
+            long g = dp_results_cov_load(&res, cpath);
+            if (g >= 0) fprintf(stderr, "deepeel: resumed coverage map (%ld bytes known again)\n", g);
+        }
     }
     if (scfg.resume && fdir) {
         int fl = dp_explorer_frontier_load(ex, fdir);
@@ -647,7 +662,16 @@ static int cmd_explore(int argc, char **argv) {
                     (unsigned long long)dp_play_tas_cut_stuck(play_engine));
         // phase 3, mandatory: the total search drains the frontier the
         // sessions fed, depth-first, until every choice is closed
-        if (reason != 2) {
+        // the play budget ran out by the clock (not a user SIGINT): the fork search keeps its own
+        // wall budget instead of inheriting an already-fired alarm (it used to never start)
+        if ((g_alarm_fired || reason == 6) && g_search_limit_secs && reason != 2) {
+            g_alarm_fired = 0;
+            dp_explore_interrupt = 0;
+            ex->stop = 0;
+            alarm(g_search_limit_secs);
+            fprintf(stderr, "deepeel: play budget spent, fork search gets %us\n", g_search_limit_secs);
+        }
+        if (reason != 2 && !(g_alarm_fired && dp_explore_interrupt && !g_search_limit_secs)) {
             clock_t t1 = clock();
             ex->cfg.dfs = 1;
             ex->stop = 0;
@@ -853,6 +877,14 @@ static int cmd_explore(int argc, char **argv) {
                     (unsigned long long)(res.spool_writes - res.spool_reads),
                     (unsigned long long)(pend >> 20));
         dp_explorer_exact_save(ex, exact_path);
+    }
+    if (scfg.state_dir) {
+        char cpath[540];
+        snprintf(cpath, sizeof cpath, "%s/coverage.bin", scfg.state_dir);
+        if (!dp_results_cov_save(&res, cpath)) fprintf(stderr, "deepeel: cannot save %s\n", cpath);
+        char dpath[540];
+        snprintf(dpath, sizeof dpath, "%s/disc.bin", scfg.state_dir);
+        if (!dp_results_disc_save(&res, dpath)) fprintf(stderr, "deepeel: cannot save %s\n", dpath);
     }
     if (fdir) {
         if (!scfg.state_dir) mkdir(fdir, 0777);

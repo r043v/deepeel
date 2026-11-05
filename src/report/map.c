@@ -459,11 +459,6 @@ static int legend_text_width(const char *str, int scale) {
     return wpx;
 }
 
-// largest font scale whose text still fits the image width
-static int fit_scale(const char *str, int w, int x, int scale) {
-    while (scale > 1 && x + legend_text_width(str, scale) > w) scale--;
-    return scale;
-}
 
 // draws one legend entry — a square swatch, one text line tall, then the
 // text (swatch on the right when right_edge >= 0, the whole entry then
@@ -709,6 +704,39 @@ static void heat_rgb(double t, uint8_t *px) {
         px[c] = (uint8_t)(stops[i][c] + (stops[i + 1][c] - stops[i][c]) * f + 0.5);
 }
 
+// greedy word wrap of str into at most maxl lines of at most maxw pixels at the given
+// scale (a word wider than a line stays whole on its own line); returns the line count
+enum { WRAP_LEN = 160 };
+static int wrap_text(const char *str, int maxw, int scale, char lines[][WRAP_LEN], int maxl) {
+    int n = 0;
+    char cur[WRAP_LEN];
+    cur[0] = 0;
+    const char *p = str;
+    while (*p && n < maxl) {
+        while (*p == ' ') p++;
+        if (!*p) break;
+        const char *e = p;
+        while (*e && *e != ' ') e++;
+        char word[WRAP_LEN];
+        size_t wl = (size_t)(e - p);
+        if (wl >= sizeof word) wl = sizeof word - 1;
+        memcpy(word, p, wl);
+        word[wl] = 0;
+        char trial[2 * WRAP_LEN];
+        snprintf(trial, sizeof trial, cur[0] ? "%s %s" : "%s%s", cur, word);
+        if (cur[0] && legend_text_width(trial, scale) > maxw) {
+            memcpy(lines[n++], cur, sizeof cur);
+            snprintf(cur, sizeof cur, "%s", word);
+            if (n >= maxl) return n;
+        } else {
+            snprintf(cur, sizeof cur, "%.*s", WRAP_LEN - 1, trial);
+        }
+        p = e;
+    }
+    if (cur[0] && n < maxl) memcpy(lines[n++], cur, sizeof cur);
+    return n;
+}
+
 static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapSummary *s,
                           const char *map_text, size_t map_len, const char *meta,
                           const char *path, const char *sysname, const char *filename,
@@ -733,7 +761,7 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
         for (;;) {
             double pw = GAP + bc * (double)(BANK_PX + GAP);
             double ph = GAP + br * (double)(TILE / bpp + GAP);
-            if (heat) ph *= 2;
+            if (heat) ph = ph * 1.5; // the heat grid is half size on both axes
             if (pw * ph <= (double)dp_map_png_budget || bpp >= 128) break;
             bpp <<= 1;
         }
@@ -791,9 +819,12 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     ls = rs = s_common;
     int LH = 7 * s_common + 4;
     int map_h = GAP + rows * (BANK_H + GAP);
+    // the heat grid is drawn at half resolution on both axes (one heat pixel = the hottest of a
+    // 2x2 block): it only shows where the play went, the complete data ship in the PNG chunks
+    const int HEAT_W = TILE / 2, HEAT_H = (BANK_H + 1) / 2;
     int heat_oy = map_h - GAP; // heat grid right below the ROM grid
-    int grid_h = heat ? heat_oy + map_h : map_h;
-    int n_meth = methods ? 1 : 0; // one legend line for the method shares
+    int heat_map_h = GAP + rows * (HEAT_H + GAP);
+    int grid_h = heat ? heat_oy + heat_map_h : map_h;
     // identity block: title row, then system / file / sizes / converter
     char size_txt[24];
     if (rom_size >= 1024 * 1024)
@@ -804,8 +835,26 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     snprintf(info_a, sizeof info_a, "%s - %s - %s", sysname ? sysname : "?",
              filename && filename[0] ? filename : "?", size_txt);
     int head_LH = 7 * FSCALE + 4;
-    int foot_LH = 11; // the 1-px note (+ heat scale) + deepeel signature, bottom right
-    int h = grid_h + GAP + head_LH + GAP + (7 + 4) + GAP + n_meth * (7 + 4 + GAP) + half * LH + GAP + foot_LH;
+    // title, identity and method lines wrap on word boundaries instead of running off a narrow
+    // (32 KiB) image
+    char head[160];
+    // truncated, never rounded up: 100.0% only when nothing is unknown
+    snprintf(head, sizeof head, "%s - %.1f%%", title[0] ? title : "?",
+             s->unknown ? floor(s->known * (s->total ? 100.0 / (double)s->total : 0.0) * 10.0) / 10.0 : 100.0);
+    char head_l[3][WRAP_LEN], info_l[3][WRAP_LEN], meth_l[4][WRAP_LEN];
+    int n_head = wrap_text(head, w - 2 * GAP, FSCALE, head_l, 3);
+    int n_info = wrap_text(info_a, w - 2 * GAP, 1, info_l, 3);
+    int n_meth = methods ? wrap_text(methods, w - 2 * GAP, 1, meth_l, 4) : 0;
+    // bottom line: heat scale left, "1 px = N o / deepeel x.y.z" right; own line when too narrow
+    char sig[40], note_buf[24];
+    snprintf(sig, sizeof sig, "deepeel %s", DEEPEEL_VERSION);
+    snprintf(note_buf, sizeof note_buf, "1 px = %d o", bpp);
+    const char *heat_lt = "chaleur (jeu, 1/4) : froid", *heat_rt = "chaud";
+    int sig_total = legend_text_width(note_buf, 1) + 4 + legend_text_width("/", 1) + 4 + legend_text_width(sig, 1);
+    int heat_total = heat ? legend_text_width(heat_lt, 1) + 4 + 64 + 4 + legend_text_width(heat_rt, 1) : 0;
+    int heat_own_line = heat && heat_total + 8 + sig_total > w - 2 * GAP;
+    int foot_LH = 11 * (heat_own_line ? 2 : 1);
+    int h = grid_h + GAP + n_head * head_LH + GAP + n_info * (7 + 4) + GAP + (n_meth ? n_meth * (7 + 4) + GAP : 0) + half * LH + GAP + foot_LH;
     uint8_t *rgb = malloc((size_t)w * h * 3);
     if (!rgb) { free(m); return 0; }
     for (size_t i = 0; i < (size_t)w * h; i++) { rgb[i * 3] = 0x18; rgb[i * 3 + 1] = 0x18; rgb[i * 3 + 2] = 0x1c; }
@@ -824,13 +873,9 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
             int x = g % TILE, y = g / TILE;
             uint8_t *px = rgb + ((size_t)(oy + y) * w + ox + x) * 3;
             int cls = m[k];
-            uint32_t hv = heat ? heat[k] : 0;
-            if (bpp > 1) { // dominant class of the group (a known class wins a tie); hottest byte
+            if (bpp > 1) { // dominant class of the group (a known class wins a tie)
                 unsigned cnt[DP_MAP_COUNT] = {0};
-                for (int q = 0; q < bpp; q++) {
-                    cnt[m[k + (size_t)q]]++;
-                    if (heat && heat[k + (size_t)q] > hv) hv = heat[k + (size_t)q];
-                }
+                for (int q = 0; q < bpp; q++) cnt[m[k + (size_t)q]]++;
                 cls = 0;
                 for (int c2 = 1; c2 < DP_MAP_COUNT; c2++)
                     if (cnt[c2] >= cnt[cls] && cnt[c2]) cls = c2;
@@ -838,11 +883,24 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
             }
             const uint8_t *c = map_rgb[cls];
             px[0] = c[0]; px[1] = c[1]; px[2] = c[2];
-            if (heat) {
-                uint8_t *hp = rgb + ((size_t)(heat_oy + oy + y) * w + ox + x) * 3;
-                if (hv && hlog > 0.0) heat_rgb(log2((double)hv + 1.0) / hlog, hp);
-                else { hp[0] = 0x22; hp[1] = 0x22; hp[2] = 0x28; }
-            }
+        }
+        if (heat) { // half-resolution heat tile, centred under its bank tile
+            int hox = ox + (BANK_PX - HEAT_W) / 2, hoy = heat_oy + GAP + (b / PER_ROW) * (HEAT_H + GAP);
+            for (int hy = 0; hy < HEAT_H; hy++)
+                for (int hx = 0; hx < HEAT_W; hx++) {
+                    uint32_t hv = 0;
+                    for (int dy = 0; dy < 2; dy++) // the 2x2 ROM pixels, each bpp bytes
+                        for (int dx = 0; dx < 2; dx++) {
+                            int ry = hy * 2 + dy, rx = hx * 2 + dx;
+                            if (ry >= BANK_H) continue;
+                            size_t k0 = (size_t)b * 0x4000 + ((size_t)ry * TILE + (size_t)rx) * (size_t)bpp;
+                            for (int q = 0; q < bpp; q++)
+                                if (heat[k0 + (size_t)q] > hv) hv = heat[k0 + (size_t)q];
+                        }
+                    uint8_t *hp = rgb + ((size_t)(hoy + hy) * w + hox + hx) * 3;
+                    if (hv && hlog > 0.0) heat_rgb(log2((double)hv + 1.0) / hlog, hp);
+                    else { hp[0] = 0x22; hp[1] = 0x22; hp[2] = 0x28; }
+                }
         }
     }
     // the legend itself: rom name, identity line, the classes in two columns,
@@ -850,18 +908,16 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     // ROM bytes), "64 o", a slash and the deepeel signature, one small line
     int y = grid_h + GAP;
     double pct = s->total ? 100.0 / (double)s->total : 0.0;
-    char head[160];
-    // truncated, never rounded up: 100.0% only when nothing is unknown
-    snprintf(head, sizeof head, "%s - %.1f%%", title[0] ? title : "?",
-             s->unknown ? floor(s->known * pct * 10.0) / 10.0 : 100.0);
-    int head_scale = fit_scale(head, w, GAP, FSCALE);
-    legend_text(rgb, w, h, GAP, y, head, (const uint8_t *)"\xe0\xe0\xe0", head_scale);
-    y += head_LH + GAP;
-    legend_text(rgb, w, h, GAP, y, info_a, (const uint8_t *)"\x90\x90\x98", 1);
-    y += (7 + 4) + GAP;
-    if (methods) {
-        legend_text(rgb, w, h, GAP, y, methods, (const uint8_t *)"\xc0\xc0\xc8", 1);
-        y += (7 + 4) + GAP;
+    for (int i = 0; i < n_head; i++, y += head_LH)
+        legend_text(rgb, w, h, GAP, y, head_l[i], (const uint8_t *)"\xe0\xe0\xe0", FSCALE);
+    y += GAP;
+    for (int i = 0; i < n_info; i++, y += 7 + 4)
+        legend_text(rgb, w, h, GAP, y, info_l[i], (const uint8_t *)"\x90\x90\x98", 1);
+    y += GAP;
+    if (n_meth) {
+        for (int i = 0; i < n_meth; i++, y += 7 + 4)
+            legend_text(rgb, w, h, GAP, y, meth_l[i], (const uint8_t *)"\xc0\xc0\xc8", 1);
+        y += GAP;
     }
     for (int r = 0; r < half; r++) {
         int ry = y + r * LH;
@@ -885,12 +941,10 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     // the bottom line: heat scale (left, when drawn), then on the right
     // "1 px = 1 o", "/", the deepeel signature
     {
-        char sig[40];
-        snprintf(sig, sizeof sig, "deepeel %s", DEEPEEL_VERSION);
         const uint8_t *col = (const uint8_t *)"\x70\x70\x78";
         int fy = y + half * LH + GAP;
         if (heat) {
-            const char *lt = "chaleur (jeu) : froid", *rt = "chaud";
+            const char *lt = heat_lt, *rt = heat_rt;
             int x = GAP;
             legend_text(rgb, w, h, x, fy, lt, col, 1);
             x += legend_text_width(lt, 1) + 4;
@@ -903,11 +957,9 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
             x += 64 + 4;
             legend_text(rgb, w, h, x, fy, rt, col, 1);
         }
-        char note_buf[24];
-        snprintf(note_buf, sizeof note_buf, "1 px = %d o", bpp);
         const char *px_note = note_buf;
-        int total = legend_text_width(px_note, 1) + 4 + legend_text_width("/", 1) + 4 +
-                    legend_text_width(sig, 1);
+        int total = sig_total;
+        if (heat_own_line) fy += 11;
         int x = w - GAP - total;
         legend_text(rgb, w, h, x, fy, px_note, col, 1);
         x += legend_text_width(px_note, 1) + 4;

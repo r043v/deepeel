@@ -624,6 +624,10 @@ uint64_t dp_explorer_spool_pending(const DpExplorer *ex);
 // exact-state dedup persistence: without it a resumed run would re-explore
 // every spooled state from scratch
 int dp_explorer_exact_save(const DpExplorer *ex, const char *path);
+int dp_results_cov_save(const DpResults *res, const char *path);   // coverage flags next to the spool
+long dp_results_cov_load(DpResults *res, const char *path);        // OR them back on --resume (-1: none)
+int dp_results_disc_save(const DpResults *res, const char *path); // discovery log, same purpose
+long dp_results_disc_load(DpResults *res, const char *path);       // prepended on --resume (-1: none)
 int dp_explorer_exact_load(DpExplorer *ex, const char *path);
 // bytes neither executed, nor read as data, nor statically classified
 // (padding, pointer tables) — the honest "remaining" gap metric

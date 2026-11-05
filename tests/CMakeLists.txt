@@ -574,3 +574,6 @@ add_test(NAME pce_speculative COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore 
 set_tests_properties(pce_speculative PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_speculative COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_dma_fault.md --max-total 20000 --text ${CMAKE_CURRENT_BINARY_DIR}/md_sp.txt >/dev/null 2>&1; grep -q '1 speculative (static closure only)' ${CMAKE_CURRENT_BINARY_DIR}/md_sp.txt")
 set_tests_properties(md_speculative PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+
+add_test(NAME resume_cov COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/resume_cov.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_branch.gb)
+set_tests_properties(resume_cov PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)

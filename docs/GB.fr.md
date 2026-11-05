@@ -3719,3 +3719,44 @@ reprise de Sonic tourne ensuite sans plantage (observation de l'outil ; fin du r
   `meta.json` (`per_movie`).
 - Les nombres produits sont des observations de l'outil (machine concrète, RAM
   à zéro), pas des mesures de matériel.
+
+## 0.249.41 : carte de couverture persistante, recherche fork avec son propre budget (2026-11-05)
+
+- **Bogue corrigé : `--resume` oubliait la couverture.** La carte (`exec_flags`, `data_flags`,
+  `static_flags`, `src_flags`) n'était pas sauvegardée : une reprise repartait d'une carte vide, et comme
+  le dédup d'états saute les états déjà vus, leurs octets n'étaient jamais redécouverts — un octet connu
+  par la passe précédente redevenait inconnu. Elle est désormais écrite dans `<state-dir>/coverage.bin`
+  à la sortie (écriture atomique) et réinjectée par OU au `--resume` (`resumed coverage map (N bytes
+  known again)`). Test `resume_cov`. Limite connue : le journal de découvertes n'est pas persisté, donc
+  `methods_pct` d'une reprise crédite le socle déjà connu à `static`.
+- **`--search-limit S`.** Avec `--play`, la recherche à fourches (« total search ») ne tourne qu'après la
+  phase de jeu ; quand `--time-limit` expirait pendant le jeu, l'alarme déjà déclenchée l'arrêtait avant
+  son premier pas, d'où `fork` à 0 % sur les ROMs qui atteignent le plafond. `--search-limit S` lui
+  donne S secondes de plus. Sans l'option, comportement inchangé.
+- Lot (`tools/romset_batch.py`) : `--search` (600 s par défaut) transmet `--search-limit` ; `--guard`
+  passe à 20 Go (le spool disque sert à décharger la RAM) ; un arrêt `mem-guard`/`state-guard` reprend
+  maintenant avec `--resume` (3 fois au plus) au lieu de clore la ROM.
+- Observations de l'outil sur Noobow (Japan), une exécution chacune : `explore` sans `--play` (fourches
+  seules) 77,78 % en 911 s, 47 M d'états (11,5 Go) en spool ; jeu 300 s + recherche 300 s 82,39 % ;
+  reprise de cet état (jeu 120 s + recherche 600 s) 84,11 %, sans perte. La recherche à fourches n'a
+  rien ajouté après le jeu dans ces deux passes : 17,4 M d'états sont élagués « côtés déjà couverts ».
+  Des 17,6 % encore inconnus, 55 % sont des franges de remplissage, 15 % des bords code/données.
+
+## 0.249.42 : PNG de carte lisible sur les petites ROMs (2026-11-05)
+
+- Le titre, la ligne d'identité et la ligne des parts par méthode passent à la ligne (mots entiers)
+  au lieu de déborder sur les images étroites (ROMs de 32 Kio : 2 banques, 274 px de large).
+- La grille de chaleur est dessinée à demi-résolution sur les deux axes (un pixel de chaleur = le plus
+  chaud d'un bloc 2×2 de pixels de la carte), centrée sous chaque banque : elle montre où le jeu est
+  passé, les données complètes restent dans les chunks du PNG. Sa légende (« chaleur (jeu, 1/4) ») passe
+  sur sa propre ligne quand elle ne tient pas à côté de la signature.
+
+### 0.249.42 (suite) : journal de découvertes persistant
+
+- `<state-dir>/disc.bin` : le journal de découvertes (qui a trouvé combien, quand) est sauvegardé à la sortie
+  et préfixé au `--resume`, à côté de `coverage.bin`. Les octets connus d'une passe antérieure restent
+  crédités à la méthode qui les avait trouvés dans `methods_pct`, au lieu de tomber dans `static`.
+- Observation sur Noobow (Japan) : la recherche à fourches après le jeu n'est pas « vide » mais bornée par
+  `--search-limit` : 569 s, 13 965 chemins, 43 M de forks élagués « côtés déjà couverts » (ils ne coûtent
+  pas de code mais du temps). Le gain mesuré vient surtout de la fermeture statique (+20 417 octets au
+  round 1). Les passes de reprise ajoutent du temps de recherche sans repasser sur le jeu.

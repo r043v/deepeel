@@ -230,6 +230,100 @@ void dp_disc_add(DpResults *res, const char *source, uint64_t credit) {
     e->frame = 0;
 }
 
+
+// --- coverage map persistence (--resume must not forget what a previous pass proved) ---
+// Flags only ever gain bits within a run; a resumed run used to start from an empty map and
+// deduplicated states then never re-proved their bytes, so earlier knowledge was lost.
+// Format: "DPCOV1\0\0", u32 banks, then exec_flags, data_flags, static_flags (1 byte per ROM
+// byte) and src_flags (u32 per ROM byte).
+int dp_results_cov_save(const DpResults *res, const char *path) {
+    size_t n = (size_t)res->banks * 0x4000;
+    char tmp[600];
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *f = fopen(tmp, "wb");
+    if (!f) return 0;
+    uint32_t banks = (uint32_t)res->banks;
+    int ok = fwrite("DPCOV1\0\0", 1, 8, f) == 8 && fwrite(&banks, 4, 1, f) == 1 &&
+             fwrite(res->exec_flags, 1, n, f) == n && fwrite(res->data_flags, 1, n, f) == n &&
+             fwrite(res->static_flags, 1, n, f) == n && fwrite(res->src_flags, 4, n, f) == n;
+    if (fclose(f) != 0) ok = 0;
+    if (!ok) { remove(tmp); return 0; }
+    return rename(tmp, path) == 0;
+}
+
+// OR the saved flags into the map; returns the bytes whose exec|data|static state became non-empty, -1 if absent
+long dp_results_cov_load(DpResults *res, const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    size_t n = (size_t)res->banks * 0x4000;
+    char magic[8];
+    uint32_t banks = 0;
+    long gained = -1;
+    uint8_t *e = malloc(n), *d = malloc(n), *st = malloc(n);
+    uint32_t *sr = malloc(n * sizeof(uint32_t));
+    if (e && d && st && sr && fread(magic, 1, 8, f) == 8 && !memcmp(magic, "DPCOV1\0\0", 8) &&
+        fread(&banks, 4, 1, f) == 1 && banks == (uint32_t)res->banks &&
+        fread(e, 1, n, f) == n && fread(d, 1, n, f) == n && fread(st, 1, n, f) == n &&
+        fread(sr, 4, n, f) == n) {
+        gained = 0;
+        for (size_t i = 0; i < n; i++) {
+            if (!(res->exec_flags[i] | res->data_flags[i] | res->static_flags[i]) && (e[i] | d[i] | st[i])) gained++;
+            res->exec_flags[i] |= e[i];
+            res->data_flags[i] |= d[i];
+            res->static_flags[i] |= st[i];
+            res->src_flags[i] |= sr[i];
+        }
+    }
+    free(e); free(d); free(st); free(sr);
+    fclose(f);
+    return gained;
+}
+
+// The discovery log rides next to the coverage map so a resumed pass keeps crediting the
+// earlier passes' bytes to the methods that found them (methods_pct) instead of to "static".
+// Format: "DPDSC1\0\0", u32 entry size, u32 count, raw entries.
+int dp_results_disc_save(const DpResults *res, const char *path) {
+    char tmp[600];
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *f = fopen(tmp, "wb");
+    if (!f) return 0;
+    uint32_t esz = (uint32_t)sizeof(DpDiscEntry), cnt = (uint32_t)res->disc_n;
+    int ok = fwrite("DPDSC1\0\0", 1, 8, f) == 8 && fwrite(&esz, 4, 1, f) == 1 && fwrite(&cnt, 4, 1, f) == 1 &&
+             (cnt == 0 || fwrite(res->disc, sizeof(DpDiscEntry), cnt, f) == cnt);
+    if (fclose(f) != 0) ok = 0;
+    if (!ok) { remove(tmp); return 0; }
+    return rename(tmp, path) == 0;
+}
+
+// Prepend the saved log to the entries already present; returns the entries loaded, -1 if absent
+long dp_results_disc_load(DpResults *res, const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    char magic[8];
+    uint32_t esz = 0, cnt = 0;
+    long got = -1;
+    if (fread(magic, 1, 8, f) == 8 && !memcmp(magic, "DPDSC1\0\0", 8) &&
+        fread(&esz, 4, 1, f) == 1 && fread(&cnt, 4, 1, f) == 1 && esz == sizeof(DpDiscEntry) && cnt < (1u << 26)) {
+        size_t have = (size_t)res->disc_n;
+        DpDiscEntry *n = malloc((cnt + have + 1) * sizeof *n);
+        if (n && fread(n, sizeof *n, cnt, f) == cnt) {
+            if (have) memcpy(n + cnt, res->disc, have * sizeof *n);
+            free(res->disc);
+            res->disc = n;
+            res->disc_n = res->disc_cap = (int)(cnt + have);
+            struct timespec ts;
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            // the clock of the new pass continues after the last saved entry
+            double last = cnt ? n[cnt - 1].t : 0.0;
+            res->disc_t0 = (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9 - last;
+            for (size_t i = 0; i < have; i++) n[cnt + i].t += last;
+            got = (long)cnt;
+        } else free(n);
+    }
+    fclose(f);
+    return got;
+}
+
 void dp_results_free(DpResults *res) {
     free(res->disc);
     free(res->exec_flags);
