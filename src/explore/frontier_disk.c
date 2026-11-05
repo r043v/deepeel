@@ -19,13 +19,15 @@
 // u32 choice, u32 img length, image bytes.  One file, two cursors: records are
 // appended at spool_wr and read back from spool_rd.
 #define DP_SPOOL_REC 0x52535044ull // 'DPSR' little-endian: raw image (older spools)
+#define DP_SPOOL_DREC 0x44535044ull // 'DPSD' (format v2): XOR against a key record; hdr[2] = size | blen << 32, body = key offset (8) + deflate
+#define DP_SPOOL_KEY_MAX 256       // deltas per key: bounds the chain and re-keys when states drift
 #define DP_SPOOL_ZREC 0x5A535044ull // 'DPSZ': zlib image; hdr[2] = image size | clen << 32
 // records are variable-size now: the byte length of the record starting at `at`
 // (0: truncated or unknown)
 static uint64_t spool_rec_len(FILE *f, uint64_t at, uint64_t end, uint64_t sb) {
     uint64_t h[3];
     if (at + sizeof h > end || fseek(f, (long)at, SEEK_SET) || fread(h, sizeof h, 1, f) != 1) return 0;
-    uint64_t body = h[0] == DP_SPOOL_REC ? sb : (h[0] == DP_SPOOL_ZREC ? (h[2] >> 32) : 0);
+    uint64_t body = h[0] == DP_SPOOL_REC ? sb : ((h[0] == DP_SPOOL_ZREC || h[0] == DP_SPOOL_DREC) ? (h[2] >> 32) : 0);
     if (!body || at + sizeof h + body > end) return 0;
     return sizeof h + body;
 }
@@ -55,6 +57,36 @@ static int zraw_uncompress(uint8_t *dst, uLongf *dlen, const uint8_t *src, uLong
     return r == Z_STREAM_END ? Z_OK : Z_DATA_ERROR;
 }
 
+uint8_t *dp_img_pack(const DpExplorer *ex, uint8_t *img, uint8_t *packed) {
+    *packed = 0;
+    uLongf clen = compressBound((uLong)ex->sb);
+    uint8_t *cb = malloc(clen + 4);
+    if (!cb) return img;
+    if (zraw_compress(cb + 4, &clen, img, (uLong)ex->sb, 1) != Z_OK || clen + 4 >= ex->sb) {
+        free(cb);
+        return img;
+    }
+    uint32_t c32 = (uint32_t)clen;
+    memcpy(cb, &c32, 4);
+    uint8_t *out = realloc(cb, clen + 4);
+    free(img);
+    *packed = 1;
+    return out ? out : cb;
+}
+
+uint8_t *dp_img_unpack(const DpExplorer *ex, uint8_t *pk) {
+    uint32_t c32;
+    memcpy(&c32, pk, 4);
+    uint8_t *img = xrealloc(NULL, ex->sb);
+    uLongf n = ex->sb;
+    if (zraw_uncompress(img, &n, pk + 4, c32) != Z_OK || n != ex->sb) {
+        fprintf(stderr, "deepeel: packed queue image corrupt\n");
+        memset(img, 0, ex->sb);
+    }
+    free(pk);
+    return img;
+}
+
 int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int kind,
                            int from_reset, uint32_t choice) {
     DpSpool *sp = ex->spool;
@@ -70,20 +102,50 @@ int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int kind,
         src = cb;
     }
     pthread_mutex_lock(&sp->mtx);
+    uint8_t *dbuf = NULL;
+    uint64_t as_key = 0;
+    if (sp->key_img && sp->key_n < DP_SPOOL_KEY_MAX) {
+        uLongf dl = compressBound((uLong)ex->sb) + 8;
+        uint8_t *x = malloc(ex->sb);
+        dbuf = malloc(dl);
+        if (x && dbuf) {
+            for (uint32_t i = 0; i < ex->sb; i++) x[i] = img[i] ^ sp->key_img[i];
+            dl -= 8;
+            if (zraw_compress(dbuf + 8, &dl, x, (uLong)ex->sb, 1) == Z_OK && dl + 8 < (magic == DP_SPOOL_ZREC ? body : (uint64_t)ex->sb)) {
+                memcpy(dbuf, &sp->key_off, 8);
+                magic = DP_SPOOL_DREC;
+                body = dl + 8;
+                src = dbuf;
+                sp->key_n++;
+            }
+        }
+        free(x);
+    }
+    if (magic != DP_SPOOL_DREC) as_key = 1; // a full record becomes the next key
     if ((ex->cfg.spool_cap_bytes && sp->wr - sp->rd >= ex->cfg.spool_cap_bytes) ||
         (ex->cfg.spool_cap_mb && (sp->wr - sp->rd) / (1024 * 1024) >= ex->cfg.spool_cap_mb)) {
         pthread_mutex_unlock(&sp->mtx);
         free(cb);
+        free(dbuf);
         u32_add(&ex->res->spool_refused, 1);
         return 0;
     }
     uint64_t hdr[3] = { magic,
                         (uint64_t)(forced ? 1 : 0) | ((uint64_t)kind << 8) |
                             ((uint64_t)(from_reset ? 1 : 0) << 16) | ((uint64_t)choice << 32),
-                        magic == DP_SPOOL_ZREC ? (ex->sb | (body << 32)) : ex->sb };
+                        magic != DP_SPOOL_REC ? (ex->sb | (body << 32)) : ex->sb };
     int ok = (sp->wpos == sp->wr || !fseek(sp->f, (long)sp->wr, SEEK_SET)) &&
              fwrite(hdr, sizeof hdr, 1, sp->f) == 1 && fwrite(src, 1, body, sp->f) == body;
     free(cb);
+    free(dbuf);
+    if (ok && as_key) {
+        if (!sp->key_img) sp->key_img = malloc(ex->sb);
+        if (sp->key_img) {
+            memcpy(sp->key_img, img, ex->sb);
+            sp->key_off = sp->wr;
+            sp->key_n = 0;
+        }
+    }
     if (ok) {
         sp->wr += sizeof hdr + body;
         sp->wpos = sp->wr;
@@ -94,6 +156,28 @@ int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int kind,
         perror("deepeel spool");
     }
     pthread_mutex_unlock(&sp->mtx);
+    return ok;
+}
+
+// loads the key record at `off` into the reader cache (a full record: raw or deflated)
+static int spool_key_load(DpExplorer *ex, DpSpool *sp, uint64_t off) {
+    if (sp->rkey_img && sp->rkey_off == off) return 1;
+    uint64_t h[3];
+    if (off + sizeof h > sp->wr || fseek(sp->f, (long)off, SEEK_SET) || fread(h, sizeof h, 1, sp->f) != 1) return 0;
+    if (!sp->rkey_img) sp->rkey_img = malloc(ex->sb);
+    if (!sp->rkey_img) return 0;
+    int ok = 0;
+    if (h[0] == DP_SPOOL_REC && h[2] == ex->sb) {
+        ok = fread(sp->rkey_img, 1, ex->sb, sp->f) == ex->sb;
+    } else if (h[0] == DP_SPOOL_ZREC && (h[2] & 0xFFFFFFFFull) == ex->sb && (h[2] >> 32) <= compressBound((uLong)ex->sb)) {
+        uint64_t n = h[2] >> 32;
+        uint8_t *cb = malloc(n);
+        uLongf dl = (uLongf)ex->sb;
+        ok = cb && fread(cb, 1, n, sp->f) == n && zraw_uncompress(sp->rkey_img, &dl, cb, (uLong)n) == Z_OK && dl == ex->sb;
+        free(cb);
+    }
+    if (ok) sp->rkey_off = off;
+    else sp->rkey_off = UINT64_MAX;
     return ok;
 }
 
@@ -125,8 +209,8 @@ void spool_feed(DpExplorer *ex) {
         if (fseek(sp->f, (long)sp->rd, SEEK_SET) ||
             fread(hdr, sizeof hdr, 1, sp->f) != 1 ||
             !((hdr[0] == DP_SPOOL_REC && hdr[2] == ex->sb) ||
-              (hdr[0] == DP_SPOOL_ZREC && (hdr[2] & 0xFFFFFFFFull) == ex->sb && (hdr[2] >> 32) > 0 &&
-               (hdr[2] >> 32) <= compressBound((uLong)ex->sb)))) {
+              ((hdr[0] == DP_SPOOL_ZREC || hdr[0] == DP_SPOOL_DREC) && (hdr[2] & 0xFFFFFFFFull) == ex->sb && (hdr[2] >> 32) > 0 &&
+               (hdr[2] >> 32) <= compressBound((uLong)ex->sb) + 8))) {
             fprintf(stderr, "deepeel: spool corrupt at %llu, dropping the rest\n",
                     (unsigned long long)sp->rd);
             sp->rd = sp->wr;
@@ -135,10 +219,20 @@ void spool_feed(DpExplorer *ex) {
             return;
         }
         uint8_t *img = xrealloc(NULL, ex->sb);
-        uint64_t body = hdr[0] == DP_SPOOL_ZREC ? (hdr[2] >> 32) : ex->sb;
+        uint64_t body = hdr[0] != DP_SPOOL_REC ? (hdr[2] >> 32) : ex->sb;
         int rok = 0;
         if (img && hdr[0] == DP_SPOOL_REC) rok = fread(img, 1, ex->sb, sp->f) == ex->sb;
-        else if (img) {
+        else if (img && hdr[0] == DP_SPOOL_DREC) {
+            uint8_t *cb = malloc(body);
+            uLongf dl = (uLongf)ex->sb;
+            uint64_t koff = 0;
+            rok = cb && body > 8 && fread(cb, 1, body, sp->f) == body && (memcpy(&koff, cb, 8), 1) &&
+                  zraw_uncompress(img, &dl, cb + 8, (uLong)(body - 8)) == Z_OK && dl == ex->sb &&
+                  spool_key_load(ex, sp, koff);
+            if (rok)
+                for (uint32_t i = 0; i < ex->sb; i++) img[i] ^= sp->rkey_img[i];
+            free(cb);
+        } else if (img) {
             uint8_t *cb = malloc(body);
             uLongf dl = (uLongf)ex->sb;
             rok = cb && fread(cb, 1, body, sp->f) == body && zraw_uncompress(img, &dl, cb, (uLong)body) == Z_OK &&
@@ -261,6 +355,7 @@ uint64_t dp_explorer_spool_flush(DpExplorer *ex) {
         for (uint32_t i = 0; i < ex->sh->len; i++) {
             DpPathState *p = &ex->sh->q[(ex->sh->head + i) % ex->sh->cap];
             if (p->img) {
+                if (p->packed) { p->img = dp_img_unpack(ex, p->img); p->packed = 0; }
                 if (!spool_write_rec(ex, p->img, p->forced, p->kind, p->from_reset, p->choice)) {
                 if (defer_push(ex, p->img, p->forced, p->kind, p->from_reset, p->choice, DP_R_PATHS)) {
                     memset(p, 0, sizeof *p);
@@ -279,6 +374,7 @@ uint64_t dp_explorer_spool_flush(DpExplorer *ex) {
     for (uint32_t i = 0; i < ex->q_len; i++) {
         DpPathState *p = &ex->queue[(ex->q_head + i) % ex->q_cap];
         if (p->img) {
+            if (p->packed) { p->img = dp_img_unpack(ex, p->img); p->packed = 0; }
             if (!spool_write_rec(ex, p->img, p->forced, p->kind, p->from_reset, p->choice)) {
                 if (defer_push(ex, p->img, p->forced, p->kind, p->from_reset, p->choice, DP_R_PATHS)) {
                     memset(p, 0, sizeof *p);
@@ -295,6 +391,7 @@ uint64_t dp_explorer_spool_flush(DpExplorer *ex) {
     for (uint32_t i = 0; i < ex->pq_len; i++) {
         DpPathState *p = &ex->pqueue[(ex->pq_head + i) % ex->pq_cap];
         if (p->img) {
+            if (p->packed) { p->img = dp_img_unpack(ex, p->img); p->packed = 0; }
             if (!spool_write_rec(ex, p->img, p->forced, p->kind, p->from_reset, p->choice)) {
                 if (defer_push(ex, p->img, p->forced, p->kind, p->from_reset, p->choice, DP_R_PATHS)) {
                     memset(p, 0, sizeof *p);

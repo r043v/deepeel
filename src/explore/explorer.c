@@ -486,6 +486,7 @@ void dp_explorer_free(DpExplorer *ex) {
     if (ex->spool && ex->spool_owned) {
         fclose(ex->spool->f);
         pthread_mutex_destroy(&ex->spool->mtx);
+        free(ex->spool->key_img); free(ex->spool->rkey_img);
         free(ex->spool->cursor_path);
         free(ex->spool);
     }
@@ -656,9 +657,11 @@ static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, in
                 return 0;
             }
         }
+        uint8_t pk;
+        img = dp_img_pack(ex, img, &pk);
         sh->q[(sh->head + sh->len) % sh->cap] =
             (DpPathState){ img, (uint8_t)(forced ? 1 : 0), (uint8_t)kind,
-                           (uint8_t)(from_reset ? 1 : 0), choice };
+                           (uint8_t)(from_reset ? 1 : 0), pk, choice };
         sh->len++;
         pthread_mutex_unlock(&sh->mtx);
         return 1;
@@ -693,6 +696,8 @@ static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, in
         }
     }
     DpPathState *p = &q[(head + len) % cap];
+    p->packed = 0;
+    if (!pri) img = dp_img_pack(ex, img, &p->packed);
     p->img = img;
     p->forced = (uint8_t)(forced ? 1 : 0);
     p->kind = (uint8_t)kind;
@@ -1583,7 +1588,8 @@ static int explore_step_inner(DpExplorer *ex) {
             ex->q_len--;
         }
     }
-    uint8_t *img = p->img;
+    uint8_t *img = p->packed ? dp_img_unpack(ex, p->img) : p->img;
+    p->packed = 0;
     int forced = p->forced, kind = p->kind, from_reset = p->from_reset;
     uint32_t choice = p->choice;
     uint8_t from_defer = p == &tmp ? ex->defer_tier_next : 0;

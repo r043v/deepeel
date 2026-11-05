@@ -374,6 +374,7 @@ typedef struct DpPathState {
     uint8_t forced;      // reached through a fork or speculative seed
     uint8_t kind;        // DP_SEED_* or DP_PATH_FORK
     uint8_t from_reset;  // descends from the reset flow (necessity verdicts)
+    uint8_t packed;      // img is a deflated copy (4-byte length prefix), see dp_img_pack
     uint32_t choice;     // the tree choice this path answers
 } DpPathState;
 
@@ -402,6 +403,12 @@ typedef struct DpSpool {
     uint64_t wpos; // file position after the last write (UINT64_MAX: a read moved it): consecutive appends skip the fseek
     pthread_mutex_t mtx;
     char *cursor_path; // <spool>.rd
+    // delta coding (record 'DPSD'): a state is stored as its XOR against a recent full "key" record
+    uint8_t *key_img;  // writer: image of the current key (NULL: none yet)
+    uint64_t key_off;  // file offset of the key record
+    uint32_t key_n;    // deltas written against this key
+    uint8_t *rkey_img; // reader cache: the key last read back
+    uint64_t rkey_off;
 } DpSpool;
 
 // shared work pool of a parallel drain (--jobs N): ordinary pushes go here,
@@ -624,6 +631,10 @@ uint64_t dp_explorer_frontier_disk(const DpExplorer *ex);
 uint64_t dp_explorer_spool_pending(const DpExplorer *ex);
 // exact-state dedup persistence: without it a resumed run would re-explore
 // every spooled state from scratch
+// queue-resident images are kept deflated (raw RLE, ~100x on machine states): pack on ring
+// insertion, unpack on pop / flush.  pack keeps the image as is when it does not shrink.
+uint8_t *dp_img_pack(const DpExplorer *ex, uint8_t *img, uint8_t *packed);
+uint8_t *dp_img_unpack(const DpExplorer *ex, uint8_t *pk);
 int dp_explorer_exact_save(const DpExplorer *ex, const char *path);
 int dp_results_cov_save(const DpResults *res, const char *path);   // coverage flags next to the spool
 long dp_results_cov_load(DpResults *res, const char *path);        // OR them back on --resume (-1: none)

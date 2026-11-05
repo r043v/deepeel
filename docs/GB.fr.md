@@ -3867,3 +3867,17 @@ de l'outil) : Puzznic 2 172 → 2 172 octets inconnus (120 → 161 variantes) ; 
 (438 → 1 273 variantes) ; Kirby's Dream Land 34 183 → 33 697 (219 → 684 variantes). Le gain est réel mais
 faible : la plupart des attentes de ces ROMs sortaient déjà par les bornes de boucle ; le coût en variantes
 est multiplié par 2 à 3.
+
+## 0.249.49 — file en RAM compressée, spool par différences
+
+- **File compressée.** Les images d'état en attente dans les files (anneau local et pool partagé) sont
+  gardées compressées (deflate brut RLE, préfixe de longueur sur 4 octets, drapeau `packed` dans
+  `DpPathState`), décompressées au dépilage ou au vidage vers le disque. La file prioritaire reste brute
+  (petite, plafonnée). Une image qui ne rétrécit pas reste telle quelle.
+- **Spool par différences (format v2).** Nouvel enregistrement `DPSD` : l'état est stocké en XOR contre un
+  enregistrement « clé » complet récent (jusqu'à 256 différences par clé, puis nouvelle clé), le décalage
+  de la clé précède le corps. Versionnage : les enregistrements `DPSR` (brut) et `DPSZ` (zlib) des anciens
+  spools restent lus tels quels et `--resume` accepte un spool mixte ; un ancien binaire ne lit pas `DPSD`.
+- **Mesure** (Puzznic, `--queue 4 --queue-max 4`, 120 s, observation de l'outil) : spool 10,4 Mo → 4,5 Mo
+  pour 47 878 états écrits (≈217 → ≈94 octets par état), même couverture (1 570 octets inconnus).
+  Reprise d'un spool écrit par l'ancien binaire : sans erreur.
