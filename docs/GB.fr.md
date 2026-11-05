@@ -3664,3 +3664,10 @@ provenance). PCE et MD restent ◐. Audit : 61 cellules ouvertes.
 
 D12 passe à ✅ pour PCE (sans plafond à 8, adresse de table gardée en 0.249.35, second passage et provenance) et MD (sans
 plafond, l'adresse de table est celle que S4 retrouve, second passage). La ligne D12 est ✅ sur les six colonnes.
+
+## 0.249.38 (MSX : débordement de pile dans le défilement texte)
+
+Un run prolongé de Gradius 2 (MSX, ROM hors dépôt) mourait par `stack smashing detected` : le runtime MSX amont lit la
+largeur de ligne dans `LINLEN` (RAM, modifiable par le jeu) et `text_scroll` la range dans un tampon de 40 octets.
+`cmake/dp_msx_instrument.cmake` borne désormais cette largeur à 40 dans la copie instrumentée (la source m0boy reste
+intacte). Les 172 tests passent ; le run de Gradius 2 repart sans le crash (observation de l'outil, non conclue ici).

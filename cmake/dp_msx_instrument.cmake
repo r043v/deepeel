@@ -41,4 +41,8 @@ replace_once([=[/* ---- ports --------------------------------------------------
 #undef msx_vdp_out
 #undef msx_vdp_data
 /* ---- ports ---------------------------------------------------------------- */]=])
+# CHPUT/scroll take the line width from LINLEN in RAM, which a game may overwrite: text_scroll keeps a
+# 40-byte line buffer, so a larger value smashed the stack (seen on Gradius 2).  Clamp it to the buffer.
+replace_once([=[const unsigned stride = mode ? 32 : 40, columns = rd(LINLEN);]=]
+  [=[const unsigned stride = mode ? 32 : 40, columns = rd(LINLEN) > 40 ? 40 : rd(LINLEN);]=])
 file(WRITE "${OUTPUT}" "/* Generated MSX BIOS instrumentation; do not edit. */\n#include \"msx_hooks.h\"\n${source}")
