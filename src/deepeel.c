@@ -6,6 +6,7 @@
 //   deepeel regs gb                                 dump the GB register registry
 //   deepeel dis rom.gb bank:addr [n]                disassemble n instructions
 #include <signal.h>
+#include <malloc.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include "core/md5.h"
@@ -38,6 +39,28 @@ static uint8_t *nes_read_file(const char *path, size_t *size);
 static DpExplorer *volatile g_sig_ex;
 static volatile sig_atomic_t g_alarm_fired;   // the wall-clock alarm (not a user SIGINT) stopped the run
 static unsigned g_search_limit_secs;          // --search-limit: fresh wall budget for the post-play fork search
+// SIGUSR1: one line per RAM-heavy structure (diagnostic, not async-signal-safe on purpose: the run is long-lived
+// and this is read by a human). Sizes are the live allocations the explorer holds, in MB.
+static DpTree *g_sig_tree;
+static void on_explore_usr1(int sig) {
+    (void)sig;
+    DpExplorer *ex = g_sig_ex;
+    if (!ex) return;
+    struct mallinfo2 mi = mallinfo2();
+    double mb = 1048576.0, img = (double)ex->sb;
+    fprintf(stderr, "mem: malloc in-use %.0f MB, arena %.0f MB, mmap %.0f MB\n", mi.uordblks / mb, mi.arena / mb, mi.hblkhd / mb);
+    fprintf(stderr, "mem: queue %u/%u, priority %u/%u, state image %u B\n", ex->q_len, ex->q_cap, ex->pq_len, ex->pq_cap, ex->sb);
+    if (ex->sh) fprintf(stderr, "mem: shared pool %u/%u (max %u) = up to %.0f MB of images\n", ex->sh->len, ex->sh->cap, ex->sh->max, ex->sh->len * img / mb);
+    fprintf(stderr, "mem: deferred %u/%u, exact set %zu keys (%.0f MB)\n", ex->defer_len, ex->defer_cap,
+            ex->exact.cnt, ex->exact.cap * 9 / mb);
+    if (g_sig_tree) {
+        uint32_t res_ch = 0;
+        for (uint32_t c = 0; c < g_sig_tree->nch; c++) res_ch += g_sig_tree->ch[c] != NULL;
+        fprintf(stderr, "mem: tree %u choices, %u chunks (%u resident = %.0f MB), pin %u open\n", g_sig_tree->n, g_sig_tree->nch,
+                res_ch, res_ch * 65536.0 * 20 / mb, g_sig_tree->pin_n);
+    }
+}
+
 static void on_explore_sigint(int sig) {
     if (sig == SIGALRM) g_alarm_fired = 1;
     dp_explore_interrupt = 1;
@@ -635,6 +658,8 @@ static int cmd_explore(int argc, char **argv) {
     // written) instead of killing the process; --play installs its own cooperative handler below
     g_sig_ex = ex;
     signal(SIGINT, on_explore_sigint);
+    g_sig_tree = &tree;
+    signal(SIGUSR1, on_explore_usr1);
     if (scfg.time_limit_secs) { // wall-clock limit for the whole run, play or not: same clean stop as SIGINT
         signal(SIGALRM, on_explore_sigint);
         alarm((unsigned)scfg.time_limit_secs);

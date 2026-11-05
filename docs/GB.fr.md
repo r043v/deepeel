@@ -3917,3 +3917,9 @@ de `tree.bin` passe par un fichier temporaire renommé. Le rechargement de `tree
 les anciens fichiers se lisent. Avant ce changement la croissance de l'arbre (20 octets par choix, sans plafond
 ni repli disque) était la principale consommation de RAM d'une exploration longue. Un `tree.bin` illisible reste
 mis de côté (`tree.bin.prev`) avec un message au lieu d'être écrasé.
+
+### Diagnostic mémoire (0.249.53)
+
+`kill -USR1 <pid>` d'un `deepeel explore` en cours écrit sur stderr la taille de chaque structure en RAM :
+malloc total, file, pool partagé (images), différés, ensemble de dédup exact, arbre (blocs résidents, choix
+épinglés). Sert à savoir ce qui grossit sans arrêter le run (gdb est bloqué par ptrace_scope).
