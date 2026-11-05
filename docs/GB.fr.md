@@ -3616,3 +3616,10 @@ Le pool de checkpoints des sessions jouées de NES, PCE et MD (`--play-pool`) es
 (`src/core/ckptpool.h` : `dp_ckpt_claim`, `dp_ckpt_pick`, `dp_ckpt_free`), au lieu de trois copies. Même consommation du
 générateur qu'avant (tiré seulement au remplacement), sorties inchangées ; test unitaire dans `test_core`. J1 reste ◐ pour
 ces plateformes : l'ordonnanceur d'époques, l'inbox vers le fork-explorer et le mode humain ne sont pas encore communs.
+
+## 0.249.31 (J1 : croissance des files commune)
+
+La politique de croissance des tableaux d'états en attente (file vivante bornée par `--queue-max`, zone de parking sans
+borne) est `dp_vec_grow` (`src/core/growvec.h`), utilisée par NES, PCE et MD (parking) et NES, PCE (file) ; la file de MD
+garde sa propre logique. Sorties inchangées, test unitaire dans `test_core`. J1 reste ◐ : l'enregistrement d'un état dans
+l'inbox (`push_live`, dédup, éviction de contexte, déversement sur disque) reste propre à chaque cœur.

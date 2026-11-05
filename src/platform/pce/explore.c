@@ -20,6 +20,7 @@
 // After the dynamic passes, a static closure follows the decoded flow of the
 // observed code inside each page's observed window, then padding and gap
 // inference classify what is left (reported apart from the observations).
+#include "../../core/growvec.h"
 #include "../../core/ckptpool.h"
 #include "../../core/rng.h"
 #include "explore.h"
@@ -379,9 +380,7 @@ static int push_live(PceRun *x, int forced) {
         if (k >= x->opt.ctx_cap) { r->ctx_evicted++; if (node) dp_tree_close(&x->tree, node, DP_ISSUE_CAPPED); return 0; }
     }
     if (x->queue_len >= x->qcap && x->opt.queue_max > x->qcap) { // adaptive worklist: grow before parking
-        uint32_t nc = x->qcap > x->opt.queue_max / 2 ? x->opt.queue_max : (x->qcap ? x->qcap * 2 : 1);
-        PceQueued *g = realloc(x->queue, (size_t)nc * sizeof *g);
-        if (g) { x->queue = g; x->qcap = nc; r->queue_grown++; }
+        if (dp_vec_grow((void **)&x->queue, &x->qcap, sizeof *x->queue, 1, x->opt.queue_max)) r->queue_grown++;
     }
     int full = x->queue_len >= x->qcap;
     dp_pce_save(x->tmp2);
@@ -395,11 +394,8 @@ static int push_live(PceRun *x, int forced) {
         free(z); r->queue_cuts++; r->parked_lost++; return 0;
     }
     if (full) { // a full queue is not a loss: the state waits aside (bounded, counted)
-        if (x->park_len == x->park_cap) {
-            uint32_t nc = x->park_cap ? x->park_cap * 2 : 64;
-            PceQueued *g = realloc(x->park, nc * sizeof *g);
-            if (!g) { free(z); r->queue_cuts++; r->parked_lost++; return 0; }
-            x->park = g; x->park_cap = nc;
+        if (x->park_len == x->park_cap && !dp_vec_grow((void **)&x->park, &x->park_cap, sizeof *x->park, 64, 0)) {
+            free(z); r->queue_cuts++; r->parked_lost++; return 0;
         }
         x->park[x->park_len].z = z; x->park[x->park_len].zlen = zl; x->park[x->park_len].forced = (uint8_t)forced;
         x->park[x->park_len].choice = node; x->park[x->park_len].in_handler = (uint8_t)x->in_handler;

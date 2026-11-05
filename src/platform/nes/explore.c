@@ -6,6 +6,7 @@
 // saturation lands in a counter, never in silence.  Everything observed
 // lands on physical PRG cells (bank * $4000 + (addr & $3FFF)); execution
 // outside PRG counts as exec_outside and never enters the cartridge maps.
+#include "../../core/growvec.h"
 #include "../../core/ckptpool.h"
 #include "../../core/rng.h"
 #include "explore.h"
@@ -845,9 +846,7 @@ static void tree_close(DpNesRun *x, uint32_t id, int issue) {
 static int queue_room(DpNesRun *x) {
     if (x->queue_len < x->queue_cap) return 1;
     if (x->opt.queue_max > x->queue_cap) {
-        uint32_t nc = x->queue_cap > x->opt.queue_max / 2 ? x->opt.queue_max : (x->queue_cap ? x->queue_cap * 2 : 1);
-        DpNesPathState *g = realloc(x->queue, (size_t)nc * sizeof *g);
-        if (g) { memset(g + x->queue_cap, 0, (size_t)(nc - x->queue_cap) * sizeof *g); x->queue = g; x->queue_cap = nc; x->r->queue_grown++; }
+        if (dp_vec_grow((void **)&x->queue, &x->queue_cap, sizeof *x->queue, 1, x->opt.queue_max)) x->r->queue_grown++;
     }
     return x->queue_len < x->queue_cap;
 }
@@ -896,11 +895,7 @@ static int snap_push(DpNesRun *x, DpNesPathState *s) {
     if (!queue_room(x)) {
         // a full queue is not a loss: the state waits aside (bounded, counted)
         if (x->park_len < 4096) {
-            if (x->park_len == x->park_cap) {
-                uint32_t nc = x->park_cap ? x->park_cap * 2 : 64;
-                DpNesPathState *g = realloc(x->park, nc * sizeof *g);
-                if (g) { x->park = g; x->park_cap = nc; }
-            }
+            if (x->park_len == x->park_cap) dp_vec_grow((void **)&x->park, &x->park_cap, sizeof *x->park, 64, 0);
             if (x->park_len < x->park_cap) { x->park[x->park_len++] = *s; x->r->parked++; return 2; }
         }
         if (lot_spill(x, s)) { x->r->parked++; return 2; }

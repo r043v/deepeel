@@ -1,3 +1,4 @@
+#include "../../core/growvec.h"
 #include "../../core/ckptpool.h"
 #include "../../core/rng.h"
 #include "explore.h"
@@ -250,12 +251,7 @@ static int push(X *x, uint32_t pc, int vint, int hint) {
                 free(ls);
                 x->r->parked_lost++; return 0;
             }
-            if (x->npark == x->parkcap) {
-                uint32_t nc = x->parkcap ? x->parkcap * 2 : 64;
-                Item *g = realloc(x->park, (size_t)nc * sizeof *g);
-                if (!g) { x->r->parked_lost++; return 0; }
-                x->park = g; x->parkcap = nc;
-            }
+            if (x->npark == x->parkcap && !dp_vec_grow((void **)&x->park, &x->parkcap, sizeof *x->park, 64, 0)) { x->r->parked_lost++; return 0; }
             full = 1;
         } else { x->q = q; x->qcap = ncap; x->r->queue_growths++; }
     }

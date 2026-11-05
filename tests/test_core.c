@@ -2,6 +2,7 @@
 // state round-trips and execution determinism.
 #include "../src/core/cart.h"
 #include "../src/core/ckptpool.h"
+#include "../src/core/growvec.h"
 #include "../src/explore/explorer.h" // dp_rom_index
 #include "../src/mach/m0boy.h"
 #include "mach_util.h"
@@ -37,6 +38,21 @@ static void run_code(DpMach *m, const uint8_t *code, int n, int count) {
 
 int main(void) {
     char err[256];
+    // --- shared pending-array growth (J1) ---------------------------------------
+    {
+        uint32_t *v = NULL, cap = 0;
+        CHECK(dp_vec_grow((void **)&v, &cap, sizeof *v, 1, 6) && cap == 1);
+        CHECK(dp_vec_grow((void **)&v, &cap, sizeof *v, 1, 6) && cap == 2);
+        CHECK(dp_vec_grow((void **)&v, &cap, sizeof *v, 1, 6) && cap == 4);
+        CHECK(dp_vec_grow((void **)&v, &cap, sizeof *v, 1, 6) && cap == 6);   // clamped to the limit
+        CHECK(!dp_vec_grow((void **)&v, &cap, sizeof *v, 1, 6) && cap == 6);  // at the limit: untouched
+        CHECK(v[5] == 0);                                                      // new tail is zeroed
+        free(v);
+        uint32_t *w = NULL, wc = 0;
+        CHECK(dp_vec_grow((void **)&w, &wc, sizeof *w, 64, 0) && wc == 64);    // unbounded holding area
+        CHECK(dp_vec_grow((void **)&w, &wc, sizeof *w, 64, 0) && wc == 128);
+        free(w);
+    }
     // --- shared checkpoint pool (J1) ------------------------------------------
     {
         DpCkptPool p = {{0}, 0};
