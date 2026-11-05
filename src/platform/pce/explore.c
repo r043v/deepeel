@@ -20,6 +20,7 @@
 // After the dynamic passes, a static closure follows the decoded flow of the
 // observed code inside each page's observed window, then padding and gap
 // inference classify what is left (reported apart from the observations).
+#include "../../core/ckptpool.h"
 #include "../../core/rng.h"
 #include "explore.h"
 #include "../../explore/stop.h"
@@ -97,7 +98,7 @@ typedef struct {
     uLongf zcap;
     size_t state_size;
     uint32_t rng;
-    uint8_t *pool[64]; unsigned pool_n;   // J1 shared checkpoint pool
+    DpCkptPool pool;   // J1 shared checkpoint pool
     int idle;              // demo session: no button pressed
     uint64_t novel;        // cells observed for the first time (novelty search)
     int failed;
@@ -942,8 +943,8 @@ static void play_session(PceRun *x, uint32_t frames, uint32_t seed, const DpPceT
     x->path_id = r->paths;
     x->rng = seed ? seed : 0x9E3779B9u;
     const unsigned pool_cap = x->opt.play_pool < 64 ? x->opt.play_pool : 64;
-    if (!tas && pool_cap && x->pool_n && !x->idle) {   // continue from a checkpoint an earlier session kept
-        dp_pce_load(x->pool[rng_next(&x->rng) % x->pool_n]);
+    if (!tas && pool_cap && x->pool.n && !x->idle) {   // continue from a checkpoint an earlier session kept
+        dp_pce_load(dp_ckpt_pick(&x->pool, &x->rng));
         r->pool_starts++;
     } else dp_pce_reset();
     uint8_t held = 0;
@@ -961,13 +962,8 @@ static void play_session(PceRun *x, uint32_t frames, uint32_t seed, const DpPceT
         }
         play_frame(x, in);
         if (!tas && pool_cap && f % 256 == 255 && !x->idle) {   // every 256 frames: keep a checkpoint (random replacement when full)
-            unsigned slot = x->pool_n < pool_cap ? x->pool_n : rng_next(&x->rng) % pool_cap;
-            if (!x->pool[slot]) x->pool[slot] = malloc(x->state_size);
-            if (x->pool[slot]) {
-                dp_pce_save(x->pool[slot]);
-                if (slot == x->pool_n) x->pool_n++;
-                r->pool_saved++;
-            }
+            uint8_t *ck = dp_ckpt_claim(&x->pool, pool_cap, x->state_size, &x->rng);
+            if (ck) { dp_pce_save(ck); r->pool_saved++; }
         }
         if (x->opt.queue_cap && f % seed_every == seed_every - 1) push_live(x, 0);
     }
@@ -1704,7 +1700,7 @@ drain:
     }
 
     pstm_free(x);
-    for (unsigned i = 0; i < 64; i++) free(x->pool[i]);
+    dp_ckpt_free(&x->pool);
     dp_pce_observe(NULL);
     // states still queued when the global wall stopped the drain: counted
     // (saved in the lot when there is one: the next run resumes them)

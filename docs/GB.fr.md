@@ -3609,3 +3609,10 @@ Le xorshift32 des sessions jouées de NES, PCE, MD et Sega/MSX n'existe plus qu'
 (`src/core/rng.h`) ; les quatre copies locales y délèguent. Même suite de nombres qu'avant (les 170 tests passent, sorties
 inchangées). Le `rnd` de `src/explore/sessions.c` (GB) reste à part : il re-sème un état nul, donc sa suite diffère
 légèrement. J1 reste ◐ : la couche de sessions (pool, époques, inbox, mode humain) n'est toujours pas commune.
+
+## 0.249.30 (J1 : pool de checkpoints commun)
+
+Le pool de checkpoints des sessions jouées de NES, PCE et MD (`--play-pool`) est un composant unique, `DpCkptPool`
+(`src/core/ckptpool.h` : `dp_ckpt_claim`, `dp_ckpt_pick`, `dp_ckpt_free`), au lieu de trois copies. Même consommation du
+générateur qu'avant (tiré seulement au remplacement), sorties inchangées ; test unitaire dans `test_core`. J1 reste ◐ pour
+ces plateformes : l'ordonnanceur d'époques, l'inbox vers le fork-explorer et le mode humain ne sont pas encore communs.

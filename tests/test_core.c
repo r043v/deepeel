@@ -1,6 +1,7 @@
 // test_core.c: the m0boy machine backend — variant picking, mapper writes,
 // state round-trips and execution determinism.
 #include "../src/core/cart.h"
+#include "../src/core/ckptpool.h"
 #include "../src/explore/explorer.h" // dp_rom_index
 #include "../src/mach/m0boy.h"
 #include "mach_util.h"
@@ -36,6 +37,21 @@ static void run_code(DpMach *m, const uint8_t *code, int n, int count) {
 
 int main(void) {
     char err[256];
+    // --- shared checkpoint pool (J1) ------------------------------------------
+    {
+        DpCkptPool p = {{0}, 0};
+        uint32_t rng = 12345;
+        CHECK(dp_ckpt_claim(&p, 0, 16, &rng) == NULL);          // cap 0: no pool
+        for (unsigned i = 0; i < 3; i++) { uint8_t *b = dp_ckpt_claim(&p, 3, 16, &rng); CHECK(b != NULL); if (b) b[0] = (uint8_t)(i + 1); }
+        CHECK(p.n == 3);
+        uint32_t before = rng;
+        uint8_t *rep = dp_ckpt_claim(&p, 3, 16, &rng);          // full: random replacement, pool size unchanged
+        CHECK(rep != NULL && p.n == 3 && rng != before);
+        const uint8_t *pk = dp_ckpt_pick(&p, &rng);
+        CHECK(pk != NULL);
+        dp_ckpt_free(&p);
+        CHECK(p.n == 0 && p.slot[0] == NULL);
+    }
     // --- variant picking -----------------------------------------------------
     {
         DpCart *c = cart_of(0x19, 0x03, 0x800000); // MBC5+32K RAM

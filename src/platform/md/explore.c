@@ -1,3 +1,4 @@
+#include "../../core/ckptpool.h"
 #include "../../core/rng.h"
 #include "explore.h"
 #include "../../explore/lots.h"
@@ -69,7 +70,7 @@ typedef struct {
     int play_active;                 /* random played session running */
     int play_idle;                   /* the played session presses nothing (demo / attract mode) */
     uint32_t play_left, play_rng, play_hold, play_f;
-    uint8_t *pool[64]; unsigned pool_n;   // J1 shared checkpoint pool
+    DpCkptPool pool;   // J1 shared checkpoint pool
     uint8_t play_held;
     uint16_t op;
     uint32_t move_src;
@@ -146,13 +147,8 @@ static void on_frame(void *u) {
         x->r->play_frames_run++;
         const unsigned pc_ = x->o->play_pool < 64 ? x->o->play_pool : 64;
         if (pc_ && !x->play_idle && ++x->play_f % 256 == 0) {   // keep a checkpoint (random replacement when full)
-            unsigned slot = x->pool_n < pc_ ? x->pool_n : md_rng(&x->play_rng) % pc_;
-            if (!x->pool[slot]) x->pool[slot] = malloc(dp_mdmach_state_size());
-            if (x->pool[slot]) {
-                dp_mdmach_save(x->m, x->pool[slot]);
-                if (slot == x->pool_n) x->pool_n++;
-                x->r->pool_saved++;
-            }
+            uint8_t *ck = dp_ckpt_claim(&x->pool, pc_, dp_mdmach_state_size(), &x->play_rng);
+            if (ck) { dp_mdmach_save(x->m, ck); x->r->pool_saved++; }
         }
         if (--x->play_left == 0) {
             x->play_active = 0;
@@ -1556,8 +1552,8 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         x.play_hold = 0; x.play_f = 0;
         x.play_rng = (o->play_seed + s * 0x2545F491u) * 0x9E3779B1u + 7;
         if (!x.play_rng) x.play_rng = 1;
-        if (o->play_pool && x.pool_n) {   // continue from a checkpoint an earlier session kept
-            dp_mdmach_load(x.m, x.pool[md_rng(&x.play_rng) % x.pool_n]);
+        if (o->play_pool && x.pool.n) {   // continue from a checkpoint an earlier session kept
+            dp_mdmach_load(x.m, dp_ckpt_pick(&x.pool, &x.play_rng));
             r->pool_starts++;
         } else dp_mdmach_reset(x.m);
         x.play_active = 1;
@@ -1567,7 +1563,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         x.play_active = 0;
         r->play_sessions_run++;
     }
-    for (unsigned i = 0; i < 64; i++) free(x.pool[i]);
+    dp_ckpt_free(&x.pool);
     if (!drain) novelty_search(&x);
     // explicit entries (G3): each starts a forced path from the power-on machine
     if (!drain)
