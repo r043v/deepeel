@@ -1,3 +1,4 @@
+#include "../../core/rng.h"
 #include "explore.h"
 #include "../../explore/lots.h"
 #include "../../explore/novelty.h"
@@ -1226,7 +1227,7 @@ typedef struct {
     int recent[64]; uint32_t recent_f[64]; unsigned nrecent;
 } MdNov;
 
-static uint32_t md_rng(uint32_t *s) { uint32_t v = *s; v ^= v << 13; v ^= v >> 17; v ^= v << 5; return *s = v; }
+static uint32_t md_rng(uint32_t *s) { return dp_xorshift32(s); }
 static int md_archive_add(X *x, MdNov *N, uint64_t gain) {
     DpMdResults *r = x->r;
     dp_mdmach_save(x->m, N->tmp);

@@ -6,6 +6,7 @@
 // saturation lands in a counter, never in silence.  Everything observed
 // lands on physical PRG cells (bank * $4000 + (addr & $3FFF)); execution
 // outside PRG counts as exec_outside and never enters the cartridge maps.
+#include "../../core/rng.h"
 #include "explore.h"
 #include "../../explore/stop.h"
 #include "../../explore/lots.h"
@@ -1005,13 +1006,7 @@ static void sections_build(DpNesRun *x) {
 // --- play / TAS sessions ---------------------------------------------------------
 
 // xorshift32: enough randomness for input policies, cheap and portable
-static uint32_t nes_rng(uint32_t *state) {
-    uint32_t v = *state;
-    v ^= v << 13;
-    v ^= v >> 17;
-    v ^= v << 5;
-    return *state = v;
-}
+static uint32_t nes_rng(uint32_t *state) { return dp_xorshift32(state); }
 
 // one play or TAS session: `frames` frames from power-on (or from a reset
 // the movie commands).  The machine runs through the hooks; a jam rewinds

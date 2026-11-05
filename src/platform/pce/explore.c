@@ -20,6 +20,7 @@
 // After the dynamic passes, a static closure follows the decoded flow of the
 // observed code inside each page's observed window, then padding and gap
 // inference classify what is left (reported apart from the observations).
+#include "../../core/rng.h"
 #include "explore.h"
 #include "../../explore/stop.h"
 #include "../../explore/lots.h"
@@ -877,9 +878,7 @@ static void run_path(PceRun *x, PceQueued q) {
 // --- play / TAS sessions --------------------------------------------------------------
 
 static uint32_t rng_next(uint32_t *s) {
-    uint32_t v = *s;
-    v ^= v << 13; v ^= v >> 17; v ^= v << 5;
-    return *s = v;
+    return dp_xorshift32(s);
 }
 
 static uint8_t random_input(PceRun *x, uint8_t *held, uint32_t *hold) {

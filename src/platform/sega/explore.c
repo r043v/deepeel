@@ -1,3 +1,4 @@
+#include "../../core/rng.h"
 #include "explore.h"
 #include "backend.h"
 #include "visits.h"
@@ -1112,7 +1113,7 @@ done:
 }
 // play session (GB sessions parity): the machine runs from reset with held
 // inputs changing every epoch.
-static uint32_t sega_rng(uint32_t *s) { *s^=*s<<13; *s^=*s>>17; *s^=*s<<5; return *s; }
+static uint32_t sega_rng(uint32_t *s) { return dp_xorshift32(s); }
 static void play_session(Run *x) {
     DpSegaResults *r=x->r;
     const DpSegaOptions *o=x->opt;

@@ -3602,3 +3602,10 @@ Pendant le rejeu d'un film MD (GMV/BK2), l'état de la machine est mis en file d
 (défaut 256, 0 = aucun) : le code atteint par fourche depuis ces points du chemin joué est exploré comme les autres fourches
 (étiquette « forcé », jamais « naturel »). Le rapport affiche `GMV shoots: N checkpoints queued`. Test `md_movie_shoots`
 (`--shoot-every 1`, 3 états pour 4 cadres). Cellule J2 MD passée ✅.
+
+## 0.249.29 (J1 : générateur d'entrées commun, première tranche)
+
+Le xorshift32 des sessions jouées de NES, PCE, MD et Sega/MSX n'existe plus qu'en un exemplaire, `dp_xorshift32`
+(`src/core/rng.h`) ; les quatre copies locales y délèguent. Même suite de nombres qu'avant (les 170 tests passent, sorties
+inchangées). Le `rnd` de `src/explore/sessions.c` (GB) reste à part : il re-sème un état nul, donc sa suite diffère
+légèrement. J1 reste ◐ : la couche de sessions (pool, époques, inbox, mode humain) n'est toujours pas commune.
