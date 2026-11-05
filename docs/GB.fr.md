@@ -3646,3 +3646,10 @@ la page (`fix_nes_ctx`) n'est toujours pas plafonnée. C2 NES reste ◐ : granul
 NES : le rapport « indirect jumps » compte aussi les adresses de table distinctes par site (`jmp (abs)` : l'opérande
 d'où la cible est lue), `N table addresses`, gardées pour S4/§5. Il n'y a pas de plafond à 8 cibles (jusqu'à 65 536 paires
 site-cible, débordement compté) ; test `nes_indirect` mis à jour. La cellule D12 reste ◐ pour PCE/MD (même ajout à faire).
+
+## 0.249.35 (D12 PCE : adresse de table gardée)
+
+PCE : même ajout que NES (0.249.34) pour `jmp (abs)` / `jmp (abs,X)` : `N table addresses` (l'opérande, indexé par X pour
+`$7C`, d'où la cible est lue). Test `pce_indirect` mis à jour. MD n'a pas d'équivalent : `jmp/jsr (An)` lit un registre,
+l'adresse de table est celle que S4 retrouve par `s4_table`. D12 reste ◐ pour PCE/MD : plafond et second passage à
+confirmer cœur par cœur avant de cocher.

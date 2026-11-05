@@ -74,7 +74,7 @@ typedef struct {
     int disp_done;
     DpTree tree;           // --tree: every queued state is a choice
     uint32_t cur_choice;
-    DpHashSet ind_sites, ind_pairs;   // observed indirect jumps (D12)
+    DpHashSet ind_sites, ind_pairs, ind_ptrs;   // observed indirect jumps (D12)
     DpHashSet ctx_seen;    // per-context admission counters (C2)
     size_t seen_cap, seen_len;
     uint8_t *fork_sites, *pad_sites, *irq_sites; // per-cell counters (saturating)
@@ -795,6 +795,8 @@ static int step_one(PceRun *x, int *frame_done) {
         else {
             if (dp_set_insert(&x->ind_sites, (uint64_t)site + 1) > 0) r->indirect_sites++;
             if (dp_set_insert(&x->ind_pairs, ((uint64_t)(site + 1) << 16) | tgt) > 0) r->indirect_targets++;
+            // D12: the table address the jump reads its target from (indexed by X for $7C), kept for S4
+            if (dp_set_insert(&x->ind_ptrs, ((uint64_t)(site + 1) << 16) | ptr) > 0) r->indirect_ptrs++;
         }
     }
     int outside = site < 0;
@@ -1547,6 +1549,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     dp_tree_init(&x->tree);
     dp_set_init(&x->ind_sites, 1 << 8);
     dp_set_init(&x->ind_pairs, 1 << 10);
+    dp_set_init(&x->ind_ptrs, 1 << 10);
     memset(r, 0, sizeof *r);
     x->opt = options ? *options : dp_pce_options();
     r->options = x->opt;
@@ -1721,6 +1724,7 @@ drain:
     dp_set_free(&x->ctx_seen);
     dp_set_free(&x->ind_sites);
     dp_set_free(&x->ind_pairs);
+    dp_set_free(&x->ind_ptrs);
     free(x->prov_anchor);
     free(x->seen);
     free(x->fork_sites);
@@ -1825,7 +1829,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             (unsigned long long)r->idx_cross_page, (unsigned long long)r->idx_forced_ignored,
             (unsigned long long)r->idx_overflow);
     if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/MPR context past the cap)\n", (unsigned long long)r->ctx_evicted);
-    fprintf(out, "  indirect jumps: %llu sites, %llu targets, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_overflow);
+    fprintf(out, "  indirect jumps: %llu sites, %llu targets, %llu table addresses, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_ptrs, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  stream replay (S6): %llu decoders, %llu tables, %llu candidates, %llu queued replays (%llu saturated)\n",
             (unsigned long long)r->s6_decoders, (unsigned long long)r->s6_tables, (unsigned long long)r->s6_candidates,
             (unsigned long long)r->s6_runs, (unsigned long long)r->s6_sat);
