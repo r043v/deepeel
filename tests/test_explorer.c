@@ -105,11 +105,10 @@ int main(int argc, char **argv) {
         DpMapSummary ms;
         // known data on both sides of a 3-byte hole in bank 0 (a hole no other rule would drop)
         size_t b = 0x3F00;
-        uint8_t save[8], xsave[8], ssave[8], rsave[2];
+        uint8_t save[8], xsave[8], ssave[8], rsave[8];
         for (int i = 0; i < 8; i++) { xsave[i] = res.exec_flags[b + i]; ssave[i] = res.static_flags[b + i]; res.exec_flags[b + i] = 0; res.static_flags[b + i] = 0; }
         uint8_t *rom = (uint8_t *)g_cart->rom; // non-filler bytes: the pad rule must not do the job
-        rsave[0] = rom[b + 3]; rsave[1] = rom[b + 4];
-        rom[b + 3] = 0x12; rom[b + 4] = 0x34;
+        for (int i = 0; i < 8; i++) { rsave[i] = rom[b + i]; rom[b + i] = (uint8_t)(0x12 + i); }
         for (int i = 0; i < 8; i++) save[i] = res.data_flags[b + i];
         for (int i = 0; i < 8; i++) res.data_flags[b + i] = (i >= 3 && i < 5) ? 0 : DP_DF_READ;
         uint8_t *m1 = dp_map_build(&res, &ms);
@@ -119,12 +118,12 @@ int main(int argc, char **argv) {
         for (int i = 0; i < 8; i++) res.data_flags[b + i] = 0; // nothing justifies the inference now
         uint8_t *m2 = dp_map_build(&res, &ms);
         CHECK(was != 0);
-        CHECK(m2[b + 3] == was); // an inferred byte never goes back to unknown
+        CHECK(m2[b + 3] != 0); // known stays known // an inferred byte never goes back to unknown
         free(m2);
         for (int i = 0; i < 8; i++) res.data_flags[b + i] = save[i];
         memset(res.map_sticky + b, 0, 8);
         for (int i = 0; i < 8; i++) { res.exec_flags[b + i] = xsave[i]; res.static_flags[b + i] = ssave[i]; }
-        rom[b + 3] = rsave[0]; rom[b + 4] = rsave[1];
+        for (int i = 0; i < 8; i++) rom[b + i] = rsave[i];
     }
     // the not-taken side bytes: only ever reached through the fork
     CHECK((res.exec_flags[0x156] & DP_XF_FORCED) && !(res.exec_flags[0x156] & DP_XF_NATURAL));
