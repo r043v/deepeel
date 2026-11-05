@@ -3861,3 +3861,9 @@ des valeurs fixes. Il couvre maintenant :
 Plafonds par site et par registre inchangés ; les forks sont comptés dans `forks_event`. Tests : fixtures
 `lywait` et `hlwait` (le second échoue avec l'ancien code). Les chiffres de couverture sur ROMs réelles
 sont à refaire : les fourches de valeur augmentent le nombre de chemins, donc le coût.
+
+Mesure A/B (même ROM, mêmes bornes `--jobs 1 --time-limit`, seul le code de `fork_event` change ; observations
+de l'outil) : Puzznic 2 172 → 2 172 octets inconnus (120 → 161 variantes) ; Tetris Rev A 55 → 55
+(438 → 1 273 variantes) ; Kirby's Dream Land 34 183 → 33 697 (219 → 684 variantes). Le gain est réel mais
+faible : la plupart des attentes de ces ROMs sortaient déjà par les bornes de boucle ; le coût en variantes
+est multiplié par 2 à 3.
