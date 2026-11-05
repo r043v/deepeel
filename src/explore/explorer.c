@@ -1267,7 +1267,9 @@ bad_done:
         // propose each pressed key as its own variant
         if (!ex->cfg.no_p1_fork && (op == 0xF0 || op == 0xF2))
             fork_p1(ex, pk, pc, op);
-        if (!ex->cfg.no_event_fork && (op == 0xF0 || op == 0xF2 || op == 0xFA))
+        if (!ex->cfg.no_event_fork && (op == 0xF0 || op == 0xF2 || op == 0xFA || op == 0x7E || op == 0x46 || op == 0x4E ||
+                                       op == 0x56 || op == 0x5E || op == 0x6E || op == 0x2A || op == 0x3A || op == 0xBE ||
+                                       op == 0xA6 || op == 0xB6 || op == 0xAE || op == 0x0A || op == 0x1A || op == 0xCB))
             fork_event(ex, pk, pc, op);
     }
 

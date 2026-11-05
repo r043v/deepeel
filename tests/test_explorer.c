@@ -283,6 +283,14 @@ int main(int argc, char **argv) {
     CHECK(res.exec_flags[0x270] & (DP_XF_STATIC | DP_XF_FORCED));
     CHECK(res.data_flags[0x230] & DP_DF_STATIC);
 
+    // --- lywait / hlwait: wait loops on a register value the stock probes miss ----
+    run(dir, "lywait");
+    CHECK(res.exec_hits[0x156] > 0);
+    CHECK(res.forks_event >= 3);       // 0/143/144/153 are already $64-free: the compare constant adds $63,$64,$65
+    run(dir, "hlwait");
+    CHECK(res.exec_hits[0x158] > 0);
+    CHECK(res.forks_event >= 3);       // TIMA read through ld a,(hl): 0/$80/$FF + $36,$37,$38
+
     // --- loop: infinite loop contained ----------------------------------------------
     run(dir, "loop");
     CHECK(res.cycle_cuts >= 1);

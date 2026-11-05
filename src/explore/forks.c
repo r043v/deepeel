@@ -207,29 +207,75 @@ void fork_p1(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op) {
     free(img);
 }
 
-/* Event-register read probes (docs/COUVERTURE.fr.md 3.7).  LY, STAT and DIV are
- * static for the explorer, so a wait loop on them only leaves through the
- * guards.  Before an instruction that reads one of them, each significant value
- * the register is not holding becomes its own forced variant:
- *   LY   : 0, 143, 144, 153 (line 0, last visible, first vblank, last line)
- *   STAT : the four PPU modes (low two bits)
- *   DIV  : 0x00, 0x40, 0x80, 0xFF
+/* Event-register read probes (docs/COUVERTURE.fr.md 3.7).  LY, STAT, DIV, TIMA and the serial
+ * registers are static for the explorer, so a wait loop on them only leaves through the guards.
+ * Before an instruction that reads one of them, each significant value the register is not holding
+ * becomes its own forced variant:
+ *   LY   : 0, 143, 144, 153, plus the constant the next compare tests (n-1, n, n+1)
+ *   STAT : the four PPU modes x the LY=LYC coincidence bit
+ *   DIV  : 0x00, 0x40, 0x80, 0xFF, plus the compare constant
+ *   TIMA : 0x00, 0x80, 0xFF, plus the compare constant
+ *   SC   : transfer done / transfer pending (a serial wait loop with no partner)
+ *   SB   : 0x00, 0xFF (what a linked console would have sent)
+ * The register is found from the read forms `ldh a,(n)`, `ld a,(C)`, `ld a,(nn)`, `ld r,(hl)`,
+ * `ld a,(hl+/-)`, `ld a,(bc/de)`, `cp/and/or/xor (hl)` and `bit n,(hl)` whose address is $FFxx.
  * Capped per site and per register like the P1 forks. */
+static int ev_read_reg(const DpGblApi *api, DpMach *m, uint16_t pc, uint8_t op, int *next_len) {
+    const gbl_cpu_t *g = api->gbr;
+    *next_len = 0;
+    switch (op) {
+    case 0xF0: *next_len = 2; return dp_mach_op(m, (uint16_t)(pc + 1));      // ldh a,(n)
+    case 0xF2: *next_len = 1; return g->c ? g->c : -1;                       // ld a,(C)
+    case 0xFA:                                                               // ld a,(nn)
+        *next_len = 3;
+        return dp_mach_op(m, (uint16_t)(pc + 2)) == 0xFF ? dp_mach_op(m, (uint16_t)(pc + 1)) : -1;
+    case 0x7E: case 0x46: case 0x4E: case 0x56: case 0x5E: case 0x6E: case 0x2A: case 0x3A:
+    case 0xBE: case 0xA6: case 0xB6: case 0xAE:                              // reads through HL
+        *next_len = 1;
+        return (g->hl >> 8) == 0xFF ? (int)(g->hl & 0xFF) : -1;
+    case 0x0A: *next_len = 1; return (g->bc >> 8) == 0xFF ? (int)(g->bc & 0xFF) : -1; // ld a,(bc)
+    case 0x1A: *next_len = 1; return (g->de >> 8) == 0xFF ? (int)(g->de & 0xFF) : -1; // ld a,(de)
+    case 0xCB: {                                                             // bit n,(hl)
+        uint8_t x = dp_mach_op(m, (uint16_t)(pc + 1));
+        if (x >= 0x40 && x < 0x80 && (x & 7) == 6) { *next_len = 2; return (g->hl >> 8) == 0xFF ? (int)(g->hl & 0xFF) : -1; }
+        return -1;
+    }
+    }
+    return -1;
+}
+
 void fork_event(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op) {
     const DpGblApi *api = ex->mach->api;
-    uint8_t reg;
-    if (op == 0xF0) reg = dp_mach_op(ex->mach, (uint16_t)(pc + 1));       // ldh a,(n)
-    else if (op == 0xF2) { if (api->gbr->c == 0) return; reg = api->gbr->c; } // ld a,(C)
-    else if (op == 0xFA) {                                                  // ld a,(nn)
-        if (dp_mach_op(ex->mach, (uint16_t)(pc + 2)) != 0xFF) return;
-        reg = dp_mach_op(ex->mach, (uint16_t)(pc + 1));
-    } else return;
-    static const uint8_t ly[] = {0, 143, 144, 153}, st[] = {0, 1, 2, 3}, dv[] = {0x00, 0x40, 0x80, 0xFF};
-    const uint8_t *vals; int n;
-    if (reg == 0x44) { vals = ly; n = 4; }
-    else if (reg == 0x41) { vals = st; n = 4; }
-    else if (reg == 0x04) { vals = dv; n = 4; }
-    else return;
+    int nlen;
+    int r = ev_read_reg(api, ex->mach, pc, op, &nlen);
+    if (r < 0) return;
+    uint8_t reg = (uint8_t)r;
+    if (reg != 0x44 && reg != 0x41 && reg != 0x04 && reg != 0x05 && reg != 0x02 && reg != 0x01) return;
+    // the constant of the compare that follows the read: the value worth testing is that one +/- 1
+    int cmpk = -1;
+    {
+        uint16_t np = (uint16_t)(pc + nlen);
+        uint8_t nop = dp_mach_op(ex->mach, np);
+        if (nop == 0xFE || nop == 0xD6) cmpk = dp_mach_op(ex->mach, (uint16_t)(np + 1)); // cp n / sub n
+    }
+    uint8_t vbuf[12];
+    const uint8_t *vals; int n = 0;
+    if (reg == 0x44) { static const uint8_t b[] = {0, 143, 144, 153}; memcpy(vbuf, b, 4); n = 4; }
+    else if (reg == 0x41) { static const uint8_t b[] = {0, 1, 2, 3, 4, 5, 6, 7}; memcpy(vbuf, b, 8); n = 8; }
+    else if (reg == 0x04) { static const uint8_t b[] = {0x00, 0x40, 0x80, 0xFF}; memcpy(vbuf, b, 4); n = 4; }
+    else if (reg == 0x05) { static const uint8_t b[] = {0x00, 0x80, 0xFF}; memcpy(vbuf, b, 3); n = 3; }
+    else if (reg == 0x02) { vbuf[0] = (uint8_t)(api->io[0x02] & ~0x80); vbuf[1] = (uint8_t)(api->io[0x02] | 0x80); n = 2; }
+    else { vbuf[0] = 0x00; vbuf[1] = 0xFF; n = 2; }
+    if (cmpk >= 0 && reg != 0x41 && reg != 0x02) {
+        int cand[3] = { cmpk - 1, cmpk, cmpk + 1 };
+        for (int i = 0; i < 3; i++) {
+            if (cand[i] < 0 || cand[i] > 0xFF) continue;
+            int dup = 0;
+            for (int q = 0; q < n; q++) dup |= vbuf[q] == (uint8_t)cand[i];
+            if (!dup && n < 12) vbuf[n++] = (uint8_t)cand[i];
+        }
+    }
+    vals = vbuf;
     uint32_t *cnt = fork_slot(ex, site ^ 0xE0000000u ^ ((uint32_t)reg << 20));
     if (!cnt) return;
     int edefer = 0;
@@ -245,7 +291,7 @@ void fork_event(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op) {
     ex_save(ex, m, img);
     uint8_t cur = api->io[reg];
     for (int k = 0; k < n; k++) {
-        uint8_t v = reg == 0x41 ? (uint8_t)((cur & ~3) | vals[k]) : vals[k];
+        uint8_t v = reg == 0x41 ? (uint8_t)((cur & ~7) | vals[k]) : vals[k];
         if (v == cur) continue;
         api->io[reg] = v;
         uint8_t *fimg = xrealloc(NULL, ex->sb);

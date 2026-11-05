@@ -121,9 +121,9 @@ matériels sont ceux de m0boy.
 ## Limites (documentées, pas cachées)
 
 - **Registres événementiels** : la machine est celle de m0boy (PPU, APU et
-  timer réels), mais les fourches ne portent pas sur les valeurs de LY,
-  STAT, DIV ou TIMA : une boucle d'attente sort au rythme de la machine
-  concrète, pas sur chaque valeur possible. Les handlers d'IRQ sont atteints
+  timer réels) ; les fourches de valeur (0.249.48) couvrent LY, STAT, DIV,
+  TIMA, SC et SB, mais une boucle d'attente non fourchée sort au rythme de la
+  machine concrète, pas sur chaque valeur possible. Les handlers d'IRQ sont atteints
   par les graines de vecteurs (semées comme forcées depuis J0) et les forks
   d'IRQ.
 - **RAM initiale à zéro**, registres au reset DMG ($01B0…) — l'exploration
@@ -3845,3 +3845,19 @@ Toujours non supportés : TAMA5 et MMM01 (registres par quartets / banque 0 mobi
 Écart restant du matériel : CGB non modélisé (seulement 8 ROMs « CGB enhanced » dans ce romset, aucune
 CGB-only), RTC MBC3, liaison série, valeurs de LY/STAT/DIV/TIMA non fourchées. Essai : Nectaris GB (HuC1)
 est maintenant exploré (`--redo` du batch pour les 15 ROMs).
+
+## 0.249.48 : fourches de valeur sur les registres événementiels (2026-11-05)
+
+`fork_event` ne lisait que `ldh a,(n)`, `ld a,(C)` et `ld a,(nn)`, et seulement LY, STAT et DIV avec
+des valeurs fixes. Il couvre maintenant :
+- **Formes de lecture** : `ld r,(hl)`, `ld a,(hl+/-)`, `ld a,(bc/de)`, `cp/and/or/xor (hl)` et
+  `bit n,(hl)` dont l'adresse est `$FFxx` (un code qui charge `HL=$FF44` puis boucle n'était pas fourché).
+- **Registres** : TIMA ($00, $80, $FF), SC (transfert fini / en cours : l'attente série sans partenaire),
+  SB ($00, $FF), en plus de LY, STAT et DIV.
+- **Constante du test qui suit** : si l'instruction suivante est `cp n` ou `sub n`, les valeurs `n-1`, `n`,
+  `n+1` sont fourchées (une attente de la ligne 100 ou d'un compteur précis atteint enfin la bonne valeur,
+  pas seulement 0/143/144/153).
+- **STAT** : les quatre modes PPU × le bit de coïncidence LY=LYC (8 valeurs).
+Plafonds par site et par registre inchangés ; les forks sont comptés dans `forks_event`. Tests : fixtures
+`lywait` et `hlwait` (le second échoue avec l'ancien code). Les chiffres de couverture sur ROMs réelles
+sont à refaire : les fourches de valeur augmentent le nombre de chemins, donc le coût.

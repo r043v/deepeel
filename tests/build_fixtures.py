@@ -306,6 +306,20 @@ def build(out):
     w(r, 0x270, 0x3E, 0x03, 0x76)
     save(out, "fix_copytable", r)
 
+    # --- lywait: wait on LY == $64 (not one of the stock probe values), then code ----
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0xF0, 0x44, 0xFE, 0x64, 0x20, 0xFA)   # L: ldh a,($44); cp $64; jr nz,L
+    w(r, 0x156, 0x3E, 0x07, 0x76)                     # reached only when LY == $64
+    save(out, "fix_lywait", r)
+
+    # --- hlwait: wait on TIMA through ld a,(hl) with HL=$FF05 ----------------------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x21, 0x05, 0xFF, 0x7E, 0xFE, 0x37, 0x20, 0xFB)  # ld hl,$FF05; L: ld a,(hl); cp $37; jr nz,L
+    w(r, 0x158, 0x3E, 0x08, 0x76)
+    save(out, "fix_hlwait", r)
+
     # --- loop: infinite tight loop -------------------------------------------
     r = rom(2)
     w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
