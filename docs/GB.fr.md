@@ -3678,3 +3678,44 @@ intacte). Les 172 tests passent ; le run de Gradius 2 repart sans le crash (obse
 le Z80 sonore appelait un `read` mort et plantait (SIGSEGV observé sur Sonic). La charge conserve désormais les
 pointeurs du processus courant (callbacks du bus Z80, `ym_log`, `coverage`, `screen`, hooks). 172 tests verts. La
 reprise de Sonic tourne ensuite sans plantage (observation de l'outil ; fin du run non encore documentée).
+
+## Entrée `.zip` et lot sur un romset (0.249.40)
+
+- **ROM en zip** : `deepeel explore jeu.zip` (et toute commande qui charge une
+  ROM GB, MD, libretro) lit directement l'archive : `dp_read_rom_file`
+  (`src/core/zip.c`) prend la première entrée `.gb`/`.gbc`, sinon la première
+  entrée, stored ou deflate. Test `zip_cli` : le rapport d'un zip (deflate et
+  stored) est identique à celui de la ROM brute. Correction au passage : le nom
+  d'entrée de `dp_zip_read` n'était copié que s'il faisait moins de 8
+  caractères.
+- **`--state-dir` crée son répertoire** : un répertoire absent désactivait le
+  spool en silence, et `--unbounded` remplissait alors la RAM sans déversement
+  possible (plusieurs Go en quelques secondes même sur une ROM de 32 Ko).
+- **`summary.json`** : `map.methods_pct` (apport en % de la ROM de `tas`,
+  `random`, `fork`, `attract`, `static`, jusque-là seulement dans le PNG) et
+  `discovery[]` (par source : entrées, crédit, octets gagnés, dernier gain,
+  `last_credit_frame` et `max_frame` de la lane).
+- **`tools/romset_batch.py`** : lot sur un répertoire de zips. Copie chaque zip
+  dans `roms/gb/<sous-dossier>/`, récupère les films TASVideos du jeu
+  (soumissions de tous statuts, publiés ou rejetés, via l'API
+  `submissions`), lance un `explore --play --unbounded` par ROM sur un stockage
+  temporaire (`/run/media/m/Windows/claude/romset/tmp`) sous cgroup
+  (`systemd-run --user --scope`, `MemoryMax`, sans swap, arrêt gracieux à
+  80 %), puis conserve `map.png`, `summary.json`, `report.txt`, `run.log` et
+  `meta.json` dans `results/gb/<sous-dossier>/<slug>/` et efface le temporaire.
+  `results/gb/ROMSET.{log,csv,json}` cumulent les stats ; `index.json` rend le
+  lot reprenable. `roms/` et `results/` sont ignorés par git.
+- **Arrêt d'une ROM** : épuisement, `--stagnation` (aucune découverte pendant N
+  frames de jeu) ou mur `--time-limit` (cap). Un run unique par ROM, pas de
+  tranches : `--resume` recharge le pool, le spool et l'arbre mais pas la carte
+  de couverture, les rapports d'une reprise ne décriraient que la dernière
+  tranche (observé : 97,9 % puis 92,7 % sur Alleyway).
+- **Verdict TAS (estimation, pas une mesure)** : deepeel n'a pas de détecteur
+  de désynchronisation. Le lot compare les frames atteintes par le film
+  (checkpoints × intervalle) et la dernière frame où il apporte encore du
+  crédit : `complete`, `desync_est` (film joué jusqu'au bout mais plus rien
+  après < 60 % de sa longueur), `cut_by_wall`, `stopped_early`, `rom_refused`
+  (film d'une autre révision), `no_movie`. Les valeurs brutes sont gardées dans
+  `meta.json` (`per_movie`).
+- Les nombres produits sont des observations de l'outil (machine concrète, RAM
+  à zéro), pas des mesures de matériel.
