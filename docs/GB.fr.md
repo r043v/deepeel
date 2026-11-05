@@ -3908,9 +3908,11 @@ queue écrite après. Sans curseur valide, le balayage complet reste le repli.
 
 ### Arbre sur disque (0.249.52)
 
-L'arbre est maintenant stocké en blocs de 65 536 choix. Un bloc dont tous les choix sont fermés est écrit dans
-`<state>/tree.spill` et sa RAM libérée : la RAM ne porte plus que les choix ouverts (la frontière), quelle que
-soit la taille de l'arbre. Le rechargement de `tree.bin` fait de même bloc par bloc (le `tree.bin` SML2 de
+L'arbre est maintenant stocké en blocs de 65 536 choix. Tout bloc plein (sauf le premier) est écrit dans
+`<state>/tree.spill` et sa RAM libérée ; ses choix encore ouverts restent dans une table (`pin`). La RAM ne porte
+plus que la frontière, quelle que soit la taille de l'arbre. (Première version « bloc entièrement fermé » :
+inopérante, les 91 372 choix ouverts du `tree.bin` SML2 sont répartis dans les 4 300 blocs.) L'enregistrement
+de `tree.bin` passe par un fichier temporaire renommé. Le rechargement de `tree.bin` fait de même bloc par bloc (le `tree.bin` SML2 de
 282 millions de choix, 5,6 Go, se recharge sans les 5,6 Go de RAM). Le format de `tree.bin` est inchangé :
 les anciens fichiers se lisent. Avant ce changement la croissance de l'arbre (20 octets par choix, sans plafond
 ni repli disque) était la principale consommation de RAM d'une exploration longue. Un `tree.bin` illisible reste

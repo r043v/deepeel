@@ -42,13 +42,14 @@ typedef struct DpChoice {
     uint16_t bank, pc;          // where this choice's path starts
 } DpChoice;
 
-// Choices live in fixed chunks of 1<<DP_TREE_CHUNK_BITS entries. A chunk whose choices are all closed is
-// written to the spill file (when one is set) and its RAM freed: the tree grows on disk, never in RAM, past
-// the open frontier. Ids are indexes (id == position); the tree.bin format is unchanged.
+// Choices live in fixed chunks of 1<<DP_TREE_CHUNK_BITS entries. Every full chunk but the first is written to
+// the spill file (when one is set) and its RAM freed; its still-open choices stay in the `pin` table. RAM holds
+// the open frontier, never the whole tree. Ids are indexes (id == position); the tree.bin format is unchanged.
 #define DP_TREE_CHUNK_BITS 16
 typedef struct DpTree {
     DpChoice **ch;              // chunk pointers; NULL = evicted to the spill file
-    uint32_t *chopen;           // open choices per chunk
+    DpChoice *pin;              // open choices of evicted chunks (hash by id, id 0 = empty slot)
+    uint32_t pin_cap, pin_n;
     uint8_t *chev;              // 1 = evicted
     uint32_t nch, chcap;
     uint32_t n;

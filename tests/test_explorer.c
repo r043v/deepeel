@@ -109,13 +109,13 @@ static void test_tree_spill(void) {
     for (uint32_t i = 1; i <= N; i++) {
         uint32_t id = dp_tree_add(&a, i > 1 ? i - 1 : 0, 4, i, 0, 0x100);
         CHECK(id == i);
-        if (i == 70000) keep = id;                 // stays open: pins its chunk in RAM
+        if (i % 1000 == 7) keep++;                 // open choices scattered over every chunk (the real frontier)
         else dp_tree_close(&a, id, DP_ISSUE_DONE);
     }
     uint32_t resident = 0;
     for (uint32_t c = 0; c < a.nch; c++) resident += a.ch[c] != NULL;
-    CHECK(resident < a.nch);                       // closed chunks were evicted
-    CHECK(a.open == 1);                            // the kept one (the root is not counted)
+    CHECK(resident <= 3);                          // chunk 0 + the growing one: everything else is on disk
+    CHECK(keep == 300 && a.open == keep);          // the root is not counted
     CHECK(dp_tree_save(&a, bin));
     DpTree b;
     dp_tree_init(&b);
@@ -125,8 +125,13 @@ static void test_tree_spill(void) {
     CHECK(dp_tree_load(&b, bin));
     CHECK(b.n == a.n && b.open == a.open && b.max_depth == a.max_depth);
     CHECK(b.closed[DP_ISSUE_DONE] == a.closed[DP_ISSUE_DONE]);
-    dp_tree_close(&b, keep, DP_ISSUE_MERGED);      // the open one is still reachable after reload
-    CHECK(b.open == 0);
+    for (uint32_t i = 1; i <= N; i++) if (i % 1000 == 7) dp_tree_close(&b, i, DP_ISSUE_MERGED);   // reachable after reload
+    CHECK(b.open == 0 && b.closed[DP_ISSUE_MERGED] == 300);
+    CHECK(dp_tree_save(&b, bin));
+    DpTree c3;
+    dp_tree_init(&c3);
+    CHECK(dp_tree_load(&c3, bin) && c3.open == 0 && c3.closed[DP_ISSUE_MERGED] == 300);   // closed-after-evict persisted
+    dp_tree_free(&c3);
     uint32_t id2 = dp_tree_add(&b, 5, 4, 1, 0, 0x100);   // parent in an evicted chunk: depth read from disk
     CHECK(id2 == N + 1);
     dp_tree_free(&a);
