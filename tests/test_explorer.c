@@ -248,6 +248,25 @@ int main(int argc, char **argv) {
     CHECK(res.data_flags[0x231] & DP_DF_STATIC);
     CHECK(res.exec_hits[dp_rom_index(0, 0x240)] > 0); // the walk really landed there
 
+    // --- dispatch: the indexed jp hl cannot be proven by value, its table is ---------
+    run(dir, "dispatch");
+    CHECK(res.exec_hits[0x260] > 0);                    // the taken entry really ran
+    CHECK(!(res.exec_flags[0x250] & DP_XF_NATURAL));    // the others never did
+    dp_provenance(&res);
+    CHECK(res.prov_table_targets >= 3);
+    CHECK(res.exec_flags[0x250] & (DP_XF_STATIC | DP_XF_FORCED)); // entry 0 is code (proven, or already forked)
+    CHECK(res.exec_flags[0x270] & (DP_XF_STATIC | DP_XF_FORCED)); // entry 2 too
+    CHECK(res.data_flags[0x230] & DP_DF_STATIC);        // the table words proven data
+
+    // --- rstdispatch: the inline table after `rst $28` is proven, all entries code ----
+    run(dir, "rstdispatch");
+    CHECK(res.exec_hits[0x270] > 0);
+    dp_provenance(&res);
+    CHECK(res.prov_table_targets >= 3);
+    CHECK(res.exec_flags[0x260] & (DP_XF_STATIC | DP_XF_FORCED));
+    CHECK(res.exec_flags[0x280] & (DP_XF_STATIC | DP_XF_FORCED));
+    CHECK(res.data_flags[0x153] & DP_DF_STATIC);
+
     // --- loop: infinite loop contained ----------------------------------------------
     run(dir, "loop");
     CHECK(res.cycle_cuts >= 1);

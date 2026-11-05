@@ -7,6 +7,8 @@ Every fixture is a minimal ROM exercising one exploration behaviour:
   dma        - OAM DMA from a ROM source ($FF46)
   irq        - IE/IF set by hand (IRQ forking) + a VBlank handler
   jumptable  - JP HL through a pointer table, both handlers reachable
+  rstdispatch - rst $28 jump table inline after the call site
+  dispatch   - indexed JP HL (ld hl,TABLE; add hl,de; ld h,(hl); jp hl): the table's other entries proven code
   loop       - infinite loop, must be contained by the guards
   unreach    - a data blob no code ever touches
   closure    - code left unvisited by a tiny budget, reached by direct flow
@@ -252,6 +254,33 @@ def build(out):
     w(r, 0x230, 0x40, 0x02)                      # pointer -> $0240
     w(r, 0x240, 0x3E, 0x33, 0xEA, 0x00, 0x80, 0x76)  # handler C: vram $33, halt
     save(out, "fix_jumptable", r)
+
+    # --- dispatch: indexed jp hl, three table entries, one taken ---------------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x11, 0x02, 0x00)                # ld de,2  (index 1, entry two)
+    w(r, 0x153, 0x21, 0x30, 0x02)                # ld hl,$0230
+    w(r, 0x156, 0x19)                            # add hl,de
+    w(r, 0x157, 0x2A)                            # ld a,(hl+)
+    w(r, 0x158, 0x66)                            # ld h,(hl)
+    w(r, 0x159, 0x6F)                            # ld l,a
+    w(r, 0x15A, 0xE9)                            # jp hl
+    w(r, 0x230, 0x50, 0x02, 0x60, 0x02, 0x70, 0x02)   # table: $0250 $0260 $0270
+    w(r, 0x250, 0x3E, 0x01, 0x76)                # entry 0 (never taken)
+    w(r, 0x260, 0x3E, 0x02, 0x76)                # entry 1 (taken)
+    w(r, 0x270, 0x3E, 0x03, 0x76)                # entry 2 (never taken)
+    save(out, "fix_dispatch", r)
+
+    # --- rstdispatch: rst $28 jump table inline after the call site (SML2 idiom) -----
+    r = rom(2)
+    w(r, 0x28, 0x87, 0xE1, 0x5F, 0x16, 0x00, 0x19, 0x5E, 0x23, 0x56, 0xD5, 0xE1, 0xE9)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x3E, 0x01, 0xEF)                # ld a,1; rst $28
+    w(r, 0x153, 0x60, 0x02, 0x70, 0x02, 0x80, 0x02)   # inline table: three entries
+    w(r, 0x260, 0x3E, 0x01, 0x76)                # entry 0 (never taken)
+    w(r, 0x270, 0x3E, 0x02, 0x76)                # entry 1 (taken)
+    w(r, 0x280, 0x3E, 0x03, 0x76)                # entry 2 (never taken)
+    save(out, "fix_rstdispatch", r)
 
     # --- loop: infinite tight loop -------------------------------------------
     r = rom(2)

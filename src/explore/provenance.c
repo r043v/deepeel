@@ -29,6 +29,8 @@ typedef struct {
     uint8_t aknown;
     uint16_t de, bc; // whole-pair values (S3: BC/DE beside HL)
     uint8_t pm2;     // bit0 = DE known, bit1 = BC known
+    uint16_t tbase;  // last `ld hl,nn` base: the candidate pointer table of an indexed dispatch
+    uint8_t tflags;  // bit0 = tbase valid, bit1 = a `ld h,(hl)` pointer load followed it
 } ProvState;
 
 typedef struct { ProvState *v; size_t n, cap; } ProvStack;
@@ -136,6 +138,75 @@ static void prov_pairs(DpResults *res, ProvRead *pr, ProvState *s, uint8_t op,
     }
 }
 
+
+// An indexed `jp hl` (the index is not provable) whose HL came from a pointer table at a known
+// base: walk the table's words and prove every plausible one a code entry (DP_XF_STATIC, the
+// closure then seeds them) and its bytes data.  Plausible = contiguous, inside the ROM view the
+// table belongs to, first byte a legal opcode that is not filler, location never executed.
+// Tool inference, not an observation: a table needs two plausible entries, at most 128.
+static int prov_legal_op(uint8_t op) {
+    switch (op) { case 0xD3: case 0xDB: case 0xDD: case 0xE3: case 0xE4: case 0xEB:
+                  case 0xEC: case 0xED: case 0xF4: case 0xFC: case 0xFD: return 0;
+                  default: return 1; }
+}
+static uint32_t prov_table_targets(DpResults *res, uint32_t bank, uint16_t base) {
+    const DpCart *c = res->cart;
+    uint32_t tkey;
+    if (base < 0x4000) tkey = base;
+    else if (bank) tkey = bank * 0x4000 + (base - 0x4000);
+    else return 0; // bank 0 code, table in the window: no static bank evidence
+    uint32_t tbank = tkey / 0x4000, got = 0, tg[128];
+    uint32_t marked = 0;
+    for (uint32_t i = 0; i < 128; i++) {
+        uint32_t w = tkey + 2 * i;
+        if (w + 1 >= c->rom_size || (w + 1) / 0x4000 != tbank) break;
+        if ((res->exec_flags[w] | res->exec_flags[w + 1]) & DP_XF_NATURAL) break; // run by the natural flow: code, not a table (speculative forks may run table bytes)
+        uint16_t t = (uint16_t)(c->rom[w] | (c->rom[w + 1] << 8));
+        uint32_t tk = t < 0x8000 ? prov_target(res, tbank, t) : ~0u;
+        if (tk == ~0u || tk >= c->rom_size) break;
+        uint8_t op = c->rom[tk];
+        if (op == 0x00 || op == 0xFF || !prov_legal_op(op)) break;
+        tg[got++] = tk;
+    }
+    if (got < 2) return 0;
+    for (uint32_t i = 0; i < got; i++) {
+        uint32_t w = tkey + 2 * i;
+        for (uint32_t b = 0; b < 2; b++) {
+            dp_cov_mark(&res->first, res->src_flags, w + b, DP_SRC_PROVENANCE, res->steps_total, 0);
+            if (!(res->data_flags[w + b] & DP_DF_STATIC)) { res->data_flags[w + b] |= DP_DF_STATIC; res->prov_data++; }
+        }
+        uint8_t *f = &res->exec_flags[tg[i]];
+        if (!(*f & (DP_XF_NATURAL | DP_XF_FORCED))) {
+            if (!(*f & DP_XF_STATIC)) marked++;
+            *f |= DP_XF_STATIC | DP_XF_START | DP_XF_ENTRY;
+            dp_cov_mark(&res->first, res->src_flags, tg[i], DP_SRC_PROVENANCE, res->steps_total, 0);
+        }
+    }
+    res->prov_table_targets += got;
+    return marked;
+}
+
+// rst-vector dispatchers (SML2's `rst $28`): the vector pops its return address, indexes the table
+// that follows the call site and jumps.  Recognised by shape: a `pop hl` then an `add hl,..`
+// before the first `jp hl`, no return or jump in between.
+static uint8_t prov_rst_dispatchers(const DpCart *c) {
+    uint8_t mask = 0;
+    for (int v = 0; v < 8; v++) {
+        uint32_t a = (uint32_t)v * 8;
+        if (a + 24 > c->rom_size) break;
+        int pop = 0, add = 0, ok = 0;
+        for (uint32_t i = a; i < a + 24; i++) {
+            uint8_t op = c->rom[i];
+            if (op == 0xC9 || op == 0xD9 || op == 0xC3) break;
+            if (op == 0xE1) pop = 1;
+            else if (pop && (op == 0x19 || op == 0x29)) add = 1;
+            else if (op == 0xE9) { ok = pop && add; break; }
+        }
+        if (ok) mask |= (uint8_t)(1u << v);
+    }
+    return mask;
+}
+
 uint32_t dp_provenance(DpResults *res) {
     const DpCart *c = res->cart;
     size_t n = (size_t)res->banks * 0x4000;
@@ -143,11 +214,21 @@ uint32_t dp_provenance(DpResults *res) {
     ProvStack st = {0};
     uint32_t marked = 0;
     dp_set_init(&vis, 1 << 16);
+    uint8_t rstd = prov_rst_dispatchers(c);
+    for (size_t k = 0; rstd && k < n && k < c->rom_size; k++) { // inline tables after each `rst` call site
+        uint8_t op = c->rom[k];
+        if ((op & 0xC7) != 0xC7 || !(rstd & (1u << ((op >> 3) & 7)))) continue;
+        if (!(res->exec_flags[k] & DP_XF_START) || !(res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED | DP_XF_STATIC))) continue;
+        uint32_t bank = (uint32_t)(k / 0x4000);
+        uint32_t base = bank ? 0x4000 + (uint32_t)(k % 0x4000) + 1 : (uint32_t)k + 1;
+        if (base >= 0x8000 || (bank == 0 && base >= 0x4000)) continue;
+        marked += prov_table_targets(res, bank, (uint16_t)base);
+    }
     for (size_t k = 0; k < n; k++) {
         if (!(res->exec_flags[k] & DP_XF_START) ||
             !(res->exec_flags[k] & (DP_XF_NATURAL | DP_XF_FORCED | DP_XF_STATIC)))
             continue;
-        ProvState s0 = { (uint32_t)k, 0, 0, 0, 0, 0, 0, 0 };
+        ProvState s0 = { (uint32_t)k, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
         ppush(&st, s0);
     }
     uint32_t steps = 0;
@@ -160,6 +241,7 @@ uint32_t dp_provenance(DpResults *res) {
         ProvState s = st.v[--st.n];
         uint64_t vk = ((uint64_t)s.k << 17) | ((uint64_t)(s.hlmask ? s.hl : 0) << 1) | s.aknown;
         // BC/DE join the key through a mix: a collision only prunes a state, never invents one
+        if (s.tflags) vk ^= ((uint64_t)s.tbase * 4 + s.tflags) * 0xC2B2AE3D27D4EB4Full;
         vk ^= (((uint64_t)(s.pm2 & 1 ? s.de : 0) << 16 | (s.pm2 & 2 ? s.bc : 0)) * 4 + s.pm2) * 0x9E3779B97F4A7C15ull << 20;
         if (dp_set_insert(&vis, vk) <= 0) continue;
         if (s.k >= n || s.k >= c->rom_size) continue;
@@ -181,12 +263,20 @@ uint32_t dp_provenance(DpResults *res) {
         isa->regs_effect(&c->rom[s.k], &r, &rom);
         prov_pairs(res, &pr, &s, c->rom[s.k], old_hl, old_mask, &r);
         s.hl = r.p; s.hlmask = r.pmask; s.a = r.a; s.aknown = r.aknown;
+        { // indexed dispatch idiom: ld hl,TABLE ... add hl,idx ... ld h,(hl) ... jp hl
+            uint8_t op0 = c->rom[s.k];
+            if (op0 == 0x21) {
+                uint16_t base = (uint16_t)(c->rom[s.k + 1] | (c->rom[s.k + 2] << 8));
+                if (base < 0x8000) { s.tbase = base; s.tflags = 1; } else s.tflags = 0;
+            } else if (op0 == 0x66 && (s.tflags & 1)) s.tflags |= 2;
+        }
 
         int fall = fi.fall;
         if (fi.halt) fall = 0; // halt/stop: the run ends here
         if (fi.kind == DP_FLOW_INDIRECT) { // jp hl
             if (s.hlmask != 3) {
                 res->prov_unresolved++;
+                if (s.tflags == 3) marked += prov_table_targets(res, bank, s.tbase);
             } else if (s.hl < 0x4000 && s.hl < c->rom_size) {
                 uint32_t tk = s.hl;
                 if (!(res->exec_flags[tk] & (DP_XF_NATURAL | DP_XF_FORCED))) {
@@ -213,7 +303,7 @@ uint32_t dp_provenance(DpResults *res) {
             else res->prov_unresolved++;
             if (fi.call) {
                 // the callee may clobber everything: the continuation forgets
-                ProvState rs = { 0, 0, 0, 0, 0, 0, 0, 0 };
+                ProvState rs = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
                 rs.k = prov_target(res, bank, (uint32_t)pc + 3);
                 if (rs.k != ~0u) ppush(&st, rs);
             }

@@ -3779,3 +3779,24 @@ reprise de Sonic tourne ensuite sans plantage (observation de l'outil ; fin du r
   frame), `DEEPEEL_DEBUG_WATCHWR=lo-hi` (écritures sur une plage), et la trace `DEEPEEL_TAS_TRACEFRAME`
   affiche cycles, IME, IF et le haut de pile. GBHawk n'est pas exécutable ici (pas de BIOS DMG, `gbh.dll`
   non construit) : la référence est libgambatte, qui a enregistré ce film.
+
+## 0.249.44 : tables de dispatch indexées prouvées par la provenance (2026-11-05)
+
+- **Manque** (anatomie résiduelle de SML2, `code-code (dispatch non prouvé)`) : les `jp hl` dont l'index
+  n'est pas statiquement connu laissaient leurs tables hors de la carte. SML2 dispatche par `rst $28` :
+  le vecteur dépile l'adresse de retour, indexe la table placée juste après le site d'appel, puis saute.
+- **`src/explore/provenance.c`** : deux preuves nouvelles, balisées statiques (inférence de l'outil, pas
+  observation) et alimentant la fermeture :
+  1. idiome `ld hl,TABLE … add hl,idx … ld h,(hl) … jp hl` : les mots de la table sont prouvés données et
+     leurs cibles prouvées entrées de code ;
+  2. vecteur `rst` reconnu par sa forme (`pop hl`, `add hl,…`, `jp hl`, sans retour entre) : la table en
+     ligne après chaque site `rst` exécuté est parcourue de la même façon.
+  Une table exige ≥ 2 entrées plausibles (≤ 128) : mots contigus dans la même vue de ROM, premier octet de
+  la cible un opcode légal et non un remplissage `00`/`FF`, emplacement jamais exécuté par le flot naturel
+  (les forks spéculatifs peuvent exécuter les octets d'une table ; seuls le flot naturel et un opcode
+  illégal l'arrêtent). Compteur `prov_table_targets`.
+- **Tests** : fixtures `dispatch` et `rstdispatch`, vérifiées dans `test_explorer` (entrées jamais prises
+  prouvées code, mots de table prouvés données).
+- **Observation de l'outil** (SML2, relecture du film `dadinfinitum` seul, sans fourches) : octets inconnus
+  51 750 → 46 923, plages 1 101 → 1 050 ; `code-code` 10 388 → 8 765 octets, `code-data` 34 654 → 31 475.
+  C'est de l'inférence statique : à croiser avec la couverture par fourches.

@@ -289,6 +289,7 @@ typedef struct DpResults {
     uint32_t seeds_refused_budget; // seeds dropped: the phase's cascade solde was spent
     uint32_t sib_tables, sib_ranges, sib_bytes, sib_refused, sib_caps; // copy-sibling inference
     uint32_t prov_jp_hl, prov_data;  // provenance: jp-hl targets proven, bytes proven data
+    uint32_t prov_table_targets;     // indexed-dispatch table entries proven code (tool inference)
     uint32_t prov_unresolved, prov_sat, prov_steps; // partial proofs, caps hit, walk steps
     uint32_t sgb_packets, sgb_cmd[32]; // SGB packets decoded from $FF00 writes, per command (code = byte0 >> 3)
     uint32_t forks_event;         // read-value probes on LY / STAT / DIV (3.7)
