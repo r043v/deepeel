@@ -266,6 +266,15 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
             i = j;
         }
     }
+    // monotone inference: a byte the map once classed by inference stays classed when a later
+    // pass moves the neighbours that justified it (observed classes always win; they are
+    // read from the monotone flags above)
+    if (res->map_sticky) {
+        for (size_t k = 0; k < n; k++) {
+            if (m[k] == DP_MAP_UNKNOWN) { if (res->map_sticky[k]) m[k] = res->map_sticky[k]; }
+            else if (m[k] >= DP_MAP_INF_DATA) res->map_sticky[k] = m[k];
+        }
+    }
     if (sum) {
         memset(sum, 0, sizeof *sum);
         sum->total = n;
@@ -282,6 +291,34 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
         sum->probable = sum->cls[DP_MAP_PROB_CODE];
     }
     return m;
+}
+
+// sticky inference sidecar: "DPMS", u32 banks, one class byte per ROM byte (versioned by the magic)
+int dp_map_sticky_save(const DpResults *res, const char *path) {
+    if (!res->map_sticky) return 1;
+    size_t n = (size_t)res->banks * 0x4000;
+    FILE *f = fopen(path, "wb");
+    if (!f) return 0;
+    uint32_t h[2] = { 0x534D5044u, res->banks };
+    int ok = fwrite(h, sizeof h, 1, f) == 1 && fwrite(res->map_sticky, 1, n, f) == n;
+    return fclose(f) == 0 && ok;
+}
+
+long dp_map_sticky_load(DpResults *res, const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f || !res->map_sticky) { if (f) fclose(f); return -1; }
+    size_t n = (size_t)res->banks * 0x4000;
+    uint32_t h[2];
+    uint8_t *b = malloc(n ? n : 1);
+    long got = -1;
+    if (b && fread(h, sizeof h, 1, f) == 1 && h[0] == 0x534D5044u && h[1] == res->banks && fread(b, 1, n, f) == n) {
+        got = 0;
+        for (size_t k = 0; k < n; k++)
+            if (b[k] && !res->map_sticky[k]) { res->map_sticky[k] = b[k]; got++; }
+    }
+    free(b);
+    fclose(f);
+    return got;
 }
 
 void dp_map_summary_text(const DpMapSummary *s, DpBuf *out) {

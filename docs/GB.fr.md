@@ -3881,3 +3881,19 @@ est multiplié par 2 à 3.
 - **Mesure** (Puzznic, `--queue 4 --queue-max 4`, 120 s, observation de l'outil) : spool 10,4 Mo → 4,5 Mo
   pour 47 878 états écrits (≈217 → ≈94 octets par état), même couverture (1 570 octets inconnus).
   Reprise d'un spool écrit par l'ancien binaire : sans erreur.
+
+## 0.249.50 — carte inférée monotone
+
+Les classes inférées de la carte (`inferred-*`, `probable-code`) sont mémorisées par octet
+(`DpResults.map_sticky`) : un octet une fois classé par inférence ne retombe plus à « inconnu » quand une
+passe ultérieure déplace les voisins qui le justifiaient (les classes observées l'emportent toujours, et
+elles viennent des drapeaux de couverture, monotones). Persisté à côté de `coverage.bin`
+(`coverage.bin.sticky`, magic `DPMS`) et rechargé par `--resume` ; un fichier absent ou d'une autre
+géométrie est ignoré (compatibilité ascendante). Essai Puzznic 40 s + reprise 40 s : 24 523 octets inférés
+conservés, inconnu inchangé (2 172 octets).
+
+Journal du romset (`results/gb/ROMSET.log`, observation) : 0 arrêt `mem-guard`, 0 `hard-kill` ; les 27
+`reason=interrupted` datent du SIGINT du batch (03:39) ; l'unique `state-guard` (frogger-usa, 10:14) est le
+garde-fou de **disque libre** (< 15 Gio sur le scratch), pas la RAM, et la ROM a ensuite fini sans arrêt
+(`time budget reached`, 99,912 %). L'entrée « noobow-japan 24 344 Mo » n'existe plus dans le journal : le
+dernier run se termine par `time budget reached` (7 875 Mo d'état).

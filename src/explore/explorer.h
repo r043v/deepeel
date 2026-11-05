@@ -200,6 +200,7 @@ typedef struct DpResults {
     uint32_t *play_exec_hits;
     uint32_t *play_data_hits;
     uint8_t *static_flags;
+    uint8_t *map_sticky; // per ROM byte: the inferred map class once given (never taken back by a later pass)
     uint64_t defer_by[DP_R_COUNT];   // deferred per reason
     uint64_t defer_final[DP_R_COUNT]; // cut for good per reason (tier cap / holding area full)
     uint64_t seeds_deferred, seeds_resumed, seeds_lost, seeds_pending_disk, defer_on_disk, inbox_dropped;

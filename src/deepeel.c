@@ -593,6 +593,10 @@ static int cmd_explore(int argc, char **argv) {
             if (dl >= 0) fprintf(stderr, "deepeel: resumed discovery log (%ld entries)\n", dl);
             long g = dp_results_cov_load(&res, cpath);
             if (g >= 0) fprintf(stderr, "deepeel: resumed coverage map (%ld bytes known again)\n", g);
+            char spath[560];
+            snprintf(spath, sizeof spath, "%s.sticky", cpath);
+            long sg = dp_map_sticky_load(&res, spath);
+            if (sg >= 0) fprintf(stderr, "deepeel: resumed inferred map (%ld bytes kept)\n", sg);
         }
     }
     if (scfg.resume && fdir) {
@@ -886,6 +890,13 @@ static int cmd_explore(int argc, char **argv) {
         char cpath[540];
         snprintf(cpath, sizeof cpath, "%s/coverage.bin", scfg.state_dir);
         if (!dp_results_cov_save(&res, cpath)) fprintf(stderr, "deepeel: cannot save %s\n", cpath);
+        {
+            char spath[560];
+            snprintf(spath, sizeof spath, "%s.sticky", cpath);
+            DpMapSummary ms;
+            free(dp_map_build(&res, &ms)); // refreshes the sticky classes before they are saved
+            if (!dp_map_sticky_save(&res, spath)) fprintf(stderr, "deepeel: cannot save %s\n", spath);
+        }
         char dpath[540];
         snprintf(dpath, sizeof dpath, "%s/disc.bin", scfg.state_dir);
         if (!dp_results_disc_save(&res, dpath)) fprintf(stderr, "deepeel: cannot save %s\n", dpath);

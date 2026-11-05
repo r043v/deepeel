@@ -51,6 +51,9 @@ typedef struct DpMapSummary {
 } DpMapSummary;
 // malloc'd per-byte class array (banks*0x4000), caller frees
 uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum);
+// sticky inferred classes persisted beside coverage.bin (a resumed run never loses an inferred byte)
+int dp_map_sticky_save(const DpResults *res, const char *path);
+long dp_map_sticky_load(DpResults *res, const char *path);
 // what each exploration method added, in % of the whole ROM: tas, random, fork, attract, static+inferred
 void dp_map_methods_pct(const DpResults *res, const DpMapSummary *s, double out[5]);
 const char *dp_map_class_name(int c);

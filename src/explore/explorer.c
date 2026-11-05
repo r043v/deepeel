@@ -191,6 +191,7 @@ void dp_results_init(DpResults *res, const DpCart *cart, const DpPlatform *plat)
     memset(res->data_flags, 0, n);
     memset(res->data_hits, 0, n * sizeof(uint32_t));
     memset(res->static_flags, 0, n);
+    res->map_sticky = calloc(n ? n : 1, 1);
     memset(res->section_of, 0, n * sizeof(uint32_t));
     res->io_count = plat->io_reg_count;
     res->io = xrealloc(NULL, sizeof(DpIoStat) * (size_t)res->io_count);
@@ -333,6 +334,7 @@ void dp_results_free(DpResults *res) {
     free(res->play_exec_hits);
     free(res->play_data_hits);
     free(res->static_flags);
+    free(res->map_sticky);
     free(res->section_of);
     free(res->src_flags);
     dp_first_free(&res->first);
