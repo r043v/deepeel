@@ -58,6 +58,7 @@ typedef struct {
     uint32_t novelty_archive;  /* archive capacity */
     int novelty_cells;         /* key the archive on the screen fingerprint and lives */
     uint32_t play_seed;
+    uint32_t shoot_every;   // J2 shoots: while a movie replays, every N frames the state is queued for fork exploration (0: none; default 256)
     uint32_t play_pool;     // J1 shared checkpoint pool size: played sessions restart from earlier sessions' checkpoints (0: from power-on)
     uint32_t play_frames;      /* random played sessions: frames per session (0: off) */
     uint32_t demo_frames;      /* attract-mode session: no button pressed, runs before everything else (0: off) */
@@ -138,6 +139,7 @@ typedef struct DpMdResults_ {
     unsigned nreaders;
     uint64_t reader_overflow;
     uint64_t s4_tables, s4_seeds, s4_refused, disp_tables, disp_seeds, disp_refused_view, pass2_seeds, pass2_refused, pass2_capped, ctx_evicted, exact_dups, exact_loaded, tree_nodes, tree_loaded, sib_tables, sib_entries, sib_bytes, sib_caps, pad_cuts, indirect_sites, indirect_targets, indirect_overflow;
+    uint32_t shoots;                    /* J2: movie checkpoints queued as exploration seeds */
     uint32_t sec_n, sec_req, sec_spec;  /* C1: executed runs, and those with a natural-path byte */
     uint32_t exec_bytes, forced_only_bytes, dread_bytes, natural_data_bytes, dma_source_bytes, dma_read_bytes,
              cpu_vram_bytes, observed_bytes, code_or_vram_bytes, data_only_bytes, filtered_observed_bytes;

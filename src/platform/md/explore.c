@@ -126,6 +126,7 @@ static void next_generation(X *x) {
 /* Per-frame loop detection permits legitimate polling across V-blank;
  * path_steps and max_total still bound paths that run forever. */
 static void novelty_frame(X *x);
+static int push(X *x, uint32_t pc, int vint, int hint);
 static void s4_table(X *x, uint32_t pc, uint32_t obs);
 static void s4_ptr_table(X *x, uint32_t pc, unsigned an, uint32_t obs);
 static uint8_t play_pad(X *x);
@@ -162,7 +163,11 @@ static void on_frame(void *u) {
         if (x->r->movie_frames >= x->o->movie->frames) {
             x->movie_active = 0;
             dp_mdmach_halt(x->m);
-        } else dp_mdmach_set_pad(x->m, x->o->movie->pads[x->r->movie_frames]);
+        } else {
+            // J2 shoot: the state of the movie's own path becomes a fork-exploration seed
+            if (x->o->shoot_every && x->r->movie_frames % x->o->shoot_every == 0 && push(x, x->pc, 0, 0)) x->r->shoots++;
+            dp_mdmach_set_pad(x->m, x->o->movie->pads[x->r->movie_frames]);
+        }
     }
 }
 static void on_dma_read(void *u, uint32_t addr, unsigned size) {
@@ -801,6 +806,7 @@ void dp_md_options_default(DpMdOptions *o) {
     o->watch_write = UINT32_MAX;
     o->exclude_read_pc = UINT32_MAX;
     o->movie = NULL;
+    o->shoot_every = 256;
     o->lot_path = NULL;
     o->lot_drain = 0;
     o->entry_count = 0;
@@ -1797,6 +1803,7 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     fprintf(out, "steps: %llu in %llu paths, forks %llu (irq %llu)\n", (unsigned long long)r->steps,
             (unsigned long long)r->paths, (unsigned long long)r->forks, (unsigned long long)r->irq_forks);
     fprintf(out, "pad probes: %llu (fourteen patterns per read site: twelve three-button, two six-button)\n", (unsigned long long)r->pad_forks);
+    if (o->movie && r->shoots) fprintf(out, "GMV shoots: %u checkpoints queued for fork exploration\n", r->shoots);
     if (o->movie) fprintf(out, "GMV replay: %u / %u frames%s\n", r->movie_frames, o->movie->frames,
                           r->movie_frames == o->movie->frames ? "" : " (incomplete)");
     fprintf(out, "saturation (a non-zero line means the exploration is incomplete):\n");

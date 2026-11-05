@@ -13,9 +13,9 @@ remesure pas l'outil.
 | MSX | 32 | 5 | 0 | 2 |
 | NES | 20 | 17 | 0 | 2 |
 | PCE | 25 | 13 | 0 | 1 |
-| MD | 21 | 17 | 0 | 1 |
+| MD | 22 | 16 | 0 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 63.
+Cellules ouvertes (◐ ou ✗) : 62.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
@@ -63,7 +63,6 @@ Cellules ouvertes (◐ ou ✗) : 63.
 | J1 | Sessions jouées multi-thread + pool | NES | ◐ 0.207 xorshift + pool de checkpoints `--play-pool` |
 | J1 | Sessions jouées multi-thread + pool | PCE | ◐ 0.208 pool `--play-pool` |
 | J1 | Sessions jouées multi-thread + pool | MD | ◐ 0.209 pool `--play-pool` ; 0.189.0 `--play-frames/--play-sessions/--play-seed` (xorshift) ; sessions jouées dans une seule instance (le multi-thread passe par `--jobs`, F3) |
-| J2 | Rejeu TAS prioritaire + shoots | MD | ◐ GMV |
 | J3 | Identité ROM des films | MD | ◐ BK2 : MD5 d'en-tête comparé au ROM (avertissement seulement, le hash BizHawk MD n'est pas fiable) ; GMV sans identité |
 | J4 | Go-Explore (cellules écran) | GB | ◐ `--session-cells` 0.144.0 (pool de sessions) |
 | J4 | Go-Explore (cellules écran) | SMS/GG | ◐ `--novelty` 0.141.0 + `--novelty-cells 1` (cellules écran, vies apprises ; test `z80_novelty_cells`) (SMS/GG/SG) |

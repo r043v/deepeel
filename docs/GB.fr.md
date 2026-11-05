@@ -3595,3 +3595,10 @@ fin (plus d'éviction sur sa fixture). Le branchement sûr demande la liveness p
 G3 MD : `--entry ADDR` est fait ; `--seed-banks` est sans objet tant que la machine MD ne modélise pas de commutation de banque
 ROM du 68000 (SSF2 non modélisée, la fenêtre de banque du Z80 est suivie à part). La cellule passe ✅ sur ce périmètre ;
 elle sera rouverte si SSF2 est modélisée. Aucun changement de code.
+
+## 0.249.28 (MD : shoots du film, J2 ✅)
+
+Pendant le rejeu d'un film MD (GMV/BK2), l'état de la machine est mis en file d'exploration tous les `--shoot-every N` cadres
+(défaut 256, 0 = aucun) : le code atteint par fourche depuis ces points du chemin joué est exploré comme les autres fourches
+(étiquette « forcé », jamais « naturel »). Le rapport affiche `GMV shoots: N checkpoints queued`. Test `md_movie_shoots`
+(`--shoot-every 1`, 3 états pour 4 cadres). Cellule J2 MD passée ✅.
