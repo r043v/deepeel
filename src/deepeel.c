@@ -534,6 +534,10 @@ static int cmd_explore(int argc, char **argv) {
         dp_cart_free(cart);
         return 1;
     }
+    {
+        const char *note = dp_mach_mapper_note(cart->rom);
+        if (note) fprintf(stderr, "deepeel: warning: %s\n", note);
+    }
     DpMach *mach = dp_mach_open(vi, 0);
     dp_mach_set_rom(mach, cart->rom, cart->rom_size);
     if (cfg.unbounded) { cfg.max_paths = UINT32_MAX; cfg.max_steps_total = UINT64_MAX; }   // no path/step wall: the run ends when nothing is left

@@ -16,6 +16,8 @@ int dp_mach_pick_variant(const uint8_t *header) {
     static const struct { uint8_t lo, hi, mbc; } map[] = {
         {0x00, 0x00, 0}, {0x01, 0x03, 1}, {0x05, 0x06, 2},
         {0x0F, 0x13, 3}, {0x19, 0x1E, 5},
+        // approximated: banking-compatible stand-ins (see dp_mach_mapper_note)
+        {0x20, 0x20, 5}, {0x22, 0x22, 5}, {0xFC, 0xFC, 5}, {0xFE, 0xFE, 5}, {0xFF, 0xFF, 1},
     };
     int mbc = -1;
     for (unsigned k = 0; k < sizeof map / sizeof map[0]; k++)
@@ -29,6 +31,20 @@ int dp_mach_pick_variant(const uint8_t *header) {
     for (int v = 0; v < DP_GBL_VARIANTS; v++)
         if (dp_gbl_variant_mbc[v] == mbc && dp_gbl_variant_eram[v] == eram) return v;
     return -1;
+}
+
+// Mappers the machine does not implement but whose ROM banking a compiled variant reproduces closely
+// enough to explore the ROM: the cartridge-specific extras (IR, camera sensor, RTC-like registers) are
+// not modelled.  NULL when the mapper is exact or unsupported.
+const char *dp_mach_mapper_note(const uint8_t *header) {
+    switch (header[0x147]) {
+    case 0x20: return "MBC6 explored as MBC5 (flash and second bank window not modelled)";
+    case 0x22: return "MBC7 explored as MBC5 (accelerometer and EEPROM not modelled)";
+    case 0xFC: return "Pocket Camera explored as MBC5 (sensor and camera registers not modelled)";
+    case 0xFE: return "HuC3 explored as MBC5 (clock, speaker and IR not modelled)";
+    case 0xFF: return "HuC1 explored as MBC1 (infrared port not modelled)";
+    }
+    return NULL;
 }
 
 DpMach *dp_mach_open(int vi, int ii) {

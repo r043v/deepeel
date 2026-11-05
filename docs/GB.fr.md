@@ -3832,3 +3832,16 @@ Observation de l'outil (SML2, relecture du film seul) : inconnu 46 923 → 26 11
   changent rien sur cette ROM (aucun site de ce type en plus) ; `probable-code` gagne 252 octets
   (inconnu 26 117 → 25 865). Les ~8 500 octets de `code-code` restants sont en grande partie des données
   graphiques bornées par du code : seule l'exécution (fourches) peut les trancher.
+
+## 0.249.47 : mappers approchés (HuC1, HuC3, Pocket Camera, MBC6, MBC7) (2026-11-05)
+
+Sur le romset de 1 659 ROMs, 15 portaient un mapper sans variante compilée (HuC1 ×10, Pocket Camera ×3, HuC3,
+TAMA5) et étaient écartées comme `unsupported` sans aucune couverture. `dp_mach_pick_variant` leur
+associe désormais une variante dont le banking ROM est compatible : HuC1 → MBC1 ; HuC3, Pocket Camera, MBC6
+et MBC7 → MBC5. `dp_mach_mapper_note` émet un avertissement sur stderr : les extras de la cartouche
+(port infrarouge, capteur, horloge, accéléromètre, EEPROM, seconde fenêtre MBC6) ne sont **pas** modélisés,
+donc la couverture de ces ROMs est une observation sous approximation, pas une mesure du matériel.
+Toujours non supportés : TAMA5 et MMM01 (registres par quartets / banque 0 mobile).
+Écart restant du matériel : CGB non modélisé (seulement 8 ROMs « CGB enhanced » dans ce romset, aucune
+CGB-only), RTC MBC3, liaison série, valeurs de LY/STAT/DIV/TIMA non fourchées. Essai : Nectaris GB (HuC1)
+est maintenant exploré (`--redo` du batch pour les 15 ROMs).

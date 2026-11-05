@@ -65,6 +65,7 @@ struct DpMach {
 /* Variant pick from a cartridge header (0x147 mapper, 0x149 RAM size);
  * returns -1 when no compiled variant covers it. */
 int dp_mach_pick_variant(const uint8_t *header);
+const char *dp_mach_mapper_note(const uint8_t *header);
 
 DpMach *dp_mach_open(int vi, int ii);
 // same, but NULL when the instance slot is already taken (a session worker,
