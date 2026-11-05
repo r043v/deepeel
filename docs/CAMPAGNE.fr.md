@@ -206,3 +206,14 @@ Ces chiffres sont des essais courts, pas une campagne : ni saturation levée, ni
   42 essais, 10 000 trames, profondeur 96 trames, 2 touches, 3 points archivés, 142 000 000 pas ; carte connue
   **81,48 %** contre 76,21 % (essai court) et 74,35 % (sans jeu). Peu de nouveauté trouvée (2 touches) : gain modeste,
   un seul run. `exec_outside` 4 651 185 pas (code hors ROM, à examiner avant d'en tirer une conclusion).
+
+## J13 : NES Super Mario Bros. jusqu'à l'épuisement (0.249.37)
+
+Observation de l'outil (machine concrète, RAM à zéro, ROM hors dépôt, sortie sur la partition Windows),
+`--second-pass --max-total 400000000 --queue 200000` :
+- PRG 32 Kio, 13 438 octets touchés (41,01 %), 6 259 308 pas, 3 673 chemins dont 3 634 forcés, 3 628 forks, 175 évincés ;
+  coupes : boucle 3 610, fourche 284 261, globale 0 (le run s'arrête par épuisement de la file, pas par budget) ;
+  41 fautes, 7 exécutions hors PRG, frontière 0 parqué / 0 perdu ;
+  second passage : 6 racines semées, 0 refusée, 0 au-dessus du plafond ; 112 sections.
+- Contraste avec la campagne courte de 0.187.6 (3 045 225 pas) : le run complet double les pas, sans saturation.
+Ce n'est pas une mesure de matériel, et le 41 % reste ce que l'outil atteint sans manette réelle ni TAS.
