@@ -181,6 +181,26 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
             if (fill) c = DP_MAP_INF_PAD;
             else if (before >= 0 && after >= 0 && dp_map_is_code(before) && dp_map_is_code(after) && len <= 3) c = DP_MAP_INF_CODE;
             else if (before >= 0 && after >= 0 && dp_map_is_data(before) && dp_map_is_data(after) && len <= 1024) c = DP_MAP_INF_DATA;
+            // mixed code/data edge: code that ends on an unconditional transfer cannot fall into the run,
+            // and a run that stops at known code is the data/padding before that entry
+            if (c == DP_MAP_UNKNOWN && rom && j <= rsz && len <= 2048) {
+                int bt = 0;
+                if (before >= 0 && dp_map_is_code(before)) {
+                    uint8_t o1 = rom[i - 1];
+                    bt = o1 == 0xC9 || o1 == 0xD9 || o1 == 0xE9 || (i - bs >= 3 && rom[i - 3] == 0xC3) ||
+                         (i - bs >= 2 && rom[i - 2] == 0x18);
+                }
+                int ad = after >= 0 && dp_map_is_data(after), bd = before >= 0 && dp_map_is_data(before);
+                if ((bt && ad) || (bd && after >= 0 && dp_map_is_code(after)) || (bt && after < 0)) c = DP_MAP_INF_DATA;
+                else if (bd && after < 0) c = DP_MAP_INF_DATA; // data running to the bank's end
+            }
+            // padding fringe: filler with a few stray bytes next to padding (mostly 00/FF)
+            if (c == DP_MAP_UNKNOWN && rom && j <= rsz && len <= 64 &&
+                ((before == DP_MAP_PAD || before == DP_MAP_INF_PAD) || (after == DP_MAP_PAD || after == DP_MAP_INF_PAD))) {
+                size_t fl = 0;
+                for (size_t k = i; k < j; k++) fl += rom[k] == 0x00 || rom[k] == 0xFF;
+                if (fl * 4 >= len * 3) c = DP_MAP_INF_PAD;
+            }
             if (c != DP_MAP_UNKNOWN) memset(m + i, c, len);
             i = j;
         }

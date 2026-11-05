@@ -3800,3 +3800,16 @@ reprise de Sonic tourne ensuite sans plantage (observation de l'outil ; fin du r
 - **Observation de l'outil** (SML2, relecture du film `dadinfinitum` seul, sans fourches) : octets inconnus
   51 750 → 46 923, plages 1 101 → 1 050 ; `code-code` 10 388 → 8 765 octets, `code-data` 34 654 → 31 475.
   C'est de l'inférence statique : à croiser avec la couverture par fourches.
+
+## 0.249.45 : inférence des bords mixtes code/donnée (2026-11-05)
+
+Deux règles d'inférence ajoutées à `dp_map_build` (classes inférées, comptées dans « dont inféré ») :
+- **Bord mixte** : une plage inconnue (≤ 2048 o) entre du code qui se termine par un transfert
+  inconditionnel (`ret`, `reti`, `jp hl`, `jp nn`, `jr e`) et de la donnée connue, ou entre de la donnée
+  connue et du code connu, est classée donnée. Le code ne peut pas tomber dedans ; l'entrée du code
+  suivant borne la plage. Donnée courant jusqu'à la fin de banque : idem.
+- **Frange de remplissage** : plage ≤ 64 o au contact d'un remplissage, dont ≥ 75 % d'octets `00`/`FF`.
+
+Observation de l'outil (SML2, relecture du film seul) : inconnu 46 923 → 26 117 octets, `code-data`
+31 475 → 10 770. C'est une inférence, pas une observation d'exécution : les plages `code-code`
+(dispatch non prouvé, 8 765 o) restent inconnues, faute de preuve.
