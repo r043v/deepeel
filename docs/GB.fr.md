@@ -3671,3 +3671,10 @@ Un run prolongé de Gradius 2 (MSX, ROM hors dépôt) mourait par `stack smashin
 largeur de ligne dans `LINLEN` (RAM, modifiable par le jeu) et `text_scroll` la range dans un tampon de 40 octets.
 `cmake/dp_msx_instrument.cmake` borne désormais cette largeur à 40 dans la copie instrumentée (la source m0boy reste
 intacte). Les 172 tests passent ; le run de Gradius 2 repart sans le crash (observation de l'outil, non conclue ici).
+
+## 0.249.39 (MD : reprise d'un spool dans un autre processus)
+
+`dp_mdmach_load` recopiait l'état entier, pointeurs compris : après une reprise de `--spool` par un nouveau processus,
+le Z80 sonore appelait un `read` mort et plantait (SIGSEGV observé sur Sonic). La charge conserve désormais les
+pointeurs du processus courant (callbacks du bus Z80, `ym_log`, `coverage`, `screen`, hooks). 172 tests verts. La
+reprise de Sonic tourne ensuite sans plantage (observation de l'outil ; fin du run non encore documentée).

@@ -140,7 +140,25 @@ uint32_t dp_mdmach_fault_pc(const DpMdMach *d) { return d->m->fault_pc; }
 size_t dp_mdmach_state_size(void) { return sizeof(MdFull); }
 void dp_mdmach_save(const DpMdMach *d, void *buf) { memcpy(buf, d->m, sizeof(MdFull)); }
 void dp_mdmach_load(DpMdMach *d, const void *buf) {
-    memcpy(d->m, buf, sizeof(MdFull));
+    // A state read back from a spool was written by another process: keep this process's own
+    // pointers (Z80 bus callbacks, hooks, coverage, screen) instead of the stale saved ones.
+    MdFull *m = d->m;
+    z80_t cpu = m->sound_cpu;
+    void (*ym_log)(void *, uint64_t, unsigned, uint8_t, uint8_t) = m->ym_log;
+    void *ym_log_user = m->ym_log_user;
+    uint8_t *coverage = m->coverage;
+    uint32_t *screen = m->screen;
+    void (*line_hook)(void *, const struct MdFull *, unsigned) = m->line_hook;
+    void *hook_user = m->hook_user;
+    memcpy(m, buf, sizeof(MdFull));
+    m->sound_cpu.user = cpu.user;
+    m->sound_cpu.read = cpu.read;
+    m->sound_cpu.write = cpu.write;
+    m->sound_cpu.in = cpu.in;
+    m->sound_cpu.out = cpu.out;
+    m->ym_log = ym_log; m->ym_log_user = ym_log_user;
+    m->coverage = coverage; m->screen = screen;
+    m->line_hook = line_hook; m->hook_user = hook_user;
     d->resume_frame = 1;
     md_full_cram_sync(d->m);
 }
