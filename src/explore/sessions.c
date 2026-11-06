@@ -46,6 +46,9 @@ void dp_session_cfg_defaults(DpSessionCfg *cfg) {
     cfg->tas_ckpt_frames = 0; // auto: derived from tas_ckpt_secs and tas_ckpt_max
     cfg->tas_ckpt_secs = 30;
     cfg->tas_ckpt_max = 1024;
+    cfg->tas_rng = 1;
+    cfg->tas_rng_share = 2;
+    cfg->tas_rng_min = 3600;
     cfg->uniform = 1;
     cfg->uniform_hold = 64;
 }
@@ -231,6 +234,7 @@ typedef struct DpTasSnap {
 #define DP_MAX_TAS 8
 
 typedef struct DpTasSnapRec {
+    uint32_t chosen; // random-key segments already started from this snapshot
     uint32_t frame;
     uint64_t credit;
     int tas;
@@ -335,6 +339,7 @@ struct DpPlay {
     int tasnaps_n, tasnaps_cap;
     int tas_resume_rec[DP_MAX_TAS]; // resume: latest snapshot record per movie (-1 = none)
     uint64_t tas_ckpts;
+    uint64_t tas_rng_starts; // random-key segments started from a TAS checkpoint
     uint64_t tas_cuts;      // fork-explorer cuts absorbed mid-movie (movie kept)
     uint64_t tas_cut_stuck; // consecutive-cut guard hits (movie then falls to random play)
     uint32_t tas_rom_refused; // movies refused: recorded on another ROM (identity mismatch)
@@ -488,11 +493,44 @@ static void segment_end(DpWorker *w) {
             if (best == ~0u) pick = 0; // only the start exists
         }
     }
-    p->pool.slot[pick]->chosen++;
-    w->backtracked = (pick != 0);
-    dp_mach_load(w->mach, p->pool.slot[pick]->img);
+    // a share of the random-key segments restarts from a TAS checkpoint: the least started one, so
+    // every seed of the near-perfect run gets many long random explorations of its neighbourhood
+    char tpath[600];
+    int use_tas = 0;
+    if (w->mode == IN_RNG && p->cfg.tas_rng && p->tasnaps_n > 0 && p->cfg.tas_rng_share &&
+        rnd(&w->in.rng) % p->cfg.tas_rng_share == 0) {
+        int bi = -1;
+        int off = (int)(rnd(&w->in.rng) % (uint32_t)p->tasnaps_n);
+        for (int k = 0; k < p->tasnaps_n; k++) {
+            int i = (k + off) % p->tasnaps_n;
+            if (bi < 0 || p->tasnaps[i].chosen < p->tasnaps[bi].chosen) bi = i;
+        }
+        p->tasnaps[bi].chosen++;
+        snprintf(tpath, sizeof tpath, "%s", p->tasnaps[bi].path);
+        use_tas = 1;
+        __atomic_fetch_add(&p->tas_rng_starts, 1, __ATOMIC_RELAXED);
+    }
+    if (!use_tas) {
+        p->pool.slot[pick]->chosen++;
+        w->backtracked = (pick != 0);
+        dp_mach_load(w->mach, p->pool.slot[pick]->img);
+    }
     pthread_mutex_unlock(&p->pool.mtx);
     w->seg_left = p->cfg.segment_min + rnd(&w->in.rng) % p->cfg.segment_span;
+    if (use_tas) {
+        DpCheckpoint *tc = tas_snap_load(p, tpath);
+        if (tc) {
+            dp_mach_load(w->mach, tc->img);
+            ckpt_free(tc);
+            w->backtracked = 1;
+            w->seg_left = p->cfg.tas_rng_min + rnd(&w->in.rng) % (2 * p->cfg.tas_rng_min + 1);
+        } else { // unreadable: the power-on start, as a normal segment
+            pthread_mutex_lock(&p->pool.mtx);
+            w->backtracked = 0;
+            dp_mach_load(w->mach, p->pool.slot[0]->img);
+            pthread_mutex_unlock(&p->pool.mtx);
+        }
+    }
     w->in.move_left = 0;
     w->in.tap_left = 0;
     w->credit_prev = worker_credit(w);
@@ -914,7 +952,7 @@ static int pool_load(DpPlay *p) {
         uint32_t tn = 0;
         if (fread(&tn, sizeof tn, 1, f) != 1 || tn > 64u * 1024u) ok = 0;
         for (uint32_t i = 0; ok && i < tn; i++) {
-            DpTasSnapRec r = { 0, 0, DP_MAX_TAS, "" };
+            DpTasSnapRec r = { .tas = DP_MAX_TAS };
             uint32_t pl = 0;
             if (fread(&r.frame, sizeof r.frame, 1, f) != 1 ||
                 fread(&r.credit, sizeof r.credit, 1, f) != 1 ||
@@ -1293,15 +1331,18 @@ static void drain_tas_snaps(DpPlay *p) {
         char path[600];
         snprintf(path, sizeof path, "%s/tas%02d-f%u.png", p->snap_dir, s.tas, s.frame);
         if (save_png_path(p, &c, path)) {
+            pthread_mutex_lock(&p->pool.mtx); // the random-key workers read this list
             if (p->tasnaps_n == p->tasnaps_cap) {
                 p->tasnaps_cap = p->tasnaps_cap ? p->tasnaps_cap * 2 : 64;
                 p->tasnaps = realloc(p->tasnaps, (size_t)p->tasnaps_cap * sizeof *p->tasnaps);
             }
             DpTasSnapRec *r = &p->tasnaps[p->tasnaps_n++];
+            r->chosen = 0;
             r->frame = s.frame;
             r->credit = s.credit;
             r->tas = s.tas;
             snprintf(r->path, sizeof r->path, "%s", path);
+            pthread_mutex_unlock(&p->pool.mtx);
         } else {
             fprintf(stderr, "deepeel: TAS snapshot save failed: %s\n", path);
         }
@@ -1315,6 +1356,7 @@ static void drain_tas_snaps(DpPlay *p) {
 // stagnant sessions (their next segment_end picks the best checkpoint) and
 // checks the stop conditions.
 uint64_t dp_play_tas_ckpts(const DpPlay *p) { return p->tas_ckpts; }
+uint64_t dp_play_tas_rng_starts(const DpPlay *p) { return p->tas_rng_starts; }
 uint64_t dp_play_tas_snap_files(const DpPlay *p) { return (uint64_t)p->tasnaps_n; }
 
 // the post-play phase: every snapshot saved during the TAS replays becomes a

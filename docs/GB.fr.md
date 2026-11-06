@@ -4006,3 +4006,13 @@ classes observées (12 plages sur 12 dans cette situation sont du code) ; les 31
 remplissage (0-50 % de 00/FF) mais des tuiles, les courtes (< 32 octets, ~2,2 Ko) restent inconnues ; (b) l'amorçage
 statique par tables de pointeurs (suites de ≥ 4 mots dont la moitié vise du code exécuté) ne donne que 23 racines à
 décodage propre sur SML2, dont une seule au début d'une plage inconnue : rendement trop faible pour le coût.
+
+## Segments aléatoires depuis les checkpoints TAS (0.249.61)
+
+Par défaut, une session en touches aléatoires sur deux repart d'un snapshot TAS
+(le moins déjà tiré) et joue un segment long (`3600 + [0, 7200]` images) : chaque
+graine du run quasi parfait reçoit ainsi de nombreuses explorations aléatoires de
+son voisinage. Réglages : `--tas-rng-share N` (1 départ sur N, défaut 2),
+`--tas-rng-frames N` (défaut 3600), `--no-tas-rng` pour revenir à l'ancien
+comportement. Les snapshots restent aussi des graines de fourches. Non mesuré sur
+ROM réelle à ce stade : à comparer à temps égal (inconnu avant/après).

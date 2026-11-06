@@ -52,6 +52,10 @@ typedef struct DpSessionCfg {
                                 // time (0 = off; default 30)
     int cells;                  // Go-Explore screen cells (J4): a never-seen background fingerprint joins the pool
     int tas_ckpt_max;           // TAS replay: checkpoint snapshots kept per movie (default 1024)
+    int tas_rng;                // 1 (default): random-key sessions also start long segments from the TAS
+                                // checkpoints (the neighbourhood of the near-perfect run), many times each
+    uint32_t tas_rng_share;     // 1 segment start in this many is drawn from the TAS checkpoints (default 2)
+    uint32_t tas_rng_min;       // frames of such a segment: min + random below 2*min (default 3600)
     int tas_ckpt_live;          // 1: the old behavior — the captures feed the fork explorer's
                                 // inbox during the replay instead of waiting for the post-play
                                 // phase (default 0)
@@ -104,6 +108,7 @@ int dp_play_save(const DpPlay *p);
 int dp_play_done(const DpPlay *p);
 // TAS gameplay states handed to the fork explorer so far
 uint64_t dp_play_tas_ckpts(const DpPlay *p);
+uint64_t dp_play_tas_rng_starts(const DpPlay *p); // random-key segments started from a TAS checkpoint
 // screen cells archived into the pool (--session-cells)
 uint64_t dp_play_cells(const DpPlay *p);
 // TAS checkpoint snapshots saved on disk during the replays

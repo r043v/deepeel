@@ -178,6 +178,11 @@ static void usage(void) {
             "                         interval is min(movie/S, S secs), so a long movie stays at\n"
             "                         one snapshot per S seconds\n"
             "    --session-cells      Go-Explore: sessions archive every new background screen as a checkpoint\n"
+            "    --no-tas-rng         disable the default: half of the random-key segments restart\n"
+            "                         from the TAS checkpoints (long segments, each checkpoint many\n"
+            "                         times) to explore the neighbourhood of the near-perfect run\n"
+            "    --tas-rng-share N    one random-key segment start in N uses a TAS checkpoint (default 2)\n"
+            "    --tas-rng-frames N   such a segment lasts N + [0, 2N] frames (default 3600)\n"
             "    --tas-ckpt-live      feed the TAS snapshots to the fork explorer during the\n"
             "                         replay instead of the default: save them, then seed the\n"
             "                         whole set after the coverage exploration\n"
@@ -451,6 +456,9 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--tas-ckpt-secs") && i + 1 < argc) scfg.tas_ckpt_secs = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--tas-ckpt-max") && i + 1 < argc) scfg.tas_ckpt_max = atoi(argv[++i]);
         else if (!strcmp(a, "--tas-ckpt-live")) scfg.tas_ckpt_live = 1;
+        else if (!strcmp(a, "--no-tas-rng")) scfg.tas_rng = 0;
+        else if (!strcmp(a, "--tas-rng-share") && i + 1 < argc) scfg.tas_rng_share = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--tas-rng-frames") && i + 1 < argc) scfg.tas_rng_min = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--session-cells")) scfg.cells = 1;
         else if (!strcmp(a, "--tas-solo")) scfg.tas_solo = 1;
         else if (!strcmp(a, "--tas-any-rom")) scfg.tas_any_rom = 1;
