@@ -4139,3 +4139,11 @@ première divergence à l'image 24. Cause ouverte : l'IRQ STAT de l'image 23 est
 servie par VBA 2 ticks après le pc 476f, par deepeel ~44 cycles plus tard
 (phase de la ligne 153 → LY=0 différente). Essai « LY 153→0 à 24 cycles » : sans
 effet, retiré. Le replay intégral n'est pas encore sans désynchronisation.
+
+Piste explorée, non retenue (observations de l'outil) : dans VBA V7, la
+première ligne après un allumage du LCD dure 1140 ticks (mode 0, LY=0) : le
+premier VBlank tombe 17443 ticks après l'écriture LCDC, soit ~4104 cycles de
+plus que le matériel. Reproduit dans deepeel (ligne 0 allongée), l'effet fait
+diverger plus tôt (première image 10 au lieu de 24 : `$DB97` apparaît une
+image trop tôt) — le modèle reste à compléter avant d'être activé. De même,
+LY 153→0 à 24 cycles n'a aucun effet mesuré.

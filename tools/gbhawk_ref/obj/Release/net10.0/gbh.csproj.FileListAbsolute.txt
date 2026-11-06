@@ -25,3 +25,8 @@
 /home/m/.claude/jobs/56b762b5/tmp/gbhout/gbh.runtimeconfig.json
 /home/m/.claude/jobs/56b762b5/tmp/gbhout/gbh.dll
 /home/m/.claude/jobs/56b762b5/tmp/gbhout/gbh.pdb
+/home/m/.claude/jobs/56b762b5/tmp/rc/out/gbh
+/home/m/.claude/jobs/56b762b5/tmp/rc/out/gbh.deps.json
+/home/m/.claude/jobs/56b762b5/tmp/rc/out/gbh.runtimeconfig.json
+/home/m/.claude/jobs/56b762b5/tmp/rc/out/gbh.dll
+/home/m/.claude/jobs/56b762b5/tmp/rc/out/gbh.pdb
