@@ -4056,3 +4056,13 @@ Subs-List du jeu (tous statuts). Test : 20 copies d'un film sur 16 machines,
   cycles (~14 481 cycles plus tard, le même décalage que `sync_pad_delay`).
   La comparaison de WRAM doit se faire hors des boucles de remplissage ou avec
   ce décalage.
+
+## Fidélité VBM : motif d'allumage VBA-rr (0.249.65)
+
+Un harnais VBA-rr sans tête (hors dépôt, construit à part) rejoue un VBM image
+par image et sort la WRAM et les registres. Constats (observations de l'outil) :
+- cœur V8 (VBM mineure ≥ 1) : WRAM initiale en motif `$FF`×8 / `$0F`×8 par blocs
+  de `$800` alternés, HRAM à `$FF` ; deepeel l'applique désormais ;
+- cœur V7 (mineure 0) : WRAM à zéro, aucun motif. Sur Zelda 2076, deepeel colle
+  au cœur V7 jusqu'à l'image 23 ; le premier écart restant est `$C13D` (RNG qui
+  lit LY), donc une différence de cadence cycle par cycle, à traiter ensuite.

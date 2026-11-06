@@ -513,3 +513,15 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      stat_refresh();
      P.spr_ly = 0xFF;
      bg_pairs_bgp = -1;
+@@ -1340,6 +1487,11 @@
+ void gbl_ppu_state_io(gbl_state_fn io, void *ctx, int load) {
+     io(&gbl_ppu_state, sizeof(gbl_ppu_state), ctx);
+     if (!load) return;
++    /* statics outside the saved state belong to the previous run of this
++     * instance (a queued movie, a restored snapshot): drop them */
++    on_pend = 0;
++    off_silent = 0;
++    gam_v0_pend = 0;
+     P.evt_dirty = 1;
+     P.moved = 1;
+     P.spr_ly = 0xFF;

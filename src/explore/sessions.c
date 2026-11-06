@@ -573,6 +573,11 @@ static void watch_sample(DpPlay *p, DpWorker *w, DpMach *m) {
         for (int y = 0; y < DP_GB_SCREEN_H; y++)
             for (int x = 0; x < DP_GB_SCREEN_W; x++)
                 p->watch_buf[y * DP_GB_SCREEN_W + x] = m->screen[y][x];
+        if (getenv("DEEPEEL_WATCH_DEBUG")) {
+            int nz = 0;
+            for (int y = 0; y < DP_GB_SCREEN_H; y++) for (int x = 0; x < DP_GB_SCREEN_W; x++) nz += m->screen[y][x] != 0;
+            fprintf(stderr, "watch: movie %d(tas %d) frame %u nonzero %d lcdc %02x bgp %02x pc %04x lines %u\n", mine, w->tas_idx, (unsigned)w->frames_done, nz, m->api->io[0x40], m->api->io[0x47], m->api->gbr->pc, (unsigned)m->lines);
+        }
         p->watch_have = 1;
         p->watch_buf_movie = mine;
         p->watch_frame = w->frames_done;
@@ -1099,6 +1104,15 @@ static void worker_tune_movie(DpPlay *p, DpWorker *w) {
     // branch on it, so a zeroed RAM replays another game
     if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->mach->api->eram)
         memset(w->mach->api->eram, 0xFF, dp_gbl_variant_eram[w->mach->api->variant]);
+    // VBA-rr's V8 core (VBM minor version 1) powers WRAM up with a fixed
+    // pattern ($FF x8 / $0F x8, blocks of $800 alternating), HRAM with $FF
+    // (observed on the VBA-rr headless harness); the V7 core (minor 0)
+    // powers up zeroed, like m0boy: uninitialised reads depend on it
+    if (w->tas.recorder == DP_TAS_REC_VBA && w->tas.recorder_rev >= 1 && !getenv("DEEPEEL_TAS_NOINIT")) {
+        for (int i = 0; i < 0x2000; i++)
+            w->mach->api->wram[i] = (((i >> 3) ^ (i >> 11)) & 1) ? 0x0F : 0xFF;
+        memset(w->mach->api->hram, 0xFF, 0x7F);
+    }
     // BizHawk's Gambatte starts from a fixed power-on RAM dump, not zeros
     if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gambatte && !getenv("DEEPEEL_TAS_NOINIT")) {
         memcpy(w->mach->api->wram, dp_gambatte_wram, 0x2000);
