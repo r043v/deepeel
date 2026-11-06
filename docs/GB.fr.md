@@ -4102,3 +4102,22 @@ intégral de Zelda sans désynchro n'est donc **pas** atteint.
   première divergence à la frame 2088 au lieu de 43 ; 3269 des 4921 premières
   frames sont identiques. Les écarts suivants sont de courts décalages d'une
   frame ($C5D0, $D744) puis des différences de $C13D (RNG).
+
+### Mise à jour 0.249.69 : réveil du HALT sur la grille sonore de VBA V7
+
+- VBA 1.7.2 exécute une CPU en HALT par pas bornés par
+  `min(gbLcdTicks, gbLcdLYIncrementTicks, soundTicks, timer)`. Le pas sonore
+  vaut 24 ticks (96 cycles) : le réveil sur le vblank tombe donc sur une
+  grille de 96 cycles (11316 des 11413 entrées vblank en HALT de Zelda sont
+  alignées). Le profil V7 reproduit cette grille (`DEEPEEL_TAS_HALTSND`,
+  phase en cycles, défaut 32 ; 0 = réveil matériel) ; elle ne s'applique
+  qu'aux réveils par vblank LCD allumé (`sync_halt_snd`, `gbl_halt_wait`).
+- Cas limite reproduit : quand le flip LY=144 tombe exactement sur la grille,
+  `soundTicks` reste collé à 0, le pas suivant n'est plus borné par le son et
+  la CPU dort jusqu'à l'incrément de LY suivant (+456 cycles).
+- Diagnostic `DEEPEEL_TAS_HRAM` : vidage de la HRAM à chaque vblank.
+- Observation de l'outil (Zelda, bobmario2-zeldala.vbm, référence VBA V7) :
+  12873 des 13714 frames sont identiques à la référence (4335 avant). Restent
+  des écarts isolés (frames 2088, 2090, 3579, 3669, 3765, 6252–9103) et une
+  dérive finale à partir de la frame 13278 (sprites des crédits), pas encore
+  expliquée. Ce n'est pas une mesure de matériel.

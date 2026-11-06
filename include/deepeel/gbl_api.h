@@ -59,6 +59,8 @@ typedef struct DpGblApi {
     int16_t *sync_ly_lag;
     /* VBA 1.7.2 cores (gbl.h): cycles taken off the interrupt dispatch */
     int16_t *sync_irq_trim;
+    /* VBA 1.7.2 cores (gbl.h): HALT woken by vblank resumes on the sound grid (phase + 1, 0 = off) */
+    int16_t *sync_halt_snd;
 } DpGblApi;
 
 /* the ROM bank behind a pc/address of the fixed-or-switchable windows */
