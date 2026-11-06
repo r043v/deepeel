@@ -44,9 +44,9 @@ char dp_block_class(const DpResults *res, int bank, int block);
 // ---- .map: classification of 100% of the ROM (see map.c)
 enum { DP_MAP_UNKNOWN, DP_MAP_CODE_NAT, DP_MAP_CODE_FORCED, DP_MAP_CODE_STATIC,
        DP_MAP_DATA_COPIED, DP_MAP_DATA_READ, DP_MAP_DATA_STATIC, DP_MAP_TABLE, DP_MAP_PAD,
-       DP_MAP_INF_DATA, DP_MAP_INF_CODE, DP_MAP_INF_PAD, DP_MAP_PROB_CODE, DP_MAP_COUNT };
+       DP_MAP_INF_DATA, DP_MAP_INF_CODE, DP_MAP_INF_PAD, DP_MAP_PROB_CODE, DP_MAP_PROB_DATA, DP_MAP_COUNT };
 typedef struct DpMapSummary {
-    uint64_t total, known, unknown, code, data, pad, inferred, probable;
+    uint64_t total, known, unknown, code, data, pad, inferred, probable, probable_data;
     uint64_t cls[DP_MAP_COUNT];
 } DpMapSummary;
 // malloc'd per-byte class array (banks*0x4000), caller frees

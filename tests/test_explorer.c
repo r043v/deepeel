@@ -172,6 +172,47 @@ int main(int argc, char **argv) {
         for (int i = 0; i < 8; i++) { res.exec_flags[b + i] = xsave[i]; res.static_flags[b + i] = ssave[i]; }
         for (int i = 0; i < 8; i++) rom[b + i] = rsave[i];
     }
+    { // probable data: a run that looks like the data this run observed, not like its code
+        enum { LO = 0x0200, HI = 0x4000, N = HI - LO };
+        uint8_t *rom = (uint8_t *)g_cart->rom;
+        uint8_t *sv = malloc(5 * (size_t)N);
+        memcpy(sv, rom + LO, N);
+        memcpy(sv + N, res.exec_flags + LO, N);
+        memcpy(sv + 2 * N, res.static_flags + LO, N);
+        memcpy(sv + 3 * N, res.data_flags + LO, N);
+        memcpy(sv + 4 * N, res.map_sticky + LO, N);
+        static const uint8_t cod[] = { 0x3E, 0xCD, 0xC9, 0x21, 0x78, 0xB7, 0x20, 0x28, 0xE0, 0xF0, 0x7E, 0x23, 0xFE, 0xC2, 0x5F, 0x16, 0x19, 0xEA, 0xFA, 0x06 };
+        static const uint8_t dth[] = { 0xAA, 0xEE, 0xBB, 0xAB, 0xBA, 0x8A, 0x2A, 0xAE, 0xEA, 0xFB };
+        uint32_t x = 0x9E3779B9u;
+        #define RND() (x ^= x << 13, x ^= x >> 17, x ^= x << 5, x)
+        // layout (offsets from LO): observed code 0..4095, observed data 4096..8191, then
+        // code | hole C (64, dither) | code | hole D (64, code-like) | code, all observed code
+        for (int i = 0; i < N; i++) { res.exec_flags[LO + i] = 0; res.static_flags[LO + i] = 0; res.data_flags[LO + i] = 0; }
+        for (int i = 0; i < 4096; i++) { rom[LO + i] = cod[RND() % sizeof cod]; res.exec_flags[LO + i] = DP_XF_NATURAL | DP_XF_START; }
+        for (int i = 4096; i < 8192; i++) { rom[LO + i] = dth[RND() % sizeof dth]; res.data_flags[LO + i] = DP_DF_READ; }
+        int c0 = 8192 + 64, d0 = c0 + 64 + 64;   // holes at LO + c0 and LO + d0
+        for (int i = 8192; i < N; i++) {
+            if ((i >= c0 && i < c0 + 64) || (i >= d0 && i < d0 + 64)) continue;   // unknown
+            rom[LO + i] = cod[RND() % sizeof cod];
+            res.exec_flags[LO + i] = DP_XF_NATURAL | DP_XF_START;
+        }
+        for (int i = 0; i < 64; i++) { rom[LO + c0 + i] = dth[RND() % sizeof dth]; rom[LO + d0 + i] = cod[RND() % sizeof cod]; }
+        rom[LO + c0] = 0xD3;   // an undefined opcode: the strict code decode cannot take it
+        DpMapSummary ms;
+        uint8_t *m1 = dp_map_build(&res, &ms);
+        CHECK(m1[LO + c0 + 10] == DP_MAP_PROB_DATA);     // dither-like hole between code: probable data
+        CHECK(m1[LO + d0 + 10] != DP_MAP_PROB_DATA);     // code-like hole: never labelled data
+        CHECK(ms.probable_data >= 64);
+        free(m1);
+        CHECK(res.map_sticky[LO + c0 + 10] == 0);        // heuristic: never made sticky
+        #undef RND
+        memcpy(rom + LO, sv, N);
+        memcpy(res.exec_flags + LO, sv + N, N);
+        memcpy(res.static_flags + LO, sv + 2 * N, N);
+        memcpy(res.data_flags + LO, sv + 3 * N, N);
+        memcpy(res.map_sticky + LO, sv + 4 * N, N);
+        free(sv);
+    }
     // the not-taken side bytes: only ever reached through the fork
     CHECK((res.exec_flags[0x156] & DP_XF_FORCED) && !(res.exec_flags[0x156] & DP_XF_NATURAL));
     const DpSection *s180 = section_at(0, 0x180);

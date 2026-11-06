@@ -3985,3 +3985,24 @@ Un choix fermé n'est plus jamais lu (son issue est dans les compteurs de l'en-t
 enfants, tous issus de choix ouverts) : la v2 n'écrit que les choix ouverts et les compteurs. Mesure sur l'état
 neuf : 358 Mo → 3,4 Mo, rechargé avec les mêmes compteurs. Une v1 se lit encore, compactée à la volée sans écrire
 le spill, puis la prochaine sauvegarde est en v2. Le spill est indexé par un numéro de bloc relatif (`spill_skip`).
+
+### Classe `probable-data` (0.249.60)
+
+Les plus grosses plages inconnues de SML2 (20:64bc, 23:7820, 21:7203, 21:781d, 18:7401, 9:6da6) sont des données :
+décodées en SM83 elles donnent ~4 % d'opcodes illégaux (le taux d'octets aléatoires), et 32-52 % de leurs octets sont des
+octets de tramage (`aa/ab/ba/ee…`, ~5 % attendus au hasard). Les octets « code-forcé/statique » qui les bordent sont
+du même type. La carte reçoit donc une classe `probable-data` (vert pâle, « incertain ») : une plage inconnue d'au moins
+32 octets dont le score moyen d'un modèle de bigrammes d'octets, appris sur les octets que ce run a *observés* (code
+naturel contre données lues/copiées/statiques/tables), atteint 0,5 nat/octet. Elle est signalée à part dans le résumé
+(« data includes X% probable »), jamais réinjectée dans la fermeture et jamais mémorisée en sticky (recalculée à chaque
+construction). Validation croisée par banques sur SML2 : 0,2 % des fenêtres de code observé sont jugées données, 85-92 %
+des fenêtres de données observées le sont (fenêtres de 32-128 octets). Hors échantillon, avec l'ancienne carte
+(`map.92.png`) : sur 20 639 octets prédits, aucun n'est devenu du code *naturel* ; ils sont devenus `code-static`
+(3 763), `code-forced` (1 093), donnée (3 594) ou sont restés inconnus (12 178) : la passe statique produit du faux code
+sur ces zones. Observation de l'outil : inconnu de SML2 21 937 → 10 261 octets sur une copie de l'état.
+
+Pistes mesurées et **non retenues** : (a) « inconnu entre une donnée et un remplissage = donnée » est réfutée par les
+classes observées (12 plages sur 12 dans cette situation sont du code) ; les 314 franges de remplissage ne sont pas du
+remplissage (0-50 % de 00/FF) mais des tuiles, les courtes (< 32 octets, ~2,2 Ko) restent inconnues ; (b) l'amorçage
+statique par tables de pointeurs (suites de ≥ 4 mots dont la moitié vise du code exécuté) ne donne que 23 racines à
+décodage propre sur SML2, dont une seule au début d'une plage inconnue : rendement trop faible pour le coût.

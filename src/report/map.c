@@ -103,12 +103,12 @@ unsigned dp_map_png_budget = 16u << 20;
 const char *dp_map_class_name(int c) {
     static const char *nm[DP_MAP_COUNT] = { "unknown", "code-natural", "code-forced",
         "code-static", "data-copied", "data-read", "data-static", "table", "padding",
-        "inferred-data", "inferred-code", "inferred-padding", "probable-code" };
+        "inferred-data", "inferred-code", "inferred-padding", "probable-code", "probable-data" };
     return c >= 0 && c < DP_MAP_COUNT ? nm[c] : "?";
 }
 
 int dp_map_is_code(int c) { return c == DP_MAP_CODE_NAT || c == DP_MAP_CODE_FORCED || c == DP_MAP_CODE_STATIC || c == DP_MAP_INF_CODE || c == DP_MAP_PROB_CODE; }
-int dp_map_is_data(int c) { return c == DP_MAP_DATA_COPIED || c == DP_MAP_DATA_READ || c == DP_MAP_DATA_STATIC || c == DP_MAP_TABLE || c == DP_MAP_INF_DATA; }
+int dp_map_is_data(int c) { return c == DP_MAP_DATA_COPIED || c == DP_MAP_DATA_READ || c == DP_MAP_DATA_STATIC || c == DP_MAP_TABLE || c == DP_MAP_INF_DATA || c == DP_MAP_PROB_DATA; }
 
 // what each exploration method added, in % of the whole ROM (tas, rng, fork,
 // attract, static+inferred): the rise of the known-byte count over each
@@ -212,6 +212,42 @@ static int map_probable_code(const uint8_t *rom, size_t i, size_t j) {
     return 1;
 }
 
+// ---- probable data: a byte-bigram model learned from the bytes this very run OBSERVED (executed code
+// versus read/copied data), applied to an unknown run.  Heuristic by nature, flagged apart, never fed
+// back into the closure and never made sticky (it is recomputed from the current evidence).  Cross-
+// validated by bank on SML2: 0.2% of observed code windows scored data-like, 85-92% of observed data
+// windows did (windows of 32-128 bytes, threshold 0.5 nats/byte).
+#define MAP_PDATA_MIN_LEN 32
+#define MAP_PDATA_THRESHOLD 0.5f
+static float *map_data_model(const uint8_t *rom, size_t rsz, const uint8_t *m, size_t n) {
+    uint32_t *cc = calloc(65536, sizeof *cc), *dc = calloc(65536, sizeof *dc);
+    float *llr = malloc(65536 * sizeof *llr);
+    uint64_t nc = 0, nd = 0;
+    if (cc && dc && llr) {
+        for (size_t bs = 0; bs < n && bs < rsz; bs += 0x4000)
+            for (size_t i = bs + 1; i < bs + 0x4000 && i < rsz; i++) {
+                int c = m[i];
+                uint32_t key = (uint32_t)rom[i - 1] << 8 | rom[i];
+                if (c == DP_MAP_CODE_NAT) { cc[key]++; nc++; }
+                else if (c == DP_MAP_DATA_COPIED || c == DP_MAP_DATA_READ || c == DP_MAP_DATA_STATIC || c == DP_MAP_TABLE) { dc[key]++; nd++; }
+            }
+    }
+    if (!cc || !dc || !llr || nc < 4096 || nd < 4096) { free(llr); llr = NULL; }
+    else
+        for (uint32_t k = 0; k < 65536; k++)
+            llr[k] = (float)(log(((double)dc[k] + 0.5) / ((double)nd + 32768.0)) -
+                             log(((double)cc[k] + 0.5) / ((double)nc + 32768.0)));
+    free(cc);
+    free(dc);
+    return llr;
+}
+static int map_probable_data(const float *llr, const uint8_t *rom, size_t i, size_t j) {
+    if (!llr || j - i < MAP_PDATA_MIN_LEN) return 0;
+    double s = 0;
+    for (size_t k = i + 1; k < j; k++) s += llr[(uint32_t)rom[k - 1] << 8 | rom[k]];
+    return s / (double)(j - i) >= MAP_PDATA_THRESHOLD;
+}
+
 uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
     size_t n = (size_t)res->banks * 0x4000;
     uint8_t *m = malloc(n ? n : 1);
@@ -223,6 +259,8 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
     // inference over the unknown runs of each bank (never crossing a bank)
     const uint8_t *rom = res->cart ? res->cart->rom : NULL;
     size_t rsz = res->cart ? res->cart->rom_size : 0;
+    float *dmodel = NULL;
+    int dmodel_tried = 0;
     for (size_t bs = 0; bs < n; bs += 0x4000) {
         size_t be = bs + 0x4000;
         for (size_t i = bs; i < be;) {
@@ -262,17 +300,23 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
             if (c == DP_MAP_UNKNOWN && rom && j <= rsz && before >= 0 && after >= 0 && dp_map_is_code(before) &&
                 dp_map_is_code(after) && map_probable_code(rom, i, j))
                 c = DP_MAP_PROB_CODE;
+            // what is left and looks like the data this run observed: probable data, flagged apart
+            if (c == DP_MAP_UNKNOWN && rom && j <= rsz && len >= MAP_PDATA_MIN_LEN) {
+                if (!dmodel_tried) { dmodel = map_data_model(rom, rsz, m, n); dmodel_tried = 1; }
+                if (map_probable_data(dmodel, rom, i, j)) c = DP_MAP_PROB_DATA;
+            }
             if (c != DP_MAP_UNKNOWN) memset(m + i, c, len);
             i = j;
         }
     }
+    free(dmodel);
     // monotone inference: a byte the map once classed by inference stays classed when a later
     // pass moves the neighbours that justified it (observed classes always win; they are
     // read from the monotone flags above)
     if (res->map_sticky) {
         for (size_t k = 0; k < n; k++) {
             if (m[k] == DP_MAP_UNKNOWN) { if (res->map_sticky[k]) m[k] = res->map_sticky[k]; }
-            else if (m[k] >= DP_MAP_INF_DATA) res->map_sticky[k] = m[k];
+            else if (m[k] >= DP_MAP_INF_DATA && m[k] != DP_MAP_PROB_DATA) res->map_sticky[k] = m[k];
         }
     }
     if (sum) {
@@ -289,6 +333,7 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
         for (int c = 0; c < DP_MAP_COUNT; c++)
             if (c >= DP_MAP_INF_DATA) sum->inferred += sum->cls[c];
         sum->probable = sum->cls[DP_MAP_PROB_CODE];
+        sum->probable_data = sum->cls[DP_MAP_PROB_DATA];
     }
     return m;
 }
@@ -328,6 +373,8 @@ void dp_map_summary_text(const DpMapSummary *s, DpBuf *out) {
                s->known * t, s->unknown * t, s->inferred * t);
     dp_buf_fmt(out, "  code     %5.1f%%   data    %5.1f%%   padding %5.1f%%\n", s->code * t, s->data * t, s->pad * t);
     if (s->probable) dp_buf_fmt(out, "  (code includes %.1f%% probable, unproven: linear decode only)\n", s->probable * t);
+    if (s->probable_data)
+        dp_buf_fmt(out, "  (data includes %.1f%% probable, unproven: byte statistics of this ROM only)\n", s->probable_data * t);
     for (int c = 0; c < DP_MAP_COUNT; c++)
         dp_buf_fmt(out, "    %-17s %8llu  %5.1f%%\n", dp_map_class_name(c), (unsigned long long)s->cls[c], s->cls[c] * t);
 }
@@ -508,6 +555,7 @@ static const uint8_t map_rgb[DP_MAP_COUNT][3] = {
     { 0xb5, 0xd3, 0xf3 }, // inferred-code
     { 0xa0, 0xa0, 0xa0 }, // inferred-padding
     { 0xe8, 0xa0, 0x40 }, // probable-code (uncertain)
+    { 0x7a, 0xb8, 0x9a }, // probable-data (uncertain)
 };
 const uint8_t *dp_map_rgb(int cls) { return map_rgb[cls >= 0 && cls < DP_MAP_COUNT ? cls : 0]; }
 
@@ -891,7 +939,8 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     static const char *fr[DP_MAP_COUNT] = {
         "inconnu", "code naturel", "code forcé", "code statique",
         "donnée copiée", "donnée lue", "donnée statique", "table", "padding",
-        "donnée inférée", "code inféré", "padding inféré", "code probable (incertain)" };
+        "donnée inférée", "code inféré", "padding inféré", "code probable (incertain)",
+        "donnée probable (incertain)" };
     int cols = banks < PER_ROW ? banks : PER_ROW;
     int rows = (banks + PER_ROW - 1) / PER_ROW;
     if (cols < 1) cols = 1;
