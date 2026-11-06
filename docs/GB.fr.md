@@ -389,9 +389,11 @@ code / data / padding.
 - `--html f` : page web autonome (carrés par banque, légende, tableau des
   classes, journal de découverte : temps, source, crédit, octets connus).
   Le rapport texte affiche aussi les 40 dernières entrées du journal.
-- `tools/tasvideos_fetch.py ROM.gb DIR [--max N] [--list] [--game "nom"]`
-  télécharge les TAS TASVideos de la ROM (nom de jeu strict) ; `--tas`
-  accepte jusqu'à 8 fichiers, tous joués en entier.
+- `tools/tasvideos_fetch.py ROM.gb DIR [--game-id N] [--max N] [--list]`
+  télécharge **tous** les films TASVideos du jeu : la Subs-List du jeu
+  (`Subs-List?GameId=N`, toutes les soumissions quel que soit le statut —
+  publiées, rejetées, annulées, playground), plus les publications ; reprise
+  sur 503. `--tas` accepte jusqu'à 1024 fichiers, tous rejoués en entier.
 - Saturation : les débordements de file de la recherche sont rapportés
   (« queue overflows »), jamais silencieux.
 - Ces nombres sont des observations de l'outil (machine concrète, RAM à
@@ -430,8 +432,8 @@ code / data / padding.
   Le rapport texte la résume (`residual anatomy:`) et le summary JSON porte
   le champ `mech` sur chaque plage résiduelle : la feuille de route vers
   100 % est désormais produite par l'outil lui-même.
-- `--tas-dir D` (répétable) : découvre les films du répertoire (8 max, triés
-  par ressemblance de titre quand il y en a plus ; `.vmv`, `.vbm`, `.bk2`,
+- `--tas-dir D` (répétable) : découvre tous les films du répertoire (triés
+  par ressemblance de titre ; `.vmv`, `.vbm`, `.bk2`,
   `.gbm`, `.fm2`, `.log`), les films retenus sont loggés sur stderr.
 - `--summary f` : profil JSON compact d'une passe — identité ROM, écho de la
   config, résumé de la carte (toutes classes), liste **complète** des plages
@@ -4025,3 +4027,14 @@ ROM réelle à ce stade : à comparer à temps égal (inconnu avant/après).
   676 plages sans (`--no-tas-rng`), 20 684 / 578 avec ; mais 1,62 M images jouées contre 1,34 M (confondant).
 - `--mapwin` : la disposition suit la zone utilisable de l'écran ; 8 blocs par ligne si ça tient, sinon plus haut
   avant plus large ; `--mapwin N` est un plafond d'échelle.
+
+### 0.249.63 : tous les films, tous rejoués (file d'attente de films)
+
+Prendre tous les films possible est la norme : plus de plafond de 8 films
+(`--tas`, `--tas-dir`, jusqu'à 1024). Quand il y a plus de films que de machines,
+chaque worker dont le film se termine enchaîne sur le suivant non réclamé
+(état d'allumage, profil de synchro propre au film) : « TAS queue: worker N
+starts movie k/n ». Un film refusé (autre ROM) est sauté, déjà rapporté ;
+la fin de `--tas-solo` attend la file vide. `tasvideos_fetch.py` lit la
+Subs-List du jeu (tous statuts). Test : 20 copies d'un film sur 16 machines,
+4 films en file, tous rejoués.

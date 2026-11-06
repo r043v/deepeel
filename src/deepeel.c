@@ -260,14 +260,14 @@ static void tas_collect_dir(const char *dir, const char *title, const char **tas
         fprintf(stderr, "deepeel: --tas-dir %s: %s\n", dir, strerror(errno));
         return;
     }
-    char (*names)[256] = calloc(64, 256);
+    char (*names)[256] = calloc(2048, 256);
     if (!names) {
         closedir(d);
         return;
     }
     int nn = 0;
     struct dirent *e;
-    while ((e = readdir(d)) && nn < 64) {
+    while ((e = readdir(d)) && nn < 2048) {
         if (e->d_name[0] == '.') continue;
         if (!mov_ext(e->d_name)) continue;
         snprintf(names[nn], 256, "%s", e->d_name);
@@ -347,7 +347,7 @@ static int cmd_explore(int argc, char **argv) {
     const char *rtcode_path = NULL, *ramcode_path = NULL;
     const char *json = NULL, *text = NULL, *cov = NULL, *romdata = NULL, *map = NULL, *html = NULL, *path = NULL;
     const char *from_png = NULL, *export_dir = NULL, *summary = NULL;
-    const char *tas_dirs[8];
+    const char *tas_dirs[64];
     int tas_dirs_n = 0;
     const char *stop_txt = "explore-only";
     unsigned long long play_frames = 0;
@@ -451,8 +451,8 @@ static int cmd_explore(int argc, char **argv) {
             cfg.spool_cap_mb = 0; cfg.spool_cap_bytes = 0;
         }
         else if (!strcmp(a, "--input") && i + 1 < argc && scfg.inputs_n < 8) scfg.inputs[scfg.inputs_n++] = argv[++i];
-        else if (!strcmp(a, "--tas") && i + 1 < argc && scfg.tas_n < 8) scfg.tas[scfg.tas_n++] = argv[++i];
-        else if (!strcmp(a, "--tas-dir") && i + 1 < argc && tas_dirs_n < 8) tas_dirs[tas_dirs_n++] = argv[++i];
+        else if (!strcmp(a, "--tas") && i + 1 < argc && scfg.tas_n < (int)(sizeof scfg.tas / sizeof *scfg.tas)) scfg.tas[scfg.tas_n++] = argv[++i];
+        else if (!strcmp(a, "--tas-dir") && i + 1 < argc && tas_dirs_n < 64) tas_dirs[tas_dirs_n++] = argv[++i];
         else if (!strcmp(a, "--tas-ckpt") && i + 1 < argc) scfg.tas_ckpt_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--tas-ckpt-secs") && i + 1 < argc) scfg.tas_ckpt_secs = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--tas-ckpt-max") && i + 1 < argc) scfg.tas_ckpt_max = atoi(argv[++i]);
@@ -553,7 +553,7 @@ static int cmd_explore(int argc, char **argv) {
     const DpPlatform *plat = dp_platform_gb();
     // the discovered movies join the explicit --tas ones (the worker list caps at 8)
     for (int i = 0; i < tas_dirs_n; i++)
-        tas_collect_dir(tas_dirs[i], cart->title, scfg.tas, &scfg.tas_n, 8);
+        tas_collect_dir(tas_dirs[i], cart->title, scfg.tas, &scfg.tas_n, (int)(sizeof scfg.tas / sizeof *scfg.tas));
     DpResults res;
     dp_results_init(&res, cart, plat);
     // cascading seed budgets (z80 branch): the re-seeding phases share one

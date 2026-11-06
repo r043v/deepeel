@@ -39,7 +39,7 @@ typedef struct DpSessionCfg {
     int resume;                 // load the pool file and continue
     const char *inputs[8];      // m0boy held-named input scripts to replay
     int inputs_n;
-    const char *tas[8];         // TAS movie files (VBA .vmv, BizHawk .bk2, plain
+    const char *tas[1024];         // TAS movie files (VBA .vmv, BizHawk .bk2, plain
     int tas_n;                  // input log): one worker each, frame by frame
     int tas_any_rom;            // 1: replay a movie whose recorded ROM identity differs
                                 //    from this ROM (default: refused, counted)

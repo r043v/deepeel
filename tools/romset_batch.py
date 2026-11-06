@@ -79,7 +79,7 @@ def regions(name):
 def pick_movies(cat, rom_base, limit=8):
     key = norm(rom_base)
     rr = regions(rom_base)
-    # a movie recorded on another region's ROM is refused by the engine and would waste one of the 8 --tas slots
+    # a movie recorded on another region's ROM is refused by the engine and would be a wasted replay (every movie is replayed, queued beyond the workers)
     hits = [c for c in cat if key and norm(c["gameName"]) == key
             and (c.get("movieExtension") or "").lower() in [e[1:] for e in MOVIE_EXTS]
             and (not rr or not regions(c.get("gameVersion")) or rr & regions(c.get("gameVersion")))]

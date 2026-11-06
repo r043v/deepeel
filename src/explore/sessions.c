@@ -232,7 +232,7 @@ typedef struct DpTasSnap {
 } DpTasSnap;
 
 #define DP_TSN_CAP 64
-#define DP_MAX_TAS 8
+#define DP_MAX_TAS 1024 // movies one run can carry (the --tas / --tas-dir list)
 
 typedef struct DpTasSnapRec {
     uint32_t chosen; // random-key segments already started from this snapshot
@@ -311,6 +311,7 @@ struct DpPlay {
     uint64_t cells_archived;
     DpWorker w[DP_MAX_SESSIONS];
     int nworkers;
+    int tas_next;              // solo queue: next movie index nobody has claimed yet
     // human takeover lane (driven by the GUI thread, not threaded)
     int human_on;
     DpWorker human;
@@ -370,6 +371,8 @@ static uint64_t worker_credit(const DpWorker *w) {
 }
 
 // fresh per-segment engine bookkeeping (the machine state comes from a load)
+static int worker_next_movie(DpWorker *w);
+
 static void worker_reset_run_state(DpWorker *w) {
     w->ex->cur_forced = 0;
     w->ex->cur_kind = 3; // DP_SEED_POINTER: real play state, not a fork
@@ -681,6 +684,8 @@ static void worker_vblank(DpMach *m) {
     else if (w->mode == IN_TAS) {
         if (w->frames_done < w->tas.frames) {
             mask = w->tas.masks[w->frames_done];
+        } else if (worker_next_movie(w)) { // movie queue: the next movie starts on this worker
+            mask = w->tas.masks[0];
         } else { // the movie is over: uniform random play, segments resume
             w->mode = IN_RNG;
             *m->api->sync_div_skew = 0;
@@ -1019,6 +1024,166 @@ static void worker_setup(DpPlay *p, DpWorker *w, int instance) {
     worker_reset_run_state(w);
 }
 
+// load movie t into worker w (mode IN_TAS on success, IN_RNG otherwise)
+static int worker_load_movie(DpPlay *p, DpWorker *w, int t) {
+    char terr[256];
+    int loaded = dp_tas_load(p->cfg.tas[t], &w->tas, terr, sizeof terr);
+    if (loaded) {
+        char why[256];
+        int match = dp_tas_rom_match(&w->tas, p->cart->rom, p->cart->rom_size, why, sizeof why);
+        if (match == 0 && !p->cfg.tas_any_rom) {
+            // a movie for another revision desyncs by construction:
+            // refused, reported (never silently replayed)
+            fprintf(stderr, "deepeel: TAS %s refused: recorded on another ROM (%s); --tas-any-rom forces it\n",
+                    w->tas.source, why);
+            p->tas_rom_refused++;
+            dp_tas_free(&w->tas);
+            loaded = 0;
+        } else if (match == 0) {
+            fprintf(stderr, "deepeel: TAS %s: recorded on another ROM (%s), replayed anyway (--tas-any-rom)\n",
+                    w->tas.source, why);
+        } else if (match == 1) {
+            fprintf(stderr, "deepeel: TAS %s: ROM identity verified (%s)\n", w->tas.source, why);
+        }
+    }
+    if (loaded) {
+        w->mode = IN_TAS;
+        w->tas_idx = t;
+        // capture interval: both constraints are lower bounds on the
+        // interval — the pace (tas_ckpt_secs of game time) and the
+        // cap (the whole movie yields at most tas_ckpt_max snapshots)
+        w->tas_ckpt_every = p->cfg.tas_ckpt_frames;
+        if (!w->tas_ckpt_every && p->cfg.tas_ckpt_secs && p->cfg.tas_ckpt_max > 0) {
+            uint32_t by_cap = w->tas.frames / (uint32_t)p->cfg.tas_ckpt_max;
+            uint32_t by_secs = p->cfg.tas_ckpt_secs * 60; // 60 fps game time
+            w->tas_ckpt_every = by_cap > by_secs ? by_cap : by_secs;
+        }
+        fprintf(stderr, "deepeel: TAS %s: %u frames%s%s\n", w->tas.source, w->tas.frames,
+                w->tas.anchored
+                    ? " (savestate-anchored: replayed from power-on, best effort)"
+                    : "",
+                w->tas_ckpt_every
+                    ? ""
+                    : " (no checkpoint capture)");
+        if (w->tas_ckpt_every)
+            fprintf(stderr, "deepeel: TAS %d: checkpoint snapshot every %u frames (max %d)\n",
+                    w->tas_idx, w->tas_ckpt_every,
+                    p->cfg.tas_ckpt_max > 0 ? p->cfg.tas_ckpt_max : 0);
+    } else {
+        fprintf(stderr, "deepeel: TAS %s: %s\n", p->cfg.tas[t], terr);
+        w->mode = IN_RNG;
+    }
+    return w->mode == IN_TAS;
+}
+
+// per-recorder machine tuning for the movie loaded in w (sync profiles, frame 0 input)
+static void worker_tune_movie(DpPlay *p, DpWorker *w) {
+    // the recording emulator's timing quirks (gbl.h movie sync
+    // knobs), for this worker's machine only and while the movie
+    // plays: random play after it runs on hardware timing again
+    // BizHawk (Gambatte) powers a cartridge up with blank battery RAM
+    // filled with $FF: games that read their save slot (Mario Land 2)
+    // branch on it, so a zeroed RAM replays another game
+    if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->mach->api->eram)
+        memset(w->mach->api->eram, 0xFF, dp_gbl_variant_eram[w->mach->api->variant]);
+    // BizHawk's Gambatte starts from a fixed power-on RAM dump, not zeros
+    if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gambatte && !getenv("DEEPEEL_TAS_NOINIT")) {
+        memcpy(w->mach->api->wram, dp_gambatte_wram, 0x2000);
+        memcpy(w->mach->api->hram, dp_gambatte_hram, 0x7F);
+    }
+    // BizHawk's GBHawk (gbl.h): the pad is latched at the vblank
+    // edge inside its fixed frame (65,664 cycles to LY 144); the
+    // worker applies the next mask just after the m0boy vblank, so
+    // the pad needs a 14,481-cycle delay (measured window
+    // 14,470..14,550; the PPU phase below moves the m0boy vblank
+    // edge but the pad window keeps 14,481).  The divider phase at
+    // $0100 is 0xFE4D, and GBHawk is 405 cycles into line 153
+    // there (LY zeroed by its cycle-6 rule; gbl.h, sync_ppu_phase:
+    // applied to the loaded state, it makes every LY read match).
+    // GBHawk keeps the WRAM zero (no power-on dump) and its frames
+    // are always 70224 cycles, like the vblank clock: no mode-3
+    // clock change applies.
+    if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gbhawk) {
+        *w->mach->api->sync_pad_delay = getenv("DEEPEEL_TAS_PADDELAY")
+            ? (uint32_t)strtoul(getenv("DEEPEEL_TAS_PADDELAY"), NULL, 0) : 14481u;
+        *w->mach->api->sync_div_extra = getenv("DEEPEEL_TAS_DIVEXTRA")
+            ? (uint16_t)strtoul(getenv("DEEPEEL_TAS_DIVEXTRA"), NULL, 0) : 0xFE4Du;
+        *w->mach->api->sync_ppu_phase = getenv("DEEPEEL_TAS_PPUPHASE")
+            ? (uint16_t)strtoul(getenv("DEEPEEL_TAS_PPUPHASE"), NULL, 0) : 405u;
+        w->mach->api->sync_ppu_apply();
+        fprintf(stderr, "deepeel: TAS %s: GBHawk sync profile (pad latch +14481 cycles, DIV phase $FE4D, PPU phase 405)\n",
+                w->tas.source);
+    }
+    // BizHawk's frame clock (gbl.h, sync_vba_off_clock 3): a frame ends at
+    // the video frame or when its sample budget runs out
+    if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gambatte && !w->tas.equal_frames && !getenv("DEEPEEL_TAS_NOMODE3"))
+        *w->mach->api->sync_vba_off_clock = 3;
+    // Gambatte's DIV phase against the m0boy clock, measured on SML2 (DIV
+    // reads that seed its RNG): any skew in 25..64 matches, 40 is mid-range.
+    if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gambatte)
+        *w->mach->api->sync_div_skew = getenv("DEEPEEL_TAS_DIVSKEW") ? (uint8_t)atoi(getenv("DEEPEEL_TAS_DIVSKEW")) : 40;
+    int vba_old = w->tas.recorder == DP_TAS_REC_VBA && w->tas.recorder_rev == 0;
+    if (vba_old) {
+        // VBA 1.7.2 based recorders (VBM minor version 0): input
+        // read at each vblank, no frame while the LCD is off, a
+        // ten-line line 0 after an enable.  Partial: their CPU
+        // timing quirks (cycle table, HALT wake-up) stay hardware
+        *w->mach->api->sync_vba_off_clock = 2;
+        fprintf(stderr, "deepeel: TAS %s: VBA 1.7.2 sync profile (input at vblank, no LCD-off frame, "
+                        "ten-line enable)\n", w->tas.source);
+    } else if (w->tas.recorder == DP_TAS_REC_VBA) {
+        *w->mach->api->sync_div_skew = 4;
+        *w->mach->api->sync_vba_off_clock = 1;
+        fprintf(stderr, "deepeel: TAS %s: VBA sync profile (DIV read +4 cycles, VBA LCD-off frame clock)\n",
+                w->tas.source);
+    }
+    // movie frame 0 is the power-on frame: its input is held from
+    // the first instruction (VBA-rr v23.1+ and BizHawk), each vblank
+    // then feeds the next frame.  The VBA 1.7.2 cores read the pad
+    // at the vblank instead: frame 0 lands at the first one.
+    if (w->tas.frames && !vba_old) {
+        w->mach->api->set_buttons(w->tas.masks[0]);
+        w->applied_mask = w->tas.masks[0];
+        w->frames_done = 1;
+    }
+}
+
+// Movie queue: when a worker's movie is over and unclaimed movies remain, load
+// the next one on this same machine (power-on state, fresh sync profile).  Every
+// movie of the list gets replayed even when there are more movies than machine
+// instances; a movie refused (other ROM, unreadable) is skipped, already reported.
+static int worker_next_movie(DpWorker *w) {
+    DpPlay *p = w->p;
+    for (;;) {
+        int t = __atomic_fetch_add(&p->tas_next, 1, __ATOMIC_RELAXED);
+        if (t >= p->cfg.tas_n) {
+            __atomic_store_n(&p->tas_next, p->cfg.tas_n, __ATOMIC_RELAXED);
+            return 0;
+        }
+        int was_gbhawk = w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gbhawk;
+        dp_tas_free(&w->tas);
+        memset(&w->tas, 0, sizeof w->tas);
+        if (!worker_load_movie(p, w, t)) continue;
+        w->tas_idx = t;
+        dp_mach_load(w->mach, dp_explorer_seed_base(p->fork)); // power-on state
+        worker_reset_run_state(w);
+        *w->mach->api->sync_div_skew = 0;
+        *w->mach->api->sync_vba_off_clock = 0;
+        if (was_gbhawk) {
+            *w->mach->api->sync_pad_delay = 0;
+            *w->mach->api->sync_div_extra = 0;
+            *w->mach->api->sync_ppu_phase = 0;
+        }
+        memset(w->mach->api->eram, 0, dp_gbl_variant_eram[w->mach->api->variant]);
+        w->frames_done = 0;
+        w->applied_mask = 0;
+        w->seg_left = 0;
+        worker_tune_movie(p, w);
+        fprintf(stderr, "deepeel: TAS queue: worker %d starts movie %d/%d\n", w->id, t + 1, p->cfg.tas_n);
+        return 1;
+    }
+}
+
 DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex) {
     DpPlay *p = calloc(1, sizeof *p);
     if (!p) return NULL;
@@ -1097,6 +1262,11 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
     if (p->cfg.sessions < 1) p->cfg.sessions = 1;
     res->mt = 1;
     p->nworkers = p->cfg.sessions;
+    {   // movies the initial workers take: the rest is queued for the first worker to finish
+        int first = p->cfg.tas_solo ? p->nworkers : p->nworkers - 1 - p->cfg.inputs_n;
+        if (first < 0) first = 0;
+        p->tas_next = first < p->cfg.tas_n ? first : p->cfg.tas_n;
+    }
     p->workers_done = p->nworkers; // the first poll starts epoch 1
     for (int i = 0; i < p->nworkers; i++) {
         DpWorker *w = &p->w[i];
@@ -1112,53 +1282,7 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
                 w->mode = IN_RNG;
             }
         } else if (t >= 0 && t < p->cfg.tas_n && p->cfg.tas[t]) {
-            char terr[256];
-            int loaded = dp_tas_load(p->cfg.tas[t], &w->tas, terr, sizeof terr);
-            if (loaded) {
-                char why[256];
-                int match = dp_tas_rom_match(&w->tas, p->cart->rom, p->cart->rom_size, why, sizeof why);
-                if (match == 0 && !p->cfg.tas_any_rom) {
-                    // a movie for another revision desyncs by construction:
-                    // refused, reported (never silently replayed)
-                    fprintf(stderr, "deepeel: TAS %s refused: recorded on another ROM (%s); --tas-any-rom forces it\n",
-                            w->tas.source, why);
-                    p->tas_rom_refused++;
-                    dp_tas_free(&w->tas);
-                    loaded = 0;
-                } else if (match == 0) {
-                    fprintf(stderr, "deepeel: TAS %s: recorded on another ROM (%s), replayed anyway (--tas-any-rom)\n",
-                            w->tas.source, why);
-                } else if (match == 1) {
-                    fprintf(stderr, "deepeel: TAS %s: ROM identity verified (%s)\n", w->tas.source, why);
-                }
-            }
-            if (loaded) {
-                w->mode = IN_TAS;
-                w->tas_idx = t;
-                // capture interval: both constraints are lower bounds on the
-                // interval — the pace (tas_ckpt_secs of game time) and the
-                // cap (the whole movie yields at most tas_ckpt_max snapshots)
-                w->tas_ckpt_every = p->cfg.tas_ckpt_frames;
-                if (!w->tas_ckpt_every && p->cfg.tas_ckpt_secs && p->cfg.tas_ckpt_max > 0) {
-                    uint32_t by_cap = w->tas.frames / (uint32_t)p->cfg.tas_ckpt_max;
-                    uint32_t by_secs = p->cfg.tas_ckpt_secs * 60; // 60 fps game time
-                    w->tas_ckpt_every = by_cap > by_secs ? by_cap : by_secs;
-                }
-                fprintf(stderr, "deepeel: TAS %s: %u frames%s%s\n", w->tas.source, w->tas.frames,
-                        w->tas.anchored
-                            ? " (savestate-anchored: replayed from power-on, best effort)"
-                            : "",
-                        w->tas_ckpt_every
-                            ? ""
-                            : " (no checkpoint capture)");
-                if (w->tas_ckpt_every)
-                    fprintf(stderr, "deepeel: TAS %d: checkpoint snapshot every %u frames (max %d)\n",
-                            w->tas_idx, w->tas_ckpt_every,
-                            p->cfg.tas_ckpt_max > 0 ? p->cfg.tas_ckpt_max : 0);
-            } else {
-                fprintf(stderr, "deepeel: TAS %s: %s\n", p->cfg.tas[i - 1 - p->cfg.inputs_n], terr);
-                w->mode = IN_RNG;
-            }
+            worker_load_movie(p, w, t);
         }
         if (i < p->cfg.fixed_n && p->cfg.fixed[i] && w->mode == IN_RNG) {
             w->mode = IN_FIXED;
@@ -1170,74 +1294,7 @@ DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex
         w->in.uniform_hold = p->cfg.uniform_hold ? p->cfg.uniform_hold : 64;
         worker_setup(p, w, 1 + i);
         if (w->mode == IN_TAS) {
-            // the recording emulator's timing quirks (gbl.h movie sync
-            // knobs), for this worker's machine only and while the movie
-            // plays: random play after it runs on hardware timing again
-            // BizHawk (Gambatte) powers a cartridge up with blank battery RAM
-            // filled with $FF: games that read their save slot (Mario Land 2)
-            // branch on it, so a zeroed RAM replays another game
-            if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->mach->api->eram)
-                memset(w->mach->api->eram, 0xFF, dp_gbl_variant_eram[w->mach->api->variant]);
-            // BizHawk's Gambatte starts from a fixed power-on RAM dump, not zeros
-            if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gambatte && !getenv("DEEPEEL_TAS_NOINIT")) {
-                memcpy(w->mach->api->wram, dp_gambatte_wram, 0x2000);
-                memcpy(w->mach->api->hram, dp_gambatte_hram, 0x7F);
-            }
-            // BizHawk's GBHawk (gbl.h): the pad is latched at the vblank
-            // edge inside its fixed frame (65,664 cycles to LY 144); the
-            // worker applies the next mask just after the m0boy vblank, so
-            // the pad needs a 14,481-cycle delay (measured window
-            // 14,470..14,550; the PPU phase below moves the m0boy vblank
-            // edge but the pad window keeps 14,481).  The divider phase at
-            // $0100 is 0xFE4D, and GBHawk is 405 cycles into line 153
-            // there (LY zeroed by its cycle-6 rule; gbl.h, sync_ppu_phase:
-            // applied to the loaded state, it makes every LY read match).
-            // GBHawk keeps the WRAM zero (no power-on dump) and its frames
-            // are always 70224 cycles, like the vblank clock: no mode-3
-            // clock change applies.
-            if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gbhawk) {
-                *w->mach->api->sync_pad_delay = getenv("DEEPEEL_TAS_PADDELAY")
-                    ? (uint32_t)strtoul(getenv("DEEPEEL_TAS_PADDELAY"), NULL, 0) : 14481u;
-                *w->mach->api->sync_div_extra = getenv("DEEPEEL_TAS_DIVEXTRA")
-                    ? (uint16_t)strtoul(getenv("DEEPEEL_TAS_DIVEXTRA"), NULL, 0) : 0xFE4Du;
-                *w->mach->api->sync_ppu_phase = getenv("DEEPEEL_TAS_PPUPHASE")
-                    ? (uint16_t)strtoul(getenv("DEEPEEL_TAS_PPUPHASE"), NULL, 0) : 405u;
-                w->mach->api->sync_ppu_apply();
-                fprintf(stderr, "deepeel: TAS %s: GBHawk sync profile (pad latch +14481 cycles, DIV phase $FE4D, PPU phase 405)\n",
-                        w->tas.source);
-            }
-            // BizHawk's frame clock (gbl.h, sync_vba_off_clock 3): a frame ends at
-            // the video frame or when its sample budget runs out
-            if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gambatte && !w->tas.equal_frames && !getenv("DEEPEEL_TAS_NOMODE3"))
-                *w->mach->api->sync_vba_off_clock = 3;
-            // Gambatte's DIV phase against the m0boy clock, measured on SML2 (DIV
-            // reads that seed its RNG): any skew in 25..64 matches, 40 is mid-range.
-            if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gambatte)
-                *w->mach->api->sync_div_skew = getenv("DEEPEEL_TAS_DIVSKEW") ? (uint8_t)atoi(getenv("DEEPEEL_TAS_DIVSKEW")) : 40;
-            int vba_old = w->tas.recorder == DP_TAS_REC_VBA && w->tas.recorder_rev == 0;
-            if (vba_old) {
-                // VBA 1.7.2 based recorders (VBM minor version 0): input
-                // read at each vblank, no frame while the LCD is off, a
-                // ten-line line 0 after an enable.  Partial: their CPU
-                // timing quirks (cycle table, HALT wake-up) stay hardware
-                *w->mach->api->sync_vba_off_clock = 2;
-                fprintf(stderr, "deepeel: TAS %s: VBA 1.7.2 sync profile (input at vblank, no LCD-off frame, "
-                                "ten-line enable)\n", w->tas.source);
-            } else if (w->tas.recorder == DP_TAS_REC_VBA) {
-                *w->mach->api->sync_div_skew = 4;
-                *w->mach->api->sync_vba_off_clock = 1;
-                fprintf(stderr, "deepeel: TAS %s: VBA sync profile (DIV read +4 cycles, VBA LCD-off frame clock)\n",
-                        w->tas.source);
-            }
-            // movie frame 0 is the power-on frame: its input is held from
-            // the first instruction (VBA-rr v23.1+ and BizHawk), each vblank
-            // then feeds the next frame.  The VBA 1.7.2 cores read the pad
-            // at the vblank instead: frame 0 lands at the first one.
-            if (w->tas.frames && !vba_old) {
-                w->mach->api->set_buttons(w->tas.masks[0]);
-                w->applied_mask = w->tas.masks[0];
-                w->frames_done = 1;
-            }
+            worker_tune_movie(p, w);
         }
         // resume: a TAS worker continues its movie at its latest snapshot
         if (w->mode == IN_TAS && p->cfg.resume && p->tas_resume_rec[w->tas_idx] >= 0) {
@@ -1415,7 +1472,8 @@ int dp_play_poll(DpPlay *p) {
             if (p->res->disc_n) p->res->disc[p->res->disc_n - 1].frame = w->lane_frame;
         }
         glob_new += w->credit_epoch;
-        frames += w->lane_frame - w->seen_frame;
+        // a worker moved on to its next queued movie: its frame counter restarted
+        frames += w->lane_frame >= w->seen_frame ? w->lane_frame - w->seen_frame : w->lane_frame;
         w->seen_frame = w->lane_frame;
         w->stagnant_epochs = w->credit_epoch == 0 ? w->stagnant_epochs + 1 : 0;
     }
@@ -1462,6 +1520,7 @@ int dp_play_poll(DpPlay *p) {
     int tas_left = 0;
     for (int i = 0; i < p->nworkers; i++)
         if (p->w[i].mode == IN_TAS && p->w[i].frames_done < p->w[i].tas.frames) tas_left = 1;
+    if (__atomic_load_n(&p->tas_next, __ATOMIC_RELAXED) < p->cfg.tas_n) tas_left = 1;
     if (g_sigint) reason = 2;
     else if (p->cfg.max_frames && !tas_left && p->total_frames >= p->cfg.max_frames) reason = 0;
     else if (p->cfg.stagnation_frames && !tas_left && p->stagnation >= p->cfg.stagnation_frames) reason = 1;

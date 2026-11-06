@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "vMRMGwXW6YQ=",
+  "success": true,
+  "projectFilePath": "/home/m/dev/memscan/tools/gbhawk_ref/gbh.csproj",
+  "expectedPackageFiles": [
+    "/home/m/.nuget/packages/microsoft.aspnetcore.app.ref/10.0.12/microsoft.aspnetcore.app.ref.10.0.12.nupkg.sha512"
+  ],
+  "logs": []
+}
