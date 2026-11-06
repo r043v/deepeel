@@ -4076,3 +4076,16 @@ cycles, `DEEPEEL_TAS_LYLAG` pour expérimenter) fait lire la ligne de 20 cycles
 plus tôt. Sur Zelda LA (film 2076), la première divergence de WRAM contre le
 harnais VBA V7 passe de la frame 24 à la frame 43 (observation de l'outil).
 Reste ouvert : la divergence de la frame 43 (`$C13D`, RNG), puis l'épée.
+
+### Mise à jour 0.249.67 : lecture de LY au début d'instruction
+
+Le décalage `sync_ly_lag` (profil `vba_old`, VBA V7) devient un décalage signé
+appliqué à l'offset de ligne **au début de l'instruction** lectrice
+(`gbl_insn_cyc`), défaut −16 T (`DEEPEEL_TAS_LYLAG`). Observation de l'outil
+sur Zelda (bobmario2-zeldala.vbm, référence VBA V7 : harnais hors dépôt) : les
+42 premières frames sont identiques à la référence (hors HRAM/OAM) ; la frame
+43 diverge (RNG $C13D, compteurs $C1xx/$D00x). Un balayage coût de dispatch ×
+lag montre que seules les combinaisons (20,−16), (16,0), (8,16) passent la
+frame 43 ; aucune ne va au-delà : la cause restante n'est pas encore
+localisée (un écart de découpage de frame apparaît dès la 43). Le replay
+intégral de Zelda sans désynchro n'est donc **pas** atteint.

@@ -1165,7 +1165,7 @@ static void worker_tune_movie(DpPlay *p, DpWorker *w) {
             ? (uint8_t)atoi(getenv("DEEPEEL_TAS_OFFCLOCK")) : 2;
         // V7 reads LY at the start of the reading instruction (gbl.h, sync_ly_lag)
         *w->mach->api->sync_ly_lag = getenv("DEEPEEL_TAS_LYLAG")
-            ? (uint8_t)atoi(getenv("DEEPEEL_TAS_LYLAG")) : 20;
+            ? (int16_t)atoi(getenv("DEEPEEL_TAS_LYLAG")) : -16;
         fprintf(stderr, "deepeel: TAS %s: VBA 1.7.2 sync profile (input at vblank, no LCD-off frame, "
                         "ten-line enable)\n", w->tas.source);
     } else if (w->tas.recorder == DP_TAS_REC_VBA) {

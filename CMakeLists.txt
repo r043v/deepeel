@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.249.66 LANGUAGES C)
+project(deepeel VERSION 0.249.67 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -182,7 +182,7 @@ extern uint32_t ${p}gbl_sync_pad_delay;
 extern uint16_t ${p}gbl_sync_div_extra;
 extern uint16_t ${p}gbl_sync_ppu_phase;
 extern void ${p}gbl_ppu_phase_apply(void);
-extern uint8_t ${p}gbl_sync_echo_old, ${p}gbl_sync_ly_lag;
+extern uint8_t ${p}gbl_sync_echo_old; extern int16_t ${p}gbl_sync_ly_lag;
 extern void ${p}gbl_echo_apply(void);
 extern uint8_t ${p}gbl_eram[];
 extern void ${p}gbl_wr(uint16_t a, uint8_t v);
