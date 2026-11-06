@@ -709,18 +709,33 @@ static int mw_scale;
 static DpPlay *mw_play;   // optional: the replay engine whose game screen is shown beside the map
 static void *mw_main(void *arg) {
     (void)arg;
-    enum { TILE = 128, GAP = 4, PER_ROW = 8, LEG_H = 30, PANEL_W = 2 * DP_GB_SCREEN_W + 2 * GAP };
+    enum { TILE = 128, GAP = 4, LEG_H = 30, PANEL_W = 2 * DP_GB_SCREEN_W + 2 * GAP };
     const DpResults *res = mw_res;
     int banks = (int)res->banks;
     if (banks < 1) return NULL;
-    int cols = banks < PER_ROW ? banks : PER_ROW, rows = (banks + PER_ROW - 1) / PER_ROW;
-    int sc = mw_scale;
-    if (sc < 1) { // fit a 1280x860 desktop by default
-        sc = 1;
-        while (sc < 4 && (GAP + cols * (TILE * (sc + 1) + GAP)) <= 1500 && (GAP + rows * (TILE * (sc + 1) + GAP) + LEG_H) <= 1000) sc++;
-    }
-    int W = GAP + cols * (TILE * sc + GAP), H = GAP + rows * (TILE * sc + GAP) + LEG_H;
     if (SDL_Init(SDL_INIT_VIDEO) != 0) { fprintf(stderr, "deepeel: mapwin: SDL_Init: %s\n", SDL_GetError()); return NULL; }
+    // fit the user's screen: the usable area (minus window decoration), the game panel included
+    int maxW = 1280 - 40, maxH = 800 - 80;
+    SDL_Rect ub;
+    if (SDL_GetDisplayUsableBounds(0, &ub) == 0 && ub.w > 0 && ub.h > 0) { maxW = ub.w - 40; maxH = ub.h - 80; }
+    int panel = mw_play ? PANEL_W : 0;
+    // choose the banks-per-row and the integer scale: the biggest scale that fits (a requested scale
+    // is a ceiling); at that scale stay at 8 banks per row when it fits, else go taller (fewer
+    // columns, more rows) before going wider
+    int per_row = 8, sc = 1, found = 0;
+    int ceil_sc = mw_scale >= 1 ? mw_scale : 4;
+    for (int k = ceil_sc; k >= 1 && !found; k--) {
+        for (int t = 0; t < banks && !found; t++) {
+            int pr = t < 8 ? 8 - t : t + 1; // 8, 7, ..., 1, then 9, 10, ...
+            if (pr > banks) continue;
+            int rws = (banks + pr - 1) / pr;
+            int w = GAP + pr * (TILE * k + GAP) + panel, h = GAP + rws * (TILE * k + GAP) + LEG_H;
+            if (w <= maxW && h <= maxH) { found = 1; per_row = pr; sc = k; }
+        }
+    }
+    if (!found) { per_row = banks < 8 ? banks : 8; sc = 1; } // nothing fits: the smallest layout, the window is resizable
+    int cols = banks < per_row ? banks : per_row, rows = (banks + per_row - 1) / per_row;
+    int W = GAP + cols * (TILE * sc + GAP), H = GAP + rows * (TILE * sc + GAP) + LEG_H;
     SDL_Window *win = SDL_CreateWindow("deepeel ROM map", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, W + (mw_play ? PANEL_W : 0), H, SDL_WINDOW_RESIZABLE);
     SDL_Renderer *ren = win ? SDL_CreateRenderer(win, -1, 0) : NULL;
     SDL_Texture *tex = ren ? SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, W, H - LEG_H) : NULL;
@@ -756,7 +771,7 @@ static void *mw_main(void *arg) {
         if (m) {
             have_map = 1;
             for (int b = 0; b < banks; b++) {
-                int ox = GAP + (b % PER_ROW) * (TILE * sc + GAP), oy = GAP + (b / PER_ROW) * (TILE * sc + GAP);
+                int ox = GAP + (b % per_row) * (TILE * sc + GAP), oy = GAP + (b / per_row) * (TILE * sc + GAP);
                 for (int g = 0; g < 0x4000; g++) {
                     size_t gi = (size_t)b * 0x4000 + g;
                     if (painted && prev[gi] == m[gi]) continue;

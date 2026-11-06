@@ -44,10 +44,11 @@ void dp_session_cfg_defaults(DpSessionCfg *cfg) {
     cfg->save_epochs = 10;
     cfg->fork_paths_per_epoch = 200;
     cfg->tas_ckpt_frames = 0; // auto: derived from tas_ckpt_secs and tas_ckpt_max
-    cfg->tas_ckpt_secs = 30;
-    cfg->tas_ckpt_max = 1024;
+    cfg->tas_ckpt_secs = 5;
+    cfg->tas_ckpt_max = 4096;
     cfg->tas_rng = 1;
-    cfg->tas_rng_share = 2;
+    cfg->tas_rng_share = 1; // every segment, until each checkpoint has had tas_rng_per of them
+    cfg->tas_rng_per = 8;
     cfg->tas_rng_min = 3600;
     cfg->uniform = 1;
     cfg->uniform_hold = 64;
@@ -505,10 +506,12 @@ static void segment_end(DpWorker *w) {
             int i = (k + off) % p->tasnaps_n;
             if (bi < 0 || p->tasnaps[i].chosen < p->tasnaps[bi].chosen) bi = i;
         }
-        p->tasnaps[bi].chosen++;
-        snprintf(tpath, sizeof tpath, "%s", p->tasnaps[bi].path);
-        use_tas = 1;
-        __atomic_fetch_add(&p->tas_rng_starts, 1, __ATOMIC_RELAXED);
+        if (p->tasnaps[bi].chosen < p->cfg.tas_rng_per) {
+            p->tasnaps[bi].chosen++;
+            snprintf(tpath, sizeof tpath, "%s", p->tasnaps[bi].path);
+            use_tas = 1;
+            __atomic_fetch_add(&p->tas_rng_starts, 1, __ATOMIC_RELAXED);
+        }
     }
     if (!use_tas) {
         p->pool.slot[pick]->chosen++;

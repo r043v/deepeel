@@ -4016,3 +4016,12 @@ son voisinage. Réglages : `--tas-rng-share N` (1 départ sur N, défaut 2),
 `--tas-rng-frames N` (défaut 3600), `--no-tas-rng` pour revenir à l'ancien
 comportement. Les snapshots restent aussi des graines de fourches. Non mesuré sur
 ROM réelle à ce stade : à comparer à temps égal (inconnu avant/après).
+
+### 0.249.62 : snapshots TAS toutes les 5 s, plusieurs segments par snapshot, fenêtre `--mapwin` adaptée à l'écran
+
+- `--tas-ckpt-secs` passe à 5 (défaut), `--tas-ckpt-max` à 4096. Chaque snapshot reçoit `--tas-rng-per` (8) segments
+  aléatoires longs avant que les segments normaux reprennent (`--tas-rng-share` défaut 1).
+- Mesure (SML2, 1 run chacun, 4 workers, charge machine variable — indicatif, pas une preuve) : inconnu 22 521 octets /
+  676 plages sans (`--no-tas-rng`), 20 684 / 578 avec ; mais 1,62 M images jouées contre 1,34 M (confondant).
+- `--mapwin` : la disposition suit la zone utilisable de l'écran ; 8 blocs par ligne si ça tient, sinon plus haut
+  avant plus large ; `--mapwin N` est un plafond d'échelle.

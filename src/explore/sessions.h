@@ -55,6 +55,7 @@ typedef struct DpSessionCfg {
     int tas_rng;                // 1 (default): random-key sessions also start long segments from the TAS
                                 // checkpoints (the neighbourhood of the near-perfect run), many times each
     uint32_t tas_rng_share;     // 1 segment start in this many is drawn from the TAS checkpoints (default 2)
+    uint32_t tas_rng_per;       // segments started from each TAS checkpoint before the share stops (default 8)
     uint32_t tas_rng_min;       // frames of such a segment: min + random below 2*min (default 3600)
     int tas_ckpt_live;          // 1: the old behavior — the captures feed the fork explorer's
                                 // inbox during the replay instead of waiting for the post-play

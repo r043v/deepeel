@@ -173,15 +173,16 @@ static void usage(void) {
             "    --tas-ckpt N         TAS replay: capture-interval override in frames (default:\n"
             "                         auto, from --tas-ckpt-secs and --tas-ckpt-max)\n"
             "    --tas-ckpt-secs S    TAS replay: a checkpoint snapshot every S seconds of game\n"
-            "                         time (default 30, 0 = off)\n"
-            "    --tas-ckpt-max N     TAS replay: snapshot cap per movie (default 1024); the\n"
+            "                         time (default 5, 0 = off)\n"
+            "    --tas-ckpt-max N     TAS replay: snapshot cap per movie (default 4096); the\n"
             "                         interval is min(movie/S, S secs), so a long movie stays at\n"
             "                         one snapshot per S seconds\n"
             "    --session-cells      Go-Explore: sessions archive every new background screen as a checkpoint\n"
             "    --no-tas-rng         disable the default: half of the random-key segments restart\n"
             "                         from the TAS checkpoints (long segments, each checkpoint many\n"
             "                         times) to explore the neighbourhood of the near-perfect run\n"
-            "    --tas-rng-share N    one random-key segment start in N uses a TAS checkpoint (default 2)\n"
+            "    --tas-rng-share N    one random-key segment start in N uses a TAS checkpoint (default 1)\n"
+            "    --tas-rng-per N      random segments started from each TAS checkpoint (default 8)\n"
             "    --tas-rng-frames N   such a segment lasts N + [0, 2N] frames (default 3600)\n"
             "    --tas-ckpt-live      feed the TAS snapshots to the fork explorer during the\n"
             "                         replay instead of the default: save them, then seed the\n"
@@ -458,6 +459,7 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--tas-ckpt-live")) scfg.tas_ckpt_live = 1;
         else if (!strcmp(a, "--no-tas-rng")) scfg.tas_rng = 0;
         else if (!strcmp(a, "--tas-rng-share") && i + 1 < argc) scfg.tas_rng_share = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--tas-rng-per") && i + 1 < argc) scfg.tas_rng_per = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--tas-rng-frames") && i + 1 < argc) scfg.tas_rng_min = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--session-cells")) scfg.cells = 1;
         else if (!strcmp(a, "--tas-solo")) scfg.tas_solo = 1;
