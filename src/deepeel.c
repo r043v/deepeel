@@ -337,6 +337,7 @@ static void write_ramcode(const DpResults *res, const char *path) {
 }
 
 static int cmd_explore(int argc, char **argv) {
+    int nocredit_set = 0;
     const char *rtcode_path = NULL, *ramcode_path = NULL;
     const char *json = NULL, *text = NULL, *cov = NULL, *romdata = NULL, *map = NULL, *html = NULL, *path = NULL;
     const char *from_png = NULL, *export_dir = NULL, *summary = NULL;
@@ -380,6 +381,7 @@ static int cmd_explore(int argc, char **argv) {
             if (watch > 30) watch = 30;
         }
         else if (!strcmp(a, "--max-steps") && i + 1 < argc) cfg.max_steps_path = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--nocredit-cut") && i + 1 < argc) { cfg.nocredit_cut = (uint32_t)strtoul(argv[++i], NULL, 0); nocredit_set = 1; }
         else if (!strcmp(a, "--max-paths") && i + 1 < argc) cfg.max_paths = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--max-total") && i + 1 < argc) cfg.max_steps_total = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--queue") && i + 1 < argc) cfg.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
@@ -565,6 +567,7 @@ static int cmd_explore(int argc, char **argv) {
     }
     DpMach *mach = dp_mach_open(vi, 0);
     dp_mach_set_rom(mach, cart->rom, cart->rom_size);
+    if (cfg.unbounded && !nocredit_set) cfg.nocredit_cut = 20000;   // unbounded still ends a path that only loops over known code
     if (cfg.unbounded) { cfg.max_paths = UINT32_MAX; cfg.max_steps_total = UINT64_MAX; }   // no path/step wall: the run ends when nothing is left
     DpExplorer *ex = dp_explorer_new(&cfg, &res, mach);
     // the common exploration tree: every seed, fork and session deposit is

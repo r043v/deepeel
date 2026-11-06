@@ -276,6 +276,7 @@ typedef struct DpResults {
     // WRAM/HRAM — the bytes stay out of the code map
     uint32_t nonsense_echo, nonsense_data, nonsense_stack;
     uint32_t halt_cuts; // paths parked in a HALT nothing wakes (watchdog)
+    uint32_t nocredit_cuts; // paths ended by --nocredit-cut (nothing new learned for N steps)
     uint32_t seeds_natural, seeds_spec;
     uint32_t seeds_skipped_data; // pointer-scan targets inside proven data/static zones
     uint64_t vram_write_pages[2], sram_write_pages; // page bitmaps
@@ -307,6 +308,7 @@ typedef struct DpResults {
 // --- exploration config -------------------------------------------------------
 typedef struct DpConfig {
     uint32_t max_steps_path;  // per-path step budget
+    uint32_t nocredit_cut;    // a path that learned nothing new (no code, data, copy, I/O, bank) for this many steps ends; 0 = off
     uint32_t max_paths;       // hard cap on paths run
     uint64_t max_steps_total; // hard cap on steps across all paths
     uint32_t queue_cap;       // max pending states

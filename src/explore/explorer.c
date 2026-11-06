@@ -138,6 +138,7 @@ void *dp_map_find(DpMap32 *m, uint32_t key) {
 void dp_config_defaults(DpConfig *cfg) {
     memset(cfg, 0, sizeof *cfg);
     cfg->max_steps_path = 100000;
+    cfg->nocredit_cut = 0;
     cfg->max_paths = 200000;
     cfg->max_steps_total = 20000000ull;
     cfg->queue_cap = 4096;
@@ -1506,6 +1507,12 @@ bad_done:
             ex->steps_no_credit = 0;
         } else {
             ex->steps_no_credit++;
+            // the path only re-runs code already known: the forks it made along the way carry the other
+            // outcomes, so it ends here instead of climbing the step tiers for ever
+            if (ex->cfg.nocredit_cut && ex->steps_no_credit > ex->cfg.nocredit_cut) {
+                u32_add(&res->nocredit_cuts, 1);
+                dp_mach_cut(m, DP_CUT_HALT);
+            }
         }
     }
 }

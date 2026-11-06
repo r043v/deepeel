@@ -67,6 +67,10 @@ void fork_branch(DpExplorer *ex, int cond, uint32_t site, uint16_t pc, uint8_t o
         ex->res->forks_covered_pruned++;
         defer = DP_R_COVERED;
     }
+    // both sides already executed: the variant can only add state diversity, never a byte of code. Under
+    // --unbounded the cap is infinite, so parking it would send every such fork to the disk spool (the
+    // unbounded growth): it is dropped, counted as final, no snapshot paid
+    if (defer == DP_R_COVERED && ex->cfg.unbounded) { ex->res->defer_final[DP_R_COVERED]++; return; }
     // a deferred variant spends the site's counter too: each site parks at most
     // as many variants as its cap again (a loop body cannot flood the frontier)
     if (defer && (*cnt >= 2 * ex->cfg.fork_site_cap || !defer_room(ex, defer))) {
@@ -123,6 +127,7 @@ void fork_key(DpExplorer *ex, uint32_t site) {
     if (api->io[0x0F] & 0x10) return; // already pending: the natural IRQ fires
     uint32_t *cnt = fork_slot(ex, site ^ 0x80000000u);
     if (!cnt) return;
+    if (ex->cfg.unbounded && *cnt >= 1) { ex->res->defer_final[DP_R_COVERED]++; return; }   // one round of presses per site
     // once the joypad handler ($60) has run, more key variants at a site only
     // re-run known code: one round of presses per site is enough
     uint32_t kcap = (ex->res->exec_flags[0x60] & DP_XF_START) ? 1 : ex->cfg.fork_site_cap;
@@ -177,6 +182,7 @@ void fork_p1(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op) {
     }
     uint32_t *cnt = fork_slot(ex, site ^ 0xC0000000u);
     if (!cnt) return;
+    if (ex->cfg.unbounded && *cnt >= 1) { ex->res->defer_final[DP_R_COVERED]++; return; }   // one round of keys per polling site
     int pdefer = 0;
     if (*cnt >= ex->cfg.fork_site_cap) {
         ex->res->forks_capped++;
@@ -276,8 +282,12 @@ void fork_event(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op) {
         }
     }
     vals = vbuf;
-    uint32_t *cnt = fork_slot(ex, site ^ 0xE0000000u ^ ((uint32_t)reg << 20));
+    // the values worth testing come from constants hard-coded at the site (plus the compare constant that
+    // follows): one round per (site, register, constant) is enough, a loop revisiting the read with another
+    // context re-runs the same destinations. --unbounded keeps that one round and drops the repeats
+    uint32_t *cnt = fork_slot(ex, site ^ 0xE0000000u ^ ((uint32_t)reg << 20) ^ ((uint32_t)(cmpk + 1) * 0x9E3779B1u));
     if (!cnt) return;
+    if (ex->cfg.unbounded && *cnt >= 1) { ex->res->defer_final[DP_R_COVERED]++; return; }
     int edefer = 0;
     if (*cnt >= ex->cfg.fork_site_cap) {
         ex->res->forks_capped++;

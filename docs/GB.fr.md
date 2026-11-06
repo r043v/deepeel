@@ -3962,3 +3962,16 @@ gestionnaire de l'explorateur est réinstallé à l'entrée de la recherche tota
 est honorée avant d'ouvrir un nouveau chemin et à l'intérieur d'un long chemin. Mesure sur un état neuf :
 arrêt et rapport en 28 s. Les workers du drain s'adaptent aussi à la RAM libre (mise en pause par palier de
 400 Mo sous 4 Go), et les continuations de chemin retournent dans le pool avant le spool.
+
+### Élagage par destination sous --unbounded (0.249.58)
+
+Cause de l'explosion du spool (5,8 Go en 10 min) : (1) les forks de branchement dont les deux côtés sont
+déjà exécutés étaient *différés* au lieu d'être jetés, donc tous envoyés au disque (plafond infini) ;
+(2) les forks d'événements (LY, STAT, DIV, TIMA, série), de port P1 et de touches n'avaient aucun plafond
+sous `--unbounded` : chaque lecture dans une boucle d'attente relançait jusqu'à 12 variantes.
+Les valeurs testées viennent de constantes écrites en dur au site (plus la constante du `cp` qui suit) :
+un tour par (site, registre, constante) suffit. Sous `--unbounded`, un fork « deux côtés couverts » est
+jeté (compté en `defer_final`), et les forks événement/P1/touches font un seul tour par site.
+`--nocredit-cut N` ferme un chemin sans nouveau crédit depuis N pas (20000 par défaut en `--unbounded`).
+Observation de l'outil sur SML2, état neuf, 20 min : RAM ~480 Mo, spool 325 Mo (au lieu de 5,8 Go),
+inconnu 52 064 octets (74 355 avant).
