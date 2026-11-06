@@ -86,7 +86,11 @@ static class P {
             var ram = ((BizHawk.Emulation.Cores.Nintendo.GBHawk.GBHawk)gb).RAM;
             ulong wh = 1469598103934665603ul;
             for (int i = 0; i < 0x2000; i++) wh = (wh ^ ram[i]) * 1099511628211ul;
-            o.WriteLine($"{f + 1} {R("PC"):x4} {R("SPh") << 8 | R("SPl"):x4} {R("A") << 8 | R("F"):x4} {R("B") << 8 | R("C"):x4} {R("D") << 8 | R("E"):x4} {R("H") << 8 | R("L"):x4} {h:x8} {wh:x16}");
+            var dfr = Environment.GetEnvironmentVariable("GBH_DUMPFRAME");
+            if (dfr != null && int.Parse(dfr) == f + 1) File.WriteAllBytes(Environment.GetEnvironmentVariable("GBH_DUMPFILE") ?? "/tmp/gbh_wram.bin", ram.Take(0x2000).ToArray());
+            ulong xh = 1469598103934665603ul; // without the stack page $CFxx and the sound page $DFxx
+            for (int i = 0; i < 0x2000; i++) if ((i >> 8) != 0x0F && (i >> 8) != 0x1F) xh = (xh ^ ram[i]) * 1099511628211ul;
+            o.WriteLine($"{f + 1} {R("PC"):x4} {R("SPh") << 8 | R("SPl"):x4} {R("A") << 8 | R("F"):x4} {R("B") << 8 | R("C"):x4} {R("D") << 8 | R("E"):x4} {R("H") << 8 | R("L"):x4} {h:x8} {wh:x16} {xh:x16}");
             if (shot != null && every > 0 && (f + 1) % every == 0) {
                 var vb = gb.GetVideoBuffer();
                 using var w = new BinaryWriter(File.Create($"{shot}{f + 1:D6}.ppm"));

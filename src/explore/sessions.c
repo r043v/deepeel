@@ -650,10 +650,13 @@ static void worker_vblank(DpMach *m) {
         if (dumpf) {
             uint64_t h = 1469598103934665603ull;
             for (int i = 0; i < 0x2000; i++) h = (h ^ m->api->wram[i]) * 1099511628211ull;
+            uint64_t hx = 1469598103934665603ull; // WRAM without the stack page $CFxx and the sound page $DFxx
+            for (int i = 0; i < 0x2000; i++)
+                if ((i >> 8) != 0x0F && (i >> 8) != 0x1F) hx = (hx ^ m->api->wram[i]) * 1099511628211ull;
             uint32_t hh = 2166136261u;
             for (int i = 0; i < 0x7F; i++) if (i != 0x04 && i != 0x05) hh = (hh ^ m->api->hram[i]) * 16777619u;
-            fprintf(dumpf, "%u %016llx pc=%04x ime=%u if=%02x ie=%02x 82=%02x 40=%02x LY=%02x hh=%08x h99=%02x hc0=%02x hc6=%02x h97=%02x s8fb=%02x%02x\n", (unsigned)w->frames_done, (unsigned long long)h,
-                    m->api->gbr->pc, m->api->gbr->ime, m->api->io ? m->api->io[0x0F] : 0, m->api->ie ? *m->api->ie : 0, m->api->hram[0x82 - 0x80 + 0], m->api->io[0x40], m->api->io[0x44], hh, m->api->hram[0x19], m->api->hram[0x40], m->api->hram[0x46], m->api->hram[0x17], m->api->eram[0x8fc], m->api->eram[0x8fb]);
+            fprintf(dumpf, "%u %016llx pc=%04x ime=%u if=%02x ie=%02x 82=%02x 40=%02x LY=%02x hh=%08x h99=%02x hc0=%02x hc6=%02x h97=%02x s8fb=%02x%02x hx=%016llx\n", (unsigned)w->frames_done, (unsigned long long)h,
+                    m->api->gbr->pc, m->api->gbr->ime, m->api->io ? m->api->io[0x0F] : 0, m->api->ie ? *m->api->ie : 0, m->api->hram[0x82 - 0x80 + 0], m->api->io[0x40], m->api->io[0x44], hh, m->api->hram[0x19], m->api->hram[0x40], m->api->hram[0x46], m->api->hram[0x17], m->api->eram[0x8fc], m->api->eram[0x8fb], (unsigned long long)hx);
             fflush(dumpf);
             extern int dp_dbg_trace;
             extern FILE *dp_dbg_trace_f;
