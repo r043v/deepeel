@@ -3975,3 +3975,13 @@ jeté (compté en `defer_final`), et les forks événement/P1/touches font un se
 `--nocredit-cut N` ferme un chemin sans nouveau crédit depuis N pas (20000 par défaut en `--unbounded`).
 Observation de l'outil sur SML2, état neuf, 20 min : RAM ~480 Mo, spool 325 Mo (au lieu de 5,8 Go),
 inconnu 52 064 octets (74 355 avant).
+
+### tree.bin v2 : seuls les choix ouverts (0.249.59)
+
+Le `tree.bin` v1 stockait les 322 M de choix (6 Go) ; sa lecture réécrivait ces 6 Go dans `tree.spill`, et chaque
+sauvegarde en écrivait 6 de plus. Sur le disque ntfs3 (écritures ~14 Mo/s, pas de fichier creux : un écrit à
+6 Go de décalage alloue 6 Go de zéros) cela faisait ~7 min par chargement. Les lectures, elles, vont à 200-370 Mo/s.
+Un choix fermé n'est plus jamais lu (son issue est dans les compteurs de l'en-tête, sa profondeur ne sert qu'à ses
+enfants, tous issus de choix ouverts) : la v2 n'écrit que les choix ouverts et les compteurs. Mesure sur l'état
+neuf : 358 Mo → 3,4 Mo, rechargé avec les mêmes compteurs. Une v1 se lit encore, compactée à la volée sans écrire
+le spill, puis la prochaine sauvegarde est en v2. Le spill est indexé par un numéro de bloc relatif (`spill_skip`).

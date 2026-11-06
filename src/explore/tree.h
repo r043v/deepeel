@@ -57,6 +57,7 @@ typedef struct DpTree {
     uint32_t closed[DP_ISSUE_N];
     uint32_t open;
     uint32_t next_id;
+    uint32_t spill_skip;        // chunks below this index have no slot in the spill file (a v2 load leaves them out)
     int spill_fd;
     char spill_path[560];
     pthread_mutex_t mtx;        // leaf lock: add/close may come from any worker
@@ -69,7 +70,8 @@ void dp_tree_set_spill(DpTree *t, const char *path);
 // add a choice (open); parent 0 = root; returns its id
 uint32_t dp_tree_add(DpTree *t, uint32_t parent, int kind, uint32_t site, int bank, int pc);
 void dp_tree_close(DpTree *t, uint32_t id, int issue);
-// tree.bin persistence (choices only; the frontier images ride in pool-style
+// tree.bin v2 keeps the open choices only (the closed ones are never read again: the counters ride in the
+// header); v1 (every choice) still loads.  tree.bin persistence (choices only; the frontier images ride in pool-style
 // files of their own).  Returns 1 on success.
 int dp_tree_save(const DpTree *t, const char *path);
 int dp_tree_load(DpTree *t, const char *path);

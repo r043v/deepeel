@@ -12,6 +12,11 @@
 #define CHM (CHN - 1u)
 #define CHBYTES ((size_t)CHN * sizeof(DpChoice))
 
+// byte offset of chunk c in the spill file, -1 when it has no slot (v2 load: closed history is not kept)
+static off_t spill_chunk_off(const DpTree *t, uint32_t c) {
+    return c < t->spill_skip ? (off_t)-1 : (off_t)(c - t->spill_skip) * (off_t)CHBYTES;
+}
+
 static int tree_grow(DpTree *t) {
     if (t->nch == t->chcap) {
         uint32_t nc = t->chcap ? t->chcap * 2 : 16;
@@ -83,10 +88,12 @@ static void pin_del(DpTree *t, DpChoice *e) {
 // choices in the pin table; on any failure it stays in RAM
 static void tree_evict(DpTree *t, uint32_t c) {
     if (t->spill_fd < 0 || !c || !t->ch[c] || c + 1 >= t->nch) return;
+    off_t base = spill_chunk_off(t, c);
+    if (base < 0) return;
     const uint8_t *p = (const uint8_t *)t->ch[c];
     size_t left = CHBYTES, done = 0;
     while (left) {
-        ssize_t w = pwrite(t->spill_fd, p + done, left, (off_t)(c * CHBYTES + done));
+        ssize_t w = pwrite(t->spill_fd, p + done, left, base + (off_t)done);
         if (w <= 0) return;
         done += (size_t)w;
         left -= (size_t)w;
@@ -104,7 +111,9 @@ static int tree_read(const DpTree *t, uint32_t id, DpChoice *out) {
     if (t->ch[c]) { *out = t->ch[c][id & CHM]; return 1; }
     const DpChoice *pe = pin_find(t, id);
     if (pe) { *out = *pe; return 1; }
-    return t->spill_fd >= 0 && pread(t->spill_fd, out, sizeof *out, (off_t)id * (off_t)sizeof *out) == (ssize_t)sizeof *out;
+    off_t base = spill_chunk_off(t, c);
+    if (t->spill_fd < 0 || base < 0) return 0;
+    return pread(t->spill_fd, out, sizeof *out, base + (off_t)(id & CHM) * (off_t)sizeof *out) == (ssize_t)sizeof *out;
 }
 
 static void tree_boot(DpTree *t) {
@@ -190,8 +199,9 @@ void dp_tree_close(DpTree *t, uint32_t id, int issue) {
             if (t->open) t->open--;
             if (issue > DP_ISSUE_OPEN && issue < DP_ISSUE_N) t->closed[issue]++;
             if (!t->ch[c]) {            // the spilled copy still says open: rewrite it, then unpin
-                if (t->spill_fd >= 0)
-                    (void)!pwrite(t->spill_fd, e, sizeof *e, (off_t)id * (off_t)sizeof *e);
+                off_t base = spill_chunk_off(t, c);
+                if (t->spill_fd >= 0 && base >= 0)
+                    (void)!pwrite(t->spill_fd, e, sizeof *e, base + (off_t)(id & CHM) * (off_t)sizeof *e);
                 pin_del(t, e);
             }
         }
@@ -211,30 +221,121 @@ int dp_tree_save(const DpTree *t, const char *path) {
     FILE *f = fopen(tmpn, "wb");
     if (!f) return 0;
     const char magic[4] = {'M', 'S', 'T', 'V'};
-    const uint32_t ver = 1;
+    const uint32_t ver = 2, zero = 0;
     fwrite(magic, 1, 4, f);
     fwrite(&ver, sizeof ver, 1, f);
     fwrite(&t->n, sizeof t->n, 1, f);
     fwrite(&t->next_id, sizeof t->next_id, 1, f);
     fwrite(&t->max_depth, sizeof t->max_depth, 1, f);
     fwrite(t->closed, sizeof t->closed, 1, f);
-    DpChoice *tmp = NULL;
+    long npos = ftell(f);
+    fwrite(&zero, sizeof zero, 1, f);                // number of open choices, patched below
+    // v2: the open choices only. A closed choice is never read again (its issue is in the counters, its
+    // depth only matters for its children, which all descend from open choices), so the history is not kept
+    uint32_t nopen = 0;
     int ok = 1;
     for (uint32_t c = 0; c < t->nch && ok; c++) {
+        if (!t->ch[c]) continue;                      // evicted: its open choices are in the pin table
         size_t cnt = (size_t)(t->n - (c << CHB));
         if (cnt > CHN) cnt = CHN;
-        const DpChoice *src = t->ch[c];
-        if (!src) {
-            if (!tmp && !(tmp = malloc(CHBYTES))) { ok = 0; break; }
-            if (t->spill_fd < 0 || pread(t->spill_fd, tmp, cnt * sizeof(DpChoice), (off_t)(c * CHBYTES)) != (ssize_t)(cnt * sizeof(DpChoice))) { ok = 0; break; }
-            src = tmp;
-        }
-        if (fwrite(src, sizeof(DpChoice), cnt, f) != cnt) ok = 0;
+        for (size_t k = 0; k < cnt && ok; k++)
+            if (t->ch[c][k].issue == DP_ISSUE_OPEN) {
+                ok = fwrite(&t->ch[c][k], sizeof(DpChoice), 1, f) == 1;
+                nopen++;
+            }
     }
-    free(tmp);
+    for (uint32_t k = 0; k < t->pin_cap && ok; k++)
+        if (t->pin[k].id) {
+            ok = fwrite(&t->pin[k], sizeof(DpChoice), 1, f) == 1;
+            nopen++;
+        }
+    if (ok && (fseek(f, npos, SEEK_SET) || fwrite(&nopen, sizeof nopen, 1, f) != 1)) ok = 0;
     if (fclose(f)) ok = 0;
     if (ok && rename(tmpn, path) != 0) ok = 0;
     if (!ok) unlink(tmpn);
+    return ok;
+}
+
+// Rebuild the in-memory tree from its open choices only. The closed history is not rebuilt: its chunks stay
+// empty (evicted, no spill slot); the first and the last chunk are resident and filled as "done" so a stray
+// close finds nothing open. Takes ownership of nothing: recs is copied into place.
+static int tree_build_open(DpTree *t, uint32_t n, uint32_t next_id, uint32_t max_depth,
+                           const uint32_t *closed, const DpChoice *recs, uint32_t nopen) {
+    tree_drop(t);
+    uint32_t nchunks = (n + CHN - 1) >> CHB;
+    int ok = 1;
+    for (uint32_t c = 0; c < nchunks && ok; c++) {
+        if (!tree_grow(t)) { ok = 0; break; }
+        if (c == 0 || c + 1 == nchunks) {
+            memset(t->ch[c], 0, CHBYTES);
+            for (uint32_t i = 0; i < CHN; i++) t->ch[c][i].issue = DP_ISSUE_DONE;
+        } else {
+            free(t->ch[c]);
+            t->ch[c] = NULL;
+            t->chev[c] = 1;
+        }
+    }
+    for (uint32_t k = 0; k < nopen && ok; k++) {
+        uint32_t c = recs[k].id >> CHB;
+        if (recs[k].id >= n) { ok = 0; break; }
+        if (t->ch[c]) t->ch[c][recs[k].id & CHM] = recs[k];
+        else if (!pin_put(t, &recs[k])) ok = 0;
+    }
+    if (!ok) {
+        tree_drop(t);
+        tree_boot(t);
+        t->spill_skip = 0;
+        return 0;
+    }
+    t->n = n;
+    t->next_id = next_id;
+    t->max_depth = max_depth;
+    t->spill_skip = nchunks - 1;                     // the last chunk takes the first slot when it is evicted
+    memcpy(t->closed, closed, sizeof(uint32_t) * DP_ISSUE_N);
+    t->open = nopen - (t->ch[0][0].issue == DP_ISSUE_OPEN);
+    return 1;
+}
+
+static int tree_load_v2(DpTree *t, FILE *f, uint32_t n, uint32_t next_id, uint32_t max_depth,
+                        const uint32_t *closed) {
+    uint32_t nopen;
+    DpChoice *recs = NULL;
+    int ok = n && fread(&nopen, sizeof nopen, 1, f) == 1 && nopen <= n;
+    if (ok && nopen) {
+        recs = malloc((size_t)nopen * sizeof *recs);
+        ok = recs && fread(recs, sizeof *recs, nopen, f) == nopen;
+    }
+    fclose(f);
+    if (ok) ok = tree_build_open(t, n, next_id, max_depth, closed, recs, nopen);
+    free(recs);
+    return ok;
+}
+
+// v1 file (every choice): read chunk by chunk, keep the open ones, never write the closed history to the spill
+static int tree_load_v1_compact(DpTree *t, FILE *f, uint32_t n, uint32_t next_id, uint32_t max_depth,
+                                const uint32_t *closed) {
+    DpChoice *buf = malloc(CHBYTES), *recs = NULL;
+    size_t rcap = 0, nrec = 0;
+    int ok = buf != NULL;
+    for (uint32_t done = 0; done < n && ok; done += CHN) {
+        uint32_t cnt = n - done < CHN ? n - done : CHN;
+        if (fread(buf, sizeof(DpChoice), cnt, f) != cnt) { ok = 0; break; }
+        for (uint32_t i = 0; i < cnt; i++) {
+            if (buf[i].issue != DP_ISSUE_OPEN) continue;
+            if (nrec == rcap) {
+                size_t nc = rcap ? rcap * 2 : 4096;
+                DpChoice *r = realloc(recs, nc * sizeof *recs);
+                if (!r) { ok = 0; break; }
+                recs = r;
+                rcap = nc;
+            }
+            recs[nrec++] = buf[i];
+        }
+    }
+    fclose(f);
+    free(buf);
+    if (ok) ok = tree_build_open(t, n, next_id, max_depth, closed, recs, (uint32_t)nrec);
+    free(recs);
     return ok;
 }
 
@@ -244,12 +345,21 @@ int dp_tree_load(DpTree *t, const char *path) {
     char magic[4];
     uint32_t ver, n, next_id, max_depth, closed[DP_ISSUE_N];
     if (fread(magic, 1, 4, f) != 4 || memcmp(magic, "MSTV", 4) ||
-        fread(&ver, sizeof ver, 1, f) != 1 || ver != 1 ||
+        fread(&ver, sizeof ver, 1, f) != 1 || (ver != 1 && ver != 2) ||
         fread(&n, sizeof n, 1, f) != 1 || fread(&next_id, sizeof next_id, 1, f) != 1 ||
         fread(&max_depth, sizeof max_depth, 1, f) != 1 ||
         fread(closed, sizeof closed, 1, f) != 1) {
         fclose(f);
         return 0;
+    }
+    if (ver == 2) return tree_load_v2(t, f, n, next_id, max_depth, closed);
+    if (ver == 1 && t->spill_fd >= 0 && n) {
+        long here0 = ftell(f);
+        fseek(f, 0, SEEK_END);
+        long fsz0 = ftell(f);
+        fseek(f, here0, SEEK_SET);
+        if (here0 >= 0 && fsz0 >= here0 && (uint64_t)(fsz0 - here0) >= (uint64_t)n * sizeof(DpChoice))
+            return tree_load_v1_compact(t, f, n, next_id, max_depth, closed);
     }
     // without a spill file the whole tree must fit in RAM: keep the historical wall
     if (n == 0 || (t->spill_fd < 0 && n > (1u << 24))) {
