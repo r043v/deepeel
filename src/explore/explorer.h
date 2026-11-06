@@ -420,11 +420,14 @@ typedef struct DpSharedPool {
     DpPathState *q;
     uint32_t cap, head, len, max;
     int nthreads, idle; // drain threads in all / currently waiting for work (guarded by mtx)
+    int target;          // drain threads allowed to run now (the others park); adapted live
+    uint64_t next_ms;    // next time the target is recomputed
 } DpSharedPool;
 
 // the engine state is shared with the sibling modules (sections.c, copies.c)
 struct DpStreams;
 struct DpExplorer {
+    int drain_id;        // 0 = the leader (never parks), 1.. = workers of a parallel drain
     struct DpStreams *stm; // S6 decoder detection (streams.c)
     struct { uint32_t gen; int32_t rk; } wram_src[0x2000]; // WRAM pc -> ROM index of its copy source (cache, per copy_count)
     DpConfig cfg;

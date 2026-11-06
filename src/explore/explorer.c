@@ -1089,10 +1089,49 @@ int defer_room(DpExplorer *ex, int reason) {
     }
 }
 
+// Parallel total search: a parked continuation goes back on top of the shared pool
+// (the next pop is the newest) instead of the disk spool, whose writes are the
+// drain's bottleneck. No dedup here: the state has already been seen once.
+// takes ownership of img on success; 0 = the pool is at its wall (img untouched)
+static int pool_try_push(DpExplorer *ex, uint8_t *img, int forced, int kind, int from_reset,
+                         uint32_t choice) {
+    DpSharedPool *sh = ex->sh;
+    pthread_mutex_lock(&sh->mtx);
+    if (sh->len >= sh->cap) {
+        uint32_t ncap = sh->cap * 2;
+        if (ncap > sh->max) ncap = sh->max;
+        if (sh->cap >= sh->max || (ex->cfg.mem_cap_mb && dp_rss_mb() >= ex->cfg.mem_cap_mb)) {
+            pthread_mutex_unlock(&sh->mtx);
+            return 0;
+        }
+        DpPathState *nq = xrealloc(NULL, sizeof(DpPathState) * (size_t)ncap);
+        for (uint32_t i = 0; i < sh->len; i++) nq[i] = sh->q[(sh->head + i) % sh->cap];
+        memset(nq + sh->len, 0, sizeof(DpPathState) * (size_t)(ncap - sh->len));
+        free(sh->q);
+        sh->q = nq;
+        sh->head = 0;
+        sh->cap = ncap;
+        u32_add(&ex->res->queue_growths, 1);
+    }
+    uint8_t pk;
+    img = dp_img_pack(ex, img, &pk);
+    sh->q[(sh->head + sh->len) % sh->cap] =
+        (DpPathState){ img, (uint8_t)(forced ? 1 : 0), (uint8_t)kind,
+                       (uint8_t)(from_reset ? 1 : 0), pk, choice };
+    sh->len++;
+    pthread_mutex_unlock(&sh->mtx);
+    return 1;
+}
+
 // takes ownership of img on success; 0 = counted final loss (img untouched)
 int defer_push(DpExplorer *ex, uint8_t *img, int forced, int kind, int from_reset,
                       uint32_t choice, int reason) {
     if (!defer_room(ex, reason)) return 0;
+    if (ex->sh && ex->cfg.unbounded && ex->cfg.dfs &&
+        pool_try_push(ex, img, forced, kind, from_reset, choice)) {
+        ex->res->defer_by[reason]++;
+        return 1;
+    }
     if (ex->cfg.unbounded && ex->spool &&
         (ex->cur_tier >= DP_TIER_MAX || ex->defer_len >= DP_DEFER_CAP ||
          ex->defer_by_reason[reason] >= DP_DEFER_CAP)) {
@@ -1184,6 +1223,13 @@ static void hook_step(DpMach *m, uint16_t pc, uint8_t op, int entry) {
             res->step_cuts++;
             defer_cut(ex, m, 0);
             dp_mach_cut(m, DP_CUT_STEPS);
+        }
+        // SIGINT inside a long path (no step wall under --unbounded): the running path is kept as a
+        // continuation like at the step wall, so a stop is prompt and loses nothing
+        if (!(ex->steps_this_path & 0x3FF) && (dp_explore_interrupt || ex->stop)) {
+            ex->stop = 1;
+            defer_cut_reason(ex, m, DP_R_WALL);
+            dp_mach_cut(m, DP_CUT_QUIT);
         }
     }
     u64_add(&res->steps_total, 1);
@@ -1553,6 +1599,10 @@ static int explore_step_inner(DpExplorer *ex) {
     DpResults *res = ex->res;
     // any free worklist slot: pull the spooled overflow back in (also covers
     // the everything-drained case, so a spool keeps dp_explore going)
+    // a stop request is honoured before any new path starts: nothing is popped, nothing is lost
+    if (dp_explore_interrupt || ex->stop) {
+        return 0;
+    }
     if (ex->q_len < ex->q_cap && dp_explorer_spool_pending(ex)) spool_feed(ex);
     // the path wall stops before popping: the pending state stays in the
     // worklist (a flush spools it for --resume) instead of being freed unrun
@@ -1569,8 +1619,14 @@ static int explore_step_inner(DpExplorer *ex) {
     if (ex->sh && !from_pq) { // the parallel drain: pops come from the pool
         pthread_mutex_lock(&ex->sh->mtx);
         if (ex->sh->len) {
-            *p = ex->sh->q[ex->sh->head % ex->sh->cap];
-            ex->sh->head = (ex->sh->head + 1) % ex->sh->cap;
+            if (ex->cfg.dfs) {
+                // total search: newest first, like the single-explorer worklist — the frontier is then
+                // a stack (depth x fan-out), not a whole layer of the state space spilling to disk
+                *p = ex->sh->q[(ex->sh->head + ex->sh->len - 1) % ex->sh->cap];
+            } else {
+                *p = ex->sh->q[ex->sh->head % ex->sh->cap];
+                ex->sh->head = (ex->sh->head + 1) % ex->sh->cap;
+            }
             ex->sh->len--;
         } else {
             p->img = NULL;
@@ -1752,11 +1808,65 @@ void dp_explore_finalize(DpExplorer *ex) {
     }
 }
 
+// Live sizing of a parallel drain: the machine is shared with the user, so the
+// number of running workers follows the available memory (a worker costs images
+// and deltas); extra workers park (counted idle, so the end of the drain is still
+// detected) and wake when the room is back. The leader never parks.
+static uint64_t mono_ms(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint64_t)t.tv_sec * 1000 + (uint64_t)t.tv_nsec / 1000000;
+}
+
+static int avail_mb(void) {
+    FILE *f = fopen("/proc/meminfo", "r");
+    char l[128];
+    long kb = -1;
+    if (!f) return -1;
+    while (fgets(l, sizeof l, f))
+        if (sscanf(l, "MemAvailable: %ld kB", &kb) == 1) break;
+    fclose(f);
+    return kb < 0 ? -1 : (int)(kb / 1024);
+}
+
+static void drain_adapt(DpExplorer *w) {
+    DpSharedPool *sh = w->sh;
+    uint64_t now = mono_ms();
+    if (!sh || now < sh->next_ms) return;
+    sh->next_ms = now + 2000;
+    int a = avail_mb(), t = sh->nthreads;
+    if (a >= 0 && a < 4000) { // 4 GB and more: everyone; under: one worker fewer per 400 MB
+        t = 1 + (a > 1600 ? (a - 1600) / 400 : 0);
+        if (t > sh->nthreads) t = sh->nthreads;
+    }
+    sh->target = t;
+}
+
+static void drain_park(DpExplorer *w) {
+    DpSharedPool *sh = w->sh;
+    if (w->drain_id <= 0 || w->drain_id < sh->target) return;
+    pthread_mutex_lock(&sh->mtx);
+    sh->idle++;
+    pthread_mutex_unlock(&sh->mtx);
+    while (w->drain_id >= sh->target && !dp_explore_interrupt && !w->stop) {
+        usleep(200000);
+        pthread_mutex_lock(&sh->mtx);
+        int end = sh->len == 0 && sh->idle >= sh->nthreads; // everyone else is done too
+        pthread_mutex_unlock(&sh->mtx);
+        if (end) break;
+    }
+    pthread_mutex_lock(&sh->mtx);
+    sh->idle--;
+    pthread_mutex_unlock(&sh->mtx);
+}
+
 // one parallel drain worker: same slice loop, pops from the shared pool
 static void *drain_thread(void *arg) {
     DpExplorer *w = arg;
-    while (dp_explore_slice(w, 50))
-        ;
+    do {
+        drain_adapt(w);
+        drain_park(w);
+    } while (dp_explore_slice(w, 50));
     return NULL;
 }
 
@@ -1778,6 +1888,7 @@ int dp_explore(DpExplorer *ex) {
     pthread_mutex_init(&sh.mtx, NULL);
     ex->sh = &sh;
     sh.nthreads = 1; // the leader; the workers add themselves below
+    sh.target = 1 << 20; // no worker parks until drain_adapt has measured
     ex->res->mt = 1; // the record lists are shared from now on: take the mutexes
     // the seeds queued before the drain sit in the leader's local worklist:
     // hand them to the pool, the workers cannot see the local ring
@@ -1811,12 +1922,14 @@ int dp_explore(DpExplorer *ex) {
         w[nw]->tree = ex->tree;
         dp_explorer_share(w[nw], ex);
         sh.nthreads++;
+        w[nw]->drain_id = nw + 1;
         pthread_create(&th[nw], NULL, drain_thread, w[nw]);
         nw++;
     }
     if (!nw) fprintf(stderr, "deepeel: --jobs: no free machine instance, single core\n");
-    while (dp_explore_slice(ex, 50))
-        ;
+    do {
+        drain_adapt(ex);
+    } while (dp_explore_slice(ex, 50));
     for (int i = 0; i < nw; i++) pthread_join(th[i], NULL);
     for (int i = 0; i < nw; i++) {
         DpMach *m = w[i]->mach;

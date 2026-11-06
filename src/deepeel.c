@@ -709,6 +709,9 @@ static int cmd_explore(int argc, char **argv) {
             fprintf(stderr, "deepeel: TAS cuts absorbed (movie kept) %llu, wedged-machine fallbacks %llu\n",
                     (unsigned long long)dp_play_tas_cuts(play_engine),
                     (unsigned long long)dp_play_tas_cut_stuck(play_engine));
+        // the play's cooperative SIGINT handler only stops the sessions: back to the explorer's own
+        // handler, or a SIGINT during the total search is never seen (the drain ran on without end)
+        signal(SIGINT, on_explore_sigint);
         // phase 3, mandatory: the total search drains the frontier the
         // sessions fed, depth-first, until every choice is closed
         // the play budget ran out by the clock (not a user SIGINT): the fork search keeps its own

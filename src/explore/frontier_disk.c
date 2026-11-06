@@ -20,6 +20,7 @@
 // appended at spool_wr and read back from spool_rd.
 #define DP_SPOOL_REC 0x52535044ull // 'DPSR' little-endian: raw image (older spools)
 #define DP_SPOOL_DREC 0x44535044ull // 'DPSD' (format v2): XOR against a key record; hdr[2] = size | blen << 32, body = key offset (8) + deflate
+#define DP_SPOOL_DFS_LOW 256       // depth-first drain: pool refill target from the spool
 #define DP_SPOOL_KEY_MAX 256       // deltas per key: bounds the chain and re-keys when states drift
 #define DP_SPOOL_ZREC 0x5A535044ull // 'DPSZ': zlib image; hdr[2] = image size | clen << 32
 // records are variable-size now: the byte length of the record starting at `at`
@@ -101,26 +102,37 @@ int spool_write_rec(DpExplorer *ex, const uint8_t *img, int forced, int kind,
         body = clen;
         src = cb;
     }
+    // the delta against the key image is the costly part (xor + deflate): done
+    // OUTSIDE the spool lock on a snapshot of the key.  A stale key stays valid,
+    // since key records are never removed from the file, so concurrent writers
+    // no longer queue behind one compressor.
+    uint8_t *dbuf = NULL, *kcopy = NULL;
+    uint64_t as_key = 0, koff = 0;
     pthread_mutex_lock(&sp->mtx);
-    uint8_t *dbuf = NULL;
-    uint64_t as_key = 0;
-    if (sp->key_img && sp->key_n < DP_SPOOL_KEY_MAX) {
+    if (sp->key_img && sp->key_n < DP_SPOOL_KEY_MAX && (kcopy = malloc(ex->sb))) {
+        memcpy(kcopy, sp->key_img, ex->sb);
+        koff = sp->key_off;
+    }
+    pthread_mutex_unlock(&sp->mtx);
+    if (kcopy) {
         uLongf dl = compressBound((uLong)ex->sb) + 8;
         uint8_t *x = malloc(ex->sb);
         dbuf = malloc(dl);
         if (x && dbuf) {
-            for (uint32_t i = 0; i < ex->sb; i++) x[i] = img[i] ^ sp->key_img[i];
+            for (uint32_t i = 0; i < ex->sb; i++) x[i] = img[i] ^ kcopy[i];
             dl -= 8;
             if (zraw_compress(dbuf + 8, &dl, x, (uLong)ex->sb, 1) == Z_OK && dl + 8 < (magic == DP_SPOOL_ZREC ? body : (uint64_t)ex->sb)) {
-                memcpy(dbuf, &sp->key_off, 8);
+                memcpy(dbuf, &koff, 8);
                 magic = DP_SPOOL_DREC;
                 body = dl + 8;
                 src = dbuf;
-                sp->key_n++;
             }
         }
         free(x);
+        free(kcopy);
     }
+    pthread_mutex_lock(&sp->mtx);
+    if (magic == DP_SPOOL_DREC) sp->key_n++;
     if (magic != DP_SPOOL_DREC) as_key = 1; // a full record becomes the next key
     if ((ex->cfg.spool_cap_bytes && sp->wr - sp->rd >= ex->cfg.spool_cap_bytes) ||
         (ex->cfg.spool_cap_mb && (sp->wr - sp->rd) / (1024 * 1024) >= ex->cfg.spool_cap_mb)) {
@@ -198,7 +210,10 @@ void spool_feed(DpExplorer *ex) {
             return;
         }
         // room checked under the pool lock when shared (the push must not overflow)
-        int room = ex->sh ? (ex->sh->len < ex->sh->cap) : (ex->q_len < ex->q_cap);
+        // depth-first drain: the spool is only a reserve, refilled to a small low-water mark when the pool
+        // runs dry; topping the pool up to its cap with old records would bury the newest forks on disk
+        int room = ex->sh ? (ex->cfg.dfs ? ex->sh->len < DP_SPOOL_DFS_LOW : ex->sh->len < ex->sh->cap)
+                          : (ex->q_len < ex->q_cap);
         if (!room) {
             if (ex->sh) pthread_mutex_unlock(&ex->sh->mtx);
             pthread_mutex_unlock(&sp->mtx);
@@ -361,9 +376,11 @@ uint64_t dp_explorer_spool_flush(DpExplorer *ex) {
     if (!ex->spool) return 0;
     // a parallel drain may have left states in the shared pool
     if (ex->sh) {
-        pthread_mutex_lock(&ex->sh->mtx);
-        for (uint32_t i = 0; i < ex->sh->len; i++) {
-            DpPathState *p = &ex->sh->q[(ex->sh->head + i) % ex->sh->cap];
+        DpSharedPool *sh = ex->sh;
+        pthread_mutex_lock(&sh->mtx);
+        ex->sh = NULL; // defer_push below must not re-lock the pool (it would push back into it)
+        for (uint32_t i = 0; i < sh->len; i++) {
+            DpPathState *p = &sh->q[(sh->head + i) % sh->cap];
             if (p->img) {
                 if (p->packed) { p->img = dp_img_unpack(ex, p->img); p->packed = 0; }
                 if (!spool_write_rec(ex, p->img, p->forced, p->kind, p->from_reset, p->choice)) {
@@ -377,9 +394,10 @@ uint64_t dp_explorer_spool_flush(DpExplorer *ex) {
                 memset(p, 0, sizeof *p);
             }
         }
-        ex->sh->len = 0;
-        ex->sh->head = 0;
-        pthread_mutex_unlock(&ex->sh->mtx);
+        sh->len = 0;
+        sh->head = 0;
+        ex->sh = sh;
+        pthread_mutex_unlock(&sh->mtx);
     }
     for (uint32_t i = 0; i < ex->q_len; i++) {
         DpPathState *p = &ex->queue[(ex->q_head + i) % ex->q_cap];

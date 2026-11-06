@@ -3930,3 +3930,35 @@ Mesuré par `kill -USR1` sur SML2 (reprise, `--queue 60000`, `--jobs 8`) : file 
 25 193 octets = 5,9 Go, soit 4 × `--queue` (croissance adaptative `queue_max`, qui n'était freinée que par
 `--mem-cap`, absent). La file est maintenant bornée aussi en octets : `--queue-mem MB` (défaut 1536). Au-delà,
 les états vont dans le spool disque (jamais jetés) et reviennent quand la RAM le permet.
+
+### Écriture du spool en parallèle (0.249.55)
+
+Mesuré par `perf record` sur le drain parallèle de SML2 (`--jobs 15`) : 3 threads sur 13 actifs, les autres
+en attente de verrou, et plus de la moitié des échantillons dans `deflate`. Chaque état déversé était
+compressé deux fois, la seconde (delta XOR contre l'image clé) **sous le verrou du spool** : tous les workers
+passaient par un seul compresseur. Le delta est maintenant calculé hors verrou sur une copie de la clé (une clé
+périmée reste valide : les clés ne sont jamais effacées du fichier). Le format du spool est inchangé.
+
+### Drain en profondeur et arrêt dans un chemin (0.249.56)
+
+Mesuré sur SML2 (`--unbounded --jobs 15`) : le spool grossissait de 0,8 Go par minute sans fin (76 Go). Cause :
+le pool partagé dépilait le plus ancien (parcours en largeur, frontière = une couche entière de l'espace
+d'états) et `spool_feed` le remplissait de vieux enregistrements à chaque pas, repoussant les fourches neuves
+sur le disque. Avec `cfg.dfs` (recherche totale), le pool dépile maintenant le plus récent (frontière = pile,
+profondeur × fan-out) et le spool n'est plus qu'une réserve, rechargée jusqu'à un plancher de 256 états quand
+le pool se vide.
+
+Autre mesure : SIGINT n'était testé qu'entre deux pas d'exploration, jamais dans un chemin ; sans mur de pas
+(`--unbounded`), un chemin qui pousse des fourches sans fin ne s'arrêtait plus (arrêt > 30 min, disque qui se
+remplit). Tous les 1024 pas, un chemin voit l'interruption et reste en attente comme continuation, comme au
+mur de pas : l'arrêt est prompt et ne perd rien.
+
+### SIGINT pendant la recherche totale (0.249.57)
+
+Cause trouvée du « SIGINT sans effet » : avec `--play`, `sessions.c` installe un gestionnaire coopératif qui
+ne touche que les sessions de jeu, et il n'était jamais remplacé après la phase de jeu. Pendant le drain, le
+signal n'atteignait donc jamais `dp_explore_interrupt` (runs de 30 min à 3 h sans arrêt, disque plein). Le
+gestionnaire de l'explorateur est réinstallé à l'entrée de la recherche totale ; en plus, une demande d'arrêt
+est honorée avant d'ouvrir un nouveau chemin et à l'intérieur d'un long chemin. Mesure sur un état neuf :
+arrêt et rapport en 28 s. Les workers du drain s'adaptent aussi à la RAM libre (mise en pause par palier de
+400 Mo sous 4 Go), et les continuations de chemin retournent dans le pool avant le spool.
