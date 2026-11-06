@@ -57,6 +57,8 @@ typedef struct DpGblApi {
     void (*sync_echo_apply)(void);
     /* VBA 1.7.2 cores (gbl.h): LY reads see the state this many cycles earlier */
     int16_t *sync_ly_lag;
+    /* VBA 1.7.2 cores (gbl.h): cycles taken off the interrupt dispatch */
+    int16_t *sync_irq_trim;
 } DpGblApi;
 
 /* the ROM bank behind a pc/address of the fixed-or-switchable windows */

@@ -4089,3 +4089,16 @@ lag montre que seules les combinaisons (20,−16), (16,0), (8,16) passent la
 frame 43 ; aucune ne va au-delà : la cause restante n'est pas encore
 localisée (un écart de découpage de frame apparaît dès la 43). Le replay
 intégral de Zelda sans désynchro n'est donc **pas** atteint.
+
+### Mise à jour 0.249.68 : entrée du film et dispatch d'IRQ (VBA V7)
+
+- L'entrée de la frame 0 du film est appliquée dès le départ aussi pour les
+  cœurs VBA 1.7.2 (le masque de la frame n+1 est alors présenté au vblank n) :
+  l'ancien traitement retardait chaque entrée d'une frame (le Start de la
+  frame 43 de Zelda était vu une frame trop tard).
+- Le dispatch d'interruption ne coûte plus que 16 T au lieu de 20 sur ce
+  profil (`DEEPEEL_TAS_IRQTRIM`, défaut 4) ; `sync_ly_lag` repasse à 0.
+- Observation de l'outil (Zelda, bobmario2-zeldala.vbm, référence VBA V7) :
+  première divergence à la frame 2088 au lieu de 43 ; 3269 des 4921 premières
+  frames sont identiques. Les écarts suivants sont de courts décalages d'une
+  frame ($C5D0, $D744) puis des différences de $C13D (RNG).

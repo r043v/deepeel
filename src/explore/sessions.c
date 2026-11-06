@@ -706,7 +706,7 @@ static void worker_vblank(DpMach *m) {
             mask = w->tas.masks[0];
         } else { // the movie is over: uniform random play, segments resume
             w->mode = IN_RNG;
-            *m->api->sync_div_skew = 0, *m->api->sync_ly_lag = 0;
+            *m->api->sync_div_skew = 0, *m->api->sync_ly_lag = 0, *m->api->sync_irq_trim = 0;
             *m->api->sync_vba_off_clock = 0;
             if (*m->api->sync_echo_old) { *m->api->sync_echo_old = 0; m->api->sync_echo_apply(); }
             if (w->watch_armed) { w->watch_armed = 0; m->render = 0; m->api->skip_render[0] = 1; }
@@ -821,7 +821,7 @@ static void run_epoch(DpWorker *w, uint32_t frames) {
                     if (++tas_same > 1000) {
                         __atomic_fetch_add(&p->tas_cut_stuck, 1, __ATOMIC_RELAXED);
                         w->mode = IN_RNG;
-                        *w->mach->api->sync_div_skew = 0, *w->mach->api->sync_ly_lag = 0;
+                        *w->mach->api->sync_div_skew = 0, *w->mach->api->sync_ly_lag = 0, *w->mach->api->sync_irq_trim = 0;
                         *w->mach->api->sync_vba_off_clock = 0;
                         segment_end(w);
                         tas_same = 0;
@@ -1165,7 +1165,10 @@ static void worker_tune_movie(DpPlay *p, DpWorker *w) {
             ? (uint8_t)atoi(getenv("DEEPEEL_TAS_OFFCLOCK")) : 2;
         // V7 reads LY at the start of the reading instruction (gbl.h, sync_ly_lag)
         *w->mach->api->sync_ly_lag = getenv("DEEPEEL_TAS_LYLAG")
-            ? (int16_t)atoi(getenv("DEEPEEL_TAS_LYLAG")) : -16;
+            ? (int16_t)atoi(getenv("DEEPEEL_TAS_LYLAG")) : 0;
+        // V7 counts no tick for the interrupt dispatch (20 cycles on the hardware)
+        *w->mach->api->sync_irq_trim = getenv("DEEPEEL_TAS_IRQTRIM")
+            ? (int16_t)atoi(getenv("DEEPEEL_TAS_IRQTRIM")) : 4;
         fprintf(stderr, "deepeel: TAS %s: VBA 1.7.2 sync profile (input at vblank, no LCD-off frame, "
                         "ten-line enable)\n", w->tas.source);
     } else if (w->tas.recorder == DP_TAS_REC_VBA) {
@@ -1178,7 +1181,7 @@ static void worker_tune_movie(DpPlay *p, DpWorker *w) {
     // the first instruction (VBA-rr v23.1+ and BizHawk), each vblank
     // then feeds the next frame.  The VBA 1.7.2 cores read the pad
     // at the vblank instead: frame 0 lands at the first one.
-    if (w->tas.frames && !vba_old) {
+    if (w->tas.frames) {
         w->mach->api->set_buttons(w->tas.masks[0]);
         w->applied_mask = w->tas.masks[0];
         w->frames_done = 1;
@@ -1204,7 +1207,7 @@ static int worker_next_movie(DpWorker *w) {
         w->tas_idx = t;
         dp_mach_load(w->mach, dp_explorer_seed_base(p->fork)); // power-on state
         worker_reset_run_state(w);
-        *w->mach->api->sync_div_skew = 0, *w->mach->api->sync_ly_lag = 0;
+        *w->mach->api->sync_div_skew = 0, *w->mach->api->sync_ly_lag = 0, *w->mach->api->sync_irq_trim = 0;
         *w->mach->api->sync_vba_off_clock = 0;
         if (*w->mach->api->sync_echo_old) { *w->mach->api->sync_echo_old = 0; w->mach->api->sync_echo_apply(); }
         if (was_gbhawk) {
