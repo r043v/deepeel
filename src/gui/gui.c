@@ -760,6 +760,15 @@ static void *mw_main(void *arg) {
     if (!prev) { free(px); SDL_DestroyTexture(tex); SDL_DestroyRenderer(ren); SDL_DestroyWindow(win); SDL_Quit(); return NULL; }
     for (size_t i = 0; i < (size_t)W * (H - LEG_H); i++) px[i] = 0xff18181c;
     int painted = 0;
+    {   // present something at once: the first dp_map_build of a resumed state can take a while,
+        // and an unpresented window shows up blank white
+        SDL_Color grey = { 0xb0, 0xb0, 0xb8, 255 };
+        SDL_SetRenderDrawColor(ren, 0x18, 0x18, 0x1c, 255);
+        SDL_RenderClear(ren);
+        draw_text(ren, 6, 6, "building the map...", 1, grey);
+        SDL_RenderPresent(ren);
+        SDL_PumpEvents();
+    }
     for (int first = 1, tick = 0; first || !atomic_load(&mw_quit); first = 0, tick++) {   // always one draw, even for a run that ends at once
         SDL_Event e;
         while (SDL_PollEvent(&e))
