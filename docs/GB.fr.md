@@ -4066,3 +4066,13 @@ par image et sort la WRAM et les registres. Constats (observations de l'outil) :
 - cœur V7 (mineure 0) : WRAM à zéro, aucun motif. Sur Zelda 2076, deepeel colle
   au cœur V7 jusqu'à l'image 23 ; le premier écart restant est `$C13D` (RNG qui
   lit LY), donc une différence de cadence cycle par cycle, à traiter ensuite.
+
+## Fidélité VBM : lecture de LY du cœur VBA 1.7.2 (0.249.66)
+
+Le cœur V7 de VBA-rr applique les cycles d'une instruction au LCD *après*
+l'avoir exécutée : une lecture de `$FF44` voit donc l'état du début de
+l'instruction. Pour les films VBA à mineure 0, le réglage `sync_ly_lag` (20
+cycles, `DEEPEEL_TAS_LYLAG` pour expérimenter) fait lire la ligne de 20 cycles
+plus tôt. Sur Zelda LA (film 2076), la première divergence de WRAM contre le
+harnais VBA V7 passe de la frame 24 à la frame 43 (observation de l'outil).
+Reste ouvert : la divergence de la frame 43 (`$C13D`, RNG), puis l'épée.

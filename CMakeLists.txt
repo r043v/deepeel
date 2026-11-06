@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.249.65 LANGUAGES C)
+project(deepeel VERSION 0.249.66 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -182,7 +182,7 @@ extern uint32_t ${p}gbl_sync_pad_delay;
 extern uint16_t ${p}gbl_sync_div_extra;
 extern uint16_t ${p}gbl_sync_ppu_phase;
 extern void ${p}gbl_ppu_phase_apply(void);
-extern uint8_t ${p}gbl_sync_echo_old;
+extern uint8_t ${p}gbl_sync_echo_old, ${p}gbl_sync_ly_lag;
 extern void ${p}gbl_echo_apply(void);
 extern uint8_t ${p}gbl_eram[];
 extern void ${p}gbl_wr(uint16_t a, uint8_t v);
@@ -198,7 +198,7 @@ static const DpGblApi inst_${v}_${i} = {
     &${p}gbl_interp_instrs, &${p}gbl_interp_only, &${p}gbl_skip_render,
     (uint8_t *)${p}gbl_rom, ${rommax}, ${p}gbl_wr,
     &${p}gbl_sync_div_skew, &${p}gbl_sync_vba_off_clock, &${p}gbl_sync_pad_delay, &${p}gbl_sync_div_extra, &${p}gbl_sync_ppu_phase, ${p}gbl_ppu_phase_apply, &${p}gbl_rom0_bank, &${p}gbl_rom_banks, &${p}gbl_mbc1m,
-    &${p}gbl_sync_echo_old, ${p}gbl_echo_apply,
+    &${p}gbl_sync_echo_old, ${p}gbl_echo_apply, &${p}gbl_sync_ly_lag,
 };
 ")
     string(APPEND g_rows "[${v}][${i}] = &inst_${v}_${i},
