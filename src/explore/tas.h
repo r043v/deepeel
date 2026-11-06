@@ -36,6 +36,8 @@ typedef struct DpTas {
     // VBM header minor version ($30): 0 = VBA 1.7.2 based recorders (up to
     // VBA-rr v23.0), 1 = later (VBA-rr v23.1+, v24 "V8" core)
     int recorder_rev;
+    // VBM option flag $17 bit 6 clear (echoRAMFix off): VBA's $E000-$FDFF is its own memory
+    int echo_old;
     // movie frames the DMG boot ROM ran before the cartridge's first
     // instruction (BizHawk Gambatte with the original boot ROM; the masks of
     // those frames are dropped at load, frame 0 is the first with the game)

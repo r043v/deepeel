@@ -35,6 +35,7 @@ class Mc : IMemoryCallback {
     public string Scope => "System Bus";
 }
 static class P {
+    static int CurF, TrFrom = 0, TrTo = int.MaxValue;
     static int Main(string[] a) {
         if (a.Length < 4) { Console.Error.WriteLine("gbh ROM inputlog.txt out.txt BIOS [shotprefix every]"); return 2; }
         var rom = File.ReadAllBytes(a[0]);
@@ -56,6 +57,7 @@ static class P {
         StreamWriter iw = instrFile == null ? null : new StreamWriter(instrFile);
         if (iw != null) {
             var mc = new Mc { Cb = (addr, value, flags) => {
+                if (CurF < TrFrom || CurF > TrTo) return null; // GBH_TRACE_FROM/TO: movie frames traced
                 var r = gb.GetCpuFlagsAndRegisters();
                 long cyc = gb.TotalExecutedCycles;
                 int im = r["Flag I"].Value != 0 ? 1 : 0;
@@ -74,8 +76,13 @@ static class P {
         }
         }
         using var o = new StreamWriter(a[2]);
+        var rawPath = Environment.GetEnvironmentVariable("GBH_RAW");
+        using var rawOut = rawPath == null ? null : new FileStream(rawPath, FileMode.Create);
         string shot = a.Length > 4 && a[4] != "--instr" ? a[4] : null; int every = a.Length > 5 && a[4] != "--instr" ? int.Parse(a[5]) : 0;
+        if (Environment.GetEnvironmentVariable("GBH_TRACE_FROM") != null) TrFrom = int.Parse(Environment.GetEnvironmentVariable("GBH_TRACE_FROM"));
+        if (Environment.GetEnvironmentVariable("GBH_TRACE_TO") != null) TrTo = int.Parse(Environment.GetEnvironmentVariable("GBH_TRACE_TO"));
         for (int f = 0; f < frames.Count; f++) {
+            CurF = f;
             pad.Down.Clear();
             for (int k = 0; k < 8; k++) if (frames[f][k] != '.') pad.Down.Add("P1 " + keys[k]);
             gb.FrameAdvance(pad, true, false);
@@ -86,6 +93,7 @@ static class P {
             var ram = ((BizHawk.Emulation.Cores.Nintendo.GBHawk.GBHawk)gb).RAM;
             ulong wh = 1469598103934665603ul;
             for (int i = 0; i < 0x2000; i++) wh = (wh ^ ram[i]) * 1099511628211ul;
+            if (rawOut != null) rawOut.Write(ram.Take(0x2000).ToArray(), 0, 0x2000); // GBH_RAW: WRAM at every frame
             var dfr = Environment.GetEnvironmentVariable("GBH_DUMPFRAME");
             if (dfr != null && int.Parse(dfr) == f + 1) File.WriteAllBytes(Environment.GetEnvironmentVariable("GBH_DUMPFILE") ?? "/tmp/gbh_wram.bin", ram.Take(0x2000).ToArray());
             ulong xh = 1469598103934665603ul; // without the stack page $CFxx and the sound page $DFxx

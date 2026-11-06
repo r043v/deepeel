@@ -52,6 +52,9 @@ typedef struct DpGblApi {
     uint32_t *rom_banks;
     /* MBC1M multicart wiring flag */
     uint8_t *mbc1m;
+    /* VBA echoRAMFix=0 movies: $E000-$FDFF is separate memory; set *sync_echo_old, then call sync_echo_apply */
+    uint8_t *sync_echo_old;
+    void (*sync_echo_apply)(void);
 } DpGblApi;
 
 /* the ROM bank behind a pc/address of the fixed-or-switchable windows */

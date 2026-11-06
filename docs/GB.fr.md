@@ -4038,3 +4038,21 @@ starts movie k/n ». Un film refusé (autre ROM) est sauté, déjà rapporté ;
 la fin de `--tas-solo` attend la file vide. `tasvideos_fetch.py` lit la
 Subs-List du jeu (tous statuts). Test : 20 copies d'un film sur 16 machines,
 4 films en file, tous rejoués.
+
+### 0.249.64 : echoRAMFix des VBM, outils de comparaison de replay
+
+- VBM : le bit 6 de l'octet d'options (0x17) à 0 (echoRAMFix désactivé, cas des
+  films VBA anciens) met `$E000-$FDFF` en mémoire séparée de la WRAM (knob
+  `sync_echo_old`, patch m0boy). Sans effet mesuré sur Zelda LA (dumps identiques).
+  `DEEPEEL_TAS_NOECHO=1` l'inhibe.
+- `DEEPEEL_TAS_RAW=<fichier>` écrit les 0x2000 octets de WRAM à chaque vblank ;
+  `tools/replay_compare.py` les compare à ceux de la référence GBHawk
+  (`GBH_RAW`, `GBH_TRACE_FROM/TO` pour la trace d'instructions d'une frame).
+- Observation (SML2, film GBHawk) : sur la frame LCD éteint 518/852, les traces
+  d'instructions deepeel et GBHawk sont identiques (10 235 instructions, mêmes
+  PC et registres, décalage de cycles constant). L'écart de WRAM aux frames
+  519..524 n'est donc pas un écart d'exécution mais de phase d'échantillonnage :
+  deepeel échantillonne à son vblank, GBHawk à la fin de son chunk de 70 224
+  cycles (~14 481 cycles plus tard, le même décalage que `sync_pad_delay`).
+  La comparaison de WRAM doit se faire hors des boucles de remplissage ou avec
+  ce décalage.

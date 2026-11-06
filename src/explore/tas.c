@@ -140,6 +140,7 @@ static int vbm_parse(const uint8_t *d, size_t n, DpTas *out, char *err, size_t e
         out->anchored = (start_flags & 0x03) != 0;
         out->recorder = DP_TAS_REC_VBA; // binary VBM: VBA-rr / VBA-M
         out->recorder_rev = d[0x30];
+        out->echo_old = !(d[0x17] & 0x40);
         // $30 minor version, $31 ROM header checksum, $32-$33 global checksum
         out->has_cksum = 1;
         out->hdr_ck = d[0x31];

@@ -650,6 +650,18 @@ static void worker_vblank(DpMach *m) {
                     m->api->gbr->sp, m->api->gbr->a, m->api->gbr->bc, m->api->gbr->de, m->api->gbr->hl);
             fflush(regsf);
         }
+        // DEEPEEL_TAS_RAW=<file>: the 8 KiB of WRAM at every movie vblank, appended (tools/replay_compare.py
+        // diffs it byte by byte against a reference emulator's per-frame WRAM)
+        {
+            static FILE *rawf;
+            static int raw_init;
+            if (!raw_init) {
+                const char *rn = getenv("DEEPEEL_TAS_RAW");
+                raw_init = 1;
+                if (rn) rawf = fopen(rn, "wb");
+            }
+            if (rawf) fwrite(m->api->wram, 1, 0x2000, rawf);
+        }
         if (dumpf) {
             uint64_t h = 1469598103934665603ull;
             for (int i = 0; i < 0x2000; i++) h = (h ^ m->api->wram[i]) * 1099511628211ull;
@@ -690,6 +702,7 @@ static void worker_vblank(DpMach *m) {
             w->mode = IN_RNG;
             *m->api->sync_div_skew = 0;
             *m->api->sync_vba_off_clock = 0;
+            if (*m->api->sync_echo_old) { *m->api->sync_echo_old = 0; m->api->sync_echo_apply(); }
             if (w->watch_armed) { w->watch_armed = 0; m->render = 0; m->api->skip_render[0] = 1; }
             mask = input_keys(&w->in);
             w->seg_left = 1; // rotate away from the movie's end state next frame
@@ -1122,6 +1135,11 @@ static void worker_tune_movie(DpPlay *p, DpWorker *w) {
     // reads that seed its RNG): any skew in 25..64 matches, 40 is mid-range.
     if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gambatte)
         *w->mach->api->sync_div_skew = getenv("DEEPEEL_TAS_DIVSKEW") ? (uint8_t)atoi(getenv("DEEPEEL_TAS_DIVSKEW")) : 40;
+    if (w->tas.echo_old && !getenv("DEEPEEL_TAS_NOECHO")) {
+        *w->mach->api->sync_echo_old = 1;
+        w->mach->api->sync_echo_apply();
+        fprintf(stderr, "deepeel: TAS %s: VBA echoRAMFix off ($E000-$FDFF is separate memory)\n", w->tas.source);
+    }
     int vba_old = w->tas.recorder == DP_TAS_REC_VBA && w->tas.recorder_rev == 0;
     if (vba_old) {
         // VBA 1.7.2 based recorders (VBM minor version 0): input
@@ -1169,6 +1187,7 @@ static int worker_next_movie(DpWorker *w) {
         worker_reset_run_state(w);
         *w->mach->api->sync_div_skew = 0;
         *w->mach->api->sync_vba_off_clock = 0;
+        if (*w->mach->api->sync_echo_old) { *w->mach->api->sync_echo_old = 0; w->mach->api->sync_echo_apply(); }
         if (was_gbhawk) {
             *w->mach->api->sync_pad_delay = 0;
             *w->mach->api->sync_div_extra = 0;
