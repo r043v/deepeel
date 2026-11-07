@@ -4174,3 +4174,16 @@ l'initialise désormais ainsi pour les films VBA mineur 0 (`DEEPEEL_TAS_NOINIT`
 désactive). La première divergence d'instruction de la fenêtre 180k–592k ticks
 passe du tick 246 490 au tick 372 306 (VBL prise une instruction plus tôt par
 VBA). Observation de l'outil, pas une mesure matérielle.
+
+Pistes lockstep suivantes (non retenues, observations de l'outil) :
+- Le réveil du HALT par une requête VBL tombant sur la grille son (reste
+  `(t−ph)%96` de 0 ou 6 selon la phase) attend jusqu'au prochain incrément de
+  LY (+360 cycles), comme le cas déjà modélisé à 22.
+- Avec `IRQTRIM=20`, `HALTSND=0`, `LYLAG=-3`, ce réveil et l'activation LCD
+  décalée de −6 cycles, les 125 679 premières instructions de la fenêtre
+  180k–700k ticks sont identiques, la première divergence d'image passe de 24
+  à 38 et 13 143 images sur 13 714 sont identiques (13 106 par défaut). Le
+  résidu est la phase des lignes : VBA réinitialise son compteur de LY sans
+  report à chaque trame (quantifié à la fin d'instruction), alors que celle de
+  deepeel est exacte ; un simple ancrage de la ligne 0 sur l'instant observé
+  fait chuter le total (2 457 images) et n'est pas retenu.
