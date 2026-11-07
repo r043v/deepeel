@@ -507,6 +507,37 @@ void dp_map_residual_text(const DpResults *res, const uint8_t *m, DpBuf *out) { 
     dp_buf_str(out, "\n");
 }
 
+// Where the ROM bytes that were observed copied land: one kind per ROM byte from the copy records
+// (0 none, 1 VRAM tile data $8000-$97FF, 2 VRAM tile map $9800-$9FFF, 3 OAM sprites, 4 WRAM).  The
+// first record covering a byte decides.  Nothing here tells audio from graphics inside plain
+// data reads: only a copy has a destination to name.
+const char *const dp_map_kind_name[DP_MAP_KINDS] = { "tuiles VRAM", "carte VRAM", "sprites OAM", "WRAM" };
+static const uint8_t map_kind_rgb[DP_MAP_KINDS][3] = {
+    { 0xd0, 0x50, 0xc8 }, { 0x8a, 0x6a, 0xe0 }, { 0xf0, 0xb0, 0xd8 }, { 0x40, 0xd0, 0xa0 } };
+uint8_t *dp_map_kinds(const DpResults *res, uint64_t count[DP_MAP_KINDS]) {
+    size_t n = (size_t)res->banks * 0x4000;
+    uint8_t *k = calloc(n ? n : 1, 1);
+    if (count) memset(count, 0, sizeof(uint64_t) * DP_MAP_KINDS);
+    if (!k) return NULL;
+    for (int i = 0; i < res->copy_count; i++) {
+        const DpCopyRec *r = &res->copies[i];
+        if (r->src_space != DP_SPACE_ROM || r->src_hi < r->src_lo || r->src_lo >= 0x8000) continue;
+        int kind = r->dst_space == DP_SPACE_VRAM ? (r->dst_lo >= 0x9800 ? 2 : 1)
+                 : r->dst_space == DP_SPACE_OAM ? 3 : r->dst_space == DP_SPACE_WRAM ? 4 : 0;
+        if (!kind) continue;
+        for (uint32_t a = r->src_lo; a <= r->src_hi && a < 0x8000; a++) {
+            uint32_t bank = a < 0x4000 ? 0 : r->src_bank;
+            size_t key = (size_t)bank * 0x4000 + (a & 0x3FFF);
+            if (key >= n || k[key]) continue;
+            k[key] = (uint8_t)kind;
+        }
+    }
+    if (count)
+        for (size_t i = 0; i < n; i++)
+            if (k[i]) count[k[i] - 1]++;
+    return k;
+}
+
 void dp_report_map(const DpResults *res, DpBuf *out) {
     DpMapSummary s;
     uint8_t *m = dp_map_build(res, &s);
@@ -525,6 +556,17 @@ void dp_report_map(const DpResults *res, DpBuf *out) {
             if (tmp.p[i] == '\n' && i + 1 < tmp.len) dp_buf_str(out, "# ");
         }
         dp_buf_free(&tmp);
+    }
+    {
+        uint64_t kc[DP_MAP_KINDS];
+        uint8_t *kk = dp_map_kinds(res, kc);
+        if (kk) {
+            dp_buf_str(out, "# data copied by destination (ROM bytes a copy loop or DMA moved):");
+            for (int q = 0; q < DP_MAP_KINDS; q++)
+                dp_buf_fmt(out, " %s %llu", dp_map_kind_name[q], (unsigned long long)kc[q]);
+            dp_buf_str(out, "\n# audio is not told apart from other data reads: no destination to name it\n");
+            free(kk);
+        }
     }
     dp_buf_str(out, "# columns: bank start end(inclusive) class\n");
     for (size_t bs = 0; bs < n; bs += 0x4000) {
@@ -667,7 +709,7 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
                           const char *map_text, size_t map_len, const char *meta,
                           const char *path, const char *sysname, const char *filename,
                           unsigned rom_size, const uint32_t *heat, const DpPngText *extra,
-                          int n_extra, const char *methods);
+                          int n_extra, const char *methods, const uint8_t *kinds);
 int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom_path,
                       const char *path) {
     DpMapSummary s;
@@ -694,6 +736,7 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
     double pct = s.total ? 100.0 / (double)s.total : 0.0;
     // played usage: per-zone ranking, the played .cov, the played ROM reads
     // per page — what m0boy picks its native code and resident ROM by
+    uint8_t *kinds = dp_map_kinds(res, NULL);
     DpHeat heat;
     int have_heat = dp_heat_build(res, m, &heat);
     DpBuf heat_txt, cov_txt, rom_txt;
@@ -793,7 +836,8 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
     };
     int ok = map_png_render(m, (int)res->banks, title, &s, (const char *)txt.p, txt.len,
                             meta, path, res->plat ? res->plat->name : "gb", file,
-                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 7, meth);
+                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 7, meth, kinds);
+    free(kinds);
     dp_buf_free(&ix_txt);
     dp_buf_free(&ch);
     dp_buf_free(&tb_txt);
@@ -853,7 +897,7 @@ int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char 
         if (c >= DP_MAP_INF_DATA) s.inferred++;
     }
     return map_png_render(m, banks, title, &s, text, len, meta, path, sysname, filename,
-                          rom_size, NULL, NULL, 0, NULL);
+                          rom_size, NULL, NULL, 0, NULL, NULL);
 }
 
 // the shared renderer: squares grid + legend band + tEXt chunks, from a
@@ -910,7 +954,7 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
                           const char *map_text, size_t map_len, const char *meta,
                           const char *path, const char *sysname, const char *filename,
                           unsigned rom_size, const uint32_t *heat, const DpPngText *extra,
-                          int n_extra, const char *methods) {
+                          int n_extra, const char *methods, const uint8_t *kinds) {
     // TILE: one pixel per byte, 128 bytes per row; with heat, a heat tile
     // follows each bank tile (TGAP apart)
     enum { TILE = 128, TGAP = 2, GAP = 6 };
@@ -941,19 +985,38 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
         "donnée copiée", "donnée lue", "donnée statique", "table", "padding",
         "donnée inférée", "code inféré", "padding inféré", "code probable (incertain)",
         "donnée probable (incertain)" };
+    // legend labels and swatches: the classes, then the destinations of copied data
+    const char *lname[DP_MAP_COUNT + DP_MAP_KINDS];
+    const uint8_t *lcol[DP_MAP_COUNT + DP_MAP_KINDS];
+    static char kname[DP_MAP_KINDS][32];
+    for (int c = 0; c < DP_MAP_COUNT; c++) { lname[c] = fr[c]; lcol[c] = map_rgb[c]; }
+    for (int q = 0; q < DP_MAP_KINDS; q++) {
+        snprintf(kname[q], sizeof kname[q], "copie vers %s", dp_map_kind_name[q]);
+        lname[DP_MAP_COUNT + q] = kname[q];
+        lcol[DP_MAP_COUNT + q] = map_kind_rgb[q];
+    }
     int cols = banks < PER_ROW ? banks : PER_ROW;
     int rows = (banks + PER_ROW - 1) / PER_ROW;
     if (cols < 1) cols = 1;
     if (rows < 1) rows = 1;
     // legend band sizing: one title line + one line per class present
-    int order[DP_MAP_COUNT], ncls = 0;
+    int order[DP_MAP_COUNT + DP_MAP_KINDS], ncls = 0;
+    // legend entries: the classes, then the destinations of the copied data (index DP_MAP_COUNT + q)
+    uint64_t ecnt[DP_MAP_COUNT + DP_MAP_KINDS];
+    memcpy(ecnt, s->cls, sizeof(uint64_t) * DP_MAP_COUNT);
+    memset(ecnt + DP_MAP_COUNT, 0, sizeof(uint64_t) * DP_MAP_KINDS);
+    if (kinds)
+        for (size_t k = 0; k < (size_t)banks * 0x4000; k++)
+            if (kinds[k] && dp_map_is_data(m[k])) ecnt[DP_MAP_COUNT + kinds[k] - 1]++;
     for (int c = 0; c < DP_MAP_COUNT; c++)
-        if (s->cls[c]) order[ncls++] = c;
+        if (ecnt[c]) order[ncls++] = c;
     for (int i = 1; i < ncls; i++) { // insertion sort, largest share first
         int cur = order[i], j = i - 1;
-        while (j >= 0 && s->cls[order[j]] < s->cls[cur]) { order[j + 1] = order[j]; j--; }
+        while (j >= 0 && ecnt[order[j]] < ecnt[cur]) { order[j + 1] = order[j]; j--; }
         order[j + 1] = cur;
     }
+    for (int q = 0; q < DP_MAP_KINDS; q++)
+        if (ecnt[DP_MAP_COUNT + q]) order[ncls++] = DP_MAP_COUNT + q;
     enum { FSCALE = 2 };
     int w = GAP + cols * (BANK_PX + GAP);
     // two justified columns only when each half can hold an entry; otherwise
@@ -970,17 +1033,17 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     for (int r = 0; r < half; r++) {
         if (r < ncls) {
             char line[64];
-            double p = s->cls[order[r]] * pct0;
-            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[order[r]]);
-            else snprintf(line, sizeof line, "%s %.1f%%", fr[order[r]], p);
+            double p = ecnt[order[r]] * pct0;
+            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", lname[order[r]]);
+            else snprintf(line, sizeof line, "%s %.1f%%", lname[order[r]], p);
             int need = (7 + 3) * ls + legend_text_width(line, ls);
             while (ls > 1 && need > lavail) { ls--; need = (7 + 3) * ls + legend_text_width(line, ls); }
         }
         if (two_cols && r + half < ncls) {
             char line[64];
-            double p = s->cls[order[r + half]] * pct0;
-            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[order[r + half]]);
-            else snprintf(line, sizeof line, "%s %.1f%%", fr[order[r + half]], p);
+            double p = ecnt[order[r + half]] * pct0;
+            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", lname[order[r + half]]);
+            else snprintf(line, sizeof line, "%s %.1f%%", lname[order[r + half]], p);
             int need = (7 + 3) * rs + legend_text_width(line, rs);
             while (rs > 1 && need > ravail) { rs--; need = (7 + 3) * rs + legend_text_width(line, rs); }
         }
@@ -993,7 +1056,15 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     // 2x2 block): it only shows where the play went, the complete data ship in the PNG chunks
     const int HEAT_W = TILE / 2, HEAT_H = (BANK_H + 1) / 2;
     int heat_oy = map_h - GAP; // heat grid right below the ROM grid
-    int heat_map_h = GAP + rows * (HEAT_H + GAP);
+    // four heat tiles per ROM-tile slot (2 across, 2 down): a bank's heat tile is a quarter of its ROM
+    // tile, so they are packed edge to edge, HG apart, 2 * PER_ROW to a row
+    enum { HG = 3 };
+    const int HPER = 2 * PER_ROW;
+    int hcols = banks < HPER ? banks : HPER;
+    int hrows = (banks + HPER - 1) / HPER;
+    int heat_x0 = (w - (hcols * (HEAT_W + HG) - HG)) / 2;
+    if (heat_x0 < 0) heat_x0 = 0;
+    int heat_map_h = GAP + hrows * (HEAT_H + HG);
     int grid_h = heat ? heat_oy + heat_map_h : map_h;
     // identity block: title row, then system / file / sizes / converter
     char size_txt[24];
@@ -1052,10 +1123,14 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
                 if (cnt[0] > cnt[cls]) cls = 0;
             }
             const uint8_t *c = map_rgb[cls];
+            if (kinds && dp_map_is_data(cls)) { // data a copy moved: coloured by its destination
+                for (int q = 0; q < bpp; q++)
+                    if (kinds[k + (size_t)q]) { c = map_kind_rgb[kinds[k + (size_t)q] - 1]; break; }
+            }
             px[0] = c[0]; px[1] = c[1]; px[2] = c[2];
         }
-        if (heat) { // half-resolution heat tile, centred under its bank tile
-            int hox = ox + (BANK_PX - HEAT_W) / 2, hoy = heat_oy + GAP + (b / PER_ROW) * (HEAT_H + GAP);
+        if (heat) { // half-resolution heat tile, packed four per ROM-tile slot
+            int hox = heat_x0 + (b % HPER) * (HEAT_W + HG), hoy = heat_oy + GAP + (b / HPER) * (HEAT_H + HG);
             for (int hy = 0; hy < HEAT_H; hy++)
                 for (int hx = 0; hx < HEAT_W; hx++) {
                     uint32_t hv = 0;
@@ -1094,18 +1169,18 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
         if (r < ncls) {
             int c = order[r];
             char line[64];
-            double p = s->cls[c] * pct;
-            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[c]);
-            else snprintf(line, sizeof line, "%s %.1f%%", fr[c], p);
-            legend_entry(rgb, w, h, ry, line, map_rgb[c], ls, lavail, -1);
+            double p = ecnt[c] * pct;
+            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", lname[c]);
+            else snprintf(line, sizeof line, "%s %.1f%%", lname[c], p);
+            legend_entry(rgb, w, h, ry, line, lcol[c], ls, lavail, -1);
         }
         if (two_cols && r + half < ncls) {
             int c = order[r + half];
             char line[64];
-            double p = s->cls[c] * pct;
-            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", fr[c]);
-            else snprintf(line, sizeof line, "%s %.1f%%", fr[c], p);
-            legend_entry(rgb, w, h, ry, line, map_rgb[c], rs, ravail, w - GAP);
+            double p = ecnt[c] * pct;
+            if (p > 0.0 && p < 0.05) snprintf(line, sizeof line, "%s <0.1%%", lname[c]);
+            else snprintf(line, sizeof line, "%s %.1f%%", lname[c], p);
+            legend_entry(rgb, w, h, ry, line, lcol[c], rs, ravail, w - GAP);
         }
     }
     // the bottom line: heat scale (left, when drawn), then on the right

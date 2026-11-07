@@ -4251,3 +4251,18 @@ Profil VBA (`cmake/m0boy-tas-compat.patch`, hors m0boy : comportements de VBA, p
   registres d'E/S (DIV, IF, son), sans effet sur le jeu.
 - Outils : `DEEPEEL_TAS_VRAM=<fichier>` (VRAM bank 0, OAM, LCDC/SCY/SCX par vblank) et `tools/vram_compare.py`
   pour comparer à la référence (`VBAH_VRAM` du harnais VBA). Observations de l'outil, pas des mesures de matériel.
+
+## Mise à jour 0.249.77
+
+Carte PNG (`map.png`) :
+
+- **Chaleur tassée** : la grille de chaleur est au quart de la surface de la grille ROM ; ses tuiles sont
+  maintenant collées bord à bord (4 par emplacement d'une tuile ROM, 16 par ligne, 3 px d'écart) au lieu d'être
+  centrées une par emplacement. L'image est plus basse.
+- **Destination des données copiées** : un octet de ROM qu'une boucle de copie ou un DMA a déplacé est coloré
+  selon sa destination (tuiles VRAM `$8000-$97FF`, carte VRAM `$9800-$9FFF`, sprites OAM, WRAM) et la légende
+  ajoute une entrée « copie vers … » avec sa part de la ROM. Le texte `.map` porte la ligne
+  `# data copied by destination` avec les octets par destination.
+- **Limite** : l'audio n'est pas distingué. Seule une copie a une destination ; une donnée lue par le moteur
+  son n'en a pas. Typer l'audio demanderait d'observer les écritures vers `$FF10-$FF3F` et de les rattacher à
+  la source en ROM. Observations de l'outil, pas des mesures de matériel.

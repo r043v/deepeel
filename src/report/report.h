@@ -57,6 +57,11 @@ long dp_map_sticky_load(DpResults *res, const char *path);
 // what each exploration method added, in % of the whole ROM: tas, random, fork, attract, static+inferred
 void dp_map_methods_pct(const DpResults *res, const DpMapSummary *s, double out[5]);
 const char *dp_map_class_name(int c);
+enum { DP_MAP_KINDS = 4 };
+extern const char *const dp_map_kind_name[DP_MAP_KINDS];
+// per ROM byte, where a copy moved it: 0 none, 1 VRAM tiles, 2 VRAM map, 3 OAM, 4 WRAM (caller frees);
+// count[q] = bytes of kind q + 1
+uint8_t *dp_map_kinds(const DpResults *res, uint64_t count[DP_MAP_KINDS]);
 const uint8_t *dp_map_rgb(int cls); // the .map.png colour of a class (3 bytes)
 int dp_map_is_code(int c);
 int dp_map_is_data(int c);
