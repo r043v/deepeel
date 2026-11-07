@@ -115,6 +115,7 @@ typedef struct {
     DpHashSet ind_sites, ind_pairs;   // observed indirect jmp/jsr (D12)
     int64_t exp_pc;          // address the next instruction should start at (-1: unknown)
     int in_handler;          // between an exception vector entry and its RTE
+    uint32_t cur_sec;        // C1: section the path is currently extending (id, 0 none)
 } X;
 
 static size_t ssz;
@@ -174,6 +175,8 @@ static void on_dma_read(void *u, uint32_t addr, unsigned size) {
         x->r->flags[addr + i] |= DP_MDF_DMA_READ;
 }
 
+static uint32_t md_sec_touch(X *x, uint32_t off);
+static void md_sec_mark(X *x, uint32_t pc, unsigned len);
 static void mark(X *x, uint32_t pc, unsigned len) {
     uint8_t f = x->forced ? DP_MDF_FORCED : DP_MDF_NATURAL;
     if (!x->forced && x->r->exec_hits && pc < x->r->rom_size && x->r->exec_hits[pc] != UINT32_MAX) x->r->exec_hits[pc]++;   // heat: played instruction starts
@@ -182,6 +185,73 @@ static void mark(X *x, uint32_t pc, unsigned len) {
             if (!(x->r->flags[pc + i] & (DP_MDF_NATURAL | DP_MDF_FORCED))) x->novel++;
             x->r->flags[pc + i] |= f;
         }
+    md_sec_mark(x, pc, len);
+}
+
+static int md_sec_cmp(const void *pa, const void *pb) {
+    const DpMdSection *x = pa, *y = pb;
+    return x->lo < y->lo ? -1 : x->lo > y->lo;
+}
+
+// --- C1: sections with per-run hardware liveness ---------------------------------
+//
+// A section is a maximal executed run, built live: sequential execution extends
+// it, a re-entry joins it, anything else starts a new one.  Hardware register
+// accesses are attributed to the accessing instruction's section (DP_MDL_*),
+// which is the liveness C2 needs to project a state onto what the section
+// really reads.
+static uint32_t md_sec_touch(X *x, uint32_t off) {
+    DpMdResults *r = x->r;
+    if (off >= r->rom_size) return 0;
+    uint32_t id = r->sec_of[off];
+    if (!id && x->cur_sec && r->secs[x->cur_sec - 1].hi + 1 == off) id = x->cur_sec; // sequential
+    if (!id && off && (id = r->sec_of[off - 1]) != 0 && r->secs[id - 1].hi != off - 1) id = 0; // previous run ended earlier: not this one
+    if (!id && off + 1 < r->rom_size && (id = r->sec_of[off + 1]) != 0 && r->secs[id - 1].lo != off + 1) id = 0;
+    if (!id) {
+        if (r->sec_n == r->secs_cap) {
+            uint32_t nc = r->secs_cap ? r->secs_cap * 2 : 64;
+            DpMdSection *ns = realloc(r->secs, (size_t)nc * sizeof *ns);
+            if (!ns) return 0;
+            r->secs = ns;
+            r->secs_cap = nc;
+        }
+        memset(&r->secs[r->sec_n], 0, sizeof r->secs[r->sec_n]);
+        r->secs[r->sec_n].lo = r->secs[r->sec_n].hi = off;
+        id = ++r->sec_n;
+    } else {
+        DpMdSection *s = &r->secs[id - 1];
+        if (off < s->lo) s->lo = off;
+        if (off > s->hi) s->hi = off;
+    }
+    r->sec_of[off] = id;
+    DpMdSection *s = &r->secs[id - 1];
+    s->hits++;
+    if (!x->forced) s->natural = 1;
+    x->cur_sec = id;
+    return id;
+}
+
+static void md_sec_mark(X *x, uint32_t pc, unsigned len) {
+    uint32_t id = md_sec_touch(x, pc);
+    if (id && len && pc + len - 1 > x->r->secs[id - 1].hi) x->r->secs[id - 1].hi = pc + len - 1; // operands belong to the run
+}
+
+static uint8_t md_sec_live_bit(const char *category) {
+    if (!category) return DP_MDL_SYS;
+    if (!strcmp(category, "video")) return DP_MDL_VIDEO;
+    if (!strcmp(category, "sound")) return DP_MDL_SOUND;
+    if (!strcmp(category, "input")) return DP_MDL_INPUT;
+    if (!strcmp(category, "mapper")) return DP_MDL_BANK;
+    if (!strcmp(category, "memory")) return DP_MDL_MEMORY;
+    return DP_MDL_SYS;
+}
+
+static void md_sec_live(X *x, uint8_t bit) {
+    DpMdResults *r = x->r;
+    if (x->halted || x->pc >= r->rom_size) return;
+    uint32_t id = r->sec_of[x->pc];
+    if (!id) id = md_sec_touch(x, x->pc);
+    if (id) r->secs[id - 1].live |= bit;
 }
 
 // one queued item to the disk lot (the state blob stays owned by the caller)
@@ -650,7 +720,7 @@ static void on_read(void *u, uint32_t a, unsigned size) {
     } else if (a < 0xE00000) {
         int k = dp_md_reg_find(a);
         if (k < 0) r->unmapped_r++;
-        else if (k < 64) r->reg_r[k]++;
+        else if (k < 64) { r->reg_r[k]++; md_sec_live(x, md_sec_live_bit(dp_md_regs[k].category)); }
     }
 }
 
@@ -698,7 +768,7 @@ static void on_write(void *u, uint32_t a, unsigned size, uint32_t v) {
     if (a < 0xA00000 || a >= 0xE00000) return;
     int k = dp_md_reg_find(a);
     if (k < 0) r->unmapped_w++;
-    else if (k < 64) r->reg_w[k]++;
+    else if (k < 64) { r->reg_w[k]++; md_sec_live(x, md_sec_live_bit(dp_md_regs[k].category)); }
     if (a >= 0xC00004 && a <= 0xC00007) {
         /* the second command word of a pair carries CD5 (DMA); a long write
          * delivers both words in one access */
@@ -1475,6 +1545,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     r->rom_size = c->size;
     r->flags = calloc(c->size, 1);
     r->exec_kind = calloc(c->size, 1);
+    r->sec_of = calloc(c->size, sizeof *r->sec_of);
     r->nonexcluded_reads = calloc(c->size, 1);
     r->exec_hits = calloc(c->size, sizeof(uint32_t));
     r->data_hits = calloc(c->size, sizeof(uint32_t));
@@ -1716,15 +1787,17 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         }
         for (size_t i = 0; i < n; i++) if (r->inferred[i] == 0xFF) r->inferred[i] = 0;
     }
-    // C1: sections = maximal executed runs; required when some byte ran on a natural path
-    for (size_t i = 0; i < c->size;) {
-        const uint8_t L = DP_MDF_NATURAL | DP_MDF_FORCED;
-        if (!(r->flags[i] & L)) { i++; continue; }
-        int nat = 0;
-        while (i < c->size && (r->flags[i] & L)) { nat |= (r->flags[i] & DP_MDF_NATURAL) != 0; i++; }
-        r->sec_n++;
-        if (nat) r->sec_req++;
+    // C1: the sections were built live (md_sec_mark); required = some byte ran
+    // on a natural path.  Canonical order first (a --jobs fold appends the
+    // secondary's runs), then the per-section verdicts.
+    if (r->sec_n > 1) {
+        qsort(r->secs, r->sec_n, sizeof *r->secs, md_sec_cmp);
+        for (uint32_t s = 0; s < r->sec_n; s++)
+            for (uint32_t i = r->secs[s].lo; i <= r->secs[s].hi && i < r->rom_size; i++)
+                if (r->sec_of[i]) r->sec_of[i] = s + 1;
     }
+    for (uint32_t s = 0; s < r->sec_n; s++)
+        if (r->secs[s].natural) r->sec_req++;
     // C1 "speculative": maximal runs reached only by the static flow closure (stat 3), never executed or forced
     for (size_t i = 0; i < c->size;) {
         const uint8_t L = DP_MDF_NATURAL | DP_MDF_FORCED;
@@ -1778,6 +1851,8 @@ void dp_md_results_free(DpMdResults *r) {
     free(r->stat);
     free(r->flags);
     free(r->exec_kind); r->exec_kind = NULL;
+    free(r->sec_of); r->sec_of = NULL;
+    free(r->secs); r->secs = NULL;
     free(r->nonexcluded_reads);
     free(r->exec_hits);
     free(r->data_hits);
@@ -1881,6 +1956,20 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
     fprintf(out, "executed rom bytes: %u (%.1f%%), of which only via forks: %u; data-read: %u\n", r->exec_bytes,
             100.0 * r->exec_bytes / r->rom_size, r->forced_only_bytes, r->dread_bytes);
     fprintf(out, "sections: %u executed runs, %u required (natural path), %u forced only, %u speculative (static closure only)\n", r->sec_n, r->sec_req, r->sec_n - r->sec_req, r->sec_spec);
+    {   // C1 liveness: hardware blocks each section reads or writes (first 64, overflow counted)
+        unsigned shown = r->sec_n < 64 ? r->sec_n : 64;
+        static const char *const ln[6] = { "video", "sound", "input", "bank", "sram", "sys" };
+        for (unsigned s = 0; s < shown; s++) {
+            const DpMdSection *g = &r->secs[s];
+            fprintf(out, "  section %u %06X-%06X %s hits %u live:", s + 1, g->lo, g->hi,
+                    g->natural ? "required" : "forced", g->hits);
+            for (unsigned b = 0; b < 6; b++)
+                if (g->live & (1u << b)) fprintf(out, " %s", ln[b]);
+            fprintf(out, "\n");
+        }
+        if (r->sec_n > shown)
+            fprintf(out, "  ... %u more sections (counted, not listed)\n", r->sec_n - shown);
+    }
     fprintf(out, "data-read on natural path: %u; commanded DMA source bytes: %u (may include an interrupted transfer)\n",
             r->natural_data_bytes, r->dma_source_bytes);
     fprintf(out, "DMA ROM bytes actually read: %u\n", r->dma_read_bytes);

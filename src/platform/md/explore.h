@@ -15,6 +15,18 @@ enum { DP_MDX_ENTRY = 1, DP_MDX_IRQ = 2 };
 enum { DP_MDF_NATURAL = 1, DP_MDF_FORCED = 2, DP_MDF_DATA = 4, DP_MDF_QUEUED = 8,
        DP_MDF_DATA_NATURAL = 16, DP_MDF_DMA_SOURCE = 32, DP_MDF_DMA_READ = 64,
        DP_MDF_CPU_VRAM = 128 };
+
+/* C1 liveness: hardware blocks a section actually reads or writes */
+enum { DP_MDL_VIDEO = 1, DP_MDL_SOUND = 2, DP_MDL_INPUT = 4, DP_MDL_BANK = 8,
+       DP_MDL_MEMORY = 16, DP_MDL_SYS = 32 };
+
+/* one executed run with its per-section hardware liveness (C1) */
+typedef struct {
+    uint32_t lo, hi;    /* inclusive ROM offsets */
+    uint32_t hits;      /* instructions executed inside */
+    uint8_t natural;    /* some byte ran on a natural path */
+    uint8_t live;       /* DP_MDL_* blocks */
+} DpMdSection;
 /* Z80 sound CPU evidence, one byte per ROM byte (DpMdResults.z80_flags). */
 enum { DP_MDZ_COPIED = 1,    /* 68000 copied it into Z80 RAM */
        DP_MDZ_CODE_RAM = 2,  /* ... and the Z80 executed it there (code-ramcopy) */
@@ -141,6 +153,9 @@ typedef struct DpMdResults_ {
     uint64_t s4_tables, s4_seeds, s4_refused, disp_tables, disp_seeds, disp_refused_view, pass2_seeds, pass2_refused, pass2_capped, ctx_evicted, exact_dups, exact_loaded, tree_nodes, tree_loaded, sib_tables, sib_entries, sib_bytes, sib_caps, pad_cuts, indirect_sites, indirect_targets, indirect_overflow;
     uint32_t shoots;                    /* J2: movie checkpoints queued as exploration seeds */
     uint32_t sec_n, sec_req, sec_spec;  /* C1: executed runs, and those with a natural-path byte */
+    DpMdSection *secs;                  /* C1: per-run records with hardware liveness (built live) */
+    uint32_t *sec_of;                   /* per ROM byte: section id + 1 (opcode starts) */
+    uint32_t secs_cap, secs_overflow;   /* listing cap overflow (report shows the first 64) */
     uint32_t exec_bytes, forced_only_bytes, dread_bytes, natural_data_bytes, dma_source_bytes, dma_read_bytes,
              cpu_vram_bytes, observed_bytes, code_or_vram_bytes, data_only_bytes, filtered_observed_bytes;
     /* stream replay: a called routine whose first ROM read is at the address

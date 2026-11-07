@@ -47,7 +47,7 @@ Cellules ouvertes (◐ ou ✗) : 58.
 | G4 | Semis indirect + budgets en cascade | MD | ◐ second passage sur successeurs statiques non exécutés (`--second-pass`) |
 | C1 | Sections, liveness, verdicts | NES | ◐ req/forced + `speculative` (0.249.17, test `nes_speculative`) ; 0.249.24 liveness par section : pages de RAM et classes de registres lus (PPU, pads, autres), test `nes` (`test_liveness`) ; reste : banque/IRQ dans le contexte, non utilisée par l'éviction C2 |
 | C1 | Sections, liveness, verdicts | PCE | ◐ req/forced + `speculative` (0.249.18, test `pce_speculative`) ; 0.249.25 liveness par section : blocs matériels lus (VDC, VCE, PSG, timer, pad, IRQ ; test `pce` `test_liveness`) ; reste : pages de RAM lues (pas de hook de lecture RAM), non utilisée par C2 |
-| C1 | Sections, liveness, verdicts | MD | ◐ 0.135 req/forced par plage exécutée ; 0.249.19 compteur `speculative` (plages de la fermeture statique seule, test `md_speculative`) ; sans liveness |
+| C1 | Sections, liveness, verdicts | MD | ◐ 0.135 req/forced par plage exécutée ; 0.249.19 compteur `speculative` (plages de la fermeture statique seule, test `md_speculative`) ; 0.249.82 sections vivantes : blocs matériels lus/écrits par section (video, sound, input, bank, sram, sys), fusion `--jobs` et ordre canonique, test `md_section_liveness` ; reste : non utilisée par C2 |
 | C2 | Éviction par contexte | NES | ◐ contexte grossier opt-in (`--ctx-cap`) |
 | C2 | Éviction par contexte | PCE | ◐ contexte grossier opt-in (`--ctx-cap`) |
 | C2 | Éviction par contexte | MD | ◐ contexte grossier opt-in (`--ctx-cap`) |

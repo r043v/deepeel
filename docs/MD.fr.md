@@ -215,3 +215,17 @@ Pour que l'arrêt soit honoré sans borne de pas : l'exécution est découpée e
 main à 43 s réelles (rc 0, rapport écrit) ; 16,7 M pas, 65 024 forks écrits au lot. Observation de l'outil, pas une
 mesure de matériel. Attention : le lot grossit vite (≈ 3,4 Go en quelques minutes sur Sonic) — surveiller le disque.
 Non vérifié : un run `--unbounded` jusqu'à épuisement.
+
+## 0.249.82 — sections vivantes (C1 liveness)
+
+Les sections (courses exécutées maximales) sont désormais construites en
+direct pendant l'exploration et portent leur **liveness matérielle** : les
+blocs que la section lit ou écrit réellement (video, sound, input, bank/mapper,
+sram, sys), dérivés des accès registres attribués à l'instruction courante.
+Le rapport liste les 64 premières sections avec leur verdict (required/forced)
+et leurs blocs vivants ; les suivantes sont comptées. Avec `--jobs 2`, les
+sections du secondaire rejoignent celles du primaire (union des courses, hits
+au plus grand compte, liveness OU-ées) et toutes sont triées en ordre
+canonique (premier octet) au moment de la finalisation. Test
+`md_section_liveness`. Ces liveness préparent l'éviction par contexte C2 sur
+le modèle GB (projection de l'état sur ce que la section lit réellement).

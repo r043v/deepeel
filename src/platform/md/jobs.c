@@ -57,6 +57,34 @@ static void fold(DpMdResults *a, uint8_t *bank_seen, void *user) {
     ADD(pass2_seeds); ADD(pass2_refused); ADD(pass2_capped); ADD(pad_cuts); ADD(indirect_sites);
     ADD(indirect_targets); ADD(indirect_overflow); ADD(ctx_evicted);
     for (int i = 0; i < 64; i++) { a->reg_r[i] += b->reg_r[i]; a->reg_w[i] += b->reg_w[i]; }
+    // C1: the secondary's sections join the primary's records (runs are the
+    // union; hits keep the larger count: per-instruction overlap is not
+    // recoverable post-hoc).  finalize sorts them into canonical order.
+    for (uint32_t s = 0; s < b->sec_n; s++) {
+        const DpMdSection *g = &b->secs[s];
+        if (g->lo >= a->rom_size) continue;
+        uint32_t id = a->sec_of[g->lo];
+        if (!id && g->lo && (id = a->sec_of[g->lo - 1]) != 0 && a->secs[id - 1].hi != g->lo - 1) id = 0;
+        if (!id && g->lo + 1 < a->rom_size && (id = a->sec_of[g->lo + 1]) != 0 && a->secs[id - 1].lo != g->lo + 1) id = 0;
+        if (!id) {
+            if (a->sec_n == a->secs_cap) {
+                uint32_t nc = a->secs_cap ? a->secs_cap * 2 : 64;
+                DpMdSection *ns = realloc(a->secs, (size_t)nc * sizeof *ns);
+                if (!ns) return;
+                a->secs = ns;
+                a->secs_cap = nc;
+            }
+            a->secs[a->sec_n] = *g;
+            a->sec_of[g->lo] = ++a->sec_n;
+            continue;
+        }
+        DpMdSection *t = &a->secs[id - 1];
+        if (g->lo < t->lo) t->lo = g->lo;
+        if (g->hi > t->hi) t->hi = g->hi;
+        if (g->hits > t->hits) t->hits = g->hits;
+        t->natural |= g->natural;
+        t->live |= g->live;
+    }
     // copy records: same (pc, src, len, code) merged, the rest appended; overflow is counted
     for (int i = 0; i < b->ncopy; i++) {
         int k;
