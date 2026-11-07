@@ -1744,11 +1744,30 @@ static int64_t table_target(const DpNesRun *x, size_t a, unsigned v, int loose) 
     return -1;
 }
 
-static int table_word(const DpNesRun *x, const uint8_t *rom, size_t a) {
+static int table_word(const DpNesRun *x, const uint8_t *rom, size_t a, int *xbank) {
     size_t n = x->r->prg_size;
     if (a + 1 >= n) return 0;
-    int64_t t = table_target(x, a, (unsigned)(rom[a] | rom[a + 1] << 8), 1);
-    return t >= 0 && (size_t)t < n && x->istart[t] && (x->r->flags[t] & (DP_NES_NATURAL | DP_NES_FORCED));
+    unsigned v = (unsigned)(rom[a] | rom[a + 1] << 8);
+    int64_t t = table_target(x, a, v, 1);
+    if (t >= 0 && (size_t)t < n && x->istart[t] && (x->r->flags[t] & (DP_NES_NATURAL | DP_NES_FORCED))) return 1;
+    // S1: a word in $8000-$BFFF may target another switchable bank than the
+    // table's own (the game selects the target bank before the indirect
+    // jump).  Only boards with a switchable $8000-$BFFF window qualify (the
+    // same set the loose rule resolves); the proof is unchanged — the target
+    // offset is an executed instruction start in some switchable bank — and
+    // the relaxation is counted, the class stays an inference (table).
+    if (v < 0x8000u || v >= 0xC000u) return 0;
+    unsigned mp = dp_nesmach_mapper(x->m);
+    if (mp == 0 || mp == 3 || mp == 7 || n < 0x8000) return 0;
+    unsigned banks = (unsigned)(n >> 14);
+    for (unsigned b = 0; b < banks; b++) {
+        size_t tb = (size_t)b * 0x4000 + (v & 0x3FFFu);
+        if (x->istart[tb] && (x->r->flags[tb] & (DP_NES_NATURAL | DP_NES_FORCED))) {
+            if (xbank) *xbank = 1;
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static void table_scan(DpNesRun *x) {
@@ -1763,14 +1782,21 @@ static void table_scan(DpNesRun *x) {
         for (unsigned al = 0; al < 2; al++) {
             if (i < al) continue;
             size_t a = i - al;
-            if (!table_word(x, rom, a) || r->inferred[a] == DP_NMAP_TABLE) continue;
+            if (!table_word(x, rom, a, NULL) || r->inferred[a] == DP_NMAP_TABLE) continue;
             size_t lo = a, hi = a;
-            while (lo >= 2 && (a - lo) / 2 < 256 && table_word(x, rom, lo - 2)) lo -= 2;
-            while ((hi - a) / 2 < 256 && table_word(x, rom, hi + 2)) hi += 2;
+            while (lo >= 2 && (a - lo) / 2 < 256 && table_word(x, rom, lo - 2, NULL)) lo -= 2;
+            while ((hi - a) / 2 < 256 && table_word(x, rom, hi + 2, NULL)) hi += 2;
             if ((hi - lo) / 2 + 1 < 2) continue;
             for (size_t k = lo; k < hi + 2; k++) {
                 if (r->flags[k] & (DP_NES_NATURAL | DP_NES_FORCED)) continue;
-                if (r->inferred[k] != DP_NMAP_TABLE) { r->inferred[k] = DP_NMAP_TABLE; r->table_bytes++; }
+                if (r->inferred[k] != DP_NMAP_TABLE) {
+                    r->inferred[k] = DP_NMAP_TABLE;
+                    r->table_bytes++;
+                    if (!(k & 1) && k + 1 < n) {
+                        int xb = 0;
+                        if (table_word(x, rom, k, &xb) && xb) r->table_xbank_words++;
+                    }
+                }
             }
             r->table_count++;
         }
@@ -2075,7 +2101,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->pending_dropped);
     fprintf(out, "  tas identity: same ROM %llu, different ROM %llu, not recorded %llu\n", (unsigned long long)r->tas_same, (unsigned long long)r->tas_different, (unsigned long long)r->tas_unrecorded);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
-    fprintf(out, "  pointer tables: %llu tables, %llu bytes (inferred)\n", (unsigned long long)r->table_count, (unsigned long long)r->table_bytes);
+    fprintf(out, "  pointer tables: %llu tables, %llu bytes, %llu cross-bank words (inferred)\n", (unsigned long long)r->table_count, (unsigned long long)r->table_bytes, (unsigned long long)r->table_xbank_words);
     fprintf(out, "  static closure: %llu bytes from %llu roots, cap hits %llu\n", (unsigned long long)r->static_bytes, (unsigned long long)r->static_roots, (unsigned long long)r->static_cap_hits);
     fprintf(out, "  padding %llu bytes; inferred code %llu data %llu padding %llu\n", (unsigned long long)r->padding_bytes, (unsigned long long)r->inferred_code, (unsigned long long)r->inferred_data, (unsigned long long)r->inferred_pad);
     fprintf(out, "  cpu loop copy bytes %llu, to WRAM %llu, to SRAM/APU %llu, ROM->WRAM->OAM %llu\n", (unsigned long long)r->cpu_copy_bytes, (unsigned long long)r->wram_copy_bytes, (unsigned long long)r->aux_copy_bytes, (unsigned long long)r->oam_chain_bytes);

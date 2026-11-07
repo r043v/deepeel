@@ -1125,6 +1125,30 @@ def build_nes_pce(out):
         m1[q:q + 2] = bytes([0x00, 0xC0])
     with open(os.path.join(out, "fix_nes_mmc1table.nes"), "wb") as f:
         f.write(m1)
+    # NES UxROM cross-bank pointer table: the table sits in bank 0 ($8100) and
+    # its words ($8140/$8150/$8160) target code in bank 1 — the game selects
+    # the target bank before the indirect jump, so no own-bank resolution
+    # exists.  Bank 0 reads the table as data, bank 1 executes the targets.
+    xb = bytearray(16 + 4 * 0x4000)
+    xb[0:4] = b"NES\x1a"
+    xb[4], xb[5], xb[6] = 4, 0, 0x20
+    code = bytes([0xAD, 0x00, 0x81, 0xAD, 0x02, 0x81, 0xAD, 0x04, 0x81, 0x4C, 0x09, 0x80])
+    xb[16:16 + len(code)] = code
+    for k, a in enumerate((0x40, 0x50, 0x60)):
+        xb[16 + 0x100 + 2 * k:16 + 0x100 + 2 * k + 2] = bytes([a, 0x81])
+    o = 16 + 0x4000
+    code = bytes([0x20, 0x40, 0x81, 0x20, 0x50, 0x81, 0x20, 0x60, 0x81, 0x4C, 0x09, 0x80])
+    xb[o:o + len(code)] = code
+    # CPU $8140/$8150/$8160 in bank 1 = bank offsets 0x140/0x150/0x160
+    for a in (0x140, 0x150, 0x160):
+        xb[o + a] = 0x60
+    o = 16 + 3 * 0x4000
+    xb[o:o + 3] = bytes([0x4C, 0x00, 0xC0])
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        q = o + 0x3FFA + (v - 0xFFFA)
+        xb[q:q + 2] = bytes([0x00, 0xC0])
+    with open(os.path.join(out, "fix_nes_xbanktable.nes"), "wb") as f:
+        f.write(xb)
     # NES padding slide: lda #1; jmp $8100 into a zero-filled PRG
     n = bytearray(16 + 2 * 0x4000 + 0x2000)
     n[0:4] = b"NES\x1a"

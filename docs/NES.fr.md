@@ -93,3 +93,21 @@ Le cœur m0boy traite les opcodes illégaux en NOP : DuckTales passe
 (trampoline de banque UNROM `STA $FFE5,X` avec table ROM), mais une
 cartouche s'appuyant réellement sur la sémantique d'un opcode illégal
 dériverait — à garder en tête.
+
+## 0.249.81 — tables de pointeurs vers une autre banque (S1)
+
+Un mot `$8000-$BFFF` d'une table lue en données peut viser une autre banque
+commutable que celle de la table (le jeu sélectionne la banque cible avant le
+saut indirect) : la résolution « banque propre » échoue alors alors même que
+la cible est exécutée. Le scan accepte désormais cette résolution croisée sur
+les cartes à fenêtre `$8000-$BFFF` commutable (UxROM et cartes « loose »,
+MMC1/MMC3…) : la preuve reste le début d'instruction exécutée — dans une
+banque commutable quelconque à l'offset visé — et le relâchement est compté
+(`cross-bank words` dans le rapport). La classe reste une inférence (`table`).
+Fixture `fix_nes_xbanktable.nes` (UxROM : table en banque 0, cibles exécutées
+en banque 1), test `nes_table_xbank`.
+
+Mesure sur DuckTales (Europe) (UNROM, 20 M pas, observations de l'outil) :
+tables de pointeurs 18 → 26, octets classés `table` 90 → 129 (6 mots
+cross-bank) ; les 39 octets gagnés sont reclassés depuis `data-read` et
+`inf-data`, aucune autre classe ne régresse (`known_pct` identique).

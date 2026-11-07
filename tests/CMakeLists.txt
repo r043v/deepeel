@@ -566,6 +566,8 @@ add_test(NAME md_exact_persist COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAK
 set_tests_properties(md_exact_persist PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME nes_table_mmc1 COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_mmc1table.nes --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_t1.txt >/dev/null 2>&1; grep -q 'pointer tables: 1 tables' ${CMAKE_CURRENT_BINARY_DIR}/nes_t1.txt")
 set_tests_properties(nes_table_mmc1 PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME nes_table_xbank COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_xbanktable.nes --seed-banks --max-total 200000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_tb.txt >/dev/null 2>&1; grep -q 'pointer tables: 1 tables, 6 bytes, 3 cross-bank words' ${CMAKE_CURRENT_BINARY_DIR}/nes_tb.txt")
+set_tests_properties(nes_table_xbank PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME md_pad_full6 COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_pad6.md --pad-full6 --max-total 3000000 --text ${CMAKE_CURRENT_BINARY_DIR}/md_pf6.txt >/dev/null 2>&1; grep -q 'pad probes: 43[0-9][0-9] ' ${CMAKE_CURRENT_BINARY_DIR}/md_pf6.txt")
 set_tests_properties(md_pad_full6 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_speculative COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_static.nes --max-total 20000 --max-steps 2 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_sp.txt >/dev/null 2>&1; grep -q 'section 2 bank 0 .0020-.0026 .* verdict speculative' ${CMAKE_CURRENT_BINARY_DIR}/nes_sp.txt && grep -q 'verdict required' ${CMAKE_CURRENT_BINARY_DIR}/nes_sp.txt")
