@@ -395,7 +395,7 @@ def main():
     ap.add_argument("--stagnation", type=int, default=30000, help="play frames without discovery before stopping")
     ap.add_argument("--cap", type=int, default=1200, help="max exploration wall per ROM (s)")
     ap.add_argument("--guard", type=int, default=15 << 30, help="stop a run only when the scratch disk has less than this many bytes free (the disk spool unloads the RAM; no per-ROM size cap)")
-    ap.add_argument("--search", type=int, default=600, help="seconds of fork search after the play budget (deepeel --search-limit); 0 = skip")
+    ap.add_argument("--search", type=int, default=900, help="seconds of fork search after the play budget (deepeel --search-limit); 0 = skip")
     ap.add_argument("--sessions", type=int, default=8, help="--sessions of each deepeel (CPU use comes in bursts at the epoch barriers, so 4 explorations x 8 interleave on 16 cores)")
     ap.add_argument("--queue", type=int, default=60000, help="exploration states kept in RAM before the disk spool (0 = engine default 4096)")
     ap.add_argument("--only", default="")
