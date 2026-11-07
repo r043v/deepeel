@@ -736,7 +736,7 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
     double pct = s.total ? 100.0 / (double)s.total : 0.0;
     // played usage: per-zone ranking, the played .cov, the played ROM reads
     // per page — what m0boy picks its native code and resident ROM by
-    uint8_t *kinds = dp_map_kinds(res, NULL);
+    uint8_t *kinds = NULL; // copy-destination colours dropped from the PNG (the text keeps the counts)
     DpHeat heat;
     int have_heat = dp_heat_build(res, m, &heat);
     DpBuf heat_txt, cov_txt, rom_txt;
@@ -836,7 +836,7 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
     };
     int ok = map_png_render(m, (int)res->banks, title, &s, (const char *)txt.p, txt.len,
                             meta, path, res->plat ? res->plat->name : "gb", file,
-                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 7, meth, kinds);
+                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 7, meth, NULL);
     free(kinds);
     dp_buf_free(&ix_txt);
     dp_buf_free(&ch);

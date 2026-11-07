@@ -4277,3 +4277,6 @@ snapshots aient eu leurs rafales (le budget de temps et SIGINT arrêtent toujour
 chemin quasi optimal, ces rafales balaient les alentours de chaque checkpoint à peu de frais ; elles
 se distinguent du jeu aléatoire classique (départ au power-on ou checkpoint du pool, touches à priors).
 Valeurs observées de l'outil, pas des mesures de matériel.
+
+Les couleurs de destination des données copiées sont retirées de la carte PNG (0.249.78) ; le
+décompte par destination reste dans le texte `.map`.
