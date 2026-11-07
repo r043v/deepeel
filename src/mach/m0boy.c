@@ -177,6 +177,7 @@ void dp_gbl_hook_coverage(int v, int i, uint16_t bank, uint16_t addr, int entry)
 int dp_dbg_trace;
 FILE *dp_dbg_trace_f;
 static FILE *dp_instr_f;
+static int instr_init_win;
 void dp_gbl_hook_trace(int v, int i, uint16_t pc) {
     DpMach *m = mach_at[v][i];
     if (m && m->cut_pending) dp_mach_cut(m, m->cut_pending); /* instruction boundary: pc is exact */
@@ -194,7 +195,13 @@ void dp_gbl_hook_trace(int v, int i, uint16_t pc) {
             const char *p = getenv("DEEPEEL_TAS_INSTR");
             if (p) dp_instr_f = fopen(p, "w");
         }
-        if (dp_instr_f) {
+        static uint32_t win_lo, win_hi = 0xFFFFFFFFu; // DEEPEEL_TAS_INSTR_WIN=lo-hi (cycles): trace only that window
+        if (!instr_init_win) {
+            instr_init_win = 1;
+            const char *w = getenv("DEEPEEL_TAS_INSTR_WIN");
+            if (w) sscanf(w, "%u-%u", &win_lo, &win_hi);
+        }
+        if (dp_instr_f && (uint32_t)(m->api->gbr->cyc - win_lo) <= win_hi - win_lo) {
             const gbl_cpu_t *c = m->api->gbr;
             uint8_t f = (uint8_t)((c->zr == 0 ? 0x80 : 0) | (c->nf ? 0x40 : 0) | (c->hf ? 0x20 : 0) | (c->cf ? 0x10 : 0));
             fprintf(dp_instr_f, "%u %04x %02x %02x %04x %04x %04x %04x %u\n", (unsigned)c->cyc, pc, c->a, f, c->bc, c->de, c->hl, c->sp, c->ime);

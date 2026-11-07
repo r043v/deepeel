@@ -69,6 +69,8 @@ static inline void dp_first_free(DpFirstLog *l) {
 // ORs `bits` into flags[k]; the byte's first proof is logged.  Returns the old bits.
 static inline uint32_t dp_cov_mark(DpFirstLog *l, uint32_t *flags, uint32_t k, uint32_t bits,
                                    uint64_t stamp, uint32_t actor) {
+    uint32_t cur = __atomic_load_n(&flags[k], __ATOMIC_RELAXED);
+    if (cur && (cur & bits) == bits) return cur; // already proven: no shared write (cache line stays shared)
     uint32_t old = __atomic_fetch_or(&flags[k], bits, __ATOMIC_RELAXED);
     if (old || !bits || !l->max) return old;
     pthread_mutex_lock(&l->mtx);

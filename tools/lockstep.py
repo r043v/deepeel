@@ -53,7 +53,7 @@ def main():
 
     th = threading.Thread(target=read_fifo_window, args=(fifo, a.t0 * 4 - 2000, a.t1 * 4 + 2000, dtr))
     th.start()
-    denv = dict(os.environ, DEEPEEL_TAS_INSTR=fifo)
+    denv = dict(os.environ, DEEPEEL_TAS_INSTR=fifo, DEEPEEL_TAS_INSTR_WIN="%d-%d" % ((a.t0 * 4 - 2000) & 0xFFFFFFFF, (a.t1 * 4 + 2000) & 0xFFFFFFFF))
     for kv in a.env:
         k, v = kv.split("=", 1)
         denv[k] = v

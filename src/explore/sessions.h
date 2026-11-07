@@ -161,6 +161,7 @@ typedef struct {
     int movie, movies;        // shown movie (0-based) and how many movies replay
     uint32_t frame, total;    // movie frame of the sampled image / movie length
     uint32_t live_frame;      // the replay's current frame (for the real speed)
+    int film, films;          // 1-based number of the movie being shown among all the queued ones
     char name[256];
 } DpWatchInfo;
 // returns the number of replaying movies (0 = nothing to watch)

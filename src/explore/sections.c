@@ -19,8 +19,61 @@ static void sec_unlock(DpResults *res) {
 // creates or extends the section at (bank, pc) and updates its per-run
 // counters under the section lock; returns the section id (the pointer would
 // not survive the lock: another worker may realloc the array)
+// Per-thread hit cache (parallel mode): the counters of a section already known to this
+// thread (and wide enough for the executed range) are accumulated here and merged into
+// the shared record under sec_mtx when the slot is evicted or by dp_section_flush().  A
+// lock per executed instruction made ten session workers wait on one mutex.
+#define SEC_TC 256
+typedef struct {
+    DpResults *res;
+    uint32_t sid1, hits, nat, forced, entries, boot;
+    uint16_t hi;
+    uint8_t bank, kinds;
+} SecTc;
+static __thread SecTc sec_tc[SEC_TC];
+static __thread int sec_tc_on; // only while this thread runs an epoch (flushed at its end)
+
+void dp_section_tc_begin(void) { sec_tc_on = 1; }
+
+// merge one slot into the shared record; caller holds sec_mtx
+static void sec_tc_merge(SecTc *t) {
+    if (!t->res || !t->sid1) return;
+    DpSection *s = &t->res->sections[t->sid1 - 1];
+    s->hits += t->hits;
+    s->natural_hits += t->nat;
+    s->forced_hits += t->forced;
+    s->entries += t->entries;
+    s->boot_hits += t->boot;
+    s->kind_bits |= t->kinds;
+    t->hits = t->nat = t->forced = t->entries = t->boot = 0;
+    t->kinds = 0;
+}
+
+// call from the owning thread when it stops (end of an epoch / of the run)
+void dp_section_flush(DpResults *res) {
+    sec_tc_on = 0;
+    if (!res->mt) return;
+    pthread_mutex_lock(&res->sec_mtx);
+    for (int i = 0; i < SEC_TC; i++)
+        if (sec_tc[i].res == res) { sec_tc_merge(&sec_tc[i]); sec_tc[i].res = NULL; sec_tc[i].sid1 = 0; }
+    pthread_mutex_unlock(&res->sec_mtx);
+}
+
 uint32_t dp_section_touch(DpResults *res, uint8_t bank, uint16_t pc, uint16_t hi, int natural,
                           int is_entry, uint32_t cur_sec, int from_reset, int irq) {
+    uint32_t key0 = dp_rom_index(bank, pc);
+    if (res->mt && sec_tc_on) { // lock-free hit on a section this thread already knows
+        uint32_t k1 = __atomic_load_n(&res->section_of[key0], __ATOMIC_RELAXED);
+        SecTc *t = &sec_tc[k1 & (SEC_TC - 1)];
+        if (k1 && t->res == res && t->sid1 == k1 && t->bank == bank && hi <= t->hi) {
+            t->hits++;
+            if (natural) t->nat++; else t->forced++;
+            if (is_entry) t->entries++;
+            if (from_reset && natural) t->boot++;
+            t->kinds |= (uint8_t)((natural ? DP_XF_NATURAL : DP_XF_FORCED) | (irq ? DP_XF_IRQ : 0));
+            return k1 - 1;
+        }
+    }
     sec_lock(res);
     uint32_t key = dp_rom_index(bank, pc);
     uint32_t sid1 = res->section_of[key];
@@ -56,6 +109,17 @@ uint32_t dp_section_touch(DpResults *res, uint8_t bank, uint16_t pc, uint16_t hi
     if (from_reset && natural) s->boot_hits++;
     if (irq) s->kind_bits |= DP_XF_IRQ;
     uint32_t id = s->id;
+    if (res->mt && sec_tc_on) { // remember this section for the lock-free path (hits above are already counted)
+        SecTc *t = &sec_tc[(id + 1) & (SEC_TC - 1)];
+        if (t->res != res || t->sid1 != id + 1) {
+            sec_tc_merge(t);
+            memset(t, 0, sizeof *t);
+            t->res = res;
+            t->sid1 = id + 1;
+        }
+        t->bank = s->bank;
+        t->hi = s->hi;
+    }
     sec_unlock(res);
     return id;
 }

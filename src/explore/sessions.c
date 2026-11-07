@@ -808,7 +808,7 @@ static void worker_vblank(DpMach *m) {
 // one scheduler slice: frames of play across as many segments as needed.
 // The halt watchdog (m0boy.c) cuts dead halts; the segment continues from a
 // fresh checkpoint.
-static void run_epoch(DpWorker *w, uint32_t frames) {
+static void run_epoch_body(DpWorker *w, uint32_t frames) {
     DpPlay *p = w->p;
     w->epoch_target = frames;
     w->epoch_done = 0;
@@ -854,6 +854,15 @@ static void run_epoch(DpWorker *w, uint32_t frames) {
 }
 
 // --- worker thread ---------------------------------------------------------------------
+// every path out of an epoch publishes this thread's cached section hits and batched step
+// count (a stale cache entry must never outlive its DpResults)
+static void run_epoch(DpWorker *w, uint32_t frames) {
+    dp_section_tc_begin();
+    run_epoch_body(w, frames);
+    dp_section_flush(w->p->res);
+    dp_explorer_flush_steps(w->ex);
+}
+
 static void *worker_main(void *arg) {
     DpWorker *w = arg;
     DpPlay *p = w->p;
@@ -1962,6 +1971,8 @@ int dp_play_watch_read(DpPlay *p, uint8_t *shades, DpWatchInfo *info) {
     // movie name and the movie's live frame counter (read racily, display only)
     int k = 0;
     info->movies = 0;
+    info->film = 0;
+    info->films = p->cfg.tas_n;
     info->name[0] = 0;
     info->live_frame = 0;
     for (int i = 0; i < p->nworkers; i++) {
@@ -1969,6 +1980,7 @@ int dp_play_watch_read(DpPlay *p, uint8_t *shades, DpWatchInfo *info) {
         if (k == info->movie) {
             snprintf(info->name, sizeof info->name, "%s", p->w[i].tas.source);
             info->live_frame = __atomic_load_n(&p->w[i].frames_done, __ATOMIC_RELAXED);
+            info->film = p->w[i].tas_idx + 1;
         }
         k++;
     }

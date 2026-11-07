@@ -566,8 +566,8 @@ static void *watch_main(void *arg) {
         }
         double now = watch_now();
         if (have) {
-            if (info.movie != movie_ref) {
-                movie_ref = info.movie;
+            if ((info.film ? info.film : info.movie) != movie_ref) {
+                movie_ref = info.film ? info.film : info.movie;
                 t_ref = now;
                 f_ref = info.live_frame;
                 speed = 0;
@@ -595,8 +595,8 @@ static void *watch_main(void *arg) {
             base = base ? base + 1 : info.name;
             snprintf(buf, sizeof buf, "%.52s", base);
             draw_text(ren, 6, ty, buf, 1, gui_color(DP_C_TITLE));
-            snprintf(buf, sizeof buf, "movie %d/%d  frame %u/%u", info.movie + 1, info.movies,
-                     (unsigned)info.frame, (unsigned)info.total);
+            snprintf(buf, sizeof buf, "movie %d/%d  frame %u/%u", info.film ? info.film : info.movie + 1,
+                     info.films ? info.films : info.movies, (unsigned)info.frame, (unsigned)info.total);
             draw_text(ren, 6, ty + 12, buf, 1, gui_color(DP_C_TEXT));
             snprintf(buf, sizeof buf, "replay %.0f frames/s  (shown %d img/s)", speed, watch_fps_cfg);
             draw_text(ren, 6, ty + 24, buf, 1, gui_color(DP_C_LABEL));

@@ -175,13 +175,30 @@ diff -ruN a/gbl_core.c b/gbl_core.c
  #if GBL_DEBUG_RESTART
      if (gbr.pc - 0x68u < 0x150u - 0x68u && !gbl_dbg_badirq.frame)
          dbg_badirq((uint32_t)(uintptr_t)__builtin_return_address(0));
-@@ -1982,11 +2056,54 @@
+@@ -1982,11 +2056,71 @@
          gbr.cyc = (t & ~3u) + 4u;
      } else if (!slept) {
          gbr.cyc = h0 + 4u;
 +        if (gbl_sync_halt_snd > 0 && (IF & 1u) && (gbl_io[0x40] & 0x80u)) {
 +            uint32_t ph = (uint32_t)(gbl_sync_halt_snd - 1);
-+            if ((h0 - ph) % 96u == 20u) gbr.cyc = h0 + 4u + 448u;
++            if (vbl_wst == 1) {
++                /* HALT entered while the VBlank is held back by gbInterruptWait: the
++                 * wait left after this HALT is walked step by step (sound grid /
++                 * next LCD line), the IRQ is taken at the end of the first step
++                 * that starts with the wait expired (VBA V7 halted loop). */
++                int32_t wl = vbl_wait - 4;
++                uint32_t wait = wl > 0 ? (uint32_t)wl : 0u, now = h0 + 4u;
++                for (;;) {
++                    uint32_t lb = gbl_vbl_cyc + 456u * ((now - gbl_vbl_cyc) / 456u + 1u);
++                    uint32_t e = (((now - ph) % 96u) == 0u) ? lb : now + 96u - ((now - ph) % 96u);
++                    if ((int32_t)(e - lb) > 0) e = lb;
++                    uint32_t c = e - now;
++                    now = e;
++                    if (wait == 0u) break;
++                    wait = wait > c ? wait - c : 0u;
++                }
++                gbr.cyc = now;
++            } else if ((h0 - ph) % 96u == 20u) gbr.cyc = h0 + 4u + 448u;
 +        }
      } else {
          uint32_t w = (t + 5u) & ~3u;
@@ -230,7 +247,7 @@ diff -ruN a/gbl_core.c b/gbl_core.c
      gbl_sync();
  }
  
-@@ -2185,10 +2302,13 @@
+@@ -2185,10 +2319,13 @@
  #endif
      /* E000-EFFF echoes C000-CFFF (F000-FDFF shares a page with OAM, IO
       * and HRAM and stays on the slow path). */
@@ -245,7 +262,7 @@ diff -ruN a/gbl_core.c b/gbl_core.c
  void gbl_reset(void) {
      __asm__ volatile("" : : "r"(&gbl_input_probe));
      memset(&gbr, 0, sizeof(gbr));
-@@ -2228,6 +2348,7 @@
+@@ -2228,6 +2365,7 @@
      gbr.sp = 0xFFFE; gbr.pc = 0x0100;
      gbl_ie = 0;
      gbl_io[0x00] = 0x30;
@@ -253,7 +270,7 @@ diff -ruN a/gbl_core.c b/gbl_core.c
      joypad_update();
      IF = 0x01;
      TAC = 0; TIMA = 0; TMA = 0;
-@@ -2315,6 +2436,19 @@
+@@ -2315,6 +2453,19 @@
      gbl_ppu_state_io(io, ctx, load);
      gbl_apu_state_io(io, ctx, load);
      if (!load) return;

@@ -31,6 +31,8 @@ static inline void src_or(DpResults *res, uint32_t k, uint32_t bits) {
     dp_cov_mark(&res->first, res->src_flags, k, bits, res->steps_total, 0);
 }
 static inline uint8_t flags_or(uint8_t *p, uint8_t bit) {
+    uint8_t cur = __atomic_load_n(p, __ATOMIC_RELAXED);
+    if ((cur & bit) == bit) return cur; // already set: no shared write
     return __atomic_or_fetch(p, bit, __ATOMIC_RELAXED); // returns the old bits
 }
 // per-byte hit counter, saturating at UINT32_MAX (a hot loop never wraps to
@@ -506,7 +508,7 @@ void dp_explorer_free(DpExplorer *ex) {
 
 void dp_explorer_progress(DpExplorer *ex, DpProgress *out) {
     out->queue_len = ex->q_len;
-    out->steps_total = ex->res->steps_total;
+    out->steps_total = ex->res->steps_total + ex->steps_pend; // + this explorer's unflushed batch
     out->paths_run = ex->res->paths_run;
     out->sections = (uint32_t)ex->res->section_count;
 }
@@ -1233,7 +1235,8 @@ static void hook_step(DpMach *m, uint16_t pc, uint8_t op, int entry) {
             dp_mach_cut(m, DP_CUT_QUIT);
         }
     }
-    u64_add(&res->steps_total, 1);
+    // batched: one shared atomic per 1024 steps instead of one per step (flushed at epoch ends)
+    if (++ex->steps_pend >= 1024) { u64_add(&res->steps_total, ex->steps_pend); ex->steps_pend = 0; }
 
     // a RETI from the previous step ends its IRQ handler
     if (ex->reti_pending) {
@@ -1995,3 +1998,8 @@ uint64_t dp_results_unexplained(const DpResults *res) {
     return b[DP_CLS_UNEXPLAINED];
 }
 
+
+// publish the steps this explorer counted locally (epoch ends, end of a run)
+void dp_explorer_flush_steps(DpExplorer *ex) {
+    if (ex && ex->steps_pend) { u64_add(&ex->res->steps_total, ex->steps_pend); ex->steps_pend = 0; }
+}
