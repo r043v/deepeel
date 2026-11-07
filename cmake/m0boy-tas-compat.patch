@@ -253,6 +253,26 @@ diff -ruN a/gbl_core.c b/gbl_core.c
      joypad_update();
      IF = 0x01;
      TAC = 0; TIMA = 0; TMA = 0;
+@@ -2315,6 +2436,19 @@
+     gbl_ppu_state_io(io, ctx, load);
+     gbl_apu_state_io(io, ctx, load);
+     if (!load) return;
++    /* statics outside the saved state belong to the previous run of this
++     * instance (a queued movie, a restored snapshot): a loaded state starts
++     * with no vblank wait, no EI memory and no pending pad latch */
++    vbl_wait = 0;
++    vbl_wst = 0;
++    vbl_ei_insn = 0xFFFFFFFFu;
++    vbl_halt_woke = 0;
++    pad_pending = pad_queued = 0;
++    pad_at = 0;
++    /* absolute cycle stamps of the previous run (the host may load a state
++     * from inside an instruction hook): a loaded state restarts the clock */
++    gbl_insn_cyc = gbr.cyc;
++    gbl_vbl_cyc = gbr.cyc - 1000000u;
+     map_pages();
+ #if GBL_LOOKUP_CACHE
+     for (int i = 0; i < GBL_LOOKUP_CACHE; i++) lookup_cache[i].pc = 0xFFFF;
 diff -ruN a/gbl_cpu.c b/gbl_cpu.c
 --- a/gbl_cpu.c
 +++ b/gbl_cpu.c
@@ -800,19 +820,22 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      stat_refresh();
      P.spr_ly = 0xFF;
      bg_pairs_bgp = -1;
-@@ -1340,6 +1526,11 @@
+@@ -1340,6 +1526,14 @@
  void gbl_ppu_state_io(gbl_state_fn io, void *ctx, int load) {
      io(&gbl_ppu_state, sizeof(gbl_ppu_state), ctx);
      if (!load) return;
 +    /* statics outside the saved state belong to the previous run of this
 +     * instance (a queued movie, a restored snapshot): drop them */
 +    on_pend = 0;
++    on_at = 0;
 +    off_silent = 0;
 +    gam_v0_pend = 0;
++    gam_stage = 0;
++    q153 = 0;
      P.evt_dirty = 1;
      P.moved = 1;
      P.spr_ly = 0xFF;
-@@ -1359,3 +1550,4 @@
+@@ -1359,3 +1553,4 @@
  #endif
      update_due();
  }

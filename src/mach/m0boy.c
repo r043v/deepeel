@@ -188,7 +188,9 @@ void dp_gbl_hook_trace(int v, int i, uint16_t pc) {
     // per executed instruction (--tas-solo: the TAS worker's machine is the only
     // one), the same columns tools/gbhawk_ref --instr writes
     {
-        if (!dp_instr_f) {
+        static int instr_init; // getenv once, not on every instruction
+        if (!instr_init) {
+            instr_init = 1;
             const char *p = getenv("DEEPEEL_TAS_INSTR");
             if (p) dp_instr_f = fopen(p, "w");
         }

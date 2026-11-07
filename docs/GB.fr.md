@@ -4212,3 +4212,9 @@ du profil VBA mineur 0 : `LYLAG=1`, `IRQTRIM=20`, `HALTSND=0` (variables
   Remplace la règle empirique « +360 cycles » ;
 - `tools/lockstep.py` ignore le quartet bas de F (VBA le conserve après
   `POP AF`, deepeel stocke les drapeaux décomposés).
+
+## Mise à jour 0.249.72 : enchaînement des films et vitesse de rejeu
+
+- **File de films** : un film lancé depuis la file (le « film suivant » d'un worker qui a fini) restait bloqué au boot (écran noir/blanc, boucle sur `LY=$91`). Le chargement de l'état de départ se faisait dans le hook de vblank, donc au milieu d'une instruction de lecture. Le worker réserve désormais le film dans le hook, demande une coupure, et recharge la machine dans `run_epoch`, hors de l'exécution (même chemin qu'au démarrage). Le patch `m0boy-tas-compat.patch` remet aussi à zéro, au chargement d'un état, les statiques hors état (attente VBL, verrou du pad, `q153`, `gam_*`, cycles absolus).
+- **Vitesse** : tant qu'un film est en cours de rejeu ou en attente dans la file, le fork d'exploration ne fait plus de pas entre deux époques (priorité TAS) ; ses graines sont explorées après tous les films. Un film Zelda de 13 700 images se rejoue en une quinzaine de secondes sur cette machine (observation de l'outil, pas une mesure de matériel).
+- `dp_gbl_hook_trace` ne relit plus `getenv` à chaque instruction.

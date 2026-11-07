@@ -264,6 +264,8 @@ typedef struct DpWorker {
     int script_n, script_pos;
     DpTas tas;                 // IN_TAS: the loaded movie (masks per frame)
     int tas_idx;               // IN_TAS: movie index (the --tas order)
+    int was_gbhawk;            // the movie just replaced was a GBHawk one
+    int reload_pending;        // next queued movie claimed in the vblank hook; the machine is reloaded outside the run
     uint32_t tas_ckpt_every;   // IN_TAS: capture interval in frames (0 = no capture)
     uint8_t fixed_mask;
     uint8_t human_buttons; // IN_HUMAN: set by the GUI thread before each frame
@@ -372,6 +374,7 @@ static uint64_t worker_credit(const DpWorker *w) {
 
 // fresh per-segment engine bookkeeping (the machine state comes from a load)
 static int worker_next_movie(DpWorker *w);
+static void worker_apply_movie(DpWorker *w);
 
 static void worker_reset_run_state(DpWorker *w) {
     w->ex->cur_forced = 0;
@@ -815,6 +818,11 @@ static void run_epoch(DpWorker *w, uint32_t frames) {
         dp_mach_attach(w->mach, w->ex, w->ex->mach->on_step, w->ex->mach->on_read,
                        w->ex->mach->on_write, worker_vblank);
         int cut = dp_mach_run(w->mach);
+        if (w->reload_pending) { // queued movie claimed in the hook: load it here, outside the run
+            w->reload_pending = 0;
+            worker_apply_movie(w);
+            continue;
+        }
         // the fork explorer's cuts (pad slide, halt) mean this play state is
         // stuck: rotate to the next checkpoint like a dead halt would.  A TAS
         // mid-replay cannot rewind its movie: it falls through to random play.
@@ -1208,6 +1216,7 @@ static void worker_tune_movie(DpPlay *p, DpWorker *w) {
 // the next one on this same machine (power-on state, fresh sync profile).  Every
 // movie of the list gets replayed even when there are more movies than machine
 // instances; a movie refused (other ROM, unreadable) is skipped, already reported.
+static void worker_apply_movie(DpWorker *w);
 static int worker_next_movie(DpWorker *w) {
     DpPlay *p = w->p;
     for (;;) {
@@ -1216,29 +1225,40 @@ static int worker_next_movie(DpWorker *w) {
             __atomic_store_n(&p->tas_next, p->cfg.tas_n, __ATOMIC_RELAXED);
             return 0;
         }
-        int was_gbhawk = w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gbhawk;
+        w->was_gbhawk = w->tas.recorder == DP_TAS_REC_BIZHAWK && w->tas.gbhawk;
         dp_tas_free(&w->tas);
         memset(&w->tas, 0, sizeof w->tas);
         if (!worker_load_movie(p, w, t)) continue;
         w->tas_idx = t;
-        dp_mach_load(w->mach, dp_explorer_seed_base(p->fork)); // power-on state
-        worker_reset_run_state(w);
-        *w->mach->api->sync_div_skew = 0, *w->mach->api->sync_ly_lag = 0, *w->mach->api->sync_irq_trim = 0, *w->mach->api->sync_halt_snd = 0;
-        *w->mach->api->sync_vba_off_clock = 0;
-        if (*w->mach->api->sync_echo_old) { *w->mach->api->sync_echo_old = 0; w->mach->api->sync_echo_apply(); }
-        if (was_gbhawk) {
-            *w->mach->api->sync_pad_delay = 0;
-            *w->mach->api->sync_div_extra = 0;
-            *w->mach->api->sync_ppu_phase = 0;
-        }
-        memset(w->mach->api->eram, 0, dp_gbl_variant_eram[w->mach->api->variant]);
+        // called from the vblank hook, i.e. in the middle of an instruction:
+        // the machine must not be reloaded here.  Cut at the next instruction
+        // boundary; run_epoch then calls worker_apply_movie outside the run.
+        w->reload_pending = 1;
         w->frames_done = 0;
-        w->applied_mask = 0;
-        w->seg_left = 0;
-        worker_tune_movie(p, w);
-        fprintf(stderr, "deepeel: TAS queue: worker %d starts movie %d/%d\n", w->id, t + 1, p->cfg.tas_n);
+        w->mach->cut_pending = DP_CUT_SEGEND;
         return 1;
     }
+}
+
+// the machine side of a queued movie start: power-on state, fresh sync profile
+static void worker_apply_movie(DpWorker *w) {
+    DpPlay *p = w->p;
+    dp_mach_load(w->mach, dp_explorer_seed_base(p->fork)); // power-on state
+    worker_reset_run_state(w);
+    *w->mach->api->sync_div_skew = 0, *w->mach->api->sync_ly_lag = 0, *w->mach->api->sync_irq_trim = 0, *w->mach->api->sync_halt_snd = 0;
+    *w->mach->api->sync_vba_off_clock = 0;
+    if (*w->mach->api->sync_echo_old) { *w->mach->api->sync_echo_old = 0; w->mach->api->sync_echo_apply(); }
+    if (w->was_gbhawk) {
+        *w->mach->api->sync_pad_delay = 0;
+        *w->mach->api->sync_div_extra = 0;
+        *w->mach->api->sync_ppu_phase = 0;
+    }
+    memset(w->mach->api->eram, 0, dp_gbl_variant_eram[w->mach->api->variant]);
+    w->frames_done = 0;
+    w->applied_mask = 0;
+    w->seg_left = 0;
+    worker_tune_movie(p, w);
+    fprintf(stderr, "deepeel: TAS queue: worker %d starts movie %d/%d\n", w->id, w->tas_idx + 1, p->cfg.tas_n);
 }
 
 DpPlay *dp_play_new(const DpSessionCfg *cfg, DpResults *res, DpExplorer *fork_ex) {
@@ -1566,7 +1586,13 @@ int dp_play_poll(DpPlay *p) {
     // so a fixed-seed run is reproducible
     // (--unbounded: the steps run after the workers are released instead, so the sessions
     // keep playing while the fork explores; reproducibility is not promised in that mode)
-    if (!p->cfg.unbounded)
+    // TAS priority: while a movie is still replaying (or queued) the fork waits, the
+    // replay runs at machine speed instead of at the pace of the fork's paths; its
+    // seeds are explored once every movie is over (the post-play phase)
+    int tas_playing = __atomic_load_n(&p->tas_next, __ATOMIC_RELAXED) < p->cfg.tas_n;
+    for (int i = 0; i < p->nworkers && !tas_playing; i++)
+        if (p->w[i].mode == IN_TAS && p->w[i].frames_done < p->w[i].tas.frames) tas_playing = 1;
+    if (!p->cfg.unbounded && !tas_playing)
         for (int i = 0; i < p->cfg.fork_paths_per_epoch && p->fork->q_len && !p->fork->stop; i++)
             dp_explore_step(p->fork);
 
