@@ -4167,3 +4167,10 @@ identiques baisse (3740 contre 13106) : réglage non retenu par défaut. Reste
 une phase des lignes visibles (LYC) en retard de quelques cycles dans la
 trame 24 (le front LY32 arrive 2 cycles après la fin de l'instruction où VBA
 l'a vu).
+
+Constat du lockstep (SRAM) : le harnais VBA-rr V7 démarre avec la RAM de
+sauvegarde à `$FF` (Zelda lit `$FF` en `$A100` à l'image ~14). deepeel
+l'initialise désormais ainsi pour les films VBA mineur 0 (`DEEPEEL_TAS_NOINIT`
+désactive). La première divergence d'instruction de la fenêtre 180k–592k ticks
+passe du tick 246 490 au tick 372 306 (VBL prise une instruction plus tôt par
+VBA). Observation de l'outil, pas une mesure matérielle.

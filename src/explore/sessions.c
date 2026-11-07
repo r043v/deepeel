@@ -1113,7 +1113,7 @@ static void worker_tune_movie(DpPlay *p, DpWorker *w) {
     // BizHawk (Gambatte) powers a cartridge up with blank battery RAM
     // filled with $FF: games that read their save slot (Mario Land 2)
     // branch on it, so a zeroed RAM replays another game
-    if (w->tas.recorder == DP_TAS_REC_BIZHAWK && w->mach->api->eram)
+    if ((w->tas.recorder == DP_TAS_REC_BIZHAWK || (w->tas.recorder == DP_TAS_REC_VBA && w->tas.recorder_rev == 0 && !getenv("DEEPEEL_TAS_NOINIT"))) && w->mach->api->eram)
         memset(w->mach->api->eram, 0xFF, dp_gbl_variant_eram[w->mach->api->variant]);
     // VBA-rr's V8 core (VBM minor version 1) powers WRAM up with a fixed
     // pattern ($FF x8 / $0F x8, blocks of $800 alternating), HRAM with $FF
