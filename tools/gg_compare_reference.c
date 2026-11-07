@@ -165,8 +165,15 @@ int main(int argc, char **argv) {
         if (frame < 10 || (frame + 1) % 300 == 0 || (diff && first_diff_frame == (long)frame + 1))
             printf("%u ramdiff=%u first=$%04x screen=%s ref=%ux%u\n", frame + 1, diff, first,
                    (g_ref_hash == g_dut_hash) ? "same" : "diff", g_ref_w, g_ref_h);
-        if (diff && first_diff_frame == (long)frame + 1)
+        if (diff && first_diff_frame == (long)frame + 1) {
             fprintf(stderr, "first work-RAM divergence at frame %u, offset $%04x\n", frame + 1, first);
+            const char *hex = getenv("DP_GG_DIFF_HEX");
+            if (hex) {
+                unsigned kmax = (unsigned)strtoul(hex, NULL, 0);
+                for (size_t i = first; i < ref_ram_size && i < first + kmax; i++)
+                    fprintf(stderr, "  $%04zx ref=%02x dut=%02x\n", i, ref_ram[i], machine.ram[i]);
+            }
+        }
         fflush(stdout);
     }
     printf("frames %u, mean ramdiff %.2f, first divergence %s (%ld, offset $%04x)\n", limit,
