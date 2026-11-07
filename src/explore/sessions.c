@@ -659,6 +659,16 @@ static void worker_vblank(DpMach *m) {
                 if (rn) rawf = fopen(rn, "wb");
             }
             if (rawf) fwrite(m->api->wram, 1, 0x2000, rawf);
+            {   // DEEPEEL_TAS_VRAM=<file>: VRAM bank 0 (8 KiB) + OAM (160) + LCDC,SCY,SCX,LYC,BGP,OBP0,OBP1,WY,WX
+                // (16 bytes) per movie vblank, to find the first graphic divergence against a reference
+                static FILE *vramf; static int vram_init;
+                if (!vram_init) { vram_init = 1; const char *vn = getenv("DEEPEEL_TAS_VRAM"); if (vn) vramf = fopen(vn, "wb"); }
+                if (vramf) {
+                    const uint8_t *io = m->api->io;
+                    uint8_t r[16] = {io[0x40], io[0x42], io[0x43], io[0x45], io[0x47], io[0x48], io[0x49], io[0x4A], io[0x4B]};
+                    fwrite(m->api->vram, 1, 0x2000, vramf); fwrite(m->api->oam, 1, 0xA0, vramf); fwrite(r, 1, 16, vramf);
+                }
+            }
             {   // DEEPEEL_TAS_HRAM=<file>: the 128 HRAM bytes per movie vblank (hidden-state comparison)
                 static FILE *hramf; static int hram_init;
                 if (!hram_init) { hram_init = 1; const char *hn = getenv("DEEPEEL_TAS_HRAM"); if (hn) hramf = fopen(hn, "wb"); }

@@ -4237,3 +4237,17 @@ du profil VBA mineur 0 : `LYLAG=1`, `IRQTRIM=20`, `HALTSND=0` (variables
 - **Grille sonore de HALT (VBA V7)** : la grille de 96 cycles de VBA court sur un compteur 64 bits ; `gbr.cyc` est sur 32 bits et 2³² mod 96 = 64, donc après chaque repli la grille se décale de 32 cycles (modulo 96). Le patch compat compte les replis vus pendant les HALT (`halt_track`, bits hauts de `gbl_sync_halt_snd`) et corrige la phase (`halt_grid_phase`). Sur `bobmario511-zeldagb-playaround`, l'écart RNG de l'image 59601 (réveil de HALT 32 cycles trop tôt) et ceux qui en découlaient (67887, 82068, ~90k) disparaissent ; le premier écart durable est maintenant à l'image 123131 (`$C13D`). Limite : un état rechargé en cours de film (reprise) perd le compte de replis. Observation de l'outil face à VBA V7, pas une mesure de matériel.
 - **Comparaison en direct** : `DEEPEEL_WATCH_REF=<fichier>` ajoute à la mosaïque une vignette « VBA 1.7.2 (reference) » alimentée par un harnais VBA (`VBAH_LIVE=<fichier>`, écran partagé par mmap, `src/explore/ref_feed.h`). Le rejeu du premier film ne dépasse pas la référence de plus d'une image : les deux vignettes montrent la même image. Le harnais VBA reste hors du dépôt.
 - `DEEPEEL_TAS_INSTR_IF=1` ajoute IF/IE/LY (ligne `#IF=…`) à la trace d'instructions `DEEPEEL_TAS_INSTR` (diagnostic, incompatible avec `tools/lockstep.py`).
+
+## Mise à jour 0.249.76
+
+Profil VBA (`cmake/m0boy-tas-compat.patch`, hors m0boy : comportements de VBA, pas du matériel) :
+
+- VBA ne verrouille jamais la VRAM ni l'OAM : `gbl_ppu_blocked` renvoie 0 sous le profil VBA. Le film
+  bobmario 2021 lit la VRAM en mode 3 (frame 15858 : `ld a,(hl)` en `$8217`) ; avec le verrou, deepeel lisait
+  `$FF` et l'ordre des sprites divergeait.
+- Lecture de `$FF02`, `$FF03`, `$FF08-$FF0E` : l'octet brut, comme la mémoire de VBA.
+- Résultat sur la bobmario 2021 : WRAM identique à VBA sur 145 366 frames sur 145 368 (écarts d'un octet aux
+  frames 74207 et 135700), OAM et tilemaps identiques. Il reste des octets de tuiles recopiés depuis des
+  registres d'E/S (DIV, IF, son), sans effet sur le jeu.
+- Outils : `DEEPEEL_TAS_VRAM=<fichier>` (VRAM bank 0, OAM, LCDC/SCY/SCX par vblank) et `tools/vram_compare.py`
+  pour comparer à la référence (`VBAH_VRAM` du harnais VBA). Observations de l'outil, pas des mesures de matériel.

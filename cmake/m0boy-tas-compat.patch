@@ -1,6 +1,6 @@
 diff -ruN a/gbl_core.c b/gbl_core.c
 --- a/gbl_core.c	2026-11-06 21:47:21.672263505 +0100
-+++ b/gbl_core.c	2026-11-07 12:05:12.132752764 +0100
++++ b/gbl_core.c	2026-11-07 13:10:10.554734504 +0100
 @@ -1,8 +1,13 @@
 +#include <stdlib.h>
  /*
@@ -81,13 +81,23 @@ diff -ruN a/gbl_core.c b/gbl_core.c
  uint8_t gbl_io_rd(uint8_t n) {
      switch (n) {
 -    case 0x00: return gbl_joyp;
-+    case 0x00: gbl_pad_pending_check(gbr.cyc); return gbl_joyp;
-     case 0x02: return gbl_io[0x02] | 0x7E;
+-    case 0x02: return gbl_io[0x02] | 0x7E;
 -    case 0x04: return (uint8_t)((gbr.cyc - div_base) >> 8);
++    case 0x00: gbl_pad_pending_check(gbr.cyc); return gbl_joyp;
++    case 0x02: return gbl_sync_halt_snd > 0 ? gbl_io[0x02] : gbl_io[0x02] | 0x7E; /* VBA: the raw byte */
 +    case 0x04: return (uint8_t)((gbr.cyc + gbl_sync_div_skew + gbl_sync_div_extra - div_base) >> 8);
      case 0x05: timer_sync(gbr.cyc); return TIMA;
      case 0x07: return TAC | 0xF8;
      case 0x0F: gbl_sync(); return IF | 0xE0;
+@@ -1354,7 +1399,7 @@
+         if (n >= 0x10 && n < 0x40) return gbl_apu_read(n);
+         if (n >= 0x40 && n < 0x4C) return gbl_ppu_read(n);
+         /* unconnected registers read 1s on the DMG (mooneye unused_hwio) */
+-        if (n == 0x03 || (n >= 0x08 && n < 0x0F)) return 0xFF;
++        if (n == 0x03 || (n >= 0x08 && n < 0x0F)) return gbl_sync_halt_snd > 0 ? gbl_io[n] : 0xFF; /* VBA: plain memory */
+ #if GBL_CGB
+         if (n >= 0x4C && n < 0x80 && !gbl_cgb) return 0xFF;
+ #else
 @@ -1412,7 +1457,7 @@
  #endif
  void gbl_io_wr(uint8_t n, uint8_t v) {
@@ -475,7 +485,7 @@ diff -ruN a/gbl.h b/gbl.h
  extern uint32_t gbl_frame;
 diff -ruN a/gbl_ppu.c b/gbl_ppu.c
 --- a/gbl_ppu.c	2026-11-06 21:47:21.672263505 +0100
-+++ b/gbl_ppu.c	2026-11-07 09:08:48.858936135 +0100
++++ b/gbl_ppu.c	2026-11-07 12:51:53.081479718 +0100
 @@ -1,3 +1,4 @@
 +#include <stdio.h>
  /*
@@ -713,7 +723,15 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
  #ifndef GBL_VBL_DELAY
  /* reference mode: the CPU services a VBlank request 2 dots after the
   * dispatcher would see it (mooneye di_timing-GS: DI wins by one NOP) */
-@@ -1250,12 +1363,47 @@
+@@ -1208,6 +1321,7 @@
+ #if GBL_ACCESS_BLOCK
+ /* CPU access blocking by mode (GBL_ACCESS_BLOCK): 1 = VRAM, 2 = OAM. */
+ int gbl_ppu_blocked(int what) {
++    if (gbl_sync_halt_snd > 0) return 0; /* VBA 1.7.2 never locks VRAM/OAM: the TAS reads and writes them in mode 2/3 */
+     ppu_moved = 0;
+     gbl_ppu_sync(gbr.cyc);
+     if (ppu_moved) gbl_update_evt();
+@@ -1250,12 +1364,47 @@
          ppu_moved = 0;
          gbl_ppu_sync(gbr.cyc);
          if (ppu_moved) gbl_update_evt();
@@ -761,7 +779,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
  void gbl_ppu_write(uint8_t n, uint8_t v) {
      gbl_ppu_sync(gbr.cyc);
  #if GBL_FRAME_SIGNATURE
-@@ -1264,39 +1412,54 @@
+@@ -1264,39 +1413,54 @@
  #endif
      switch (n) {
      case 0x40:
@@ -837,7 +855,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      case 0x44: return;
      default: gbl_io[n] = v; break;
      }
-@@ -1310,7 +1473,29 @@
+@@ -1310,7 +1474,29 @@
      }
  }
  
@@ -867,7 +885,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      LCDC = 0x91;
      STAT = 0x00;
      BGP = 0xFC;
-@@ -1325,6 +1510,7 @@
+@@ -1325,6 +1511,7 @@
      stat_line = 0;
      off_start = gbr.cyc;
      update_due();
@@ -875,7 +893,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      stat_refresh();
      P.spr_ly = 0xFF;
      bg_pairs_bgp = -1;
-@@ -1340,6 +1526,14 @@
+@@ -1340,6 +1527,14 @@
  void gbl_ppu_state_io(gbl_state_fn io, void *ctx, int load) {
      io(&gbl_ppu_state, sizeof(gbl_ppu_state), ctx);
      if (!load) return;
@@ -890,7 +908,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      P.evt_dirty = 1;
      P.moved = 1;
      P.spr_ly = 0xFF;
-@@ -1359,3 +1553,4 @@
+@@ -1359,3 +1554,4 @@
  #endif
      update_due();
  }
