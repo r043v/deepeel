@@ -4280,3 +4280,11 @@ Valeurs observées de l'outil, pas des mesures de matériel.
 
 Les couleurs de destination des données copiées sont retirées de la carte PNG (0.249.78) ; le
 décompte par destination reste dans le texte `.map`.
+
+## Mise à jour 0.249.79 — timeline de banques bornée
+
+La timeline de banques ne garde plus que la **première occurrence de chaque commutation distincte**
+(site, fenêtre, ancienne et nouvelle banque) ; le total des commutations reste compté. Le rapport
+affiche `bank switches (N distinct of M)`. Les compteurs d'accès registres et le crédit de banques
+comptent toujours chaque commutation. Avant ce changement le tableau atteignait 8 Go sur Zelda
+(observation de l'outil, pas une mesure matérielle).
