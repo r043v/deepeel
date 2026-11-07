@@ -302,11 +302,12 @@ def process(e, cat, a):
         el, rc, why = run_slice(cmd, logpath, state, a.cap + a.search, a.guard, int(a.ram_gb * (1 << 30) * 0.45), int(a.ram_gb * (1 << 30)))
         # a resource guard stops the run gracefully; the state dir now keeps the coverage map
         # (coverage.bin), so --resume continues the same exploration without losing what is known
-        for _ in range(3):
+        for rn in range(3):
             if why not in ("mem-guard", "state-guard") or STOP.is_set() or not os.path.exists(os.path.join(state, "coverage.bin")):
                 break
             log("%s: %s, resuming from the saved state" % (slug, why))
-            el2, rc, why = run_slice(cmd + ["--resume"], logpath, state, a.cap + a.search, a.guard,
+            # the last resume ends the play at once (stagnation 1) so the mandatory fork search always runs
+            el2, rc, why = run_slice(cmd + ["--resume"] + (["--stagnation", "1"] if rn == 2 else []), logpath, state, a.cap + a.search, a.guard,
                                      int(a.ram_gb * (1 << 30) * 0.45), int(a.ram_gb * (1 << 30)))
             el += el2
         s = json.load(open(summ)) if os.path.exists(summ) else {}
