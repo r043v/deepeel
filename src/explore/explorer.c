@@ -346,6 +346,7 @@ void dp_results_free(DpResults *res) {
     free(res->io);
     free(res->copies);
     free(res->bank_events);
+    free(res->bank_seen);
     dp_map_free(&res->sites);
     dp_map_free(&res->callers);
     dp_map_free(&res->fork_counts);
@@ -1053,6 +1054,37 @@ static void emit_pend_map(DpExplorer *ex) {
     DpResults *res = ex->res;
     uint32_t new_bank = ex->mach->api->gbr->rom_bank;
     if (res->mt) pthread_mutex_lock(&res->rec_mtx);
+    res->bank_total++;
+    {   // a game that switches banks every frame must not grow the timeline without bound: keep the first
+        // occurrence of each distinct switch (the total stays counted in bank_total)
+        uint64_t key = ((uint64_t)ex->pend_pc << 32 | (uint64_t)ex->pend_window << 24 | (uint64_t)(ex->pend_old & 0xFFF) << 12 |
+                        (new_bank & 0xFFF)) + 1;
+        if (res->bank_seen_n * 2 >= res->bank_seen_cap) {
+            uint32_t nc = res->bank_seen_cap ? res->bank_seen_cap * 2 : 1024;
+            uint64_t *ns = calloc(nc, sizeof *ns);
+            for (uint32_t i = 0; i < res->bank_seen_cap; i++) {
+                uint64_t k = res->bank_seen[i];
+                if (!k) continue;
+                uint32_t j = (uint32_t)(k * 0x9E3779B97F4A7C15ull >> 40) & (nc - 1);
+                while (ns[j]) j = (j + 1) & (nc - 1);
+                ns[j] = k;
+            }
+            free(res->bank_seen);
+            res->bank_seen = ns;
+            res->bank_seen_cap = nc;
+        }
+        uint32_t j = (uint32_t)(key * 0x9E3779B97F4A7C15ull >> 40) & (res->bank_seen_cap - 1);
+        int known = 0;
+        while (res->bank_seen[j]) {
+            if (res->bank_seen[j] == key) { known = 1; break; }
+            j = (j + 1) & (res->bank_seen_cap - 1);
+        }
+        if (!known) { res->bank_seen[j] = key; res->bank_seen_n++; }
+        if (known) {
+            if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
+            goto bank_counted;
+        }
+    }
     if (res->bank_count == res->bank_cap) {
         res->bank_cap = res->bank_cap ? res->bank_cap * 2 : 64;
         res->bank_events = xrealloc(res->bank_events, sizeof(DpBankEvent) * (size_t)res->bank_cap);
@@ -1064,6 +1096,7 @@ static void emit_pend_map(DpExplorer *ex) {
     e->old_bank = ex->pend_old;
     e->new_bank = new_bank;
     if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
+bank_counted:;
     int slot = dp_io_slot(res, ex->pend_addr);
     if (slot >= 0) {
         u32_add(&res->io[slot].wr, 1);

@@ -219,6 +219,9 @@ typedef struct DpResults {
     int copy_count, copy_cap;
     DpBankEvent *bank_events;
     int bank_count, bank_cap;
+    uint64_t bank_total;     // every bank switch seen; the timeline keeps the first of each distinct (pc, window, old, new)
+    uint64_t *bank_seen;     // open-addressing set of those tuples (0 = empty slot)
+    uint32_t bank_seen_cap, bank_seen_n;
     // maps
     DpMap32 sites;   // branch site key -> DpSiteStat
     DpMap32 callers; // call target key -> DpCallList

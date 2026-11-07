@@ -245,7 +245,7 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
 
     // bank switches
     if (res->bank_count) {
-        dp_buf_fmt(out, "\nbank switches (%d", res->bank_count);
+        dp_buf_fmt(out, "\nbank switches (%d distinct of %llu", res->bank_count, (unsigned long long)res->bank_total);
         int show = res->bank_count > 30 ? 30 : res->bank_count;
         dp_buf_str(out, "):\n");
         for (int i = 0; i < show; i++) {
