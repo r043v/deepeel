@@ -1175,15 +1175,15 @@ static void worker_tune_movie(DpPlay *p, DpWorker *w) {
             ? (uint8_t)atoi(getenv("DEEPEEL_TAS_OFFCLOCK")) : 2;
         // V7 reads LY at the start of the reading instruction (gbl.h, sync_ly_lag)
         *w->mach->api->sync_ly_lag = getenv("DEEPEEL_TAS_LYLAG")
-            ? (int16_t)atoi(getenv("DEEPEEL_TAS_LYLAG")) : 0;
+            ? (int16_t)atoi(getenv("DEEPEEL_TAS_LYLAG")) : 1;
         // V7 counts no tick for the interrupt dispatch (20 cycles on the hardware)
         *w->mach->api->sync_irq_trim = getenv("DEEPEEL_TAS_IRQTRIM")
-            ? (int16_t)atoi(getenv("DEEPEEL_TAS_IRQTRIM")) : 4;
+            ? (int16_t)atoi(getenv("DEEPEEL_TAS_IRQTRIM")) : 20;
         // V7 wakes a halted CPU on its 96-cycle sound grid (gbl.h, sync_halt_snd);
         // DEEPEEL_TAS_HALTSND = grid phase in cycles, -1 = hardware wake-up
         {
             const char *hs = getenv("DEEPEEL_TAS_HALTSND");
-            *w->mach->api->sync_halt_snd = (int16_t)((hs ? atoi(hs) : 32) + 1);
+            *w->mach->api->sync_halt_snd = (int16_t)((hs ? atoi(hs) : 0) + 1);
         }
         fprintf(stderr, "deepeel: TAS %s: VBA 1.7.2 sync profile (input at vblank, no LCD-off frame, "
                         "ten-line enable)\n", w->tas.source);

@@ -75,6 +75,9 @@ def main():
         masks.append((int(lo, 16), int(hi, 16)))
 
     def eq(x, y):
+        # VBA keeps the low nibble of F after POP AF; deepeel stores flags decomposed
+        x = x[:3] + ["%02x" % (int(x[3], 16) & 0xF0)] + x[4:]
+        y = y[:3] + ["%02x" % (int(y[3], 16) & 0xF0)] + y[4:]
         if x[1:8] == y[1:8]:
             return True
         if x[1] == y[1] and x[4:8] == y[4:8]:

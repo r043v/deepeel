@@ -4187,3 +4187,28 @@ Pistes lockstep suivantes (non retenues, observations de l'outil) :
   report à chaque trame (quantifié à la fin d'instruction), alors que celle de
   deepeel est exacte ; un simple ancrage de la ligne 0 sur l'instant observé
   fait chuter le total (2 457 images) et n'est pas retenu.
+
+### Mise à jour 0.249.71 : profil VBA V7 complet (replay Zelda identique)
+
+Le film `bobmario2-zeldala.vbm` (VBM mineur 0, ROM Link's Awakening) se rejoue
+sur les 13 714 images identiques à VBA-rr V7 (VRAM comparée image par image,
+observation de l'outil), là où le profil précédent en donnait 13 106. Défauts
+du profil VBA mineur 0 : `LYLAG=1`, `IRQTRIM=20`, `HALTSND=0` (variables
+`DEEPEEL_TAS_*` toujours prioritaires). Règles ajoutées au runtime
+(`cmake/m0boy-tas-compat.patch`), toutes actives seulement avec ce profil :
+
+- SRAM à $FF au démarrage (0.249.70) ; activation LCD comptée depuis le début
+  de l'instruction qui écrit LCDC (+2 cycles) ;
+- lecture de LY : passage 153→0 vu 6 ticks après l'entrée en ligne 153
+  (relatif à l'observation, `q153`) et événement de passage armé en
+  permanence ;
+- une correspondance LYC ne lève IF STAT que si IE bit 1 est positionné au
+  moment de la comparaison (`gbCompareLYToLYC`) ; les sources de mode, non ;
+- HALT réveillé par VBlank : marche pas à pas comme VBA (pas = min(prochaine
+  frontière LCD, prochain tick son ; un pas qui démarre exactement sur la
+  grille de 24 ticks n'est pas borné par le son) ; `gbInterruptWait` (6 ticks)
+  est consommé par la durée des pas à partir de celui de l'entrée VBL, et
+  l'IRQ est prise à la fin du premier pas qui démarre avec l'attente expirée.
+  Remplace la règle empirique « +360 cycles » ;
+- `tools/lockstep.py` ignore le quartet bas de F (VBA le conserve après
+  `POP AF`, deepeel stocke les drapeaux décomposés).

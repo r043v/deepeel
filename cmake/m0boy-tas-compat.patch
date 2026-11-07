@@ -175,23 +175,54 @@ diff -ruN a/gbl_core.c b/gbl_core.c
  #if GBL_DEBUG_RESTART
      if (gbr.pc - 0x68u < 0x150u - 0x68u && !gbl_dbg_badirq.frame)
          dbg_badirq((uint32_t)(uintptr_t)__builtin_return_address(0));
-@@ -1985,8 +2059,23 @@
+@@ -1982,11 +2056,54 @@
+         gbr.cyc = (t & ~3u) + 4u;
+     } else if (!slept) {
+         gbr.cyc = h0 + 4u;
++        if (gbl_sync_halt_snd > 0 && (IF & 1u) && (gbl_io[0x40] & 0x80u)) {
++            uint32_t ph = (uint32_t)(gbl_sync_halt_snd - 1);
++            if ((h0 - ph) % 96u == 20u) gbr.cyc = h0 + 4u + 448u;
++        }
      } else {
          uint32_t w = (t + 5u) & ~3u;
          if ((int32_t)(w - (h0 + 8u)) < 0) w = h0 + 8u;
 +        if (gbl_sync_halt_snd > 0 && (IF & 1u) && (gbl_io[0x40] & 0x80u)) {
-+            /* gbl.h: first grid point (96 cycles apart) at or after w */
++            /* VBA V7 steps a halted CPU to the earliest of the next LCD
++             * boundary and the next sound tick, except that a step starting
++             * exactly on the sound grid (soundTicks == 0) is not sound-bounded.
++             * Every LCD boundary ends a step, so the walk starts at the last
++             * boundary before the VBlank entry t (mode 0 of line 143, 204
++             * cycles earlier) or at the HALT.  gbInterruptWait (6 ticks) is
++             * consumed by the length of every step from the VBlank one on and
++             * the IRQ is taken at the end of the first step that begins with
++             * the wait expired. */
 +            uint32_t ph = (uint32_t)(gbl_sync_halt_snd - 1);
-+            uint32_t g = ph + (((w - ph) / 96u) + 1u) * 96u;
-+            if (g - w >= 96u) g -= 96u;
-+            w = g;
-+            /* VBA: soundTicks sticks at 0 after a step ending exactly on the
-+             * grid, and the next halted step is then not sound-bounded: it
-+             * runs to the next LY increment */
-+            /* VBA: a step ending exactly on the sound grid leaves soundTicks
-+             * at 0 and the next halted step is not sound-bounded: the CPU
-+             * sleeps on to the next LY increment (456 cycles) */
-+            if ((t - ph) % 96u == 22u) w += 360u;
++            uint32_t now = t - 204u, last;
++            if ((int32_t)(now - h0) < 0) now = h0;
++            last = now;
++            while ((int32_t)(now - t) < 0) {
++                uint32_t e = (((now - ph) % 96u) == 0u) ? t : now + 96u - ((now - ph) % 96u);
++                if ((int32_t)(e - t) > 0) e = t;
++                last = now;
++                now = e;
++            }
++            uint32_t wait = 24u, c0 = now - last;
++            wait = wait > c0 ? wait - c0 : 0u;
++            for (;;) {
++                uint32_t lb = t + 456u * ((now - t) / 456u + 1u);
++                uint32_t e = (((now - ph) % 96u) == 0u) ? lb : now + 96u - ((now - ph) % 96u);
++                if ((int32_t)(e - lb) > 0) e = lb;
++                uint32_t c = e - now;
++                now = e;
++                if (wait == 0u) break;
++                wait = wait > c ? wait - c : 0u;
++            }
++            w = now;
++        }
++        else if (gbl_sync_halt_snd > 0) {
++            /* VBA: a non-VBL request ends the halted step at its own tick */
++            w = (t + 3u) & ~3u;
++            if ((int32_t)(w - (h0 + 8u)) < 0) w = h0 + 8u;
 +        }
          gbr.cyc = w;
      }
@@ -199,7 +230,7 @@ diff -ruN a/gbl_core.c b/gbl_core.c
      gbl_sync();
  }
  
-@@ -2185,10 +2274,13 @@
+@@ -2185,10 +2302,13 @@
  #endif
      /* E000-EFFF echoes C000-CFFF (F000-FDFF shares a page with OAM, IO
       * and HRAM and stays on the slow path). */
@@ -214,7 +245,7 @@ diff -ruN a/gbl_core.c b/gbl_core.c
  void gbl_reset(void) {
      __asm__ volatile("" : : "r"(&gbl_input_probe));
      memset(&gbr, 0, sizeof(gbr));
-@@ -2228,6 +2320,7 @@
+@@ -2228,6 +2348,7 @@
      gbr.sp = 0xFFFE; gbr.pc = 0x0100;
      gbl_ie = 0;
      gbl_io[0x00] = 0x30;
@@ -375,15 +406,31 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
  /*
   * gbl PPU: lazy DMG scanline renderer.
   *
-@@ -55,6 +56,7 @@
+@@ -55,7 +56,11 @@
  static inline uint32_t line_len(uint8_t l) { (void)l; return LINE_CYCLES; }
  static inline uint32_t lines_span(uint8_t from, uint32_t to) { return (to - from) * LINE_CYCLES; }
  #endif
-+#include <stdlib.h>
- #define LY153_CMP PS(8u) /* line 153: LYC sees LY=0 from here (DMG, SameBoy reference) */
+-#define LY153_CMP PS(8u) /* line 153: LYC sees LY=0 from here (DMG, SameBoy reference) */
++#define LY153_CMP (gbl_sync_halt_snd > 0 ? PS(24u) : PS(8u)) /* line 153: LYC sees LY=0 from here (DMG, SameBoy reference; VBA V7: 6 ticks) */
++/* VBA V7 resets its LY counter to 6 ticks without carry when it sees LY=153, at the end of the
++ * instruction that crossed the line: LY=0 comes 6 ticks after that instruction end */
++static uint32_t q153;
++#define LY153_EFF (LY153_CMP + (gbl_sync_halt_snd > 0 ? q153 : 0u))
  #define FRAME_CYCLES PS(70224u)
  
-@@ -979,10 +981,42 @@
+ uint8_t gbl_skip_render;
+@@ -204,7 +209,9 @@
+  * three source bits out: no source. */
+ static inline __attribute__((always_inline)) void stat_update(void) {
+     uint8_t line = (uint8_t)(((P.stat_modes >> mode) & 1u) | P.lyc_line);
+-    if (line > stat_line) IF |= 0x02; /* rising edge; IF is rarely written */
++    /* VBA V7 latches an LYC match only while IE bit 1 is set */
++    if (line > stat_line && !(gbl_sync_halt_snd > 0 && !(gbl_ie & 2u) && !((P.stat_modes >> mode) & 1u)))
++        IF |= 0x02; /* rising edge; IF is rarely written */
+     stat_line = line;
+ }
+ 
+@@ -979,10 +986,42 @@
   * calls (register polls, VRAM writes) land between two transitions. */
  uint32_t gbl_ppu_due;
  
@@ -427,7 +474,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
  /* LCD off: a virtual frame clock (the assembly version jumps here too). */
  #if GBL_TIMING_ASM
  void gbl_ppu_advance_off(uint32_t now);
-@@ -990,10 +1024,50 @@
+@@ -990,10 +1029,50 @@
  static
  #endif
  void gbl_ppu_advance_off(uint32_t now) {
@@ -479,7 +526,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
          gbl_frame++;
          gbl_platform_vblank();
      }
-@@ -1046,6 +1120,7 @@
+@@ -1046,6 +1125,7 @@
              pen += 6;
          }
      }
@@ -487,7 +534,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      return (uint16_t)(MODE0_START + PS(pen));
  }
  #endif
-@@ -1058,6 +1133,25 @@
+@@ -1058,6 +1138,25 @@
      }
      for (;;) {
          uint32_t off = now - line_start;
@@ -513,7 +560,24 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
          if (ly < 144) {
              if (stage == 0) {
                  if (off < MODE3_START) break;
-@@ -1114,7 +1208,9 @@
+@@ -1084,7 +1183,7 @@
+             /* line 153: LY reads 0 after LY153_ZERO cycles; the LYC
+              * comparator sees 0 two cycles later (an LYC=0 match fires here,
+              * a line before line 0) */
+-            if (off < LY153_CMP) break;
++            if (off < LY153_EFF) break;
+             ppu_moved = 1;
+             P.evt_dirty = 1;
+             stage = 1;
+@@ -1099,6 +1198,7 @@
+         P.evt_dirty = 1;
+         line_start += llen;
+         stage = 0;
++        if (ly == 152) q153 = off - llen > 64u ? 0u : off - llen;
+         if (++ly == 154) {
+             ly = 0;
+             win_line = 0;
+@@ -1114,7 +1214,9 @@
  #endif
              mode = 1;
              IF |= 0x01;
@@ -523,7 +587,15 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
              gbl_frame++;
              gbl_platform_vblank();
          } else {
-@@ -1129,12 +1225,12 @@
+@@ -1122,19 +1224,19 @@
+             stat_update();
+         }
+     }
+-    next_stage_off = ly == 153 ? (stage ? line_len(153) : LY153_CMP)
++    next_stage_off = ly == 153 ? (stage ? line_len(153) : LY153_EFF)
+                    : ly >= 144 || stage == 2 ? line_len(ly) : stage == 0 ? MODE3_START : P.m0_start;
+     update_due();
+ }
  #endif
  
  uint32_t gbl_ppu_stable_until(void) {
@@ -532,18 +604,54 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      return line_start + next_stage_off;
  }
  
- static inline uint32_t ppu_next_event(void) {
+-static inline uint32_t ppu_next_event(void) {
 -    if (!lcd_on) return off_start + FRAME_CYCLES;
++static inline uint32_t ppu_next_event0(void) {
 +    if (!lcd_on) return off_due();
      uint8_t s = STAT;
  #if GBL_CGB
      if (gbl_hdma_pend) return gbr.cyc;
-@@ -1250,12 +1346,39 @@
+@@ -1146,7 +1248,7 @@
+     if (ly < 144 && stage == 0 && (s & 0x08)) return line_start + MODE3_START; /* mode 0 offset known at mode 3 */
+     if (ly < 144 && stage == 1 && (s & 0x08)) return line_start + P.m0_start;
+ #endif
+-    if (ly == 153 && !stage) return line_start + LY153_CMP;
++    if (ly == 153 && !stage) return line_start + LY153_EFF;
+     if (GBL_PPU_BATCH == 1 || (s & 0x20)) return line_start + line_len(ly);
+     /* Nothing observable happens inside a batch: the next line start that
+      * matters is the batch end, VBlank, the LYC line, or the next frame. */
+@@ -1162,6 +1264,17 @@
+     return t;
+ }
+ 
++
++static inline uint32_t ppu_next_event(void) {
++    uint32_t t = ppu_next_event0();
++    /* VBA V7: the crossing into line 153 is seen at the end of the instruction that crosses it */
++    if (lcd_on && gbl_sync_halt_snd > 0 && ly <= 152) {
++        uint32_t tb = line_start + lines_span(ly, 153u);
++        if ((int32_t)(tb - t) < 0) t = tb;
++    }
++    return t;
++}
++
+ #ifndef GBL_VBL_DELAY
+ /* reference mode: the CPU services a VBlank request 2 dots after the
+  * dispatcher would see it (mooneye di_timing-GS: DI wins by one NOP) */
+@@ -1250,12 +1363,47 @@
          ppu_moved = 0;
          gbl_ppu_sync(gbr.cyc);
          if (ppu_moved) gbl_update_evt();
 +        if (n == 0x44 && lcd_on && gbl_sync_ly_lag) {
 +            int32_t at = (int32_t)(gbl_insn_cyc - line_start) + gbl_sync_ly_lag;
++            if (gbl_sync_halt_snd > 0) {
++                /* VBA: LY reads 0 from 6 ticks (+ the quantization) into line 153 */
++                if (ly == 153 && stage && at <= (int32_t)LY153_EFF + 8) return 153;
++                if (ly == 0 && at < 0) {
++                    int32_t a153 = (int32_t)(gbl_insn_cyc - (line_start - line_len(153))) + gbl_sync_ly_lag;
++                    return a153 > (int32_t)LY153_EFF + 8 ? 0 : 153;
++                }
++            }
 +            if (at < 0) return (uint8_t)(ly ? ly - 1 : 153);
 +            if (at >= 456) return (uint8_t)(ly >= 153 ? 0 : ly + 1);
 +        }
@@ -578,7 +686,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
  void gbl_ppu_write(uint8_t n, uint8_t v) {
      gbl_ppu_sync(gbr.cyc);
  #if GBL_FRAME_SIGNATURE
-@@ -1264,39 +1387,54 @@
+@@ -1264,39 +1412,54 @@
  #endif
      switch (n) {
      case 0x40:
@@ -608,7 +716,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
 +            if (gbl_sync_vba_off_clock == 2) {
 +                /* gbl.h: line 0 runs ten lines of mode 0, LY 0, no STAT edge */
 +                on_pend = 1;
-+                on_at = gbr.cyc + 9u * LINE_CYCLES;
++                on_at = gbl_insn_cyc + 9u * LINE_CYCLES + (gbl_sync_halt_snd > 0 ? 2u : (uint32_t)(gbr.cyc - gbl_insn_cyc)); /* VBA V7: counted from the start of the writing instruction */
 +            } else
 +                lcd_enable_at(gbr.cyc, 1);
 +        } else if (!(v & 0x80) && on_pend) {
@@ -654,7 +762,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      case 0x44: return;
      default: gbl_io[n] = v; break;
      }
-@@ -1310,7 +1448,29 @@
+@@ -1310,7 +1473,29 @@
      }
  }
  
@@ -684,7 +792,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      LCDC = 0x91;
      STAT = 0x00;
      BGP = 0xFC;
-@@ -1325,6 +1485,7 @@
+@@ -1325,6 +1510,7 @@
      stat_line = 0;
      off_start = gbr.cyc;
      update_due();
@@ -692,7 +800,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      stat_refresh();
      P.spr_ly = 0xFF;
      bg_pairs_bgp = -1;
-@@ -1340,6 +1501,11 @@
+@@ -1340,6 +1526,11 @@
  void gbl_ppu_state_io(gbl_state_fn io, void *ctx, int load) {
      io(&gbl_ppu_state, sizeof(gbl_ppu_state), ctx);
      if (!load) return;
@@ -704,7 +812,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      P.evt_dirty = 1;
      P.moved = 1;
      P.spr_ly = 0xFF;
-@@ -1359,3 +1525,4 @@
+@@ -1359,3 +1550,4 @@
  #endif
      update_due();
  }
