@@ -205,6 +205,7 @@ void dp_gbl_hook_trace(int v, int i, uint16_t pc) {
             const gbl_cpu_t *c = m->api->gbr;
             uint8_t f = (uint8_t)((c->zr == 0 ? 0x80 : 0) | (c->nf ? 0x40 : 0) | (c->hf ? 0x20 : 0) | (c->cf ? 0x10 : 0));
             fprintf(dp_instr_f, "%u %04x %02x %02x %04x %04x %04x %04x %u\n", (unsigned)c->cyc, pc, c->a, f, c->bc, c->de, c->hl, c->sp, c->ime);
+            if (getenv("DEEPEEL_TAS_INSTR_IF")) fprintf(dp_instr_f, "#IF=%02x IE=%02x LY=%02x\n", m->api->io[0x0F], m->api->ie ? *m->api->ie : 0, m->api->io[0x44]);
         }
     }
     if (!m || !m->on_step) return;

@@ -1,6 +1,6 @@
 diff -ruN a/gbl_core.c b/gbl_core.c
---- a/gbl_core.c
-+++ b/gbl_core.c
+--- a/gbl_core.c	2026-11-06 21:47:21.672263505 +0100
++++ b/gbl_core.c	2026-11-07 12:05:12.132752764 +0100
 @@ -1,8 +1,13 @@
 +#include <stdlib.h>
  /*
@@ -175,12 +175,46 @@ diff -ruN a/gbl_core.c b/gbl_core.c
  #if GBL_DEBUG_RESTART
      if (gbr.pc - 0x68u < 0x150u - 0x68u && !gbl_dbg_badirq.frame)
          dbg_badirq((uint32_t)(uintptr_t)__builtin_return_address(0));
-@@ -1982,11 +2056,71 @@
+@@ -1953,10 +2027,25 @@
+ 
+ /* Wait in HALT until an interrupt is pending, then service it when IME is
+  * set.  Returns nonzero when control did not come back to resume_pc. */
++/* VBA's sound grid is 96 cycles of its 64-bit tick counter; gbr.cyc is 32 bits, and 2^32 is
++ * not a multiple of 96 (2^32 mod 96 = 64): after w wraps of gbr.cyc the grid sits at
++ * (phase + 32 * w) mod 96 in gbr.cyc terms.  gbl_sync_halt_snd carries phase + 1 in bits
++ * 0..6 and w above (the host sets w from the movie frame when it loads a state; the core
++ * counts the wraps it sees afterwards). */
++static uint32_t halt_last_cyc;
++static void halt_track(uint32_t h0) {
++    if (h0 < halt_last_cyc && halt_last_cyc - h0 > 0x80000000u) gbl_sync_halt_snd += 128;
++    halt_last_cyc = h0;
++}
++static uint32_t halt_grid_phase(void) {
++    uint32_t v = (uint32_t)(gbl_sync_halt_snd - 1);
++    return ((v & 127u) + 32u * (v >> 7)) % 96u;
++}
+ uint8_t gbl_halt_bug; /* reference modes only: the next fetch leaves PC where it is */
+ void gbl_halt_wait(void) {
+     gbl_sync();
+     uint32_t h0 = gbr.cyc;
++    if (gbl_sync_halt_snd > 0) halt_track(h0);
+ #if defined(GBL_PPU_REF) && GBL_PPU_REF
+     /* HALT with IME=0 and an interrupt already pending does not halt: the
+      * byte after it is fetched twice (halt bug). */
+@@ -1982,11 +2071,80 @@
          gbr.cyc = (t & ~3u) + 4u;
      } else if (!slept) {
          gbr.cyc = h0 + 4u;
 +        if (gbl_sync_halt_snd > 0 && (IF & 1u) && (gbl_io[0x40] & 0x80u)) {
-+            uint32_t ph = (uint32_t)(gbl_sync_halt_snd - 1);
++            uint32_t ph = halt_grid_phase();
++            /* the VBlank entered on the very tick the HALT ends: VBA has armed
++             * gbInterruptWait although no instruction boundary saw it */
++            int at_entry = 0;
++            if (vbl_wst == 0 && (int32_t)(h0 - gbl_vbl_cyc) >= 0 && (int32_t)(h0 - gbl_vbl_cyc) < 4) {
++                vbl_wst = 1;
++                vbl_wait = 24;
++                at_entry = 1;
++            }
 +            if (vbl_wst == 1) {
 +                /* HALT entered while the VBlank is held back by gbInterruptWait: the
 +                 * wait left after this HALT is walked step by step (sound grid /
@@ -188,6 +222,7 @@ diff -ruN a/gbl_core.c b/gbl_core.c
 +                 * that starts with the wait expired (VBA V7 halted loop). */
 +                int32_t wl = vbl_wait - 4;
 +                uint32_t wait = wl > 0 ? (uint32_t)wl : 0u, now = h0 + 4u;
++                if (at_entry) now = h0; /* VBA's first halted step starts at the VBlank tick */
 +                for (;;) {
 +                    uint32_t lb = gbl_vbl_cyc + 456u * ((now - gbl_vbl_cyc) / 456u + 1u);
 +                    uint32_t e = (((now - ph) % 96u) == 0u) ? lb : now + 96u - ((now - ph) % 96u);
@@ -213,7 +248,7 @@ diff -ruN a/gbl_core.c b/gbl_core.c
 +             * consumed by the length of every step from the VBlank one on and
 +             * the IRQ is taken at the end of the first step that begins with
 +             * the wait expired. */
-+            uint32_t ph = (uint32_t)(gbl_sync_halt_snd - 1);
++            uint32_t ph = halt_grid_phase();
 +            uint32_t now = t - 204u, last;
 +            if ((int32_t)(now - h0) < 0) now = h0;
 +            last = now;
@@ -247,7 +282,7 @@ diff -ruN a/gbl_core.c b/gbl_core.c
      gbl_sync();
  }
  
-@@ -2185,10 +2319,13 @@
+@@ -2185,10 +2343,13 @@
  #endif
      /* E000-EFFF echoes C000-CFFF (F000-FDFF shares a page with OAM, IO
       * and HRAM and stays on the slow path). */
@@ -262,7 +297,7 @@ diff -ruN a/gbl_core.c b/gbl_core.c
  void gbl_reset(void) {
      __asm__ volatile("" : : "r"(&gbl_input_probe));
      memset(&gbr, 0, sizeof(gbr));
-@@ -2228,6 +2365,7 @@
+@@ -2228,6 +2389,7 @@
      gbr.sp = 0xFFFE; gbr.pc = 0x0100;
      gbl_ie = 0;
      gbl_io[0x00] = 0x30;
@@ -270,7 +305,7 @@ diff -ruN a/gbl_core.c b/gbl_core.c
      joypad_update();
      IF = 0x01;
      TAC = 0; TIMA = 0; TMA = 0;
-@@ -2315,6 +2453,19 @@
+@@ -2315,6 +2477,20 @@
      gbl_ppu_state_io(io, ctx, load);
      gbl_apu_state_io(io, ctx, load);
      if (!load) return;
@@ -286,13 +321,14 @@ diff -ruN a/gbl_core.c b/gbl_core.c
 +    /* absolute cycle stamps of the previous run (the host may load a state
 +     * from inside an instruction hook): a loaded state restarts the clock */
 +    gbl_insn_cyc = gbr.cyc;
++    halt_last_cyc = gbr.cyc;
 +    gbl_vbl_cyc = gbr.cyc - 1000000u;
      map_pages();
  #if GBL_LOOKUP_CACHE
      for (int i = 0; i < GBL_LOOKUP_CACHE; i++) lookup_cache[i].pc = 0xFFFF;
 diff -ruN a/gbl_cpu.c b/gbl_cpu.c
---- a/gbl_cpu.c
-+++ b/gbl_cpu.c
+--- a/gbl_cpu.c	2026-11-06 21:47:21.672263505 +0100
++++ b/gbl_cpu.c	2026-11-06 23:50:56.236409178 +0100
 @@ -294,7 +294,11 @@
      case 0x37: gbr.cf = 1; gbr.nf = 0; gbr.hf = 0; break;
      case 0x3F: gbr.cf ^= 1; gbr.nf = 0; gbr.hf = 0; break;
@@ -343,9 +379,9 @@ diff -ruN a/gbl_cpu.c b/gbl_cpu.c
          extern uint8_t gbl_rom_fetch; /* opcode fetches are not data reads */
          gbl_rom_fetch = 1;
 diff -ruN a/gbl.h b/gbl.h
---- a/gbl.h
-+++ b/gbl.h
-@@ -416,6 +416,89 @@
+--- a/gbl.h	2026-11-06 21:47:21.672263505 +0100
++++ b/gbl.h	2026-11-07 11:21:17.477366373 +0100
+@@ -416,6 +416,91 @@
  extern uint8_t gbl_safe_request;
  void gbl_platform_safe_point(void); /* weak default: nothing */
  
@@ -390,7 +426,9 @@ diff -ruN a/gbl.h b/gbl.h
 + * sound timer, a fixed 24-tick (96 cycle) grid, and services the vblank
 + * interrupt only at the end of the step that follows the line-144 flip, so
 + * the HALT exit lands on that grid (11316 of 11413 halted vblank entries of
-+ * a Zelda movie).  Value = grid phase in cycles + 1; 0 = hardware wake-up. */
++ * a Zelda movie).  Value = grid phase in cycles + 1 (bits 0..6); 0 = hardware wake-up.
++ * Bits 7.. count the wraps of the 32-bit gbr.cyc (2^32 mod 96 = 64 shifts the grid):
++ * the host sets them when it loads a state, the core adds the wraps it sees. */
 +extern int16_t gbl_sync_halt_snd;
 +extern uint32_t gbl_vbl_cyc;
 +void gbl_vba_ei(void);
@@ -436,8 +474,8 @@ diff -ruN a/gbl.h b/gbl.h
  extern uint8_t gbl_interp_only;     /* ignore compiled code (reference mode) */
  extern uint32_t gbl_frame;
 diff -ruN a/gbl_ppu.c b/gbl_ppu.c
---- a/gbl_ppu.c
-+++ b/gbl_ppu.c
+--- a/gbl_ppu.c	2026-11-06 21:47:21.672263505 +0100
++++ b/gbl_ppu.c	2026-11-07 09:08:48.858936135 +0100
 @@ -1,3 +1,4 @@
 +#include <stdio.h>
  /*

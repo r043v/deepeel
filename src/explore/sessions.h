@@ -164,6 +164,16 @@ typedef struct {
     int film, films;          // 1-based number of the movie being shown among all the queued ones
     char name[256];
 } DpWatchInfo;
+// one tile per replaying movie (the whole-run mosaic): last sampled image + progress
+typedef struct {
+    uint8_t shades[160 * 144];
+    int have;                 // an image has been sampled for this film
+    int film, films;          // 1-based film number among the queued ones
+    uint32_t frame, total, live_frame;
+    int done;                 // the movie reached its last frame
+    char name[256];
+} DpWatchTile;
+int dp_play_watch_tiles(DpPlay *p, DpWatchTile *t, int max);
 // returns the number of replaying movies (0 = nothing to watch)
 int dp_play_watch_enable(DpPlay *p, int fps);
 void dp_play_watch_disable(DpPlay *p);

@@ -10,6 +10,10 @@
 
 #include <SDL.h>
 #include <pthread.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include "../explore/ref_feed.h"
 #include <stdatomic.h>
 #include <time.h>
 
@@ -504,8 +508,8 @@ int dp_gui_run(DpResults *res, DpConfig *cfg, DpExplorer *ex, DpPlay *play) {
     return 0;
 }
 
-// --- watch window ---------------------------------------------------------------
-enum { DP_WATCH_SC = 3, DP_WATCH_STRIP = 64 };
+// --- watch window: a mosaic, one tile per replaying movie ------------------------------
+enum { DP_WATCH_TILES = 32, DP_WATCH_CAP = 30 };
 
 static pthread_t watch_th;
 static int watch_running;
@@ -519,6 +523,7 @@ static double watch_now(void) {
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 
+
 static void *watch_main(void *arg) {
     (void)arg;
     // all SDL calls stay in this thread
@@ -526,9 +531,8 @@ static void *watch_main(void *arg) {
         fprintf(stderr, "deepeel: watch: SDL_Init: %s\n", SDL_GetError());
         return NULL;
     }
-    const int w = DP_GB_SCREEN_W * DP_WATCH_SC, h = DP_GB_SCREEN_H * DP_WATCH_SC + DP_WATCH_STRIP;
     SDL_Window *win = SDL_CreateWindow("deepeel watch", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                       w, h, 0);
+                                       960, 720, SDL_WINDOW_RESIZABLE);
     SDL_Renderer *ren = win ? SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED) : NULL;
     if (win && !ren) ren = SDL_CreateRenderer(win, -1, 0);
     if (!win || !ren) {
@@ -537,74 +541,97 @@ static void *watch_main(void *arg) {
         SDL_Quit();
         return NULL;
     }
-    uint8_t shades[DP_GB_SCREEN_W * DP_GB_SCREEN_H];
-    memset(shades, 0, sizeof shades);
-    DpWatchInfo info;
-    memset(&info, 0, sizeof info);
-    int have = 0;
-    // real speed: replay frames per wall second, smoothed over ~1 s
-    double t_ref = watch_now(), speed = 0;
-    uint32_t f_ref = 0;
-    int movie_ref = -1;
+    static DpWatchTile tiles[DP_WATCH_TILES];
+    static SDL_Texture *tex[DP_WATCH_TILES];
+    static uint32_t px[DP_GB_SCREEN_W * DP_GB_SCREEN_H];
+    static int film_ref[DP_WATCH_TILES];
+    static uint32_t f_ref[DP_WATCH_TILES], img_ref[DP_WATCH_TILES];
+    static double t_ref[DP_WATCH_TILES], speed[DP_WATCH_TILES];
+    for (int i = 0; i < DP_WATCH_TILES; i++) {
+        tex[i] = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+                                   DP_GB_SCREEN_W, DP_GB_SCREEN_H);
+        img_ref[i] = 0xFFFFFFFFu;
+    }
+    DpRefFeed *ref = dp_ref_open();
     while (!atomic_load(&watch_quit)) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) atomic_store(&watch_quit, 1);
-            else if (e.type == SDL_KEYDOWN) {
-                SDL_Keycode k = e.key.keysym.sym;
-                if (k == SDLK_ESCAPE) atomic_store(&watch_quit, 1);
-                else if (k == SDLK_SPACE || k == SDLK_TAB || k == SDLK_RIGHT)
-                    dp_play_watch_next(watch_play, info.movies > 0 ? info.movies : 1);
-            }
+            else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) atomic_store(&watch_quit, 1);
         }
-        DpWatchInfo ni;
-        uint8_t tmp[DP_GB_SCREEN_W * DP_GB_SCREEN_H];
-        if (dp_play_watch_read(watch_play, tmp, &ni)) {
-            memcpy(shades, tmp, sizeof shades);
-            info = ni;
-            have = 1;
+        int n = dp_play_watch_tiles(watch_play, tiles, DP_WATCH_TILES - 1);
+        if (ref) {
+            // the reference follows the first movie; its tile comes right after
+            if (n > 0) ref->master = tiles[0].live_frame;
+            uint32_t s0;
+            DpWatchTile *rt = &tiles[n];
+            memset(rt, 0, sizeof *rt);
+            do { s0 = ref->seq; memcpy(rt->shades, (const void *)ref->shades, sizeof rt->shades); } while ((s0 & 1u) || s0 != ref->seq);
+            rt->have = ref->magic == DP_REF_MAGIC;
+            rt->film = 900; rt->films = 1; // a film id of its own: its speed meter restarts independently
+            rt->frame = rt->live_frame = ref->vframe;
+            rt->total = n > 0 ? tiles[0].total : 0;
+            snprintf(rt->name, sizeof rt->name, "VBA 1.7.2 (reference)");
+            n++;
         }
         double now = watch_now();
-        if (have) {
-            if ((info.film ? info.film : info.movie) != movie_ref) {
-                movie_ref = info.film ? info.film : info.movie;
-                t_ref = now;
-                f_ref = info.live_frame;
-                speed = 0;
-            } else if (now - t_ref >= 1.0) {
-                if (info.live_frame >= f_ref) speed = (info.live_frame - f_ref) / (now - t_ref);
-                t_ref = now;
-                f_ref = info.live_frame;
-            }
-        }
+        int W, H;
+        SDL_GetRendererOutputSize(ren, &W, &H);
         set_color(ren, 16, 16, 20);
         SDL_RenderClear(ren);
-        for (int y = 0; y < DP_GB_SCREEN_H; y++)
-            for (int x = 0; x < DP_GB_SCREEN_W; x++) {
-                uint8_t v = (uint8_t)(255 - shades[y * DP_GB_SCREEN_W + x] * 85);
-                set_color(ren, v, v, v);
-                SDL_Rect r = { x * DP_WATCH_SC, y * DP_WATCH_SC, DP_WATCH_SC, DP_WATCH_SC };
-                SDL_RenderFillRect(ren, &r);
-            }
-        int ty = DP_GB_SCREEN_H * DP_WATCH_SC + 6;
-        char buf[200];
-        if (!have) {
-            draw_text(ren, 6, ty, "waiting for the first image...", 1, gui_color(DP_C_DIM));
-        } else {
-            const char *base = strrchr(info.name, '/');
-            base = base ? base + 1 : info.name;
-            snprintf(buf, sizeof buf, "%.52s", base);
-            draw_text(ren, 6, ty, buf, 1, gui_color(DP_C_TITLE));
-            snprintf(buf, sizeof buf, "movie %d/%d  frame %u/%u", info.film ? info.film : info.movie + 1,
-                     info.films ? info.films : info.movies, (unsigned)info.frame, (unsigned)info.total);
-            draw_text(ren, 6, ty + 12, buf, 1, gui_color(DP_C_TEXT));
-            snprintf(buf, sizeof buf, "replay %.0f frames/s  (shown %d img/s)", speed, watch_fps_cfg);
-            draw_text(ren, 6, ty + 24, buf, 1, gui_color(DP_C_LABEL));
+        // the grid that gives the largest image per tile
+        int cols = 1, rows = 1;
+        double best = 0;
+        const int CAP = 30; // caption height under each image
+        for (int c = 1; c <= (n > 0 ? n : 1); c++) {
+            int r = (n + c - 1) / (c > 0 ? c : 1);
+            if (r < 1) r = 1;
+            double cw = (double)W / c, ch = (double)H / r - CAP;
+            if (ch <= 0) continue;
+            double sc = cw / DP_GB_SCREEN_W < ch / DP_GB_SCREEN_H ? cw / DP_GB_SCREEN_W : ch / DP_GB_SCREEN_H;
+            if (sc > best) { best = sc; cols = c; rows = r; }
         }
-        draw_text(ren, 6, ty + 40, "space/tab: next movie   esc: close", 1, gui_color(DP_C_DIM));
+        if (n == 0) draw_text(ren, 6, 6, "waiting for a replaying movie...", 1, gui_color(DP_C_DIM));
+        for (int i = 0; i < n; i++) {
+            DpWatchTile *t = &tiles[i];
+            if (t->film != film_ref[i]) { // another movie in this slot: restart its speed meter
+                film_ref[i] = t->film; t_ref[i] = now; f_ref[i] = t->live_frame; speed[i] = 0; img_ref[i] = 0xFFFFFFFFu;
+            } else if (now - t_ref[i] >= 1.0) {
+                if (t->live_frame >= f_ref[i]) speed[i] = (t->live_frame - f_ref[i]) / (now - t_ref[i]);
+                t_ref[i] = now; f_ref[i] = t->live_frame;
+            }
+            if (t->done) speed[i] = 0;
+            int cw = W / cols, chh = H / rows;
+            int ox = (i % cols) * cw, oy = (i / cols) * chh;
+            int iw = cw - 4, ih = chh - CAP - 2;
+            double sc = (double)iw / DP_GB_SCREEN_W < (double)ih / DP_GB_SCREEN_H ? (double)iw / DP_GB_SCREEN_W : (double)ih / DP_GB_SCREEN_H;
+            if (sc < 0.25) sc = 0.25;
+            int dw = (int)(DP_GB_SCREEN_W * sc), dh = (int)(DP_GB_SCREEN_H * sc);
+            if (t->have && tex[i] && (t->frame != img_ref[i])) {
+                for (int k = 0; k < DP_GB_SCREEN_W * DP_GB_SCREEN_H; k++) {
+                    uint32_t v = (uint32_t)(255 - t->shades[k] * 85);
+                    px[k] = 0xFF000000u | v << 16 | v << 8 | v;
+                }
+                SDL_UpdateTexture(tex[i], NULL, px, DP_GB_SCREEN_W * 4);
+                img_ref[i] = t->frame;
+            }
+            SDL_Rect dst = { ox + (cw - dw) / 2, oy + 2, dw, dh };
+            if (t->have && tex[i]) SDL_RenderCopy(ren, tex[i], NULL, &dst);
+            else { set_color(ren, 40, 40, 48); SDL_RenderFillRect(ren, &dst); }
+            const char *base = strrchr(t->name, '/');
+            base = base ? base + 1 : t->name;
+            char buf[200];
+            int maxc = cw / 6 - 1; if (maxc < 4) maxc = 4; if (maxc > 60) maxc = 60;
+            snprintf(buf, sizeof buf, "%d/%d %.*s", t->film, t->films, maxc - 6, base);
+            draw_text(ren, ox + 4, oy + dh + 4, buf, 1, gui_color(DP_C_TITLE));
+            if (t->done) snprintf(buf, sizeof buf, "done  %u frames", (unsigned)t->total);
+            else snprintf(buf, sizeof buf, "%u/%u  %.0f f/s", (unsigned)t->live_frame, (unsigned)t->total, speed[i]);
+            draw_text(ren, ox + 4, oy + dh + 16, buf, 1, gui_color(t->done ? DP_C_DIM : DP_C_TEXT));
+        }
         SDL_RenderPresent(ren);
-        SDL_Delay(1000 / (watch_fps_cfg > 0 ? watch_fps_cfg : 30) / 2 + 1);
+        SDL_Delay(1000 / (watch_fps_cfg > 0 ? watch_fps_cfg : DP_WATCH_CAP) / 2 + 1);
     }
+    for (int i = 0; i < DP_WATCH_TILES; i++) if (tex[i]) SDL_DestroyTexture(tex[i]);
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
     SDL_Quit();

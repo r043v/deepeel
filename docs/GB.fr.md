@@ -465,10 +465,12 @@ stderr ; une saturation n'est jamais silencieuse.
 fenêtre SDL2 (sans carte ni stats) qui montre l'écran du jeu rejoué par le
 TAS, échantillonné à 1..30 images/s en temps humain (défaut 30). Une image
 sur 1/FPS s est rendue par la machine du film, les autres ne le sont pas :
-le TAS n'est pas ralenti. La fenêtre affiche le film, sa frame courante, et
-la vitesse réelle du rejeu en frames/s (observation de l'outil). `Espace`,
-`Tab` ou `→` passent au film suivant ; `Échap` ferme la fenêtre seule, le
-run continue. Sans SDL2, l'option affiche un message et est ignorée.
+le TAS n'est pas ralenti. Depuis 0.249.74 la fenêtre est une **mosaïque** :
+une vignette par worker qui rejoue un film (grille choisie pour la plus grande
+image, fenêtre redimensionnable), avec le numéro du film, son nom, la frame
+courante et la vitesse réelle du rejeu en frames/s (observation de l'outil) ;
+un film terminé garde sa dernière image marquée « done ». `Échap` ferme la
+fenêtre seule, le run continue. Sans SDL2, l'option affiche un message et est ignorée.
 
 ## Copies des longues sessions, provenance, sources sœurs, identité des films (0.22.0)
 
@@ -4224,3 +4226,14 @@ du profil VBA mineur 0 : `LYLAG=1`, `IRQTRIM=20`, `HALTSND=0` (variables
 - **Réveil de HALT (VBA V7)** : quand un HALT démarre alors que le vblank est déjà levé mais retenu par `gbInterruptWait`, le patch compat marche le HALT par pas (grille sonore de 96 cycles, puis ligne LCD suivante) avec l'attente restante, au lieu d'un cas figé. Sur `bobmario511-zeldagb-playaround` (145 368 images), l'écart durable qui commençait à l'image 52691 disparaît ; le premier écart durable restant est à l'image 59601 (observation de l'outil face à VBA V7).
 - **Débit** : `dp_section_touch` ne prend plus `sec_mtx` à chaque instruction exécutée (cache de compteurs par thread, vidé en fin d'époque), `steps_total` est mis à jour par lots de 1024, `dp_cov_mark` et `flags_or` n'écrivent plus quand les bits sont déjà posés. Neuf sessions sur huit films Zelda : 396 snapshots en 25 s contre 112 avant.
 - **Watch** : le libellé affiche le numéro réel du film (parmi tous ceux en file) et non l'emplacement du worker ; le compteur de vitesse repart à zéro à chaque changement de film.
+
+## Mise à jour 0.249.74 : watch en mosaïque
+
+- `--watch` affiche tous les films rejoués en même temps (une vignette par worker, textures SDL mises à jour uniquement quand l'image change) au lieu d'un seul film sélectionné qui restait figé à sa fin. Chaque worker échantillonne son propre écran (`DpWorker.watch_img`, sous `watch_mtx`), exposé par `dp_play_watch_tiles`. La fenêtre de la carte (`--map`) garde le flux d'un seul film (`dp_play_watch_read`).
+- `tools/lockstep.py` : le filtre de fenêtre et le calcul des décalages se font modulo 2³² (le compteur de cycles de deepeel est sur 32 bits) ; avant, une fenêtre au-delà du tick 2³⁰ donnait une trace deepeel vide.
+
+## Mise à jour 0.249.75 : phase de la grille sonore de HALT, watch côte à côte avec VBA
+
+- **Grille sonore de HALT (VBA V7)** : la grille de 96 cycles de VBA court sur un compteur 64 bits ; `gbr.cyc` est sur 32 bits et 2³² mod 96 = 64, donc après chaque repli la grille se décale de 32 cycles (modulo 96). Le patch compat compte les replis vus pendant les HALT (`halt_track`, bits hauts de `gbl_sync_halt_snd`) et corrige la phase (`halt_grid_phase`). Sur `bobmario511-zeldagb-playaround`, l'écart RNG de l'image 59601 (réveil de HALT 32 cycles trop tôt) et ceux qui en découlaient (67887, 82068, ~90k) disparaissent ; le premier écart durable est maintenant à l'image 123131 (`$C13D`). Limite : un état rechargé en cours de film (reprise) perd le compte de replis. Observation de l'outil face à VBA V7, pas une mesure de matériel.
+- **Comparaison en direct** : `DEEPEEL_WATCH_REF=<fichier>` ajoute à la mosaïque une vignette « VBA 1.7.2 (reference) » alimentée par un harnais VBA (`VBAH_LIVE=<fichier>`, écran partagé par mmap, `src/explore/ref_feed.h`). Le rejeu du premier film ne dépasse pas la référence de plus d'une image : les deux vignettes montrent la même image. Le harnais VBA reste hors du dépôt.
+- `DEEPEEL_TAS_INSTR_IF=1` ajoute IF/IE/LY (ligne `#IF=…`) à la trace d'instructions `DEEPEEL_TAS_INSTR` (diagnostic, incompatible avec `tools/lockstep.py`).

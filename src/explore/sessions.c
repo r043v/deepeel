@@ -16,6 +16,7 @@
 #include "sessions.h"
 #include "novelty.h"
 #include "../core/snapshot_png.h"
+#include "ref_feed.h"
 #include "../mach/m0boy.h"
 #include "tas.h"
 
@@ -295,6 +296,9 @@ typedef struct DpWorker {
     // watch sampling (IN_TAS only): the screen is rendered one frame out of
     // every 1/fps seconds, the rest of the time rendering stays off
     int watch_armed;
+    uint8_t watch_img[DP_GB_SCREEN_W * DP_GB_SCREEN_H]; // last sampled screen of this worker's movie (under watch_mtx)
+    int watch_img_film;     // 1-based film the image belongs to (0 = none yet)
+    uint32_t watch_img_frame, watch_img_total;
     uint64_t watch_next_ns;
 } DpWorker;
 
@@ -351,10 +355,6 @@ struct DpPlay {
     int watch_fps;          // 0 = off
     int watch_sel;          // which TAS worker is shown (index among the movies)
     pthread_mutex_t watch_mtx;
-    uint8_t watch_buf[DP_GB_SCREEN_W * DP_GB_SCREEN_H];
-    int watch_have;
-    int watch_buf_movie;
-    uint32_t watch_frame, watch_total;
     // totals
     uint64_t total_frames;
     uint64_t stagnation;
@@ -566,25 +566,14 @@ static int tas_movie_index(const DpPlay *p, const DpWorker *w) {
 static void watch_sample(DpPlay *p, DpWorker *w, DpMach *m) {
     int fps = __atomic_load_n(&p->watch_fps, __ATOMIC_RELAXED);
     if (!fps || !w->tas.masks) return;
-    int mine = tas_movie_index(p, w);
-    if (mine != __atomic_load_n(&p->watch_sel, __ATOMIC_RELAXED)) {
-        if (w->watch_armed) { w->watch_armed = 0; m->render = 0; m->api->skip_render[0] = 1; }
-        return;
-    }
     if (w->watch_armed) { // the frame just finished was rendered in full
         pthread_mutex_lock(&p->watch_mtx);
         for (int y = 0; y < DP_GB_SCREEN_H; y++)
             for (int x = 0; x < DP_GB_SCREEN_W; x++)
-                p->watch_buf[y * DP_GB_SCREEN_W + x] = m->screen[y][x];
-        if (getenv("DEEPEEL_WATCH_DEBUG")) {
-            int nz = 0;
-            for (int y = 0; y < DP_GB_SCREEN_H; y++) for (int x = 0; x < DP_GB_SCREEN_W; x++) nz += m->screen[y][x] != 0;
-            fprintf(stderr, "watch: movie %d(tas %d) frame %u nonzero %d lcdc %02x bgp %02x pc %04x lines %u\n", mine, w->tas_idx, (unsigned)w->frames_done, nz, m->api->io[0x40], m->api->io[0x47], m->api->gbr->pc, (unsigned)m->lines);
-        }
-        p->watch_have = 1;
-        p->watch_buf_movie = mine;
-        p->watch_frame = w->frames_done;
-        p->watch_total = w->tas.frames;
+                w->watch_img[y * DP_GB_SCREEN_W + x] = m->screen[y][x];
+        w->watch_img_film = w->tas_idx + 1;
+        w->watch_img_frame = (uint32_t)w->frames_done;
+        w->watch_img_total = (uint32_t)w->tas.frames;
         pthread_mutex_unlock(&p->watch_mtx);
         w->watch_armed = 0;
         m->render = 0;
@@ -732,6 +721,7 @@ static void worker_vblank(DpMach *m) {
     w->applied_mask = mask;
     m->api->set_buttons(mask);
 
+    if (w->mode == IN_TAS && w->tas_idx == 0) dp_ref_gate((uint32_t)w->frames_done);
     w->frames_done++;
     w->epoch_done++;
     if (w->mode == IN_TAS) watch_sample(p, w, m);
@@ -1956,34 +1946,56 @@ void dp_play_watch_next(DpPlay *p, int n) {
                      __ATOMIC_RELAXED);
 }
 
+int dp_play_watch_tiles(DpPlay *p, DpWatchTile *t, int max) {
+    if (!p) return 0;
+    int n = 0;
+    for (int i = 0; i < p->nworkers && n < max; i++) {
+        DpWorker *w = &p->w[i];
+        if (!w->tas.masks) continue;
+        DpWatchTile *o = &t[n++];
+        o->film = w->tas_idx + 1;
+        o->films = p->cfg.tas_n;
+        o->total = (uint32_t)w->tas.frames;
+        o->live_frame = (uint32_t)__atomic_load_n(&w->frames_done, __ATOMIC_RELAXED);
+        o->done = o->live_frame >= o->total;
+        snprintf(o->name, sizeof o->name, "%s", w->tas.source);
+        pthread_mutex_lock(&p->watch_mtx);
+        o->have = w->watch_img_film == o->film;
+        if (o->have) {
+            memcpy(o->shades, w->watch_img, sizeof o->shades);
+            o->frame = w->watch_img_frame;
+        }
+        pthread_mutex_unlock(&p->watch_mtx);
+    }
+    return n;
+}
+
+// the single selected movie (map window): the tile of the sel-th replaying movie
 int dp_play_watch_read(DpPlay *p, uint8_t *shades, DpWatchInfo *info) {
     if (!p) return 0;
-    pthread_mutex_lock(&p->watch_mtx);
-    int ok = p->watch_have;
-    if (ok) {
-        memcpy(shades, p->watch_buf, sizeof p->watch_buf);
-        info->movie = p->watch_buf_movie;
-        info->frame = p->watch_frame;
-        info->total = p->watch_total;
-    }
-    pthread_mutex_unlock(&p->watch_mtx);
-    if (!ok) return 0;
-    // movie name and the movie's live frame counter (read racily, display only)
-    int k = 0;
-    info->movies = 0;
-    info->film = 0;
-    info->films = p->cfg.tas_n;
-    info->name[0] = 0;
-    info->live_frame = 0;
+    int sel = __atomic_load_n(&p->watch_sel, __ATOMIC_RELAXED), k = 0;
     for (int i = 0; i < p->nworkers; i++) {
-        if (!p->w[i].tas.masks) continue;
-        if (k == info->movie) {
-            snprintf(info->name, sizeof info->name, "%s", p->w[i].tas.source);
-            info->live_frame = __atomic_load_n(&p->w[i].frames_done, __ATOMIC_RELAXED);
-            info->film = p->w[i].tas_idx + 1;
+        DpWorker *w = &p->w[i];
+        if (!w->tas.masks) continue;
+        if (k++ != sel) continue;
+        int ok;
+        pthread_mutex_lock(&p->watch_mtx);
+        ok = w->watch_img_film == w->tas_idx + 1;
+        if (ok) {
+            memcpy(shades, w->watch_img, DP_GB_SCREEN_W * DP_GB_SCREEN_H);
+            info->frame = w->watch_img_frame;
+            info->total = w->watch_img_total;
         }
-        k++;
+        pthread_mutex_unlock(&p->watch_mtx);
+        if (!ok) return 0;
+        info->movie = sel;
+        info->film = w->tas_idx + 1;
+        info->films = p->cfg.tas_n;
+        info->live_frame = (uint32_t)__atomic_load_n(&w->frames_done, __ATOMIC_RELAXED);
+        snprintf(info->name, sizeof info->name, "%s", w->tas.source);
+        info->movies = 0;
+        for (int j = 0; j < p->nworkers; j++) if (p->w[j].tas.masks) info->movies++;
+        return 1;
     }
-    info->movies = k;
-    return 1;
+    return 0;
 }

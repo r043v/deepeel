@@ -22,7 +22,8 @@ def read_fifo_window(fifo, lo, hi, out):
             if not t:
                 continue
             c = int(t[0])
-            if lo <= c <= hi:
+            # deepeel's cycle counter is 32 bits wide: compare modulo 2**32
+            if (c - lo) & 0xFFFFFFFF <= (hi - lo) & 0xFFFFFFFF:
                 o.write(line)
 
 def main():
@@ -103,7 +104,7 @@ def main():
           (a.t0, a.t1, len(v), len(d), k))
     prev = None
     for i in range(n):
-        off = int(d[k + i][0]) - 4 * int(v[i][0])
+        off = (int(d[k + i][0]) - 4 * int(v[i][0]) + 0x80000000) % 0x100000000 - 0x80000000  # modulo 2**32
         if off != prev:
             print("  offset %+d cycles from instruction %d (pc %s, VBA tick %s)" % (off, i, v[i][1], v[i][0]))
             prev = off
