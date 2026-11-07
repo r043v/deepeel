@@ -49,8 +49,8 @@ void dp_session_cfg_defaults(DpSessionCfg *cfg) {
     cfg->tas_ckpt_max = 4096;
     cfg->tas_rng = 1;
     cfg->tas_rng_share = 1; // every segment, until each checkpoint has had tas_rng_per of them
-    cfg->tas_rng_per = 8;
-    cfg->tas_rng_min = 3600;
+    cfg->tas_rng_per = 10;
+    cfg->tas_rng_min = 2000;
     cfg->uniform = 1;
     cfg->uniform_hold = 64;
 }
@@ -69,6 +69,7 @@ typedef struct DpInputState {
     uint32_t rng;
     uint32_t move_left, move_keys, tap_left;
     int uniform;              // draw one of the 8 keys, no human priors
+    int no_start;             // never draw START (TAS-snapshot bursts)
     uint32_t uniform_hold;
 } DpInputState;
 
@@ -85,7 +86,8 @@ static const uint8_t key_tab[8] = { K_A, K_B, 0x04, K_START, K_RIGHT, K_LEFT, K_
 
 static void next_move(DpInputState *in) {
     if (in->uniform) {
-        in->move_keys = key_tab[rnd(&in->rng) % 8]; // one key, uniform
+        do in->move_keys = key_tab[rnd(&in->rng) % 8]; // one key, uniform
+        while (in->no_start && in->move_keys == K_START);
         in->move_left = 1 + rnd(&in->rng) % in->uniform_hold;
         in->tap_left = 0;
         return;
@@ -273,6 +275,8 @@ typedef struct DpWorker {
     uint8_t applied_mask;  // the mask the current frame applied
     // segment state (m0x)
     uint32_t seg_left;
+    int burst;                // segment started from a TAS snapshot: random keys, ends on stall
+    uint32_t burst_idle, burst_len; // frames without a discovery of this run / frames run
     uint64_t credit_prev; // credit at the last observe
     int has_pending;
     DpCheckpoint pending;
@@ -459,6 +463,17 @@ static int promote_pending(DpWorker *w) {
     return slot;
 }
 
+// 1 while a TAS snapshot still owes its random bursts, or one is running: the stagnation wall waits,
+// every snapshot gets its tas_rng_per bursts (the time budget and SIGINT still stop the run)
+static int tas_rng_pending(const DpPlay *p) {
+    if (!p->cfg.tas_rng || !p->cfg.tas_rng_share) return 0;
+    for (int i = 0; i < p->nworkers; i++)
+        if (p->w[i].burst) return 1;
+    for (int i = 0; i < p->tasnaps_n; i++)
+        if (p->tasnaps[i].chosen < p->cfg.tas_rng_per) return 1;
+    return 0;
+}
+
 // m0x_next: promote the pending discovery, deposit the end-of-segment state,
 // then load the next segment start.  Runs inside the vblank hook (frame
 // boundary = instruction boundary) or after a halt cut: the machine keeps
@@ -474,6 +489,9 @@ static void segment_end(DpWorker *w) {
         }
     }
 
+    w->burst = 0;
+    w->in.no_start = 0;
+    w->in.uniform = p->cfg.uniform;
     // next segment start: 1/restart_rate from power-on, a stagnant session
     // re-seeds from the most productive checkpoint, otherwise the least chosen
     pthread_mutex_lock(&p->pool.mtx);
@@ -532,7 +550,14 @@ static void segment_end(DpWorker *w) {
             dp_mach_load(w->mach, tc->img);
             ckpt_free(tc);
             w->backtracked = 1;
-            w->seg_left = p->cfg.tas_rng_min + rnd(&w->in.rng) % (2 * p->cfg.tas_rng_min + 1);
+            // burst: at least tas_rng_min frames of uniform random keys (START excluded), carried on
+            // for as long as the run keeps discovering (it ends after tas_rng_min frames without one)
+            w->burst = 1;
+            w->burst_idle = 0;
+            w->burst_len = 0;
+            w->in.no_start = 1;
+            w->in.uniform = 1;
+            w->seg_left = p->cfg.tas_rng_min;
         } else { // unreadable: the power-on start, as a normal segment
             pthread_mutex_lock(&p->pool.mtx);
             w->backtracked = 0;
@@ -784,6 +809,11 @@ static void worker_vblank(DpMach *m) {
     if (cred > w->credit_prev) {
         observe(w, cred);
         w->credit_prev = cred;
+        w->burst_idle = 0;
+    } else if (w->burst) w->burst_idle++;
+    if (w->burst) { // the segment goes on until a full stall window passes without a discovery
+        w->burst_len++;
+        w->seg_left = (w->burst_idle >= p->cfg.tas_rng_min || w->burst_len >= 216000u) ? 0 : 1;
     }
     dp_copy_flush_path(w->ex, &w->ex->ct);
     if (w->mode == IN_HUMAN) {
@@ -1266,6 +1296,7 @@ static void worker_apply_movie(DpWorker *w) {
     w->frames_done = 0;
     w->applied_mask = 0;
     w->seg_left = 0;
+    w->burst = 0;
     worker_tune_movie(p, w);
     fprintf(stderr, "deepeel: TAS queue: worker %d starts movie %d/%d\n", w->id, w->tas_idx + 1, p->cfg.tas_n);
 }
@@ -1615,7 +1646,7 @@ int dp_play_poll(DpPlay *p) {
     if (__atomic_load_n(&p->tas_next, __ATOMIC_RELAXED) < p->cfg.tas_n) tas_left = 1;
     if (g_sigint) reason = 2;
     else if (p->cfg.max_frames && !tas_left && p->total_frames >= p->cfg.max_frames) reason = 0;
-    else if (p->cfg.stagnation_frames && !tas_left && p->stagnation >= p->cfg.stagnation_frames) reason = 1;
+    else if (p->cfg.stagnation_frames && !tas_left && p->stagnation >= p->cfg.stagnation_frames && !tas_rng_pending(p)) reason = 1;
     else if (p->cfg.until_static && !tas_left && p->unexplained == 0 && frames) reason = 3;
     else if (p->cfg.mem_cap_mb && !p->cfg.unbounded && dp_rss_mb() > p->cfg.mem_cap_mb) reason = 4;
     else if (p->cfg.time_limit_secs &&

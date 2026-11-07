@@ -4266,3 +4266,14 @@ Carte PNG (`map.png`) :
 - **Limite** : l'audio n'est pas distingué. Seule une copie a une destination ; une donnée lue par le moteur
   son n'en a pas. Typer l'audio demanderait d'observer les écritures vers `$FF10-$FF3F` et de les rattacher à
   la source en ROM. Observations de l'outil, pas des mesures de matériel.
+
+## Mise à jour 0.249.78 — rafales aléatoires par snapshot TAS
+
+Chaque snapshot du tas (captures du film) reçoit obligatoirement `--tas-rng-per` = 10 rafales :
+touches totalement aléatoires (tirage uniforme, **START exclu**), au minimum `--tas-rng-frames`
+= 2000 frames (~30 s de jeu), prolongées tant que la rafale découvre, terminées après 2000 frames
+sans découverte propre (plafond 216000 frames). Le mur de stagnation globale attend que tous les
+snapshots aient eu leurs rafales (le budget de temps et SIGINT arrêtent toujours). Le tas étant un
+chemin quasi optimal, ces rafales balaient les alentours de chaque checkpoint à peu de frais ; elles
+se distinguent du jeu aléatoire classique (départ au power-on ou checkpoint du pool, touches à priors).
+Valeurs observées de l'outil, pas des mesures de matériel.
