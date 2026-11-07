@@ -180,6 +180,11 @@ typedef struct DpRtCode {
 } DpRtCode;
 
 #define DP_IX_CAP 2048
+// absolute caps of the record sets a long unbounded run could otherwise grow
+// for days: the sets keep their semantics (first occurrence / curve shape),
+// only the resolution stops, and every refused item is counted (never silent)
+#define DP_BANK_SEEN_CAP_MAX (1u << 22) // distinct bank switches kept (32 MB of set)
+#define DP_DISC_CAP_MAX (1u << 16)      // discovery-log entries before compaction
 typedef struct DpResults {
     const DpCart *cart;
     const DpPlatform *plat;
@@ -254,6 +259,9 @@ typedef struct DpResults {
     uint32_t exec_outside; // instructions executed outside ROM (VRAM/RAM code)
     uint64_t hits_saturated; // per-byte hit counters held at UINT32_MAX (never wrap)
     uint32_t forks_branch, forks_irq, forks_key, forks_p1, evicted_exact, evicted_ctx;
+    uint32_t ctx_set_full;   // paths run: the section context set was at its cap (kept, not evicted)
+    uint32_t bank_seen_full; // bank switches not kept in the timeline: the distinct-switch set is full
+    uint32_t disc_dropped;   // discovery-log entries folded away by compaction
     uint32_t decoders, decoders_without_snapshot, decoder_overflow, start_overflow, frame_overflow; // S6 stream consumers
     uint32_t replay_tables, replay_candidates, replay_runs, sat_replay_total; // S6 replays
     struct { uint32_t at; uint16_t stride, count; } tb[128]; uint32_t tb_n;   // S6 pointer tables found (dpTb)

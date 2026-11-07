@@ -4288,3 +4288,23 @@ La timeline de banques ne garde plus que la **première occurrence de chaque com
 affiche `bank switches (N distinct of M)`. Les compteurs d'accès registres et le crédit de banques
 comptent toujours chaque commutation. Avant ce changement le tableau atteignait 8 Go sur Zelda
 (observation de l'outil, pas une mesure matérielle).
+
+## Mise à jour 0.249.80 — ensembles saturables bornés (audit RAM)
+
+Suite de l'audit RAM : trois ensembles qui restaient à croissance libre sont
+bornés, chaque saturation comptée (jamais silencieuse) :
+
+- **ensemble des commutations de banque distinctes** : plafond absolu de 4 M
+  d'entrées (32 Mo) ; au-delà, les occurrences continuent de compter dans le
+  total (`bank switches`) mais la timeline cesse de croître — compteur
+  `bank_seen_full` (rapport texte, JSON) ;
+- **ensembles de contexte par section** (éviction « même contexte ») : un
+  ensemble plein ne jette plus rien (le chemin est exécuté, comme avant), mais
+  le cas est compté — compteur `ctx_set_full` ;
+- **journal de découvertes** : plafond de 65 536 entrées ; au-delà, compaction
+  par moitié (la courbe garde sa forme, la résolution temporelle est divisée
+  par deux à chaque compaction) — compteur `disc_dropped`.
+
+Ce sont des observations de l'outil ; les plafonds ne sont pas atteignables
+par les fixtures (aucun test ne les déclenche), les compteurs sont vérifiés à
+zéro sur les runs normaux.

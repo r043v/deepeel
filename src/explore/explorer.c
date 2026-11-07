@@ -214,6 +214,15 @@ static double disc_now(void) {
 
 void dp_disc_add(DpResults *res, const char *source, uint64_t credit) {
     if (res->disc_n == res->disc_cap) {
+        if (res->disc_cap >= DP_DISC_CAP_MAX) {
+            // log compaction at the absolute cap: keep every other entry (the
+            // curve keeps its shape, the time resolution halves); the folded
+            // count is reported
+            int keep = 0;
+            for (int i = 0; i < res->disc_n; i += 2) res->disc[keep++] = res->disc[i];
+            res->disc_dropped += (uint32_t)(res->disc_n - keep);
+            res->disc_n = keep;
+        }
         int cap = res->disc_cap ? res->disc_cap * 2 : 256;
         DpDiscEntry *n = realloc(res->disc, (size_t)cap * sizeof *n);
         if (!n) return;
@@ -1061,17 +1070,28 @@ static void emit_pend_map(DpExplorer *ex) {
                         (new_bank & 0xFFF)) + 1;
         if (res->bank_seen_n * 2 >= res->bank_seen_cap) {
             uint32_t nc = res->bank_seen_cap ? res->bank_seen_cap * 2 : 1024;
-            uint64_t *ns = calloc(nc, sizeof *ns);
-            for (uint32_t i = 0; i < res->bank_seen_cap; i++) {
-                uint64_t k = res->bank_seen[i];
-                if (!k) continue;
-                uint32_t j = (uint32_t)(k * 0x9E3779B97F4A7C15ull >> 40) & (nc - 1);
-                while (ns[j]) j = (j + 1) & (nc - 1);
-                ns[j] = k;
+            if (nc > DP_BANK_SEEN_CAP_MAX) nc = DP_BANK_SEEN_CAP_MAX;
+            if (nc > res->bank_seen_cap) { // else the set sits at its absolute cap
+                uint64_t *ns = calloc(nc, sizeof *ns);
+                for (uint32_t i = 0; i < res->bank_seen_cap; i++) {
+                    uint64_t k = res->bank_seen[i];
+                    if (!k) continue;
+                    uint32_t j = (uint32_t)(k * 0x9E3779B97F4A7C15ull >> 40) & (nc - 1);
+                    while (ns[j]) j = (j + 1) & (nc - 1);
+                    ns[j] = k;
+                }
+                free(res->bank_seen);
+                res->bank_seen = ns;
+                res->bank_seen_cap = nc;
             }
-            free(res->bank_seen);
-            res->bank_seen = ns;
-            res->bank_seen_cap = nc;
+        }
+        if (res->bank_seen_n >= res->bank_seen_cap) {
+            // distinct-switch set full: the occurrence stays counted in
+            // bank_total, its first occurrence is no longer kept (saturation,
+            // reported — the timeline simply stops growing)
+            res->bank_seen_full++;
+            if (res->mt) pthread_mutex_unlock(&res->rec_mtx);
+            goto bank_counted;
         }
         uint32_t j = (uint32_t)(key * 0x9E3779B97F4A7C15ull >> 40) & (res->bank_seen_cap - 1);
         int known = 0;
@@ -1758,6 +1778,7 @@ static int explore_step_inner(DpExplorer *ex) {
                     return (ex->q_len || ex->pq_len) ? 1 : 0;
                 }
                 if (ins > 0) s->ctx_count++;
+                if (ins < 0) u32_add(&res->ctx_set_full, 1); // set at cap: the path runs, never silently
             }
         }
     }

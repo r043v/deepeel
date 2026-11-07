@@ -95,6 +95,8 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
     dp_buf_fmt(out, "stream replay (S6): %u decoders, %u tables, %u candidates, %u queued replays (%u without snapshot, %u saturated)\n",
                res->decoders, res->replay_tables, res->replay_candidates, res->replay_runs,
                res->decoders_without_snapshot, res->sat_replay_total);
+    dp_buf_fmt(out, "set saturation: context sets full %u (paths kept), bank-timeline set full %u (occurrences), discovery log compacted (%u entries folded)\n",
+               res->ctx_set_full, res->bank_seen_full, res->disc_dropped);
     if (res->smc_writes)
         dp_buf_fmt(out, "self-modifying WRAM code: %u writes into executed bytes (first at pc $%04X)\n",
                    res->smc_writes, res->smc_first_pc);
@@ -359,6 +361,7 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
                   "\"sections\":%u,\"evicted_exact\":%u,\"evicted_ctx\":%u,\"cycle_cuts\":%u,"
                   "\"step_cuts\":%u,\"pad_cuts\":%u,\"halt_cuts\":%u,\"nonsense_echo\":%u,\"nonsense_data\":%u,\"nonsense_stack\":%u,\"budget_paths\":%u,\"budget_steps\":%u,\"queue_overflows\":%u,\"queue_growths\":%u,\"spool_writes\":%u,\"spool_reads\":%u,\"spool_refused\":%u,"
                   "\"exec_outside\":%u,\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_refused_budget\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u,\"prov_jp_hl\":%u,\"prov_data\":%u,\"prov_partial\":%u,\"prov_sat\":%u,"
+                  "\"ctx_set_full\":%u,\"bank_seen_full\":%u,\"disc_dropped\":%u,"
                   "\"steps_deferred\":%llu,\"loop_deferred\":%llu,\"defer_resumed\":%llu,\"steps_final\":%llu,\"loop_final\":%llu,\"defer_dropped\":%llu,\"defer_pending\":%llu},\n",
                (unsigned long long)res->steps_total, (unsigned long long)res->paths_run, res->forks_branch, res->forks_irq,
                res->forks_key, res->forks_p1, res->forks_capped, res->forks_table_full, res->forks_covered_pruned,
@@ -370,6 +373,7 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
                res->seeds_refused_budget, res->seeds_skipped_data,
                (unsigned)res->bad_op_count, res->prov_jp_hl,
                res->prov_data, res->prov_unresolved, res->prov_sat,
+               res->ctx_set_full, res->bank_seen_full, res->disc_dropped,
                (unsigned long long)res->steps_deferred, (unsigned long long)res->loop_deferred,
                (unsigned long long)res->defer_resumed, (unsigned long long)res->steps_final,
                (unsigned long long)res->loop_final, (unsigned long long)res->defer_dropped,
@@ -651,6 +655,7 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
                   "\"nonsense_stack\":%u,\"budget_paths\":%u,\"budget_steps\":%u,"
                   "\"queue_overflows\":%u,\"queue_growths\":%u,\"spool_writes\":%u,\"spool_reads\":%u,\"spool_refused\":%u,\"exec_outside\":%u,"
                   "\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_refused_budget\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u,\"prov_jp_hl\":%u,\"prov_data\":%u,\"prov_partial\":%u,\"prov_sat\":%u,"
+                  "\"ctx_set_full\":%u,\"bank_seen_full\":%u,\"disc_dropped\":%u,"
                   "\"steps_deferred\":%llu,\"loop_deferred\":%llu,\"defer_resumed\":%llu,\"steps_final\":%llu,\"loop_final\":%llu,\"defer_dropped\":%llu,\"defer_pending\":%llu},\n",
                (unsigned long long)res->steps_total, (unsigned long long)res->paths_run,
                res->forks_branch, res->forks_irq, res->forks_key, res->forks_p1, res->forks_capped,
@@ -662,6 +667,7 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
                res->seeds_natural, res->seeds_spec, res->seeds_refused_budget,
                res->seeds_skipped_data, (unsigned)res->bad_op_count, res->prov_jp_hl, res->prov_data,
                res->prov_unresolved, res->prov_sat,
+               res->ctx_set_full, res->bank_seen_full, res->disc_dropped,
                (unsigned long long)res->steps_deferred, (unsigned long long)res->loop_deferred,
                (unsigned long long)res->defer_resumed, (unsigned long long)res->steps_final,
                (unsigned long long)res->loop_final, (unsigned long long)res->defer_dropped,
