@@ -4147,3 +4147,23 @@ plus que le matériel. Reproduit dans deepeel (ligne 0 allongée), l'effet fait
 diverger plus tôt (première image 10 au lieu de 24 : `$DB97` apparaît une
 image trop tôt) — le modèle reste à compléter avant d'être activé. De même,
 LY 153→0 à 24 cycles n'a aucun effet mesuré.
+
+### Outil de lockstep VBA V7 / deepeel (`tools/lockstep.py`)
+
+Lance le harnais VBA V7 (`VBAH_PCT`, `VBAH_T0`, `VBAH_T1`) et deepeel
+(`DEEPEEL_TAS_INSTR`) sur le même film, journalise chaque instruction des
+deux côtés (fenêtre en ticks VBA, 1 tick = 4 cycles deepeel), aligne les
+traces et indique chaque changement du décalage de temps (cycles deepeel −
+4 × ticks VBA) puis la première instruction où pc ou registres diffèrent,
+avec le contexte des deux côtés. `--mask-a LO-HI` ignore A/F sur une plage de
+pc (lectures du joypad, bits 7-6 de `$FF00`), `--env K=V` passe les réglages
+de profil à deepeel. Observations de l'outil, pas des mesures de matériel.
+
+Constats avec cet outil (Zelda, `bobmario2-zeldala.vbm`) : avec
+`DEEPEEL_TAS_IRQTRIM=20`, `DEEPEEL_TAS_HALTSND=0` et `LY153_CMP` à 24
+cycles, les images 22 à 25 sont identiques instruction par instruction ; la
+première divergence d'image passe de 24 à 25, mais le total d'images
+identiques baisse (3740 contre 13106) : réglage non retenu par défaut. Reste
+une phase des lignes visibles (LYC) en retard de quelques cycles dans la
+trame 24 (le front LY32 arrive 2 cycles après la fin de l'instruction où VBA
+l'a vu).
