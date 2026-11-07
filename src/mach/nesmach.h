@@ -70,7 +70,12 @@ uint8_t *dp_nesmach_state_ram(void *buf);
 unsigned dp_nesmach_sp(const DpNesMach *m);
 unsigned dp_nesmach_state_pc(const void *buf);
 /* coarse context hash (registers, pc, mapper registers; RAM and clocks excluded) */
+/* C1 liveness classes of register reads ($2000 PPU, $4016/$4017 pads, other) */
+enum { DP_NES_LIVE_PPU = 1, DP_NES_LIVE_PAD = 2, DP_NES_LIVE_OTHER = 4 };
+
 uint64_t dp_nesmach_state_ctx_hash(const void *buf);
+uint64_t dp_nesmach_state_ctx_hash_live(const void *buf, unsigned ram_pages, unsigned wram_pages,
+                                        unsigned io_mask);
 uint64_t dp_nesmach_state_ctx_hash_ram(const void *buf, unsigned pages);
 /* the saved state's pending-NMI edge (an interrupt fork clears it) */
 uint8_t *dp_nesmach_state_nmi_edge(void *buf);

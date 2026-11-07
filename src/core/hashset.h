@@ -2,6 +2,7 @@
 #define DP_CORE_HASHSET_H
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 // Open-addressing u64 set shared by the GB and Z80 explorers (seed dedup,
 // visited contexts). Kept header-only: both engines are separate libraries.
@@ -46,6 +47,14 @@ static inline void dp_set_init(DpHashSet *s, size_t cap_abs) {
     s->cap = 1024;
     s->keys = calloc(s->cap, sizeof(uint64_t));
     s->used = calloc(s->cap, 1);
+    s->cnt = 0;
+}
+
+// semantic reset (the liveness mask grew: previously evicted contexts may now
+// differ, the seen set starts over) — cheaper than free+init, keeps the arrays
+static inline void dp_set_clear(DpHashSet *s) {
+    if (!s->keys) return;
+    memset(s->used, 0, s->cap);
     s->cnt = 0;
 }
 

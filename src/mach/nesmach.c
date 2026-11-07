@@ -460,6 +460,46 @@ uint64_t dp_nesmach_state_ctx_hash_ram(const void *buf, unsigned pages) {
     }
     return h;
 }
+/* C2 projection (docs/COUVERTURE.fr.md 2.5): the context a section cannot
+ * distinguish, projected onto what it actually reads: CPU registers, pc and
+ * the mapper registers (coarse), the NMI edge (IRQ in the context), the
+ * work-RAM and PRG-RAM pages whose bit is set, and the PPU / controller / APU
+ * state when the section was seen reading them.  Clocks stay excluded: an IRQ
+ * that fires later is the irq fork's variant, as on GB. */
+uint64_t dp_nesmach_state_ctx_hash_live(const void *buf, unsigned ram_pages, unsigned wram_pages,
+                                        unsigned io_mask) {
+    uint64_t h = dp_nesmach_state_ctx_hash(buf);
+    const uint8_t *b = buf;
+    h = (h ^ b[offsetof(nes_t, cpu) + offsetof(nes6502_t, nmi_edge)]) * 0x100000001b3ull;
+    const uint8_t *ram = b + offsetof(nes_t, ram);
+    for (unsigned pg = 0; pg < 8; pg++) {
+        if (!(ram_pages & (1u << pg))) continue;
+        for (unsigned i = 0; i < 256; i++) h = (h ^ ram[pg * 256 + i]) * 0x100000001b3ull;
+        h ^= pg + 1;
+    }
+    const uint8_t *wram = b + offsetof(nes_t, wram);
+    for (unsigned pg = 0; pg < 32; pg++) {
+        if (!(wram_pages & (1u << pg))) continue;
+        for (unsigned i = 0; i < 256; i++) h = (h ^ wram[pg * 256 + i]) * 0x100000001b3ull;
+        h ^= 0x40 + pg;
+    }
+    if (io_mask & DP_NES_LIVE_PPU) {  // PPU registers + OAM: $2002/$2004 readers
+        const uint8_t *ppu = b + offsetof(nes_t, ppu);
+        for (size_t i = 0; i < sizeof(nes_ppu_t); i++) h = (h ^ ppu[i]) * 0x100000001b3ull;
+        const uint8_t *oam = b + offsetof(nes_t, oam);
+        for (unsigned i = 0; i < 256; i++) h = (h ^ oam[i]) * 0x100000001b3ull;
+    }
+    if (io_mask & DP_NES_LIVE_PAD) {  // controller state: $4016/$4017 readers
+        for (unsigned i = 0; i < 4; i++) {
+            h = (h ^ b[offsetof(nes_t, input) + i]) * 0x100000001b3ull;  // input, shift[2], strobe
+        }
+    }
+    if (io_mask & DP_NES_LIVE_OTHER) {  // APU / $4015 readers
+        const uint8_t *apu = b + offsetof(nes_t, apu);
+        for (size_t i = 0; i < sizeof(nes_apu_t); i++) h = (h ^ apu[i]) * 0x100000001b3ull;
+    }
+    return h;
+}
 uint8_t *dp_nesmach_state_nmi_edge(void *buf) {
     return (uint8_t *)buf + offsetof(nes_t, cpu) + offsetof(nes6502_t, nmi_edge);
 }

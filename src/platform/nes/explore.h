@@ -6,6 +6,7 @@
 #ifndef DP_NES_EXPLORE_H
 #define DP_NES_EXPLORE_H
 #include "../../core/hashset.h"
+#include "../../mach/nesmach.h"
 #include "../../explore/ramarch.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -79,7 +80,6 @@ typedef struct {
     uint8_t kind, issue;
 } DpNesTreeNode;
 
-enum { DP_NES_LIVE_PPU = 1, DP_NES_LIVE_PAD = 2, DP_NES_LIVE_OTHER = 4 };
 
 typedef struct {
     uint32_t id;
@@ -113,8 +113,8 @@ typedef struct {
     int no_pad_probe;      // disable the strobe-site pad probes
     int pad_full;          // D10: also probe every one of the 256 port-1 button masks at each strobe site
     int bank_dispatch;     // second pass also scans the fixed bank for jump tables and seeds every bank view (G2, UxROM)
-    unsigned ctx_cap;      // max admitted states per coarse context (0 = off, C2)
-    int ctx_live;          // --ctx-live: the context also keys the RAM pages some code has read so far (C2 over C1 liveness)
+    unsigned ctx_cap;      // legacy C2: max admitted states per coarse context (0 = off; keeps the old opt-in admission-cap mode)
+    int ctx_live;          // --ctx-live: --ctx-cap projects the context on what the window reads (RAM/PRG-RAM pages, PPU, pads, APU)
     int second_pass;       // after the drain, enter static-closure roots that no path executed and drain again (G4)
     int seed_vectors;      // also seed the NMI and IRQ/BRK vector targets as roots (G1)
     int seed_banks;        // also seed every switchable bank at $8000 (UxROM)
@@ -147,6 +147,7 @@ typedef struct DpNesResults_ {
     size_t chr_size;
     uint64_t chr_tiles_bg, chr_tiles_spr, chr_reads; // distinct 16-byte tiles / $2007 reads
     uint8_t *live_ram, *live_io; // C1: per PRG cell of an executed opcode, RAM pages (bit per 256 B) and register classes it read
+    uint32_t *live_wram;         // C1/C2: per PRG cell, PRG-RAM ($6000-$7FFF) 256-byte pages it read
     uint32_t *exec_hits, *data_hits; // per PRG cell: executions of the opcode byte / data reads (saturating)
     DpNesTreeNode *tree_nodes; uint32_t tree_count, tree_capacity;
     uint8_t *flags;            // one byte per physical PRG cell
@@ -160,7 +161,7 @@ typedef struct DpNesResults_ {
     uint64_t queue_grown;
     uint64_t step_cuts, loop_cuts, fork_cuts, queue_cuts, global_cuts, path_cuts,
              faults, decode_cuts;
-    uint64_t ctx_evicted, dispatch_tables, dispatch_seeds, dispatch_refused_view, prov_sites, prov_roots, pass2_seeds, pass2_refused, pass2_capped, sib_tables, sib_ranges, sib_bytes, sib_refused, sib_caps, vectors_seeded, tas_same, tas_different, tas_unrecorded, pad_cuts, table_bytes, table_count, table_xbank_words, static_bytes, static_roots, static_cap_hits, padding_bytes, inferred_code, inferred_data, inferred_pad, cpu_copy_bytes, wram_copy_bytes, aux_copy_bytes, oam_chain_bytes, indirect_sites, indirect_targets, indirect_ptrs, indirect_overflow, pad_probes, pad_probe_sites, pad_probe_refused, entries_seeded, entries_refused, seeds_reset, seeds_irq, seeds_bank, seeds_refused_queue;
+    uint64_t ctx_evicted, dispatch_tables, dispatch_seeds, dispatch_refused_view, prov_sites, prov_roots, pass2_seeds, pass2_refused, pass2_capped, sib_tables, sib_ranges, sib_bytes, sib_refused, sib_caps, vectors_seeded, tas_same, tas_different, tas_unrecorded, pad_cuts, table_bytes, table_count, table_xbank_words, ctx_grew, ctx_set_full, static_bytes, static_roots, static_cap_hits, padding_bytes, inferred_code, inferred_data, inferred_pad, cpu_copy_bytes, wram_copy_bytes, aux_copy_bytes, oam_chain_bytes, indirect_sites, indirect_targets, indirect_ptrs, indirect_overflow, pad_probes, pad_probe_sites, pad_probe_refused, entries_seeded, entries_refused, seeds_reset, seeds_irq, seeds_bank, seeds_refused_queue;
     uint64_t demo_frames_run, play_frames_run, play_sessions_run, play_steps_accounted, seeds_play;
     uint64_t evicted;          // exact-state dedup admissions refused
     uint64_t lot_written, lot_read, lot_pending; // disk lot (--lot): spilled / read back / left on disk

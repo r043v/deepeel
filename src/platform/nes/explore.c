@@ -34,6 +34,7 @@ typedef struct {
     uint32_t choice;     // choice-tree node id (0: not yet registered)
     uint8_t kind;        // DP_NES_TREE_* when the creator set it, else derived
     uint8_t in_handler;  // forked inside an NMI/IRQ handler: its code keeps the IRQ mark
+    uint8_t probe;       // deliberate input probe (D10): never context-evicted (as GB's priority seeds)
 } DpNesPathState;
 
 #define DP_NES_STATE_MAX 65536
@@ -54,6 +55,11 @@ typedef struct {
     uint32_t queue_len, queue_cap;
     uint8_t live_half[64];                 // the same, per 16 KiB PRG window of the reading code
     uint8_t live_pages;                    // RAM pages (256 B each, 2 KiB mirrored) read by any code so far
+    uint32_t live_wram_half[64];           // PRG-RAM ($6000-$7FFF) pages per 16 KiB window of the reading code
+    uint32_t live_wram_pages;              // the same, any code (slot 64 of the C2 masks)
+    uint8_t live_io_all;                   // DP_NES_LIVE_* classes read by any code (slot 64)
+    uint8_t prev_ram[65], prev_io[65];     // C2: masks as last projected (slot 64 = global);
+    uint32_t prev_wram[65];                // a mask that grew invalidates the seen contexts
     DpNesPathState *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
     DpLotFile *lot;                        // disk lot: park overflow, wall leftovers, --lot resume
     uint8_t ram_exec[0x800];           // RAM bytes executed since their last write (SMC tracking)
@@ -549,7 +555,8 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
                 dp_nesmach_set_input(x->m, (uint8_t)(1u << b), 0);
                 dp_nesmach_save(x->m, snap);
                 DpNesPathState f = { snap, 0, 0, x->paths_opened, x->total_steps, 0 };
-                if (snap_push(x, &f)) r->pad_probes++; else r->pad_probe_refused++;
+                f.probe = 1;
+                f.probe = 1; if (snap_push(x, &f)) r->pad_probes++; else r->pad_probe_refused++;
             }
             // port 2 single buttons, then a catalog of two-button combinations on port 1
             // (A/B/Start/Select with each direction): code that tests chords is reached
@@ -563,7 +570,8 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
                 dp_nesmach_set_input(x->m, p0, p1);
                 dp_nesmach_save(x->m, snap);
                 DpNesPathState f = { snap, 0, 0, x->paths_opened, x->total_steps, 0 };
-                if (snap_push(x, &f)) r->pad_probes++; else r->pad_probe_refused++;
+                f.probe = 1;
+                f.probe = 1; if (snap_push(x, &f)) r->pad_probes++; else r->pad_probe_refused++;
             }
             if (x->opt.pad_full) {
                 // the whole catalog: every port-1 mask not already probed (singles and the
@@ -578,7 +586,7 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
                     dp_nesmach_set_input(x->m, (uint8_t)m, 0);
                     dp_nesmach_save(x->m, snap);
                     DpNesPathState f = { snap, 0, 0, x->paths_opened, x->total_steps, 0 };
-                    if (snap_push(x, &f)) r->pad_probes++; else r->pad_probe_refused++;
+                    f.probe = 1; if (snap_push(x, &f)) r->pad_probes++; else r->pad_probe_refused++;
                 }
             }
             dp_nesmach_set_input(x->m, (uint8_t)keep, 0);
@@ -605,6 +613,13 @@ static void hook_read(void *user, unsigned addr) {
     if (addr < 0x2000) {
         x->live_pages |= (uint8_t)(1u << ((addr & 0x7FFu) >> 8));
         if (x->cur_cell >= 0) x->live_half[(x->cur_cell >> 14) & 63] |= (uint8_t)(1u << ((addr & 0x7FFu) >> 8));
+    } else if (addr >= 0x6000 && addr < 0x8000) {
+        x->live_wram_pages |= 1u << ((addr & 0x1FFFu) >> 8);
+        if (x->cur_cell >= 0) x->live_wram_half[(x->cur_cell >> 14) & 63] |= 1u << ((addr & 0x1FFFu) >> 8);
+    }
+    if (addr < 0x2000 || (addr >= 0x2000 && addr < 0x4000) || addr == 0x4016 || addr == 0x4017 || (addr >= 0x4000 && addr < 0x6000)) {
+        unsigned cls = addr < 0x2000 ? 0 : addr < 0x4000 ? DP_NES_LIVE_PPU : (addr == 0x4016 || addr == 0x4017) ? DP_NES_LIVE_PAD : DP_NES_LIVE_OTHER;
+        if (cls) x->live_io_all |= (uint8_t)cls;
     }
     if (x->cur_cell >= 0 && x->r->live_ram) {
         if (addr < 0x2000) x->r->live_ram[x->cur_cell] |= (uint8_t)(1u << ((addr & 0x7FFu) >> 8));
@@ -887,10 +902,18 @@ static int snap_push(DpNesRun *x, DpNesPathState *s) {
         tree_close(x, tree_add(x, s), DP_NES_ISSUE_EVICTED);
         free(s->state); return 0;
     }
-    if (x->opt.ctx_cap) {
-        // coarse same-context eviction: the k-th admission of a context is the
-        // key hash(ctx, k); a context past ctx_cap admissions is closed unrun
-        uint64_t c = x->opt.ctx_live ? dp_nesmach_state_ctx_hash_ram(s->state, x->in_run && x->cur_cell >= 0 ? x->live_half[(x->cur_cell >> 14) & 63] : x->live_pages) : dp_nesmach_state_ctx_hash(s->state);
+    if (x->opt.ctx_cap && !s->probe) {
+        // legacy C2 (--ctx-cap): coarse same-context eviction, the k-th
+        // admission of a context is the key hash(ctx, k); a context past
+        // ctx_cap admissions is closed unrun
+        uint64_t c;
+        if (x->opt.ctx_live) {  // --ctx-live: projection on what the window reads (RAM/PRG-RAM pages, PPU, pads, APU)
+            unsigned cell = (x->in_run && x->cur_cell >= 0) ? (unsigned)((x->cur_cell >> 14) & 63) : 64;
+            c = dp_nesmach_state_ctx_hash_live(s->state,
+                                               cell < 64 ? x->live_half[cell] : x->live_pages,
+                                               cell < 64 ? x->live_wram_half[cell] : x->live_wram_pages,
+                                               cell < 64 ? (x->r->live_io ? x->r->live_io[x->cur_cell] : 0) : x->live_io_all);
+        } else c = dp_nesmach_state_ctx_hash(s->state);
         unsigned k = 0;
         while (k < x->opt.ctx_cap && dp_set_insert(&x->ctx_seen, (c ^ (k * 0x9E3779B97F4A7C15ull)) | 1) == 0) k++;
         if (k >= x->opt.ctx_cap) {
@@ -1278,7 +1301,7 @@ void dp_nes_results_free(DpNesResults *r) {
     free(r->exec_hits);
     free(r->exec_kind); r->exec_kind = NULL;
     free(r->data_hits);
-    free(r->live_ram); free(r->live_io); r->live_ram = r->live_io = NULL;
+    free(r->live_ram); free(r->live_io); free(r->live_wram); r->live_ram = r->live_io = NULL; r->live_wram = NULL;
     r->exec_hits = r->data_hits = NULL;
     free(r->chr_flags);
     free(r->inferred);
@@ -1333,6 +1356,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     x.exp_pc = -1;
     r->data_hits = calloc(r->prg_size, sizeof(uint32_t));
     r->live_ram = calloc(r->prg_size, 1); r->live_io = calloc(r->prg_size, 1);
+    r->live_wram = calloc(r->prg_size, sizeof *r->live_wram);
     r->chr_size = dp_nesmach_chr_size(x.m);
     if (r->chr_size) r->chr_flags = calloc(r->chr_size, 1);
     if (!r->flags) { dp_nesmach_close(x.m); return 0; }
@@ -1366,7 +1390,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     x.fork_sites = calloc(x.fork_sites_len ? x.fork_sites_len : 1, sizeof(uint32_t));
     dp_set_init(&x.seen, 1 << 22);
     dp_set_init(&x.probe_seen, 1 << 10);
-    dp_set_init(&x.ctx_seen, 1 << 10);
+    dp_set_init(&x.ctx_seen, 1 << 20);
     dp_set_init(&x.ind_sites, 1 << 10);
     dp_set_init(&x.ind_pairs, 1 << 12);
     dp_set_init(&x.ind_ptrs, 1 << 12);
@@ -2110,7 +2134,9 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  copy siblings: %llu tables; %llu ranges (%llu bytes); %llu refused over executed code; %llu tables cut at the cap\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_ranges, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_refused, (unsigned long long)r->sib_caps);
     fprintf(out, "  choice tree: %u nodes\n", r->tree_count);
     fprintf(out, "  provenance: %llu jump-table words traced from PRG reads, %llu roots seeded\n", (unsigned long long)r->prov_sites, (unsigned long long)r->prov_roots);
-    if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/mapper context past the cap)\n", (unsigned long long)r->ctx_evicted);
+    if (r->ctx_evicted || r->ctx_grew || r->ctx_set_full)
+        fprintf(out, "  context eviction: %llu states closed (same projected context: what the section reads), %u liveness growths (contexts reset), %u context-set full\n",
+                (unsigned long long)r->ctx_evicted, r->ctx_grew, r->ctx_set_full);
     fprintf(out, "  bank dispatch: %llu tables, %llu seeds, %llu bank views refused (not code)\n", (unsigned long long)r->dispatch_tables, (unsigned long long)r->dispatch_seeds, (unsigned long long)r->dispatch_refused_view);
     fprintf(out, "  second pass: %llu seeds, %llu refused, %llu roots over the cap\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     fprintf(out, "  vector seeds: %llu\n", (unsigned long long)r->vectors_seeded);

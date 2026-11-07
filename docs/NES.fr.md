@@ -111,3 +111,21 @@ Mesure sur DuckTales (Europe) (UNROM, 20 M pas, observations de l'outil) :
 tables de pointeurs 18 → 26, octets classés `table` 90 → 129 (6 mots
 cross-bank) ; les 39 octets gagnés sont reclassés depuis `data-read` et
 `inf-data`, aucune autre classe ne régresse (`known_pct` identique).
+
+## 0.249.83 — C2 : projection de contexte sur la liveness (mesure et retour arrière)
+
+La projection de contexte de `--ctx-cap --ctx-live` est étendue : CPU, pc,
+registres mapper et bord NMI, **pages de RAM et de PRG-RAM ($6000-$7FFF)
+lues** par la fenêtre de code, et **état PPU + OAM, manette ou APU** quand la
+fenêtre a été vue les lire (les classes de liveness C1). Les sondes de
+manette (D10) ne sont jamais évincées par le contexte — ce sont des sondes
+délibérées, comme les graines prioritaires GB.
+
+**Résultat négatif mesuré et conservé** : rendre cette éviction *par défaut*
+(à la GB) fait perdre 8 points de couverture sur DuckTales (Europe), 20 M pas
+: 60,6 % → 52,4 % de octets connus, 623 états fermés, 1527 → 962 chemins. La
+liveness par fenêtre de 16 Kio est plus grossière que les sections GB et
+l'éviction à l'empilage tue des états qui divergent dans un état que la
+fenêtre n'a pas encore lu. L'expérience est réverted ; la C2 par défaut sur
+NES attendra des sections vivantes par course (comme GB), la projection reste
+disponible en opt-in. Observations de l'outil, pas des mesures de matériel.
