@@ -1126,7 +1126,11 @@ Implémentations existantes à envelopper :
   (95,398 % / 30 327 826 pas / 588 courses), tests sega_closure/msx_closure
   verts ;
 - `src/cpu/z80/` ;
-- `src/cpu/m6502/` ;
+- `src/cpu/m6502/` — **fait** (0.249.99 : `src/cpu/m6502/m6502_isa.c`,
+  `dp_isa_m6502` : conditions compactes N/V/C/Z ±, JAM = ILLEGAL, `disasm`
+  via `dp_m6502_format`, `mem_operand` sur les modes d'adressage, treillis
+  de provenance à ouvrir — pas de paire pointeur prouvée sur le 6502) ;
+  épinglée par `test_dpisa` ;
 - `src/platform/pce/hucdec.c` ;
 - `src/cpu/m68k/m68k_disasm.c`.
 

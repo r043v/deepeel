@@ -65,7 +65,7 @@ add_test(NAME sega_tas COMMAND test_sega_tas)
 set_tests_properties(sega_tas PROPERTIES TIMEOUT 30)
 # the DpIsa kernel interface (spec §7.3), pinned per CPU
 add_executable(test_dpisa test_dpisa.c)
-target_link_libraries(test_dpisa PRIVATE deepeel_z80 deepeel_core)
+target_link_libraries(test_dpisa PRIVATE deepeel_z80 deepeel_core deepeel_nes)
 add_test(NAME dpisa COMMAND test_dpisa)
 set_tests_properties(dpisa PROPERTIES TIMEOUT 30)
 # J3: random bursts fired from TAS snapshots (GB sessions parity)

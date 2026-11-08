@@ -55,9 +55,34 @@ static void test_sm83(void) {
     CHECK(isa->flow(jphl, 0x100, &fi) == 1 && fi.kind == DP_FLOW_INDIRECT, "jp hl");
 }
 
+static void test_m6502(void) {
+    const DpIsa *isa = dp_isa_m6502();
+    CHECK(!strcmp(isa->name, "m6502"), "name");
+    DpFlowInfo fi;
+    uint8_t nop[] = { 0xEA };
+    CHECK(isa->flow(nop, 0x8000, &fi) == 1 && fi.kind == DP_FLOW_SEQ && fi.fall, "nop");
+    uint8_t jmp[] = { 0x4C, 0x50, 0x80 };
+    CHECK(isa->flow(jmp, 0x8000, &fi) == 3 && fi.kind == DP_FLOW_JUMP && !fi.fall && fi.target == 0x8050, "jmp abs");
+    uint8_t jmpi[] = { 0x6C, 0x00, 0x02 };
+    CHECK(isa->flow(jmpi, 0x8000, &fi) == 3 && fi.kind == DP_FLOW_INDIRECT, "jmp (ind)");
+    uint8_t jsr[] = { 0x20, 0x00, 0x90 };
+    CHECK(isa->flow(jsr, 0x8000, &fi) == 3 && fi.kind == DP_FLOW_CALL && fi.call && fi.target == 0x9000, "jsr");
+    uint8_t rts[] = { 0x60 };
+    CHECK(isa->flow(rts, 0x8000, &fi) == 1 && fi.kind == DP_FLOW_RET && !fi.fall, "rts");
+    uint8_t bne[] = { 0xD0, 0x05 };
+    CHECK(isa->flow(bne, 0x8000, &fi) == 2 && fi.kind == DP_FLOW_COND && fi.fall && fi.target == 0x8007, "bne");
+    CHECK(isa->cond_of(0xD0) >= 0 && isa->cond_of(0xEA) < 0, "cond_of");
+    CHECK(isa->cond_flag(6) == 0x01 && isa->cond_flag(2) == 0x01, "carry flag both polarities");
+    uint8_t jam[] = { 0x02 };
+    CHECK(isa->illegal(0x02) && isa->flow(jam, 0x8000, &fi) == 1 && fi.kind == DP_FLOW_ILLEGAL, "jam 02");
+    char txt[32];
+    CHECK(isa->disasm(jsr, sizeof jsr, 0, txt, sizeof txt) == 3 && strstr(txt, "9000"), "disasm jsr (addr is a view offset)");
+}
+
 int main(void) {
     test_z80();
     test_sm83();
+    test_m6502();
     printf(fails ? "dpisa: %d checks failed\n" : "dpisa: all checks passed\n", fails);
     return fails != 0;
 }

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.249.98 LANGUAGES C)
+project(deepeel VERSION 0.249.99 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -491,6 +491,7 @@ if(NOT DP_NES_NES MATCHES "nes_frame_rest")
 endif()
 add_library(deepeel_nes_raw STATIC
   src/cpu/m6502/m6502.c
+  src/cpu/m6502/m6502_isa.c
   src/mach/nesmach.c
   src/mach/nes_machine.c
   src/platform/nes/registry.c
