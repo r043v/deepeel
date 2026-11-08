@@ -1089,8 +1089,13 @@ Backends existants : GB (`src/mach/gb_machine.c`, `dp_machine_gb`, contrat
 (`src/mach/sega_machine.c`, `dp_machine_sega` — le singleton
 `DpSegaBackend` vu derrière l'interface, `run()` = un pas
 service/décodage/exécution comme le `play_step` de l'explorateur, même
-contrat de point fixe sur la fixture SMS). Restent à envelopper : NES, PCE,
-MD, libretro niveau A (déjà listé §8).
+contrat de point fixe sur la fixture SMS) ; 0.249.95 : NES
+(`dp_machine_nes` — ouvre le runtime depuis l'image et le possède, dans
+l'archive préfixée pour que ses appels suivent le clonage `--jobs`) et MD
+(`dp_machine_md` — possède le `DpMdMach`, fetch big-endian via `peek32`,
+`rom_index` = adresse visible car la ROM est en $000000, observateurs sur
+les hooks 68000). Restent à envelopper : PCE, libretro niveau A (déjà
+listé §8).
 
 ### 7.3 `DpIsa` — le statique générique
 

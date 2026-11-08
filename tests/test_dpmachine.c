@@ -7,6 +7,8 @@
 #include "../src/cpu/sm83/sm83.h"
 #include "../src/mach/m0boy.h"
 #include "../src/platform/sega/backend.h"
+#include "../src/mach/nesmach.h"
+#include "../src/mach/mdmach.h"
 #include "test_util.h"
 
 static unsigned obs_steps, obs_reads;
@@ -190,6 +192,54 @@ int main(int argc, char **argv) {
         CHECK_MSG(ran > 0, "run executes instructions");
         free(a); free(bb);
         m->close(m);
+    }
+    // machine: the NES runtime behind the generic view (spec §7.2)
+    if (argc > 1) {
+        char path[512];
+        snprintf(path, sizeof path, "%s/fix_nes_ctx.nes", argv[1]);
+        FILE *f = fopen(path, "rb");
+        CHECK_MSG(f, "nes fixture opens");
+        static uint8_t rom[1 << 17];
+        size_t rn = fread(rom, 1, sizeof rom, f);
+        fclose(f);
+        char nerr[256];
+        DpMachine *m = dp_machine_nes(rom, rn, -1, nerr, sizeof nerr);
+        CHECK_MSG(m && !strcmp(m->name, "nes"), "nes machine wired");
+        uint32_t n = m->state_bytes(m);
+        uint8_t *a = malloc(n), *bb = malloc(n);
+        m->save(m, a); m->load(m, a); m->save(m, bb); m->load(m, bb); m->save(m, a);
+        CHECK_MSG(!memcmp(a, bb, n), "nes save/load/save reaches a fixed point");
+        m->load(m, bb);
+        unsigned ran = 0;
+        while (ran < 64 && m->run(m)) ran++;
+        CHECK_MSG(ran > 0, "nes run executes instructions");
+        free(a); free(bb);
+        m->close(m);   // owns the DpNesMach
+        // machine: the Mega Drive runtime behind the generic view
+        snprintf(path, sizeof path, "%s/fix_md_pad.md", argv[1]);
+        f = fopen(path, "rb");
+        CHECK_MSG(f, "md fixture opens");
+        fseek(f, 0, SEEK_END); long mn = ftell(f); fseek(f, 0, SEEK_SET);
+        uint8_t *mrom = malloc((size_t)mn);
+        if (!mrom || fread(mrom, 1, (size_t)mn, f) != (size_t)mn) mn = 0;
+        fclose(f);
+        CHECK_MSG(mn, "md fixture reads");
+        DpMdMach *md = dp_mdmach_open(mrom, (size_t)mn);
+        CHECK_MSG(md, "md machine opens");
+        m = dp_machine_md(md);
+        CHECK_MSG(m && !strcmp(m->name, "md"), "md machine wired");
+        n = m->state_bytes(m);
+        a = malloc(n); bb = malloc(n);
+        m->save(m, a); m->load(m, a); m->save(m, bb); m->load(m, bb); m->save(m, a);
+        CHECK_MSG(!memcmp(a, bb, n), "md save/load/save reaches a fixed point");
+        CHECK_MSG(m->fetch(m, 0x0200) == mrom[0x0200], "md fetch sees the ROM");
+        CHECK_MSG(m->rom_index(m, 0x0200) == 0x0200, "md rom_index");
+        m->load(m, bb);
+        ran = 0;
+        while (ran < 64 && m->run(m)) ran++;
+        CHECK_MSG(ran > 0, "md run executes instructions");
+        free(a); free(bb); free(mrom);
+        m->close(m);   // owns the DpMdMach
     }
     TEST_DONE("dpmachine");
 }

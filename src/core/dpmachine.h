@@ -153,4 +153,11 @@ DpMachine *dp_machine_gb(struct DpMach *impl);
 // is a typedef of an anonymous struct, not forward-declarable here.
 DpMachine *dp_machine_sega(const void *backend);
 
+struct DpMdMach;
+// the NES backend (src/mach/nes_machine.c): opens the runtime from a
+// cartridge image (mapper <0: auto) and owns it
+DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err, size_t errsz);
+// the Mega Drive backend (src/mach/md_machine.c); takes ownership of the machine
+DpMachine *dp_machine_md(struct DpMdMach *impl);
+
 #endif

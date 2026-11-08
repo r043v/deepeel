@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.249.95 LANGUAGES C)
+project(deepeel VERSION 0.249.96 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -340,6 +340,7 @@ add_library(deepeel_z80 STATIC
   src/cpu/z80/z80.c
   src/cpu/z80/z80_isa.c
   src/mach/sega_machine.c
+  src/mach/md_machine.c
   src/cpu/z80/provenance.c
   src/cpu/z80/command.c
   src/platform/sega/sega.c)
@@ -491,6 +492,7 @@ endif()
 add_library(deepeel_nes_raw STATIC
   src/cpu/m6502/m6502.c
   src/mach/nesmach.c
+  src/mach/nes_machine.c
   src/platform/nes/registry.c
   src/platform/nes/explore.c
   src/platform/nes/tas.c
