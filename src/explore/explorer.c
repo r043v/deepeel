@@ -30,6 +30,10 @@ volatile sig_atomic_t dp_explore_interrupt;
 static inline void src_or(DpResults *res, uint32_t k, uint32_t bits) {
     dp_cov_mark(&res->first, res->src_flags, k, bits, res->steps_total, 0);
 }
+// same, carrying the explorer's actor tag (which session method first saw it)
+static inline void src_or_actor(DpExplorer *ex, uint32_t k, uint32_t bits) {
+    dp_cov_mark(&ex->res->first, ex->res->src_flags, k, bits, ex->res->steps_total, ex->first_actor);
+}
 static inline uint8_t flags_or(uint8_t *p, uint8_t bit) {
     uint8_t cur = __atomic_load_n(p, __ATOMIC_RELAXED);
     if ((cur & bit) == bit) return cur; // already set: no shared write
@@ -873,7 +877,7 @@ static void hook_read(DpMach *m, uint16_t a, uint8_t v) {
     if (a < 0x8000) { // ROM data read (opcode fetches never take this path)
         uint32_t key = key_at(ex, a);
         uint8_t old = flags_or(&res->data_flags[key], DP_DF_READ);
-        src_or(res, key, ex->session ? DP_SRC_SESSION : (ex->cur_forced ? DP_SRC_FORK_FORCED : DP_SRC_FORK_NATURAL));
+        src_or_actor(ex, key, ex->session ? DP_SRC_SESSION : (ex->cur_forced ? DP_SRC_FORK_FORCED : DP_SRC_FORK_NATURAL));
         if (!(old & DP_DF_READ)) ex->credit_data++;
         hits_add(res, &res->data_hits[key]);
         ix_record(res, key_at(ex, m->api->gbr->pc), key);
@@ -1513,7 +1517,7 @@ bad_done:
                 for (int i = 0; i < len && (uint32_t)rk + (uint32_t)i < nbytes; i++) {
                     uint32_t k = (uint32_t)rk + (uint32_t)i;
                     uint8_t o2 = flags_or(&res->exec_flags[k], i ? nf : (uint8_t)(nf | DP_XF_START));
-                    src_or(res, k, xs);
+                    src_or_actor(ex, k, xs);
                     if (!(o2 & nf)) ex->credit_exec++;
                 }
                 u32_add(&res->exec_wram_rom, 1);
@@ -1522,7 +1526,7 @@ bad_done:
             uint8_t nf = (uint8_t)(ex->cur_forced ? DP_XF_FORCED : DP_XF_NATURAL);
             uint8_t old = flags_or(&res->exec_flags[pk], nf);
             uint32_t xs = ex->session ? DP_SRC_SESSION : (ex->cur_forced ? DP_SRC_FORK_FORCED : DP_SRC_FORK_NATURAL);
-            src_or(res, pk, xs);
+            src_or_actor(ex, pk, xs);
             if (!(old & nf)) ex->credit_exec++;
             if (!(old & DP_XF_START)) flags_or(&res->exec_flags[pk], DP_XF_START);
             hits_add(res, &res->exec_hits[pk]);
@@ -1536,7 +1540,7 @@ bad_done:
                 if (pc < 0x4000 && a >= 0x4000) break; // crossed the window edge
                 uint32_t k = dp_rom_index(bank, a);
                 uint8_t o2 = flags_or(&res->exec_flags[k], nf);
-                src_or(res, k, xs);
+                src_or_actor(ex, k, xs);
                 if (!(o2 & nf)) ex->credit_exec++;
                 hi = a;
             }

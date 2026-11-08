@@ -492,6 +492,26 @@ code / data / padding.
   `TAS shoots: N snapshots seeded (M from residual banks: backsearch
   first)`. Les répertoires d'état écrits avant 0.251.4 (pool v3) ne
   reprennent plus : la reprise repart proprement de zéro.
+- **Attribution par `first_seen`, arrêt du worker attract, seuil de
+  rendement** (0.251.5) : `methods_pct` n'est plus le prorata de `credit`
+  sur la hausse d'une époque (le crédit d'un worker qui tourne en continu
+  sans rien trouver gonflait sa part) — chaque octet est crédité à la
+  source qui l'a **premièrement** prouvé (journal `first_seen`, par octet) ;
+  les lignes session portent la méthode dans l'acteur (tas / rng / attract ;
+  acteur 0 = chemins historiques, case statique comme avant), le débordement
+  du journal reste compté (`first_dropped` dans le JSON). Le worker attract
+  ne tourne plus à rendement nul toute la durée du run : après
+  `attract_stall` époques vides (3 par défaut), il est retiré au jeu
+  aléatoire depuis le pool (le moins choisi), compté sur stderr. Le seuil de
+  rendement par méthode est opt-in : `--yield-window N --yield-min B` somme
+  le crédit de chaque méthode sur les N dernières époques ; une méthode sous
+  le minimum se réaffecte (attract → rng, rng stagnant → meilleur
+  checkpoint), et quand **toutes** y sont le run s'arrête proprement
+  (`stop_reason: "yield"`). `tools/romset_batch.py` forward
+  `--yield-window/--yield-min`. Mesure sur l'état gelé Zelda : l'ancienne
+  attribution créditait « attract s0 » de 315 378 octets connus cumulés ;
+  l'attribution first_seen rend la part réelle de l'attract ≈ 0 % —
+  l'artefact est confirmé et corrigé.
 - `--tas-dir D` (répétable) : découvre tous les films du répertoire (triés
   par ressemblance de titre ; `.vmv`, `.vbm`, `.bk2`,
   `.gbm`, `.fm2`, `.log`), les films retenus sont loggés sur stderr.

@@ -42,6 +42,8 @@ void dp_session_cfg_defaults(DpSessionCfg *cfg) {
     cfg->segment_span = 1920;
     cfg->pool_cap = 48;
     cfg->stall_epochs = 3;
+    cfg->attract_stall = 3;
+    cfg->yield_window = 0; // the yield stop is opt-in (--yield-window / --yield-min)
     cfg->restart_rate = 8;
     cfg->save_epochs = 10;
     cfg->fork_paths_per_epoch = 200;
@@ -356,6 +358,11 @@ struct DpPlay {
     uint64_t tas_ckpts;
     uint64_t tas_bank_hits; // backsearch: snapshots seeded from a residual bank
     uint64_t tas_rng_starts; // random-key segments started from a TAS checkpoint
+    uint64_t attract_retired; // attract workers retired to random play (zero yield)
+    uint64_t method_yield[5]; // per-method credit of the current epoch (tas,rng,script/other,attract,fixed/human)
+    uint64_t yield_hist[5][32]; // ring of per-epoch per-method credit (yield window)
+    uint32_t yield_hn; // epochs recorded (capped at 32)
+    uint32_t yield_hi; // ring write index
     uint64_t tas_cuts;      // fork-explorer cuts absorbed mid-movie (movie kept)
     uint64_t tas_cut_stuck; // consecutive-cut guard hits (movie then falls to random play)
     uint32_t tas_rom_refused; // movies refused: recorded on another ROM (identity mismatch)
@@ -759,6 +766,12 @@ static void worker_vblank(DpMach *m) {
     else mask = input_keys(&w->in);
     w->applied_mask = mask;
     m->api->set_buttons(mask);
+    // the first-seen rows carry the method: the per-byte attribution of
+    // methods_pct reads this tag (0 falls back to the legacy bucket)
+    w->ex->first_actor = w->mode == IN_TAS ? DP_ACTOR_TAS
+                       : w->mode == IN_ATTRACT ? DP_ACTOR_ATTRACT
+                       : w->mode == IN_RNG ? DP_ACTOR_RNG
+                       : 0;
 
     if (w->mode == IN_TAS && w->tas_idx == 0) dp_ref_gate((uint32_t)w->frames_done);
     w->frames_done++;
@@ -1548,6 +1561,7 @@ static void drain_tas_snaps(DpPlay *p) {
 // checks the stop conditions.
 uint64_t dp_play_tas_ckpts(const DpPlay *p) { return p->tas_ckpts; }
 uint64_t dp_play_tas_bank_hits(const DpPlay *p) { return p->tas_bank_hits; }
+uint64_t dp_play_attract_retired(const DpPlay *p) { return p->attract_retired; }
 uint64_t dp_play_tas_rng_starts(const DpPlay *p) { return p->tas_rng_starts; }
 uint64_t dp_play_tas_snap_files(const DpPlay *p) { return (uint64_t)p->tasnaps_n; }
 
@@ -1626,10 +1640,25 @@ int dp_play_poll(DpPlay *p) {
             if (p->res->disc_n) p->res->disc[p->res->disc_n - 1].frame = w->lane_frame;
         }
         glob_new += w->credit_epoch;
+        { // per-method yield for this epoch (the yield stop reads the window)
+            int mi = w->mode == IN_TAS ? 0 : w->mode == IN_ATTRACT ? 3 : w->mode == IN_FIXED ? 4 : 1;
+            p->method_yield[mi] += w->credit_epoch;
+        }
         // a worker moved on to its next queued movie: its frame counter restarted
         frames += w->lane_frame >= w->seen_frame ? w->lane_frame - w->seen_frame : w->lane_frame;
         w->seen_frame = w->lane_frame;
         w->stagnant_epochs = w->credit_epoch == 0 ? w->stagnant_epochs + 1 : 0;
+        // the attract worker retires when its play finds nothing anymore (the
+        // attract mode is exhausted): its core goes to random play from the
+        // pool — the least chosen checkpoints — like any other rng worker
+        if (w->mode == IN_ATTRACT && w->stagnant_epochs >= p->cfg.attract_stall) {
+            w->mode = IN_RNG;
+            w->seg_left = 1; // rotate to a pool checkpoint at the next frame boundary
+            w->stagnant_epochs = 0;
+            p->attract_retired++;
+            fprintf(stderr, "deepeel: attract worker %d retired after %d empty epochs: core to random play\n",
+                    w->id, p->cfg.attract_stall);
+        }
     }
     // the human lane counts too: playing counts as progress, it must never
     // be punished by the stagnation wall
@@ -1681,6 +1710,57 @@ int dp_play_poll(DpPlay *p) {
     for (int i = 0; i < p->nworkers; i++)
         if (p->w[i].mode == IN_TAS && p->w[i].frames_done < p->w[i].tas.frames) tas_left = 1;
     if (__atomic_load_n(&p->tas_next, __ATOMIC_RELAXED) < p->cfg.tas_n) tas_left = 1;
+    // the yield stop: per-method credit over the last --yield-window epochs
+    if (p->cfg.yield_window > 0) {
+        int wn = p->cfg.yield_window > 32 ? 32 : p->cfg.yield_window;
+        p->yield_hist[0][p->yield_hi] = p->method_yield[0];
+        p->yield_hist[1][p->yield_hi] = p->method_yield[1];
+        p->yield_hist[2][p->yield_hi] = p->method_yield[2];
+        p->yield_hist[3][p->yield_hi] = p->method_yield[3];
+        p->yield_hist[4][p->yield_hi] = p->method_yield[4];
+        p->method_yield[0] = p->method_yield[1] = p->method_yield[2] = 0;
+        p->method_yield[3] = p->method_yield[4] = 0;
+        p->yield_hi = (p->yield_hi + 1) % 32;
+        if (p->yield_hn < 32) p->yield_hn++;
+        if (p->yield_hn >= (uint32_t)wn) { // full window: judge each method
+            uint64_t ysum[5] = {0};
+            for (int m = 0; m < 5; m++)
+                for (uint32_t k = 0; k < (uint32_t)wn; k++) {
+                    int idx = (int)(((p->yield_hi + 32) - 1 - (uint32_t)k) % 32);
+                    ysum[m] += p->yield_hist[m][idx];
+                }
+            // a starved method reallocates: attract workers retire to random
+            // play; stagnant rng workers re-seed from the best checkpoint (the
+            // existing stall path — force its counter so it fires now)
+            if (ysum[3] < p->cfg.yield_min)
+                for (int i = 0; i < p->nworkers; i++)
+                    if (p->w[i].mode == IN_ATTRACT) {
+                        p->w[i].mode = IN_RNG;
+                        p->w[i].seg_left = 1; // rotate to a pool checkpoint now
+                        p->w[i].stagnant_epochs = 0;
+                        p->attract_retired++;
+                        fprintf(stderr, "deepeel: attract worker %d retired on the yield threshold: core to random play\n",
+                                p->w[i].id);
+                    }
+            if (ysum[1] < p->cfg.yield_min)
+                for (int i = 0; i < p->nworkers; i++)
+                    if (p->w[i].mode == IN_RNG) {
+                        p->w[i].stagnant_epochs = p->cfg.stall_epochs; // re-seed from the best
+                    }
+            // every method below the minimum: the whole play yields
+            if (!tas_left && ysum[0] < p->cfg.yield_min && ysum[1] < p->cfg.yield_min &&
+                ysum[3] < p->cfg.yield_min) {
+                fprintf(stderr, "deepeel: yield stop: every method below %u bytes over %d epochs\n",
+                        p->cfg.yield_min, wn);
+                p->quit = 1;
+                p->stop_reason = 7;
+                dp_play_save(p);
+                pthread_cond_broadcast(&p->cv);
+                pthread_mutex_unlock(&p->bar_mtx);
+                return 1;
+            }
+        }
+    }
     if (g_sigint) reason = 2;
     else if (p->cfg.max_frames && !tas_left && p->total_frames >= p->cfg.max_frames) reason = 0;
     else if (p->cfg.stagnation_frames && !tas_left && p->stagnation >= p->cfg.stagnation_frames && !tas_rng_pending(p)) reason = 1;

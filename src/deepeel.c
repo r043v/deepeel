@@ -169,6 +169,9 @@ static void usage(void) {
             "                         (frontier drain) S more seconds instead of skipping it\n"
             "    --checkpoints N      checkpoint pool size (default 48)\n"
             "    --stall E            empty epochs before re-seeding from the best (default 3)\n"
+            "    --yield-window N     epochs a method's yield is summed over (0 = off, default 0)\n"
+            "    --yield-min B        bytes below which a method reallocates, and the whole\n"
+            "                         play yields (stop reason \"yield\") when every method does\n"
             "    --state-dir D        persist the pool (pool.bin) and the PNG snapshots\n"
             "    --resume             continue from a saved pool\n"
             "    --input f            replay an m0boy held-named input script (repeatable)\n"
@@ -447,6 +450,8 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--until-static")) scfg.until_static = 1;
         else if (!strcmp(a, "--checkpoints") && i + 1 < argc) scfg.pool_cap = atoi(argv[++i]);
         else if (!strcmp(a, "--stall") && i + 1 < argc) scfg.stall_epochs = atoi(argv[++i]);
+        else if (!strcmp(a, "--yield-window") && i + 1 < argc) { scfg.yield_window = atoi(argv[++i]); scfg.attract_stall = scfg.yield_window; }
+        else if (!strcmp(a, "--yield-min") && i + 1 < argc) scfg.yield_min = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--state-dir") && i + 1 < argc) scfg.state_dir = argv[++i];
         else if (!strcmp(a, "--resume")) scfg.resume = 1;
         else if (!strcmp(a, "--spool-to-frontier")) spool_to_frontier = 1;
@@ -705,13 +710,13 @@ static int cmd_explore(int argc, char **argv) {
         int reason = dp_play_run(play_engine);
         dp_watch_stop();
         double secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
-        static const char *why[7] = { "frame budget reached", "stagnation wall reached",
+        static const char *why[8] = { "frame budget reached", "stagnation wall reached",
                                       "interrupted", "every byte explained", "memory cap reached",
-                                      "TAS replay done", "time budget reached" };
+                                      "TAS replay done", "time budget reached", "yield stop" };
         fprintf(stderr, "deepeel: play done after %llu frames (%s), %.2fs\n",
                 (unsigned long long)dp_play_frames(play_engine),
-                reason >= 0 && reason < 7 ? why[reason] : "?", secs);
-        stop_txt = reason >= 0 && reason < 7 ? why[reason] : "?";
+                reason >= 0 && reason < 8 ? why[reason] : "?", secs);
+        stop_txt = reason >= 0 && reason < 8 ? why[reason] : "?";
         play_frames = dp_play_frames(play_engine);
         if (scfg.tas_n) {
             if (scfg.tas_ckpt_live)

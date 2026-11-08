@@ -519,6 +519,7 @@ struct DpExplorer {
     // cleared.  Sessions record naturally, never fork, and attribute every
     // first discovery to their credit counters below.
     int session;
+    uint32_t first_actor; // actor tag carried into first-seen rows (DP_ACTOR_*, 0 unknown)
     void *session_ctx;         // the owning worker (sessions.c)
     int irq_depth;             // natural IRQ handlers currently executing
     int reti_pending;          // a RETI executes this step: drop the depth after

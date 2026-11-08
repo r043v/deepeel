@@ -299,6 +299,8 @@ def process(e, cat, a):
         # stops by itself on exhaustion, on --stagnation (no discovery for N
         # play frames = negligible gain) or on the --time-limit cap.
         cmd = base + ["--time-limit", str(int(a.cap)), "--stagnation", str(a.stagnation), "--until-static", "--search-limit", str(a.search)]
+        if a.yield_window:
+            cmd += ["--yield-window", str(a.yield_window), "--yield-min", str(a.yield_min)]
         el, rc, why = run_slice(cmd, logpath, state, a.cap + a.search, a.guard, int(a.ram_gb * (1 << 30) * 0.45), int(a.ram_gb * (1 << 30)))
         # a resource guard stops the run gracefully; the state dir now keeps the coverage map
         # (coverage.bin), so --resume continues the same exploration without losing what is known
@@ -394,6 +396,8 @@ def main():
     ap.add_argument("--jobs", type=int, default=8, help="--jobs of each deepeel (bursty load: 4 x 8 workers share the cores)")
     ap.add_argument("--ram-gb", type=float, default=10.0, help="total RAM ceiling for all deepeel runs (user limit: 10 GB)")
     ap.add_argument("--stagnation", type=int, default=30000, help="play frames without discovery before stopping")
+    ap.add_argument("--yield-window", type=int, default=0, help="epochs a method's yield is summed over (0 = off; forwards --yield-window/--yield-min)")
+    ap.add_argument("--yield-min", type=int, default=0, help="bytes below which a method reallocates and the play yields (stop reason 'yield')")
     ap.add_argument("--cap", type=int, default=1200, help="max exploration wall per ROM (s)")
     ap.add_argument("--guard", type=int, default=15 << 30, help="stop a run only when the scratch disk has less than this many bytes free (the disk spool unloads the RAM; no per-ROM size cap)")
     ap.add_argument("--search", type=int, default=900, help="seconds of fork search after the play budget (deepeel --search-limit); 0 = skip")

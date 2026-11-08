@@ -603,6 +603,8 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
             dp_buf_fmt(o, ",\"methods_pct\":{\"tas\":%.3f,\"random\":%.3f,\"fork\":%.3f,"
                           "\"attract\":%.3f,\"static\":%.3f}",
                        ms[0], ms[1], ms[2], ms[3], ms[4]);
+            dp_buf_fmt(o, ",\"first_dropped\":%llu",
+                       (unsigned long long)res->first.dropped);
         }
         if (m) {
             int cap = 16384;

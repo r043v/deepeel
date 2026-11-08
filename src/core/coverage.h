@@ -52,6 +52,12 @@ static inline const char *dp_src_name(int bit) {
 // actor).  The stamp is the platform's step counter; the actor is a worker or
 // movie id (0 when unknown).  Bounded: rows past `max` are counted, not kept.
 typedef struct { uint32_t key, src; uint64_t stamp; uint32_t actor; } DpFirstSeen;
+// actor values for session rows (which session method first saw the byte):
+// 0 = unknown/legacy (the whole family credits static in methods_pct, the
+// pre-0.251.5 behaviour), the others tag the play mode of the recording lane
+#define DP_ACTOR_TAS 1
+#define DP_ACTOR_RNG 2
+#define DP_ACTOR_ATTRACT 3
 typedef struct {
     DpFirstSeen *e;
     uint32_t n, cap, max;

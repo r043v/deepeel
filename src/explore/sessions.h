@@ -24,6 +24,9 @@ typedef struct DpSessionCfg {
     uint32_t segment_span;      // + random below (m0x: 1920)
     int pool_cap;               // checkpoint pool (m0x: 48)
     int stall_epochs;           // empty epochs before a session re-seeds from the best
+    int attract_stall;          // empty epochs before the attract worker retires to random play
+    int yield_window;           // epochs a method's yield is summed over (0 = yield stop off)
+    uint32_t yield_min;         // bytes below which a method (or the whole play) yields
     int restart_rate;           // 1/n segments restart from power-on (m0x: 8)
     uint32_t seed;              // input RNG base
     uint64_t max_frames;        // stop after this many frames total (0 = unlimited)
@@ -112,6 +115,8 @@ uint64_t dp_play_tas_ckpts(const DpPlay *p);
 // backsearch: TAS snapshots whose capture bank still holds residual unknown,
 // seeded first (priority 1) by dp_play_seed_tas_snaps
 uint64_t dp_play_tas_bank_hits(const DpPlay *p);
+// attract workers retired to random play after empty epochs (zero yield)
+uint64_t dp_play_attract_retired(const DpPlay *p);
 uint64_t dp_play_tas_rng_starts(const DpPlay *p); // random-key segments started from a TAS checkpoint
 // screen cells archived into the pool (--session-cells)
 uint64_t dp_play_cells(const DpPlay *p);

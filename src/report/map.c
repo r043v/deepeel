@@ -6,6 +6,7 @@
 #include "core/snapshot_png.h"
 #include "../gui/font5x7.h"
 #include <math.h>
+#include <pthread.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -110,49 +111,36 @@ const char *dp_map_class_name(int c) {
 int dp_map_is_code(int c) { return c == DP_MAP_CODE_NAT || c == DP_MAP_CODE_FORCED || c == DP_MAP_CODE_STATIC || c == DP_MAP_INF_CODE || c == DP_MAP_PROB_CODE; }
 int dp_map_is_data(int c) { return c == DP_MAP_DATA_COPIED || c == DP_MAP_DATA_READ || c == DP_MAP_DATA_STATIC || c == DP_MAP_TABLE || c == DP_MAP_INF_DATA || c == DP_MAP_PROB_DATA; }
 
-// what each exploration method added, in % of the whole ROM (tas, rng, fork,
-// attract, static+inferred): the rise of the known-byte count over each
-// discovery entry, credited by source
+// what each exploration method first saw, in % of the whole ROM (tas, rng,
+// fork, attract, static+inferred): the per-byte first-seen journal is the
+// truth — each byte is credited to the method that discovered it first, no
+// prorata of a shared epoch rise (the pre-0.251.5 attribution inflated
+// methods whose workers run continuously without finding anything).  Session
+// rows carry the method in the actor tag; a row with the unknown actor (0,
+// legacy paths) and the static family land in the static bucket like before.
 void dp_map_methods_pct(const DpResults *res, const DpMapSummary *sp, double mshare[5]) {
     const DpMapSummary s = *sp;
-    double pct = s.total ? 100.0 / (double)s.total : 0.0;
+    double tot = (double)s.total;
     for (int i = 0; i < 5; i++) mshare[i] = 0;
-    {
-        uint32_t prev = 0;
-        double tot = (double)res->banks * 0x4000;
-        for (uint32_t i = 0; i < (uint32_t)res->disc_n;) {
-            // one play epoch adds one entry per worker that found something,
-            // all with the epoch's final known count: split the rise by credit
-            uint32_t j = i + 1;
-            uint64_t csum = res->disc[i].credit;
-            if (res->disc[i].credit)
-                while (j < (uint32_t)res->disc_n && res->disc[j].credit &&
-                       res->disc[j].known == res->disc[i].known)
-                    csum += res->disc[j++].credit;
-            uint32_t k = res->disc[j - 1].known;
-            if (k > prev) {
-                for (uint32_t q = i; q < j; q++) {
-                    const char *src = res->disc[q].source;
-                    int c = !strncmp(src, "tas", 3) && strncmp(src, "tas-shoots", 10) ? 0
-                            : !strncmp(src, "rng", 3)                                 ? 1
-                            : !strncmp(src, "attract", 7)                             ? 3
-                            : (!strcmp(src, "start") || !strncmp(src, "script", 6) ||
-                               !strncmp(src, "fixed", 5) || !strncmp(src, "human", 5) ||
-                               !strncmp(src, "closure", 7) || !strncmp(src, "static", 6))
-                                ? 4
-                                : 2;
-                    double f = j - i > 1 && csum ? (double)res->disc[q].credit / (double)csum
-                                                 : 1.0 / (j - i);
-                    mshare[c] += (k - prev) * f * 100.0 / tot;
-                }
-                prev = k;
-            }
-            i = j;
-        }
-        double sum = mshare[0] + mshare[1] + mshare[2] + mshare[3] + mshare[4];
-        double rest = s.known * pct - sum; // provenance, final closure, inference
-        if (rest > 0) mshare[4] += rest;
+    if (!tot) return;
+    pthread_mutex_lock((pthread_mutex_t *)&res->first.mtx);
+    for (uint32_t i = 0; i < res->first.n; i++) {
+        const DpFirstSeen *r = &res->first.e[i];
+        int c;
+        if (r->src & DP_SRC_SESSION)
+            c = r->actor == DP_ACTOR_TAS     ? 0
+                : r->actor == DP_ACTOR_RNG   ? 1
+                : r->actor == DP_ACTOR_ATTRACT ? 3
+                                             : 4; // unknown actor: legacy bucket
+        else if (r->src & (DP_SRC_FORK_NATURAL | DP_SRC_FORK_FORCED))
+            c = 2;
+        else
+            c = 4; // static family: closure, provenance, scans, sibling inference
+        mshare[c] += 100.0 / tot;
     }
+    pthread_mutex_unlock((pthread_mutex_t *)&res->first.mtx);
+    // the journal is bounded (first_dropped counts the overflow, reported
+    // alongside): the shares then undercount slightly, they never invent
 }
 
 // ---- probable code: a linear decode of an unknown run between two known code blocks.  Uncertain by
