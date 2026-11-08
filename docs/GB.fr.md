@@ -540,6 +540,16 @@ code / data / padding.
   distribution indirecte du harnais empêchait les fourches d'atteindre
   les cibles) passe à **100,0 % connu** — son résidu de 19 octets était
   la fin du logo que seul le boot lisait.
+- **Registres natifs SMS/GG/SG + MSX** (0.251.8) : les tables de ports
+  `DpSegaPort` deviennent des entrées `DpIoReg` natives (le modèle
+  GB/NES/PCE/MD, `dp_platform_sega` / `dp_platform_msx`) : catégories
+  vidéo/son/entrée/série/système décidées par nom de registre, les
+  registres événementiels (VDP_STATUS, V/H_COUNTER, GG_START) portent
+  `DP_IMPL_EVENT` — la surface des sondes §3.7. Les tables de métadonnées
+  restent l'unique source de vérité (adresses, masques de décodage,
+  direction) ; la conversion ne perd aucun port (épinglé par le test
+  `registry` : compte exact, catégories valides, drapeaux cohérents,
+  registre jamais inventé).
 - `--tas-dir D` (répétable) : découvre tous les films du répertoire (triés
   par ressemblance de titre ; `.vmv`, `.vbm`, `.bk2`,
   `.gbm`, `.fm2`, `.log`), les films retenus sont loggés sur stderr.

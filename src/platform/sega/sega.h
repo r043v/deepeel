@@ -22,6 +22,10 @@ typedef struct {
 } DpSegaSystem;
 const DpSegaSystem *dp_sega_system(const char *id);
 const DpSegaPort *dp_sega_port(const DpSegaSystem *system, uint16_t port, int write);
+// the port tables as native DpIoReg entries (the GB/NES/PCE/MD model)
+struct DpPlatform;
+const struct DpPlatform *dp_platform_sega(const DpSegaSystem *system);
+const struct DpPlatform *dp_platform_msx(void);
 void dp_sega_regs(FILE *out, const DpSegaSystem *system);
 int dp_z80_command(int argc, char **argv);
 #endif
