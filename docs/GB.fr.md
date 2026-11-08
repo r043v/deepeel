@@ -445,6 +445,21 @@ code / data / padding.
   clairsemée (tilemaps 00-04, plans graphiques) que le run de référence
   8 h30 a lue comme donnée : l'inférer padding serait un faux positif de
   classe — limite documentée, la règle est saturée.
+- **Preuve de dispatch stride-3** (0.251.2) : la table d'opérandes d'un
+  `jp hl` exécuté peut être au pas 3 (adresse + octet de banque par entrée,
+  l'idiome multi-banques) — chaque entrée nomme sa propre banque, la cible
+  est marquée dans la vue `banque*0x4000 + (adresse & 0x3FFF)`, y compris
+  pour une adresse basse (< $4000) d'une autre banque. L'acceptation d'une
+  cible non encore exécutée est renforcée : elle doit décoder, sans opcode
+  indéfini, jusqu'à un transfert (ret/jr/jp/rst/call/halt) dans une fenêtre
+  de 48 instructions ; les octets d'une table validée sont prouvés données.
+  Fixture `dispatch3` (table stride-3, entrée prise en banque 1, la
+  fermeture S4 est appelée explicitement par le harnais). Mesure Zelda
+  (banc rapide 19 s) : résidu inchangé (11787 octets, même anatomie) — les
+  21 plages code-code n'y sont pas des tables S4 ; 8 tables validées contre
+  16 sous l'ancien critère (« premier octet légal » suffisait) : les 8
+  perdues avaient des cibles qui ne décodent pas jusqu'à un transfert, des
+  racines statiques douteuses que la preuve renforcée refuse.
 - `--tas-dir D` (répétable) : découvre tous les films du répertoire (triés
   par ressemblance de titre ; `.vmv`, `.vbm`, `.bk2`,
   `.gbm`, `.fm2`, `.log`), les films retenus sont loggés sur stderr.

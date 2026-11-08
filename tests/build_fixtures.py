@@ -273,6 +273,25 @@ def build(out):
     w(r, 0x270, 0x3E, 0x03, 0x76)                # entry 2 (never taken)
     save(out, "fix_dispatch", r)
 
+    # --- dispatch3: indexed jp hl through a stride-3 table (addr, addr, bank);
+    # the taken entry lives in bank 1: only the stride-3 proof reaches it ------
+    r = rom(2, mbc=0x19)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x3E, 0x01, 0xEA, 0x00, 0x20)    # ld a,1; ld ($2000),a  (bank 1 in)
+    w(r, 0x155, 0x11, 0x03, 0x00)                # ld de,3  (index 1, stride 3)
+    w(r, 0x158, 0x21, 0x30, 0x02)                # ld hl,$0230
+    w(r, 0x15B, 0x19)                            # add hl,de
+    w(r, 0x15C, 0x2A)                            # ld a,(hl+)
+    w(r, 0x15D, 0x66)                            # ld h,(hl)
+    w(r, 0x15E, 0x6F)                            # ld l,a
+    w(r, 0x15F, 0xE9)                            # jp hl
+    # stride-3 table: $0250@0 (ROM0, bank 0), $4250@1 (window, bank 1), $0260@0
+    w(r, 0x230, 0x50, 0x02, 0x00, 0x50, 0x42, 0x01, 0x60, 0x02, 0x00)
+    w(r, 0x250, 0x3E, 0x01, 0x76)                # entry 0 bank 0 (never taken): ld a,1; halt
+    w(r, 0x4250, 0x3E, 0x02, 0xEA, 0x00, 0x80, 0x76)  # entry 1 bank 1 (taken): vram $02, halt
+    w(r, 0x260, 0x3E, 0x03, 0x76)                # entry 2 bank 0 (never taken)
+    save(out, "fix_dispatch3", r)
+
     # --- rstdispatch: rst $28 jump table inline after the call site (SML2 idiom) -----
     r = rom(2)
     w(r, 0x28, 0x87, 0xE1, 0x5F, 0x16, 0x00, 0x19, 0x5E, 0x23, 0x56, 0xD5, 0xE1, 0xE9)

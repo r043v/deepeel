@@ -12,6 +12,7 @@
 // becomes bounded forks instead of a dead end.
 #include "explorer.h"
 #include "../core/dpmachine.h"
+#include "../cpu/sm83/sm83.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -52,6 +53,29 @@ static void bank_edge_add(DpResults *res, DpHashSet *seen, uint16_t target) {
 }
 
 static int illegal(uint8_t op) { return dp_isa_sm83()->illegal(op); }
+
+// a table target is plausible code when the bytes decode, without an illegal
+// opcode and without running into a padding run, to a transfer (ret/jp/jr)
+// within a short window — the plan-B acceptance rule ("début d'instruction
+// cohérent jusqu'à ret/jp")
+static int decodes_to_transfer(const DpCart *c, uint32_t tk, int banks) {
+    uint32_t bank = tk / 0x4000;
+    uint32_t p = tk % 0x4000;
+    if (bank >= (uint32_t)banks) return 0;
+    for (int i = 0; i < 48; i++) {
+        if (p + 3 >= 0x4000) return 0;
+        uint8_t op = c->rom[bank * 0x4000 + p];
+        if (op == 0xC9 || op == 0xD9 || op == 0xC3 || op == 0xE9 || op == 0x18) return 1; // ret/reti/jp/jp hl/jr
+        if (op == 0x76) return 1; // halt ends a handler as surely as a return
+        if (op == 0xC7 || op == 0xCF || op == 0xD7 || op == 0xDF || op == 0xE7 ||
+            op == 0xEF || op == 0xF7 || op == 0xFF || op == 0xC4 || op == 0xCC ||
+            op == 0xCD || op == 0xC2 || op == 0xCA) return 1; // rst/call variants end the window fine
+        int len = sm83_len(op);
+        if (illegal(op) || len <= 0) return 0;
+        p += (uint32_t)len;
+    }
+    return 0;
+}
 
 // the bank the $4000 window holds right after reset
 static uint16_t boot_bank(const DpResults *res) {
@@ -178,7 +202,9 @@ uint32_t dp_static_closure(DpResults *res) {
         // S4: an executed `jp hl` preceded (within 24 bytes of straight code) by an executed
         // `ld hl,nn` reads a table of code pointers at nn: its entries are static roots in
         // the same bank view as the jump (up to 64 words, each a ROM address, stopping at
-        // padding or an address that does not start a legal instruction)
+        // padding or an address that does not start a legal instruction).  A stride-3
+        // variant (addr + bank byte per entry) is tried when the stride-2 table does not
+        // validate; a target is accepted when it decodes to a transfer within a short window.
         if (executed && op == 0xE9 && k >= 24) {
             for (uint32_t b = k - 1; b + 24 > k && b < k; b--) {
                 // base register: `ld hl,nn` itself, or `ld de,nn` / `ld bc,nn` added to HL by an
@@ -197,25 +223,51 @@ uint32_t dp_static_closure(DpResults *res) {
                 if (base < 0x4000) bk = base;
                 else if (base < 0x8000 && tb != NO_HINT && tb < (uint32_t)res->banks) bk = tb * 0x4000 + (base & 0x3FFF);
                 if (bk == ~0u || bk + 6 > c->rom_size) { if (b == 0) break; continue; }
-                int cnt = 0;
-                for (int e = 0; e < 64 && bk + (uint32_t)e * 2 + 1 < c->rom_size; e++) {
-                    uint16_t t = (uint16_t)(c->rom[bk + e * 2] | c->rom[bk + e * 2 + 1] << 8);
-                    if (t < 0x150 || t >= 0x8000 || illegal(c->rom[t < 0x4000 ? t : (tb != NO_HINT && tb < (uint32_t)res->banks ? tb * 0x4000 + (t & 0x3FFF) : 0)])) break;
-                    uint32_t tk = ~0u;
-                    if (t < 0x4000) tk = t;
-                    else if (tb != NO_HINT && tb < (uint32_t)res->banks) tk = tb * 0x4000 + (t & 0x3FFF);
-                    if (tk == ~0u || tk >= n || (res->static_flags[tk] & DP_SF_PAD)) break;
-                    cnt++;
-                    res->closure_jp_entries++;
-                    if (!(res->exec_flags[tk] & (DP_XF_NATURAL | DP_XF_FORCED))) {
-                        res->exec_flags[tk] |= DP_XF_ENTRY;
-                        dp_cov_mark(&res->first, res->src_flags, tk, DP_SRC_CLOSURE, res->steps_total, 0);
-                        if (dp_set_insert(&listed, tk) > 0) entry_add(res, tk);
+                int validated = 0;
+                for (int stride = 2; stride <= 3 && !validated; stride++) {
+                    int cnt = 0;
+                    for (int e = 0; e < 64 && bk + (uint32_t)e * (uint32_t)stride + (stride > 2 ? 2 : 1) < c->rom_size; e++) {
+                        uint16_t t = (uint16_t)(c->rom[bk + e * (uint32_t)stride] | c->rom[bk + e * (uint32_t)stride + 1] << 8);
+                        uint32_t ebk = tb;
+                        if (stride == 3) { // the entry names its own bank
+                            uint8_t eb = c->rom[bk + e * 3 + 2];
+                            if (eb >= (uint32_t)res->banks) break;
+                            ebk = eb;
+                        }
+                        if (t < 0x150 || t >= 0x8000) break;
+                        uint32_t tk = ~0u;
+                        if (stride == 3) { // the entry names its bank, low targets included
+                            if (ebk != NO_HINT && ebk < (uint32_t)res->banks) tk = ebk * 0x4000 + (t & 0x3FFF);
+                        } else if (t < 0x4000) tk = t;
+                        else if (ebk != NO_HINT && ebk < (uint32_t)res->banks) tk = ebk * 0x4000 + (t & 0x3FFF);
+                        if (tk == ~0u || tk >= n || (res->static_flags[tk] & DP_SF_PAD)) break;
+                        // entry target: a legal instruction start; an unproven target must
+                        // further decode toward a transfer (no illegal opcode on the way)
+                        if (illegal(c->rom[tk]) || sm83_len(c->rom[tk]) <= 0) break;
+                        if (!(res->exec_flags[tk] & (DP_XF_NATURAL | DP_XF_FORCED)) &&
+                            !decodes_to_transfer(c, tk, res->banks)) break;
+                        cnt++;
+                        res->closure_jp_entries++;
+                        if (!(res->exec_flags[tk] & (DP_XF_NATURAL | DP_XF_FORCED))) {
+                            res->exec_flags[tk] |= DP_XF_ENTRY;
+                            dp_cov_mark(&res->first, res->src_flags, tk, DP_SRC_CLOSURE, res->steps_total, 0);
+                            if (dp_set_insert(&listed, tk) > 0) entry_add(res, tk);
+                        }
+                        push(&st, tk, tk >= 0x4000 ? NO_HINT : it.hint, 0);
                     }
-                    push(&st, tk, tk >= 0x4000 ? NO_HINT : it.hint, 0);
+                    if (cnt) {
+                        res->closure_jp_tables++;
+                        validated = 1;
+                        uint32_t tbytes = bk + (uint32_t)cnt * (uint32_t)stride; // the entries proven data
+                        if (tbytes > c->rom_size) tbytes = c->rom_size;
+                        for (uint32_t wb = bk; wb < tbytes; wb++)
+                            if (!(res->data_flags[wb] & DP_DF_STATIC)) {
+                                res->data_flags[wb] |= DP_DF_STATIC;
+                                res->prov_data++;
+                            }
+                    }
                 }
-                if (cnt) { res->closure_jp_tables++; break; }
-                if (b == 0) break;
+                if (validated || b == 0) break;
             }
         }
         if (fall) {

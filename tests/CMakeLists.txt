@@ -173,6 +173,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pal.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_probes.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_copyx.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_dispatch3.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nsecho.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nsdata.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nsstack.gb

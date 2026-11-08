@@ -370,6 +370,18 @@ int main(int argc, char **argv) {
     CHECK(res.exec_flags[0x270] & (DP_XF_STATIC | DP_XF_FORCED)); // entry 2 too
     CHECK(res.data_flags[0x230] & DP_DF_STATIC);        // the table words proven data
 
+    // --- dispatch3: stride-3 table (addr, addr, bank): the taken entry is in
+    // bank 1, only the banked-entry proof marks it and its siblings ---------
+    run(dir, "dispatch3");
+    dp_static_closure(&res);                            // the S4 banked-entry proof (CLI runs it in closure rounds)
+    CHECK(res.exec_hits[dp_rom_index(1, 0x250)] > 0);   // the bank-1 entry really ran
+    CHECK(!(res.exec_flags[0x250] & DP_XF_NATURAL));    // bank-0 namesake never did
+    dp_provenance(&res);
+    CHECK(res.exec_flags[0x250] & (DP_XF_STATIC | DP_XF_FORCED)); // entry 0 is code
+    CHECK(res.exec_flags[0x260] & (DP_XF_STATIC | DP_XF_FORCED)); // entry 2 too
+    CHECK(res.exec_flags[dp_rom_index(1, 0x250)] & (DP_XF_STATIC | DP_XF_FORCED));
+    CHECK(res.data_flags[0x230] & DP_DF_STATIC);        // the stride-3 table proven data
+
     // --- rstdispatch: the inline table after `rst $28` is proven, all entries code ----
     run(dir, "rstdispatch");
     CHECK(res.exec_hits[0x270] > 0);
