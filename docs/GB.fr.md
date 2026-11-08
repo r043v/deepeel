@@ -3011,6 +3011,13 @@ Explorations deepeel (bornées, observations de l'outil) :
   atteint par la fermeture statique (« 3 stopped by data/padding ») : il
   faut résoudre la distribution indirecte du harnais pour convertir ces
   « données » en code. Amélioration de couverture à venir, pas un échec.
+- `--fork-site-cap N` (0.249.88) : le cap de fourches par site du GB (16,
+  compteur par octet) est exposé au CLI (255 max, `--unbounded` le met à 255).
+  Mesure sur la réserve 09-op r,r : cap 255, 13 M pas, 1109 courses —
+  **toujours 53 octets de code** et 3,2 M de fourches plafonnées : le cap
+  n'est pas le verrou, la distribution indirecte du harnais l'est (les
+  variantes de fourche retombent dans la même boucle sans atteindre de
+  nouveau code). À suivre côté résolution de cibles indirectes.
 - Recompilation (axe 10, première ROM de test) : `09-op r,r.gb` via
   `gbrecomp --target meta --coverage` deepeel — 8210 enregistrements, 53
   instructions compilées, **interpreter-only 0** ; la qualité de la

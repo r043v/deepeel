@@ -143,6 +143,7 @@ static void usage(void) {
             "                         round exits early once it seeds nothing)\n"
             "    --no-covered-prune   keep forking sites whose both sides are covered\n"
             "    --covered-keep N     forks such a site still gets (default 2)\n"
+            "    --fork-site-cap N    per-branch-site fork cap (default 16, bytes counters)\n"
             "    --gui                SDL2 live viewer\n"
             "    --mapwin [SCALE]     live ROM map window (1 px per byte like the .map.png), redrawn while exploring\n"
             "    --watch [FPS]        small window showing the replaying TAS movie, 1..30 img/s (default 30)\n"
@@ -423,6 +424,10 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--closure-rounds") && i + 1 < argc) cfg.closure_rounds = atoi(argv[++i]);
         else if (!strcmp(a, "--no-covered-prune")) cfg.no_covered_prune = 1;
         else if (!strcmp(a, "--covered-keep") && i + 1 < argc) cfg.covered_fork_keep = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--fork-site-cap") && i + 1 < argc) {
+            cfg.fork_site_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+            if (cfg.fork_site_cap > 255) cfg.fork_site_cap = 255; // per-site counters are bytes
+        }
         else if (!strcmp(a, "--entry") && i + 1 < argc && entries < 32) {
             if (!parse_entry(argv[++i], &eb[entries], &ea[entries])) {
                 fprintf(stderr, "deepeel: bad --entry '%s' (bank:addr)\n", argv[i]);
@@ -447,7 +452,7 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--unbounded")) {
             // coverage first: no per-site fork cap (covered-both-sides pruning stays: it adds no code), no spool or
             // queue ceiling, no memory stop; whatever RAM cannot hold goes to the disk
-            cfg.unbounded = scfg.unbounded = 1; cfg.fork_site_cap = 0x7FFFFFFFu;
+            cfg.unbounded = scfg.unbounded = 1; cfg.fork_site_cap = 255u;
             cfg.spool_cap_mb = 0; cfg.spool_cap_bytes = 0;
         }
         else if (!strcmp(a, "--input") && i + 1 < argc && scfg.inputs_n < 8) scfg.inputs[scfg.inputs_n++] = argv[++i];
