@@ -1,5 +1,6 @@
 #include "nesmach.h"
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <stdio.h>
 #include "nes.h"
@@ -312,6 +313,13 @@ void dp_nesmach_reset(DpNesMach *d) {
 
 void dp_nesmach_set_hooks(DpNesMach *d, const DpNesHooks *h) { d->h = *h; }
 
+/* ends the current run slice at the next instruction boundary (the frame
+ * hook of an external driver uses it; same contract as dp_mach_cut) */
+void dp_nesmach_cut(DpNesMach *d) {
+    (void)d;
+    nes_trace.stop = 1;
+}
+
 uint64_t dp_nesmach_run(DpNesMach *d, uint64_t max_steps) {
     nes_trace.user = d;
     nes_trace.step = t_step;
@@ -347,6 +355,10 @@ void dp_nesmach_frame(DpNesMach *d) {
     nes_trace.wr = t_wr;
     nes_trace.interrupt = t_interrupt;
     nes_trace.stop = 0;
+    d->steps = 0;
+    d->budget = UINT64_MAX;   /* the step hook stops on budget otherwise:
+        * a zeroed instance never executed a single instruction (found by
+        * the fidelity harness: the DUT sat at its reset loop forever) */
     if (d->in_frame) { nes_frame_rest(); d->in_frame = 0; }
     nes_frame();
     if (d->h.on_frame) d->h.on_frame(d->h.user);

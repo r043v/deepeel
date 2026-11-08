@@ -112,6 +112,52 @@ tables de pointeurs 18 → 26, octets classés `table` 90 → 129 (6 mots
 cross-bank) ; les 39 octets gagnés sont reclassés depuis `data-read` et
 `inf-data`, aucune autre classe ne régresse (`known_pct` identique).
 
+## 0.250.4 — fidélité NES : banc de comparaison Nestopia
+
+`tools/nes_compare_reference.sh ROM film.bk2|fm2 trames` rejoue le même film
+sur le cœur libretro Nestopia (`DP_NESTOPIA_SO`, construit hors dépôt) et sur
+le runtime m0boy, diff des 2 Kio de RAM par trame (`DP_NES_DUMP=préfixe`
+décharge les RAM pour l'analyse d'alignement par corrélation croisée, comme
+le banc GG).
+
+Premiers résultats (DuckTales Europe, TAS jvuln33v2, 600 trames) : les 4
+premières trames sont identiques ; divergence à la trame 6 (`$0080`), pas
+un décalage de trame (corrélation plate) — le compteur de trames du jeu
+avance côté m0boy (4 contre 1). À démêler : timing exact de \$2002 (la
+boucle d'attente vblank du boot), frontière de trame interne de Nestopia.
+Le banc a déjà trouvé et corrigé un vrai bug du runtime :
+`dp_nesmach_frame` n'initialisait jamais `steps`/`budget` — le hook de pas
+voyait `0 >= 0` et arrêtait la machine à sa première instruction ; une
+instance pilotée par `dp_nesmach_frame` n'exécutait rien (reparé :
+`dp_nesmach_cut` public + budget initialisé). Le warm-up PPU (~29658
+cycles, écritures \$2000/\$2001/\$2005/\$2006 ignorées) est côté m0boy ;
+DuckTales n'écrit pas dans la fenêtre (ramdiff inchangé), conservé pour la
+conformité NESdev. Observations de l'outil, pas des mesures de matériel.
+
+## 0.250.4 — fidélité NES : banc de comparaison Nestopia
+
+`tools/nes_compare_reference.sh ROM film.bk2|fm2 trames` rejoue le même film
+sur le cœur libretro Nestopia (`DP_NESTOPIA_SO`, cloné et construit hors
+dépôt) et sur le runtime m0boy, diff des 2 Kio de RAM par trame
+(`DP_NES_DUMP=préfixe` décharge les RAM pour la corrélation croisée, comme
+le banc GG).
+
+Premiers résultats (DuckTales Europe, TAS jvuln33v2, 600 trames) : les 4
+premières trames identiques ; divergence à la trame 6 (`$0080`), pas un
+décalage de trame (corrélation plate) — le compteur de trames du jeu avance
+côté m0boy (4 contre 1). À démêler : timing exact de \$2002 (la boucle
+d'attente vblank du boot), frontière de trame interne de Nestopia.
+
+Le banc a déjà trouvé un vrai bug du runtime : `dp_nesmach_frame`
+n'initialisait jamais `steps`/`budget` — le hook de pas voyait `0 >= 0` et
+arrêtait la machine à sa première instruction ; une instance pilotée par
+`dp_nesmach_frame` n'exécutait rien. Corrigé (`dp_nesmach_cut` public +
+budget initialisé). Le warm-up PPU (~29658 cycles, NESdev) a été essayé et
+**reverté** : ramdiff Nestopia inchangé sur DuckTales (le jeu n'écrit pas
+dans la fenêtre) et les fixtures synthétiques de test écrivent pendant la
+fenêtre — résultat négatif au CATALOGUE. Observations de l'outil, pas des
+mesures de matériel.
+
 ## 0.249.83 — C2 : projection de contexte sur la liveness (mesure et retour arrière)
 
 La projection de contexte de `--ctx-cap --ctx-live` est étendue : CPU, pc,

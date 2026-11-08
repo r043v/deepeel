@@ -31,6 +31,8 @@ DpNesMach *dp_nesmach_open(const uint8_t *data, size_t size, int mapper,
 void dp_nesmach_close(DpNesMach *m);
 void dp_nesmach_reset(DpNesMach *m);
 void dp_nesmach_set_hooks(DpNesMach *m, const DpNesHooks *h);
+/* ends the current run slice at the next instruction boundary (dp_mach_cut's contract) */
+void dp_nesmach_cut(DpNesMach *m);
 
 /* Runs instructions until max_steps, a hook stop or a completed frame
  * boundary the caller's on_frame handles; returns the steps executed. */

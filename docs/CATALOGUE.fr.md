@@ -34,6 +34,8 @@ infructueux.
 
 ## Abandonnées (avec chiffres)
 
+| Warm-up PPU NES (~29658 cycles, écritures \$2000/\$2001/\$2005/\$2006 ignorées) | NES | ramdiff Nestopia inchangé sur DuckTales (le jeu n'écrit pas dans la fenêtre) ; casse deux épingles (fixtures écrivant pendant la fenêtre — comportement impossible sur matériel mais contractuel dans les tests) | `docs/NES.fr.md` (0.250.4) |
+
 | Technique | Plateforme | Pourquoi abandonné | Référence |
 |---|---|---|---|
 | Éviction C2 par fenêtre de 16 Kio en défaut | NES | −8 points de couverture sur DuckTales (60,6 → 52,4 %) ; revert, voir ligne opt-in ci-dessus | `docs/NES.fr.md` (0.249.83) |
