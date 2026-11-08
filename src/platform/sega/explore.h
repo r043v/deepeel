@@ -66,6 +66,9 @@ typedef struct {
     uint64_t tas_total;      // TAS replay budget, steps (bounded whatever the movie length)
     uint32_t tas_frame_steps; // per-frame step cap of the TAS replay
     const char *tas_path;    // TAS movie (.bk2 or plain input log, sega/tas.h)
+    uint32_t tas_rng_per;    // J3: snapshot the TAS every N frames and fire random bursts from it (0: off)
+    uint32_t tas_rng_bursts; // bursts per snapshot (default 2)
+    uint32_t tas_rng_steps;  // steps per burst (default 300x tas_frame_steps)
     int jobs;                // parallel drain workers (2 max: prefixed instances)
     uint32_t defer_tiers; // 0: budget cuts stay final; N: resume them up to N times with a 4x cap (CLI default 3)
     uint32_t max_steps,max_paths,queue_cap,loop_cap,fork_cap,stagnation,copy_cap,input_masks,input_sites;
@@ -176,6 +179,8 @@ typedef struct {
     uint32_t novelty_depth,state_exported_depth; int state_exported;
     // TAS replay (GB tas.c parity): natural coverage from a movie, priority
     uint64_t tas_frames,tas_frames_refused,tas_steps;
+    // J3 random bursts fired from TAS snapshots (GB sessions parity)
+    uint64_t tas_bursts,tas_burst_steps;
     // copy siblings (S5): tables found, ranges marked, ranges refused over executed code, tables cut at the entry cap, bytes newly marked
     uint64_t halt_cuts; // loop cuts at a HALT: the D14 watchdog, bounded by the loop cap
     uint64_t sib_tables,sib_ranges,sib_refused,sib_caps,sib_bytes;

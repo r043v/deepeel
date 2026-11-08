@@ -1064,6 +1064,7 @@ static void pass_begin(Run *x) {
     x->forced=0; x->cur_sec=NULL; x->boot_path=0; x->irq_flag=0;
     x->b->set_input((DpSegaInput){{0,0},0,0,0}); // released hands to start
 }
+static uint32_t sega_rng(uint32_t *s);
 static void pass_end(Run *x) {
     x->b->set_input((DpSegaInput){{0,0},0,0,0}); // power-on inputs released
     x->b->load(x->seed_state); hook(x);
@@ -1092,6 +1093,17 @@ static int tas_replay(Run *x) {
     }
     pass_begin(x);
     int gg=!strcmp(x->system->id,"gg"),msx=!strcmp(x->system->id,"msx");
+    // J3 random-burst snapshots (GB sessions parity): every tas_rng_per frames
+    // the machine state is kept aside; after the replay, bursts of uniform
+    // random held inputs run from these snapshots.  They extend the movie's
+    // reach past its scripted frames, still inside the tas_total budget.
+    unsigned nsnaps=0;
+    unsigned rng_per=o->tas_rng_per;   // local copy: the options are read-only here
+    void **snaps=NULL;
+    if(rng_per) {
+        snaps=malloc((size_t)(t.frames/rng_per+1)*sizeof *snaps);
+        if(!snaps) { fprintf(stderr,"deepeel: --tas-rng: out of memory\n"); rng_per=0; }
+    }
     for(uint32_t f=0;f<t.frames && r->steps<o->tas_total;f++) {
         DpSegaInput in={{0,0},0,0,0};
         uint8_t m=t.masks[f];
@@ -1103,10 +1115,44 @@ static int tas_replay(Run *x) {
         r->tas_frames++;
         for(unsigned i=0;i<o->tas_frame_steps && r->steps<o->tas_total;i++)
             if(!play_step(x)) goto done;
+        if(rng_per && (f+1)%rng_per==0) {
+            void *s=malloc(x->b->state_size);
+            if(s) { x->b->save(s); snaps[nsnaps++]=s; }
+        }
     }
 done:
     r->tas_frames_refused=t.frames-r->tas_frames;
     r->tas_steps=r->steps; // the replay runs before every other phase
+    // the bursts: from each snapshot, tas_rng_bursts sessions of uniform
+    // random held inputs (re-drawn every ~15 frames), the system key
+    // included at 1/8; the tas_total budget and SIGINT still stop everything
+    if(nsnaps) {
+        uint32_t prng=(uint32_t)(r->steps*2654435761u)|1;
+        unsigned per=o->tas_rng_bursts?o->tas_rng_bursts:2;
+        uint64_t len=o->tas_rng_steps?o->tas_rng_steps:300ull*(o->tas_frame_steps?o->tas_frame_steps:1000);
+        uint64_t before=r->steps;
+        for(unsigned s=0;s<nsnaps;s++) {
+            for(unsigned b=0;b<per && r->steps<o->tas_total;b++) {
+                x->b->load(snaps[s]);
+                dp_sega_closure_invalidate(x->closure);
+                pass_begin(x);
+                for(uint64_t i=0;i<len && r->steps<o->tas_total;i++) {
+                    if(i%15==0) {
+                        DpSegaInput in={{0,0},0,0,0};
+                        in.pad[0]=(uint8_t)(sega_rng(&prng)&63);
+                        if((sega_rng(&prng)&7)==0) { if(gg||msx) in.start=1; else in.pause=1; }
+                        x->b->set_input(in);
+                    }
+                    if(!play_step(x)) break;
+                }
+                pass_end(x);
+                r->tas_bursts++;
+            }
+            free(snaps[s]);
+        }
+        free(snaps);
+        r->tas_burst_steps=r->steps-before;
+    }
     pass_end(x);
     free(t.masks);
     return 1;
@@ -2063,7 +2109,7 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
         ",\"evicted_ctx\":%"PRIu64",\"indirect_sites\":%"PRIu64",\"indirect_targets\":%"PRIu64
         ",\"indirect_seeds\":%"PRIu64",\"indirect_pending\":%"PRIu64
         ",\"play_steps\":%"PRIu64",\"play_epochs\":%"PRIu64
-        ",\"tas_frames\":%"PRIu64",\"tas_frames_refused\":%"PRIu64",\"tas_identity\":%d"
+        ",\"tas_frames\":%"PRIu64",\"tas_frames_refused\":%"PRIu64",\"tas_bursts\":%"PRIu64",\"tas_burst_steps\":%"PRIu64",\"tas_identity\":%d"
         ",\"jobs_capped\":%"PRIu64",\"seeds_offlane\":%"PRIu64",\"merge_conflicts\":%"PRIu64
         ",\"bank_changes\":%"PRIu64",\"data_reads\":%"PRIu64",\"steps_deferred\":%"PRIu64",\"loop_deferred\":%"PRIu64",\"defer_resumed\":%"PRIu64",\"steps_final\":%"PRIu64",\"loop_final\":%"PRIu64",\"defer_dropped\":%"PRIu64",\"defer_pending\":%"PRIu64",\"fork_deferred\":%"PRIu64",\"fork_final\":%"PRIu64"}",
         r->steps,r->paths,r->forks,r->irq_forks,r->exec_outside,r->loop_cuts,r->fork_cuts,
@@ -2072,7 +2118,7 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
         r->seeds_entry,r->seeds_admitted,r->seeds_refused_cap,r->seeds_refused_view,
         r->seeds_pending,r->evicted_ctx,r->indirect_sites,r->indirect_targets,
         r->indirect_seeds,r->indirect_pending,r->play_steps,r->play_epochs,
-        r->tas_frames,r->tas_frames_refused,r->tas_identity,r->jobs_capped,r->seeds_offlane,
+        r->tas_frames,r->tas_frames_refused,r->tas_bursts,r->tas_burst_steps,r->tas_identity,r->jobs_capped,r->seeds_offlane,
         r->merge_conflicts,r->bank_changes,r->data_reads,
         r->steps_deferred,r->loop_deferred,r->defer_resumed,r->steps_final,r->loop_final,r->defer_dropped,r->defer_pending,r->fork_deferred,r->fork_final);
     fprintf(out,",\"limits\":{\"base\":%"PRIu64",\"inputs\":%"PRIu64",\"indirect\":%"PRIu64"}",
@@ -2402,6 +2448,7 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
     if(r->state_exported) fprintf(out,"state exported: deepest cell, %u frames from power-on\n",r->state_exported_depth);
     if(r->watch_frames) fprintf(out,"watch: %"PRIu64" frames published\n",r->watch_frames);
     fprintf(out,"tas replay: %"PRIu64" frames; %"PRIu64" steps; frames refused %"PRIu64"\n",r->tas_frames,r->tas_steps,r->tas_frames_refused);
+    if(r->tas_bursts) fprintf(out,"tas bursts: %"PRIu64" fired, %"PRIu64" steps (J3: random sessions from TAS snapshots)\n",r->tas_bursts,r->tas_burst_steps);
     fprintf(out,"drain: jobs capped %"PRIu64"; seeds off-lane %"PRIu64"; section attribution conflicts %"PRIu64" (record paths and parent paths are per-worker with --jobs 2)\n",
         r->jobs_capped,r->seeds_offlane,r->merge_conflicts);
     fprintf(out,"indirect jumps: sites %"PRIu64"; targets %"PRIu64"; seeded %"PRIu64"; refused budget %"PRIu64"; pending %"PRIu64"; site overflow %"PRIu64"; target overflow %"PRIu64"\n",
@@ -2600,6 +2647,9 @@ int dp_sega_explore_command(int argc,char **argv) {
             else if(!strcmp(key,"--novelty-frame-steps")) { if(n>1000000) goto usage; o.novelty_frame_steps=(uint32_t)n; }
             else if(!strcmp(key,"--novelty-cells")) o.novelty_cells=n!=0;
             else if(!strcmp(key,"--tas-frame-steps")) { if(!n || n>1000000) goto usage; o.tas_frame_steps=(uint32_t)n; }
+            else if(!strcmp(key,"--tas-rng-per")) { if(n>1000000) goto usage; o.tas_rng_per=(uint32_t)n; }
+            else if(!strcmp(key,"--tas-rng-bursts")) { if(n>1000) goto usage; o.tas_rng_bursts=(uint32_t)n; }
+            else if(!strcmp(key,"--tas-rng-steps")) o.tas_rng_steps=n;
             else if(!strcmp(key,"--queue-max")) { if(n>65536 || n<o.queue_cap) goto usage; o.queue_max=(uint32_t)n; }
             else if(!strcmp(key,"--spool-cap-mb") && n<=1048576) o.spool_cap_mb=(uint32_t)n;
             else goto usage;
@@ -2634,5 +2684,5 @@ int dp_sega_explore_command(int argc,char **argv) {
     if(rtcode) { FILE *rf=fopen(rtcode,"w"); if(rf) { dp_ramarch_write(&r.ra,rf,s->id); fclose(rf); } }
     dp_sega_results_free(&r); return ok?0:1;
 usage:
-    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--novelty N] [--novelty-frames N] [--novelty-archive N] [--novelty-frame-steps N] [--novelty-cells 1] [--export-state FILE] [--watch [FPS]] [--watch-dump FILE.ppm] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE] [--rtcode FILE]\n"); return 2;
+    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--novelty N] [--novelty-frames N] [--novelty-archive N] [--novelty-frame-steps N] [--novelty-cells 1] [--export-state FILE] [--watch [FPS]] [--watch-dump FILE.ppm] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--tas-rng-per N] [--tas-rng-bursts N] [--tas-rng-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE] [--rtcode FILE]\n"); return 2;
 }
