@@ -3,8 +3,9 @@
  * BizHawk key names of each console map onto it at load time. */
 #define _GNU_SOURCE
 #include "tas.h"
-#include "../../../src/core/zip.h"
 #include "../../../src/core/sha1.h"
+#include "../../../src/core/zip.h"
+#include "../../../src/core/bk2.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -89,38 +90,15 @@ static int log_parse(const uint8_t *d,size_t n,DpSegaTas *out,char *err,size_t e
 static int tas_load_buf(uint8_t *d,size_t n,DpSegaTas *out,char *err,size_t errsz,int depth) {
     if(depth>3) { snprintf(err,errsz,"too many nested containers"); return 0; }
     if(dp_zip_is(d,n)) {
-        size_t hn=0;
-        uint8_t *hdr=dp_zip_read(d,n,"header",&hn,NULL);
-        if(hdr) {
-            if(strcasestr((const char *)hdr,"startsfromsavestate true")) out->anchored=1;
-            for(size_t i=0;i+45<=hn;i++) { // line "SHA1 <40 hex>"
-                if((i==0 || hdr[i-1]=='\n') && !strncmp((const char *)hdr+i,"SHA1 ",5)) {
-                    uint8_t h[20]; int ok=1;
-                    for(int k=0;k<20 && ok;k++) {
-                        char b[3]={(char)hdr[i+5+2*k],(char)hdr[i+6+2*k],0},*e;
-                        h[k]=(uint8_t)strtoul(b,&e,16); if(*e) ok=0;
-                    }
-                    if(ok) { memcpy(out->sha1,h,20); out->has_sha1=1; }
-                    break;
-                }
-            }
-            free(hdr);
-        }
-        size_t ln=0;
-        uint8_t *log=dp_zip_read(d,n,"input log",&ln,NULL);
-        if(!log) log=dp_zip_read(d,n,"log",&ln,NULL);
-        if(!log) log=dp_zip_read(d,n,".txt",&ln,NULL);
-        if(log) {
-            int ok=tas_load_buf(log,ln,out,err,errsz,depth+1);
-            free(log);
-            return ok;
-        }
-        size_t an=0;
-        char name[128];
-        uint8_t *any=dp_zip_read(d,n,NULL,&an,name);
-        if(!any) { snprintf(err,errsz,"zip: no readable entry"); return 0; }
-        int ok=tas_load_buf(any,an,out,err,errsz,depth+1);
-        free(any);
+        // the container is the shared kernel's job (src/core/bk2.c); the '|'
+        // frame grammar stays here
+        DpBk2 b;
+        if(!dp_bk2_open(d,n,&b,err,errsz)) return 0;
+        out->anchored |= b.anchored;
+        out->has_sha1 |= b.has_sha1;
+        if(b.has_sha1) memcpy(out->sha1,b.sha1,20);
+        int ok=tas_load_buf(b.log,b.log_n,out,err,errsz,depth+1);
+        dp_bk2_free(&b);
         return ok;
     }
     if(memchr(d,'|',n<4096?n:4096)) return log_parse(d,n,out,err,errsz);

@@ -1,6 +1,6 @@
 // tas.c: PC Engine movie loading (see tas.h).
 #include "tas.h"
-#include "../../core/zip.h"
+#include "../../core/bk2.h"
 #include "../../core/sha1.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -97,34 +97,30 @@ int dp_pce_tas_load(const char *path, DpPceTas *t, char *err, size_t errsz) {
     blob[sz] = 0;
     int ok = 0;
     if (sz > 4 && blob[0] == 'P' && blob[1] == 'K') {
-        size_t logn = 0, hdrn = 0;
-        char name[128];
-        uint8_t *log = dp_zip_read(blob, (size_t)sz, "input log", &logn, name);
-        uint8_t *hdr = dp_zip_read(blob, (size_t)sz, "header.txt", &hdrn, name);
-        if (!log) snprintf(err, errsz, "bk2: no Input Log.txt inside");
-        else {
-            char *text = malloc(logn + 1);
+        DpBk2 b;   /* container handled by the shared kernel (src/core/bk2.c) */
+        if (!dp_bk2_open(blob, (size_t)sz, &b, err, errsz)) {
+            /* err already set */
+        } else {
+            char *text = malloc(b.log_n + 1);
             if (text) {
-                memcpy(text, log, logn);
-                text[logn] = 0;
+                memcpy(text, b.log, b.log_n);
+                text[b.log_n] = 0;
                 ok = load_bk2_log(text, t, err, errsz);
                 free(text);
             }
-        }
-        if (ok && hdr) {
-            char *ht = malloc(hdrn + 1);
-            if (ht) {
-                memcpy(ht, hdr, hdrn);
-                ht[hdrn] = 0;
-                char *g = strstr(ht, "GameName ");
-                if (g) snprintf(t->game, sizeof t->game, "%.*s", (int)strcspn(g + 9, "\r\n"), g + 9);
-                char *h = strstr(ht, "SHA1 ");
-                if (h) snprintf(t->sha1, sizeof t->sha1, "%.40s", h + 5);
-                free(ht);
+            if (ok && b.header) {
+                char *ht = malloc(b.header_n + 1);
+                if (ht) {
+                    memcpy(ht, b.header, b.header_n);
+                    ht[b.header_n] = 0;
+                    char *g = strstr(ht, "GameName ");
+                    if (g) snprintf(t->game, sizeof t->game, "%.*s", (int)strcspn(g + 9, "\r\n"), g + 9);
+                    if (b.has_sha1) for (int k = 0; k < 20; k++) snprintf(t->sha1 + 2 * k, 3, "%02x", b.sha1[k]);
+                    free(ht);
+                }
             }
+            dp_bk2_free(&b);
         }
-        free(log);
-        free(hdr);
     } else {
         // plain text: a hex pad byte per line ('#' comments, 'R' prefix: reset)
         uint32_t cap = 0;

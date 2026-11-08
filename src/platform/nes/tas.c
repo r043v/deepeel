@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#include "../../../src/core/zip.h"
+#include "../../../src/core/bk2.h"
 #include "../../../src/core/sha1.h"
 
 /* fm2 controller characters, in the movie's column order, to nes.input
@@ -153,31 +153,23 @@ int dp_nes_tas_load(const char *path, DpNesTas *out, char *err, size_t errsz) {
             free(blob);
             snprintf(err, errsz, "bk2: cannot read %s", path);
         } else {
-            size_t logn = 0, hdrn = 0;
-            char name[128];
-            uint8_t *log = dp_zip_read(blob, (size_t)sz, "input log", &logn, name);
-            uint8_t *hdr = dp_zip_read(blob, (size_t)sz, "header.txt", &hdrn, name);
-            if (!log) {
-                snprintf(err, errsz, "bk2: no Input Log.txt inside");
-            } else if (!tas_load_bk2(log, logn, out, err, errsz)) {
+            DpBk2 b;   /* container handled by the shared kernel (src/core/bk2.c) */
+            if (!dp_bk2_open(blob, (size_t)sz, &b, err, errsz)) {
+                /* err already set */
+            } else if (!tas_load_bk2(b.log, b.log_n, out, err, errsz)) {
                 /* err already set */
             } else {
                 ok = 1;
-                if (hdr) {
+                if (b.has_sha1)
+                    for (int k = 0; k < 20; k++) snprintf(out->sha1 + 2 * k, 3, "%02x", b.sha1[k]);
+                if (b.header) {
                     /* Header.txt is text but not NUL-terminated: search
                      * with length bounds */
-                    size_t tl = hdrn;
+                    size_t tl = b.header_n;
                     char *ht = malloc(tl + 1);
                     if (ht) {
-                        memcpy(ht, hdr, tl);
+                        memcpy(ht, b.header, tl);
                         ht[tl] = 0;
-                        char *sh = strstr(ht, "SHA1 ");
-                        if (sh) {
-                            sh += 5;
-                            unsigned n = 0;
-                            while (sh[n] && n < 40) { out->sha1[n] = sh[n]; n++; }
-                            out->sha1[n] = 0;
-                        }
                         char *gn = strstr(ht, "GameName ");
                         if (gn) {
                             gn += 9;
@@ -194,8 +186,7 @@ int dp_nes_tas_load(const char *path, DpNesTas *out, char *err, size_t errsz) {
                     }
                 }
             }
-            free(log);
-            free(hdr);
+            dp_bk2_free(&b);
             free(blob);
         }
     } else if (hn > 4 && !memcmp(head, "FCM", 3)) {

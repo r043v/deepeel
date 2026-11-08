@@ -1116,7 +1116,7 @@ Implémentations existantes à envelopper :
 | `closure` + `provenance` (sur `DpIsa`, à vues) | `closure.c`, `sega/closure.c`, `provenance.c` ×2, `tables()` PCE, `infer` PCE |
 | `replay` (S6 + §5.4) | `replay_*` MD |
 | `play` (sessions, pool, Go-Explore, humain) | `sessions.c`, `play_session` z80/NES/PCE, `novelty_search` PCE |
-| `movie` (`DpMovie` + chargeurs vbm/vmv/bk2/fm2/gmv/texte) | `tas.c` ×5 |
+| `movie` (`DpMovie` + chargeurs vbm/vmv/bk2/fm2/gmv/texte) | `tas.c` ×5 — 0.249.87 premier pas : le conteneur `.bk2` (zip, Header.txt, lignes d'identité SHA1/MD5, recherche de l'Input Log) est extrait dans `src/core/bk2.c` et partagé par les quatre chargeurs NES/Sega/PCE/MD (1038 → 692 lignes, noyau 55 lignes) ; les grammaires de frames restent par plateforme |
 | `report` (texte, JSON, `.map`, PNG §9, `.cov`, HTML, heat) | `report/`, rapports par plateforme |
 | `cli` (options communes, une seule table) | parsing dupliqué de `deepeel.c` |
 

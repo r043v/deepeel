@@ -1,5 +1,6 @@
 #include "movie.h"
 #include "../../core/zip.h"
+#include "../../core/bk2.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,22 +9,10 @@ static int hexval(int c) { return c >= '0' && c <= '9' ? c - '0' : (c | 32) >= '
 
 /* BK2 Input Log: "|pr|UDLRABCSXYZM|...|" per frame; pad byte as in GMV (bit0 U, 1 D, 2 L,
  * 3 R, 4 B, 5 C, 6 A, 7 Start).  X/Y/Z/Mode are not modelled by the 3-button replay. */
-static int bk2_parse(const uint8_t *log, size_t n, const uint8_t *hdr, size_t hn,
+static int bk2_parse(const uint8_t *log, size_t n, const DpBk2 *bk,
                      DpMdMovie *out, char *err, size_t errsz) {
-    if (hdr && hn) {
-        const char *h = (const char *)hdr;
-        for (size_t i = 0; i + 5 < hn; i++)
-            if ((i == 0 || h[i - 1] == '\n') && (!strncmp(h + i, "SHA1 ", 5) || !strncmp(h + i, "MD5 ", 4))) {
-                const char *v = h + i + (h[i] == 'S' ? 5 : 4);
-                size_t k = 0; uint8_t d[16];
-                while (k < 32 && i + (size_t)(v - h - i) + k < hn && hexval(v[k]) >= 0) k++;
-                if (k == 32) {
-                    for (int j = 0; j < 16; j++) d[j] = (uint8_t)(hexval(v[2 * j]) * 16 + hexval(v[2 * j + 1]));
-                    memcpy(out->md5, d, 16); out->has_md5 = 1;
-                }
-                break;
-            }
-    }
+    (void)bk;   /* the identity lines live in DpBk2 (dp_md_movie_rom_match reads the movie header); the MD5 the replay checks comes from the movie's own header below */
+    if (bk && bk->has_md5) { memcpy(out->md5, bk->md5, 16); out->has_md5 = 1; }
     uint32_t cap = 1024; out->pads = malloc(cap);
     if (!out->pads) { snprintf(err, errsz, "out of memory"); return 0; }
     for (size_t i = 0; i < n;) {
@@ -59,16 +48,15 @@ int dp_md_movie_load(const char *path, DpMdMovie *out, char *err, size_t errsz) 
     fclose(f);
     size_t size = (size_t)n;
     if (dp_zip_is(data, size)) {
-        size_t ilen = 0;
-        uint8_t *ilog = dp_zip_read(data, size, "input log", &ilen, NULL);
-        if (ilog) { /* BizHawk BK2 */
-            size_t hn = 0;
-            uint8_t *hdr = dp_zip_read(data, size, "header", &hn, NULL);
+        DpBk2 b;
+        if (!dp_bk2_open(data, size, &b, err, errsz)) { /* err already set */ }
+        else { /* BizHawk BK2: container handled by the shared kernel (src/core/bk2.c) */
             free(data);
-            int ok = bk2_parse(ilog, ilen, hdr, hn, out, err, errsz);
-            free(ilog); free(hdr);
+            int ok = bk2_parse(b.log, b.log_n, &b, out, err, errsz);
+            dp_bk2_free(&b);
             return ok;
         }
+        dp_bk2_free(&b);
         size_t len = 0;
         uint8_t *raw = dp_zip_read(data, size, ".gmv", &len, NULL);
         free(data); data = raw; size = len;
