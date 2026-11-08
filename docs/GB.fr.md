@@ -574,6 +574,22 @@ code / data / padding.
   (6 o) — les boucles de mesure de timing elles-mêmes, jamais atteintes en
   30 s de jeu. blargg `cpu_instrs` : 11/11 à 100,0 % connu, résidu 0 ;
   ZEXALL SMS : 100,0 %, résidu 0.
+- **Sondes de lecture d'événement §3.7 côté sega** (0.251.11) : un `in`
+  sur un port événementiel du registre natif (VDP_STATUS, V/H_COUNTER —
+  les entrées `DP_IMPL_EVENT`, GG_START reste aux sondes d'entrée) fourche
+  par valeur plausible (bits de statut, phases de compteur de ligne/trame) ;
+  la valeur substituée est portée par le chemin en file et lue une fois
+  (`in_bus`), la machine parente n'est jamais touchée. Garde de principe :
+  jamais de sonde quand une IRQ/NMI est en attente ou sur un chemin de
+  fourche IRQ (`skip_irq`) — une substitution ne doit pas masquer une ligne
+  d'interruption (c'est la régression qu'a attrapée `sega_hardware`).
+  Opt-out `--no-event-probes` ; fourches/coupures comptées (texte, JSON,
+  fusion `--jobs`, journal 64 entrées). Mesure A/B Aleste (SMS, 70 M pas) :
+  couverture identique (69,897 %, résidu 4309 o), 14 fourches d'événement
+  tirées — neutre sur ce jeu, la garde IRQ limite le tir ; aucun faux
+  positif observé. cgb_sound/dmg_sound : les singles blargg 12/12 à
+  99,98 % (6 o résiduels chacun), les suites complètes restent à 87-88 %
+  (harnais audio, CGB listé non émulé) ; `oam_bug` 99,76 %.
 - `--tas-dir D` (répétable) : découvre tous les films du répertoire (triés
   par ressemblance de titre ; `.vmv`, `.vbm`, `.bk2`,
   `.gbm`, `.fm2`, `.log`), les films retenus sont loggés sur stderr.

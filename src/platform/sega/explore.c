@@ -28,7 +28,10 @@ typedef struct {
     DpZ80Origin cram_latch;
     DpZ80Origin ram[];
 } Origins;
-typedef struct { void *state; uint8_t *cart; Origins *origins; int forced,skip_irq; uint32_t choice; uint8_t tier; uint8_t reason; } Path;
+typedef struct { void *state; uint8_t *cart; Origins *origins; int forced,skip_irq; uint32_t choice; uint8_t tier; uint8_t reason;
+    // §3.7 event-read probe carried by the path: the first IN on probe_port
+    // returns probe_value once, then the path reads the machine's own value
+    uint16_t probe_port; uint8_t probe_value,probe_armed; } Path;
 // A seed spec: pc in a mapper view. exact=1 applies seed_window(pc,bank) and
 // refuses any view where rom_index(pc) is not bank*0x4000+(pc&0x3FFF); exact=0
 // keeps the boot view untouched.
@@ -87,6 +90,12 @@ typedef struct {
     uint8_t *seed_cart;            // reset cartridge RAM alongside it
     Origins *seed_origins;         // reset provenance origins alongside it
     void *seed_scratch;            // running machine saved across materialization
+    uint8_t *event_sites;          // per-site fork counter of the §3.7 event probes
+    size_t event_site_count;
+    void *event_scratch;           // machine saved across one event-probe round
+    uint16_t event_probe_port;     // armed by the popped path (probe_armed)
+    uint8_t event_probe_value;
+    int event_probe_armed;
     uint8_t *seed_scratch_cart;
     Origins *seed_scratch_origins;
     DpSegaSection *cur_sec;        // section of the instruction being executed
@@ -339,6 +348,12 @@ static uint8_t in_bus(void *user,uint16_t p) {
     if(!x->r->io_read[p&255]) x->discoveries++;
     x->r->io_read[p&255]++;
     if(!x->fetching) section_live_port(x,p);
+    // §3.7 event probe: an armed path reads the substituted value exactly
+    // once, then falls back to the machine's own value
+    if(x->event_probe_armed && (uint8_t)(p&255)==(uint8_t)(x->event_probe_port&255)) {
+        x->event_probe_armed=0;
+        return x->event_probe_value;
+    }
     return x->b->in(p);
 }
 static void out_bus(void *user,uint16_t p,uint8_t v) {
@@ -1013,11 +1028,56 @@ static int fork_inputs(Run *x,const z80_decoded_t *d,size_t at,int skip_irq) {
     if(!strcmp(reg->name,"GG_START")) return probe_inputs(x,INPUT_START,port,at,skip_irq);
     return 1;
 }
+// §3.7 event-read probes: an IN from an event port (VDP_STATUS, V/H_COUNTER —
+// the DP_IMPL_EVENT registers of the native registry) forks per plausible
+// value: status bits, frame/line counter phases. GG_START stays with the
+// input probes. The substituted value is carried by the queued path and read
+// once (in_bus); the parent machine is never touched.
+static const uint8_t *event_values(const char *name,int *n) {
+    static const uint8_t st[] = {0x00,0x20,0x40,0x80,0xC0,0xE0,0xFF}; // collision|overflow|vblank|line, combos
+    static const uint8_t vc[] = {0x00,0x7F,0x80,0xC0,0xFF};          // frame phases (SMS 8-bit, GG 9-bit low)
+    static const uint8_t hc[] = {0x00,0x20,0x40,0x80,0xE0,0xFF};     // line phases
+    if(!strncmp(name,"VDP_STATUS",10)) { *n=(int)(sizeof st); return st; }
+    if(!strcmp(name,"V_COUNTER")) { *n=(int)(sizeof vc); return vc; }
+    if(!strcmp(name,"H_COUNTER")) { *n=(int)(sizeof hc); return hc; }
+    *n=0; return NULL;
+}
+static int fork_event_ports(Run *x,const z80_decoded_t *d,size_t at,int skip_irq) {
+    if(!x->opt->event_probes) return 1;
+    if(at>=x->event_site_count) return 1;
+    if(x->event_sites[at]>=2) { x->r->event_cuts++; return 1; }
+    // a substituted status must never hide a pending interrupt line, and an
+    // IRQ-fork path (skip_irq) carries the suppressed-service semantics the
+    // probe would perturb: no probe on either
+    if(skip_irq || x->b->cpu()->irq || x->b->cpu()->nmi) return 1;
+    z80_t *c=x->b->cpu();
+    uint16_t port;
+    if(!dp_z80_input_port(d,c,&port)) return 1;
+    const DpSegaPort *reg=dp_sega_port(x->system,port,0);
+    if(!reg) return 1;
+    int n; const uint8_t *vals=event_values(reg->name,&n);
+    if(!vals) return 1;
+    for(int i=0;i<n && x->event_sites[at]<2;i++) {
+        uint32_t queued_before=x->queued;
+        int accepted=push_to(x,1,skip_irq,0,DP_SEGA_TREE_EVENT);
+        if(accepted<0) return -1;
+        if(!accepted || x->queued!=queued_before+1) { x->r->event_cuts++; break; } // spooled: the probe would be lost
+        Path *q=&x->queue[x->queued-1];
+        q->probe_port=port; q->probe_value=vals[i]; q->probe_armed=1;
+        x->event_sites[at]++;
+        x->r->event_forks++;
+        if(x->r->event_count<DP_SEGA_EVENT_LOG_CAP) {
+            x->r->event_log[x->r->event_count++]=(typeof(x->r->event_log[0])){x->r->steps,x->r->paths,x->pc,(uint8_t)(port&255),vals[i]};
+        } else x->r->event_log_overflow++;
+    }
+    return 1;
+}
 DpSegaOptions dp_sega_options(void) {
     // Boot code often runs nested 16-bit delay loops before touching the VDP.
     DpSegaOptions o={.novelty_frames=240,.novelty_archive=4096,.novelty_frame_steps=10000,.max_total=20000000,.input_total=20000000,.indirect_total=20000000,.play_total=0,.tas_total=2000000,.tas_frame_steps=1000,.max_steps=2000000,.max_paths=4096,.queue_cap=128,
         .loop_cap=262144,.fork_cap=2,.stagnation=32768,.copy_cap=DP_SEGA_COPY_CAP,
-        .input_masks=8,.input_sites=4096,.seed_vectors=1,.seed_cap=1024,.queue_max=4096,.target_closure=1,.block_closure=1,.msx_mapper=DP_MSX_AUTO,.closure={262144,65536,256,8},.jobs=1}; return o;
+        .input_masks=8,.input_sites=4096,.seed_vectors=1,.seed_cap=1024,.queue_max=4096,.target_closure=1,.block_closure=1,.msx_mapper=DP_MSX_AUTO,.closure={262144,65536,256,8},.jobs=1,
+        .event_probes=1}; return o;
 }
 DpSegaOptions dp_msx_options(void) {
     DpSegaOptions o=dp_sega_options(); o.seed_vectors=0; return o;
@@ -1499,6 +1559,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     r->copy_capacity=o->copy_cap;
     r->copies=calloc(o->copy_cap?o->copy_cap:1,sizeof(*r->copies));
     x.forks=calloc(sites,1); x.sides=calloc(sites,1); x.irq_forks=calloc(sites,1);
+    x.event_sites=calloc(sites,1); x.event_site_count=sites;
     x.queue_capacity=o->queue_cap;
     x.queue=calloc(o->queue_cap,sizeof(*x.queue));
     x.input_queue=calloc(o->queue_cap,sizeof(*x.input_queue));
@@ -1653,6 +1714,8 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
             x.b->load(p.state); memcpy(x.cart,p.cart,0x8000);
             dp_sega_closure_invalidate(x.closure);
             memcpy(x.origins,p.origins,x.origin_size);
+            // a §3.7 probed path arms its substitution for its first read
+            x.event_probe_armed=p.probe_armed; x.event_probe_port=p.probe_port; x.event_probe_value=p.probe_value;
             free_path(p); hook(&x); x.forced=p.forced; x.cur_tier=p.tier;
             dp_sega_visits_reset(&visits); r->paths++;
             x.cur_choice=p.choice;
@@ -1747,6 +1810,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
                     // input probes belong to their dedicated pass; the
                     // indirect phase never opens a second input frontier
                     if(phase!=2 && fork_inputs(&x,&d,at,service_suppressed)<0) { ok=0; goto cleanup; }
+                    if(phase!=2 && fork_event_ports(&x,&d,at,service_suppressed)<0) { ok=0; goto cleanup; }
                     int outside=0;
                     for(unsigned j=0;j<d.length;j++) {
                         int64_t index=x.b->rom_index((uint16_t)(c->pc+j));
@@ -1847,7 +1911,7 @@ cleanup:
         free_path(x.defer[i]);
     }
     zstm_free(&x);
-    free(x.defer); free(x.queue); free(x.forks); free(x.sides); free(x.irq_forks); free(x.cart); free(image);
+    free(x.defer); free(x.queue); free(x.forks); free(x.sides); free(x.irq_forks); free(x.event_sites); free(x.cart); free(image);
     r->loop_context_peak=visits.peak; r->loop_context_capacity=visits.capacity; r->loop_context_growths=visits.growths;
     dp_sega_visits_free(&visits);
     free(x.origins);
@@ -1951,6 +2015,9 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
                &d->memory_log_overflow,sizeof(DpSegaMemoryWrite));
     append_log(d->ay_log,&d->ay_count,DP_SEGA_HARDWARE_LOG_CAP,s->ay_log,s->ay_count,
                &d->ay_log_overflow,sizeof(DpSegaRegisterWrite));
+    append_log(d->event_log,&d->event_count,DP_SEGA_EVENT_LOG_CAP,s->event_log,s->event_count,
+               &d->event_log_overflow,sizeof *d->event_log);
+    d->event_forks+=s->event_forks; d->event_cuts+=s->event_cuts;
     for(unsigned i=0;i<256;i++) { d->io_read[i]+=s->io_read[i]; d->io_write[i]+=s->io_write[i]; }
     for(unsigned i=0;i<6;i++) d->ym_class[i]+=s->ym_class[i];
     for(unsigned i=0;i<16;i++) {
@@ -1997,6 +2064,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     DP_MR_SUM(input_forks); DP_MR_SUM(input_cap_cuts); DP_MR_SUM(input_drops);
     DP_MR_SUM(input_site_drops); DP_MR_SUM(input_log_overflow); DP_MR_SUM(input_queue_cuts);
     DP_MR_SUM(input_path_cuts); DP_MR_SUM(input_retry_skips);
+    DP_MR_SUM(event_forks); DP_MR_SUM(event_cuts);
     DP_MR_SUM(bank_changes); DP_MR_SUM(bank_log_overflow);
     DP_MR_SUM(interrupt_suppressed); DP_MR_SUM(vdp_register_ignored);
     DP_MR_SUM(memory_writes); DP_MR_SUM(memory_effect_changes); DP_MR_SUM(memory_log_overflow);
@@ -2123,7 +2191,7 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
         ",\"play_steps\":%"PRIu64",\"play_epochs\":%"PRIu64
         ",\"tas_frames\":%"PRIu64",\"tas_frames_refused\":%"PRIu64",\"tas_bursts\":%"PRIu64",\"tas_burst_steps\":%"PRIu64",\"tas_identity\":%d"
         ",\"jobs_capped\":%"PRIu64",\"seeds_offlane\":%"PRIu64",\"merge_conflicts\":%"PRIu64
-        ",\"bank_changes\":%"PRIu64",\"data_reads\":%"PRIu64",\"steps_deferred\":%"PRIu64",\"loop_deferred\":%"PRIu64",\"defer_resumed\":%"PRIu64",\"steps_final\":%"PRIu64",\"loop_final\":%"PRIu64",\"defer_dropped\":%"PRIu64",\"defer_pending\":%"PRIu64",\"fork_deferred\":%"PRIu64",\"fork_final\":%"PRIu64"}",
+        ",\"bank_changes\":%"PRIu64",\"data_reads\":%"PRIu64",\"steps_deferred\":%"PRIu64",\"loop_deferred\":%"PRIu64",\"defer_resumed\":%"PRIu64",\"steps_final\":%"PRIu64",\"loop_final\":%"PRIu64",\"defer_dropped\":%"PRIu64",\"defer_pending\":%"PRIu64",\"fork_deferred\":%"PRIu64",\"fork_final\":%"PRIu64",\"event_forks\":%"PRIu64",\"event_cuts\":%"PRIu64"}",
         r->steps,r->paths,r->forks,r->irq_forks,r->exec_outside,r->loop_cuts,r->fork_cuts,
         r->queue_cuts,r->global_cuts,r->path_cuts,r->faults,r->decode_cuts,r->pad_cuts,r->halt_cuts,r->sib_tables,r->sib_ranges,r->sib_refused,r->sib_caps,r->sib_bytes,r->jt_tables,r->jt_entries,r->jt_caps,r->jt_bytes,r->queue_growths,
         r->spool_writes,r->spool_reads,r->spool_refused,r->seeds_pointer,r->seeds_bank,
@@ -2132,7 +2200,8 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
         r->indirect_seeds,r->indirect_pending,r->play_steps,r->play_epochs,
         r->tas_frames,r->tas_frames_refused,r->tas_bursts,r->tas_burst_steps,r->tas_identity,r->jobs_capped,r->seeds_offlane,
         r->merge_conflicts,r->bank_changes,r->data_reads,
-        r->steps_deferred,r->loop_deferred,r->defer_resumed,r->steps_final,r->loop_final,r->defer_dropped,r->defer_pending,r->fork_deferred,r->fork_final);
+        r->steps_deferred,r->loop_deferred,r->defer_resumed,r->steps_final,r->loop_final,r->defer_dropped,r->defer_pending,r->fork_deferred,r->fork_final,
+        r->event_forks,r->event_cuts);
     fprintf(out,",\"limits\":{\"base\":%"PRIu64",\"inputs\":%"PRIu64",\"indirect\":%"PRIu64"}",
         r->phase_limits[0],r->phase_limits[1],r->phase_limits[2]);
     {   // per-source byte counts: a byte proven by several sources counts in each
@@ -2492,6 +2561,9 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
         r->queue_growths,r->spool_writes,r->spool_reads,r->spool_flushed,r->spool_refused,r->tree_count);
     fprintf(out,"input forks %"PRIu64"; masks/site %u; site-cap cuts %"PRIu64"; queue/path drops %"PRIu64"; sites %u/%u; site drops %"PRIu64"; input log overflow %"PRIu64"\n",r->input_forks,r->input_mask_limit,r->input_cap_cuts,r->input_drops,r->input_site_count,r->input_site_capacity,r->input_site_drops,r->input_log_overflow);
     fprintf(out,"input frontier cuts: queue %"PRIu64"; paths %"PRIu64"; deferred retry skips %"PRIu64"\n",r->input_queue_cuts,r->input_path_cuts,r->input_retry_skips);
+    fprintf(out,"event-read probes (3.7): forks %"PRIu64"; cuts %"PRIu64"; log overflow %"PRIu64"\n",r->event_forks,r->event_cuts,r->event_log_overflow);
+    for(unsigned i=0;i<r->event_count;i++)
+        fprintf(out,"  event probe PC $%04X port $%02X value $%02X\n",r->event_log[i].pc,r->event_log[i].port,r->event_log[i].value);
     for(unsigned i=0;i<r->input_count;i++) {
         const DpSegaInput *v=&r->inputs[i].input;
         fprintf(out,"  input parent %"PRIu64" step %"PRIu64" PC $%04X",r->inputs[i].parent_path,r->inputs[i].step,r->inputs[i].pc);
@@ -2584,6 +2656,7 @@ int dp_sega_explore_command(int argc,char **argv) {
         if(!strcmp(argv[i],"--tree")) { if(i+1>=argc) goto usage; o.tree_path=argv[++i]; continue; }
         if(!strcmp(argv[i],"--seed-banks")) { o.seed_banks=1; continue; }
         if(!strcmp(argv[i],"--no-pointer-scan")) { o.no_pointer_scan=1; continue; }
+        if(!strcmp(argv[i],"--no-event-probes")) { o.event_probes=0; continue; }
         if(!strcmp(argv[i],"--entry")) {
             if(i+1>=argc || o.entry_count>=32 || !parse_entry(argv[++i],&o)) goto usage;
             continue;
@@ -2696,5 +2769,5 @@ int dp_sega_explore_command(int argc,char **argv) {
     if(rtcode) { FILE *rf=fopen(rtcode,"w"); if(rf) { dp_ramarch_write(&r.ra,rf,s->id); fclose(rf); } }
     dp_sega_results_free(&r); return ok?0:1;
 usage:
-    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--novelty N] [--novelty-frames N] [--novelty-archive N] [--novelty-frame-steps N] [--novelty-cells 1] [--export-state FILE] [--watch [FPS]] [--watch-dump FILE.ppm] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--tas-rng-per N] [--tas-rng-bursts N] [--tas-rng-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE] [--rtcode FILE]\n"); return 2;
+    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--no-event-probes] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--novelty N] [--novelty-frames N] [--novelty-archive N] [--novelty-frame-steps N] [--novelty-cells 1] [--export-state FILE] [--watch [FPS]] [--watch-dump FILE.ppm] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--tas-rng-per N] [--tas-rng-bursts N] [--tas-rng-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE] [--rtcode FILE]\n"); return 2;
 }

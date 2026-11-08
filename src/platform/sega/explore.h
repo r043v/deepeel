@@ -87,6 +87,7 @@ typedef struct {
     const char *tree_path;  // choice tree record (--tree FILE)
     struct { uint32_t bank; uint16_t addr; } entry[32]; // extra --entry seeds
     unsigned entry_count;
+    int event_probes;      // §3.7: fork on plausible read values of event ports (VDP_STATUS, V/H_COUNTER)
     int sega_mapper; // 0 auto; otherwise DP_SEGA_MAPPER_* (SMS/GG only)
     int msx_mapper; // -1 auto; otherwise DP_MSX_* mapper selection
     DpSegaClosureOptions closure;
@@ -95,7 +96,8 @@ typedef struct {
 // nodes when their outcome is known. Nodes are written as binary records.
 enum {
     DP_SEGA_TREE_RESET=1, DP_SEGA_TREE_VECTOR, DP_SEGA_TREE_POINTER, DP_SEGA_TREE_BANK,
-    DP_SEGA_TREE_ENTRY, DP_SEGA_TREE_BRANCH, DP_SEGA_TREE_IRQ, DP_SEGA_TREE_INPUT
+    DP_SEGA_TREE_ENTRY, DP_SEGA_TREE_BRANCH, DP_SEGA_TREE_IRQ, DP_SEGA_TREE_INPUT,
+    DP_SEGA_TREE_EVENT
 };
 enum {
     DP_SEGA_ISSUE_NONE=0, DP_SEGA_ISSUE_DONE, DP_SEGA_ISSUE_EVICTED,
@@ -200,6 +202,13 @@ typedef struct {
     uint64_t input_forks,input_cap_cuts,input_drops,input_site_drops,input_log_overflow;
     uint64_t input_queue_cuts,input_path_cuts;
     uint64_t input_retry_skips;
+    // §3.7 event-read probes: forks that substitute a plausible value on the
+    // first read of an event port; cuts are site caps, queue room and spooled
+    // probes (a spool round-trip drops the substitution, the path stays plain)
+    uint64_t event_forks,event_cuts,event_log_overflow;
+#define DP_SEGA_EVENT_LOG_CAP 64
+    struct { uint64_t step,path; uint16_t pc; uint8_t port,value; } event_log[DP_SEGA_EVENT_LOG_CAP];
+    unsigned event_count;
     uint64_t phase_steps[3],phase_paths[3],phase_pending[3],phase_limits[3],phase_known[3];
     uint32_t input_site_count,input_site_capacity,input_mask_limit;
     struct {
