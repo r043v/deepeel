@@ -1096,7 +1096,10 @@ l'archive préfixée pour que ses appels suivent le clonage `--jobs`) et MD
 `rom_index` = adresse visible car la ROM est en $000000, observateurs sur
 les hooks 68000) ; 0.249.97 : PCE (`dp_machine_pce` — le singleton runtime
 vu derrière l'interface, `run()` = `dp_pce_step`, observateurs sur la
-trace huc6280). Reste à envelopper : libretro niveau A (déjà listé §8).
+trace huc6280) ; 0.249.97 : libretro niveau A (`dp_machine_libretro` —
+frames seulement, dégradation visible : pas de `isa`/`fetch`/`observe`,
+contrat sur le mock `test_libretro`). **§7.2 complet** : GB, Sega/MSX, NES,
+MD, PCE, libretro — toutes les plateformes derrière la même interface.
 
 ### 7.3 `DpIsa` — le statique générique
 

@@ -1,6 +1,7 @@
 // test_libretro.c: J11 — level-A libretro backend on a mock core built by the
 // tests: load, run, input, serialize round trip, TAS replay determinism,
 // framebuffer, and the honest degradation report.
+#include "../src/core/dpmachine.h"
 #include "../src/mach/libretro.h"
 #include "test_util.h"
 
@@ -186,6 +187,23 @@ int main(int argc, char **argv) {
 
     free(snap);
     dp_lr_close(lr);
+    // the same mock core behind the generic DpMachine view (spec §7.2 level A):
+    // degraded (no step/fetch/rom_index/observe) but real state and frames
+    {
+        DpLibretro *lr2 = dp_lr_open(argv[1], err, sizeof err);
+        CHECK_MSG(lr2 && dp_lr_load_rom(lr2, argv[2], err, sizeof err), err);
+        DpMachine *m = dp_machine_libretro(lr2);
+        CHECK_MSG(m && !strcmp(m->name, "libretro") && !m->isa && !m->fetch && !m->observe,
+                  "libretro machine degrades visibly");
+        uint32_t n = m->state_bytes(m);
+        CHECK_MSG(n > 0, "state size");
+        uint8_t *a = malloc(n), *b2 = malloc(n);
+        m->save(m, a); m->load(m, a); m->save(m, b2); m->load(m, b2); m->save(m, a);
+        CHECK_MSG(!memcmp(a, b2, n), "libretro save/load/save reaches a fixed point");
+        CHECK_MSG(m->run(m), "a frame advances");
+        free(a); free(b2);
+        m->close(m);   // owns the DpLibretro instance
+    }
     remove(argv[2]);
     TEST_DONE("test_libretro");
 }
