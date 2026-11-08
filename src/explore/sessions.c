@@ -19,6 +19,7 @@
 #include "ref_feed.h"
 #include "../mach/m0boy.h"
 #include "tas.h"
+#include "../report/report.h"
 
 #include <signal.h>
 #include <time.h>
@@ -232,6 +233,7 @@ typedef struct DpTasSnap {
     uint32_t frame;
     uint64_t credit;
     int tas;      // movie index (the --tas order)
+    uint16_t bank; // ROM bank the machine PC ran in at capture (backsearch index)
 } DpTasSnap;
 
 #define DP_TSN_CAP 64
@@ -242,6 +244,7 @@ typedef struct DpTasSnapRec {
     uint32_t frame;
     uint64_t credit;
     int tas;
+    uint16_t bank; // ROM bank at capture (the on-disk index is the filename)
     char path[600];
 } DpTasSnapRec;
 
@@ -351,6 +354,7 @@ struct DpPlay {
     int tasnaps_n, tasnaps_cap;
     int tas_resume_rec[DP_MAX_TAS]; // resume: latest snapshot record per movie (-1 = none)
     uint64_t tas_ckpts;
+    uint64_t tas_bank_hits; // backsearch: snapshots seeded from a residual bank
     uint64_t tas_rng_starts; // random-key segments started from a TAS checkpoint
     uint64_t tas_cuts;      // fork-explorer cuts absorbed mid-movie (movie kept)
     uint64_t tas_cut_stuck; // consecutive-cut guard hits (movie then falls to random play)
@@ -780,8 +784,10 @@ static void worker_vblank(DpMach *m) {
                 else {
                     pthread_mutex_lock(&p->tsn_mtx);
                     if (p->tsn_n < DP_TSN_CAP) {
-                        p->tsn[p->tsn_n++] =
-                            (DpTasSnap){ img, w->frames_done, worker_credit(w), w->tas_idx };
+                        p->tsn[p->tsn_n++] = (DpTasSnap){
+                            img, w->frames_done, worker_credit(w), w->tas_idx,
+                            (uint16_t)dp_gbl_bank_of(m->api, m->api->gbr->pc)
+                        };
                         img = NULL; // the queue entry owns it now
                     }
                     pthread_mutex_unlock(&p->tsn_mtx);
@@ -941,7 +947,7 @@ int dp_play_save(const DpPlay *p) {
     FILE *f = fopen(path, "wb");
     if (!f) return 0;
     const char magic[4] = { 'D', 'P', 'P', 'S' };
-    const uint32_t ver = 3;
+    const uint32_t ver = 4; // v4: each TAS snapshot record carries its capture bank
     uint32_t sb = p->fork->sb;
     fwrite(magic, 1, 4, f);
     fwrite(&ver, sizeof ver, 1, f);
@@ -970,6 +976,7 @@ int dp_play_save(const DpPlay *p) {
         fwrite(&r->frame, sizeof r->frame, 1, f);
         fwrite(&r->credit, sizeof r->credit, 1, f);
         fwrite(&r->tas, sizeof r->tas, 1, f);
+        fwrite(&r->bank, sizeof r->bank, 1, f);
         uint32_t pl = (uint32_t)strlen(r->path);
         fwrite(&pl, sizeof pl, 1, f);
         fwrite(r->path, 1, pl, f);
@@ -1015,7 +1022,7 @@ static int pool_load(DpPlay *p) {
     char magic[4];
     uint32_t ver, sb;
     if (fread(magic, 1, 4, f) != 4 || memcmp(magic, "DPPS", 4) || fread(&ver, sizeof ver, 1, f) != 1 ||
-        ver != 3 || fread(&sb, sizeof sb, 1, f) != 1 || sb != p->fork->sb) {
+        ver != 4 || fread(&sb, sizeof sb, 1, f) != 1 || sb != p->fork->sb) {
         fclose(f);
         return 0;
     }
@@ -1044,6 +1051,7 @@ static int pool_load(DpPlay *p) {
             if (fread(&r.frame, sizeof r.frame, 1, f) != 1 ||
                 fread(&r.credit, sizeof r.credit, 1, f) != 1 ||
                 fread(&r.tas, sizeof r.tas, 1, f) != 1 ||
+                fread(&r.bank, sizeof r.bank, 1, f) != 1 ||
                 fread(&pl, sizeof pl, 1, f) != 1 || pl >= sizeof r.path ||
                 fread(r.path, 1, pl, f) != pl) {
                 ok = 0;
@@ -1509,7 +1517,9 @@ static void drain_tas_snaps(DpPlay *p) {
         pthread_mutex_unlock(&p->tsn_mtx);
         const DpCheckpoint c = { s.img, p->fork->sb, s.frame, s.credit, 0, 0, (uint32_t)s.tas };
         char path[600];
-        snprintf(path, sizeof path, "%s/tas%02d-f%u.png", p->snap_dir, s.tas, s.frame);
+        // the bank in the filename is the on-disk bank->states index: a
+        // backsearch targeting a residual bank finds its states by name
+        snprintf(path, sizeof path, "%s/tas%02d-b%u-f%u.png", p->snap_dir, s.tas, s.bank, s.frame);
         if (save_png_path(p, &c, path)) {
             pthread_mutex_lock(&p->pool.mtx); // the random-key workers read this list
             if (p->tasnaps_n == p->tasnaps_cap) {
@@ -1521,6 +1531,7 @@ static void drain_tas_snaps(DpPlay *p) {
             r->frame = s.frame;
             r->credit = s.credit;
             r->tas = s.tas;
+            r->bank = s.bank;
             snprintf(r->path, sizeof r->path, "%s", path);
             pthread_mutex_unlock(&p->pool.mtx);
         } else {
@@ -1536,25 +1547,51 @@ static void drain_tas_snaps(DpPlay *p) {
 // stagnant sessions (their next segment_end picks the best checkpoint) and
 // checks the stop conditions.
 uint64_t dp_play_tas_ckpts(const DpPlay *p) { return p->tas_ckpts; }
+uint64_t dp_play_tas_bank_hits(const DpPlay *p) { return p->tas_bank_hits; }
 uint64_t dp_play_tas_rng_starts(const DpPlay *p) { return p->tas_rng_starts; }
 uint64_t dp_play_tas_snap_files(const DpPlay *p) { return (uint64_t)p->tasnaps_n; }
 
 // the post-play phase: every snapshot saved during the TAS replays becomes a
-// fork-explorer seed, in movie then frame order
+// fork-explorer seed, in movie then frame order.  The backsearch first seeds
+// the states whose capture bank still holds residual unknown (the dispatch
+// code the fork explorer never resolved): real play states local to the zone
+// start before the rest (priority 1 vs 0), the queue caps order the work.
 int dp_play_seed_tas_snaps(DpPlay *p) {
     int n = 0;
-    for (int i = 0; i < p->tasnaps_n; i++) {
-        DpCheckpoint *c = tas_snap_load(p, p->tasnaps[i].path);
-        if (!c) {
-            fprintf(stderr, "deepeel: TAS snapshot unreadable: %s\n", p->tasnaps[i].path);
-            continue;
+    // residual banks: one bit per bank with unknown ranges (static view)
+    uint8_t *rbank = calloc((size_t)p->fork->res->banks, 1);
+    if (rbank) {
+        uint8_t *m = dp_map_build(p->fork->res, &(DpMapSummary){0});
+        if (m) {
+            int nr = dp_map_residual_list(p->fork->res, m, NULL, 0);
+            DpResidualRange *rr = nr > 0 ? malloc((size_t)nr * sizeof *rr) : NULL;
+            if (rr && dp_map_residual_list(p->fork->res, m, rr, nr) > 0)
+                for (int i = 0; i < nr; i++)
+                    if (rr[i].bank < p->fork->res->banks) rbank[rr[i].bank] = 1;
+            free(rr);
         }
-        if (!dp_explorer_seed_pri(p->fork, c->img, 3 /* DP_SEED_POINTER: real play state */, 0, 1))
-            continue; // dropped: not seeded (the report counts accepted seeds only)
-        n++;
-        c->img = NULL; // the fork explorer's queue owns the image now
-        ckpt_free(c);
+        free(m);
     }
+    for (int pass = 0; pass < 2; pass++) { // 0: residual banks first, 1: the rest
+        for (int i = 0; i < p->tasnaps_n; i++) {
+            if ((pass == 0) != (rbank && p->tasnaps[i].bank < p->fork->res->banks &&
+                                rbank[p->tasnaps[i].bank]))
+                continue;
+            DpCheckpoint *c = tas_snap_load(p, p->tasnaps[i].path);
+            if (!c) {
+                fprintf(stderr, "deepeel: TAS snapshot unreadable: %s\n", p->tasnaps[i].path);
+                continue;
+            }
+            if (!dp_explorer_seed_pri(p->fork, c->img, 3 /* DP_SEED_POINTER: real play state */,
+                                      pass == 0 ? 1 : 0, 1))
+                continue; // dropped: not seeded (the report counts accepted seeds only)
+            if (pass == 0) p->tas_bank_hits++;
+            n++;
+            c->img = NULL; // the fork explorer's queue owns the image now
+            ckpt_free(c);
+        }
+    }
+    free(rbank);
     return n;
 }
 uint64_t dp_play_tas_cuts(const DpPlay *p) { return p->tas_cuts; }

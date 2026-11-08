@@ -109,6 +109,9 @@ int dp_play_save(const DpPlay *p);
 int dp_play_done(const DpPlay *p);
 // TAS gameplay states handed to the fork explorer so far
 uint64_t dp_play_tas_ckpts(const DpPlay *p);
+// backsearch: TAS snapshots whose capture bank still holds residual unknown,
+// seeded first (priority 1) by dp_play_seed_tas_snaps
+uint64_t dp_play_tas_bank_hits(const DpPlay *p);
 uint64_t dp_play_tas_rng_starts(const DpPlay *p); // random-key segments started from a TAS checkpoint
 // screen cells archived into the pool (--session-cells)
 uint64_t dp_play_cells(const DpPlay *p);

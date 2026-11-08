@@ -479,6 +479,19 @@ code / data / padding.
   dispatch essayées, 16 entrées forcées semées, 5 refusées — le résidu passe
   de 11787 à 11408 octets (932 → 909 plages) dès les rounds statiques ; le
   reste du gain attendu vient de l'exploration qui consomme les graines.
+- **Recherche arrière depuis les états sauvegardés** (0.251.4) : chaque
+  instantané TAS porte désormais la banque ROM où tournait le PC à la
+  capture — dans le nom du fichier (`tasNN-bB-fF.png`, l'index
+  banque→états sur disque, visible par nom) et dans les enregistrements du
+  pool (format `pool.bin` v4 ; les fichiers v3 ne reprennent plus — la
+  reprise repart proprement de zéro). La phase post-jeu sème les états en
+  deux passes : d'abord ceux dont la banque de capture détient encore du
+  résidu inconnu (vues statiques de la carte, priorité 1 — des états de jeu
+  réels **locaux à la zone** que la fermeture n'a jamais résolue), puis le
+  reste (priorité 0). Compteur `tas_bank_hits`, ligne stderr
+  `TAS shoots: N snapshots seeded (M from residual banks: backsearch
+  first)`. Les répertoires d'état écrits avant 0.251.4 (pool v3) ne
+  reprennent plus : la reprise repart proprement de zéro.
 - `--tas-dir D` (répétable) : découvre tous les films du répertoire (triés
   par ressemblance de titre ; `.vmv`, `.vbm`, `.bk2`,
   `.gbm`, `.fm2`, `.log`), les films retenus sont loggés sur stderr.

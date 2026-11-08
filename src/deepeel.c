@@ -762,7 +762,8 @@ static int cmd_explore(int argc, char **argv) {
                 dp_disc_add(&res, "tas-shoots", 0);
                 uint32_t k1 = res.disc_n ? res.disc[res.disc_n - 1].known : 0;
                 int seeds = dp_play_seed_tas_snaps(play_engine);
-                fprintf(stderr, "deepeel: TAS shoots: %d snapshots seeded\n", seeds);
+                fprintf(stderr, "deepeel: TAS shoots: %d snapshots seeded (%llu from residual banks: backsearch first)\n",
+                        seeds, (unsigned long long)dp_play_tas_bank_hits(play_engine));
                 dp_explore(ex);
                 dp_disc_add(&res, "tas-shoots-search", 0);
                 if (res.disc_n) res.disc[res.disc_n - 1].credit = res.disc[res.disc_n - 1].known - k1;
