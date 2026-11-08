@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include "../../core/cart_md.h"
+#include "../../mach/mdmach.h"   /* DP_MDL_* section-liveness blocks (C1/C2) */
 #include "movie.h"
 #include "../../explore/ramarch.h"
 
@@ -15,10 +16,6 @@ enum { DP_MDX_ENTRY = 1, DP_MDX_IRQ = 2 };
 enum { DP_MDF_NATURAL = 1, DP_MDF_FORCED = 2, DP_MDF_DATA = 4, DP_MDF_QUEUED = 8,
        DP_MDF_DATA_NATURAL = 16, DP_MDF_DMA_SOURCE = 32, DP_MDF_DMA_READ = 64,
        DP_MDF_CPU_VRAM = 128 };
-
-/* C1 liveness: hardware blocks a section actually reads or writes */
-enum { DP_MDL_VIDEO = 1, DP_MDL_SOUND = 2, DP_MDL_INPUT = 4, DP_MDL_BANK = 8,
-       DP_MDL_MEMORY = 16, DP_MDL_SYS = 32 };
 
 /* one executed run with its per-section hardware liveness (C1) */
 typedef struct {
@@ -59,6 +56,9 @@ typedef struct {
     const char *tree_path;  // write the choice tree (DpTree file) here, NULL: none
     int exact_dedup;        // C3: drop a fork whose clock-free machine hash was already queued
     unsigned ctx_cap;       // admissions per coarse context (0: off)
+    int ctx_live;           // C2: with ctx_cap, key on the target section's id and its
+                            // hardware liveness instead of the pc (measured: half the
+                            // steps, half the coverage on Sonic - stays opt-in)
     int bank_dispatch;      // seed the targets of longword dispatch tables (G2)
     int second_pass;        // seed the unexecuted static successors of executed code (G4)
     int pad_cut;           // cut paths sliding through 16+ zero bytes (default on, --no-cut-padding disables)

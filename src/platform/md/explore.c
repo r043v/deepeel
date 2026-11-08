@@ -274,12 +274,26 @@ static int push(X *x, uint32_t pc, int vint, int hint) {
     if (x->o->ctx_cap) {
         // coarse same-context eviction: pc, D0-D7, A0-A7, SR and the interrupt kind; RAM
         // excluded.  The k-th admission of a context is the key hash(ctx, k); past
-        // ctx_cap the state is closed and counted
-        uint64_t h = 0xcbf29ce484222325ull;
-        uint32_t raw[20];
-        raw[0] = pc; raw[1] = dp_mdmach_sr(x->m) | (uint32_t)vint << 16 | (uint32_t)hint << 17;
-        for (unsigned i = 0; i < 8; i++) { raw[2 + i] = dp_mdmach_dn(x->m, i); raw[10 + i] = dp_mdmach_an(x->m, i); }
-        for (unsigned i = 0; i < 18; i++) h = (h ^ raw[i]) * 0x100000001b3ull;
+        // ctx_cap the state is closed and counted.  --ctx-live replaces the pc with
+        // the target section's id and projects the state onto that section's
+        // hardware liveness (C2); measured on Sonic (3 M steps, cap 1) it halves
+        // the work but also the coverage (10794 -> 5184 executed bytes), so the
+        // coarse key stays the default.
+        uint64_t h;
+        if (x->o->ctx_live) {
+            DpMdResults *r = x->r;
+            uint32_t id = pc < r->rom_size ? r->sec_of[pc] : 0;   // CPU address: ROM sits at 0
+            uint8_t live = id ? r->secs[id - 1].live : 0;         // unexecuted target: registers only
+            h = dp_mdmach_state_ctx_hash_live(x->m, live);
+            h = (h ^ (uint64_t)id * 0x100000001b3ull) * 0x100000001b3ull;
+            h ^= (uint64_t)(uint8_t)vint << 40 | (uint64_t)(uint8_t)hint << 48;
+        } else {
+            uint32_t raw[20];
+            raw[0] = pc; raw[1] = dp_mdmach_sr(x->m) | (uint32_t)vint << 16 | (uint32_t)hint << 17;
+            for (unsigned i = 0; i < 8; i++) { raw[2 + i] = dp_mdmach_dn(x->m, i); raw[10 + i] = dp_mdmach_an(x->m, i); }
+            h = 0xcbf29ce484222325ull;
+            for (unsigned i = 0; i < 18; i++) h = (h ^ raw[i]) * 0x100000001b3ull;
+        }
         unsigned k = 0;
         while (k < x->o->ctx_cap && dp_set_insert(&x->ctx_seen, (h ^ (k * 0x9E3779B97F4A7C15ull)) | 1) == 0) k++;
         if (k >= x->o->ctx_cap) { x->r->ctx_evicted++; return 0; }
@@ -881,6 +895,7 @@ void dp_md_options_default(DpMdOptions *o) {
     o->pre_finalize = NULL; o->pre_user = NULL;
     o->bank_dispatch = 0;
     o->ctx_cap = 0;
+    o->ctx_live = 0;
     o->tree_path = NULL;
 }
 
@@ -1892,7 +1907,8 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
             o->queue_cap, o->queue_max > o->queue_cap ? o->queue_max : o->queue_cap);
     if (r->tree_nodes) fprintf(out, "  choice tree: %llu nodes\n", (unsigned long long)r->tree_nodes);
     if (r->tree_loaded) fprintf(out, "  choice tree resumed: %llu nodes reloaded\n", (unsigned long long)r->tree_loaded);
-    if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/SR context past the cap)\n", (unsigned long long)r->ctx_evicted);
+    if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (%s context past the cap)\n", (unsigned long long)r->ctx_evicted,
+                                o->ctx_live ? "section-projected" : "coarse pc/regs/SR");
     if (r->pass2_seeds || r->pass2_refused || r->pass2_capped) fprintf(out, "  second pass: %llu seeds, %llu refused, %llu capped\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     if (r->s4_tables) fprintf(out, "  jump tables (S4, jmp d(pc,Xn)): %llu tables, %llu handlers seeded, %llu refused\n", (unsigned long long)r->s4_tables, (unsigned long long)r->s4_seeds, (unsigned long long)r->s4_refused);
     if (r->disp_tables) fprintf(out, "  dispatch tables: %llu tables, %llu seeds, %llu refused targets\n", (unsigned long long)r->disp_tables, (unsigned long long)r->disp_seeds, (unsigned long long)r->disp_refused_view);

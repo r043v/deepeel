@@ -229,3 +229,26 @@ au plus grand compte, liveness OU-ées) et toutes sont triées en ordre
 canonique (premier octet) au moment de la finalisation. Test
 `md_section_liveness`. Ces liveness préparent l'éviction par contexte C2 sur
 le modèle GB (projection de l'état sur ce que la section lit réellement).
+
+## 0.249.84 — C2 par liveness de section : `--ctx-live` (mesuré, rejeté par défaut)
+
+`--ctx-cap N --ctx-live` remplace la clé grossière (pc, D0-D7, A0-A7, SR) par
+l'identifiant de la section cible et l'état machine **projeté sur les blocs
+que cette section touche** (`dp_mdmach_state_ctx_hash_live` : registres et SR
+toujours ; VDP, son, bank/SRAM, interruptions selon la liveness apprise).
+Quand la liveness d'une section grandit, son haché change et les admissions
+se rouvrent sans réinitialiser l'ensemble vu.
+
+Mesure (Sonic the Hedgehog, 3 M pas, cap 1) : la clé projetée **réduit le
+travail de moitié mais aussi la couverture de moitié** (261 571 pas, 493
+courses, 5 184 octets exécutés contre 410 513 pas, 932 courses, 10 794
+octets sans éviction ; la clé grossière garde les 10 794 octets avec 419 761
+pas). Cause : la projection ne porte ni la RAM de travail ni la VRAM (64 Kio
+chacune, uniques à quasi chaque push — mesuré sur la fixture `md_ctx_cap` :
+15 courses au lieu de 2) ni la manette (la différence même des sondes D10 :
+chaque génération de boucle de lecture se ré-admet). Les états évincés
+différaient donc par des composantes non modélisées que la section lit
+réellement — même échec que le C2 NES par fenêtres 16 Kio. Le défaut reste
+la clé grossière ; reprise quand les sections porteront leurs pages de RAM
+lues (sémantique GB). Test `md_ctx_live` (la clé projetée évince et le
+rapport dit « section-projected »).

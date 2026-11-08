@@ -85,6 +85,21 @@ const uint8_t *dp_mdmach_ram(const DpMdMach *m);   /* the 64 KiB work RAM */
 void dp_mdmach_render(const DpMdMach *m, uint32_t *pixels);
 /* hash of the machine without its clocks, audio and counters: equal = same future (C3) */
 uint64_t dp_mdmach_state_hash(const DpMdMach *m);
+/* C1 liveness: hardware blocks a section actually reads or writes */
+enum { DP_MDL_VIDEO = 1, DP_MDL_SOUND = 2, DP_MDL_INPUT = 4, DP_MDL_BANK = 8,
+       DP_MDL_MEMORY = 16, DP_MDL_SYS = 32 };
+/* C2: machine state projected onto the blocks a section touches (DP_MDL_*):
+ * registers and SR always; VDP, sound, bank/SRAM and interrupt state only
+ * when the section is live there.  Work RAM, VRAM and the pad are
+ * excluded: RAM and VRAM change on almost every push (64 KiB each — every
+ * context would be unique), and the pad is how the D10 pad probes differ,
+ * so hashing it re-opens every generation of a pad-polling loop (both
+ * measured on the md_ctx_cap fixture: 15 paths / 1935 steps instead of
+ * 2 paths / 258 for the same 8 executed ROM bytes).  A fork decided by a
+ * RAM, VRAM or pad byte is a known limitation, counted by the eviction
+ * report line; per-section learned RAM pages would close the RAM part
+ * (GB semantics) and stay open work. */
+uint64_t dp_mdmach_state_ctx_hash_live(const DpMdMach *m, uint8_t live);
 uint64_t dp_mdmach_screen_key(const DpMdMach *m);
 uint8_t dp_mdmach_ram8(const DpMdMach *m, uint32_t addr); /* work RAM byte */
 #endif

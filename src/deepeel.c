@@ -107,7 +107,7 @@ static void usage(void) {
             "  deepeel z80 explore <sg|sms|gg|msx> ROM [--input-total N] [--input-forks N] [--text FILE] [--map FILE] [--evidence FILE]\n"
             "  deepeel z80 dis ROM hex-offset [instruction-count]\n"
             "  deepeel lr explore CORE ROM [--text FILE] [--map FILE] [--path-steps N] [--max-total N] [--queue N]\n"
-            "  deepeel md explore ROM [--tas GMV] [--max-total N] [--path-steps N] [--queue N] [--queue-max N] [--fork-cap N] [--visit-cap N] [--entry ADDR]... [--watch-write ADDR] [--exclude-read-pc ADDR] [--text FILE] [--map FILE] [--evidence FILE]\n"
+            "  deepeel md explore ROM [--tas GMV] [--max-total N] [--path-steps N] [--queue N] [--queue-max N] [--fork-cap N] [--visit-cap N] [--entry ADDR]... [--watch-write ADDR] [--exclude-read-pc ADDR] [--ctx-cap N] [--ctx-live] [--text FILE] [--map FILE] [--evidence FILE]\n"
             "  deepeel md dis ROM hex-offset [instruction-count]\n"
             "  deepeel regs <gb|sg|sms|gg|msx|md>\n"
             "    --max-steps N        per-path step budget (default 100000)\n"
@@ -1636,6 +1636,7 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--seed-vectors")) o.seed_vectors = 1;
             else if (!strcmp(a, "--bank-dispatch")) o.bank_dispatch = 1;
             else if (!strcmp(a, "--exact-dedup")) o.exact_dedup = 1;
+            else if (!strcmp(a, "--ctx-live")) o.ctx_live = 1;
             else if (!strcmp(a, "--pad-full")) o.pad_full = 1;
             else if (!strcmp(a, "--pad-full6")) o.pad_full = o.pad_full6 = 1;
             else if (!strcmp(a, "--entry")) {

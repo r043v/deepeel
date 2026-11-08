@@ -260,6 +260,36 @@ uint64_t dp_mdmach_state_hash(const DpMdMach *d) {
     h = fnv_bytes(h, &m->z80_bank, sizeof m->z80_bank);
     return h;
 }
+uint64_t dp_mdmach_state_ctx_hash_live(const DpMdMach *d, uint8_t live) {
+    const MdFull *m = d->m;
+    uint64_t h = 0xcbf29ce484222325ull;
+    h = fnv_bytes(h, m->d, sizeof m->d); h = fnv_bytes(h, m->a, sizeof m->a);
+    h = fnv_bytes(h, &m->usp, sizeof m->usp); h = fnv_bytes(h, &m->sr, sizeof m->sr);
+    if (live & DP_MDL_VIDEO) {
+        h = fnv_bytes(h, m->vdp_reg, sizeof m->vdp_reg);
+        h = fnv_bytes(h, m->vsram, sizeof m->vsram);
+        h = fnv_bytes(h, m->cram, sizeof m->cram);
+        h = fnv_bytes(h, &m->vdp_addr, sizeof m->vdp_addr);
+        h = fnv_bytes(h, &m->vdp_first, sizeof m->vdp_first);
+        uint8_t vf[] = { m->vdp_code, m->vdp_pending, m->dma_fill };
+        h = fnv_bytes(h, vf, sizeof vf);
+    }
+    if (live & DP_MDL_SOUND) {
+        h = fnv_bytes(h, &m->z80_bus, sizeof m->z80_bus);
+        h = fnv_bytes(h, &m->z80_reset, sizeof m->z80_reset);
+        h = fnv_bytes(h, &m->z80_bank, sizeof m->z80_bank);
+        h = fnv_bytes(h, m->zram, sizeof m->zram);
+    }
+    if (live & DP_MDL_BANK) {
+        uint8_t bk[] = { m->sram_enable, m->sram_protect };
+        h = fnv_bytes(h, bk, sizeof bk);
+    }
+    if (live & DP_MDL_SYS) {
+        uint8_t sys[] = { m->irq_pending, m->hint_pending, m->hint_counter, m->stopped };
+        h = fnv_bytes(h, sys, sizeof sys);
+    }
+    return h;
+}
 uint64_t dp_mdmach_screen_key(const DpMdMach *d) {
     const MdFull *m = d->m;
     unsigned wsel = m->vdp_reg[16] & 3, w = wsel == 0 ? 32 : wsel == 1 ? 64 : 128;
