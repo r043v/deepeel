@@ -559,6 +559,21 @@ code / data / padding.
   lit) et MD (mesuré sur Sonic : divise le travail mais aussi la
   couverture, la clé grossière reste le défaut). La ligne de rapport
   nomme la clé utilisée (`section-live pc/regs/MPR`).
+- **Correction campagne B-F** : le message du commit 1cb3944 annonce SML2
+  « match en 3,8x moins de mur » — erreur, le vrai ratio est **1,9x** : la
+  référence SML2 a tourné 15 301 s (4 h 15), pas 8 h 30 (le 3,8x est correct
+  pour Zelda seule : 30 606 s -> 8 107 s). Chiffres vérifiés à la source :
+  référence Zelda 99,743 % / 1 347 o / 89 plages, finition Zelda 99,68 % /
+  1 678 o / 117 (légère régression — les 8 h 30 de fourches de la référence
+  ont creusé plus) ; référence SML2 99,431 % / 2 982 o / 263, finition SML2
+  99,435 % / 2 961 o / 302 (légère amélioration).
+- **Sweep des ROMs de test matériel — mooneye acceptance** (étape C) : 75
+  ROMs, 30 s de jeu chacune, critère `residual_bytes == 0` : **72/75 à
+  résidu nul**. Les 3 restantes sont des ROMs de timing pur, à 99,98 %
+  chacune : `boot_hwio-dmg0` (7 o), `call_cc_timing` (6 o), `call_timing`
+  (6 o) — les boucles de mesure de timing elles-mêmes, jamais atteintes en
+  30 s de jeu. blargg `cpu_instrs` : 11/11 à 100,0 % connu, résidu 0 ;
+  ZEXALL SMS : 100,0 %, résidu 0.
 - `--tas-dir D` (répétable) : découvre tous les films du répertoire (triés
   par ressemblance de titre ; `.vmv`, `.vbm`, `.bk2`,
   `.gbm`, `.fm2`, `.log`), les films retenus sont loggés sur stderr.
