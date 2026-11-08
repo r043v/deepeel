@@ -1,4 +1,5 @@
 #include "closure.h"
+#include "../../core/dpmachine.h"
 #include "explore.h"
 #include "../../cpu/z80/provenance.h"
 #include <stdlib.h>
@@ -491,8 +492,13 @@ static void process(DpSegaClosure *c,Node n) {
         s->decode++; if(dec.bad==2) s->ambiguous++; else if(dec.bad==1) s->unmapped++;
         return;
     }
-    DpZ80Instruction in;
-    if(!dp_z80_decode(bytes,raw.length,n.pc,&in)) { s->decode++; return; }
+    // instruction classification through the shared DpIsa (spec §7.3,
+    // src/cpu/z80/z80_isa.c): the classes below are the DpFlowInfo reading of
+    // what used to be open-coded over DpZ80Instruction.  RET cc arrives as
+    // DP_FLOW_COND with no target, JR cc/DJNZ as DP_FLOW_COND with a target,
+    // the ED block repetitions as DP_FLOW_COND back to themselves.
+    DpFlowInfo fi;
+    if(dp_isa_z80()->flow(bytes,n.pc,&fi)<0 || fi.kind==DP_FLOW_ILLEGAL) { s->decode++; return; }
     for(unsigned j=0;j<raw.length;j++) {
         int64_t index=index_of(c,n,(uint16_t)(n.pc+j));
         uint8_t f=c->flags[index];
@@ -503,17 +509,18 @@ static void process(DpSegaClosure *c,Node n) {
         if(!(c->flags[index]&~DP_SEGA_STATIC_DATA)) s->new_bytes++;
         c->flags[index]|=DP_SEGA_STATIC;
     }
-    Node next=n; next.pc=(uint16_t)(n.pc+raw.length);
+    Node next=n; next.pc=(uint16_t)(n.pc+fi.length);
     const View *v=&c->views[n.view];
-    if(in.flow==DP_Z80_HALT) { s->halted++; return; }
-    if(in.flow==DP_Z80_INDIRECT) {
+    if(fi.halt) { s->halted++; return; }
+    if(fi.kind==DP_FLOW_INDIRECT) {
         unsigned pair=raw.index,mask=3u<<(pair*2);
         if((n.target_known&mask)==mask) {
             next.pc=n.target[pair]; s->indirect_resolved++; enqueue(c,next,0);
         } else s->indirect++;
         return;
     }
-    if(in.flow==DP_Z80_RETURN) {
+    int is_ret = fi.kind==DP_FLOW_RET || (fi.kind==DP_FLOW_COND && fi.target<0);
+    if(is_ret) {
         uint16_t target; int found=0; Node returned=next;
         if(n.sp_known && is_ram(c,n,n.sp) && is_ram(c,n,(uint16_t)(n.sp+1))) {
             for(unsigned i=n.depth;i>0;i--) if(n.returns[i-1].cell==(n.sp&c->ram_mask)) {
@@ -525,11 +532,11 @@ static void process(DpSegaClosure *c,Node n) {
             returned.pc=target; returned.sp=(uint16_t)(n.sp+2);
             s->returns_resolved++; enqueue(c,returned,0);
         } else s->indirect++;
-        if(in.condition>=0) enqueue(c,next,0);
+        if(fi.cond>=0) enqueue(c,next,0);
         return;
     }
-    if(in.flow==DP_Z80_CALL) {
-        Node called=next; called.pc=in.target;
+    if(fi.kind==DP_FLOW_CALL) {
+        Node called=next; called.pc=(uint16_t)fi.target;
         uint64_t effect=stack_effect(v,n,1);
         stack_store(c,n,&called,1);
         if(effect&called.known) s->map_barriers++;
@@ -545,15 +552,17 @@ static void process(DpSegaClosure *c,Node n) {
             }
         }
         enqueue(c,called,0);
-        if(in.condition>=0) enqueue(c,next,0);
+        if(fi.cond>=0) enqueue(c,next,0);
         return;
     }
     uint64_t effect=effects(c,n,&next,&raw);
     if(effect&next.known) s->map_barriers++;
     next.known&=~effect;
-    if(in.flow==DP_Z80_JUMP || in.flow==DP_Z80_REPEAT) {
-        Node branch=next; branch.pc=in.target; enqueue(c,branch,0);
-        if(in.condition>=0 || in.flow==DP_Z80_REPEAT) enqueue(c,next,0);
+    int jr_cc = fi.kind==DP_FLOW_COND && fi.target>=0 && fi.cond>=0;          // JR cc / DJNZ
+    int repeat = fi.kind==DP_FLOW_COND && fi.cond<0 && fi.target==(int32_t)n.pc;   // ED block repetition
+    if(fi.kind==DP_FLOW_JUMP || jr_cc || repeat) {
+        Node branch=next; branch.pc=(uint16_t)fi.target; enqueue(c,branch,0);
+        if(fi.cond>=0 || repeat) enqueue(c,next,0);
     } else enqueue(c,next,0);
 }
 static void remaining_budget(DpSegaClosure *blocks,const DpSegaClosureStats *targets) {

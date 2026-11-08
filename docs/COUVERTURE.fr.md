@@ -1101,8 +1101,12 @@ Implémentations existantes à envelopper :
   `closure.c` GB) ; 0.249.93 : `src/cpu/z80/z80_isa.c` (`dp_isa_z80`,
   décodeur partagé du runtime, conditions natives 0..8, LDIR = boucle sur
   elle-même, bornes de longueur du premier octet, `disasm` sur décalage de
-  vue comme sm83) — épinglée par `test_dpisa` ; adoption par la fermeture
-  statique sega à suivre ;
+  vue comme sm83) — épinglée par `test_dpisa` ; 0.249.94 : **adoptée** par la fermeture
+  statique sega (`process()` classifie via `DpFlowInfo` : RET cc = COND sans
+  cible, JR cc/DJNZ = COND avec cible, répétitions ED = COND sur
+  elles-mêmes) — ZEXALL bit-identique à la mesure d'avant migration
+  (95,398 % / 30 327 826 pas / 588 courses), tests sega_closure/msx_closure
+  verts ;
 - `src/cpu/z80/` ;
 - `src/cpu/m6502/` ;
 - `src/platform/pce/hucdec.c` ;
