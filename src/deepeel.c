@@ -1367,10 +1367,10 @@ static int cmd_pce(int argc, char **argv) {
         fprintf(stderr, "deepeel pce explore ROM [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N] "
                         "[--max-total N] [--max-steps N] [--queue N] [--loop-cap N] [--fork-cap N] "
                         "[--novelty STEPS] [--novelty-frames N] [--novelty-archive N] [--novelty-cells] [--pad-fork-cap N] [--irq-fork-cap N] [--no-irq-fork] [--no-static] [--no-infer] [--multitap] [--jobs 2] "
-                        "[--text FILE] [--map FILE] [--png FILE] [--evidence FILE] [--entry ADDR]... [--ctx-cap N] [--ctx-live]\n");
+                        "[--text FILE] [--map FILE] [--png FILE] [--evidence FILE] [--entry ADDR]... [--ctx-cap N] [--ctx-live] [--summary FILE]\n");
         return 2;
     }
-    const char *path = NULL, *text = NULL, *map = NULL, *png = NULL, *pce_ev = NULL, *pce_cov = NULL, *pce_rd = NULL;
+    const char *path = NULL, *text = NULL, *map = NULL, *png = NULL, *pce_ev = NULL, *pce_cov = NULL, *pce_rd = NULL, *pce_summary = NULL;
     DpPceOptions opt = dp_pce_options();
     DpCliCommon cc = { .jobs = 1 };
     int multitap = 0;
@@ -1388,6 +1388,7 @@ static int cmd_pce(int argc, char **argv) {
             opt.entries[opt.entry_count++] = (uint16_t)strtoul(argv[++i], NULL, 0);
         }
         else if (!strcmp(a, "--png") && i + 1 < argc) png = argv[++i];
+        else if (!strcmp(a, "--summary") && i + 1 < argc) pce_summary = argv[++i];
         else if (!strcmp(a, "--cov") && i + 1 < argc) pce_cov = argv[++i];
         else if (!strcmp(a, "--romdata") && i + 1 < argc) pce_rd = argv[++i];
         else if (!strcmp(a, "--tas") && i + 1 < argc) {
@@ -1431,6 +1432,7 @@ static int cmd_pce(int argc, char **argv) {
     fprintf(stderr, "deepeel: pce explore done — steps %llu, paths %llu, forks %llu, sections %u, copies %u\n",
             (unsigned long long)res->steps, (unsigned long long)res->paths,
             (unsigned long long)res->forks, res->section_count, res->copy_count);
+    if (pce_summary && dp_pce_summary(res, pce_summary)) fprintf(stderr, "deepeel: cannot write %s\n", pce_summary);
     if (text) {
         FILE *f = fopen(text, "w");
         if (!f) fprintf(stderr, "deepeel: cannot write %s\n", text);

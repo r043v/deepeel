@@ -201,6 +201,8 @@ void dp_pce_rtcode(FILE *out, const DpPceResults *r);
 void dp_pce_results_free(DpPceResults *results);
 uint8_t *dp_pce_map_build(const DpPceResults *r);
 void dp_pce_report(FILE *out, const DpPceResults *results);
+// campaign summary (same JSON shape as the MD one, tools/compare_platforms.py input)
+int dp_pce_summary(const DpPceResults *results, const char *path);
 // the "bank start end class" text maprender --z80 reads (16 KiB physical banks)
 void dp_pce_map(FILE *out, const DpPceResults *results);
 // physical-bank offset-start offset-end evidence-mask (8 KiB banks), like the NES file

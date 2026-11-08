@@ -2,7 +2,7 @@
 
 Observations de l'outil (machine concrète, RAM à zéro) — pas des mesures de matériel. Les budgets diffèrent d'une campagne à l'autre : le tableau compare ce qui a été exécuté, pas la difficulté intrinsèque des plateformes.
 
-Sources : `results/compare-0.249.84/`, `results/gb-0.249.78/`.  Généré par `tools/compare_platforms.py`. Le PCE n'expose pas encore `--summary` (tableau texte seul) : ligne à ajouter quand il l'aura.
+Sources : `results/compare-0.249.84/`, `results/gb-0.249.78/`.  Généré par `tools/compare_platforms.py`.
 
 ## gb
 
@@ -47,6 +47,12 @@ Sources : `results/compare-0.249.84/`, `results/gb-0.249.78/`.  Généré par `t
 |---|---|---|---|---|---|---|---|
 | aleste | 262 144 | 29.2 % | 45.7 % | 25 524 637 | 563 | 600 | — |
 
+## pce
+
+| ROM | taille | connu | inféré | pas | courses | fourches | octets exécutés |
+|---|---|---|---|---|---|---|---|
+| raiden | 786 432 | 18.3 % | — | 5 000 000 | 337 | 449 | — |
+
 ## Agrégat par plateforme
 
 | plateforme | ROMs | connu moyen |
@@ -58,3 +64,4 @@ Sources : `results/compare-0.249.84/`, `results/gb-0.249.78/`.  Généré par `t
 | sms | 1 | 100.0 % |
 | gg | 1 | 74.0 % |
 | msx | 1 | 29.2 % |
+| pce | 1 | 18.3 % |

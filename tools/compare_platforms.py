@@ -94,8 +94,7 @@ def main():
               "Les budgets diffèrent d'une campagne à l'autre : le tableau compare ce qui a été "
               "exécuté, pas la difficulté intrinsèque des plateformes.\n\n")
     out.write("Sources : " + ", ".join(f"`{d}/`" for d in args.dirs) + ".  ")
-    out.write("Généré par `tools/compare_platforms.py`. Le PCE n'expose pas encore "
-              "`--summary` (tableau texte seul) : ligne à ajouter quand il l'aura.\n")
+    out.write("Généré par `tools/compare_platforms.py`.\n")
     cur = None
     for r in sorted(rows, key=lambda r: (PLATFORMS.index(r["platform"]) if r["platform"] in PLATFORMS else 99, r["rom"])):
         if r["platform"] != cur:

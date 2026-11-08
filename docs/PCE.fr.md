@@ -89,6 +89,16 @@ de 90 % suppose d'atteindre tous les niveaux. Aucun film TAS de Raiden
 n'existe sur TASVideos ; un film BizHawk d'une partie complète, passé en
 `--tas`, reste la voie la plus directe.
 
+## 0.249.85 — `--summary` (campagne JSON)
+
+`pce explore --summary FILE` écrit le même profil JSON de campagne que MD
+(deepeel, platform, rom_size, classes du map, known_pct, compteurs de pas,
+courses, fourches, coupes, exécution hors ROM) : la matière première de
+`tools/compare_platforms.py`, qui alimente la ligne PCE du tableau comparatif
+`docs/COMPARATIF.fr.md`. Test `pce_summary`. Première observation (Raiden
+USA, 5 M pas, borné 120 s) : 18,3 % connus — cohérent avec le tableau
+ci-dessus (les données de niveaux ne se révèlent qu'en jouant).
+
 ## m0boy
 
 Correctif rétroporté : ST0/ST1/ST2 écrivent toujours sur le VDC, en

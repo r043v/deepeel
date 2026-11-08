@@ -1778,6 +1778,33 @@ void dp_pce_map(FILE *out, const DpPceResults *r) {
     free(map);
 }
 
+// Campaign summary (--summary FILE): the same JSON shape as the MD one, the raw
+// material of tools/compare_platforms.py.  Observations of the tool, never
+// hardware measurements.
+int dp_pce_summary(const DpPceResults *r, const char *path) {
+    uint8_t *m = dp_pce_map_build(r);
+    if (!m) return -1;
+    uint64_t cls[DP_PMAP_COUNT] = { 0 };
+    for (size_t i = 0; i < r->rom_size; i++) cls[m[i]]++;
+    free(m);
+    FILE *f = fopen(path, "w");
+    if (!f) return -1;
+    fprintf(f, "{\"deepeel\":\"%s\",\"platform\":\"pce\",\"rom_size\":%zu,\"classes\":{", DEEPEEL_VERSION, r->rom_size);
+    for (int k = 0; k < DP_PMAP_COUNT; k++)
+        fprintf(f, "%s\"%s\":%llu", k ? "," : "", dp_pmap_names[k], (unsigned long long)cls[k]);
+    fprintf(f, "},\"known_pct\":%.3f,\"counters\":{\"steps\":%llu,\"paths\":%llu,\"forks\":%llu,"
+               "\"forced_paths\":%llu,\"pad_forks\":%llu,\"irq_forks\":%llu,\"evicted\":%llu,"
+               "\"step_cuts\":%llu,\"loop_cuts\":%llu,\"fork_cuts\":%llu,\"queue_cuts\":%llu,\"global_cuts\":%llu,"
+               "\"exec_outside\":%llu,\"data_reads\":%llu,\"copied_bytes\":%llu}}\n",
+            r->rom_size ? 100.0 * (double)(r->rom_size - cls[DP_PMAP_UNKNOWN]) / (double)r->rom_size : 0.0,
+            (unsigned long long)r->steps, (unsigned long long)r->paths, (unsigned long long)r->forks,
+            (unsigned long long)r->forced_paths, (unsigned long long)r->pad_forks, (unsigned long long)r->irq_forks,
+            (unsigned long long)r->evicted, (unsigned long long)r->step_cuts, (unsigned long long)r->loop_cuts,
+            (unsigned long long)r->fork_cuts, (unsigned long long)r->queue_cuts, (unsigned long long)r->global_cuts,
+            (unsigned long long)r->exec_outside, (unsigned long long)r->data_reads, (unsigned long long)r->copied_bytes);
+    return fclose(f) ? -1 : 0;
+}
+
 void dp_pce_report(FILE *out, const DpPceResults *r) {
     uint8_t *map = dp_pce_map_build(r);
     uint64_t cls[DP_PMAP_COUNT] = { 0 }, observed = 0;
