@@ -89,6 +89,20 @@ de 90 % suppose d'atteindre tous les niveaux. Aucun film TAS de Raiden
 n'existe sur TASVideos ; un film BizHawk d'une partie complète, passé en
 `--tas`, reste la voie la plus directe.
 
+## 0.250.5 — fidélité PCE : banc de comparaison Beetle PCE
+
+`tools/pce_compare_reference.sh ROM film trames` rejoue le même film
+(.bk2 PCEHawk ou texte hexadécimal, chargeur `dp_pce_tas`) sur le cœur
+libretro Beetle PCE / Mednafen (`DP_BEETLE_SO`, cloné et construit hors
+dépôt) et sur le runtime m0boy, diff des 8 Kio de RAM de travail par trame
+(la SYSTEM_RAM de Beetle porte les banques SuperGrafx/CD au-delà ; la
+comparaison prend les 8 Kio partagés). Premiers résultats (Raiden USA,
+300 trames d'un film synthétique sans TAS disponible : deux appuis sur
+Run) : divergence dès la trame 1 sur un octet (`$0000` : Mednafen $EB,
+m0boy $FF), qui s'élargit (~835 octets à la trame 300) — le boot des deux
+machines diffère dès le premier passage ; à démêler octet par octet.
+Observations de l'outil, pas des mesures de matériel.
+
 ## 0.249.85 — `--summary` (campagne JSON)
 
 `pce explore --summary FILE` écrit le même profil JSON de campagne que MD
