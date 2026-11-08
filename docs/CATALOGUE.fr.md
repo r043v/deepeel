@@ -44,6 +44,13 @@ infructueux.
 
 ## Jalons atteints
 
+- **Axe 4** : la campagne multi-plateforme complète (`results/campagne-0.250.1`)
+  — 1199 ROMs, zéro résumé invalide : SMS 897 (56,9 % connus en moyen),
+  GG 225 (40,9 %), SG 68 (82,9 %), MD 4 (14,7 %), NES 2 (38,9 %), MSX 2
+  (39,3 %), PCE 1 (21,5 %) ; 74 milliards de pas au total, observations de
+  l'outil à budgets bornés par ROM (`tools/campaign_full.sh`, partage
+  multi-ouvriers).
+
 - **Axe 10** : les trois ROMs de couverture 100 % (Puzzle Boy, BattleCity,
   Master Karateka — campagnes 0.249.x) se recompilent toutes avec
   **interpreter-only 0** ; le compteur « compilé » (8601) est le plafond de
