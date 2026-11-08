@@ -9,9 +9,10 @@
 set -eu
 plat=$1; romdir=$2; out=$3
 maxtotal=${4:-20000000}; timelimit=${5:-600}
+shard=${6:-0}; shards=${7:-1}   # optional split: this worker takes roms i with i % shards == shard
 B=${DEEPEEL_BIN:-$PWD/build/deepeel}
 mkdir -p "$out"
-find "$romdir" -type f \( -iname "*.gb" -o -iname "*.gbc" -o -iname "*.nes" -o -iname "*.md" -o -iname "*.sg" -o -iname "*.sms" -o -iname "*.gg" -o -iname "*.rom" -o -iname "*.mx1" -o -iname "*.mx2" -o -iname "*.pce" \) | sort | while read -r rom; do
+find "$romdir" -type f \( -iname "*.gb" -o -iname "*.gbc" -o -iname "*.nes" -o -iname "*.md" -o -iname "*.sg" -o -iname "*.sms" -o -iname "*.gg" -o -iname "*.rom" -o -iname "*.mx1" -o -iname "*.mx2" -o -iname "*.pce" \) | sort | awk -v s="$shard" -v n="$shards" 'NR % n == s' | while read -r rom; do
     case "$rom" in
         *test*|*Test*|*[Bb]ios*|*[Pp]D\ *.sms) ;;  # hardware-test ROMs and BIOSes: dedicated axes, not the campaign
     esac
