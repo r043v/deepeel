@@ -156,11 +156,16 @@ int main(int argc, char **argv) {
     unsigned limit = (unsigned)strtoul(argv[3], NULL, 0);
     if (tas.frames && limit > tas.frames) limit = tas.frames;
 
-    gg_init_system(rom, (size_t)n, NULL, 0);
+    /* DP_SEGA_SYS=sms runs the Master System profile of the same runtime
+     * (the VDP clocking and the 8 KiB work RAM are the machine's; the row
+     * callback keeps the compiled width, the screen hash stays an
+     * observation) */
+    const int is_sms = getenv("DP_SEGA_SYS") && !strcmp(getenv("DP_SEGA_SYS"), "sms");
+    gg_init_system(rom, (size_t)n, NULL, is_sms);
     machine.row = dut_row; machine.draw_line = dut_line; machine.frame = dut_frame;
     machine.row_out = g_dut_store + GG_ROW_PAD; machine.row_tmp = NULL;
     g_b = dp_sega_backend_gg();
-    g_b->init(rom, (size_t)n, NULL, 0);   /* BIOS-less profile, bus hooks, mapper detection */
+    g_b->init(rom, (size_t)n, NULL, is_sms);   /* BIOS-less profile, bus hooks, mapper detection */
     machine.row = dut_row; machine.draw_line = dut_line; machine.frame = dut_frame;
     machine.row_out = g_dut_store + GG_ROW_PAD; machine.row_tmp = NULL;
     gg_reset();
@@ -194,7 +199,7 @@ int main(int argc, char **argv) {
     }
     const unsigned watch = getenv("DP_GG_WATCH") ? (unsigned)strtoul(getenv("DP_GG_WATCH"), NULL, 16) : 0;
     for (unsigned frame = 0; frame < limit; frame++) {
-        g_pad = tas.masks[frame] & 0x7Fu;   /* bit 128 is the SMS Reset: GG ignores it */
+        g_pad = tas.masks[frame] & 0x7Fu;   /* bit 128 is the SMS Reset: kept off (the movies that use it are rare; documented) */
         gg_buttons(g_pad);
         g_retro_run();
         /* one real frame: instructions until the frame-end event (same loop
