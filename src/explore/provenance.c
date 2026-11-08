@@ -28,7 +28,7 @@ typedef struct {
     uint8_t a;
     uint8_t aknown;
     uint16_t de, bc; // whole-pair values (S3: BC/DE beside HL)
-    uint8_t pm2;     // bit0 = DE known, bit1 = BC known
+    uint8_t pm2;     // bit0 = E known, bit1 = D known, bit2 = C known, bit3 = B known (S3 byte-granular)
     uint16_t tbase;  // last `ld hl,nn` base: the candidate pointer table of an indexed dispatch
     uint8_t tflags;  // bit0 = tbase valid, bit1 = a `ld h,(hl)` pointer load followed it
 } ProvState;
@@ -94,48 +94,133 @@ static int prov_rom_read(void *ctx, uint16_t addr, uint8_t *v) {
 static void prov_pairs(DpResults *res, ProvRead *pr, ProvState *s, uint8_t op,
                        uint16_t old_hl, uint8_t old_mask, DpProvRegs *r) {
     uint8_t v;
+    // byte reads of the tracked pairs: B=(bc>>8) C=bc&0xFF D=(de>>8) E=de&0xFF
+    #define PPAIR_BYTE(pair, hi) (uint8_t)((hi) ? (pair) >> 8 : (pair) & 0xFF)
     switch (op) {
-    case 0x11: s->de = (uint16_t)(res->cart->rom[s->k + 1] | (res->cart->rom[s->k + 2] << 8)); s->pm2 |= 1; return;
-    case 0x01: s->bc = (uint16_t)(res->cart->rom[s->k + 1] | (res->cart->rom[s->k + 2] << 8)); s->pm2 |= 2; return;
-    case 0x13: if (s->pm2 & 1) s->de++; return;
-    case 0x1B: if (s->pm2 & 1) s->de--; return;
-    case 0x03: if (s->pm2 & 2) s->bc++; return;
-    case 0x0B: if (s->pm2 & 2) s->bc--; return;
+    case 0x11: s->de = (uint16_t)(res->cart->rom[s->k + 1] | (res->cart->rom[s->k + 2] << 8)); s->pm2 |= 3; return;  // ld de,nn
+    case 0x01: s->bc = (uint16_t)(res->cart->rom[s->k + 1] | (res->cart->rom[s->k + 2] << 8)); s->pm2 |= 12; return; // ld bc,nn
+    case 0x16: s->de = (uint16_t)((s->de & 0x00FF) | ((uint16_t)res->cart->rom[s->k + 1] << 8)); s->pm2 |= 2; return; // ld d,n
+    case 0x1E: s->de = (uint16_t)((s->de & 0xFF00) | res->cart->rom[s->k + 1]); s->pm2 |= 1; return;                 // ld e,n
+    case 0x06: s->bc = (uint16_t)((s->bc & 0x00FF) | ((uint16_t)res->cart->rom[s->k + 1] << 8)); s->pm2 |= 8; return; // ld b,n
+    case 0x0E: s->bc = (uint16_t)((s->bc & 0xFF00) | res->cart->rom[s->k + 1]); s->pm2 |= 4; return;                 // ld c,n
+    case 0x13: if ((s->pm2 & 3) == 3) s->de++; return;   // inc de
+    case 0x1B: if ((s->pm2 & 3) == 3) s->de--; return;   // dec de
+    case 0x03: if ((s->pm2 & 12) == 12) s->bc++; return; // inc bc
+    case 0x0B: if ((s->pm2 & 12) == 12) s->bc--; return; // dec bc
+    case 0x14: if (s->pm2 & 2) s->de = (uint16_t)((s->de & 0x00FF) | ((s->de + 0x0100) & 0xFF00)); return;   // inc d
+    case 0x1C: if (s->pm2 & 1) s->de = (uint16_t)((s->de & 0xFF00) | ((s->de + 1) & 0x00FF)); return;        // inc e
+    case 0x15: if (s->pm2 & 2) s->de = (uint16_t)((s->de & 0x00FF) | ((s->de - 0x0100) & 0xFF00)); return;   // dec d
+    case 0x1D: if (s->pm2 & 1) s->de = (uint16_t)((s->de & 0xFF00) | ((s->de - 1) & 0x00FF)); return;        // dec e
+    case 0x04: if (s->pm2 & 8) s->bc = (uint16_t)((s->bc & 0x00FF) | ((s->bc + 0x0100) & 0xFF00)); return;   // inc b
+    case 0x0C: if (s->pm2 & 4) s->bc = (uint16_t)((s->bc & 0xFF00) | ((s->bc + 1) & 0x00FF)); return;        // inc c
+    case 0x05: if (s->pm2 & 8) s->bc = (uint16_t)((s->bc & 0x00FF) | ((s->bc - 0x0100) & 0xFF00)); return;   // dec b
+    case 0x0D: if (s->pm2 & 4) s->bc = (uint16_t)((s->bc & 0xFF00) | ((s->bc - 1) & 0x00FF)); return;        // dec c
     case 0x1A: case 0x0A: { // ld a,(de) / ld a,(bc)
-        int bit = op == 0x1A ? 1 : 2;
+        int bit = op == 0x1A ? 3 : 12;
         uint16_t addr = op == 0x1A ? s->de : s->bc;
-        if ((s->pm2 & bit) && prov_rom_read(pr, addr, &v)) { r->a = v; r->aknown = 1; }
+        if ((s->pm2 & bit) == bit && prov_rom_read(pr, addr, &v)) { r->a = v; r->aknown = 1; }
         else r->aknown = 0;
         return;
     }
     case 0x7A: case 0x7B: case 0x78: case 0x79: { // ld a,d|e|b|c
-        int bit = (op == 0x7A || op == 0x7B) ? 1 : 2;
-        uint16_t pair = bit == 1 ? s->de : s->bc;
-        if (s->pm2 & bit) { r->a = (op == 0x7A || op == 0x78) ? (uint8_t)(pair >> 8) : (uint8_t)pair; r->aknown = 1; }
+        int bit = (op == 0x7A || op == 0x7B) ? 3 : 12;
+        uint16_t pair = (op == 0x7A || op == 0x7B) ? s->de : s->bc;
+        if ((s->pm2 & bit) == bit) { r->a = PPAIR_BYTE(pair, op == 0x7A || op == 0x78); r->aknown = 1; }
         else r->aknown = 0;
         return;
     }
+    case 0x47: case 0x4F: case 0x57: case 0x5F: { // ld b|c|d|e,a
+        if (!r->aknown) { s->pm2 &= (uint8_t)~(op == 0x47 ? 8 : op == 0x4F ? 4 : op == 0x57 ? 2 : 1); return; }
+        uint8_t byte = r->a;
+        if (op == 0x47) s->bc = (uint16_t)((s->bc & 0x00FF) | ((uint16_t)byte << 8)), s->pm2 |= 8;
+        else if (op == 0x4F) s->bc = (uint16_t)((s->bc & 0xFF00) | byte), s->pm2 |= 4;
+        else if (op == 0x57) s->de = (uint16_t)((s->de & 0x00FF) | ((uint16_t)byte << 8)), s->pm2 |= 2;
+        else s->de = (uint16_t)((s->de & 0xFF00) | byte), s->pm2 |= 1;
+        return;
+    }
+    // ld b|c|d|e, another tracked byte (0x40-0x6F, both registers tracked)
+    case 0x40: case 0x41: case 0x42: case 0x43: case 0x44: case 0x45: // ld b,r
+    case 0x48: case 0x49: case 0x4A: case 0x4B: case 0x4C: case 0x4D: // ld c,r
+    case 0x50: case 0x51: case 0x52: case 0x53: case 0x54: case 0x55: // ld d,r
+    case 0x58: case 0x59: case 0x5A: case 0x5B: case 0x5C: case 0x5D: // ld e,r
+    case 0x61: case 0x63: case 0x64: case 0x65:                       // ld h,r (ld h,h keeps)
+    case 0x6A: case 0x6C: case 0x6D: {                                // ld l,r (ld l,l keeps)
+        unsigned dst = (op >> 3) & 7, src = op & 7;
+        if (src == dst) return;   // ld r,r of the same byte: knowledge unchanged
+        // the source byte's knowledge and value; (hl) sources fall through to the kill
+        int sknown = 0; uint8_t sbyte = 0;
+        if (src == 7 && r->aknown) { sknown = 1; sbyte = r->a; }
+        else if (src == 4 && (r->pmask & 2)) { sknown = 1; sbyte = (uint8_t)(r->p >> 8); }
+        else if (src == 5 && (r->pmask & 1)) { sknown = 1; sbyte = (uint8_t)r->p; }
+        else if (src == 0 && (s->pm2 & 8)) { sknown = 1; sbyte = (uint8_t)(s->bc >> 8); }
+        else if (src == 1 && (s->pm2 & 4)) { sknown = 1; sbyte = (uint8_t)s->bc; }
+        else if (src == 2 && (s->pm2 & 2)) { sknown = 1; sbyte = (uint8_t)(s->de >> 8); }
+        else if (src == 3 && (s->pm2 & 1)) { sknown = 1; sbyte = (uint8_t)s->de; }
+        else if (src == dst) { sknown = 1; }   // ld b,b: keeps whatever B was
+        if (dst == 0 || dst == 1) {            // ld b,src / ld c,src
+            uint16_t bit = dst ? 4 : 8;
+            if (!sknown) s->pm2 &= (uint8_t)~bit;
+            else {
+                if (dst) s->bc = (uint16_t)((s->bc & 0xFF00) | sbyte), s->pm2 |= 4;
+                else s->bc = (uint16_t)((s->bc & 0x00FF) | ((uint16_t)sbyte << 8)), s->pm2 |= 8;
+            }
+        } else if (dst == 2 || dst == 3) {     // ld d,src / ld e,src
+            uint16_t bit = dst == 2 ? 2 : 1;
+            if (!sknown) s->pm2 &= (uint8_t)~bit;
+            else {
+                if (dst == 2) s->de = (uint16_t)((s->de & 0x00FF) | ((uint16_t)sbyte << 8)), s->pm2 |= 2;
+                else s->de = (uint16_t)((s->de & 0xFF00) | sbyte), s->pm2 |= 1;
+            }
+        } else if ((dst == 4 || dst == 5) && sknown) { // ld h|l, a tracked byte (the ISA effect
+            // handled h,a and l,a; h,d/b and l,e/c arrive here with sknown)
+            if (dst == 4) { r->p = (uint16_t)((r->p & 0x00FF) | ((uint16_t)sbyte << 8)); r->pmask |= 2; }
+            else { r->p = (uint16_t)((r->p & 0xFF00) | sbyte); r->pmask |= 1; }
+        }
+        return;
+    }
+    case 0x09: { // add hl,bc
+        if (old_mask == 3 && (s->pm2 & 12) == 12) { r->p = (uint16_t)(old_hl + s->bc); r->pmask = 3; }
+        return;
+    }
+    case 0x19: { // add hl,de
+        if (old_mask == 3 && (s->pm2 & 3) == 3) { r->p = (uint16_t)(old_hl + s->de); r->pmask = 3; }
+        return;
+    }
     case 0x62: case 0x60: { // ld h,d / ld h,b
-        int bit = op == 0x62 ? 1 : 2;
-        uint16_t pair = bit == 1 ? s->de : s->bc;
-        if (s->pm2 & bit) { r->p = (uint16_t)((old_hl & 0x00FF) | (pair & 0xFF00)); r->pmask = old_mask | 2; }
+        int bit = op == 0x62 ? 2 : 8;
+        uint16_t pair = op == 0x62 ? s->de : s->bc;
+        if ((s->pm2 & bit) == bit) { r->p = (uint16_t)((old_hl & 0x00FF) | (pair & 0xFF00)); r->pmask = old_mask | 2; }
         return;
     }
     case 0x6B: case 0x69: { // ld l,e / ld l,c
-        int bit = op == 0x6B ? 1 : 2;
-        uint16_t pair = bit == 1 ? s->de : s->bc;
-        if (s->pm2 & bit) { r->p = (uint16_t)((old_hl & 0xFF00) | (pair & 0x00FF)); r->pmask = old_mask | 1; }
+        int bit = op == 0x6B ? 1 : 4;
+        uint16_t pair = op == 0x6B ? s->de : s->bc;
+        if ((s->pm2 & bit) == bit) { r->p = (uint16_t)((old_hl & 0xFF00) | (pair & 0x00FF)); r->pmask = old_mask | 1; }
         return;
     }
-    // instructions that provably leave B/C/D/E alone
-    case 0x00: case 0x3E: case 0x21: case 0x23: case 0x2B: case 0x2A: case 0x7E: case 0x66: case 0x6E:
-    case 0x67: case 0x6F: case 0xFA: case 0x18: case 0x20: case 0x28: case 0x30: case 0x38:
-    case 0xC3: case 0xC2: case 0xCA: case 0xD2: case 0xDA: case 0xE9:
-        return;
-    default:
-        s->pm2 = 0;
+    default: {
+        // which of B/C/D/E does this opcode write?  bit3 B, bit2 C, bit1 D,
+        // bit0 E — everything else keeps its knowledge (never a stale value)
+        unsigned wr = 0;
+        if (op == 0xCB) wr = 0xF;                       // the byte written depends on b[1]
+        else if (op == 0xC1) wr = 0xC;                  // pop bc
+        else if (op == 0xD1) wr = 0x3;                  // pop de
+        else if (op >= 0x40 && op <= 0x7F) {            // ld r,r' / ld r,(hl) / ld (hl),r / halt
+            unsigned dst = (op >> 3) & 7;
+            if (op != 0x76) wr = dst == 0 ? 8 : dst == 1 ? 4 : dst == 2 ? 2 : dst == 3 ? 1 : 0;
+        } else if (op >= 0x04 && op <= 0x3D && (op & 7) < 4 && (op & 7) != 0) {
+            // inc/dec r on b/c/d/e (0x04-0x1F zone; a/h/l destinations handled above/by the ISA)
+            unsigned dst = (op >> 3) & 7;
+            if (dst <= 3) wr = dst == 0 ? 8 : dst == 1 ? 4 : dst == 2 ? 2 : 1;
+        } else if ((op & 0xC7) == 0x06) {               // ld r,n
+            unsigned dst = (op >> 3) & 7;
+            wr = dst == 0 ? 8 : dst == 1 ? 4 : dst == 2 ? 2 : dst == 3 ? 1 : 0;
+        }
+        s->pm2 &= (uint8_t)~wr;
         return;
     }
+    }
+    #undef PPAIR_BYTE
 }
 
 
@@ -287,7 +372,9 @@ uint32_t dp_provenance(DpResults *res) {
         uint64_t vk = ((uint64_t)s.k << 17) | ((uint64_t)(s.hlmask ? s.hl : 0) << 1) | s.aknown;
         // BC/DE join the key through a mix: a collision only prunes a state, never invents one
         if (s.tflags) vk ^= ((uint64_t)s.tbase * 4 + s.tflags) * 0xC2B2AE3D27D4EB4Full;
-        vk ^= (((uint64_t)(s.pm2 & 1 ? s.de : 0) << 16 | (s.pm2 & 2 ? s.bc : 0)) * 4 + s.pm2) * 0x9E3779B97F4A7C15ull << 20;
+        // byte-granular pairs: the values join the key with their own masks
+        // (a collision only prunes a state, never invents one)
+        vk ^= (((uint64_t)(s.pm2 & 3 ? s.de : 0) << 16 | (s.pm2 & 12 ? s.bc : 0)) * 4 + s.pm2) * 0x9E3779B97F4A7C15ull << 20;
         if (dp_set_insert(&vis, vk) <= 0) continue;
         if (s.k >= n || s.k >= c->rom_size) continue;
         uint32_t bank = s.k / 0x4000, off = s.k % 0x4000;

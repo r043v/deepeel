@@ -3464,8 +3464,25 @@ débit de ~45 000 pas/s dominé par l'écriture du spool.
 `ld a,(de|bc)` sur un octet de ROM prouvable, `ld a,b|c|d|e`, `ld h,d|b`, `ld l,e|c`). Seules les instructions connues
 pour ne pas toucher B/C/D/E conservent les paires ; toute autre les oublie (jamais de valeur périmée). La clé des états
 visités mélange BC/DE (une collision ne fait qu'élaguer). Test `gb_prov_de` (fixture `fix_provde`) : avant, 0 cible
-`jp hl` prouvée ; après, 1 cible et 2 octets de données statiques (témoin négatif vérifié). Reste pour S3 GB : les
-autres registres 8 bits et la RAM (le z80 les suit déjà).
+`jp hl` prouvée ; après, 1 cible et 2 octets de données statiques (témoin négatif vérifié).
+
+## 0.250.7 — S3 GB : BC et DE octet par octet
+
+`prov_pairs` porte la connaissance **par octet** (bit3 B, bit2 C, bit1 D,
+bit0 E) au lieu de paires entières : `ld b/c/d/e,n`, `ld b|c|d|e,a`,
+`inc/dec r` et `inc/dec rr`, `ld r,r'` entre registres suivis (la valeur
+transite quand la source est prouvée, l'octet s'oublie sinon — jamais de
+valeur périmée), `add hl,bc|de` calculé quand tout est prouvé. La règle
+des autres opcodes est **inversée** : seuls les opcodes qui écrivent
+réellement B/C/D/E (ld r,r' vers ces destinations, ld r,n, inc/dec r,
+pop bc/de, préfixe CB) ouvrent un octet ; tout le reste conserve — un `cp`
+ne tuait plus toute la paire (l'ancien défaut tuait B/C/D/E pour toute
+instruction non listée, ce qui rendait le suivi inutilisable en pratique).
+La clé des états visités mélange les valeurs avec leurs masques (une
+collision n'épure que l'état). Fixture `fix_provbyte` (test
+`gb_prov_byte`) : la fourche `ld a,($44)`/`cp 0` — le côté `ld b,a`
+(H inconnu) laisse son `jp hl` non résolu, le côté `ld b,$01`/`ld c,$90`
+prouve sa cible `$0190`. Reste pour S3 GB : la RAM (le z80 la suit déjà).
 
 ## 0.248.1 — J4 : score et remplacement des archives de cellules partagés
 

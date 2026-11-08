@@ -462,6 +462,17 @@ def build(out):
     w(r, 0x180, 0x3C, 0x00, 0x18, 0xFE)
     save(out, "fix_provde", r)
 
+    # --- provbyte: the pointer devised byte by byte through BC — S3 byte-granular.
+    # The fork: A comes from an IO read (unknown), so the z side's ld b,a leaves
+    # B unknown and its jp hl stays unresolved (negative witness, "1 partial");
+    # the nz side devises HL from ld b,$01/ld c,$90 and its jp hl is proven -> $0190 ---
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0xF0, 0x44, 0xFE, 0x00, 0x28, 0x06, 0x06, 0x01, 0x0E, 0x90,
+       0x18, 0x03, 0x78, 0x0E, 0x90, 0x60, 0x69, 0xE9)
+    w(r, 0x190, 0x3C, 0x00, 0x18, 0xFE)
+    save(out, "fix_provbyte", r)
+
     # --- hdma: CGB general-purpose HDMA, 256 bytes $4000 -> $8000 -------------
     r = rom(2)
     w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
