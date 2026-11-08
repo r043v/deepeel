@@ -48,6 +48,7 @@ enum { DP_MAP_UNKNOWN, DP_MAP_CODE_NAT, DP_MAP_CODE_FORCED, DP_MAP_CODE_STATIC,
 typedef struct DpMapSummary {
     uint64_t total, known, unknown, code, data, pad, inferred, probable, probable_data;
     uint64_t cls[DP_MAP_COUNT];
+    uint32_t pad_fringe_refused;  // filler runs a plausible pointer aims at: not inferred
 } DpMapSummary;
 // malloc'd per-byte class array (banks*0x4000), caller frees
 uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum);

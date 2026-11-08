@@ -432,6 +432,19 @@ code / data / padding.
   Le rapport texte la résume (`residual anatomy:`) et le summary JSON porte
   le champ `mech` sur chaque plage résiduelle : la feuille de route vers
   100 % est désormais produite par l'outil lui-même.
+- **Garde-fou de la frange de remplissage** (0.251.1) : une plage remplie
+  de 00/FF adjacente à du remplissage n'est inférée `inferred-padding` que
+  si aucun pointeur plausible ne vise à l'intérieur (mot de 2 octets posé
+  sur du code ou une table, forme bare et forme banque:adresse) ; les
+  refus sont comptés (`padding fringe: N filler run(s) not inferred` dans
+  le texte, `pad_fringe_refused` dans le JSON). Mesure sur l'état gelé
+  Zelda (reprise + fermeture seule, 19 s de banc rapide) : 4 plages
+  refusées, 32 octets basculent d'`inferred-padding` vers l'inférence
+  data, le résidu est inchangé — le garde-fou protège, il ne regress rien.
+  Le restant « padding-fringe » de Zelda (9658 octets) est de la donnée
+  clairsemée (tilemaps 00-04, plans graphiques) que le run de référence
+  8 h30 a lue comme donnée : l'inférer padding serait un faux positif de
+  classe — limite documentée, la règle est saturée.
 - `--tas-dir D` (répétable) : découvre tous les films du répertoire (triés
   par ressemblance de titre ; `.vmv`, `.vbm`, `.bk2`,
   `.gbm`, `.fm2`, `.log`), les films retenus sont loggés sur stderr.

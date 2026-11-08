@@ -308,6 +308,10 @@ add_test(NAME dpmachine COMMAND test_dpmachine ${CMAKE_CURRENT_BINARY_DIR})
 add_executable(test_map_png test_map_png.c)
 target_link_libraries(test_map_png PRIVATE deepeel_core m)
 add_test(NAME map_png COMMAND test_map_png)
+
+add_executable(test_map_infer test_map_infer.c)
+target_link_libraries(test_map_infer PRIVATE deepeel_core m)
+add_test(NAME map_infer COMMAND test_map_infer)
 add_test(NAME maprender_cv COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/maprender_cv.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_copy1.gb)
 
 # J11: level-A libretro backend, tested on a mock core built here (no binary committed)

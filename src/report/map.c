@@ -241,6 +241,31 @@ static float *map_data_model(const uint8_t *rom, size_t rsz, const uint8_t *m, s
     free(dc);
     return llr;
 }
+// bitmap of plausible pointer targets: every 2-byte word that sits in code or
+// table bytes and whose value, in either pointer form (bank:addr little-endian
+// pair, or a bare in-bank address), lands in the ROM — a filler run one of
+// these aims at is a target, not padding
+static uint8_t *map_pointer_targets(const uint8_t *rom, size_t rsz, const uint8_t *m, size_t n) {
+    uint8_t *bm = calloc((rsz + 7) / 8, 1);
+    if (!bm) return NULL;
+    for (size_t bs = 0; bs < n && bs < rsz; bs += 0x4000)
+        for (size_t k = bs; k + 1 < bs + 0x4000 && k + 1 < rsz; k++) {
+            int ck = m[k];
+            if (ck != DP_MAP_CODE_NAT && ck != DP_MAP_CODE_FORCED && ck != DP_MAP_CODE_STATIC &&
+                ck != DP_MAP_TABLE && ck != DP_MAP_INF_CODE && ck != DP_MAP_PROB_CODE)
+                continue;
+            uint32_t off = (uint32_t)rom[k] | (uint32_t)rom[k + 1] << 8;   // bare in-bank address:
+            if (off < 0x4000) {                                            // bank 0, and the word's own bank
+                bm[off >> 3] |= 1u << (off & 7);
+                uint32_t own = bs + off;
+                if (own < rsz && own < n) bm[own >> 3] |= 1u << (own & 7);
+            }
+            uint32_t banked = (uint32_t)rom[k + 1] * 0x4000u + rom[k];      // bank:addr pair
+            if (banked < rsz) bm[banked >> 3] |= 1u << (banked & 7);
+        }
+    return bm;
+}
+
 static int map_probable_data(const float *llr, const uint8_t *rom, size_t i, size_t j) {
     if (!llr || j - i < MAP_PDATA_MIN_LEN) return 0;
     double s = 0;
@@ -249,6 +274,7 @@ static int map_probable_data(const float *llr, const uint8_t *rom, size_t i, siz
 }
 
 uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
+    if (sum) memset(sum, 0, sizeof *sum);   // the inference below counts into it
     size_t n = (size_t)res->banks * 0x4000;
     uint8_t *m = malloc(n ? n : 1);
     for (size_t k = 0; k < n; k++) {
@@ -261,6 +287,7 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
     size_t rsz = res->cart ? res->cart->rom_size : 0;
     float *dmodel = NULL;
     int dmodel_tried = 0;
+    uint8_t *ptargets = NULL;
     for (size_t bs = 0; bs < n; bs += 0x4000) {
         size_t be = bs + 0x4000;
         for (size_t i = bs; i < be;) {
@@ -294,7 +321,16 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
                 ((before == DP_MAP_PAD || before == DP_MAP_INF_PAD) || (after == DP_MAP_PAD || after == DP_MAP_INF_PAD))) {
                 size_t fl = 0;
                 for (size_t k = i; k < j; k++) fl += rom[k] == 0x00 || rom[k] == 0xFF;
-                if (fl * 4 >= len * 3) c = DP_MAP_INF_PAD;
+                if (fl * 4 >= len * 3) {
+                    // guard: never when a plausible pointer (a word sitting in
+                    // code or table bytes, either pointer form) targets inside
+                    // the run — the rejections are counted
+                    if (!ptargets) ptargets = map_pointer_targets(rom, rsz, m, n);
+                    int aimed = 0;
+                    for (size_t k = i; k < j && !aimed; k++) aimed = ptargets[k >> 3] >> (k & 7) & 1;
+                    if (aimed) sum->pad_fringe_refused++;
+                    else c = DP_MAP_INF_PAD;
+                }
             }
             // code-code run that decodes like code: probable, flagged apart because it is not proven
             if (c == DP_MAP_UNKNOWN && rom && j <= rsz && before >= 0 && after >= 0 && dp_map_is_code(before) &&
@@ -310,6 +346,7 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
         }
     }
     free(dmodel);
+    free(ptargets);
     // monotone inference: a byte the map once classed by inference stays classed when a later
     // pass moves the neighbours that justified it (observed classes always win; they are
     // read from the monotone flags above)
@@ -320,7 +357,6 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
         }
     }
     if (sum) {
-        memset(sum, 0, sizeof *sum);
         sum->total = n;
         for (size_t k = 0; k < n; k++) sum->cls[m[k]]++;
         for (int c = 0; c < DP_MAP_COUNT; c++) {

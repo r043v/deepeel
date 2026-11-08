@@ -153,6 +153,12 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
             if (rmap) {
                 dp_map_residual_text(res, rmap, out);
                 dp_residual_anatomy_text(res, rmap, out);
+                if (rsum.pad_fringe_refused) {
+                    snprintf(line, sizeof line,
+                             "padding fringe: %u filler run(s) not inferred: a plausible pointer aims inside\n",
+                             rsum.pad_fringe_refused);
+                    dp_buf_str(out, line);
+                }
                 DpHeat heat;
                 if (dp_heat_build(res, rmap, &heat)) {
                     dp_heat_top_text(&heat, 20, out);
@@ -434,6 +440,8 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
             dp_buf_fmt(o, "%s\"%s\":%llu", cl ? "," : "", dp_map_class_name(cl),
                        (unsigned long long)s.cls[cl]);
         dp_buf_str(o, "}");
+        if (s.pad_fringe_refused)   // the fringe guard's rejections, never silent
+            dp_buf_fmt(o, ",\"pad_fringe_refused\":%u", s.pad_fringe_refused);
         if (m) {
             DpResidualRange rr[4096];
             int nr = dp_map_residual_list(res, m, rr, 4096);
