@@ -242,6 +242,9 @@ typedef struct DpResults {
     uint32_t closure_seeds, closure_seeds_dropped;
     uint32_t closure_seeds_refused;     // seeds the full queue sent back (retried next round)
     uint32_t closure_bank_seeds;        // bank candidates seeded on ambiguous edges
+    uint32_t residual_targets, residual_seeded;     // residual ranges tried, forced entries seeded
+    uint32_t residual_static, residual_refused;     // ranges re-proven statically, refusals (pointer, no entry)
+    DpHashSet residual_tried;           // rom keys of ranges already targeted (never retried)
     uint32_t *clo_entries;              // rom keys of static entry points never executed
     int clo_entry_n, clo_entry_cap;
     uint32_t *clo_bank_entries;         // rom keys: every bank's view of an unresolved edge target
@@ -569,6 +572,17 @@ void dp_section_banks_seen(DpSection *s, uint32_t bank);
 // proven data stop the flow.  Terminates by construction (a visited map the
 // size of the ROM).  Returns the newly marked byte count.
 uint32_t dp_static_closure(DpResults *res);
+// a table target is plausible code when the bytes decode, without an illegal
+// opcode, to a transfer (ret/jr/jp/rst/call/halt) within a 48-instruction
+// window — the strengthened acceptance shared by the closure's S4 tables and
+// the residual targeting
+int dp_closure_decodes_transfer(const DpCart *c, uint32_t tk, int banks);
+// residual targeting: for each unclassified range whose mechanism is
+// dispatch-shaped, find its predecessor (the nearest executed dispatch site)
+// and either re-prove its operand table or seed the range start as a forced
+// cold entry.  Bounded: cap ranges, each range tried once, refusals counted.
+// Returns the seeds queued.
+uint32_t dp_residual_target(DpExplorer *ex, uint32_t cap);
 uint32_t dp_provenance(DpResults *res); // static HL/A provenance: jp-hl targets + proven data reads
 // seed the fork explorer at the closure's entry points that were never
 // executed (jump/call/branch targets): the static flow proposes, the machine

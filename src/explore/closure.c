@@ -58,7 +58,7 @@ static int illegal(uint8_t op) { return dp_isa_sm83()->illegal(op); }
 // opcode and without running into a padding run, to a transfer (ret/jp/jr)
 // within a short window — the plan-B acceptance rule ("début d'instruction
 // cohérent jusqu'à ret/jp")
-static int decodes_to_transfer(const DpCart *c, uint32_t tk, int banks) {
+int dp_closure_decodes_transfer(const DpCart *c, uint32_t tk, int banks) {
     uint32_t bank = tk / 0x4000;
     uint32_t p = tk % 0x4000;
     if (bank >= (uint32_t)banks) return 0;
@@ -245,7 +245,7 @@ uint32_t dp_static_closure(DpResults *res) {
                         // further decode toward a transfer (no illegal opcode on the way)
                         if (illegal(c->rom[tk]) || sm83_len(c->rom[tk]) <= 0) break;
                         if (!(res->exec_flags[tk] & (DP_XF_NATURAL | DP_XF_FORCED)) &&
-                            !decodes_to_transfer(c, tk, res->banks)) break;
+                            !dp_closure_decodes_transfer(c, tk, res->banks)) break;
                         cnt++;
                         res->closure_jp_entries++;
                         if (!(res->exec_flags[tk] & (DP_XF_NATURAL | DP_XF_FORCED))) {

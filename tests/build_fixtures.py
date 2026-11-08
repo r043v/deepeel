@@ -292,6 +292,31 @@ def build(out):
     w(r, 0x260, 0x3E, 0x03, 0x76)                # entry 2 bank 0 (never taken)
     save(out, "fix_dispatch3", r)
 
+    # --- residual: a dispatch whose sibling entry is 60 NOPs (the 48-instruction
+    # decode window refuses it, so the table stays unproven); the taken handler
+    # ends in an unconditional jp right before the sibling: only the residual
+    # targeting (predecessor + forced entry) reaches it --------------------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x11, 0x00, 0x00)                # ld de,0  (index 0, entry one)
+    w(r, 0x153, 0x21, 0x40, 0x02)                # ld hl,$0240
+    w(r, 0x156, 0x19)                            # add hl,de
+    w(r, 0x157, 0x2A)                            # ld a,(hl+)
+    w(r, 0x158, 0x66)                            # ld h,(hl)
+    w(r, 0x159, 0x6F)                            # ld l,a
+    w(r, 0x15A, 0xE9)                            # jp hl
+    w(r, 0x240, 0x50, 0x02, 0x58, 0x02, 0xA0, 0x02, 0xA0, 0x02)  # 4-word table: detected
+                                                 # as a pointer table, so the pointer scan
+                                                 # evicts its targets (only the residual
+                                                 # targeting can reach the sibling)
+    w(r, 0x250, 0x3E, 0x01, 0xEA, 0x00, 0x80, 0xC3, 0xA0, 0x02)  # taken: ld a,1; ld ($8000),a; jp $02A0
+    w(r, 0x258, *([0x7C, 0x7D, 0x7E, 0x7F] * 15))            # sibling: 60x ld a,h / ld a,l (no transfer in the
+                                                 # decode window, not a 00/FF fill, and no uniform
+                                                 # word run: no pad or pointer-table inference)
+    w(r, 0x294, 0x76)                            # sibling halt
+    w(r, 0x2A0, 0x76)                            # taken handler's landing halt
+    save(out, "fix_residual", r)
+
     # --- rstdispatch: rst $28 jump table inline after the call site (SML2 idiom) -----
     r = rom(2)
     w(r, 0x28, 0x87, 0xE1, 0x5F, 0x16, 0x00, 0x19, 0x5E, 0x23, 0x56, 0xD5, 0xE1, 0xE9)

@@ -143,6 +143,11 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
                  res->closure_bank_seeds, res->indirect_seeds, res->closure_seeds_refused);
         dp_buf_str(out, line);
         snprintf(line, sizeof line,
+                 "  residual targeting: %u dispatch-shaped ranges tried, %u forced entries seeded, "
+                 "%u re-proven statically, %u refused (pointer already aims, or no plausible entry)\n",
+                 res->residual_targets, res->residual_seeded, res->residual_static, res->residual_refused);
+        dp_buf_str(out, line);
+        snprintf(line, sizeof line,
                  "runtime code archive: %u distinct instructions executed from RAM/VRAM/HRAM, %u attached to a ROM copy source, %u generated (no ROM source; %u with an approximate ROM producer), %u rewrote an earlier instruction at the same address (self-modifying)\n  generated code by reachability: %u executed on a non-forced path, %u only after a fork decision (branch/IRQ/key/P1)\n",
                  res->rt_n, res->rt_attached, res->rt_n - res->rt_attached, res->rt_derived, res->rt_poly,
                  res->rt_natural, (res->rt_n - res->rt_attached) - res->rt_natural);
@@ -419,11 +424,13 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
     cov_frontier_json(o, res);
     dp_buf_fmt(o, "\"closure\": {\"rounds\":%u,\"starts\":%u,\"unresolved_bank\":%u,"
                   "\"stopped_data\":%u,\"stopped_illegal\":%u,\"seeds\":%u,\"seeds_dropped\":%u,"
-                  "\"seeds_refused\":%u,\"bank_seeds\":%u,\"indirect_seeds\":%u},\n",
+                  "\"seeds_refused\":%u,\"bank_seeds\":%u,\"indirect_seeds\":%u,"
+                  "\"residual_targets\":%u,\"residual_seeded\":%u,\"residual_static\":%u,\"residual_refused\":%u},\n",
                res->closure_rounds, res->closure_starts, res->closure_unresolved_bank,
                res->closure_stopped_data, res->closure_stopped_illegal, res->closure_seeds,
                res->closure_seeds_dropped, res->closure_seeds_refused, res->closure_bank_seeds,
-               res->indirect_seeds);
+               res->indirect_seeds, res->residual_targets, res->residual_seeded,
+               res->residual_static, res->residual_refused);
     dp_buf_fmt(o, "\"data\": {\"verbatim_bytes\":%llu,\"contradictions\":%u,\"copies\":%d,\"copy_window_breaks\":%u,\"copies_dropped\":%u},\n",
                (unsigned long long)res->data_verbatim_bytes, res->data_contradictions,
                res->copy_count, res->copy_window_breaks, res->copies_dropped);
@@ -684,11 +691,13 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
     cov_frontier_json(o, res);
     dp_buf_fmt(o, "\"closure\": {\"rounds\":%u,\"starts\":%u,\"unresolved_bank\":%u,"
                   "\"stopped_data\":%u,\"stopped_illegal\":%u,\"seeds\":%u,\"seeds_dropped\":%u,"
-                  "\"seeds_refused\":%u,\"bank_seeds\":%u,\"indirect_seeds\":%u},\n",
+                  "\"seeds_refused\":%u,\"bank_seeds\":%u,\"indirect_seeds\":%u,"
+                  "\"residual_targets\":%u,\"residual_seeded\":%u,\"residual_static\":%u,\"residual_refused\":%u},\n",
                res->closure_rounds, res->closure_starts, res->closure_unresolved_bank,
                res->closure_stopped_data, res->closure_stopped_illegal, res->closure_seeds,
                res->closure_seeds_dropped, res->closure_seeds_refused, res->closure_bank_seeds,
-               res->indirect_seeds);
+               res->indirect_seeds, res->residual_targets, res->residual_seeded,
+               res->residual_static, res->residual_refused);
     dp_buf_fmt(o, "\"data\": {\"verbatim_bytes\":%llu,\"contradictions\":%u,\"copies\":%d,\"copy_window_breaks\":%u,\"copies_dropped\":%u}\n}\n",
                (unsigned long long)res->data_verbatim_bytes, res->data_contradictions,
                res->copy_count, res->copy_window_breaks, res->copies_dropped);

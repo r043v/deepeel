@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.251.2 LANGUAGES C)
+project(deepeel VERSION 0.251.3 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -311,6 +311,7 @@ add_library(deepeel_core STATIC
   src/explore/gambatte_init.c
   src/explore/tree.c
   src/explore/closure.c
+  src/explore/residual.c
   src/explore/provenance.c
   src/explore/tas.c
   src/report/report.c

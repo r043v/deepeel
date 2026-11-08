@@ -1567,12 +1567,13 @@ static void closure_rounds(DpExplorer *ex, DpResults *res, uint32_t *seed_spent,
     // copy siblings have their own switches
     for (int r = 0; !ex->cfg.no_closure && r < ex->cfg.closure_rounds; r++) {
         uint32_t marked = dp_static_closure(res);
+        uint32_t rseeded = dp_residual_target(ex, 64); // residual ranges: re-proof or forced entry
         uint32_t ref0 = res->closure_seeds_refused;
-        int seeded = dp_closure_seed(ex, seed_total - *seed_spent); // the cascade solde
+        int seeded = dp_closure_seed(ex, seed_total - *seed_spent) + (int)rseeded; // the cascade solde
         *seed_spent += (uint32_t)seeded;
         uint32_t refused = res->closure_seeds_refused - ref0;
-        fprintf(stderr, "deepeel: closure round %d: +%u static bytes, %d entries seeded, %u refused\n",
-                r + 1, marked, seeded, refused);
+        fprintf(stderr, "deepeel: closure round %d: +%u static bytes, %d entries seeded (%u residual-targeted), %u refused\n",
+                r + 1, marked, seeded, res->residual_seeded, refused);
         if (!seeded && !refused) break; // provenance + final closure still run
         ex->stop = 0;
         ex->steps_own = 0;

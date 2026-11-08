@@ -23,6 +23,9 @@ static uint32_t g_forkcap, g_seedcap, g_maxpaths; // 0 = default
 static uint32_t g_psteps; // 0 = default per-path step budget
 static uint32_t g_loopcap; // 0 = default backward-edge cap
 static int g_full_forks;  // 1 = the per-site fork table starts full
+static DpExplorer *g_ex;  // the current run's explorer (residual targeting reuses it)
+static int g_noptr;       // 1 = run with the pointer scan off (residual fixture)
+static int g_keep_ex;     // 1 = run() keeps the explorer alive after the run (residual block)
 
 static uint64_t res_deferred_total(void) {
     uint64_t n = 0;
@@ -46,6 +49,7 @@ static void run(const char *dir, const char *name) {
     dp_static_scan(&res);
     DpConfig cfg;
     dp_config_defaults(&cfg);
+    cfg.no_pointer_scan = g_noptr;
     if (g_wall) cfg.max_steps_total = g_wall;
     if (g_psteps) cfg.max_steps_path = g_psteps;
     if (g_forkcap) cfg.fork_site_cap = g_forkcap;
@@ -55,6 +59,7 @@ static void run(const char *dir, const char *name) {
     if (g_mach) dp_mach_close(g_mach);
     g_mach = mach_for(g_cart);
     DpExplorer *ex = dp_explorer_new(&cfg, &res, g_mach);
+    g_ex = ex;
     if (g_full_forks) {
         // fill the table to its growth threshold with keys no site uses,
         // then forbid growth: every real site finds no counter slot
@@ -65,7 +70,7 @@ static void run(const char *dir, const char *name) {
     dp_seed_gb(ex);
     dp_explore(ex);
     if (g_fsave) g_fsaved = dp_explorer_frontier_save(ex, g_fsave);
-    dp_explorer_free(ex);
+    if (!g_keep_ex) dp_explorer_free(ex);
 }
 
 static const DpSection *section_at(int bank, uint16_t addr) {
@@ -382,6 +387,32 @@ int main(int argc, char **argv) {
     CHECK(res.exec_flags[dp_rom_index(1, 0x250)] & (DP_XF_STATIC | DP_XF_FORCED));
     CHECK(res.data_flags[0x230] & DP_DF_STATIC);        // the stride-3 table proven data
 
+    // --- residual: the dispatch-shaped range the closure never proved; the
+    // residual targeting seeds its plausible start as a forced entry --------
+    g_noptr = 1; // the pointer scan would seed every bare table word on a
+                 // fixture this small; the residual targeting is the route
+                 // when it cannot reach (its contract test)
+    g_keep_ex = 1; // the targeting and the follow-up explore need a live explorer
+    run(dir, "residual");
+    dp_static_closure(&res);                            // the CLI's closure rounds, replayed
+    dp_residual_target(g_ex, 64);                       // then the residual targeting itself
+    g_ex->stop = 0;                                     // the closure-round restart (fresh wall)
+    g_ex->steps_own = 0;
+    dp_explore(g_ex);                                   // the forced entries run
+    dp_explorer_free(g_ex);
+    g_keep_ex = 0;
+    fprintf(stderr, "DBG clo_n=%d:", res.clo_entry_n);
+    for (int i = 0; i < res.clo_entry_n && i < 40; i++) fprintf(stderr, " %x", res.clo_entries[i]);
+    fprintf(stderr, "\n");
+    for (int k = 0x250; k < 0x2A4; k++)
+        fprintf(stderr, "DBG %02x: exec=%02x data=%02x sfl=%02x\n", k,
+                res.exec_flags[k], res.data_flags[k], res.static_flags[k]);
+    CHECK(res.residual_targets >= 1);                   // the range was tried
+    CHECK(res.residual_seeded >= 1);                    // the sibling entry was seeded
+    CHECK(res.exec_flags[0x258] & DP_XF_FORCED);        // the forced entry really ran
+    CHECK(!(res.exec_flags[0x258] & DP_XF_NATURAL));    // never on the natural flow
+    g_noptr = 0;
+
     // --- rstdispatch: the inline table after `rst $28` is proven, all entries code ----
     run(dir, "rstdispatch");
     CHECK(res.exec_hits[0x270] > 0);
@@ -611,7 +642,7 @@ int main(int argc, char **argv) {
         DpExplorer *ex = dp_explorer_new(&cfg, &res, g_mach);
         dp_seed_gb(ex);
         dp_explore(ex);
-        dp_explorer_free(ex);
+        if (!g_keep_ex) dp_explorer_free(ex);
         uint64_t paths_capped = res.paths_run;
         CHECK(res.queue_overflows >= 1); // the tiny queue really dropped paths
 
@@ -672,7 +703,7 @@ int main(int argc, char **argv) {
         uint32_t pend_recs = res.spool_writes - res.spool_reads;
         CHECK(pend_recs >= 1);
         CHECK(dp_explorer_exact_save(ex, exactf));
-        dp_explorer_free(ex);
+        if (!g_keep_ex) dp_explorer_free(ex);
 
         // run 2: --resume — the spool and the dedup come back, the exploration
         // continues and runs strictly more paths than the stopped run
@@ -731,7 +762,7 @@ int main(int argc, char **argv) {
         CHECK(res.defer_by[DP_R_PATHS] >= 1);
         CHECK(res.defer_final[DP_R_PATHS] == 0);
         CHECK(ex->defer_len == 0); // the held states were resumed before the end
-        dp_explorer_free(ex);
+        if (!g_keep_ex) dp_explorer_free(ex);
         unlink(spool);
     }
 

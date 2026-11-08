@@ -460,6 +460,25 @@ code / data / padding.
   16 sous l'ancien critère (« premier octet légal » suffisait) : les 8
   perdues avaient des cibles qui ne décodent pas jusqu'à un transfert, des
   racines statiques douteuses que la preuve renforcée refuse.
+- **Ciblage des plages résiduelles** (0.251.3) : nouveau module
+  `src/explore/residual.c`, appelé à chaque round de fermeture. Les plages
+  résiduelles de classe dispatch (`code-code`, `edge-code`, et
+  `padding-fringe` dont le bord gauche est du code) sont traitées une à une
+  (ensemble `tried` persistant entre rounds, échec marqué, jamais de
+  re-boucle) : le prédécesseur — le `jp hl` exécuté le plus proche derrière
+  la plage, même banque, fenêtre de 2 Ko — voit sa table d'opérandes
+  re-prouvée avec l'acceptation renforcée (pas 2/3, cible doit décoder
+  jusqu'à un transfert) ; une table validée marque ses entrées et prouve ses
+  octets données. Une plage qui commence juste après un transfert
+  inconditionnel exécuté (ret/reti/jp/jr — le `jp hl` non prouvé refuse la
+  plage comme table d'opérandes présumée) reçoit une graine froide forcée :
+  la machine en dispose. Les plages refusées sont comptées
+  (`residual_targets` / `residual_seeded` / `residual_static` /
+  `residual_refused` dans le JSON, ligne `residual targeting:` dans le
+  texte). Mesure Zelda (banc rapide sur l'état gelé) : 64 plages
+  dispatch essayées, 16 entrées forcées semées, 5 refusées — le résidu passe
+  de 11787 à 11408 octets (932 → 909 plages) dès les rounds statiques ; le
+  reste du gain attendu vient de l'exploration qui consomme les graines.
 - `--tas-dir D` (répétable) : découvre tous les films du répertoire (triés
   par ressemblance de titre ; `.vmv`, `.vbm`, `.bk2`,
   `.gbm`, `.fm2`, `.log`), les films retenus sont loggés sur stderr.

@@ -204,6 +204,7 @@ void dp_results_init(DpResults *res, const DpCart *cart, const DpPlatform *plat)
     dp_map_init(&res->fork_counts, sizeof(uint32_t), 1 << 20);
     dp_map_init(&res->indirect, sizeof(DpIndirect), 1 << 16);
     dp_set_init(&res->bad_seen, 1 << 20);
+    dp_set_init(&res->residual_tried, 1 << 12);
 }
 
 static double disc_now(void) {
@@ -361,6 +362,7 @@ void dp_results_free(DpResults *res) {
     dp_map_free(&res->fork_counts);
     dp_map_free(&res->indirect);
     dp_set_free(&res->bad_seen);
+    dp_set_free(&res->residual_tried);
     free(res->clo_entries);
     free(res->clo_bank_entries);
     free(res->bad_ops);
