@@ -130,10 +130,28 @@ int main(int argc, char **argv) {
         while (!frame_done && guard++ < 2000000u) dp_pce_step(&frame_done);
         unsigned diff = 0, first = 0;
         const uint8_t *dut_ram = dp_pce_wram();
+        static uint8_t prev_dut[8192]; static unsigned have_prev;
+        if (getenv("DP_PCE_SHIFT")) {   // compare ref frame N with dut frame N+1 (phase-shift probe)
+            if (have_prev) {
+                unsigned sd = 0; unsigned sfirst = 0;
+                for (size_t i = 0; i < ref_ram_size; i++)
+                    if (ref_ram[i] != prev_dut[i]) { if (!sd) sfirst = (unsigned)i; sd++; }
+                printf("shift %u ramdiff=%u first=$%04x\n", frame, sd, sfirst);
+            }
+            memcpy(prev_dut, dut_ram, ref_ram_size); have_prev = 1;
+        }
         for (size_t i = 0; i < ref_ram_size; i++)
             if (ref_ram[i] != dut_ram[i]) { if (!diff) first = (unsigned)i; diff++; }
         ram_diff_total += diff;
         if (diff && first_diff_frame < 0) { first_diff_frame = (long)frame + 1; first_diff_off = first; }
+        {   // DP_PCE_DUMP=FRAME: the first 16 differing cells of that frame
+            const char *dp = getenv("DP_PCE_DUMP");
+            if (dp && (long)frame + 1 == atoi(dp)) {
+                unsigned shown = 0;
+                for (size_t i = 0; i < ref_ram_size && shown < 16; i++)
+                    if (ref_ram[i] != dut_ram[i]) { printf("  $%04zx ref=%02x dut=%02x\n", i, ref_ram[i], dut_ram[i]); shown++; }
+            }
+        }
         if (every || frame < 10 || (frame + 1) % 300 == 0 || (diff && first_diff_frame == (long)frame + 1))
             printf("%u ramdiff=%u first=$%04x\n", frame + 1, diff, first);
         if (diff && first_diff_frame == (long)frame + 1)

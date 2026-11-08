@@ -96,11 +96,21 @@ n'existe sur TASVideos ; un film BizHawk d'une partie complète, passé en
 libretro Beetle PCE / Mednafen (`DP_BEETLE_SO`, cloné et construit hors
 dépôt) et sur le runtime m0boy, diff des 8 Kio de RAM de travail par trame
 (la SYSTEM_RAM de Beetle porte les banques SuperGrafx/CD au-delà ; la
-comparaison prend les 8 Kio partagés). Premiers résultats (Raiden USA,
-300 trames d'un film synthétique sans TAS disponible : deux appuis sur
-Run) : divergence dès la trame 1 sur un octet (`$0000` : Mednafen $EB,
-m0boy $FF), qui s'élargit (~835 octets à la trame 300) — le boot des deux
-machines diffère dès le premier passage ; à démêler octet par octet.
+comparaison prend les 8 Kio partagés). Diagnostic 0.251.12 : la « divergence » du boot
+n'en est pas une. Le banc trace les écritures à la cellule `RAM[0]`
+(côté référence : patch de trace hors dépôt du `.so` Beetle, activé par
+`DP_PCE_TRACE=1`) : le jeu écrit un **compteur incrémenté** à cette cellule
+(0, 1, 2, 3…), et les deux cœurs coupent la trame à des instants différents
+— l'octet lu diffère (Mednafen $EB, m0boy $FF) sans divergence CPU. Les
+diffs suivants confirment le déphasage : à 600 trames, `ramdiff` ≈ 46-52
+cellules et les fenêtres diffèrent du **même flux de données décalé de
+quelques octets** (ex. `$01AB-$01B5` : ref `0e 00 00 c1 41 24…` = dut
+`c1 41 24 e2…` décalé). Sondes ajoutées au banc :
+`DP_PCE_DUMP=FRAME` (16 premières cellules différentes de la trame FRAME)
+et `DP_PCE_SHIFT=1` (référence trame N contre DUT trame N+1 : le décalage
+d'une trame ne referme pas non plus le diff — plusieurs compteurs en
+phases différentes). Prochaine étape : comparer à un événement aligné
+(front d'appui ou fenêtre stationnaire), pas à la découpe de trame.
 Observations de l'outil, pas des mesures de matériel.
 
 ## 0.249.85 — `--summary` (campagne JSON)
