@@ -144,7 +144,11 @@ python3 tools/scan_all.py digest-z80 --out output/batch-z80/sms
 La norme visée pour toutes les plateformes (techniques de couverture
 exigées, typage et sources par octet, frontière différée, mutualisation,
 libretro, PNG adaptatif) et sa feuille de route sont décrites dans
-[docs/COUVERTURE.fr.md](docs/COUVERTURE.fr.md).
+[docs/COUVERTURE.fr.md](docs/COUVERTURE.fr.md). Le bilan des techniques
+essayées, gardées ou abandonnées avec leurs mesures, est tenu dans
+[docs/CATALOGUE.fr.md](docs/CATALOGUE.fr.md) ; le tableau comparatif des
+campagnes par plateforme est [docs/COMPARATIF.fr.md](docs/COMPARATIF.fr.md)
+(régénéré par `tools/compare_platforms.py`).
 
 - **Game Boy** : la machine est celle de m0boy (MBC0/1/2/3/5, PPU/APU/timer
   réels, CPU interprété) — 17 variantes MBC×RAM compilées au build, un
