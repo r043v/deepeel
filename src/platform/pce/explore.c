@@ -404,6 +404,21 @@ static int push_live(PceRun *x, int forced) {
         uint8_t raw[16] = { c.a, c.x, c.y, c.s, c.p, (uint8_t)c.pc, (uint8_t)(c.pc >> 8), c.irq_mask };
         memcpy(raw + 8, c.mpr, 8);
         for (unsigned i = 0; i < sizeof raw; i++) h = (h ^ raw[i]) * 0x100000001b3ull;
+        // --ctx-live: the pc folds into the target section's id, and the key
+        // carries the section's C1 liveness (which hardware blocks its code
+        // reads).  The coarse key stays the default: measured on Sonic (MD)
+        // the projection halves the work but also the coverage.
+        if (x->opt.ctx_live) {
+            int64_t si = dp_pce_rom_index(c.pc);
+            uint32_t id = 0;
+            uint8_t live = 0;
+            if (si >= 0 && (size_t)si < x->rom_size) {
+                id = (uint32_t)(si >> 13); // one 8 KiB page = the section grain here
+                live = x->r->live_io ? x->r->live_io[si] : 0;
+            }
+            h ^= (uint64_t)id * 0x100000001b3ull;
+            h = (h ^ live) * 0x100000001b3ull;
+        }
         unsigned k = 0;
         while (k < x->opt.ctx_cap && dp_set_insert(&x->ctx_seen, (h ^ (k * 0x9E3779B97F4A7C15ull)) | 1) == 0) k++;
         if (k >= x->opt.ctx_cap) { r->ctx_evicted++; if (node) dp_tree_close(&x->tree, node, DP_ISSUE_CAPPED); return 0; }
@@ -1604,6 +1619,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     r->exec_hits = calloc(x->rom_size, sizeof(uint32_t));
     r->data_hits = calloc(x->rom_size, sizeof(uint32_t));
     r->live_io = calloc(x->rom_size, 1);
+    r->ctx_live = x->opt.ctx_live;
     r->pal_flags = calloc(x->rom_size, 1);
     r->idx_flags = calloc(x->rom_size, 1);
     x->fork_sites = calloc(x->rom_size, 1);
@@ -1898,7 +1914,8 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             r->nidx, r->idx_declared, r->idx_refused_code, r->idx_biased,
             (unsigned long long)r->idx_cross_page, (unsigned long long)r->idx_forced_ignored,
             (unsigned long long)r->idx_overflow);
-    if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (coarse pc/regs/MPR context past the cap)\n", (unsigned long long)r->ctx_evicted);
+    if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (%s context past the cap)\n", (unsigned long long)r->ctx_evicted,
+                                r->ctx_live ? "section-live pc/regs/MPR" : "coarse pc/regs/MPR");
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, %llu table addresses, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_ptrs, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  stream replay (S6): %llu decoders, %llu tables, %llu candidates, %llu queued replays (%llu saturated)\n",
             (unsigned long long)r->s6_decoders, (unsigned long long)r->s6_tables, (unsigned long long)r->s6_candidates,

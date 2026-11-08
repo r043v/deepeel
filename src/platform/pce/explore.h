@@ -115,6 +115,7 @@ typedef struct {
     uint16_t entries[16];   // explicit entry points (CPU addresses in the power-on mapping)
     unsigned entry_count;
     unsigned ctx_cap;       // max admitted states per coarse context (0 = off, C2)
+    unsigned ctx_live;      // --ctx-live: project the context onto the target section's hardware liveness (C1 -> C2)
     int lot_drain;         // with a lot backlog: run only the saved states (no root, no seeds)
     const char *tree_path; // write the choice tree (DpTree file) here, NULL: none
     const char *lot_path;  // disk lot of deferred states (NULL: memory only); an existing file is resumed
@@ -174,6 +175,7 @@ typedef struct DpPceResults_ {
     uint64_t irq_counts[3];
     uint64_t state_bytes_peak;
     DpPceSection *sections;
+    unsigned ctx_live;     // the run used --ctx-live (report wording)
     uint32_t section_count;
     DpPceCopy copies[DP_PCE_COPY_CAP];
     unsigned copy_count;

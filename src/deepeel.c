@@ -1295,6 +1295,7 @@ static int cmd_nes(int argc, char **argv) {
         else if (!strcmp(a, "--mapper") && i + 1 < argc) mapper_name = argv[++i];
         else if (!strcmp(a, "--max-paths") && i + 1 < argc) opt.max_paths = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--queue") && i + 1 < argc) opt.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--ctx-live")) opt.ctx_live = 1;
         else if (!strcmp(a, "--queue-max") && i + 1 < argc) opt.queue_max = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--spool") && i + 1 < argc) opt.lot_path = argv[++i];
         else if (!strcmp(a, "--resume") && i + 1 < argc) { opt.lot_path = argv[++i]; opt.lot_drain = 1; }
@@ -1392,6 +1393,7 @@ static int cmd_pce(int argc, char **argv) {
         if (0) {}
         DP_CLI_COMMON(opt, cc)
         DP_CLI_PLAYED(opt)
+        else if (!strcmp(a, "--ctx-live")) opt.ctx_live = 1;
         else if (!strcmp(a, "--queue-max") && i + 1 < argc) opt.queue_max = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--play-pool") && i + 1 < argc) opt.play_pool = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed-vectors")) opt.seed_vectors = 1;

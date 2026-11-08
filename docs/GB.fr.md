@@ -550,6 +550,15 @@ code / data / padding.
   direction) ; la conversion ne perd aucun port (épinglé par le test
   `registry` : compte exact, catégories valides, drapeaux cohérents,
   registre jamais inventé).
+- **Liveness registre -> éviction C2 sur PCE** (0.251.9) :
+  `deepeel pce explore ... --ctx-cap N --ctx-live` projette la clé de
+  contexte sur la section cible : le PC se replie dans la page de 8 KiB
+  qui le porte, et la clé porte les blocs matériels que le code de la
+  page lit (C1 : VDC/VCE/PSG/timer/manette/IRQ, `live_io` par cellule) —
+  même sémantique que `--ctx-live` NES (projection sur ce que la fenêtre
+  lit) et MD (mesuré sur Sonic : divise le travail mais aussi la
+  couverture, la clé grossière reste le défaut). La ligne de rapport
+  nomme la clé utilisée (`section-live pc/regs/MPR`).
 - `--tas-dir D` (répétable) : découvre tous les films du répertoire (triés
   par ressemblance de titre ; `.vmv`, `.vbm`, `.bk2`,
   `.gbm`, `.fm2`, `.log`), les films retenus sont loggés sur stderr.
