@@ -1131,7 +1131,10 @@ Implémentations existantes à envelopper :
   via `dp_m6502_format`, `mem_operand` sur les modes d'adressage, treillis
   de provenance à ouvrir — pas de paire pointeur prouvée sur le 6502) ;
   épinglée par `test_dpisa` ;
-- `src/platform/pce/hucdec.c` ;
+- `src/platform/pce/hucdec.c` — **fait** (0.250.0 :
+  `src/mach/huc_isa.c`, `dp_isa_huc6280` : conditions du décodeur 0..7 +
+  BBR/BBS 8+bit, BRK = appel par $FFF6, illégaux = NOP deux cycles de la
+  machine, `disasm` via `dp_huc_format`) ; épinglée par `test_dpisa` ;
 - `src/cpu/m68k/m68k_disasm.c`.
 
 ### 7.4 Modules communs (le noyau)

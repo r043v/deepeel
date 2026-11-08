@@ -79,10 +79,31 @@ static void test_m6502(void) {
     CHECK(isa->disasm(jsr, sizeof jsr, 0, txt, sizeof txt) == 3 && strstr(txt, "9000"), "disasm jsr (addr is a view offset)");
 }
 
+static void test_huc6280(void) {
+    const DpIsa *isa = dp_isa_huc6280();
+    CHECK(!strcmp(isa->name, "huc6280"), "name");
+    DpFlowInfo fi;
+    uint8_t nop[] = { 0x00 };
+    CHECK(isa->flow(nop, 0x8000, &fi) >= 1 && fi.fall, "nop/brk falls");
+    uint8_t jmp[] = { 0x4C, 0x00, 0x90 };
+    CHECK(isa->flow(jmp, 0x8000, &fi) == 3 && fi.kind == DP_FLOW_JUMP && !fi.fall && fi.target == 0x9000, "jmp abs");
+    uint8_t jsr[] = { 0x20, 0x00, 0x90 };
+    CHECK(isa->flow(jsr, 0x8000, &fi) == 3 && fi.kind == DP_FLOW_CALL && fi.call, "jsr");
+    uint8_t rts[] = { 0x60 };
+    CHECK(isa->flow(rts, 0x8000, &fi) == 1 && fi.kind == DP_FLOW_RET && !fi.fall, "rts");
+    uint8_t bne[] = { 0xD0, 0x05 };
+    CHECK(isa->flow(bne, 0x8000, &fi) == 2 && fi.kind == DP_FLOW_COND && fi.fall && fi.target == 0x8007, "bne");
+    uint8_t jmpi[] = { 0x6C, 0x00, 0x20 };
+    CHECK(isa->flow(jmpi, 0x8000, &fi) == 3 && fi.kind == DP_FLOW_INDIRECT, "jmp (ind)");
+    char txt[40];
+    CHECK(isa->disasm(jsr, sizeof jsr, 0, txt, sizeof txt) == 3 && strstr(txt, "9000"), "disasm jsr");
+}
+
 int main(void) {
     test_z80();
     test_sm83();
     test_m6502();
+    test_huc6280();
     printf(fails ? "dpisa: %d checks failed\n" : "dpisa: all checks passed\n", fails);
     return fails != 0;
 }
