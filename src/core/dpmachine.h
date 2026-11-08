@@ -148,4 +148,9 @@ struct DpMach;
 // the GB backend (src/mach/gb_machine.c); takes ownership of the DpMach
 DpMachine *dp_machine_gb(struct DpMach *impl);
 
+// the SG/SMS/GG/MSX backend (src/mach/sega_machine.c); borrows the singleton
+// backend instance (exploration is sequential).  const void *: DpSegaBackend
+// is a typedef of an anonymous struct, not forward-declarable here.
+DpMachine *dp_machine_sega(const void *backend);
+
 #endif

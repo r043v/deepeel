@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.249.94 LANGUAGES C)
+project(deepeel VERSION 0.249.95 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -339,6 +339,7 @@ add_library(deepeel_z80 STATIC
   ${M0BOY_DIR}/targets/sg1000/runtime/z80.c
   src/cpu/z80/z80.c
   src/cpu/z80/z80_isa.c
+  src/mach/sega_machine.c
   src/cpu/z80/provenance.c
   src/cpu/z80/command.c
   src/platform/sega/sega.c)

@@ -6,6 +6,7 @@
 #include "../src/explore/frontier.h"
 #include "../src/cpu/sm83/sm83.h"
 #include "../src/mach/m0boy.h"
+#include "../src/platform/sega/backend.h"
 #include "test_util.h"
 
 static unsigned obs_steps, obs_reads;
@@ -158,6 +159,37 @@ int main(int argc, char **argv) {
         CHECK_MSG(obs_reads > 0, "observe sees data accesses");
         m->close(m);
         dp_cart_free(c);
+    }
+    // machine: the sega backend behind the same generic view (spec §7.2)
+    if (argc > 1) {
+        char path[512];
+        snprintf(path, sizeof path, "%s/fix_z80_branch.sms", argv[1]);
+        FILE *f = fopen(path, "rb");
+        CHECK_MSG(f, "sms fixture opens");
+        static uint8_t rom[0x8000];
+        size_t rn = fread(rom, 1, sizeof rom, f);
+        fclose(f);
+        const DpSegaBackend *b = dp_sega_backend_gg();   // the GG backend carries the SMS profile
+        CHECK_MSG(b && b->init(rom, rn, NULL, 1) == 1, "sms backend inits");
+        DpMachine *m = dp_machine_sega(b);
+        CHECK_MSG(m && !strcmp(m->name, "sega") && m->isa == dp_isa_z80(), "sega machine wired");
+        uint32_t n = m->state_bytes(m);
+        CHECK_MSG(n > 0, "state size");
+        uint8_t *a = malloc(n), *bb = malloc(n);
+        m->save(m, a);
+        m->load(m, a);
+        m->save(m, bb);
+        m->load(m, bb);
+        m->save(m, a);
+        CHECK_MSG(!memcmp(a, bb, n), "sega save/load/save reaches a fixed point");
+        CHECK_MSG(m->fetch(m, 0x0000) == rom[0x0000], "fetch sees the ROM");
+        CHECK_MSG(m->rom_index(m, 0x0000) == 0, "rom_index maps the ROM");
+        m->load(m, bb);
+        unsigned ran = 0;
+        while (ran < 64 && m->run(m)) ran++;
+        CHECK_MSG(ran > 0, "run executes instructions");
+        free(a); free(bb);
+        m->close(m);
     }
     TEST_DONE("dpmachine");
 }

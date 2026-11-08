@@ -1083,6 +1083,15 @@ Tout membre est optionnel. Le noyau **dégrade proprement** et rapporte ce qui
 n'est pas disponible. Par exemple, sans `step`, les fourches D7-D11 sont
 indisponibles, ce qui est le cas de libretro niveau A.
 
+Backends existants : GB (`src/mach/gb_machine.c`, `dp_machine_gb`, contrat
+`test_dpmachine` : aller-retour save/load/load en point fixe, fetch,
+`rom_index`, catalogue de sondes, observateurs) ; 0.249.94 : Sega/MSX
+(`src/mach/sega_machine.c`, `dp_machine_sega` — le singleton
+`DpSegaBackend` vu derrière l'interface, `run()` = un pas
+service/décodage/exécution comme le `play_step` de l'explorateur, même
+contrat de point fixe sur la fixture SMS). Restent à envelopper : NES, PCE,
+MD, libretro niveau A (déjà listé §8).
+
 ### 7.3 `DpIsa` — le statique générique
 
 Fonctions, toutes sur un octet de ROM dans une vue :
