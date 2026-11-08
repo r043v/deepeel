@@ -1107,7 +1107,7 @@ Implémentations existantes à envelopper :
 
 | Module | Remplace / absorbe |
 |---|---|
-| `frontier` (file live + dédup + frontière disque + arbre) | `explorer.c` 306-498/1188-1401, `tree.c`, spool z80, files NES/PCE/MD — 0.249.89 : la politique (paliers, raisons, `dp_frontier_room`) est adoptée par sega/MSX (plus de réimplémentation locale, raison suivie dans le spool) ; 0.249.90 : NES rejoint la politique (`--defer-tiers`, opt-in — mesuré neutre sur DuckTales) ; 0.249.91 : PCE rejoint la politique (`--defer-tiers`, opt-in, test `pce_defer_tiers`) ; reste à migrer : MD |
+| `frontier` (file live + dédup + frontière disque + arbre) | `explorer.c` 306-498/1188-1401, `tree.c`, spool z80, files NES/PCE/MD — 0.249.89 : la politique (paliers, raisons, `dp_frontier_room`) est adoptée par sega/MSX (plus de réimplémentation locale, raison suivie dans le spool) ; 0.249.90 : NES rejoint la politique (`--defer-tiers`, opt-in — mesuré neutre sur DuckTales) ; 0.249.91 : PCE rejoint la politique (`--defer-tiers`, opt-in, test `pce_defer_tiers`) ; 0.249.92 : MD rejoint la politique (`--defer-tiers`, coupe de budget propre reprise à ×4, 57 courses contre 29 sur la fixture à `--path-steps 50`) — la politique §6 est désormais **commune aux cinq explorateurs** |
 | `cover` (modèle §4) | flags GB/Sega/NES/PCE/MD |
 | `sections` (liveness, verdicts, éviction contexte) | `sections.c`, `section_touch` z80, `sections_build` NES/PCE |
 | `copies` (boucle CPU + canaux DMA + frères) | `copies.c`, `copied` z80, `log_copy` PCE, DMA MD/NES |

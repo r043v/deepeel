@@ -252,3 +252,16 @@ réellement — même échec que le C2 NES par fenêtres 16 Kio. Le défaut rest
 la clé grossière ; reprise quand les sections porteront leurs pages de RAM
 lues (sémantique GB). Test `md_ctx_live` (la clé projetée évince et le
 rapport dit « section-projected »).
+
+## 0.249.92 — frontière partagée (§6) : `--defer-tiers` (couverture en hausse)
+
+Comme NES et PCE (0.249.90-91) : l'admission des continuations coupées passe
+par la politique partagée `src/explore/frontier.c`. Une course dont le
+budget propre (`--path-steps`) s'épuise — sans mur global ni SIGINT — garde
+son état machine (registres, writers, watch) et reprend avec un budget ×4,
+jusqu'à `--defer-tiers N` (0 : coupes finales, défaut). Les fourches
+héritent du palier de leur parent, les restes vont au lot disque, la raison
+reste ouverte (issue `deferred` dans l'arbre). Mesure (fixture `fix_md_pad`,
+`--path-steps 50`) : 28 continuations reportées et toutes reprises, 57
+courses contre 29 sans déferral au même budget. Rapport : `frontier:
+deferred steps/loop; resumed; final; dropped`. Test `md_defer_tiers`.

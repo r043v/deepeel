@@ -3,6 +3,7 @@
 #include "../../core/rng.h"
 #include "explore.h"
 #include "../../explore/lots.h"
+#include "../../explore/frontier.h"
 #include "../../explore/novelty.h"
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +28,8 @@ typedef struct {
     uint32_t choice;        // choice-tree node (0: none)
     int forced;
     int in_handler;         // forked inside an exception handler (not persisted in disk lots)
+    uint8_t tier;           // deferral tier (0 = power-on budgets); budgets x4 per tier
+    uint8_t reason;         // DP_R_* why it waits (per-reason caps, src/explore/frontier.c)
     uint32_t origin;
     uint32_t an_writer[8], dn_writer[8];
     uint32_t watch_pc, watch_addr, watch_value;
@@ -42,6 +45,9 @@ typedef struct {
     Item *q;
     uint32_t nq, qcap;
     Item *park; uint32_t npark, parkcap; // deferred holding area (queue full)
+    Item *defer; uint32_t ndef, defcap;  // cut continuations (frontier §6, shared policy)
+    uint32_t defer_reason[DP_R_COUNT];   // held per reason (noisy ones cap at a quarter)
+    uint8_t cur_tier, deferred_cut;
     void *spill_state; Item spill_item; // state waiting for its post-edits before going to the lot
     DpLotFile *lot;         // disk lot: park overflow, wall leftovers, --lot resume
     void *last_state;   // blob of the state the last push() produced (queued or parked)
@@ -348,6 +354,7 @@ static int push(X *x, uint32_t pc, int vint, int hint) {
     if (full) x->r->parked++;
     x->last_state = s;
     item->state = s; item->forced = 1; item->origin = x->pc; item->in_handler = x->in_handler;
+    item->tier = x->cur_tier;   // a fork runs with its parent's budgets
     item->choice = x->o->tree_path ? dp_tree_add(&x->tree, x->cur_choice, 4, x->push_site, 0, (int)(pc & 0xFFFF)) : 0;
     x->push_site = 0;
     memcpy(item->an_writer, x->an_writer, sizeof item->an_writer);
@@ -895,6 +902,7 @@ void dp_md_options_default(DpMdOptions *o) {
     o->pre_finalize = NULL; o->pre_user = NULL;
     o->bank_dispatch = 0;
     o->ctx_cap = 0;
+    o->defer_tiers = 0;
     o->ctx_live = 0;
     o->tree_path = NULL;
 }
@@ -1209,10 +1217,39 @@ static uint64_t run_sliced(DpMdMach *m, uint64_t budget, int *cut, int *fault) {
     return n;
 }
 
+// cut continuations (frontier §6, shared policy src/explore/frontier.c): a
+// path whose own budget ran out (not the global wall) waits in a holding
+// area and resumes with a 4x budget, defer_tiers times.  defer_tiers = 0
+// keeps the cut final, as before.
+static void md_defer(X *x, const Item *it, int loop) {
+    DpMdResults *r = x->r;
+    int reason = loop ? DP_R_LOOP : DP_R_STEPS;
+    if (!x->o->defer_tiers) return;
+    if (x->cur_tier >= x->o->defer_tiers) { if (loop) r->loop_final++; else r->steps_final++; return; }
+    if (dp_frontier_room(x->cur_tier, x->ndef, x->defer_reason[reason], reason) != DP_ROOM_OK) { r->defer_dropped++; return; }
+    if (x->ndef >= x->defcap && !dp_vec_grow((void **)&x->defer, &x->defcap, sizeof *x->defer, 64, 0)) { r->defer_dropped++; return; }
+    void *st = malloc(ssz);
+    if (!st) { r->defer_dropped++; return; }
+    dp_mdmach_save(x->m, st);
+    Item d = {0};
+    d.state = st; d.choice = x->cur_choice; d.forced = x->forced; d.in_handler = x->in_handler;
+    d.origin = x->origin;
+    memcpy(d.an_writer, x->an_writer, sizeof d.an_writer);
+    memcpy(d.dn_writer, x->dn_writer, sizeof d.dn_writer);
+    d.watch_pc = x->watch_pc; d.watch_addr = x->watch_addr; d.watch_value = x->watch_value;
+    d.watch_size = x->watch_size; d.watch_d0 = x->watch_d0; d.watch_a1 = x->watch_a1; d.watch_a2 = x->watch_a2;
+    d.tier = (uint8_t)(x->cur_tier + 1); d.reason = (uint8_t)reason;
+    x->defer[x->ndef++] = d; x->defer_reason[reason]++;
+    if (loop) r->loop_deferred++; else r->steps_deferred++;
+    x->deferred_cut = 1;   // the tree node stays open (issue DEFERRED)
+}
+
 static void run_path(X *x, Item *it, uint64_t budget, int *cut) {
     DpMdResults *r = x->r;
     int fault = 0;
     x->halted = 0;
+    x->deferred_cut = 0;
+    x->cur_tier = it ? it->tier : 0;
     x->previous_move_valid = x->register_move_valid = 0;
     x->forced = it ? it->forced : 0;
     x->exp_pc = -1; x->in_handler = it ? it->in_handler : 0;
@@ -1230,12 +1267,16 @@ static void run_path(X *x, Item *it, uint64_t budget, int *cut) {
     next_generation(x);
     if (it) dp_mdmach_load(x->m, it->state);
     r->paths++;
-    uint64_t pb = (x->movie_active || !x->forced) ? budget / 2 : (x->o->path_steps < budget ? x->o->path_steps : budget);
+    uint64_t psb = (uint64_t)x->o->path_steps << (2u * x->cur_tier);   // x4 per deferral tier
+    uint64_t pb = (x->movie_active || !x->forced) ? budget / 2 : (psb < budget ? psb : budget);
     uint64_t n = run_sliced(x->m, pb, cut, &fault);
     r->steps += n;
     if (*cut) {
         if (n >= budget) r->sat_total++;
-        else r->sat_path++;
+        else {
+            r->sat_path++;
+            if (!dp_stop) md_defer(x, it, 0);   // not the global wall, not SIGINT: the continuation waits
+        }
     }
     if (fault) {
         r->faults++;
@@ -1684,19 +1725,26 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
             if (!x.nq) continue;
         }
         if (!x.nq) {
+            if (x.ndef && x.nq < x.qcap) {   // cut continuations (frontier §6)
+                Item d = x.defer[--x.ndef];
+                if (d.reason < DP_R_COUNT) x.defer_reason[d.reason]--;
+                x.q[x.nq++] = d; r->defer_resumed++;
+                continue;
+            }
             if (o->bank_dispatch && !x.disp_done && r->steps < o->max_total) { x.disp_done = 1; if (dispatch_seed(&x)) continue; }
             if (o->second_pass && r->steps < o->max_total && second_pass_seed(&x)) continue;
             break;
         }
         Item it = x.q[--x.nq];
         run_path(&x, &it, o->max_total - r->steps, &cut);
-        if (it.choice) dp_tree_close(&x.tree, it.choice, DP_ISSUE_DONE);
+        if (it.choice) dp_tree_close(&x.tree, it.choice, x.deferred_cut ? DP_ISSUE_DEFERRED : DP_ISSUE_DONE);
         x.cur_choice = 0;
         free(it.state);
     }
     // leftovers of a wall go to the lot when there is one (the next run resumes them)
     for (uint32_t i = 0; i < x.npark; i++) if (x.park[i].choice) dp_tree_close(&x.tree, x.park[i].choice, DP_ISSUE_DEFERRED);
     for (uint32_t i = 0; i < x.nq; i++) if (x.q[i].choice) dp_tree_close(&x.tree, x.q[i].choice, DP_ISSUE_DEFERRED);
+    for (uint32_t i = 0; i < x.ndef; i++) if (x.defer[i].choice) dp_tree_close(&x.tree, x.defer[i].choice, DP_ISSUE_DEFERRED);
     for (uint32_t i = 0; i < x.npark; i++) {
         if (!lot_spill(&x, &x.park[i])) r->dropped_pending++;
         free(x.park[i].state);
@@ -1714,6 +1762,11 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
         if (!lot_spill(&x, &x.q[i])) r->dropped_pending++;
         free(x.q[i].state);
     }
+    for (uint32_t i = 0; i < x.ndef; i++) {
+        if (!lot_spill(&x, &x.defer[i])) r->dropped_pending++;
+        free(x.defer[i].state);
+    }
+    free(x.defer); x.defer = NULL;
     if (x.lot) {
         r->lot_written = x.lot->written; r->lot_read = x.lot->read_back;
         r->lot_pending = dp_lf_pending(x.lot);
@@ -1907,7 +1960,10 @@ void dp_md_explore_report(const DpMdCart *c, const DpMdOptions *o, const DpMdRes
             o->queue_cap, o->queue_max > o->queue_cap ? o->queue_max : o->queue_cap);
     if (r->tree_nodes) fprintf(out, "  choice tree: %llu nodes\n", (unsigned long long)r->tree_nodes);
     if (r->tree_loaded) fprintf(out, "  choice tree resumed: %llu nodes reloaded\n", (unsigned long long)r->tree_loaded);
-    if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (%s context past the cap)\n", (unsigned long long)r->ctx_evicted,
+    if (r->steps_deferred || r->loop_deferred) fprintf(out, "  frontier: deferred steps %llu loop %llu; resumed %llu; final steps %llu loop %llu; dropped %llu\n",
+                                (unsigned long long)r->steps_deferred, (unsigned long long)r->loop_deferred, (unsigned long long)r->defer_resumed,
+                                (unsigned long long)r->steps_final, (unsigned long long)r->loop_final, (unsigned long long)r->defer_dropped);
+if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (%s context past the cap)\n", (unsigned long long)r->ctx_evicted,
                                 o->ctx_live ? "section-projected" : "coarse pc/regs/SR");
     if (r->pass2_seeds || r->pass2_refused || r->pass2_capped) fprintf(out, "  second pass: %llu seeds, %llu refused, %llu capped\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     if (r->s4_tables) fprintf(out, "  jump tables (S4, jmp d(pc,Xn)): %llu tables, %llu handlers seeded, %llu refused\n", (unsigned long long)r->s4_tables, (unsigned long long)r->s4_seeds, (unsigned long long)r->s4_refused);

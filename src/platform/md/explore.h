@@ -84,6 +84,7 @@ typedef struct {
     void (*pre_finalize)(struct DpMdResults_ *r, uint8_t *bank_seen, void *user);
     void *pre_user;
     int lot_drain; /* with a lot backlog: run only the saved states (no root) */
+    unsigned defer_tiers;   // frontier §6 (shared policy): path-budget cuts resume with a 4x budget, N tiers (0: final)
     const char *lot_path; /* disk lot of deferred states (NULL: memory only); an existing file is resumed */
 } DpMdOptions;
 
@@ -131,6 +132,7 @@ typedef struct DpMdResults_ {
     uint64_t lot_written, lot_read, lot_pending; /* disk lot (--lot) */
     uint64_t entries_seeded, entries_refused, vectors_seeded; /* explicit entries queued / refused (odd or outside the ROM) */
     uint64_t parked, parked_resumed, parked_lost; /* queue-full forks held aside (§6) */
+    uint64_t steps_deferred, loop_deferred, defer_resumed, steps_final, loop_final, defer_dropped; /* frontier §6 shared policy */
     uint64_t dropped_pending;  /* forks left unrun when the total budget ended */
     uint64_t faults;
     DpMdFaultSite fault_sites[DP_MD_FAULT_SITE_CAP];

@@ -1653,6 +1653,10 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--bank-dispatch")) o.bank_dispatch = 1;
             else if (!strcmp(a, "--exact-dedup")) o.exact_dedup = 1;
             else if (!strcmp(a, "--ctx-live")) o.ctx_live = 1;
+            else if (!strcmp(a, "--defer-tiers") && i + 1 < argc) {
+                o.defer_tiers = (unsigned)strtoul(argv[++i], NULL, 0);
+                if (o.defer_tiers > DP_TIER_MAX) o.defer_tiers = DP_TIER_MAX;
+            }
             else if (!strcmp(a, "--pad-full")) o.pad_full = 1;
             else if (!strcmp(a, "--pad-full6")) o.pad_full = o.pad_full6 = 1;
             else if (!strcmp(a, "--entry")) {
