@@ -42,6 +42,14 @@ infructueux.
 | Dédup exacte MD en défaut | MD | 4 épingles de tests cassées (les fourches dédupliquées ne créent plus les nœuds d'arbre attendus, sondes pad) ; reportée | session 0.249.82, matrice C3 |
 | Mesures du harnais GG avant correction de la boucle trame | GG | le callback de fin de trame ne posait pas `machine.stop` : le DUT courait des centaines de trames par trame de référence, les observations `$1FFE`/`$D10C` (~266 octets) étaient des artefacts ; corrigé puis re-mesuré (décalage d'une trame, résidu médian 2 octets) | `docs/Z80.fr.md` (0.249.84) |
 
+## Jalons atteints
+
+- **Axe 10** : les trois ROMs de couverture 100 % (Puzzle Boy, BattleCity,
+  Master Karateka — campagnes 0.249.x) se recompilent toutes avec
+  **interpreter-only 0** ; le compteur « compilé » (8601) est le plafond de
+  budget flash de la carte cible, pas un repli. Réserve : le Game Genie
+  (en-tête multicart incohérent).
+
 ## Leçons transversales
 
 - **Projeter avant d'évincer** : une éviction qui compare des états sur des
