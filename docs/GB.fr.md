@@ -786,6 +786,16 @@ milieu de section) ; elle apparaît dans le résumé (`frontier:`) et dans le
 JSON (`steps_deferred`, `loop_deferred`, `defer_resumed`, `*_final`,
 `defer_dropped`, `defer_pending`). Même correctif côté GB.
 
+Sega/MSX (0.249.89, mutualisation §7.4) : l'admission des continuations
+reportées passe par la **politique partagée** `src/explore/frontier.c`
+(`dp_frontier_room`, raisons `DP_R_*` de COUVERTURE §6) au lieu d'une
+réimplémentation locale : plafond de paliers `DP_TIER_MAX` commun, et les
+reports de fourches (`DP_R_FORK_CAP`, raison bruyante) ne peuvent plus
+occuper plus d'un quart de la zone d'attente (1024 des 4096) — ils ne
+affament plus les reports `steps`/`loop`. La raison suit la continuation
+dans le spool disque (bits 16-23 de l'en-tête) pour garder la comptabilité
+par raison après une reprise `--resume`. Compteurs de rapport inchangés.
+
 ## J1 terminé (0.34.0)
 
 Table creuse de première découverte (`DpFirstLog`, `coverage.h`) : une ligne

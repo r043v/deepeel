@@ -1,5 +1,6 @@
 #include "../../core/rng.h"
 #include "explore.h"
+#include "../../explore/frontier.h"
 #include "backend.h"
 #include "visits.h"
 #include "tas.h"
@@ -27,7 +28,7 @@ typedef struct {
     DpZ80Origin cram_latch;
     DpZ80Origin ram[];
 } Origins;
-typedef struct { void *state; uint8_t *cart; Origins *origins; int forced,skip_irq; uint32_t choice; uint8_t tier; } Path;
+typedef struct { void *state; uint8_t *cart; Origins *origins; int forced,skip_irq; uint32_t choice; uint8_t tier; uint8_t reason; } Path;
 // A seed spec: pc in a mapper view. exact=1 applies seed_window(pc,bank) and
 // refuses any view where rom_index(pc) is not bank*0x4000+(pc&0x3FFF); exact=0
 // keeps the boot view untouched.
@@ -45,6 +46,7 @@ enum { INPUT_PAD1, INPUT_PAD2, INPUT_START, INPUT_HALT_PAUSE, INPUT_PAD2_UD, INP
 typedef struct { uint32_t key; uint8_t accepted,seen[16]; uint64_t blocked_epoch; } InputSite;
 typedef struct {
     Path *defer; uint32_t defer_n,defer_cap; uint8_t cur_tier; // deferred frontier (COUVERTURE §6)
+    uint32_t defer_reason[DP_R_COUNT]; // held per reason (the noisy ones cap at a quarter, dp_frontier_room)
     const DpSegaBackend *b;
     const DpSegaSystem *system;
     const DpSegaOptions *opt;
@@ -433,7 +435,7 @@ static int spool_write_path(Run *x,const Path *p,int flushed) {
         x->r->spool_refused++; return 0;
     }
     uint64_t hdr[4]={DP_SPOOL_MAGIC,
-        (uint64_t)(p->forced?1:0)|((uint64_t)(p->skip_irq?1:0)<<1)|((uint64_t)p->tier<<8)|((uint64_t)p->choice<<32),
+        (uint64_t)(p->forced?1:0)|((uint64_t)(p->skip_irq?1:0)<<1)|((uint64_t)p->tier<<8)|((uint64_t)p->reason<<16)|((uint64_t)p->choice<<32),
         (uint64_t)x->b->state_size,(uint64_t)x->origin_size};
     // one file, two cursors: records are appended at spool_wr, reads replay
     // from spool_rd — the explicit seek keeps writes from landing where the
@@ -464,34 +466,39 @@ static int queue_room(Run *x,int input) {
     return x->queued<x->queue_capacity;
 }
 // A path cut by its step budget or its backward-edge cap keeps its machine
-// state and resumes later with a cap four times larger, up to DP_SEGA_TIER_MAX.
-// Past the last tier or a full holding area the cut stays final and counted.
-#define DP_SEGA_TIER_MAX 3
-#define DP_SEGA_DEFER_CAP 4096
+// state and resumes later with a cap four times larger, up to DP_TIER_MAX.
+// The admission decision is the shared kernel's (src/explore/frontier.c,
+// COUVERTURE §6): tier ceiling, per-reason caps (the noisy fork-cap reason
+// holds at most a quarter of the area), never silent.  Past that the cut
+// stays final and counted.
 static void defer_cut(Run *x,int loop) {
     DpSegaResults *r=x->r;
+    int reason=loop?DP_R_LOOP:DP_R_STEPS;
     if(!x->opt->defer_tiers) return; // deferral off: the cut stays final (step_cuts / loop_cuts)
     if(x->cur_tier>=x->opt->defer_tiers) { if(loop) r->loop_final++; else r->steps_final++; return; }
-    if(x->defer_n>=DP_SEGA_DEFER_CAP) { r->defer_dropped++; return; }
+    if(dp_frontier_room(x->cur_tier,x->defer_n,x->defer_reason[reason],reason)!=DP_ROOM_OK) { r->defer_dropped++; return; }
     if(x->defer_n>=x->defer_cap) {
         uint32_t nc=x->defer_cap?x->defer_cap*2:64;
         Path *g=realloc(x->defer,(size_t)nc*sizeof(*g));
         if(!g) { r->defer_dropped++; return; }
         x->defer=g; x->defer_cap=nc;
     }
-    Path p={malloc(x->b->state_size),malloc(0x8000),malloc(x->origin_size),x->forced,0,x->cur_choice,(uint8_t)(x->cur_tier+1)};
+    Path p={malloc(x->b->state_size),malloc(0x8000),malloc(x->origin_size),x->forced,0,x->cur_choice,(uint8_t)(x->cur_tier+1),(uint8_t)reason};
     if(!p.state||!p.cart||!p.origins) { free_path(p); r->defer_dropped++; return; }
     x->b->save(p.state); memcpy(p.cart,x->cart,0x8000);
     memcpy(p.origins,x->origins,x->origin_size);
-    x->defer[x->defer_n++]=p;
+    x->defer[x->defer_n++]=p; x->defer_reason[reason]++;
     if(loop) r->loop_deferred++; else r->steps_deferred++;
 }
 // A fork the path cap or a full frontier would drop waits in the deferred
 // holding area instead (same tiers as defer_cut); 1 = kept, 0 = final loss.
 static int defer_fork(Run *x,int forced,int skip_irq,unsigned kind,uint64_t *lost) {
     DpSegaResults *r=x->r;
-    if(!x->opt->defer_tiers || x->cur_tier>=x->opt->defer_tiers) { if(x->opt->defer_tiers) r->fork_final++; (*lost)++; return 0; }
-    if(x->defer_n>=DP_SEGA_DEFER_CAP) { r->defer_dropped++; (*lost)++; return 0; }
+    if(!x->opt->defer_tiers) { (*lost)++; return 0; }
+    if(x->cur_tier>=x->opt->defer_tiers) { r->fork_final++; (*lost)++; return 0; }
+    // fork deferrals are the noisy reason: the shared policy holds at most a
+    // quarter of the area for them so they cannot starve the rest (§6.4)
+    if(dp_frontier_room(x->cur_tier,x->defer_n,x->defer_reason[DP_R_FORK_CAP],DP_R_FORK_CAP)!=DP_ROOM_OK) { r->defer_dropped++; (*lost)++; return 0; }
     if(x->defer_n>=x->defer_cap) {
         uint32_t nc=x->defer_cap?x->defer_cap*2:64;
         Path *g=realloc(x->defer,(size_t)nc*sizeof(*g));
@@ -499,11 +506,11 @@ static int defer_fork(Run *x,int forced,int skip_irq,unsigned kind,uint64_t *los
         x->defer=g; x->defer_cap=nc;
     }
     uint32_t choice=tree_add(x,kind);
-    Path p={malloc(x->b->state_size),malloc(0x8000),malloc(x->origin_size),forced,skip_irq,choice,(uint8_t)(x->cur_tier+1)};
+    Path p={malloc(x->b->state_size),malloc(0x8000),malloc(x->origin_size),forced,skip_irq,choice,(uint8_t)(x->cur_tier+1),(uint8_t)DP_R_FORK_CAP};
     if(!p.state||!p.cart||!p.origins) { free_path(p); r->defer_dropped++; (*lost)++; return 0; }
     x->b->save(p.state); memcpy(p.cart,x->cart,0x8000);
     memcpy(p.origins,x->origins,x->origin_size);
-    x->defer[x->defer_n++]=p;
+    x->defer[x->defer_n++]=p; x->defer_reason[DP_R_FORK_CAP]++;
     r->fork_deferred++;
     return 1;
 }
@@ -1623,7 +1630,8 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
                    fread(hdr,sizeof hdr,1,x.spool)!=1 || hdr[0]!=DP_SPOOL_MAGIC) break;
                 if(hdr[2]!=x.b->state_size || hdr[3]!=x.origin_size) break;
                 Path p={malloc(x.b->state_size),malloc(0x8000),malloc(x.origin_size),
-                    (int)(hdr[1]&1),(int)((hdr[1]>>1)&1),(uint32_t)(hdr[1]>>32),(uint8_t)((hdr[1]>>8)&0xff)};
+                    (int)(hdr[1]&1),(int)((hdr[1]>>1)&1),(uint32_t)(hdr[1]>>32),(uint8_t)((hdr[1]>>8)&0xff),
+                    (uint8_t)((hdr[1]>>16)&0xff)};
                 if(!p.state||!p.cart||!p.origins) { free_path(p); break; }
                 if(fread(p.state,1,x.b->state_size,x.spool)!=x.b->state_size ||
                    fread(p.cart,1,0x8000,x.spool)!=0x8000 ||
@@ -1634,7 +1642,11 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
             }
                         int from_input=phase && x.input_queued && (!x.queued || ((r->paths-start_paths)&1)==0);
             // the live frontier first; deferred cuts resume once it is empty
-            if(!from_input && !x.queued && x.defer_n && queue_room(&x,0)) { x.queue[x.queued++]=x.defer[--x.defer_n]; r->defer_resumed++; }
+            if(!from_input && !x.queued && x.defer_n && queue_room(&x,0)) {
+                Path dp=x.defer[--x.defer_n];
+                if(dp.reason < DP_R_COUNT) x.defer_reason[dp.reason]--;
+                x.queue[x.queued++]=dp; r->defer_resumed++;
+            }
             if(!from_input && !x.queued) break;
             Path p=from_input?x.input_queue[--x.input_queued]:x.queue[--x.queued];
             if(from_input) x.input_epoch++;
@@ -2552,7 +2564,7 @@ static int parse_entry(const char *s,DpSegaOptions *o) {
 int dp_sega_explore_command(int argc,char **argv) {
     if(argc<5) goto usage;
     const DpSegaSystem *s=!strcmp(argv[3],"msx")?dp_msx_system():dp_sega_system(argv[3]); if(!s) goto usage;
-    DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); o.defer_tiers=DP_SEGA_TIER_MAX; int watch=0; const char *dump=NULL,*text=NULL,*map=NULL,*evidence=NULL,*summary=NULL,*cov=NULL,*romdata=NULL,*rtcode=NULL;
+    DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); o.defer_tiers=DP_TIER_MAX; int watch=0; const char *dump=NULL,*text=NULL,*map=NULL,*evidence=NULL,*summary=NULL,*cov=NULL,*romdata=NULL,*rtcode=NULL;
     for(int i=5;i<argc;i++) {
         if(!strcmp(argv[i],"--no-vector-seeds")) { o.seed_vectors=0; continue; }
         if(!strcmp(argv[i],"--no-context-evict")) { o.no_context_evict=1; continue; }
@@ -2627,7 +2639,7 @@ int dp_sega_explore_command(int argc,char **argv) {
             else if(!strcmp(key,"--max-paths")) o.max_paths=(uint32_t)n;
             else if(!strcmp(key,"--queue")) o.queue_cap=(uint32_t)n;
             else if(!strcmp(key,"--loop-cap")) o.loop_cap=(uint32_t)n;
-            else if(!strcmp(key,"--defer-tiers")) o.defer_tiers=n>DP_SEGA_TIER_MAX?DP_SEGA_TIER_MAX:(uint32_t)n;
+            else if(!strcmp(key,"--defer-tiers")) o.defer_tiers=n>DP_TIER_MAX?DP_TIER_MAX:(uint32_t)n;
             else if(!strcmp(key,"--stagnation")) o.stagnation=(uint32_t)n;
             else if(!strcmp(key,"--copy-cap")) o.copy_cap=(uint32_t)n;
             else if(!strcmp(key,"--input-forks")) o.input_masks=(uint32_t)n;

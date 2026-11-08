@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.249.88 LANGUAGES C)
+project(deepeel VERSION 0.249.89 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -394,7 +394,7 @@ set_target_properties(deepeel_msx PROPERTIES IMPORTED_LOCATION ${DP_MSX_ARCHIVE}
   INTERFACE_LINK_LIBRARIES deepeel_z80)
 add_dependencies(deepeel_msx dp_msx_runtime)
 target_link_libraries(deepeel PRIVATE deepeel_msx)
-add_library(deepeel_sega STATIC src/platform/sega/explore.c src/platform/sega/closure.c src/platform/sega/visits.c src/platform/sega/tas.c src/core/bk2.c src/core/zip.c src/core/sha1.c src/core/statefile.c src/gui/fbwatch.c src/explore/ramarch.c)
+add_library(deepeel_sega STATIC src/platform/sega/explore.c src/platform/sega/closure.c src/platform/sega/visits.c src/platform/sega/tas.c src/explore/frontier.c src/core/bk2.c src/core/zip.c src/core/sha1.c src/core/statefile.c src/gui/fbwatch.c src/explore/ramarch.c)
 target_link_libraries(deepeel_sega PUBLIC ZLIB::ZLIB)
 # Second runtime instances for --jobs 2: the same sources compiled again with
 # the backend getter renamed, then every global namespaced by objcopy (the
