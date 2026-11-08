@@ -99,6 +99,15 @@ courses, fourches, coupes, exécution hors ROM) : la matière première de
 USA, 5 M pas, borné 120 s) : 18,3 % connus — cohérent avec le tableau
 ci-dessus (les données de niveaux ne se révèlent qu'en jouant).
 
+## 0.249.91 — frontière partagée (§6) : `--defer-tiers` (opt-in)
+
+Comme NES (0.249.90) : l'admission des continuations coupées (`step`,
+`loop`) passe par la politique partagée `src/explore/frontier.c` — reprise
+à budget ×4 jusqu'à `--defer-tiers N` (0 : coupes finales, défaut), raison
+bruyante bornée au quart de la zone, fourches au palier du parent, restes
+au lot disque. Rapport : `frontier: deferred steps/loop; resumed; final;
+dropped`. Test `pce_defer_tiers`.
+
 ## m0boy
 
 Correctif rétroporté : ST0/ST1/ST2 écrivent toujours sur le VDC, en

@@ -1406,6 +1406,10 @@ static int cmd_pce(int argc, char **argv) {
             else { fprintf(stderr, "deepeel: at most 8 TAS movies\n"); return 2; }
         }
         else if (!strcmp(a, "--pad-fork-cap") && i + 1 < argc) opt.pad_fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--defer-tiers") && i + 1 < argc) {
+            opt.defer_tiers = (unsigned)strtoul(argv[++i], NULL, 0);
+            if (opt.defer_tiers > DP_TIER_MAX) opt.defer_tiers = DP_TIER_MAX;
+        }
         else if (!strcmp(a, "--irq-fork-cap") && i + 1 < argc) opt.irq_fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--no-static")) opt.static_closure = 0;
         else if (!strcmp(a, "--no-infer")) opt.infer = 0;

@@ -26,6 +26,7 @@
 #include "explore.h"
 #include "../../explore/stop.h"
 #include "../../explore/lots.h"
+#include "../../explore/frontier.h"
 #include "../../explore/novelty.h"
 #include "../../core/hashset.h"
 #include "../../explore/tree.h"
@@ -44,6 +45,8 @@ typedef struct {
     uint8_t forced;
     uint32_t choice;       // choice-tree node (0: none)
     uint8_t in_handler;    // forked inside an interrupt handler (not persisted in disk lots)
+    uint8_t tier;          // deferral tier (0 = power-on budgets); budgets x4 per tier
+    uint8_t reason;        // DP_R_* why it waits (per-reason caps, src/explore/frontier.c)
 } PceQueued;
 
 enum { LOOP_SLOTS = 4096 };
@@ -69,6 +72,9 @@ typedef struct {
     PceQueued *queue;
     uint32_t queue_len, qcap; // qcap: live capacity, grown up to opt.queue_max
     PceQueued *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
+    PceQueued *defer; uint32_t defer_len, defer_cap; // cut continuations (frontier §6, shared policy)
+    uint32_t defer_reason[DP_R_COUNT];               // held per reason (noisy ones cap at a quarter)
+    uint8_t cur_tier, deferred_cut, loop_cut;
     DpLotFile *lot;            // disk lot: park overflow, wall leftovers, --lot resume
     uint64_t *seen;        // open-addressed dedup set
     int disp_done;
@@ -358,6 +364,29 @@ static int lot_spill(PceRun *x, uint8_t *z, uLongf zlen, uint8_t forced, uint32_
     return 1;
 }
 
+// cut continuations (frontier §6, shared policy src/explore/frontier.c): a
+// path cut by its step budget or loop cap waits in a holding area and resumes
+// with a 4x budget, defer_tiers times; the noisy fork-cap reason holds at
+// most a quarter of the area.  With defer_tiers = 0 the cut stays final.
+static void pce_defer(PceRun *x, const PceQueued *q, int loop) {
+    DpPceResults *r = x->r;
+    int reason = loop ? DP_R_LOOP : DP_R_STEPS;
+    if (!x->opt.defer_tiers) return;
+    if (x->cur_tier >= x->opt.defer_tiers) { if (loop) r->loop_final++; else r->steps_final++; return; }
+    if (dp_frontier_room(x->cur_tier, x->defer_len, x->defer_reason[reason], reason) != DP_ROOM_OK) { r->defer_dropped++; return; }
+    if (x->defer_len >= x->defer_cap && !dp_vec_grow((void **)&x->defer, &x->defer_cap, sizeof *x->defer, 64, 0)) { r->defer_dropped++; return; }
+    dp_pce_save(x->tmp2);
+    uLongf zl = x->zcap;
+    if (compress2(x->ztmp, &zl, x->tmp2, x->state_size, 1) != Z_OK) { x->failed = 1; r->defer_dropped++; return; }
+    uint8_t *z = malloc(zl);
+    if (!z) { x->failed = 1; r->defer_dropped++; return; }
+    memcpy(z, x->ztmp, zl);
+    PceQueued d = { z, zl, q->forced, q->choice, (uint8_t)x->in_handler, (uint8_t)(x->cur_tier + 1), (uint8_t)reason };
+    x->defer[x->defer_len++] = d; x->defer_reason[reason]++;
+    if (loop) r->loop_deferred++; else r->steps_deferred++;
+    x->deferred_cut = 1;   // the tree node stays open (issue DEFERRED)
+}
+
 // queue the live machine state (dedup on its control-state hash)
 static int push_live(PceRun *x, int forced) {
     DpPceResults *r = x->r;
@@ -406,6 +435,7 @@ static int push_live(PceRun *x, int forced) {
     x->queue[x->queue_len].zlen = zl;
     x->queue[x->queue_len].forced = (uint8_t)forced;
     x->queue[x->queue_len].choice = node; x->queue[x->queue_len].in_handler = (uint8_t)x->in_handler;
+    x->queue[x->queue_len].tier = x->cur_tier;   // a fork runs with its parent's budgets
     x->queue_len++;
     r->state_bytes_peak += zl;
     return 1;
@@ -817,8 +847,9 @@ static int step_one(PceRun *x, int *frame_done) {
             int bit, woff;
             int taken = branch_taken(&in, &c, &bit, &woff);
             if (taken > 0 && in.target <= c.pc && site >= 0) {
-                if (loop_bump(x, ((uint64_t)site << 16) | in.target | 1ull << 63) > x->opt.loop_cap) {
+                if (loop_bump(x, ((uint64_t)site << 16) | in.target | 1ull << 63) > (x->opt.loop_cap << (2u * x->cur_tier))) {
                     r->loop_cuts++;
+                    x->loop_cut = 1;
                     return 0;
                 }
             }
@@ -861,16 +892,20 @@ static void run_path(PceRun *x, PceQueued q) {
     x->was_outside = 0; x->exp_pc = -1; x->in_handler = q.in_handler;
     x->forced = q.forced;
     x->cur_choice = q.choice;
+    x->cur_tier = q.tier; x->deferred_cut = 0; x->loop_cut = 0;
     x->path_id = r->paths++;
     r->forced_paths += q.forced != 0;
     x->last_read_cell = -1;
     for (;;) {
-        if (x->path_steps >= x->opt.max_steps) { r->step_cuts++; break; }
+        if (x->path_steps >= (x->opt.max_steps << (2u * x->cur_tier))) { r->step_cuts++; pce_defer(x, &q, 0); break; }
         if ((x->total_steps >= x->opt.max_total || dp_stop)) { r->global_cuts++; break; }
         int frame;
-        if (!step_one(x, &frame)) break;
+        if (!step_one(x, &frame)) {
+            if (x->loop_cut) { pce_defer(x, &q, 1); x->loop_cut = 0; }
+            break;
+        }
     }
-    if (q.choice) dp_tree_close(&x->tree, q.choice, DP_ISSUE_DONE);
+    if (q.choice) dp_tree_close(&x->tree, q.choice, x->deferred_cut ? DP_ISSUE_DEFERRED : DP_ISSUE_DONE);
     x->cur_choice = 0;
 }
 
@@ -1660,6 +1695,11 @@ drain:
     for (;;) {
         if (x->failed) break;
         if (!x->queue_len && x->park_len) { x->queue[x->queue_len++] = x->park[--x->park_len]; r->parked_resumed++; }
+        if (!x->queue_len && x->defer_len) {   // cut continuations (frontier §6)
+            PceQueued d = x->defer[--x->defer_len];
+            if (d.reason < DP_R_COUNT) x->defer_reason[d.reason]--;
+            x->queue[x->queue_len++] = d; r->defer_resumed++;
+        }
         if (!x->queue_len && dp_lf_pending(x->lot)) { // the disk backlog comes back
             uint8_t meta[DP_LF_META_MAX] = { 0 }, *blob = NULL; uint32_t ml = 0, bl = 0;
             if (dp_lf_get(x->lot, meta, &ml, &blob, &bl) && (ml == 1 || ml == 5)) {
@@ -1710,6 +1750,9 @@ drain:
     free(x->park);
     for (uint32_t i = 0; i < x->queue_len; i++)
         if (!lot_spill(x, x->queue[i].z, x->queue[i].zlen, x->queue[i].forced, x->queue[i].choice)) { r->pending_dropped++; free(x->queue[i].z); }
+    for (uint32_t i = 0; i < x->defer_len; i++)
+        if (!lot_spill(x, x->defer[i].z, x->defer[i].zlen, x->defer[i].forced, x->defer[i].choice)) { r->pending_dropped++; free(x->defer[i].z); }
+    free(x->defer);
     if (x->lot) {
         r->lot_written = x->lot->written; r->lot_read = x->lot->read_back;
         r->lot_pending = dp_lf_pending(x->lot);
@@ -1862,6 +1905,11 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             (unsigned long long)r->s6_runs, (unsigned long long)r->s6_sat);
     fprintf(out, "  provenance: %llu jump-table words traced from ROM reads, %llu roots seeded\n", (unsigned long long)r->prov_sites, (unsigned long long)r->prov_roots);
     if (r->queue_grown) fprintf(out, "  queue grown %llu times\n", (unsigned long long)r->queue_grown);
+    if (r->steps_deferred || r->loop_deferred)
+        fprintf(out, "  frontier: deferred steps %llu loop %llu; resumed %llu; final steps %llu loop %llu; dropped %llu\n",
+                (unsigned long long)r->steps_deferred, (unsigned long long)r->loop_deferred,
+                (unsigned long long)r->defer_resumed, (unsigned long long)r->steps_final,
+                (unsigned long long)r->loop_final, (unsigned long long)r->defer_dropped);
     if (r->tree_nodes) fprintf(out, "  choice tree: %llu nodes\n", (unsigned long long)r->tree_nodes);
     if (r->tree_loaded) fprintf(out, "  choice tree resumed: %llu nodes reloaded\n", (unsigned long long)r->tree_loaded);
     if (r->pass2_seeds || r->pass2_refused || r->pass2_capped) fprintf(out, "  second pass: %llu seeds, %llu refused (page unmappable), %llu capped\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
