@@ -1107,7 +1107,7 @@ Implémentations existantes à envelopper :
 
 | Module | Remplace / absorbe |
 |---|---|
-| `frontier` (file live + dédup + frontière disque + arbre) | `explorer.c` 306-498/1188-1401, `tree.c`, spool z80, files NES/PCE/MD |
+| `frontier` (file live + dédup + frontière disque + arbre) | `explorer.c` 306-498/1188-1401, `tree.c`, spool z80, files NES/PCE/MD — 0.249.89 : la politique (paliers, raisons, `dp_frontier_room`) est adoptée par sega/MSX (plus de réimplémentation locale, raison suivie dans le spool) ; restent à migrer : files NES/PCE/MD |
 | `cover` (modèle §4) | flags GB/Sega/NES/PCE/MD |
 | `sections` (liveness, verdicts, éviction contexte) | `sections.c`, `section_touch` z80, `sections_build` NES/PCE |
 | `copies` (boucle CPU + canaux DMA + frères) | `copies.c`, `copied` z80, `log_copy` PCE, DMA MD/NES |
