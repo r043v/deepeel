@@ -2987,6 +2987,35 @@ couvrent tout ce qu'une partie réelle exécute.
   948 ROMs à protocole machine, 430 passent, 291 échouent, 227 sans verdict ; Mooneye 31/115, gbmicrotest 354/513,
   Blargg 20/58 (cpu_instrs individuels tous passés). Gambatte, mealybug et acid2 attendent une comparaison de captures.
 
+## 0.249.87 — axe 11 : deepeel sur les ROMs de test matériel
+
+Inventaire hors dépôt (aucune ROM dans le dépôt) : `~/dev/gb-test-roms/`
+(Blargg cpu_instrs/mem_timing), `~/dev/game-boy-test-roms/` (mooneye,
+mealybug, dmg-acid2, cgb-acid2, SameSuite, rtc3test…), `~/dev/m0boy/roms/gb/test/`
+(doublons pratiques) ; SMS : `~/dev/m0boy/roms/sms/ZEXALL*`.
+
+Explorations deepeel (bornées, observations de l'outil) :
+
+- **ZEXALL SDSC (SMS, 32 Kio)**, 30 M pas, 588 courses : map connue
+  **95,4 %**, 0 fault — mais 65 314 écritures dans des octets exécutés
+  (l'auto-modification est le mode de fonctionnement du testeur Z80, il
+  s'exécute depuis la RAM) : la preuve passe par les frères de copie (S5)
+  et l'archive de code en RAM, pas par l'exécution directe.
+- **Blargg cpu_instrs individuels (GB)**, 3 M pas chacun : 01-special
+  **99,88 %** connus, 04-op r,imm **99,94 %**, 09-op r,r **99,94 %** — les
+  suites de test matériel sont bien des cas quasi 100 % (axe 11c).
+- **09-op r,r, la réserve** : 8210 enregistrements de couverture mais 53
+  octets de code exécuté et 8157 marqués données — 250 607 fourches
+  plafonnées (cap 16/site, non exposé au CLI GB) sur le site de
+  distribution du harnais blargg. Le code du test n'est ni exécuté ni
+  atteint par la fermeture statique (« 3 stopped by data/padding ») : il
+  faut résoudre la distribution indirecte du harnais pour convertir ces
+  « données » en code. Amélioration de couverture à venir, pas un échec.
+- Recompilation (axe 10, première ROM de test) : `09-op r,r.gb` via
+  `gbrecomp --target meta --coverage` deepeel — 8210 enregistrements, 53
+  instructions compilées, **interpreter-only 0** ; la qualité de la
+  recompilation suit la couverture du code, le repli ne réapparaît pas.
+
 ## 0.202.0 : NES et PCE, `--demo N` (aucune touche) avant le TAS et les parties (2026-11-04)
 
 - `deepeel nes|pce explore ROM --demo N` : N trames depuis la mise sous tension, manettes au repos (mode attract),
