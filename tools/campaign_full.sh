@@ -9,6 +9,7 @@
 set -eu
 plat=$1; romdir=$2; out=$3
 maxtotal=${4:-20000000}; timelimit=${5:-600}
+B=${DEEPEEL_BIN:-$PWD/build/deepeel}
 mkdir -p "$out"
 find "$romdir" -type f \( -iname "*.gb" -o -iname "*.gbc" -o -iname "*.nes" -o -iname "*.md" -o -iname "*.sg" -o -iname "*.sms" -o -iname "*.gg" -o -iname "*.rom" -o -iname "*.mx1" -o -iname "*.mx2" -o -iname "*.pce" \) | sort | while read -r rom; do
     case "$rom" in
@@ -19,19 +20,19 @@ find "$romdir" -type f \( -iname "*.gb" -o -iname "*.gbc" -o -iname "*.nes" -o -
     [ -f "$d/summary.json" ] && { echo "skip $plat/$slug (done)"; continue; }
     echo "== $plat: $slug"
     case "$plat" in
-    gb)   deepeel explore "$rom" --max-total "$maxtotal" --time-limit "$timelimit" \
+    gb)   $B explore "$rom" --max-total "$maxtotal" --time-limit "$timelimit" \
               --summary "$d/summary.json" --cov "$d/rom.cov" \
               --rtcode "$d/rtcode.txt" --text "$d/report.txt" >/dev/null 2>&1 || echo "  (rc=$?)";;
-    nes)  deepeel nes explore "$rom" --max-total "$maxtotal" --time-limit "$timelimit" \
+    nes)  $B nes explore "$rom" --max-total "$maxtotal" --time-limit "$timelimit" \
               --summary "$d/summary.json" --cov "$d/rom.cov" --evidence "$d/evidence.txt" \
               --romdata "$d/romdata.txt" --text "$d/report.txt" >/dev/null 2>&1 || echo "  (rc=$?)";;
-    md)   deepeel md explore "$rom" --max-total "$maxtotal" --time-limit "$timelimit" \
+    md)   $B md explore "$rom" --max-total "$maxtotal" --time-limit "$timelimit" \
               --summary "$d/summary.json" --cov "$d/rom.cov" --evidence "$d/evidence.txt" \
               --romdata "$d/romdata.txt" --rtcode "$d/rtcode.txt" --text "$d/report.txt" >/dev/null 2>&1 || echo "  (rc=$?)";;
-    sg|sms|gg|msx) deepeel z80 explore "$plat" "$rom" --max-total "$maxtotal" \
+    sg|sms|gg|msx) $B z80 explore "$plat" "$rom" --max-total "$maxtotal" \
               --summary "$d/summary.json" --cov "$d/rom.cov" --evidence "$d/evidence.txt" \
               --romdata "$d/romdata.txt" --text "$d/report.txt" >/dev/null 2>&1 || echo "  (rc=$?)";;
-    pce)  deepeel pce explore "$rom" --max-total "$maxtotal" --time-limit "$timelimit" \
+    pce)  $B pce explore "$rom" --max-total "$maxtotal" --time-limit "$timelimit" \
               --summary "$d/summary.json" --cov "$d/rom.cov" --evidence "$d/evidence.txt" \
               --romdata "$d/romdata.txt" --text "$d/report.txt" >/dev/null 2>&1 || echo "  (rc=$?)";;
     *) echo "unknown platform $plat"; exit 2;;
