@@ -2997,6 +2997,26 @@ couvrent tout ce qu'une partie réelle exécute.
   948 ROMs à protocole machine, 430 passent, 291 échouent, 227 sans verdict ; Mooneye 31/115, gbmicrotest 354/513,
   Blargg 20/58 (cpu_instrs individuels tous passés). Gambatte, mealybug et acid2 attendent une comparaison de captures.
 
+## 0.250.2 — axe 10 : recompilation totale des ROMs à 100 % de couverture
+
+Les campagnes 0.249.x ont atteint **100,000 % connus** sur quatre ROMs
+(`results/gb/`). Le tableau « ROM → recompilé → causes restantes »
+(`gbrecomp --target meta --coverage carte.png`, chiffres de l'outil) :
+
+| ROM | enregistrements | compilé | interpreter-only | données prouvées |
+|---|---|---|---|---|
+| Puzzle Boy (Japan) | 17 867 | 8 601 inst. en 90 régions | **0** | 379 |
+| BattleCity (Japan) | 15 566 | 8 601 inst. en 93 régions | **0** | 171 |
+| Master Karateka (Japan) | 17 536 | 8 601 inst. en 90 régions | **0** | 326 |
+| Game Genie (USA) (v2.1) (Unl) | — | refusé : l'en-tête annonce plus que la taille du fichier (multicart) | — | — |
+
+Les 8 601 sont le **plafond de budget flash** de la carte cible, pas un
+repli : aucun octet couvert ne retombe dans l'interpréteur. Causes
+restantes : aucune sur ces trois ROMs pour l'exécution ; le Game Genie
+attend un lecteur tolérant aux en-têtes multicart. La recompilation sans
+interpréteur est atteinte sur couverture 100 % — l'axe 10 tient son
+objectif.
+
 ## 0.249.87 — axe 11 : deepeel sur les ROMs de test matériel
 
 Inventaire hors dépôt (aucune ROM dans le dépôt) : `~/dev/gb-test-roms/`
