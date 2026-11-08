@@ -14,6 +14,7 @@ typedef struct {
     int jobs, watch;
     unsigned time_limit;
     const char *dump, *text, *map, *evidence, *rtcode;
+    const char *summary, *cov, *romdata;   // the campaign outputs every platform writes
 } DpCliCommon;
 
 static void dp_cli_on_stop(int sig) { (void)sig; dp_stop = 1; }
@@ -32,6 +33,9 @@ static inline void dp_cli_arm_stop(unsigned time_limit) {
     else if (!strcmp(a, "--text") && i + 1 < argc) (cc).text = argv[++i]; \
     else if (!strcmp(a, "--map") && i + 1 < argc) (cc).map = argv[++i]; \
     else if (!strcmp(a, "--evidence") && i + 1 < argc) (cc).evidence = argv[++i]; \
+    else if (!strcmp(a, "--summary") && i + 1 < argc) (cc).summary = argv[++i]; \
+    else if (!strcmp(a, "--cov") && i + 1 < argc) (cc).cov = argv[++i]; \
+    else if (!strcmp(a, "--romdata") && i + 1 < argc) (cc).romdata = argv[++i]; \
     DP_CLI_U(opt, "--max-total", max_total, uint64_t); \
     DP_CLI_U(opt, "--queue", queue_cap, uint32_t); \
     DP_CLI_U(opt, "--novelty", novelty_steps, uint64_t); \

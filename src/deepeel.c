@@ -1267,7 +1267,7 @@ static int cmd_nes(int argc, char **argv) {
                         "[--loop-cap N] [--fork-cap N] [--no-irq-fork] [--entry bank:addr]... [--seed-banks] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--rtcode FILE]\n");
         return 2;
     }
-    const char *path = NULL, *text = NULL, *map = NULL, *evidence = NULL, *cov = NULL, *romdata = NULL, *mapper_name = "auto", *nes_summary = NULL, *nes_heat = NULL;
+    const char *path = NULL, *mapper_name = "auto", *nes_heat = NULL;
     DpNesOptions opt = dp_nes_options();   // defer_tiers 0: cuts stay final; --defer-tiers N opts in (sega's CLI defaults to 3, NES measured neutral on DuckTales)
     DpCliCommon cc = { .jobs = 1 };
     for (int i = 3; i < argc; i++) {
@@ -1281,10 +1281,7 @@ static int cmd_nes(int argc, char **argv) {
             opt.defer_tiers = (unsigned)strtoul(argv[++i], NULL, 0);
             if (opt.defer_tiers > DP_TIER_MAX) opt.defer_tiers = DP_TIER_MAX;
         }
-        else if (!strcmp(a, "--cov") && i + 1 < argc) cov = argv[++i];
-        else if (!strcmp(a, "--romdata") && i + 1 < argc) romdata = argv[++i];
-        else if (!strcmp(a, "--summary") && i + 1 < argc) nes_summary = argv[++i];
-        else if (!strcmp(a, "--heat") && i + 1 < argc) nes_heat = argv[++i];
+        else if (!strcmp(a, "--heat") && i + 1 < argc) nes_heat = argv[++i];   // --summary/--cov/--romdata come from DP_CLI_COMMON
         else if (!strcmp(a, "--tas") && i + 1 < argc) {
             if (opt.tas_count < 8) snprintf(opt.tas_paths[opt.tas_count++], 512, "%s", argv[++i]);
             else { fprintf(stderr, "deepeel: at most 8 TAS movies\n"); return 2; }
@@ -1309,7 +1306,7 @@ static int cmd_nes(int argc, char **argv) {
         else { fprintf(stderr, "deepeel: unknown option %s\n", a); return 2; }
     }
     const char *rtcode_path = cc.rtcode; int nes_jobs = cc.jobs, nes_watch = cc.watch; const char *nes_dump = cc.dump;
-    text = cc.text; map = cc.map; evidence = cc.evidence;
+    const char *text = cc.text, *map = cc.map, *evidence = cc.evidence;
     dp_cli_arm_stop(cc.time_limit);
     int mapper = -1; /* auto: the iNES header's mapper */
     if (!strcmp(mapper_name, "nrom")) mapper = 0;
@@ -1350,16 +1347,16 @@ static int cmd_nes(int argc, char **argv) {
         if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", evidence); }
         else { dp_nes_evidence(f, &res); fclose(f); }
     }
-    if (cov) {
-        FILE *f = fopen(cov, "w");
-        if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", cov); }
+    if (cc.cov) {
+        FILE *f = fopen(cc.cov, "w");
+        if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", cc.cov); }
         else { dp_nes_cov(f, &res); fclose(f); }
     }
-    if (nes_summary && dp_nes_summary(&res, nes_summary)) fprintf(stderr, "deepeel: cannot write %s\n", nes_summary);
+    if (cc.summary && dp_nes_summary(&res, cc.summary)) fprintf(stderr, "deepeel: cannot write %s\n", cc.summary);
     if (nes_heat && dp_nes_heat(&res, nes_heat)) fprintf(stderr, "deepeel: cannot write %s\n", nes_heat);
-    if (romdata) {
-        FILE *f = fopen(romdata, "w");
-        if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", romdata); }
+    if (cc.romdata) {
+        FILE *f = fopen(cc.romdata, "w");
+        if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", cc.romdata); }
         else { dp_nes_romdata(f, &res); fclose(f); }
     }
     if (rtcode_path) {
@@ -1380,7 +1377,7 @@ static int cmd_pce(int argc, char **argv) {
                         "[--text FILE] [--map FILE] [--png FILE] [--evidence FILE] [--entry ADDR]... [--ctx-cap N] [--ctx-live] [--summary FILE]\n");
         return 2;
     }
-    const char *path = NULL, *text = NULL, *map = NULL, *png = NULL, *pce_ev = NULL, *pce_cov = NULL, *pce_rd = NULL, *pce_summary = NULL;
+    const char *path = NULL, *png = NULL;
     DpPceOptions opt = dp_pce_options();
     DpCliCommon cc = { .jobs = 1 };
     int multitap = 0;
@@ -1397,10 +1394,7 @@ static int cmd_pce(int argc, char **argv) {
             if (opt.entry_count >= 16) { fprintf(stderr, "deepeel: at most 16 --entry\n"); return 2; }
             opt.entries[opt.entry_count++] = (uint16_t)strtoul(argv[++i], NULL, 0);
         }
-        else if (!strcmp(a, "--png") && i + 1 < argc) png = argv[++i];
-        else if (!strcmp(a, "--summary") && i + 1 < argc) pce_summary = argv[++i];
-        else if (!strcmp(a, "--cov") && i + 1 < argc) pce_cov = argv[++i];
-        else if (!strcmp(a, "--romdata") && i + 1 < argc) pce_rd = argv[++i];
+        else if (!strcmp(a, "--png") && i + 1 < argc) png = argv[++i];   // --summary/--cov/--romdata come from DP_CLI_COMMON
         else if (!strcmp(a, "--tas") && i + 1 < argc) {
             if (opt.tas_count < 8) snprintf(opt.tas_paths[opt.tas_count++], 512, "%s", argv[++i]);
             else { fprintf(stderr, "deepeel: at most 8 TAS movies\n"); return 2; }
@@ -1419,7 +1413,7 @@ static int cmd_pce(int argc, char **argv) {
         else { fprintf(stderr, "deepeel: unknown option %s\n", a); return 2; }
     }
     const char *rtcode_path = cc.rtcode; int pce_jobs = cc.jobs, pce_watch = cc.watch; const char *pce_dump = cc.dump;
-    text = cc.text; map = cc.map; pce_ev = cc.evidence;
+    const char *text = cc.text, *map = cc.map, *pce_ev = cc.evidence;
     dp_cli_arm_stop(cc.time_limit);
     if (opt.fork_cap > 255) opt.fork_cap = 255; // per-site counters are bytes
     if (opt.pad_fork_cap > 255) opt.pad_fork_cap = 255;
@@ -1446,7 +1440,7 @@ static int cmd_pce(int argc, char **argv) {
     fprintf(stderr, "deepeel: pce explore done — steps %llu, paths %llu, forks %llu, sections %u, copies %u\n",
             (unsigned long long)res->steps, (unsigned long long)res->paths,
             (unsigned long long)res->forks, res->section_count, res->copy_count);
-    if (pce_summary && dp_pce_summary(res, pce_summary)) fprintf(stderr, "deepeel: cannot write %s\n", pce_summary);
+    if (cc.summary && dp_pce_summary(res, cc.summary)) fprintf(stderr, "deepeel: cannot write %s\n", cc.summary);
     if (text) {
         FILE *f = fopen(text, "w");
         if (!f) fprintf(stderr, "deepeel: cannot write %s\n", text);
@@ -1466,14 +1460,14 @@ static int cmd_pce(int argc, char **argv) {
         if (!f) fprintf(stderr, "deepeel: cannot write %s\n", pce_ev);
         else { dp_pce_evidence(f, res); fclose(f); }
     }
-    if (pce_cov) {
-        FILE *f = fopen(pce_cov, "w");
-        if (!f) fprintf(stderr, "deepeel: cannot write %s\n", pce_cov);
+    if (cc.cov) {
+        FILE *f = fopen(cc.cov, "w");
+        if (!f) fprintf(stderr, "deepeel: cannot write %s\n", cc.cov);
         else { dp_pce_cov(f, res); fclose(f); }
     }
-    if (pce_rd) {
-        FILE *f = fopen(pce_rd, "w");
-        if (!f) fprintf(stderr, "deepeel: cannot write %s\n", pce_rd);
+    if (cc.romdata) {
+        FILE *f = fopen(cc.romdata, "w");
+        if (!f) fprintf(stderr, "deepeel: cannot write %s\n", cc.romdata);
         else { dp_pce_romdata(f, res); fclose(f); }
     }
     if (rtcode_path) {
@@ -1639,7 +1633,7 @@ static int cmd_md(int argc, char **argv) {
         DpCliCommon cc = { .jobs = 1 };
         int md_unbounded = 0;
         dp_md_options_default(&o);
-        const char *movie_path = NULL, *md_summary = NULL, *md_heat = NULL, *md_cov = NULL, *md_romdata = NULL;
+        const char *movie_path = NULL, *md_heat = NULL;
         for (int i = 4; i < argc; i++) {
             const char *a = argv[i];
             if (i + 1 >= argc && strcmp(a, "--lot-drain") && strcmp(a, "--unbounded")) { fprintf(stderr, "deepeel: bad option %s\n", a); rc = 2; break; }
@@ -1676,10 +1670,7 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--play-pool")) o.play_pool = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--shoot-every")) o.shoot_every = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--tas-any-rom")) md_any_rom = 1;
-            else if (!strcmp(a, "--summary")) md_summary = argv[++i];
-            else if (!strcmp(a, "--heat")) md_heat = argv[++i];
-            else if (!strcmp(a, "--cov")) md_cov = argv[++i];
-            else if (!strcmp(a, "--romdata")) md_romdata = argv[++i];
+            else if (!strcmp(a, "--heat")) md_heat = argv[++i];   // --summary/--cov/--romdata come from DP_CLI_COMMON
             else { fprintf(stderr, "deepeel: unknown option %s\n", a); rc = 2; break; }
         }
         const char *text = cc.text, *map = cc.map, *ev = cc.evidence, *md_dump = cc.dump; md_rtcode = cc.rtcode;
@@ -1727,10 +1718,10 @@ static int cmd_md(int argc, char **argv) {
                 if (md_rtcode) dp_md_explore_rtcode(&r, md_rtcode);
                 if (map) dp_md_explore_map(&r, map);
                 if (ev) dp_md_explore_evidence(&r, ev);
-                if (md_summary) dp_md_explore_summary(&r, md_summary);
+                if (cc.summary) dp_md_explore_summary(&r, cc.summary);
                 if (md_heat) dp_md_explore_heat(&r, md_heat);
-                if (md_cov) dp_md_explore_cov(&r, md_cov);
-                if (md_romdata) dp_md_explore_romdata(&r, md_romdata);
+                if (cc.cov) dp_md_explore_cov(&r, cc.cov);
+                if (cc.romdata) dp_md_explore_romdata(&r, cc.romdata);
                 dp_md_results_free(&r);
             }
         }
