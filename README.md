@@ -148,7 +148,9 @@ libretro, PNG adaptatif) et sa feuille de route sont décrites dans
 essayées, gardées ou abandonnées avec leurs mesures, est tenu dans
 [docs/CATALOGUE.fr.md](docs/CATALOGUE.fr.md) ; le tableau comparatif des
 campagnes par plateforme est [docs/COMPARATIF.fr.md](docs/COMPARATIF.fr.md)
-(régénéré par `tools/compare_platforms.py`).
+(régénéré par `tools/compare_platforms.py`) ; l'interface de consommation
+par m0boy (`.cov`, PNG, `.map`, code en RAM) est documentée dans
+[docs/m0boy-consommation.fr.md](docs/m0boy-consommation.fr.md).
 
 - **Game Boy** : la machine est celle de m0boy (MBC0/1/2/3/5, PPU/APU/timer
   réels, CPU interprété) — 17 variantes MBC×RAM compilées au build, un
