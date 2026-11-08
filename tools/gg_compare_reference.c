@@ -13,6 +13,8 @@
 #include <dlfcn.h>
 
 #include "gg.h"
+#include "z80.h"
+#include "backend.h"
 #include "tas.h"
 
 /* --- libretro 1.x surface (subset) ---------------------------------------- */
@@ -33,6 +35,8 @@ enum { LR_ID_B = 0, LR_ID_START = 3, LR_ID_UP = 4,
        LR_ID_DOWN = 5, LR_ID_LEFT = 6, LR_ID_RIGHT = 7, LR_ID_A = 8 };
 
 static unsigned g_pad;               /* sega mask of this frame (up=1..start=64) */
+static uint16_t g_ref_fb[160 * 144]; /* last reference frame (5:5:5 raw) */
+static unsigned g_snap;              /* dump both screens at this 1-based frame */
 static uint64_t g_ref_hash;
 static unsigned g_ref_w, g_ref_h;
 static unsigned g_ref_fmt = LR_PF_0RGB1555;
@@ -52,6 +56,9 @@ static void ref_video(const void *data, unsigned w, unsigned h, size_t pitch) {
     }
     g_ref_hash = h1;
     g_ref_w = w; g_ref_h = h;
+    if (w == 160 && h == 144)
+        for (unsigned y = 0; y < h; y++)
+            memcpy(g_ref_fb + y * 160, row + y * pitch, 320);
 }
 static int16_t ref_input(unsigned port, unsigned device, unsigned index, unsigned id) {
     (void)device; (void)index;
@@ -81,15 +88,24 @@ static bool ref_env(unsigned cmd, void *data) {
 
 /* --- device under test: the m0boy GG runtime ------------------------------- */
 static uint64_t g_dut_rowhash, g_dut_hash;
+static uint16_t g_dut_last[160 * 144];
+static uint16_t g_dut_store[GG_ROW_STRIDE];   /* the runtime renders into row_out (+GG_ROW_PAD) */
+static const DpSegaBackend *g_b;              /* deepeel's GG backend (BIOS-less bus profile) */
+static z80_decoded_t g_d;                     /* runtime decode cache */
 static void dut_row(void *u, unsigned y, uint16_t *px) {
     (void)u; (void)y;
     for (unsigned i = 0; i < GG_WIDTH; i++) {
         unsigned p = px[i], r = (p >> 11) & 31, g = (p >> 6) & 31, b = p & 31;
         g_dut_rowhash = (g_dut_rowhash ^ (r * 16 + g * 4 + b)) * 0x100000001b3ull;
+        g_dut_last[y * 160 + i] = p;
     }
 }
 static int dut_line(void *u, unsigned y) { (void)u; (void)y; return 1; }
-static void dut_frame(void *u) { (void)u; g_dut_hash = g_dut_rowhash; g_dut_rowhash = 0; }
+static void dut_frame(void *u) {
+    (void)u; g_dut_hash = g_dut_rowhash; g_dut_rowhash = 0;
+    machine.stop = 1;   /* end the frame's instruction loop */
+    /* the frame callback sees the finished frame in g_dut_last */
+}
 
 #define RS(sym, var) do { void *p = dlsym(lib, sym); if (!p) { fprintf(stderr, "missing %s\n", sym); return 2; } *(void **)&(var) = p; } while (0)
 
@@ -142,6 +158,11 @@ int main(int argc, char **argv) {
 
     gg_init_system(rom, (size_t)n, NULL, 0);
     machine.row = dut_row; machine.draw_line = dut_line; machine.frame = dut_frame;
+    machine.row_out = g_dut_store + GG_ROW_PAD; machine.row_tmp = NULL;
+    g_b = dp_sega_backend_gg();
+    g_b->init(rom, (size_t)n, NULL, 0);   /* BIOS-less profile, bus hooks, mapper detection */
+    machine.row = dut_row; machine.draw_line = dut_line; machine.frame = dut_frame;
+    machine.row_out = g_dut_store + GG_ROW_PAD; machine.row_tmp = NULL;
     gg_reset();
 
     uint8_t *ref_ram = mem_data(2);   /* RETRO_MEMORY_SYSTEM_RAM */
@@ -151,34 +172,100 @@ int main(int argc, char **argv) {
         return 2;
     }
     unsigned ram_diff_total = 0; long first_diff_frame = -1; unsigned first_diff_off = 0;
+    /* DP_GG_SHIFT=-1: compare the reference frame n with the DUT frame n-1
+     * (the reference boots through the BIOS, the DUT starts the game one
+     * frame earlier; measured by cross-correlating dumped RAMs) */
+    const int shift = getenv("DP_GG_SHIFT") ? atoi(getenv("DP_GG_SHIFT")) : 0;
+    static uint8_t prev_ram[8192]; int have_prev = 0;
+    const uint8_t *dut_cmp = machine.ram;
+    const int every = getenv("DP_GG_EVERY") ? atoi(getenv("DP_GG_EVERY")) : 0;
+    g_snap = getenv("DP_GG_SNAP") ? (unsigned)strtoul(getenv("DP_GG_SNAP"), NULL, 0) : 0;
+    /* DP_GG_DUMP=prefix: append both work RAMs per frame (prefix.ref.bin,
+     * prefix.dut.bin) for offline frame-alignment analysis */
+    FILE *dump_ref = NULL, *dump_dut = NULL;
+    const char *dump = getenv("DP_GG_DUMP");
+    if (dump) {
+        char path[512];
+        snprintf(path, sizeof path, "%s.ref.bin", dump);
+        dump_ref = fopen(path, "wb");
+        snprintf(path, sizeof path, "%s.dut.bin", dump);
+        dump_dut = fopen(path, "wb");
+        if (!dump_ref || !dump_dut) { fprintf(stderr, "cannot open DP_GG_DUMP files\n"); return 2; }
+    }
+    const unsigned watch = getenv("DP_GG_WATCH") ? (unsigned)strtoul(getenv("DP_GG_WATCH"), NULL, 16) : 0;
     for (unsigned frame = 0; frame < limit; frame++) {
         g_pad = tas.masks[frame] & 0x7Fu;   /* bit 128 is the SMS Reset: GG ignores it */
         gg_buttons(g_pad);
         g_retro_run();
-        machine.cyc += GG_FRAME_CYCLES;
-        sg_sync();
+        /* one real frame: instructions until the frame-end event (same loop
+         * as the sega explorer's play_step: service, decode, execute, advance) */
+        machine.stop = 0;
+        unsigned long long ins = 0;   /* safety bound: a frame is ~7k instructions */
+        while (!machine.stop && ins < 10000000ull) {
+            z80_t *c = g_b->cpu();
+            if (c->fault) break;
+            unsigned cycles = z80_service(c);
+            if (!cycles) {
+                if (!z80_decode(c, &g_d)) break;
+                uint8_t bytes[8];
+                for (unsigned j = 0; j < g_d.length && j < sizeof bytes; j++) bytes[j] = g_b->read((uint16_t)(c->pc + j));
+                DpZ80Instruction in;
+                if (!dp_z80_decode(bytes, g_d.length, c->pc, &in)) break;
+                cycles = z80_execute_decoded(c, &g_d);
+                z80_finish(c, cycles);
+            }
+            g_b->advance(cycles);
+            ins++;
+        }
+        if (ins >= 10000000ull && !machine.stop)
+            fprintf(stderr, "warning: frame %u ended on the instruction bound, not the frame event\n", frame + 1);
         unsigned diff = 0, first = 0;
+        dut_cmp = (shift == -1 && have_prev) ? prev_ram : machine.ram;
         for (size_t i = 0; i < ref_ram_size; i++)
-            if (ref_ram[i] != machine.ram[i]) { if (!diff) first = (unsigned)i; diff++; }
+            if (ref_ram[i] != dut_cmp[i]) { if (!diff) first = (unsigned)i; diff++; }
+        if (shift == -1) { memcpy(prev_ram, machine.ram, sizeof prev_ram); have_prev = 1; }
         ram_diff_total += diff;
         if (diff && first_diff_frame < 0) { first_diff_frame = (long)frame + 1; first_diff_off = first; }
-        if (frame < 10 || (frame + 1) % 300 == 0 || (diff && first_diff_frame == (long)frame + 1))
+        if (every || frame < 10 || (frame + 1) % 300 == 0 || (diff && first_diff_frame == (long)frame + 1))
             printf("%u ramdiff=%u first=$%04x screen=%s ref=%ux%u\n", frame + 1, diff, first,
                    (g_ref_hash == g_dut_hash) ? "same" : "diff", g_ref_w, g_ref_h);
-        if (diff && first_diff_frame == (long)frame + 1) {
+        unsigned dut_lit = 0, ref_lit = 0;
+        for (unsigned i = 0; i < 160 * 144; i++) { if (g_dut_last[i]) dut_lit++; if (g_ref_fb[i]) ref_lit++; }
+        static unsigned plit_r = 1, plit_d = 1;
+        if (every && (ref_lit != plit_r || dut_lit != plit_d))
+            fprintf(stderr, "lit %u ref=%u dut=%u pc=%04x sp=%04x\n", frame + 1, ref_lit, dut_lit, machine.cpu.pc, machine.cpu.sp);
+        plit_r = ref_lit; plit_d = dut_lit;
+        if (watch && watch + 1 < ref_ram_size)
+            fprintf(stderr, "watch %u $%04x ref=%02x%02x dut=%02x%02x\n", frame + 1, watch,
+                    ref_ram[watch + 1], ref_ram[watch], dut_cmp[watch + 1], dut_cmp[watch]);
+        if (diff && first_diff_frame == (long)frame + 1)
             fprintf(stderr, "first work-RAM divergence at frame %u, offset $%04x\n", frame + 1, first);
-            const char *hex = getenv("DP_GG_DIFF_HEX");
-            if (hex) {
-                unsigned kmax = (unsigned)strtoul(hex, NULL, 0);
-                for (size_t i = first; i < ref_ram_size && i < first + kmax; i++)
-                    fprintf(stderr, "  $%04zx ref=%02x dut=%02x\n", i, ref_ram[i], machine.ram[i]);
-            }
+        const char *hex = getenv("DP_GG_DIFF_HEX");
+        if (hex && diff && (frame < 20 || (frame + 1) % 300 == 0)) {
+            unsigned kmax = (unsigned)strtoul(hex, NULL, 0);
+            for (size_t i = 0; i < ref_ram_size && kmax; i++)
+                if (ref_ram[i] != machine.ram[i]) {
+                    fprintf(stderr, "  %u $%04zx ref=%02x dut=%02x\n", frame + 1, i, ref_ram[i], machine.ram[i]);
+                    kmax--;
+                }
         }
         fflush(stdout);
+        if (dump_ref) { fwrite(ref_ram, 1, ref_ram_size, dump_ref); fwrite(machine.ram, 1, sizeof machine.ram, dump_dut); }
+        if (g_snap && frame + 1 == g_snap) {
+            char path[256];
+            snprintf(path, sizeof path, "/tmp/gg_ref.ppm");
+            FILE *o = fopen(path, "wb");
+            if (o) { fprintf(o, "P6\n160 144\n255\n"); for (unsigned i = 0; i < 160 * 144; i++) { unsigned p = g_ref_fb[i]; fputc(((p >> 10) & 31) * 255 / 31, o); fputc(((p >> 5) & 31) * 255 / 31, o); fputc((p & 31) * 255 / 31, o); } fclose(o); }
+            snprintf(path, sizeof path, "/tmp/gg_dut.ppm");
+            o = fopen(path, "wb");
+            if (o) { fprintf(o, "P6\n160 144\n255\n"); for (unsigned i = 0; i < 160 * 144; i++) { unsigned p = g_dut_last[i]; fputc(((p >> 11) & 31) * 255 / 31, o); fputc(((p >> 6) & 31) * 255 / 31, o); fputc((p & 31) * 255 / 31, o); } fclose(o); }
+            fprintf(stderr, "screens dumped to /tmp/gg_ref.ppm /tmp/gg_dut.ppm\n");
+        }
     }
     printf("frames %u, mean ramdiff %.2f, first divergence %s (%ld, offset $%04x)\n", limit,
            limit ? (double)ram_diff_total / limit : 0.0,
            first_diff_frame < 0 ? "none" : "at", first_diff_frame, first_diff_off);
+    if (dump_ref) { fclose(dump_ref); fclose(dump_dut); }
     free(rom); free(tas.masks);
     dlclose(lib);
     return 0;
