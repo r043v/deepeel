@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.250.0 LANGUAGES C)
+project(deepeel VERSION 0.250.1 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -543,6 +543,7 @@ add_library(deepeel_pce STATIC
   src/platform/pce/hucdec.c
   src/mach/pce_machine.c
   src/mach/huc_isa.c
+  src/mach/m68k_isa.c
   src/platform/pce/pcemach.c
   src/platform/pce/registry.c
   src/platform/pce/explore.c

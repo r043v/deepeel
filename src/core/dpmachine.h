@@ -89,6 +89,7 @@ const DpIsa *dp_isa_sm83(void);
 const DpIsa *dp_isa_z80(void);
 const DpIsa *dp_isa_m6502(void);
 const DpIsa *dp_isa_huc6280(void);
+const DpIsa *dp_isa_68000(void);
 
 // normalised register view (pc/sp and the flag byte; regs are CPU specific)
 typedef struct DpRegs {

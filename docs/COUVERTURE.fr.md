@@ -1135,7 +1135,13 @@ Implémentations existantes à envelopper :
   `src/mach/huc_isa.c`, `dp_isa_huc6280` : conditions du décodeur 0..7 +
   BBR/BBS 8+bit, BRK = appel par $FFF6, illégaux = NOP deux cycles de la
   machine, `disasm` via `dp_huc_format`) ; épinglée par `test_dpisa` ;
-- `src/cpu/m68k/m68k_disasm.c`.
+- `src/cpu/m68k/m68k_disasm.c` — **fait** (0.250.1 :
+  `src/mach/m68k_isa.c`, `dp_isa_68000` : classes du décodeur statique,
+  jsr (An) = appel indirect, jmp (An) = indirect, STOP = halt, pointeurs 24
+  bits gros-boutiens, `disasm` = texte du décodeur ; `mem_operand` reste à
+  l'explorateur MD) ; épinglée par `test_dpisa`. **§7.3 complet** : les cinq
+  jeux d'instructions (sm83, z80, m6502, huc6280, 68000) derrière la même
+  interface, chaque classification vérifiée par son test.
 
 ### 7.4 Modules communs (le noyau)
 

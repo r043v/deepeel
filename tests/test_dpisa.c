@@ -99,11 +99,36 @@ static void test_huc6280(void) {
     CHECK(isa->disasm(jsr, sizeof jsr, 0, txt, sizeof txt) == 3 && strstr(txt, "9000"), "disasm jsr");
 }
 
+static void test_68000(void) {
+    const DpIsa *isa = dp_isa_68000();
+    CHECK(!strcmp(isa->name, "68000") && isa->big_endian && isa->ptr_width == 3, "name, big-endian, 24-bit pointers");
+    DpFlowInfo fi;
+    uint8_t nop[] = { 0x4E, 0x71 };
+    CHECK(isa->flow(nop, 0x400, &fi) == 2 && fi.kind == DP_FLOW_SEQ && fi.fall, "nop");
+    uint8_t bra[] = { 0x60, 0x10 };
+    CHECK(isa->flow(bra, 0x400, &fi) == 2 && fi.kind == DP_FLOW_JUMP && !fi.fall && fi.target == 0x412, "bra");
+    uint8_t bne[] = { 0x66, 0x08 };
+    CHECK(isa->flow(bne, 0x400, &fi) == 2 && fi.kind == DP_FLOW_COND && fi.fall && fi.target == 0x40A && fi.cond == 6, "bne");
+    uint8_t jsr[] = { 0x4E, 0xB9, 0x00, 0x10, 0x00, 0x00 };
+    CHECK(isa->flow(jsr, 0x400, &fi) == 6 && fi.kind == DP_FLOW_CALL && fi.call && fi.target == 0x100000, "jsr abs");
+    uint8_t jsran[] = { 0x4E, 0x90 };
+    CHECK(isa->flow(jsran, 0x400, &fi) == 2 && fi.kind == DP_FLOW_INDIRECT && fi.call, "jsr (a3) is an indirect call");
+    uint8_t rts[] = { 0x4E, 0x75 };
+    CHECK(isa->flow(rts, 0x400, &fi) == 2 && fi.kind == DP_FLOW_RET && !fi.fall, "rts");
+    uint8_t jmpd[] = { 0x4E, 0xD0 };   // jmp (a3): register-indirect, computed
+    CHECK(isa->flow(jmpd, 0x400, &fi) == 2 && fi.kind == DP_FLOW_INDIRECT, "jmp (an)");
+    uint8_t stop[] = { 0x4E, 0x72, 0x27, 0x00 };
+    CHECK(isa->flow(stop, 0x400, &fi) == 4 && fi.halt, "stop");
+    char txt[96];
+    CHECK(isa->disasm(jsr, sizeof jsr, 0, txt, sizeof txt) == 6 && strstr(txt, "100000"), "disasm jsr");
+}
+
 int main(void) {
     test_z80();
     test_sm83();
     test_m6502();
     test_huc6280();
+    test_68000();
     printf(fails ? "dpisa: %d checks failed\n" : "dpisa: all checks passed\n", fails);
     return fails != 0;
 }
