@@ -529,6 +529,17 @@ code / data / padding.
   statique 16716, tas 12835, fork 7120, random 2306, attract 427 —
   la réaffectation du cœur attract (0.251.5) est justifiée par les
   chiffres.
+- **Logo Nintendo prouvé donnée** (0.251.7) : quand la cartouche porte le
+  logo canonique à $0104 (les 16 premiers octets vérifiés), la plage
+  $0104-$0133 est prouvée donnée au scan statique — le boot ROM la lit
+  intégralement à chaque mise sous tension sur tout matériel réel, c'est
+  une donnée par construction matérielle, pas une inférence. Un blob
+  différent à $0104 (ROM non démarrable) reste intact : la règle prouve
+  la position, jamais le contenu. Compteur `logo_data`. Mesure : la ROM
+  blargg `09-op r,r` (verrou historique de la campagne 0.250.1 : la
+  distribution indirecte du harnais empêchait les fourches d'atteindre
+  les cibles) passe à **100,0 % connu** — son résidu de 19 octets était
+  la fin du logo que seul le boot lisait.
 - `--tas-dir D` (répétable) : découvre tous les films du répertoire (triés
   par ressemblance de titre ; `.vmv`, `.vbm`, `.bk2`,
   `.gbm`, `.fm2`, `.log`), les films retenus sont loggés sur stderr.

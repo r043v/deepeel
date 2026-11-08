@@ -389,6 +389,22 @@ int dp_io_slot(const DpResults *res, uint16_t addr) {
 void dp_static_scan(DpResults *res) {
     const DpCart *c = res->cart;
     size_t n = (size_t)c->rom_banks * 0x4000;
+    // the Nintendo logo at $0104-$0133: hardware-mandated data the boot ROM
+    // verifiably reads on every power-on.  Only when the cartridge carries
+    // the canonical logo (a hardware-bootable ROM); a mismatched blob at the
+    // same offset stays untouched — the rule proves position, never content
+    {
+        static const uint8_t logo_pre[16] = { 0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B,
+                                              0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D };
+        if (c->rom_size >= 0x134 && !memcmp(c->rom + 0x104, logo_pre, sizeof logo_pre))
+            for (uint32_t a = 0x104; a <= 0x133; a++)
+                if (!(res->data_flags[a] & DP_DF_STATIC)) {
+                    res->data_flags[a] |= DP_DF_STATIC;
+                    res->prov_data++;
+                    res->logo_data++;
+                    dp_cov_mark(&res->first, res->src_flags, a, DP_SRC_STATIC_SCAN, 0, 0);
+                }
+    }
     // padding: runs of 8+ identical 00 or FF bytes, the whole run marked
     // (an unmarked head of 7 would leave a systematic unknown fringe)
     uint32_t run = 0;

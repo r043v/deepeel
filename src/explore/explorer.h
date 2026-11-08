@@ -293,6 +293,7 @@ typedef struct DpResults {
     uint32_t nocredit_cuts; // paths ended by --nocredit-cut (nothing new learned for N steps)
     uint32_t seeds_natural, seeds_spec;
     uint32_t seeds_dedup_bypass; // seeds deposited despite the saturated dedup set
+    uint32_t logo_data;         // $0104-$0133 proven data (canonical logo present)
     uint32_t seeds_skipped_data; // pointer-scan targets inside proven data/static zones
     uint64_t vram_write_pages[2], sram_write_pages; // page bitmaps
     uint8_t oam_written;
