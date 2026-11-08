@@ -562,7 +562,7 @@ Sinon elle est listée comme limite.
 | Surface | État | Contribution exigée |
 |---|---|---|
 | SM83, IRQ ×5, RST ×8 | ✅ | — |
-| PPU (LY, STAT, LYC, SCX…) | réel m0boy, registres événementiels **statiques** pour l'explorateur | **Sonde** sur lectures LY/STAT (§3.7) |
+| PPU (LY, STAT, LYC, SCX…) | réel m0boy ; **sondes de valeur** 0.249.48 sur lectures LY/STAT/DIV/TIMA/SC/SB (§3.7) | ✅ |
 | OAM DMA `$FF46` | ✅ ROM | **Copie** depuis la WRAM avec provenance (chaîne ROM→WRAM→OAM) |
 | APU NR10-NR52, wave RAM `$FF30-3F` | observé seulement | **Type** music (registres) / samples (wave RAM) |
 | Timer DIV/TIMA/TMA/TAC | réel, IRQ fourchée | **Sonde** DIV/TIMA (graines RNG) |
@@ -571,14 +571,9 @@ Sinon elle est listée comme limite.
 | MBC0/1/2/3/5 | ✅ | **Banque** |
 | RTC MBC3 | **non simulé** (`gbl_core.c` : « no RTC on this target ») | **Sonde** des registres RTC |
 | MBC6/7, MMM01, HuC1/3, TAMA5, caméra | **refusés** | Machine ou libretro (§8) |
-| CGB : VBK, SVBK, HDMA1-5, palettes BCPS/OCPS, KEY1 | registres listés, **non émulés** ; la doc dit « VBK réellement commuté », ce qui est faux | **Copie** HDMA, **Banque** VBK/SVBK, **Type** palette |
+| CGB : VBK, SVBK, HDMA1-5, palettes BCPS/OCPS, KEY1 | registres listés, **non émulés** (le runtime est DMG) ; HDMA copie modélisée, drapeau `modelled` retiré en J0 | **Copie** HDMA (✅), Banque VBK/SVBK (limite documentée), **Type** palette |
 | SGB (commandes par P1) | ◐ 0.158 : paquets décodés depuis les écritures `$FF00` (compte par commande, rapport) ; rien n'est rendu, bordures/palettes non typées | **Type** des paquets SGB (bordures, palettes) |
 | Boot ROM | absente (registres au reset DMG) | limite documentée |
-
-**Corrections de doc à faire** : `docs/GB.fr.md` §Limites (l.121-135) dit encore
-« Pas de PPU/APU/timer » et « VBK réellement commuté ». Les deux affirmations
-sont fausses aujourd'hui, et les implications `HDMA`/`MODELLED` des registres
-CGB sont mensongères.
 
 ### 3.2 SMS / Game Gear / SG-1000
 
@@ -587,7 +582,7 @@ CGB sont mensongères.
 | Z80, VDP (TMS9918 / mode 4), PSG SN76489 | ✅ | **Type** : port VDP → tiles/tilemap/palette selon l'adresse VRAM/CRAM ; PSG → music |
 | `$3E` contrôle mémoire, mappers sega/codemasters/korean150 | ✅ | — |
 | Pause NMI | ✅ | — |
-| V/H-counter `$7E/$7F` | statiques | **Sonde** (§3.7) |
+| V/H-counter `$7E/$7F`, statut VDP `$BF` | **sondes de valeur** 0.251.11 (§3.7) : fourche par valeur plausible, garde « jamais sur IRQ en attente », `--no-event-probes` | ✅ |
 | YM2413 FM (SMS japonaise) | ◐ 0.156 : écritures `$F0/$F1` observées et typées « music » dans le rapport (la puce n'est pas émulée) | Obs. + **Type** music |
 | Phaser, paddle, lunettes 3D, port de lien GG | absents | **Sonde** catalogue |
 
@@ -658,6 +653,18 @@ n'en sort que par les gardes. C'est la limite principale de la règle « registr
 - le compteur `probe_event_*` est rapporté.
 
 **Garde.** Le cap par site est le même que pour D7, avec report au-delà (§6).
+
+**Implémentation.** GB : 0.249.48 (`fork_event`, LY/STAT/DIV/TIMA/SB/SC, la
+constante de comparaison qui suit la lecture élargit le catalogue). Sega :
+0.251.11 (`fork_event_ports`) — les ports `DP_IMPL_EVENT` du registre natif
+(VDP_STATUS, V/H_COUNTER ; GG_START reste aux sondes d'entrée), la valeur
+substituée est portée par le chemin en file et lue une fois (`in_bus`), la
+machine parente jamais touchée ; **garde de principe : jamais de sonde sur
+IRQ/NMI en attente ni sur un chemin de fourche IRQ** — une substitution ne
+doit pas masquer une ligne d'interruption. Opt-out `--no-event-probes`,
+fourches/coupures comptées (texte, JSON, fusion `--jobs`). Mesure A/B Aleste
+(SMS, 70 M pas) : neutre (couverture identique, 14 fourches tirées), zéro
+faux positif.
 
 ---
 
