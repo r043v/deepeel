@@ -159,5 +159,8 @@ struct DpMdMach;
 DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err, size_t errsz);
 // the Mega Drive backend (src/mach/md_machine.c); takes ownership of the machine
 DpMachine *dp_machine_md(struct DpMdMach *impl);
+// the PC Engine backend (src/mach/pce_machine.c): wraps the live runtime
+// singleton (dp_pce_init first)
+DpMachine *dp_machine_pce(void);
 
 #endif

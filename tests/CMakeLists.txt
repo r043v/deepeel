@@ -297,7 +297,8 @@ add_test(NAME zip_cli COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/zip_cli.sh $<TARGET
 set_tests_properties(zip_cli PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 
 add_executable(test_dpmachine test_dpmachine.c)
-target_link_libraries(test_dpmachine PRIVATE deepeel_z80 deepeel_sega deepeel_nes deepeel_core m)
+target_link_libraries(test_dpmachine PRIVATE deepeel_z80 deepeel_sega deepeel_nes deepeel_pce deepeel_core m)
+target_include_directories(test_dpmachine PRIVATE ${M0BOY_DIR}/targets/pce/runtime)
 target_include_directories(test_dpmachine PRIVATE ${M0BOY_DIR}/targets/sg1000/runtime)
 add_dependencies(test_dpmachine fixtures)
 add_test(NAME dpmachine COMMAND test_dpmachine ${CMAKE_CURRENT_BINARY_DIR})

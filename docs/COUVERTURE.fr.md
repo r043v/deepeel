@@ -1094,8 +1094,9 @@ contrat de point fixe sur la fixture SMS) ; 0.249.95 : NES
 l'archive préfixée pour que ses appels suivent le clonage `--jobs`) et MD
 (`dp_machine_md` — possède le `DpMdMach`, fetch big-endian via `peek32`,
 `rom_index` = adresse visible car la ROM est en $000000, observateurs sur
-les hooks 68000). Restent à envelopper : PCE, libretro niveau A (déjà
-listé §8).
+les hooks 68000) ; 0.249.97 : PCE (`dp_machine_pce` — le singleton runtime
+vu derrière l'interface, `run()` = `dp_pce_step`, observateurs sur la
+trace huc6280). Reste à envelopper : libretro niveau A (déjà listé §8).
 
 ### 7.3 `DpIsa` — le statique générique
 

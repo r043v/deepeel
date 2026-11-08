@@ -9,6 +9,7 @@
 #include "../src/platform/sega/backend.h"
 #include "../src/mach/nesmach.h"
 #include "../src/mach/mdmach.h"
+#include "../src/platform/pce/pce.h"
 #include "test_util.h"
 
 static unsigned obs_steps, obs_reads;
@@ -240,6 +241,31 @@ int main(int argc, char **argv) {
         CHECK_MSG(ran > 0, "md run executes instructions");
         free(a); free(bb); free(mrom);
         m->close(m);   // owns the DpMdMach
+    }
+    // machine: the PC Engine runtime behind the generic view (spec §7.2)
+    if (argc > 1) {
+        char path[512];
+        snprintf(path, sizeof path, "%s/fix_pce_slide.pce", argv[1]);
+        FILE *f = fopen(path, "rb");
+        CHECK_MSG(f, "pce fixture opens");
+        static uint8_t prom[1 << 21];
+        size_t pn = fread(prom, 1, sizeof prom, f);
+        fclose(f);
+        CHECK_MSG(dp_pce_init(prom, pn) == 1, "pce runtime inits");
+        dp_pce_reset();
+        DpMachine *m = dp_machine_pce();
+        CHECK_MSG(m && !strcmp(m->name, "pce"), "pce machine wired");
+        uint32_t n = m->state_bytes(m);
+        uint8_t *a = malloc(n), *bb = malloc(n);
+        m->save(m, a); m->load(m, a); m->save(m, bb); m->load(m, bb); m->save(m, a);
+        CHECK_MSG(!memcmp(a, bb, n), "pce save/load/save reaches a fixed point");
+        CHECK_MSG(m->fetch(m, 0x0000) == (pn % 0x2000 == 512 ? prom[512] : prom[0]), "pce fetch sees the ROM entry");
+        m->load(m, bb);
+        unsigned ran = 0;
+        while (ran < 64 && m->run(m)) ran++;
+        CHECK_MSG(ran > 0, "pce run executes steps");
+        free(a); free(bb);
+        m->close(m);
     }
     TEST_DONE("dpmachine");
 }

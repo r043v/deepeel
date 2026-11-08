@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.249.96 LANGUAGES C)
+project(deepeel VERSION 0.249.97 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -540,6 +540,7 @@ target_link_libraries(deepeel PRIVATE deepeel_z80 deepeel_nes deepeel_nes2 deepe
 set(DP_PCE_RUNTIME "${M0BOY_DIR}/targets/pce/runtime")
 add_library(deepeel_pce STATIC
   src/platform/pce/hucdec.c
+  src/mach/pce_machine.c
   src/platform/pce/pcemach.c
   src/platform/pce/registry.c
   src/platform/pce/explore.c
