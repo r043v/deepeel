@@ -12,6 +12,7 @@
 #include "explore.h"
 #include "../../explore/stop.h"
 #include "../../explore/lots.h"
+#include "../../explore/frontier.h"
 #include "../../explore/novelty.h"
 #include "../../mach/nesmach.h"
 #include "../../cpu/m6502/m6502.h"
@@ -35,6 +36,8 @@ typedef struct {
     uint8_t kind;        // DP_NES_TREE_* when the creator set it, else derived
     uint8_t in_handler;  // forked inside an NMI/IRQ handler: its code keeps the IRQ mark
     uint8_t probe;       // deliberate input probe (D10): never context-evicted (as GB's priority seeds)
+    uint8_t tier;        // deferral tier (0 = power-on budgets); budgets x4 per tier
+    uint8_t reason;      // DP_R_* why it waits (per-reason caps, src/explore/frontier.c)
 } DpNesPathState;
 
 #define DP_NES_STATE_MAX 65536
@@ -61,6 +64,10 @@ typedef struct {
     uint8_t prev_ram[65], prev_io[65];     // C2: masks as last projected (slot 64 = global);
     uint32_t prev_wram[65];                // a mask that grew invalidates the seen contexts
     DpNesPathState *park; uint32_t park_len, park_cap; // deferred holding area (queue full)
+    DpNesPathState *defer; uint32_t defer_len, defer_cap; // cut continuations (frontier §6, shared policy)
+    uint32_t defer_reason[DP_R_COUNT];                    // held per reason (noisy ones cap at a quarter)
+    DpNesPathState *cur_path;                             // the slot being run (deferral inherits its metadata)
+    uint8_t cur_tier, deferred_cut;
     DpLotFile *lot;                        // disk lot: park overflow, wall leftovers, --lot resume
     uint8_t ram_exec[0x800];           // RAM bytes executed since their last write (SMC tracking)
     int32_t ram_prod[0x800];           // last ROM cell read at any earlier time before the store (approximate producer, -1 none)
@@ -105,6 +112,37 @@ typedef struct {
 
 static uint32_t loop_bump(DpNesRun *x, uint64_t key);
 static int snap_push(DpNesRun *x, DpNesPathState *s);
+
+// cut continuations (frontier §6, shared policy src/explore/frontier.c): the
+// machine waits in a holding area and resumes with a 4x budget, defer_tiers
+// times; the noisy fork-cap reason holds at most a quarter of the area.  With
+// defer_tiers = 0 the cut stays final and counted, as before.
+static void nes_defer(DpNesRun *x, int loop) {
+    DpNesResults *r = x->r;
+    int reason = loop ? DP_R_LOOP : DP_R_STEPS;
+    if (!x->opt.defer_tiers) return;
+    if (x->cur_tier >= x->opt.defer_tiers) { if (loop) r->loop_final++; else r->steps_final++; return; }
+    if (dp_frontier_room(x->cur_tier, x->defer_len, x->defer_reason[reason], reason) != DP_ROOM_OK) { r->defer_dropped++; return; }
+    if (x->defer_len >= x->defer_cap) {
+        uint32_t nc = x->defer_cap ? x->defer_cap * 2 : 64;
+        DpNesPathState *g = realloc(x->defer, (size_t)nc * sizeof *g);
+        if (!g) { r->defer_dropped++; return; }
+        x->defer = g; x->defer_cap = nc;
+    }
+    uint8_t *img = malloc(dp_nesmach_state_size());
+    if (!img) { r->defer_dropped++; return; }
+    dp_nesmach_save(x->m, img);
+    DpNesPathState d = { img, x->cur_path ? x->cur_path->forced : 1, 0,
+                         x->cur_path ? x->cur_path->parent_path : 0,
+                         x->cur_path ? x->cur_path->parent_step : 0, 0,
+                         x->cur_path ? x->cur_path->choice : 0,
+                         x->cur_path ? x->cur_path->kind : 0,
+                         x->in_handler, x->cur_path ? x->cur_path->probe : 0,
+                         (uint8_t)(x->cur_tier + 1), (uint8_t)reason };
+    x->defer[x->defer_len++] = d; x->defer_reason[reason]++;
+    if (loop) r->loop_deferred++; else r->steps_deferred++;
+    x->deferred_cut = 1;   // the path's tree node stays open (issue DEFERRED)
+}
 
 static void record_copy(DpNesRun *x, uint64_t path, uint64_t step, uint16_t pc,
                         uint32_t source, uint32_t destination, uint8_t channel) {
@@ -355,8 +393,9 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
     if (x->play_mode) r->play_steps_accounted++;
 
     // budgets: per-path first, then the global one
-    if (!x->play_mode && x->path_steps >= x->opt.max_steps) {
+    if (!x->play_mode && x->path_steps >= (x->opt.max_steps << (2u * x->cur_tier))) {
         r->step_cuts++;
+        nes_defer(x, 0);
         nes_trace.stop = 1;
         return;
     }
@@ -504,8 +543,9 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
         t.p = (uint8_t)dp_nesmach_p(x->m);
         if (dp_m6502_condition(in.condition, &t) && in.target < pc) {
             uint64_t key = site >= 0 ? ((uint64_t)site << 16) | (in.target & 0xFFFF) : 0;
-            if (loop_bump(x, key) > x->opt.loop_cap) {
+            if (loop_bump(x, key) > (x->opt.loop_cap << (2u * x->cur_tier))) {
                 r->loop_cuts++;
+                nes_defer(x, 1);
                 nes_trace.stop = 1;
                 return;
             }
@@ -877,6 +917,7 @@ static int queue_room(DpNesRun *x) {
 static int queue_push(DpNesRun *x, const DpNesPathState *s) {
     if (!queue_room(x)) { x->r->queue_cuts++; return 0; }
     DpNesPathState c = *s;
+    c.tier = c.tier ? c.tier : x->cur_tier;   // a fork runs with its parent's budgets
     if (!c.choice) c.choice = tree_add(x, &c);
     x->queue[x->queue_len++] = c;
     return 1;
@@ -967,6 +1008,7 @@ static void run_path_inner(DpNesRun *x, uint32_t slot) {
     x->path_steps = 0; x->exp_pc = -1; x->in_handler = self->in_handler;
     x->was_outside = 0;
     x->jam_pending = 0;
+    x->cur_path = self; x->cur_tier = self->tier; x->deferred_cut = 0;
     uint64_t path = x->paths_opened++;
     r->paths++;
     x->cur_choice = self->choice;
@@ -980,8 +1022,9 @@ static void run_path_inner(DpNesRun *x, uint32_t slot) {
 
     // runs until the hook's budgets stop it (step, global, jam, loop)
     dp_nesmach_run(x->m, UINT64_MAX);
-    tree_close(x, x->cur_choice, DP_NES_ISSUE_DONE);
+    tree_close(x, x->cur_choice, x->deferred_cut ? DP_NES_ISSUE_DEFERRED : DP_NES_ISSUE_DONE);
     x->cur_choice = 0;
+    x->cur_path = NULL; x->deferred_cut = 0;
     free(own);
 }
 
@@ -1271,6 +1314,7 @@ DpNesOptions dp_nes_options(void) {
     o.queue_cap = 8192;
     o.loop_cap = 4096;
     o.fork_cap = 4;
+    o.defer_tiers = 0;   // the CLI turns it on (3 tiers, like sega); library callers keep final cuts
     o.seed_irq = 1;
     o.play_frames = 0; o.demo_frames = 0;
     o.play_sessions = 8;
@@ -1484,6 +1528,11 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                 for (;;) {
                     if (x.failed) break;
                     if (x.queue_len == 0 && x.park_len > 0) { x.queue[x.queue_len++] = x.park[--x.park_len]; r->parked_resumed++; }
+                    if (x.queue_len == 0 && x.defer_len > 0) {   // cut continuations (frontier §6)
+                        DpNesPathState d = x.defer[--x.defer_len];
+                        if (d.reason < DP_R_COUNT) x.defer_reason[d.reason]--;
+                        x.queue[x.queue_len++] = d; r->defer_resumed++;
+                    }
                     if (x.queue_len == 0 && dp_lf_pending(x.lot)) { // the disk backlog comes back
                         DpNesPathState m; uint32_t ml = 0, bl = 0; uint8_t *blob = NULL;
                         if (dp_lf_get(x.lot, &m, &ml, &blob, &bl)) {
@@ -1523,12 +1572,17 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
         if (!lot_spill(&x, &x.park[i])) { r->pending_dropped++; tree_close(&x, x.park[i].choice, DP_NES_ISSUE_DEFERRED); }
         free(x.park[i].state);
     }
+    for (uint32_t i = 0; i < x.defer_len; i++) {
+        if (!lot_spill(&x, &x.defer[i])) { r->pending_dropped++; tree_close(&x, x.defer[i].choice, DP_NES_ISSUE_DEFERRED); }
+        free(x.defer[i].state);
+    }
     if (x.lot) {
         r->lot_written = x.lot->written; r->lot_read = x.lot->read_back;
         r->lot_pending = dp_lf_pending(x.lot);
         dp_lf_close(x.lot, x.opt.lot_path);
     }
     free(x.park);
+    free(x.defer);
     if (x.opt.tree_path && r->tree_count && !x.opt.no_finalize) {
         FILE *tf = fopen(x.opt.tree_path, "wb");
         if (tf) {
@@ -2082,6 +2136,11 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
         (unsigned long long)r->forks, (unsigned long long)r->irq_forks,
         (unsigned long long)r->evicted);
     if (r->queue_grown) fprintf(out, "  queue grown %llu times\n", (unsigned long long)r->queue_grown);
+    if (r->steps_deferred || r->loop_deferred)
+        fprintf(out, "  frontier: deferred steps %llu loop %llu; resumed %llu; final steps %llu loop %llu; dropped %llu\n",
+                (unsigned long long)r->steps_deferred, (unsigned long long)r->loop_deferred,
+                (unsigned long long)r->defer_resumed, (unsigned long long)r->steps_final,
+                (unsigned long long)r->loop_final, (unsigned long long)r->defer_dropped);
     fprintf(out, "  cuts: step %llu loop %llu fork %llu queue %llu global %llu path %llu\n",
         (unsigned long long)r->step_cuts, (unsigned long long)r->loop_cuts,
         (unsigned long long)r->fork_cuts, (unsigned long long)r->queue_cuts,

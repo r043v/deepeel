@@ -12,6 +12,7 @@
 #include "core/md5.h"
 #include "core/cart.h"
 #include "core/cart_md.h"
+#include "explore/frontier.h"
 #include "explore/md_trace.h"
 #include "core/machine.h"
 #include "core/sta.h"
@@ -1267,7 +1268,7 @@ static int cmd_nes(int argc, char **argv) {
         return 2;
     }
     const char *path = NULL, *text = NULL, *map = NULL, *evidence = NULL, *cov = NULL, *romdata = NULL, *mapper_name = "auto", *nes_summary = NULL, *nes_heat = NULL;
-    DpNesOptions opt = dp_nes_options();
+    DpNesOptions opt = dp_nes_options();   // defer_tiers 0: cuts stay final; --defer-tiers N opts in (sega's CLI defaults to 3, NES measured neutral on DuckTales)
     DpCliCommon cc = { .jobs = 1 };
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
@@ -1276,6 +1277,10 @@ static int cmd_nes(int argc, char **argv) {
         DP_CLI_PLAYED(opt)
         else if (!strcmp(a, "--play-pool") && i + 1 < argc) opt.play_pool = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--ctx-live")) opt.ctx_live = 1;
+        else if (!strcmp(a, "--defer-tiers") && i + 1 < argc) {
+            opt.defer_tiers = (unsigned)strtoul(argv[++i], NULL, 0);
+            if (opt.defer_tiers > DP_TIER_MAX) opt.defer_tiers = DP_TIER_MAX;
+        }
         else if (!strcmp(a, "--cov") && i + 1 < argc) cov = argv[++i];
         else if (!strcmp(a, "--romdata") && i + 1 < argc) romdata = argv[++i];
         else if (!strcmp(a, "--summary") && i + 1 < argc) nes_summary = argv[++i];

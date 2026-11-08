@@ -129,3 +129,16 @@ l'éviction à l'empilage tue des états qui divergent dans un état que la
 fenêtre n'a pas encore lu. L'expérience est réverted ; la C2 par défaut sur
 NES attendra des sections vivantes par course (comme GB), la projection reste
 disponible en opt-in. Observations de l'outil, pas des mesures de matériel.
+
+## 0.249.90 — frontière partagée (§6) : `--defer-tiers` (opt-in)
+
+L'admission des continuations coupées passe par la politique partagée
+`src/explore/frontier.c` (`dp_frontier_room`, raisons `DP_R_*`), comme sega
+(0.249.89) : une coupe de budget de chemin (`step`) ou de rebouclage
+(`loop`) garde son état et reprend avec un budget ×4, jusqu'à
+`--defer-tiers N` (0 : coupes finales, défaut — mesuré **neutre** sur
+DuckTales à 3 M pas : 16,96 % connus avec et sans, 2 reprises seulement) ;
+la raison bruyante `fork-cap` est bornée à un quart de la zone d'attente,
+les fourches héritent du palier de leur chemin parent, et les restes vont au
+lot disque. Rapport : `frontier: deferred steps/loop; resumed; final;
+dropped`. Test `nes_defer_tiers`.

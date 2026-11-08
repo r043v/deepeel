@@ -97,6 +97,7 @@ struct DpNesResults_;
 typedef struct {
     uint64_t max_total;
     uint32_t max_steps, max_paths, queue_cap, queue_max, loop_cap, fork_cap;   // queue_max: adaptive growth ceiling (0: fixed queue_cap)
+    unsigned defer_tiers;   // frontier §6 (shared policy): cut continuations resume with a 4x budget, N tiers (0: cuts stay final)
     int seed_irq;          // fork the NMI/IRQ entries when enabled (default on)
     // play sessions: random-input frames before the fork exploration.  The
     // visited bytes land in the same physical map as the exploration.
@@ -166,6 +167,7 @@ typedef struct DpNesResults_ {
     uint64_t evicted;          // exact-state dedup admissions refused
     uint64_t lot_written, lot_read, lot_pending; // disk lot (--lot): spilled / read back / left on disk
     uint64_t parked, parked_resumed, parked_lost; // queue-full states held aside (§6), resumed, lost at the holding cap
+    uint64_t steps_deferred, loop_deferred, defer_resumed, steps_final, loop_final, defer_dropped, fork_final; // frontier §6 shared policy
     uint64_t pending_dropped;  // queued states left undrained at a wall
     uint64_t ram_writes, io_writes, io_reads;
     uint64_t smc_writes; uint16_t smc_first_pc; // writes into already executed RAM bytes
