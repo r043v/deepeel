@@ -21,6 +21,7 @@ infructueux.
 | Tables de pointeurs inter-banques (S1 NES) | NES | DuckTales + table croisée ; fixture `nes_table_xbank` | `docs/NES.fr.md` (0.249.81) |
 | Conteneur `.bk2` partagé (noyau §7.4, premier module) | NES, Sega, PCE, MD | 1038 → 692 lignes de chargeurs, noyau 55 lignes ; tests verts ; MD : ligne SHA1 du header ne masque plus un faux MD5 | `docs/COUVERTURE.fr.md` §7.4 (0.249.87) |
 | Bouffées aléatoires depuis les instantanés TAS (J3) | SG/SMS/GG/MSX | modèle GB porté ; fixture : 2 instantanés × 2 bouffées = 4 sessions, 2000 pas comptés ; test `z80_tas_rng` | `docs/Z80.fr.md` (0.249.86) |
+| Politique de frontière §6 commune (`dp_frontier_room`, raisons `DP_R_*`) | les 5 explorateurs | sega : compteur inchangés, raison suivie dans le spool ; NES : opt-in mesuré **neutre** (DuckTales 16,96 % avec et sans) ; PCE : opt-in (fixture : reportées/reprises) ; MD : gain mesuré (fixture `--path-steps 50` : 57 courses contre 29, 28 reportées toutes reprises ; Sonic inchangé : 410 513 pas / 10 794 octets) | `docs/GB.fr.md` 0.249.89, `docs/NES.fr.md`, `docs/PCE.fr.md`, `docs/MD.fr.md` |
 | `--summary` JSON de campagne | PCE | même forme que MD ; Raiden 5 M pas : 18,3 % connus ; ligne PCE du tableau comparatif | `docs/PCE.fr.md` (0.249.85) |
 
 ## Opt-in (mesurées, pas par défaut)
