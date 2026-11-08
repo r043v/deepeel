@@ -154,11 +154,16 @@ forme (524 → 490 octets, corrélation toujours plate) ; la machine d'état
 \$0080 avance d'un pas par trame côté m0boy (écritures tracées avec leurs
 pc : le NMI de la trame 6 et la réponse de la boucle principale tombent
 dans la même trame) ; le buffer OAM \$0200+ cesse d'être mis à jour côté
-m0boy après la trame 5 quand la référence continue. L'instrument de trace
-des lectures \$2002 (hook + `dp_nesmach_ppu_status`, nouvel accesseur non
-destructif) montre un artefact de mesure à lever (les hooks tirent aussi
-sur les fetches d'opérandes) avant de conclure sur les valeurs vues par le
-jeu.
+m0boy après la trame 5 quand la référence continue. L'instrument est désormais **value-exact** (0.250.9) : le hook `rd` du
+runtime m0boy porte la valeur **rendue** (le macro `rd` du 6502 calcule
+l'octet puis appelle le hook — post-lecture, `DpNesHooks.on_read` porte la
+valeur), et le handler NMI de DuckTales est décodé : `$92` est le compteur
+de trames (`INC \$92` à \$C0AC), `\$90` reçoit `\$FF` (\$C0B0), la lecture
+`\$2002` à \$C02C n'utilise pas sa valeur (effacement du drapeau/du loffset).
+Le 0x90 vu à la lecture = vblank + open-bus bas (le `\$90` écrit dans
+\$2000 juste avant) — conforme. Reste à comparer côté Nestopia : la valeur
+de la même lecture (open-bus) et le moment où la boucle principale consomme
+le drapeau.
 
 Le banc a déjà trouvé un vrai bug du runtime : `dp_nesmach_frame`
 n'initialisait jamais `steps`/`budget` — le hook de pas voyait `0 >= 0` et

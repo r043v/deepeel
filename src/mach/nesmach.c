@@ -200,9 +200,9 @@ static void t_step(void *u, unsigned pc, unsigned op) {
     if (d->h.on_step) d->h.on_step(d->h.user, pc, op);
 }
 
-static void t_rd(void *u, unsigned a) {
+static void t_rd(void *u, unsigned a, unsigned v) {
     DpNesMach *d = u;
-    if (d->h.on_read) d->h.on_read(d->h.user, a);
+    if (d->h.on_read) d->h.on_read(d->h.user, a, v);
 }
 
 static void t_wr(void *u, unsigned a, unsigned v) {

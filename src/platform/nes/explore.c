@@ -648,7 +648,7 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
     }
 }
 
-static void hook_read(void *user, unsigned addr) {
+static void hook_read(void *user, unsigned addr, unsigned value) {
     DpNesRun *x = user;
     if (addr < 0x2000) {
         x->live_pages |= (uint8_t)(1u << ((addr & 0x7FFu) >> 8));

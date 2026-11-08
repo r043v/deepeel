@@ -30,9 +30,9 @@ static void nes_on_step(void *user, unsigned pc, unsigned op) {
     NesMachWrap *w = user;
     if (w->obs && w->obs->on_step) w->obs->on_step(w->user, pc, (uint8_t)op, 0);
 }
-static void nes_on_read(void *user, unsigned addr) {
+static void nes_on_read(void *user, unsigned addr, unsigned value) {
     NesMachWrap *w = user;
-    if (w->obs && w->obs->on_read) w->obs->on_read(w->user, addr, 0);
+    if (w->obs && w->obs->on_read) w->obs->on_read(w->user, addr, (uint8_t)value);
 }
 static void nes_on_write(void *user, unsigned addr, unsigned value) {
     NesMachWrap *w = user;

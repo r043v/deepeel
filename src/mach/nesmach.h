@@ -16,7 +16,7 @@ typedef struct {
     /* before the instruction at pc executes (opcode fetched) */
     void (*on_step)(void *user, unsigned pc, unsigned op);
     /* data accesses only (the opcode fetch and the stack stay out) */
-    void (*on_read)(void *user, unsigned addr);
+    void (*on_read)(void *user, unsigned addr, unsigned value);
     void (*on_write)(void *user, unsigned addr, unsigned value);
     /* an NMI ($FFFA) or IRQ/BRK ($FFFE) sequence starts */
     void (*on_interrupt)(void *user, unsigned vector);
