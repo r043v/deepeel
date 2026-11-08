@@ -38,11 +38,16 @@ qui interpète encore — restent, elles servent à atteindre zéro interpréteu
   instructions compilées, **interpreter-only 0** — la qualité de la
   recompilation suit la couverture du code, le repli ne réapparaît pas.
 
-## Reste à faire (axe 9)
+## État de la désactivation (axe 9, fait côté code)
 
-- Désactiver la découverte propre de m0boy : le harnais `m0_explore` est
-  partagé par tous les cœurs de couverture (GB, SG-1000, PICO-8) — la
-  désactivation se décide par cœur, session dédiée (le dépôt m0boy a une
-  session concurrente active).
-- Les cartes MD/PCE/NES consommées par les recompilateurs correspondants
-  (le canal `.map` texte couvre déjà SG/GG/SMS/MSX).
+- `--explore` (le joueur guidé par la couverture, la découverte propre) est
+  **retiré de tous les hôtes de cœurs** : meta/GB, sg1000, gamegear, nes,
+  pce, vectrex — chaque hôte refuse avec un renvoi vers deepeel. Le harnais
+  `m0_explore` reste dans `targets/common` (PICO-8 reste scripté, d'autres
+  usages peuvent subsister).
+- **Reste actif volontairement** : l'enregistrement de couverture en jouant
+  (mode humain) et la mesure incrémentale du binaire recompilé (ce qui
+  interpète encore) — c'est la voie vers zéro interpréteur, pas de la
+  découverte.
+- Les cartes MD/PCE/NES consommées par les recompilateurs correspondants :
+  le canal `.map` texte couvre déjà SG/GG/SMS/MSX (`--coverage-map`).
