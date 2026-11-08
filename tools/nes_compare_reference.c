@@ -17,12 +17,12 @@
 /* one frame = run to the frame boundary: the runtime's frame hook raises the
  * observer stop flag, the run honours it at the next instruction boundary */
 static DpNesMach *g_dut;
-static void dut_on_frame(void *user) { (void)user; dp_nesmach_cut(g_dut); }
-/* sample the RAM where nestopia's retro_run returns: the vblank start (the
- * NMI sequence), not the frame end — the game's main loop consumes the NMI
- * flag during the frame tail, so an end-of-frame snapshot reads one state
- * step ahead of the reference (measured: the $0080 pipeline one step ahead
- * every frame on DuckTales) */
+/* ONE cut per iteration, at the NMI (line 241): the frame-end cut competed
+ * with it and the iterations alternated between the two points — the RAM
+ * dumps alternated pre/post handler (the $92 counter read 1,1,2,2 where the
+ * reference reads 1,2,3: the handler runs every frame, measured by counting
+ * the INC $92 events).  Nestopia's retro_run returns one frame; the NMI is
+ * the DUT's matching boundary. */
 static void dut_on_interrupt(void *user, unsigned vector) {
     (void)user;
     if (vector == 0xFFFA) dp_nesmach_cut(g_dut);
@@ -129,12 +129,21 @@ int main(int argc, char **argv) {
     DpNesMach *dut = dp_nesmach_open(rom, (size_t)n, -1, derr, sizeof derr);
     if (!dut) { fprintf(stderr, "nesmach: %s\n", derr); return 2; }
     g_dut = dut;
-    DpNesHooks hooks = { .user = dut, .on_frame = dut_on_frame, .on_interrupt = dut_on_interrupt };
+    DpNesHooks hooks = { .user = dut, .on_interrupt = dut_on_interrupt };
     dp_nesmach_set_hooks(dut, &hooks);
     dp_nesmach_reset(dut);
 
     unsigned ram_diff_total = 0; long first_diff_frame = -1; unsigned first_diff_off = 0;
     const int every = getenv("DP_NES_EVERY") ? atoi(getenv("DP_NES_EVERY")) : 0;
+    /* DP_NES_SHIFT=n: compare the reference frame n with the DUT frame n+n
+     * (measured on DuckTales: a constant +5 — Nestopia's boot spends ~5 more
+     * frames before the game's first NMI than the BIOS-less m0boy boot) */
+    const int shift = getenv("DP_NES_SHIFT") ? atoi(getenv("DP_NES_SHIFT")) : 0;
+    static uint8_t *ref_ring[16]; static int ring_n = 0;   // delayed reference snapshots
+    if (shift > 0) {
+        for (int i = 0; i < shift && i < 16; i++) ref_ring[i] = malloc(ref_ram_size);
+        ring_n = shift < 16 ? shift : 16;
+    }
     /* DP_NES_DUMP=prefix: append both RAMs per frame for offline
      * frame-alignment analysis (cross-correlation, as the GG bench) */
     FILE *dump_ref = NULL, *dump_dut = NULL;
@@ -157,9 +166,17 @@ int main(int argc, char **argv) {
         dp_nesmach_cut(dut);   /* clear the stop flag through the public API */
         dp_nesmach_run(dut, UINT64_MAX);
         const uint8_t *dut_ram = dp_nesmach_ram(dut);
+        const uint8_t *ref_cmp = ref_ram;
+        if (shift > 0 && ring_n == shift) {
+            // the ring holds the reference snapshots of the last `shift` frames
+            static int ring_at = 0;
+            memcpy(ref_ring[ring_at], ref_ram, ref_ram_size);
+            ring_at = (ring_at + 1) % ring_n;
+            ref_cmp = ref_ring[ring_at];   // `shift` frames old
+        }
         unsigned diff = 0, first = 0;
         for (size_t i = 0; i < ref_ram_size; i++)
-            if (ref_ram[i] != dut_ram[i]) { if (!diff) first = (unsigned)i; diff++; }
+            if (ref_cmp[i] != dut_ram[i]) { if (!diff) first = (unsigned)i; diff++; }
         ram_diff_total += diff;
         if (diff && first_diff_frame < 0) { first_diff_frame = (long)frame + 1; first_diff_off = first; }
         if (every || frame < 10 || (frame + 1) % 300 == 0 || (diff && first_diff_frame == (long)frame + 1))

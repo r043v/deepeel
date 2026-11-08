@@ -169,10 +169,22 @@ rafraîchissent le latch (`io.latch = data`) et la lecture renvoie
 **chaque trame** (1,2,3,…24), m0boy **une trame sur deux** — le handler
 NMI de m0boy **sort tôt en alternance** (les trames sans `INC \$92` n'ont
 pas le `STX \$90` final non plus : `\$90=255` n'apparaît qu'aux trames
-impaires). La cause est la poignée de main boucle-principale/NMI dont la
-phase diffère (le drapeau qui décide la sortie tôt alterne) — à tracer :
-la branche de sortie tôt du handler et le drapeau la pilotant, côté m0boy,
-puis le même côté Nestopia.
+impaires). La suite a **résolu l'alternance et caractérisé l'écart** :
+
+- l'alternance 1,1,2,2 du compteur était un **artefact du harnais** : deux
+  hooks coupaient la course (NMI ligne 241 et fin de trame ligne 262) et
+  les itérations alternaient entre les deux points de coupe ; le comptage
+  direct des `INC $92` montre que le handler s'exécute **chaque trame** des
+  deux côtés. Corrigé : une seule coupe par itération, au NMI ;
+- au nouveau régime les compteurs avancent chaque trame avec un **décalage
+  constant de +5** (le boot de Nestopia dépense ~5 trames de plus avant la
+  première NMI du jeu — son warm-up PPU ; `DP_NES_SHIFT=5` aligne \$92) ;
+- mais au niveau \$92 la RAM diffère encore largement (~520 octets) avec
+  des **valeurs différentes**, pas décalées : un écart comportemental semé
+  à l'init (une lecture sensible au timing qui a nourri RNG ou un choix de
+  mode) — la chasse continue avec l'instrument value-exact (côté m0boy les
+  lectures \$2002/\$4016/\$4015 de la trame 6 sont traçables ; côté
+  Nestopia par patch local de son `NstPpu.cpp`).
 
 Le banc a déjà trouvé un vrai bug du runtime : `dp_nesmach_frame`
 n'initialisait jamais `steps`/`budget` — le hook de pas voyait `0 >= 0` et
