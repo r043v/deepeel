@@ -695,6 +695,18 @@ Super Mario Land World : toujours 100,0 % (0,0 % déduit) avec le patch.
 - **m0boy** lit ce PNG : `gbrecomp --coverage x.map.png` prend `deepeel_cov`
   (classement du budget de flash par les comptes joués) et, sans
   `--rom-profile`, `deepeel_rom` pour choisir les blocs ROM résidents.
+- **m0boy lit aussi le `.cov` directement** (interface de consommation, axe 9
+  du plan) : `--coverage campagne.cov` — le format « gbl coverage v1 » de
+  deepeel est le format natif du recompilateur (`bank addr flags(1=exec,
+  2=entry,4=speculative,8=data) hits`, plages de données prouvées avec une
+  5ᵉ colonne de longueur). Une campagne deepeel complète pilote donc la
+  recompilation sans découverte propre côté m0boy. Mesure bout-en-bout
+  (Super Mario Land World, `.cov` de la campagne TAS deepeel, 42 706
+  enregistrements) : 6 963 instructions compilées en 74 régions,
+  **interpreter-only 0**, 21 125 enregistrements de données prouvées laissés
+  en données — la recompilation sans interpréteur tient déjà sur une
+  couverture partielle ; ce qui reste à 100 % est la couverture elle-même
+  (axe 10), pas le repli.
 
 Super Mario Land World (TAS muggv3) : PNG de 146 Ko contre 155 Ko pour
 l'ancien format, qui ne portait qu'une image par cellules de 64 octets et le
