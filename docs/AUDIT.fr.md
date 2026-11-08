@@ -11,16 +11,14 @@ remesure pas l'outil.
 | GB | 32 | 6 | 0 | 1 |
 | SMS/GG | 32 | 5 | 0 | 2 |
 | MSX | 32 | 5 | 0 | 2 |
-| NES | 22 | 15 | 0 | 2 |
+| NES | 23 | 14 | 0 | 2 |
 | PCE | 26 | 12 | 0 | 1 |
-| MD | 23 | 15 | 0 | 1 |
+| MD | 25 | 13 | 0 | 1 |
 
-Cellules ouvertes (◐ ou ✗) : 58.
+Cellules ouvertes (◐ ou ✗) : 55.
 
 | # | Technique | Plateforme | État |
 |---|---|---|---|
-| D10 | Sondes de lecture manette | NES | ◐ 0.230.0 8 boutons port 1 + 8 port 2 + 10 combinaisons ; 0.243.0 `--pad-full` : les 256 masques du port 1 (test `nes_pad_full`), hors défaut ; pas de multitap |
-| D10 | Sondes de lecture manette | MD | ◐ 0.240.0 14 sondes dont pad 6 boutons (runtime m0boy `pad_ext`) ; 0.245.0 `--pad-full` : les 256 masques à trois boutons (test `md_pad_full`), hors défaut ; 0.249.16 `--pad-full6` : les 256 masques × 16 combinaisons X/Y/Z/Mode du pad 6 boutons (test `md_pad_full6`) ; pas de multitap |
 | S2 | Fermeture statique de flot | NES | ◐ saut/appel/branche, fenêtre propre |
 | S2 | Fermeture statique de flot | PCE | ◐ fenêtre MPR ; 0.232.0 arêtes inter-fenêtres résolues vers la page unique observée (test `pce`), 0.242.0 vues multiples : l'arête est suivie dans chaque page observée de la fenêtre cible (≤ 16) ; reste le mapping qui change en cours de page (TAM) |
 | S2 | Fermeture statique de flot | MD | ◐ 0.132 Bcc/DBcc/BRA/JMP/JSR depuis les plages exécutées, confiance perdue après BSR/JSR ; bus 68000 plat : une seule vue par construction ; reste le raffinement des écritures indirectes et le budget en cascade |
@@ -59,7 +57,6 @@ Cellules ouvertes (◐ ou ✗) : 58.
 | J1 | Sessions jouées multi-thread + pool | NES | ◐ 0.207 xorshift + pool de checkpoints `--play-pool` |
 | J1 | Sessions jouées multi-thread + pool | PCE | ◐ 0.208 pool `--play-pool` |
 | J1 | Sessions jouées multi-thread + pool | MD | ◐ 0.209 pool `--play-pool` ; 0.189.0 `--play-frames/--play-sessions/--play-seed` (xorshift) ; sessions jouées dans une seule instance (le multi-thread passe par `--jobs`, F3) |
-| J3 | Identité ROM des films | MD | ◐ BK2 : MD5 d'en-tête comparé au ROM (avertissement seulement, le hash BizHawk MD n'est pas fiable) ; GMV sans identité |
 | J4 | Go-Explore (cellules écran) | GB | ◐ `--session-cells` 0.144.0 (pool de sessions) |
 | J4 | Go-Explore (cellules écran) | SMS/GG | ◐ `--novelty` 0.141.0 + `--novelty-cells 1` (cellules écran, vies apprises ; test `z80_novelty_cells`) (SMS/GG/SG) |
 | J4 | Go-Explore (cellules écran) | MSX | ◐ `--novelty` 0.141.0 + `--novelty-cells 1` (idem ; test `z80_novelty_cells`) (MSX) |
