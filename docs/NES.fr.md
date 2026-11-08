@@ -161,9 +161,18 @@ valeur), et le handler NMI de DuckTales est décodé : `$92` est le compteur
 de trames (`INC \$92` à \$C0AC), `\$90` reçoit `\$FF` (\$C0B0), la lecture
 `\$2002` à \$C02C n'utilise pas sa valeur (effacement du drapeau/du loffset).
 Le 0x90 vu à la lecture = vblank + open-bus bas (le `\$90` écrit dans
-\$2000 juste avant) — conforme. Reste à comparer côté Nestopia : la valeur
-de la même lecture (open-bus) et le moment où la boucle principale consomme
-le drapeau.
+\$2000 juste avant) — conforme. Comparaison faite côté Nestopia par ses sources : les écritures PPU
+rafraîchissent le latch (`io.latch = data`) et la lecture renvoie
+`latch & 0x1F` — après le `\$90` écrit dans `\$2000`, Nestopia lit aussi
+`0x90` : l'open-bus est **écarté**. Le chronométrage du compteur `\$92`
+(dump par trame, 60 trames) donne l'arme : la référence incrémente `\$92`
+**chaque trame** (1,2,3,…24), m0boy **une trame sur deux** — le handler
+NMI de m0boy **sort tôt en alternance** (les trames sans `INC \$92` n'ont
+pas le `STX \$90` final non plus : `\$90=255` n'apparaît qu'aux trames
+impaires). La cause est la poignée de main boucle-principale/NMI dont la
+phase diffère (le drapeau qui décide la sortie tôt alterne) — à tracer :
+la branche de sortie tôt du handler et le drapeau la pilotant, côté m0boy,
+puis le même côté Nestopia.
 
 Le banc a déjà trouvé un vrai bug du runtime : `dp_nesmach_frame`
 n'initialisait jamais `steps`/`budget` — le hook de pas voyait `0 >= 0` et
