@@ -18,6 +18,15 @@
  * observer stop flag, the run honours it at the next instruction boundary */
 static DpNesMach *g_dut;
 static void dut_on_frame(void *user) { (void)user; dp_nesmach_cut(g_dut); }
+/* sample the RAM where nestopia's retro_run returns: the vblank start (the
+ * NMI sequence), not the frame end — the game's main loop consumes the NMI
+ * flag during the frame tail, so an end-of-frame snapshot reads one state
+ * step ahead of the reference (measured: the $0080 pipeline one step ahead
+ * every frame on DuckTales) */
+static void dut_on_interrupt(void *user, unsigned vector) {
+    (void)user;
+    if (vector == 0xFFFA) dp_nesmach_cut(g_dut);
+}
 
 /* --- libretro 1.x surface (subset) ---------------------------------------- */
 #define LR_ENV_SET_PIXEL_FORMAT 10
@@ -120,7 +129,7 @@ int main(int argc, char **argv) {
     DpNesMach *dut = dp_nesmach_open(rom, (size_t)n, -1, derr, sizeof derr);
     if (!dut) { fprintf(stderr, "nesmach: %s\n", derr); return 2; }
     g_dut = dut;
-    DpNesHooks hooks = { .user = dut, .on_frame = dut_on_frame };
+    DpNesHooks hooks = { .user = dut, .on_frame = dut_on_frame, .on_interrupt = dut_on_interrupt };
     dp_nesmach_set_hooks(dut, &hooks);
     dp_nesmach_reset(dut);
 

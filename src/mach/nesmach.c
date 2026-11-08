@@ -320,6 +320,13 @@ void dp_nesmach_cut(DpNesMach *d) {
     nes_trace.stop = 1;
 }
 
+/* the live PPU status byte, without a read's side effects (the fidelity
+ * harness traces what the game sees at its $2002 polls) */
+unsigned dp_nesmach_ppu_status(const DpNesMach *d) {
+    (void)d;
+    return machine.ppu.status;
+}
+
 uint64_t dp_nesmach_run(DpNesMach *d, uint64_t max_steps) {
     nes_trace.user = d;
     nes_trace.step = t_step;

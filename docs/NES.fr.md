@@ -147,6 +147,18 @@ premières trames identiques ; divergence à la trame 6 (`$0080`), pas un
 décalage de trame (corrélation plate) — le compteur de trames du jeu avance
 côté m0boy (4 contre 1). À démêler : timing exact de \$2002 (la boucle
 d'attente vblank du boot), frontière de trame interne de Nestopia.
+Avancées de l'enquête : le boot identifié (la boucle classique des 4
+vblanks en \$FEF3-\$FEF9, les deux machines l'exécutent — trames 1-5
+identiques) ; l'échantillon au début du NMI (ligne 241) ne change pas la
+forme (524 → 490 octets, corrélation toujours plate) ; la machine d'état
+\$0080 avance d'un pas par trame côté m0boy (écritures tracées avec leurs
+pc : le NMI de la trame 6 et la réponse de la boucle principale tombent
+dans la même trame) ; le buffer OAM \$0200+ cesse d'être mis à jour côté
+m0boy après la trame 5 quand la référence continue. L'instrument de trace
+des lectures \$2002 (hook + `dp_nesmach_ppu_status`, nouvel accesseur non
+destructif) montre un artefact de mesure à lever (les hooks tirent aussi
+sur les fetches d'opérandes) avant de conclure sur les valeurs vues par le
+jeu.
 
 Le banc a déjà trouvé un vrai bug du runtime : `dp_nesmach_frame`
 n'initialisait jamais `steps`/`budget` — le hook de pas voyait `0 >= 0` et
