@@ -1097,7 +1097,12 @@ Fonctions, toutes sur un octet de ROM dans une vue :
 - `disasm`.
 
 Implémentations existantes à envelopper :
-- `src/cpu/sm83/` ;
+- `src/cpu/sm83/` — **fait** (`sm83_isa.c`, consommée par `forks.c` et
+  `closure.c` GB) ; 0.249.93 : `src/cpu/z80/z80_isa.c` (`dp_isa_z80`,
+  décodeur partagé du runtime, conditions natives 0..8, LDIR = boucle sur
+  elle-même, bornes de longueur du premier octet, `disasm` sur décalage de
+  vue comme sm83) — épinglée par `test_dpisa` ; adoption par la fermeture
+  statique sega à suivre ;
 - `src/cpu/z80/` ;
 - `src/cpu/m6502/` ;
 - `src/platform/pce/hucdec.c` ;

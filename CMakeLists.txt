@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.249.92 LANGUAGES C)
+project(deepeel VERSION 0.249.93 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -338,6 +338,7 @@ target_link_libraries(deepeel PRIVATE deepeel_libretro ${CMAKE_DL_LIBS})
 add_library(deepeel_z80 STATIC
   ${M0BOY_DIR}/targets/sg1000/runtime/z80.c
   src/cpu/z80/z80.c
+  src/cpu/z80/z80_isa.c
   src/cpu/z80/provenance.c
   src/cpu/z80/command.c
   src/platform/sega/sega.c)
@@ -466,7 +467,7 @@ set_target_properties(deepeel_msx2 PROPERTIES IMPORTED_LOCATION ${DP_MSX2_ARCHIV
   INTERFACE_LINK_LIBRARIES deepeel_z80)
 add_custom_target(dp_msx2_runtime DEPENDS ${DP_MSX2_ARCHIVE})
 add_dependencies(deepeel_msx2 dp_msx2_runtime)
-target_link_libraries(deepeel_sega PUBLIC deepeel_sg deepeel_gg deepeel_msx deepeel_msx2 deepeel_sg2 deepeel_gg2 Threads::Threads)
+target_link_libraries(deepeel_sega PUBLIC deepeel_sg deepeel_gg deepeel_msx deepeel_msx2 deepeel_sg2 deepeel_gg2 deepeel_z80 Threads::Threads)
 target_link_libraries(deepeel PRIVATE deepeel_sega)
 # --- the m0boy NES machine (6502 + PPU + APU runtime) ------------------------
 # The runtime's globals (`machine`, nes_*/apu_*/ppu_*) are namespaced with

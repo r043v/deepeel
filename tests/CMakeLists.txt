@@ -63,6 +63,11 @@ add_executable(test_sega_tas test_sega_tas.c)
 target_link_libraries(test_sega_tas PRIVATE deepeel_sega)
 add_test(NAME sega_tas COMMAND test_sega_tas)
 set_tests_properties(sega_tas PROPERTIES TIMEOUT 30)
+# the DpIsa kernel interface (spec §7.3), pinned per CPU
+add_executable(test_dpisa test_dpisa.c)
+target_link_libraries(test_dpisa PRIVATE deepeel_z80 deepeel_core)
+add_test(NAME dpisa COMMAND test_dpisa)
+set_tests_properties(dpisa PROPERTIES TIMEOUT 30)
 # J3: random bursts fired from TAS snapshots (GB sessions parity)
 add_test(NAME z80_tas_rng COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; printf '|.......S|\\n|.......S|\\n|.......S|\\n|.......S|\\n' > $D/tas_rng.log; $B z80 explore sms $D/fix_z80_branch.sms --tas $D/tas_rng.log --tas-rng-per 2 --tas-rng-bursts 2 --tas-rng-steps 500 --tas-total 40000 --max-total 60000 --text $D/z80_rng.txt >/dev/null 2>&1; grep -q 'tas bursts: 4 fired, 2000 steps' $D/z80_rng.txt && grep -q 'tas replay: 4 frames' $D/z80_rng.txt")
 
