@@ -73,7 +73,7 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
              "nonsense evictions: %u echo/OAM, %u verbatim data, %u incoherent stack\n"
              "budgets: %u paths cap hit, %u step-wall hit, %u queue overflows (%u growths), %u forks capped (%u table full), %u outside-rom exec (%u traced to ROM copy sources)\n"
              "spool: %u written, %u read back, %u refused, %llu bytes pending\n"
-             "seeds: %u natural, %u speculative (%u refused: cascade solde spent)\n"
+             "seeds: %u natural, %u speculative, %u past the saturated dedup set (%u refused: cascade solde spent)\n"
              "data: %llu bytes proven verbatim (cov flag 8), %u exec∩data contradictions\n"
              "copies: %d records, %u emitted at window breaks, %u dropped by the cap\n"
              "provenance: %u jp-hl targets, %u data bytes static, %u partial, %u caps, %u table targets\n",
@@ -87,7 +87,7 @@ void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out) {
              res->queue_growths, res->forks_capped, res->forks_table_full, res->exec_outside, res->exec_wram_rom,
              res->spool_writes, res->spool_reads, res->spool_refused,
              (unsigned long long)res->spool_bytes,
-             res->seeds_natural, res->seeds_spec, res->seeds_refused_budget,
+             res->seeds_natural, res->seeds_spec, res->seeds_dedup_bypass, res->seeds_refused_budget,
              (unsigned long long)res->data_verbatim_bytes, res->data_contradictions,
              res->copy_count, res->copy_window_breaks, res->copies_dropped,
              res->prov_jp_hl, res->prov_data, res->prov_unresolved, res->prov_sat, res->prov_table_targets);
@@ -371,7 +371,7 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
                   "\"forks_key\":%u,\"forks_p1\":%u,\"forks_capped\":%u,\"forks_table_full\":%u,\"forks_covered_pruned\":%u,"
                   "\"sections\":%u,\"evicted_exact\":%u,\"evicted_ctx\":%u,\"cycle_cuts\":%u,"
                   "\"step_cuts\":%u,\"pad_cuts\":%u,\"halt_cuts\":%u,\"nonsense_echo\":%u,\"nonsense_data\":%u,\"nonsense_stack\":%u,\"budget_paths\":%u,\"budget_steps\":%u,\"queue_overflows\":%u,\"queue_growths\":%u,\"spool_writes\":%u,\"spool_reads\":%u,\"spool_refused\":%u,"
-                  "\"exec_outside\":%u,\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_refused_budget\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u,\"prov_jp_hl\":%u,\"prov_data\":%u,\"prov_partial\":%u,\"prov_sat\":%u,"
+                  "\"exec_outside\":%u,\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_dedup_bypass\":%u,\"seeds_refused_budget\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u,\"prov_jp_hl\":%u,\"prov_data\":%u,\"prov_partial\":%u,\"prov_sat\":%u,"
                   "\"ctx_set_full\":%u,\"bank_seen_full\":%u,\"disc_dropped\":%u,"
                   "\"steps_deferred\":%llu,\"loop_deferred\":%llu,\"defer_resumed\":%llu,\"steps_final\":%llu,\"loop_final\":%llu,\"defer_dropped\":%llu,\"defer_pending\":%llu},\n",
                (unsigned long long)res->steps_total, (unsigned long long)res->paths_run, res->forks_branch, res->forks_irq,
@@ -380,7 +380,7 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
                res->step_cuts, res->pad_cuts, res->halt_cuts, res->nonsense_echo, res->nonsense_data,
                res->nonsense_stack, res->budget_paths, res->budget_steps, res->queue_overflows,
                res->queue_growths, res->spool_writes, res->spool_reads, res->spool_refused,
-               res->exec_outside, res->seeds_natural, res->seeds_spec,
+               res->exec_outside, res->seeds_natural, res->seeds_spec, res->seeds_dedup_bypass,
                res->seeds_refused_budget, res->seeds_skipped_data,
                (unsigned)res->bad_op_count, res->prov_jp_hl,
                res->prov_data, res->prov_unresolved, res->prov_sat,
@@ -671,7 +671,7 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
                   "\"pad_cuts\":%u,\"halt_cuts\":%u,\"nonsense_echo\":%u,\"nonsense_data\":%u,"
                   "\"nonsense_stack\":%u,\"budget_paths\":%u,\"budget_steps\":%u,"
                   "\"queue_overflows\":%u,\"queue_growths\":%u,\"spool_writes\":%u,\"spool_reads\":%u,\"spool_refused\":%u,\"exec_outside\":%u,"
-                  "\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_refused_budget\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u,\"prov_jp_hl\":%u,\"prov_data\":%u,\"prov_partial\":%u,\"prov_sat\":%u,"
+                  "\"seeds_natural\":%u,\"seeds_spec\":%u,\"seeds_dedup_bypass\":%u,\"seeds_refused_budget\":%u,\"seeds_skipped_data\":%u,\"bad_ops\":%u,\"prov_jp_hl\":%u,\"prov_data\":%u,\"prov_partial\":%u,\"prov_sat\":%u,"
                   "\"ctx_set_full\":%u,\"bank_seen_full\":%u,\"disc_dropped\":%u,"
                   "\"steps_deferred\":%llu,\"loop_deferred\":%llu,\"defer_resumed\":%llu,\"steps_final\":%llu,\"loop_final\":%llu,\"defer_dropped\":%llu,\"defer_pending\":%llu},\n",
                (unsigned long long)res->steps_total, (unsigned long long)res->paths_run,
@@ -681,7 +681,7 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
                res->nonsense_echo, res->nonsense_data, res->nonsense_stack, res->budget_paths,
                res->budget_steps, res->queue_overflows, res->queue_growths, res->spool_writes,
                res->spool_reads, res->spool_refused, res->exec_outside,
-               res->seeds_natural, res->seeds_spec, res->seeds_refused_budget,
+               res->seeds_natural, res->seeds_spec, res->seeds_dedup_bypass, res->seeds_refused_budget,
                res->seeds_skipped_data, (unsigned)res->bad_op_count, res->prov_jp_hl, res->prov_data,
                res->prov_unresolved, res->prov_sat,
                res->ctx_set_full, res->bank_seen_full, res->disc_dropped,

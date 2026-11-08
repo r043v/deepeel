@@ -638,14 +638,22 @@ static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, in
         return 0;
     }
     if (ins < 0) { // dedup set full: surfaced; the state waits in the frontier (not for the shared pool)
-        u32_add(&ex->res->queue_overflows, 1);
-        if (!ex->sh && defer_push(ex, img, forced, kind, from_reset, choice, DP_R_DEDUP_FULL)) {
-            tree_close_g(ex, choice, DP_ISSUE_SPOOLED);
+        if (!pri) {
+            u32_add(&ex->res->queue_overflows, 1);
+            if (!ex->sh && defer_push(ex, img, forced, kind, from_reset, choice, DP_R_DEDUP_FULL)) {
+                tree_close_g(ex, choice, DP_ISSUE_SPOOLED);
+                return 0;
+            }
+            tree_close_g(ex, choice, DP_ISSUE_DEFERRED);
+            free(img);
             return 0;
         }
-        tree_close_g(ex, choice, DP_ISSUE_DEFERRED);
-        free(img);
-        return 0;
+        // a priority deposit is an explicit seed (closure entry, residual
+        // target, TAS snapshot): the saturated dedup set cannot prove it
+        // already explored — deposit anyway, counted; the path re-walks, the
+        // credit stays first-seen (a duplicate seed costs one re-run, a lost
+        // seed costs the range)
+        u32_add(&ex->res->seeds_dedup_bypass, 1);
     }
     if (ex->sh && !pri) { // the parallel drain: everything through the pool
         DpSharedPool *sh = ex->sh;
@@ -700,7 +708,23 @@ static int queue_push_pri(DpExplorer *ex, uint8_t *img, int forced, int kind, in
     uint32_t len = pri ? ex->pq_len : ex->q_len;
     uint32_t head = pri ? ex->pq_head : ex->q_head;
     if (len >= cap) {
-        if (!pri && queue_grow(ex)) { // bounded adaptive growth, counted
+        if (pri && ex->pq_cap < (1u << 16)) {
+            // the priority inbox holds explicit seeds only (closure entries,
+            // residual targets, TAS snapshots): a bulk deposit grows it,
+            // bounded, rebase the ring head like the shared pool growth
+            uint32_t ncap = ex->pq_cap * 2;
+            DpPathState *nq = xrealloc(NULL, sizeof(DpPathState) * (size_t)ncap);
+            for (uint32_t i = 0; i < ex->pq_len; i++) nq[i] = ex->pqueue[(ex->pq_head + i) % ex->pq_cap];
+            memset(nq + ex->pq_len, 0, sizeof(DpPathState) * (size_t)(ncap - ex->pq_len));
+            free(ex->pqueue);
+            ex->pqueue = nq;
+            ex->pq_head = 0;
+            ex->pq_cap = ncap;
+            u32_add(&ex->res->queue_growths, 1);
+            q = ex->pqueue;
+            cap = ex->pq_cap;
+            head = ex->pq_head;
+        } else if (!pri && queue_grow(ex)) { // bounded adaptive growth, counted
             q = ex->queue;
             cap = ex->q_cap;
             head = ex->q_head;

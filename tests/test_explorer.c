@@ -399,14 +399,18 @@ int main(int argc, char **argv) {
     g_ex->stop = 0;                                     // the closure-round restart (fresh wall)
     g_ex->steps_own = 0;
     dp_explore(g_ex);                                   // the forced entries run
+    // the priority inbox grows under a bulk deposit (TAS snapshots, residual
+    // targets): 1200 seeds past the 512 default cap must all be accepted
+    {
+        uint32_t before = res.queue_growths;
+        int ok = 0;
+        for (int i = 0; i < 1200; i++)
+            ok += dp_explorer_seed_pc_pri(g_ex, 0, (uint16_t)(0x0300 + i * 7), DP_SEED_POINTER, 1, 1) > 0;
+        CHECK(ok == 1200);                              // nothing dropped
+        CHECK(res.queue_growths > before);              // the inbox grew, rebase intact
+    }
     dp_explorer_free(g_ex);
     g_keep_ex = 0;
-    fprintf(stderr, "DBG clo_n=%d:", res.clo_entry_n);
-    for (int i = 0; i < res.clo_entry_n && i < 40; i++) fprintf(stderr, " %x", res.clo_entries[i]);
-    fprintf(stderr, "\n");
-    for (int k = 0x250; k < 0x2A4; k++)
-        fprintf(stderr, "DBG %02x: exec=%02x data=%02x sfl=%02x\n", k,
-                res.exec_flags[k], res.data_flags[k], res.static_flags[k]);
     CHECK(res.residual_targets >= 1);                   // the range was tried
     CHECK(res.residual_seeded >= 1);                    // the sibling entry was seeded
     CHECK(res.exec_flags[0x258] & DP_XF_FORCED);        // the forced entry really ran

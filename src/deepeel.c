@@ -1573,7 +1573,7 @@ static void closure_rounds(DpExplorer *ex, DpResults *res, uint32_t *seed_spent,
     // copy siblings have their own switches
     for (int r = 0; !ex->cfg.no_closure && r < ex->cfg.closure_rounds; r++) {
         uint32_t marked = dp_static_closure(res);
-        uint32_t rseeded = dp_residual_target(ex, 64); // residual ranges: re-proof or forced entry
+        uint32_t rseeded = dp_residual_target(ex, 4096); // residual ranges: re-proof or forced entry (the tried set bounds reloops)
         uint32_t ref0 = res->closure_seeds_refused;
         int seeded = dp_closure_seed(ex, seed_total - *seed_spent) + (int)rseeded; // the cascade solde
         *seed_spent += (uint32_t)seeded;

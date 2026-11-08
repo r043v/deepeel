@@ -512,6 +512,23 @@ code / data / padding.
   attribution créditait « attract s0 » de 315 378 octets connus cumulés ;
   l'attribution first_seen rend la part réelle de l'attract ≈ 0 % —
   l'artefact est confirmé et corrigé.
+- **Graines explicites au-delà du dedup saturé** (0.251.6) : la campagne
+  Zelda (2 h 15, 99,68 % connu, résidu 1678 o) a exposé une perte —
+  l'ensemble de déduplication saturé (16,4 M refus) faisait mourir chaque
+  dépôt priority : les 937 instantanés TAS de la phase post-jeu et les
+  cibles résiduelles tombaient à « 0 seeded » (la branche de report au
+  frontier n'est pas câblée pour le pool partagé). Un dépôt priority est
+  une graine explicite (entrée de fermeture, cible résiduelle,
+  instantané TAS) : l'ensemble saturé ne peut pas prouver qu'il est déjà
+  exploré — il est déposé quand même, compté (`seeds_dedup_bypass`,
+  texte et JSON) ; une graine dupliquée coûte une re-exécution, une
+  graine perdue coûte la plage. L'inbox priority (plafond 512 par défaut)
+  croît maintenant par doublement borné (64 K, repliage de l'anneau
+  compté dans `queue_growths`) au lieu de refuser un dépôt massif.
+  Tableau octets/heure-CPU Zelda (attribution first_seen, 12,77 CPU-h) :
+  statique 16716, tas 12835, fork 7120, random 2306, attract 427 —
+  la réaffectation du cœur attract (0.251.5) est justifiée par les
+  chiffres.
 - `--tas-dir D` (répétable) : découvre tous les films du répertoire (triés
   par ressemblance de titre ; `.vmv`, `.vbm`, `.bk2`,
   `.gbm`, `.fm2`, `.log`), les films retenus sont loggés sur stderr.
