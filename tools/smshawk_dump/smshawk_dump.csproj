@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>10</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>smshawk_dump</AssemblyName>
+    <!-- the BizHawk checkout to reference (same rule as the GPGX .so: the
+         third-party tree stays outside the repository) -->
+    <BizHawkDir Condition="'$(BizHawkDir)'==''">$(HOME)/dev/BizHawk</BizHawkDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(BizHawkDir)/src/BizHawk.Tests.Testroms/BizHawk.Tests.Testroms.csproj" />
+  </ItemGroup>
+</Project>

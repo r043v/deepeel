@@ -1,0 +1,1686 @@
+{
+  "format": 1,
+  "restore": {
+    "/home/m/dev/memscan/tools/smshawk_dump/smshawk_dump.csproj": {}
+  },
+  "projects": {
+    "/home/m/dev/BizHawk/src/BizHawk.BizInvoke/BizHawk.BizInvoke.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/home/m/dev/BizHawk/src/BizHawk.BizInvoke/BizHawk.BizInvoke.csproj",
+        "projectName": "BizHawk.BizInvoke",
+        "projectPath": "/home/m/dev/BizHawk/src/BizHawk.BizInvoke/BizHawk.BizInvoke.csproj",
+        "packagesPath": "/home/m/.nuget/packages/",
+        "outputPath": "/home/m/dev/BizHawk/src/BizHawk.BizInvoke/obj/",
+        "projectStyle": "PackageReference",
+        "centralPackageVersionsManagementEnabled": true,
+        "CentralPackageTransitivePinningEnabled": true,
+        "configFilePaths": [
+          "/home/m/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net48"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net48": {
+            "targetAlias": "net48",
+            "projectReferences": {
+              "/home/m/dev/BizHawk/src/BizHawk.Common/BizHawk.Common.csproj": {
+                "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Common/BizHawk.Common.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "net48": {
+          "targetAlias": "net48",
+          "dependencies": {
+            "DotNetAnalyzers.DocumentationAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.0-beta.59, )",
+              "versionCentrallyManaged": true
+            },
+            "Menees.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.2.2, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Analyzer": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.0.206, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Polyfill": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.168, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.3.4, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.NETFramework.ReferenceAssemblies": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.3, )",
+              "versionCentrallyManaged": true
+            },
+            "Nullable": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.3.1, )",
+              "versionCentrallyManaged": true
+            },
+            "Roslynator.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[4.13.1, )",
+              "versionCentrallyManaged": true
+            },
+            "System.Reflection.Emit": {
+              "target": "Package",
+              "version": "[4.7.0, )",
+              "versionCentrallyManaged": true
+            },
+            "System.Resources.Extensions": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[7.0.0, )",
+              "versionCentrallyManaged": true
+            }
+          },
+          "centralPackageVersions": {
+            "CommunityToolkit.HighPerformance": "8.4.0",
+            "Cyotek.Drawing.BitmapFont": "2.0.4",
+            "DotNetAnalyzers.DocumentationAnalyzers": "1.0.0-beta.59",
+            "Google.FlatBuffers": "23.5.26",
+            "ImGui.NET": "1.90.6.1",
+            "JunitXml.TestLogger": "3.1.12",
+            "Magick.NET-Q8-AnyCPU": "14.8.2",
+            "Menees.Analyzers": "3.2.2",
+            "Meziantou.Analyzer": "2.0.206",
+            "Meziantou.Polyfill": "1.0.168",
+            "Microsoft.Bcl.HashCode": "6.0.0",
+            "Microsoft.Bcl.Numerics": "10.0.1",
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": "3.3.4",
+            "Microsoft.CodeAnalysis.CSharp": "5.0",
+            "Microsoft.CodeAnalysis.CSharp.Analyzer.Testing": "1.1.2",
+            "Microsoft.CodeAnalysis.CSharp.Workspaces": "5.0",
+            "Microsoft.CSharp": "4.7.0",
+            "Microsoft.Data.Sqlite.Core": "8.0.4",
+            "Microsoft.Extensions.DependencyModel": "9.0.9",
+            "Microsoft.NETFramework.ReferenceAssemblies": "1.0.3",
+            "Microsoft.Win32.Registry": "5.0.0",
+            "MSTest": "3.9.3",
+            "Newtonsoft.Json": "13.0.3",
+            "Nullable": "1.3.1",
+            "PolySharp": "1.15.0",
+            "ppy.SDL2-CS": "1.0.630-alpha",
+            "Roslynator.Analyzers": "4.13.1",
+            "SharpCompress": "0.40.0",
+            "Silk.NET.OpenAL": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Creative": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Enumeration": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.EXT": "2.23.0",
+            "Silk.NET.OpenGL": "2.23.0",
+            "Silk.NET.WGL.Extensions.NV": "2.23.0",
+            "SQLitePCLRaw.provider.e_sqlite3": "2.1.8",
+            "StyleCop.Analyzers": "1.2.0-beta.556",
+            "System.Collections.Immutable": "9.0.0",
+            "System.CommandLine": "2.0.3",
+            "System.ComponentModel.Annotations": "5.0.0",
+            "System.Drawing.Common": "6.0.0",
+            "System.Drawing.Primitives": "4.3.0",
+            "System.Memory": "4.6.3",
+            "System.Net.Http": "4.3.4",
+            "System.Reflection.Emit": "4.7.0",
+            "System.Resources.Extensions": "7.0.0",
+            "System.Runtime.CompilerServices.Unsafe": "6.1.2",
+            "Vortice.D3DCompiler": "2.4.2",
+            "Vortice.Direct3D11": "2.4.2",
+            "Vortice.MediaFoundation": "2.4.2",
+            "Vortice.XAudio2": "2.4.2"
+          },
+          "runtimeIdentifierGraphPath": "/usr/share/dotnet/sdk/10.0.112/RuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "/home/m/dev/BizHawk/src/BizHawk.Bizware.Graphics/BizHawk.Bizware.Graphics.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/home/m/dev/BizHawk/src/BizHawk.Bizware.Graphics/BizHawk.Bizware.Graphics.csproj",
+        "projectName": "BizHawk.Bizware.Graphics",
+        "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Bizware.Graphics/BizHawk.Bizware.Graphics.csproj",
+        "packagesPath": "/home/m/.nuget/packages/",
+        "outputPath": "/home/m/dev/BizHawk/src/BizHawk.Bizware.Graphics/obj/",
+        "projectStyle": "PackageReference",
+        "centralPackageVersionsManagementEnabled": true,
+        "CentralPackageTransitivePinningEnabled": true,
+        "configFilePaths": [
+          "/home/m/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "netstandard2.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "netstandard2.0": {
+            "targetAlias": "netstandard2.0",
+            "projectReferences": {
+              "/home/m/dev/BizHawk/src/BizHawk.Common/BizHawk.Common.csproj": {
+                "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Common/BizHawk.Common.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "netstandard2.0": {
+          "targetAlias": "netstandard2.0",
+          "dependencies": {
+            "Cyotek.Drawing.BitmapFont": {
+              "target": "Package",
+              "version": "[2.0.4, )",
+              "versionCentrallyManaged": true
+            },
+            "DotNetAnalyzers.DocumentationAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.0-beta.59, )",
+              "versionCentrallyManaged": true
+            },
+            "ImGui.NET": {
+              "include": "Runtime, Compile, Build, ContentFiles, Analyzers, BuildTransitive",
+              "target": "Package",
+              "version": "[1.90.6.1, )",
+              "versionCentrallyManaged": true
+            },
+            "Menees.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.2.2, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Analyzer": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.0.206, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Polyfill": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.168, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.3.4, )",
+              "versionCentrallyManaged": true
+            },
+            "NETStandard.Library": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.0.3, )",
+              "autoReferenced": true
+            },
+            "Nullable": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.3.1, )",
+              "versionCentrallyManaged": true
+            },
+            "Roslynator.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[4.13.1, )",
+              "versionCentrallyManaged": true
+            },
+            "Silk.NET.OpenGL": {
+              "target": "Package",
+              "version": "[2.23.0, )",
+              "versionCentrallyManaged": true
+            },
+            "Silk.NET.WGL.Extensions.NV": {
+              "target": "Package",
+              "version": "[2.23.0, )",
+              "versionCentrallyManaged": true
+            },
+            "System.Drawing.Common": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[6.0.0, )",
+              "versionCentrallyManaged": true
+            },
+            "System.Drawing.Primitives": {
+              "target": "Package",
+              "version": "[4.3.0, )",
+              "versionCentrallyManaged": true
+            },
+            "Vortice.D3DCompiler": {
+              "target": "Package",
+              "version": "[2.4.2, )",
+              "versionCentrallyManaged": true
+            },
+            "Vortice.Direct3D11": {
+              "target": "Package",
+              "version": "[2.4.2, )",
+              "versionCentrallyManaged": true
+            },
+            "ppy.SDL2-CS": {
+              "include": "Runtime, Compile, Build, Analyzers, BuildTransitive",
+              "target": "Package",
+              "version": "[1.0.630-alpha, )",
+              "versionCentrallyManaged": true
+            }
+          },
+          "centralPackageVersions": {
+            "CommunityToolkit.HighPerformance": "8.4.0",
+            "Cyotek.Drawing.BitmapFont": "2.0.4",
+            "DotNetAnalyzers.DocumentationAnalyzers": "1.0.0-beta.59",
+            "Google.FlatBuffers": "23.5.26",
+            "ImGui.NET": "1.90.6.1",
+            "JunitXml.TestLogger": "3.1.12",
+            "Magick.NET-Q8-AnyCPU": "14.8.2",
+            "Menees.Analyzers": "3.2.2",
+            "Meziantou.Analyzer": "2.0.206",
+            "Meziantou.Polyfill": "1.0.168",
+            "Microsoft.Bcl.HashCode": "6.0.0",
+            "Microsoft.Bcl.Numerics": "10.0.1",
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": "3.3.4",
+            "Microsoft.CodeAnalysis.CSharp": "5.0",
+            "Microsoft.CodeAnalysis.CSharp.Analyzer.Testing": "1.1.2",
+            "Microsoft.CodeAnalysis.CSharp.Workspaces": "5.0",
+            "Microsoft.CSharp": "4.7.0",
+            "Microsoft.Data.Sqlite.Core": "8.0.4",
+            "Microsoft.Extensions.DependencyModel": "9.0.9",
+            "Microsoft.NETFramework.ReferenceAssemblies": "1.0.3",
+            "Microsoft.Win32.Registry": "5.0.0",
+            "MSTest": "3.9.3",
+            "Newtonsoft.Json": "13.0.3",
+            "Nullable": "1.3.1",
+            "PolySharp": "1.15.0",
+            "ppy.SDL2-CS": "1.0.630-alpha",
+            "Roslynator.Analyzers": "4.13.1",
+            "SharpCompress": "0.40.0",
+            "Silk.NET.OpenAL": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Creative": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Enumeration": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.EXT": "2.23.0",
+            "Silk.NET.OpenGL": "2.23.0",
+            "Silk.NET.WGL.Extensions.NV": "2.23.0",
+            "SQLitePCLRaw.provider.e_sqlite3": "2.1.8",
+            "StyleCop.Analyzers": "1.2.0-beta.556",
+            "System.Collections.Immutable": "9.0.0",
+            "System.CommandLine": "2.0.3",
+            "System.ComponentModel.Annotations": "5.0.0",
+            "System.Drawing.Common": "6.0.0",
+            "System.Drawing.Primitives": "4.3.0",
+            "System.Memory": "4.6.3",
+            "System.Net.Http": "4.3.4",
+            "System.Reflection.Emit": "4.7.0",
+            "System.Resources.Extensions": "7.0.0",
+            "System.Runtime.CompilerServices.Unsafe": "6.1.2",
+            "Vortice.D3DCompiler": "2.4.2",
+            "Vortice.Direct3D11": "2.4.2",
+            "Vortice.MediaFoundation": "2.4.2",
+            "Vortice.XAudio2": "2.4.2"
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "runtimeIdentifierGraphPath": "/usr/share/dotnet/sdk/10.0.112/RuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "/home/m/dev/BizHawk/src/BizHawk.Bizware.Input/BizHawk.Bizware.Input.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/home/m/dev/BizHawk/src/BizHawk.Bizware.Input/BizHawk.Bizware.Input.csproj",
+        "projectName": "BizHawk.Bizware.Input",
+        "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Bizware.Input/BizHawk.Bizware.Input.csproj",
+        "packagesPath": "/home/m/.nuget/packages/",
+        "outputPath": "/home/m/dev/BizHawk/src/BizHawk.Bizware.Input/obj/",
+        "projectStyle": "PackageReference",
+        "centralPackageVersionsManagementEnabled": true,
+        "CentralPackageTransitivePinningEnabled": true,
+        "configFilePaths": [
+          "/home/m/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "netstandard2.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "netstandard2.0": {
+            "targetAlias": "netstandard2.0",
+            "projectReferences": {
+              "/home/m/dev/BizHawk/src/BizHawk.Common/BizHawk.Common.csproj": {
+                "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Common/BizHawk.Common.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "netstandard2.0": {
+          "targetAlias": "netstandard2.0",
+          "dependencies": {
+            "DotNetAnalyzers.DocumentationAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.0-beta.59, )",
+              "versionCentrallyManaged": true
+            },
+            "Menees.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.2.2, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Analyzer": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.0.206, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Polyfill": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.168, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.3.4, )",
+              "versionCentrallyManaged": true
+            },
+            "NETStandard.Library": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.0.3, )",
+              "autoReferenced": true
+            },
+            "Nullable": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.3.1, )",
+              "versionCentrallyManaged": true
+            },
+            "Roslynator.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[4.13.1, )",
+              "versionCentrallyManaged": true
+            },
+            "ppy.SDL2-CS": {
+              "include": "Runtime, Compile, Build, Analyzers, BuildTransitive",
+              "target": "Package",
+              "version": "[1.0.630-alpha, )",
+              "versionCentrallyManaged": true
+            }
+          },
+          "centralPackageVersions": {
+            "CommunityToolkit.HighPerformance": "8.4.0",
+            "Cyotek.Drawing.BitmapFont": "2.0.4",
+            "DotNetAnalyzers.DocumentationAnalyzers": "1.0.0-beta.59",
+            "Google.FlatBuffers": "23.5.26",
+            "ImGui.NET": "1.90.6.1",
+            "JunitXml.TestLogger": "3.1.12",
+            "Magick.NET-Q8-AnyCPU": "14.8.2",
+            "Menees.Analyzers": "3.2.2",
+            "Meziantou.Analyzer": "2.0.206",
+            "Meziantou.Polyfill": "1.0.168",
+            "Microsoft.Bcl.HashCode": "6.0.0",
+            "Microsoft.Bcl.Numerics": "10.0.1",
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": "3.3.4",
+            "Microsoft.CodeAnalysis.CSharp": "5.0",
+            "Microsoft.CodeAnalysis.CSharp.Analyzer.Testing": "1.1.2",
+            "Microsoft.CodeAnalysis.CSharp.Workspaces": "5.0",
+            "Microsoft.CSharp": "4.7.0",
+            "Microsoft.Data.Sqlite.Core": "8.0.4",
+            "Microsoft.Extensions.DependencyModel": "9.0.9",
+            "Microsoft.NETFramework.ReferenceAssemblies": "1.0.3",
+            "Microsoft.Win32.Registry": "5.0.0",
+            "MSTest": "3.9.3",
+            "Newtonsoft.Json": "13.0.3",
+            "Nullable": "1.3.1",
+            "PolySharp": "1.15.0",
+            "ppy.SDL2-CS": "1.0.630-alpha",
+            "Roslynator.Analyzers": "4.13.1",
+            "SharpCompress": "0.40.0",
+            "Silk.NET.OpenAL": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Creative": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Enumeration": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.EXT": "2.23.0",
+            "Silk.NET.OpenGL": "2.23.0",
+            "Silk.NET.WGL.Extensions.NV": "2.23.0",
+            "SQLitePCLRaw.provider.e_sqlite3": "2.1.8",
+            "StyleCop.Analyzers": "1.2.0-beta.556",
+            "System.Collections.Immutable": "9.0.0",
+            "System.CommandLine": "2.0.3",
+            "System.ComponentModel.Annotations": "5.0.0",
+            "System.Drawing.Common": "6.0.0",
+            "System.Drawing.Primitives": "4.3.0",
+            "System.Memory": "4.6.3",
+            "System.Net.Http": "4.3.4",
+            "System.Reflection.Emit": "4.7.0",
+            "System.Resources.Extensions": "7.0.0",
+            "System.Runtime.CompilerServices.Unsafe": "6.1.2",
+            "Vortice.D3DCompiler": "2.4.2",
+            "Vortice.Direct3D11": "2.4.2",
+            "Vortice.MediaFoundation": "2.4.2",
+            "Vortice.XAudio2": "2.4.2"
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "runtimeIdentifierGraphPath": "/usr/share/dotnet/sdk/10.0.112/RuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "/home/m/dev/BizHawk/src/BizHawk.Client.Common/BizHawk.Client.Common.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/home/m/dev/BizHawk/src/BizHawk.Client.Common/BizHawk.Client.Common.csproj",
+        "projectName": "BizHawk.Client.Common",
+        "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Client.Common/BizHawk.Client.Common.csproj",
+        "packagesPath": "/home/m/.nuget/packages/",
+        "outputPath": "/home/m/dev/BizHawk/src/BizHawk.Client.Common/obj/",
+        "projectStyle": "PackageReference",
+        "centralPackageVersionsManagementEnabled": true,
+        "CentralPackageTransitivePinningEnabled": true,
+        "configFilePaths": [
+          "/home/m/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net48"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net48": {
+            "targetAlias": "net48",
+            "projectReferences": {
+              "/home/m/dev/BizHawk/src/BizHawk.Bizware.Graphics/BizHawk.Bizware.Graphics.csproj": {
+                "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Bizware.Graphics/BizHawk.Bizware.Graphics.csproj"
+              },
+              "/home/m/dev/BizHawk/src/BizHawk.Bizware.Input/BizHawk.Bizware.Input.csproj": {
+                "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Bizware.Input/BizHawk.Bizware.Input.csproj"
+              },
+              "/home/m/dev/BizHawk/src/BizHawk.Emulation.Cores/BizHawk.Emulation.Cores.csproj": {
+                "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Emulation.Cores/BizHawk.Emulation.Cores.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "net48": {
+          "targetAlias": "net48",
+          "dependencies": {
+            "DotNetAnalyzers.DocumentationAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.0-beta.59, )",
+              "versionCentrallyManaged": true
+            },
+            "Menees.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.2.2, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Analyzer": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.0.206, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Polyfill": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.168, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.3.4, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.Data.Sqlite.Core": {
+              "target": "Package",
+              "version": "[8.0.4, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.NETFramework.ReferenceAssemblies": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.3, )",
+              "versionCentrallyManaged": true
+            },
+            "Nullable": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.3.1, )",
+              "versionCentrallyManaged": true
+            },
+            "Roslynator.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[4.13.1, )",
+              "versionCentrallyManaged": true
+            },
+            "SQLitePCLRaw.provider.e_sqlite3": {
+              "target": "Package",
+              "version": "[2.1.8, )",
+              "versionCentrallyManaged": true
+            },
+            "SharpCompress": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[0.40.0, )",
+              "noWarn": [
+                "NU1902"
+              ],
+              "versionCentrallyManaged": true
+            },
+            "System.CommandLine": {
+              "target": "Package",
+              "version": "[2.0.3, )",
+              "versionCentrallyManaged": true
+            },
+            "System.Drawing.Common": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[6.0.0, )",
+              "versionCentrallyManaged": true
+            },
+            "System.Resources.Extensions": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[7.0.0, )",
+              "versionCentrallyManaged": true
+            }
+          },
+          "centralPackageVersions": {
+            "CommunityToolkit.HighPerformance": "8.4.0",
+            "Cyotek.Drawing.BitmapFont": "2.0.4",
+            "DotNetAnalyzers.DocumentationAnalyzers": "1.0.0-beta.59",
+            "Google.FlatBuffers": "23.5.26",
+            "ImGui.NET": "1.90.6.1",
+            "JunitXml.TestLogger": "3.1.12",
+            "Magick.NET-Q8-AnyCPU": "14.8.2",
+            "Menees.Analyzers": "3.2.2",
+            "Meziantou.Analyzer": "2.0.206",
+            "Meziantou.Polyfill": "1.0.168",
+            "Microsoft.Bcl.HashCode": "6.0.0",
+            "Microsoft.Bcl.Numerics": "10.0.1",
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": "3.3.4",
+            "Microsoft.CodeAnalysis.CSharp": "5.0",
+            "Microsoft.CodeAnalysis.CSharp.Analyzer.Testing": "1.1.2",
+            "Microsoft.CodeAnalysis.CSharp.Workspaces": "5.0",
+            "Microsoft.CSharp": "4.7.0",
+            "Microsoft.Data.Sqlite.Core": "8.0.4",
+            "Microsoft.Extensions.DependencyModel": "9.0.9",
+            "Microsoft.NETFramework.ReferenceAssemblies": "1.0.3",
+            "Microsoft.Win32.Registry": "5.0.0",
+            "MSTest": "3.9.3",
+            "Newtonsoft.Json": "13.0.3",
+            "Nullable": "1.3.1",
+            "PolySharp": "1.15.0",
+            "ppy.SDL2-CS": "1.0.630-alpha",
+            "Roslynator.Analyzers": "4.13.1",
+            "SharpCompress": "0.40.0",
+            "Silk.NET.OpenAL": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Creative": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Enumeration": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.EXT": "2.23.0",
+            "Silk.NET.OpenGL": "2.23.0",
+            "Silk.NET.WGL.Extensions.NV": "2.23.0",
+            "SQLitePCLRaw.provider.e_sqlite3": "2.1.8",
+            "StyleCop.Analyzers": "1.2.0-beta.556",
+            "System.Collections.Immutable": "9.0.0",
+            "System.CommandLine": "2.0.3",
+            "System.ComponentModel.Annotations": "5.0.0",
+            "System.Drawing.Common": "6.0.0",
+            "System.Drawing.Primitives": "4.3.0",
+            "System.Memory": "4.6.3",
+            "System.Net.Http": "4.3.4",
+            "System.Reflection.Emit": "4.7.0",
+            "System.Resources.Extensions": "7.0.0",
+            "System.Runtime.CompilerServices.Unsafe": "6.1.2",
+            "Vortice.D3DCompiler": "2.4.2",
+            "Vortice.Direct3D11": "2.4.2",
+            "Vortice.MediaFoundation": "2.4.2",
+            "Vortice.XAudio2": "2.4.2"
+          },
+          "runtimeIdentifierGraphPath": "/usr/share/dotnet/sdk/10.0.112/RuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "/home/m/dev/BizHawk/src/BizHawk.Common/BizHawk.Common.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/home/m/dev/BizHawk/src/BizHawk.Common/BizHawk.Common.csproj",
+        "projectName": "BizHawk.Common",
+        "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Common/BizHawk.Common.csproj",
+        "packagesPath": "/home/m/.nuget/packages/",
+        "outputPath": "/home/m/dev/BizHawk/src/BizHawk.Common/obj/",
+        "projectStyle": "PackageReference",
+        "centralPackageVersionsManagementEnabled": true,
+        "CentralPackageTransitivePinningEnabled": true,
+        "configFilePaths": [
+          "/home/m/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "netstandard2.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "netstandard2.0": {
+            "targetAlias": "netstandard2.0",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "netstandard2.0": {
+          "targetAlias": "netstandard2.0",
+          "dependencies": {
+            "CommunityToolkit.HighPerformance": {
+              "target": "Package",
+              "version": "[8.4.0, )",
+              "versionCentrallyManaged": true
+            },
+            "DotNetAnalyzers.DocumentationAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.0-beta.59, )",
+              "versionCentrallyManaged": true
+            },
+            "Menees.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.2.2, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Analyzer": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.0.206, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Polyfill": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.168, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.Bcl.HashCode": {
+              "target": "Package",
+              "version": "[6.0.0, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.Bcl.Numerics": {
+              "target": "Package",
+              "version": "[10.0.1, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.3.4, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.Win32.Registry": {
+              "target": "Package",
+              "version": "[5.0.0, )",
+              "versionCentrallyManaged": true
+            },
+            "NETStandard.Library": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.0.3, )",
+              "autoReferenced": true
+            },
+            "Nullable": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.3.1, )",
+              "versionCentrallyManaged": true
+            },
+            "PolySharp": {
+              "target": "Package",
+              "version": "[1.15.0, )",
+              "versionCentrallyManaged": true
+            },
+            "Roslynator.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[4.13.1, )",
+              "versionCentrallyManaged": true
+            },
+            "System.ComponentModel.Annotations": {
+              "target": "Package",
+              "version": "[5.0.0, )",
+              "versionCentrallyManaged": true
+            },
+            "System.Memory": {
+              "target": "Package",
+              "version": "[4.6.3, )",
+              "versionCentrallyManaged": true
+            },
+            "System.Runtime.CompilerServices.Unsafe": {
+              "target": "Package",
+              "version": "[6.1.2, )",
+              "versionCentrallyManaged": true
+            }
+          },
+          "centralPackageVersions": {
+            "CommunityToolkit.HighPerformance": "8.4.0",
+            "Cyotek.Drawing.BitmapFont": "2.0.4",
+            "DotNetAnalyzers.DocumentationAnalyzers": "1.0.0-beta.59",
+            "Google.FlatBuffers": "23.5.26",
+            "ImGui.NET": "1.90.6.1",
+            "JunitXml.TestLogger": "3.1.12",
+            "Magick.NET-Q8-AnyCPU": "14.8.2",
+            "Menees.Analyzers": "3.2.2",
+            "Meziantou.Analyzer": "2.0.206",
+            "Meziantou.Polyfill": "1.0.168",
+            "Microsoft.Bcl.HashCode": "6.0.0",
+            "Microsoft.Bcl.Numerics": "10.0.1",
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": "3.3.4",
+            "Microsoft.CodeAnalysis.CSharp": "5.0",
+            "Microsoft.CodeAnalysis.CSharp.Analyzer.Testing": "1.1.2",
+            "Microsoft.CodeAnalysis.CSharp.Workspaces": "5.0",
+            "Microsoft.CSharp": "4.7.0",
+            "Microsoft.Data.Sqlite.Core": "8.0.4",
+            "Microsoft.Extensions.DependencyModel": "9.0.9",
+            "Microsoft.NETFramework.ReferenceAssemblies": "1.0.3",
+            "Microsoft.Win32.Registry": "5.0.0",
+            "MSTest": "3.9.3",
+            "Newtonsoft.Json": "13.0.3",
+            "Nullable": "1.3.1",
+            "PolySharp": "1.15.0",
+            "ppy.SDL2-CS": "1.0.630-alpha",
+            "Roslynator.Analyzers": "4.13.1",
+            "SharpCompress": "0.40.0",
+            "Silk.NET.OpenAL": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Creative": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Enumeration": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.EXT": "2.23.0",
+            "Silk.NET.OpenGL": "2.23.0",
+            "Silk.NET.WGL.Extensions.NV": "2.23.0",
+            "SQLitePCLRaw.provider.e_sqlite3": "2.1.8",
+            "StyleCop.Analyzers": "1.2.0-beta.556",
+            "System.Collections.Immutable": "9.0.0",
+            "System.CommandLine": "2.0.3",
+            "System.ComponentModel.Annotations": "5.0.0",
+            "System.Drawing.Common": "6.0.0",
+            "System.Drawing.Primitives": "4.3.0",
+            "System.Memory": "4.6.3",
+            "System.Net.Http": "4.3.4",
+            "System.Reflection.Emit": "4.7.0",
+            "System.Resources.Extensions": "7.0.0",
+            "System.Runtime.CompilerServices.Unsafe": "6.1.2",
+            "Vortice.D3DCompiler": "2.4.2",
+            "Vortice.Direct3D11": "2.4.2",
+            "Vortice.MediaFoundation": "2.4.2",
+            "Vortice.XAudio2": "2.4.2"
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "runtimeIdentifierGraphPath": "/usr/share/dotnet/sdk/10.0.112/RuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "/home/m/dev/BizHawk/src/BizHawk.Emulation.Common/BizHawk.Emulation.Common.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/home/m/dev/BizHawk/src/BizHawk.Emulation.Common/BizHawk.Emulation.Common.csproj",
+        "projectName": "BizHawk.Emulation.Common",
+        "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Emulation.Common/BizHawk.Emulation.Common.csproj",
+        "packagesPath": "/home/m/.nuget/packages/",
+        "outputPath": "/home/m/dev/BizHawk/src/BizHawk.Emulation.Common/obj/",
+        "projectStyle": "PackageReference",
+        "centralPackageVersionsManagementEnabled": true,
+        "CentralPackageTransitivePinningEnabled": true,
+        "configFilePaths": [
+          "/home/m/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net48"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net48": {
+            "targetAlias": "net48",
+            "projectReferences": {
+              "/home/m/dev/BizHawk/src/BizHawk.BizInvoke/BizHawk.BizInvoke.csproj": {
+                "projectPath": "/home/m/dev/BizHawk/src/BizHawk.BizInvoke/BizHawk.BizInvoke.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "net48": {
+          "targetAlias": "net48",
+          "dependencies": {
+            "DotNetAnalyzers.DocumentationAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.0-beta.59, )",
+              "versionCentrallyManaged": true
+            },
+            "Menees.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.2.2, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Analyzer": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.0.206, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Polyfill": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.168, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.3.4, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.NETFramework.ReferenceAssemblies": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.3, )",
+              "versionCentrallyManaged": true
+            },
+            "Newtonsoft.Json": {
+              "target": "Package",
+              "version": "[13.0.3, )",
+              "versionCentrallyManaged": true
+            },
+            "Nullable": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.3.1, )",
+              "versionCentrallyManaged": true
+            },
+            "Roslynator.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[4.13.1, )",
+              "versionCentrallyManaged": true
+            },
+            "System.Collections.Immutable": {
+              "target": "Package",
+              "version": "[9.0.0, )",
+              "versionCentrallyManaged": true
+            },
+            "System.Resources.Extensions": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[7.0.0, )",
+              "versionCentrallyManaged": true
+            },
+            "ppy.SDL2-CS": {
+              "include": "Runtime, Compile, Build, Analyzers, BuildTransitive",
+              "target": "Package",
+              "version": "[1.0.630-alpha, )",
+              "versionCentrallyManaged": true
+            }
+          },
+          "centralPackageVersions": {
+            "CommunityToolkit.HighPerformance": "8.4.0",
+            "Cyotek.Drawing.BitmapFont": "2.0.4",
+            "DotNetAnalyzers.DocumentationAnalyzers": "1.0.0-beta.59",
+            "Google.FlatBuffers": "23.5.26",
+            "ImGui.NET": "1.90.6.1",
+            "JunitXml.TestLogger": "3.1.12",
+            "Magick.NET-Q8-AnyCPU": "14.8.2",
+            "Menees.Analyzers": "3.2.2",
+            "Meziantou.Analyzer": "2.0.206",
+            "Meziantou.Polyfill": "1.0.168",
+            "Microsoft.Bcl.HashCode": "6.0.0",
+            "Microsoft.Bcl.Numerics": "10.0.1",
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": "3.3.4",
+            "Microsoft.CodeAnalysis.CSharp": "5.0",
+            "Microsoft.CodeAnalysis.CSharp.Analyzer.Testing": "1.1.2",
+            "Microsoft.CodeAnalysis.CSharp.Workspaces": "5.0",
+            "Microsoft.CSharp": "4.7.0",
+            "Microsoft.Data.Sqlite.Core": "8.0.4",
+            "Microsoft.Extensions.DependencyModel": "9.0.9",
+            "Microsoft.NETFramework.ReferenceAssemblies": "1.0.3",
+            "Microsoft.Win32.Registry": "5.0.0",
+            "MSTest": "3.9.3",
+            "Newtonsoft.Json": "13.0.3",
+            "Nullable": "1.3.1",
+            "PolySharp": "1.15.0",
+            "ppy.SDL2-CS": "1.0.630-alpha",
+            "Roslynator.Analyzers": "4.13.1",
+            "SharpCompress": "0.40.0",
+            "Silk.NET.OpenAL": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Creative": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Enumeration": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.EXT": "2.23.0",
+            "Silk.NET.OpenGL": "2.23.0",
+            "Silk.NET.WGL.Extensions.NV": "2.23.0",
+            "SQLitePCLRaw.provider.e_sqlite3": "2.1.8",
+            "StyleCop.Analyzers": "1.2.0-beta.556",
+            "System.Collections.Immutable": "9.0.0",
+            "System.CommandLine": "2.0.3",
+            "System.ComponentModel.Annotations": "5.0.0",
+            "System.Drawing.Common": "6.0.0",
+            "System.Drawing.Primitives": "4.3.0",
+            "System.Memory": "4.6.3",
+            "System.Net.Http": "4.3.4",
+            "System.Reflection.Emit": "4.7.0",
+            "System.Resources.Extensions": "7.0.0",
+            "System.Runtime.CompilerServices.Unsafe": "6.1.2",
+            "Vortice.D3DCompiler": "2.4.2",
+            "Vortice.Direct3D11": "2.4.2",
+            "Vortice.MediaFoundation": "2.4.2",
+            "Vortice.XAudio2": "2.4.2"
+          },
+          "runtimeIdentifierGraphPath": "/usr/share/dotnet/sdk/10.0.112/RuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "/home/m/dev/BizHawk/src/BizHawk.Emulation.Cores/BizHawk.Emulation.Cores.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/home/m/dev/BizHawk/src/BizHawk.Emulation.Cores/BizHawk.Emulation.Cores.csproj",
+        "projectName": "BizHawk.Emulation.Cores",
+        "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Emulation.Cores/BizHawk.Emulation.Cores.csproj",
+        "packagesPath": "/home/m/.nuget/packages/",
+        "outputPath": "/home/m/dev/BizHawk/src/BizHawk.Emulation.Cores/obj/",
+        "projectStyle": "PackageReference",
+        "centralPackageVersionsManagementEnabled": true,
+        "CentralPackageTransitivePinningEnabled": true,
+        "configFilePaths": [
+          "/home/m/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net48"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net48": {
+            "targetAlias": "net48",
+            "projectReferences": {
+              "/home/m/dev/BizHawk/src/BizHawk.Bizware.Graphics/BizHawk.Bizware.Graphics.csproj": {
+                "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Bizware.Graphics/BizHawk.Bizware.Graphics.csproj"
+              },
+              "/home/m/dev/BizHawk/src/BizHawk.Emulation.Common/BizHawk.Emulation.Common.csproj": {
+                "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Emulation.Common/BizHawk.Emulation.Common.csproj"
+              },
+              "/home/m/dev/BizHawk/src/BizHawk.Emulation.DiscSystem/BizHawk.Emulation.DiscSystem.csproj": {
+                "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Emulation.DiscSystem/BizHawk.Emulation.DiscSystem.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "net48": {
+          "targetAlias": "net48",
+          "dependencies": {
+            "DotNetAnalyzers.DocumentationAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.0-beta.59, )",
+              "versionCentrallyManaged": true
+            },
+            "Google.FlatBuffers": {
+              "target": "Package",
+              "version": "[23.5.26, )",
+              "versionCentrallyManaged": true
+            },
+            "Menees.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.2.2, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Analyzer": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.0.206, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Polyfill": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.168, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.CSharp": {
+              "target": "Package",
+              "version": "[4.7.0, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.3.4, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.Extensions.DependencyModel": {
+              "target": "Package",
+              "version": "[9.0.9, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.NETFramework.ReferenceAssemblies": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.3, )",
+              "versionCentrallyManaged": true
+            },
+            "Nullable": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.3.1, )",
+              "versionCentrallyManaged": true
+            },
+            "Roslynator.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[4.13.1, )",
+              "versionCentrallyManaged": true
+            },
+            "System.Resources.Extensions": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[7.0.0, )",
+              "versionCentrallyManaged": true
+            }
+          },
+          "centralPackageVersions": {
+            "CommunityToolkit.HighPerformance": "8.4.0",
+            "Cyotek.Drawing.BitmapFont": "2.0.4",
+            "DotNetAnalyzers.DocumentationAnalyzers": "1.0.0-beta.59",
+            "Google.FlatBuffers": "23.5.26",
+            "ImGui.NET": "1.90.6.1",
+            "JunitXml.TestLogger": "3.1.12",
+            "Magick.NET-Q8-AnyCPU": "14.8.2",
+            "Menees.Analyzers": "3.2.2",
+            "Meziantou.Analyzer": "2.0.206",
+            "Meziantou.Polyfill": "1.0.168",
+            "Microsoft.Bcl.HashCode": "6.0.0",
+            "Microsoft.Bcl.Numerics": "10.0.1",
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": "3.3.4",
+            "Microsoft.CodeAnalysis.CSharp": "5.0",
+            "Microsoft.CodeAnalysis.CSharp.Analyzer.Testing": "1.1.2",
+            "Microsoft.CodeAnalysis.CSharp.Workspaces": "5.0",
+            "Microsoft.CSharp": "4.7.0",
+            "Microsoft.Data.Sqlite.Core": "8.0.4",
+            "Microsoft.Extensions.DependencyModel": "9.0.9",
+            "Microsoft.NETFramework.ReferenceAssemblies": "1.0.3",
+            "Microsoft.Win32.Registry": "5.0.0",
+            "MSTest": "3.9.3",
+            "Newtonsoft.Json": "13.0.3",
+            "Nullable": "1.3.1",
+            "PolySharp": "1.15.0",
+            "ppy.SDL2-CS": "1.0.630-alpha",
+            "Roslynator.Analyzers": "4.13.1",
+            "SharpCompress": "0.40.0",
+            "Silk.NET.OpenAL": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Creative": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Enumeration": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.EXT": "2.23.0",
+            "Silk.NET.OpenGL": "2.23.0",
+            "Silk.NET.WGL.Extensions.NV": "2.23.0",
+            "SQLitePCLRaw.provider.e_sqlite3": "2.1.8",
+            "StyleCop.Analyzers": "1.2.0-beta.556",
+            "System.Collections.Immutable": "9.0.0",
+            "System.CommandLine": "2.0.3",
+            "System.ComponentModel.Annotations": "5.0.0",
+            "System.Drawing.Common": "6.0.0",
+            "System.Drawing.Primitives": "4.3.0",
+            "System.Memory": "4.6.3",
+            "System.Net.Http": "4.3.4",
+            "System.Reflection.Emit": "4.7.0",
+            "System.Resources.Extensions": "7.0.0",
+            "System.Runtime.CompilerServices.Unsafe": "6.1.2",
+            "Vortice.D3DCompiler": "2.4.2",
+            "Vortice.Direct3D11": "2.4.2",
+            "Vortice.MediaFoundation": "2.4.2",
+            "Vortice.XAudio2": "2.4.2"
+          },
+          "runtimeIdentifierGraphPath": "/usr/share/dotnet/sdk/10.0.112/RuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "/home/m/dev/BizHawk/src/BizHawk.Emulation.DiscSystem/BizHawk.Emulation.DiscSystem.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/home/m/dev/BizHawk/src/BizHawk.Emulation.DiscSystem/BizHawk.Emulation.DiscSystem.csproj",
+        "projectName": "BizHawk.Emulation.DiscSystem",
+        "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Emulation.DiscSystem/BizHawk.Emulation.DiscSystem.csproj",
+        "packagesPath": "/home/m/.nuget/packages/",
+        "outputPath": "/home/m/dev/BizHawk/src/BizHawk.Emulation.DiscSystem/obj/",
+        "projectStyle": "PackageReference",
+        "centralPackageVersionsManagementEnabled": true,
+        "CentralPackageTransitivePinningEnabled": true,
+        "configFilePaths": [
+          "/home/m/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "netstandard2.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "netstandard2.0": {
+            "targetAlias": "netstandard2.0",
+            "projectReferences": {
+              "/home/m/dev/BizHawk/src/BizHawk.Common/BizHawk.Common.csproj": {
+                "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Common/BizHawk.Common.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "netstandard2.0": {
+          "targetAlias": "netstandard2.0",
+          "dependencies": {
+            "DotNetAnalyzers.DocumentationAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.0-beta.59, )",
+              "versionCentrallyManaged": true
+            },
+            "Menees.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.2.2, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Analyzer": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.0.206, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Polyfill": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.168, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.3.4, )",
+              "versionCentrallyManaged": true
+            },
+            "NETStandard.Library": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.0.3, )",
+              "autoReferenced": true
+            },
+            "Nullable": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.3.1, )",
+              "versionCentrallyManaged": true
+            },
+            "Roslynator.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[4.13.1, )",
+              "versionCentrallyManaged": true
+            }
+          },
+          "centralPackageVersions": {
+            "CommunityToolkit.HighPerformance": "8.4.0",
+            "Cyotek.Drawing.BitmapFont": "2.0.4",
+            "DotNetAnalyzers.DocumentationAnalyzers": "1.0.0-beta.59",
+            "Google.FlatBuffers": "23.5.26",
+            "ImGui.NET": "1.90.6.1",
+            "JunitXml.TestLogger": "3.1.12",
+            "Magick.NET-Q8-AnyCPU": "14.8.2",
+            "Menees.Analyzers": "3.2.2",
+            "Meziantou.Analyzer": "2.0.206",
+            "Meziantou.Polyfill": "1.0.168",
+            "Microsoft.Bcl.HashCode": "6.0.0",
+            "Microsoft.Bcl.Numerics": "10.0.1",
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": "3.3.4",
+            "Microsoft.CodeAnalysis.CSharp": "5.0",
+            "Microsoft.CodeAnalysis.CSharp.Analyzer.Testing": "1.1.2",
+            "Microsoft.CodeAnalysis.CSharp.Workspaces": "5.0",
+            "Microsoft.CSharp": "4.7.0",
+            "Microsoft.Data.Sqlite.Core": "8.0.4",
+            "Microsoft.Extensions.DependencyModel": "9.0.9",
+            "Microsoft.NETFramework.ReferenceAssemblies": "1.0.3",
+            "Microsoft.Win32.Registry": "5.0.0",
+            "MSTest": "3.9.3",
+            "Newtonsoft.Json": "13.0.3",
+            "Nullable": "1.3.1",
+            "PolySharp": "1.15.0",
+            "ppy.SDL2-CS": "1.0.630-alpha",
+            "Roslynator.Analyzers": "4.13.1",
+            "SharpCompress": "0.40.0",
+            "Silk.NET.OpenAL": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Creative": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Enumeration": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.EXT": "2.23.0",
+            "Silk.NET.OpenGL": "2.23.0",
+            "Silk.NET.WGL.Extensions.NV": "2.23.0",
+            "SQLitePCLRaw.provider.e_sqlite3": "2.1.8",
+            "StyleCop.Analyzers": "1.2.0-beta.556",
+            "System.Collections.Immutable": "9.0.0",
+            "System.CommandLine": "2.0.3",
+            "System.ComponentModel.Annotations": "5.0.0",
+            "System.Drawing.Common": "6.0.0",
+            "System.Drawing.Primitives": "4.3.0",
+            "System.Memory": "4.6.3",
+            "System.Net.Http": "4.3.4",
+            "System.Reflection.Emit": "4.7.0",
+            "System.Resources.Extensions": "7.0.0",
+            "System.Runtime.CompilerServices.Unsafe": "6.1.2",
+            "Vortice.D3DCompiler": "2.4.2",
+            "Vortice.Direct3D11": "2.4.2",
+            "Vortice.MediaFoundation": "2.4.2",
+            "Vortice.XAudio2": "2.4.2"
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "runtimeIdentifierGraphPath": "/usr/share/dotnet/sdk/10.0.112/RuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "/home/m/dev/BizHawk/src/BizHawk.Tests.Testroms/BizHawk.Tests.Testroms.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/home/m/dev/BizHawk/src/BizHawk.Tests.Testroms/BizHawk.Tests.Testroms.csproj",
+        "projectName": "BizHawk.Tests.Testroms",
+        "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Tests.Testroms/BizHawk.Tests.Testroms.csproj",
+        "packagesPath": "/home/m/.nuget/packages/",
+        "outputPath": "/home/m/dev/BizHawk/src/BizHawk.Tests.Testroms/obj/",
+        "projectStyle": "PackageReference",
+        "centralPackageVersionsManagementEnabled": true,
+        "CentralPackageTransitivePinningEnabled": true,
+        "configFilePaths": [
+          "/home/m/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net48"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net48": {
+            "targetAlias": "net48",
+            "projectReferences": {
+              "/home/m/dev/BizHawk/src/BizHawk.Client.Common/BizHawk.Client.Common.csproj": {
+                "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Client.Common/BizHawk.Client.Common.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "net48": {
+          "targetAlias": "net48",
+          "dependencies": {
+            "DotNetAnalyzers.DocumentationAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.0-beta.59, )",
+              "versionCentrallyManaged": true
+            },
+            "JunitXml.TestLogger": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.1.12, )",
+              "versionCentrallyManaged": true
+            },
+            "MSTest": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.9.3, )",
+              "versionCentrallyManaged": true
+            },
+            "Magick.NET-Q8-AnyCPU": {
+              "target": "Package",
+              "version": "[14.8.2, )",
+              "versionCentrallyManaged": true
+            },
+            "Menees.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.2.2, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Analyzer": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.0.206, )",
+              "versionCentrallyManaged": true
+            },
+            "Meziantou.Polyfill": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.168, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.3.4, )",
+              "versionCentrallyManaged": true
+            },
+            "Microsoft.NETFramework.ReferenceAssemblies": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.3, )",
+              "versionCentrallyManaged": true
+            },
+            "Nullable": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.3.1, )",
+              "versionCentrallyManaged": true
+            },
+            "Roslynator.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[4.13.1, )",
+              "versionCentrallyManaged": true
+            },
+            "System.Drawing.Common": {
+              "target": "Package",
+              "version": "[6.0.0, )",
+              "versionCentrallyManaged": true
+            },
+            "System.Resources.Extensions": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[7.0.0, )",
+              "versionCentrallyManaged": true
+            }
+          },
+          "centralPackageVersions": {
+            "CommunityToolkit.HighPerformance": "8.4.0",
+            "Cyotek.Drawing.BitmapFont": "2.0.4",
+            "DotNetAnalyzers.DocumentationAnalyzers": "1.0.0-beta.59",
+            "Google.FlatBuffers": "23.5.26",
+            "ImGui.NET": "1.90.6.1",
+            "JunitXml.TestLogger": "3.1.12",
+            "Magick.NET-Q8-AnyCPU": "14.8.2",
+            "Menees.Analyzers": "3.2.2",
+            "Meziantou.Analyzer": "2.0.206",
+            "Meziantou.Polyfill": "1.0.168",
+            "Microsoft.Bcl.HashCode": "6.0.0",
+            "Microsoft.Bcl.Numerics": "10.0.1",
+            "Microsoft.CodeAnalysis.BannedApiAnalyzers": "3.3.4",
+            "Microsoft.CodeAnalysis.CSharp": "5.0",
+            "Microsoft.CodeAnalysis.CSharp.Analyzer.Testing": "1.1.2",
+            "Microsoft.CodeAnalysis.CSharp.Workspaces": "5.0",
+            "Microsoft.CSharp": "4.7.0",
+            "Microsoft.Data.Sqlite.Core": "8.0.4",
+            "Microsoft.Extensions.DependencyModel": "9.0.9",
+            "Microsoft.NETFramework.ReferenceAssemblies": "1.0.3",
+            "Microsoft.Win32.Registry": "5.0.0",
+            "MSTest": "3.9.3",
+            "Newtonsoft.Json": "13.0.3",
+            "Nullable": "1.3.1",
+            "PolySharp": "1.15.0",
+            "ppy.SDL2-CS": "1.0.630-alpha",
+            "Roslynator.Analyzers": "4.13.1",
+            "SharpCompress": "0.40.0",
+            "Silk.NET.OpenAL": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Creative": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.Enumeration": "2.23.0",
+            "Silk.NET.OpenAL.Extensions.EXT": "2.23.0",
+            "Silk.NET.OpenGL": "2.23.0",
+            "Silk.NET.WGL.Extensions.NV": "2.23.0",
+            "SQLitePCLRaw.provider.e_sqlite3": "2.1.8",
+            "StyleCop.Analyzers": "1.2.0-beta.556",
+            "System.Collections.Immutable": "9.0.0",
+            "System.CommandLine": "2.0.3",
+            "System.ComponentModel.Annotations": "5.0.0",
+            "System.Drawing.Common": "6.0.0",
+            "System.Drawing.Primitives": "4.3.0",
+            "System.Memory": "4.6.3",
+            "System.Net.Http": "4.3.4",
+            "System.Reflection.Emit": "4.7.0",
+            "System.Resources.Extensions": "7.0.0",
+            "System.Runtime.CompilerServices.Unsafe": "6.1.2",
+            "Vortice.D3DCompiler": "2.4.2",
+            "Vortice.Direct3D11": "2.4.2",
+            "Vortice.MediaFoundation": "2.4.2",
+            "Vortice.XAudio2": "2.4.2"
+          },
+          "runtimeIdentifierGraphPath": "/usr/share/dotnet/sdk/10.0.112/RuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "/home/m/dev/memscan/tools/smshawk_dump/smshawk_dump.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/home/m/dev/memscan/tools/smshawk_dump/smshawk_dump.csproj",
+        "projectName": "smshawk_dump",
+        "projectPath": "/home/m/dev/memscan/tools/smshawk_dump/smshawk_dump.csproj",
+        "packagesPath": "/home/m/.nuget/packages/",
+        "outputPath": "/home/m/dev/memscan/tools/smshawk_dump/obj/",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "/home/m/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net48"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net48": {
+            "targetAlias": "net48",
+            "projectReferences": {
+              "/home/m/dev/BizHawk/src/BizHawk.Tests.Testroms/BizHawk.Tests.Testroms.csproj": {
+                "projectPath": "/home/m/dev/BizHawk/src/BizHawk.Tests.Testroms/BizHawk.Tests.Testroms.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "net48": {
+          "targetAlias": "net48",
+          "dependencies": {
+            "Microsoft.NETFramework.ReferenceAssemblies": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.3, )",
+              "autoReferenced": true
+            }
+          },
+          "runtimeIdentifierGraphPath": "/usr/share/dotnet/sdk/10.0.112/RuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}

@@ -20,12 +20,12 @@ enum { DP_WATCH_PAD = 8, DP_WATCH_CAP = 20 };  /* gaps; caption band: two text l
 struct DpWatch {
     SDL_Window *win;
     SDL_Renderer *ren;
-    SDL_Texture *tex[2];
+    SDL_Texture *tex[3];
     int ntiles;
-    int bw[2], bh[2];            /* native buffer sizes (the platform's screen) */
+    int bw[3], bh[3];            /* native buffer sizes (the platform's screen) */
     int sc;                      /* global display scale: 2 on small screens */
-    uint16_t *fb[2];             /* latest frame of each tile (copied) */
-    char l1[2][96], l2[2][96];   /* captions, drawn each present */
+    uint16_t *fb[3];             /* latest frame of each tile (copied) */
+    char l1[3][96], l2[3][96];   /* captions, drawn each present */
     Uint32 t_last;
 };
 
@@ -68,7 +68,7 @@ DpWatch *dp_watch_open(const char *title, int ntiles, const int *w, const int *h
     }
     DpWatch *k = calloc(1, sizeof *k);
     if (!k) return NULL;
-    k->ntiles = ntiles > 2 ? 2 : (ntiles < 1 ? 1 : ntiles);
+    k->ntiles = ntiles > 3 ? 3 : (ntiles < 1 ? 1 : ntiles);
     /* small screens at x2 (the console panels are tiny on a desktop monitor);
      * anything bigger keeps 1:1 */
     k->sc = 1;

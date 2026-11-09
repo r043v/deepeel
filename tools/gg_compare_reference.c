@@ -168,15 +168,16 @@ static void on_term_signal(int sig) {
             sig == SIGTERM ? "SIGTERM" : sig == SIGINT ? "SIGINT" : "SIGHUP");
 }
 
+static FILE *hawk;   /* DP_GG_HAWK_FRAMES: SMSHawk's pre-dumped frames (declared in main) */
 static void watch_open(unsigned movie_frames, const char *movie_path, unsigned buf_w, unsigned buf_h) {
     g_watch_movie = strrchr(movie_path, '/');
     g_watch_movie = g_watch_movie ? g_watch_movie + 1 : movie_path;
     g_watch_mframes = movie_frames;
     char title[160];
     snprintf(title, sizeof title, "deepeel SMS/GG — %s", g_watch_movie);
-    const int wdims[2] = { (int)buf_w, (int)buf_w };
-    const int hdims[2] = { (int)buf_h, (int)buf_h };
-    g_watch = dp_watch_open(title, 2, wdims, hdims);
+    const int wdims[3] = { (int)buf_w, (int)buf_w, (int)buf_w };
+    const int hdims[3] = { (int)buf_h, (int)buf_h, (int)buf_h };
+    g_watch = dp_watch_open(title, hawk ? 3 : 2, wdims, hdims);
     /* SDL converts SIGTERM/SIGINT into SDL_QUIT: a process outside the
      * terminal (cgroup shutdown, scope stop) then silently closes the
      * window. Log the signal so the cause stays visible. */
@@ -236,7 +237,7 @@ static void watch_frame(void) {
         g_watch_t0 = now_ms(); g_watch_n = 0; g_watch_rn = 0; g_ref_frames_seen = 0;
     }
     dp_watch_caption(g_watch, 0, l1, g_l2);
-    dp_watch_caption(g_watch, 1, "Genesis Plus GX (reference)", g_r2);
+    dp_watch_caption(g_watch, 1, "Genesis Plus GX", g_r2);
     int stop = 0;
     dp_watch_frame(g_watch, &stop);
     if (stop) exit(0);
@@ -402,8 +403,22 @@ int main(int argc, char **argv) {
      * mapping as DP_GG_PAD_SHIFT=-N minus the tail: rows past the movie end
      * (which the shift keeps pulling in) stay silent here. */
     unsigned lag = getenv("DP_GG_LAG_FRAMES") ? (unsigned)strtoul(getenv("DP_GG_LAG_FRAMES"), NULL, 0) : 0;
+    /* DP_GG_HAWK_FRAMES=file.raw: SMSHawk's frames pre-dumped by
+     * tools/smshawk_dump (raw RGB565, native buffer size) — the third tile */
+    uint16_t *hawk_fb = NULL;
+    {   const char *hf = getenv("DP_GG_HAWK_FRAMES");
+        if (hf) {
+            hawk = fopen(hf, "rb");
+            if (!hawk) { fprintf(stderr, "cannot open DP_GG_HAWK_FRAMES file\n"); return 2; }
+            hawk_fb = malloc((size_t)g_dut_w * (size_t)(g_dut_w == DUT_W_MAX ? GG_ACTIVE : GG_HEIGHT) * sizeof *hawk_fb);
+            if (!hawk_fb) { fprintf(stderr, "out of memory (hawk tile)\n"); return 2; }
+        }
+    }
     for (unsigned frame = 0; frame < limit; frame++) {
-        if (have_window && frame == seek) watch_open(tas.frames, movie_path, g_dut_w, is_sms ? GG_ACTIVE : GG_HEIGHT);
+        if (have_window && frame == seek) {
+            watch_open(tas.frames, movie_path, g_dut_w, is_sms ? GG_ACTIVE : GG_HEIGHT);
+            if (hawk) dp_watch_caption(g_watch, 2, "SMSHawk (BizHawk)", "");
+        }
         long mi = pad_shift ? (long)frame - pad_shift : (long)frame + (long)lag;
         g_pad = (mi >= 0 && (unsigned)mi < tas.frames ? tas.masks[mi] : 0) & 0x7Fu;   /* bit 128 = SMS Reset: kept off */
         if (g_pad != prev_pad) {
@@ -461,6 +476,20 @@ int main(int argc, char **argv) {
                 if (pc_hist[pgi]) fprintf(stderr, " %03x=%llu", pgi, pc_hist[pgi]);
             fprintf(stderr, "\n");
             memset(pc_hist, 0, sizeof pc_hist);
+        }
+        if (hawk) {
+            static unsigned hawk_frames, hawk_eof;
+            if (fread(hawk_fb, sizeof *hawk_fb, (size_t)g_dut_w * (size_t)(g_dut_w == DUT_W_MAX ? GG_ACTIVE : GG_HEIGHT), hawk) == (size_t)g_dut_w * (size_t)(g_dut_w == DUT_W_MAX ? GG_ACTIVE : GG_HEIGHT)) {
+                hawk_frames++;
+                if (g_watch) {
+                    dp_watch_tile(g_watch, 2, hawk_fb, g_dut_w);
+                    char h1[64], h2[96];
+                    snprintf(h1, sizeof h1, "SMSHawk (BizHawk)");
+                    if (hawk_eof) snprintf(h2, sizeof h2, "fin du dump (frame %u)", hawk_frames);
+                    else snprintf(h2, sizeof h2, "frame %u/%u", hawk_frames, g_watch_mframes);
+                    dp_watch_caption(g_watch, 2, h1, h2);
+                }
+            } else hawk_eof = 1;
         }
         if (pc_range_frames > 0) pc_range_frames--;
         /* DP_GG_VDPLOG: per-frame VDP interrupt state (reg0 line IE, reg1
