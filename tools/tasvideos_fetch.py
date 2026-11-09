@@ -47,16 +47,24 @@ def opt(argv, name, default=None):
         return v
     return default
 
+ALT_SYSTEM = {"MD": ("Genesis",)}   # the publications API renamed the system codes (MD -> Genesis, observed 11/2026)
+
 def pubs_of(system, title):
-    data = json.loads(get(PUBS % system))
-    data = data if isinstance(data, list) else data.get("items", [])
     hits = []
-    for p in data:
-        g = re.sub(r"^%s\s+" % re.escape(system), "", p.get("title", ""))
-        g = re.split(r"\s+by\s+", g)[0]
-        g = re.sub(r'\s*"[^"]*"\s*$', "", g)
-        if title and norm(g) == title:
-            hits.append(p)
+    prefixes = [system] + list(ALT_SYSTEM.get(system, ()))
+    for sys_ in prefixes:
+        data = json.loads(get(PUBS % sys_))
+        data = data if isinstance(data, list) else data.get("items", [])
+        for p in data:
+            g = p.get("title", "")
+            for pre in prefixes:   # the titles carry the system word ("Genesis Sonic ...")
+                g = re.sub(r"^%s\s+" % re.escape(pre), "", g, count=1, flags=re.I)
+            g = re.split(r"\s+by\s+", g)[0]
+            g = re.sub(r'\s*"[^"]*"\s*$', "", g)
+            if title and norm(g) == title:
+                hits.append(p)
+        if hits:
+            break
     return hits
 
 def main():
