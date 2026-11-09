@@ -35,6 +35,7 @@ void dp_nesmach_set_hooks(DpNesMach *m, const DpNesHooks *h);
 void dp_nesmach_cut(DpNesMach *m);
 /* the live PPU status byte without a read's side effects (fidelity-harness diagnostics) */
 unsigned dp_nesmach_ppu_status(const DpNesMach *m);
+void dp_nesmach_set_ppu_status(unsigned st);
 
 /* Runs instructions until max_steps, a hook stop or a completed frame
  * boundary the caller's on_frame handles; returns the steps executed. */

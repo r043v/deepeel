@@ -633,6 +633,32 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
         }
     }
 
+    // $2002 event probe (§3.7): the first LDA/BIT abs $2002 at a site forks
+    // one state per plausible status byte (vblank, sprite 0, overflow — the
+    // combos the real PPU can present), each snapshot plants the value so the
+    // forked path reads it at the poll.  The live machine is never touched,
+    // one visit per site, refusals counted.  Guard of principle, as on sega:
+    // no probe while an NMI edge is pending — a planted vblank must not mask
+    // the interrupt line the real hardware would raise.
+    if (x->opt.event_probes && (op == 0xAD || op == 0x2C) && bytes[1] == 0x02 && bytes[2] == 0x20 &&
+        !dp_nesmach_nmi_pending(x->m)) {
+        int64_t site = dp_nesmach_rom_index(x->m, pc);
+        if (site >= 0 && dp_set_insert(&x->probe_seen, ((uint64_t)site + 1) << 1 | 1) > 0) {
+            r->ppu_probe_sites++;
+            static const uint8_t st[] = { 0x80, 0x40, 0x20, 0xC0, 0xA0, 0xE0, 0x00 };
+            unsigned keep = dp_nesmach_ppu_status(x->m);
+            for (unsigned b = 0; b < sizeof st; b++) {
+                uint8_t *snap = malloc(dp_nesmach_state_size());
+                if (!snap) { r->ppu_probe_refused++; continue; }
+                dp_nesmach_set_ppu_status(st[b]);
+                dp_nesmach_save(x->m, snap);
+                dp_nesmach_set_ppu_status(keep);
+                DpNesPathState f = { snap, 0, 0, x->paths_opened, x->total_steps, 0 };
+                f.probe = 1; if (snap_push(x, &f)) r->ppu_probes++; else r->ppu_probe_refused++;
+            }
+        }
+    }
+
     // NMI fork: the edge is pending, queue a state where it is cleared so
     // the no-NMI side is explored too (the natural path takes the NMI)
     if (x->opt.seed_irq && dp_nesmach_nmi_pending(x->m) &&
@@ -1318,6 +1344,7 @@ DpNesOptions dp_nes_options(void) {
     o.fork_cap = 4;
     o.defer_tiers = 0;   // the CLI turns it on (3 tiers, like sega); library callers keep final cuts
     o.seed_irq = 1;
+    o.event_probes = 1;
     o.play_frames = 0; o.demo_frames = 0;
     o.play_sessions = 8;
     o.novelty_frames = 240;
@@ -2065,11 +2092,13 @@ int dp_nes_summary(const DpNesResults *r, const char *path) {
     fprintf(f, "{\"deepeel\":\"%s\",\"platform\":\"nes\",\"prg_size\":%zu,\"classes\":{", DEEPEEL_VERSION, r->prg_size);
     for (int k = 0; k < DP_NMAP_COUNT; k++) fprintf(f, "%s\"%s\":%llu", k ? "," : "", dp_nmap_names[k], (unsigned long long)cls[k]);
     fprintf(f, "},\"known_pct\":%.3f,\"counters\":{\"steps\":%llu,\"paths\":%llu,\"forks\":%llu,"
-               "\"step_cuts\":%llu,\"loop_cuts\":%llu,\"fork_cuts\":%llu,\"queue_cuts\":%llu,\"sections\":%u}}\n",
+               "\"step_cuts\":%llu,\"loop_cuts\":%llu,\"fork_cuts\":%llu,\"queue_cuts\":%llu,\"sections\":%u,"
+               "\"ppu_probes\":%llu,\"ppu_probe_refused\":%llu}}\n",
             r->prg_size ? 100.0 * (double)(r->prg_size - cls[0]) / (double)r->prg_size : 0.0,
             (unsigned long long)r->steps, (unsigned long long)r->paths, (unsigned long long)r->forks,
             (unsigned long long)r->step_cuts, (unsigned long long)r->loop_cuts, (unsigned long long)r->fork_cuts,
-            (unsigned long long)r->queue_cuts, r->section_count);
+            (unsigned long long)r->queue_cuts, r->section_count,
+            (unsigned long long)r->ppu_probes, (unsigned long long)r->ppu_probe_refused);
     return fclose(f) ? -1 : 0;
 }
 
@@ -2192,6 +2221,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  cpu loop copy bytes %llu, to WRAM %llu, to SRAM/APU %llu, ROM->WRAM->OAM %llu\n", (unsigned long long)r->cpu_copy_bytes, (unsigned long long)r->wram_copy_bytes, (unsigned long long)r->aux_copy_bytes, (unsigned long long)r->oam_chain_bytes);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, %llu table addresses, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_ptrs, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  pad probes: %llu forks at %llu sites, refused %llu\n", (unsigned long long)r->pad_probes, (unsigned long long)r->pad_probe_sites, (unsigned long long)r->pad_probe_refused);
+    fprintf(out, "  $2002 probes (3.7): %llu forks at %llu sites, refused %llu\n", (unsigned long long)r->ppu_probes, (unsigned long long)r->ppu_probe_sites, (unsigned long long)r->ppu_probe_refused);
     fprintf(out, "  copy siblings: %llu tables; %llu ranges (%llu bytes); %llu refused over executed code; %llu tables cut at the cap\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_ranges, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_refused, (unsigned long long)r->sib_caps);
     fprintf(out, "  choice tree: %u nodes\n", r->tree_count);
     fprintf(out, "  provenance: %llu jump-table words traced from PRG reads, %llu roots seeded\n", (unsigned long long)r->prov_sites, (unsigned long long)r->prov_roots);

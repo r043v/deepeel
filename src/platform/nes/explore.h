@@ -112,6 +112,7 @@ typedef struct {
     int tas_count;
     uint8_t entry_bank[32]; uint16_t entry_addr[32]; int entry_count; // --entry bank:addr seeds
     int no_pad_probe;      // disable the strobe-site pad probes
+    int event_probes;      // §3.7: fork on plausible $2002 status values at the poll sites
     int pad_full;          // D10: also probe every one of the 256 port-1 button masks at each strobe site
     int bank_dispatch;     // second pass also scans the fixed bank for jump tables and seeds every bank view (G2, UxROM)
     unsigned ctx_cap;      // legacy C2: max admitted states per coarse context (0 = off; keeps the old opt-in admission-cap mode)
@@ -162,7 +163,7 @@ typedef struct DpNesResults_ {
     uint64_t queue_grown;
     uint64_t step_cuts, loop_cuts, fork_cuts, queue_cuts, global_cuts, path_cuts,
              faults, decode_cuts;
-    uint64_t ctx_evicted, dispatch_tables, dispatch_seeds, dispatch_refused_view, prov_sites, prov_roots, pass2_seeds, pass2_refused, pass2_capped, sib_tables, sib_ranges, sib_bytes, sib_refused, sib_caps, vectors_seeded, tas_same, tas_different, tas_unrecorded, pad_cuts, table_bytes, table_count, table_xbank_words, ctx_grew, ctx_set_full, static_bytes, static_roots, static_cap_hits, padding_bytes, inferred_code, inferred_data, inferred_pad, cpu_copy_bytes, wram_copy_bytes, aux_copy_bytes, oam_chain_bytes, indirect_sites, indirect_targets, indirect_ptrs, indirect_overflow, pad_probes, pad_probe_sites, pad_probe_refused, entries_seeded, entries_refused, seeds_reset, seeds_irq, seeds_bank, seeds_refused_queue;
+    uint64_t ctx_evicted, dispatch_tables, dispatch_seeds, dispatch_refused_view, prov_sites, prov_roots, pass2_seeds, pass2_refused, pass2_capped, sib_tables, sib_ranges, sib_bytes, sib_refused, sib_caps, vectors_seeded, tas_same, tas_different, tas_unrecorded, pad_cuts, table_bytes, table_count, table_xbank_words, ctx_grew, ctx_set_full, static_bytes, static_roots, static_cap_hits, padding_bytes, inferred_code, inferred_data, inferred_pad, cpu_copy_bytes, wram_copy_bytes, aux_copy_bytes, oam_chain_bytes, indirect_sites, indirect_targets, indirect_ptrs, indirect_overflow, pad_probes, pad_probe_sites, pad_probe_refused, ppu_probes, ppu_probe_sites, ppu_probe_refused, entries_seeded, entries_refused, seeds_reset, seeds_irq, seeds_bank, seeds_refused_queue;
     uint64_t demo_frames_run, play_frames_run, play_sessions_run, play_steps_accounted, seeds_play;
     uint64_t evicted;          // exact-state dedup admissions refused
     uint64_t lot_written, lot_read, lot_pending; // disk lot (--lot): spilled / read back / left on disk

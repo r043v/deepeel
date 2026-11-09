@@ -264,8 +264,8 @@ qui fournissent les hooks requis.
     initiaux, puis combinaisons, avec reports différés quand la file est pleine
     (`deferred retry skips`) ;
   - le catalogue est fourni par la plateforme, le mécanisme est commun ;
-  - à ajouter : NES `$4016/$4017`, pad 6 boutons MD, multitap PCE, paddle et
-    phaser SMS (la matrice clavier MSX est faite, 0.251.14).
+  - à ajouter : pad 6 boutons MD, multitap PCE, paddle et phaser SMS (la
+    matrice clavier MSX est faite 0.251.14, `$4016` et `$2002` NES 0.251.16).
 
 **D11 — Fourches de répétition.**
 - **Méca.** : une instruction de bloc ou de boucle (LDIR/CPIR/INIR/OTIR, BBR/BBS,
@@ -614,11 +614,11 @@ Sinon elle est listée comme limite.
 | Surface | État | Exigé |
 |---|---|---|
 | 6502, PPU événementiel, APU, OAM DMA, NMI/IRQ | ✅ | — |
-| Mappers | **NROM, UxROM seulement** | MMC1, MMC3 (+IRQ scanline), CNROM, AxROM, MMC5… : **Banque**, **Fourche IRQ** |
+| Mappers | ✅ NROM/UxROM natifs (runtime), MMC1, CNROM, MMC3, AxROM, MMC5 (sous-ensemble), 66, 94 pontés par fenêtres composées (`nesmach.c`) | IRQ scanline MMC3 : **Fourche IRQ** |
 | CHR-ROM | **non suivie** (seul le PRG est indexé) | Index ROM étendu au CHR, **Type** tiles par les fetchs PPU |
 | DMC DMA | absent | **Copie** + **Type** samples |
-| `$4016/$4017` | ? | **Sonde** manette (D10) |
-| `$2002` (vblank, sprite 0) | statique | **Sonde** (§3.7) |
+| `$4016/$4017` | ✅ sondes manette (strobe-site : boutons uniques, accords, catalogue `--pad-full`) ; les lectures ≥ 9 renvoient 1 (signature NESdev, m0boy) | — |
+| `$2002` (vblank, sprite 0) | ✅ sonde de valeur 0.251.16 (§3.7) : première lecture LDA/BIT abs d'un site fourche par octet de statut plausible, garde NMI de principe, opt-out `--no-event-probes` | — |
 | Opcodes illégaux | NOP | à émuler ou comptés |
 
 ### 3.5 PC Engine

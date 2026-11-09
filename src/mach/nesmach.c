@@ -327,6 +327,10 @@ unsigned dp_nesmach_ppu_status(const DpNesMach *d) {
     return machine.ppu.status;
 }
 
+/* $2002 event probe (§3.7): plant a plausible status byte into a snapshot so
+ * the forked path reads it at the poll; the live machine is never touched */
+void dp_nesmach_set_ppu_status(unsigned st) { machine.ppu.status = (uint8_t)st; }
+
 uint64_t dp_nesmach_run(DpNesMach *d, uint64_t max_steps) {
     nes_trace.user = d;
     nes_trace.step = t_step;
