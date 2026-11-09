@@ -662,6 +662,7 @@ void dp_watch_stop(void) {
 
 // --- framebuffer watch window (NES/PCE/MD --watch): shows the latest published frame ---
 #include "fbwatch.h"
+#include "../explore/md_ref_feed.h"
 static pthread_t fb_th;
 static int fb_running;
 static atomic_int fb_quit;
@@ -686,6 +687,12 @@ static void *fb_main(void *arg) {
     SDL_Texture *tex = NULL;
     int tw = 0, th = 0;
     enum { FB_CAP = 30 };   // caption height under the image (two text lines)
+    // per-tile speed meters (the GB watch maths): a 1 s window over the frame counter
+    static uint32_t rx[DP_MDRF_MAX_W * DP_MDRF_MAX_H];
+    static double t_main, t_ref;
+    static uint64_t f_main;
+    static uint32_t f_ref;
+    static double s_main, s_ref;
     while (!atomic_load(&fb_quit)) {
         SDL_Event e;
         while (SDL_PollEvent(&e))
@@ -701,18 +708,55 @@ static void *fb_main(void *arg) {
                 tw = w; th = h;
             }
             if (tex) SDL_UpdateTexture(tex, NULL, px, w * 4);
+            double now = watch_now();
+            if (now - t_main >= 1.0) {
+                if (f >= f_main) s_main = (double)(f - f_main) / (now - t_main);
+                t_main = now; f_main = f;
+            }
+        }
+        int ref = dp_fb_ref_active(), rhave = 0, rw = 0, rh = 0, rdone = 0;
+        uint32_t rvf = 0, rtot = 0;
+        if (ref) {
+            rhave = dp_fb_ref_read(rx, &rw, &rh, &rvf, &rtot, &rdone);
+            double now = watch_now();
+            if (rhave && now - t_ref >= 1.0) {
+                if (rvf >= f_ref) s_ref = (double)(rvf - f_ref) / (now - t_ref);
+                t_ref = now; f_ref = rvf;
+            }
+            if (rdone) s_ref = 0;
         }
         SDL_RenderClear(ren);
+        int cols = ref ? 2 : 1, cw = W / cols, img_h = H - FB_CAP > 0 ? H - FB_CAP : 1;
         if (tex) {
-            // keep the caption lines free: the image fills the rest, stretched
-            SDL_Rect dst = {0, 0, W, H - FB_CAP > 0 ? H - FB_CAP : 1};
+            // the left tile: the replay/explorer image; the caption lines stay free
+            SDL_Rect dst = {0, 0, cw, img_h};
             SDL_RenderCopy(ren, tex, NULL, &dst);
         }
-        {   // caption: the fixed part from the CLI, the progress line from the explorer
+        SDL_Texture *rtex = NULL;
+        if (rhave) {
+            rtex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, rw, rh);
+            SDL_UpdateTexture(rtex, NULL, rx, rw * 4);
+            SDL_Rect dst = {cw, 0, W - cw, img_h};
+            SDL_RenderCopy(ren, rtex, NULL, &dst);
+            SDL_DestroyTexture(rtex);
+        }
+        {   // captions (the GB watch tile information, mutualized): the left tile
+            // keeps the CLI fixed part and the explorer progress line
             char c1[160], c2[160];
             int done = dp_fb_caption_read(c1, sizeof c1, c2, sizeof c2);
-            if (c1[0]) draw_text(ren, 6, H - FB_CAP + 2, c1, 1, gui_color(DP_C_TITLE));
+            if (!c1[0]) snprintf(c1, sizeof c1, "replay (deepeel)");
+            if (!c2[0] && s_main > 0) snprintf(c2, sizeof c2, "%.0f f/s", s_main);
+            draw_text(ren, 6, H - FB_CAP + 2, c1, 1, gui_color(DP_C_TITLE));
             if (c2[0]) draw_text(ren, 6, H - FB_CAP + 16, c2, 1, gui_color(done ? DP_C_DIM : DP_C_TEXT));
+            if (ref) {   // the right tile: the reference harness, its own captions
+                char r1[160], r2[160];
+                snprintf(r1, sizeof r1, "ClownMDEmu (reference)");
+                if (rhave) snprintf(r2, sizeof r2, rdone ? "done  %u frames" : "%u/%u  %.0f f/s",
+                                    rdone ? (unsigned)rtot : (unsigned)rvf, (unsigned)rtot, s_ref);
+                else snprintf(r2, sizeof r2, "waiting for tools/md_ref_live...");
+                draw_text(ren, cw + 6, H - FB_CAP + 2, r1, 1, gui_color(DP_C_TITLE));
+                draw_text(ren, cw + 6, H - FB_CAP + 16, r2, 1, gui_color(rdone ? DP_C_DIM : DP_C_TEXT));
+            }
         }
         SDL_RenderPresent(ren);
         SDL_Delay(16);

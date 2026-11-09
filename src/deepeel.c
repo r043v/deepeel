@@ -9,6 +9,8 @@
 #include <malloc.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include "explore/md_ref_feed.h"
 #include "core/md5.h"
 #include "core/cart.h"
 #include "core/cart_md.h"
@@ -1627,6 +1629,26 @@ static void md_movie_output_path(char *out, size_t cap, const char *base, int id
         snprintf(out, cap, "%s/%02d-%s", base, idx + 1, b);
 }
 
+/* the reference tile: tools/md_ref_live (ClownMDEmu, the reference core of
+ * tools/md_compare_reference) replays the same movie into the shared feed
+ * (DEEPEEL_MD_REF_FEED, the GB VBA harness pattern); spawned per movie, killed
+ * when the explorer moves on — the two cores run at their own pace and the
+ * window shows each tile's speed separately */
+static const char *md_ref_live_path(void) {
+    const char *env = getenv("DP_MD_REF_LIVE");
+    if (env && *env) return env;
+    static char p[600];
+    ssize_t n = readlink("/proc/self/exe", p, sizeof p - 1);
+    if (n > 0) {
+        p[n] = 0;
+        char *s = strrchr(p, '/');
+        if (s) { snprintf(s + 1, (size_t)(sizeof p - (size_t)(s + 1 - p)), "md_ref_live"); if (!access(p, X_OK)) return p; }
+    }
+    snprintf(p, sizeof p, "build/md-reference/md_ref_live");
+    if (!access(p, X_OK)) return p;
+    return NULL;
+}
+
 static int cmd_md(int argc, char **argv) {
     const char *md_rtcode = NULL;
     if (argc < 4) return usage(), 2;
@@ -1706,7 +1728,14 @@ static int cmd_md(int argc, char **argv) {
             mkdir(cc.summary, 0777);   // a missing --summary directory would silently lose the summaries
             if (md_watch && !o.watch_every) o.watch_every = 2;   // the progress caption needs published frames
         }
-        if (md_watch && dp_fbwatch_start("deepeel md watch")) o.watch_every = o.watch_every ? o.watch_every : 0;
+        const char *reflive = md_watch ? md_ref_live_path() : NULL;
+        char feedpath[64];
+        if (reflive) {   // the window picks the feed up by name (dp_fb_ref_active)
+            snprintf(feedpath, sizeof feedpath, "/tmp/deepeel-md-ref-%d.bin", (int)getpid());
+            setenv("DEEPEEL_MD_REF_FEED", feedpath, 1);
+        } else if (md_watch)
+            fprintf(stderr, "deepeel: md watch: no reference tile (build it with tools/md_ref_live.sh)\n");
+        if (md_watch) dp_fbwatch_start("deepeel md watch");
         int md_failed = 0;
         for (int mi = 0; !rc && mi < nmovies && !md_failed; mi++) {
             DpMdMovie movie = {0};
@@ -1723,6 +1752,17 @@ static int cmd_md(int argc, char **argv) {
                             "(the replay will show whether the movie matches)\n");
             }
             o.movie = &movie;
+            pid_t refpid = 0;
+            if (reflive && movies[mi]) {   // reset the feed, then the reference replays this movie
+                dp_md_ref_feed_open(feedpath, 1);
+                refpid = fork();
+                if (refpid == 0) {
+                    execl(reflive, reflive, argv[3], movies[mi], (char *)NULL);
+                    fprintf(stderr, "deepeel: md ref: exec %s failed\n", reflive);
+                    _exit(127);
+                }
+                if (refpid < 0) { fprintf(stderr, "deepeel: md ref: fork failed (no reference tile)\n"); refpid = 0; }
+            }
             char cap[240], pth[5][600];
             const char *sum = cc.summary, *txt = text, *mp = map, *evp = ev, *heat = md_heat;
             if (md_watch && movies[mi]) {
@@ -1771,6 +1811,10 @@ static int cmd_md(int argc, char **argv) {
                 if (cc.cov) dp_md_explore_cov(&r, cc.cov);
                 if (cc.romdata) dp_md_explore_romdata(&r, cc.romdata);
                 dp_md_results_free(&r);
+            }
+            if (refpid > 0) {   // the harness exits by itself at the end of the movie; kill covers an early move-on
+                kill(refpid, SIGKILL);
+                waitpid(refpid, NULL, 0);
             }
             dp_md_movie_free(&movie);
         }

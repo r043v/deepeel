@@ -1,6 +1,8 @@
 #include "fbwatch.h"
+#include "../explore/md_ref_feed.h"
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
@@ -35,6 +37,22 @@ int dp_fb_caption_read(char *c1, size_t n1, char *c2, size_t n2) {
     done = cap_done;
     pthread_mutex_unlock(&mu);
     return done;
+}
+
+static DpMdRefFeed *ref_feed;
+static int ref_feed_tried;
+
+int dp_fb_ref_active(void) {
+    if (!ref_feed_tried) {
+        ref_feed_tried = 1;
+        ref_feed = dp_md_ref_feed_open(getenv("DEEPEEL_MD_REF_FEED"), 0);
+    }
+    return ref_feed && ref_feed->magic == DP_MDRF_MAGIC;
+}
+
+int dp_fb_ref_read(uint32_t *out, int *w, int *h, uint32_t *vframe, uint32_t *total, int *done) {
+    if (!dp_fb_ref_active()) return 0;
+    return dp_md_ref_read(ref_feed, out, w, h, vframe, total, done);
 }
 
 void dp_fb_publish(const uint32_t *argb, int w, int h, uint64_t frame) {

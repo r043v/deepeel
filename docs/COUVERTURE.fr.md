@@ -690,6 +690,18 @@ suivant. Un summary JSON par film (`<dir>/<i>-<nom>.json`) garde le verdict
 `GMV replay: X / Y frames (incomplete)` (désynchronisation = relecture
 incomplète).
 
+Tuile référence (0.251.20, le modèle GB `DpRefFeed`) : la fenêtre montre deux
+tuiles côte à côte — le replay deepeel (m0boy) et l'émulateur de référence du
+banc `md_compare_reference` (ClownMDEmu), qui rejoue le même movie via le
+harnais hors dépôt `tools/md_ref_live` (construit par `tools/md_ref_live.sh`)
+dans le feed partagé `DEEPEEL_MD_REF_FEED` (`src/explore/md_ref_feed.h`,
+seqlock image + compteur d'images). `deepeel md explore --watch` lance le
+harnais par film (chemin : `DP_MD_REF_LIVE` sinon `build/md-reference/md_ref_live`)
+et le tue au passage au suivant ; chaque tuile a sa propre légende (`film i/N
+nom`, `frame/total f/s`, `done` grisée) et son propre compteur f/s — les deux
+cœurs tournent à leur rythme, sans gating (l'exploration fourchue n'est pas une
+relecture linéaire).
+
 ### 3.7 Sondes de registres événementiels (proposition transversale)
 
 **Constat.** Aujourd'hui, un registre `DP_IMPL_EVENT` (LY, STAT, DIV, TIMA,

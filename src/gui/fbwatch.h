@@ -24,4 +24,8 @@ void dp_fbwatch_caption(const char *base);
 void dp_fbwatch_progress(uint32_t frame, uint32_t total, int done);
 // the window thread reads the caption back; returns the done flag
 int dp_fb_caption_read(char *c1, size_t n1, char *c2, size_t n2);
+// reference tile (DEEPEEL_MD_REF_FEED, src/explore/md_ref_feed.h): the
+// external harness's latest frame; returns 0 without a feed or frame yet
+int dp_fb_ref_active(void);
+int dp_fb_ref_read(uint32_t *out, int *w, int *h, uint32_t *vframe, uint32_t *total, int *done);
 #endif
