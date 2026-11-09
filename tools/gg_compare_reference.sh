@@ -18,3 +18,10 @@ cc -O2 -std=c99 -D_POSIX_C_SOURCE=200809L -I"$runtime/targets/gamegear/runtime" 
     "$root/build/libdeepeel_sms.a" \
     -lm -ldl -lSDL2 -o "$root/build/gg_compare_reference"
 DP_GPGX_SO="$so" "$root/build/gg_compare_reference" "$1" "$2" "$3"
+
+# mkmask: bench-accurate mask extraction for the SMSHawk dumper (a side re-parse
+# of the movie log drifts on the LogKey column mapping — see tools/mkmask.c)
+cc -O2 -std=c99 -D_POSIX_C_SOURCE=200809L -I"$root/src/platform/sega" -I"$root/src/core" \
+    "$root/tools/mkmask.c" "$root/build/libdeepeel_sega.a" "$root/build/libdeepeel_gg.a" \
+    "$root/build/libdeepeel_z80.a" "$root/build/libdeepeel_sms.a" \
+    -lm -ldl -o "$root/build/mkmask"
