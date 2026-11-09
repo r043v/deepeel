@@ -1,6 +1,8 @@
 #include "backend.h"
 #include <gg.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 // The bridge steps the generic CPU and instruments its bus callbacks. The
 // runtime's separate block interpreter/profiler is not used by this bridge.
 void gg_rom_trace(uint32_t offset) { (void)offset; }
@@ -18,8 +20,13 @@ static uint8_t read(uint16_t a) {
     return cartridge_enabled()?gg_read(a):0xff;
 }
 static void write(uint16_t a,uint8_t v) {
+    static int wr_trace=-1;
+    if(wr_trace<0) wr_trace=getenv("GG_WR_TRACE")?1:0;
+    if(wr_trace&&a>=0xc0c0&&a<=0xc0d0)
+        fprintf(stderr,"wr %04x=%02x ctl=%02x pc=%04x\n",a,v,memory_control,machine.cpu.pc);
     if(a>=0xc000) {
         if(!(memory_control&0x10)) machine.ram[a&0x1fff]=v;
+        else if(wr_trace&&a>=0xc0c0&&a<=0xc0d0) fprintf(stderr,"wr %04x DROPPED ctl=%02x\n",a,memory_control);
         // The cartridge mapper and internal RAM have independent enables.
         if(cartridge_enabled() && (GG_KOREAN150?(a==0xfff3 || a==0xfffc):
             (a>=0xfffc && !GG_CODEMASTERS))) gg_mapper_write(a,v);

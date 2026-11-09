@@ -380,6 +380,22 @@ int main(int argc, char **argv) {
     /* DP_GG_PAD_SHIFT=n: read the movie input n frames earlier (negative: later) —
      * replay-sync experiment (BizHawk lag-frame conventions) */
     const int pad_shift = getenv("DP_GG_PAD_SHIFT") ? atoi(getenv("DP_GG_PAD_SHIFT")) : 0;
+    const unsigned pc_sample = getenv("DP_GG_PC_SAMPLE") ? (unsigned)strtoul(getenv("DP_GG_PC_SAMPLE"), NULL, 0) : 0;
+    unsigned long long pc_hist[4096];  /* index = pc >> 4 */
+    memset(pc_hist, 0, sizeof pc_hist);
+    /* DP_GG_PC_RANGE=start:end (hex), DP_GG_PC_RANGE_FRAMES=n: log every pc
+     * executed inside [start,end) for the first n frames — who really
+     * executes there */
+    unsigned pc_lo = 0, pc_hi = 0;
+    long pc_range_frames = 0;
+    {   const char *pr = getenv("DP_GG_PC_RANGE");
+        if (pr) {
+            pc_lo = (unsigned)strtoul(pr, (char **)&pr, 16);
+            if (*pr == ':') pc_hi = (unsigned)strtoul(pr + 1, NULL, 16);
+            const char *pf = getenv("DP_GG_PC_RANGE_FRAMES");
+            pc_range_frames = pf ? atol(pf) : 20;
+        }
+    }
     for (unsigned frame = 0; frame < limit; frame++) {
         if (have_window && frame == seek) watch_open(tas.frames, movie_path, g_dut_w, is_sms ? GG_ACTIVE : GG_HEIGHT);
         long mi = (long)frame - pad_shift;
@@ -417,6 +433,9 @@ int main(int argc, char **argv) {
                     fprintf(stderr, "trace: frame %u pc=%04x -> $%04x=%02x (sp=%04x)\n",
                             frame + 1, c->pc, (unsigned)(0xC000 + trace_addr), g_mach->ram[trace_addr], c->sp);
                 z80_finish(c, cycles);
+                pc_hist[c->pc >> 4]++;
+                if (pc_range_frames > 0 && c->pc >= pc_lo && c->pc < pc_hi)
+                    fprintf(stderr, "pcr f%u pc=%04x sp=%04x\n", frame + 1, c->pc, c->sp);
             }
             g_b->advance(cycles);
             if (dump_vbl && !have_vbl && g_mach->vblank_done) {
@@ -427,6 +446,23 @@ int main(int argc, char **argv) {
         }
         if (ins >= 10000000ull && !g_mach->stop)
             fprintf(stderr, "warning: frame %u ended on the instruction bound, not the frame event\n", frame + 1);
+        /* DP_GG_PC_SAMPLE=N: every N frames, histogram the PC's page (top
+         * byte) over the frame's executed instructions — where does the CPU
+         * actually spend the frame */
+        if (pc_sample && (frame + 1) % pc_sample == 0) {
+            fprintf(stderr, "pcs f%u:", frame + 1);
+            for (int pgi = 0; pgi < 4096; pgi++)
+                if (pc_hist[pgi]) fprintf(stderr, " %03x=%llu", pgi, pc_hist[pgi]);
+            fprintf(stderr, "\n");
+            memset(pc_hist, 0, sizeof pc_hist);
+        }
+        if (pc_range_frames > 0) pc_range_frames--;
+        /* DP_GG_VDPLOG: per-frame VDP interrupt state (reg0 line IE, reg1
+         * frame IE, status flags, line_irq latch) */
+        if (getenv("DP_GG_VDPLOG"))
+            fprintf(stderr, "vdp f%u r0=%02x r1=%02x st=%02x line_irq=%d irq=%d iff1=%d\n",
+                    frame + 1, g_mach->vdp[0], g_mach->vdp[1], g_mach->vdp_status,
+                    g_mach->line_irq, g_mach->cpu.irq, g_mach->cpu.iff1);
         unsigned diff = 0, first = 0;
         dut_cmp = (shift == -1 && have_prev) ? prev_ram : g_mach->ram;
         for (size_t i = 0; i < ref_ram_size; i++)

@@ -76,7 +76,13 @@ static int log_parse(const uint8_t *d,size_t n,DpSegaTas *out,char *err,size_t e
         uint8_t mask=0;
         int idx=0,seen=0;
         for(char *c=fl;*c;c++) {
-            if(*c=='|') { idx=0; continue; } // next controller: restart the LogKey
+            // the cells group the LogKey columns (system keys | P1 | P2): the
+            // column sequence is continuous across the row, so with a LogKey
+            // the index does NOT restart at each cell
+            if(*c=='|') {
+                if(!nkey) idx=0;   // positional grammar: 8 buttons per controller
+                continue;
+            }
             if(nkey && idx<nkey) {
                 if(*c!='.') mask|=key_mask[idx];
                 idx++;
