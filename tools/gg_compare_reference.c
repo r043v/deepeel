@@ -35,8 +35,13 @@ enum { LR_ID_B = 0, LR_ID_START = 3, LR_ID_UP = 4,
        LR_ID_DOWN = 5, LR_ID_LEFT = 6, LR_ID_RIGHT = 7, LR_ID_A = 8 };
 
 static unsigned g_pad;               /* sega mask of this frame (up=1..start=64) */
-static uint16_t g_ref_fb[160 * 144]; /* last reference frame (5:5:5 raw) */
+/* the SMS profile renders GG_ACTIVE (192) picture lines, the GG 144: both
+ * framebuffers cover the taller one (the GG leaves the rest black) — the DUT
+ * row callback used to write past a 144-line buffer and clobber host .bss */
+#define DUT_LINES GG_ACTIVE
+static uint16_t g_ref_fb[160 * DUT_LINES]; /* last reference frame (5:5:5 raw) */
 static unsigned g_snap;              /* dump both screens at this 1-based frame */
+static unsigned g_snap_save;         /* the loaded core may scribble host .bss: g_snap is re-read here each frame */
 static uint64_t g_ref_hash;
 static unsigned g_ref_w, g_ref_h;
 static unsigned g_ref_fmt = LR_PF_0RGB1555;
@@ -56,7 +61,7 @@ static void ref_video(const void *data, unsigned w, unsigned h, size_t pitch) {
     }
     g_ref_hash = h1;
     g_ref_w = w; g_ref_h = h;
-    if (w == 160 && h == 144)
+    if (w == 160 && h <= DUT_LINES)
         for (unsigned y = 0; y < h; y++)
             memcpy(g_ref_fb + y * 160, row + y * pitch, 320);
 }
@@ -88,12 +93,14 @@ static bool ref_env(unsigned cmd, void *data) {
 
 /* --- device under test: the m0boy GG runtime ------------------------------- */
 static uint64_t g_dut_rowhash, g_dut_hash;
-static uint16_t g_dut_last[160 * 144];
+/* (DUT_LINES is defined above, shared with the reference framebuffer) */
+static uint16_t g_dut_last[160 * DUT_LINES];
 static uint16_t g_dut_store[GG_ROW_STRIDE];   /* the runtime renders into row_out (+GG_ROW_PAD) */
 static const DpSegaBackend *g_b;              /* deepeel's GG backend (BIOS-less bus profile) */
 static z80_decoded_t g_d;                     /* runtime decode cache */
 static void dut_row(void *u, unsigned y, uint16_t *px) {
-    (void)u; (void)y;
+    (void)u;
+    if (y >= DUT_LINES) return;   /* never write past the picture lines */
     for (unsigned i = 0; i < GG_WIDTH; i++) {
         unsigned p = px[i], r = (p >> 11) & 31, g = (p >> 6) & 31, b = p & 31;
         g_dut_rowhash = (g_dut_rowhash ^ (r * 16 + g * 4 + b)) * 0x100000001b3ull;
@@ -151,8 +158,8 @@ int main(int argc, char **argv) {
     DpSegaTas tas; char err[512];
     if (!dp_sega_tas_load(argv[2], &tas, err, sizeof err)) { fprintf(stderr, "movie: %s\n", err); return 2; }
     fprintf(stderr, "movie: %u frames\n", tas.frames);
-    if (dp_sega_tas_rom_match(&tas, rom, n, err, sizeof err) == 0)
-        fprintf(stderr, "warning: movie/ROM identity mismatch: %s\n", err);
+    if (dp_sega_tas_rom_match(&tas, rom, n, err, sizeof err) <= 0)
+        fprintf(stderr, "warning: movie/ROM identity not verified: %s\n", err);
     unsigned limit = (unsigned)strtoul(argv[3], NULL, 0);
     if (tas.frames && limit > tas.frames) limit = tas.frames;
 
@@ -184,7 +191,11 @@ int main(int argc, char **argv) {
     static uint8_t prev_ram[8192]; int have_prev = 0;
     const uint8_t *dut_cmp = machine.ram;
     const int every = getenv("DP_GG_EVERY") ? atoi(getenv("DP_GG_EVERY")) : 0;
-    g_snap = getenv("DP_GG_SNAP") ? (unsigned)strtoul(getenv("DP_GG_SNAP"), NULL, 0) : 0;
+    {   const char *se = getenv("DP_GG_SNAP");
+        g_snap = se ? (unsigned)strtoul(se, NULL, 0) : 0;
+        g_snap_save = g_snap;
+        if (getenv("DP_GG_SNAPDBG")) fprintf(stderr, "snapinit raw=%s -> %u\n", se ? se : "(null)", g_snap);
+    }
     /* DP_GG_DUMP=prefix: append both work RAMs per frame (prefix.ref.bin,
      * prefix.dut.bin) for offline frame-alignment analysis */
     FILE *dump_ref = NULL, *dump_dut = NULL;
@@ -235,7 +246,7 @@ int main(int argc, char **argv) {
             printf("%u ramdiff=%u first=$%04x screen=%s ref=%ux%u\n", frame + 1, diff, first,
                    (g_ref_hash == g_dut_hash) ? "same" : "diff", g_ref_w, g_ref_h);
         unsigned dut_lit = 0, ref_lit = 0;
-        for (unsigned i = 0; i < 160 * 144; i++) { if (g_dut_last[i]) dut_lit++; if (g_ref_fb[i]) ref_lit++; }
+        for (unsigned i = 0; i < 160 * DUT_LINES; i++) { if (g_dut_last[i]) dut_lit++; if (i < 160 * 144 && g_ref_fb[i]) ref_lit++; }
         static unsigned plit_r = 1, plit_d = 1;
         if (every && (ref_lit != plit_r || dut_lit != plit_d))
             fprintf(stderr, "lit %u ref=%u dut=%u pc=%04x sp=%04x\n", frame + 1, ref_lit, dut_lit, machine.cpu.pc, machine.cpu.sp);
@@ -256,14 +267,19 @@ int main(int argc, char **argv) {
         }
         fflush(stdout);
         if (dump_ref) { fwrite(ref_ram, 1, ref_ram_size, dump_ref); fwrite(machine.ram, 1, sizeof machine.ram, dump_dut); }
+        if (g_snap != g_snap_save) {   /* the loaded core scribbled the host .bss: restore and keep going */
+            fprintf(stderr, "warning: frame %u: host global clobbered (g_snap %u -> %u)\n",
+                    frame + 1, g_snap_save, g_snap);
+            g_snap = g_snap_save;
+        }
         if (g_snap && frame + 1 == g_snap) {
             char path[256];
             snprintf(path, sizeof path, "/tmp/gg_ref.ppm");
             FILE *o = fopen(path, "wb");
-            if (o) { fprintf(o, "P6\n160 144\n255\n"); for (unsigned i = 0; i < 160 * 144; i++) { unsigned p = g_ref_fb[i]; fputc(((p >> 10) & 31) * 255 / 31, o); fputc(((p >> 5) & 31) * 255 / 31, o); fputc((p & 31) * 255 / 31, o); } fclose(o); }
+            if (o) { fprintf(o, "P6\n160 %u\n255\n", g_ref_h); for (unsigned i = 0; i < 160 * g_ref_h && i < 160 * DUT_LINES; i++) { unsigned p = g_ref_fb[i]; fputc(((p >> 10) & 31) * 255 / 31, o); fputc(((p >> 5) & 31) * 255 / 31, o); fputc((p & 31) * 255 / 31, o); } fclose(o); }
             snprintf(path, sizeof path, "/tmp/gg_dut.ppm");
             o = fopen(path, "wb");
-            if (o) { fprintf(o, "P6\n160 144\n255\n"); for (unsigned i = 0; i < 160 * 144; i++) { unsigned p = g_dut_last[i]; fputc(((p >> 11) & 31) * 255 / 31, o); fputc(((p >> 6) & 31) * 255 / 31, o); fputc((p & 31) * 255 / 31, o); } fclose(o); }
+            if (o) { fprintf(o, "P6\n160 %d\n255\n", DUT_LINES); for (unsigned i = 0; i < 160 * DUT_LINES; i++) { unsigned p = g_dut_last[i]; fputc(((p >> 11) & 31) * 255 / 31, o); fputc(((p >> 6) & 31) * 255 / 31, o); fputc((p & 31) * 255 / 31, o); } fclose(o); }
             fprintf(stderr, "screens dumped to /tmp/gg_ref.ppm /tmp/gg_dut.ppm\n");
         }
     }

@@ -637,6 +637,7 @@ un à un (cause harnais vs cause moteur).
 | V/H-counter `$7E/$7F`, statut VDP `$BF` | **sondes de valeur** 0.251.11 (§3.7) : fourche par valeur plausible, garde « jamais sur IRQ en attente », `--no-event-probes` | ✅ |
 | YM2413 FM (SMS japonaise) | ◐ 0.156 : écritures `$F0/$F1` observées et typées « music » dans le rapport (la puce n'est pas émulée) | Obs. + **Type** music |
 | Phaser, paddle, lunettes 3D, port de lien GG | ◐ 0.251.19 : les sondes d'événement couvrent **les lignes que les sondes d'entrée ne modélisent pas** — TH A/B sur `$DD` (les détections phaser/paddle/3D bifurquent) et bits région/écran de `$00` GG (0x00/0x40) ; les touches pad, Pause et Start restent aux sondes d'entrée (pas de double emploi), et `input_masks 0` désactive aussi ces sondes-là. Le protocole réel (position phaser/paddle, obturateur 3D) reste non émulé (TH modélisé côté pont `backend_gg.c`) | **Sonde** ✅ ; émulation : libretro/limite |
+| Fidélité TAS vs référence (GPGX) | 0.251.22 : les films BizHawk SMS rejoués en entier sur le banc GG/SMS — **Sonic SMS 5129S/6255S** : RAM de gameplay `$C000-$CFFF` identique sur 99,95 % des trames, le film va jusqu'au bout ; **Alex Kidd (5136S/3154M)** : film complet, divergence de gameplay par plages dès la trame 68 (signature front de bouton ±1 trame, harnais réparé : débordement `dut_row` 192 lignes, écrans 160×192, identité MD5 des en-têtes SMSHawk) — chasse ouverte (détails `docs/Z80.fr.md`) | Sonic convergé ; Alex Kidd : à démêler |
 
 ### 3.3 MSX1
 

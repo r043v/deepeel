@@ -4,6 +4,7 @@
 #define _GNU_SOURCE
 #include "tas.h"
 #include "../../../src/core/sha1.h"
+#include "../../../src/core/md5.h"
 #include "../../../src/core/zip.h"
 #include "../../../src/core/bk2.h"
 
@@ -97,6 +98,8 @@ static int tas_load_buf(uint8_t *d,size_t n,DpSegaTas *out,char *err,size_t errs
         out->anchored |= b.anchored;
         out->has_sha1 |= b.has_sha1;
         if(b.has_sha1) memcpy(out->sha1,b.sha1,20);
+        out->has_md5 |= b.has_md5;
+        if(b.has_md5) memcpy(out->md5,b.md5,16);
         int ok=tas_load_buf(b.log,b.log_n,out,err,errsz,depth+1);
         dp_bk2_free(&b);
         return ok;
@@ -133,10 +136,21 @@ void dp_sega_tas_free(DpSegaTas *t) {
     memset(t,0,sizeof *t);
 }
 int dp_sega_tas_rom_match(const DpSegaTas *t,const uint8_t *rom,size_t size,char *why,size_t whysz) {
-    if(!t->has_sha1) { snprintf(why,whysz,"movie records no ROM identity"); return -1; }
-    uint8_t h[20]; dp_sha1(rom,size,h);
+    if(!t->has_sha1 && !t->has_md5) { snprintf(why,whysz,"movie records no ROM identity"); return -1; }
     char a[41],b[41];
-    for(int k=0;k<20;k++) { snprintf(a+2*k,3,"%02x",t->sha1[k]); snprintf(b+2*k,3,"%02x",h[k]); }
-    snprintf(why,whysz,"movie SHA-1 %s, ROM SHA-1 %s",a,b);
-    return !memcmp(h,t->sha1,20);
+    if(t->has_sha1) {
+        uint8_t h[20]; dp_sha1(rom,size,h);
+        for(int k=0;k<20;k++) { snprintf(a+2*k,3,"%02x",t->sha1[k]); snprintf(b+2*k,3,"%02x",h[k]); }
+        if(!memcmp(h,t->sha1,20)) { snprintf(why,whysz,"movie SHA-1 %s matches",a); return 1; }
+        if(!t->has_md5) { snprintf(why,whysz,"movie SHA-1 %s, ROM SHA-1 %s",a,b); return 0; }
+    }
+    if(t->has_md5) {
+        uint8_t m[16]; dp_md5(rom,size,m);
+        char ma[33],mb[33];
+        for(int k=0;k<16;k++) { snprintf(ma+2*k,3,"%02x",t->md5[k]); snprintf(mb+2*k,3,"%02x",m[k]); }
+        snprintf(why,whysz,"movie MD5 %s%s, ROM MD5 %s",ma,t->has_sha1?" (SHA1 label)":"",
+                 mb);
+        return !memcmp(m,t->md5,16);
+    }
+    return 0;
 }

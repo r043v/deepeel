@@ -6,16 +6,20 @@
 
 static int hexval(int c) { return c >= '0' && c <= '9' ? c - '0' : (c | 32) >= 'a' && (c | 32) <= 'f' ? (c | 32) - 'a' + 10 : -1; }
 
-/* parse a line-anchored "SHA1 <40 hex>" / "MD5 <32 hex>" identity line */
+/* parse a line-anchored "SHA1 <40 hex>" / "MD5 <32 hex>" identity line.  Some
+ * BizHawk cores (SMSHawk observed) write an MD5 value under the "SHA1" label:
+ * a 32-hex value on a SHA1 line is taken as the ROM MD5 (verified against
+ * Alex Kidd in Miracle World / Sonic the Hedgehog SMS movies). */
 static void parse_identity(const uint8_t *h, size_t hn, DpBk2 *out) {
     for (size_t i = 0; i + 5 < hn; i++) {
         if ((i && h[i - 1] != '\n')) continue;
-        size_t vlen = !strncmp((const char *)h + i, "SHA1 ", 5) ? 40 : (!strncmp((const char *)h + i, "MD5 ", 4) ? 32 : 0);
-        if (!vlen) continue;
-        const char *v = (const char *)h + i + (vlen == 40 ? 5 : 4);
-        uint8_t d[20]; int ok = 1;
-        for (size_t k = 0; k < vlen && ok; k++) ok = hexval((unsigned char)v[k]) >= 0;
-        if (!ok) continue;
+        size_t lab = !strncmp((const char *)h + i, "SHA1 ", 5) ? 5 : (!strncmp((const char *)h + i, "MD5 ", 4) ? 4 : 0);
+        if (!lab) continue;
+        const char *v = (const char *)h + i + lab;
+        size_t vlen = 0;
+        while (hexval((unsigned char)v[vlen]) >= 0) vlen++;
+        if (vlen != 40 && vlen != 32) continue;
+        uint8_t d[20];
         for (size_t k = 0; k < vlen / 2; k++)
             d[k] = (uint8_t)(hexval((unsigned char)v[2 * k]) * 16 + hexval((unsigned char)v[2 * k + 1]));
         if (vlen == 40) { memcpy(out->sha1, d, 20); out->has_sha1 = 1; }
