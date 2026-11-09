@@ -13,3 +13,8 @@ Testing/
 # romset batch: ROM copies and campaign results stay out of git
 /roms/
 /results/
+
+# outils tiers : artefacts de construction
+build2/
+tools/smshawk_dump/bin/
+tools/smshawk_dump/obj/
