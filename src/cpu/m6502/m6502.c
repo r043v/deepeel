@@ -274,7 +274,7 @@ static const M6502Row rows[256] = {
     [0xE8] = {DP_M6502_IMP, ACC_NONE, 2, DP_M6502_NEXT, "INX"},
     [0xE9] = {DP_M6502_IMM, ACC_R, 2, DP_M6502_NEXT, "SBC"},
     [0xEA] = {DP_M6502_IMP, ACC_NONE, 2, DP_M6502_NEXT, "NOP"},
-    [0xEB] = {255, ACC_NONE, 2, DP_M6502_JAM, "JAM"},
+    [0xEB] = {DP_M6502_IMM, ACC_R, 2, DP_M6502_NEXT, "SBC"},  // USBC: SBC immediate alias
     [0xEC] = {DP_M6502_ABS, ACC_R, 4, DP_M6502_NEXT, "CPX"},
     [0xED] = {DP_M6502_ABS, ACC_R, 4, DP_M6502_NEXT, "SBC"},
     [0xEE] = {DP_M6502_ABS, ACC_RMW, 6, DP_M6502_NEXT, "INC"},
@@ -621,7 +621,7 @@ unsigned m6502_step(m6502_t *cpu) {
             case 0x69: case 0x65: case 0x75: case 0x6D: case 0x7D: case 0x79:
             case 0x61: case 0x71: cpu->a = adc(cpu, cpu->a, v); break;
             case 0xE9: case 0xE5: case 0xF5: case 0xED: case 0xFD: case 0xF9:
-            case 0xE1: case 0xF1: cpu->a = sbc(cpu, cpu->a, v); break;
+            case 0xE1: case 0xF1: case 0xEB: cpu->a = sbc(cpu, cpu->a, v); break; // $EB: USBC alias
             // illegal loads
             case 0xA3: case 0xA7: case 0xAB: case 0xAF: case 0xB3: case 0xB7:
             case 0xBF: cpu->a = cpu->x = v; set_zn(cpu, v); break; // LAX/LXA

@@ -1037,6 +1037,12 @@ static const uint8_t *event_values(const char *name,int *n) {
     static const uint8_t st[] = {0x00,0x20,0x40,0x80,0xC0,0xE0,0xFF}; // collision|overflow|vblank|line, combos
     static const uint8_t vc[] = {0x00,0x7F,0x80,0xC0,0xFF};          // frame phases (SMS 8-bit, GG 9-bit low)
     static const uint8_t hc[] = {0x00,0x20,0x40,0x80,0xE0,0xFF};     // line phases
+    // one asserted line per bit (active low): pad keys, player-2 bits, reset,
+    // TH A/B — the phaser/paddle/3D-glasses detection reads these lines
+    static const uint8_t pad[] = {0xFE,0xFD,0xFB,0xF7,0xEF,0xDF,0xBF,0x7F};
+    if(!strncmp(name,"JOYPAD_A",7) || !strncmp(name,"JOYPAD_B",7) || !strcmp(name,"GG_START")) { *n=(int)(sizeof pad); return pad; }
+    // GG system register $00: region/screen bits — a GG detection read branches on these
+    if(!strcmp(name,"GG_SERIAL")) { *n=3; return (const uint8_t*)"\x00\x40\x7f"; }
     if(!strncmp(name,"VDP_STATUS",10)) { *n=(int)(sizeof st); return st; }
     if(!strcmp(name,"V_COUNTER")) { *n=(int)(sizeof vc); return vc; }
     if(!strcmp(name,"H_COUNTER")) { *n=(int)(sizeof hc); return hc; }
