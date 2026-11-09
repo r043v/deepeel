@@ -202,7 +202,6 @@ int main(int argc, char **argv) {
     {   const char *se = getenv("DP_GG_SNAP");
         g_snap = se ? (unsigned)strtoul(se, NULL, 0) : 0;
         g_snap_save = g_snap;
-        if (getenv("DP_GG_SNAPDBG")) fprintf(stderr, "snapinit raw=%s -> %u\n", se ? se : "(null)", g_snap);
     }
     /* DP_GG_DUMP=prefix: append both work RAMs per frame (prefix.ref.bin,
      * prefix.dut.bin) for offline frame-alignment analysis */
