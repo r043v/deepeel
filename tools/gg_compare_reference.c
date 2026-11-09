@@ -396,9 +396,15 @@ int main(int argc, char **argv) {
             pc_range_frames = pf ? atol(pf) : 20;
         }
     }
+    /* DP_GG_LAG_FRAMES=N: BizHawk lag-frame model — the N first input rows are
+     * consumed by the recorder's lag frames, so the game's frame f reads the
+     * movie row f+N (and the movie's tail rows are never played).  Same
+     * mapping as DP_GG_PAD_SHIFT=-N minus the tail: rows past the movie end
+     * (which the shift keeps pulling in) stay silent here. */
+    unsigned lag = getenv("DP_GG_LAG_FRAMES") ? (unsigned)strtoul(getenv("DP_GG_LAG_FRAMES"), NULL, 0) : 0;
     for (unsigned frame = 0; frame < limit; frame++) {
         if (have_window && frame == seek) watch_open(tas.frames, movie_path, g_dut_w, is_sms ? GG_ACTIVE : GG_HEIGHT);
-        long mi = (long)frame - pad_shift;
+        long mi = pad_shift ? (long)frame - pad_shift : (long)frame + (long)lag;
         g_pad = (mi >= 0 && (unsigned)mi < tas.frames ? tas.masks[mi] : 0) & 0x7Fu;   /* bit 128 = SMS Reset: kept off */
         if (g_pad != prev_pad) {
             char pl[64] = "";
