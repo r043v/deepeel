@@ -705,6 +705,53 @@ relecture linéaire). 0.251.21 : chaque image est letterboxée à son ratio nati
 (320×224 MD, plus d'étirement) ; la découverte `--tas-dir` reconnaît enfin
 `.gmv` (la chaîne Sonic MD ne chargeait que le seul `.bk2` des 19 films).
 
+Verdicts de la chaîne Sonic 1 MD terminée (0.251.22, 19 films du répertoire,
+observations de l'outil — 16 relectures, 3 refus de chargement) :
+
+| Film | Verdict |
+|---|---|
+| 1383S-JXQ - Sonic the Hedgehog TAS v2 | 15940 / 65849 trames (incomplète) |
+| 1843S-Sonic the Hedgehog (JUE) [!] | 31467 / 60644 trames (incomplète) |
+| 1937M-aglar-nozips-sonicthehedgehog | 8440 / 63395 trames (incomplète) |
+| 3378S-no_zips_Aglar | 8440 / 63395 trames (incomplète) |
+| 3402S-aglar,marzojr-sonicthehedgehog | 54266 / 54266 trames |
+| 5702S-Aglar (W REV01) | 34055 / 51166 trames (incomplète) |
+| 7988S-Sonic_The_Hedgehog_W_REV01_100 (.bk2) | 60053 / 60053 trames |
+| 8563S-Sonic The Hedgehog (USA, Europe) | 5179 / 5179 trames |
+| 907S-JXQ - Sonic The Hedgehog TAS | 65946 / 66495 trames (incomplète) |
+| 1847S-SonicTasTeam_Sonic1 | 58692 / 58692 trames |
+| 2457S-SonicTasTeamAndFuzZerd_Sonic1 | 57104 / 57104 trames |
+| 370S-Sonic rercord | 9611 / 9611 trames |
+| 3994S-Tee-N-Tee-sonic1 | 14440 / 52049 trames (incomplète) |
+| 4348S-improved-…Tee-N-Tee-sonic1 | 51847 / 51847 trames |
+| 5906S-Sonic 1 - Over 9000 | 22273 / 56561 trames (incomplète) |
+| 1437S-Upthorn&JXQ-S1v3 | 23098 / 65258 trames (incomplète) |
+
+Les 7 relectures complètes (film joué jusqu'à sa dernière image) vont du
+mini-film 8563S au 7988S en `.bk2` ; les relectures « incomplètes »
+s'arrêtent sur désynchronisation (le film attends un état que la relecture
+depuis la mise sous tension ne reproduit pas — les films M/savestate sont
+hors de portée par conception). 1937M et 3378S sont les deux variantes du
+même TAS aglar sans zips (mêmes comptes 63395/8440, vérifié aux en-têtes) ;
+refus : 1179S et 2342S (« GMV uses unsupported additional input »),
+3712S (« GMV requires unsupported controllers, PAL, or savestate ») — un
+film refusé ne rejoue pas (`src/platform/md/movie.c`).
+
+Banc GG/SMS (0.251.23) : le profil Master System joue maintenant sur l'écran
+de la console elle-même — 256×192 natif, plus la fenêtre Game Gear recadrée
+160×192 — par une seconde instance du même runtime m0boy compilée
+`GG_OUT_WIDTH=256` (symboles préfixés `dp_sms_`, même technique d'espacement
+que les instances ×2 ; le chemin d'affichage natif `gg_render_line` est
+branché dans le dispatcher de lignes quand `GG_OUT_WIDTH != GG_WIDTH`).
+La capture d'écran des deux cœurs est mutualisée (même tampon `Screen`, même
+normalisation 5:6:5, même hash — le verdict d'écran compare enfin comme à
+comme : les trames de boot SMS sont `screen=same`). La fenêtre de relecture
+est générique (`src/gui/watch.c`, commune à tous les bancs de fidélité) :
+une tuile par cœur, chaque tampon à son ratio natif (SMS 256×192, GG
+160×144, ...), letterbox sans étirement, ×2 sur les petits écrans, légendes
+sous chaque tuile (nom trop long élidé au milieu, jamais de débordement sur
+la tuile voisine).
+
 ### 3.7 Sondes de registres événementiels (proposition transversale)
 
 **Constat.** Aujourd'hui, un registre `DP_IMPL_EVENT` (LY, STAT, DIV, TIMA,

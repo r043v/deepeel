@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.251.22 LANGUAGES C)
+project(deepeel VERSION 0.251.23 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -444,6 +444,32 @@ add_library(deepeel_gg2 STATIC IMPORTED GLOBAL)
 set_target_properties(deepeel_gg2 PROPERTIES IMPORTED_LOCATION ${DP_GG2_ARCHIVE})
 add_custom_target(dp_gg2_runtime DEPENDS ${DP_GG2_ARCHIVE})
 add_dependencies(deepeel_gg2 dp_gg2_runtime)
+# Native 256-wide Master System instance of the GG runtime (GG_OUT_WIDTH=256,
+# the PC Master System panel: no GG window crop, no filter — gg.h) — the
+# fidelity bench plays the SMS profile on the console's own screen. Same
+# namespacing technique: every global prefixed dp_sms_, backend getter renamed.
+add_library(deepeel_sms_raw STATIC
+  ${M0BOY_DIR}/targets/gamegear/runtime/gg.c
+  ${M0BOY_DIR}/targets/gamegear/runtime/gg_vdp.c
+  ${M0BOY_DIR}/targets/gamegear/runtime/gg_psg.c
+  src/platform/sega/backend_gg.c)
+target_compile_definitions(deepeel_sms_raw PRIVATE GG_ROM_TRACE=1 GG_OUT_WIDTH=256 dp_sega_backend_gg=dp_sega_backend_sms)
+target_include_directories(deepeel_sms_raw PRIVATE
+  ${M0BOY_DIR}/targets/gamegear/runtime ${M0BOY_DIR}/targets/common/runtime
+  ${M0BOY_DIR}/targets/sg1000/runtime)
+set(DP_SMS_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_sms.a)
+add_custom_command(OUTPUT ${DP_SMS_ARCHIVE}
+  BYPRODUCTS ${DP_SMS_ARCHIVE}.syms
+  COMMAND ${CMAKE_COMMAND} -DNM=${DP_NM} -DOBJCOPY=${DP_OBJCOPY}
+    -DINPUT=$<TARGET_FILE:deepeel_sms_raw> -DOUTPUT=${DP_SMS_ARCHIVE}
+    -DPREFIX=dp_sms_ -DPATTERNS=machine|gg[A-Za-z0-9_]*|sg[A-Za-z0-9_]*|tms[A-Za-z0-9_]*
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_sega_prefix.cmake
+  DEPENDS deepeel_sms_raw cmake/dp_sega_prefix.cmake VERBATIM)
+add_library(deepeel_sms STATIC IMPORTED GLOBAL)
+set_target_properties(deepeel_sms PROPERTIES IMPORTED_LOCATION ${DP_SMS_ARCHIVE}
+  INTERFACE_LINK_LIBRARIES deepeel_z80)
+add_custom_target(dp_sms_runtime DEPENDS ${DP_SMS_ARCHIVE})
+add_dependencies(deepeel_sms dp_sms_runtime)
 # MSX second instance for --jobs 2: backend.c and the instrumented msx.c
 # recompiled with the backend getter renamed, then every global (runtime and
 # dp_msx_* alike, except the renamed getter) namespaced with dp_msx2_.
