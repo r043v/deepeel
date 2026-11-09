@@ -114,12 +114,24 @@ void dp_watch_caption(DpWatch *k, int which, const char *line1, const char *line
 void dp_watch_frame(DpWatch *k, int *stop) {
     if (!k) return;
     SDL_Event e;
-    while (SDL_PollEvent(&e))
-        if (e.type == SDL_QUIT ||
-            (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)) {
-            fprintf(stderr, "watch: window closed, stopping\n");
+    static int evlog = -1;
+    if (evlog < 0) evlog = getenv("DP_WATCH_EVLOG") ? 1 : 0;
+    while (SDL_PollEvent(&e)) {
+        if (evlog) {
+            if (e.type == SDL_WINDOWEVENT)
+                fprintf(stderr, "watch: event WINDOWEVENT %d (win %u) t=%u\n",
+                        e.window.event, e.window.windowID, SDL_GetTicks());
+            else
+                fprintf(stderr, "watch: event %d t=%u\n", e.type, SDL_GetTicks());
+        }
+        if (e.type == SDL_QUIT) {
+            fprintf(stderr, "watch: SDL_QUIT received, stopping\n");
+            *stop = 1;
+        } else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) {
+            fprintf(stderr, "watch: escape pressed, stopping\n");
             *stop = 1;
         }
+    }
     SDL_SetRenderDrawColor(k->ren, 32, 32, 32, 255);
     SDL_RenderClear(k->ren);
     int tw = 0, th = 0;

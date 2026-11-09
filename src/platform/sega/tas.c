@@ -27,16 +27,20 @@ static int emit(DpSegaTas *out,uint8_t mask,char *err,size_t errsz) {
     return 1;
 }
 // BizHawk key names across the three consoles: SMS/GG pads are B and C,
-// MSX uses full words and Return for Enter
+// MSX uses full words and Return for Enter.  Column names carry the player
+// prefix ("P1 Up", "P2 Left"), so the match is on the contained word.
 static uint8_t btn_mask(const char *n) {
-    if(!strcmp(n,"up") || !strcmp(n,"u")) return 1;
-    if(!strcmp(n,"down") || !strcmp(n,"d")) return 2;
-    if(!strcmp(n,"left") || !strcmp(n,"l")) return 4;
-    if(!strcmp(n,"right") || !strcmp(n,"r")) return 8;
-    if(!strcmp(n,"button1") || !strcmp(n,"b1") || !strcmp(n,"b")) return 16;
-    if(!strcmp(n,"button2") || !strcmp(n,"b2") || !strcmp(n,"c")) return 32;
-    if(!strcmp(n,"start") || !strcmp(n,"st") || !strcmp(n,"pause") || !strcmp(n,"return")) return 64;
-    if(!strcmp(n,"reset")) return 128;
+    if(strstr(n,"up")) return 1;
+    if(strstr(n,"down")) return 2;
+    if(strstr(n,"left")) return 4;
+    if(strstr(n,"right")) return 8;
+    size_t l=strlen(n);
+    if(strstr(n,"button1") || strstr(n,"button 1") || strstr(n,"b1") || !strcmp(n,"b")
+       || (l>=3 && !strcmp(n+l-2," b"))) return 16;
+    if(strstr(n,"button2") || strstr(n,"button 2") || strstr(n,"b2")
+       || !strcmp(n,"c") || (l>=3 && !strcmp(n+l-2," c"))) return 32;
+    if(strstr(n,"start") || strstr(n,"st") || strstr(n,"pause") || strstr(n,"return")) return 64;
+    if(strstr(n,"reset")) return 128;
     return 0; // Power, hard/soft keys, motion: ignored
 }
 // frames are '|'-separated segments; within a segment one character per
@@ -55,11 +59,14 @@ static int log_parse(const uint8_t *d,size_t n,DpSegaTas *out,char *err,size_t e
         if(ll && line[ll-1]=='\r') line[ll-1]=0;
         if(!strncmp(line,"LogKey:",7)) {
             nkey=0;
-            char *tok=strtok(line+7,"| \t#");
+            // split on '|' only: names contain spaces ("P1 Up"), and the
+            // leading '#' is the sticky-column marker, not part of the name
+            char *tok=strtok(line+7,"|");
             while(tok && nkey<64) {
+                while(*tok=='#' || *tok==' ' || *tok=='\t') tok++;
                 for(char *c=tok;*c;c++) *c=(char)tolower((unsigned char)*c);
                 key_mask[nkey++]=btn_mask(tok);
-                tok=strtok(NULL,"| \t#");
+                tok=strtok(NULL,"|");
             }
             continue;
         }

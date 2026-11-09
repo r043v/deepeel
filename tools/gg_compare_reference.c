@@ -12,6 +12,7 @@
 #include <time.h>
 #include <stdbool.h>
 #include <dlfcn.h>
+#include <signal.h>
 
 #include "../src/gui/watch.h"
 
@@ -146,8 +147,11 @@ static bool ref_env(unsigned cmd, void *data) {
  * under each tile). The left tile is deepeel's m0boy runtime, the right one
  * the reference core. */
 static DpWatch *g_watch;
+static int have_window;                  /* DP_GG_WINDOW seen (window opened at DP_GG_SEEK) */
+static unsigned g_frame_no;              /* absolute movie frame (dump target) */
 static unsigned g_watch_mframes;         /* movie total frames (f/s caption) */
 static const char *g_watch_movie;        /* movie file name (caption) */
+static unsigned g_watch_total, g_watch_rtotal; /* absolute frames (caption) */
 static unsigned g_watch_n, g_watch_rn;   /* frames in the current f/s window */
 static unsigned g_watch_seen;            /* total frames (one-shot tile dump) */
 static unsigned g_watch_t0;              /* f/s window start (ms clock) */
@@ -159,6 +163,11 @@ static unsigned now_ms(void) {
     return (unsigned)(ts.tv_sec * 1000u + ts.tv_nsec / 1000000u);
 }
 
+static void on_term_signal(int sig) {
+    fprintf(stderr, "bench: signal %d (%s) received\n", sig,
+            sig == SIGTERM ? "SIGTERM" : sig == SIGINT ? "SIGINT" : "SIGHUP");
+}
+
 static void watch_open(unsigned movie_frames, const char *movie_path, unsigned buf_w, unsigned buf_h) {
     g_watch_movie = strrchr(movie_path, '/');
     g_watch_movie = g_watch_movie ? g_watch_movie + 1 : movie_path;
@@ -168,6 +177,12 @@ static void watch_open(unsigned movie_frames, const char *movie_path, unsigned b
     const int wdims[2] = { (int)buf_w, (int)buf_w };
     const int hdims[2] = { (int)buf_h, (int)buf_h };
     g_watch = dp_watch_open(title, 2, wdims, hdims);
+    /* SDL converts SIGTERM/SIGINT into SDL_QUIT: a process outside the
+     * terminal (cgroup shutdown, scope stop) then silently closes the
+     * window. Log the signal so the cause stays visible. */
+    signal(SIGTERM, on_term_signal);
+    signal(SIGINT, on_term_signal);
+    signal(SIGHUP, on_term_signal);
     g_watch_t0 = now_ms();
 }
 
@@ -176,7 +191,7 @@ static void watch_open(unsigned movie_frames, const char *movie_path, unsigned b
 static void watch_dump(void) {
     const unsigned at = getenv("DP_GG_DUMP_FRAME")
         ? (unsigned)strtoul(getenv("DP_GG_DUMP_FRAME"), NULL, 0) : 120;
-    if (g_watch_seen != at) return;
+    if (g_frame_no != at) return;   /* absolute frame number */
     const char *td = getenv("DP_GG_TILE_DUMP");
     if (!td) return;
     const unsigned h = g_dut_w == DUT_W_MAX ? GG_ACTIVE : GG_HEIGHT;
@@ -201,11 +216,13 @@ static void watch_dump(void) {
 }
 
 static void watch_frame(void) {
-    if (!g_watch) return;
+    if (!g_watch) { watch_dump(); return; }   /* headless: tile dumps still work */
     g_watch_n++;
     g_watch_rn++;
+    g_watch_total++;
+    g_watch_rtotal++;
     g_watch_seen++;
-    watch_dump();
+    watch_dump();   /* tile dumps work even without a window */
     char l1[128];
     snprintf(l1, sizeof l1, "deepeel (m0boy) | %s", g_watch_movie);
     dp_watch_tile(g_watch, 0, g_dut.px, DUT_W_MAX);
@@ -213,9 +230,9 @@ static void watch_frame(void) {
     unsigned span = now_ms() - g_watch_t0;
     if (span >= 500) {   /* captions' f/s, both tiles measured independently */
         snprintf(g_l2, sizeof g_l2, "film 1/1  frame %u/%u  %u f/s",
-                 g_watch_n, g_watch_mframes, g_watch_n * 1000u / span);
+                 g_watch_total, g_watch_mframes, g_watch_n * 1000u / span);
         snprintf(g_r2, sizeof g_r2, "frame %u  %u f/s",
-                 g_watch_rn, g_watch_rn * 1000u / span);
+                 g_watch_rtotal, g_watch_rn * 1000u / span);
         g_watch_t0 = now_ms(); g_watch_n = 0; g_watch_rn = 0; g_ref_frames_seen = 0;
     }
     dp_watch_caption(g_watch, 0, l1, g_l2);
@@ -297,7 +314,7 @@ int main(int argc, char **argv) {
     g_mach = is_sms ? &dp_sms_machine : &machine;
     /* the watch tiles show the platform's own buffer (SMS 256x192, GG 160x144):
      * the window ratio is the buffer ratio, never a stretch */
-    if (getenv("DP_GG_WINDOW")) watch_open(tas.frames, movie_path, g_dut_w, is_sms ? GG_ACTIVE : GG_HEIGHT);
+    if (getenv("DP_GG_WINDOW")) have_window = 1;
     if (is_sms) dp_sms_gg_init_system(rom, (size_t)n, NULL, 1);
     else gg_init_system(rom, (size_t)n, NULL, 0);
     g_mach->row = dut_row; g_mach->draw_line = dut_line; g_mach->frame = dut_frame;
@@ -355,9 +372,29 @@ int main(int argc, char **argv) {
         if (!dump_vbl) { fprintf(stderr, "cannot open DP_GG_DUMP_VBL file\n"); return 2; }
     }
     const unsigned watch = getenv("DP_GG_WATCH") ? (unsigned)strtoul(getenv("DP_GG_WATCH"), NULL, 16) : 0;
+    static const char *const pad_names[] = { "U", "D", "L", "R", "B1", "B2", "START" };
+    unsigned prev_pad = 0xFFFFu;   /* log every movie input transition */
+    /* DP_GG_SEEK=N: run the movie's N first frames without the window (still
+     * feeding the inputs) so the watch opens straight into the action */
+    const unsigned seek = getenv("DP_GG_SEEK") ? (unsigned)strtoul(getenv("DP_GG_SEEK"), NULL, 0) : 0;
+    /* DP_GG_PAD_SHIFT=n: read the movie input n frames earlier (negative: later) —
+     * replay-sync experiment (BizHawk lag-frame conventions) */
+    const int pad_shift = getenv("DP_GG_PAD_SHIFT") ? atoi(getenv("DP_GG_PAD_SHIFT")) : 0;
     for (unsigned frame = 0; frame < limit; frame++) {
-        g_pad = tas.masks[frame] & 0x7Fu;   /* bit 128 is the SMS Reset: kept off (the movies that use it are rare; documented) */
-        if (g_dut_w == DUT_W_MAX) dp_sms_gg_buttons(g_pad); else gg_buttons(g_pad);
+        if (have_window && frame == seek) watch_open(tas.frames, movie_path, g_dut_w, is_sms ? GG_ACTIVE : GG_HEIGHT);
+        long mi = (long)frame - pad_shift;
+        g_pad = (mi >= 0 && (unsigned)mi < tas.frames ? tas.masks[mi] : 0) & 0x7Fu;   /* bit 128 = SMS Reset: kept off */
+        if (g_pad != prev_pad) {
+            char pl[64] = "";
+            for (int b = 0; b < 7; b++)
+                if (g_pad & (1u << b)) { strncat(pl, " ", sizeof pl - strlen(pl) - 1); strncat(pl, pad_names[b], sizeof pl - strlen(pl) - 1); }
+            fprintf(stderr, "frame %u pad=%02x%s\n", frame + 1, g_pad, pl);
+            prev_pad = g_pad;
+        }
+        /* the movie's Pause (bit 64) is the SMS pause button: the runtime
+         * expects it on bit 128 (GG_PAUSE), not the Game Gear START bit */
+        const unsigned dut_pad = is_sms ? ((g_pad & 0x3Fu) | ((g_pad & 0x40u) << 1)) : g_pad;
+        if (g_dut_w == DUT_W_MAX) dp_sms_gg_buttons(dut_pad); else gg_buttons(dut_pad);
         g_retro_run();
         /* one real frame: instructions until the frame-end event (same loop
          * as the sega explorer's play_step: service, decode, execute, advance) */
@@ -438,6 +475,10 @@ int main(int argc, char **argv) {
             if (o) { fprintf(o, "P6\n%u %d\n255\n", g_dut_w, DUT_LINES); for (unsigned y = 0; y < DUT_LINES; y++) for (unsigned x = 0; x < g_dut_w; x++) { unsigned p = g_dut.px[y * DUT_W_MAX + x]; fputc(((p >> 11) & 31) * 255 / 31, o); fputc(((p >> 6) & 31) * 255 / 31, o); fputc((p & 31) * 255 / 31, o); } fclose(o); }
             fprintf(stderr, "screens dumped to /tmp/gg_ref.ppm /tmp/gg_dut.ppm\n");
         }
+        if (getenv("DP_GG_HASHLOG"))
+            fprintf(stderr, "f %u dut=%08x ref=%08x pad=%02x\n", frame + 1,
+                    (unsigned)g_dut.hash, (unsigned)g_ref.hash, g_pad);
+        g_frame_no++;
         watch_frame();
     }
     printf("frames %u, mean ramdiff %.2f, first divergence %s (%ld, offset $%04x)\n", limit,
