@@ -1042,21 +1042,9 @@ static const uint8_t *event_values(const char *name,int *n) {
     if(!strcmp(name,"H_COUNTER")) { *n=(int)(sizeof hc); return hc; }
     *n=0; return NULL;
 }
-static int fork_event_ports(Run *x,const z80_decoded_t *d,size_t at,int skip_irq) {
-    if(!x->opt->event_probes) return 1;
-    if(at>=x->event_site_count) return 1;
-    if(x->event_sites[at]>=2) { x->r->event_cuts++; return 1; }
-    // a substituted status must never hide a pending interrupt line, and an
-    // IRQ-fork path (skip_irq) carries the suppressed-service semantics the
-    // probe would perturb: no probe on either
-    if(skip_irq || x->b->cpu()->irq || x->b->cpu()->nmi) return 1;
-    z80_t *c=x->b->cpu();
-    uint16_t port;
-    if(!dp_z80_input_port(d,c,&port)) return 1;
-    const DpSegaPort *reg=dp_sega_port(x->system,port,0);
-    if(!reg) return 1;
-    int n; const uint8_t *vals=event_values(reg->name,&n);
-    if(!vals) return 1;
+// one fork per plausible value; shared by the native event ports and the MSX
+// keyboard matrix (both are one-shot substitutions carried by the path)
+static int fork_value_probes(Run *x,uint16_t port,const uint8_t *vals,int n,size_t at,int skip_irq) {
     for(int i=0;i<n && x->event_sites[at]<2;i++) {
         uint32_t queued_before=x->queued;
         int accepted=push_to(x,1,skip_irq,0,DP_SEGA_TREE_EVENT);
@@ -1071,6 +1059,36 @@ static int fork_event_ports(Run *x,const z80_decoded_t *d,size_t at,int skip_irq
         } else x->r->event_log_overflow++;
     }
     return 1;
+}
+static int fork_event_ports(Run *x,const z80_decoded_t *d,size_t at,int skip_irq) {
+    if(!x->opt->event_probes) return 1;
+    if(at>=x->event_site_count) return 1;
+    if(x->event_sites[at]>=2) { x->r->event_cuts++; return 1; }
+    // a substituted status must never hide a pending interrupt line, and an
+    // IRQ-fork path (skip_irq) carries the suppressed-service semantics the
+    // probe would perturb: no probe on either
+    if(skip_irq || x->b->cpu()->irq || x->b->cpu()->nmi) return 1;
+    z80_t *c=x->b->cpu();
+    uint16_t port;
+    if(!dp_z80_input_port(d,c,&port)) return 1;
+    // MSX keyboard matrix (§3.7): a PPI_B read ($A9) whose selected row the
+    // input probes do not model (every row but RETURN 7 and pad 8) forks per
+    // single-key value, active low like the hardware pull-ups; the per-site
+    // cap keeps it bounded and the cuts stay counted
+    if(x->msx && (port&255)==0xa9) {
+        DpMsxInfo ki=x->b->msx_info();
+        unsigned row=ki.ppi_c&15;
+        if(row!=7 && row!=8) {
+            static const uint8_t kb[]={0xFE,0xFD,0xFB,0xF7,0xEF,0xDF,0xBF,0x7F}; // one key per bit
+            return fork_value_probes(x,port,kb,(int)(sizeof kb),at,skip_irq);
+        }
+        return 1; // rows 7/8: the input probes already fork them
+    }
+    const DpSegaPort *reg=dp_sega_port(x->system,port,0);
+    if(!reg) return 1;
+    int n; const uint8_t *vals=event_values(reg->name,&n);
+    if(!vals) return 1;
+    return fork_value_probes(x,port,vals,n,at,skip_irq);
 }
 DpSegaOptions dp_sega_options(void) {
     // Boot code often runs nested 16-bit delay loops before touching the VDP.

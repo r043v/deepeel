@@ -264,8 +264,8 @@ qui fournissent les hooks requis.
     initiaux, puis combinaisons, avec reports différés quand la file est pleine
     (`deferred retry skips`) ;
   - le catalogue est fourni par la plateforme, le mécanisme est commun ;
-  - à ajouter : NES `$4016/$4017`, matrice clavier MSX, pad 6 boutons MD,
-    multitap PCE, paddle et phaser SMS.
+  - à ajouter : NES `$4016/$4017`, pad 6 boutons MD, multitap PCE, paddle et
+    phaser SMS (la matrice clavier MSX est faite, 0.251.14).
 
 **D11 — Fourches de répétition.**
 - **Méca.** : une instruction de bloc ou de boucle (LDIR/CPIR/INIR/OTIR, BBR/BBS,
@@ -605,7 +605,7 @@ Sinon elle est listée comme limite.
 |---|---|---|
 | Slots, PPI, AY, VDP TMS, 5 mappers | ✅ | — |
 | BIOS | simulé par traps | BIOS réel optionnel (libretro ou ROM fournie hors dépôt) |
-| Matrice clavier (PPI port B) | ? | **Sonde** catalogue (touches utilisées par les jeux : espace, F1-F5, curseurs) |
+| Matrice clavier (PPI port B) | ✅ sonde de valeur 0.251.14 (§3.7) : une lecture `$A9` d'une ligne non modélisée par les sondes d'entrée (toute ligne sauf RETURN 7 et pad 8) fourche par touche unique active-basse, cap 2/site, coupures comptées, garde IRQ | — |
 | SCC (ondes) | listé comme mapper | **Type** samples (RAM d'onde SCC) |
 | V9938 (MSX2), FM-PAC, disque, cassette | absents ; limites déclarées dans le rapport (0.157) | limites ou libretro |
 
