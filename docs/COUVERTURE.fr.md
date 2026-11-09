@@ -505,6 +505,11 @@ qui fournissent les hooks requis.
 **J2 — TAS.**
 - **Méca.** :
   - le film est prioritaire sur tout budget ;
+  - **relecture intégrale obligatoire** (0.251.13) : le film est relu jusqu'à sa
+    dernière frame sur toutes les plateformes — GB : tout arrêt gated par
+    `!tas_left` (sessions.c) ; PCE/NES : budget = max(`--play`, frames du film) ;
+    MD : relecture complète du GMV/BK2 ; z80 : le budget pas s'étire à la
+    longueur du film (`--tas-total` ne fait que réduire, refus comptés) ;
   - checkpoints périodiques, puis **shoots** : chaque checkpoint est semé dans le
     fork-explorer ;
   - profils de synchro VBA.

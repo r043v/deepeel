@@ -1074,7 +1074,7 @@ static int fork_event_ports(Run *x,const z80_decoded_t *d,size_t at,int skip_irq
 }
 DpSegaOptions dp_sega_options(void) {
     // Boot code often runs nested 16-bit delay loops before touching the VDP.
-    DpSegaOptions o={.novelty_frames=240,.novelty_archive=4096,.novelty_frame_steps=10000,.max_total=20000000,.input_total=20000000,.indirect_total=20000000,.play_total=0,.tas_total=2000000,.tas_frame_steps=1000,.max_steps=2000000,.max_paths=4096,.queue_cap=128,
+    DpSegaOptions o={.novelty_frames=240,.novelty_archive=4096,.novelty_frame_steps=10000,.max_total=20000000,.input_total=20000000,.indirect_total=20000000,.play_total=0,.tas_total=DP_SEGA_TAS_TOTAL_DEFAULT,.tas_frame_steps=1000,.max_steps=2000000,.max_paths=4096,.queue_cap=128,
         .loop_cap=262144,.fork_cap=2,.stagnation=32768,.copy_cap=DP_SEGA_COPY_CAP,
         .input_masks=8,.input_sites=4096,.seed_vectors=1,.seed_cap=1024,.queue_max=4096,.target_closure=1,.block_closure=1,.msx_mapper=DP_MSX_AUTO,.closure={262144,65536,256,8},.jobs=1,
         .event_probes=1}; return o;
@@ -1171,7 +1171,12 @@ static int tas_replay(Run *x) {
         snaps=malloc((size_t)(t.frames/rng_per+1)*sizeof *snaps);
         if(!snaps) { fprintf(stderr,"deepeel: --tas-rng: out of memory\n"); rng_per=0; }
     }
-    for(uint32_t f=0;f<t.frames && r->steps<o->tas_total;f++) {
+    // the movie plays to the end (0.251.13): the step budget stretches to the
+    // movie length; --tas-total only ever shrinks it, and refusals stay counted
+    uint64_t tas_budget=o->tas_total;
+    uint64_t need=(uint64_t)t.frames*o->tas_frame_steps+1000;
+    if(need>tas_budget && tas_budget==DP_SEGA_TAS_TOTAL_DEFAULT) tas_budget=need;
+    for(uint32_t f=0;f<t.frames && r->steps<tas_budget;f++) {
         DpSegaInput in={{0,0},0,0,0};
         uint8_t m=t.masks[f];
         in.pad[0]=(uint8_t)(m&63);
@@ -1180,7 +1185,7 @@ static int tas_replay(Run *x) {
         in.reset=!!(m&128);
         x->b->set_input(in);
         r->tas_frames++;
-        for(unsigned i=0;i<o->tas_frame_steps && r->steps<o->tas_total;i++)
+        for(unsigned i=0;i<o->tas_frame_steps && r->steps<tas_budget;i++)
             if(!play_step(x)) goto done;
         if(rng_per && (f+1)%rng_per==0) {
             void *s=malloc(x->b->state_size);

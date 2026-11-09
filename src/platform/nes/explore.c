@@ -1463,7 +1463,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
                 r->tas_different++;
                 fprintf(stderr, "deepeel: TAS %s: recorded for a different ROM (SHA-1 mismatch); played anyway\n", x.opt.tas_paths[i]);
             } else r->tas_unrecorded++;
-            uint32_t frames = x.opt.play_frames ? x.opt.play_frames : t.frames;
+            uint32_t frames = x.opt.play_frames > t.frames ? x.opt.play_frames : t.frames; // the movie always plays to the end (PCE parity, 0.251.13)
             if (t.rom_name[0])
                 fprintf(stderr, "deepeel: TAS %s: rom '%s', %u frames\n",
                         x.opt.tas_paths[i], t.rom_name, t.frames);

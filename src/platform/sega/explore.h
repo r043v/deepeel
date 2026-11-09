@@ -63,7 +63,8 @@ typedef struct {
     unsigned watch_every;    // publish a frame to the watch buffer every N frames (0: off; forces one worker)
     const char *export_state; // write the deepest novelty cell here (DPST file, needs --novelty)
     int novelty_cells;       // key the archive on the screen fingerprint and learned lives
-    uint64_t tas_total;      // TAS replay budget, steps (bounded whatever the movie length)
+#define DP_SEGA_TAS_TOTAL_DEFAULT 2000000ULL
+    uint64_t tas_total;      // TAS replay budget, steps; the default stretches to the movie length (0.251.13), an explicit value is honored
     uint32_t tas_frame_steps; // per-frame step cap of the TAS replay
     const char *tas_path;    // TAS movie (.bk2 or plain input log, sega/tas.h)
     uint32_t tas_rng_per;    // J3: snapshot the TAS every N frames and fire random bursts from it (0: off)
