@@ -868,6 +868,19 @@ static void on_sound_store(void *u, uint16_t addr, uint8_t v, int ymreg) {
     }
     if (ymreg == -1 || (ymreg >= 0 && !(addr & 1u))) return;
     if (ymreg == -2) r->z80_psg_writes++; else r->z80_ym_writes++;
+    if (ymreg >= 0) {   /* data byte for the YM2612 register selected by the
+                         * address port: classify like the SMS YM2413 model.
+                         * Both parts share the same low register byte. */
+        unsigned rg = (unsigned)ymreg, cls;
+        if (rg <= 0x2C)                                /* test, timers, LFO, mode */
+            cls = rg == 0x28 ? 1 : rg == 0x2A ? 2 : 0; /* key on/off, DAC */
+        else if (rg <= 0x3F) cls = 3;                  /* DT / multiply */
+        else if (rg <= 0x4F) cls = 4;                  /* total level */
+        else if (rg <= 0x9F) cls = 5;                  /* envelope: RS/AR, AM/DR, SR, SL/RR, SSG-EG */
+        else if (rg <= 0xAF) cls = 6;                  /* F-number/block (+ the 3ch extra A8-AF) */
+        else cls = 7;                                  /* FB/connect, panning/AMS/FMS, rest */
+        r->z80_ym_class[cls]++;
+    }
     uint32_t src = UINT32_MAX;
     if (x->in_z80) {
         if (x->z80_last_valid && x->c->rom[x->z80_last_read] == v) src = x->z80_last_read;
@@ -2099,6 +2112,17 @@ if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (%s con
     fprintf(out, "  YM2612 stores %llu, PSG stores %llu; ROM bytes typed sample (DAC): %u, music (FM/PSG data): %u\n",
             (unsigned long long)r->z80_ym_writes, (unsigned long long)r->z80_psg_writes,
             r->z80_sample_bytes, r->z80_music_bytes);
+    {   /* classified by selected register (SMS YM2413 model, 0.251.17) */
+        uint64_t sum = 0;
+        for (unsigned i = 0; i < 8; i++) sum += r->z80_ym_class[i];
+        if (sum)
+            fprintf(out, "  YM2612 typed stores: mode/timer %llu, key on/off %llu, DAC %llu, DT/MUL %llu, "
+                         "total level %llu, envelope %llu, F-number/block %llu, connect/panning %llu\n",
+                    (unsigned long long)r->z80_ym_class[0], (unsigned long long)r->z80_ym_class[1],
+                    (unsigned long long)r->z80_ym_class[2], (unsigned long long)r->z80_ym_class[3],
+                    (unsigned long long)r->z80_ym_class[4], (unsigned long long)r->z80_ym_class[5],
+                    (unsigned long long)r->z80_ym_class[6], (unsigned long long)r->z80_ym_class[7]);
+    }
     fprintf(out, "rom->vdp copies: %d\n", r->ncopy);
     for (int i = 0; i < r->ncopy; i++)
         fprintf(out, "  pc %06X src %06X len %u words code %02X\n", r->copies[i].pc, r->copies[i].src,

@@ -583,13 +583,14 @@ couverture.
 | GB | 13 | 6 | 5 | 2 | 46 % | 69 % | RTC, CGB (VBK/SVBK/palettes), SGB rendu, APU typé seulement |
 | SMS/GG/SG | 7 | 4 | 1 | 2 | 57 % | 64 % | YM2413 non émulé ; phaser/paddle/lunettes 3D absents |
 | MSX1 | 6 | 2 | 2 | 2 | 33 % | 58 % | BIOS simulé ; SCC non typé ; V9938/FM-PAC absents |
-| NES | 8 | 5 | 1 | 2 | 62 % | 69 % | CHR-ROM non indexée ; DMC absent ; illégaux NOP |
+| NES | 8 | 6 | 1 | 1 | 75 % | 81 % | CHR-ROM non indexée ; illégaux NOP |
 | PCE | 6 | 2 | 1 | 3 | 33 % | 58 % | ADPCM/CD-ROM², SF2/SuperGrafx, multitap absents |
-| MD | 6 | 1 | 3 | 2 | 17 % | 42 % | **YM2612 non observé, Z80 son sans fourches, pad catalogue incomplet** — le système qui borne le plus |
+| MD | 6 | 2 | 2 | 2 | 33 % | 58 % | Z80 son sans fourches ; SRAM/SVP/32X absents ; pad catalogue opt-in (0.251.17 : YM2612 typé par registre, pad 14 motifs par défaut) |
 
-Priorité de portée (ordre de travail) : MD (YM2612 typé + Z80 exploré + pad
-complet) → SMS/GG entrées non couvertes → NES CHR/DMC → PCE entrées. SNES,
-Lynx, Vectrex, PICO-8 : hors matrice (aucune exploration, aucun banc), 0 %.
+Priorité de portée (ordre de travail) : MD (Z80 son exploré : fourches, copie
+du driver) → SMS/GG entrées non couvertes (phaser/paddle/3D) → NES CHR/DMC →
+PCE entrées (multitap). SNES, Lynx, Vectrex, PICO-8 : hors matrice (aucune
+exploration, aucun banc), 0 %.
 
 ### 3.0 bis Couverture réelle mesurée sur les suites de tests (0.251.16)
 
@@ -654,7 +655,7 @@ un à un (cause harnais vs cause moteur).
 | 6502, PPU événementiel, APU, OAM DMA, NMI/IRQ | ✅ | — |
 | Mappers | ✅ NROM/UxROM natifs (runtime), MMC1, CNROM, MMC3, AxROM, MMC5 (sous-ensemble), 66, 94 pontés par fenêtres composées (`nesmach.c`) | IRQ scanline MMC3 : **Fourche IRQ** |
 | CHR-ROM | **non suivie** (seul le PRG est indexé) | Index ROM étendu au CHR, **Type** tiles par les fetchs PPU |
-| DMC DMA | absent | **Copie** + **Type** samples |
+| DMC DMA | ✅ (J9) : `$4012/$4013` suivis, lectures DMC typées **samples** (`test_dmc`) | **Copie** + **Type** samples |
 | `$4016/$4017` | ✅ sondes manette (strobe-site : boutons uniques, accords, catalogue `--pad-full`) ; les lectures ≥ 9 renvoient 1 (signature NESdev, m0boy) | — |
 | `$2002` (vblank, sprite 0) | ✅ sonde de valeur 0.251.16 (§3.7) : première lecture LDA/BIT abs d'un site fourche par octet de statut plausible, garde NMI de principe, opt-out `--no-event-probes` | — |
 | Opcodes illégaux | NOP | à émuler ou comptés |
@@ -675,9 +676,9 @@ un à un (cause harnais vs cause moteur).
 | Surface | État | Exigé |
 |---|---|---|
 | 68000, VDP + DMA, SSF2 | ✅ | DMA typée par destination VRAM/CRAM/VSRAM |
-| YM2612 | compilé, non observé | **Type** music ; DAC → samples |
+| YM2612 | ✅ 0.251.17 : écritures observées et **typées par registre sélectionné** (modèle ym_class SMS) — mode/timer, key on/off, DAC (→ samples), DT/MUL, total level, enveloppe, F-number/block, connect/panning ; rapport + fusion jobs | **Type** music ; DAC → samples |
 | Z80 son | observé concrètement (0.57), sans fourches | Exploration Z80 (le moteur z80 existe) : code du driver copié en RAM Z80 (**Copie** ROM→RAM Z80), lectures ROM par la fenêtre de banque `$8000` (**Type** samples/music) |
-| Pad 3 boutons | sondes de 4 motifs | catalogue complet + 6 boutons |
+| Pad | ✅ sondes : 14 motifs par site de lecture (douze 3 boutons, deux 6 boutons) ; catalogue complet opt-in `--pad-full` (256 masques) × `--pad-full6` (×16 X/Y/Z/Mode) | catalogue complet par défaut là où le cap le permet |
 | SRAM/EEPROM, mappers > SSF2, SVP, 32X, Sega CD | absents | limites ou libretro |
 
 ### 3.7 Sondes de registres événementiels (proposition transversale)
