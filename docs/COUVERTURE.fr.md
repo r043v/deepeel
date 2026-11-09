@@ -581,7 +581,7 @@ couverture.
 | Système | Surfaces | Plein | ◐ | ✗ | % plein | % pondéré | Manques qui bornent la portée |
 |---|---|---|---|---|---|---|---|
 | GB | 13 | 6 | 5 | 2 | 46 % | 69 % | RTC, CGB (VBK/SVBK/palettes), SGB rendu, APU typé seulement |
-| SMS/GG/SG | 7 | 4 | 1 | 2 | 57 % | 64 % | YM2413 non émulé ; phaser/paddle/lunettes 3D absents |
+| SMS/GG/SG | 7 | 5 | 1 | 1 | 71 % | 86 % | YM2413 non émulé ; protocole phaser/paddle/3D non émulé (lignes sondées, 0.251.18) |
 | MSX1 | 6 | 2 | 2 | 2 | 33 % | 58 % | BIOS simulé ; SCC non typé ; V9938/FM-PAC absents |
 | NES | 8 | 6 | 1 | 1 | 75 % | 81 % | CHR-ROM non indexée ; illégaux NOP |
 | PCE | 6 | 2 | 1 | 3 | 33 % | 58 % | ADPCM/CD-ROM², SF2/SuperGrafx, multitap absents |
@@ -636,7 +636,7 @@ un à un (cause harnais vs cause moteur).
 | Pause NMI | ✅ | — |
 | V/H-counter `$7E/$7F`, statut VDP `$BF` | **sondes de valeur** 0.251.11 (§3.7) : fourche par valeur plausible, garde « jamais sur IRQ en attente », `--no-event-probes` | ✅ |
 | YM2413 FM (SMS japonaise) | ◐ 0.156 : écritures `$F0/$F1` observées et typées « music » dans le rapport (la puce n'est pas émulée) | Obs. + **Type** music |
-| Phaser, paddle, lunettes 3D, port de lien GG | absents | **Sonde** catalogue |
+| Phaser, paddle, lunettes 3D, port de lien GG | ◐ 0.251.18 : les lignes que ces périphériques conduisent sont ** sondées** — `JOYPAD_A/B`, `GG_START` (une ligne active-basse par bit : touches, joueur 2, reset, TH A/B) et `GG_SERIAL` `$00` (région/écran 0x00/0x40/0x7F) ; les détections de périphérique bifurquent. Le protocole réel (position phaser/paddle, obturateur 3D) reste non émulé (TH modélisé côté pont `backend_gg.c`) | **Sonde** ✅ ; émulation : libretro/limite |
 
 ### 3.3 MSX1
 
