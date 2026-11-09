@@ -236,3 +236,33 @@ d'IRQ), `exec_outside` 809 630 474 pas, 4 172 494 écritures dans des octets dé
 
 Sonic (MD, `--unbounded`) : le run a été interrompu avant tout rapport (limite externe) ; reprise de spool corrigée en
 0.249.39, aucun chiffre retenu. J13 reste ◐.
+
+## J14 : banc GG/SMS — chargeur bk2 continu et films SMS complets (0.251.24/0.251.25, observations de l'outil)
+
+Deux bugs du chargeur de films `.bk2` expliquaient les « attract modes » des relectures SMS. Premier coup : le
+tokenizer LogKey coupait sur l'espace (« P1 Up » devenait deux colonnes) — corrigé en 0.251.24. Second coup, le vrai
+pour Castle : les cellules d'une ligne (`|Reset Pause|P1×6|P2×6|`) sont des **groupes de colonnes continues**, pas des
+contrôleurs redémarrant à zéro — l'index est continu sur la ligne (0.251.25). Le TAS Castle 3292M presse **B1 à la
+trame 74** pour sauter l'écran copyright (le jeu teste les fronts B1/B2 à `$0CEE` : `ld a,($C01C) ; and $30`) ; lu
+comme Left, le saut ne se produisait jamais et les 42 337 trames restaient en attract, écran identique au contrôle
+sans entrée, dans m0boy comme dans GPGX.
+
+Vérité de terrain : la vidéo officielle du TAS (archive.org, décalage +105 trames — carte d'intro TASVideos) montre
+le même enchaînement copyright → B1 → menu PRACTICE/NORMAL → niveau 1 ; notre relecture suit trame par trame jusqu'au
+spring (~trame 4000, même scène). Verdicts :
+
+| Film | Cœurs | Resultat |
+| --- | --- | --- |
+| Alex Kidd 5136S (ROM (U) V1.0, MD5 du Header.txt) | m0boy / GPGX | film complet 35 432 trames, en jeu dès ~600, ramdiff moyen 60 (déphasage de position) |
+| Castle 3292M (ROM (U) V1.1, MD5 exact) | m0boy / GPGX | film complet 42 337 trames, skip + menu + niveau 1 conformes à la vidéo ; `DP_GG_PAD_SHIFT=-1` : ramdiff moyen 54 (contre 1785), 48 % d'écrans identiques trame à trame |
+
+Divergence ouverte : à partir de ~trame 4500 nos deux cœurs (ensemble — pas un écart m0boy/GPGX) dérivent du run
+original (mort au spring puis reprise dans la section à trois portes, HUD figé, alors que le run original finit le
+jeu). C'est un problème de synchronisation d'entrées à la trame près (lag frames BizHawk, phase de lecture du pad
+dans la trame), pas une divergence de cœur ; les décalages entiers testés (-3..+1) donnent -1 comme meilleur.
+
+Preuves du pad lui-même : ROM de test Xch3l (sms_padtest, assemblée WLA-DX hors dépôt) affiche `0F0F0F0F` (U D L R
+B1 B2 pressés) à l'identique sur les deux cœurs avec un film synthétique all-buttons ; lecture du pad confirmée à
+$DC/$DD (29 passes/trame dans la boucle d'attract de Castle). Diagnostic : l'INT vblank n'est jamais prise par ce jeu
+(il scrute $BF, bit7 vu à 1 chaque trame), les line IRQ ne partent pas (reg10 hors écran) — conforme à ce que le code
+du jeu attend, vérifié par DP_GG_PC_SAMPLE/PC_RANGE/TRACE_ADDR.
