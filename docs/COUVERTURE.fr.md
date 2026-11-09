@@ -505,11 +505,19 @@ qui fournissent les hooks requis.
 **J2 — TAS.**
 - **Méca.** :
   - le film est prioritaire sur tout budget ;
-  - **relecture intégrale obligatoire** (0.251.13) : le film est relu jusqu'à sa
-    dernière frame sur toutes les plateformes — GB : tout arrêt gated par
-    `!tas_left` (sessions.c) ; PCE/NES : budget = max(`--play`, frames du film) ;
-    MD : relecture complète du GMV/BK2 ; z80 : le budget pas s'étire à la
-    longueur du film (`--tas-total` ne fait que réduire, refus comptés) ;
+  - **relecture intégrale obligatoire** (0.251.13, durci 0.251.14) : **aucun TAS
+    n'est coupé** — le film est relu de bout en bout quelle que soit l'option :
+    GB tout arrêt gated par `!tas_left` (sessions.c) ; PCE/NES : les frames
+    scriptées ignorent `--max-total` (le jeu aléatoire d'après-film reste borné,
+    `global_cuts` ne compte que lui) ; MD : relecture complète du GMV/BK2 ;
+    z80 : `--tas-total` ne coupe plus le film (compteur `tas_frames_refused`
+    réservé aux frames que la relecture n'a pas pu avancer, jamais silencieux) ;
+  - **rôle des cœurs de référence** : les émulateurs de référence (gambatte,
+    Nestopia, Beetle, ClownMDEmu, Genesis Plus GX…) servent de contrôle de
+    conformité de notre cœur. Un correctif d'alignement sur un film précis
+    reste dans deepeel et spécifique à ce type de film ; s'il s'avère être une
+    erreur de fidélité matérielle de notre cœur, il est backporté dans m0boy —
+    **m0boy doit être fidèle** ;
   - checkpoints périodiques, puis **shoots** : chaque checkpoint est semé dans le
     fork-explorer ;
   - profils de synchro VBA.

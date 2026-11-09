@@ -999,7 +999,9 @@ static void play_session(PceRun *x, uint32_t frames, uint32_t seed, const DpPceT
     uint32_t hold = 0;
     const uint32_t seed_every = 300;
     for (uint32_t f = 0; f < frames; f++) {
-        if ((x->total_steps >= x->opt.max_total || dp_stop)) { r->global_cuts++; break; }
+        // a scripted frame is never cut (0.251.14): the movie plays in full,
+        // max_total only stops the random play after it
+        if ((!tas || f >= tas->frames) && (x->total_steps >= x->opt.max_total || dp_stop)) { r->global_cuts++; break; }
         uint8_t in;
         if (tas && f < tas->frames) {
             in = tas->pads[f];

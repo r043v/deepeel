@@ -1171,12 +1171,10 @@ static int tas_replay(Run *x) {
         snaps=malloc((size_t)(t.frames/rng_per+1)*sizeof *snaps);
         if(!snaps) { fprintf(stderr,"deepeel: --tas-rng: out of memory\n"); rng_per=0; }
     }
-    // the movie plays to the end (0.251.13): the step budget stretches to the
-    // movie length; --tas-total only ever shrinks it, and refusals stay counted
-    uint64_t tas_budget=o->tas_total;
-    uint64_t need=(uint64_t)t.frames*o->tas_frame_steps+1000;
-    if(need>tas_budget && tas_budget==DP_SEGA_TAS_TOTAL_DEFAULT) tas_budget=need;
-    for(uint32_t f=0;f<t.frames && r->steps<tas_budget;f++) {
+    // the movie is replayed in full, never cut (0.251.14): every frame is read
+    // to the end whatever --tas-total says; tas_frame_steps bounds each frame
+    // (a starved frame is still counted below, never silently)
+    for(uint32_t f=0;f<t.frames;f++) {
         DpSegaInput in={{0,0},0,0,0};
         uint8_t m=t.masks[f];
         in.pad[0]=(uint8_t)(m&63);
@@ -1185,7 +1183,7 @@ static int tas_replay(Run *x) {
         in.reset=!!(m&128);
         x->b->set_input(in);
         r->tas_frames++;
-        for(unsigned i=0;i<o->tas_frame_steps && r->steps<tas_budget;i++)
+        for(unsigned i=0;i<o->tas_frame_steps;i++)
             if(!play_step(x)) goto done;
         if(rng_per && (f+1)%rng_per==0) {
             void *s=malloc(x->b->state_size);

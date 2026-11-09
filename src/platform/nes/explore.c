@@ -1112,7 +1112,9 @@ static void play_session(DpNesRun *x, uint32_t frames, uint32_t seed,
     dp_nesmach_set_input(x->m, x->frame_masks[0][0], x->frame_masks[0][1]);
     uint32_t f = 0;
     while (f < frames) {
-        if ((x->total_steps >= x->opt.max_total || dp_stop)) { r->global_cuts++; break; }
+        // a scripted frame is never cut (0.251.14): the movie plays in full,
+        // max_total only stops the random play after it
+        if ((!tas || f >= tas->frames) && (x->total_steps >= x->opt.max_total || dp_stop)) { r->global_cuts++; break; }
         if (!tas && pool_cap && f % 256 == 255 && !x->idle) {   // every 256 frames: keep a checkpoint (random replacement when full)
             uint8_t *ck = dp_ckpt_claim(&x->pool, pool_cap, dp_nesmach_state_size(), &x->rng);
             if (ck) { dp_nesmach_save(x->m, ck); r->pool_saved++; }
