@@ -232,9 +232,9 @@ static int parse_entry(const char *s, uint8_t *bank, uint16_t *addr) {
 
 // --- --tas-dir: movie discovery ------------------------------------------------
 static int mov_ext(const char *name) {
-    static const char *exts[] = { ".vmv", ".vbm", ".bk2", ".gbm", ".fm2", ".log" };
+    static const char *exts[] = { ".vmv", ".vbm", ".bk2", ".gbm", ".fm2", ".log", ".gmv" };
     size_t n = strlen(name);
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 7; i++) {
         size_t e = strlen(exts[i]);
         if (n > e && !strcasecmp(name + n - e, exts[i])) return 1;
     }

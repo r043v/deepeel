@@ -700,7 +700,9 @@ harnais par film (chemin : `DP_MD_REF_LIVE` sinon `build/md-reference/md_ref_liv
 et le tue au passage au suivant ; chaque tuile a sa propre légende (`film i/N
 nom`, `frame/total f/s`, `done` grisée) et son propre compteur f/s — les deux
 cœurs tournent à leur rythme, sans gating (l'exploration fourchue n'est pas une
-relecture linéaire).
+relecture linéaire). 0.251.21 : chaque image est letterboxée à son ratio natif
+(320×224 MD, plus d'étirement) ; la découverte `--tas-dir` reconnaît enfin
+`.gmv` (la chaîne Sonic MD ne chargeait que le seul `.bk2` des 19 films).
 
 ### 3.7 Sondes de registres événementiels (proposition transversale)
 

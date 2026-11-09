@@ -726,36 +726,43 @@ static void *fb_main(void *arg) {
             if (rdone) s_ref = 0;
         }
         SDL_RenderClear(ren);
-        int cols = ref ? 2 : 1, cw = W / cols, img_h = H - FB_CAP > 0 ? H - FB_CAP : 1;
-        if (tex) {
-            // the left tile: the replay/explorer image; the caption lines stay free
-            SDL_Rect dst = {0, 0, cw, img_h};
-            SDL_RenderCopy(ren, tex, NULL, &dst);
-        }
-        SDL_Texture *rtex = NULL;
-        if (rhave) {
-            rtex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, rw, rh);
-            SDL_UpdateTexture(rtex, NULL, rx, rw * 4);
-            SDL_Rect dst = {cw, 0, W - cw, img_h};
-            SDL_RenderCopy(ren, rtex, NULL, &dst);
-            SDL_DestroyTexture(rtex);
-        }
-        {   // captions (the GB watch tile information, mutualized): the left tile
-            // keeps the CLI fixed part and the explorer progress line
+        {   // two tiles side by side, each letterboxed to its image aspect (the
+            // GB watch layout), with two caption lines under the image
+            int cols = ref ? 2 : 1;
+            int cw = W / cols, ch = H - FB_CAP > 0 ? H - FB_CAP : 1;
+            // helper: aspect-fit (iw,ih) inside the tile and blit, like watch_main
+            struct { int ox, oy; } tile[2] = { {0, 0}, {cw, 0} };
+            for (int t = 0; t < (ref ? 2 : 1); t++) {
+                int iw = 0, ih = 0;
+                if (t == 0) { if (tex && th > 0) { iw = tw; ih = th; } }
+                else if (rhave && rh > 0) { iw = rw; ih = rh; }
+                if (!iw || !ih) continue;
+                double sc = (double)cw / iw < (double)ch / ih ? (double)cw / iw : (double)ch / ih;
+                int dw = (int)(iw * sc), dh = (int)(ih * sc);
+                SDL_Rect dst = { tile[t].ox + (cw - dw) / 2, tile[t].oy + (ch - dh) / 2, dw, dh };
+                if (t == 0) SDL_RenderCopy(ren, tex, NULL, &dst);
+                else {
+                    SDL_Texture *rtex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888,
+                                                          SDL_TEXTUREACCESS_STREAMING, rw, rh);
+                    SDL_UpdateTexture(rtex, NULL, rx, rw * 4);
+                    SDL_RenderCopy(ren, rtex, NULL, &dst);
+                    SDL_DestroyTexture(rtex);
+                }
+            }
+            // captions (the GB watch tile information, mutualized)
             char c1[160], c2[160];
             int done = dp_fb_caption_read(c1, sizeof c1, c2, sizeof c2);
             if (!c1[0]) snprintf(c1, sizeof c1, "replay (deepeel)");
             if (!c2[0] && s_main > 0) snprintf(c2, sizeof c2, "%.0f f/s", s_main);
-            draw_text(ren, 6, H - FB_CAP + 2, c1, 1, gui_color(DP_C_TITLE));
-            if (c2[0]) draw_text(ren, 6, H - FB_CAP + 16, c2, 1, gui_color(done ? DP_C_DIM : DP_C_TEXT));
+            draw_text(ren, 6, ch + 2, c1, 1, gui_color(DP_C_TITLE));
+            if (c2[0]) draw_text(ren, 6, ch + 16, c2, 1, gui_color(done ? DP_C_DIM : DP_C_TEXT));
             if (ref) {   // the right tile: the reference harness, its own captions
-                char r1[160], r2[160];
-                snprintf(r1, sizeof r1, "ClownMDEmu (reference)");
+                char r2[160];
                 if (rhave) snprintf(r2, sizeof r2, rdone ? "done  %u frames" : "%u/%u  %.0f f/s",
                                     rdone ? (unsigned)rtot : (unsigned)rvf, (unsigned)rtot, s_ref);
                 else snprintf(r2, sizeof r2, "waiting for tools/md_ref_live...");
-                draw_text(ren, cw + 6, H - FB_CAP + 2, r1, 1, gui_color(DP_C_TITLE));
-                draw_text(ren, cw + 6, H - FB_CAP + 16, r2, 1, gui_color(rdone ? DP_C_DIM : DP_C_TEXT));
+                draw_text(ren, cw + 6, ch + 2, "ClownMDEmu (reference)", 1, gui_color(DP_C_TITLE));
+                draw_text(ren, cw + 6, ch + 16, r2, 1, gui_color(rdone ? DP_C_DIM : DP_C_TEXT));
             }
         }
         SDL_RenderPresent(ren);
