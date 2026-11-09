@@ -108,7 +108,7 @@ static void usage(void) {
             "  deepeel z80 explore <sg|sms|gg|msx> ROM [--input-total N] [--input-forks N] [--text FILE] [--map FILE] [--evidence FILE]\n"
             "  deepeel z80 dis ROM hex-offset [instruction-count]\n"
             "  deepeel lr explore CORE ROM [--text FILE] [--map FILE] [--path-steps N] [--max-total N] [--queue N]\n"
-            "  deepeel md explore ROM [--tas GMV] [--max-total N] [--path-steps N] [--queue N] [--queue-max N] [--fork-cap N] [--visit-cap N] [--entry ADDR]... [--watch-write ADDR] [--exclude-read-pc ADDR] [--ctx-cap N] [--ctx-live] [--text FILE] [--map FILE] [--evidence FILE]\n"
+            "  deepeel md explore ROM [--tas GMV] [--tas-dir DIR] [--max-total N] [--path-steps N] [--queue N] [--queue-max N] [--fork-cap N] [--visit-cap N] [--entry ADDR]... [--watch-write ADDR] [--exclude-read-pc ADDR] [--ctx-cap N] [--ctx-live] [--text FILE] [--map FILE] [--evidence FILE]\n"
             "  deepeel md dis ROM hex-offset [instruction-count]\n"
             "  deepeel regs <gb|sg|sms|gg|msx|md>\n"
             "    --max-steps N        per-path step budget (default 100000)\n"
@@ -1617,6 +1617,16 @@ static void md_regs_print(void) {
                dp_md_regs[i].category);
 }
 
+/* per-movie output path in a --tas-dir chain: <dir-of-base>/<i>-<movie name><ext of base> */
+static void md_movie_output_path(char *out, size_t cap, const char *base, int idx, const char *movie) {
+    const char *ext = strrchr(base, '.'), *b = strrchr(movie, '/');
+    b = b ? b + 1 : movie;
+    if (ext && ext != base)
+        snprintf(out, cap, "%.*s/%02d-%s%s", (int)(ext - base), base, idx + 1, b, ext);
+    else
+        snprintf(out, cap, "%s/%02d-%s", base, idx + 1, b);
+}
+
 static int cmd_md(int argc, char **argv) {
     const char *md_rtcode = NULL;
     if (argc < 4) return usage(), 2;
@@ -1643,7 +1653,7 @@ static int cmd_md(int argc, char **argv) {
         DpCliCommon cc = { .jobs = 1 };
         int md_unbounded = 0;
         dp_md_options_default(&o);
-        const char *movie_path = NULL, *md_heat = NULL;
+        const char *movie_path = NULL, *md_heat = NULL, *md_tas_dir = NULL;
         for (int i = 4; i < argc; i++) {
             const char *a = argv[i];
             if (i + 1 >= argc && strcmp(a, "--lot-drain") && strcmp(a, "--unbounded")) { fprintf(stderr, "deepeel: bad option %s\n", a); rc = 2; break; }
@@ -1673,6 +1683,7 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--watch-write")) o.watch_write = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--exclude-read-pc")) o.exclude_read_pc = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--tas")) movie_path = argv[++i];
+            else if (!strcmp(a, "--tas-dir") && i + 1 < argc) md_tas_dir = argv[++i];
             else if (!strcmp(a, "--demo-frames")) o.demo_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--play-frames")) o.play_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--play-sessions")) o.play_sessions = (uint32_t)strtoul(argv[++i], NULL, 0);
@@ -1685,23 +1696,48 @@ static int cmd_md(int argc, char **argv) {
         }
         const char *text = cc.text, *map = cc.map, *ev = cc.evidence, *md_dump = cc.dump; md_rtcode = cc.rtcode;
         int md_jobs = cc.jobs, md_watch = cc.watch; unsigned md_time_limit = cc.time_limit;
-        DpMdMovie movie = {0};
-        if (!rc && movie_path) {
-            if (!dp_md_movie_load(movie_path, &movie, err, sizeof err)) {
-                fprintf(stderr, "deepeel: GMV: %s\n", err); rc = 1;
-            } else if (movie.has_md5) {
+        const char *movies[64];
+        int nmovies = 0;
+        if (!rc && movie_path) movies[nmovies++] = movie_path;
+        if (!rc && md_tas_dir)   // the movie chain: every replay is whole, the window moves to the next when one ends
+            tas_collect_dir(md_tas_dir, c.overseas, movies, &nmovies, (int)(sizeof movies / sizeof *movies));
+        if (!rc && !nmovies) movies[nmovies++] = NULL;   // plain exploration, no movie: one report as before
+        if (nmovies > 1) {   // per-movie outputs live in the directory of the requested file
+            mkdir(cc.summary, 0777);   // a missing --summary directory would silently lose the summaries
+            if (md_watch && !o.watch_every) o.watch_every = 2;   // the progress caption needs published frames
+        }
+        if (md_watch && dp_fbwatch_start("deepeel md watch")) o.watch_every = o.watch_every ? o.watch_every : 0;
+        int md_failed = 0;
+        for (int mi = 0; !rc && mi < nmovies && !md_failed; mi++) {
+            DpMdMovie movie = {0};
+            if (movies[mi] && !dp_md_movie_load(movies[mi], &movie, err, sizeof err)) {
+                fprintf(stderr, "deepeel: GMV %s: %s\n", movies[mi], err);
+                continue;
+            }
+            if (movie.has_md5) {
                 uint8_t h[16]; dp_md5(c.rom, c.size, h);
                 /* BizHawk's Genesis header hash is not a reliable ROM digest (a movie that
                  * replays to its last frame can carry a different value): warn, never refuse */
                 if (!md_any_rom && memcmp(h, movie.md5, 16))
                     fprintf(stderr, "deepeel: warning: BK2 header hash differs from the ROM MD5 "
                             "(the replay will show whether the movie matches)\n");
-                o.movie = &movie;
-            } else o.movie = &movie;
-        }
-        if (!rc) {
-            DpMdResults r;
-            if (md_watch && dp_fbwatch_start("deepeel md watch")) o.watch_every = o.watch_every ? o.watch_every : 0;
+            }
+            o.movie = &movie;
+            char cap[240], pth[5][600];
+            const char *sum = cc.summary, *txt = text, *mp = map, *evp = ev, *heat = md_heat;
+            if (md_watch && movies[mi]) {
+                const char *b = strrchr(movies[mi], '/'); b = b ? b + 1 : movies[mi];
+                snprintf(cap, sizeof cap, "film %d/%d  %s", mi + 1, nmovies, b);
+                dp_fbwatch_caption(cap);
+                dp_fbwatch_progress(0, movie.frames, 0);
+            }
+            if (nmovies > 1) {   // suffix every requested output with the movie, none silently overwrites another
+                if (sum)  { md_movie_output_path(pth[0], sizeof pth[0], sum, mi, movies[mi]); sum = pth[0]; }
+                if (txt)  { md_movie_output_path(pth[1], sizeof pth[1], txt, mi, movies[mi]); txt = pth[1]; }
+                if (mp)   { md_movie_output_path(pth[2], sizeof pth[2], mp, mi, movies[mi]); mp = pth[2]; }
+                if (evp)  { md_movie_output_path(pth[3], sizeof pth[3], evp, mi, movies[mi]); evp = pth[3]; }
+                if (heat) { md_movie_output_path(pth[4], sizeof pth[4], heat, mi, movies[mi]); heat = pth[4]; }
+            }
             if (md_unbounded) { // owner-decided exception: coverage over time and resources; the RAM queue stays
                 // modest and the excess states go to the disk lot (resumable with --resume); stops on exhaustion,
                 // --time-limit or SIGINT
@@ -1713,29 +1749,32 @@ static int cmd_md(int argc, char **argv) {
                 fprintf(stderr, "deepeel: md --unbounded: caps lifted, excess states spooled to %s\n", o.lot_path);
             }
             dp_cli_arm_stop(md_time_limit);
+            DpMdResults r;
             int mrc = dp_md_explore_jobs(&c, &o, &r, md_jobs);
-            if (md_watch) dp_fbwatch_stop();
+            if (md_watch) dp_fbwatch_progress(movie.frames, movie.frames, 1);
             if (md_dump && dp_fb_dump_ppm(md_dump)) fprintf(stderr, "deepeel: no frame to dump (the ROM never completed a frame)\n");
             if (mrc) {
-                fprintf(stderr, "deepeel: md explore failed\n");
+                fprintf(stderr, "deepeel: md explore failed on %s\n", movies[mi]);
+                md_failed = 1;
                 rc = 1;
             } else {
-                FILE *f = text ? fopen(text, "w") : stdout;
+                FILE *f = txt ? fopen(txt, "w") : stdout;
                 if (f) {
                     dp_md_explore_report(&c, &o, &r, f);
-                    if (text) fclose(f);
+                    if (txt) fclose(f);
                 }
                 if (md_rtcode) dp_md_explore_rtcode(&r, md_rtcode);
-                if (map) dp_md_explore_map(&r, map);
-                if (ev) dp_md_explore_evidence(&r, ev);
-                if (cc.summary) dp_md_explore_summary(&r, cc.summary);
-                if (md_heat) dp_md_explore_heat(&r, md_heat);
+                if (mp) dp_md_explore_map(&r, mp);
+                if (evp) dp_md_explore_evidence(&r, evp);
+                if (sum) dp_md_explore_summary(&r, sum);
+                if (heat) dp_md_explore_heat(&r, heat);
                 if (cc.cov) dp_md_explore_cov(&r, cc.cov);
                 if (cc.romdata) dp_md_explore_romdata(&r, cc.romdata);
                 dp_md_results_free(&r);
             }
+            dp_md_movie_free(&movie);
         }
-        dp_md_movie_free(&movie);
+        if (md_watch) dp_fbwatch_stop();
     } else rc = (usage(), 2);
     dp_md_cart_free(&c);
     return rc;

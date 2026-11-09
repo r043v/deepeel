@@ -114,7 +114,7 @@ typedef struct DpMdResults_ {
     uint8_t *z80_flags;   /* per ROM byte, DP_MDZ_* */
     uint64_t z80_steps, z80_exec_ram, z80_exec_bank, z80_exec_other, z80_rom_reads;
     uint64_t z80_ram_copied;   /* 68000 stores into Z80 RAM whose byte came from the ROM */
-    uint64_t z80_ym_writes, z80_psg_writes, z80_typed_sample, z80_typed_music;
+    uint64_t z80_ym_writes, z80_psg_writes, z80_bank_writes, z80_typed_sample, z80_typed_music;
     /* YM2612 data stores classified by selected register (SMS YM2413 model):
      * mode/timer, key on/off, DAC, DT/MUL, total level, envelope rates,
      * F-number/block, connection/panning and the rest */

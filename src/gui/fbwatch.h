@@ -3,6 +3,7 @@
 // a window thread (SDL2 builds) or a file dump shows them.  No machine state is shared.
 #ifndef DP_FBWATCH_H
 #define DP_FBWATCH_H
+#include <stddef.h>
 #include <stdint.h>
 
 enum { DP_FB_MAX_W = 512, DP_FB_MAX_H = 512 };
@@ -16,4 +17,11 @@ int dp_fb_dump_ppm(const char *path);
 int dp_fbwatch_available(void);
 int dp_fbwatch_start(const char *title);
 void dp_fbwatch_stop(void);
+// caption under the image (the GB watch tile information, mutualized): a
+// fixed part set by the CLI (movie index and file name) and a progress line
+// the explorer updates per published frame; done dims the progress line
+void dp_fbwatch_caption(const char *base);
+void dp_fbwatch_progress(uint32_t frame, uint32_t total, int done);
+// the window thread reads the caption back; returns the done flag
+int dp_fb_caption_read(char *c1, size_t n1, char *c2, size_t n2);
 #endif

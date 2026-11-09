@@ -88,7 +88,9 @@ static void start_and_pause(void) {
     const uint8_t start[]={0x31,0,0xd0,0xdb,0,0x07,0x3e,2,0xce,0,0x67,0x2e,0,0xe9};
     program(start,sizeof(start)); rom[0x200]=rom[0x300]=0x76;
     run("gg",options());
-    CHECK(result.input_forks==2 && result.paths==3 && !result.input_log_overflow);
+    // Start press/release by the input probes (2 forks) plus the region/screen
+    // event sondes on the same $00 read (0x00, 0x40): 2 more paths
+    CHECK(result.input_forks==2 && result.paths==5 && !result.input_log_overflow);
     CHECK(result.flags[0x300]&DP_SEGA_NATURAL); CHECK(result.flags[0x200]&DP_SEGA_FORCED);
     CHECK(!result.flags[0x66]); // Start is polled; no NMI is generated on GG.
     for(unsigned i=0;i<result.input_count;i++) CHECK(!result.inputs[i].input.pause);

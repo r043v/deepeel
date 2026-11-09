@@ -53,7 +53,7 @@ static void fold(DpMdResults *a, uint8_t *bank_seen, void *user) {
     ADD(dropped_pending); ADD(faults); ADD(exec_outside); ADD(ram_exec); ADD(smc_writes); ADD(sram_exec); ADD(sram_reads);
     ADD(decode_length_mismatches); ADD(unmapped_r); ADD(unmapped_w); ADD(cpu_vram_words);
     ADD(z80_steps); ADD(z80_exec_ram); ADD(z80_exec_bank); ADD(z80_exec_other); ADD(z80_rom_reads);
-    ADD(z80_ram_copied); ADD(z80_ym_writes); ADD(z80_psg_writes); ADD(z80_typed_sample); ADD(z80_typed_music);
+    ADD(z80_ram_copied); ADD(z80_ym_writes); ADD(z80_psg_writes); ADD(z80_bank_writes); ADD(z80_typed_sample); ADD(z80_typed_music);
     for (int i = 0; i < 8; i++) a->z80_ym_class[i] += b->z80_ym_class[i];
     ADD(pass2_seeds); ADD(pass2_refused); ADD(pass2_capped); ADD(pad_cuts); ADD(indirect_sites);
     ADD(indirect_targets); ADD(indirect_overflow); ADD(ctx_evicted);

@@ -1037,12 +1037,11 @@ static const uint8_t *event_values(const char *name,int *n) {
     static const uint8_t st[] = {0x00,0x20,0x40,0x80,0xC0,0xE0,0xFF}; // collision|overflow|vblank|line, combos
     static const uint8_t vc[] = {0x00,0x7F,0x80,0xC0,0xFF};          // frame phases (SMS 8-bit, GG 9-bit low)
     static const uint8_t hc[] = {0x00,0x20,0x40,0x80,0xE0,0xFF};     // line phases
-    // one asserted line per bit (active low): pad keys, player-2 bits, reset,
-    // TH A/B — the phaser/paddle/3D-glasses detection reads these lines
-    static const uint8_t pad[] = {0xFE,0xFD,0xFB,0xF7,0xEF,0xDF,0xBF,0x7F};
-    if(!strncmp(name,"JOYPAD_A",7) || !strncmp(name,"JOYPAD_B",7) || !strcmp(name,"GG_START")) { *n=(int)(sizeof pad); return pad; }
-    // GG system register $00: region/screen bits — a GG detection read branches on these
-    if(!strcmp(name,"GG_SERIAL")) { *n=3; return (const uint8_t*)"\x00\x40\x7f"; }
+    // the pad, Pause and Start lines stay with the input probes (the port
+    // names still matter to fork_event_ports, which covers only the lines
+    // they cannot model: the TH peripheral lines and the GG region bits)
+    if(!strncmp(name,"JOYPAD_A",7) || !strncmp(name,"JOYPAD_B",7) ||
+       !strcmp(name,"GG_START") || !strcmp(name,"GG_SERIAL")) { *n=0; return NULL; }
     if(!strncmp(name,"VDP_STATUS",10)) { *n=(int)(sizeof st); return st; }
     if(!strcmp(name,"V_COUNTER")) { *n=(int)(sizeof vc); return vc; }
     if(!strcmp(name,"H_COUNTER")) { *n=(int)(sizeof hc); return hc; }
@@ -1092,8 +1091,23 @@ static int fork_event_ports(Run *x,const z80_decoded_t *d,size_t at,int skip_irq
     }
     const DpSegaPort *reg=dp_sega_port(x->system,port,0);
     if(!reg) return 1;
-    int n; const uint8_t *vals=event_values(reg->name,&n);
-    if(!vals) return 1;
+    /* the pad, Pause and Start lines belong to the input probes; the event
+     * sondes cover only what they cannot model: the TH lines of $DD (the
+     * phaser/paddle/3D-glasses detection reads them) and the region/screen
+     * bits of GG $00.  An input_masks of 0 disables input exploration —
+     * discovering the peripheral lines is input exploration too. */
+    static const uint8_t th[] = {0xBF,0x7F};       // TH A, TH B asserted (active low)
+    static const uint8_t region[] = {0x00,0x40};   // GG region/screen, Start released
+    const uint8_t *vals; int n;
+    if(!strncmp(reg->name,"JOYPAD_A",7)) return 1; // fully modeled by the input probes
+    if(!strncmp(reg->name,"JOYPAD_B",7) || !strcmp(reg->name,"GG_START") || !strcmp(reg->name,"GG_SERIAL")) {
+        if(!x->opt->input_masks) return 1;
+        vals = strcmp(reg->name,"JOYPAD_B") ? region : th;
+        n = 2;
+    } else {
+        vals=event_values(reg->name,&n);
+        if(!vals) return 1;
+    }
     return fork_value_probes(x,port,vals,n,at,skip_irq);
 }
 DpSegaOptions dp_sega_options(void) {

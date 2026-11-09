@@ -581,11 +581,11 @@ couverture.
 | Système | Surfaces | Plein | ◐ | ✗ | % plein | % pondéré | Manques qui bornent la portée |
 |---|---|---|---|---|---|---|---|
 | GB | 13 | 6 | 5 | 2 | 46 % | 69 % | RTC, CGB (VBK/SVBK/palettes), SGB rendu, APU typé seulement |
-| SMS/GG/SG | 7 | 5 | 1 | 1 | 71 % | 86 % | YM2413 non émulé ; protocole phaser/paddle/3D non émulé (lignes sondées, 0.251.18) |
+| SMS/GG/SG | 7 | 5 | 1 | 1 | 71 % | 86 % | YM2413 non émulé ; protocole phaser/paddle/3D non émulé (lignes TH/région sondées, 0.251.19) |
 | MSX1 | 6 | 2 | 2 | 2 | 33 % | 58 % | BIOS simulé ; SCC non typé ; V9938/FM-PAC absents |
 | NES | 8 | 6 | 1 | 1 | 75 % | 81 % | CHR-ROM non indexée ; illégaux NOP |
 | PCE | 6 | 2 | 1 | 3 | 33 % | 58 % | ADPCM/CD-ROM², SF2/SuperGrafx, multitap absents |
-| MD | 6 | 2 | 2 | 2 | 33 % | 58 % | Z80 son sans fourches ; SRAM/SVP/32X absents ; pad catalogue opt-in (0.251.17 : YM2612 typé par registre, pad 14 motifs par défaut) |
+| MD | 6 | 2 | 2 | 2 | 33 % | 58 % | Z80 son ◐ (copie driver typée 0.251.19, fourches = backport m0boy) ; SRAM/SVP/32X absents ; pad catalogue opt-in (0.251.17 : YM2612 typé par registre, pad 14 motifs par défaut) |
 
 Priorité de portée (ordre de travail) : MD (Z80 son exploré : fourches, copie
 du driver) → SMS/GG entrées non couvertes (phaser/paddle/3D) → NES CHR/DMC →
@@ -636,7 +636,7 @@ un à un (cause harnais vs cause moteur).
 | Pause NMI | ✅ | — |
 | V/H-counter `$7E/$7F`, statut VDP `$BF` | **sondes de valeur** 0.251.11 (§3.7) : fourche par valeur plausible, garde « jamais sur IRQ en attente », `--no-event-probes` | ✅ |
 | YM2413 FM (SMS japonaise) | ◐ 0.156 : écritures `$F0/$F1` observées et typées « music » dans le rapport (la puce n'est pas émulée) | Obs. + **Type** music |
-| Phaser, paddle, lunettes 3D, port de lien GG | ◐ 0.251.18 : les lignes que ces périphériques conduisent sont ** sondées** — `JOYPAD_A/B`, `GG_START` (une ligne active-basse par bit : touches, joueur 2, reset, TH A/B) et `GG_SERIAL` `$00` (région/écran 0x00/0x40/0x7F) ; les détections de périphérique bifurquent. Le protocole réel (position phaser/paddle, obturateur 3D) reste non émulé (TH modélisé côté pont `backend_gg.c`) | **Sonde** ✅ ; émulation : libretro/limite |
+| Phaser, paddle, lunettes 3D, port de lien GG | ◐ 0.251.19 : les sondes d'événement couvrent **les lignes que les sondes d'entrée ne modélisent pas** — TH A/B sur `$DD` (les détections phaser/paddle/3D bifurquent) et bits région/écran de `$00` GG (0x00/0x40) ; les touches pad, Pause et Start restent aux sondes d'entrée (pas de double emploi), et `input_masks 0` désactive aussi ces sondes-là. Le protocole réel (position phaser/paddle, obturateur 3D) reste non émulé (TH modélisé côté pont `backend_gg.c`) | **Sonde** ✅ ; émulation : libretro/limite |
 
 ### 3.3 MSX1
 
@@ -677,9 +677,18 @@ un à un (cause harnais vs cause moteur).
 |---|---|---|
 | 68000, VDP + DMA, SSF2 | ✅ | DMA typée par destination VRAM/CRAM/VSRAM |
 | YM2612 | ✅ 0.251.17 : écritures observées et **typées par registre sélectionné** (modèle ym_class SMS) — mode/timer, key on/off, DAC (→ samples), DT/MUL, total level, enveloppe, F-number/block, connect/panning ; rapport + fusion jobs | **Type** music ; DAC → samples |
-| Z80 son | observé concrètement (0.57), sans fourches | Exploration Z80 (le moteur z80 existe) : code du driver copié en RAM Z80 (**Copie** ROM→RAM Z80), lectures ROM par la fenêtre de banque `$8000` (**Type** samples/music) |
+| Z80 son | ◐ 0.251.19 : la **copie ROM→RAM Z80 faite par le driver lui-même** est typée — un store Z80 RAM pendant l'exécution Z80 est attribué à l'octet lu juste avant par la fenêtre de banque `$8000` (`DP_MDZ_COPIED`, le `code-ramcopy` suit) ; les stores de contrôle de fenêtre (`$6000-$7FFF`, remap de page 32 Kio) sont comptés (`z80_bank_writes`). Toujours sans fourches propres (la machine MdFull ne donne pas d'instantané Z80) | Exploration Z80 fourchue (backport m0boy : état Z80 dans le snapshot) |
 | Pad | ✅ sondes : 14 motifs par site de lecture (douze 3 boutons, deux 6 boutons) ; catalogue complet opt-in `--pad-full` (256 masques) × `--pad-full6` (×16 X/Y/Z/Mode) | catalogue complet par défaut là où le cap le permet |
 | SRAM/EEPROM, mappers > SSF2, SVP, 32X, Sega CD | absents | limites ou libretro |
+
+Chaîne de films (`--tas-dir`, 0.251.19) : `md explore` enchaîne tous les movies
+d'un répertoire (tri par proximité du titre, chaque relecture est entière),
+la fenêtre `--watch` reste vivante sur toute la chaîne et porte la légende de
+la tuile GB mutualisée — `film i/N  nom`, progression `frame/total` (grisée
+quand le film a joué jusqu'à son dernier frame), passage automatique au film
+suivant. Un summary JSON par film (`<dir>/<i>-<nom>.json`) garde le verdict
+`GMV replay: X / Y frames (incomplete)` (désynchronisation = relecture
+incomplète).
 
 ### 3.7 Sondes de registres événementiels (proposition transversale)
 

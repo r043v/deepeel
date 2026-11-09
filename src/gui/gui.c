@@ -685,10 +685,13 @@ static void *fb_main(void *arg) {
     static uint32_t px[DP_FB_MAX_W * DP_FB_MAX_H];
     SDL_Texture *tex = NULL;
     int tw = 0, th = 0;
+    enum { FB_CAP = 30 };   // caption height under the image (two text lines)
     while (!atomic_load(&fb_quit)) {
         SDL_Event e;
         while (SDL_PollEvent(&e))
             if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)) atomic_store(&fb_quit, 1);
+        int W = 640, H = 480;
+        SDL_GetRendererOutputSize(ren, &W, &H);
         int w, h;
         uint64_t f;
         if (dp_fb_read(px, DP_FB_MAX_W * DP_FB_MAX_H, &w, &h, &f)) {
@@ -700,7 +703,17 @@ static void *fb_main(void *arg) {
             if (tex) SDL_UpdateTexture(tex, NULL, px, w * 4);
         }
         SDL_RenderClear(ren);
-        if (tex) SDL_RenderCopy(ren, tex, NULL, NULL);
+        if (tex) {
+            // keep the caption lines free: the image fills the rest, stretched
+            SDL_Rect dst = {0, 0, W, H - FB_CAP > 0 ? H - FB_CAP : 1};
+            SDL_RenderCopy(ren, tex, NULL, &dst);
+        }
+        {   // caption: the fixed part from the CLI, the progress line from the explorer
+            char c1[160], c2[160];
+            int done = dp_fb_caption_read(c1, sizeof c1, c2, sizeof c2);
+            if (c1[0]) draw_text(ren, 6, H - FB_CAP + 2, c1, 1, gui_color(DP_C_TITLE));
+            if (c2[0]) draw_text(ren, 6, H - FB_CAP + 16, c2, 1, gui_color(done ? DP_C_DIM : DP_C_TEXT));
+        }
         SDL_RenderPresent(ren);
         SDL_Delay(16);
     }

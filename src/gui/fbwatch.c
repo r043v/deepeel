@@ -7,6 +7,35 @@ static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t buf[DP_FB_MAX_W * DP_FB_MAX_H];
 static int bw, bh;
 static uint64_t bframe;
+/* caption state (the GB watch tile information, mutualized): a fixed part set
+ * by the CLI and a progress line the explorer updates per published frame;
+ * read back by the SDL window thread through dp_fb_caption_read */
+static char cap1[160], cap2[160];
+static int cap_done;
+
+void dp_fbwatch_caption(const char *base) {
+    pthread_mutex_lock(&mu);
+    snprintf(cap1, sizeof cap1, "%s", base ? base : "");
+    pthread_mutex_unlock(&mu);
+}
+
+void dp_fbwatch_progress(uint32_t f, uint32_t total, int done) {
+    pthread_mutex_lock(&mu);
+    cap_done = done;
+    if (total) snprintf(cap2, sizeof cap2, "%u/%u%s", (unsigned)f, (unsigned)total, done ? "  done" : "");
+    else snprintf(cap2, sizeof cap2, "%u frames%s", (unsigned)f, done ? "  done" : "");
+    pthread_mutex_unlock(&mu);
+}
+
+int dp_fb_caption_read(char *c1, size_t n1, char *c2, size_t n2) {
+    int done = 0;
+    pthread_mutex_lock(&mu);
+    snprintf(c1, n1, "%s", cap1);
+    snprintf(c2, n2, "%s", cap2);
+    done = cap_done;
+    pthread_mutex_unlock(&mu);
+    return done;
+}
 
 void dp_fb_publish(const uint32_t *argb, int w, int h, uint64_t frame) {
     if (w <= 0 || h <= 0 || w > DP_FB_MAX_W || h > DP_FB_MAX_H) return;

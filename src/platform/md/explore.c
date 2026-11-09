@@ -149,6 +149,10 @@ static void on_frame(void *u) {
         dp_mdmach_render(x->m, px);
         dp_fb_publish(px, 320, 224, x->wframe);
         x->r->watch_frames++;
+        /* the caption shows the replay progress: "done" once the movie ran to
+         * its last frame (a count short of total means the replay desynced) */
+        dp_fbwatch_progress(x->r->movie_frames, x->o->movie ? x->o->movie->frames : 0,
+                            x->o->movie && !x->movie_active);
     }
     if (x->nov) novelty_frame(x);
     if (x->play_active) {
@@ -859,14 +863,22 @@ static void on_sound_store(void *u, uint16_t addr, uint8_t v, int ymreg) {
     if (x->halted) return;
     if (addr < 0x4000u) {
         int32_t src = -1;
-        if (!x->in_z80)
+        if (x->in_z80) {
+            /* the driver itself copies: attribute to the bank-window byte it just read */
+            if (x->z80_last_valid && x->z80_last_read < r->rom_size && x->c->rom[x->z80_last_read] == v)
+                src = (int32_t)x->z80_last_read;
+        } else
             for (unsigned i = x->nlr; i-- > 0;)
                 if (x->lr[i] < r->rom_size && x->c->rom[x->lr[i]] == v) { src = (int32_t)x->lr[i]; break; }
         x->zsrc[addr & 0x1FFFu] = src;
         if (src >= 0) { r->z80_flags[src] |= DP_MDZ_COPIED; r->z80_ram_copied++; }
         return;
     }
-    if (ymreg == -1 || (ymreg >= 0 && !(addr & 1u))) return;
+    if (ymreg == -1) {
+        if (addr >= 0x6000u) r->z80_bank_writes++;   /* bank-window control: the driver maps another 32 KiB page */
+        return;
+    }
+    if (ymreg >= 0 && !(addr & 1u)) return;
     if (ymreg == -2) r->z80_psg_writes++; else r->z80_ym_writes++;
     if (ymreg >= 0) {   /* data byte for the YM2612 register selected by the
                          * address port: classify like the SMS YM2413 model.
@@ -2109,9 +2121,10 @@ if (r->ctx_evicted) fprintf(out, "  context eviction: %llu states closed (%s con
             r->z80_copied_bytes, (unsigned long long)r->z80_ram_copied, r->z80_code_bytes);
     fprintf(out, "  executed from the bank window: %u bytes; data read through it: %u bytes in %u bank(s) of 32 KiB (%llu reads)\n",
             r->z80_exec_rom_bytes, r->z80_data_bytes, r->z80_banks_read, (unsigned long long)r->z80_rom_reads);
-    fprintf(out, "  YM2612 stores %llu, PSG stores %llu; ROM bytes typed sample (DAC): %u, music (FM/PSG data): %u\n",
+    fprintf(out, "  YM2612 stores %llu, PSG stores %llu, bank-window control stores %llu; "
+                 "ROM bytes typed sample (DAC): %u, music (FM/PSG data): %u\n",
             (unsigned long long)r->z80_ym_writes, (unsigned long long)r->z80_psg_writes,
-            r->z80_sample_bytes, r->z80_music_bytes);
+            (unsigned long long)r->z80_bank_writes, r->z80_sample_bytes, r->z80_music_bytes);
     {   /* classified by selected register (SMS YM2413 model, 0.251.17) */
         uint64_t sum = 0;
         for (unsigned i = 0; i < 8; i++) sum += r->z80_ym_class[i];
