@@ -570,6 +570,44 @@ une contribution :
 - **Banque** : timeline de mapping.
 Sinon elle est listée comme limite.
 
+### 3.0 État mesuré du support matériel (0.251.16)
+
+Pourcentage des surfaces §3.1-3.6 : « plein » = modélisé **et** alimentant la
+couverture (copie/type/sonde/banque) ; « ◐ » = observé/typé sans émulation ;
+« ✗ » = absent ou refusé (limite documentée). Le % pondéré crédite les ◐ à
+moitié — c'est la part du matériel qui participe déjà à la portée de
+couverture.
+
+| Système | Surfaces | Plein | ◐ | ✗ | % plein | % pondéré | Manques qui bornent la portée |
+|---|---|---|---|---|---|---|---|
+| GB | 13 | 6 | 5 | 2 | 46 % | 69 % | RTC, CGB (VBK/SVBK/palettes), SGB rendu, APU typé seulement |
+| SMS/GG/SG | 7 | 4 | 1 | 2 | 57 % | 64 % | YM2413 non émulé ; phaser/paddle/lunettes 3D absents |
+| MSX1 | 6 | 2 | 2 | 2 | 33 % | 58 % | BIOS simulé ; SCC non typé ; V9938/FM-PAC absents |
+| NES | 8 | 5 | 1 | 2 | 62 % | 69 % | CHR-ROM non indexée ; DMC absent ; illégaux NOP |
+| PCE | 6 | 2 | 1 | 3 | 33 % | 58 % | ADPCM/CD-ROM², SF2/SuperGrafx, multitap absents |
+| MD | 6 | 1 | 3 | 2 | 17 % | 42 % | **YM2612 non observé, Z80 son sans fourches, pad catalogue incomplet** — le système qui borne le plus |
+
+Priorité de portée (ordre de travail) : MD (YM2612 typé + Z80 exploré + pad
+complet) → SMS/GG entrées non couvertes → NES CHR/DMC → PCE entrées. SNES,
+Lynx, Vectrex, PICO-8 : hors matrice (aucune exploration, aucun banc), 0 %.
+
+### 3.0 bis Couverture réelle mesurée sur les suites de tests (0.251.16)
+
+`known_pct` du rapport (octets connus = code + data + padding inféré), sweep
+30 s/ROM sur les suites de tests matériel hors dépôt. La médiane est élevée
+partout ; le **plancher** est le signal utile (verrous harnais de test).
+
+| Système | Suite | n | médiane | min | max |
+|---|---|---|---|---|---|
+| GB | gbc-hw-tests (AntonioND) | 84/180 | 100,00 % | 98,26 % (hdma_halt) | 100 % |
+| NES | nesdev Emulator_tests (christopherpow) | 247/263 | 100,00 % | 16,38 % (nestest : le harnais du test est le seul chemin) | 100 % |
+| PCE | CPU_Test + PCEngine_TestRoms | 6/6 | 100,00 % | 88,92 % (CPU_Test_10) | 100 % |
+| SMS | smspower TestSuite/VDPTest/memtest | 4/4 | 88,57 % | 65,26 % (TestSuite) | 99,95 % |
+| MD | md_test (gendev t=2565) | sweep en cours | — | — | — |
+
+À refaire à chaque vague : tableau régénéré par sweep, planchers analysés
+un à un (cause harnais vs cause moteur).
+
 ### 3.1 Game Boy
 
 | Surface | État | Contribution exigée |
