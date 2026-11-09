@@ -61,9 +61,15 @@ static void ref_video(const void *data, unsigned w, unsigned h, size_t pitch) {
     }
     g_ref_hash = h1;
     g_ref_w = w; g_ref_h = h;
-    if (w == 160 && h <= DUT_LINES)
-        for (unsigned y = 0; y < h; y++)
-            memcpy(g_ref_fb + y * 160, row + y * pitch, 320);
+    /* copy from the frame start (`row` has advanced past it); the SMS output
+     * of GPGX is the native 256x192 and the DUT shows the 160-wide window at
+     * x=48 (GG_LEFT): crop the same window for the screen comparison */
+    const unsigned crop_x = (w >= 256) ? 48 * 2 : 0;
+    if ((w == 160 || w == 256) && h <= DUT_LINES) {
+        const uint8_t *f = data;
+        for (unsigned y = 0; y < h; y++, f += pitch)
+            memcpy(g_ref_fb + y * 160, f + crop_x, 320);
+    }
 }
 static int16_t ref_input(unsigned port, unsigned device, unsigned index, unsigned id) {
     (void)device; (void)index;
@@ -191,6 +197,8 @@ int main(int argc, char **argv) {
     static uint8_t prev_ram[8192]; int have_prev = 0;
     const uint8_t *dut_cmp = machine.ram;
     const int every = getenv("DP_GG_EVERY") ? atoi(getenv("DP_GG_EVERY")) : 0;
+    /* DP_GG_TRACE_ADDR=$xxxx (SMS address): log the DUT pc whenever that work-RAM byte changes */
+    unsigned trace_addr = getenv("DP_GG_TRACE_ADDR") ? (unsigned)strtoul(getenv("DP_GG_TRACE_ADDR"), NULL, 16) - 0xC000 : (unsigned)-1;
     {   const char *se = getenv("DP_GG_SNAP");
         g_snap = se ? (unsigned)strtoul(se, NULL, 0) : 0;
         g_snap_save = g_snap;
@@ -227,7 +235,11 @@ int main(int argc, char **argv) {
                 for (unsigned j = 0; j < g_d.length && j < sizeof bytes; j++) bytes[j] = g_b->read((uint16_t)(c->pc + j));
                 DpZ80Instruction in;
                 if (!dp_z80_decode(bytes, g_d.length, c->pc, &in)) break;
+                uint8_t before = trace_addr < sizeof machine.ram ? machine.ram[trace_addr] : 0;
                 cycles = z80_execute_decoded(c, &g_d);
+                if (trace_addr < sizeof machine.ram && machine.ram[trace_addr] != before)
+                    fprintf(stderr, "trace: frame %u pc=%04x -> $%04x=%02x (sp=%04x)\n",
+                            frame + 1, c->pc, (unsigned)(0xC000 + trace_addr), machine.ram[trace_addr], c->sp);
                 z80_finish(c, cycles);
             }
             g_b->advance(cycles);
