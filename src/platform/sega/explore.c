@@ -2881,12 +2881,12 @@ static int parse_entry(const char *s,DpSegaOptions *o) {
 }
 // --core: the generic kernel (src/explore/core.c) on the DpMachine view of
 // the SG/SMS/GG backend.  MSX keeps its own engine until its hooks exist.
-static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *o,FILE *out) {
+static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *o,const DpCoreConfig *kcfg,FILE *out) {
     if(!strcmp(s->id,"msx")) { fprintf(stderr,"deepeel: --core: msx not supported yet (hooks missing)\n"); return 0; }
     const DpSegaBackend *b=!strcmp(s->id,"sg")?dp_sega_backend_sg():dp_sega_backend_gg();
     if(!b || b->init(rom,size,NULL,1)!=1) return 0;
     DpMachine *m=dp_machine_sega(b); if(!m) return 0;
-    DpCoreConfig cfg; dp_core_config_default(&cfg);
+    DpCoreConfig cfg=*kcfg;
     if(o->max_total) cfg.max_total=o->max_total;
     if(o->max_steps) cfg.max_path_steps=o->max_steps;
     cfg.fork_site_cap=o->fork_cap; cfg.queue_max=o->queue_max;
@@ -2913,7 +2913,7 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
 int dp_sega_explore_command(int argc,char **argv) {
     if(argc<5) goto usage;
     const DpSegaSystem *s=!strcmp(argv[3],"msx")?dp_msx_system():dp_sega_system(argv[3]); if(!s) goto usage;
-    DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); o.defer_tiers=DP_TIER_MAX; int watch=0,use_core=0; const char *dump=NULL,*text=NULL,*map=NULL,*evidence=NULL,*summary=NULL,*cov=NULL,*romdata=NULL,*rtcode=NULL;
+    DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); o.defer_tiers=DP_TIER_MAX; int watch=0,use_core=0; DpCoreConfig kcfg; dp_core_config_default(&kcfg); const char *dump=NULL,*text=NULL,*map=NULL,*evidence=NULL,*summary=NULL,*cov=NULL,*romdata=NULL,*rtcode=NULL;
     if(!strcmp(s->id,"sms") || !strcmp(s->id,"gg")) {
         o.play_total=1000000;
         o.fork_cap=DP_DEFAULT_BRANCH_FORK_CAP;
@@ -2927,6 +2927,7 @@ int dp_sega_explore_command(int argc,char **argv) {
     o.attract_frames=DP_DEFAULT_ATTRACT_FRAMES;
     for(int i=5;i<argc;i++) {
         if(!strcmp(argv[i],"--core")) { use_core=1; continue; }
+        { int kn=dp_core_parse_option(&kcfg,argc,argv,i); if(kn) { i+=kn-1; continue; } }
         if(!strcmp(argv[i],"--no-vector-seeds")) { o.seed_vectors=0; continue; }
         if(!strcmp(argv[i],"--no-context-evict")) { o.no_context_evict=1; continue; }
         if(!strcmp(argv[i],"--spool") || !strcmp(argv[i],"--resume")) {
@@ -3041,7 +3042,7 @@ int dp_sega_explore_command(int argc,char **argv) {
     int read_ok=fread(image,1,(size_t)end,f)==(size_t)end; fclose(f);
     if(!read_ok) { free(image); return 1; }
     size_t header=(!strcmp(s->id,"sms") || !strcmp(s->id,"gg")) && ((size_t)end&0x3fff)==512?512:0;
-    if(use_core) { int cok=sega_core_run(s,image+header,(size_t)end-header,&o,stdout); free(image); return cok?0:1; }
+    if(use_core) { int cok=sega_core_run(s,image+header,(size_t)end-header,&o,&kcfg,stdout); free(image); return cok?0:1; }
     DpSegaResults r;
     if(o.watch_every) o.jobs=1; // one framebuffer: the instances would share it
     if(watch && dp_fbwatch_start) dp_fbwatch_start("deepeel sega watch");

@@ -66,6 +66,11 @@ typedef struct DpCoreSection {
 // fills up to `cap` sections, returns the total count (may exceed cap)
 size_t dp_core_sections(const DpCoreResult *r, DpCoreSection *out, size_t cap);
 
+// Common kernel options, parsed once for every platform CLI: --no-copies,
+// --no-forced-ram-cut, --no-novelty-order, --visits-per-pc N.  Returns the
+// number of argv entries consumed (0: not a kernel option).
+int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i);
+
 void dp_core_config_default(DpCoreConfig *cfg);
 // explores from the machine's current state; rom_size = number of ROM index slots
 int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCoreResult *out);

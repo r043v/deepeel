@@ -24,6 +24,15 @@ void dp_core_config_default(DpCoreConfig *c) {
     c->queue_max = 65536;
 }
 
+int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
+    const char *a = argv[i];
+    if (!strcmp(a, "--no-copies")) { c->no_copies = 1; return 1; }
+    if (!strcmp(a, "--no-forced-ram-cut")) { c->no_forced_ram_cut = 1; return 1; }
+    if (!strcmp(a, "--no-novelty-order")) { c->no_novelty_order = 1; return 1; }
+    if (!strcmp(a, "--visits-per-pc") && i + 1 < argc) { c->visits_per_pc = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
+    return 0;
+}
+
 size_t dp_core_sections(const DpCoreResult *r, DpCoreSection *out, size_t cap) {
     size_t n = 0;
     for (size_t i = 0; i < r->rom_size;) {
