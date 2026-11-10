@@ -118,6 +118,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
             }
             if (!m->run(m)) { free(pre); break; }
             steps++; out->steps++;
+            if (cfg->hooks && cfg->hooks->after_step) cfg->hooks->after_step(cfg->hooks->user, m, pc);
             if (cond) {
                 uint32_t after = m->pc(m);
                 uint32_t fall = pc + (uint32_t)len, tgt = (uint32_t)fi.target;
@@ -125,6 +126,9 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
                 if (after != tgt && after != fall) { free(pre); continue; }   // an IRQ intervened
                 if (covered(out, m, other) && covered(out, m, after)) {
                     out->pruned_covered++; free(pre);
+                } else if (cfg->hooks && cfg->hooks->veto_fork &&
+                           !cfg->hooks->veto_fork(cfg->hooks->user, m, pc, other)) {
+                    out->hook_vetoed++; free(pre);
                 } else {
                     uint32_t *cnt = site_count(&sites, pc);
                     if (cfg->fork_site_cap && *cnt >= cfg->fork_site_cap) { out->sat_site++; free(pre); }

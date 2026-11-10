@@ -19,6 +19,11 @@ typedef struct DpPlatformHooks {
     void *user;
     // called before each instruction; return 0 to stop the current path
     int (*before_step)(void *user, DpMachine *m, uint32_t pc);
+    // called after each executed instruction (platform events: mapper, traps)
+    void (*after_step)(void *user, DpMachine *m, uint32_t pc);
+    // asked before a forced side is queued; return 0 to refuse it (counted in
+    // DpCoreResult.hook_vetoed)
+    int (*veto_fork)(void *user, DpMachine *m, uint32_t site, uint32_t other);
 } DpPlatformHooks;
 
 typedef struct DpCoreConfig {
@@ -36,6 +41,7 @@ typedef struct DpCoreResult {
     uint64_t steps, paths, forks;
     uint64_t sat_total, sat_path, sat_loop, sat_site, sat_queue;   // reported caps, never silent
     uint64_t pruned_covered;   // forks skipped because both sides were already covered
+    uint64_t hook_vetoed;      // forced sides refused by DpPlatformHooks.veto_fork
     uint64_t exec_outside;     // instructions executed where rom_index < 0 (RAM/VRAM code)
     uint64_t no_pc;            // 1 when the machine has no pc/set_pc: nothing explored
 } DpCoreResult;
