@@ -142,6 +142,14 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
     uint32_t *visits = calloc(0x10000, sizeof *visits);
     uint32_t *stamp = calloc(0x10000, sizeof *stamp);
     int ok = start && visits && stamp;
+    for (size_t i = 0; ok && i < cfg->n_seeds; i++) {
+        uint8_t *cp = malloc(sbytes);
+        if (!cp) break;
+        memcpy(cp, start, sbytes);
+        if (qn == qcap) { qcap = qcap ? qcap * 2 : 64; q = realloc(q, qcap * sizeof *q); }
+        q[qn++] = (Pending){ cp, cfg->seeds[i], 1 };
+        out->seeded++;
+    }
     // the first path is the natural one: the machine's current state
     uint8_t *cur_state = start; start = NULL;
     uint32_t cur_pc = m->pc(m);

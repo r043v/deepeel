@@ -2890,6 +2890,8 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
     if(o->max_total) cfg.max_total=o->max_total;
     if(o->max_steps) cfg.max_path_steps=o->max_steps;
     cfg.fork_site_cap=o->fork_cap; cfg.queue_max=o->queue_max;
+    static const uint32_t vec[]={0x08,0x10,0x18,0x20,0x28,0x30,0x38,0x66};
+    if(o->seed_vectors && !cfg.seeds) { cfg.seeds=vec; cfg.n_seeds=sizeof vec/sizeof *vec; }
     DpCoreResult r;
     int ok=dp_core_explore(m,size,&cfg,&r);
     if(ok) {
@@ -2898,6 +2900,7 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
         fprintf(out,"deepeel %s (generic kernel)\n",s->id);
         fprintf(out,"steps %llu paths %llu forks %llu pruned-covered %llu\n",(unsigned long long)r.steps,(unsigned long long)r.paths,(unsigned long long)r.forks,(unsigned long long)r.pruned_covered);
         fprintf(out,"saturation: total %llu path %llu loop %llu site %llu queue %llu\n",(unsigned long long)r.sat_total,(unsigned long long)r.sat_path,(unsigned long long)r.sat_loop,(unsigned long long)r.sat_site,(unsigned long long)r.sat_queue);
+        fprintf(out,"seeded entry points %llu\n",(unsigned long long)r.seeded);
         fprintf(out,"forced RAM cuts %llu\n",(unsigned long long)r.forced_ram_cuts);
         fprintf(out,"exec_outside %llu, rom->ram copy bytes %llu (%zu distinct ROM sources), forced %llu\n",(unsigned long long)r.exec_outside,(unsigned long long)r.copy_bytes,copied,(unsigned long long)r.copy_forced);
         DpCoreSection secs[64]; size_t ns=dp_core_sections(&r,secs,64);
