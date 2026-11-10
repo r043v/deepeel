@@ -7,6 +7,7 @@
 #include "../../../src/core/hashset.h"
 #include <stddef.h>
 #include <stdint.h>
+enum { DP_SEGA_BUDGET_BASE=1, DP_SEGA_BUDGET_INPUT=2, DP_SEGA_BUDGET_INDIRECT=4, DP_SEGA_BUDGET_PATHS=8 };
 enum { DP_SEGA_NATURAL=1, DP_SEGA_FORCED=2, DP_SEGA_DATA=4, DP_SEGA_COPIED=8, DP_SEGA_STATIC=16, DP_SEGA_STATIC_DATA=32,
     DP_SEGA_TABLE=64, DP_SEGA_PAD=128 };
 // bit of static_flags (own byte, not the flags above): inferred sibling of a copy source
@@ -87,6 +88,7 @@ typedef struct {
     int lot_drain;          // with a lot backlog: run only the saved states (no root, no seeds)
     const char *lot_path;   // portable frontier lot: imported into the spool at start, the unread spool saved back at the end
     uint32_t spool_cap_mb;  // 0: unbounded
+    uint8_t budget_global;  // DP_SEGA_BUDGET_* given explicitly: shared across workers
     uint32_t mem_cap_mb;    // process-wide RSS ceiling shared by all workers (0: off)
     const char *tree_path;  // choice tree record (--tree FILE)
     struct { uint32_t bank; uint16_t addr; } entry[32]; // extra --entry seeds
@@ -157,7 +159,7 @@ typedef struct {
     uint16_t smc_first_pc;   // pc of the first store into an already executed RAM byte
     uint64_t steps,paths,forks,irq_forks,exec_outside,smc_writes,data_reads,vdp_copies,ram_copies;
     uint64_t defer_spooled, fork_deferred, fork_final, steps_deferred,loop_deferred,defer_resumed,steps_final,loop_final,defer_dropped,defer_pending; // §6
-    uint64_t step_cuts,loop_cuts,fork_cuts,queue_cuts,global_cuts,path_cuts,faults,decode_cuts,pad_cuts,stagnation_cuts;
+    uint64_t step_cuts,loop_cuts,fork_cuts,queue_cuts,global_cuts,path_cuts,faults,decode_cuts,pad_cuts,stagnation_cuts,forced_ram_cuts;
     // Seeds (GB parity): generated specs by kind, admissions, bounded refusals.
     uint64_t seeds_pointer,seeds_bank,seeds_entry,seeds_admitted,seeds_skipped_padding;
     uint64_t seeds_refused_view,seeds_refused_queue,seeds_refused_cap,seeds_pending;

@@ -1677,12 +1677,16 @@ void dp_sega_results_free(DpSegaResults *r) {
 static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *opt,DpSegaResults *r,int worker,int jobs) {
     DpSegaOptions wopt=*opt;
     if(jobs>1) {
-        wopt.max_total=share_budget(opt->max_total,(unsigned)jobs);
-        wopt.input_total=share_budget(opt->input_total,(unsigned)jobs);
-        wopt.indirect_total=share_budget(opt->indirect_total,(unsigned)jobs);
+        // explicit budgets are global caps shared by the workers; default
+        // budgets are per worker, so more workers mean more coverage work
+        if(opt->budget_global&DP_SEGA_BUDGET_BASE) wopt.max_total=share_budget(opt->max_total,(unsigned)jobs);
+        if(opt->budget_global&DP_SEGA_BUDGET_INPUT) wopt.input_total=share_budget(opt->input_total,(unsigned)jobs);
+        if(opt->budget_global&DP_SEGA_BUDGET_INDIRECT) wopt.indirect_total=share_budget(opt->indirect_total,(unsigned)jobs);
         wopt.play_total=opt->play_total;
-        wopt.max_paths=(opt->max_paths+(uint32_t)jobs-1)/(uint32_t)jobs;
-        if(!wopt.max_paths) wopt.max_paths=1;
+        if(opt->budget_global&DP_SEGA_BUDGET_PATHS) {
+            wopt.max_paths=(opt->max_paths+(uint32_t)jobs-1)/(uint32_t)jobs;
+            if(!wopt.max_paths) wopt.max_paths=1;
+        }
     }
     if(worker) { // the spool file, tree and TAS movie belong to worker 0
         wopt.spool_path=NULL; wopt.tree_path=NULL; wopt.jobs=1;
@@ -1925,7 +1929,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
                 continue;
             }
             x.cur_sec=NULL;
-            uint32_t n=0,quiet=0;
+            uint32_t n=0,quiet=0; int forced_ram=0;
             int closed=0;
             for(;n<((uint64_t)o->max_steps<<(2*x.cur_tier)) && r->steps-start_steps<budget;n++) {
                 uint64_t before_discoveries=x.discoveries;
@@ -2022,6 +2026,9 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
                         r->exec_outside++;
                         // ROM source of the first byte when a copy (provenance, value-checked) fed it
                         DpZ80Origin src_o=valid_origin(&x,origin_read(&x,c->pc),bytes[0]);
+                        // a forced path executing RAM no ROM copy fed is running
+                        // speculative garbage: close it after this instruction
+                        if(x.forced && !src_o) forced_ram=1;
                         dp_ramarch_add(&r->ra,c->pc,bytes,(int)d.length,src_o?(int32_t)(src_o-1):-1);
                         for(int q=0;q<(int)d.length;q++) { int32_t ri=x.b->ram_index((uint16_t)(c->pc+q)); if(ri>=0 && ri<0x10000) x.ram_exec[ri]=1; }
                     }
@@ -2037,6 +2044,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
                 // Leave the concrete reset path its full budget: initialisation
                 // can contain long delay loops. Forced probes yield on stagnation.
                 if(x.forced && o->stagnation && quiet>=o->stagnation) { r->stagnation_cuts++; closed=1; break; }
+                if(forced_ram) { r->forced_ram_cuts++; closed=1; break; }
             }
             if(n==((uint64_t)o->max_steps<<(2*x.cur_tier))) { r->step_cuts++; defer_cut(&x,0); }
             // The first successor after a concrete budget cut still has an
@@ -2244,6 +2252,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     DP_MR_SUM(step_cuts); DP_MR_SUM(loop_cuts); DP_MR_SUM(fork_cuts); DP_MR_SUM(queue_cuts);
     DP_MR_SUM(global_cuts); DP_MR_SUM(path_cuts); DP_MR_SUM(faults); DP_MR_SUM(decode_cuts); DP_MR_SUM(pad_cuts); DP_MR_SUM(halt_cuts);
     DP_MR_SUM(stagnation_cuts);
+    DP_MR_SUM(forced_ram_cuts);
     DP_MR_SUM(seeds_pointer); DP_MR_SUM(seeds_bank); DP_MR_SUM(seeds_entry); DP_MR_SUM(seeds_admitted);
     DP_MR_SUM(seeds_skipped_padding); DP_MR_SUM(seeds_refused_view); DP_MR_SUM(seeds_refused_queue);
     DP_MR_SUM(seeds_refused_cap); DP_MR_SUM(seeds_pending); DP_MR_SUM(seeds_offlane);
@@ -2375,12 +2384,13 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
 // ranges first (capped at 512 ranges).
 void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r) {
     uint8_t *map=dp_sega_map_build(r);
-    uint64_t known=0,unknown=0,inferred=0;
+    uint64_t known=0,unknown=0,inferred=0,speculative=0;
     uint64_t class_bytes[DP_SMAP_COUNT]={0};
     if(map) for(size_t i=0;i<r->size;i++) {
         class_bytes[map[i]]++;
         if(map[i]==DP_SMAP_UNKNOWN) unknown++;
         else if(map[i]>=DP_SMAP_INF_DATA) inferred++;
+        else if(map[i]==DP_SMAP_CODE_FORCED) speculative++;
         else known++;
     }
     typedef struct { uint32_t bank,lo,hi,len; } DpSegaResidual;
@@ -2400,10 +2410,10 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
     }
     double total=(double)(r->size?r->size:1);
     fprintf(out,"{\"system\":\"%s\",\"rom\":{\"bytes\":%zu,\"banks\":%zu},"
-        "\"map\":{\"known_pct\":%.3f,\"unknown_pct\":%.3f,\"inferred_pct\":%.3f,"
+        "\"map\":{\"known_pct\":%.3f,\"unknown_pct\":%.3f,\"inferred_pct\":%.3f,\"speculative_pct\":%.3f,"
         "\"residual_bytes\":%"PRIu64",\"residual_ranges\":%u,\"residual\":[",
         system->id,r->size,(size_t)((r->size+0x3fff)/0x4000),
-        100.0*known/total,100.0*unknown/total,100.0*inferred/total,
+        100.0*known/total,100.0*unknown/total,100.0*inferred/total,100.0*speculative/total,
         unknown,nresid);
     for(unsigned i=0;i<nresid;i++)
         fprintf(out,"%s{\"bank\":%u,\"lo\":%u,\"hi\":%u,\"len\":%u}",i?",":"",resid[i].bank,resid[i].lo,resid[i].hi,resid[i].len);
@@ -2694,8 +2704,9 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
         uint64_t cls[DP_SMAP_COUNT]={0},inferred=0;
         for(size_t i=0;i<r->size;i++) cls[m[i]]++;
         for(int c=DP_SMAP_INF_DATA;c<DP_SMAP_COUNT;c++) inferred+=cls[c];
-        fprintf(out,"map (tool observation, %zu bytes): known %zu (%.2f%%); unknown %zu; inferred %"PRIu64"\n",
-            r->size,r->size-(size_t)cls[DP_SMAP_UNKNOWN],100.0*(r->size-(double)cls[DP_SMAP_UNKNOWN])/r->size,
+        size_t mapped=r->size-(size_t)cls[DP_SMAP_UNKNOWN]-(size_t)cls[DP_SMAP_CODE_FORCED];
+        fprintf(out,"map (tool observation, %zu bytes): known %zu (%.2f%%); speculative forced code %"PRIu64" (%.2f%%, not counted as known); unknown %zu; inferred %"PRIu64"\n",
+            r->size,mapped,100.0*(double)mapped/r->size,cls[DP_SMAP_CODE_FORCED],100.0*cls[DP_SMAP_CODE_FORCED]/r->size,
             (size_t)cls[DP_SMAP_UNKNOWN],inferred);
         for(int c=0;c<DP_SMAP_COUNT;c++) if(cls[c])
             fprintf(out,"    %-15s %8"PRIu64"  %5.2f%%\n",dp_smap_names[c],cls[c],100.0*cls[c]/r->size);
@@ -2763,7 +2774,7 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
     if(r->watch_frames) fprintf(out,"watch: %"PRIu64" frames published\n",r->watch_frames);
     fprintf(out,"tas replay: %"PRIu64" frames; %"PRIu64" steps; frames refused %"PRIu64"\n",r->tas_frames,r->tas_steps,r->tas_frames_refused);
     if(r->tas_bursts) fprintf(out,"tas bursts: %"PRIu64" fired, %"PRIu64" steps (J3: random sessions from TAS snapshots)\n",r->tas_bursts,r->tas_burst_steps);
-    fprintf(out,"drain: jobs capped %"PRIu64"; seeds off-lane %"PRIu64"; section attribution conflicts %"PRIu64" (record paths and parent paths are per-worker with --jobs 2)\n",
+    fprintf(out,"drain: jobs capped %"PRIu64"; seeds off-lane %"PRIu64"; section attribution conflicts %"PRIu64" (record paths and parent paths are per-worker with --jobs > 1)\n",
         r->jobs_capped,r->seeds_offlane,r->merge_conflicts);
     fprintf(out,"indirect jumps: sites %"PRIu64"; targets %"PRIu64"; seeded %"PRIu64"; refused budget %"PRIu64"; pending %"PRIu64"; site overflow %"PRIu64"; target overflow %"PRIu64"\n",
         r->indirect_sites,r->indirect_targets,r->indirect_seeds,r->indirect_refused_budget,r->indirect_pending,r->indirect_site_overflow,r->indirect_target_overflow);
@@ -2789,7 +2800,7 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
     if(r->section_count>printed) fprintf(out,"  ... %u more sections\n",r->section_count-printed);
     fprintf(out,"loop contexts: CPU address + compact ROM index (outside: CPU address); peak %zu; buckets %zu; growths %"PRIu64"\n",
         r->loop_context_peak,r->loop_context_capacity,r->loop_context_growths);
-    fprintf(out,"forced stagnation cuts %"PRIu64"\n",r->stagnation_cuts);
+    fprintf(out,"forced stagnation cuts %"PRIu64"; forced RAM cuts %"PRIu64" (forced path executing RAM no ROM copy fed)\n",r->stagnation_cuts,r->forced_ram_cuts);
     fprintf(out,"queue growths %"PRIu64"; spool writes %"PRIu64", reads %"PRIu64", flushed %"PRIu64", refused %"PRIu64"; tree nodes %u\n",
         r->queue_growths,r->spool_writes,r->spool_reads,r->spool_flushed,r->spool_refused,r->tree_count);
     fprintf(out,"input forks %"PRIu64"; masks/site %u; site-cap cuts %"PRIu64"; queue/path drops %"PRIu64"; sites %u/%u; site drops %"PRIu64"; input log overflow %"PRIu64"\n",r->input_forks,r->input_mask_limit,r->input_cap_cuts,r->input_drops,r->input_site_count,r->input_site_capacity,r->input_site_drops,r->input_log_overflow);
@@ -2873,6 +2884,12 @@ int dp_sega_explore_command(int argc,char **argv) {
     if(!strcmp(s->id,"sms") || !strcmp(s->id,"gg")) {
         o.play_total=1000000;
         o.fork_cap=DP_DEFAULT_BRANCH_FORK_CAP;
+        // coverage-first defaults: every core, per-worker budgets, every
+        // bank seeded, a deep queue, and half the RAM before queues stop growing
+        long cpus=sysconf(_SC_NPROCESSORS_ONLN); o.jobs=cpus>0?(int)cpus:1;
+        o.seed_banks=1; o.queue_max=65536;
+        long pages=sysconf(_SC_PHYS_PAGES),page=sysconf(_SC_PAGESIZE);
+        if(pages>0 && page>0) o.mem_cap_mb=(uint32_t)((uint64_t)pages*(uint64_t)page/2/(1024u*1024u));
     }
     o.attract_frames=DP_DEFAULT_ATTRACT_FRAMES;
     for(int i=5;i<argc;i++) {
@@ -2943,13 +2960,13 @@ int dp_sega_explore_command(int argc,char **argv) {
         else {
             uint64_t n; if(!number(value,&n)) goto usage;
             if(!n && strcmp(key,"--fork-cap") && strcmp(key,"--stagnation") && strcmp(key,"--copy-cap") && strcmp(key,"--input-forks") && strcmp(key,"--input-sites") && strcmp(key,"--input-total") && strcmp(key,"--closure-nodes") && strcmp(key,"--seed-cap") && strcmp(key,"--defer-tiers") && strcmp(key,"--novelty-cells") && strcmp(key,"--attract-frames")) goto usage;
-            if(!strcmp(key,"--max-total")) o.max_total=n;
-            else if(!strcmp(key,"--input-total")) o.input_total=n;
+            if(!strcmp(key,"--max-total")) { o.max_total=n; o.budget_global|=DP_SEGA_BUDGET_BASE; }
+            else if(!strcmp(key,"--input-total")) { o.input_total=n; o.budget_global|=DP_SEGA_BUDGET_INPUT; }
             else if(!strcmp(key,"--tas-total")) o.tas_total=n;
             else if(!strcmp(key,"--seed-cap")) { if(n>65536) goto usage; o.seed_cap=(uint32_t)n; }
             else if(n>UINT32_MAX) goto usage;
             else if(!strcmp(key,"--max-steps")) o.max_steps=(uint32_t)n;
-            else if(!strcmp(key,"--max-paths")) o.max_paths=(uint32_t)n;
+            else if(!strcmp(key,"--max-paths")) { o.max_paths=(uint32_t)n; o.budget_global|=DP_SEGA_BUDGET_PATHS; }
             else if(!strcmp(key,"--queue")) o.queue_cap=(uint32_t)n;
             else if(!strcmp(key,"--loop-cap")) o.loop_cap=(uint32_t)n;
             else if(!strcmp(key,"--defer-tiers")) o.defer_tiers=n>DP_TIER_MAX?DP_TIER_MAX:(uint32_t)n;
@@ -2962,7 +2979,7 @@ int dp_sega_explore_command(int argc,char **argv) {
             else if(!strcmp(key,"--closure-views")) o.closure.views=(uint32_t)n;
             else if(!strcmp(key,"--closure-contexts")) o.closure.contexts=(uint32_t)n;
             else if(!strcmp(key,"--fork-cap") && n<=255) o.fork_cap=(uint32_t)n;
-            else if(!strcmp(key,"--indirect-total")) o.indirect_total=n;
+            else if(!strcmp(key,"--indirect-total")) { o.indirect_total=n; o.budget_global|=DP_SEGA_BUDGET_INDIRECT; }
             else if(!strcmp(key,"--play-steps")) o.play_total=n;
             else if(!strcmp(key,"--play-sessions")) o.play_sessions=(uint32_t)n;
             else if(!strcmp(key,"--play-pool")) o.play_pool=(uint32_t)n;
