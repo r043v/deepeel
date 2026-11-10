@@ -1213,6 +1213,7 @@ static int tas_replay(Run *x) {
     DpSegaResults *r=x->r;
     const DpSegaOptions *o=x->opt;
     if(!o->tas_path) return 1;
+    uint64_t tas_start_steps=r->steps;
     DpSegaTas t; char err[256];
     if(!dp_sega_tas_load(o->tas_path,&t,err,sizeof err)) {
         fprintf(stderr,"deepeel: --tas %s: %s\n",o->tas_path,err);
@@ -1292,7 +1293,7 @@ done:
         dump_failed=1;
     }
     r->tas_frames_refused=t.frames-r->tas_frames;
-    r->tas_steps=r->steps; // the replay runs before every other phase
+    r->tas_steps=r->steps-tas_start_steps;
     if(dump_failed) {
         for(unsigned i=0;i<nsnaps;i++) free(snaps[i]);
         free(snaps); pass_end(x); dp_sega_tas_free(&t); return 0;
@@ -1434,10 +1435,21 @@ static void attract_session(Run *x) {
     dp_sega_closure_invalidate(x->closure);
     x->play_actor=DP_ACTOR_ATTRACT;
     uint64_t start=x->b->frame_count?x->b->frame_count():0;
+    uint64_t last_frame=start;
     uint64_t deadline=x->b->cpu()->cycles;
     while(x->b->frame_count?x->b->frame_count()-start<x->opt->attract_frames:
           x->b->cpu()->cycles<deadline+(uint64_t)x->opt->attract_frames*262u*228u) {
         if(!play_step(x)) break;
+        // The path loop guard is useful to the explorer, but it must not
+        // terminate a concrete no-input session before its frame budget.
+        // Match TAS and random bursts: start a fresh visit window each frame.
+        if(x->b->frame_count) {
+            uint64_t frame=x->b->frame_count();
+            if(frame!=last_frame) {
+                last_frame=frame;
+                dp_sega_visits_reset(&x->play_visits);
+            }
+        }
     }
     x->r->attract_frames_run=x->b->frame_count?x->b->frame_count()-start:x->opt->attract_frames;
     fprintf(stderr,"deepeel: attract mode: %"PRIu64"/%u frames\n",x->r->attract_frames_run,x->opt->attract_frames);
@@ -1815,8 +1827,8 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     }
     if(!drain) {
         if(!worker) {
-            if(!tas_replay(&x)) { ok=0; goto cleanup; }
             attract_session(&x);
+            if(!tas_replay(&x)) { ok=0; goto cleanup; }
             play_session(&x);
             novelty_session(&x);
         } else if(o->tas_path && !tas_replay(&x)) { ok=0; goto cleanup; }
