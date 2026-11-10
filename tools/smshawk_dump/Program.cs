@@ -92,6 +92,21 @@ namespace SmshawkDump
 						return null;
 					}, watchAddr == uint.MaxValue ? null : (uint?)watchAddr, null));
 			}
+			// bench trace: SMSSHAWK_LDAR=1 logs every executed LD A,R (ED 5F) with
+			// the frame, pc and R at fetch — the game's RNG taps, the counterpart of
+			// the bench's DP_GG_LDAR (R compared where the game reads it, not at
+			// the frame edge where the two cores stop at different instruction phases)
+			if (Environment.GetEnvironmentVariable("SMSSHAWK_LDAR") == "1")
+			{
+				var hawkCore = (SMSHawk)fe.Core;
+				hawkCore.MemoryCallbacks.Add(new MemoryCallback("System Bus", MemoryCallbackType.Execute, "bench-ldar",
+					(address, value, flags) =>
+					{
+						if (bus.PeekByte(address & 0xFFFF) == 0xED && bus.PeekByte((address + 1) & 0xFFFF) == 0x5F)
+							Console.Error.WriteLine($"ldar f={watchFrame} pc={address & 0xFFFF:x4} r={hawkCore.Cpu.GetCpuFlagsAndRegisters()["R"].Value & 0x7F:x2}");
+						return null;
+					}, null, null));
+			}
 			Console.Error.WriteLine("stage: loop");
 			for (int f = 0; f < frames; f++)
 			{
@@ -107,7 +122,18 @@ namespace SmshawkDump
 				controller["P1 B2"] = (m & 32) != 0;
 				controller["Pause"] = (m & 64) != 0;
 				if (f == 0 || f % 500 == 0) Console.Error.WriteLine($"frame {f}");
-				fe.Core.FrameAdvance(controller, render: true, renderSound: false);
+				{   var rf = Environment.GetEnvironmentVariable("SMSSHAWK_REGTRACE");
+					if (rf != null) { var p2 = rf.Split('-'); if (f + 1 >= int.Parse(p2[0]) && f + 1 <= int.Parse(p2[^1])) { var regs2 = ((SMSHawk)fe.Core).Cpu.GetCpuFlagsAndRegisters(); Console.Error.WriteLine($"regs f={f + 1} pc={regs2["PC"].Value:x4} r={regs2["R"].Value & 0x7F:x2} aff={regs2["AF"].Value:x4}"); } }
+				}
+				// DummyFrontend's constructor already advanced the core by one frame
+				// (FrameAdvanceTo(0) runs its trailing FrameAdvance unconditionally,
+				// empty controller): that frame IS movie frame 0. Advancing again here
+				// played every input one frame late against a real BizHawk playback —
+				// the whole reference was shifted, and R with it (constant offset at
+				// the game's LD A,R taps). SMSSHAWK_PREFRAME=1 restores the old shift.
+				if (f > 0 || Environment.GetEnvironmentVariable("SMSSHAWK_PREFRAME") == "1")
+					fe.Core.FrameAdvance(controller, render: true, renderSound: false);
+				else if (m != 0) Console.Error.WriteLine("warning: movie frame 0 carries input, lost to the frontend's constructor frame");
 				var buf = new byte[0x2000];
 				for (int a = 0; a < buf.Length; a++) buf[a] = bus.PeekByte(0xC000 + a);
 				ram.Write(buf, 0, buf.Length);

@@ -295,6 +295,30 @@ halt — la dérive de m0boy pendant le halt est retirée au passage). Refermer 
 comptage d'instructions trame par trame, c'est-à-dire la visibilité du drapeau vblank au même T-state que BizHawk :
 chantier de cyclicalité exacte, pas un bug d'état. Observations de l'outil.
 
+**Référence corrigée et phase refermée (0.251.31).** Trois causes distinctes se cachaient derrière ce desync :
+
+- *Le dumper SMSHawk jouait le film avec une trame de retard.* Le constructeur de `DummyFrontend` avance le cœur
+  d'une trame (`FrameAdvanceTo(0)` exécute son `FrameAdvance` final sans condition) avant la boucle du dumper : toute
+  la référence était décalée, et R avec elle — offset **constant de 14** à chaque `ld a,r` du jeu (f3427, f3674,
+  f3922, f7403…), invisible tant que le jeu ne consomme que le bit 0. Le dumper compte désormais cette trame comme la
+  trame 0 du film (`SMSSHAWK_PREFRAME=1` rétablit l'ancien décalage). Les références produites avant 0.251.31 sont à
+  régénérer.
+- *Phase de reset.* Le Z80A de BizHawk passe 3 T-states dans sa séquence de reset avant le premier M1 : chaque
+  frontière d'instruction tombe 3 T plus tard face au VDP. `DP_GG_RESET_T=3` applique cette phase au DUT — patch de
+  compatibilité TAS côté banc (phase de mise sous tension d'un émulateur, pas une mesure de matériel).
+- *T-state de lecture du statut.* Un `IN A,($BF)` échantillonne le bus à son dernier T-state (11ᵉ) : le drapeau
+  vblank levé pendant l'instruction est vu par cette lecture. Corrigé dans le runtime m0boy (`GG_STATUS_READ_T`, 10
+  par défaut). La note 0.251.30 parlait de « k = 4 » : les essais d'alors tournaient sur une archive
+  `libdeepeel_sms.a` périmée (la cible `dp_sms_runtime` n'était pas dans `ALL` — corrigé), et `IN A,(n)` fait bien
+  11 T chez BizHawk (3 de fetch + 8 micro-pas), pas 8.
+
+Mesure : comparer R au bord de trame ne vaut rien (BizHawk s'arrête en cours d'instruction, m0boy à une frontière) ;
+`DP_GG_LDAR=1` / `SMSSHAWK_LDAR=1` tracent R à chaque `ld a,r` exécuté, là où le jeu le lit. Avec
+`DP_GG_RESET_T=3` et la référence régénérée : les **17 premiers tirages** (jusqu'à f7657) sont identiques des deux
+côtés, pc et R ; premier écart au tirage de **f7826** (R=$6E contre $71, 3 comptes), la RAM divergeant durablement à
+partir de là (contre f4029 avant). Reste donc une dérive de 3 incréments de R entre f7657 et f7826, à chasser avec le
+même outillage. Observations de l'outil.
+
 Preuves du pad lui-même : ROM de test Xch3l (sms_padtest, assemblée WLA-DX hors dépôt) affiche `0F0F0F0F` (U D L R
 B1 B2 pressés) à l'identique sur les deux cœurs avec un film synthétique all-buttons ; lecture du pad confirmée à
 $DC/$DD (29 passes/trame dans la boucle d'attract de Castle). Diagnostic : l'INT vblank n'est jamais prise par ce jeu
