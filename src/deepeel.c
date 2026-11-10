@@ -1727,6 +1727,11 @@ static const char *md_ref_live_path(void) {
     return NULL;
 }
 
+static int md_has_core(int argc, char **argv) {
+    for (int i = 4; i < argc; i++) if (!strcmp(argv[i], "--core")) return 1;
+    return 0;
+}
+
 static int cmd_md(int argc, char **argv) {
     const char *md_rtcode = NULL;
     if (argc < 4) return usage(), 2;
@@ -1746,6 +1751,24 @@ static int cmd_md(int argc, char **argv) {
             unsigned len = dp_m68k_decode(c.rom + pc, c.size - pc, pc, &in);
             printf("%06X  %s\n", pc, in.text);
             pc += len ? len : 2;
+        }
+    } else if (!strcmp(argv[2], "explore") && md_has_core(argc, argv)) {
+        DpCoreConfig kcfg; dp_core_config_default(&kcfg);
+        for (int i = 4; i < argc; i++) {
+            int used = dp_core_parse_option(&kcfg, argc, argv, i);
+            if (used) { i += used - 1; continue; }
+            if (!strcmp(argv[i], "--max-total") && i + 1 < argc) kcfg.max_total = strtoull(argv[++i], NULL, 0);
+            else if (!strcmp(argv[i], "--fork-cap") && i + 1 < argc) kcfg.fork_site_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+        }
+        DpMdMach *mm = dp_mdmach_open(c.rom, c.size);
+        DpMachine *km = mm ? dp_machine_md(mm) : NULL;
+        if (!km) { fprintf(stderr, "deepeel: --core: cannot open the ROM\n"); rc = 1; }
+        else {
+            DpCoreResult kr;
+            rc = dp_core_explore(km, c.size, &kcfg, &kr) ? 0 : 1;
+            if (!rc) dp_core_report(stdout, "md", &kr);
+            dp_core_result_free(&kr);
+            km->close(km);
         }
     } else if (!strcmp(argv[2], "explore")) {
         DpMdOptions o;

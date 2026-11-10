@@ -50,6 +50,18 @@ static void md_observe(DpMachine *m, const DpObservers *o, void *user) {
     dp_mdmach_set_hooks(w->m, &h);
 }
 
+static uint32_t md_pc(DpMachine *m) { return dp_mdmach_pc(((MdMachWrap *)m->impl)->m); }
+// the pc lives in the saved state: round-trip it through the buffer
+static void md_set_pc(DpMachine *m, uint32_t pc) {
+    MdMachWrap *w = m->impl;
+    uint8_t *buf = malloc(dp_mdmach_state_size());
+    if (!buf) return;
+    dp_mdmach_save(w->m, buf);
+    dp_mdmach_state_set_pc(buf, pc);
+    dp_mdmach_load(w->m, buf);
+    free(buf);
+}
+
 static void md_close(DpMachine *m) {
     dp_mdmach_close(((MdMachWrap *)m->impl)->m);
     free(m->impl);
@@ -72,5 +84,8 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->run = md_run;
     m->observe = md_observe;
     m->close = md_close;
+    m->isa = dp_isa_68000();
+    m->pc = md_pc;
+    m->set_pc = md_set_pc;
     return m;
 }
