@@ -21,6 +21,13 @@ typedef struct {
     void (*prev_write)(void *, uint16_t, uint8_t);
     void *prev_user;
     const uint8_t *rom; size_t rom_size; const void *(*pick)(unsigned);
+    // this instance's own bus callbacks: a state saved by another instance
+    // (a worker clone) carries that instance's pointers, which must not survive a load
+    uint8_t (*base_read)(void *, uint16_t);
+    void (*base_write)(void *, uint16_t, uint8_t);
+    uint8_t (*base_in)(void *, uint16_t);
+    void (*base_out)(void *, uint16_t, uint8_t);
+    void *base_user;
     int wrapped, fetching;   // fetching: opcode reads are not data accesses
 } SegaMach;
 
@@ -75,7 +82,9 @@ static void sega_obs_write(void *u, uint16_t a, uint8_t v) {
 
 static void sega_reinstall(SegaMach *s) {
     z80_t *c = s->b->cpu();
-    if (!s->wrapped || c->read == sega_obs_read) return;   // backend re-init clears wrapped state: observe() wraps again
+    c->read = s->base_read; c->write = s->base_write; c->in = s->base_in; c->out = s->base_out;
+    c->user = s->base_user;
+    if (!s->wrapped) return;
     s->prev_read = c->read; s->prev_write = c->write; s->prev_user = c->user;
     c->read = sega_obs_read; c->write = sega_obs_write; c->user = s;
 }
@@ -120,6 +129,7 @@ DpMachine *dp_machine_sega(const void *backend) {
     DpMachine *m = calloc(1, sizeof *m);
     if (!s || !m) { free(s); free(m); return NULL; }
     s->b = b;
+    { z80_t *c0 = b->cpu(); s->base_read = c0->read; s->base_write = c0->write; s->base_in = c0->in; s->base_out = c0->out; s->base_user = c0->user; }
     m->name = "sega";
     m->isa = dp_isa_z80();
     m->impl = s;

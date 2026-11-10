@@ -2881,12 +2881,18 @@ static int parse_entry(const char *s,DpSegaOptions *o) {
 }
 // --core: the generic kernel (src/explore/core.c) on the DpMachine view of
 // the SG/SMS/GG backend.  MSX keeps its own engine until its hooks exist.
+static int core_is_sg;
+// only the first two instances are trusted: gg3..gg16 resolve the bank-switch
+// fixture differently (observed 2026-11: fix_sega_mapper reaches other ROM indexes)
+static const void *sega_core_pick(unsigned w) { return w==1 ? (core_is_sg?(const void*)dp_sega_backend_sg2():(const void*)dp_sega_backend_gg2()) : NULL; }
 static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *o,const DpCoreConfig *kcfg,FILE *out) {
     if(!strcmp(s->id,"msx")) { fprintf(stderr,"deepeel: --core: msx not supported yet (hooks missing)\n"); return 0; }
     const DpSegaBackend *b=!strcmp(s->id,"sg")?dp_sega_backend_sg():dp_sega_backend_gg();
     if(!b || b->init(rom,size,NULL,1)!=1) return 0;
     DpMachine *m=dp_machine_sega(b); if(!m) return 0;
-    DpCoreConfig cfg=*kcfg;
+    core_is_sg=!strcmp(s->id,"sg");
+    dp_machine_sega_source(m,rom,size,sega_core_pick);
+    DpCoreConfig cfg=*kcfg; cfg.jobs=o->jobs>1?(unsigned)o->jobs:1;
     if(o->max_total) cfg.max_total=o->max_total;
     if(o->max_steps) cfg.max_path_steps=o->max_steps;
     cfg.fork_site_cap=o->fork_cap; cfg.queue_max=o->queue_max;
@@ -2900,6 +2906,7 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
         fprintf(out,"deepeel %s (generic kernel)\n",s->id);
         fprintf(out,"steps %llu paths %llu forks %llu pruned-covered %llu\n",(unsigned long long)r.steps,(unsigned long long)r.paths,(unsigned long long)r.forks,(unsigned long long)r.pruned_covered);
         fprintf(out,"saturation: total %llu path %llu loop %llu site %llu queue %llu\n",(unsigned long long)r.sat_total,(unsigned long long)r.sat_path,(unsigned long long)r.sat_loop,(unsigned long long)r.sat_site,(unsigned long long)r.sat_queue);
+        fprintf(out,"workers %llu (short %llu)\n",(unsigned long long)r.workers,(unsigned long long)r.workers_short);
         fprintf(out,"seeded entry points %llu\n",(unsigned long long)r.seeded);
         fprintf(out,"forced RAM cuts %llu\n",(unsigned long long)r.forced_ram_cuts);
         fprintf(out,"exec_outside %llu, rom->ram copy bytes %llu (%zu distinct ROM sources), forced %llu\n",(unsigned long long)r.exec_outside,(unsigned long long)r.copy_bytes,copied,(unsigned long long)r.copy_forced);
