@@ -36,6 +36,7 @@ typedef struct DpCoreResult {
     uint64_t steps, paths, forks;
     uint64_t sat_total, sat_path, sat_loop, sat_site, sat_queue;   // reported caps, never silent
     uint64_t pruned_covered;   // forks skipped because both sides were already covered
+    uint64_t exec_outside;     // instructions executed where rom_index < 0 (RAM/VRAM code)
     uint64_t no_pc;            // 1 when the machine has no pc/set_pc: nothing explored
 } DpCoreResult;
 

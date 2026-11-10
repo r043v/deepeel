@@ -108,6 +108,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
             int have_flow = isa->flow && isa->flow(bytes, (uint16_t)pc, &fi);
             if (have_flow && fi.length) len = fi.length;
             if (len <= 0) len = 1;
+            if (m->rom_index(m, pc) < 0) out->exec_outside++;
             mark(out, m, pc, (unsigned)len, cur_forced ? DP_CORE_FORCED : DP_CORE_NATURAL);
             int cond = have_flow && fi.kind == DP_FLOW_COND && fi.target >= 0;
             uint8_t *pre = NULL;

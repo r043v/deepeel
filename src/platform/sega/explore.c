@@ -2898,6 +2898,7 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
         fprintf(out,"deepeel %s (generic kernel)\n",s->id);
         fprintf(out,"steps %llu paths %llu forks %llu pruned-covered %llu\n",(unsigned long long)r.steps,(unsigned long long)r.paths,(unsigned long long)r.forks,(unsigned long long)r.pruned_covered);
         fprintf(out,"saturation: total %llu path %llu loop %llu site %llu queue %llu\n",(unsigned long long)r.sat_total,(unsigned long long)r.sat_path,(unsigned long long)r.sat_loop,(unsigned long long)r.sat_site,(unsigned long long)r.sat_queue);
+        fprintf(out,"exec_outside %llu\n",(unsigned long long)r.exec_outside);
         fprintf(out,"rom bytes: natural %zu, forced %zu (speculative)\n",nat,forced);
     }
     dp_core_result_free(&r); m->close(m);
