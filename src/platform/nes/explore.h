@@ -6,6 +6,7 @@
 #ifndef DP_NES_EXPLORE_H
 #define DP_NES_EXPLORE_H
 #include "../../core/hashset.h"
+#include "../../core/coverage.h"
 #include "../../mach/nesmach.h"
 #include "../../explore/ramarch.h"
 #include <stdint.h>
@@ -151,6 +152,9 @@ typedef struct DpNesResults_ {
     uint8_t *live_ram, *live_io; // C1: per PRG cell of an executed opcode, RAM pages (bit per 256 B) and register classes it read
     uint32_t *live_wram;         // C1/C2: per PRG cell, PRG-RAM ($6000-$7FFF) 256-byte pages it read
     uint32_t *exec_hits, *data_hits; // per PRG cell: executions of the opcode byte / data reads (saturating)
+    uint32_t *play_exec_hits, *play_data_hits, *src_flags;
+    DpFirstLog first;
+    int first_ready;
     DpNesTreeNode *tree_nodes; uint32_t tree_count, tree_capacity;
     uint8_t *flags;            // one byte per physical PRG cell
     uint8_t *exec_kind;        // per PRG cell, opcode byte: DP_NES_X_ENTRY (non-sequential arrival) | DP_NES_X_IRQ (ran inside a handler)

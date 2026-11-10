@@ -784,6 +784,12 @@ static void test_play_pool(void) {
     CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "pool explore runs");
     CHECK(r.pool_saved >= 2, "checkpoints kept (%llu)", (unsigned long long)r.pool_saved);
     CHECK(r.pool_starts >= 1, "a session started from the pool (%llu)", (unsigned long long)r.pool_starts);
+    CHECK(r.play_exec_hits[0] > 0 && r.play_exec_hits[1] > 0, "played instruction and operands carry heat");
+    CHECK(r.src_flags[0] & DP_SRC_SESSION, "played execution records its session source");
+    int rng_first = 0;
+    for (uint32_t i = 0; i < r.first.n; i++)
+        if (r.first.e[i].key == 0 && r.first.e[i].actor == DP_ACTOR_RNG) rng_first = 1;
+    CHECK(rng_first, "first discovery records the random session");
     dp_nes_results_free(&r);
     free(rom);
 }

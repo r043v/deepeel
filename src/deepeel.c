@@ -1110,7 +1110,15 @@ static int cmd_maprender(int argc, char **argv) {
         if (!cart) { fprintf(stderr, "deepeel: %s\n", err); free(text); return 1; }
         rom_size = (unsigned)cart->rom_size;
         rom_banks = cart->rom_banks;
-    } else { // z80 platforms: no GB header — size from the file, banks of 16 KiB
+    } else if (!strcmp(sysname, "nes")) {
+        size_t file_size = 0; char err[256];
+        uint8_t *data = nes_read_file(rom, &file_size);
+        DpNesMach *machine = data ? dp_nesmach_open(data, file_size, -1, err, sizeof err) : NULL;
+        if (!machine) { fprintf(stderr, "deepeel: cannot read NES PRG from %s\n", rom); free(data); free(text); free(cv_in); return 1; }
+        rom_size = (unsigned)dp_nesmach_prg_size(machine);
+        dp_nesmach_close(machine); free(data);
+        rom_banks = (int)((rom_size + 0x3FFF) / 0x4000);
+    } else { // raw cartridges: size from the file, banks of 16 KiB
         FILE *rf = fopen(rom, "rb");
         if (!rf) { perror(rom); free(text); return 1; }
         fseek(rf, 0, SEEK_END);
@@ -1349,9 +1357,20 @@ static int cmd_nes(int argc, char **argv) {
         else { dp_nes_report(f, &res); fclose(f); }
     }
     if (map) {
-        FILE *f = fopen(map, "w");
-        if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", map); }
-        else { dp_nes_map(f, &res); fclose(f); }
+        size_t ml = strlen(map);
+        if (ml >= 4 && !strcmp(map + ml - 4, ".png")) {
+            uint8_t *classes = dp_nes_map_build(&res);
+            const char *base = strrchr(path, '/'); base = base ? base + 1 : path;
+            if (!classes || !dp_map_png_from_evidence(classes, res.prg_size, res.play_exec_hits,
+                                                       res.play_data_hits, res.src_flags, &res.first,
+                                                       base, "nes", base, map))
+                fprintf(stderr, "deepeel: cannot write %s\n", map);
+            free(classes);
+        } else {
+            FILE *f = fopen(map, "w");
+            if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", map); }
+            else { dp_nes_map(f, &res); fclose(f); }
+        }
     }
     if (evidence) {
         FILE *f = fopen(evidence, "w");

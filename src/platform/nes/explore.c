@@ -94,6 +94,7 @@ typedef struct {
     int in_handler;                    // between an NMI/IRQ vector entry and its RTI
     // play/TAS session state (the on_frame hook drives it)
     int play_mode;                     // 0: fork exploration, 1: play/TAS
+    uint32_t play_actor;               // DP_ACTOR_* for the active session
     uint8_t (*frame_masks)[2];         // inputs per frame (TAS or generated)
     uint8_t *frame_cmds;               // per-frame command byte (reset bit)
     uint32_t frame_count, frame_target;
@@ -471,6 +472,8 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
         for (unsigned i = 0; i < in.length; i++) {
             int64_t cell = dp_nesmach_rom_index(x->m, pc + i);
             if (cell >= 0) {
+                uint32_t src = x->queue[x->queue_len - 1].forced ? DP_SRC_FORK_FORCED : DP_SRC_FORK_NATURAL;
+                dp_cov_mark(&r->first,r->src_flags,(uint32_t)cell,src,r->steps,0);
                 if (!r->flags[cell])
                     r->flags[cell] = (uint8_t)(x->queue[x->queue_len - 1].forced
                                                    ? DP_NES_FORCED : DP_NES_NATURAL);
@@ -482,6 +485,8 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
         for (unsigned i = 0; i < in.length; i++) {
             int64_t cell = dp_nesmach_rom_index(x->m, pc + i);
             if (cell >= 0) {
+                if (r->play_exec_hits[cell] != UINT32_MAX) r->play_exec_hits[cell]++;
+                dp_cov_mark(&r->first,r->src_flags,(uint32_t)cell,DP_SRC_SESSION,r->steps,x->play_actor);
                 if (!r->flags[cell]) { r->flags[cell] = DP_NES_NATURAL; x->novel++; }
             } else {
                 r->exec_outside++;
@@ -706,6 +711,10 @@ static void hook_read(void *user, unsigned addr, unsigned value) {
         if (cell >= 0) {
             x->r->data_reads++;
             if (x->r->data_hits && x->r->data_hits[cell] != UINT32_MAX) x->r->data_hits[cell]++;
+            uint32_t src = x->play_mode ? DP_SRC_SESSION :
+                (x->queue_len && x->queue[x->queue_len - 1].forced ? DP_SRC_FORK_FORCED : DP_SRC_FORK_NATURAL);
+            if (x->play_mode && x->r->play_data_hits[cell] != UINT32_MAX) x->r->play_data_hits[cell]++;
+            dp_cov_mark(&x->r->first,x->r->src_flags,(uint32_t)cell,src,x->r->steps,x->play_actor);
             if (!x->r->flags[cell]) x->r->flags[cell] = DP_NES_DATA;
             x->last_read_cell = cell; x->last_read_step = x->total_steps;
             if (!x->play_mode) nstm_read(x, addr);
@@ -1138,6 +1147,7 @@ static void play_session(DpNesRun *x, uint32_t frames, uint32_t seed,
     dp_nesmach_set_input(x->m, x->frame_masks[0][0], x->frame_masks[0][1]);
     uint32_t f = 0;
     while (f < frames) {
+        x->play_actor = tas && f < tas->frames ? DP_ACTOR_TAS : x->idle ? DP_ACTOR_ATTRACT : DP_ACTOR_RNG;
         // a scripted frame is never cut (0.251.14): the movie plays in full,
         // max_total only stops the random play after it
         if ((!tas || f >= tas->frames) && (x->total_steps >= x->opt.max_total || dp_stop)) { r->global_cuts++; break; }
@@ -1160,6 +1170,7 @@ static void play_session(DpNesRun *x, uint32_t frames, uint32_t seed,
         f++;
     }
     x->play_mode = 0;
+    x->play_actor = 0;
     r->play_sessions_run++;
 }
 
@@ -1238,6 +1249,7 @@ static void novelty_search(DpNesRun *x) {
     const int cells = x->opt.novelty_cells;
     x->play_mode = 1;
     x->nov = 1;
+    x->play_actor = DP_ACTOR_RNG;
     x->rng = x->opt.play_seed * 0x2545F491u + 7;
     dp_nesmach_reset(x->m);
     nes_archive_add(x, a, &n, 1, tmp, ztmp, zcap);
@@ -1307,6 +1319,7 @@ static void novelty_search(DpNesRun *x) {
     }
     x->nov = 0;
     x->play_mode = 0;
+    x->play_actor = 0;
     // the archive's freshest checkpoints seed the fork queue (exact-state dedup applies)
     for (uint32_t i = n; i > 0 && x->opt.queue_cap && !x->failed; i--) {
         if (i + 64 < n) break;
@@ -1374,6 +1387,9 @@ void dp_nes_results_free(DpNesResults *r) {
     free(r->exec_hits);
     free(r->exec_kind); r->exec_kind = NULL;
     free(r->data_hits);
+    free(r->play_exec_hits); free(r->play_data_hits); free(r->src_flags);
+    r->play_exec_hits = r->play_data_hits = r->src_flags = NULL;
+    if (r->first_ready) { dp_first_free(&r->first); r->first_ready = 0; }
     free(r->live_ram); free(r->live_io); free(r->live_wram); r->live_ram = r->live_io = NULL; r->live_wram = NULL;
     r->exec_hits = r->data_hits = NULL;
     free(r->chr_flags);
@@ -1424,6 +1440,11 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     r->options = x.opt;
     r->prg_size = dp_nesmach_prg_size(x.m);
     r->flags = calloc(r->prg_size, 1);
+    dp_first_init(&r->first,1u<<20);
+    r->first_ready = 1;
+    r->src_flags = calloc(r->prg_size, sizeof(uint32_t));
+    r->play_exec_hits = calloc(r->prg_size, sizeof(uint32_t));
+    r->play_data_hits = calloc(r->prg_size, sizeof(uint32_t));
     r->exec_hits = calloc(r->prg_size, sizeof(uint32_t));
     r->exec_kind = calloc(r->prg_size, 1);
     x.exp_pc = -1;
@@ -1432,8 +1453,8 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     r->live_wram = calloc(r->prg_size, sizeof *r->live_wram);
     r->chr_size = dp_nesmach_chr_size(x.m);
     if (r->chr_size) r->chr_flags = calloc(r->chr_size, 1);
-    if (!r->flags) { dp_nesmach_close(x.m); return 0; }
-    if (dp_nesmach_state_size() > DP_NES_STATE_MAX) { dp_nesmach_close(x.m); return 0; }
+    if (!r->flags || !r->src_flags || !r->play_exec_hits || !r->play_data_hits || !r->exec_hits || !r->data_hits ||
+        dp_nesmach_state_size() > DP_NES_STATE_MAX) { dp_nesmach_close(x.m); dp_nes_results_free(r); return 0; }
 
     // play/TAS scratch
     uint32_t fmax = x.opt.play_frames > x.opt.demo_frames ? x.opt.play_frames : x.opt.demo_frames;
@@ -1633,6 +1654,13 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     if (!x.failed && !x.opt.no_finalize) table_scan(&x);
     if (!x.failed && !x.opt.no_finalize) copy_siblings(&x);
     if (!x.failed && !x.opt.no_finalize) infer_gaps(&x);
+    if (!x.failed && !x.opt.no_finalize) for (size_t i=0;i<r->prg_size;i++) {
+        uint32_t bits=0;
+        if (r->flags[i]&DP_NES_STATIC) bits|=DP_SRC_CLOSURE;
+        if (r->flags[i]&DP_NES_PAD) bits|=DP_SRC_STATIC_SCAN;
+        if (r->flags[i]&DP_NES_COPIED) bits|=DP_SRC_COPY;
+        if (bits) dp_cov_mark(&r->first,r->src_flags,(uint32_t)i,bits,r->steps,0);
+    }
     free(x.prov_anchor);
     free(x.ipc);
     free(x.istart);

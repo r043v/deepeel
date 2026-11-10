@@ -8,8 +8,12 @@ plateformes Z80, `--map carte.png` utilise le même rendu que la GB : chaleur
 des sessions, apports par méthode et preuves embarquées. Le rejeu d'un PNG par
 `maprender` conserve ses preuves et sa chaleur ; une carte texte seule ne peut
 pas les reconstituer. Les chunks `dpFi` conservent les premières découvertes
-et `dpMt` leur résumé affiché. Les autres plateformes restent à raccorder à ce
-format partagé.
+et `dpMt` leur résumé affiché. La sortie `nes explore --map carte.png` utilise aussi ce
+rendu pour la PRG-ROM, avec chaleur jouée, origines et premières découvertes ;
+`maprender --sys nes` conserve ces preuves lors du nouveau rendu. Les horloges
+des workers NES étant indépendantes, une découverte présente dans plusieurs
+workers conserve l'origine du worker principal. Les autres plateformes restent
+à raccorder à ce format partagé.
 
 Évolution multi-systèmes : le registre de ports, le désassemblage et les
 premières explorations Z80/Sega sont décrits dans [Z80.fr.md](Z80.fr.md).

@@ -39,12 +39,24 @@ static void fold(DpNesResults *a, void *user) {
     }
     const DpNesResults *b = j->res;
     size_t n = a->prg_size < b->prg_size ? a->prg_size : b->prg_size;
+    // Workers have independent clocks: retain the primary's first discovery
+    // on overlaps, and retain the secondary's actor for new cells.
+    for (uint32_t i=0;i<b->first.n;i++) {
+        const DpFirstSeen *f=&b->first.e[i];
+        if (f->key<n) dp_cov_mark(&a->first,a->src_flags,f->key,f->src,f->stamp,f->actor);
+    }
+    a->first.dropped += b->first.dropped;
     for (size_t i = 0; i < n; i++) {
         a->flags[i] |= b->flags[i];
         if (a->exec_kind && b->exec_kind) a->exec_kind[i] |= b->exec_kind[i];
         uint64_t e = (uint64_t)a->exec_hits[i] + b->exec_hits[i], d = (uint64_t)a->data_hits[i] + b->data_hits[i];
         a->exec_hits[i] = e > 0xFFFFFFFFu ? 0xFFFFFFFFu : (uint32_t)e;
         a->data_hits[i] = d > 0xFFFFFFFFu ? 0xFFFFFFFFu : (uint32_t)d;
+        e=(uint64_t)a->play_exec_hits[i]+b->play_exec_hits[i];
+        d=(uint64_t)a->play_data_hits[i]+b->play_data_hits[i];
+        a->play_exec_hits[i]=e>UINT32_MAX?UINT32_MAX:(uint32_t)e;
+        a->play_data_hits[i]=d>UINT32_MAX?UINT32_MAX:(uint32_t)d;
+        if (b->src_flags[i]) dp_cov_mark(&a->first,a->src_flags,(uint32_t)i,b->src_flags[i],b->steps,0);
         if (a->live_ram && b->live_ram) { a->live_ram[i] |= b->live_ram[i]; a->live_io[i] |= b->live_io[i]; }
     }
     if (a->chr_flags && b->chr_flags) {
