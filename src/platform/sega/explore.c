@@ -19,6 +19,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/resource.h>
+#include <stdatomic.h>
 #include "../../core/statefile.h"
 #include <zlib.h>
 #include <math.h>
@@ -55,6 +56,7 @@ static uint64_t fnv1a_u16(uint64_t h,uint16_t v) { return fnv1a(h,&v,sizeof v); 
 static uint64_t fnv1a_u32(uint64_t h,uint32_t v) { return fnv1a(h,&v,sizeof v); }
 enum { INPUT_PAD1, INPUT_PAD2, INPUT_START, INPUT_HALT_PAUSE, INPUT_PAD2_UD, INPUT_GROUP_COUNT };
 typedef struct { uint32_t key; uint8_t accepted,seen[16]; uint64_t blocked_epoch; } InputSite;
+static atomic_uint sega_shared_seed_cursor;
 typedef struct {
     Path *defer; uint32_t defer_n,defer_cap; uint8_t cur_tier; // deferred frontier (COUVERTURE §6)
     uint32_t defer_reason[DP_R_COUNT]; // held per reason (the noisy ones cap at a quarter, dp_frontier_room)
@@ -748,8 +750,7 @@ static int seed_padding(const uint8_t *image,size_t size,uint64_t index) {
 }
 // A seed enters below the pending frontier: branch forks keep popping first,
 // and the reset path and vector entries still run ahead of every seed.
-static int push_seed_front(Run *x) {
-    const SeedSpec *s=&x->seeds[x->seed_next-1];
+static int push_seed_front(Run *x,const SeedSpec *s) {
     if(x->created[x->phase]>=x->opt->max_paths) { x->r->path_cuts++; return 0; }
     if(x->queued>=x->opt->queue_cap) { x->r->queue_cuts++; return 0; }
     uint32_t choice=tree_add(x,s->kind);
@@ -779,7 +780,7 @@ static int materialize_seed(Run *x) {
        (s->exact && index!=(int64_t)((uint32_t)s->bank*0x4000+(s->pc&0x3fff)))) r->seeds_refused_view++;
     else {
         x->b->cpu()->pc=s->pc;
-        accepted=push_seed_front(x);
+        accepted=push_seed_front(x,s);
         if(!accepted) r->seeds_refused_queue++;
     }
     x->b->load(x->seed_scratch); hook(x);
@@ -1835,18 +1836,26 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
         x.phase=phase;
         uint64_t start_steps=r->steps,start_paths=r->paths,budget=r->phase_limits[phase];
         if(phase==2 && budget) generate_indirect_specs(&x);
+        if(jobs>1 && phase!=1) atomic_store(&sega_shared_seed_cursor,0);
         if(phase && budget) { memset(x.forks,0,sites); memset(x.sides,0,sites); memset(x.irq_forks,0,sites); }
         again:
         while((x.queued || x.defer_n || (phase && x.input_queued) ||
-               (phase!=1 && x.seed_next<x.seed_count) ||
+               (phase!=1 && (phase==0 && jobs>1 ? atomic_load(&sega_shared_seed_cursor)<x.seed_count : x.seed_next<x.seed_count)) ||
                (!phase && x.spool_rd<x.spool_wr)) && r->steps-start_steps<budget) {
             // Seeds materialize below the pending frontier while the base
             // phase has room: forks keep popping first, reset and vectors run
             // ahead of every seed, and leftovers close as counted pending work.
             // The indirect pass is phase 2: its specs were generated from the
             // observations of the passes before it.
-            if(phase!=1) while(x.seed_next<x.seed_count && x.queued<x.opt->queue_cap) {
-                if((x.seed_next%jobs)!=worker) { x.seed_next++; r->seeds_offlane++; continue; }
+            if(phase!=1) while(x.queued<x.opt->queue_cap) {
+                if(phase==0 && jobs>1) {
+                    unsigned seed=atomic_fetch_add(&sega_shared_seed_cursor,1);
+                    if(seed>=x.seed_count) break;
+                    x.seed_next=seed;
+                } else {
+                    if(x.seed_next>=x.seed_count) break;
+                    if((x.seed_next%jobs)!=worker) { x.seed_next++; r->seeds_offlane++; continue; }
+                }
                 if(materialize_seed(&x)<0) { ok=0; goto cleanup; }
             }
             // Keep input seeds and their branch children moving in turn. Their
@@ -2024,7 +2033,9 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
         }
         if(!phase && r->steps-start_steps<budget && zstm_replay(&x)>0) goto again;   // S6 once the frontier is drained
         r->phase_steps[phase]=r->steps-start_steps; r->phase_paths[phase]=r->paths-start_paths;
-        if(phase!=1) r->seeds_pending=x.seed_count-x.seed_next;
+        if(phase!=1) r->seeds_pending=(phase==0 && jobs>1)
+            ? (worker==0 && atomic_load(&sega_shared_seed_cursor)<x.seed_count ? x.seed_count-atomic_load(&sega_shared_seed_cursor):0)
+            : x.seed_count-x.seed_next;
         if(phase==2) r->indirect_pending=r->seeds_pending;
         r->phase_pending[phase]+=x.queued+(phase==1?x.input_queued:0)+
             (phase!=1?r->seeds_pending:0);
@@ -2315,6 +2326,7 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
     long cpus=sysconf(_SC_NPROCESSORS_ONLN); if(cpus>0 && jobs>cpus) jobs=(int)cpus;
     if(jobs<1) jobs=1;
     if(jobs==1) return sega_explore_one(s,rom,size,o,r,0,1);
+    atomic_store(&sega_shared_seed_cursor,0);
     DpSegaResults *other=calloc((size_t)jobs-1,sizeof(*other));
     DpSegaWorker *workers=calloc((size_t)jobs-1,sizeof(*workers));
     pthread_t *threads=calloc((size_t)jobs-1,sizeof(*threads));
