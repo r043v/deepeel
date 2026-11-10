@@ -1665,12 +1665,13 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
         wopt.max_total=share_budget(opt->max_total,(unsigned)jobs);
         wopt.input_total=share_budget(opt->input_total,(unsigned)jobs);
         wopt.indirect_total=share_budget(opt->indirect_total,(unsigned)jobs);
-        wopt.play_total=share_budget(opt->play_total,(unsigned)jobs);
+        wopt.play_total=opt->play_total;
         wopt.max_paths=(opt->max_paths+(uint32_t)jobs-1)/(uint32_t)jobs;
         if(!wopt.max_paths) wopt.max_paths=1;
     }
     if(worker) { // the spool file, tree and TAS movie belong to worker 0
         wopt.spool_path=NULL; wopt.tree_path=NULL; wopt.tas_path=NULL; wopt.jobs=1;
+        wopt.play_total=0; wopt.attract_frames=0;
     }
     const DpSegaOptions *o=&wopt;
     if(!s||!rom||!size||!o||!r||!o->max_total||!o->max_steps||!o->max_paths||!o->queue_cap||!o->loop_cap||o->fork_cap>255) return 0;
