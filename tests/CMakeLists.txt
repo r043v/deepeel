@@ -630,3 +630,5 @@ target_link_libraries(test_kernel PRIVATE deepeel_z80 deepeel_sega deepeel_core 
 target_include_directories(test_kernel PRIVATE ${M0BOY_DIR}/targets/sg1000/runtime)
 add_dependencies(test_kernel fixtures)
 add_test(NAME kernel_explore COMMAND test_kernel ${CMAKE_CURRENT_BINARY_DIR})
+add_test(NAME core_cli_sega COMMAND sh -c "$<TARGET_FILE:deepeel> z80 explore sms ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sms --core > ${CMAKE_CURRENT_BINARY_DIR}/core_cli.txt 2>&1; grep -q 'generic kernel' ${CMAKE_CURRENT_BINARY_DIR}/core_cli.txt && grep -q 'forced [1-9]' ${CMAKE_CURRENT_BINARY_DIR}/core_cli.txt")
+set_tests_properties(core_cli_sega PROPERTIES FIXTURES_REQUIRED fixtures)
