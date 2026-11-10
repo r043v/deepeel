@@ -1,9 +1,12 @@
 # Plateforme Game Boy
 
-En ligne de commande SMS/GG, une courte session jouée commence désormais
-touches relâchées (attract), et le rejeu TAS capture par défaut un état toutes
-les 600 images pour des essais aléatoires. Ces essais restaurent aussi la RAM
-cartouche et les origines de données ; leur budget reste borné. Pour les
+Les plateformes de couverture utilisent par défaut un passage attract de
+6 000 images, puis les phases jouées et à fourches. Quand un TAS fournit des
+instantanés, les essais aléatoires en lancent dix par instantané pris toutes
+les 600 images; chaque essai dure au moins 2 000 images et attend ensuite
+2 000 images sans nouvelle découverte. Les essais restaurent aussi la RAM
+cartouche et les origines de données. Ces réglages sont partagés par les
+sessions GB et Z80 et peuvent être remplacés par plateforme. Pour les
 plateformes Z80, `--map carte.png` utilise le même rendu que la GB : chaleur
 des sessions, apports par méthode et preuves embarquées. Le rejeu d'un PNG par
 `maprender` conserve ses preuves et sa chaleur ; une carte texte seule ne peut

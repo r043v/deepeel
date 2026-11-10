@@ -1,0 +1,12 @@
+// Shared defaults for game-play based coverage across platform engines.
+#ifndef DP_COVERAGE_DEFAULTS_H
+#define DP_COVERAGE_DEFAULTS_H
+
+#define DP_DEFAULT_TAS_RNG_PER_CHECKPOINT 10u
+#define DP_DEFAULT_TAS_RNG_STAGNATION_FRAMES 2000u
+#define DP_DEFAULT_ATTRACT_FRAMES 6000u
+#define DP_DEFAULT_TAS_CHECKPOINT_FRAMES 600u
+#define DP_DEFAULT_TAS_CHECKPOINT_SECONDS 10u
+#define DP_DEFAULT_BRANCH_FORK_CAP 4u
+
+#endif

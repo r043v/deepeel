@@ -70,6 +70,7 @@ static inline void dp_cli_arm_stop(unsigned time_limit) {
     DP_CLI_U(opt, "--play", play_frames, uint32_t); \
     DP_CLI_U(opt, "--sessions", play_sessions, uint32_t); \
     DP_CLI_U(opt, "--demo", demo_frames, uint32_t); \
+    DP_CLI_U(opt, "--attract-frames", demo_frames, uint32_t); \
     DP_CLI_U(opt, "--seed", play_seed, uint32_t); \
     else if (!strcmp(a, "--no-irq-fork")) (opt).seed_irq = 0;
 #endif

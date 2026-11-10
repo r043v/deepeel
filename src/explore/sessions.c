@@ -14,6 +14,7 @@
 #include <zlib.h>
 #include "gambatte_init.h"
 #include "sessions.h"
+#include "coverage_defaults.h"
 #include "novelty.h"
 #include "../core/snapshot_png.h"
 #include "ref_feed.h"
@@ -42,18 +43,19 @@ void dp_session_cfg_defaults(DpSessionCfg *cfg) {
     cfg->segment_span = 1920;
     cfg->pool_cap = 48;
     cfg->stall_epochs = 3;
-    cfg->attract_stall = 3;
+    cfg->attract_stall = (DP_DEFAULT_ATTRACT_FRAMES + 479u) / 480u;
+    cfg->attract_frames = DP_DEFAULT_ATTRACT_FRAMES;
     cfg->yield_window = 0; // the yield stop is opt-in (--yield-window / --yield-min)
     cfg->restart_rate = 8;
     cfg->save_epochs = 10;
     cfg->fork_paths_per_epoch = 200;
     cfg->tas_ckpt_frames = 0; // auto: derived from tas_ckpt_secs and tas_ckpt_max
-    cfg->tas_ckpt_secs = 5;
+    cfg->tas_ckpt_secs = DP_DEFAULT_TAS_CHECKPOINT_SECONDS;
     cfg->tas_ckpt_max = 4096;
     cfg->tas_rng = 1;
     cfg->tas_rng_share = 1; // every segment, until each checkpoint has had tas_rng_per of them
-    cfg->tas_rng_per = 10;
-    cfg->tas_rng_min = 2000;
+    cfg->tas_rng_per = DP_DEFAULT_TAS_RNG_PER_CHECKPOINT;
+    cfg->tas_rng_min = DP_DEFAULT_TAS_RNG_STAGNATION_FRAMES;
     cfg->uniform = 1;
     cfg->uniform_hold = 64;
 }
@@ -289,6 +291,7 @@ typedef struct DpWorker {
     uint32_t epoch_target, epoch_done;
     // bookkeeping
     uint32_t frames_done;
+    uint32_t attract_frames_done;
     uint32_t seen_frame;      // frames_done as last seen by the scheduler
     uint64_t credit_base;     // credit_total as last seen by the scheduler
     uint64_t credit_epoch;    // credit gained during the current epoch
@@ -775,6 +778,7 @@ static void worker_vblank(DpMach *m) {
 
     if (w->mode == IN_TAS && w->tas_idx == 0) dp_ref_gate((uint32_t)w->frames_done);
     w->frames_done++;
+    if (w->mode == IN_ATTRACT && w->attract_frames_done < UINT32_MAX) w->attract_frames_done++;
     w->epoch_done++;
     if (w->mode == IN_TAS) watch_sample(p, w, m);
     // TAS gameplay states are the best fork origins there are: populated RAM,
@@ -832,7 +836,7 @@ static void worker_vblank(DpMach *m) {
     } else if (w->burst) w->burst_idle++;
     if (w->burst) { // the segment goes on until a full stall window passes without a discovery
         w->burst_len++;
-        w->seg_left = (w->burst_idle >= p->cfg.tas_rng_min || w->burst_len >= 216000u) ? 0 : 1;
+        w->seg_left = w->burst_idle >= p->cfg.tas_rng_min ? 0 : 1;
     }
     dp_copy_flush_path(w->ex, &w->ex->ct);
     if (w->mode == IN_HUMAN) {
@@ -1651,7 +1655,8 @@ int dp_play_poll(DpPlay *p) {
         // the attract worker retires when its play finds nothing anymore (the
         // attract mode is exhausted): its core goes to random play from the
         // pool — the least chosen checkpoints — like any other rng worker
-        if (w->mode == IN_ATTRACT && w->stagnant_epochs >= p->cfg.attract_stall) {
+        if (w->mode == IN_ATTRACT && w->attract_frames_done >= p->cfg.attract_frames &&
+            w->stagnant_epochs >= p->cfg.attract_stall) {
             w->mode = IN_RNG;
             w->seg_left = 1; // rotate to a pool checkpoint at the next frame boundary
             w->stagnant_epochs = 0;
@@ -1734,7 +1739,7 @@ int dp_play_poll(DpPlay *p) {
             // existing stall path — force its counter so it fires now)
             if (ysum[3] < p->cfg.yield_min)
                 for (int i = 0; i < p->nworkers; i++)
-                    if (p->w[i].mode == IN_ATTRACT) {
+                    if (p->w[i].mode == IN_ATTRACT && p->w[i].attract_frames_done >= p->cfg.attract_frames) {
                         p->w[i].mode = IN_RNG;
                         p->w[i].seg_left = 1; // rotate to a pool checkpoint now
                         p->w[i].stagnant_epochs = 0;

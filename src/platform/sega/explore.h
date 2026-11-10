@@ -68,8 +68,10 @@ typedef struct {
     uint32_t tas_frame_steps; // per-frame step cap of the TAS replay
     const char *tas_path;    // TAS movie (.bk2 or plain input log, sega/tas.h)
     uint32_t tas_rng_per;    // J3: snapshot the TAS every N frames and fire random bursts from it (0: off)
-    uint32_t tas_rng_bursts; // bursts per snapshot (default 2)
-    uint32_t tas_rng_steps;  // steps per burst (default 300x tas_frame_steps)
+    uint32_t tas_rng_bursts; // random runs per snapshot (0: shared default)
+    uint32_t tas_rng_frames; // minimum run length and no-discovery tail, in frames
+    uint64_t tas_rng_steps;  // legacy bounded run override (0: frame/stagnation policy)
+    uint32_t attract_frames; // no-input attract pass before play sessions
     int jobs;                // parallel drain workers (2 max: prefixed instances)
     uint32_t defer_tiers; // 0: budget cuts stay final; N: resume them up to N times with a 4x cap (CLI default 3)
     uint32_t max_steps,max_paths,queue_cap,loop_cap,fork_cap,stagnation,copy_cap,input_masks,input_sites;
@@ -176,7 +178,7 @@ typedef struct {
     uint64_t indirect_sites,indirect_targets,indirect_site_overflow,indirect_target_overflow;
     uint64_t indirect_seeds,indirect_refused_budget,indirect_pending;
     // play session (GB sessions parity): natural coverage from held inputs
-    uint64_t play_steps,play_epochs,pool_saved,pool_starts;
+    uint64_t play_steps,play_epochs,pool_saved,pool_starts,attract_frames_run;
     // novelty search (Go-Explore)
     uint64_t novelty_trials,novelty_hits,novelty_archived,novelty_replaced,novelty_frames_run,novelty_deaths;
     uint64_t watch_frames;

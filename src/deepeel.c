@@ -21,6 +21,7 @@
 #include "mach/m0boy.h"
 #include "core/snapshot_png.h"
 #include "explore/explorer.h"
+#include "explore/coverage_defaults.h"
 #include "explore/lots.h"
 #include "explore/sessions.h"
 #include "explore/tree.h"
@@ -146,7 +147,7 @@ static void usage(void) {
             "                         round exits early once it seeds nothing)\n"
             "    --no-covered-prune   keep forking sites whose both sides are covered\n"
             "    --covered-keep N     forks such a site still gets (default 2)\n"
-            "    --fork-site-cap N    per-branch-site fork cap (default 16, bytes counters)\n"
+            "    --fork-site-cap N    per-branch-site fork cap (default 4, bytes counters)\n"
             "    --gui                SDL2 live viewer\n"
             "    --mapwin [SCALE]     live ROM map window (1 px per byte like the .map.png), redrawn while exploring\n"
             "    --watch [FPS]        small window showing the replaying TAS movie, 1..30 img/s (default 30)\n"
@@ -162,6 +163,7 @@ static void usage(void) {
             "    --play               enable the play sessions (default 10 workers)\n"
             "    --sessions N         parallel sessions (default 10)\n"
             "    --epoch F            frames per epoch (default 480)\n"
+            "    --attract-frames N   minimum no-input attract run (default 6000 frames)\n"
             "    --frames F           total frame budget (default unlimited)\n"
             "    --seed N             input RNG base seed\n"
             "    --stagnation F       stop after F frames with no discovery (default never)\n"
@@ -180,7 +182,7 @@ static void usage(void) {
             "    --tas-ckpt N         TAS replay: capture-interval override in frames (default:\n"
             "                         auto, from --tas-ckpt-secs and --tas-ckpt-max)\n"
             "    --tas-ckpt-secs S    TAS replay: a checkpoint snapshot every S seconds of game\n"
-            "                         time (default 5, 0 = off)\n"
+            "                         time (default 10, 0 = off)\n"
             "    --tas-ckpt-max N     TAS replay: snapshot cap per movie (default 4096); the\n"
             "                         interval is min(movie/S, S secs), so a long movie stays at\n"
             "                         one snapshot per S seconds\n"
@@ -445,6 +447,7 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--play")) play = 1;
         else if (!strcmp(a, "--sessions") && i + 1 < argc) scfg.sessions = atoi(argv[++i]);
         else if (!strcmp(a, "--epoch") && i + 1 < argc) scfg.epoch_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--attract-frames") && i + 1 < argc) scfg.attract_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--frames") && i + 1 < argc) scfg.max_frames = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed") && i + 1 < argc) scfg.seed = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--stagnation") && i + 1 < argc) scfg.stagnation_frames = strtoull(argv[++i], NULL, 0);
@@ -1288,6 +1291,7 @@ static int cmd_nes(int argc, char **argv) {
     }
     const char *path = NULL, *mapper_name = "auto", *nes_heat = NULL;
     DpNesOptions opt = dp_nes_options();   // defer_tiers 0: cuts stay final; --defer-tiers N opts in (sega's CLI defaults to 3, NES measured neutral on DuckTales)
+    opt.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
     DpCliCommon cc = { .jobs = 1 };
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
@@ -1411,6 +1415,7 @@ static int cmd_pce(int argc, char **argv) {
     }
     const char *path = NULL, *png = NULL;
     DpPceOptions opt = dp_pce_options();
+    opt.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
     DpCliCommon cc = { .jobs = 1 };
     int multitap = 0;
     for (int i = 3; i < argc; i++) {
@@ -1708,6 +1713,8 @@ static int cmd_md(int argc, char **argv) {
         DpCliCommon cc = { .jobs = 1 };
         int md_unbounded = 0;
         dp_md_options_default(&o);
+        o.fork_cap = DP_DEFAULT_BRANCH_FORK_CAP;
+        o.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
         const char *movie_path = NULL, *md_heat = NULL, *md_tas_dir = NULL;
         for (int i = 4; i < argc; i++) {
             const char *a = argv[i];
@@ -1740,6 +1747,7 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--tas")) movie_path = argv[++i];
             else if (!strcmp(a, "--tas-dir") && i + 1 < argc) md_tas_dir = argv[++i];
             else if (!strcmp(a, "--demo-frames")) o.demo_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--attract-frames")) o.demo_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--play-frames")) o.play_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--play-sessions")) o.play_sessions = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--play-seed")) o.play_seed = (uint32_t)strtoul(argv[++i], NULL, 0);

@@ -25,6 +25,7 @@ typedef struct DpSessionCfg {
     int pool_cap;               // checkpoint pool (m0x: 48)
     int stall_epochs;           // empty epochs before a session re-seeds from the best
     int attract_stall;          // empty epochs before the attract worker retires to random play
+    uint32_t attract_frames;    // minimum no-input attract duration (default 6000)
     int yield_window;           // epochs a method's yield is summed over (0 = yield stop off)
     uint32_t yield_min;         // bytes below which a method (or the whole play) yields
     int restart_rate;           // 1/n segments restart from power-on (m0x: 8)

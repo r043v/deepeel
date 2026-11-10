@@ -10,6 +10,7 @@
 #include "../../core/hashset.h"
 #include "../../explore/lots.h"
 #include "../../explore/novelty.h"
+#include "../../explore/coverage_defaults.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1121,7 +1122,7 @@ static int fork_event_ports(Run *x,const z80_decoded_t *d,size_t at,int skip_irq
 }
 DpSegaOptions dp_sega_options(void) {
     // Boot code often runs nested 16-bit delay loops before touching the VDP.
-    DpSegaOptions o={.novelty_frames=240,.novelty_archive=4096,.novelty_frame_steps=10000,.max_total=20000000,.input_total=20000000,.indirect_total=20000000,.play_total=0,.tas_total=DP_SEGA_TAS_TOTAL_DEFAULT,.tas_frame_steps=20000,.max_steps=2000000,.max_paths=4096,.queue_cap=128,
+    DpSegaOptions o={.novelty_frames=240,.novelty_archive=4096,.novelty_frame_steps=10000,.max_total=20000000,.input_total=20000000,.indirect_total=20000000,.play_total=0,.tas_total=DP_SEGA_TAS_TOTAL_DEFAULT,.tas_frame_steps=20000,.tas_rng_per=DP_DEFAULT_TAS_CHECKPOINT_FRAMES,.tas_rng_bursts=DP_DEFAULT_TAS_RNG_PER_CHECKPOINT,.tas_rng_frames=DP_DEFAULT_TAS_RNG_STAGNATION_FRAMES,.max_steps=2000000,.max_paths=4096,.queue_cap=128,
         .loop_cap=262144,.fork_cap=2,.stagnation=32768,.copy_cap=DP_SEGA_COPY_CAP,
         .input_masks=8,.input_sites=4096,.seed_vectors=1,.seed_cap=1024,.queue_max=4096,.target_closure=1,.block_closure=1,.msx_mapper=DP_MSX_AUTO,.closure={262144,65536,256,8},.jobs=1,
         .event_probes=1}; return o;
@@ -1159,7 +1160,7 @@ static int play_step(Run *x) {
         for(unsigned j=0;j<d.length;j++) {
             int64_t index=x->b->rom_index((uint16_t)(c->pc+j));
             if(index>=0 && (uint64_t)index<r->size) {
-                if(!(r->flags[index]&DP_SEGA_NATURAL)) x->novel++;
+                if(!(r->flags[index]&DP_SEGA_NATURAL)) { x->novel++; x->discoveries++; }
                 r->flags[index]|=DP_SEGA_NATURAL;
                 hit_inc(r->exec_hits,(size_t)index);
                 hit_inc(r->play_exec_hits,(size_t)index);
@@ -1286,13 +1287,13 @@ done:
         for(unsigned i=0;i<nsnaps;i++) free(snaps[i]);
         free(snaps); pass_end(x); dp_sega_tas_free(&t); return 0;
     }
-    // the bursts: from each snapshot, tas_rng_bursts sessions of uniform
-    // random held inputs (re-drawn every ~15 frames), the system key
-    // included at 1/8; the tas_total budget and SIGINT still stop everything
+    // From each checkpoint, run independent random-input games. A run lasts
+    // at least the configured frame count and continues until that many
+    // consecutive frames produce no new coverage.
     if(nsnaps) {
         uint32_t prng=(uint32_t)(r->steps*2654435761u)|1;
-        unsigned per=o->tas_rng_bursts?o->tas_rng_bursts:2;
-        uint64_t len=o->tas_rng_steps?o->tas_rng_steps:300ull*(o->tas_frame_steps?o->tas_frame_steps:1000);
+        unsigned per=o->tas_rng_bursts?o->tas_rng_bursts:DP_DEFAULT_TAS_RNG_PER_CHECKPOINT;
+        uint32_t min_frames=o->tas_rng_frames?o->tas_rng_frames:DP_DEFAULT_TAS_RNG_STAGNATION_FRAMES;
         uint64_t before=r->steps;
         // With the default budget, leave enough room to visit each snapshot.
         // Other budget values remain a shared hard limit.
@@ -1305,17 +1306,39 @@ done:
                 memcpy(x->cart,(uint8_t *)snaps[s]+x->b->state_size,0x8000);
                 memcpy(x->origins,(uint8_t *)snaps[s]+x->b->state_size+0x8000,x->origin_size);
                 dp_sega_closure_invalidate(x->closure);
-                uint64_t next_input=x->b->cpu()->cycles;
-                for(uint64_t i=0;i<len && r->steps<burst_limit;i++) {
-                    if(x->b->cpu()->cycles>=next_input) {
+                uint64_t frame_start=x->b->frame_count?x->b->frame_count():0;
+                uint64_t next_input=frame_start;
+                uint64_t last_discovery=0;
+                uint32_t idle_frames=0;
+                uint32_t played_frames=0;
+                uint64_t burst_start_steps=r->steps;
+                while(r->steps<burst_limit &&
+                      (o->tas_rng_steps ? r->steps-burst_start_steps<o->tas_rng_steps : 1)) {
+                    uint64_t now=x->b->frame_count?x->b->frame_count():frame_start+played_frames;
+                    uint64_t elapsed=now-frame_start;
+                    if(!o->tas_rng_steps && elapsed>=min_frames && idle_frames>=min_frames) break;
+                    if(now>=next_input) {
                         DpSegaInput in={{0,0},0,0,0};
                         in.pad[0]=(uint8_t)(sega_rng(&prng)&63);
                         if((sega_rng(&prng)&7)==0) { if(gg||msx) in.start=1; else in.pause=1; }
                         x->b->set_input(in);
-                        next_input=x->b->cpu()->cycles+15ull*262*228;
+                        next_input=now+15;
                     }
+                    uint64_t old_frame=now, old_discovery=x->discoveries;
                     if(!play_step(x)) break;
+                    now=x->b->frame_count?x->b->frame_count():old_frame+1;
+                    if(now>old_frame) {
+                        uint64_t advanced=now-old_frame;
+                        played_frames+=(uint32_t)(advanced>UINT32_MAX?UINT32_MAX:advanced);
+                        if(x->discoveries!=old_discovery) { idle_frames=0; last_discovery=x->discoveries; }
+                        else if(idle_frames<UINT32_MAX) idle_frames+=(uint32_t)(advanced>UINT32_MAX?UINT32_MAX:advanced);
+                        // A concrete play run is frame-bounded; the exploration
+                        // path loop guard must not terminate it before its frame
+                        // and stagnation requirements are met.
+                        dp_sega_visits_reset(&x->play_visits);
+                    }
                 }
+                (void)last_discovery;
                 pass_end(x);
                 r->tas_bursts++;
             }
@@ -1388,6 +1411,20 @@ static void play_session(Run *x) {
     }
     for(unsigned i=0;i<64;i++) free_path(pool[i]);
     r->play_steps=r->steps-play_start;
+}
+static void attract_session(Run *x) {
+    if(!x->opt->attract_frames) return;
+    pass_begin(x);
+    x->play_actor=DP_ACTOR_ATTRACT;
+    uint64_t start=x->b->frame_count?x->b->frame_count():0;
+    uint64_t deadline=x->b->cpu()->cycles;
+    while(x->b->frame_count?x->b->frame_count()-start<x->opt->attract_frames:
+          x->b->cpu()->cycles<deadline+(uint64_t)x->opt->attract_frames*262u*228u) {
+        if(!play_step(x)) break;
+    }
+    x->r->attract_frames_run=x->b->frame_count?x->b->frame_count()-start:x->opt->attract_frames;
+    fprintf(stderr,"deepeel: attract mode: %"PRIu64"/%u frames\n",x->r->attract_frames_run,x->opt->attract_frames);
+    pass_end(x);
 }
 // --- novelty search (Go-Explore, GB/NES/MD parity) ----------------------------------
 // An archive of compressed machine checkpoints; each trial restores the most promising
@@ -1751,6 +1788,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     }
     if(!worker && !drain) {
         if(!tas_replay(&x)) { ok=0; goto cleanup; }
+        attract_session(&x);
         play_session(&x);
         novelty_session(&x);
     }
@@ -2164,7 +2202,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     DP_MR_SUM(indirect_sites); DP_MR_SUM(indirect_targets); DP_MR_SUM(indirect_site_overflow);
     DP_MR_SUM(indirect_target_overflow); DP_MR_SUM(indirect_seeds);
     DP_MR_SUM(indirect_refused_budget); DP_MR_SUM(indirect_pending);
-    DP_MR_SUM(play_steps); DP_MR_SUM(play_epochs); DP_MR_SUM(pool_saved); DP_MR_SUM(pool_starts);
+    DP_MR_SUM(play_steps); DP_MR_SUM(play_epochs); DP_MR_SUM(pool_saved); DP_MR_SUM(pool_starts); DP_MR_SUM(attract_frames_run);
     DP_MR_SUM(watch_frames);
     DP_MR_SUM(novelty_trials); DP_MR_SUM(novelty_hits); DP_MR_SUM(novelty_archived); DP_MR_SUM(novelty_replaced); DP_MR_SUM(novelty_frames_run); DP_MR_SUM(novelty_deaths);
     if(s->novelty_depth>d->novelty_depth) d->novelty_depth=s->novelty_depth;
@@ -2635,6 +2673,7 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
         r->phase_steps[1],r->phase_limits[1],r->phase_paths[1],r->phase_known[1],r->phase_pending[1],
         r->phase_steps[2],r->phase_limits[2],r->phase_paths[2],r->phase_known[2],r->phase_pending[2]);
     fprintf(out,"play session: %"PRIu64" steps; %"PRIu64" input epochs\n",r->play_steps,r->play_epochs);
+    if(r->attract_frames_run) fprintf(out,"attract mode: %"PRIu64" frames\n",r->attract_frames_run);
     if(r->pool_saved) fprintf(out,"checkpoint pool: %"PRIu64" kept, %"PRIu64" sessions started from one\n",r->pool_saved,r->pool_starts);
     if(r->novelty_trials)
         fprintf(out,"novelty: depth %u frames, %"PRIu64" trials, %"PRIu64" frames, %"PRIu64" hits, %"PRIu64" deaths, %"PRIu64" archived (%"PRIu64" replaced)\n",
@@ -2751,10 +2790,10 @@ int dp_sega_explore_command(int argc,char **argv) {
     const DpSegaSystem *s=!strcmp(argv[3],"msx")?dp_msx_system():dp_sega_system(argv[3]); if(!s) goto usage;
     DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); o.defer_tiers=DP_TIER_MAX; int watch=0; const char *dump=NULL,*text=NULL,*map=NULL,*evidence=NULL,*summary=NULL,*cov=NULL,*romdata=NULL,*rtcode=NULL;
     if(!strcmp(s->id,"sms") || !strcmp(s->id,"gg")) {
-        o.play_total=1000000; // includes a released-input attract epoch
-        o.tas_rng_per=600;
-        o.tas_rng_steps=100000;
+        o.play_total=1000000;
+        o.fork_cap=DP_DEFAULT_BRANCH_FORK_CAP;
     }
+    o.attract_frames=DP_DEFAULT_ATTRACT_FRAMES;
     for(int i=5;i<argc;i++) {
         if(!strcmp(argv[i],"--no-vector-seeds")) { o.seed_vectors=0; continue; }
         if(!strcmp(argv[i],"--no-context-evict")) { o.no_context_evict=1; continue; }
@@ -2820,7 +2859,7 @@ int dp_sega_explore_command(int argc,char **argv) {
         }
         else {
             uint64_t n; if(!number(value,&n)) goto usage;
-            if(!n && strcmp(key,"--fork-cap") && strcmp(key,"--stagnation") && strcmp(key,"--copy-cap") && strcmp(key,"--input-forks") && strcmp(key,"--input-sites") && strcmp(key,"--input-total") && strcmp(key,"--closure-nodes") && strcmp(key,"--seed-cap") && strcmp(key,"--defer-tiers") && strcmp(key,"--novelty-cells")) goto usage;
+            if(!n && strcmp(key,"--fork-cap") && strcmp(key,"--stagnation") && strcmp(key,"--copy-cap") && strcmp(key,"--input-forks") && strcmp(key,"--input-sites") && strcmp(key,"--input-total") && strcmp(key,"--closure-nodes") && strcmp(key,"--seed-cap") && strcmp(key,"--defer-tiers") && strcmp(key,"--novelty-cells") && strcmp(key,"--attract-frames")) goto usage;
             if(!strcmp(key,"--max-total")) o.max_total=n;
             else if(!strcmp(key,"--input-total")) o.input_total=n;
             else if(!strcmp(key,"--tas-total")) o.tas_total=n;
@@ -2844,6 +2883,7 @@ int dp_sega_explore_command(int argc,char **argv) {
             else if(!strcmp(key,"--play-steps")) o.play_total=n;
             else if(!strcmp(key,"--play-sessions")) o.play_sessions=(uint32_t)n;
             else if(!strcmp(key,"--play-pool")) o.play_pool=(uint32_t)n;
+            else if(!strcmp(key,"--attract-frames")) o.attract_frames=(uint32_t)n;
             else if(!strcmp(key,"--novelty")) o.novelty_total=n;
             else if(!strcmp(key,"--novelty-frames")) o.novelty_frames=(uint32_t)n;
             else if(!strcmp(key,"--novelty-archive")) o.novelty_archive=(uint32_t)n;
@@ -2852,6 +2892,7 @@ int dp_sega_explore_command(int argc,char **argv) {
             else if(!strcmp(key,"--tas-frame-steps")) { if(!n || n>1000000) goto usage; o.tas_frame_steps=(uint32_t)n; }
             else if(!strcmp(key,"--tas-rng-per")) { if(n>1000000) goto usage; o.tas_rng_per=(uint32_t)n; }
             else if(!strcmp(key,"--tas-rng-bursts")) { if(n>1000) goto usage; o.tas_rng_bursts=(uint32_t)n; }
+            else if(!strcmp(key,"--tas-rng-frames")) { if(n>1000000) goto usage; o.tas_rng_frames=(uint32_t)n; }
             else if(!strcmp(key,"--tas-rng-steps")) o.tas_rng_steps=n;
             else if(!strcmp(key,"--queue-max")) { if(n>65536 || n<o.queue_cap) goto usage; o.queue_max=(uint32_t)n; }
             else if(!strcmp(key,"--spool-cap-mb") && n<=1048576) o.spool_cap_mb=(uint32_t)n;
@@ -2897,5 +2938,5 @@ int dp_sega_explore_command(int argc,char **argv) {
     if(rtcode) { FILE *rf=fopen(rtcode,"w"); if(rf) { dp_ramarch_write(&r.ra,rf,s->id); fclose(rf); } }
     dp_sega_results_free(&r); return ok?0:1;
 usage:
-    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--no-event-probes] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--novelty N] [--novelty-frames N] [--novelty-archive N] [--novelty-frame-steps N] [--novelty-cells 1] [--export-state FILE] [--watch [FPS]] [--watch-dump FILE.ppm] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--tas-rng-per N] [--tas-rng-bursts N] [--tas-rng-steps N] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE] [--rtcode FILE]\n"); return 2;
+    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--no-event-probes] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--attract-frames N] [--novelty N] [--novelty-frames N] [--novelty-archive N] [--novelty-frame-steps N] [--novelty-cells 1] [--export-state FILE] [--watch [FPS]] [--watch-dump FILE.ppm] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--tas-rng-per N] [--tas-rng-bursts N] [--tas-rng-frames N] [--tas-rng-steps N (legacy override)] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE] [--rtcode FILE]\n"); return 2;
 }

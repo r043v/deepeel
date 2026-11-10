@@ -24,6 +24,7 @@
 #include "../../core/ckptpool.h"
 #include "../../core/rng.h"
 #include "explore.h"
+#include "../../explore/coverage_defaults.h"
 #include "../../explore/stop.h"
 #include "../../explore/lots.h"
 #include "../../explore/frontier.h"

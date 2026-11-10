@@ -17,6 +17,7 @@
 volatile sig_atomic_t dp_explore_interrupt;
 #include <sys/stat.h>
 #include "explorer.h"
+#include "coverage_defaults.h"
 #include "../core/dpmachine.h"
 #include "tree.h"
 #include "explorer_priv.h"
@@ -149,7 +150,7 @@ void dp_config_defaults(DpConfig *cfg) {
     cfg->max_steps_total = 20000000ull;
     cfg->queue_cap = 4096;
     cfg->loop_back_cap = 4096;
-    cfg->fork_site_cap = 16;
+    cfg->fork_site_cap = DP_DEFAULT_BRANCH_FORK_CAP;
     cfg->seed_cap = 4096;
     cfg->max_copies = 65536;
     cfg->closure_rounds = 12; // each round exits early once it seeds nothing
