@@ -144,7 +144,15 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         }
         have = 0;
         if (qn) {
-            Pending p = q[--qn];
+            size_t pick = qn - 1;
+            if (!cfg->no_novelty_order) {
+                for (size_t i = qn; i-- > 0;)
+                    if (!covered(out, m, q[i].pc)) { pick = i; break; }
+                if (pick != qn - 1) out->novelty_picks++;
+            }
+            Pending p = q[pick];
+            q[pick] = q[qn - 1];
+            qn--;
             cur_state = p.state; cur_pc = p.pc; cur_forced = p.forced; have = 1;
         }
     }
