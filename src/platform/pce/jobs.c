@@ -108,7 +108,17 @@ static void fold(DpPceResults *a, void *user) {
         return;
     }
     const DpPceResults *b = j->res;
+    for (uint32_t i = 0; i < b->first.n; i++) {
+        const DpFirstSeen *f = &b->first.e[i];
+        if (f->key < a->rom_size) dp_cov_mark(&a->first, a->src_flags, f->key, f->src, f->stamp, f->actor);
+    }
+    a->first.dropped += b->first.dropped;
     for (size_t i = 0; i < a->rom_size && i < b->rom_size; i++) { a->flags[i] |= b->flags[i]; if (a->exec_kind && b->exec_kind) a->exec_kind[i] |= b->exec_kind[i];
+        uint64_t pe = (uint64_t)a->play_exec_hits[i] + b->play_exec_hits[i];
+        uint64_t pd = (uint64_t)a->play_data_hits[i] + b->play_data_hits[i];
+        a->play_exec_hits[i] = pe > UINT32_MAX ? UINT32_MAX : (uint32_t)pe;
+        a->play_data_hits[i] = pd > UINT32_MAX ? UINT32_MAX : (uint32_t)pd;
+        if (b->src_flags[i]) dp_cov_mark(&a->first, a->src_flags, (uint32_t)i, b->src_flags[i], b->steps, 0);
         if (a->exec_hits && b->exec_hits) { uint64_t s = (uint64_t)a->exec_hits[i] + b->exec_hits[i]; a->exec_hits[i] = s > UINT32_MAX ? UINT32_MAX : (uint32_t)s; }
         if (a->live_io && b->live_io) a->live_io[i] |= b->live_io[i];
         if (a->data_hits && b->data_hits) { uint64_t s = (uint64_t)a->data_hits[i] + b->data_hits[i]; a->data_hits[i] = s > UINT32_MAX ? UINT32_MAX : (uint32_t)s; } }

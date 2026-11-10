@@ -89,6 +89,7 @@ typedef struct {
     PceLoop loops[LOOP_SLOTS];
     uint64_t total_steps, path_steps, path_id;
     int mode;              // 0 fork exploration, 1 play/TAS
+    uint32_t play_actor;
     int forced;            // current path entered through a flipped side
     uint16_t cur_pc;
     uint8_t cur_len, cur_op;
@@ -256,6 +257,10 @@ static void obs_rom_read(void *user, uint32_t cell, uint16_t addr) {
     index_note(x, cell, addr);
     x->r->data_reads++;
     if (!x->forced && x->r->data_hits && x->r->data_hits[cell] != UINT32_MAX) x->r->data_hits[cell]++;
+    if (x->mode && x->r->play_data_hits[cell] != UINT32_MAX) x->r->play_data_hits[cell]++;
+    dp_cov_mark(&x->r->first, x->r->src_flags, cell,
+                x->mode ? DP_SRC_SESSION : x->forced ? DP_SRC_FORK_FORCED : DP_SRC_FORK_NATURAL,
+                x->total_steps, x->mode ? x->play_actor : 0);
     mark(x, cell, DP_PCE_DATA);
     x->last_read_cell = cell;
     x->last_read_step = x->total_steps;
@@ -799,6 +804,10 @@ static int step_one(PceRun *x, int *frame_done) {
         for (unsigned i = 0; i < in.length; i++) {
             int64_t cell = dp_pce_rom_index((uint16_t)(c.pc + i));
             if (cell < 0) continue;
+            if (x->mode && r->play_exec_hits[cell] != UINT32_MAX) r->play_exec_hits[cell]++;
+            dp_cov_mark(&r->first, r->src_flags, (uint32_t)cell,
+                        x->mode ? DP_SRC_SESSION : x->forced ? DP_SRC_FORK_FORCED : DP_SRC_FORK_NATURAL,
+                        x->total_steps, x->mode ? x->play_actor : 0);
             mark(x, (size_t)cell, x->forced ? DP_PCE_FORCED : DP_PCE_NATURAL);
             if (i == 0 && !x->forced && r->exec_hits && r->exec_hits[cell] != UINT32_MAX) r->exec_hits[cell]++;
         }
@@ -960,6 +969,13 @@ static void trace_cb(void *user, uint16_t pc, uint8_t op) {
     x->was_outside = outside;
     if (outside) return;
     if (!dp_huc_defined(op)) { r->faults++; return; }
+    for (unsigned i = 0; i < x->cur_len; i++) {
+        int64_t cell = dp_pce_rom_index((uint16_t)(pc + i));
+        if (cell < 0) continue;
+        if (r->play_exec_hits[cell] != UINT32_MAX) r->play_exec_hits[cell]++;
+        dp_cov_mark(&r->first, r->src_flags, (uint32_t)cell, DP_SRC_SESSION,
+                    x->total_steps, x->play_actor);
+    }
     if (x->istart[site]) return; // seen: its cells are marked
     for (unsigned i = 0; i < x->cur_len; i++) {
         int64_t cell = dp_pce_rom_index((uint16_t)(pc + i));
@@ -999,6 +1015,7 @@ static void play_session(PceRun *x, uint32_t frames, uint32_t seed, const DpPceT
     uint32_t hold = 0;
     const uint32_t seed_every = 300;
     for (uint32_t f = 0; f < frames; f++) {
+        x->play_actor = tas && f < tas->frames ? DP_ACTOR_TAS : x->idle ? DP_ACTOR_ATTRACT : DP_ACTOR_RNG;
         // a scripted frame is never cut (0.251.14): the movie plays in full,
         // max_total only stops the random play after it
         if ((!tas || f >= tas->frames) && (x->total_steps >= x->opt.max_total || dp_stop)) { r->global_cuts++; break; }
@@ -1019,6 +1036,7 @@ static void play_session(PceRun *x, uint32_t frames, uint32_t seed, const DpPceT
     }
     if (x->opt.queue_cap) push_live(x, 0);
     x->mode = 0;
+    x->play_actor = 0;
     r->play_sessions_run++;
 }
 
@@ -1066,6 +1084,7 @@ static void novelty_search(PceRun *x) {
     if (!L || !keys.k) { free(a); free(L); dp_keys_free(&keys); x->failed = 1; return; }
     const int cells = x->opt.novelty_cells;
     x->mode = 1;
+    x->play_actor = DP_ACTOR_RNG;
     x->forced = 0;
     x->rng = x->opt.play_seed * 0x2545F491u + 7;
     dp_pce_reset();
@@ -1163,6 +1182,7 @@ static void novelty_search(PceRun *x) {
     free(L);
     dp_keys_free(&keys);
     x->mode = 0;
+    x->play_actor = 0;
 }
 
 // --- static closure ---------------------------------------------------------------------
@@ -1570,6 +1590,9 @@ void dp_pce_results_free(DpPceResults *r) {
     free(r->exec_kind); r->exec_kind = NULL;
     free(r->exec_hits); r->exec_hits = NULL;
     free(r->data_hits); r->data_hits = NULL;
+    free(r->play_exec_hits); free(r->play_data_hits); free(r->src_flags);
+    r->play_exec_hits = r->play_data_hits = r->src_flags = NULL;
+    if (r->first_ready) { dp_first_free(&r->first); r->first_ready = 0; }
     free(r->live_io); r->live_io = NULL;
     free(r->pal_flags);
     free(r->idx_flags);
@@ -1620,6 +1643,10 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     r->exec_kind = calloc(x->rom_size, 1);
     r->exec_hits = calloc(x->rom_size, sizeof(uint32_t));
     r->data_hits = calloc(x->rom_size, sizeof(uint32_t));
+    dp_first_init(&r->first, 1u << 20); r->first_ready = 1;
+    r->play_exec_hits = calloc(x->rom_size, sizeof(uint32_t));
+    r->play_data_hits = calloc(x->rom_size, sizeof(uint32_t));
+    r->src_flags = calloc(x->rom_size, sizeof(uint32_t));
     r->live_io = calloc(x->rom_size, 1);
     r->ctx_live = x->opt.ctx_live;
     r->pal_flags = calloc(x->rom_size, 1);
@@ -1635,7 +1662,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     x->ztmp = malloc(x->zcap);
     x->qcap = x->opt.queue_cap ? x->opt.queue_cap : 1;
     x->queue = calloc(x->qcap, sizeof *x->queue);
-    if (!r->flags || !x->fork_sites || !x->pad_sites || !x->irq_sites || !x->istart ||
+    if (!r->flags || !r->play_exec_hits || !r->play_data_hits || !r->src_flags || !x->fork_sites || !x->pad_sites || !x->irq_sites || !x->istart ||
         !x->tmp || !x->tmp2 || !x->ztmp || !x->queue)
         x->failed = 1;
     DpPceObserver o = { x, obs_rom_read, obs_io_write, obs_io_read };
@@ -1754,6 +1781,13 @@ drain:
         g_inferred = calloc(x->rom_size, 1);
         g_inferred_size = x->rom_size;
         if (g_inferred && x->opt.infer) { infer(x, g_inferred); siblings(x, g_inferred); }
+        for (size_t i = 0; i < r->rom_size; i++) {
+            uint32_t bits = 0;
+            if (r->flags[i] & DP_PCE_STATIC) bits |= DP_SRC_CLOSURE;
+            if (r->flags[i] & DP_PCE_PAD) bits |= DP_SRC_STATIC_SCAN;
+            if (r->flags[i] & DP_PCE_COPIED) bits |= DP_SRC_COPY;
+            if (bits) dp_cov_mark(&r->first, r->src_flags, (uint32_t)i, bits, x->total_steps, 0);
+        }
     }
 
     pstm_free(x);

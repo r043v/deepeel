@@ -1124,6 +1124,8 @@ static int cmd_maprender(int argc, char **argv) {
         fseek(rf, 0, SEEK_END);
         rom_size = (unsigned)ftell(rf);
         fclose(rf);
+        if (!strcmp(sysname, "pce") && rom_size > 512 && rom_size % 0x2000 == 512)
+            rom_size -= 512;
         rom_banks = (int)((rom_size + 0x3FFF) / 0x4000);
     }
     if (cv_in) { // a map PNG as input: its dpCv vector, expanded for the renderer
@@ -1482,9 +1484,20 @@ static int cmd_pce(int argc, char **argv) {
     char mapbuf[1024];
     if (png && !map) { snprintf(mapbuf, sizeof mapbuf, "%s.map", png); map = mapbuf; }
     if (map) {
-        FILE *f = fopen(map, "w");
-        if (!f) fprintf(stderr, "deepeel: cannot write %s\n", map);
-        else { dp_pce_map(f, res); fclose(f); }
+        size_t ml = strlen(map);
+        if (ml >= 4 && !strcmp(map + ml - 4, ".png")) {
+            uint8_t *classes = dp_pce_map_build(res);
+            const char *base = strrchr(path, '/'); base = base ? base + 1 : path;
+            if (!classes || !dp_map_png_from_evidence(classes, res->rom_size, res->play_exec_hits,
+                                                       res->play_data_hits, res->src_flags, &res->first,
+                                                       base, "pce", base, map))
+                fprintf(stderr, "deepeel: cannot write %s\n", map);
+            free(classes);
+        } else {
+            FILE *f = fopen(map, "w");
+            if (!f) fprintf(stderr, "deepeel: cannot write %s\n", map);
+            else { dp_pce_map(f, res); fclose(f); }
+        }
     }
     if (pce_ev) {
         FILE *f = fopen(pce_ev, "w");

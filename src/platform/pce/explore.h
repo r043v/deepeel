@@ -5,6 +5,7 @@
 #ifndef DP_PCE_EXPLORE_H
 #define DP_PCE_EXPLORE_H
 #include "../../explore/ramarch.h"
+#include "../../core/coverage.h"
 #include <stdint.h>
 #include <stdio.h>
 
@@ -149,6 +150,9 @@ typedef struct DpPceResults_ {
     uint8_t *flags;        // one byte per physical cell
     uint8_t *live_io;    // C1: per ROM cell of an executed opcode, hardware blocks it read
     uint32_t *exec_hits, *data_hits;   // per cell: natural-path opcode starts / ROM data reads (saturating)
+    uint32_t *play_exec_hits, *play_data_hits, *src_flags;
+    DpFirstLog first;
+    int first_ready;
     uint8_t *exec_kind;    // per cell, opcode byte: DP_PCE_X_ENTRY (non-sequential arrival) | DP_PCE_X_IRQ (ran inside a handler)
     uint8_t *pal_flags;    // 1: the cell was copied into the VCE palette (HuC6260)
     uint64_t vce_data_writes, palette_bytes; // VCE colour-data stores / distinct palette cells
