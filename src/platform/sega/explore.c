@@ -1112,7 +1112,7 @@ static int fork_event_ports(Run *x,const z80_decoded_t *d,size_t at,int skip_irq
 }
 DpSegaOptions dp_sega_options(void) {
     // Boot code often runs nested 16-bit delay loops before touching the VDP.
-    DpSegaOptions o={.novelty_frames=240,.novelty_archive=4096,.novelty_frame_steps=10000,.max_total=20000000,.input_total=20000000,.indirect_total=20000000,.play_total=0,.tas_total=DP_SEGA_TAS_TOTAL_DEFAULT,.tas_frame_steps=1000,.max_steps=2000000,.max_paths=4096,.queue_cap=128,
+    DpSegaOptions o={.novelty_frames=240,.novelty_archive=4096,.novelty_frame_steps=10000,.max_total=20000000,.input_total=20000000,.indirect_total=20000000,.play_total=0,.tas_total=DP_SEGA_TAS_TOTAL_DEFAULT,.tas_frame_steps=20000,.max_steps=2000000,.max_paths=4096,.queue_cap=128,
         .loop_cap=262144,.fork_cap=2,.stagnation=32768,.copy_cap=DP_SEGA_COPY_CAP,
         .input_masks=8,.input_sites=4096,.seed_vectors=1,.seed_cap=1024,.queue_max=4096,.target_closure=1,.block_closure=1,.msx_mapper=DP_MSX_AUTO,.closure={262144,65536,256,8},.jobs=1,
         .event_probes=1}; return o;
@@ -1133,7 +1133,7 @@ static int play_step(Run *x) {
     int admitted=dp_sega_visits_enter(&x->play_visits,(uint32_t)at,c->pc,x->opt->loop_cap);
     if(admitted<0) return 0;
     if(!admitted) { r->loop_cuts++; return 0; }
-    unsigned cycles=z80_service(c);
+    unsigned cycles=x->b->service ? x->b->service() : z80_service(c);
     if(c->fault) { r->faults++; return 0; }
     if(!cycles) {
         x->fetching=1;
@@ -1198,6 +1198,13 @@ static int tas_replay(Run *x) {
     }
     pass_begin(x);
     int gg=!strcmp(x->system->id,"gg"),msx=!strcmp(x->system->id,"msx");
+    if(!strcmp(x->system->id,"sms") && x->b->tas_compat) x->b->tas_compat(1);
+    FILE *ram_dump=NULL; int dump_failed=0;
+    const char *ram_dump_path=getenv("DP_SEGA_TAS_RAM_DUMP");
+    if(ram_dump_path) {
+        ram_dump=fopen(ram_dump_path,"wb");
+        if(!ram_dump) { fprintf(stderr,"deepeel: cannot open TAS RAM dump %s\n",ram_dump_path); dp_sega_tas_free(&t); pass_end(x); return 0; }
+    }
     // J3 random-burst snapshots (GB sessions parity): every tas_rng_per frames
     // the machine state is kept aside; after the replay, bursts of uniform
     // random held inputs run from these snapshots.  They extend the movie's
@@ -1209,9 +1216,11 @@ static int tas_replay(Run *x) {
         snaps=malloc((size_t)(t.frames/rng_per+1)*sizeof *snaps);
         if(!snaps) { fprintf(stderr,"deepeel: --tas-rng: out of memory\n"); rng_per=0; }
     }
-    // the movie is replayed in full, never cut (0.251.14): every frame is read
-    // to the end whatever --tas-total says; tas_frame_steps bounds each frame
-    // (a starved frame is still counted below, never silently)
+    // NTSC Sega/MSX frames have 262 lines of 228 Z80 T-states. Keep an
+    // absolute deadline so the last instruction's overshoot carries into the
+    // next frame; changing inputs after a fixed number of instructions loses
+    // synchronisation as soon as instruction timings vary.
+    uint64_t deadline=x->b->cpu()->cycles;
     for(uint32_t f=0;f<t.frames;f++) {
         DpSegaInput in={{0,0},0,0,0};
         uint8_t m=t.masks[f];
@@ -1220,17 +1229,38 @@ static int tas_replay(Run *x) {
         if(m&64) { if(gg || msx) in.start=1; else in.pause=1; }
         in.reset=!!(m&128);
         x->b->set_input(in);
+        deadline += 262u * 228u;
+        unsigned steps=0;
+        uint64_t start_frame=x->b->frame_count ? x->b->frame_count() : 0;
+        dp_sega_visits_reset(&x->play_visits);
+        while(x->b->frame_count ? x->b->frame_count()==start_frame : x->b->cpu()->cycles < deadline) {
+            if(steps++ >= o->tas_frame_steps || !play_step(x)) goto done;
+        }
         r->tas_frames++;
-        for(unsigned i=0;i<o->tas_frame_steps;i++)
-            if(!play_step(x)) goto done;
+        if(ram_dump && x->b->ram_view) {
+            size_t size=0; const uint8_t *ram=x->b->ram_view(&size);
+            if(!ram || fwrite(ram,1,size,ram_dump)!=size) {
+                fprintf(stderr,"deepeel: cannot write TAS RAM dump\n");
+                dump_failed=1;
+                goto done;
+            }
+        }
         if(rng_per && (f+1)%rng_per==0) {
             void *s=malloc(x->b->state_size);
             if(s) { x->b->save(s); snaps[nsnaps++]=s; }
         }
     }
 done:
+    if(ram_dump && fclose(ram_dump)!=0) {
+        fprintf(stderr,"deepeel: cannot close TAS RAM dump\n");
+        dump_failed=1;
+    }
     r->tas_frames_refused=t.frames-r->tas_frames;
     r->tas_steps=r->steps; // the replay runs before every other phase
+    if(dump_failed) {
+        for(unsigned i=0;i<nsnaps;i++) free(snaps[i]);
+        free(snaps); pass_end(x); dp_sega_tas_free(&t); return 0;
+    }
     // the bursts: from each snapshot, tas_rng_bursts sessions of uniform
     // random held inputs (re-drawn every ~15 frames), the system key
     // included at 1/8; the tas_total budget and SIGINT still stop everything

@@ -83,6 +83,10 @@ typedef struct {
     // --watch: publish every Nth completed frame (0: off) through the platform-neutral
     // framebuffer; rendering is only switched on while watching (it sets sprite status).
     void (*watch)(unsigned every,uint64_t *published);
+    // Optional SMSHawk TAS timing profile and its interrupt sampling.
+    void (*tas_compat)(int enabled);
+    unsigned (*service)(void);
+    uint64_t (*frame_count)(void);
 } DpSegaBackend;
 // weak: standalone runtime tests link the backends without the framebuffer watch
 void dp_fb_publish(const uint32_t *argb, int w, int h, uint64_t frame) __attribute__((weak));

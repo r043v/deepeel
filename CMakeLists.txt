@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.251.31 LANGUAGES C)
+project(deepeel VERSION 0.251.32 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -358,9 +358,14 @@ target_compile_definitions(deepeel_sg PRIVATE
   sg_exec=dp_sg_exec sg_interp_block=dp_sg_interp_block sg_step=dp_sg_step)
 target_include_directories(deepeel_sg PRIVATE ${M0BOY_DIR}/targets/common/runtime)
 target_link_libraries(deepeel_sg PUBLIC deepeel_z80)
+set(DP_GG_VDP_SOURCE ${GEN}/dp_gg_vdp.c)
+add_custom_command(OUTPUT ${DP_GG_VDP_SOURCE}
+  COMMAND ${CMAKE_COMMAND} -DINPUT=${M0BOY_DIR}/targets/gamegear/runtime/gg_vdp.c
+    -DOUTPUT=${DP_GG_VDP_SOURCE} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_gg_instrument.cmake
+  DEPENDS ${M0BOY_DIR}/targets/gamegear/runtime/gg_vdp.c cmake/dp_gg_instrument.cmake VERBATIM)
 add_library(deepeel_gg STATIC
   ${M0BOY_DIR}/targets/gamegear/runtime/gg.c
-  ${M0BOY_DIR}/targets/gamegear/runtime/gg_vdp.c
+  ${DP_GG_VDP_SOURCE}
   ${M0BOY_DIR}/targets/gamegear/runtime/gg_psg.c
   src/platform/sega/backend_gg.c)
 target_include_directories(deepeel_gg PRIVATE
@@ -425,7 +430,7 @@ add_custom_target(dp_sg2_runtime DEPENDS ${DP_SG2_ARCHIVE})
 add_dependencies(deepeel_sg2 dp_sg2_runtime)
 add_library(deepeel_gg2_raw STATIC
   ${M0BOY_DIR}/targets/gamegear/runtime/gg.c
-  ${M0BOY_DIR}/targets/gamegear/runtime/gg_vdp.c
+  ${DP_GG_VDP_SOURCE}
   ${M0BOY_DIR}/targets/gamegear/runtime/gg_psg.c
   src/platform/sega/backend_gg.c)
 target_compile_definitions(deepeel_gg2_raw PRIVATE GG_ROM_TRACE=1 dp_sega_backend_gg=dp_sega_backend_gg2)
@@ -450,7 +455,7 @@ add_dependencies(deepeel_gg2 dp_gg2_runtime)
 # namespacing technique: every global prefixed dp_sms_, backend getter renamed.
 add_library(deepeel_sms_raw STATIC
   ${M0BOY_DIR}/targets/gamegear/runtime/gg.c
-  ${M0BOY_DIR}/targets/gamegear/runtime/gg_vdp.c
+  ${DP_GG_VDP_SOURCE}
   ${M0BOY_DIR}/targets/gamegear/runtime/gg_psg.c
   src/platform/sega/backend_gg.c)
 target_compile_definitions(deepeel_sms_raw PRIVATE GG_ROM_TRACE=1 GG_OUT_WIDTH=256 dp_sega_backend_gg=dp_sega_backend_sms)

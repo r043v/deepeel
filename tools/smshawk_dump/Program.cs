@@ -35,6 +35,16 @@ namespace SmshawkDump
 			var romPath = args[0];
 			var masks = File.ReadAllBytes(args[1]);
 			var frames = int.Parse(args[2]);
+			if (frames < 0 || masks.Length < frames)
+			{
+				Console.Error.WriteLine($"input has {masks.Length} frames, but {frames} were requested");
+				Environment.Exit(2);
+			}
+			if (frames > 0 && masks[0] != 0 && Environment.GetEnvironmentVariable("SMSSHAWK_PREFRAME") != "1")
+			{
+				Console.Error.WriteLine("cannot replay nonzero first-frame input: DummyFrontend advances before input is available");
+				Environment.Exit(2);
+			}
 			var outPrefix = args[3];
 			var ppmFrames = args.Skip(4).Select(int.Parse).ToHashSet();
 
@@ -79,6 +89,22 @@ namespace SmshawkDump
 				if (wt != null) watchTo = uint.Parse(wt);
 			}
 			int watchFrame = 0;
+			var insTrace = Environment.GetEnvironmentVariable("SMSSHAWK_INSN_TRACE");
+			if (insTrace != null)
+			{
+				var range = insTrace.Split(':');
+				int lo = int.Parse(range[0]), hi = int.Parse(range[range.Length - 1]);
+				var cpu = ((SMSHawk)fe.Core).Cpu;
+				((SMSHawk)fe.Core).MemoryCallbacks.Add(new MemoryCallback("System Bus", MemoryCallbackType.Execute, "bench-insn",
+					(address, value, flags) => {
+						if (watchFrame >= lo && watchFrame <= hi)
+						{
+							var regs = cpu.GetCpuFlagsAndRegisters();
+							Console.Error.WriteLine($"ins f={watchFrame} pc={address & 0xffff:x4} r={regs["R"].Value & 0x7f:x2} t={cpu.TotalExecutedCycles} af={regs["AF"].Value:x4} bc={regs["BC"].Value:x4} de={regs["DE"].Value:x4} hl={regs["HL"].Value:x4} ix={regs["IX"].Value:x4}");
+						}
+						return null;
+					}, null, null));
+			}
 			if (watchAddr != null)
 			{
 				var hawkCore = (SMSHawk)fe.Core;

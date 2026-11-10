@@ -330,7 +330,12 @@ int main(int argc, char **argv) {
      * sequence before the first M1, so every instruction boundary sits 3 T
      * later against the VDP than a core that fetches at T0 (TAS compatibility
      * with SMSHawk movies: a power-on phase, not a hardware measurement) */
-    if (getenv("DP_GG_RESET_T")) g_mach->cyc += (uint32_t)strtoul(getenv("DP_GG_RESET_T"), NULL, 0);
+    const int hawk_compat = is_sms && (getenv("DP_GG_HAWK_COMPAT") || getenv("DP_GG_HAWK_FRAMES")) && g_b->tas_compat;
+    if (hawk_compat) g_b->tas_compat(1);
+    if (getenv("DP_GG_RESET_T")) {
+        if (hawk_compat) g_mach->cyc -= 3; /* explicit phase replaces the profile's default */
+        g_mach->cyc += (uint32_t)strtoul(getenv("DP_GG_RESET_T"), NULL, 0);
+    }
 
     uint8_t *ref_ram = mem_data(2);   /* RETRO_MEMORY_SYSTEM_RAM */
     size_t ref_ram_size = mem_size(2);
@@ -365,6 +370,9 @@ int main(int argc, char **argv) {
     }
     static uint8_t insn_ram[8192];
     const int ldar = getenv("DP_GG_LDAR") != NULL;
+    long itrace_lo = 0, itrace_hi = -1;
+    { const char *it = getenv("DP_GG_INSN_TRACE");
+      if (it) { itrace_lo = atol(it); const char *x = strchr(it, ':'); itrace_hi = x ? atol(x + 1) : itrace_lo; } }
     {   const char *se = getenv("DP_GG_SNAP");
         g_snap = se ? (unsigned)strtoul(se, NULL, 0) : 0;
         g_snap_save = g_snap;
@@ -464,7 +472,7 @@ int main(int argc, char **argv) {
         while (!g_mach->stop && ins < 10000000ull) {
             z80_t *c = g_b->cpu();
             if (c->fault) break;
-            unsigned cycles = z80_service(c);
+            unsigned cycles = g_b->service ? g_b->service() : z80_service(c);
             if (!cycles) {
                 if (!z80_decode(c, &g_d)) break;
                 uint8_t bytes[8];
@@ -478,6 +486,8 @@ int main(int argc, char **argv) {
                  * fetch — the counterpart of the dumper's SMSSHAWK_LDAR */
                 if (ldar && bytes[0] == 0xED && bytes[1] == 0x5F)
                     fprintf(stderr, "ldar f=%u pc=%04x r=%02x\n", frame + 1, c->pc, c->r & 0x7F);
+                if (frame + 1 >= itrace_lo && frame + 1 <= itrace_hi)
+                    fprintf(stderr, "ins f=%u pc=%04x r=%02x t=%u af=%02x%02x bc=%02x%02x de=%02x%02x hl=%02x%02x ix=%04x st=%02x li=%u ie=%02x/%02x\n", frame + 1, c->pc, c->r & 0x7f, g_mach->cyc - g_mach->frame_start, c->a, c->f, c->b, c->c, c->d, c->e, c->h, c->l, c->ix, g_mach->vdp_status, g_mach->line_irq, g_mach->vdp[0], g_mach->vdp[1]);
                 cycles = z80_execute_decoded(c, &g_d);
                 if (trace_addr < sizeof g_mach->ram && g_mach->ram[trace_addr] != before)
                     fprintf(stderr, "trace: frame %u pc=%04x -> $%04x=%02x (sp=%04x)\n",

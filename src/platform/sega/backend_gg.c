@@ -12,7 +12,21 @@ void gg_cart_trace(uint32_t offset,unsigned write) { (void)offset; (void)write; 
 // The imported runtime has only the first pad. Extra SMS pins belong to the
 // bridge snapshot too; the generic CPU reaches them through this input bus.
 static uint8_t second_pad,reset_button,memory_control;
-typedef struct { gg_t core; uint8_t second_pad,reset_button,memory_control; } State;
+static uint8_t tas_compat_enabled,irq_defer;
+typedef struct { gg_t core; uint8_t second_pad,reset_button,memory_control,tas_compat_enabled,irq_defer; } State;
+unsigned gg_line_irq_phase(void) { return tas_compat_enabled ? 0 : GG_LINE_IRQ_AT; }
+static void tas_compat(int enabled) {
+    tas_compat_enabled=!!enabled; irq_defer=0;
+    if(enabled) machine.cyc+=3;
+}
+static unsigned service(void) {
+    uint8_t irq=machine.cpu.irq;
+    if(irq_defer) machine.cpu.irq=0;
+    unsigned cycles=z80_service(&machine.cpu);
+    if(irq_defer) machine.cpu.irq=irq;
+    irq_defer=0;
+    return cycles;
+}
 static int cartridge_enabled(void) { return !GG_IS_SMS || !(memory_control&0x40); }
 static int memory_port(uint16_t p) { return GG_IS_SMS?(p&0xc1)==0:(p&255)==0x3e; }
 static uint8_t read(uint16_t a) {
@@ -39,7 +53,7 @@ static void output_bus(void *u,uint16_t p,uint8_t v) { (void)u; out(p,v); }
 static uint8_t in(uint16_t p);
 static uint8_t input_bus(void *user,uint16_t p) { (void)user; return in(p); }
 static int init(const uint8_t *rom,size_t n,uint8_t *ram,int sms) {
-    second_pad=reset_button=0; gg_init_system(rom,n,ram,sms);
+    second_pad=reset_button=tas_compat_enabled=irq_defer=0; gg_init_system(rom,n,ram,sms);
     // BIOS-less post-boot profile: absent BIOS/card/expansion, cartridge and RAM on.
     memory_control=sms?0xab:0xa8;
     machine.cpu.in=input_bus; machine.cpu.out=output_bus;
@@ -66,7 +80,12 @@ static uint8_t in(uint16_t p) {
 static void out(uint16_t p,uint8_t v) {
     if(memory_port(p)) memory_control=v; else gg_out((uint8_t)p,v);
 }
-static void advance(unsigned cycles) { machine.cyc+=cycles; sg_sync(); }
+static void advance(unsigned cycles) {
+    uint8_t prior_irq=machine.cpu.irq;
+    machine.cyc+=cycles; sg_sync();
+    if(tas_compat_enabled && !prior_irq && machine.cpu.irq &&
+       machine.cyc==machine.frame_start+GG_VBLANK_CYCLES) irq_defer=1;
+}
 static int64_t rom_index(uint16_t a) {
     if(!cartridge_enabled() || a>=0xc000 || (!GG_KOREAN150 && a>=0x8000 && (machine.ram_ctl&8))) return -1;
     uint32_t index = a<0x400 && GG_FIXED_KIB ? a :
@@ -74,7 +93,7 @@ static int64_t rom_index(uint16_t a) {
     return index<machine.rom_size ? (int64_t)index : -1;
 }
 static void save(void *out) {
-    State *s=out; memset(s,0,sizeof(*s)); s->core=machine; s->second_pad=second_pad; s->reset_button=reset_button; s->memory_control=memory_control;
+    State *s=out; memset(s,0,sizeof(*s)); s->core=machine; s->second_pad=second_pad; s->reset_button=reset_button; s->memory_control=memory_control; s->tas_compat_enabled=tas_compat_enabled; s->irq_defer=irq_defer;
 }
 static DpSegaWatch W;
 static uint16_t watch_store[GG_ROW_STRIDE];
@@ -89,7 +108,7 @@ static void hook(void) {
 }
 static void watch(unsigned every,uint64_t *published) { W.every=every; W.published=published; hook(); }
 static void load(const void *in) {
-    const State *s=in; machine=s->core; second_pad=s->second_pad; reset_button=s->reset_button; memory_control=s->memory_control;
+    const State *s=in; machine=s->core; second_pad=s->second_pad; reset_button=s->reset_button; memory_control=s->memory_control; tas_compat_enabled=s->tas_compat_enabled; irq_defer=s->irq_defer;
     hook(); gg_remap(); gg_vdp_restore();
 }
 static int32_t ram_index(uint16_t a) {
@@ -168,8 +187,9 @@ static uint64_t screen_key(void) {
     if(!machine.sms) return dp_sega_name_key(machine.vram,(machine.vdp[2]&14u)<<10,1792,2,machine.vdp[8],machine.vdp[9]);
     return dp_sega_name_key(machine.vram,(machine.vdp[2]&14u)<<10,1792,2,machine.vdp[8],machine.vdp[9]);
 }
+static uint64_t frame_count(void) { return machine.frames; }
 static const uint8_t *ram_view(size_t *n) { *n=sizeof(machine.ram); return machine.ram; }
 const DpSegaBackend *dp_sega_backend_gg(void) {
-    static const DpSegaBackend ops={init,cpu,read,write,in,out,advance,rom_index,sizeof(State),save,load,ram_index,vdp_target,input,set_input,mapper,vdp_command,irq_sources,DP_SEGA_RAM_TAGS,8192,0xc1,0x80,0x81,NULL,NULL,control_state,select_mapper,seed_geometry,seed_window,NULL,NULL,NULL,screen_key,ram_view,watch};
+    static const DpSegaBackend ops={init,cpu,read,write,in,out,advance,rom_index,sizeof(State),save,load,ram_index,vdp_target,input,set_input,mapper,vdp_command,irq_sources,DP_SEGA_RAM_TAGS,8192,0xc1,0x80,0x81,NULL,NULL,control_state,select_mapper,seed_geometry,seed_window,NULL,NULL,NULL,screen_key,ram_view,watch,tas_compat,service,frame_count};
     return &ops;
 }

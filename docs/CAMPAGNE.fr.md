@@ -324,3 +324,20 @@ B1 B2 pressés) à l'identique sur les deux cœurs avec un film synthétique all
 $DC/$DD (29 passes/trame dans la boucle d'attract de Castle). Diagnostic : l'INT vblank n'est jamais prise par ce jeu
 (il scrute $BF, bit7 vu à 1 chaque trame), les line IRQ ne partent pas (reg10 hors écran) — conforme à ce que le code
 du jeu attend, vérifié par DP_GG_PC_SAMPLE/PC_RANGE/TRACE_ADDR.
+
+**Complément 0.251.32.** La conclusion précédente sur les IRQ était fausse : les traces instruction par instruction
+montrent des IRQ de ligne et de trame pendant le jeu. SMSHawk déclenche son compteur de ligne en début de ligne ; son
+CPU accepte aussi une IRQ de trame arrivant exactement à la frontière d'instruction après l'instruction suivante.
+Le profil de rejeu SMS reproduit ces deux phases ainsi que les 3 T de reset, sans changer le runtime matériel m0boy.
+Le rejeu change maintenant les boutons à la fin d'une trame VDP plutôt qu'après un nombre fixe d'instructions.
+
+Avec le film Castle entier (42 337 trames), le rejeu deepeel achève 253 169 986 pas sans faute ni trame refusée.
+Les 38 lectures de `R` observées coïncident avec SMSHawk ; hors les 256 derniers octets de pile, la RAM du rejeu
+correspond exactement à celle du banc m0boy à chaque fin de trame. En comparaison avec SMSHawk, 639 fins de trame
+présentent une ou deux différences hors pile (maximum deux), compatibles avec les phases d'arrêt différentes ; ces
+chaque octet concerné redevient identique à la trame suivante. Par exemple, à f42 `$C02B` vaut `$30` côté deepeel
+et `$C3` côté SMSHawk : les deux exécutent les mêmes écritures, mais `$30` tombe en f43 côté SMSHawk. Ces écarts
+de bord de trame ne démontrent pas une égalité cycle par cycle ni une égalité de rendu vidéo.
+Le dump SMSHawk utilisait auparavant un fichier de 8 000 masques : au-delà les boutons étaient silencieusement
+relâchés. Le dumper refuse désormais un fichier plus court que le nombre de trames demandé et refuse une première
+trame non nulle qu'il ne peut pas fournir au constructeur de son frontend. Observations de l'outil, ROM hors dépôt.

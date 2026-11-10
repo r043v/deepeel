@@ -1,5 +1,6 @@
 #include "../src/platform/sega/explore.h"
 #include "../src/platform/sega/tas.h"
+#include "../src/platform/sega/backend.h"
 #include "../src/core/sha1.h"
 #include "test_util.h"
 #include <stdio.h>
@@ -156,9 +157,9 @@ static void replay_reaches_movie_code(void) {
     o.max_total=20000; o.max_steps=256; o.max_paths=64; o.queue_cap=16;
     o.seed_vectors=0; o.seed_cap=0; o.input_masks=0; o.closure.nodes=0;
     o.no_context_evict=1; o.tas_path=path;
-    o.tas_total=20000; o.tas_frame_steps=2000;
+    o.tas_total=20000; o.tas_frame_steps=20000;
     CHECK(dp_sega_explore(dp_sega_system("sms"),rom,sizeof(rom),&o,&result));
-    CHECK(result.tas_frames==3 && result.tas_frames_refused==0 && result.tas_steps>0);
+    CHECK(result.tas_frames==3 && result.tas_frames_refused==0 && result.tas_steps>14000);
     // handler coverage is movie-only: PLAYED, and the idle loop is boot
     CHECK((result.flags[0x150]&DP_SEGA_NATURAL) && (result.flags[0x152]&DP_SEGA_NATURAL));
     DpSegaSection *nmi=section_at(0x150);
@@ -174,7 +175,36 @@ static void replay_reaches_movie_code(void) {
     CHECK(dp_sega_explore(dp_sega_system("sms"),rom,sizeof(rom),&tight,&result));
     CHECK(result.tas_frames==3 && result.tas_frames_refused==0);
     dp_sega_results_free(&result);
+    DpSegaOptions starved=o; starved.tas_frame_steps=1;
+    CHECK(dp_sega_explore(dp_sega_system("sms"),rom,sizeof(rom),&starved,&result));
+    CHECK(result.tas_frames==0 && result.tas_frames_refused==3);
+    dp_sega_results_free(&result);
     unlink(path);
+}
+static void sms_tas_phase(void) {
+    fixture();
+    const DpSegaBackend *b=dp_sega_backend_gg();
+    CHECK(b->init(rom,sizeof rom,NULL,1));
+    CHECK(b->tas_compat && b->frame_count && b->service);
+    b->tas_compat(1);
+    CHECK(b->frame_count()==0);
+    b->advance(59732);
+    CHECK(b->frame_count()==0);
+    b->advance(1);
+    CHECK(b->frame_count()==1);
+    b->init(rom,sizeof rom,NULL,1);
+    b->tas_compat(1);
+    b->out(0xbf,0x10); b->out(0xbf,0x80); // enable line interrupts
+    b->out(0xbf,0); b->out(0xbf,0x8a);    // reload every line
+    b->advance(59733);
+    CHECK(b->cpu()->irq);
+    b->init(rom,sizeof rom,NULL,1);
+    b->tas_compat(1);
+    b->out(0xbf,0x20); b->out(0xbf,0x81); // enable frame interrupts
+    b->cpu()->iff1=1;
+    b->advance(44001);                     // IRQ rises at the instruction boundary
+    CHECK(b->cpu()->irq && b->service()==0);
+    CHECK(b->service()==13);
 }
 int main(void) {
     loader_plain_log();
@@ -182,5 +212,6 @@ int main(void) {
     rom_identity();
     loader_rejects_garbage();
     replay_reaches_movie_code();
+    sms_tas_phase();
     TEST_DONE("sega_tas");
 }
