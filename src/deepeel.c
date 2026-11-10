@@ -1439,10 +1439,12 @@ static int cmd_pce(int argc, char **argv) {
     DpPceOptions opt = dp_pce_options();
     opt.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
     DpCliCommon cc = { .jobs = 1 };
-    int multitap = 0;
+    int multitap = 0, use_core = 0; DpCoreConfig kcfg; dp_core_config_default(&kcfg);
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
         if (0) {}
+        else if (!strcmp(a, "--core")) use_core = 1;
+        else if (dp_core_parse_option(&kcfg, argc, argv, i)) { i += dp_core_parse_option(&kcfg, argc, argv, i) - 1; }
         DP_CLI_COMMON(opt, cc)
         DP_CLI_PLAYED(opt)
         else if (!strcmp(a, "--ctx-live")) opt.ctx_live = 1;
@@ -1486,6 +1488,22 @@ static int cmd_pce(int argc, char **argv) {
     size_t size;
     uint8_t *data = nes_read_file(path, &size);
     if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", path); return 1; }
+    if (use_core) {
+        if (!dp_pce_init(data, size)) { fprintf(stderr, "deepeel: --core: not a PCE image\n"); free(data); return 1; }
+        DpMachine *km = dp_machine_pce();
+        if (!km) { free(data); return 1; }
+        if (opt.max_total) kcfg.max_total = opt.max_total;
+        if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
+        if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
+        if (opt.queue_max) kcfg.queue_max = opt.queue_max;
+        DpCoreResult kr;
+        int kok = dp_core_explore(km, dp_pce_rom_size(), &kcfg, &kr);
+        if (kok) dp_core_report(stdout, "pce", &kr);
+        dp_core_result_free(&kr);
+        km->close(km);
+        free(data);
+        return kok ? 0 : 1;
+    }
     DpPceResults *res = calloc(1, sizeof *res);
     if (pce_watch) dp_fbwatch_start("deepeel pce watch");
     int pce_ok = res && dp_pce_explore_jobs(data, size, &opt, res, pce_jobs);

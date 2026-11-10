@@ -41,6 +41,9 @@ static void pce_close(DpMachine *m) {
 }
 
 // wraps the live runtime singleton (dp_pce_init already done, or call it first)
+static uint32_t pce_pc(DpMachine *m) { (void)m; return dp_pce_cpu().pc; }
+static void pce_set_pc(DpMachine *m, uint32_t pc) { (void)m; dp_pce_set_pc((uint16_t)pc); }
+
 DpMachine *dp_machine_pce(void) {
     PceWrap *w = calloc(1, sizeof *w);
     DpMachine *m = calloc(1, sizeof *m);
@@ -55,5 +58,8 @@ DpMachine *dp_machine_pce(void) {
     m->run = pce_run;
     m->observe = pce_observe;
     m->close = pce_close;
+    m->isa = dp_isa_huc6280();
+    m->pc = pce_pc;
+    m->set_pc = pce_set_pc;
     return m;
 }

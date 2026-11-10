@@ -648,3 +648,5 @@ add_test(NAME core_novelty COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_sms_
 set_tests_properties(core_novelty PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_cli_nes COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes --core --attract-frames 0 > ${CMAKE_CURRENT_BINARY_DIR}/core_nes.txt 2>&1; grep -q 'deepeel nes (generic kernel)' ${CMAKE_CURRENT_BINARY_DIR}/core_nes.txt && grep -q 'forced [1-9]' ${CMAKE_CURRENT_BINARY_DIR}/core_nes.txt && $<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_cpucopy.nes --core --attract-frames 0 2>&1 | grep -q 'rom->ram copy bytes [1-9]'")
 set_tests_properties(core_cli_nes PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_cli_pce COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce --core --attract-frames 0 2>&1 | grep -q 'deepeel pce (generic kernel)' && $<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce --core --attract-frames 0 2>&1 | grep -q 'forced [1-9]'")
+set_tests_properties(core_cli_pce PROPERTIES FIXTURES_REQUIRED fixtures)
