@@ -624,3 +624,9 @@ set_tests_properties(md_speculative PROPERTIES FIXTURES_REQUIRED fixtures TIMEOU
 
 add_test(NAME resume_cov COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/resume_cov.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_branch.gb)
 set_tests_properties(resume_cov PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+
+add_executable(test_kernel test_kernel.c)
+target_link_libraries(test_kernel PRIVATE deepeel_z80 deepeel_sega deepeel_core m)
+target_include_directories(test_kernel PRIVATE ${M0BOY_DIR}/targets/sg1000/runtime)
+add_dependencies(test_kernel fixtures)
+add_test(NAME kernel_explore COMMAND test_kernel ${CMAKE_CURRENT_BINARY_DIR})

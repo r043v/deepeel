@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.252.0 LANGUAGES C)
+project(deepeel VERSION 0.253.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -296,6 +296,7 @@ add_library(deepeel_core STATIC
   src/mach/bh_cmd.c
   ${GEN}/dp_gbl_instances.c
   src/explore/explorer.c
+  src/explore/core.c
   src/explore/frontier.c
   src/explore/frontier_disk.c
   src/explore/forks.c

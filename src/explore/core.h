@@ -1,0 +1,47 @@
+// core.h: the generic exploration kernel (docs/PLAN-MUTUALISATION.fr.md, step 1).
+// Drives any DpMachine + DpIsa: executes paths instruction by instruction,
+// takes both sides of every conditional (the natural side by execution, the
+// other one as a forced fork from the saved pre-instruction state), keys
+// coverage by ROM index and reports every cap it hits.  Platform specifics are
+// optional DpPlatformHooks.
+#ifndef DP_EXPLORE_CORE_H
+#define DP_EXPLORE_CORE_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "../core/dpmachine.h"
+
+enum { DP_CORE_NATURAL = 1, DP_CORE_FORCED = 2 };
+
+// optional platform hooks; every member may be NULL
+typedef struct DpPlatformHooks {
+    void *user;
+    // called before each instruction; return 0 to stop the current path
+    int (*before_step)(void *user, DpMachine *m, uint32_t pc);
+} DpPlatformHooks;
+
+typedef struct DpCoreConfig {
+    uint64_t max_total;        // total instruction budget (0: unbounded)
+    uint32_t max_path_steps;   // per-path instruction cap (0: unbounded)
+    uint32_t fork_site_cap;    // forks per conditional site (0: unbounded)
+    uint32_t visits_per_pc;    // per-path visits of one pc before the path stops (0: unbounded)
+    size_t queue_max;          // pending forked states held in RAM (0: unbounded)
+    const DpPlatformHooks *hooks;
+} DpCoreConfig;
+
+typedef struct DpCoreResult {
+    uint8_t *flags;            // per ROM index: DP_CORE_NATURAL | DP_CORE_FORCED
+    size_t rom_size;
+    uint64_t steps, paths, forks;
+    uint64_t sat_total, sat_path, sat_loop, sat_site, sat_queue;   // reported caps, never silent
+    uint64_t pruned_covered;   // forks skipped because both sides were already covered
+    uint64_t no_pc;            // 1 when the machine has no pc/set_pc: nothing explored
+} DpCoreResult;
+
+void dp_core_config_default(DpCoreConfig *cfg);
+// explores from the machine's current state; rom_size = number of ROM index slots
+int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCoreResult *out);
+void dp_core_result_free(DpCoreResult *r);
+
+#endif

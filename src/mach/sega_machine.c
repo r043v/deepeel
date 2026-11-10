@@ -45,6 +45,9 @@ static int sega_run(DpMachine *m) {
     return 1;
 }
 
+static uint32_t sega_pc(DpMachine *m) { return ((SegaMach *)m->impl)->b->cpu()->pc; }
+static void sega_set_pc(DpMachine *m, uint32_t pc) { ((SegaMach *)m->impl)->b->cpu()->pc = (uint16_t)pc; }
+
 static void sega_observe(DpMachine *m, const DpObservers *o, void *user) {
     SegaMach *s = m->impl;
     s->obs = o; s->user = user;
@@ -70,6 +73,8 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->fetch = sega_fetch;
     m->rom_index = sega_rom_index;
     m->run = sega_run;
+    m->pc = sega_pc;
+    m->set_pc = sega_set_pc;
     m->observe = sega_observe;
     m->close = sega_close;
     return m;

@@ -141,6 +141,10 @@ struct DpMachine {
     uint8_t (*fetch)(struct DpMachine *, uint32_t addr);      // opcode view
     // execution (NULL when the backend only advances by frames)
     int (*run)(struct DpMachine *);
+    // program counter access for the generic explorer (core.c): the forced
+    // side of a conditional is taken by moving pc on a restored state
+    uint32_t (*pc)(struct DpMachine *);
+    void (*set_pc)(struct DpMachine *, uint32_t pc);
     void (*observe)(struct DpMachine *, const DpObservers *, void *user);
     int (*ctx_components)(struct DpMachine *, const DpCtxComp **out);   // count
     int (*probes)(struct DpMachine *, const DpProbe **out);             // count
