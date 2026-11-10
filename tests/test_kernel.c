@@ -10,6 +10,9 @@
 static void after_step_cb(void *u, DpMachine *m, uint32_t pc) { (void)m; (void)pc; ((uint64_t *)u)[0]++; }
 static int veto_all(void *u, DpMachine *m, uint32_t s, uint32_t o) { (void)u; (void)m; (void)s; (void)o; return 0; }
 
+static void obs_read(void *u, uint16_t a, uint8_t v) { (void)a; (void)v; ((uint64_t *)u)[0]++; }
+static void obs_write(void *u, uint16_t a, uint8_t v) { (void)a; (void)v; ((uint64_t *)u)[1]++; }
+
 int main(int argc, char **argv) {
     CHECK(argc > 1);
     char path[512];
@@ -60,6 +63,13 @@ int main(int argc, char **argv) {
     CHECK(h.steps == r.steps && r.steps > 0);
     CHECK(r.forks == 0 && r.hook_vetoed >= 1 && r.paths == 1);
     dp_core_result_free(&r);
+    // observe: the fixture does ld a,(RAM): at least one data read is reported
+    b->init(rom, rn, NULL, 1);
+    uint64_t acc[2] = {0, 0};
+    DpObservers ob = { NULL, obs_read, obs_write };
+    m->observe(m, &ob, acc);
+    for (int i = 0; i < 20 && m->run(m); i++) {}
+    CHECK(acc[0] >= 1);
     m->close(m);
     return 0;
 }

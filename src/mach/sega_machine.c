@@ -16,6 +16,11 @@ typedef struct {
     z80_decoded_t d;
     const DpObservers *obs;
     void *user;
+    // the callbacks observe() wrapped, called through after reporting
+    uint8_t (*prev_read)(void *, uint16_t);
+    void (*prev_write)(void *, uint16_t, uint8_t);
+    void *prev_user;
+    int wrapped;
 } SegaMach;
 
 static uint32_t sega_state_bytes(DpMachine *m) { return (uint32_t)((SegaMach *)m->impl)->b->state_size; }
@@ -48,9 +53,29 @@ static int sega_run(DpMachine *m) {
 static uint32_t sega_pc(DpMachine *m) { return ((SegaMach *)m->impl)->b->cpu()->pc; }
 static void sega_set_pc(DpMachine *m, uint32_t pc) { ((SegaMach *)m->impl)->b->cpu()->pc = (uint16_t)pc; }
 
+static uint8_t sega_obs_read(void *u, uint16_t a) {
+    SegaMach *s = u;
+    uint8_t v = s->prev_read(s->prev_user, a);
+    if (s->obs && s->obs->on_read) s->obs->on_read(s->user, a, v);
+    return v;
+}
+static void sega_obs_write(void *u, uint16_t a, uint8_t v) {
+    SegaMach *s = u;
+    if (s->obs && s->obs->on_write) s->obs->on_write(s->user, a, v);
+    s->prev_write(s->prev_user, a, v);
+}
+
 static void sega_observe(DpMachine *m, const DpObservers *o, void *user) {
     SegaMach *s = m->impl;
     s->obs = o; s->user = user;
+    // data accesses: interpose on the CPU bus callbacks once (instruction
+    // fetches go through z80_decode's own path and are not reported)
+    z80_t *c = s->b->cpu();
+    if (o && !s->wrapped && c->read && c->write) {
+        s->prev_read = c->read; s->prev_write = c->write; s->prev_user = c->user;
+        c->read = sega_obs_read; c->write = sega_obs_write; c->user = s;
+        s->wrapped = 1;
+    }
 }
 
 static void sega_close(DpMachine *m) {
