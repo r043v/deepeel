@@ -261,6 +261,19 @@ original (mort au spring puis reprise dans la section à trois portes, HUD figé
 jeu). C'est un problème de synchronisation d'entrées à la trame près (lag frames BizHawk, phase de lecture du pad
 dans la trame), pas une divergence de cœur ; les décalages entiers testés (-3..+1) donnent -1 comme meilleur.
 
+**Correction (0.251.28)** : les ramdiff 60 (Alex Kidd) et 54 (Castle) ci-dessus ont été mesurés avec les masques
+faux de l'extraction ad hoc (le second bug du chargeur, colonnes continues, s'y était répercuté) — toujours extraire
+les masques avec `tools/mkmask` (le même chargeur `dp_sega_tas_load` que le banc). Avec les masques corrects, la
+resynchronisation SMSHawk (BizHawk 0.251.27, dumper `tools/smshawk_dump`) est établie sur Castle : pressions aux
+mêmes trames des deux côtés (73/139/286/…), m0boy **sans** `DP_GG_PAD_SHIFT` (GPGX garde son -1 propre), IRQ vblank
+BizHawk traitée avant les pas CPU de la scanline (placement amont ; après les pas → divergence à f3533, intra-
+scanline équivalent) : ramdiff m0boy↔SMSHawk 2,9 @1000 puis < 0,5 jusqu'à **f4029**. Là, un état objet ($C31F,
+écrit par la routine $86c7-$86e0 avec un compteur $C325 reincrémente `AND $0F`) prend une valeur d'avance (2 contre
+1) dès la trame de transition f3921 — tous les octets visibles au repos sont identiques : la divergence est
+intratrame (une itération de plus du compteur d'objet chez m0boy dans cette trame), la dérive de phase sous-trame
+déjà documentée en e3cb130, pas un décalage d'entrées. Replay complet 42 337 trames : les deux cœurs jouent le film
+jusqu'au bout, ramdiff moyen 1785 (un seul point de rupture). Observations de l'outil.
+
 Preuves du pad lui-même : ROM de test Xch3l (sms_padtest, assemblée WLA-DX hors dépôt) affiche `0F0F0F0F` (U D L R
 B1 B2 pressés) à l'identique sur les deux cœurs avec un film synthétique all-buttons ; lecture du pad confirmée à
 $DC/$DD (29 passes/trame dans la boucle d'attract de Castle). Diagnostic : l'INT vblank n'est jamais prise par ce jeu
