@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include "../../core/cart_md.h"
+#include "../../core/coverage.h"
 #include "../../mach/mdmach.h"   /* DP_MDL_* section-liveness blocks (C1/C2) */
 #include "movie.h"
 #include "../../explore/ramarch.h"
@@ -107,6 +108,9 @@ typedef struct DpMdResults_ {
     uint8_t *exec_kind;   /* per ROM byte, instruction start: DP_MDX_ENTRY (non-sequential arrival) | DP_MDX_IRQ (ran inside a handler) */
     uint32_t *exec_hits;  /* per ROM byte: natural-path instruction starts (heat) */
     uint32_t *data_hits;  /* per ROM byte: natural-path CPU data reads (saturating) */
+    uint32_t *play_exec_hits, *play_data_hits, *src_flags;
+    DpFirstLog first;
+    int first_ready;
     uint8_t *stat;        /* S1/S2 static layer per ROM byte: 3 code (flow closure), 7 pointer table, 8 padding; 0 none */
     uint64_t stat_pad, stat_table, stat_code, stat_code_roots, stat_conf_lost;
     uint8_t *inferred;    /* S7 map inference per ROM byte: 1 pad, 2 code, 3 data, 0 none (never an observation) */

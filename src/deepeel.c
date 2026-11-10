@@ -1837,7 +1837,18 @@ static int cmd_md(int argc, char **argv) {
                     if (txt) fclose(f);
                 }
                 if (md_rtcode) dp_md_explore_rtcode(&r, md_rtcode);
-                if (mp) dp_md_explore_map(&r, mp);
+                if (mp) {
+                    size_t ml = strlen(mp);
+                    if (ml >= 4 && !strcmp(mp + ml - 4, ".png")) {
+                        uint8_t *classes = dp_md_map_build(&r);
+                        const char *base = strrchr(argv[3], '/'); base = base ? base + 1 : argv[3];
+                        if (!classes || !dp_map_png_from_evidence(classes, r.rom_size, r.play_exec_hits,
+                                                                   r.play_data_hits, r.src_flags, &r.first,
+                                                                   base, "md", base, mp))
+                            fprintf(stderr, "deepeel: cannot write %s\n", mp);
+                        free(classes);
+                    } else dp_md_explore_map(&r, mp);
+                }
                 if (evp) dp_md_explore_evidence(&r, evp);
                 if (sum) dp_md_explore_summary(&r, sum);
                 if (heat) dp_md_explore_heat(&r, heat);

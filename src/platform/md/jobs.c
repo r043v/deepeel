@@ -38,7 +38,17 @@ static void fold(DpMdResults *a, uint8_t *bank_seen, void *user) {
     }
     const DpMdResults *b = j->res;
     size_t n = a->rom_size < b->rom_size ? a->rom_size : b->rom_size;
+    for (uint32_t i = 0; i < b->first.n; i++) {
+        const DpFirstSeen *f = &b->first.e[i];
+        if (f->key < n) dp_cov_mark(&a->first, a->src_flags, f->key, f->src, f->stamp, f->actor);
+    }
+    a->first.dropped += b->first.dropped;
     for (size_t i = 0; i < n; i++) {
+        uint64_t pe = (uint64_t)a->play_exec_hits[i] + b->play_exec_hits[i];
+        uint64_t pd = (uint64_t)a->play_data_hits[i] + b->play_data_hits[i];
+        a->play_exec_hits[i] = pe > UINT32_MAX ? UINT32_MAX : (uint32_t)pe;
+        a->play_data_hits[i] = pd > UINT32_MAX ? UINT32_MAX : (uint32_t)pd;
+        if (b->src_flags[i]) dp_cov_mark(&a->first, a->src_flags, (uint32_t)i, b->src_flags[i], b->steps, 0);
         a->flags[i] |= b->flags[i];
         if (a->exec_kind && b->exec_kind) a->exec_kind[i] |= b->exec_kind[i];
         a->z80_flags[i] |= b->z80_flags[i];

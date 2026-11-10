@@ -441,6 +441,8 @@ add_test(NAME nes_coverage_png COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/platform_c
 set_tests_properties(nes_coverage_png PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME pce_coverage_png COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/platform_coverage_png.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce pce)
 set_tests_properties(pce_coverage_png PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME md_coverage_png COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/platform_coverage_png.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_md_longloop.md md)
+set_tests_properties(md_coverage_png PROPERTIES FIXTURES_REQUIRED fixtures)
 set_tests_properties(nes_jobs PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 120)
 add_test(NAME nes_novelty COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes; D=${CMAKE_CURRENT_BINARY_DIR}; $B nes explore $F --novelty 300000 --novelty-frames 30 --novelty-cells --text $D/nes_nv1.txt >/dev/null 2>&1; $B nes explore $F --text $D/nes_nv0.txt >/dev/null 2>&1; grep -q 'novelty: depth [1-9][0-9]* frames, [1-9][0-9]* trials' $D/nes_nv1.txt && grep -q '[1-9][0-9]* hits' $D/nes_nv1.txt && ! grep -q 'novelty:' $D/nes_nv0.txt")
 set_tests_properties(nes_novelty PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 120)

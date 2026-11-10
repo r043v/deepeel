@@ -187,11 +187,20 @@ static void on_dma_read(void *u, uint32_t addr, unsigned size) {
 
 static uint32_t md_sec_touch(X *x, uint32_t off);
 static void md_sec_mark(X *x, uint32_t pc, unsigned len);
+static uint32_t coverage_actor(const X *x) {
+    return x->movie_active ? DP_ACTOR_TAS : x->play_active ?
+        (x->play_idle ? DP_ACTOR_ATTRACT : DP_ACTOR_RNG) : x->nov ? DP_ACTOR_RNG : 0;
+}
 static void mark(X *x, uint32_t pc, unsigned len) {
     uint8_t f = x->forced ? DP_MDF_FORCED : DP_MDF_NATURAL;
+    uint32_t actor = coverage_actor(x);
     if (!x->forced && x->r->exec_hits && pc < x->r->rom_size && x->r->exec_hits[pc] != UINT32_MAX) x->r->exec_hits[pc]++;   // heat: played instruction starts
     for (unsigned i = 0; i < len && pc + i < x->r->rom_size; i++)
         if (dp_mdmach_rom_visible(x->m, pc + i)) {
+            if (actor && x->r->play_exec_hits[pc + i] != UINT32_MAX) x->r->play_exec_hits[pc + i]++;
+            dp_cov_mark(&x->r->first, x->r->src_flags, pc + i,
+                        actor ? DP_SRC_SESSION : x->forced ? DP_SRC_FORK_FORCED : DP_SRC_FORK_NATURAL,
+                        x->r->steps, actor);
             if (!(x->r->flags[pc + i] & (DP_MDF_NATURAL | DP_MDF_FORCED))) x->novel++;
             x->r->flags[pc + i] |= f;
         }
@@ -735,6 +744,11 @@ static void on_read(void *u, uint32_t a, unsigned size) {
         } else r->reader_overflow++;
         for (unsigned i = 0; i < size && a + i < r->rom_size; i++)
         {
+            uint32_t actor = coverage_actor(x);
+            if (actor && r->play_data_hits[a + i] != UINT32_MAX) r->play_data_hits[a + i]++;
+            dp_cov_mark(&r->first, r->src_flags, a + i,
+                        actor ? DP_SRC_SESSION : x->forced ? DP_SRC_FORK_FORCED : DP_SRC_FORK_NATURAL,
+                        r->steps, actor);
             r->flags[a + i] |= DP_MDF_DATA | (x->forced ? 0 : DP_MDF_DATA_NATURAL);
             if (!x->forced && r->data_hits && r->data_hits[a + i] != UINT32_MAX) r->data_hits[a + i]++;
             if (x->pc != x->o->exclude_read_pc) r->nonexcluded_reads[a + i] |= x->replay ? 2 : 1;
@@ -1630,6 +1644,10 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     r->nonexcluded_reads = calloc(c->size, 1);
     r->exec_hits = calloc(c->size, sizeof(uint32_t));
     r->data_hits = calloc(c->size, sizeof(uint32_t));
+    dp_first_init(&r->first, 1u << 20); r->first_ready = 1;
+    r->play_exec_hits = calloc(c->size, sizeof(uint32_t));
+    r->play_data_hits = calloc(c->size, sizeof(uint32_t));
+    r->src_flags = calloc(c->size, sizeof(uint32_t));
     r->z80_flags = calloc(c->size, 1);
     r->copies = calloc(DP_MD_COPY_CAP, sizeof *r->copies);
     X x = {.c = c, .o = o, .r = r, .qcap = o->queue_cap};
@@ -1657,7 +1675,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     x.site = calloc(c->size / 2 + 1, sizeof *x.site);
     x.pad_sites = calloc(c->size / 2 + 1, sizeof *x.pad_sites);
     x.m = dp_mdmach_open(c->rom, c->size);
-    if (!r->flags || !r->z80_flags || !r->nonexcluded_reads || !r->copies || !x.q || !x.gen || !x.vis || !x.site || !x.pad_sites || !x.m) {
+    if (!r->flags || !r->play_exec_hits || !r->play_data_hits || !r->src_flags || !r->z80_flags || !r->nonexcluded_reads || !r->copies || !x.q || !x.gen || !x.vis || !x.site || !x.pad_sites || !x.m) {
         dp_mdmach_close(x.m);
         free(x.q); free(x.gen); free(x.vis); free(x.site); free(x.pad_sites); dp_set_free(&x.ind_sites); dp_set_free(&x.pad_full_seen); dp_set_free(&x.ind_pairs);
         dp_md_results_free(r);
@@ -1849,6 +1867,13 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     // S1/S2 static layer (no machine, tagged apart from observations)
     r->stat = calloc(c->size, 1);
     if (r->stat) md_static_scan(c->rom, c->size, r);
+    for (size_t i = 0; i < c->size; i++) {
+        uint32_t bits = 0;
+        if (r->stat && r->stat[i] == 3) bits |= DP_SRC_CLOSURE;
+        if (r->stat && (r->stat[i] == 7 || r->stat[i] == 8)) bits |= DP_SRC_STATIC_SCAN;
+        if (r->flags[i] & (DP_MDF_DMA_READ | DP_MDF_CPU_VRAM)) bits |= DP_SRC_COPY;
+        if (bits) dp_cov_mark(&r->first, r->src_flags, (uint32_t)i, bits, r->steps, 0);
+    }
     // S7 map inference (render only, tagged apart from observations): unobserved
     // runs of one byte value (00/FF from 8 bytes, others from 32) are padding; a
     // gap of <= 3 bytes between executed bytes is code; a gap of <= 1024 bytes next
@@ -1949,6 +1974,8 @@ void dp_md_results_free(DpMdResults *r) {
     free(r->nonexcluded_reads);
     free(r->exec_hits);
     free(r->data_hits);
+    free(r->play_exec_hits); free(r->play_data_hits); free(r->src_flags);
+    if (r->first_ready) dp_first_free(&r->first);
     free(r->z80_flags);
     free(r->copies);
     memset(r, 0, sizeof *r);

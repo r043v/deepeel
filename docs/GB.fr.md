@@ -15,7 +15,9 @@ des workers NES étant indépendantes, une découverte présente dans plusieurs
 workers conserve l'origine du worker principal. La PC Engine utilise le même
 format pour `pce explore --map carte.png`, y compris après nouveau rendu d'une
 ROM avec en-tête de copieur. Les autres plateformes restent à raccorder à ce
-format partagé.
+format partagé. La Mega Drive produit aussi ces preuves avec `md explore --map
+carte.png` ; ses dates de première découverte sont celles du début de la
+tranche d'exécution et ne donnent donc pas l'ordre des octets dans une tranche.
 
 Évolution multi-systèmes : le registre de ports, le désassemblage et les
 premières explorations Z80/Sega sont décrits dans [Z80.fr.md](Z80.fr.md).

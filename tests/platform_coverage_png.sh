@@ -11,8 +11,13 @@ if [ "$system" = pce ]; then
     rom="$dir/headered.pce"
 fi
 for jobs in 1 2; do
-    "$binary" "$system" explore "$rom" --play 20 --sessions 2 --jobs "$jobs" \
-        --map "$dir/map.png" >"$dir/log" 2>&1
+    if [ "$system" = md ]; then
+        "$binary" "$system" explore "$rom" --play-frames 20 --play-sessions 2 --jobs "$jobs" \
+            --map "$dir/map.png" >"$dir/log" 2>&1
+    else
+        "$binary" "$system" explore "$rom" --play 20 --sessions 2 --jobs "$jobs" \
+            --map "$dir/map.png" >"$dir/log" 2>&1
+    fi
     "$binary" maprender "$rom" "$dir/map.png" "$dir/again.png" --sys "$system"
     for chunk in dpCv dpCh dpFi dpMt; do
         "$binary" mapx "$dir/map.png" "$dir/original" --chunk "$chunk"
