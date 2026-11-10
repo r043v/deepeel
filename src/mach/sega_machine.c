@@ -20,6 +20,7 @@ typedef struct {
     uint8_t (*prev_read)(void *, uint16_t);
     void (*prev_write)(void *, uint16_t, uint8_t);
     void *prev_user;
+    const uint8_t *rom; size_t rom_size; const void *(*pick)(unsigned);
     int wrapped, fetching;   // fetching: opcode reads are not data accesses
 } SegaMach;
 
@@ -95,6 +96,22 @@ static void sega_observe(DpMachine *m, const DpObservers *o, void *user) {
 static void sega_close(DpMachine *m) {
     free(m->impl);
     free(m);
+}
+
+DpMachine *dp_machine_sega(const void *backend);
+static DpMachine *sega_clone(DpMachine *m, unsigned worker) {
+    SegaMach *s = m->impl;
+    if (!s->pick || !s->rom || !worker) return NULL;
+    const DpSegaBackend *b = s->pick(worker);
+    if (!b || b->init(s->rom, s->rom_size, NULL, 1) != 1) return NULL;
+    DpMachine *c = dp_machine_sega(b);
+    if (c) dp_machine_sega_source(c, s->rom, s->rom_size, s->pick);
+    return c;
+}
+void dp_machine_sega_source(DpMachine *m, const uint8_t *rom, size_t size, const void *(*pick)(unsigned worker)) {
+    SegaMach *s = m->impl;
+    s->rom = rom; s->rom_size = size; s->pick = pick;
+    m->clone = sega_clone;
 }
 
 DpMachine *dp_machine_sega(const void *backend) {

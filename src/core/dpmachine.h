@@ -148,6 +148,9 @@ struct DpMachine {
     void (*observe)(struct DpMachine *, const DpObservers *, void *user);
     int (*ctx_components)(struct DpMachine *, const DpCtxComp **out);   // count
     int (*probes)(struct DpMachine *, const DpProbe **out);             // count
+    // An independent machine of the same program for parallel workers (`worker` >= 1),
+    // already initialized and at its power-on state; NULL when unsupported.
+    struct DpMachine *(*clone)(struct DpMachine *, unsigned worker);
     void (*close)(struct DpMachine *);
 };
 
@@ -159,6 +162,9 @@ DpMachine *dp_machine_gb(struct DpMach *impl);
 // backend instance (exploration is sequential).  const void *: DpSegaBackend
 // is a typedef of an anonymous struct, not forward-declarable here.
 DpMachine *dp_machine_sega(const void *backend);
+// Tell a Sega machine where its program comes from so clone() can start a
+// worker instance: `pick` maps a worker number to its backend instance.
+void dp_machine_sega_source(DpMachine *m, const uint8_t *rom, size_t size, const void *(*pick)(unsigned worker));
 
 struct DpMdMach;
 // the NES backend (src/mach/nes_machine.c): opens the runtime from a

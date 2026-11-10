@@ -13,6 +13,8 @@ static int veto_all(void *u, DpMachine *m, uint32_t s, uint32_t o) { (void)u; (v
 static void obs_read(void *u, uint16_t a, uint8_t v) { (void)a; (void)v; ((uint64_t *)u)[0]++; }
 static void obs_write(void *u, uint16_t a, uint8_t v) { (void)a; (void)v; ((uint64_t *)u)[1]++; }
 
+static const void *pick_gg(unsigned w) { return dp_sega_backend_gg_worker(w); }
+
 int main(int argc, char **argv) {
     CHECK(argc > 1);
     char path[512];
@@ -84,6 +86,18 @@ int main(int argc, char **argv) {
     m->observe(m, &ob, acc);
     for (int i = 0; i < 20 && m->run(m); i++) {}
     CHECK(acc[0] >= 1);
+    // clone: an independent worker instance starting from the same program
+    dp_machine_sega_source(m, rom, rn, pick_gg);
+    DpMachine *c = m->clone ? m->clone(m, 1) : NULL;
+    CHECK(c != NULL);
+    if (c) {
+        uint32_t pm = m->pc(m), pc0 = c->pc(c);
+        CHECK(pc0 == 0);
+        for (int i = 0; i < 5; i++) CHECK(c->run(c));
+        CHECK(c->pc(c) != pc0);       // the clone advanced...
+        CHECK(m->pc(m) == pm);
+        c->close(c);
+    }
     m->close(m);
     TEST_DONE("kernel");
     return 0;
