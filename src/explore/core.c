@@ -66,6 +66,7 @@ typedef struct {
     DpCoreResult *r;
     int64_t last_rom;     // ROM index of the last ROM byte read, -1 when consumed
     uint8_t last_val;
+    uint8_t *fed;         // 64 KiB bitmap: CPU addresses written by a natural verbatim ROM copy
     int forced;           // the current path is a forced fork: speculative state
     int age;              // instructions since that read; a stale read is not a copy
 } CopyObs;
@@ -81,7 +82,7 @@ static void obs_write(void *u, uint16_t addr, uint8_t v) {
     if (o->last_rom < 0 || o->age > 4) return;
     if (o->m->rom_index(o->m, addr) < 0 && v == o->last_val) {
         if (o->forced) o->r->copy_forced++;
-        else { o->r->flags[o->last_rom] |= DP_CORE_COPIED; o->r->copy_bytes++; }
+        else { o->r->flags[o->last_rom] |= DP_CORE_COPIED; o->r->copy_bytes++; if (o->fed) o->fed[addr] = 1; }
     }
     o->last_rom = -1;
 }
@@ -94,7 +95,8 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
     out->flags = calloc(rom_size ? rom_size : 1, 1);
     if (!out->flags) return 0;
     const DpIsa *isa = m->isa;
-    CopyObs cobs = { m, out, -1, 0, 0, 99 };
+    uint8_t *fed = calloc(0x10000, 1);
+    CopyObs cobs = { m, out, -1, 0, fed, 0, 99 };
     DpObservers obsv = { NULL, obs_read, obs_write };
     if (!cfg->no_copies && m->observe) m->observe(m, &obsv, &cobs);
     uint32_t sbytes = m->state_bytes(m);
@@ -138,7 +140,13 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
             int have_flow = isa->flow && isa->flow(bytes, (uint16_t)pc, &fi);
             if (have_flow && fi.length) len = fi.length;
             if (len <= 0) len = 1;
-            if (m->rom_index(m, pc) < 0) out->exec_outside++;
+            if (m->rom_index(m, pc) < 0) {
+                if (cur_forced && !cfg->no_forced_ram_cut && !(fed && fed[pc & 0xffff])) {
+                    out->forced_ram_cuts++;
+                    break;
+                }
+                out->exec_outside++;
+            }
             mark(out, m, pc, (unsigned)len, cur_forced ? DP_CORE_FORCED : DP_CORE_NATURAL);
             int cond = have_flow && fi.kind == DP_FLOW_COND && fi.target >= 0;
             uint8_t *pre = NULL;
@@ -187,6 +195,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         }
     }
     for (size_t i = 0; i < qn; i++) free(q[i].state);
+    free(fed);
     free(q); free(sites.s); free(visits); free(stamp); free(cur_state); free(start);
     return ok;
 }

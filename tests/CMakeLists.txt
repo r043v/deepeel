@@ -636,3 +636,5 @@ add_test(NAME core_exec_outside COMMAND sh -c "$<TARGET_FILE:deepeel> z80 explor
 set_tests_properties(core_exec_outside PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_copies COMMAND sh -c "$<TARGET_FILE:deepeel> z80 explore sms ${CMAKE_CURRENT_BINARY_DIR}/fix_sms_ramsrc.sms --core 2>&1 | grep -q '(3 distinct ROM sources)'")
 set_tests_properties(core_copies PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_forced_ram_cut COMMAND sh -c "$<TARGET_FILE:deepeel> z80 explore sms ${CMAKE_CURRENT_BINARY_DIR}/fix_sms_ramsrc.sms --core 2>&1 | grep -q 'forced RAM cuts [1-9]'")
+set_tests_properties(core_forced_ram_cut PROPERTIES FIXTURES_REQUIRED fixtures)
