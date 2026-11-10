@@ -282,6 +282,19 @@ dispatch de plus chez m0boy dans cette trame). Les séquences d'écritures diff�
 écritures contre 221) : le travail de trame n'est pas le même dès cette trame, alors que l'état au repos est
 identique octet pour octet — la divergence naît d'une lecture intratrame, pas d'un état. Observations de l'outil.
 
+**Cause racine (0.251.30) : le RNG du jeu lit le registre R.** La trace registres pleine trame montre le chaîne :
+après le `ret` ($86d7), le dispatcheur passe par une routine de hachage à $8166 — `ld hl,($C063)`, rotations,
+**`ld a,r` (ED 5F)**, `xor l`, stockage $C063/$C064 — et le bit consommé par le `and $01`/`inc a`/`ld (ix+$1f),a`
+vient de ce R. Or R compte les instructions exécutées : les boucles d'attente de m0boy et de BizHawk ne sortent pas
+au même nombre d'itérations (1801 contre 1798 itérations du poll $BF à f3921 — BizHawk rend le drapeau vblank
+visible en cours d'instruction, m0boy aux frontières d'instruction seulement), donc R diffère (offset 0-127,
+erratique, mesuré trame par trame des deux côtés avec DP_GG_RTRACE / SMSSHAWK_REGTRACE) bien que la RAM soit
+identique. Le premier `ld a,r` du jeu (transition de scène f3921) transforme cette dérive invisible en divergence
+d'état permanente. Le comptage de R lui-même est correct des deux côtés (+2 par préfixe DD/FD/ED, rien pendant le
+halt — la dérive de m0boy pendant le halt est retirée au passage). Refermer le desync exige une équivalence de
+comptage d'instructions trame par trame, c'est-à-dire la visibilité du drapeau vblank au même T-state que BizHawk :
+chantier de cyclicalité exacte, pas un bug d'état. Observations de l'outil.
+
 Preuves du pad lui-même : ROM de test Xch3l (sms_padtest, assemblée WLA-DX hors dépôt) affiche `0F0F0F0F` (U D L R
 B1 B2 pressés) à l'identique sur les deux cœurs avec un film synthétique all-buttons ; lecture du pad confirmée à
 $DC/$DD (29 passes/trame dans la boucle d'attract de Castle). Diagnostic : l'INT vblank n'est jamais prise par ce jeu

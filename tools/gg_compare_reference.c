@@ -347,6 +347,13 @@ int main(int argc, char **argv) {
      * complete intra-frame write sequence, the bench's counterpart of the
      * dumper's SMSSHAWK_WATCH=ALL */
     long trace_fr_lo = 0, trace_fr_hi = -1;
+    /* DP_GG_RTRACE=first:last (1-based): print the Z80 R register at each
+     * frame end — R counts executed instructions, so its per-frame delta
+     * measures the poll-loop iteration drift against the reference core */
+    long rtrace_lo = 0, rtrace_hi = -1;
+    {   const char *rt = getenv("DP_GG_RTRACE");
+        if (rt) { rtrace_lo = atol(rt); char *x = strchr(rt, ':'); rtrace_hi = x ? atol(x + 1) : rtrace_lo; }
+    }
     {   const char *tf = getenv("DP_GG_TRACE_FRAMES");
         if (tf) { trace_fr_lo = atol(tf); char *x = strchr(tf, ':'); trace_fr_hi = x ? atol(x + 1) : trace_fr_lo; }
     }
@@ -466,9 +473,9 @@ int main(int argc, char **argv) {
                             frame + 1, c->pc, (unsigned)(0xC000 + trace_addr), g_mach->ram[trace_addr], c->sp);
                 /* register trace on the object routine's pc window: where does
                  * the A of the $C31F write come from */
-                if (trace_all && c->pc >= 0x86b0 && c->pc <= 0x8728)
-                    fprintf(stderr, "aregs f%u pc=%04x a=%02x b=%02x c=%02x d=%02x e=%02x h=%02x l=%02x ix=%04x op=%02x%02x%02x\n",
-                            frame + 1, c->pc, c->a, c->b, c->c, c->d, c->e, c->h, c->l, c->ix,
+                if (trace_all)   /* full-frame register trace: find the dispatcher's bit source */
+                    fprintf(stderr, "aregs f%u pc=%04x a=%02x b=%02x c=%02x d=%02x e=%02x h=%02x l=%02x ix=%04x r=%02x op=%02x%02x%02x\n",
+                            frame + 1, c->pc, c->a, c->b, c->c, c->d, c->e, c->h, c->l, c->ix, c->r,
                             bytes[0], g_d.length > 1 ? bytes[1] : (uint8_t)0, g_d.length > 2 ? bytes[2] : (uint8_t)0);
                 if (trace_all)
                     for (unsigned ra = 0; ra < sizeof insn_ram; ra++)
@@ -487,6 +494,8 @@ int main(int argc, char **argv) {
             }
             ins++;
         }
+        if (rtrace_lo <= frame + 1 && frame + 1 <= rtrace_hi)
+            fprintf(stderr, "regr f%u r=%02x pc=%04x ins=%llu\n", frame + 1, g_mach->cpu.r, g_mach->cpu.pc, ins);
         if (ins >= 10000000ull && !g_mach->stop)
             fprintf(stderr, "warning: frame %u ended on the instruction bound, not the frame event\n", frame + 1);
         /* DP_GG_PC_SAMPLE=N: every N frames, histogram the PC's page (top
