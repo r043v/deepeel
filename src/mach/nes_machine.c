@@ -45,6 +45,10 @@ static void nes_observe(DpMachine *m, const DpObservers *o, void *user) {
     dp_nesmach_set_hooks(w->m, &h);
 }
 
+static uint32_t nes_pc(DpMachine *m) { return dp_nesmach_pc(((NesMachWrap *)m->impl)->m); }
+static void nes_set_pc(DpMachine *m, uint32_t pc) { dp_nesmach_set_pc(((NesMachWrap *)m->impl)->m, pc); }
+size_t dp_machine_nes_prg_size(DpMachine *m) { return dp_nesmach_prg_size(((NesMachWrap *)m->impl)->m); }
+
 static void nes_close(DpMachine *m) {
     free(m->impl);
     free(m);
@@ -60,6 +64,9 @@ DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err
     if (!w || !m) { dp_nesmach_close(impl); free(w); free(m); return NULL; }
     w->m = impl;
     m->name = "nes";
+    m->isa = dp_isa_m6502();
+    m->pc = nes_pc;
+    m->set_pc = nes_set_pc;
     m->impl = w;             // the m6502 DpIsa wrapper is not extracted yet
     m->state_bytes = nes_state_bytes;
     m->save = nes_save;

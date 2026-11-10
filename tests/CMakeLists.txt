@@ -646,3 +646,5 @@ add_test(NAME core_jobs COMMAND sh -c "for f in fix_z80_branch fix_sms_ramsrc fi
 set_tests_properties(core_jobs PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_novelty COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_sms_ramsrc.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --jobs 1 --attract-frames 0 | grep -q 'novelty picks [1-9]' && $<TARGET_FILE:deepeel> z80 explore sms $f --core --jobs 1 --attract-frames 0 --no-novelty-order | grep -q 'novelty picks 0'")
 set_tests_properties(core_novelty PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_cli_nes COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes --core --attract-frames 0 > ${CMAKE_CURRENT_BINARY_DIR}/core_nes.txt 2>&1; grep -q 'deepeel nes (generic kernel)' ${CMAKE_CURRENT_BINARY_DIR}/core_nes.txt && grep -q 'forced [1-9]' ${CMAKE_CURRENT_BINARY_DIR}/core_nes.txt && $<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_cpucopy.nes --core --attract-frames 0 2>&1 | grep -q 'rom->ram copy bytes [1-9]'")
+set_tests_properties(core_cli_nes PROPERTIES FIXTURES_REQUIRED fixtures)

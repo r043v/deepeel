@@ -103,6 +103,8 @@ static int cmd_maprender(int argc, char **argv);
 #include <errno.h>
 #include <time.h>
 #include "cli_common.h"
+#include "explore/core.h"
+#include "core/dpmachine.h"
 
 static void usage(void) {
     fprintf(stderr,
@@ -1293,9 +1295,12 @@ static int cmd_nes(int argc, char **argv) {
     DpNesOptions opt = dp_nes_options();   // defer_tiers 0: cuts stay final; --defer-tiers N opts in (sega's CLI defaults to 3, NES measured neutral on DuckTales)
     opt.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
     DpCliCommon cc = { .jobs = 1 };
+    int use_core = 0; DpCoreConfig kcfg; dp_core_config_default(&kcfg);
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
         if (0) {}
+        else if (!strcmp(a, "--core")) use_core = 1;
+        else if (dp_core_parse_option(&kcfg, argc, argv, i)) { i += dp_core_parse_option(&kcfg, argc, argv, i) - 1; }
         DP_CLI_COMMON(opt, cc)
         DP_CLI_PLAYED(opt)
         else if (!strcmp(a, "--play-pool") && i + 1 < argc) opt.play_pool = (uint32_t)strtoul(argv[++i], NULL, 0);
@@ -1343,6 +1348,23 @@ static int cmd_nes(int argc, char **argv) {
     size_t size;
     uint8_t *data = nes_read_file(path, &size);
     if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", path); return 1; }
+    if (use_core) {
+        char err[128] = "";
+        DpMachine *km = dp_machine_nes(data, size, mapper, err, sizeof err);
+        if (!km) { fprintf(stderr, "deepeel: --core: %s\n", err); free(data); return 1; }
+        if (opt.max_total) kcfg.max_total = opt.max_total;
+        if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
+        if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
+        if (opt.queue_max) kcfg.queue_max = opt.queue_max;
+        DpCoreResult kr;
+        size_t prg = dp_machine_nes_prg_size(km);
+        int kok = dp_core_explore(km, prg, &kcfg, &kr);
+        if (kok) dp_core_report(stdout, "nes", &kr);
+        dp_core_result_free(&kr);
+        km->close(km);
+        free(data);
+        return kok ? 0 : 1;
+    }
     DpNesResults res;
     if (nes_watch) dp_fbwatch_start("deepeel nes watch");
     int nes_ok = dp_nes_explore_jobs(data, size, mapper, &opt, &res, nes_jobs);

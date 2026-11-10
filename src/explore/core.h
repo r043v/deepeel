@@ -7,6 +7,7 @@
 #ifndef DP_EXPLORE_CORE_H
 #define DP_EXPLORE_CORE_H
 
+#include <stdio.h>
 #include <stddef.h>
 #include <stdint.h>
 #include "../core/coverage.h"
@@ -76,6 +77,10 @@ size_t dp_core_sections(const DpCoreResult *r, DpCoreSection *out, size_t cap);
 // --no-forced-ram-cut, --no-novelty-order, --visits-per-pc N.  Returns the
 // number of argv entries consumed (0: not a kernel option).
 int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i);
+
+// Prints the kernel's result in the shared report format (the platform-neutral
+// part of every `--core` command); `label` names the platform.
+void dp_core_report(FILE *out, const char *label, const DpCoreResult *r);
 
 void dp_core_config_default(DpCoreConfig *cfg);
 // explores from the machine's current state; rom_size = number of ROM index slots

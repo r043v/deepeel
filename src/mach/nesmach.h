@@ -60,6 +60,7 @@ int64_t dp_nesmach_rom_index(const DpNesMach *m, unsigned addr);
 /* a CPU bus read through the machine (RAM, PPU, APU, pads, PRG windows) */
 uint8_t dp_nesmach_read(const DpNesMach *m, unsigned addr);
 unsigned dp_nesmach_pc(const DpNesMach *m);
+void dp_nesmach_set_pc(DpNesMach *m, unsigned pc);
 unsigned dp_nesmach_p(const DpNesMach *m);       /* live flags byte */
 unsigned dp_nesmach_nmi_pending(const DpNesMach *m);
 unsigned dp_nesmach_banked(const DpNesMach *m);
