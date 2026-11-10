@@ -51,6 +51,13 @@ static void play_reaches_held_input_code(void) {
     DpSegaOptions o=options(); o.play_total=4000;
     run(o);
     CHECK(result.play_steps>0 && result.play_epochs>=8);
+    CHECK(result.play_exec_hits[0x103]>0 && (result.src_flags[0x103]&DP_SRC_SESSION));
+    int attract_seen=0, scripted_seen=0;
+    for(uint32_t i=0;i<result.first.n;i++) {
+        attract_seen |= result.first.e[i].src==DP_SRC_SESSION && result.first.e[i].actor==DP_ACTOR_ATTRACT;
+        scripted_seen |= result.first.e[i].src==DP_SRC_SESSION && result.first.e[i].actor==DP_ACTOR_SCRIPT;
+    }
+    CHECK(attract_seen && scripted_seen);
     // the poll's guarded code is reached both ways (the jr fork explores the
     // taken side too): REQUIRED, not PLAYED
     CHECK(result.flags[0x10b]&DP_SEGA_NATURAL);

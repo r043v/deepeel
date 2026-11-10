@@ -11,6 +11,7 @@ enum { DP_SEGA_WRAM, DP_SEGA_SRAM, DP_SEGA_VRAM, DP_SEGA_CRAM };
 enum { DP_SEGA_RAM_TAGS=8192+32768 };
 enum { DP_SEGA_MAPPER_NONE, DP_SEGA_MAPPER_SEGA, DP_SEGA_MAPPER_CODEMASTERS, DP_SEGA_MAPPER_KOREAN150, DP_Z80_MAPPER_MSX_PLAIN, DP_Z80_MAPPER_MSX_ASCII8, DP_Z80_MAPPER_MSX_ASCII16, DP_Z80_MAPPER_MSX_KONAMI, DP_Z80_MAPPER_MSX_SCC };
 enum { DP_SEGA_IRQ_FRAME=1, DP_SEGA_IRQ_LINE=2 };
+enum { DP_TAS_NATIVE=0, DP_TAS_SMSHAWK_CURRENT=1, DP_TAS_SMSHAWK_1114=2 };
 typedef struct {
     unsigned space;
     uint16_t address;
@@ -83,10 +84,11 @@ typedef struct {
     // --watch: publish every Nth completed frame (0: off) through the platform-neutral
     // framebuffer; rendering is only switched on while watching (it sets sprite status).
     void (*watch)(unsigned every,uint64_t *published);
-    // Optional SMSHawk TAS timing profile and its interrupt sampling.
-    void (*tas_compat)(int enabled);
+    // Optional SMSHawk replay profile and its interrupt sampling.
+    void (*tas_compat)(int profile);
     unsigned (*service)(void);
     uint64_t (*frame_count)(void);
+    unsigned (*tas_instruction)(const z80_decoded_t *decoded, unsigned cycles);
 } DpSegaBackend;
 // weak: standalone runtime tests link the backends without the framebuffer watch
 void dp_fb_publish(const uint32_t *argb, int w, int h, uint64_t frame) __attribute__((weak));

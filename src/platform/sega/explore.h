@@ -148,6 +148,7 @@ static inline uint16_t dp_sega_nature(uint8_t f,uint8_t st) {
 typedef struct {
     uint8_t *flags;
     uint32_t *exec_hits,*data_hits; // per ROM byte, saturating: how often it was executed / read as data
+    uint32_t *play_exec_hits,*play_data_hits; // played accesses only, for the shared heat map
     size_t size;
     uint64_t s6_decoders,s6_tables,s6_candidates,s6_runs,s6_sat; // S6 decoder replay
     uint16_t smc_first_pc;   // pc of the first store into an already executed RAM byte

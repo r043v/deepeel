@@ -3,6 +3,7 @@
  * BizHawk key names of each console map onto it at load time. */
 #define _GNU_SOURCE
 #include "tas.h"
+#include "backend.h"
 #include "../../../src/core/sha1.h"
 #include "../../../src/core/md5.h"
 #include "../../../src/core/zip.h"
@@ -25,6 +26,13 @@ static int emit(DpSegaTas *out,uint8_t mask,char *err,size_t errsz) {
     }
     out->masks[out->frames++]=mask;
     return 1;
+}
+static int header_line(const uint8_t *data,size_t n,const char *line) {
+    size_t len=strlen(line);
+    for(size_t i=0;i+len<=n;i++)
+        if((i==0 || data[i-1]=='\n') && !memcmp(data+i,line,len) &&
+           (i+len==n || data[i+len]=='\n' || data[i+len]=='\r')) return 1;
+    return 0;
 }
 // BizHawk key names across the three consoles: SMS/GG pads are B and C,
 // MSX uses full words and Return for Enter.  Column names carry the player
@@ -113,6 +121,8 @@ static int tas_load_buf(uint8_t *d,size_t n,DpSegaTas *out,char *err,size_t errs
         if(b.has_sha1) memcpy(out->sha1,b.sha1,20);
         out->has_md5 |= b.has_md5;
         if(b.has_md5) memcpy(out->md5,b.md5,16);
+        if(b.header && header_line(b.header,b.header_n,"emuVersion Version 1.11.4") &&
+           header_line(b.header,b.header_n,"Core SMSHawk")) out->smshawk_1114=1;
         int ok=tas_load_buf(b.log,b.log_n,out,err,errsz,depth+1);
         dp_bk2_free(&b);
         return ok;
@@ -147,6 +157,9 @@ void dp_sega_tas_free(DpSegaTas *t) {
     if(!t) return;
     free(t->masks);
     memset(t,0,sizeof *t);
+}
+int dp_sega_tas_smshawk_profile(const DpSegaTas *t) {
+    return t->smshawk_1114 ? DP_TAS_SMSHAWK_1114 : DP_TAS_SMSHAWK_CURRENT;
 }
 int dp_sega_tas_rom_match(const DpSegaTas *t,const uint8_t *rom,size_t size,char *why,size_t whysz) {
     if(!t->has_sha1 && !t->has_md5) { snprintf(why,whysz,"movie records no ROM identity"); return -1; }

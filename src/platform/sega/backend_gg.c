@@ -14,17 +14,40 @@ void gg_cart_trace(uint32_t offset,unsigned write) { (void)offset; (void)write; 
 static uint8_t second_pad,reset_button,memory_control;
 static uint8_t tas_compat_enabled,irq_defer;
 typedef struct { gg_t core; uint8_t second_pad,reset_button,memory_control,tas_compat_enabled,irq_defer; } State;
-unsigned gg_line_irq_phase(void) { return tas_compat_enabled ? 0 : GG_LINE_IRQ_AT; }
+enum { HAWK_LINE_START=1, HAWK_RESET_PHASE=2, HAWK_DEFER_FRAME_EDGE=4,
+       HAWK_DEFER_ALL_EDGES=8, HAWK_OLD_REFRESH=16, HAWK_OLD_INDEX_ADD=32 };
+static unsigned tas_patches(void) {
+    static const unsigned profiles[]={
+        0,
+        HAWK_LINE_START|HAWK_RESET_PHASE|HAWK_DEFER_FRAME_EDGE,
+        HAWK_LINE_START|HAWK_DEFER_ALL_EDGES|HAWK_OLD_REFRESH|HAWK_OLD_INDEX_ADD
+    };
+    return tas_compat_enabled<sizeof profiles/sizeof profiles[0] ? profiles[tas_compat_enabled] : 0;
+}
+unsigned gg_line_irq_phase(void) { return (tas_patches()&HAWK_LINE_START) ? 0 : GG_LINE_IRQ_AT; }
 static void tas_compat(int enabled) {
-    tas_compat_enabled=!!enabled; irq_defer=0;
-    if(enabled) machine.cyc+=3;
+    tas_compat_enabled=(uint8_t)enabled; irq_defer=0;
+    if(tas_patches()&HAWK_RESET_PHASE) machine.cyc+=3;
 }
 static unsigned service(void) {
     uint8_t irq=machine.cpu.irq;
+    uint8_t old_r=machine.cpu.r;
     if(irq_defer) machine.cpu.irq=0;
+    int accepting=machine.cpu.nmi || (machine.cpu.irq && machine.cpu.iff1 && !machine.cpu.ei_delay);
     unsigned cycles=z80_service(&machine.cpu);
+    // The 1.11.4 instruction interpreter did not count interrupt acknowledges in R.
+    if((tas_patches()&HAWK_OLD_REFRESH) && cycles && accepting) machine.cpu.r=old_r;
     if(irq_defer) machine.cpu.irq=irq;
     irq_defer=0;
+    return cycles;
+}
+static unsigned tas_instruction(const z80_decoded_t *d, unsigned cycles) {
+    // Its indexed-CB decoder counted a third refresh, and ADD A,(IX/IY+d)
+    // charged 16 T instead of 19. These are movie compatibility quirks.
+    if((tas_patches()&HAWK_OLD_REFRESH) && d->group==1 && d->index)
+        machine.cpu.r=(uint8_t)((machine.cpu.r&128)|((machine.cpu.r+1)&127));
+    if((tas_patches()&HAWK_OLD_INDEX_ADD) && d->group==0 && d->index && d->opcode==0x86)
+        cycles-=3;
     return cycles;
 }
 static int cartridge_enabled(void) { return !GG_IS_SMS || !(memory_control&0x40); }
@@ -83,8 +106,9 @@ static void out(uint16_t p,uint8_t v) {
 static void advance(unsigned cycles) {
     uint8_t prior_irq=machine.cpu.irq;
     machine.cyc+=cycles; sg_sync();
-    if(tas_compat_enabled && !prior_irq && machine.cpu.irq &&
-       machine.cyc==machine.frame_start+GG_VBLANK_CYCLES) irq_defer=1;
+    if(!prior_irq && machine.cpu.irq &&
+       (((tas_patches()&HAWK_DEFER_FRAME_EDGE) && machine.cyc==machine.frame_start+GG_VBLANK_CYCLES) ||
+        (tas_patches()&HAWK_DEFER_ALL_EDGES))) irq_defer=1;
 }
 static int64_t rom_index(uint16_t a) {
     if(!cartridge_enabled() || a>=0xc000 || (!GG_KOREAN150 && a>=0x8000 && (machine.ram_ctl&8))) return -1;
@@ -190,6 +214,6 @@ static uint64_t screen_key(void) {
 static uint64_t frame_count(void) { return machine.frames; }
 static const uint8_t *ram_view(size_t *n) { *n=sizeof(machine.ram); return machine.ram; }
 const DpSegaBackend *dp_sega_backend_gg(void) {
-    static const DpSegaBackend ops={init,cpu,read,write,in,out,advance,rom_index,sizeof(State),save,load,ram_index,vdp_target,input,set_input,mapper,vdp_command,irq_sources,DP_SEGA_RAM_TAGS,8192,0xc1,0x80,0x81,NULL,NULL,control_state,select_mapper,seed_geometry,seed_window,NULL,NULL,NULL,screen_key,ram_view,watch,tas_compat,service,frame_count};
+    static const DpSegaBackend ops={init,cpu,read,write,in,out,advance,rom_index,sizeof(State),save,load,ram_index,vdp_target,input,set_input,mapper,vdp_command,irq_sources,DP_SEGA_RAM_TAGS,8192,0xc1,0x80,0x81,NULL,NULL,control_state,select_mapper,seed_geometry,seed_window,NULL,NULL,NULL,screen_key,ram_view,watch,tas_compat,service,frame_count,tas_instruction};
     return &ops;
 }

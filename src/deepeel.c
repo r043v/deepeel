@@ -1043,6 +1043,7 @@ static int cmd_maprender(int argc, char **argv) {
     fclose(f);
     size_t cv_len = 0;
     uint8_t *cv_in = (ln > 8 && !memcmp(text, "\x89PNG", 4)) ? (uint8_t *)dp_png_text(inmap, "dpCv", &cv_len) : NULL;
+    int saved_png = cv_in != NULL;
     if (ln > 8 && !memcmp(text, "\x89PNG", 4) && !cv_in) {
         fprintf(stderr, "deepeel: %s: PNG without a dpCv class vector\n", inmap);
         free(text);
@@ -1166,10 +1167,10 @@ static int cmd_maprender(int argc, char **argv) {
                  DEEPEEL_VERSION, inmap, title, rom_banks, rom_size);
         meta = meta_syn;
     }
-    int ok = dp_map_png_from_maptext(text, (size_t)ln, rom_banks,
+    int ok = dp_map_png_from_saved(text, (size_t)ln, rom_banks,
                                      title, meta, out, sysname,
                                      strrchr(rom, '/') ? strrchr(rom, '/') + 1 : rom,
-                                     rom_size);
+                                     rom_size, saved_png ? inmap : NULL);
     if (!ok) { fprintf(stderr, "deepeel: %s: render failed\n", inmap); }
     if (meta != meta_syn) free(meta);
     free(text);
@@ -1185,7 +1186,7 @@ static int cmd_mapx(int argc, char **argv) {
     if (argc >= 6 && !strcmp(argv[4], "--chunk")) chunk = argv[5];
     if (argc < 4) {
         fprintf(stderr, "usage: deepeel mapx in.map.png out [--chunk deepeel_map|deepeel_meta|"
-                        "deepeel_heat|deepeel_cov|deepeel_rom|dpCv|dpCh|dpFr|dpTb|dpIx]\n");
+                        "deepeel_heat|deepeel_cov|deepeel_rom|dpCv|dpCh|dpFr|dpTb|dpIx|dpMt|dpFi]\n");
         return 2;
     }
     size_t n = 0;

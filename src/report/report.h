@@ -98,6 +98,15 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
 int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char *title,
                             const char *meta, const char *path, const char *sysname,
                             const char *filename, unsigned rom_size);
+// As above, retaining evidence and played heat from a previously saved PNG.
+int dp_map_png_from_saved(const char *text, size_t len, int banks, const char *title,
+                          const char *meta, const char *path, const char *sysname,
+                          const char *filename, unsigned rom_size, const char *saved_png);
+// Platform-neutral projection: classes and played heat are indexed by ROM byte.
+int dp_map_png_from_evidence(const uint8_t *classes, size_t size, const uint32_t *played_exec,
+                             const uint32_t *played_data, const uint32_t *sources,
+                             const DpFirstLog *first, const char *title, const char *sysname,
+                             const char *filename, const char *path);
 // dpCv: lossless class vector (RLE) embedded in the map PNG; decode returns 1
 // when the runs fill exactly n bytes
 int dp_map_ch_encode(const DpResults *res, DpBuf *out);   // dpCh: flags and hit counters

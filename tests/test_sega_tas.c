@@ -72,7 +72,7 @@ static void loader_plain_log(void) {
     unlink(path);
 }
 static void loader_bk2_zip(void) {
-    static const char hdr[]="StartsFromSavestate True\n";
+    static const char hdr[]="StartsFromSavestate True\nemuVersion Version 1.11.4\nCore SMSHawk\n";
     static const char log[]="LogKey: Up|Down|Left|Right|Button1|Button2|Start|Reset\n"
         "|....B...\n|....B...\n";
     uint8_t zip[512];
@@ -85,7 +85,10 @@ static void loader_bk2_zip(void) {
     int loaded=dp_sega_tas_load(path,&t,err,sizeof err);
     if(!loaded) fprintf(stderr,"bk2 loader: %s\n",err);
     CHECK(loaded);
-    CHECK(t.frames==2 && t.anchored);
+    CHECK(t.frames==2 && t.anchored && t.smshawk_1114);
+    CHECK(dp_sega_tas_smshawk_profile(&t)==DP_TAS_SMSHAWK_1114);
+    t.smshawk_1114=0;
+    CHECK(dp_sega_tas_smshawk_profile(&t)==DP_TAS_SMSHAWK_CURRENT);
     CHECK(t.masks[0]==16 && t.masks[1]==16); // Button 1 held
     dp_sega_tas_free(&t);
     unlink(path);
@@ -205,6 +208,17 @@ static void sms_tas_phase(void) {
     b->advance(44001);                     // IRQ rises at the instruction boundary
     CHECK(b->cpu()->irq && b->service()==0);
     CHECK(b->service()==13);
+    b->init(rom,sizeof rom,NULL,1);
+    b->tas_compat(2);
+    z80_t *c=b->cpu();
+    c->r=0x35; c->iff1=1; c->irq=1;
+    CHECK(b->service()==13 && c->r==0x35);
+    z80_decoded_t d={0}; d.group=1; d.index=1;
+    CHECK(b->tas_instruction(&d,23)==23 && c->r==0x36);
+    d.group=0; d.opcode=0x86;
+    CHECK(b->tas_instruction(&d,19)==16);
+    b->tas_compat(1);
+    CHECK(b->tas_instruction(&d,19)==19);
 }
 int main(void) {
     loader_plain_log();

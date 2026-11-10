@@ -64,6 +64,16 @@ static int ch_nonzero(const void *p, size_t bytes) {
 static void ch_put(DpBuf *o, uint64_t v, int bytes) {
     for (int i = 0; i < bytes; i++) { uint8_t b = (uint8_t)(v >> (8 * i)); dp_buf_push(o, &b, 1); }
 }
+// Preserve the first-discovery journal, including its overflow count.
+static void first_encode(const DpFirstLog *first, DpBuf *out) {
+    pthread_mutex_lock((pthread_mutex_t *)&first->mtx);
+    dp_buf_push(out, "DPFI", 4); ch_put(out, 1, 4); ch_put(out, first->n, 4); ch_put(out, first->dropped, 8);
+    for (uint32_t i = 0; i < first->n; i++) {
+        const DpFirstSeen *r = &first->e[i];
+        ch_put(out, r->key, 4); ch_put(out, r->src, 4); ch_put(out, r->stamp, 8); ch_put(out, r->actor, 4);
+    }
+    pthread_mutex_unlock((pthread_mutex_t *)&first->mtx);
+}
 int dp_map_ch_encode(const DpResults *res, DpBuf *out) {
     size_t n = (size_t)res->banks * 0x4000;
     if (n > (64u << 20) / 15) return 0;   // bounded: past it the chunk is left out
@@ -118,14 +128,13 @@ int dp_map_is_data(int c) { return c == DP_MAP_DATA_COPIED || c == DP_MAP_DATA_R
 // methods whose workers run continuously without finding anything).  Session
 // rows carry the method in the actor tag; a row with the unknown actor (0,
 // legacy paths) and the static family land in the static bucket like before.
-void dp_map_methods_pct(const DpResults *res, const DpMapSummary *sp, double mshare[5]) {
-    const DpMapSummary s = *sp;
-    double tot = (double)s.total;
+static void methods_pct(const DpFirstLog *first, size_t total, double mshare[5]) {
+    double tot = (double)total;
     for (int i = 0; i < 5; i++) mshare[i] = 0;
     if (!tot) return;
-    pthread_mutex_lock((pthread_mutex_t *)&res->first.mtx);
-    for (uint32_t i = 0; i < res->first.n; i++) {
-        const DpFirstSeen *r = &res->first.e[i];
+    pthread_mutex_lock((pthread_mutex_t *)&first->mtx);
+    for (uint32_t i = 0; i < first->n; i++) {
+        const DpFirstSeen *r = &first->e[i];
         int c;
         if (r->src & DP_SRC_SESSION)
             c = r->actor == DP_ACTOR_TAS     ? 0
@@ -138,9 +147,12 @@ void dp_map_methods_pct(const DpResults *res, const DpMapSummary *sp, double msh
             c = 4; // static family: closure, provenance, scans, sibling inference
         mshare[c] += 100.0 / tot;
     }
-    pthread_mutex_unlock((pthread_mutex_t *)&res->first.mtx);
+    pthread_mutex_unlock((pthread_mutex_t *)&first->mtx);
     // the journal is bounded (first_dropped counts the overflow, reported
     // alongside): the shares then undercount slightly, they never invent
+}
+void dp_map_methods_pct(const DpResults *res, const DpMapSummary *sp, double mshare[5]) {
+    methods_pct(&res->first, sp->total, mshare);
 }
 
 // ---- probable code: a linear decode of an unknown run between two known code blocks.  Uncertain by
@@ -849,7 +861,8 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
     DpBuf ch;
     dp_buf_init(&ch);
     int have_ch = dp_map_ch_encode(res, &ch);
-    DpPngText extra[7] = {
+    DpBuf fi; dp_buf_init(&fi); first_encode(&res->first, &fi);
+    DpPngText extra[9] = {
         { "deepeel_heat", heat_txt.p, heat_txt.len, 0 },
         { "deepeel_cov", cov_txt.p, cov_txt.len, 0 },
         { "deepeel_rom", rom_txt.p, rom_txt.len, 0 },
@@ -857,13 +870,16 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
         { "dpTb", tb_txt.p, tb_txt.len, 0 },
         { "dpCh", ch.p, have_ch ? ch.len : 0, 0 },
         { "dpIx", ix_txt.p, ix_txt.len, 0 },
+        { "dpMt", meth, strlen(meth), 0 },
+        { "dpFi", fi.p, fi.len, 0 },
     };
     int ok = map_png_render(m, (int)res->banks, title, &s, (const char *)txt.p, txt.len,
                             meta, path, res->plat ? res->plat->name : "gb", file,
-                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 7, meth, NULL);
+                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 9, meth, NULL);
     free(kinds);
     dp_buf_free(&ix_txt);
     dp_buf_free(&ch);
+    dp_buf_free(&fi);
     dp_buf_free(&tb_txt);
     dp_buf_free(&fr_txt);
     free(hb);
@@ -876,9 +892,103 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
     return ok;
 }
 
-int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char *title,
-                            const char *meta, const char *path, const char *sysname,
-                            const char *filename, unsigned rom_size) {
+static uint64_t ch_get(const uint8_t *p, unsigned width) {
+    uint64_t v = 0;
+    for (unsigned i = 0; i < width; i++) v |= (uint64_t)p[i] << (8 * i);
+    return v;
+}
+
+// Reconstruct GB played heat from dpCh without trusting chunk lengths or alignment.
+static uint32_t *ch_heat(const uint8_t *p, size_t len, size_t n) {
+    if (len < 28 || memcmp(p, "DPCH", 4) || ch_get(p + 4, 4) != 1 ||
+        ch_get(p + 8, 4) > 1 || ch_get(p + 12, 8) != n ||
+        ch_get(p + 20, 4) != 0x4000) return NULL;
+    uint32_t mask = (uint32_t)ch_get(p + 24, 4);
+    if (mask & ~255u) return NULL;
+    static const unsigned width[8] = {1,1,1,4,4,4,4,4};
+    const uint8_t *sec[8] = {0};
+    size_t pos = 28;
+    for (int i = 0; i < 8; i++) if (mask & (1u << i)) {
+        if (n > (len - pos) / width[i]) return NULL;
+        sec[i] = p + pos; pos += n * width[i];
+    }
+    if (pos != len || (!sec[5] && !sec[6])) return NULL;
+    uint32_t *heat = calloc(n, sizeof(*heat));
+    if (!heat) return NULL;
+    int byte_hits = ch_get(p + 8, 4) == 1;
+    uint32_t carry = 0;
+    for (size_t k = 0; k < n; k++) {
+        if (!(k & 0x3fff)) carry = 0;
+        uint8_t ef = sec[0] ? sec[0][k] : 0;
+        uint32_t e = sec[5] ? (uint32_t)ch_get(sec[5] + 4*k, 4) : 0;
+        uint32_t r = sec[6] ? (uint32_t)ch_get(sec[6] + 4*k, 4) : 0;
+        if (byte_hits) { heat[k] = e > r ? e : r; continue; }
+        if (ef & DP_XF_START) carry = e;
+        else if (!(ef & (DP_XF_NATURAL | DP_XF_FORCED))) carry = 0;
+        uint32_t v = (ef & (DP_XF_NATURAL | DP_XF_FORCED)) ? carry : 0;
+        heat[k] = v > r ? v : r;
+    }
+    return heat;
+}
+
+int dp_map_png_from_evidence(const uint8_t *classes, size_t size, const uint32_t *played_exec,
+                             const uint32_t *played_data, const uint32_t *sources,
+                             const DpFirstLog *first, const char *title, const char *sysname,
+                             const char *filename, const char *path) {
+    if (!classes || !size || size > UINT32_MAX || !first) return 0;
+    int banks = (int)((size + 0x3fff) / 0x4000);
+    size_t n = (size_t)banks * 0x4000;
+    uint8_t *m = calloc(n, 1);
+    uint32_t *heat = calloc(n, sizeof(*heat));
+    if (!m || !heat) { free(m); free(heat); return 0; }
+    memcpy(m, classes, size);
+    DpMapSummary s = {0}; s.total = size;
+    for (size_t i = 0; i < size; i++) {
+        int c = m[i];
+        if (c >= DP_MAP_COUNT) { free(m); free(heat); return 0; }
+        s.cls[c]++;
+        if (c == DP_MAP_UNKNOWN) s.unknown++; else s.known++;
+        if (dp_map_is_code(c)) s.code++; else if (dp_map_is_data(c)) s.data++;
+        else if (c == DP_MAP_PAD || c == DP_MAP_INF_PAD) s.pad++;
+        if (c >= DP_MAP_INF_DATA) s.inferred++;
+        uint32_t e = played_exec ? played_exec[i] : 0, d = played_data ? played_data[i] : 0;
+        heat[i] = e > d ? e : d;
+    }
+    double shares[5];
+    methods_pct(first, size, shares);
+    pthread_mutex_lock((pthread_mutex_t *)&first->mtx);
+    double scripted = 0;
+    for (uint32_t i = 0; i < first->n; i++)
+        if ((first->e[i].src & DP_SRC_SESSION) && first->e[i].actor == DP_ACTOR_SCRIPT)
+            scripted += 100.0 / (double)size;
+    uint64_t dropped = first->dropped;
+    pthread_mutex_unlock((pthread_mutex_t *)&first->mtx);
+    shares[4] -= scripted;
+    char methods[192], meta[256];
+    snprintf(methods, sizeof methods, "apport : tas %.1f%%  aleatoire %.1f%%  fourche %.1f%%  demo %.1f%%  dirige %.1f%%  statique+infere %.1f%%",
+             shares[0], shares[1], shares[2], shares[3], scripted, shares[4]);
+    snprintf(meta, sizeof meta, "{\"deepeel\":\"%s\",\"first_dropped\":%llu}", DEEPEEL_VERSION, (unsigned long long)dropped);
+    DpBuf cv, txt, ch, fi; dp_buf_init(&cv); dp_buf_init(&txt); dp_buf_init(&ch); dp_buf_init(&fi);
+    first_encode(first, &fi);
+    dp_map_cv_encode(m, n, &cv);
+    int ok = dp_map_cv_to_text(cv.p, cv.len, banks, &txt);
+    dp_buf_push(&ch, "DPCH", 4); ch_put(&ch, 1, 4); ch_put(&ch, 1, 4);
+    ch_put(&ch, n, 8); ch_put(&ch, 0x4000, 4);
+    uint32_t mask = (played_exec ? 1u<<5 : 0) | (played_data ? 1u<<6 : 0) | (sources ? 1u<<7 : 0);
+    ch_put(&ch, mask, 4);
+    const uint32_t *sections[] = {played_exec, played_data, sources};
+    for (int j = 0; j < 3; j++) if (sections[j])
+        for (size_t i = 0; i < n; i++) ch_put(&ch, i < size ? sections[j][i] : 0, 4);
+    DpPngText extra[] = {{"dpCh", ch.p, ch.len, 0}, {"dpMt", methods, strlen(methods), 0}, {"dpFi", fi.p, fi.len, 0}};
+    if (ok) ok = map_png_render(m, banks, title, &s, (const char *)txt.p, txt.len, meta, path,
+                                sysname, filename, (unsigned)size, heat, extra, 3, methods, NULL);
+    dp_buf_free(&cv); dp_buf_free(&txt); dp_buf_free(&ch); dp_buf_free(&fi); free(heat); free(m);
+    return ok;
+}
+
+int dp_map_png_from_saved(const char *text, size_t len, int banks, const char *title,
+                          const char *meta, const char *path, const char *sysname,
+                          const char *filename, unsigned rom_size, const char *saved_png) {
     if (banks <= 0) return 0;
     size_t n = (size_t)banks * 0x4000;
     uint8_t *m = calloc(n ? n : 1, 1); // DP_MAP_UNKNOWN
@@ -920,8 +1030,28 @@ int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char 
         else if (c == DP_MAP_PAD || c == DP_MAP_INF_PAD) s.pad++;
         if (c >= DP_MAP_INF_DATA) s.inferred++;
     }
-    return map_png_render(m, banks, title, &s, text, len, meta, path, sysname, filename,
-                          rom_size, NULL, NULL, 0, NULL, NULL);
+    static const char *keys[] = {"deepeel_heat", "deepeel_cov", "deepeel_rom", "dpFr", "dpTb", "dpCh", "dpIx", "dpMt", "dpFi"};
+    DpPngText extra[9]; int count = 0;
+    uint32_t *heat = NULL; const char *methods = NULL;
+    if (saved_png) for (size_t i = 0; i < sizeof(keys)/sizeof(keys[0]); i++) {
+        size_t chunk_len = 0;
+        char *chunk = dp_png_text(saved_png, keys[i], &chunk_len);
+        if (!chunk) continue;
+        extra[count++] = (DpPngText){keys[i], chunk, chunk_len, 0};
+        if (!strcmp(keys[i], "dpCh")) heat = ch_heat((uint8_t *)chunk, chunk_len, n);
+        if (!strcmp(keys[i], "dpMt")) methods = chunk;
+    }
+    int ok = map_png_render(m, banks, title, &s, text, len, meta, path, sysname, filename,
+                            rom_size, heat, extra, count, methods, NULL);
+    for (int i = 0; i < count; i++) free((void *)extra[i].data);
+    free(heat); free(m);
+    return ok;
+}
+
+int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char *title,
+                            const char *meta, const char *path, const char *sysname,
+                            const char *filename, unsigned rom_size) {
+    return dp_map_png_from_saved(text, len, banks, title, meta, path, sysname, filename, rom_size, NULL);
 }
 
 // the shared renderer: squares grid + legend band + tEXt chunks, from a
@@ -1239,7 +1369,7 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
     DpBuf cv;
     dp_buf_init(&cv);
     dp_map_cv_encode(m, (size_t)banks * 0x4000, &cv);
-    DpPngText items[3 + 8];
+    DpPngText items[3 + 9];
     int ni = 0;
     items[ni++] = (DpPngText){ "dpCv", cv.p, cv.len, 0 };
     items[ni++] = (DpPngText){ "deepeel_map", map_text, map_len, 0 };

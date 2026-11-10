@@ -341,3 +341,27 @@ de bord de trame ne démontrent pas une égalité cycle par cycle ni une égalit
 Le dump SMSHawk utilisait auparavant un fichier de 8 000 masques : au-delà les boutons étaient silencieusement
 relâchés. Le dumper refuse désormais un fichier plus court que le nombre de trames demandé et refuse une première
 trame non nulle qu'il ne peut pas fournir au constructeur de son frontend. Observations de l'outil, ROM hors dépôt.
+
+**Complément 0.251.33 — version du cœur et parcours complet.** La comparaison précédente utilisait le SMSHawk
+actuel : les deux exécutions restaient synchrones mais Mickey restait dans le hall, alors que le film publié termine
+le jeu. Son en-tête indique SMSHawk de BizHawk 1.11.4. En reconstruisant ce cœur depuis le tag local et en lui
+fournissant les 42 337 entrées, on observe le niveau à f8000 et le château final à la dernière trame.
+
+Le Z80 historique ne compte pas l'acquittement d'une interruption dans `R`, compte trois rafraîchissements pour
+les instructions indexées à double préfixe et facture 16 T à `ADD A,(IX/IY+d)`. Son moteur traite une interruption
+signalée en début de ligne après l'instruction suivante. Ces particularités de compatibilité appartiennent au rejeu
+deepeel ; elles ne modifient pas le cœur matériel m0boy. Les profils partagent le déclenchement de ligne et activent
+leurs autres correctifs selon la version : l'en-tête SMSHawk 1.11.4 sélectionne le profil historique ; les autres
+en-têtes et les journaux sans en-tête gardent le profil actuel par défaut. Ce choix est commun au rejeu et au banc.
+Dans cet essai, la RAM hors les 256 derniers octets de pile est identique à chaque fin de trame avec le SMSHawk
+historique ; le rejeu de l'explorateur et le banc sont identiques sur toute la RAM. L'explorateur exécute
+252 093 239 pas de film sans faute ni trame refusée. Ces observations ne démontrent pas une équivalence générale
+pour les autres jeux ou toutes les versions de SMSHawk. Une comparaison des empreintes vidéo signale 784 trames
+différentes sur 42 337 ; à f1739, par exemple, 13 pixels diffèrent. L'image finale a la même empreinte. Les écarts
+de rendu restent à analyser et les empreintes ne sont pas une preuve d'égalité pixel par pixel.
+
+Pour observer simultanément m0boy et les deux SMSHawk, exécuter
+`tools/gg_watch_smshawks.sh ROM film.bk2 42337`. Le script construit le cœur historique dans `build/` à partir du
+tag `1.11.4` du dépôt BizHawk voisin ; les images transitent par des tubes temporaires. Les FPS affichés mesurent
+les trames effectivement présentées dans cette comparaison synchronisée, qui est limitée par le plus lent des cœurs
+et par la cadence de la fenêtre.

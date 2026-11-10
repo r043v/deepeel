@@ -164,7 +164,7 @@ def cmd_scan_z80(args):
             "--indirect-total", str(args.max_total),
             "--seed-banks", "--jobs", str(args.jobs),
             "--text", os.path.join(out_dir, f"{slug}.txt"),
-            "--map", os.path.join(out_dir, f"{slug}.map"),
+            "--map", os.path.join(out_dir, f"{slug}.map.png"),
             "--evidence", os.path.join(out_dir, f"{slug}.evidence"),
             "--summary", os.path.join(out_dir, f"{slug}.summary.json"),
         ]

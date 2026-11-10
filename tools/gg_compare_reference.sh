@@ -10,7 +10,7 @@ fi
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 runtime=${M0BOY_DIR:-"$root/../m0boy"}
 so=${DP_GPGX_SO:-"$root/../Genesis-Plus-GX/genesis_plus_gx_libretro.so"}
-[ -f "$so" ] || { echo "reference core not found: $so" >&2; exit 1; }
+[ -n "${DP_GG_OLD_HAWK_FRAMES:-}" ] || [ -f "$so" ] || { echo "reference core not found: $so" >&2; exit 1; }
 cc -O2 -std=c99 -D_POSIX_C_SOURCE=200809L -I"$runtime/targets/gamegear/runtime" -I"$runtime/targets/sg1000/runtime" \
     -I"$runtime/targets/common/runtime" -I"$root/src/platform/sega" -I"$root/src/gui" \
     "$root/tools/gg_compare_reference.c" "$root/src/gui/watch.c" "$root/src/gui/font5x7.c" \

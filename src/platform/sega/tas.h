@@ -17,6 +17,7 @@ typedef struct {
     uint8_t sha1[20];
     int has_md5;      // BizHawk SMSHawk writes an MD5 under the "SHA1" label
     uint8_t md5[16];
+    int smshawk_1114; // movie header identifies the historical SMSHawk 1.11.4 core
     char source[512];
 } DpSegaTas;
 // 1 = same ROM, 0 = different, -1 = the movie records no identity; `why` explains
@@ -25,4 +26,7 @@ int dp_sega_tas_rom_match(const DpSegaTas *t,const uint8_t *rom,size_t size,char
 // sniff and load; returns 1 on success, 0 with a human message in `err`
 int dp_sega_tas_load(const char *path,DpSegaTas *out,char *err,size_t errsz);
 void dp_sega_tas_free(DpSegaTas *t);
+// SMSHawk profile inferred from the movie header; unknown headers retain the
+// existing current-core fallback.
+int dp_sega_tas_smshawk_profile(const DpSegaTas *t);
 #endif

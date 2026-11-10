@@ -85,6 +85,36 @@ int main(void) {
         free(r2);
         dp_buf_free(&t2);
     }
+    // A saved evidence chunk survives re-rendering and supplies played heat.
+    {
+        const size_t bytes = 0x4000;
+        size_t chlen = 28 + bytes + 4 * bytes;
+        uint8_t *ch = calloc(chlen, 1);
+        memcpy(ch, "DPCH", 4);
+        ch[4] = 1; ch[13] = 0x40; ch[21] = 0x40;
+        ch[24] = (1u << 0) | (1u << 5);
+        ch[28] = DP_XF_NATURAL | DP_XF_START;
+        ch[28 + bytes] = 42;
+        const uint8_t pixel[3] = {0, 0, 0};
+        const char methods[] = "apport : tas 1.0%";
+        DpPngText chunks[] = {{"dpCh", ch, chlen, 0}, {"dpMt", methods, sizeof(methods)-1, 0}};
+        CHECK(dp_png_save_chunks("test_map_saved.png", 1, 1, pixel, chunks, 2));
+        const char map[] = "0 0 3fff code-natural\n";
+        CHECK(dp_map_png_from_saved(map, sizeof(map)-1, 1, "SAVED", "{}", "test_map_restored.png",
+                                    "gb", "s.gb", bytes, "test_map_saved.png"));
+        size_t got = 0;
+        char *restored = dp_png_text("test_map_restored.png", "dpCh", &got);
+        CHECK(restored && got == chlen && !memcmp(restored, ch, chlen));
+        free(restored);
+        restored = dp_png_text("test_map_restored.png", "dpMt", &got);
+        CHECK(restored && got == sizeof(methods)-1 && !memcmp(restored, methods, got));
+        free(restored);
+        int w3 = 0, h3 = 0; uint8_t *r3 = NULL, *p3 = NULL; size_t l3 = 0;
+        CHECK(dp_png_load("test_map_restored.png", &w3, &h3, &r3, &p3, &l3));
+        CHECK(h3 > 128 + 64); // map, separate heat grid, and legend
+        free(r3); free(p3); free(ch);
+        remove("test_map_saved.png"); remove("test_map_restored.png");
+    }
     remove(path);
     remove("test_map_small.png");
     free(ref);

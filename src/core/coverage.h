@@ -58,6 +58,7 @@ typedef struct { uint32_t key, src; uint64_t stamp; uint32_t actor; } DpFirstSee
 #define DP_ACTOR_TAS 1
 #define DP_ACTOR_RNG 2
 #define DP_ACTOR_ATTRACT 3
+#define DP_ACTOR_SCRIPT 4
 typedef struct {
     DpFirstSeen *e;
     uint32_t n, cap, max;

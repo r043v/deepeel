@@ -169,6 +169,8 @@ static void on_term_signal(int sig) {
 }
 
 static FILE *hawk;   /* DP_GG_HAWK_FRAMES: SMSHawk's pre-dumped frames (declared in main) */
+static FILE *old_hawk;
+static unsigned hawk_window, hawk_fps;
 static void watch_open(unsigned movie_frames, const char *movie_path, unsigned buf_w, unsigned buf_h) {
     g_watch_movie = strrchr(movie_path, '/');
     g_watch_movie = g_watch_movie ? g_watch_movie + 1 : movie_path;
@@ -225,19 +227,21 @@ static void watch_frame(void) {
     g_watch_seen++;
     watch_dump();   /* tile dumps work even without a window */
     char l1[128];
-    snprintf(l1, sizeof l1, "deepeel (m0boy) | %s", g_watch_movie);
+    snprintf(l1, sizeof l1, "m0boy %s | deepeel", getenv("DP_GG_M0BOY_VERSION") ? getenv("DP_GG_M0BOY_VERSION") : "local");
     dp_watch_tile(g_watch, 0, g_dut.px, DUT_W_MAX);
     dp_watch_tile(g_watch, 1, g_ref.px, DUT_W_MAX);
     unsigned span = now_ms() - g_watch_t0;
     if (span >= 500) {   /* captions' f/s, both tiles measured independently */
-        snprintf(g_l2, sizeof g_l2, "film 1/1  frame %u/%u  %u f/s",
+        snprintf(g_l2, sizeof g_l2, "film 1/1  frame %u/%u  %u fps",
                  g_watch_total, g_watch_mframes, g_watch_n * 1000u / span);
-        snprintf(g_r2, sizeof g_r2, "frame %u  %u f/s",
+        snprintf(g_r2, sizeof g_r2, "frame %u  %u fps",
                  g_watch_rtotal, g_watch_rn * 1000u / span);
+        hawk_fps = hawk_window * 1000u / span;
+        hawk_window = 0;
         g_watch_t0 = now_ms(); g_watch_n = 0; g_watch_rn = 0; g_ref_frames_seen = 0;
     }
     dp_watch_caption(g_watch, 0, l1, g_l2);
-    dp_watch_caption(g_watch, 1, "Genesis Plus GX", g_r2);
+    dp_watch_caption(g_watch, 1, old_hawk ? "SMSHawk / BizHawk 1.11.4" : "Genesis Plus GX", g_r2);
     int stop = 0;
     dp_watch_frame(g_watch, &stop);
     if (stop) exit(0);
@@ -262,32 +266,41 @@ static void dut_frame(void *u) {
 
 int main(int argc, char **argv) {
     if (argc != 4) { fprintf(stderr, "usage: gg_compare_reference ROM movie.bk2 frames\n"); return 2; }
-    const char *so = getenv("DP_GPGX_SO");
-    if (!so) so = "../Genesis-Plus-GX/genesis_plus_gx_libretro.so";
-    void *lib = dlopen(so, RTLD_NOW | RTLD_LOCAL);
-    if (!lib) { fprintf(stderr, "dlopen %s: %s\n", so, dlerror()); return 2; }
-    void (*g_retro_run)(void); RS("retro_run", g_retro_run);
-    void (*set_env)(lr_environment_t); RS("retro_set_environment", set_env);
-    void (*set_video)(lr_video_t); RS("retro_set_video_refresh", set_video);
-    void (*set_poll)(lr_poll_t); RS("retro_set_input_poll", set_poll);
-    void (*set_input)(lr_input_state_t); RS("retro_set_input_state", set_input);
-    void (*set_audio)(void (*)(int16_t, int16_t)); RS("retro_set_audio_sample", set_audio);
-    void (*set_audio_batch)(void (*)(int16_t *, size_t)); RS("retro_set_audio_sample_batch", set_audio_batch);
-    unsigned (*api)(void); RS("retro_api_version", api);
-    void (*init)(void); RS("retro_init", init);
-    bool (*load)(const struct lr_game_info *); RS("retro_load_game", load);
-    void *(*mem_data)(unsigned); RS("retro_get_memory_data", mem_data);
-    size_t (*mem_size)(unsigned); RS("retro_get_memory_size", mem_size);
-    void (*get_info)(struct lr_system_info *); RS("retro_get_system_info", get_info);
+    const char *old_path = getenv("DP_GG_OLD_HAWK_FRAMES");
+    void (*g_retro_run)(void) = NULL;
+    bool (*load)(const struct lr_game_info *) = NULL;
+    void *(*mem_data)(unsigned) = NULL;
+    size_t (*mem_size)(unsigned) = NULL;
+    void *lib = NULL;
+    uint8_t legacy_ram[8192] = {0};
+    if (!old_path) {
+        const char *so = getenv("DP_GPGX_SO");
+        if (!so) so = "../Genesis-Plus-GX/genesis_plus_gx_libretro.so";
+        lib = dlopen(so, RTLD_NOW | RTLD_LOCAL);
+        if (!lib) { fprintf(stderr, "dlopen %s: %s\n", so, dlerror()); return 2; }
+        RS("retro_run", g_retro_run);
+        void (*set_env)(lr_environment_t); RS("retro_set_environment", set_env);
+        void (*set_video)(lr_video_t); RS("retro_set_video_refresh", set_video);
+        void (*set_poll)(lr_poll_t); RS("retro_set_input_poll", set_poll);
+        void (*set_input)(lr_input_state_t); RS("retro_set_input_state", set_input);
+        void (*set_audio)(void (*)(int16_t, int16_t)); RS("retro_set_audio_sample", set_audio);
+        void (*set_audio_batch)(void (*)(int16_t *, size_t)); RS("retro_set_audio_sample_batch", set_audio_batch);
+        unsigned (*api)(void); RS("retro_api_version", api);
+        void (*init)(void); RS("retro_init", init);
+        RS("retro_load_game", load);
+        RS("retro_get_memory_data", mem_data);
+        RS("retro_get_memory_size", mem_size);
+        void (*get_info)(struct lr_system_info *); RS("retro_get_system_info", get_info);
     #undef RS
-    if (api() != 1) { fprintf(stderr, "unsupported libretro API %u\n", api()); return 2; }
+        if (api() != 1) { fprintf(stderr, "unsupported libretro API %u\n", api()); return 2; }
 
-    set_video(ref_video); set_poll(ref_poll); set_input(ref_input);
-    set_audio(ref_audio_sample); set_audio_batch(ref_audio_batch);
-    set_env(ref_env);
-    init();
-    struct lr_system_info info; get_info(&info);
-    fprintf(stderr, "reference: %s %s (extensions %s)\n", info.library_name, info.library_version, info.valid_extensions);
+        set_video(ref_video); set_poll(ref_poll); set_input(ref_input);
+        set_audio(ref_audio_sample); set_audio_batch(ref_audio_batch);
+        set_env(ref_env);
+        init();
+        struct lr_system_info info; get_info(&info);
+        fprintf(stderr, "reference: %s %s (extensions %s)\n", info.library_name, info.library_version, info.valid_extensions);
+    }
 
     FILE *f = fopen(argv[1], "rb");
     if (!f) { fprintf(stderr, "cannot open ROM\n"); return 2; }
@@ -296,7 +309,7 @@ int main(int argc, char **argv) {
     if (!rom || fread(rom, 1, n, f) != (size_t)n) return 2;
     fclose(f);
     struct lr_game_info gi = { .path = argv[1], .data = rom, .size = (size_t)n, .meta = NULL };
-    if (!load(&gi)) { fprintf(stderr, "retro_load_game refused the ROM\n"); return 2; }
+    if (!old_path && !load(&gi)) { fprintf(stderr, "retro_load_game refused the ROM\n"); return 2; }
     fprintf(stderr, "reference pixel format %u, framebuffer %ux%u\n", g_ref.fmt, g_ref.w, g_ref.h);
 
     DpSegaTas tas; char err[512];
@@ -331,14 +344,15 @@ int main(int argc, char **argv) {
      * later against the VDP than a core that fetches at T0 (TAS compatibility
      * with SMSHawk movies: a power-on phase, not a hardware measurement) */
     const int hawk_compat = is_sms && (getenv("DP_GG_HAWK_COMPAT") || getenv("DP_GG_HAWK_FRAMES")) && g_b->tas_compat;
-    if (hawk_compat) g_b->tas_compat(1);
+    const int hawk_profile = getenv("DP_GG_HAWK_LEGACY") ? DP_TAS_SMSHAWK_1114 : dp_sega_tas_smshawk_profile(&tas);
+    if (hawk_compat) g_b->tas_compat(hawk_profile);
     if (getenv("DP_GG_RESET_T")) {
-        if (hawk_compat) g_mach->cyc -= 3; /* explicit phase replaces the profile's default */
+        if (hawk_compat && hawk_profile == DP_TAS_SMSHAWK_CURRENT) g_mach->cyc -= 3; /* explicit phase replaces the profile's default */
         g_mach->cyc += (uint32_t)strtoul(getenv("DP_GG_RESET_T"), NULL, 0);
     }
 
-    uint8_t *ref_ram = mem_data(2);   /* RETRO_MEMORY_SYSTEM_RAM */
-    size_t ref_ram_size = mem_size(2);
+    uint8_t *ref_ram = old_path ? legacy_ram : mem_data(2);   /* RETRO_MEMORY_SYSTEM_RAM */
+    size_t ref_ram_size = old_path ? sizeof legacy_ram : mem_size(2);
     if (!ref_ram || ref_ram_size != sizeof g_mach->ram) {
         fprintf(stderr, "reference SYSTEM_RAM %zu bytes (expected %zu)\n", ref_ram_size, sizeof g_mach->ram);
         return 2;
@@ -445,6 +459,12 @@ int main(int argc, char **argv) {
             if (!hawk_fb) { fprintf(stderr, "out of memory (hawk tile)\n"); return 2; }
         }
     }
+    if (old_path) {
+        if (!is_sms) { fprintf(stderr, "historical SMSHawk stream requires SMS mode\n"); return 2; }
+        old_hawk = fopen(old_path, "rb");
+        if (!old_hawk) { fprintf(stderr, "cannot open historical SMSHawk stream\n"); return 2; }
+        g_ref.fmt = LR_PF_RGB565;
+    }
     for (unsigned frame = 0; frame < limit; frame++) {
         if (have_window && frame == seek) {
             watch_open(tas.frames, movie_path, g_dut_w, is_sms ? GG_ACTIVE : GG_HEIGHT);
@@ -463,7 +483,15 @@ int main(int argc, char **argv) {
          * expects it on bit 128 (GG_PAUSE), not the Game Gear START bit */
         const unsigned dut_pad = is_sms ? ((g_pad & 0x3Fu) | ((g_pad & 0x40u) << 1)) : g_pad;
         if (g_dut_w == DUT_W_MAX) dp_sms_gg_buttons(dut_pad); else gg_buttons(dut_pad);
-        g_retro_run();
+        if (old_hawk) {
+            uint16_t pixels[256 * 192];
+            if (fread(pixels, sizeof *pixels, 256 * 192, old_hawk) != 256 * 192 ||
+                fread(legacy_ram, 1, sizeof legacy_ram, old_hawk) != sizeof legacy_ram) {
+                fprintf(stderr, "historical SMSHawk stream ended at frame %u\n", frame + 1);
+                return 2;
+            }
+            ref_video(pixels, 256, 192, 256 * sizeof *pixels);
+        } else g_retro_run();
         /* one real frame: instructions until the frame-end event (same loop
          * as the sega explorer's play_step: service, decode, execute, advance) */
         g_mach->stop = 0;
@@ -489,6 +517,7 @@ int main(int argc, char **argv) {
                 if (frame + 1 >= itrace_lo && frame + 1 <= itrace_hi)
                     fprintf(stderr, "ins f=%u pc=%04x r=%02x t=%u af=%02x%02x bc=%02x%02x de=%02x%02x hl=%02x%02x ix=%04x st=%02x li=%u ie=%02x/%02x\n", frame + 1, c->pc, c->r & 0x7f, g_mach->cyc - g_mach->frame_start, c->a, c->f, c->b, c->c, c->d, c->e, c->h, c->l, c->ix, g_mach->vdp_status, g_mach->line_irq, g_mach->vdp[0], g_mach->vdp[1]);
                 cycles = z80_execute_decoded(c, &g_d);
+                if (g_b->tas_instruction) cycles = g_b->tas_instruction(&g_d, cycles);
                 if (trace_addr < sizeof g_mach->ram && g_mach->ram[trace_addr] != before)
                     fprintf(stderr, "trace: frame %u pc=%04x -> $%04x=%02x (sp=%04x)\n",
                             frame + 1, c->pc, (unsigned)(0xC000 + trace_addr), g_mach->ram[trace_addr], c->sp);
@@ -530,18 +559,21 @@ int main(int argc, char **argv) {
             memset(pc_hist, 0, sizeof pc_hist);
         }
         if (hawk) {
-            static unsigned hawk_frames, hawk_eof;
+            static unsigned hawk_frames;
             if (fread(hawk_fb, sizeof *hawk_fb, (size_t)g_dut_w * (size_t)(g_dut_w == DUT_W_MAX ? GG_ACTIVE : GG_HEIGHT), hawk) == (size_t)g_dut_w * (size_t)(g_dut_w == DUT_W_MAX ? GG_ACTIVE : GG_HEIGHT)) {
                 hawk_frames++;
+                hawk_window++;
                 if (g_watch) {
                     dp_watch_tile(g_watch, 2, hawk_fb, g_dut_w);
                     char h1[64], h2[96];
-                    snprintf(h1, sizeof h1, "SMSHawk (BizHawk)");
-                    if (hawk_eof) snprintf(h2, sizeof h2, "fin du dump (frame %u)", hawk_frames);
-                    else snprintf(h2, sizeof h2, "frame %u/%u", hawk_frames, g_watch_mframes);
+                    snprintf(h1, sizeof h1, "SMSHawk / BizHawk %s", getenv("DP_GG_HAWK_VERSION") ? getenv("DP_GG_HAWK_VERSION") : "actuel");
+                    snprintf(h2, sizeof h2, "frame %u/%u  %u fps", hawk_frames, g_watch_mframes, hawk_fps);
                     dp_watch_caption(g_watch, 2, h1, h2);
                 }
-            } else hawk_eof = 1;
+            } else {
+                fprintf(stderr, "current SMSHawk stream ended at frame %u\n", frame + 1);
+                return 2;
+            }
         }
         if (pc_range_frames > 0) pc_range_frames--;
         /* DP_GG_VDPLOG: per-frame VDP interrupt state (reg0 line IE, reg1
@@ -610,6 +642,7 @@ int main(int argc, char **argv) {
     if (dump_ref) { fclose(dump_ref); fclose(dump_dut); }
     if (dump_vbl) fclose(dump_vbl);
     free(rom); free(tas.masks);
-    dlclose(lib);
+    if (old_hawk) fclose(old_hawk);
+    if (lib) dlclose(lib);
     return 0;
 }

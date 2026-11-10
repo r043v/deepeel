@@ -1,5 +1,16 @@
 # Plateforme Game Boy
 
+En ligne de commande SMS/GG, une courte session jouée commence désormais
+touches relâchées (attract), et le rejeu TAS capture par défaut un état toutes
+les 600 images pour des essais aléatoires. Ces essais restaurent aussi la RAM
+cartouche et les origines de données ; leur budget reste borné. Pour les
+plateformes Z80, `--map carte.png` utilise le même rendu que la GB : chaleur
+des sessions, apports par méthode et preuves embarquées. Le rejeu d'un PNG par
+`maprender` conserve ses preuves et sa chaleur ; une carte texte seule ne peut
+pas les reconstituer. Les chunks `dpFi` conservent les premières découvertes
+et `dpMt` leur résumé affiché. Les autres plateformes restent à raccorder à ce
+format partagé.
+
 Évolution multi-systèmes : le registre de ports, le désassemblage et les
 premières explorations Z80/Sega sont décrits dans [Z80.fr.md](Z80.fr.md).
 Ils utilisent des machines et rapports séparés ; la limite ROM `$8000` de
