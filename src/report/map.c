@@ -148,11 +148,24 @@ static void methods_pct(const DpFirstLog *first, size_t total, double mshare[5])
         mshare[c] += 100.0 / tot;
     }
     pthread_mutex_unlock((pthread_mutex_t *)&first->mtx);
+    // Inferred bytes are a separate, disjoint addition to the map. Credit
+    // them to the static+inferred family so the displayed source shares
+    // reconcile with the final map coverage.
+    // (Added by the caller, which has the map summary.)
     // the journal is bounded (first_dropped counts the overflow, reported
     // alongside): the shares then undercount slightly, they never invent
 }
 void dp_map_methods_pct(const DpResults *res, const DpMapSummary *sp, double mshare[5]) {
     methods_pct(&res->first, sp->total, mshare);
+    if (sp->total) mshare[4] += 100.0 * (double)sp->inferred / (double)sp->total;
+}
+
+static void method_append(char *out, size_t cap, const char *name, double pct) {
+    // The UI uses one decimal place; omit values that would render as 0.0%.
+    if (pct < 0.05 || !cap) return;
+    size_t used = strlen(out);
+    if (used < cap) snprintf(out + used, cap - used, "%s%s %.1f%%",
+                             used ? "  " : "apport : ", name, pct);
 }
 
 // ---- probable code: a linear decode of an unknown run between two known code blocks.  Uncertain by
@@ -789,11 +802,9 @@ int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom
     // the known-byte count over each discovery entry, credited by source
     double mshare[5];
     dp_map_methods_pct(res, &s, mshare);
-    char meth[160];
-    snprintf(meth, sizeof meth,
-             "apport : tas %.1f%%  aleatoire %.1f%%  fourche %.1f%%  demo %.1f%%  "
-             "statique+infere %.1f%%",
-             mshare[0], mshare[1], mshare[2], mshare[3], mshare[4]);
+    char meth[256] = "";
+    static const char *method_names[] = { "tas", "aleatoire", "fourche", "demo", "statique+infere" };
+    for (int i = 0; i < 5; i++) method_append(meth, sizeof meth, method_names[i], mshare[i]);
     char meta[1280];
     snprintf(meta, sizeof meta,
              "{\"deepeel\":\"%s\",\"rom\":{\"title\":\"%s\",\"banks\":%d,\"size\":%u},"
@@ -956,6 +967,7 @@ int dp_map_png_from_evidence(const uint8_t *classes, size_t size, const uint32_t
     }
     double shares[5];
     methods_pct(first, size, shares);
+    if (size) shares[4] += 100.0 * (double)s.inferred / (double)size;
     pthread_mutex_lock((pthread_mutex_t *)&first->mtx);
     double scripted = 0;
     for (uint32_t i = 0; i < first->n; i++)
@@ -964,9 +976,11 @@ int dp_map_png_from_evidence(const uint8_t *classes, size_t size, const uint32_t
     uint64_t dropped = first->dropped;
     pthread_mutex_unlock((pthread_mutex_t *)&first->mtx);
     shares[4] -= scripted;
-    char methods[192], meta[256];
-    snprintf(methods, sizeof methods, "apport : tas %.1f%%  aleatoire %.1f%%  fourche %.1f%%  demo %.1f%%  dirige %.1f%%  statique+infere %.1f%%",
-             shares[0], shares[1], shares[2], shares[3], scripted, shares[4]);
+    char methods[256] = "", meta[256];
+    static const char *method_names[] = { "tas", "aleatoire", "fourche", "demo", "dirige", "statique+infere" };
+    for (int i = 0; i < 4; i++) method_append(methods, sizeof methods, method_names[i], shares[i]);
+    method_append(methods, sizeof methods, method_names[4], scripted);
+    method_append(methods, sizeof methods, method_names[5], shares[4] - scripted);
     snprintf(meta, sizeof meta, "{\"deepeel\":\"%s\",\"first_dropped\":%llu}", DEEPEEL_VERSION, (unsigned long long)dropped);
     DpBuf cv, txt, ch, fi; dp_buf_init(&cv); dp_buf_init(&txt); dp_buf_init(&ch); dp_buf_init(&fi);
     first_encode(first, &fi);
