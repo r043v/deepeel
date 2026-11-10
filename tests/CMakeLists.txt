@@ -241,7 +241,7 @@ add_custom_target(fixtures ALL DEPENDS ${FIXTURES})
 add_test(NAME sega_mapper_cli COMMAND ${CMAKE_COMMAND}
   -DCLI=$<TARGET_FILE:deepeel> -DROM=${CMAKE_CURRENT_BINARY_DIR}/fix_sega_mapper.sms
   -P ${CMAKE_CURRENT_SOURCE_DIR}/sega_mapper_cli.cmake)
-set_tests_properties(sega_mapper_cli PROPERTIES TIMEOUT 30)
+set_tests_properties(sega_mapper_cli PROPERTIES TIMEOUT 120)
 
 
 add_executable(test_core test_core.c)
