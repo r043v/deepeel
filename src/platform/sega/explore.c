@@ -1413,8 +1413,14 @@ static void play_session(Run *x) {
     r->play_steps=r->steps-play_start;
 }
 static void attract_session(Run *x) {
-    if(!x->opt->attract_frames) return;
+    if(!x->opt->attract_frames || !x->seed_state) return;
     pass_begin(x);
+    // Attract mode is measured from a clean power-on state, regardless of
+    // whether an optional TAS replay ran immediately before it.
+    x->b->load(x->seed_state);
+    memcpy(x->cart,x->seed_cart,0x8000);
+    memcpy(x->origins,x->seed_origins,x->origin_size);
+    dp_sega_closure_invalidate(x->closure);
     x->play_actor=DP_ACTOR_ATTRACT;
     uint64_t start=x->b->frame_count?x->b->frame_count():0;
     uint64_t deadline=x->b->cpu()->cycles;
