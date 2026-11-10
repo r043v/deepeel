@@ -24,6 +24,23 @@ void dp_core_config_default(DpCoreConfig *c) {
     c->queue_max = 65536;
 }
 
+size_t dp_core_sections(const DpCoreResult *r, DpCoreSection *out, size_t cap) {
+    size_t n = 0;
+    for (size_t i = 0; i < r->rom_size;) {
+        if (!(r->flags[i] & (DP_CORE_NATURAL | DP_CORE_FORCED))) { i++; continue; }
+        DpCoreSection sec = { i, i, 0, 0, 0 };
+        for (; i < r->rom_size && (r->flags[i] & (DP_CORE_NATURAL | DP_CORE_FORCED)); i++) {
+            if (r->flags[i] & DP_CORE_NATURAL) sec.natural++;
+            else sec.forced++;
+            sec.hi = i;
+        }
+        sec.required = sec.natural > 0;
+        if (n < cap) out[n] = sec;
+        n++;
+    }
+    return n;
+}
+
 void dp_core_result_free(DpCoreResult *r) {
     free(r->flags);
     memset(r, 0, sizeof *r);

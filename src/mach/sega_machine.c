@@ -74,7 +74,7 @@ static void sega_obs_write(void *u, uint16_t a, uint8_t v) {
 
 static void sega_reinstall(SegaMach *s) {
     z80_t *c = s->b->cpu();
-    if (!s->wrapped || c->read == sega_obs_read) return;
+    if (!s->wrapped || c->read == sega_obs_read) return;   // backend re-init clears wrapped state: observe() wraps again
     s->prev_read = c->read; s->prev_write = c->write; s->prev_user = c->user;
     c->read = sega_obs_read; c->write = sega_obs_write; c->user = s;
 }
@@ -85,7 +85,7 @@ static void sega_observe(DpMachine *m, const DpObservers *o, void *user) {
     // data accesses: interpose on the CPU bus callbacks once (instruction
     // fetches go through z80_decode's own path and are not reported)
     z80_t *c = s->b->cpu();
-    if (o && !s->wrapped && c->read && c->write) {
+    if (o && c->read != sega_obs_read && c->read && c->write) {
         s->prev_read = c->read; s->prev_write = c->write; s->prev_user = c->user;
         c->read = sega_obs_read; c->write = sega_obs_write; c->user = s;
         s->wrapped = 1;

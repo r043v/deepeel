@@ -41,6 +41,12 @@ int main(int argc, char **argv) {
     printf("core: steps %llu paths %llu forks %llu natural %zu forced %zu\n",
            (unsigned long long)r.steps, (unsigned long long)r.paths,
            (unsigned long long)r.forks, nat, forced);
+    DpCoreSection secs[16];
+    size_t ns = dp_core_sections(&r, secs, 16);
+    CHECK(ns >= 1 && ns <= 16);
+    size_t sn = 0, sf = 0;
+    for (size_t i = 0; i < ns; i++) { CHECK(secs[i].required == (secs[i].natural > 0)); sn += secs[i].natural; sf += secs[i].forced; }
+    CHECK(sn > 0 && sf > 0);   // natural code plus the side only a fork reached
     dp_core_result_free(&r);
     // a tiny budget is reported, never silent
     b->init(rom, rn, NULL, 1);
@@ -71,5 +77,6 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 20 && m->run(m); i++) {}
     CHECK(acc[0] >= 1);
     m->close(m);
+    TEST_DONE("kernel");
     return 0;
 }

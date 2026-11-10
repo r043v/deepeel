@@ -2900,6 +2900,10 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
         fprintf(out,"saturation: total %llu path %llu loop %llu site %llu queue %llu\n",(unsigned long long)r.sat_total,(unsigned long long)r.sat_path,(unsigned long long)r.sat_loop,(unsigned long long)r.sat_site,(unsigned long long)r.sat_queue);
         fprintf(out,"forced RAM cuts %llu\n",(unsigned long long)r.forced_ram_cuts);
         fprintf(out,"exec_outside %llu, rom->ram copy bytes %llu (%zu distinct ROM sources), forced %llu\n",(unsigned long long)r.exec_outside,(unsigned long long)r.copy_bytes,copied,(unsigned long long)r.copy_forced);
+        DpCoreSection secs[64]; size_t ns=dp_core_sections(&r,secs,64);
+        fprintf(out,"sections %zu\n",ns);
+        for(size_t i=0;i<ns && i<64;i++)
+            fprintf(out,"  section %zu rom-index %zu-%zu natural %zu forced %zu verdict %s\n",i+1,secs[i].lo,secs[i].hi,secs[i].natural,secs[i].forced,secs[i].required?"required":"speculative");
         fprintf(out,"rom bytes: natural %zu, forced %zu (speculative)\n",nat,forced);
     }
     dp_core_result_free(&r); m->close(m);

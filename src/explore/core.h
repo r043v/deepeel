@@ -53,6 +53,16 @@ typedef struct DpCoreResult {
     uint64_t no_pc;            // 1 when the machine has no pc/set_pc: nothing explored
 } DpCoreResult;
 
+// a section is a maximal run of ROM indexes covered by execution; its verdict
+// is "required" when any byte of it ran on a natural path, "forced" otherwise
+typedef struct DpCoreSection {
+    size_t lo, hi;             // ROM index range, inclusive
+    size_t natural, forced;    // bytes covered by each kind of path
+    int required;
+} DpCoreSection;
+// fills up to `cap` sections, returns the total count (may exceed cap)
+size_t dp_core_sections(const DpCoreResult *r, DpCoreSection *out, size_t cap);
+
 void dp_core_config_default(DpCoreConfig *cfg);
 // explores from the machine's current state; rom_size = number of ROM index slots
 int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCoreResult *out);
