@@ -41,6 +41,7 @@ typedef struct DpCoreConfig {
 
 typedef struct DpCoreResult {
     uint32_t *src_flags;       // per ROM index: DP_SRC_* (core/coverage.h), OR-ed over every proving source
+    uint64_t *first_seen;      // per ROM index: global step count when first covered (0: never)
     uint8_t *flags;            // per ROM index: DP_CORE_NATURAL | DP_CORE_FORCED
     size_t rom_size;
     uint64_t steps, paths, forks;

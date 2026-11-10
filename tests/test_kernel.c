@@ -45,6 +45,7 @@ int main(int argc, char **argv) {
     for (size_t i = 0; i < r.rom_size; i++) {
         if (r.src_flags[i] & DP_SRC_FORK_NATURAL) sn_nat++;
         if (r.src_flags[i] & DP_SRC_FORK_FORCED) sn_frc++;
+        CHECK(!!r.flags[i] == !!r.first_seen[i] && r.first_seen[i] <= r.steps + 1);
         CHECK(!!r.flags[i] == !!(r.src_flags[i] & (DP_SRC_FORK_NATURAL | DP_SRC_FORK_FORCED)));
     }
     CHECK(sn_nat > 0 && sn_frc > 0);

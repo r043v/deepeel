@@ -44,6 +44,7 @@ size_t dp_core_sections(const DpCoreResult *r, DpCoreSection *out, size_t cap) {
 void dp_core_result_free(DpCoreResult *r) {
     free(r->flags);
     free(r->src_flags);
+    free(r->first_seen);
     memset(r, 0, sizeof *r);
 }
 
@@ -51,6 +52,7 @@ static void mark(DpCoreResult *r, DpMachine *m, uint32_t pc, unsigned len, uint8
     for (unsigned i = 0; i < len; i++) {
         int64_t k = m->rom_index(m, pc + i);
         if (k >= 0 && (size_t)k < r->rom_size) {
+            if (!r->flags[k]) r->first_seen[k] = r->steps + 1;
             r->flags[k] |= how;
             r->src_flags[k] |= (how & DP_CORE_NATURAL) ? DP_SRC_FORK_NATURAL : DP_SRC_FORK_FORCED;
         }
@@ -115,7 +117,8 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
     if (!m->pc || !m->set_pc) { out->no_pc = 1; return 1; }
     out->flags = calloc(rom_size ? rom_size : 1, 1);
     out->src_flags = calloc(rom_size ? rom_size : 1, sizeof *out->src_flags);
-    if (!out->flags || !out->src_flags) { dp_core_result_free(out); return 0; }
+    out->first_seen = calloc(rom_size ? rom_size : 1, sizeof *out->first_seen);
+    if (!out->flags || !out->src_flags || !out->first_seen) { dp_core_result_free(out); return 0; }
     const DpIsa *isa = m->isa;
     uint8_t *fed = calloc(0x10000, 1);
     CopyObs cobs = { m, out, -1, 0, fed, 0, 99 };
