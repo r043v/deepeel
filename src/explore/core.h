@@ -9,6 +9,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "../core/coverage.h"
 
 #include "../core/dpmachine.h"
 
@@ -39,6 +40,7 @@ typedef struct DpCoreConfig {
 } DpCoreConfig;
 
 typedef struct DpCoreResult {
+    uint32_t *src_flags;       // per ROM index: DP_SRC_* (core/coverage.h), OR-ed over every proving source
     uint8_t *flags;            // per ROM index: DP_CORE_NATURAL | DP_CORE_FORCED
     size_t rom_size;
     uint64_t steps, paths, forks;

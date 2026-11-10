@@ -43,13 +43,17 @@ size_t dp_core_sections(const DpCoreResult *r, DpCoreSection *out, size_t cap) {
 
 void dp_core_result_free(DpCoreResult *r) {
     free(r->flags);
+    free(r->src_flags);
     memset(r, 0, sizeof *r);
 }
 
 static void mark(DpCoreResult *r, DpMachine *m, uint32_t pc, unsigned len, uint8_t how) {
     for (unsigned i = 0; i < len; i++) {
         int64_t k = m->rom_index(m, pc + i);
-        if (k >= 0 && (size_t)k < r->rom_size) r->flags[k] |= how;
+        if (k >= 0 && (size_t)k < r->rom_size) {
+            r->flags[k] |= how;
+            r->src_flags[k] |= (how & DP_CORE_NATURAL) ? DP_SRC_FORK_NATURAL : DP_SRC_FORK_FORCED;
+        }
     }
 }
 
@@ -99,7 +103,7 @@ static void obs_write(void *u, uint16_t addr, uint8_t v) {
     if (o->last_rom < 0 || o->age > 4) return;
     if (o->m->rom_index(o->m, addr) < 0 && v == o->last_val) {
         if (o->forced) o->r->copy_forced++;
-        else { o->r->flags[o->last_rom] |= DP_CORE_COPIED; o->r->copy_bytes++; if (o->fed) o->fed[addr] = 1; }
+        else { o->r->flags[o->last_rom] |= DP_CORE_COPIED; o->r->src_flags[o->last_rom] |= DP_SRC_COPY; o->r->copy_bytes++; if (o->fed) o->fed[addr] = 1; }
     }
     o->last_rom = -1;
 }
@@ -110,7 +114,8 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
     if (!m || !m->isa || !m->run || !m->save || !m->load || !m->fetch || !m->rom_index) return 0;
     if (!m->pc || !m->set_pc) { out->no_pc = 1; return 1; }
     out->flags = calloc(rom_size ? rom_size : 1, 1);
-    if (!out->flags) return 0;
+    out->src_flags = calloc(rom_size ? rom_size : 1, sizeof *out->src_flags);
+    if (!out->flags || !out->src_flags) { dp_core_result_free(out); return 0; }
     const DpIsa *isa = m->isa;
     uint8_t *fed = calloc(0x10000, 1);
     CopyObs cobs = { m, out, -1, 0, fed, 0, 99 };

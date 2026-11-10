@@ -41,6 +41,13 @@ int main(int argc, char **argv) {
     printf("core: steps %llu paths %llu forks %llu natural %zu forced %zu\n",
            (unsigned long long)r.steps, (unsigned long long)r.paths,
            (unsigned long long)r.forks, nat, forced);
+    size_t sn_nat = 0, sn_frc = 0;
+    for (size_t i = 0; i < r.rom_size; i++) {
+        if (r.src_flags[i] & DP_SRC_FORK_NATURAL) sn_nat++;
+        if (r.src_flags[i] & DP_SRC_FORK_FORCED) sn_frc++;
+        CHECK(!!r.flags[i] == !!(r.src_flags[i] & (DP_SRC_FORK_NATURAL | DP_SRC_FORK_FORCED)));
+    }
+    CHECK(sn_nat > 0 && sn_frc > 0);
     DpCoreSection secs[16];
     size_t ns = dp_core_sections(&r, secs, 16);
     CHECK(ns >= 1 && ns <= 16);
