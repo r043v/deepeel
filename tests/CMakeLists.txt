@@ -634,3 +634,5 @@ add_test(NAME core_cli_sega COMMAND sh -c "$<TARGET_FILE:deepeel> z80 explore sm
 set_tests_properties(core_cli_sega PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_exec_outside COMMAND sh -c "$<TARGET_FILE:deepeel> z80 explore sms ${CMAKE_CURRENT_BINARY_DIR}/fix_sms_ramsrc.sms --core 2>&1 | grep -q 'exec_outside [1-9]' && $<TARGET_FILE:deepeel> z80 explore sms ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sms --core 2>&1 | grep -q 'exec_outside 0'")
 set_tests_properties(core_exec_outside PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_copies COMMAND sh -c "$<TARGET_FILE:deepeel> z80 explore sms ${CMAKE_CURRENT_BINARY_DIR}/fix_sms_ramsrc.sms --core 2>&1 | grep -q '(3 distinct ROM sources)'")
+set_tests_properties(core_copies PROPERTIES FIXTURES_REQUIRED fixtures)

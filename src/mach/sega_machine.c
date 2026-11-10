@@ -20,12 +20,17 @@ typedef struct {
     uint8_t (*prev_read)(void *, uint16_t);
     void (*prev_write)(void *, uint16_t, uint8_t);
     void *prev_user;
-    int wrapped;
+    int wrapped, fetching;   // fetching: opcode reads are not data accesses
 } SegaMach;
 
 static uint32_t sega_state_bytes(DpMachine *m) { return (uint32_t)((SegaMach *)m->impl)->b->state_size; }
 static void sega_save(DpMachine *m, uint8_t *buf) { ((SegaMach *)m->impl)->b->save(buf); }
-static void sega_load(DpMachine *m, const uint8_t *buf) { ((SegaMach *)m->impl)->b->load(buf); }
+static void sega_reinstall(SegaMach *s);
+static void sega_load(DpMachine *m, const uint8_t *buf) {
+    SegaMach *s = m->impl;
+    s->b->load(buf);
+    sega_reinstall(s);   // a restored state carries the original bus callbacks
+}
 static uint8_t sega_fetch(DpMachine *m, uint32_t a) { return ((SegaMach *)m->impl)->b->read((uint16_t)a); }
 static int64_t sega_rom_index(DpMachine *m, uint32_t a) { return ((SegaMach *)m->impl)->b->rom_index((uint16_t)a); }
 
@@ -37,9 +42,11 @@ static int sega_run(DpMachine *m) {
     if (c->fault) return 0;
     unsigned cycles = z80_service(c);
     if (!cycles) {
-        if (!z80_decode(c, &s->d)) return 0;
+        s->fetching = 1;
+        if (!z80_decode(c, &s->d)) { s->fetching = 0; return 0; }
         uint8_t bytes[8] = { 0 };
         for (unsigned j = 0; j < s->d.length && j < sizeof bytes; j++) bytes[j] = s->b->read((uint16_t)(c->pc + j));
+        s->fetching = 0;
         DpZ80Instruction in;
         if (!dp_z80_decode(bytes, s->d.length, c->pc, &in)) return 0;
         if (s->obs && s->obs->on_step) s->obs->on_step(s->user, c->pc, bytes[0], 0);
@@ -56,13 +63,20 @@ static void sega_set_pc(DpMachine *m, uint32_t pc) { ((SegaMach *)m->impl)->b->c
 static uint8_t sega_obs_read(void *u, uint16_t a) {
     SegaMach *s = u;
     uint8_t v = s->prev_read(s->prev_user, a);
-    if (s->obs && s->obs->on_read) s->obs->on_read(s->user, a, v);
+    if (!s->fetching && s->obs && s->obs->on_read) s->obs->on_read(s->user, a, v);
     return v;
 }
 static void sega_obs_write(void *u, uint16_t a, uint8_t v) {
     SegaMach *s = u;
     if (s->obs && s->obs->on_write) s->obs->on_write(s->user, a, v);
     s->prev_write(s->prev_user, a, v);
+}
+
+static void sega_reinstall(SegaMach *s) {
+    z80_t *c = s->b->cpu();
+    if (!s->wrapped || c->read == sega_obs_read) return;
+    s->prev_read = c->read; s->prev_write = c->write; s->prev_user = c->user;
+    c->read = sega_obs_read; c->write = sega_obs_write; c->user = s;
 }
 
 static void sega_observe(DpMachine *m, const DpObservers *o, void *user) {

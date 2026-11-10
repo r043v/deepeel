@@ -12,7 +12,7 @@
 
 #include "../core/dpmachine.h"
 
-enum { DP_CORE_NATURAL = 1, DP_CORE_FORCED = 2 };
+enum { DP_CORE_NATURAL = 1, DP_CORE_FORCED = 2, DP_CORE_COPIED = 4 };   // COPIED: a ROM byte later written verbatim to RAM
 
 // optional platform hooks; every member may be NULL
 typedef struct DpPlatformHooks {
@@ -31,6 +31,7 @@ typedef struct DpCoreConfig {
     uint32_t max_path_steps;   // per-path instruction cap (0: unbounded)
     uint32_t fork_site_cap;    // forks per conditional site (0: unbounded)
     uint32_t visits_per_pc;    // per-path visits of one pc before the path stops (0: unbounded)
+    int no_copies;             // 1: do not observe data accesses
     int no_novelty_order;      // 1: plain LIFO instead of uncovered-target-first
     size_t queue_max;          // pending forked states held in RAM (0: unbounded)
     const DpPlatformHooks *hooks;
@@ -42,6 +43,8 @@ typedef struct DpCoreResult {
     uint64_t steps, paths, forks;
     uint64_t sat_total, sat_path, sat_loop, sat_site, sat_queue;   // reported caps, never silent
     uint64_t pruned_covered;   // forks skipped because both sides were already covered
+    uint64_t copy_bytes;       // verbatim ROM->RAM byte copies seen (a ROM read written unchanged to RAM)
+    uint64_t copy_forced;      // the same on forced paths (speculative, not marked on the ROM)
     uint64_t novelty_picks;    // pending states chosen ahead of LIFO order because their target was uncovered
     uint64_t hook_vetoed;      // forced sides refused by DpPlatformHooks.veto_fork
     uint64_t exec_outside;     // instructions executed where rom_index < 0 (RAM/VRAM code)

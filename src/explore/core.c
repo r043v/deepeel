@@ -61,6 +61,31 @@ static uint32_t *site_count(SiteTab *t, uint32_t pc) {
     return &t->s[h].count;
 }
 
+typedef struct {
+    DpMachine *m;
+    DpCoreResult *r;
+    int64_t last_rom;     // ROM index of the last ROM byte read, -1 when consumed
+    uint8_t last_val;
+    int forced;           // the current path is a forced fork: speculative state
+    int age;              // instructions since that read; a stale read is not a copy
+} CopyObs;
+
+static void obs_read(void *u, uint16_t addr, uint8_t v) {
+    CopyObs *o = u;
+    int64_t k = o->m->rom_index(o->m, addr);
+    if (k >= 0 && (size_t)k < o->r->rom_size) { o->last_rom = k; o->last_val = v; o->age = 0; }
+}
+
+static void obs_write(void *u, uint16_t addr, uint8_t v) {
+    CopyObs *o = u;
+    if (o->last_rom < 0 || o->age > 4) return;
+    if (o->m->rom_index(o->m, addr) < 0 && v == o->last_val) {
+        if (o->forced) o->r->copy_forced++;
+        else { o->r->flags[o->last_rom] |= DP_CORE_COPIED; o->r->copy_bytes++; }
+    }
+    o->last_rom = -1;
+}
+
 int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCoreResult *out) {
     memset(out, 0, sizeof *out);
     out->rom_size = rom_size;
@@ -69,6 +94,9 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
     out->flags = calloc(rom_size ? rom_size : 1, 1);
     if (!out->flags) return 0;
     const DpIsa *isa = m->isa;
+    CopyObs cobs = { m, out, -1, 0, 0, 99 };
+    DpObservers obsv = { NULL, obs_read, obs_write };
+    if (!cfg->no_copies && m->observe) m->observe(m, &obsv, &cobs);
     uint32_t sbytes = m->state_bytes(m);
     uint8_t *start = malloc(sbytes);
     m->save(m, start);
@@ -89,6 +117,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         free(cur_state); cur_state = NULL;
         if (cur_forced) m->set_pc(m, cur_pc);
         out->paths++;
+        cobs.forced = cur_forced; cobs.last_rom = -1;
         path_id++;
         uint32_t steps = 0;
         for (;;) {
@@ -102,6 +131,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
             if (cfg->visits_per_pc && ++visits[vi] > cfg->visits_per_pc) { out->sat_loop++; break; }
             uint8_t bytes[8] = {0};
             for (unsigned i = 0; i < sizeof bytes; i++) bytes[i] = m->fetch(m, pc + i);
+            cobs.age++;
             int len = isa->length(bytes[0]);
             DpFlowInfo fi;
             memset(&fi, 0, sizeof fi);

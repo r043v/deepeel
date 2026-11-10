@@ -2893,12 +2893,12 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
     DpCoreResult r;
     int ok=dp_core_explore(m,size,&cfg,&r);
     if(ok) {
-        size_t nat=0,forced=0;
-        for(size_t i=0;i<r.rom_size;i++) { if(r.flags[i]&DP_CORE_NATURAL) nat++; if(r.flags[i]&DP_CORE_FORCED) forced++; }
+        size_t nat=0,forced=0,copied=0;
+        for(size_t i=0;i<r.rom_size;i++) { if(r.flags[i]&DP_CORE_NATURAL) nat++; if(r.flags[i]&DP_CORE_FORCED) forced++; if(r.flags[i]&DP_CORE_COPIED) copied++; }
         fprintf(out,"deepeel %s (generic kernel)\n",s->id);
         fprintf(out,"steps %llu paths %llu forks %llu pruned-covered %llu\n",(unsigned long long)r.steps,(unsigned long long)r.paths,(unsigned long long)r.forks,(unsigned long long)r.pruned_covered);
         fprintf(out,"saturation: total %llu path %llu loop %llu site %llu queue %llu\n",(unsigned long long)r.sat_total,(unsigned long long)r.sat_path,(unsigned long long)r.sat_loop,(unsigned long long)r.sat_site,(unsigned long long)r.sat_queue);
-        fprintf(out,"exec_outside %llu\n",(unsigned long long)r.exec_outside);
+        fprintf(out,"exec_outside %llu, rom->ram copy bytes %llu (%zu distinct ROM sources), forced %llu\n",(unsigned long long)r.exec_outside,(unsigned long long)r.copy_bytes,copied,(unsigned long long)r.copy_forced);
         fprintf(out,"rom bytes: natural %zu, forced %zu (speculative)\n",nat,forced);
     }
     dp_core_result_free(&r); m->close(m);
