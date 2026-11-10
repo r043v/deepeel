@@ -87,6 +87,7 @@ typedef struct {
     int lot_drain;          // with a lot backlog: run only the saved states (no root, no seeds)
     const char *lot_path;   // portable frontier lot: imported into the spool at start, the unread spool saved back at the end
     uint32_t spool_cap_mb;  // 0: unbounded
+    uint32_t mem_cap_mb;    // process-wide RSS ceiling shared by all workers (0: off)
     const char *tree_path;  // choice tree record (--tree FILE)
     struct { uint32_t bank; uint16_t addr; } entry[32]; // extra --entry seeds
     unsigned entry_count;

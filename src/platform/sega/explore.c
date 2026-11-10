@@ -17,6 +17,8 @@
 #include <inttypes.h>
 #include <errno.h>
 #include <pthread.h>
+#include <unistd.h>
+#include <sys/resource.h>
 #include "../../core/statefile.h"
 #include <zlib.h>
 #include <math.h>
@@ -45,6 +47,9 @@ static uint64_t fnv1a(uint64_t h,const void *p,size_t n) {
     const uint8_t *b=p;
     for(size_t i=0;i<n;i++) { h^=b[i]; h*=1099511628211ull; }
     return h;
+}
+static uint64_t share_budget(uint64_t value,unsigned workers) {
+    return value/workers + (value%workers != 0);
 }
 static uint64_t fnv1a_u16(uint64_t h,uint16_t v) { return fnv1a(h,&v,sizeof v); }
 static uint64_t fnv1a_u32(uint64_t h,uint32_t v) { return fnv1a(h,&v,sizeof v); }
@@ -484,7 +489,10 @@ static int queue_room(Run *x,int input) {
     uint32_t want=x->queue_capacity?x->queue_capacity*2:64;
     uint32_t max=x->opt->queue_max>x->opt->queue_cap?x->opt->queue_max:x->opt->queue_cap;
     if(want>max) want=max;
-    if(want>x->queue_capacity) {
+    struct rusage usage;
+    int under_mem_cap=!x->opt->mem_cap_mb || (getrusage(RUSAGE_SELF,&usage)==0 &&
+        (uint64_t)usage.ru_maxrss < (uint64_t)x->opt->mem_cap_mb*1024u);
+    if(want>x->queue_capacity && under_mem_cap) {
         Path *grown=realloc(x->queue,(size_t)want*sizeof(*grown));
         if(grown) { x->queue=grown; x->queue_capacity=want; x->r->queue_growths++; }
     }
@@ -1653,6 +1661,14 @@ void dp_sega_results_free(DpSegaResults *r) {
 // sections and counters merge into worker 0's results after the join.
 static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *opt,DpSegaResults *r,int worker,int jobs) {
     DpSegaOptions wopt=*opt;
+    if(jobs>1) {
+        wopt.max_total=share_budget(opt->max_total,(unsigned)jobs);
+        wopt.input_total=share_budget(opt->input_total,(unsigned)jobs);
+        wopt.indirect_total=share_budget(opt->indirect_total,(unsigned)jobs);
+        wopt.play_total=share_budget(opt->play_total,(unsigned)jobs);
+        wopt.max_paths=(opt->max_paths+(uint32_t)jobs-1)/(uint32_t)jobs;
+        if(!wopt.max_paths) wopt.max_paths=1;
+    }
     if(worker) { // the spool file, tree and TAS movie belong to worker 0
         wopt.spool_path=NULL; wopt.tree_path=NULL; wopt.tas_path=NULL; wopt.jobs=1;
     }
@@ -1672,7 +1688,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     memset(r,0,sizeof(*r)); r->size=size;
     size_t padded=(size+0x3fff)&~(size_t)0x3fff, sites=size+65536;
     uint8_t *image=malloc(padded); DpSegaVisits visits={0};
-    Run x={0}; x.b=msx?(worker?dp_msx_backend2():dp_msx_backend()):worker?(sg?dp_sega_backend_sg2():dp_sega_backend_gg2()):(sg?dp_sega_backend_sg():dp_sega_backend_gg());
+    Run x={0}; x.b=msx?(worker?dp_msx_backend2():dp_msx_backend()):worker?(sg?dp_sega_backend_sg2():dp_sega_backend_gg_worker((unsigned)worker)):(sg?dp_sega_backend_sg():dp_sega_backend_gg());
     x.msx=msx; x.system=s; x.opt=o; x.r=r; x.input_epoch=1;
     r->input_site_capacity=o->input_sites; r->input_mask_limit=o->input_masks;
     r->phase_limits[0]=o->max_total; r->phase_limits[1]=o->input_masks?o->input_total:0;
@@ -2265,6 +2281,25 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
 // thread body of the parallel drain
 typedef struct { const DpSegaSystem *s; const uint8_t *rom; size_t size;
     const DpSegaOptions *o; DpSegaResults *r; int worker,jobs,ok; } DpSegaWorker;
+#define DP_GG_BACKEND_DECL(n) extern const DpSegaBackend *dp_sega_backend_gg##n(void)
+DP_GG_BACKEND_DECL(3); DP_GG_BACKEND_DECL(4); DP_GG_BACKEND_DECL(5); DP_GG_BACKEND_DECL(6);
+DP_GG_BACKEND_DECL(7); DP_GG_BACKEND_DECL(8); DP_GG_BACKEND_DECL(9); DP_GG_BACKEND_DECL(10);
+DP_GG_BACKEND_DECL(11); DP_GG_BACKEND_DECL(12); DP_GG_BACKEND_DECL(13); DP_GG_BACKEND_DECL(14);
+DP_GG_BACKEND_DECL(15); DP_GG_BACKEND_DECL(16);
+#undef DP_GG_BACKEND_DECL
+const DpSegaBackend *dp_sega_backend_gg_worker(unsigned worker) {
+    switch(worker) {
+    case 1: return dp_sega_backend_gg2(); case 2: return dp_sega_backend_gg3();
+    case 3: return dp_sega_backend_gg4(); case 4: return dp_sega_backend_gg5();
+    case 5: return dp_sega_backend_gg6(); case 6: return dp_sega_backend_gg7();
+    case 7: return dp_sega_backend_gg8(); case 8: return dp_sega_backend_gg9();
+    case 9: return dp_sega_backend_gg10(); case 10: return dp_sega_backend_gg11();
+    case 11: return dp_sega_backend_gg12(); case 12: return dp_sega_backend_gg13();
+    case 13: return dp_sega_backend_gg14(); case 14: return dp_sega_backend_gg15();
+    case 15: return dp_sega_backend_gg16();
+    default: return NULL;
+    }
+}
 static void *drain_thread(void *arg) {
     DpSegaWorker *w=arg;
     w->ok=sega_explore_one(w->s,w->rom,w->size,w->o,w->r,w->worker,w->jobs);
@@ -2273,25 +2308,30 @@ static void *drain_thread(void *arg) {
 int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *o,DpSegaResults *r) {
     int jobs=o?o->jobs:1;
     if(jobs<=1) return sega_explore_one(s,rom,size,o,r,0,1);
-    if(jobs>2) jobs=2;
-    DpSegaResults second;
-    DpSegaWorker w={s,rom,size,o,&second,1,jobs,0};
-    pthread_t th;
-    if(pthread_create(&th,NULL,drain_thread,&w)) {
-        int ok=sega_explore_one(s,rom,size,o,r,0,1);
-        if(ok) r->jobs_capped=1;
-        return ok;
+    int sms_gg=strcmp(s->id,"sms")==0 || strcmp(s->id,"gg")==0;
+    int max_jobs=sms_gg?16:2;
+    if(jobs>max_jobs) jobs=max_jobs;
+    long cpus=sysconf(_SC_NPROCESSORS_ONLN); if(cpus>0 && jobs>cpus) jobs=(int)cpus;
+    if(jobs<1) jobs=1;
+    if(jobs==1) return sega_explore_one(s,rom,size,o,r,0,1);
+    DpSegaResults *other=calloc((size_t)jobs-1,sizeof(*other));
+    DpSegaWorker *workers=calloc((size_t)jobs-1,sizeof(*workers));
+    pthread_t *threads=calloc((size_t)jobs-1,sizeof(*threads));
+    if(!other||!workers||!threads) { free(other); free(workers); free(threads); return 0; }
+    int made=0,ok=1;
+    for(int i=1;i<jobs;i++) {
+        workers[i-1]=(DpSegaWorker){s,rom,size,o,&other[i-1],i,jobs,0};
+        if(pthread_create(&threads[i-1],NULL,drain_thread,&workers[i-1])) { ok=0; break; }
+        made++;
     }
-    int ok=sega_explore_one(s,rom,size,o,r,0,jobs);
-    pthread_join(th,NULL);
-    if(!w.ok) { // a failed worker must not halve the result silently
-        dp_sega_results_free(&second);
-        if(ok) fprintf(stderr,"deepeel: --jobs: worker 1 failed, results incomplete\n");
-        return 0;
-    }
-    if(ok) merge_results(r,&second);
-    dp_sega_results_free(&second);
-    if(o->jobs>2) r->jobs_capped=o->jobs-2;
+    if(ok) ok=sega_explore_one(s,rom,size,o,r,0,jobs);
+    for(int i=0;i<made;i++) pthread_join(threads[i],NULL);
+    for(int i=0;i<made;i++) if(!workers[i].ok) ok=0;
+    if(ok) for(int i=0;i<made;i++) merge_results(r,&other[i]);
+    else if(made) fprintf(stderr,"deepeel: --jobs: a worker failed, results incomplete\n");
+    for(int i=0;i<made;i++) dp_sega_results_free(&other[i]);
+    free(other); free(workers); free(threads);
+    if(o->jobs>jobs) r->jobs_capped=o->jobs-jobs;
     return ok;
 }
 // Campaign summary (--summary FILE): one JSON object per run, the raw
@@ -2839,7 +2879,9 @@ int dp_sega_explore_command(int argc,char **argv) {
         if(!strcmp(argv[i],"--tas")) { if(i+1>=argc) goto usage; o.tas_path=argv[++i]; continue; }
         if(!strcmp(argv[i],"--jobs")) {
             if(i+1>=argc) goto usage;
-            uint64_t n; if(!number(argv[++i],&n) || !n || n>65536) goto usage;
+            const char *v=argv[++i]; uint64_t n;
+            if(!strcmp(v,"auto")) { long cpus=sysconf(_SC_NPROCESSORS_ONLN); n=cpus>0?(uint64_t)cpus:1; }
+            else if(!number(v,&n) || !n || n>65536) goto usage;
             o.jobs=(int)n; continue;
         }
         if(i+1>=argc) goto usage;
@@ -2901,6 +2943,7 @@ int dp_sega_explore_command(int argc,char **argv) {
             else if(!strcmp(key,"--tas-rng-frames")) { if(n>1000000) goto usage; o.tas_rng_frames=(uint32_t)n; }
             else if(!strcmp(key,"--tas-rng-steps")) o.tas_rng_steps=n;
             else if(!strcmp(key,"--queue-max")) { if(n>65536 || n<o.queue_cap) goto usage; o.queue_max=(uint32_t)n; }
+            else if(!strcmp(key,"--mem-cap-mb") && n<=1048576) o.mem_cap_mb=(uint32_t)n;
             else if(!strcmp(key,"--spool-cap-mb") && n<=1048576) o.spool_cap_mb=(uint32_t)n;
             else goto usage;
         }
@@ -2944,5 +2987,5 @@ int dp_sega_explore_command(int argc,char **argv) {
     if(rtcode) { FILE *rf=fopen(rtcode,"w"); if(rf) { dp_ramarch_write(&r.ra,rf,s->id); fclose(rf); } }
     dp_sega_results_free(&r); return ok?0:1;
 usage:
-    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--no-event-probes] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--attract-frames N] [--novelty N] [--novelty-frames N] [--novelty-archive N] [--novelty-frame-steps N] [--novelty-cells 1] [--export-state FILE] [--watch [FPS]] [--watch-dump FILE.ppm] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--tas-rng-per N] [--tas-rng-bursts N] [--tas-rng-frames N] [--tas-rng-steps N (legacy override)] [--jobs N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE] [--rtcode FILE]\n"); return 2;
+    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--no-event-probes] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--attract-frames N] [--novelty N] [--novelty-frames N] [--novelty-archive N] [--novelty-frame-steps N] [--novelty-cells 1] [--export-state FILE] [--watch [FPS]] [--watch-dump FILE.ppm] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--tas-rng-per N] [--tas-rng-bursts N] [--tas-rng-frames N] [--tas-rng-steps N (legacy override)] [--jobs N|auto] [--mem-cap-mb N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE] [--rtcode FILE]\n"); return 2;
 }

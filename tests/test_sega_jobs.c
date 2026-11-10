@@ -4,11 +4,8 @@
 #include "test_util.h"
 #include <string.h>
 
-// Parallel drain parity: --jobs 2 splits the seed list round-robin across two
-// prefixed runtime clones; after the join the merged evidence must match the
-// single-core run byte for byte on disjoint-seed fixtures, seeds routed to the
-// other lane are counted, a request above two instances is capped (counted),
-// and MSX (no clone) falls back single core without dropping coverage.
+// Parallel drain parity: SMS/GG workers split the seed list across isolated
+// runtime clones and share the step budget; MSX remains capped at two clones.
 static uint8_t rom[0x10000];
 static DpSegaResults one,two,three;
 
@@ -54,12 +51,11 @@ int main(void) {
     // sum across lanes; admissions stay disjoint and identical to one core
     CHECK(two.seeds_pointer==2*one.seeds_pointer);
     CHECK(two.seeds_admitted==one.seeds_admitted);
-    // three requested, two instances: the excess is capped, counted, and the
-    // merged evidence still agrees with the single-core run
+    // three workers use three isolated runtimes and merge to single-core evidence
     o.jobs=3;
     CHECK(dp_sega_explore(dp_sega_system("sms"),rom,sizeof(rom),&o,&three));
     same_flags(&one,&three);
-    CHECK(three.jobs_capped==1);
+    CHECK(three.jobs_capped==0);
     // MSX runs on its prefixed second instance: two workers, merged evidence
     // equal to the single-core run, nothing capped
     memset(rom,0xff,sizeof(rom));

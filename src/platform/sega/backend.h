@@ -123,5 +123,6 @@ const DpSegaBackend *dp_sega_backend_gg(void);
 // drain runs one worker per instance. MSX has dp_msx_backend2.
 const DpSegaBackend *dp_sega_backend_sg2(void);
 const DpSegaBackend *dp_sega_backend_gg2(void);
+const DpSegaBackend *dp_sega_backend_gg_worker(unsigned worker);
 const DpSegaBackend *dp_msx_backend2(void);
 #endif

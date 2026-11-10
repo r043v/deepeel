@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.251.36 LANGUAGES C)
+project(deepeel VERSION 0.251.37 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -449,6 +449,34 @@ add_library(deepeel_gg2 STATIC IMPORTED GLOBAL)
 set_target_properties(deepeel_gg2 PROPERTIES IMPORTED_LOCATION ${DP_GG2_ARCHIVE})
 add_custom_target(dp_gg2_runtime DEPENDS ${DP_GG2_ARCHIVE})
 add_dependencies(deepeel_gg2 dp_gg2_runtime)
+# SMS/GG campaigns can use the full worker pool. Each worker needs an isolated
+# copy of the runtime globals; keep the pool size aligned with 16-core hosts.
+foreach(DP_SEGA_WORKER RANGE 3 16)
+  set(DP_GGN_RAW deepeel_gg${DP_SEGA_WORKER}_raw)
+  set(DP_GGN_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_gg${DP_SEGA_WORKER}.a)
+  add_library(${DP_GGN_RAW} STATIC
+    ${M0BOY_DIR}/targets/gamegear/runtime/gg.c
+    ${DP_GG_VDP_SOURCE}
+    ${M0BOY_DIR}/targets/gamegear/runtime/gg_psg.c
+    src/platform/sega/backend_gg.c)
+  target_compile_definitions(${DP_GGN_RAW} PRIVATE GG_ROM_TRACE=1
+    dp_sega_backend_gg=dp_sega_backend_gg${DP_SEGA_WORKER})
+  target_include_directories(${DP_GGN_RAW} PRIVATE
+    ${M0BOY_DIR}/targets/gamegear/runtime ${M0BOY_DIR}/targets/common/runtime
+    ${M0BOY_DIR}/targets/sg1000/runtime)
+  add_custom_command(OUTPUT ${DP_GGN_ARCHIVE}
+    BYPRODUCTS ${DP_GGN_ARCHIVE}.syms
+    COMMAND ${CMAKE_COMMAND} -DNM=${DP_NM} -DOBJCOPY=${DP_OBJCOPY}
+      -DINPUT=$<TARGET_FILE:${DP_GGN_RAW}> -DOUTPUT=${DP_GGN_ARCHIVE}
+      -DPREFIX=dp_gg${DP_SEGA_WORKER}_ -DPATTERNS=machine|sg[A-Za-z0-9_]*|gg[A-Za-z0-9_]*|tms[A-Za-z0-9_]*
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_sega_prefix.cmake
+    DEPENDS ${DP_GGN_RAW} cmake/dp_sega_prefix.cmake VERBATIM)
+  add_library(deepeel_gg${DP_SEGA_WORKER} STATIC IMPORTED GLOBAL)
+  set_target_properties(deepeel_gg${DP_SEGA_WORKER} PROPERTIES IMPORTED_LOCATION ${DP_GGN_ARCHIVE})
+  add_custom_target(dp_gg${DP_SEGA_WORKER}_runtime DEPENDS ${DP_GGN_ARCHIVE})
+  add_dependencies(deepeel_gg${DP_SEGA_WORKER} dp_gg${DP_SEGA_WORKER}_runtime)
+  target_link_libraries(deepeel_sega PUBLIC deepeel_gg${DP_SEGA_WORKER})
+endforeach()
 # Native 256-wide Master System instance of the GG runtime (GG_OUT_WIDTH=256,
 # the PC Master System panel: no GG window crop, no filter — gg.h) — the
 # fidelity bench plays the SMS profile on the console's own screen. Same
