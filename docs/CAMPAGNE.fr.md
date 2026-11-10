@@ -274,6 +274,14 @@ intratrame (une itération de plus du compteur d'objet chez m0boy dans cette tra
 déjà documentée en e3cb130, pas un décalage d'entrées. Replay complet 42 337 trames : les deux cœurs jouent le film
 jusqu'au bout, ramdiff moyen 1785 (un seul point de rupture). Observations de l'outil.
 
+**Chasse intratrame (outillage `DP_GG_TRACE_FRAMES`/`SMSSHAWK_WATCH=ALL`)** : sur la trame de transition, la même
+écriture `$C31F` part du même pc ($86de, `ld (ix+$1f),a`) avec A=2 chez m0boy contre 1 chez hawk ; la chaîne est
+`ld a,(ix+$0d)` → `cp $80` → `ret` → dispatch → `and $01` ($86dc) → `inc a` → stockage : m0boy arrive au `and $01`
+avec **A=01**, hawk avec **A=00** — un bit produit par le dispatcheur d'objets entre les deux (une itération de
+dispatch de plus chez m0boy dans cette trame). Les séquences d'écritures diffèrent aussi d'un facteur ~2 (hawk 415
+écritures contre 221) : le travail de trame n'est pas le même dès cette trame, alors que l'état au repos est
+identique octet pour octet — la divergence naît d'une lecture intratrame, pas d'un état. Observations de l'outil.
+
 Preuves du pad lui-même : ROM de test Xch3l (sms_padtest, assemblée WLA-DX hors dépôt) affiche `0F0F0F0F` (U D L R
 B1 B2 pressés) à l'identique sur les deux cœurs avec un film synthétique all-buttons ; lecture du pad confirmée à
 $DC/$DD (29 passes/trame dans la boucle d'attract de Castle). Diagnostic : l'INT vblank n'est jamais prise par ce jeu

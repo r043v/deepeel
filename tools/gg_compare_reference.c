@@ -342,6 +342,15 @@ int main(int argc, char **argv) {
     const int every = getenv("DP_GG_EVERY") ? atoi(getenv("DP_GG_EVERY")) : 0;
     /* DP_GG_TRACE_ADDR=$xxxx (SMS address): log the DUT pc whenever that work-RAM byte changes */
     unsigned trace_addr = getenv("DP_GG_TRACE_ADDR") ? (unsigned)strtoul(getenv("DP_GG_TRACE_ADDR"), NULL, 16) - 0xC000 : (unsigned)-1;
+    /* DP_GG_TRACE_FRAMES=first:last (1-based, inclusive): log every work-RAM
+     * byte each instruction changes (diff before/after, pc after) — the
+     * complete intra-frame write sequence, the bench's counterpart of the
+     * dumper's SMSSHAWK_WATCH=ALL */
+    long trace_fr_lo = 0, trace_fr_hi = -1;
+    {   const char *tf = getenv("DP_GG_TRACE_FRAMES");
+        if (tf) { trace_fr_lo = atol(tf); char *x = strchr(tf, ':'); trace_fr_hi = x ? atol(x + 1) : trace_fr_lo; }
+    }
+    static uint8_t insn_ram[8192];
     {   const char *se = getenv("DP_GG_SNAP");
         g_snap = se ? (unsigned)strtoul(se, NULL, 0) : 0;
         g_snap_save = g_snap;
@@ -449,10 +458,23 @@ int main(int argc, char **argv) {
                 DpZ80Instruction in;
                 if (!dp_z80_decode(bytes, g_d.length, c->pc, &in)) break;
                 uint8_t before = trace_addr < sizeof g_mach->ram ? g_mach->ram[trace_addr] : 0;
+                const int trace_all = frame + 1 >= trace_fr_lo && frame + 1 <= trace_fr_hi;
+                if (trace_all) memcpy(insn_ram, g_mach->ram, sizeof insn_ram);
                 cycles = z80_execute_decoded(c, &g_d);
                 if (trace_addr < sizeof g_mach->ram && g_mach->ram[trace_addr] != before)
                     fprintf(stderr, "trace: frame %u pc=%04x -> $%04x=%02x (sp=%04x)\n",
                             frame + 1, c->pc, (unsigned)(0xC000 + trace_addr), g_mach->ram[trace_addr], c->sp);
+                /* register trace on the object routine's pc window: where does
+                 * the A of the $C31F write come from */
+                if (trace_all && c->pc >= 0x86b0 && c->pc <= 0x8728)
+                    fprintf(stderr, "aregs f%u pc=%04x a=%02x b=%02x c=%02x d=%02x e=%02x h=%02x l=%02x ix=%04x op=%02x%02x%02x\n",
+                            frame + 1, c->pc, c->a, c->b, c->c, c->d, c->e, c->h, c->l, c->ix,
+                            bytes[0], g_d.length > 1 ? bytes[1] : (uint8_t)0, g_d.length > 2 ? bytes[2] : (uint8_t)0);
+                if (trace_all)
+                    for (unsigned ra = 0; ra < sizeof insn_ram; ra++)
+                        if (insn_ram[ra] != g_mach->ram[ra])
+                            fprintf(stderr, "wtrace f%u pc=%04x $%04x %02x->%02x\n",
+                                    frame + 1, c->pc, (unsigned)(0xC000 + ra), insn_ram[ra], g_mach->ram[ra]);
                 z80_finish(c, cycles);
                 pc_hist[c->pc >> 4]++;
                 if (pc_range_frames > 0 && c->pc >= pc_lo && c->pc < pc_hi)

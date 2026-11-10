@@ -63,9 +63,39 @@ namespace SmshawkDump
 			if (rawPrefix != null) raw = new BinaryWriter(File.Create(rawPrefix));
 			var bus = fe.CoreAsMemDomains!["System Bus"];
 			var vp = fe.Core.AsVideoProvider();
+			// bench watch: SMSSHAWK_WATCH=C31F (+ SMSSHAWK_WATCH_FROM/TO, 1-based
+			// inclusive) logs the pc of every write to that work-RAM byte, via the
+			// core's memory-callback system — the intra-frame counterpart of the
+			// bench's DP_GG_TRACE_ADDR
+			uint watchFrom = 1, watchTo = uint.MaxValue;
+			uint? watchAddr = null;
+			{   var w = Environment.GetEnvironmentVariable("SMSSHAWK_WATCH");
+				// the address is absolute ($C31F): the core reports full-bus addresses
+				if (w == "ALL") watchAddr = uint.MaxValue; // no address filter: every write
+				else if (w != null) watchAddr = Convert.ToUInt32(w, 16);
+				var wf = Environment.GetEnvironmentVariable("SMSSHAWK_WATCH_FROM");
+				if (wf != null) watchFrom = uint.Parse(wf);
+				var wt = Environment.GetEnvironmentVariable("SMSSHAWK_WATCH_TO");
+				if (wt != null) watchTo = uint.Parse(wt);
+			}
+			int watchFrame = 0;
+			if (watchAddr != null)
+			{
+				var hawkCore = (SMSHawk)fe.Core;
+				var mcs = hawkCore.MemoryCallbacks;
+				mcs.Add(new MemoryCallback("System Bus", MemoryCallbackType.Write, "bench-watch",
+					(address, value, flags) =>
+					{
+						if (watchAddr != uint.MaxValue && address != watchAddr) return null;
+						if (watchFrame >= watchFrom && watchFrame <= watchTo)
+							Console.Error.WriteLine($"watch f={watchFrame} pc={hawkCore.Cpu.RegPC:x4} a={address & 0xFFFF:x4} v={value & 0xFF:x2}");
+						return null;
+					}, watchAddr == uint.MaxValue ? null : (uint?)watchAddr, null));
+			}
 			Console.Error.WriteLine("stage: loop");
 			for (int f = 0; f < frames; f++)
 			{
+				watchFrame = f + 1;
 				var m = f < masks.Length ? masks[f] : (byte)0;
 				// the SMSHawk definition prefixes per-player: "P1 Up", "P1 B1",
 				// plus the system keys "Pause"/"Reset"
