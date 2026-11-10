@@ -4584,13 +4584,15 @@ Ce sont des observations de l'outil ; les plafonds ne sont pas atteignables
 par les fixtures (aucun test ne les déclenche), les compteurs sont vérifiés à
 zéro sur les runs normaux.
 
-## 0.251.37 — SMS/GG : pool de workers et plafond mémoire partagé
+## 0.251.38 — SMS/GG : pool de workers et plafond mémoire partagé
 
 SMS/GG acceptent maintenant `--jobs N|auto` jusqu'à 16 instances runtime isolées
 (ou moins si la machine expose moins de cœurs). Les budgets globaux de pas,
 d'inputs aléatoires, de closure indirecte, de jeu et de chemins sont répartis
 entre les workers ; les seeds du premier passage sont distribuées à la demande
-et leur somme reste bornée par les valeurs demandées.
+et les bursts aléatoires issus des checkpoints TAS sont eux aussi répartis entre
+les workers. Le nombre de runs par checkpoint reste celui demandé.
+La somme des budgets globaux reste bornée par les valeurs demandées.
 `--mem-cap-mb N` surveille le pic RSS du processus et arrête la croissance des
 files de tous les workers à cette limite. `--queue-max` fixe leur plafond de
 croissance ; `--spool-cap-mb` borne le spool du worker principal. Le moteur

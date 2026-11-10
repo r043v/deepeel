@@ -83,6 +83,7 @@ typedef struct {
     unsigned phase;
     uint64_t discoveries;
     int forced,fetching;
+    int worker,jobs;
     uint16_t pc;
     InputSite *input_sites;
     size_t input_hash_size;
@@ -1230,7 +1231,7 @@ static int tas_replay(Run *x) {
     if(!strcmp(x->system->id,"sms") && x->b->tas_compat)
         x->b->tas_compat(dp_sega_tas_smshawk_profile(&t));
     FILE *ram_dump=NULL; int dump_failed=0;
-    const char *ram_dump_path=getenv("DP_SEGA_TAS_RAM_DUMP");
+    const char *ram_dump_path=x->worker==0?getenv("DP_SEGA_TAS_RAM_DUMP"):NULL;
     if(ram_dump_path) {
         ram_dump=fopen(ram_dump_path,"wb");
         if(!ram_dump) { fprintf(stderr,"deepeel: cannot open TAS RAM dump %s\n",ram_dump_path); dp_sega_tas_free(&t); pass_end(x); return 0; }
@@ -1300,7 +1301,7 @@ done:
     // at least the configured frame count and continues until that many
     // consecutive frames produce no new coverage.
     if(nsnaps) {
-        uint32_t prng=(uint32_t)(r->steps*2654435761u)|1;
+        uint32_t prng=((uint32_t)(r->steps*2654435761u)^(uint32_t)(x->worker*0x9e3779b9u))|1;
         unsigned per=o->tas_rng_bursts?o->tas_rng_bursts:DP_DEFAULT_TAS_RNG_PER_CHECKPOINT;
         uint32_t min_frames=o->tas_rng_frames?o->tas_rng_frames:DP_DEFAULT_TAS_RNG_STAGNATION_FRAMES;
         uint64_t before=r->steps;
@@ -1309,6 +1310,7 @@ done:
         uint64_t burst_limit=o->tas_total==DP_SEGA_TAS_TOTAL_DEFAULT ? UINT64_MAX : o->tas_total;
         for(unsigned s=0;s<nsnaps;s++) {
             for(unsigned b=0;b<per && r->steps<burst_limit;b++) {
+                if(x->jobs>1 && b%(unsigned)x->jobs!=(unsigned)x->worker) continue;
                 pass_begin(x);
                 x->play_actor=DP_ACTOR_RNG;
                 x->b->load(snaps[s]);
@@ -1671,7 +1673,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
         if(!wopt.max_paths) wopt.max_paths=1;
     }
     if(worker) { // the spool file, tree and TAS movie belong to worker 0
-        wopt.spool_path=NULL; wopt.tree_path=NULL; wopt.tas_path=NULL; wopt.jobs=1;
+        wopt.spool_path=NULL; wopt.tree_path=NULL; wopt.jobs=1;
         wopt.play_total=0; wopt.attract_frames=0;
     }
     const DpSegaOptions *o=&wopt;
@@ -1690,7 +1692,8 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     memset(r,0,sizeof(*r)); r->size=size;
     size_t padded=(size+0x3fff)&~(size_t)0x3fff, sites=size+65536;
     uint8_t *image=malloc(padded); DpSegaVisits visits={0};
-    Run x={0}; x.b=msx?(worker?dp_msx_backend2():dp_msx_backend()):worker?(sg?dp_sega_backend_sg2():dp_sega_backend_gg_worker((unsigned)worker)):(sg?dp_sega_backend_sg():dp_sega_backend_gg());
+    Run x={0}; x.worker=worker; x.jobs=jobs;
+    x.b=msx?(worker?dp_msx_backend2():dp_msx_backend()):worker?(sg?dp_sega_backend_sg2():dp_sega_backend_gg_worker((unsigned)worker)):(sg?dp_sega_backend_sg():dp_sega_backend_gg());
     x.msx=msx; x.system=s; x.opt=o; x.r=r; x.input_epoch=1;
     r->input_site_capacity=o->input_sites; r->input_mask_limit=o->input_masks;
     r->phase_limits[0]=o->max_total; r->phase_limits[1]=o->input_masks?o->input_total:0;
@@ -1810,11 +1813,13 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
         memcpy(x.seed_origins,x.origins,x.origin_size);
         generate_seed_specs(&x,image,size);
     }
-    if(!worker && !drain) {
-        if(!tas_replay(&x)) { ok=0; goto cleanup; }
-        attract_session(&x);
-        play_session(&x);
-        novelty_session(&x);
+    if(!drain) {
+        if(!worker) {
+            if(!tas_replay(&x)) { ok=0; goto cleanup; }
+            attract_session(&x);
+            play_session(&x);
+            novelty_session(&x);
+        } else if(o->tas_path && !tas_replay(&x)) { ok=0; goto cleanup; }
     }
     if(!worker && push_to(&x,0,0,0,DP_SEGA_TREE_RESET)<0) { ok=0; goto cleanup; }
 
@@ -2243,6 +2248,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     if(s->state_exported && (!d->state_exported || s->state_exported_depth>d->state_exported_depth)) { d->state_exported=1; d->state_exported_depth=s->state_exported_depth; }
     if(s->tas_identity) d->tas_identity=s->tas_identity;
     DP_MR_SUM(tas_frames); DP_MR_SUM(tas_frames_refused); DP_MR_SUM(tas_steps);
+    DP_MR_SUM(tas_bursts); DP_MR_SUM(tas_burst_steps);
     DP_MR_SUM(jobs_capped); DP_MR_SUM(merge_conflicts);
     DP_MR_SUM(vram_copies); DP_MR_SUM(cram_copies); DP_MR_SUM(sram_copies);
     DP_MR_SUM(copy_transformed); DP_MR_SUM(copy_log_overflow); DP_MR_SUM(provenance_mismatches);
@@ -2340,7 +2346,11 @@ int dp_sega_explore(const DpSegaSystem *s,const uint8_t *rom,size_t size,const D
     if(ok) ok=sega_explore_one(s,rom,size,o,r,0,jobs);
     for(int i=0;i<made;i++) pthread_join(threads[i],NULL);
     for(int i=0;i<made;i++) if(!workers[i].ok) ok=0;
-    if(ok) for(int i=0;i<made;i++) merge_results(r,&other[i]);
+    if(ok) for(int i=0;i<made;i++) {
+        other[i].tas_frames=0; other[i].tas_frames_refused=0;
+        other[i].tas_steps=0; other[i].tas_identity=0;
+        merge_results(r,&other[i]);
+    }
     else if(made) fprintf(stderr,"deepeel: --jobs: a worker failed, results incomplete\n");
     for(int i=0;i<made;i++) dp_sega_results_free(&other[i]);
     free(other); free(workers); free(threads);

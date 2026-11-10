@@ -171,6 +171,11 @@ static void replay_reaches_movie_code(void) {
     DpSegaSection *idle=section_at(0x100);
     CHECK(idle && idle->boot_hits>0 && idle->verdict==DP_SEGA_VERDICT_REQUIRED);
     dp_sega_results_free(&result);
+    DpSegaOptions pooled=o; pooled.jobs=2; pooled.tas_total=DP_SEGA_TAS_TOTAL_DEFAULT;
+    pooled.tas_rng_per=1; pooled.tas_rng_bursts=2; pooled.tas_rng_frames=1;
+    CHECK(dp_sega_explore(dp_sega_system("sms"),rom,sizeof(rom),&pooled,&result));
+    CHECK(result.tas_frames==3 && result.tas_bursts==6);
+    dp_sega_results_free(&result);
     // the movie is replayed in full, never cut (0.251.14): a tight tas_total
     // no longer drops frames (refused counts only frames the replay could not
     // advance, e.g. a starved tas_frame_steps)
