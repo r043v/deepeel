@@ -42,11 +42,11 @@ int main(void) {
     DpSegaOptions o=options();
     CHECK(dp_sega_explore(dp_sega_system("sms"),rom,sizeof(rom),&o,&one));
     CHECK((one.flags[0x8005]&DP_SEGA_FORCED) && (one.flags[0xc005]&DP_SEGA_FORCED));
-    // two jobs: same evidence, the off-lane seeds are counted, nothing refused
+    // two jobs: same evidence, nothing refused (dynamic dispatch: no static off-lane count)
     o.jobs=2;
     CHECK(dp_sega_explore(dp_sega_system("sms"),rom,sizeof(rom),&o,&two));
     same_flags(&one,&two);
-    CHECK(two.seeds_offlane>0 && !two.seeds_refused_view && !two.jobs_capped);
+    CHECK(!two.seeds_refused_view && !two.jobs_capped);
     // every worker generates the same spec list, so generated-seed counters
     // sum across lanes; live dispatch may hit the shared path budget differently
     CHECK(two.seeds_pointer==2*one.seeds_pointer);
