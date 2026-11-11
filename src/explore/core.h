@@ -39,6 +39,7 @@ typedef struct DpCoreConfig {
     size_t n_seeds;
     int no_copies;             // 1: do not observe data accesses
     int no_novelty_order;      // 1: plain LIFO instead of uncovered-target-first
+    uint32_t cell_lo, cell_hi; // technique 8: RAM range hashed into a semantic cell (cell_hi > cell_lo enables it)
     size_t queue_max;          // pending forked states held in RAM (0: unbounded)
     const DpPlatformHooks *hooks;
 } DpCoreConfig;
@@ -61,6 +62,8 @@ typedef struct DpCoreResult {
     uint64_t novelty_new_bytes; // ROM bytes first covered by paths started from a novelty pick (yield of technique 5)
     uint64_t plain_new_bytes;   // the same for paths started in plain LIFO order
     int in_novelty_path;        // internal: the path being run was a novelty pick
+    uint64_t cells;             // distinct (fork target, RAM cell) pairs queued (technique 8)
+    uint64_t cell_pruned;       // forced forks dropped because their (target, RAM cell) pair was already queued
     uint64_t hook_vetoed;      // forced sides refused by DpPlatformHooks.veto_fork
     uint64_t exec_outside;     // instructions executed where rom_index < 0 (RAM/VRAM code)
     uint64_t no_pc;            // 1 when the machine has no pc/set_pc: nothing explored
@@ -76,7 +79,7 @@ typedef struct DpCoreSection {
 // fills up to `cap` sections, returns the total count (may exceed cap)
 size_t dp_core_sections(const DpCoreResult *r, DpCoreSection *out, size_t cap);
 
-// Common kernel options, parsed once for every platform CLI: --no-copies,
+// Common kernel options, parsed once for every platform CLI: --cells LO-HI, --no-copies,
 // --no-forced-ram-cut, --no-novelty-order, --visits-per-pc N.  Returns the
 // number of argv entries consumed (0: not a kernel option).
 int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i);

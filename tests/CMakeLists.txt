@@ -222,6 +222,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_oamchain.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_sramcopy.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_apucopy.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_cells.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.gg
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sg
@@ -654,3 +655,5 @@ add_test(NAME core_cli_md COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMA
 set_tests_properties(core_cli_md PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_cli_msx COMMAND sh -c "$<TARGET_FILE:deepeel> z80 explore msx ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.msx --core --attract-frames 0 2>&1 | grep -q 'deepeel msx (generic kernel)' && $<TARGET_FILE:deepeel> z80 explore msx ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.msx --core --attract-frames 0 2>&1 | grep -q 'forced [1-9]'")
 set_tests_properties(core_cli_msx PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_cells COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_cells.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --jobs 1 --attract-frames 0 --cells 0xC000-0xC0FF | grep -q 'cell-pruned forks [1-9]' && $<TARGET_FILE:deepeel> z80 explore sms $f --core --jobs 1 --attract-frames 0 | grep -q 'cell-pruned forks 0'")
+set_tests_properties(core_cells PROPERTIES FIXTURES_REQUIRED fixtures)

@@ -27,6 +27,11 @@ void dp_core_config_default(DpCoreConfig *c) {
 
 int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     const char *a = argv[i];
+    if (!strcmp(a, "--cells") && i + 1 < argc) {   // LO-HI: RAM range hashed into a cell
+        char *e; unsigned long lo = strtoul(argv[i + 1], &e, 0);
+        if (*e == '-') { c->cell_lo = (uint32_t)lo; c->cell_hi = (uint32_t)strtoul(e + 1, NULL, 0); }
+        return 2;
+    }
     if (!strcmp(a, "--no-copies")) { c->no_copies = 1; return 1; }
     if (!strcmp(a, "--no-forced-ram-cut")) { c->no_forced_ram_cut = 1; return 1; }
     if (!strcmp(a, "--no-novelty-order")) { c->no_novelty_order = 1; return 1; }
@@ -73,6 +78,8 @@ typedef struct {
     const DpCoreConfig *cfg;
     uint8_t *fed;
     uint32_t sbytes;
+    uint64_t *cellset;         // technique 8: open-addressing set of (target, RAM cell) keys
+    size_t cellcap, celln;
 } Shared;
 
 typedef struct {
@@ -155,6 +162,29 @@ static void obs_write(void *u, uint16_t addr, uint8_t v) {
     o->last_rom = -1;
 }
 
+// FNV-1a over the configured RAM range, mixed with the fork target
+static uint64_t cell_key(const DpCoreConfig *cfg, DpMachine *m, uint32_t other) {
+    uint64_t h = 1469598103934665603ull ^ other;
+    for (uint32_t a = cfg->cell_lo; a <= cfg->cell_hi; a++) { h ^= m->fetch(m, a); h *= 1099511628211ull; }
+    return h | 1;   // never 0: 0 marks an empty slot
+}
+
+// 1 when the key is new (inserted), 0 when already present; caller holds sh->mu
+static int cell_insert(Shared *sh, uint64_t key) {
+    if (sh->celln * 2 >= sh->cellcap) {
+        size_t nc = sh->cellcap ? sh->cellcap * 2 : 1024;
+        uint64_t *ns = calloc(nc, sizeof *ns);
+        if (!ns) return 1;
+        for (size_t i = 0; i < sh->cellcap; i++)
+            if (sh->cellset[i]) { size_t h = sh->cellset[i] & (nc - 1); while (ns[h]) h = (h + 1) & (nc - 1); ns[h] = sh->cellset[i]; }
+        free(sh->cellset); sh->cellset = ns; sh->cellcap = nc;
+    }
+    size_t h = key & (sh->cellcap - 1);
+    while (sh->cellset[h]) { if (sh->cellset[h] == key) return 0; h = (h + 1) & (sh->cellcap - 1); }
+    sh->cellset[h] = key; sh->celln++;
+    return 1;
+}
+
 static void run_path(Worker *w, Pending *p) {
     Shared *sh = w->sh;
     const DpCoreConfig *cfg = sh->cfg;
@@ -225,6 +255,10 @@ static void run_path(Worker *w, Pending *p) {
                 pthread_mutex_lock(&sh->mu);
                 uint32_t *cnt = site_count(&sh->sites, pc);
                 int pushed = 0;
+                if (cfg->cell_hi > cfg->cell_lo) {
+                    if (cell_insert(sh, cell_key(cfg, m, other))) loc->cells++;
+                    else { loc->cell_pruned++; pthread_mutex_unlock(&sh->mu); free(pre); continue; }
+                }
                 if (cfg->fork_site_cap && *cnt >= cfg->fork_site_cap) loc->sat_site++;
                 else if (cfg->queue_max && sh->qn >= cfg->queue_max) loc->sat_queue++;
                 else {
@@ -345,14 +379,14 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         out->sat_site += l->sat_site; out->sat_queue += l->sat_queue;
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
-        out->novelty_picks += l->novelty_picks; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
+        out->novelty_picks += l->novelty_picks; out->cells += l->cells; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
         out->exec_outside += l->exec_outside;
         free(ws[i].visits); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
     }
     out->steps = sh.steps;
     for (size_t i = 0; i < sh.qn; i++) free(sh.q[i].state);
-    free(sh.q); free(sh.sites.s); free(sh.fed); free(ws);
+    free(sh.cellset); free(sh.q); free(sh.sites.s); free(sh.fed); free(ws);
     return ok;
 }
 
@@ -369,6 +403,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "saturation: total %llu path %llu loop %llu site %llu queue %llu\n", U(r->sat_total), U(r->sat_path), U(r->sat_loop), U(r->sat_site), U(r->sat_queue));
     fprintf(out, "novelty picks %llu (new ROM bytes: novelty %llu, plain %llu)\n", U(r->novelty_picks), U(r->novelty_new_bytes), U(r->plain_new_bytes));
     fprintf(out, "workers %llu (short %llu)\n", U(r->workers), U(r->workers_short));
+    fprintf(out, "cells %llu, cell-pruned forks %llu\n", U(r->cells), U(r->cell_pruned));
     fprintf(out, "seeded entry points %llu\n", U(r->seeded));
     fprintf(out, "forced RAM cuts %llu\n", U(r->forced_ram_cuts));
     fprintf(out, "exec_outside %llu, rom->ram copy bytes %llu (%zu distinct ROM sources), forced %llu\n", U(r->exec_outside), U(r->copy_bytes), copied, U(r->copy_forced));

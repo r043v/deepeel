@@ -947,6 +947,13 @@ def build_z80_family(out):
         z[0:len(prog)] = prog
         with open(os.path.join(out, "fix_z80_branch." + ext), "wb") as f:
             f.write(z)
+    # two conditional sites forking to the same target with the same RAM: technique 8
+    # (semantic cells) drops the second forced fork
+    cells = bytes([0xB7, 0x20, 0x06, 0x20, 0x04, 0, 0, 0, 0, 0x18, 0xFE])
+    z = bytearray([0xFF]) * 0x8000
+    z[0:len(cells)] = cells
+    with open(os.path.join(out, "fix_z80_cells.sms"), "wb") as f:
+        f.write(z)
     m = bytearray([0xFF]) * 0x8000
     m[0:2] = b"AB"
     m[2:4] = (0x4010).to_bytes(2, "little")
