@@ -4733,3 +4733,15 @@ Observation de l'outil sur SML Rev 0, film `muggv3` : les empreintes WRAM par vb
 de l'ancien moteur sont identiques sur les 845 premiers vblanks comparés (une ligne dupliquée à
 l'indice 15) ; fin de film (43726 trames) : `ffb4=43`, `ffac=8e` dans les deux moteurs (avant la
 correction : `ffb4=11`, couverture naturelle 9818 octets ROM ; après : 12251 octets à 55 M de pas).
+
+## 0.304.5 — noyau : TAS SMS (Castle of Illusion) rétabli
+
+Le noyau (`--core --tas`) sur SMS ignorait le profil SMSHawk et les touches système du film.
+`sega_set_input` applique maintenant le bit 6 (Start sur GG/MSX, Pause/NMI sur SG/SMS) et le bit 7
+(Reset) ; `sega_run` passe par `service`/`tas_instruction` du backend ; `dp_machine_sega_tas` active le
+profil de synchronisation (phase d'IRQ de ligne) au chargement du film. Observation de l'outil :
+sur le film `teentee2-castleofillusionstarringmickeymouse.bk2` (V1.0), la WRAM du noyau est identique à
+celle de l'ancien moteur sur 3165 trames comparées (décalage d'échantillonnage d'une trame).
+`DEEPEEL_TAS_WRAM=<fichier>` écrit les 8 KiB à $C000 par trame du film. Les sessions à manette tenue
+exercent désormais Pause : `core_pause_probe` coupe `--no-sessions` pour isoler la sonde d'événement.
+`1344M.bk2` (autre jeu) n'est pas lu par le chargeur ; `3292M.bk2.zip` n'a pas été rejoué.

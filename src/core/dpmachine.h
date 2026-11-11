@@ -186,6 +186,7 @@ void dp_machine_md_source(DpMachine *m, const uint8_t *rom, size_t size);
 DpMachine *dp_machine_sega(const void *backend);
 // Tell a Sega machine where its program comes from so clone() can start a
 // worker instance: `pick` maps a worker number to its backend instance.
+void dp_machine_sega_tas(DpMachine *m, int sys_key, int profile);   /* movie bit 6 meaning + SMSHawk timing profile (0 = off) */
 void dp_machine_sega_init_arg(DpMachine *m, int arg);   /* backend init's last argument for clones (MSX mapper) */
 void dp_machine_sega_source(DpMachine *m, const uint8_t *rom, size_t size, const void *(*pick)(unsigned worker));
 

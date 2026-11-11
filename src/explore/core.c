@@ -590,6 +590,11 @@ static void run_path(Worker *w, Pending *p) {
                     if (!hinit) { hinit = 1; const char *hn = getenv("DEEPEEL_TAS_HRAM"); if (hn) hf = fopen(hn, "wb"); }
                     if (hf) { uint8_t hb[0x80]; for (unsigned i = 0; i < 0x7F; i++) hb[i] = m->fetch(m, 0xFF80 + i); hb[0x7F] = 0; fwrite(hb, 1, 0x80, hf); }
                 }
+                if (tas_shift == 0) {   // DEEPEEL_TAS_WRAM=<file>: 8 KiB at $C000 per movie frame (Z80 machines), comparable with DP_SEGA_TAS_RAM_DUMP
+                    static FILE *wf; static int winit;
+                    if (!winit) { winit = 1; const char *wn = getenv("DEEPEEL_TAS_WRAM"); if (wn) wf = fopen(wn, "wb"); }
+                    if (wf) { uint8_t wb[0x2000]; for (unsigned i = 0; i < 0x2000; i++) wb[i] = m->fetch(m, 0xC000 + i); fwrite(wb, 1, sizeof wb, wf); fflush(wf); }
+                }
                 int64_t k = (int64_t)f - tas_shift;
                 if (k >= (int64_t)cfg->tas_frames) {
                     m->set_input(m, 0); tas = 0;

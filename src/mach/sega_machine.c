@@ -33,6 +33,7 @@ typedef struct {
     int wrapped, fetching;   // fetching: opcode reads are not data accesses
     int msx;                 // MSX cartridge machine (init_arg is then the mapper)
     int init_arg;            // backend init's last argument: SMS flag, or the MSX mapper
+    int sys_key;             // movie bit 6: 1 = Start (GG, MSX), 0 = Pause NMI (SG, SMS)
 } SegaMach;
 
 static uint32_t sega_state_bytes(DpMachine *m) { return (uint32_t)((SegaMach *)m->impl)->b->state_size; }
@@ -53,7 +54,7 @@ static int sega_run(DpMachine *m) {
     SegaMach *s = m->impl;
     z80_t *c = s->b->cpu();
     if (c->fault) return 0;
-    unsigned cycles = z80_service(c);
+    unsigned cycles = s->b->service ? s->b->service() : z80_service(c);
     if (!cycles) {
         s->fetching = 1;
         if (!z80_decode(c, &s->d)) { s->fetching = 0; return 0; }
@@ -64,6 +65,7 @@ static int sega_run(DpMachine *m) {
         if (!dp_z80_decode(bytes, s->d.length, c->pc, &in)) return 0;
         if (s->obs && s->obs->on_step) s->obs->on_step(s->user, c->pc, bytes[0], 0);
         cycles = z80_execute_decoded(c, &s->d);
+        if (s->b->tas_instruction) cycles = s->b->tas_instruction(&s->d, cycles);
         z80_finish(c, cycles);
     }
     s->b->advance(cycles);
@@ -84,8 +86,10 @@ static void sega_set_input(DpMachine *m, uint32_t mask) {
     DpSegaInput in;
     memset(&in, 0, sizeof in);
     in.pad[0] = (uint8_t)(mask & 0x3F);
-    in.start = (uint8_t)((mask >> 6) & 1);   // GG Start (SMS/SG: no such line)
-    ((SegaMach *)m->impl)->b->set_input(in);
+    SegaMach *s = m->impl;
+    if ((mask >> 6) & 1) { if (s->sys_key) in.start = 1; else in.pause = 1; }
+    in.reset = (uint8_t)((mask >> 7) & 1);
+    s->b->set_input(in);
 }
 
 static uint8_t sega_obs_read(void *u, uint16_t a) {
@@ -158,6 +162,10 @@ void dp_machine_sega_source(DpMachine *m, const uint8_t *rom, size_t size, const
     m->clone = sega_clone;
 }
 
+void dp_machine_sega_tas(DpMachine *m, int sys_key, int profile) {
+    SegaMach *s = m->impl; s->sys_key = sys_key;
+    if (s->b->tas_compat) s->b->tas_compat(profile);
+}
 void dp_machine_sega_init_arg(DpMachine *m, int arg) { ((SegaMach *)m->impl)->init_arg = arg; }
 void dp_machine_sega_set_msx(DpMachine *m, int msx) { ((SegaMach *)m->impl)->msx = msx; }
 
