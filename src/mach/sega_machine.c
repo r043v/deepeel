@@ -77,6 +77,7 @@ static void sega_poke(DpMachine *m, uint32_t a, uint8_t v) {
     if (s->base_write) s->base_write(s->base_user, (uint16_t)a, v);
 }
 
+static uint64_t sega_frame(DpMachine *m) { const DpSegaBackend *b = ((SegaMach *)m->impl)->b; return b->frame_count ? b->frame_count() : 0; }
 static void sega_set_input(DpMachine *m, uint32_t mask) {
     DpSegaInput in;
     memset(&in, 0, sizeof in);
@@ -164,6 +165,7 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->set_pc = sega_set_pc;
     m->poke = sega_poke;
     m->set_input = sega_set_input;
+    if (b->frame_count) m->frame = sega_frame;
     m->observe = sega_observe;
     m->close = sega_close;
     return m;

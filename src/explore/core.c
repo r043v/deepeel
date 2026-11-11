@@ -45,6 +45,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
         } else { static const uint8_t d[4] = {0x00, 0xFF, 0x55, 0xAA}; memcpy(c->seed_vals, d, 4); c->seed_n = 4; }
         return 2;
     }
+    if (!strcmp(a, "--no-tas-jitter")) { c->no_tas_jitter = 1; return 1; }
     if (!strcmp(a, "--no-sessions")) { c->no_sessions = 1; return 1; }
     if (!strcmp(a, "--sessions") && i + 1 < argc) { c->sessions = (uint32_t)strtoul(argv[i + 1], NULL, 0); c->no_sessions = 0; return 2; }
     if (!strcmp(a, "--no-irq-jitter")) { c->no_irq_jitter = 1; return 1; }
@@ -240,6 +241,7 @@ static int keyset_insert(uint64_t **set, size_t *cap, size_t *n, uint64_t key) {
 }
 static int cell_insert(Shared *sh, uint64_t key) { return keyset_insert(&sh->cellset, &sh->cellcap, &sh->celln, key); }
 
+enum { TAS_INPUT = 0x40000000 };
 static void run_path(Worker *w, Pending *p) {
     Shared *sh = w->sh;
     const DpCoreConfig *cfg = sh->cfg;
@@ -250,6 +252,12 @@ static void run_path(Worker *w, Pending *p) {
     free(p->state);
     if (p->forced) m->set_pc(m, p->pc);
     uint32_t cur_input = p->input;
+    // TAS replay: input >= TAS_INPUT encodes the frame shift (value - TAS_INPUT - 3, -3..+3)
+    int tas = cur_input >= TAS_INPUT && cfg->tas_masks && m->frame && m->set_input;
+    int tas_shift = tas ? (int)(cur_input - TAS_INPUT) - 3 : 0;
+    uint64_t tas_last = ~0ull;
+    if (cur_input >= TAS_INPUT) cur_input = 0;
+    if (tas) loc->tas_paths++;
     // a session shares half the total budget with its siblings: it must not starve the natural path
     uint64_t session_cap = cfg->max_total / (2 * (cfg->sessions ? (cfg->sessions > 16 ? 16 : cfg->sessions) : 16));
     if (m->set_input && cur_input) m->set_input(m, cur_input - 1);   // input 0: keep the loaded state's held pad (probe forks hold theirs)
@@ -268,14 +276,23 @@ static void run_path(Worker *w, Pending *p) {
             pthread_mutex_unlock(&sh->mu);
             break;
         }
-        if (cfg->max_path_steps && steps >= cfg->max_path_steps) { loc->sat_path++; break; }
+        if (tas) {
+            uint64_t f = m->frame(m);
+            if (f != tas_last) {
+                tas_last = f;
+                int64_t k = (int64_t)f - tas_shift;
+                if (k >= (int64_t)cfg->tas_frames) { m->set_input(m, 0); tas = 0; }
+                else m->set_input(m, k < 0 ? 0 : cfg->tas_masks[k]);
+            }
+        }
+        if (!tas && cfg->max_path_steps && steps >= cfg->max_path_steps) { loc->sat_path++; break; }
         if (cur_input && cfg->max_total && steps >= session_cap) { loc->sat_path++; break; }
         uint32_t pc = m->pc(m);
         if (cfg->hooks && cfg->hooks->before_step &&
             !cfg->hooks->before_step(cfg->hooks->user, m, pc)) break;
         uint16_t vi = (uint16_t)pc;
         if (w->stamp[vi] != path_id) { w->stamp[vi] = path_id; w->visits[vi] = 0; }
-        if (cfg->visits_per_pc && ++w->visits[vi] > cfg->visits_per_pc) { loc->sat_loop++; break; }
+        if (!tas && cfg->visits_per_pc && ++w->visits[vi] > cfg->visits_per_pc) { loc->sat_loop++; break; }
         uint8_t bytes[8] = {0};
         for (unsigned i = 0; i < sizeof bytes; i++) bytes[i] = m->fetch(m, pc + i);
         w->cobs.age++;
@@ -618,6 +635,18 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
                 out->sessions++;
             }
         }
+        // technique 9 (TAS form): the movie from power-on, unshifted and shifted by 1..3 frames
+        if (m->frame && m->set_input && cfg->tas_masks && cfg->tas_frames) {
+            static const int order[6] = {-3, -2, -1, 1, 2, 3};
+            for (int i = cfg->no_tas_jitter ? 6 : 0; i < 7; i++) {
+                int sh_ = i < 6 ? order[i] : 0;
+                uint8_t *cp = malloc(sh.sbytes);
+                if (!cp) break;
+                memcpy(cp, start, sh.sbytes);
+                if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
+                sh.q[sh.qn++] = (Pending){ cp, start_pc, 0, 0, TAS_INPUT + 3 + sh_ };
+            }
+        }
         // clones start from power-on, the same state the main machine saved
         for (unsigned i = 1; i < started; i++) pthread_create(&ws[i].th, NULL, worker_main, &ws[i]);
         worker_main(&ws[0]);
@@ -632,7 +661,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
-        out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
+        out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
         out->exec_outside += l->exec_outside;
         free(ws[i].visits); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
@@ -657,6 +686,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "index replays %llu\n", U(r->index_replays));
     fprintf(out, "rng-byte forks %llu\n", U(r->rng_forks));
     fprintf(out, "learned signatures %llu\n", U(r->learned_sigs));
+    fprintf(out, "tas replay paths %llu\n", U(r->tas_paths));
     fprintf(out, "site-scored picks %llu\n", U(r->site_scored_picks));
     fprintf(out, "novelty picks %llu (new ROM bytes: novelty %llu, plain %llu)\n", U(r->novelty_picks), U(r->novelty_new_bytes), U(r->plain_new_bytes));
     fprintf(out, "workers %llu (short %llu)\n", U(r->workers), U(r->workers_short));

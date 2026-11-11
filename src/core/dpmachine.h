@@ -151,6 +151,8 @@ struct DpMachine {
     // holds a pad mask (bits 0..5 = up/down/left/right/button1/button2) until changed;
     // NULL: the machine has no input model.  Entry point of the kernel's held-pad sessions.
     void (*set_input)(struct DpMachine *, uint32_t mask);
+    // completed frames since power-on (NULL: unknown); lets the kernel replay a movie
+    uint64_t (*frame)(struct DpMachine *);
     void (*observe)(struct DpMachine *, const DpObservers *, void *user);
     int (*ctx_components)(struct DpMachine *, const DpCtxComp **out);   // count
     int (*probes)(struct DpMachine *, const DpProbe **out);             // count

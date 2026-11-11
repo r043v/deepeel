@@ -57,6 +57,9 @@ typedef struct DpCoreConfig {
     uint8_t seed_vals[8]; unsigned seed_n;   /* values (default 00 FF 55 AA) */
     uint32_t sessions;          /* held-pad sessions started from power-on (0: off); default 16 when the machine has set_input */
     int no_sessions;
+    const uint8_t *tas_masks;   /* TAS replay (techniques 9): one kernel pad mask per frame, needs DpMachine.frame */
+    uint32_t tas_frames;
+    int no_tas_jitter;          /* 1: replay the movie unshifted only (no +-1..3 frame shifts) */
     int no_irq_jitter;          /* technique 9: only the 1-instruction IRQ delay, no 2..3 */       // 1: ignore DpPlatformHooks.event_probe (technique 2)
     int no_decompress;         // 1: do not look for decompressors (technique 6)
     int no_copies;             // 1: do not observe data accesses
@@ -72,6 +75,7 @@ typedef struct DpCoreResult {
     uint8_t *flags;            // per ROM index: DP_CORE_NATURAL | DP_CORE_FORCED
     size_t rom_size;
     uint64_t steps, paths, forks;
+    uint64_t tas_paths;        // TAS replay paths started (unshifted + shifted)
     uint64_t sat_total, sat_path, sat_loop, sat_site, sat_queue;   // reported caps, never silent
     uint64_t pruned_covered;   // forks skipped because both sides were already covered
     uint64_t copy_bytes;       // verbatim ROM->RAM byte copies seen (a ROM read written unchanged to RAM)

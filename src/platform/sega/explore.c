@@ -2905,8 +2905,15 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
     if(o->seed_vectors && !cfg.seeds) { cfg.seeds=vec; cfg.n_seeds=sizeof vec/sizeof *vec; }
     if(!cfg.hooks) cfg.hooks=dp_machine_sega_hooks();
     if(!cfg.visits_per_pc || cfg.visits_per_pc<262144) cfg.visits_per_pc=262144;   // the old engine loop_cap: boot delay loops run 65535 x n iterations
+    DpSegaTas tas; memset(&tas,0,sizeof tas);
+    if(o->tas_path && o->tas_path[0]) {
+        char terr[256]="";
+        if(dp_sega_tas_load(o->tas_path,&tas,terr,sizeof terr)) { cfg.tas_masks=tas.masks; cfg.tas_frames=tas.frames; }
+        else fprintf(out,"tas: %s\n",terr);
+    }
     DpCoreResult r;
     int ok=dp_core_explore(m,size,&cfg,&r);
+    dp_sega_tas_free(&tas);
     if(ok) {
         dp_core_report(out,s->id,&r);
     }
