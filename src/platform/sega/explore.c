@@ -2893,6 +2893,7 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
     if(!b || b->init(rom,size,NULL,init_arg)!=1) return 0;
     DpMachine *m=dp_machine_sega(b); if(!m) return 0;
     dp_machine_sega_init_arg(m,init_arg);
+    dp_machine_sega_set_msx(m,msx);
     core_is_msx=msx;
     core_is_sg=!strcmp(s->id,"sg");
     dp_machine_sega_source(m,rom,size,sega_core_pick);
@@ -2902,7 +2903,7 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
     cfg.fork_site_cap=o->fork_cap; cfg.queue_max=o->queue_max;
     static const uint32_t vec[]={0x08,0x10,0x18,0x20,0x28,0x30,0x38,0x66};
     if(o->seed_vectors && !cfg.seeds) { cfg.seeds=vec; cfg.n_seeds=sizeof vec/sizeof *vec; }
-    if(!msx && !cfg.hooks) cfg.hooks=dp_machine_sega_hooks();
+    if(!cfg.hooks) cfg.hooks=dp_machine_sega_hooks();
     if(!cfg.visits_per_pc || cfg.visits_per_pc<262144) cfg.visits_per_pc=262144;   // the old engine loop_cap: boot delay loops run 65535 x n iterations
     DpCoreResult r;
     int ok=dp_core_explore(m,size,&cfg,&r);

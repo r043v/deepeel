@@ -30,6 +30,7 @@ typedef struct {
     void (*base_out)(void *, uint16_t, uint8_t);
     void *base_user;
     int wrapped, fetching;   // fetching: opcode reads are not data accesses
+    int msx;                 // MSX cartridge machine (init_arg is then the mapper)
     int init_arg;            // backend init's last argument: SMS flag, or the MSX mapper
 } SegaMach;
 
@@ -140,6 +141,7 @@ void dp_machine_sega_source(DpMachine *m, const uint8_t *rom, size_t size, const
 }
 
 void dp_machine_sega_init_arg(DpMachine *m, int arg) { ((SegaMach *)m->impl)->init_arg = arg; }
+void dp_machine_sega_set_msx(DpMachine *m, int msx) { ((SegaMach *)m->impl)->msx = msx; }
 
 DpMachine *dp_machine_sega(const void *backend) {
     const DpSegaBackend *b = backend;
@@ -183,7 +185,7 @@ static int sega_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t
     z80_t *c = s->b->cpu();
     if (bytes[0] == 0x76) {
         // HALT on an SMS: the Pause button raises an NMI that wakes it (handler at $66)
-        if (s->init_arg != 1 || k > 0 || c->nmi) return 0;
+        if (s->msx || s->init_arg != 1 || k > 0 || c->nmi) return 0;
         uint8_t *tmp = malloc(m->state_bytes(m));
         if (!tmp) return 0;
         m->save(m, tmp);
@@ -196,6 +198,19 @@ static int sega_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t
     if (bytes[0] != 0xDB) return 0;                       // in a,(n)
     if (c->irq || c->nmi) return 0;
     const uint8_t *vals; unsigned n;
+    if (s->msx) {
+        // MSX keyboard matrix: PPI port B ($A9) forks one key down (active low) per alternative
+        static const uint8_t kb[] = {0xFE, 0xFD, 0xFB, 0xF7, 0xEF, 0xDF, 0xBF, 0x7F};
+        if (bytes[1] != 0xA9 || k >= sizeof kb) return 0;
+        uint8_t *tmp = malloc(m->state_bytes(m));
+        if (!tmp) return 0;
+        m->save(m, tmp);
+        int ok = m->run(m);
+        if (ok) { c->a = kb[k]; m->save(m, save); }
+        m->load(m, tmp);
+        free(tmp);
+        return ok;
+    }
     switch (bytes[1] & 0xC1) {
     case 0x81: vals = st; n = sizeof st; break;
     case 0x40: vals = vc; n = sizeof vc; break;
