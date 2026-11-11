@@ -1443,6 +1443,7 @@ static int cmd_pce(int argc, char **argv) {
     opt.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
     DpCliCommon cc = { .jobs = 1 };
     int multitap = 0, use_core = 0; DpCoreConfig kcfg; dp_core_config_default(&kcfg);
+    kcfg.visits_per_pc = 50000;   // Raiden at 2 M steps: natural 116 bytes at 64 visits, 2220 at 50000 (frame waits are long loops)
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
         if (0) {}
