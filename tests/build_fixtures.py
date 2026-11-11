@@ -960,6 +960,12 @@ def build_z80_family(out):
     sv[0:len(code)] = code
     with open(os.path.join(out, "fix_z80_save.sms"), "wb") as f:
         f.write(sv)
+    # volatile byte: loop reads ($C200) twice around an inc, then tests it (technique 4)
+    rg = bytearray([0xFF]) * 0x8000
+    code = bytes([0x3A,0x00,0xC2, 0xEE,0x55, 0x32,0x00,0xC2, 0xFE,0xAA, 0x28,0x02, 0x18,0xF2, 0x3E,0x01, 0x18,0xFE])
+    rg[0:len(code)] = code
+    with open(os.path.join(out, "fix_z80_rng.sms"), "wb") as f:
+        f.write(rg)
     # HALT then idle; NMI handler at $66 (the SMS Pause button): needs the Pause NMI probe
     nm = bytearray([0xFF]) * 0x8000
     nm[0:3] = bytes([0x76, 0x18, 0xFD])

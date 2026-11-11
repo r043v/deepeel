@@ -50,6 +50,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--no-irq-jitter")) { c->no_irq_jitter = 1; return 1; }
     if (!strcmp(a, "--no-decompress")) { c->no_decompress = 1; return 1; }
     if (!strcmp(a, "--no-copies")) { c->no_copies = 1; return 1; }
+    if (!strcmp(a, "--no-rng-learn")) { c->no_rng_learn = 1; return 1; }
     if (!strcmp(a, "--no-learn-sig")) { c->no_learn_sig = 1; return 1; }
     if (!strcmp(a, "--no-taint-cut")) { c->no_taint_cut = 1; return 1; }
     if (!strcmp(a, "--no-forced-ram-cut")) { c->no_forced_ram_cut = 1; return 1; }
@@ -143,6 +144,8 @@ typedef struct {
     DpCoreResult loc;     // private counters; the coverage arrays are the shared ones
     CopyObs cobs;
     uint32_t *visits, *stamp;
+    uint32_t *rng_stamp;   // per ld a,(nn) site: path id of the last visit (technique 4)
+    uint8_t *rng_last;
     uint32_t path_id;
     int ok;
     pthread_t th;
@@ -287,6 +290,38 @@ static void run_path(Worker *w, Pending *p) {
                 break;
             }
             loc->exec_outside++;
+        }
+        // technique 4 (restricted form): a z80 `ld a,(nn)` of RAM that returns a different value on a later
+        // visit within one path reads a byte the game updates (RNG, timer); fork it on a few values
+        if (!cfg->no_rng_learn && !cur_forced && m->poke && bytes[0] == 0x3A && isa->name && !strcmp(isa->name, "z80") &&
+            m->rom_index(m, bytes[1] | (bytes[2] << 8)) < 0) {
+            uint32_t addr = bytes[1] | (bytes[2] << 8);
+            uint8_t v = m->fetch(m, addr);
+            int volatile_byte = w->rng_stamp[(uint16_t)pc] == path_id && w->rng_last[(uint16_t)pc] != v;
+            w->rng_stamp[(uint16_t)pc] = path_id; w->rng_last[(uint16_t)pc] = v;
+            int fresh = 0;
+            if (volatile_byte) {
+                pthread_mutex_lock(&sh->mu);
+                fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, ((uint64_t)addr) | (5ull << 60));
+                pthread_mutex_unlock(&sh->mu);
+            }
+            if (fresh) {
+                static const uint8_t rv[4] = {0x00, 0x01, 0x80, 0xFF};
+                uint8_t *tmp = malloc(sh->sbytes);
+                if (tmp) m->save(m, tmp);
+                for (unsigned k = 0; tmp && k < 4; k++) {
+                    uint8_t *snap = malloc(sh->sbytes);
+                    if (!snap) break;
+                    m->poke(m, addr, rv[k]);
+                    m->save(m, snap);
+                    pthread_mutex_lock(&sh->mu);
+                    if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
+                    sh->q[sh->qn++] = (Pending){ snap, pc, 0, 0, cur_input };
+                    pthread_mutex_unlock(&sh->mu);
+                    loc->rng_forks++;
+                }
+                if (tmp) { m->load(m, tmp); free(tmp); }
+            }
         }
         // technique 3 (learned form): z80 `ld a,(nn)` of RAM straight followed by `cp n` is a signature test;
         // queue a state whose byte already holds n so the matching side runs as natural
@@ -490,6 +525,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         w->loc.first_seen = out->first_seen; w->loc.rom_size = rom_size;
         w->visits = calloc(0x10000, sizeof *w->visits);
         w->stamp = calloc(0x10000, sizeof *w->stamp);
+        w->rng_stamp = calloc(0x10000, sizeof *w->rng_stamp); w->rng_last = calloc(0x10000, 1);
         if (!w->visits || !w->stamp) { ok = 0; break; }
         w->cobs = (CopyObs){ wm, &w->loc, -1, 0, sh.fed, 0, 99, -1, -1, 0, cfg->no_decompress };
         started++;
@@ -563,7 +599,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
-        out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
+        out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->rng_forks += l->rng_forks; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
         out->exec_outside += l->exec_outside;
         free(ws[i].visits); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
@@ -585,6 +621,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "deepeel %s (generic kernel)\n", label);
     fprintf(out, "steps %llu paths %llu forks %llu pruned-covered %llu\n", U(r->steps), U(r->paths), U(r->forks), U(r->pruned_covered));
     fprintf(out, "saturation: total %llu path %llu loop %llu site %llu queue %llu\n", U(r->sat_total), U(r->sat_path), U(r->sat_loop), U(r->sat_site), U(r->sat_queue));
+    fprintf(out, "rng-byte forks %llu\n", U(r->rng_forks));
     fprintf(out, "learned signatures %llu\n", U(r->learned_sigs));
     fprintf(out, "site-scored picks %llu\n", U(r->site_scored_picks));
     fprintf(out, "novelty picks %llu (new ROM bytes: novelty %llu, plain %llu)\n", U(r->novelty_picks), U(r->novelty_new_bytes), U(r->plain_new_bytes));
