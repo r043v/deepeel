@@ -40,6 +40,7 @@
 #include "platform/pce/pce.h"
 #include "platform/nes/tas.h"
 #include "platform/pce/tas.h"
+#include "explore/tas.h"
 
 static uint8_t *nes_read_file(const char *path, size_t *size);
 static DpExplorer *volatile g_sig_ex;
@@ -611,10 +612,30 @@ static int cmd_explore(int argc, char **argv) {
         int rc = 1;
         if (km) {
             dp_machine_gb_source(km, cart->rom, cart->rom_size);
+            DpTas gt; memset(&gt, 0, sizeof gt);
+            uint8_t *gmasks = NULL;
+            if (scfg.tas_n >= 1) {   // GB pad (a1 b2 select4 start8 right16 left32 up64 down128) -> kernel mask; recorder sync profiles are not applied here
+                char terr[160] = "";
+                if (dp_tas_load(scfg.tas[0], &gt, terr, sizeof terr) && gt.frames && (gmasks = malloc(gt.frames))) {
+                    for (uint32_t f = 0; f < gt.frames; f++) {
+                        uint8_t b = gt.masks[f], k = 0;
+                        if (b & 64) k |= 0x01;
+                        if (b & 128) k |= 0x02;
+                        if (b & 32) k |= 0x04;
+                        if (b & 16) k |= 0x08;
+                        if (b & 1) k |= 0x10;
+                        if (b & 2) k |= 0x20;
+                        if (b & 8) k |= 0x40;
+                        gmasks[f] = k;
+                    }
+                    gkcfg.tas_masks = gmasks; gkcfg.tas_frames = gt.frames;
+                } else fprintf(stderr, "deepeel: --tas: %s\n", terr);
+            }
             DpCoreResult kr;
             rc = dp_core_explore(km, cart->rom_size, &gkcfg, &kr) ? 0 : 1;
             if (!rc) dp_core_report(stdout, "gb", &kr);
             dp_core_result_free(&kr);
+            free(gmasks); dp_tas_free(&gt);
             km->close(km);
         } else fprintf(stderr, "deepeel: --core: cannot wrap the machine\n");
         dp_mapwin_stop();

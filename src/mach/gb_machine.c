@@ -2,6 +2,7 @@
 // still drives DpMach directly; this wrapper is the kernel-facing view, built
 // on the same instance so both see the same state.
 #include <stdlib.h>
+#include <string.h>
 
 #include "../core/dpmachine.h"
 #include "m0boy.h"
@@ -19,9 +20,20 @@ typedef struct GbWrap {
 } GbWrap;
 static GbWrap *gbw(DpMachine *m) { return m->impl; }
 
-static uint32_t gb_state_bytes(DpMachine *m) { return dp_mach_state_bytes(gbw(m)->d); }
-static void gb_save(DpMachine *m, uint8_t *buf) { dp_mach_save(gbw(m)->d, buf); }
-static void gb_load(DpMachine *m, const uint8_t *buf) { dp_mach_load(gbw(m)->d, buf); }
+// the frame counter rides at the end of the saved state so a restored fork resumes at its own frame
+static uint32_t gb_state_bytes(DpMachine *m) { return dp_mach_state_bytes(gbw(m)->d) + 8; }
+static void gb_save(DpMachine *m, uint8_t *buf) {
+    DpMach *d = gbw(m)->d;
+    dp_mach_save(d, buf);
+    uint64_t f = *d->api->frame;
+    memcpy(buf + dp_mach_state_bytes(d), &f, 8);
+}
+static void gb_load(DpMachine *m, const uint8_t *buf) {
+    DpMach *d = gbw(m)->d;
+    dp_mach_load(d, buf);
+    uint64_t f; memcpy(&f, buf + dp_mach_state_bytes(d), 8);
+    *d->api->frame = (typeof(*d->api->frame))f;
+}
 static uint8_t gb_fetch(DpMachine *m, uint32_t a) { return dp_mach_op(gbw(m)->d, (uint16_t)a); }
 // compact ROM index bank * 0x4000 + (addr & 0x3FFF); the window bank comes from the mapper state
 static int64_t gb_rom_index(DpMachine *m, uint32_t a) {
