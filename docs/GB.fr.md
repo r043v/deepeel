@@ -4668,3 +4668,17 @@ utilisait `Super Mario Land (World) (Rev A).gb` (checksums 9d/5ecf) alors que `m
 `Super Mario Land (World).gb` (Rev 0, 9e/416b) ; l'ancien moteur refuse ce film sur la Rev A. Le noyau ne
 vérifiait pas l'identité de la ROM : il le fait désormais (même message de refus, `--tas-any-rom` pour forcer). La
 vérification du monde 4 par le noyau doit se refaire sur la Rev 0.
+
+#### Rejeu `muggv3` sur le noyau, Rev 0 (0.303.8, observations de l'outil)
+
+Sur `Super Mario Land (World).gb` (identité vérifiée), avec `--max-total` élevé (le plafond par défaut de 20 M de pas
+coupe le chemin du film bien avant ses 43 726 images), le noyau rejoue le film jusqu'à la fin mais `$FFB4=11`, aucune
+exécution en banque 1 : le résultat de l'ancien moteur (monde 4) n'est **pas** reproduit.
+
+Comparaison HRAM image par image (`DEEPEEL_TAS_HRAM`, ancien moteur `--play` contre noyau `--core`) : les 13 premières
+images sont identiques (hors transitoires), puis le noyau accuse un retard d'une image du jeu (`$FFB3` : 14 contre 15 à
+l'image 14). Le film n'est pas en cause (ses entrées sont à zéro jusqu'à l'image 15), pas plus que les techniques du
+noyau (`--no-event-probes`, `--no-solve`, `--no-irq-jitter`, `--no-taint-cut` : même premier écart). Piste constatée :
+`api->frame` n'avance pas à un des vblanks (le 15e rappel vblank porte le même `frame` que le 14e) ; compter les
+rappels vblank à la place de `api->frame` ne change pas l'écart. Reste à localiser : granularité d'une instruction par
+`dp_mach_run` (le noyau coupe à chaque pas) contre exécution continue de l'ancien moteur.
