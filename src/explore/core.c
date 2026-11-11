@@ -9,6 +9,7 @@ typedef struct {
     uint8_t *state;
     uint32_t pc;       // where the forced path resumes
     int forced;
+    uint32_t site;     // fork site rom index + 1 (0: none), for the per-site novelty score
     uint32_t input;    // held pad mask + 1 (0: none); inherited by every fork of the path
 } Pending;
 
@@ -51,6 +52,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--no-copies")) { c->no_copies = 1; return 1; }
     if (!strcmp(a, "--no-taint-cut")) { c->no_taint_cut = 1; return 1; }
     if (!strcmp(a, "--no-forced-ram-cut")) { c->no_forced_ram_cut = 1; return 1; }
+    if (!strcmp(a, "--no-site-score")) { c->no_site_score = 1; return 1; }
     if (!strcmp(a, "--no-novelty-order")) { c->no_novelty_order = 1; return 1; }
     if (!strcmp(a, "--visits-per-pc") && i + 1 < argc) { c->visits_per_pc = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
     return 0;
@@ -89,6 +91,7 @@ typedef struct {
     Pending *q;
     size_t qn, qcap;
     SiteTab sites;
+    uint32_t *site_picks, *site_gain;   // per fork site (rom index + 1): paths run / new ROM bytes they found
     int active;                // workers currently running a path
     uint64_t steps;            // global instruction count (atomic)
     DpCoreResult *out;
@@ -305,7 +308,7 @@ static void run_path(Worker *w, Pending *p) {
                     if (cfg->queue_max && sh->qn >= cfg->queue_max) loc->sat_queue++;
                     else {
                         if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
-                        sh->q[sh->qn++] = (Pending){ snap, pc, 0, cur_input };
+                        sh->q[sh->qn++] = (Pending){ snap, pc, 0, (uint32_t)(m->rom_index(m, pc) + 1), cur_input };
                         loc->event_probes++;
                         pthread_cond_signal(&sh->cv);
                         snap = malloc(sh->sbytes);
@@ -330,7 +333,7 @@ static void run_path(Worker *w, Pending *p) {
                 if (!fresh || (cfg->queue_max && sh->qn >= cfg->queue_max)) { if (fresh) loc->sat_queue++; free(snap); }
                 else {
                     if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
-                    sh->q[sh->qn++] = (Pending){ snap, pc, 0, cur_input };
+                    sh->q[sh->qn++] = (Pending){ snap, pc, 0, (uint32_t)(m->rom_index(m, pc) + 1), cur_input };
                     if (d == 1) loc->irq_forks++; else loc->jitter_forks++;
                     pthread_cond_signal(&sh->cv);
                 }
@@ -369,7 +372,7 @@ static void run_path(Worker *w, Pending *p) {
                 else if (cfg->queue_max && sh->qn >= cfg->queue_max) loc->sat_queue++;
                 else {
                     if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
-                    sh->q[sh->qn++] = (Pending){ pre, other, 1, cur_input };
+                    sh->q[sh->qn++] = (Pending){ pre, other, 1, (uint32_t)(m->rom_index(m, pc) + 1), cur_input };
                     (*cnt)++;
                     loc->forks++;
                     pushed = 1;
@@ -393,8 +396,17 @@ static void *worker_main(void *arg) {
         size_t pick = sh->qn - 1;
         w->loc.in_novelty_path = 0;
         if (!cfg->no_novelty_order) {
-            for (size_t i = sh->qn; i-- > 0;)
-                if (!covered(&w->loc, w->m, sh->q[i].pc)) { pick = i; break; }
+            double best = -1;
+            for (size_t i = sh->qn; i-- > 0;) {
+                if (covered(&w->loc, w->m, sh->q[i].pc)) continue;
+                double sc = 0;   // AFL-like: rare, productive parent sites first; latest wins ties
+                uint32_t st = sh->q[i].site;
+                if (!cfg->no_site_score && st && st <= sh->out->rom_size)
+                    sc = (1.0 + sh->site_gain[st - 1]) / (1.0 + sh->site_picks[st - 1]);
+                if (sc > best) { best = sc; pick = i; }
+                if (cfg->no_site_score) break;
+            }
+            if (best > 0 && pick != sh->qn - 1) w->loc.site_scored_picks++;
             if (pick != sh->qn - 1) { w->loc.novelty_picks++; w->loc.in_novelty_path = 1; }
         }
         Pending p = sh->q[pick];
@@ -402,8 +414,13 @@ static void *worker_main(void *arg) {
         sh->qn--;
         sh->active++;
         pthread_mutex_unlock(&sh->mu);
+        uint64_t before = w->loc.novelty_new_bytes + w->loc.plain_new_bytes;
         run_path(w, &p);
         run_flush(&w->cobs);
+        if (p.site && p.site <= sh->out->rom_size) {
+            __atomic_fetch_add(&sh->site_picks[p.site - 1], 1, __ATOMIC_RELAXED);
+            __atomic_fetch_add(&sh->site_gain[p.site - 1], (uint32_t)(w->loc.novelty_new_bytes + w->loc.plain_new_bytes - before), __ATOMIC_RELAXED);
+        }
         pthread_mutex_lock(&sh->mu);
         sh->active--;
         pthread_cond_broadcast(&sh->cv);
@@ -430,6 +447,8 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
     sh.out = out; sh.cfg = cfg;
     sh.sbytes = m->state_bytes(m);
     sh.fed = calloc(0x10000, 1);
+    sh.site_picks = calloc(rom_size + 1, sizeof *sh.site_picks);
+    sh.site_gain = calloc(rom_size + 1, sizeof *sh.site_gain);
 
     unsigned nw = cfg->jobs > 1 ? cfg->jobs : 1;
     Worker *ws = calloc(nw, sizeof *ws);
@@ -467,12 +486,12 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
             if (!cp) break;
             memcpy(cp, start, sh.sbytes);
             if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
-            sh.q[sh.qn++] = (Pending){ cp, cfg->seeds[i], 1, 0 };
+            sh.q[sh.qn++] = (Pending){ cp, cfg->seeds[i], 1, 0, 0 };
             out->seeded++;
         }
         // the natural path goes last: it is the first one taken
         if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
-        sh.q[sh.qn++] = (Pending){ start, start_pc, 0, 0 };
+        sh.q[sh.qn++] = (Pending){ start, start_pc, 0, 0, 0 };
         // technique 3: start states whose RAM range already holds a plausible valid save
         if (m->poke && cfg->seed_n && cfg->seed_hi >= cfg->seed_lo) {
             for (unsigned v = 0; v < cfg->seed_n; v++) {
@@ -482,7 +501,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
                 if (!cp) break;
                 m->save(m, cp);
                 if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
-                sh.q[sh.qn++] = (Pending){ cp, start_pc, 0, 0 };
+                sh.q[sh.qn++] = (Pending){ cp, start_pc, 0, 0, 0 };
                 out->seeded_ram++;
             }
             m->load(m, start);
@@ -499,7 +518,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
                 if (!cp) break;
                 memcpy(cp, start, sh.sbytes);
                 if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
-                sh.q[sh.qn++] = (Pending){ cp, start_pc, 0, masks[i] + 1 };
+                sh.q[sh.qn++] = (Pending){ cp, start_pc, 0, 0, masks[i] + 1 };
                 out->sessions++;
             }
         }
@@ -517,14 +536,14 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
-        out->novelty_picks += l->novelty_picks; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
+        out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
         out->exec_outside += l->exec_outside;
         free(ws[i].visits); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
     }
     out->steps = sh.steps;
     for (size_t i = 0; i < sh.qn; i++) free(sh.q[i].state);
-    free(sh.probeset); free(sh.cellset); free(sh.q); free(sh.sites.s); free(sh.fed); free(ws);
+    free(sh.probeset); free(sh.cellset); free(sh.q); free(sh.sites.s); free(sh.fed); free(sh.site_picks); free(sh.site_gain); free(ws);
     return ok;
 }
 
@@ -539,6 +558,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "deepeel %s (generic kernel)\n", label);
     fprintf(out, "steps %llu paths %llu forks %llu pruned-covered %llu\n", U(r->steps), U(r->paths), U(r->forks), U(r->pruned_covered));
     fprintf(out, "saturation: total %llu path %llu loop %llu site %llu queue %llu\n", U(r->sat_total), U(r->sat_path), U(r->sat_loop), U(r->sat_site), U(r->sat_queue));
+    fprintf(out, "site-scored picks %llu\n", U(r->site_scored_picks));
     fprintf(out, "novelty picks %llu (new ROM bytes: novelty %llu, plain %llu)\n", U(r->novelty_picks), U(r->novelty_new_bytes), U(r->plain_new_bytes));
     fprintf(out, "workers %llu (short %llu)\n", U(r->workers), U(r->workers_short));
     fprintf(out, "cells %llu, cell-pruned forks %llu\n", U(r->cells), U(r->cell_pruned));
