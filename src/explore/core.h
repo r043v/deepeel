@@ -14,7 +14,7 @@
 
 #include "../core/dpmachine.h"
 
-enum { DP_CORE_NATURAL = 1, DP_CORE_FORCED = 2, DP_CORE_COPIED = 4, DP_CORE_COMPRESSED = 8 };   // COPIED: a ROM byte later written verbatim to RAM
+enum { DP_CORE_NATURAL = 1, DP_CORE_FORCED = 2, DP_CORE_COPIED = 4, DP_CORE_COMPRESSED = 8, DP_CORE_DATA = 16 };   // DATA: read as data by a natural path   // COPIED: a ROM byte later written verbatim to RAM
 
 // optional platform hooks; every member may be NULL
 typedef struct DpPlatformHooks {

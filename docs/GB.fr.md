@@ -4633,3 +4633,12 @@ fermeture→graines. Écart non résorbé : à porter (ou à écarter explicitem
 monde 4 passe par les lectures de données (tuiles bank 1 $47F2–$4FB1), que le `--cov` du noyau n'exporte pas (pas de
 drapeau 8) : la fidélité reste **non vérifiée**. À faire : exporter les lectures de données du noyau, ou journaliser
 le dernier frame du film atteint.
+
+### `--cov` du noyau : lectures de données (0.303.8)
+
+Le `--cov` du noyau marque désormais le drapeau 8 (octet ROM lu comme donnée par un chemin naturel ; `DP_CORE_DATA`),
+sans que cela compte comme couverture de code. Mesure SML Rev A + muggv3, `--tas-solo` (le film va au bout) :
+noyau 14 418 octets de données, ancien moteur 18 096 ; **aucun** des deux ne lit la plage de tuiles du monde 4
+(bank 1 $07F2–$0FB1 en offset) dans cette exécution. Conclusion : sur ce run, ni l'ancien ni le noyau ne prouvent
+que le film atteint le monde 4 ; la fidélité du rejeu GB reste non établie (ou la plage est mal identifiée pour
+cette révision). Observation de l'outil.

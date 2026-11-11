@@ -224,7 +224,7 @@ static void mark(Shared *sh, DpCoreResult *r, DpMachine *m, uint32_t pc, unsigne
 
 static int covered(DpCoreResult *r, DpMachine *m, uint32_t pc) {
     int64_t k = m->rom_index(m, pc);
-    return k >= 0 && (size_t)k < r->rom_size && __atomic_load_n(&r->flags[k], __ATOMIC_RELAXED);
+    return k >= 0 && (size_t)k < r->rom_size && (__atomic_load_n(&r->flags[k], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED));
 }
 
 // per-site fork counter, open addressing on the pc
@@ -255,6 +255,7 @@ static void obs_read(void *u, uint32_t addr, uint8_t v) {
         if (i == o->nram) o->ram[o->nram++] = addr;
     }
     if (k >= 0 && (size_t)k < o->r->rom_size) {
+        if (!o->forced && !(__atomic_load_n(&o->r->flags[k], __ATOMIC_RELAXED) & DP_CORE_DATA)) __atomic_fetch_or(&o->r->flags[k], DP_CORE_DATA, __ATOMIC_RELAXED);
         o->last_rom = k; o->last_val = v; o->age = 0;
         if (o->run_hi >= 0 && k >= o->run_hi && k <= o->run_hi + 2) o->run_hi = k;
         else { run_flush(o); o->run_lo = o->run_hi = k; }
@@ -851,7 +852,7 @@ static void *limits_main(void *arg) {
         nanosleep(&ts, NULL);
         time_t now = time(NULL);
         size_t n = 0;
-        for (size_t i = 0; i < sh->out->rom_size; i++) if (sh->out->flags[i]) n++;
+        for (size_t i = 0; i < sh->out->rom_size; i++) if (sh->out->flags[i] & (DP_CORE_NATURAL | DP_CORE_FORCED)) n++;
         if (n != seen) { seen = n; last_gain = now; }
         int why = 0;
         if (cfg->max_secs && (uint32_t)(now - t0) >= cfg->max_secs) why = 1;
@@ -1147,10 +1148,13 @@ void dp_core_write_cov(const char *path, const char *id, const DpCoreResult *r) 
     if (!path || !path[0]) return;
     FILE *cf = fopen(path, "w");
     if (!cf) return;
-    fprintf(cf, "# deepeel %s coverage v1 (generic kernel): bank offset flags(1=exec,4=speculative) hits\n", id);
+    fprintf(cf, "# deepeel %s coverage v1 (generic kernel): bank offset flags(1=exec,4=speculative,8=data read by a natural path) hits\n", id);
     for (size_t i = 0; i < r->rom_size; i++) {
         uint8_t f = r->flags[i]; if (!f) continue;
-        fprintf(cf, "%02x %04x %x 1\n", (unsigned)(i >> 14), (unsigned)(i & 0x3fff), (f & DP_CORE_NATURAL) ? 1 : 5);
+        unsigned out = (f & DP_CORE_NATURAL) ? 1 : (f & DP_CORE_FORCED) ? 5 : 0;
+        if (f & DP_CORE_DATA) out |= 8;
+        if (!out) continue;
+        fprintf(cf, "%02x %04x %x 1\n", (unsigned)(i >> 14), (unsigned)(i & 0x3fff), out);
     }
     fclose(cf);
 }
