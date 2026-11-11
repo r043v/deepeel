@@ -954,6 +954,12 @@ def build_z80_family(out):
     z[0:len(cells)] = cells
     with open(os.path.join(out, "fix_z80_cells.sms"), "wb") as f:
         f.write(z)
+    # pad poll: in a,($DC) / bit 4,a (button 1) / jr z; both outcomes need a pad probe
+    pad = bytearray([0xFF]) * 0x8000
+    code = bytes([0xDB, 0xDC, 0xCB, 0x67, 0x28, 0x04, 0x3E, 0x01, 0x18, 0x02, 0x3E, 0x02, 0x18, 0xFE])
+    pad[0:len(code)] = code
+    with open(os.path.join(out, "fix_z80_pad.sms"), "wb") as f:
+        f.write(pad)
     # IM 1 vblank interrupt: VDP reg1 enables the frame IRQ, EI, idle; handler at $38 (IRQ fork)
     irq = bytearray([0xFF]) * 0x8000
     boot = bytes([0x31, 0xF0, 0xDF, 0x3E, 0x20, 0xD3, 0xBF, 0x3E, 0x81, 0xD3, 0xBF,

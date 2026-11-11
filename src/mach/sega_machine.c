@@ -162,12 +162,14 @@ DpMachine *dp_machine_sega(const void *backend) {
 // ($7E) or the H counter ($7F) forks one state per plausible value.  The IN runs on the
 // live machine, A is overwritten with the alternative, the state is saved, then the live
 // state is restored: the saved state sits just after the IN.  No probe while an
-// interrupt line is pending (a planted status must not hide it).
+// interrupt line is pending (a planted status must not hide it).  `in a,($DC)` forks
+// one pad-1 line low per alternative (input probes, one button at a time).
 static int sega_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *bytes, unsigned k, uint8_t *save) {
     (void)user; (void)pc;
     static const uint8_t st[] = {0x00, 0x20, 0x40, 0x80, 0xC0, 0xE0, 0xFF};   // collision|overflow|vblank|line, combos
     static const uint8_t vc[] = {0x00, 0x7F, 0x80, 0xC0, 0xFF};
     static const uint8_t hc[] = {0x00, 0x20, 0x40, 0x80, 0xE0, 0xFF};
+    static const uint8_t pad[] = {0xFE, 0xFD, 0xFB, 0xF7, 0xEF, 0xDF};   // pad 1: one line low (up, down, left, right, 1, 2)
     if (bytes[0] != 0xDB) return 0;                       // in a,(n)
     SegaMach *s = m->impl;
     z80_t *c = s->b->cpu();
@@ -177,6 +179,7 @@ static int sega_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t
     case 0x81: vals = st; n = sizeof st; break;
     case 0x40: vals = vc; n = sizeof vc; break;
     case 0x41: vals = hc; n = sizeof hc; break;
+    case 0xC0: vals = pad; n = sizeof pad; break;   // $DC/$C0 joypad port A
     default: return 0;
     }
     if (k >= n) return 0;
