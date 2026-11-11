@@ -4807,3 +4807,10 @@ et `rom bytes: … static-only N`. `--no-closure` désactive la technique.
 Fixtures et tests : `core_closure_{sm83,huc6280,68000,6502,z80}` (un appel dont
 le site de retour n'est jamais atteint). Les nombres sont des observations de
 l'outil, non des mesures de matériel.
+
+## 0.307.1 — noyau Sega : `--text`, `--cov` partagé, `--no-closure`
+
+Sous `--core`, `deepeel z80 explore` écrit `--text FILE` (le rapport du noyau) et
+`--cov FILE` (écrivain partagé `dp_core_write_cov`, qui ajoute le drapeau données `8`).
+`--no-closure` coupe aussi la fermeture statique du noyau. `--map` (PNG) et
+`--summary` restent à faire côté noyau.
