@@ -32,6 +32,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
         if (*e == '-') { c->cell_lo = (uint32_t)lo; c->cell_hi = (uint32_t)strtoul(e + 1, NULL, 0); }
         return 2;
     }
+    if (!strcmp(a, "--no-decompress")) { c->no_decompress = 1; return 1; }
     if (!strcmp(a, "--no-copies")) { c->no_copies = 1; return 1; }
     if (!strcmp(a, "--no-forced-ram-cut")) { c->no_forced_ram_cut = 1; return 1; }
     if (!strcmp(a, "--no-novelty-order")) { c->no_novelty_order = 1; return 1; }
@@ -90,7 +91,29 @@ typedef struct {
     uint8_t *fed;         // 64 KiB bitmap: CPU addresses written by a natural verbatim ROM copy
     int forced;           // the current path is a forced fork: speculative state
     int age;              // instructions since that read; a stale read is not a copy
+    // technique 6: a sequential ROM read stream and the RAM writes it feeds
+    int64_t run_lo, run_hi;
+    uint32_t run_writes;
+    int no_decompress;
 } CopyObs;
+
+#define RUN_MIN 16
+// closes the current stream: a long one whose RAM output is not 1:1 is a decompressor input
+static void run_flush(CopyObs *o) {
+    if (o->run_hi >= 0 && !o->no_decompress && !o->forced) {
+        int64_t reads = o->run_hi - o->run_lo + 1;
+        int64_t w = o->run_writes;
+        int64_t diff = w > reads ? w - reads : reads - w;
+        if (reads >= RUN_MIN && w >= RUN_MIN && diff * 4 > reads) {
+            for (int64_t k = o->run_lo; k <= o->run_hi; k++) {
+                uint8_t old = __atomic_fetch_or(&o->r->flags[k], DP_CORE_COMPRESSED, __ATOMIC_RELAXED);
+                if (!(old & DP_CORE_COMPRESSED)) o->r->compressed_bytes++;
+            }
+            o->r->decompress_runs++;
+        }
+    }
+    o->run_lo = o->run_hi = -1; o->run_writes = 0;
+}
 
 typedef struct {
     Shared *sh;
@@ -144,11 +167,16 @@ static uint32_t *site_count(SiteTab *t, uint32_t pc) {
 static void obs_read(void *u, uint16_t addr, uint8_t v) {
     CopyObs *o = u;
     int64_t k = o->m->rom_index(o->m, addr);
-    if (k >= 0 && (size_t)k < o->r->rom_size) { o->last_rom = k; o->last_val = v; o->age = 0; }
+    if (k >= 0 && (size_t)k < o->r->rom_size) {
+        o->last_rom = k; o->last_val = v; o->age = 0;
+        if (o->run_hi >= 0 && k >= o->run_hi && k <= o->run_hi + 2) o->run_hi = k;
+        else { run_flush(o); o->run_lo = o->run_hi = k; }
+    }
 }
 
 static void obs_write(void *u, uint16_t addr, uint8_t v) {
     CopyObs *o = u;
+    if (o->run_hi >= 0 && o->m->rom_index(o->m, addr) < 0) o->run_writes++;
     if (o->last_rom < 0 || o->age > 4) return;
     if (o->m->rom_index(o->m, addr) < 0 && v == o->last_val) {
         if (o->forced) o->r->copy_forced++;
@@ -195,6 +223,7 @@ static void run_path(Worker *w, Pending *p) {
     free(p->state);
     if (p->forced) m->set_pc(m, p->pc);
     loc->paths++;
+    run_flush(&w->cobs);
     w->cobs.forced = p->forced; w->cobs.last_rom = -1;
     uint32_t path_id = ++w->path_id, steps = 0;
     int cur_forced = p->forced;
@@ -297,6 +326,7 @@ static void *worker_main(void *arg) {
         sh->active++;
         pthread_mutex_unlock(&sh->mu);
         run_path(w, &p);
+        run_flush(&w->cobs);
         pthread_mutex_lock(&sh->mu);
         sh->active--;
         pthread_cond_broadcast(&sh->cv);
@@ -338,7 +368,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         w->visits = calloc(0x10000, sizeof *w->visits);
         w->stamp = calloc(0x10000, sizeof *w->stamp);
         if (!w->visits || !w->stamp) { ok = 0; break; }
-        w->cobs = (CopyObs){ wm, &w->loc, -1, 0, sh.fed, 0, 99 };
+        w->cobs = (CopyObs){ wm, &w->loc, -1, 0, sh.fed, 0, 99, -1, -1, 0, cfg->no_decompress };
         started++;
     }
     out->workers = started;
@@ -379,7 +409,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         out->sat_site += l->sat_site; out->sat_queue += l->sat_queue;
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
-        out->novelty_picks += l->novelty_picks; out->cells += l->cells; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
+        out->novelty_picks += l->novelty_picks; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
         out->exec_outside += l->exec_outside;
         free(ws[i].visits); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
@@ -404,6 +434,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "novelty picks %llu (new ROM bytes: novelty %llu, plain %llu)\n", U(r->novelty_picks), U(r->novelty_new_bytes), U(r->plain_new_bytes));
     fprintf(out, "workers %llu (short %llu)\n", U(r->workers), U(r->workers_short));
     fprintf(out, "cells %llu, cell-pruned forks %llu\n", U(r->cells), U(r->cell_pruned));
+    fprintf(out, "decompress runs %llu, compressed ROM bytes %llu\n", U(r->decompress_runs), U(r->compressed_bytes));
     fprintf(out, "seeded entry points %llu\n", U(r->seeded));
     fprintf(out, "forced RAM cuts %llu\n", U(r->forced_ram_cuts));
     fprintf(out, "exec_outside %llu, rom->ram copy bytes %llu (%zu distinct ROM sources), forced %llu\n", U(r->exec_outside), U(r->copy_bytes), copied, U(r->copy_forced));

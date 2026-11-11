@@ -954,6 +954,14 @@ def build_z80_family(out):
     z[0:len(cells)] = cells
     with open(os.path.join(out, "fix_z80_cells.sms"), "wb") as f:
         f.write(z)
+    # a 32-byte ROM stream expanded 1:2 into RAM: technique 6 (decompressor detection)
+    dec = bytes([0x21, 0x00, 0x01, 0x11, 0x00, 0xC0, 0x06, 0x20,
+                 0x7E, 0x23, 0x12, 0x13, 0x12, 0x13, 0x10, 0xF8, 0x18, 0xFE])
+    z = bytearray([0xFF]) * 0x8000
+    z[0:len(dec)] = dec
+    z[0x100:0x120] = bytes(range(1, 33))
+    with open(os.path.join(out, "fix_z80_decomp.sms"), "wb") as f:
+        f.write(z)
     m = bytearray([0xFF]) * 0x8000
     m[0:2] = b"AB"
     m[2:4] = (0x4010).to_bytes(2, "little")

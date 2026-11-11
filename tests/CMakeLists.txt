@@ -222,6 +222,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_oamchain.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_sramcopy.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_apucopy.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_decomp.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_cells.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.gg
@@ -657,3 +658,5 @@ add_test(NAME core_cli_msx COMMAND sh -c "$<TARGET_FILE:deepeel> z80 explore msx
 set_tests_properties(core_cli_msx PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_cells COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_cells.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --jobs 1 --attract-frames 0 --cells 0xC000-0xC0FF | grep -q 'cell-pruned forks [1-9]' && $<TARGET_FILE:deepeel> z80 explore sms $f --core --jobs 1 --attract-frames 0 | grep -q 'cell-pruned forks 0'")
 set_tests_properties(core_cells PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_decompress COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_decomp.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --jobs 1 --attract-frames 0 | grep -q 'decompress runs [1-9][0-9]*, compressed ROM bytes 3[0-9]' && $<TARGET_FILE:deepeel> z80 explore sms $f --core --jobs 1 --attract-frames 0 --no-decompress | grep -q 'decompress runs 0, compressed ROM bytes 0' && $<TARGET_FILE:deepeel> z80 explore sms ${CMAKE_CURRENT_BINARY_DIR}/fix_sms_ramsrc.sms --core --jobs 1 --attract-frames 0 | grep -q 'decompress runs 0,'")
+set_tests_properties(core_decompress PROPERTIES FIXTURES_REQUIRED fixtures)

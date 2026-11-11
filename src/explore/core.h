@@ -14,7 +14,7 @@
 
 #include "../core/dpmachine.h"
 
-enum { DP_CORE_NATURAL = 1, DP_CORE_FORCED = 2, DP_CORE_COPIED = 4 };   // COPIED: a ROM byte later written verbatim to RAM
+enum { DP_CORE_NATURAL = 1, DP_CORE_FORCED = 2, DP_CORE_COPIED = 4, DP_CORE_COMPRESSED = 8 };   // COPIED: a ROM byte later written verbatim to RAM
 
 // optional platform hooks; every member may be NULL
 typedef struct DpPlatformHooks {
@@ -37,6 +37,7 @@ typedef struct DpCoreConfig {
     int no_forced_ram_cut;     // 1: let forced paths run unfed RAM
     const uint32_t *seeds;     // extra entry points (vectors): queued as forced paths from the start state
     size_t n_seeds;
+    int no_decompress;         // 1: do not look for decompressors (technique 6)
     int no_copies;             // 1: do not observe data accesses
     int no_novelty_order;      // 1: plain LIFO instead of uncovered-target-first
     uint32_t cell_lo, cell_hi; // technique 8: RAM range hashed into a semantic cell (cell_hi > cell_lo enables it)
@@ -64,6 +65,8 @@ typedef struct DpCoreResult {
     int in_novelty_path;        // internal: the path being run was a novelty pick
     uint64_t cells;             // distinct (fork target, RAM cell) pairs queued (technique 8)
     uint64_t cell_pruned;       // forced forks dropped because their (target, RAM cell) pair was already queued
+    uint64_t compressed_bytes;  // ROM bytes read as a sequential stream that fed unequal RAM writes (technique 6)
+    uint64_t decompress_runs;   // such streams detected
     uint64_t hook_vetoed;      // forced sides refused by DpPlatformHooks.veto_fork
     uint64_t exec_outside;     // instructions executed where rom_index < 0 (RAM/VRAM code)
     uint64_t no_pc;            // 1 when the machine has no pc/set_pc: nothing explored
@@ -79,7 +82,7 @@ typedef struct DpCoreSection {
 // fills up to `cap` sections, returns the total count (may exceed cap)
 size_t dp_core_sections(const DpCoreResult *r, DpCoreSection *out, size_t cap);
 
-// Common kernel options, parsed once for every platform CLI: --cells LO-HI, --no-copies,
+// Common kernel options, parsed once for every platform CLI: --cells LO-HI, --no-decompress, --no-copies,
 // --no-forced-ram-cut, --no-novelty-order, --visits-per-pc N.  Returns the
 // number of argv entries consumed (0: not a kernel option).
 int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i);
