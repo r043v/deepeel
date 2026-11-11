@@ -129,6 +129,8 @@ uint64_t dp_mdmach_run(DpMdMach *d, uint64_t max_steps, int *cut, int *fault) {
         if (!d->m->fault) d->resume_frame = 0;
         if (!d->m->fault && d->h.on_frame) d->h.on_frame(d->h.user);
     }
+    // the budget fault is raised after the opcode words were consumed: put pc back on the cut instruction
+    if (d->m->fault == DP_MD_FAULT_BUDGET) { d->m->pc = d->m->fault_pc; d->m->fault = 0; }
     if (cut) *cut = d->m->fault == DP_MD_FAULT_BUDGET || (!d->m->fault && d->steps >= d->budget);
     if (fault) *fault = (d->m->fault == DP_MD_FAULT_BUDGET || d->m->fault == DP_MD_FAULT_HALT) ? 0 : d->m->fault;
     return d->steps;
