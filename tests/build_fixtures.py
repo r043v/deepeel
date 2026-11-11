@@ -646,6 +646,7 @@ def build_techniques_8bit(out):
     gb("fix_gb_lyprobe", bytes.fromhex("f044 fe90 2804 3e01 18fe 3e02 18fe"))   # technique 2: one read of LY, branch on the first VBlank line
     gb("fix_gb_cells", bytes.fromhex("af 2006 2004 00000000 18fe"))
     pce("fix_pce_decomp", bytes.fromhex("a200 a000 bd20e0 990020 c8 990020 c8 e8 e020 d0f0 80fe"), bytes(range(1, 33)))
+    pce("fix_pce_status", bytes.fromhex("a9ff 5301 ad0000 2920 d004 a901 80fe a902 80fe"))   # technique 2: one VDC status read, branch on the VBlank flag
     pce("fix_pce_cells", bytes.fromhex("a900 d006 d004 eaeaeaea 80fe"))
 
 def md_rom(size=0x1000):
@@ -967,6 +968,7 @@ def build_md_techniques(out):
         save_md(out, name, r)
     prog("fix_md_save", bytes.fromhex("1039 00ffc100 0c00 00aa 6604 7001 6002 7002 60fe"))
     prog("fix_md_decomp", bytes.fromhex("41f9 00000230 43f9 00ffc000 701f 12d8 12c1 51c8 fffa 60fe"), bytes(range(1, 33)))
+    prog("fix_md_status", bytes.fromhex("3039 00c00004 0240 0008 6604 7201 60fe 7202 60fe"))   # technique 2: one VDP status read, branch on the VBlank flag
     prog("fix_md_cells", bytes.fromhex("7000 6606 6604 4e714e71 60fe"))   # technique 8: two Bne sites, same target, same RAM
     prog("fix_md_rng", bytes.fromhex("1039 00ffc200 0a00 0055 13c0 00ffc200 0c00 00aa 6702 60e8 7001 60fe"))
     prog("fix_md_index", bytes.fromhex("1039 00ffc300 0280 0000 000f 41f9 00000230 1230 0000 0c01 0003 6704 7001 60fe 7002 60fe"),

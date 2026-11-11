@@ -85,10 +85,29 @@ static void md_set_input(DpMachine *m, uint32_t mask) {
 // state per pad held (Start, A+C, B, directions); the held pad stays in the saved state, so the
 // game's next reads see it.  The instruction is dry-run once to see whether it touches the port.
 static int md_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *bytes, unsigned k, uint8_t *save) {
-    (void)user; (void)pc; (void)bytes;
+    (void)user; (void)pc;
     static const uint32_t pads[] = {0x40, 0x10, 0x20, 0x08, 0x04, 0x01, 0x02};
-    if (k >= sizeof pads / sizeof *pads) return 0;
+    static const uint16_t vdp[] = {0x3400, 0x3408, 0x3404, 0x3402, 0x340C};   // VDP status: idle, VBlank, HBlank, DMA busy, VBlank+HBlank
     MdMachWrap *w = m->impl;
+    // `move.w $C00004,Dn` or `move.w (An),Dn` with An at the VDP control port: one state per status value,
+    // the destination data register overwritten in the state saved after the read
+    unsigned op = (unsigned)bytes[0] << 8 | bytes[1];
+    int dn = -1;
+    if ((op & 0xF1FF) == 0x3039 && bytes[2] == 0x00 && bytes[3] == 0xC0 && bytes[4] == 0x00 && (bytes[5] == 0x04 || bytes[5] == 0x06)) dn = (int)((op >> 9) & 7);
+    else if ((op & 0xF1F8) == 0x3010) { uint32_t a = dp_mdmach_an(w->m, op & 7); if (a == 0xC00004u || a == 0xC00006u) dn = (int)((op >> 9) & 7); }
+    if (dn >= 0) {
+        if (k >= sizeof vdp / sizeof *vdp) return 0;
+        uint8_t *pre = malloc(md_state_bytes(m));
+        if (!pre) return 0;
+        m->save(m, pre);
+        md_run(m);
+        m->save(m, save);
+        dp_mdmach_state_set_dn_word(save, (unsigned)dn, vdp[k]);
+        m->load(m, pre);
+        free(pre);
+        return 1;
+    }
+    if (k >= sizeof pads / sizeof *pads) return 0;
     uint8_t *pre = malloc(md_state_bytes(m));
     if (!pre) return 0;
     m->save(m, pre);

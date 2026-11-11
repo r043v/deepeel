@@ -249,6 +249,8 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_index40.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_decomp.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_lyprobe.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_md_status.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_status.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_decomp.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_decomp.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_decomp.nes
@@ -773,3 +775,7 @@ add_test(NAME core_decompress_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/
 set_tests_properties(core_decompress_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_event_probes_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_lyprobe.gb; $<TARGET_FILE:deepeel> explore $f --core --jobs 1 --attract-frames 0 --no-sessions | grep -q 'event probes [1-9][0-9]* at 1 sites' && $<TARGET_FILE:deepeel> explore $f --core --jobs 1 --attract-frames 0 --no-sessions --no-event-probes | grep -q 'event probes 0 at 0 sites'")
 set_tests_properties(core_event_probes_sm83 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_event_probes_68000 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_md_status.md; $<TARGET_FILE:deepeel> md explore $f --core --jobs 1 --attract-frames 0 --no-sessions | grep -q 'event probes [1-9][0-9]* at 1 sites' && $<TARGET_FILE:deepeel> md explore $f --core --jobs 1 --attract-frames 0 --no-sessions --no-event-probes | grep -q 'event probes 0 at 0 sites'")
+set_tests_properties(core_event_probes_68000 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_event_probes_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_status.pce; $<TARGET_FILE:deepeel> pce explore $f --core --jobs 1 --attract-frames 0 --no-sessions | grep -q 'event probes [1-9][0-9]* at 1 sites' && $<TARGET_FILE:deepeel> pce explore $f --core --jobs 1 --attract-frames 0 --no-sessions --no-event-probes | grep -q 'event probes 0 at 0 sites'")
+set_tests_properties(core_event_probes_huc6280 PROPERTIES FIXTURES_REQUIRED fixtures)

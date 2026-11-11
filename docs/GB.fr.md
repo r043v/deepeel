@@ -4781,3 +4781,14 @@ l'accès est la suite.
 - **Technique 2 sur SM83** : la lecture de LY (`$FF44`) ou STAT (`$FF41`) (`ldh`/`ld a,(nn)`) donne une fourche par
   valeur plausible (LY 0, $90, $99, $8F ; STAT modes 0..3). Fixture `fix_gb_lyprobe`, test `core_event_probes_sm83`.
   Reste : sonde d'état VDP sur 68000 et sondes de pad/statut VDC sur HuC6280.
+
+## 0.306.1 — noyau : technique 2 sur 68000 et HuC6280
+
+- **68000** : `move.w $C00004,Dn` et `move.w (An),Dn` avec An sur le port de contrôle VDP donnent une fourche par
+  valeur d'état (inactif, VBlank, HBlank, DMA, VBlank+HBlank) ; le registre de destination est écrasé dans
+  l'état sauvegardé après la lecture. Fixture `fix_md_status`, test `core_event_probes_68000`.
+- **HuC6280** : `lda $0000..$03FF` (état du VDC, page E/S en MPR0) donne une fourche par valeur (inactif, VBlank,
+  raster, occupé) ; `dp_pce_set_a` écrase A. Fixture `fix_pce_status`, test `core_event_probes_huc6280`.
+- La technique 2 est ainsi présente sur les cinq ISA (Z80 : état VDP/compteurs/pad/Pause ; 6502 : état PPU ;
+  SM83 : LY/STAT et pad ; 68000 : état VDP et pad ; HuC6280 : état VDC et IRQ). Limite restante : sonde de
+  pad HuC6280 (port multiplexé `$1000`) et registres de compteurs H/V du VDC.

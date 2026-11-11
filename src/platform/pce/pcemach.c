@@ -138,6 +138,7 @@ DpPceCpu dp_pce_cpu(void) {
 
 void dp_pce_set_flags(uint8_t p) { machine.cpu.p = p; }
 void dp_pce_set_pc(uint16_t pc) { machine.cpu.pc = pc; }
+void dp_pce_set_a(uint8_t a) { machine.cpu.a = a; }
 
 // map the physical ROM page into the window of pc and start there; 0 when no MPR value maps it
 int dp_pce_enter(uint32_t rom_page, uint16_t pc) {

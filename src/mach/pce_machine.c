@@ -178,6 +178,21 @@ static void pce_set_pc(DpMachine *m, uint32_t pc) { pce_ensure(m); dp_pce_set_pc
 // as the old PCE engine's fork_irq
 static int pce_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *bytes, unsigned k, uint8_t *save) {
     (void)user; (void)pc;
+    // `lda $0000..$03FF` of the VDC status register (I/O page mapped at MPR0): one state per status value,
+    // the instruction runs on the live machine, A is overwritten, the state is saved, the live state restored
+    if (bytes[0] == 0xAD && ((bytes[2] << 8) | bytes[1]) < 0x0400 && !(bytes[1] & 3)) {
+        static const uint8_t vdc[] = {0x00, 0x20, 0x04, 0x40, 0x24};   // idle, vblank, raster, busy, vblank+raster
+        if (k >= sizeof vdc) return 0;
+        uint8_t *tmp = malloc(m->state_bytes(m));
+        if (!tmp) return 0;
+        m->save(m, tmp);
+        m->run(m);
+        dp_pce_set_a(vdc[k]);
+        m->save(m, save);
+        m->load(m, tmp);
+        free(tmp);
+        return 1;
+    }
     if (k >= 2) return 0;
     int unmask = bytes[0] == 0x58 || bytes[0] == 0x28 || bytes[0] == 0x40;
     if (!unmask && (bytes[0] == 0x8D || bytes[0] == 0x9C) && (((bytes[2] << 8) | bytes[1]) & 0x1FFF) == 0x1402) unmask = 1;
