@@ -101,6 +101,19 @@ static int nes_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t 
     (void)user; (void)pc;
     static const uint8_t st[] = { 0x80, 0x40, 0x20, 0xC0, 0xA0, 0xE0, 0x00 };
     DpNesMach *n = ((NesMachWrap *)m->impl)->m;
+    if ((bytes[0] == 0xAD || bytes[0] == 0xBD) && bytes[1] == 0x16 && bytes[2] == 0x40) {
+        // controller read (LDA $4016 / LDA $4016,X): one button held from here on per alternative (as the Sega pad probe)
+        static const uint32_t pads[] = { 0x10, 0x20, 0x40, 0x01, 0x02, 0x04, 0x08 };
+        if (k >= sizeof pads / sizeof *pads) return 0;
+        uint8_t *tmp = malloc(m->state_bytes(m));
+        if (!tmp) return 0;
+        m->save(m, tmp);
+        m->set_input(m, pads[k]);
+        m->save(m, save);
+        m->load(m, tmp);
+        free(tmp);
+        return 1;
+    }
     if (k >= sizeof st) return 0;
     if (!((bytes[0] == 0xAD || bytes[0] == 0x2C) && bytes[1] == 0x02 && bytes[2] == 0x20)) return 0;
     if (dp_nesmach_nmi_pending(n)) return 0;
