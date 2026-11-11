@@ -4709,3 +4709,11 @@ instructions). Avant : seulement GB, Sega et MD. Fixtures `fix_nes_nmi` et
 `fix_pce_irq`, tests `core_irq_fork_nes|pce` (compteur et option
 `--no-irq-jitter`). Observations de l'outil : Raiden PCE 55 fourches (110 de
 gigue), une ROM NES 77 (154).
+
+Note de 0.304.2 : le commit 0.304.1 contient aussi, par un `git add` trop large,
+(1) l'hypothèse « délai EI perdu à la coupure » de `gb_machine.c` (drapeau
+`last_ei` sauvé dans l'état, `next_evt` masqué pendant le run) et (2) le
+diagnostic `DEEPEEL_KDUMP`/`DEEPEEL_KWRAM` de `m0boy.c` (une ligne par vblank :
+trame, empreinte, pc, ime, if, LY). Observation de l'outil : sur SML Rev 0 avec
+600 M de pas, le film est joué jusqu'au bout (43726 trames) et finit à
+`ffb4=11` : le monde 4 n'est pas atteint, l'hypothèse EI ne suffit pas.
