@@ -76,6 +76,13 @@ static void sega_poke(DpMachine *m, uint32_t a, uint8_t v) {
     if (s->base_write) s->base_write(s->base_user, (uint16_t)a, v);
 }
 
+static void sega_set_input(DpMachine *m, uint32_t mask) {
+    DpSegaInput in;
+    memset(&in, 0, sizeof in);
+    in.pad[0] = (uint8_t)(mask & 0x3F);
+    ((SegaMach *)m->impl)->b->set_input(in);
+}
+
 static uint8_t sega_obs_read(void *u, uint16_t a) {
     SegaMach *s = u;
     uint8_t v = s->prev_read(s->prev_user, a);
@@ -153,6 +160,7 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->pc = sega_pc;
     m->set_pc = sega_set_pc;
     m->poke = sega_poke;
+    m->set_input = sega_set_input;
     m->observe = sega_observe;
     m->close = sega_close;
     return m;

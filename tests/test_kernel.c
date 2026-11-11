@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
     hooks.veto_fork = veto_all;
     b->init(rom, rn, NULL, 1);
     dp_core_config_default(&cfg);
-    cfg.max_total = 20000;
+    cfg.max_total = 20000; cfg.no_sessions = 1;
     cfg.hooks = &hooks;
     CHECK(dp_core_explore(m, rn, &cfg, &r));
     CHECK(h.steps == r.steps && r.steps > 0);

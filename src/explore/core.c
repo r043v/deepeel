@@ -9,6 +9,7 @@ typedef struct {
     uint8_t *state;
     uint32_t pc;       // where the forced path resumes
     int forced;
+    uint32_t input;    // held pad mask + 1 (0: none); inherited by every fork of the path
 } Pending;
 
 typedef struct {
@@ -33,6 +34,8 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
         return 2;
     }
     if (!strcmp(a, "--no-event-probes")) { c->no_event_probes = 1; return 1; }
+    if (!strcmp(a, "--no-sessions")) { c->no_sessions = 1; return 1; }
+    if (!strcmp(a, "--sessions") && i + 1 < argc) { c->sessions = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--no-irq-jitter")) { c->no_irq_jitter = 1; return 1; }
     if (!strcmp(a, "--no-decompress")) { c->no_decompress = 1; return 1; }
     if (!strcmp(a, "--no-copies")) { c->no_copies = 1; return 1; }
@@ -227,6 +230,10 @@ static void run_path(Worker *w, Pending *p) {
     m->load(m, p->state);
     free(p->state);
     if (p->forced) m->set_pc(m, p->pc);
+    uint32_t cur_input = p->input;
+    // a session shares half the total budget with its siblings: it must not starve the natural path
+    uint64_t session_cap = cfg->max_total / (2 * (cfg->sessions ? (cfg->sessions > 16 ? 16 : cfg->sessions) : 16));
+    if (m->set_input) m->set_input(m, cur_input ? cur_input - 1 : 0);
     loc->paths++;
     run_flush(&w->cobs);
     w->cobs.forced = p->forced; w->cobs.last_rom = -1;
@@ -242,6 +249,7 @@ static void run_path(Worker *w, Pending *p) {
             break;
         }
         if (cfg->max_path_steps && steps >= cfg->max_path_steps) { loc->sat_path++; break; }
+        if (cur_input && cfg->max_total && steps >= session_cap) { loc->sat_path++; break; }
         uint32_t pc = m->pc(m);
         if (cfg->hooks && cfg->hooks->before_step &&
             !cfg->hooks->before_step(cfg->hooks->user, m, pc)) break;
@@ -279,7 +287,7 @@ static void run_path(Worker *w, Pending *p) {
                     if (cfg->queue_max && sh->qn >= cfg->queue_max) loc->sat_queue++;
                     else {
                         if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
-                        sh->q[sh->qn++] = (Pending){ snap, pc, 0 };
+                        sh->q[sh->qn++] = (Pending){ snap, pc, 0, cur_input };
                         loc->event_probes++;
                         pthread_cond_signal(&sh->cv);
                         snap = malloc(sh->sbytes);
@@ -304,7 +312,7 @@ static void run_path(Worker *w, Pending *p) {
                 if (!fresh || (cfg->queue_max && sh->qn >= cfg->queue_max)) { if (fresh) loc->sat_queue++; free(snap); }
                 else {
                     if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
-                    sh->q[sh->qn++] = (Pending){ snap, pc, 0 };
+                    sh->q[sh->qn++] = (Pending){ snap, pc, 0, cur_input };
                     if (d == 1) loc->irq_forks++; else loc->jitter_forks++;
                     pthread_cond_signal(&sh->cv);
                 }
@@ -343,7 +351,7 @@ static void run_path(Worker *w, Pending *p) {
                 else if (cfg->queue_max && sh->qn >= cfg->queue_max) loc->sat_queue++;
                 else {
                     if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
-                    sh->q[sh->qn++] = (Pending){ pre, other, 1 };
+                    sh->q[sh->qn++] = (Pending){ pre, other, 1, cur_input };
                     (*cnt)++;
                     loc->forks++;
                     pushed = 1;
@@ -441,12 +449,28 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
             if (!cp) break;
             memcpy(cp, start, sh.sbytes);
             if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
-            sh.q[sh.qn++] = (Pending){ cp, cfg->seeds[i], 1 };
+            sh.q[sh.qn++] = (Pending){ cp, cfg->seeds[i], 1, 0 };
             out->seeded++;
         }
         // the natural path goes last: it is the first one taken
         if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
-        sh.q[sh.qn++] = (Pending){ start, start_pc, 0 };
+        sh.q[sh.qn++] = (Pending){ start, start_pc, 0, 0 };
+        // held-pad sessions: copies of the power-on state, one per pad mask; they run
+        // after the natural path (queue is LIFO-picked from the back) and fork like any path
+        if (m->set_input && !cfg->no_sessions) {
+            static const uint32_t masks[16] = {0x10, 0x20, 0x01, 0x02, 0x04, 0x08, 0x30, 0x11, 0x21, 0x14,
+                                               0x18, 0x24, 0x28, 0x3F, 0x00, 0x15};
+            unsigned n = cfg->sessions ? cfg->sessions : 16;
+            if (n > 16) n = 16;
+            for (unsigned i = 0; i < n; i++) {
+                uint8_t *cp = malloc(sh.sbytes);
+                if (!cp) break;
+                memcpy(cp, start, sh.sbytes);
+                if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
+                sh.q[sh.qn++] = (Pending){ cp, start_pc, 0, masks[i] + 1 };
+                out->sessions++;
+            }
+        }
         // clones start from power-on, the same state the main machine saved
         for (unsigned i = 1; i < started; i++) pthread_create(&ws[i].th, NULL, worker_main, &ws[i]);
         worker_main(&ws[0]);
@@ -486,6 +510,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "workers %llu (short %llu)\n", U(r->workers), U(r->workers_short));
     fprintf(out, "cells %llu, cell-pruned forks %llu\n", U(r->cells), U(r->cell_pruned));
     fprintf(out, "decompress runs %llu, compressed ROM bytes %llu\n", U(r->decompress_runs), U(r->compressed_bytes));
+    fprintf(out, "held-pad sessions %llu\n", U(r->sessions));
     fprintf(out, "IRQ forks %llu (timing jitter %llu)\n", U(r->irq_forks), U(r->jitter_forks));
     fprintf(out, "event probes %llu at %llu sites\n", U(r->event_probes), U(r->event_probe_sites));
     fprintf(out, "seeded entry points %llu\n", U(r->seeded));
