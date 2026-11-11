@@ -1980,6 +1980,17 @@ static int cmd_md(int argc, char **argv) {
         if (reflive) {   // the window picks the feed up by name (dp_fb_ref_active)
             { const char *td = getenv("TMPDIR"); snprintf(feedpath, sizeof feedpath, "%s/deepeel-md-ref-%d.bin", td && *td ? td : "/tmp", (int)getpid()); }
             setenv("DEEPEEL_MD_REF_FEED", feedpath, 1);
+            {   // the reference core's name with its version (git revision of its tree, next to this checkout)
+                char dir[600], cmd[800], rev[40] = "";
+                const char *cd = getenv("CLOWN_MD_DIR");
+                if (cd) snprintf(dir, sizeof dir, "%s", cd);
+                else { snprintf(dir, sizeof dir, "%s", reflive); char *q = strstr(dir, "/build/md-reference/"); if (q) { *q = 0; strncat(dir, "/../clownmdemu-core", sizeof dir - strlen(dir) - 1); } else dir[0] = 0; }
+                snprintf(cmd, sizeof cmd, "git -C '%s' rev-parse --short HEAD 2>/dev/null", dir);
+                FILE *gp = dir[0] ? popen(cmd, "r") : NULL;
+                if (gp) { if (fgets(rev, sizeof rev, gp)) rev[strcspn(rev, "\n")] = 0; pclose(gp); }
+                char nm[80]; snprintf(nm, sizeof nm, "ClownMDEmu%s%s", rev[0] ? " " : "", rev);
+                setenv("DEEPEEL_MD_REF_NAME", nm, 1);
+            }
         } else if (md_watch)
             fprintf(stderr, "deepeel: md watch: no reference tile (build it with tools/md_ref_live.sh)\n");
         if (md_watch) dp_fbwatch_start("deepeel md watch");
@@ -1999,7 +2010,7 @@ static int cmd_md(int argc, char **argv) {
                             "(the replay will show whether the movie matches)\n");
             }
             o.movie = &movie;
-            pid_t refpid = 0;
+            pid_t refpid = 0, hawkpid = 0;
             if (reflive && movies[mi]) {   // reset the feed, then the reference replays this movie
                 dp_md_ref_feed_open(feedpath, 1);
                 refpid = fork();
@@ -2009,6 +2020,27 @@ static int cmd_md(int argc, char **argv) {
                     _exit(127);
                 }
                 if (refpid < 0) { fprintf(stderr, "deepeel: md ref: fork failed (no reference tile)\n"); refpid = 0; }
+            }
+            const char *hawkexe = md_watch ? getenv("DP_MD_BIZHAWK_LIVE") : NULL;   // tools/bizhawk_md_live: BizHawk's GPGX as the second tile
+            if (hawkexe && movies[mi]) {
+                char f2[560], mk[560];
+                const char *td = getenv("TMPDIR");
+                snprintf(f2, sizeof f2, "%s/deepeel-md-hawk-%d.bin", td && *td ? td : "/tmp", (int)getpid());
+                snprintf(mk, sizeof mk, "%s.masks", f2);
+                FILE *mf = fopen(mk, "wb");
+                if (mf) { fwrite(movie.pads, 1, movie.frames, mf); fclose(mf); }
+                dp_md_ref_feed_open(f2, 1);
+                setenv("DEEPEEL_MD_REF2_FEED", f2, 1);
+                setenv("DEEPEEL_MD_REF2_NAME", "BizHawk GPGX", 1);
+                hawkpid = fork();
+                if (hawkpid == 0) {
+                    const char *bd = getenv("DP_BIZHAWK_DIR");
+                    char ld[700]; snprintf(ld, sizeof ld, "%s/Assets/dll", bd ? bd : "/home/m/dev/BizHawk");
+                    setenv("LD_LIBRARY_PATH", ld, 1);
+                    execlp("mono", "mono", hawkexe, argv[3], mk, f2, (char *)NULL);
+                    _exit(127);
+                }
+                if (hawkpid < 0) hawkpid = 0;
             }
             char cap[240], pth[5][600];
             const char *sum = cc.summary, *txt = text, *mp = map, *evp = ev, *heat = md_heat;
@@ -2070,6 +2102,7 @@ static int cmd_md(int argc, char **argv) {
                 if (cc.romdata) dp_md_explore_romdata(&r, cc.romdata);
                 dp_md_results_free(&r);
             }
+            if (hawkpid > 0) { kill(hawkpid, SIGKILL); waitpid(hawkpid, NULL, 0); }
             if (refpid > 0) {   // the harness exits by itself at the end of the movie; kill covers an early move-on
                 kill(refpid, SIGKILL);
                 waitpid(refpid, NULL, 0);

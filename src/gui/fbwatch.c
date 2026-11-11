@@ -47,14 +47,12 @@ static DpMdRefFeed *ref_feed[DP_NREF];
 static int ref_feed_tried[DP_NREF];
 static const char *const ref_env[DP_NREF] = { "DEEPEEL_MD_REF_FEED", "DEEPEEL_MD_REF2_FEED" };
 static const char *const ref_name_env[DP_NREF] = { "DEEPEEL_MD_REF_NAME", "DEEPEEL_MD_REF2_NAME" };
-static const char *const ref_name_def[DP_NREF] = { "ClownMDEmu (reference)", "BizHawk (GPGX)" };
+static const char *const ref_name_def[DP_NREF] = { "ClownMDEmu", "BizHawk GPGX" };
 
 int dp_fb_ref_active(int i) {
     if (i < 0 || i >= DP_NREF) return 0;
-    if (!ref_feed_tried[i]) {
-        ref_feed_tried[i] = 1;
+    if (!ref_feed[i] && ++ref_feed_tried[i] % 30 == 1)   // the harness may start after the window: retry now and then
         ref_feed[i] = dp_md_ref_feed_open(getenv(ref_env[i]), 0);
-    }
     return ref_feed[i] && ref_feed[i]->magic == DP_MDRF_MAGIC;
 }
 

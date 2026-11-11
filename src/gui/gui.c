@@ -769,22 +769,17 @@ static void *fb_main(void *arg) {
             char c1[160], c2[160];
             int done = dp_fb_caption_read(c1, sizeof c1, c2, sizeof c2);
             const char *own = getenv("DEEPEEL_MD_OWN_NAME");
-            char wt[260];
-            snprintf(wt, sizeof wt, "deepeel md watch - %s", c1[0] ? c1 : "no movie");
+            char wt[300];
+            snprintf(wt, sizeof wt, "deepeel md watch - %s - %s - %.0f f/s", c1[0] ? c1 : "no movie", c2, s_main);
             if (strcmp(wt, last_title)) { SDL_SetWindowTitle(win, wt); snprintf(last_title, sizeof last_title, "%s", wt); }
-            char sp[160] = "";
-            if (s_main > 0) snprintf(sp, sizeof sp, "  %.0f f/s (sync)  %.0f f/s (unsynced)", s_main, u_main);
-            snprintf(c1, sizeof c1, "%s", own && *own ? own : "deepeel MD core");
+            snprintf(c1, sizeof c1, "%s", own && *own ? own : "deepeel-md " DEEPEEL_VERSION);
             draw_text(ren, 6, ch + 2, c1, 1, gui_color(DP_C_TITLE));
-            char l2[260]; snprintf(l2, sizeof l2, "%s%s", c2, sp);
-            if (l2[0]) draw_text(ren, 6, ch + 16, l2, 1, gui_color(done ? DP_C_DIM : DP_C_TEXT));
+            char l2[64]; snprintf(l2, sizeof l2, "%.0f f/s", u_main);
+            draw_text(ren, 6, ch + 16, l2, 1, gui_color(done ? DP_C_DIM : DP_C_TEXT));
             for (int t = 1; t < cols; t++) {
                 int k = slot[t];
-                char r2[160];
-                if (rhave[k]) snprintf(r2, sizeof r2, rdone[k] ? "done  %u frames" : "%u/%u  %.0f f/s (sync)  %.1f f/s (unsynced)",
-                                       rdone[k] ? (unsigned)rtot[k] : (unsigned)rvf[k], (unsigned)rtot[k], s_ref[k],
-                                       dp_fb_ref_unsync_x10(k) / 10.0);
-                else snprintf(r2, sizeof r2, "waiting for the harness...");
+                char r2[64];
+                snprintf(r2, sizeof r2, "%.0f f/s", dp_fb_ref_unsync_x10(k) / 10.0);
                 draw_text(ren, t * cw + 6, ch + 2, dp_fb_ref_name(k), 1, gui_color(DP_C_TITLE));
                 draw_text(ren, t * cw + 6, ch + 16, r2, 1, gui_color(rdone[k] ? DP_C_DIM : DP_C_TEXT));
             }

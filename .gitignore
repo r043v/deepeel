@@ -18,3 +18,5 @@ Testing/
 build2/
 tools/smshawk_dump/bin/
 tools/smshawk_dump/obj/
+tools/bizhawk_md_live/bin/
+tools/bizhawk_md_live/obj/
