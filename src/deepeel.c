@@ -2010,7 +2010,7 @@ static int cmd_md(int argc, char **argv) {
                             "(the replay will show whether the movie matches)\n");
             }
             o.movie = &movie;
-            pid_t refpid = 0, hawkpid = 0;
+            pid_t refpid = 0, hawkpid = 0, gpgxpid = 0;
             if (reflive && movies[mi]) {   // reset the feed, then the reference replays this movie
                 dp_md_ref_feed_open(feedpath, 1);
                 refpid = fork();
@@ -2020,6 +2020,21 @@ static int cmd_md(int argc, char **argv) {
                     _exit(127);
                 }
                 if (refpid < 0) { fprintf(stderr, "deepeel: md ref: fork failed (no reference tile)\n"); refpid = 0; }
+            }
+            const char *gpgxexe = md_watch ? getenv("DP_MD_GPGX_LIVE") : NULL;   // tools/gpgx_lr_live: the standalone Genesis Plus GX libretro core
+            const char *gpgxcore = getenv("DP_GPGX_LR_CORE");
+            if (gpgxexe && gpgxcore && movies[mi]) {
+                char f3[560], mk3[560];
+                const char *td = getenv("TMPDIR");
+                snprintf(f3, sizeof f3, "%s/deepeel-md-gpgx-%d.bin", td && *td ? td : "/tmp", (int)getpid());
+                snprintf(mk3, sizeof mk3, "%s.masks", f3);
+                FILE *mf = fopen(mk3, "wb");
+                if (mf) { fwrite(movie.pads, 1, movie.frames, mf); fclose(mf); }
+                dp_md_ref_feed_open(f3, 1);
+                setenv("DEEPEEL_MD_REF3_FEED", f3, 1);
+                gpgxpid = fork();
+                if (gpgxpid == 0) { execl(gpgxexe, gpgxexe, gpgxcore, argv[3], mk3, f3, (char *)NULL); _exit(127); }
+                if (gpgxpid < 0) gpgxpid = 0;
             }
             const char *hawkexe = md_watch ? getenv("DP_MD_BIZHAWK_LIVE") : NULL;   // tools/bizhawk_md_live: BizHawk's GPGX as the second tile
             if (hawkexe && movies[mi]) {
@@ -2102,6 +2117,7 @@ static int cmd_md(int argc, char **argv) {
                 if (cc.romdata) dp_md_explore_romdata(&r, cc.romdata);
                 dp_md_results_free(&r);
             }
+            if (gpgxpid > 0) { kill(gpgxpid, SIGKILL); waitpid(gpgxpid, NULL, 0); }
             if (hawkpid > 0) { kill(hawkpid, SIGKILL); waitpid(hawkpid, NULL, 0); }
             if (refpid > 0) {   // the harness exits by itself at the end of the movie; kill covers an early move-on
                 kill(refpid, SIGKILL);

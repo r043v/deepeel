@@ -688,11 +688,11 @@ static void *fb_main(void *arg) {
     int tw = 0, th = 0;
     enum { FB_CAP = 30 };   // caption height under the image (two text lines)
     // per-tile speed meters (the GB watch maths): a 1 s window over the frame counter
-    static uint32_t rx[2][DP_MDRF_MAX_W * DP_MDRF_MAX_H];
-    static double t_main, t_ref[2];
+    static uint32_t rx[3][DP_MDRF_MAX_W * DP_MDRF_MAX_H];
+    static double t_main, t_ref[3];
     static uint64_t f_main;
-    static uint32_t f_ref[2];
-    static double s_main, s_ref[2], u_main, w_prev;
+    static uint32_t f_ref[3];
+    static double s_main, s_ref[3], u_main, w_prev;
     char last_title[260] = "";
     int sized_key = 0;
     while (!atomic_load(&fb_quit)) {
@@ -722,9 +722,9 @@ static void *fb_main(void *arg) {
                 t_main = now; f_main = f;
             }
         }
-        int ract[2], rhave[2] = {0, 0}, rw[2] = {0, 0}, rh[2] = {0, 0}, rdone[2] = {0, 0}, ref = 0;
-        uint32_t rvf[2] = {0, 0}, rtot[2] = {0, 0};
-        for (int k = 0; k < 2; k++) {
+        int ract[3], rhave[3] = {0}, rw[3] = {0}, rh[3] = {0}, rdone[3] = {0}, ref = 0;
+        uint32_t rvf[3] = {0}, rtot[3] = {0};
+        for (int k = 0; k < 3; k++) {
             ract[k] = dp_fb_ref_active(k);
             if (!ract[k]) continue;
             ref++;
@@ -746,8 +746,8 @@ static void *fb_main(void *arg) {
                 SDL_SetWindowSize(win, cols * tw * 2, th * 2 + FB_CAP);
             }
             int cw = W / cols, ch = H - FB_CAP > 0 ? H - FB_CAP : 1;
-            int slot[3] = { -1, -1, -1 }, ns = 1;   // tile 0: our core, then every active reference
-            for (int k = 0; k < 2; k++) if (ract[k]) slot[ns++] = k;
+            int slot[4] = { -1, -1, -1, -1 }, ns = 1;   // tile 0: our core, then every active reference
+            for (int k = 0; k < 3; k++) if (ract[k]) slot[ns++] = k;
             for (int t = 0; t < cols; t++) {
                 int iw = 0, ih = 0, k = slot[t];
                 if (t == 0) { if (tex && th > 0) { iw = tw; ih = th; } }

@@ -42,12 +42,12 @@ int dp_fb_caption_read(char *c1, size_t n1, char *c2, size_t n2) {
     return done;
 }
 
-#define DP_NREF 2
+#define DP_NREF 3
 static DpMdRefFeed *ref_feed[DP_NREF];
 static int ref_feed_tried[DP_NREF];
-static const char *const ref_env[DP_NREF] = { "DEEPEEL_MD_REF_FEED", "DEEPEEL_MD_REF2_FEED" };
-static const char *const ref_name_env[DP_NREF] = { "DEEPEEL_MD_REF_NAME", "DEEPEEL_MD_REF2_NAME" };
-static const char *const ref_name_def[DP_NREF] = { "ClownMDEmu", "BizHawk GPGX" };
+static const char *const ref_env[DP_NREF] = { "DEEPEEL_MD_REF_FEED", "DEEPEEL_MD_REF2_FEED", "DEEPEEL_MD_REF3_FEED" };
+static const char *const ref_name_env[DP_NREF] = { "DEEPEEL_MD_REF_NAME", "DEEPEEL_MD_REF2_NAME", "DEEPEEL_MD_REF3_NAME" };
+static const char *const ref_name_def[DP_NREF] = { "ClownMDEmu", "BizHawk GPGX", "Genesis Plus GX" };
 
 int dp_fb_ref_active(int i) {
     if (i < 0 || i >= DP_NREF) return 0;
