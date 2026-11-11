@@ -423,7 +423,7 @@ static void run_path(Worker *w, Pending *p) {
     // TAS replay: input >= TAS_INPUT encodes the frame shift (value - TAS_INPUT - 3, -3..+3)
     int tas = cur_input >= TAS_INPUT && cfg->tas_masks && m->frame && m->set_input;
     int tas_shift = tas ? (int)(cur_input - TAS_INPUT) - 3 : 0;
-    uint64_t tas_last = ~0ull;
+    uint64_t tas_last = ~0ull; int tas_ended = 0;
     if (cur_input >= TAS_INPUT) cur_input = 0;
     // generic long sessions (every platform with a frame counter): attract = no input for attract_frames frames;
     // play = a pad epoch schedule (nine epochs over play_frames frames, each session starting at another catalog entry)
@@ -467,6 +467,7 @@ static void run_path(Worker *w, Pending *p) {
                 int64_t k = (int64_t)f - tas_shift;
                 if (k >= (int64_t)cfg->tas_frames) {
                     m->set_input(m, 0); tas = 0;
+                    tas_ended = 1;
                     // the unshifted movie is over: queue the shifted replays on top, so they run next
                     if (tas_shift == 0 && sh->tas_start) {
                         pthread_mutex_lock(&sh->mu);
@@ -487,6 +488,7 @@ static void run_path(Worker *w, Pending *p) {
                 else m->set_input(m, k < 0 ? 0 : cfg->tas_masks[k]);
             }
         }
+        if (tas_ended) break;   // the movie is over: its forks (queued along the way) carry the exploration on, the path does not eat the budget
         if (framed) {
             uint64_t f = m->frame(m);
             if (f != sess_last) {
@@ -896,7 +898,7 @@ static void *worker_main(void *arg) {
         w->loc.in_novelty_path = 0;
         int session_first = 0;
         for (size_t i = sh->qn; i-- > 0;)   // the few long sessions (attract / play) start before the fork backlog
-            if (sh->q[i].input >= SESSION_ATTRACT && sh->q[i].input < TAS_INPUT) { pick = i; session_first = 1; break; }
+            if (sh->q[i].input >= SESSION_ATTRACT) { pick = i; session_first = 1; break; }
         if (!session_first && !cfg->no_novelty_order) {
             double best = -1;
             for (size_t i = sh->qn; i-- > 0;) {

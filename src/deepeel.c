@@ -38,6 +38,8 @@
 #include "platform/nes/explore.h"
 #include "platform/pce/explore.h"
 #include "platform/pce/pce.h"
+#include "platform/nes/tas.h"
+#include "platform/pce/tas.h"
 
 static uint8_t *nes_read_file(const char *path, size_t *size);
 static DpExplorer *volatile g_sig_ex;
@@ -1386,11 +1388,26 @@ static int cmd_nes(int argc, char **argv) {
         if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
         if (opt.queue_max) kcfg.queue_max = opt.queue_max;
         kcfg.hooks = dp_machine_nes_hooks();
+        DpNesTas ntas; memset(&ntas, 0, sizeof ntas);
+        uint8_t *kmasks = NULL;
+        if (opt.tas_count > 0) {   // first movie replays in the kernel (m->frame counts the frames; masks go from the NES pad layout to the kernel's)
+            char terr[160] = "";
+            if (dp_nes_tas_load(opt.tas_paths[0], &ntas, terr, sizeof terr) && (kmasks = malloc(ntas.frames ? ntas.frames : 1))) {
+                for (uint32_t f = 0; f < ntas.frames; f++) {
+                    uint8_t b = ntas.masks[f], k = 0;
+                    if (b & 0x01) k |= 0x10; if (b & 0x02) k |= 0x20; if (b & 0x08) k |= 0x40;
+                    if (b & 0x10) k |= 0x01; if (b & 0x20) k |= 0x02; if (b & 0x40) k |= 0x04; if (b & 0x80) k |= 0x08;
+                    kmasks[f] = k;
+                }
+                kcfg.tas_masks = kmasks; kcfg.tas_frames = ntas.frames;
+            } else fprintf(stderr, "deepeel: --tas: %s\n", terr);
+        }
         DpCoreResult kr;
         size_t prg = dp_machine_nes_prg_size(km);
         int kok = dp_core_explore(km, prg, &kcfg, &kr);
         if (kok) dp_core_report(stdout, "nes", &kr);
         dp_core_result_free(&kr);
+        free(kmasks); dp_nes_tas_free(&ntas);
         km->close(km);
         free(data);
         return kok ? 0 : 1;
@@ -1531,8 +1548,23 @@ static int cmd_pce(int argc, char **argv) {
         if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
         if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
         if (opt.queue_max) kcfg.queue_max = opt.queue_max;
+        DpPceTas ptas; memset(&ptas, 0, sizeof ptas);
+        uint8_t *kmasks = NULL;
+        if (opt.tas_count > 0) {
+            char terr[160] = "";
+            if (dp_pce_tas_load(opt.tas_paths[0], &ptas, terr, sizeof terr) && (kmasks = malloc(ptas.frames ? ptas.frames : 1))) {
+                for (uint32_t f = 0; f < ptas.frames; f++) {
+                    uint8_t b = ptas.pads[f], k = 0;
+                    if (b & 0x01) k |= 0x10; if (b & 0x02) k |= 0x20; if (b & 0x08) k |= 0x40;
+                    if (b & 0x10) k |= 0x01; if (b & 0x40) k |= 0x02; if (b & 0x80) k |= 0x04; if (b & 0x20) k |= 0x08;
+                    kmasks[f] = k;
+                }
+                kcfg.tas_masks = kmasks; kcfg.tas_frames = ptas.frames;
+            } else fprintf(stderr, "deepeel: --tas: %s\n", terr);
+        }
         DpCoreResult kr;
         int kok = dp_core_explore(km, dp_pce_rom_size(), &kcfg, &kr);
+        free(kmasks); dp_pce_tas_free(&ptas);
         if (kok) dp_core_report(stdout, "pce", &kr);
         dp_core_result_free(&kr);
         km->close(km);
@@ -1792,7 +1824,9 @@ static int cmd_md(int argc, char **argv) {
         kcfg.max_path_steps = 50000000;   // boot clears RAM/VRAM with millions of dbf iterations before the first interrupt is unmasked
         kcfg.hooks = dp_machine_md_hooks();
         kcfg.visits_per_pc = 2000000;   // the header checksum loop runs ROM-size/2 iterations (Sonic 1: 262144): the old 262144 cap cut it one short; was 262144 at 2 M steps: natural 32 bytes at 64 visits, 126 at 262144 (old engine ~134)
+        const char *md_core_tas = NULL;
         for (int i = 4; i < argc; i++) {
+            if (!strcmp(argv[i], "--tas") && i + 1 < argc) { md_core_tas = argv[++i]; continue; }
             int used = dp_core_parse_option(&kcfg, argc, argv, i);
             if (used) { i += used - 1; continue; }
             if (!strcmp(argv[i], "--max-total") && i + 1 < argc) kcfg.max_total = strtoull(argv[++i], NULL, 0);
@@ -1806,10 +1840,26 @@ static int cmd_md(int argc, char **argv) {
         if (km) dp_machine_md_source(km, c.rom, c.size);
         if (!km) { fprintf(stderr, "deepeel: --core: cannot open the ROM\n"); rc = 1; }
         else {
+            DpMdMovie mv; memset(&mv, 0, sizeof mv);
+            uint8_t *kmasks = NULL;
+            if (md_core_tas) {   // GMV / BK2 pads (0-3 directions, 16 A, 32 B, 64 C, 128 Start) -> kernel mask
+                char terr[160] = "";
+                if (dp_md_movie_load(md_core_tas, &mv, terr, sizeof terr) && (kmasks = malloc(mv.frames ? mv.frames : 1))) {
+                    for (uint32_t f = 0; f < mv.frames; f++) {
+                        uint8_t b = mv.pads[f], k = b & 0x0F;
+                        if (b & 0x50) k |= 0x10;   // A or C
+                        if (b & 0x20) k |= 0x20;
+                        if (b & 0x80) k |= 0x40;
+                        kmasks[f] = k;
+                    }
+                    kcfg.tas_masks = kmasks; kcfg.tas_frames = mv.frames;
+                } else fprintf(stderr, "deepeel: --tas: %s\n", terr);
+            }
             DpCoreResult kr;
             rc = dp_core_explore(km, c.size, &kcfg, &kr) ? 0 : 1;
             if (!rc) dp_core_report(stdout, "md", &kr);
             dp_core_result_free(&kr);
+            free(kmasks); dp_md_movie_free(&mv);
             km->close(km);
         }
     } else if (!strcmp(argv[2], "explore")) {

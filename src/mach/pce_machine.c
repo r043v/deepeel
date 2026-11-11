@@ -37,6 +37,19 @@ static int pce_run(DpMachine *m) {
     return ok;
 }
 
+// kernel mask (up down left right button1 button2 start) -> m0boy PCE pad (I, II, Select, Run, Up, Right, Down, Left)
+static void pce_set_input(DpMachine *m, uint32_t k) {
+    pce_ensure(m);
+    uint8_t p = 0;
+    if (k & 0x10) p |= 0x01;
+    if (k & 0x20) p |= 0x02;
+    if (k & 0x40) p |= 0x08;
+    if (k & 0x01) p |= 0x10;
+    if (k & 0x08) p |= 0x20;
+    if (k & 0x02) p |= 0x40;
+    if (k & 0x04) p |= 0x80;
+    dp_pce_input(p);
+}
 static uint64_t pce_frame(DpMachine *m) { return ((PceWrap *)m->impl)->frames; }
 
 static void pce_trace_fn(void *user, uint16_t pc, uint8_t op) {
@@ -123,5 +136,6 @@ DpMachine *dp_machine_pce(void) {
     m->pc = pce_pc;
     m->set_pc = pce_set_pc;
     m->frame = pce_frame;
+    m->set_input = pce_set_input;
     return m;
 }
