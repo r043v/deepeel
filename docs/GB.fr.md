@@ -4648,3 +4648,9 @@ Mesure SML Rev A + muggv3, `--tas-solo` (le film va au bout dans les deux moteur
 Verdict : la fidélité du rejeu GB sur le noyau **échoue** (le film se désynchronise ou la banque est mal vue au
 rechargement d'état ; cause non trouvée). Piste : comparer `dp_gbl_bank_of` après `gb_load`/`gb_clone` et le profil
 de synchro entre l'ancien moteur et le noyau, frame par frame.
+
+Précision (0.303.8) : même **sans** film, `--core` sur SML Rev A (64 Kio) n'accède à aucune adresse de la fenêtre
+$4000–$7FFF en banque 1 (seules les banques 2 et 3 sont vues ; sonde temporaire sur `gb_rom_index`), alors que
+l'ancien moteur y lit 5 193 octets. Ce n'est donc pas propre au rejeu TAS : le noyau GB n'entre pas dans le code de la
+banque 1 de ce jeu. Piste : état initial / registre de banque du mapper après `dp_machine_gb` (le jeu commence-t-il avec
+la banque 1 mappée ?), ou semis d'entrées de l'ancien moteur (fermeture statique) qui visite cette banque.
