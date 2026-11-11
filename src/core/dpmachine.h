@@ -187,6 +187,7 @@ DpMachine *dp_machine_md(struct DpMdMach *impl);
 // the PC Engine backend (src/mach/pce_machine.c): wraps the live runtime
 // singleton (dp_pce_init first)
 DpMachine *dp_machine_pce(void);
+const struct DpPlatformHooks *dp_machine_pce_hooks(void);   /* IRQ-source probes */
 // the libretro backend (src/mach/lr_machine.c), level A (§8.1): frames only,
 // the kernel degrades; takes ownership of the DpLibretro instance
 struct DpLibretro;

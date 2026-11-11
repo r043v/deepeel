@@ -6,6 +6,7 @@
 
 #include "../core/dpmachine.h"
 #include "../platform/pce/pce.h"
+#include "../explore/core.h"
 
 typedef struct {
     const DpObservers *obs;
@@ -43,6 +44,29 @@ static void pce_close(DpMachine *m) {
 // wraps the live runtime singleton (dp_pce_init already done, or call it first)
 static uint32_t pce_pc(DpMachine *m) { (void)m; return dp_pce_cpu().pc; }
 static void pce_set_pc(DpMachine *m, uint32_t pc) { (void)m; dp_pce_set_pc((uint16_t)pc); }
+
+// technique 2 (interrupts): where the CPU unmasks (CLI, PLP, RTI, or a write to the interrupt
+// mask $1402) one alternative per source (1 = VDC, 2 = timer) is forked with that source raised,
+// as the old PCE engine's fork_irq
+static int pce_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *bytes, unsigned k, uint8_t *save) {
+    (void)user; (void)pc;
+    if (k >= 2) return 0;
+    int unmask = bytes[0] == 0x58 || bytes[0] == 0x28 || bytes[0] == 0x40;
+    if (!unmask && (bytes[0] == 0x8D || bytes[0] == 0x9C) && (((bytes[2] << 8) | bytes[1]) & 0x1FFF) == 0x1402) unmask = 1;
+    if (!unmask) return 0;
+    uint8_t *tmp = malloc(m->state_bytes(m));
+    if (!tmp) return 0;
+    m->save(m, tmp);
+    dp_pce_raise((int)k + 1);
+    m->save(m, save);
+    m->load(m, tmp);
+    free(tmp);
+    return 1;
+}
+const DpPlatformHooks *dp_machine_pce_hooks(void) {
+    static const DpPlatformHooks h = { .event_probe = pce_event_probe };
+    return &h;
+}
 
 DpMachine *dp_machine_pce(void) {
     PceWrap *w = calloc(1, sizeof *w);

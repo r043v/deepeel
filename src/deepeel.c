@@ -1495,6 +1495,7 @@ static int cmd_pce(int argc, char **argv) {
     if (use_core) {
         if (!dp_pce_init(data, size)) { fprintf(stderr, "deepeel: --core: not a PCE image\n"); free(data); return 1; }
         DpMachine *km = dp_machine_pce();
+        kcfg.hooks = dp_machine_pce_hooks();
         if (!km) { free(data); return 1; }
         if (opt.max_total) kcfg.max_total = opt.max_total;
         if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
