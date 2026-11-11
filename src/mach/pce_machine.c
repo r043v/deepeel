@@ -53,8 +53,22 @@ static void pce_set_input(DpMachine *m, uint32_t k) {
 }
 static uint64_t pce_frame(DpMachine *m) { return ((PceWrap *)m->impl)->frames; }
 
+// the CPU core reads work RAM without calling the bus, so the RAM reads that technique 1 needs are
+// decoded from the instruction: zero-page and absolute operands of the 6502-family reading opcodes
+static void pce_ram_read(PceWrap *w, uint16_t pc, uint8_t op) {
+    static const uint8_t zp_rd[] = {0x05, 0x25, 0x45, 0x65, 0xA5, 0xC5, 0xE5, 0x24, 0xA4, 0xA6, 0xC4, 0xE4};
+    static const uint8_t abs_rd[] = {0x0D, 0x2D, 0x4D, 0x6D, 0xAD, 0xCD, 0xED, 0x2C, 0xAC, 0xAE, 0xCC, 0xEC};
+    uint16_t a = 0xFFFF;
+    for (unsigned i = 0; i < sizeof zp_rd; i++) if (zp_rd[i] == op) a = (uint16_t)(0x2000 + dp_pce_peek((uint16_t)(pc + 1)));
+    for (unsigned i = 0; i < sizeof abs_rd; i++) if (abs_rd[i] == op) {
+        uint16_t t = (uint16_t)(dp_pce_peek((uint16_t)(pc + 1)) | dp_pce_peek((uint16_t)(pc + 2)) << 8);
+        if (t >= 0x2000 && t < 0x4000) a = t;
+    }
+    if (a != 0xFFFF) w->obs->on_read(w->user, a, dp_pce_peek(a));
+}
 static void pce_trace_fn(void *user, uint16_t pc, uint8_t op) {
     PceWrap *w = user;
+    if (w->obs && w->obs->on_read) pce_ram_read(w, pc, op);
     if (w->obs && w->obs->on_step) w->obs->on_step(w->user, pc, op, 0);
 }
 static void pce_observe(DpMachine *m, const DpObservers *o, void *user) {
