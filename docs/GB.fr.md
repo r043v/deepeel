@@ -4625,3 +4625,11 @@ au total (forcé inclus). Ancien moteur : son `--cov` marque tout flag 4 (spécu
 inférieure. Cause identifiée en partie : l'ancien moteur GB ajoute la **fermeture statique** (tour 1 : +39 007 octets
 statiques, 2 535 entrées semées) dont les octets sont du code décodé, pas exécuté ; le noyau n'a pas cette boucle
 fermeture→graines. Écart non résorbé : à porter (ou à écarter explicitement) avant de retirer l'ancien moteur GB.
+
+### Rejeu TAS GB sur le noyau : vérification incomplète (0.303.7)
+
+`--core --tas muggv3-supermarioland.vbm` (SML Rev A) applique le profil de synchro VBA et rejoue un chemin TAS
+(`tas replay paths 1`, 8 234 octets d'exécution non spéculatifs sur 20–60 M de pas). La preuve que le film atteint le
+monde 4 passe par les lectures de données (tuiles bank 1 $47F2–$4FB1), que le `--cov` du noyau n'exporte pas (pas de
+drapeau 8) : la fidélité reste **non vérifiée**. À faire : exporter les lectures de données du noyau, ou journaliser
+le dernier frame du film atteint.
