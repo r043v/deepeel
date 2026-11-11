@@ -16,6 +16,7 @@ typedef struct {
     // will use it: the NES machine state is thread-local
     uint8_t *img; size_t img_size; int mapper;
     const uint8_t *src; size_t src_size;   // the original image (owned by the caller)
+    uint64_t frames;   // completed frames since this machine started (a relative clock for sessions)
 } NesMachWrap;
 static DpNesMach *nes_impl(DpMachine *m) {
     NesMachWrap *w = m->impl;
@@ -49,10 +50,12 @@ static void nes_on_write(void *user, unsigned addr, unsigned value) {
     NesMachWrap *w = user;
     if (w->obs && w->obs->on_write) w->obs->on_write(w->user, addr, (uint8_t)value);
 }
+static void nes_on_frame(void *user) { ((NesMachWrap *)user)->frames++; }
+static uint64_t nes_frame(DpMachine *m) { return ((NesMachWrap *)m->impl)->frames; }
 static void nes_observe(DpMachine *m, const DpObservers *o, void *user) {
     NesMachWrap *w = m->impl;
     w->obs = o; w->user = user;
-    DpNesHooks h = { .user = w, .on_step = nes_on_step, .on_read = nes_on_read, .on_write = nes_on_write };
+    DpNesHooks h = { .user = w, .on_step = nes_on_step, .on_read = nes_on_read, .on_write = nes_on_write, .on_frame = nes_on_frame };
     dp_nesmach_set_hooks(nes_impl(m), &h);
 }
 
@@ -110,6 +113,7 @@ DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err
     m->pc = nes_pc;
     m->set_pc = nes_set_pc;
     m->set_input = nes_set_input;
+    m->frame = nes_frame;
     m->impl = w;             // the m6502 DpIsa wrapper is not extracted yet
     m->state_bytes = nes_state_bytes;
     m->save = nes_save;

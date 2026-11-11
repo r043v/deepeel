@@ -370,12 +370,16 @@ static int cmd_explore(int argc, char **argv) {
     dp_session_cfg_defaults(&scfg);
     uint8_t tier_limit = 0, defer_all = 0;
     uint8_t eb[32];
+    int gb_core = 0; DpCoreConfig gkcfg; dp_core_config_default(&gkcfg); gkcfg.visits_per_pc = 2000000;   // frame waits are long loops   // --core: the generic kernel instead of the GB explorer
+    for (int i = 2; i < argc; i++) if (!strcmp(argv[i], "--core")) gb_core = 1;
     int spool_to_frontier = 0;
     uint16_t ea[32];
     int entries = 0;
     for (int i = 2; i < argc; i++) {
         const char *a = argv[i];
-        if (!strcmp(a, "--json") && i + 1 < argc) json = argv[++i];
+        if (!strcmp(a, "--core")) { /* kernel engine, see gb_core below */ }
+        else if (gb_core && dp_core_parse_option(&gkcfg, argc, argv, i)) { i += dp_core_parse_option(&gkcfg, argc, argv, i) - 1; }   // kernel options first: --attract-frames etc. mean the kernel's here
+        else if (!strcmp(a, "--json") && i + 1 < argc) json = argv[++i];
         else if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
         else if (!strcmp(a, "--rtcode") && i + 1 < argc) rtcode_path = argv[++i];
         else if (!strcmp(a, "--ram-code") && i + 1 < argc) ramcode_path = argv[++i];
@@ -595,6 +599,27 @@ static int cmd_explore(int argc, char **argv) {
     }
     DpMach *mach = dp_mach_open(vi, 0);
     dp_mach_set_rom(mach, cart->rom, cart->rom_size);
+    if (gb_core) {
+        gkcfg.max_total = cfg.max_steps_total;
+        gkcfg.jobs = cfg.jobs > 1 ? (unsigned)cfg.jobs : 1;
+        for (int i = 2; i + 1 < argc; i++) if (!strcmp(argv[i], "--jobs") && !strcmp(argv[i + 1], "auto")) { gkcfg.jobs = (unsigned)auto_jobs(); gkcfg.adaptive = 1; }
+        gkcfg.hooks = dp_machine_gb_hooks();
+        dp_mach_reset(mach);   // power-on state
+        DpMachine *km = dp_machine_gb(mach);
+        int rc = 1;
+        if (km) {
+            dp_machine_gb_source(km, cart->rom, cart->rom_size);
+            DpCoreResult kr;
+            rc = dp_core_explore(km, cart->rom_size, &gkcfg, &kr) ? 0 : 1;
+            if (!rc) dp_core_report(stdout, "gb", &kr);
+            dp_core_result_free(&kr);
+            km->close(km);
+        } else fprintf(stderr, "deepeel: --core: cannot wrap the machine\n");
+        dp_mapwin_stop();
+        dp_results_free(&res);
+        dp_cart_free(cart);
+        return rc;
+    }
     if (cfg.unbounded && !nocredit_set) cfg.nocredit_cut = 20000;   // unbounded still ends a path that only loops over known code
     if (cfg.unbounded) { cfg.max_paths = UINT32_MAX; cfg.max_steps_total = UINT64_MAX; }   // no path/step wall: the run ends when nothing is left
     DpExplorer *ex = dp_explorer_new(&cfg, &res, mach);
@@ -1295,6 +1320,7 @@ static int cmd_nes(int argc, char **argv) {
     DpNesOptions opt = dp_nes_options();   // defer_tiers 0: cuts stay final; --defer-tiers N opts in (sega's CLI defaults to 3, NES measured neutral on DuckTales)
     opt.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
     DpCliCommon cc = { .jobs = 1 };
+    int core_flag = 0; for (int i = 3; i < argc; i++) if (!strcmp(argv[i], "--core")) core_flag = 1;
     int use_core = 0; DpCoreConfig kcfg; dp_core_config_default(&kcfg);
     kcfg.no_sessions = 1;   // measured on SMB at 2 M steps: sessions halve the natural path's budget (4708 -> 2063 bytes); --pad-sessions N enables them
     kcfg.visits_per_pc = 50000;   // a frame wait is thousands of iterations (SMB: natural 15 -> 4708 bytes, old engine 4716)
@@ -1302,7 +1328,7 @@ static int cmd_nes(int argc, char **argv) {
         const char *a = argv[i];
         if (0) {}
         else if (!strcmp(a, "--core")) use_core = 1;
-        else if (dp_core_parse_option(&kcfg, argc, argv, i)) { i += dp_core_parse_option(&kcfg, argc, argv, i) - 1; }
+        else if (core_flag && dp_core_parse_option(&kcfg, argc, argv, i)) { i += dp_core_parse_option(&kcfg, argc, argv, i) - 1; }   // only with --core: the old engine owns --attract-frames etc.
         DP_CLI_COMMON(opt, cc)
         DP_CLI_PLAYED(opt)
         else if (!strcmp(a, "--play-pool") && i + 1 < argc) opt.play_pool = (uint32_t)strtoul(argv[++i], NULL, 0);
@@ -1443,13 +1469,14 @@ static int cmd_pce(int argc, char **argv) {
     DpPceOptions opt = dp_pce_options();
     opt.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
     DpCliCommon cc = { .jobs = 1 };
+    int core_flag = 0; for (int i = 3; i < argc; i++) if (!strcmp(argv[i], "--core")) core_flag = 1;
     int multitap = 0, use_core = 0; DpCoreConfig kcfg; dp_core_config_default(&kcfg);
     kcfg.visits_per_pc = 50000;   // Raiden at 2 M steps: natural 116 bytes at 64 visits, 2220 at 50000 (frame waits are long loops)
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
         if (0) {}
         else if (!strcmp(a, "--core")) use_core = 1;
-        else if (dp_core_parse_option(&kcfg, argc, argv, i)) { i += dp_core_parse_option(&kcfg, argc, argv, i) - 1; }
+        else if (core_flag && dp_core_parse_option(&kcfg, argc, argv, i)) { i += dp_core_parse_option(&kcfg, argc, argv, i) - 1; }   // only with --core: the old engine owns --attract-frames etc.
         DP_CLI_COMMON(opt, cc)
         DP_CLI_PLAYED(opt)
         else if (!strcmp(a, "--ctx-live")) opt.ctx_live = 1;

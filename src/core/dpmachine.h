@@ -170,6 +170,9 @@ struct DpMachine {
 struct DpMach;
 // the GB backend (src/mach/gb_machine.c); takes ownership of the DpMach
 DpMachine *dp_machine_gb(struct DpMach *impl);
+const struct DpPlatformHooks *dp_machine_gb_hooks(void);
+/* tell a GB machine where its ROM is so clone() can start parallel workers on other compiled instances */
+void dp_machine_gb_source(DpMachine *m, const uint8_t *rom, size_t size);
 const struct DpPlatformHooks *dp_machine_md_hooks(void);
 /* tell an MD machine where its ROM is so clone() can start parallel workers */
 void dp_machine_md_source(DpMachine *m, const uint8_t *rom, size_t size);

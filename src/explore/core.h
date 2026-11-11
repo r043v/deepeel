@@ -58,6 +58,11 @@ typedef struct DpCoreConfig {
     uint8_t seed_vals[8]; unsigned seed_n;   /* values (default 00 FF 55 AA) */
     uint32_t sessions;          /* held-pad sessions started from power-on (0: off); default 16 when the machine has set_input */
     int no_sessions;
+    uint32_t attract_frames;    /* generic attract session: no input for this many frames from power-on (0: off; needs DpMachine.frame) */
+    uint32_t min_secs, max_secs, stall_secs;   /* wall-clock limits, 0 = off: min before a stagnation stop; hard max; seconds without a new ROM byte */
+    uint32_t attract_stall;     /* attract stops after this many frames without a newly covered ROM byte (0: never) */
+    uint32_t play_frames;       /* generic play session: nine pad epochs over this many frames (0: off; needs frame + set_input) */
+    uint32_t play_sessions;     /* number of play sessions (each starts at another catalog pad; default 1) */
     const uint8_t *tas_masks;   /* TAS replay (techniques 9): one kernel pad mask per frame, needs DpMachine.frame */
     uint32_t tas_frames;
     int no_tas_jitter;          /* 1: replay the movie unshifted only (no +-1..3 frame shifts) */
@@ -104,6 +109,8 @@ typedef struct DpCoreResult {
     uint64_t decompress_runs;   // such streams detected
     uint64_t spooled;          // forked states that overflowed the RAM queue onto disk (none is dropped)
     uint64_t spool_left;       // spilled states never run (the exploration ended first)
+    unsigned halted;   /* 1: stopped by --max-time, 2: by --stall-time */
+    uint64_t attract_paths, play_paths, play_epochs, session_frames, session_steps, session_stalls;   // generic long sessions run
     uint64_t hook_vetoed;      // forced sides refused by DpPlatformHooks.veto_fork
     uint64_t exec_outside;     // instructions executed where rom_index < 0 (RAM/VRAM code)
     uint64_t no_pc;            // 1 when the machine has no pc/set_pc: nothing explored

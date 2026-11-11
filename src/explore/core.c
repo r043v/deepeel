@@ -27,6 +27,7 @@ void dp_core_config_default(DpCoreConfig *c) {
     c->max_path_steps = 100000;
     c->fork_site_cap = 4;      // DP_DEFAULT_BRANCH_FORK_CAP
     c->visits_per_pc = 64;
+    c->min_secs = 0; c->max_secs = 0; c->stall_secs = 0; c->attract_frames = 6000; c->attract_stall = 1200; c->play_frames = 0; c->play_sessions = 1;   // long sessions run wherever the machine has a frame counter (+ set_input for play)
     c->queue_max = 65536;
 }
 
@@ -61,6 +62,13 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--no-forced-ram-cut")) { c->no_forced_ram_cut = 1; return 1; }
     if (!strcmp(a, "--no-site-score")) { c->no_site_score = 1; return 1; }
     if (!strcmp(a, "--no-novelty-order")) { c->no_novelty_order = 1; return 1; }
+    if (!strcmp(a, "--attract-frames") && i + 1 < argc) { c->attract_frames = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
+    if (!strcmp(a, "--min-time") && i + 1 < argc) { c->min_secs = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
+    if (!strcmp(a, "--max-time") && i + 1 < argc) { c->max_secs = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
+    if (!strcmp(a, "--stall-time") && i + 1 < argc) { c->stall_secs = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
+    if (!strcmp(a, "--attract-stall") && i + 1 < argc) { c->attract_stall = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
+    if (!strcmp(a, "--play-frames") && i + 1 < argc) { c->play_frames = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
+    if (!strcmp(a, "--play-sessions") && i + 1 < argc) { c->play_sessions = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--visits-per-pc") && i + 1 < argc) { c->visits_per_pc = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
     return 0;
 }
@@ -103,6 +111,7 @@ typedef struct {
     uint64_t steps;            // global instruction count (atomic)
     uint64_t paths_done;       // finished paths (atomic), for the progress line
     int stop_monitor;
+    int halt;                  // 0 running, 1 max-time reached, 2 stagnation (atomic): workers wind down
     int spool_fd; uint64_t spool_n, spool_total; uint32_t spool_rs;   // disk overflow of the pending queue: fixed-size records, LIFO
     unsigned allowed;          // adaptive mode: workers with index < allowed may take work (atomic)
     unsigned wmin, wmax;
@@ -312,7 +321,9 @@ static void spool_refill(Shared *sh) {
     if (ftruncate(sh->spool_fd, (off_t)(sh->spool_n * sh->spool_rs)) != 0) { /* the next appends overwrite it anyway */ }
 }
 
-enum { TAS_INPUT = 0x40000000 };
+enum { TAS_INPUT = 0x40000000, SESSION_ATTRACT = 0x20000000, SESSION_PLAY = 0x20001000 };
+// pad masks cycled by play sessions (kernel mask bits: up down left right button1 button2 start)
+static const uint32_t play_catalog[8] = {0, 0x10, 0x40, 0x20, 0x01, 0x02, 0x04, 0x08};
 static void run_path(Worker *w, Pending *p) {
     Shared *sh = w->sh;
     const DpCoreConfig *cfg = sh->cfg;
@@ -328,6 +339,20 @@ static void run_path(Worker *w, Pending *p) {
     int tas_shift = tas ? (int)(cur_input - TAS_INPUT) - 3 : 0;
     uint64_t tas_last = ~0ull;
     if (cur_input >= TAS_INPUT) cur_input = 0;
+    // generic long sessions (every platform with a frame counter): attract = no input for attract_frames frames;
+    // play = a pad epoch schedule (nine epochs over play_frames frames, each session starting at another catalog entry)
+    int attract = cur_input == SESSION_ATTRACT && m->frame;
+    int play = cur_input >= SESSION_PLAY && cur_input < TAS_INPUT && m->frame && m->set_input;
+    unsigned play_k = play ? cur_input - SESSION_PLAY : 0;
+    if (cur_input == SESSION_ATTRACT || cur_input >= SESSION_PLAY) cur_input = 0;
+    uint64_t sess_limit = attract ? cfg->attract_frames : play ? cfg->play_frames : 0;
+    uint64_t sess_f0 = (attract || play) ? m->frame(m) : 0, sess_last = ~0ull;
+    unsigned sess_epoch = ~0u; uint64_t sess_last_cov = 0;
+    uint64_t sess_cov = 0, sess_prog_f = sess_f0;
+    uint8_t *sess_seen = attract && cfg->attract_stall ? calloc(loc->rom_size / 8 + 1, 1) : NULL;   // ROM bytes this very session executed
+    int framed = m->frame && (attract || play || cur_input);   // visit counts restart every frame: a game loop is not a runaway loop
+    if (attract) loc->attract_paths++;
+    if (play) loc->play_paths++;
     if (tas) loc->tas_paths++;
     // a session shares half the total budget with its siblings: it must not starve the natural path
     uint64_t session_cap = cfg->max_total / (2 * (cfg->sessions ? (cfg->sessions > 16 ? 16 : cfg->sessions) : 16));
@@ -335,11 +360,12 @@ static void run_path(Worker *w, Pending *p) {
     loc->paths++;
     run_flush(&w->cobs);
     w->cobs.forced = p->forced; w->cobs.last_rom = -1;
-    uint32_t path_id = ++w->path_id, steps = 0;
+    uint32_t path_id = ++w->path_id, vid = path_id, steps = 0;
     int cur_forced = p->forced;
     unsigned fdepth = 0;   // calls made since the forced fork: a ret below that pops state the path did not build
     for (;;) {
-        if (cfg->max_total && __atomic_load_n(&sh->steps, __ATOMIC_RELAXED) + w->step_batch >= cfg->max_total) {
+        if (__atomic_load_n(&sh->halt, __ATOMIC_RELAXED)) break;   // time limit / stagnation: this path ends, the queue is dropped by the worker loop
+        if (!(attract || play) && cfg->max_total && __atomic_load_n(&sh->steps, __ATOMIC_RELAXED) + w->step_batch >= cfg->max_total) {
             loc->sat_total++;
             pthread_mutex_lock(&sh->mu);
             for (size_t i = 0; i < sh->qn; i++) free(sh->q[i].state);
@@ -374,13 +400,42 @@ static void run_path(Worker *w, Pending *p) {
                 else m->set_input(m, k < 0 ? 0 : cfg->tas_masks[k]);
             }
         }
-        if (!tas && cfg->max_path_steps && steps >= cfg->max_path_steps) { loc->sat_path++; break; }
-        if (cur_input && cfg->max_total && steps >= session_cap) { loc->sat_path++; break; }
+        if (framed) {
+            uint64_t f = m->frame(m);
+            if (f != sess_last) {
+                sess_last = f;
+                vid = ++w->path_id;
+                if (attract && cfg->attract_stall) {   // stop after attract_stall frames without a newly covered ROM byte
+                    uint64_t cov = sess_cov;
+                    if (cov != sess_last_cov) { sess_last_cov = cov; sess_prog_f = f; }
+                    else if (f - sess_prog_f >= cfg->attract_stall) { loc->session_frames += f - sess_f0; loc->session_stalls++; break; }
+                }
+                if ((attract || play) && sess_limit && f - sess_f0 >= sess_limit) {
+                    loc->session_frames += f - sess_f0;
+                    break;
+                }
+                if (play && sess_limit) {
+                    unsigned ep = (unsigned)((f - sess_f0) / (sess_limit / 9 ? sess_limit / 9 : 1));
+                    if (ep != sess_epoch) {
+                        sess_epoch = ep;
+                        m->set_input(m, play_catalog[(ep + play_k) % 8]);
+                        loc->play_epochs++;
+                    }
+                }
+            }
+        }
+        if ((attract || play) && steps >= (cfg->max_total ? cfg->max_total / 2 : 400000000u)) { loc->sat_path++; loc->session_frames += m->frame(m) - sess_f0; break; }   // a long session shares the budget
+        if (!tas && !attract && !play && cfg->max_path_steps && steps >= cfg->max_path_steps) { loc->sat_path++; break; }
+        if (!attract && !play && cur_input && cfg->max_total && steps >= session_cap) { loc->sat_path++; break; }
         uint32_t pc = m->pc(m);
         if (cfg->hooks && cfg->hooks->before_step &&
             !cfg->hooks->before_step(cfg->hooks->user, m, pc)) break;
+        if (sess_seen) {
+            int64_t sk = m->rom_index(m, pc);
+            if (sk >= 0 && (size_t)sk < loc->rom_size && !(sess_seen[sk >> 3] & (1u << (sk & 7)))) { sess_seen[sk >> 3] |= (uint8_t)(1u << (sk & 7)); sess_cov++; }
+        }
         uint16_t vi = (uint16_t)pc;
-        if (w->stamp[vi] != path_id) { w->stamp[vi] = path_id; w->visits[vi] = 0; }
+        if (w->stamp[vi] != vid) { w->stamp[vi] = vid; w->visits[vi] = 0; }
         if (!tas && cfg->visits_per_pc && ++w->visits[vi] > cfg->visits_per_pc) { loc->sat_loop++; break; }
         uint8_t bytes[8] = {0};
         for (unsigned i = 0; i < sizeof bytes; i++) bytes[i] = m->fetch(m, pc + i);
@@ -547,7 +602,8 @@ static void run_path(Worker *w, Pending *p) {
         }
         if (!m->run(m)) { free(pre); break; }
         steps++;
-        if (++w->step_batch == 256) { __atomic_fetch_add(&sh->steps, 256, __ATOMIC_RELAXED); w->step_batch = 0; }
+        if (attract || play) loc->session_steps++;   // a long session has its own budget: it neither spends nor waits for the shared one
+        else if (++w->step_batch == 256) { __atomic_fetch_add(&sh->steps, 256, __ATOMIC_RELAXED); w->step_batch = 0; }
         if (cfg->hooks && cfg->hooks->after_step) cfg->hooks->after_step(cfg->hooks->user, m, pc);
         if (cond) {
             uint32_t after = m->pc(m);
@@ -580,6 +636,7 @@ static void run_path(Worker *w, Pending *p) {
             }
         }
     }
+    free(sess_seen);
 }
 
 // progress line: steps, paths, queue, workers busy, ROM bytes seen so far
@@ -676,6 +733,32 @@ static void *controller_main(void *arg) {
     return NULL;
 }
 
+// generic time limits: --min-time S (no stagnation stop before), --max-time S (hard stop),
+// --stall-time S (stop after S seconds without a newly covered ROM byte).  All optional, all platforms.
+static void *limits_main(void *arg) {
+    Shared *sh = arg;
+    const DpCoreConfig *cfg = sh->cfg;
+    time_t t0 = time(NULL), last_gain = t0;
+    size_t seen = 0;
+    while (!__atomic_load_n(&sh->stop_monitor, __ATOMIC_RELAXED)) {
+        struct timespec ts = {0, 200000000};
+        nanosleep(&ts, NULL);
+        time_t now = time(NULL);
+        size_t n = 0;
+        for (size_t i = 0; i < sh->out->rom_size; i++) if (sh->out->flags[i]) n++;
+        if (n != seen) { seen = n; last_gain = now; }
+        int why = 0;
+        if (cfg->max_secs && (uint32_t)(now - t0) >= cfg->max_secs) why = 1;
+        else if (cfg->stall_secs && (uint32_t)(now - t0) >= cfg->min_secs && (uint32_t)(now - last_gain) >= cfg->stall_secs) why = 2;
+        if (why) {
+            __atomic_store_n(&sh->halt, why, __ATOMIC_RELAXED);
+            pthread_mutex_lock(&sh->mu); pthread_cond_broadcast(&sh->cv); pthread_mutex_unlock(&sh->mu);
+            break;
+        }
+    }
+    return NULL;
+}
+
 static void *worker_main(void *arg) {
     Worker *w = arg;
     Shared *sh = w->sh;
@@ -690,6 +773,11 @@ static void *worker_main(void *arg) {
     pthread_mutex_lock(&sh->mu);
     for (;;) {
         for (;;) {
+            if (__atomic_load_n(&sh->halt, __ATOMIC_RELAXED)) {   // drop the backlog (the disk spool stays reported as left)
+                for (size_t i = 0; i < sh->qn; i++) free(sh->q[i].state);
+                sh->qn = 0;
+                break;
+            }
             if (!sh->qn && sh->spool_n) spool_refill(sh);
             if (sh->qn || sh->active == 0) break;
             pthread_cond_wait(&sh->cv, &sh->mu);
@@ -702,7 +790,10 @@ static void *worker_main(void *arg) {
         }
         size_t pick = sh->qn - 1;
         w->loc.in_novelty_path = 0;
-        if (!cfg->no_novelty_order) {
+        int session_first = 0;
+        for (size_t i = sh->qn; i-- > 0;)   // the few long sessions (attract / play) start before the fork backlog
+            if (sh->q[i].input >= SESSION_ATTRACT && sh->q[i].input < TAS_INPUT) { pick = i; session_first = 1; break; }
+        if (!session_first && !cfg->no_novelty_order) {
             double best = -1;
             for (size_t i = sh->qn; i-- > 0;) {
                 if (covered(&w->loc, w->m, sh->q[i].pc)) continue;
@@ -836,6 +927,18 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
                 out->sessions++;
             }
         }
+        // generic long sessions from power-on (need a frame counter): attract (no input) and play (pad epochs)
+        if (m->frame) {
+            unsigned na = cfg->attract_frames ? 1 : 0, np = (m->set_input && cfg->play_frames) ? (cfg->play_sessions ? cfg->play_sessions : 1) : 0;
+            if (np > 8) np = 8;
+            for (unsigned i = 0; i < na + np; i++) {
+                uint8_t *cp = malloc(sh.sbytes);
+                if (!cp) break;
+                memcpy(cp, start, sh.sbytes);
+                if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
+                sh.q[sh.qn++] = (Pending){ cp, start_pc, 0, 0, i < na ? SESSION_ATTRACT : SESSION_PLAY + (i - na) };
+            }
+        }
         // technique 9 (TAS form): the movie from power-on, unshifted and shifted by 1..3 frames
         if (m->frame && m->set_input && cfg->tas_masks && cfg->tas_frames) {
             static const int order[6] = {-3, -2, -1, 1, 2, 3};
@@ -854,7 +957,8 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         }
         // clones start from power-on, the same state the main machine saved
         for (unsigned i = 1; i < started; i++) pthread_create(&ws[i].th, NULL, worker_main, &ws[i]);
-        pthread_t mon, ctl; int has_mon = 0, has_ctl = 0;
+        pthread_t mon, ctl, lim; int has_mon = 0, has_ctl = 0, has_lim = 0;
+        if ((cfg->max_secs || cfg->stall_secs) && pthread_create(&lim, NULL, limits_main, &sh) == 0) has_lim = 1;
         if (cfg->adaptive && started > 1 && pthread_create(&ctl, NULL, controller_main, &sh) == 0) has_ctl = 1;
         if (cfg->progress_secs && pthread_create(&mon, NULL, monitor_main, &sh) == 0) has_mon = 1;
         worker_main(&ws[0]);
@@ -862,6 +966,8 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         __atomic_store_n(&sh.stop_monitor, 1, __ATOMIC_RELAXED);
         if (has_mon) pthread_join(mon, NULL);
         if (has_ctl) pthread_join(ctl, NULL);
+        if (has_lim) pthread_join(lim, NULL);
+        out->halted = (unsigned)sh.halt;
     }
 
     free(sh.tas_start);
@@ -869,6 +975,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         DpCoreResult *l = &ws[i].loc;
         out->paths += l->paths; out->forks += l->forks;
         out->sat_total += l->sat_total; out->sat_path += l->sat_path; out->sat_loop += l->sat_loop;
+        out->attract_paths += l->attract_paths; out->play_paths += l->play_paths; out->play_epochs += l->play_epochs; out->session_frames += l->session_frames; out->session_steps += l->session_steps; out->session_stalls += l->session_stalls;
         out->sat_site += l->sat_site; out->sat_queue += l->sat_queue;
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
@@ -879,6 +986,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
     }
     out->steps = sh.steps;
+    for (unsigned i = 0; i < started; i++) out->steps += 0;   /* session steps are reported separately */
     out->spool_left = sh.spool_n; out->spooled = sh.spool_total;
     if (sh.spool_fd > 0) close(sh.spool_fd);
     for (size_t i = 0; i < sh.qn; i++) free(sh.q[i].state);
@@ -896,6 +1004,8 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     #define U(x) ((unsigned long long)(x))
     fprintf(out, "deepeel %s (generic kernel)\n", label);
     fprintf(out, "steps %llu paths %llu forks %llu pruned-covered %llu\n", U(r->steps), U(r->paths), U(r->forks), U(r->pruned_covered));
+    if (r->halted) fprintf(out, "halted: %s\n", r->halted == 1 ? "--max-time reached" : "--stall-time: no new ROM byte");
+    if (r->attract_paths || r->play_paths) fprintf(out, "sessions: %llu attract, %llu play (%llu pad epochs), %llu frames played, %llu steps, %llu stopped by stagnation\n", U(r->attract_paths), U(r->play_paths), U(r->play_epochs), U(r->session_frames), U(r->session_steps), U(r->session_stalls));
     fprintf(out, "spool: %llu states spilled to disk, %llu left unexplored\n", U(r->spooled), U(r->spool_left));
     fprintf(out, "saturation: total %llu path %llu loop %llu site %llu queue %llu\n", U(r->sat_total), U(r->sat_path), U(r->sat_loop), U(r->sat_site), U(r->sat_queue));
     fprintf(out, "index replays %llu\n", U(r->index_replays));

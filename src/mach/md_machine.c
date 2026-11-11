@@ -13,6 +13,7 @@ typedef struct {
     const DpObservers *obs;
     void *user;
     const uint8_t *rom; size_t rom_size;   // for clone()
+    uint64_t frames;   // completed frames (relative clock for sessions)
     int pad_armed, pad_seen;   // pad-port read detection for the event probe
 } MdMachWrap;
 
@@ -47,10 +48,12 @@ static void md_on_write(void *user, uint32_t addr, unsigned size, uint32_t value
     if (w->obs && w->obs->on_write)
         for (unsigned k = 0; k < size; k++) w->obs->on_write(w->user, addr + k, (uint8_t)(value >> (24 - 8 * k)));
 }
+static void md_on_frame(void *user) { ((MdMachWrap *)user)->frames++; }
+static uint64_t md_frame(DpMachine *m) { return ((MdMachWrap *)m->impl)->frames; }
 static void md_observe(DpMachine *m, const DpObservers *o, void *user) {
     MdMachWrap *w = m->impl;
     w->obs = o; w->user = user;
-    DpMdHooks h = { .user = w, .on_read = md_on_read, .on_write = md_on_write };
+    DpMdHooks h = { .user = w, .on_read = md_on_read, .on_write = md_on_write, .on_frame = md_on_frame };
     dp_mdmach_set_hooks(w->m, &h);
 }
 
@@ -161,6 +164,7 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->pc = md_pc;
     m->set_pc = md_set_pc;
     m->set_input = md_set_input;
+    m->frame = md_frame;
     return m;
 }
 

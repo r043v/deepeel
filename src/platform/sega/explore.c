@@ -2949,9 +2949,10 @@ int dp_sega_explore_command(int argc,char **argv) {
         if(pages>0 && page>0) o.mem_cap_mb=(uint32_t)((uint64_t)pages*(uint64_t)page/2/(1024u*1024u));
     }
     o.attract_frames=DP_DEFAULT_ATTRACT_FRAMES;
+    int core_flag=0; for(int i=5;i<argc;i++) if(!strcmp(argv[i],"--core")) core_flag=1;
     for(int i=5;i<argc;i++) {
         if(!strcmp(argv[i],"--core")) { use_core=1; continue; }
-        { int kn=dp_core_parse_option(&kcfg,argc,argv,i); if(kn) { i+=kn-1; continue; } }
+        if(core_flag) { int kn=dp_core_parse_option(&kcfg,argc,argv,i); if(kn) { i+=kn-1; continue; } }   // only with --core: the old engine owns --attract-frames etc.
         if(!strcmp(argv[i],"--no-vector-seeds")) { o.seed_vectors=0; continue; }
         if(!strcmp(argv[i],"--no-context-evict")) { o.no_context_evict=1; continue; }
         if(!strcmp(argv[i],"--spool") || !strcmp(argv[i],"--resume")) {

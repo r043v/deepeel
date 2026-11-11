@@ -2,15 +2,23 @@
  * defined here, in a unit that does not include that header). */
 #include <stdint.h>
 #include <string.h>
+#include <pthread.h>
 #include "mdmach.h"
 
 uint8_t md_rom[DP_MD_ROM_MAX];
 uint32_t md_rom_size;
 
+/* md_rom is shared by every worker thread: a worker attaching its machine must not rewrite
+ * (zero, then copy) the bytes the others are executing.  The same ROM is loaded once. */
+static pthread_mutex_t rom_lock = PTHREAD_MUTEX_INITIALIZER;
 void dp_mdrom_set(const uint8_t *rom, size_t size) {
-    memset(md_rom, 0, sizeof md_rom);
-    memcpy(md_rom, rom, size);
-    md_rom_size = (uint32_t)size;
+    pthread_mutex_lock(&rom_lock);
+    if (md_rom_size != (uint32_t)size || memcmp(md_rom, rom, size) != 0) {
+        memset(md_rom, 0, sizeof md_rom);
+        memcpy(md_rom, rom, size);
+        md_rom_size = (uint32_t)size;
+    }
+    pthread_mutex_unlock(&rom_lock);
 }
 
 uint32_t dp_mdrom_peek32(uint32_t a) {

@@ -14,6 +14,7 @@ typedef struct {
     // clones keep the image and initialise the runtime lazily in the worker thread
     // that uses it: the PCE machine state is thread-local
     uint8_t *img; size_t img_size; int inited;
+    uint64_t frames;   // completed frames (relative clock for sessions)
     const uint8_t *src; size_t src_size;
 } PceWrap;
 static void pce_ensure(DpMachine *m) {
@@ -31,8 +32,12 @@ static int64_t pce_rom_index(DpMachine *m, uint32_t a) { pce_ensure(m); return d
 static int pce_run(DpMachine *m) {
     pce_ensure(m);
     int frame_done = 0;
-    return dp_pce_step(&frame_done) > 0;
+    int ok = dp_pce_step(&frame_done) > 0;
+    if (frame_done) ((PceWrap *)m->impl)->frames++;
+    return ok;
 }
+
+static uint64_t pce_frame(DpMachine *m) { return ((PceWrap *)m->impl)->frames; }
 
 static void pce_trace_fn(void *user, uint16_t pc, uint8_t op) {
     PceWrap *w = user;
@@ -117,5 +122,6 @@ DpMachine *dp_machine_pce(void) {
     m->isa = dp_isa_huc6280();
     m->pc = pce_pc;
     m->set_pc = pce_set_pc;
+    m->frame = pce_frame;
     return m;
 }

@@ -4597,3 +4597,13 @@ La somme des budgets globaux reste bornée par les valeurs demandées.
 files de tous les workers à cette limite. `--queue-max` fixe leur plafond de
 croissance ; `--spool-cap-mb` borne le spool du worker principal. Le moteur
 MSX/SG reste limité aux deux instances runtime disponibles.
+
+## Noyau générique (0.302.5)
+
+`deepeel explore rom.gb --core` utilise le noyau `dp_core_explore` : une instance m0boy par worker
+(`clone` = autre copie compilée, statiques propres), `--jobs N|auto`, sondes d'événements (`$FF00`
+manette), fourche d'IRQ vblank, session attract unique (`--attract-frames`, défaut 6000 ;
+`--attract-stall`). Les options du noyau passent avant celles de l'ancien moteur.
+Bornes de temps communes à toutes les plateformes : `--min-time`, `--max-time`, `--stall-time`.
+Observation de l'outil (pas une mesure matérielle) : Super Mario Land, 50 M de pas, 1 job : natural 8945.
+Parité avec l'ancien moteur non encore mesurée ; l'ancien moteur reste le défaut.
