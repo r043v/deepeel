@@ -4850,3 +4850,10 @@ Un seul chemin pour GB, Sega/MSX, NES, PCE et MD sous `--core` : `--cov`, `--map
   cores. Test `bizhawk_reader` (fixtures `fix_bz_*.bk2`, dont une manette analogique).
 - **`--unbounded`** (noyau) : plus de plafond de pas total, de pas par chemin ni de forks par site ;
   la file en RAM déborde sur le spool disque (`TMPDIR`, sinon `/tmp`).
+
+## 0.310.0 — chargeurs de films sur le lecteur BizHawk générique
+
+Les chargeurs `.bk2` de Sega (SMS/GG/MSX), NES, PCE et Mega Drive passent par `src/core/bizhawk.c` (colonnes résolues
+par nom via `LogKey`). Sega : masques identiques image par image sur le film Castle (42 337 images). NES : les colonnes
+Reset/Power déclenchent désormais la commande de reset. MD : repli sur la grammaire positionnelle sans `LogKey`.
+Restent à faire : GB, formats Meka `.mmv`, `.bkm`, `.vbm`, `.gmv` hors MD, autres cores (axes N64/SNES/PSX/Saturn).

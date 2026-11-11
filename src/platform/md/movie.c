@@ -1,6 +1,8 @@
+#define _GNU_SOURCE
 #include "movie.h"
 #include "../../core/zip.h"
 #include "../../core/bk2.h"
+#include "../../core/bizhawk.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,7 +11,7 @@ static int hexval(int c) { return c >= '0' && c <= '9' ? c - '0' : (c | 32) >= '
 
 /* BK2 Input Log: "|pr|UDLRABCSXYZM|...|" per frame; pad byte as in GMV (bit0 U, 1 D, 2 L,
  * 3 R, 4 B, 5 C, 6 A, 7 Start).  X/Y/Z/Mode are not modelled by the 3-button replay. */
-static int bk2_parse(const uint8_t *log, size_t n, const DpBk2 *bk,
+static int bk2_parse_positional(const uint8_t *log, size_t n, const DpBk2 *bk,
                      DpMdMovie *out, char *err, size_t errsz) {
     (void)bk;   /* the identity lines live in DpBk2 (dp_md_movie_rom_match reads the movie header); the MD5 the replay checks comes from the movie's own header below */
     if (bk && bk->has_md5) { memcpy(out->md5, bk->md5, 16); out->has_md5 = 1; }
@@ -32,6 +34,28 @@ static int bk2_parse(const uint8_t *log, size_t n, const DpBk2 *bk,
         i = e + 1;
     }
     if (!out->frames) { dp_md_movie_free(out); snprintf(err, errsz, "BK2 has no input frames"); return 0; }
+    return 1;
+}
+
+/* LogKey movies: the shared BizHawk reader resolves the columns by name; logs without them keep the positional grammar */
+static int bk2_parse(const uint8_t *log, size_t n, const DpBk2 *bk, DpMdMovie *out, char *err, size_t errsz) {
+    DpBzMovie m;
+    if (!memmem(log, n, "LogKey:", 7) || !dp_bz_load(log, n, &m, err, errsz))
+        return bk2_parse_positional(log, n, bk, out, err, errsz);
+    static const char *const nm[8] = { "P1 Up", "P1 Down", "P1 Left", "P1 Right", "P1 B", "P1 C", "P1 A", "P1 Start" };
+    int col[8], found = 0;
+    for (int i = 0; i < 8; i++) { col[i] = dp_bz_find(&m, nm[i]); found += col[i] >= 0; }
+    if (!found) { dp_bz_free(&m); return bk2_parse_positional(log, n, bk, out, err, errsz); }
+    if (bk && bk->has_md5) { memcpy(out->md5, bk->md5, 16); out->has_md5 = 1; }
+    out->pads = malloc(m.nframes ? m.nframes : 1);
+    if (!out->pads || !m.nframes) { dp_bz_free(&m); snprintf(err, errsz, "BK2 has no input frames"); return 0; }
+    for (uint32_t f = 0; f < m.nframes; f++) {
+        uint8_t v = 0;   /* bit0 U, 1 D, 2 L, 3 R, 4 B, 5 C, 6 A, 7 Start */
+        for (int i = 0; i < 8; i++) if (dp_bz_held(&m, f, col[i])) v |= (uint8_t)(1u << i);
+        out->pads[f] = v;
+    }
+    out->frames = m.nframes;
+    dp_bz_free(&m);
     return 1;
 }
 
