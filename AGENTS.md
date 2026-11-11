@@ -41,6 +41,11 @@ sources, frontière différée, feuille de route) est `docs/COUVERTURE.fr.md`.
 - Langue : code et identifiants en anglais, commentaires en anglais, docs
   utilisateur en français.
 
+- **But : la couverture augmentée, quoi qu'il arrive.** Chaque technique du noyau
+  doit exister sur toutes les ISA où c'est techniquement possible ; « pas encore
+  implémenté » n'est pas « impossible ». Une limite n'est déclarée que si elle est
+  réellement technique, et elle est justifiée dans la doc.
+
 ## Commits
 
 - L'auteur d'un commit reste la session git (r043v) ; un agent qui a fait le

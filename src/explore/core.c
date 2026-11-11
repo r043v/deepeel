@@ -413,28 +413,103 @@ out:
 
 
 // Direct RAM loads into the accumulator/index register, per ISA (techniques 3, 4, 7 on every ISA).
-// Returns the load length and the address when `bytes` is such a load of a non-ROM byte, else 0.
-static int direct_ram_load(DpMachine *m, const DpIsa *isa, const uint8_t *b, uint32_t *addr, int *idx_reg) {
+// Returns the load length and fills the address, the width in bytes (big-endian ISAs: the low-order byte is the last)
+// and the destination data register (68000) when `bytes` is such a load of a non-ROM byte, else 0.
+static int direct_ram_load(DpMachine *m, const DpIsa *isa, const uint8_t *b, uint32_t *addr, int *idx_reg, int *width, int *dreg) {
     const char *n = isa->name;
     if (!n) return 0;
-    *idx_reg = 0;
+    *idx_reg = 0; *width = 1; *dreg = -1;
     int len = 0; uint32_t a = 0;
     if (!strcmp(n, "z80") && b[0] == 0x3A) { len = 3; a = b[1] | (b[2] << 8); }
     else if (!strcmp(n, "sm83") && b[0] == 0xFA) { len = 3; a = b[1] | (b[2] << 8); }
     else if (!strcmp(n, "sm83") && b[0] == 0xF0) { len = 2; a = 0xFF00 + b[1]; }
     else if ((!strcmp(n, "m6502") || !strcmp(n, "huc6280")) && (b[0] == 0xAD || b[0] == 0xAE || b[0] == 0xAC)) { len = 3; a = b[1] | (b[2] << 8); *idx_reg = b[0] != 0xAD; }
     else if ((!strcmp(n, "m6502") || !strcmp(n, "huc6280")) && (b[0] == 0xA5 || b[0] == 0xA6 || b[0] == 0xA4)) { len = 2; a = b[1]; *idx_reg = b[0] != 0xA5; }
+    else if (!strcmp(n, "68000")) {
+        // move.{b,w,l} abs.w|abs.l,Dn : 00 ss DDD 000 111 00x
+        unsigned w = (b[0] << 8) | b[1], sz = (w >> 12) & 3;
+        if (sz && ((w >> 6) & 7) == 0 && ((w >> 3) & 7) == 7 && (w & 7) <= 1) {
+            *width = sz == 1 ? 1 : sz == 3 ? 2 : 4;
+            *dreg = (int)((w >> 9) & 7);
+            if ((w & 7) == 0) { len = 4; a = (uint32_t)(int32_t)(int16_t)((b[2] << 8) | b[3]) & 0xFFFFFF; }
+            else { len = 6; a = ((uint32_t)b[2] << 24 | (uint32_t)b[3] << 16 | (uint32_t)b[4] << 8 | b[5]) & 0xFFFFFF; }
+        }
+    }
     if (!len || m->rom_index(m, a) >= 0) return 0;
     *addr = a;
     return len;
 }
 
-// 1 when a ROM table access indexed by the loaded value follows within 12 bytes (technique 7)
+// 68000 immediate of `width` bytes at b: returns its length in bytes, value in *v
+static int m68k_imm(const uint8_t *b, int width, uint32_t *v) {
+    if (width == 4) { *v = (uint32_t)b[0] << 24 | (uint32_t)b[1] << 16 | (uint32_t)b[2] << 8 | b[3]; return 4; }
+    if (width == 2) { *v = (uint32_t)b[0] << 8 | b[1]; return 2; }
+    *v = b[1]; return 2;
+}
+
+// technique 3: a RAM value compared with a constant, as one site.  Fills the address, value and width.
+static int ram_signature(DpMachine *m, const DpIsa *isa, uint32_t pc, const uint8_t *b, int dl_len, int idx_reg, uint32_t dl_addr,
+                         int dl_width, int dl_dreg, uint32_t *addr, uint32_t *val, int *width) {
+    const char *n = isa->name;
+    uint8_t f[10];
+    for (unsigned i = 0; i < sizeof f; i++) f[i] = m->fetch(m, pc + (dl_len ? (unsigned)dl_len : 0) + i);
+    if (!strcmp(n, "68000")) {
+        unsigned w0 = (b[0] << 8) | b[1];
+        if (w0 == 0x0C38 || w0 == 0x0C39 || w0 == 0x0C78 || w0 == 0x0C79 || w0 == 0x0CB8 || w0 == 0x0CB9) {   // cmpi.x #imm,abs
+            int sz = (w0 >> 6) & 3, wd = sz == 0 ? 1 : sz == 1 ? 2 : 4;
+            uint8_t g[12];
+            for (unsigned i = 0; i < sizeof g; i++) g[i] = m->fetch(m, pc + 2 + i);
+            uint32_t imm; int il = m68k_imm(g, wd, &imm);
+            uint32_t a;
+            if (w0 & 1) a = ((uint32_t)g[il] << 24 | (uint32_t)g[il + 1] << 16 | (uint32_t)g[il + 2] << 8 | g[il + 3]) & 0xFFFFFF;
+            else a = (uint32_t)(int32_t)(int16_t)((g[il] << 8) | g[il + 1]) & 0xFFFFFF;
+            if (m->rom_index(m, a) >= 0) return 0;
+            *addr = a; *val = imm; *width = wd;
+            return 1;
+        }
+        if (!dl_len || dl_dreg < 0) return 0;
+        unsigned w = (f[0] << 8) | f[1];
+        int sz = dl_width == 1 ? 0 : dl_width == 2 ? 1 : 2;
+        if (w == (0x0C00u | (unsigned)sz << 6 | (unsigned)dl_dreg) ||                       // cmpi.x #imm,Dn
+            w == (0xB03Cu | (unsigned)dl_dreg << 9 | (unsigned)sz << 6)) {                   // cmp.x #imm,Dn
+            uint32_t imm; m68k_imm(f + 2, dl_width, &imm);
+            *addr = dl_addr; *val = imm; *width = dl_width;
+            return 1;
+        }
+        return 0;
+    }
+    if (!dl_len) return 0;
+    uint8_t cmpop = (!strcmp(n, "m6502") || !strcmp(n, "huc6280")) ? (idx_reg ? 0 : 0xC9) : 0xFE;
+    if (!cmpop || f[0] != cmpop) return 0;
+    *addr = dl_addr; *val = f[1]; *width = 1;
+    return 1;
+}
+
+// 1 when a ROM table access indexed by the loaded value follows within 16 bytes (technique 7)
 static int rom_table_follows(DpMachine *m, const DpIsa *isa, uint32_t pc, int len) {
-    uint8_t win[12];
+    uint8_t win[16];
     for (unsigned i = 0; i < sizeof win; i++) win[i] = m->fetch(m, pc + len + i);
     const char *n = isa->name;
     int tab = 0;
+    if (!strcmp(n, "68000")) {
+        // ROM base into An (lea abs.l / lea d16(pc) / movea.l #imm), then an (d8,An,Xn) operand of a move/ALU word
+        for (unsigned i = 0; i + 1 < sizeof win; i += 2) {
+            unsigned w = (win[i] << 8) | win[i + 1];
+            if (i + 5 < sizeof win && ((w & 0xF1FF) == 0x41F9 || w == (0x207Cu | (w & 0x0E00)))) {
+                uint32_t a = ((uint32_t)win[i + 2] << 24 | (uint32_t)win[i + 3] << 16 | (uint32_t)win[i + 4] << 8 | win[i + 5]) & 0xFFFFFF;
+                if (m->rom_index(m, a) >= 0) tab = 1;
+                i += 4;   // skip the address extension
+                continue;
+            } else if (i + 3 < sizeof win && (w & 0xF1FF) == 0x41FA) {
+                uint32_t a = (pc + (uint32_t)len + i + 2 + (uint32_t)(int32_t)(int16_t)((win[i + 2] << 8) | win[i + 3])) & 0xFFFFFF;
+                if (m->rom_index(m, a) >= 0) tab = 1;
+                i += 2;
+                continue;
+            }
+            if (tab && ((w >> 3) & 7) == 6 && (w & 0xF000) != 0x4000 && (w & 0xF000) != 0x6000) return 1;
+        }
+        return 0;
+    }
     if (!strcmp(n, "z80") || !strcmp(n, "sm83")) {
         for (unsigned i = 0; i + 2 < sizeof win; i++) {
             if (win[i] == 0x21 && m->rom_index(m, win[i + 1] | (win[i + 2] << 8)) >= 0) tab = 1;
@@ -449,6 +524,11 @@ static int rom_table_follows(DpMachine *m, const DpIsa *isa, uint32_t pc, int le
             m->rom_index(m, win[i + 1] | (win[i + 2] << 8)) >= 0) return 1;
     }
     return 0;
+}
+
+// writes `v` over `width` bytes at `addr`, most significant byte first
+static void poke_wide(DpMachine *m, uint32_t addr, int width, uint32_t v) {
+    for (int i = 0; i < width; i++) m->poke(m, addr + (uint32_t)i, (uint8_t)(v >> (8 * (width - 1 - i))));
 }
 
 static void run_path(Worker *w, Pending *p) {
@@ -590,8 +670,9 @@ static void run_path(Worker *w, Pending *p) {
         }
         // technique 7 (restricted form): z80 `ld a,(RAM)` whose value then indexes a ROM table
         // (`ld hl,ROM` + `add hl,de` within 12 bytes): replay the site with each index 0..15
-        uint32_t dl_addr = 0; int dl_idx = 0;
-        int dl_len = (m->poke && !cur_forced) ? direct_ram_load(m, isa, bytes, &dl_addr, &dl_idx) : 0;
+        uint32_t dl_addr = 0; int dl_idx = 0, dl_width = 1, dl_dreg = -1;
+        int dl_len = (m->poke && !cur_forced) ? direct_ram_load(m, isa, bytes, &dl_addr, &dl_idx, &dl_width, &dl_dreg) : 0;
+        if (dl_len) dl_addr += (uint32_t)dl_width - 1;   // big-endian: the low-order byte is the last; 1 byte elsewhere
         if (!cfg->no_index_replay && dl_len) {
             if (rom_table_follows(m, isa, pc, dl_len)) {
                 uint32_t addr = dl_addr;
@@ -647,19 +728,19 @@ static void run_path(Worker *w, Pending *p) {
         }
         // technique 3 (learned form): z80 `ld a,(nn)` of RAM straight followed by `cp n` is a signature test;
         // queue a state whose byte already holds n so the matching side runs as natural
-        uint8_t cmpop = (isa->name && (!strcmp(isa->name, "m6502") || !strcmp(isa->name, "huc6280"))) ? (dl_idx ? 0 : 0xC9) : 0xFE;
-        if (!cfg->no_learn_sig && dl_len && cmpop && m->fetch(m, pc + dl_len) == cmpop) {
-            uint32_t addr = dl_addr;
-            uint8_t sigv = m->fetch(m, pc + dl_len + 1);
+        uint32_t sg_addr = 0, sg_val = 0; int sg_w = 1;
+        if (!cfg->no_learn_sig && m->poke && !cur_forced &&
+            ram_signature(m, isa, pc, bytes, dl_len, dl_idx, dl_len ? dl_addr - (uint32_t)dl_width + 1 : 0, dl_width, dl_dreg, &sg_addr, &sg_val, &sg_w)) {
+            uint32_t addr = sg_addr; uint32_t sigv = sg_val;
             pthread_mutex_lock(&sh->mu);
             int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben,
-                                      ((uint64_t)addr << 8 | sigv) | (3ull << 60));
+                                      ((uint64_t)addr << 32 | sigv) | (3ull << 60));
             pthread_mutex_unlock(&sh->mu);
             if (fresh) {
                 uint8_t *tmp = malloc(sh->sbytes), *snap = malloc(sh->sbytes);
                 if (tmp && snap) {
                     m->save(m, tmp);
-                    m->poke(m, addr, sigv);
+                    poke_wide(m, addr, sg_w, sigv);
                     m->save(m, snap);
                     m->load(m, tmp);
                     pthread_mutex_lock(&sh->mu);

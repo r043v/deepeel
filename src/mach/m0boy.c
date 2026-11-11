@@ -276,6 +276,18 @@ void dp_gbl_hook_vblank(int v, int i) {
         m->last_instrs = instrs;
         m->stalls = 0;
     }
+    {   // DEEPEEL_KDUMP=<file>: per-vblank state line, the same in both engines (timing comparison)
+        static FILE *f; static int init; static unsigned n;
+        if (!init) { init = 1; const char *e = getenv("DEEPEEL_KDUMP"); if (e) f = fopen(e, "w"); }
+        if (f) {
+            uint64_t h = 1469598103934665603ull;
+            for (int k = 0; k < 0x2000; k++) h = (h ^ m->api->wram[k]) * 1099511628211ull;
+            fprintf(f, "%u %016llx pc=%04x ime=%u if=%02x LY=%02x\n", n++, (unsigned long long)h, m->api->gbr->pc, m->api->gbr->ime, m->api->io[0x0F], m->api->io[0x44]);
+            fflush(f);
+            const char *w = getenv("DEEPEEL_KWRAM");   // <n>:<file>: WRAM at vblank n
+            if (w && (unsigned)atoi(w) == n - 1) { const char *c = strchr(w, ':'); FILE *g = c ? fopen(c + 1, "wb") : NULL; if (g) { fwrite(m->api->wram, 1, 0x2000, g); fclose(g); } }
+        }
+    }
     m->in_vblank = 1;
     if (m->on_vblank) m->on_vblank(m);
     m->in_vblank = 0;

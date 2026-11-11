@@ -22,6 +22,7 @@ static void md_save(DpMachine *m, uint8_t *buf) { dp_mdmach_save(((MdMachWrap *)
 static void md_load(DpMachine *m, const uint8_t *buf) { dp_mdmach_load(((MdMachWrap *)m->impl)->m, buf); memcpy(&((MdMachWrap *)m->impl)->frames, buf + dp_mdmach_state_size(), 8); }
 // the byte at the address: 68000 is big-endian, peek32 returns the aligned word
 static uint8_t md_fetch(DpMachine *m, uint32_t a) {
+    if ((a & 0xFFFFFFu) >= 0xFF0000u) return dp_mdmach_ram8(((MdMachWrap *)m->impl)->m, a);   // work RAM (code run from RAM, learned bytes)
     uint32_t w = dp_mdmach_peek32(((MdMachWrap *)m->impl)->m, a & ~3u);
     return (uint8_t)(w >> (24 - 8 * (a & 3)));
 }

@@ -923,6 +923,19 @@ def build_md(out):
     r[0x208:0x20C] = bytes([0x60, 0xFE, 0x4E, 0x71])     # keep reset SR interrupt mask
     save_md(out, "fix_md_vint_masked", r)
 
+def build_md_techniques(out):
+    # 68000 technique fixtures (3 save signature, 4 volatile byte, 7 index replay) on work RAM $FFC100..
+    def prog(name, code, table=None):
+        r = md_rom()
+        r[0x200:0x200 + len(code)] = code
+        if table:
+            r[0x230:0x230 + len(table)] = table
+        save_md(out, name, r)
+    prog("fix_md_save", bytes.fromhex("1039 00ffc100 0c00 00aa 6604 7001 6002 7002 60fe"))
+    prog("fix_md_rng", bytes.fromhex("1039 00ffc200 0a00 0055 13c0 00ffc200 0c00 00aa 6702 60e8 7001 60fe"))
+    prog("fix_md_index", bytes.fromhex("1039 00ffc300 0280 0000 000f 41f9 00000230 1230 0000 0c01 0003 6704 7001 60fe 7002 60fe"),
+         bytes([0, 0, 0, 3] + [0] * 12))
+
 def build_md_z80(out):
     # 68000 stops the Z80 bus, copies a 13-byte Z80 program from ROM $400 into
     # Z80 RAM, releases the bus. The Z80 reads ROM $320 through the bank window
@@ -1403,5 +1416,6 @@ if __name__ == "__main__":
     build_nes_pce(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_z80_family(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_md_z80(sys.argv[1] if len(sys.argv) > 1 else ".")
+    build_md_techniques(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_md(sys.argv[1] if len(sys.argv) > 1 else ".")
     build(sys.argv[1] if len(sys.argv) > 1 else ".")

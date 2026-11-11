@@ -4694,5 +4694,11 @@ HuC6280 `LDA/LDX/LDY` absolu ou page zéro. La signature suit avec `cp n`
 Les trois ont leur option (`--no-learn-sig`, `--no-rng-learn`,
 `--no-index-replay`) et leur compteur. Fixtures 6502 : `fix_nes_save`,
 `fix_nes_rng`, `fix_nes_index` (tests `core_*_6502`). Limites restantes :
-68000 (`mem_operand` n'y décrit rien), pas de fixture HuC6280 ni SM83 propre
-à ces trois techniques, index limité à 0..15.
+pas de fixture HuC6280 ni SM83 propre à ces trois techniques, index limité à
+0..15.
+
+0.304.1 : le 68000 est couvert. Chargement `move.{b,w,l} abs,Dn`, signature
+`cmpi`/`cmp #n,Dn` ou `cmpi #n,abs`, table `lea`/`movea.l #ROM` suivie d'un
+octet `(d8,An,Xn)`. `md_fetch` lit désormais la RAM de travail `$FF0000+`
+(avant : vue ROM seule, donc un octet RAM appris restait invisible). Fixtures
+`fix_md_save|rng|index`, tests `core_*_68000`.

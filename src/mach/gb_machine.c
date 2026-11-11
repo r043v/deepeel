@@ -21,6 +21,8 @@ typedef struct GbWrap {
     int joy_armed, joy_seen;  // joypad-port read detection for the event probe
     const uint8_t *rom; size_t rom_size;   // for clone()
     const DpTas *tas;         // movie whose recorder sync profile every instance takes
+    int last_ei;              // the last executed instruction was EI: the IRQ check skips the next one
+    uint8_t first_op;         // opcode of the instruction executed by the current gb_run
 } GbWrap;
 static GbWrap *gbw(DpMachine *m) { return m->impl; }
 
@@ -29,13 +31,15 @@ static uint32_t gb_state_bytes(DpMachine *m) { return dp_mach_state_bytes(gbw(m)
 static void gb_save(DpMachine *m, uint8_t *buf) {
     DpMach *d = gbw(m)->d;
     dp_mach_save(d, buf);
-    uint64_t f = *d->api->frame;
+    uint64_t f = *d->api->frame | ((uint64_t)gbw(m)->last_ei << 63);   // EI shadow rides in the top bit
     memcpy(buf + dp_mach_state_bytes(d), &f, 8);
 }
 static void gb_load(DpMachine *m, const uint8_t *buf) {
     DpMach *d = gbw(m)->d;
     dp_mach_load(d, buf);
     uint64_t f; memcpy(&f, buf + dp_mach_state_bytes(d), 8);
+    gbw(m)->last_ei = (int)(f >> 63);
+    f &= ~(1ull << 63);
     *d->api->frame = (typeof(*d->api->frame))f;
 }
 // side-effect-free view: work RAM bank 0/1 area and HRAM are read from the instance, the rest through the op view
@@ -57,6 +61,7 @@ static int64_t gb_rom_index(DpMachine *m, uint32_t a) {
 // one instruction per gb_run: the hook of the second instruction cuts before it executes
 static void gb_on_step(DpMach *m, uint16_t pc, uint8_t op, int entry) {
     GbWrap *g = m->owner;
+    if (g->seen == 0) g->first_op = op;
     if (g->seen++ >= 1) dp_mach_cut(m, DP_CUT_STEPS);
     if (g->o.on_step) g->o.on_step(g->user, pc, op, entry);
 }
@@ -83,7 +88,14 @@ static void gb_observe(DpMachine *m, const DpObservers *o, void *user) {
 static int gb_run(DpMachine *m) {
     GbWrap *g = gbw(m);
     g->seen = 0;
+    // the interpreter keeps the EI delay in a local that a cut loses: after an EI, hide the pending
+    // event for this run so the instruction after EI still executes before the interrupt
+    volatile uint32_t *ne = &g->d->api->gbr->next_evt;
+    uint32_t saved = *ne, far = g->d->api->gbr->cyc + 0x40000000u;
+    if (g->last_ei) *ne = far;
     dp_mach_run(g->d);
+    if (g->last_ei && *ne == far) *ne = saved;
+    if (g->seen > 0) g->last_ei = (g->first_op == 0xFB);
     return g->seen > 0;
 }
 static uint32_t gb_pc(DpMachine *m) { return gbw(m)->d->api->gbr->pc; }

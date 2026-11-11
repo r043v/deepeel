@@ -196,6 +196,9 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ramexg.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ramsrc.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_z80.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_md_save.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_md_rng.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_md_index.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_save.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_rng.nes
@@ -704,3 +707,11 @@ add_test(NAME core_rng_bytes_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/f
 set_tests_properties(core_rng_bytes_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_index_replay_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_index.nes; $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions | grep -q 'index replays 16' && $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions --no-solve --no-index-replay | grep -q 'rom bytes: natural 16'")
 set_tests_properties(core_index_replay_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# techniques 3, 4, 7 on the 68000 (Mega Drive)
+add_test(NAME core_learn_sig_68000 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_md_save.md; $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'learned signatures 1' && $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-learn-sig | grep -q 'rom bytes: natural 16'")
+set_tests_properties(core_learn_sig_68000 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_rng_bytes_68000 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_md_rng.md; $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'rng-byte forks 4' && $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-rng-learn | grep -q 'rom bytes: natural 24'")
+set_tests_properties(core_rng_bytes_68000 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_index_replay_68000 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_md_index.md; $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'index replays 16' && $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-index-replay | grep -q 'rom bytes: natural 32'")
+set_tests_properties(core_index_replay_68000 PROPERTIES FIXTURES_REQUIRED fixtures)
