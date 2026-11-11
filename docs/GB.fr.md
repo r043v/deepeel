@@ -4622,4 +4622,6 @@ Super Mario Land 2, 40 M de pas, 8 workers (observations de l'outil). Noyau : 13
 au total (forcé inclus). Ancien moteur : son `--cov` marque tout flag 4 (spéculatif) et ne distingue pas le naturel
 (0 octet naturel), mais 141 459 octets exécutés au total — l'ancien moteur couvre beaucoup plus en spéculatif sur GB
 (forks à budget plus large). Le critère « naturel ≥ ancien » tient ; la couverture totale spéculative du noyau GB reste
-inférieure : écart non résorbé, à étudier avant de retirer l'ancien moteur GB.
+inférieure. Cause identifiée en partie : l'ancien moteur GB ajoute la **fermeture statique** (tour 1 : +39 007 octets
+statiques, 2 535 entrées semées) dont les octets sont du code décodé, pas exécuté ; le noyau n'a pas cette boucle
+fermeture→graines. Écart non résorbé : à porter (ou à écarter explicitement) avant de retirer l'ancien moteur GB.
