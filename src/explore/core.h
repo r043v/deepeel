@@ -44,6 +44,7 @@ typedef struct DpCoreConfig {
     uint32_t fork_site_cap;    // forks per conditional site (0: unbounded)
     uint32_t visits_per_pc;    // per-path visits of one pc before the path stops (0: unbounded)
     unsigned jobs;             // parallel workers (<=1: single); needs DpMachine.clone
+    int no_taint_cut;          // 1: do not cut forced paths on tainted control transfers (technique 1.b)
     int no_forced_ram_cut;     // 1: let forced paths run unfed RAM
     const uint32_t *seeds;     // extra entry points (vectors): queued as forced paths from the start state
     size_t n_seeds;
@@ -71,6 +72,7 @@ typedef struct DpCoreResult {
     uint64_t pruned_covered;   // forks skipped because both sides were already covered
     uint64_t copy_bytes;       // verbatim ROM->RAM byte copies seen (a ROM read written unchanged to RAM)
     uint64_t copy_forced;      // the same on forced paths (speculative, not marked on the ROM)
+    uint64_t taint_cut_indirect, taint_cut_ret;   // forced paths cut on a computed jump / a ret on a stack the path did not build
     uint64_t forced_ram_cuts;  // forced paths cut when executing RAM no verbatim ROM copy fed
     uint64_t workers;          // workers actually started
     uint64_t workers_short;    // workers requested but unavailable (no clone / init failure)

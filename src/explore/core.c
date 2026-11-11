@@ -49,6 +49,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--no-irq-jitter")) { c->no_irq_jitter = 1; return 1; }
     if (!strcmp(a, "--no-decompress")) { c->no_decompress = 1; return 1; }
     if (!strcmp(a, "--no-copies")) { c->no_copies = 1; return 1; }
+    if (!strcmp(a, "--no-taint-cut")) { c->no_taint_cut = 1; return 1; }
     if (!strcmp(a, "--no-forced-ram-cut")) { c->no_forced_ram_cut = 1; return 1; }
     if (!strcmp(a, "--no-novelty-order")) { c->no_novelty_order = 1; return 1; }
     if (!strcmp(a, "--visits-per-pc") && i + 1 < argc) { c->visits_per_pc = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
@@ -249,6 +250,7 @@ static void run_path(Worker *w, Pending *p) {
     w->cobs.forced = p->forced; w->cobs.last_rom = -1;
     uint32_t path_id = ++w->path_id, steps = 0;
     int cur_forced = p->forced;
+    unsigned fdepth = 0;   // calls made since the forced fork: a ret below that pops state the path did not build
     for (;;) {
         if (cfg->max_total && __atomic_load_n(&sh->steps, __ATOMIC_RELAXED) >= cfg->max_total) {
             loc->sat_total++;
@@ -281,6 +283,12 @@ static void run_path(Worker *w, Pending *p) {
                 break;
             }
             loc->exec_outside++;
+        }
+        if (cur_forced && !cfg->no_taint_cut && have_flow) {
+            // technique 1.b: the inverted flag may have corrupted registers/stack; a transfer whose target comes from them is untrusted
+            if (fi.kind == DP_FLOW_INDIRECT) { loc->taint_cut_indirect++; break; }
+            if (fi.kind == DP_FLOW_RET) { if (!fdepth) { loc->taint_cut_ret++; break; } fdepth--; }
+            else if (fi.call) fdepth++;
         }
         mark(sh, loc, m, pc, (unsigned)len, cur_forced ? DP_CORE_FORCED : DP_CORE_NATURAL);
         if (!cfg->no_event_probes && cfg->hooks && cfg->hooks->event_probe && m->rom_index(m, pc) >= 0) {
@@ -508,6 +516,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         out->sat_site += l->sat_site; out->sat_queue += l->sat_queue;
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
+        out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
         out->novelty_picks += l->novelty_picks; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
         out->exec_outside += l->exec_outside;
         free(ws[i].visits); free(ws[i].stamp);
@@ -540,6 +549,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "event probes %llu at %llu sites\n", U(r->event_probes), U(r->event_probe_sites));
     fprintf(out, "seeded entry points %llu\n", U(r->seeded));
     fprintf(out, "forced RAM cuts %llu\n", U(r->forced_ram_cuts));
+    fprintf(out, "forced taint cuts: indirect %llu, ret %llu\n", U(r->taint_cut_indirect), U(r->taint_cut_ret));
     fprintf(out, "exec_outside %llu, rom->ram copy bytes %llu (%zu distinct ROM sources), forced %llu\n", U(r->exec_outside), U(r->copy_bytes), copied, U(r->copy_forced));
     DpCoreSection secs[64];
     size_t ns = dp_core_sections(r, secs, 64);

@@ -679,3 +679,5 @@ add_test(NAME core_sessions COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80
 set_tests_properties(core_sessions PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_seed_ram COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_save.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --no-sessions --seed-ram 0xC100-0xC100 | grep -q 'natural 15' && $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --no-sessions | grep -q 'natural 11'")
 set_tests_properties(core_seed_ram PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_taint_cut COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_save.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --no-sessions | grep -q 'forced taint cuts' && $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --no-sessions --no-taint-cut | grep -q 'taint cuts: indirect 0, ret 0'")
+set_tests_properties(core_taint_cut PROPERTIES FIXTURES_REQUIRED fixtures)
