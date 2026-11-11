@@ -993,6 +993,17 @@ def build_nes_pce(out):
         rom[o:o + 2] = bytes([0x00, 0x80])
     with open(os.path.join(out, "fix_nes_branch.nes"), "wb") as f:
         f.write(rom)
+    # NES PPU status poll: LDA $2002 / BMI done / JMP poll; done stores and idles (technique 2)
+    n = bytearray(16 + 2 * 0x4000 + 0x2000)
+    n[0:4] = b"NES\x1a"
+    n[4], n[5] = 2, 1
+    code = bytes([0xAD, 0x02, 0x20, 0x30, 0x03, 0x4C, 0x00, 0x80, 0xA9, 0x55, 0x85, 0x10, 0x4C, 0x0C, 0x80])
+    n[16:16 + len(code)] = code
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        o = 16 + 0x4000 + (v - 0xFFFA) + 0x3FFA
+        n[o:o + 2] = bytes([0x00, 0x80])
+    with open(os.path.join(out, "fix_nes_ppupoll.nes"), "wb") as f:
+        f.write(n)
     # NES pad reader: strobe $4016, read A, branch, loop (pad probes fork per button)
     n = bytearray(16 + 2 * 0x4000 + 0x2000)
     n[0:4] = b"NES\x1a"

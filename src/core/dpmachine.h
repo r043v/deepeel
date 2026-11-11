@@ -174,6 +174,8 @@ struct DpMdMach;
 // the NES backend (src/mach/nes_machine.c): opens the runtime from a
 // cartridge image (mapper <0: auto) and owns it
 size_t dp_machine_nes_prg_size(DpMachine *m);
+struct DpPlatformHooks;
+const struct DpPlatformHooks *dp_machine_nes_hooks(void);   /* NES platform hooks for the kernel (event probes) */
 DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err, size_t errsz);
 // the Mega Drive backend (src/mach/md_machine.c); takes ownership of the machine
 DpMachine *dp_machine_md(struct DpMdMach *impl);

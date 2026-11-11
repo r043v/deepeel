@@ -6,6 +6,7 @@
 
 #include "../core/dpmachine.h"
 #include "nesmach.h"
+#include "../explore/core.h"
 
 typedef struct {
     DpNesMach *m;
@@ -77,4 +78,25 @@ DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err
     m->observe = nes_observe;
     m->close = nes_close;
     return m;
+}
+
+// technique 2: the first LDA/BIT abs $2002 at a ROM site forks one state per status byte
+// the PPU can present (vblank, sprite 0, overflow and their combinations); no probe while
+// an NMI edge is pending, a planted vblank must not mask the interrupt the hardware raises
+static int nes_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *bytes, unsigned k, uint8_t *save) {
+    (void)user; (void)pc;
+    static const uint8_t st[] = { 0x80, 0x40, 0x20, 0xC0, 0xA0, 0xE0, 0x00 };
+    DpNesMach *n = ((NesMachWrap *)m->impl)->m;
+    if (k >= sizeof st) return 0;
+    if (!((bytes[0] == 0xAD || bytes[0] == 0x2C) && bytes[1] == 0x02 && bytes[2] == 0x20)) return 0;
+    if (dp_nesmach_nmi_pending(n)) return 0;
+    unsigned keep = dp_nesmach_ppu_status(n);
+    dp_nesmach_set_ppu_status(st[k]);
+    dp_nesmach_save(n, save);
+    dp_nesmach_set_ppu_status(keep);
+    return 1;
+}
+const DpPlatformHooks *dp_machine_nes_hooks(void) {
+    static const DpPlatformHooks h = { .event_probe = nes_event_probe };
+    return &h;
 }

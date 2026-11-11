@@ -1296,6 +1296,7 @@ static int cmd_nes(int argc, char **argv) {
     opt.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
     DpCliCommon cc = { .jobs = 1 };
     int use_core = 0; DpCoreConfig kcfg; dp_core_config_default(&kcfg);
+    kcfg.visits_per_pc = 50000;   // a frame wait is thousands of iterations (SMB: natural 15 -> 4708 bytes, old engine 4716)
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
         if (0) {}
@@ -1356,6 +1357,7 @@ static int cmd_nes(int argc, char **argv) {
         if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
         if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
         if (opt.queue_max) kcfg.queue_max = opt.queue_max;
+        kcfg.hooks = dp_machine_nes_hooks();
         DpCoreResult kr;
         size_t prg = dp_machine_nes_prg_size(km);
         int kok = dp_core_explore(km, prg, &kcfg, &kr);

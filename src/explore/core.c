@@ -32,6 +32,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
         if (*e == '-') { c->cell_lo = (uint32_t)lo; c->cell_hi = (uint32_t)strtoul(e + 1, NULL, 0); }
         return 2;
     }
+    if (!strcmp(a, "--no-event-probes")) { c->no_event_probes = 1; return 1; }
     if (!strcmp(a, "--no-decompress")) { c->no_decompress = 1; return 1; }
     if (!strcmp(a, "--no-copies")) { c->no_copies = 1; return 1; }
     if (!strcmp(a, "--no-forced-ram-cut")) { c->no_forced_ram_cut = 1; return 1; }
@@ -81,6 +82,8 @@ typedef struct {
     uint32_t sbytes;
     uint64_t *cellset;         // technique 8: open-addressing set of (target, RAM cell) keys
     size_t cellcap, celln;
+    uint64_t *probeset;        // technique 2: sites already probed
+    size_t probecap, proben;
 } Shared;
 
 typedef struct {
@@ -198,20 +201,21 @@ static uint64_t cell_key(const DpCoreConfig *cfg, DpMachine *m, uint32_t other) 
 }
 
 // 1 when the key is new (inserted), 0 when already present; caller holds sh->mu
-static int cell_insert(Shared *sh, uint64_t key) {
-    if (sh->celln * 2 >= sh->cellcap) {
-        size_t nc = sh->cellcap ? sh->cellcap * 2 : 1024;
+static int keyset_insert(uint64_t **set, size_t *cap, size_t *n, uint64_t key) {
+    if (*n * 2 >= *cap) {
+        size_t nc = *cap ? *cap * 2 : 1024;
         uint64_t *ns = calloc(nc, sizeof *ns);
         if (!ns) return 1;
-        for (size_t i = 0; i < sh->cellcap; i++)
-            if (sh->cellset[i]) { size_t h = sh->cellset[i] & (nc - 1); while (ns[h]) h = (h + 1) & (nc - 1); ns[h] = sh->cellset[i]; }
-        free(sh->cellset); sh->cellset = ns; sh->cellcap = nc;
+        for (size_t i = 0; i < *cap; i++)
+            if ((*set)[i]) { size_t h = (*set)[i] & (nc - 1); while (ns[h]) h = (h + 1) & (nc - 1); ns[h] = (*set)[i]; }
+        free(*set); *set = ns; *cap = nc;
     }
-    size_t h = key & (sh->cellcap - 1);
-    while (sh->cellset[h]) { if (sh->cellset[h] == key) return 0; h = (h + 1) & (sh->cellcap - 1); }
-    sh->cellset[h] = key; sh->celln++;
+    size_t h = key & (*cap - 1);
+    while ((*set)[h]) { if ((*set)[h] == key) return 0; h = (h + 1) & (*cap - 1); }
+    (*set)[h] = key; (*n)++;
     return 1;
 }
+static int cell_insert(Shared *sh, uint64_t key) { return keyset_insert(&sh->cellset, &sh->cellcap, &sh->celln, key); }
 
 static void run_path(Worker *w, Pending *p) {
     Shared *sh = w->sh;
@@ -260,6 +264,31 @@ static void run_path(Worker *w, Pending *p) {
             loc->exec_outside++;
         }
         mark(sh, loc, m, pc, (unsigned)len, cur_forced ? DP_CORE_FORCED : DP_CORE_NATURAL);
+        if (!cfg->no_event_probes && cfg->hooks && cfg->hooks->event_probe && m->rom_index(m, pc) >= 0) {
+            pthread_mutex_lock(&sh->mu);
+            int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, (uint64_t)m->rom_index(m, pc) + 1);
+            pthread_mutex_unlock(&sh->mu);
+            if (fresh) {
+                unsigned k = 0;
+                uint8_t *snap = malloc(sh->sbytes);
+                int any = 0;
+                while (snap && cfg->hooks->event_probe(cfg->hooks->user, m, pc, bytes, k++, snap)) {
+                    any = 1;
+                    pthread_mutex_lock(&sh->mu);
+                    if (cfg->queue_max && sh->qn >= cfg->queue_max) loc->sat_queue++;
+                    else {
+                        if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
+                        sh->q[sh->qn++] = (Pending){ snap, pc, 0 };
+                        loc->event_probes++;
+                        pthread_cond_signal(&sh->cv);
+                        snap = malloc(sh->sbytes);
+                    }
+                    pthread_mutex_unlock(&sh->mu);
+                }
+                free(snap);
+                if (any) loc->event_probe_sites++;
+            }
+        }
         int cond = have_flow && fi.kind == DP_FLOW_COND && fi.target >= 0;
         uint8_t *pre = NULL;
         if (cond) {
@@ -409,14 +438,14 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         out->sat_site += l->sat_site; out->sat_queue += l->sat_queue;
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
-        out->novelty_picks += l->novelty_picks; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
+        out->novelty_picks += l->novelty_picks; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
         out->exec_outside += l->exec_outside;
         free(ws[i].visits); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
     }
     out->steps = sh.steps;
     for (size_t i = 0; i < sh.qn; i++) free(sh.q[i].state);
-    free(sh.cellset); free(sh.q); free(sh.sites.s); free(sh.fed); free(ws);
+    free(sh.probeset); free(sh.cellset); free(sh.q); free(sh.sites.s); free(sh.fed); free(ws);
     return ok;
 }
 
@@ -435,6 +464,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "workers %llu (short %llu)\n", U(r->workers), U(r->workers_short));
     fprintf(out, "cells %llu, cell-pruned forks %llu\n", U(r->cells), U(r->cell_pruned));
     fprintf(out, "decompress runs %llu, compressed ROM bytes %llu\n", U(r->decompress_runs), U(r->compressed_bytes));
+    fprintf(out, "event probes %llu at %llu sites\n", U(r->event_probes), U(r->event_probe_sites));
     fprintf(out, "seeded entry points %llu\n", U(r->seeded));
     fprintf(out, "forced RAM cuts %llu\n", U(r->forced_ram_cuts));
     fprintf(out, "exec_outside %llu, rom->ram copy bytes %llu (%zu distinct ROM sources), forced %llu\n", U(r->exec_outside), U(r->copy_bytes), copied, U(r->copy_forced));
