@@ -1,6 +1,7 @@
 // tas.c: PC Engine movie loading (see tas.h).
 #include "tas.h"
 #include "../../core/bk2.h"
+#include "../../core/bizhawk.h"
 #include "../../core/sha1.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -35,47 +36,26 @@ static int key_bit(const char *k, int *reset) {
     return -1;
 }
 
-static int load_bk2_log(char *text, DpPceTas *t, char *err, size_t errsz) {
-    int bits[64], rst[64], nf = 0;
-    char *lk = strstr(text, "LogKey:");
-    if (!lk) { snprintf(err, errsz, "bk2: no LogKey line"); return 0; }
-    lk += 7;
-    char *kend = strchr(lk, '\n');
-    if (!kend) kend = lk + strlen(lk);
-    while (lk < kend && nf < 64) {
-        while (lk < kend && (*lk == '#' || *lk == '|')) lk++;
-        if (lk >= kend) break;
-        char *e = lk;
-        while (e < kend && *e != '|' && *e != '\r') e++;
-        char key[32];
-        size_t len = (size_t)(e - lk);
-        if (len >= sizeof key) len = sizeof key - 1;
-        memcpy(key, lk, len);
-        key[len] = 0;
-        bits[nf] = key_bit(key, &rst[nf]);
-        nf++;
-        lk = e;
-        if (lk < kend && *lk == '\r') break;
-    }
-    uint32_t cap = 0;
-    for (char *s = text; (s = strchr(s, '\n'));) {
-        s++;
-        if (*s != '|') continue;
-        if (!grow(t, &cap)) { snprintf(err, errsz, "bk2: out of memory"); return 0; }
+static int load_bk2_log(const uint8_t *log, size_t logn, DpPceTas *t, char *err, size_t errsz) {
+    DpBzMovie m;
+    if (!dp_bz_load(log, logn, &m, err, errsz)) return 0;
+    int bits[512], rst[512];
+    unsigned nf = m.nkeys < 512 ? m.nkeys : 512;
+    for (unsigned i = 0; i < nf; i++) bits[i] = key_bit(m.keys[i].name, &rst[i]);
+    t->pads = malloc(m.nframes ? m.nframes : 1);
+    t->resets = malloc(m.nframes ? m.nframes : 1);
+    if (!t->pads || !t->resets) { dp_bz_free(&m); snprintf(err, errsz, "bk2: out of memory"); return 0; }
+    for (uint32_t f = 0; f < m.nframes; f++) {
         uint8_t pad = 0, reset = 0;
-        char *q = s + 1;
-        for (int fi = 0; fi < nf && *q && *q != '\n' && *q != '\r'; fi++) {
-            if (*q == '|') q++;
-            char c = *q++;
-            int on = c != '.' && c != ' ';
-            if (on && bits[fi] >= 0) pad |= (uint8_t)(1u << bits[fi]);
-            if (on && rst[fi]) reset = 1;
+        for (unsigned i = 0; i < nf; i++) {
+            if (!dp_bz_held(&m, f, (int)i)) continue;
+            if (bits[i] >= 0) pad |= (uint8_t)(1u << bits[i]);
+            if (rst[i]) reset = 1;
         }
-        t->pads[t->frames] = pad;
-        t->resets[t->frames] = reset;
-        t->frames++;
+        t->pads[f] = pad; t->resets[f] = reset;
     }
-    if (!t->frames) { snprintf(err, errsz, "bk2: no input frames"); return 0; }
+    t->frames = m.nframes;
+    dp_bz_free(&m);
     return 1;
 }
 
@@ -101,13 +81,7 @@ int dp_pce_tas_load(const char *path, DpPceTas *t, char *err, size_t errsz) {
         if (!dp_bk2_open(blob, (size_t)sz, &b, err, errsz)) {
             /* err already set */
         } else {
-            char *text = malloc(b.log_n + 1);
-            if (text) {
-                memcpy(text, b.log, b.log_n);
-                text[b.log_n] = 0;
-                ok = load_bk2_log(text, t, err, errsz);
-                free(text);
-            }
+            ok = load_bk2_log(b.log, b.log_n, t, err, errsz);
             if (ok && b.header) {
                 char *ht = malloc(b.header_n + 1);
                 if (ht) {
