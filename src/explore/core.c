@@ -35,7 +35,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     }
     if (!strcmp(a, "--no-event-probes")) { c->no_event_probes = 1; return 1; }
     if (!strcmp(a, "--no-sessions")) { c->no_sessions = 1; return 1; }
-    if (!strcmp(a, "--sessions") && i + 1 < argc) { c->sessions = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
+    if (!strcmp(a, "--sessions") && i + 1 < argc) { c->sessions = (uint32_t)strtoul(argv[i + 1], NULL, 0); c->no_sessions = 0; return 2; }
     if (!strcmp(a, "--no-irq-jitter")) { c->no_irq_jitter = 1; return 1; }
     if (!strcmp(a, "--no-decompress")) { c->no_decompress = 1; return 1; }
     if (!strcmp(a, "--no-copies")) { c->no_copies = 1; return 1; }
@@ -459,7 +459,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         // after the natural path (queue is LIFO-picked from the back) and fork like any path
         if (m->set_input && !cfg->no_sessions) {
             static const uint32_t masks[16] = {0x10, 0x20, 0x01, 0x02, 0x04, 0x08, 0x30, 0x11, 0x21, 0x14,
-                                               0x18, 0x24, 0x28, 0x3F, 0x00, 0x15};
+                                               0x18, 0x24, 0x28, 0x3F, 0x40, 0x15};   // 0x40: Start
             unsigned n = cfg->sessions ? cfg->sessions : 16;
             if (n > 16) n = 16;
             for (unsigned i = 0; i < n; i++) {

@@ -80,6 +80,7 @@ static void sega_set_input(DpMachine *m, uint32_t mask) {
     DpSegaInput in;
     memset(&in, 0, sizeof in);
     in.pad[0] = (uint8_t)(mask & 0x3F);
+    in.start = (uint8_t)((mask >> 6) & 1);   // GG Start (SMS/SG: no such line)
     ((SegaMach *)m->impl)->b->set_input(in);
 }
 

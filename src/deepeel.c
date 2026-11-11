@@ -1296,6 +1296,7 @@ static int cmd_nes(int argc, char **argv) {
     opt.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
     DpCliCommon cc = { .jobs = 1 };
     int use_core = 0; DpCoreConfig kcfg; dp_core_config_default(&kcfg);
+    kcfg.no_sessions = 1;   // measured on SMB at 2 M steps: sessions halve the natural path's budget (4708 -> 2063 bytes); --sessions N enables them
     kcfg.visits_per_pc = 50000;   // a frame wait is thousands of iterations (SMB: natural 15 -> 4708 bytes, old engine 4716)
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];

@@ -48,6 +48,19 @@ static void nes_observe(DpMachine *m, const DpObservers *o, void *user) {
 
 static uint32_t nes_pc(DpMachine *m) { return dp_nesmach_pc(((NesMachWrap *)m->impl)->m); }
 static void nes_set_pc(DpMachine *m, uint32_t pc) { dp_nesmach_set_pc(((NesMachWrap *)m->impl)->m, pc); }
+// kernel pad mask (bit0 up, 1 down, 2 left, 3 right, 4 button 1, 5 button 2, 6 start)
+// -> NES pad 0 (A, B, Select, Start, Up, Down, Left, Right = bits 0..7)
+static void nes_set_input(DpMachine *m, uint32_t k) {
+    uint8_t p = 0;
+    if (k & 0x10) p |= 0x01;   // A
+    if (k & 0x20) p |= 0x02;   // B
+    if (k & 0x40) p |= 0x08;   // Start
+    if (k & 0x01) p |= 0x10;
+    if (k & 0x02) p |= 0x20;
+    if (k & 0x04) p |= 0x40;
+    if (k & 0x08) p |= 0x80;
+    dp_nesmach_set_input(((NesMachWrap *)m->impl)->m, p, 0);
+}
 size_t dp_machine_nes_prg_size(DpMachine *m) { return dp_nesmach_prg_size(((NesMachWrap *)m->impl)->m); }
 
 static void nes_close(DpMachine *m) {
@@ -68,6 +81,7 @@ DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err
     m->isa = dp_isa_m6502();
     m->pc = nes_pc;
     m->set_pc = nes_set_pc;
+    m->set_input = nes_set_input;
     m->impl = w;             // the m6502 DpIsa wrapper is not extracted yet
     m->state_bytes = nes_state_bytes;
     m->save = nes_save;
