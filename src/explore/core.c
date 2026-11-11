@@ -252,7 +252,7 @@ static void run_path(Worker *w, Pending *p) {
     uint32_t cur_input = p->input;
     // a session shares half the total budget with its siblings: it must not starve the natural path
     uint64_t session_cap = cfg->max_total / (2 * (cfg->sessions ? (cfg->sessions > 16 ? 16 : cfg->sessions) : 16));
-    if (m->set_input) m->set_input(m, cur_input ? cur_input - 1 : 0);
+    if (m->set_input && cur_input) m->set_input(m, cur_input - 1);   // input 0: keep the loaded state's held pad (probe forks hold theirs)
     loc->paths++;
     run_flush(&w->cobs);
     w->cobs.forced = p->forced; w->cobs.last_rom = -1;

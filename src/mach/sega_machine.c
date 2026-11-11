@@ -223,7 +223,12 @@ static int sega_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t
     if (!tmp) return 0;
     m->save(m, tmp);
     int ok = m->run(m);
-    if (ok) { c->a = vals[k]; m->save(m, save); }
+    if (ok) {
+        c->a = vals[k];
+        // joypad port A probe: the alternative also holds that button from now on (as the old engine's input fork)
+        if ((bytes[1] & 0xC1) == 0xC0) m->set_input(m, (~vals[k]) & 0x3F);
+        m->save(m, save);
+    }
     m->load(m, tmp);
     free(tmp);
     return ok;
