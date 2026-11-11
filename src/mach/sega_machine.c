@@ -69,6 +69,12 @@ static int sega_run(DpMachine *m) {
 static uint32_t sega_pc(DpMachine *m) { return ((SegaMach *)m->impl)->b->cpu()->pc; }
 static void sega_set_pc(DpMachine *m, uint32_t pc) { ((SegaMach *)m->impl)->b->cpu()->pc = (uint16_t)pc; }
 
+// the base write callback bypasses the observation wrapper: a poke is not a CPU access
+static void sega_poke(DpMachine *m, uint32_t a, uint8_t v) {
+    SegaMach *s = m->impl;
+    if (s->base_write) s->base_write(s->base_user, (uint16_t)a, v);
+}
+
 static uint8_t sega_obs_read(void *u, uint16_t a) {
     SegaMach *s = u;
     uint8_t v = s->prev_read(s->prev_user, a);
@@ -145,6 +151,7 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->run = sega_run;
     m->pc = sega_pc;
     m->set_pc = sega_set_pc;
+    m->poke = sega_poke;
     m->observe = sega_observe;
     m->close = sega_close;
     return m;

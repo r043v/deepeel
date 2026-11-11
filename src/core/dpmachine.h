@@ -145,6 +145,9 @@ struct DpMachine {
     // side of a conditional is taken by moving pc on a restored state
     uint32_t (*pc)(struct DpMachine *);
     void (*set_pc)(struct DpMachine *, uint32_t pc);
+    // writes one byte through the machine's memory map, unobserved (NULL: unsupported);
+    // the entry point of the RAM-seeding techniques (docs/PLAN-MUTUALISATION.fr.md, step 3)
+    void (*poke)(struct DpMachine *, uint32_t addr, uint8_t value);
     void (*observe)(struct DpMachine *, const DpObservers *, void *user);
     int (*ctx_components)(struct DpMachine *, const DpCtxComp **out);   // count
     int (*probes)(struct DpMachine *, const DpProbe **out);             // count

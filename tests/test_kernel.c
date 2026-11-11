@@ -86,6 +86,17 @@ int main(int argc, char **argv) {
     m->observe(m, &ob, acc);
     for (int i = 0; i < 20 && m->run(m); i++) {}
     CHECK(acc[0] >= 1);
+    // poke: a byte written through the map is read back by the machine and is not observed
+    CHECK(m->poke);
+    {
+        b->init(rom, rn, NULL, 1);
+        uint64_t acc2[2] = {0, 0};
+        DpObservers ob2 = { NULL, obs_read, obs_write };
+        m->observe(m, &ob2, acc2);
+        m->poke(m, 0xC123, 0x5A);
+        CHECK(m->fetch(m, 0xC123) == 0x5A);
+        CHECK(acc2[1] == 0);
+    }
     // clone: an independent worker instance starting from the same program
     dp_machine_sega_source(m, rom, rn, pick_gg);
     DpMachine *c = m->clone ? m->clone(m, 1) : NULL;
