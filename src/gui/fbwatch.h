@@ -26,6 +26,13 @@ void dp_fbwatch_progress(uint32_t frame, uint32_t total, int done);
 int dp_fb_caption_read(char *c1, size_t n1, char *c2, size_t n2);
 // reference tile (DEEPEEL_MD_REF_FEED, src/explore/md_ref_feed.h): the
 // external harness's latest frame; returns 0 without a feed or frame yet
-int dp_fb_ref_active(void);
-int dp_fb_ref_read(uint32_t *out, int *w, int *h, uint32_t *vframe, uint32_t *total, int *done);
+// feed 0: DEEPEEL_MD_REF_FEED, feed 1: DEEPEEL_MD_REF2_FEED; dp_fb_ref_name gives the emulator's name
+int dp_fb_ref_active(int i);
+// replay sync: call once per replayed frame; publishes our frame to the references and waits while we are more than two frames ahead of the slowest live one
+void dp_fb_sync_gate(uint64_t frame);
+// seconds spent waiting in the gate so far (the window derives the unsynchronised speed), and a reference's own unsynchronised speed in tenths of frames/s
+double dp_fb_sync_waited(void);
+uint32_t dp_fb_ref_unsync_x10(int i);
+const char *dp_fb_ref_name(int i);
+int dp_fb_ref_read(int i, uint32_t *out, int *w, int *h, uint32_t *vframe, uint32_t *total, int *done);
 #endif

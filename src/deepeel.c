@@ -1976,9 +1976,9 @@ static int cmd_md(int argc, char **argv) {
             if (md_watch && !o.watch_every) o.watch_every = 2;   // the progress caption needs published frames
         }
         const char *reflive = md_watch ? md_ref_live_path() : NULL;
-        char feedpath[64];
+        char feedpath[512];
         if (reflive) {   // the window picks the feed up by name (dp_fb_ref_active)
-            snprintf(feedpath, sizeof feedpath, "/tmp/deepeel-md-ref-%d.bin", (int)getpid());
+            { const char *td = getenv("TMPDIR"); snprintf(feedpath, sizeof feedpath, "%s/deepeel-md-ref-%d.bin", td && *td ? td : "/tmp", (int)getpid()); }
             setenv("DEEPEEL_MD_REF_FEED", feedpath, 1);
         } else if (md_watch)
             fprintf(stderr, "deepeel: md watch: no reference tile (build it with tools/md_ref_live.sh)\n");

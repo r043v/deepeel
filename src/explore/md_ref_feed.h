@@ -17,6 +17,8 @@ typedef struct {
     volatile uint32_t magic, seq;      /* seqlock: even = the frame is complete */
     volatile uint32_t vframe, total;
     volatile uint32_t w, h, done;
+    volatile uint32_t leader;          /* frame the deepeel core reached: the harness waits while it is ahead (replay sync) */
+    volatile uint32_t unsync_x10;      /* harness speed without the sync waits, in tenths of frames/s */
     uint32_t px[DP_MDRF_MAX_W * DP_MDRF_MAX_H];
 } DpMdRefFeed;
 

@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "clownmdemu.h"
+#include <time.h>
+#include <unistd.h>
 #include "explore/md_ref_feed.h"
 #include "platform/md/movie.h"
 
@@ -101,7 +103,22 @@ int main(int argc, char **argv) {
 
     g_movie = &movie;
     static uint32_t packed[DP_MDRF_MAX_W * DP_MDRF_MAX_H];
+    struct timespec t0; clock_gettime(CLOCK_MONOTONIC, &t0);
+    double waited = 0, last_move = 0; uint32_t last_leader = 0;
     for (g_frame = 0; g_frame < movie.frames; g_frame++) {
+        /* replay sync: stay within two frames of the deepeel core; a leader that stopped moving for 2 s releases us */
+        for (;;) {
+            struct timespec t1; clock_gettime(CLOCK_MONOTONIC, &t1);
+            double now = (double)(t1.tv_sec - t0.tv_sec) + (double)(t1.tv_nsec - t0.tv_nsec) * 1e-9;
+            if (feed->leader != last_leader) { last_leader = feed->leader; last_move = now; }
+            if (g_frame <= (uint32_t)feed->leader + 2 || now - last_move > 2.0 || now < 2.0 && feed->leader == 0 && now > 1.0) break;
+            usleep(300); waited += 300e-6;
+        }
+        if (g_frame && g_frame % 30 == 0) {
+            struct timespec t1; clock_gettime(CLOCK_MONOTONIC, &t1);
+            double el = (double)(t1.tv_sec - t0.tv_sec) + (double)(t1.tv_nsec - t0.tv_nsec) * 1e-9 - waited;
+            if (el > 0.01) feed->unsync_x10 = (uint32_t)(10.0 * g_frame / el);
+        }
         ClownMDEmu_Iterate(ref);
         if (scr_w && scr_h) {
             for (int y = 0; y < scr_h; y++)   /* the row stride differs from the screen width */

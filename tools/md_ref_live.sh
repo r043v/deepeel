@@ -12,7 +12,7 @@ cc -O2 -std=gnu99 -DCC_USE_C99_INTEGERS \
     -I"$reference/source" -I"$root/src" \
     "$root/tools/md_ref_live.c" \
     "$root/src/platform/md/movie.c" "$root/src/core/zip.c" "$root/src/core/bk2.c" \
-    "$root/src/core/sha1.c" "$root/src/core/md5.c" \
+    "$root/src/core/sha1.c" "$root/src/core/md5.c" "$root/src/core/bizhawk.c" \
     "$ref_build/libclownmdemu-core.a" \
     "$ref_build/libraries/clown68000/libclown68000-interpreter.a" \
     "$ref_build/libraries/clown68000/libclown68000-common.a" \

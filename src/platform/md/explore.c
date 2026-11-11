@@ -140,6 +140,10 @@ static int push(X *x, uint32_t pc, int vint, int hint);
 static void s4_table(X *x, uint32_t pc, uint32_t obs);
 static void s4_ptr_table(X *x, uint32_t pc, unsigned an, uint32_t obs);
 static uint8_t play_pad(X *x);
+/* movie pad byte (GMV order: bit4 B, bit5 C, bit6 A) to the core's pad byte (bit4 A, bit5 B, bit6 C); U/D/L/R/Start unchanged */
+static uint8_t movie_pad(uint8_t m) {
+    return (uint8_t)((m & 0x8F) | ((m & 0x10) << 1) | ((m & 0x20) << 1) | ((m & 0x40) >> 2));
+}
 static uint32_t md_rng(uint32_t *s);
 static void on_frame(void *u) {
     X *x = u;
@@ -169,13 +173,14 @@ static void on_frame(void *u) {
     }
     if (x->movie_active) {
         x->r->movie_frames++;
+        if (x->o->watch_every) dp_fb_sync_gate(x->r->movie_frames);   // replay sync with the reference cores
         if (x->r->movie_frames >= x->o->movie->frames) {
             x->movie_active = 0;
             dp_mdmach_halt(x->m);
         } else {
             // J2 shoot: the state of the movie's own path becomes a fork-exploration seed
             if (x->o->shoot_every && x->r->movie_frames % x->o->shoot_every == 0 && push(x, x->pc, 0, 0)) x->r->shoots++;
-            dp_mdmach_set_pad(x->m, x->o->movie->pads[x->r->movie_frames]);
+            dp_mdmach_set_pad(x->m, movie_pad(x->o->movie->pads[x->r->movie_frames]));
         }
     }
 }
@@ -1307,7 +1312,8 @@ static void run_path(X *x, Item *it, uint64_t budget, int *cut) {
     if (it) dp_mdmach_load(x->m, it->state);
     r->paths++;
     uint64_t psb = (uint64_t)x->o->path_steps << (2u * x->cur_tier);   // x4 per deferral tier
-    uint64_t pb = (x->movie_active || !x->forced) ? budget / 2 : (psb < budget ? psb : budget);
+    // the movie is the given natural path: replayed to its last frame, never cut by the step wall
+    uint64_t pb = x->movie_active ? UINT64_MAX / 4 : !x->forced ? budget / 2 : (psb < budget ? psb : budget);
     uint64_t n = run_sliced(x->m, pb, cut, &fault);
     r->steps += n;
     if (*cut) {
@@ -1689,7 +1695,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     dp_mdmach_reset(x.m);
     if (o->movie && o->movie->frames) {
         x.movie_active = 1;
-        dp_mdmach_set_pad(x.m, o->movie->pads[0]);
+        dp_mdmach_set_pad(x.m, movie_pad(o->movie->pads[0]));
     }
     int cut = 0;
     int drain = o->lot_drain && dp_lf_pending(x.lot); // saved states only: no reset path, no stream replay

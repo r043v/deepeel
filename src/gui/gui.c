@@ -688,11 +688,13 @@ static void *fb_main(void *arg) {
     int tw = 0, th = 0;
     enum { FB_CAP = 30 };   // caption height under the image (two text lines)
     // per-tile speed meters (the GB watch maths): a 1 s window over the frame counter
-    static uint32_t rx[DP_MDRF_MAX_W * DP_MDRF_MAX_H];
-    static double t_main, t_ref;
+    static uint32_t rx[2][DP_MDRF_MAX_W * DP_MDRF_MAX_H];
+    static double t_main, t_ref[2];
     static uint64_t f_main;
-    static uint32_t f_ref;
-    static double s_main, s_ref;
+    static uint32_t f_ref[2];
+    static double s_main, s_ref[2], u_main, w_prev;
+    char last_title[260] = "";
+    int sized_key = 0;
     while (!atomic_load(&fb_quit)) {
         SDL_Event e;
         while (SDL_PollEvent(&e))
@@ -710,60 +712,81 @@ static void *fb_main(void *arg) {
             if (tex) SDL_UpdateTexture(tex, NULL, px, w * 4);
             double now = watch_now();
             if (now - t_main >= 1.0) {
-                if (f >= f_main) s_main = (double)(f - f_main) / (now - t_main);
+                double wt = dp_fb_sync_waited();
+                if (f >= f_main) {
+                    s_main = (double)(f - f_main) / (now - t_main);
+                    double busy = (now - t_main) - (wt - w_prev);
+                    u_main = busy > 0.02 ? (double)(f - f_main) / busy : s_main;
+                }
+                w_prev = wt;
                 t_main = now; f_main = f;
             }
         }
-        int ref = dp_fb_ref_active(), rhave = 0, rw = 0, rh = 0, rdone = 0;
-        uint32_t rvf = 0, rtot = 0;
-        if (ref) {
-            rhave = dp_fb_ref_read(rx, &rw, &rh, &rvf, &rtot, &rdone);
+        int ract[2], rhave[2] = {0, 0}, rw[2] = {0, 0}, rh[2] = {0, 0}, rdone[2] = {0, 0}, ref = 0;
+        uint32_t rvf[2] = {0, 0}, rtot[2] = {0, 0};
+        for (int k = 0; k < 2; k++) {
+            ract[k] = dp_fb_ref_active(k);
+            if (!ract[k]) continue;
+            ref++;
+            rhave[k] = dp_fb_ref_read(k, rx[k], &rw[k], &rh[k], &rvf[k], &rtot[k], &rdone[k]);
             double now = watch_now();
-            if (rhave && now - t_ref >= 1.0) {
-                if (rvf >= f_ref) s_ref = (double)(rvf - f_ref) / (now - t_ref);
-                t_ref = now; f_ref = rvf;
+            if (rhave[k] && now - t_ref[k] >= 1.0) {
+                if (rvf[k] >= f_ref[k]) s_ref[k] = (double)(rvf[k] - f_ref[k]) / (now - t_ref[k]);
+                t_ref[k] = now; f_ref[k] = rvf[k];
             }
-            if (rdone) s_ref = 0;
+            if (rdone[k]) s_ref[k] = 0;
         }
         SDL_SetRenderDrawColor(ren, 24, 24, 28, 255);   // dark ground: the captions are light
         SDL_RenderClear(ren);
         {   // two tiles side by side, each letterboxed to its image aspect (the
             // GB watch layout), with two caption lines under the image
-            int cols = ref ? 2 : 1;
+            int cols = 1 + ref;
+            if (tex && tw > 0 && th > 0 && sized_key != cols * 100000 + tw * 10 + th % 10) {   // fit the window to the tiles (2x), once per layout
+                sized_key = cols * 100000 + tw * 10 + th % 10;
+                SDL_SetWindowSize(win, cols * tw * 2, th * 2 + FB_CAP);
+            }
             int cw = W / cols, ch = H - FB_CAP > 0 ? H - FB_CAP : 1;
-            // helper: aspect-fit (iw,ih) inside the tile and blit, like watch_main
-            struct { int ox, oy; } tile[2] = { {0, 0}, {cw, 0} };
-            for (int t = 0; t < (ref ? 2 : 1); t++) {
-                int iw = 0, ih = 0;
+            int slot[3] = { -1, -1, -1 }, ns = 1;   // tile 0: our core, then every active reference
+            for (int k = 0; k < 2; k++) if (ract[k]) slot[ns++] = k;
+            for (int t = 0; t < cols; t++) {
+                int iw = 0, ih = 0, k = slot[t];
                 if (t == 0) { if (tex && th > 0) { iw = tw; ih = th; } }
-                else if (rhave && rh > 0) { iw = rw; ih = rh; }
+                else if (rhave[k] && rh[k] > 0) { iw = rw[k]; ih = rh[k]; }
                 if (!iw || !ih) continue;
                 double sc = (double)cw / iw < (double)ch / ih ? (double)cw / iw : (double)ch / ih;
                 int dw = (int)(iw * sc), dh = (int)(ih * sc);
-                SDL_Rect dst = { tile[t].ox + (cw - dw) / 2, tile[t].oy + (ch - dh) / 2, dw, dh };
+                SDL_Rect dst = { t * cw + (cw - dw) / 2, (ch - dh) / 2, dw, dh };
                 if (t == 0) SDL_RenderCopy(ren, tex, NULL, &dst);
                 else {
                     SDL_Texture *rtex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888,
-                                                          SDL_TEXTUREACCESS_STREAMING, rw, rh);
-                    SDL_UpdateTexture(rtex, NULL, rx, rw * 4);
+                                                          SDL_TEXTUREACCESS_STREAMING, rw[k], rh[k]);
+                    SDL_UpdateTexture(rtex, NULL, rx[k], rw[k] * 4);
                     SDL_RenderCopy(ren, rtex, NULL, &dst);
                     SDL_DestroyTexture(rtex);
                 }
             }
-            // captions (the GB watch tile information, mutualized)
+            // captions: the emulator's name first, then its progress and speed; the movie goes in the window title
             char c1[160], c2[160];
             int done = dp_fb_caption_read(c1, sizeof c1, c2, sizeof c2);
-            if (!c1[0]) snprintf(c1, sizeof c1, "replay (deepeel)");
-            if (!c2[0] && s_main > 0) snprintf(c2, sizeof c2, "%.0f f/s", s_main);
+            const char *own = getenv("DEEPEEL_MD_OWN_NAME");
+            char wt[260];
+            snprintf(wt, sizeof wt, "deepeel md watch - %s", c1[0] ? c1 : "no movie");
+            if (strcmp(wt, last_title)) { SDL_SetWindowTitle(win, wt); snprintf(last_title, sizeof last_title, "%s", wt); }
+            char sp[160] = "";
+            if (s_main > 0) snprintf(sp, sizeof sp, "  %.0f f/s (sync)  %.0f f/s (unsynced)", s_main, u_main);
+            snprintf(c1, sizeof c1, "%s", own && *own ? own : "deepeel MD core");
             draw_text(ren, 6, ch + 2, c1, 1, gui_color(DP_C_TITLE));
-            if (c2[0]) draw_text(ren, 6, ch + 16, c2, 1, gui_color(done ? DP_C_DIM : DP_C_TEXT));
-            if (ref) {   // the right tile: the reference harness, its own captions
+            char l2[260]; snprintf(l2, sizeof l2, "%s%s", c2, sp);
+            if (l2[0]) draw_text(ren, 6, ch + 16, l2, 1, gui_color(done ? DP_C_DIM : DP_C_TEXT));
+            for (int t = 1; t < cols; t++) {
+                int k = slot[t];
                 char r2[160];
-                if (rhave) snprintf(r2, sizeof r2, rdone ? "done  %u frames" : "%u/%u  %.0f f/s",
-                                    rdone ? (unsigned)rtot : (unsigned)rvf, (unsigned)rtot, s_ref);
-                else snprintf(r2, sizeof r2, "waiting for tools/md_ref_live...");
-                draw_text(ren, cw + 6, ch + 2, "ClownMDEmu (reference)", 1, gui_color(DP_C_TITLE));
-                draw_text(ren, cw + 6, ch + 16, r2, 1, gui_color(rdone ? DP_C_DIM : DP_C_TEXT));
+                if (rhave[k]) snprintf(r2, sizeof r2, rdone[k] ? "done  %u frames" : "%u/%u  %.0f f/s (sync)  %.1f f/s (unsynced)",
+                                       rdone[k] ? (unsigned)rtot[k] : (unsigned)rvf[k], (unsigned)rtot[k], s_ref[k],
+                                       dp_fb_ref_unsync_x10(k) / 10.0);
+                else snprintf(r2, sizeof r2, "waiting for the harness...");
+                draw_text(ren, t * cw + 6, ch + 2, dp_fb_ref_name(k), 1, gui_color(DP_C_TITLE));
+                draw_text(ren, t * cw + 6, ch + 16, r2, 1, gui_color(rdone[k] ? DP_C_DIM : DP_C_TEXT));
             }
         }
         SDL_RenderPresent(ren);
