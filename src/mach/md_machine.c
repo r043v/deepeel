@@ -17,9 +17,9 @@ typedef struct {
     int pad_armed, pad_seen;   // pad-port read detection for the event probe
 } MdMachWrap;
 
-static uint32_t md_state_bytes(DpMachine *m) { (void)m; return (uint32_t)dp_mdmach_state_size(); }
-static void md_save(DpMachine *m, uint8_t *buf) { dp_mdmach_save(((MdMachWrap *)m->impl)->m, buf); }
-static void md_load(DpMachine *m, const uint8_t *buf) { dp_mdmach_load(((MdMachWrap *)m->impl)->m, buf); }
+static uint32_t md_state_bytes(DpMachine *m) { (void)m; return (uint32_t)dp_mdmach_state_size() + 8; }
+static void md_save(DpMachine *m, uint8_t *buf) { dp_mdmach_save(((MdMachWrap *)m->impl)->m, buf); memcpy(buf + dp_mdmach_state_size(), &((MdMachWrap *)m->impl)->frames, 8); }
+static void md_load(DpMachine *m, const uint8_t *buf) { dp_mdmach_load(((MdMachWrap *)m->impl)->m, buf); memcpy(&((MdMachWrap *)m->impl)->frames, buf + dp_mdmach_state_size(), 8); }
 // the byte at the address: 68000 is big-endian, peek32 returns the aligned word
 static uint8_t md_fetch(DpMachine *m, uint32_t a) {
     uint32_t w = dp_mdmach_peek32(((MdMachWrap *)m->impl)->m, a & ~3u);
@@ -87,7 +87,7 @@ static int md_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *
     static const uint32_t pads[] = {0x40, 0x10, 0x20, 0x08, 0x04, 0x01, 0x02};
     if (k >= sizeof pads / sizeof *pads) return 0;
     MdMachWrap *w = m->impl;
-    uint8_t *pre = malloc(dp_mdmach_state_size());
+    uint8_t *pre = malloc(md_state_bytes(m));
     if (!pre) return 0;
     m->save(m, pre);
     w->pad_armed = 1; w->pad_seen = 0;

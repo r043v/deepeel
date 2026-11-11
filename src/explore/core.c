@@ -57,6 +57,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--no-copies")) { c->no_copies = 1; return 1; }
     if (!strcmp(a, "--no-index-replay")) { c->no_index_replay = 1; return 1; }
     if (!strcmp(a, "--no-rng-learn")) { c->no_rng_learn = 1; return 1; }
+    if (!strcmp(a, "--no-solve")) { c->no_solve = 1; return 1; }
     if (!strcmp(a, "--no-learn-sig")) { c->no_learn_sig = 1; return 1; }
     if (!strcmp(a, "--no-taint-cut")) { c->no_taint_cut = 1; return 1; }
     if (!strcmp(a, "--no-forced-ram-cut")) { c->no_forced_ram_cut = 1; return 1; }
@@ -138,6 +139,8 @@ typedef struct {
     int64_t run_lo, run_hi;
     uint32_t run_writes;
     int no_decompress;
+    // technique 1 (solve): non-ROM addresses read inside the current window
+    uint16_t ram[4]; unsigned nram; int track;
 } CopyObs;
 
 #define RUN_MIN 16
@@ -171,8 +174,35 @@ typedef struct {
     unsigned idx;
     uint32_t *capped;      // direct-mapped cache of conditional sites that reached fork_site_cap (pc + 1)
     unsigned step_batch;   // steps not yet added to the shared counter (flushed every 256)
+    uint8_t *wsnap;        // technique 1: state at the start of the window before a conditional
+    uint32_t *winmemo;     // direct-mapped: (rom index + 1) * 2 + (a conditional follows within 5 sequential instructions)
+    int win_on; uint32_t win_pc; unsigned win_n;
+    uint8_t win_imm[24]; unsigned win_ni;
     pthread_t th;
 } Worker;
+
+// 1 when a conditional follows `pc` within 5 sequential instructions (memoised per ROM site)
+static int cond_ahead(Worker *w, const DpIsa *isa, uint32_t pc) {
+    DpMachine *m = w->m;
+    int64_t k = m->rom_index(m, pc);
+    if (k < 0 || !isa->flow) return 0;
+    uint32_t *e = &w->winmemo[(uint64_t)k * 2654435761u >> 16 & 0xFFFF];
+    if ((*e >> 1) == (uint32_t)k + 1) return *e & 1;
+    int yes = 0;
+    uint32_t p = pc;
+    for (int i = 0; i < 5; i++) {
+        uint8_t b[8];
+        for (unsigned j = 0; j < sizeof b; j++) b[j] = m->fetch(m, p + j);
+        DpFlowInfo f;
+        memset(&f, 0, sizeof f);
+        if (!isa->flow(b, (uint16_t)p, &f) || !f.length) break;
+        if (f.kind == DP_FLOW_COND) { yes = i > 0; break; }   // the conditional itself starts no window
+        if (f.kind != DP_FLOW_SEQ) break;
+        p += f.length;
+    }
+    *e = ((uint32_t)k + 1) << 1 | (uint32_t)yes;
+    return yes;
+}
 
 static void mark(Shared *sh, DpCoreResult *r, DpMachine *m, uint32_t pc, unsigned len, uint8_t how) {
     for (unsigned i = 0; i < len; i++) {
@@ -219,6 +249,11 @@ static uint32_t *site_count(SiteTab *t, uint32_t pc) {
 static void obs_read(void *u, uint16_t addr, uint8_t v) {
     CopyObs *o = u;
     int64_t k = o->m->rom_index(o->m, addr);
+    if (k < 0 && o->track && o->nram < 4) {
+        unsigned i = 0;
+        while (i < o->nram && o->ram[i] != addr) i++;
+        if (i == o->nram) o->ram[o->nram++] = addr;
+    }
     if (k >= 0 && (size_t)k < o->r->rom_size) {
         o->last_rom = k; o->last_val = v; o->age = 0;
         if (o->run_hi >= 0 && k >= o->run_hi && k <= o->run_hi + 2) o->run_hi = k;
@@ -324,6 +359,57 @@ static void spool_refill(Shared *sh) {
 enum { TAS_INPUT = 0x40000000, SESSION_ATTRACT = 0x20000000, SESSION_PLAY = 0x20001000 };
 // pad masks cycled by play sessions (kernel mask bits: up down left right button1 button2 start)
 static const uint32_t play_catalog[8] = {0, 0x10, 0x40, 0x20, 0x01, 0x02, 0x04, 0x08};
+// technique 1 (concolic form): the window start state `wsnap` is replayed with each RAM byte the window read set
+// to a few candidate values (immediates of the window, +-1, 0, 1, 0xFF); a value that makes the conditional at
+// `condpc` land on `other` is queued as a *natural* state (source: solved), no forced inversion.  Returns the
+// number of states queued; the caller falls back to the forced fork when 0.
+static unsigned solve_cond(Worker *w, const DpCoreConfig *cfg, uint32_t condpc, uint32_t other, uint32_t input) {
+    Shared *sh = w->sh; DpMachine *m = w->m; DpCoreResult *loc = &w->loc;
+    uint8_t cand[64]; unsigned nc = 0;
+    #define ADDC(v) do { uint8_t v_ = (uint8_t)(v); unsigned q_ = 0; while (q_ < nc && cand[q_] != v_) q_++; if (q_ == nc && nc < sizeof cand) cand[nc++] = v_; } while (0)
+    for (unsigned i = 0; i < w->win_ni; i++) { ADDC(w->win_imm[i]); ADDC(w->win_imm[i] + 1); ADDC(w->win_imm[i] - 1); }
+    ADDC(0); ADDC(1); ADDC(0xFF);
+    unsigned queued = 0;
+    uint8_t *cur = malloc(sh->sbytes), *snap = malloc(sh->sbytes);
+    if (!cur || !snap) { free(cur); free(snap); return 0; }
+    m->save(m, cur);
+    int saved_forced = w->cobs.forced, saved_track = w->cobs.track;
+    w->cobs.forced = 1; w->cobs.track = 0;
+    for (unsigned a = 0; a < w->cobs.nram; a++) {
+        uint16_t addr = w->cobs.ram[a];
+        pthread_mutex_lock(&sh->mu);
+        int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, (((uint64_t)m->rom_index(m, condpc) + 1) << 20 ^ addr << 4 ^ (other & 15)) | (9ull << 60));
+        pthread_mutex_unlock(&sh->mu);
+        if (!fresh) continue;
+        loc->solve_tries++;
+        for (unsigned c = 0; c < nc; c++) {
+            m->load(m, w->wsnap);
+            m->poke(m, addr, cand[c]);
+            m->save(m, snap);
+            int reached = 0;
+            for (int st = 0; st < 16 && m->pc(m) != condpc; st++) if (!m->run(m)) break;
+            if (m->pc(m) == condpc) { m->run(m); reached = 1; }
+            if (reached && m->pc(m) == other) {
+                pthread_mutex_lock(&sh->mu);
+                queue_push(sh, (Pending){ snap, w->win_pc, 0, 0, input });
+                pthread_cond_signal(&sh->cv);
+                pthread_mutex_unlock(&sh->mu);
+                snap = malloc(sh->sbytes);
+                if (!snap) goto out;
+                queued++; loc->solved_forks++;
+                break;
+            }
+        }
+    }
+out:
+    w->cobs.forced = saved_forced; w->cobs.track = saved_track;
+    m->load(m, cur);
+    free(cur); free(snap);
+    (void)cfg;
+    return queued;
+    #undef ADDC
+}
+
 static void run_path(Worker *w, Pending *p) {
     Shared *sh = w->sh;
     const DpCoreConfig *cfg = sh->cfg;
@@ -360,6 +446,7 @@ static void run_path(Worker *w, Pending *p) {
     loc->paths++;
     run_flush(&w->cobs);
     w->cobs.forced = p->forced; w->cobs.last_rom = -1;
+    w->win_on = w->cobs.track = 0;
     uint32_t path_id = ++w->path_id, vid = path_id, steps = 0;
     int cur_forced = p->forced;
     unsigned fdepth = 0;   // calls made since the forced fork: a ret below that pops state the path did not build
@@ -550,6 +637,19 @@ static void run_path(Worker *w, Pending *p) {
             else if (fi.call) fdepth++;
         }
         mark(sh, loc, m, pc, (unsigned)len, cur_forced ? DP_CORE_FORCED : DP_CORE_NATURAL);
+        if (!cfg->no_solve && !cur_forced && m->poke && have_flow) {
+            // window: the sequential instructions before a conditional; their start state and RAM reads feed solve_cond
+            if (fi.kind == DP_FLOW_COND) { /* closes the window below */ }
+            else if (fi.kind != DP_FLOW_SEQ) w->win_on = w->cobs.track = 0;
+            else if (!w->win_on && cond_ahead(w, isa, pc)) {
+                m->save(m, w->wsnap);
+                w->win_on = 1; w->win_pc = pc; w->win_n = 0; w->win_ni = 0; w->cobs.nram = 0; w->cobs.track = 1;
+            }
+            if (w->win_on) {
+                if (++w->win_n > 8) w->win_on = w->cobs.track = 0;
+                for (int i = 1; i < len && w->win_ni < sizeof w->win_imm; i++) w->win_imm[w->win_ni++] = bytes[i];
+            }
+        }
         if (!cfg->no_event_probes && cfg->hooks && cfg->hooks->event_probe && m->rom_index(m, pc) >= 0) {
             pthread_mutex_lock(&sh->mu);
             int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, (uint64_t)m->rom_index(m, pc) + 1);
@@ -615,6 +715,8 @@ static void run_path(Worker *w, Pending *p) {
             } else if (cfg->hooks && cfg->hooks->veto_fork &&
                        !cfg->hooks->veto_fork(cfg->hooks->user, m, pc, other)) {
                 loc->hook_vetoed++; free(pre);
+            } else if (w->win_on && w->cobs.nram && !covered(loc, m, other) && solve_cond(w, cfg, pc, other, cur_input)) {
+                free(pre);   // proved a legal way to the other side: no forced inversion
             } else {
                 pthread_mutex_lock(&sh->mu);
                 uint32_t *cnt = site_count(&sh->sites, pc);
@@ -635,7 +737,9 @@ static void run_path(Worker *w, Pending *p) {
                 if (!pushed) free(pre);
             }
         }
+        if (fi.kind == DP_FLOW_COND) w->win_on = w->cobs.track = 0;
     }
+    w->win_on = w->cobs.track = 0;
     free(sess_seen);
 }
 
@@ -865,6 +969,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         w->visits = calloc(0x10000, sizeof *w->visits);
         w->capped = calloc(0x10000, sizeof *w->capped);
         w->stamp = calloc(0x10000, sizeof *w->stamp);
+        w->wsnap = malloc(sh.sbytes ? sh.sbytes : 1); w->winmemo = calloc(0x10000, sizeof *w->winmemo);
         w->rng_stamp = calloc(0x10000, sizeof *w->rng_stamp); w->rng_last = calloc(0x10000, 1);
         if (!w->visits || !w->stamp || !w->capped) { ok = 0; break; }
         w->cobs = (CopyObs){ wm, &w->loc, -1, 0, sh.fed, 0, 99, -1, -1, 0, cfg->no_decompress };
@@ -980,9 +1085,9 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
-        out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
+        out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
         out->exec_outside += l->exec_outside;
-        free(ws[i].visits); free(ws[i].capped); free(ws[i].stamp);
+        free(ws[i].visits); free(ws[i].wsnap); free(ws[i].winmemo); free(ws[i].capped); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
     }
     out->steps = sh.steps;
@@ -1011,6 +1116,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "index replays %llu\n", U(r->index_replays));
     fprintf(out, "rng-byte forks %llu\n", U(r->rng_forks));
     fprintf(out, "learned signatures %llu\n", U(r->learned_sigs));
+    fprintf(out, "solved forks %llu (tries %llu)\n", U(r->solved_forks), U(r->solve_tries));
     fprintf(out, "tas replay paths %llu\n", U(r->tas_paths));
     fprintf(out, "site-scored picks %llu\n", U(r->site_scored_picks));
     fprintf(out, "novelty picks %llu (new ROM bytes: novelty %llu, plain %llu)\n", U(r->novelty_picks), U(r->novelty_new_bytes), U(r->plain_new_bytes));

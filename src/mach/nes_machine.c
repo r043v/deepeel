@@ -24,9 +24,9 @@ static DpNesMach *nes_impl(DpMachine *m) {
     return w->m;
 }
 
-static uint32_t nes_state_bytes(DpMachine *m) { (void)m; return (uint32_t)dp_nesmach_state_size(); }
-static void nes_save(DpMachine *m, uint8_t *buf) { dp_nesmach_save(nes_impl(m), buf); }
-static void nes_load(DpMachine *m, const uint8_t *buf) { dp_nesmach_load(nes_impl(m), buf); }
+static uint32_t nes_state_bytes(DpMachine *m) { (void)m; return (uint32_t)dp_nesmach_state_size() + 8; }
+static void nes_save(DpMachine *m, uint8_t *buf) { dp_nesmach_save(nes_impl(m), buf); memcpy(buf + dp_nesmach_state_size(), &((NesMachWrap *)m->impl)->frames, 8); }
+static void nes_load(DpMachine *m, const uint8_t *buf) { dp_nesmach_load(nes_impl(m), buf); memcpy(&((NesMachWrap *)m->impl)->frames, buf + dp_nesmach_state_size(), 8); }
 static uint8_t nes_fetch(DpMachine *m, uint32_t a) { return dp_nesmach_read(nes_impl(m), a); }
 static int64_t nes_rom_index(DpMachine *m, uint32_t a) { return dp_nesmach_rom_index(nes_impl(m), a); }
 
@@ -153,7 +153,7 @@ static int nes_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t 
     if (dp_nesmach_nmi_pending(n)) return 0;
     unsigned keep = dp_nesmach_ppu_status(n);
     dp_nesmach_set_ppu_status(st[k]);
-    dp_nesmach_save(n, save);
+    dp_nesmach_save(n, save); memcpy(save + dp_nesmach_state_size(), &((NesMachWrap *)m->impl)->frames, 8);
     dp_nesmach_set_ppu_status(keep);
     return 1;
 }

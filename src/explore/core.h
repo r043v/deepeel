@@ -48,6 +48,7 @@ typedef struct DpCoreConfig {
     int no_taint_cut;          // 1: do not cut forced paths on tainted control transfers (technique 1.b)
     int no_index_replay;       // 1: do not replay table-index reads (technique 7)
     int no_rng_learn;          // 1: do not fork bytes that change between visits (technique 4)
+    int no_solve;              // 1: no concolic solving of conditionals (technique 1)
     int no_learn_sig;          // 1: do not learn `ld a,(nn); cp n` signatures (technique 3)
     int no_site_score;         // 1: novelty pick ignores the per-site yield score (technique 5)
     int no_forced_ram_cut;     // 1: let forced paths run unfed RAM
@@ -96,6 +97,7 @@ typedef struct DpCoreResult {
     uint64_t novelty_picks;    // pending states chosen ahead of LIFO order because their target was uncovered
     uint64_t index_replays;    // states queued with a RAM index byte set to 0..15 at a ROM-table read
     uint64_t rng_forks;        // states queued with a volatile RAM byte forced to 00/01/80/FF
+    uint64_t solved_forks, solve_tries;   // technique 1: natural states proving the other side / replays tried
     uint64_t learned_sigs;     // signature states queued from observed `ld a,(nn); cp n`
     uint64_t site_scored_picks; // picks that the per-site score moved away from the plain novelty choice
     uint64_t novelty_new_bytes; // ROM bytes first covered by paths started from a novelty pick (yield of technique 5)

@@ -29,7 +29,7 @@ int main(int argc, char **argv) {
     DpMachine *m = dp_machine_sega(b);
     CHECK(m && m->pc && m->set_pc);
     DpCoreConfig cfg;
-    dp_core_config_default(&cfg);
+    dp_core_config_default(&cfg); cfg.no_solve = 1;   // this test pins the forced side
     cfg.max_total = 20000;
     DpCoreResult r;
     CHECK(dp_core_explore(m, rn, &cfg, &r));
@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
     hooks.veto_fork = veto_all;
     b->init(rom, rn, NULL, 1);
     dp_core_config_default(&cfg);
-    cfg.max_total = 20000; cfg.no_sessions = 1; cfg.attract_frames = 0;   // the contract below is about the one natural path
+    cfg.max_total = 20000; cfg.no_sessions = 1; cfg.no_solve = 1; cfg.attract_frames = 0;   // the contract below is about the one natural path
     cfg.hooks = &hooks;
     CHECK(dp_core_explore(m, rn, &cfg, &r));
     CHECK(h.steps == r.steps && r.steps > 0);
