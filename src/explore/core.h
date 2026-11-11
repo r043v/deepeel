@@ -44,6 +44,7 @@ typedef struct DpCoreConfig {
     uint32_t fork_site_cap;    // forks per conditional site (0: unbounded)
     uint32_t visits_per_pc;    // per-path visits of one pc before the path stops (0: unbounded)
     unsigned jobs;             // parallel workers (<=1: single); needs DpMachine.clone
+    int adaptive;              // 1: `jobs` is a ceiling; the number of active workers follows the machine's free CPU and RAM
     int no_taint_cut;          // 1: do not cut forced paths on tainted control transfers (technique 1.b)
     int no_index_replay;       // 1: do not replay table-index reads (technique 7)
     int no_rng_learn;          // 1: do not fork bytes that change between visits (technique 4)
@@ -84,6 +85,7 @@ typedef struct DpCoreResult {
     uint64_t taint_cut_indirect, taint_cut_ret;   // forced paths cut on a computed jump / a ret on a stack the path did not build
     uint64_t forced_ram_cuts;  // forced paths cut when executing RAM no verbatim ROM copy fed
     uint64_t workers;          // workers actually started
+    uint64_t workers_min, workers_max;   // adaptive mode: lowest / highest number of workers allowed
     uint64_t workers_short;    // workers requested but unavailable (no clone / init failure)
     uint64_t seeded;           // seed entry points queued
     uint64_t novelty_picks;    // pending states chosen ahead of LIFO order because their target was uncovered
@@ -100,6 +102,8 @@ typedef struct DpCoreResult {
     uint64_t cell_pruned;       // forced forks dropped because their (target, RAM cell) pair was already queued
     uint64_t compressed_bytes;  // ROM bytes read as a sequential stream that fed unequal RAM writes (technique 6)
     uint64_t decompress_runs;   // such streams detected
+    uint64_t spooled;          // forked states that overflowed the RAM queue onto disk (none is dropped)
+    uint64_t spool_left;       // spilled states never run (the exploration ended first)
     uint64_t hook_vetoed;      // forced sides refused by DpPlatformHooks.veto_fork
     uint64_t exec_outside;     // instructions executed where rom_index < 0 (RAM/VRAM code)
     uint64_t no_pc;            // 1 when the machine has no pc/set_pc: nothing explored

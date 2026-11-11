@@ -1771,7 +1771,7 @@ static int cmd_md(int argc, char **argv) {
             if (!strcmp(argv[i], "--max-total") && i + 1 < argc) kcfg.max_total = strtoull(argv[++i], NULL, 0);
             else if (!strcmp(argv[i], "--fork-cap") && i + 1 < argc) kcfg.fork_site_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(argv[i], "--progress") && i + 1 < argc) kcfg.progress_secs = (unsigned)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(argv[i], "--jobs") && i + 1 < argc) kcfg.jobs = (unsigned)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(argv[i], "--jobs") && i + 1 < argc) { ++i; if (!strcmp(argv[i], "auto")) { kcfg.jobs = (unsigned)auto_jobs(); kcfg.adaptive = 1; } else kcfg.jobs = (unsigned)strtoul(argv[i], NULL, 0); }
         }
         DpMdMach *mm = dp_mdmach_open(c.rom, c.size);
         if (mm) dp_mdmach_reset(mm);   // power-on state: the 68000 starts from the vectors (without it the path faults)

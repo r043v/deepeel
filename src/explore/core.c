@@ -1,4 +1,5 @@
 // core.c: generic exploration kernel over DpMachine + DpIsa (see core.h).
+#include <unistd.h>
 #include "core.h"
 
 #include <pthread.h>
@@ -102,6 +103,9 @@ typedef struct {
     uint64_t steps;            // global instruction count (atomic)
     uint64_t paths_done;       // finished paths (atomic), for the progress line
     int stop_monitor;
+    int spool_fd; uint64_t spool_n, spool_total; uint32_t spool_rs;   // disk overflow of the pending queue: fixed-size records, LIFO
+    unsigned allowed;          // adaptive mode: workers with index < allowed may take work (atomic)
+    unsigned wmin, wmax;
     DpCoreResult *out;
     const DpCoreConfig *cfg;
     uint8_t *fed;
@@ -155,6 +159,7 @@ typedef struct {
     uint8_t *rng_last;
     uint32_t path_id;
     int ok;
+    unsigned idx;
     pthread_t th;
 } Worker;
 
@@ -245,6 +250,61 @@ static int keyset_insert(uint64_t **set, size_t *cap, size_t *n, uint64_t key) {
     return 1;
 }
 static int cell_insert(Shared *sh, uint64_t key) { return keyset_insert(&sh->cellset, &sh->cellcap, &sh->celln, key); }
+
+
+// Queue overflow goes to disk, never away: a record is {pc, forced, site, input} + the saved state.
+// All called with sh->mu held.  If the disk is unusable the state stays in RAM beyond queue_max.
+typedef struct { uint32_t pc, forced, site, input; } SpoolHead;
+static void ram_push(Shared *sh, Pending p) {
+    if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
+    sh->q[sh->qn++] = p;
+}
+static int spool_open(Shared *sh) {
+    if (sh->spool_fd > 0) return 1;
+    if (sh->spool_fd < 0) return 0;   // failed once: stay in RAM
+    const char *dir = getenv("TMPDIR"); if (!dir || !*dir) dir = "/tmp";
+    char path[512]; snprintf(path, sizeof path, "%s/deepeel-spool-XXXXXX", dir);
+    int fd = mkstemp(path);
+    if (fd < 0) { sh->spool_fd = -1; return 0; }
+    unlink(path);
+    sh->spool_fd = fd; sh->spool_rs = (uint32_t)(sizeof(SpoolHead) + sh->sbytes);
+    return 1;
+}
+// pushes p; when the RAM queue is full, appends it to the spool.  Returns 1 if spilled.
+static int queue_push(Shared *sh, Pending p) {
+    const DpCoreConfig *cfg = sh->cfg;
+    if (cfg->queue_max && sh->qn >= cfg->queue_max && spool_open(sh)) {
+        uint8_t *rec = malloc(sh->spool_rs);
+        if (rec) {
+            SpoolHead h = { p.pc, (uint32_t)p.forced, p.site, p.input };
+            memcpy(rec, &h, sizeof h); memcpy(rec + sizeof h, p.state, sh->sbytes);
+            ssize_t w = pwrite(sh->spool_fd, rec, sh->spool_rs, (off_t)(sh->spool_n * sh->spool_rs));
+            free(rec);
+            if (w == (ssize_t)sh->spool_rs) { sh->spool_n++; sh->spool_total++; free(p.state); return 1; }
+        }
+    }
+    ram_push(sh, p);
+    return 0;
+}
+// the queue is empty: bring back up to queue_max/2 of the newest spilled records
+static void spool_refill(Shared *sh) {
+    size_t want = sh->cfg->queue_max ? sh->cfg->queue_max / 2 : 64;
+    if (want < 1) want = 1;
+    uint8_t *rec = malloc(sh->spool_rs);
+    if (!rec) return;
+    while (want-- && sh->spool_n) {
+        uint64_t i = sh->spool_n - 1;
+        if (pread(sh->spool_fd, rec, sh->spool_rs, (off_t)(i * sh->spool_rs)) != (ssize_t)sh->spool_rs) break;
+        SpoolHead h; memcpy(&h, rec, sizeof h);
+        uint8_t *st = malloc(sh->sbytes);
+        if (!st) break;
+        memcpy(st, rec + sizeof h, sh->sbytes);
+        sh->spool_n = i;
+        ram_push(sh, (Pending){ st, h.pc, (int)h.forced, h.site, h.input });
+    }
+    free(rec);
+    if (ftruncate(sh->spool_fd, (off_t)(sh->spool_n * sh->spool_rs)) != 0) { /* the next appends overwrite it anyway */ }
+}
 
 enum { TAS_INPUT = 0x40000000 };
 static void run_path(Worker *w, Pending *p) {
@@ -440,10 +500,8 @@ static void run_path(Worker *w, Pending *p) {
                 while (snap && cfg->hooks->event_probe(cfg->hooks->user, m, pc, bytes, k++, snap)) {
                     any = 1;
                     pthread_mutex_lock(&sh->mu);
-                    if (cfg->queue_max && sh->qn >= cfg->queue_max) loc->sat_queue++;
-                    else {
-                        if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
-                        sh->q[sh->qn++] = (Pending){ snap, pc, 0, (uint32_t)(m->rom_index(m, pc) + 1), cur_input };
+                    {
+                        queue_push(sh, (Pending){ snap, pc, 0, (uint32_t)(m->rom_index(m, pc) + 1), cur_input });
                         loc->event_probes++;
                         pthread_cond_signal(&sh->cv);
                         snap = malloc(sh->sbytes);
@@ -465,10 +523,9 @@ static void run_path(Worker *w, Pending *p) {
                 if (!cfg->hooks->irq_alt(cfg->hooks->user, m, d, snap)) { free(snap); break; }
                 pthread_mutex_lock(&sh->mu);
                 int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, ((uint64_t)m->rom_index(m, pc) + 1) | ((uint64_t)d << 40));
-                if (!fresh || (cfg->queue_max && sh->qn >= cfg->queue_max)) { if (fresh) loc->sat_queue++; free(snap); }
+                if (!fresh) free(snap);
                 else {
-                    if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
-                    sh->q[sh->qn++] = (Pending){ snap, pc, 0, (uint32_t)(m->rom_index(m, pc) + 1), cur_input };
+                    queue_push(sh, (Pending){ snap, pc, 0, (uint32_t)(m->rom_index(m, pc) + 1), cur_input });
                     if (d == 1) loc->irq_forks++; else loc->jitter_forks++;
                     pthread_cond_signal(&sh->cv);
                 }
@@ -504,10 +561,8 @@ static void run_path(Worker *w, Pending *p) {
                     else { loc->cell_pruned++; pthread_mutex_unlock(&sh->mu); free(pre); continue; }
                 }
                 if (cfg->fork_site_cap && *cnt >= cfg->fork_site_cap) loc->sat_site++;
-                else if (cfg->queue_max && sh->qn >= cfg->queue_max) loc->sat_queue++;
                 else {
-                    if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
-                    sh->q[sh->qn++] = (Pending){ pre, other, 1, (uint32_t)(m->rom_index(m, pc) + 1), cur_input };
+                    queue_push(sh, (Pending){ pre, other, 1, (uint32_t)(m->rom_index(m, pc) + 1), cur_input });
                     (*cnt)++;
                     loc->forks++;
                     pushed = 1;
@@ -549,6 +604,71 @@ static void *monitor_main(void *arg) {
     return NULL;
 }
 
+
+// adaptive mode: every second, allowed = cores not used by other processes, lowered when
+// MemAvailable is under 10% of the total or 1 GiB.  Worker 0 always runs.
+static int read_cpu(unsigned long long *idle, unsigned long long *total) {
+    FILE *f = fopen("/proc/stat", "r");
+    if (!f) return 0;
+    unsigned long long v[8] = {0};
+    int n = fscanf(f, "cpu %llu %llu %llu %llu %llu %llu %llu %llu", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7]);
+    fclose(f);
+    if (n < 4) return 0;
+    unsigned long long t = 0;
+    for (int i = 0; i < 8; i++) t += v[i];
+    *idle = v[3] + v[4]; *total = t;
+    return 1;
+}
+static int read_mem(unsigned long long *avail_kb, unsigned long long *total_kb) {
+    FILE *f = fopen("/proc/meminfo", "r");
+    if (!f) return 0;
+    char line[128]; int got = 0;
+    while (fgets(line, sizeof line, f)) {
+        if (sscanf(line, "MemTotal: %llu", total_kb) == 1) got |= 1;
+        else if (sscanf(line, "MemAvailable: %llu", avail_kb) == 1) got |= 2;
+    }
+    fclose(f);
+    return got == 3;
+}
+static void *controller_main(void *arg) {
+    Shared *sh = arg;
+    long ncpu = sysconf(_SC_NPROCESSORS_ONLN); if (ncpu < 1) ncpu = 1;
+    unsigned long long i0 = 0, t0 = 0, i1, t1;
+    int have = read_cpu(&i0, &t0);
+    unsigned ram_cap = sh->wmax;
+    struct timespec pc0, pc1, w0, w1;
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &pc0); clock_gettime(CLOCK_MONOTONIC, &w0);
+    while (!__atomic_load_n(&sh->stop_monitor, __ATOMIC_RELAXED)) {
+        struct timespec ts = {1, 0};
+        nanosleep(&ts, NULL);
+        if (!have || !read_cpu(&i1, &t1) || t1 <= t0) { have = read_cpu(&i0, &t0); continue; }
+        double busy = ncpu * (1.0 - (double)(i1 - i0) / (double)(t1 - t0));   // cores in use, ours included
+        i0 = i1; t0 = t1;
+        unsigned cur = __atomic_load_n(&sh->allowed, __ATOMIC_RELAXED);
+        clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &pc1); clock_gettime(CLOCK_MONOTONIC, &w1);
+        double dw = (w1.tv_sec - w0.tv_sec) + (w1.tv_nsec - w0.tv_nsec) / 1e9;
+        double ours_cpu = dw > 0 ? ((pc1.tv_sec - pc0.tv_sec) + (pc1.tv_nsec - pc0.tv_nsec) / 1e9) / dw : 0;   // cores we really got
+        pc0 = pc1; w0 = w1;
+        double others = busy - ours_cpu; if (others < 0) others = 0;   // cores taken by other processes
+        unsigned ours = (unsigned)(ours_cpu + 0.5);
+        long want = (long)(ncpu - others + 0.5);
+        unsigned long long av, tot;
+        if (read_mem(&av, &tot)) {   // RAM cap: persistent, lowered under 10% / 1 GiB free, lifted only above 20% / 2 GiB
+            if (av < tot / 10 || av < 1048576ull) { if (ram_cap > 1) ram_cap--; }
+            else if (av > tot / 5 && av > 2097152ull && ram_cap < sh->wmax) ram_cap++;
+        }
+        if (want > (long)ram_cap) want = ram_cap;
+        if (want < (long)sh->wmin) want = sh->wmin;
+        if (want > (long)sh->wmax) want = sh->wmax;
+        if (want != (long)cur && (labs(want - (long)cur) > 1 || want == (long)sh->wmin || want == (long)sh->wmax)) {
+            fprintf(stderr, "core: auto workers %u -> %ld (cores busy %.1f, ours %u)\n", cur, want, busy, ours);
+            __atomic_store_n(&sh->allowed, (unsigned)want, __ATOMIC_RELAXED);
+            pthread_mutex_lock(&sh->mu); pthread_cond_broadcast(&sh->cv); pthread_mutex_unlock(&sh->mu);
+        }
+    }
+    return NULL;
+}
+
 static void *worker_main(void *arg) {
     Worker *w = arg;
     Shared *sh = w->sh;
@@ -562,8 +682,17 @@ static void *worker_main(void *arg) {
     if (!cfg->no_copies && w->m->observe) w->m->observe(w->m, &obsv, &w->cobs);
     pthread_mutex_lock(&sh->mu);
     for (;;) {
-        while (!sh->qn && sh->active > 0) pthread_cond_wait(&sh->cv, &sh->mu);
+        for (;;) {
+            if (!sh->qn && sh->spool_n) spool_refill(sh);
+            if (sh->qn || sh->active == 0) break;
+            pthread_cond_wait(&sh->cv, &sh->mu);
+        }
         if (!sh->qn) break;
+        if (w->idx > 0 && w->idx >= __atomic_load_n(&sh->allowed, __ATOMIC_RELAXED)) {   // adaptive: this worker is parked
+            struct timespec dl; clock_gettime(CLOCK_REALTIME, &dl); dl.tv_sec += 1;
+            pthread_cond_timedwait(&sh->cv, &sh->mu, &dl);
+            continue;
+        }
         size_t pick = sh->qn - 1;
         w->loc.in_novelty_path = 0;
         if (!cfg->no_novelty_order) {
@@ -618,6 +747,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
     pthread_cond_init(&sh.cv, NULL);
     sh.out = out; sh.cfg = cfg;
     sh.sbytes = m->state_bytes(m);
+    sh.spool_fd = 0;
     sh.fed = calloc(0x10000, 1);
     sh.site_picks = calloc(rom_size + 1, sizeof *sh.site_picks);
     sh.site_gain = calloc(rom_size + 1, sizeof *sh.site_gain);
@@ -630,7 +760,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         Worker *w = &ws[i];
         DpMachine *wm = i == 0 ? m : (m->clone ? m->clone(m, i) : NULL);
         if (!wm) break;                       // fewer workers than asked: reported
-        w->sh = &sh; w->m = wm;
+        w->sh = &sh; w->m = wm; w->idx = i;
         w->loc.flags = out->flags; w->loc.src_flags = out->src_flags;
         w->loc.first_seen = out->first_seen; w->loc.rom_size = rom_size;
         w->visits = calloc(0x10000, sizeof *w->visits);
@@ -641,6 +771,12 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         started++;
     }
     out->workers = started;
+    sh.wmin = 1; sh.wmax = started; sh.allowed = started;
+    if (cfg->adaptive && started > 1) {
+        long nc = sysconf(_SC_NPROCESSORS_ONLN);
+        sh.allowed = nc > 0 && (unsigned)nc < started ? (unsigned)nc : started;
+    }
+    out->workers_min = 1; out->workers_max = started;
     if (started < nw && ok) out->workers_short = nw - started;
     ok = ok && started > 0;
 
@@ -709,11 +845,14 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         }
         // clones start from power-on, the same state the main machine saved
         for (unsigned i = 1; i < started; i++) pthread_create(&ws[i].th, NULL, worker_main, &ws[i]);
-        pthread_t mon; int has_mon = 0;
+        pthread_t mon, ctl; int has_mon = 0, has_ctl = 0;
+        if (cfg->adaptive && started > 1 && pthread_create(&ctl, NULL, controller_main, &sh) == 0) has_ctl = 1;
         if (cfg->progress_secs && pthread_create(&mon, NULL, monitor_main, &sh) == 0) has_mon = 1;
         worker_main(&ws[0]);
         for (unsigned i = 1; i < started; i++) pthread_join(ws[i].th, NULL);
-        if (has_mon) { __atomic_store_n(&sh.stop_monitor, 1, __ATOMIC_RELAXED); pthread_join(mon, NULL); }
+        __atomic_store_n(&sh.stop_monitor, 1, __ATOMIC_RELAXED);
+        if (has_mon) pthread_join(mon, NULL);
+        if (has_ctl) pthread_join(ctl, NULL);
     }
 
     free(sh.tas_start);
@@ -731,6 +870,8 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
     }
     out->steps = sh.steps;
+    out->spool_left = sh.spool_n; out->spooled = sh.spool_total;
+    if (sh.spool_fd > 0) close(sh.spool_fd);
     for (size_t i = 0; i < sh.qn; i++) free(sh.q[i].state);
     free(sh.probeset); free(sh.cellset); free(sh.q); free(sh.sites.s); free(sh.fed); free(sh.site_picks); free(sh.site_gain); free(ws);
     return ok;
@@ -746,6 +887,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     #define U(x) ((unsigned long long)(x))
     fprintf(out, "deepeel %s (generic kernel)\n", label);
     fprintf(out, "steps %llu paths %llu forks %llu pruned-covered %llu\n", U(r->steps), U(r->paths), U(r->forks), U(r->pruned_covered));
+    fprintf(out, "spool: %llu states spilled to disk, %llu left unexplored\n", U(r->spooled), U(r->spool_left));
     fprintf(out, "saturation: total %llu path %llu loop %llu site %llu queue %llu\n", U(r->sat_total), U(r->sat_path), U(r->sat_loop), U(r->sat_site), U(r->sat_queue));
     fprintf(out, "index replays %llu\n", U(r->index_replays));
     fprintf(out, "rng-byte forks %llu\n", U(r->rng_forks));
@@ -753,7 +895,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "tas replay paths %llu\n", U(r->tas_paths));
     fprintf(out, "site-scored picks %llu\n", U(r->site_scored_picks));
     fprintf(out, "novelty picks %llu (new ROM bytes: novelty %llu, plain %llu)\n", U(r->novelty_picks), U(r->novelty_new_bytes), U(r->plain_new_bytes));
-    fprintf(out, "workers %llu (short %llu)\n", U(r->workers), U(r->workers_short));
+    fprintf(out, "workers %llu (short %llu)%s\n", U(r->workers), U(r->workers_short), r->workers_max ? "" : "");
     fprintf(out, "cells %llu, cell-pruned forks %llu\n", U(r->cells), U(r->cell_pruned));
     fprintf(out, "decompress runs %llu, compressed ROM bytes %llu\n", U(r->decompress_runs), U(r->compressed_bytes));
     fprintf(out, "seeded RAM states %llu\n", U(r->seeded_ram));

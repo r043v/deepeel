@@ -2884,6 +2884,8 @@ static int parse_entry(const char *s,DpSegaOptions *o) {
 static int core_is_sg, core_is_msx;
 // only the first two instances are trusted: gg3..gg16 resolve the bank-switch
 // fixture differently (observed 2026-11: fix_sega_mapper reaches other ROM indexes)
+static const char *core_cov_path;
+static int core_jobs_auto;
 static const void *sega_core_pick(unsigned w) { (void)w; if(core_is_msx) return dp_msx_backendt(); if(core_is_sg) return dp_sega_backend_sgt(); return dp_sega_backend_ggt(); }
 static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *o,const DpCoreConfig *kcfg,FILE *out) {
     int msx=!strcmp(s->id,"msx");
@@ -2897,7 +2899,7 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
     core_is_msx=msx;
     core_is_sg=!strcmp(s->id,"sg");
     dp_machine_sega_source(m,rom,size,sega_core_pick);
-    DpCoreConfig cfg=*kcfg; cfg.jobs=o->jobs>1?(unsigned)o->jobs:1;
+    DpCoreConfig cfg=*kcfg; cfg.jobs=o->jobs>1?(unsigned)o->jobs:1; cfg.adaptive=core_jobs_auto;
     if(o->max_total) cfg.max_total=o->max_total;
     if(o->max_steps) cfg.max_path_steps=o->max_steps;
     cfg.fork_site_cap=o->fork_cap; cfg.queue_max=o->queue_max;
@@ -2916,6 +2918,17 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
     dp_sega_tas_free(&tas);
     if(ok) {
         dp_core_report(out,s->id,&r);
+        if(core_cov_path && core_cov_path[0]) {   // same line format as the old engine's --cov: bank offset flags hits
+            FILE *cf=fopen(core_cov_path,"w");
+            if(cf) {
+                fprintf(cf,"# deepeel %s coverage v1 (generic kernel): bank offset flags(1=exec,4=speculative) hits\n",s->id);
+                for(size_t i=0;i<r.rom_size;i++) {
+                    uint8_t f=r.flags[i]; if(!f) continue;
+                    fprintf(cf,"%02x %04x %x 1\n",(unsigned)(i>>14),(unsigned)(i&0x3fff),(f&DP_CORE_NATURAL)?1:5);
+                }
+                fclose(cf);
+            }
+        }
     }
     dp_core_result_free(&r); m->close(m);
     return ok;
@@ -2978,7 +2991,7 @@ int dp_sega_explore_command(int argc,char **argv) {
         if(!strcmp(argv[i],"--jobs")) {
             if(i+1>=argc) goto usage;
             const char *v=argv[++i]; uint64_t n;
-            if(!strcmp(v,"auto")) { long cpus=sysconf(_SC_NPROCESSORS_ONLN); n=cpus>0?(uint64_t)cpus:1; }
+            if(!strcmp(v,"auto")) { core_jobs_auto=1; long cpus=sysconf(_SC_NPROCESSORS_ONLN); n=cpus>0?(uint64_t)cpus:1; }
             else if(!number(v,&n) || !n || n>65536) goto usage;
             o.jobs=(int)n; continue;
         }
@@ -3053,7 +3066,7 @@ int dp_sega_explore_command(int argc,char **argv) {
     int read_ok=fread(image,1,(size_t)end,f)==(size_t)end; fclose(f);
     if(!read_ok) { free(image); return 1; }
     size_t header=(!strcmp(s->id,"sms") || !strcmp(s->id,"gg")) && ((size_t)end&0x3fff)==512?512:0;
-    if(use_core) { int cok=sega_core_run(s,image+header,(size_t)end-header,&o,&kcfg,stdout); free(image); return cok?0:1; }
+    if(use_core) { core_cov_path=cov; int cok=sega_core_run(s,image+header,(size_t)end-header,&o,&kcfg,stdout); free(image); return cok?0:1; }
     DpSegaResults r;
     if(o.watch_every) o.jobs=1; // one framebuffer: the instances would share it
     if(watch && dp_fbwatch_start) dp_fbwatch_start("deepeel sega watch");
