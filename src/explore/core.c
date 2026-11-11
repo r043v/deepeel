@@ -38,6 +38,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
         if (*e == '-') { c->cell_lo = (uint32_t)lo; c->cell_hi = (uint32_t)strtoul(e + 1, NULL, 0); }
         return 2;
     }
+    if (!strcmp(a, "--no-closure")) { c->no_closure = 1; return 1; }
     if (!strcmp(a, "--no-cells")) { c->no_cells = 1; return 1; }
     if (!strcmp(a, "--no-event-probes")) { c->no_event_probes = 1; return 1; }
     if (!strcmp(a, "--seed-ram") && i + 1 < argc) {   // LO-HI[=V,V,...]: technique 3 start states
@@ -208,6 +209,60 @@ static int cond_ahead(Worker *w, const DpIsa *isa, uint32_t pc) {
     return yes;
 }
 
+// static closure (all ISAs): from a natural executed direct transfer, the target and the fall-through are
+// swept linearly under the live bank mapping, following direct jumps/calls/conditionals, until a return, an
+// unconditional jump, a computed transfer, an illegal opcode, a known byte or a non-ROM address.  The bytes are
+// marked DP_CORE_STATIC: reachable code that no path executed, never counted as natural.
+#define CLOSURE_INSTR 4096
+static void closure_walk(DpCoreResult *r, DpMachine *m, const DpIsa *isa, uint32_t root) {
+    uint32_t stack[256]; unsigned sp = 0;
+    unsigned budget = CLOSURE_INSTR;
+    uint32_t pc = root;
+    int64_t k0 = m->rom_index(m, pc);
+    if (k0 < 0 || (size_t)k0 >= r->rom_size || (__atomic_load_n(&r->flags[k0], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC))) return;
+    r->closure_roots++;
+    for (;;) {
+        int64_t k = m->rom_index(m, pc);
+        if (k < 0 || (size_t)k >= r->rom_size || !budget) {
+            if (k >= 0 && !budget) r->closure_capped++;
+            if (!sp) return;
+            pc = stack[--sp]; if (!budget) budget = 1;
+            continue;
+        }
+        if (__atomic_load_n(&r->flags[k], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC)) {
+            if (!sp) return;
+            pc = stack[--sp];
+            continue;
+        }
+        uint8_t b[8];
+        for (unsigned i = 0; i < sizeof b; i++) b[i] = m->fetch(m, pc + i);
+        DpFlowInfo f; memset(&f, 0, sizeof f);
+        if (!isa->flow(b, pc, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL) {
+            if (!sp) return;
+            pc = stack[--sp];
+            continue;
+        }
+        budget--;
+        for (unsigned i = 0; i < f.length; i++) {
+            int64_t q = m->rom_index(m, pc + i);
+            if (q >= 0 && (size_t)q < r->rom_size) {
+                uint8_t old = __atomic_fetch_or(&r->flags[q], DP_CORE_STATIC, __ATOMIC_RELAXED);
+                if (!(old & (DP_CORE_STATIC | DP_CORE_NATURAL | DP_CORE_FORCED))) r->closure_bytes++;
+            }
+        }
+        int fall = f.fall || f.kind == DP_FLOW_SEQ || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL;
+        if (f.kind != DP_FLOW_RET && f.kind != DP_FLOW_INDIRECT && f.target >= 0 && sp < 256 &&
+            (f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL))
+            stack[sp++] = (uint32_t)f.target;
+        if (f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_RET || f.kind == DP_FLOW_INDIRECT || f.halt) fall = 0;
+        if (fall) pc += f.length;
+        else {
+            if (!sp) return;
+            pc = stack[--sp];
+        }
+    }
+}
+
 static void mark(Shared *sh, DpCoreResult *r, DpMachine *m, uint32_t pc, unsigned len, uint8_t how) {
     for (unsigned i = 0; i < len; i++) {
         int64_t k = m->rom_index(m, pc + i);
@@ -217,7 +272,7 @@ static void mark(Shared *sh, DpCoreResult *r, DpMachine *m, uint32_t pc, unsigne
             uint8_t cur = __atomic_load_n(&r->flags[k], __ATOMIC_RELAXED);
             if ((cur & how) == how && (__atomic_load_n(&r->src_flags[k], __ATOMIC_RELAXED) & srcbit)) continue;
             uint8_t old = __atomic_fetch_or(&r->flags[k], how, __ATOMIC_RELAXED);
-            if (!old) {
+            if (!(old & (DP_CORE_NATURAL | DP_CORE_FORCED))) {
                 r->first_seen[k] = __atomic_load_n(&sh->steps, __ATOMIC_RELAXED) + 1;
                 if (r->in_novelty_path) r->novelty_new_bytes++; else r->plain_new_bytes++;
             }
@@ -776,6 +831,10 @@ static void run_path(Worker *w, Pending *p) {
             else if (fi.call) fdepth++;
         }
         mark(sh, loc, m, pc, (unsigned)len, cur_forced ? DP_CORE_FORCED : DP_CORE_NATURAL);
+        if (!cfg->no_closure && !cur_forced && have_flow && fi.kind != DP_FLOW_SEQ && fi.kind != DP_FLOW_ILLEGAL) {
+            if (fi.target >= 0 && (fi.kind == DP_FLOW_JUMP || fi.kind == DP_FLOW_COND || fi.kind == DP_FLOW_CALL)) closure_walk(loc, m, isa, (uint32_t)fi.target);
+            if (fi.kind == DP_FLOW_COND || fi.kind == DP_FLOW_CALL) closure_walk(loc, m, isa, pc + fi.length);
+        }
         if (!cfg->no_solve && !cur_forced && m->poke && have_flow) {
             // window: the sequential instructions before a conditional; their start state and RAM reads feed solve_cond
             if (fi.kind == DP_FLOW_COND) { /* closes the window below */ }
@@ -1226,7 +1285,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
-        out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
+        out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
         out->exec_outside += l->exec_outside;
         free(ws[i].visits); free(ws[i].wsnap); free(ws[i].winmemo); free(ws[i].capped); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
@@ -1277,7 +1336,10 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "sections %zu\n", ns);
     for (size_t i = 0; i < ns && i < 64; i++)
         fprintf(out, "  section %zu rom-index %zu-%zu natural %zu forced %zu verdict %s\n", i + 1, secs[i].lo, secs[i].hi, secs[i].natural, secs[i].forced, secs[i].required ? "required" : "speculative");
-    fprintf(out, "rom bytes: natural %zu, forced %zu (speculative)\n", nat, forced);
+    size_t stat_only = 0;
+    for (size_t i = 0; i < r->rom_size; i++) if ((r->flags[i] & (DP_CORE_STATIC | DP_CORE_NATURAL | DP_CORE_FORCED)) == DP_CORE_STATIC) stat_only++;
+    fprintf(out, "static closure: roots %llu, bytes %llu, static-only %zu, capped walks %llu\n", U(r->closure_roots), U(r->closure_bytes), stat_only, U(r->closure_capped));
+    fprintf(out, "rom bytes: natural %zu, forced %zu (speculative), static-only %zu\n", nat, forced, stat_only);
     #undef U
 }
 

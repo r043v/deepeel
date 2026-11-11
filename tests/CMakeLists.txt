@@ -250,6 +250,11 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_decomp.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_lyprobe.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_status.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_closure.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_closure.pce
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_md_closure.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_closure.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_closure.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_status.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_decomp.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_decomp.md
@@ -779,3 +784,13 @@ add_test(NAME core_event_probes_68000 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DI
 set_tests_properties(core_event_probes_68000 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_event_probes_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_status.pce; $<TARGET_FILE:deepeel> pce explore $f --core --jobs 1 --attract-frames 0 --no-sessions | grep -q 'event probes [1-9][0-9]* at 1 sites' && $<TARGET_FILE:deepeel> pce explore $f --core --jobs 1 --attract-frames 0 --no-sessions --no-event-probes | grep -q 'event probes 0 at 0 sites'")
 set_tests_properties(core_event_probes_huc6280 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_closure_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_closure.gb; a='--core --jobs 1 --attract-frames 0 --no-sessions'; $<TARGET_FILE:deepeel> explore $f $a | grep -q 'static closure: roots [1-9][0-9]*, bytes [0-9]*, static-only 4,' && $<TARGET_FILE:deepeel> explore $f $a --no-closure | grep -q 'static closure: roots 0, bytes 0, static-only 0,'")
+set_tests_properties(core_closure_sm83 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_closure_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_closure.pce; a='--core --jobs 1 --attract-frames 0 --no-sessions'; $<TARGET_FILE:deepeel> pce explore $f $a | grep -q 'static closure: roots [1-9][0-9]*, bytes [0-9]*, static-only 4,' && $<TARGET_FILE:deepeel> pce explore $f $a --no-closure | grep -q 'static closure: roots 0, bytes 0, static-only 0,'")
+set_tests_properties(core_closure_huc6280 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_closure_68000 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_md_closure.md; a='--core --jobs 1 --attract-frames 0 --no-sessions'; $<TARGET_FILE:deepeel> md explore $f $a | grep -q 'static closure: roots [1-9][0-9]*, bytes [0-9]*, static-only 4,' && $<TARGET_FILE:deepeel> md explore $f $a --no-closure | grep -q 'static closure: roots 0, bytes 0, static-only 0,'")
+set_tests_properties(core_closure_68000 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_closure_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_closure.nes; a='--core --jobs 1 --attract-frames 0 --no-sessions'; $<TARGET_FILE:deepeel> nes explore $f $a | grep -q 'static closure: roots [1-9][0-9]*, bytes [0-9]*, static-only 4,' && $<TARGET_FILE:deepeel> nes explore $f $a --no-closure | grep -q 'static closure: roots 0, bytes 0, static-only 0,'")
+set_tests_properties(core_closure_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_closure_z80 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_closure.sms; a='--core --jobs 1 --attract-frames 0 --no-sessions'; $<TARGET_FILE:deepeel> z80 explore sms $f $a | grep -q 'static closure: roots [1-9][0-9]*, bytes [0-9]*, static-only 5,' && $<TARGET_FILE:deepeel> z80 explore sms $f $a --no-closure | grep -q 'static closure: roots 0, bytes 0, static-only 0,'")
+set_tests_properties(core_closure_z80 PROPERTIES FIXTURES_REQUIRED fixtures)

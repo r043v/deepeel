@@ -4792,3 +4792,18 @@ l'accès est la suite.
 - La technique 2 est ainsi présente sur les cinq ISA (Z80 : état VDP/compteurs/pad/Pause ; 6502 : état PPU ;
   SM83 : LY/STAT et pad ; 68000 : état VDP et pad ; HuC6280 : état VDC et IRQ). Limite restante : sonde de
   pad HuC6280 (port multiplexé `$1000`) et registres de compteurs H/V du VDC.
+
+## 0.307.0 — noyau : fermeture statique sur toutes les ISA
+
+Le noyau générique marque désormais, depuis chaque transfert direct exécuté
+naturellement (saut, appel, conditionnel), la cible et la suite : balayage
+linéaire sous le mappage de banque courant, via `DpIsa->flow`, jusqu'à un retour,
+un saut inconditionnel, un transfert calculé, un opcode illégal, un octet déjà
+connu ou une adresse hors ROM (plafond de 4096 instructions par balayage,
+compté dans `capped walks`, jamais silencieux). Ces octets portent le drapeau
+`DP_CORE_STATIC` : atteignables, jamais exécutés, **jamais comptés comme
+naturels**. Le rapport ajoute `static closure: roots …, bytes …, static-only …`
+et `rom bytes: … static-only N`. `--no-closure` désactive la technique.
+Fixtures et tests : `core_closure_{sm83,huc6280,68000,6502,z80}` (un appel dont
+le site de retour n'est jamais atteint). Les nombres sont des observations de
+l'outil, non des mesures de matériel.

@@ -14,7 +14,7 @@
 
 #include "../core/dpmachine.h"
 
-enum { DP_CORE_NATURAL = 1, DP_CORE_FORCED = 2, DP_CORE_COPIED = 4, DP_CORE_COMPRESSED = 8, DP_CORE_DATA = 16 };   // DATA: read as data by a natural path   // COPIED: a ROM byte later written verbatim to RAM
+enum { DP_CORE_NATURAL = 1, DP_CORE_FORCED = 2, DP_CORE_COPIED = 4, DP_CORE_COMPRESSED = 8, DP_CORE_DATA = 16, DP_CORE_STATIC = 32 };   // STATIC: reached by the static closure from a natural direct transfer   // DATA: read as data by a natural path   // COPIED: a ROM byte later written verbatim to RAM
 
 // optional platform hooks; every member may be NULL
 typedef struct DpPlatformHooks {
@@ -56,6 +56,7 @@ typedef struct DpCoreConfig {
     const uint32_t *seeds;     // extra entry points (vectors): queued as forced paths from the start state
     size_t n_seeds;
     int no_event_probes;
+    int no_closure;            // static closure off (no STATIC marking from natural direct transfers)
     int no_cells;              // technique 8 off: no (target, RAM cell) pruning of forced forks
     uint32_t seed_lo, seed_hi;  /* technique 3: RAM range pre-filled in extra start states (needs DpMachine.poke) */
     uint8_t seed_vals[8]; unsigned seed_n;   /* values (default 00 FF 55 AA) */
@@ -107,6 +108,7 @@ typedef struct DpCoreResult {
     int in_novelty_path;        // internal: the path being run was a novelty pick
     uint64_t seeded_ram, event_probe_sites, irq_forks, jitter_forks, sessions; // probe sites visited (technique 2)
     uint64_t event_probes;      // alternative-status states queued
+    uint64_t closure_roots, closure_bytes, closure_capped;   // static closure: roots walked, bytes newly marked, walks stopped by the cap
     uint64_t cells;             // distinct (fork target, RAM cell) pairs queued (technique 8)
     uint64_t cell_pruned;       // forced forks dropped because their (target, RAM cell) pair was already queued
     uint64_t compressed_bytes;  // ROM bytes read as a sequential stream that fed unequal RAM writes (technique 6)
