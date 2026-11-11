@@ -465,6 +465,11 @@ static void run_path(Worker *w, Pending *p) {
             uint64_t f = m->frame(m);
             if (f != tas_last) {
                 tas_last = f;
+                if (tas_shift == 0) {   // DEEPEEL_TAS_HRAM=<file>: HRAM per movie frame, comparable with the old engine's dump
+                    static FILE *hf; static int hinit;
+                    if (!hinit) { hinit = 1; const char *hn = getenv("DEEPEEL_TAS_HRAM"); if (hn) hf = fopen(hn, "wb"); }
+                    if (hf) { uint8_t hb[0x80]; for (unsigned i = 0; i < 0x7F; i++) hb[i] = m->fetch(m, 0xFF80 + i); hb[0x7F] = 0; fwrite(hb, 1, 0x80, hf); }
+                }
                 int64_t k = (int64_t)f - tas_shift;
                 if (k >= (int64_t)cfg->tas_frames) {
                     m->set_input(m, 0); tas = 0;

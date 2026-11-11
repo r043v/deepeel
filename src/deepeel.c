@@ -621,7 +621,15 @@ static int cmd_explore(int argc, char **argv) {
             uint8_t *gmasks = NULL;
             if (scfg.tas_n >= 1) {   // GB pad (a1 b2 select4 start8 right16 left32 up64 down128) -> kernel mask; recorder sync profiles are not applied here
                 char terr[160] = "";
-                if (dp_tas_load(scfg.tas[0], &gt, terr, sizeof terr) && gt.frames && (gmasks = malloc(gt.frames))) {
+                if (dp_tas_load(scfg.tas[0], &gt, terr, sizeof terr) && gt.frames) {
+                    char why[256];
+                    int match = dp_tas_rom_match(&gt, cart->rom, cart->rom_size, why, sizeof why);
+                    if (match == 0 && !scfg.tas_any_rom) {   // another revision desyncs by construction
+                        fprintf(stderr, "deepeel: TAS %s refused: recorded on another ROM (%s); --tas-any-rom forces it\n", gt.source, why);
+                        dp_tas_free(&gt); memset(&gt, 0, sizeof gt);
+                    } else if (match == 1) fprintf(stderr, "deepeel: TAS %s: ROM identity verified (%s)\n", gt.source, why);
+                }
+                if (gt.frames && (gmasks = malloc(gt.frames))) {
                     for (uint32_t f = 0; f < gt.frames; f++) {
                         uint8_t b = gt.masks[f], k = 0;
                         if (b & 64) k |= 0x01;

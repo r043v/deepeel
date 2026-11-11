@@ -4663,5 +4663,8 @@ le registre de banque et `$FFAC` entre l'ancien moteur et le noyau pour trouver 
 
 `gb_fetch` lit maintenant la WRAM ($C000–$DFFF) et la HRAM ($FF80–$FFFE) sans effet de bord. À la fin du film muggv3 sur
 le noyau (message `TAS movie played to its end`, qui affiche désormais `$FFAC` et `$FFB4`) : `$FFAC=4f`, `$FFB4=11`
-(niveau 1-1 si `$FFB4` code monde/niveau) — le film devrait finir en 4-3 : **désynchronisation confirmée** côté noyau
-(observation de l'outil). Comparer ensuite avec l'ancien moteur à la même frame pour localiser la première divergence.
+(niveau 1-1 si `$FFB4` code monde/niveau) — le film devrait finir en 4-3 : ~~désynchronisation confirmée~~ — **CONCLUSION RETIRÉE** : ce test
+utilisait `Super Mario Land (World) (Rev A).gb` (checksums 9d/5ecf) alors que `muggv3` est enregistré sur
+`Super Mario Land (World).gb` (Rev 0, 9e/416b) ; l'ancien moteur refuse ce film sur la Rev A. Le noyau ne
+vérifiait pas l'identité de la ROM : il le fait désormais (même message de refus, `--tas-any-rom` pour forcer). La
+vérification du monde 4 par le noyau doit se refaire sur la Rev 0.
