@@ -4884,3 +4884,10 @@ défaut) ; avec `--ring`, ces images sont écrites en fichiers pour inspection. 
 s'excluent par `--ignore`. Test `desync_finder` (fixture synthétique). **Pas encore branché** : les producteurs
 (dump par image côté m0boy/deepeel ; dumper BizHawk générique par domaine mémoire) restent à écrire ; les outils
 existants `tools/smshawk_dump` et `tools/gbhawk_ref` produisent des WRAM par image dans un autre format.
+
+## 0.314.0 — producteur DSY1 côté Sega
+
+`DP_SEGA_TAS_DSY=fichier` écrit, à chaque image rejouée d'un film Sega (worker 0), les blocs `wram` et `regs`
+(BC DE HL AF, jeu alterné, IX IY SP PC, I R IM IFF1 IFF2). Contrôle de déterminisme : deux rejeux du film Castle
+comparés par `deepeel desync` sont identiques sur 32 662 images (observation de l'outil). Le dumper BizHawk
+générique reste à écrire pour comparer avec SMSHawk/GBHawk dans ce format.

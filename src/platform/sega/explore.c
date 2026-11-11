@@ -2,6 +2,7 @@
 #include "explore.h"
 #include "../../explore/core.h"
 #include "../../core/dpmachine.h"
+#include "../../core/desync.h"
 #include "../../explore/frontier.h"
 #include "backend.h"
 #include "visits.h"
@@ -1247,6 +1248,10 @@ static int tas_replay(Run *x) {
         ram_dump=fopen(ram_dump_path,"wb");
         if(!ram_dump) { fprintf(stderr,"deepeel: cannot open TAS RAM dump %s\n",ram_dump_path); dp_sega_tas_free(&t); pass_end(x); return 0; }
     }
+    // DP_SEGA_TAS_DSY=file: per-frame state in the generic DSY1 exchange format (deepeel desync): "wram" and "regs"
+    DpDsyWriter dsy={0};
+    if(x->worker==0 && getenv("DP_SEGA_TAS_DSY") && !dp_dsy_open(&dsy,getenv("DP_SEGA_TAS_DSY")))
+        fprintf(stderr,"deepeel: cannot open DP_SEGA_TAS_DSY %s\n",getenv("DP_SEGA_TAS_DSY"));
     // J3 random-burst snapshots (GB sessions parity): every tas_rng_per frames
     // the machine state is kept aside; after the replay, bursts of uniform
     // random held inputs run from these snapshots.  They extend the movie's
@@ -1288,6 +1293,16 @@ static int tas_replay(Run *x) {
                 goto done;
             }
         }
+        if(dsy.f) {
+            size_t size=0; const uint8_t *ram=x->b->ram_view ? x->b->ram_view(&size) : NULL;
+            z80_t *c=x->b->cpu();
+            uint16_t rr[12]={c->bc,c->de,c->hl,(uint16_t)(c->a<<8|c->f),c->bc2,c->de2,c->hl2,c->af2,c->ix,c->iy,c->sp,c->pc};
+            uint8_t regs[24+5];
+            for(int k=0;k<12;k++) { regs[2*k]=(uint8_t)rr[k]; regs[2*k+1]=(uint8_t)(rr[k]>>8); }
+            regs[24]=c->i; regs[25]=c->r; regs[26]=c->im; regs[27]=c->iff1; regs[28]=c->iff2;
+            const char *nm[2]={"wram","regs"}; const uint8_t *dd[2]={ram,regs}; uint32_t ln[2]={(uint32_t)size,sizeof regs};
+            dp_dsy_frame(&dsy,(uint32_t)f,ram?2:1,ram?nm:nm+1,ram?dd:dd+1,ram?ln:ln+1);
+        }
         if(rng_per && (f+1)%rng_per==0) {
             uint8_t *s=malloc(x->b->state_size+0x8000+x->origin_size);
             if(s) {
@@ -1302,6 +1317,7 @@ done:
     if(o->watch_every && dp_fbwatch_progress) dp_fbwatch_progress(r->tas_frames,t.frames,1);
     // the movie is over: freeze the window on its last frame (the random bursts and forks that follow are not the movie)
     if(o->watch_every && x->b->watch) x->b->watch(0,&r->watch_frames);
+    dp_dsy_close(&dsy);
     if(ram_dump && fclose(ram_dump)!=0) {
         fprintf(stderr,"deepeel: cannot close TAS RAM dump\n");
         dump_failed=1;
