@@ -34,6 +34,16 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
         return 2;
     }
     if (!strcmp(a, "--no-event-probes")) { c->no_event_probes = 1; return 1; }
+    if (!strcmp(a, "--seed-ram") && i + 1 < argc) {   // LO-HI[=V,V,...]: technique 3 start states
+        char *e; unsigned long lo = strtoul(argv[i + 1], &e, 0);
+        if (*e != '-') return 0;
+        unsigned long hi = strtoul(e + 1, &e, 0);
+        c->seed_lo = (uint32_t)lo; c->seed_hi = (uint32_t)hi; c->seed_n = 0;
+        if (*e == '=') {
+            for (++e; *e && c->seed_n < 8; ) { c->seed_vals[c->seed_n++] = (uint8_t)strtoul(e, &e, 0); if (*e == ',') e++; else break; }
+        } else { static const uint8_t d[4] = {0x00, 0xFF, 0x55, 0xAA}; memcpy(c->seed_vals, d, 4); c->seed_n = 4; }
+        return 2;
+    }
     if (!strcmp(a, "--no-sessions")) { c->no_sessions = 1; return 1; }
     if (!strcmp(a, "--sessions") && i + 1 < argc) { c->sessions = (uint32_t)strtoul(argv[i + 1], NULL, 0); c->no_sessions = 0; return 2; }
     if (!strcmp(a, "--no-irq-jitter")) { c->no_irq_jitter = 1; return 1; }
@@ -455,6 +465,20 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         // the natural path goes last: it is the first one taken
         if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
         sh.q[sh.qn++] = (Pending){ start, start_pc, 0, 0 };
+        // technique 3: start states whose RAM range already holds a plausible valid save
+        if (m->poke && cfg->seed_n && cfg->seed_hi >= cfg->seed_lo) {
+            for (unsigned v = 0; v < cfg->seed_n; v++) {
+                m->load(m, start);
+                for (uint32_t a = cfg->seed_lo; a <= cfg->seed_hi; a++) m->poke(m, a, cfg->seed_vals[v]);
+                uint8_t *cp = malloc(sh.sbytes);
+                if (!cp) break;
+                m->save(m, cp);
+                if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
+                sh.q[sh.qn++] = (Pending){ cp, start_pc, 0, 0 };
+                out->seeded_ram++;
+            }
+            m->load(m, start);
+        }
         // held-pad sessions: copies of the power-on state, one per pad mask; they run
         // after the natural path (queue is LIFO-picked from the back) and fork like any path
         if (m->set_input && !cfg->no_sessions) {
@@ -510,6 +534,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "workers %llu (short %llu)\n", U(r->workers), U(r->workers_short));
     fprintf(out, "cells %llu, cell-pruned forks %llu\n", U(r->cells), U(r->cell_pruned));
     fprintf(out, "decompress runs %llu, compressed ROM bytes %llu\n", U(r->decompress_runs), U(r->compressed_bytes));
+    fprintf(out, "seeded RAM states %llu\n", U(r->seeded_ram));
     fprintf(out, "held-pad sessions %llu\n", U(r->sessions));
     fprintf(out, "IRQ forks %llu (timing jitter %llu)\n", U(r->irq_forks), U(r->jitter_forks));
     fprintf(out, "event probes %llu at %llu sites\n", U(r->event_probes), U(r->event_probe_sites));

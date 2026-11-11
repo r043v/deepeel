@@ -222,6 +222,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_oamchain.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_sramcopy.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_apucopy.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_save.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_pause.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_pad.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_irq.sms
@@ -676,3 +677,5 @@ add_test(NAME core_pause_probe COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_
 set_tests_properties(core_pause_probe PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_sessions COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_pad.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 | grep -q 'held-pad sessions 16' && $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --no-sessions | grep -q 'held-pad sessions 0'")
 set_tests_properties(core_sessions PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_seed_ram COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_save.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --no-sessions --seed-ram 0xC100-0xC100 | grep -q 'natural 15' && $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --no-sessions | grep -q 'natural 11'")
+set_tests_properties(core_seed_ram PROPERTIES FIXTURES_REQUIRED fixtures)

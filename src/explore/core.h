@@ -48,6 +48,8 @@ typedef struct DpCoreConfig {
     const uint32_t *seeds;     // extra entry points (vectors): queued as forced paths from the start state
     size_t n_seeds;
     int no_event_probes;
+    uint32_t seed_lo, seed_hi;  /* technique 3: RAM range pre-filled in extra start states (needs DpMachine.poke) */
+    uint8_t seed_vals[8]; unsigned seed_n;   /* values (default 00 FF 55 AA) */
     uint32_t sessions;          /* held-pad sessions started from power-on (0: off); default 16 when the machine has set_input */
     int no_sessions;
     int no_irq_jitter;          /* technique 9: only the 1-instruction IRQ delay, no 2..3 */       // 1: ignore DpPlatformHooks.event_probe (technique 2)
@@ -77,7 +79,7 @@ typedef struct DpCoreResult {
     uint64_t novelty_new_bytes; // ROM bytes first covered by paths started from a novelty pick (yield of technique 5)
     uint64_t plain_new_bytes;   // the same for paths started in plain LIFO order
     int in_novelty_path;        // internal: the path being run was a novelty pick
-    uint64_t event_probe_sites, irq_forks, jitter_forks, sessions; // probe sites visited (technique 2)
+    uint64_t seeded_ram, event_probe_sites, irq_forks, jitter_forks, sessions; // probe sites visited (technique 2)
     uint64_t event_probes;      // alternative-status states queued
     uint64_t cells;             // distinct (fork target, RAM cell) pairs queued (technique 8)
     uint64_t cell_pruned;       // forced forks dropped because their (target, RAM cell) pair was already queued

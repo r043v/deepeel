@@ -954,6 +954,12 @@ def build_z80_family(out):
     z[0:len(cells)] = cells
     with open(os.path.join(out, "fix_z80_cells.sms"), "wb") as f:
         f.write(z)
+    # save-signature check: ld a,($C100) / cp $AA / jr nz (technique 3: a valid save flips it)
+    sv = bytearray([0xFF]) * 0x8000
+    code = bytes([0x3A, 0x00, 0xC1, 0xFE, 0xAA, 0x20, 0x04, 0x3E, 0x01, 0x18, 0x02, 0x3E, 0x02, 0x18, 0xFE])
+    sv[0:len(code)] = code
+    with open(os.path.join(out, "fix_z80_save.sms"), "wb") as f:
+        f.write(sv)
     # HALT then idle; NMI handler at $66 (the SMS Pause button): needs the Pause NMI probe
     nm = bytearray([0xFF]) * 0x8000
     nm[0:3] = bytes([0x76, 0x18, 0xFD])
