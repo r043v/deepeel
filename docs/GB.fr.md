@@ -4865,3 +4865,11 @@ Le chargeur de films GB (`src/explore/tas.c`) passe par `src/core/bizhawk.c`. Le
 décalait les colonnes suivantes (masque `Down` lu `0xF8` au lieu de `0x80` sur `casualpokeplayer-…gameendglitch.bk2`).
 Le lecteur générique la traite comme une valeur numérique (colonne « axe »). Conséquence : les couvertures GB lancées
 avant 0.311.0 avec de tels films ont rejoué des entrées erronées ; à relancer.
+
+## 0.312.0 — films Meka `.mmv` (Sega)
+
+`src/platform/sega/tas.c` lit les `.mmv` de Meka (nus ou dans un zip, comme `1344M.bk2` qui n'est pas un bk2) :
+magie `MMV\0`, nombre d'images à l'offset 0x08, taille d'en-tête à 0x18, MD5 de la ROM à 0xE4, puis un u16 par image dont
+l'octet bas est la manette 1 dans le même plan de bits que le masque Sega. Le film Castle `1344M` est enregistré sur la
+V1.0 (MD5 e9b4b92b…) : l'outil signale « different ROM » et rejoue malgré tout sur la V1.1. Observation de l'outil,
+format déduit de l'en-tête (cohérence nombre d'images × 2 + en-tête = taille du fichier), non vérifié contre Meka.

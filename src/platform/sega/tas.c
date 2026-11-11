@@ -133,13 +133,31 @@ static int log_parse(const uint8_t *d,size_t n,DpSegaTas *out,char *err,size_t e
     dp_bz_free(&m);
     return ok;
 }
+// Meka .mmv: "MMV\0", u32 frame count at 0x08, u32 header size at 0x18, ROM MD5 at 0xE4, then one u16 per
+// frame whose low byte is the player-1 pad in the sega layout (up 1, down 2, left 4, right 8, b1 16, b2 32, start 64)
+static int mmv_parse(const uint8_t *d,size_t n,DpSegaTas *out,char *err,size_t errsz) {
+    if(n<0x100) { snprintf(err,errsz,"mmv: truncated header"); return 0; }
+    uint32_t frames=d[8]|d[9]<<8|d[10]<<16|(uint32_t)d[11]<<24, hdr=d[0x18]|d[0x19]<<8|d[0x1A]<<16|(uint32_t)d[0x1B]<<24;
+    if(hdr<0xF4 || hdr>n || (size_t)frames*2>n-hdr) { snprintf(err,errsz,"mmv: inconsistent header (frames %u, header %u, size %zu)",frames,hdr,n); return 0; }
+    for(uint32_t f=0;f<frames;f++) if(!emit(out,d[hdr+2*(size_t)f],err,errsz)) return 0;
+    memcpy(out->md5,d+0xE4,16); out->has_md5=1;
+    return frames>0 ? 1 : (snprintf(err,errsz,"mmv: no input frames"),0);
+}
 static int tas_load_buf(uint8_t *d,size_t n,DpSegaTas *out,char *err,size_t errsz,int depth) {
     if(depth>3) { snprintf(err,errsz,"too many nested containers"); return 0; }
     if(dp_zip_is(d,n)) {
         // the container is the shared kernel's job (src/core/bk2.c); the '|'
         // frame grammar stays here
         DpBk2 b;
-        if(!dp_bk2_open(d,n,&b,err,errsz)) return 0;
+        if(!dp_bk2_open(d,n,&b,err,errsz)) {
+            size_t ml=0;
+            uint8_t *mm=dp_zip_read(d,n,".mmv",&ml,NULL);   // a zip holding a Meka movie rather than a bk2
+            if(!mm) return 0;
+            err[0]=0;
+            int ok=tas_load_buf(mm,ml,out,err,errsz,depth+1);
+            free(mm);
+            return ok;
+        }
         out->anchored |= b.anchored;
         out->has_sha1 |= b.has_sha1;
         if(b.has_sha1) memcpy(out->sha1,b.sha1,20);
@@ -151,6 +169,7 @@ static int tas_load_buf(uint8_t *d,size_t n,DpSegaTas *out,char *err,size_t errs
         dp_bk2_free(&b);
         return ok;
     }
+    if(n>4 && !memcmp(d,"MMV\0",4)) return mmv_parse(d,n,out,err,errsz);
     if(memchr(d,'|',n<4096?n:4096)) return log_parse(d,n,out,err,errsz);
     snprintf(err,errsz,"unknown movie format");
     return 0;
