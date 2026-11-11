@@ -1141,3 +1141,16 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "rom bytes: natural %zu, forced %zu (speculative)\n", nat, forced);
     #undef U
 }
+
+// --cov FILE: coverage in the old engine's line format (bank offset flags hits; flags 1 = natural, 5 = forced)
+void dp_core_write_cov(const char *path, const char *id, const DpCoreResult *r) {
+    if (!path || !path[0]) return;
+    FILE *cf = fopen(path, "w");
+    if (!cf) return;
+    fprintf(cf, "# deepeel %s coverage v1 (generic kernel): bank offset flags(1=exec,4=speculative) hits\n", id);
+    for (size_t i = 0; i < r->rom_size; i++) {
+        uint8_t f = r->flags[i]; if (!f) continue;
+        fprintf(cf, "%02x %04x %x 1\n", (unsigned)(i >> 14), (unsigned)(i & 0x3fff), (f & DP_CORE_NATURAL) ? 1 : 5);
+    }
+    fclose(cf);
+}

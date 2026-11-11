@@ -142,4 +142,6 @@ void dp_core_config_default(DpCoreConfig *cfg);
 int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCoreResult *out);
 void dp_core_result_free(DpCoreResult *r);
 
+void dp_core_write_cov(const char *path, const char *id, const DpCoreResult *r);
+
 #endif

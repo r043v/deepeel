@@ -42,6 +42,11 @@
 #include "platform/pce/tas.h"
 #include "explore/tas.h"
 
+static const char *argv_cov(int argc, char **argv) {
+    for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "--cov")) return argv[i + 1];
+    return NULL;
+}
+
 static uint8_t *nes_read_file(const char *path, size_t *size);
 static DpExplorer *volatile g_sig_ex;
 static volatile sig_atomic_t g_alarm_fired;   // the wall-clock alarm (not a user SIGINT) stopped the run
@@ -634,7 +639,7 @@ static int cmd_explore(int argc, char **argv) {
             }
             DpCoreResult kr;
             rc = dp_core_explore(km, cart->rom_size, &gkcfg, &kr) ? 0 : 1;
-            if (!rc) dp_core_report(stdout, "gb", &kr);
+            if (!rc) dp_core_report(stdout, "gb", &kr); dp_core_write_cov(argv_cov(argc, argv), "gb", &kr);
             dp_core_result_free(&kr);
             free(gmasks); dp_tas_free(&gt);
             km->close(km);
@@ -1427,7 +1432,7 @@ static int cmd_nes(int argc, char **argv) {
         DpCoreResult kr;
         size_t prg = dp_machine_nes_prg_size(km);
         int kok = dp_core_explore(km, prg, &kcfg, &kr);
-        if (kok) dp_core_report(stdout, "nes", &kr);
+        if (kok) dp_core_report(stdout, "nes", &kr); dp_core_write_cov(argv_cov(argc, argv), "nes", &kr);
         dp_core_result_free(&kr);
         free(kmasks); dp_nes_tas_free(&ntas);
         km->close(km);
@@ -1587,7 +1592,7 @@ static int cmd_pce(int argc, char **argv) {
         DpCoreResult kr;
         int kok = dp_core_explore(km, dp_pce_rom_size(), &kcfg, &kr);
         free(kmasks); dp_pce_tas_free(&ptas);
-        if (kok) dp_core_report(stdout, "pce", &kr);
+        if (kok) dp_core_report(stdout, "pce", &kr); dp_core_write_cov(argv_cov(argc, argv), "pce", &kr);
         dp_core_result_free(&kr);
         km->close(km);
         free(data);
@@ -1879,7 +1884,7 @@ static int cmd_md(int argc, char **argv) {
             }
             DpCoreResult kr;
             rc = dp_core_explore(km, c.size, &kcfg, &kr) ? 0 : 1;
-            if (!rc) dp_core_report(stdout, "md", &kr);
+            if (!rc) dp_core_report(stdout, "md", &kr); dp_core_write_cov(argv_cov(argc, argv), "md", &kr);
             dp_core_result_free(&kr);
             free(kmasks); dp_md_movie_free(&mv);
             km->close(km);

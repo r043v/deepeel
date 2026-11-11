@@ -56,7 +56,7 @@ static M0_TL size_t rom_size;
 static M0_TL uint32_t rom_pages;
 static M0_TL uint8_t page_map[256];  // MPR value -> physical page, 0xFF: not ROM
 static M0_TL int page_valid[256];
-static unsigned line_no, line_budget_;
+static M0_TL unsigned line_no, line_budget_;
 static M0_TL int line_left;
 static M0_TL DpPceObserver obs;
 static M0_TL int st_port;            // ST0/ST1/ST2 in flight: the write is the hardware's
@@ -170,7 +170,7 @@ uint8_t dp_pce_peek(uint16_t addr) {
 // next pad (up to 5); a read returns the current pad's nibble chosen by SEL.  The scan
 // state is kept beside the machine, outside the snapshot: it is an observation model, not
 // a hardware measurement, and forks that read the port restart from the scan they find.
-static int tap_on, tap_idx, tap_prev_sel;
+static M0_TL int tap_on, tap_idx, tap_prev_sel;
 static M0_TL uint8_t tap_pad[5];
 int dp_pce_multitap_enabled(void) { return tap_on; }
 void dp_pce_multitap(int on) { tap_on = on; tap_idx = 0; tap_prev_sel = 0; }
