@@ -31,6 +31,11 @@ typedef struct DpPlatformHooks {
     // hardware can present, saves the machine into `save` (m->save), restores the live
     // state and returns 1; it returns 0 when k is out of range (or `pc` is no probe site).
     int (*event_probe)(void *user, DpMachine *m, uint32_t pc, const uint8_t *bytes, unsigned k, uint8_t *save);
+    // IRQ fork: asked once per ROM site.  When an interrupt would be serviced at the next
+    // run(), the hook saves into `save` the state where that service is suppressed for
+    // one instruction (the line stays pending) and returns 1; otherwise returns 0.  The
+    // live machine is left unchanged.  Counted in DpCoreResult.irq_forks.
+    int (*irq_alt)(void *user, DpMachine *m, uint8_t *save);
 } DpPlatformHooks;
 
 typedef struct DpCoreConfig {
@@ -69,7 +74,7 @@ typedef struct DpCoreResult {
     uint64_t novelty_new_bytes; // ROM bytes first covered by paths started from a novelty pick (yield of technique 5)
     uint64_t plain_new_bytes;   // the same for paths started in plain LIFO order
     int in_novelty_path;        // internal: the path being run was a novelty pick
-    uint64_t event_probe_sites; // probe sites visited (technique 2)
+    uint64_t event_probe_sites, irq_forks; // probe sites visited (technique 2)
     uint64_t event_probes;      // alternative-status states queued
     uint64_t cells;             // distinct (fork target, RAM cell) pairs queued (technique 8)
     uint64_t cell_pruned;       // forced forks dropped because their (target, RAM cell) pair was already queued

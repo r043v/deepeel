@@ -189,7 +189,25 @@ static int sega_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t
     free(tmp);
     return ok;
 }
+// IRQ fork: the alternative to servicing a pending interrupt is to run the next
+// instruction with the line masked, then re-arm it (the old engine's skip_irq).
+static int sega_irq_alt(void *user, DpMachine *m, uint8_t *save) {
+    (void)user;
+    SegaMach *s = m->impl;
+    z80_t *c = s->b->cpu();
+    if (!(c->nmi || (c->irq && c->iff1 && !c->ei_delay))) return 0;
+    uint8_t irq = c->irq, nmi = c->nmi;
+    uint8_t *tmp = malloc(m->state_bytes(m));
+    if (!tmp) return 0;
+    m->save(m, tmp);
+    c->irq = c->nmi = 0;
+    int ok = m->run(m);
+    if (ok) { c->irq = irq; c->nmi = nmi; m->save(m, save); }
+    m->load(m, tmp);
+    free(tmp);
+    return ok;
+}
 const DpPlatformHooks *dp_machine_sega_hooks(void) {
-    static const DpPlatformHooks h = { .event_probe = sega_event_probe };
+    static const DpPlatformHooks h = { .event_probe = sega_event_probe, .irq_alt = sega_irq_alt };
     return &h;
 }

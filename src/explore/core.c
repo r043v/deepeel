@@ -289,6 +289,23 @@ static void run_path(Worker *w, Pending *p) {
                 if (any) loc->event_probe_sites++;
             }
         }
+        if (cfg->hooks && cfg->hooks->irq_alt && m->rom_index(m, pc) >= 0) {
+            // the hook answers 0 unless an interrupt is pending: the per-site key is spent
+            // only when a fork is really produced
+            uint8_t *snap = malloc(sh->sbytes);
+            if (snap && cfg->hooks->irq_alt(cfg->hooks->user, m, snap)) {
+                pthread_mutex_lock(&sh->mu);
+                int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, ((uint64_t)m->rom_index(m, pc) + 1) | (1ull << 40));
+                if (!fresh || (cfg->queue_max && sh->qn >= cfg->queue_max)) { if (fresh) loc->sat_queue++; free(snap); }
+                else {
+                    if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
+                    sh->q[sh->qn++] = (Pending){ snap, pc, 0 };
+                    loc->irq_forks++;
+                    pthread_cond_signal(&sh->cv);
+                }
+                pthread_mutex_unlock(&sh->mu);
+            } else free(snap);
+        }
         int cond = have_flow && fi.kind == DP_FLOW_COND && fi.target >= 0;
         uint8_t *pre = NULL;
         if (cond) {
@@ -438,7 +455,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         out->sat_site += l->sat_site; out->sat_queue += l->sat_queue;
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
-        out->novelty_picks += l->novelty_picks; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
+        out->novelty_picks += l->novelty_picks; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
         out->exec_outside += l->exec_outside;
         free(ws[i].visits); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
@@ -464,6 +481,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "workers %llu (short %llu)\n", U(r->workers), U(r->workers_short));
     fprintf(out, "cells %llu, cell-pruned forks %llu\n", U(r->cells), U(r->cell_pruned));
     fprintf(out, "decompress runs %llu, compressed ROM bytes %llu\n", U(r->decompress_runs), U(r->compressed_bytes));
+    fprintf(out, "IRQ forks %llu\n", U(r->irq_forks));
     fprintf(out, "event probes %llu at %llu sites\n", U(r->event_probes), U(r->event_probe_sites));
     fprintf(out, "seeded entry points %llu\n", U(r->seeded));
     fprintf(out, "forced RAM cuts %llu\n", U(r->forced_ram_cuts));

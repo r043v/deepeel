@@ -222,6 +222,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_oamchain.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_sramcopy.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_apucopy.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_irq.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ppupoll.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_decomp.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_cells.sms
@@ -663,3 +664,5 @@ add_test(NAME core_decompress COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z
 set_tests_properties(core_decompress PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_event_probes COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ppupoll.nes; $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --visits-per-pc 8 | grep -q 'event probes [1-9][0-9]* at 1 sites' && $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --visits-per-pc 8 --no-event-probes | grep -q 'event probes 0 at 0'")
 set_tests_properties(core_event_probes PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_irq_fork COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_irq.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --max-total 200000 | grep -q 'IRQ forks [1-9]'")
+set_tests_properties(core_irq_fork PROPERTIES FIXTURES_REQUIRED fixtures)
