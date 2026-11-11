@@ -170,9 +170,21 @@ static int sega_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t
     static const uint8_t vc[] = {0x00, 0x7F, 0x80, 0xC0, 0xFF};
     static const uint8_t hc[] = {0x00, 0x20, 0x40, 0x80, 0xE0, 0xFF};
     static const uint8_t pad[] = {0xFE, 0xFD, 0xFB, 0xF7, 0xEF, 0xDF};   // pad 1: one line low (up, down, left, right, 1, 2)
-    if (bytes[0] != 0xDB) return 0;                       // in a,(n)
     SegaMach *s = m->impl;
     z80_t *c = s->b->cpu();
+    if (bytes[0] == 0x76) {
+        // HALT on an SMS: the Pause button raises an NMI that wakes it (handler at $66)
+        if (s->init_arg != 1 || k > 0 || c->nmi) return 0;
+        uint8_t *tmp = malloc(m->state_bytes(m));
+        if (!tmp) return 0;
+        m->save(m, tmp);
+        c->nmi = 1;
+        m->save(m, save);
+        m->load(m, tmp);
+        free(tmp);
+        return 1;
+    }
+    if (bytes[0] != 0xDB) return 0;                       // in a,(n)
     if (c->irq || c->nmi) return 0;
     const uint8_t *vals; unsigned n;
     switch (bytes[1] & 0xC1) {

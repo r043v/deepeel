@@ -954,6 +954,12 @@ def build_z80_family(out):
     z[0:len(cells)] = cells
     with open(os.path.join(out, "fix_z80_cells.sms"), "wb") as f:
         f.write(z)
+    # HALT then idle; NMI handler at $66 (the SMS Pause button): needs the Pause NMI probe
+    nm = bytearray([0xFF]) * 0x8000
+    nm[0:3] = bytes([0x76, 0x18, 0xFD])
+    nm[0x66:0x6B] = bytes([0x3E, 0x77, 0x32, 0x00, 0xC0]); nm[0x6B:0x6D] = bytes([0xED, 0x45])
+    with open(os.path.join(out, "fix_z80_pause.sms"), "wb") as f:
+        f.write(nm)
     # pad poll: in a,($DC) / bit 4,a (button 1) / jr z; both outcomes need a pad probe
     pad = bytearray([0xFF]) * 0x8000
     code = bytes([0xDB, 0xDC, 0xCB, 0x67, 0x28, 0x04, 0x3E, 0x01, 0x18, 0x02, 0x3E, 0x02, 0x18, 0xFE])

@@ -222,6 +222,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_oamchain.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_sramcopy.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_apucopy.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_pause.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_pad.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_irq.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ppupoll.nes
@@ -671,3 +672,5 @@ add_test(NAME core_irq_jitter COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z
 set_tests_properties(core_irq_jitter PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_pad_probes COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_pad.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 | grep -q 'natural 14' && ! $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --no-event-probes | grep -q 'natural 14'")
 set_tests_properties(core_pad_probes PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_pause_probe COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_pause.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 | grep -q 'rom-index 102-108 natural' && ! $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --no-event-probes | grep -q 'rom-index 102-108 natural [1-9]'")
+set_tests_properties(core_pause_probe PROPERTIES FIXTURES_REQUIRED fixtures)
