@@ -1296,7 +1296,7 @@ static int cmd_nes(int argc, char **argv) {
     opt.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
     DpCliCommon cc = { .jobs = 1 };
     int use_core = 0; DpCoreConfig kcfg; dp_core_config_default(&kcfg);
-    kcfg.no_sessions = 1;   // measured on SMB at 2 M steps: sessions halve the natural path's budget (4708 -> 2063 bytes); --sessions N enables them
+    kcfg.no_sessions = 1;   // measured on SMB at 2 M steps: sessions halve the natural path's budget (4708 -> 2063 bytes); --pad-sessions N enables them
     kcfg.visits_per_pc = 50000;   // a frame wait is thousands of iterations (SMB: natural 15 -> 4708 bytes, old engine 4716)
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
@@ -1757,6 +1757,7 @@ static int cmd_md(int argc, char **argv) {
         }
     } else if (!strcmp(argv[2], "explore") && md_has_core(argc, argv)) {
         DpCoreConfig kcfg; dp_core_config_default(&kcfg);
+        kcfg.visits_per_pc = 262144;   // Sonic at 2 M steps: natural 32 bytes at 64 visits, 126 at 262144 (old engine ~134)
         for (int i = 4; i < argc; i++) {
             int used = dp_core_parse_option(&kcfg, argc, argv, i);
             if (used) { i += used - 1; continue; }
