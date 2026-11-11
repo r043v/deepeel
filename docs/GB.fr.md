@@ -4615,3 +4615,11 @@ est porté par l'état sauvegardé (les forks reprennent à leur trame) et le pr
 (`dp_tas_tune_machine`, partagé avec l'ancien moteur) est appliqué à l'instance et à ses clones. Le chemin du
 film s'arrête à sa fin ; ses forks poursuivent l'exploration. Observation de l'outil sur SML (muggv3, 20 M de
 pas) : natural 7086 octets ; fidélité image par image au film non vérifiée côté noyau.
+
+### Parité GB, seconde ROM (0.303.7)
+
+Super Mario Land 2, 40 M de pas, 8 workers (observations de l'outil). Noyau : 13 720 octets d'exécution naturels, 33 181
+au total (forcé inclus). Ancien moteur : son `--cov` marque tout flag 4 (spéculatif) et ne distingue pas le naturel
+(0 octet naturel), mais 141 459 octets exécutés au total — l'ancien moteur couvre beaucoup plus en spéculatif sur GB
+(forks à budget plus large). Le critère « naturel ≥ ancien » tient ; la couverture totale spéculative du noyau GB reste
+inférieure : écart non résorbé, à étudier avant de retirer l'ancien moteur GB.
