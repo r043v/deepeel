@@ -160,6 +160,8 @@ typedef struct {
     uint32_t path_id;
     int ok;
     unsigned idx;
+    uint32_t *capped;      // direct-mapped cache of conditional sites that reached fork_site_cap (pc + 1)
+    unsigned step_batch;   // steps not yet added to the shared counter (flushed every 256)
     pthread_t th;
 } Worker;
 
@@ -167,12 +169,16 @@ static void mark(Shared *sh, DpCoreResult *r, DpMachine *m, uint32_t pc, unsigne
     for (unsigned i = 0; i < len; i++) {
         int64_t k = m->rom_index(m, pc + i);
         if (k >= 0 && (size_t)k < r->rom_size) {
+            uint32_t srcbit = (how & DP_CORE_NATURAL) ? DP_SRC_FORK_NATURAL : DP_SRC_FORK_FORCED;
+            // read first: an atomic read-modify-write on an already covered byte only bounces the cache line
+            uint8_t cur = __atomic_load_n(&r->flags[k], __ATOMIC_RELAXED);
+            if ((cur & how) == how && (__atomic_load_n(&r->src_flags[k], __ATOMIC_RELAXED) & srcbit)) continue;
             uint8_t old = __atomic_fetch_or(&r->flags[k], how, __ATOMIC_RELAXED);
             if (!old) {
                 r->first_seen[k] = __atomic_load_n(&sh->steps, __ATOMIC_RELAXED) + 1;
                 if (r->in_novelty_path) r->novelty_new_bytes++; else r->plain_new_bytes++;
             }
-            __atomic_fetch_or(&r->src_flags[k], (how & DP_CORE_NATURAL) ? DP_SRC_FORK_NATURAL : DP_SRC_FORK_FORCED, __ATOMIC_RELAXED);
+            __atomic_fetch_or(&r->src_flags[k], srcbit, __ATOMIC_RELAXED);
         }
     }
 }
@@ -333,7 +339,7 @@ static void run_path(Worker *w, Pending *p) {
     int cur_forced = p->forced;
     unsigned fdepth = 0;   // calls made since the forced fork: a ret below that pops state the path did not build
     for (;;) {
-        if (cfg->max_total && __atomic_load_n(&sh->steps, __ATOMIC_RELAXED) >= cfg->max_total) {
+        if (cfg->max_total && __atomic_load_n(&sh->steps, __ATOMIC_RELAXED) + w->step_batch >= cfg->max_total) {
             loc->sat_total++;
             pthread_mutex_lock(&sh->mu);
             for (size_t i = 0; i < sh->qn; i++) free(sh->q[i].state);
@@ -533,6 +539,7 @@ static void run_path(Worker *w, Pending *p) {
             }
         }
         int cond = have_flow && fi.kind == DP_FLOW_COND && fi.target >= 0;
+        if (cond && cfg->fork_site_cap && w->capped[pc & 0xFFFF] == pc + 1) { loc->sat_site++; cond = 0; }   // site already saturated: no snapshot, no lock
         uint8_t *pre = NULL;
         if (cond) {
             pre = malloc(sh->sbytes);
@@ -540,7 +547,7 @@ static void run_path(Worker *w, Pending *p) {
         }
         if (!m->run(m)) { free(pre); break; }
         steps++;
-        __atomic_fetch_add(&sh->steps, 1, __ATOMIC_RELAXED);
+        if (++w->step_batch == 256) { __atomic_fetch_add(&sh->steps, 256, __ATOMIC_RELAXED); w->step_batch = 0; }
         if (cfg->hooks && cfg->hooks->after_step) cfg->hooks->after_step(cfg->hooks->user, m, pc);
         if (cond) {
             uint32_t after = m->pc(m);
@@ -560,7 +567,7 @@ static void run_path(Worker *w, Pending *p) {
                     if (cell_insert(sh, cell_key(cfg, m, other))) loc->cells++;
                     else { loc->cell_pruned++; pthread_mutex_unlock(&sh->mu); free(pre); continue; }
                 }
-                if (cfg->fork_site_cap && *cnt >= cfg->fork_site_cap) loc->sat_site++;
+                if (cfg->fork_site_cap && *cnt >= cfg->fork_site_cap) { loc->sat_site++; w->capped[pc & 0xFFFF] = pc + 1; }
                 else {
                     queue_push(sh, (Pending){ pre, other, 1, (uint32_t)(m->rom_index(m, pc) + 1), cur_input });
                     (*cnt)++;
@@ -728,6 +735,7 @@ static void *worker_main(void *arg) {
     }
     pthread_cond_broadcast(&sh->cv);
     pthread_mutex_unlock(&sh->mu);
+    __atomic_fetch_add(&sh->steps, w->step_batch, __ATOMIC_RELAXED); w->step_batch = 0;
     return NULL;
 }
 
@@ -764,9 +772,10 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         w->loc.flags = out->flags; w->loc.src_flags = out->src_flags;
         w->loc.first_seen = out->first_seen; w->loc.rom_size = rom_size;
         w->visits = calloc(0x10000, sizeof *w->visits);
+        w->capped = calloc(0x10000, sizeof *w->capped);
         w->stamp = calloc(0x10000, sizeof *w->stamp);
         w->rng_stamp = calloc(0x10000, sizeof *w->rng_stamp); w->rng_last = calloc(0x10000, 1);
-        if (!w->visits || !w->stamp) { ok = 0; break; }
+        if (!w->visits || !w->stamp || !w->capped) { ok = 0; break; }
         w->cobs = (CopyObs){ wm, &w->loc, -1, 0, sh.fed, 0, 99, -1, -1, 0, cfg->no_decompress };
         started++;
     }
@@ -866,7 +875,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
         out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
         out->exec_outside += l->exec_outside;
-        free(ws[i].visits); free(ws[i].stamp);
+        free(ws[i].visits); free(ws[i].capped); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
     }
     out->steps = sh.steps;
