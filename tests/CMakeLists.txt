@@ -222,6 +222,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_oamchain.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_sramcopy.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_apucopy.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_index.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_rng.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_save.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_pause.sms
@@ -688,3 +689,5 @@ add_test(NAME core_learn_sig COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z8
 set_tests_properties(core_learn_sig PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_rng_bytes COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_rng.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --no-sessions | grep -q 'natural 18' && $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --no-sessions --no-rng-learn | grep -q 'natural 14'")
 set_tests_properties(core_rng_bytes PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_index_replay COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_index.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --no-sessions | grep -q 'natural 23' && $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --no-sessions --no-index-replay | grep -q 'natural 19'")
+set_tests_properties(core_index_replay PROPERTIES FIXTURES_REQUIRED fixtures)

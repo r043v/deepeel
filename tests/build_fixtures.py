@@ -966,6 +966,13 @@ def build_z80_family(out):
     rg[0:len(code)] = code
     with open(os.path.join(out, "fix_z80_rng.sms"), "wb") as f:
         f.write(rg)
+    # table read indexed by a RAM byte (technique 7): only index 3 reaches the cp $03 match
+    ix = bytearray([0xFF]) * 0x8000
+    code = bytes([0x3A,0x00,0xC3, 0x5F, 0x16,0x00, 0x21,0x20,0x00, 0x19, 0x7E, 0xFE,0x03, 0x28,0x04, 0x3E,0x01, 0x18,0xFE, 0x3E,0x02, 0x18,0xFE])
+    ix[0:len(code)] = code
+    ix[0x20:0x30] = bytes([0,0,0,3] + [0] * 12)
+    with open(os.path.join(out, "fix_z80_index.sms"), "wb") as f:
+        f.write(ix)
     # HALT then idle; NMI handler at $66 (the SMS Pause button): needs the Pause NMI probe
     nm = bytearray([0xFF]) * 0x8000
     nm[0:3] = bytes([0x76, 0x18, 0xFD])

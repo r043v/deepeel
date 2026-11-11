@@ -50,6 +50,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--no-irq-jitter")) { c->no_irq_jitter = 1; return 1; }
     if (!strcmp(a, "--no-decompress")) { c->no_decompress = 1; return 1; }
     if (!strcmp(a, "--no-copies")) { c->no_copies = 1; return 1; }
+    if (!strcmp(a, "--no-index-replay")) { c->no_index_replay = 1; return 1; }
     if (!strcmp(a, "--no-rng-learn")) { c->no_rng_learn = 1; return 1; }
     if (!strcmp(a, "--no-learn-sig")) { c->no_learn_sig = 1; return 1; }
     if (!strcmp(a, "--no-taint-cut")) { c->no_taint_cut = 1; return 1; }
@@ -290,6 +291,38 @@ static void run_path(Worker *w, Pending *p) {
                 break;
             }
             loc->exec_outside++;
+        }
+        // technique 7 (restricted form): z80 `ld a,(RAM)` whose value then indexes a ROM table
+        // (`ld hl,ROM` + `add hl,de` within 12 bytes): replay the site with each index 0..15
+        if (!cfg->no_index_replay && !cur_forced && m->poke && bytes[0] == 0x3A && isa->name && !strcmp(isa->name, "z80") &&
+            m->rom_index(m, bytes[1] | (bytes[2] << 8)) < 0) {
+            uint8_t win[12];
+            for (unsigned i = 0; i < sizeof win; i++) win[i] = m->fetch(m, pc + 3 + i);
+            int tab = 0, add = 0;
+            for (unsigned i = 0; i < sizeof win; i++) {
+                if (win[i] == 0x21 && i + 2 < sizeof win && m->rom_index(m, win[i + 1] | (win[i + 2] << 8)) >= 0) tab = 1;
+                if (tab && (win[i] == 0x19 || win[i] == 0x09)) add = 1;
+            }
+            if (tab && add) {
+                uint32_t addr = bytes[1] | (bytes[2] << 8);
+                pthread_mutex_lock(&sh->mu);
+                int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, ((uint64_t)addr) | (7ull << 60));
+                pthread_mutex_unlock(&sh->mu);
+                uint8_t *tmp = fresh ? malloc(sh->sbytes) : NULL;
+                if (tmp) m->save(m, tmp);
+                for (unsigned k = 0; tmp && k < 16; k++) {
+                    uint8_t *snap = malloc(sh->sbytes);
+                    if (!snap) break;
+                    m->poke(m, addr, (uint8_t)k);
+                    m->save(m, snap);
+                    pthread_mutex_lock(&sh->mu);
+                    if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
+                    sh->q[sh->qn++] = (Pending){ snap, pc, 0, 0, cur_input };
+                    pthread_mutex_unlock(&sh->mu);
+                    loc->index_replays++;
+                }
+                if (tmp) { m->load(m, tmp); free(tmp); }
+            }
         }
         // technique 4 (restricted form): a z80 `ld a,(nn)` of RAM that returns a different value on a later
         // visit within one path reads a byte the game updates (RNG, timer); fork it on a few values
@@ -599,7 +632,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
-        out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->rng_forks += l->rng_forks; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
+        out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
         out->exec_outside += l->exec_outside;
         free(ws[i].visits); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
@@ -621,6 +654,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "deepeel %s (generic kernel)\n", label);
     fprintf(out, "steps %llu paths %llu forks %llu pruned-covered %llu\n", U(r->steps), U(r->paths), U(r->forks), U(r->pruned_covered));
     fprintf(out, "saturation: total %llu path %llu loop %llu site %llu queue %llu\n", U(r->sat_total), U(r->sat_path), U(r->sat_loop), U(r->sat_site), U(r->sat_queue));
+    fprintf(out, "index replays %llu\n", U(r->index_replays));
     fprintf(out, "rng-byte forks %llu\n", U(r->rng_forks));
     fprintf(out, "learned signatures %llu\n", U(r->learned_sigs));
     fprintf(out, "site-scored picks %llu\n", U(r->site_scored_picks));
