@@ -4745,3 +4745,15 @@ celle de l'ancien moteur sur 3165 trames comparées (décalage d'échantillonnag
 `DEEPEEL_TAS_WRAM=<fichier>` écrit les 8 KiB à $C000 par trame du film. Les sessions à manette tenue
 exercent désormais Pause : `core_pause_probe` coupe `--no-sessions` pour isoler la sonde d'événement.
 `1344M.bk2` (autre jeu) n'est pas lu par le chargeur ; `3292M.bk2.zip` n'a pas été rejoué.
+
+## 0.305.0 — noyau : technique 8, cellules sémantiques (toutes ISA)
+
+Sans plage manuelle : le noyau enregistre, dans un bitmap partagé de 64 Kio, chaque adresse non-ROM lue
+par le code (`obs_read`) ; la clé de cellule d'un fork forcé est le hash FNV de la cible et des valeurs
+courantes de ces adresses (au plus 4096). Deux forks de même cible et de même RAM lue ne sont pas
+ré-explorés (`cell-pruned forks`) — comme le pruning « les deux côtés couverts », cela n'ajoute aucun
+code. `--cells LO-HI` impose encore une plage manuelle ; `--no-cells` désactive la technique.
+Limite connue : le bitmap croît pendant l'exploration, donc deux clés calculées à des instants
+différents peuvent différer (moins de pruning, jamais plus de perte). Fixtures `fix_{gb,pce,md,nes}_cells`
+et `fix_z80_cells.sms`, tests `core_cells_auto_{sm83,huc6280,68000,6502,z80}`.
+Watch SMS (0.305.0) : la fenêtre utilise l'instance SMS native de 256 colonnes.

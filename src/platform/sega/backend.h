@@ -128,5 +128,6 @@ const DpSegaBackend *dp_sega_backend_ggt(void);
 const DpSegaBackend *dp_sega_backend_sgt(void);
 const DpSegaBackend *dp_msx_backendt(void);
 const DpSegaBackend *dp_sega_backend_gg_worker(unsigned worker);
+const DpSegaBackend *dp_sega_backend_sms(void);
 const DpSegaBackend *dp_msx_backend2(void);
 #endif

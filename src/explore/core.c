@@ -38,6 +38,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
         if (*e == '-') { c->cell_lo = (uint32_t)lo; c->cell_hi = (uint32_t)strtoul(e + 1, NULL, 0); }
         return 2;
     }
+    if (!strcmp(a, "--no-cells")) { c->no_cells = 1; return 1; }
     if (!strcmp(a, "--no-event-probes")) { c->no_event_probes = 1; return 1; }
     if (!strcmp(a, "--seed-ram") && i + 1 < argc) {   // LO-HI[=V,V,...]: technique 3 start states
         char *e; unsigned long lo = strtoul(argv[i + 1], &e, 0);
@@ -119,6 +120,7 @@ typedef struct {
     DpCoreResult *out;
     const DpCoreConfig *cfg;
     uint8_t *fed;
+    uint8_t *ramread;
     uint32_t sbytes;
     uint64_t *cellset;         // technique 8: open-addressing set of (target, RAM cell) keys
     size_t cellcap, celln;
@@ -141,6 +143,7 @@ typedef struct {
     int no_decompress;
     // technique 1 (solve): non-ROM addresses read inside the current window
     uint32_t ram[4]; unsigned nram; int track;
+    uint8_t *ramread;     // technique 8: 64 KiB bitmap of non-ROM data addresses any path has read (the semantic cell)
 } CopyObs;
 
 #define RUN_MIN 16
@@ -249,6 +252,7 @@ static uint32_t *site_count(SiteTab *t, uint32_t pc) {
 static void obs_read(void *u, uint32_t addr, uint8_t v) {
     CopyObs *o = u;
     int64_t k = o->m->rom_index(o->m, addr);
+    if (k < 0 && o->ramread && !o->ramread[addr & 0xFFFF]) __atomic_store_n(&o->ramread[addr & 0xFFFF], 1, __ATOMIC_RELAXED);
     if (k < 0 && o->track && o->nram < 4) {
         unsigned i = 0;
         while (i < o->nram && o->ram[i] != addr) i++;
@@ -279,8 +283,14 @@ static void obs_write(void *u, uint32_t addr, uint8_t v) {
 }
 
 // FNV-1a over the configured RAM range, mixed with the fork target
-static uint64_t cell_key(const DpCoreConfig *cfg, DpMachine *m, uint32_t other) {
+static uint64_t cell_key(const DpCoreConfig *cfg, const uint8_t *ramread, DpMachine *m, uint32_t other) {
     uint64_t h = 1469598103934665603ull ^ other;
+    if (!(cfg->cell_hi > cfg->cell_lo)) {   // semantic cell: the RAM bytes the code has been seen to read (at most 4096), no game knowledge
+        unsigned n = 0;
+        for (uint32_t a = 0; a < 0x10000 && n < 4096; a++)
+            if (ramread[a]) { h ^= m->fetch(m, a) | ((uint64_t)n << 8); h *= 1099511628211ull; n++; }
+        return h | 1;
+    }
     for (uint32_t a = cfg->cell_lo; a <= cfg->cell_hi; a++) { h ^= m->fetch(m, a); h *= 1099511628211ull; }
     return h | 1;   // never 0: 0 marks an empty slot
 }
@@ -849,8 +859,8 @@ static void run_path(Worker *w, Pending *p) {
                 pthread_mutex_lock(&sh->mu);
                 uint32_t *cnt = site_count(&sh->sites, pc);
                 int pushed = 0;
-                if (cfg->cell_hi > cfg->cell_lo) {
-                    if (cell_insert(sh, cell_key(cfg, m, other))) loc->cells++;
+                if (cfg->cell_hi > cfg->cell_lo || !cfg->no_cells) {
+                    if (cell_insert(sh, cell_key(cfg, sh->ramread, m, other))) loc->cells++;
                     else { loc->cell_pruned++; pthread_mutex_unlock(&sh->mu); free(pre); continue; }
                 }
                 if (cfg->fork_site_cap && *cnt >= cfg->fork_site_cap) { loc->sat_site++; w->capped[pc & 0xFFFF] = pc + 1; }
@@ -1080,12 +1090,13 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
     sh.sbytes = m->state_bytes(m);
     sh.spool_fd = 0;
     sh.fed = calloc(0x10000, 1);
+    sh.ramread = calloc(0x10000, 1);
     sh.site_picks = calloc(rom_size + 1, sizeof *sh.site_picks);
     sh.site_gain = calloc(rom_size + 1, sizeof *sh.site_gain);
 
     unsigned nw = cfg->jobs > 1 ? cfg->jobs : 1;
     Worker *ws = calloc(nw, sizeof *ws);
-    int ok = sh.fed && ws;
+    int ok = sh.fed && sh.ramread && ws;
     unsigned started = 0;
     for (unsigned i = 0; ok && i < nw; i++) {
         Worker *w = &ws[i];
@@ -1101,6 +1112,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         w->rng_stamp = calloc(0x10000, sizeof *w->rng_stamp); w->rng_last = calloc(0x10000, 1);
         if (!w->visits || !w->stamp || !w->capped) { ok = 0; break; }
         w->cobs = (CopyObs){ wm, &w->loc, -1, 0, sh.fed, 0, 99, -1, -1, 0, cfg->no_decompress };
+        w->cobs.ramread = sh.ramread;
         started++;
     }
     out->workers = started;
@@ -1223,7 +1235,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
     out->spool_left = sh.spool_n; out->spooled = sh.spool_total;
     if (sh.spool_fd > 0) close(sh.spool_fd);
     for (size_t i = 0; i < sh.qn; i++) free(sh.q[i].state);
-    free(sh.probeset); free(sh.cellset); free(sh.q); free(sh.sites.s); free(sh.fed); free(sh.site_picks); free(sh.site_gain); free(ws);
+    free(sh.probeset); free(sh.cellset); free(sh.q); free(sh.sites.s); free(sh.fed); free(sh.ramread); free(sh.site_picks); free(sh.site_gain); free(ws);
     return ok;
 }
 

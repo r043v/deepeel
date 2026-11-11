@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.304.5 LANGUAGES C)
+project(deepeel VERSION 0.305.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -511,6 +511,7 @@ set_target_properties(deepeel_sms PROPERTIES IMPORTED_LOCATION ${DP_SMS_ARCHIVE}
   INTERFACE_LINK_LIBRARIES deepeel_z80)
 add_custom_target(dp_sms_runtime ALL DEPENDS ${DP_SMS_ARCHIVE})
 add_dependencies(deepeel_sms dp_sms_runtime)
+target_link_libraries(deepeel_sega PUBLIC deepeel_sms)
 # MSX second instance for --jobs 2: backend.c and the instrumented msx.c
 # recompiled with the backend getter renamed, then every global (runtime and
 # dp_msx_* alike, except the renamed getter) namespaced with dp_msx2_.

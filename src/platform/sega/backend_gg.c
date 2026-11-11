@@ -126,7 +126,7 @@ static M0_TL DpSegaWatch W;
 static M0_TL uint16_t watch_store[GG_ROW_STRIDE];
 static int watch_draw(void *u,unsigned y) { (void)u; (void)y; return 1; }
 static void watch_row(void *u,unsigned y,uint16_t *p) {
-    (void)u; dp_sega_watch_row(&W,y-GG_WIN_TOP,p,GG_WIDTH,(int)GG_WIN_LINES);
+    (void)u; dp_sega_watch_row(&W,y-GG_WIN_TOP,p,GG_OUT_WIDTH,(int)GG_WIN_LINES);
 }
 static void watch_frame(void *u) { (void)u; dp_sega_watch_frame(&W); }
 static void hook(void) {

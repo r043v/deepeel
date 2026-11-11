@@ -725,6 +725,7 @@ static void *fb_main(void *arg) {
             }
             if (rdone) s_ref = 0;
         }
+        SDL_SetRenderDrawColor(ren, 24, 24, 28, 255);   // dark ground: the captions are light
         SDL_RenderClear(ren);
         {   // two tiles side by side, each letterboxed to its image aspect (the
             // GB watch layout), with two caption lines under the image

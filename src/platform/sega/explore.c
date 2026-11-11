@@ -13,6 +13,9 @@
 #include "../../explore/lots.h"
 #include "../../explore/novelty.h"
 #include "../../explore/coverage_defaults.h"
+// watch caption/progress (weak: standalone runtime tests link without the GUI)
+extern void dp_fbwatch_caption(const char *base) __attribute__((weak));
+extern void dp_fbwatch_progress(uint32_t f, uint32_t total, int done) __attribute__((weak));
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1233,6 +1236,11 @@ static int tas_replay(Run *x) {
     int gg=!strcmp(x->system->id,"gg"),msx=!strcmp(x->system->id,"msx");
     if(!strcmp(x->system->id,"sms") && x->b->tas_compat)
         x->b->tas_compat(dp_sega_tas_smshawk_profile(&t));
+    if(o->watch_every && dp_fbwatch_caption) {
+        const char *base=strrchr(o->tas_path,'/'); base=base?base+1:o->tas_path;
+        char cap[160]; snprintf(cap,sizeof cap,"%s  %s  smshawk-%s",x->system->id,base,dp_sega_tas_smshawk_profile(&t)==DP_TAS_SMSHAWK_1114?"1.11.4":"current");
+        dp_fbwatch_caption(cap); dp_fbwatch_progress(0,t.frames,0);
+    }
     FILE *ram_dump=NULL; int dump_failed=0;
     const char *ram_dump_path=x->worker==0?getenv("DP_SEGA_TAS_RAM_DUMP"):NULL;
     if(ram_dump_path) {
@@ -1271,6 +1279,7 @@ static int tas_replay(Run *x) {
             if(steps++ >= o->tas_frame_steps || !play_step(x)) goto done;
         }
         r->tas_frames++;
+        if(o->watch_every && dp_fbwatch_progress && !(r->tas_frames&7)) dp_fbwatch_progress(r->tas_frames,t.frames,0);
         if(ram_dump && x->b->ram_view) {
             size_t size=0; const uint8_t *ram=x->b->ram_view(&size);
             if(!ram || fwrite(ram,1,size,ram_dump)!=size) {
@@ -1290,6 +1299,9 @@ static int tas_replay(Run *x) {
         }
     }
 done:
+    if(o->watch_every && dp_fbwatch_progress) dp_fbwatch_progress(r->tas_frames,t.frames,1);
+    // the movie is over: freeze the window on its last frame (the random bursts and forks that follow are not the movie)
+    if(o->watch_every && x->b->watch) x->b->watch(0,&r->watch_frames);
     if(ram_dump && fclose(ram_dump)!=0) {
         fprintf(stderr,"deepeel: cannot close TAS RAM dump\n");
         dump_failed=1;
@@ -1712,6 +1724,8 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     uint8_t *image=malloc(padded); DpSegaVisits visits={0};
     Run x={0}; x.worker=worker; x.jobs=jobs;
     x.b=msx?(worker?dp_msx_backend2():dp_msx_backend()):worker?(sg?dp_sega_backend_sg2():dp_sega_backend_gg_worker((unsigned)worker)):(sg?dp_sega_backend_sg():dp_sega_backend_gg());
+    // --watch on SMS: the native 256-wide instance (the GG one box-filters to 160 columns, a wrong ratio)
+    if(!msx && !sg && !worker && o->watch_every && !strcmp(s->id,"sms")) x.b=dp_sega_backend_sms();
     x.msx=msx; x.system=s; x.opt=o; x.r=r; x.input_epoch=1;
     r->input_site_capacity=o->input_sites; r->input_mask_limit=o->input_masks;
     r->phase_limits[0]=o->max_total; r->phase_limits[1]=o->input_masks?o->input_total:0;

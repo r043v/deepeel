@@ -245,6 +245,10 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ppupoll.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_decomp.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_cells.sms
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_cells.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_md_cells.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_cells.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_cells.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.gg
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sg
@@ -477,7 +481,7 @@ add_test(NAME nes_watch_dump COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_
 set_tests_properties(nes_watch_dump PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME sms_play_pool COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B z80 explore sms $D/fix_z80_branch.sms --play-steps 900000 --play-sessions 3 --play-pool 8 --text $D/sms_pp.txt >/dev/null 2>&1; grep -Eq 'checkpoint pool: [1-9][0-9]* kept, [1-9][0-9]* sessions started from one' $D/sms_pp.txt")
 set_tests_properties(sms_play_pool PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 120)
-add_test(NAME sms_watch_dump COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -f $D/sms_w.ppm; $B z80 explore sms $D/fix_z80_branch.sms --play-steps 300000 --watch-dump $D/sms_w.ppm --text $D/sms_w.txt >/dev/null 2>&1; grep -q 'watch: [1-9][0-9]* frames published' $D/sms_w.txt && head -c 15 $D/sms_w.ppm | grep -q '160 192'")
+add_test(NAME sms_watch_dump COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -f $D/sms_w.ppm; $B z80 explore sms $D/fix_z80_branch.sms --play-steps 300000 --watch-dump $D/sms_w.ppm --text $D/sms_w.txt >/dev/null 2>&1; grep -q 'watch: [1-9][0-9]* frames published' $D/sms_w.txt && head -c 15 $D/sms_w.ppm | grep -q '256 192'")
 set_tests_properties(sms_watch_dump PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME gg_watch_dump COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -f $D/gg_w.ppm; $B z80 explore gg $D/fix_z80_branch.gg --play-steps 300000 --watch-dump $D/gg_w.ppm --text $D/gg_w.txt >/dev/null 2>&1; grep -q 'watch: [1-9][0-9]* frames published' $D/gg_w.txt && head -c 15 $D/gg_w.ppm | grep -q '160 144'")
 set_tests_properties(gg_watch_dump PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
@@ -677,8 +681,18 @@ add_test(NAME core_cli_md COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMA
 set_tests_properties(core_cli_md PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_cli_msx COMMAND sh -c "$<TARGET_FILE:deepeel> z80 explore msx ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.msx --core --attract-frames 0 2>&1 | grep -q 'deepeel msx (generic kernel)' && $<TARGET_FILE:deepeel> z80 explore msx ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.msx --core --attract-frames 0 2>&1 | grep -q 'forced [1-9]'")
 set_tests_properties(core_cli_msx PROPERTIES FIXTURES_REQUIRED fixtures)
-add_test(NAME core_cells COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_cells.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --jobs 1 --attract-frames 0 --cells 0xC000-0xC0FF | grep -q 'cell-pruned forks [1-9]' && $<TARGET_FILE:deepeel> z80 explore sms $f --core --jobs 1 --attract-frames 0 | grep -q 'cell-pruned forks 0'")
+add_test(NAME core_cells COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_cells.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --jobs 1 --attract-frames 0 --cells 0xC000-0xC0FF | grep -q 'cell-pruned forks [1-9]' && $<TARGET_FILE:deepeel> z80 explore sms $f --core --jobs 1 --attract-frames 0 --no-cells | grep -q 'cell-pruned forks 0'")
 set_tests_properties(core_cells PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_cells_auto_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_cells.gb; $<TARGET_FILE:deepeel> explore $f --core --jobs 1 --attract-frames 0 --no-sessions | grep -q 'cell-pruned forks [1-9]' && $<TARGET_FILE:deepeel> explore $f --core --jobs 1 --attract-frames 0 --no-sessions --no-cells | grep -q 'cell-pruned forks 0'")
+set_tests_properties(core_cells_auto_sm83 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_cells_auto_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_cells.pce; $<TARGET_FILE:deepeel> pce explore $f --core --jobs 1 --attract-frames 0 --no-sessions | grep -q 'cell-pruned forks [1-9]' && $<TARGET_FILE:deepeel> pce explore $f --core --jobs 1 --attract-frames 0 --no-sessions --no-cells | grep -q 'cell-pruned forks 0'")
+set_tests_properties(core_cells_auto_huc6280 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_cells_auto_z80 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_cells.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --jobs 1 --attract-frames 0 | grep -q 'cell-pruned forks [1-9]'")
+set_tests_properties(core_cells_auto_z80 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_cells_auto_68000 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_md_cells.md; $<TARGET_FILE:deepeel> md explore $f --core --jobs 1 --attract-frames 0 --no-sessions | grep -q 'cell-pruned forks [1-9]' && $<TARGET_FILE:deepeel> md explore $f --core --jobs 1 --attract-frames 0 --no-sessions --no-cells | grep -q 'cell-pruned forks 0'")
+set_tests_properties(core_cells_auto_68000 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_cells_auto_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_cells.nes; $<TARGET_FILE:deepeel> nes explore $f --core --jobs 1 --attract-frames 0 --no-sessions | grep -q 'cell-pruned forks [1-9]' && $<TARGET_FILE:deepeel> nes explore $f --core --jobs 1 --attract-frames 0 --no-sessions --no-cells | grep -q 'cell-pruned forks 0'")
+set_tests_properties(core_cells_auto_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_decompress COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_decomp.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --jobs 1 --attract-frames 0 | grep -q 'decompress runs [1-9][0-9]*, compressed ROM bytes 3[0-9]' && $<TARGET_FILE:deepeel> z80 explore sms $f --core --jobs 1 --attract-frames 0 --no-decompress | grep -q 'decompress runs 0, compressed ROM bytes 0' && $<TARGET_FILE:deepeel> z80 explore sms ${CMAKE_CURRENT_BINARY_DIR}/fix_sms_ramsrc.sms --core --jobs 1 --attract-frames 0 | grep -q 'decompress runs 0,'")
 set_tests_properties(core_decompress PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_event_probes COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ppupoll.nes; $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --visits-per-pc 8 | grep -q 'event probes [1-9][0-9]* at 1 sites' && $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --visits-per-pc 8 --no-event-probes | grep -q 'event probes 0 at 0'")
