@@ -33,6 +33,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
         return 2;
     }
     if (!strcmp(a, "--no-event-probes")) { c->no_event_probes = 1; return 1; }
+    if (!strcmp(a, "--no-irq-jitter")) { c->no_irq_jitter = 1; return 1; }
     if (!strcmp(a, "--no-decompress")) { c->no_decompress = 1; return 1; }
     if (!strcmp(a, "--no-copies")) { c->no_copies = 1; return 1; }
     if (!strcmp(a, "--no-forced-ram-cut")) { c->no_forced_ram_cut = 1; return 1; }
@@ -290,21 +291,25 @@ static void run_path(Worker *w, Pending *p) {
             }
         }
         if (cfg->hooks && cfg->hooks->irq_alt && m->rom_index(m, pc) >= 0) {
-            // the hook answers 0 unless an interrupt is pending: the per-site key is spent
-            // only when a fork is really produced
-            uint8_t *snap = malloc(sh->sbytes);
-            if (snap && cfg->hooks->irq_alt(cfg->hooks->user, m, snap)) {
+            // delay d = 1 is the plain IRQ fork; d = 2..3 is technique 9 (temporal
+            // perturbation: the interrupt lands a few instructions later).  The hook
+            // answers 0 unless an interrupt is pending, so the per-(site, delay) key is
+            // spent only when a fork is really produced.
+            for (unsigned d = 1; d <= (cfg->no_irq_jitter ? 1u : 3u); d++) {
+                uint8_t *snap = malloc(sh->sbytes);
+                if (!snap) break;
+                if (!cfg->hooks->irq_alt(cfg->hooks->user, m, d, snap)) { free(snap); break; }
                 pthread_mutex_lock(&sh->mu);
-                int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, ((uint64_t)m->rom_index(m, pc) + 1) | (1ull << 40));
+                int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, ((uint64_t)m->rom_index(m, pc) + 1) | ((uint64_t)d << 40));
                 if (!fresh || (cfg->queue_max && sh->qn >= cfg->queue_max)) { if (fresh) loc->sat_queue++; free(snap); }
                 else {
                     if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
                     sh->q[sh->qn++] = (Pending){ snap, pc, 0 };
-                    loc->irq_forks++;
+                    if (d == 1) loc->irq_forks++; else loc->jitter_forks++;
                     pthread_cond_signal(&sh->cv);
                 }
                 pthread_mutex_unlock(&sh->mu);
-            } else free(snap);
+            }
         }
         int cond = have_flow && fi.kind == DP_FLOW_COND && fi.target >= 0;
         uint8_t *pre = NULL;
@@ -455,7 +460,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         out->sat_site += l->sat_site; out->sat_queue += l->sat_queue;
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
-        out->novelty_picks += l->novelty_picks; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
+        out->novelty_picks += l->novelty_picks; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
         out->exec_outside += l->exec_outside;
         free(ws[i].visits); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
@@ -481,7 +486,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "workers %llu (short %llu)\n", U(r->workers), U(r->workers_short));
     fprintf(out, "cells %llu, cell-pruned forks %llu\n", U(r->cells), U(r->cell_pruned));
     fprintf(out, "decompress runs %llu, compressed ROM bytes %llu\n", U(r->decompress_runs), U(r->compressed_bytes));
-    fprintf(out, "IRQ forks %llu\n", U(r->irq_forks));
+    fprintf(out, "IRQ forks %llu (timing jitter %llu)\n", U(r->irq_forks), U(r->jitter_forks));
     fprintf(out, "event probes %llu at %llu sites\n", U(r->event_probes), U(r->event_probe_sites));
     fprintf(out, "seeded entry points %llu\n", U(r->seeded));
     fprintf(out, "forced RAM cuts %llu\n", U(r->forced_ram_cuts));

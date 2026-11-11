@@ -33,9 +33,9 @@ typedef struct DpPlatformHooks {
     int (*event_probe)(void *user, DpMachine *m, uint32_t pc, const uint8_t *bytes, unsigned k, uint8_t *save);
     // IRQ fork: asked once per ROM site.  When an interrupt would be serviced at the next
     // run(), the hook saves into `save` the state where that service is suppressed for
-    // one instruction (the line stays pending) and returns 1; otherwise returns 0.  The
+    // `delay` instructions (the line stays pending) and returns 1; otherwise returns 0.  The
     // live machine is left unchanged.  Counted in DpCoreResult.irq_forks.
-    int (*irq_alt)(void *user, DpMachine *m, uint8_t *save);
+    int (*irq_alt)(void *user, DpMachine *m, unsigned delay, uint8_t *save);
 } DpPlatformHooks;
 
 typedef struct DpCoreConfig {
@@ -47,7 +47,8 @@ typedef struct DpCoreConfig {
     int no_forced_ram_cut;     // 1: let forced paths run unfed RAM
     const uint32_t *seeds;     // extra entry points (vectors): queued as forced paths from the start state
     size_t n_seeds;
-    int no_event_probes;       // 1: ignore DpPlatformHooks.event_probe (technique 2)
+    int no_event_probes;
+    int no_irq_jitter;          /* technique 9: only the 1-instruction IRQ delay, no 2..3 */       // 1: ignore DpPlatformHooks.event_probe (technique 2)
     int no_decompress;         // 1: do not look for decompressors (technique 6)
     int no_copies;             // 1: do not observe data accesses
     int no_novelty_order;      // 1: plain LIFO instead of uncovered-target-first
@@ -74,7 +75,7 @@ typedef struct DpCoreResult {
     uint64_t novelty_new_bytes; // ROM bytes first covered by paths started from a novelty pick (yield of technique 5)
     uint64_t plain_new_bytes;   // the same for paths started in plain LIFO order
     int in_novelty_path;        // internal: the path being run was a novelty pick
-    uint64_t event_probe_sites, irq_forks; // probe sites visited (technique 2)
+    uint64_t event_probe_sites, irq_forks, jitter_forks; // probe sites visited (technique 2)
     uint64_t event_probes;      // alternative-status states queued
     uint64_t cells;             // distinct (fork target, RAM cell) pairs queued (technique 8)
     uint64_t cell_pruned;       // forced forks dropped because their (target, RAM cell) pair was already queued

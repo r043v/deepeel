@@ -666,3 +666,5 @@ add_test(NAME core_event_probes COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix
 set_tests_properties(core_event_probes PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_irq_fork COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_irq.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --max-total 200000 | grep -q 'IRQ forks [1-9]'")
 set_tests_properties(core_irq_fork PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_irq_jitter COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_irq.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --max-total 200000 | grep -q 'timing jitter [1-9]' && $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --max-total 200000 --no-irq-jitter | grep -q 'timing jitter 0'")
+set_tests_properties(core_irq_jitter PROPERTIES FIXTURES_REQUIRED fixtures)

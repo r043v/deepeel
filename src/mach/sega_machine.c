@@ -191,7 +191,7 @@ static int sega_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t
 }
 // IRQ fork: the alternative to servicing a pending interrupt is to run the next
 // instruction with the line masked, then re-arm it (the old engine's skip_irq).
-static int sega_irq_alt(void *user, DpMachine *m, uint8_t *save) {
+static int sega_irq_alt(void *user, DpMachine *m, unsigned delay, uint8_t *save) {
     (void)user;
     SegaMach *s = m->impl;
     z80_t *c = s->b->cpu();
@@ -201,7 +201,8 @@ static int sega_irq_alt(void *user, DpMachine *m, uint8_t *save) {
     if (!tmp) return 0;
     m->save(m, tmp);
     c->irq = c->nmi = 0;
-    int ok = m->run(m);
+    int ok = 1;
+    for (unsigned i = 0; i < delay && ok; i++) ok = m->run(m);
     if (ok) { c->irq = irq; c->nmi = nmi; m->save(m, save); }
     m->load(m, tmp);
     free(tmp);
