@@ -2032,6 +2032,15 @@ static int cmd_md(int argc, char **argv) {
                 if (mf) { fwrite(movie.pads, 1, movie.frames, mf); fclose(mf); }
                 dp_md_ref_feed_open(f3, 1);
                 setenv("DEEPEEL_MD_REF3_FEED", f3, 1);
+                {   // the libretro core's own checkout: its release line and git revision
+                    char dir[600], cmd[700], rev[40] = ""; snprintf(dir, sizeof dir, "%s", gpgxcore);
+                    char *sl = strrchr(dir, '/'); if (sl) *sl = 0;
+                    snprintf(cmd, sizeof cmd, "git -C '%s' rev-parse --short HEAD 2>/dev/null", dir);
+                    FILE *gp = popen(cmd, "r");
+                    if (gp) { if (fgets(rev, sizeof rev, gp)) rev[strcspn(rev, "\n")] = 0; pclose(gp); }
+                    char nm[120]; snprintf(nm, sizeof nm, "Genesis Plus GX libretro%s%s", rev[0] ? " " : "", rev);
+                    setenv("DEEPEEL_MD_REF3_NAME", nm, 1);
+                }
                 gpgxpid = fork();
                 if (gpgxpid == 0) { execl(gpgxexe, gpgxexe, gpgxcore, argv[3], mk3, f3, (char *)NULL); _exit(127); }
                 if (gpgxpid < 0) gpgxpid = 0;
@@ -2046,7 +2055,14 @@ static int cmd_md(int argc, char **argv) {
                 if (mf) { fwrite(movie.pads, 1, movie.frames, mf); fclose(mf); }
                 dp_md_ref_feed_open(f2, 1);
                 setenv("DEEPEEL_MD_REF2_FEED", f2, 1);
-                setenv("DEEPEEL_MD_REF2_NAME", "BizHawk GPGX", 1);
+                {   // name the BizHawk checkout it runs (git describe)
+                    const char *bd = getenv("DP_BIZHAWK_DIR"); char cmd[600], ver[64] = "";
+                    snprintf(cmd, sizeof cmd, "git -C '%s' describe --tags --always 2>/dev/null", bd ? bd : "/home/m/dev/BizHawk");
+                    FILE *gp = popen(cmd, "r");
+                    if (gp) { if (fgets(ver, sizeof ver, gp)) ver[strcspn(ver, "\n")] = 0; pclose(gp); }
+                    char nm[120]; snprintf(nm, sizeof nm, "BizHawk GPGX%s%s", ver[0] ? " " : "", ver);
+                    setenv("DEEPEEL_MD_REF2_NAME", nm, 1);
+                }
                 hawkpid = fork();
                 if (hawkpid == 0) {
                     const char *bd = getenv("DP_BIZHAWK_DIR");

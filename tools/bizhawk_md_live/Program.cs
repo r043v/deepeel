@@ -45,7 +45,7 @@ namespace BizhawkMdLive
 				return (core, 0);
 			});
 			var controller = new SimpleController(fe.Core.ControllerDefinition);
-			var vp = fe.Core.AsVideoProvider();
+			var vp = fe.Core.AsVideoProvider(); Console.Error.WriteLine("BUTTONS " + string.Join(",", fe.Core.ControllerDefinition.BoolButtons));
 			string[] bits = { "P1 Up", "P1 Down", "P1 Left", "P1 Right", "P1 B", "P1 C", "P1 A", "P1 Start" };
 			var clock = Stopwatch.StartNew();
 			double waited = 0, lastMove = 0;
@@ -69,7 +69,7 @@ namespace BizhawkMdLive
 				{
 					uint seq = acc.ReadUInt32(OffSeq);
 					acc.Write(OffSeq, seq + 1);
-					acc.WriteArray(OffPx, buf, 0, w * h);
+					unsafe { byte *bp = null; acc.SafeMemoryMappedViewHandle.AcquirePointer(ref bp); System.Runtime.InteropServices.Marshal.Copy(buf, 0, (IntPtr)(bp + acc.PointerOffset + OffPx), w * h); acc.SafeMemoryMappedViewHandle.ReleasePointer(); }
 					acc.Write(OffW, (uint)w); acc.Write(OffH, (uint)h);
 					acc.Write(OffV, (uint)(f + 1)); acc.Write(OffTotal, (uint)masks.Length);
 					acc.Write(OffDone, f + 1 == masks.Length ? 1u : 0u);

@@ -55,11 +55,13 @@ static inline int dp_md_ref_read(DpMdRefFeed *f, uint32_t *out, int *w, int *h,
         uint32_t s0 = f->seq;
         if (s0 & 1u) continue;
         __sync_synchronize();
-        memcpy(out, (const void *)f->px, sizeof f->px);
+        static uint32_t stage[DP_MDRF_MAX_W * DP_MDRF_MAX_H];   // one reader thread: a torn copy never reaches the caller
+        memcpy(stage, (const void *)f->px, sizeof stage);
         int rw = (int)f->w, rh = (int)f->h, rv = (int)f->vframe, rt = (int)f->total, rd = (int)f->done;
         __sync_synchronize();
         if (f->seq == s0) {
             if (rw <= 0 || rh <= 0 || rw > DP_MDRF_MAX_W || rh > DP_MDRF_MAX_H) return 0;
+            memcpy(out, stage, (size_t)rw * rh * sizeof *out);
             *w = rw; *h = rh; *vframe = (uint32_t)rv; *total = (uint32_t)rt; *done = rd;
             return 1;
         }

@@ -690,7 +690,7 @@ static void *fb_main(void *arg) {
     // per-tile speed meters (the GB watch maths): a 1 s window over the frame counter
     static uint32_t rx[3][DP_MDRF_MAX_W * DP_MDRF_MAX_H];
     static double t_main, t_ref[3];
-    static uint64_t f_main;
+    static uint64_t f_main, f_cur;
     static uint32_t f_ref[3];
     static double s_main, s_ref[3], u_main, w_prev;
     char last_title[260] = "";
@@ -704,6 +704,7 @@ static void *fb_main(void *arg) {
         int w, h;
         uint64_t f;
         if (dp_fb_read(px, DP_FB_MAX_W * DP_FB_MAX_H, &w, &h, &f)) {
+            f_cur = f;
             if (!tex || w != tw || h != th) {
                 if (tex) SDL_DestroyTexture(tex);
                 tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, w, h);
@@ -728,7 +729,10 @@ static void *fb_main(void *arg) {
             ract[k] = dp_fb_ref_active(k);
             if (!ract[k]) continue;
             ref++;
+            static int kw[3], kh[3]; static uint32_t kv[3], kt[3]; static int kd[3];   // last good frame: a torn read keeps showing it instead of blanking the tile
             rhave[k] = dp_fb_ref_read(k, rx[k], &rw[k], &rh[k], &rvf[k], &rtot[k], &rdone[k]);
+            if (rhave[k]) { kw[k] = rw[k]; kh[k] = rh[k]; kv[k] = rvf[k]; kt[k] = rtot[k]; kd[k] = rdone[k]; }
+            else if (kw[k] > 0) { rw[k] = kw[k]; rh[k] = kh[k]; rvf[k] = kv[k]; rtot[k] = kt[k]; rdone[k] = kd[k]; }
             double now = watch_now();
             if (rhave[k] && now - t_ref[k] >= 1.0) {
                 if (rvf[k] >= f_ref[k]) s_ref[k] = (double)(rvf[k] - f_ref[k]) / (now - t_ref[k]);
@@ -740,22 +744,23 @@ static void *fb_main(void *arg) {
         SDL_RenderClear(ren);
         {   // two tiles side by side, each letterboxed to its image aspect (the
             // GB watch layout), with two caption lines under the image
-            int cols = 1 + ref;
-            if (tex && tw > 0 && th > 0 && sized_key != cols * 100000 + tw * 10 + th % 10) {   // fit the window to the tiles (2x), once per layout
-                sized_key = cols * 100000 + tw * 10 + th % 10;
-                SDL_SetWindowSize(win, cols * tw * 2, th * 2 + FB_CAP);
+            int ncell = 1 + ref, cols = ncell > 2 ? 2 : ncell, rows = (ncell + cols - 1) / cols;   // two tiles per row
+            if (tex && tw > 0 && th > 0 && sized_key != ncell * 100000 + tw * 10 + th % 10) {   // fit the window to the tiles (2x), once per layout
+                sized_key = ncell * 100000 + tw * 10 + th % 10;
+                SDL_SetWindowSize(win, cols * tw * 2, rows * (th * 2 + FB_CAP));
             }
-            int cw = W / cols, ch = H - FB_CAP > 0 ? H - FB_CAP : 1;
+            int cw = W / cols, rowh = H / rows, ch = rowh - FB_CAP > 0 ? rowh - FB_CAP : 1;
             int slot[4] = { -1, -1, -1, -1 }, ns = 1;   // tile 0: our core, then every active reference
             for (int k = 0; k < 3; k++) if (ract[k]) slot[ns++] = k;
-            for (int t = 0; t < cols; t++) {
+            for (int t = 0; t < ncell; t++) {
+                int ox = (t % cols) * cw, oy = (t / cols) * rowh;
                 int iw = 0, ih = 0, k = slot[t];
                 if (t == 0) { if (tex && th > 0) { iw = tw; ih = th; } }
-                else if (rhave[k] && rh[k] > 0) { iw = rw[k]; ih = rh[k]; }
+                else if (rh[k] > 0) { iw = rw[k]; ih = rh[k]; }
                 if (!iw || !ih) continue;
                 double sc = (double)cw / iw < (double)ch / ih ? (double)cw / iw : (double)ch / ih;
                 int dw = (int)(iw * sc), dh = (int)(ih * sc);
-                SDL_Rect dst = { t * cw + (cw - dw) / 2, (ch - dh) / 2, dw, dh };
+                SDL_Rect dst = { ox + (cw - dw) / 2, oy + (ch - dh) / 2, dw, dh };
                 if (t == 0) SDL_RenderCopy(ren, tex, NULL, &dst);
                 else {
                     SDL_Texture *rtex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888,
@@ -773,15 +778,15 @@ static void *fb_main(void *arg) {
             snprintf(wt, sizeof wt, "deepeel md watch - %s - %s - %.0f f/s", c1[0] ? c1 : "no movie", c2, s_main);
             if (strcmp(wt, last_title)) { SDL_SetWindowTitle(win, wt); snprintf(last_title, sizeof last_title, "%s", wt); }
             snprintf(c1, sizeof c1, "%s", own && *own ? own : "deepeel-md " DEEPEEL_VERSION);
-            draw_text(ren, 6, ch + 2, c1, 1, gui_color(DP_C_TITLE));
-            char l2[64]; snprintf(l2, sizeof l2, "%.0f f/s", u_main);
+            draw_text(ren, 6, ch + 2, c1, 1, gui_color(DP_C_TITLE));   // tile 0 sits at the origin
+            char l2[96]; snprintf(l2, sizeof l2, "frame %llu  %.0f f/s", (unsigned long long)f_cur, u_main);
             draw_text(ren, 6, ch + 16, l2, 1, gui_color(done ? DP_C_DIM : DP_C_TEXT));
-            for (int t = 1; t < cols; t++) {
-                int k = slot[t];
-                char r2[64];
-                snprintf(r2, sizeof r2, "%.0f f/s", dp_fb_ref_unsync_x10(k) / 10.0);
-                draw_text(ren, t * cw + 6, ch + 2, dp_fb_ref_name(k), 1, gui_color(DP_C_TITLE));
-                draw_text(ren, t * cw + 6, ch + 16, r2, 1, gui_color(rdone[k] ? DP_C_DIM : DP_C_TEXT));
+            for (int t = 1; t < ncell; t++) {
+                int k = slot[t], ox = (t % cols) * cw, oy = (t / cols) * rowh;
+                char r2[96];
+                snprintf(r2, sizeof r2, "frame %u  %.0f f/s", (unsigned)rvf[k], dp_fb_ref_unsync_x10(k) / 10.0);
+                draw_text(ren, ox + 6, oy + ch + 2, dp_fb_ref_name(k), 1, gui_color(DP_C_TITLE));
+                draw_text(ren, ox + 6, oy + ch + 16, r2, 1, gui_color(rdone[k] ? DP_C_DIM : DP_C_TEXT));
             }
         }
         SDL_RenderPresent(ren);
