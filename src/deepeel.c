@@ -1758,6 +1758,7 @@ static int cmd_md(int argc, char **argv) {
         }
     } else if (!strcmp(argv[2], "explore") && md_has_core(argc, argv)) {
         DpCoreConfig kcfg; dp_core_config_default(&kcfg);
+        kcfg.max_path_steps = 2000000;   // probe: a long natural path (boot waits) must not be capped at 100000
         kcfg.visits_per_pc = 262144;   // Sonic at 2 M steps: natural 32 bytes at 64 visits, 126 at 262144 (old engine ~134)
         for (int i = 4; i < argc; i++) {
             int used = dp_core_parse_option(&kcfg, argc, argv, i);
