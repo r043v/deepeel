@@ -73,14 +73,19 @@ int dp_md_movie_load(const char *path, DpMdMovie *out, char *err, size_t errsz) 
     size_t size = (size_t)n;
     if (dp_zip_is(data, size)) {
         DpBk2 b;
-        if (!dp_bk2_open(data, size, &b, err, errsz)) { /* err already set */ }
-        else { /* BizHawk BK2: container handled by the shared kernel (src/core/bk2.c) */
+        size_t glen = 0;
+        uint8_t *gprobe = dp_zip_read(data, size, ".gmv", &glen, NULL);   // a zip holding a Gens movie is not a bk2
+        int is_gmv = gprobe != NULL;
+        free(gprobe);
+        if (is_gmv) { memset(&b, 0, sizeof b); }
+        else if (!dp_bk2_open(data, size, &b, err, errsz)) { /* err already set */ }
+        else if (b.log && b.log_n) { /* BizHawk BK2: container handled by the shared kernel (src/core/bk2.c) */
             free(data);
             int ok = bk2_parse(b.log, b.log_n, &b, out, err, errsz);
             dp_bk2_free(&b);
             return ok;
         }
-        dp_bk2_free(&b);
+        if (!is_gmv) dp_bk2_free(&b);
         size_t len = 0;
         uint8_t *raw = dp_zip_read(data, size, ".gmv", &len, NULL);
         free(data); data = raw; size = len;
