@@ -1767,6 +1767,7 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(argv[i], "--fork-cap") && i + 1 < argc) kcfg.fork_site_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         }
         DpMdMach *mm = dp_mdmach_open(c.rom, c.size);
+        if (mm) dp_mdmach_reset(mm);   // power-on state: the 68000 starts from the vectors (without it the path faults)
         DpMachine *km = mm ? dp_machine_md(mm) : NULL;
         if (!km) { fprintf(stderr, "deepeel: --core: cannot open the ROM\n"); rc = 1; }
         else {
