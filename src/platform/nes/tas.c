@@ -4,6 +4,7 @@
 #include <string.h>
 #include <ctype.h>
 #include "../../../src/core/bk2.h"
+#include "../../../src/core/bizhawk.h"
 #include "../../../src/core/sha1.h"
 
 /* fm2 controller characters, in the movie's column order, to nes.input
@@ -72,67 +73,26 @@ static int tas_load_fm2(FILE *f, DpNesTas *t, char *err, size_t errsz) {
     return 1;
 }
 
-/* bk2: LogKey names the fields in order, one character per field per frame
- * line; controller sections are separated by '|', so a section's fields are
- * adjacent characters with no separator between them. */
+/* bk2: the shared BizHawk reader (src/core/bizhawk.c) resolves the LogKey columns; here only the NES pad
+ * mapping (A B Select Start Up Down Left Right = bits 0..7 of player 1) and the Reset/Power command bit. */
 static int tas_load_bk2(const uint8_t *log, size_t logn, DpNesTas *t,
                         char *err, size_t errsz) {
-    char key[40][24];
-    int nf = 0;
-    char *text = malloc(logn + 1);
-    if (!text) return 0;
-    memcpy(text, log, logn);
-    text[logn] = 0;
-    char *lk = strstr(text, "LogKey:");
-    if (!lk) { free(text); snprintf(err, errsz, "bk2: no LogKey line"); return 0; }
-    lk += 7;
-    char *kend = strchr(lk, '\n');
-    if (!kend) kend = lk + strlen(lk);
-    while (lk < kend && nf < 40) {
-        if (*lk == '#' || *lk == '|') lk++;
-        char *e = memchr(lk, '|', (size_t)(kend - lk));
-        size_t len = e ? (size_t)(e - lk) : (size_t)(kend - lk);
-        if (len == 0) break;
-        if (len >= sizeof key[0]) len = sizeof key[0] - 1;
-        memcpy(key[nf], lk, len);
-        key[nf][len] = 0;
-        nf++;
-        lk = e ? e + 1 : kend;
-    }
-    /* frame lines: fields consume one character each, a '|' between fields
-     * is skipped when present */
-    uint32_t cap = 0;
-    char *s = text;
-    while ((s = strchr(s, '\n'))) {
-        s++;
-        if (*s != '|') continue;
-        if (t->frames == cap) {
-            cap = cap ? cap * 2 : 8192;
-            uint8_t *nm = realloc(t->masks, cap);
-            uint8_t *nc = realloc(t->cmds, cap);
-            if (!nm || !nc) { free(nm); free(nc); free(text); snprintf(err, errsz, "bk2: out of memory"); return 0; }
-            t->masks = nm; t->cmds = nc;
-        }
+    DpBzMovie m;
+    if (!dp_bz_load(log, logn, &m, err, errsz)) return 0;
+    static const char *const names[8] = { "P1 A", "P1 B", "P1 Select", "P1 Start", "P1 Up", "P1 Down", "P1 Left", "P1 Right" };
+    int col[8], reset = dp_bz_find(&m, "Reset"), power = dp_bz_find(&m, "Power");
+    for (int i = 0; i < 8; i++) col[i] = dp_bz_find(&m, names[i]);
+    t->masks = malloc(m.nframes ? m.nframes : 1);
+    t->cmds = calloc(m.nframes ? m.nframes : 1, 1);
+    if (!t->masks || !t->cmds) { dp_bz_free(&m); snprintf(err, errsz, "bk2: out of memory"); return 0; }
+    for (uint32_t f = 0; f < m.nframes; f++) {
         uint8_t mask = 0;
-        char *q = s + 1;
-        for (int fi = 0; fi < nf && *q && *q != '\n'; fi++) {
-            char c = *q++;
-            if (!strncmp(key[fi], "P1 ", 3)) {
-                const char *n = key[fi] + 3;
-                int bit = !strcmp(n, "A") ? 0 : !strcmp(n, "B") ? 1 :
-                          !strcmp(n, "Select") ? 2 : !strcmp(n, "Start") ? 3 :
-                          !strcmp(n, "Up") ? 4 : !strcmp(n, "Down") ? 5 :
-                          !strcmp(n, "Left") ? 6 : 7;
-                if (c != '.' && c != ' ') mask |= (uint8_t)(1u << bit);
-            }
-            if (*q == '|') q++;
-        }
-        t->masks[t->frames] = mask;
-        t->cmds[t->frames] = 0;
-        t->frames++;
+        for (int i = 0; i < 8; i++) if (dp_bz_held(&m, f, col[i])) mask |= (uint8_t)(1u << i);
+        t->masks[f] = mask;
+        if (dp_bz_held(&m, f, reset) || dp_bz_held(&m, f, power)) { t->cmds[f] = 2; t->resets++; }
     }
-    free(text);
-    if (!t->frames) { snprintf(err, errsz, "bk2: no input frames"); return 0; }
+    t->frames = m.nframes;
+    dp_bz_free(&m);
     return 1;
 }
 
