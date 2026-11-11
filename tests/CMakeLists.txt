@@ -197,6 +197,9 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ramsrc.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_z80.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_save.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_rng.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_index.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_adpcm.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_sgx.pce
@@ -693,3 +696,11 @@ add_test(NAME core_index_replay COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix
 set_tests_properties(core_index_replay PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_solve COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_solve.sms; $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --no-sessions | grep -q 'natural 17' && $<TARGET_FILE:deepeel> z80 explore sms $f --core --attract-frames 0 --no-sessions --no-solve | grep -q 'natural 15'")
 set_tests_properties(core_solve PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# techniques 3, 4, 7 on the 6502 (NES): the technique covers the other side as natural, its counter is never silent
+add_test(NAME core_learn_sig_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_save.nes; $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions | grep -q 'learned signatures 1' && $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions --no-solve --no-learn-sig | grep -q 'rom bytes: natural 12'")
+set_tests_properties(core_learn_sig_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_rng_bytes_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_rng.nes; $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions | grep -q 'rng-byte forks 4' && $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions --no-solve --no-rng-learn | grep -q 'rom bytes: natural 15'")
+set_tests_properties(core_rng_bytes_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_index_replay_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_index.nes; $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions | grep -q 'index replays 16' && $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions --no-solve --no-index-replay | grep -q 'rom bytes: natural 16'")
+set_tests_properties(core_index_replay_6502 PROPERTIES FIXTURES_REQUIRED fixtures)

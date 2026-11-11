@@ -4682,3 +4682,17 @@ noyau (`--no-event-probes`, `--no-solve`, `--no-irq-jitter`, `--no-taint-cut` : 
 `api->frame` n'avance pas à un des vblanks (le 15e rappel vblank porte le même `frame` que le 14e) ; compter les
 rappels vblank à la place de `api->frame` ne change pas l'écart. Reste à localiser : granularité d'une instruction par
 `dp_mach_run` (le noyau coupe à chaque pas) contre exécution continue de l'ancien moteur.
+
+## Techniques 3, 4 et 7 du noyau : forme multi-ISA (0.304.0)
+
+La sauvegarde valide (§10.2), les octets RNG appris (§10.3) et le rejeu par
+index (§5.4) ne sont plus limités à `ld a,(nn)` Z80. Le noyau reconnaît le
+chargement direct d'un octet RAM par ISA : Z80 `3A`, SM83 `FA`/`F0`, 6502 et
+HuC6280 `LDA/LDX/LDY` absolu ou page zéro. La signature suit avec `cp n`
+(`FE`) ou `cmp #n` (`C9`). La table ROM indexée est reconnue en Z80/SM83
+(`ld hl,ROM` + `add hl,rr`) et en 6502/HuC6280 (`abs,X|Y` de base ROM).
+Les trois ont leur option (`--no-learn-sig`, `--no-rng-learn`,
+`--no-index-replay`) et leur compteur. Fixtures 6502 : `fix_nes_save`,
+`fix_nes_rng`, `fix_nes_index` (tests `core_*_6502`). Limites restantes :
+68000 (`mem_operand` n'y décrit rien), pas de fixture HuC6280 ni SM83 propre
+à ces trois techniques, index limité à 0..15.

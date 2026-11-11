@@ -411,6 +411,46 @@ out:
     #undef ADDC
 }
 
+
+// Direct RAM loads into the accumulator/index register, per ISA (techniques 3, 4, 7 on every ISA).
+// Returns the load length and the address when `bytes` is such a load of a non-ROM byte, else 0.
+static int direct_ram_load(DpMachine *m, const DpIsa *isa, const uint8_t *b, uint32_t *addr, int *idx_reg) {
+    const char *n = isa->name;
+    if (!n) return 0;
+    *idx_reg = 0;
+    int len = 0; uint32_t a = 0;
+    if (!strcmp(n, "z80") && b[0] == 0x3A) { len = 3; a = b[1] | (b[2] << 8); }
+    else if (!strcmp(n, "sm83") && b[0] == 0xFA) { len = 3; a = b[1] | (b[2] << 8); }
+    else if (!strcmp(n, "sm83") && b[0] == 0xF0) { len = 2; a = 0xFF00 + b[1]; }
+    else if ((!strcmp(n, "m6502") || !strcmp(n, "huc6280")) && (b[0] == 0xAD || b[0] == 0xAE || b[0] == 0xAC)) { len = 3; a = b[1] | (b[2] << 8); *idx_reg = b[0] != 0xAD; }
+    else if ((!strcmp(n, "m6502") || !strcmp(n, "huc6280")) && (b[0] == 0xA5 || b[0] == 0xA6 || b[0] == 0xA4)) { len = 2; a = b[1]; *idx_reg = b[0] != 0xA5; }
+    if (!len || m->rom_index(m, a) >= 0) return 0;
+    *addr = a;
+    return len;
+}
+
+// 1 when a ROM table access indexed by the loaded value follows within 12 bytes (technique 7)
+static int rom_table_follows(DpMachine *m, const DpIsa *isa, uint32_t pc, int len) {
+    uint8_t win[12];
+    for (unsigned i = 0; i < sizeof win; i++) win[i] = m->fetch(m, pc + len + i);
+    const char *n = isa->name;
+    int tab = 0;
+    if (!strcmp(n, "z80") || !strcmp(n, "sm83")) {
+        for (unsigned i = 0; i + 2 < sizeof win; i++) {
+            if (win[i] == 0x21 && m->rom_index(m, win[i + 1] | (win[i + 2] << 8)) >= 0) tab = 1;
+            if (tab && (win[i] == 0x19 || win[i] == 0x09 || win[i] == 0x85 || win[i] == 0x83)) return 1;
+        }
+        return 0;
+    }
+    // 6502 family: abs,X / abs,Y load/ALU from a ROM base address
+    for (unsigned i = 0; i + 2 < sizeof win; i++) {
+        uint8_t o = win[i];
+        if ((o == 0xBD || o == 0xB9 || o == 0x7D || o == 0x79 || o == 0x3D || o == 0x39 || o == 0xDD || o == 0xD9) &&
+            m->rom_index(m, win[i + 1] | (win[i + 2] << 8)) >= 0) return 1;
+    }
+    return 0;
+}
+
 static void run_path(Worker *w, Pending *p) {
     Shared *sh = w->sh;
     const DpCoreConfig *cfg = sh->cfg;
@@ -550,17 +590,11 @@ static void run_path(Worker *w, Pending *p) {
         }
         // technique 7 (restricted form): z80 `ld a,(RAM)` whose value then indexes a ROM table
         // (`ld hl,ROM` + `add hl,de` within 12 bytes): replay the site with each index 0..15
-        if (!cfg->no_index_replay && !cur_forced && m->poke && bytes[0] == 0x3A && isa->name && !strcmp(isa->name, "z80") &&
-            m->rom_index(m, bytes[1] | (bytes[2] << 8)) < 0) {
-            uint8_t win[12];
-            for (unsigned i = 0; i < sizeof win; i++) win[i] = m->fetch(m, pc + 3 + i);
-            int tab = 0, add = 0;
-            for (unsigned i = 0; i < sizeof win; i++) {
-                if (win[i] == 0x21 && i + 2 < sizeof win && m->rom_index(m, win[i + 1] | (win[i + 2] << 8)) >= 0) tab = 1;
-                if (tab && (win[i] == 0x19 || win[i] == 0x09)) add = 1;
-            }
-            if (tab && add) {
-                uint32_t addr = bytes[1] | (bytes[2] << 8);
+        uint32_t dl_addr = 0; int dl_idx = 0;
+        int dl_len = (m->poke && !cur_forced) ? direct_ram_load(m, isa, bytes, &dl_addr, &dl_idx) : 0;
+        if (!cfg->no_index_replay && dl_len) {
+            if (rom_table_follows(m, isa, pc, dl_len)) {
+                uint32_t addr = dl_addr;
                 pthread_mutex_lock(&sh->mu);
                 int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, ((uint64_t)addr) | (7ull << 60));
                 pthread_mutex_unlock(&sh->mu);
@@ -582,9 +616,8 @@ static void run_path(Worker *w, Pending *p) {
         }
         // technique 4 (restricted form): a z80 `ld a,(nn)` of RAM that returns a different value on a later
         // visit within one path reads a byte the game updates (RNG, timer); fork it on a few values
-        if (!cfg->no_rng_learn && !cur_forced && m->poke && bytes[0] == 0x3A && isa->name && !strcmp(isa->name, "z80") &&
-            m->rom_index(m, bytes[1] | (bytes[2] << 8)) < 0) {
-            uint32_t addr = bytes[1] | (bytes[2] << 8);
+        if (!cfg->no_rng_learn && dl_len) {
+            uint32_t addr = dl_addr;
             uint8_t v = m->fetch(m, addr);
             int volatile_byte = w->rng_stamp[(uint16_t)pc] == path_id && w->rng_last[(uint16_t)pc] != v;
             w->rng_stamp[(uint16_t)pc] = path_id; w->rng_last[(uint16_t)pc] = v;
@@ -614,18 +647,19 @@ static void run_path(Worker *w, Pending *p) {
         }
         // technique 3 (learned form): z80 `ld a,(nn)` of RAM straight followed by `cp n` is a signature test;
         // queue a state whose byte already holds n so the matching side runs as natural
-        if (!cfg->no_learn_sig && !cur_forced && m->poke && bytes[0] == 0x3A && bytes[3] == 0xFE &&
-            m->rom_index(m, bytes[1] | (bytes[2] << 8)) < 0 && isa->name && !strcmp(isa->name, "z80")) {
-            uint32_t addr = bytes[1] | (bytes[2] << 8);
+        uint8_t cmpop = (isa->name && (!strcmp(isa->name, "m6502") || !strcmp(isa->name, "huc6280"))) ? (dl_idx ? 0 : 0xC9) : 0xFE;
+        if (!cfg->no_learn_sig && dl_len && cmpop && m->fetch(m, pc + dl_len) == cmpop) {
+            uint32_t addr = dl_addr;
+            uint8_t sigv = m->fetch(m, pc + dl_len + 1);
             pthread_mutex_lock(&sh->mu);
             int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben,
-                                      ((uint64_t)addr << 8 | bytes[4]) | (3ull << 60));
+                                      ((uint64_t)addr << 8 | sigv) | (3ull << 60));
             pthread_mutex_unlock(&sh->mu);
             if (fresh) {
                 uint8_t *tmp = malloc(sh->sbytes), *snap = malloc(sh->sbytes);
                 if (tmp && snap) {
                     m->save(m, tmp);
-                    m->poke(m, addr, bytes[4]);
+                    m->poke(m, addr, sigv);
                     m->save(m, snap);
                     m->load(m, tmp);
                     pthread_mutex_lock(&sh->mu);
