@@ -468,7 +468,7 @@ static void run_path(Worker *w, Pending *p) {
                 int64_t k = (int64_t)f - tas_shift;
                 if (k >= (int64_t)cfg->tas_frames) {
                     m->set_input(m, 0); tas = 0;
-                    tas_ended = 1; if (tas_shift == 0) fprintf(stderr, "deepeel: TAS movie played to its end (%llu frames)\n", (unsigned long long)cfg->tas_frames);
+                    tas_ended = 1; if (tas_shift == 0) fprintf(stderr, "deepeel: TAS movie played to its end (%llu frames) ffac=%02x ffb4=%02x\n", (unsigned long long)cfg->tas_frames, m->fetch(m,0xFFAC), m->fetch(m,0xFFB4));
                     // the unshifted movie is over: queue the shifted replays on top, so they run next
                     if (tas_shift == 0 && sh->tas_start) {
                         pthread_mutex_lock(&sh->mu);

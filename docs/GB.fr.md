@@ -4660,3 +4660,8 @@ Piste suivie (0.303.8, sans correctif) : à la fin du film, `rom_index(0x4000)` 
 (`$FFAC`, `$FFB4`, `$FF40` reviennent à `$FF`), donc l'état du jeu n'est pas observable depuis le noyau. Étapes
 suivantes : (1) accès lecture RAM/E/S dans `DpMachine` (ou dump de l'état sauvegardé) ; (2) comparer frame par frame
 le registre de banque et `$FFAC` entre l'ancien moteur et le noyau pour trouver la première divergence du film.
+
+`gb_fetch` lit maintenant la WRAM ($C000–$DFFF) et la HRAM ($FF80–$FFFE) sans effet de bord. À la fin du film muggv3 sur
+le noyau (message `TAS movie played to its end`, qui affiche désormais `$FFAC` et `$FFB4`) : `$FFAC=4f`, `$FFB4=11`
+(niveau 1-1 si `$FFB4` code monde/niveau) — le film devrait finir en 4-3 : **désynchronisation confirmée** côté noyau
+(observation de l'outil). Comparer ensuite avec l'ancien moteur à la même frame pour localiser la première divergence.

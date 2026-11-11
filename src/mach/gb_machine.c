@@ -38,7 +38,13 @@ static void gb_load(DpMachine *m, const uint8_t *buf) {
     uint64_t f; memcpy(&f, buf + dp_mach_state_bytes(d), 8);
     *d->api->frame = (typeof(*d->api->frame))f;
 }
-static uint8_t gb_fetch(DpMachine *m, uint32_t a) { return dp_mach_op(gbw(m)->d, (uint16_t)a); }
+// side-effect-free view: work RAM bank 0/1 area and HRAM are read from the instance, the rest through the op view
+static uint8_t gb_fetch(DpMachine *m, uint32_t a) {
+    DpMach *d = gbw(m)->d;
+    if (a >= 0xC000 && a < 0xE000 && d->api->wram) return d->api->wram[a - 0xC000];
+    if (a >= 0xFF80 && a < 0xFFFF && d->api->hram) return d->api->hram[a - 0xFF80];
+    return dp_mach_op(d, (uint16_t)a);
+}
 // compact ROM index bank * 0x4000 + (addr & 0x3FFF); the window bank comes from the mapper state
 static int64_t gb_rom_index(DpMachine *m, uint32_t a) {
     DpMach *d = gbw(m)->d;
