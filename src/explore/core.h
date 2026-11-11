@@ -56,6 +56,7 @@ typedef struct DpCoreConfig {
     const uint32_t *seeds;     // extra entry points (vectors): queued as forced paths from the start state
     size_t n_seeds;
     int no_event_probes;
+    int unbounded;             // --unbounded: no step/path/site-fork ceilings; the RAM queue spills to the disk spool
     int no_closure;            // static closure off (no STATIC marking from natural direct transfers)
     int no_cells;              // technique 8 off: no (target, RAM cell) pruning of forced forks
     uint32_t seed_lo, seed_hi;  /* technique 3: RAM range pre-filled in extra start states (needs DpMachine.poke) */

@@ -38,6 +38,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
         if (*e == '-') { c->cell_lo = (uint32_t)lo; c->cell_hi = (uint32_t)strtoul(e + 1, NULL, 0); }
         return 2;
     }
+    if (!strcmp(a, "--unbounded")) { c->unbounded = 1; c->max_total = 0; c->max_path_steps = 0; c->fork_site_cap = 0; return 1; }
     if (!strcmp(a, "--no-closure")) { c->no_closure = 1; return 1; }
     if (!strcmp(a, "--no-cells")) { c->no_cells = 1; return 1; }
     if (!strcmp(a, "--no-event-probes")) { c->no_event_probes = 1; return 1; }
@@ -1132,7 +1133,10 @@ static void *worker_main(void *arg) {
     return NULL;
 }
 
-int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCoreResult *out) {
+int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, DpCoreResult *out) {
+    DpCoreConfig cfg_unb = *cfg_in;
+    if (cfg_unb.unbounded) { cfg_unb.max_total = 0; cfg_unb.max_path_steps = 0; cfg_unb.fork_site_cap = 0; }   // --unbounded: the one stop is exhaustion or SIGINT
+    const DpCoreConfig *cfg = &cfg_unb;
     memset(out, 0, sizeof *out);
     out->rom_size = rom_size;
     if (!m || !m->isa || !m->run || !m->save || !m->load || !m->fetch || !m->rom_index) return 0;

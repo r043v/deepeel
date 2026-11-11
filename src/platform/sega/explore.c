@@ -2917,6 +2917,7 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
     if(o->max_total) cfg.max_total=o->max_total;
     if(o->max_steps) cfg.max_path_steps=o->max_steps;
     cfg.fork_site_cap=o->fork_cap; cfg.queue_max=o->queue_max;
+    if(cfg.unbounded) { cfg.max_total=0; cfg.max_path_steps=0; cfg.fork_site_cap=0; }   // coverage first: only exhaustion or SIGINT stops
     static const uint32_t vec[]={0x08,0x10,0x18,0x20,0x28,0x30,0x38,0x66};
     if(o->seed_vectors && !cfg.seeds) { cfg.seeds=vec; cfg.n_seeds=sizeof vec/sizeof *vec; }
     if(!cfg.hooks) cfg.hooks=dp_machine_sega_hooks();

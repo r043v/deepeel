@@ -4835,3 +4835,18 @@ classes `DP_MAP_*` communes — copié, code naturel, code spéculatif, code sta
 Un seul chemin pour GB, Sega/MSX, NES, PCE et MD sous `--core` : `--cov`, `--map`
 (PNG si le nom finit par `.png`), `--summary`, `--text`. Tests
 `core_map_{sm83,huc6280,68000,6502,z80}`.
+
+## 0.309.0 — lecteur BizHawk générique et `--unbounded` du noyau
+
+- **`src/core/bizhawk.{c,h}`** : un lecteur unique pour les films BizHawk de n'importe quel core
+  (`.bk2` zip ou `.bkm` texte). Il lit l'en-tête (`Platform`, `Core`, `GameName`, identité SHA1/MD5,
+  `rerecordCount`, `Pal`, `StartsFromSavestate`), `SyncSettings.json` brut, les colonnes `LogKey`
+  (groupes `#`, boutons et axes analogiques) et chaque image (masque de boutons 64 bits par mot, axes
+  en entiers 16 bits). Chaque plateforme n'a plus qu'à associer des noms de colonnes (« P1 Up »,
+  « Reset », « P1 X Axis ») à ses bits de manette ; les grammaires par plateforme existantes
+  (`sega/tas.c`, `nes`, `pce`, `md`) restent à y basculer.
+- **`deepeel tas info FILM`** et **`deepeel tas diff A B`** : description d'un film et première image
+  où deux films (ou le même film vu par deux cores) diffèrent, base de la comparaison de TAS entre
+  cores. Test `bizhawk_reader` (fixtures `fix_bz_*.bk2`, dont une manette analogique).
+- **`--unbounded`** (noyau) : plus de plafond de pas total, de pas par chemin ni de forks par site ;
+  la file en RAM déborde sur le spool disque (`TMPDIR`, sinon `/tmp`).

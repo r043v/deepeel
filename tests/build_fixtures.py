@@ -1478,9 +1478,23 @@ def build_nes_pce(out):
     with open(os.path.join(out, "fix_pce_prov.pce"), "wb") as f:
         f.write(pv)
 
+def build_movies(out):
+    # generic BizHawk reader fixtures: a button-only core and an analog (N64-like) core, plus a variant of the first
+    import zipfile
+    def bk2(name, platform, core, key, rows, sync=True):
+        with zipfile.ZipFile(os.path.join(out, name), "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr("Header.txt", "MovieVersion BizHawk v2.0.0\nPlatform %s\nGameName Fixture\nCore %s\nSHA1 0123456789ABCDEF0123456789ABCDEF01234567\nrerecordCount 7\n" % (platform, core))
+            z.writestr("Input Log.txt", "[Input]\nLogKey:%s\n%s\n[/Input]\n" % (key, "\n".join(rows)))
+            if sync: z.writestr("SyncSettings.json", "{}")
+    key = "#Reset|Power|#P1 Up|P1 Down|P1 A"
+    bk2("fix_bz_a.bk2", "NES", "NesHawk", key, ["|..|...|", "|..|U..|", "|.P|..A|", "|..|...|"])
+    bk2("fix_bz_b.bk2", "NES", "QuickNES", key, ["|..|...|", "|..|U..|", "|.P|.DA|", "|..|...|"])
+    bk2("fix_bz_axis.bk2", "N64", "Mupen64Plus", "#P1 A|P1 B|#P1 X Axis|P1 Y Axis", ["|..|   0,   0|", "|A.|  12, -34|", "|.B| 127,-128|"])
+
 if __name__ == "__main__":
     build_nes_pce(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_z80_family(sys.argv[1] if len(sys.argv) > 1 else ".")
+    build_movies(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_md_z80(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_md_techniques(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_techniques_8bit(sys.argv[1] if len(sys.argv) > 1 else ".")

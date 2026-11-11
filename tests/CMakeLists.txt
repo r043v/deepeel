@@ -250,6 +250,9 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_decomp.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_lyprobe.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_status.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_bz_a.bk2
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_bz_b.bk2
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_bz_axis.bk2
   ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_closure.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_closure.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_closure.md
@@ -804,3 +807,5 @@ add_test(NAME core_map_6502 COMMAND sh -c "o=${CMAKE_CURRENT_BINARY_DIR}/core_ma
 set_tests_properties(core_map_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_map_z80 COMMAND sh -c "o=${CMAKE_CURRENT_BINARY_DIR}/core_map_z80; rm -f $o.png $o.json $o.map; $<TARGET_FILE:deepeel> z80 explore sms ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_closure.sms --core --jobs 1 --attract-frames 0 --no-sessions --map $o.png --summary $o.json >/dev/null && head -c 8 $o.png | grep -q PNG && grep -q '\"code-static\":[1-9]' $o.json && $<TARGET_FILE:deepeel> z80 explore sms ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_closure.sms --core --jobs 1 --attract-frames 0 --no-sessions --map $o.map >/dev/null && grep -q 'map v1' $o.map")
 set_tests_properties(core_map_z80 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME bizhawk_reader COMMAND sh -c "d=${CMAKE_CURRENT_BINARY_DIR}; x=$<TARGET_FILE:deepeel>; $x tas info $d/fix_bz_axis.bk2 | grep -q 'frames 3, columns 4 (2 buttons, 2 axes)' && $x tas info $d/fix_bz_a.bk2 | grep -q 'core NesHawk' && $x tas diff $d/fix_bz_a.bk2 $d/fix_bz_a.bk2 | grep -q identical && ! $x tas diff $d/fix_bz_a.bk2 $d/fix_bz_b.bk2 | grep -q identical && $x tas diff $d/fix_bz_a.bk2 $d/fix_bz_b.bk2 | grep -q 'first differing frame: 2'")
+set_tests_properties(bizhawk_reader PROPERTIES FIXTURES_REQUIRED fixtures)

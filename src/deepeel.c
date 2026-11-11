@@ -43,6 +43,7 @@
 #include "explore/tas.h"
 
 #include "explore/core.h"
+#include "core/bizhawk.h"
 static const char *argv_cov(int argc, char **argv) {
     for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "--cov")) return argv[i + 1];
     return NULL;
@@ -2080,6 +2081,43 @@ static int cmd_md(int argc, char **argv) {
     return rc;
 }
 
+
+// deepeel tas info MOVIE | deepeel tas diff A B : generic BizHawk movie reader (any core)
+static int bz_open(const char *path, DpBzMovie *m) {
+    size_t n = 0;
+    uint8_t *d = nes_read_file(path, &n);
+    char err[160] = "";
+    if (!d) { fprintf(stderr, "deepeel: cannot read %s\n", path); return 0; }
+    int ok = dp_bz_load(d, n, m, err, sizeof err);
+    free(d);
+    if (!ok) fprintf(stderr, "deepeel: %s: %s\n", path, err);
+    return ok;
+}
+static int cmd_tas(int argc, char **argv) {
+    if (argc >= 4 && !strcmp(argv[2], "info")) {
+        DpBzMovie m;
+        if (!bz_open(argv[3], &m)) return 1;
+        dp_bz_describe(&m, stdout);
+        dp_bz_free(&m);
+        return 0;
+    }
+    if (argc >= 5 && !strcmp(argv[2], "diff")) {
+        DpBzMovie a, b;
+        if (!bz_open(argv[3], &a)) return 1;
+        if (!bz_open(argv[4], &b)) { dp_bz_free(&a); return 1; }
+        unsigned oa = 0, ob = 0;
+        long f = dp_bz_diff(&a, &b, &oa, &ob);
+        printf("A: %s %s %u frames; B: %s %s %u frames\n", a.platform, a.core, a.nframes, b.platform, b.core, b.nframes);
+        printf("columns only in A: %u, only in B: %u\n", oa, ob);
+        if (f < 0) printf("inputs identical over %u common frames\n", a.nframes < b.nframes ? a.nframes : b.nframes);
+        else printf("first differing frame: %ld\n", f);
+        dp_bz_free(&a); dp_bz_free(&b);
+        return f < 0 ? 0 : 3;
+    }
+    fprintf(stderr, "usage: deepeel tas info MOVIE | deepeel tas diff MOVIE_A MOVIE_B\n");
+    return 2;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) return usage(), 2;
     if (!strcmp(argv[1], "frontier") && argc > 3 && !strcmp(argv[2], "stats")) {
@@ -2192,6 +2230,7 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "explore")) return cmd_explore(argc, argv);
     if (!strcmp(argv[1], "mapx")) return cmd_mapx(argc, argv);
     if (!strcmp(argv[1], "maprender")) return cmd_maprender(argc, argv);
+    if (!strcmp(argv[1], "tas")) return cmd_tas(argc, argv);
     if (!strcmp(argv[1], "map")) return cmd_map(argc, argv);
     if (!strcmp(argv[1], "regs")) return cmd_regs(argc, argv);
     if (!strcmp(argv[1], "dis")) return cmd_dis(argc, argv);
