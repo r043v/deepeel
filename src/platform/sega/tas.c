@@ -8,6 +8,7 @@
 #include "../../../src/core/md5.h"
 #include "../../../src/core/zip.h"
 #include "../../../src/core/bk2.h"
+#include "../../../src/core/bizhawk.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -53,7 +54,7 @@ static uint8_t btn_mask(const char *n) {
 }
 // frames are '|'-separated segments; within a segment one character per
 // LogKey name in order, '.' = released, anything else = pressed
-static int log_parse(const uint8_t *d,size_t n,DpSegaTas *out,char *err,size_t errsz) {
+static int log_parse_positional(const uint8_t *d,size_t n,DpSegaTas *out,char *err,size_t errsz) {
     const char *p=(const char *)d,*end=(const char *)d+n;
     uint8_t key_mask[64];
     int nkey=0,any_frame=0;
@@ -108,6 +109,29 @@ static int log_parse(const uint8_t *d,size_t n,DpSegaTas *out,char *err,size_t e
     }
     if(!any_frame) { snprintf(err,errsz,"no input frames found"); return 0; }
     return 1;
+}
+// LogKey movies go through the shared BizHawk reader (src/core/bizhawk.c): every named column is mapped onto the
+// sega mask by btn_mask; movies without a LogKey keep the positional grammar above
+static int log_parse(const uint8_t *d,size_t n,DpSegaTas *out,char *err,size_t errsz) {
+    if(!memmem(d,n,"LogKey:",7)) return log_parse_positional(d,n,out,err,errsz);
+    DpBzMovie m;
+    if(!dp_bz_load(d,n,&m,err,errsz)) return 0;
+    uint8_t km[512]; unsigned nk=m.nkeys<512?m.nkeys:512;
+    for(unsigned i=0;i<nk;i++) {
+        char low[DP_BZ_NAME];
+        size_t k=0;
+        for(const char *c=m.keys[i].name;*c && k+1<sizeof low;c++) low[k++]=(char)tolower((unsigned char)*c);
+        low[k]=0;
+        km[i]=m.keys[i].axis?0:btn_mask(low);
+    }
+    int ok=1;
+    for(uint32_t f=0;f<m.nframes && ok;f++) {
+        uint8_t mask=0;
+        for(unsigned i=0;i<nk;i++) if(km[i] && dp_bz_held(&m,f,(int)i)) mask|=km[i];
+        ok=emit(out,mask,err,errsz);
+    }
+    dp_bz_free(&m);
+    return ok;
 }
 static int tas_load_buf(uint8_t *d,size_t n,DpSegaTas *out,char *err,size_t errsz,int depth) {
     if(depth>3) { snprintf(err,errsz,"too many nested containers"); return 0; }

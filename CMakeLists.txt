@@ -413,7 +413,7 @@ set_target_properties(deepeel_msx PROPERTIES IMPORTED_LOCATION ${DP_MSX_ARCHIVE}
   INTERFACE_LINK_LIBRARIES deepeel_z80)
 add_dependencies(deepeel_msx dp_msx_runtime)
 target_link_libraries(deepeel PRIVATE deepeel_msx)
-add_library(deepeel_sega STATIC src/platform/sega/explore.c src/platform/sega/closure.c src/platform/sega/visits.c src/platform/sega/tas.c src/platform/sega/registry.c src/explore/frontier.c src/core/bk2.c src/core/md5.c src/core/zip.c src/core/sha1.c src/core/statefile.c src/gui/fbwatch.c src/explore/ramarch.c src/explore/core.c)
+add_library(deepeel_sega STATIC src/platform/sega/explore.c src/platform/sega/closure.c src/platform/sega/visits.c src/platform/sega/tas.c src/core/bizhawk.c src/platform/sega/registry.c src/explore/frontier.c src/core/bk2.c src/core/md5.c src/core/zip.c src/core/sha1.c src/core/statefile.c src/gui/fbwatch.c src/explore/ramarch.c src/explore/core.c)
 target_link_libraries(deepeel_sega PUBLIC deepeel_core)
 target_link_libraries(deepeel_sega PUBLIC ZLIB::ZLIB)
 # Second runtime instances for --jobs 2: the same sources compiled again with
