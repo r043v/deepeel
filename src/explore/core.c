@@ -140,7 +140,7 @@ typedef struct {
     uint32_t run_writes;
     int no_decompress;
     // technique 1 (solve): non-ROM addresses read inside the current window
-    uint16_t ram[4]; unsigned nram; int track;
+    uint32_t ram[4]; unsigned nram; int track;
 } CopyObs;
 
 #define RUN_MIN 16
@@ -195,7 +195,7 @@ static int cond_ahead(Worker *w, const DpIsa *isa, uint32_t pc) {
         for (unsigned j = 0; j < sizeof b; j++) b[j] = m->fetch(m, p + j);
         DpFlowInfo f;
         memset(&f, 0, sizeof f);
-        if (!isa->flow(b, (uint16_t)p, &f) || !f.length) break;
+        if (!isa->flow(b, p, &f) || !f.length) break;
         if (f.kind == DP_FLOW_COND) { yes = i > 0; break; }   // the conditional itself starts no window
         if (f.kind != DP_FLOW_SEQ) break;
         p += f.length;
@@ -246,7 +246,7 @@ static uint32_t *site_count(SiteTab *t, uint32_t pc) {
     return &t->s[h].count;
 }
 
-static void obs_read(void *u, uint16_t addr, uint8_t v) {
+static void obs_read(void *u, uint32_t addr, uint8_t v) {
     CopyObs *o = u;
     int64_t k = o->m->rom_index(o->m, addr);
     if (k < 0 && o->track && o->nram < 4) {
@@ -261,7 +261,7 @@ static void obs_read(void *u, uint16_t addr, uint8_t v) {
     }
 }
 
-static void obs_write(void *u, uint16_t addr, uint8_t v) {
+static void obs_write(void *u, uint32_t addr, uint8_t v) {
     CopyObs *o = u;
     if (o->run_hi >= 0 && o->m->rom_index(o->m, addr) < 0) o->run_writes++;
     if (o->last_rom < 0 || o->age > 4) return;
@@ -271,7 +271,7 @@ static void obs_write(void *u, uint16_t addr, uint8_t v) {
             __atomic_fetch_or(&o->r->flags[o->last_rom], DP_CORE_COPIED, __ATOMIC_RELAXED);
             __atomic_fetch_or(&o->r->src_flags[o->last_rom], DP_SRC_COPY, __ATOMIC_RELAXED);
             o->r->copy_bytes++;
-            if (o->fed) o->fed[addr] = 1;
+            if (o->fed) o->fed[addr & 0xFFFF] = 1;
         }
     }
     o->last_rom = -1;
@@ -376,9 +376,9 @@ static unsigned solve_cond(Worker *w, const DpCoreConfig *cfg, uint32_t condpc, 
     int saved_forced = w->cobs.forced, saved_track = w->cobs.track;
     w->cobs.forced = 1; w->cobs.track = 0;
     for (unsigned a = 0; a < w->cobs.nram; a++) {
-        uint16_t addr = w->cobs.ram[a];
+        uint32_t addr = w->cobs.ram[a];
         pthread_mutex_lock(&sh->mu);
-        int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, (((uint64_t)m->rom_index(m, condpc) + 1) << 20 ^ addr << 4 ^ (other & 15)) | (9ull << 60));
+        int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, (((uint64_t)m->rom_index(m, condpc) + 1) << 20 ^ (uint64_t)addr << 4 ^ (other & 15)) | (9ull << 60));
         pthread_mutex_unlock(&sh->mu);
         if (!fresh) continue;
         loc->solve_tries++;
@@ -532,7 +532,7 @@ static void run_path(Worker *w, Pending *p) {
         int len = isa->length(bytes[0]);
         DpFlowInfo fi;
         memset(&fi, 0, sizeof fi);
-        int have_flow = isa->flow && isa->flow(bytes, (uint16_t)pc, &fi);
+        int have_flow = isa->flow && isa->flow(bytes, pc, &fi);
         if (have_flow && fi.length) len = fi.length;
         if (len <= 0) len = 1;
         if (m->rom_index(m, pc) < 0) {

@@ -101,7 +101,7 @@ static void isa_effect(const uint8_t *b, DpProvRegs *r, const DpProvRom *rom) {
 
 static int isa_length(uint8_t op) { return sm83_len(op); }
 
-static int isa_flow(const uint8_t *b, uint16_t pc, DpFlowInfo *o) {
+static int isa_flow(const uint8_t *b, uint32_t pc, DpFlowInfo *o) {
     uint8_t op = b[0];
     int len = sm83_len(op);
     o->kind = DP_FLOW_SEQ; o->length = (uint8_t)len; o->fall = 1; o->call = 0;

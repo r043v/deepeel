@@ -7,7 +7,7 @@
 
 static int isa_length(uint8_t op) { return dp_huc_length(op); }
 
-static int isa_flow(const uint8_t *bytes, uint16_t pc, DpFlowInfo *o) {
+static int isa_flow(const uint8_t *bytes, uint32_t pc, DpFlowInfo *o) {
     DpHucIns in;
     o->kind = DP_FLOW_SEQ; o->fall = 1; o->call = 0; o->rst = 0; o->halt = 0;
     o->target = -1; o->cond = -1; o->length = 1;

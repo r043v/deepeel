@@ -47,7 +47,7 @@ static uint8_t isa_cond_flag(int cond) {
 // the decoder is the undefined-opcode authority (prefix chains included)
 static int isa_illegal(uint8_t op) { (void)op; return 0; }
 
-static int isa_flow(const uint8_t *bytes, uint16_t pc, DpFlowInfo *o) {
+static int isa_flow(const uint8_t *bytes, uint32_t pc, DpFlowInfo *o) {
     DpZ80Instruction in;
     o->kind = DP_FLOW_SEQ; o->fall = 1; o->call = 0; o->rst = 0; o->halt = 0;
     o->target = -1; o->cond = -1; o->length = 1;

@@ -10,8 +10,8 @@
 static void after_step_cb(void *u, DpMachine *m, uint32_t pc) { (void)m; (void)pc; ((uint64_t *)u)[0]++; }
 static int veto_all(void *u, DpMachine *m, uint32_t s, uint32_t o) { (void)u; (void)m; (void)s; (void)o; return 0; }
 
-static void obs_read(void *u, uint16_t a, uint8_t v) { (void)a; (void)v; ((uint64_t *)u)[0]++; }
-static void obs_write(void *u, uint16_t a, uint8_t v) { (void)a; (void)v; ((uint64_t *)u)[1]++; }
+static void obs_read(void *u, uint32_t a, uint8_t v) { (void)a; (void)v; ((uint64_t *)u)[0]++; }
+static void obs_write(void *u, uint32_t a, uint8_t v) { (void)a; (void)v; ((uint64_t *)u)[1]++; }
 
 static const void *pick_gg(unsigned w) { return dp_sega_backend_gg_worker(w); }
 

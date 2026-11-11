@@ -70,7 +70,7 @@ typedef struct DpIsa {
     int (*length)(uint8_t op);
     // classify the instruction at `bytes` (at least `length` readable bytes)
     // located at CPU address `pc`
-    int (*flow)(const uint8_t *bytes, uint16_t pc, DpFlowInfo *out);
+    int (*flow)(const uint8_t *bytes, uint32_t pc, DpFlowInfo *out);
     // condition index of a conditional opcode, -1 otherwise
     int (*cond_of)(uint8_t op);
     // state mask of the flag a condition tests (polarity in the low bit of cond)
@@ -102,8 +102,8 @@ typedef struct DpRegs {
 // CPU data access, as the engine sees them
 typedef struct DpObservers {
     void (*on_step)(void *user, uint16_t pc, uint8_t op, int entry);
-    void (*on_read)(void *user, uint16_t addr, uint8_t v);
-    void (*on_write)(void *user, uint16_t addr, uint8_t v);
+    void (*on_read)(void *user, uint32_t addr, uint8_t v);
+    void (*on_write)(void *user, uint32_t addr, uint8_t v);
 } DpObservers;
 
 // a component of the incoming state a section's behaviour may depend on

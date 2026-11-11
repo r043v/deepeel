@@ -234,7 +234,7 @@ int dp_mdmach_vdp_pending(const DpMdMach *d) { return d->m->vdp_pending; }
 uint16_t dp_mdmach_vdp_first(const DpMdMach *d) { return (uint16_t)d->m->vdp_first; }
 uint8_t dp_mdmach_vdp_code(const DpMdMach *d) { return d->m->vdp_code; }
 int dp_mdmach_rom_visible(const DpMdMach *d, uint32_t addr) {
-    return !(d->m->sram_enable && addr >= 0x200000u && addr < 0x210000u);
+    return addr < 0x400000u && !(d->m->sram_enable && addr >= 0x200000u && addr < 0x210000u);
 }
 const uint8_t *dp_mdmach_ram(const DpMdMach *d) { return d->m->ram; }
 void dp_mdmach_render(const DpMdMach *d, uint32_t *pixels) { md_full_render(d->m, pixels, 320); }

@@ -18,8 +18,8 @@ static void obs_step(void *u, uint16_t pc, uint8_t op, int entry) {
     (void)u; (void)pc; (void)op; (void)entry;
     if (++obs_steps >= 3000) dp_mach_cut(obs_mach, DP_CUT_QUIT);
 }
-static void obs_read(void *u, uint16_t a, uint8_t v) { (void)u; (void)a; (void)v; obs_reads++; }
-static void obs_write(void *u, uint16_t a, uint8_t v) { (void)u; (void)a; (void)v; obs_reads++; }
+static void obs_read(void *u, uint32_t a, uint8_t v) { (void)u; (void)a; (void)v; obs_reads++; }
+static void obs_write(void *u, uint32_t a, uint8_t v) { (void)u; (void)a; (void)v; obs_reads++; }
 
 int main(int argc, char **argv) {
     const DpIsa *isa = dp_isa_sm83();
