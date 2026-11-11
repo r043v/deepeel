@@ -7,6 +7,9 @@
 #include "../core/dpmachine.h"
 #include "m0boy.h"
 #include "../explore/core.h"
+#include "../explore/tas.h"
+
+void dp_tas_tune_machine(DpMach *mach, const DpTas *tas);   // sessions.c: the recorder's timing quirks
 
 // The kernel-facing view of one m0boy instance.  Each wrapper owns its observer and its step
 // counter, so several instances (parallel workers, one per compiled slot) run side by side.
@@ -17,6 +20,7 @@ typedef struct GbWrap {
     unsigned seen;            // instructions started in the current gb_run
     int joy_armed, joy_seen;  // joypad-port read detection for the event probe
     const uint8_t *rom; size_t rom_size;   // for clone()
+    const DpTas *tas;         // movie whose recorder sync profile every instance takes
 } GbWrap;
 static GbWrap *gbw(DpMachine *m) { return m->impl; }
 
@@ -175,9 +179,10 @@ static DpMachine *gb_clone(DpMachine *m, unsigned worker) {
         if (!d) continue;
         dp_mach_set_rom(d, o->rom, (uint32_t)o->rom_size);
         dp_mach_reset(d);
+        if (o->tas) dp_tas_tune_machine(d, o->tas);
         DpMachine *c = gb_wrap(d);
         if (!c) { dp_mach_close(d); return NULL; }
-        gbw(c)->rom = o->rom; gbw(c)->rom_size = o->rom_size;
+        gbw(c)->rom = o->rom; gbw(c)->rom_size = o->rom_size; gbw(c)->tas = o->tas;
         c->clone = gb_clone;
         return c;
     }
@@ -216,4 +221,10 @@ static DpMachine *gb_wrap(DpMach *impl) {
     m->probes = gb_probes;
     m->close = gb_close;
     return m;
+}
+
+// applies the movie's recorder sync profile to this instance and to every clone
+void dp_machine_gb_set_tas(DpMachine *m, const struct DpTas *tas) {
+    gbw(m)->tas = tas;
+    dp_tas_tune_machine(gbw(m)->d, tas);
 }

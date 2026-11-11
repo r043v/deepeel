@@ -629,6 +629,7 @@ static int cmd_explore(int argc, char **argv) {
                         gmasks[f] = k;
                     }
                     gkcfg.tas_masks = gmasks; gkcfg.tas_frames = gt.frames;
+                    dp_machine_gb_set_tas(km, &gt);   // the recorder's sync profile
                 } else fprintf(stderr, "deepeel: --tas: %s\n", terr);
             }
             DpCoreResult kr;

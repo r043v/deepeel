@@ -173,6 +173,9 @@ DpMachine *dp_machine_gb(struct DpMach *impl);
 const struct DpPlatformHooks *dp_machine_gb_hooks(void);
 /* tell a GB machine where its ROM is so clone() can start parallel workers on other compiled instances */
 void dp_machine_gb_source(DpMachine *m, const uint8_t *rom, size_t size);
+struct DpTas;
+/* the movie whose recorder sync profile (timing quirks, power-on RAM) every GB instance takes */
+void dp_machine_gb_set_tas(DpMachine *m, const struct DpTas *tas);
 const struct DpPlatformHooks *dp_machine_md_hooks(void);
 /* tell an MD machine where its ROM is so clone() can start parallel workers */
 void dp_machine_md_source(DpMachine *m, const uint8_t *rom, size_t size);

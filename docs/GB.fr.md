@@ -4607,3 +4607,11 @@ manette), fourche d'IRQ vblank, session attract unique (`--attract-frames`, déf
 Bornes de temps communes à toutes les plateformes : `--min-time`, `--max-time`, `--stall-time`.
 Observation de l'outil (pas une mesure matérielle) : Super Mario Land, 50 M de pas, 1 job : natural 8945.
 Parité avec l'ancien moteur non encore mesurée ; l'ancien moteur reste le défaut.
+
+## Rejeu TAS sur le noyau (0.303.2)
+
+`deepeel explore rom.gb --core --tas film` rejoue un film (VBM, BK2, log) dans le noyau : le compteur de trames
+est porté par l'état sauvegardé (les forks reprennent à leur trame) et le profil de synchro de l'enregistreur
+(`dp_tas_tune_machine`, partagé avec l'ancien moteur) est appliqué à l'instance et à ses clones. Le chemin du
+film s'arrête à sa fin ; ses forks poursuivent l'exploration. Observation de l'outil sur SML (muggv3, 20 M de
+pas) : natural 7086 octets ; fidélité image par image au film non vérifiée côté noyau.
