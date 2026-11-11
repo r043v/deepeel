@@ -147,5 +147,9 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
 void dp_core_result_free(DpCoreResult *r);
 
 void dp_core_write_cov(const char *path, const char *id, const DpCoreResult *r);
+// generic map/summary outputs (core_map.c): class vector, PNG-or-text map, JSON summary; 0 = ok, -1 = failure
+uint8_t *dp_core_map_build(const DpCoreResult *r);
+int dp_core_write_map(const char *path, const char *id, const char *rom_name, const DpCoreResult *r);
+int dp_core_write_summary(const char *path, const char *id, const DpCoreResult *r);
 
 #endif

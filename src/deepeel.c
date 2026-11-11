@@ -42,9 +42,23 @@
 #include "platform/pce/tas.h"
 #include "explore/tas.h"
 
+#include "explore/core.h"
 static const char *argv_cov(int argc, char **argv) {
     for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "--cov")) return argv[i + 1];
     return NULL;
+}
+
+static const char *argv_opt(int argc, char **argv, const char *name) {
+    for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], name)) return argv[i + 1];
+    return NULL;
+}
+// kernel (--core) outputs shared by every platform: --cov, --map (PNG or text), --summary, --text
+static void core_outputs(int argc, char **argv, const char *id, const char *rom, const DpCoreResult *r) {
+    dp_core_write_cov(argv_cov(argc, argv), id, r);
+    if (dp_core_write_map(argv_opt(argc, argv, "--map"), id, rom, r) < 0) fprintf(stderr, "deepeel: cannot write --map\n");
+    if (dp_core_write_summary(argv_opt(argc, argv, "--summary"), id, r) < 0) fprintf(stderr, "deepeel: cannot write --summary\n");
+    const char *t = argv_opt(argc, argv, "--text");
+    if (t) { FILE *f = fopen(t, "w"); if (f) { dp_core_report(f, id, r); fclose(f); } }
 }
 
 static uint8_t *nes_read_file(const char *path, size_t *size);
@@ -111,7 +125,6 @@ static int cmd_maprender(int argc, char **argv);
 #include <errno.h>
 #include <time.h>
 #include "cli_common.h"
-#include "explore/core.h"
 #include "core/dpmachine.h"
 
 static void usage(void) {
@@ -648,7 +661,7 @@ static int cmd_explore(int argc, char **argv) {
             }
             DpCoreResult kr;
             rc = dp_core_explore(km, cart->rom_size, &gkcfg, &kr) ? 0 : 1;
-            if (!rc) dp_core_report(stdout, "gb", &kr); dp_core_write_cov(argv_cov(argc, argv), "gb", &kr);
+            if (!rc) dp_core_report(stdout, "gb", &kr); core_outputs(argc, argv, "gb", path, &kr);
             dp_core_result_free(&kr);
             free(gmasks); dp_tas_free(&gt);
             km->close(km);
@@ -1441,7 +1454,7 @@ static int cmd_nes(int argc, char **argv) {
         DpCoreResult kr;
         size_t prg = dp_machine_nes_prg_size(km);
         int kok = dp_core_explore(km, prg, &kcfg, &kr);
-        if (kok) dp_core_report(stdout, "nes", &kr); dp_core_write_cov(argv_cov(argc, argv), "nes", &kr);
+        if (kok) dp_core_report(stdout, "nes", &kr); core_outputs(argc, argv, "nes", path, &kr);
         dp_core_result_free(&kr);
         free(kmasks); dp_nes_tas_free(&ntas);
         km->close(km);
@@ -1601,7 +1614,7 @@ static int cmd_pce(int argc, char **argv) {
         DpCoreResult kr;
         int kok = dp_core_explore(km, dp_pce_rom_size(), &kcfg, &kr);
         free(kmasks); dp_pce_tas_free(&ptas);
-        if (kok) dp_core_report(stdout, "pce", &kr); dp_core_write_cov(argv_cov(argc, argv), "pce", &kr);
+        if (kok) dp_core_report(stdout, "pce", &kr); core_outputs(argc, argv, "pce", path, &kr);
         dp_core_result_free(&kr);
         km->close(km);
         free(data);
@@ -1893,7 +1906,7 @@ static int cmd_md(int argc, char **argv) {
             }
             DpCoreResult kr;
             rc = dp_core_explore(km, c.size, &kcfg, &kr) ? 0 : 1;
-            if (!rc) dp_core_report(stdout, "md", &kr); dp_core_write_cov(argv_cov(argc, argv), "md", &kr);
+            if (!rc) dp_core_report(stdout, "md", &kr); core_outputs(argc, argv, "md", NULL, &kr);
             dp_core_result_free(&kr);
             free(kmasks); dp_md_movie_free(&mv);
             km->close(km);

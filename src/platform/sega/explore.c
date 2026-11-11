@@ -2898,7 +2898,7 @@ static int parse_entry(const char *s,DpSegaOptions *o) {
 static int core_is_sg, core_is_msx;
 // only the first two instances are trusted: gg3..gg16 resolve the bank-switch
 // fixture differently (observed 2026-11: fix_sega_mapper reaches other ROM indexes)
-static const char *core_cov_path, *core_text_path;
+static const char *core_cov_path, *core_text_path, *core_map_path, *core_summary_path, *core_rom_name;
 static int core_jobs_auto;
 static const void *sega_core_pick(unsigned w) { (void)w; if(core_is_msx) return dp_msx_backendt(); if(core_is_sg) return dp_sega_backend_sgt(); return dp_sega_backend_ggt(); }
 static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *o,const DpCoreConfig *kcfg,FILE *out) {
@@ -2936,6 +2936,8 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
     if(ok) {
         dp_core_report(out,s->id,&r);
         dp_core_write_cov(core_cov_path,s->id,&r);
+        if(dp_core_write_map(core_map_path,s->id,core_rom_name,&r)<0) fprintf(stderr,"deepeel: cannot write %s\n",core_map_path);
+        if(dp_core_write_summary(core_summary_path,s->id,&r)<0) fprintf(stderr,"deepeel: cannot write %s\n",core_summary_path);
         if(core_text_path && core_text_path[0]) {   // --text: the same report, written to a file
             FILE *tf=fopen(core_text_path,"w");
             if(tf) { dp_core_report(tf,s->id,&r); fclose(tf); }
@@ -3078,7 +3080,7 @@ int dp_sega_explore_command(int argc,char **argv) {
     int read_ok=fread(image,1,(size_t)end,f)==(size_t)end; fclose(f);
     if(!read_ok) { free(image); return 1; }
     size_t header=(!strcmp(s->id,"sms") || !strcmp(s->id,"gg")) && ((size_t)end&0x3fff)==512?512:0;
-    if(use_core) { core_cov_path=cov; core_text_path=text; int cok=sega_core_run(s,image+header,(size_t)end-header,&o,&kcfg,stdout); free(image); return cok?0:1; }
+    if(use_core) { core_cov_path=cov; core_text_path=text; core_map_path=map; core_summary_path=summary; core_rom_name=argv[4]; int cok=sega_core_run(s,image+header,(size_t)end-header,&o,&kcfg,stdout); free(image); return cok?0:1; }
     DpSegaResults r;
     if(o.watch_every) o.jobs=1; // one framebuffer: the instances would share it
     if(watch && dp_fbwatch_start) dp_fbwatch_start("deepeel sega watch");

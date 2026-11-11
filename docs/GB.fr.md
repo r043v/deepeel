@@ -4824,3 +4824,14 @@ site est exercé sur Z80 (`core_site_score_*`) ; sur les autres ISA, une fixture
 minimale ne produit aucun pick faute d'historique de gain par site (constat de
 l'outil, pas une limite technique). Limite restante de la technique 2 : pad
 HuC6280 (`$1000`) et compteurs H/V du VDC, pas encore sondés.
+
+## 0.308.0 — noyau : `--map` (PNG ou texte), `--summary` et `--text` génériques
+
+`src/explore/core_map.c` projette les drapeaux du noyau (par octet de ROM) sur les
+classes `DP_MAP_*` communes — copié, code naturel, code spéculatif, code statique
+(fermeture), donnée lue / décompressée, inconnu — et alimente le rendu PNG partagé
+(`dp_map_png_from_evidence`, avec le journal des premières preuves tiré de
+`first_seen`/`src_flags`), la carte texte `<id> map v1` et le JSON `--summary`.
+Un seul chemin pour GB, Sega/MSX, NES, PCE et MD sous `--core` : `--cov`, `--map`
+(PNG si le nom finit par `.png`), `--summary`, `--text`. Tests
+`core_map_{sm83,huc6280,68000,6502,z80}`.
