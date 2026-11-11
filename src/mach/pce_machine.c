@@ -26,6 +26,7 @@ static uint32_t pce_state_bytes(DpMachine *m) { (void)m; return (uint32_t)dp_pce
 static void pce_save(DpMachine *m, uint8_t *buf) { pce_ensure(m); dp_pce_save(buf); memcpy(buf + dp_pce_state_size(), &((PceWrap *)m->impl)->frames, 8); }
 static void pce_load(DpMachine *m, const uint8_t *buf) { pce_ensure(m); dp_pce_load(buf); memcpy(&((PceWrap *)m->impl)->frames, buf + dp_pce_state_size(), 8); }
 static uint8_t pce_fetch(DpMachine *m, uint32_t a) { pce_ensure(m); return dp_pce_peek((uint16_t)a); }
+static void pce_poke(DpMachine *m, uint32_t a, uint8_t v) { pce_ensure(m); dp_pce_poke((uint16_t)a, v); }
 static int64_t pce_rom_index(DpMachine *m, uint32_t a) { pce_ensure(m); return dp_pce_rom_index((uint16_t)a); }
 
 // one step (an instruction or an interrupt dispatch)
@@ -128,6 +129,7 @@ DpMachine *dp_machine_pce(void) {
     m->save = pce_save;
     m->load = pce_load;
     m->fetch = pce_fetch;
+    m->poke = pce_poke;
     m->rom_index = pce_rom_index;
     m->run = pce_run;
     m->observe = pce_observe;

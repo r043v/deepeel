@@ -662,6 +662,8 @@ void dp_nesmach_render(const DpNesMach *d, uint32_t *argb) {
     }
 }
 const uint8_t *dp_nesmach_ram(const DpNesMach *d) { (void)d; return machine.ram; }
+/* debugger-style write of internal RAM (not a CPU access) */
+void dp_nesmach_poke(uint32_t addr, uint8_t v) { if (addr < 0x2000u) machine.ram[addr & 0x7FF] = v; }
 uint64_t dp_nesmach_screen_key(const DpNesMach *d) {
     (void)d;
     const nes_ppu_t *p = &machine.ppu;

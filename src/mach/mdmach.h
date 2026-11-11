@@ -101,5 +101,6 @@ enum { DP_MDL_VIDEO = 1, DP_MDL_SOUND = 2, DP_MDL_INPUT = 4, DP_MDL_BANK = 8,
  * (GB semantics) and stay open work. */
 uint64_t dp_mdmach_state_ctx_hash_live(const DpMdMach *m, uint8_t live);
 uint64_t dp_mdmach_screen_key(const DpMdMach *m);
+void dp_mdmach_poke(DpMdMach *m, uint32_t addr, uint8_t v); /* work RAM ($FF0000..), no CPU access */
 uint8_t dp_mdmach_ram8(const DpMdMach *m, uint32_t addr); /* work RAM byte */
 #endif

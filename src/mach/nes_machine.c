@@ -24,6 +24,7 @@ static DpNesMach *nes_impl(DpMachine *m) {
     return w->m;
 }
 
+static void nes_poke(DpMachine *m, uint32_t a, uint8_t v) { (void)nes_impl(m); dp_nesmach_poke(a, v); }
 static uint32_t nes_state_bytes(DpMachine *m) { (void)m; return (uint32_t)dp_nesmach_state_size() + 8; }
 static void nes_save(DpMachine *m, uint8_t *buf) { dp_nesmach_save(nes_impl(m), buf); memcpy(buf + dp_nesmach_state_size(), &((NesMachWrap *)m->impl)->frames, 8); }
 static void nes_load(DpMachine *m, const uint8_t *buf) { dp_nesmach_load(nes_impl(m), buf); memcpy(&((NesMachWrap *)m->impl)->frames, buf + dp_nesmach_state_size(), 8); }
@@ -119,6 +120,7 @@ DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err
     m->save = nes_save;
     m->load = nes_load;
     m->fetch = nes_fetch;
+    m->poke = nes_poke;
     m->rom_index = nes_rom_index;
     m->run = nes_run;
     m->observe = nes_observe;
@@ -135,7 +137,7 @@ static int nes_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t 
     (void)user; (void)pc;
     static const uint8_t st[] = { 0x80, 0x40, 0x20, 0xC0, 0xA0, 0xE0, 0x00 };
     DpNesMach *n = nes_impl(m);
-    if ((bytes[0] == 0xAD || bytes[0] == 0xBD) && bytes[1] == 0x16 && bytes[2] == 0x40) {
+    if ((bytes[0] == 0xAD || bytes[0] == 0xBD || bytes[0] == 0x8D || bytes[0] == 0x8E || bytes[0] == 0x8C) && bytes[1] == 0x16 && bytes[2] == 0x40) {   // read or strobe write of the controller port
         // controller read (LDA $4016 / LDA $4016,X): one button held from here on per alternative (as the Sega pad probe)
         static const uint32_t pads[] = { 0x10, 0x20, 0x40, 0x01, 0x02, 0x04, 0x08 };
         if (k >= sizeof pads / sizeof *pads) return 0;

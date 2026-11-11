@@ -310,5 +310,6 @@ uint64_t dp_mdmach_screen_key(const DpMdMach *d) {
     }
     return h;
 }
+void dp_mdmach_poke(DpMdMach *d, uint32_t a, uint8_t v) { if (a >= 0xFF0000u) d->m->ram[a & 0xFFFFu] = v; }
 uint8_t dp_mdmach_ram8(const DpMdMach *d, uint32_t a) { return d->m->ram[a & 0xFFFFu]; }
 

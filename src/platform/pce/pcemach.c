@@ -165,6 +165,11 @@ uint8_t dp_pce_peek(uint16_t addr) {
     return 0xFF;
 }
 
+void dp_pce_poke(uint16_t addr, uint8_t v) {
+    uint8_t m = machine.cpu.mpr[addr >> 13];
+    if (m >= 0xF8 && m <= 0xFB) machine.wram[addr & 0x1FFF] = v;
+}
+
 // --- multitap (opt-in): the five-pad adapter, as the tool models it.  CLR (bit 1 of the
 // $1000 write) high resets the scan to pad 1; each rising SEL while CLR is low steps to the
 // next pad (up to 5); a read returns the current pad's nibble chosen by SEL.  The scan

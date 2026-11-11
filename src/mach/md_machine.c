@@ -25,6 +25,7 @@ static uint8_t md_fetch(DpMachine *m, uint32_t a) {
     uint32_t w = dp_mdmach_peek32(((MdMachWrap *)m->impl)->m, a & ~3u);
     return (uint8_t)(w >> (24 - 8 * (a & 3)));
 }
+static void md_poke(DpMachine *m, uint32_t a, uint8_t v) { dp_mdmach_poke(((MdMachWrap *)m->impl)->m, a, v); }
 // the ROM sits at $000000: a visible CPU address is its physical offset
 static int64_t md_rom_index(DpMachine *m, uint32_t a) {
     return dp_mdmach_rom_visible(((MdMachWrap *)m->impl)->m, a) ? (int64_t)a : -1;
@@ -156,6 +157,7 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->save = md_save;
     m->load = md_load;
     m->fetch = md_fetch;
+    m->poke = md_poke;
     m->rom_index = md_rom_index;
     m->run = md_run;
     m->observe = md_observe;

@@ -82,6 +82,7 @@ int64_t dp_pce_rom_index(uint16_t addr);
 int64_t dp_pce_rom_index_mpr(const uint8_t *mpr, uint16_t addr);
 // side-effect-free byte view (no I/O side effects; hardware reads $FF)
 uint8_t dp_pce_peek(uint16_t addr);
+void dp_pce_poke(uint16_t addr, uint8_t v);   /* work RAM through the mapping, no CPU access */
 // true when the next step dispatches an interrupt instead of an instruction
 int dp_pce_irq_due(void);
 // one step: an interrupt dispatch or one instruction; the line clock

@@ -44,6 +44,7 @@ uint64_t dp_nesmach_run(DpNesMach *m, uint64_t max_steps);
 void dp_nesmach_frame(DpNesMach *m);
 /* the linear PRG image (cell index = bank * $4000 + offset) */
 const uint8_t *dp_nesmach_prg_rom(const DpNesMach *m);
+void dp_nesmach_poke(uint32_t addr, uint8_t v);   /* internal RAM, no CPU access */
 unsigned dp_nesmach_input(const DpNesMach *m);   /* live pad 0 mask */
 void dp_nesmach_set_input(DpNesMach *m, uint8_t pad0, uint8_t pad1);
 
