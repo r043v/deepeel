@@ -201,6 +201,12 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_index.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_save.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_save.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_rng.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_index.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_save.pce
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_rng.pce
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_index.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_nmi.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_irq.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_rng.nes
@@ -721,3 +727,17 @@ add_test(NAME core_irq_fork_nes COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix
 set_tests_properties(core_irq_fork_nes PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_irq_fork_pce COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_irq.pce; a='--core --attract-frames 0 --no-sessions --max-total 400000 --visits-per-pc 100000'; $<TARGET_FILE:deepeel> pce explore $f $a | grep -q 'IRQ forks 1 (timing jitter 2)' && $<TARGET_FILE:deepeel> pce explore $f $a --no-irq-jitter | grep -q 'IRQ forks 1 (timing jitter 0)'")
 set_tests_properties(core_irq_fork_pce PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# techniques 3, 4, 7 on the SM83 (GB) and the HuC6280 (PCE)
+add_test(NAME core_learn_sig_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_save.gb; $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'learned signatures 1' && $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-learn-sig | grep -q 'rom bytes: natural 15'")
+set_tests_properties(core_learn_sig_sm83 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_rng_bytes_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_rng.gb; $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'rng-byte forks 4' && $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-rng-learn | grep -q 'rom bytes: natural 18'")
+set_tests_properties(core_rng_bytes_sm83 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_index_replay_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_index.gb; $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'index replays 16' && $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-index-replay | grep -q 'rom bytes: natural 23'")
+set_tests_properties(core_index_replay_sm83 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_learn_sig_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_save.pce; $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'learned signatures 1' && $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-learn-sig | grep -q 'rom bytes: natural 15'")
+set_tests_properties(core_learn_sig_huc6280 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_rng_bytes_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_rng.pce; $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'rng-byte forks 4' && $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-rng-learn | grep -q 'rom bytes: natural 19'")
+set_tests_properties(core_rng_bytes_huc6280 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_index_replay_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_index.pce; $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'index replays 16' && $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-index-replay | grep -q 'rom bytes: natural 21'")
+set_tests_properties(core_index_replay_huc6280 PROPERTIES FIXTURES_REQUIRED fixtures)

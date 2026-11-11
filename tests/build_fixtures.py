@@ -614,6 +614,33 @@ def build(out):
     w(r, 0x154, 0x76)                            # halt
     save(out, "fix_nsstack", r)
 
+def build_techniques_8bit(out):
+    # SM83 (GB) technique fixtures 3/4/7 on work RAM $C1xx..$C3xx
+    def gb(name, code, table=None):
+        r = rom(2)
+        w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+        r[0x150:0x150 + len(code)] = code
+        if table:
+            r[0x220:0x220 + len(table)] = table
+        save(out, name, r)
+    gb("fix_gb_save", bytes.fromhex("fa00c1 feaa 2004 3e01 1802 3e02 18fe"))
+    gb("fix_gb_rng", bytes.fromhex("fa00c2 ee55 ea00c2 feaa 2802 18f2 3e01 18fe"))
+    gb("fix_gb_index", bytes.fromhex("fa00c3 5f 1600 212002 19 7e fe03 2804 3e01 18fe 3e02 18fe"), bytes([0, 0, 0, 3] + [0] * 12))
+    # HuC6280 (PCE) technique fixtures: MPR1 = work RAM ($2000..), code at $E000, table at $E020
+    def pce(name, code, table=None):
+        p = bytearray(0x4000)
+        pro = bytes.fromhex("a9f8 5302")
+        p[0:len(pro) + len(code)] = pro + code
+        if table:
+            p[0x20:0x20 + len(table)] = table
+        p[0x1FFE], p[0x1FFF] = 0x00, 0xE0
+        with open(os.path.join(out, name + ".pce"), "wb") as f:
+            f.write(p)
+        print("wrote", name)
+    pce("fix_pce_save", bytes.fromhex("ad0020 c9aa d004 a901 8002 a902 80fe"))
+    pce("fix_pce_rng", bytes.fromhex("ad0020 4955 8d0020 c9aa f003 4c04e0 a901 80fe"))
+    pce("fix_pce_index", bytes.fromhex("ad0021 aa bd20e0 c903 f004 a901 8002 a902 80fe"), bytes([0, 0, 0, 3] + [0] * 12))
+
 def md_rom(size=0x1000):
     r = bytearray(size)
     r[0:4] = (0x00FFFE00).to_bytes(4, "big")      # initial SSP
@@ -1434,5 +1461,6 @@ if __name__ == "__main__":
     build_z80_family(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_md_z80(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_md_techniques(sys.argv[1] if len(sys.argv) > 1 else ".")
+    build_techniques_8bit(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_md(sys.argv[1] if len(sys.argv) > 1 else ".")
     build(sys.argv[1] if len(sys.argv) > 1 else ".")
