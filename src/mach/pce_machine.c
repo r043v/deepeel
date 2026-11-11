@@ -107,8 +107,29 @@ static int pce_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t 
     free(tmp);
     return 1;
 }
+// techniques 9 / IRQ fork: when the next step would dispatch an interrupt, the state where it lands `delay`
+// instructions later (the I flag held for those instructions; the latch stays raised)
+static int pce_irq_alt(void *user, DpMachine *m, unsigned delay, uint8_t *save) {
+    (void)user;
+    pce_ensure(m);
+    if (!dp_pce_irq_due()) return 0;
+    uint8_t *tmp = malloc(m->state_bytes(m));
+    if (!tmp) return 0;
+    m->save(m, tmp);
+    uint8_t p0 = dp_pce_cpu().p;
+    dp_pce_set_flags((uint8_t)(p0 | 0x04));
+    int ok = 1;
+    for (unsigned i = 0; i < delay && ok; i++) ok = m->run(m);
+    if (ok) {
+        dp_pce_set_flags((uint8_t)((dp_pce_cpu().p & ~0x04) | (p0 & 0x04)));
+        m->save(m, save);
+    }
+    m->load(m, tmp);
+    free(tmp);
+    return ok;
+}
 const DpPlatformHooks *dp_machine_pce_hooks(void) {
-    static const DpPlatformHooks h = { .event_probe = pce_event_probe };
+    static const DpPlatformHooks h = { .event_probe = pce_event_probe, .irq_alt = pce_irq_alt };
     return &h;
 }
 

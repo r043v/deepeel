@@ -201,6 +201,8 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_index.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_save.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_nmi.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_irq.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_rng.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_index.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce
@@ -715,3 +717,7 @@ add_test(NAME core_rng_bytes_68000 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/
 set_tests_properties(core_rng_bytes_68000 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_index_replay_68000 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_md_index.md; $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'index replays 16' && $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-index-replay | grep -q 'rom bytes: natural 32'")
 set_tests_properties(core_index_replay_68000 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_irq_fork_nes COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_nmi.nes; a='--core --attract-frames 0 --no-sessions --max-total 400000 --visits-per-pc 100000'; $<TARGET_FILE:deepeel> nes explore $f $a | grep -q 'IRQ forks 1 (timing jitter 2)' && $<TARGET_FILE:deepeel> nes explore $f $a --no-irq-jitter | grep -q 'IRQ forks 1 (timing jitter 0)'")
+set_tests_properties(core_irq_fork_nes PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_irq_fork_pce COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_irq.pce; a='--core --attract-frames 0 --no-sessions --max-total 400000 --visits-per-pc 100000'; $<TARGET_FILE:deepeel> pce explore $f $a | grep -q 'IRQ forks 1 (timing jitter 2)' && $<TARGET_FILE:deepeel> pce explore $f $a --no-irq-jitter | grep -q 'IRQ forks 1 (timing jitter 0)'")
+set_tests_properties(core_irq_fork_pce PROPERTIES FIXTURES_REQUIRED fixtures)

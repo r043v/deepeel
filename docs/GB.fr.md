@@ -4702,3 +4702,10 @@ pas de fixture HuC6280 ni SM83 propre à ces trois techniques, index limité à
 octet `(d8,An,Xn)`. `md_fetch` lit désormais la RAM de travail `$FF0000+`
 (avant : vue ROM seule, donc un octet RAM appris restait invisible). Fixtures
 `fix_md_save|rng|index`, tests `core_*_68000`.
+
+0.304.2 : fourches d'IRQ et perturbation temporelle (technique 9) sur NES (NMI
+retenu `delay` instructions puis relevé) et PCE (drapeau I tenu `delay`
+instructions). Avant : seulement GB, Sega et MD. Fixtures `fix_nes_nmi` et
+`fix_pce_irq`, tests `core_irq_fork_nes|pce` (compteur et option
+`--no-irq-jitter`). Observations de l'outil : Raiden PCE 55 fourches (110 de
+gigue), une ROM NES 77 (154).

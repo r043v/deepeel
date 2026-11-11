@@ -159,7 +159,26 @@ static int nes_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t 
     dp_nesmach_set_ppu_status(keep);
     return 1;
 }
+// techniques 9 / IRQ fork: with an NMI edge pending, the state where the NMI is serviced `delay`
+// instructions later (the edge is held off for those instructions, then raised again)
+static int nes_irq_alt(void *user, DpMachine *m, unsigned delay, uint8_t *save) {
+    (void)user;
+    if (!dp_nesmach_nmi_pending(nes_impl(m))) return 0;
+    uint32_t sb = m->state_bytes(m);
+    uint8_t *tmp = malloc(sb), *off = malloc(sb);
+    if (!tmp || !off) { free(tmp); free(off); return 0; }
+    m->save(m, tmp);
+    memcpy(off, tmp, sb);
+    *dp_nesmach_state_nmi_edge(off) = 0;
+    m->load(m, off);
+    int ok = 1;
+    for (unsigned i = 0; i < delay && ok; i++) ok = m->run(m);
+    if (ok) { m->save(m, save); *dp_nesmach_state_nmi_edge(save) = 1; }
+    m->load(m, tmp);
+    free(tmp); free(off);
+    return ok;
+}
 const DpPlatformHooks *dp_machine_nes_hooks(void) {
-    static const DpPlatformHooks h = { .event_probe = nes_event_probe };
+    static const DpPlatformHooks h = { .event_probe = nes_event_probe, .irq_alt = nes_irq_alt };
     return &h;
 }
