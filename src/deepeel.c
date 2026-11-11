@@ -639,6 +639,7 @@ static int cmd_explore(int argc, char **argv) {
                         if (b & 1) k |= 0x10;
                         if (b & 2) k |= 0x20;
                         if (b & 8) k |= 0x40;
+                        if (b & 4) k |= 0x80;   // select
                         gmasks[f] = k;
                     }
                     gkcfg.tas_masks = gmasks; gkcfg.tas_frames = gt.frames;

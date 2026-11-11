@@ -4717,3 +4717,19 @@ diagnostic `DEEPEEL_KDUMP`/`DEEPEEL_KWRAM` de `m0boy.c` (une ligne par vblank :
 trame, empreinte, pc, ime, if, LY). Observation de l'outil : sur SML Rev 0 avec
 600 M de pas, le film est joué jusqu'au bout (43726 trames) et finit à
 `ffb4=11` : le monde 4 n'est pas atteint, l'hypothèse EI ne suffit pas.
+
+## 0.304.4 — noyau : TAS GB rétabli (disposition des boutons)
+
+Cause de la désynchronisation du rejeu de film sur le noyau (`--core --tas`) : `gb_set_input`
+traduisait le masque noyau vers une disposition de pad qui n'est pas celle de `set_buttons`
+(A=1, B=2, Select=4, Start=8, Droite=16, Gauche=32, Haut=64, Bas=128, celle des films et de
+l'ancien moteur). Les touches arrivaient permutées (Haut → Select, etc.). Ni l'EI ni le profil
+VBA n'étaient en cause : les hypothèses « délai EI perdu à la coupure » et la comparaison KDUMP
+ont permis de situer la première divergence à la lecture du pad (`ldh a,(00)` en $47F6, banque 3)
+puis la table de conversion. Corrections : `gb_set_input` (disposition native) et Select ajouté au
+masque noyau (bit 0x80, `deepeel.c`).
+
+Observation de l'outil sur SML Rev 0, film `muggv3` : les empreintes WRAM par vblank du noyau et
+de l'ancien moteur sont identiques sur les 845 premiers vblanks comparés (une ligne dupliquée à
+l'indice 15) ; fin de film (43726 trames) : `ffb4=43`, `ffac=8e` dans les deux moteurs (avant la
+correction : `ffb4=11`, couverture naturelle 9818 octets ROM ; après : 12251 octets à 55 M de pas).

@@ -102,16 +102,18 @@ static uint32_t gb_pc(DpMachine *m) { return gbw(m)->d->api->gbr->pc; }
 static void gb_set_pc(DpMachine *m, uint32_t pc) { gbw(m)->d->api->gbr->pc = (uint16_t)pc; }
 static void gb_poke(DpMachine *m, uint32_t a, uint8_t v) { gbw(m)->d->api->wr((uint16_t)a, v); }
 static uint64_t gb_frame(DpMachine *m) { return *gbw(m)->d->api->frame; }
-// kernel mask (up down left right button1 button2 start) -> GB pad (right left up down a b select start)
+// kernel mask (up down left right button1 button2 start select) -> the engine's set_buttons layout
+// (A=1 B=2 Select=4 Start=8 Right=16 Left=32 Up=64 Down=128, what the movies and the old engine feed)
 static void gb_set_input(DpMachine *m, uint32_t mask) {
     uint8_t pad = 0;
-    if (mask & 0x01) pad |= 0x04;   // up
-    if (mask & 0x02) pad |= 0x08;   // down
-    if (mask & 0x04) pad |= 0x02;   // left
-    if (mask & 0x08) pad |= 0x01;   // right
-    if (mask & 0x10) pad |= 0x10;   // a
-    if (mask & 0x20) pad |= 0x20;   // b
-    if (mask & 0x40) pad |= 0x80;   // start
+    if (mask & 0x01) pad |= 0x40;   // up
+    if (mask & 0x02) pad |= 0x80;   // down
+    if (mask & 0x04) pad |= 0x20;   // left
+    if (mask & 0x08) pad |= 0x10;   // right
+    if (mask & 0x10) pad |= 0x01;   // a
+    if (mask & 0x20) pad |= 0x02;   // b
+    if (mask & 0x40) pad |= 0x08;   // start
+    if (mask & 0x80) pad |= 0x04;   // select
     gbw(m)->d->api->set_buttons(pad);
 }
 
