@@ -4637,8 +4637,14 @@ le dernier frame du film atteint.
 ### `--cov` du noyau : lectures de données (0.303.8)
 
 Le `--cov` du noyau marque désormais le drapeau 8 (octet ROM lu comme donnée par un chemin naturel ; `DP_CORE_DATA`),
-sans que cela compte comme couverture de code. Mesure SML Rev A + muggv3, `--tas-solo` (le film va au bout) :
-noyau 14 418 octets de données, ancien moteur 18 096 ; **aucun** des deux ne lit la plage de tuiles du monde 4
-(bank 1 $07F2–$0FB1 en offset) dans cette exécution. Conclusion : sur ce run, ni l'ancien ni le noyau ne prouvent
-que le film atteint le monde 4 ; la fidélité du rejeu GB reste non établie (ou la plage est mal identifiée pour
-cette révision). Observation de l'outil.
+sans que cela compte comme couverture de code. Attention aux colonnes : l'ancien `--cov` GB donne l'**adresse CPU**
+(`$4000`–`$7FFF`), celui du noyau l'**offset dans la banque** (`$0000`–`$3FFF`).
+
+Mesure SML Rev A + muggv3, `--tas-solo` (le film va au bout dans les deux moteurs), observations de l'outil :
+- ancien moteur : 339 octets lus dans les tuiles du monde 4 (bank 1 $47F2–$4FB1) et 22 dans le flux de niveau
+  ($5832–$5965) — il atteint le monde 4 ;
+- noyau : **aucune** ligne de la bank 1 (ni exécution, ni donnée) ; les banques actives sont 0, 2 et 3 seulement.
+
+Verdict : la fidélité du rejeu GB sur le noyau **échoue** (le film se désynchronise ou la banque est mal vue au
+rechargement d'état ; cause non trouvée). Piste : comparer `dp_gbl_bank_of` après `gb_load`/`gb_clone` et le profil
+de synchro entre l'ancien moteur et le noyau, frame par frame.
