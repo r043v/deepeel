@@ -58,6 +58,9 @@ typedef struct DpCoreResult {
     uint64_t workers_short;    // workers requested but unavailable (no clone / init failure)
     uint64_t seeded;           // seed entry points queued
     uint64_t novelty_picks;    // pending states chosen ahead of LIFO order because their target was uncovered
+    uint64_t novelty_new_bytes; // ROM bytes first covered by paths started from a novelty pick (yield of technique 5)
+    uint64_t plain_new_bytes;   // the same for paths started in plain LIFO order
+    int in_novelty_path;        // internal: the path being run was a novelty pick
     uint64_t hook_vetoed;      // forced sides refused by DpPlatformHooks.veto_fork
     uint64_t exec_outside;     // instructions executed where rom_index < 0 (RAM/VRAM code)
     uint64_t no_pc;            // 1 when the machine has no pc/set_pc: nothing explored

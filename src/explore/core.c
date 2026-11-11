@@ -101,7 +101,10 @@ static void mark(Shared *sh, DpCoreResult *r, DpMachine *m, uint32_t pc, unsigne
         int64_t k = m->rom_index(m, pc + i);
         if (k >= 0 && (size_t)k < r->rom_size) {
             uint8_t old = __atomic_fetch_or(&r->flags[k], how, __ATOMIC_RELAXED);
-            if (!old) r->first_seen[k] = __atomic_load_n(&sh->steps, __ATOMIC_RELAXED) + 1;
+            if (!old) {
+                r->first_seen[k] = __atomic_load_n(&sh->steps, __ATOMIC_RELAXED) + 1;
+                if (r->in_novelty_path) r->novelty_new_bytes++; else r->plain_new_bytes++;
+            }
             __atomic_fetch_or(&r->src_flags[k], (how & DP_CORE_NATURAL) ? DP_SRC_FORK_NATURAL : DP_SRC_FORK_FORCED, __ATOMIC_RELAXED);
         }
     }
@@ -248,10 +251,11 @@ static void *worker_main(void *arg) {
         while (!sh->qn && sh->active > 0) pthread_cond_wait(&sh->cv, &sh->mu);
         if (!sh->qn) break;
         size_t pick = sh->qn - 1;
+        w->loc.in_novelty_path = 0;
         if (!cfg->no_novelty_order) {
             for (size_t i = sh->qn; i-- > 0;)
                 if (!covered(&w->loc, w->m, sh->q[i].pc)) { pick = i; break; }
-            if (pick != sh->qn - 1) w->loc.novelty_picks++;
+            if (pick != sh->qn - 1) { w->loc.novelty_picks++; w->loc.in_novelty_path = 1; }
         }
         Pending p = sh->q[pick];
         sh->q[pick] = sh->q[sh->qn - 1];
@@ -341,7 +345,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         out->sat_site += l->sat_site; out->sat_queue += l->sat_queue;
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
-        out->novelty_picks += l->novelty_picks; out->hook_vetoed += l->hook_vetoed;
+        out->novelty_picks += l->novelty_picks; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
         out->exec_outside += l->exec_outside;
         free(ws[i].visits); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
@@ -363,7 +367,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "deepeel %s (generic kernel)\n", label);
     fprintf(out, "steps %llu paths %llu forks %llu pruned-covered %llu\n", U(r->steps), U(r->paths), U(r->forks), U(r->pruned_covered));
     fprintf(out, "saturation: total %llu path %llu loop %llu site %llu queue %llu\n", U(r->sat_total), U(r->sat_path), U(r->sat_loop), U(r->sat_site), U(r->sat_queue));
-    fprintf(out, "novelty picks %llu\n", U(r->novelty_picks));
+    fprintf(out, "novelty picks %llu (new ROM bytes: novelty %llu, plain %llu)\n", U(r->novelty_picks), U(r->novelty_new_bytes), U(r->plain_new_bytes));
     fprintf(out, "workers %llu (short %llu)\n", U(r->workers), U(r->workers_short));
     fprintf(out, "seeded entry points %llu\n", U(r->seeded));
     fprintf(out, "forced RAM cuts %llu\n", U(r->forced_ram_cuts));
