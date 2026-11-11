@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/01/nuspec.xsd">
+  <metadata minClientVersion="2.7">
+    <id>DotNetAnalyzers.DocumentationAnalyzers.Unstable</id>
+    <version>1.0.0.59</version>
+    <title>DotNetAnalyzers.DocumentationAnalyzers.Unstable</title>
+    <authors>Sam Harwell et. al.</authors>
+    <owners>Sam Harwell</owners>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <developmentDependency>true</developmentDependency>
+    <licenseUrl>https://raw.githubusercontent.com/DotNetAnalyzers/DocumentationAnalyzers/489c06575b/LICENSE</licenseUrl>
+    <projectUrl>https://github.com/DotNetAnalyzers/DocumentationAnalyzers</projectUrl>
+    <description>An implementation of .NET documentation rules using Roslyn analyzers and code fixes</description>
+    <releaseNotes>https://github.com/DotNetAnalyzers/DocumentationAnalyzers/releases/1.0.0-beta.59</releaseNotes>
+    <copyright>Copyright 2018 Tunnel Vision Laboratories, LLC</copyright>
+    <tags>Documentation DotNetAnalyzers Roslyn Diagnostic Analyzer</tags>
+  </metadata>
+</package>

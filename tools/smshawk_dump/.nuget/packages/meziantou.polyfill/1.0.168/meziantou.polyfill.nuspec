@@ -1,0 +1,20 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
+  <metadata>
+    <id>Meziantou.Polyfill</id>
+    <version>1.0.168</version>
+    <authors>meziantou</authors>
+    <developmentDependency>true</developmentDependency>
+    <license type="expression">MIT</license>
+    <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
+    <icon>icon.png</icon>
+    <readme>README.md</readme>
+    <projectUrl>https://github.com/meziantou/Meziantou.Polyfill</projectUrl>
+    <description>Meziantou.Polyfill generates source-only polyfills for C# features, so runtime-agnostic language capabilities work on older target frameworks.</description>
+    <tags>SourceGenerator,Roslyn,Polyfill</tags>
+    <repository type="git" url="https://github.com/meziantou/Meziantou.Polyfill" branch="refs/heads/main" commit="9e3d93a6237c952ecd45b384b49f87db36a0172d" />
+    <dependencies>
+      <group targetFramework=".NETStandard2.0" />
+    </dependencies>
+  </metadata>
+</package>

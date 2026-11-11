@@ -58,7 +58,7 @@ namespace BizhawkMdLive
 					double now = clock.Elapsed.TotalSeconds;
 					uint leader = acc.ReadUInt32(OffLeader);
 					if (leader != lastLeader) { lastLeader = leader; lastMove = now; }
-					if (f <= leader + 2 || now - lastMove > 2.0 || (leader == 0 && now > 1.0)) break;
+					if (f <= leader + 2 || (lastLeader != 0 && now - lastMove > 2.0) || (lastLeader == 0 && now > 90.0)) break;
 					Thread.Sleep(1); waited += 0.001;
 				}
 				for (int b = 0; b < 8; b++) controller[bits[b]] = (masks[f] & (1 << b)) != 0;

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
+  <metadata>
+    <id>JunitXml.TestLogger</id>
+    <version>3.1.12</version>
+    <title>JunitXml.TestLogger</title>
+    <authors>Siphonophora,codito,faizan2304,smadala,lahma</authors>
+    <owners>Siphonophora,codito,faizan2304,smadala</owners>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <license type="expression">MIT</license>
+    <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
+    <projectUrl>https://github.com/spekt/junit.testlogger</projectUrl>
+    <description>Xml logger for JUnit v5 compliant xml report when test is running with "dotnet test" or "dotnet vstest".</description>
+    <icon>packageIcon.png</icon>
+  </metadata>
+</package>

@@ -1,0 +1,5 @@
+<Project>
+  <ItemGroup>
+    <SharpGenConsumerMapping Include="$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '..', 'build', 'Vortice.D3DCompiler.BindMapping.xml'))"/>
+  </ItemGroup>
+</Project>

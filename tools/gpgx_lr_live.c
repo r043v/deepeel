@@ -31,7 +31,7 @@ int main(int c, char **v) {
         for (;;) {   // replay sync: within two frames of the deepeel core; a stopped leader releases after 2 s
             double t = now_s(); uint32_t ld = feed->leader;
             if (ld != lastleader) { lastleader = ld; lastmove = t; }
-            if ((uint32_t)fr <= ld + 2 || t - lastmove > 2.0 || (ld == 0 && t - t0 > 1.0)) break;
+            if ((uint32_t)fr <= ld + 2 || (lastleader != 0 && t - lastmove > 2.0) || (lastleader == 0 && t - t0 > 90.0)) break;
             struct timespec s = { 0, 1000000 }; nanosleep(&s, NULL); waited += 0.001;
         }
         dp_lr_set_input(lr, 0, to_retro(masks[fr]));

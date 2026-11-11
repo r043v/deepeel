@@ -111,7 +111,7 @@ int main(int argc, char **argv) {
             struct timespec t1; clock_gettime(CLOCK_MONOTONIC, &t1);
             double now = (double)(t1.tv_sec - t0.tv_sec) + (double)(t1.tv_nsec - t0.tv_nsec) * 1e-9;
             if (feed->leader != last_leader) { last_leader = feed->leader; last_move = now; }
-            if (g_frame <= (uint32_t)feed->leader + 2 || now - last_move > 2.0 || now < 2.0 && feed->leader == 0 && now > 1.0) break;
+            if (g_frame <= (uint32_t)feed->leader + 2 || (last_leader != 0 && now - last_move > 2.0) || (last_leader == 0 && now > 90.0)) break;
             usleep(300); waited += 300e-6;
         }
         if (g_frame && g_frame % 30 == 0) {

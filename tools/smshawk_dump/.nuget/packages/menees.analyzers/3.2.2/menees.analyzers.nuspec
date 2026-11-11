@@ -1,0 +1,33 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
+  <metadata>
+    <id>Menees.Analyzers</id>
+    <version>3.2.2</version>
+    <title>Menees.Analyzers</title>
+    <authors>Bill Menees</authors>
+    <owners>Bill Menees</owners>
+    <developmentDependency>true</developmentDependency>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <license type="expression">MIT</license>
+    <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
+    <projectUrl>https://github.com/menees/Analyzers</projectUrl>
+    <description>Provides analyzers for validating that:
+		* Tabs are used for indentation.
+		* Lengths of lines, methods, properties, and files are acceptable.
+		* #regions are used within long files and files that contain multiple types.
+		* Method blocks use a single return.
+		* File names match the names of types they contain.
+		* Preferred exception types are used.
+		* Magic numbers aren't used.
+		* Using directives are indented consistently.
+		* Flags enum members are zero, powers of two, or named member combinations.
+		* UTC times are used.
+		* TryGetValue is used instead of ContainsKey and this[key].
+		* Preferred terms are used in identifiers.</description>
+    <copyright>Copyright © 2015-2024 Bill Menees</copyright>
+    <tags>Analyzers, DotNetAnalyzers, Roslyn</tags>
+    <frameworkAssemblies>
+      <frameworkAssembly assemblyName="System" targetFramework="" />
+    </frameworkAssemblies>
+  </metadata>
+</package>

@@ -2011,8 +2011,10 @@ static int cmd_md(int argc, char **argv) {
             }
             o.movie = &movie;
             pid_t refpid = 0, hawkpid = 0, gpgxpid = 0;
+            const char *wf[3] = { NULL, NULL, NULL };   // feeds to wait on: every tile starts together
             if (reflive && movies[mi]) {   // reset the feed, then the reference replays this movie
                 dp_md_ref_feed_open(feedpath, 1);
+                wf[0] = feedpath;
                 refpid = fork();
                 if (refpid == 0) {
                     execl(reflive, reflive, argv[3], movies[mi], (char *)NULL);
@@ -2041,6 +2043,7 @@ static int cmd_md(int argc, char **argv) {
                     char nm[120]; snprintf(nm, sizeof nm, "Genesis Plus GX libretro%s%s", rev[0] ? " " : "", rev);
                     setenv("DEEPEEL_MD_REF3_NAME", nm, 1);
                 }
+                wf[2] = f3;
                 gpgxpid = fork();
                 if (gpgxpid == 0) { execl(gpgxexe, gpgxexe, gpgxcore, argv[3], mk3, f3, (char *)NULL); _exit(127); }
                 if (gpgxpid < 0) gpgxpid = 0;
@@ -2063,6 +2066,7 @@ static int cmd_md(int argc, char **argv) {
                     char nm[120]; snprintf(nm, sizeof nm, "BizHawk GPGX%s%s", ver[0] ? " " : "", ver);
                     setenv("DEEPEEL_MD_REF2_NAME", nm, 1);
                 }
+                wf[1] = f2;
                 hawkpid = fork();
                 if (hawkpid == 0) {
                     const char *bd = getenv("DP_BIZHAWK_DIR");
@@ -2072,6 +2076,10 @@ static int cmd_md(int argc, char **argv) {
                     _exit(127);
                 }
                 if (hawkpid < 0) hawkpid = 0;
+            }
+            for (int k = 0; k < 3; k++) {   // the harnesses boot slowly (mono, waterbox): hold our replay until each published its first frame (30 s cap)
+                DpMdRefFeed *wfd = wf[k] ? dp_md_ref_feed_open(wf[k], 0) : NULL;
+                for (int t = 0; wfd && t < 600 && wfd->vframe == 0; t++) usleep(50000);
             }
             char cap[240], pth[5][600];
             const char *sum = cc.summary, *txt = text, *mp = map, *evp = ev, *heat = md_heat;
