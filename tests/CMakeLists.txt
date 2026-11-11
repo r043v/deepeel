@@ -247,6 +247,11 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_cells.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_cells.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_index40.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_decomp.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_lyprobe.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_decomp.pce
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_md_decomp.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_decomp.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_cells.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_cells.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_cells.pce
@@ -758,3 +763,13 @@ add_test(NAME core_index_replay_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_
 set_tests_properties(core_index_replay_huc6280 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_index_max_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_index40.gb; $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --index-max 63 | grep -q 'index replays 64' && $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'index replays 16'")
 set_tests_properties(core_index_max_sm83 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_decompress_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_decomp.gb; $<TARGET_FILE:deepeel> explore $f --core --jobs 1 --attract-frames 0 --no-sessions | grep -q 'decompress runs [1-9][0-9]*, compressed ROM bytes [1-9]' && $<TARGET_FILE:deepeel> explore $f --core --jobs 1 --attract-frames 0 --no-sessions --no-decompress | grep -q 'decompress runs 0, compressed ROM bytes 0'")
+set_tests_properties(core_decompress_sm83 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_decompress_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_decomp.pce; $<TARGET_FILE:deepeel> pce explore $f --core --jobs 1 --attract-frames 0 --no-sessions | grep -q 'decompress runs [1-9][0-9]*, compressed ROM bytes [1-9]' && $<TARGET_FILE:deepeel> pce explore $f --core --jobs 1 --attract-frames 0 --no-sessions --no-decompress | grep -q 'decompress runs 0, compressed ROM bytes 0'")
+set_tests_properties(core_decompress_huc6280 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_decompress_68000 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_md_decomp.md; $<TARGET_FILE:deepeel> md explore $f --core --jobs 1 --attract-frames 0 --no-sessions | grep -q 'decompress runs [1-9][0-9]*, compressed ROM bytes [1-9]' && $<TARGET_FILE:deepeel> md explore $f --core --jobs 1 --attract-frames 0 --no-sessions --no-decompress | grep -q 'decompress runs 0, compressed ROM bytes 0'")
+set_tests_properties(core_decompress_68000 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_decompress_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_decomp.nes; $<TARGET_FILE:deepeel> nes explore $f --core --jobs 1 --attract-frames 0 --no-sessions | grep -q 'decompress runs [1-9][0-9]*, compressed ROM bytes [1-9]' && $<TARGET_FILE:deepeel> nes explore $f --core --jobs 1 --attract-frames 0 --no-sessions --no-decompress | grep -q 'decompress runs 0, compressed ROM bytes 0'")
+set_tests_properties(core_decompress_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_event_probes_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_lyprobe.gb; $<TARGET_FILE:deepeel> explore $f --core --jobs 1 --attract-frames 0 --no-sessions | grep -q 'event probes [1-9][0-9]* at 1 sites' && $<TARGET_FILE:deepeel> explore $f --core --jobs 1 --attract-frames 0 --no-sessions --no-event-probes | grep -q 'event probes 0 at 0 sites'")
+set_tests_properties(core_event_probes_sm83 PROPERTIES FIXTURES_REQUIRED fixtures)

@@ -4765,3 +4765,19 @@ la valeur par défaut reste 15 (coût : un état en file par index et par site).
 `fix_gb_index40` (valeur utile à l'index 40), test `core_index_max_sm83`. La borne reste une limite de
 budget, pas de technique : l'étendre automatiquement à la plage prouvée par la comparaison qui précède
 l'accès est la suite.
+
+## 0.306.0 — noyau : technique 6 sur toutes les ISA, sondes LY/STAT SM83, observateurs HuC6280 et 6502
+
+- **Technique 6 (décompresseurs)** : fixtures `fix_{gb,pce,md,nes}_decomp` (32 octets de ROM étendus 1:2 en RAM) et
+  tests `core_decompress_{sm83,huc6280,68000,6502}` (avec `--no-decompress` → 0). Les deux échecs initiaux
+  ont révélé deux lacunes d'observation, corrigées :
+  - **6502** : le crochet de lecture du cœur NES signale aussi les octets d'opérande de l'instruction ; ils
+    écrasaient la dernière lecture de données et cassaient la détection de copie (seules deux copies sur 32
+    étaient vues, par coïncidence de valeur). Les opérandes sont désormais ignorés (`nes_oplen`).
+  - **HuC6280** : le cœur ne passe pas par le bus ; seules les lectures zp/abs de la RAM étaient décodées. Le
+    décodage couvre maintenant tous les modes d'adressage des lectures et écritures (ROM incluse, jamais les
+    registres matériels) et les transferts de blocs TII/TDD/TIN/TIA/TAI. Conséquence : détection de copie
+    ROM→RAM/VRAM et marquage des données ROM désormais actifs sur PCE.
+- **Technique 2 sur SM83** : la lecture de LY (`$FF44`) ou STAT (`$FF41`) (`ldh`/`ld a,(nn)`) donne une fourche par
+  valeur plausible (LY 0, $90, $99, $8F ; STAT modes 0..3). Fixture `fix_gb_lyprobe`, test `core_event_probes_sm83`.
+  Reste : sonde d'état VDP sur 68000 et sondes de pad/statut VDC sur HuC6280.

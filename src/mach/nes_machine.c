@@ -17,6 +17,7 @@ typedef struct {
     uint8_t *img; size_t img_size; int mapper;
     const uint8_t *src; size_t src_size;   // the original image (owned by the caller)
     uint64_t frames;   // completed frames since this machine started (a relative clock for sessions)
+    int skip;          // operand-byte reads still to ignore for the running instruction
 } NesMachWrap;
 static DpNesMach *nes_impl(DpMachine *m) {
     NesMachWrap *w = m->impl;
@@ -39,12 +40,23 @@ static int nes_run(DpMachine *m) {
     return dp_nesmach_run(n, 1) > 0;
 }
 
+// instruction length of the 6502 opcode space (illegal opcodes included): the core's read hook
+// reports the operand bytes too, and they are not data reads
+static unsigned nes_oplen(unsigned op) {
+    unsigned l = op & 0x1F;
+    if (op == 0x20) return 3;
+    if (op == 0x00 || op == 0x40 || op == 0x60 || l == 0x08 || l == 0x0A || l == 0x18 || l == 0x1A) return 1;
+    if (l == 0x0C || l == 0x0D || l == 0x0E || l == 0x0F || l == 0x19 || l == 0x1B || l == 0x1C || l == 0x1D || l == 0x1E || l == 0x1F) return 3;
+    return 2;
+}
 static void nes_on_step(void *user, unsigned pc, unsigned op) {
     NesMachWrap *w = user;
+    w->skip = (int)nes_oplen(op) - 1;
     if (w->obs && w->obs->on_step) w->obs->on_step(w->user, pc, (uint8_t)op, 0);
 }
 static void nes_on_read(void *user, unsigned addr, unsigned value) {
     NesMachWrap *w = user;
+    if (w->skip > 0) { w->skip--; return; }   // an operand byte of the running instruction
     if (w->obs && w->obs->on_read) w->obs->on_read(w->user, addr, (uint8_t)value);
 }
 static void nes_on_write(void *user, unsigned addr, unsigned value) {

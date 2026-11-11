@@ -151,10 +151,30 @@ static int gb_probes(DpMachine *m, const DpProbe **out) {
 // technique 2 on GB: an instruction that reads the joypad port ($FF00) forks one state per button
 // held; the held pad stays in the saved state.  The instruction is dry-run once to see the read.
 static int gb_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *bytes, unsigned k, uint8_t *save) {
-    (void)user; (void)pc; (void)bytes;
+    (void)user; (void)pc;
     static const uint8_t pads[] = {0x80, 0x10, 0x20, 0x40, 0x04, 0x08, 0x02, 0x01};
-    if (k >= sizeof pads) return 0;
+    static const uint8_t ly[] = {0x00, 0x90, 0x99, 0x8F};     // line 0, first VBlank line, last line, last visible line
+    static const uint8_t stat[] = {0x00, 0x01, 0x02, 0x03};   // PPU mode 0..3
     GbWrap *g = gbw(m);
+    // a read of LY ($FF44) or STAT ($FF41) forks one state per plausible value: the instruction runs
+    // on the live machine, A is overwritten, the state is saved, then the live state is restored
+    int rly  = (bytes[0] == 0xF0 && bytes[1] == 0x44) || (bytes[0] == 0xFA && bytes[1] == 0x44 && bytes[2] == 0xFF);
+    int rsta = (bytes[0] == 0xF0 && bytes[1] == 0x41) || (bytes[0] == 0xFA && bytes[1] == 0x41 && bytes[2] == 0xFF);
+    if (rly || rsta) {
+        const uint8_t *vals = rly ? ly : stat;
+        unsigned n = rly ? sizeof ly : sizeof stat;
+        if (k >= n) return 0;
+        uint8_t *pre = malloc(m->state_bytes(m));
+        if (!pre) return 0;
+        m->save(m, pre);
+        gb_run(m);
+        g->d->api->gbr->a = vals[k];
+        m->save(m, save);
+        m->load(m, pre);
+        free(pre);
+        return 1;
+    }
+    if (k >= sizeof pads) return 0;
     uint8_t *pre = malloc(m->state_bytes(m));
     if (!pre) return 0;
     m->save(m, pre);

@@ -642,7 +642,10 @@ def build_techniques_8bit(out):
     pce("fix_pce_index", bytes.fromhex("ad0021 aa bd20e0 c903 f004 a901 8002 a902 80fe"), bytes([0, 0, 0, 3] + [0] * 12))
     # technique 8 (semantic cells): two conditional sites forking to the same target with the same RAM
     gb("fix_gb_index40", bytes.fromhex("fa00c3 5f 1600 212002 19 7e fe03 2804 3e01 18fe 3e02 18fe"), bytes([0] * 40 + [3] + [0] * 8))   # index 40 is outside the default 0..15
+    gb("fix_gb_decomp", bytes.fromhex("212002 1100c0 0620 2a 12 13 12 13 05 20f8 18fe"), bytes(range(1, 33)))   # technique 6: 32 ROM bytes expanded 1:2
+    gb("fix_gb_lyprobe", bytes.fromhex("f044 fe90 2804 3e01 18fe 3e02 18fe"))   # technique 2: one read of LY, branch on the first VBlank line
     gb("fix_gb_cells", bytes.fromhex("af 2006 2004 00000000 18fe"))
+    pce("fix_pce_decomp", bytes.fromhex("a200 a000 bd20e0 990020 c8 990020 c8 e8 e020 d0f0 80fe"), bytes(range(1, 33)))
     pce("fix_pce_cells", bytes.fromhex("a900 d006 d004 eaeaeaea 80fe"))
 
 def md_rom(size=0x1000):
@@ -963,6 +966,7 @@ def build_md_techniques(out):
             r[0x230:0x230 + len(table)] = table
         save_md(out, name, r)
     prog("fix_md_save", bytes.fromhex("1039 00ffc100 0c00 00aa 6604 7001 6002 7002 60fe"))
+    prog("fix_md_decomp", bytes.fromhex("41f9 00000230 43f9 00ffc000 701f 12d8 12c1 51c8 fffa 60fe"), bytes(range(1, 33)))
     prog("fix_md_cells", bytes.fromhex("7000 6606 6604 4e714e71 60fe"))   # technique 8: two Bne sites, same target, same RAM
     prog("fix_md_rng", bytes.fromhex("1039 00ffc200 0a00 0055 13c0 00ffc200 0c00 00aa 6702 60e8 7001 60fe"))
     prog("fix_md_index", bytes.fromhex("1039 00ffc300 0280 0000 000f 41f9 00000230 1230 0000 0c01 0003 6704 7001 60fe 7002 60fe"),
@@ -1103,6 +1107,7 @@ def build_nes_pce(out):
     # NMI enabled, spin; the handler counts frames (IRQ forks and timing jitter, techniques 2/9)
     nes_prog("fix_nes_nmi.nes", bytes([0xA9,0x80, 0x8D,0x00,0x20, 0x4C,0x05,0x80]), nmi=0x10, handler=bytes([0xE6,0x10, 0x40]))
     nes_prog("fix_nes_save.nes", bytes([0xAD,0x00,0x03, 0xC9,0xAA, 0xD0,0x05, 0xA9,0x01, 0x4C,0x0E,0x80, 0xA9,0x02, 0x4C,0x0E,0x80]))
+    nes_prog("fix_nes_decomp.nes", bytes([0xA2,0x00, 0xA0,0x00, 0xBD,0x20,0x80, 0x99,0x00,0x03, 0xC8, 0x99,0x00,0x03, 0xC8, 0xE8, 0xE0,0x20, 0xD0,0xF0, 0x4C,0x14,0x80]), bytes(range(1, 33)))
     nes_prog("fix_nes_cells.nes", bytes([0xA9,0x00, 0xD0,0x06, 0xD0,0x04, 0xEA,0xEA,0xEA,0xEA, 0x4C,0x0A,0x80]))   # technique 8: two BNE sites, same target
     nes_prog("fix_nes_rng.nes", bytes([0xAD,0x00,0x03, 0x49,0x55, 0x8D,0x00,0x03, 0xC9,0xAA, 0xF0,0x03, 0x4C,0x00,0x80, 0xA9,0x01, 0x4C,0x11,0x80]))
     nes_prog("fix_nes_index.nes", bytes([0xAD,0x00,0x04, 0xAA, 0xBD,0x20,0x80, 0xC9,0x03, 0xF0,0x05, 0xA9,0x01, 0x4C,0x0D,0x80, 0xA9,0x02, 0x4C,0x12,0x80]),
