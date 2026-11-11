@@ -193,6 +193,8 @@ int dp_sega_tas_load(const char *path,DpSegaTas *out,char *err,size_t errsz) {
     snprintf(out->source,sizeof out->source,"%s",path);
     int ok=tas_load_buf(d,(size_t)sz,out,err,errsz,0);
     free(d);
+    // DP_SEGA_TAS_MASKS=file: the loaded movie as one mask byte per frame (feeds the BizHawk dumper, tools/smshawk_dump)
+    if(ok && getenv("DP_SEGA_TAS_MASKS")) { FILE *mf=fopen(getenv("DP_SEGA_TAS_MASKS"),"wb"); if(mf) { fwrite(out->masks,1,out->frames,mf); fclose(mf); } }
     if(!ok) dp_sega_tas_free(out);
     return ok;
 }

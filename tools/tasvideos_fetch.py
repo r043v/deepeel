@@ -1,9 +1,11 @@
 #!/usr/bin/env python3 -I
 """Download every TASVideos movie of a Game Boy (or other) game: all of them is the norm.
 
-usage: tasvideos_fetch.py ROM.gb OUT_DIR [--game-id N] [--game "TASVideos game name"]
+usage: tasvideos_fetch.py ROM OUT_DIR [--game-id N[,N...]] [--game "TASVideos game name"]
                           [--system GB|NES|MD|...] [--max N] [--list]
 
+Order: publications first (the game page https://tasvideos.org/NNNG, then the
+publications API), then the submissions.  --game-id takes several ids (comma list).
 Sources, all kept (no cap unless --max): the Subs-List of the game (every
 submission whatever its status: published, rejected, cancelled, playground...
 free data, often more recorders and routes than the publications) and the
@@ -35,8 +37,13 @@ def norm(s):
     return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
 
 def rom_title(path):
-    with open(path, "rb") as f:
-        h = f.read(0x150)
+    try:
+        with open(path, "rb") as f:
+            h = f.read(0x150)
+    except OSError:
+        return os.path.basename(path)   # listing without a ROM
+    if len(h) < 0x150 or not path.lower().endswith((".gb", ".gbc")):
+        return os.path.basename(path)   # only GB headers carry a title
     return h[0x134:0x144].split(b"\0")[0].decode("ascii", "replace").strip()
 
 def opt(argv, name, default=None):
@@ -92,9 +99,24 @@ def main():
                     break
             if gid:
                 break
-    items = []  # (kind, id, label, download url)
-    if gid:
-        html = get(SUBS % int(gid)).decode("utf-8", "replace")
+    items = []  # (kind, id, label, download url): publications first, then submissions
+    gids = [int(x) for x in str(gid).split(",") if x.strip()] if gid else []
+    pseen = set(p["id"] for p in pubs)
+    for g in gids:   # the game page lists its publications whatever the API's title matching finds
+        try:
+            ghtml = get("https://tasvideos.org/%dG" % g).decode("utf-8", "replace")
+        except Exception as e:
+            print("game page %dG failed (%s)" % (g, e), file=sys.stderr)
+            continue
+        for m in re.finditer(r'href="/(\d+)M"[^>]*>([^<]*)', ghtml):
+            if int(m.group(1)) not in pseen:
+                pseen.add(int(m.group(1)))
+                pubs.append({"id": int(m.group(1)), "title": m.group(2).strip()})
+    for p in pubs:
+        items.append(("M", p["id"], p.get("title", ""),
+                      "https://tasvideos.org/%dM?handler=Download" % p["id"]))
+    for gid in gids:
+        html = get(SUBS % gid).decode("utf-8", "replace")
         seen = set()
         for row in re.findall(r"<tr>(.*?)</tr>", html, re.S):
             m = re.search(r'href="/(\d+)S"', row)
@@ -105,11 +127,8 @@ def main():
                      for c in re.findall(r"<td.*?>(.*?)</td>", row, re.S)]
             items.append(("S", int(m.group(1)), " | ".join(cells[2:7]),
                           "https://tasvideos.org/%sS?handler=Download" % m.group(1)))
-    else:
+    if not gids:
         print("no GameId (pass --game-id N from Subs-List?GameId=N): publications only", file=sys.stderr)
-    for p in pubs:
-        items.append(("M", p["id"], p.get("title", ""),
-                      "https://tasvideos.org/%dM?handler=Download" % p["id"]))
     print("rom header title: %r; %d submission/publication movie(s)" % (rom_title(rom), len(items)),
           file=sys.stderr)
     for k, i, lab, _ in items:

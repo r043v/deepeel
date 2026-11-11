@@ -133,6 +133,11 @@ namespace SmshawkDump
 						return null;
 					}, null, null));
 			}
+			// SMSSHAWK_DSY=file: the same per-frame state as deepeel's DP_SEGA_TAS_DSY, in the DSY1 exchange format
+			// (src/core/desync.h) so `deepeel desync` compares the two emulators; frames numbered as the movie's
+			BinaryWriter dsy = null;
+			var dsyPath = Environment.GetEnvironmentVariable("SMSSHAWK_DSY");
+			if (dsyPath != null) { dsy = new BinaryWriter(File.Create(dsyPath)); dsy.Write(Encoding.ASCII.GetBytes("DSY1")); }
 			Console.Error.WriteLine("stage: loop");
 			for (int f = 0; f < frames; f++)
 			{
@@ -170,6 +175,19 @@ namespace SmshawkDump
 				var vb = vp.GetVideoBuffer();
 				int n = vp.BufferWidth * vp.BufferHeight;
 				for (int p = 0; p < n; p++) { sh ^= (uint)vb[p]; sh *= 16777619; }
+				if (dsy != null)
+				{
+					var rg = ((SMSHawk)fe.Core).Cpu.GetCpuFlagsAndRegisters();
+					var rb = new byte[29];
+					string[] order = { "BC", "DE", "HL", "AF", "Shadow BC", "Shadow DE", "Shadow HL", "Shadow AF", "IX", "IY", "SP", "PC" };
+					for (int k = 0; k < order.Length; k++) { int v = (int)rg[order[k]].Value; rb[2 * k] = (byte)v; rb[2 * k + 1] = (byte)(v >> 8); }
+					// BizHawk's Z80A reports SP from the IY registers (Z80A.cs): left at zero here, ignore regs:14-15 when comparing
+					rb[20] = 0; rb[21] = 0;
+					rb[24] = (byte)(int)rg["I"].Value; rb[25] = (byte)(int)rg["R"].Value; // IM / IFF1 / IFF2 are not exposed: left zero (ignore regs:1a-1c)
+					dsy.Write((uint)f); dsy.Write((ushort)2);
+					dsy.Write((byte)4); dsy.Write(Encoding.ASCII.GetBytes("wram")); dsy.Write((uint)buf.Length); dsy.Write(buf);
+					dsy.Write((byte)4); dsy.Write(Encoding.ASCII.GetBytes("regs")); dsy.Write((uint)rb.Length); dsy.Write(rb);
+				}
 				var line = Encoding.ASCII.GetBytes($"f {f + 1} hawk={sh:x8} ram={h:x8}\n"); hash.Write(line, 0, line.Length);
 				if (raw != null)
 				{
@@ -185,6 +203,7 @@ namespace SmshawkDump
 				}
 				if (ppmFrames.Contains(f + 1)) DumpPpm($"{outPrefix}.hawk.{f + 1}.ppm", vp);
 			}
+			dsy?.Dispose();
 			Console.Error.WriteLine($"smshawk_dump: {frames} frames -> {outPrefix}.hawk.bin");
 		}
 
