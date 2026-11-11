@@ -44,6 +44,7 @@
 
 #include "explore/core.h"
 #include "core/bizhawk.h"
+#include "core/desync.h"
 static const char *argv_cov(int argc, char **argv) {
     for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "--cov")) return argv[i + 1];
     return NULL;
@@ -2093,6 +2094,34 @@ static int bz_open(const char *path, DpBzMovie *m) {
     if (!ok) fprintf(stderr, "deepeel: %s: %s\n", path, err);
     return ok;
 }
+// deepeel desync A.dsy B.dsy [--window N] [--offset-a N] [--offset-b N] [--show K] [--ignore block:lo-hi]... [--ring DIR]
+// compares two per-frame state streams (src/core/desync.h) and reports the first divergence with the last N frames
+static int cmd_desync(int argc, char **argv) {
+    if (argc < 4) { fprintf(stderr, "usage: deepeel desync A.dsy B.dsy [--window N] [--offset-a N] [--offset-b N] [--show K] [--ignore block:lo-hi] [--ring DIR]\n"); return 2; }
+    DpDsyOptions o; DpDsyIgnore ign[32];
+    memset(&o, 0, sizeof o);
+    for (int i = 4; i < argc; i++) {
+        if (!strcmp(argv[i], "--window") && i + 1 < argc) o.window = (unsigned)atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--offset-a") && i + 1 < argc) o.offset_a = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--offset-b") && i + 1 < argc) o.offset_b = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--show") && i + 1 < argc) o.show = (unsigned)atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--ring") && i + 1 < argc) o.ring_dir = argv[++i];
+        else if (!strcmp(argv[i], "--ignore") && i + 1 < argc && o.nignore < 32) {
+            char *a = argv[++i], *c = strchr(a, ':');
+            DpDsyIgnore *g = &ign[o.nignore];
+            if (!c) { fprintf(stderr, "--ignore wants block:lo-hi (hex)\n"); return 2; }
+            snprintf(g->block, sizeof g->block, "%.*s", (int)(c - a), a);
+            g->lo = (uint32_t)strtoul(c + 1, &c, 16);
+            g->hi = *c == '-' ? (uint32_t)strtoul(c + 1, NULL, 16) : g->lo;
+            o.nignore++;
+        } else { fprintf(stderr, "desync: unknown option %s\n", argv[i]); return 2; }
+    }
+    o.ignore = ign;
+    uint32_t n = 0;
+    int rc = dp_dsy_compare(argv[2], argv[3], &o, stdout, &n);
+    return rc < 0 ? 2 : rc;
+}
+
 static int cmd_tas(int argc, char **argv) {
     if (argc >= 4 && !strcmp(argv[2], "info")) {
         DpBzMovie m;
@@ -2231,6 +2260,7 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "mapx")) return cmd_mapx(argc, argv);
     if (!strcmp(argv[1], "maprender")) return cmd_maprender(argc, argv);
     if (!strcmp(argv[1], "tas")) return cmd_tas(argc, argv);
+    if (!strcmp(argv[1], "desync")) return cmd_desync(argc, argv);
     if (!strcmp(argv[1], "map")) return cmd_map(argc, argv);
     if (!strcmp(argv[1], "regs")) return cmd_regs(argc, argv);
     if (!strcmp(argv[1], "dis")) return cmd_dis(argc, argv);

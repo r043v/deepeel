@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.312.0 LANGUAGES C)
+project(deepeel VERSION 0.313.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -291,6 +291,7 @@ add_library(deepeel_core STATIC
   src/core/zip.c
   src/core/bk2.c
   src/core/bizhawk.c
+  src/core/desync.c
   src/core/sha1.c
   src/core/md5.c
   src/core/statefile.c

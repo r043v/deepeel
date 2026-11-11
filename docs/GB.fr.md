@@ -4873,3 +4873,14 @@ magie `MMV\0`, nombre d'images à l'offset 0x08, taille d'en-tête à 0x18, MD5 
 l'octet bas est la manette 1 dans le même plan de bits que le masque Sega. Le film Castle `1344M` est enregistré sur la
 V1.0 (MD5 e9b4b92b…) : l'outil signale « different ROM » et rejoue malgré tout sur la V1.1. Observation de l'outil,
 format déduit de l'en-tête (cohérence nombre d'images × 2 + en-tête = taille du fichier), non vérifié contre Meka.
+
+## 0.313.0 — `deepeel desync` : chercheur de désynchronisations entre deux émulateurs
+
+`deepeel desync A.dsy B.dsy [--window N] [--offset-a N] [--offset-b N] [--show K] [--ignore bloc:lo-hi] [--ring DIR]`
+compare deux flux d'état par image au format d'échange `DSY1` (`src/core/desync.h` : par image, des blocs nommés —
+`wram`, `vram`, `regs`, `bus`… — écrits avec `dp_dsy_frame`). Il s'arrête à la première image qui diffère, liste les
+octets (adresse, A, B), et conserve en mémoire l'état complet des N dernières images des deux côtés (`--window`, 8 par
+défaut) ; avec `--ring`, ces images sont écrites en fichiers pour inspection. Les plages bruyantes (pile, page sonore)
+s'excluent par `--ignore`. Test `desync_finder` (fixture synthétique). **Pas encore branché** : les producteurs
+(dump par image côté m0boy/deepeel ; dumper BizHawk générique par domaine mémoire) restent à écrire ; les outils
+existants `tools/smshawk_dump` et `tools/gbhawk_ref` produisent des WRAM par image dans un autre format.
