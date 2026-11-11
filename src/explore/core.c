@@ -106,6 +106,7 @@ typedef struct {
     size_t cellcap, celln;
     uint64_t *probeset;        // technique 2: sites already probed
     size_t probecap, proben;
+    uint8_t *tas_start; uint32_t tas_pc; int tas_shifts_left;   // power-on state kept to queue the shifted movie replays once the unshifted one ends
 } Shared;
 
 typedef struct {
@@ -281,7 +282,25 @@ static void run_path(Worker *w, Pending *p) {
             if (f != tas_last) {
                 tas_last = f;
                 int64_t k = (int64_t)f - tas_shift;
-                if (k >= (int64_t)cfg->tas_frames) { m->set_input(m, 0); tas = 0; }
+                if (k >= (int64_t)cfg->tas_frames) {
+                    m->set_input(m, 0); tas = 0;
+                    // the unshifted movie is over: queue the shifted replays on top, so they run next
+                    if (tas_shift == 0 && sh->tas_start) {
+                        pthread_mutex_lock(&sh->mu);
+                        if (sh->tas_shifts_left) {
+                            sh->tas_shifts_left = 0;
+                            static const int order[6] = {3, 2, 1, -1, -2, -3};
+                            for (int i = 0; i < 6; i++) {
+                                uint8_t *cp = malloc(sh->sbytes);
+                                if (!cp) break;
+                                memcpy(cp, sh->tas_start, sh->sbytes);
+                                if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
+                                sh->q[sh->qn++] = (Pending){ cp, sh->tas_pc, 0, 0, TAS_INPUT + 3 + order[i] };
+                            }
+                        }
+                        pthread_mutex_unlock(&sh->mu);
+                    }
+                }
                 else m->set_input(m, k < 0 ? 0 : cfg->tas_masks[k]);
             }
         }
@@ -638,7 +657,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         // technique 9 (TAS form): the movie from power-on, unshifted and shifted by 1..3 frames
         if (m->frame && m->set_input && cfg->tas_masks && cfg->tas_frames) {
             static const int order[6] = {-3, -2, -1, 1, 2, 3};
-            for (int i = cfg->no_tas_jitter ? 6 : 0; i < 7; i++) {
+            for (int i = 6; i < 7; i++) {
                 int sh_ = i < 6 ? order[i] : 0;
                 uint8_t *cp = malloc(sh.sbytes);
                 if (!cp) break;
@@ -647,12 +666,17 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
                 sh.q[sh.qn++] = (Pending){ cp, start_pc, 0, 0, TAS_INPUT + 3 + sh_ };
             }
         }
+        if (m->frame && m->set_input && cfg->tas_masks && cfg->tas_frames && !cfg->no_tas_jitter) {
+            sh.tas_start = malloc(sh.sbytes);
+            if (sh.tas_start) { memcpy(sh.tas_start, sh.q[sh.qn - 1].state, sh.sbytes); sh.tas_pc = start_pc; sh.tas_shifts_left = 1; }
+        }
         // clones start from power-on, the same state the main machine saved
         for (unsigned i = 1; i < started; i++) pthread_create(&ws[i].th, NULL, worker_main, &ws[i]);
         worker_main(&ws[0]);
         for (unsigned i = 1; i < started; i++) pthread_join(ws[i].th, NULL);
     }
 
+    free(sh.tas_start);
     for (unsigned i = 0; i < started; i++) {
         DpCoreResult *l = &ws[i].loc;
         out->paths += l->paths; out->forks += l->forks;
