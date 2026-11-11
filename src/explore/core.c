@@ -50,6 +50,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--no-irq-jitter")) { c->no_irq_jitter = 1; return 1; }
     if (!strcmp(a, "--no-decompress")) { c->no_decompress = 1; return 1; }
     if (!strcmp(a, "--no-copies")) { c->no_copies = 1; return 1; }
+    if (!strcmp(a, "--no-learn-sig")) { c->no_learn_sig = 1; return 1; }
     if (!strcmp(a, "--no-taint-cut")) { c->no_taint_cut = 1; return 1; }
     if (!strcmp(a, "--no-forced-ram-cut")) { c->no_forced_ram_cut = 1; return 1; }
     if (!strcmp(a, "--no-site-score")) { c->no_site_score = 1; return 1; }
@@ -286,6 +287,32 @@ static void run_path(Worker *w, Pending *p) {
                 break;
             }
             loc->exec_outside++;
+        }
+        // technique 3 (learned form): z80 `ld a,(nn)` of RAM straight followed by `cp n` is a signature test;
+        // queue a state whose byte already holds n so the matching side runs as natural
+        if (!cfg->no_learn_sig && !cur_forced && m->poke && bytes[0] == 0x3A && bytes[3] == 0xFE &&
+            m->rom_index(m, bytes[1] | (bytes[2] << 8)) < 0 && isa->name && !strcmp(isa->name, "z80")) {
+            uint32_t addr = bytes[1] | (bytes[2] << 8);
+            pthread_mutex_lock(&sh->mu);
+            int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben,
+                                      ((uint64_t)addr << 8 | bytes[4]) | (3ull << 60));
+            pthread_mutex_unlock(&sh->mu);
+            if (fresh) {
+                uint8_t *tmp = malloc(sh->sbytes), *snap = malloc(sh->sbytes);
+                if (tmp && snap) {
+                    m->save(m, tmp);
+                    m->poke(m, addr, bytes[4]);
+                    m->save(m, snap);
+                    m->load(m, tmp);
+                    pthread_mutex_lock(&sh->mu);
+                    if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
+                    sh->q[sh->qn++] = (Pending){ snap, pc, 0, 0, cur_input };
+                    pthread_mutex_unlock(&sh->mu);
+                    loc->learned_sigs++;
+                    snap = NULL;
+                }
+                free(tmp); free(snap);
+            }
         }
         if (cur_forced && !cfg->no_taint_cut && have_flow) {
             // technique 1.b: the inverted flag may have corrupted registers/stack; a transfer whose target comes from them is untrusted
@@ -536,7 +563,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
-        out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
+        out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed;
         out->exec_outside += l->exec_outside;
         free(ws[i].visits); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
@@ -558,6 +585,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "deepeel %s (generic kernel)\n", label);
     fprintf(out, "steps %llu paths %llu forks %llu pruned-covered %llu\n", U(r->steps), U(r->paths), U(r->forks), U(r->pruned_covered));
     fprintf(out, "saturation: total %llu path %llu loop %llu site %llu queue %llu\n", U(r->sat_total), U(r->sat_path), U(r->sat_loop), U(r->sat_site), U(r->sat_queue));
+    fprintf(out, "learned signatures %llu\n", U(r->learned_sigs));
     fprintf(out, "site-scored picks %llu\n", U(r->site_scored_picks));
     fprintf(out, "novelty picks %llu (new ROM bytes: novelty %llu, plain %llu)\n", U(r->novelty_picks), U(r->novelty_new_bytes), U(r->plain_new_bytes));
     fprintf(out, "workers %llu (short %llu)\n", U(r->workers), U(r->workers_short));
