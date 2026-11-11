@@ -37,7 +37,7 @@ static int add_key(DpBzMovie *m, unsigned *cap, const char *name, unsigned group
 /* LogKey:#Reset|Power|#P1 Up|P1 Down|...  ('#' opens a controller group; names may contain spaces).
  * An analog column is recognised by name ("Axis", "Stick", "Trackball", "Mouse X/Y", "Wheel", "Throttle"). */
 static int is_axis_name(const char *s) {
-    static const char *const w[] = { "axis", "stick", "trackball", "mouse x", "mouse y", "wheel", "throttle", "paddle", "pointer", "lightgun x", "lightgun y", "x pos", "y pos", "lightpen" };
+    static const char *const w[] = { "axis", "stick", "trackball", "mouse x", "mouse y", "wheel", "throttle", "paddle", "pointer", "lightgun x", "lightgun y", "x pos", "y pos", "lightpen", "cycle", "counter", "frame count", "lag" };
     char l[DP_BZ_NAME]; size_t i = 0;
     for (; s[i] && i + 1 < sizeof l; i++) l[i] = (char)tolower((unsigned char)s[i]);
     l[i] = 0;

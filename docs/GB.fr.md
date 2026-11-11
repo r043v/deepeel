@@ -4857,3 +4857,11 @@ Les chargeurs `.bk2` de Sega (SMS/GG/MSX), NES, PCE et Mega Drive passent par `s
 par nom via `LogKey`). Sega : masques identiques image par image sur le film Castle (42 337 images). NES : les colonnes
 Reset/Power déclenchent désormais la commande de reset. MD : repli sur la grammaire positionnelle sans `LogKey`.
 Restent à faire : GB, formats Meka `.mmv`, `.bkm`, `.vbm`, `.gmv` hors MD, autres cores (axes N64/SNES/PSX/Saturn).
+
+## 0.311.0 — chargeur GB sur le lecteur générique ; correction « Input Cycle »
+
+Le chargeur de films GB (`src/explore/tas.c`) passe par `src/core/bizhawk.c`. Les films SubGBHawk ont une colonne
+`Input Cycle` (compteur, ex. `70224,`) : l'ancien analyseur la lisait caractère par caractère comme des boutons et
+décalait les colonnes suivantes (masque `Down` lu `0xF8` au lieu de `0x80` sur `casualpokeplayer-…gameendglitch.bk2`).
+Le lecteur générique la traite comme une valeur numérique (colonne « axe »). Conséquence : les couvertures GB lancées
+avant 0.311.0 avec de tels films ont rejoué des entrées erronées ; à relancer.

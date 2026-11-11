@@ -5,6 +5,7 @@
 #include "tas.h"
 #include "../core/sha1.h"
 #include "../core/zip.h"
+#include "../core/bizhawk.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -48,7 +49,7 @@ static uint8_t btn_mask(const char *n) {
 }
 
 // --- bk2 / plain input log ---------------------------------------------------
-static int log_parse(const uint8_t *d, size_t n, DpTas *out, char *err, size_t errsz) {
+static int log_parse_positional(const uint8_t *d, size_t n, DpTas *out, char *err, size_t errsz) {
     const char *p = (const char *)d, *end = (const char *)d + n;
     uint8_t key_mask[64];
     int nkey = 0;
@@ -121,6 +122,33 @@ static int log_parse(const uint8_t *d, size_t n, DpTas *out, char *err, size_t e
         return 0;
     }
     return 1;
+}
+
+// LogKey movies go through the shared BizHawk reader (src/core/bizhawk.c); the controller prefix is dropped
+// and the button name mapped by btn_mask.  Logs without a LogKey keep the positional grammar above.
+static int log_parse(const uint8_t *d, size_t n, DpTas *out, char *err, size_t errsz) {
+    if (!memmem(d, n, "LogKey:", 7)) return log_parse_positional(d, n, out, err, errsz);
+    DpBzMovie m;
+    if (!dp_bz_load(d, n, &m, err, errsz)) return 0;
+    uint8_t km[512];
+    unsigned nk = m.nkeys < 512 ? m.nkeys : 512;
+    for (unsigned i = 0; i < nk; i++) {
+        char low[DP_BZ_NAME];
+        const char *t = m.keys[i].name;
+        if ((t[0] == 'P' || t[0] == 'p') && isdigit((unsigned char)t[1]) && t[2] == ' ') t += 3;
+        size_t k = 0;
+        for (; *t && k + 1 < sizeof low; t++) low[k++] = (char)tolower((unsigned char)*t);
+        low[k] = 0;
+        km[i] = m.keys[i].axis ? 0 : btn_mask(low);
+    }
+    int ok = 1;
+    for (uint32_t f = 0; f < m.nframes && ok; f++) {
+        uint8_t mask = 0;
+        for (unsigned i = 0; i < nk; i++) if (km[i] && dp_bz_held(&m, f, (int)i)) mask |= km[i];
+        ok = emit(out, mask, err, errsz);
+    }
+    dp_bz_free(&m);
+    return ok;
 }
 
 // --- VBM ---------------------------------------------------------------------
