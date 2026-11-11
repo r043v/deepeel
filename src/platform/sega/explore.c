@@ -2884,7 +2884,7 @@ static int parse_entry(const char *s,DpSegaOptions *o) {
 static int core_is_sg, core_is_msx;
 // only the first two instances are trusted: gg3..gg16 resolve the bank-switch
 // fixture differently (observed 2026-11: fix_sega_mapper reaches other ROM indexes)
-static const void *sega_core_pick(unsigned w) { if(core_is_msx) return w==1?(const void*)dp_msx_backend2():NULL; if(core_is_sg) return w==1?(const void*)dp_sega_backend_sg2():NULL; return w>=1 && w<=15 ? (const void*)dp_sega_backend_gg_worker(w) : NULL; }
+static const void *sega_core_pick(unsigned w) { (void)w; if(core_is_msx) return dp_msx_backendt(); if(core_is_sg) return dp_sega_backend_sgt(); return dp_sega_backend_ggt(); }
 static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *o,const DpCoreConfig *kcfg,FILE *out) {
     int msx=!strcmp(s->id,"msx");
     const DpSegaBackend *b=msx?dp_msx_backend():!strcmp(s->id,"sg")?dp_sega_backend_sg():dp_sega_backend_gg();

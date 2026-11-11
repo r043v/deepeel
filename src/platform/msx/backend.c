@@ -1,3 +1,6 @@
+#ifndef M0_TL
+#define M0_TL   /* the kernel flavour builds with -DM0_TL=__thread: one machine per worker thread */
+#endif
 #include "msx.h"
 #include "explore.h"
 #include <sg1000.h>
@@ -7,11 +10,11 @@
 _Static_assert((int)DP_MSX_PLAIN==M0_MSX_PLAIN && (int)DP_MSX_ASCII8==M0_MSX_ASCII8 &&
     (int)DP_MSX_ASCII16==M0_MSX_ASCII16 && (int)DP_MSX_KONAMI==M0_MSX_KONAMI &&
     (int)DP_MSX_KONAMI_SCC==M0_MSX_KONAMI_SCC,"MSX mapper IDs changed upstream");
-static uint8_t *image;
-static size_t image_size;
-static uint64_t generation;
-static DpMsxObserver observer;
-static void *observer_user;
+static M0_TL uint8_t *image;
+static M0_TL size_t image_size;
+static M0_TL uint64_t generation;
+static M0_TL DpMsxObserver observer;
+static M0_TL void *observer_user;
 void msx_ay_write(unsigned reg,uint8_t value);
 void dp_msx_observe(DpMsxObserver callback,void *user) { observer=callback; observer_user=user; }
 static void event(unsigned kind,uint32_t address,uint8_t value) {
@@ -92,8 +95,8 @@ int dp_msx_save(void *state,size_t size) {
     Snapshot *saved=state; memset(saved,0,size); saved->machine=machine; saved->generation=generation; return 1;
 }
 #include "../sega/backend.h"
-static DpSegaWatch W;
-static uint16_t watch_buf[SG_OUT_WIDTH];
+static M0_TL DpSegaWatch W;
+static M0_TL uint16_t watch_buf[SG_OUT_WIDTH];
 static int watch_draw(void *u,unsigned y) { (void)u; (void)y; return 1; }
 static void watch_row(void *u,unsigned y,uint16_t *p) { (void)u; dp_sega_watch_row(&W,y,p,SG_OUT_WIDTH,SG_HEIGHT); }
 static void watch_frame(void *u) { (void)u; dp_sega_watch_frame(&W); }

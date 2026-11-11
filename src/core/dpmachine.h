@@ -159,6 +159,11 @@ struct DpMachine {
     // An independent machine of the same program for parallel workers (`worker` >= 1),
     // already initialized and at its power-on state; NULL when unsupported.
     struct DpMachine *(*clone)(struct DpMachine *, unsigned worker);
+    // Optional: bind the machine to the calling thread.  The kernel calls it first in each worker
+    // thread (never on worker 0, which already runs); a clone() may then return a cheap shell and
+    // build the runtime here, so thread-local platform state belongs to the thread that uses it.
+    // Returns 0 when the machine cannot be built: that worker retires, the others go on.
+    int (*attach)(struct DpMachine *);
     void (*close)(struct DpMachine *);
 };
 

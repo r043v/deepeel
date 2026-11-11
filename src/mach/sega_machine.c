@@ -29,6 +29,7 @@ typedef struct {
     uint8_t (*base_in)(void *, uint16_t);
     void (*base_out)(void *, uint16_t, uint8_t);
     void *base_user;
+    int attached;            // the runtime is built (a clone is a shell until its worker thread attaches)
     int wrapped, fetching;   // fetching: opcode reads are not data accesses
     int msx;                 // MSX cartridge machine (init_arg is then the mapper)
     int init_arg;            // backend init's last argument: SMS flag, or the MSX mapper
@@ -37,6 +38,7 @@ typedef struct {
 static uint32_t sega_state_bytes(DpMachine *m) { return (uint32_t)((SegaMach *)m->impl)->b->state_size; }
 static void sega_save(DpMachine *m, uint8_t *buf) { ((SegaMach *)m->impl)->b->save(buf); }
 static void sega_reinstall(SegaMach *s);
+static void sega_capture(SegaMach *s);
 static void sega_load(DpMachine *m, const uint8_t *buf) {
     SegaMach *s = m->impl;
     s->b->load(buf);
@@ -126,13 +128,28 @@ static void sega_close(DpMachine *m) {
 }
 
 DpMachine *dp_machine_sega(const void *backend);
+// A clone is a shell: the backend is thread-local, so its runtime is built by the worker thread
+// that will own it (attach), on demand and for any number of workers.
+static int sega_attach(DpMachine *m) {
+    SegaMach *s = m->impl;
+    if (s->attached) return 1;
+    if (s->b->init(s->rom, s->rom_size, NULL, s->init_arg) != 1) return 0;
+    sega_capture(s);
+    s->attached = 1;
+    return 1;
+}
 static DpMachine *sega_clone(DpMachine *m, unsigned worker) {
     SegaMach *s = m->impl;
     if (!s->pick || !s->rom || !worker) return NULL;
     const DpSegaBackend *b = s->pick(worker);
-    if (!b || b->init(s->rom, s->rom_size, NULL, s->init_arg) != 1) return NULL;
-    DpMachine *c = dp_machine_sega(b);
-    if (c) { dp_machine_sega_source(c, s->rom, s->rom_size, s->pick); ((SegaMach *)c->impl)->init_arg = s->init_arg; }
+    if (!b) return NULL;
+    DpMachine *c = dp_machine_sega(b);   // reads the calling thread's runtime only to capture callbacks
+    if (!c) return NULL;
+    SegaMach *cs = c->impl;
+    cs->attached = 0;                     // those callbacks are not this clone's: attach rebuilds them
+    dp_machine_sega_source(c, s->rom, s->rom_size, s->pick);
+    cs->init_arg = s->init_arg; cs->msx = s->msx;
+    c->attach = sega_attach;
     return c;
 }
 void dp_machine_sega_source(DpMachine *m, const uint8_t *rom, size_t size, const void *(*pick)(unsigned worker)) {
@@ -144,6 +161,12 @@ void dp_machine_sega_source(DpMachine *m, const uint8_t *rom, size_t size, const
 void dp_machine_sega_init_arg(DpMachine *m, int arg) { ((SegaMach *)m->impl)->init_arg = arg; }
 void dp_machine_sega_set_msx(DpMachine *m, int msx) { ((SegaMach *)m->impl)->msx = msx; }
 
+static void sega_capture(SegaMach *s) {
+    z80_t *c0 = s->b->cpu();
+    if (!c0) return;   // thread-local backend not built in this thread yet (clone shell)
+    s->base_read = c0->read; s->base_write = c0->write; s->base_in = c0->in; s->base_out = c0->out; s->base_user = c0->user;
+}
+
 DpMachine *dp_machine_sega(const void *backend) {
     const DpSegaBackend *b = backend;
     SegaMach *s = calloc(1, sizeof *s);
@@ -151,7 +174,8 @@ DpMachine *dp_machine_sega(const void *backend) {
     if (!s || !m) { free(s); free(m); return NULL; }
     s->b = b;
     s->init_arg = 1;
-    { z80_t *c0 = b->cpu(); s->base_read = c0->read; s->base_write = c0->write; s->base_in = c0->in; s->base_out = c0->out; s->base_user = c0->user; }
+    s->attached = 1;
+    sega_capture(s);
     m->name = "sega";
     m->isa = dp_isa_z80();
     m->impl = s;

@@ -96,19 +96,37 @@ static int md_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *
     free(pre);
     return hit;
 }
-static const DpPlatformHooks md_hooks = { .event_probe = md_event_probe };
+// IRQ fork (technique 2): where the vertical interrupt is enabled and unmasked, one state with
+// the interrupt raised (the old engine's irq_forks); delay 1 only
+static int md_irq_alt(void *user, DpMachine *m, unsigned delay, uint8_t *save) {
+    (void)user;
+    MdMachWrap *w = m->impl;
+    if (delay != 1) return 0;
+    if (((dp_mdmach_sr(w->m) >> 8) & 7u) >= 6u || !(dp_mdmach_vdp_reg(w->m, 1) & 0x20)) return 0;
+    m->save(m, save);
+    dp_mdmach_state_set_irq(save, 1, 0);
+    return 1;
+}
+static const DpPlatformHooks md_hooks = { .event_probe = md_event_probe, .irq_alt = md_irq_alt };
 const DpPlatformHooks *dp_machine_md_hooks(void) { return &md_hooks; }
 
+// the runtime (68000, VDP, RAM) is thread-local: a clone is a shell until its worker attaches
+static int md_attach(DpMachine *m) {
+    MdMachWrap *w = m->impl;
+    if (w->m) return 1;
+    w->m = dp_mdmach_open(w->rom, w->rom_size);
+    if (!w->m) return 0;
+    dp_mdmach_reset(w->m);
+    return 1;
+}
 static DpMachine *md_clone(DpMachine *m, unsigned worker) {
     (void)worker;
-    MdMachWrap *w = m->impl;
-    if (!w->rom) return NULL;
-    DpMdMach *d = dp_mdmach_open(w->rom, w->rom_size);
-    if (!d) return NULL;
-    dp_mdmach_reset(d);
-    DpMachine *c = dp_machine_md(d);
-    if (!c) { dp_mdmach_close(d); return NULL; }
-    dp_machine_md_source(c, w->rom, w->rom_size);
+    MdMachWrap *o = m->impl;
+    if (!o->rom) return NULL;
+    DpMachine *c = dp_machine_md(NULL);
+    if (!c) return NULL;
+    dp_machine_md_source(c, o->rom, o->rom_size);
+    c->attach = md_attach;
     return c;
 }
 void dp_machine_md_source(DpMachine *m, const uint8_t *rom, size_t size) {
@@ -118,7 +136,7 @@ void dp_machine_md_source(DpMachine *m, const uint8_t *rom, size_t size) {
 }
 
 static void md_close(DpMachine *m) {
-    dp_mdmach_close(((MdMachWrap *)m->impl)->m);
+    if (((MdMachWrap *)m->impl)->m) dp_mdmach_close(((MdMachWrap *)m->impl)->m);
     free(m->impl);
     free(m);
 }

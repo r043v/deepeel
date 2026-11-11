@@ -1,3 +1,6 @@
+#ifndef M0_TL
+#define M0_TL   /* the kernel flavour builds with -DM0_TL=__thread: one machine per worker thread */
+#endif
 #include "backend.h"
 #include <sg1000.h>
 #include <string.h>
@@ -12,8 +15,8 @@ static int64_t rom_index(uint16_t a) {
     return a<machine.rom_size ? a : -1;
 }
 static void save(void *out) { memcpy(out,&machine,sizeof(machine)); }
-static DpSegaWatch W;
-static uint16_t watch_buf[SG_OUT_WIDTH];
+static M0_TL DpSegaWatch W;
+static M0_TL uint16_t watch_buf[SG_OUT_WIDTH];
 static int watch_draw(void *u,unsigned y) { (void)u; (void)y; return 1; }
 static void watch_row(void *u,unsigned y,uint16_t *p) { (void)u; dp_sega_watch_row(&W,y,p,SG_OUT_WIDTH,SG_HEIGHT); }
 static void watch_frame(void *u) { (void)u; dp_sega_watch_frame(&W); }

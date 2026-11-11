@@ -80,6 +80,7 @@ static void nes_close(DpMachine *m) {
     free(m);
 }
 
+static int nes_attach(DpMachine *m) { return nes_impl(m) != NULL; }
 static DpMachine *nes_clone(DpMachine *m, unsigned worker) {
     (void)worker;
     NesMachWrap *o = m->impl, *w = calloc(1, sizeof *w);
@@ -91,6 +92,7 @@ static DpMachine *nes_clone(DpMachine *m, unsigned worker) {
     memcpy(w->img, o->src, o->src_size);
     w->img_size = o->src_size; w->mapper = o->mapper;
     c->impl = w;
+    c->attach = nes_attach;
     return c;
 }
 

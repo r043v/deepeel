@@ -79,6 +79,7 @@ const DpPlatformHooks *dp_machine_pce_hooks(void) {
     return &h;
 }
 
+static int pce_attach(DpMachine *m) { pce_ensure(m); return 1; }
 static DpMachine *pce_clone(DpMachine *m, unsigned worker) {
     (void)worker;
     PceWrap *o = m->impl, *w = calloc(1, sizeof *w);
@@ -90,6 +91,7 @@ static DpMachine *pce_clone(DpMachine *m, unsigned worker) {
     memcpy(w->img, o->src, o->src_size);
     w->img_size = o->src_size;
     c->impl = w;
+    c->attach = pce_attach;
     return c;
 }
 void dp_machine_pce_source(DpMachine *m, const uint8_t *data, size_t size) {

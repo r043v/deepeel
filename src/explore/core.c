@@ -553,6 +553,10 @@ static void *worker_main(void *arg) {
     Worker *w = arg;
     Shared *sh = w->sh;
     const DpCoreConfig *cfg = sh->cfg;
+    if (w->m->attach && !w->m->attach(w->m)) {
+        fprintf(stderr, "core: worker could not build its machine, retired\n");
+        return NULL;
+    }
     // each worker hooks its own machine from its own thread (platform state may be thread-local)
     DpObservers obsv = { NULL, obs_read, obs_write };
     if (!cfg->no_copies && w->m->observe) w->m->observe(w->m, &obsv, &w->cobs);

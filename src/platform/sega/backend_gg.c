@@ -1,3 +1,6 @@
+#ifndef M0_TL
+#define M0_TL   /* the kernel flavour builds with -DM0_TL=__thread: one machine per worker thread */
+#endif
 #include "backend.h"
 #include <gg.h>
 #include <string.h>
@@ -119,8 +122,8 @@ static int64_t rom_index(uint16_t a) {
 static void save(void *out) {
     State *s=out; memset(s,0,sizeof(*s)); s->core=machine; s->second_pad=second_pad; s->reset_button=reset_button; s->memory_control=memory_control; s->tas_compat_enabled=tas_compat_enabled; s->irq_defer=irq_defer;
 }
-static DpSegaWatch W;
-static uint16_t watch_store[GG_ROW_STRIDE];
+static M0_TL DpSegaWatch W;
+static M0_TL uint16_t watch_store[GG_ROW_STRIDE];
 static int watch_draw(void *u,unsigned y) { (void)u; (void)y; return 1; }
 static void watch_row(void *u,unsigned y,uint16_t *p) {
     (void)u; dp_sega_watch_row(&W,y-GG_WIN_TOP,p,GG_WIDTH,(int)GG_WIN_LINES);

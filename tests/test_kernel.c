@@ -102,6 +102,7 @@ int main(int argc, char **argv) {
     DpMachine *c = m->clone ? m->clone(m, 1) : NULL;
     CHECK(c != NULL);
     if (c) {
+        CHECK(!c->attach || c->attach(c));   // the worker thread builds its runtime
         uint32_t pm = m->pc(m), pc0 = c->pc(c);
         CHECK(pc0 == 0);
         for (int i = 0; i < 5; i++) CHECK(c->run(c));

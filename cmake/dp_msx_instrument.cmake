@@ -21,12 +21,12 @@ replace_once([=[#else
 #endif
 }
 
-static int mapper_override]=] [=[#else
+static M0_TL int mapper_override]=] [=[#else
     return dp_msx_bios_rom_read(offset, a, machine.rom[offset]);
 #endif
 }
 
-static int mapper_override]=])
+static M0_TL int mapper_override]=])
 replace_once([=[if (slot == 3 && a >= 0x10000u - SG_MSX_RAM) return m->ram[a - (0x10000u - SG_MSX_RAM)];]=]
   [=[if (slot == 3 && a >= 0x10000u - SG_MSX_RAM) return dp_msx_bios_ram_read(a, m->ram[a - (0x10000u - SG_MSX_RAM)]);]=])
 replace_once([=[if ((slot & 3) == 3 && a >= 0x10000u - SG_MSX_RAM) machine.ram[a - (0x10000u - SG_MSX_RAM)] = v;]=]
