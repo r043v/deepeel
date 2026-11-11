@@ -12,19 +12,29 @@ typedef struct {
     DpNesMach *m;
     const DpObservers *obs;
     void *user;
+    // clones keep the image and open their runtime lazily, in the worker thread that
+    // will use it: the NES machine state is thread-local
+    uint8_t *img; size_t img_size; int mapper;
+    const uint8_t *src; size_t src_size;   // the original image (owned by the caller)
 } NesMachWrap;
+static DpNesMach *nes_impl(DpMachine *m) {
+    NesMachWrap *w = m->impl;
+    if (!w->m && w->img) { char err[64]; w->m = dp_nesmach_open(w->img, w->img_size, w->mapper, err, sizeof err); }
+    return w->m;
+}
 
 static uint32_t nes_state_bytes(DpMachine *m) { (void)m; return (uint32_t)dp_nesmach_state_size(); }
-static void nes_save(DpMachine *m, uint8_t *buf) { dp_nesmach_save(((NesMachWrap *)m->impl)->m, buf); }
-static void nes_load(DpMachine *m, const uint8_t *buf) { dp_nesmach_load(((NesMachWrap *)m->impl)->m, buf); }
-static uint8_t nes_fetch(DpMachine *m, uint32_t a) { return dp_nesmach_read(((NesMachWrap *)m->impl)->m, a); }
-static int64_t nes_rom_index(DpMachine *m, uint32_t a) { return dp_nesmach_rom_index(((NesMachWrap *)m->impl)->m, a); }
+static void nes_save(DpMachine *m, uint8_t *buf) { dp_nesmach_save(nes_impl(m), buf); }
+static void nes_load(DpMachine *m, const uint8_t *buf) { dp_nesmach_load(nes_impl(m), buf); }
+static uint8_t nes_fetch(DpMachine *m, uint32_t a) { return dp_nesmach_read(nes_impl(m), a); }
+static int64_t nes_rom_index(DpMachine *m, uint32_t a) { return dp_nesmach_rom_index(nes_impl(m), a); }
 
 // one step; a completed frame boundary inside it still counts as progress
 static int nes_run(DpMachine *m) {
     NesMachWrap *w = m->impl;
-    if (w->obs && w->obs->on_step) w->obs->on_step(w->user, dp_nesmach_pc(w->m), 0, 0);
-    return dp_nesmach_run(w->m, 1) > 0;
+    DpNesMach *n = nes_impl(m);
+    if (w->obs && w->obs->on_step) w->obs->on_step(w->user, dp_nesmach_pc(n), 0, 0);
+    return dp_nesmach_run(n, 1) > 0;
 }
 
 static void nes_on_step(void *user, unsigned pc, unsigned op) {
@@ -43,11 +53,11 @@ static void nes_observe(DpMachine *m, const DpObservers *o, void *user) {
     NesMachWrap *w = m->impl;
     w->obs = o; w->user = user;
     DpNesHooks h = { .user = w, .on_step = nes_on_step, .on_read = nes_on_read, .on_write = nes_on_write };
-    dp_nesmach_set_hooks(w->m, &h);
+    dp_nesmach_set_hooks(nes_impl(m), &h);
 }
 
-static uint32_t nes_pc(DpMachine *m) { return dp_nesmach_pc(((NesMachWrap *)m->impl)->m); }
-static void nes_set_pc(DpMachine *m, uint32_t pc) { dp_nesmach_set_pc(((NesMachWrap *)m->impl)->m, pc); }
+static uint32_t nes_pc(DpMachine *m) { return dp_nesmach_pc(nes_impl(m)); }
+static void nes_set_pc(DpMachine *m, uint32_t pc) { dp_nesmach_set_pc(nes_impl(m), pc); }
 // kernel pad mask (bit0 up, 1 down, 2 left, 3 right, 4 button 1, 5 button 2, 6 start)
 // -> NES pad 0 (A, B, Select, Start, Up, Down, Left, Right = bits 0..7)
 static void nes_set_input(DpMachine *m, uint32_t k) {
@@ -59,13 +69,29 @@ static void nes_set_input(DpMachine *m, uint32_t k) {
     if (k & 0x02) p |= 0x20;
     if (k & 0x04) p |= 0x40;
     if (k & 0x08) p |= 0x80;
-    dp_nesmach_set_input(((NesMachWrap *)m->impl)->m, p, 0);
+    dp_nesmach_set_input(nes_impl(m), p, 0);
 }
-size_t dp_machine_nes_prg_size(DpMachine *m) { return dp_nesmach_prg_size(((NesMachWrap *)m->impl)->m); }
+size_t dp_machine_nes_prg_size(DpMachine *m) { return dp_nesmach_prg_size(nes_impl(m)); }
 
 static void nes_close(DpMachine *m) {
+    NesMachWrap *w = m->impl;
+    if (w->img) { if (w->m) dp_nesmach_close(w->m); free(w->img); }
     free(m->impl);
     free(m);
+}
+
+static DpMachine *nes_clone(DpMachine *m, unsigned worker) {
+    (void)worker;
+    NesMachWrap *o = m->impl, *w = calloc(1, sizeof *w);
+    DpMachine *c = calloc(1, sizeof *c);
+    if (!w || !c || !o->src) { free(w); free(c); return NULL; }
+    *c = *m;
+    w->img = malloc(o->src_size);
+    if (!w->img) { free(w); free(c); return NULL; }
+    memcpy(w->img, o->src, o->src_size);
+    w->img_size = o->src_size; w->mapper = o->mapper;
+    c->impl = w;
+    return c;
 }
 
 // opens the runtime from a cartridge image and wraps it; the DpMachine owns
@@ -91,6 +117,8 @@ DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err
     m->run = nes_run;
     m->observe = nes_observe;
     m->close = nes_close;
+    m->clone = nes_clone;
+    w->src = rom; w->src_size = size; w->mapper = mapper;
     return m;
 }
 
@@ -100,7 +128,7 @@ DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err
 static int nes_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *bytes, unsigned k, uint8_t *save) {
     (void)user; (void)pc;
     static const uint8_t st[] = { 0x80, 0x40, 0x20, 0xC0, 0xA0, 0xE0, 0x00 };
-    DpNesMach *n = ((NesMachWrap *)m->impl)->m;
+    DpNesMach *n = nes_impl(m);
     if ((bytes[0] == 0xAD || bytes[0] == 0xBD) && bytes[1] == 0x16 && bytes[2] == 0x40) {
         // controller read (LDA $4016 / LDA $4016,X): one button held from here on per alternative (as the Sega pad probe)
         static const uint32_t pads[] = { 0x10, 0x20, 0x40, 0x01, 0x02, 0x04, 0x08 };

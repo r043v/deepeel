@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.300.0 LANGUAGES C)
+project(deepeel VERSION 0.301.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -94,7 +94,7 @@ add_library(dp_mdmach_lib STATIC
   ${DP_MD_RUNTIME}/md_full_video.c ${CMAKE_CURRENT_BINARY_DIR}/dp_md_full_audio.c
   ${DP_MD_RUNTIME}/md_ym2612.c ${DP_MD_Z80}/z80.c
   src/mach/mdmach.c src/mach/mdrom.c)
-target_compile_definitions(dp_mdmach_lib PRIVATE MD_TRACE)
+target_compile_definitions(dp_mdmach_lib PRIVATE MD_TRACE MD_THREAD_LOCAL=__thread)
 target_include_directories(dp_mdmach_lib PUBLIC src/mach PRIVATE ${DP_MD_RUNTIME} ${DP_MD_Z80})
 target_compile_options(dp_mdmach_lib PRIVATE -w)
 
@@ -570,7 +570,7 @@ add_library(deepeel_nes_raw STATIC
   ${DP_NES_RUNTIME}/nes.c
   ${DP_NES_RUNTIME}/apu.c
   ${DP_NES_RUNTIME}/ppu.c)
-target_compile_definitions(deepeel_nes_raw PRIVATE NES_TRACE)
+target_compile_definitions(deepeel_nes_raw PRIVATE NES_TRACE M0_TL=__thread M0_NO_INPUT_PROBE)
 target_include_directories(deepeel_nes_raw PUBLIC src
   ${DP_NES_RUNTIME} "${M0BOY_DIR}/targets/common/runtime")
 set(DP_NES_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_nes.a)
@@ -591,7 +591,7 @@ add_library(deepeel_nes2_raw STATIC
   src/cpu/m6502/m6502.c src/mach/nesmach.c src/platform/nes/registry.c
   src/platform/nes/explore.c src/platform/nes/tas.c
   ${DP_NES_RUNTIME}/6502.c ${DP_NES_RUNTIME}/nes.c ${DP_NES_RUNTIME}/apu.c ${DP_NES_RUNTIME}/ppu.c)
-target_compile_definitions(deepeel_nes2_raw PRIVATE NES_TRACE)
+target_compile_definitions(deepeel_nes2_raw PRIVATE NES_TRACE M0_TL=__thread M0_NO_INPUT_PROBE)
 target_include_directories(deepeel_nes2_raw PRIVATE src ${DP_NES_RUNTIME} "${M0BOY_DIR}/targets/common/runtime")
 set(DP_NES2_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_nes2.a)
 add_custom_command(OUTPUT ${DP_NES2_ARCHIVE}
@@ -622,7 +622,7 @@ add_library(deepeel_pce STATIC
   ${DP_PCE_RUNTIME}/psg.c)
 target_include_directories(deepeel_pce PUBLIC src ${DP_PCE_RUNTIME}
   "${M0BOY_DIR}/targets/common/runtime")
-target_compile_definitions(deepeel_pce PRIVATE PCE_TRACE)
+target_compile_definitions(deepeel_pce PRIVATE PCE_TRACE M0_TL=__thread M0_NO_INPUT_PROBE)
 target_link_libraries(deepeel_pce PUBLIC deepeel_core)
 # second PCE instance for --jobs 2: the whole stack compiled again, every
 # defined global namespaced dp_pce2_ (the explorer, the bridge and m0boy's
@@ -633,7 +633,7 @@ add_library(deepeel_pce2_raw STATIC
   ${DP_PCE_RUNTIME}/huc6280.c ${DP_PCE_RUNTIME}/vdc.c ${DP_PCE_RUNTIME}/psg.c)
 target_include_directories(deepeel_pce2_raw PRIVATE src ${DP_PCE_RUNTIME}
   "${M0BOY_DIR}/targets/common/runtime")
-target_compile_definitions(deepeel_pce2_raw PRIVATE PCE_TRACE)
+target_compile_definitions(deepeel_pce2_raw PRIVATE PCE_TRACE M0_TL=__thread M0_NO_INPUT_PROBE)
 set(DP_PCE2_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_pce2.a)
 add_custom_command(OUTPUT ${DP_PCE2_ARCHIVE}
   BYPRODUCTS ${DP_PCE2_ARCHIVE}.syms
@@ -658,7 +658,7 @@ add_library(deepeel_md2_raw STATIC
   ${DP_MD_RUNTIME}/md_full_video.c ${CMAKE_CURRENT_BINARY_DIR}/dp_md_full_audio.c
   ${DP_MD_RUNTIME}/md_ym2612.c ${DP_MD_Z80}/z80.c
   src/mach/mdmach.c src/mach/mdrom.c src/platform/md/explore.c src/explore/md_trace.c)
-target_compile_definitions(deepeel_md2_raw PRIVATE MD_TRACE)
+target_compile_definitions(deepeel_md2_raw PRIVATE MD_TRACE MD_THREAD_LOCAL=__thread)
 target_include_directories(deepeel_md2_raw PRIVATE src src/mach ${DP_MD_RUNTIME} ${DP_MD_Z80})
 target_compile_options(deepeel_md2_raw PRIVATE -w)
 set(DP_MD2_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_md2.a)

@@ -11,17 +11,25 @@
 typedef struct {
     const DpObservers *obs;
     void *user;
+    // clones keep the image and initialise the runtime lazily in the worker thread
+    // that uses it: the PCE machine state is thread-local
+    uint8_t *img; size_t img_size; int inited;
+    const uint8_t *src; size_t src_size;
 } PceWrap;
+static void pce_ensure(DpMachine *m) {
+    PceWrap *w = m->impl;
+    if (w->img && !w->inited) { dp_pce_init(w->img, w->img_size); w->inited = 1; }
+}
 
 static uint32_t pce_state_bytes(DpMachine *m) { (void)m; return (uint32_t)dp_pce_state_size(); }
-static void pce_save(DpMachine *m, uint8_t *buf) { (void)m; dp_pce_save(buf); }
-static void pce_load(DpMachine *m, const uint8_t *buf) { (void)m; dp_pce_load(buf); }
-static uint8_t pce_fetch(DpMachine *m, uint32_t a) { (void)m; return dp_pce_peek((uint16_t)a); }
-static int64_t pce_rom_index(DpMachine *m, uint32_t a) { (void)m; return dp_pce_rom_index((uint16_t)a); }
+static void pce_save(DpMachine *m, uint8_t *buf) { pce_ensure(m); dp_pce_save(buf); }
+static void pce_load(DpMachine *m, const uint8_t *buf) { pce_ensure(m); dp_pce_load(buf); }
+static uint8_t pce_fetch(DpMachine *m, uint32_t a) { pce_ensure(m); return dp_pce_peek((uint16_t)a); }
+static int64_t pce_rom_index(DpMachine *m, uint32_t a) { pce_ensure(m); return dp_pce_rom_index((uint16_t)a); }
 
 // one step (an instruction or an interrupt dispatch)
 static int pce_run(DpMachine *m) {
-    (void)m;
+    pce_ensure(m);
     int frame_done = 0;
     return dp_pce_step(&frame_done) > 0;
 }
@@ -32,18 +40,21 @@ static void pce_trace_fn(void *user, uint16_t pc, uint8_t op) {
 }
 static void pce_observe(DpMachine *m, const DpObservers *o, void *user) {
     PceWrap *w = m->impl;
+    pce_ensure(m);
     w->obs = o; w->user = user;
     dp_pce_trace(o ? pce_trace_fn : NULL, w);
 }
 
 static void pce_close(DpMachine *m) {
+    PceWrap *w = m->impl;
+    if (w->img) { if (w->inited) dp_pce_close(); free(w->img); }
     free(m->impl);
     free(m);
 }
 
 // wraps the live runtime singleton (dp_pce_init already done, or call it first)
-static uint32_t pce_pc(DpMachine *m) { (void)m; return dp_pce_cpu().pc; }
-static void pce_set_pc(DpMachine *m, uint32_t pc) { (void)m; dp_pce_set_pc((uint16_t)pc); }
+static uint32_t pce_pc(DpMachine *m) { pce_ensure(m); return dp_pce_cpu().pc; }
+static void pce_set_pc(DpMachine *m, uint32_t pc) { pce_ensure(m); dp_pce_set_pc((uint16_t)pc); }
 
 // technique 2 (interrupts): where the CPU unmasks (CLI, PLP, RTI, or a write to the interrupt
 // mask $1402) one alternative per source (1 = VDC, 2 = timer) is forked with that source raised,
@@ -66,6 +77,25 @@ static int pce_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t 
 const DpPlatformHooks *dp_machine_pce_hooks(void) {
     static const DpPlatformHooks h = { .event_probe = pce_event_probe };
     return &h;
+}
+
+static DpMachine *pce_clone(DpMachine *m, unsigned worker) {
+    (void)worker;
+    PceWrap *o = m->impl, *w = calloc(1, sizeof *w);
+    DpMachine *c = calloc(1, sizeof *c);
+    if (!w || !c || !o->src) { free(w); free(c); return NULL; }
+    *c = *m;
+    w->img = malloc(o->src_size);
+    if (!w->img) { free(w); free(c); return NULL; }
+    memcpy(w->img, o->src, o->src_size);
+    w->img_size = o->src_size;
+    c->impl = w;
+    return c;
+}
+void dp_machine_pce_source(DpMachine *m, const uint8_t *data, size_t size) {
+    PceWrap *w = m->impl;
+    w->src = data; w->src_size = size;
+    m->clone = pce_clone;
 }
 
 DpMachine *dp_machine_pce(void) {

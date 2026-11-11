@@ -67,6 +67,7 @@ typedef struct DpCoreConfig {
     uint32_t cell_lo, cell_hi; // technique 8: RAM range hashed into a semantic cell (cell_hi > cell_lo enables it)
     size_t queue_max;          // pending forked states held in RAM (0: unbounded)
     const DpPlatformHooks *hooks;
+    unsigned progress_secs;   // >0: a progress line on stderr every N seconds (0 = silent)
 } DpCoreConfig;
 
 typedef struct DpCoreResult {

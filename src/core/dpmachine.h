@@ -165,6 +165,9 @@ struct DpMachine {
 struct DpMach;
 // the GB backend (src/mach/gb_machine.c); takes ownership of the DpMach
 DpMachine *dp_machine_gb(struct DpMach *impl);
+const struct DpPlatformHooks *dp_machine_md_hooks(void);
+/* tell an MD machine where its ROM is so clone() can start parallel workers */
+void dp_machine_md_source(DpMachine *m, const uint8_t *rom, size_t size);
 
 // the SG/SMS/GG/MSX backend (src/mach/sega_machine.c); borrows the singleton
 // backend instance (exploration is sequential).  const void *: DpSegaBackend
@@ -189,6 +192,8 @@ DpMachine *dp_machine_md(struct DpMdMach *impl);
 // the PC Engine backend (src/mach/pce_machine.c): wraps the live runtime
 // singleton (dp_pce_init first)
 DpMachine *dp_machine_pce(void);
+/* give the PCE machine its ROM image (kept by the caller) so clone() can start workers */
+void dp_machine_pce_source(DpMachine *m, const uint8_t *data, size_t size);
 const struct DpPlatformHooks *dp_machine_pce_hooks(void);   /* IRQ-source probes */
 // the libretro backend (src/mach/lr_machine.c), level A (§8.1): frames only,
 // the kernel degrades; takes ownership of the DpLibretro instance

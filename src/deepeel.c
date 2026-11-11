@@ -1354,6 +1354,7 @@ static int cmd_nes(int argc, char **argv) {
         char err[128] = "";
         DpMachine *km = dp_machine_nes(data, size, mapper, err, sizeof err);
         if (!km) { fprintf(stderr, "deepeel: --core: %s\n", err); free(data); return 1; }
+        kcfg.jobs = (unsigned)nes_jobs;
         if (opt.max_total) kcfg.max_total = opt.max_total;
         if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
         if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
@@ -1495,6 +1496,8 @@ static int cmd_pce(int argc, char **argv) {
     if (use_core) {
         if (!dp_pce_init(data, size)) { fprintf(stderr, "deepeel: --core: not a PCE image\n"); free(data); return 1; }
         DpMachine *km = dp_machine_pce();
+        if (km) dp_machine_pce_source(km, data, size);
+        kcfg.jobs = (unsigned)pce_jobs;
         kcfg.hooks = dp_machine_pce_hooks();
         if (!km) { free(data); return 1; }
         if (opt.max_total) kcfg.max_total = opt.max_total;
@@ -1759,17 +1762,21 @@ static int cmd_md(int argc, char **argv) {
         }
     } else if (!strcmp(argv[2], "explore") && md_has_core(argc, argv)) {
         DpCoreConfig kcfg; dp_core_config_default(&kcfg);
-        kcfg.max_path_steps = 2000000;   // probe: a long natural path (boot waits) must not be capped at 100000
-        kcfg.visits_per_pc = 262144;   // Sonic at 2 M steps: natural 32 bytes at 64 visits, 126 at 262144 (old engine ~134)
+        kcfg.max_path_steps = 50000000;   // boot clears RAM/VRAM with millions of dbf iterations before the first interrupt is unmasked
+        kcfg.hooks = dp_machine_md_hooks();
+        kcfg.visits_per_pc = 2000000;   // the header checksum loop runs ROM-size/2 iterations (Sonic 1: 262144): the old 262144 cap cut it one short; was 262144 at 2 M steps: natural 32 bytes at 64 visits, 126 at 262144 (old engine ~134)
         for (int i = 4; i < argc; i++) {
             int used = dp_core_parse_option(&kcfg, argc, argv, i);
             if (used) { i += used - 1; continue; }
             if (!strcmp(argv[i], "--max-total") && i + 1 < argc) kcfg.max_total = strtoull(argv[++i], NULL, 0);
             else if (!strcmp(argv[i], "--fork-cap") && i + 1 < argc) kcfg.fork_site_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(argv[i], "--progress") && i + 1 < argc) kcfg.progress_secs = (unsigned)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(argv[i], "--jobs") && i + 1 < argc) kcfg.jobs = (unsigned)strtoul(argv[++i], NULL, 0);
         }
         DpMdMach *mm = dp_mdmach_open(c.rom, c.size);
         if (mm) dp_mdmach_reset(mm);   // power-on state: the 68000 starts from the vectors (without it the path faults)
         DpMachine *km = mm ? dp_machine_md(mm) : NULL;
+        if (km) dp_machine_md_source(km, c.rom, c.size);
         if (!km) { fprintf(stderr, "deepeel: --core: cannot open the ROM\n"); rc = 1; }
         else {
             DpCoreResult kr;

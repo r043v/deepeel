@@ -2,6 +2,7 @@
 #include "core.h"
 
 #include <pthread.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -21,6 +22,7 @@ typedef struct {
 void dp_core_config_default(DpCoreConfig *c) {
     memset(c, 0, sizeof *c);
     c->max_total = 5000000;
+    c->progress_secs = 5;
     c->max_path_steps = 100000;
     c->fork_site_cap = 4;      // DP_DEFAULT_BRANCH_FORK_CAP
     c->visits_per_pc = 64;
@@ -98,6 +100,8 @@ typedef struct {
     uint32_t *site_picks, *site_gain;   // per fork site (rom index + 1): paths run / new ROM bytes they found
     int active;                // workers currently running a path
     uint64_t steps;            // global instruction count (atomic)
+    uint64_t paths_done;       // finished paths (atomic), for the progress line
+    int stop_monitor;
     DpCoreResult *out;
     const DpCoreConfig *cfg;
     uint8_t *fed;
@@ -516,10 +520,42 @@ static void run_path(Worker *w, Pending *p) {
     }
 }
 
+// progress line: steps, paths, queue, workers busy, ROM bytes seen so far
+static void *monitor_main(void *arg) {
+    Shared *sh = arg;
+    unsigned secs = sh->cfg->progress_secs, t = 0;
+    time_t t0 = time(NULL);
+    while (!__atomic_load_n(&sh->stop_monitor, __ATOMIC_RELAXED)) {
+        struct timespec ts = {0, 100000000};
+        nanosleep(&ts, NULL);
+        if (++t < secs * 10) continue;
+        t = 0;
+        size_t nat = 0, forced = 0;
+        for (size_t i = 0; i < sh->out->rom_size; i++) {
+            uint8_t f = sh->out->flags[i];
+            if (f & DP_CORE_NATURAL) nat++;
+            if (f & DP_CORE_FORCED) forced++;
+        }
+        pthread_mutex_lock(&sh->mu);
+        size_t qn = sh->qn; int act = sh->active;
+        pthread_mutex_unlock(&sh->mu);
+        unsigned long long st = __atomic_load_n(&sh->steps, __ATOMIC_RELAXED);
+        long el = (long)(time(NULL) - t0);
+        fprintf(stderr, "[%ldm%02lds] steps %llu (%.1f M/s) paths %llu queue %zu busy %d ROM bytes natural %zu forced %zu%s\n",
+                el / 60, el % 60, st, el ? st / 1e6 / el : 0.0,
+                (unsigned long long)__atomic_load_n(&sh->paths_done, __ATOMIC_RELAXED), qn, act, nat, forced,
+                sh->cfg->max_total ? "" : " (no step limit)");
+    }
+    return NULL;
+}
+
 static void *worker_main(void *arg) {
     Worker *w = arg;
     Shared *sh = w->sh;
     const DpCoreConfig *cfg = sh->cfg;
+    // each worker hooks its own machine from its own thread (platform state may be thread-local)
+    DpObservers obsv = { NULL, obs_read, obs_write };
+    if (!cfg->no_copies && w->m->observe) w->m->observe(w->m, &obsv, &w->cobs);
     pthread_mutex_lock(&sh->mu);
     for (;;) {
         while (!sh->qn && sh->active > 0) pthread_cond_wait(&sh->cv, &sh->mu);
@@ -548,6 +584,7 @@ static void *worker_main(void *arg) {
         uint64_t before = w->loc.novelty_new_bytes + w->loc.plain_new_bytes;
         run_path(w, &p);
         run_flush(&w->cobs);
+        __atomic_fetch_add(&sh->paths_done, 1, __ATOMIC_RELAXED);
         if (p.site && p.site <= sh->out->rom_size) {
             __atomic_fetch_add(&sh->site_picks[p.site - 1], 1, __ATOMIC_RELAXED);
             __atomic_fetch_add(&sh->site_gain[p.site - 1], (uint32_t)(w->loc.novelty_new_bytes + w->loc.plain_new_bytes - before), __ATOMIC_RELAXED);
@@ -605,10 +642,6 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
 
     if (ok) {
         // every worker observes its own machine; the start state is the main one's
-        for (unsigned i = 0; i < started; i++) {
-            DpObservers obsv = { NULL, obs_read, obs_write };
-            if (!cfg->no_copies && ws[i].m->observe) ws[i].m->observe(ws[i].m, &obsv, &ws[i].cobs);
-        }
         uint8_t *start = malloc(sh.sbytes);
         m->save(m, start);
         uint32_t start_pc = m->pc(m);
@@ -672,8 +705,11 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCo
         }
         // clones start from power-on, the same state the main machine saved
         for (unsigned i = 1; i < started; i++) pthread_create(&ws[i].th, NULL, worker_main, &ws[i]);
+        pthread_t mon; int has_mon = 0;
+        if (cfg->progress_secs && pthread_create(&mon, NULL, monitor_main, &sh) == 0) has_mon = 1;
         worker_main(&ws[0]);
         for (unsigned i = 1; i < started; i++) pthread_join(ws[i].th, NULL);
+        if (has_mon) { __atomic_store_n(&sh.stop_monitor, 1, __ATOMIC_RELAXED); pthread_join(mon, NULL); }
     }
 
     free(sh.tas_start);

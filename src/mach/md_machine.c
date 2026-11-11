@@ -6,11 +6,14 @@
 
 #include "../core/dpmachine.h"
 #include "mdmach.h"
+#include "../explore/core.h"
 
 typedef struct {
     DpMdMach *m;
     const DpObservers *obs;
     void *user;
+    const uint8_t *rom; size_t rom_size;   // for clone()
+    int pad_armed, pad_seen;   // pad-port read detection for the event probe
 } MdMachWrap;
 
 static uint32_t md_state_bytes(DpMachine *m) { (void)m; return (uint32_t)dp_mdmach_state_size(); }
@@ -35,6 +38,7 @@ static int md_run(DpMachine *m) {
 
 static void md_on_read(void *user, uint32_t addr, unsigned size) {
     MdMachWrap *w = user;
+    if (w->pad_armed && addr >= 0xA10002u && addr <= 0xA10005u) w->pad_seen = 1;
     if (w->obs && w->obs->on_read)
         for (unsigned k = 0; k < size; k++) w->obs->on_read(w->user, addr + k, 0);
 }
@@ -62,6 +66,57 @@ static void md_set_pc(DpMachine *m, uint32_t pc) {
     free(buf);
 }
 
+// kernel mask (up down left right button1 button2 start) -> MD pad bits
+// (0-3 directions, 16 A, 32 B, 64 C, 128 Start): button1 holds A and C, button2 B
+static void md_set_input(DpMachine *m, uint32_t mask) {
+    uint8_t pad = (uint8_t)(mask & 0x0F);
+    if (mask & 0x10) pad |= 16 | 64;
+    if (mask & 0x20) pad |= 32;
+    if (mask & 0x40) pad |= 128;
+    dp_mdmach_set_pad(((MdMachWrap *)m->impl)->m, pad);
+}
+
+// technique 2 on MD: an instruction that reads the pad data port ($A10003/$A10005) forks one
+// state per pad held (Start, A+C, B, directions); the held pad stays in the saved state, so the
+// game's next reads see it.  The instruction is dry-run once to see whether it touches the port.
+static int md_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *bytes, unsigned k, uint8_t *save) {
+    (void)user; (void)pc; (void)bytes;
+    static const uint32_t pads[] = {0x40, 0x10, 0x20, 0x08, 0x04, 0x01, 0x02};
+    if (k >= sizeof pads / sizeof *pads) return 0;
+    MdMachWrap *w = m->impl;
+    uint8_t *pre = malloc(dp_mdmach_state_size());
+    if (!pre) return 0;
+    m->save(m, pre);
+    w->pad_armed = 1; w->pad_seen = 0;
+    md_run(m);
+    w->pad_armed = 0;
+    int hit = w->pad_seen;
+    m->load(m, pre);
+    if (hit) { md_set_input(m, pads[k]); m->save(m, save); m->load(m, pre); }
+    free(pre);
+    return hit;
+}
+static const DpPlatformHooks md_hooks = { .event_probe = md_event_probe };
+const DpPlatformHooks *dp_machine_md_hooks(void) { return &md_hooks; }
+
+static DpMachine *md_clone(DpMachine *m, unsigned worker) {
+    (void)worker;
+    MdMachWrap *w = m->impl;
+    if (!w->rom) return NULL;
+    DpMdMach *d = dp_mdmach_open(w->rom, w->rom_size);
+    if (!d) return NULL;
+    dp_mdmach_reset(d);
+    DpMachine *c = dp_machine_md(d);
+    if (!c) { dp_mdmach_close(d); return NULL; }
+    dp_machine_md_source(c, w->rom, w->rom_size);
+    return c;
+}
+void dp_machine_md_source(DpMachine *m, const uint8_t *rom, size_t size) {
+    MdMachWrap *w = m->impl;
+    w->rom = rom; w->rom_size = size;
+    m->clone = md_clone;
+}
+
 static void md_close(DpMachine *m) {
     dp_mdmach_close(((MdMachWrap *)m->impl)->m);
     free(m->impl);
@@ -87,5 +142,6 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->isa = dp_isa_68000();
     m->pc = md_pc;
     m->set_pc = md_set_pc;
+    m->set_input = md_set_input;
     return m;
 }

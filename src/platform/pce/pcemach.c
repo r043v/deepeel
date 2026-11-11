@@ -14,6 +14,9 @@
 #define machine dp_pce_machine
 #define pce_bus_read dp_pce_hw_read
 #define pce_bus_write dp_pce_hw_write
+#ifndef M0_TL
+#define M0_TL
+#endif
 #include "pce.c"
 #undef pce_bus_read
 #undef pce_bus_write
@@ -48,15 +51,15 @@ typedef struct {
     unsigned line_budget;
 } PceBridgeState;
 
-static uint8_t *rom;           // owned, header stripped
-static size_t rom_size;
-static uint32_t rom_pages;
-static uint8_t page_map[256];  // MPR value -> physical page, 0xFF: not ROM
-static int page_valid[256];
+static M0_TL uint8_t *rom;           // owned, header stripped
+static M0_TL size_t rom_size;
+static M0_TL uint32_t rom_pages;
+static M0_TL uint8_t page_map[256];  // MPR value -> physical page, 0xFF: not ROM
+static M0_TL int page_valid[256];
 static unsigned line_no, line_budget_;
-static int line_left;
-static DpPceObserver obs;
-static int st_port;            // ST0/ST1/ST2 in flight: the write is the hardware's
+static M0_TL int line_left;
+static M0_TL DpPceObserver obs;
+static M0_TL int st_port;            // ST0/ST1/ST2 in flight: the write is the hardware's
 
 static void build_page_map(void) {
     for (unsigned v = 0; v < 256; v++) {
@@ -168,7 +171,7 @@ uint8_t dp_pce_peek(uint16_t addr) {
 // state is kept beside the machine, outside the snapshot: it is an observation model, not
 // a hardware measurement, and forks that read the port restart from the scan they find.
 static int tap_on, tap_idx, tap_prev_sel;
-static uint8_t tap_pad[5];
+static M0_TL uint8_t tap_pad[5];
 int dp_pce_multitap_enabled(void) { return tap_on; }
 void dp_pce_multitap(int on) { tap_on = on; tap_idx = 0; tap_prev_sel = 0; }
 void dp_pce_pad_n(unsigned n, uint8_t buttons) { if (n < 5) tap_pad[n] = buttons; }
@@ -259,8 +262,8 @@ uint8_t dp_pce_input_get(void) { return machine.input; }
 uint32_t dp_pce_frames(void) { return machine.frames; }
 
 // --- watch picture: the VDC's rows (RGB565, 256 or 352 wide) of the last frame ---
-static uint16_t watch_pix[262 * 352];
-static unsigned watch_w;
+static M0_TL uint16_t watch_pix[262 * 352];
+static M0_TL unsigned watch_w;
 static void watch_row(void *host, unsigned line, const uint16_t *px, unsigned width) {
     (void)host;
     if (line >= 262 || width > 352) return;
@@ -345,8 +348,8 @@ void dp_pce_reset(void) {
 
 // --- fast frames: the native loop, one line per huc6280_run, the trace
 // hook (huc6280.c built with PCE_TRACE) reporting each instruction
-static DpPceTraceFn trace_fn;
-static void *trace_user;
+static M0_TL DpPceTraceFn trace_fn;
+static M0_TL void *trace_user;
 
 void dp_pce_trace(DpPceTraceFn fn, void *user) { trace_fn = fn; trace_user = user; }
 

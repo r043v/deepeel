@@ -15,7 +15,7 @@ struct DpMdMach {
     int resume_frame;
 };
 
-static DpMdMach *cur;
+static __thread DpMdMach *cur;   // per thread: parallel workers each run their own machine
 void dp_md_dma_observe(MdFull *m, uint32_t addr) {
     if (cur && cur->m == m && cur->h.on_dma_read &&
         !(m->sram_enable && addr >= 0x200000u && addr < 0x210000u))
