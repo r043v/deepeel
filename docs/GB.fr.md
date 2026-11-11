@@ -4814,3 +4814,13 @@ Sous `--core`, `deepeel z80 explore` écrit `--text FILE` (le rapport du noyau) 
 `--cov FILE` (écrivain partagé `dp_core_write_cov`, qui ajoute le drapeau données `8`).
 `--no-closure` coupe aussi la fermeture statique du noyau. `--map` (PNG) et
 `--summary` restent à faire côté noyau.
+
+## Technique 5 : indépendante de l'ISA
+
+L'ordonnancement par nouveauté et le score de site (`site_gain`, `site_picks`)
+ne dépendent que de `rom_index` et des clés de site du noyau : aucune instruction
+ISA n'y intervient. Ils s'appliquent donc à toutes les ISA. Le test du gain par
+site est exercé sur Z80 (`core_site_score_*`) ; sur les autres ISA, une fixture
+minimale ne produit aucun pick faute d'historique de gain par site (constat de
+l'outil, pas une limite technique). Limite restante de la technique 2 : pad
+HuC6280 (`$1000`) et compteurs H/V du VDC, pas encore sondés.
