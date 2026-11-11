@@ -641,6 +641,7 @@ def build_techniques_8bit(out):
     pce("fix_pce_rng", bytes.fromhex("ad0020 4955 8d0020 c9aa f003 4c04e0 a901 80fe"))
     pce("fix_pce_index", bytes.fromhex("ad0021 aa bd20e0 c903 f004 a901 8002 a902 80fe"), bytes([0, 0, 0, 3] + [0] * 12))
     # technique 8 (semantic cells): two conditional sites forking to the same target with the same RAM
+    gb("fix_gb_index40", bytes.fromhex("fa00c3 5f 1600 212002 19 7e fe03 2804 3e01 18fe 3e02 18fe"), bytes([0] * 40 + [3] + [0] * 8))   # index 40 is outside the default 0..15
     gb("fix_gb_cells", bytes.fromhex("af 2006 2004 00000000 18fe"))
     pce("fix_pce_cells", bytes.fromhex("a900 d006 d004 eaeaeaea 80fe"))
 

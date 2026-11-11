@@ -246,6 +246,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_decomp.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_cells.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_cells.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_index40.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_cells.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_cells.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_cells.pce
@@ -755,3 +756,5 @@ add_test(NAME core_rng_bytes_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR
 set_tests_properties(core_rng_bytes_huc6280 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_index_replay_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_index.pce; $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'index replays 16' && $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-index-replay | grep -q 'rom bytes: natural 21'")
 set_tests_properties(core_index_replay_huc6280 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_index_max_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_index40.gb; $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --index-max 63 | grep -q 'index replays 64' && $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'index replays 16'")
+set_tests_properties(core_index_max_sm83 PROPERTIES FIXTURES_REQUIRED fixtures)

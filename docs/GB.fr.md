@@ -4757,3 +4757,11 @@ Limite connue : le bitmap croît pendant l'exploration, donc deux clés calculé
 différents peuvent différer (moins de pruning, jamais plus de perte). Fixtures `fix_{gb,pce,md,nes}_cells`
 et `fix_z80_cells.sms`, tests `core_cells_auto_{sm83,huc6280,68000,6502,z80}`.
 Watch SMS (0.305.0) : la fenêtre utilise l'instance SMS native de 256 colonnes.
+
+## 0.305.1 — noyau : borne de l'index de la technique 7
+
+Le rejeu par index n'est plus limité en dur à 0..15 : `--index-max N` (jusqu'à 255) élève la borne ;
+la valeur par défaut reste 15 (coût : un état en file par index et par site). Fixture
+`fix_gb_index40` (valeur utile à l'index 40), test `core_index_max_sm83`. La borne reste une limite de
+budget, pas de technique : l'étendre automatiquement à la plage prouvée par la comparaison qui précède
+l'accès est la suite.

@@ -56,6 +56,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--no-irq-jitter")) { c->no_irq_jitter = 1; return 1; }
     if (!strcmp(a, "--no-decompress")) { c->no_decompress = 1; return 1; }
     if (!strcmp(a, "--no-copies")) { c->no_copies = 1; return 1; }
+    if (!strcmp(a, "--index-max") && i + 1 < argc) { unsigned long v = strtoul(argv[i + 1], NULL, 0); c->index_max = v > 255 ? 255 : (unsigned)v; return 2; }
     if (!strcmp(a, "--no-index-replay")) { c->no_index_replay = 1; return 1; }
     if (!strcmp(a, "--no-rng-learn")) { c->no_rng_learn = 1; return 1; }
     if (!strcmp(a, "--no-solve")) { c->no_solve = 1; return 1; }
@@ -684,7 +685,7 @@ static void run_path(Worker *w, Pending *p) {
             loc->exec_outside++;
         }
         // technique 7 (restricted form): z80 `ld a,(RAM)` whose value then indexes a ROM table
-        // (`ld hl,ROM` + `add hl,de` within 12 bytes): replay the site with each index 0..15
+        // (`ld hl,ROM` + `add hl,de` within 12 bytes): replay the site with each index 0..index_max (default 15, --index-max up to 255)
         uint32_t dl_addr = 0; int dl_idx = 0, dl_width = 1, dl_dreg = -1;
         int dl_len = (m->poke && !cur_forced) ? direct_ram_load(m, isa, bytes, &dl_addr, &dl_idx, &dl_width, &dl_dreg) : 0;
         if (dl_len) dl_addr += (uint32_t)dl_width - 1;   // big-endian: the low-order byte is the last; 1 byte elsewhere
@@ -696,7 +697,7 @@ static void run_path(Worker *w, Pending *p) {
                 pthread_mutex_unlock(&sh->mu);
                 uint8_t *tmp = fresh ? malloc(sh->sbytes) : NULL;
                 if (tmp) m->save(m, tmp);
-                for (unsigned k = 0; tmp && k < 16; k++) {
+                for (unsigned k = 0; tmp && k <= (cfg->index_max ? cfg->index_max : 15); k++) {
                     uint8_t *snap = malloc(sh->sbytes);
                     if (!snap) break;
                     m->poke(m, addr, (uint8_t)k);

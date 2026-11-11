@@ -46,6 +46,7 @@ typedef struct DpCoreConfig {
     unsigned jobs;             // parallel workers (<=1: single); needs DpMachine.clone
     int adaptive;              // 1: `jobs` is a ceiling; the number of active workers follows the machine's free CPU and RAM
     int no_taint_cut;          // 1: do not cut forced paths on tainted control transfers (technique 1.b)
+    unsigned index_max;        // technique 7: highest index replayed (0 = default 15, at most 255)
     int no_index_replay;       // 1: do not replay table-index reads (technique 7)
     int no_rng_learn;          // 1: do not fork bytes that change between visits (technique 4)
     int no_solve;              // 1: no concolic solving of conditionals (technique 1)
