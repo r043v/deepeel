@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "../core/dpmachine.h"
+#include "../explore/core.h"
 #include "../cpu/z80/z80.h"
 #include "../platform/sega/backend.h"
 
@@ -155,4 +156,40 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->observe = sega_observe;
     m->close = sega_close;
     return m;
+}
+
+// technique 2 on SMS/GG/SG: `in a,(n)` of the VDP status ($BF mirrors), the V counter
+// ($7E) or the H counter ($7F) forks one state per plausible value.  The IN runs on the
+// live machine, A is overwritten with the alternative, the state is saved, then the live
+// state is restored: the saved state sits just after the IN.  No probe while an
+// interrupt line is pending (a planted status must not hide it).
+static int sega_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *bytes, unsigned k, uint8_t *save) {
+    (void)user; (void)pc;
+    static const uint8_t st[] = {0x00, 0x20, 0x40, 0x80, 0xC0, 0xE0, 0xFF};   // collision|overflow|vblank|line, combos
+    static const uint8_t vc[] = {0x00, 0x7F, 0x80, 0xC0, 0xFF};
+    static const uint8_t hc[] = {0x00, 0x20, 0x40, 0x80, 0xE0, 0xFF};
+    if (bytes[0] != 0xDB) return 0;                       // in a,(n)
+    SegaMach *s = m->impl;
+    z80_t *c = s->b->cpu();
+    if (c->irq || c->nmi) return 0;
+    const uint8_t *vals; unsigned n;
+    switch (bytes[1] & 0xC1) {
+    case 0x81: vals = st; n = sizeof st; break;
+    case 0x40: vals = vc; n = sizeof vc; break;
+    case 0x41: vals = hc; n = sizeof hc; break;
+    default: return 0;
+    }
+    if (k >= n) return 0;
+    uint8_t *tmp = malloc(m->state_bytes(m));
+    if (!tmp) return 0;
+    m->save(m, tmp);
+    int ok = m->run(m);
+    if (ok) { c->a = vals[k]; m->save(m, save); }
+    m->load(m, tmp);
+    free(tmp);
+    return ok;
+}
+const DpPlatformHooks *dp_machine_sega_hooks(void) {
+    static const DpPlatformHooks h = { .event_probe = sega_event_probe };
+    return &h;
 }
