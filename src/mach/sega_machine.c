@@ -29,6 +29,7 @@ typedef struct {
     void (*base_out)(void *, uint16_t, uint8_t);
     void *base_user;
     int wrapped, fetching;   // fetching: opcode reads are not data accesses
+    int init_arg;            // backend init's last argument: SMS flag, or the MSX mapper
 } SegaMach;
 
 static uint32_t sega_state_bytes(DpMachine *m) { return (uint32_t)((SegaMach *)m->impl)->b->state_size; }
@@ -112,9 +113,9 @@ static DpMachine *sega_clone(DpMachine *m, unsigned worker) {
     SegaMach *s = m->impl;
     if (!s->pick || !s->rom || !worker) return NULL;
     const DpSegaBackend *b = s->pick(worker);
-    if (!b || b->init(s->rom, s->rom_size, NULL, 1) != 1) return NULL;
+    if (!b || b->init(s->rom, s->rom_size, NULL, s->init_arg) != 1) return NULL;
     DpMachine *c = dp_machine_sega(b);
-    if (c) dp_machine_sega_source(c, s->rom, s->rom_size, s->pick);
+    if (c) { dp_machine_sega_source(c, s->rom, s->rom_size, s->pick); ((SegaMach *)c->impl)->init_arg = s->init_arg; }
     return c;
 }
 void dp_machine_sega_source(DpMachine *m, const uint8_t *rom, size_t size, const void *(*pick)(unsigned worker)) {
@@ -123,12 +124,15 @@ void dp_machine_sega_source(DpMachine *m, const uint8_t *rom, size_t size, const
     m->clone = sega_clone;
 }
 
+void dp_machine_sega_init_arg(DpMachine *m, int arg) { ((SegaMach *)m->impl)->init_arg = arg; }
+
 DpMachine *dp_machine_sega(const void *backend) {
     const DpSegaBackend *b = backend;
     SegaMach *s = calloc(1, sizeof *s);
     DpMachine *m = calloc(1, sizeof *m);
     if (!s || !m) { free(s); free(m); return NULL; }
     s->b = b;
+    s->init_arg = 1;
     { z80_t *c0 = b->cpu(); s->base_read = c0->read; s->base_write = c0->write; s->base_in = c0->in; s->base_out = c0->out; s->base_user = c0->user; }
     m->name = "sega";
     m->isa = dp_isa_z80();

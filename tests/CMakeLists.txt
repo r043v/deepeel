@@ -652,3 +652,5 @@ add_test(NAME core_cli_pce COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${C
 set_tests_properties(core_cli_pce PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_cli_md COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_cpu_vram.md --core --max-total 20000 2>&1 | grep -q 'deepeel md (generic kernel)' && $<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_cpu_vram.md --core --max-total 20000 2>&1 | grep -q 'forced [1-9]'")
 set_tests_properties(core_cli_md PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_cli_msx COMMAND sh -c "$<TARGET_FILE:deepeel> z80 explore msx ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.msx --core --attract-frames 0 2>&1 | grep -q 'deepeel msx (generic kernel)' && $<TARGET_FILE:deepeel> z80 explore msx ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.msx --core --attract-frames 0 2>&1 | grep -q 'forced [1-9]'")
+set_tests_properties(core_cli_msx PROPERTIES FIXTURES_REQUIRED fixtures)

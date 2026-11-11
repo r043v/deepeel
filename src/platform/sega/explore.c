@@ -2881,15 +2881,19 @@ static int parse_entry(const char *s,DpSegaOptions *o) {
 }
 // --core: the generic kernel (src/explore/core.c) on the DpMachine view of
 // the SG/SMS/GG backend.  MSX keeps its own engine until its hooks exist.
-static int core_is_sg;
+static int core_is_sg, core_is_msx;
 // only the first two instances are trusted: gg3..gg16 resolve the bank-switch
 // fixture differently (observed 2026-11: fix_sega_mapper reaches other ROM indexes)
-static const void *sega_core_pick(unsigned w) { return w==1 ? (core_is_sg?(const void*)dp_sega_backend_sg2():(const void*)dp_sega_backend_gg2()) : NULL; }
+static const void *sega_core_pick(unsigned w) { if(core_is_msx) return w==1?(const void*)dp_msx_backend2():NULL; return w==1 ? (core_is_sg?(const void*)dp_sega_backend_sg2():(const void*)dp_sega_backend_gg2()) : NULL; }
 static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *o,const DpCoreConfig *kcfg,FILE *out) {
-    if(!strcmp(s->id,"msx")) { fprintf(stderr,"deepeel: --core: msx not supported yet (hooks missing)\n"); return 0; }
-    const DpSegaBackend *b=!strcmp(s->id,"sg")?dp_sega_backend_sg():dp_sega_backend_gg();
-    if(!b || b->init(rom,size,NULL,1)!=1) return 0;
+    int msx=!strcmp(s->id,"msx");
+    const DpSegaBackend *b=msx?dp_msx_backend():!strcmp(s->id,"sg")?dp_sega_backend_sg():dp_sega_backend_gg();
+    int init_arg=msx?o->msx_mapper:1;
+    if(msx && (size>0x100000 || o->msx_mapper<DP_MSX_AUTO || o->msx_mapper>DP_MSX_KONAMI_SCC)) return 0;
+    if(!b || b->init(rom,size,NULL,init_arg)!=1) return 0;
     DpMachine *m=dp_machine_sega(b); if(!m) return 0;
+    dp_machine_sega_init_arg(m,init_arg);
+    core_is_msx=msx;
     core_is_sg=!strcmp(s->id,"sg");
     dp_machine_sega_source(m,rom,size,sega_core_pick);
     DpCoreConfig cfg=*kcfg; cfg.jobs=o->jobs>1?(unsigned)o->jobs:1;
