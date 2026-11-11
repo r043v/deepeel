@@ -1,6 +1,7 @@
 #include "../../core/growvec.h"
 #include "../../core/ckptpool.h"
 #include "../../core/rng.h"
+#include "../../core/desync.h"
 #include "explore.h"
 #include "../../explore/lots.h"
 #include "../../explore/frontier.h"
@@ -173,6 +174,18 @@ static void on_frame(void *u) {
     }
     if (x->movie_active) {
         x->r->movie_frames++;
+        {   // DP_MD_TAS_DSY=file: per-frame "wram" (64 KiB, big-endian byte order) and "regs" (D0-7, A0-7, PC; u32 LE) in DSY1 for `deepeel desync`
+            static DpDsyWriter dsy; static int dsy_init;
+            if (!dsy_init) { dsy_init = 1; const char *p = getenv("DP_MD_TAS_DSY"); if (p && !dp_dsy_open(&dsy, p)) fprintf(stderr, "deepeel: cannot open DP_MD_TAS_DSY %s\n", p); }
+            if (dsy.f) {
+                uint8_t rb[68]; uint32_t v[17];
+                for (unsigned k = 0; k < 8; k++) { v[k] = dp_mdmach_dn(x->m, k); v[8 + k] = dp_mdmach_an(x->m, k); }
+                v[16] = dp_mdmach_pc(x->m);
+                for (unsigned k = 0; k < 17; k++) { rb[4*k] = (uint8_t)v[k]; rb[4*k+1] = (uint8_t)(v[k] >> 8); rb[4*k+2] = (uint8_t)(v[k] >> 16); rb[4*k+3] = (uint8_t)(v[k] >> 24); }
+                const char *nm[2] = {"wram", "regs"}; const uint8_t *dt[2] = {dp_mdmach_ram(x->m), rb}; uint32_t ln[2] = {65536, 68};
+                dp_dsy_frame(&dsy, x->r->movie_frames, 2, nm, dt, ln);
+            }
+        }
         if (x->o->watch_every) dp_fb_sync_gate(x->r->movie_frames);   // replay sync with the reference cores
         if (x->r->movie_frames >= x->o->movie->frames) {
             x->movie_active = 0;

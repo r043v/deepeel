@@ -4891,3 +4891,12 @@ existants `tools/smshawk_dump` et `tools/gbhawk_ref` produisent des WRAM par ima
 (BC DE HL AF, jeu alterné, IX IY SP PC, I R IM IFF1 IFF2). Contrôle de déterminisme : deux rejeux du film Castle
 comparés par `deepeel desync` sont identiques sur 32 662 images (observation de l'outil). Le dumper BizHawk
 générique reste à écrire pour comparer avec SMSHawk/GBHawk dans ce format.
+
+## 0.315.4 — producteurs DSY1 côté Mega Drive
+
+`DP_MD_TAS_DSY=fichier` (deepeel/m0boy, rejeu d'un film MD) écrit par image les blocs `wram` (64 Kio, ordre
+big-endian) et `regs` (D0-7, A0-7, PC, u32 LE). `GPGX_DSY=fichier` (`tools/gpgx_lr_live`, Genesis Plus GX libretro)
+écrit `wram` (octets ré-échangés). `deepeel desync m0.dsy gpgx.dsy --ignore wram:fff0-ffff` les compare.
+Observation de l'outil sur Sonic (GMV jxq-783, touches appliquées dès l'image 0) : la manette RAM ($F604) concorde
+avec GPGX jusqu'à l'image ≈ 1100 ; elle diverge ensuite (≈ 1200). Les écarts de piles/tampons avant sont des
+décalages de phase dans l'image (m0boy rend la main à l'entrée du V-blank), pas des divergences de jeu.

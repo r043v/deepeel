@@ -26,6 +26,9 @@ int main(int c, char **v) {
     uint8_t *masks = malloc((size_t)n + 1); if (fread(masks, 1, (size_t)n, f) != (size_t)n) return 1; fclose(f);
     DpMdRefFeed *feed = dp_md_ref_feed_open(v[4], 0); if (!feed) return 1;
     static uint32_t px[DP_MDRF_MAX_W * DP_MDRF_MAX_H];
+    // GPGX_DSY=file: per-frame "wram" (64 KiB, swapped back to big-endian order) in DSY1 (src/core/desync.h), for `deepeel desync`
+    FILE *dsy = getenv("GPGX_DSY") ? fopen(getenv("GPGX_DSY"), "wb") : NULL;
+    if (dsy) fwrite("DSY1", 1, 4, dsy);
     double t0 = now_s(), waited = 0, lastmove = t0; uint32_t lastleader = 0;
     for (long fr = 0; fr < n; fr++) {
         for (;;) {   // replay sync: within two frames of the deepeel core; a stopped leader releases after 2 s
@@ -36,6 +39,16 @@ int main(int c, char **v) {
         }
         dp_lr_set_input(lr, 0, to_retro(masks[fr]));
         dp_lr_advance(lr, 1);
+        if (dsy) {
+            size_t sz; const uint8_t *r = dp_lr_memory(lr, 2, &sz);
+            if (r && sz >= 0x10000) {
+                static uint8_t sw[0x10000];
+                for (unsigned i = 0; i < 0x10000; i++) sw[i] = r[i ^ 1];
+                uint32_t fn = (uint32_t)(fr + 1), len = 0x10000; uint16_t nb = 1; uint8_t nl = 4;
+                fwrite(&fn, 4, 1, dsy); fwrite(&nb, 2, 1, dsy); fwrite(&nl, 1, 1, dsy); fwrite("wram", 1, 4, dsy);
+                fwrite(&len, 4, 1, dsy); fwrite(sw, 1, len, dsy);
+            }
+        }
         int w, h, pitch, fmt; const uint8_t *fb = dp_lr_framebuffer(lr, &w, &h, &pitch, &fmt);
         if (!fb || w <= 0 || h <= 0 || w > DP_MDRF_MAX_W || h > DP_MDRF_MAX_H) continue;
         for (int y = 0; y < h; y++)
@@ -54,6 +67,7 @@ int main(int c, char **v) {
         if (fr > 0 && fr % 30 == 0 && busy > 0.01) feed->unsync_x10 = (uint32_t)(10.0 * fr / busy);
         feed->seq++;
     }
+    if (dsy) fclose(dsy);
     dp_lr_close(lr);
     return 0;
 }
