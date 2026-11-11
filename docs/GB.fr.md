@@ -4654,3 +4654,9 @@ $4000–$7FFF en banque 1 (seules les banques 2 et 3 sont vues ; sonde temporair
 l'ancien moteur y lit 5 193 octets. Ce n'est donc pas propre au rejeu TAS : le noyau GB n'entre pas dans le code de la
 banque 1 de ce jeu. Piste : état initial / registre de banque du mapper après `dp_machine_gb` (le jeu commence-t-il avec
 la banque 1 mappée ?), ou semis d'entrées de l'ancien moteur (fermeture statique) qui visite cette banque.
+
+Piste suivie (0.303.8, sans correctif) : à la fin du film, `rom_index(0x4000)` du noyau tombe sur la **banque 2**
+(index 32768), alors que le monde 4 de l'ancien moteur lit la banque 1 ; `gb_fetch` ne lit ni la WRAM ni les E/S
+(`$FFAC`, `$FFB4`, `$FF40` reviennent à `$FF`), donc l'état du jeu n'est pas observable depuis le noyau. Étapes
+suivantes : (1) accès lecture RAM/E/S dans `DpMachine` (ou dump de l'état sauvegardé) ; (2) comparer frame par frame
+le registre de banque et `$FFAC` entre l'ancien moteur et le noyau pour trouver la première divergence du film.
