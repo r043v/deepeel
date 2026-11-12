@@ -5120,3 +5120,8 @@ Reste des 13 techniques : provenance, cellules de session, archive de code runti
 0.316.1 (suite) — provenance portée dans le noyau (heuristique, pas le treillis de l'ancien moteur) : `ld de/bc,nn` suivi de `ld a,(de/bc)` ou
 `add hl,de/bc`, et la paire `ld b,n`/`ld c,m` + `ld h,b`/`ld l,c`, avant un `JP HL` exécuté ; ligne `provenance: N jp-hl targets, M data bytes static`.
 Les cas à plusieurs registres, les « partial » et les « caps » de l'ancien moteur restent à porter.
+
+0.316.1 (suite) — noyau : rattachement ROM→RAM exécutée (`fedsrc` : adresse RAM → octet ROM source de la copie verbatim ; l'octet ROM reçoit
+le drapeau naturel, ligne `RAM-executed instructions traced to ROM copy sources`) ; `--cov` GB écrit les offsets des banques ≥ 1 en adresse CPU ($4000+),
+comme l'ancien moteur. Ctest 256/256 (`lr_gambatte_parity` sauté). Tests dont le noyau satisfait maintenant la vérification : `wram_exec_trace`
+(sortie `--core`) ; reste à porter : cellules de session, frontier, archive runtime, sondes LY (format de ligne), mapwin, campagne.

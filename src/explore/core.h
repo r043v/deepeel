@@ -121,7 +121,7 @@ typedef struct DpCoreResult {
     unsigned halted;   /* 1: stopped by --max-time, 2: by --stall-time */
     uint64_t attract_paths, play_paths, play_epochs, session_frames, session_steps, session_stalls;   // generic long sessions run
     uint64_t hook_vetoed;      // forced sides refused by DpPlatformHooks.veto_fork
-    uint64_t exec_outside;     // instructions executed where rom_index < 0 (RAM/VRAM code)
+    uint64_t exec_outside, exec_wram_rom;     // instructions executed where rom_index < 0 (RAM/VRAM code)
     uint64_t no_pc;            // 1 when the machine has no pc/set_pc: nothing explored
 } DpCoreResult;
 

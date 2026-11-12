@@ -124,6 +124,7 @@ typedef struct {
     DpCoreResult *out;
     const DpCoreConfig *cfg;
     uint8_t *fed;
+    uint32_t *fedsrc;
     uint8_t *ramread;
     uint32_t sbytes;
     uint64_t *cellset;         // technique 8: open-addressing set of (target, RAM cell) keys
@@ -148,6 +149,7 @@ typedef struct {
     // technique 1 (solve): non-ROM addresses read inside the current window
     uint32_t ram[4]; unsigned nram; int track;
     uint8_t *ramread;     // technique 8: 64 KiB bitmap of non-ROM data addresses any path has read (the semantic cell)
+    uint32_t *fedsrc;     // parallel to fed: rom index + 1 of the source byte of that copy
 } CopyObs;
 
 #define RUN_MIN 16
@@ -383,6 +385,7 @@ static void obs_write(void *u, uint32_t addr, uint8_t v) {
             __atomic_fetch_or(&o->r->src_flags[o->last_rom], DP_SRC_COPY, __ATOMIC_RELAXED);
             o->r->copy_bytes++;
             if (o->fed) o->fed[addr & 0xFFFF] = 1;
+            if (o->fedsrc) o->fedsrc[addr & 0xFFFF] = (uint32_t)o->last_rom + 1;
         }
     }
     o->last_rom = -1;
@@ -811,6 +814,17 @@ static void run_path(Worker *w, Pending *p) {
                 break;
             }
             loc->exec_outside++;
+            if (!cur_forced && sh->fedsrc) {   // executed RAM bytes that a verbatim ROM copy produced: attribute them to their ROM source
+                int any = 0;
+                for (int i = 0; i < len; i++) {
+                    uint32_t src = sh->fedsrc[(pc + (uint32_t)i) & 0xFFFF];
+                    if (src && src - 1 < loc->rom_size) {
+                        __atomic_fetch_or(&loc->flags[src - 1], DP_CORE_NATURAL, __ATOMIC_RELAXED);
+                        any = 1;
+                    }
+                }
+                if (any) loc->exec_wram_rom++;
+            }
         }
         // technique 7 (restricted form): z80 `ld a,(RAM)` whose value then indexes a ROM table
         // (`ld hl,ROM` + `add hl,de` within 12 bytes): replay the site with each index 0..index_max (default 15, --index-max up to 255)
@@ -1227,6 +1241,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     sh.sbytes = m->state_bytes(m);
     sh.spool_fd = 0;
     sh.fed = calloc(0x10000, 1);
+    sh.fedsrc = calloc(0x10000, sizeof(uint32_t));
     sh.ramread = calloc(0x10000, 1);
     sh.site_picks = calloc(rom_size + 1, sizeof *sh.site_picks);
     sh.site_gain = calloc(rom_size + 1, sizeof *sh.site_gain);
@@ -1249,6 +1264,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         w->rng_stamp = calloc(0x10000, sizeof *w->rng_stamp); w->rng_last = calloc(0x10000, 1);
         if (!w->visits || !w->stamp || !w->capped) { ok = 0; break; }
         w->cobs = (CopyObs){ wm, &w->loc, -1, 0, sh.fed, 0, 99, -1, -1, 0, cfg->no_decompress };
+        w->cobs.fedsrc = sh.fedsrc;
         w->cobs.ramread = sh.ramread;
         started++;
     }
@@ -1366,7 +1382,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
         out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
-        out->exec_outside += l->exec_outside;
+        out->exec_outside += l->exec_outside; out->exec_wram_rom += l->exec_wram_rom;
         free(ws[i].visits); free(ws[i].wsnap); free(ws[i].winmemo); free(ws[i].capped); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
     }
@@ -1375,7 +1391,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     out->spool_left = sh.spool_n; out->spooled = sh.spool_total;
     if (sh.spool_fd > 0) close(sh.spool_fd);
     for (size_t i = 0; i < sh.qn; i++) free(sh.q[i].state);
-    free(sh.probeset); free(sh.cellset); free(sh.q); free(sh.sites.s); free(sh.fed); free(sh.ramread); free(sh.site_picks); free(sh.site_gain); free(ws);
+    free(sh.probeset); free(sh.cellset); free(sh.q); free(sh.sites.s); free(sh.fed); free(sh.fedsrc); free(sh.ramread); free(sh.site_picks); free(sh.site_gain); free(ws);
     return ok;
 }
 
@@ -1410,6 +1426,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "seeded entry points %llu\n", U(r->seeded));
     fprintf(out, "forced RAM cuts %llu\n", U(r->forced_ram_cuts));
     fprintf(out, "forced taint cuts: indirect %llu, ret %llu\n", U(r->taint_cut_indirect), U(r->taint_cut_ret));
+    if (r->exec_wram_rom) fprintf(out, "RAM-executed instructions traced to ROM copy sources: %llu\n", U(r->exec_wram_rom));
     fprintf(out, "exec_outside %llu, rom->ram copy bytes %llu (%zu distinct ROM sources), forced %llu\n", U(r->exec_outside), U(r->copy_bytes), copied, U(r->copy_forced));
     DpCoreSection secs[64];
     size_t ns = dp_core_sections(r, secs, 64);
@@ -1436,7 +1453,7 @@ void dp_core_write_cov(const char *path, const char *id, const DpCoreResult *r) 
         unsigned out = (f & DP_CORE_NATURAL) ? 1 : (f & DP_CORE_FORCED) ? 5 : 0;
         if (f & DP_CORE_DATA) out |= 8;
         if (!out) continue;
-        fprintf(cf, "%02x %04x %x 1\n", (unsigned)(i >> 14), (unsigned)(i & 0x3fff), out);
+        fprintf(cf, "%02x %04x %x 1\n", (unsigned)(i >> 14), (unsigned)(i & 0x3fff) + ((i >> 14) && !strcmp(id, "gb") ? 0x4000u : 0u), out);
     }
     fclose(cf);
 }
