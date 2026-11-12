@@ -64,11 +64,25 @@ def opt(argv, name, default=None):
 
 ALT_SYSTEM = {"MD": ("Genesis",)}   # the publications API renamed the system codes (MD -> Genesis, observed 11/2026)
 
+EXT_SYSTEM = {".gb": "GB", ".gbc": "GBC", ".nes": "NES", ".sfc": "SNES", ".smc": "SNES", ".sms": "SMS", ".gg": "GG",
+              ".pce": "PC Engine", ".md": "Genesis", ".gen": "Genesis", ".smd": "Genesis", ".bin": "Genesis"}
+
+def system_of(rom):
+    return EXT_SYSTEM.get(os.path.splitext(rom)[1].lower())   # the platform named by the ROM, no flag needed
+
+def games_of(title, system):
+    """Every TASVideos game whose name is exactly the ROM's title (one game may have several ids per version)."""
+    out = []
+    for i, name in search(title, system):
+        if norm(name) == title and i not in out:
+            out.append(i)
+    return out or [i for i, name in search(title, "") if norm(name) == title]
+
 def pubs_of(system, title):
     hits = []
     prefixes = [system] + list(ALT_SYSTEM.get(system, ()))
     for sys_ in prefixes:
-        data = json.loads(get(PUBS % sys_))
+        data = json.loads(get(PUBS % __import__("urllib.parse").parse.quote(sys_)))
         data = data if isinstance(data, list) else data.get("items", [])
         for p in data:
             g = p.get("title", "")
@@ -106,7 +120,7 @@ def main():
             print("%sG  %s   https://tasvideos.org/%sG" % (i, name, i))
         return
     game = opt(argv, "--game")
-    system = opt(argv, "--system", "GB")
+    system = opt(argv, "--system")
     gid = opt(argv, "--game-id")
     mx = opt(argv, "--max")
     lst = "--list" in argv
@@ -114,6 +128,7 @@ def main():
     if len(a) < 2:
         sys.exit(__doc__)
     rom, out = a[0], a[1]
+    system = system or (system_of(rom) if os.path.exists(rom) else None) or "GB"
     tid = target_ids(rom) if not os.path.exists(rom) else None
     if tid:
         gid = (gid + "," + tid) if gid else tid
@@ -124,6 +139,14 @@ def main():
             pubs = pubs_of(system, title)
     except Exception as e:
         print("publications lookup failed (%s)" % e, file=sys.stderr)
+    if gid is None and not pubs and not tid:
+        try:
+            ids = games_of(title, system)
+            if ids:
+                gid = ",".join(ids)
+                print("game ids from the ROM title: %s" % gid, file=sys.stderr)
+        except Exception as e:
+            print("game search failed (%s)" % e, file=sys.stderr)
     if gid is None:
         for p in pubs:
             for k in ("gameId", "game_id", "GameId"):

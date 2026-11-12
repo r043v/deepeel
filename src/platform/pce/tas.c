@@ -89,7 +89,10 @@ int dp_pce_tas_load(const char *path, DpPceTas *t, char *err, size_t errsz) {
                     memcpy(ht, b.header, b.header_n);
                     ht[b.header_n] = 0;
                     char *g = strstr(ht, "GameName ");
-                    dp_pce_reference(strstr(ht, "Core PCEHawk") != NULL);
+                    {   // DEEPEEL_PCE_REF_CORE=pce|pcehawk forces the profile (a movie replayed on another core than the one in its header)
+                        const char *fc = getenv("DEEPEEL_PCE_REF_CORE");
+                        dp_pce_reference(fc && *fc ? !strcmp(fc, "pcehawk") : strstr(ht, "Core PCEHawk") != NULL);
+                    }
                     if (g) snprintf(t->game, sizeof t->game, "%.*s", (int)strcspn(g + 9, "\r\n"), g + 9);
                     if (b.has_sha1) for (int k = 0; k < 20; k++) snprintf(t->sha1 + 2 * k, 3, "%02x", b.sha1[k]);
                     free(ht);

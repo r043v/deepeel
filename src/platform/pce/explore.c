@@ -62,15 +62,12 @@ static uint64_t g_tas_base;     // frame counter when the movie being replayed s
 static uint32_t g_tas_total;    // its length (0: no movie in progress)
 // replay sync with the reference tile (tools/pce_watch.sh): the movie's frame is published as `leader` and the
 // replay then waits (bounded) until the reference has reached it, so both cores stay on the same frame
-static DpMdRefFeed *g_feed;
 static void feed_sync(void) {
     if (!g_tas_total) return;
-    if (!g_feed) { g_feed = dp_md_ref_feed_open(getenv("DEEPEEL_MD_REF_FEED"), 0); if (!g_feed) return; }
-    uint32_t f = (uint32_t)(g_watch_n - g_tas_base);
-    g_feed->leader = f;
-    if (g_feed->vframe == 0 && f > 1) return;   // reference not started (or gone): free run
-    for (int i = 0; i < 400 && g_feed->vframe + 1 < f; i++) { struct timespec ts = { 0, 250000 }; nanosleep(&ts, NULL); }
+    dp_fb_sync_gate((uint64_t)(g_watch_n - g_tas_base));   // every live reference tile, bounded by the gate's own stall rules
 }
+#define STAGNATION_FRAMES 900   // 15 s at 60 Hz
+static uint64_t g_stag_hash, g_stag_since; static int g_stag_warned;
 static void watch_frame_hook(void) {
     if (g_watch_every) { ++g_watch_n; feed_sync(); } else return;
     if (g_watch_n % g_watch_every) return;
@@ -78,6 +75,18 @@ static void watch_frame_hook(void) {
     static uint32_t px[352 * 256];
     int w, h;
     if (!dp_pce_render(px, 352 * 256, &w, &h)) return;
+    // stagnation: a movie keeps the picture moving; the same image for STAGNATION_FRAMES running frames means
+    // the replay has probably desynchronised (the game waits for an input the movie no longer supplies)
+    if (g_tas_total) {
+        uint64_t hsh = 1469598103934665603ull;
+        for (size_t i = 0, n = (size_t)w * (size_t)h; i < n; i++) hsh = (hsh ^ px[i]) * 1099511628211ull;
+        if (hsh != g_stag_hash) { g_stag_hash = hsh; g_stag_since = g_watch_n; g_stag_warned = 0; }
+        else if (!g_stag_warned && g_watch_n - g_stag_since >= STAGNATION_FRAMES) {
+            g_stag_warned = 1;
+            fprintf(stderr, "tas: STAGNATION - same image since movie frame %llu, probable desync with the movie (frame %llu/%u)\n",
+                    (unsigned long long)(g_stag_since - g_tas_base), (unsigned long long)(g_watch_n - g_tas_base), g_tas_total);
+        }
+    }
     dp_fb_publish(px, w, h, g_watch_n);
     g_watch_r->watch_frames++;
 }

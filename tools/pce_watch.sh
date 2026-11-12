@@ -19,10 +19,20 @@ f=open(sys.argv[1],'wb'); f.write(struct.pack('<I',0x52464D44)); f.write(b'\0'*(
   # the reference core is the one that recorded the movie: PCEHawk (BizHawk <= 2.4) or TurboNyma (Mednafen)
   core=${PCE_REF_CORE:-$(unzip -p "$film" Header.txt 2>/dev/null | grep -q "Core PCEHawk" && echo pcehawk || echo pce)}
   echo "watch: reference core $core" >&2
+  # a third tile (the other BizHawk core on the same inputs) only on request: PCE_WATCH_THIRD=1
+  feed2=$TMPDIR/pce_watch.feed2; bhpid2=; ref2=; other=
+  if [ "${PCE_WATCH_THIRD:-0}" = 1 ]; then
+    other=$([ "$core" = pcehawk ] && echo pce || echo pcehawk)
+    cp "$feed" "$feed2"
+    LD_LIBRARY_PATH=${BIZHAWK_DIR:-$HOME/dev/BizHawk}/Assets/dll BIZHAWK_FEED="$feed2" BIZHAWK_FEED_SYNC=1 \
+      mono "$bh" "$other" "$rom" "$masks" "$TMPDIR/pce_watch_bh2.dsy" "$n" >/dev/null 2>&1 &
+    bhpid2=$!; ref2=$feed2
+  fi
   LD_LIBRARY_PATH=${BIZHAWK_DIR:-$HOME/dev/BizHawk}/Assets/dll BIZHAWK_FEED="$feed" BIZHAWK_FEED_SYNC=1 \
     mono "$bh" "$core" "$rom" "$masks" "$TMPDIR/pce_watch_bh.dsy" "$n" >/dev/null 2>&1 &
   bhpid=$!
+  env DEEPEEL_PCE_REF_CORE="$core" ${ref2:+DEEPEEL_MD_REF2_FEED="$ref2"} DEEPEEL_MD_REF2_NAME="BizHawk $([ "$other" = pcehawk ] && echo PCEHawk || echo TurboNyma)" \
   DEEPEEL_MD_REF_FEED="$feed" DEEPEEL_MD_REF_NAME="BizHawk $([ "$core" = pcehawk ] && echo PCEHawk || echo TurboNyma)" \
     "$root/build/deepeel" pce explore "$rom" --tas "$film" --play "$n" --watch 30 || true
-  kill $bhpid 2>/dev/null || true
+  kill $bhpid ${bhpid2:-} 2>/dev/null || true
 done

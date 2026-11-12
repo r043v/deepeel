@@ -761,13 +761,15 @@ static void *fb_main(void *arg) {
                 double sc = (double)cw / iw < (double)ch / ih ? (double)cw / iw : (double)ch / ih;
                 int dw = (int)(iw * sc), dh = (int)(ih * sc);
                 SDL_Rect dst = { ox + (cw - dw) / 2, oy + (ch - dh) / 2, dw, dh };
-                if (t == 0) SDL_RenderCopy(ren, tex, NULL, &dst);
-                else {
-                    SDL_Texture *rtex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888,
-                                                          SDL_TEXTUREACCESS_STREAMING, rw[k], rh[k]);
-                    SDL_UpdateTexture(rtex, NULL, rx[k], rw[k] * 4);
-                    SDL_RenderCopy(ren, rtex, NULL, &dst);
-                    SDL_DestroyTexture(rtex);
+                {   // one path for every tile, ours included: a texture built from the tile's pixel buffer
+                    const uint32_t *src = t == 0 ? px : rx[k];
+                    SDL_Texture *ttex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888,
+                                                          SDL_TEXTUREACCESS_STREAMING, iw, ih);
+                    if (ttex) {
+                        SDL_UpdateTexture(ttex, NULL, src, iw * 4);
+                        SDL_RenderCopy(ren, ttex, NULL, &dst);
+                        SDL_DestroyTexture(ttex);
+                    }
                 }
             }
             // captions: the emulator's name first, then its progress and speed; the movie goes in the window title
