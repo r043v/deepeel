@@ -752,13 +752,27 @@ static void *fb_main(void *arg) {
             int cw = W / cols, rowh = H / rows, ch = rowh - FB_CAP > 0 ? rowh - FB_CAP : 1;
             int slot[4] = { -1, -1, -1, -1 }, ns = 1;   // tile 0: our core, then every active reference
             for (int k = 0; k < 3; k++) if (ract[k]) slot[ns++] = k;
+            // one scale for every tile (the smallest that fits them all): equal pixels are drawn equally big, so a
+            // tile taller or wider than another shows a real difference of the image, not of the fitting
+            double sc_all = 1e9; int sizes_key = 0;
+            for (int t = 0; t < ncell; t++) {
+                int k = slot[t], iw = t == 0 ? (tex ? tw : 0) : (k >= 0 ? rw[k] : 0), ih = t == 0 ? (tex ? th : 0) : (k >= 0 ? rh[k] : 0);
+                if (iw <= 0 || ih <= 0) continue;
+                double s1 = (double)cw / iw < (double)ch / ih ? (double)cw / iw : (double)ch / ih;
+                if (s1 < sc_all) sc_all = s1;
+                sizes_key = sizes_key * 31 + iw * 1000 + ih;
+            }
+            { static int last_sizes_key; if (sizes_key != last_sizes_key) { last_sizes_key = sizes_key;
+                fprintf(stderr, "watch: tile sizes ours %dx%d", tw, th);
+                for (int k = 0; k < 3; k++) if (ract[k]) fprintf(stderr, ", ref%d %dx%d", k, rw[k], rh[k]);
+                fputc('\n', stderr); } }
             for (int t = 0; t < ncell; t++) {
                 int ox = (t % cols) * cw, oy = (t / cols) * rowh;
                 int iw = 0, ih = 0, k = slot[t];
                 if (t == 0) { if (tex && th > 0) { iw = tw; ih = th; } }
                 else if (rh[k] > 0) { iw = rw[k]; ih = rh[k]; }
                 if (!iw || !ih) continue;
-                double sc = (double)cw / iw < (double)ch / ih ? (double)cw / iw : (double)ch / ih;
+                double sc = sc_all;
                 int dw = (int)(iw * sc), dh = (int)(ih * sc);
                 SDL_Rect dst = { ox + (cw - dw) / 2, oy + (ch - dh) / 2, dw, dh };
                 {   // one path for every tile, ours included: a texture built from the tile's pixel buffer

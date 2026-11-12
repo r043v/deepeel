@@ -31,8 +31,10 @@ f=open(sys.argv[1],'wb'); f.write(struct.pack('<I',0x52464D44)); f.write(b'\0'*(
   LD_LIBRARY_PATH=${BIZHAWK_DIR:-$HOME/dev/BizHawk}/Assets/dll BIZHAWK_FEED="$feed" BIZHAWK_FEED_SYNC=1 \
     mono "$bh" "$core" "$rom" "$masks" "$TMPDIR/pce_watch_bh.dsy" "$n" >/dev/null 2>&1 &
   bhpid=$!
-  env DEEPEEL_PCE_REF_CORE="$core" ${ref2:+DEEPEEL_MD_REF2_FEED="$ref2"} DEEPEEL_MD_REF2_NAME="BizHawk $([ "$other" = pcehawk ] && echo PCEHawk || echo TurboNyma)" \
-  DEEPEEL_MD_REF_FEED="$feed" DEEPEEL_MD_REF_NAME="BizHawk $([ "$core" = pcehawk ] && echo PCEHawk || echo TurboNyma)" \
+  bhv=$(sed -n 's/.*MainVersion = "\([^"]*\)".*/\1/p' "${BIZHAWK_DIR:-$HOME/dev/BizHawk}/src/BizHawk.Common/VersionInfo.cs" 2>/dev/null | head -1)
+  name_of() { [ "$1" = pcehawk ] && echo "BizHawk ${bhv:-?} PCEHawk" || echo "BizHawk ${bhv:-?} TurboNyma (Mednafen 1.32.1)"; }
+  env DEEPEEL_PCE_REF_CORE="$core" ${ref2:+DEEPEEL_MD_REF2_FEED="$ref2"} DEEPEEL_MD_REF2_NAME="$(name_of "$other")" \
+  DEEPEEL_MD_REF_FEED="$feed" DEEPEEL_MD_REF_NAME="$(name_of "$core")" \
     "$root/build/deepeel" pce explore "$rom" --tas "$film" --play "$n" --watch 30 || true
   kill $bhpid ${bhpid2:-} 2>/dev/null || true
 done

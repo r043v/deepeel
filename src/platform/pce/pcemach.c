@@ -344,8 +344,8 @@ void dp_pce_watch_enable(int on) { machine.row = on ? watch_row : 0; machine.row
 void dp_pce_set_frame_hook(void (*fn)(void)) { frame_hook_fn = fn; }
 // the visible rows as ARGB (w x h); returns 0 before the first frame
 int dp_pce_render(uint32_t *argb, unsigned cap, int *w, int *h) {
-    unsigned ww = watch_w ? watch_w : machine.vdc.row_width, y0 = machine.first_active_line, hh = machine.vdc.active_height;
-    if (!ww || !hh || y0 + hh > 262 || ww * hh > cap) return 0;
+    unsigned ww = watch_w ? watch_w : machine.vdc.row_width, y0 = 4, hh = 232;   // the window Mednafen/TurboNyma shows (lines 4..235), not the VDC's own active height
+    if (!ww || !machine.vdc.active_height || ww * hh > cap) return 0;
     for (unsigned y = 0; y < hh; y++)
         for (unsigned x = 0; x < ww; x++) {
             uint16_t v = watch_pix[(size_t)(y0 + y) * 352 + x];
