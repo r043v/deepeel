@@ -34,6 +34,9 @@ static unsigned ref_word(const ClownMDEmu *m, unsigned addr) {
 static unsigned dut_word(const MdFull *m, unsigned addr) {
     return ((unsigned)m->ram[addr & 0xffff] << 8) | m->ram[(addr + 1) & 0xffff];
 }
+#ifdef DP_CYCLE_TRACE   /* needs an instrumented Clown68000 copy and a traced m0boy runtime */
+extern int dp_trace_on, dp_trace_on_d; extern FILE *dp_trace_f, *dp_trace_d;
+#endif
 int main(int argc, char **argv) {
     if (argc != 4) {
         fprintf(stderr, "usage: md_compare_reference ROM raw.gmv frames\n");
@@ -73,7 +76,14 @@ int main(int argc, char **argv) {
         unsigned char b[3]; if (fread(b, 1, 3, movie) != 3) break;
         if (b[1] != 0xff || b[2] != 0xff) { fprintf(stderr, "unsupported GMV input at frame %u\n", frame); return 2; }
         pad = (uint8_t)~b[0]; dut->pad = pad;
+#ifdef DP_CYCLE_TRACE
+        if (getenv("DP_MD_CYCLE_TRACE") && frame + 1 == (unsigned)atoi(getenv("DP_MD_CYCLE_TRACE"))) {
+            dp_trace_f = fopen("cyc_ref.txt", "w"); dp_trace_d = fopen("cyc_dut.txt", "w"); dp_trace_on = dp_trace_on_d = 1; }
+#endif
         ClownMDEmu_Iterate(ref); md_full_frame(dut, 0);
+#ifdef DP_CYCLE_TRACE
+        if (dp_trace_on) { dp_trace_on = dp_trace_on_d = 0; fclose(dp_trace_f); fclose(dp_trace_d); }
+#endif
         if (frame + 1 >= trace_begin && frame + 1 <= trace_end)
             printf("detail %u pad=%02x x=%04x/%04x y=%04x/%04x vx=%04x/%04x vy=%04x/%04x inertia=%04x/%04x status=%02x/%02x\n",
                    frame + 1, pad, ref_word(ref, 0xd008), dut_word(dut, 0xd008),
