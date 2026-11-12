@@ -5126,3 +5126,5 @@ le drapeau naturel, ligne `RAM-executed instructions traced to ROM copy sources`
 comme l'ancien moteur. Ctest 256/256 (`lr_gambatte_parity` sauté). Tests dont le noyau satisfait maintenant la vérification : `wram_exec_trace`
 (sortie `--core`) ; reste à porter : cellules de session, frontier, archive runtime, sondes LY (format de ligne), mapwin, campagne.
 0.316.1 (suite) — sondes LY du noyau : ligne `event probes N at M sites: K forced variants`, option `--no-event-fork` (alias de `--no-event-probes`).
+
+0.316.1 (suite) — noyau : `DEEPEEL_MAPWIN_DUMP` écrit la carte ROM finale (PPM, 1 px par octet, 256 de large : vert naturel, orange forcé, bleu statique, jaune donnée). La fenêtre SDL temps réel du noyau reste à faire (la fenêtre actuelle lit les structures de l'ancien moteur).

@@ -57,6 +57,22 @@ static const char *argv_opt(int argc, char **argv, const char *name) {
 // kernel (--core) outputs shared by every platform: --cov, --map (PNG or text), --summary, --text
 static void core_outputs(int argc, char **argv, const char *id, const char *rom, const DpCoreResult *r) {
     dp_core_write_cov(argv_cov(argc, argv), id, r);
+    if (getenv("DEEPEEL_MAPWIN_DUMP")) {   // kernel --mapwin: the final ROM map (1 px per byte, 256 wide) as a PPM; the live window is the legacy engine's
+        FILE *mf = fopen(getenv("DEEPEEL_MAPWIN_DUMP"), "wb");
+        if (mf) {
+            size_t rows = (r->rom_size + 255) / 256;
+            fprintf(mf, "P6\n256\n%zu\n255\n", rows);
+            for (size_t i = 0; i < rows * 256; i++) {
+                uint8_t f = i < r->rom_size ? r->flags[i] : 0, c[3] = { 0x20, 0x20, 0x28 };
+                if (f & DP_CORE_NATURAL) { c[0] = 0x30; c[1] = 0xc0; c[2] = 0x50; }
+                else if (f & DP_CORE_FORCED) { c[0] = 0xe0; c[1] = 0x90; c[2] = 0x30; }
+                else if (f & DP_CORE_STATIC) { c[0] = 0x40; c[1] = 0x70; c[2] = 0xe0; }
+                else if (f & DP_CORE_DATA) { c[0] = 0xd0; c[1] = 0xd0; c[2] = 0x40; }
+                fwrite(c, 1, 3, mf);
+            }
+            fclose(mf);
+        }
+    }
     if (dp_core_write_map(argv_opt(argc, argv, "--map"), id, rom, r) < 0) fprintf(stderr, "deepeel: cannot write --map\n");
     if (dp_core_write_summary(argv_opt(argc, argv, "--summary"), id, r) < 0) fprintf(stderr, "deepeel: cannot write --summary\n");
     const char *t = argv_opt(argc, argv, "--text");
