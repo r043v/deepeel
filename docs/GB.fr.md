@@ -4975,3 +4975,15 @@ Essai négatif (MD) : lever le V-int de m0boy d'une ligne (224 → 225, comme l'
 aucune position X de `s6k.gmv` (mêmes valeurs aux trames 1200-5859, mêmes messages d'écart). Ce n'est donc pas la cause du
 décalage d'une trame au chargement du niveau (trame 399) ni de la dérive. Candidats restants : latence d'acquittement des IRQ,
 timing du HINT, bus Z80, démarrage de la machine.
+
+### 0.315.6 — Mega Drive : durée de trame 3420/7 (cause du décalage de la trame 399)
+
+Observation de l'outil (`DP_MD_FIRST_DIFF`, `DP_MD_MODE_TRACE` dans `tools/md_compare_reference.c`) :
+le contrôle de somme de la ROM au démarrage de Sonic 1 écrit son marqueur `$FFFD` à la trame 52 chez
+ClownMDEmu et à la trame 53 chez m0boy. Cause : m0boy comptait 488 cycles/ligne (127 856/trame) alors que
+le matériel NTSC fait 3420 horloges maîtres/ligne, soit ~488,57 cycles 68000 (128 005/trame). Les
+~150 cycles manquants par trame s'accumulaient en ~1 trame sur la phase de boot. Correctif : les coupes
+de ligne utilisent `(ligne+1)*3420/7` ; le marqueur tombe désormais à la même trame. Le niveau démarre
+à ±1 trame de la référence (trames 293/491 : écarts de signe opposé), la dérive de X reste (zone 1 atteinte
+sur 6000 trames). Restent à aligner : `md_full_bus.c` (compteur HV et gel DMA calculés avec 488) et
+`md_full_audio.c` (`FRAME_MASTER = 127856*7`).

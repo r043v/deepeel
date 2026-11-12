@@ -80,6 +80,10 @@ int main(int argc, char **argv) {
                    ref_word(ref, 0xd00c), dut_word(dut, 0xd00c), ref_word(ref, 0xd010), dut_word(dut, 0xd010),
                    ref_word(ref, 0xd012), dut_word(dut, 0xd012), ref_word(ref, 0xd014), dut_word(dut, 0xd014),
                    ref_byte(ref, 0xd022), dut->ram[0xd022]);
+        if (getenv("DP_MD_MODE_TRACE") && ref_byte(ref, 0xf600) != dut->ram[0xf600] && frame < 600)
+            printf("mode-diff %u ref=%02x dut=%02x\n", frame + 1, ref_byte(ref, 0xf600), dut->ram[0xf600]);
+        if (getenv("DP_MD_MODE_TRACE")) { static unsigned pr = 0xff, pd = 0xff; unsigned r = ref_byte(ref, 0xf600), d = dut->ram[0xf600];
+            if (r != pr || d != pd) printf("mode-change %u ref=%02x dut=%02x\n", frame + 1, r, d); pr = r; pd = d; }
         unsigned ref_x = ((unsigned)ref_byte(ref, 0xd008) << 8) | ref_byte(ref, 0xd009);
         unsigned dut_x = ((unsigned)dut->ram[0xd008] << 8) | dut->ram[0xd009];
         if (ref_byte(ref, 0xf600) == 0x0c && dut->ram[0xf600] == 0x0c &&
@@ -97,6 +101,18 @@ int main(int argc, char **argv) {
             fflush(stdout);
             if (mismatch_streak == 20)
                 fprintf(stderr, "player X differs for 20 frames even with a one-frame offset at frame %u\n", frame + 1);
+        }
+        if (getenv("DP_MD_FIRST_DIFF") && frame + 1 == 49) {   // interrupts are masked during the ROM checksum: step to the exact marker cycle
+            MdFull *c = malloc(sizeof *c); memcpy(c, dut, sizeof *c);
+            for (unsigned n = 0; n < 4000000 && c->ram[0xfffd] != 0x6e; n++) md_full_step_interp(c);
+            printf("m0boy: init marker written at total cycle %u (frame %u starts at %u)\n", (unsigned)c->cycles, (unsigned)(c->cycles / 127856u) + 1, (unsigned)(c->cycles / 127856u) * 127856u);
+            free(c);
+        }
+        if (getenv("DP_MD_FIRST_DIFF")) { static int rs, ds; if (!rs && ref_byte(ref, 0xfffd) == 0x6e) { rs = 1; printf("ref init marker at frame %u\n", frame + 1); }
+            if (!ds && dut->ram[0xfffd] == 0x6e) { ds = 1; printf("dut init marker at frame %u (m0boy cycles %u, frame_cycles %u)\n", frame + 1, (unsigned)dut->cycles, (unsigned)dut->frame_cycles); } }
+        if (getenv("DP_MD_FIRST_DIFF") && frame < 300) {   // first frame whose work RAM differs, with the first bytes
+            static int shown; unsigned nd = 0, first[8]; for (unsigned i = 0; i < 0x10000; i++) if (ref_byte(ref, i) != dut->ram[i]) { if (nd < 8) first[nd] = i; nd++; }
+            if (nd && !shown) { shown = 1; printf("first-diff frame %u: %u bytes:", frame + 1, nd); for (unsigned k = 0; k < nd && k < 8; k++) printf(" %04x(%02x/%02x)", first[k], ref_byte(ref, first[k]), dut->ram[first[k]]); printf("\n"); }
         }
         if (dut->fault) break;
     }
