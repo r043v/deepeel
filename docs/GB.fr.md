@@ -5135,3 +5135,5 @@ comme l'ancien moteur. Ctest 256/256 (`lr_gambatte_parity` sauté). Tests dont l
 Reste : conversion en lots portables et commandes `frontier stats` / `frontier drain` côté noyau.
 
 0.316.1 (suite) — `frontier stats DIR` lit `DIR/frontier.bin` du noyau (`frontier: N kernel states pending`) ; `frontier drain ROM DIR` le reprend jusqu'au bout (`explore --core --state-dir DIR --resume`). Lots portables du noyau : non faits.
+
+0.316.1 (suite) — noyau : archive de code runtime (`DpRamArch` partagée avec NES/MD) : variantes (pc, octets) exécutées hors ROM, source de copie ROM ou producteur approché (dernière cellule ROM lue avant un store non verbatim), polymorphisme ; `--rtcode FICHIER` et ligne `runtime code archive: …`. Les chemins forcés sont archivés comme dans l'ancien moteur.

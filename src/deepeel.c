@@ -57,6 +57,7 @@ static const char *argv_opt(int argc, char **argv, const char *name) {
 // kernel (--core) outputs shared by every platform: --cov, --map (PNG or text), --summary, --text
 static void core_outputs(int argc, char **argv, const char *id, const char *rom, const DpCoreResult *r) {
     dp_core_write_cov(argv_cov(argc, argv), id, r);
+    if (argv_opt(argc, argv, "--rtcode") && r->ra.n) { FILE *rf = fopen(argv_opt(argc, argv, "--rtcode"), "w"); if (rf) { dp_ramarch_write(&r->ra, rf, id); fclose(rf); } }
     if (getenv("DEEPEEL_MAPWIN_DUMP")) {   // kernel --mapwin: the final ROM map (1 px per byte, 256 wide) as a PPM; the live window is the legacy engine's
         FILE *mf = fopen(getenv("DEEPEEL_MAPWIN_DUMP"), "wb");
         if (mf) {

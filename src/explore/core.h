@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "../core/coverage.h"
+#include "ramarch.h"
 
 #include "../core/dpmachine.h"
 
@@ -105,6 +106,7 @@ typedef struct DpCoreResult {
     uint64_t novelty_picks;    // pending states chosen ahead of LIFO order because their target was uncovered
     uint64_t index_replays;    // states queued with a RAM index byte set to 0..15 at a ROM-table read
     uint64_t rng_forks;        // states queued with a volatile RAM byte forced to 00/01/80/FF
+    DpRamArch ra;              // distinct (pc, bytes) variants executed outside ROM, with their ROM copy source / approximate producer
     uint64_t solved_forks, solve_tries;   // technique 1: natural states proving the other side / replays tried
     uint64_t learned_sigs;     // signature states queued from observed `ld a,(nn); cp n`
     uint64_t site_scored_picks; // picks that the per-site score moved away from the plain novelty choice

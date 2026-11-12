@@ -99,6 +99,7 @@ size_t dp_core_sections(const DpCoreResult *r, DpCoreSection *out, size_t cap) {
 }
 
 void dp_core_result_free(DpCoreResult *r) {
+    dp_ramarch_free(&r->ra);
     free(r->flags);
     free(r->src_flags);
     free(r->first_seen);
@@ -127,6 +128,7 @@ typedef struct {
     const DpCoreConfig *cfg;
     uint8_t *fed;
     uint32_t *fedsrc;
+    uint32_t *fedprod;
     uint8_t *ramread;
     uint32_t sbytes;
     uint64_t *cellset;         // technique 8: open-addressing set of (target, RAM cell) keys
@@ -152,6 +154,7 @@ typedef struct {
     uint32_t ram[4]; unsigned nram; int track;
     uint8_t *ramread;     // technique 8: 64 KiB bitmap of non-ROM data addresses any path has read (the semantic cell)
     uint32_t *fedsrc;     // parallel to fed: rom index + 1 of the source byte of that copy
+    uint32_t *fedprod;    // rom index + 1 of the last ROM cell read before a non-copy store (approximate producer)
 } CopyObs;
 
 #define RUN_MIN 16
@@ -380,6 +383,7 @@ static void obs_write(void *u, uint32_t addr, uint8_t v) {
     CopyObs *o = u;
     if (o->run_hi >= 0 && o->m->rom_index(o->m, addr) < 0) o->run_writes++;
     if (o->last_rom < 0 || o->age > 4) return;
+    if (o->m->rom_index(o->m, addr) < 0 && v != o->last_val && o->fedprod && !o->forced) o->fedprod[addr & 0xFFFF] = (uint32_t)o->last_rom + 1;
     if (o->m->rom_index(o->m, addr) < 0 && v == o->last_val) {
         if (o->forced) o->r->copy_forced++;
         else {
@@ -821,6 +825,10 @@ static void run_path(Worker *w, Pending *p) {
                 break;
             }
             loc->exec_outside++;
+            if (sh->fedsrc) {
+                uint32_t s0 = sh->fedsrc[pc & 0xFFFF], p0 = sh->fedprod[pc & 0xFFFF];
+                dp_ramarch_add_p(&loc->ra, (uint16_t)pc, bytes, len > 10 ? 10 : len, s0 ? (int32_t)(s0 - 1) : -1, s0 ? -1 : (p0 ? (int32_t)(p0 - 1) : -1));
+            }
             if (!cur_forced && sh->fedsrc) {   // executed RAM bytes that a verbatim ROM copy produced: attribute them to their ROM source
                 int any = 0;
                 for (int i = 0; i < len; i++) {
@@ -1251,6 +1259,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     sh.spool_fd = 0;
     sh.fed = calloc(0x10000, 1);
     sh.fedsrc = calloc(0x10000, sizeof(uint32_t));
+    sh.fedprod = calloc(0x10000, sizeof(uint32_t));
     sh.ramread = calloc(0x10000, 1);
     sh.site_picks = calloc(rom_size + 1, sizeof *sh.site_picks);
     sh.site_gain = calloc(rom_size + 1, sizeof *sh.site_gain);
@@ -1273,7 +1282,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         w->rng_stamp = calloc(0x10000, sizeof *w->rng_stamp); w->rng_last = calloc(0x10000, 1);
         if (!w->visits || !w->stamp || !w->capped) { ok = 0; break; }
         w->cobs = (CopyObs){ wm, &w->loc, -1, 0, sh.fed, 0, 99, -1, -1, 0, cfg->no_decompress };
-        w->cobs.fedsrc = sh.fedsrc;
+        w->cobs.fedsrc = sh.fedsrc; w->cobs.fedprod = sh.fedprod;
         w->cobs.ramread = sh.ramread;
         started++;
     }
@@ -1407,7 +1416,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
         out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
-        out->exec_outside += l->exec_outside; out->exec_wram_rom += l->exec_wram_rom;
+        out->exec_outside += l->exec_outside; out->exec_wram_rom += l->exec_wram_rom; dp_ramarch_merge(&out->ra, &l->ra);
         free(ws[i].visits); free(ws[i].wsnap); free(ws[i].winmemo); free(ws[i].capped); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
     }
@@ -1436,7 +1445,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     }
     if (sh.spool_fd > 0) close(sh.spool_fd);
     for (size_t i = 0; i < sh.qn; i++) free(sh.q[i].state);
-    free(sh.probeset); free(sh.cellset); free(sh.q); free(sh.sites.s); free(sh.fed); free(sh.fedsrc); free(sh.ramread); free(sh.site_picks); free(sh.site_gain); free(ws);
+    free(sh.probeset); free(sh.cellset); free(sh.q); free(sh.sites.s); free(sh.fed); free(sh.fedsrc); free(sh.fedprod); free(sh.ramread); free(sh.site_picks); free(sh.site_gain); free(ws);
     return ok;
 }
 
@@ -1473,6 +1482,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "forced RAM cuts %llu\n", U(r->forced_ram_cuts));
     fprintf(out, "forced taint cuts: indirect %llu, ret %llu\n", U(r->taint_cut_indirect), U(r->taint_cut_ret));
     if (r->exec_wram_rom) fprintf(out, "RAM-executed instructions traced to ROM copy sources: %llu\n", U(r->exec_wram_rom));
+    if (r->ra.n) fprintf(out, "runtime code archive: %u distinct instructions executed from RAM/VRAM/HRAM, %u attached to a ROM copy source, %u generated (no ROM source; %u with an approximate ROM producer), %u rewrote an earlier instruction at the same address (self-modifying)\n", r->ra.n, r->ra.attached, r->ra.n - r->ra.attached, r->ra.derived, r->ra.poly);
     fprintf(out, "exec_outside %llu, rom->ram copy bytes %llu (%zu distinct ROM sources), forced %llu\n", U(r->exec_outside), U(r->copy_bytes), copied, U(r->copy_forced));
     DpCoreSection secs[64];
     size_t ns = dp_core_sections(r, secs, 64);
