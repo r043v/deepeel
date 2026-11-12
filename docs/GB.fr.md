@@ -5137,3 +5137,9 @@ Reste : conversion en lots portables et commandes `frontier stats` / `frontier d
 0.316.1 (suite) — `frontier stats DIR` lit `DIR/frontier.bin` du noyau (`frontier: N kernel states pending`) ; `frontier drain ROM DIR` le reprend jusqu'au bout (`explore --core --state-dir DIR --resume`). Lots portables du noyau : non faits.
 
 0.316.1 (suite) — noyau : archive de code runtime (`DpRamArch` partagée avec NES/MD) : variantes (pc, octets) exécutées hors ROM, source de copie ROM ou producteur approché (dernière cellule ROM lue avant un store non verbatim), polymorphisme ; `--rtcode FICHIER` et ligne `runtime code archive: …`. Les chemins forcés sont archivés comme dans l'ancien moteur.
+
+Seconde tentative de bascule (`DEEPEEL_GB_KERNEL=1` pour essayer, non retenue) : avec le noyau par défaut, il ne reste que 5 échecs sur 256 (14 avant) :
+`gb_session_cells(_resume)` (moteur `--play`, absent du noyau), `frontier_cli` (spool/lots de l'ancien moteur), `wram_exec_trace` (corrigé : un octet copié puis exécuté n'est plus marqué « donnée » dans `--cov`),
+et `campaign_fixtures`, qui échoue par dépassement de délai sur `fix_irq.gb` : le noyau y tourne à ~0,03 M pas/s (file de 32 000 forks IRQ, états de 17 Ko) et ne finit pas dans les 300 s,
+alors que l'ancien explorateur termine. C'est le dernier bloqueur de performance avant la bascule. Les trois tests liés aux fonctions absentes sont épinglés à l'ancien explorateur
+(`DEEPEEL_GB_LEGACY=1`, propriété de test). Les graines pointeurs (`Pending.seed`) sont abandonnées au moment du tirage si leur cible est déjà couverte.

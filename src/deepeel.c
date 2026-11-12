@@ -411,13 +411,14 @@ static int cmd_explore(int argc, char **argv) {
     uint8_t tier_limit = 0, defer_all = 0;
     uint8_t eb[32];
     int gb_core = 0; DpCoreConfig gkcfg; dp_core_config_default(&gkcfg); gkcfg.visits_per_pc = 2000000;   // frame waits are long loops   // --core: the generic kernel instead of the GB explorer
-    for (int i = 2; i < argc; i++) if (!strcmp(argv[i], "--core")) gb_core = 1;
+    gb_core = getenv("DEEPEEL_GB_KERNEL") != NULL;   // DEEPEEL_GB_KERNEL=1 makes the kernel the GB default (blocked: fix_irq.gb is too slow, see docs/GB.fr.md); --legacy forces the old explorer
+    for (int i = 2; i < argc; i++) { if (!strcmp(argv[i], "--core")) gb_core = 1; else if (!strcmp(argv[i], "--legacy")) gb_core = 0; }
     int spool_to_frontier = 0;
     uint16_t ea[32];
     int entries = 0;
     for (int i = 2; i < argc; i++) {
         const char *a = argv[i];
-        if (!strcmp(a, "--core")) { /* kernel engine, see gb_core below */ }
+        if (!strcmp(a, "--core") || !strcmp(a, "--legacy")) { /* engine choice, see gb_core above */ }
         else if (gb_core && dp_core_parse_option(&gkcfg, argc, argv, i)) { i += dp_core_parse_option(&gkcfg, argc, argv, i) - 1; }   // kernel options first: --attract-frames etc. mean the kernel's here
         else if (!strcmp(a, "--json") && i + 1 < argc) json = argv[++i];
         else if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];

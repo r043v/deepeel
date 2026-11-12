@@ -13,6 +13,7 @@ typedef struct {
     int forced;
     uint32_t site;     // fork site rom index + 1 (0: none), for the per-site novelty score
     uint32_t input;    // held pad mask + 1 (0: none); inherited by every fork of the path
+    uint8_t seed;      // a configured seed: dropped at pick time when its start is already covered
 } Pending;
 
 typedef struct {
@@ -686,6 +687,7 @@ static void run_path(Worker *w, Pending *p) {
     const DpIsa *isa = m->isa;
     m->load(m, p->state);
     free(p->state);
+    if (p->seed && covered(loc, m, p->pc)) return;   // a pointer seed whose target the exploration already reached adds nothing
     if (p->forced) m->set_pc(m, p->pc);
     uint32_t cur_input = p->input;
     // TAS replay: input >= TAS_INPUT encodes the frame shift (value - TAS_INPUT - 3, -3..+3)
@@ -1326,7 +1328,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
                 m->load(m, start); m->poke(m, 0x2000, (uint8_t)cfg->seed_banks[i]); m->save(m, cp); m->load(m, start);
             }
             if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
-            sh.q[sh.qn++] = (Pending){ cp, cfg->seeds[i], 1, 0, 0 };
+            sh.q[sh.qn++] = (Pending){ cp, cfg->seeds[i], 1, 0, 0, 1 };
             out->seeded++;
         }
         // the natural path goes last: it is the first one taken
@@ -1507,7 +1509,7 @@ void dp_core_write_cov(const char *path, const char *id, const DpCoreResult *r) 
     for (size_t i = 0; i < r->rom_size; i++) {
         uint8_t f = r->flags[i]; if (!f) continue;
         unsigned out = (f & DP_CORE_NATURAL) ? 1 : (f & DP_CORE_FORCED) ? 5 : 0;
-        if (f & DP_CORE_DATA) out |= 8;
+        if ((f & DP_CORE_DATA) && !((f & DP_CORE_COPIED) && (f & DP_CORE_NATURAL))) out |= 8;   // a copied byte later executed is code, not plain data
         if (!out) continue;
         fprintf(cf, "%02x %04x %x 1\n", (unsigned)(i >> 14), (unsigned)(i & 0x3fff) + ((i >> 14) && !strcmp(id, "gb") ? 0x4000u : 0u), out);
     }
