@@ -4947,3 +4947,8 @@ identiques sur 300 trames. Côté deepeel (m0boy GB/NES/PCE) le producteur natif
 RAM de travail (GB/SMS : $C000-$DFFF, NES : $0000-$07FF, PCE : $2000-$3FFF) en bloc `wram` DSY1 à chaque trame.
 Vérifié sur GB (Super Mario Land + muggv3.vbm : 1664 trames). NES/PCE : même code, non essayés ici. La comparaison
 avec `tools/lr_dsy` demande de convertir le film VBM en masques ; non fait.
+
+`DEEPEEL_TAS_MASKS=fichier` écrit le film au format de `tools/lr_dsy` (GB, `--core --tas`). Premier essai Super Mario
+Land + muggv3 : deepeel (`--dsy`) contre Gambatte (`lr_dsy`), WRAM de 8 Kio : 64 octets différents à la trame 100, 112 à la
+600, 218 à la 1500 (l'état initial de la RAM diffère : deepeel à $FF/0, Gambatte avec son motif ; une partie
+des écarts est ce bruit). Observation de l'outil ; pas de conclusion de synchro tant que les octets de jeu ne sont pas isolés.

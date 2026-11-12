@@ -657,6 +657,17 @@ static int cmd_explore(int argc, char **argv) {
                         if (b & 4) k |= 0x80;   // select
                         gmasks[f] = k;
                     }
+                    if (getenv("DEEPEEL_TAS_MASKS")) {   // the movie as tools/lr_dsy masks (U D L R B A Select Start), for the reference side
+                        FILE *mf = fopen(getenv("DEEPEEL_TAS_MASKS"), "wb");
+                        if (mf) {
+                            for (uint32_t f = 0; f < gt.frames; f++) {
+                                uint8_t k = gmasks[f], r = (uint8_t)(k & 0x0F);
+                                if (k & 0x10) r |= 0x20; if (k & 0x20) r |= 0x10; if (k & 0x40) r |= 0x80; if (k & 0x80) r |= 0x40;
+                                fputc(r, mf);
+                            }
+                            fclose(mf);
+                        }
+                    }
                     gkcfg.tas_masks = gmasks; gkcfg.tas_frames = gt.frames;
                     dp_machine_gb_set_tas(km, &gt);   // the recorder's sync profile
                 } else fprintf(stderr, "deepeel: --tas: %s\n", terr);
