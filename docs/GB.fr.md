@@ -5145,3 +5145,5 @@ alors que l'ancien explorateur termine. C'est le dernier bloqueur de performance
 (`DEEPEEL_GB_LEGACY=1`, propriété de test). Les graines pointeurs (`Pending.seed`) sont abandonnées au moment du tirage si leur cible est déjà couverte.
 
 Performance du noyau sur `fix_irq.gb` : cause trouvée, des clés d'ensembles (`keyset_insert`) qui se regroupaient dans les bits bas (sondage linéaire dégénéré). Un hachage mélangé (`keyhash`) fait passer le noyau de plus de 300 s à ~9,5 s ; le fork IRQ ignore aussi sans coût les couples (site, délai) déjà vus. Le bloqueur de performance est levé. Restent, pour la bascule du défaut : le moteur de sessions, les lots de la frontière et `coverage.bin`/`disc.bin` (`resume_cov`) côté noyau. L'ancien explorateur reste le défaut GB.
+
+Carte de couverture persistante du noyau : avec `--state-dir`, `coverage.bin` (en-tête `COV1`, taille ROM, un octet de drapeaux par octet de ROM) est écrit à la fin et réinjecté par OR avec `--resume` (« resumed coverage map »). Un rapport repris ne sait donc jamais moins que le précédent. Le journal de découverte (`disc.bin`) reste propre à l'ancien explorateur.

@@ -1,4 +1,5 @@
 // core.c: generic exploration kernel over DpMachine + DpIsa (see core.h).
+#include <sys/stat.h>
 #include <unistd.h>
 #include "core.h"
 
@@ -1311,6 +1312,23 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         m->save(m, start);
         uint32_t start_pc = m->pc(m);
         sh.q = NULL;
+    if (cfg->state_dir && cfg->resume) {   // the coverage proved by previous runs is OR-ed back: a resumed report never knows less
+        char cp[600]; snprintf(cp, sizeof cp, "%s/coverage.bin", cfg->state_dir);
+        FILE *cf = fopen(cp, "rb");
+        if (cf) {
+            uint32_t hd[2];
+            if (fread(hd, 4, 2, cf) == 2 && hd[0] == 0x31564F43u && hd[1] == rom_size) {
+                uint8_t *buf = malloc(rom_size ? rom_size : 1);
+                if (buf && fread(buf, 1, rom_size, cf) == rom_size) {
+                    size_t n = 0;
+                    for (size_t i = 0; i < rom_size; i++) { if (buf[i] & ~out->flags[i]) n++; out->flags[i] |= buf[i]; }
+                    fprintf(stderr, "deepeel: resumed coverage map (%zu bytes added)\n", n);
+                }
+                free(buf);
+            }
+            fclose(cf);
+        }
+    }
     if (cfg->state_dir && cfg->resume) {   // states left pending by a previous run (same machine state size)
         char fp[600]; snprintf(fp, sizeof fp, "%s/frontier.bin", cfg->state_dir);
         FILE *ff = fopen(fp, "rb");
@@ -1432,6 +1450,12 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     out->steps = sh.steps;
     for (unsigned i = 0; i < started; i++) out->steps += 0;   /* session steps are reported separately */
     out->spool_left = sh.spool_n; out->spooled = sh.spool_total;
+    if (cfg->state_dir) {   // coverage map for --resume
+        char cp[600]; snprintf(cp, sizeof cp, "%s/coverage.bin", cfg->state_dir);
+        mkdir(cfg->state_dir, 0777);
+        FILE *cf = fopen(cp, "wb");
+        if (cf) { uint32_t hd[2] = { 0x31564F43u, (uint32_t)rom_size }; fwrite(hd, 4, 2, cf); fwrite(out->flags, 1, rom_size, cf); fclose(cf); }
+    }
     if (cfg->state_dir) {   // the pending frontier (RAM queue, then the disk spool) for --resume
         char fp[600]; snprintf(fp, sizeof fp, "%s/frontier.bin", cfg->state_dir);
         if (sh.qn + sh.spool_n == 0) remove(fp);
