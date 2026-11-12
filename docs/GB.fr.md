@@ -5000,3 +5000,15 @@ blanking passent d'abord, puis les 224 lignes actives ; statut VDP, compteur HV,
 Observation de l'outil (`tools/md_compare_reference.sh`, `s6k.gmv`, 6000 trames) : changements de mode aux
 mêmes trames (294, 491, 723, 3314, 3546), X du joueur 0x08F4 des deux côtés, 10 octets de WRAM d'écart
 (avant : 1788). ctest 256/256.
+
+### 0.315.7 (suite) — GPGX/BizHawk : le « retard » est le déphasage de mise sous tension réel
+
+Observation de l'outil : sur Sonic 1, Genesis Plus GX écrit le marqueur d'initialisation à la trame 54
+(Clown/m0boy : 52) et compte son premier V-int à la trame 63 (60). Ce n'est pas un défaut du cœur : GPGX
+(`core/genesis.c`, `gen_reset`) fait partir le 68000 à la ligne VDP 159 (HVC $9F21 mesuré sur matériel),
+`(262-192+159)*3420+1004` horloges maîtres après le début de sa trame, alors que ClownMDEmu et m0boy
+partent du V-int. Un film Gens/GMV rejoué dans GPGX arrive donc plus tard (Start perdu, fondu plus long) :
+c'est de la fidélité, pas un bug à corriger à la source. `DP_MD_POWERON=gpgx` reproduit ce départ dans m0boy
+(`md_full_reset` : phase 197 lignes + 1004, pas de V-int d'ouverture). Résidu : m0boy passe en mode 4 à la
+trame 295, GPGX à 299 ; le reste du déphasage (fondu, latence d'entrée de GPGX) n'est pas encore modélisé,
+`GPGX_SHIFT` reste le contournement pour la comparaison.

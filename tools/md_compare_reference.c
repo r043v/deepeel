@@ -105,7 +105,7 @@ int main(int argc, char **argv) {
         if (getenv("DP_MD_PENALTY") && frame == 52) dut->frame_cycles += (unsigned)atoi(getenv("DP_MD_PENALTY"));
         if (getenv("DP_MD_VBLA")) { static unsigned pv = 0, shown; unsigned r = (ref_byte(ref,0xfe0c)<<24)|(ref_byte(ref,0xfe0d)<<16)|(ref_byte(ref,0xfe0e)<<8)|ref_byte(ref,0xfe0f);
             unsigned d = (dut->ram[0xfe0c]<<24)|(dut->ram[0xfe0d]<<16)|(dut->ram[0xfe0e]<<8)|dut->ram[0xfe0f];
-            if (r != d && shown < 3 && frame > 0) { shown++; printf("vbla f%u ref=%08x dut=%08x mode=%02x/%02x\n", frame + 1, r, d, ref_byte(ref,0xf600), dut->ram[0xf600]); } (void)pv; }
+            if (r != d && shown < 200 && frame > 0) { shown++; printf("vbla f%u ref=%08x dut=%08x mode=%02x/%02x\n", frame + 1, r, d, ref_byte(ref,0xf600), dut->ram[0xf600]); } (void)pv; }
         if (getenv("DP_MD_FIRST_DIFF") && frame + 1 == 49) {   // interrupts are masked during the ROM checksum: step to the exact marker cycle
             MdFull *c = malloc(sizeof *c); memcpy(c, dut, sizeof *c);
             for (unsigned n = 0; n < 4000000 && c->ram[0xfffd] != 0x6e; n++) md_full_step_interp(c);
