@@ -5203,7 +5203,7 @@ Observations (machine concrète, pas des mesures de matériel) : Bonk 3 n'a aucu
 première divergence soutenue à la frame 10257 sur 25 411 (2818 avant le calage SAT, 1207 avant le profil). Cause trouvée du décalage de
 la frame 2533 : le HuC6270 de Mednafen bloque l'accès VRAM suivant tant que le DMA SATB n'est pas fini (`VDC_IS_BSY`) ; un accès VRAM
 juste avant le VBL se valide après le début du DMA, et l'IRQ1 VBL arrive ~4 lignes plus tard. Le profil TurboNyma retarde donc la fin
-du DMA SAT (`pce_sat_offset = 1350`, fenêtre `pce_mys_w = 170`) ; PCEHawk reste inchangé (Bonk 3 toujours sans divergence soutenue).
+du DMA SAT (`pce_sat_offset = 2000`, fenêtre `pce_mys_w = 170`) ; le DMA SAT démarre à la fin de l'affichage horizontal de la dernière ligne active (`pce_sat_hdw`, comme le HuC6270 de Mednafen), ce qui ramène la médiane des écarts à 0 jusqu'à ~la frame 3000 ; PCEHawk reste inchangé (Bonk 3 toujours sans divergence soutenue).
 Il reste un écart de scène cumulatif (`$1`, `$6`) avant 10257 : le modèle d'attente VDC n'est pas encore exact. Les traces
 Mednafen patché servent jusqu'à ~la frame 550. Réglages de calage : `tools/pce_bridge_dsy.c` (`PCE_IRQD`, `PCE_TPH`,
-`PCE_TCLK`, `PCE_TEXTRA`, `PCE_PHASE`, `PCE_CUT`, `PCE_SATOFF`, `PCE_MYS`, `PCE_MYSW`).
+`PCE_TCLK`, `PCE_TEXTRA`, `PCE_PHASE`, `PCE_CUT`, `PCE_SATOFF`, `PCE_MYS`, `PCE_MYSW`, `PCE_SATHDW`).

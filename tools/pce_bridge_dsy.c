@@ -22,6 +22,7 @@ int main(int argc, char **argv) {
       if (getenv("PCE_CUT")) { extern void dp_pce_set_cut(unsigned); dp_pce_set_cut((unsigned)atoi(getenv("PCE_CUT"))); }
       if (getenv("PCE_MYS")) { extern unsigned pce_mys_off; pce_mys_off = (unsigned)atoi(getenv("PCE_MYS")); }
       if (getenv("PCE_MYSW")) { extern unsigned pce_mys_w; pce_mys_w = (unsigned)atoi(getenv("PCE_MYSW")); }
+      if (getenv("PCE_SATHDW")) { extern int pce_sat_hdw; pce_sat_hdw = atoi(getenv("PCE_SATHDW")); }
       if (getenv("PCE_SATOFF")) pce_sat_offset = atoi(getenv("PCE_SATOFF")); }
     FILE *o = fopen(argv[3], "wb"); fwrite("DSY1", 1, 4, o);
     for (size_t i = 0; i < N; i++) {

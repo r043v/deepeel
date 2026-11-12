@@ -17,6 +17,7 @@
 #ifndef M0_TL
 #define M0_TL
 #endif
+int pce_sat_hdw;
 #include "pce.c"
 #undef pce_bus_read
 #undef pce_bus_write
@@ -93,7 +94,7 @@ void dp_pce_reference(int pcehawk) {
     pce_timer_extra = pcehawk ? 1u : 0u;     // and its timer period is load + 1 ticks, first period 2 ticks longer
     pce_timer_phase = pcehawk ? 0u : 3u;
     { extern unsigned pce_timer_clk; pce_timer_clk = pcehawk ? 0u : 456u; }   // first timer period: 3 ticks and 480 prescaler cycles longer (measured on Shinobi)
-    pce_sat_offset = pcehawk ? 0 : 1350;   // the VRAM access queued at the VBL start waits ~1350 master clocks longer (Shinobi: stalls of 1000-1900 cycles)
+    pce_sat_offset = pcehawk ? 0 : 2000; pce_sat_hdw = pcehawk ? 0 : 1;   // the SATB DMA starts at the end of the display window (HuC6270), the held VRAM access waits ~2000 master clocks longer
     pce_mys_w = pcehawk ? 90u : 170u;   // measured: sustained desync 2818 -> 10257
     pce_vdc_waits = pcehawk ? 0u : 1u;   // PCEHawk has no VRAM wait states behind the SATB DMA (TurboNyma does)
     ref_phase = pcehawk ? 4u : 258u;
@@ -260,6 +261,7 @@ int dp_pce_irq_due(void) {
 
 // end of a line (the CPU has used its budget): the VDC/timer/IRQ events and the frame/line counters, as m0boy's pce_frame;
 // returns 1 when the frame completed (the boot frame before frame 1 is not reported)
+
 static int irq_defer;   // CPU cycles IRQ1 is still held back after a line end (TurboNyma profile)
 static int line_finish(void) {
     huc6280_t *c = &machine.cpu;
@@ -273,7 +275,8 @@ static int line_finish(void) {
         if (machine.vdc.sat_started) {
             static const unsigned ratio[4] = { 4, 3, 2, 2 };
             machine.vdc.sat_started = 0;
-            machine.sat_end = machine.line_master + 1024u * ratio[machine.vce_cr & 3] + pce_sat_offset;
+            const int tail = pce_sat_hdw ? (int)((((machine.vdc.hdr >> 8) & 0x7F) + 1 + (machine.vdc.hsr & 0x1F) + 1) * 8 * ratio[machine.vce_cr & 3]) : 0;   // HuC6270 starts the SATB DMA at the end of the display window, before HDE and HSW
+            machine.sat_end = (uint64_t)((int64_t)machine.line_master - tail + 1024 * (int)ratio[machine.vce_cr & 3] + pce_sat_offset);
             machine.vdc_pending = 0;
         }
         if (line_no < 262) emit_row(line_no);
