@@ -624,6 +624,7 @@ static int cmd_explore(int argc, char **argv) {
     dp_mach_set_rom(mach, cart->rom, cart->rom_size);
     if (gb_core) {
         gkcfg.max_total = cfg.max_steps_total;
+        gkcfg.max_path_steps = getenv("DEEPEEL_GB_PATH_STEPS") ? strtoull(getenv("DEEPEEL_GB_PATH_STEPS"), NULL, 0) : 1000;   // short paths, many entries: Zelda 39 M steps 4x the natural bytes of 100000-step paths
         gkcfg.jobs = cfg.jobs > 1 ? (unsigned)cfg.jobs : 1;
         for (int i = 2; i + 1 < argc; i++) if (!strcmp(argv[i], "--jobs") && !strcmp(argv[i + 1], "auto")) { gkcfg.jobs = (unsigned)auto_jobs(); gkcfg.adaptive = 1; }
         gkcfg.hooks = dp_machine_gb_hooks();
@@ -673,8 +674,9 @@ static int cmd_explore(int argc, char **argv) {
                 } else fprintf(stderr, "deepeel: --tas: %s\n", terr);
             }
             uint32_t *gseed_pc = NULL; uint16_t *gseed_bk = NULL;
-            if (getenv("DEEPEEL_GB_POINTER_SEEDS")) {   // pointer-table entry discovery (core_gbseeds.c), to match the GB explorer's speculative seeds
-                gkcfg.n_seeds = dp_core_gb_pointer_seeds(cart->rom, cart->rom_size, getenv("DEEPEEL_GB_POINTER_SEEDS") ? (size_t)atol(getenv("DEEPEEL_GB_POINTER_SEEDS")) : 0, &gseed_pc, &gseed_bk);
+            size_t gseed_cap = getenv("DEEPEEL_GB_POINTER_SEEDS") ? (size_t)atol(getenv("DEEPEEL_GB_POINTER_SEEDS")) : 40000;   // 0 turns it off
+            if (gseed_cap) {   // pointer-table entry discovery (core_gbseeds.c), to match the GB explorer's speculative seeds
+                gkcfg.n_seeds = dp_core_gb_pointer_seeds(cart->rom, cart->rom_size, gseed_cap, &gseed_pc, &gseed_bk);
                 gkcfg.seeds = gseed_pc; gkcfg.seed_banks = gseed_bk;
             }
             DpCoreResult kr;

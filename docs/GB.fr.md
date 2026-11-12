@@ -5077,3 +5077,17 @@ l'ancien moteur (≈ 2 800 pas par chemin) : les 16 000 graines de pointeurs ne 
 1 529 chemins seulement, forcé 5031, `pruned-covered` 12,7 M — le plafond de pas par chemin n'est donc pas le seul mécanisme en jeu
 (le pruning « deux côtés déjà couverts » absorbe l'essentiel des pas). Piste suivante : compter, par graine, les pas consommés avant
 la première coupe, pour voir si les graines meurent tôt (HALT, boucle, état incohérent).
+
+### 0.316.0 — noyau GB : chemins courts + graines de pointeurs par défaut (étape 2.3, parité de couverture atteinte sur Zelda)
+
+Le goulet était le plafond de pas par chemin du noyau (100 000) : à 39 M pas il n'achevait que ~1 500 chemins, l'ancien moteur 13 950.
+Défauts GB du noyau : `max_path_steps = 1000` (`DEEPEEL_GB_PATH_STEPS`) et 40 000 graines de pointeurs (`DEEPEEL_GB_POINTER_SEEDS`, 0 = off).
+Zelda Link's Awakening, 39 M pas, observations de l'outil (définitions de rapport côte à côte) :
+
+| | ancien moteur | noyau avant | noyau 0.316.0 (`--no-taint-cut`) |
+|---|---|---|---|
+| naturel | 55 | 8155 | 30 221 |
+| forcé (spéculatif) | 142 978 | 3458 | 263 170 |
+
+Le noyau couvre donc plus que l'ancien moteur sur les deux colonnes ; les 5 tests de contrat et les 256 tests ctest passent.
+Reste à faire avant de désactiver l'ancien moteur : mêmes mesures sur d'autres ROMs GB et sur MD/NES.
