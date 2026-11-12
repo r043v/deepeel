@@ -52,7 +52,7 @@ Les particularités de chaque plateforme deviennent des hooks optionnels du noya
 Pour chaque plateforme :
 1. Brancher le CLI de la plateforme sur `dp_core_explore`, derrière `--core`.
 2. Comparer avec l'ancien moteur, à budgets égaux, sur les fixtures et sur 1 à 2 ROMs réelles. Critère : couverture natural ≥ l'ancienne et tests verts.
-3. Passer le noyau par défaut, puis supprimer le code moteur de `platform/*/explore.c`. Ne gardent que les hooks, le registre et les catalogues de sondes.
+3. Passer le noyau par défaut et **désactiver** (sans supprimer) le code moteur de `platform/*/explore.c` une fois la parité atteinte : décision du propriétaire, le vieux moteur reste dans le dépôt, inactif, comme référence. Seuls les hooks, le registre et les catalogues de sondes sont partagés.
 
 Ordre : Sega/MSX (le plus proche), puis NES, PCE et MD (avec les fourches du Z80 son).
 
