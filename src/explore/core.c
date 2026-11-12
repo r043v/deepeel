@@ -1223,6 +1223,9 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
             uint8_t *cp = malloc(sh.sbytes);
             if (!cp) break;
             memcpy(cp, start, sh.sbytes);
+            if (cfg->seed_banks && cfg->seed_banks[i] > 1 && m->poke) {   // bank-carrying seed: switch the mapper, save that state
+                m->load(m, start); m->poke(m, 0x2000, (uint8_t)cfg->seed_banks[i]); m->save(m, cp); m->load(m, start);
+            }
             if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
             sh.q[sh.qn++] = (Pending){ cp, cfg->seeds[i], 1, 0, 0 };
             out->seeded++;

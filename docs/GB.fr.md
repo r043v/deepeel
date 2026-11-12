@@ -5053,3 +5053,13 @@ Lecture de `old.txt` (Zelda GB) : l'ancien moteur n'exécute que 55 octets « na
 en chemin forcé. L'écart vient donc de la **découverte d'entrées** (pointeurs/tables de la ROM), pas de l'exécuteur : le noyau
 n'ensemence que les cibles de transferts directs naturels. Chantier : un découvreur d'entrées (tables de pointeurs 16 bits
 dans la ROM, vecteurs) qui alimente `cfg->seeds` du noyau, à mesurer au même budget avant de désactiver l'ancien moteur.
+
+### Découvreur d'entrées du noyau GB (`DEEPEEL_GB_POINTER_SEEDS=N`, `core_gbseeds.c`)
+
+Port du scan de pointeurs de `seeds.c` : chaque mot LE de la ROM entre $0100 et $7FFF qui vise du code plausible devient une
+graine `{banque, adresse}` (jusqu'à N) ; le noyau sait maintenant démarrer une graine dans une banque donnée
+(`cfg->seed_banks` : écriture en $2000 sur l'état de départ). Zelda GB, mêmes 39 M pas : 200 000 graines → forcé 4519 octets ;
+16 000 graines → 3458 (inchangé : les graines, au fond de la file, ne tournent pas dans le budget) ; 16 000 graines, 150 M pas,
+5 workers → forcé 5356. Contre 142 978 pour l'ancien moteur : **l'écart n'est pas comblé**. Hypothèse suivante : les chemins
+forcés du noyau sont coupés au premier `RET` de profondeur 0 (coupe de taint, technique 1.b) alors que l'ancien moteur poursuit
+en cascade ; à tester avec `--no-taint-cut`. Désactivé par défaut (aucun test de contrat modifié).

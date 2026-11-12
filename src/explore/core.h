@@ -55,6 +55,7 @@ typedef struct DpCoreConfig {
     int no_forced_ram_cut;     // 1: let forced paths run unfed RAM
     const uint32_t *seeds;     // extra entry points (vectors): queued as forced paths from the start state
     size_t n_seeds;
+    const uint16_t *seed_banks;   // optional, parallel to seeds: ROM bank selected (a write to $2000 on the start state) before the seed runs
     int no_event_probes;
     int unbounded;             // --unbounded: no step/path/site-fork ceilings; the RAM queue spills to the disk spool
     int no_closure;            // static closure off (no STATIC marking from natural direct transfers)
@@ -155,3 +156,6 @@ int dp_core_write_map(const char *path, const char *id, const char *rom_name, co
 int dp_core_write_summary(const char *path, const char *id, const DpCoreResult *r);
 
 #endif
+
+// GB pointer-table entry discovery: seeds {bank, pc} for cfg->seeds / cfg->seed_banks (free both arrays)
+size_t dp_core_gb_pointer_seeds(const uint8_t *rom, size_t size, size_t cap, uint32_t **pcs, uint16_t **banks);

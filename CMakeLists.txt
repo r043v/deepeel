@@ -307,6 +307,7 @@ add_library(deepeel_core STATIC
   src/explore/explorer.c
   src/explore/core.c
   src/explore/core_map.c
+  src/explore/core_gbseeds.c
   src/explore/frontier.c
   src/explore/frontier_disk.c
   src/explore/forks.c

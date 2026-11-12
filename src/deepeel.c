@@ -672,8 +672,14 @@ static int cmd_explore(int argc, char **argv) {
                     dp_machine_gb_set_tas(km, &gt);   // the recorder's sync profile
                 } else fprintf(stderr, "deepeel: --tas: %s\n", terr);
             }
+            uint32_t *gseed_pc = NULL; uint16_t *gseed_bk = NULL;
+            if (getenv("DEEPEEL_GB_POINTER_SEEDS")) {   // pointer-table entry discovery (core_gbseeds.c), to match the GB explorer's speculative seeds
+                gkcfg.n_seeds = dp_core_gb_pointer_seeds(cart->rom, cart->rom_size, getenv("DEEPEEL_GB_POINTER_SEEDS") ? (size_t)atol(getenv("DEEPEEL_GB_POINTER_SEEDS")) : 0, &gseed_pc, &gseed_bk);
+                gkcfg.seeds = gseed_pc; gkcfg.seed_banks = gseed_bk;
+            }
             DpCoreResult kr;
             rc = dp_core_explore(km, cart->rom_size, &gkcfg, &kr) ? 0 : 1;
+            free(gseed_pc); free(gseed_bk);
             if (!rc) dp_core_report(stdout, "gb", &kr); core_outputs(argc, argv, "gb", path, &kr);
             dp_core_result_free(&kr);
             free(gmasks); dp_tas_free(&gt);
