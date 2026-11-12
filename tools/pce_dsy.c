@@ -36,6 +36,7 @@ int main(int argc, char **argv) {
     if (getenv("PCE_MYS")) { extern unsigned pce_mys_off; pce_mys_off = (unsigned)atoi(getenv("PCE_MYS")); }
     if (getenv("PCE_SCALE")) pce_scale_permille = (unsigned)atoi(getenv("PCE_SCALE"));
     if (getenv("PCE_CUT")) { extern unsigned pce_cut_cycles; pce_cut_cycles = (unsigned)atoi(getenv("PCE_CUT")); }
+    if (getenv("PCE_NOWAIT")) { extern unsigned pce_vdc_waits; pce_vdc_waits = 0; }
     if (getenv("PCE_EVT")) { extern unsigned pce_evt_master; pce_evt_master = (unsigned)atoi(getenv("PCE_EVT")); }
     if (getenv("PCE_BOOT")) { extern int pce_boot_offset; pce_boot_offset = atoi(getenv("PCE_BOOT")); }
     pce_frame_start_line = getenv("PCE_PHASE") ? (unsigned)atoi(getenv("PCE_PHASE")) : 258;   /* TurboNyma cuts its frames at about this VDC line (the boot-time counters of frames 4-6 match from 258) */

@@ -117,10 +117,29 @@ namespace BizhawkDsy
 			if (feedPath != null) feed = MemoryMappedFile.CreateFromFile(feedPath, FileMode.Open, null, 36 + 426 * 262 * 4).CreateViewAccessor();
 			int feedFps = int.TryParse(Environment.GetEnvironmentVariable("BIZHAWK_FEED_FPS"), out var ff) ? ff : 60;
 			var t0 = DateTime.UtcNow; double worked = 0; bool syncFeed = Environment.GetEnvironmentVariable("BIZHAWK_FEED_SYNC") == "1";
+			// BIZHAWK_PADTRACE=lo-hi (frames): PCEHawk only, prints every pad port read (frame, VDC line, CPU cycles) to stderr
+			var pt = Environment.GetEnvironmentVariable("BIZHAWK_PADTRACE"); int ptLo = 0, ptHi = -1, curF = 0; Action addPad = null;
+			if (pt != null && fe.Core is PCEngine pcc)
+			{
+				var q = pt.Split('-'); ptLo = int.Parse(q[0]); ptHi = int.Parse(q[1]);
+				var vdcF = typeof(PCEngine).GetField("VDC1"); var scF = typeof(VDC).GetField("ScanLine");
+				addPad = () => pcc.MemoryCallbacks.Add(new MemoryCallback("System Bus", MemoryCallbackType.Read, "pad", (a, v, fl) =>
+				{
+					if (a == 0x1000 && curF >= ptLo && curF <= ptHi) Console.Error.WriteLine("PADREAD f=" + curF + " ln=" + scF.GetValue(vdcF.GetValue(pcc)) + " cyc=" + pcc.TotalExecutedCycles + " v=" + v.ToString("x2"));
+				return null;
+			}, null, null));
+				var prevAdd = addPad;
+				addPad = () => { prevAdd(); pcc.MemoryCallbacks.Add(new MemoryCallback("System Bus", MemoryCallbackType.Write, "vdcw", (a, v, fl) =>
+				{
+					if (a < 4 && curF >= ptLo && curF <= ptHi) Console.Error.WriteLine("VDCW f=" + curF + " ln=" + scF.GetValue(vdcF.GetValue(pcc)) + " a=" + a + " v=" + v.ToString("x2") + " cyc=" + pcc.TotalExecutedCycles);
+					return null;
+				}, null, null)); };
+			}
 			using var w = new BinaryWriter(File.Create(args[3]));
 			w.Write(Encoding.ASCII.GetBytes("DSY1"));
 			for (int f = 0; f < frames; f++)
 			{
+				curF = f + 1; if (addPad != null && curF == ptLo - 1) { addPad(); addPad = null; }
 				for (int i = 0; i < 8; i++) if (names[i] != null) controller[names[i]] = (masks[f] & (1 << i)) != 0;
 				if (feed != null && syncFeed) while (feed.ReadUInt32(28) < (uint)(f + 1)) Thread.Sleep(1);   // replay sync: frame f+1 only once deepeel has published it
 				var tf = DateTime.UtcNow;

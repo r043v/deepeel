@@ -87,6 +87,8 @@ static void line_start(void) {
 
 // which core recorded the movie being replayed: only the frame cut moves (the hardware model is the same)
 void dp_pce_reference(int pcehawk) {
+    extern unsigned pce_vdc_waits;
+    pce_vdc_waits = pcehawk ? 0u : 1u;   // PCEHawk has no VRAM wait states behind the SATB DMA (TurboNyma does)
     ref_phase = pcehawk ? 4u : 258u;
     pce_frame_start_line = ref_phase;
     if (!machine.frames && !fl_no) line_no = ref_phase % 262u;
