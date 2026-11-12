@@ -104,6 +104,18 @@ int main(int argc, char **argv) {
         if (getenv("DP_MD_STACK_DIFF")) { static int shown2; unsigned nd = 0, first = 0;
             for (unsigned i = (getenv("DP_MD_DEEP") ? 0xfd7e : 0xfd00); i < (getenv("DP_MD_DEEP") ? 0xfd8e : 0xfe00); i++) if (ref_byte(ref, i) != dut->ram[i]) { if (!nd) first = i; nd++; }
             if (nd && shown2 < 6) { shown2++; printf("stack-diff frame %u: %u bytes in fd00-fdff, first %04x ref=%02x dut=%02x sp=%08x/%08x pc=%06x/%06x\n", frame + 1, nd, first, ref_byte(ref, first), dut->ram[first], (unsigned)ref->m68k.address_registers[7], dut->a[7], (unsigned)ref->m68k.program_counter, dut->pc); } }
+        if (getenv("DP_MD_GENS_DUMP")) {   /* Gens-rr work RAM dump (tools/gens_dump.lua): 64 KiB per frame, DP_MD_GENS_SKIP frames of offset */
+            static FILE *gf; static unsigned char gbuf[0x10000]; static unsigned first_ref = 0, first_dut = 0;
+            if (!gf) gf = fopen(getenv("DP_MD_GENS_DUMP"), "rb");
+            long idx = (long)frame - (getenv("DP_MD_GENS_SKIP") ? atol(getenv("DP_MD_GENS_SKIP")) : 0);
+            if (gf && idx >= 0 && fseek(gf, idx * 0x10000L, SEEK_SET) == 0 && fread(gbuf, 1, 0x10000, gf) == 0x10000) {
+                unsigned dr = 0, dd = 0;
+                for (unsigned i = 0; i < 0x10000; i++) { dr += gbuf[i] != ref_byte(ref, i); dd += gbuf[i] != dut->ram[i]; }
+                if ((dr && !first_ref) || (dd && !first_dut) || (frame + 1) % 60 == 0) {
+                    printf("gens frame %u: differs from ClownMDEmu %u, from m0boy %u bytes\n", frame + 1, dr, dd);
+                    if (dr && !first_ref) first_ref = frame + 1; if (dd && !first_dut) first_dut = frame + 1; }
+            }
+        }
         if ((frame + 1 >= 50 && frame + 1 <= 62) || (frame + 1) % 300 == 0 || mismatch_streak == 20 || dut->fault) {
             unsigned diff = 0;
             for (unsigned i = 0; i < 0x10000; i++) { int d = ref_byte(ref, i) != dut->ram[i]; diff += d; if (d && getenv("DP_MD_DIFF_LIST") && (frame + 1) % (getenv("DP_MD_DIFF_MOD") ? (unsigned)atoi(getenv("DP_MD_DIFF_MOD")) : 3000u) == 0) printf("  diff %04x ref=%02x dut=%02x\n", i, ref_byte(ref, i), dut->ram[i]); }
