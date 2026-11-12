@@ -16,7 +16,7 @@ for film in "$@"; do
 import struct,sys
 f=open(sys.argv[1],'wb'); f.write(struct.pack('<I',0x52464D44)); f.write(b'\0'*(36-4+426*262*4))" "$feed"
   n=$(stat -c %s "$masks")
-  LD_LIBRARY_PATH=${BIZHAWK_DIR:-$HOME/dev/BizHawk}/Assets/dll BIZHAWK_FEED="$feed" \
+  LD_LIBRARY_PATH=${BIZHAWK_DIR:-$HOME/dev/BizHawk}/Assets/dll BIZHAWK_FEED="$feed" BIZHAWK_FEED_SYNC=1 \
     mono "$bh" pce "$rom" "$masks" "$TMPDIR/pce_watch_bh.dsy" "$n" >/dev/null 2>&1 &
   bhpid=$!
   DEEPEEL_MD_REF_FEED="$feed" DEEPEEL_MD_REF_NAME="BizHawk TurboNyma" \

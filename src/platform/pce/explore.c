@@ -38,6 +38,8 @@
 #include <string.h>
 #include <zlib.h>
 #include "../../gui/fbwatch.h"
+#include "../../explore/md_ref_feed.h"
+#include <time.h>
 #include "../../core/statefile.h"
 
 typedef struct {
@@ -58,8 +60,20 @@ static DpPceResults *g_watch_r;
 static uint64_t g_watch_n;
 static uint64_t g_tas_base;     // frame counter when the movie being replayed started
 static uint32_t g_tas_total;    // its length (0: no movie in progress)
+// replay sync with the reference tile (tools/pce_watch.sh): the movie's frame is published as `leader` and the
+// replay then waits (bounded) until the reference has reached it, so both cores stay on the same frame
+static DpMdRefFeed *g_feed;
+static void feed_sync(void) {
+    if (!g_tas_total) return;
+    if (!g_feed) { g_feed = dp_md_ref_feed_open(getenv("DEEPEEL_MD_REF_FEED"), 0); if (!g_feed) return; }
+    uint32_t f = (uint32_t)(g_watch_n - g_tas_base);
+    g_feed->leader = f;
+    if (g_feed->vframe == 0 && f > 1) return;   // reference not started (or gone): free run
+    for (int i = 0; i < 400 && g_feed->vframe + 1 < f; i++) { struct timespec ts = { 0, 250000 }; nanosleep(&ts, NULL); }
+}
 static void watch_frame_hook(void) {
-    if (!g_watch_every || ++g_watch_n % g_watch_every) return;
+    if (g_watch_every) { ++g_watch_n; feed_sync(); } else return;
+    if (g_watch_n % g_watch_every) return;
     if (g_tas_total) dp_fbwatch_progress((uint32_t)(g_watch_n - g_tas_base), g_tas_total, 0);
     static uint32_t px[352 * 256];
     int w, h;

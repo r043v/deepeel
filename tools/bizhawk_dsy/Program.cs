@@ -109,12 +109,13 @@ namespace BizhawkDsy
 			var feedPath = Environment.GetEnvironmentVariable("BIZHAWK_FEED");
 			if (feedPath != null) feed = MemoryMappedFile.CreateFromFile(feedPath, FileMode.Open, null, 36 + 426 * 262 * 4).CreateViewAccessor();
 			int feedFps = int.TryParse(Environment.GetEnvironmentVariable("BIZHAWK_FEED_FPS"), out var ff) ? ff : 60;
-			var t0 = DateTime.UtcNow; double worked = 0;
+			var t0 = DateTime.UtcNow; double worked = 0; bool syncFeed = Environment.GetEnvironmentVariable("BIZHAWK_FEED_SYNC") == "1";
 			using var w = new BinaryWriter(File.Create(args[3]));
 			w.Write(Encoding.ASCII.GetBytes("DSY1"));
 			for (int f = 0; f < frames; f++)
 			{
 				for (int i = 0; i < 8; i++) if (names[i] != null) controller[names[i]] = (masks[f] & (1 << i)) != 0;
+				if (feed != null && syncFeed) while (feed.ReadUInt32(28) < (uint)(f + 1)) Thread.Sleep(1);   // replay sync: frame f+1 only once deepeel has published it
 				var tf = DateTime.UtcNow;
 				fe.Core.FrameAdvance(controller, true, false);
 				if (feed != null)
@@ -128,7 +129,7 @@ namespace BizhawkDsy
 					feed.Write(4, seq + 2);
 					worked += (DateTime.UtcNow - tf).TotalSeconds;
 					feed.Write(32, (uint)((f + 1) / Math.Max(worked, 1e-3) * 10));   // speed without the pacing sleeps, tenths of frames/s
-					var due = t0.AddSeconds((f + 1) / (double)feedFps) - DateTime.UtcNow;
+					var due = syncFeed ? TimeSpan.Zero : t0.AddSeconds((f + 1) / (double)feedFps) - DateTime.UtcNow;
 					if (due > TimeSpan.Zero) Thread.Sleep(due);
 				}
 				w.Write((uint)(f + 1)); w.Write((ushort)picked.Count);
