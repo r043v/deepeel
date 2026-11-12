@@ -5071,3 +5071,9 @@ L'étape 2.3 reste ouverte, l'ancien moteur reste le défaut sur GB.
 Autres essais (Zelda GB, 16 000 graines, `--no-taint-cut`) : `--max-steps 5000000 --loop-cap 100000` à 150 M pas → forcé 8528, avec
 saturation de site 3 397 030 (le plafond de forks par site borne l'exploration, rapporté). `--unbounded` : à 0,1 M pas/s (file sur
 disque), 580 s ne suffisent pas à conclure ; pas de résultat. L'écart reste ouvert.
+
+Observation : à 150 M pas le noyau n'achève qu'environ 1 500 chemins (≈ 100 000 pas par chemin) contre 13 950 chemins à 39 M pas pour
+l'ancien moteur (≈ 2 800 pas par chemin) : les 16 000 graines de pointeurs ne passent pas toutes. Avec `--max-steps 3000`, 39 M pas :
+1 529 chemins seulement, forcé 5031, `pruned-covered` 12,7 M — le plafond de pas par chemin n'est donc pas le seul mécanisme en jeu
+(le pruning « deux côtés déjà couverts » absorbe l'essentiel des pas). Piste suivante : compter, par graine, les pas consommés avant
+la première coupe, pour voir si les graines meurent tôt (HALT, boucle, état incohérent).
