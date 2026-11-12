@@ -5172,3 +5172,15 @@ Bascule effective : le noyau `dp_core_explore` est maintenant l'explorateur GB p
 S4 stride 3 sur le noyau : `DpCoreConfig.rom_image` (image ROM complète, fournie par la voie GB de `deepeel.c`) permet de lire une table dont chaque entrée est `{lo, hi, banque}` et de parcourir statiquement la cible dans la banque nommée (`closure_walk_img`, sans passer par la banque mappée de la machine). Le stride 3 est tenté quand le stride 2 ne valide aucune entrée, ou une seule ; il n'est accepté qu'avec au moins 2 entrées valides, vérifiées avant tout marquage (sinon `gb_prov_de` régresse). Test `gb_jp_table3` (fixture `fix_jptable3`, 4 banques). ctest 258/258 (`lr_gambatte_parity` sauté). Reste côté GB : la provenance multi-registres.
 
 Référence VBA-rr (état) : `vba-rerecording` (sources dans `../vba-rerecording`) ne se compile pas avec la chaîne actuelle, même avec `-fpermissive -std=gnu++98` et les en-têtes standard forcés. Il reste des erreurs de fond (identifiants non déclarés : `cpuSaveType`, `gbFrameSkip`, `useBios`, `soundOffFlag`, `pix` ; `LuaJoypadType` ; `theEmulator` de type incomplet), c'est-à-dire des sources incohérentes entre elles, pas seulement du C++ ancien. Une référence VBA exige un binaire externe ou un portage de ces sources ; la parité GB reste vérifiée contre les références déjà disponibles (gambatte via libretro, jeux d'essai générés).
+
+## PCE : synchronisation m0boy ↔ TurboNyma sur le TAS Bonk 3 (observation de l'outil)
+
+`tools/pce_dsy` (m0boy sans fenêtre) rejoue le TAS et écrit la WRAM par frame, comparée par `deepeel desync` à
+`bizhawk_dsy pce` (TurboNyma). Sur 2000 frames, l'écart de WRAM est de 11 octets stables (compteurs jamais
+réécrits d'un côté, `$51–$59`, `$95d`…) hors pile (`$180–$1ff`) ; les frames 101–200 sont identiques.
+Trois choses ont fait converger les temps (trace des accès VDC comparée à Mednafen, constante à ~381 cycles maître) :
+la pile temporelle du CPU absorbe les décrochages (un arrêt de bus long ne s'ajoute plus à la ligne suivante),
+un commit VRAM est retenu dans une fenêtre de chaque ligne (`pce_mys_off`/`pce_mys_w`, ajustée sur les traces),
+et les blocs mémoire avancent le temps octet par octet. Valeurs par défaut de `pce_dsy` : 1 frame de boot
+(`PCE_PRE`), entrée sans retard (`PCE_INDELAY=0`), coupure de frame à la ligne 245 (`PCE_PHASE`).
+Ce sont des observations de l'outil sur un seul jeu, pas des mesures de matériel.

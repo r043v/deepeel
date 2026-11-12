@@ -25,10 +25,12 @@ int main(int argc, char **argv) {
     fwrite("DSY1", 1, 4, o);
     pce_init(rom, rb);
     if (getenv("PCE_SATOFF")) pce_sat_offset = atoi(getenv("PCE_SATOFF"));
+    if (getenv("PCE_MYSW")) { extern unsigned pce_mys_w; pce_mys_w = (unsigned)atoi(getenv("PCE_MYSW")); }
+    if (getenv("PCE_MYS")) { extern unsigned pce_mys_off; pce_mys_off = (unsigned)atoi(getenv("PCE_MYS")); }
     if (getenv("PCE_SCALE")) pce_scale_permille = (unsigned)atoi(getenv("PCE_SCALE"));
-    if (getenv("PCE_PHASE")) pce_frame_start_line = (unsigned)atoi(getenv("PCE_PHASE"));
-    for (int pre = getenv("PCE_PRE") ? atoi(getenv("PCE_PRE")) : 0; pre > 0; pre--) { machine.input = 0; pce_frame(); }   /* extra boot frames before frame 1 (reference alignment) */
-    const int indelay = getenv("PCE_INDELAY") ? atoi(getenv("PCE_INDELAY")) : 1;
+    pce_frame_start_line = getenv("PCE_PHASE") ? (unsigned)atoi(getenv("PCE_PHASE")) : 245;   /* TurboNyma cuts its frames at about this VDC line (200..245 are equivalent) */
+    for (int pre = getenv("PCE_PRE") ? atoi(getenv("PCE_PRE")) : 1; pre > 0; pre--) { machine.input = 0; pce_frame(); }   /* extra boot frames before frame 1 (reference alignment) */
+    const int indelay = getenv("PCE_INDELAY") ? atoi(getenv("PCE_INDELAY")) : 0;
     for (size_t i = 0; i < n; i++) {
         unsigned m = (i >= (size_t)indelay) ? mk[i - indelay] : 0, k = 0;   /* TurboNyma applies the movie's input one frame late */   // masks -> pce.input: I II Select Run Up Right Down Left = bits 0..7
         if (m & 0x20) k |= PCE_BTN_I; if (m & 0x10) k |= PCE_BTN_II; if (m & 0x40) k |= PCE_BTN_SELECT; if (m & 0x80) k |= PCE_BTN_RUN;
