@@ -4945,7 +4945,7 @@ identiques sur 300 trames. Côté deepeel (m0boy GB/NES/PCE) le producteur natif
 
 `deepeel explore ROM --core --tas FILM --no-tas-jitter --dsy out.dsy` écrit, pour la relecture non décalée du film, la
 RAM de travail (GB/SMS : $C000-$DFFF, NES : $0000-$07FF, PCE : $2000-$3FFF) en bloc `wram` DSY1 à chaque trame.
-Vérifié sur GB (Super Mario Land + muggv3.vbm : 1664 trames) et NES (`deepeel nes explore SMB.nes --core --tas film.fm2 --no-tas-jitter --dsy out.dsy`, film fm2 synthétique de 600 trames : 600 blocs `wram` de 2 Kio écrits). PCE : même code, aucun film disponible ici, non essayé. La comparaison
+Vérifié sur GB (Super Mario Land + muggv3.vbm : 1664 trames) et NES (`deepeel nes explore SMB.nes --core --tas film.fm2 --no-tas-jitter --dsy out.dsy`, film fm2 synthétique de 600 trames : 600 blocs `wram` de 2 Kio écrits). PCE : `deepeel pce explore Raiden.pce --core --tas film.bk2 --no-tas-jitter --dsy out.dsy`, bk2 synthétique de 600 trames : 600 blocs `wram` de 8 Kio écrits (aucune référence PCE à comparer). La comparaison
 avec `tools/lr_dsy` demande de convertir le film VBM en masques ; non fait.
 
 `DEEPEEL_TAS_MASKS=fichier` écrit le film au format de `tools/lr_dsy` (GB, `--core --tas`). Premier essai Super Mario
