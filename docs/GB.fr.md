@@ -5105,3 +5105,9 @@ Le noyau atteint donc, avec six fois moins de pas, plus d'octets exécutés (nat
   21 104 naturels, 15 274 forcés.
 Avec GB (Zelda, SML2) le noyau couvre donc au moins autant que l'ancien moteur sur les quatre ROMs mesurées, sauf les octets naturels NES à
 budget égal (6 210 contre 7 763). Désactivation de l'ancien moteur : décision reportée à l'accord du propriétaire (instruction : désactiver, jamais supprimer).
+
+Essai de bascule (non retenu) : noyau par défaut sur GB (`--legacy` pour l'ancien explorateur). 14 tests ctest sur 256 échouent, car ils
+exercent des fonctions de l'ancien explorateur que le noyau GB n'a pas encore : `gb_session_cells(_resume)`, `gb_prov_byte`/`gb_prov_de`
+(provenance), `frontier_cli`, `rtcode_archive`/`rtcode_generated` (archive de code runtime), `event_probe_ly`, `wram_exec_trace`,
+`gb_jp_table(_de)` (tables de sauts), `mapwin_cli`, `campaign_fixtures`. La couverture d'octets est atteinte (mesures ci-dessus) ; les
+fonctions listées sont le reste du portage avant de désactiver l'ancien explorateur sur GB. L'ancien reste donc le défaut.
