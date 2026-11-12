@@ -34,11 +34,13 @@ int main(int argc, char **argv) {
         if (m & 0x20) k |= PCE_BTN_I; if (m & 0x10) k |= PCE_BTN_II; if (m & 0x40) k |= PCE_BTN_SELECT; if (m & 0x80) k |= PCE_BTN_RUN;
         if (m & 1) k |= 0x10; if (m & 8) k |= 0x20; if (m & 2) k |= 0x40; if (m & 4) k |= 0x80;
         machine.input = (uint8_t)k;
+        { extern int pce_trace; int a = getenv("PCE_TRACE") ? atoi(getenv("PCE_TRACE")) : 0; pce_trace = a && (int)i + 1 >= a && (int)i + 1 <= a + (getenv("PCE_TRACE_N") ? atoi(getenv("PCE_TRACE_N")) : 1) - 1; if (pce_trace) fprintf(stderr, "FRAME %zu\n", i + 1); }
         pce_frame();
         uint32_t fn = (uint32_t)(i + 1), len = 0x2000; uint16_t nb = 1; uint8_t nl = 4;
         fwrite(&fn, 4, 1, o); fwrite(&nb, 2, 1, o); fwrite(&nl, 1, 1, o); fwrite("wram", 1, 4, o);
         fwrite(&len, 4, 1, o); fwrite(machine.wram, 1, 0x2000, o);
     }
+    if (getenv("PCE_STATS")) { extern unsigned pce_stat_waits; fprintf(stderr, "vdc waits: %u\n", pce_stat_waits); }
     fclose(o);
     return 0;
 }
