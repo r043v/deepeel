@@ -646,6 +646,7 @@ static int cmd_explore(int argc, char **argv) {
         gkcfg.jobs = cfg.jobs > 1 ? (unsigned)cfg.jobs : 1;
         for (int i = 2; i + 1 < argc; i++) if (!strcmp(argv[i], "--jobs") && !strcmp(argv[i + 1], "auto")) { gkcfg.jobs = (unsigned)auto_jobs(); gkcfg.adaptive = 1; }
         gkcfg.hooks = dp_machine_gb_hooks();
+        gkcfg.rom_image = cart->rom; gkcfg.rom_image_size = cart->rom_size;
         dp_mach_reset(mach);   // power-on state
         DpMachine *km = dp_machine_gb(mach);
         int rc = 1;

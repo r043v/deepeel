@@ -276,7 +276,71 @@ static void closure_walk(DpCoreResult *r, DpMachine *m, const DpIsa *isa, uint32
 
 // S4 (sm83/z80): an executed `jp hl` preceded (within 24 bytes) by `ld hl,nn` reads a table of code
 // pointers at nn; each entry that starts a legal instruction is a static root.  Stride 2, up to 64 words.
-static void closure_jp_table(DpCoreResult *r, DpMachine *m, const DpIsa *isa, uint32_t pc) {
+// Static walk straight on the ROM image, for a target in a bank the machine does not currently map (S4 stride 3).
+// Addresses < 0x4000 are bank 0, the others fold into the target's own bank.
+static void closure_walk_img(DpCoreResult *r, const DpCoreConfig *cfg, const DpIsa *isa, uint32_t bank, uint32_t root) {
+    uint32_t stack[256][2]; unsigned sp = 0, budget = CLOSURE_INSTR;
+    uint32_t pc = root, bk = bank;
+    for (;;) {
+        uint32_t ix = (pc < 0x4000 ? 0 : bk) * 0x4000u + (pc & 0x3FFFu);
+        if (pc >= 0x8000 || ix + 1 > cfg->rom_image_size || ix >= r->rom_size || !budget ||
+            (__atomic_load_n(&r->flags[ix], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC))) {
+            if (!sp) return;
+            sp--; pc = stack[sp][0]; bk = stack[sp][1]; if (!budget) budget = 1;
+            continue;
+        }
+        uint8_t b[8] = {0};
+        for (unsigned i = 0; i < sizeof b && ix + i < cfg->rom_image_size; i++) b[i] = cfg->rom_image[ix + i];
+        DpFlowInfo f; memset(&f, 0, sizeof f);
+        if (!isa->flow(b, pc, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL) {
+            if (!sp) return;
+            sp--; pc = stack[sp][0]; bk = stack[sp][1];
+            continue;
+        }
+        budget--;
+                for (unsigned i = 0; i < f.length && ix + i < r->rom_size; i++) {
+            uint8_t old = __atomic_fetch_or(&r->flags[ix + i], DP_CORE_STATIC, __ATOMIC_RELAXED);
+            if (!(old & (DP_CORE_STATIC | DP_CORE_NATURAL | DP_CORE_FORCED))) r->closure_bytes++;
+        }
+        int fall = f.fall || f.kind == DP_FLOW_SEQ || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL;
+        if (f.kind != DP_FLOW_RET && f.kind != DP_FLOW_INDIRECT && f.target >= 0 && sp < 256 &&
+            (f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL)) { stack[sp][0] = (uint32_t)f.target; stack[sp][1] = bk; sp++; }
+        if (f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_RET || f.kind == DP_FLOW_INDIRECT || f.halt) fall = 0;
+        if (fall) pc += f.length;
+        else { if (!sp) return; sp--; pc = stack[sp][0]; bk = stack[sp][1]; }
+    }
+}
+
+// S4 stride 3: entries are {addr lo, addr hi, bank}; the table sits in the currently mapped window.
+static int closure_jp_table3(DpCoreResult *r, DpMachine *m, const DpCoreConfig *cfg, const DpIsa *isa, uint32_t base, int min_entries) {
+    if (!cfg->rom_image || base >= 0x8000) return 0;
+    int64_t bi = base < 0x4000 ? (int64_t)base : m->rom_index(m, base);
+    if (bi < 0 || (size_t)bi + 6 > cfg->rom_image_size) return 0;
+    uint32_t nbanks = (uint32_t)(cfg->rom_image_size / 0x4000);
+    int cnt = 0;
+    uint32_t tg[64][2];
+    for (int e = 0; e < 64 && (size_t)bi + (size_t)e * 3 + 2 < cfg->rom_image_size; e++) {
+        const uint8_t *en = cfg->rom_image + bi + (size_t)e * 3;
+        uint32_t t = en[0] | (uint32_t)en[1] << 8, eb = en[2];
+        if (eb >= nbanks || t < 0x150 || t >= 0x8000) break;
+        uint32_t ix = (t < 0x4000 ? 0 : eb) * 0x4000u + (t & 0x3FFFu);
+        if (ix >= r->rom_size || ix >= cfg->rom_image_size) break;
+        uint8_t b[8] = {0};
+        for (unsigned i = 0; i < sizeof b && ix + i < cfg->rom_image_size; i++) b[i] = cfg->rom_image[ix + i];
+        DpFlowInfo f; memset(&f, 0, sizeof f);
+        if (!isa->flow(b, t, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL) break;
+        tg[cnt][0] = t; tg[cnt][1] = eb; cnt++;
+    }
+    if (cnt < min_entries) return 0;   // validated first: nothing is marked for a table that does not hold up
+    for (int e = 0; e < cnt; e++) {
+        r->closure_jp_entries++; r->prov_data_bytes += 3; r->closure_roots++;
+        closure_walk_img(r, cfg, isa, tg[e][1], tg[e][0]);
+    }
+    if (cnt) r->closure_jp_tables++;
+    return cnt;
+}
+
+static void closure_jp_table(DpCoreResult *r, DpMachine *m, const DpCoreConfig *cfg, const DpIsa *isa, uint32_t pc) {
     if (!isa->name || (strcmp(isa->name, "sm83") && strcmp(isa->name, "z80"))) return;
     {   // byte-granular: ld b,n / ld c,m then ld h,b / ld l,c (or the reverse pair) before the jump
         int hb = -1, lc = -1, mv = 0;
@@ -318,7 +382,8 @@ static void closure_jp_table(DpCoreResult *r, DpMachine *m, const DpIsa *isa, ui
             closure_walk(r, m, isa, t);
             cnt++;
         }
-        if (cnt) { r->closure_jp_tables++; return; }
+        if (cnt) { r->closure_jp_tables++; if (cnt < 2) closure_jp_table3(r, m, cfg, isa, base, 2); return; }   // a lone stride-2 word may be the head of a stride-3 table
+        if (closure_jp_table3(r, m, cfg, isa, base, 1)) return;   // stride 3: the entries name their own bank
     }
 }
 
@@ -940,7 +1005,7 @@ static void run_path(Worker *w, Pending *p) {
         if (!cfg->no_closure && !cur_forced && have_flow && fi.kind != DP_FLOW_SEQ && fi.kind != DP_FLOW_ILLEGAL) {
             if (fi.target >= 0 && (fi.kind == DP_FLOW_JUMP || fi.kind == DP_FLOW_COND || fi.kind == DP_FLOW_CALL)) closure_walk(loc, m, isa, (uint32_t)fi.target);
             if (fi.kind == DP_FLOW_COND || fi.kind == DP_FLOW_CALL) closure_walk(loc, m, isa, pc + fi.length);
-            if (fi.kind == DP_FLOW_INDIRECT && bytes[0] == 0xE9) closure_jp_table(loc, m, isa, pc);
+            if (fi.kind == DP_FLOW_INDIRECT && bytes[0] == 0xE9) closure_jp_table(loc, m, cfg, isa, pc);
         }
         if (!cfg->no_solve && !cur_forced && m->poke && have_flow) {
             // window: the sequential instructions before a conditional; their start state and RAM reads feed solve_cond

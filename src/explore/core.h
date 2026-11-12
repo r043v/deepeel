@@ -54,6 +54,8 @@ typedef struct DpCoreConfig {
     int no_learn_sig;          // 1: do not learn `ld a,(nn); cp n` signatures (technique 3)
     int no_site_score;         // 1: novelty pick ignores the per-site yield score (technique 5)
     int no_forced_ram_cut;     // 1: let forced paths run unfed RAM
+    const uint8_t *rom_image;  // optional: the whole ROM (bank*0x4000 layout); enables bank-naming tables (S4 stride 3)
+    size_t rom_image_size;
     const uint32_t *seeds;     // extra entry points (vectors): queued as forced paths from the start state
     size_t n_seeds;
     const uint16_t *seed_banks;   // optional, parallel to seeds: ROM bank selected (a write to $2000 on the start state) before the seed runs
