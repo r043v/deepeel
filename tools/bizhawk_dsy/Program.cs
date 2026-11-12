@@ -125,7 +125,7 @@ namespace BizhawkDsy
 					uint seq = feed.ReadUInt32(4);
 					feed.Write(4, seq + 1);
 					for (int y = 0; y < oh; y++) for (int x = 0; x < ow; x++) feed.Write(36 + (y * ow + x) * 4, (uint)vb[y * sy * bw + x * sx] | 0xFF000000u);
-					feed.Write(8, (uint)(f + 1)); feed.Write(12, (uint)frames); feed.Write(16, (uint)ow); feed.Write(20, (uint)oh); feed.Write(24, 0u);
+					feed.Write(8, (uint)(f + 1)); feed.Write(12, (uint)frames); feed.Write(16, (uint)ow); feed.Write(20, (uint)oh); feed.Write(24, f + 1 == frames ? 1u : 0u);   // done=1 on the movie's last frame
 					feed.Write(4, seq + 2);
 					worked += (DateTime.UtcNow - tf).TotalSeconds;
 					feed.Write(32, (uint)((f + 1) / Math.Max(worked, 1e-3) * 10));   // speed without the pacing sleeps, tenths of frames/s
