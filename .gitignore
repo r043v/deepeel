@@ -20,3 +20,5 @@ tools/smshawk_dump/bin/
 tools/smshawk_dump/obj/
 tools/bizhawk_md_live/bin/
 tools/bizhawk_md_live/obj/
+tools/bizhawk_dsy/bin/
+tools/bizhawk_dsy/obj/

@@ -5012,3 +5012,15 @@ c'est de la fidélité, pas un bug à corriger à la source. `DP_MD_POWERON=gpgx
 (`md_full_reset` : phase 197 lignes + 1004, pas de V-int d'ouverture). Résidu : m0boy passe en mode 4 à la
 trame 295, GPGX à 299 ; le reste du déphasage (fondu, latence d'entrée de GPGX) n'est pas encore modélisé,
 `GPGX_SHIFT` reste le contournement pour la comparaison.
+
+### 0.315.8 — `tools/bizhawk_dsy` : lecteur BizHawk générique (DSY1)
+
+Un seul outil pour tout cœur BizHawk : `bizhawk_dsy SYSTEM ROM masks.bin out.dsy [TRAMES]` (`gen` = GPGX,
+`sms` = SMSHawk ; ajouter un système = une ligne dans `Make`). Les blocs DSY1 sont les domaines mémoire du cœur
+(`68K RAM`→`wram`, `Z80 RAM`→`zram`, `VRAM`, `CRAM`, `VSRAM`), les entrées suivent la disposition de `lr_dsy`
+et sont associées aux boutons du cœur par le nom (`P1 Up`…). Sous mono les lectures de mémoire d'un cœur
+waterbox coûtent cher (≈0,3 s/trame pour 5 Kio, plusieurs s/trame pour 140 Kio) : `BIZHAWK_DSY_RANGE=lo-hi`
+limite la lecture à une fenêtre (le reste à zéro, à ignorer côté `deepeel desync --ignore`). `gpgx.wbx`
+doit se trouver dans `dll/` à côté de l'exécutable (copie hors dépôt), `LD_LIBRARY_PATH=…/BizHawk/Assets/dll`.
+Vérifié : Sonic 1, GPGX BizHawk contre m0boy, fenêtre `$FC00-$FFFF` ; premier écart à la trame 52 (marqueur
+d'initialisation d'un cœur ou de l'autre, voir 0.315.7).
