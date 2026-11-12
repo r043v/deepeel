@@ -59,6 +59,8 @@ static M0_TL int page_valid[256];
 static M0_TL unsigned line_no, line_budget_;
 static M0_TL int line_left;
 static M0_TL DpPceObserver obs;
+static M0_TL unsigned ref_phase = 258;   // VDC line the movie reference cuts its frames at (TurboNyma 258, PCEHawk 4: measured on the Bonk 3 movie)
+static M0_TL unsigned fl_no; static M0_TL int pre_frames;
 static M0_TL int st_port;            // ST0/ST1/ST2 in flight: the write is the hardware's
 
 static void build_page_map(void) {
@@ -83,6 +85,13 @@ static void line_start(void) {
     line_left += (int)line_budget_; // the overshoot carries, as in huc6280_run
 }
 
+// which core recorded the movie being replayed: only the frame cut moves (the hardware model is the same)
+void dp_pce_reference(int pcehawk) {
+    ref_phase = pcehawk ? 4u : 258u;
+    pce_frame_start_line = ref_phase;
+    if (!machine.frames && !fl_no) line_no = ref_phase % 262u;
+}
+
 int dp_pce_init(const uint8_t *data, size_t size) {
     if (!data || size < 0x2000) return 0;
     size_t off = (size % 0x2000) == 512 ? 512 : 0;
@@ -105,9 +114,15 @@ int dp_pce_init(const uint8_t *data, size_t size) {
     // every cartridge read goes through the bridge from now on
     machine.cpu.rom_bytes = 0;
     huc6280_map(&machine.cpu);
-    line_no = 0;
+    // the reference timing m0boy's pce_frame carries (tools/pce_dsy.c): frames cut at VDC line 258, one boot frame
+    // before frame 1 whose end is not reported, the 263-line frame when the VCE asks for it
+    pce_frame_start_line = ref_phase;
+    pre_frames = 1;
+    fl_no = 0;
+    line_no = pce_frame_start_line % 262u;
     line_left = 0;
     line_start();
+    machine.line_cycles = machine.cpu.cycles;
     return 1;
 }
 
@@ -179,7 +194,7 @@ void dp_pce_poke(uint16_t addr, uint8_t v) {
 static M0_TL int tap_on, tap_idx, tap_prev_sel;
 static M0_TL uint8_t tap_pad[5];
 int dp_pce_multitap_enabled(void) { return tap_on; }
-void dp_pce_multitap(int on) { tap_on = on; tap_idx = 0; tap_prev_sel = 0; }
+void dp_pce_multitap(int on) { tap_on = on; tap_idx = 0; tap_prev_sel = 0; machine.pad_idx = 0; }   // the core counts the scanned ports itself: restart it with the adapter
 void dp_pce_pad_n(unsigned n, uint8_t buttons) { if (n < 5) tap_pad[n] = buttons; }
 unsigned dp_pce_tap_index(void) { return (unsigned)tap_idx; }
 uint8_t dp_pce_pad_port_read(void) {
@@ -227,6 +242,45 @@ int dp_pce_irq_due(void) {
     return (machine.cpu.irq_low & machine.cpu.irq_mask) && !(machine.cpu.p & PCE_P_I);
 }
 
+// end of a line (the CPU has used its budget): the VDC/timer/IRQ events and the frame/line counters, as m0boy's pce_frame;
+// returns 1 when the frame completed (the boot frame before frame 1 is not reported)
+static int line_finish(void) {
+    huc6280_t *c = &machine.cpu;
+    int frame_done = 0;
+        const unsigned total = (machine.vce_cr & 4) ? 263u : 262u;
+        pce_cur_line = line_no;
+        { extern unsigned vdc_master_per_cycle; static const unsigned rt[4] = { 4, 3, 2, 2 }; vdc_master_per_cycle = rt[machine.vce_cr & 3]; }
+        if (line_no < 262) vdc_line(&machine.vdc, line_no);
+        machine.line_master += 1365;
+        if (machine.vdc.sat_started) {
+            static const unsigned ratio[4] = { 4, 3, 2, 2 };
+            machine.vdc.sat_started = 0;
+            machine.sat_end = machine.line_master + 1024u * ratio[machine.vce_cr & 3] + pce_sat_offset;
+            machine.vdc_pending = 0;
+        }
+        if (line_no < 262) emit_row(line_no);
+        machine.timer_clock += c->speed ? (unsigned)line_budget_ : (unsigned)line_budget_ * 4u;
+        while (machine.timer_clock >= 1024) {
+            machine.timer_clock -= 1024;
+            timer_tick();
+        }
+        update_irq();
+        const uint32_t nominal_next = c->cycles + (uint32_t)line_left;   // line_left <= 0: the overshoot is inside the next line
+        if (++fl_no >= total) {
+            fl_no = 0;
+            if (pre_frames > 0) pre_frames--;
+            else {
+                machine.frames++;
+                if (frame_hook_fn) frame_hook_fn();
+                frame_done = 1;
+            }
+        }
+        line_no = (fl_no + pce_frame_start_line) % total;
+        line_start();
+        machine.line_cycles = nominal_next;
+    return frame_done;
+}
+
 unsigned dp_pce_step(int *frame_done) {
     huc6280_t *c = &machine.cpu;
     uint8_t op = dp_pce_peek(c->pc);
@@ -238,21 +292,8 @@ unsigned dp_pce_step(int *frame_done) {
     if (frame_done) *frame_done = 0;
     line_left -= (int)spent;
     if (line_left <= 0) {
-        vdc_line(&machine.vdc, line_no);
-        emit_row(line_no);
-        machine.timer_clock += line_budget_;
-        while (machine.timer_clock >= 1024) {
-            machine.timer_clock -= 1024;
-            timer_tick();
-        }
-        update_irq();
-        if (++line_no == 262) {
-            line_no = 0;
-            machine.frames++;
-            if (frame_hook_fn) frame_hook_fn();
-            if (frame_done) *frame_done = 1;
-        }
-        line_start();
+        int fd = line_finish();
+        if (frame_done) *frame_done = fd;
     }
     return spent;
 }
@@ -347,7 +388,8 @@ void dp_pce_reset(void) {
     pce_reset();
     machine.cpu.rom_bytes = 0;
     huc6280_map(&machine.cpu);
-    line_no = 0;
+    fl_no = 0;
+    line_no = pce_frame_start_line % 262u;
     line_left = 0;
     line_start();
 }
@@ -366,6 +408,7 @@ void pce_trace_step(uint16_t pc) {
 }
 
 void pce_trace_dyn(uint16_t pc) { (void)pc; }
+void pce_trace_regs(uint8_t a, uint8_t x, uint8_t y, uint8_t s, uint8_t p, uint32_t cyc) { (void)a; (void)x; (void)y; (void)s; (void)p; (void)cyc; }
 
 void dp_pce_run_frame(void) {
     huc6280_t *c = &machine.cpu;
@@ -375,23 +418,7 @@ void dp_pce_run_frame(void) {
         st_port = 0;
         line_left -= (int)(c->cycles - before);
         if (line_left > 0) continue;
-        vdc_line(&machine.vdc, line_no);
-        emit_row(line_no);
-        machine.timer_clock += line_budget_;
-        while (machine.timer_clock >= 1024) {
-            machine.timer_clock -= 1024;
-            timer_tick();
-        }
-        update_irq();
-        int done = 0;
-        if (++line_no == 262) {
-            line_no = 0;
-            machine.frames++;
-            if (frame_hook_fn) frame_hook_fn();
-            done = 1;
-        }
-        line_start();
-        if (done) return;
+        if (line_finish()) return;
     }
 }
 

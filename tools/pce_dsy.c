@@ -9,6 +9,13 @@
 #include <string.h>
 #include "pce.h"
 
+#ifdef PCE_TRACE
+static uint16_t tr_pc;
+void pce_trace_dyn(uint16_t pc) { (void)pc; }
+void pce_trace_step(uint16_t pc) { tr_pc = pc; }
+void pce_trace_regs(uint8_t a, uint8_t x, uint8_t y, uint8_t s, uint8_t p, uint32_t cyc) { extern int pce_trace; if (pce_trace) fprintf(stderr, "I %04x a=%02x x=%02x y=%02x s=%02x p=%02x t=%u\n", tr_pc, a, x, y, s, p, cyc); }
+#endif
+
 int main(int argc, char **argv) {
     if (argc < 4) { fprintf(stderr, "usage: pce_dsy ROM masks out.dsy [N]\n"); return 2; }
     FILE *f = fopen(argv[1], "rb"); if (!f) { perror(argv[1]); return 2; }
@@ -29,8 +36,10 @@ int main(int argc, char **argv) {
     if (getenv("PCE_MYS")) { extern unsigned pce_mys_off; pce_mys_off = (unsigned)atoi(getenv("PCE_MYS")); }
     if (getenv("PCE_SCALE")) pce_scale_permille = (unsigned)atoi(getenv("PCE_SCALE"));
     if (getenv("PCE_CUT")) { extern unsigned pce_cut_cycles; pce_cut_cycles = (unsigned)atoi(getenv("PCE_CUT")); }
+    if (getenv("PCE_EVT")) { extern unsigned pce_evt_master; pce_evt_master = (unsigned)atoi(getenv("PCE_EVT")); }
     if (getenv("PCE_BOOT")) { extern int pce_boot_offset; pce_boot_offset = atoi(getenv("PCE_BOOT")); }
     pce_frame_start_line = getenv("PCE_PHASE") ? (unsigned)atoi(getenv("PCE_PHASE")) : 258;   /* TurboNyma cuts its frames at about this VDC line (the boot-time counters of frames 4-6 match from 258) */
+    { extern int pce_trace; pce_trace = getenv("PCE_TRACE_BOOT") != NULL; }
     for (int pre = getenv("PCE_PRE") ? atoi(getenv("PCE_PRE")) : 1; pre > 0; pre--) { machine.input = 0; pce_frame(); }   /* extra boot frames before frame 1 (reference alignment) */
     const int indelay = getenv("PCE_INDELAY") ? atoi(getenv("PCE_INDELAY")) : 0;
     for (size_t i = 0; i < n; i++) {

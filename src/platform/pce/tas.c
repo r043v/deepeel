@@ -1,5 +1,6 @@
 // tas.c: PC Engine movie loading (see tas.h).
 #include "tas.h"
+#include "pce.h"
 #include "../../core/bk2.h"
 #include "../../core/bizhawk.h"
 #include "../../core/sha1.h"
@@ -88,6 +89,7 @@ int dp_pce_tas_load(const char *path, DpPceTas *t, char *err, size_t errsz) {
                     memcpy(ht, b.header, b.header_n);
                     ht[b.header_n] = 0;
                     char *g = strstr(ht, "GameName ");
+                    dp_pce_reference(strstr(ht, "Core PCEHawk") != NULL);
                     if (g) snprintf(t->game, sizeof t->game, "%.*s", (int)strcspn(g + 9, "\r\n"), g + 9);
                     if (b.has_sha1) for (int k = 0; k < 20; k++) snprintf(t->sha1 + 2 * k, 3, "%02x", b.sha1[k]);
                     free(ht);

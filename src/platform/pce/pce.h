@@ -67,6 +67,7 @@ typedef struct {
     void (*io_read)(void *user, uint16_t reg, uint8_t value);
 } DpPceObserver;
 
+void dp_pce_reference(int pcehawk);   // frame cut of the core that recorded the movie (0: TurboNyma, 1: PCEHawk)
 int dp_pce_init(const uint8_t *data, size_t size); // strips a 512-byte copier header
 void dp_pce_close(void);
 size_t dp_pce_rom_size(void);

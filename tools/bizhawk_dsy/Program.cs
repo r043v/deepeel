@@ -20,6 +20,7 @@ using BizHawk.Emulation.Common;
 using BizHawk.Emulation.Cores;
 using BizHawk.Emulation.Cores.Consoles.Sega.gpgx;
 using BizHawk.Emulation.Cores.Consoles.NEC.PCE;
+using BizHawk.Emulation.Cores.PCEngine;
 using BizHawk.Emulation.Cores.Nintendo.NES;
 using BizHawk.Emulation.Cores.Waterbox;
 using SMSHawk = BizHawk.Emulation.Cores.Sega.MasterSystem.SMS;
@@ -73,8 +74,14 @@ namespace BizhawkDsy
 						Comm = coreComm, DeterministicEmulationRequested = true, Game = GameInfo.NullInstance,
 						Roms = { new PceRom(rom) }, Settings = new(), SyncSettings = new(),
 					});
+				case "pcehawk":   // PCEHawk (Vecna's C# core): the core BizHawk movies up to 2.4 were recorded on
+					return new PCEngine(new CoreLoadParameters<PCEngine.PCESettings, PCEngine.PCESyncSettings>
+					{
+						Comm = coreComm, DeterministicEmulationRequested = true, Game = GameInfo.NullInstance,
+						Roms = { new PceRom(rom) }, Settings = new(), SyncSettings = new(),
+					});
 				default:
-					Console.Error.WriteLine("unknown system " + system + " (gen | sms | nes | pce)");
+					Console.Error.WriteLine("unknown system " + system + " (gen | sms | nes | pce | pcehawk)");
 					Environment.Exit(2);
 					return null;
 			}
@@ -90,7 +97,7 @@ namespace BizhawkDsy
 			var def = fe.Core.ControllerDefinition;
 			var names = new string[8];
 			for (int i = 0; i < 8; i++)   // PC Engine names: II = B, I = A, Run = Start
-				names[i] = def.BoolButtons.FirstOrDefault(b => b.StartsWith("P1 ") && (b.EndsWith(" " + Words[i]) || (args[0] == "pce" && b.EndsWith(" " + (i == 4 ? "II" : i == 5 ? "I" : i == 7 ? "Run" : "\0")))));
+				names[i] = def.BoolButtons.FirstOrDefault(b => b.StartsWith("P1 ") && (b.EndsWith(" " + Words[i]) || ((args[0] == "pce" || args[0] == "pcehawk") && b.EndsWith(" " + (i == 4 ? (args[0] == "pcehawk" ? "B2" : "II") : i == 5 ? (args[0] == "pcehawk" ? "B1" : "I") : i == 7 ? "Run" : "\0")))));
 			Console.Error.WriteLine("buttons: " + string.Join(", ", names.Select((n, i) => Words[i] + "=" + (n ?? "-"))));
 			var controller = new SimpleController(def);
 			var domains = fe.CoreAsMemDomains;
