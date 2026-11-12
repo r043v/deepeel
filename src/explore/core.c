@@ -269,8 +269,28 @@ static void closure_walk(DpCoreResult *r, DpMachine *m, const DpIsa *isa, uint32
 // pointers at nn; each entry that starts a legal instruction is a static root.  Stride 2, up to 64 words.
 static void closure_jp_table(DpCoreResult *r, DpMachine *m, const DpIsa *isa, uint32_t pc) {
     if (!isa->name || (strcmp(isa->name, "sm83") && strcmp(isa->name, "z80"))) return;
+    {   // byte-granular: ld b,n / ld c,m then ld h,b / ld l,c (or the reverse pair) before the jump
+        int hb = -1, lc = -1, mv = 0;
+        for (uint32_t d = 1; d <= 24 && d <= pc; d++) {
+            uint8_t o = m->fetch(m, pc - d);
+            if (o == 0x60 || o == 0x69) mv |= o == 0x60 ? 1 : 2;
+            if (d >= 2 && hb < 0 && m->fetch(m, pc - d) == 0x06) hb = m->fetch(m, pc - d + 1);
+            if (d >= 2 && lc < 0 && m->fetch(m, pc - d) == 0x0E) lc = m->fetch(m, pc - d + 1);
+        }
+        if (mv == 3 && hb >= 0 && lc >= 0 && (hb << 8 | lc) >= 0x150 && (hb << 8 | lc) < 0x8000) {
+            uint32_t t = (uint32_t)(hb << 8 | lc);
+            int64_t kt = m->rom_index(m, t);
+            if (kt >= 0 && (size_t)kt < r->rom_size && !(r->flags[kt] & DP_CORE_STATIC)) r->closure_jp_entries++;
+            closure_walk(r, m, isa, t);
+            return;
+        }
+    }
     for (uint32_t d = 3; d <= 24 && d <= pc; d++) {
-        if (m->fetch(m, pc - d) != 0x21) continue;
+        uint8_t lop = m->fetch(m, pc - d);
+        int base_ok = lop == 0x21;
+        if (lop == 0x11 || lop == 0x01)   // ld de/bc,nn then add hl,de/bc, or ld a,(de/bc) pointer reads, before the jump
+            for (uint32_t q = pc - d + 3; q < pc; q++) { uint8_t o = m->fetch(m, q); if (o == (lop == 0x11 ? 0x19 : 0x09) || o == (lop == 0x11 ? 0x1A : 0x0A)) { base_ok = 1; break; } }
+        if (!base_ok) continue;
         uint32_t base = m->fetch(m, pc - d + 1) | (uint32_t)m->fetch(m, pc - d + 2) << 8;
         if (base < 0x100 || base >= 0x8000) continue;
         int cnt = 0;
@@ -280,8 +300,14 @@ static void closure_jp_table(DpCoreResult *r, DpMachine *m, const DpIsa *isa, ui
             uint8_t b[8]; for (unsigned i = 0; i < sizeof b; i++) b[i] = m->fetch(m, t + i);
             DpFlowInfo f; memset(&f, 0, sizeof f);
             if (!isa->flow(b, t, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL) break;
+            uint32_t ea = base + (uint32_t)e * 2; int fresh = 1;
+            for (unsigned z = 0; z < r->jp_seen_n; z++) if (r->jp_seen[z] == ea) { fresh = 0; break; }
+            if (fresh && r->jp_seen_n < 256) r->jp_seen[r->jp_seen_n++] = ea;
+            if (fresh) {
+                r->closure_jp_entries++; r->prov_data_bytes += 2;
+            }
             closure_walk(r, m, isa, t);
-            cnt++; r->closure_jp_entries++;
+            cnt++;
         }
         if (cnt) { r->closure_jp_tables++; return; }
     }
@@ -1339,7 +1365,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
-        out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
+        out->novelty_picks += l->novelty_picks; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
         out->exec_outside += l->exec_outside;
         free(ws[i].visits); free(ws[i].wsnap); free(ws[i].winmemo); free(ws[i].capped); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
@@ -1393,6 +1419,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     size_t stat_only = 0;
     for (size_t i = 0; i < r->rom_size; i++) if ((r->flags[i] & (DP_CORE_STATIC | DP_CORE_NATURAL | DP_CORE_FORCED)) == DP_CORE_STATIC) stat_only++;
     fprintf(out, "static closure: roots %llu, bytes %llu, static-only %zu, capped walks %llu\n", U(r->closure_roots), U(r->closure_bytes), stat_only, U(r->closure_capped));
+    if (r->closure_jp_entries) fprintf(out, "provenance: %llu jp-hl targets, %llu data bytes static\n", U(r->closure_jp_entries), U(r->prov_data_bytes));
     if (r->closure_jp_tables) fprintf(out, "S4 operand tables of executed JP HL: %llu tables, %llu entries\n", U(r->closure_jp_tables), U(r->closure_jp_entries));
     fprintf(out, "rom bytes: natural %zu, forced %zu (speculative), static-only %zu\n", nat, forced, stat_only);
     #undef U

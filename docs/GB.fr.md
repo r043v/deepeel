@@ -5116,3 +5116,7 @@ fonctions listées sont le reste du portage avant de désactiver l'ancien explor
 lit une table de pointeurs de code à nn (stride 2, 64 mots max) dont les entrées valides deviennent des racines statiques ; rapport
 `S4 operand tables of executed JP HL: N tables, M entries`. Les variantes stride 3 et `add hl,de/bc` de l'ancien moteur restent à porter.
 Reste des 13 techniques : provenance, cellules de session, archive de code runtime, sondes d'événements, frontière, fenêtre de banque.
+
+0.316.1 (suite) — provenance portée dans le noyau (heuristique, pas le treillis de l'ancien moteur) : `ld de/bc,nn` suivi de `ld a,(de/bc)` ou
+`add hl,de/bc`, et la paire `ld b,n`/`ld c,m` + `ld h,b`/`ld l,c`, avant un `JP HL` exécuté ; ligne `provenance: N jp-hl targets, M data bytes static`.
+Les cas à plusieurs registres, les « partial » et les « caps » de l'ancien moteur restent à porter.
