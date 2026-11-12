@@ -28,6 +28,7 @@ int main(int argc, char **argv) {
     if (getenv("PCE_MYSW")) { extern unsigned pce_mys_w; pce_mys_w = (unsigned)atoi(getenv("PCE_MYSW")); }
     if (getenv("PCE_MYS")) { extern unsigned pce_mys_off; pce_mys_off = (unsigned)atoi(getenv("PCE_MYS")); }
     if (getenv("PCE_SCALE")) pce_scale_permille = (unsigned)atoi(getenv("PCE_SCALE"));
+    if (getenv("PCE_CUT")) { extern unsigned pce_cut_cycles; pce_cut_cycles = (unsigned)atoi(getenv("PCE_CUT")); }
     pce_frame_start_line = getenv("PCE_PHASE") ? (unsigned)atoi(getenv("PCE_PHASE")) : 258;   /* TurboNyma cuts its frames at about this VDC line (the boot-time counters of frames 4-6 match from 258) */
     for (int pre = getenv("PCE_PRE") ? atoi(getenv("PCE_PRE")) : 1; pre > 0; pre--) { machine.input = 0; pce_frame(); }   /* extra boot frames before frame 1 (reference alignment) */
     const int indelay = getenv("PCE_INDELAY") ? atoi(getenv("PCE_INDELAY")) : 0;
@@ -41,7 +42,7 @@ int main(int argc, char **argv) {
         if (getenv("PCE_SP")) fprintf(stderr, "SP %zu %02x\n", i + 1, machine.cpu.s);
         uint32_t fn = (uint32_t)(i + 1), len = 0x2000; uint16_t nb = 1; uint8_t nl = 4;
         fwrite(&fn, 4, 1, o); fwrite(&nb, 2, 1, o); fwrite(&nl, 1, 1, o); fwrite("wram", 1, 4, o);
-        fwrite(&len, 4, 1, o); fwrite(machine.wram, 1, 0x2000, o);
+        fwrite(&len, 4, 1, o); { extern uint8_t pce_cut_wram[]; extern int pce_cut_valid; fwrite(pce_cut_valid ? pce_cut_wram : machine.wram, 1, 0x2000, o); }
     }
     if (getenv("PCE_STATS")) { extern unsigned pce_stat_waits; fprintf(stderr, "vdc waits: %u\n", pce_stat_waits); }
     fclose(o);
