@@ -4966,3 +4966,7 @@ trame 3900) et restent à quelques pixels l'une de l'autre (X : 25c0/25bf trame 
 trame 4855 ; 094d/0949 trame 5859). Des dérives de quelques pixels réapparaissent (messages « player X differs for 20 frames »
 aux trames 4391, 4922, 5938) sans perte de piste. La synchro n'est donc pas à l'identique de la trame, mais le niveau est terminé
 des deux côtés. Cause du résidu (timing VDP/horloge Z80 ?) non identifiée.
+
+Premier écart m0boy / ClownMDEmu sur `s6k.gmv` (`DP_MD_TRACE_RANGE=300:1210`) : trame 399, le niveau démarre une trame plus tard
+dans m0boy (X = 0 contre $50) ; X vaut ensuite $54 contre $56 pendant l'intro (trames 492-497). Le résidu de quelques pixels
+est donc une phase d'une trame prise au chargement du niveau (démarrage/fondu), puis conservée. Origine non trouvée.
