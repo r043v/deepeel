@@ -1,7 +1,10 @@
 #!/usr/bin/env python3 -I
 """Compare two CPU instruction traces and report the first divergence (any platform, any core).
 
-usage: trace_cmp.py A.txt B.txt [--context N] [--align K] [--names NAMEA,NAMEB]
+usage: trace_cmp.py A.txt B.txt [--context N] [--align K] [--names NAMEA,NAMEB] [--collapse]
+
+--collapse folds runs of identical consecutive instructions (same pc and registers: wait loops) into one, so the
+length of a wait, which depends on timing only, does not hide the first difference in the useful code.
 
 A trace is text, one event per line; only the lines are used:
   I <pc> a=.. x=.. y=.. s=.. p=.. [t=..]     an executed instruction (hex fields, the time is ignored)
@@ -53,10 +56,17 @@ def main():
         if n in argv:
             i = argv.index(n); v = argv[i + 1]; del argv[i:i + 2]; return v
         return d
+    collapse = "--collapse" in argv
+    if collapse:
+        argv.remove("--collapse")
     ctx = int(opt("--context", 8)); k = int(opt("--align", 12)); names = opt("--names", "A,B").split(",")
     if len(argv) != 2:
         sys.exit(__doc__)
     (a, aa, aat), (b, ba, bat) = load(argv[0]), load(argv[1])
+    if collapse:
+        def fold(l):
+            return [x for i, x in enumerate(l) if i == 0 or x != l[i - 1]]
+        a, b = fold(a), fold(b)
     print("%s: %d instructions, %s: %d instructions" % (names[0], len(a), names[1], len(b)))
     al = align(a, b, k)
     if not al:
