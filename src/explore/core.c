@@ -52,6 +52,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
         } else { static const uint8_t d[4] = {0x00, 0xFF, 0x55, 0xAA}; memcpy(c->seed_vals, d, 4); c->seed_n = 4; }
         return 2;
     }
+    if (!strcmp(a, "--dsy") && i + 1 < argc) { c->dsy_path = argv[i + 1]; return 2; }
     if (!strcmp(a, "--no-tas-jitter")) { c->no_tas_jitter = 1; return 1; }
     if (!strcmp(a, "--no-sessions")) { c->no_sessions = 1; return 1; }
     if (!strcmp(a, "--sessions") && i + 1 < argc) { c->sessions = (uint32_t)strtoul(argv[i + 1], NULL, 0); c->no_sessions = 0; return 2; }
@@ -598,6 +599,28 @@ static void poke_wide(DpMachine *m, uint32_t addr, int width, uint32_t v) {
     for (int i = 0; i < width; i++) m->poke(m, addr + (uint32_t)i, (uint8_t)(v >> (8 * (width - 1 - i))));
 }
 
+
+// --dsy FILE: the unshifted movie replay writes its work RAM per frame in DSY1 (src/core/desync.h) for `deepeel desync`
+// against a reference emulator (tools/lr_dsy).  One writer: the first replay to reach a frame owns it (frames are monotone).
+static pthread_mutex_t dsy_mu = PTHREAD_MUTEX_INITIALIZER;
+static FILE *dsy_file; static uint64_t dsy_last;
+static void core_dsy_frame(const DpCoreConfig *cfg, DpMachine *m, uint64_t f) {
+    uint32_t base = 0xC000, len = 0x2000;   // gb, sms, gg, sg: $C000-$DFFF
+    if (!strcmp(m->name, "nes")) { base = 0; len = 0x800; }
+    else if (!strcmp(m->name, "pce")) { base = 0x2000; len = 0x2000; }
+    pthread_mutex_lock(&dsy_mu);
+    if (!dsy_file) { dsy_file = fopen(cfg->dsy_path, "wb"); if (dsy_file) fwrite("DSY1", 1, 4, dsy_file); }
+    if (dsy_file && f > dsy_last) {
+        uint8_t buf[0x2000];
+        for (uint32_t i = 0; i < len; i++) buf[i] = m->fetch(m, base + i);
+        uint32_t fn = (uint32_t)f; uint16_t nb = 1; uint8_t nl = 4;
+        fwrite(&fn, 4, 1, dsy_file); fwrite(&nb, 2, 1, dsy_file); fwrite(&nl, 1, 1, dsy_file); fwrite("wram", 1, 4, dsy_file);
+        fwrite(&len, 4, 1, dsy_file); fwrite(buf, 1, len, dsy_file); fflush(dsy_file);
+        dsy_last = f;
+    }
+    pthread_mutex_unlock(&dsy_mu);
+}
+
 static void run_path(Worker *w, Pending *p) {
     Shared *sh = w->sh;
     const DpCoreConfig *cfg = sh->cfg;
@@ -652,6 +675,7 @@ static void run_path(Worker *w, Pending *p) {
             uint64_t f = m->frame(m);
             if (f != tas_last) {
                 tas_last = f;
+                if (tas_shift == 0 && cfg->dsy_path && f > 0) core_dsy_frame(cfg, m, f);
                 if (tas_shift == 0) {   // DEEPEEL_TAS_HRAM=<file>: HRAM per movie frame, comparable with the old engine's dump
                     static FILE *hf; static int hinit;
                     if (!hinit) { hinit = 1; const char *hn = getenv("DEEPEEL_TAS_HRAM"); if (hn) hf = fopen(hn, "wb"); }

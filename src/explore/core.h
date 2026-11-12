@@ -70,6 +70,7 @@ typedef struct DpCoreConfig {
     uint32_t play_sessions;     /* number of play sessions (each starts at another catalog pad; default 1) */
     const uint8_t *tas_masks;   /* TAS replay (techniques 9): one kernel pad mask per frame, needs DpMachine.frame */
     uint32_t tas_frames;
+    const char *dsy_path;       /* --dsy FILE: the unshifted TAS replay writes work RAM per frame as DSY1 */
     int no_tas_jitter;          /* 1: replay the movie unshifted only (no +-1..3 frame shifts) */
     int no_irq_jitter;          /* technique 9: only the 1-instruction IRQ delay, no 2..3 */       // 1: ignore DpPlatformHooks.event_probe (technique 2)
     int no_decompress;         // 1: do not look for decompressors (technique 6)

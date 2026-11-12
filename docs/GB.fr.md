@@ -4940,3 +4940,10 @@ contre 45 px). Observation de l'outil sur Sonic 1 uniquement ; le résidu reste 
 out.dsy [N]` rejoue un film (1 octet/trame, bits U D L R B A Select Start) dans n'importe quel cœur libretro et écrit
 `wram` / `vram` / `sram` par trame, à comparer par `deepeel desync`. Vérifié : Gambatte sur Zelda GB, deux runs
 identiques sur 300 trames. Côté deepeel (m0boy GB/NES/PCE) le producteur natif reste à écrire.
+
+### `--dsy FILE` (noyau) : producteur DSY1 natif GB/SMS/NES/PCE
+
+`deepeel explore ROM --core --tas FILM --no-tas-jitter --dsy out.dsy` écrit, pour la relecture non décalée du film, la
+RAM de travail (GB/SMS : $C000-$DFFF, NES : $0000-$07FF, PCE : $2000-$3FFF) en bloc `wram` DSY1 à chaque trame.
+Vérifié sur GB (Super Mario Land + muggv3.vbm : 1664 trames). NES/PCE : même code, non essayés ici. La comparaison
+avec `tools/lr_dsy` demande de convertir le film VBM en masques ; non fait.
