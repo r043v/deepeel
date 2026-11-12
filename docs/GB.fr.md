@@ -4952,3 +4952,9 @@ avec `tools/lr_dsy` demande de convertir le film VBM en masques ; non fait.
 Land + muggv3 : deepeel (`--dsy`) contre Gambatte (`lr_dsy`), WRAM de 8 Kio : 64 octets différents à la trame 100, 112 à la
 600, 218 à la 1500 (l'état initial de la RAM diffère : deepeel à $FF/0, Gambatte avec son motif ; une partie
 des écarts est ce bruit). Observation de l'outil ; pas de conclusion de synchro tant que les octets de jeu ne sont pas isolés.
+
+Suite : les octets qui diffèrent à la trame 1200-1550 sont dans la copie OAM ($C000+ : y/x des sprites de Mario, ex. 102 contre 128),
+donc les deux machines ne sont pas au même point du jeu. Le film `.vbm` est enregistré sur VBA ; deepeel applique le profil
+de synchro VBA (lecture DIV +4 cycles, horloge d'image VBA), Gambatte non. Gambatte n'est donc pas une référence valide pour
+rejouer ce film : la désynchro observée vient de la référence, pas démontrée côté deepeel. Une référence valide est VBA
+lui-même (ou BizHawk/Gambatte avec le même profil), pas encore branchée.
