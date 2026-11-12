@@ -5063,3 +5063,7 @@ graine `{banque, adresse}` (jusqu'à N) ; le noyau sait maintenant démarrer une
 5 workers → forcé 5356. Contre 142 978 pour l'ancien moteur : **l'écart n'est pas comblé**. Hypothèse suivante : les chemins
 forcés du noyau sont coupés au premier `RET` de profondeur 0 (coupe de taint, technique 1.b) alors que l'ancien moteur poursuit
 en cascade ; à tester avec `--no-taint-cut`. Désactivé par défaut (aucun test de contrat modifié).
+
+Test de l'hypothèse : avec `--no-taint-cut`, mêmes 16 000 graines, 150 M pas, 5 workers : forcé 9593 octets (contre 5356), naturel 8922.
+La coupe au `RET` explique donc une partie de l'écart, pas l'essentiel (142 978 pour l'ancien moteur) ; le reste n'est pas expliqué.
+L'étape 2.3 reste ouverte, l'ancien moteur reste le défaut sur GB.
