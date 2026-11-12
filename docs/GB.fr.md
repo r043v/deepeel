@@ -5091,3 +5091,8 @@ Zelda Link's Awakening, 39 M pas, observations de l'outil (définitions de rappo
 
 Le noyau couvre donc plus que l'ancien moteur sur les deux colonnes ; les 5 tests de contrat et les 256 tests ctest passent.
 Reste à faire avant de désactiver l'ancien moteur : mêmes mesures sur d'autres ROMs GB et sur MD/NES.
+
+Deuxième ROM GB, Super Mario Land 2 (observations de l'outil) : l'ancien moteur (249 M pas, 67 553 chemins) rapporte naturel 62, forcé 140 785,
+statique 43 243. Le noyau 0.316.0 à 40 M pas seulement : naturel 99 332, forcé 106 457, statique 62 774 (à 20 M pas : 53 170 / 37 379).
+Le noyau atteint donc, avec six fois moins de pas, plus d'octets exécutés (naturel + forcé : 205 789 contre 140 847). Les définitions de
+« forcé » des deux rapports ne sont pas identiques ; la comparaison reste indicative. Reste à mesurer : MD et NES.
