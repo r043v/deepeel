@@ -5176,8 +5176,10 @@ Référence VBA-rr (état) : `vba-rerecording` (sources dans `../vba-rerecording
 ## PCE : synchronisation m0boy ↔ TurboNyma sur le TAS Bonk 3 (observation de l'outil)
 
 `tools/pce_dsy` (m0boy sans fenêtre) rejoue le TAS et écrit la WRAM par frame, comparée par `deepeel desync` à
-`bizhawk_dsy pce` (TurboNyma). Sur 2000 frames, l'écart de WRAM est de 11 octets stables (compteurs jamais
-réécrits d'un côté, `$51–$59`, `$95d`…) hors pile (`$180–$1ff`) ; les frames 101–200 sont identiques.
+`bizhawk_dsy pce` (TurboNyma). Sur les 6000 frames de la référence, hors pile (`$180–$1ff`), l'écart médian de WRAM est de 0 octet dans
+chaque tranche de 500 frames ; des écarts passagers (jusqu'à ~55 octets, 173 au tout début) subsistent, et la pile
+n'est pas synchronisée (2 frames sur 6000 identiques pile comprise). Le multitap que le cœur de référence active
+(compteur de port à chaque écriture `$1000`) est émulé : il expliquait 11 octets stables.
 Trois choses ont fait converger les temps (trace des accès VDC comparée à Mednafen, constante à ~381 cycles maître) :
 la pile temporelle du CPU absorbe les décrochages (un arrêt de bus long ne s'ajoute plus à la ligne suivante),
 un commit VRAM est retenu dans une fenêtre de chaque ligne (`pce_mys_off`/`pce_mys_w`, ajustée sur les traces),
