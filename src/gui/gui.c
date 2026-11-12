@@ -775,9 +775,12 @@ static void *fb_main(void *arg) {
             int done = dp_fb_caption_read(c1, sizeof c1, c2, sizeof c2);
             const char *own = getenv("DEEPEEL_MD_OWN_NAME");
             char wt[300];
-            snprintf(wt, sizeof wt, "deepeel md watch - %s - %s - %.0f f/s", c1[0] ? c1 : "no movie", c2, s_main);
+            char plat[16] = "md";   // "deepeel <platform> watch" -> the platform
+            sscanf(fb_title, "deepeel %15s", plat);
+            snprintf(wt, sizeof wt, "deepeel %s watch - %s - %s - %.0f f/s", plat, c1[0] ? c1 : "no movie", c2, s_main);
             if (strcmp(wt, last_title)) { SDL_SetWindowTitle(win, wt); snprintf(last_title, sizeof last_title, "%s", wt); }
-            snprintf(c1, sizeof c1, "%s", own && *own ? own : "deepeel-md " DEEPEEL_VERSION);
+            if (own && *own) snprintf(c1, sizeof c1, "%s", own);
+            else snprintf(c1, sizeof c1, "deepeel-%s " DEEPEEL_VERSION, plat);
             draw_text(ren, 6, ch + 2, c1, 1, gui_color(DP_C_TITLE));   // tile 0 sits at the origin
             char l2[96]; snprintf(l2, sizeof l2, "frame %llu  %.0f f/s", (unsigned long long)f_cur, u_main);
             draw_text(ren, 6, ch + 16, l2, 1, gui_color(done ? DP_C_DIM : DP_C_TEXT));
