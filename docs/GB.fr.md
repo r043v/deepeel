@@ -4958,3 +4958,11 @@ donc les deux machines ne sont pas au même point du jeu. Le film `.vbm` est enr
 de synchro VBA (lecture DIV +4 cycles, horloge d'image VBA), Gambatte non. Gambatte n'est donc pas une référence valide pour
 rejouer ce film : la désynchro observée vient de la référence, pas démontrée côté deepeel. Une référence valide est VBA
 lui-même (ou BizHawk/Gambatte avec le même profil), pas encore branchée.
+
+### MD : Sonic 1, m0boy contre ClownMDEmu jusqu'à la trame 6000 (observation de l'outil)
+
+Avec le gel DMA, `s6k.gmv` (6000 trames) : les deux machines passent de la zone 0 à la zone 1 (`zone=0001/0001` vers la
+trame 3900) et restent à quelques pixels l'une de l'autre (X : 25c0/25bf trame 3000 ; 042d/0429 trame 3900 ; 08dc/08cf
+trame 4855 ; 094d/0949 trame 5859). Des dérives de quelques pixels réapparaissent (messages « player X differs for 20 frames »
+aux trames 4391, 4922, 5938) sans perte de piste. La synchro n'est donc pas à l'identique de la trame, mais le niveau est terminé
+des deux côtés. Cause du résidu (timing VDP/horloge Z80 ?) non identifiée.
