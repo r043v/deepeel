@@ -4926,3 +4926,10 @@ ce film. Correctif m0boy : une écriture 16 bits sur `$C00008-$C0000F` (compteur
 `touch` des fichiers autotools, la compilation s'arrête sur `gens_core/cpu/68k/cpu_68k.c:27` (initialisation non
 constante). Il faudrait une chaîne 32 bits (multilib) ; limite technique de la machine, pas du moteur. Les références
 GMV restent ClownMDEmu, GPGX (libretro) et BizHawk.
+
+### MD : gel du 68000 pendant le DMA VDP (cause de la désynchro Sonic ~trame 2053)
+
+m0boy exécutait le DMA mémoire→VDP en 0 cycle ; le matériel (et ClownMDEmu) gèle le 68000 pendant `longueur / débit`
+lignes (débit en mots/ligne : H40 204 en blanking, 18 en affichage ; H32 166 / 16 ; VRAM compte double). Corrigé
+dans `md_full_bus.c` : Sonic ne dérive plus de ClownMDEmu aux trames 2025/2073 (écart de X ≤ 6 px à la trame 2100,
+contre 45 px). Observation de l'outil sur Sonic 1 uniquement ; le résidu reste à étudier.
