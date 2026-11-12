@@ -5041,3 +5041,9 @@ beaucoup plus de code spéculatif, car il ensemence des entrées (16 273 graines
 résiduelle) que le noyau n'ensemence pas encore. **La parité de couverture n'est donc pas atteinte** : l'ancien moteur
 reste le moteur par défaut sur GB et n'est pas désactivé. Chantier suivant : ensemencement d'entrées issu de la
 fermeture statique dans `dp_core_explore`, puis nouvelle mesure.
+
+Essai (non retenu) : un chemin forcé démarré à chaque racine de la fermeture statique (état courant, 12 553 graines)
+fait passer le « forcé » du noyau de 3458 à 3963 octets seulement (même budget de 39 M pas) et casse les tests
+`core_closure_*` / `core_map_*` (les octets « static-only » deviennent forcés). L'écart de couverture spéculative avec
+l'ancien moteur ne vient donc pas de ces racines ; il reste à expliquer (définition de « code-forced » côté ancien moteur :
+décodage des graines de cascade, tables de sauts) avant toute désactivation de l'ancien moteur.
