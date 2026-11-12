@@ -5125,3 +5125,4 @@ Les cas à plusieurs registres, les « partial » et les « caps » de l'ancien 
 le drapeau naturel, ligne `RAM-executed instructions traced to ROM copy sources`) ; `--cov` GB écrit les offsets des banques ≥ 1 en adresse CPU ($4000+),
 comme l'ancien moteur. Ctest 256/256 (`lr_gambatte_parity` sauté). Tests dont le noyau satisfait maintenant la vérification : `wram_exec_trace`
 (sortie `--core`) ; reste à porter : cellules de session, frontier, archive runtime, sondes LY (format de ligne), mapwin, campagne.
+0.316.1 (suite) — sondes LY du noyau : ligne `event probes N at M sites: K forced variants`, option `--no-event-fork` (alias de `--no-event-probes`).

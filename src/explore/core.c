@@ -41,7 +41,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--unbounded")) { c->unbounded = 1; c->max_total = 0; c->max_path_steps = 0; c->fork_site_cap = 0; return 1; }
     if (!strcmp(a, "--no-closure")) { c->no_closure = 1; return 1; }
     if (!strcmp(a, "--no-cells")) { c->no_cells = 1; return 1; }
-    if (!strcmp(a, "--no-event-probes")) { c->no_event_probes = 1; return 1; }
+    if (!strcmp(a, "--no-event-probes") || !strcmp(a, "--no-event-fork")) { c->no_event_probes = 1; return 1; }
     if (!strcmp(a, "--seed-ram") && i + 1 < argc) {   // LO-HI[=V,V,...]: technique 3 start states
         char *e; unsigned long lo = strtoul(argv[i + 1], &e, 0);
         if (*e != '-') return 0;
@@ -1422,7 +1422,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "seeded RAM states %llu\n", U(r->seeded_ram));
     fprintf(out, "held-pad sessions %llu\n", U(r->sessions));
     fprintf(out, "IRQ forks %llu (timing jitter %llu)\n", U(r->irq_forks), U(r->jitter_forks));
-    fprintf(out, "event probes %llu at %llu sites\n", U(r->event_probes), U(r->event_probe_sites));
+    fprintf(out, "event probes %llu at %llu sites: %llu forced variants\n", U(r->event_probes), U(r->event_probe_sites), U(r->event_probes));
     fprintf(out, "seeded entry points %llu\n", U(r->seeded));
     fprintf(out, "forced RAM cuts %llu\n", U(r->forced_ram_cuts));
     fprintf(out, "forced taint cuts: indirect %llu, ret %llu\n", U(r->taint_cut_indirect), U(r->taint_cut_ret));
