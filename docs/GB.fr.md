@@ -4970,3 +4970,8 @@ des deux côtés. Cause du résidu (timing VDP/horloge Z80 ?) non identifiée.
 Premier écart m0boy / ClownMDEmu sur `s6k.gmv` (`DP_MD_TRACE_RANGE=300:1210`) : trame 399, le niveau démarre une trame plus tard
 dans m0boy (X = 0 contre $50) ; X vaut ensuite $54 contre $56 pendant l'intro (trames 492-497). Le résidu de quelques pixels
 est donc une phase d'une trame prise au chargement du niveau (démarrage/fondu), puis conservée. Origine non trouvée.
+
+Essai négatif (MD) : lever le V-int de m0boy d'une ligne (224 → 225, comme l'indexation de ClownMDEmu depuis la ligne -1) ne change
+aucune position X de `s6k.gmv` (mêmes valeurs aux trames 1200-5859, mêmes messages d'écart). Ce n'est donc pas la cause du
+décalage d'une trame au chargement du niveau (trame 399) ni de la dérive. Candidats restants : latence d'acquittement des IRQ,
+timing du HINT, bus Z80, démarrage de la machine.
