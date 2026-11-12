@@ -265,3 +265,7 @@ reste ouverte (issue `deferred` dans l'arbre). Mesure (fixture `fix_md_pad`,
 `--path-steps 50`) : 28 continuations reportées et toutes reprises, 57
 courses contre 29 sans déferral au même budget. Rapport : `frontier:
 deferred steps/loop; resumed; final; dropped`. Test `md_defer_tiers`.
+
+## Les 10 octets de WRAM d'écart avec ClownMDEmu (observation, 6000 trames Sonic 1)
+
+`DP_MD_DIFF_LIST=1 sh tools/md_compare_reference.sh ROM s6k.gmv 6000` liste les adresses qui diffèrent (aux trames multiples de 3000). Observations de l'outil : trame 3000, 2 octets (`$F606` ref 00 / m0boy FF, `$FD81`) ; trame 6000, 10 octets : `$F606` plus `$FD7E–$FD85`, `$FD8C–$FD8D`. La zone `$FD7E–$FD8D` est la pile 68000 sous le pointeur de pile, que le V-int et sa trame d'exception réécrivent à chaque trame ; les deux cœurs sont dans la boucle d'attente du V-int (`pc` 0x29AC / 0x29B0 selon l'instant d'échantillonnage) et la valeur résiduelle dépend de l'instruction coupée par l'interruption. Mode de jeu, zone, X du joueur ($08F4), et toutes les variables de jeu sont égaux ; `fault=0`. Ce n'est donc pas un écart d'état de jeu mais un résidu de pile dépendant de la phase d'interruption au cycle près ; `$F606` reste à expliquer. Pas une mesure de matériel : une comparaison entre deux cœurs.
