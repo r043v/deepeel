@@ -3,7 +3,7 @@
 // The memory blocks are the core's own domains (RAM-like ones, never ROM / System Bus), so the same tool serves
 // every system; a system is one line in Cores[].
 //
-// usage: bizhawk_dsy SYSTEM ROM masks.bin out.dsy [FRAMES]       SYSTEM: gen | sms
+// usage: bizhawk_dsy SYSTEM ROM masks.bin out.dsy [FRAMES]       SYSTEM: gen | sms | nes | pce
 //   masks.bin: one byte per frame, the lr_dsy layout (bit0 Up 1 Down 2 Left 3 Right 4 B 5 A 6 Select 7 Start);
 //   each bit drives the core button whose name ends with the same word (first controller port).
 using System;
@@ -17,6 +17,9 @@ using BizHawk.Client.Common;
 using BizHawk.Emulation.Common;
 using BizHawk.Emulation.Cores;
 using BizHawk.Emulation.Cores.Consoles.Sega.gpgx;
+using BizHawk.Emulation.Cores.Consoles.NEC.PCE;
+using BizHawk.Emulation.Cores.Nintendo.NES;
+using BizHawk.Emulation.Cores.Waterbox;
 using SMSHawk = BizHawk.Emulation.Cores.Sega.MasterSystem.SMS;
 using BizHawk.Tests.Testroms;
 
@@ -30,10 +33,10 @@ namespace BizhawkDsy
 		private static readonly Dictionary<string, string> Blocks = new()
 		{
 			{ "68K RAM", "wram" }, { "Main RAM", "wram" }, { "WRAM", "wram" }, { "RAM", "wram" },
-			{ "Z80 RAM", "zram" }, { "VRAM", "vram" }, { "CRAM", "cram" }, { "VSRAM", "vsrm" },
+			{ "Z80 RAM", "zram" }, { "Main Memory", "wram" }, { "Work Ram", "wram" }, { "CIRAM (nametables)", "vram" }, { "PALRAM", "cram" }, { "OAM", "oam" }, { "VRAM", "vram" }, { "CRAM", "cram" }, { "VSRAM", "vsrm" },
 		};
 
-		private static IEmulator Make(string system, byte[] rom, CoreComm coreComm)
+		private static IEmulator Make(string system, byte[] rom, CoreComm coreComm, DummyFrontend.EmbeddedFirmwareProvider efp)
 		{
 			switch (system)
 			{
@@ -45,8 +48,20 @@ namespace BizhawkDsy
 					});
 				case "sms":
 					return new SMSHawk(coreComm, GameInfo.NullInstance, rom, new(), new SMSHawk.SmsSyncSettings { UseBios = false });
+				case "nes":
+					BizHawk.Emulation.Common.Database.InitializeDatabase(Environment.GetEnvironmentVariable("BIZHAWK_GAMEDB") ?? (Environment.GetEnvironmentVariable("HOME") + "/dev/BizHawk/Assets/gamedb"), null, true);   // NesHawk waits on the game database
+					BootGodDb.Initialize(Environment.GetEnvironmentVariable("BIZHAWK_GAMEDB") ?? (Environment.GetEnvironmentVariable("HOME") + "/dev/BizHawk/Assets/gamedb"));   // NesHawk, the BizHawk NES core
+					efp.EmbedPathMap[new FirmwareID("NES", "Bios_FDS")] = "none";   // no FDS BIOS: the provider answers "absent" instead of throwing
+					return new NES(coreComm, GameInfo.NullInstance, rom, new(), new NES.NESSyncSettings   // work RAM at zero like deepeel's machines; BIZHAWK_NES_RAM=power keeps the core's FCEUX power-up pattern
+					{ InitialWRamStatePattern = Environment.GetEnvironmentVariable("BIZHAWK_NES_RAM") == "power" ? new byte[0] : new byte[] { 0 } });
+				case "pce":   // TurboNyma (Mednafen PCE, waterbox), the BizHawk PC Engine core
+					return new TurboNyma(new CoreLoadParameters<NymaCore.NymaSettings, NymaCore.NymaSyncSettings>
+					{
+						Comm = coreComm, DeterministicEmulationRequested = true, Game = GameInfo.NullInstance,
+						Roms = { new DummyRomAsset(rom, VSystemID.Raw.PCE) }, Settings = new(), SyncSettings = new(),
+					});
 				default:
-					Console.Error.WriteLine("unknown system " + system + " (gen | sms)");
+					Console.Error.WriteLine("unknown system " + system + " (gen | sms | nes | pce)");
 					Environment.Exit(2);
 					return null;
 			}
@@ -58,10 +73,11 @@ namespace BizhawkDsy
 			var rom = File.ReadAllBytes(args[1]);
 			var masks = File.ReadAllBytes(args[2]);
 			int frames = args.Length > 4 ? Math.Min(int.Parse(args[4]), masks.Length) : masks.Length;
-			using var fe = new DummyFrontend((efp, config, coreComm) => (Make(args[0], rom, coreComm), 0));
+			using var fe = new DummyFrontend((efp, config, coreComm) => (Make(args[0], rom, coreComm, efp), 0));
 			var def = fe.Core.ControllerDefinition;
 			var names = new string[8];
-			for (int i = 0; i < 8; i++) names[i] = def.BoolButtons.FirstOrDefault(b => b.StartsWith("P1 ") && b.EndsWith(" " + Words[i]));
+			for (int i = 0; i < 8; i++)   // PC Engine names: II = B, I = A, Run = Start
+				names[i] = def.BoolButtons.FirstOrDefault(b => b.StartsWith("P1 ") && (b.EndsWith(" " + Words[i]) || (args[0] == "pce" && b.EndsWith(" " + (i == 4 ? "II" : i == 5 ? "I" : i == 7 ? "Run" : "\0")))));
 			Console.Error.WriteLine("buttons: " + string.Join(", ", names.Select((n, i) => Words[i] + "=" + (n ?? "-"))));
 			var controller = new SimpleController(def);
 			var domains = fe.CoreAsMemDomains;

@@ -4941,6 +4941,19 @@ out.dsy [N]` rejoue un film (1 octet/trame, bits U D L R B A Select Start) dans 
 `wram` / `vram` / `sram` par trame, à comparer par `deepeel desync`. Vérifié : Gambatte sur Zelda GB, deux runs
 identiques sur 300 trames. Côté deepeel (m0boy GB/NES/PCE) le producteur natif reste à écrire.
 
+### NES : `tools/nes_dsy` (m0boy) contre `bizhawk_dsy nes` (NesHawk)
+
+`--dsy` sur NES n'est pas une référence exploitable : la relecture du noyau y passe par les sondes d'événements statiques
+(`$2002` forcé), le jeu reste dans sa boucle d'attente de VBlank et la RAM reste à zéro (constaté sur SMB, 3816 trames
+nulles). Le côté DUT honnête est donc `tools/nes_dsy.c` (compilation en tête de fichier : runtime m0boy `nes,6502,apu,ppu`),
+qui joue le film (masques `tools/tas_masks.py`, 1 octet/trame, mêmes bits que `lr_dsy`) sans exploration et écrit la RAM
+2 Kio par trame. Côté référence : `bizhawk_dsy nes ROM masks out.dsy N` (NesHawk ; la base de jeux et BootGod sont
+initialisées depuis `BIZHAWK_GAMEDB`, défaut `~/dev/BizHawk/Assets/gamedb` ; RAM mise à zéro comme deepeel, ou
+`BIZHAWK_NES_RAM=power` pour le motif FCEUX). Observation de l'outil sur Super Mario Bros. (World), 3000 trames : premier
+écart à la trame 2 (`$07`), NesHawk en avance d'environ une trame au démarrage ; ensuite 283 trames identiques sur 3000, écart
+moyen ~72 octets par trame (21 en comparant A[f] à B[f-1]) : phase de démarrage CPU/PPU et lecture de la manette à
+aligner dans m0boy. Pas encore résolu.
+
 ### `--dsy FILE` (noyau) : producteur DSY1 natif GB/SMS/NES/PCE
 
 `deepeel explore ROM --core --tas FILM --no-tas-jitter --dsy out.dsy` écrit, pour la relecture non décalée du film, la
