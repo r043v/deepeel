@@ -1575,3 +1575,13 @@ Forme : `<module>_<événement>`. Exemples :
 Chaque compteur apparaît dans le texte, le JSON et `deepeel_meta`. Un compteur
 non nul de la forme `*_dropped` / `*_refused` hors éviction sémantique est un
 **défaut** au sens de cette norme.
+
+## Récupération des films TAS (toutes plateformes)
+
+`tools/tasvideos_fetch.py` est l'outil commun : la cible est une ROM, ou une référence de jeu TASVideos qui n'exige aucune ROM (`135`, `135G`, `https://tasvideos.org/135G`), quelle que soit la plateforme. Il télécharge les publications de la page du jeu et toutes les soumissions de la Subs-List (chaque film dans son sous-répertoire, formats `.gmv .bk2 .vbm .gbm .fm2 .mmv…`) et imprime les arguments `--tas` à donner à `deepeel`.
+
+    tools/tasvideos_fetch.py --search castle --system Genesis       # liste id + nom
+    tools/tasvideos_fetch.py 135G $DONNEES/tas/castle-md           # télécharge
+    deepeel md explore ROM.md --tas $DONNEES/tas/castle-md/1903M/x.gmv --watch 30
+
+Essai : Castle of Illusion (Genesis, 135G) → 8 films, dont la publication 1903M (`.gmv`). Un film `.bk2` (7146S) n'est relu que par les chemins qui savent le lire ; le `.gmv` est celui du chemin `md explore --tas`.

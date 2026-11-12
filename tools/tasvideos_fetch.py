@@ -1,8 +1,16 @@
 #!/usr/bin/env python3 -I
 """Download every TASVideos movie of a Game Boy (or other) game: all of them is the norm.
 
-usage: tasvideos_fetch.py ROM OUT_DIR [--game-id N[,N...]] [--game "TASVideos game name"]
+usage: tasvideos_fetch.py TARGET OUT_DIR [--game-id N[,N...]] [--game "TASVideos game name"]
                           [--system GB|NES|MD|...] [--max N] [--list]
+       tasvideos_fetch.py --search TERMS [--system Genesis|"Game Boy"|NES|...]
+
+TARGET is a ROM path (title and system looked up as before), or a TASVideos game
+reference needing no ROM at all: 135, 135G or https://tasvideos.org/135G (any
+platform: the movies of the game page and its Subs-List are fetched whatever the
+system).  --search lists the games matching TERMS (id, name) from
+https://tasvideos.org/Games/List, optionally restricted to one system; give the id
+back as TARGET.
 
 Order: publications first (the game page https://tasvideos.org/NNNG, then the
 publications API), then the submissions.  --game-id takes several ids (comma list).
@@ -74,8 +82,29 @@ def pubs_of(system, title):
             break
     return hits
 
+GAMES = "https://tasvideos.org/Games/List?SearchTerms=%s&System=%s"
+
+def search(terms, system):
+    from urllib.parse import quote
+    html = get(GAMES % (quote(terms), quote(system or ""))).decode("utf-8", "replace")
+    seen = []
+    for i, name in re.findall(r'href="/(\d+)G"[^>]*>([^<]*)', html):
+        if (i, name) not in seen and name.strip():
+            seen.append((i, name.strip()))
+    return seen
+
+def target_ids(t):
+    """Game ids named by a non-ROM target (135, 135G, tasvideos URL), else None."""
+    m = re.fullmatch(r"(?:https?://tasvideos\.org/)?(\d+)G?/?", t.strip())
+    return m.group(1) if m else None
+
 def main():
     argv = sys.argv[1:]
+    terms = opt(argv, "--search")
+    if terms is not None:
+        for i, name in search(terms, opt(argv, "--system")):
+            print("%sG  %s   https://tasvideos.org/%sG" % (i, name, i))
+        return
     game = opt(argv, "--game")
     system = opt(argv, "--system", "GB")
     gid = opt(argv, "--game-id")
@@ -85,10 +114,14 @@ def main():
     if len(a) < 2:
         sys.exit(__doc__)
     rom, out = a[0], a[1]
+    tid = target_ids(rom) if not os.path.exists(rom) else None
+    if tid:
+        gid = (gid + "," + tid) if gid else tid
     title = norm(game or re.sub(r"\(.*?\)", "", os.path.basename(rom).rsplit(".", 1)[0]))
     pubs = []
     try:
-        pubs = pubs_of(system, title)
+        if not tid:
+            pubs = pubs_of(system, title)
     except Exception as e:
         print("publications lookup failed (%s)" % e, file=sys.stderr)
     if gid is None:
