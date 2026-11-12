@@ -5024,3 +5024,20 @@ limite la lecture à une fenêtre (le reste à zéro, à ignorer côté `deepeel
 doit se trouver dans `dll/` à côté de l'exécutable (copie hors dépôt), `LD_LIBRARY_PATH=…/BizHawk/Assets/dll`.
 Vérifié : Sonic 1, GPGX BizHawk contre m0boy, fenêtre `$FC00-$FFFF` ; premier écart à la trame 52 (marqueur
 d'initialisation d'un cœur ou de l'autre, voir 0.315.7).
+
+### Étape 2.3 : comparaison ancien moteur / noyau (Zelda Link's Awakening, GB, ~39 M pas)
+
+Même ROM, même budget de pas (39 M), exploration sans film. Observations de l'outil, définitions des deux rapports
+mises côte à côte (pas des mesures matérielles) :
+
+| | ancien moteur | noyau (`--core`) |
+|---|---|---|
+| octets ROM exécutés « naturels » | 55 | 8155 |
+| octets ROM exécutés sur fourche/seed spéculatif | 142 978 | 3458 |
+| octets atteints par fermeture statique seule | 47 373 | 4856 |
+
+Lecture : sur les chemins naturels, le noyau exécute bien plus (8155 contre 55) ; en revanche l'ancien moteur couvre
+beaucoup plus de code spéculatif, car il ensemence des entrées (16 273 graines spéculatives, 3 tours de fermeture
+résiduelle) que le noyau n'ensemence pas encore. **La parité de couverture n'est donc pas atteinte** : l'ancien moteur
+reste le moteur par défaut sur GB et n'est pas désactivé. Chantier suivant : ensemencement d'entrées issu de la
+fermeture statique dans `dp_core_explore`, puis nouvelle mesure.
