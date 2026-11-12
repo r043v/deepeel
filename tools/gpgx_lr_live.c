@@ -24,6 +24,16 @@ int main(int c, char **v) {
     FILE *f = fopen(v[3], "rb"); if (!f) return 1;
     fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
     uint8_t *masks = malloc((size_t)n + 1); if (fread(masks, 1, (size_t)n, f) != (size_t)n) return 1; fclose(f);
+    // GPGX_SHIFT=lead:at:ins: GPGX boots later and its title->level fade is longer than ClownMDEmu/Gens, so a movie recorded
+    // there lands early.  Prepend `lead` neutral frames and insert `ins` neutral frames after movie frame `at`
+    // (Sonic 1: 8:491:12 starts the level on the same input as the reference up to a ~7 frame residue).
+    if (getenv("GPGX_SHIFT")) {
+        unsigned lead = 0, at = 0, ins = 0; sscanf(getenv("GPGX_SHIFT"), "%u:%u:%u", &lead, &at, &ins);
+        if (at > (unsigned)n) at = (unsigned)n;
+        uint8_t *sh = calloc((size_t)n + lead + ins + 1, 1);
+        memcpy(sh + lead, masks, at); memcpy(sh + lead + at + ins, masks + at, (size_t)n - at);
+        free(masks); masks = sh; n += lead + ins;
+    }
     DpMdRefFeed *feed = dp_md_ref_feed_open(v[4], 0); if (!feed) return 1;
     static uint32_t px[DP_MDRF_MAX_W * DP_MDRF_MAX_H];
     // GPGX_DSY=file: per-frame "wram" (64 KiB, swapped back to big-endian order) in DSY1 (src/core/desync.h), for `deepeel desync`

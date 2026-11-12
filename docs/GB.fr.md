@@ -4907,3 +4907,15 @@ seulement) ; ensuite m0boy se bloque vers x=8537 (saut, sol à y≈1197) alors q
 vraie divergence. GPGX/BizHawk s'écartent des deux dès l'image ≈ 600 (≈ 500 octets de RAM de jeu), donc ils ne suivent pas
 ce film. Correctif m0boy : une écriture 16 bits sur `$C00008-$C0000F` (compteur HV) récursait sans fin
 (`md_full_write16` → `write8` → `write16`) et plantait l'exploration après la fin du film.
+
+## 0.315.5 — MD : GPGX/BizHawk, entrée décalée (observations de l'outil)
+
+- GPGX (donc BizHawk) démarre le niveau de Sonic 1 **plus tard** que ClownMDEmu/Gens sur le même film : l'appui Start d'une
+  trame (film, trame 490) est perdu si le film n'est pas retardé d'au moins 7 trames (`lead` ≥ 7), et le fondu
+  titre → niveau dure ~12 trames de plus. Un décalage constant ne suffit donc pas (Sonic reste bloqué à x=760) :
+  `GPGX_SHIFT=8:491:12` (trames neutres en tête, puis insérées après le Start) amène GPGX à x≈1300 à la trame 1000
+  (ClownMDEmu : 1422), reliquat ≈ 7 trames.
+- Le pad 6 boutons n'est pas en cause (`DP_LR_PAD_DEVICE=0x101` force « MD Joypad 3 Button » : même comportement).
+- m0boy : deux écarts de temps 68000 corrigés (opérations de bit sur registre, +2 seulement pour les bits ≥ 16 ; TAS 10 + ea).
+  `tools/md_cpu_diff.c` (test différentiel instruction par instruction contre Clown68000) ne trouve aucun écart
+  de résultat sur les opcodes légaux ; la désynchronisation Sonic ~trame 2053 de m0boy n'est pas résolue.

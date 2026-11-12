@@ -42,8 +42,8 @@ int main(int argc, char **argv) {
         Clown68000_State cs; memset(&cs, 0, sizeof cs);
         memcpy(cs.data_registers, d, sizeof d); memcpy(cs.address_registers, a, sizeof a);
         cs.program_counter = pc; cs.status_register = (cc_u16l)(0x2000 | ccr); cs.user_stack_pointer = 0xff6000u; cs.supervisor_stack_pointer = a[7];
-        outside = 0; Clown68000_DoCycles(&cs, &cb, 1);
-        md_full_step_interp(m);
+        outside = 0; unsigned cret = (unsigned)Clown68000_DoCycles(&cs, &cb, 1); uint32_t c0 = m->cycles;
+        md_full_step_interp(m); unsigned mcy = m->cycles - c0;
         if (outside || m->fault || cs.halted || cs.stopped || (cs.program_counter < 0xff0000u) || (m->pc < 0xff0000u)) { skipped++; continue; }
         ran++;
         int diff = 0; char why[96] = "";
@@ -52,6 +52,7 @@ int main(int argc, char **argv) {
         if (!diff && (m->sr & 0xff1f) != (cs.status_register & 0xff1f)) { diff = 1; snprintf(why, sizeof why, "SR %04x/%04x", m->sr, cs.status_register); }
         if (!diff && m->pc != cs.program_counter) { diff = 1; snprintf(why, sizeof why, "PC %08x/%08x", m->pc, cs.program_counter); }
         if (!diff && memcmp(m->ram, cmem, 65536)) { diff = 1; snprintf(why, sizeof why, "RAM"); }
+        if (getenv("CYC") && !diff && mcy != cret) { printf("cyc %04x %u %u\n", op, mcy, cret); }
         if (diff) { bad++; cls[op >> 6]++; if (bad <= 40) printf("op %04x ext %02x%02x%02x%02x ccr %02x  %s   (D%u:%08x A%u:%08x)\n", op, base[0x102], base[0x103], base[0x104], base[0x105], ccr, why, 0u, d[0], 0u, a[0]); }
     }
     printf("ran %ld skipped %ld mismatches %ld\n", ran, skipped, bad);

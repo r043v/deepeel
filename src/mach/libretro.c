@@ -213,6 +213,10 @@ int dp_lr_load_rom(DpLibretro *lr, const char *rom_path, char *err, size_t errn)
     struct retro_game_info gi = { rom_path, lr->rom, (size_t)n, NULL };
     if (!lr->r_load(&gi)) { seterr(err, errn, "libretro: the core refused %s", rom_path); return 0; }
     lr->loaded = 1;
+    if (getenv("DP_LR_PAD_DEVICE")) {   // force the port-1 controller type (e.g. 0x101 = GPGX "MD Joypad 3 Button", 0x201 = 6 Button)
+        void (*setdev)(unsigned, unsigned) = (void (*)(unsigned, unsigned))dlsym(lr->h, "retro_set_controller_port_device");
+        if (setdev) setdev(0, (unsigned)strtoul(getenv("DP_LR_PAD_DEVICE"), NULL, 0));
+    }
     if (lr->level)
         snprintf(lr->degr, sizeof lr->degr,
                  "level B (%s): trace extension negotiated (step, observers, forced branch %s, rom index %s)",
