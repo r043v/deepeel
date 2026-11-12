@@ -5067,3 +5067,7 @@ en cascade ; à tester avec `--no-taint-cut`. Désactivé par défaut (aucun tes
 Test de l'hypothèse : avec `--no-taint-cut`, mêmes 16 000 graines, 150 M pas, 5 workers : forcé 9593 octets (contre 5356), naturel 8922.
 La coupe au `RET` explique donc une partie de l'écart, pas l'essentiel (142 978 pour l'ancien moteur) ; le reste n'est pas expliqué.
 L'étape 2.3 reste ouverte, l'ancien moteur reste le défaut sur GB.
+
+Autres essais (Zelda GB, 16 000 graines, `--no-taint-cut`) : `--max-steps 5000000 --loop-cap 100000` à 150 M pas → forcé 8528, avec
+saturation de site 3 397 030 (le plafond de forks par site borne l'exploration, rapporté). `--unbounded` : à 0,1 M pas/s (file sur
+disque), 580 s ne suffisent pas à conclure ; pas de résultat. L'écart reste ouvert.
