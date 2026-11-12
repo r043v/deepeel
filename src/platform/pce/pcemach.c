@@ -92,7 +92,7 @@ void dp_pce_reference(int pcehawk) {
     pce_irq_delay = pcehawk ? 0u : 44u;      // TurboNyma raises IRQ1 about 44 CPU cycles after the line end
     pce_timer_extra = pcehawk ? 1u : 0u;     // and its timer period is load + 1 ticks, first period 2 ticks longer
     pce_timer_phase = pcehawk ? 0u : 3u;
-    { extern unsigned pce_timer_clk; pce_timer_clk = pcehawk ? 0u : 480u; }   // first timer period: 3 ticks and 480 prescaler cycles longer (measured on Shinobi)
+    { extern unsigned pce_timer_clk; pce_timer_clk = pcehawk ? 0u : 456u; }   // first timer period: 3 ticks and 480 prescaler cycles longer (measured on Shinobi)
     pce_vdc_waits = pcehawk ? 0u : 1u;   // PCEHawk has no VRAM wait states behind the SATB DMA (TurboNyma does)
     ref_phase = pcehawk ? 4u : 258u;
     pce_frame_start_line = ref_phase;
@@ -275,9 +275,9 @@ static int line_finish(void) {
             machine.vdc_pending = 0;
         }
         if (line_no < 262) emit_row(line_no);
-        machine.timer_clock += c->speed ? (unsigned)line_budget_ : (unsigned)line_budget_ * 4u;
-        while (machine.timer_clock >= 1024) {
-            machine.timer_clock -= 1024;
+        machine.timer_clock += (c->speed ? (unsigned)line_budget_ : (unsigned)line_budget_ * 4u) * 64u;   // in 1/64 cycle
+        while (machine.timer_clock >= pce_timer_div) {
+            machine.timer_clock -= pce_timer_div;
             timer_tick();
         }
         update_irq();
@@ -419,14 +419,18 @@ static M0_TL void *trace_user;
 
 void dp_pce_trace(DpPceTraceFn fn, void *user) { trace_fn = fn; trace_user = user; }
 
+static uint16_t tr_pc_;
 void pce_trace_step(uint16_t pc) {
+    tr_pc_ = pc;
     uint8_t op = dp_pce_peek(pc);
     st_port = op == 0x03 || op == 0x13 || op == 0x23;
     if (trace_fn) trace_fn(trace_user, pc, op);
 }
 
 void pce_trace_dyn(uint16_t pc) { (void)pc; }
-void pce_trace_regs(uint8_t a, uint8_t x, uint8_t y, uint8_t s, uint8_t p, uint32_t cyc) { (void)a; (void)x; (void)y; (void)s; (void)p; (void)cyc; }
+void pce_trace_regs(uint8_t a, uint8_t x, uint8_t y, uint8_t s, uint8_t p, uint32_t cyc) {
+    if (pce_trace) fprintf(stderr, "I %04x a=%02x x=%02x y=%02x s=%02x p=%02x t=%u\n", tr_pc_, a, x, y, s, p, cyc);   // calibration trace (-DPCE_TRACE)
+}
 
 static unsigned cut_cycles;          // the reference samples its WRAM this many CPU cycles before the frame's last line ends
 static uint8_t cut_wram[0x2000]; static int cut_valid;
