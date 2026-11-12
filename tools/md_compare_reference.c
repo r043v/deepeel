@@ -106,8 +106,8 @@ int main(int argc, char **argv) {
             if (nd && shown2 < 6) { shown2++; printf("stack-diff frame %u: %u bytes in fd00-fdff, first %04x ref=%02x dut=%02x sp=%08x/%08x pc=%06x/%06x\n", frame + 1, nd, first, ref_byte(ref, first), dut->ram[first], (unsigned)ref->m68k.address_registers[7], dut->a[7], (unsigned)ref->m68k.program_counter, dut->pc); } }
         if ((frame + 1 >= 50 && frame + 1 <= 62) || (frame + 1) % 300 == 0 || mismatch_streak == 20 || dut->fault) {
             unsigned diff = 0;
-            for (unsigned i = 0; i < 0x10000; i++) { int d = ref_byte(ref, i) != dut->ram[i]; diff += d; if (d && getenv("DP_MD_DIFF_LIST") && (frame + 1) % 3000 == 0) printf("  diff %04x ref=%02x dut=%02x\n", i, ref_byte(ref, i), dut->ram[i]); }
-            if (getenv("DP_MD_DIFF_LIST") && (frame + 1) % 3000 == 0) printf("  sp ref=%08x dut=%08x\n", (unsigned)ref->m68k.address_registers[7], dut->a[7]);
+            for (unsigned i = 0; i < 0x10000; i++) { int d = ref_byte(ref, i) != dut->ram[i]; diff += d; if (d && getenv("DP_MD_DIFF_LIST") && (frame + 1) % (getenv("DP_MD_DIFF_MOD") ? (unsigned)atoi(getenv("DP_MD_DIFF_MOD")) : 3000u) == 0) printf("  diff %04x ref=%02x dut=%02x\n", i, ref_byte(ref, i), dut->ram[i]); }
+            if (getenv("DP_MD_DIFF_LIST") && (frame + 1) % (getenv("DP_MD_DIFF_MOD") ? (unsigned)atoi(getenv("DP_MD_DIFF_MOD")) : 3000u) == 0) printf("  sp ref=%08x dut=%08x\n", (unsigned)ref->m68k.address_registers[7], dut->a[7]);
             printf("%u mode=%02x/%02x zone=%02x%02x/%02x%02x playerx=%02x%02x/%02x%02x pc=%06x/%06x diff=%u fault=%u\n",
                    frame + 1, ref_byte(ref, 0xf600), dut->ram[0xf600],
                    ref_byte(ref, 0xfe10), ref_byte(ref, 0xfe11), dut->ram[0xfe10], dut->ram[0xfe11],
