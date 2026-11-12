@@ -5133,3 +5133,5 @@ comme l'ancien moteur. Ctest 256/256 (`lr_gambatte_parity` sauté). Tests dont l
 (RAM puis spool disque) dans `DIR/frontier.bin` (en-tête magique, taille d'état, nombre ; enregistrements `{pc, forced, site, input}` + état) ;
 `--resume` les remet en file avant les graines. Vérifié sur `fix_branch.gb` : 20 états sauvés, repris, exploration terminée (fichier supprimé quand la file est vide).
 Reste : conversion en lots portables et commandes `frontier stats` / `frontier drain` côté noyau.
+
+0.316.1 (suite) — `frontier stats DIR` lit `DIR/frontier.bin` du noyau (`frontier: N kernel states pending`) ; `frontier drain ROM DIR` le reprend jusqu'au bout (`explore --core --state-dir DIR --resume`). Lots portables du noyau : non faits.

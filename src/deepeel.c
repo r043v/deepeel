@@ -2258,6 +2258,13 @@ static int cmd_tas(int argc, char **argv) {
 int main(int argc, char **argv) {
     if (argc < 2) return usage(), 2;
     if (!strcmp(argv[1], "frontier") && argc > 3 && !strcmp(argv[2], "stats")) {
+        char kp[700]; snprintf(kp, sizeof kp, "%s/frontier.bin", argv[3]);   // kernel frontier (--core --state-dir)
+        FILE *kf = fopen(kp, "rb");
+        if (kf) {
+            uint32_t kh[3];
+            if (fread(kh, 4, 3, kf) == 3 && kh[0] == 0x31524644u) { printf("frontier: %u kernel states pending (%u bytes each)\n", kh[2], kh[1]); fclose(kf); return 0; }
+            fclose(kf);
+        }
         // pending records by reason, tier and bank (the unread part of each lot)
         char p[700], line[400];
         struct stat lst;
@@ -2318,6 +2325,13 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (!strcmp(argv[1], "frontier") && argc > 4 && !strcmp(argv[2], "drain")) {
+        char kp[700]; snprintf(kp, sizeof kp, "%s/frontier.bin", argv[4]);   // kernel frontier: resume it to the end
+        if (!access(kp, R_OK)) {
+            char *av[12]; int n = 0;
+            av[n++] = argv[0]; av[n++] = (char *)"explore"; av[n++] = argv[3]; av[n++] = (char *)"--core";
+            av[n++] = (char *)"--state-dir"; av[n++] = argv[4]; av[n++] = (char *)"--resume"; av[n] = NULL;
+            return cmd_explore(n, av);
+        }
         struct stat dst;
         if (!stat(argv[4], &dst) && S_ISREG(dst.st_mode)) {
             // a portable lot: resume its saved states only on the platform that wrote it
