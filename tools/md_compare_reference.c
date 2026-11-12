@@ -90,6 +90,9 @@ int main(int argc, char **argv) {
             ref_x && dut_x && ref_x != dut_x && ref_x != prev_dut_x && dut_x != prev_ref_x) mismatch_streak++;
         else mismatch_streak = 0;
         prev_ref_x = ref_x; prev_dut_x = dut_x;
+        if (getenv("DP_MD_STACK_DIFF")) { static int shown2; unsigned nd = 0, first = 0;
+            for (unsigned i = 0xfd00; i < 0xfe00; i++) if (ref_byte(ref, i) != dut->ram[i]) { if (!nd) first = i; nd++; }
+            if (nd && shown2 < 6) { shown2++; printf("stack-diff frame %u: %u bytes in fd00-fdff, first %04x ref=%02x dut=%02x sp=%08x/%08x pc=%06x/%06x\n", frame + 1, nd, first, ref_byte(ref, first), dut->ram[first], (unsigned)ref->m68k.address_registers[7], dut->a[7], (unsigned)ref->m68k.program_counter, dut->pc); } }
         if ((frame + 1 >= 50 && frame + 1 <= 62) || (frame + 1) % 300 == 0 || mismatch_streak == 20 || dut->fault) {
             unsigned diff = 0;
             for (unsigned i = 0; i < 0x10000; i++) { int d = ref_byte(ref, i) != dut->ram[i]; diff += d; if (d && getenv("DP_MD_DIFF_LIST") && (frame + 1) % 3000 == 0) printf("  diff %04x ref=%02x dut=%02x\n", i, ref_byte(ref, i), dut->ram[i]); }
