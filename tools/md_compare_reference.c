@@ -90,6 +90,7 @@ int main(int argc, char **argv) {
             ref_x && dut_x && ref_x != dut_x && ref_x != prev_dut_x && dut_x != prev_ref_x) mismatch_streak++;
         else mismatch_streak = 0;
         prev_ref_x = ref_x; prev_dut_x = dut_x;
+        if (getenv("DP_MD_PC_DIFF")) { static int shown3; if (shown3 < 12 && (unsigned)ref->m68k.program_counter != dut->pc) { shown3++; printf("pc-diff frame %u: pc=%06x/%06x sr=%04x/%04x\n", frame + 1, (unsigned)ref->m68k.program_counter, dut->pc, (unsigned)ref->m68k.status_register, (unsigned)dut->sr); } }
         if (getenv("DP_MD_STACK_DIFF")) { static int shown2; unsigned nd = 0, first = 0;
             for (unsigned i = (getenv("DP_MD_DEEP") ? 0xfd7e : 0xfd00); i < (getenv("DP_MD_DEEP") ? 0xfd8e : 0xfe00); i++) if (ref_byte(ref, i) != dut->ram[i]) { if (!nd) first = i; nd++; }
             if (nd && shown2 < 6) { shown2++; printf("stack-diff frame %u: %u bytes in fd00-fdff, first %04x ref=%02x dut=%02x sp=%08x/%08x pc=%06x/%06x\n", frame + 1, nd, first, ref_byte(ref, first), dut->ram[first], (unsigned)ref->m68k.address_registers[7], dut->a[7], (unsigned)ref->m68k.program_counter, dut->pc); } }
