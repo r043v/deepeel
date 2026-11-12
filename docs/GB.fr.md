@@ -5177,12 +5177,12 @@ Référence VBA-rr (état) : `vba-rerecording` (sources dans `../vba-rerecording
 
 `tools/pce_dsy` (m0boy sans fenêtre) rejoue le TAS et écrit la WRAM par frame, comparée par `deepeel desync` à
 `bizhawk_dsy pce` (TurboNyma). Sur les 6000 frames de la référence, hors pile (`$180–$1ff`), l'écart médian de WRAM est de 0 octet dans
-chaque tranche de 500 frames ; des écarts passagers (jusqu'à ~55 octets, 173 au tout début) subsistent, et la pile
+chaque tranche de 500 frames ; 285 frames sur 6000 diffèrent encore hors pile (surtout les 40 premières, compteurs de boot `$0–$13`, et des rafales courtes ; jusqu'à ~55 octets, 173 au tout début) subsistent, et la pile
 n'est pas synchronisée (2 frames sur 6000 identiques pile comprise). Le multitap que le cœur de référence active
 (compteur de port à chaque écriture `$1000`) est émulé : il expliquait 11 octets stables.
 Trois choses ont fait converger les temps (trace des accès VDC comparée à Mednafen, constante à ~381 cycles maître) :
 la pile temporelle du CPU absorbe les décrochages (un arrêt de bus long ne s'ajoute plus à la ligne suivante),
 un commit VRAM est retenu dans une fenêtre de chaque ligne (`pce_mys_off`/`pce_mys_w`, ajustée sur les traces),
 et les blocs mémoire avancent le temps octet par octet. Valeurs par défaut de `pce_dsy` : 1 frame de boot
-(`PCE_PRE`), entrée sans retard (`PCE_INDELAY=0`), coupure de frame à la ligne 245 (`PCE_PHASE`).
+(`PCE_PRE`), entrée sans retard (`PCE_INDELAY=0`), coupure de frame à la ligne 258 (`PCE_PHASE`).
 Ce sont des observations de l'outil sur un seul jeu, pas des mesures de matériel.

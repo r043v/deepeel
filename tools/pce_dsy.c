@@ -28,7 +28,7 @@ int main(int argc, char **argv) {
     if (getenv("PCE_MYSW")) { extern unsigned pce_mys_w; pce_mys_w = (unsigned)atoi(getenv("PCE_MYSW")); }
     if (getenv("PCE_MYS")) { extern unsigned pce_mys_off; pce_mys_off = (unsigned)atoi(getenv("PCE_MYS")); }
     if (getenv("PCE_SCALE")) pce_scale_permille = (unsigned)atoi(getenv("PCE_SCALE"));
-    pce_frame_start_line = getenv("PCE_PHASE") ? (unsigned)atoi(getenv("PCE_PHASE")) : 245;   /* TurboNyma cuts its frames at about this VDC line (200..245 are equivalent) */
+    pce_frame_start_line = getenv("PCE_PHASE") ? (unsigned)atoi(getenv("PCE_PHASE")) : 258;   /* TurboNyma cuts its frames at about this VDC line (the boot-time counters of frames 4-6 match from 258) */
     for (int pre = getenv("PCE_PRE") ? atoi(getenv("PCE_PRE")) : 1; pre > 0; pre--) { machine.input = 0; pce_frame(); }   /* extra boot frames before frame 1 (reference alignment) */
     const int indelay = getenv("PCE_INDELAY") ? atoi(getenv("PCE_INDELAY")) : 0;
     for (size_t i = 0; i < n; i++) {
