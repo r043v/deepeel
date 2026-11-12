@@ -93,6 +93,8 @@ void dp_pce_reference(int pcehawk) {
     pce_timer_extra = pcehawk ? 1u : 0u;     // and its timer period is load + 1 ticks, first period 2 ticks longer
     pce_timer_phase = pcehawk ? 0u : 3u;
     { extern unsigned pce_timer_clk; pce_timer_clk = pcehawk ? 0u : 456u; }   // first timer period: 3 ticks and 480 prescaler cycles longer (measured on Shinobi)
+    pce_sat_offset = pcehawk ? 0 : 1350;   // the VRAM access queued at the VBL start waits ~1350 master clocks longer (Shinobi: stalls of 1000-1900 cycles)
+    pce_mys_w = pcehawk ? 90u : 170u;   // measured: sustained desync 2818 -> 10257
     pce_vdc_waits = pcehawk ? 0u : 1u;   // PCEHawk has no VRAM wait states behind the SATB DMA (TurboNyma does)
     ref_phase = pcehawk ? 4u : 258u;
     pce_frame_start_line = ref_phase;
