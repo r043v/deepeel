@@ -102,6 +102,9 @@ int main(int argc, char **argv) {
     ClownMDEmu_SetCartridge(ref, words, (cc_u32f)(n / 2)); ClownMDEmu_HardReset(ref, 1, 0);
 
     g_movie = &movie;
+    /* MD_REF_DSY=file: per-frame "wram" (64 KiB big-endian) in DSY1 (src/core/desync.h), for `deepeel desync` */
+    FILE *dsy = getenv("MD_REF_DSY") ? fopen(getenv("MD_REF_DSY"), "wb") : NULL;
+    if (dsy) fwrite("DSY1", 1, 4, dsy);
     static uint32_t packed[DP_MDRF_MAX_W * DP_MDRF_MAX_H];
     struct timespec t0; clock_gettime(CLOCK_MONOTONIC, &t0);
     double waited = 0, last_move = 0; uint32_t last_leader = 0;
@@ -120,6 +123,13 @@ int main(int argc, char **argv) {
             if (el > 0.01) feed->unsync_x10 = (uint32_t)(10.0 * g_frame / el);
         }
         ClownMDEmu_Iterate(ref);
+        if (dsy) {
+            static uint8_t sw[0x10000];
+            for (unsigned i = 0; i < 0x8000; i++) { sw[2*i] = (uint8_t)(ref->state.m68k.ram[i] >> 8); sw[2*i+1] = (uint8_t)ref->state.m68k.ram[i]; }
+            uint32_t fn = g_frame + 1, len = 0x10000; uint16_t nb = 1; uint8_t nl = 4;
+            fwrite(&fn, 4, 1, dsy); fwrite(&nb, 2, 1, dsy); fwrite(&nl, 1, 1, dsy); fwrite("wram", 1, 4, dsy);
+            fwrite(&len, 4, 1, dsy); fwrite(sw, 1, len, dsy);
+        }
         if (scr_w && scr_h) {
             for (int y = 0; y < scr_h; y++)   /* the row stride differs from the screen width */
                 memcpy(packed + (size_t)y * scr_w, screen[y], (size_t)scr_w * sizeof *packed);
@@ -127,6 +137,7 @@ int main(int argc, char **argv) {
                               movie.frames, g_frame + 1 == movie.frames);
         }
     }
+    if (dsy) fclose(dsy);
     dp_md_movie_free(&movie);
     free(rom); free(words); free(ref);
     return 0;

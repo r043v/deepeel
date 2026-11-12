@@ -4900,3 +4900,10 @@ big-endian) et `regs` (D0-7, A0-7, PC, u32 LE). `GPGX_DSY=fichier` (`tools/gpgx_
 Observation de l'outil sur Sonic (GMV jxq-783, touches appliquées dès l'image 0) : la manette RAM ($F604) concorde
 avec GPGX jusqu'à l'image ≈ 1100 ; elle diverge ensuite (≈ 1200). Les écarts de piles/tampons avant sont des
 décalages de phase dans l'image (m0boy rend la main à l'entrée du V-blank), pas des divergences de jeu.
+
+`MD_REF_DSY=fichier` (`tools/md_ref_live`, ClownMDEmu) écrit aussi `wram`. Comparaison Sonic (GMV jxq-783, 6000 images,
+observation de l'outil) : m0boy et ClownMDEmu ont la même position/anneaux jusqu'à l'image ≈ 2050 (écarts de phase
+seulement) ; ensuite m0boy se bloque vers x=8537 (saut, sol à y≈1197) alors que ClownMDEmu continue : c'est la première
+vraie divergence. GPGX/BizHawk s'écartent des deux dès l'image ≈ 600 (≈ 500 octets de RAM de jeu), donc ils ne suivent pas
+ce film. Correctif m0boy : une écriture 16 bits sur `$C00008-$C0000F` (compteur HV) récursait sans fin
+(`md_full_write16` → `write8` → `write16`) et plantait l'exploration après la fin du film.
