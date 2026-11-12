@@ -412,16 +412,17 @@ static uint64_t cell_key(const DpCoreConfig *cfg, const uint8_t *ramread, DpMach
 }
 
 // 1 when the key is new (inserted), 0 when already present; caller holds sh->mu
+static inline size_t keyhash(uint64_t k) { k ^= k >> 33; k *= 0xff51afd7ed558ccdull; k ^= k >> 33; return (size_t)k; }
 static int keyset_insert(uint64_t **set, size_t *cap, size_t *n, uint64_t key) {
     if (*n * 2 >= *cap) {
         size_t nc = *cap ? *cap * 2 : 1024;
         uint64_t *ns = calloc(nc, sizeof *ns);
         if (!ns) return 1;
         for (size_t i = 0; i < *cap; i++)
-            if ((*set)[i]) { size_t h = (*set)[i] & (nc - 1); while (ns[h]) h = (h + 1) & (nc - 1); ns[h] = (*set)[i]; }
+            if ((*set)[i]) { size_t h = keyhash((*set)[i]) & (nc - 1); while (ns[h]) h = (h + 1) & (nc - 1); ns[h] = (*set)[i]; }
         free(*set); *set = ns; *cap = nc;
     }
-    size_t h = key & (*cap - 1);
+    size_t h = keyhash(key) & (*cap - 1);
     while ((*set)[h]) { if ((*set)[h] == key) return 0; h = (h + 1) & (*cap - 1); }
     (*set)[h] = key; (*n)++;
     return 1;
@@ -982,6 +983,12 @@ static void run_path(Worker *w, Pending *p) {
             // answers 0 unless an interrupt is pending, so the per-(site, delay) key is
             // spent only when a fork is really produced.
             for (unsigned d = 1; d <= (cfg->no_irq_jitter ? 1u : 3u); d++) {
+                uint64_t ikey = ((uint64_t)m->rom_index(m, pc) + 1) | ((uint64_t)d << 40);
+                int known = 0;   // (site, delay) already forked: skip the costly hook and the 17 KiB snapshot
+                pthread_mutex_lock(&sh->mu);
+                if (sh->probecap) { size_t h = keyhash(ikey) & (sh->probecap - 1); while (sh->probeset[h]) { if (sh->probeset[h] == ikey) { known = 1; break; } h = (h + 1) & (sh->probecap - 1); } }
+                pthread_mutex_unlock(&sh->mu);
+                if (known) continue;
                 uint8_t *snap = malloc(sh->sbytes);
                 if (!snap) break;
                 if (!cfg->hooks->irq_alt(cfg->hooks->user, m, d, snap)) { free(snap); break; }

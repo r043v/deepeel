@@ -5143,3 +5143,5 @@ Seconde tentative de bascule (`DEEPEEL_GB_KERNEL=1` pour essayer, non retenue) :
 et `campaign_fixtures`, qui échoue par dépassement de délai sur `fix_irq.gb` : le noyau y tourne à ~0,03 M pas/s (file de 32 000 forks IRQ, états de 17 Ko) et ne finit pas dans les 300 s,
 alors que l'ancien explorateur termine. C'est le dernier bloqueur de performance avant la bascule. Les trois tests liés aux fonctions absentes sont épinglés à l'ancien explorateur
 (`DEEPEEL_GB_LEGACY=1`, propriété de test). Les graines pointeurs (`Pending.seed`) sont abandonnées au moment du tirage si leur cible est déjà couverte.
+
+Performance du noyau sur `fix_irq.gb` : cause trouvée, des clés d'ensembles (`keyset_insert`) qui se regroupaient dans les bits bas (sondage linéaire dégénéré). Un hachage mélangé (`keyhash`) fait passer le noyau de plus de 300 s à ~9,5 s ; le fork IRQ ignore aussi sans coût les couples (site, délai) déjà vus. Le bloqueur de performance est levé. Restent, pour la bascule du défaut : le moteur de sessions, les lots de la frontière et `coverage.bin`/`disc.bin` (`resume_cov`) côté noyau. L'ancien explorateur reste le défaut GB.

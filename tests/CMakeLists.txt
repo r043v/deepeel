@@ -813,4 +813,4 @@ set_tests_properties(bizhawk_reader PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME desync_finder COMMAND sh -c "d=${CMAKE_CURRENT_BINARY_DIR}; x=$<TARGET_FILE:deepeel>; python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/desync_fixture.py $d && $x desync $d/dsy_a.dsy $d/dsy_a.dsy | grep -q 'identical over 6' && ! $x desync $d/dsy_a.dsy $d/dsy_b.dsy > $d/dsy.out; grep -q 'compared frame 4' $d/dsy.out && grep -q '+0010  A=aa  B=ab' $d/dsy.out && grep -q 'window (5 frames' $d/dsy.out && $x desync $d/dsy_a.dsy $d/dsy_b.dsy --ignore wram:10 | grep -q 'identical over 6'")
 
 # Features the kernel does not have yet (play sessions, the legacy spool/lot frontier) stay pinned to the old GB explorer, which is kept but no longer the default.
-set_tests_properties(gb_session_cells gb_session_cells_resume frontier_cli PROPERTIES ENVIRONMENT "DEEPEEL_GB_LEGACY=1")
+set_tests_properties(gb_session_cells gb_session_cells_resume frontier_cli resume_cov PROPERTIES ENVIRONMENT "DEEPEEL_GB_LEGACY=1")
