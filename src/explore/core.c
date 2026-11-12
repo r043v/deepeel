@@ -1329,6 +1329,11 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
             fclose(cf);
         }
     }
+    if (cfg->state_dir && cfg->resume) {   // screen cells already archived by previous runs are not archived again
+        char kp[600]; snprintf(kp, sizeof kp, "%s/cells.bin", cfg->state_dir);
+        FILE *kf = fopen(kp, "rb");
+        if (kf) { uint64_t k; while (fread(&k, sizeof k, 1, kf) == 1) cell_insert(&sh, k); fclose(kf); }
+    }
     if (cfg->state_dir && cfg->resume) {   // discovery order: the earliest step at which each ROM byte was ever covered
         char dp[600]; snprintf(dp, sizeof dp, "%s/disc.bin", cfg->state_dir);
         FILE *df = fopen(dp, "rb");
@@ -1467,6 +1472,12 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     out->steps = sh.steps;
     for (unsigned i = 0; i < started; i++) out->steps += 0;   /* session steps are reported separately */
     out->spool_left = sh.spool_n; out->spooled = sh.spool_total;
+    if (cfg->state_dir && sh.celln) {   // archived screen cells for --resume
+        char kp[600]; snprintf(kp, sizeof kp, "%s/cells.bin", cfg->state_dir);
+        mkdir(cfg->state_dir, 0777);
+        FILE *kf = fopen(kp, "wb");
+        if (kf) { for (size_t i = 0; i < sh.cellcap; i++) if (sh.cellset[i]) fwrite(&sh.cellset[i], sizeof sh.cellset[i], 1, kf); fclose(kf); }
+    }
     if (cfg->state_dir) {   // discovery log for --resume
         char dp[600]; snprintf(dp, sizeof dp, "%s/disc.bin", cfg->state_dir);
         mkdir(cfg->state_dir, 0777);
@@ -1529,6 +1540,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "novelty picks %llu (new ROM bytes: novelty %llu, plain %llu)\n", U(r->novelty_picks), U(r->novelty_new_bytes), U(r->plain_new_bytes));
     fprintf(out, "workers %llu (short %llu)%s\n", U(r->workers), U(r->workers_short), r->workers_max ? "" : "");
     fprintf(out, "cells %llu, cell-pruned forks %llu\n", U(r->cells), U(r->cell_pruned));
+    fprintf(out, "deepeel: %llu screen cells archived into the checkpoint pool\n", U(r->cells));
     fprintf(out, "decompress runs %llu, compressed ROM bytes %llu\n", U(r->decompress_runs), U(r->compressed_bytes));
     fprintf(out, "seeded RAM states %llu\n", U(r->seeded_ram));
     fprintf(out, "held-pad sessions %llu\n", U(r->sessions));
