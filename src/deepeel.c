@@ -411,7 +411,7 @@ static int cmd_explore(int argc, char **argv) {
     uint8_t tier_limit = 0, defer_all = 0;
     uint8_t eb[32];
     int gb_core = 0; DpCoreConfig gkcfg; dp_core_config_default(&gkcfg); gkcfg.visits_per_pc = 2000000;   // frame waits are long loops   // --core: the generic kernel instead of the GB explorer
-    gb_core = getenv("DEEPEEL_GB_KERNEL") != NULL;   // DEEPEEL_GB_KERNEL=1 makes the kernel the GB default (blocked: fix_irq.gb is too slow, see docs/GB.fr.md); --legacy forces the old explorer
+    gb_core = getenv("DEEPEEL_GB_LEGACY") == NULL;   // the kernel is the GB default; --legacy (or DEEPEEL_GB_LEGACY=1) runs the old explorer, kept but deactivated
     for (int i = 2; i < argc; i++) { if (!strcmp(argv[i], "--core")) gb_core = 1; else if (!strcmp(argv[i], "--legacy")) gb_core = 0; }
     int spool_to_frontier = 0;
     uint16_t ea[32];
