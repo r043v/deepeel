@@ -88,6 +88,10 @@ static void line_start(void) {
 // which core recorded the movie being replayed: only the frame cut moves (the hardware model is the same)
 void dp_pce_reference(int pcehawk) {
     extern unsigned pce_vdc_waits;
+    extern unsigned pce_irq_delay, pce_timer_extra, pce_timer_phase;
+    pce_irq_delay = pcehawk ? 0u : 44u;      // TurboNyma raises IRQ1 about 44 CPU cycles after the line end
+    pce_timer_extra = pcehawk ? 1u : 0u;     // and its timer period is load + 1 ticks, first period 2 ticks longer
+    pce_timer_phase = pcehawk ? 0u : 2u;
     pce_vdc_waits = pcehawk ? 0u : 1u;   // PCEHawk has no VRAM wait states behind the SATB DMA (TurboNyma does)
     ref_phase = pcehawk ? 4u : 258u;
     pce_frame_start_line = ref_phase;
@@ -246,12 +250,14 @@ int dp_pce_irq_due(void) {
 
 // end of a line (the CPU has used its budget): the VDC/timer/IRQ events and the frame/line counters, as m0boy's pce_frame;
 // returns 1 when the frame completed (the boot frame before frame 1 is not reported)
+static int irq_defer;   // CPU cycles IRQ1 is still held back after a line end (TurboNyma profile)
 static int line_finish(void) {
     huc6280_t *c = &machine.cpu;
     int frame_done = 0;
         const unsigned total = (machine.vce_cr & 4) ? 263u : 262u;
         pce_cur_line = line_no;
         { extern unsigned vdc_master_per_cycle; static const unsigned rt[4] = { 4, 3, 2, 2 }; vdc_master_per_cycle = rt[machine.vce_cr & 3]; }
+        const unsigned st_before = machine.vdc.status & 0x3F;
         if (line_no < 262) vdc_line(&machine.vdc, line_no);
         machine.line_master += 1365;
         if (machine.vdc.sat_started) {
@@ -267,6 +273,7 @@ static int line_finish(void) {
             timer_tick();
         }
         update_irq();
+        if (pce_irq_delay && !st_before && (machine.vdc.status & 0x3F)) { c->irq_low &= (uint8_t)~PCE_IQ_IRQ1; irq_defer = (int)pce_irq_delay; }
         const uint32_t nominal_next = c->cycles + (uint32_t)line_left;   // line_left <= 0: the overshoot is inside the next line
         if (++fl_no >= total) {
             fl_no = 0;
@@ -293,6 +300,7 @@ unsigned dp_pce_step(int *frame_done) {
     unsigned spent = c->cycles - before;
     if (frame_done) *frame_done = 0;
     line_left -= (int)spent;
+    if (irq_defer > 0 && (irq_defer -= (int)spent) <= 0) { irq_defer = 0; update_irq(); }
     if (line_left <= 0) {
         int fd = line_finish();
         if (frame_done) *frame_done = fd;
@@ -416,9 +424,10 @@ void dp_pce_run_frame(void) {
     huc6280_t *c = &machine.cpu;
     for (;;) {
         uint32_t before = c->cycles;
-        huc6280_run(c, c->cycles + (uint32_t)(line_left > 0 ? line_left : 1));
+        huc6280_run(c, c->cycles + (uint32_t)(irq_defer > 0 && irq_defer < line_left ? irq_defer : line_left > 0 ? line_left : 1));
         st_port = 0;
         line_left -= (int)(c->cycles - before);
+        if (irq_defer > 0 && (irq_defer -= (int)(c->cycles - before)) <= 0) { irq_defer = 0; update_irq(); }
         if (line_left > 0) continue;
         if (line_finish()) return;
     }

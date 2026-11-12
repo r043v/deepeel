@@ -11,7 +11,7 @@ int main(int argc, char **argv) {
     uint8_t *mk = malloc(1 << 22); f = fopen(argv[2], "rb"); size_t nm = fread(mk, 1, 1 << 22, f); fclose(f);
     size_t N = (size_t)atol(argv[4]); if (N > nm) N = nm;
     if (!dp_pce_init(rom, n)) return 2;
-    if (argc > 5) dp_pce_reference(1);
+    dp_pce_reference(argc > 5);
     FILE *o = fopen(argv[3], "wb"); fwrite("DSY1", 1, 4, o);
     for (size_t i = 0; i < N; i++) {
         unsigned m = mk[i], k = 0;
