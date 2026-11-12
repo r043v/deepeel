@@ -4987,3 +4987,16 @@ de ligne utilisent `(ligne+1)*3420/7` ; le marqueur tombe désormais à la même
 à ±1 trame de la référence (trames 293/491 : écarts de signe opposé), la dérive de X reste (zone 1 atteinte
 sur 6000 trames). Restent à aligner : `md_full_bus.c` (compteur HV et gel DMA calculés avec 488) et
 `md_full_audio.c` (`FRAME_MASTER = 127856*7`).
+
+### 0.315.7 — Mega Drive : la trame commence au V-int (parité Sonic 1 / ClownMDEmu sur 6000 trames)
+
+Cause réelle de l'écart de ±1 trame : ClownMDEmu commence chaque trame au V-int (scanline 224, puis 225…261,
+−1, 0…223), alors que m0boy commençait à la ligne 0 et déclenchait le V-int à la ligne 224. Les deux
+horloges d'interruption étaient donc déphasées de 224 lignes depuis la mise sous tension, et le
+V-int activé en fin d'initialisation tombait de part ou d'autre de la frontière selon le cœur (compteur
+`$FE0C` en avance d'une unité dès la trame 60). Correctif dans m0boy (`md_full_cpu.c`, `md_full_bus.c`,
+`md_full_audio.c`) : le créneau 0 d'une trame est la ligne VDP 224 (V-int levé au début), les 38 lignes de
+blanking passent d'abord, puis les 224 lignes actives ; statut VDP, compteur HV, gel DMA et IRQ Z80 suivent.
+Observation de l'outil (`tools/md_compare_reference.sh`, `s6k.gmv`, 6000 trames) : changements de mode aux
+mêmes trames (294, 491, 723, 3314, 3546), X du joueur 0x08F4 des deux côtés, 10 octets de WRAM d'écart
+(avant : 1788). ctest 256/256.

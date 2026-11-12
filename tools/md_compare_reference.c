@@ -90,7 +90,7 @@ int main(int argc, char **argv) {
             ref_x && dut_x && ref_x != dut_x && ref_x != prev_dut_x && dut_x != prev_ref_x) mismatch_streak++;
         else mismatch_streak = 0;
         prev_ref_x = ref_x; prev_dut_x = dut_x;
-        if (frame < 20 || (frame + 1) % 300 == 0 || mismatch_streak == 20 || dut->fault) {
+        if ((frame + 1 >= 50 && frame + 1 <= 62) || (frame + 1) % 300 == 0 || mismatch_streak == 20 || dut->fault) {
             unsigned diff = 0;
             for (unsigned i = 0; i < 0x10000; i++) diff += ref_byte(ref, i) != dut->ram[i];
             printf("%u mode=%02x/%02x zone=%02x%02x/%02x%02x playerx=%02x%02x/%02x%02x pc=%06x/%06x diff=%u fault=%u\n",
@@ -102,6 +102,10 @@ int main(int argc, char **argv) {
             if (mismatch_streak == 20)
                 fprintf(stderr, "player X differs for 20 frames even with a one-frame offset at frame %u\n", frame + 1);
         }
+        if (getenv("DP_MD_PENALTY") && frame == 52) dut->frame_cycles += (unsigned)atoi(getenv("DP_MD_PENALTY"));
+        if (getenv("DP_MD_VBLA")) { static unsigned pv = 0, shown; unsigned r = (ref_byte(ref,0xfe0c)<<24)|(ref_byte(ref,0xfe0d)<<16)|(ref_byte(ref,0xfe0e)<<8)|ref_byte(ref,0xfe0f);
+            unsigned d = (dut->ram[0xfe0c]<<24)|(dut->ram[0xfe0d]<<16)|(dut->ram[0xfe0e]<<8)|dut->ram[0xfe0f];
+            if (r != d && shown < 3 && frame > 0) { shown++; printf("vbla f%u ref=%08x dut=%08x mode=%02x/%02x\n", frame + 1, r, d, ref_byte(ref,0xf600), dut->ram[0xf600]); } (void)pv; }
         if (getenv("DP_MD_FIRST_DIFF") && frame + 1 == 49) {   // interrupts are masked during the ROM checksum: step to the exact marker cycle
             MdFull *c = malloc(sizeof *c); memcpy(c, dut, sizeof *c);
             for (unsigned n = 0; n < 4000000 && c->ram[0xfffd] != 0x6e; n++) md_full_step_interp(c);
