@@ -5047,3 +5047,9 @@ fait passer le « forcé » du noyau de 3458 à 3963 octets seulement (même bud
 `core_closure_*` / `core_map_*` (les octets « static-only » deviennent forcés). L'écart de couverture spéculative avec
 l'ancien moteur ne vient donc pas de ces racines ; il reste à expliquer (définition de « code-forced » côté ancien moteur :
 décodage des graines de cascade, tables de sauts) avant toute désactivation de l'ancien moteur.
+
+Lecture de `old.txt` (Zelda GB) : l'ancien moteur n'exécute que 55 octets « naturels » ; les 142 978 octets « code-forced » viennent de
+16 273 graines spéculatives (entrées candidates : cibles de fermeture statique, pointeurs de tables, vecteurs), chacune exécutée
+en chemin forcé. L'écart vient donc de la **découverte d'entrées** (pointeurs/tables de la ROM), pas de l'exécuteur : le noyau
+n'ensemence que les cibles de transferts directs naturels. Chantier : un découvreur d'entrées (tables de pointeurs 16 bits
+dans la ROM, vecteurs) qui alimente `cfg->seeds` du noyau, à mesurer au même budget avant de désactiver l'ancien moteur.
