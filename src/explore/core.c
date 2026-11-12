@@ -39,6 +39,8 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
         return 2;
     }
     if (!strcmp(a, "--unbounded")) { c->unbounded = 1; c->max_total = 0; c->max_path_steps = 0; c->fork_site_cap = 0; return 1; }
+    if (!strcmp(a, "--state-dir") && i + 1 < argc) { c->state_dir = argv[i + 1]; return 2; }
+    if (!strcmp(a, "--resume")) { c->resume = 1; return 1; }
     if (!strcmp(a, "--no-closure")) { c->no_closure = 1; return 1; }
     if (!strcmp(a, "--no-cells")) { c->no_cells = 1; return 1; }
     if (!strcmp(a, "--no-event-probes") || !strcmp(a, "--no-event-fork")) { c->no_event_probes = 1; return 1; }
@@ -717,8 +719,13 @@ static void run_path(Worker *w, Pending *p) {
         if (!(attract || play) && cfg->max_total && __atomic_load_n(&sh->steps, __ATOMIC_RELAXED) + w->step_batch >= cfg->max_total) {
             loc->sat_total++;
             pthread_mutex_lock(&sh->mu);
-            for (size_t i = 0; i < sh->qn; i++) free(sh->q[i].state);
-            sh->qn = 0;
+            if (!cfg->state_dir) {
+                for (size_t i = 0; i < sh->qn; i++) free(sh->q[i].state);
+                sh->qn = 0;
+            } else {   // with --state-dir the backlog stays for the frontier file and the run winds down
+                __atomic_store_n(&sh->halt, 1, __ATOMIC_RELAXED);
+                pthread_cond_broadcast(&sh->cv);
+            }
             pthread_mutex_unlock(&sh->mu);
             break;
         }
@@ -1164,15 +1171,17 @@ static void *worker_main(void *arg) {
     for (;;) {
         for (;;) {
             if (__atomic_load_n(&sh->halt, __ATOMIC_RELAXED)) {   // drop the backlog (the disk spool stays reported as left)
-                for (size_t i = 0; i < sh->qn; i++) free(sh->q[i].state);
-                sh->qn = 0;
+                if (!cfg->state_dir) {   // with --state-dir the backlog is kept for the frontier file
+                    for (size_t i = 0; i < sh->qn; i++) free(sh->q[i].state);
+                    sh->qn = 0;
+                }
                 break;
             }
             if (!sh->qn && sh->spool_n) spool_refill(sh);
             if (sh->qn || sh->active == 0) break;
             pthread_cond_wait(&sh->cv, &sh->mu);
         }
-        if (!sh->qn) break;
+        if (!sh->qn || (cfg->state_dir && __atomic_load_n(&sh->halt, __ATOMIC_RELAXED))) break;
         if (w->idx > 0 && w->idx >= __atomic_load_n(&sh->allowed, __ATOMIC_RELAXED)) {   // adaptive: this worker is parked
             struct timespec dl; clock_gettime(CLOCK_REALTIME, &dl); dl.tv_sec += 1;
             pthread_cond_timedwait(&sh->cv, &sh->mu, &dl);
@@ -1284,6 +1293,22 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         m->save(m, start);
         uint32_t start_pc = m->pc(m);
         sh.q = NULL;
+    if (cfg->state_dir && cfg->resume) {   // states left pending by a previous run (same machine state size)
+        char fp[600]; snprintf(fp, sizeof fp, "%s/frontier.bin", cfg->state_dir);
+        FILE *ff = fopen(fp, "rb");
+        if (ff) {
+            uint32_t hd[3];
+            if (fread(hd, 4, 3, ff) == 3 && hd[0] == 0x31524644u && hd[1] == sh.sbytes) {
+                for (uint32_t i = 0; i < hd[2]; i++) {
+                    SpoolHead h; uint8_t *st = malloc(sh.sbytes);
+                    if (!st || fread(&h, sizeof h, 1, ff) != 1 || fread(st, 1, sh.sbytes, ff) != sh.sbytes) { free(st); break; }
+                    ram_push(&sh, (Pending){ st, h.pc, (int)h.forced, h.site, h.input });
+                    out->resumed++;
+                }
+            }
+            fclose(ff);
+        }
+    }
         for (size_t i = 0; i < cfg->n_seeds; i++) {
             uint8_t *cp = malloc(sh.sbytes);
             if (!cp) break;
@@ -1389,6 +1414,26 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     out->steps = sh.steps;
     for (unsigned i = 0; i < started; i++) out->steps += 0;   /* session steps are reported separately */
     out->spool_left = sh.spool_n; out->spooled = sh.spool_total;
+    if (cfg->state_dir) {   // the pending frontier (RAM queue, then the disk spool) for --resume
+        char fp[600]; snprintf(fp, sizeof fp, "%s/frontier.bin", cfg->state_dir);
+        if (sh.qn + sh.spool_n == 0) remove(fp);
+        else {
+            FILE *ff = fopen(fp, "wb");
+            if (ff) {
+                uint32_t hd[3] = { 0x31524644u, sh.sbytes, (uint32_t)(sh.qn + sh.spool_n) };
+                fwrite(hd, 4, 3, ff);
+                for (size_t i = 0; i < sh.qn; i++) {
+                    SpoolHead h = { sh.q[i].pc, (uint32_t)sh.q[i].forced, sh.q[i].site, sh.q[i].input };
+                    fwrite(&h, sizeof h, 1, ff); fwrite(sh.q[i].state, 1, sh.sbytes, ff);
+                }
+                uint8_t *rec = malloc(sh.spool_rs ? sh.spool_rs : 1);
+                for (uint64_t i = 0; rec && i < sh.spool_n; i++)
+                    if (pread(sh.spool_fd, rec, sh.spool_rs, (off_t)(i * sh.spool_rs)) == (ssize_t)sh.spool_rs) fwrite(rec, 1, sh.spool_rs, ff);
+                free(rec); fclose(ff);
+                out->saved = (uint64_t)(sh.qn + sh.spool_n);
+            }
+        }
+    }
     if (sh.spool_fd > 0) close(sh.spool_fd);
     for (size_t i = 0; i < sh.qn; i++) free(sh.q[i].state);
     free(sh.probeset); free(sh.cellset); free(sh.q); free(sh.sites.s); free(sh.fed); free(sh.fedsrc); free(sh.ramread); free(sh.site_picks); free(sh.site_gain); free(ws);
@@ -1407,6 +1452,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "steps %llu paths %llu forks %llu pruned-covered %llu\n", U(r->steps), U(r->paths), U(r->forks), U(r->pruned_covered));
     if (r->halted) fprintf(out, "halted: %s\n", r->halted == 1 ? "--max-time reached" : "--stall-time: no new ROM byte");
     if (r->attract_paths || r->play_paths) fprintf(out, "sessions: %llu attract, %llu play (%llu pad epochs), %llu frames played, %llu steps, %llu stopped by stagnation\n", U(r->attract_paths), U(r->play_paths), U(r->play_epochs), U(r->session_frames), U(r->session_steps), U(r->session_stalls));
+    if (r->resumed || r->saved) fprintf(out, "frontier: %llu states resumed, %llu saved\n", U(r->resumed), U(r->saved));
     fprintf(out, "spool: %llu states spilled to disk, %llu left unexplored\n", U(r->spooled), U(r->spool_left));
     fprintf(out, "saturation: total %llu path %llu loop %llu site %llu queue %llu\n", U(r->sat_total), U(r->sat_path), U(r->sat_loop), U(r->sat_site), U(r->sat_queue));
     fprintf(out, "index replays %llu\n", U(r->index_replays));

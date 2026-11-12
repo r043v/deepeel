@@ -5128,3 +5128,8 @@ comme l'ancien moteur. Ctest 256/256 (`lr_gambatte_parity` sauté). Tests dont l
 0.316.1 (suite) — sondes LY du noyau : ligne `event probes N at M sites: K forced variants`, option `--no-event-fork` (alias de `--no-event-probes`).
 
 0.316.1 (suite) — noyau : `DEEPEEL_MAPWIN_DUMP` écrit la carte ROM finale (PPM, 1 px par octet, 256 de large : vert naturel, orange forcé, bleu statique, jaune donnée). La fenêtre SDL temps réel du noyau reste à faire (la fenêtre actuelle lit les structures de l'ancien moteur).
+
+0.316.1 (suite) — noyau : frontière persistante. `--state-dir DIR` conserve à l'arrêt (budget `--max-total` atteint) la file des états en attente
+(RAM puis spool disque) dans `DIR/frontier.bin` (en-tête magique, taille d'état, nombre ; enregistrements `{pc, forced, site, input}` + état) ;
+`--resume` les remet en file avant les graines. Vérifié sur `fix_branch.gb` : 20 états sauvés, repris, exploration terminée (fichier supprimé quand la file est vide).
+Reste : conversion en lots portables et commandes `frontier stats` / `frontier drain` côté noyau.

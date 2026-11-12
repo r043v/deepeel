@@ -57,6 +57,8 @@ typedef struct DpCoreConfig {
     size_t n_seeds;
     const uint16_t *seed_banks;   // optional, parallel to seeds: ROM bank selected (a write to $2000 on the start state) before the seed runs
     int no_event_probes;
+    const char *state_dir;     // --state-dir: pending forked states are saved to <dir>/frontier.bin at exit
+    int resume;                // --resume: states saved there by a previous run are queued first
     int unbounded;             // --unbounded: no step/path/site-fork ceilings; the RAM queue spills to the disk spool
     int no_closure;            // static closure off (no STATIC marking from natural direct transfers)
     int no_cells;              // technique 8 off: no (target, RAM cell) pruning of forced forks
@@ -116,7 +118,7 @@ typedef struct DpCoreResult {
     uint64_t cell_pruned;       // forced forks dropped because their (target, RAM cell) pair was already queued
     uint64_t compressed_bytes;  // ROM bytes read as a sequential stream that fed unequal RAM writes (technique 6)
     uint64_t decompress_runs;   // such streams detected
-    uint64_t spooled;          // forked states that overflowed the RAM queue onto disk (none is dropped)
+    uint64_t resumed, saved; uint64_t spooled;          // forked states that overflowed the RAM queue onto disk (none is dropped)
     uint64_t spool_left;       // spilled states never run (the exploration ended first)
     unsigned halted;   /* 1: stopped by --max-time, 2: by --stall-time */
     uint64_t attract_paths, play_paths, play_epochs, session_frames, session_steps, session_stalls;   // generic long sessions run
