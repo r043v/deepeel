@@ -5214,3 +5214,8 @@ anticipé du DMA SAT dans m0boy), mais la fenêtre exacte n'est pas une simple b
 bloquées, à −150, −138, −132 non bloquées). Armer le blocage dès la ligne précédente fait diverger Shinobi dès la frame 1175
 (contre 10157 sans), quel que soit `PCE_SATOFF` : le décalage 2000 actuel absorbe déjà cet effet. À reprendre avec un modèle
 d'engagement exact (`pending_write`, `CheckAndCommitPending`) plutôt qu'une fenêtre empirique.
+Faits tirés du code Mednafen (`vdc.cpp`, `DoWaitStates`) et des traces : l'attente a lieu au *début* du prochain accès de données VDC
+(écriture VWR msb, lecture VRR, MARR msb) et non juste après l'écriture en attente ; la fin du DMA SAT mesurée est ≈ VD + 4090 unités
+maître (1024 × 4), soit un décalage bien inférieur à 2000. Un armement anticipé avec `PCE_SATOFF` 500–1000 ramène la somme des
+écarts de 386 k à ~180 k sur 11 500 frames mais introduit du bruit dès la frame ~2000 et une première divergence soutenue à ~2760 ;
+non retenu.
