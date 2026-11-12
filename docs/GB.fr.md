@@ -4919,3 +4919,10 @@ ce film. Correctif m0boy : une écriture 16 bits sur `$C00008-$C0000F` (compteur
 - m0boy : deux écarts de temps 68000 corrigés (opérations de bit sur registre, +2 seulement pour les bits ≥ 16 ; TAS 10 + ea).
   `tools/md_cpu_diff.c` (test différentiel instruction par instruction contre Clown68000) ne trouve aucun écart
   de résultat sur les opcodes légaux ; la désynchronisation Sonic ~trame 2053 de m0boy n'est pas résolue.
+
+### Gens (très vieux port Linux) : non construisible ici
+
+`~/dev/gens` est un code x86 32 bits (assembleur nasm elf32, pointeurs castés en entiers 32 bits) : après
+`touch` des fichiers autotools, la compilation s'arrête sur `gens_core/cpu/68k/cpu_68k.c:27` (initialisation non
+constante). Il faudrait une chaîne 32 bits (multilib) ; limite technique de la machine, pas du moteur. Les références
+GMV restent ClownMDEmu, GPGX (libretro) et BizHawk.
