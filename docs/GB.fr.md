@@ -4933,3 +4933,10 @@ m0boy exécutait le DMA mémoire→VDP en 0 cycle ; le matériel (et ClownMDEmu)
 lignes (débit en mots/ligne : H40 204 en blanking, 18 en affichage ; H32 166 / 16 ; VRAM compte double). Corrigé
 dans `md_full_bus.c` : Sonic ne dérive plus de ClownMDEmu aux trames 2025/2073 (écart de X ≤ 6 px à la trame 2100,
 contre 45 px). Observation de l'outil sur Sonic 1 uniquement ; le résidu reste à étudier.
+
+### `tools/lr_dsy` : producteur DSY1 générique (références GB/NES/PCE)
+
+`cc -O2 -std=gnu99 -Isrc tools/lr_dsy.c src/mach/libretro.c -ldl -lm -o build/lr_dsy` ; `lr_dsy CORE.so ROM masks.bin
+out.dsy [N]` rejoue un film (1 octet/trame, bits U D L R B A Select Start) dans n'importe quel cœur libretro et écrit
+`wram` / `vram` / `sram` par trame, à comparer par `deepeel desync`. Vérifié : Gambatte sur Zelda GB, deux runs
+identiques sur 300 trames. Côté deepeel (m0boy GB/NES/PCE) le producteur natif reste à écrire.
