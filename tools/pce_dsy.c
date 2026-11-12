@@ -31,6 +31,7 @@ int main(int argc, char **argv) {
     FILE *o = fopen(argv[3], "wb"); if (!o) { perror(argv[3]); return 2; }
     fwrite("DSY1", 1, 4, o);
     pce_init(rom, rb);
+    { extern unsigned pce_irq_delay, pce_timer_extra, pce_timer_phase; pce_irq_delay = 44; pce_timer_extra = 0; pce_timer_phase = 2; }   /* the TurboNyma profile, as dp_pce_reference(0) */
     if (getenv("PCE_SATOFF")) pce_sat_offset = atoi(getenv("PCE_SATOFF"));
     if (getenv("PCE_MYSW")) { extern unsigned pce_mys_w; pce_mys_w = (unsigned)atoi(getenv("PCE_MYSW")); }
     if (getenv("PCE_MYS")) { extern unsigned pce_mys_off; pce_mys_off = (unsigned)atoi(getenv("PCE_MYS")); }
@@ -39,7 +40,7 @@ int main(int argc, char **argv) {
     if (getenv("PCE_NOWAIT")) { extern unsigned pce_vdc_waits; pce_vdc_waits = 0; }
     if (getenv("PCE_IRQD")) { extern unsigned pce_irq_delay; pce_irq_delay = (unsigned)atoi(getenv("PCE_IRQD")); }
     if (getenv("PCE_TMUL")) { extern unsigned pce_timer_mul; pce_timer_mul = (unsigned)atoi(getenv("PCE_TMUL")); }
-    if (getenv("PCE_TEXTRA")) { extern unsigned pce_timer_extra; pce_timer_extra = 1; }
+    if (getenv("PCE_TEXTRA")) { extern unsigned pce_timer_extra; pce_timer_extra = (unsigned)atoi(getenv("PCE_TEXTRA")); }
     if (getenv("PCE_TPH")) { extern unsigned pce_timer_phase; pce_timer_phase = (unsigned)atoi(getenv("PCE_TPH")); }
     if (getenv("PCE_TCLK")) { extern unsigned pce_timer_clk; pce_timer_clk = (unsigned)atoi(getenv("PCE_TCLK")); }
     if (getenv("PCE_EVT")) { extern unsigned pce_evt_master; pce_evt_master = (unsigned)atoi(getenv("PCE_EVT")); }

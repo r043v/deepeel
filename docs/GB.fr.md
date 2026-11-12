@@ -5186,3 +5186,22 @@ un commit VRAM est retenu dans une fenêtre de chaque ligne (`pce_mys_off`/`pce_
 et les blocs mémoire avancent le temps octet par octet. Valeurs par défaut de `pce_dsy` : 1 frame de boot
 (`PCE_PRE`), entrée sans retard (`PCE_INDELAY=0`), coupure de frame à la ligne 258 (`PCE_PHASE`).
 Ce sont des observations de l'outil sur un seul jeu, pas des mesures de matériel.
+
+## PCE : deux profils de film, Bonk 3 (PCEHawk) et Shinobi (TurboNyma) (observation de l'outil)
+
+Le pont choisit le profil par l'en-tête du film (`Core PCEHawk`) via `dp_pce_reference` :
+
+| | PCEHawk (Bonk 3) | TurboNyma (Shinobi J) |
+|---|---|---|
+| coupe de frame | ligne 4 | ligne 258 |
+| attentes VRAM derrière le DMA SATB | aucune | oui |
+| IRQ1 (VDC) | à la fin de ligne | +44 cycles CPU après la fin de ligne (`pce_irq_delay`) |
+| période du timer | `load + 2` ticks | `load + 1` ticks (`pce_timer_extra = 0`) |
+| 1re période du timer | — | +3 ticks et +480 cycles de prédiviseur (`pce_timer_phase`, `pce_timer_clk`) |
+
+Observations (machine concrète, pas des mesures de matériel) : Bonk 3 n'a aucune divergence soutenue sur 68 420 frames. Shinobi :
+première divergence soutenue à la frame 2818 sur 25 411 (1207 avant le profil) ; 2 410 des 4 000 premières frames ont au plus 3 octets
+d'écart hors pile. Au-delà, un événement de scène arrive une frame plus tôt côté m0boy (frame 2533, `$6` saute de +64 une frame avant la
+référence) : une course contre la coupe de frame non expliquée. Le Mednafen patché sert de trace d'instructions jusqu'à ~la frame 550 ;
+après, il s'écarte plus de la référence que m0boy et ne sert plus. Réglages de calage : `tools/pce_bridge_dsy.c` (`PCE_IRQD`, `PCE_TPH`,
+`PCE_TCLK`, `PCE_TEXTRA`, `PCE_PHASE`, `PCE_CUT`, `PCE_SATOFF`).

@@ -91,11 +91,19 @@ void dp_pce_reference(int pcehawk) {
     extern unsigned pce_irq_delay, pce_timer_extra, pce_timer_phase;
     pce_irq_delay = pcehawk ? 0u : 44u;      // TurboNyma raises IRQ1 about 44 CPU cycles after the line end
     pce_timer_extra = pcehawk ? 1u : 0u;     // and its timer period is load + 1 ticks, first period 2 ticks longer
-    pce_timer_phase = pcehawk ? 0u : 2u;
+    pce_timer_phase = pcehawk ? 0u : 3u;
+    { extern unsigned pce_timer_clk; pce_timer_clk = pcehawk ? 0u : 480u; }   // first timer period: 3 ticks and 480 prescaler cycles longer (measured on Shinobi)
     pce_vdc_waits = pcehawk ? 0u : 1u;   // PCEHawk has no VRAM wait states behind the SATB DMA (TurboNyma does)
     ref_phase = pcehawk ? 4u : 258u;
     pce_frame_start_line = ref_phase;
     if (!machine.frames && !fl_no) line_no = ref_phase % 262u;
+}
+
+// calibration: move the reference's frame cut (before the first frame)
+void dp_pce_set_phase(unsigned line) {
+    ref_phase = line;
+    pce_frame_start_line = line;
+    if (!machine.frames && !fl_no) line_no = line % 262u;
 }
 
 int dp_pce_init(const uint8_t *data, size_t size) {
@@ -420,11 +428,22 @@ void pce_trace_step(uint16_t pc) {
 void pce_trace_dyn(uint16_t pc) { (void)pc; }
 void pce_trace_regs(uint8_t a, uint8_t x, uint8_t y, uint8_t s, uint8_t p, uint32_t cyc) { (void)a; (void)x; (void)y; (void)s; (void)p; (void)cyc; }
 
+static unsigned cut_cycles;          // the reference samples its WRAM this many CPU cycles before the frame's last line ends
+static uint8_t cut_wram[0x2000]; static int cut_valid;
+void dp_pce_set_cut(unsigned cycles) { cut_cycles = cycles; }
 void dp_pce_run_frame(void) {
     huc6280_t *c = &machine.cpu;
+    cut_valid = 0;
     for (;;) {
         uint32_t before = c->cycles;
-        huc6280_run(c, c->cycles + (uint32_t)(irq_defer > 0 && irq_defer < line_left ? irq_defer : line_left > 0 ? line_left : 1));
+        const unsigned total = (machine.vce_cr & 4) ? 263u : 262u;
+        int chunk = irq_defer > 0 && irq_defer < line_left ? irq_defer : line_left > 0 ? line_left : 1;
+        const int at_cut = cut_cycles && !cut_valid && fl_no + 1 == total;
+        if (at_cut) {
+            if (line_left <= (int)cut_cycles) { memcpy(cut_wram, machine.wram, sizeof cut_wram); cut_valid = 1; }
+            else if (chunk > line_left - (int)cut_cycles) chunk = line_left - (int)cut_cycles;
+        }
+        huc6280_run(c, c->cycles + (uint32_t)chunk);
         st_port = 0;
         line_left -= (int)(c->cycles - before);
         if (irq_defer > 0 && (irq_defer -= (int)(c->cycles - before)) <= 0) { irq_defer = 0; update_irq(); }
@@ -432,6 +451,8 @@ void dp_pce_run_frame(void) {
         if (line_finish()) return;
     }
 }
+
+uint8_t *dp_pce_wram_cut(void) { return cut_valid ? cut_wram : machine.wram; }   // the frame's WRAM as the reference samples it
 
 // a coarse screen fingerprint (Go-Explore cells): the visible part of the
 // BAT (its size from MWR, its origin from the scroll registers) on a 4x4

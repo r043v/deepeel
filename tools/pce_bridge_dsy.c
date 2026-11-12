@@ -12,6 +12,14 @@ int main(int argc, char **argv) {
     size_t N = (size_t)atol(argv[4]); if (N > nm) N = nm;
     if (!dp_pce_init(rom, n)) return 2;
     dp_pce_reference(argc > 5);
+    { extern unsigned pce_irq_delay, pce_timer_extra, pce_timer_phase, pce_timer_clk; extern int pce_sat_offset;   // sweep knobs
+      if (getenv("PCE_IRQD")) pce_irq_delay = (unsigned)atoi(getenv("PCE_IRQD"));
+      if (getenv("PCE_TPH")) pce_timer_phase = (unsigned)atoi(getenv("PCE_TPH"));
+      if (getenv("PCE_TCLK")) pce_timer_clk = (unsigned)atoi(getenv("PCE_TCLK"));
+      if (getenv("PCE_TEXTRA")) pce_timer_extra = (unsigned)atoi(getenv("PCE_TEXTRA"));
+      if (getenv("PCE_PHASE")) { extern void dp_pce_set_phase(unsigned); dp_pce_set_phase((unsigned)atoi(getenv("PCE_PHASE"))); }
+      if (getenv("PCE_CUT")) { extern void dp_pce_set_cut(unsigned); dp_pce_set_cut((unsigned)atoi(getenv("PCE_CUT"))); }
+      if (getenv("PCE_SATOFF")) pce_sat_offset = atoi(getenv("PCE_SATOFF")); }
     FILE *o = fopen(argv[3], "wb"); fwrite("DSY1", 1, 4, o);
     for (size_t i = 0; i < N; i++) {
         unsigned m = mk[i], k = 0;
@@ -21,7 +29,7 @@ int main(int argc, char **argv) {
         dp_pce_run_frame();
         uint32_t fn = (uint32_t)(i + 1), len = 0x2000; uint16_t nb = 1; uint8_t nl = 4;
         fwrite(&fn, 4, 1, o); fwrite(&nb, 2, 1, o); fwrite(&nl, 1, 1, o); fwrite("wram", 1, 4, o); fwrite(&len, 4, 1, o);
-        fwrite(dp_pce_wram(), 1, 0x2000, o);
+        { extern uint8_t *dp_pce_wram_cut(void); fwrite(dp_pce_wram_cut(), 1, 0x2000, o); }
     }
     fclose(o); return 0;
 }
