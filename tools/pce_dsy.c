@@ -38,6 +38,7 @@ int main(int argc, char **argv) {
         machine.input = (uint8_t)k;
         { extern int pce_trace; int a = getenv("PCE_TRACE") ? atoi(getenv("PCE_TRACE")) : 0; pce_trace = a && (int)i + 1 >= a && (int)i + 1 <= a + (getenv("PCE_TRACE_N") ? atoi(getenv("PCE_TRACE_N")) : 1) - 1; if (pce_trace) fprintf(stderr, "FRAME %zu\n", i + 1); }
         pce_frame();
+        if (getenv("PCE_SP")) fprintf(stderr, "SP %zu %02x\n", i + 1, machine.cpu.s);
         uint32_t fn = (uint32_t)(i + 1), len = 0x2000; uint16_t nb = 1; uint8_t nl = 4;
         fwrite(&fn, 4, 1, o); fwrite(&nb, 2, 1, o); fwrite(&nl, 1, 1, o); fwrite("wram", 1, 4, o);
         fwrite(&len, 4, 1, o); fwrite(machine.wram, 1, 0x2000, o);
