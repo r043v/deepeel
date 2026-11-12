@@ -7,7 +7,7 @@ II/I/Run buttons map to B/A/Start).  --skip drops N leading frames (a movie that
 """
 import sys, zipfile, re
 
-BITS = {"up": 0, "down": 1, "left": 2, "right": 3, "b": 4, "a": 5, "select": 6, "start": 7, "ii": 4, "i": 5, "run": 7}
+BITS = {"up": 0, "down": 1, "left": 2, "right": 3, "b": 4, "a": 5, "select": 6, "start": 7, "ii": 4, "i": 5, "run": 7, "b2": 4, "b1": 5}   # PCEHawk logs name the buttons B1 (I) / B2 (II)
 
 def fm2(text):
     out = []
@@ -28,13 +28,11 @@ def fm2(text):
 def bk2(z):
     log = z.read("Input Log.txt").decode("utf-8", "replace").splitlines()
     key = next(l for l in log if l.startswith("LogKey:"))
-    groups = key[len("LogKey:"):].split("|")
-    names = []   # button names of player 1, in log order
-    for g in groups:
-        if not g or g.startswith("#"):
-            continue
+    names = []   # button names in log order; '#' starts a group, '|' separates buttons (a leading '#' is not a skip marker)
+    for g in key[len("LogKey:"):].replace("#", "|").split("|"):
         for b in g.split(","):
-            names.append(b.strip())
+            if b.strip():
+                names.append(b.strip())
     p1 = [(i, n[3:].lower()) for i, n in enumerate(names) if n.startswith("P1 ")]
     out = []
     for l in log:

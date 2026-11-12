@@ -109,12 +109,13 @@ namespace BizhawkDsy
 			var feedPath = Environment.GetEnvironmentVariable("BIZHAWK_FEED");
 			if (feedPath != null) feed = MemoryMappedFile.CreateFromFile(feedPath, FileMode.Open, null, 36 + 426 * 262 * 4).CreateViewAccessor();
 			int feedFps = int.TryParse(Environment.GetEnvironmentVariable("BIZHAWK_FEED_FPS"), out var ff) ? ff : 60;
-			var t0 = DateTime.UtcNow;
+			var t0 = DateTime.UtcNow; double worked = 0;
 			using var w = new BinaryWriter(File.Create(args[3]));
 			w.Write(Encoding.ASCII.GetBytes("DSY1"));
 			for (int f = 0; f < frames; f++)
 			{
 				for (int i = 0; i < 8; i++) if (names[i] != null) controller[names[i]] = (masks[f] & (1 << i)) != 0;
+				var tf = DateTime.UtcNow;
 				fe.Core.FrameAdvance(controller, true, false);
 				if (feed != null)
 				{
@@ -125,6 +126,8 @@ namespace BizhawkDsy
 					for (int y = 0; y < oh; y++) for (int x = 0; x < ow; x++) feed.Write(36 + (y * ow + x) * 4, (uint)vb[y * sy * bw + x * sx] | 0xFF000000u);
 					feed.Write(8, (uint)(f + 1)); feed.Write(12, (uint)frames); feed.Write(16, (uint)ow); feed.Write(20, (uint)oh); feed.Write(24, 0u);
 					feed.Write(4, seq + 2);
+					worked += (DateTime.UtcNow - tf).TotalSeconds;
+					feed.Write(32, (uint)((f + 1) / Math.Max(worked, 1e-3) * 10));   // speed without the pacing sleeps, tenths of frames/s
 					var due = t0.AddSeconds((f + 1) / (double)feedFps) - DateTime.UtcNow;
 					if (due > TimeSpan.Zero) Thread.Sleep(due);
 				}
