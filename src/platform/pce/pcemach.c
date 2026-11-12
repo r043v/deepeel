@@ -135,8 +135,8 @@ int dp_pce_init(const uint8_t *data, size_t size) {
     // before frame 1 whose end is not reported, the 263-line frame when the VCE asks for it
     pce_frame_start_line = ref_phase;
     pre_frames = 1;
-    fl_no = 0;
-    line_no = pce_frame_start_line % 262u;
+    fl_no = getenv("PCE_BOOTFL") ? (unsigned)atoi(getenv("PCE_BOOTFL")) : 0;   // calibration: where in its 262-line cycle the frame grid starts
+    line_no = (fl_no + pce_frame_start_line) % 262u;
     line_left = 0;
     line_start();
     machine.line_cycles = machine.cpu.cycles;
@@ -262,6 +262,7 @@ int dp_pce_irq_due(void) {
 // end of a line (the CPU has used its budget): the VDC/timer/IRQ events and the frame/line counters, as m0boy's pce_frame;
 // returns 1 when the frame completed (the boot frame before frame 1 is not reported)
 
+unsigned pce_vsync_extra = 0;   // CPU cycles the vsync's VD is held back (TurboNyma profile; calibration knob PCE_VSEXTRA)
 static int irq_defer;   // CPU cycles IRQ1 is still held back after a line end (TurboNyma profile)
 static int line_finish(void) {
     huc6280_t *c = &machine.cpu;
@@ -286,7 +287,7 @@ static int line_finish(void) {
             timer_tick();
         }
         update_irq();
-        if (pce_irq_delay && !st_before && (machine.vdc.status & 0x3F)) { c->irq_low &= (uint8_t)~PCE_IQ_IRQ1; irq_defer = (int)pce_irq_delay; }
+        if (pce_irq_delay && !st_before && (machine.vdc.status & 0x3F)) { c->irq_low &= (uint8_t)~PCE_IQ_IRQ1; irq_defer = (int)pce_irq_delay + ((line_no <= 1 && (machine.vdc.status & 0x20)) ? pce_vsync_extra : 0); }   // the VCE vsync lands inside a line: the VD it raises is seen later
         const uint32_t nominal_next = c->cycles + (uint32_t)line_left;   // line_left <= 0: the overshoot is inside the next line
         if (++fl_no >= total) {
             fl_no = 0;

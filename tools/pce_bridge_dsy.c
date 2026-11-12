@@ -18,6 +18,7 @@ int main(int argc, char **argv) {
       if (getenv("PCE_TCLK")) pce_timer_clk = (unsigned)atoi(getenv("PCE_TCLK"));
       if (getenv("PCE_TDIV")) { extern unsigned pce_timer_div; pce_timer_div = (unsigned)atoi(getenv("PCE_TDIV")); }
       if (getenv("PCE_TEXTRA")) pce_timer_extra = (unsigned)atoi(getenv("PCE_TEXTRA"));
+      if (getenv("PCE_VSEXTRA")) { extern unsigned pce_vsync_extra; pce_vsync_extra = (unsigned)atoi(getenv("PCE_VSEXTRA")); }
       if (getenv("PCE_PHASE")) { extern void dp_pce_set_phase(unsigned); dp_pce_set_phase((unsigned)atoi(getenv("PCE_PHASE"))); }
       if (getenv("PCE_CUT")) { extern void dp_pce_set_cut(unsigned); dp_pce_set_cut((unsigned)atoi(getenv("PCE_CUT"))); }
       if (getenv("PCE_MYS")) { extern unsigned pce_mys_off; pce_mys_off = (unsigned)atoi(getenv("PCE_MYS")); }
