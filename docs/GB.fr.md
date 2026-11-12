@@ -5207,3 +5207,10 @@ du DMA SAT (`pce_sat_offset = 2000`, fenêtre `pce_mys_w = 170`) ; le DMA SAT d�
 Il reste un écart de scène cumulatif (`$1`, `$6`) avant 10257 : le modèle d'attente VDC n'est pas encore exact. Les traces
 Mednafen patché servent jusqu'à ~la frame 550. Réglages de calage : `tools/pce_bridge_dsy.c` (`PCE_IRQD`, `PCE_TPH`,
 `PCE_TCLK`, `PCE_TEXTRA`, `PCE_PHASE`, `PCE_CUT`, `PCE_SATOFF`, `PCE_MYS`, `PCE_MYSW`, `PCE_SATHDW`).
+
+Piste explorée sans succès (non conservée) : Mednafen bloque le CPU (`WS:sat`) quand une écriture VWR tombe peu avant le début
+du DMA SAT (frames 1–5, 251–254, 495–516, 848–852 : la liste des frames bloquées coïncide à peu près avec celle d'un armement
+anticipé du DMA SAT dans m0boy), mais la fenêtre exacte n'est pas une simple borne temporelle (écritures à −291, −195 avant VD
+bloquées, à −150, −138, −132 non bloquées). Armer le blocage dès la ligne précédente fait diverger Shinobi dès la frame 1175
+(contre 10157 sans), quel que soit `PCE_SATOFF` : le décalage 2000 actuel absorbe déjà cet effet. À reprendre avec un modèle
+d'engagement exact (`pending_write`, `CheckAndCommitPending`) plutôt qu'une fenêtre empirique.
