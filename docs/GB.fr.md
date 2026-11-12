@@ -5111,3 +5111,8 @@ exercent des fonctions de l'ancien explorateur que le noyau GB n'a pas encore : 
 (provenance), `frontier_cli`, `rtcode_archive`/`rtcode_generated` (archive de code runtime), `event_probe_ly`, `wram_exec_trace`,
 `gb_jp_table(_de)` (tables de sauts), `mapwin_cli`, `campaign_fixtures`. La couverture d'octets est atteinte (mesures ci-dessus) ; les
 fonctions listées sont le reste du portage avant de désactiver l'ancien explorateur sur GB. L'ancien reste donc le défaut.
+
+0.316.1 — technique S4 portée dans la fermeture statique du noyau (sm83/z80) : un `JP HL` exécuté précédé (≤ 24 octets) d'un `ld hl,nn`
+lit une table de pointeurs de code à nn (stride 2, 64 mots max) dont les entrées valides deviennent des racines statiques ; rapport
+`S4 operand tables of executed JP HL: N tables, M entries`. Les variantes stride 3 et `add hl,de/bc` de l'ancien moteur restent à porter.
+Reste des 13 techniques : provenance, cellules de session, archive de code runtime, sondes d'événements, frontière, fenêtre de banque.

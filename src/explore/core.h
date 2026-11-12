@@ -111,7 +111,7 @@ typedef struct DpCoreResult {
     int in_novelty_path;        // internal: the path being run was a novelty pick
     uint64_t seeded_ram, event_probe_sites, irq_forks, jitter_forks, sessions; // probe sites visited (technique 2)
     uint64_t event_probes;      // alternative-status states queued
-    uint64_t closure_roots, closure_bytes, closure_capped;   // static closure: roots walked, bytes newly marked, walks stopped by the cap
+    uint64_t closure_roots, closure_bytes, closure_capped, closure_jp_tables, closure_jp_entries;   // static closure: roots walked, bytes newly marked, walks stopped by the cap
     uint64_t cells;             // distinct (fork target, RAM cell) pairs queued (technique 8)
     uint64_t cell_pruned;       // forced forks dropped because their (target, RAM cell) pair was already queued
     uint64_t compressed_bytes;  // ROM bytes read as a sequential stream that fed unequal RAM writes (technique 6)
