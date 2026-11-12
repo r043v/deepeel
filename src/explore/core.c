@@ -1329,6 +1329,23 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
             fclose(cf);
         }
     }
+    if (cfg->state_dir && cfg->resume) {   // discovery order: the earliest step at which each ROM byte was ever covered
+        char dp[600]; snprintf(dp, sizeof dp, "%s/disc.bin", cfg->state_dir);
+        FILE *df = fopen(dp, "rb");
+        if (df) {
+            uint32_t hd[2];
+            if (fread(hd, 4, 2, df) == 2 && hd[0] == 0x31435344u && hd[1] == rom_size) {
+                uint64_t *buf = malloc((rom_size ? rom_size : 1) * sizeof *buf);
+                if (buf && fread(buf, sizeof *buf, rom_size, df) == rom_size) {
+                    size_t n = 0;
+                    for (size_t i = 0; i < rom_size; i++) if (buf[i] && (!out->first_seen[i] || buf[i] < out->first_seen[i])) { out->first_seen[i] = buf[i]; n++; }
+                    fprintf(stderr, "deepeel: resumed discovery log (%zu entries)\n", n);
+                }
+                free(buf);
+            }
+            fclose(df);
+        }
+    }
     if (cfg->state_dir && cfg->resume) {   // states left pending by a previous run (same machine state size)
         char fp[600]; snprintf(fp, sizeof fp, "%s/frontier.bin", cfg->state_dir);
         FILE *ff = fopen(fp, "rb");
@@ -1450,6 +1467,12 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     out->steps = sh.steps;
     for (unsigned i = 0; i < started; i++) out->steps += 0;   /* session steps are reported separately */
     out->spool_left = sh.spool_n; out->spooled = sh.spool_total;
+    if (cfg->state_dir) {   // discovery log for --resume
+        char dp[600]; snprintf(dp, sizeof dp, "%s/disc.bin", cfg->state_dir);
+        mkdir(cfg->state_dir, 0777);
+        FILE *df = fopen(dp, "wb");
+        if (df) { uint32_t hd[2] = { 0x31435344u, (uint32_t)rom_size }; fwrite(hd, 4, 2, df); fwrite(out->first_seen, sizeof *out->first_seen, rom_size, df); fclose(df); }
+    }
     if (cfg->state_dir) {   // coverage map for --resume
         char cp[600]; snprintf(cp, sizeof cp, "%s/coverage.bin", cfg->state_dir);
         mkdir(cfg->state_dir, 0777);
