@@ -9,6 +9,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.MemoryMappedFiles;
+using System.Threading;
 using System.Linq;
 using System.Text;
 
@@ -25,6 +27,17 @@ using BizHawk.Tests.Testroms;
 
 namespace BizhawkDsy
 {
+	// Nyma cores read the asset's file name and extension (DummyRomAsset leaves RomPath unimplemented)
+	internal sealed class PceRom : IRomAsset
+	{
+		public PceRom(byte[] d) { RomData = d; FileData = d; }
+		public byte[] RomData { get; }
+		public byte[] FileData { get; }
+		public string Extension => ".pce";
+		public string RomPath => "game.pce";
+		public GameInfo Game => GameInfo.NullInstance;
+	}
+
 	internal static class Program
 	{
 		private static readonly string[] Words = { "Up", "Down", "Left", "Right", "B", "A", "Select", "Start" };
@@ -58,7 +71,7 @@ namespace BizhawkDsy
 					return new TurboNyma(new CoreLoadParameters<NymaCore.NymaSettings, NymaCore.NymaSyncSettings>
 					{
 						Comm = coreComm, DeterministicEmulationRequested = true, Game = GameInfo.NullInstance,
-						Roms = { new DummyRomAsset(rom, VSystemID.Raw.PCE) }, Settings = new(), SyncSettings = new(),
+						Roms = { new PceRom(rom) }, Settings = new(), SyncSettings = new(),
 					});
 				default:
 					Console.Error.WriteLine("unknown system " + system + " (gen | sms | nes | pce)");
@@ -90,12 +103,31 @@ namespace BizhawkDsy
 			long lo = 0, hi = long.MaxValue;
 			var rg = Environment.GetEnvironmentVariable("BIZHAWK_DSY_RANGE");
 			if (rg != null) { var p = rg.Split('-'); lo = Convert.ToInt64(p[0], 16); hi = Convert.ToInt64(p[1], 16) + 1; }
+			// BIZHAWK_FEED=<file>: also publish each frame to the watch window's reference tile (src/explore/md_ref_feed.h
+			// layout, the file must exist with the 'MDRF' magic: tools/pce_watch.sh creates it); BIZHAWK_FEED_FPS paces it (default 60)
+			MemoryMappedViewAccessor feed = null; var vp = fe.Core.AsVideoProvider();
+			var feedPath = Environment.GetEnvironmentVariable("BIZHAWK_FEED");
+			if (feedPath != null) feed = MemoryMappedFile.CreateFromFile(feedPath, FileMode.Open, null, 36 + 426 * 262 * 4).CreateViewAccessor();
+			int feedFps = int.TryParse(Environment.GetEnvironmentVariable("BIZHAWK_FEED_FPS"), out var ff) ? ff : 60;
+			var t0 = DateTime.UtcNow;
 			using var w = new BinaryWriter(File.Create(args[3]));
 			w.Write(Encoding.ASCII.GetBytes("DSY1"));
 			for (int f = 0; f < frames; f++)
 			{
 				for (int i = 0; i < 8; i++) if (names[i] != null) controller[names[i]] = (masks[f] & (1 << i)) != 0;
 				fe.Core.FrameAdvance(controller, true, false);
+				if (feed != null)
+				{
+					int bw = vp.BufferWidth, bh = vp.BufferHeight, sx = (bw + 425) / 426, sy = (bh + 261) / 262, ow = bw / sx, oh = bh / sy;
+					var vb = vp.GetVideoBuffer();
+					uint seq = feed.ReadUInt32(4);
+					feed.Write(4, seq + 1);
+					for (int y = 0; y < oh; y++) for (int x = 0; x < ow; x++) feed.Write(36 + (y * ow + x) * 4, (uint)vb[y * sy * bw + x * sx] | 0xFF000000u);
+					feed.Write(8, (uint)(f + 1)); feed.Write(12, (uint)frames); feed.Write(16, (uint)ow); feed.Write(20, (uint)oh); feed.Write(24, 0u);
+					feed.Write(4, seq + 2);
+					var due = t0.AddSeconds((f + 1) / (double)feedFps) - DateTime.UtcNow;
+					if (due > TimeSpan.Zero) Thread.Sleep(due);
+				}
 				w.Write((uint)(f + 1)); w.Write((ushort)picked.Count);
 				foreach (var (blk, dom) in picked)
 				{

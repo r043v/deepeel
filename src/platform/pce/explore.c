@@ -56,8 +56,11 @@ typedef struct { uint64_t key; uint32_t count; } PceLoop;
 static unsigned g_watch_every;
 static DpPceResults *g_watch_r;
 static uint64_t g_watch_n;
+static uint64_t g_tas_base;     // frame counter when the movie being replayed started
+static uint32_t g_tas_total;    // its length (0: no movie in progress)
 static void watch_frame_hook(void) {
     if (!g_watch_every || ++g_watch_n % g_watch_every) return;
+    if (g_tas_total) dp_fbwatch_progress((uint32_t)(g_watch_n - g_tas_base), g_tas_total, 0);
     static uint32_t px[352 * 256];
     int w, h;
     if (!dp_pce_render(px, 352 * 256, &w, &h)) return;
@@ -1708,7 +1711,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     if (x->opt.seed_banks) dp_pce_reset();
 
     // TAS movies, then the play sessions; their checkpoints join the queue
-    if (x->opt.demo_frames) { // the attract mode first: no button, from power-on
+    if (x->opt.demo_frames && !(g_watch_every && x->opt.tas_count)) { // the attract mode first (not when a watched movie is to play): no button, from power-on
         x->idle = 1;
         play_session(x, x->opt.demo_frames, 0, NULL);
         x->idle = 0;
@@ -1725,9 +1728,18 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
         int id = dp_pce_tas_identity(&t, x->rom, x->rom_size);
         if (id == 1) x->r->tas_same++; else if (id == 2) x->r->tas_different++; else x->r->tas_unrecorded++;
         if (id == 2) fprintf(stderr, "deepeel: TAS %s: recorded for a different ROM\n", x->opt.tas_paths[i]);
+        if (g_watch_every) {   // the watch window names the movie (index, file) and shows its progress
+            const char *base = strrchr(x->opt.tas_paths[i], '/'); base = base ? base + 1 : x->opt.tas_paths[i];
+            char cap[200]; snprintf(cap, sizeof cap, "pce  %d/%d  %s", i + 1, x->opt.tas_count, base);
+            dp_fbwatch_caption(cap); dp_fbwatch_progress(0, t.frames, 0);
+            g_tas_base = g_watch_n; g_tas_total = t.frames;
+        }
         play_session(x, x->opt.play_frames > t.frames ? x->opt.play_frames : t.frames, 0, &t);
+        if (g_tas_total) dp_fbwatch_progress(t.frames, t.frames, 1);
+        g_tas_total = 0;
         dp_pce_tas_free(&t);
     }
+    if (g_watch_every && x->opt.tas_count) g_watch_every = 0;   // the watch shows the movies only, never the random sessions or forks
     if (x->opt.play_frames)
         for (uint32_t i = 0; i < x->opt.play_sessions && !x->failed; i++) {
             if ((x->total_steps >= x->opt.max_total || dp_stop)) break;
