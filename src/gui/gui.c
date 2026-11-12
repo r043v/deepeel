@@ -686,7 +686,7 @@ static void *fb_main(void *arg) {
     static uint32_t px[DP_FB_MAX_W * DP_FB_MAX_H];
     SDL_Texture *tex = NULL;
     int tw = 0, th = 0;
-    enum { FB_CAP = 30 };   // caption height under the image (two text lines)
+    enum { FB_CAP = 30, FB_INFO = 16 };   // caption height under the image (two text lines); the info line at the bottom
     // per-tile speed meters (the GB watch maths): a 1 s window over the frame counter
     static uint32_t rx[3][DP_MDRF_MAX_W * DP_MDRF_MAX_H];
     static double t_main, t_ref[3];
@@ -747,9 +747,15 @@ static void *fb_main(void *arg) {
             int ncell = 1 + ref, cols = ncell > 2 ? 2 : ncell, rows = (ncell + cols - 1) / cols;   // two tiles per row
             if (tex && tw > 0 && th > 0 && sized_key != ncell * 100000 + tw * 10 + th % 10) {   // fit the window to the tiles (2x), once per layout
                 sized_key = ncell * 100000 + tw * 10 + th % 10;
-                SDL_SetWindowSize(win, cols * tw * 2, rows * (th * 2 + FB_CAP));
+                SDL_Rect ub; int mag = 2, winw, winh;   // windowed, never larger than 90% of the usable desktop
+                if (SDL_GetDisplayUsableBounds(0, &ub) != 0) { ub.w = 1280; ub.h = 800; }
+                for (; mag > 1; mag--) if (cols * tw * mag <= ub.w * 9 / 10 && rows * (th * mag + FB_CAP) + FB_INFO <= ub.h * 9 / 10) break;
+                winw = cols * tw * mag; winh = rows * (th * mag + FB_CAP) + FB_INFO;
+                SDL_SetWindowFullscreen(win, 0);
+                SDL_RestoreWindow(win);
+                SDL_SetWindowSize(win, winw, winh);
             }
-            int cw = W / cols, rowh = H / rows, ch = rowh - FB_CAP > 0 ? rowh - FB_CAP : 1;
+            int cw = W / cols, rowh = (H - FB_INFO) / rows, ch = rowh - FB_CAP > 0 ? rowh - FB_CAP : 1;
             int slot[4] = { -1, -1, -1, -1 }, ns = 1;   // tile 0: our core, then every active reference
             for (int k = 0; k < 3; k++) if (ract[k]) slot[ns++] = k;
             // one scale for every tile (the smallest that fits them all): equal pixels are drawn equally big, so a
@@ -777,12 +783,12 @@ static void *fb_main(void *arg) {
                 SDL_Rect dst = { ox + (cw - dw) / 2, oy + (ch - dh) / 2, dw, dh };
                 {   // one path for every tile, ours included: a texture built from the tile's pixel buffer
                     const uint32_t *src = t == 0 ? px : rx[k];
-                    SDL_Texture *ttex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888,
-                                                          SDL_TEXTUREACCESS_STREAMING, iw, ih);
-                    if (ttex) {
-                        SDL_UpdateTexture(ttex, NULL, src, iw * 4);
-                        SDL_RenderCopy(ren, ttex, NULL, &dst);
-                        SDL_DestroyTexture(ttex);
+                    static SDL_Texture *tt[4]; static int ttw[4], tth[4];   // one texture per tile, rebuilt only when its size changes
+                    if (tt[t] && (ttw[t] != iw || tth[t] != ih)) { SDL_DestroyTexture(tt[t]); tt[t] = NULL; }
+                    if (!tt[t]) { tt[t] = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, iw, ih); ttw[t] = iw; tth[t] = ih; }
+                    if (tt[t]) {
+                        SDL_UpdateTexture(tt[t], NULL, src, iw * 4);
+                        SDL_RenderCopy(ren, tt[t], NULL, &dst);
                     }
                 }
             }
@@ -807,6 +813,10 @@ static void *fb_main(void *arg) {
                 draw_text(ren, ox + 6, oy + ch + 2, dp_fb_ref_name(k), 1, gui_color(DP_C_TITLE));
                 draw_text(ren, ox + 6, oy + ch + 16, r2, 1, gui_color(rdone[k] ? DP_C_DIM : DP_C_TEXT));
             }
+        }
+        {   // info line: what the window is, how to leave it
+            char inf[200]; snprintf(inf, sizeof inf, "windowed - Esc closes this movie - tiles share one scale - cycle counts are tool observations");
+            draw_text(ren, 6, H - FB_INFO + 3, inf, 1, gui_color(DP_C_DIM));
         }
         SDL_RenderPresent(ren);
         SDL_Delay(16);
