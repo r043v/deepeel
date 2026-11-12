@@ -5096,3 +5096,12 @@ Deuxième ROM GB, Super Mario Land 2 (observations de l'outil) : l'ancien moteur
 statique 43 243. Le noyau 0.316.0 à 40 M pas seulement : naturel 99 332, forcé 106 457, statique 62 774 (à 20 M pas : 53 170 / 37 379).
 Le noyau atteint donc, avec six fois moins de pas, plus d'octets exécutés (naturel + forcé : 205 789 contre 140 847). Les définitions de
 « forcé » des deux rapports ne sont pas identiques ; la comparaison reste indicative. Reste à mesurer : MD et NES.
+
+Étape 2.3 — NES et MD (20 M pas, observations de l'outil ; définitions de rapport différentes, comparaison indicative) :
+- NES, Super Mario Bros. : ancien moteur 1 chemin, 0 fourche, 7 763 octets naturels, 0 forcé ; noyau 930 chemins, 1 528 fourches,
+  6 210 naturels, 13 327 forcés, 415 statiques seuls. Le noyau explore les deux issues des conditionnels, pas l'ancien moteur NES par défaut ;
+  ses naturels sont 20 % plus bas à ce budget (mêmes entrées, mais temps partagé entre 930 chemins).
+- MD, Sonic 1 : ancien moteur 5 635 chemins, 5 370 fourches, démo sans bouton 16 884 octets ROM exécutés ; noyau 439 chemins, 1 375 fourches,
+  21 104 naturels, 15 274 forcés.
+Avec GB (Zelda, SML2) le noyau couvre donc au moins autant que l'ancien moteur sur les quatre ROMs mesurées, sauf les octets naturels NES à
+budget égal (6 210 contre 7 763). Désactivation de l'ancien moteur : décision reportée à l'accord du propriétaire (instruction : désactiver, jamais supprimer).
