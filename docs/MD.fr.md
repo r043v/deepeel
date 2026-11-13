@@ -385,3 +385,11 @@ défaut de l'outil n'est qu'un compromis mesuré sur trois films. Observation de
 **0.320.0 : horloge `exact` phase 3 par défaut dans `deepeel md`** (`dp_mdmach_reset` : `setenv(…, 0)` avant
 `md_full_reset`, sans modifier m0boy ; `DP_MD_CLOWN_CLOCK` et `DP_MD_CLOCK_OFF` du processus l'emportent). Les 69 tests
 `md|sega|…` restent verts. Mesure : voir le tableau ci-dessus ; `3994S` garde son écart à 1479/1497.
+
+`3994S`, états de fin de trame (`DP_MD_ENDSTATE`, horloge `exact` phase 3) : trame 1479, les deux sont en milieu de
+routine (`$D70A` référence, `$D7C8` m0boy, m0boy *plus avancé*), revenus à l'attente à la trame 1480 sans conséquence ;
+trame 1496, la référence est à l'attente (`$29A8`, compteur de trame avancé) alors que m0boy est encore en
+`$4206` : une trame perdue, comme à 1423 pour `1843S`. Le signe du décalage change d'une trame à l'autre : le coût
+en cycles de certaines instructions ou séquences de bus de m0boy s'écarte de ClownMDEmu dans les deux sens, ce qui
+exclut un réglage d'horloge unique et demande la sommation de cycles par routine (hook de cycles côté référence,
+dépôt externe). Observation de l'outil.
