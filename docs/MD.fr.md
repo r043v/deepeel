@@ -338,3 +338,6 @@ Autres films (même chaîne, `DP_MD_FIRSTLOW=1`, ROM USA/Europe) : `1437S` diver
 avec les mêmes valeurs (X `0f`/`0e`) : l'événement est déterministe et dépend du jeu, pas d'un bruit de film.
 `3994S` reste identique à ClownMDEmu jusqu'à la trame 29275 (premier écart d'objets à 1481, 2 octets). `5906S`
 n'a pas fini dans le temps imparti. Ces nombres sont des observations de l'outil.
+
+`5906S` : pas de divergence soutenue de la position du joueur ; deux écarts d'objets isolés (trame 4076 : 11 octets
+`$D841–$D873` ; trame 10497 : 3 octets `$D009–$D00D`). Observation de l'outil.
