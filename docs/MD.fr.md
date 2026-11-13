@@ -333,3 +333,8 @@ Trace `DP_MD_TRACE_RANGE=1420:1424` (1843S) : trames 1420–1422 identiques ; à
 trame côté m0boy. Même entrée manette (`pad=18`). Cause probable : une trame de lag due à un écart de cycles
 68000 à la limite de la trame (boucle principale finie ou non avant le vblank). À borner par comparaison des
 compteurs de cycles par trame entre les deux émulateurs.
+
+Autres films (même chaîne, `DP_MD_FIRSTLOW=1`, ROM USA/Europe) : `1437S` diverge à la même trame 1423 que `1843S`,
+avec les mêmes valeurs (X `0f`/`0e`) : l'événement est déterministe et dépend du jeu, pas d'un bruit de film.
+`3994S` reste identique à ClownMDEmu jusqu'à la trame 29275 (premier écart d'objets à 1481, 2 octets). `5906S`
+n'a pas fini dans le temps imparti. Ces nombres sont des observations de l'outil.
