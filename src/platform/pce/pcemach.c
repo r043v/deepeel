@@ -23,6 +23,12 @@ int pce_sat_hdw;
 #undef pce_bus_write
 #include "pce.h"
 static void (*frame_hook_fn)(void);
+int pce_vce_model;      // the VCE's vblank counter drives the VDC's phase re-arm (TurboNyma; PCEHawk rewinds at line 0)
+static int vce_vblank;      // the VCE vblank flag's state (TurboNyma model)
+static int vce_vb_left;     // master clocks until the next vblank edge
+static int vce_first_frame; // the reference's frame 0 is its 257-line boot frame (the VCE resets 237 master clocks into the hsync)
+static unsigned vce_frame_total;     // the current frame's line count: the VCE cycle that was current when the frame started
+static unsigned vce_frame_total_next; // the sample taken at the last vblank end, applied at the next frame boundary
 
 // the display side of pce_frame's line loop, which the stepper replaces: first active line,
 // then the row callback (watch picture) with the VCE applied
@@ -50,6 +56,10 @@ typedef struct {
     unsigned line;      // 0..261
     int line_left;      // CPU cycles left in this line
     unsigned line_budget;
+    int vb;             // the VCE vblank flag and the master clocks to its edge (the TurboNyma model)
+    int vb_left;
+    unsigned vft;       // the frame's line count (sampled at the last vblank end)
+    unsigned vft2;      // and the staged one (applied at the next frame boundary)
 } PceBridgeState;
 
 static M0_TL uint8_t *rom;           // owned, header stripped
@@ -100,6 +110,17 @@ void dp_pce_reference(int pcehawk) {
     ref_phase = pcehawk ? 4u : 258u;
     pce_frame_start_line = ref_phase;
     if (!machine.frames && !fl_no) line_no = ref_phase % 262u;
+    pce_vce_model = !pcehawk;   // the VCE's vblank counter (boot: 4095+30 master, then the 262/263-line cycle) re-arms the VDC
+    machine.vdc.vsync_model = (uint8_t)pce_vce_model;
+    if (pce_vce_model) {
+        vce_vblank = 1; vce_vb_left = 4095 + 30;   // the VCE's power-on state (vblank set, the boot cycle 30 clocks longer)
+        pre_frames = 0;       // the reference's frame 0 IS the boot frame (257 lines): report it, don't skip it
+        vce_first_frame = 1;
+        vce_frame_total = vce_frame_total_next = 262u;
+        const unsigned div = machine.cpu.speed ? 3u : 12u;
+        line_left = (int)(237u / div);   // the VCE resets 237 master clocks into the hsync: the first line is that much shorter
+        master_carry = 237u % div;       // and the line boundaries sit on the reference's scanline edges from here on
+    }
 }
 
 // calibration: move the reference's frame cut (before the first frame)
@@ -264,6 +285,19 @@ int dp_pce_irq_due(void) {
 
 unsigned pce_vsync_extra = 0;   // CPU cycles the vsync's VD is held back (TurboNyma profile; calibration knob PCE_VSEXTRA)
 static int irq_defer;   // CPU cycles IRQ1 is still held back after a line end (TurboNyma profile)
+static void vce_edge_advance(unsigned spent) {
+    if (!pce_vce_model || vce_vb_left <= 0) return;
+    vce_vb_left -= (int)(spent * (machine.cpu.speed ? 3u : 12u));
+    while (vce_vb_left <= 0) {
+        vce_vblank ^= 1;
+        vce_vb_left += vce_vblank ? 4095 : (int)((machine.vce_cr & 4 ? 358995u : 357630u) - 4095);
+        if (!vce_vblank) vce_frame_total_next = (machine.vce_cr & 4) ? 263u : 262u;   // the cycle's length is fixed at its reload; it governs the next frame
+#ifdef PCE_TRACE
+        if (pce_trace) fprintf(stderr, "V VCE %s lm=%llu cyc=%u left=%d\n", vce_vblank ? "VS" : "VSE", (unsigned long long)machine.line_master, machine.cpu.cycles, vce_vb_left);
+#endif
+        if (vce_vblank) vdc_vsync(&machine.vdc);   // the VS edge re-arms the phase machine mid-line; the line's step is skipped
+    }
+}
 static int line_finish(void) {
     huc6280_t *c = &machine.cpu;
     int frame_done = 0;
@@ -271,7 +305,7 @@ static int line_finish(void) {
         pce_cur_line = line_no;
         { extern unsigned vdc_master_per_cycle; static const unsigned rt[4] = { 4, 3, 2, 2 }; vdc_master_per_cycle = rt[machine.vce_cr & 3]; }
         const unsigned st_before = machine.vdc.status & 0x3F;
-        if (line_no < 262) vdc_line(&machine.vdc, line_no);
+        if (line_no < 262 || pce_vce_model) vdc_line(&machine.vdc, line_no);   // the model steps the machine on every line, as the HuC6270 does
         machine.line_master += 1365;
         if (machine.vdc.sat_started) {
             static const unsigned ratio[4] = { 4, 3, 2, 2 };
@@ -287,10 +321,12 @@ static int line_finish(void) {
             timer_tick();
         }
         update_irq();
-        if (pce_irq_delay && !st_before && (machine.vdc.status & 0x3F)) { c->irq_low &= (uint8_t)~PCE_IQ_IRQ1; irq_defer = (int)pce_irq_delay + ((line_no <= 1 && (machine.vdc.status & 0x20)) ? pce_vsync_extra : 0); }   // the VCE vsync lands inside a line: the VD it raises is seen later
+        if (pce_irq_delay && !(st_before & 0x20u) && (machine.vdc.status & 0x20u)) { c->irq_low &= (uint8_t)~PCE_IQ_IRQ1; irq_defer = (int)pce_irq_delay + ((line_no <= 1 && (machine.vdc.status & 0x20u)) ? pce_vsync_extra : 0); }   // a freshly raised VD lands one defer later, wherever the VCE's vsync sits inside the line
         const uint32_t nominal_next = c->cycles + (uint32_t)line_left;   // line_left <= 0: the overshoot is inside the next line
-        if (++fl_no >= total) {
+        if (++fl_no >= (pce_vce_model ? (vce_first_frame ? 258u : vce_frame_total) : total)) {   // the reference's frame 0: the 237-master hsync piece + 257 full lines
             fl_no = 0;
+            vce_first_frame = 0;
+            vce_frame_total = vce_frame_total_next;
             if (pre_frames > 0) pre_frames--;
             else {
                 machine.frames++;
@@ -298,6 +334,12 @@ static int line_finish(void) {
                 frame_done = 1;
             }
         }
+#ifdef PCE_TRACE
+        if (pce_trace) fprintf(stderr, "V LFIN ln=%u lm=%llu cyc=%u st=%02x vdnew=%u dfr=%d ph=%d cnt=%d vsr=%04x vdr=%03x vcr=%02x fd=%u\n",
+            line_no, (unsigned long long)machine.line_master, c->cycles, machine.vdc.status,
+            (machine.vdc.status & 0x20u) != 0 && !(st_before & 0x20u), irq_defer,
+            machine.vdc.vphase, machine.vdc.vcounter, machine.vdc.vsr, machine.vdc.vdr, machine.vdc.vcr, frame_done);
+#endif
         line_no = (fl_no + pce_frame_start_line) % total;
         line_start();
         machine.line_cycles = nominal_next;
@@ -315,6 +357,7 @@ unsigned dp_pce_step(int *frame_done) {
     if (frame_done) *frame_done = 0;
     line_left -= (int)spent;
     if (irq_defer > 0 && (irq_defer -= (int)spent) <= 0) { irq_defer = 0; update_irq(); }
+    vce_edge_advance(spent);
     if (line_left <= 0) {
         int fd = line_finish();
         if (frame_done) *frame_done = fd;
@@ -366,6 +409,10 @@ void dp_pce_save(void *dst) {
     s->line = line_no;
     s->line_left = line_left;
     s->line_budget = line_budget_;
+    s->vb = vce_vblank;
+    s->vb_left = vce_vb_left;
+    s->vft = vce_frame_total;
+    s->vft2 = vce_frame_total_next;
 }
 
 void dp_pce_load(const void *src) {
@@ -375,6 +422,10 @@ void dp_pce_load(const void *src) {
     line_no = s->line;
     line_left = s->line_left;
     line_budget_ = s->line_budget;
+    vce_vblank = s->vb;
+    vce_vb_left = s->vb_left;
+    vce_frame_total = s->vft;
+    vce_frame_total_next = s->vft2;
     // the windows point into this process's machine (same global): rebuild
     // them anyway so a snapshot from another build layout stays coherent
     machine.cpu.wram = machine.wram;
@@ -407,7 +458,7 @@ uint64_t dp_pce_vram_hash(void) {
 }
 
 uint8_t *dp_pce_wram(void) { return machine.wram; }
-uint8_t *dp_pce_vram_bytes(void) { return (uint8_t *)machine.vdc.vram; }   // the whole VRAM, word units, little-endian on the host (frame dumps)
+uint8_t *dp_pce_vram_bytes(void) { return (uint8_t *)machine.vdc.vram; }   // the whole VRAM, word units, little-endian on the host
 uint8_t dp_pce_mpr(unsigned i) { return machine.cpu.mpr[i & 7]; }
 void dp_pce_reset(void) {
     pce_reset();
@@ -417,6 +468,15 @@ void dp_pce_reset(void) {
     line_no = pce_frame_start_line % 262u;
     line_left = 0;
     line_start();
+    if (pce_vce_model) {
+        vce_vblank = 1; vce_vb_left = 4095 + 30;   // the VCE's power-on counter again
+        pre_frames = 0;
+        vce_first_frame = 1;
+        vce_frame_total = vce_frame_total_next = 262u;
+        const unsigned div = machine.cpu.speed ? 3u : 12u;
+        line_left = (int)(237u / div);
+        master_carry = 237u % div;
+    }
 }
 
 // --- fast frames: the native loop, one line per huc6280_run, the trace
@@ -426,7 +486,7 @@ static M0_TL void *trace_user;
 
 void dp_pce_trace(DpPceTraceFn fn, void *user) { trace_fn = fn; trace_user = user; }
 
-static uint16_t tr_pc_;
+uint16_t tr_pc_;   // the instruction the trace hook is on (the WRAM-write log's pc)
 void pce_trace_step(uint16_t pc) {
     tr_pc_ = pc;
     uint8_t op = dp_pce_peek(pc);
@@ -435,8 +495,12 @@ void pce_trace_step(uint16_t pc) {
 }
 
 void pce_trace_dyn(uint16_t pc) { (void)pc; }
+void pce_trace_wram_write(uint16_t at, uint8_t v) {
+    if (pce_trace) fprintf(stderr, "WWM pc=%04x a=%04x=%02x\n", tr_pc_, (unsigned)at, (unsigned)v);   // the WRAM write stream (-DPCE_TRACE)
+}
 void pce_trace_regs(uint8_t a, uint8_t x, uint8_t y, uint8_t s, uint8_t p, uint32_t cyc) {
-    if (pce_trace) fprintf(stderr, "I %04x a=%02x x=%02x y=%02x s=%02x p=%02x t=%u\n", tr_pc_, a, x, y, s, p, cyc);   // calibration trace (-DPCE_TRACE)
+    if (pce_trace) fprintf(stderr, "I %04x a=%02x x=%02x y=%02x s=%02x p=%02x t=%u m=%02x%02x%02x%02x%02x%02x%02x%02x\n", tr_pc_, a, x, y, s, p, cyc,
+        machine.cpu.mpr[0], machine.cpu.mpr[1], machine.cpu.mpr[2], machine.cpu.mpr[3], machine.cpu.mpr[4], machine.cpu.mpr[5], machine.cpu.mpr[6], machine.cpu.mpr[7]);   // calibration trace (-DPCE_TRACE)
 }
 
 static unsigned cut_cycles;          // the reference samples its WRAM this many CPU cycles before the frame's last line ends
@@ -454,10 +518,16 @@ void dp_pce_run_frame(void) {
             if (line_left <= (int)cut_cycles) { memcpy(cut_wram, machine.wram, sizeof cut_wram); cut_valid = 1; }
             else if (chunk > line_left - (int)cut_cycles) chunk = line_left - (int)cut_cycles;
         }
+        if (pce_vce_model && vce_vb_left > 0) {   // end the chunk exactly on the next VCE edge, as the reference fires it there
+            const unsigned div = c->speed ? 3u : 12u;
+            const int to_edge = (vce_vb_left + (int)div - 1) / (int)div;
+            if (to_edge > 0 && to_edge < chunk) chunk = to_edge;
+        }
         huc6280_run(c, c->cycles + (uint32_t)chunk);
         st_port = 0;
         line_left -= (int)(c->cycles - before);
         if (irq_defer > 0 && (irq_defer -= (int)(c->cycles - before)) <= 0) { irq_defer = 0; update_irq(); }
+        vce_edge_advance(c->cycles - before);
         if (line_left > 0) continue;
         if (line_finish()) return;
     }
