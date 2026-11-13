@@ -38,6 +38,8 @@ int main(int argc, char **argv) {
         uint32_t fn = (uint32_t)(i + 1), len = 0x2000; uint16_t nb = 1; uint8_t nl = 4;
         fwrite(&fn, 4, 1, o); fwrite(&nb, 2, 1, o); fwrite(&nl, 1, 1, o); fwrite("wram", 1, 4, o); fwrite(&len, 4, 1, o);
         { extern uint8_t *dp_pce_wram_cut(void); fwrite(dp_pce_wram_cut(), 1, 0x2000, o); }
+        { static FILE *vo; if (!vo) { const char *ev = getenv("DSY_VRAM"); if (ev) vo = fopen(ev, "wb"); }   // DSY_VRAM: the whole VRAM after each frame (fn, 0x10000 bytes)
+          if (vo) { extern uint8_t *dp_pce_vram_bytes(void); uint32_t vlen = 0x10000; fwrite(&fn, 4, 1, vo); fwrite(&vlen, 4, 1, vo); fwrite(dp_pce_vram_bytes(), 1, 0x10000, vo); } }
     }
     fclose(o); return 0;
 }

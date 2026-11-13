@@ -407,6 +407,7 @@ uint64_t dp_pce_vram_hash(void) {
 }
 
 uint8_t *dp_pce_wram(void) { return machine.wram; }
+uint8_t *dp_pce_vram_bytes(void) { return (uint8_t *)machine.vdc.vram; }   // the whole VRAM, word units, little-endian on the host (frame dumps)
 uint8_t dp_pce_mpr(unsigned i) { return machine.cpu.mpr[i & 7]; }
 void dp_pce_reset(void) {
     pce_reset();

@@ -116,6 +116,7 @@ uint64_t dp_pce_state_hash(void);
 // the 9-bit VRAM-side view of the current frame for screenshots: the
 // machine renders rows only when asked
 uint64_t dp_pce_vram_hash(void);
+uint8_t *dp_pce_vram_bytes(void);   // the whole VRAM, word units, little-endian on the host (frame dumps)
 uint8_t *dp_pce_wram(void);     // the 8 KiB work RAM (page $F8)
 uint8_t dp_pce_mpr(unsigned i);
 void dp_pce_reset(void);
