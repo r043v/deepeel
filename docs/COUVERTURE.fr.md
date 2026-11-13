@@ -1585,3 +1585,12 @@ non nul de la forme `*_dropped` / `*_refused` hors éviction sémantique est un
     deepeel md explore ROM.md --tas $DONNEES/tas/castle-md/1903M/x.gmv --watch 30
 
 Essai : Castle of Illusion (Genesis, 135G) → 8 films, dont la publication 1903M (`.gmv`). Un film `.bk2` (7146S) n'est relu que par les chemins qui savent le lire ; le `.gmv` est celui du chemin `md explore --tas`.
+
+### Récupération des films TASVideos en C (13 novembre 2026)
+
+`tools/tasvideos_fetch.c` (`cc -O2 tools/tasvideos_fetch.c -lz`) : `tasvideos_fetch 135G DIR [--list] [--max N]`
+récupère les publications (page du jeu) et les soumissions (Subs-List) d'un jeu TASVideos, dézippe avec zlib
+(stocké/deflate, noms de base des extensions de films seulement) et imprime les `--tas`. Vérifié sur le jeu 135 :
+2 publications, 6 soumissions, deux GMV extraits dont l'en-tête est « Gens Movie ». Limite actuelle : l'id de jeu se
+donne directement (la recherche par titre de ROM reste dans `tools/tasvideos_fetch.py`) ; l'intégration dans le
+binaire `deepeel` lui-même n'est pas faite.
