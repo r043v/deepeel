@@ -1592,3 +1592,13 @@ Essai : Castle of Illusion (Genesis, 135G) → 8 films, dont la publication 1903
 récupère les publications (page du jeu) et les soumissions (Subs-List) d'un jeu TASVideos, dézippe avec zlib
 (stocké/deflate, noms de base des extensions de films seulement) et imprime les `--tas`. Vérifié sur le jeu 135 :
 2 publications, 6 soumissions, deux GMV extraits dont l'en-tête est « Gens Movie ». Une ROM peut remplacer l'id (`deepeel tasfetch ROM DIR`) : le titre est celui du nom de fichier sans étiquettes « (…) », le système vient de l'extension ; Sonic 1 (MD) donne 9 publications + 18 soumissions, les 27 films du Python. Limite : seuls les titres identiques au nom TASVideos sont retenus ; Binaire `deepeel` : intégré (0.318.1). Reste dans le Python seulement `--search` et `--game`.
+
+### NES : provenance de l'astuce RTS (0.319.0, 13 novembre 2026)
+
+Cellule S3/S4 NES : `lda tbl+1,x / pha / lda tbl,x / pha / rts` (table de mots « cible − 1 », idiome 6502 courant).
+Le cœur 6502 de m0boy pousse dans sa RAM sans passer par le hook d'écriture ; l'explorateur suit donc `PHA` lui-même
+(la cellule PRG qui a nourri A, effacée par `JSR`/`BRK`). Au `RTS`, deux cellules de pile consécutives dans la PRG
+nomment une table ; ses voisins (≤ 64 mots de chaque côté, valeur + 1) sont semés comme racines (compteur
+`prov_sites`, ajout `prov_rts_sites`). Fixture `fix_nes_rts.nes`, test `nes_provenance_rts` (1 table, 2 racines).
+Limite technique : des tables séparées octet bas / octet haut (`tblL,x` et `tblH,x`) ne sont pas adjacentes en PRG ; la
+variante à tables scindées reste à faire (stride distinct), la cellule S4 NES reste donc ◐.

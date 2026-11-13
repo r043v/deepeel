@@ -25,6 +25,7 @@
 #include <zlib.h>
 #include "../../gui/fbwatch.h"
 #include "../../core/statefile.h"
+#define NES_PROV_RTS ((int64_t)1 << 40)   // anchor tag: the table words hold target - 1 (RTS trick)
 
 // one queued exploration state: a machine snapshot plus its provenance
 typedef struct {
@@ -554,6 +555,30 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
                 nes_defer(x, 1);
                 nes_trace.stop = 1;
                 return;
+            }
+        }
+    }
+
+    // the 6502 core pushes straight into its RAM (no write hook): PHA carries the PRG cell that fed A, JSR/BRK
+    // pushes carry none, so a stale stack cell never names a table
+    if (bytes[0] == 0x48) {
+        unsigned top = 0x100u + (dp_nesmach_sp(x->m) & 0xFFu);
+        x->ram_src[top] = (x->last_read_cell >= 0 && x->total_steps - x->last_read_step <= 4) ? (int32_t)x->last_read_cell : -1;
+    } else if (bytes[0] == 0x20 || bytes[0] == 0x00) {
+        unsigned sp = dp_nesmach_sp(x->m) & 0xFFu;
+        x->ram_src[0x100u + sp] = x->ram_src[0x100u + ((sp - 1u) & 0xFFu)] = -1;
+    }
+    // S3/S4 RTS trick: `lda tbl+1,x / pha / lda tbl,x / pha / rts` pushes a table word (target - 1) from two
+    // consecutive PRG cells; the pair on the stack at the RTS names that table, whose neighbours are roots
+    if (in.flow == DP_M6502_RETURN && bytes[0] == 0x60 && x->prov_len < 4096) {
+        unsigned sp = dp_nesmach_sp(x->m) & 0xFFu, lo = 0x100u + ((sp + 1u) & 0xFFu), hi = 0x100u + ((sp + 2u) & 0xFFu);
+        if (x->ram_src[lo] >= 0 && x->ram_src[hi] == x->ram_src[lo] + 1) {
+            int64_t tag = (int64_t)x->ram_src[lo] | NES_PROV_RTS;
+            uint32_t a;
+            for (a = 0; a < x->prov_len && x->prov_anchor[a] != tag; a++) {}
+            if (a == x->prov_len) {
+                int64_t *g = realloc(x->prov_anchor, (x->prov_len + 1) * sizeof *g);
+                if (g) { x->prov_anchor = g; x->prov_anchor[x->prov_len++] = tag; r->prov_sites++; r->prov_rts_sites++; }
             }
         }
     }
@@ -1725,12 +1750,13 @@ static void second_pass_seed(DpNesRun *x) {
     // S3: neighbours of a provenance-traced table word (aligned words in the
     // same table, up to 64 each way) that point at unexecuted PRG are roots too
     for (uint32_t pa = 0; pa < x->prov_len; pa++) {
-        size_t a0 = (size_t)x->prov_anchor[pa];
+        size_t a0 = (size_t)(x->prov_anchor[pa] & ~NES_PROV_RTS);
+        unsigned rts_off = (x->prov_anchor[pa] & NES_PROV_RTS) ? 1u : 0u;   // RTS words point one byte before the target
         for (int dir = -1; dir <= 1; dir += 2) {
             size_t a = a0;
             for (unsigned e = 0; e < 64; e++) {
                 if (dir < 0) { if (a < 2) break; a -= 2; } else { a += 2; if (a + 1 >= n) break; }
-                unsigned v = rom[a] | (rom[a + 1] << 8);
+                unsigned v = ((rom[a] | (rom[a + 1] << 8)) + rts_off) & 0xFFFFu;
                 int64_t tc = table_target(x, a, v, 0);
                 if (tc < 0 || (size_t)tc >= n) break;
                 if ((r->flags[tc] & (DP_NES_NATURAL | DP_NES_FORCED)) || sd[tc]) continue;
