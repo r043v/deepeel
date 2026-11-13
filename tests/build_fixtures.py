@@ -1320,6 +1320,22 @@ def build_nes_pce(out):
         m3[q:q + 2] = bytes([0x00, 0xC0])
     with open(os.path.join(out, "fix_nes_dispatch4.nes"), "wb") as f:
         f.write(m3)
+    # MMC3 PRG mode 1 dispatch: table of three $C000-window words (R6 under mode 1, so mode 0 cannot see them) in the
+    # last 8 KiB bank ($E000); 8 KiB bank 0 holds code at all three offsets, bank 1 only at $C010
+    m4 = bytearray(m3[:16 + 8 * 0x2000])
+    for i in range(16, len(m4)): m4[i] = 0
+    for bk, ts in ((0, (0x10, 0x20, 0x30)), (1, (0x10,))):
+        for t in ts:
+            q = 16 + bk * 0x2000 + t
+            m4[q:q + 3] = bytes([0x4C, t, 0xC0])
+    o = 16 + 7 * 0x2000
+    m4[o:o + 3] = bytes([0x4C, 0x00, 0xE0])
+    m4[o + 0x100:o + 0x106] = bytes([0x10, 0xC0, 0x20, 0xC0, 0x30, 0xC0])
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        q = 16 + 8 * 0x2000 - 6 + (v - 0xFFFA)
+        m4[q:q + 2] = bytes([0x00, 0xE0])
+    with open(os.path.join(out, "fix_nes_dispatch5.nes"), "wb") as f:
+        f.write(m4)
     # NES context loop: INC $10 / LDA #0 / BEQ back; every pass differs only in RAM,
     # so the exact dedup keeps all of them and a context cap closes the surplus
     k = bytearray(16 + 2 * 0x4000)

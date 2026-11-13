@@ -1833,14 +1833,17 @@ static void second_pass_seed(DpNesRun *x) {
             k = e > k ? e + 2 : k + 1;
         }
     }
-    // G2 on MMC3 (PRG mode 0): the fixed $C000-$FFFF region holds the table; each word in $8000-$BFFF is entered
-    // under every 8 KiB bank whose bytes at that offset decode as code (R6 for $8000-$9FFF, R7 for $A000-$BFFF).
-    if (x->opt.bank_dispatch && mp == 4 && n >= 0x8000) {
-        size_t fixed = n - 0x4000;
+    // G2 on MMC3: the table sits in the fixed region ($C000-$FFFF in PRG mode 0, $E000-$FFFF in mode 1); each word in the
+    // switchable windows ($8000-$BFFF in mode 0, $A000-$DFFF in mode 1) is entered under every 8 KiB bank whose bytes at
+    // that offset decode as code (mode 0: R6 $8000, R7 $A000; mode 1: R7 $A000, R6 $C000).
+    if (x->opt.bank_dispatch && mp == 4 && n >= 0x8000) for (int pm = 0; pm < 2; pm++) {
+        size_t fixed = n - (pm ? 0x2000 : 0x4000);
+        unsigned wlo = pm ? 0xA0 : 0x80, whi = pm ? 0xE0 : 0xC0;
         unsigned banks8 = (unsigned)(n >> 13);
-        for (size_t k = fixed; k + 1 < n;) {
+        const size_t lim = pm ? n - 6 : n;   // mode 1: the $FFFA vectors are not a dispatch table
+        for (size_t k = fixed; k + 1 < lim;) {
             size_t e = k;
-            while (e + 1 < n && (rom[e + 1] & 0xC0) == 0x80) e += 2;
+            while (e + 1 < lim && rom[e + 1] >= wlo && rom[e + 1] < whi) e += 2;
             if (e - k >= 6) {
                 r->dispatch_tables++;
                 for (size_t w = k; w < e; w += 2) {
@@ -1865,6 +1868,7 @@ static void second_pass_seed(DpNesRun *x) {
                         uint8_t *es = malloc(dp_nesmach_state_size());
                         if (!es) { x->failed = 1; free(sd); return; }
                         dp_nesmach_reset(x->m);
+                        dp_nesmach_set_prg_mode(x->m, pm);
                         if (!dp_nesmach_map_8k(x->m, v, b)) { free(es); r->pass2_refused++; continue; }
                         dp_nesmach_set_pc(x->m, v);
                         dp_nesmach_save(x->m, es);

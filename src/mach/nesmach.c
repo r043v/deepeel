@@ -594,13 +594,21 @@ void dp_nesmach_window(const DpNesMach *d, unsigned *lo, unsigned *hi) {
 }
 int dp_nesmach_map_8k(DpNesMach *d, unsigned addr, unsigned bank8) {
     if (d->mapper != 4 || addr < 0x8000u || addr >= 0xE000u || bank8 >= (unsigned)(machine.prg_size >> 13) || bank8 > 63) return 0;
-    if (d->rg.v[0] & 0x40) {   /* PRG mode 1: R6 is the $C000 window, $8000 is fixed */
-        if (addr < 0xC000u) return 0;
-        d->rg.v[2 + (addr >= 0xE000u ? 7 : 6)] = (uint8_t)bank8;
-    } else {
+    if (d->rg.v[0] & 0x40) {   /* PRG mode 1: R7 at $A000, R6 at $C000, $8000 and $E000 fixed */
+        if (addr < 0xA000u || addr >= 0xE000u) return 0;
+        d->rg.v[2 + (addr >= 0xC000u ? 6 : 7)] = (uint8_t)bank8;
+    } else {                   /* PRG mode 0: R6 at $8000, R7 at $A000, $C000-$FFFF fixed */
         if (addr >= 0xC000u) return 0;
         d->rg.v[2 + (addr >= 0xA000u ? 7 : 6)] = (uint8_t)bank8;
     }
+    mapper_apply(d);
+    return 1;
+}
+
+/* MMC3 bank-select PRG mode bit (0: R6 at $8000, 1: R6 at $C000); no-op on other mappers */
+int dp_nesmach_set_prg_mode(DpNesMach *d, int mode1) {
+    if (d->mapper != 4) return 0;
+    if (mode1) d->rg.v[0] |= 0x40; else d->rg.v[0] &= (uint8_t)~0x40;
     mapper_apply(d);
     return 1;
 }
