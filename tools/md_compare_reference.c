@@ -52,7 +52,7 @@ int main(int argc, char **argv) {
     fclose(f);
     unsigned char header[64];
     if (fread(header, 1, sizeof header, movie) != sizeof header || memcmp(header, "Gens Movie ", 11) ||
-        header[20] != '3' || header[21] != '3' || (header[15] >= 'A' && (header[22] & 0xe0))) {
+        (header[20] != '3' && header[20] != '6') || (header[21] != '3' && header[21] != '6') || (header[15] >= 'A' && (header[22] & 0xe0))) {
         fprintf(stderr, "unsupported GMV\n"); return 2;
     }
     ClownMDEmu *ref = calloc(1, sizeof *ref); MdFull *dut = calloc(1, sizeof *dut);

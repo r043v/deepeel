@@ -305,3 +305,19 @@ Balayage de la phase sous-cycle du mode `exact` (`DP_MD_CLOCK_OFF` 0 à 6, trame
 Blocage DMA : arrondi de la référence (`DP_MD_DMA_REFROUND=1`, option de m0boy, désactivée par défaut). La référence compte le gel du 68000 en horloges maîtres (`cycles_per_scanline * lectures / débit`) puis arrondit au cycle 68000 supérieur ; m0boy calculait `(ligne * lectures / 7) / débit` au plancher. Avec l'arrondi de la référence, la WRAM de m0boy est identique à ClownMDEmu de la trame 60 à la trame 3300 (`diff=0` aux trames 900, 1500, 3000 ; les 3 octets de pile morte dès la trame 673 disparaissent), mais une divergence de jeu apparaît ensuite : 1 octet de pile à la trame 3600, puis une table de 4 en 4 octets en `$CB31…` et X du joueur `02bf`/`02b9` à la trame 3714 (642 octets), 2235 octets à la trame 6000. Le défaut reste donc plus proche sur 6000 trames (3 octets). La divergence à partir de ~3650 n'est pas encore expliquée (hypothèses : autre durée de gel DMA, test « vblank » : `DP_MD_DMA_VBLANK37=1` n'y change rien). Piste suivante : la première trame divergente entre 3600 et 3714.
 
 Référence Gens-rr (v11c, sous wine) : `tools/gens_dump.lua` rejoue le film et écrit les 64 Kio de WRAM après chaque trame (`wine Gens.exe ROM.md -lua gens_dump.lua`) ; `DP_MD_GENS_DUMP=wram.bin [DP_MD_GENS_SKIP=N]` les compare dans `md_compare_reference`. Sonic 1, `s6k.gmv` : écart de 1 à 2 octets aux trames 120–420, puis des centaines d'octets (628 à la trame 1200, ~3500 à 6000), identiques à 2 octets près pour ClownMDEmu et m0boy — Gens est une troisième horloge (488 cycles/ligne), les deux autres s'accordent entre eux. Observation de l'outil, pas mesure matérielle.
+
+### Re-mesure Gens-rr (13 novembre 2026) : film 1843S (Sonic 1, GMV 6 boutons)
+
+`tools/tasvideos_fetch.py` a re-téléchargé les 27 films Sonic 1 (`tas/sonic1-refetch`) : les liens de
+`tas/games/sonic-md-all` étaient cassés. `md_compare_reference` acceptait seulement les GMV à 2 manettes 3
+boutons (`33`) ; il accepte maintenant `3` ou `6` par port (les films « 66 » dont les octets d'entrée sont
+`FF FF` en dehors du premier). Observations de l'outil (pas des mesures matérielles), ROM USA/Europe, 3000 trames :
+
+- ClownMDEmu et m0boy s'accordent à 1–2 octets près jusqu'à la trame ~1466 ; à cet endroit la position X du
+  joueur diverge entre eux (« player X differs for 20 frames »), puis ClownMDEmu reste plus proche de Gens-rr
+  que m0boy (trame 1560 : 645 contre 2123 octets d'écart ; trame 1800 : 486 contre 3085).
+- Contre Gens-rr (référence des GMV, sous wine, `tools/gens_dump.lua`) les deux divergent dès la trame ~540
+  (53 octets) puis de centaines d'octets (840 : 579) : Gens a sa propre horloge (488 cycles/ligne), connue.
+- La première divergence propre à m0boy est donc ≈ trame 1466 (hors piles `$FDF6/7`, déjà différentes dès la
+  trame 54) ; sa cause n'est pas encore isolée. Les autres films incomplets du tableau (`3994S`, `1437S`,
+  `5906S`, …) restent à mesurer par la même chaîne.
