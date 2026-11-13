@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 /* Standalone differential probe: run one raw GMV against the external
  * ClownMDEmu library and deepeel's m0boy bridge. The printed RAM offsets
  * describe Sonic 1 World Rev 00, not a platform-wide ABI. The cores expose
@@ -38,6 +39,9 @@ static unsigned dut_word(const MdFull *m, unsigned addr) {
 extern int dp_trace_on, dp_trace_on_d; extern FILE *dp_trace_f, *dp_trace_d;
 #endif
 int main(int argc, char **argv) {
+    /* ClownMDEmu's own clock: the m0boy exact clock with a 3-master-clock phase tracks 1843S/1437S/s6k (13 800 frames)
+     * where the default 3420-master line drifts by one frame near 1423; both still overridable from the environment. */
+    setenv("DP_MD_CLOWN_CLOCK", "exact", 0); setenv("DP_MD_CLOCK_OFF", "3", 0);
     if (argc != 4) {
         fprintf(stderr, "usage: md_compare_reference ROM raw.gmv frames\n");
         return 2;

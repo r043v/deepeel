@@ -355,3 +355,22 @@ inachevée : la trame 1423 est « perdue » (le joueur n'avance pas), d'où le r
 dizaines de cycles 68000 sur une trame chargée de GHZ1 ; il ne dépend pas de la phase initiale (balayage
 `DP_MD_PENALTY`). Piste suivante : sommer les cycles par routine de la boucle (jsr/bsr de `$3B10–$3B40`) des deux
 côtés ; le cœur de référence n'expose pas de compteur, il faut donc un hook de cycles dans ClownMDEmu.
+
+### Horloge de référence : la cause du lag de la trame 1423 (13 novembre 2026)
+
+Balayage des modèles de timing de m0boy contre ClownMDEmu (`1843S`, `1437S`, `s6k`) : aucune bascule DMA
+(`DP_MD_DMA_REFROUND`, `DP_MD_DMA_VBLANK37`) ne bouge l'écart ; en revanche l'**horloge** le fait.
+
+| réglage m0boy | `s6k` (6000) | `1843S` | `1437S` |
+|---|---|---|---|
+| défaut (ligne de 3420 horloges) | identique | écart X à 1423 | écart X à 1423 |
+| `DP_MD_CLOWN_CLOCK=exact` | écart X à 5936 | identique 13 500 trames | identique 13 800 |
+| `exact` + `DP_MD_CLOCK_OFF=3` | identique | identique 13 500 | identique 13 800 |
+
+L'horloge `exact` à phase 3 suit ClownMDEmu sur les trois films (X du joueur égal, 5 octets d'écart de WRAM) ;
+`MD_IRQ_IMMEDIATE=1` donne un résultat voisin sur deux films (non retenu : latence d'IRQ de la référence).
+`md_compare_reference` la prend désormais par défaut (`setenv(…, 0)`, surchargeable par l'environnement). Avec ce
+réglage : `5906S` 39 900 trames sans écart de X (25 octets), `3994S` garde sa divergence à 29275 (autre cause).
+**Non fait** : la changer dans les défauts de m0boy lui-même (dépôt externe, accord nécessaire) et donc dans
+`deepeel md` ; les films GMV réels ne rejouent pas encore tous avec l'horloge par défaut de la plateforme.
+Observations de l'outil, pas des mesures matérielles.
