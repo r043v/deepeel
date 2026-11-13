@@ -430,3 +430,9 @@ conserve le reste entre transferts » est donc écartée. Le transfert qui sépa
 affichage actif, ou seulement en V-blank : `3994S` diverge dans les deux cas (2 906 octets), `1843S` et `1437S` tiennent.
 `3994S` n'est donc fermé que si les deux classes sont arrondies au plafond. La séparation active / blanking n'explique pas
 l'écart ; les classes restantes à tester sont la destination (VRAM, CRAM, VSRAM) et la largeur (H32 / H40). Observation de l'outil.
+
+**Arrondi DMA par destination et largeur (`DP_MD_DMA_KCLASS`, m0boy local, non publié).** k = 6 limité aux écritures VRAM, aux
+écritures hors VRAM (CRAM/VSRAM) ou au mode H40 : `3994S` diverge dans les trois cas (2 906 octets). Aucune classe isolée
+(actif/blanking, VRAM/autre, H40) ne reproduit le comportement « tout au plafond » : l'écart de `3994S` n'est pas un arrondi par
+type de transfert mais une combinaison, ou un terme de phase (position dans la ligne au lancement du DMA) que l'arrondi fixe
+imite sans le modéliser. Piste suivante : modéliser la phase de la ligne au lancement. Observation de l'outil.
