@@ -1006,6 +1006,16 @@ static void md_static_scan(const uint8_t *rom, size_t n, DpMdResults *r) {
     uint32_t *wl = malloc(sizeof(uint32_t) * (n / 2 + 1));
     if (!wl) return;
     size_t nw = 0;
+    /* S2 refinement: a callee is "known to return" when an executed BSR/JSR to it has an executed fall-through
+     * (the call came back), so the fall-through of an unexecuted call to it is code, not inline data. */
+    uint8_t *rets = calloc(n / 2 + 1, 1);
+    for (size_t i = 0; rets && i < n; i += 2) {
+        if (!(r->flags[i] & live)) continue;
+        DpM68kInsn in;
+        unsigned len = dp_m68k_decode(rom + i, n - i, (uint32_t)i, &in);
+        if (len && (in.cls == DP_M68K_BSR || in.cls == DP_M68K_JSR) && in.has_target && i + len < n &&
+            (r->flags[i + len] & live) && (in.target & 0xFFFFFFu) < n) rets[(in.target & 0xFFFFFFu) >> 1] = 1;
+    }
     #define MD_PUSH(t) do { uint32_t t_ = (t); if (!(t_ & 1) && t_ >= 0x200 && t_ < n && !(r->flags[t_] & live) && r->stat[t_] != 3 && r->stat[t_] != 8 && r->stat[t_] != 7 && nw < n / 2) wl[nw++] = t_; } while (0)
     for (size_t i = 0; i < n; i += 2) {
         if (!(r->flags[i] & live) || (i && (r->flags[i - 1] & live))) continue;
@@ -1018,7 +1028,7 @@ static void md_static_scan(const uint8_t *rom, size_t n, DpMdResults *r) {
                        in.cls == DP_M68K_RTR || in.cls == DP_M68K_STOP;
             if ((in.cls == DP_M68K_BRA || in.cls == DP_M68K_BSR || in.cls == DP_M68K_BCC || in.cls == DP_M68K_DBCC ||
                  in.cls == DP_M68K_JMP || in.cls == DP_M68K_JSR) && in.has_target) MD_PUSH(in.target & 0xFFFFFFu);
-            if (!term) { if (in.cls == DP_M68K_BSR || in.cls == DP_M68K_JSR) r->stat_conf_lost++; else MD_PUSH((uint32_t)(a + len)); }
+            if (!term) { if ((in.cls == DP_M68K_BSR || in.cls == DP_M68K_JSR) && !(in.has_target && (in.target & 0xFFFFFFu) < n && rets && rets[(in.target & 0xFFFFFFu) >> 1])) r->stat_conf_lost++; else MD_PUSH((uint32_t)(a + len)); }
             a += len;
         }
     }
@@ -1038,11 +1048,12 @@ static void md_static_scan(const uint8_t *rom, size_t n, DpMdResults *r) {
             if ((in.cls == DP_M68K_BRA || in.cls == DP_M68K_BSR || in.cls == DP_M68K_BCC || in.cls == DP_M68K_DBCC ||
                  in.cls == DP_M68K_JMP || in.cls == DP_M68K_JSR) && in.has_target) MD_PUSH(in.target & 0xFFFFFFu);
             if (term) break;
-            if (in.cls == DP_M68K_BSR || in.cls == DP_M68K_JSR) { r->stat_conf_lost++; break; }
+            if ((in.cls == DP_M68K_BSR || in.cls == DP_M68K_JSR) && !(in.has_target && (in.target & 0xFFFFFFu) < n && rets && rets[(in.target & 0xFFFFFFu) >> 1])) { r->stat_conf_lost++; break; }
             a += len;
         }
     }
     #undef MD_PUSH
+    free(rets);
     free(wl);
 }
 
