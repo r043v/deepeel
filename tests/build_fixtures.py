@@ -1303,6 +1303,23 @@ def build_nes_pce(out):
     d1[6] = 0x10
     with open(os.path.join(out, "fix_nes_dispatch1.nes"), "wb") as f:
         f.write(d1)
+    # MMC3 dispatch: table of three $8000-range words in the fixed last 16 KiB; 8 KiB bank 0 holds code at all
+    # three offsets, bank 1 only at $8010, banks 2-5 none (zero runs), banks 6-7 are the fixed pair
+    m3 = bytearray(16 + 8 * 0x2000)
+    m3[0:4] = b"NES\x1a"
+    m3[4], m3[5], m3[6] = 4, 0, 0x40
+    for bk, ts in ((0, (0x10, 0x20, 0x30)), (1, (0x10,))):
+        for t in ts:
+            q = 16 + bk * 0x2000 + t
+            m3[q:q + 3] = bytes([0x4C, t, 0x80])
+    o = 16 + 6 * 0x2000
+    m3[o:o + 3] = bytes([0x4C, 0x00, 0xC0])
+    m3[o + 0x100:o + 0x106] = bytes([0x10, 0x80, 0x20, 0x80, 0x30, 0x80])
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        q = 16 + 8 * 0x2000 - 6 + (v - 0xFFFA)
+        m3[q:q + 2] = bytes([0x00, 0xC0])
+    with open(os.path.join(out, "fix_nes_dispatch4.nes"), "wb") as f:
+        f.write(m3)
     # NES context loop: INC $10 / LDA #0 / BEQ back; every pass differs only in RAM,
     # so the exact dedup keeps all of them and a context cap closes the surplus
     k = bytearray(16 + 2 * 0x4000)

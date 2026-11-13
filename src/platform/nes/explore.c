@@ -1833,6 +1833,49 @@ static void second_pass_seed(DpNesRun *x) {
             k = e > k ? e + 2 : k + 1;
         }
     }
+    // G2 on MMC3 (PRG mode 0): the fixed $C000-$FFFF region holds the table; each word in $8000-$BFFF is entered
+    // under every 8 KiB bank whose bytes at that offset decode as code (R6 for $8000-$9FFF, R7 for $A000-$BFFF).
+    if (x->opt.bank_dispatch && mp == 4 && n >= 0x8000) {
+        size_t fixed = n - 0x4000;
+        unsigned banks8 = (unsigned)(n >> 13);
+        for (size_t k = fixed; k + 1 < n;) {
+            size_t e = k;
+            while (e + 1 < n && (rom[e + 1] & 0xC0) == 0x80) e += 2;
+            if (e - k >= 6) {
+                r->dispatch_tables++;
+                for (size_t w = k; w < e; w += 2) {
+                    unsigned v = rom[w] | (rom[w + 1] << 8);
+                    for (unsigned b = 0; b + 2 < banks8; b++) {
+                        size_t cell = (size_t)b * 0x2000 + (v & 0x1FFF);
+                        if (cell >= n || sd[cell] || (r->flags[cell] & (DP_NES_NATURAL | DP_NES_FORCED))) continue;
+                        int ok = 1, run = 1;
+                        for (unsigned q = 1; q < 8 && cell + q < n; q++) run += rom[cell + q] == rom[cell];
+                        if (run >= 8) ok = 0;
+                        size_t c = cell; unsigned pcv = v;
+                        for (unsigned ins = 0; ok && ins < 6; ins++) {
+                            uint8_t bb[3] = { rom[c], c + 1 < n ? rom[c + 1] : 0, c + 2 < n ? rom[c + 2] : 0 };
+                            DpM6502Instruction in;
+                            if (!dp_m6502_decode(bb, 3, (uint16_t)pcv, &in) || in.flow == DP_M6502_JAM || (c & 0x1FFF) + in.length > 0x2000) { ok = 0; break; }
+                            if (in.flow == DP_M6502_JUMP || in.flow == DP_M6502_RETURN) break;
+                            c += in.length; pcv += in.length;
+                        }
+                        if (!ok) { r->dispatch_refused_view++; continue; }
+                        sd[cell] = 1;
+                        if (r->pass2_seeds + r->pass2_refused >= ((x->opt.max_total == UINT64_MAX || x->lot) ? UINT32_MAX : (uint32_t)NES_PASS2_MAX)) { r->pass2_capped++; continue; }
+                        uint8_t *es = malloc(dp_nesmach_state_size());
+                        if (!es) { x->failed = 1; free(sd); return; }
+                        dp_nesmach_reset(x->m);
+                        if (!dp_nesmach_map_8k(x->m, v, b)) { free(es); r->pass2_refused++; continue; }
+                        dp_nesmach_set_pc(x->m, v);
+                        dp_nesmach_save(x->m, es);
+                        DpNesPathState er = { es, 1, 0, 0, 0, 0, 0, DP_NES_TREE_PASS2 };
+                        if (seed_push(x, &er)) { r->pass2_seeds++; r->dispatch_seeds++; }
+                    }
+                }
+            }
+            k = e > k ? e + 2 : k + 1;
+        }
+    }
     free(sd);
 }
 

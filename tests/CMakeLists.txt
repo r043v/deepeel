@@ -233,6 +233,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_rtssplit.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dispatch.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dispatch1.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dispatch4.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ctx.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_jam.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_cpucopy.nes
@@ -431,6 +432,7 @@ add_test(NAME nes_provenance_rts_split COMMAND sh -c "$<TARGET_FILE:deepeel> nes
 set_tests_properties(nes_provenance_rts_split PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_bank_dispatch COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dispatch.nes --attract-frames 0 --bank-dispatch --max-total 20000 --max-steps 50 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_bd.txt >/dev/null 2>&1; grep -Eq 'bank dispatch: 1 tables, 7 seeds, 5 bank views refused' ${CMAKE_CURRENT_BINARY_DIR}/nes_bd.txt")
 add_test(NAME nes_bank_dispatch_mmc1 COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dispatch1.nes --attract-frames 0 --bank-dispatch --max-total 20000 --max-steps 50 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_bd1.txt >/dev/null 2>&1; grep -Eq 'bank dispatch: 1 tables, [1-9][0-9]* seeds' ${CMAKE_CURRENT_BINARY_DIR}/nes_bd1.txt")
+add_test(NAME nes_bank_dispatch_mmc3 COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dispatch4.nes --attract-frames 0 --bank-dispatch --max-total 20000 --max-steps 50 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_bd4.txt >/dev/null 2>&1; grep -Eq 'bank dispatch: 1 tables, [1-9][0-9]* seeds' ${CMAKE_CURRENT_BINARY_DIR}/nes_bd4.txt")
 set_tests_properties(nes_bank_dispatch PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_ctx_cap COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ctx.nes; $B nes explore $F --attract-frames 0 --ctx-cap 3 --max-total 5000 --max-steps 40 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_cc1.txt >/dev/null 2>&1; $B nes explore $F --attract-frames 0 --no-context-evict --max-total 5000 --max-steps 40 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_cc0.txt >/dev/null 2>&1; grep -q 'context eviction: [1-9]' ${CMAKE_CURRENT_BINARY_DIR}/nes_cc1.txt && ! grep -q 'context eviction' ${CMAKE_CURRENT_BINARY_DIR}/nes_cc0.txt")
 set_tests_properties(nes_ctx_cap PROPERTIES FIXTURES_REQUIRED fixtures)
