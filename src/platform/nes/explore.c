@@ -1882,8 +1882,16 @@ static void static_closure(DpNesRun *x) {
                 if (!(r->flags[c + k] & DP_NES_STATIC)) { r->flags[c + k] |= DP_NES_STATIC; r->static_bytes++; }
             if (in.flow == DP_M6502_JUMP || in.flow == DP_M6502_CALL || in.flow == DP_M6502_BRANCH) {
                 unsigned t = in.target;
-                if (t >= 0x8000u && (t & 0xC000u) == (pc & 0xC000u)) {
-                    size_t tc = (size_t)((int64_t)(c) - (int64_t)(pc & 0x3FFFu) + (int64_t)(t & 0x3FFFu));
+                int64_t tcs = -1;
+                if (t >= 0x8000u && (t & 0xC000u) == (pc & 0xC000u))
+                    tcs = (int64_t)(c) - (int64_t)(pc & 0x3FFFu) + (int64_t)(t & 0x3FFFu);
+                else if (t >= 0xC000u && pc < 0xC000u && n >= 0x8000 && dp_nesmach_mapper(x->m) != 7 && dp_nesmach_mapper(x->m) != 0 && dp_nesmach_mapper(x->m) != 3) {
+                    // S2: a switchable-window sweep following a jump into the fixed $C000+ bank (last 16 KiB).
+                    tcs = (int64_t)(n - 0x4000) + (int64_t)(t & 0x3FFFu);
+                    r->static_xwindow++;
+                }
+                if (tcs >= 0) {
+                    size_t tc = (size_t)tcs;
                     if (tc < n && !seen[tc] && !(r->flags[tc] & (DP_NES_NATURAL | DP_NES_FORCED | DP_NES_STATIC))) {
                         if (wl < n) { seen[tc] = 1; work[wl] = tc; wpc[wl++] = (uint16_t)t; }
                         else r->static_cap_hits++;
@@ -2285,7 +2293,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  tas identity: same ROM %llu, different ROM %llu, not recorded %llu\n", (unsigned long long)r->tas_same, (unsigned long long)r->tas_different, (unsigned long long)r->tas_unrecorded);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);
     fprintf(out, "  pointer tables: %llu tables, %llu bytes, %llu cross-bank words (inferred)\n", (unsigned long long)r->table_count, (unsigned long long)r->table_bytes, (unsigned long long)r->table_xbank_words);
-    fprintf(out, "  static closure: %llu bytes from %llu roots, cap hits %llu\n", (unsigned long long)r->static_bytes, (unsigned long long)r->static_roots, (unsigned long long)r->static_cap_hits);
+    fprintf(out, "  static closure: %llu bytes from %llu roots, cap hits %llu, cross-window edges followed %llu\n", (unsigned long long)r->static_bytes, (unsigned long long)r->static_roots, (unsigned long long)r->static_cap_hits, (unsigned long long)r->static_xwindow);
     fprintf(out, "  padding %llu bytes; inferred code %llu data %llu padding %llu\n", (unsigned long long)r->padding_bytes, (unsigned long long)r->inferred_code, (unsigned long long)r->inferred_data, (unsigned long long)r->inferred_pad);
     fprintf(out, "  cpu loop copy bytes %llu, to WRAM %llu, to SRAM/APU %llu, ROM->WRAM->OAM %llu\n", (unsigned long long)r->cpu_copy_bytes, (unsigned long long)r->wram_copy_bytes, (unsigned long long)r->aux_copy_bytes, (unsigned long long)r->oam_chain_bytes);
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, %llu table addresses, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_ptrs, (unsigned long long)r->indirect_overflow);

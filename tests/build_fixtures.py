@@ -1322,6 +1322,20 @@ def build_nes_pce(out):
         n[q:q + 2] = bytes([0x00, 0x80])
     with open(os.path.join(out, "fix_nes_static.nes"), "wb") as f:
         f.write(n)
+    # NES S2 cross-window closure (UxROM): the swept subroutine at $8020 calls $C100 in the fixed bank
+    n = bytearray(16 + 3 * 0x4000)
+    n[0:4] = b"NES\x1a"
+    n[4], n[5], n[6] = 3, 0, 0x20
+    code = bytes([0x20, 0x20, 0x80, 0x4C, 0x00, 0x80])
+    n[16:16 + len(code)] = code
+    sub = bytes([0xA9, 0x01, 0x20, 0x00, 0xC1, 0x60])
+    n[16 + 0x20:16 + 0x20 + len(sub)] = sub
+    n[16 + 2 * 0x4000 + 0x100:16 + 2 * 0x4000 + 0x100 + 3] = bytes([0xA9, 0x02, 0x60])
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        q = 16 + 2 * 0x4000 + (v - 0xFFFA) + 0x3FFA
+        n[q:q + 2] = bytes([0x00, 0x80])
+    with open(os.path.join(out, "fix_nes_xwin.nes"), "wb") as f:
+        f.write(n)
     # NES picture: palette ($0F, $30), 64 nametable tiles of tile 1 (solid colour 1), rendering on
     n = bytearray(16 + 2 * 0x4000 + 0x2000)
     n[0:4] = b"NES\x1a"

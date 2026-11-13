@@ -223,6 +223,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_pad.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ind.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_static.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_xwin.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_table.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_mmc1table.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_slide.nes
@@ -412,6 +413,7 @@ add_test(NAME nes_cov COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_
 set_tests_properties(nes_cov PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_sibling COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_sibling.nes --attract-frames 0 --max-total 20000 --max-steps 2000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_sib.txt >/dev/null 2>&1; grep -Eq 'copy siblings: 1 tables; 2 ranges .32 bytes.' ${CMAKE_CURRENT_BINARY_DIR}/nes_sib.txt")
 set_tests_properties(nes_sibling PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME nes_static_xwindow COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_xwin.nes --attract-frames 0 --max-total 20000 --max-steps 2 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_xw.txt >/dev/null 2>&1; grep -q 'cross-window edges followed 1' ${CMAKE_CURRENT_BINARY_DIR}/nes_xw.txt")
 add_test(NAME nes_second_pass COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_static.nes --attract-frames 0 --second-pass --max-total 20000 --max-steps 2 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_p2.txt >/dev/null 2>&1; grep -Eq 'second pass: 1 seeds, 0 refused' ${CMAKE_CURRENT_BINARY_DIR}/nes_p2.txt && grep -Eq 'static closure: 0 bytes from 0 roots' ${CMAKE_CURRENT_BINARY_DIR}/nes_p2.txt")
 set_tests_properties(nes_second_pass PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_spool_resume COMMAND sh -c "rm -f ${CMAKE_CURRENT_BINARY_DIR}/nes.lot; $<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes --attract-frames 0 --spool ${CMAKE_CURRENT_BINARY_DIR}/nes.lot --max-total 3 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_sp1.txt >/dev/null 2>&1; grep -Eq '1 left on disk' ${CMAKE_CURRENT_BINARY_DIR}/nes_sp1.txt && $<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes --attract-frames 0 --resume ${CMAKE_CURRENT_BINARY_DIR}/nes.lot --max-total 20000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_sp2.txt >/dev/null 2>&1; grep -Eq '1 read back, 0 left on disk' ${CMAKE_CURRENT_BINARY_DIR}/nes_sp2.txt")
