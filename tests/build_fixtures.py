@@ -1336,6 +1336,10 @@ def build_nes_pce(out):
         m4[q:q + 2] = bytes([0x00, 0xE0])
     with open(os.path.join(out, "fix_nes_dispatch5.nes"), "wb") as f:
         f.write(m4)
+    # MMC5 PRG mode 3 (power-on): same image as the MMC3 mode 1 fixture, but the mapper is 5; $E000 is the fixed last bank.
+    m4b = bytearray(m4); m4b[6] = (m4b[6] & 0x0F) | 0x50; m4b[7] = (m4b[7] & 0x0F)
+    with open(os.path.join(out, "fix_nes_dispatch8.nes"), "wb") as f:
+        f.write(m4b)
     # MMC1 control mode 2 dispatch: bank 0 (fixed at $8000 in mode 2) holds a table of three $C000-slot words; bank 1 has
     # code at all three offsets, bank 2 only at $C010, bank 3 none.  Power-on is mode 3: bank 3 at $C000 jumps to bank 0.
     m5 = bytearray(16 + 4 * 0x4000)

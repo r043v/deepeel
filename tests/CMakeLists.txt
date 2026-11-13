@@ -234,6 +234,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dispatch.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dispatch1.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dispatch4.nes
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dispatch8.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ctx.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_jam.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_cpucopy.nes
@@ -434,6 +435,7 @@ add_test(NAME nes_bank_dispatch COMMAND sh -c "$<TARGET_FILE:deepeel> nes explor
 add_test(NAME nes_bank_dispatch_mmc1 COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dispatch1.nes --attract-frames 0 --bank-dispatch --max-total 20000 --max-steps 50 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_bd1.txt >/dev/null 2>&1; grep -Eq 'bank dispatch: 1 tables, [1-9][0-9]* seeds' ${CMAKE_CURRENT_BINARY_DIR}/nes_bd1.txt")
 add_test(NAME nes_bank_dispatch_mmc3 COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dispatch4.nes --attract-frames 0 --bank-dispatch --max-total 20000 --max-steps 50 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_bd4.txt >/dev/null 2>&1; grep -Eq 'bank dispatch: 1 tables, [1-9][0-9]* seeds' ${CMAKE_CURRENT_BINARY_DIR}/nes_bd4.txt")
 add_test(NAME nes_bank_dispatch_mmc3_m1 COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dispatch5.nes --attract-frames 0 --bank-dispatch --max-total 20000 --max-steps 50 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_bd5.txt >/dev/null 2>&1; grep -Eq 'bank dispatch: 1 tables, [1-9][0-9]* seeds' ${CMAKE_CURRENT_BINARY_DIR}/nes_bd5.txt")
+add_test(NAME nes_bank_dispatch_mmc5 COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dispatch8.nes --attract-frames 0 --bank-dispatch --max-total 20000 --max-steps 50 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_bd8.txt >/dev/null 2>&1; grep -Eq 'bank dispatch: 1 tables, [1-9][0-9]* seeds' ${CMAKE_CURRENT_BINARY_DIR}/nes_bd8.txt")
 add_test(NAME nes_bank_dispatch_mmc1_m2 COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dispatch6.nes --attract-frames 0 --bank-dispatch --max-total 20000 --max-steps 50 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_bd6.txt >/dev/null 2>&1; grep -Eq 'bank dispatch: 1 tables, [1-9][0-9]* seeds' ${CMAKE_CURRENT_BINARY_DIR}/nes_bd6.txt")
 add_test(NAME nes_bank_dispatch_mmc1_32k COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dispatch7.nes --attract-frames 0 --bank-dispatch --max-total 20000 --max-steps 50 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_bd7.txt >/dev/null 2>&1; grep -Eq 'bank dispatch: 1 tables, [1-9][0-9]* seeds' ${CMAKE_CURRENT_BINARY_DIR}/nes_bd7.txt")
 set_tests_properties(nes_bank_dispatch PROPERTIES FIXTURES_REQUIRED fixtures)

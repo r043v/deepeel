@@ -1885,11 +1885,11 @@ static void second_pass_seed(DpNesRun *x) {
     // G2 on MMC3: the table sits in the fixed region ($C000-$FFFF in PRG mode 0, $E000-$FFFF in mode 1); each word in the
     // switchable windows ($8000-$BFFF in mode 0, $A000-$DFFF in mode 1) is entered under every 8 KiB bank whose bytes at
     // that offset decode as code (mode 0: R6 $8000, R7 $A000; mode 1: R7 $A000, R6 $C000).
-    if (x->opt.bank_dispatch && mp == 4 && n >= 0x8000) for (int pm = 0; pm < 2; pm++) {
-        size_t fixed = n - (pm ? 0x2000 : 0x4000);
-        unsigned wlo = pm ? 0xA0 : 0x80, whi = pm ? 0xE0 : 0xC0;
+    if (x->opt.bank_dispatch && (mp == 4 || mp == 5) && n >= 0x8000) for (int pm = 0; pm < (mp == 5 ? 1 : 2); pm++) {   // MMC5: PRG mode 3, only $E000 fixed
+        size_t fixed = n - (pm || mp == 5 ? 0x2000 : 0x4000);
+        unsigned wlo = pm ? 0xA0 : 0x80, whi = pm || mp == 5 ? 0xE0 : 0xC0;
         unsigned banks8 = (unsigned)(n >> 13);
-        const size_t lim = pm ? n - 6 : n;   // mode 1: the $FFFA vectors are not a dispatch table
+        const size_t lim = pm || mp == 5 ? n - 6 : n;   // mode 1: the $FFFA vectors are not a dispatch table
         for (size_t k = fixed; k + 1 < lim;) {
             size_t e = k;
             while (e + 1 < lim && rom[e + 1] >= wlo && rom[e + 1] < whi) e += 2;

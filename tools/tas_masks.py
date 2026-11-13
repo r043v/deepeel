@@ -7,7 +7,7 @@ II/I/Run buttons map to B/A/Start).  --skip drops N leading frames (a movie that
 """
 import sys, zipfile, re
 
-BITS = {"up": 0, "down": 1, "left": 2, "right": 3, "b": 4, "a": 5, "select": 6, "start": 7, "ii": 4, "i": 5, "run": 7, "b2": 4, "b1": 5}   # PCEHawk logs name the buttons B1 (I) / B2 (II)
+BITS = {"up": 0, "down": 1, "left": 2, "right": 3, "b": 4, "a": 5, "select": 6, "start": 7, "ii": 4, "i": 5, "run": 7, "b2": 4, "b1": 5, "c": 6}   # PCEHawk logs name the buttons B1 (I) / B2 (II)
 
 def fm2(text):
     out = []

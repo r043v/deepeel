@@ -89,7 +89,7 @@ void dp_fb_sync_gate(uint64_t frame) {
             if (frame > (uint64_t)v + 2) wait = 1;
         }
         if (!wait || dp_stop) break;
-        usleep(300);
+        usleep(100);
     }
     sync_waited += mono_now() - t0;
     (void)stale_since;

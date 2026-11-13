@@ -611,6 +611,11 @@ void dp_nesmach_window(const DpNesMach *d, unsigned *lo, unsigned *hi) {
     else if (dp_nesmach_mmc3_mode1(d)) { *lo = 0xC000u; *hi = 0xE000u; }
 }
 int dp_nesmach_map_8k(DpNesMach *d, unsigned addr, unsigned bank8) {
+    if (d->mapper == 5 && (d->rg.v[0] & 3u) == 3u && addr >= 0x8000u && addr < 0xE000u && bank8 < (unsigned)(machine.prg_size >> 13) && bank8 < 0x80u) {
+        d->rg.v[2 + ((addr - 0x8000u) >> 13)] = (uint8_t)(0x80u | bank8);   /* MMC5 PRG mode 3: $5114-$5116 pick the 8 KiB banks, $E000 stays last */
+        mapper_apply(d);
+        return 1;
+    }
     if (d->mapper != 4 || addr < 0x8000u || addr >= 0xE000u || bank8 >= (unsigned)(machine.prg_size >> 13) || bank8 > 63) return 0;
     if (d->rg.v[0] & 0x40) {   /* PRG mode 1: R7 at $A000, R6 at $C000, $8000 and $E000 fixed */
         if (addr < 0xA000u || addr >= 0xE000u) return 0;

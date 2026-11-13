@@ -97,7 +97,7 @@ namespace BizhawkDsy
 			var def = fe.Core.ControllerDefinition;
 			var names = new string[8];
 			for (int i = 0; i < 8; i++)   // PC Engine names: II = B, I = A, Run = Start
-				names[i] = def.BoolButtons.FirstOrDefault(b => b.StartsWith("P1 ") && (b.EndsWith(" " + Words[i]) || ((args[0] == "pce" || args[0] == "pcehawk") && b.EndsWith(" " + (i == 4 ? (args[0] == "pcehawk" ? "B2" : "II") : i == 5 ? (args[0] == "pcehawk" ? "B1" : "I") : i == 7 ? "Run" : "\0")))));
+				names[i] = def.BoolButtons.FirstOrDefault(b => b.StartsWith("P1 ") && (b.EndsWith(" " + (args[0] == "gen" && i == 6 ? "C" : Words[i])) || ((args[0] == "pce" || args[0] == "pcehawk") && b.EndsWith(" " + (i == 4 ? (args[0] == "pcehawk" ? "B2" : "II") : i == 5 ? (args[0] == "pcehawk" ? "B1" : "I") : i == 7 ? "Run" : "\0")))));
 			Console.Error.WriteLine("buttons: " + string.Join(", ", names.Select((n, i) => Words[i] + "=" + (n ?? "-"))));
 			var controller = new SimpleController(def);
 			var domains = fe.CoreAsMemDomains;
@@ -141,7 +141,7 @@ namespace BizhawkDsy
 			{
 				curF = f + 1; if (addPad != null && curF == ptLo - 1) { addPad(); addPad = null; }
 				for (int i = 0; i < 8; i++) if (names[i] != null) controller[names[i]] = (masks[f] & (1 << i)) != 0;
-				if (feed != null && syncFeed) while (feed.ReadUInt32(28) < (uint)(f + 1)) Thread.Sleep(1);   // replay sync: frame f+1 only once deepeel has published it
+				if (feed != null && syncFeed) while (feed.ReadUInt32(28) + 2 < (uint)(f + 1)) Thread.Yield();   // two frames of slack: the lockstep ping-pong with 1 ms sleeps capped the pair near 7 frames/s   // replay sync: frame f+1 only once deepeel has published it
 				var tf = DateTime.UtcNow;
 				fe.Core.FrameAdvance(controller, true, false);
 				if (feed != null)

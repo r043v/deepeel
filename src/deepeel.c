@@ -1870,6 +1870,7 @@ static void md_movie_output_path(char *out, size_t cap, const char *base, int id
  * window shows each tile's speed separately */
 static const char *md_ref_live_path(void) {
     const char *env = getenv("DP_MD_REF_LIVE");
+    if (env && !strcmp(env, "none")) return NULL;   // another reference feed (BizHawk) is wired by the caller
     if (env && *env) return env;
     static char p[600];
     ssize_t n = readlink("/proc/self/exe", p, sizeof p - 1);
