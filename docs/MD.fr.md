@@ -341,3 +341,8 @@ n'a pas fini dans le temps imparti. Ces nombres sont des observations de l'outil
 
 `5906S` : pas de divergence soutenue de la position du joueur ; deux écarts d'objets isolés (trame 4076 : 11 octets
 `$D841–$D873` ; trame 10497 : 3 octets `$D009–$D00D`). Observation de l'outil.
+
+Balayage `DP_MD_PENALTY` (1843S) : 0, +400, +1200 cycles laissent l'écart à la trame 1423 inchangé ; −400 et −1200 le
+ramènent à la trame 336 (mauvais). Le lag de 1423 n'est donc pas un décalage de phase initial : c'est le coût en
+cycles d'une trame précise (GHZ1) qui fait dépasser le vblank à m0boy mais pas à ClownMDEmu. Piste : comparer
+les cycles par instruction 68000 (accès bus, MULU/DIVU) sur la trame 1422 avec `DP_MD_TRACE_RANGE`.
