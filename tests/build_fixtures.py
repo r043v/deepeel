@@ -944,6 +944,14 @@ def build_md(out):
     r[0x3F8:0x400] = bytes([0x11]) * 8
     r[0x500:0x520] = bytes([0xAA]) * 0x20
     save_md(out, "fix_md_static", r)
+    # --- static BSR: beq.s taken; the unexecuted bsr.s at $204 calls $210, which an executed bsr.s ($230) showed returns,
+    # so its fall-through ($206 moveq/nop/bra) is swept as code ---
+    r = md_rom()
+    r[0x200:0x204] = bytes([0x70, 0x00, 0x67, 0x2C])
+    r[0x204:0x20C] = bytes([0x61, 0x0A, 0x70, 0x01, 0x4E, 0x71, 0x60, 0xFE])
+    r[0x210:0x212] = bytes([0x4E, 0x75])
+    r[0x230:0x234] = bytes([0x61, 0xDE, 0x60, 0xFE])
+    save_md(out, "fix_md_staticbsr", r)
     # --- siblings: DMA of $400 (16 words) + a longword table {$400,$600,$800} read at $300
     r = md_rom()
     pc = 0x200
