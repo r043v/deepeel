@@ -64,6 +64,51 @@ static int unzip_movies(const unsigned char *z, size_t n, const char *dir) {
     return got;
 }
 
+
+static void norm(const char *in, char *out, size_t cap) {   /* lower-case alphanumerics, single spaces */
+    size_t k = 0; int sp = 0;
+    for (; *in && k + 2 < cap; in++) {
+        if (isalnum((unsigned char)*in)) { if (sp && k) out[k++] = ' '; sp = 0; out[k++] = (char)tolower((unsigned char)*in); }
+        else sp = 1;
+    }
+    out[k] = 0;
+}
+static const char *system_of(const char *rom) {
+    static const struct { const char *e, *s; } T[] = { {".gb","GB"}, {".gbc","GBC"}, {".nes","NES"}, {".sms","SMS"}, {".gg","GG"},
+        {".pce","PC Engine"}, {".md","Genesis"}, {".gen","Genesis"}, {".smd","Genesis"}, {".sfc","SNES"}, {".smc","SNES"}, {0,0} };
+    const char *dot = strrchr(rom, '.'); if (!dot) return "";
+    for (int i = 0; T[i].e; i++) if (!strcasecmp(dot, T[i].e)) return T[i].s;
+    return "";
+}
+static void urlenc(const char *in, char *out, size_t cap) {
+    size_t k = 0; for (; *in && k + 4 < cap; in++) {
+        if (isalnum((unsigned char)*in)) out[k++] = *in; else k += (size_t)sprintf(out + k, "%%%02X", (unsigned char)*in); }
+    out[k] = 0;
+}
+/* Game ids whose TASVideos name equals the ROM's title (file name without extension and "(...)" tags). */
+static int games_of_rom(const char *rom, long *ids, int max) {
+    const char *b = strrchr(rom, '/'); b = b ? b + 1 : rom;
+    char raw[256], title[256], q[800], url[1024]; size_t k = 0;
+    for (int depth = 0; *b && k + 1 < sizeof raw; b++) { if (*b == '(') depth++; else if (*b == ')') { if (depth) depth--; } else if (!depth) raw[k++] = *b; }
+    raw[k] = 0; char *dot = strrchr(raw, '.'); if (dot) *dot = 0;
+    norm(raw, title, sizeof title);
+    urlenc(raw, q, sizeof q); char sys[128]; urlenc(system_of(rom), sys, sizeof sys);
+    snprintf(url, sizeof url, "https://tasvideos.org/Games/List?SearchTerms=%s&System=%s", q, sys);
+    size_t n; unsigned char *h = fetch(url, &n); if (!h) return 0;
+    h = realloc(h, n + 1); h[n] = 0; int c = 0;
+    for (const char *p = (char *)h; (p = strstr(p, "href=\"/")); p += 7) {
+        char *end; long v = strtol(p + 7, &end, 10);
+        if (end == p + 7 || *end != 'G' || end[1] != '"') continue;
+        const char *gt = strchr(end, '>'), *lt = gt ? strchr(gt, '<') : 0; if (!lt) continue;
+        char name[256], nn[256]; size_t l = (size_t)(lt - gt - 1); if (l >= sizeof name) l = sizeof name - 1;
+        memcpy(name, gt + 1, l); name[l] = 0; norm(name, nn, sizeof nn);
+        int dup = 0; for (int i = 0; i < c; i++) dup |= ids[i] == v;
+        if (!strcmp(nn, title) && !dup && c < max) ids[c++] = v;
+    }
+    free(h); fprintf(stderr, "ROM title '%s': %d game id(s) from the Games list\n", title, c);
+    return c;
+}
+
 /* Collect distinct numbers N of every href="/NNN<suffix>" in html. */
 static int ids_of(const char *html, char suffix, long *ids, int max) {
     int k = 0;
@@ -76,6 +121,12 @@ static int ids_of(const char *html, char suffix, long *ids, int max) {
     return k;
 }
 
+static int ids_merge(const char *html, char suffix, long *ids, int have, int max) {
+    long tmp[4096]; int k = ids_of(html, suffix, tmp, 4096);
+    for (int i = 0; i < k; i++) { int dup = 0; for (int j = 0; j < have; j++) dup |= ids[j] == tmp[i]; if (!dup && have < max) ids[have++] = tmp[i]; }
+    return have;
+}
+
 int dp_tasfetch_command(int argc, char **argv) {   /* argv: deepeel tasfetch GAME OUT [--list] [--max N] */
     const char *target = 0, *out = 0; int list = 0, mx = 1 << 30;
     for (int i = 2; i < argc; i++) {
@@ -84,18 +135,22 @@ int dp_tasfetch_command(int argc, char **argv) {   /* argv: deepeel tasfetch GAM
         else if (!target) target = argv[i]; else if (!out) out = argv[i];
     }
     if (!target || !out) { fprintf(stderr, "usage: deepeel tasfetch GAME_ID|NNNG|URL OUT_DIR [--list] [--max N]\n"); return 2; }
-    const char *d = target; while (*d && !isdigit((unsigned char)*d)) d++;
-    long gid = strtol(d, 0, 10); if (gid <= 0) { fprintf(stderr, "no game id in '%s'\n", target); return 2; }
-    static long mids[4096], sids[4096]; char url[256]; size_t n;
+    long gids[16]; int ng = 0;
+    if (access(target, R_OK) == 0) ng = games_of_rom(target, gids, 16);
+    else { const char *d = target; while (*d && !isdigit((unsigned char)*d)) d++; long g = strtol(d, 0, 10); if (g > 0) gids[ng++] = g; }
+    if (!ng) { fprintf(stderr, "no TASVideos game found for '%s'\n", target); return 2; }
+    static long mids[4096], sids[4096]; char url[256]; size_t n; int nm = 0, ns = 0;
+    for (int gi = 0; gi < ng; gi++) { long gid = gids[gi]; unsigned char *h;
     snprintf(url, sizeof url, "https://tasvideos.org/%ldG", gid);
-    unsigned char *h = fetch(url, &n); int nm = 0, ns = 0;
-    if (h) { h = realloc(h, n + 1); h[n] = 0; nm = ids_of((char *)h, 'M', mids, 4096); free(h); }
+    h = fetch(url, &n);
+    if (h) { h = realloc(h, n + 1); h[n] = 0; nm = ids_merge((char *)h, 'M', mids, nm, 4096); free(h); }
     else fprintf(stderr, "game page %ldG failed\n", gid);
     snprintf(url, sizeof url, "https://tasvideos.org/Subs-List?GameId=%ld", gid);
     h = fetch(url, &n);
-    if (h) { h = realloc(h, n + 1); h[n] = 0; ns = ids_of((char *)h, 'S', sids, 4096); free(h); }
+    if (h) { h = realloc(h, n + 1); h[n] = 0; ns = ids_merge((char *)h, 'S', sids, ns, 4096); free(h); }
     else fprintf(stderr, "Subs-List failed\n");
     fprintf(stderr, "%d publication(s), %d submission(s)\n", nm, ns);
+    }
     if (list) { for (int i = 0; i < nm; i++) fprintf(stderr, "  %ldM\n", mids[i]); for (int i = 0; i < ns; i++) fprintf(stderr, "  %ldS\n", sids[i]); return 0; }
     mkdir(out, 0755);
     for (int pass = 0; pass < 2; pass++) for (int i = 0; i < (pass ? ns : nm) && mx > 0; i++, mx--) {

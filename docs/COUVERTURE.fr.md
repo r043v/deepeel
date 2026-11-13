@@ -1591,6 +1591,6 @@ Essai : Castle of Illusion (Genesis, 135G) → 8 films, dont la publication 1903
 `src/core/tasfetch.c`, sous-commande `deepeel tasfetch 135G DIR [--list] [--max N]`
 récupère les publications (page du jeu) et les soumissions (Subs-List) d'un jeu TASVideos, dézippe avec zlib
 (stocké/deflate, noms de base des extensions de films seulement) et imprime les `--tas`. Vérifié sur le jeu 135 :
-2 publications, 6 soumissions, deux GMV extraits dont l'en-tête est « Gens Movie ». Limite actuelle : l'id de jeu se
+2 publications, 6 soumissions, deux GMV extraits dont l'en-tête est « Gens Movie ». Une ROM peut remplacer l'id (`deepeel tasfetch ROM DIR`) : le titre est celui du nom de fichier sans étiquettes « (…) », le système vient de l'extension ; Sonic 1 (MD) donne 9 publications + 18 soumissions, les 27 films du Python. Limite : seuls les titres identiques au nom TASVideos sont retenus ; l'id de jeu se
 donne directement (la recherche par titre de ROM reste dans `tools/tasvideos_fetch.py`) ;
 binaire `deepeel` lui-même n'est pas faite.
