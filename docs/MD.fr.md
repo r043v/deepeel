@@ -393,3 +393,6 @@ trame 1496, la référence est à l'attente (`$29A8`, compteur de trame avancé)
 en cycles de certaines instructions ou séquences de bus de m0boy s'écarte de ClownMDEmu dans les deux sens, ce qui
 exclut un réglage d'horloge unique et demande la sommation de cycles par routine (hook de cycles côté référence,
 dépôt externe). Observation de l'outil.
+
+**S2 : mesure du raffinement « callee à retour observé » (0.322.0)** sur Sonic 1 (`explore`, `--max-total 20000`) :
+appels à confiance perdue 76 → 38, octets de code statiques 2 180 → 2 256 (+76). Observation de l'outil.
