@@ -1,6 +1,6 @@
 #!/bin/sh
 # md_watch.sh ROM.md MOVIE.gmv [frames]: the generic deepeel watch window with BizHawk (Genesis Plus GX core) as the
-# reference tile, replaying the same raw GMV; BizHawk paces the pair (BIZHAWK_FEED_FPS, default 60). Runs until closed.
+# reference tile, replaying the same raw GMV; each core runs at full speed (no lockstep); the window shows each tile at 60 fps at most. Runs until closed.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 rom=$1; film=$2
@@ -27,9 +27,9 @@ P
   ;;
 esac
 n=$(stat -c %s "$masks"); [ $# -ge 3 ] && n=$3
-BIZHAWK_DSY_RANGE=${BIZHAWK_DSY_RANGE:-0-0} LD_LIBRARY_PATH=${BIZHAWK_DIR:-$HOME/dev/BizHawk}/Assets/dll BIZHAWK_FEED="$feed" BIZHAWK_FEED_SYNC=1 \
+BIZHAWK_DSY_RANGE=${BIZHAWK_DSY_RANGE:-0-0} LD_LIBRARY_PATH=${BIZHAWK_DIR:-$HOME/dev/BizHawk}/Assets/dll BIZHAWK_FEED="$feed" BIZHAWK_FEED_FPS=${BIZHAWK_FEED_FPS:-1000000} \
   mono "$bh" gen "$rom" "$masks" "$TMPDIR/md_watch_bh.dsy" "$n" >"$TMPDIR/md_watch_bh.log" 2>&1 &
 bhpid=$!
-env DP_MD_REF_LIVE=none DEEPEEL_MD_REF_FEED="$feed" DEEPEEL_MD_REF_NAME="BizHawk Genesis Plus GX" \
+env DP_MD_WATCH_NOSYNC=1 DP_MD_REF_LIVE=none DEEPEEL_MD_REF_FEED="$feed" DEEPEEL_MD_REF_NAME="BizHawk Genesis Plus GX" \
   "$root/build/deepeel" md explore "$rom" --tas "$film" --watch 1 --max-total 2000000000 --text "$TMPDIR/md_watch.txt" || true
 kill $bhpid 2>/dev/null || true

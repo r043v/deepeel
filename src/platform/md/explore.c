@@ -188,12 +188,12 @@ static void on_frame(void *u) {
                 dp_dsy_frame(&dsy, x->r->movie_frames, 2, nm, dt, ln);
             }
         }
-        if (x->o->watch_every) dp_fb_sync_gate(x->r->movie_frames);   // replay sync with the reference cores
-        if (x->o->watch_every) {   // real-time pacing of the replay (DP_MD_WATCH_FPS, default 60, 0 = unpaced): published frames reach the window evenly instead of in bursts
+        if (x->o->watch_every && !getenv("DP_MD_WATCH_NOSYNC")) dp_fb_sync_gate(x->r->movie_frames);   // replay sync with the reference cores
+        if (x->o->watch_every) {   // real-time pacing of the replay (DP_MD_WATCH_FPS, default 0 = unpaced, full speed): published frames reach the window evenly instead of in bursts
             static double fps = -1, next;
             struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
             double now = (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
-            if (fps < 0) { const char *e = getenv("DP_MD_WATCH_FPS"); fps = e ? atof(e) : 60.0; next = now; }
+            if (fps < 0) { const char *e = getenv("DP_MD_WATCH_FPS"); fps = e ? atof(e) : 0.0; next = now; }
             if (fps > 0) {
                 next += 1.0 / fps;
                 if (next > now) usleep((useconds_t)((next - now) * 1e6)); else if (now - next > 0.25) next = now;   // far behind: do not try to catch up
