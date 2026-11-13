@@ -1792,17 +1792,20 @@ static void second_pass_seed(DpNesRun *x) {
     // distinct target is entered in every bank view whose bytes there decode
     // as code (6 instructions without a jam, not an 8-byte constant run).
     unsigned mp = dp_nesmach_mapper(x->m);
-    if (x->opt.bank_dispatch && (mp == 2 || mp == 1 || mp == 71 || mp == 94) && n >= 0x8000) {   // boards with a 16 KiB $8000 slot and a fixed last bank
-        size_t fixed = n - 0x4000;
+    for (int pm = 0; pm < 2; pm++)   // pm 1: MMC1 control mode 2 (first bank fixed at $8000, switchable 16 KiB slot at $C000)
+    if (x->opt.bank_dispatch && (pm ? mp == 1 : (mp == 2 || mp == 1 || mp == 71 || mp == 94)) && n >= 0x8000) {   // boards with a 16 KiB $8000 slot and a fixed last bank
+        size_t fixed = pm ? 0 : n - 0x4000;
+        const size_t lim = pm ? 0x4000 : n;
+        const unsigned wlo = pm ? 0xC0 : 0x80, whi = pm ? 0x100 : 0xC0;
         unsigned banks = (unsigned)(n >> 14);
-        for (size_t k = fixed; k + 1 < n;) {
+        for (size_t k = fixed; k + 1 < lim;) {
             size_t e = k;
-            while (e + 1 < n && (rom[e + 1] & 0xC0) == 0x80) e += 2;   // word high byte in $80-$BF
+            while (e + 1 < lim && rom[e + 1] >= wlo && rom[e + 1] < whi) e += 2;   // word high byte in $80-$BF
             if (e - k >= 6) {
                 r->dispatch_tables++;
                 for (size_t w = k; w < e; w += 2) {
                     unsigned v = rom[w] | (rom[w + 1] << 8);
-                    for (unsigned b = 0; b < banks; b++) {
+                    for (unsigned b = pm ? 1 : 0; b < banks; b++) {
                         size_t cell = (size_t)b * 0x4000 + (v & 0x3FFF);
                         if (sd[cell] || (r->flags[cell] & (DP_NES_NATURAL | DP_NES_FORCED))) continue;
                         // plausibility: decodes as code, not a padding run
@@ -1823,7 +1826,7 @@ static void second_pass_seed(DpNesRun *x) {
                         uint8_t *es = malloc(dp_nesmach_state_size());
                         if (!es) { x->failed = 1; free(sd); return; }
                         dp_nesmach_reset(x->m);
-                        if (!dp_nesmach_enter(x->m, b, v)) { free(es); r->pass2_refused++; continue; }
+                        if (!(pm ? dp_nesmach_enter_mmc1_c000(x->m, b, v) : dp_nesmach_enter(x->m, b, v))) { free(es); r->pass2_refused++; continue; }
                         dp_nesmach_save(x->m, es);
                         DpNesPathState er = { es, 1, 0, 0, 0, 0, 0, DP_NES_TREE_PASS2 };
                         if (seed_push(x, &er)) { r->pass2_seeds++; r->dispatch_seeds++; }
