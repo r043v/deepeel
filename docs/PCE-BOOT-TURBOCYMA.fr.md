@@ -117,6 +117,22 @@ rapproche beaucoup les flux (f9 passe de −27 à −8 écritures ; la
 divergence dans f6 recule de l'écriture 1308 à 1326, l'arrivée de l'IRQ
 s'aligne).
 
+## La mesure au cut : indexer sur les trames du film
+
+La comparaison des dumps DSY (une WRAM par trame) s'est révélée piégeuse :
+le dump `fn=N` de la référence n'est pas l'état à la fin de la trame film
+N−1 comme le suppose l'outil de comparaison. Vérification directe : le
+dump `fn=5` de la référence contient déjà `wram[0]=01` (l'écriture
+`pc=4006`) alors que cette écriture tombe à ts=164301 **dans la trame 5**
+du film (position dans le fichier : après le front VS f=5, avant le VS
+f=6). La frontière « un Emulate Mednafen » ne coïncide donc pas avec la
+coupe scanline 254 du film. La comparaison par **flux d'écritures** (WWM
+des deux côtés, alignés par fin d'Emulate côté pont et par marqueurs de
+sonde côté référence) reste l'autorité : f0–f5 octet-exacts, f6 divergence
+à l'écriture 1326 avec l'IRQ alignée, f9 à −8. La mesure « au cut » doit
+être refaite sur des instants explicitement alignés (les frontières de
+Emulate de chaque côté), pas sur l'index de dump.
+
 ## Non-régression
 
 - `tools/pce_dsy` reconstruit avec le runtime modifié : 6000/6000 trames
