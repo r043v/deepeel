@@ -420,3 +420,8 @@ modèles. Défaut inchangé. Observation de l'outil.
 octets). Pour k = 6 (`DMA_REFROUND`), `3994S` tient 30 000 frames et les deux autres divergent. Aucun k entier ne tient les
 trois : l'écart tient à un seul cycle sur un transfert précis, donc à un terme du modèle (phase d'horloge maître au lancement
 du DMA ?) et non à l'arrondi. À suivre avec la trace `DP_MD_REF_CYCLE` sur les frames 13 483 (`1843S`). Observation de l'outil.
+
+**Report du reste d'horloge maître entre transferts DMA (`DP_MD_DMA_CARRY=1`, m0boy local, non publié).** Même résultat que k = 0…5 :
+`1843S` (13 500) et `1437S` (13 800) tiennent (5 octets), `3994S` diverge (2 906 octets). L'hypothèse « la référence
+conserve le reste entre transferts » est donc écartée. Le transfert qui sépare `3994S` des deux autres reste à identifier
+(source ROM ou RAM, VRAM ou CRAM, H32 ou H40). Observation de l'outil.
