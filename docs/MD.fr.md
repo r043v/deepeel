@@ -374,3 +374,10 @@ réglage : `5906S` 39 900 trames sans écart de X (25 octets), `3994S` garde sa 
 **Non fait** : la changer dans les défauts de m0boy lui-même (dépôt externe, accord nécessaire) et donc dans
 `deepeel md` ; les films GMV réels ne rejouent pas encore tous avec l'horloge par défaut de la plateforme.
 Observations de l'outil, pas des mesures matérielles.
+
+`3994S` avec l'horloge `exact` : premier écart de RAM d'objets à la trame 1479 (`$DB01`, bit 7 d'état d'objet : `b5`
+contre `35`) quelle que soit la phase `DP_MD_CLOCK_OFF` 0–6 ; un écart plus large (X du joueur, 127 octets) à la trame
+1497 pour les phases 3 et 4, repoussé après la trame 1499 pour les phases 0, 1, 2 et 6. Il n'existe donc pas de phase
+unique qui tienne tous les films : `1843S`/`1437S` veulent 3, `3994S` préfère 0–2 et 6. Le modèle de timing
+sous-cycle de m0boy garde un défaut résiduel (l'ordre exact des accès bus/DMA dans la trame) ; le réglage par
+défaut de l'outil n'est qu'un compromis mesuré sur trois films. Observation de l'outil.
