@@ -1251,19 +1251,19 @@ static void static_closure(PceRun *x) {
         default: break;
         }
         // TAM: the windows may move under the next bytes.  S2 peephole: `lda #page` right before a
-        // single-bit `tam #mask` names the new page of that window, so the successors in that window
+        // `tam #mask` (every selected window gets that page) names the new page of that window, so the successors in that window
         // are followed there (counted); any other TAM stops the sweep as before.
-        int tam_win = -1; uint32_t tam_page = 0;
+        unsigned tam_mask = 0; uint32_t tam_page = 0;
         if (in.mapchange) {
             unsigned mask = avail >= 2 ? x->rom[cell + 1] : 0;
-            if ((cell & 0x1FFF) >= 2 && x->rom[cell - 2] == 0xA9 && mask && !(mask & (mask - 1)) && (size_t)x->rom[cell - 1] * 0x2000 < n) {
-                tam_win = __builtin_ctz(mask); tam_page = x->rom[cell - 1]; r->static_tam++;
+            if ((cell & 0x1FFF) >= 2 && x->rom[cell - 2] == 0xA9 && mask && (size_t)x->rom[cell - 1] * 0x2000 < n) {
+                tam_mask = mask; tam_page = x->rom[cell - 1]; r->static_tam++;
             } else ns = 0;
         }
         for (int k = 0; k < ns; k++) {
             uint32_t tps[16];
             int ntp = 0;
-            if (tam_win >= 0 && (int)(succ[k] >> 13) == tam_win) tps[ntp++] = tam_page;
+            if (tam_mask & (1u << (succ[k] >> 13))) tps[ntp++] = tam_page;
             else if ((succ[k] >> 13) == x->page_win[page]) tps[ntp++] = page;
             else {                                               // another window: every observed page there
                 int wn = win_n[succ[k] >> 13];
