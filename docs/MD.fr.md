@@ -414,3 +414,9 @@ Observation de l'outil ; la vérité matérielle de `addq.w` sur An (8 ou 10 cyc
 alors qu'elles tenaient 13 500/13 800 frames sans cette option. Aucun réglage `DMA_REFROUND` × `CLOCK_OFF` testé ne tient
 les trois films : le coût DMA par mot de m0boy est proche de la vérité sans l'être, la valeur manquante est entre les deux
 modèles. Défaut inchangé. Observation de l'outil.
+
+**Balayage de l'arrondi DMA (`DP_MD_DMA_ROUNDK=k`, m0boy local, non publié).** Coût = `(lm·mots/débit + k) / 7`. Pour k = 0…5,
+`1843S` (13 500 frames) et `1437S` (13 800) tiennent (5 octets de RAM d'écart) mais `3994S` diverge (zone différente, 2 906
+octets). Pour k = 6 (`DMA_REFROUND`), `3994S` tient 30 000 frames et les deux autres divergent. Aucun k entier ne tient les
+trois : l'écart tient à un seul cycle sur un transfert précis, donc à un terme du modèle (phase d'horloge maître au lancement
+du DMA ?) et non à l'arrondi. À suivre avec la trace `DP_MD_REF_CYCLE` sur les frames 13 483 (`1843S`). Observation de l'outil.
