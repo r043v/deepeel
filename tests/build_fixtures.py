@@ -1299,6 +1299,10 @@ def build_nes_pce(out):
         d[q:q + 2] = bytes([0x00, 0xC0])
     with open(os.path.join(out, "fix_nes_dispatch.nes"), "wb") as f:
         f.write(d)
+    d1 = bytearray(d)                       # same image on MMC1 (mapper 1): the dispatch scan covers it too
+    d1[6] = 0x10
+    with open(os.path.join(out, "fix_nes_dispatch1.nes"), "wb") as f:
+        f.write(d1)
     # NES context loop: INC $10 / LDA #0 / BEQ back; every pass differs only in RAM,
     # so the exact dedup keeps all of them and a context cap closes the surplus
     k = bytearray(16 + 2 * 0x4000)

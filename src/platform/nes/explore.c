@@ -1787,12 +1787,12 @@ static void second_pass_seed(DpNesRun *x) {
             }
         }
     }
-    // G2: UxROM dispatch by bank views.  Runs of >= 3 aligned words in the
+    // G2: UxROM / MMC1 (mode 3) / Camerica 71 / UN1ROM 94 dispatch by bank views.  Runs of >= 3 aligned words in the
     // fixed bank that all point into $8000-$BFFF are a dispatch table; each
     // distinct target is entered in every bank view whose bytes there decode
     // as code (6 instructions without a jam, not an 8-byte constant run).
     unsigned mp = dp_nesmach_mapper(x->m);
-    if (x->opt.bank_dispatch && mp == 2 && n >= 0x8000) {
+    if (x->opt.bank_dispatch && (mp == 2 || mp == 1 || mp == 71 || mp == 94) && n >= 0x8000) {   // boards with a 16 KiB $8000 slot and a fixed last bank
         size_t fixed = n - 0x4000;
         unsigned banks = (unsigned)(n >> 14);
         for (size_t k = fixed; k + 1 < n;) {
