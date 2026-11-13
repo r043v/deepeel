@@ -149,3 +149,27 @@ dans son binaire).
 
 Ce sont des observations de l'outil sur deux jeux, pas des mesures de
 matériel.
+
+## Mesures du 13 novembre 2026 : Mednafen 1.32.1 autonome contre la référence BizHawk (Tonma)
+
+Observations de l'outil (machine concrète, RAM à zéro) — pas des mesures de matériel.
+
+- **Numérotation** : le dump `fn=N` du Mednafen patché autonome est identique octet pour octet (hors pile
+  `$100-$1FF` et `$6`) au dump `fn=N-1` de `ref/tonma_tn.dsy`, de N = 1 à 250. `tools/dsy_cmp.py` applique ce
+  décalage par défaut.
+- **m0boy contre Mednafen autonome** (pont `pce_bridge_dsy`, profil TurboNyma, décalage 0, 252 frames) : 247
+  frames identiques, aucune divergence soutenue ; les écarts sont des tampons transitoires de 2 à 33 octets
+  (`$1BC4-$1BE2`) qui disparaissent d'eux-mêmes. Les traces d'instructions des frames 250-252 sont identiques
+  sur 43 936 instructions, coupes comprises (boucle d'attente `$4146` des deux côtés).
+- **Référence BizHawk contre Mednafen autonome** : à la frame 251 elles divergent l'une de l'autre, pas seulement
+  de m0boy. Le même code écrit `$0201 = 0` (pc `$6045`) un dump plus tard dans la référence. La « divergence
+  soutenue 251 » n'est donc pas une erreur de timing de m0boy : m0boy suit Mednafen 1.32.1, la référence (TurboNyma
+  de BizHawk) s'en écarte. Fermer l'écart demande une trace de la référence elle-même.
+- **Balayages sans effet** sur la frame 240/251 : `PCE_IRQD` (0-100), `PCE_PHASE` (250-265), `PCE_BOOT0`
+  (237-1400), largeur de la fenêtre mystère `PCE_MYSW` (64-120).
+- **Durées d'attente (WS) de Mednafen** (sonde `STEAL` dans `VCE::WS_Hook`, Tonma frame 239) : 6 vols de cycles
+  par frame, de 27 ou 30 cycles CPU, tous `WS:mys` ; ils sont déclenchés par l'accès à la position 1314-1317 de la
+  ligne et se terminent à la position 270-276 de la ligne suivante (fin d'événement VDC, pas une durée fixe).
+- **Mega Drive** (`md_compare_reference`, `dsy/sonic.gmv`, ClownMDEmu, 6000 frames) : 3 octets de RAM de travail
+  diffèrent, mode/zone/position X identiques. Les 12 autres films Sonic 1 de `tas/games/sonic-md-all` sont des
+  liens cassés vers `output/tas/…` : à retrouver pour re-mesurer les relectures « incomplètes ».
