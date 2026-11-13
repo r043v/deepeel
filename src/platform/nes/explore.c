@@ -25,6 +25,7 @@
 #include <zlib.h>
 #include "../../gui/fbwatch.h"
 #include "../../core/statefile.h"
+#define NES_PROV_SPLIT ((int64_t)1 << 41)   // anchor tag: low and high bytes in two tables, offset in bits 42..
 #define NES_PROV_RTS ((int64_t)1 << 40)   // anchor tag: the table words hold target - 1 (RTS trick)
 
 // one queued exploration state: a machine snapshot plus its provenance
@@ -572,8 +573,10 @@ static void hook_step(void *user, unsigned pc, unsigned op) {
     // consecutive PRG cells; the pair on the stack at the RTS names that table, whose neighbours are roots
     if (in.flow == DP_M6502_RETURN && bytes[0] == 0x60 && x->prov_len < 4096) {
         unsigned sp = dp_nesmach_sp(x->m) & 0xFFu, lo = 0x100u + ((sp + 1u) & 0xFFu), hi = 0x100u + ((sp + 2u) & 0xFFu);
-        if (x->ram_src[lo] >= 0 && x->ram_src[hi] == x->ram_src[lo] + 1) {
+        int64_t dsp = x->ram_src[lo] >= 0 && x->ram_src[hi] >= 0 ? (int64_t)x->ram_src[hi] - x->ram_src[lo] : 0;
+        if (x->ram_src[lo] >= 0 && (x->ram_src[hi] == x->ram_src[lo] + 1 || (dsp >= -512 && dsp <= 512 && (dsp >= 2 || dsp <= -2)))) {
             int64_t tag = (int64_t)x->ram_src[lo] | NES_PROV_RTS;
+            if (dsp != 1) tag |= NES_PROV_SPLIT | ((dsp + 512) << 42);   // separate low/high tables
             uint32_t a;
             for (a = 0; a < x->prov_len && x->prov_anchor[a] != tag; a++) {}
             if (a == x->prov_len) {
@@ -1750,13 +1753,24 @@ static void second_pass_seed(DpNesRun *x) {
     // S3: neighbours of a provenance-traced table word (aligned words in the
     // same table, up to 64 each way) that point at unexecuted PRG are roots too
     for (uint32_t pa = 0; pa < x->prov_len; pa++) {
-        size_t a0 = (size_t)(x->prov_anchor[pa] & ~NES_PROV_RTS);
-        unsigned rts_off = (x->prov_anchor[pa] & NES_PROV_RTS) ? 1u : 0u;   // RTS words point one byte before the target
+        int64_t anc = x->prov_anchor[pa];
+        int split = (anc & NES_PROV_SPLIT) != 0;
+        int64_t dsplit = split ? ((anc >> 42) & 0x7FF) - 512 : 0;
+        size_t a0 = (size_t)(anc & (NES_PROV_RTS - 1));
+        unsigned rts_off = (anc & NES_PROV_RTS) ? 1u : 0u;   // RTS words point one byte before the target
         for (int dir = -1; dir <= 1; dir += 2) {
             size_t a = a0;
             for (unsigned e = 0; e < 64; e++) {
-                if (dir < 0) { if (a < 2) break; a -= 2; } else { a += 2; if (a + 1 >= n) break; }
-                unsigned v = ((rom[a] | (rom[a + 1] << 8)) + rts_off) & 0xFFFFu;
+                unsigned v;
+                if (split) {   // low bytes at a, high bytes at a + dsplit: one word per cell
+                    if (dir < 0) { if (a < 1) break; a--; } else { a++; }
+                    int64_t h = (int64_t)a + dsplit;
+                    if (a >= n || h < 0 || (size_t)h >= n) break;
+                    v = ((rom[a] | (rom[h] << 8)) + rts_off) & 0xFFFFu;
+                } else {
+                    if (dir < 0) { if (a < 2) break; a -= 2; } else { a += 2; if (a + 1 >= n) break; }
+                    v = ((rom[a] | (rom[a + 1] << 8)) + rts_off) & 0xFFFFu;
+                }
                 int64_t tc = table_target(x, a, v, 0);
                 if (tc < 0 || (size_t)tc >= n) break;
                 if ((r->flags[tc] & (DP_NES_NATURAL | DP_NES_FORCED)) || sd[tc]) continue;

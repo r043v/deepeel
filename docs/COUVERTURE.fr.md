@@ -1600,5 +1600,7 @@ Le cœur 6502 de m0boy pousse dans sa RAM sans passer par le hook d'écriture ; 
 (la cellule PRG qui a nourri A, effacée par `JSR`/`BRK`). Au `RTS`, deux cellules de pile consécutives dans la PRG
 nomment une table ; ses voisins (≤ 64 mots de chaque côté, valeur + 1) sont semés comme racines (compteur
 `prov_sites`, ajout `prov_rts_sites`). Fixture `fix_nes_rts.nes`, test `nes_provenance_rts` (1 table, 2 racines).
-Limite technique : des tables séparées octet bas / octet haut (`tblL,x` et `tblH,x`) ne sont pas adjacentes en PRG ; la
-variante à tables scindées reste à faire (stride distinct), la cellule S4 NES reste donc ◐.
+Tables séparées (0.319.1) : `lda tblH,x / pha / lda tblL,x / pha / rts` donne deux cellules de pile non adjacentes
+en PRG ; leur écart (2 à 512 octets, signé) est conservé dans l'ancre et les voisins sont lus en paires
+(octet bas à `a`, octet haut à `a + écart`). Fixture `fix_nes_rtssplit.nes`, test `nes_provenance_rts_split`
+(1 table, 2 racines). Reste ◐ pour S4 NES : tables hors PRG de la banque fenêtre et décalages > 512.

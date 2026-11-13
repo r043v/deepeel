@@ -1242,6 +1242,22 @@ def build_nes_pce(out):
         n4[q:q + 2] = bytes([0x00, 0x80])
     with open(os.path.join(out, "fix_nes_rts.nes"), "wb") as f:
         f.write(n4)
+    # NES RTS trick with split tables: lda $8110,x / pha / lda $8100,x / pha / rts; low bytes at $8100,
+    # high bytes at $8110 (not adjacent), targets - 1 for $8020, $8030, $8040, only the first is taken
+    n5 = bytearray(16 + 2 * 0x4000 + 0x2000)
+    n5[0:4] = b"NES\x1a"
+    n5[4], n5[5] = 2, 1
+    code5 = bytes([0xA2, 0x00, 0xBD, 0x10, 0x81, 0x48, 0xBD, 0x00, 0x81, 0x48, 0x60])
+    n5[16:16 + len(code5)] = code5
+    n5[16 + 0x100:16 + 0x103] = bytes([0x1F, 0x2F, 0x3F])
+    n5[16 + 0x110:16 + 0x113] = bytes([0x80, 0x80, 0x80])
+    for t in (0x20, 0x30, 0x40):
+        n5[16 + t:16 + t + 3] = bytes([0x4C, t, 0x80])
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        q = 16 + 0x4000 + (v - 0xFFFA) + 0x3FFA
+        n5[q:q + 2] = bytes([0x00, 0x80])
+    with open(os.path.join(out, "fix_nes_rtssplit.nes"), "wb") as f:
+        f.write(n5)
     # NES bank dispatch: UxROM, 4 banks; the fixed bank idles at $C000 and holds a
     # word table ($8010, $8020, $8030) at $C100; banks 0 and 1 hold code at all
     # three targets, bank 2 only at $8010, bank 3 (the fixed bank) none
