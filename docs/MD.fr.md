@@ -407,3 +407,10 @@ aux écritures qui lancent un transfert (`move.w ($…).w,(a5)` : 169, 1 548, 2 
 au 68000 66 cycles de plus (37 instructions de plus avant la fin de trame, dont `$4206`, l'instruction qui manque à m0boy
 à la frame 1496). La correction est donc dans le coût DMA par mot de m0boy (`DP_MD_DMA_*`), pas dans l'horloge.
 Observation de l'outil ; la vérité matérielle de `addq.w` sur An (8 ou 10 cycles) reste à trancher.
+
+**3994S et `DP_MD_DMA_REFROUND=1`.** Avec l'arrondi de coût DMA de référence (horloge `exact` phase 3), `3994S` tient les
+30 000 frames (X du joueur identique, 19 octets de RAM d'objets différents en fin de film) : le premier écart passe de
+1479/1497 à 1506 (5 octets). Mais `1843S` et `1437S` divergent alors (frame 13 483 ; phases 0 et 1 testées : 3 500 octets),
+alors qu'elles tenaient 13 500/13 800 frames sans cette option. Aucun réglage `DMA_REFROUND` × `CLOCK_OFF` testé ne tient
+les trois films : le coût DMA par mot de m0boy est proche de la vérité sans l'être, la valeur manquante est entre les deux
+modèles. Défaut inchangé. Observation de l'outil.
