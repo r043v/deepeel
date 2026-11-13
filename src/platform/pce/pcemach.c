@@ -23,6 +23,7 @@ int pce_sat_hdw;
 #undef pce_bus_write
 #include "pce.h"
 static void (*frame_hook_fn)(void);
+static unsigned boot_master(void) { const char *e = getenv("PCE_BOOT0"); return e ? (unsigned)atoi(e) : 237u; }   // calibration knob: master clocks of the first line piece
 int pce_vce_model;      // the VCE's vblank counter drives the VDC's phase re-arm (TurboNyma; PCEHawk rewinds at line 0)
 static int vce_vblank;      // the VCE vblank flag's state (TurboNyma model)
 static int vce_vb_left;     // master clocks until the next vblank edge
@@ -118,8 +119,8 @@ void dp_pce_reference(int pcehawk) {
         vce_first_frame = 1;
         vce_frame_total = vce_frame_total_next = 262u;
         const unsigned div = machine.cpu.speed ? 3u : 12u;
-        line_left = (int)(237u / div);   // the VCE resets 237 master clocks into the hsync: the first line is that much shorter
-        master_carry = 237u % div;       // and the line boundaries sit on the reference's scanline edges from here on
+        line_left = (int)(boot_master() / div);   // the VCE resets 237 master clocks into the hsync: the first line is that much shorter
+        master_carry = boot_master() % div;       // and the line boundaries sit on the reference's scanline edges from here on
     }
 }
 
@@ -474,8 +475,8 @@ void dp_pce_reset(void) {
         vce_first_frame = 1;
         vce_frame_total = vce_frame_total_next = 262u;
         const unsigned div = machine.cpu.speed ? 3u : 12u;
-        line_left = (int)(237u / div);
-        master_carry = 237u % div;
+        line_left = (int)(boot_master() / div);
+        master_carry = boot_master() % div;
     }
 }
 
