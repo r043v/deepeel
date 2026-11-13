@@ -321,3 +321,9 @@ boutons (`33`) ; il accepte maintenant `3` ou `6` par port (les films « 66 » d
 - La première divergence propre à m0boy est donc ≈ trame 1466 (hors piles `$FDF6/7`, déjà différentes dès la
   trame 54) ; sa cause n'est pas encore isolée. Les autres films incomplets du tableau (`3994S`, `1437S`,
   `5906S`, …) restent à mesurer par la même chaîne.
+
+Isolation de la divergence 1843S (`DP_MD_FIRSTLOW=1`, RAM des objets `$D000–$EFFF`) : premier écart réel à la
+trame 1423 (position X du joueur, `$D008/9`) ; ensuite m0boy vaut exactement la valeur de ClownMDEmu de la
+trame précédente (X : 0f→0e, 0b→05, 11→0b, 17→11, pas de 6). C'est un retard d'une trame (une trame de lag
+manquée ou ajoutée côté m0boy), pas une erreur de logique de jeu. Prochaine étape : tracer la trame 1422–1423
+(`DP_MD_TRACE_RANGE=1420:1424`) pour trouver quel événement (fin de vblank, lecture manette) décale la boucle principale.

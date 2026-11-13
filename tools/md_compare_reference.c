@@ -116,6 +116,11 @@ int main(int argc, char **argv) {
                     if (dr && !first_ref) first_ref = frame + 1; if (dd && !first_dut) first_dut = frame + 1; }
             }
         }
+        if (getenv("DP_MD_FIRSTLOW")) {   /* first frames whose low work RAM ($0000-$EFFF: objects, level, state) differs, with the first addresses */
+            static int shown; unsigned low = 0, a0 = 0, a1 = 0;
+            for (unsigned i = 0xD000; i < 0xF000; i++) if (ref_byte(ref, i) != dut->ram[i]) { if (!low++) a0 = i; a1 = i; }
+            if (low && shown < 8) { shown++; printf("low-RAM diff frame %u: %u bytes, first %04x last %04x (ref=%02x dut=%02x)\n", frame + 1, low, a0, a1, ref_byte(ref, a0), dut->ram[a0]); }
+        }
         if ((frame + 1 >= 50 && frame + 1 <= 62) || (frame + 1) % 300 == 0 || mismatch_streak == 20 || dut->fault) {
             unsigned diff = 0;
             for (unsigned i = 0; i < 0x10000; i++) { int d = ref_byte(ref, i) != dut->ram[i]; diff += d; if (d && getenv("DP_MD_DIFF_LIST") && (frame + 1) % (getenv("DP_MD_DIFF_MOD") ? (unsigned)atoi(getenv("DP_MD_DIFF_MOD")) : 3000u) == 0) printf("  diff %04x ref=%02x dut=%02x\n", i, ref_byte(ref, i), dut->ram[i]); }
