@@ -669,6 +669,11 @@ def build_techniques_8bit(out):
     p[0x1FFE], p[0x1FFF] = 0x00, 0xE0
     with open(os.path.join(out, "fix_pce_tam.pce"), "wb") as f:
         f.write(p)
+    # same, mask $C0 (windows 6 and 7 both take page 1)
+    p2 = bytearray(p)
+    p2[7] = 0xC0
+    with open(os.path.join(out, "fix_pce_tam2.pce"), "wb") as f:
+        f.write(p2)
     pce("fix_pce_cells", bytes.fromhex("a900 d006 d004 eaeaeaea 80fe"))
 
 def md_rom(size=0x1000):
