@@ -425,3 +425,8 @@ du DMA ?) et non à l'arrondi. À suivre avec la trace `DP_MD_REF_CYCLE` sur les
 `1843S` (13 500) et `1437S` (13 800) tiennent (5 octets), `3994S` diverge (2 906 octets). L'hypothèse « la référence
 conserve le reste entre transferts » est donc écartée. Le transfert qui sépare `3994S` des deux autres reste à identifier
 (source ROM ou RAM, VRAM ou CRAM, H32 ou H40). Observation de l'outil.
+
+**Arrondi DMA par classe (`DP_MD_DMA_KACT` / `DP_MD_DMA_KBLANK`, m0boy local, non publié).** k = 6 seulement sur les transferts en
+affichage actif, ou seulement en V-blank : `3994S` diverge dans les deux cas (2 906 octets), `1843S` et `1437S` tiennent.
+`3994S` n'est donc fermé que si les deux classes sont arrondies au plafond. La séparation active / blanking n'explique pas
+l'écart ; les classes restantes à tester sont la destination (VRAM, CRAM, VSRAM) et la largeur (H32 / H40). Observation de l'outil.
