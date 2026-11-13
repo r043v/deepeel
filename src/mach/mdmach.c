@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include "mdmach.h"
 #include <stdlib.h>
 #include <string.h>
@@ -107,6 +108,9 @@ void dp_mdmach_close(DpMdMach *d) {
 void dp_mdmach_set_hooks(DpMdMach *d, const DpMdHooks *h) { d->h = *h; }
 
 void dp_mdmach_reset(DpMdMach *d) {
+    /* ClownMDEmu's clock (exact, phase 3) keeps real Sonic 1 films in step for 13 800+ frames where the 3420-master
+     * default loses a frame near 1423 (docs/MD.fr.md); still overridable from the environment. */
+    setenv("DP_MD_CLOWN_CLOCK", "exact", 0); setenv("DP_MD_CLOCK_OFF", "3", 0);
     md_full_reset(d->m);
     d->resume_frame = 0;
     d->steps = 0;

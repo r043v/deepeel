@@ -381,3 +381,7 @@ contre `35`) quelle que soit la phase `DP_MD_CLOCK_OFF` 0–6 ; un écart plus l
 unique qui tienne tous les films : `1843S`/`1437S` veulent 3, `3994S` préfère 0–2 et 6. Le modèle de timing
 sous-cycle de m0boy garde un défaut résiduel (l'ordre exact des accès bus/DMA dans la trame) ; le réglage par
 défaut de l'outil n'est qu'un compromis mesuré sur trois films. Observation de l'outil.
+
+**0.320.0 : horloge `exact` phase 3 par défaut dans `deepeel md`** (`dp_mdmach_reset` : `setenv(…, 0)` avant
+`md_full_reset`, sans modifier m0boy ; `DP_MD_CLOWN_CLOCK` et `DP_MD_CLOCK_OFF` du processus l'emportent). Les 69 tests
+`md|sega|…` restent verts. Mesure : voir le tableau ci-dessus ; `3994S` garde son écart à 1479/1497.
