@@ -1,9 +1,9 @@
 /* tasvideos_fetch: download every TASVideos movie (publications + submissions) of a game, in C.
- *   tasvideos_fetch GAME_ID|NNNG|URL OUT_DIR [--list] [--max N]
+ *   deepeel tasfetch GAME_ID|NNNG|URL OUT_DIR [--list] [--max N]
  * Pages come through `curl -sL` (retried: the site answers 503 under load); zip archives are unpacked with
  * zlib (stored/deflate).  Each movie goes in its own fresh sub-directory of OUT_DIR; an existing one is skipped.
  * Prints the --tas arguments for deepeel.  Downloads are untrusted data: only base names of known movie
- * extensions are written, never an archive path.  Build: cc -O2 tools/tasvideos_fetch.c -lz -o tasvideos_fetch */
+ * extensions are written, never an archive path.  Linked into deepeel (zlib). */
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -76,14 +76,14 @@ static int ids_of(const char *html, char suffix, long *ids, int max) {
     return k;
 }
 
-int main(int argc, char **argv) {
+int dp_tasfetch_command(int argc, char **argv) {   /* argv: deepeel tasfetch GAME OUT [--list] [--max N] */
     const char *target = 0, *out = 0; int list = 0, mx = 1 << 30;
-    for (int i = 1; i < argc; i++) {
+    for (int i = 2; i < argc; i++) {
         if (!strcmp(argv[i], "--list")) list = 1;
         else if (!strcmp(argv[i], "--max") && i + 1 < argc) mx = atoi(argv[++i]);
         else if (!target) target = argv[i]; else if (!out) out = argv[i];
     }
-    if (!target || !out) { fprintf(stderr, "usage: %s GAME_ID|NNNG|URL OUT_DIR [--list] [--max N]\n", argv[0]); return 2; }
+    if (!target || !out) { fprintf(stderr, "usage: deepeel tasfetch GAME_ID|NNNG|URL OUT_DIR [--list] [--max N]\n"); return 2; }
     const char *d = target; while (*d && !isdigit((unsigned char)*d)) d++;
     long gid = strtol(d, 0, 10); if (gid <= 0) { fprintf(stderr, "no game id in '%s'\n", target); return 2; }
     static long mids[4096], sids[4096]; char url[256]; size_t n;

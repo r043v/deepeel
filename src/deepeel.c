@@ -2258,6 +2258,8 @@ static int cmd_tas(int argc, char **argv) {
     return 2;
 }
 
+int dp_tasfetch_command(int argc, char **argv);
+
 int main(int argc, char **argv) {
     if (argc < 2) return usage(), 2;
     if (!strcmp(argv[1], "frontier") && argc > 3 && !strcmp(argv[2], "stats")) {
@@ -2373,6 +2375,7 @@ int main(int argc, char **argv) {
         g_drain_only = 1;
         return cmd_explore(n, av);
     }
+    if (!strcmp(argv[1], "tasfetch")) return dp_tasfetch_command(argc, argv);
     if (!strcmp(argv[1], "lr")) return dp_lr_command(argc, argv);
     if (!strcmp(argv[1], "bh")) return dp_bh_command(argc, argv);
     if (!strcmp(argv[1], "md")) return cmd_md(argc, argv);
