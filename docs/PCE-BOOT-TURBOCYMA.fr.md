@@ -173,3 +173,22 @@ Observations de l'outil (machine concrète, RAM à zéro) — pas des mesures de
 - **Mega Drive** (`md_compare_reference`, `dsy/sonic.gmv`, ClownMDEmu, 6000 frames) : 3 octets de RAM de travail
   diffèrent, mode/zone/position X identiques. Les 12 autres films Sonic 1 de `tas/games/sonic-md-all` sont des
   liens cassés vers `output/tas/…` : à retrouver pour re-mesurer les relectures « incomplètes ».
+
+### Re-mesure des quatre films PCE (pont avant/après le modèle VCE, 13 novembre 2026)
+
+`dsy_cmp.py`, WRAM hors pile et `$6`, observations de l'outil. « Avant » = pont de `f086fee^`, « après » = `3a30a6d`.
+
+| Film | Décalage | Avant : identiques / divergence soutenue | Après : identiques / divergence soutenue |
+|---|---|---|---|
+| Tonma (800 trames) | −1 | 241 / 251 | 244 / 251 |
+| Bonk 3 (1500, PCEHawk) | 0 | 129 / aucune | 129 / aucune (identique à l'avant) |
+| Neutopia 6777S (2500) | 0 | 0 / 1528 | 0 / 8 |
+| Shinobi (3000) | 0 | 2600 / aucune | 4 / 847 |
+
+- Bonk 3 n'a pas bougé : le profil PCEHawk n'est pas touché.
+- **Régression constatée** sur Neutopia et Shinobi : l'ancien pont, lu sans décalage, tenait bien mieux (Shinobi :
+  2600 trames identiques sur 3000). Le modèle VCE de TurboNyma, calé sur Tonma (décalage −1), ne convient pas à
+  ces deux films (références BizHawk d'une autre version, sans décalage). À traiter en profil séparé, pas en
+  retouchant Tonma ; les deux jeux restent hors priorité (« mal émulés »).
+- Tonma : la divergence soutenue 251 est la même avec l'ancien et le nouveau modèle, ce qui confirme qu'elle vient
+  de l'écart entre la référence et Mednafen, pas du modèle.
