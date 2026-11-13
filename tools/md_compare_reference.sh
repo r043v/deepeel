@@ -18,9 +18,15 @@ if [ "${DP_MD_REF_GENS_CLOCK:-0}" = 1 ]; then
     ref_build=${DP_MD_REF_BUILD:-"$root/build/md-reference-gens-clock"}
     clock_flag=-DDEEPEEL_GENS_60
 fi
+trace_flag=
+if [ "${DP_MD_REF_CYCLE:-0}" = 1 ]; then   # per-instruction cycle trace (needs the local DEEPEEL_C68_TRACE hook in clown68000.c)
+    ref_build=${DP_MD_REF_BUILD:-"$root/build/md-reference-cycle"}
+    clock_flag="$clock_flag -DDEEPEEL_C68_TRACE"
+    trace_flag="-DDP_CYCLE_TRACE -DMD_TRACE -DMD_THREAD_LOCAL=__thread"
+fi
 cmake -S "$reference" -B "$ref_build" -DCC_USE_C99_INTEGERS=ON -DCMAKE_C_FLAGS="$clock_flag" >&2
 cmake --build "$ref_build" -j 4 >&2
-cc -O2 -std=c99 -DCC_USE_C99_INTEGERS \
+cc -O2 -std=c99 -DCC_USE_C99_INTEGERS $trace_flag \
     -I"$reference/source" -I"$runtime/targets/megadrive/runtime" -I"$runtime/targets/sg1000/runtime" \
     "$root/tools/md_compare_reference.c" "$ref_build/libclownmdemu-core.a" \
     "$ref_build/libraries/clown68000/libclown68000-interpreter.a" \

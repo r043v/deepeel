@@ -36,7 +36,13 @@ static unsigned dut_word(const MdFull *m, unsigned addr) {
     return ((unsigned)m->ram[addr & 0xffff] << 8) | m->ram[(addr + 1) & 0xffff];
 }
 #ifdef DP_CYCLE_TRACE   /* needs an instrumented Clown68000 copy and a traced m0boy runtime */
-extern int dp_trace_on, dp_trace_on_d; extern FILE *dp_trace_f, *dp_trace_d;
+#include "md_trace.h"
+extern int dp_trace_on; extern FILE *dp_trace_f;      /* Clown68000 side (DEEPEEL_C68_TRACE build) */
+int dp_trace_on_d; FILE *dp_trace_d;                  /* m0boy side, through the md_trace hooks */
+static uint32_t dp_trace_c0;
+static void dp_trace_step(void *u, MdFull *m, uint32_t pc, uint16_t op) { (void)u; (void)pc; (void)op; dp_trace_c0 = m->cycles; }
+static void dp_trace_end(void *u, MdFull *m, uint32_t pc, uint32_t npc) { (void)u; (void)npc;
+    if (dp_trace_on_d) fprintf(dp_trace_d, "%06x %u\n", (unsigned)pc, (unsigned)(m->cycles - dp_trace_c0)); }
 #endif
 int main(int argc, char **argv) {
     /* ClownMDEmu's own clock: the m0boy exact clock with a 3-master-clock phase tracks 1843S/1437S/s6k (13 800 frames)
@@ -82,7 +88,7 @@ int main(int argc, char **argv) {
         pad = (uint8_t)~b[0]; dut->pad = pad;
 #ifdef DP_CYCLE_TRACE
         if (getenv("DP_MD_CYCLE_TRACE") && frame + 1 == (unsigned)atoi(getenv("DP_MD_CYCLE_TRACE"))) {
-            dp_trace_f = fopen("cyc_ref.txt", "w"); dp_trace_d = fopen("cyc_dut.txt", "w"); dp_trace_on = dp_trace_on_d = 1; }
+            dp_trace_f = fopen("cyc_ref.txt", "w"); dp_trace_d = fopen("cyc_dut.txt", "w"); dp_trace_on = dp_trace_on_d = 1; md_trace.step = dp_trace_step; md_trace.end = dp_trace_end; }
 #endif
         ClownMDEmu_Iterate(ref); md_full_frame(dut, 0);
 #ifdef DP_CYCLE_TRACE

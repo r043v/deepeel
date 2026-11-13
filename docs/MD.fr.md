@@ -396,3 +396,14 @@ dépôt externe). Observation de l'outil.
 
 **S2 : mesure du raffinement « callee à retour observé » (0.322.0)** sur Sonic 1 (`explore`, `--max-total 20000`) :
 appels à confiance perdue 76 → 38, octets de code statiques 2 180 → 2 256 (+76). Observation de l'outil.
+
+**3994S : trace de cycles par instruction (frame 1496), `DP_MD_REF_CYCLE=1`.** `tools/md_compare_reference.sh` construit
+alors ClownMDEmu avec le crochet local `DEEPEEL_C68_TRACE` (un `#ifdef` dans `clown68000.c`, non publié, par défaut
+inactif) et le harnais écrit `cyc_ref.txt` / `cyc_dut.txt` (`DP_MD_CYCLE_TRACE=<trame>` ; DUT par les crochets
+`md_trace`). Sur la trame 1496 de `3994S`, les deux flux d'instructions sont identiques sur les 12 285 instructions
+communes. Écarts de coût hors DMA : `addq.w #n,An` (`$5849`, `$5449`, `$584F`) coûte 10 cycles dans ClownMDEmu et 8 dans
+m0boy (5 occurrences) ; tout le reste est égal. L'écart de trame vient du gel DMA : m0boy ajoute 3 830 cycles de blocage
+aux écritures qui lancent un transfert (`move.w ($…).w,(a5)` : 169, 1 548, 2 161 cycles) alors que ClownMDEmu laisse
+au 68000 66 cycles de plus (37 instructions de plus avant la fin de trame, dont `$4206`, l'instruction qui manque à m0boy
+à la frame 1496). La correction est donc dans le coût DMA par mot de m0boy (`DP_MD_DMA_*`), pas dans l'horloge.
+Observation de l'outil ; la vérité matérielle de `addq.w` sur An (8 ou 10 cycles) reste à trancher.
