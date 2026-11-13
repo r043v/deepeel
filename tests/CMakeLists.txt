@@ -258,6 +258,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_bz_axis.bk2
   ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_closure.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_closure.pce
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_tam.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_closure.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_closure.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_closure.sms
@@ -800,6 +801,8 @@ add_test(NAME core_event_probes_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_
 set_tests_properties(core_event_probes_huc6280 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_closure_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_closure.gb; a='--core --jobs 1 --attract-frames 0 --no-sessions'; $<TARGET_FILE:deepeel> explore $f $a | grep -q 'static closure: roots [1-9][0-9]*, bytes [0-9]*, static-only 4,' && $<TARGET_FILE:deepeel> explore $f $a --no-closure | grep -q 'static closure: roots 0, bytes 0, static-only 0,'")
 set_tests_properties(core_closure_sm83 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME pce_static_tam COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_tam.pce --attract-frames 0 --max-steps 3 --max-total 100 --text ${CMAKE_CURRENT_BINARY_DIR}/pt.txt >/dev/null 2>&1; grep -q '(1 through a lda/tam view)' ${CMAKE_CURRENT_BINARY_DIR}/pt.txt")
+set_tests_properties(pce_static_tam PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME core_closure_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_closure.pce; a='--core --jobs 1 --attract-frames 0 --no-sessions'; $<TARGET_FILE:deepeel> pce explore $f $a | grep -q 'static closure: roots [1-9][0-9]*, bytes [0-9]*, static-only 4,' && $<TARGET_FILE:deepeel> pce explore $f $a --no-closure | grep -q 'static closure: roots 0, bytes 0, static-only 0,'")
 set_tests_properties(core_closure_huc6280 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_closure_68000 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_md_closure.md; a='--core --jobs 1 --attract-frames 0 --no-sessions'; $<TARGET_FILE:deepeel> md explore $f $a | grep -q 'static closure: roots [1-9][0-9]*, bytes [0-9]*, static-only 4,' && $<TARGET_FILE:deepeel> md explore $f $a --no-closure | grep -q 'static closure: roots 0, bytes 0, static-only 0,'")

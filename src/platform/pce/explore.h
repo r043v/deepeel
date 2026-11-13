@@ -174,7 +174,7 @@ typedef struct DpPceResults_ {
     uint64_t io_reads, io_reg_reads[DP_PCE_IO_SLOTS], io_reg_writes[DP_PCE_IO_SLOTS];
     uint64_t io_writes, vdc_data_writes, copied_bytes;
     uint64_t smc_writes; uint16_t smc_first_pc; // stores into already executed WRAM bytes
-    uint64_t static_bytes, padding_bytes, inferred_code, inferred_data, inferred_pad,
+    uint64_t static_bytes, static_tam, padding_bytes, inferred_code, inferred_data, inferred_pad,
              table_bytes;
     uint64_t irq_counts[3];
     uint64_t state_bytes_peak;

@@ -659,6 +659,16 @@ def build_techniques_8bit(out):
     pce("fix_pce_decomp", bytes.fromhex("a200 a000 bd20e0 990020 c8 990020 c8 e8 e020 d0f0 80fe"), bytes(range(1, 33)))
     pce("fix_pce_status", bytes.fromhex("a9ff 5301 ad0000 2920 d004 a901 80fe a902 80fe"))   # technique 2: one VDC status read, branch on the VBlank flag
     pce("fix_pce_closure", bytes.fromhex("200be0 eaeaeaea 80fe"))
+    # S2 TAM peephole: lda #1 / tam #$80 remaps the executing window to ROM page 1; the swept fall-through is
+    # followed there (page 1 holds nop,nop,bra * at the same offset)
+    p = bytearray(0x4000)
+    p[0:4] = bytes.fromhex("a9f85302")
+    p[4:8] = bytes.fromhex("a9015380")
+    p[8:10] = bytes.fromhex("80fe")
+    p[0x2000 + 8:0x2000 + 14] = bytes.fromhex("eaea4c00e0ea")
+    p[0x1FFE], p[0x1FFF] = 0x00, 0xE0
+    with open(os.path.join(out, "fix_pce_tam.pce"), "wb") as f:
+        f.write(p)
     pce("fix_pce_cells", bytes.fromhex("a900 d006 d004 eaeaeaea 80fe"))
 
 def md_rom(size=0x1000):

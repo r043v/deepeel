@@ -1250,11 +1250,21 @@ static void static_closure(PceRun *x) {
         case DP_HUC_CALL: succ[ns++] = (uint16_t)(addr + in.length); succ[ns++] = in.target; break;
         default: break;
         }
-        if (in.mapchange) ns = 0; // TAM: the windows may move under the next bytes
+        // TAM: the windows may move under the next bytes.  S2 peephole: `lda #page` right before a
+        // single-bit `tam #mask` names the new page of that window, so the successors in that window
+        // are followed there (counted); any other TAM stops the sweep as before.
+        int tam_win = -1; uint32_t tam_page = 0;
+        if (in.mapchange) {
+            unsigned mask = avail >= 2 ? x->rom[cell + 1] : 0;
+            if ((cell & 0x1FFF) >= 2 && x->rom[cell - 2] == 0xA9 && mask && !(mask & (mask - 1)) && (size_t)x->rom[cell - 1] * 0x2000 < n) {
+                tam_win = __builtin_ctz(mask); tam_page = x->rom[cell - 1]; r->static_tam++;
+            } else ns = 0;
+        }
         for (int k = 0; k < ns; k++) {
             uint32_t tps[16];
             int ntp = 0;
-            if ((succ[k] >> 13) == x->page_win[page]) tps[ntp++] = page;
+            if (tam_win >= 0 && (int)(succ[k] >> 13) == tam_win) tps[ntp++] = tam_page;
+            else if ((succ[k] >> 13) == x->page_win[page]) tps[ntp++] = page;
             else {                                               // another window: every observed page there
                 int wn = win_n[succ[k] >> 13];
                 for (int q = 0; q < wn; q++) tps[ntp++] = win_pages[succ[k] >> 13][q];
@@ -2024,8 +2034,8 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
             (unsigned long long)r->novelty_hits, (unsigned long long)r->novelty_deaths,
             (unsigned long long)r->novelty_archived,
             (unsigned long long)r->novelty_replaced);
-    fprintf(out, "  static closure %llu, tables %llu, padding %llu, inferred code %llu data %llu padding %llu\n",
-            (unsigned long long)r->static_bytes, (unsigned long long)r->table_bytes,
+    fprintf(out, "  static closure %llu (%llu through a lda/tam view), tables %llu, padding %llu, inferred code %llu data %llu padding %llu\n",
+            (unsigned long long)r->static_bytes, (unsigned long long)r->static_tam, (unsigned long long)r->table_bytes,
             (unsigned long long)r->padding_bytes, (unsigned long long)r->inferred_code,
             (unsigned long long)r->inferred_data, (unsigned long long)r->inferred_pad);
     fprintf(out, "  interrupts: IRQ2/BRK %llu IRQ1 %llu timer %llu (log %u, overflow %llu)\n",
