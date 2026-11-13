@@ -137,3 +137,7 @@ dropped`. Test `pce_defer_tiers`.
 Correctif rétroporté : ST0/ST1/ST2 écrivent toujours sur le VDC, en
 $1FE000-$1FE003 physique, quelle que soit la projection de MPR0.
 L'interpréteur et l'émetteur du recompilateur sont corrigés.
+
+**S2 : motif `lda #page ; tam #bit` (0.323.0).** Le balayage statique suit le nouveau mapping au lieu de s'arrêter au `tam`.
+Le compteur « through a lda/tam view » dénombre les `tam` ainsi résolus (non des octets) : Bonk 3 : 7, Tonma : 2,
+Raiden : 8 (`--max-total 3000`). Observations de l'outil ; le gain en octets n'est pas isolé.
