@@ -1802,7 +1802,7 @@ static void second_pass_seed(DpNesRun *x) {
             size_t e = k;
             while (e + 1 < lim && rom[e + 1] >= wlo && rom[e + 1] < whi) e += 2;   // word high byte in $80-$BF
             if (e - k >= 6) {
-                r->dispatch_tables++;
+                if (!(sd[k] & 0x80)) { sd[k] |= 0x80; r->dispatch_tables++; }   // a table read under two board interpretations counts once
                 for (size_t w = k; w < e; w += 2) {
                     unsigned v = rom[w] | (rom[w + 1] << 8);
                     for (unsigned b = pm ? 1 : 0; b < banks; b++) {
@@ -1836,6 +1836,52 @@ static void second_pass_seed(DpNesRun *x) {
             k = e > k ? e + 2 : k + 1;
         }
     }
+    // G2 on MMC1 control mode 0/1: 32 KiB switchable block, tables read inside one block are entered under each other block
+    if (x->opt.bank_dispatch && mp == 1 && n >= 0x10000) {   // MMC1 control mode 0/1: one 32 KiB block at $8000, no fixed bank   // boards with a 16 KiB $8000 slot and a fixed last bank
+        unsigned banks = (unsigned)(n >> 15);
+        for (unsigned sb = 0; sb < banks; sb++) {   // table block: any 32 KiB block (its own bytes are what the table lives in)
+        size_t fixed = (size_t)sb * 0x8000, lim = fixed + 0x8000 - (sb + 1 == banks ? 6 : 0);   // the $FFFA vectors are not a table
+        const unsigned wlo = 0x80, whi = 0x100;
+        for (size_t k = fixed; k + 1 < lim;) {
+            size_t e = k;
+            while (e + 1 < lim && rom[e + 1] >= wlo && rom[e + 1] < whi) e += 2;   // word high byte in $80-$BF
+            if (e - k >= 6) {
+                if (!(sd[k] & 0x80)) { sd[k] |= 0x80; r->dispatch_tables++; }   // a table read under two board interpretations counts once
+                for (size_t w = k; w < e; w += 2) {
+                    unsigned v = rom[w] | (rom[w + 1] << 8);
+                    for (unsigned b = 0; b < banks; b++) {
+                        if (b == sb) continue;
+                        size_t cell = (size_t)b * 0x8000 + (v & 0x7FFF);
+                        if (sd[cell] || (r->flags[cell] & (DP_NES_NATURAL | DP_NES_FORCED))) continue;
+                        // plausibility: decodes as code, not a padding run
+                        int ok = 1, run = 1;
+                        for (unsigned q = 1; q < 8 && cell + q < n; q++) run += rom[cell + q] == rom[cell];
+                        if (run >= 8) ok = 0;
+                        size_t c = cell; unsigned pcv = v;
+                        for (unsigned ins = 0; ok && ins < 6; ins++) {
+                            uint8_t bb[3] = { rom[c], c + 1 < n ? rom[c + 1] : 0, c + 2 < n ? rom[c + 2] : 0 };
+                            DpM6502Instruction in;
+                            if (!dp_m6502_decode(bb, 3, (uint16_t)pcv, &in) || in.flow == DP_M6502_JAM || (c & 0x7FFF) + in.length > 0x8000) { ok = 0; break; }
+                            if (in.flow == DP_M6502_JUMP || in.flow == DP_M6502_RETURN) break;
+                            c += in.length; pcv += in.length;
+                        }
+                        if (!ok) { r->dispatch_refused_view++; continue; }
+                        sd[cell] = 1;
+                        if (r->pass2_seeds + r->pass2_refused >= ((x->opt.max_total == UINT64_MAX || x->lot) ? UINT32_MAX : (uint32_t)NES_PASS2_MAX)) { r->pass2_capped++; continue; }
+                        uint8_t *es = malloc(dp_nesmach_state_size());
+                        if (!es) { x->failed = 1; free(sd); return; }
+                        dp_nesmach_reset(x->m);
+                        if (!dp_nesmach_enter_mmc1_32k(x->m, b, v)) { free(es); r->pass2_refused++; continue; }
+                        dp_nesmach_save(x->m, es);
+                        DpNesPathState er = { es, 1, 0, 0, 0, 0, 0, DP_NES_TREE_PASS2 };
+                        if (seed_push(x, &er)) { r->pass2_seeds++; r->dispatch_seeds++; }
+                    }
+                }
+            }
+            k = e > k ? e + 2 : k + 1;
+        }
+        }
+    }
     // G2 on MMC3: the table sits in the fixed region ($C000-$FFFF in PRG mode 0, $E000-$FFFF in mode 1); each word in the
     // switchable windows ($8000-$BFFF in mode 0, $A000-$DFFF in mode 1) is entered under every 8 KiB bank whose bytes at
     // that offset decode as code (mode 0: R6 $8000, R7 $A000; mode 1: R7 $A000, R6 $C000).
@@ -1848,7 +1894,7 @@ static void second_pass_seed(DpNesRun *x) {
             size_t e = k;
             while (e + 1 < lim && rom[e + 1] >= wlo && rom[e + 1] < whi) e += 2;
             if (e - k >= 6) {
-                r->dispatch_tables++;
+                if (!(sd[k] & 0x80)) { sd[k] |= 0x80; r->dispatch_tables++; }   // a table read under two board interpretations counts once
                 for (size_t w = k; w < e; w += 2) {
                     unsigned v = rom[w] | (rom[w + 1] << 8);
                     for (unsigned b = 0; b + 2 < banks8; b++) {

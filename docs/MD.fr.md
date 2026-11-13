@@ -436,3 +436,9 @@ l'écart ; les classes restantes à tester sont la destination (VRAM, CRAM, VSRA
 (actif/blanking, VRAM/autre, H40) ne reproduit le comportement « tout au plafond » : l'écart de `3994S` n'est pas un arrondi par
 type de transfert mais une combinaison, ou un terme de phase (position dans la ligne au lancement du DMA) que l'arrondi fixe
 imite sans le modéliser. Piste suivante : modéliser la phase de la ligne au lancement. Observation de l'outil.
+
+**Gel DMA en phase d'horloge exacte (m0boy, défaut avec `DP_MD_CLOWN_CLOCK=exact`).** La référence gèle le 68000 pendant
+`floor(horloges maîtres)` et le reste sous-cycle décale la phase des instructions suivantes ; m0boy l'ajoute désormais à
+`clock_off` au lieu de l'arrondir (`DP_MD_DMA_NOPHASE` rétablit l'ancien calcul). Mesure : `3994S` 30 000 frames, `1843S`
+13 500 et `1437S` 13 800 tiennent ensemble (X du joueur identique ; 19 / 14 / 14 octets de RAM d'objets différents en fin
+de film). Remplace les pistes `DMA_REFROUND` / arrondi par classe, toutes écartées plus haut. Observation de l'outil.

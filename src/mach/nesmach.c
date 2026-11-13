@@ -592,6 +592,15 @@ int dp_nesmach_enter_mmc1_c000(DpNesMach *d, unsigned bank, unsigned addr) {
     return 1;
 }
 
+/* MMC1 control mode 0: one 32 KiB block (`block32` * 2 in 16 KiB units) mapped at $8000 */
+int dp_nesmach_enter_mmc1_32k(DpNesMach *d, unsigned block32, unsigned addr) {
+    if (d->mapper != 1 || block32 >= (unsigned)(machine.prg_size >> 15) || block32 > 7) return 0;
+    d->rg.v[0] = (uint8_t)(d->rg.v[0] & ~0x0C); d->rg.v[3] = (uint8_t)(block32 * 2u);
+    mapper_apply(d);
+    machine.cpu.pc = (uint16_t)addr;
+    return 1;
+}
+
 /* MMC3: map an 8 KiB PRG bank under the switchable slot `addr` falls in ($8000-$BFFF in PRG mode 0, $C000-$DFFF in mode 1) */
 int dp_nesmach_cross16(const DpNesMach *d) { return d->mapper == 1 || d->mapper == 2 || d->mapper == 71 || d->mapper == 94 || d->mapper == 180; }
 int dp_nesmach_mmc3_mode1(const DpNesMach *d) { return d->mapper == 4 && (d->rg.v[0] & 0x40); }

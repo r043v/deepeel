@@ -97,6 +97,7 @@ int dp_nesmach_cross16(const DpNesMach *m);
 void dp_nesmach_window(const DpNesMach *m, unsigned *lo, unsigned *hi);   /* switchable PRG window [lo, hi) */
 int dp_nesmach_mmc3_mode1(const DpNesMach *m);   /* MMC3 in PRG mode 1 ($C000 window switchable) */
 int dp_nesmach_enter_mmc1_c000(DpNesMach *m, unsigned bank, unsigned addr);
+int dp_nesmach_enter_mmc1_32k(DpNesMach *m, unsigned block32, unsigned addr);
 int dp_nesmach_set_prg_mode(DpNesMach *m, int mode1);
 int dp_nesmach_map_8k(DpNesMach *m, unsigned addr, unsigned bank8);
 unsigned dp_nesmach_mapper(const DpNesMach *m);
