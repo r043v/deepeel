@@ -98,6 +98,25 @@ la trame, d'où des divergences transitoires de dumps dès la trame 247
 défaut du profil TurboNyma ne sont pas encore recalées sur ce nouveau
 modèle.
 
+## La fenêtre « mystery » du HuC6270 (dérivée du code)
+
+Le comptage des wait-states des deux côtés sur le boot Tonma a levé le
+dernier modèle : Mednafen ne bloque **jamais** le CPU sur le DMA SATB dans
+ces trames (202 événements WS, tous `WS:mys`), alors que le pont posait
+~1500 attentes SAT (~95000 maîtres). La fenêtre mys du HuC6270 est
+dérivable de son code : `VDC_IS_BSY` n'est que `pending_read ||
+pending_write` ; une écriture du port de données posée pendant la phase
+busy — **16 dot-clocks après 48 dot-clocks depuis le début du hsync**
+(x=1128), soit `[1128+48·r, 1128+64·r]` maîtres de la ligne — reste
+en attente, et l'accès suivant bloque jusqu'à la sortie de phase. Le pont
+utilise maintenant cette fenêtre dérivée à la place du calage
+`[979, +170]` ajusté sur l'ancienne géométrie (`PCE_MYS`/`PCE_MYSW`
+maintiennent l'ancien comportement), et les attentes SAT ont leur propre
+drapeau (`PCE_SATWAIT`) : sur le boot Tonma, fermer les attentes SAT
+rapproche beaucoup les flux (f9 passe de −27 à −8 écritures ; la
+divergence dans f6 recule de l'écriture 1308 à 1326, l'arrivée de l'IRQ
+s'aligne).
+
 ## Non-régression
 
 - `tools/pce_dsy` reconstruit avec le runtime modifié : 6000/6000 trames
@@ -106,6 +125,11 @@ modèle.
 - Chemin PCEHawk du pont : médianes par tranche inchangées, aucune
   divergence soutenue — le nouveau chemin est derrière le drapeau
   `pce_vce_model` (profil TurboNyma seul).
+
+Un segfault transitoire a été observé deux fois (runs N=2000 du pont, un
+test `nes` sous ctest parallèle) sans se reproduire depuis ; le test `nes`
+passe isolé et n'est pas affecté par ces changements (aucun chemin PCE
+dans son binaire).
 
 Ce sont des observations de l'outil sur deux jeux, pas des mesures de
 matériel.
