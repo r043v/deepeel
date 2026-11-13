@@ -84,6 +84,10 @@ int main(int argc, char **argv) {
 #ifdef DP_CYCLE_TRACE
         if (dp_trace_on) { dp_trace_on = dp_trace_on_d = 0; fclose(dp_trace_f); fclose(dp_trace_d); }
 #endif
+        if (getenv("DP_MD_ENDSTATE") && frame + 1 >= trace_begin && frame + 1 <= trace_end)   /* CPU state at the end of each frame */
+            printf("end %u pc=%06x/%06x sr=%04x/%04x a7=%08x/%08x d0=%08x/%08x frame_cycles(dut)=%u\n", frame + 1,
+                   (unsigned)ref->m68k.program_counter, dut->pc, (unsigned)ref->m68k.status_register, (unsigned)dut->sr,
+                   (unsigned)ref->m68k.address_registers[7], dut->a[7], (unsigned)ref->m68k.data_registers[0], dut->d[0], (unsigned)dut->frame_cycles);
         if (frame + 1 >= trace_begin && frame + 1 <= trace_end)
             printf("detail %u pad=%02x x=%04x/%04x y=%04x/%04x vx=%04x/%04x vy=%04x/%04x inertia=%04x/%04x status=%02x/%02x\n",
                    frame + 1, pad, ref_word(ref, 0xd008), dut_word(dut, 0xd008),

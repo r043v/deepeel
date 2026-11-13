@@ -346,3 +346,12 @@ Balayage `DP_MD_PENALTY` (1843S) : 0, +400, +1200 cycles laissent l'écart à la
 ramènent à la trame 336 (mauvais). Le lag de 1423 n'est donc pas un décalage de phase initial : c'est le coût en
 cycles d'une trame précise (GHZ1) qui fait dépasser le vblank à m0boy mais pas à ClownMDEmu. Piste : comparer
 les cycles par instruction 68000 (accès bus, MULU/DIVU) sur la trame 1422 avec `DP_MD_TRACE_RANGE`.
+
+État CPU en fin de trame (`DP_MD_ENDSTATE=1 DP_MD_TRACE_RANGE=1419:1424`, 1843S) : à la fin de la trame 1422,
+ClownMDEmu est déjà dans la boucle d'attente du vblank (`pc=$29B0`, `a7=$FFFDF8`), m0boy encore dans la boucle de jeu
+(`pc=$3B34`, `a7=$FFFDFC`, `SR=$2309`) : `$3B34` est le dernier `bsr` de la boucle principale, à quelques
+instructions du `cmpi.b #8,($F600).w` et du retour à l'attente. Le vblank arrive donc à m0boy avec la logique de la trame
+inachevée : la trame 1423 est « perdue » (le joueur n'avance pas), d'où le retard d'une trame. L'écart est de quelques
+dizaines de cycles 68000 sur une trame chargée de GHZ1 ; il ne dépend pas de la phase initiale (balayage
+`DP_MD_PENALTY`). Piste suivante : sommer les cycles par routine de la boucle (jsr/bsr de `$3B10–$3B40`) des deux
+côtés ; le cœur de référence n'expose pas de compteur, il faut donc un hook de cycles dans ClownMDEmu.
