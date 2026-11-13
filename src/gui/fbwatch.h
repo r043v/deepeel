@@ -35,4 +35,6 @@ double dp_fb_sync_waited(void);
 uint32_t dp_fb_ref_unsync_x10(int i);
 const char *dp_fb_ref_name(int i);
 int dp_fb_ref_read(int i, uint32_t *out, int *w, int *h, uint32_t *vframe, uint32_t *total, int *done);
+// the per-frame entry of every platform's --watch: caption progress + stagnation warning + publish (platform code only renders)
+void dp_watch_frame(const uint32_t *argb, int w, int h, uint64_t frame, uint32_t movie_frame, uint32_t total, int done);
 #endif

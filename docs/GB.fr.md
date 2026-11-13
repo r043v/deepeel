@@ -5219,3 +5219,14 @@ Faits tirés du code Mednafen (`vdc.cpp`, `DoWaitStates`) et des traces : l'atte
 maître (1024 × 4), soit un décalage bien inférieur à 2000. Un armement anticipé avec `PCE_SATOFF` 500–1000 ramène la somme des
 écarts de 386 k à ~180 k sur 11 500 frames mais introduit du bruit dès la frame ~2000 et une première divergence soutenue à ~2760 ;
 non retenu.
+
+## Fenêtre watch générique avec BizHawk (0.330.0)
+
+`tools/watch_bizhawk.sh SYSTEM ROM FILM…` (md, pce, nes, sms) rejoue chaque film dans la fenêtre watch de deepeel et dans
+BizHawk (`tools/bizhawk_dsy`, flux MDRF) avec les mêmes entrées ; les tuiles avancent en lockstep (deux images de marge, la plus
+lente dicte le pas). Variables neutres : `DEEPEEL_REF_FEED`, `DEEPEEL_REF_NAME` (et `REF2`/`REF3`) ; les anciens
+`DEEPEEL_MD_REF_*` restent acceptés. Chaque plateforme n'appelle que `dp_fb_sync_gate` (synchro et cadence) et `dp_watch_frame`
+(légende, alerte de stagnation, publication). `DP_WATCH_FPS` (0 par défaut = vitesse maximale ; 60 cadence le rejeu sur l'affichage) :
+une image par présentation, sans tressautement ; `DP_WATCH_JITTER=1` journalise l'avance par présentation.
+`--watch FPS` accepte 1..60 : `--watch 1` publie une image par seconde (c'était la cause d'une fenêtre « à 2 images par seconde »).
+Observations de l'outil, pas des mesures de matériel.

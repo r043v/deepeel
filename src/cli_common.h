@@ -57,7 +57,7 @@ static inline void dp_cli_arm_stop(unsigned time_limit) {
         int fps_ = 30; \
         if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') fps_ = atoi(argv[++i]); \
         if (fps_ < 1) fps_ = 1; \
-        if (fps_ > 30) fps_ = 30; \
+        if (fps_ > 60) fps_ = 60; \
         (opt).watch_every = (unsigned)(60 / fps_); \
         (cc).watch = 1; \
     }

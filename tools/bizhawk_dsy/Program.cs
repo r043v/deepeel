@@ -58,7 +58,7 @@ namespace BizhawkDsy
 					return new GPGX(new CoreLoadParameters<GPGX.GPGXSettings, GPGX.GPGXSyncSettings>
 					{
 						Comm = coreComm, DeterministicEmulationRequested = true, Game = GameInfo.NullInstance,
-						Roms = { new DummyRomAsset(rom, VSystemID.Raw.GEN) }, Settings = new(), SyncSettings = new(),
+						Roms = { new DummyRomAsset(rom, VSystemID.Raw.GEN) }, Settings = new(), SyncSettings = new() { UseSixButton = Environment.GetEnvironmentVariable("BIZHAWK_GEN_SIX") == "1" },   // BIZHAWK_GEN_SIX=1 for a six-button pad (the BK2 SyncSettings.json says which)
 					});
 				case "sms":
 					return new SMSHawk(coreComm, GameInfo.NullInstance, rom, new(), new SMSHawk.SmsSyncSettings { UseBios = false });
@@ -111,7 +111,7 @@ namespace BizhawkDsy
 			var rg = Environment.GetEnvironmentVariable("BIZHAWK_DSY_RANGE");
 			if (rg != null) { var p = rg.Split('-'); lo = Convert.ToInt64(p[0], 16); hi = Convert.ToInt64(p[1], 16) + 1; }
 			// BIZHAWK_FEED=<file>: also publish each frame to the watch window's reference tile (src/explore/md_ref_feed.h
-			// layout, the file must exist with the 'MDRF' magic: tools/pce_watch.sh creates it); BIZHAWK_FEED_FPS paces it (default 60)
+			// layout, the file must exist with the 'MDRF' magic: tools/watch_bizhawk.sh creates it); BIZHAWK_FEED_FPS paces it (default 60)
 			MemoryMappedViewAccessor feed = null; var vp = fe.Core.AsVideoProvider();
 			var feedPath = Environment.GetEnvironmentVariable("BIZHAWK_FEED");
 			if (feedPath != null) feed = MemoryMappedFile.CreateFromFile(feedPath, FileMode.Open, null, 36 + 426 * 262 * 4).CreateViewAccessor();
@@ -148,6 +148,7 @@ namespace BizhawkDsy
 				{
 					int bw = vp.BufferWidth, bh = vp.BufferHeight, sx = (bw + 425) / 426, sy = (bh + 261) / 262, ow = bw / sx, oh = bh / sy;
 					var vb = vp.GetVideoBuffer();
+					if (Environment.GetEnvironmentVariable("BIZHAWK_VIDEO_LOG") != null && f % 100 == 0) { int nz = 0; foreach (var p in vb) if ((p & 0xFFFFFF) != 0) nz++; Console.Error.WriteLine("video f=" + f + " " + bw + "x" + bh + " nonblack=" + nz + " pad=" + masks[f].ToString("x2")); }
 					uint seq = feed.ReadUInt32(4);
 					feed.Write(4, seq + 1);
 					for (int y = 0; y < oh; y++) for (int x = 0; x < ow; x++) feed.Write(36 + (y * ow + x) * 4, (uint)vb[y * sy * bw + x * sx] | 0xFF000000u);

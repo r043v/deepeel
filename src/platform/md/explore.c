@@ -154,12 +154,15 @@ static void on_frame(void *u) {
     if (x->o->watch_every && ++x->wframe % x->o->watch_every == 0) {
         static uint32_t px[320 * 224];
         dp_mdmach_render(x->m, px);
-        dp_fb_publish(px, 320, 224, x->wframe);
+        if (getenv("DEEPEEL_VIDEO_LOG") && x->wframe % 100 == 0) {   // same lines as bizhawk_dsy's BIZHAWK_VIDEO_LOG: a frame-by-frame timeline to compare the cores
+            int nz = 0; for (int i = 0; i < 320 * 224; i++) if (px[i] & 0xFFFFFF) nz++;
+            fprintf(stderr, "video f=%u 320x224 nonblack=%d\n", (unsigned)x->wframe, nz);
+        }
+        dp_watch_frame(px, 320, 224, x->wframe, (uint32_t)x->r->movie_frames, x->o->movie ? (uint32_t)x->o->movie->frames : 0,
+                       x->o->movie && !x->movie_active);
         x->r->watch_frames++;
-        /* the caption shows the replay progress: "done" once the movie ran to
-         * its last frame (a count short of total means the replay desynced) */
-        dp_fbwatch_progress(x->r->movie_frames, x->o->movie ? x->o->movie->frames : 0,
-                            x->o->movie && !x->movie_active);
+        { const char *da = getenv("DEEPEEL_DUMP_AT"), *dpf = getenv("DEEPEEL_DUMP_FILE");   // write the published frame N as a PPM (frame-exact comparison with a reference core)
+          if (da && dpf && (unsigned)atoi(da) == (unsigned)x->wframe) { dp_fb_dump_ppm(dpf); char vp_[1024]; snprintf(vp_, sizeof vp_, "%s.vid", dpf); dp_mdmach_dump_video(x->m, vp_); } }
     }
     if (x->nov) novelty_frame(x);
     if (x->play_active) {
@@ -188,17 +191,7 @@ static void on_frame(void *u) {
                 dp_dsy_frame(&dsy, x->r->movie_frames, 2, nm, dt, ln);
             }
         }
-        if (x->o->watch_every && !getenv("DP_MD_WATCH_NOSYNC")) dp_fb_sync_gate(x->r->movie_frames);   // replay sync with the reference cores
-        if (x->o->watch_every) {   // real-time pacing of the replay (DP_MD_WATCH_FPS, default 0 = unpaced, full speed): published frames reach the window evenly instead of in bursts
-            static double fps = -1, next;
-            struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
-            double now = (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
-            if (fps < 0) { const char *e = getenv("DP_MD_WATCH_FPS"); fps = e ? atof(e) : 0.0; next = now; }
-            if (fps > 0) {
-                next += 1.0 / fps;
-                if (next > now) usleep((useconds_t)((next - now) * 1e6)); else if (now - next > 0.25) next = now;   // far behind: do not try to catch up
-            }
-        }
+        if (x->o->watch_every) dp_fb_sync_gate(x->r->movie_frames);   // replay sync with the reference cores
         if (x->r->movie_frames >= x->o->movie->frames) {
             x->movie_active = 0;
             dp_mdmach_halt(x->m);

@@ -45,12 +45,11 @@ static void draw_text(SDL_Renderer *ren, int x, int y, const char *s, int scale,
         char ch = *s;
         if (ch < 0x20 || ch > 0x7E) ch = '?';
         const uint8_t *gl = dp_font5x7[ch - 0x20];
+        SDL_Rect rs[35]; int nr = 0;   // one draw call per glyph instead of one per lit pixel
         for (int cx = 0; cx < 5; cx++)
             for (int cy = 0; cy < 7; cy++)
-                if (gl[cx] & (1 << cy)) {
-                    SDL_Rect r = { x + cx * scale, y + cy * scale, scale, scale };
-                    SDL_RenderFillRect(ren, &r);
-                }
+                if (gl[cx] & (1 << cy)) rs[nr++] = (SDL_Rect){ x + cx * scale, y + cy * scale, scale, scale };
+        if (nr) SDL_RenderFillRects(ren, rs, nr);
         x += 6 * scale;
         s++;
     }
@@ -676,7 +675,8 @@ static void *fb_main(void *arg) {
     }
     SDL_Window *win = SDL_CreateWindow(fb_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 480,
                                        SDL_WINDOW_RESIZABLE);
-    SDL_Renderer *ren = win ? SDL_CreateRenderer(win, -1, 0) : NULL;
+    SDL_Renderer *ren = win ? SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC) : NULL;   // vsync: presents land on the display's refresh
+    if (win && !ren) ren = SDL_CreateRenderer(win, -1, 0);
     if (!win || !ren) {
         fprintf(stderr, "deepeel: watch: %s\n", SDL_GetError());
         if (win) SDL_DestroyWindow(win);
@@ -705,6 +705,13 @@ static void *fb_main(void *arg) {
         uint64_t f;
         if (dp_fb_read(px, DP_FB_MAX_W * DP_FB_MAX_H, &w, &h, &f)) {
             f_cur = f;
+            if (getenv("DP_WATCH_JITTER")) {   // per window present: how many frames the tile advanced (smooth = steady), once a second
+                static uint64_t pf; static double pt; static int mn = 1 << 30, mx, np;
+                double jn = watch_now();
+                if (pf) { int d = (int)(f - pf); if (d < mn) mn = d; if (d > mx) mx = d; np++; }
+                pf = f;
+                if (jn - pt >= 1.0) { fprintf(stderr, "jitter: %d presents/s, advance per present min %d max %d\n", np, mn, mx); pt = jn; mn = 1 << 30; mx = 0; np = 0; }
+            }
             if (!tex || w != tw || h != th) {
                 if (tex) SDL_DestroyTexture(tex);
                 tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, w, h);
@@ -804,12 +811,14 @@ static void *fb_main(void *arg) {
             if (own && *own) snprintf(c1, sizeof c1, "%s", own);
             else snprintf(c1, sizeof c1, "deepeel-%s " DEEPEEL_VERSION, plat);
             draw_text(ren, 6, ch + 2, c1, 1, gui_color(DP_C_TITLE));   // tile 0 sits at the origin
-            char l2[96]; snprintf(l2, sizeof l2, "frame %llu  %.0f f/s", (unsigned long long)f_cur, u_main);
+            char l2[96]; snprintf(l2, sizeof l2, "frame %llu  %.0f f/s", (unsigned long long)f_cur, s_main);   // the rate actually shown (lockstep: the pace of the slowest core), not the unpaced speed
             draw_text(ren, 6, ch + 16, l2, 1, gui_color(done ? DP_C_DIM : DP_C_TEXT));
             for (int t = 1; t < ncell; t++) {
                 int k = slot[t], ox = (t % cols) * cw, oy = (t / cols) * rowh;
                 char r2[96];
-                snprintf(r2, sizeof r2, "frame %u  %.0f f/s", (unsigned)rvf[k], dp_fb_ref_unsync_x10(k) / 10.0);
+                static double rr_t[3], rr_v[3], rr_f[3]; double rn = watch_now();   // measured advance of this reference per wall second
+                if (rn - rr_t[k] >= 1.0) { if (rr_t[k] > 0 && rvf[k] >= rr_f[k]) rr_v[k] = (rvf[k] - rr_f[k]) / (rn - rr_t[k]); rr_t[k] = rn; rr_f[k] = rvf[k]; }
+                snprintf(r2, sizeof r2, "frame %u  %.0f f/s", (unsigned)rvf[k], rr_v[k]);
                 draw_text(ren, ox + 6, oy + ch + 2, dp_fb_ref_name(k), 1, gui_color(DP_C_TITLE));
                 draw_text(ren, ox + 6, oy + ch + 16, r2, 1, gui_color(rdone[k] ? DP_C_DIM : DP_C_TEXT));
             }
@@ -819,7 +828,7 @@ static void *fb_main(void *arg) {
             draw_text(ren, 6, H - FB_INFO + 3, inf, 1, gui_color(DP_C_DIM));
         }
         SDL_RenderPresent(ren);
-        SDL_Delay(16);
+        SDL_Delay(2);   // the vsynced present paces the loop (a software renderer without vsync: the delay keeps it from spinning)
     }
     if (tex) SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(ren);

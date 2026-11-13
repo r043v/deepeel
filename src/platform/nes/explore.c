@@ -19,6 +19,7 @@
 #include "../../cpu/m6502/m6502.h"
 #include "nes_trace.h"
 #include "tas.h"
+#include "../../gui/fbwatch.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -894,11 +895,12 @@ static void hook_frame(void *user) {
     if (x->opt.watch_every && ++x->wframe % x->opt.watch_every == 0) {
         static uint32_t px[160 * 128];
         dp_nesmach_render(x->m, px);
-        dp_fb_publish(px, 160, 128, x->wframe);
+        dp_watch_frame(px, 160, 128, x->wframe, x->play_mode ? (uint32_t)x->frame_count : 0, x->play_mode ? (uint32_t)x->frame_target : 0, 0);
         x->r->watch_frames++;
     }
     if (!x->play_mode) return;
     x->frame_count++;
+    if (x->opt.watch_every) dp_fb_sync_gate(x->frame_count);   // replay sync with the reference tiles
     if (!x->nov) x->r->play_frames_run++;
     if (x->frame_count >= x->frame_target) { nes_trace.stop = 1; return; }
     // next frame's inputs (TAS command byte may demand a reset first)

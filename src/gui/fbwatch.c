@@ -48,16 +48,20 @@ static int ref_feed_tried[DP_NREF];
 static const char *const ref_env[DP_NREF] = { "DEEPEEL_MD_REF_FEED", "DEEPEEL_MD_REF2_FEED", "DEEPEEL_MD_REF3_FEED" };
 static const char *const ref_name_env[DP_NREF] = { "DEEPEEL_MD_REF_NAME", "DEEPEEL_MD_REF2_NAME", "DEEPEEL_MD_REF3_NAME" };
 static const char *const ref_name_def[DP_NREF] = { "ClownMDEmu", "BizHawk GPGX", "Genesis Plus GX" };
+/* platform-neutral names first (DEEPEEL_REF_FEED, DEEPEEL_REF2_FEED, ..._NAME), the historical DEEPEEL_MD_* ones as aliases */
+static const char *const ref_env_g[DP_NREF] = { "DEEPEEL_REF_FEED", "DEEPEEL_REF2_FEED", "DEEPEEL_REF3_FEED" };
+static const char *const ref_name_env_g[DP_NREF] = { "DEEPEEL_REF_NAME", "DEEPEEL_REF2_NAME", "DEEPEEL_REF3_NAME" };
+static const char *env2(const char *a, const char *b) { const char *v = getenv(a); return v && *v ? v : getenv(b); }
 
 int dp_fb_ref_active(int i) {
     if (i < 0 || i >= DP_NREF) return 0;
     if (!ref_feed[i] && ++ref_feed_tried[i] % 30 == 1)   // the harness may start after the window: retry now and then
-        ref_feed[i] = dp_md_ref_feed_open(getenv(ref_env[i]), 0);
+        ref_feed[i] = dp_md_ref_feed_open(env2(ref_env_g[i], ref_env[i]), 0);
     return ref_feed[i] && ref_feed[i]->magic == DP_MDRF_MAGIC;
 }
 
 const char *dp_fb_ref_name(int i) {
-    const char *n = i >= 0 && i < DP_NREF ? getenv(ref_name_env[i]) : NULL;
+    const char *n = i >= 0 && i < DP_NREF ? env2(ref_name_env_g[i], ref_name_env[i]) : NULL;
     return n && *n ? n : i >= 0 && i < DP_NREF ? ref_name_def[i] : "";
 }
 
@@ -70,7 +74,24 @@ static double sync_waited;
 static double mono_now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (double)t.tv_sec + (double)t.tv_nsec * 1e-9; }
 double dp_fb_sync_waited(void) { return sync_waited; }
 uint32_t dp_fb_ref_unsync_x10(int i) { return dp_fb_ref_active(i) ? ref_feed[i]->unsync_x10 : 0; }
+/* real-time pacing of the replay (DP_WATCH_FPS, default 0 = flat out; 60 gives exactly one frame per window image): the window presents ~60 images a second, so a core running
+ * at 130 frames/s would be shown as 2,2,3,2... frames per image (judder); one frame per image is the smooth way.  Called once per
+ * replayed frame by every platform, so the pace lives here and nowhere else. */
+static void pace_frame(void) {
+    static double fps = -1, next;
+    if (fps < 0) { const char *e = getenv("DP_WATCH_FPS"); fps = e && *e ? atof(e) : 0.0; next = 0; }
+    if (fps <= 0) return;
+    double now = mono_now();
+    if (next == 0 || now - next > 0.25) next = now;   /* first frame, or far behind: no catching up */
+    next += 1.0 / fps;
+    while (!dp_stop) {
+        double left = next - mono_now();
+        if (left <= 0) break;
+        usleep(left > 0.002 ? (useconds_t)((left - 0.001) * 1e6) : 100);
+    }
+}
 void dp_fb_sync_gate(uint64_t frame) {
+    pace_frame();
     static double last_prog[2], stale_since[2];
     static uint32_t last_v[2];
     int any = 0;
@@ -128,4 +149,22 @@ int dp_fb_dump_ppm(const char *path) {
         fwrite(px, 1, 3, o);
     }
     return fclose(o) ? 1 : 0;
+}
+
+/* the one per-frame entry of every platform's --watch: progress caption, stagnation warning (a movie keeps the
+ * picture moving; the same image for 900 frames means the replay probably desynchronised), then the publish.
+ * `movie_frame`/`total`: the replayed movie's position (total 0: no movie in progress). */
+void dp_watch_frame(const uint32_t *px, int w, int h, uint64_t frame, uint32_t movie_frame, uint32_t total, int done) {
+    static uint64_t hsh_last, since; static int warned;
+    if (total) {
+        dp_fbwatch_progress(movie_frame, total, done);
+        uint64_t hsh = 1469598103934665603ull;
+        for (size_t i = 0, n = (size_t)w * (size_t)h; i < n; i++) hsh = (hsh ^ px[i]) * 1099511628211ull;
+        if (hsh != hsh_last) { hsh_last = hsh; since = movie_frame; warned = 0; }
+        else if (!warned && movie_frame - since >= 900) {
+            warned = 1;
+            fprintf(stderr, "tas: STAGNATION - same image since movie frame %llu, probable desync with the movie (frame %u/%u)\n", (unsigned long long)since, movie_frame, total);
+        }
+    }
+    dp_fb_publish(px, w, h, frame);
 }

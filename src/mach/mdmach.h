@@ -63,6 +63,7 @@ void dp_mdmach_state_set_irq(void *buf, int vint, int hint);
 void dp_mdmach_state_set_pad(void *buf, uint8_t pad);
 void dp_mdmach_state_set_an(void *buf, unsigned n, uint32_t v);
 /* VDP command latch: 1 if the next ctrl-port word is the second one. */
+void dp_mdmach_dump_video(const DpMdMach *m, const char *path);
 int dp_mdmach_vdp_pending(const DpMdMach *m);
 uint16_t dp_mdmach_vdp_first(const DpMdMach *m);
 uint8_t dp_mdmach_vdp_code(const DpMdMach *m);

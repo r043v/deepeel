@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
+#include <stdio.h>
 #include "mdmach.h"
 #include <stdlib.h>
 #include <string.h>
@@ -317,3 +318,12 @@ uint64_t dp_mdmach_screen_key(const DpMdMach *d) {
 void dp_mdmach_poke(DpMdMach *d, uint32_t a, uint8_t v) { if (a >= 0xFF0000u) d->m->ram[a & 0xFFFFu] = v; }
 uint8_t dp_mdmach_ram8(const DpMdMach *d, uint32_t a) { return d->m->ram[a & 0xFFFFu]; }
 
+
+/* Debug: writes VRAM (64K), CRAM (64 words LE), VSRAM (80), VDP regs (24 words LE) to path. */
+void dp_mdmach_dump_video(const DpMdMach *m, const char *path) {
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    fwrite(m->m->vram, 1, 65536, f); fwrite(m->m->cram, 2, 64, f);
+    fwrite(m->m->vsram, 1, 80, f); fwrite(m->m->vdp_reg, 2, 24, f); fwrite(m->m->ram, 1, 65536, f);
+    fclose(f);
+}

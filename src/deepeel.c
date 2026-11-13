@@ -192,7 +192,7 @@ static void usage(void) {
             "    --fork-site-cap N    per-branch-site fork cap (default 4, bytes counters)\n"
             "    --gui                SDL2 live viewer\n"
             "    --mapwin [SCALE]     live ROM map window (1 px per byte like the .map.png), redrawn while exploring\n"
-            "    --watch [FPS]        small window showing the replaying TAS movie, 1..30 img/s (default 30)\n"
+            "    --watch [FPS]        small window showing the replaying TAS movie, 1..60 img/s (default 30; 60 shows every frame)\n"
             "    --ram-code f         executed WRAM/HRAM code as byte variants (m0boy: gbrecomp --ram-code f)\n"
             "    --json f / --text f / --cov f / --romdata f / --map f / --html f   outputs\n"
             "                         (--map: PNG by default, 1 px per ROM byte + played heat,\n"
@@ -1870,7 +1870,7 @@ static void md_movie_output_path(char *out, size_t cap, const char *base, int id
  * window shows each tile's speed separately */
 static const char *md_ref_live_path(void) {
     const char *env = getenv("DP_MD_REF_LIVE");
-    if (env && !strcmp(env, "none")) return NULL;   // another reference feed (BizHawk) is wired by the caller
+    if ((env && !strcmp(env, "none")) || getenv("DEEPEEL_REF_FEED") || getenv("DEEPEEL_MD_REF_FEED")) return NULL;   // an external reference feed (tools/watch_bizhawk.sh) is already wired   // another reference feed (BizHawk) is wired by the caller
     if (env && *env) return env;
     static char p[600];
     ssize_t n = readlink("/proc/self/exe", p, sizeof p - 1);
@@ -2030,7 +2030,7 @@ static int cmd_md(int argc, char **argv) {
                 char nm[80]; snprintf(nm, sizeof nm, "ClownMDEmu%s%s", rev[0] ? " " : "", rev);
                 setenv("DEEPEEL_MD_REF_NAME", nm, 1);
             }
-        } else if (md_watch)
+        } else if (md_watch && !getenv("DEEPEEL_REF_FEED") && !getenv("DEEPEEL_MD_REF_FEED"))
             fprintf(stderr, "deepeel: md watch: no reference tile (build it with tools/md_ref_live.sh)\n");
         if (md_watch) dp_fbwatch_start("deepeel md watch");
         int md_failed = 0;
@@ -2048,6 +2048,7 @@ static int cmd_md(int argc, char **argv) {
                     fprintf(stderr, "deepeel: warning: BK2 header hash differs from the ROM MD5 "
                             "(the replay will show whether the movie matches)\n");
             }
+            { const char *wf = getenv("DEEPEEL_WATCH_FRAMES"); if (wf && *wf && movie.frames > (unsigned)atoi(wf)) movie.frames = (unsigned)atoi(wf); }   // stop the replay early (tools/watch_bizhawk.sh WATCH_FRAMES)
             o.movie = &movie;
             pid_t refpid = 0, hawkpid = 0, gpgxpid = 0;
             const char *wf[3] = { NULL, NULL, NULL };   // feeds to wait on: every tile starts together
