@@ -105,7 +105,7 @@ void dp_pce_reference(int pcehawk) {
     pce_timer_phase = pcehawk ? 0u : 3u;
     { extern unsigned pce_timer_clk; pce_timer_clk = pcehawk ? 0u : 456u; }   // first timer period: 3 ticks and 480 prescaler cycles longer (measured on Shinobi)
     pce_sat_offset = pcehawk ? 0 : 2000; pce_sat_hdw = pcehawk ? 0 : 1;   // the SATB DMA starts at the end of the display window (HuC6270), the held VRAM access waits ~2000 master clocks longer
-    pce_mys_w = pcehawk ? 90u : 170u;   // measured: sustained desync 2818 -> 10257
+    pce_mys_w = 0;   // the mystery window is derived from the HuC6270 (48+16 dot clocks from the hsync start); PCE_MYS/PCE_MYSW override
     pce_vdc_waits = pcehawk ? 0u : 1u;   // PCEHawk has no VRAM wait states behind the SATB DMA (TurboNyma does)
     ref_phase = pcehawk ? 4u : 258u;
     pce_frame_start_line = ref_phase;
