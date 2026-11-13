@@ -1604,3 +1604,8 @@ Tables séparées (0.319.1) : `lda tblH,x / pha / lda tblL,x / pha / rts` donne 
 en PRG ; leur écart (2 à 512 octets, signé) est conservé dans l'ancre et les voisins sont lus en paires
 (octet bas à `a`, octet haut à `a + écart`). Fixture `fix_nes_rtssplit.nes`, test `nes_provenance_rts_split`
 (1 table, 2 racines). Reste ◐ pour S4 NES : tables hors PRG de la banque fenêtre et décalages > 512.
+
+**G2 NES : mesure sur ROM réelle.** DuckTales (UxROM) avec `--bank-dispatch --max-total 4000` : 0 table de dispatch, 0 semis
+(ses sauts passent par des tables lues en RAM ou des `rts` empilés, non par des mots de la banque fixe). Les cartes
+MMC1/MMC3/Camerica ajoutées en 0.324.0–0.325.0 n'ont pas de ROM réelle dans la machine : elles ne sont validées que par
+fixture. Observation de l'outil.
