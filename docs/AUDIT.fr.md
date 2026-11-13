@@ -27,7 +27,7 @@ Cellules ouvertes (◐ ou ✗) : 55.
 | S3 | Suivi de constantes / provenance | PCE | ◐ provenance ROM→WRAM→`jmp (abs)` ; 0.249.0 graines voisines de la table (`--second-pass`, test `pce_provenance_roots`) |
 | S3 | Suivi de constantes / provenance | MD | ◐ témoin An |
 | S4 | Tables de sauts depuis l'opérande | GB | ◐ 0.134 `ld hl,nn` → `jp hl` (≤ 64 mots, même banque) + 0.191.0 base dans DE/BC (`add hl,rr`) |
-| S4 | Tables de sauts depuis l'opérande | NES | ◐ tables de mots lues en données |
+| S4 | Tables de sauts depuis l'opérande | NES | ◐ tables de mots lues en données ; 0.319.0–0.319.1 astuce `pha`/`pha`/`rts` (tables de mots ou scindées bas/haut, test `nes_provenance_rts*`) |
 | S4 | Tables de sauts depuis l'opérande | MD | ◐ 0.190.0 `jmp d8(pc,Xn)` → table de `bra.s`/`bra.w` (≤ 128 entrées, fixture `md_s4`) ; pas de tables de mots ni `jmp (An)` ; 0.233.0 aussi `jsr d8(pc,Xn)` (test `md_s4_jsr`) ; 0.234.0 `d8(An,Xn)` depuis la valeur vivante d'An (test `md_s4_an`) ; 0.235.0 tables de déplacements 16 bits validées par la cible observée (test `md_s4_words`) ; 0.241.0 `jmp (An)` dont An vient de `movea.l d8(Am ou pc,Xn),An` (test `md_s4_ptr`) |
 | S5 | Frères de copie | NES | ◐ copies OAM DMA / boucle CPU, tables du même flux |
 | S5 | Frères de copie | PCE | ◐ tables du même flux, même page/fenêtre (VDC block move) |
