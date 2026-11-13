@@ -37,7 +37,7 @@ Cellules ouvertes (◐ ou ✗) : 55.
 | S6 | Rejeu de décodeurs sur tables de flux | MSX | ◐ 0.147 idem |
 | S6 | Rejeu de décodeurs sur tables de flux | NES | ◐ 0.148 `JSR` + mot de page zéro, tables de mots même bloc ; 0.205 UxROM, 0.211 MMC1, 0.212 MMC3 (modes 0 et 1, 0.213), Camerica 71, UN1ROM 94 (0.214), 180 (0.215) (banque, ptr) ; tous les mappers à PRG commutable du pont (1, 2, 4) sont couverts, 3/7/11/66 permutent tout le PRG ou seulement la CHR (rien à rejouer inter-banques), MMC5 (0.223.0, sous-ensemble : PRG/CHR) et le reste dépendent de leur prise en charge (J5) |
 | S6 | Rejeu de décodeurs sur tables de flux | PCE | ◐ 0.149 `JSR` + mot de page zéro, page ROM de 8 Kio ; 0.206 entrées (page, ptr) |
-| G2 | Scan de dispatch par vues de banques | NES | ◐ UxROM, banque fixe (`--bank-dispatch`) |
+| G2 | Scan de dispatch par vues de banques | NES | ◐ UxROM, banque fixe (`--bank-dispatch`) ; 0.324.0 aussi MMC1 (mode 3), Camerica 71, UN1ROM 94 (test `nes_bank_dispatch_mmc1`) ; reste MMC3 (banques de 8 Kio) et les autres modes MMC1 |
 | G2 | Scan de dispatch par vues de banques | PCE | ◐ tables de mots par fenêtre, vues de pages (`--bank-dispatch`) |
 | G2 | Scan de dispatch par vues de banques | MD | ◐ tables de mots longs de pointeurs de code (`--bank-dispatch`) |
 | G4 | Semis indirect + budgets en cascade | NES | ◐ second passage sur racines statiques (`--second-pass`) |
