@@ -162,6 +162,13 @@ struct DpMachine {
     // this board cannot show that block: the kernel counts it in
     // DpCoreResult.seed_banks_absent (never silent).
     int (*bank_view)(struct DpMachine *, unsigned bank);
+    // Optional nonsense cuts (the GB legacy eviction, mutualized — audit E2):
+    // 1 when executing at `pc` is senseless (echo/OAM RAM, I/O page — the bytes
+    // never become code evidence), resp. 1 when the current stack pointer is
+    // outside the platform's RAM space (checked when a RET is about to pop).
+    // NULL: no cut from this machine; every cut is counted, never silent.
+    int (*cut_pc)(struct DpMachine *, uint32_t pc);
+    int (*cut_sp)(struct DpMachine *);
     // writes one byte through the machine's memory map, unobserved (NULL: unsupported);
     // the entry point of the RAM-seeding techniques (docs/PLAN-MUTUALISATION.fr.md, step 3)
     void (*poke)(struct DpMachine *, uint32_t addr, uint8_t value);

@@ -32,10 +32,10 @@ static const DpRegion pce_regions[] = {
 };
 
 static const DpEntry pce_entries[] = {
-    { 0xFFFE, DP_SEED_RESET, "reset" },
-    { 0xFFF8, DP_SEED_IRQ, "irq1" },
-    { 0xFFFA, DP_SEED_IRQ, "timer" },
-    { 0xFFF6, DP_SEED_IRQ, "irq2" },
+    { 0xFFFE, DP_SEED_RESET, 1, "reset" },
+    { 0xFFF8, DP_SEED_IRQ, 1, "irq1" },
+    { 0xFFFA, DP_SEED_IRQ, 1, "timer" },
+    { 0xFFF6, DP_SEED_IRQ, 1, "irq2" },
 };
 
 static const DpPlatform pce_platform = {

@@ -142,6 +142,7 @@ uint64_t dp_mdmach_run(DpMdMach *d, uint64_t max_steps, int *cut, int *fault) {
 }
 
 uint32_t dp_mdmach_pc(const DpMdMach *d) { return d->m->pc; }
+uint32_t dp_mdmach_sp(const DpMdMach *d) { return d->m->a[7]; }   // A7 is the stack pointer
 uint32_t dp_mdmach_fault_pc(const DpMdMach *d) { return d->m->fault_pc; }
 
 size_t dp_mdmach_state_size(void) { return sizeof(MdFull); }

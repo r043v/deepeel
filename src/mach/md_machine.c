@@ -85,6 +85,10 @@ static int md_seed_regs(DpMachine *m, uint8_t a, uint16_t sp) {
     free(buf);
     return 1;
 }
+// nonsense cut (audit E2): the 68000 stack lives in work RAM $FF0000-$FFFFFF —
+// an SP below that pops ROM or bus garbage (no echo/I-O pc cut: the MD maps
+// nothing a path could reasonably execute into and call code)
+static int md_cut_sp(DpMachine *m) { return dp_mdmach_sp(((MdMachWrap *)m->impl)->m) < 0xFF0000u; }
 
 // kernel mask (up down left right button1 button2 start) -> MD pad bits
 // (0-3 directions, 16 A, 32 B, 64 C, 128 Start): button1 holds A and C, button2 B
@@ -202,6 +206,7 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->set_pc = md_set_pc;
     m->set_input = md_set_input;
     m->seed_regs = md_seed_regs;   // no 68000 mapper: bank_view stays NULL (sans objet)
+    m->cut_sp = md_cut_sp;
     m->frame = md_frame;
     return m;
 }

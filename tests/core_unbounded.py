@@ -11,8 +11,8 @@ import time
 
 exe, rom = sys.argv[1:]
 fixtures = pathlib.Path(rom).parent
-cases = [("gb", ["explore", rom], ["--no-pointer-scan"]),
-         ("gb_jobs", ["explore", rom], ["--no-pointer-scan", "--jobs", "2"]),
+cases = [("gb", ["explore", rom], ["--no-pointer-scan", "--no-nonsense"]),
+         ("gb_jobs", ["explore", rom], ["--no-pointer-scan", "--no-nonsense", "--jobs", "2"]),
          ("z80", ["z80", "explore", "sms", str(fixtures / "fix_z80_branch.sms")], []),
          ("6502", ["nes", "explore", str(fixtures / "fix_nes_branch.nes")], []),
          ("huc6280", ["pce", "explore", str(fixtures / "fix_pce_branch.pce")], []),

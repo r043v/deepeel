@@ -57,6 +57,8 @@ typedef struct DpCoreConfig {
     int no_learn_sig;          // 1: do not learn `ld a,(nn); cp n` signatures (technique 3)
     int no_site_score;         // 1: novelty pick ignores the per-site yield score (technique 5)
     int no_forced_ram_cut;     // 1: let forced paths run unfed RAM
+    int no_nonsense;           // 1: no nonsense cuts (echo/OAM pc, stack outside RAM, padding slide)
+    int no_vectors;            // 1: do not seed the platform registry's RST/IRQ vector entries (G1)
     const uint8_t *rom_image;  // optional: the whole ROM (bank*0x4000 layout); enables bank-naming tables (S4 stride 3)
     size_t rom_image_size;
     const uint32_t *seeds;     // extra entry points (vectors): queued as forced paths from the start state
@@ -111,6 +113,9 @@ typedef struct DpCoreResult {
     uint64_t copy_forced;      // the same on forced paths (speculative, not marked on the ROM)
     uint64_t taint_cut_indirect, taint_cut_ret;   // forced paths cut on a computed jump / a ret on a stack the path did not build
     uint64_t forced_ram_cuts;  // forced paths cut when executing RAM no verbatim ROM copy fed
+    uint64_t nonsense_pc;      // paths cut executing in echo/OAM/I-O space (machine cut_pc, audit E2)
+    uint64_t nonsense_sp;      // paths cut on a RET whose stack left the RAM space (machine cut_sp)
+    uint64_t pad_cuts;         // paths cut after sliding through a long 00/FF run (padding is not code)
     uint64_t workers;          // workers actually started
     uint64_t workers_min, workers_max;   // adaptive mode: lowest / highest number of workers allowed
     uint64_t workers_short;    // workers requested but unavailable (no clone / init failure)
@@ -118,6 +123,7 @@ typedef struct DpCoreResult {
     uint64_t seed_refused_cap; // unique pointer seeds not queued due to the GB scan cap
     uint64_t seed_regs_absent; // register seeds requested but the machine has no seed_regs hook
     uint64_t seed_banks_absent; // bank seeds requested but the machine cannot show the block (no bank_view hook, or the block is not switchable)
+    uint64_t vector_seeds;     // the platform registry's RST/IRQ vector entries queued as forced starts (G1)
     uint64_t novelty_picks;    // pending states chosen ahead of LIFO order because their target was uncovered
     uint64_t index_replays;    // states queued with a RAM index byte set to 0..15 at a ROM-table read
     uint64_t rng_forks;        // states queued with a volatile RAM byte forced to 00/01/80/FF

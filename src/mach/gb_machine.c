@@ -114,6 +114,11 @@ static int gb_bank_view(DpMachine *m, unsigned bank) {
     if (bank > 0xff) gb_poke(m, 0x3000, (uint8_t)(bank >> 8));
     return 1;
 }
+// nonsense cuts (audit E2): echo RAM $E000-$FDFF and OAM $FE00-$FEFF never hold
+// real code (HRAM $FF00+ does — the boot code runs there); a stack outside
+// WRAM/HRAM pops garbage
+static int gb_cut_pc(DpMachine *m, uint32_t pc) { (void)m; return pc >= 0xE000 && pc < 0xFF00; }
+static int gb_cut_sp(DpMachine *m) { uint16_t sp = gbw(m)->d->api->gbr->sp; return sp < 0xC000 || sp > 0xFFFE; }
 static uint64_t gb_frame(DpMachine *m) { return *gbw(m)->d->api->frame; }
 // kernel mask (up down left right button1 button2 start select) -> the engine's set_buttons layout
 // (A=1 B=2 Select=4 Start=8 Right=16 Left=32 Up=64 Down=128, what the movies and the old engine feed)
@@ -268,6 +273,8 @@ static DpMachine *gb_wrap(DpMach *impl) {
     m->set_pc = gb_set_pc;
     m->seed_regs = gb_seed_regs;
     m->bank_view = gb_bank_view;
+    m->cut_pc = gb_cut_pc;
+    m->cut_sp = gb_cut_sp;
     m->poke = gb_poke;
     m->set_input = gb_set_input;
     m->frame = gb_frame;

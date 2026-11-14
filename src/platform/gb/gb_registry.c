@@ -107,20 +107,20 @@ static const DpRegion gb_regions[] = {
 };
 
 static const DpEntry gb_entries[] = {
-    { 0x0100, DP_SEED_RESET, "reset" },
-    { 0x0000, DP_SEED_RST, "rst00" },
-    { 0x0008, DP_SEED_RST, "rst08" },
-    { 0x0010, DP_SEED_RST, "rst10" },
-    { 0x0018, DP_SEED_RST, "rst18" },
-    { 0x0020, DP_SEED_RST, "rst20" },
-    { 0x0028, DP_SEED_RST, "rst28" },
-    { 0x0030, DP_SEED_RST, "rst30" },
-    { 0x0038, DP_SEED_RST, "rst38" },
-    { 0x0040, DP_SEED_IRQ, "irq_vblank" },
-    { 0x0048, DP_SEED_IRQ, "irq_stat" },
-    { 0x0050, DP_SEED_IRQ, "irq_timer" },
-    { 0x0058, DP_SEED_IRQ, "irq_serial" },
-    { 0x0060, DP_SEED_IRQ, "irq_joypad" },
+    { 0x0100, DP_SEED_RESET, 0, "reset" },
+    { 0x0000, DP_SEED_RST, 0, "rst00" },
+    { 0x0008, DP_SEED_RST, 0, "rst08" },
+    { 0x0010, DP_SEED_RST, 0, "rst10" },
+    { 0x0018, DP_SEED_RST, 0, "rst18" },
+    { 0x0020, DP_SEED_RST, 0, "rst20" },
+    { 0x0028, DP_SEED_RST, 0, "rst28" },
+    { 0x0030, DP_SEED_RST, 0, "rst30" },
+    { 0x0038, DP_SEED_RST, 0, "rst38" },
+    { 0x0040, DP_SEED_IRQ, 0, "irq_vblank" },
+    { 0x0048, DP_SEED_IRQ, 0, "irq_stat" },
+    { 0x0050, DP_SEED_IRQ, 0, "irq_timer" },
+    { 0x0058, DP_SEED_IRQ, 0, "irq_serial" },
+    { 0x0060, DP_SEED_IRQ, 0, "irq_joypad" },
 };
 
 static const DpPlatform gb_platform = {

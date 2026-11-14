@@ -17,6 +17,7 @@ typedef struct {
     uint32_t site;     // fork site rom index + 1 (0: none), for the per-site novelty score
     uint32_t input;    // held pad mask + 1 (0: none); inherited by every fork of the path
     uint8_t seed;      // a configured seed: dropped at pick time when its start is already covered
+    uint8_t vector;    // a registry vector entry: real machine state, no forced inversion (the taint RET cut does not apply)
 } Pending;
 
 typedef struct {
@@ -61,6 +62,8 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--dsy") && i + 1 < argc) { c->dsy_path = argv[i + 1]; return 2; }
     if (!strcmp(a, "--no-tas-jitter")) { c->no_tas_jitter = 1; return 1; }
     if (!strcmp(a, "--no-sessions")) { c->no_sessions = 1; return 1; }
+    if (!strcmp(a, "--no-nonsense")) { c->no_nonsense = 1; return 1; }
+    if (!strcmp(a, "--no-vectors")) { c->no_vectors = 1; return 1; }
     if (!strcmp(a, "--sessions") && i + 1 < argc) { c->sessions = (uint32_t)strtoul(argv[i + 1], NULL, 0); c->no_sessions = 0; return 2; }
     if (!strcmp(a, "--no-irq-jitter")) { c->no_irq_jitter = 1; return 1; }
     if (!strcmp(a, "--no-decompress")) { c->no_decompress = 1; return 1; }
@@ -501,7 +504,7 @@ static int cell_insert(Shared *sh, uint64_t key) { return keyset_insert(&sh->cel
 
 // Queue overflow goes to disk, never away: a record is {pc, forced, site, input} + the saved state.
 // All called with sh->mu held.  If the disk is unusable the state stays in RAM beyond queue_max.
-typedef struct { uint32_t pc, forced, site, input; } SpoolHead;
+typedef struct { uint32_t pc, forced, site, input; } SpoolHead;   // forced bit 0, seed bit 1, vector bit 2
 static void ram_push(Shared *sh, Pending p) {
     if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
     sh->q[sh->qn++] = p;
@@ -523,7 +526,7 @@ static int queue_push(Shared *sh, Pending p) {
     if (cfg->queue_max && sh->qn >= cfg->queue_max && !sh->spool_write_failed && spool_open(sh)) {
         uint8_t *rec = malloc(sh->spool_rs);
         if (rec) {
-            SpoolHead h = { p.pc, (uint32_t)!!p.forced | ((uint32_t)!!p.seed << 1), p.site, p.input };
+            SpoolHead h = { p.pc, (uint32_t)!!p.forced | ((uint32_t)!!p.seed << 1) | ((uint32_t)!!p.vector << 2), p.site, p.input };
             memcpy(rec, &h, sizeof h); memcpy(rec + sizeof h, p.state, sh->sbytes);
             ssize_t w = pwrite(sh->spool_fd, rec, sh->spool_rs, (off_t)(sh->spool_n * sh->spool_rs));
             free(rec);
@@ -550,7 +553,7 @@ static int spool_refill(Shared *sh) {
         if (!st) { ok = 0; break; }
         memcpy(st, rec + sizeof h, sh->sbytes);
         sh->spool_n = i;
-        ram_push(sh, (Pending){ st, h.pc, (int)(h.forced & 1), h.site, h.input, (uint8_t)((h.forced >> 1) & 1) });
+        ram_push(sh, (Pending){ st, h.pc, (int)(h.forced & 1), h.site, h.input, (uint8_t)((h.forced >> 1) & 1), (uint8_t)((h.forced >> 2) & 1) });
     }
     free(rec);
     if (ftruncate(sh->spool_fd, (off_t)(sh->spool_n * sh->spool_rs)) != 0) { /* the next appends overwrite it anyway */ }
@@ -588,7 +591,7 @@ static int frontier_load(Shared *sh, const char *path, DpCoreResult *out) {
             fclose(f);
             return 0;
         }
-        queue_push(sh, (Pending){ state, h.pc, (int)(h.forced & 1), h.site, h.input, (uint8_t)((h.forced >> 1) & 1) });
+        queue_push(sh, (Pending){ state, h.pc, (int)(h.forced & 1), h.site, h.input, (uint8_t)((h.forced >> 1) & 1), (uint8_t)((h.forced >> 2) & 1) });
         out->resumed++;
     }
     if (fclose(f) != 0) { perror("deepeel: closing kernel frontier"); return 0; }
@@ -875,6 +878,7 @@ static void run_path(Worker *w, Pending *p) {
     uint32_t path_id = ++w->path_id, vid = path_id, steps = 0, slice_steps = 0;
     int cur_forced = p->forced;
     unsigned fdepth = 0;   // calls made since the forced fork: a ret below that pops state the path did not build
+    unsigned pad_slide = 0;   // consecutive executed steps inside a pure 00/FF run (padding is not code)
     for (;;) {
         if (cfg->stop_requested && *cfg->stop_requested) {
             __atomic_store_n(&sh->halt, 4, __ATOMIC_RELAXED);
@@ -1023,6 +1027,14 @@ static void run_path(Worker *w, Pending *p) {
         int have_flow = isa->flow && isa->flow(bytes, pc, &fi);
         if (have_flow && fi.length) len = fi.length;
         if (len <= 0) len = 1;
+        // nonsense cuts (E2, the GB legacy eviction mutualized): an executed
+        // instruction in echo/OAM/I-O space, a RET whose stack left the RAM
+        // space, or a slide through pure 00/FF padding ends the path — the
+        // executed byte itself stays covered (the legacy rule: cut after the
+        // instruction ran), the reason is counted, never silent
+        int ns_pc = !cfg->no_nonsense && !tas && !attract && !play && m->cut_pc && m->cut_pc(m, pc);
+        int ns_ret = !cfg->no_nonsense && !tas && !attract && !play && m->cut_sp &&
+                     have_flow && fi.kind == DP_FLOW_RET;
         if (m->rom_index(m, pc) < 0) {
             if (cur_forced && !cfg->no_forced_ram_cut && !(sh->fed && sh->fed[pc & 0xffff])) {
                 loc->forced_ram_cuts++;
@@ -1130,7 +1142,7 @@ static void run_path(Worker *w, Pending *p) {
                 free(tmp); free(snap);
             }
         }
-        if (cur_forced && !cfg->no_taint_cut && have_flow) {
+        if (cur_forced && !p->vector && !cfg->no_taint_cut && have_flow) {
             // technique 1.b: the inverted flag may have corrupted registers/stack; a transfer whose target comes from them is untrusted
             if (fi.kind == DP_FLOW_INDIRECT) { loc->taint_cut_indirect++; break; }
             if (fi.kind == DP_FLOW_RET) { if (!fdepth) { loc->taint_cut_ret++; break; } fdepth--; }
@@ -1212,6 +1224,24 @@ static void run_path(Worker *w, Pending *p) {
             m->save(m, pre);
         }
         if (!m->run(m)) { free(pre); break; }
+        if (ns_pc) { loc->nonsense_pc++; break; }
+        if (ns_ret && m->cut_sp(m)) { loc->nonsense_sp++; break; }
+        if (!cfg->no_nonsense && !tas && !attract && !play) {
+            // padding slide: an executed instruction inside a pure 00/FF run — the
+            // code after the run is often the point of a forced entry, so keep going,
+            // but garbage loops stay bounded (the 32-byte window keeps short real
+            // NOP loops alive)
+            if ((bytes[0] == 0x00 || bytes[0] == 0xFF) && len == 1) {
+                int inpad = 1;
+                for (int i = -16; i <= 16 && inpad; i++) {
+                    if (!i) continue;
+                    uint8_t b = m->fetch(m, pc + (uint32_t)i);
+                    inpad = b == 0x00 || b == 0xFF;
+                }
+                if (inpad) { if (++pad_slide > 4096) { loc->pad_cuts++; break; } }
+                else pad_slide = 0;
+            } else pad_slide = 0;
+        }
         steps++; slice_steps++;
         if (attract || play) loc->session_steps++;   // a long session has its own budget: it neither spends nor waits for the shared one
         else if (++w->step_batch == 256) { __atomic_fetch_add(&sh->steps, 256, __ATOMIC_RELAXED); w->step_batch = 0; }
@@ -1601,6 +1631,27 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
             queue_push(&sh, (Pending){ cp, cfg->seeds[i], 1, 0, 0, 1 });
             out->seeded++;
         }
+        // the platform registry's RST/IRQ vector entries as forced starts (the
+        // legacy engines' vector seeding, G1, mutualized): a vector cell's
+        // handler address is read through the machine; an entry whose bytes are
+        // pure padding is skipped, every seed is counted
+        if (m->plat && !cfg->no_vectors) {
+            for (int i = 0; i < m->plat->entry_count; i++) {
+                const DpEntry *e = &m->plat->entries[i];
+                if (e->kind == DP_SEED_RESET) continue;   // the reset flow is the natural path
+                uint32_t vpc = e->addr;
+                if (e->cell) vpc = (uint32_t)(m->fetch(m, e->addr) | (m->fetch(m, (uint32_t)e->addr + 1) << 8));
+                int pad = 1;
+                for (unsigned k = 0; k < 8 && pad; k++) { uint8_t b = m->fetch(m, vpc + k); pad = b == 0x00 || b == 0xFF; }
+                if (pad) continue;   // the legacy rule: a padding vector holds no handler
+                uint8_t *cp = malloc(sh.sbytes);
+                if (!cp) break;
+                memcpy(cp, start, sh.sbytes);
+                if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
+                sh.q[sh.qn++] = (Pending){ cp, vpc, 1, 0, 0, 1, 1 };
+                out->vector_seeds++;
+            }
+        }
         // the natural path goes last: it is the first one taken
         if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
         sh.q[sh.qn++] = (Pending){ start, start_pc, 0, 0, 0 };
@@ -1801,10 +1852,14 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "IRQ forks %llu (timing jitter %llu)\n", U(r->irq_forks), U(r->jitter_forks));
     fprintf(out, "event probes %llu at %llu sites: %llu forced variants\n", U(r->event_probes), U(r->event_probe_sites), U(r->event_probes));
     fprintf(out, "seeded entry points %llu\n", U(r->seeded));
+    if (r->vector_seeds) fprintf(out, "vector seeds (RST/IRQ registry entries) %llu\n", U(r->vector_seeds));
     fprintf(out, "pointer seeds refused by cap %llu\n", U(r->seed_refused_cap));
     if (r->seed_regs_absent) fprintf(out, "register seeds unsupported by the machine: %llu (not seeded)\n", U(r->seed_regs_absent));
     if (r->seed_banks_absent) fprintf(out, "bank seeds the machine cannot show: %llu (not seeded)\n", U(r->seed_banks_absent));
     fprintf(out, "forced RAM cuts %llu\n", U(r->forced_ram_cuts));
+    if (r->nonsense_pc || r->nonsense_sp || r->pad_cuts)
+        fprintf(out, "nonsense cuts: echo/I-O pc %llu, stack outside RAM %llu, padding slides %llu\n",
+                U(r->nonsense_pc), U(r->nonsense_sp), U(r->pad_cuts));
     fprintf(out, "forced taint cuts: indirect %llu, ret %llu\n", U(r->taint_cut_indirect), U(r->taint_cut_ret));
     if (r->exec_wram_rom) fprintf(out, "RAM-executed instructions traced to ROM copy sources: %llu\n", U(r->exec_wram_rom));
     if (r->ra.n) fprintf(out, "runtime code archive: %u distinct instructions executed from RAM/VRAM/HRAM, %u attached to a ROM copy source, %u generated (no ROM source; %u with an approximate ROM producer), %u rewrote an earlier instruction at the same address (self-modifying)\n", r->ra.n, r->ra.attached, r->ra.n - r->ra.attached, r->ra.derived, r->ra.poly);

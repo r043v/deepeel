@@ -69,6 +69,7 @@ enum { DP_SEED_RESET = 0, DP_SEED_RST, DP_SEED_IRQ, DP_SEED_POINTER };
 typedef struct DpEntry {
     uint16_t addr;
     uint8_t kind; // DP_SEED_*
+    uint8_t cell; // 1 = `addr` is a vector cell: the handler address is read from it (NES/PCE); 0 = direct handler address (GB)
     const char *name;
 } DpEntry;
 

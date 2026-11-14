@@ -157,6 +157,27 @@ Super Mario Bros. (World) — le rip `Super Mario Bros. … (NES)` vérifié dan
 le crawler joshw couvre `kss.joshw.info` (arborescence par système : Game Gear/, MSX/,
 Master System/).
 
+0.341.0 : les coupes « non-sens » passent au noyau commun (E2 de l'audit) et le semis de
+vecteurs devient mutualisé (G1). `DpMachine` gagne deux hooks optionnels : `cut_pc` (exécuter
+ici est absurde — GB écho `$E000-$FDFF` + OAM jusqu'à `$FF00`, Sega écho hors MSX, NES la
+page registres `$2000-$401F` ; PCE/MD sans écho fixe) et `cut_sp` (la pile est hors de l'espace
+RAM — GB `< $C000` ou `> $FFFE`, Sega `< $C000` (MSX `< $E000`), PCE `< $2000`, MD `< $FF0000` ;
+NES sans objet, la page pile 6502 est toujours valide). Le noyau coupe le chemin **après**
+l'exécution de l'instruction fautive (l'octet reste couvert — la sémantique exacte du moteur
+GB, l'ordre inverse faisait perdre un octet au contrat de parité), comptée et imprimée
+(`nonsense cuts: echo/I-O pc N, stack outside RAM N, padding slides N`), désactivable par
+`--no-nonsense`. La glissade de padding est évaluée dans le noyau sans savoir-faire statique :
+une instruction d'un octet `00`/`FF` dont les 32 octets voisins sont tous `00`/`FF` compte la
+glissade, 4096 pas coupent (les vraies boucles de NOP courts restent vivantes). Et le noyau
+sème désormais les entrées RST/IRQ de la registry de plateforme (`DpEntry`, champ `cell` :
+GB entre directement aux stubs `$0000-$0078`, NES/PCE lisent l'adresse du handler dans la
+cellule vecteur) comme démarrages forcés — `vector seeds (RST/IRQ registry entries) N` au
+rapport, `--no-vectors` pour les couper ; un chemin de vecteur porte l'état réel de la
+machine (pas d'inversion de flags) : la coupe taint `ret` ne s'y applique pas (bit `vector`
+du Pending, propagé au spool). Motivation mesurée : sur `fix_branch`, la couverture noyau de
+l'octet vecteur `$0040` venait d'un chemin poubelle (le `ret` de la pile zéro du boot qui
+glisse dans le padding jusqu'au vecteur) — le semis de vecteurs la remplace proprement.
+
 0.333.0 : quand des banques matchent mais qu'un pc reste non projeté (une tranche de rip
 trop courte pour le seuil — un rip qui commence au milieu d'un `$4000` dont la tête fait
 56 octets), le vote de fragments porte désormais ce pc au lieu d'abandonner ; le vote ne

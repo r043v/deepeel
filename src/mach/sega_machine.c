@@ -88,6 +88,16 @@ static int sega_bank_view(DpMachine *m, unsigned bank) {
     const DpSegaBackend *b = ((SegaMach *)m->impl)->b;
     return bank && b->seed_window ? b->seed_window(0x4000, bank) : 0;
 }
+// nonsense cuts (audit E2): the WRAM echo $E000-$FDFF never holds real code
+// (the MSX has RAM there, not an echo); a stack below the WRAM pops garbage
+// (MSX guarantees RAM only from $E000 up)
+static int sega_cut_pc(DpMachine *m, uint32_t pc) {
+    return !((SegaMach *)m->impl)->msx && pc >= 0xE000 && pc < 0xFE00;
+}
+static int sega_cut_sp(DpMachine *m) {
+    uint16_t sp = ((SegaMach *)m->impl)->b->cpu()->sp;
+    return ((SegaMach *)m->impl)->msx ? sp < 0xE000 : sp < 0xC000;
+}
 
 // the base write callback bypasses the observation wrapper: a poke is not a CPU access
 static void sega_poke(DpMachine *m, uint32_t a, uint8_t v) {
@@ -211,6 +221,8 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->set_pc = sega_set_pc;
     m->seed_regs = sega_seed_regs;
     m->bank_view = sega_bank_view;
+    m->cut_pc = sega_cut_pc;
+    m->cut_sp = sega_cut_sp;
     m->poke = sega_poke;
     m->set_input = sega_set_input;
     if (b->frame_count) m->frame = sega_frame;

@@ -84,6 +84,10 @@ static int nes_seed_regs(DpMachine *m, uint8_t a, uint16_t sp) {
 static int nes_bank_view(DpMachine *m, unsigned bank) {
     return dp_nesmach_set_bank(nes_impl(m), bank) || dp_nesmach_mapper(nes_impl(m)) == 0;
 }
+// nonsense cut (audit E2): the PPU/APU/pad register page $2000-$401F never
+// holds code; the RAM mirrors $0800-$1FFF are ordinary RAM (code lives there
+// after a copy), and the 6502 stack page is always valid RAM (no stack cut)
+static int nes_cut_pc(DpMachine *m, uint32_t pc) { (void)m; return pc >= 0x2000 && pc < 0x4020; }
 static uint32_t nes_pc(DpMachine *m) { return dp_nesmach_pc(nes_impl(m)); }
 static void nes_set_pc(DpMachine *m, uint32_t pc) { dp_nesmach_set_pc(nes_impl(m), pc); }
 // kernel pad mask (bit0 up, 1 down, 2 left, 3 right, 4 button 1, 5 button 2, 6 start)
@@ -148,6 +152,7 @@ DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err
     m->rom_index = nes_rom_index;
     m->seed_regs = nes_seed_regs;
     m->bank_view = nes_bank_view;
+    m->cut_pc = nes_cut_pc;
     m->run = nes_run;
     m->observe = nes_observe;
     m->close = nes_close;

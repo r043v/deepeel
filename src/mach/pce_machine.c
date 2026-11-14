@@ -186,6 +186,11 @@ static int pce_bank_view(DpMachine *m, unsigned bank) {
     pce_ensure(m);
     return bank ? dp_pce_bank16(bank) : 0;
 }
+// nonsense cut (audit E2): the HuC6280 stack lives in work RAM $2000-$3FFF
+// (MPR1) — an SP below that pops the hardware I/O page; a stack an MPR2+ page
+// maps into RAM is legal, so only the low bound cuts
+static int pce_cut_sp(DpMachine *m) { pce_ensure(m); return dp_pce_cpu().s < 0x2000; }
+// the HuC6280 mirrors RAM into MPR-mapped windows (no fixed echo page): no pc cut
 
 // technique 2 (interrupts): where the CPU unmasks (CLI, PLP, RTI, or a write to the interrupt
 // mask $1402) one alternative per source (1 = VDC, 2 = timer) is forked with that source raised,
@@ -287,6 +292,7 @@ DpMachine *dp_machine_pce(void) {
     m->set_pc = pce_set_pc;
     m->seed_regs = pce_seed_regs;
     m->bank_view = pce_bank_view;
+    m->cut_sp = pce_cut_sp;
     m->frame = pce_frame;
     m->set_input = pce_set_input;
     return m;

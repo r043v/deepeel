@@ -43,9 +43,9 @@ static const DpRegion nes_regions[] = {
 };
 
 static const DpEntry nes_entries[] = {
-    { 0xFFFC, DP_SEED_RESET, "reset" }, // the vector cell; the explorer reads it
-    { 0xFFFA, DP_SEED_IRQ, "nmi" },
-    { 0xFFFE, DP_SEED_IRQ, "irq" },
+    { 0xFFFC, DP_SEED_RESET, 1, "reset" }, // the vector cell; the explorer reads it
+    { 0xFFFA, DP_SEED_IRQ, 1, "nmi" },
+    { 0xFFFE, DP_SEED_IRQ, 1, "irq" },
 };
 
 static const DpPlatform nes_platform = {
