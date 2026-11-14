@@ -631,7 +631,10 @@ def build(bab_dir, rip_dirs, dbfile, alias_files=()):
                 ("rips", "", "gbs/nsf/kss/...", str([str(r) for r, _ in rip_dirs]),
                  None, n, None,
                  "joshw:gbs.joshw.info + local", None, None,
-                 "deepeel --gbs-fetch + music_index.py", "voir bab/README"))
+                 "deepeel --gbs-fetch + music_index.py",
+                 "rips de la communauté hcs64 (JoshW) — la musique reste © ses éditeurs "
+                 "d'origine, aucune licence de redistribution : bibliothèque locale "
+                 "uniquement (output/), hors dépôt, comme les bases BAB"))
     counts["rips"] = n
 
     # ---- precomputed cross-source links ---------------------------------
@@ -937,7 +940,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build")
     b.add_argument("--bab", default="output/bab/db")
-    b.add_argument("--rip-dirs", nargs="*", default=["output/gbs"])
+    b.add_argument("--rip-dirs", nargs="*", default=["output/gbs", "output/joshw"])
     b.add_argument("--db", default="output/music_index/music_index.sqlite3")
     b.add_argument("--alias", action="append", default=[],
                    help="alias file: 'link ID_A ID_B' lines joining entry ids")

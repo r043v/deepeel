@@ -1,5 +1,7 @@
-/* gbsfetch: fetch a game's GBS rip from gbs.joshw.info (the GBS set of Joshua Wurzel's
- * NSFE/SPC-style rip archive).  The listing of https://gbs.joshw.info/<letter>/ is
+/* gbsfetch: fetch a game's GBS rip from gbs.joshw.info (the GB set of the
+ * NSFE/SPC-style rip archive — the hcs64 community set maintained by JoshW;
+ * the rips themselves are community contributions, the music data stays
+ * © its original publishers).  The listing of https://gbs.joshw.info/<letter>/ is
  * scanned for a *.7z whose decoded, normalized name contains the game name, the archive
  * is downloaded and unpacked with the 7z binary, and the first *.gbs found is returned.
  * Pages come through `curl -sL` (retried: the site answers 503 under load), the same
@@ -17,6 +19,30 @@
 #include <unistd.h>
 
 #define URL_MAX 1300   // a joshw listing href with its percent escapes
+
+/* decode the HTML entities an Apache listing escapes (&amp; &lt; &gt; &quot;
+ * &#39; &apos;); %XX escapes are left alone — the URL still needs them */
+static size_t ent_decode(const char *in, char *out, size_t cap) {
+    static const struct { const char *ent; char c; } ents[] = {
+        {"amp;", '&'}, {"lt;", '<'}, {"gt;", '>'}, {"quot;", '"'}, {"#39;", '\''}, {"apos;", '\''},
+    };
+    size_t k = 0;
+    for (size_t i = 0; in[i] && k + 1 < cap; i++) {
+        int done = 0;
+        if (in[i] == '&')
+            for (size_t e = 0; e < sizeof ents / sizeof *ents && !done; e++) {
+                size_t el = strlen(ents[e].ent);
+                if (!strncmp(in + i + 1, ents[e].ent, el)) {
+                    out[k++] = ents[e].c;
+                    i += el;
+                    done = 1;
+                }
+            }
+        if (!done) out[k++] = in[i];
+    }
+    out[k] = 0;
+    return k;
+}
 
 static unsigned char *fetch(const char *url, size_t *len) {
     /* the rip names carry apostrophes (…Link's Awakening…): a raw ' inside the
@@ -77,10 +103,11 @@ int dp_gbs_fetch(const char *game, const char *dir, char *out_gbs, size_t cap, c
     size_t hl = dp_gbs_listing_pick((char *)h, game, href, sizeof href);
     free(h);
     if (!hl) { snprintf(err, errsz, "no gbs rip of '%s' in %s", game, url); return -1; }
-    char dec[1024]; dp_gbs_url_decode(href, hl, dec, sizeof dec);
+    char href2[1024]; ent_decode(href, href2, sizeof href2);   // &amp; in the listing
+    char dec[1024]; dp_gbs_url_decode(href2, strlen(href2), dec, sizeof dec);
     const char *base = strrchr(dec, '/'); base = base ? base + 1 : dec;
     fprintf(stderr, "deepeel: gbs: downloading '%s'\n", base);
-    char durl[1300]; snprintf(durl, sizeof durl, "https://gbs.joshw.info/%s/%s", seg, href);
+    char durl[1300]; snprintf(durl, sizeof durl, "https://gbs.joshw.info/%s/%s", seg, href2);
     unsigned char *z = fetch(durl, &n);
     if (!z) { snprintf(err, errsz, "download of %s failed", durl); return -1; }
     char arc[1040]; snprintf(arc, sizeof arc, "%s/rip.7z", sub);
