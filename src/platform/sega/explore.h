@@ -93,6 +93,8 @@ typedef struct {
     const char *tree_path;  // choice tree record (--tree FILE)
     struct { uint32_t bank; uint16_t addr; } entry[32]; // extra --entry seeds
     unsigned entry_count;
+    const void *music_seeds;   // DpMusicSeed[] from --music-index (ownership: the CLI), appended as confirmed entry seeds
+    unsigned music_seed_count;
     int event_probes;      // §3.7: fork on plausible read values of event ports (VDP_STATUS, V/H_COUNTER)
     int sega_mapper; // 0 auto; otherwise DP_SEGA_MAPPER_* (SMS/GG only)
     int msx_mapper; // -1 auto; otherwise DP_MSX_* mapper selection
@@ -103,7 +105,7 @@ typedef struct {
 enum {
     DP_SEGA_TREE_RESET=1, DP_SEGA_TREE_VECTOR, DP_SEGA_TREE_POINTER, DP_SEGA_TREE_BANK,
     DP_SEGA_TREE_ENTRY, DP_SEGA_TREE_BRANCH, DP_SEGA_TREE_IRQ, DP_SEGA_TREE_INPUT,
-    DP_SEGA_TREE_EVENT
+    DP_SEGA_TREE_EVENT, DP_SEGA_TREE_MUSIC
 };
 enum {
     DP_SEGA_ISSUE_NONE=0, DP_SEGA_ISSUE_DONE, DP_SEGA_ISSUE_EVICTED,
@@ -161,7 +163,7 @@ typedef struct {
     uint64_t defer_spooled, fork_deferred, fork_final, steps_deferred,loop_deferred,defer_resumed,steps_final,loop_final,defer_dropped,defer_pending; // §6
     uint64_t step_cuts,loop_cuts,fork_cuts,queue_cuts,global_cuts,path_cuts,faults,decode_cuts,pad_cuts,stagnation_cuts,forced_ram_cuts;
     // Seeds (GB parity): generated specs by kind, admissions, bounded refusals.
-    uint64_t seeds_pointer,seeds_bank,seeds_entry,seeds_admitted,seeds_skipped_padding;
+    uint64_t seeds_pointer,seeds_bank,seeds_entry,seeds_music,seeds_admitted,seeds_skipped_padding;
     uint64_t seeds_refused_view,seeds_refused_queue,seeds_refused_cap,seeds_pending;
     // sections and same-context eviction (GB parity)
     DpSegaSection *sections;

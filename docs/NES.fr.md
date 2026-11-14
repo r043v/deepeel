@@ -44,6 +44,17 @@ sont les index compacts `banque * $4000 + (addr & $3FFF)` ; la fenêtre
 fixe $C000-$FFFF est la dernière banque physique. L'exécution hors ROM
 (trampolines RAM) est comptée `exec_outside`, le chemin continue.
 
+0.336.0 : `--music-index [FICHIER]` (défaut `output/music_index/music_index.bin`) passe par
+la glue CLI partagée (`src/core/music_index_seeds.c`, comme GB et les plateformes Z80) :
+CRC32 du fichier brut, recherche dans l'index musical (DPMDX002, hors dépôt), ligne de
+rapport unique. Aujourd'hui il n'y a **rien à semer** : les tables nsf du ripper ne portent
+ni CRC de dump, ni table de chunks, ni projection `init_rom`/`play_rom` — aucune entrée
+n'est ancrable à un dump (0/2983). Le rapport reste affiché, jamais silencieux : quand des
+points d'entrée existeraient, la ligne dit combien et l'explorateur précise qu'il n'en sème
+encore aucun ; un `--music-index` explicite qui ne charge pas est une erreur (comme sur les
+autres plateformes). Levier futur : ancrer le rip par son bloc de données dans les banques
+PRG, comme le vote de fragments de GB.
+
 ## TAS
 
 `--tas FICHIER` (répétable, 8 max) rejoue un film tool-assisté depuis la

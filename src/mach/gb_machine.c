@@ -100,6 +100,12 @@ static int gb_run(DpMachine *m) {
 }
 static uint32_t gb_pc(DpMachine *m) { return gbw(m)->d->api->gbr->pc; }
 static void gb_set_pc(DpMachine *m, uint32_t pc) { gbw(m)->d->api->gbr->pc = (uint16_t)pc; }
+// register seeds (music rips): the SM83 registers are directly writable through the engine
+static int gb_seed_regs(DpMachine *m, uint8_t a, uint16_t sp) {
+    if (a != 0xFF) gbw(m)->d->api->gbr->a = a;
+    if (sp != 0xFFFF) gbw(m)->d->api->gbr->sp = sp;
+    return 1;
+}
 static void gb_poke(DpMachine *m, uint32_t a, uint8_t v) { gbw(m)->d->api->wr((uint16_t)a, v); }
 static uint64_t gb_frame(DpMachine *m) { return *gbw(m)->d->api->frame; }
 // kernel mask (up down left right button1 button2 start select) -> the engine's set_buttons layout
@@ -253,6 +259,7 @@ static DpMachine *gb_wrap(DpMach *impl) {
     m->run = gb_run;
     m->pc = gb_pc;
     m->set_pc = gb_set_pc;
+    m->seed_regs = gb_seed_regs;
     m->poke = gb_poke;
     m->set_input = gb_set_input;
     m->frame = gb_frame;

@@ -50,6 +50,23 @@ directs (0xE6F2 / 0xE5F2), couverture inchangée (98 octets de moteur exécutés
 débloquer le moteur entier demanderait de semer init avec le numéro de chanson dans A,
 capacité noyau qui n'existe pas encore.
 
+0.336.0 : le noyau sait désormais préparer les registres d'une graine. `DpCoreConfig.seed_regs`
+(parallèle à `seeds`) porte par graine un A et un SP à poser sur l'état de départ avant la mise
+en file (`0xFF`/`0xFFFF` : inchangés) ; `DpMachine.seed_regs` est le crochet machine (implémenté
+pour le SM83 et le Z80 ; une machine sans crochet est comptée dans `seed_regs_absent`, jamais
+silencieusement). C'est la capacité qui manquait à l'apport musical : l'appel d'init conventionnel
+porte le numéro de chanson dans A. Les graines init en profitent — `--gbs` pose A = premier
+morceau du rip, `--music-index` pose A = chanson 0 et SP = `stack` du rip quand consigné ; play
+reste sans registre. La limite de 0.335.0 est levée pour les entrées dont `init_rom` est projeté
+(225 au catalogue) ; Super Mario Land reste sans graine init (son init 2010 est le stub du
+ripper, non projetée). L'extraction des graines **et toute la chaîne CLI** (`--music-index` :
+chargement de l'index, CRC du dump brut, paliers, ligne de rapport unique avec le compte
+init, `DEEPEEL_MIDX_DEBUG`) sont partagées à toutes les plateformes dans
+`src/core/music_index_seeds.c` — GB ne garde que le titre d'en-tête normalisé et la
+provenance par entrée (`[palier] source/format: init X, play Y`, inchangée). Le câblage Z80
+est documenté dans [Z80.fr.md](Z80.fr.md), les rapports NES/PCE dans leurs docs — l'apport
+devient multi-plateformes, un seul chemin de code.
+
 0.333.0 : quand des banques matchent mais qu'un pc reste non projeté (une tranche de rip
 trop courte pour le seuil — un rip qui commence au milieu d'un `$4000` dont la tête fait
 56 octets), le vote de fragments porte désormais ce pc au lieu d'abandonner ; le vote ne

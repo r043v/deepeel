@@ -19,6 +19,17 @@ $40-$7F). Les autres tailles sont projetées modulo leur nombre de pages.
 Les index ROM sont les offsets physiques, ce qui revient à
 `banque16K * 0x4000 + (addr & 0x3FFF)`, comme sur les autres plateformes.
 
+0.336.0 : `--music-index [FICHIER]` (défaut `output/music_index/music_index.bin`) passe par
+la glue CLI partagée (`src/core/music_index_seeds.c`, comme GB et les plateformes Z80) :
+CRC32 du fichier brut, recherche dans l'index musical (DPMDX002, hors dépôt), ligne de
+rapport unique. Le palier crc
+existe (314/847 entrées hes portent le CRC d'un dump — vérifié sur les dumps disponibles : 2/5
+touchent), mais les tables hes ne projettent **aucun** `init_rom`/`play_rom` (pas de table de
+chunks) et ne consignent pas `play` : rien n'est semable aujourd'hui. Le rapport reste affiché,
+jamais silencieux ; il dit combien d'entrées matchent et pourquoi aucune graine n'en sort ; un
+`--music-index` explicite qui ne charge pas est une erreur (comme sur les autres plateformes).
+Levier futur : la table de copies du ripper côté hes, ou l'ancrage par bloc de données.
+
 ## Passes
 
 1. **Fourches bornées.** Les deux issues de chaque conditionnel sont

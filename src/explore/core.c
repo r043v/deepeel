@@ -1581,12 +1581,22 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
             uint8_t *cp = malloc(sh.sbytes);
             if (!cp) break;
             memcpy(cp, start, sh.sbytes);
+            const DpSeedRegs *sr = cfg->seed_regs ? &cfg->seed_regs[i] : NULL;
+            int prep = 0;
             if (cfg->seed_banks && cfg->seeds[i] >= 0x4000 && cfg->seeds[i] < 0x8000 && m->poke) {
                 m->load(m, start);
                 m->poke(m, 0x2000, (uint8_t)cfg->seed_banks[i]);
                 if (cfg->seed_banks[i] > 0xff) m->poke(m, 0x3000, (uint8_t)(cfg->seed_banks[i] >> 8));
-                m->save(m, cp); m->load(m, start);
+                prep = 1;
             }
+            if (sr && (sr->a != 0xFF || sr->sp != 0xFFFF)) {
+                if (m->seed_regs) {
+                    if (!prep) m->load(m, start);
+                    m->seed_regs(m, sr->a, sr->sp);
+                    prep = 1;
+                } else out->seed_regs_absent++;   // requested but unsupported: never silent
+            }
+            if (prep) { m->save(m, cp); m->load(m, start); }
             queue_push(&sh, (Pending){ cp, cfg->seeds[i], 1, 0, 0, 1 });
             out->seeded++;
         }

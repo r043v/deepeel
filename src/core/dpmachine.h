@@ -145,6 +145,12 @@ struct DpMachine {
     // side of a conditional is taken by moving pc on a restored state
     uint32_t (*pc)(struct DpMachine *);
     void (*set_pc)(struct DpMachine *, uint32_t pc);
+    // Optional: prepare the CPU registers of a seeded entry point (music rips:
+    // the init call carries the song number in A and starts on the rip's
+    // stack).  a == 0xFF / sp == 0xFFFF leave the register untouched.  NULL:
+    // the kernel counts the seed in DpCoreResult.seed_regs_absent (never
+    // silent).
+    int (*seed_regs)(struct DpMachine *, uint8_t a, uint16_t sp);
     // writes one byte through the machine's memory map, unobserved (NULL: unsupported);
     // the entry point of the RAM-seeding techniques (docs/PLAN-MUTUALISATION.fr.md, step 3)
     void (*poke)(struct DpMachine *, uint32_t addr, uint8_t value);

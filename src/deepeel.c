@@ -16,7 +16,7 @@
 #include "core/cart_md.h"
 #include "core/gbs.h"
 #include "core/music_index.h"
-#include <zlib.h>   // crc32: the music index is keyed by dump CRC32
+#include "core/music_index_seeds.h"
 #include "core/zip.h"   // dp_read_rom_file: the GBS rip may also be read from a zip member
 int dp_gbs_fetch(const char *game, const char *dir, char *out_gbs, size_t cap, char *err, size_t errsz);   // core/gbsfetch.c (network, not in the core lib)
 #include "explore/frontier.h"
@@ -184,6 +184,8 @@ static void usage(void) {
             "    --seed-cap N         pointer-scan seed cap (default 4096)\n"
             "    --entry bank:addr    extra seed (repeatable)\n"
             "    --seed-banks         also seed every bank at $4000\n"
+            "    --music-index [FILE] seed the entry points of this game's music rips\n"
+            "                         (DPMDX002 index; default output/music_index/music_index.bin)\n"
             "    --no-pointer-scan    disable pointer-table seeding\n"
             "    --gbs FILE           GBS rip of this game: verify against the ROM (per-bank\n"
             "                         best match, DEEPEEL_GBS_MATCH, default 90%) and seed the\n"
@@ -412,26 +414,47 @@ static void write_ramcode(const DpResults *res, const char *path) {
 
 // append extra {pc, bank} seeds to the kernel's arrays (the caller's extras are copied);
 // 0 ok, -1 on allocation failure (the existing seeds are kept)
-static int core_seed_append(uint32_t **pcs, uint16_t **bks, size_t *n, const uint32_t *apcs, const uint16_t *abks, size_t an) {
+static int core_seed_append(uint32_t **pcs, uint16_t **bks, DpSeedRegs **regs, size_t *n,
+                            const uint32_t *apcs, const uint16_t *abks, const DpSeedRegs *aregs, size_t an) {
     if (!an) return 0;
     uint32_t *p = realloc(*pcs, (*n + an) * sizeof *p);
     uint16_t *b = realloc(*bks, (*n + an) * sizeof *b);
     if (!p || !b) { free(p); return -1; }
     memcpy(p + *n, apcs, an * sizeof *p);
     memcpy(b + *n, abks, an * sizeof *b);
-    *pcs = p; *bks = b; *n += an;
+    *pcs = p; *bks = b;
+    if (aregs) {
+        DpSeedRegs *r;
+        if (!*regs) {   // the seeds already in the array carry no registers
+            r = malloc((*n + an) * sizeof *r);
+            if (!r) return -1;
+            for (size_t i = 0; i < *n; i++) { r[i].a = 0xFF; r[i].sp = 0xFFFF; }
+        } else {
+            r = realloc(*regs, (*n + an) * sizeof *r);
+            if (!r) return -1;
+        }
+        memcpy(r + *n, aregs, an * sizeof *r);
+        *regs = r;
+    }
+    *n += an;
     return 0;
 }
 
-/* append one confirmed entry-point seed (GBS verify or music index); grows the arrays */
-static int seed_push(uint32_t **pcs, uint16_t **bks, int *n, uint32_t pc, uint16_t bank) {
+/* append one confirmed entry-point seed (GBS verify or music index); grows the arrays;
+ * a/sp are the register seeds (0xFF/0xFFFF: leave A/SP at their start value) */
+static int seed_push(uint32_t **pcs, uint16_t **bks, DpSeedRegs **regs, int *n,
+                     uint32_t pc, uint16_t bank, uint8_t a, uint16_t sp) {
     uint32_t *np = realloc(*pcs, (*n + 1) * sizeof **pcs);
     if (!np) return -1;
     *pcs = np;
     uint16_t *nb = realloc(*bks, (*n + 1) * sizeof **bks);
     if (!nb) return -1;
     *bks = nb;
+    DpSeedRegs *nr = realloc(*regs, (*n + 1) * sizeof **regs);
+    if (!nr) return -1;
+    *regs = nr;
     (*pcs)[*n] = pc; (*bks)[*n] = bank;
+    (*regs)[*n].a = a; (*regs)[*n].sp = sp;
     (*n)++;
     return 0;
 }
@@ -681,7 +704,7 @@ static int cmd_explore(int argc, char **argv) {
     // rips are patched and trimmed) and its init/play become confirmed seeds, the
     // counterpart of the speculative pointer scan.  Never silent: the full match report.
     DpGbs gbs; DpGbsMatch gmatch; memset(&gmatch, 0, sizeof gmatch);
-    uint32_t *gbs_pcs = NULL; uint16_t *gbs_bks = NULL; int gbs_seeds = 0;
+    uint32_t *gbs_pcs = NULL; uint16_t *gbs_bks = NULL; DpSeedRegs *gbs_regs = NULL; int gbs_seeds = 0;
     if (gbs_path || gbs_fetch) {
         char gpath[1024], gerr[256];
         if (gbs_path) snprintf(gpath, sizeof gpath, "%s", gbs_path);
@@ -736,16 +759,19 @@ static int cmd_explore(int argc, char **argv) {
         int push_fail = 0;
         if (gmatch.init_bank >= 0) {
             printf("gbs: init -> rom bank %u $%04x\n", gmatch.init_bank, gmatch.init_addr);
-            push_fail |= seed_push(&gbs_pcs, &gbs_bks, &gbs_seeds, gmatch.init_addr, (uint16_t)gmatch.init_bank);
+            /* the init call carries the first song in A (GBS calling convention);
+             * the boot state's stack ($FFFE) is kept — the header's stack byte
+             * convention is not settled (see the S_ADDR arbitration note) */
+            push_fail |= seed_push(&gbs_pcs, &gbs_bks, &gbs_regs, &gbs_seeds, gmatch.init_addr, (uint16_t)gmatch.init_bank, (uint8_t)gbs.first, 0xFFFF);
         } else printf("gbs: init $%04x not mapped to this ROM (player stub or unmatched bank)\n", gbs.init);
         if (gmatch.play_bank >= 0) {
             printf("gbs: play -> rom bank %u $%04x\n", gmatch.play_bank, gmatch.play_addr);
-            push_fail |= seed_push(&gbs_pcs, &gbs_bks, &gbs_seeds, gmatch.play_addr, (uint16_t)gmatch.play_bank);
+            push_fail |= seed_push(&gbs_pcs, &gbs_bks, &gbs_regs, &gbs_seeds, gmatch.play_addr, (uint16_t)gmatch.play_bank, 0xFF, 0xFFFF);
         } else printf("gbs: play $%04x not mapped to this ROM (player stub or unmatched bank)\n", gbs.play);
         free(gbuf);
         if (push_fail) {   // same cleanup as the other early exits of the option block
             fprintf(stderr, "deepeel: cannot allocate GBS seeds\n");
-            free(gbs_pcs); free(gbs_bks);
+            free(gbs_pcs); free(gbs_bks); free(gbs_regs);
             dp_cart_free(cart);
             return 1;
         }
@@ -755,97 +781,55 @@ static int cmd_explore(int argc, char **argv) {
             return 1;
         }
     }
-    // Music-rip index (DPMDX002, tools/music_index.py export --bin): the BAB ripper
-    // databases and the local rips merged.  Three lookup tiers over this ROM dump:
-    // CRC32 exact (the databases record dump CRCs), normalized header title (ASCII
-    // sources only — the Japanese BAB titles normalize to nothing), then game identity:
-    // the game_key siblings of every hit, i.e. all dumps/regions/formats of the same
-    // game.  The precomputed init_rom/play_rom of every GB entry found join the GBS
-    // seeds; the log names the tier that carried each one (identity transfer across a
-    // region is weaker evidence than an exact dump CRC — never mixed up silently).
+    // Music-rip index (DPMDX002, tools/music_index.py export --bin): the shared CLI
+    // glue (src/core/music_index_seeds.c) loads the index, runs the three lookup
+    // tiers over this dump (CRC32 exact, normalized header title, game identity)
+    // and reports the match.  Every seed found joins the GBS seeds with the rip's
+    // calling convention (init carries song 0 in A on the rip's stack); the log
+    // names the tier that carried each one (identity transfer across a region is
+    // weaker evidence than an exact dump CRC — never mixed up silently).
     if (midx_given || access("output/music_index/music_index.bin", F_OK) == 0) {
-        const char *mp = midx_path ? midx_path : "output/music_index/music_index.bin";
-        DpMusicIndex ix; char merr[256];
-        if (dp_midx_load(mp, &ix, merr, sizeof merr)) {
-            fprintf(stderr, "deepeel: --music-index %s: %s\n", mp, merr);
-            if (midx_given) { free(gbs_pcs); free(gbs_bks); dp_cart_free(cart); return 1; }
-        } else {
-            size_t cap = ix.n_entry ? ix.n_entry : 1;
-            uint8_t *seen = calloc(cap, 1);
-            uint32_t *hits = malloc(cap * sizeof *hits);
-            uint8_t *tiers = malloc(cap);
-            int nh = 0, alloc_fail = !seen || !hits || !tiers;
-            if (!alloc_fail) {
-                uint32_t crc = (uint32_t)crc32(0, cart->rom, (uInt)cart->rom_size);
-                char norm[32];
-                dp_midx_norm_title(cart->rom + 0x134, norm, sizeof norm);
-                uint32_t first, count;
-                /* tier 1: this exact dump's CRC is in the databases */
-                if (!dp_midx_by_crc(&ix, crc, &first, &count))
-                    for (uint32_t k = 0; k < count; k++)
-                        if (!seen[first + k]) { seen[first + k] = 1; hits[nh] = first + k; tiers[nh++] = 1; }
-                /* tier 2: normalized header title (ASCII sources only — the Japanese
-                 * BAB titles normalize to nothing); the range indexes the refs array */
-                if (norm[0] && !dp_midx_by_title(&ix, norm, &first, &count))
-                    for (uint32_t k = 0; k < count; k++) {
-                        uint32_t e = dp_midx_title_ref(&ix, first + k);
-                        if (!seen[e]) { seen[e] = 1; hits[nh] = e; tiers[nh++] = 2; }
-                    }
-                /* tier 3: identity siblings — every hit's game_key pulls the other
-                 * dumps/regions/formats of the same game */
-                for (int h = 0; h < nh; h++) {
-                    DpMusicRec hr; dp_midx_rec(&ix, hits[h], &hr);
-                    if (hr.game_key == 0xFFFFFFFFu || dp_midx_by_game(&ix, hr.game_key, &first, &count)) continue;
-                    for (uint32_t k = 0; k < count; k++) {
-                        uint32_t e = dp_midx_game_ref(&ix, first + k);
-                        if (!seen[e]) { seen[e] = 1; hits[nh] = e; tiers[nh++] = 3; }
-                    }
-                }
-                if (getenv("DEEPEEL_MIDX_DEBUG"))
-                    for (int h = 0; h < nh; h++) {
-                        DpMusicRec d; dp_midx_rec(&ix, hits[h], &d);
-                        fprintf(stderr, "midx-dbg: h=%d tier=%u pos=%u gk=%u %s/%s irom=%u prom=%u\n",
-                                h, tiers[h], hits[h], d.game_key, d.source, d.format, d.init_rom, d.play_rom);
-                    }
-                static const char *tname[4] = { "", "crc", "title", "game" };
-                int pushed = 0, non_gb = 0, no_point = 0, out_of_range = 0;
-                for (int h = 0; h < nh; h++) {
-                    DpMusicRec r; dp_midx_rec(&ix, hits[h], &r);
-                    if (strcmp(r.platform, "GB")) { non_gb++; continue; }
-                    if (r.init_rom == 0xFFFFFFFFu && r.play_rom == 0xFFFFFFFFu) { no_point++; continue; }
-                    char sinit[20] = "-", splay[20] = "-";
-                    if (r.init_rom != 0xFFFFFFFFu) rom_str(sinit, sizeof sinit, r.init_rom);
-                    if (r.play_rom != 0xFFFFFFFFu) rom_str(splay, sizeof splay, r.play_rom);
-                    uint32_t roms[2] = { r.init_rom, r.play_rom };
-                    int any = 0, bad = 0;
-                    for (int s = 0; s < 2; s++) {
-                        if (roms[s] == 0xFFFFFFFFu) continue;
-                        if (roms[s] >= cart->rom_size) { bad = 1; continue; }   // another dump's banking
-                        /* dp_rom_index -> bank + window address; bank 0 maps $0000-$3FFF directly */
-                        uint16_t bk = (uint16_t)(roms[s] >> 14);
-                        uint16_t pc = bk ? (uint16_t)(0x4000 + (roms[s] & 0x3FFF)) : (uint16_t)roms[s];
-                        int dup = 0;
-                        for (int i = 0; i < gbs_seeds; i++) if (gbs_bks[i] == bk && gbs_pcs[i] == pc) dup = 1;
-                        if (dup) continue;
-                        if (seed_push(&gbs_pcs, &gbs_bks, &gbs_seeds, pc, bk)) { alloc_fail = 1; break; }
-                        pushed++;
-                        any = 1;
-                    }
-                    if (bad && !any) { out_of_range++; continue; }
-                    printf("music-index: [%s] %s/%s: init %s, play %s\n", tname[tiers[h]], r.source, r.format, sinit, splay);
-                }
-                printf("music-index: crc %08X title \"%s\": %d entries, %d seeds, %d non-GB, %d without entry point, %d out of range\n",
-                       crc, norm, nh, pushed, non_gb, no_point, out_of_range);
+        static const char *const plats_gb[] = {"GB"};
+        char norm[32];
+        dp_midx_norm_title(cart->rom + 0x134, norm, sizeof norm);
+        DpMusicIndex mix;
+        DpMusicSeed *mseeds = NULL; size_t mn = 0; DpMusicSeedStats mst;
+        int mrc = dp_music_seeds_cli(midx_given ? (midx_path ? midx_path : "") : NULL,
+                                     plats_gb, 1, cart->rom, cart->rom_size, cart->rom_size,
+                                     norm, &mseeds, &mn, &mst, &mix);
+        if ((mrc == DP_MUSIC_SEEDS_LOAD_ERR && midx_given) || mrc == DP_MUSIC_SEEDS_ALLOC) {
+            free(gbs_pcs); free(gbs_bks); free(gbs_regs); dp_cart_free(cart);
+            return 1;
+        }
+        if (mrc >= 0) {
+            int alloc_fail = 0;
+            for (size_t i = 0; i < mn && !alloc_fail; i++) {   // dedup against the GBS seeds already queued
+                int dup = 0;
+                for (int j = 0; j < gbs_seeds; j++) if (gbs_bks[j] == mseeds[i].bank && gbs_pcs[j] == mseeds[i].pc) dup = 1;
+                if (!dup && seed_push(&gbs_pcs, &gbs_bks, &gbs_regs, &gbs_seeds,
+                                      mseeds[i].pc, mseeds[i].bank, mseeds[i].a, mseeds[i].sp)) alloc_fail = 1;
             }
-            free(seen); free(hits); free(tiers);
-            dp_midx_free(&ix);
+            for (size_t i = 0; i < mn; i++) {   // per-entry provenance: the tier that carried it and the rip
+                if (i && mseeds[i].entry == mseeds[i - 1].entry) continue;
+                DpMusicRec r; dp_midx_rec(&mix, mseeds[i].entry, &r);
+                char sinit[20] = "-", splay[20] = "-";
+                if (r.init_rom != 0xFFFFFFFFu) rom_str(sinit, sizeof sinit, r.init_rom);
+                if (r.play_rom != 0xFFFFFFFFu) rom_str(splay, sizeof splay, r.play_rom);
+                uint8_t t = mseeds[i].tier;
+                printf("music-index: [%s] %s/%s: init %s, play %s\n",
+                       dp_music_seeds_tier_name(t), r.source, r.format, sinit, splay);
+            }
             if (alloc_fail) {
                 fprintf(stderr, "deepeel: cannot allocate music-index seeds\n");
-                free(gbs_pcs); free(gbs_bks);
+                free(gbs_pcs); free(gbs_bks); free(gbs_regs);
+                free(mseeds);
+                dp_midx_free(&mix);
                 dp_cart_free(cart);
                 return 1;
             }
         }
+        free(mseeds);
+        if (mrc >= 0) dp_midx_free(&mix);
     }
     const DpPlatform *plat = dp_platform_gb();
     // the discovered movies join the explicit --tas ones (the worker list caps at 8)
@@ -926,7 +910,7 @@ static int cmd_explore(int argc, char **argv) {
                     dp_machine_gb_set_tas(km, &gt);   // the recorder's sync profile
                 } else fprintf(stderr, "deepeel: --tas: %s\n", terr);
             }
-            uint32_t *gseed_pc = NULL; uint16_t *gseed_bk = NULL;
+            uint32_t *gseed_pc = NULL; uint16_t *gseed_bk = NULL; DpSeedRegs *gseed_regs = NULL;
             uint64_t gseed_refused = 0;
             size_t gseed_cap = cfg.no_pointer_scan ? 0 :
                 (getenv("DEEPEEL_GB_POINTER_SEEDS") ? (size_t)atol(getenv("DEEPEEL_GB_POINTER_SEEDS")) : 40000);
@@ -945,8 +929,9 @@ static int cmd_explore(int argc, char **argv) {
                 size_t total = gkcfg.n_seeds + (size_t)entries;
                 uint32_t *pcs = malloc(total * sizeof *pcs);
                 uint16_t *banks = malloc(total * sizeof *banks);
-                if (!pcs || !banks) {
-                    free(pcs); free(banks); free(gseed_pc); free(gseed_bk);
+                DpSeedRegs *regs = malloc(total * sizeof *regs);
+                if (!pcs || !banks || !regs) {
+                    free(pcs); free(banks); free(regs); free(gseed_pc); free(gseed_bk);
                     free(gmasks); dp_tas_free(&gt); km->close(km);
                     dp_mapwin_stop(); dp_results_free(&res); dp_cart_free(cart);
                     fprintf(stderr, "deepeel: cannot allocate explicit entry seeds\n");
@@ -956,32 +941,33 @@ static int cmd_explore(int argc, char **argv) {
                     memcpy(pcs, gseed_pc, gkcfg.n_seeds * sizeof *pcs);
                     memcpy(banks, gseed_bk, gkcfg.n_seeds * sizeof *banks);
                 }
+                for (size_t i = 0; i < total; i++) { regs[i].a = 0xFF; regs[i].sp = 0xFFFF; }   // explicit entries carry no registers
                 for (int i = 0; i < entries; i++) {
                     pcs[gkcfg.n_seeds + (size_t)i] = ea[i];
                     banks[gkcfg.n_seeds + (size_t)i] = ea[i] >= 0x4000 ?
                         (eb[i] || cart->mbc == DP_MBC5 ? eb[i] : 1) : 0;
                 }
                 free(gseed_pc); free(gseed_bk);
-                gseed_pc = pcs; gseed_bk = banks;
-                gkcfg.n_seeds = total; gkcfg.seeds = pcs; gkcfg.seed_banks = banks;
+                gseed_pc = pcs; gseed_bk = banks; gseed_regs = regs;
+                gkcfg.n_seeds = total; gkcfg.seeds = pcs; gkcfg.seed_banks = banks; gkcfg.seed_regs = regs;
             }
             if (gbs_seeds) {   // confirmed GBS entry points join the speculative seeds
-                if (core_seed_append(&gseed_pc, &gseed_bk, &gkcfg.n_seeds, gbs_pcs, gbs_bks, (size_t)gbs_seeds)) {
-                    free(gbs_pcs); free(gbs_bks);
-                    free(gseed_pc); free(gseed_bk);
+                if (core_seed_append(&gseed_pc, &gseed_bk, &gseed_regs, &gkcfg.n_seeds, gbs_pcs, gbs_bks, gbs_regs, (size_t)gbs_seeds)) {
+                    free(gbs_pcs); free(gbs_bks); free(gbs_regs);
+                    free(gseed_pc); free(gseed_bk); free(gseed_regs);
                     free(gmasks); dp_tas_free(&gt); km->close(km);
                     dp_mapwin_stop(); dp_results_free(&res); dp_cart_free(cart);
                     fprintf(stderr, "deepeel: cannot allocate GBS seeds\n");
                     return 1;
                 }
-                gkcfg.seeds = gseed_pc; gkcfg.seed_banks = gseed_bk;
+                gkcfg.seeds = gseed_pc; gkcfg.seed_banks = gseed_bk; gkcfg.seed_regs = gseed_regs;
             }
-            free(gbs_pcs); free(gbs_bks);   // copied into the kernel's seed arrays above
-            gbs_pcs = NULL; gbs_bks = NULL; gbs_seeds = 0;
+            free(gbs_pcs); free(gbs_bks); free(gbs_regs);   // copied into the kernel's seed arrays above
+            gbs_pcs = NULL; gbs_bks = NULL; gbs_regs = NULL; gbs_seeds = 0;
             DpCoreResult kr;
             rc = dp_core_explore_cli(km, cart->rom_size, &gkcfg, &kr, summary ? summary : text) ? 0 : 1;
             kr.seed_refused_cap = gseed_refused;
-            free(gseed_pc); free(gseed_bk);
+            free(gseed_pc); free(gseed_bk); free(gseed_regs);
             if (!rc) { dp_core_report(stdout, "gb", &kr); core_outputs(argc, argv, "gb", path, &kr); }
             dp_core_result_free(&kr);
             free(gmasks); dp_tas_free(&gt);
@@ -1080,7 +1066,7 @@ static int cmd_explore(int argc, char **argv) {
         dp_explorer_seed_pc(ex, ea[i] >= 0x4000 ? (eb[i] ? eb[i] : 1) : 0, ea[i], DP_SEED_POINTER, 1);
     for (int i = 0; !g_drain_only && i < gbs_seeds; i++)   // confirmed GBS entry points (legacy explorer)
         dp_explorer_seed_pc(ex, gbs_bks[i], gbs_pcs[i], DP_SEED_POINTER, 1);
-    free(gbs_pcs); free(gbs_bks);   // handed to the explorer above
+    free(gbs_pcs); free(gbs_bks); free(gbs_regs);   // handed to the explorer above (the legacy explorer takes {pc, bank} only)
     gbs_pcs = NULL; gbs_bks = NULL;
     DpPlay *play_engine = NULL;
     if (play) {
@@ -1689,10 +1675,10 @@ static int cmd_nes(int argc, char **argv) {
     if (argc < 4 || strcmp(argv[2], "explore")) {
         fprintf(stderr, "deepeel nes explore ROM [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N] [--mapper auto|nrom|uxrom] "
                         "[--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--queue-max N] [--summary FILE] [--heat FILE] "
-                        "[--loop-cap N] [--fork-cap N] [--no-irq-fork] [--entry bank:addr]... [--seed-banks] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--rtcode FILE]\n");
+                        "[--loop-cap N] [--fork-cap N] [--no-irq-fork] [--entry bank:addr]... [--seed-banks] [--music-index [FILE]] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--rtcode FILE]\n");
         return 2;
     }
-    const char *path = NULL, *mapper_name = "auto", *nes_heat = NULL;
+    const char *path = NULL, *mapper_name = "auto", *nes_heat = NULL, *midx_file = NULL;
     DpNesOptions opt = dp_nes_options();   // defer_tiers 0: cuts stay final; --defer-tiers N opts in (sega's CLI defaults to 3, NES measured neutral on DuckTales)
     opt.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
     DpCliCommon cc = { .jobs = 1 };
@@ -1726,6 +1712,7 @@ static int cmd_nes(int argc, char **argv) {
         else if (!strcmp(a, "--spool") && i + 1 < argc) opt.lot_path = argv[++i];
         else if (!strcmp(a, "--resume") && i + 1 < argc) { opt.lot_path = argv[++i]; opt.lot_drain = 1; }
         else if (!strcmp(a, "--seed-banks")) opt.seed_banks = 1;
+        else if (!strcmp(a, "--music-index")) { if (i + 1 < argc && argv[i + 1][0] != '-') midx_file = argv[++i]; else midx_file = ""; }
         else if (!strcmp(a, "--seed-vectors")) opt.seed_vectors = 1;
         else if (!strcmp(a, "--bank-dispatch")) opt.second_pass = opt.bank_dispatch = 1;
         else if (!strcmp(a, "--no-p1-fork")) opt.no_pad_probe = 1;
@@ -1752,6 +1739,17 @@ static int cmd_nes(int argc, char **argv) {
     size_t size;
     uint8_t *data = nes_read_file(path, &size);
     if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", path); return 1; }
+    {   // music-rip index: the shared glue reports the match for this dump, but
+        // the NES explorer seeds none of it yet (the rip tables carry no dump
+        // CRC and no projection) — never silent when points would exist
+        static const char *const plats[] = {"NES"};
+        DpMusicSeed *mseeds = NULL; size_t mn = 0; DpMusicSeedStats mst;
+        int mrc = dp_music_seeds_cli(midx_file, plats, 1, data, size, size, NULL, &mseeds, &mn, &mst, NULL);
+        if ((mrc == DP_MUSIC_SEEDS_LOAD_ERR && midx_file) || mrc == DP_MUSIC_SEEDS_ALLOC) { free(data); return 1; }
+        if (mn)
+            fprintf(stderr, "deepeel: nes: %zu music-index entry points are available but this explorer seeds none of them yet\n", mn);
+        free(mseeds);
+    }
     if (use_core) {
         char err[128] = "";
         DpMachine *km = dp_machine_nes(data, size, mapper, err, sizeof err);
@@ -1853,10 +1851,10 @@ static int cmd_pce(int argc, char **argv) {
         fprintf(stderr, "deepeel pce explore ROM [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N] "
                         "[--max-total N] [--max-steps N] [--queue N] [--loop-cap N] [--fork-cap N] "
                         "[--novelty STEPS] [--novelty-frames N] [--novelty-archive N] [--novelty-cells] [--pad-fork-cap N] [--irq-fork-cap N] [--no-irq-fork] [--no-static] [--no-infer] [--multitap] [--jobs 2] "
-                        "[--text FILE] [--map FILE] [--png FILE] [--evidence FILE] [--entry ADDR]... [--ctx-cap N] [--ctx-live] [--summary FILE]\n");
+                        "[--text FILE] [--map FILE] [--png FILE] [--evidence FILE] [--entry ADDR]... [--seed-banks] [--music-index [FILE]] [--ctx-cap N] [--ctx-live] [--summary FILE]\n");
         return 2;
     }
-    const char *path = NULL, *png = NULL;
+    const char *path = NULL, *png = NULL, *midx_file = NULL;
     DpPceOptions opt = dp_pce_options();
     opt.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
     DpCliCommon cc = { .jobs = 1 };
@@ -1875,6 +1873,7 @@ static int cmd_pce(int argc, char **argv) {
         else if (!strcmp(a, "--play-pool") && i + 1 < argc) opt.play_pool = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed-vectors")) opt.seed_vectors = 1;
         else if (!strcmp(a, "--seed-banks")) opt.seed_banks = 1;
+        else if (!strcmp(a, "--music-index")) { if (i + 1 < argc && argv[i + 1][0] != '-') midx_file = argv[++i]; else midx_file = ""; }
         else if (!strcmp(a, "--entry") && i + 1 < argc) {
             if (opt.entry_count >= 16) { fprintf(stderr, "deepeel: at most 16 --entry\n"); return 2; }
             opt.entries[opt.entry_count++] = (uint16_t)strtoul(argv[++i], NULL, 0);
@@ -1911,6 +1910,17 @@ static int cmd_pce(int argc, char **argv) {
     size_t size;
     uint8_t *data = nes_read_file(path, &size);
     if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", path); return 1; }
+    {   // music-rip index: the shared glue reports the match for this dump, but
+        // the PCE explorer seeds none of it yet (the hes tables project no
+        // init/play into ROM space) — never silent when points would exist
+        static const char *const plats[] = {"PCE"};
+        DpMusicSeed *mseeds = NULL; size_t mn = 0; DpMusicSeedStats mst;
+        int mrc = dp_music_seeds_cli(midx_file, plats, 1, data, size, size, NULL, &mseeds, &mn, &mst, NULL);
+        if ((mrc == DP_MUSIC_SEEDS_LOAD_ERR && midx_file) || mrc == DP_MUSIC_SEEDS_ALLOC) { free(data); return 1; }
+        if (mn)
+            fprintf(stderr, "deepeel: pce: %zu music-index entry points are available but this explorer seeds none of them yet\n", mn);
+        free(mseeds);
+    }
     if (use_core) {
         if (!dp_pce_init(data, size)) { fprintf(stderr, "deepeel: --core: not a PCE image\n"); free(data); return 1; }
         DpMachine *km = dp_machine_pce();

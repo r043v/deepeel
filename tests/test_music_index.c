@@ -119,6 +119,52 @@ int main(int argc, char **argv) {
     dp_midx_norm_title((const uint8_t *)"\x8c\x9c\x8b\xd6", norm, sizeof norm);   // Shift-JIS bytes: no ASCII alnum
     CHECK(norm[0] == 0);
 
+    /* the shared seed extraction (music_index_seeds.c): tiers, registers, dedup */
+#include "core/music_index_seeds.h"
+    {
+        DpMusicSeed *seeds = NULL; size_t n = 0; DpMusicSeedStats st;
+        /* tier 1 crc on entry 0 + game-key siblings (1, 3); play deduped, init carries
+         * song 0 in A on the rip's stack (0xFFFE); the tier named is the strongest
+         * among the entries used (the siblings came through game identity) */
+        CHECK(dp_music_seeds(&ix, (const char *const[]){"GB"}, 1, 0x11223344, NULL, 0x80000, &seeds, &n, &st) == 0);
+        CHECK(n == 2 && st.tier == 3 && st.entries == 2 && st.init_seeds == 1 && st.no_entry_point == 1);
+        CHECK(seeds[0].kind == 0 && seeds[0].bank == 3 && seeds[0].pc == 0x6760 && seeds[0].a == 0xFF);
+        CHECK(seeds[1].kind == 1 && seeds[1].bank == 3 && seeds[1].pc == 0x66E2 && seeds[1].a == 0 && seeds[1].sp == 0xFFFE);
+        free(seeds); seeds = NULL;
+        /* tier 2 title (no crc hit): entries 0,1,3 through the refs array */
+        CHECK(dp_music_seeds(&ix, (const char *const[]){"GB"}, 1, 0xDEADBEEF, "supermarioland", 0x80000, &seeds, &n, &st) == 0);
+        CHECK(n == 2 && st.tier == 2 && st.entries == 2);
+        free(seeds); seeds = NULL;
+        /* another platform's entries are counted, never seeded (the tier only
+         * names the entries actually used) */
+        CHECK(dp_music_seeds(&ix, (const char *const[]){"NES"}, 1, 0x11223344, NULL, 0x80000, &seeds, &n, &st) == 0);
+        CHECK(n == 0 && st.other_platform == 3 && st.tier == 0);
+        free(seeds); seeds = NULL;
+        /* points outside this dump's size are refused, counted */
+        CHECK(dp_music_seeds(&ix, (const char *const[]){"GB"}, 1, 0x11223344, NULL, 0x100, &seeds, &n, &st) == 0);
+        CHECK(n == 0 && st.out_of_range == 2);
+        free(seeds);
+    }
+
+    /* the shared CLI glue (load + crc + report): an explicit missing file is a
+     * load error, an absent option with no default index skips silently, and a
+     * title hit on this dump yields its seed through the one shared path */
+    {
+        DpMusicSeed *cs = NULL; size_t cn = 0; DpMusicSeedStats cst;
+        CHECK(dp_music_seeds_cli("no/such/music_index.bin", (const char *const[]){"NES"}, 1,
+                                 (const uint8_t *)"x", 1, 0x80000, NULL, &cs, &cn, &cst, NULL) == DP_MUSIC_SEEDS_LOAD_ERR);
+        if (access("output/music_index/music_index.bin", F_OK) != 0)
+            CHECK(dp_music_seeds_cli(NULL, (const char *const[]){"NES"}, 1,
+                                     (const uint8_t *)"x", 1, 0x80000, NULL, &cs, &cn, &cst, NULL) == DP_MUSIC_SEEDS_NO_FILE);
+        DpMusicIndex kix;
+        CHECK(dp_music_seeds_cli(path, (const char *const[]){"NES"}, 1,
+                                 (const uint8_t *)"x", 1, 0x80000, "tetris", &cs, &cn, &cst, &kix) == 1);
+        CHECK(cn == 1 && cst.tier == 2 && cst.entries == 1 && cst.init_seeds == 1);
+        CHECK(cs[0].kind == 1 && cs[0].bank == 0 && cs[0].pc == 0x10 && cs[0].a == 0);
+        free(cs);
+        dp_midx_free(&kix);
+    }
+
     dp_midx_free(&ix);
 
     /* a truncated file must fail at load, never later */

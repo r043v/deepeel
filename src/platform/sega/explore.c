@@ -11,6 +11,7 @@
 #include "../msx/explore.h"
 #include "../../cpu/z80/provenance.h"
 #include "../../core/hashset.h"
+#include "../../core/music_index_seeds.h"
 #include "../../explore/lots.h"
 #include "../../explore/novelty.h"
 #include "../../explore/coverage_defaults.h"
@@ -46,8 +47,13 @@ typedef struct { void *state; uint8_t *cart; Origins *origins; int forced,skip_i
     uint16_t probe_port; uint8_t probe_value,probe_armed; } Path;
 // A seed spec: pc in a mapper view. exact=1 applies seed_window(pc,bank) and
 // refuses any view where rom_index(pc) is not bank*0x4000+(pc&0x3FFF); exact=0
-// keeps the boot view untouched.
-typedef struct { uint16_t pc; uint16_t bank; uint8_t exact,kind; } SeedSpec;
+// keeps the boot view untouched.  a/sp are register seeds (music rips: the
+// init call carries the song number in A and starts on the rip's stack);
+// 0xFF/0xFFFF leave the register at its reset value.
+// one confirmed entry point queued before exploration; the register seed is
+// the kernel's DpSeedRegs (music rips: init's song in A, the rip's stack)
+typedef struct { uint16_t pc; uint16_t bank; uint8_t exact,kind; DpSeedRegs regs; } SeedSpec;
+#define SEGA_REGS_NONE (DpSeedRegs){0xFF,0xFFFF}   // leave A/SP at the start state
 // observed indirect jump site: up to 8 distinct physical targets
 typedef struct { uint32_t site; uint8_t n,overflow; uint32_t target[8]; uint32_t hits; uint32_t table; /* physical index+1 of the ROM word the jump target was loaded from, 0 unknown */ } DpSegaIndirectRec;
 static uint64_t fnv1a(uint64_t h,const void *p,size_t n) {
@@ -786,7 +792,12 @@ static int materialize_seed(Run *x) {
     if(index<0 || (uint64_t)index>=r->size ||
        (s->exact && index!=(int64_t)((uint32_t)s->bank*0x4000+(s->pc&0x3fff)))) r->seeds_refused_view++;
     else {
-        x->b->cpu()->pc=s->pc;
+        z80_t *c=x->b->cpu();
+        c->pc=s->pc;
+        if(s->regs.a!=0xFF || s->regs.sp!=0xFFFF) {   // register seeds (music rips: init's song in A, the rip's stack)
+            if(s->regs.a!=0xFF) c->a=s->regs.a;
+            if(s->regs.sp!=0xFFFF) c->sp=s->regs.sp;
+        }
         accepted=push_seed_front(x,s);
         if(!accepted) r->seeds_refused_queue++;
     }
@@ -1627,7 +1638,7 @@ static void generate_indirect_specs(Run *x) {
             if(x->seed_count>=x->seed_capacity || r->indirect_seeds>=8192) { r->indirect_refused_budget++; continue; }
             if(dp_set_insert(&seen,target)!=1) continue;
             uint16_t pc=target<0x4000?(uint16_t)target:(uint16_t)(0x4000u|(target&0x3fff));
-            x->seeds[x->seed_count++]=(SeedSpec){pc,(uint16_t)(target>>14),(uint8_t)!!banked,DP_SEGA_TREE_POINTER};
+            x->seeds[x->seed_count++]=(SeedSpec){pc,(uint16_t)(target>>14),(uint8_t)!!banked,DP_SEGA_TREE_POINTER,SEGA_REGS_NONE};
             r->indirect_seeds++;
         }
     }
@@ -1644,6 +1655,15 @@ static void generate_seed_specs(Run *x,const uint8_t *image,size_t size) {
     DpSegaSeedGeometry g;
     int geo=x->b->seed_geometry && x->b->seed_geometry(&g);
     DpHashSet seen; dp_set_init(&seen,1<<16);
+    // music-rip index seeds (--music-index) go first: they are confirmed entry
+    // points of this game's rips and must not starve behind the speculative
+    // pointer scan when the queue starts refusing; the materialize view check
+    // still refuses anything this dump cannot show
+    for(unsigned i=0;i<o->music_seed_count && x->seed_count<x->seed_capacity;i++) {
+        const DpMusicSeed *ms=&((const DpMusicSeed *)o->music_seeds)[i];
+        x->seeds[x->seed_count++]=(SeedSpec){ms->pc,ms->bank,1,DP_SEGA_TREE_MUSIC,(DpSeedRegs){ms->a,ms->sp}};
+        r->seeds_music++;
+    }
     if(o->seed_cap && !o->no_pointer_scan) {
         uint16_t lo=geo?g.window_lo:0, hi=geo?(uint16_t)(g.window_hi+0x4000):0;
         for(size_t a=0;a+1<size;a++) {
@@ -1660,7 +1680,7 @@ static void generate_seed_specs(Run *x,const uint8_t *image,size_t size) {
                     // duplicates first: a view already seeded is not a refusal
                     if(dp_set_insert(&seen,key)!=1) continue;
                     if(x->seed_count>=x->seed_capacity || r->seeds_pointer>=o->seed_cap) { r->seeds_refused_cap++; continue; }
-                    x->seeds[x->seed_count++]=(SeedSpec){v,(uint16_t)b,1,DP_SEGA_TREE_POINTER};
+                    x->seeds[x->seed_count++]=(SeedSpec){v,(uint16_t)b,1,DP_SEGA_TREE_POINTER,SEGA_REGS_NONE};
                     r->seeds_pointer++;
                 }
             } else {
@@ -1670,7 +1690,7 @@ static void generate_seed_specs(Run *x,const uint8_t *image,size_t size) {
                 // duplicates first: a view already seeded is not a refusal
                 if(dp_set_insert(&seen,(uint64_t)key)!=1) continue;
                 if(x->seed_count>=x->seed_capacity || r->seeds_pointer>=o->seed_cap) { r->seeds_refused_cap++; continue; }
-                x->seeds[x->seed_count++]=(SeedSpec){v,0,0,DP_SEGA_TREE_POINTER};
+                x->seeds[x->seed_count++]=(SeedSpec){v,0,0,DP_SEGA_TREE_POINTER,SEGA_REGS_NONE};
                 r->seeds_pointer++;
             }
         }
@@ -1682,13 +1702,13 @@ static void generate_seed_specs(Run *x,const uint8_t *image,size_t size) {
                 if(key>=size) continue;
                 if(seed_padding(image,size,key)) { r->seeds_skipped_padding++; continue; }
                 if(dp_set_insert(&seen,key)!=1) continue;
-                x->seeds[x->seed_count++]=(SeedSpec){(uint16_t)w,(uint16_t)b,1,DP_SEGA_TREE_BANK};
+                x->seeds[x->seed_count++]=(SeedSpec){(uint16_t)w,(uint16_t)b,1,DP_SEGA_TREE_BANK,SEGA_REGS_NONE};
                 r->seeds_bank++;
             }
         }
     }
     for(unsigned i=0;i<o->entry_count && x->seed_count<x->seed_capacity;i++) {
-        x->seeds[x->seed_count++]=(SeedSpec){o->entry[i].addr,(uint16_t)o->entry[i].bank,1,DP_SEGA_TREE_ENTRY};
+        x->seeds[x->seed_count++]=(SeedSpec){o->entry[i].addr,(uint16_t)o->entry[i].bank,1,DP_SEGA_TREE_ENTRY,SEGA_REGS_NONE};
         r->seeds_entry++;
     }
     dp_set_free(&seen);
@@ -1849,7 +1869,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     // Seed base: the reset state every seed starts from. Generation reads the
     // boot view through rom_index while the machine has not run yet.
     if((o->seed_cap || o->entry_count || o->seed_banks || o->indirect_total || o->play_total || o->novelty_total || o->tas_path)) {
-        x.seed_capacity=o->seed_cap+o->entry_count+3*256+8192;
+        x.seed_capacity=o->seed_cap+o->entry_count+o->music_seed_count+3*256+8192;
         x.seeds=malloc((size_t)x.seed_capacity*sizeof(*x.seeds));
         x.seed_state=malloc(x.b->state_size); x.seed_scratch=malloc(x.b->state_size);
         x.seed_cart=malloc(0x8000); x.seed_scratch_cart=malloc(0x8000);
@@ -2285,7 +2305,7 @@ static void merge_results(DpSegaResults *d,const DpSegaResults *s) {
     DP_MR_SUM(global_cuts); DP_MR_SUM(path_cuts); DP_MR_SUM(faults); DP_MR_SUM(decode_cuts); DP_MR_SUM(pad_cuts); DP_MR_SUM(halt_cuts);
     DP_MR_SUM(stagnation_cuts);
     DP_MR_SUM(forced_ram_cuts);
-    DP_MR_SUM(seeds_pointer); DP_MR_SUM(seeds_bank); DP_MR_SUM(seeds_entry); DP_MR_SUM(seeds_admitted);
+    DP_MR_SUM(seeds_pointer); DP_MR_SUM(seeds_bank); DP_MR_SUM(seeds_entry); DP_MR_SUM(seeds_music); DP_MR_SUM(seeds_admitted);
     DP_MR_SUM(seeds_skipped_padding); DP_MR_SUM(seeds_refused_view); DP_MR_SUM(seeds_refused_queue);
     DP_MR_SUM(seeds_refused_cap); DP_MR_SUM(seeds_pending); DP_MR_SUM(seeds_offlane);
     DP_MR_SUM(evicted_ctx); DP_MR_SUM(ctx_grew); DP_MR_SUM(ctx_full); DP_MR_SUM(section_cuts);
@@ -2458,7 +2478,7 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
         ",\"sib_tables\":%"PRIu64",\"sib_ranges\":%"PRIu64",\"sib_refused\":%"PRIu64",\"sib_caps\":%"PRIu64",\"sib_bytes\":%"PRIu64
         ",\"jt_tables\":%"PRIu64",\"jt_entries\":%"PRIu64",\"jt_caps\":%"PRIu64",\"jt_bytes\":%"PRIu64
         ",\"queue_growths\":%"PRIu64",\"spool_writes\":%"PRIu64",\"spool_reads\":%"PRIu64",\"spool_refused\":%"PRIu64
-        ",\"seeds_pointer\":%"PRIu64",\"seeds_bank\":%"PRIu64",\"seeds_entry\":%"PRIu64",\"seeds_admitted\":%"PRIu64
+        ",\"seeds_pointer\":%"PRIu64",\"seeds_bank\":%"PRIu64",\"seeds_entry\":%"PRIu64",\"seeds_music\":%"PRIu64",\"seeds_admitted\":%"PRIu64
         ",\"seeds_refused_cap\":%"PRIu64",\"seeds_refused_view\":%"PRIu64",\"seeds_pending\":%"PRIu64
         ",\"evicted_ctx\":%"PRIu64",\"indirect_sites\":%"PRIu64",\"indirect_targets\":%"PRIu64
         ",\"indirect_seeds\":%"PRIu64",\"indirect_pending\":%"PRIu64
@@ -2469,7 +2489,7 @@ void dp_sega_summary(FILE *out,const DpSegaSystem *system,const DpSegaResults *r
         r->steps,r->paths,r->forks,r->irq_forks,r->exec_outside,r->loop_cuts,r->fork_cuts,
         r->queue_cuts,r->global_cuts,r->path_cuts,r->faults,r->decode_cuts,r->pad_cuts,r->halt_cuts,r->sib_tables,r->sib_ranges,r->sib_refused,r->sib_caps,r->sib_bytes,r->jt_tables,r->jt_entries,r->jt_caps,r->jt_bytes,r->queue_growths,
         r->spool_writes,r->spool_reads,r->spool_refused,r->seeds_pointer,r->seeds_bank,
-        r->seeds_entry,r->seeds_admitted,r->seeds_refused_cap,r->seeds_refused_view,
+        r->seeds_entry,r->seeds_music,r->seeds_admitted,r->seeds_refused_cap,r->seeds_refused_view,
         r->seeds_pending,r->evicted_ctx,r->indirect_sites,r->indirect_targets,
         r->indirect_seeds,r->indirect_pending,r->play_steps,r->play_epochs,
         r->tas_frames,r->tas_frames_refused,r->tas_bursts,r->tas_burst_steps,r->tas_identity,r->jobs_capped,r->seeds_offlane,
@@ -2816,8 +2836,8 @@ void dp_sega_report(FILE *out,const DpSegaSystem *s,const DpSegaResults *r) {
     fprintf(out,"stream replay (S6): %"PRIu64" decoders, %"PRIu64" tables, %"PRIu64" candidates, %"PRIu64" queued replays (%"PRIu64" saturated)\n",r->s6_decoders,r->s6_tables,r->s6_candidates,r->s6_runs,r->s6_sat);
     fprintf(out,"copy siblings: %"PRIu64" tables; %"PRIu64" ranges (%"PRIu64" bytes); %"PRIu64" refused over executed code; %"PRIu64" tables cut at the entry cap\n",r->sib_tables,r->sib_ranges,r->sib_bytes,r->sib_refused,r->sib_caps);
     fprintf(out,"jump tables: %"PRIu64" tables; %"PRIu64" entries (%"PRIu64" new bytes); %"PRIu64" tables cut at the entry cap\n",r->jt_tables,r->jt_entries,r->jt_bytes,r->jt_caps);
-    fprintf(out,"seeds: pointer %"PRIu64"; bank sweep %"PRIu64"; entries %"PRIu64"; admitted %"PRIu64"; skipped padding %"PRIu64"; refused view %"PRIu64", queue %"PRIu64", cap %"PRIu64"; pending %"PRIu64"\n",
-        r->seeds_pointer,r->seeds_bank,r->seeds_entry,r->seeds_admitted,r->seeds_skipped_padding,r->seeds_refused_view,r->seeds_refused_queue,r->seeds_refused_cap,r->seeds_pending);
+    fprintf(out,"seeds: pointer %"PRIu64"; bank sweep %"PRIu64"; entries %"PRIu64"; music %"PRIu64"; admitted %"PRIu64"; skipped padding %"PRIu64"; refused view %"PRIu64", queue %"PRIu64", cap %"PRIu64"; pending %"PRIu64"\n",
+        r->seeds_pointer,r->seeds_bank,r->seeds_entry,r->seeds_music,r->seeds_admitted,r->seeds_skipped_padding,r->seeds_refused_view,r->seeds_refused_queue,r->seeds_refused_cap,r->seeds_pending);
     fprintf(out,"sections: %u; cap cuts %"PRIu64"; contexts evicted %"PRIu64"; grew %"PRIu64"; full %"PRIu64"\n",
         r->section_count,r->section_cuts,r->evicted_ctx,r->ctx_grew,r->ctx_full);
     unsigned printed=r->section_count<256?r->section_count:256;
@@ -2910,7 +2930,7 @@ static int parse_entry(const char *s,DpSegaOptions *o) {
     return 1;
 }
 // --core: the generic kernel (src/explore/core.c) on the DpMachine view of
-// the SG/SMS/GG backend.  MSX keeps its own engine until its hooks exist.
+// the SG/SMS/GG/MSX backend (MSX through the keyboard hooks).
 static int core_is_sg, core_is_msx;
 // only the first two instances are trusted: gg3..gg16 resolve the bank-switch
 // fixture differently (observed 2026-11: fix_sega_mapper reaches other ROM indexes)
@@ -2968,6 +2988,7 @@ int dp_sega_explore_command(int argc,char **argv) {
     if(argc<5) goto usage;
     const DpSegaSystem *s=!strcmp(argv[3],"msx")?dp_msx_system():dp_sega_system(argv[3]); if(!s) goto usage;
     DpSegaOptions o=!strcmp(s->id,"msx")?dp_msx_options():dp_sega_options(); o.defer_tiers=DP_TIER_MAX; int watch=0,use_core=0; DpCoreConfig kcfg; dp_core_config_default(&kcfg); const char *dump=NULL,*text=NULL,*map=NULL,*evidence=NULL,*summary=NULL,*cov=NULL,*romdata=NULL,*rtcode=NULL;
+    const char *midx_file=NULL; DpMusicSeed *music_seeds=NULL; size_t music_n=0;
     if(!strcmp(s->id,"sms") || !strcmp(s->id,"gg")) {
         o.play_total=1000000;
         o.fork_cap=DP_DEFAULT_BRANCH_FORK_CAP;
@@ -3000,6 +3021,10 @@ int dp_sega_explore_command(int argc,char **argv) {
         }
         if(!strcmp(argv[i],"--tree")) { if(i+1>=argc) goto usage; o.tree_path=argv[++i]; continue; }
         if(!strcmp(argv[i],"--seed-banks")) { o.seed_banks=1; continue; }
+        if(!strcmp(argv[i],"--music-index")) {   // optional FILE: the default index is output/music_index/music_index.bin
+            if(i+1<argc && argv[i+1][0]!='-') midx_file=argv[++i]; else midx_file="";
+            continue;
+        }
         if(!strcmp(argv[i],"--no-pointer-scan")) { o.no_pointer_scan=1; continue; }
         if(!strcmp(argv[i],"--no-event-probes")) { o.event_probes=0; continue; }
         if(!strcmp(argv[i],"--entry")) {
@@ -3097,7 +3122,21 @@ int dp_sega_explore_command(int argc,char **argv) {
     int read_ok=fread(image,1,(size_t)end,f)==(size_t)end; fclose(f);
     if(!read_ok) { free(image); return 1; }
     size_t header=(!strcmp(s->id,"sms") || !strcmp(s->id,"gg")) && ((size_t)end&0x3fff)==512?512:0;
-    if(use_core) { core_cov_path=cov; core_text_path=text; core_map_path=map; core_summary_path=summary; core_rom_name=argv[4]; int cok=sega_core_run(s,image+header,(size_t)end-header,&o,&kcfg,stdout); free(image); return cok?0:1; }
+    // music-rip index (DPMDX002, tools/music_index.py export --bin): the
+    // projected entry points of this game's rips become confirmed seeds.  The
+    // shared CLI glue (src/core/music_index_seeds.c) loads the index, hashes
+    // the raw dump and reports the match.  With --core the seeds are reported
+    // but not consumed: the kernel's bank seeding is the GB mapper's ($2000
+    // poke), not this platform's latches.
+    static const char *const plats_sg[]={"SCSG"},*plats_sms[]={"SCSG","MK3"},*plats_gg[]={"GG"},*plats_msx[]={"MSX"};
+    const char *const *plats=!strcmp(s->id,"sms")?plats_sms:!strcmp(s->id,"gg")?plats_gg:!strcmp(s->id,"msx")?plats_msx:plats_sg;
+    DpMusicSeedStats mst;
+    int mn=dp_music_seeds_cli(midx_file,plats,!strcmp(s->id,"sms")?2:1,image,(size_t)end,
+                              (size_t)end-header,NULL,&music_seeds,&music_n,&mst,NULL);
+    if(mn==DP_MUSIC_SEEDS_LOAD_ERR && midx_file) { free(image); return 1; }
+    if(mn==DP_MUSIC_SEEDS_ALLOC) { free(image); return 1; }
+    if(mn>=0) { o.music_seeds=music_seeds; o.music_seed_count=(unsigned)mn; }
+    if(use_core) { core_cov_path=cov; core_text_path=text; core_map_path=map; core_summary_path=summary; core_rom_name=argv[4]; int cok=sega_core_run(s,image+header,(size_t)end-header,&o,&kcfg,stdout); free(image); free(music_seeds); return cok?0:1; }
     DpSegaResults r;
     if(o.watch_every) o.jobs=1; // one framebuffer: the instances would share it
     if(watch && dp_fbwatch_start) dp_fbwatch_start("deepeel sega watch");
@@ -3128,7 +3167,7 @@ int dp_sega_explore_command(int argc,char **argv) {
         if(fclose(out)) ok=0;
     }
     if(rtcode) { FILE *rf=fopen(rtcode,"w"); if(rf) { dp_ramarch_write(&r.ra,rf,s->id); fclose(rf); } }
-    dp_sega_results_free(&r); return ok?0:1;
+    dp_sega_results_free(&r); free(music_seeds); return ok?0:1;
 usage:
-    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--no-pointer-scan] [--no-event-probes] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--attract-frames N] [--novelty N] [--novelty-frames N] [--novelty-archive N] [--novelty-frame-steps N] [--novelty-cells 1] [--export-state FILE] [--watch [FPS]] [--watch-dump FILE.ppm] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--tas-rng-per N] [--tas-rng-bursts N] [--tas-rng-frames N] [--tas-rng-steps N (legacy override)] [--jobs N|auto] [--mem-cap-mb N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE] [--rtcode FILE]\n"); return 2;
+    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N] [--stagnation N] [--copy-cap N] [--input-forks N] [--input-sites N] [--input-total N] [--seed-cap N] [--seed-banks] [--music-index [FILE]] [--no-pointer-scan] [--no-event-probes] [--entry BANK:ADDR] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [--no-vector-seeds] [--indirect-total N] [--play-steps N] [--attract-frames N] [--novelty N] [--novelty-frames N] [--novelty-archive N] [--novelty-frame-steps N] [--novelty-cells 1] [--export-state FILE] [--watch [FPS]] [--watch-dump FILE.ppm] [--tas FILE] [--tas-total N] [--tas-frame-steps N] [--tas-rng-per N] [--tas-rng-bursts N] [--tas-rng-frames N] [--tas-rng-steps N (legacy override)] [--jobs N|auto] [--mem-cap-mb N] [--queue-max N] [--spool FILE] [--resume FILE] [--spool-cap-mb N] [--tree FILE] [--text FILE] [--map FILE] [--evidence FILE] [--cov FILE] [--romdata FILE] [--summary FILE] [--rtcode FILE]\n"); return 2;
 }

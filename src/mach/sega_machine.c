@@ -74,6 +74,13 @@ static int sega_run(DpMachine *m) {
 
 static uint32_t sega_pc(DpMachine *m) { return ((SegaMach *)m->impl)->b->cpu()->pc; }
 static void sega_set_pc(DpMachine *m, uint32_t pc) { ((SegaMach *)m->impl)->b->cpu()->pc = (uint16_t)pc; }
+// register seeds (music rips): the Z80 registers are directly writable through the backend
+static int sega_seed_regs(DpMachine *m, uint8_t a, uint16_t sp) {
+    z80_t *c = ((SegaMach *)m->impl)->b->cpu();
+    if (a != 0xFF) c->a = a;
+    if (sp != 0xFFFF) c->sp = sp;
+    return 1;
+}
 
 // the base write callback bypasses the observation wrapper: a poke is not a CPU access
 static void sega_poke(DpMachine *m, uint32_t a, uint8_t v) {
@@ -195,6 +202,7 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->run = sega_run;
     m->pc = sega_pc;
     m->set_pc = sega_set_pc;
+    m->seed_regs = sega_seed_regs;
     m->poke = sega_poke;
     m->set_input = sega_set_input;
     if (b->frame_count) m->frame = sega_frame;
