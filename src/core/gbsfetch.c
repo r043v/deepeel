@@ -16,8 +16,20 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#define URL_MAX 1300   // a joshw listing href with its percent escapes
+
 static unsigned char *fetch(const char *url, size_t *len) {
-    char cmd[1024]; snprintf(cmd, sizeof cmd, "curl -sSL --fail -A deepeel-gbsfetch/1 --max-time 120 '%s'", url);
+    /* the rip names carry apostrophes (…Link's Awakening…): a raw ' inside the
+     * single-quoted shell command closes it — requote the POSIX way (close,
+     * escaped quote, reopen) */
+    char q[4 * URL_MAX + 8];
+    size_t j = 0;
+    for (size_t i = 0; url[i] && j + 4 < sizeof q; i++) {
+        if (url[i] == '\'') { q[j++] = '\''; q[j++] = '\\'; q[j++] = '\''; q[j++] = '\''; }
+        else q[j++] = url[i];
+    }
+    q[j] = 0;
+    char cmd[4 * URL_MAX + 128]; snprintf(cmd, sizeof cmd, "curl -sSL --fail -A deepeel-gbsfetch/1 --max-time 120 '%s'", q);
     for (int t = 0; t < 6; t++) {
         FILE *p = popen(cmd, "r"); if (!p) return 0;
         size_t cap = 1 << 16, n = 0, r; unsigned char *b = malloc(cap);

@@ -17,6 +17,7 @@
 #include "core/gbs.h"
 #include "core/music_index.h"
 #include "core/music_index_seeds.h"
+#include <zlib.h>   // crc32: the .verified sidecar records the dump CRC the index is keyed by
 #include "core/zip.h"   // dp_read_rom_file: the GBS rip may also be read from a zip member
 int dp_gbs_fetch(const char *game, const char *dir, char *out_gbs, size_t cap, char *err, size_t errsz);   // core/gbsfetch.c (network, not in the core lib)
 #include "explore/frontier.h"
@@ -768,6 +769,50 @@ static int cmd_explore(int argc, char **argv) {
             printf("gbs: play -> rom bank %u $%04x\n", gmatch.play_bank, gmatch.play_addr);
             push_fail |= seed_push(&gbs_pcs, &gbs_bks, &gbs_regs, &gbs_seeds, gmatch.play_addr, (uint16_t)gmatch.play_bank, 0xFF, 0xFFFF);
         } else printf("gbs: play $%04x not mapped to this ROM (player stub or unmatched bank)\n", gbs.play);
+        /* the verified (rip, dump) pair is knowledge: the sidecar line records
+         * the ROM mapping the byte-verify just proved (dump CRC32, rip bank ->
+         * ROM bank, init/play in ROM space) so the music-index build ingests
+         * it and --music-index alone re-seeds this game later — the same facts
+         * the BAB rows carry, discovered by the tool instead of a database.
+         * Never written when nothing mapped: a failed verify is not knowledge. */
+        if (gbs_seeds) {
+            char vpath[1100];
+            snprintf(vpath, sizeof vpath, "%s.verified", gpath);
+            uint32_t dump_crc = (uint32_t)crc32(0, cart->rom, (uInt)cart->rom_size);
+            char needle[32];
+            snprintf(needle, sizeof needle, "crc=%08x ", dump_crc);
+            int seen = 0;
+            FILE *rf = fopen(vpath, "r");
+            if (rf) {
+                char line[800];
+                while (fgets(line, sizeof line, rf)) if (strstr(line, needle)) seen = 1;
+                fclose(rf);
+            }
+            if (seen) printf("gbs: verified pair crc=%08x already recorded in %s\n", dump_crc, vpath);
+            else {
+                FILE *vf = fopen(vpath, "a");
+                if (!vf) fprintf(stderr, "deepeel: cannot write %s\n", vpath);
+                else {
+                    char banks[4 * DP_GBS_MAX_BANKS] = "";
+                    size_t bo = 0;
+                    for (unsigned b = 0; b < gmatch.rip_banks && bo + 16 < sizeof banks; b++)
+                        bo += (size_t)snprintf(banks + bo, sizeof banks - bo, "%s%d", b ? "," : "",
+                                               gmatch.bank[b].matched ? (int)gmatch.bank[b].rom_bank : -1);
+                    const char *rb = strrchr(path, '/'); rb = rb ? rb + 1 : path;
+                    // `rom=` last: the dump file name can carry spaces
+                    fprintf(vf, "dump crc=%08x load=%u data_size=%zu banks=%s", dump_crc, gbs.load, gbs.data_size, banks);
+                    if (gmatch.init_bank >= 0)
+                        fprintf(vf, " init_rom=%u", (unsigned)gmatch.init_bank * 0x4000u + (gmatch.init_addr & 0x3FFF));
+                    if (gmatch.play_bank >= 0)
+                        fprintf(vf, " play_rom=%u", (unsigned)gmatch.play_bank * 0x4000u + (gmatch.play_addr & 0x3FFF));
+                    if (gmatch.frag_scanned && gmatch.frag_dom_votes)
+                        fprintf(vf, " frag_delta=%zu frag_votes=%u", gmatch.frag_dom_delta, gmatch.frag_dom_votes);
+                    fprintf(vf, " rom=%s\n", rb);
+                    fclose(vf);
+                    printf("gbs: verified pair recorded in %s (the music-index build ingests it)\n", vpath);
+                }
+            }
+        }
         free(gbuf);
         if (push_fail) {   // same cleanup as the other early exits of the option block
             fprintf(stderr, "deepeel: cannot allocate GBS seeds\n");

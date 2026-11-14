@@ -432,6 +432,49 @@ ENTRY_COLS = ("source,platform,format,row_no,title,title_norm,game_norm,year,mak
               "data_sha256,data_size,rip_json,origin,raw,columns").split(",")
 
 
+def _read_verified(path, load, data_size):
+    """Parse a `.verified` sidecar (deepeel --gbs byte-verify output): one line
+    per verified dump, `dump crc=HEX load=N data_size=N banks=r0,r1,... [k=v]...
+    rom=NAME` (rom last: dump names carry spaces; banks are the ROM bank of each
+    rip bank in order, -1 when that rip bank did not match).  Lines whose
+    load/data_size disagree with the parsed rip are refused (a sidecar belongs
+    to exactly one rip file).  init_rom/play_rom are dp_rom_index values."""
+    out = []
+    if not path.exists():
+        return out
+    for ln in path.read_text(encoding="utf-8").splitlines():
+        f = ln.split()
+        if not f or f[0] != "dump":
+            continue
+        d = {}
+        rom = None
+        for kv in f[1:]:
+            k, _, v = kv.partition("=")
+            if k == "rom":
+                rom = ln.split(" rom=", 1)[1] if " rom=" in ln else v
+                break
+            d[k] = v
+        try:
+            blk = int(d.get("data_size", -1))
+            # the verifier's data_size excludes the 112-byte GBS header that
+            # rip_parse counts; both conventions name the same file
+            if int(d.get("load", -1)) != load or blk not in (data_size, data_size - 112):
+                print(f"verified: {path.name}: load/data_size mismatch, line refused")
+                continue
+            banks = [None if b == "-1" else int(b) for b in d.get("banks", "").split(",") if b != ""]
+            rec = {"crc": int(d["crc"], 16), "banks": banks}
+            if "init_rom" in d:
+                rec["init_rom"] = int(d["init_rom"])
+            if "play_rom" in d:
+                rec["play_rom"] = int(d["play_rom"])
+            if rom:
+                rec["rom"] = rom
+            out.append(rec)
+        except (KeyError, ValueError):
+            print(f"verified: {path.name}: malformed line refused")
+    return out
+
+
 def _rom_entry_points(proj):
     """Project init/play into ROM space through the chunks.
 
@@ -546,17 +589,38 @@ def build(bab_dir, rip_dirs, dbfile, alias_files=()):
             is_joshw = "joshw" in str(origin_root)
             origin = (f"joshw:gbs.joshw.info!{rel}" if is_joshw
                       else f"local:{origin_root}!{rel}")
+            # verified (rip, dump) pairs — the `.verified` sidecar deepeel --gbs
+            # writes when its byte-verify maps the rip into a dump (dump CRC32,
+            # rip bank -> ROM bank, init/play in ROM space).  This is the same
+            # knowledge the BAB rows carry, discovered by the tool instead of a
+            # database: it turns the crc tier on for the verified dumps.  Only a
+            # sidecar whose load/data_size match the parsed rip is trusted.
+            ver = _read_verified(Path(str(path) + ".verified"), g.get("load"), g["data_size"])
+            vcrcs = [f"{d['crc']:08x}" for d in ver]   # hex strings, like the BAB rows
+            v0 = ver[0] if ver else None
+            vchunks = []
+            if v0:
+                load = g.get("load") or 0
+                for i, rb in enumerate(v0["banks"]):
+                    if rb is None:
+                        continue
+                    s = max(0, i * 0x4000 - load)
+                    e = min(g["data_size"], (i + 1) * 0x4000 - load)
+                    if e > s:
+                        vchunks.append([rb * 0x4000 + load - i * 0x4000, s, e - s])
             proj = ("joshw_gbs" if is_joshw else "local_rips",
                     "GB" if g["format"] == "gbs" else "",
                     g["format"], None,
                     title, norm_name(path.parent.name) or norm_name(title),
                     norm_name(re.sub(r"[\[(（]?\s*[Vv]?\d+(\.\d+)*\s*[\])）]?", "", title or "")),
                     None, None, gbs_prod_code(path.name),
-                    None, None, g.get("songs"), None, None,
+                    json.dumps(vcrcs) if vcrcs else None, vcrcs[0] if vcrcs else None,
+                    g.get("songs"), None, None,
                     g.get("load"), None, None, g.get("init"), g.get("play"), g.get("stack"),
-                    g.get("tma"), g.get("tac"), None, None,  # init_rom, play_rom
+                    g.get("tma"), g.get("tac"),
+                    v0["init_rom"] if v0 else None, v0["play_rom"] if v0 else None,
                     None, None, None,
-                    None, None, None, None, None,
+                    json.dumps(vchunks) if vchunks else None, None, None, None, None,
                     g["sha256"], g["data_size"], json.dumps(g, ensure_ascii=False),
                     origin, path.name, json.dumps({"dir": str(path.parent), "file": path.name}))
             con.execute(

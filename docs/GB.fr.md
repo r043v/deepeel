@@ -67,6 +67,21 @@ provenance par entrée (`[palier] source/format: init X, play Y`, inchangée). L
 est documenté dans [Z80.fr.md](Z80.fr.md), les rapports NES/PCE dans leurs docs — l'apport
 devient multi-plateformes, un seul chemin de code.
 
+0.336.1 : le couple (rip, dump) vérifié devient de la connaissance réutilisable. Quand
+`--gbs` vérifie un rip contre la ROM (per-bank best match, fragments), il écrit un sidecar
+`<rip>.verified` — une ligne par dump vérifié : CRC32 du fichier brut (la clé du palier crc
+de l'index), banque ROM de chaque banque du rip, `init_rom`/`play_rom` en `dp_rom_index`.
+Le build de l'index (`tools/music_index.py`) ingère ces lignes : l'entrée du rip porte les
+CRCs vérifiés et ses points d'entrée en espace ROM, exactement comme les lignes BAB — le
+fait vient d'être prouvé par l'outil au lieu d'être lu dans une base. `--music-index` seul
+re-sème alors le jeu au palier crc, sans `--gbs`. Au passage : `--gbs-fetch` ne casse plus
+sur les apostrophes des noms de rips (« Link's Awakening » — l'URL passée au shell était
+refermée par le `'`). Zelda - Link's Awakening (France), 20 M pas (observations de l'outil) :
+le rip joshw `DMG-ZL-FRE` (même dump que la ROM) vérifie 3 banques byte-identiques à 100 %
+(init banque 26 $7FC8, play $7FCD, 96 morceaux) et porte la couverture 54,2 % → 55,5 % ;
+les sœurs GER/JP du même archive restent comptées sans point d'entrée tant qu'aucun dump
+les a vérifiées — jamais silencieuses.
+
 0.333.0 : quand des banques matchent mais qu'un pc reste non projeté (une tranche de rip
 trop courte pour le seuil — un rip qui commence au milieu d'un `$4000` dont la tête fait
 56 octets), le vote de fragments porte désormais ce pc au lieu d'abandonner ; le vote ne
