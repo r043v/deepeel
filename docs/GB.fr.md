@@ -98,6 +98,20 @@ France **et** USA/Europe (init banque 26 $7FC8, play $7FCD) et les lignes BAB ju
 invisibles au palier crc apparaissent ; Super Mario Land (World) sème 3 plays ($66F2 BAB
 crc, $6662 notre rip par palier titre, $65F2 BAB par identité de jeu), sans init de stub.
 
+0.338.0 : la preuve voyage entre régions. `rip_verify.py --translate` relit le bloc moteur
+de chaque ligne BAB **dans son dump source** (les chunks disent où) et le re-localise par
+vote d'octets dans chaque autre dump local de la plateforme ; la traduction n'est écrite que
+quand tous les segments retrouvés partagent **un même décalage** (le moteur est contigu dans
+une région — le décalage est mesuré, jamais deviné) et que les octets du point d'entrée ont
+voyagé verbatim. Le build clone alors la ligne pour le dump traduit (mêmes provenance et
+sœurs, chunks/init_rom/play_rom translatés). Mesuré au premier passage : 333 traductions
+depuis 3 985 lignes — Alex Kidd in Miracle World (UE), dont le CRC n'est dans aucune base,
+sème désormais 2 points d'entrée depuis la ligne MK3 japonaise (bloc à $8000 en J, $10000
+en UE, décalage +$8000) ; Bomber Raid (UE) depuis ses lignes MK3 (+$1C000), etc. Le gain de
+couverture reste à chiffrer par campagne (l'attract d'Alex Kidd/Ristar exécute déjà le
+moteur à 3 M pas : 28,2 %/28,2 % et 50,6 %/50,6 % avec et sans graines — le contrepoint
+confirmé, le gain attendu porte sur les attract qui ne jouent pas la musique).
+
 0.333.0 : quand des banques matchent mais qu'un pc reste non projeté (une tranche de rip
 trop courte pour le seuil — un rip qui commence au milieu d'un `$4000` dont la tête fait
 56 octets), le vote de fragments porte désormais ce pc au lieu d'abandonner ; le vote ne

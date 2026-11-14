@@ -455,12 +455,14 @@ def _read_verified(path, load, data_size):
                 break
             d[k] = v
         try:
-            blk = int(d.get("data_size", -1))
-            # the verifier's data_size excludes the 112-byte GBS header that
-            # rip_parse counts; both conventions name the same file
-            if int(d.get("load", -1)) != load or blk not in (data_size, data_size - 112):
-                print(f"verified: {path.name}: load/data_size mismatch, line refused")
-                continue
+            # translate-mode sidecars carry no load/data_size to check
+            if load is not None:
+                blk = int(d.get("data_size", -1))
+                # the verifier's data_size excludes the 112-byte GBS header that
+                # rip_parse counts; both conventions name the same file
+                if int(d.get("load", -1)) != load or blk not in (data_size, data_size - 112):
+                    print(f"verified: {path.name}: load/data_size mismatch, line refused")
+                    continue
             banks = [None if b == "-1" else int(b) for b in d.get("banks", "").split(",") if b != ""]
             rec = {"crc": int(d["crc"], 16), "banks": banks}
             if "chunks" in d:
@@ -577,6 +579,42 @@ def build(bab_dir, rip_dirs, dbfile, alias_files=()):
                      zsha, tsv_sha, f"bab_fetch.py + music_index.py (tsv {stem})",
                      "redistribution interdite; oracle local uniquement"))
         counts[source] = n
+
+    # ---- verified translations of the BAB rows ---------------------------
+    # output/bab/translate/<id>.verified (written by rip_verify.py --translate):
+    # each line relocates the row's engine block into ANOTHER local dump of the
+    # same platform — the engines are shared across regions, the shift is
+    # measured by fragment vote, and every clone keeps the row's provenance.
+    tdir = Path("output/bab/translate")
+    if tdir.is_dir():
+        n = 0
+        for vf in sorted(tdir.glob("*.verified")):
+            try:
+                rid = int(vf.stem)
+            except ValueError:
+                continue
+            row = con.execute("SELECT * FROM entry WHERE id=?", (rid,)).fetchone()
+            if row is None:
+                continue
+            for ln in _read_verified(vf, None, None):
+                if "chunks" not in ln:
+                    continue
+                # the sqlite row carries id (0) and game_key (38) beyond ENTRY_COLS:
+                # keep source..rip_json (1-36), origin (37), raw (39), columns (40)
+                keep = list(range(1, 37)) + [37, 39, 40]
+                clone = [row[i] for i in keep]
+                clone[10] = json.dumps([f"{ln['crc']:08x}"])
+                clone[11] = f"{ln['crc']:08x}"
+                clone[23] = ln.get("init_rom")
+                clone[24] = ln.get("play_rom")
+                clone[28] = json.dumps(ln["chunks"])
+                clone[36] = (row["origin"] or "") + f" | translate de {row['id']} (dump {ln['crc']:08x})"
+                con.execute(
+                    f"INSERT INTO entry({','.join(ENTRY_COLS)}) "
+                    f"VALUES({','.join('?' * len(ENTRY_COLS))})", clone)
+                n += 1
+        if n:
+            counts["translate"] = n
 
     # ---- generic rip collections (libgme-family formats) -----------------
     n = 0

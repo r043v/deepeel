@@ -24,6 +24,7 @@ Formats and dump conventions:
 
 Resumable, read-only on the dumps; sidecars land next to the rips."""
 import argparse
+import json
 import struct
 import sys
 import zlib
@@ -196,6 +197,84 @@ def read_crcs(vpath: Path):
     return out
 
 
+def translate_rows(db, root, outdir, opts):
+    """Re-locate every database row's engine block in the OTHER local dumps of
+    its platform: the row's chunks say where the block lives in ITS dump (crc1);
+    that dump's bytes are re-read, voted into every sibling dump, and a
+    translation is written when the chunk shifts agree on one delta — the
+    engine sits contiguously in a region, so its shift is constant.  This is
+    how a row recorded for the Japanese dump seeds the European one (the
+    engines are shared across regions), with the offset delta measured, never
+    guessed.  One sidecar line per translated dump; the music-index build
+    clones the row for it."""
+    import sqlite3
+    outdir.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(db)
+    con.row_factory = sqlite3.Row
+    rows = con.execute(
+        "SELECT id, source, platform, crc1, chunks, init_rom, play_rom FROM entry "
+        "WHERE crc1 IS NOT NULL AND chunks IS NOT NULL AND chunks != '[]' AND chunks != 'null'").fetchall()
+    plat_of = {"gb": ["gbs"], "gg": ["kss", "sgc"], "sms": ["kss", "sgc"], "sg": ["kss", "sgc"],
+               "mk3": ["kss", "sgc"], "msx": ["kss"], "nes": ["nsf", "nsfe"], "pce": ["hes"]}
+    dump_cache = {}
+    n_tr = 0
+    for r in rows:
+        plat = (r["platform"] or "").lower()
+        fmts = plat_of.get(plat)
+        if not fmts:
+            continue
+        dirs, exts, _ = PLATFORMS[fmts[0]]
+        if dirs[0] not in dump_cache:
+            dump_cache[dirs[0]] = load_dumps(root, dirs, exts)
+        dumps = dump_cache[dirs[0]]
+        src = dumps.get(int(r["crc1"], 16))
+        if not src:
+            continue
+        ch = [c for c in json.loads(r["chunks"]) if len(c) == 3]
+        if not ch:
+            continue
+        vpath = outdir / f"{r['id']}.verified"
+        done = read_crcs(vpath)
+        for crc, (path, rom) in dumps.items():
+            if crc == int(r["crc1"], 16) or crc in done:
+                continue
+            tch, deltas = [], set()
+            for crom, dest, ln in ch:
+                if crom + ln > len(src[1]):
+                    continue
+                d, _ = vote(src[1][crom:crom + ln], rom)
+                if d is None:
+                    continue
+                tch.append([crom + d, dest, ln])
+                deltas.add(d)
+            if not tch or len(deltas) > 1:      # the shift must be one constant
+                continue
+            shift = next(iter(deltas))
+            line = (f"dump crc={crc:08x} chunks="
+                    + ",".join(f"{a}:{b}:{c2}" for a, b, c2 in tch))
+            for k, what in (("init_rom", r["init_rom"]), ("play_rom", r["play_rom"])):
+                if what is None:
+                    continue
+                inside = [c for c in ch if c[0] <= what < c[0] + c[2]]
+                if not inside:
+                    continue
+                foff = inside[0][1] + (what - inside[0][0])
+                tgt = next((a + (foff - b) for a, b, _ in tch if b == inside[0][1]), None)
+                if tgt is None:
+                    continue
+                # the entry point's own bytes must have travelled verbatim
+                n = min(FRAG, len(src[1]) - what)
+                if src[1][what:what + n] == rom[tgt:tgt + n]:
+                    line += f" {k}={tgt}"
+            line += f" src={r['crc1']} rom={path.name}"
+            n_tr += 1
+            if not opts.dry_run:
+                with vpath.open("a") as f:
+                    f.write(line + "\n")
+            print(f"row {r['id']} ({r['source']}): {path.name} shift {shift:+#x}", flush=True)
+    return n_tr, len(rows)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -204,7 +283,16 @@ def main():
     ap.add_argument("--min-data", type=int, default=0x800, help="smallest rip block worth matching")
     ap.add_argument("--formats", default="gbs,nsf,nsfe,hes,kss")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--translate", action="store_true",
+                    help="re-locate every database row's engine block in the other local "
+                         "dumps of its platform (region sharing), not the rip files")
+    ap.add_argument("--db", default="output/music_index/music_index.sqlite3")
+    ap.add_argument("--translate-dir", default="output/bab/translate")
     args = ap.parse_args()
+    if args.translate:
+        n_tr, n_rows = translate_rows(args.db, Path(args.roms), Path(args.translate_dir), args)
+        print(f"translate: {n_tr} dump(s) translated from {n_rows} row(s)")
+        return
 
     root = Path(args.roms)
     dump_cache = {}
