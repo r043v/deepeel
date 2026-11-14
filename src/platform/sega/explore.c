@@ -3131,8 +3131,11 @@ int dp_sega_explore_command(int argc,char **argv) {
     static const char *const plats_sg[]={"SCSG"},*plats_sms[]={"SCSG","MK3"},*plats_gg[]={"GG"},*plats_msx[]={"MSX"};
     const char *const *plats=!strcmp(s->id,"sms")?plats_sms:!strcmp(s->id,"gg")?plats_gg:!strcmp(s->id,"msx")?plats_msx:plats_sg;
     DpMusicSeedStats mst;
+    static const char *const rip_dirs[]={"output/gbs","output/joshw"};
+    const char *rb=strrchr(argv[4],'/'); rb=rb?rb+1:argv[4];
+    DpMusicSeedCtx mctx={rip_dirs,2,image+header,(size_t)end-header,rb};   // the verification reads the image
     int mn=dp_music_seeds_cli(midx_file,plats,!strcmp(s->id,"sms")?2:1,image,(size_t)end,
-                              (size_t)end-header,NULL,&music_seeds,&music_n,&mst,NULL);
+                              (size_t)end-header,NULL,&music_seeds,&music_n,&mst,NULL,&mctx);
     if(mn==DP_MUSIC_SEEDS_LOAD_ERR && midx_file) { free(image); return 1; }
     if(mn==DP_MUSIC_SEEDS_ALLOC) { free(image); return 1; }
     if(mn>=0) { o.music_seeds=music_seeds; o.music_seed_count=(unsigned)mn; }

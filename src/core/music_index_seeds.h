@@ -40,10 +40,23 @@ typedef struct DpMusicSeedStats {
     int tier;               // highest tier that matched (0: nothing)
     int entries;            // index entries found for this dump
     int seeds, init_seeds;  // entry points queued (deduped, in range)
+    int auto_seeds;         // seeds from the runtime rip verification (ctx)
     int other_platform;     // hits on other platforms than the requested ones
     int no_entry_point;     // entries without any projected init_rom/play_rom
     int out_of_range;       // entries whose only points land outside this dump
 } DpMusicSeedStats;
+
+/* Runtime auto-verification context: when the index yields no seed for this
+ * dump but rip-file entries matched, their files are byte-verified against
+ * `raw` (the ROM image being explored) and the mapping is both seeded and
+ * written to the rip's .verified sidecar, so the next index build caches it. */
+typedef struct DpMusicSeedCtx {
+    const char *const *rip_dirs;   // where the rip files live (origin paths are relative to one)
+    size_t n_dirs;
+    const uint8_t *raw;            // the ROM image being explored
+    size_t raw_size;
+    const char *rom_name;          // dump file base name, for the sidecar line
+} DpMusicSeedCtx;
 
 /* Collects the seeds for one dump; `plats` are the platform names to accept
  * ("GB", "GG", "MK3", "SCSG", "MSX", "NES", "PCE").  `norm_title` may be NULL
@@ -53,6 +66,12 @@ typedef struct DpMusicSeedStats {
 int dp_music_seeds(const DpMusicIndex *ix, const char *const *plats, size_t nplat,
                    uint32_t crc, const char *norm_title, size_t rom_size,
                    DpMusicSeed **out, size_t *nout, DpMusicSeedStats *st);
+
+/* Same, with the runtime auto-verification context (NULL: like above). */
+int dp_music_seeds_full(const DpMusicIndex *ix, const char *const *plats, size_t nplat,
+                        uint32_t crc, const char *norm_title, size_t rom_size,
+                        const DpMusicSeedCtx *ctx, DpMusicSeed **out, size_t *nout,
+                        DpMusicSeedStats *st);
 
 /* CLI glue shared by every platform command that takes --music-index (the
  * per-platform code above it is the extractor, this is the one loading +
@@ -75,6 +94,6 @@ const char *dp_music_seeds_tier_name(int tier);
 int dp_music_seeds_cli(const char *midx_file, const char *const *plats, size_t nplat,
                        const uint8_t *raw, size_t raw_bytes, size_t rom_size,
                        const char *norm_title, DpMusicSeed **out, size_t *nout,
-                       DpMusicSeedStats *st, DpMusicIndex *keep_ix);
+                       DpMusicSeedStats *st, DpMusicIndex *keep_ix, const DpMusicSeedCtx *ctx);
 
 #endif

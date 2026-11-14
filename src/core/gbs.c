@@ -70,15 +70,22 @@ unsigned dp_gbs_verify(const DpGbs *g, const uint8_t *rom, size_t rom_size, doub
         m->bank[r].bytes = len;
         if (!len) continue;
         unsigned best = 0, second = 0, bbank = 0;
+        unsigned info = 0;                 // informative rip bytes of this bank (filler carries no evidence)
+        for (size_t i = 0; i < len; i++) info += g->data[d0 + i] != 0x00 && g->data[d0 + i] != 0xFF;
+        unsigned ieq_best = 0;             // how many of them the best ROM bank matches
         for (unsigned b = 0; b < nbanks; b++) {
             const uint8_t *rp = g->data + d0, *bp = rom + (size_t)b * 0x4000 + voff0;
-            unsigned eq = 0;
-            for (size_t i = 0; i < len; i++) eq += rp[i] == bp[i];
+            unsigned eq = 0, ieq = 0;
+            for (size_t i = 0; i < len; i++) {
+                eq += rp[i] == bp[i];
+                if (rp[i] != 0x00 && rp[i] != 0xFF) ieq += rp[i] == bp[i];
+            }
+            if (ieq > ieq_best) ieq_best = ieq;
             if (eq > best) { second = best; best = eq; bbank = b; }
             else if (eq > second) second = eq;
         }
         m->bank[r].rom_bank = bbank; m->bank[r].best = best; m->bank[r].second = second;
-        m->bank[r].matched = len && best >= (unsigned)(min_ratio * (double)len);
+        m->bank[r].matched = info >= 256 && ieq_best >= (unsigned)(min_ratio * (double)info);
         if (m->bank[r].matched) matched++;
     }
     if (matched) {   // path A: byte-identical banks carry their pcs directly

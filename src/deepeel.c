@@ -839,9 +839,12 @@ static int cmd_explore(int argc, char **argv) {
         dp_midx_norm_title(cart->rom + 0x134, norm, sizeof norm);
         DpMusicIndex mix;
         DpMusicSeed *mseeds = NULL; size_t mn = 0; DpMusicSeedStats mst;
+        const char *const rip_dirs[] = { "output/gbs", "output/joshw" };
+        const char *rb = strrchr(path, '/'); rb = rb ? rb + 1 : path;
+        DpMusicSeedCtx mctx = { rip_dirs, 2, cart->rom, cart->rom_size, rb };
         int mrc = dp_music_seeds_cli(midx_given ? (midx_path ? midx_path : "") : NULL,
                                      plats_gb, 1, cart->rom, cart->rom_size, cart->rom_size,
-                                     norm, &mseeds, &mn, &mst, &mix);
+                                     norm, &mseeds, &mn, &mst, &mix, &mctx);
         if ((mrc == DP_MUSIC_SEEDS_LOAD_ERR && midx_given) || mrc == DP_MUSIC_SEEDS_ALLOC) {
             free(gbs_pcs); free(gbs_bks); free(gbs_regs); dp_cart_free(cart);
             return 1;
@@ -855,6 +858,7 @@ static int cmd_explore(int argc, char **argv) {
                                       mseeds[i].pc, mseeds[i].bank, mseeds[i].a, mseeds[i].sp)) alloc_fail = 1;
             }
             for (size_t i = 0; i < mn; i++) {   // per-entry provenance: the tier that carried it and the rip
+                if (mseeds[i].entry == 0xFFFFFFFFu) continue;            // runtime-verified: no index row behind it
                 if (i && mseeds[i].entry == mseeds[i - 1].entry) continue;
                 DpMusicRec r; dp_midx_rec(&mix, mseeds[i].entry, &r);
                 char sinit[20] = "-", splay[20] = "-";
@@ -1784,12 +1788,20 @@ static int cmd_nes(int argc, char **argv) {
     size_t size;
     uint8_t *data = nes_read_file(path, &size);
     if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", path); return 1; }
-    {   // music-rip index: the shared glue reports the match for this dump, but
-        // the NES explorer seeds none of it yet (the rip tables carry no dump
-        // CRC and no projection) — never silent when points would exist
+    {   // music-rip index: the shared glue reports the match for this dump and
+        // runtime-verifies the local rips (the seeds are cached in the sidecars,
+        // ready for the explorer that will consume them) — never silent
         static const char *const plats[] = {"NES"};
+        const char *const rip_dirs[] = { "output/gbs", "output/joshw" };
+        const char *rb = strrchr(path, '/'); rb = rb ? rb + 1 : path;
+        const uint8_t *img = data; size_t img_size = size;   // the verification reads the image
+        if (size > 16 && !memcmp(data, "NES\x1a", 4)) {       // iNES: strip header (+ trainer)
+            img_size = data[4] * 0x4000u;
+            img = data + 16 + ((data[6] & 0x04) ? 512 : 0);
+        }
+        DpMusicSeedCtx mctx = { rip_dirs, 2, img, img_size, rb };
         DpMusicSeed *mseeds = NULL; size_t mn = 0; DpMusicSeedStats mst;
-        int mrc = dp_music_seeds_cli(midx_file, plats, 1, data, size, size, NULL, &mseeds, &mn, &mst, NULL);
+        int mrc = dp_music_seeds_cli(midx_file, plats, 1, data, size, size, NULL, &mseeds, &mn, &mst, NULL, &mctx);
         if ((mrc == DP_MUSIC_SEEDS_LOAD_ERR && midx_file) || mrc == DP_MUSIC_SEEDS_ALLOC) { free(data); return 1; }
         if (mn)
             fprintf(stderr, "deepeel: nes: %zu music-index entry points are available but this explorer seeds none of them yet\n", mn);
@@ -1955,12 +1967,17 @@ static int cmd_pce(int argc, char **argv) {
     size_t size;
     uint8_t *data = nes_read_file(path, &size);
     if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", path); return 1; }
-    {   // music-rip index: the shared glue reports the match for this dump, but
-        // the PCE explorer seeds none of it yet (the hes tables project no
-        // init/play into ROM space) — never silent when points would exist
+    {   // music-rip index: the shared glue reports the match for this dump and
+        // runtime-verifies the local rips (the seeds are cached in the sidecars,
+        // ready for the explorer that will consume them) — never silent
         static const char *const plats[] = {"PCE"};
+        const char *const rip_dirs[] = { "output/gbs", "output/joshw" };
+        const char *rb = strrchr(path, '/'); rb = rb ? rb + 1 : path;
+        const uint8_t *img = data; size_t img_size = size;   // the verification reads the image
+        if ((size & 0x1FFF) == 512) { img = data + 512; img_size = size - 512; }   // copier header
+        DpMusicSeedCtx mctx = { rip_dirs, 2, img, img_size, rb };
         DpMusicSeed *mseeds = NULL; size_t mn = 0; DpMusicSeedStats mst;
-        int mrc = dp_music_seeds_cli(midx_file, plats, 1, data, size, size, NULL, &mseeds, &mn, &mst, NULL);
+        int mrc = dp_music_seeds_cli(midx_file, plats, 1, data, size, size, NULL, &mseeds, &mn, &mst, NULL, &mctx);
         if ((mrc == DP_MUSIC_SEEDS_LOAD_ERR && midx_file) || mrc == DP_MUSIC_SEEDS_ALLOC) { free(data); return 1; }
         if (mn)
             fprintf(stderr, "deepeel: pce: %zu music-index entry points are available but this explorer seeds none of them yet\n", mn);

@@ -154,13 +154,13 @@ int main(int argc, char **argv) {
     {
         DpMusicSeed *cs = NULL; size_t cn = 0; DpMusicSeedStats cst;
         CHECK(dp_music_seeds_cli("no/such/music_index.bin", (const char *const[]){"NES"}, 1,
-                                 (const uint8_t *)"x", 1, 0x80000, NULL, &cs, &cn, &cst, NULL) == DP_MUSIC_SEEDS_LOAD_ERR);
+                                 (const uint8_t *)"x", 1, 0x80000, NULL, &cs, &cn, &cst, NULL, NULL) == DP_MUSIC_SEEDS_LOAD_ERR);
         if (access("output/music_index/music_index.bin", F_OK) != 0)
             CHECK(dp_music_seeds_cli(NULL, (const char *const[]){"NES"}, 1,
-                                     (const uint8_t *)"x", 1, 0x80000, NULL, &cs, &cn, &cst, NULL) == DP_MUSIC_SEEDS_NO_FILE);
+                                     (const uint8_t *)"x", 1, 0x80000, NULL, &cs, &cn, &cst, NULL, NULL) == DP_MUSIC_SEEDS_NO_FILE);
         DpMusicIndex kix;
         CHECK(dp_music_seeds_cli(path, (const char *const[]){"NES"}, 1,
-                                 (const uint8_t *)"x", 1, 0x80000, "tetris", &cs, &cn, &cst, &kix) == 1);
+                                 (const uint8_t *)"x", 1, 0x80000, "tetris", &cs, &cn, &cst, &kix, NULL) == 1);
         CHECK(cn == 1 && cst.tier == 2 && cst.entries == 1 && cst.init_seeds == 1);
         CHECK(cs[0].kind == 1 && cs[0].bank == 0 && cs[0].pc == 0x10 && cs[0].a == 0);
         free(cs);

@@ -112,6 +112,22 @@ couverture reste à chiffrer par campagne (l'attract d'Alex Kidd/Ristar exécute
 moteur à 3 M pas : 28,2 %/28,2 % et 50,6 %/50,6 % avec et sans graines — le contrepoint
 confirmé, le gain attendu porte sur les attract qui ne jouent pas la musique).
 
+0.339.0 : plus aucun prérequis — la vérification passe au runtime, sur toutes les
+plateformes. `src/core/rip_verify.c` relocalise un rip par vote de fragments dans le dump
+exploré (GBS délègue à `dp_gbs_verify` dont le verdict ne compte plus que les octets
+informatifs du rip — le remplissage 00/FF égal des deux côtés ne prouve rien ; NSF/NSFE en
+bloc linéaire, HES par banques 8 Ko à travers les pages MPR du header, KSS en linéaire) ;
+quand l'index ne donne **aucune** graine, deepeel balaie la bibliothèque locale de rips
+(`output/gbs`, `output/joshw`, ~7 s pour 1 625 rips grâce à un pré-écran par fragments),
+sème immédiatement ce qui se prouve, et écrit le sidecar — le build suivant le met en cache
+pour tout le monde. Pokémon Jaune (France), dont le titre d'en-tête ne matche aucun rip et
+le CRC n'est dans aucune base, reçoit désormais ses 2 graines (init $212C, play $205C) au
+runtime depuis le rip `DMG-APSJ-JPN.gbs`. Garde-fous mesurés : les fragments triviaux
+(00/FF) ne votent pas, un point d'entrée n'est consigné que si ses propres octets ont
+voyagé verbatim, et la recherche non guidée exige une banque alignée byte-identique (le
+repli par fragments de `dp_gbs_verify`, 3 votes locaux, ne suffit pas seul — un faux positif
+inter-catégories a été mesuré puis éliminé).
+
 0.333.0 : quand des banques matchent mais qu'un pc reste non projeté (une tranche de rip
 trop courte pour le seuil — un rip qui commence au milieu d'un `$4000` dont la tête fait
 56 octets), le vote de fragments porte désormais ce pc au lieu d'abandonner ; le vote ne
