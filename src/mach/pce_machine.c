@@ -190,6 +190,16 @@ static int pce_bank_view(DpMachine *m, unsigned bank) {
 // (MPR1) — an SP below that pops the hardware I/O page; a stack an MPR2+ page
 // maps into RAM is legal, so only the low bound cuts
 static int pce_cut_sp(DpMachine *m) { pce_ensure(m); return dp_pce_cpu().s < 0x2000; }
+// shared DP_DEST_* knowledge: the VDC data ports write graphics memory, the
+// PSG (mirrored every $0400 from $0800) is fed music data
+static uint8_t pce_data_dest(DpMachine *m, uint32_t a) {
+    (void)m;
+    uint32_t b = a & 0x1FFF;
+    if (b >= 0x0104 && b <= 0x0107) return DP_DEST_VRAM;   // the VDC data ports
+    uint32_t off = (b - 0x0800) & 0x03FF;                  // the PSG mirrors every $0400
+    if (b >= 0x0800 && off <= 9) return DP_DEST_MUSIC;
+    return DP_DEST_NONE;
+}
 // the HuC6280 mirrors RAM into MPR-mapped windows (no fixed echo page): no pc cut
 
 // technique 2 (interrupts): where the CPU unmasks (CLI, PLP, RTI, or a write to the interrupt
@@ -293,6 +303,7 @@ DpMachine *dp_machine_pce(void) {
     m->seed_regs = pce_seed_regs;
     m->bank_view = pce_bank_view;
     m->cut_sp = pce_cut_sp;
+    m->data_dest = pce_data_dest;
     m->frame = pce_frame;
     m->set_input = pce_set_input;
     return m;

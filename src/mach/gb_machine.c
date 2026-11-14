@@ -118,6 +118,18 @@ static int gb_bank_view(DpMachine *m, unsigned bank) {
 // real code (HRAM $FF00+ does — the boot code runs there); a stack outside
 // WRAM/HRAM pops garbage
 static int gb_cut_pc(DpMachine *m, uint32_t pc) { (void)m; return pc >= 0xE000 && pc < 0xFF00; }
+// shared DP_DEST_* knowledge: where a write lands in the hardware (the GB's
+// finer DP_DF_* types project onto these same destinations)
+static uint8_t gb_data_dest(DpMachine *m, uint32_t a) {
+    (void)m;
+    if (a >= 0x8000 && a < 0xA000) return DP_DEST_VRAM;
+    if (a >= 0xFE00 && a < 0xFEA0) return DP_DEST_OAM;
+    if (a >= 0xFF10 && a <= 0xFF25) return DP_DEST_MUSIC;
+    if (a >= 0xFF30 && a <= 0xFF3F) return DP_DEST_SAMPLE;
+    if (a == 0xFF47 || a == 0xFF48 || a == 0xFF49 || a == 0xFF69 || a == 0xFF6B) return DP_DEST_CRAM;
+    if (a >= 0xA000 && a < 0xC000) return DP_DEST_SRAM;
+    return DP_DEST_NONE;
+}
 static int gb_cut_sp(DpMachine *m) { uint16_t sp = gbw(m)->d->api->gbr->sp; return sp < 0xC000 || sp > 0xFFFE; }
 static uint64_t gb_frame(DpMachine *m) { return *gbw(m)->d->api->frame; }
 // kernel mask (up down left right button1 button2 start select) -> the engine's set_buttons layout
@@ -275,6 +287,7 @@ static DpMachine *gb_wrap(DpMach *impl) {
     m->bank_view = gb_bank_view;
     m->cut_pc = gb_cut_pc;
     m->cut_sp = gb_cut_sp;
+    m->data_dest = gb_data_dest;
     m->poke = gb_poke;
     m->set_input = gb_set_input;
     m->frame = gb_frame;

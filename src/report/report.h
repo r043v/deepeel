@@ -44,7 +44,8 @@ char dp_block_class(const DpResults *res, int bank, int block);
 // ---- .map: classification of 100% of the ROM (see map.c)
 enum { DP_MAP_UNKNOWN, DP_MAP_CODE_NAT, DP_MAP_CODE_FORCED, DP_MAP_CODE_STATIC,
        DP_MAP_DATA_COPIED, DP_MAP_DATA_READ, DP_MAP_DATA_STATIC, DP_MAP_TABLE, DP_MAP_PAD,
-       DP_MAP_INF_DATA, DP_MAP_INF_CODE, DP_MAP_INF_PAD, DP_MAP_PROB_CODE, DP_MAP_PROB_DATA, DP_MAP_COUNT };
+       DP_MAP_INF_DATA, DP_MAP_INF_CODE, DP_MAP_INF_PAD, DP_MAP_PROB_CODE, DP_MAP_PROB_DATA,
+       DP_MAP_DATA_MUSIC, DP_MAP_DATA_SAMPLE, DP_MAP_DATA_CRAM, DP_MAP_DATA_VRAM, DP_MAP_COUNT };
 typedef struct DpMapSummary {
     uint64_t total, known, unknown, code, data, pad, inferred, probable, probable_data;
     uint64_t cls[DP_MAP_COUNT];
@@ -66,6 +67,7 @@ uint8_t *dp_map_kinds(const DpResults *res, uint64_t count[DP_MAP_KINDS]);
 const uint8_t *dp_map_rgb(int cls); // the .map.png colour of a class (3 bytes)
 int dp_map_is_code(int c);
 int dp_map_is_data(int c);
+void dp_map_apply_dest(uint8_t *classes, size_t n, const uint8_t *dest);   // typed-data classes from the DP_DEST_* map
 void dp_map_summary_text(const DpMapSummary *s, DpBuf *out);
 // the unclassified ranges (largest first), from a dp_map_build array
 void dp_map_residual_text(const DpResults *res, const uint8_t *m, DpBuf *out);

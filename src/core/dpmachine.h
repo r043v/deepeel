@@ -169,6 +169,11 @@ struct DpMachine {
     // NULL: no cut from this machine; every cut is counted, never silent.
     int (*cut_pc)(struct DpMachine *, uint32_t pc);
     int (*cut_sp)(struct DpMachine *);
+    // Optional data-destination knowledge (the shared DP_DEST_* model in
+    // coverage.h): where a write to `addr` lands in the hardware (VRAM, OAM,
+    // palette, sound registers...).  0 = untyped.  The kernel records the
+    // destination of the data each ROM byte fed; NULL: no typing here.
+    uint8_t (*data_dest)(struct DpMachine *, uint32_t addr);
     // writes one byte through the machine's memory map, unobserved (NULL: unsupported);
     // the entry point of the RAM-seeding techniques (docs/PLAN-MUTUALISATION.fr.md, step 3)
     void (*poke)(struct DpMachine *, uint32_t addr, uint8_t value);

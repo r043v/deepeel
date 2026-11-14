@@ -25,6 +25,18 @@ enum { // types (u32), second projection (kept open for later milestones)
     DP_T_IRQ = 1 << 2,    // inside an IRQ handler
     DP_T_VERBATIM = 1 << 3,
 };
+enum { // data destinations (u8, one per ROM index, 0 = untyped): where the
+       // data read from this byte ends up — the machine's hardware knowledge
+       // (DpMachine.data_dest), shared by every engine (GB's finer DP_DF_*
+       // project onto these)
+    DP_DEST_NONE = 0,
+    DP_DEST_VRAM = 1,      // graphics memory (tiles, nametables, patterns)
+    DP_DEST_OAM = 2,       // sprite memory
+    DP_DEST_CRAM = 3,      // palette/color memory
+    DP_DEST_MUSIC = 4,     // sound registers fed with music data (notes, instruments)
+    DP_DEST_SAMPLE = 5,    // sound memory fed with sample data (wave tables, DMC)
+    DP_DEST_SRAM = 6,      // cartridge save memory
+};
 enum { // sources (u32), OR-ed
     DP_SRC_SESSION = 1 << 0,      // played session (TAS, random, human)
     DP_SRC_FORK_NATURAL = 1 << 1, // fork explorer, natural flow

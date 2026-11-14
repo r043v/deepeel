@@ -89,6 +89,16 @@ static int md_seed_regs(DpMachine *m, uint8_t a, uint16_t sp) {
 // an SP below that pops ROM or bus garbage (no echo/I-O pc cut: the MD maps
 // nothing a path could reasonably execute into and call code)
 static int md_cut_sp(DpMachine *m) { return dp_mdmach_sp(((MdMachWrap *)m->impl)->m) < 0xFF0000u; }
+// shared DP_DEST_* knowledge: the PSG ($C00011) is fed music data, the VDP
+// data port ($C00000) writes graphics memory (the CRAM/VSRAM distinction
+// needs the VDP address register state, not exposed by the runtime: VRAM)
+static uint8_t md_data_dest(DpMachine *m, uint32_t a) {
+    (void)m;
+    if ((a & 0xFFFFFFu) == 0xC00011u) return DP_DEST_MUSIC;
+    if ((a & 0xFFFFFFu) >= 0xC00000u && (a & 0xFFFFFFu) <= 0xC00003u) return DP_DEST_VRAM;
+    if ((a & 0xFFFFFFu) >= 0x200000u && (a & 0xFFFFFFu) <= 0x20FFFFu) return DP_DEST_SRAM;
+    return DP_DEST_NONE;
+}
 
 // kernel mask (up down left right button1 button2 start) -> MD pad bits
 // (0-3 directions, 16 A, 32 B, 64 C, 128 Start): button1 holds A and C, button2 B
@@ -214,6 +224,7 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->set_input = md_set_input;
     m->seed_regs = md_seed_regs;   // no 68000 mapper: bank_view stays NULL (sans objet)
     m->cut_sp = md_cut_sp;
+    m->data_dest = md_data_dest;
     m->frame = md_frame;
     return m;
 }

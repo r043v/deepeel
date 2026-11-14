@@ -103,6 +103,7 @@ typedef struct DpCoreResult {
     uint32_t *src_flags;       // per ROM index: DP_SRC_* (core/coverage.h), OR-ed over every proving source
     uint64_t *first_seen;      // per ROM index: global step count when first covered (0: never)
     uint8_t *flags;            // per ROM index: DP_CORE_NATURAL | DP_CORE_FORCED
+    uint8_t *dest;             // per ROM index: DP_DEST_* where this byte's data ends up (0: untyped)
     size_t rom_size;
     uint64_t steps, paths, forks;
     uint64_t cooperative_yields; // active paths requeued to let pending work run

@@ -119,7 +119,7 @@ const char *dp_map_class_name(int c) {
 }
 
 int dp_map_is_code(int c) { return c == DP_MAP_CODE_NAT || c == DP_MAP_CODE_FORCED || c == DP_MAP_CODE_STATIC || c == DP_MAP_INF_CODE || c == DP_MAP_PROB_CODE; }
-int dp_map_is_data(int c) { return c == DP_MAP_DATA_COPIED || c == DP_MAP_DATA_READ || c == DP_MAP_DATA_STATIC || c == DP_MAP_TABLE || c == DP_MAP_INF_DATA || c == DP_MAP_PROB_DATA; }
+int dp_map_is_data(int c) { return c == DP_MAP_DATA_COPIED || c == DP_MAP_DATA_READ || c == DP_MAP_DATA_STATIC || c == DP_MAP_TABLE || c == DP_MAP_INF_DATA || c == DP_MAP_PROB_DATA || c == DP_MAP_DATA_MUSIC || c == DP_MAP_DATA_SAMPLE || c == DP_MAP_DATA_CRAM || c == DP_MAP_DATA_VRAM; }
 
 // what each exploration method first saw, in % of the whole ROM (tas, rng,
 // fork, attract, static+inferred): the per-byte first-seen journal is the
@@ -242,7 +242,7 @@ static float *map_data_model(const uint8_t *rom, size_t rsz, const uint8_t *m, s
                 int c = m[i];
                 uint32_t key = (uint32_t)rom[i - 1] << 8 | rom[i];
                 if (c == DP_MAP_CODE_NAT) { cc[key]++; nc++; }
-                else if (c == DP_MAP_DATA_COPIED || c == DP_MAP_DATA_READ || c == DP_MAP_DATA_STATIC || c == DP_MAP_TABLE) { dc[key]++; nd++; }
+                else if (dp_map_is_data(c)) { dc[key]++; nd++; }
             }
     }
     if (!cc || !dc || !llr || nc < 4096 || nd < 4096) { free(llr); llr = NULL; }
@@ -284,6 +284,21 @@ static int map_probable_data(const float *llr, const uint8_t *rom, size_t i, siz
     double s = 0;
     for (size_t k = i + 1; k < j; k++) s += llr[(uint32_t)rom[k - 1] << 8 | rom[k]];
     return s / (double)(j - i) >= MAP_PDATA_THRESHOLD;
+}
+
+// typed data: a data class whose byte's destination is known (the machine's
+// DP_DEST_* knowledge, the kernel's dest array) becomes the typed class — the
+// type then shows in the .map.png palette
+void dp_map_apply_dest(uint8_t *classes, size_t n, const uint8_t *dest) {
+    if (!classes || !dest) return;
+    for (size_t i = 0; i < n; i++) {
+        if (!dest[i]) continue;
+        int t = dest[i] == DP_DEST_MUSIC ? DP_MAP_DATA_MUSIC
+              : dest[i] == DP_DEST_SAMPLE ? DP_MAP_DATA_SAMPLE
+              : dest[i] == DP_DEST_CRAM ? DP_MAP_DATA_CRAM
+              : dest[i] == DP_DEST_VRAM || dest[i] == DP_DEST_OAM ? DP_MAP_DATA_VRAM : -1;
+        if (t >= 0 && dp_map_is_data(classes[i])) classes[i] = (uint8_t)t;
+    }
 }
 
 uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
@@ -650,6 +665,10 @@ static const uint8_t map_rgb[DP_MAP_COUNT][3] = {
     { 0xa0, 0xa0, 0xa0 }, // inferred-padding
     { 0xe8, 0xa0, 0x40 }, // probable-code (uncertain)
     { 0x7a, 0xb8, 0x9a }, // probable-data (uncertain)
+    { 0x9a, 0x5a, 0xd1 }, // data -> sound registers, music data
+    { 0xd1, 0x5a, 0x9a }, // data -> sound memory, sample data
+    { 0xd1, 0x8a, 0x3a }, // data -> palette/color memory
+    { 0x4a, 0xa0, 0x8a }, // data -> graphics memory (tiles, nametables)
 };
 const uint8_t *dp_map_rgb(int cls) { return map_rgb[cls >= 0 && cls < DP_MAP_COUNT ? cls : 0]; }
 

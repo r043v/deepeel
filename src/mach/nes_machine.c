@@ -88,6 +88,14 @@ static int nes_bank_view(DpMachine *m, unsigned bank) {
 // holds code; the RAM mirrors $0800-$1FFF are ordinary RAM (code lives there
 // after a copy), and the 6502 stack page is always valid RAM (no stack cut)
 static int nes_cut_pc(DpMachine *m, uint32_t pc) { (void)m; return pc >= 0x2000 && pc < 0x4020; }
+// shared DP_DEST_* knowledge: $2007 goes to VRAM or the palette by the current
+// PPU address, $4014 is the OAM DMA page, $4011 the DMC direct load
+static uint8_t nes_data_dest(DpMachine *m, uint32_t a) {
+    if (a == 0x2007) return dp_nesmach_ppu_v(nes_impl(m)) >= 0x3F00u ? DP_DEST_CRAM : DP_DEST_VRAM;
+    if (a == 0x4014) return DP_DEST_OAM;
+    if (a == 0x4011) return DP_DEST_SAMPLE;
+    return DP_DEST_NONE;
+}
 static uint32_t nes_pc(DpMachine *m) { return dp_nesmach_pc(nes_impl(m)); }
 static void nes_set_pc(DpMachine *m, uint32_t pc) { dp_nesmach_set_pc(nes_impl(m), pc); }
 // kernel pad mask (bit0 up, 1 down, 2 left, 3 right, 4 button 1, 5 button 2, 6 start)
@@ -153,6 +161,7 @@ DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err
     m->seed_regs = nes_seed_regs;
     m->bank_view = nes_bank_view;
     m->cut_pc = nes_cut_pc;
+    m->data_dest = nes_data_dest;
     m->run = nes_run;
     m->observe = nes_observe;
     m->close = nes_close;

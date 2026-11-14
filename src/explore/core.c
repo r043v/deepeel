@@ -108,6 +108,7 @@ size_t dp_core_sections(const DpCoreResult *r, DpCoreSection *out, size_t cap) {
 void dp_core_result_free(DpCoreResult *r) {
     dp_ramarch_free(&r->ra);
     free(r->flags);
+    free(r->dest);
     free(r->src_flags);
     free(r->first_seen);
     memset(r, 0, sizeof *r);
@@ -457,6 +458,11 @@ static void obs_write(void *u, uint32_t addr, uint8_t v) {
     if (o->run_hi >= 0 && o->m->rom_index(o->m, addr) < 0) o->run_writes++;
     if (o->last_rom < 0 || o->age > 4) return;
     if (o->m->rom_index(o->m, addr) < 0 && v != o->last_val && o->fedprod && !o->forced) o->fedprod[addr & 0xFFFF] = (uint32_t)o->last_rom + 1;
+    if (o->m->data_dest) {   // the write's hardware destination types the data the last ROM read fed
+        uint8_t dest = o->m->data_dest(o->m, addr);
+        if (dest && o->last_rom >= 0 && (size_t)o->last_rom < o->r->rom_size)
+            __atomic_store_n(&o->r->dest[o->last_rom], dest, __ATOMIC_RELAXED);
+    }
     if (o->m->rom_index(o->m, addr) < 0 && v == o->last_val) {
         if (o->forced) o->r->copy_forced++;
         else {
@@ -1496,9 +1502,10 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     if (!m || !m->isa || !m->run || !m->save || !m->load || !m->fetch || !m->rom_index) return 0;
     if (!m->pc || !m->set_pc) { out->no_pc = 1; return 1; }
     out->flags = calloc(rom_size ? rom_size : 1, 1);
+    out->dest = calloc(rom_size ? rom_size : 1, 1);
     out->src_flags = calloc(rom_size ? rom_size : 1, sizeof *out->src_flags);
     out->first_seen = calloc(rom_size ? rom_size : 1, sizeof *out->first_seen);
-    if (!out->flags || !out->src_flags || !out->first_seen) { dp_core_result_free(out); return 0; }
+    if (!out->flags || !out->dest || !out->src_flags || !out->first_seen) { dp_core_result_free(out); return 0; }
 
     Shared sh;
     memset(&sh, 0, sizeof sh);
@@ -1524,6 +1531,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         if (!wm) break;                       // fewer workers than asked: reported
         w->sh = &sh; w->m = wm; w->idx = i;
         w->loc.flags = out->flags; w->loc.src_flags = out->src_flags;
+        w->loc.dest = out->dest;
         w->loc.first_seen = out->first_seen; w->loc.rom_size = rom_size;
         w->visits = calloc(0x10000, sizeof *w->visits);
         w->capped = calloc(0x10000, sizeof *w->capped);

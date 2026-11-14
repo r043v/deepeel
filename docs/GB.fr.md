@@ -178,6 +178,27 @@ du Pending, propagé au spool). Motivation mesurée : sur `fix_branch`, la couve
 l'octet vecteur `$0040` venait d'un chemin poubelle (le `ret` de la pile zéro du boot qui
 glisse dans le padding jusqu'au vecteur) — le semis de vecteurs la remplace proprement.
 
+0.343.0 : le **typage data par destination devient commun** — la connaissance « ces octets
+lus en ROM finissent dans la VRAM / l'OAM / la palette / les registres sonores » quitte les
+drapeaux fins du seul explorateur GB (`DP_DF_*`) pour l'énum partagée `DP_DEST_*`
+(`src/core/coverage.h`) et le hook machine optionnel `DpMachine.data_dest(addr)` :
+GB (VRAM `$8000-$9FFF`, OAM `$FE00-$FE9F`, musique `$FF10-$FF25`, samples `$FF30-$FF3F`,
+palette `$FF47-$FF49`/`$FF69`/`$FF6B`, SRAM `$A000-$BFFF`), NES (`$2007` VRAM ou palette
+selon l'adresse PPU courante, `$4014` OAM, `$4011` sample DMC), Sega (PSG `$7E/$7F` et FM
+GG `$F0/$F1` musique, port data VDP `$BE` graphismes), PCE (ports data VDC `$0104-$0107`
+graphismes, PSG miroirs `$0800+` musique), MD (PSG `$C00011` musique, port data VDP
+`$C00000-$C00003` graphismes, SRAM `$200000-$20FFFF`). Le noyau enregistre la destination
+de la donnée que chaque octet ROM a alimentée (`DpCoreResult.dest`, un octet par index,
+écrit par l'observateur de copies quand la donnée fraîchement lue part vers un registre
+typé) et le writer de carte commun applique la teinte (`dp_map_apply_dest`) : quatre
+nouvelles classes de carte `data-musique` / `data-sample` / `data-palette` / `data-vram`
+avec leurs couleurs — **le type de donnée remonte enfin dans le PNG**, mutualisé sur
+toutes les plateformes (preuve, observation de l'outil : Zelda Link's Awakening France,
+noyau 400 k pas — 641 octets de données musicales teintés dans la carte). Les distinctions
+qui demandent l'état interne d'un composant non exposé (CRAM vs VRAM du VDP Sega/MD) sont
+documentées comme VRAM, pas devinées ; le modèle GB fin (`DP_DF_*`) reste en place et
+projette sur ces mêmes destinations.
+
 0.333.0 : quand des banques matchent mais qu'un pc reste non projeté (une tranche de rip
 trop courte pour le seuil — un rip qui commence au milieu d'un `$4000` dont la tête fait
 56 octets), le vote de fragments porte désormais ce pc au lieu d'abandonner ; le vote ne

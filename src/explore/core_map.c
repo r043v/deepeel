@@ -30,6 +30,7 @@ int dp_core_write_map(const char *path, const char *id, const char *rom_name, co
     if (!path || !path[0]) return 0;
     uint8_t *m = dp_core_map_build(r);
     if (!m) return -1;
+    dp_map_apply_dest(m, r->rom_size, r->dest);   // typed data shows in the .png palette
     size_t pl = strlen(path);
     int ok;
     if (pl >= 4 && !strcmp(path + pl - 4, ".png")) {

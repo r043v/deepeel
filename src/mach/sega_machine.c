@@ -98,6 +98,15 @@ static int sega_cut_sp(DpMachine *m) {
     uint16_t sp = ((SegaMach *)m->impl)->b->cpu()->sp;
     return ((SegaMach *)m->impl)->msx ? sp < 0xE000 : sp < 0xC000;
 }
+// shared DP_DEST_* knowledge: the PSG and the GG's FM are fed music data, the
+// VDP data port ($BE) writes graphics memory (CRAM/vram distinctions need the
+// VDP address register state, which the backend does not expose: VRAM it is)
+static uint8_t sega_data_dest(DpMachine *m, uint32_t a) {
+    (void)m;
+    if (a == 0x7E || a == 0x7F || a == 0xF0 || a == 0xF1) return DP_DEST_MUSIC;
+    if (a == 0xBD || a == 0xBE) return DP_DEST_VRAM;
+    return DP_DEST_NONE;
+}
 
 // the base write callback bypasses the observation wrapper: a poke is not a CPU access
 static void sega_poke(DpMachine *m, uint32_t a, uint8_t v) {
@@ -223,6 +232,7 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->bank_view = sega_bank_view;
     m->cut_pc = sega_cut_pc;
     m->cut_sp = sega_cut_sp;
+    m->data_dest = sega_data_dest;
     m->poke = sega_poke;
     m->set_input = sega_set_input;
     if (b->frame_count) m->frame = sega_frame;
