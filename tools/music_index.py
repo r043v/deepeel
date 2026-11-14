@@ -436,27 +436,51 @@ def _rom_entry_points(proj):
     """Project init/play into ROM space through the chunks.
 
     The rip file body loads linearly at `load` (ROM-validated): rip address A
-    lives at file offset A - load; the chunk with dest <= foff < dest+len maps
-    it to rom_index = rom + (foff - dest).  Addresses inside the ripper's own
-    stub (below the first chunk dest) stay None - they are not ROM data."""
+    lives at data offset A - load.  Two chunk shapes:
+    - 2022 `C rom,dest,len` (3 fields): the chunk with dest <= foff < dest+len
+      maps it to rom_index = rom + (foff - dest).  Direct ranges only: the
+      multi-chunk rows copy scattered pieces, so there is no single linear map.
+    - 2010 `romStart:destStart-romEnd:destEnd` (4 fields, inclusive ends, data
+      space: 516/531 play cross-checks exact against the 2022 siblings): same
+      direct mapping first; then, when every chunk of the row shares one base
+      (rom0 - dest0, one contiguous extract), a play address the ranges do not
+      cover (the ripper's stub region before the extract) projects by that
+      base — cross-validated 241/259 on the 2022 siblings, so it is a play-only
+      fallback, never allowed to override a direct range and never applied to
+      init (1/14: the init wrapper is stub-local, projecting it would seed 93%
+      wrong addresses)."""
     # indices in the make_projection tuple (before the rom columns are inserted)
     load, init, play = proj[15], proj[18], proj[19]
     chunks = json.loads(proj[26]) if isinstance(proj[26], str) else (proj[26] or [])
     if load is None or not chunks:
         return [None, None]
 
-    def proj_addr(a):
+    def proj_addr(a, allow_base):
         if a is None or a < load:
             return None
         foff = a - load
+        bases = set()
+        hit = None
         for t in chunks:
-            if len(t) != 3:
-                return None  # 2010 ranges: different shape, skip
-            rom, dest, ln = t
-            if dest <= foff < dest + ln:
-                return rom + (foff - dest)
+            if len(t) == 3:
+                rom, dest, ln = t
+                if dest <= foff < dest + ln:
+                    return rom + (foff - dest)
+            elif len(t) == 4:   # 2010 romStart:destStart-romEnd:destEnd
+                rom0, d0, rom1, d1 = t
+                bases.add(rom0 - d0)
+                if d0 <= foff <= d1:
+                    hit = rom0 + (foff - d0)
+        if hit is not None:
+            return hit
+        # base fallback, play only: the play wrapper is stable across ripper
+        # generations (241/259 exact against the 2022 siblings) while the init
+        # wrapper is stub-local (1/14 — projecting it would seed 93% wrong
+        # addresses), so init outside every range stays None
+        if allow_base and len(bases) == 1:   # one contiguous extract
+            return next(iter(bases)) + foff
         return None
-    return [proj_addr(init), proj_addr(play)]
+    return [proj_addr(init, False), proj_addr(play, True)]
 
 
 def build(bab_dir, rip_dirs, dbfile, alias_files=()):

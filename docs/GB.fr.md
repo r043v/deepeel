@@ -36,6 +36,20 @@ les graines, 98 avec ; avec le scan 40 000 graines par défaut, +1 octet seuleme
 de l'index y restent le contrepoint confirmé. `DEEPEEL_MIDX_DEBUG=1` liste chaque entrée
 touchée avec son palier, sa position et sa clé de jeu.
 
+0.335.0 : les 1780 lignes 2010 (chunks `romStart:destStart-romEnd:destEnd`, 4 champs, bornes
+inclusives, espace data) sont projetées à leur tour — avant, leur forme différente les
+faisait toutes sauter. Validation croisée contre les sœurs 2022 du même `game_key` et même
+CRC de dump : 516/531 play exacts en projection directe. En repli seulement (aucun range ne
+couvre l'adresse, toutes les chunks de la ligne partagent une base `rom0-dest0` — une seule
+extraction contiguë), un **play** dans la zone de stub du ripper se projette par cette base :
+241/259 exacts contre les sœurs 2022. Le repli ne s'applique **pas** à init (1/14 : l'init du
+rip est le stub du ripper, la projeter semerait 93 % d'adresses fausses) — init reste en
+projection directe (8 lignes 2010). Totaux du catalogue : 225 init_rom, 2245 play_rom
+projectés. Super Mario Land : les play 2010 repliés coïncident exactement avec les play 2022
+directs (0xE6F2 / 0xE5F2), couverture inchangée (98 octets de moteur exécutés, sans scan) ;
+débloquer le moteur entier demanderait de semer init avec le numéro de chanson dans A,
+capacité noyau qui n'existe pas encore.
+
 0.333.0 : quand des banques matchent mais qu'un pc reste non projeté (une tranche de rip
 trop courte pour le seuil — un rip qui commence au milieu d'un `$4000` dont la tête fait
 56 octets), le vote de fragments porte désormais ce pc au lieu d'abandonner ; le vote ne
