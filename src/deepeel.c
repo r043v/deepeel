@@ -14,6 +14,9 @@
 #include "core/md5.h"
 #include "core/cart.h"
 #include "core/cart_md.h"
+#include "core/gbs.h"
+#include "core/zip.h"   // dp_read_rom_file: the GBS rip may also be read from a zip member
+int dp_gbs_fetch(const char *game, const char *dir, char *out_gbs, size_t cap, char *err, size_t errsz);   // core/gbsfetch.c (network, not in the core lib)
 #include "explore/frontier.h"
 #include "explore/md_trace.h"
 #include "core/machine.h"
@@ -180,6 +183,13 @@ static void usage(void) {
             "    --entry bank:addr    extra seed (repeatable)\n"
             "    --seed-banks         also seed every bank at $4000\n"
             "    --no-pointer-scan    disable pointer-table seeding\n"
+            "    --gbs FILE           GBS rip of this game: verify against the ROM (per-bank\n"
+            "                         best match, DEEPEEL_GBS_MATCH, default 90%) and seed the\n"
+            "                         confirmed init/play entry points\n"
+            "    --gbs-fetch [NAME]   fetch the rip from gbs.joshw.info first (NAME defaults to\n"
+            "                         the ROM file name without its (...) tags; give the ROM\n"
+            "                         path before this option when NAME is omitted)\n"
+            "    --gbs-dir DIR        GBS download directory (default output/gbs)\n"
             "    --no-context-evict   disable same-context eviction\n"
             "    --no-irq-fork        disable IRQ forking\n"
             "    --no-closure         disable the static flow closure (and its seeds)\n"
@@ -394,11 +404,26 @@ static void write_ramcode(const DpResults *res, const char *path) {
                "%u dropped)\n", nv, ni, path, nf, ns, nd);
 }
 
+// append extra {pc, bank} seeds to the kernel's arrays (the caller's extras are copied);
+// 0 ok, -1 on allocation failure (the existing seeds are kept)
+static int core_seed_append(uint32_t **pcs, uint16_t **bks, size_t *n, const uint32_t *apcs, const uint16_t *abks, size_t an) {
+    if (!an) return 0;
+    uint32_t *p = realloc(*pcs, (*n + an) * sizeof *p);
+    uint16_t *b = realloc(*bks, (*n + an) * sizeof *b);
+    if (!p || !b) { free(p); return -1; }
+    memcpy(p + *n, apcs, an * sizeof *p);
+    memcpy(b + *n, abks, an * sizeof *b);
+    *pcs = p; *bks = b; *n += an;
+    return 0;
+}
+
 static int cmd_explore(int argc, char **argv) {
     int nocredit_set = 0;
     const char *rtcode_path = NULL, *ramcode_path = NULL;
     const char *json = NULL, *text = NULL, *cov = NULL, *romdata = NULL, *map = NULL, *html = NULL, *path = NULL;
     const char *from_png = NULL, *export_dir = NULL, *summary = NULL;
+    const char *gbs_path = NULL, *gbs_name = NULL, *gbs_dir = NULL;
+    int gbs_fetch = 0;
     const char *tas_dirs[64];
     int tas_dirs_n = 0;
     const char *stop_txt = "explore-only";
@@ -469,6 +494,12 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--seed-cap") && i + 1 < argc) cfg.seed_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed-banks")) cfg.seed_banks = 1;
         else if (!strcmp(a, "--no-pointer-scan")) cfg.no_pointer_scan = 1;
+        else if (!strcmp(a, "--gbs") && i + 1 < argc) gbs_path = argv[++i];
+        else if (!strcmp(a, "--gbs-fetch")) {   // optional NAME; when omitted it is derived from the ROM file name
+            gbs_fetch = 1;
+            if (i + 1 < argc && argv[i + 1][0] != '-') gbs_name = argv[++i];
+        }
+        else if (!strcmp(a, "--gbs-dir") && i + 1 < argc) gbs_dir = argv[++i];
         else if (!strcmp(a, "--no-context-evict")) cfg.no_context_evict = 1;
         else if (!strcmp(a, "--no-irq-fork")) cfg.no_irq_fork = 1;
         else if (!strcmp(a, "--no-key-fork")) cfg.no_key_fork = 1;
@@ -614,6 +645,78 @@ static int cmd_explore(int argc, char **argv) {
         fprintf(stderr, "deepeel: %s\n", err);
         return 1;
     }
+    // GBS rip: --gbs-fetch downloads the game's rip from gbs.joshw.info, --gbs reads a
+    // local file; the data block is verified against this ROM (per-bank best match —
+    // rips are patched and trimmed) and its init/play become confirmed seeds, the
+    // counterpart of the speculative pointer scan.  Never silent: the full match report.
+    DpGbs gbs; DpGbsMatch gmatch; memset(&gmatch, 0, sizeof gmatch);
+    uint32_t gbs_pcs[2] = {0, 0}; uint16_t gbs_bks[2] = {0, 0}; int gbs_seeds = 0;
+    if (gbs_path || gbs_fetch) {
+        char gpath[1024], gerr[256];
+        if (gbs_path) snprintf(gpath, sizeof gpath, "%s", gbs_path);
+        else {
+            const char *name = gbs_name; char auto_name[256];
+            if (!name) {   // ROM file name minus its (...) tags and extension, like tasfetch
+                const char *b = strrchr(path, '/'); b = b ? b + 1 : path;
+                size_t k = 0; int depth = 0;
+                for (; *b && k + 1 < sizeof auto_name; b++) {
+                    if (*b == '(') depth++;
+                    else if (*b == ')') { if (depth) depth--; }
+                    else if (!depth) auto_name[k++] = *b;
+                }
+                auto_name[k] = 0;
+                char *dot = strrchr(auto_name, '.'); if (dot && dot != auto_name) *dot = 0;
+                name = auto_name;
+            }
+            if (dp_gbs_fetch(name, gbs_dir ? gbs_dir : "output/gbs", gpath, sizeof gpath, gerr, sizeof gerr)) {
+                fprintf(stderr, "deepeel: --gbs-fetch: %s\n", gerr);
+                dp_cart_free(cart);
+                return 1;
+            }
+        }
+        size_t gn; uint8_t *gbuf = dp_read_rom_file(gpath, &gn, gerr, sizeof gerr);
+        if (!gbuf || dp_gbs_parse(gbuf, gn, &gbs, gerr, sizeof gerr)) {
+            fprintf(stderr, "deepeel: --gbs %s: %s\n", gpath, gerr);
+            free(gbuf);
+            dp_cart_free(cart);
+            return 1;
+        }
+        double thr = 0.9;
+        if (getenv("DEEPEEL_GBS_MATCH")) {
+            double v = atof(getenv("DEEPEEL_GBS_MATCH"));
+            if (v > 0 && v <= 1) thr = v;
+        }
+        unsigned nmatch = dp_gbs_verify(&gbs, cart->rom, cart->rom_size, thr, &gmatch);
+        printf("gbs: \"%s\" songs %u first %u load $%04x init $%04x play $%04x (data %zu bytes, match %u/%u banks, threshold %.0f%%)\n",
+               gbs.title, gbs.songs, gbs.first, gbs.load, gbs.init, gbs.play, gbs.data_size, nmatch, gmatch.rip_banks, thr * 100);
+        if (gmatch.frag_scanned)   // no bank matched: the rip relocated by fragment vote
+            printf("gbs: no byte-identical bank; fragments %u/%u found in ROM, dominant delta $%zx (%u votes)\n",
+                   gmatch.frag_matched, gmatch.frag_total, gmatch.frag_dom_delta, gmatch.frag_dom_votes);
+        for (unsigned r = 0; r < gmatch.rip_banks; r++) {
+            if (!gmatch.bank[r].bytes) continue;
+            if (gmatch.bank[r].matched)
+                printf("gbs: rip bank %u -> rom bank %u (%u/%zu bytes, %u%%)\n", r, gmatch.bank[r].rom_bank,
+                       gmatch.bank[r].best, gmatch.bank[r].bytes, (unsigned)(gmatch.bank[r].best * 100 / gmatch.bank[r].bytes));
+            else if (!gmatch.frag_scanned)
+                printf("gbs: rip bank %u -> ? (best bank %u, %u%%; second %u%%)\n", r, gmatch.bank[r].rom_bank,
+                       (unsigned)(gmatch.bank[r].best * 100 / gmatch.bank[r].bytes),
+                       (unsigned)(gmatch.bank[r].second * 100 / gmatch.bank[r].bytes));
+        }
+        if (gmatch.init_bank >= 0) {
+            printf("gbs: init -> rom bank %u $%04x\n", gmatch.init_bank, gmatch.init_addr);
+            gbs_pcs[gbs_seeds] = gmatch.init_addr; gbs_bks[gbs_seeds] = (uint16_t)gmatch.init_bank; gbs_seeds++;
+        } else printf("gbs: init $%04x not mapped to this ROM (player stub or unmatched bank)\n", gbs.init);
+        if (gmatch.play_bank >= 0) {
+            printf("gbs: play -> rom bank %u $%04x\n", gmatch.play_bank, gmatch.play_addr);
+            gbs_pcs[gbs_seeds] = gmatch.play_addr; gbs_bks[gbs_seeds] = (uint16_t)gmatch.play_bank; gbs_seeds++;
+        } else printf("gbs: play $%04x not mapped to this ROM (player stub or unmatched bank)\n", gbs.play);
+        free(gbuf);
+        if (!nmatch && !gbs_seeds) {   // an explicit --gbs that maps nothing is a hard failure, never a silent one
+            fprintf(stderr, "deepeel: --gbs: no seed could be mapped to this ROM (threshold %.0f%%)\n", thr * 100);
+            dp_cart_free(cart);
+            return 1;
+        }
+    }
     const DpPlatform *plat = dp_platform_gb();
     // the discovered movies join the explicit --tas ones (the worker list caps at 8)
     for (int i = 0; i < tas_dirs_n; i++)
@@ -732,6 +835,16 @@ static int cmd_explore(int argc, char **argv) {
                 gseed_pc = pcs; gseed_bk = banks;
                 gkcfg.n_seeds = total; gkcfg.seeds = pcs; gkcfg.seed_banks = banks;
             }
+            if (gbs_seeds) {   // confirmed GBS entry points join the speculative seeds
+                if (core_seed_append(&gseed_pc, &gseed_bk, &gkcfg.n_seeds, gbs_pcs, gbs_bks, (size_t)gbs_seeds)) {
+                    free(gseed_pc); free(gseed_bk);
+                    free(gmasks); dp_tas_free(&gt); km->close(km);
+                    dp_mapwin_stop(); dp_results_free(&res); dp_cart_free(cart);
+                    fprintf(stderr, "deepeel: cannot allocate GBS seeds\n");
+                    return 1;
+                }
+                gkcfg.seeds = gseed_pc; gkcfg.seed_banks = gseed_bk;
+            }
             DpCoreResult kr;
             rc = dp_core_explore(km, cart->rom_size, &gkcfg, &kr) ? 0 : 1;
             kr.seed_refused_cap = gseed_refused;
@@ -832,6 +945,8 @@ static int cmd_explore(int argc, char **argv) {
     if (!g_drain_only) dp_seed_gb(ex); // a drain runs the saved continuations only
     for (int i = 0; !g_drain_only && i < entries; i++)
         dp_explorer_seed_pc(ex, ea[i] >= 0x4000 ? (eb[i] ? eb[i] : 1) : 0, ea[i], DP_SEED_POINTER, 1);
+    for (int i = 0; !g_drain_only && i < gbs_seeds; i++)   // confirmed GBS entry points (legacy explorer)
+        dp_explorer_seed_pc(ex, gbs_bks[i], gbs_pcs[i], DP_SEED_POINTER, 1);
     DpPlay *play_engine = NULL;
     if (play) {
         play_engine = dp_play_new(&scfg, &res, ex);

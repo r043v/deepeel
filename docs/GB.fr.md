@@ -1,5 +1,31 @@
 # Plateforme Game Boy
 
+Rips GBS (Game Boy Sound Format, `--gbs FILE` / `--gbs-fetch [NAME]`, 0.332.0) : le rip du
+moteur musical du jeu est récupéré de gbs.joshw.info (index Apache parcouru par nom
+normalisé, archive `.7z` dépaquetée par le binaire `7z` dans `<gbs-dir>/<nom normalisé>/`,
+défaut `output/gbs` ; données non fiables, seuls des noms de base `.gbs` sont relus), vérifié
+contre la ROM chargée, puis ses points d'entrée confirmés de l'en-tête (init, play) deviennent
+des graines du noyau comme de l'ancien moteur. Deux modes de vérification : par banque
+(correspondance alignée rip↔ROM, score d'octets égaux, seuil `DEEPEEL_GBS_MATCH` 90 %) ; ou,
+quand aucune banque n'est identique — les rips sont souvent une extraction contiguë du moteur
+au milieu d'une banque, avec des fragments de ripper à la place du code de sync — relocalisation
+par vote de fragments exacts de 16 octets : le delta ROM-données dominant dit où vit le bloc,
+et init/play sont projetés par le vote local des fragments qui les entourent (± 512 octets,
+≥ 3 voix concordantes, majorité). Jamais silencieux : rapport complet (banques, fragments,
+votes) et échec dur si aucune graine ne se projette.
+
+Super Mario Land (observations de l'outil) : le rip DMG-MLA.gbs (18 pistes, load $65E4) n'a
+aucune banque identique à la ROM (meilleure banque : 2 %) — le moteur vit en banque 3 (offset
+ROM $66E2) et le rip l'a extrait en bloc contigu avec 176/402 fragments de 16 octets remplacés ;
+le vote de fragments projette init $65E4 → banque 3 $66E2 et play $6662 → banque 3 $6760.
+À 20 M pas, sans graines de pointeurs : naturel 208 dans les deux cas, forcé 737 sans graines
+GBS contre 936 avec (+199 octets du moteur musical). Avec les 40 000 graines de pointeurs par
+défaut, le scan spéculatif atteint déjà ces entrées (48 362 contre 48 361 forcés, écart dans
+le bruit d'exécution) : les graines GBS sont un contrepoint confirmé au scan, pas un gain
+quand il passe. La fixture verbatim (banque identique, 16 octets patchés) passe par la voie
+banque ; la même fixture déplacée de $F0 avec un autre point de chargement passe par la voie
+fragments (tests `gbs` et `core_gbs`).
+
 L'explorateur MD compte à nouveau les lectures de registres matériels et de
 RAM hors de la fenêtre cartouche ; ces accès ne sont plus pris pour de la SRAM.
 Diagnostic du résidu : le rapport décrit les classes voisines de chaque plage

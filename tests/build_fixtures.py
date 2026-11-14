@@ -675,6 +675,37 @@ def build_techniques_8bit(out):
     with open(os.path.join(out, "fix_pce_tam2.pce"), "wb") as f:
         f.write(p2)
     pce("fix_pce_cells", bytes.fromhex("a900 d006 d004 eaeaeaea 80fe"))
+    # GBS rip verification fixture: the "engine" lives in bank 1, filled with a distinct byte
+    # pattern so the zero-filled bank 0 can never be mistaken for it; fix_gbs.gbs carries
+    # bank 1's bytes with a 16-byte patch, like a real rip whose sync code was replaced.
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    r[0x150:0x152] = b"\x18\xfe"                    # boot loop: the engine is only reachable by seed
+    x = 1
+    for i in range(0x4000):
+        x ^= (x << 13) & 0xFFFFFFFF   # xorshift32 fill: no self-similar 16-byte window,
+        x ^= x >> 17                  # so the fragment votes cannot be fooled
+        x ^= (x << 5) & 0xFFFFFFFF
+        r[0x4000 + i] = x & 0xFF
+    w(r, 0x4100, 0x2A, 0xC9)                        # $4100 init: ld a,(hl+); ret
+    w(r, 0x4200, 0x1A, 0xC9)                        # $4200 play: ld a,(de); ret
+    w(r, 0x4380, 0x00, 0x01, 0x02, 0x03, 0x04)      # "MML" data the engine would read
+    save(out, "fix_gbs", r)
+    gbs = bytearray(112 + 0x4000)
+    gbs[0:3] = b"GBS"
+    gbs[3] = 1                                      # version
+    gbs[4] = 2                                      # songs
+    gbs[5] = 1                                      # first song
+    gbs[6:8] = (0x4000).to_bytes(2, "little")       # load $4000: rip bank 0 = ROM bank 1
+    gbs[8:10] = (0x4100).to_bytes(2, "little")      # init
+    gbs[10:12] = (0x4200).to_bytes(2, "little")     # play
+    gbs[12] = 0xFE                                  # sp $FFFE
+    gbs[14:14 + len(b"FIXT ENGINE")] = b"FIXT ENGINE"
+    gbs[112:112 + 0x4000] = r[0x4000:0x8000]
+    gbs[112 + 0x3800:112 + 0x3810] = b"\xee" * 16   # a rip-style patch, 16 bytes of sync code replaced
+    with open(os.path.join(out, "fix_gbs.gbs"), "wb") as f:
+        f.write(gbs)
+    print("wrote", os.path.join(out, "fix_gbs.gbs"), len(gbs))
 
 def md_rom(size=0x1000):
     r = bytearray(size)

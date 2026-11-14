@@ -282,6 +282,8 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sg
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.msx
   ${CMAKE_CURRENT_BINARY_DIR}/fix_msx_v9938.msx
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_gbs.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_gbs.gbs
 )
 
 add_custom_command(
@@ -856,3 +858,14 @@ add_test(NAME desync_finder COMMAND sh -c "d=${CMAKE_CURRENT_BINARY_DIR}; x=$<TA
 # Features the kernel does not have yet (play sessions, the legacy spool/lot frontier) stay pinned to the old GB explorer, which is kept but no longer the default.
 add_test(NAME frontier_kernel COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/frontier_kernel.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_irq.gb)
 set_tests_properties(frontier_cli resume_cov PROPERTIES ENVIRONMENT "DEEPEEL_GB_LEGACY=1")
+
+# GBS rip verification (src/core/gbs.c): header parse, per-bank best match of a patched
+# rip, init/play mapping; and the CLI: the confirmed seeds execute, a rip that matches
+# nothing fails loudly.
+add_executable(test_gbs test_gbs.c)
+target_link_libraries(test_gbs PRIVATE deepeel_core m)
+add_dependencies(test_gbs fixtures)
+add_test(NAME gbs COMMAND test_gbs ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(gbs PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_gbs COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/core_gbs.py $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_gbs.gb ${CMAKE_CURRENT_BINARY_DIR}/fix_gbs.gbs)
+set_tests_properties(core_gbs PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 120)
