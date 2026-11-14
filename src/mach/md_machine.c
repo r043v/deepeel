@@ -71,6 +71,21 @@ static void md_set_pc(DpMachine *m, uint32_t pc) {
     free(buf);
 }
 
+// register seeds (music rips): the convention is the song number in D0 and the
+// rip's stack in A7; the 68000 registers live in the saved state, so the same
+// round-trip carries them (a == 0xFF / sp == 0xFFFF leave the register untouched)
+static int md_seed_regs(DpMachine *m, uint8_t a, uint16_t sp) {
+    MdMachWrap *w = m->impl;
+    uint8_t *buf = malloc(dp_mdmach_state_size());
+    if (!buf) return 0;
+    dp_mdmach_save(w->m, buf);
+    if (a != 0xFF) dp_mdmach_state_set_dn_word(buf, 0, a);
+    if (sp != 0xFFFF) dp_mdmach_state_set_an(buf, 7, sp);
+    dp_mdmach_load(w->m, buf);
+    free(buf);
+    return 1;
+}
+
 // kernel mask (up down left right button1 button2 start) -> MD pad bits
 // (0-3 directions, 16 A, 32 B, 64 C, 128 Start): button1 holds A and C, button2 B
 static void md_set_input(DpMachine *m, uint32_t mask) {
@@ -186,6 +201,7 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->pc = md_pc;
     m->set_pc = md_set_pc;
     m->set_input = md_set_input;
+    m->seed_regs = md_seed_regs;   // no 68000 mapper: bank_view stays NULL (sans objet)
     m->frame = md_frame;
     return m;
 }

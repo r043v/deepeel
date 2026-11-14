@@ -3,6 +3,7 @@
  * decode, header-title normalization.  The layout mirrors tools/music_index.py
  * write_binary — the real index is validated on real ROMs by the CLI. */
 #include "core/music_index.h"
+#include "core/music_index_seeds.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -122,14 +123,13 @@ int main(int argc, char **argv) {
     CHECK(norm[0] == 0);
 
     /* the shared seed extraction (music_index_seeds.c): tiers, registers, dedup */
-#include "core/music_index_seeds.h"
     {
         DpMusicSeed *seeds = NULL; size_t n = 0; DpMusicSeedStats st;
         /* tier 1 crc on entry 0 + game-key siblings (1, 3); play deduped, init carries
          * song 0 in A on the rip's stack (0xFFFE); the tier named is the strongest
-         * among the entries used (the siblings came through game identity) */
+         * identity that matched (the crc beats the weaker game-key siblings) */
         CHECK(dp_music_seeds(&ix, (const char *const[]){"GB"}, 1, 0x11223344, NULL, 0x80000, &seeds, &n, &st) == 0);
-        CHECK(n == 2 && st.tier == 3 && st.entries == 2 && st.init_seeds == 1 && st.no_entry_point == 1);
+        CHECK(n == 2 && st.tier == 1 && st.entries == 2 && st.init_seeds == 1 && st.no_entry_point == 1);
         CHECK(seeds[0].kind == 0 && seeds[0].bank == 3 && seeds[0].pc == 0x6760 && seeds[0].a == 0xFF);
         CHECK(seeds[1].kind == 1 && seeds[1].bank == 3 && seeds[1].pc == 0x66E2 && seeds[1].a == 0 && seeds[1].sp == 0xFFFE);
         free(seeds); seeds = NULL;

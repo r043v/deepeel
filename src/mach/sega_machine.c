@@ -82,6 +82,13 @@ static int sega_seed_regs(DpMachine *m, uint8_t a, uint16_t sp) {
     return 1;
 }
 
+// per-bank seeding: the backend programs its mapper so 16 KiB block `bank`
+// shows at the $4000 window (raw writes, unobserved like the kernel's other seed prep)
+static int sega_bank_view(DpMachine *m, unsigned bank) {
+    const DpSegaBackend *b = ((SegaMach *)m->impl)->b;
+    return bank && b->seed_window ? b->seed_window(0x4000, bank) : 0;
+}
+
 // the base write callback bypasses the observation wrapper: a poke is not a CPU access
 static void sega_poke(DpMachine *m, uint32_t a, uint8_t v) {
     SegaMach *s = m->impl;
@@ -203,6 +210,7 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->pc = sega_pc;
     m->set_pc = sega_set_pc;
     m->seed_regs = sega_seed_regs;
+    m->bank_view = sega_bank_view;
     m->poke = sega_poke;
     m->set_input = sega_set_input;
     if (b->frame_count) m->frame = sega_frame;

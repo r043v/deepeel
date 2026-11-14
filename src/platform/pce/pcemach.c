@@ -193,6 +193,20 @@ DpPceCpu dp_pce_cpu(void) {
 void dp_pce_set_flags(uint8_t p) { machine.cpu.p = p; }
 void dp_pce_set_pc(uint16_t pc) { machine.cpu.pc = pc; }
 void dp_pce_set_a(uint8_t a) { machine.cpu.a = a; }
+void dp_pce_set_sp(uint8_t s) { machine.cpu.s = s; }
+
+// map the 16 KiB block `block` into the $4000-$7FFF window (both MPR pages):
+// the bank view a music-rip seed's pc ($4000 + (rom & $3FFF)) must present
+int dp_pce_bank16(uint32_t block) {
+    int ok = 1;
+    for (unsigned w = 0; w < 2; w++) {
+        unsigned page = (unsigned)block * 2u + w, found = 0;
+        for (unsigned v = 0; v < 0x80; v++)
+            if (page_valid[v] && page_map[v] == page) { machine.cpu.mpr[2u + w] = (uint8_t)v; found = 1; break; }
+        ok &= found;
+    }
+    return ok;
+}
 
 // map the physical ROM page into the window of pc and start there; 0 when no MPR value maps it
 int dp_pce_enter(uint32_t rom_page, uint16_t pc) {

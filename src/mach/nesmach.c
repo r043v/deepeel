@@ -330,6 +330,24 @@ unsigned dp_nesmach_ppu_status(const DpNesMach *d) {
 /* $2002 event probe (§3.7): plant a plausible status byte into a snapshot so
  * the forked path reads it at the poll; the live machine is never touched */
 void dp_nesmach_set_ppu_status(unsigned st) { machine.ppu.status = (uint8_t)st; }
+// the live CPU registers a music-rip seed sets (the contract of DpMachine.seed_regs)
+void dp_nesmach_set_a(unsigned a) { machine.cpu.a = (uint8_t)a; }
+void dp_nesmach_set_sp(unsigned sp) { machine.cpu.s = (uint8_t)sp; }
+
+/* the CPU address a music-rip seed (a physical PRG cell) runs at under the
+ * current view: the 16 KiB window both of whose 8 KiB halves map the block,
+ * 0 when no window does (the caller re-banks to $8000 through set_bank) */
+int64_t dp_nesmach_seed_pc(DpNesMach *d, uint32_t rom) {
+    (void)d;
+    if (rom >= machine.prg_size) return -1;
+    unsigned off = rom & 0x3FFFu, base_off = rom & ~0x3FFFu;
+    for (unsigned base = 0x8000u; base < 0x10000u; base += 0x4000u) {
+        if (dp_nesmach_rom_index(d, base + off) != (int64_t)rom) continue;
+        if (dp_nesmach_rom_index(d, base + (off ^ 0x2000u)) != (int64_t)(base_off | (off ^ 0x2000u))) continue;
+        return base + off;
+    }
+    return 0;
+}
 
 uint64_t dp_nesmach_run(DpNesMach *d, uint64_t max_steps) {
     nes_trace.user = d;
@@ -562,23 +580,43 @@ int dp_nesmach_mapper_write(const DpNesMach *d, unsigned addr, unsigned value,
 }
 unsigned dp_nesmach_mapper(const DpNesMach *d) { return d->mapper; }
 
-/* Puts the CPU at `addr` with PRG bank `bank` in the switchable window
- * (UxROM; NROM accepts bank 0 only).  Bridged boards (3, 7) are refused:
- * their windows belong to the bridge.  Returns 1 on success. */
-int dp_nesmach_enter(DpNesMach *d, unsigned bank, unsigned addr) {
+/* Programs the switchable $8000 window to show 16 KiB PRG block `bank` (the
+ * music-seed convention): UxROM/MMC1/Camerica/UN1ROM through their bank
+ * register, MMC3/MMC5 as two 8 KiB slots in PRG mode 0/3.  Returns 1 on
+ * success, 0 when this board cannot show that block. */
+int dp_nesmach_map_8k(DpNesMach *d, unsigned addr, unsigned bank8);   // defined below
+int dp_nesmach_set_bank(DpNesMach *d, unsigned bank) {
     if (d->mapper == 2) {
         if (bank >= machine.cpu.bank_count) return 0;
         machine.cpu.bank = (uint8_t)bank;
         machine.cpu.bank_base = (uint32_t)bank * 16384u;
-    } else if (d->mapper == 1) {   /* MMC1: 16 KiB switchable $8000 slot (control mode 3), set as the serial port would */
+        return 1;
+    }
+    if (d->mapper == 1) {   /* MMC1: 16 KiB switchable $8000 slot (control mode 3), set as the serial port would */
         if (bank >= (unsigned)(machine.prg_size >> 14) || bank > 15) return 0;
         d->rg.v[0] |= 0x0C; d->rg.v[3] = (uint8_t)bank;
         mapper_apply(d);
-    } else if (d->mapper == 71 || d->mapper == 94 || d->mapper == 180) {   /* Camerica / UN1ROM: a 16 KiB switchable $8000 slot */
+        return 1;
+    }
+    if (d->mapper == 71 || d->mapper == 94 || d->mapper == 180) {   /* Camerica / UN1ROM: a 16 KiB switchable $8000 slot */
         if (bank >= (unsigned)(machine.prg_size >> 14) || bank > 7) return 0;
         d->rg.v[0] = (uint8_t)(d->mapper == 94 ? bank << 2 : bank);
         mapper_apply(d);
-    } else if (d->mapper != 0 || bank != 0) return 0;
+        return 1;
+    }
+    if (d->mapper == 4 || d->mapper == 5) {   /* MMC3 / MMC5: two 8 KiB slots under the $8000 window */
+        if (!dp_nesmach_map_8k(d, 0x8000, bank * 2)) return 0;
+        return dp_nesmach_map_8k(d, 0xA000, bank * 2 + 1);
+    }
+    return 0;   /* NROM (bank 0 is already the view), CNROM, AxROM: no $8000 bank register here */
+}
+
+/* Puts the CPU at `addr` with PRG bank `bank` in the switchable window
+ * (UxROM; NROM accepts bank 0 only).  Bridged boards (3, 7) are refused:
+ * their windows belong to the bridge.  Returns 1 on success. */
+int dp_nesmach_enter(DpNesMach *d, unsigned bank, unsigned addr) {
+    if (d->mapper == 0) { if (bank) return 0; }
+    else if (!dp_nesmach_set_bank(d, bank)) return 0;
     machine.cpu.pc = (uint16_t)addr;
     return 1;
 }

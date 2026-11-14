@@ -28,12 +28,12 @@ import sys
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 from urllib.request import Request, urlopen
 
 SITES = {
     "gbs": "GB",
-    "nsfe": "NES",
+    "nsf": "NES",
     "hes": "PCE",
     "kss": "MSX/Sega",
     "spc": "SNES (no entry points, big)",
@@ -66,7 +66,7 @@ def have_rip(d: Path) -> bool:
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--sites", default="gbs,nsfe,hes,kss",
+    ap.add_argument("--sites", default="gbs,nsf,hes,kss",
                     help=f"comma list from {sorted(SITES)} (default: the seedable formats)")
     ap.add_argument("--out", default="output/joshw")
     ap.add_argument("--min-free", type=int, default=2000,
@@ -82,21 +82,26 @@ def main():
     Path(args.out).mkdir(parents=True, exist_ok=True)
     for site in args.sites.split(","):
         root = Path(args.out) / f"{site}.joshw.info"
-        for seg in SEGMENTS:
-            hrefs = listing_hrefs(f"https://{site}.joshw.info/{seg}/")
-            if not hrefs:
-                continue
-            print(f"[{site}/{seg}] {len(hrefs)} archives", flush=True)
-            for href in hrefs:
-                name = unquote(html.unescape(href))   # hrefs carry &amp; etc.
-                if shutil.disk_usage(args.out).free < args.min_free * (1 << 20):
-                    sys.exit(f"disk under {args.min_free} MB free — re-run to resume")
-                arcdir = root / seg / re.sub(r"\.7z$", "", name, flags=re.I)
-                if have_rip(arcdir) or (arcdir / ".done").exists():
-                    skip += 1
+        # the kss site nests its letter segments under one folder per system
+        prefixes = [""] if site != "kss" else listing_dirs(f"https://{site}.joshw.info/")
+        for sysdir in prefixes:
+            for seg in SEGMENTS:
+                base = f"{sysdir}/{seg}" if sysdir else seg
+                udir = quote(base)   # a system folder can carry a space ("Game Gear")
+                hrefs = listing_hrefs(f"https://{site}.joshw.info/{udir}/")
+                if not hrefs:
                     continue
-                total += 1
-                data = fetch(f"https://{site}.joshw.info/{seg}/{html.unescape(href)}")
+                print(f"[{site}/{base}] {len(hrefs)} archives", flush=True)
+                for href in hrefs:
+                    name = unquote(html.unescape(href))   # hrefs carry &amp; etc.
+                    if shutil.disk_usage(args.out).free < args.min_free * (1 << 20):
+                        sys.exit(f"disk under {args.min_free} MB free — re-run to resume")
+                    arcdir = root / base / re.sub(r"\.7z$", "", name, flags=re.I)
+                    if have_rip(arcdir) or (arcdir / ".done").exists():
+                        skip += 1
+                        continue
+                    total += 1
+                    data = fetch(f"https://{site}.joshw.info/{udir}/{html.unescape(href)}")
                 if not data:
                     print(f"  FAIL {name}", flush=True)
                     fail += 1
@@ -123,6 +128,17 @@ def listing_hrefs(base):
     if not h:
         return []
     return [m.decode() for m in re.findall(rb'href="([^"]+\.7z)"', h, re.I)]
+
+
+def listing_dirs(base):
+    """the sub-directories of an index page (the kss site is organized by
+    system: Game Gear/, MSX/, Master System/), '' when the page lists archives"""
+    h = fetch(base)
+    if not h:
+        return []
+    return [unquote(html.unescape(m.decode())) for m in
+            re.findall(rb'href="([^"?/]+)/"', h)
+            if not unquote(html.unescape(m.decode())).startswith(("?", "/"))]
 
 
 if __name__ == "__main__":

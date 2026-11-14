@@ -30,6 +30,7 @@
 #include "../../explore/frontier.h"
 #include "../../explore/novelty.h"
 #include "../../core/hashset.h"
+#include "../../core/music_index_seeds.h"
 #include "../../explore/tree.h"
 #include "pce.h"
 #include "tas.h"
@@ -1699,6 +1700,19 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     if (!x->failed && x->opt.queue_cap && !x->opt.skip_root &&
         !(x->opt.lot_drain && dp_lf_pending(x->lot))) push_live(x, 0);
 
+    // music-rip seeds (--music-index) go first: confirmed entry points of this
+    // game's rips and must not starve behind the speculative passes; the pc's
+    // window ($4000-$7FFF) shows the rip's block and the init call carries the
+    // song number in A on the rip's stack
+    for (unsigned i = 0; i < x->opt.music_seed_count && !x->failed; i++) {
+        const DpMusicSeed *ms = &((const DpMusicSeed *)x->opt.music_seeds)[i];
+        dp_pce_reset();
+        if ((size_t)ms->rom >= x->rom_size || !dp_pce_enter(ms->rom >> 13, ms->pc)) { r->entries_refused++; continue; }
+        if (ms->a != 0xFF) dp_pce_set_a(ms->a);
+        if (ms->sp != 0xFFFF) dp_pce_set_sp((uint8_t)ms->sp);
+        if (push_live(x, 1)) r->seeds_music++;
+    }
+    if (x->opt.music_seed_count) dp_pce_reset();
     // explicit entries (G3): each starts a forced path from the power-on mapping;
     // an address outside the ROM mapping is refused and counted
     for (unsigned e = 0; e < x->opt.entry_count && !x->failed; e++) {
@@ -2000,6 +2014,7 @@ void dp_pce_report(FILE *out, const DpPceResults *r) {
     if (r->disp_tables) fprintf(out, "  bank dispatch: %llu tables, %llu seeds, %llu refused views\n", (unsigned long long)r->disp_tables, (unsigned long long)r->disp_seeds, (unsigned long long)r->disp_refused_view);
     fprintf(out, "  copy siblings: %llu tables, %llu entries, %llu bytes typed, %llu table caps\n", (unsigned long long)r->sib_tables, (unsigned long long)r->sib_entries, (unsigned long long)r->sib_bytes, (unsigned long long)r->sib_caps);
     if (r->seeds_bank) fprintf(out, "  bank roots: %llu pages seeded at $4000\n", (unsigned long long)r->seeds_bank);
+    if (r->seeds_music) fprintf(out, "  music-rip seeds: %llu\n", (unsigned long long)r->seeds_music);
     if (r->vectors_seeded) fprintf(out, "  vector roots: %llu seeded (IRQ2, IRQ1, TIMER, NMI targets)\n", (unsigned long long)r->vectors_seeded);
     fprintf(out, "  entries: %llu seeded, %llu refused (outside the ROM mapping)\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  padding cuts: %llu\n", (unsigned long long)r->pad_cuts);

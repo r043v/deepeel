@@ -2955,6 +2955,14 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
     cfg.fork_site_cap=o->fork_cap; cfg.queue_max=o->queue_max;
     if(cfg.unbounded) { cfg.max_total=0; cfg.max_path_steps=0; cfg.fork_site_cap=0; }   // coverage first: only exhaustion or SIGINT stops
     static const uint32_t vec[]={0x08,0x10,0x18,0x20,0x28,0x30,0x38,0x66};
+    // music-rip seeds (--music-index) go first: confirmed entry points of this
+    // game's rips, the same ones the legacy explorer seeds; the $4000 window
+    // shows each rip's block (bank_view programs the mapper) and the init call
+    // carries the song number in A on the rip's stack
+    DpMusicKernelSeeds mks={0};
+    if(o->music_seed_count && !dp_music_seeds_kernel(&mks,o->music_seeds,o->music_seed_count,0x4000,NULL) && mks.n) {
+        cfg.seeds=mks.pcs; cfg.n_seeds=mks.n; cfg.seed_banks=mks.banks; cfg.seed_regs=mks.regs;
+    }
     if(o->seed_vectors && !cfg.seeds) { cfg.seeds=vec; cfg.n_seeds=sizeof vec/sizeof *vec; }
     if(!cfg.hooks) cfg.hooks=dp_machine_sega_hooks();
     if(!cfg.visits_per_pc || cfg.visits_per_pc<262144) cfg.visits_per_pc=262144;   // the old engine loop_cap: boot delay loops run 65535 x n iterations
@@ -2981,6 +2989,7 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
         }
     }
     dp_core_result_free(&r); m->close(m);
+    dp_music_seeds_kernel_free(&mks);
     return ok;
 }
 
@@ -3125,10 +3134,10 @@ int dp_sega_explore_command(int argc,char **argv) {
     // music-rip index (DPMDX002, tools/music_index.py export --bin): the
     // projected entry points of this game's rips become confirmed seeds.  The
     // shared CLI glue (src/core/music_index_seeds.c) loads the index, hashes
-    // the raw dump and reports the match.  With --core the seeds are reported
-    // but not consumed: the kernel's bank seeding is the GB mapper's ($2000
-    // poke), not this platform's latches.
-    static const char *const plats_sg[]={"SCSG"},*plats_sms[]={"SCSG","MK3"},*plats_gg[]={"GG"},*plats_msx[]={"MSX"};
+    // the raw dump and reports the match; the kernel gets the same seeds
+    // (DpMachine.bank_view programs this platform's latches).  KSS: the rip
+    // format of MSX and the Sega 8-bit systems.
+    static const char *const plats_sg[]={"SCSG","KSS"},*plats_sms[]={"SCSG","MK3","KSS"},*plats_gg[]={"GG","KSS"},*plats_msx[]={"MSX","KSS"};
     const char *const *plats=!strcmp(s->id,"sms")?plats_sms:!strcmp(s->id,"gg")?plats_gg:!strcmp(s->id,"msx")?plats_msx:plats_sg;
     DpMusicSeedStats mst;
     static const char *const rip_dirs[]={"output/gbs","output/joshw"};

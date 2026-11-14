@@ -23,6 +23,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "music_index.h"
+#include "dpmachine.h"   // DpSeedRegs: the rip's calling convention
 
 typedef struct DpMusicSeed {
     uint32_t rom;      // dp_rom_index of the entry point
@@ -37,7 +38,7 @@ typedef struct DpMusicSeed {
 typedef struct DpMusicSeedStats {
     uint32_t crc;
     char title[32];
-    int tier;               // highest tier that matched (0: nothing)
+    int tier;               // strongest identity tier that matched (0: nothing)
     int entries;            // index entries found for this dump
     int seeds, init_seeds;  // entry points queued (deduped, in range)
     int auto_seeds;         // seeds from the runtime rip verification (ctx)
@@ -59,7 +60,9 @@ typedef struct DpMusicSeedCtx {
 } DpMusicSeedCtx;
 
 /* Collects the seeds for one dump; `plats` are the platform names to accept
- * ("GB", "GG", "MK3", "SCSG", "MSX", "NES", "PCE").  `norm_title` may be NULL
+ * ("GB", "GG", "MK3", "SCSG", "MSX", "NES", "PCE"; "KSS" = a kss rip row,
+ * which serves MSX and the Sega 8-bit systems — the byte verification still
+ * decides, the label only bounds the tier walk).  `norm_title` may be NULL
  * or empty (tier 2 then never matches).  Returns a malloc'd array the caller
  * frees (NULL when nothing matched; *st is always filled), 0 on success,
  * -1 on allocation failure. */
@@ -91,6 +94,28 @@ int dp_music_seeds_full(const DpMusicIndex *ix, const char *const *plats, size_t
 
 /* name of an identity tier, for the per-platform reports (0: nothing matched) */
 const char *dp_music_seeds_tier_name(int tier);
+
+/* The kernel seed arrays of one dump's music seeds, built once and shared by
+ * every platform CLI (the kernel consumes exactly these three parallel
+ * arrays).  With `m` (a DpMachine carrying rom_index) the pc of each seed is
+ * the 16 KiB window the dump's own view already shows the cell in — both 8 KiB
+ * halves of the block must map there (NES MMC3/MMC5 switch 8 KiB slots);
+ * otherwise the seed is re-banked: pc = $8000 + (rom & 0x3FFF) with banks[i]
+ * = rom >> 14 for DpMachine.bank_view to program.  Without `m` the pc is
+ * win_base + (rom & 0x3FFF) (the uniform 16 KiB windows of GB/Sega/PCE).
+ * regs are the rip's calling convention (init: song number in A on the rip's
+ * stack).  Skips counts the seeds whose cell no window of this dump shows
+ * (another dump's banking) — the caller reports them, never silent. */
+typedef struct DpMusicKernelSeeds {
+    uint32_t *pcs;
+    uint16_t *banks;
+    DpSeedRegs *regs;
+    size_t n, skipped;
+} DpMusicKernelSeeds;
+int dp_music_seeds_kernel(DpMusicKernelSeeds *ks, const DpMusicSeed *seeds, size_t n,
+                          unsigned win_base, const DpMachine *m);
+void dp_music_seeds_kernel_free(DpMusicKernelSeeds *ks);
+
 int dp_music_seeds_cli(const char *midx_file, const char *const *plats, size_t nplat,
                        const uint8_t *raw, size_t raw_bytes, size_t rom_size,
                        const char *norm_title, DpMusicSeed **out, size_t *nout,

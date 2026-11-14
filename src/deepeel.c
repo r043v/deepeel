@@ -1788,9 +1788,11 @@ static int cmd_nes(int argc, char **argv) {
     size_t size;
     uint8_t *data = nes_read_file(path, &size);
     if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", path); return 1; }
+    DpMusicSeed *mseeds = NULL; size_t mn = 0; DpMusicKernelSeeds mks = {0};
     {   // music-rip index: the shared glue reports the match for this dump and
-        // runtime-verifies the local rips (the seeds are cached in the sidecars,
-        // ready for the explorer that will consume them) — never silent
+        // runtime-verifies the local rips; the entry points seed both engines
+        // (kernel: seeds + banks + regs; legacy: confirmed entries with the
+        // rip's calling convention) — never silent
         static const char *const plats[] = {"NES"};
         const char *const rip_dirs[] = { "output/gbs", "output/joshw" };
         const char *rb = strrchr(path, '/'); rb = rb ? rb + 1 : path;
@@ -1800,17 +1802,24 @@ static int cmd_nes(int argc, char **argv) {
             img = data + 16 + ((data[6] & 0x04) ? 512 : 0);
         }
         DpMusicSeedCtx mctx = { rip_dirs, 2, img, img_size, rb };
-        DpMusicSeed *mseeds = NULL; size_t mn = 0; DpMusicSeedStats mst;
-        int mrc = dp_music_seeds_cli(midx_file, plats, 1, data, size, size, NULL, &mseeds, &mn, &mst, NULL, &mctx);
+        DpMusicSeedStats mst;
+        int mrc = dp_music_seeds_cli(midx_file, plats, 1, data, size, img_size, NULL, &mseeds, &mn, &mst, NULL, &mctx);
         if ((mrc == DP_MUSIC_SEEDS_LOAD_ERR && midx_file) || mrc == DP_MUSIC_SEEDS_ALLOC) { free(data); return 1; }
         if (mn)
-            fprintf(stderr, "deepeel: nes: %zu music-index entry points are available but this explorer seeds none of them yet\n", mn);
-        free(mseeds);
+            fprintf(stderr, "deepeel: nes: %zu music-rip entry point(s) matched — the explorer seeds them (init carries the song in A on the rip's stack)\n", mn);
     }
+    opt.music_seeds = mseeds;
+    opt.music_seed_count = (unsigned)mn;
     if (use_core) {
         char err[128] = "";
         DpMachine *km = dp_machine_nes(data, size, mapper, err, sizeof err);
         if (!km) { fprintf(stderr, "deepeel: --core: %s\n", err); free(data); return 1; }
+        if (mn) {   // each seed's pc is the window this dump already shows (both
+            // 8 KiB halves), else re-banked to the $8000 window through bank_view
+            if (dp_music_seeds_kernel(&mks, mseeds, mn, 0x8000, km)) { km->close(km); free(mseeds); free(data); return 1; }
+            if (mks.n) { kcfg.seeds = mks.pcs; kcfg.n_seeds = mks.n; kcfg.seed_banks = mks.banks; kcfg.seed_regs = mks.regs; }
+            if (mks.skipped) fprintf(stderr, "deepeel: nes: %zu music-rip seed(s) outside every PRG window of this dump (another banking)\n", mks.skipped);
+        }
         kcfg.jobs = (unsigned)nes_jobs;
         if (opt.max_total) kcfg.max_total = opt.max_total;
         if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
@@ -1838,6 +1847,7 @@ static int cmd_nes(int argc, char **argv) {
         dp_core_result_free(&kr);
         free(kmasks); dp_nes_tas_free(&ntas);
         km->close(km);
+        dp_music_seeds_kernel_free(&mks); free(mseeds);
         free(data);
         return kok ? 0 : 1;
     }
@@ -1848,6 +1858,7 @@ static int cmd_nes(int argc, char **argv) {
     if (nes_dump && dp_fb_dump_ppm(nes_dump)) fprintf(stderr, "deepeel: no frame to dump\n");
     if (!nes_ok) {
         fprintf(stderr, "deepeel: not an iNES image the explorer accepts (%s)\n", path);
+        dp_music_seeds_kernel_free(&mks); free(mseeds);
         free(data);
         return 1;
     }
@@ -1898,6 +1909,7 @@ static int cmd_nes(int argc, char **argv) {
         if (f) { dp_nes_rtcode(f, &res); fclose(f); }
     }
     dp_nes_results_free(&res);
+    dp_music_seeds_kernel_free(&mks); free(mseeds);
     free(data);
     return 0;
 }
@@ -1967,27 +1979,35 @@ static int cmd_pce(int argc, char **argv) {
     size_t size;
     uint8_t *data = nes_read_file(path, &size);
     if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", path); return 1; }
+    DpMusicSeed *mseeds = NULL; size_t mn = 0; DpMusicKernelSeeds mks = {0};
     {   // music-rip index: the shared glue reports the match for this dump and
-        // runtime-verifies the local rips (the seeds are cached in the sidecars,
-        // ready for the explorer that will consume them) — never silent
+        // runtime-verifies the local rips; the entry points seed both engines
+        // (kernel: seeds + banks + regs; legacy: confirmed entries with the
+        // rip's calling convention) — never silent
         static const char *const plats[] = {"PCE"};
         const char *const rip_dirs[] = { "output/gbs", "output/joshw" };
         const char *rb = strrchr(path, '/'); rb = rb ? rb + 1 : path;
         const uint8_t *img = data; size_t img_size = size;   // the verification reads the image
         if ((size & 0x1FFF) == 512) { img = data + 512; img_size = size - 512; }   // copier header
         DpMusicSeedCtx mctx = { rip_dirs, 2, img, img_size, rb };
-        DpMusicSeed *mseeds = NULL; size_t mn = 0; DpMusicSeedStats mst;
-        int mrc = dp_music_seeds_cli(midx_file, plats, 1, data, size, size, NULL, &mseeds, &mn, &mst, NULL, &mctx);
+        DpMusicSeedStats mst;
+        int mrc = dp_music_seeds_cli(midx_file, plats, 1, data, size, img_size, NULL, &mseeds, &mn, &mst, NULL, &mctx);
         if ((mrc == DP_MUSIC_SEEDS_LOAD_ERR && midx_file) || mrc == DP_MUSIC_SEEDS_ALLOC) { free(data); return 1; }
         if (mn)
-            fprintf(stderr, "deepeel: pce: %zu music-index entry points are available but this explorer seeds none of them yet\n", mn);
-        free(mseeds);
+            fprintf(stderr, "deepeel: pce: %zu music-rip entry point(s) matched — the explorer seeds them (init carries the song in A on the rip's stack)\n", mn);
     }
+    opt.music_seeds = mseeds;
+    opt.music_seed_count = (unsigned)mn;
     if (use_core) {
         if (!dp_pce_init(data, size)) { fprintf(stderr, "deepeel: --core: not a PCE image\n"); free(data); return 1; }
         DpMachine *km = dp_machine_pce();
         if (km) dp_machine_pce_source(km, data, size);
         kcfg.jobs = (unsigned)pce_jobs;
+        if (mn) {   // each seed's pc is the window this dump's MPR already shows, else re-banked (bank_view)
+            if (dp_music_seeds_kernel(&mks, mseeds, mn, 0x4000, km)) { km->close(km); free(mseeds); free(data); return 1; }
+            if (mks.n) { kcfg.seeds = mks.pcs; kcfg.n_seeds = mks.n; kcfg.seed_banks = mks.banks; kcfg.seed_regs = mks.regs; }
+            if (mks.skipped) fprintf(stderr, "deepeel: pce: %zu music-rip seed(s) outside every MPR window of this dump (another banking)\n", mks.skipped);
+        }
         kcfg.hooks = dp_machine_pce_hooks();
         if (!km) { free(data); return 1; }
         if (opt.max_total) kcfg.max_total = opt.max_total;
@@ -2014,6 +2034,7 @@ static int cmd_pce(int argc, char **argv) {
         if (kok) { dp_core_report(stdout, "pce", &kr); core_outputs(argc, argv, "pce", path, &kr); }
         dp_core_result_free(&kr);
         km->close(km);
+        dp_music_seeds_kernel_free(&mks); free(mseeds);
         free(data);
         return kok ? 0 : 1;
     }
@@ -2025,6 +2046,7 @@ static int cmd_pce(int argc, char **argv) {
     if (!pce_ok) {
         fprintf(stderr, "deepeel: pce explore failed (%s)\n", path);
         free(res);
+        dp_music_seeds_kernel_free(&mks); free(mseeds);
         free(data);
         return 1;
     }
@@ -2078,6 +2100,7 @@ static int cmd_pce(int argc, char **argv) {
     }
     dp_pce_results_free(res);
     free(res);
+    dp_music_seeds_kernel_free(&mks); free(mseeds);
     free(data);
     if (png) {
         char *av[] = {"deepeel", "maprender", (char *)path, (char *)map, (char *)png,

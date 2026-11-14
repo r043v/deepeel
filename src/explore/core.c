@@ -1583,11 +1583,12 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
             memcpy(cp, start, sh.sbytes);
             const DpSeedRegs *sr = cfg->seed_regs ? &cfg->seed_regs[i] : NULL;
             int prep = 0;
-            if (cfg->seed_banks && cfg->seeds[i] >= 0x4000 && cfg->seeds[i] < 0x8000 && m->poke) {
-                m->load(m, start);
-                m->poke(m, 0x2000, (uint8_t)cfg->seed_banks[i]);
-                if (cfg->seed_banks[i] > 0xff) m->poke(m, 0x3000, (uint8_t)(cfg->seed_banks[i] >> 8));
-                prep = 1;
+            if (cfg->seed_banks) {   // bank 0 included: the reset view is not assumed
+                if (m->bank_view) {
+                    if (!prep) m->load(m, start);
+                    if (m->bank_view(m, cfg->seed_banks[i])) prep = 1;
+                    else out->seed_banks_absent++;     // this board cannot show the block
+                } else out->seed_banks_absent++;       // no mapper control on this machine
             }
             if (sr && (sr->a != 0xFF || sr->sp != 0xFFFF)) {
                 if (m->seed_regs) {
@@ -1801,6 +1802,8 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "event probes %llu at %llu sites: %llu forced variants\n", U(r->event_probes), U(r->event_probe_sites), U(r->event_probes));
     fprintf(out, "seeded entry points %llu\n", U(r->seeded));
     fprintf(out, "pointer seeds refused by cap %llu\n", U(r->seed_refused_cap));
+    if (r->seed_regs_absent) fprintf(out, "register seeds unsupported by the machine: %llu (not seeded)\n", U(r->seed_regs_absent));
+    if (r->seed_banks_absent) fprintf(out, "bank seeds the machine cannot show: %llu (not seeded)\n", U(r->seed_banks_absent));
     fprintf(out, "forced RAM cuts %llu\n", U(r->forced_ram_cuts));
     fprintf(out, "forced taint cuts: indirect %llu, ret %llu\n", U(r->taint_cut_indirect), U(r->taint_cut_ret));
     if (r->exec_wram_rom) fprintf(out, "RAM-executed instructions traced to ROM copy sources: %llu\n", U(r->exec_wram_rom));

@@ -16,6 +16,7 @@
 #include "../../explore/frontier.h"
 #include "../../explore/novelty.h"
 #include "../../mach/nesmach.h"
+#include "../../core/music_index_seeds.h"
 #include "../../cpu/m6502/m6502.h"
 #include "nes_trace.h"
 #include "tas.h"
@@ -1574,9 +1575,31 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
             if (dp_lf_pending(x.lot)) tree_load(&x); // resumed lot: its states carry ids of the saved tree
             if ((x.opt.lot_drain && dp_lf_pending(x.lot)) || sk) { free(snap); r->seeds_reset = 0; } // drain: saved states only; secondary: no root
             else queue_push(&x, &root);
+            // music-rip seeds (--music-index) go first: confirmed entry points of
+            // this game's rips and must not starve behind the speculative passes;
+            // the pc is the window the reset view already shows the rip's block
+            // in, else the $8000 window re-banked to it (set_bank); the init call
+            // carries the song number in A on the rip's stack
+            for (unsigned i = 0; i < x.opt.music_seed_count && !x.opt.lot_drain && !sk; i++) {
+                const DpMusicSeed *ms = &((const DpMusicSeed *)x.opt.music_seeds)[i];
+                uint8_t *es = malloc(dp_nesmach_state_size());
+                if (!es) { x.failed = 1; break; }
+                dp_nesmach_reset(x.m);
+                int64_t pc = dp_nesmach_seed_pc(x.m, ms->rom);
+                if (pc > 0) dp_nesmach_set_pc(x.m, (unsigned)pc);
+                else if (pc == 0 && dp_nesmach_set_bank(x.m, ms->rom >> 14))
+                    dp_nesmach_set_pc(x.m, 0x8000u + (ms->rom & 0x3FFFu));
+                else { free(es); r->entries_refused++; continue; }   // no window shows this block
+                if (ms->a != 0xFF) dp_nesmach_set_a(ms->a);
+                if (ms->sp != 0xFFFF) dp_nesmach_set_sp(ms->sp);
+                dp_nesmach_save(x.m, es);
+                DpNesPathState er = { es, 1, 0, 0, 0, 0, 0, DP_NES_TREE_MUSIC };
+                if (seed_push(&x, &er)) r->seeds_music++;
+            }
             // explicit entries: each is a root state with the bank and PC set
-            // --seed-banks adds one entry per switchable bank at $8000 (UxROM)
-            unsigned nb = (x.opt.seed_banks && dp_nesmach_mapper(x.m) == 2) ? dp_nesmach_bank_count(x.m) : 0;
+            // --seed-banks adds one entry per switchable bank at $8000 (the
+            // boards whose $8000 slot switches: UxROM, MMC1, Camerica, UN1ROM)
+            unsigned nb = (x.opt.seed_banks && dp_nesmach_cross16(x.m)) ? dp_nesmach_bank_count(x.m) : 0;
             for (int i = 0; i < x.opt.entry_count + (int)nb && !x.opt.lot_drain && !sk; i++) {
                 unsigned eb = i < x.opt.entry_count ? x.opt.entry_bank[i] : (unsigned)(i - x.opt.entry_count);
                 unsigned ea = i < x.opt.entry_count ? x.opt.entry_addr[i] : 0x8000u;
@@ -2406,6 +2429,7 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  bank dispatch: %llu tables, %llu seeds, %llu bank views refused (not code)\n", (unsigned long long)r->dispatch_tables, (unsigned long long)r->dispatch_seeds, (unsigned long long)r->dispatch_refused_view);
     fprintf(out, "  second pass: %llu seeds, %llu refused, %llu roots over the cap\n", (unsigned long long)r->pass2_seeds, (unsigned long long)r->pass2_refused, (unsigned long long)r->pass2_capped);
     fprintf(out, "  vector seeds: %llu\n", (unsigned long long)r->vectors_seeded);
+    if (r->seeds_music) fprintf(out, "  music-rip seeds: %llu\n", (unsigned long long)r->seeds_music);
     fprintf(out, "  entries: seeded %llu refused %llu\n", (unsigned long long)r->entries_seeded, (unsigned long long)r->entries_refused);
     fprintf(out, "  seeds: reset %llu irq %llu bank %llu play %llu refused %llu\n",
         (unsigned long long)r->seeds_reset, (unsigned long long)r->seeds_irq,

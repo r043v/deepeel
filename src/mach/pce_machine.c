@@ -173,6 +173,20 @@ static void pce_close(DpMachine *m) {
 static uint32_t pce_pc(DpMachine *m) { pce_ensure(m); return dp_pce_cpu().pc; }
 static void pce_set_pc(DpMachine *m, uint32_t pc) { pce_ensure(m); dp_pce_set_pc((uint16_t)pc); }
 
+// register seeds (music rips): the HuC6280 A register and stack pointer are
+// directly writable (a == 0xFF / sp == 0xFFFF leave the register untouched)
+static int pce_seed_regs(DpMachine *m, uint8_t a, uint16_t sp) {
+    pce_ensure(m);
+    if (a != 0xFF) dp_pce_set_a(a);
+    if (sp != 0xFFFF) dp_pce_set_sp((uint8_t)sp);
+    return 1;
+}
+// per-bank seeding: the $4000-$7FFF window shows 16 KiB block `bank`
+static int pce_bank_view(DpMachine *m, unsigned bank) {
+    pce_ensure(m);
+    return bank ? dp_pce_bank16(bank) : 0;
+}
+
 // technique 2 (interrupts): where the CPU unmasks (CLI, PLP, RTI, or a write to the interrupt
 // mask $1402) one alternative per source (1 = VDC, 2 = timer) is forked with that source raised,
 // as the old PCE engine's fork_irq
@@ -271,6 +285,8 @@ DpMachine *dp_machine_pce(void) {
     m->isa = dp_isa_huc6280();
     m->pc = pce_pc;
     m->set_pc = pce_set_pc;
+    m->seed_regs = pce_seed_regs;
+    m->bank_view = pce_bank_view;
     m->frame = pce_frame;
     m->set_input = pce_set_input;
     return m;

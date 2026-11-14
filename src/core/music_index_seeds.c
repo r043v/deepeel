@@ -168,7 +168,7 @@ int dp_music_seeds_full(const DpMusicIndex *ix, const char *const *plats, size_t
         int plat_ok = 0;
         for (size_t p = 0; p < nplat; p++) if (!strcmp(r.platform, plats[p])) plat_ok = 1;
         if (!plat_ok) { st->other_platform++; continue; }
-        if (st->tier < tiers[h]) st->tier = tiers[h];
+        if (!st->tier || tiers[h] < st->tier) st->tier = tiers[h];   // the strongest identity that matched (1 crc beats 3 game)
         /* rip-file entries (the local library) are the runtime fallback's input */
         if (ctx && !strncmp(r.origin, "local:", 6)) { rips[nrip] = r.origin + 6; rip_ent[nrip++] = hits[h]; }
         else if (ctx && !strncmp(r.origin, "joshw:", 6)) { rips[nrip] = strchr(r.origin, '!') + 1; rip_ent[nrip++] = hits[h]; }
@@ -235,6 +235,54 @@ int dp_music_seeds_full(const DpMusicIndex *ix, const char *const *plats, size_t
 /* name of an identity tier, for the reports (0: nothing matched) */
 const char *dp_music_seeds_tier_name(int tier) {
     return tier == 1 ? "crc" : tier == 2 ? "title" : tier == 3 ? "game" : "none";
+}
+
+/* the pc of one seed under the machine's own view: the 16 KiB window whose
+ * mapping shows the cell (both 8 KiB halves on the 8 KiB-slot boards), 0 when
+ * no window does (the caller re-banks to win_base), -1 without rom_index */
+static int64_t ks_seed_pc(const DpMachine *m, uint32_t rom) {
+    if (!m->rom_index) return -1;
+    unsigned off = rom & 0x3FFFu, base_off = rom & ~0x3FFFu;
+    for (unsigned base = 0; base < 0x10000u; base += 0x4000u) {
+        if (m->rom_index((DpMachine *)m, base + off) != (int64_t)rom) continue;
+        if (m->rom_index((DpMachine *)m, base + (off ^ 0x2000u)) != (int64_t)(base_off | (off ^ 0x2000u))) continue;
+        return base + off;
+    }
+    return 0;
+}
+
+int dp_music_seeds_kernel(DpMusicKernelSeeds *ks, const DpMusicSeed *seeds, size_t n,
+                          unsigned win_base, const DpMachine *m) {
+    memset(ks, 0, sizeof *ks);
+    if (!n) return 0;
+    ks->pcs = malloc(n * sizeof *ks->pcs);
+    ks->banks = malloc(n * sizeof *ks->banks);
+    ks->regs = malloc(n * sizeof *ks->regs);
+    if (!ks->pcs || !ks->banks || !ks->regs) { dp_music_seeds_kernel_free(ks); return -1; }
+    for (size_t i = 0; i < n; i++) {
+        if (seeds[i].rom == DP_RIP_NONE) continue;   // a runtime seed the verifier could not place
+        uint32_t pc; uint16_t bank;
+        if (m) {
+            int64_t v = ks_seed_pc(m, seeds[i].rom);
+            if (v < 0) { ks->skipped++; continue; }   // no rom_index: cannot resolve
+            if (v > 0) { pc = (uint32_t)v; bank = 0; }   // the dump's own view already shows it
+            else { pc = win_base + (seeds[i].rom & 0x3FFFu); bank = (uint16_t)(seeds[i].rom >> 14); }
+        } else {
+            pc = win_base + (seeds[i].rom & 0x3FFFu);
+            bank = (uint16_t)(seeds[i].rom >> 14);
+        }
+        ks->pcs[ks->n] = pc;
+        ks->banks[ks->n] = bank;
+        ks->regs[ks->n].a = seeds[i].a;
+        ks->regs[ks->n].sp = seeds[i].sp;
+        ks->n++;
+    }
+    return 0;
+}
+
+void dp_music_seeds_kernel_free(DpMusicKernelSeeds *ks) {
+    free(ks->pcs); free(ks->banks); free(ks->regs);
+    memset(ks, 0, sizeof *ks);
 }
 
 int dp_music_seeds_cli(const char *midx_file, const char *const *plats, size_t nplat,

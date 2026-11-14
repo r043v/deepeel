@@ -107,6 +107,13 @@ static int gb_seed_regs(DpMachine *m, uint8_t a, uint16_t sp) {
     return 1;
 }
 static void gb_poke(DpMachine *m, uint32_t a, uint8_t v) { gbw(m)->d->api->wr((uint16_t)a, v); }
+// per-bank seeding: the $4000 window shows 16 KiB block `bank` (the kernel's seed_banks);
+// bank 0 included — the reset view is not assumed, the boot may have selected another bank
+static int gb_bank_view(DpMachine *m, unsigned bank) {
+    gb_poke(m, 0x2000, (uint8_t)bank);
+    if (bank > 0xff) gb_poke(m, 0x3000, (uint8_t)(bank >> 8));
+    return 1;
+}
 static uint64_t gb_frame(DpMachine *m) { return *gbw(m)->d->api->frame; }
 // kernel mask (up down left right button1 button2 start select) -> the engine's set_buttons layout
 // (A=1 B=2 Select=4 Start=8 Right=16 Left=32 Up=64 Down=128, what the movies and the old engine feed)
@@ -260,6 +267,7 @@ static DpMachine *gb_wrap(DpMach *impl) {
     m->pc = gb_pc;
     m->set_pc = gb_set_pc;
     m->seed_regs = gb_seed_regs;
+    m->bank_view = gb_bank_view;
     m->poke = gb_poke;
     m->set_input = gb_set_input;
     m->frame = gb_frame;

@@ -127,6 +127,11 @@ typedef struct DpProbe {
 } DpProbe;
 
 typedef struct DpMachine DpMachine;
+
+// register seeds for one entry point (music rips: the init call carries the
+// song number in A and starts on the rip's stack)
+typedef struct DpSeedRegs { uint8_t a; uint16_t sp; } DpSeedRegs;
+
 struct DpMachine {
     const char *name;                      // "gb", "sms", "nes", ...
     const DpPlatform *plat;
@@ -151,6 +156,12 @@ struct DpMachine {
     // the kernel counts the seed in DpCoreResult.seed_regs_absent (never
     // silent).
     int (*seed_regs)(struct DpMachine *, uint8_t a, uint16_t sp);
+    // Optional: map the 16 KiB ROM block `bank` into the platform's seed
+    // window ($4000 on GB/Sega/PCE, $8000 on NES) through raw mapper writes —
+    // the per-bank seeding (the banks parallel to the kernel's seeds).  0 when
+    // this board cannot show that block: the kernel counts it in
+    // DpCoreResult.seed_banks_absent (never silent).
+    int (*bank_view)(struct DpMachine *, unsigned bank);
     // writes one byte through the machine's memory map, unobserved (NULL: unsupported);
     // the entry point of the RAM-seeding techniques (docs/PLAN-MUTUALISATION.fr.md, step 3)
     void (*poke)(struct DpMachine *, uint32_t addr, uint8_t value);

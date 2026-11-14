@@ -47,13 +47,18 @@ fixe $C000-$FFFF est la dernière banque physique. L'exécution hors ROM
 0.336.0 : `--music-index [FICHIER]` (défaut `output/music_index/music_index.bin`) passe par
 la glue CLI partagée (`src/core/music_index_seeds.c`, comme GB et les plateformes Z80) :
 CRC32 du fichier brut, recherche dans l'index musical (DPMDX002, hors dépôt), ligne de
-rapport unique. Aujourd'hui il n'y a **rien à semer** : les tables nsf du ripper ne portent
-ni CRC de dump, ni table de chunks, ni projection `init_rom`/`play_rom` — aucune entrée
-n'est ancrable à un dump (0/2983). Le rapport reste affiché, jamais silencieux : quand des
-points d'entrée existeraient, la ligne dit combien et l'explorateur précise qu'il n'en sème
-encore aucun ; un `--music-index` explicite qui ne charge pas est une erreur (comme sur les
-autres plateformes). Levier futur : ancrer le rip par son bloc de données dans les banques
-PRG, comme le vote de fragments de GB.
+rapport unique. 0.340.0 : **ça sème** — les rips nsf de la bibliothèque locale sont vérifiés
+octet à octet contre le dump (batch `tools/rip_verify.py`, sidecars `.verified`), la paire
+(rip, dump) vérifiée porte la projection `init_rom`/`play_rom` en espace ROM, et les graines
+entrent dans les deux moteurs : noyau (`--core`, `seed_regs` + `bank_view` de la machine
+NES) et legacy (points d'entrée confirmés `DP_NES_TREE_MUSIC`, compteur `music-rip seeds`).
+La pc de chaque graine est la fenêtre que la vue reset montre déjà (les deux moitiés de
+8 Ko, résolution par `rom_index` — la banque fixe d'un NROM se trouve à `$C000`), sinon la
+fenêtre `$8000` re-banquée ; un bloc qu'aucune fenêtre ne montre est refusé et compté, jamais
+silencieux. Preuve (observation de l'outil) : Super Mario Bros. (World) — le rip
+`Super Mario Bros. … .nsf` vérifié dans le dump (play ROM $72E0, banque 1 visible à `$F2D0`)
+sème le moteur. Bug corrigé : le magic NSF fait 5 octets, load/init/play aux octets 8/10/12
+(l'ancien décodage décalé projetait des points d'entrée erronés).
 
 ## TAS
 

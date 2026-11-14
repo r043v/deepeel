@@ -18,10 +18,7 @@
 
 enum { DP_CORE_NATURAL = 1, DP_CORE_FORCED = 2, DP_CORE_COPIED = 4, DP_CORE_COMPRESSED = 8, DP_CORE_DATA = 16, DP_CORE_STATIC = 32 };   // STATIC: reached by the static closure from a natural direct transfer   // DATA: read as data by a natural path   // COPIED: a ROM byte later written verbatim to RAM
 enum { DP_CORE_START_NATURAL = 64, DP_CORE_START_FORCED = 128 };
-
-// register seeds for one entry point (music rips: the init call carries the
-// song number in A and starts on the rip's stack)
-typedef struct DpSeedRegs { uint8_t a; uint16_t sp; } DpSeedRegs;
+// DpSeedRegs lives in core/dpmachine.h (the seed_regs contract is on DpMachine)
 
 // optional platform hooks; every member may be NULL
 typedef struct DpPlatformHooks {
@@ -64,7 +61,7 @@ typedef struct DpCoreConfig {
     size_t rom_image_size;
     const uint32_t *seeds;     // extra entry points (vectors): queued as forced paths from the start state
     size_t n_seeds;
-    const uint16_t *seed_banks;   // optional, parallel to seeds: ROM bank selected (a write to $2000 on the start state) before the seed runs
+    const uint16_t *seed_banks;   // optional, parallel to seeds: 16 KiB ROM block mapped into the seed window (DpMachine.bank_view) before the seed runs
     // optional, parallel to seeds: register seeds applied to the start state
     // before the seed runs (music rips: the init call carries the song number
     // in A and starts on the rip's stack).  a == 0xFF leaves A, sp == 0xFFFF
@@ -120,6 +117,7 @@ typedef struct DpCoreResult {
     uint64_t seeded;           // seed entry points queued
     uint64_t seed_refused_cap; // unique pointer seeds not queued due to the GB scan cap
     uint64_t seed_regs_absent; // register seeds requested but the machine has no seed_regs hook
+    uint64_t seed_banks_absent; // bank seeds requested but the machine cannot show the block (no bank_view hook, or the block is not switchable)
     uint64_t novelty_picks;    // pending states chosen ahead of LIFO order because their target was uncovered
     uint64_t index_replays;    // states queued with a RAM index byte set to 0..15 at a ROM-table read
     uint64_t rng_forks;        // states queued with a volatile RAM byte forced to 00/01/80/FF

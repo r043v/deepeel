@@ -72,6 +72,18 @@ static void nes_observe(DpMachine *m, const DpObservers *o, void *user) {
     dp_nesmach_set_hooks(nes_impl(m), &h);
 }
 
+// register seeds (music rips): the 6502 A register and stack pointer are
+// directly writable (a == 0xFF / sp == 0xFFFF leave the register untouched)
+static int nes_seed_regs(DpMachine *m, uint8_t a, uint16_t sp) {
+    if (a != 0xFF) dp_nesmach_set_a(a);
+    if (sp != 0xFFFF) dp_nesmach_set_sp(sp);
+    return 1;
+}
+// per-bank seeding: the $8000 window shows 16 KiB block `bank` (bank 0
+// included — the reset view is not assumed; a NROM has nothing to select)
+static int nes_bank_view(DpMachine *m, unsigned bank) {
+    return dp_nesmach_set_bank(nes_impl(m), bank) || dp_nesmach_mapper(nes_impl(m)) == 0;
+}
 static uint32_t nes_pc(DpMachine *m) { return dp_nesmach_pc(nes_impl(m)); }
 static void nes_set_pc(DpMachine *m, uint32_t pc) { dp_nesmach_set_pc(nes_impl(m), pc); }
 // kernel pad mask (bit0 up, 1 down, 2 left, 3 right, 4 button 1, 5 button 2, 6 start)
@@ -134,6 +146,8 @@ DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err
     m->fetch = nes_fetch;
     m->poke = nes_poke;
     m->rom_index = nes_rom_index;
+    m->seed_regs = nes_seed_regs;
+    m->bank_view = nes_bank_view;
     m->run = nes_run;
     m->observe = nes_observe;
     m->close = nes_close;

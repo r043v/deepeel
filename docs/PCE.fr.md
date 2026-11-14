@@ -22,13 +22,15 @@ Les index ROM sont les offsets physiques, ce qui revient à
 0.336.0 : `--music-index [FICHIER]` (défaut `output/music_index/music_index.bin`) passe par
 la glue CLI partagée (`src/core/music_index_seeds.c`, comme GB et les plateformes Z80) :
 CRC32 du fichier brut, recherche dans l'index musical (DPMDX002, hors dépôt), ligne de
-rapport unique. Le palier crc
-existe (314/847 entrées hes portent le CRC d'un dump — vérifié sur les dumps disponibles : 2/5
-touchent), mais les tables hes ne projettent **aucun** `init_rom`/`play_rom` (pas de table de
-chunks) et ne consignent pas `play` : rien n'est semable aujourd'hui. Le rapport reste affiché,
-jamais silencieux ; il dit combien d'entrées matchent et pourquoi aucune graine n'en sort ; un
-`--music-index` explicite qui ne charge pas est une erreur (comme sur les autres plateformes).
-Levier futur : la table de copies du ripper côté hes, ou l'ancrage par bloc de données.
+rapport unique. 0.340.0 : **ça sème** — les rips hes de la bibliothèque locale sont vérifiés
+octet à octet contre le dump (batch `tools/rip_verify.py` par banques 8 Ko à travers les
+pages MPR du header, sidecars `.verified`), la paire (rip, dump) vérifiée porte la projection
+`init_rom`/`play_rom` en espace ROM, et les graines entrent dans les deux moteurs : noyau
+(`--core`, `seed_regs` + `bank_view` — les deux pages MPR du bloc à `$4000`-`$7FFF`) et
+legacy (points d'entrée confirmés `dp_pce_enter(page, pc)` + A/SP du rip, compteur
+`music-rip seeds`). Le bloc qu'aucune fenêtre MPR ne montre est refusé et compté, jamais
+silencieux ; les collections hes locales ne matchent pas encore les dumps disponibles
+(0/2 155 au batch — la chasse continue, et le runtime auto-vérifie tout rip qui s'ancrerait).
 
 ## Passes
 

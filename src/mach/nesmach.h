@@ -91,6 +91,16 @@ uint8_t *dp_nesmach_state_nmi_edge(void *buf);
  * 0 nothing, 1 the PRG window (16 KiB slots), 2 the CHR bank (CNROM) */
 /* explicit entry: PC + switchable bank (UxROM/NROM only), 1 on success */
 int dp_nesmach_enter(DpNesMach *m, unsigned bank, unsigned addr);
+/* the switchable $8000 window shows 16 KiB PRG block `bank` (music seeds);
+ * MMC3/MMC5 through two 8 KiB slots; 1 on success, 0 when the board cannot */
+int dp_nesmach_set_bank(DpNesMach *m, unsigned bank);
+/* the live A register / stack pointer (music-rip seed_regs: the init call
+ * carries the song number in A and starts on the rip's stack) */
+void dp_nesmach_set_a(unsigned a);
+void dp_nesmach_set_sp(unsigned sp);
+/* the CPU address a music seed (physical PRG cell) runs at under the current
+ * view (both 8 KiB halves), 0 when no window shows it, -1 outside the PRG */
+int64_t dp_nesmach_seed_pc(DpNesMach *m, uint32_t rom);
 /* MMC3: an 8 KiB bank under the R6/R7 slot holding addr (PRG mode 0); 1 on success */
 /* boards whose 16 KiB $8000 slot dp_nesmach_enter can set (UxROM, MMC1, Camerica, UN1ROM) */
 int dp_nesmach_cross16(const DpNesMach *m);

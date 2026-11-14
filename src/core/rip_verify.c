@@ -124,9 +124,10 @@ int dp_rip_verify(const uint8_t *rip, size_t n, const uint8_t *rom, size_t rn, D
     if (n < 16 || rn < 0x4000) return -1;
     if (!memcmp(rip, "GBS", 3))
         return rv_gbs(rip, n, rom, rn, out);
-    if (!memcmp(rip, "NESM\x1a", 4) && n > 128) {          // NSF: 128-byte header
-        uint32_t load = rip[7] | (rip[8] << 8), init = rip[9] | (rip[10] << 8),
-                 play = rip[11] | (rip[12] << 8);
+    if (!memcmp(rip, "NESM\x1a", 5) && n > 128) {          // NSF: 128-byte header
+        /* the magic is 5 bytes: load 8-9, init 10-11, play 12-13 (LE) */
+        uint32_t load = rip[8] | (rip[9] << 8), init = rip[10] | (rip[11] << 8),
+                 play = rip[12] | (rip[13] << 8);
         return rv_linear(rip + 128, n - 128, load, init, play, rom, rn, out);
     }
     if (!memcmp(rip, "NSFE", 4)) {                         // NSFE: INFO + DATA chunks

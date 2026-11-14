@@ -128,6 +128,35 @@ voyagé verbatim, et la recherche non guidée exige une banque alignée byte-ide
 repli par fragments de `dp_gbs_verify`, 3 votes locaux, ne suffit pas seul — un faux positif
 inter-catégories a été mesuré puis éliminé).
 
+0.340.0 : la chaîne musicale sème sur **toutes** les plateformes — NES et PCE calculaient
+les points d'entrée puis les jetaient (« this explorer seeds none of them yet ») ; Sega
+`--core` ne les transmettait pas au noyau ; `seed_regs` n'existait que sur GB et Sega.
+Désormais : `seed_regs` sur les machines NES (A/SP), PCE (A/SP) et MD (D0/A7), `--seed-banks`
+générique via le nouveau hook `DpMachine.bank_view` (GB poke `$2000`/`$3000`, Sega
+`seed_window`, NES registre du mapper — MMC3/MMC5 par deux fentes 8 Ko, PCE les deux pages
+MPR du bloc à `$4000` ; MD sans objet, pas de mapper 68000), et le glue mutualisé
+`dp_music_seeds_kernel` construit les trois tableaux parallèles du noyau pour chaque CLI.
+La pc de chaque graine est **la fenêtre que le dump montre déjà** (les deux moitiés de
+8 Ko sur NES — la résolution par `rom_index` évite de re-banquer NROM/fixe, ex. la banque
+1 d'un NROM vit à `$C000`, pas à `$8000`), sinon `$8000`/`$4000` re-banquée par
+`bank_view` ; une graine qu'aucune fenêtre ne montre est comptée, jamais silencieuse.
+NES : `--seed-banks` s'étend à toutes les boards à fente `$8000` commutable (UxROM, MMC1,
+Camerica, UN1ROM — `dp_nesmach_cross16`), plus le mapper 2 seul ; les graines musicales
+entrent comme points d'entrée confirmés (`DP_NES_TREE_MUSIC`, compteur `music-rip seeds`),
+PCE idem (`dp_pce_enter` page + pc, A/SP du rip). Bug corrigé au passage : le magic NSF
+fait 5 octets (`NESM\x1a`), load/init/play sont donc aux octets 8/10/12 — l'ancien
+décodage décalé d'un octet (Python et C) projetait des points d'entrée erronés dont les
+octets arrivaient quand même à matcher verbatim (DuckTales : init $C37F au lieu de $C003) ;
+le garde-fou `data_size` des sidecars accepte désormais l'en-tête de chaque conteneur
+(112 GBS, 128 NSF, $20 KSS/HES, somme des chunks DATA pour NSFE) ; les lignes génériques
+portent leur plateforme (`gbs`→GB, `nsf`→NES, `hes`→PCE, `kss`→KSS — format des rip MSX et
+Sega 8 bits, accepté par les listes de plateformes Sega/MSX). Le tier affiché est le plus
+fort qui a matché (crc avant game). Preuves (observations de l'outil, 300 k pas) :
+Super Mario Bros. (World) — le rip `Super Mario Bros. … (NES)` vérifié dans le dump
+(play ROM $72E0, banque 1 déjà visible à `$F2D0` dans la vue reset) sème les deux moteurs ;
+le crawler joshw couvre `kss.joshw.info` (arborescence par système : Game Gear/, MSX/,
+Master System/).
+
 0.333.0 : quand des banques matchent mais qu'un pc reste non projeté (une tranche de rip
 trop courte pour le seuil — un rip qui commence au milieu d'un `$4000` dont la tête fait
 56 octets), le vote de fragments porte désormais ce pc au lieu d'abandonner ; le vote ne

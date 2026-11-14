@@ -77,7 +77,9 @@ void dp_pce_observe(const DpPceObserver *o);       // NULL: no observer
 DpPceCpu dp_pce_cpu(void);
 void dp_pce_set_flags(uint8_t p);
 int dp_pce_enter(uint32_t rom_page, uint16_t pc); // map the page under pc's window, set pc; 0: unmappable
+int dp_pce_bank16(uint32_t block); // map the 16 KiB block into the $4000-$7FFF window (music-seed bank view); 0: unmappable
 void dp_pce_set_a(uint8_t a);       // accumulator (event probes overwrite a status read)
+void dp_pce_set_sp(uint8_t s);      // stack pointer (music-rip seed_regs)
 void dp_pce_set_pc(uint16_t pc);    // explicit entry point (the live mapping applies)
 // the physical cell of a CPU address under the live MPR (-1: not ROM)
 int64_t dp_pce_rom_index(uint16_t addr);
