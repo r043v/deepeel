@@ -871,3 +871,9 @@ add_test(NAME gbs COMMAND test_gbs ${CMAKE_CURRENT_BINARY_DIR})
 set_tests_properties(gbs PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_gbs COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/core_gbs.py $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_gbs.gb ${CMAKE_CURRENT_BINARY_DIR}/fix_gbs.gbs)
 set_tests_properties(core_gbs PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 120)
+
+# Music index reader (src/core/music_index.c): DPMDX002 layout walk, CRC/title/game
+# binary searches, entry decode, header-title normalization; truncated file fails at load.
+add_executable(test_music_index test_music_index.c)
+target_link_libraries(test_music_index PRIVATE deepeel_core m)
+add_test(NAME music_index COMMAND test_music_index ${CMAKE_CURRENT_BINARY_DIR})

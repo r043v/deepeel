@@ -14,6 +14,38 @@ et init/play sont projetés par le vote local des fragments qui les entourent (�
 ≥ 3 voix concordantes, majorité). Jamais silencieux : rapport complet (banques, fragments,
 votes) et échec dur si aucune graine ne se projette.
 
+0.334.0 : index musical `--music-index [FICHIER]` (défaut `output/music_index/music_index.bin`,
+DPMDX002 produit par `tools/music_index.py export --bin`, hors dépôt) : les bases du ripper
+BAB et les rips locaux fusionnés deviennent une source de graines confirmées sans `--gbs`
+manuel. Trois paliers de recherche sur le dump chargé : CRC32 exact (les bases enregistrent
+les CRC de dumps), titre d'en-tête normalisé (sources latines seulement — les titres
+japonais se normalisent en rien), puis identité de jeu : les sœurs `game_key` de chaque
+touche, c'est-à-dire tous les dumps/régions/formats du même jeu. Les `init_rom`/`play_rom`
+précalculés de chaque entrée GB trouvée rejoignent les graines GBS ; le journal nomme le
+palier qui a porté chaque graine (crc / title / game — un transfert par identité de jeu est
+une preuve plus faible qu'un CRC de dump exact, jamais mélangé silencieusement). Banque 0
+décodée directement (`$0000-$3FFF`), les autres banques par la fenêtre `$4000-$7FFF`.
+Super Mario Land (observations de l'outil) : le dump (World) touche au palier crc (play
+banque 3 $66F2, rip V1.0) et au palier jeu (play banque 3 $65F2, rip Rev A) ; la Rev A
+inverse les deux paliers pour les mêmes deux graines ; Zelda US : absent de l'index,
+journalisé, aucune graine. Mesure de couverture à 20 M pas (la session attract s'épuise à
+~7 M) : sans scan de pointeurs, les graines de l'index exécutent 113 octets de plus
+(11284 → 11397, zéro perdu) dont 98 dans la zone moteur bank 3 $6600-$6900 — 0 octet sans
+les graines, 98 avec ; avec le scan 40 000 graines par défaut, +1 octet seulement
+(605 → 606 dans la zone moteur) : le scan spéculatif atteint déjà le moteur, les graines
+de l'index y restent le contrepoint confirmé. `DEEPEEL_MIDX_DEBUG=1` liste chaque entrée
+touchée avec son palier, sa position et sa clé de jeu.
+
+0.333.0 : quand des banques matchent mais qu'un pc reste non projeté (une tranche de rip
+trop courte pour le seuil — un rip qui commence au milieu d'un `$4000` dont la tête fait
+56 octets), le vote de fragments porte désormais ce pc au lieu d'abandonner ; le vote ne
+touche que les pcs non encore portés par une banque matched. Link's Awakening
+(observations de l'outil) : le rip japonais DMG-ZLJ.gbs contre les ROMs française et
+américaine identifie les mêmes banques moteur (27, 30, 31) et le vote projette init/play
+en banque 26 $7FC8/$7FCD sur les deux régions comme sur le rip français DMG-ZL-FRE —
+le moteur musical est identique entre dumps de régions différentes, l'annotation d'un rip
+transfère donc par-delà le CRC de chaque dump.
+
 Super Mario Land (observations de l'outil) : le rip DMG-MLA.gbs (18 pistes, load $65E4) n'a
 aucune banque identique à la ROM (meilleure banque : 2 %) — le moteur vit en banque 3 (offset
 ROM $66E2) et le rip l'a extrait en bloc contigu avec 176/402 fragments de 16 octets remplacés ;

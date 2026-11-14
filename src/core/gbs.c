@@ -84,7 +84,11 @@ unsigned dp_gbs_verify(const DpGbs *g, const uint8_t *rom, size_t rom_size, doub
     if (matched) {   // path A: byte-identical banks carry their pcs directly
         map_pc(g, m, g->init, &m->init_bank, &m->init_addr);
         map_pc(g, m, g->play, &m->play_bank, &m->play_addr);
-        return matched;
+        if (m->init_bank >= 0 && m->play_bank >= 0) return matched;
+        /* some pcs fell in a rip bank that could not clear the threshold (a short
+         * first slice under the window, e.g. a rip starting mid-$4000 whose head is
+         * 56 bytes): the matched banks still locate the block, the fragment vote
+         * below carries the unmapped pcs the rest of the way */
     }
     /* path B: fragment relocation — no rip bank is byte-identical, the block is likely
      * a mid-bank extract; exact 16-byte fragments say where it lives */
@@ -111,6 +115,7 @@ unsigned dp_gbs_verify(const DpGbs *g, const uint8_t *rom, size_t rom_size, doub
     };
     for (int s = 0; s < 2; s++) {
         if (pcs[s].pc >= 0x8000) continue;   // WRAM/HRAM address: player stub, not ROM data
+        if (*pcs[s].bank >= 0) continue;     // already carried by a matched bank
         size_t d = data_offset(g, pcs[s].pc);
         if (d == SIZE_MAX) continue;
         size_t lo = d > 512 ? d - 512 : 0, hi = d + 512 < g->data_size ? d + 512 : g->data_size;
