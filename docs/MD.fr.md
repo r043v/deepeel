@@ -452,3 +452,19 @@ le runtime lève les deux naturellement sur ses propres lignes, la fourche ajout
 variante où l'interruption tombe ici ; le masque IPL (`SR >= 6`) vette tout. Les sources
 sèment le handler dans des contextes que le flux naturel ne produit pas (l'interruption
 entre deux instructions arbitraires du site), bornées par les caps de fourches existants.
+
+## Index musical (0.340.0 — sans objet sur MD)
+
+`--music-index` n'existe pas sur MD : aucun format rip de chip-musique 68000 n'est
+porté par l'index DPMDX002 (gbs→GB, nsf→NES, hes→PCE, kss→MSX et Sega 8 bits, et le
+kss ne couvre pas le 68000). La voie MD reste le replay TAS/moteur Z80 documenté
+ailleurs ; ajouter un format MD (VGM avec table d'entry points) est une ouverture,
+pas une promesse.
+
+## Typage data (0.343.0 — côté noyau)
+
+La connaissance de destination (DP_DEST_* : où la donnée lue en ROM atterrit — VDP
+`$C00000-$C00003`, PSG `$C00011`, SRAM `$200000-$20FFFF`) est câblée dans la machine
+(`DpMachine.data_dest`) et consommée par le noyau, dont la carte PNG teinte les
+octets typés. Les moteurs legacy ne portent pas ce tableau : ils convergent vers le
+noyau plutôt que de dupliquer la plomberie (`--core` a la carte typée).

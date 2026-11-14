@@ -708,6 +708,11 @@ target_link_libraries(test_nes_mmc3 PRIVATE deepeel_nes deepeel_core m)
 add_dependencies(test_nes_mmc3 fixtures)
 add_test(NAME nes_mmc3 COMMAND test_nes_mmc3 ${CMAKE_CURRENT_BINARY_DIR})
 
+add_executable(test_nes_jmpind test_nes_jmpind.c)
+target_link_libraries(test_nes_jmpind PRIVATE deepeel_nes deepeel_core m)
+add_dependencies(test_nes_jmpind fixtures)
+add_test(NAME nes_jmpind COMMAND test_nes_jmpind ${CMAKE_CURRENT_BINARY_DIR})
+
 add_executable(test_audit_parity test_audit_parity.c)
 target_link_libraries(test_audit_parity PRIVATE deepeel_core m)
 add_dependencies(test_audit_parity fixtures)

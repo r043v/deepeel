@@ -346,6 +346,31 @@ static int closure_jp_table3(DpCoreResult *r, DpMachine *m, const DpCoreConfig *
     return cnt;
 }
 
+// S4 (6502/huc6280): `jmp (abs)` ($6C) or `jmp (abs,x)` ($7C, HuC6280) whose
+// operand sits in the mapped ROM window — the words that follow are a table of
+// code pointers in the same window; each target that starts a legal instruction
+// is a static root (stride 2, up to 64 words).  The kernel's first banked
+// static-closure form for these ISAs (audit E5): the same-window semantics are
+// the machine's own view, the walk needs no per-mapper geometry.
+static void closure_abs_table(DpCoreResult *r, DpMachine *m, const DpIsa *isa, const uint8_t *bytes) {
+    if (bytes[0] != 0x6C && bytes[0] != 0x7C) return;
+    if (bytes[1] & 1) return;   // word tables are even
+    uint32_t ta = (uint32_t)bytes[1] | ((uint32_t)bytes[2] << 8);
+    int cnt = 0;
+    for (unsigned e = 0; e < 64; e++) {
+        uint32_t a = ta + e * 2u;
+        uint32_t t = (uint32_t)m->fetch(m, a) | ((uint32_t)m->fetch(m, a + 1) << 8);
+        if (m->rom_index(m, t) < 0) break;   // outside the ROM: end of the table
+        uint8_t b[8] = {0};
+        for (unsigned i = 0; i < sizeof b; i++) b[i] = m->fetch(m, t + i);
+        DpFlowInfo f; memset(&f, 0, sizeof f);
+        if (!isa->flow(b, t, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL) break;
+        cnt++;
+        closure_walk(r, m, isa, t);
+    }
+    if (cnt) { r->closure_jp_tables++; r->closure_jp_entries += (uint64_t)cnt; r->prov_data_bytes += (uint64_t)cnt * 2; }
+}
+
 static void closure_jp_table(DpCoreResult *r, DpMachine *m, const DpCoreConfig *cfg, const DpIsa *isa, uint32_t pc) {
     if (!isa->name || (strcmp(isa->name, "sm83") && strcmp(isa->name, "z80"))) return;
     {   // byte-granular: ld b,n / ld c,m then ld h,b / ld l,c (or the reverse pair) before the jump
@@ -1159,6 +1184,9 @@ static void run_path(Worker *w, Pending *p) {
             if (fi.target >= 0 && (fi.kind == DP_FLOW_JUMP || fi.kind == DP_FLOW_COND || fi.kind == DP_FLOW_CALL)) closure_walk(loc, m, isa, (uint32_t)fi.target);
             if (fi.kind == DP_FLOW_COND || fi.kind == DP_FLOW_CALL) closure_walk(loc, m, isa, pc + fi.length);
             if (fi.kind == DP_FLOW_INDIRECT && bytes[0] == 0xE9) closure_jp_table(loc, m, cfg, isa, pc);
+            if (fi.kind == DP_FLOW_INDIRECT && (bytes[0] == 0x6C || bytes[0] == 0x7C) &&
+                isa->name && (!strcmp(isa->name, "m6502") || !strcmp(isa->name, "huc6280")))
+                closure_abs_table(loc, m, isa, bytes);
         }
         if (!cfg->no_solve && !cur_forced && m->poke && have_flow) {
             // window: the sequential instructions before a conditional; their start state and RAM reads feed solve_cond

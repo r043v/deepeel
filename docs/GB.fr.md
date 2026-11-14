@@ -199,6 +199,20 @@ qui demandent l'état interne d'un composant non exposé (CRAM vs VRAM du VDP Se
 documentées comme VRAM, pas devinées ; le modèle GB fin (`DP_DF_*`) reste en place et
 projette sur ces mêmes destinations.
 
+0.344.0 : première tranche de **fermeture statique bancarisée au noyau pour 6502/HuC6280**
+(E5 de l'audit) : un `jmp (abs)` (`$6C`) ou `jmp (abs,x)` (`$7C`, HuC6280) dont l'opérande
+tombe dans la fenêtre ROM cartographiée lit la table de mots qui suit — chaque cible qui
+commence une instruction légale devient racine statique (`closure_abs_table`, stride 2,
+64 mots, comptée dans `closure_jp_tables`/`closure_jp_entries`). La sémantique
+même-fenêtre est la vue courante de la machine (`rom_index`), aucune géométrie par mapper
+n'est nécessaire pour cette forme ; les tables inter-banques restent du ressort de la
+passe `--bank-dispatch` legacy (plus riche). Fixture `fix_nes_jmpind.nes` (l'entrée 0
+tourne naturellement, l'entrée 1 n'est couverte que par la marche statique), test
+`nes_jmpind`. Bibliothèque musicale : le batch kss tourne (35 rips, 0 match aux dumps
+locaux) — et les rips joshw sont majoritairement `KSCC`, magic non reconnu par les
+parseurs (`KSSX` seulement) : la convention d'en-tête réelle de ce conteneur reste à
+établir sur des fichiers réels avant de la coder, la limite est documentée, pas devinée.
+
 0.333.0 : quand des banques matchent mais qu'un pc reste non projeté (une tranche de rip
 trop courte pour le seuil — un rip qui commence au milieu d'un `$4000` dont la tête fait
 56 octets), le vote de fragments porte désormais ce pc au lieu d'abandonner ; le vote ne

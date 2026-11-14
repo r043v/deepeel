@@ -1212,6 +1212,21 @@ def build_nes_pce(out):
         n[q:q + 2] = bytes([t & 0xFF, t >> 8])
     with open(os.path.join(out, "fix_nes_mmc3.nes"), "wb") as f:
         f.write(n)
+    # NES jmp (abs) word table: the natural flow takes entry 0 ($8040), entry 1
+    # ($8050) is only reachable through the static table walk (audit E5)
+    n = bytearray(16 + 2 * 0x4000 + 0x2000)
+    n[0:4] = b"NES\x1a"
+    n[4], n[5] = 2, 1
+    n[16:16 + 3] = bytes([0x6C, 0x20, 0x80])          # $8000: jmp ($8020) — the table at $8020
+    n[16 + 0x20:16 + 0x24] = bytes([0x40, 0x80, 0x50, 0x80])   # $8020: words $8040, $8050
+    n[16 + 0x40:16 + 0x48] = bytes([0xA9, 0x01, 0x4C, 0x60, 0x80, 0xEA, 0xEA, 0xEA])  # $8040: lda #1; jmp $8060
+    n[16 + 0x50:16 + 0x58] = bytes([0xA9, 0x02, 0x4C, 0x60, 0x80, 0xEA, 0xEA, 0xEA])  # $8050: lda #2; jmp $8060
+    n[16 + 0x60:16 + 0x63] = bytes([0x4C, 0x60, 0x80])   # $8060: jmp $8060 (self)
+    for v in (0xFFFA, 0xFFFC, 0xFFFE):
+        q = 16 + 0x4000 + (v - 0xFFFA) + 0x3FFA
+        n[q:q + 2] = bytes([0x00, 0x80])
+    with open(os.path.join(out, "fix_nes_jmpind.nes"), "wb") as f:
+        f.write(n)
     nes_prog("fix_nes_index.nes", bytes([0xAD,0x00,0x04, 0xAA, 0xBD,0x20,0x80, 0xC9,0x03, 0xF0,0x05, 0xA9,0x01, 0x4C,0x0D,0x80, 0xA9,0x02, 0x4C,0x12,0x80]),
              bytes([0,0,0,3] + [0] * 12))
     # NES PPU status poll: LDA $2002 / BMI done / JMP poll; done stores and idles (technique 2)
