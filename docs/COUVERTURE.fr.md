@@ -654,7 +654,7 @@ un à un (cause harnais vs cause moteur).
 | Surface | État | Exigé |
 |---|---|---|
 | 6502, PPU événementiel, APU, OAM DMA, NMI/IRQ | ✅ | — |
-| Mappers | ✅ NROM/UxROM natifs (runtime), MMC1, CNROM, MMC3, AxROM, MMC5 (sous-ensemble), 66, 94 pontés par fenêtres composées (`nesmach.c`) | IRQ scanline MMC3 : **Fourche IRQ** |
+| Mappers | ✅ NROM/UxROM natifs (runtime), MMC1, CNROM, MMC3, AxROM, MMC5 (sous-ensemble), 66, 94 pontés par fenêtres composées (`nesmach.c`) | ✅ 0.342.0 IRQ scanline MMC3 modélisée (compteur par ligne visible, loquet `$C000/$C001`, porte `$E000/$E001`) et **fourchée** par le noyau (`irq_alt`, test `nes_mmc3`) ; l'IRQ de trame APU reste non levée par le runtime |
 | CHR-ROM | **non suivie** (seul le PRG est indexé) | Index ROM étendu au CHR, **Type** tiles par les fetchs PPU |
 | DMC DMA | ✅ (J9) : `$4012/$4013` suivis, lectures DMC typées **samples** (`test_dmc`) | **Copie** + **Type** samples |
 | `$4016/$4017` | ✅ sondes manette (strobe-site : boutons uniques, accords, catalogue `--pad-full`) ; les lectures ≥ 9 renvoient 1 (signature NESdev, m0boy) | — |

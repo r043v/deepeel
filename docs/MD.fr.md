@@ -442,3 +442,13 @@ imite sans le modéliser. Piste suivante : modéliser la phase de la ligne au la
 `clock_off` au lieu de l'arrondir (`DP_MD_DMA_NOPHASE` rétablit l'ancien calcul). Mesure : `3994S` 30 000 frames, `1843S`
 13 500 et `1437S` 13 800 tiennent ensemble (X du joueur identique ; 19 / 14 / 14 octets de RAM d'objets différents en fin
 de film). Remplace les pistes `DMA_REFROUND` / arrondi par classe, toutes écartées plus haut. Observation de l'outil.
+
+## Fourches d'interruption du noyau (0.342.0)
+
+La fourche IRQ du noyau (`irq_alt`) offre désormais les **deux sources** : `delay` 1
+synthétise la V-int à ce site (le jeu a les interruptions de trame armées, bit 5 du
+registre VDP 1), `delay` 2 la **H-int** (bit 4, le compteur de lignes du registre VDP 10) —
+le runtime lève les deux naturellement sur ses propres lignes, la fourche ajoute la
+variante où l'interruption tombe ici ; le masque IPL (`SR >= 6`) vette tout. Les sources
+sèment le handler dans des contextes que le flux naturel ne produit pas (l'interruption
+entre deux instructions arbitraires du site), bornées par les caps de fourches existants.

@@ -86,6 +86,9 @@ uint64_t dp_nesmach_state_ctx_hash_live(const void *buf, unsigned ram_pages, uns
 uint64_t dp_nesmach_state_ctx_hash_ram(const void *buf, unsigned pages);
 /* the saved state's pending-NMI edge (an interrupt fork clears it) */
 uint8_t *dp_nesmach_state_nmi_edge(void *buf);
+/* the mapper IRQ line (MMC3 scanline counter), live and in the saved state */
+unsigned dp_nesmach_irq_pending(const DpNesMach *m);
+uint8_t *dp_nesmach_state_irq_line(void *buf);
 
 /* mapper the bridge runs (0, 2, 3, 7) and what a $8000+ write changes:
  * 0 nothing, 1 the PRG window (16 KiB slots), 2 the CHR bank (CNROM) */

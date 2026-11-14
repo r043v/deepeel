@@ -1185,6 +1185,33 @@ def build_nes_pce(out):
     nes_prog("fix_nes_closure.nes", bytes([0x20,0x07,0x80, 0xEA,0xEA,0xEA,0xEA, 0x4C,0x07,0x80]))
     nes_prog("fix_nes_cells.nes", bytes([0xA9,0x00, 0xD0,0x06, 0xD0,0x04, 0xEA,0xEA,0xEA,0xEA, 0x4C,0x0A,0x80]))   # technique 8: two BNE sites, same target
     nes_prog("fix_nes_rng.nes", bytes([0xAD,0x00,0x03, 0x49,0x55, 0x8D,0x00,0x03, 0xC9,0xAA, 0xF0,0x03, 0x4C,0x00,0x80, 0xA9,0x01, 0x4C,0x11,0x80]))
+    # MMC3 scanline IRQ (mapper 4): enable the counter through $C000/$C001/$E001,
+    # spin on $2002; after two visible lines the IRQ fires, the handler at $8020
+    # counts in $10 and returns — the bridge raises cpu.irq_line per its scanline
+    # approximation, the machine services it and the kernel forks it (irq_alt)
+    n = bytearray(16 + 2 * 0x4000 + 0x2000)
+    n[0:4] = b"NES\x1a"
+    n[4], n[5] = 2, 1
+    n[6] = 0x40            # mapper 4 low nibble
+    n[7] = 0x00            # mapper 4 high nibble
+    mmc3_code = bytes([
+        0x58,                          # $8000: cli (the 6502 boots with I set)
+        0xA9, 0x02, 0x8D, 0x00, 0xC0,  # $8001: lda #2; sta $C000 (latch = 2 lines)
+        0x8D, 0x01, 0xC0,              # $8006: sta $C001 (reload now)
+        0xA9, 0x01, 0x8D, 0x01, 0xE0,  # $8009: lda #1; sta $E001 (enable)
+        0xAD, 0x02, 0x20,              # $800E: lda $2002 (spin)
+        0x4C, 0x0E, 0x80,              # $8011: jmp $800E
+        0xEA, 0xEA, 0xEA, 0xEA,        # $8014-$8017: padding
+        0xEA, 0xEA, 0xEA, 0xEA,        # $8018-$801B
+        0xEA, 0xEA, 0xEA, 0xEA,        # $801C-$801F
+        0xE6, 0x10, 0x40,              # $8020: inc $10; rti (the handler)
+    ])
+    n[16:16 + len(mmc3_code)] = mmc3_code
+    for v, t in ((0xFFFA, 0x8000), (0xFFFC, 0x8000), (0xFFFE, 0x8020)):
+        q = 16 + 0x4000 + (v - 0xFFFA) + 0x3FFA
+        n[q:q + 2] = bytes([t & 0xFF, t >> 8])
+    with open(os.path.join(out, "fix_nes_mmc3.nes"), "wb") as f:
+        f.write(n)
     nes_prog("fix_nes_index.nes", bytes([0xAD,0x00,0x04, 0xAA, 0xBD,0x20,0x80, 0xC9,0x03, 0xF0,0x05, 0xA9,0x01, 0x4C,0x0D,0x80, 0xA9,0x02, 0x4C,0x12,0x80]),
              bytes([0,0,0,3] + [0] * 12))
     # NES PPU status poll: LDA $2002 / BMI done / JMP poll; done stores and idles (technique 2)

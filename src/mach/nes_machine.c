@@ -190,21 +190,29 @@ static int nes_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t 
     dp_nesmach_set_ppu_status(keep);
     return 1;
 }
-// techniques 9 / IRQ fork: with an NMI edge pending, the state where the NMI is serviced `delay`
-// instructions later (the edge is held off for those instructions, then raised again)
+// techniques 9 / IRQ fork: with an NMI edge or the mapper IRQ line (MMC3 scanline
+// counter) pending, the state where the service is held off `delay` instructions
+// (the edge/line is cleared for those instructions, then raised again)
 static int nes_irq_alt(void *user, DpMachine *m, unsigned delay, uint8_t *save) {
     (void)user;
-    if (!dp_nesmach_nmi_pending(nes_impl(m))) return 0;
+    DpNesMach *n = nes_impl(m);
+    int nmi = dp_nesmach_nmi_pending(n);
+    if (!nmi && !dp_nesmach_irq_pending(n)) return 0;
     uint32_t sb = m->state_bytes(m);
     uint8_t *tmp = malloc(sb), *off = malloc(sb);
     if (!tmp || !off) { free(tmp); free(off); return 0; }
     m->save(m, tmp);
     memcpy(off, tmp, sb);
     *dp_nesmach_state_nmi_edge(off) = 0;
+    *dp_nesmach_state_irq_line(off) = 0;
     m->load(m, off);
     int ok = 1;
     for (unsigned i = 0; i < delay && ok; i++) ok = m->run(m);
-    if (ok) { m->save(m, save); *dp_nesmach_state_nmi_edge(save) = 1; }
+    if (ok) {
+        m->save(m, save);
+        *dp_nesmach_state_nmi_edge(save) = (uint8_t)nmi;
+        *dp_nesmach_state_irq_line(save) = (uint8_t)!nmi;   // the NMI edge outranks: only one line re-raised
+    }
     m->load(m, tmp);
     free(tmp); free(off);
     return ok;

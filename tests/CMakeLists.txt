@@ -703,6 +703,11 @@ set_tests_properties(md_speculative PROPERTIES FIXTURES_REQUIRED fixtures TIMEOU
 add_test(NAME resume_cov COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/resume_cov.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_branch.gb)
 set_tests_properties(resume_cov PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 
+add_executable(test_nes_mmc3 test_nes_mmc3.c)
+target_link_libraries(test_nes_mmc3 PRIVATE deepeel_nes deepeel_core m)
+add_dependencies(test_nes_mmc3 fixtures)
+add_test(NAME nes_mmc3 COMMAND test_nes_mmc3 ${CMAKE_CURRENT_BINARY_DIR})
+
 add_executable(test_audit_parity test_audit_parity.c)
 target_link_libraries(test_audit_parity PRIVATE deepeel_core m)
 add_dependencies(test_audit_parity fixtures)

@@ -60,6 +60,17 @@ silencieux. Preuve (observation de l'outil) : Super Mario Bros. (World) — le r
 sème le moteur. Bug corrigé : le magic NSF fait 5 octets, load/init/play aux octets 8/10/12
 (l'ancien décodage décalé projetait des points d'entrée erronés).
 
+0.342.0 : l'IRQ de scanline du **MMC3 (mapper 4) est modélisée** — le bridge NES lève la
+ligne IRQ du mapper par son approximation scanline du compteur A12 (écritures `$C000`
+loquet / `$C001` rechargement, `$E000`/`$E001` porte, un décompte par ligne visible, `v[10]`-`v[14]`
+des registres mapper — `v[8]`/`v[9]` sont R6/R7), l'état du compteur voyage dans les
+snapshots (queue du mapper), la machine la branche naturellement (le handler tourne) et la
+fourche IRQ du noyau (`irq_alt`) retarde le service d'1 à 3 instructions — la même fourche
+couvre désormais NMI **et** ligne mapper. Fixture `fix_nes_mmc3.nes` (active le compteur,
+tourne sur `$2002`, handler `inc $10 ; rti` à `$8020`), test `nes_mmc3` : `irq_forks ≥ 1`,
+handler couvert naturel et forcé. L'IRQ de trame APU reste non modélisée (le runtime ne
+lève pas la ligne) : la limite est documentée, pas silencieuse.
+
 ## TAS
 
 `--tas FICHIER` (répétable, 8 max) rejoue un film tool-assisté depuis la

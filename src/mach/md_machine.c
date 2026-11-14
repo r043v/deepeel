@@ -141,13 +141,20 @@ static int md_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *
 }
 // IRQ fork (technique 2): where the vertical interrupt is enabled and unmasked, one state with
 // the interrupt raised (the old engine's irq_forks); delay 1 only
+// IRQ forks: delay 1 synthesizes the V-int at this site (the game has frame
+// interrupts enabled), delay 2 the H-int (the line counter of VDP reg 10); the
+// runtime raises both naturally on its own lines, the fork adds the variant
+// where the interrupt lands right here (technique 9's site-local form)
 static int md_irq_alt(void *user, DpMachine *m, unsigned delay, uint8_t *save) {
     (void)user;
     MdMachWrap *w = m->impl;
-    if (delay != 1) return 0;
-    if (((dp_mdmach_sr(w->m) >> 8) & 7u) >= 6u || !(dp_mdmach_vdp_reg(w->m, 1) & 0x20)) return 0;
+    if (delay > 2) return 0;
+    unsigned reg1 = dp_mdmach_vdp_reg(w->m, 1);
+    if (((dp_mdmach_sr(w->m) >> 8) & 7u) >= 6u) return 0;   // IPL masks everything
+    if (delay == 1 && !(reg1 & 0x20)) return 0;             // V-int enable
+    if (delay == 2 && !(reg1 & 0x10)) return 0;             // H-int enable
     m->save(m, save);
-    dp_mdmach_state_set_irq(save, 1, 0);
+    dp_mdmach_state_set_irq(save, delay == 1, delay == 2);
     return 1;
 }
 static const DpPlatformHooks md_hooks = { .event_probe = md_event_probe, .irq_alt = md_irq_alt };

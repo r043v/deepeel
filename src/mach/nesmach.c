@@ -173,6 +173,16 @@ static void regs_write(const DpNesMach *d, DpNesMapRegs *r, unsigned a, unsigned
         if (!(a & 0x6000)) {
             if (!(a & 1)) r->v[0] = (uint8_t)v;
             else r->v[2 + (r->v[0] & 7)] = (uint8_t)v;
+        } else if (a >= 0xC000u) {   /* the scanline IRQ counter and its gate */
+            /* the fields live in v[10..14] — v[8]/v[9] are the R6/R7 bank
+             * registers mapper_apply reads through the same array */
+            if (a < 0xE000u) {
+                if (!(a & 1)) r->v[10] = (uint8_t)v;   /* $C000: reload latch */
+                else r->v[13] = 1;                     /* $C001: reload on the next line */
+            } else {
+                if (!(a & 1)) { r->v[12] = 0; machine.cpu.irq_line = 0; }   /* $E000: disable + ack */
+                else r->v[12] = 1;                     /* $E001: enable */
+            }
         }
         break;
     }
@@ -196,6 +206,7 @@ static void io_paste(void *data, uint32_t bytes, void *ctx) {
 static void t_step(void *u, unsigned pc, unsigned op) {
     DpNesMach *d = u;
     if (d->steps >= d->budget) { nes_trace.stop = 1; return; }
+    if (getenv("NS_DBG") && d->steps < 40) fprintf(stderr, "PC %04x op %02x bank_base %u fixed %u prgbuf6 %02x\n", pc, op, machine.cpu.bank_base, machine.cpu.fixed_base, machine.cpu.prg ? machine.cpu.prg[6] : 0xEE);
     ++d->steps;
     if (d->h.on_step) d->h.on_step(d->h.user, pc, op);
 }
@@ -207,6 +218,7 @@ static void t_rd(void *u, unsigned a, unsigned v) {
 
 static void t_wr(void *u, unsigned a, unsigned v) {
     DpNesMach *d = u;
+    if (getenv("NS_DBG") && a >= 0x4000u) fprintf(stderr, "WR %04x=%02x\n", a, v);
     if (d->h.on_write) d->h.on_write(d->h.user, a, v);
     if (d->mapper == 5 && a >= 0x5100u && a < 0x5128u) {
         regs_write(d, &d->rg, a, v);
@@ -334,6 +346,13 @@ void dp_nesmach_set_ppu_status(unsigned st) { machine.ppu.status = (uint8_t)st; 
 void dp_nesmach_set_a(unsigned a) { machine.cpu.a = (uint8_t)a; }
 void dp_nesmach_set_sp(unsigned sp) { machine.cpu.s = (uint8_t)sp; }
 
+/* the mapper IRQ line (MMC3 scanline counter) alongside the NMI edge: what a
+ * DpMachine.irq_alt fork suppresses for `delay` instructions */
+unsigned dp_nesmach_irq_pending(const DpNesMach *d) { (void)d; return machine.cpu.irq_line; }
+uint8_t *dp_nesmach_state_irq_line(void *buf) {
+    return (uint8_t *)buf + offsetof(nes_t, cpu) + offsetof(nes6502_t, irq_line);
+}
+
 /* the CPU address a music-rip seed (a physical PRG cell) runs at under the
  * current view: the 16 KiB window both of whose 8 KiB halves map the block,
  * 0 when no window does (the caller re-banks to $8000 through set_bank) */
@@ -363,6 +382,16 @@ uint64_t dp_nesmach_run(DpNesMach *d, uint64_t max_steps) {
         else {
             if (watch_on) machine.ppu.panel_out = watch_buf;
             nes_frame();
+        }
+        if (d->mapper == 4 && machine.line < 240u) {   /* MMC3 scanline IRQ: the scanline
+            * approximation of the A12-edge counter (the standard banked-cart model:
+            * one count per visible line, reload through $C000/$C001, gate $E000/$E001) */
+            DpNesMapRegs *r = &d->rg;
+            if (r->v[12] && machine.line < 240u && machine.line != r->v[14]) {   // one count per visible line
+                r->v[14] = (uint8_t)machine.line;
+                if (r->v[13]) { r->v[11] = r->v[10]; r->v[13] = 0; }   // $C001: reload on the next line
+                else if (r->v[11] && !--r->v[11]) machine.cpu.irq_line = 1;
+            }
         }
         /* a completed frame (line 262) reports on_frame even when a hook
          * stop raced its end; a mid-frame stop resumes through rest() */
