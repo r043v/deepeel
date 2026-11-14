@@ -25,10 +25,13 @@ int dp_music_seeds(const DpMusicIndex *ix, const char *const *plats, size_t npla
     if (norm_title) snprintf(st->title, sizeof st->title, "%s", norm_title);
     int nh = 0, ns = 0;
     uint32_t first, count;
-    /* tier 1: this exact dump's CRC is in the databases */
+    /* tier 1: this exact dump's CRC is in the databases; the pairs map to the
+     * entry array (an entry can carry several dump CRCs) */
     if (!dp_midx_by_crc(ix, crc, &first, &count))
-        for (uint32_t k = 0; k < count; k++)
-            if (!seen[first + k]) { seen[first + k] = 1; hits[nh] = first + k; tiers[nh++] = 1; }
+        for (uint32_t k = 0; k < count; k++) {
+            uint32_t e = dp_midx_crc_pos(ix, first + k);
+            if (!seen[e]) { seen[e] = 1; hits[nh] = e; tiers[nh++] = 1; }
+        }
     /* tier 2: normalized title; the range indexes the refs array */
     if (st->title[0] && !dp_midx_by_title(ix, st->title, &first, &count))
         for (uint32_t k = 0; k < count; k++) {

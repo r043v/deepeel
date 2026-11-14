@@ -16,7 +16,7 @@ typedef struct {
     uint8_t *buf;                    // whole file, malloc'd
     size_t size;
     uint32_t n_crc, n_entry, n_chunk, n_str, pool_bytes, n_title, n_game;
-    const uint8_t *crc_idx;          // n_crc * 12: { u32 crc, first, count }
+    const uint8_t *crc_idx;          // n_crc * 8: { u32 crc, u32 entry_pos }, sorted by crc
     const uint8_t *entries;          // n_entry * 60
     const uint8_t *chunks;           // n_chunk * 12: { u32 rom, dest, len }
     const uint8_t *title_idx;        // n_title * 12: { u32 str_off, first, count }
@@ -43,10 +43,12 @@ typedef struct {
 int dp_midx_load(const char *path, DpMusicIndex *ix, char *err, size_t errsz);
 void dp_midx_free(DpMusicIndex *ix);
 
-/* Ranges over the entry array; return 0 and set *first/*count when found, -1 when absent. */
+/* Ranges over the entry array; return 0 and set *first/*count when found, -1 when absent.
+ * by_crc's range indexes the (crc, position) pair array — map through dp_midx_crc_pos. */
 int dp_midx_by_crc(const DpMusicIndex *ix, uint32_t crc, uint32_t *first, uint32_t *count);
 int dp_midx_by_title(const DpMusicIndex *ix, const char *norm, uint32_t *first, uint32_t *count);
 int dp_midx_by_game(const DpMusicIndex *ix, uint32_t game_key, uint32_t *first, uint32_t *count);
+uint32_t dp_midx_crc_pos(const DpMusicIndex *ix, uint32_t i);
 
 /* Decode the i-th entry (i < n_entry, or any index from a lookup range). */
 void dp_midx_rec(const DpMusicIndex *ix, uint32_t i, DpMusicRec *r);

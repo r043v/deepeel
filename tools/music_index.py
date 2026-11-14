@@ -463,6 +463,11 @@ def _read_verified(path, load, data_size):
                 continue
             banks = [None if b == "-1" else int(b) for b in d.get("banks", "").split(",") if b != ""]
             rec = {"crc": int(d["crc"], 16), "banks": banks}
+            if "chunks" in d:
+                # rip_verify.py writes the matched segments directly (data-offset
+                # space, the BAB `C rom,dest,len` convention): rom:dest:len,...
+                rec["chunks"] = [[int(v) for v in c.split(":")]
+                                 for c in d["chunks"].split(",") if c]
             if "init_rom" in d:
                 rec["init_rom"] = int(d["init_rom"])
             if "play_rom" in d:
@@ -598,8 +603,8 @@ def build(bab_dir, rip_dirs, dbfile, alias_files=()):
             ver = _read_verified(Path(str(path) + ".verified"), g.get("load"), g["data_size"])
             vcrcs = [f"{d['crc']:08x}" for d in ver]   # hex strings, like the BAB rows
             v0 = ver[0] if ver else None
-            vchunks = []
-            if v0:
+            vchunks = v0["chunks"] if v0 and "chunks" in v0 else []
+            if v0 and "chunks" not in v0:
                 load = g.get("load") or 0
                 for i, rb in enumerate(v0["banks"]):
                     if rb is None:
@@ -618,7 +623,8 @@ def build(bab_dir, rip_dirs, dbfile, alias_files=()):
                     g.get("songs"), None, None,
                     g.get("load"), None, None, g.get("init"), g.get("play"), g.get("stack"),
                     g.get("tma"), g.get("tac"),
-                    v0["init_rom"] if v0 else None, v0["play_rom"] if v0 else None,
+                    v0.get("init_rom") if v0 else None,
+                    v0.get("play_rom") if v0 else None,
                     None, None, None,
                     json.dumps(vchunks) if vchunks else None, None, None, None, None,
                     g["sha256"], g["data_size"], json.dumps(g, ensure_ascii=False),
@@ -810,7 +816,7 @@ def write_binary(con, path):
     Layout (little-endian, packed):
       char[8]  "DPMDX002"
       u32      n_crc, n_entry, n_chunk, n_str, pool_bytes, n_title, n_game
-      crc index, sorted by crc32: n_crc * { u32 crc, u32 first, u32 count }
+      crc index, sorted by crc32: n_crc * { u32 crc, u32 entry_pos } (flat pairs)
       entries: n_entry * {
         u32 game_key;                             // 0xFFFFFFFF = unlinked
         u32 src_off, platform_off, format_off;    // string pool offsets
@@ -851,16 +857,18 @@ def write_binary(con, path):
     def u32s(v):
         return M if v is None else (v & 0xFFFFFFFF)
 
-    # crc index
-    bycrc = {}
+    # crc index: flat (crc, entry position) pairs sorted by crc — an entry can
+    # carry several dump CRCs (BAB rows record up to 4, a verified rip one per
+    # verified dump), so ranges into the entry array cannot stay contiguous
+    pairs = set()
     for i, r in enumerate(entries):
-        if r["crc1"] and re.fullmatch(r"[0-9A-Fa-f]{8}", r["crc1"]):
-            bycrc.setdefault(r["crc1"].upper(), []).append(i)
-    crcs = sorted(bycrc, key=lambda c: int(c, 16))  # numeric order: C binary search
-    crc_index, first = [], 0
-    for c in crcs:
-        crc_index.append((int(c, 16), first, len(bycrc[c])))
-        first += len(bycrc[c])
+        cs = [str(c) for c in json.loads(r["crcs"] or "[]")] if r["crcs"] else []
+        if not cs and r["crc1"] and re.fullmatch(r"[0-9A-Fa-f]{8}", r["crc1"]):
+            cs = [r["crc1"]]
+        for c in cs:
+            if re.fullmatch(r"[0-9A-Fa-f]{8}", c):
+                pairs.add((int(c, 16), i))
+    crc_index = sorted(pairs)
     chunks = []
     ent_rec = []
     for r in entries:
@@ -902,11 +910,11 @@ def write_binary(con, path):
         pool += t.encode("utf-8") + b"\0"
     out = bytearray()
     out += b"DPMDX002"
-    out += _s.pack("<IIIIIII", len(crcs), len(entries), len(chunks), len(str_ids), len(pool),
-                   len(titles), len(games))
+    out += _s.pack("<IIIIIII", len(crc_index), len(entries), len(chunks), len(str_ids),
+                   len(pool), len(titles), len(games))
 
-    for c, f, n in crc_index:
-        out += _s.pack("<III", c, f, n)
+    for c, e in crc_index:
+        out += _s.pack("<II", c, e)
     for e in ent_rec:
         out += _s.pack("<IIII", e[0],
                        offs[str_ids[e[1]]], offs[str_ids[e[2]]], offs[str_ids[e[3]]])

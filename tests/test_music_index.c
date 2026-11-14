@@ -49,10 +49,12 @@ int main(int argc, char **argv) {
 
     outn = 0;
     wbuf("DPMDX002", 8);
-    w32(2); w32(4); w32(0); w32(NP); w32((uint32_t)pool_at); w32(2); w32(1);
-    /* crc index (numeric order): 0x11223344 -> entry 0; 0x90776841 -> entries 1,2 */
-    w32(0x11223344); w32(0); w32(1);
-    w32(0x90776841); w32(1); w32(2);
+    w32(3); w32(4); w32(0); w32(NP); w32((uint32_t)pool_at); w32(2); w32(1);
+    /* crc index, flat (crc, entry position) pairs in numeric order: 0x11223344
+     * -> entry 0; 0x90776841 -> entries 1,2 */
+    w32(0x11223344); w32(0);
+    w32(0x90776841); w32(1);
+    w32(0x90776841); w32(2);
     entry(7, 0, 1, 2, M, 0xE760, 11);          // entry 0: no init_rom
     entry(7, 3, 1, 4, 0xE6E2, 0xE760, 12);     // entry 1: both, bank 3 $66E2/$6760
     entry(M, 5, 6, 7, 0x10, M, 13);            // entry 2: NES, unlinked
@@ -78,7 +80,7 @@ int main(int argc, char **argv) {
 
     DpMusicIndex ix; char err[256];
     CHECK(dp_midx_load(path, &ix, err, sizeof err) == 0);
-    CHECK(ix.n_crc == 2 && ix.n_entry == 4 && ix.n_title == 2 && ix.n_game == 1);
+    CHECK(ix.n_crc == 3 && ix.n_entry == 4 && ix.n_title == 2 && ix.n_game == 1);
 
     uint32_t first, count;
     CHECK(dp_midx_by_crc(&ix, 0x11223344, &first, &count) == 0 && first == 0 && count == 1);

@@ -46,10 +46,10 @@ int dp_midx_load(const char *path, DpMusicIndex *ix, char *err, size_t errsz) {
     ix->n_title = ru32(h + 20); ix->n_game = ru32(h + 24);
     const uint8_t *p = h + 28;
     /* layout walk with cumulative bounds: every section must fit in the file */
-    size_t need = (size_t)ix->n_crc * 12 + (size_t)ix->n_entry * 60 + (size_t)ix->n_chunk * 12
+    size_t need = (size_t)ix->n_crc * 8 + (size_t)ix->n_entry * 60 + (size_t)ix->n_chunk * 12
                 + (size_t)ix->n_title * 12 + (size_t)ix->n_game * 12 + ix->pool_bytes;
     if (need > ix->size - 36) { snprintf(err, errsz, "%s: truncated index", path); free(ix->buf); ix->buf = NULL; return -1; }
-    ix->crc_idx = p; p += (size_t)ix->n_crc * 12;
+    ix->crc_idx = p; p += (size_t)ix->n_crc * 8;
     ix->entries = p; p += (size_t)ix->n_entry * 60;
     ix->chunks = p; p += (size_t)ix->n_chunk * 12;
     ix->title_idx = p; p += (size_t)ix->n_title * 12;
@@ -78,13 +78,22 @@ void dp_midx_free(DpMusicIndex *ix) {
 int dp_midx_by_crc(const DpMusicIndex *ix, uint32_t crc, uint32_t *first, uint32_t *count) {
     uint32_t lo = 0, hi = ix->n_crc;
     while (lo < hi) {
-        uint32_t m = lo + (hi - lo) / 2, c = ru32(ix->crc_idx + (size_t)m * 12);
+        uint32_t m = lo + (hi - lo) / 2, c = ru32(ix->crc_idx + (size_t)m * 8);
         if (c < crc) lo = m + 1; else hi = m;
     }
-    if (lo == ix->n_crc || ru32(ix->crc_idx + (size_t)lo * 12) != crc) return -1;
-    *first = ru32(ix->crc_idx + (size_t)lo * 12 + 4);
-    *count = ru32(ix->crc_idx + (size_t)lo * 12 + 8);
+    if (lo == ix->n_crc || ru32(ix->crc_idx + (size_t)lo * 8) != crc) return -1;
+    *first = lo;                       // into the (crc, position) pair array
+    *count = 0;
+    while (lo + *count < ix->n_crc && ru32(ix->crc_idx + (size_t)(lo + *count) * 8) == crc)
+        (*count)++;
     return 0;
+}
+
+/* entry position of the i-th (crc, position) pair of a by_crc range — an entry
+ * can carry several dump CRCs (BAB rows record up to 4, a verified rip one per
+ * verified dump), so the pairs are flat instead of ranges into the entry array */
+uint32_t dp_midx_crc_pos(const DpMusicIndex *ix, uint32_t i) {
+    return ru32(ix->crc_idx + (size_t)i * 8 + 4);
 }
 
 int dp_midx_by_title(const DpMusicIndex *ix, const char *norm, uint32_t *first, uint32_t *count) {

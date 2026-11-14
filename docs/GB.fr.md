@@ -82,6 +82,22 @@ le rip joshw `DMG-ZL-FRE` (même dump que la ROM) vérifie 3 banques byte-identi
 les sœurs GER/JP du même archive restent comptées sans point d'entrée tant qu'aucun dump
 les a vérifiées — jamais silencieuses.
 
+0.337.0 : la vérification devient batch et multi-plateformes. `tools/rip_verify.py` applique
+toute la bibliothèque de rips locale (gbs/nsf/nsfe/hes/kss de `output/gbs` et `output/joshw`)
+à chaque dump de sa plateforme (en-têtes iNES/copieur retirés pour la comparaison, CRC sur le
+fichier brut pour l'index) : vote de fragments 16 octets par segment de banque, et un point
+d'entrée n'est consigné que si **ses propres octets sont verbatim dans le dump** — la tête
+d'un rip dont `init == load` est souvent le stub du ripper (Super Mario Land : 23/24
+fragments verbatim, le seul qui échoue est l'offset 0 → play consigné, init refusé). Le
+palier crc de l'index binaire passe à des **paires plates (crc, position)** : une entrée
+porte désormais tous ses CRCs de dump (les lignes BAB en enregistrent jusqu'à 4 — les
+CRC2-4 étaient perdus à l'export ; un rip vérifié en porte un par dump vérifié), le lecteur
+C les mappe par `dp_midx_crc_pos`. Effet mesuré : le moteur musical de Zelda - Link's
+Awakening étant partagé entre régions, les rips FRE/GER/JP se vérifient tous dans les dumps
+France **et** USA/Europe (init banque 26 $7FC8, play $7FCD) et les lignes BAB jusque-là
+invisibles au palier crc apparaissent ; Super Mario Land (World) sème 3 plays ($66F2 BAB
+crc, $6662 notre rip par palier titre, $65F2 BAB par identité de jeu), sans init de stub.
+
 0.333.0 : quand des banques matchent mais qu'un pc reste non projeté (une tranche de rip
 trop courte pour le seuil — un rip qui commence au milieu d'un `$4000` dont la tête fait
 56 octets), le vote de fragments porte désormais ce pc au lieu d'abandonner ; le vote ne
