@@ -4,6 +4,8 @@
 #include "core.h"
 
 #include <pthread.h>
+#include <errno.h>
+#include <limits.h>
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
@@ -123,7 +125,7 @@ typedef struct {
     uint64_t paths_done;       // finished paths (atomic), for the progress line
     int stop_monitor;
     int halt;                  // 0 running, 1 max-time reached, 2 stagnation (atomic): workers wind down
-    int spool_fd; uint64_t spool_n, spool_total; uint32_t spool_rs;   // disk overflow of the pending queue: fixed-size records, LIFO
+    int spool_fd, spool_write_failed, spool_read_failed; uint64_t spool_n, spool_total; uint32_t spool_rs;   // disk overflow of the pending queue: fixed-size records, LIFO
     unsigned allowed;          // adaptive mode: workers with index < allowed may take work (atomic)
     unsigned wmin, wmax;
     DpCoreResult *out;
@@ -392,10 +394,11 @@ static void mark(Shared *sh, DpCoreResult *r, DpMachine *m, uint32_t pc, unsigne
         int64_t k = m->rom_index(m, pc + i);
         if (k >= 0 && (size_t)k < r->rom_size) {
             uint32_t srcbit = (how & DP_CORE_NATURAL) ? DP_SRC_FORK_NATURAL : DP_SRC_FORK_FORCED;
+            uint8_t bits = how | (i == 0 ? ((how & DP_CORE_NATURAL) ? DP_CORE_START_NATURAL : DP_CORE_START_FORCED) : 0);
             // read first: an atomic read-modify-write on an already covered byte only bounces the cache line
             uint8_t cur = __atomic_load_n(&r->flags[k], __ATOMIC_RELAXED);
-            if ((cur & how) == how && (__atomic_load_n(&r->src_flags[k], __ATOMIC_RELAXED) & srcbit)) continue;
-            uint8_t old = __atomic_fetch_or(&r->flags[k], how, __ATOMIC_RELAXED);
+            if ((cur & bits) == bits && (__atomic_load_n(&r->src_flags[k], __ATOMIC_RELAXED) & srcbit)) continue;
+            uint8_t old = __atomic_fetch_or(&r->flags[k], bits, __ATOMIC_RELAXED);
             if (!(old & (DP_CORE_NATURAL | DP_CORE_FORCED))) {
                 r->first_seen[k] = __atomic_load_n(&sh->steps, __ATOMIC_RELAXED) + 1;
                 if (r->in_novelty_path) r->novelty_new_bytes++; else r->plain_new_bytes++;
@@ -504,12 +507,12 @@ static void ram_push(Shared *sh, Pending p) {
     sh->q[sh->qn++] = p;
 }
 static int spool_open(Shared *sh) {
-    if (sh->spool_fd > 0) return 1;
-    if (sh->spool_fd < 0) return 0;   // failed once: stay in RAM
+    if (sh->spool_fd >= 0) return 1;
+    if (sh->spool_fd == -1) return 0;   // failed once: stay in RAM
     const char *dir = getenv("TMPDIR"); if (!dir || !*dir) dir = "/tmp";
     char path[512]; snprintf(path, sizeof path, "%s/deepeel-spool-XXXXXX", dir);
     int fd = mkstemp(path);
-    if (fd < 0) { sh->spool_fd = -1; return 0; }
+    if (fd < 0) { perror("deepeel: kernel spool unavailable; retaining states in RAM"); sh->spool_fd = -1; return 0; }
     unlink(path);
     sh->spool_fd = fd; sh->spool_rs = (uint32_t)(sizeof(SpoolHead) + sh->sbytes);
     return 1;
@@ -517,37 +520,122 @@ static int spool_open(Shared *sh) {
 // pushes p; when the RAM queue is full, appends it to the spool.  Returns 1 if spilled.
 static int queue_push(Shared *sh, Pending p) {
     const DpCoreConfig *cfg = sh->cfg;
-    if (cfg->queue_max && sh->qn >= cfg->queue_max && spool_open(sh)) {
+    if (cfg->queue_max && sh->qn >= cfg->queue_max && !sh->spool_write_failed && spool_open(sh)) {
         uint8_t *rec = malloc(sh->spool_rs);
         if (rec) {
-            SpoolHead h = { p.pc, (uint32_t)p.forced, p.site, p.input };
+            SpoolHead h = { p.pc, (uint32_t)!!p.forced | ((uint32_t)!!p.seed << 1), p.site, p.input };
             memcpy(rec, &h, sizeof h); memcpy(rec + sizeof h, p.state, sh->sbytes);
             ssize_t w = pwrite(sh->spool_fd, rec, sh->spool_rs, (off_t)(sh->spool_n * sh->spool_rs));
             free(rec);
             if (w == (ssize_t)sh->spool_rs) { sh->spool_n++; sh->spool_total++; free(p.state); return 1; }
         }
+        fprintf(stderr, "deepeel: kernel spool write failed; retaining further states in RAM\n");
+        sh->spool_write_failed = 1;
     }
     ram_push(sh, p);
     return 0;
 }
 // the queue is empty: bring back up to queue_max/2 of the newest spilled records
-static void spool_refill(Shared *sh) {
+static int spool_refill(Shared *sh) {
     size_t want = sh->cfg->queue_max ? sh->cfg->queue_max / 2 : 64;
     if (want < 1) want = 1;
     uint8_t *rec = malloc(sh->spool_rs);
-    if (!rec) return;
+    if (!rec) { fprintf(stderr, "deepeel: cannot allocate kernel spool read buffer\n"); return 0; }
+    int ok = 1;
     while (want-- && sh->spool_n) {
         uint64_t i = sh->spool_n - 1;
-        if (pread(sh->spool_fd, rec, sh->spool_rs, (off_t)(i * sh->spool_rs)) != (ssize_t)sh->spool_rs) break;
+        if (pread(sh->spool_fd, rec, sh->spool_rs, (off_t)(i * sh->spool_rs)) != (ssize_t)sh->spool_rs) { ok = 0; break; }
         SpoolHead h; memcpy(&h, rec, sizeof h);
         uint8_t *st = malloc(sh->sbytes);
-        if (!st) break;
+        if (!st) { ok = 0; break; }
         memcpy(st, rec + sizeof h, sh->sbytes);
         sh->spool_n = i;
-        ram_push(sh, (Pending){ st, h.pc, (int)h.forced, h.site, h.input });
+        ram_push(sh, (Pending){ st, h.pc, (int)(h.forced & 1), h.site, h.input, (uint8_t)((h.forced >> 1) & 1) });
     }
     free(rec);
     if (ftruncate(sh->spool_fd, (off_t)(sh->spool_n * sh->spool_rs)) != 0) { /* the next appends overwrite it anyway */ }
+    if (!ok) fprintf(stderr, "deepeel: cannot read complete kernel spool; exploration stopped\n");
+    return ok;
+}
+
+// Load the entire declared frontier or fail before starting exploration.  A
+// truncated or incompatible file must not be replaced by a partial replay.
+static int frontier_load(Shared *sh, const char *path, DpCoreResult *out) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        if (errno == ENOENT) return 1;
+        perror("deepeel: cannot open kernel frontier");
+        return 0;
+    }
+    struct stat st;
+    uint32_t hd[3];
+    uint64_t record = sizeof(SpoolHead) + (uint64_t)sh->sbytes;
+    int valid = fstat(fileno(f), &st) == 0 && S_ISREG(st.st_mode) && st.st_size >= 0 &&
+                fread(hd, sizeof *hd, 3, f) == 3 && hd[0] == 0x31524644u &&
+                hd[1] == sh->sbytes && hd[2] <= (UINT64_MAX - 12) / record &&
+                (uint64_t)st.st_size == 12 + (uint64_t)hd[2] * record;
+    if (!valid) {
+        fprintf(stderr, "deepeel: invalid, incompatible or truncated kernel frontier: %s\n", path);
+        fclose(f);
+        return 0;
+    }
+    for (uint32_t i = 0; i < hd[2]; i++) {
+        SpoolHead h;
+        uint8_t *state = malloc(sh->sbytes ? sh->sbytes : 1);
+        if (!state || fread(&h, sizeof h, 1, f) != 1 || fread(state, 1, sh->sbytes, f) != sh->sbytes) {
+            free(state);
+            fprintf(stderr, "deepeel: cannot read complete kernel frontier: %s\n", path);
+            fclose(f);
+            return 0;
+        }
+        queue_push(sh, (Pending){ state, h.pc, (int)(h.forced & 1), h.site, h.input, (uint8_t)((h.forced >> 1) & 1) });
+        out->resumed++;
+    }
+    if (fclose(f) != 0) { perror("deepeel: closing kernel frontier"); return 0; }
+    return 1;
+}
+
+// Commit a complete frontier by rename so a failed write cannot replace the
+// previous file.  The v1 header stores a 32-bit count: reject overflow.
+static int frontier_save(Shared *sh, const char *path, DpCoreResult *out) {
+    uint64_t count = sh->qn + sh->spool_n;
+    if (!count) {
+        if (unlink(path) == 0 || errno == ENOENT) return 1;
+        perror("deepeel: cannot remove empty kernel frontier");
+        return 0;
+    }
+    if (count > UINT32_MAX) {
+        fprintf(stderr, "deepeel: kernel frontier too large for v1 format\n");
+        return 0;
+    }
+    char temp[640];
+    if (snprintf(temp, sizeof temp, "%s.tmp-XXXXXX", path) >= (int)sizeof temp) return 0;
+    int fd = mkstemp(temp);
+    if (fd < 0) { perror("deepeel: cannot create kernel frontier"); return 0; }
+    FILE *f = fdopen(fd, "wb");
+    if (!f) { close(fd); unlink(temp); return 0; }
+    uint32_t hd[3] = { 0x31524644u, (uint32_t)sh->sbytes, (uint32_t)count };
+    int ok = fwrite(hd, sizeof *hd, 3, f) == 3;
+    for (size_t i = 0; ok && i < sh->qn; i++) {
+        SpoolHead h = { sh->q[i].pc, (uint32_t)!!sh->q[i].forced | ((uint32_t)!!sh->q[i].seed << 1), sh->q[i].site, sh->q[i].input };
+        ok = fwrite(&h, sizeof h, 1, f) == 1 && fwrite(sh->q[i].state, 1, sh->sbytes, f) == sh->sbytes;
+    }
+    uint8_t *rec = sh->spool_n ? malloc(sh->spool_rs) : NULL;
+    if (sh->spool_n && !rec) ok = 0;
+    for (uint64_t i = 0; ok && i < sh->spool_n; i++)
+        ok = pread(sh->spool_fd, rec, sh->spool_rs, (off_t)(i * sh->spool_rs)) == (ssize_t)sh->spool_rs &&
+             fwrite(rec, 1, sh->spool_rs, f) == sh->spool_rs;
+    free(rec);
+    if (fflush(f) != 0) ok = 0;
+    if (fclose(f) != 0) ok = 0;
+    if (ok && rename(temp, path) != 0) ok = 0;
+    if (!ok) {
+        fprintf(stderr, "deepeel: failed to save complete kernel frontier: %s\n", path);
+        unlink(temp);
+        return 0;
+    }
+    out->saved = count;
+    return 1;
 }
 
 enum { TAS_INPUT = 0x40000000, SESSION_ATTRACT = 0x20000000, SESSION_PLAY = 0x20001000 };
@@ -754,7 +842,7 @@ static void run_path(Worker *w, Pending *p) {
     const DpIsa *isa = m->isa;
     m->load(m, p->state);
     free(p->state);
-    if (p->seed && covered(loc, m, p->pc)) return;   // a pointer seed whose target the exploration already reached adds nothing
+    if (!cfg->unbounded && p->seed && covered(loc, m, p->pc)) return;   // bounded pointer seed policy
     if (p->forced) m->set_pc(m, p->pc);
     uint32_t cur_input = p->input;
     // TAS replay: input >= TAS_INPUT encodes the frame shift (value - TAS_INPUT - 3, -3..+3)
@@ -1260,7 +1348,12 @@ static void *worker_main(void *arg) {
                 }
                 break;
             }
-            if (!sh->qn && sh->spool_n) spool_refill(sh);
+            if (!sh->qn && sh->spool_n && !spool_refill(sh)) {
+                sh->spool_read_failed = 1;
+                __atomic_store_n(&sh->halt, 3, __ATOMIC_RELAXED);
+                pthread_cond_broadcast(&sh->cv);
+                continue;
+            }
             if (sh->qn || sh->active == 0) break;
             pthread_cond_wait(&sh->cv, &sh->mu);
         }
@@ -1331,7 +1424,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     pthread_cond_init(&sh.cv, NULL);
     sh.out = out; sh.cfg = cfg;
     sh.sbytes = m->state_bytes(m);
-    sh.spool_fd = 0;
+    sh.spool_fd = -2;   // not opened yet (-1 means the open failed)
     sh.fed = calloc(0x10000, 1);
     sh.fedsrc = calloc(0x10000, sizeof(uint32_t));
     sh.fedprod = calloc(0x10000, sizeof(uint32_t));
@@ -1388,6 +1481,18 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
                     size_t n = 0;
                     for (size_t i = 0; i < rom_size; i++) { if (buf[i] & ~out->flags[i]) n++; out->flags[i] |= buf[i]; }
                     fprintf(stderr, "deepeel: resumed coverage map (%zu bytes added)\n", n);
+                    // Older coverage files end after the byte map.  A tagged,
+                    // complete extension preserves method attribution on resume.
+                    uint32_t ext[2];
+                    size_t ext_bytes = fread(ext, 1, sizeof ext, cf);
+                    if (ext_bytes == sizeof ext && ext[0] == 0x31524353u && ext[1] == rom_size) {
+                        uint32_t *src = malloc((rom_size ? rom_size : 1) * sizeof *src);
+                        if (src && fread(src, sizeof *src, rom_size, cf) == rom_size) {
+                            for (size_t i = 0; i < rom_size; i++) out->src_flags[i] |= src[i];
+                            fprintf(stderr, "deepeel: resumed coverage sources\n");
+                        } else fprintf(stderr, "deepeel: incomplete coverage sources; attribution not restored\n");
+                        free(src);
+                    } else if (ext_bytes || ferror(cf)) fprintf(stderr, "deepeel: invalid coverage source extension; attribution not restored\n");
                 }
                 free(buf);
             }
@@ -1418,29 +1523,19 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     }
     if (cfg->state_dir && cfg->resume) {   // states left pending by a previous run (same machine state size)
         char fp[600]; snprintf(fp, sizeof fp, "%s/frontier.bin", cfg->state_dir);
-        FILE *ff = fopen(fp, "rb");
-        if (ff) {
-            uint32_t hd[3];
-            if (fread(hd, 4, 3, ff) == 3 && hd[0] == 0x31524644u && hd[1] == sh.sbytes) {
-                for (uint32_t i = 0; i < hd[2]; i++) {
-                    SpoolHead h; uint8_t *st = malloc(sh.sbytes);
-                    if (!st || fread(&h, sizeof h, 1, ff) != 1 || fread(st, 1, sh.sbytes, ff) != sh.sbytes) { free(st); break; }
-                    ram_push(&sh, (Pending){ st, h.pc, (int)h.forced, h.site, h.input });
-                    out->resumed++;
-                }
-            }
-            fclose(ff);
-        }
+        if (!frontier_load(&sh, fp, out)) { free(start); ok = 0; goto cleanup; }
     }
         for (size_t i = 0; i < cfg->n_seeds; i++) {
             uint8_t *cp = malloc(sh.sbytes);
             if (!cp) break;
             memcpy(cp, start, sh.sbytes);
-            if (cfg->seed_banks && cfg->seed_banks[i] > 1 && m->poke) {   // bank-carrying seed: switch the mapper, save that state
-                m->load(m, start); m->poke(m, 0x2000, (uint8_t)cfg->seed_banks[i]); m->save(m, cp); m->load(m, start);
+            if (cfg->seed_banks && cfg->seeds[i] >= 0x4000 && cfg->seeds[i] < 0x8000 && m->poke) {
+                m->load(m, start);
+                m->poke(m, 0x2000, (uint8_t)cfg->seed_banks[i]);
+                if (cfg->seed_banks[i] > 0xff) m->poke(m, 0x3000, (uint8_t)(cfg->seed_banks[i] >> 8));
+                m->save(m, cp); m->load(m, start);
             }
-            if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
-            sh.q[sh.qn++] = (Pending){ cp, cfg->seeds[i], 1, 0, 0, 1 };
+            queue_push(&sh, (Pending){ cp, cfg->seeds[i], 1, 0, 0, 1 });
             out->seeded++;
         }
         // the natural path goes last: it is the first one taken
@@ -1519,6 +1614,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         out->halted = (unsigned)sh.halt;
     }
 
+cleanup:
     free(sh.tas_start);
     for (unsigned i = 0; i < started; i++) {
         DpCoreResult *l = &ws[i].loc;
@@ -1537,45 +1633,38 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     out->steps = sh.steps;
     for (unsigned i = 0; i < started; i++) out->steps += 0;   /* session steps are reported separately */
     out->spool_left = sh.spool_n; out->spooled = sh.spool_total;
-    if (cfg->state_dir && sh.celln) {   // archived screen cells for --resume
+    // Do not publish any new state after detecting an unreadable spool: even
+    // later reads could return holes after a subsequent append extended it.
+    if (sh.spool_read_failed) ok = 0;
+    if (ok && cfg->state_dir && sh.celln) {   // archived screen cells for --resume
         char kp[600]; snprintf(kp, sizeof kp, "%s/cells.bin", cfg->state_dir);
         mkdir(cfg->state_dir, 0777);
         FILE *kf = fopen(kp, "wb");
         if (kf) { for (size_t i = 0; i < sh.cellcap; i++) if (sh.cellset[i]) fwrite(&sh.cellset[i], sizeof sh.cellset[i], 1, kf); fclose(kf); }
     }
-    if (cfg->state_dir) {   // discovery log for --resume
+    if (ok && cfg->state_dir) {   // discovery log for --resume
         char dp[600]; snprintf(dp, sizeof dp, "%s/disc.bin", cfg->state_dir);
         mkdir(cfg->state_dir, 0777);
         FILE *df = fopen(dp, "wb");
         if (df) { uint32_t hd[2] = { 0x31435344u, (uint32_t)rom_size }; fwrite(hd, 4, 2, df); fwrite(out->first_seen, sizeof *out->first_seen, rom_size, df); fclose(df); }
     }
-    if (cfg->state_dir) {   // coverage map for --resume
+    if (ok && cfg->state_dir) {   // coverage map for --resume
         char cp[600]; snprintf(cp, sizeof cp, "%s/coverage.bin", cfg->state_dir);
         mkdir(cfg->state_dir, 0777);
         FILE *cf = fopen(cp, "wb");
-        if (cf) { uint32_t hd[2] = { 0x31564F43u, (uint32_t)rom_size }; fwrite(hd, 4, 2, cf); fwrite(out->flags, 1, rom_size, cf); fclose(cf); }
-    }
-    if (cfg->state_dir) {   // the pending frontier (RAM queue, then the disk spool) for --resume
-        char fp[600]; snprintf(fp, sizeof fp, "%s/frontier.bin", cfg->state_dir);
-        if (sh.qn + sh.spool_n == 0) remove(fp);
-        else {
-            FILE *ff = fopen(fp, "wb");
-            if (ff) {
-                uint32_t hd[3] = { 0x31524644u, sh.sbytes, (uint32_t)(sh.qn + sh.spool_n) };
-                fwrite(hd, 4, 3, ff);
-                for (size_t i = 0; i < sh.qn; i++) {
-                    SpoolHead h = { sh.q[i].pc, (uint32_t)sh.q[i].forced, sh.q[i].site, sh.q[i].input };
-                    fwrite(&h, sizeof h, 1, ff); fwrite(sh.q[i].state, 1, sh.sbytes, ff);
-                }
-                uint8_t *rec = malloc(sh.spool_rs ? sh.spool_rs : 1);
-                for (uint64_t i = 0; rec && i < sh.spool_n; i++)
-                    if (pread(sh.spool_fd, rec, sh.spool_rs, (off_t)(i * sh.spool_rs)) == (ssize_t)sh.spool_rs) fwrite(rec, 1, sh.spool_rs, ff);
-                free(rec); fclose(ff);
-                out->saved = (uint64_t)(sh.qn + sh.spool_n);
-            }
+        if (cf) {
+            uint32_t hd[2] = { 0x31564F43u, (uint32_t)rom_size };
+            uint32_t ext[2] = { 0x31524353u, (uint32_t)rom_size };
+            fwrite(hd, 4, 2, cf); fwrite(out->flags, 1, rom_size, cf);
+            fwrite(ext, sizeof *ext, 2, cf); fwrite(out->src_flags, sizeof *out->src_flags, rom_size, cf);
+            fclose(cf);
         }
     }
-    if (sh.spool_fd > 0) close(sh.spool_fd);
+    if (ok && cfg->state_dir) {   // the pending frontier (RAM queue, then the disk spool) for --resume
+        char fp[600]; snprintf(fp, sizeof fp, "%s/frontier.bin", cfg->state_dir);
+        if (!frontier_save(&sh, fp, out)) ok = 0;
+    }
+    if (sh.spool_fd >= 0) close(sh.spool_fd);
     for (size_t i = 0; i < sh.qn; i++) free(sh.q[i].state);
     free(sh.probeset); free(sh.cellset); free(sh.q); free(sh.sites.s); free(sh.fed); free(sh.fedsrc); free(sh.fedprod); free(sh.ramread); free(sh.site_picks); free(sh.site_gain); free(ws);
     return ok;
@@ -1612,6 +1701,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "IRQ forks %llu (timing jitter %llu)\n", U(r->irq_forks), U(r->jitter_forks));
     fprintf(out, "event probes %llu at %llu sites: %llu forced variants\n", U(r->event_probes), U(r->event_probe_sites), U(r->event_probes));
     fprintf(out, "seeded entry points %llu\n", U(r->seeded));
+    fprintf(out, "pointer seeds refused by cap %llu\n", U(r->seed_refused_cap));
     fprintf(out, "forced RAM cuts %llu\n", U(r->forced_ram_cuts));
     fprintf(out, "forced taint cuts: indirect %llu, ret %llu\n", U(r->taint_cut_indirect), U(r->taint_cut_ret));
     if (r->exec_wram_rom) fprintf(out, "RAM-executed instructions traced to ROM copy sources: %llu\n", U(r->exec_wram_rom));

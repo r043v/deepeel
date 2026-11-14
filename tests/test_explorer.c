@@ -394,6 +394,16 @@ int main(int argc, char **argv) {
                  // when it cannot reach (its contract test)
     g_keep_ex = 1; // the targeting and the follow-up explore need a live explorer
     run(dir, "residual");
+    {
+        uint32_t n = g_ex->defer_len;
+        uint8_t *img = calloc(1, g_ex->sb);
+        CHECK(defer_push(g_ex, img, 1, DP_PATH_FORK, 1, 257, DP_R_STEPS));
+        CHECK(g_ex->defer_len == n + 1);
+        CHECK(g_ex->defer[n].p.choice == 257 && g_ex->defer[n].p.packed == 0);
+        free(g_ex->defer[n].p.img);
+        g_ex->defer_len = n;
+        g_ex->defer_by_reason[DP_R_STEPS]--;
+    }
     dp_static_closure(&res);                            // the CLI's closure rounds, replayed
     dp_residual_target(g_ex, 64);                       // then the residual targeting itself
     g_ex->stop = 0;                                     // the closure-round restart (fresh wall)

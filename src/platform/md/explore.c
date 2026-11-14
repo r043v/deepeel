@@ -737,7 +737,7 @@ static void on_read(void *u, uint32_t a, unsigned size) {
     if (x->halted) return;
     a &= 0xFFFFFFu;
     if ((a == 0xA10002 || a == 0xA10003) && x->pc < r->rom_size) x->pad_read = 1;
-    if (!dp_mdmach_rom_visible(x->m, a)) { r->sram_reads++; return; }
+    if (a < 0x400000u && !dp_mdmach_rom_visible(x->m, a)) { r->sram_reads++; return; }
     if (a >= 0xE00000 && x->ins_rd < 0) x->ins_rd = x->ram_prod[a & 0xFFFF];   // RAM read: its producer
     if (a < r->rom_size) {
         if ((x->op & 0xF000) == 0x3000 && size == 2 && a + 1 < r->rom_size &&

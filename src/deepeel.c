@@ -263,13 +263,14 @@ static void usage(void) {
             "  deepeel dis rom.gb bank:addr [n]\n");
 }
 
-static int parse_entry(const char *s, uint8_t *bank, uint16_t *addr) {
+static int parse_entry(const char *s, uint16_t *bank, uint16_t *addr) {
     char *end;
     long b = strtol(s, &end, 0);
     if (end == s || *end != ':' || b < 0 || b > 65535) return 0;
-    long a = strtol(end + 1, &end, 16); // addresses are hex ($0180 style)
-    if (end == end + 1 || a < 0 || a > 0xFFFF) return 0;
-    *bank = (uint8_t)b;
+    const char *start = end + 1;
+    long a = strtol(start, &end, 16); // addresses are hexadecimal
+    if (end == start || *end || a < 0 || a > 0xFFFF) return 0;
+    *bank = (uint16_t)b;
     *addr = (uint16_t)a;
     return 1;
 }
@@ -409,7 +410,7 @@ static int cmd_explore(int argc, char **argv) {
     DpSessionCfg scfg;
     dp_session_cfg_defaults(&scfg);
     uint8_t tier_limit = 0, defer_all = 0;
-    uint8_t eb[32];
+    uint16_t eb[32];
     int gb_core = 0; DpCoreConfig gkcfg; dp_core_config_default(&gkcfg); gkcfg.visits_per_pc = 2000000;   // frame waits are long loops   // --core: the generic kernel instead of the GB explorer
     gb_core = getenv("DEEPEEL_GB_LEGACY") == NULL;   // the kernel is the GB default; --legacy (or DEEPEEL_GB_LEGACY=1) runs the old explorer, kept but deactivated
     for (int i = 2; i < argc; i++) { if (!strcmp(argv[i], "--core")) gb_core = 1; else if (!strcmp(argv[i], "--legacy")) gb_core = 0; }
@@ -693,13 +694,47 @@ static int cmd_explore(int argc, char **argv) {
                 } else fprintf(stderr, "deepeel: --tas: %s\n", terr);
             }
             uint32_t *gseed_pc = NULL; uint16_t *gseed_bk = NULL;
-            size_t gseed_cap = getenv("DEEPEEL_GB_POINTER_SEEDS") ? (size_t)atol(getenv("DEEPEEL_GB_POINTER_SEEDS")) : 40000;   // 0 turns it off
+            uint64_t gseed_refused = 0;
+            size_t gseed_cap = cfg.no_pointer_scan ? 0 :
+                (getenv("DEEPEEL_GB_POINTER_SEEDS") ? (size_t)atol(getenv("DEEPEEL_GB_POINTER_SEEDS")) : 40000);
+            if (gkcfg.unbounded && gseed_cap) gseed_cap = cart->rom_size;
             if (gseed_cap) {   // pointer-table entry discovery (core_gbseeds.c), to match the GB explorer's speculative seeds
-                gkcfg.n_seeds = dp_core_gb_pointer_seeds(cart->rom, cart->rom_size, gseed_cap, &gseed_pc, &gseed_bk);
+                gkcfg.n_seeds = dp_core_gb_pointer_seeds(cart->rom, cart->rom_size, gseed_cap, &gseed_pc, &gseed_bk, &gseed_refused);
+                if (gkcfg.n_seeds == SIZE_MAX) {
+                    free(gmasks); dp_tas_free(&gt); km->close(km);
+                    dp_mapwin_stop(); dp_results_free(&res); dp_cart_free(cart);
+                    fprintf(stderr, "deepeel: cannot allocate pointer seed scan\n");
+                    return 1;
+                }
                 gkcfg.seeds = gseed_pc; gkcfg.seed_banks = gseed_bk;
+            }
+            if (entries) {
+                size_t total = gkcfg.n_seeds + (size_t)entries;
+                uint32_t *pcs = malloc(total * sizeof *pcs);
+                uint16_t *banks = malloc(total * sizeof *banks);
+                if (!pcs || !banks) {
+                    free(pcs); free(banks); free(gseed_pc); free(gseed_bk);
+                    free(gmasks); dp_tas_free(&gt); km->close(km);
+                    dp_mapwin_stop(); dp_results_free(&res); dp_cart_free(cart);
+                    fprintf(stderr, "deepeel: cannot allocate explicit entry seeds\n");
+                    return 1;
+                }
+                if (gkcfg.n_seeds) {
+                    memcpy(pcs, gseed_pc, gkcfg.n_seeds * sizeof *pcs);
+                    memcpy(banks, gseed_bk, gkcfg.n_seeds * sizeof *banks);
+                }
+                for (int i = 0; i < entries; i++) {
+                    pcs[gkcfg.n_seeds + (size_t)i] = ea[i];
+                    banks[gkcfg.n_seeds + (size_t)i] = ea[i] >= 0x4000 ?
+                        (eb[i] || cart->mbc == DP_MBC5 ? eb[i] : 1) : 0;
+                }
+                free(gseed_pc); free(gseed_bk);
+                gseed_pc = pcs; gseed_bk = banks;
+                gkcfg.n_seeds = total; gkcfg.seeds = pcs; gkcfg.seed_banks = banks;
             }
             DpCoreResult kr;
             rc = dp_core_explore(km, cart->rom_size, &gkcfg, &kr) ? 0 : 1;
+            kr.seed_refused_cap = gseed_refused;
             free(gseed_pc); free(gseed_bk);
             if (!rc) dp_core_report(stdout, "gb", &kr); core_outputs(argc, argv, "gb", path, &kr);
             dp_core_result_free(&kr);
@@ -1447,8 +1482,8 @@ static int cmd_nes(int argc, char **argv) {
         else if (!strcmp(a, "--no-event-probes")) opt.event_probes = 0;
         else if (!strcmp(a, "--pad-full")) opt.pad_full = 1;
         else if (!strcmp(a, "--entry") && i + 1 < argc && opt.entry_count < 32) {
-            uint8_t eb; uint16_t ea;
-            if (!parse_entry(argv[++i], &eb, &ea)) { fprintf(stderr, "deepeel: bad --entry '%s' (bank:addr)\n", argv[i]); return 2; }
+            uint16_t eb, ea;
+            if (!parse_entry(argv[++i], &eb, &ea) || eb > 255) { fprintf(stderr, "deepeel: bad --entry '%s' (bank:addr)\n", argv[i]); return 2; }
             opt.entry_bank[opt.entry_count] = eb; opt.entry_addr[opt.entry_count++] = ea;
         }
         else if (!path) path = a;
@@ -1777,10 +1812,16 @@ static int cmd_dis(int argc, char **argv) {
         fprintf(stderr, "deepeel: %s\n", err);
         return 1;
     }
-    uint8_t bank;
+    uint16_t bank;
     uint16_t addr;
     if (!parse_entry(argv[3], &bank, &addr)) {
         fprintf(stderr, "deepeel: bad address '%s' (bank:addr)\n", argv[3]);
+        dp_cart_free(cart);
+        return 2;
+    }
+    if ((size_t)bank * 0x4000 >= cart->rom_size) {
+        fprintf(stderr, "deepeel: bank %u outside ROM\n", (unsigned)bank);
+        dp_cart_free(cart);
         return 2;
     }
     int n = argc > 4 ? atoi(argv[4]) : 16;

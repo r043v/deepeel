@@ -80,8 +80,10 @@ uint8_t *dp_img_unpack(const DpExplorer *ex, uint8_t *pk) {
     memcpy(&c32, pk, 4);
     uint8_t *img = xrealloc(NULL, ex->sb);
     uLongf n = ex->sb;
-    if (zraw_uncompress(img, &n, pk + 4, c32) != Z_OK || n != ex->sb) {
-        fprintf(stderr, "deepeel: packed queue image corrupt\n");
+    int zresult = zraw_uncompress(img, &n, pk + 4, c32);
+    if (zresult != Z_OK || n != ex->sb) {
+        fprintf(stderr, "deepeel: packed queue image corrupt (compressed %u, decoded %lu, expected %u, zlib %d)\n",
+                c32, (unsigned long)n, ex->sb, zresult);
         memset(img, 0, ex->sb);
     }
     free(pk);
@@ -652,6 +654,7 @@ static void adopt_queues(DpExplorer *ex) {
         for (uint32_t i = 0; i < len[w]; i++) {
             DpPathState *p = &q[w][(head[w] + i) % cap[w]];
             if (!p->img) continue;
+            if (p->packed) { p->img = dp_img_unpack(ex, p->img); p->packed = 0; }
             int save_tier = ex->cur_tier;
             ex->cur_tier = 0; // never refused by the tier cap: a parked path, not a retry
             if (defer_push(ex, p->img, p->forced, p->kind, p->from_reset, p->choice, w ? DP_R_PRIORITY : DP_R_PATHS))
@@ -690,8 +693,9 @@ uint64_t dp_explorer_spool_convert(DpExplorer *ex) {
                 ex->defer_cap = nc;
             }
             ex->defer[ex->defer_len++] = (DpDeferred){
-                { img, (uint8_t)(hdr[1] & 1), (uint8_t)(hdr[1] >> 8), (uint8_t)((hdr[1] >> 16) & 1),
-                  (uint32_t)(hdr[1] >> 32) },
+                { .img = img, .forced = (uint8_t)(hdr[1] & 1), .kind = (uint8_t)(hdr[1] >> 8),
+                  .from_reset = (uint8_t)((hdr[1] >> 16) & 1), .packed = 0,
+                  .choice = (uint32_t)(hdr[1] >> 32) },
                 1, DP_R_PATHS };
             n++;
         }

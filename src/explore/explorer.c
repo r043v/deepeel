@@ -1252,7 +1252,8 @@ int defer_push(DpExplorer *ex, uint8_t *img, int forced, int kind, int from_rese
         ex->defer_cap = nc;
     }
     ex->defer[ex->defer_len++] = (DpDeferred){
-        { img, (uint8_t)forced, (uint8_t)kind, (uint8_t)from_reset, choice },
+        { .img = img, .forced = (uint8_t)forced, .kind = (uint8_t)kind,
+          .from_reset = (uint8_t)from_reset, .packed = 0, .choice = choice },
         (uint8_t)(ex->cur_tier + 1), (uint8_t)reason };
     ex->defer_by_reason[reason]++;
     ex->res->defer_by[reason]++;
@@ -1863,6 +1864,7 @@ int dp_explore_slice(DpExplorer *ex, int ms) {
 
 void dp_explore_finalize(DpExplorer *ex) {
     DpResults *res = ex->res;
+    dp_explorer_flush_steps(ex);
     // finalize may run once per closure round: the derived counters restart
     for (int i = 0; i < res->section_count; i++) {
         res->sections[i].cond_sites = res->sections[i].cond_both = 0;

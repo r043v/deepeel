@@ -71,9 +71,8 @@ int dp_core_write_summary(const char *path, const char *id, const DpCoreResult *
     if (!m) return -1;
     uint64_t cls[DP_MAP_COUNT] = { 0 };
     for (size_t i = 0; i < r->rom_size; i++) cls[m[i] < DP_MAP_COUNT ? m[i] : 0]++;
-    free(m);
     FILE *f = fopen(path, "w");
-    if (!f) return -1;
+    if (!f) { free(m); return -1; }
     #define U(x) ((unsigned long long)(x))
     fprintf(f, "{\"deepeel\":\"%s\",\"platform\":\"%s\",\"engine\":\"kernel\",\"rom_size\":%zu,\"classes\":{",
             DEEPEEL_VERSION, id, r->rom_size);
@@ -83,11 +82,47 @@ int dp_core_write_summary(const char *path, const char *id, const DpCoreResult *
     for (int k = 0; k < DP_MAP_COUNT; k++) fprintf(f, "%s\"%s\":%llu", k ? "," : "", names[k], U(cls[k]));
     fprintf(f, "},\"known_pct\":%.3f,\"counters\":{\"steps\":%llu,\"paths\":%llu,\"forks\":%llu,"
                "\"saturation\":%llu,\"closure_roots\":%llu,\"closure_capped\":%llu,\"event_probes\":%llu,"
-               "\"cells\":%llu,\"compressed_bytes\":%llu,\"copy_bytes\":%llu}}\n",
+               "\"cells\":%llu,\"compressed_bytes\":%llu,\"copy_bytes\":%llu,\"seed_refused_cap\":%llu}",
             r->rom_size ? 100.0 * (double)(r->rom_size - cls[0]) / (double)r->rom_size : 0.0,
             U(r->steps), U(r->paths), U(r->forks), U(r->sat_total), U(r->closure_roots), U(r->closure_capped),
-            U(r->event_probes), U(r->cells), U(r->compressed_bytes), U(r->copy_bytes));
+            U(r->event_probes), U(r->cells), U(r->compressed_bytes), U(r->copy_bytes), U(r->seed_refused_cap));
+    // Physical ROM offsets are grouped in 16 KiB chunks solely for the common
+    // residual format. These chunks do not imply the machine's bank mapping.
+    size_t ranges = 0, emitted = 0;
+    fprintf(f, ",\"map\":{\"residual_bytes\":%llu,\"residual\":[", U(cls[DP_MAP_UNKNOWN]));
+    for (size_t i = 0; i < r->rom_size;) {
+        if (m[i] != DP_MAP_UNKNOWN) { i++; continue; }
+        size_t start = i, boundary = ((i / 0x4000) + 1) * 0x4000;
+        if (boundary > r->rom_size) boundary = r->rom_size;
+        while (i < boundary && m[i] == DP_MAP_UNKNOWN) i++;
+        if (emitted < 16384) {
+            const char *before = start % 0x4000 ? dp_map_class_name(m[start - 1]) : "bank-edge";
+            const char *after = i < boundary ? dp_map_class_name(m[i]) : "bank-edge";
+            fprintf(f, "%s{\"bank\":%zu,\"lo\":%zu,\"hi\":%zu,\"len\":%zu,\"before\":\"%s\",\"after\":\"%s\"}",
+                    emitted ? "," : "", start / 0x4000, start % 0x4000,
+                    (i - 1) % 0x4000, i - start, before, after);
+            emitted++;
+        }
+        ranges++;
+    }
+    fprintf(f, "],\"residual_ranges\":%zu,\"residual_omitted\":%zu,\"coordinate_unit\":16384}",
+            ranges, ranges - emitted);
+    size_t starts = 0, starts_emitted = 0;
+    fputs(",\"instruction_starts\":[", f);
+    for (size_t i = 0; i < r->rom_size; i++) {
+        uint8_t flags = r->flags[i] & (DP_CORE_START_NATURAL | DP_CORE_START_FORCED);
+        if (!flags) continue;
+        if (starts_emitted < 16384) {
+            fprintf(f, "%s{\"index\":%zu,\"natural\":%s,\"forced\":%s}", starts_emitted ? "," : "", i,
+                    (flags & DP_CORE_START_NATURAL) ? "true" : "false",
+                    (flags & DP_CORE_START_FORCED) ? "true" : "false");
+            starts_emitted++;
+        }
+        starts++;
+    }
+    fprintf(f, "],\"instruction_starts_total\":%zu,\"instruction_starts_omitted\":%zu}\n",
+            starts, starts - starts_emitted);
     #undef U
-    fclose(f);
-    return 0;
+    free(m);
+    return fclose(f) == 0 ? 0 : -1;
 }

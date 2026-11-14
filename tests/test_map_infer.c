@@ -5,12 +5,34 @@
 #include "test_util.h"
 #include "../src/core/coverage.h"
 #include "../src/explore/explorer.h"
+#include "../src/explore/explorer_priv.h"
 #include "../src/report/report.h"
 
 #include <stdlib.h>
 #include <string.h>
 
 int main(void) {
+    {
+        DpCart c = {0}; DpResults r = {0};
+        c.rom_size = 0x4000; c.rom = calloc(c.rom_size, 1);
+        r.cart = &c; r.banks = 1;
+        r.exec_flags = calloc(c.rom_size, 1);
+        r.data_flags = calloc(c.rom_size, 1);
+        r.static_flags = calloc(c.rom_size, 1);
+        r.src_flags = calloc(c.rom_size, sizeof *r.src_flags);
+        c.rom[0x150] = 0x21; c.rom[0x151] = 0x40; c.rom[0x152] = 0x02;
+        r.exec_flags[0x150] = DP_XF_START;
+        c.rom[0x240] = 0x00; c.rom[0x241] = 0x03;
+        c.rom[0x300] = 0xc9; c.rom[0x310] = 0xc9;
+        CHECK(dp_residual_prove_table(&r, 0x155, 0) == 0);
+        CHECK(!(r.exec_flags[0x300] & DP_XF_ENTRY));
+        CHECK(!(r.data_flags[0x240] & DP_DF_STATIC));
+        c.rom[0x242] = 0x10; c.rom[0x243] = 0x03;
+        CHECK(dp_residual_prove_table(&r, 0x155, 0) == 2);
+        CHECK((r.exec_flags[0x300] & DP_XF_ENTRY) && (r.exec_flags[0x310] & DP_XF_ENTRY));
+        CHECK(r.data_flags[0x240] & DP_DF_STATIC);
+        free(r.exec_flags); free(r.data_flags); free(r.static_flags); free(r.src_flags); free(c.rom);
+    }
     const int banks = 2;
     size_t n = (size_t)banks * 0x4000;
     static DpCart cart;
@@ -57,6 +79,29 @@ int main(void) {
     rom[0x4100] = 0x40; rom[0x4101] = 0x02;   // the same bare word in bank 1 aims at its own $0240
     res.static_flags[0x4100] = DP_SF_POINTER;
     free(m);
+    // Every unknown range must appear in the anatomy, including unsupported
+    // neighboring classes that fall into the "other" bucket.
+    {
+        uint8_t *classes = malloc(n);
+        memset(classes, DP_MAP_UNKNOWN, n);
+        classes[0] = DP_MAP_COUNT;
+        classes[2] = DP_MAP_COUNT;
+        DpResidualRange range = {0, 1, 1, 1};
+        CHECK(dp_residual_neighbor(classes, &range, 0) == DP_MAP_COUNT);
+        CHECK(dp_residual_neighbor(classes, &range, 1) == DP_MAP_COUNT);
+        range.lo = 0;
+        range.hi = 0x3FFF;
+        CHECK(dp_residual_neighbor(classes, &range, 0) == -1);
+        CHECK(dp_residual_neighbor(classes, &range, 1) == -1);
+        DpBuf text;
+        dp_buf_init(&text);
+        dp_residual_anatomy_text(&res, classes, &text);
+        dp_buf_ch(&text, '\0');
+        CHECK(strstr((char *)text.p, "other") != NULL);
+        CHECK(strstr((char *)text.p, "not proven causes") != NULL);
+        dp_buf_free(&text);
+        free(classes);
+    }
     m = dp_map_build(&res, &sum);
     CHECK(m != NULL);
     CHECK(m[0x4000 + 0x240] == DP_MAP_UNKNOWN);  // the bare pointer guards its own bank

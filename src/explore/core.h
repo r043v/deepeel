@@ -16,6 +16,7 @@
 #include "../core/dpmachine.h"
 
 enum { DP_CORE_NATURAL = 1, DP_CORE_FORCED = 2, DP_CORE_COPIED = 4, DP_CORE_COMPRESSED = 8, DP_CORE_DATA = 16, DP_CORE_STATIC = 32 };   // STATIC: reached by the static closure from a natural direct transfer   // DATA: read as data by a natural path   // COPIED: a ROM byte later written verbatim to RAM
+enum { DP_CORE_START_NATURAL = 64, DP_CORE_START_FORCED = 128 };
 
 // optional platform hooks; every member may be NULL
 typedef struct DpPlatformHooks {
@@ -105,6 +106,7 @@ typedef struct DpCoreResult {
     uint64_t workers_min, workers_max;   // adaptive mode: lowest / highest number of workers allowed
     uint64_t workers_short;    // workers requested but unavailable (no clone / init failure)
     uint64_t seeded;           // seed entry points queued
+    uint64_t seed_refused_cap; // unique pointer seeds not queued due to the GB scan cap
     uint64_t novelty_picks;    // pending states chosen ahead of LIFO order because their target was uncovered
     uint64_t index_replays;    // states queued with a RAM index byte set to 0..15 at a ROM-table read
     uint64_t rng_forks;        // states queued with a volatile RAM byte forced to 00/01/80/FF
@@ -164,4 +166,5 @@ int dp_core_write_summary(const char *path, const char *id, const DpCoreResult *
 #endif
 
 // GB pointer-table entry discovery: seeds {bank, pc} for cfg->seeds / cfg->seed_banks (free both arrays)
-size_t dp_core_gb_pointer_seeds(const uint8_t *rom, size_t size, size_t cap, uint32_t **pcs, uint16_t **banks);
+size_t dp_core_gb_pointer_seeds(const uint8_t *rom, size_t size, size_t cap, uint32_t **pcs, uint16_t **banks,
+                                uint64_t *refused);

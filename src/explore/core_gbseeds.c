@@ -14,12 +14,15 @@ static int pad_at(const uint8_t *rom, size_t size, uint32_t bank, uint16_t addr)
     return 1;
 }
 
-size_t dp_core_gb_pointer_seeds(const uint8_t *rom, size_t size, size_t cap, uint32_t **pcs, uint16_t **banks) {
+size_t dp_core_gb_pointer_seeds(const uint8_t *rom, size_t size, size_t cap, uint32_t **pcs, uint16_t **banks,
+                                uint64_t *refused) {
+    *pcs = NULL; *banks = NULL;
+    if (refused) *refused = 0;
     unsigned nbanks = (unsigned)(size / 0x4000);
     uint8_t *seen = calloc(size ? size : 1, 1);   // by compact ROM index
     uint32_t *pc = malloc(cap * sizeof *pc); uint16_t *bk = malloc(cap * sizeof *bk);
     size_t n = 0;
-    if (!seen || !pc || !bk) { free(seen); free(pc); free(bk); return 0; }
+    if (!seen || !pc || !bk) { free(seen); free(pc); free(bk); return SIZE_MAX; }
     for (unsigned bank = 0; bank < nbanks; bank++)
         for (uint32_t off = 0; off + 1 < 0x4000; off++) {
             size_t a = (size_t)bank * 0x4000 + off;
@@ -36,6 +39,7 @@ size_t dp_core_gb_pointer_seeds(const uint8_t *rom, size_t size, size_t cap, uin
                 if (tk >= size || seen[tk]) continue;
                 seen[tk] = 1;
                 if (n < cap) { pc[n] = v; bk[n] = (uint16_t)tb; n++; }
+                else if (refused) (*refused)++;
             }
         }
     free(seen);

@@ -1,5 +1,5 @@
 // residual.c: targeted re-seeding of the residual unknown (plan de finition,
-// étape C).  The residual anatomy names what blocks each unknown range; this
+// étape C). The residual anatomy describes neighboring classes; this
 // module acts on the dispatch-shaped ones:
 //   - predecessor: the nearest executed `jp hl` before the range — the
 //     dispatch site responsible for the code the closure never resolved.  Its
@@ -40,7 +40,7 @@ static int ends_with_transfer(const DpCart *c, uint32_t tk) {
 // an unproven target must decode to a transfer; at least two entries validate
 // a table (one entry proves nothing about a dispatch).  Marks the validated
 // entries and proves the table bytes data.  Returns entries marked.
-static uint32_t prove_table(DpResults *res, uint32_t site, uint32_t steps_total) {
+uint32_t dp_residual_prove_table(DpResults *res, uint32_t site, uint32_t steps_total) {
     const DpCart *c = res->cart;
     size_t n = c->rom_size;
     // the site's own bank view (site key is compact bank*0x4000 + off)
@@ -68,10 +68,11 @@ static uint32_t prove_table(DpResults *res, uint32_t site, uint32_t steps_total)
     if (base < 0x4000) bk = base;
     else if (base < 0x8000 && tb < (uint32_t)res->banks) bk = tb * 0x4000 + (base & 0x3FFF);
     if (bk == ~0u || bk + 6 > n) return 0;
-    uint32_t marked = 0;
     for (int stride = 2; stride <= 3; stride++) {
+        uint32_t targets[64];
         int cnt = 0;
-        for (int e = 0; e < 64 && bk + (uint32_t)e * (uint32_t)stride + (stride > 2 ? 2 : 1) < n; e++) {
+        for (int e = 0; e < 64 && bk + (uint32_t)e * (uint32_t)stride + (stride > 2 ? 2 : 1) < n &&
+             (bk + (uint32_t)e * (uint32_t)stride + (uint32_t)stride - 1) / 0x4000 == bk / 0x4000; e++) {
             uint16_t t = (uint16_t)(c->rom[bk + e * (uint32_t)stride] | c->rom[bk + e * (uint32_t)stride + 1] << 8);
             uint32_t ebk = tb;
             if (stride == 3) {
@@ -89,14 +90,18 @@ static uint32_t prove_table(DpResults *res, uint32_t site, uint32_t steps_total)
             if (illegal(c->rom[tk])) break;
             if (!(res->exec_flags[tk] & (DP_XF_NATURAL | DP_XF_FORCED)) &&
                 !dp_closure_decodes_transfer(c, tk, res->banks)) break;
-            cnt++;
-            if (!(res->exec_flags[tk] & (DP_XF_NATURAL | DP_XF_FORCED | DP_XF_STATIC))) {
-                res->exec_flags[tk] |= DP_XF_ENTRY;
-                dp_cov_mark(&res->first, res->src_flags, tk, DP_SRC_CLOSURE, steps_total, 0);
-                marked++;
-            }
+            targets[cnt++] = tk;
         }
         if (cnt >= 2) { // a real table: entries code, its bytes proven data
+            uint32_t marked = 0;
+            for (int e = 0; e < cnt; e++) {
+                uint32_t tk = targets[e];
+                if (!(res->exec_flags[tk] & (DP_XF_NATURAL | DP_XF_FORCED | DP_XF_STATIC))) {
+                    res->exec_flags[tk] |= DP_XF_ENTRY;
+                    dp_cov_mark(&res->first, res->src_flags, tk, DP_SRC_CLOSURE, steps_total, 0);
+                    marked++;
+                }
+            }
             res->closure_jp_tables++;
             res->residual_static++;
             uint32_t tbytes = bk + (uint32_t)cnt * (uint32_t)stride;
@@ -118,9 +123,10 @@ uint32_t dp_residual_target(DpExplorer *ex, uint32_t cap) {
     DpMapSummary sum;
     uint8_t *m = dp_map_build(res, &sum);
     if (!m) return 0;
-    DpResidualRange rr[128];
-    int nr = dp_map_residual_list(res, m, rr, 128); // returns the TOTAL range count
-    if (nr > 128) nr = 128; // only cap entries were actually filled
+    int nr = dp_map_residual_list(res, m, NULL, 0);
+    DpResidualRange *rr = nr ? malloc((size_t)nr * sizeof *rr) : NULL;
+    if (nr && !rr) { free(m); res->residual_refused += (uint32_t)nr; return 0; }
+    if (nr) dp_map_residual_list(res, m, rr, nr);
     uint32_t seeded = 0;
     for (int i = 0; i < nr; i++) {
         DpResidualRange *r = &rr[i];
@@ -128,15 +134,17 @@ uint32_t dp_residual_target(DpExplorer *ex, uint32_t cap) {
         int fringe_code = !strcmp(mk, "padding-fringe") && r->lo > 0 &&
                           dp_map_is_code(m[(size_t)r->bank * 0x4000 + r->lo - 1]);
         if (strcmp(mk, "code-code") && strcmp(mk, "edge-code") && !fringe_code) continue;
+        uint32_t tk = (uint32_t)r->bank * 0x4000 + r->lo;
+        DpHashSet *tried = &res->residual_tried;
+        if (tried->used[dp_set_probe(tried, tk)]) continue;
         if (res->residual_targets >= cap) {
             res->residual_refused++;
             break; // budget spent: the remaining ranges stay untried, reported
         }
-        uint32_t tk = (uint32_t)r->bank * 0x4000 + r->lo;
+        int inserted = dp_set_insert(tried, tk);
+        if (inserted < 0) { res->residual_refused++; continue; }
+        if (!inserted) continue;
         res->residual_targets++;
-        // the range is marked tried up front: a verdict (seeded or refused,
-        // even a transient drop) is final — no reloop (plan: échec marqué)
-        if (!dp_set_insert(&res->residual_tried, tk)) continue;
         // predecessor: the nearest executed dispatch site behind the range
         uint32_t site = ~0u;
         uint32_t from = (uint32_t)r->bank * 0x4000 + r->lo;
@@ -146,7 +154,7 @@ uint32_t dp_residual_target(DpExplorer *ex, uint32_t cap) {
                 (DP_XF_START | DP_XF_NATURAL) && c->rom[k] == 0xE9) { site = k; break; }
         }
         // predecessor dispatch re-proof: its entries get marked, never seeded here
-        if (site != ~0u) prove_table(res, site, res->steps_total);
+        if (site != ~0u) dp_residual_prove_table(res, site, res->steps_total);
         // forced entry: plausible when the byte before the range is an
         // executed unconditional transfer (ret/reti/jp/jr) — the range then
         // starts an unreached sibling routine
@@ -174,6 +182,7 @@ uint32_t dp_residual_target(DpExplorer *ex, uint32_t cap) {
             res->residual_refused++;
         }
     }
+    free(rr);
     free(m);
     return seeded;
 }

@@ -454,11 +454,15 @@ void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *o) {
             int nr = dp_map_residual_list(res, m, rr, 4096);
             dp_buf_fmt(o, ",\"residual_bytes\":%llu,\"residual_ranges\":%d,\"residual\":[",
                        (unsigned long long)s.unknown, nr);
-            for (int i = 0; i < nr && i < 4096; i++)
-                dp_buf_fmt(o, "%s{\"bank\":%u,\"lo\":%u,\"hi\":%u,\"len\":%u,\"mech\":\"%s\"}", i ? "," : "",
+            for (int i = 0; i < nr && i < 4096; i++) {
+                int before = dp_residual_neighbor(m, &rr[i], 0), after = dp_residual_neighbor(m, &rr[i], 1);
+                dp_buf_fmt(o, "%s{\"bank\":%u,\"lo\":%u,\"hi\":%u,\"len\":%u,\"mech\":\"%s\",\"before\":\"%s\",\"after\":\"%s\"}", i ? "," : "",
                            rr[i].bank, rr[i].lo, rr[i].hi, rr[i].len,
-                           dp_residual_mechanism(m, &rr[i]));
+                           dp_residual_mechanism(m, &rr[i]), before < 0 ? "bank-edge" : dp_map_class_name(before),
+                           after < 0 ? "bank-edge" : dp_map_class_name(after));
+            }
             dp_buf_str(o, "]");
+            dp_buf_fmt(o, ",\"residual_omitted\":%d", nr > 4096 ? nr - 4096 : 0);
             free(m);
         }
         dp_buf_str(o, "},\n");
@@ -613,11 +617,15 @@ void dp_report_summary(const DpResults *res, const DpConfig *cfg, const DpTree *
                 int nr = dp_map_residual_list(res, m, rr, cap);
                 dp_buf_fmt(o, ",\"residual_bytes\":%llu,\"residual_ranges\":%d,\"residual\":[",
                            (unsigned long long)s.unknown, nr);
-                for (int i = 0; i < nr && i < cap; i++)
-                    dp_buf_fmt(o, "%s{\"bank\":%u,\"lo\":%u,\"hi\":%u,\"len\":%u,\"mech\":\"%s\"}", i ? "," : "",
+                for (int i = 0; i < nr && i < cap; i++) {
+                    int before = dp_residual_neighbor(m, &rr[i], 0), after = dp_residual_neighbor(m, &rr[i], 1);
+                    dp_buf_fmt(o, "%s{\"bank\":%u,\"lo\":%u,\"hi\":%u,\"len\":%u,\"mech\":\"%s\",\"before\":\"%s\",\"after\":\"%s\"}", i ? "," : "",
                                rr[i].bank, rr[i].lo, rr[i].hi, rr[i].len,
-                               dp_residual_mechanism(m, &rr[i]));
+                               dp_residual_mechanism(m, &rr[i]), before < 0 ? "bank-edge" : dp_map_class_name(before),
+                               after < 0 ? "bank-edge" : dp_map_class_name(after));
+                }
                 dp_buf_str(o, "]");
+                dp_buf_fmt(o, ",\"residual_omitted\":%d", nr > cap ? nr - cap : 0);
                 free(rr);
             }
             free(m);

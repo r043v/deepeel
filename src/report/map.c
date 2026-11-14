@@ -454,13 +454,16 @@ int dp_map_residual_list(const DpResults *res, const uint8_t *m, DpResidualRange
     return (int)ranges;
 }
 
-// mechanical verdict of one residual range: what blocks it, from the class of
-// its two edges (the C port of the campaign's residual anatomy).  It explains
-// the unknown, it never classifies it — the inference rules stay untouched.
-const char *dp_residual_mechanism(const uint8_t *m, const DpResidualRange *r) {
+int dp_residual_neighbor(const uint8_t *m, const DpResidualRange *r, int after) {
     size_t bs = (size_t)r->bank * 0x4000;
-    int before = r->lo > 0 ? m[bs + r->lo - 1] : -1;
-    int after = r->hi < 0x3FFF ? m[bs + r->hi + 1] : -1;
+    if (after) return r->hi < 0x3FFF ? m[bs + r->hi + 1] : -1;
+    return r->lo > 0 ? m[bs + r->lo - 1] : -1;
+}
+
+// Describe the neighboring classes, not the cause of an unknown range.
+const char *dp_residual_mechanism(const uint8_t *m, const DpResidualRange *r) {
+    int before = dp_residual_neighbor(m, r, 0);
+    int after = dp_residual_neighbor(m, r, 1);
     int bc = before >= 0 && dp_map_is_code(before);
     int bd = before >= 0 && dp_map_is_data(before);
     int bp = before == DP_MAP_PAD || before == DP_MAP_INF_PAD;
@@ -483,15 +486,15 @@ const char *dp_residual_mechanism(const uint8_t *m, const DpResidualRange *r) {
 
 // per-mechanism rollup of the residual unknown: ranges, bytes, where
 void dp_residual_anatomy_text(const DpResults *res, const uint8_t *m, DpBuf *out) {
-    static const char *mech[7] = { "code-code (dispatch non prouvé)",
-                                   "code-data (bord mixte, jamais inféré)",
-                                   "data-data (donnée jamais lue)",
+    static const char *mech[8] = { "code-code",
+                                   "code-data",
+                                   "data-data",
                                    "padding-fringe (frange de remplissage)",
-                                   "edge-code", "edge-data", "bank/bord de banque" };
-    static const char *key[7] = { "code-code", "code-data", "data-data", "padding-fringe",
-                                  "edge-code", "edge-data", "bank" };
-    uint32_t bytes[7] = { 0 }, biggest[7] = { 0 };
-    int ranges[7] = { 0 }, bi[7] = { 0 };
+                                   "edge-code", "edge-data", "bank/bord de banque", "other" };
+    static const char *key[8] = { "code-code", "code-data", "data-data", "padding-fringe",
+                                  "edge-code", "edge-data", "bank", "other" };
+    uint32_t bytes[8] = { 0 }, biggest[8] = { 0 };
+    int ranges[8] = { 0 }, bi[8] = { 0 };
     size_t n = (size_t)res->banks * 0x4000;
     for (size_t bs = 0; bs < n; bs += 0x4000) {
         for (size_t i = bs; i < bs + 0x4000;) {
@@ -501,7 +504,7 @@ void dp_residual_anatomy_text(const DpResults *res, const uint8_t *m, DpBuf *out
             DpResidualRange r = { (uint16_t)(bs / 0x4000), (uint16_t)(i - bs),
                                   (uint16_t)(j - 1 - bs), (uint32_t)(j - i) };
             const char *mk = dp_residual_mechanism(m, &r);
-            for (int k = 0; k < 7; k++)
+            for (int k = 0; k < 8; k++)
                 if (!strcmp(mk, key[k])) {
                     bytes[k] += r.len;
                     ranges[k]++;
@@ -511,8 +514,8 @@ void dp_residual_anatomy_text(const DpResults *res, const uint8_t *m, DpBuf *out
             i = j;
         }
     }
-    dp_buf_str(out, "residual anatomy (what blocks each unknown range):\n");
-    for (int k = 0; k < 7; k++)
+    dp_buf_str(out, "residual anatomy (neighboring classes, not proven causes):\n");
+    for (int k = 0; k < 8; k++)
         if (ranges[k])
             dp_buf_fmt(out, "  %-42s %5d ranges %8u bytes (biggest %u in bank %d)\n",
                        mech[k], ranges[k], bytes[k], biggest[k], bi[k]);

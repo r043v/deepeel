@@ -12,6 +12,7 @@ uint32_t choice_new(DpExplorer *ex, uint32_t parent, int kind, uint32_t site, in
                            int pc);
 uint8_t *seed_base(DpExplorer *ex);
 int defer_room(DpExplorer *ex, int reason);
+uint32_t dp_residual_prove_table(DpResults *res, uint32_t site, uint32_t steps_total);
 void fork_deferred(DpExplorer *ex, uint8_t *fimg, int reason, uint32_t site, uint16_t tpc);
 void pseed_add(DpExplorer *ex, int bank, uint16_t pc, int kind, int forced);
 uint64_t project_ctx(DpExplorer *ex, const DpSection *s);

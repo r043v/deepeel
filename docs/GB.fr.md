@@ -1,5 +1,77 @@
 # Plateforme Game Boy
 
+L'explorateur MD compte à nouveau les lectures de registres matériels et de
+RAM hors de la fenêtre cartouche ; ces accès ne sont plus pris pour de la SRAM.
+Diagnostic du résidu : le rapport décrit les classes voisines de chaque plage
+inconnue comme des indices, sans affirmer qu'elles en prouvent la cause ; la
+catégorie `other` est également comptabilisée.
+Les états différés GB conservent leur identifiant de choix sans le confondre
+avec le marqueur de compression ; les images de file compressées sont
+décompressées avant leur transfert vers les lots de frontière.
+Dans le noyau générique, le rechargement de `frontier.bin` utilise maintenant
+la même limite de file RAM que les nouvelles fourches : les états excédentaires
+sont transférés vers le stockage temporaire sur disque. Si ce stockage est
+indisponible, ils restent en RAM ; la sauvegarde de fin de run est encore
+nécessaire pour les conserver après l'arrêt.
+Le noyau signale ce repli en RAM ; une erreur de lecture du stockage différé
+interrompt l'exploration et renvoie un échec au lieu d'annoncer un épuisement.
+Les graines d'entrée passent elles aussi par cette limite ; leur statut de
+graine est conservé dans la frontière et lors du débordement. En mode
+`--unbounded`, le noyau ne les écarte plus au seul motif que leur adresse a
+déjà été exécutée.
+La frontière du noyau est désormais vérifiée intégralement avant reprise et
+écrite dans un fichier temporaire avant remplacement : une troncature ou un
+échec d'écriture est signalé et la précédente frontière n'est pas remplacée.
+La file courante ne devient toutefois durable qu'après la sauvegarde réussie ;
+un arrêt brutal ou une erreur disque peut encore perdre les nouveaux états.
+La carte du noyau sauvegarde aussi les sources de couverture par octet et les
+restaure lors d'une reprise. Les anciennes cartes restent lisibles, mais leurs
+sources antérieures ne peuvent pas être reconstituées ; une extension de sources
+incomplète est signalée et ignorée.
+Les pas accumulés localement sont publiés à la fin de chaque exploration,
+y compris pour les courses courtes, avant la production des rapports.
+Le ciblage du résidu examine toutes les plages plutôt que les 128 premières ;
+une table candidate ne marque ses entrées qu'après validation d'au moins deux
+éléments, et ne traverse pas une frontière physique de banque.
+Le noyau GB prend en compte les entrées explicites `--entry banque:adresse`,
+en complément des graines de pointeurs, comme chemins forcés ;
+`--no-pointer-scan` désactive les graines de pointeurs sans désactiver ces entrées.
+Les graines MBC5 sélectionnent aussi le neuvième bit de banque.
+Le nombre de graines de pointeurs refusées par le plafond est indiqué dans le
+rapport et le JSON (`seed_refused_cap`) ; `--unbounded` lève ce plafond.
+La construction depuis zéro applique de nouveau le correctif TAS à la version
+de m0boy dont le chemin RTC précède la lecture de la RAM écho.
+Les exports JSON de résidu GB précisent les classes immédiatement avant et après
+chaque plage (`bank-edge` à la frontière d'une banque), ainsi que le nombre de
+plages omises lorsque la liste atteint son plafond `residual_omitted`.
+`python3 tools/compare_residual.py avant.json apres.json` compare les plages
+inconnues de deux rapports et donne les plages devenues classées ou inconnues.
+Le résumé du noyau générique fournit aussi ces plages pour chaque plateforme :
+les coordonnées découpent l'index physique de ROM par blocs de 16 Kio, sans
+impliquer une banque matérielle. Les projections des moteurs peuvent différer.
+Il refuse les listes tronquées ou incohérentes. Vérifier séparément l'identité
+de la ROM et la compatibilité des réglages : l'outil ne les établit pas, et une
+classification nouvelle peut être inférée sans être une exécution.
+Pour rechercher des pistes d'adresses dans les zones inconnues, produire une
+carte texte du noyau (`--core --map carte.map`), puis lancer
+`python3 tools/residual_immediates.py jeu.gb carte.map`. L'outil cherche les
+motifs SM83 `ld bc/de/hl,nn` dans les octets classés comme exécutés et énumère
+les banques physiques dont l'offset correspondant est inconnu. La carte ne
+prouve ni le début d'instruction ni la banque active : les résultats sont des
+hypothèses, ne modifient pas la couverture et exigent une vérification. Le SHA-256
+de la ROM analysée est rapporté ; l'identité de la ROM ayant produit la carte
+doit être vérifiée séparément. `--limit` borne la sortie et le surplus est compté.
+Avec `--summary resume.json` issu du même run, la recherche ne retient que les
+sites observés comme débuts d'instruction par le noyau ; les débuts omis au-delà
+du plafond du résumé sont indiqués. Les débuts antérieurs à cette instrumentation
+peuvent manquer dans une session reprise. La banque reste hypothétique.
+L'option `--split-immediates`, utilisable avec `--summary`, associe aussi deux
+chargements immédiats observés vers les moitiés d'un même registre BC, DE ou HL,
+séparés d'au plus huit octets dans une banque physique. Elle examine les deux
+ordres et compte les candidats omis par `--limit`. Leur proximité ne prouve ni
+leur ordre d'exécution, ni une dépendance entre eux : ils peuvent provenir de
+chemins distincts ou avoir été écrasés entre les deux instructions.
+
 Les plateformes de couverture utilisent par défaut un passage attract de
 6 000 images, puis les phases jouées et à fourches. Quand un TAS fournit des
 instantanés, les essais aléatoires en lancent dix par instantané pris toutes
