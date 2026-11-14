@@ -82,10 +82,10 @@ int dp_core_write_summary(const char *path, const char *id, const DpCoreResult *
     for (int k = 0; k < DP_MAP_COUNT; k++) fprintf(f, "%s\"%s\":%llu", k ? "," : "", names[k], U(cls[k]));
     fprintf(f, "},\"known_pct\":%.3f,\"counters\":{\"steps\":%llu,\"paths\":%llu,\"forks\":%llu,"
                "\"saturation\":%llu,\"closure_roots\":%llu,\"closure_capped\":%llu,\"event_probes\":%llu,"
-               "\"cells\":%llu,\"compressed_bytes\":%llu,\"copy_bytes\":%llu,\"seed_refused_cap\":%llu}",
+               "\"cells\":%llu,\"compressed_bytes\":%llu,\"copy_bytes\":%llu,\"seed_refused_cap\":%llu,\"cooperative_yields\":%llu}",
             r->rom_size ? 100.0 * (double)(r->rom_size - cls[0]) / (double)r->rom_size : 0.0,
             U(r->steps), U(r->paths), U(r->forks), U(r->sat_total), U(r->closure_roots), U(r->closure_capped),
-            U(r->event_probes), U(r->cells), U(r->compressed_bytes), U(r->copy_bytes), U(r->seed_refused_cap));
+            U(r->event_probes), U(r->cells), U(r->compressed_bytes), U(r->copy_bytes), U(r->seed_refused_cap), U(r->cooperative_yields));
     // Physical ROM offsets are grouped in 16 KiB chunks solely for the common
     // residual format. These chunks do not imply the machine's bank mapping.
     size_t ranges = 0, emitted = 0;

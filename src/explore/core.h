@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <signal.h>
 #include "../core/coverage.h"
 #include "ramarch.h"
 
@@ -64,6 +65,7 @@ typedef struct DpCoreConfig {
     const char *state_dir;     // --state-dir: pending forked states are saved to <dir>/frontier.bin at exit
     int resume;                // --resume: states saved there by a previous run are queued first
     int unbounded;             // --unbounded: no step/path/site-fork ceilings; the RAM queue spills to the disk spool
+    const volatile sig_atomic_t *stop_requested; // cooperative interruption, checked between instructions
     int no_closure;            // static closure off (no STATIC marking from natural direct transfers)
     int no_cells;              // technique 8 off: no (target, RAM cell) pruning of forced forks
     uint32_t seed_lo, seed_hi;  /* technique 3: RAM range pre-filled in extra start states (needs DpMachine.poke) */
@@ -95,6 +97,7 @@ typedef struct DpCoreResult {
     uint8_t *flags;            // per ROM index: DP_CORE_NATURAL | DP_CORE_FORCED
     size_t rom_size;
     uint64_t steps, paths, forks;
+    uint64_t cooperative_yields; // active paths requeued to let pending work run
     uint64_t tas_paths;        // TAS replay paths started (unshifted + shifted)
     uint64_t sat_total, sat_path, sat_loop, sat_site, sat_queue;   // reported caps, never silent
     uint64_t pruned_covered;   // forks skipped because both sides were already covered
@@ -126,7 +129,7 @@ typedef struct DpCoreResult {
     uint64_t decompress_runs;   // such streams detected
     uint64_t resumed, saved; uint64_t spooled;          // forked states that overflowed the RAM queue onto disk (none is dropped)
     uint64_t spool_left;       // spilled states never run (the exploration ended first)
-    unsigned halted;   /* 1: stopped by --max-time, 2: by --stall-time */
+    unsigned halted;   /* 1: max-time, 2: stall-time, 3: spool error, 4: interruption */
     uint64_t attract_paths, play_paths, play_epochs, session_frames, session_steps, session_stalls;   // generic long sessions run
     uint64_t hook_vetoed;      // forced sides refused by DpPlatformHooks.veto_fork
     uint64_t exec_outside, exec_wram_rom;     // instructions executed where rom_index < 0 (RAM/VRAM code)
@@ -155,6 +158,10 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r);
 void dp_core_config_default(DpCoreConfig *cfg);
 // explores from the machine's current state; rom_size = number of ROM index slots
 int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCoreResult *out);
+// CLI wrapper: install a temporary SIGINT handler and provide a state directory
+// for unbounded runs when none was specified.  output_hint may be NULL.
+int dp_core_explore_cli(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg,
+                        DpCoreResult *out, const char *output_hint);
 void dp_core_result_free(DpCoreResult *r);
 
 void dp_core_write_cov(const char *path, const char *id, const DpCoreResult *r);

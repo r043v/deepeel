@@ -354,6 +354,14 @@ les régressions et les limites non encore résolues.
   Les graines d'entrée empruntent aussi cette file, et leur identité subsiste
   dans ses enregistrements ; en mode sans borne elles ne sont pas écartées
   simplement parce que leur adresse figure déjà dans la couverture.
+- Le noyau lève ses plafonds de visites, de temps et de fourches en mode sans
+  borne, désactive les coupes par cellules et transferts forcés et conserve les
+  chemins actifs à l'interruption ou à un arrêt borné avec répertoire d'état.
+  Un chemin sans fin est remis en file pour ne pas affamer les autres ; ce
+  passage est compté. Des fixtures exercent SIGINT et reprise sur ses cinq ISA
+  et vérifient qu'une fourche progresse malgré un chemin naturel infini ; l'équivalence
+  exacte après reprise reste ouverte car tout le contexte interne n'est pas
+  sérialisé et le stockage temporaire n'est pas durable en cas de crash.
 - Les sources par octet du noyau sont sauvegardées avec sa carte et restaurées
   à la reprise ; une ancienne carte reste utilisable sans inventer les sources
   qu'elle ne contenait pas.
@@ -374,9 +382,10 @@ autres étapes et les expériences R2 à R8 restent à mener.
   d'intégration vérifient aussi les entrées GB, le résidu et la frontière CLI.
 - Les anciens états sans extension ne contiennent pas de sources récupérables.
   Le stockage temporaire du noyau n'est pas durable après un arrêt brutal ; les
-  chemins actifs et les erreurs de sauvegarde des autres fichiers d'état restent
-  à traiter. Le contrat `--unbounded` doit encore être audité, notamment pour
-  les plafonds de visites, les arrêts temporels et l'interruption propre.
+  états actifs lors d'un crash et les erreurs de sauvegarde des autres fichiers
+  d'état restent à traiter. Le contrat `--unbounded` doit encore être audité
+  de bout en bout sur chaque moteur, notamment pour les seuils de stockage et
+  les reprises équivalentes.
 - La campagne complète doit être relancée sur la construction définitive. Une
   exécution antérieure a échoué pendant une reconstruction simultanée ; une
   autre a signalé un échec du test P1 alors en cours de développement par GLM ;

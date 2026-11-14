@@ -125,7 +125,7 @@ typedef struct {
     uint64_t paths_done;       // finished paths (atomic), for the progress line
     int stop_monitor;
     int halt;                  // 0 running, 1 max-time reached, 2 stagnation (atomic): workers wind down
-    int spool_fd, spool_write_failed, spool_read_failed; uint64_t spool_n, spool_total; uint32_t spool_rs;   // disk overflow of the pending queue: fixed-size records, LIFO
+    int spool_fd, spool_write_failed, spool_read_failed, checkpoint_failed; uint64_t spool_n, spool_total; uint32_t spool_rs;   // disk overflow of the pending queue: fixed-size records, LIFO
     unsigned allowed;          // adaptive mode: workers with index < allowed may take work (atomic)
     unsigned wmin, wmax;
     DpCoreResult *out;
@@ -872,11 +872,57 @@ static void run_path(Worker *w, Pending *p) {
     run_flush(&w->cobs);
     w->cobs.forced = p->forced; w->cobs.last_rom = -1;
     w->win_on = w->cobs.track = 0;
-    uint32_t path_id = ++w->path_id, vid = path_id, steps = 0;
+    uint32_t path_id = ++w->path_id, vid = path_id, steps = 0, slice_steps = 0;
     int cur_forced = p->forced;
     unsigned fdepth = 0;   // calls made since the forced fork: a ret below that pops state the path did not build
     for (;;) {
-        if (__atomic_load_n(&sh->halt, __ATOMIC_RELAXED)) break;   // time limit / stagnation: this path ends, the queue is dropped by the worker loop
+        if (cfg->stop_requested && *cfg->stop_requested) {
+            __atomic_store_n(&sh->halt, 4, __ATOMIC_RELAXED);
+            pthread_mutex_lock(&sh->mu); pthread_cond_broadcast(&sh->cv); pthread_mutex_unlock(&sh->mu);
+        }
+        int halt = __atomic_load_n(&sh->halt, __ATOMIC_RELAXED);
+        if (halt) {
+            if ((halt == 1 || halt == 2 || halt == 4) && cfg->state_dir) {
+                uint8_t *snapshot = malloc(sh->sbytes ? sh->sbytes : 1);
+                if (snapshot) {
+                    m->save(m, snapshot);
+                    pthread_mutex_lock(&sh->mu);
+                    queue_push(sh, (Pending){ snapshot, m->pc(m), cur_forced, 0, p->input, 0 });
+                    pthread_mutex_unlock(&sh->mu);
+                } else {
+                    fprintf(stderr, "deepeel: cannot preserve stopped kernel path\n");
+                    __atomic_store_n(&sh->checkpoint_failed, 1, __ATOMIC_RELAXED);
+                }
+            }
+            break;
+        }
+        if (cfg->unbounded && slice_steps >= 65536) {
+            // An unlimited path may loop forever. Requeue its machine state
+            // behind pending work instead of starving other forks.
+            slice_steps = 0;
+            pthread_mutex_lock(&sh->mu);
+            if (!sh->qn && sh->spool_n && !spool_refill(sh)) {
+                sh->spool_read_failed = 1;
+                __atomic_store_n(&sh->halt, 3, __ATOMIC_RELAXED);
+                pthread_cond_broadcast(&sh->cv);
+            }
+            if (sh->qn && !__atomic_load_n(&sh->halt, __ATOMIC_RELAXED)) {
+                uint8_t *snapshot = malloc(sh->sbytes ? sh->sbytes : 1);
+                if (snapshot) {
+                    m->save(m, snapshot);
+                    ram_push(sh, (Pending){ snapshot, m->pc(m), cur_forced, 0, p->input, 0 });
+                    Pending yielded = sh->q[sh->qn - 1];
+                    memmove(sh->q + 1, sh->q, (sh->qn - 1) * sizeof *sh->q);
+                    sh->q[0] = yielded;
+                    loc->cooperative_yields++;
+                    pthread_cond_broadcast(&sh->cv);
+                    pthread_mutex_unlock(&sh->mu);
+                    break;
+                }
+                fprintf(stderr, "deepeel: cannot yield kernel path; continuing it in place\n");
+            }
+            pthread_mutex_unlock(&sh->mu);
+        }
         if (!(attract || play) && cfg->max_total && __atomic_load_n(&sh->steps, __ATOMIC_RELAXED) + w->step_batch >= cfg->max_total) {
             loc->sat_total++;
             pthread_mutex_lock(&sh->mu);
@@ -888,6 +934,7 @@ static void run_path(Worker *w, Pending *p) {
                 pthread_cond_broadcast(&sh->cv);
             }
             pthread_mutex_unlock(&sh->mu);
+            if (cfg->state_dir) continue;  // checkpoint this active path at the next boundary
             break;
         }
         if (tas) {
@@ -954,7 +1001,7 @@ static void run_path(Worker *w, Pending *p) {
                 }
             }
         }
-        if ((attract || play) && steps >= (cfg->max_total ? cfg->max_total / 2 : 400000000u)) { loc->sat_path++; loc->session_frames += m->frame(m) - sess_f0; break; }   // a long session shares the budget
+        if (!cfg->unbounded && (attract || play) && steps >= (cfg->max_total ? cfg->max_total / 2 : 400000000u)) { loc->sat_path++; loc->session_frames += m->frame(m) - sess_f0; break; }   // a long session shares the budget
         if (!tas && !attract && !play && cfg->max_path_steps && steps >= cfg->max_path_steps) { loc->sat_path++; break; }
         if (!attract && !play && cur_input && cfg->max_total && steps >= session_cap) { loc->sat_path++; break; }
         uint32_t pc = m->pc(m);
@@ -1165,7 +1212,7 @@ static void run_path(Worker *w, Pending *p) {
             m->save(m, pre);
         }
         if (!m->run(m)) { free(pre); break; }
-        steps++;
+        steps++; slice_steps++;
         if (attract || play) loc->session_steps++;   // a long session has its own budget: it neither spends nor waits for the shared one
         else if (++w->step_batch == 256) { __atomic_fetch_add(&sh->steps, 256, __ATOMIC_RELAXED); w->step_batch = 0; }
         if (cfg->hooks && cfg->hooks->after_step) cfg->hooks->after_step(cfg->hooks->user, m, pc);
@@ -1407,7 +1454,12 @@ static void *worker_main(void *arg) {
 
 int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, DpCoreResult *out) {
     DpCoreConfig cfg_unb = *cfg_in;
-    if (cfg_unb.unbounded) { cfg_unb.max_total = 0; cfg_unb.max_path_steps = 0; cfg_unb.fork_site_cap = 0; }   // --unbounded: the one stop is exhaustion or SIGINT
+    if (cfg_unb.unbounded) {
+        cfg_unb.max_total = 0; cfg_unb.max_path_steps = 0; cfg_unb.fork_site_cap = 0;
+        cfg_unb.visits_per_pc = 0; cfg_unb.max_secs = cfg_unb.stall_secs = 0;
+        cfg_unb.no_cells = 1; cfg_unb.cell_lo = cfg_unb.cell_hi = 0;
+        cfg_unb.no_taint_cut = cfg_unb.no_forced_ram_cut = 1;
+    }
     const DpCoreConfig *cfg = &cfg_unb;
     memset(out, 0, sizeof *out);
     out->rom_size = rom_size;
@@ -1619,6 +1671,7 @@ cleanup:
     for (unsigned i = 0; i < started; i++) {
         DpCoreResult *l = &ws[i].loc;
         out->paths += l->paths; out->forks += l->forks;
+        out->cooperative_yields += l->cooperative_yields;
         out->sat_total += l->sat_total; out->sat_path += l->sat_path; out->sat_loop += l->sat_loop;
         out->attract_paths += l->attract_paths; out->play_paths += l->play_paths; out->play_epochs += l->play_epochs; out->session_frames += l->session_frames; out->session_steps += l->session_steps; out->session_stalls += l->session_stalls;
         out->sat_site += l->sat_site; out->sat_queue += l->sat_queue;
@@ -1635,7 +1688,7 @@ cleanup:
     out->spool_left = sh.spool_n; out->spooled = sh.spool_total;
     // Do not publish any new state after detecting an unreadable spool: even
     // later reads could return holes after a subsequent append extended it.
-    if (sh.spool_read_failed) ok = 0;
+    if (sh.spool_read_failed || sh.checkpoint_failed) ok = 0;
     if (ok && cfg->state_dir && sh.celln) {   // archived screen cells for --resume
         char kp[600]; snprintf(kp, sizeof kp, "%s/cells.bin", cfg->state_dir);
         mkdir(cfg->state_dir, 0777);
@@ -1670,6 +1723,41 @@ cleanup:
     return ok;
 }
 
+static volatile sig_atomic_t core_cli_interrupted;
+static void core_cli_sigint(int sig) { (void)sig; core_cli_interrupted = 1; }
+
+int dp_core_explore_cli(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg,
+                        DpCoreResult *out, const char *output_hint) {
+    DpCoreConfig local = *cfg;
+    char state_path[1024];
+    memset(out, 0, sizeof *out);
+    if (!local.state_dir && (local.unbounded || local.resume)) {
+        const char *base = output_hint && *output_hint ? output_hint : "deepeel-unbounded";
+        if (snprintf(state_path, sizeof state_path, "%s.state", base) >= (int)sizeof state_path) {
+            fprintf(stderr, "deepeel: kernel state directory path is too long\n"); return 0;
+        }
+        local.state_dir = state_path;
+    }
+    if (local.state_dir && local.unbounded) {
+        if (mkdir(local.state_dir, 0777) != 0 && errno != EEXIST) {
+            perror("deepeel: cannot create kernel state directory"); return 0;
+        }
+        struct stat st;
+        if (stat(local.state_dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+            fprintf(stderr, "deepeel: kernel state path is not a directory: %s\n", local.state_dir); return 0;
+        }
+    }
+    struct sigaction act = {0}, old;
+    act.sa_handler = core_cli_sigint;
+    sigemptyset(&act.sa_mask);
+    core_cli_interrupted = 0;
+    if (sigaction(SIGINT, &act, &old) != 0) { perror("deepeel: cannot install SIGINT handler"); return 0; }
+    local.stop_requested = &core_cli_interrupted;
+    int ok = dp_core_explore(m, rom_size, &local, out);
+    if (sigaction(SIGINT, &old, NULL) != 0) { perror("deepeel: cannot restore SIGINT handler"); ok = 0; }
+    return ok;
+}
+
 void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     size_t nat = 0, forced = 0, copied = 0;
     for (size_t i = 0; i < r->rom_size; i++) {
@@ -1680,10 +1768,11 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     #define U(x) ((unsigned long long)(x))
     fprintf(out, "deepeel %s (generic kernel)\n", label);
     fprintf(out, "steps %llu paths %llu forks %llu pruned-covered %llu\n", U(r->steps), U(r->paths), U(r->forks), U(r->pruned_covered));
-    if (r->halted) fprintf(out, "halted: %s\n", r->halted == 1 ? "--max-time reached" : "--stall-time: no new ROM byte");
+    if (r->halted) fprintf(out, "halted: %s\n", r->halted == 1 ? "--max-time reached" : r->halted == 2 ? "--stall-time: no new ROM byte" : r->halted == 4 ? "interrupted" : "spool error");
     if (r->attract_paths || r->play_paths) fprintf(out, "sessions: %llu attract, %llu play (%llu pad epochs), %llu frames played, %llu steps, %llu stopped by stagnation\n", U(r->attract_paths), U(r->play_paths), U(r->play_epochs), U(r->session_frames), U(r->session_steps), U(r->session_stalls));
     if (r->resumed || r->saved) fprintf(out, "frontier: %llu states resumed, %llu saved\n", U(r->resumed), U(r->saved));
     fprintf(out, "spool: %llu states spilled to disk, %llu left unexplored\n", U(r->spooled), U(r->spool_left));
+    if (r->cooperative_yields) fprintf(out, "cooperative yields: %llu\n", U(r->cooperative_yields));
     fprintf(out, "saturation: total %llu path %llu loop %llu site %llu queue %llu\n", U(r->sat_total), U(r->sat_path), U(r->sat_loop), U(r->sat_site), U(r->sat_queue));
     fprintf(out, "index replays %llu\n", U(r->index_replays));
     fprintf(out, "rng-byte forks %llu\n", U(r->rng_forks));

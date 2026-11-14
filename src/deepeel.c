@@ -846,10 +846,10 @@ static int cmd_explore(int argc, char **argv) {
                 gkcfg.seeds = gseed_pc; gkcfg.seed_banks = gseed_bk;
             }
             DpCoreResult kr;
-            rc = dp_core_explore(km, cart->rom_size, &gkcfg, &kr) ? 0 : 1;
+            rc = dp_core_explore_cli(km, cart->rom_size, &gkcfg, &kr, summary ? summary : text) ? 0 : 1;
             kr.seed_refused_cap = gseed_refused;
             free(gseed_pc); free(gseed_bk);
-            if (!rc) dp_core_report(stdout, "gb", &kr); core_outputs(argc, argv, "gb", path, &kr);
+            if (!rc) { dp_core_report(stdout, "gb", &kr); core_outputs(argc, argv, "gb", path, &kr); }
             dp_core_result_free(&kr);
             free(gmasks); dp_tas_free(&gt);
             km->close(km);
@@ -1643,8 +1643,8 @@ static int cmd_nes(int argc, char **argv) {
         }
         DpCoreResult kr;
         size_t prg = dp_machine_nes_prg_size(km);
-        int kok = dp_core_explore(km, prg, &kcfg, &kr);
-        if (kok) dp_core_report(stdout, "nes", &kr); core_outputs(argc, argv, "nes", path, &kr);
+        int kok = dp_core_explore_cli(km, prg, &kcfg, &kr, argv_opt(argc, argv, "--summary") ? argv_opt(argc, argv, "--summary") : argv_opt(argc, argv, "--text"));
+        if (kok) { dp_core_report(stdout, "nes", &kr); core_outputs(argc, argv, "nes", path, &kr); }
         dp_core_result_free(&kr);
         free(kmasks); dp_nes_tas_free(&ntas);
         km->close(km);
@@ -1802,9 +1802,9 @@ static int cmd_pce(int argc, char **argv) {
             } else fprintf(stderr, "deepeel: --tas: %s\n", terr);
         }
         DpCoreResult kr;
-        int kok = dp_core_explore(km, dp_pce_rom_size(), &kcfg, &kr);
+        int kok = dp_core_explore_cli(km, dp_pce_rom_size(), &kcfg, &kr, argv_opt(argc, argv, "--summary") ? argv_opt(argc, argv, "--summary") : argv_opt(argc, argv, "--text"));
         free(kmasks); dp_pce_tas_free(&ptas);
-        if (kok) dp_core_report(stdout, "pce", &kr); core_outputs(argc, argv, "pce", path, &kr);
+        if (kok) { dp_core_report(stdout, "pce", &kr); core_outputs(argc, argv, "pce", path, &kr); }
         dp_core_result_free(&kr);
         km->close(km);
         free(data);
@@ -2102,8 +2102,8 @@ static int cmd_md(int argc, char **argv) {
                 } else fprintf(stderr, "deepeel: --tas: %s\n", terr);
             }
             DpCoreResult kr;
-            rc = dp_core_explore(km, c.size, &kcfg, &kr) ? 0 : 1;
-            if (!rc) dp_core_report(stdout, "md", &kr); core_outputs(argc, argv, "md", NULL, &kr);
+            rc = dp_core_explore_cli(km, c.size, &kcfg, &kr, argv_opt(argc, argv, "--summary") ? argv_opt(argc, argv, "--summary") : argv_opt(argc, argv, "--text")) ? 0 : 1;
+            if (!rc) { dp_core_report(stdout, "md", &kr); core_outputs(argc, argv, "md", NULL, &kr); }
             dp_core_result_free(&kr);
             free(kmasks); dp_md_movie_free(&mv);
             km->close(km);

@@ -14,6 +14,7 @@
 
 static void after_step_cb(void *u, DpMachine *m, uint32_t pc) { (void)m; (void)pc; ((uint64_t *)u)[0]++; }
 static int veto_all(void *u, DpMachine *m, uint32_t s, uint32_t o) { (void)u; (void)m; (void)s; (void)o; return 0; }
+static int stop_at_loop(void *u, DpMachine *m, uint32_t pc) { (void)u; (void)m; return pc != 0x0f; }
 
 static void obs_read(void *u, uint32_t a, uint8_t v) { (void)a; (void)v; ((uint64_t *)u)[0]++; }
 static void obs_write(void *u, uint32_t a, uint8_t v) { (void)a; (void)v; ((uint64_t *)u)[1]++; }
@@ -113,6 +114,15 @@ int main(int argc, char **argv) {
     uint32_t header[3], first_record[4];
     CHECK(f && fread(header, sizeof *header, 3, f) == 3 && fread(first_record, sizeof *first_record, 4, f) == 4);
     CHECK(first_record[1] == 3);  // forced entry, retaining its seed identity
+    CHECK(fseek(f, (long)header[1], SEEK_CUR) == 0);
+    int active_saved = 0;
+    for (uint32_t i = 1; i < header[2]; i++) {
+        uint32_t item[4];
+        CHECK(fread(item, sizeof *item, 4, f) == 4);
+        if (item[0] == 3 && item[1] == 0) active_saved = 1;
+        CHECK(fseek(f, (long)header[1], SEEK_CUR) == 0);
+    }
+    CHECK(active_saved);  // natural path stopped after ld a,($C000)
     fclose(f);
     uint32_t *sources = malloc(r.rom_size * sizeof *sources);
     CHECK(sources);
@@ -191,7 +201,7 @@ int main(int argc, char **argv) {
     // In unbounded mode an already covered entry is still explored from its
     // own state, rather than discarded solely on its address.
     uint32_t covered_entry = 0;
-    DpPlatformHooks seed_hooks = {0}; seed_hooks.veto_fork = veto_all;
+    DpPlatformHooks seed_hooks = {0}; seed_hooks.veto_fork = veto_all; seed_hooks.before_step = stop_at_loop;
     b->init(rom, rn, NULL, 1);
     dp_core_config_default(&cfg);
     cfg.no_sessions = 1; cfg.attract_frames = 0; cfg.no_solve = 1;

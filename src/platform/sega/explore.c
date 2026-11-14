@@ -2948,7 +2948,7 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
         else fprintf(out,"tas: %s\n",terr);
     }
     DpCoreResult r;
-    int ok=dp_core_explore(m,size,&cfg,&r);
+    int ok=dp_core_explore_cli(m,size,&cfg,&r,core_summary_path?core_summary_path:core_text_path);
     dp_sega_tas_free(&tas);
     if(ok) {
         dp_core_report(out,s->id,&r);

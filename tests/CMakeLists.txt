@@ -4,6 +4,8 @@ add_test(NAME compare_residual COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOU
 add_test(NAME residual_immediates COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/residual_immediates.py ${CMAKE_SOURCE_DIR}/tools/residual_immediates.py)
 add_test(NAME core_residual COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/core_residual.py $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_branch.gb ${CMAKE_SOURCE_DIR}/tools/compare_residual.py)
 add_test(NAME core_gb_entry COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/core_gb_entry.py $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_mbc5.gb)
+add_test(NAME core_unbounded COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/core_unbounded.py $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_branch.gb)
+set_tests_properties(core_unbounded PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_executable(test_z80 test_z80.c)
 target_link_libraries(test_z80 PRIVATE deepeel_z80)
 add_test(NAME z80 COMMAND test_z80)

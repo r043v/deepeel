@@ -45,6 +45,21 @@ Les graines d'entrée passent elles aussi par cette limite ; leur statut de
 graine est conservé dans la frontière et lors du débordement. En mode
 `--unbounded`, le noyau ne les écarte plus au seul motif que leur adresse a
 déjà été exécutée.
+Dans le noyau, `--unbounded` désactive les plafonds de pas, de visites et de
+fourches, les arrêts sur durée et stagnation, ainsi que les coupes par cellules
+et par transfert forcé ; l'élagage des deux issues déjà couvertes demeure.
+Un chemin long cède périodiquement la place aux états en attente en conservant
+son état machine ; le rapport et le résumé comptent ces passages de relais
+(`cooperative_yields`). Les fourches peuvent ainsi avancer même quand le chemin
+courant ne termine jamais.
+Un `SIGINT` demande un arrêt coopératif : les chemins en cours rejoignent la
+frontière et les sorties sont écrites. Sans `--state-dir`, le noyau crée
+`<résumé-ou-texte>.state`, ou `deepeel-unbounded.state` sans sortie nommée.
+La reprise restaure l'état machine et la nature du chemin ; les compteurs locaux
+et le contexte interne de l'explorateur ne sont pas tous sérialisés, donc une
+reprise n'est pas encore garantie identique à une exploration continue.
+Avec `--state-dir`, les arrêts sur budget ou sur durée conservent également le
+chemin actif à la prochaine frontière d'instruction.
 La frontière du noyau est désormais vérifiée intégralement avant reprise et
 écrite dans un fichier temporaire avant remplacement : une troncature ou un
 échec d'écriture est signalé et la précédente frontière n'est pas remplacée.
