@@ -1168,6 +1168,14 @@ static void poke_wide(DpMachine *m, uint32_t addr, int width, uint32_t v) {
 // against a reference emulator (tools/lr_dsy).  One writer: the first replay to reach a frame owns it (frames are monotone).
 static pthread_mutex_t dsy_mu = PTHREAD_MUTEX_INITIALIZER;
 static FILE *dsy_file; static uint64_t dsy_last;
+// the generic game-screen watch: every watch_every-th frame of the replayed movie / a session goes to the framebuffer window
+static void core_watch_publish(const DpCoreConfig *cfg, DpMachine *m, uint64_t f, uint32_t movie_frame, uint32_t total) {
+    static __thread uint32_t px[512 * 512];
+    if (!cfg->watch_every || !m->render || !dp_watch_frame || f % cfg->watch_every) return;
+    int w = 0, h = 0;
+    if (m->render(m, px, 512u * 512u, &w, &h) && w > 0 && h > 0) dp_watch_frame(px, w, h, f, movie_frame, total, 0);
+}
+
 static void core_dsy_frame(const DpCoreConfig *cfg, DpMachine *m, uint64_t f) {
     uint32_t base = m->work_ram_len ? m->work_ram_base : 0xC000u, len = m->work_ram_len ? m->work_ram_len : 0x2000u;   // declared by the machine (A25)
     pthread_mutex_lock(&dsy_mu);
@@ -1198,7 +1206,6 @@ static void run_path(Worker *w, Pending *p) {
     // TAS replay: input >= TAS_INPUT encodes the frame shift (value - TAS_INPUT - 3, -3..+3)
     int tas = cur_input >= TAS_INPUT && (cfg->tas_masks || cfg->tas_masks32) && m->frame && m->set_input;
     int tas_shift = tas ? (int)(cur_input - TAS_INPUT) - 3 : 0;
-    if (tas && tas_shift == 0 && cfg->watch_every && m->watch) m->watch(m, 1);
     uint64_t tas_last = ~0ull; int tas_ended = 0;
     if (cur_input >= TAS_INPUT) cur_input = 0;
     // generic long sessions (every platform with a frame counter): attract = no input for attract_frames frames;
@@ -1213,6 +1220,7 @@ static void run_path(Worker *w, Pending *p) {
     if (cur_input == SESSION_ATTRACT || cur_input >= SESSION_PLAY) cur_input = 0;
     uint64_t sess_limit = attract ? cfg->attract_frames : burst ? cfg->ckpt_burst_frames : play ? cfg->play_frames : 0;
     uint64_t sess_f0 = (attract || play) ? m->frame(m) : 0, sess_last = ~0ull;
+    if (cfg->watch_every && m->watch && ((tas && tas_shift == 0) || ((attract || play) && !burst))) m->watch(m, 1);
     unsigned sess_epoch = ~0u; uint64_t sess_last_cov = 0;
     uint64_t sess_cov = 0, sess_prog_f = sess_f0;
     uint8_t *sess_seen = attract && cfg->attract_stall ? calloc(loc->rom_size / 8 + 1, 1) : NULL;   // ROM bytes this very session executed
@@ -1301,10 +1309,7 @@ static void run_path(Worker *w, Pending *p) {
             if (f != tas_last) {
                 tas_last = f;
                 if (tas_shift == 0 && cfg->dsy_path && f > 0) core_dsy_frame(cfg, m, f);
-                if (tas_shift == 0 && cfg->watch_every && m->render && dp_watch_frame && f % cfg->watch_every == 0) {   // generic game-screen watch
-                    static uint32_t wpx[512 * 512]; int ww = 0, wh = 0;
-                    if (m->render(m, wpx, 512u * 512u, &ww, &wh) && ww > 0 && wh > 0) dp_watch_frame(wpx, ww, wh, f, (uint32_t)f, (uint32_t)cfg->tas_frames, 0);
-                }
+                if (tas_shift == 0) core_watch_publish(cfg, m, f, (uint32_t)f, (uint32_t)cfg->tas_frames);
                 if (tas_shift == 0) {   // DEEPEEL_TAS_HRAM=<file>: HRAM per movie frame, comparable with the old engine's dump
                     static FILE *hf; static int hinit;
                     if (!hinit) { hinit = 1; const char *hn = getenv("DEEPEEL_TAS_HRAM"); if (hn) hf = fopen(hn, "wb"); }
@@ -1391,6 +1396,7 @@ static void run_path(Worker *w, Pending *p) {
             uint64_t f = m->frame(m);
             if (f != sess_last) {
                 sess_last = f;
+                if (!burst) core_watch_publish(cfg, m, f, (uint32_t)(f - sess_f0), (uint32_t)sess_limit);   // the live screen also follows the attract/play sessions
                 vid = ++w->path_id;
                 // B3: attract and play sessions drop live states into the same pool as the movie: a checkpoint every tas_ckpt_every
                 // session frames (bounded by tas_ckpt_cap) continues as a free natural path

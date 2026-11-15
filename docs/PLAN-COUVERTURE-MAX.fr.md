@@ -271,3 +271,24 @@ Mise à jour 0.366.0 : le propriétaire a décidé le **retrait complet** (ancie
 nouvelles plateformes). Ordre : (1) fenêtres sur le noyau — carte `--mapwin` faite, `--gui`/`--human`/`--watch` à faire ; (2) fonctions épinglées à
 l'ancien GB (sessions play, spool/lot, reprise) ; (3) références figées `tests/golden/` — faites pour GB/NES ; (4) retraits plateforme par
 plateforme (NES, PCE, MD, Sega, GB) avec campagne après chacun.
+
+## Tentative de retrait NES (0.367.0) : annulée, inventaire du reste à porter
+
+Essai : suppression de `nes/explore.c`, `nes/jobs.c` et de la 2e instance NES. Le binaire se construit, mais 42 tests CLI NES échouent : ils
+vérifient des lignes de rapport et des options qui n'existent que dans le moteur historique. Conformément à la règle « réimplémenter avant de
+supprimer, sans perte de couverture », le retrait est annulé ; voici ce que le noyau doit d'abord reproduire (par test) :
+
+| Fonction historique NES | Tests | État dans le noyau |
+|---|---|---|
+| `--entry bank:addr` + ligne `entries: seeded/refused` | nes_entry, nes_seed_banks | `seeded entry points` : syntaxe et décompte à aligner |
+| sondes de pad (`--pad-full`, `pad probes: N forks at S sites`) | nes_pad_probe, nes_pad_full | sondes `event probes`, mode complet absent |
+| rapport des sauts indirects, tables de pointeurs inter-banques | nes_indirect, nes_table*, nes_sibling | comptés (`jump tables`, `copy tables`), pas par banque |
+| copies (canaux `chN src .. len`), chaîne ROM->WRAM->OAM | nes_cpu_copy, nes_wram_copy, nes_oam_chain | `rom->ram copy bytes` ; canaux et chaînes à exposer |
+| `--bank-dispatch`, `--second-pass`, provenance des mots de table | nes_bank_dispatch*, nes_second_pass, nes_provenance* | semis partagés ; passe par dispatch/provenance absente |
+| `--tree`, `--demo N`, file `--queue/--queue-max` croissante | nes_tree, nes_demo_frames, nes_queue_grow | spool/attract existent, formats différents |
+| éviction par contexte (`--ctx-cap`, `--ctx-live`, `--defer-tiers`) | nes_ctx_cap, nes_ctx_live_window, nes_defer_tiers | cap de contexte présent (B1/B7 au plan) |
+| `--jobs 2` replié (2e instance), `--novelty` | nes_jobs, nes_novelty | travailleurs noyau par `clone` ; novelty = cellules |
+| carte `--map` textuelle historique | nes_padding, nes_static, nes_table | format `nes map v1` du noyau |
+
+Même constat pour PCE, MD, Sega et GB (tests `test_explorer`, `test_sessions`, spool/lot). Chaque ligne ci-dessus est un travail de portage
+à faire avant suppression ; le retrait suit tranche par tranche, `campaign_fixtures` après chacune.
