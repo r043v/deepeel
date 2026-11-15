@@ -3,6 +3,7 @@
 // classification data the report and the section liveness use; the machine
 // semantics live in nes.c.
 #include "../platform.h"
+#include "explore.h"
 
 static const DpIoReg nes_io_regs[] = {
     // PPU (mirrored every 8 bytes through $3FFF)
@@ -91,4 +92,24 @@ void dp_nes_regs(FILE *out) {
         "banks; $8000-$BFFF and $C000-$FFFF take the bank of their current window.\n"
         "Limits: no audio synthesis, no pixel PPU, no A12 filtering on the MMC3\n"
         "counter, DMC DMA cycle stealing and open-bus decay not modelled.\n", out);
+}
+
+// defaults of the CLI option block still shared with the kernel's front end
+DpNesOptions dp_nes_options(void) {
+    DpNesOptions o = { 0 };
+    o.max_total = 20000000;
+    o.max_steps = 200000;
+    o.max_paths = 8192;
+    o.queue_cap = 8192;
+    o.loop_cap = 4096;
+    o.fork_cap = 4;
+    o.defer_tiers = 0;   // the CLI turns it on (3 tiers, like sega); library callers keep final cuts
+    o.seed_irq = 1;
+    o.event_probes = 1;
+    o.play_frames = 0; o.demo_frames = 0;
+    o.play_sessions = 8;
+    o.novelty_frames = 240;
+    o.novelty_archive = 4096;
+    o.play_seed = 1;
+    return o;
 }

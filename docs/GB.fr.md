@@ -5872,3 +5872,9 @@ vérifier, puis supprimer.
 du film et publie via `dp_watch_frame` : même fenêtre/PPM (`--watch [FPS]`, `--watch-dump FILE`) que les anciens moteurs, sans code par
 plateforme dans le noyau. Posés sur NES (160x128), PCE, MD (320x224), GB (160x144, test `watch_kernel_gb`) ; Sega reste à brancher (écran dans
 `DpSegaBackend`). Test : `watch_kernel`.
+
+### 0.368.0 — retrait du moteur NES historique
+
+Le noyau est le seul moteur NES (voir `docs/PLAN-COUVERTURE-MAX.fr.md`). `--entry`, `--seed-banks` et `--pad-full` sont portés ;
+`--tree`, `--demo`, `--second-pass`, `--bank-dispatch`, `--novelty`, `--evidence`, `--heat` et la file/étagères historiques disparaissent.
+Tests CLI NES : `tests/nes_kernel_fixtures.sh`. Les nombres restent des observations de l'outil.

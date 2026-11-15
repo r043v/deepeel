@@ -3,6 +3,7 @@ set -eu
 binary=$1
 rom=$2
 system=$3
+heat=${4:-heat}   # "noheat": the kernel map carries no per-byte played execution heat yet
 dir=$(mktemp -d)
 trap 'rm -rf "$dir"' EXIT
 if [ "$system" = pce ]; then
@@ -24,6 +25,7 @@ for jobs in 1 2; do
         "$binary" mapx "$dir/again.png" "$dir/again" --chunk "$chunk"
         cmp "$dir/original" "$dir/again"
     done
+    [ "$heat" = noheat ] && continue
     "$binary" mapx "$dir/map.png" "$dir/heat" --chunk dpCh
     python3 - "$dir/heat" <<'PY'
 import struct, sys

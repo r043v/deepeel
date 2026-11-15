@@ -288,60 +288,6 @@ static void compare_gb(const char *dir, const char *name, int expect_branch, int
 
 // one NES fixture: the same comparison over the PRG index space; the legacy
 // play sessions are off (the kernel run has none either: comparable options)
-static void compare_nes(const char *dir, const char *name) {
-    char path[512];
-    snprintf(path, sizeof path, "%s/fix_%s.nes", dir, name);
-    FILE *f = fopen(path, "rb");
-    CHECK_MSG(f, "nes fixture opens");
-    static uint8_t rom[1 << 17];
-    size_t size = fread(rom, 1, sizeof rom, f);
-    fclose(f);
-    CHECK_MSG(size > 16, "nes fixture reads");
-    row_open("nes", name, "deepeel nes explore fix.nes", "deepeel nes explore fix.nes --core",
-             BUDGET_TOTAL, BUDGET_PATH);
-
-    DpNesOptions o = dp_nes_options();
-    o.max_total = BUDGET_TOTAL;
-    o.max_steps = BUDGET_PATH;
-    o.play_sessions = 0;   // the kernel run has no sessions: comparable budgets
-    DpNesResults r;
-    memset(&r, 0, sizeof r);
-    CHECK_MSG(dp_nes_explore(rom, size, -1, &o, &r), "nes legacy explore runs");
-
-    char err[256] = "";
-    DpMachine *km = dp_machine_nes(rom, size, -1, err, sizeof err);
-    if (!km) fprintf(stderr, "nes kernel machine: %s\n", err);
-    CHECK_MSG(km, "nes kernel machine opens");
-    DpCoreConfig kcfg;
-    dp_core_config_default(&kcfg);
-    kcfg.max_total = BUDGET_TOTAL;
-    kcfg.max_path_steps = BUDGET_PATH;
-    kcfg.fork_site_cap = FORK_CAP;
-    kcfg.hooks = dp_machine_nes_hooks();
-    kcfg.no_solve = 1;
-    kcfg.no_rng_learn = 1;
-    kcfg.no_learn_sig = 1;
-    kcfg.no_index_replay = 1;
-    kcfg.no_decompress = 1;
-    kcfg.no_cells = 1;
-    kcfg.no_novelty_order = 1;
-    kcfg.no_sessions = 1;
-    kcfg.attract_frames = 0;
-    DpCoreResult kr;
-    memset(&kr, 0, sizeof kr);
-    size_t prg = dp_machine_nes_prg_size(km);
-    CHECK_MSG(dp_core_explore(km, prg, &kcfg, &kr), "nes kernel explore runs");
-    km->close(km);
-
-    ParityRow *row = &rows[n_rows - 1];
-    row->space_ok = kr.rom_size == prg && prg == r.prg_size;
-    CHECK_MSG(row->space_ok, "kernel index space matches the fixture");
-
-    compare_bytes(name, prg, r.flags, DP_NES_NATURAL, DP_NES_FORCED, 0, kr.flags, &kr,
-                  r.fork_cuts, 1, 0, 0);
-    dp_core_result_free(&kr);
-    dp_nes_results_free(&r);
-}
 
 static void json_write(const char *dir) {
     char jpath[512];
@@ -410,7 +356,6 @@ int main(int argc, char **argv) {
     compare_gb(dir, "branch", 0, 0, 0, 1);
 
     // second ISA: the NES 6502 pair on the both-sides fixture
-    compare_nes(dir, "nes_branch");
 
     json_write(dir);
     TEST_DONE("audit_parity");

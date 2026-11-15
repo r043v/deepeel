@@ -1727,15 +1727,14 @@ static int cmd_nes(int argc, char **argv) {
     DpNesOptions opt = dp_nes_options();   // defer_tiers 0: cuts stay final; --defer-tiers N opts in (sega's CLI defaults to 3, NES measured neutral on DuckTales)
     opt.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
     DpCliCommon cc = { .jobs = 1 };
-    int core_flag = getenv("DEEPEEL_LEGACY") == NULL; for (int i = 3; i < argc; i++) { if (!strcmp(argv[i], "--legacy")) core_flag = 0; else if (!strcmp(argv[i], "--core")) core_flag = 1; }   // C9: the kernel is the default; --legacy runs the old engine
+    int core_flag = 1;   // the kernel is the only NES engine
     int use_core = core_flag; DpCoreConfig kcfg; dp_core_config_default(&kcfg);
     kcfg.no_sessions = 0;   // A26: held-pad sessions spend their own budget (held_steps), so they no longer starve the natural path   // measured on SMB at 2 M steps: sessions halve the natural path's budget (4708 -> 2063 bytes); --pad-sessions N enables them
     kcfg.visits_per_pc = 50000;   // a frame wait is thousands of iterations (SMB: natural 15 -> 4708 bytes, old engine 4716)
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
         if (0) {}
-        else if (!strcmp(a, "--core")) use_core = 1;   // accepted, now the default
-        else if (!strcmp(a, "--legacy")) use_core = 0;
+        else if (!strcmp(a, "--core")) {}   // accepted: the kernel is the only engine
         else if (core_flag && dp_core_parse_option(&kcfg, argc, argv, i)) { i += dp_core_parse_option(&kcfg, argc, argv, i) - 1; }   // only with --core: the old engine owns --attract-frames etc.
         DP_CLI_COMMON(opt, cc)
         DP_CLI_PLAYED(opt)
@@ -1858,68 +1857,10 @@ static int cmd_nes(int argc, char **argv) {
         free(data);
         return kok ? 0 : 1;
     }
-    DpNesResults res;
-    if (nes_watch) dp_fbwatch_start("deepeel nes watch");
-    int nes_ok = dp_nes_explore_jobs(data, size, mapper, &opt, &res, nes_jobs);
-    if (nes_watch) dp_fbwatch_stop();
-    if (nes_dump && dp_fb_dump_ppm(nes_dump)) fprintf(stderr, "deepeel: no frame to dump\n");
-    if (!nes_ok) {
-        fprintf(stderr, "deepeel: not an iNES image the explorer accepts (%s)\n", path);
-        dp_music_seeds_kernel_free(&mks); free(mseeds);
-        free(data);
-        return 1;
-    }
-    fprintf(stderr, "deepeel: nes explore done — steps %llu, paths %llu, forks %llu, "
-                    "sections %u, copies %u\n",
-            (unsigned long long)res.steps, (unsigned long long)res.paths,
-            (unsigned long long)res.forks, res.section_count, res.copy_count);
-    if (text) {
-        FILE *f = fopen(text, "w");
-        if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", text); }
-        else { dp_nes_report(f, &res); fclose(f); }
-    }
-    if (map) {
-        size_t ml = strlen(map);
-        if (ml >= 4 && !strcmp(map + ml - 4, ".png")) {
-            uint8_t *classes = dp_nes_map_build(&res);
-            dp_map_apply_dest(classes, res.prg_size, res.dest);
-            const char *base = strrchr(path, '/'); base = base ? base + 1 : path;
-            if (!classes || !dp_map_png_from_evidence(classes, res.prg_size, res.play_exec_hits,
-                                                       res.play_data_hits, res.src_flags, &res.first,
-                                                       base, "nes", base, map))
-                fprintf(stderr, "deepeel: cannot write %s\n", map);
-            free(classes);
-        } else {
-            FILE *f = fopen(map, "w");
-            if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", map); }
-            else { dp_nes_map(f, &res); fclose(f); }
-        }
-    }
-    if (evidence) {
-        FILE *f = fopen(evidence, "w");
-        if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", evidence); }
-        else { dp_nes_evidence(f, &res); fclose(f); }
-    }
-    if (cc.cov) {
-        FILE *f = fopen(cc.cov, "w");
-        if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", cc.cov); }
-        else { dp_nes_cov(f, &res); fclose(f); }
-    }
-    if (cc.summary && dp_nes_summary(&res, cc.summary)) fprintf(stderr, "deepeel: cannot write %s\n", cc.summary);
-    if (nes_heat && dp_nes_heat(&res, nes_heat)) fprintf(stderr, "deepeel: cannot write %s\n", nes_heat);
-    if (cc.romdata) {
-        FILE *f = fopen(cc.romdata, "w");
-        if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", cc.romdata); }
-        else { dp_nes_romdata(f, &res); fclose(f); }
-    }
-    if (rtcode_path) {
-        FILE *f = fopen(rtcode_path, "w");
-        if (f) { dp_nes_rtcode(f, &res); fclose(f); }
-    }
-    dp_nes_results_free(&res);
-    dp_music_seeds_kernel_free(&mks); free(mseeds);
+    (void)nes_heat; (void)nes_jobs; (void)text; (void)map; (void)evidence; (void)rtcode_path;
     free(data);
-    return 0;
+    fprintf(stderr, "deepeel: nes: the kernel is the only engine (the historical explorer is retired)\n");
+    return 2;
 }
 
 // PC Engine branch: the HuC6280 forking explorer over m0boy's machine.

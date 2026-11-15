@@ -208,26 +208,6 @@ static void test_cnrom_axrom(void) {
 
 // MMC1 (serial port, 16 KiB switch) and MMC3 (8 KiB windows) composed in the bridge
 // DMC DMA: $4012 = $40 (sample at $D000), $4013 = 1 (17 bytes), $4015 bit 4
-static void test_dmc(void) {
-    unsigned sz = 16 + 2 * 0x4000 + 0x2000;
-    uint8_t *rom = calloc(1, sz);
-    set_header(rom, 2, 1, 0);
-    put(rom, 1, 0, 0xA9, 0x40, 0x8D, 0x12, 0x40, 0xA9, 0x01, 0x8D, 0x13, 0x40,
-                   0xA9, 0x10, 0x8D, 0x15, 0x40, 0x4C, 0x0F, 0xC0, -1);
-    set_vector(rom, 1, 0xFFFC, 0xC000);
-    DpNesOptions o = dp_nes_options();
-    o.max_total = 20000;
-    DpNesResults r;
-    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "dmc explore runs");
-    CHECK(r.dmc_starts >= 1 && r.dmc_bytes == 17, "17 sample bytes (%llu)", (unsigned long long)r.dmc_bytes);
-    CHECK((r.flags[0x4000 + 0x1000] & DP_NES_SAMPLE) && (r.flags[0x4000 + 0x1010] & DP_NES_SAMPLE), "sample range flagged");
-    CHECK(!(r.flags[0x4000 + 0x1011] & DP_NES_SAMPLE) && !(r.flags[0x4000 + 0x0FFF] & DP_NES_SAMPLE), "and only it");
-    int dmc = 0;
-    for (unsigned i = 0; i < r.copy_count; i++) dmc |= r.copies[i].channel == 2 && r.copies[i].source == 0x5000;
-    CHECK(dmc, "copy record on channel 2");
-    dp_nes_results_free(&r);
-    free(rom);
-}
 
 static void test_mmc1_mmc3(void) {
     char err[256];
@@ -309,54 +289,8 @@ static void test_mmc5(void) {
 }
 
 // D13: a KIL (jam) on a natural path ends it; the bytes behind it are not followed
-static void test_jam_cut(void) {
-    unsigned sz = 16 + 2 * 0x4000 + 0x2000;
-    uint8_t *rom = calloc(1, sz);
-    set_header(rom, 2, 1, 0);
-    put(rom, 0, 0, 0xEA, 0xEA, 0x02, 0xEA, 0x4C, 0x03, 0x80, -1);   // NOP NOP KIL NOP JMP $8003
-    set_vector(rom, 1, 0xFFFC, 0x8000);
-    DpNesOptions o = dp_nes_options();
-    o.max_total = 20000;
-    DpNesResults r;
-    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "jam explore runs");
-    CHECK(r.faults >= 1, "jam counted (%llu)", (unsigned long long)r.faults);
-    CHECK((r.flags[2] & DP_NES_NATURAL) && !(r.flags[3] & DP_NES_NATURAL), "the KIL is reached, the NOP behind it is not");
-    dp_nes_results_free(&r);
-    free(rom);
-}
 
 // G1: --seed-vectors roots the NMI and IRQ targets as forced code
-static void test_seed_vectors(void) {
-    unsigned sz = 16 + 2 * 0x4000 + 0x2000;
-    for (int seeded = 0; seeded < 3; seeded++) {   // 2: seeded with a one-slot queue (G4)
-        uint8_t *rom = calloc(1, sz);
-        set_header(rom, 2, 1, 0);
-        put(rom, 0, 0, 0x78, 0x4C, 0x01, 0x80, -1);                 // sei; jmp $8001
-        put(rom, 0, 0x100, 0xEA, 0xA9, 0x00, 0xD0, 0x03, 0x4C, 0x00, 0x81, 0xEA, 0x4C, 0x00, 0x81, -1);   // NMI handler: lda #0; bne +3 (forced side only at $8108)
-        put(rom, 0, 0x120, 0xEA, 0x4C, 0x20, 0x81, -1);             // IRQ handler
-        set_vector(rom, 1, 0xFFFC, 0x8000);
-        set_vector(rom, 1, 0xFFFA, 0x8100);
-        set_vector(rom, 1, 0xFFFE, 0x8120);
-        DpNesOptions o = dp_nes_options();
-        o.max_total = 20000; o.max_steps = 1000; o.seed_vectors = seeded != 0;
-        if (seeded == 2) o.queue_cap = 1;
-        DpNesResults r;
-        CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "vector explore runs");
-        if (seeded) {
-            CHECK(r.vectors_seeded == 2, "two vector roots (%llu)", (unsigned long long)r.vectors_seeded);
-            CHECK(r.seeds_refused_queue == 0, "G4: no seed refused by the queue (%llu)", (unsigned long long)r.seeds_refused_queue);
-            CHECK((r.flags[0x100] & DP_NES_FORCED) && !(r.flags[0x100] & DP_NES_NATURAL), "NMI code reached, forced (flags %02x)", r.flags[0x100]);
-            CHECK((r.exec_kind[0x100] & DP_NES_X_ENTRY) && (r.exec_kind[0x100] & DP_NES_X_IRQ), "D1: NMI handler is entry + irq (%d)", r.exec_kind[0x100]);
-            CHECK((r.exec_kind[0x120] & DP_NES_X_IRQ), "D1: IRQ handler is irq");
-            CHECK((r.flags[0x108] & DP_NES_FORCED) && (r.exec_kind[0x108] & DP_NES_X_IRQ), "D1: a fork taken inside a handler keeps the irq mark (%d)", r.exec_kind[0x108]);
-            CHECK((r.exec_kind[0] & DP_NES_X_ENTRY) && !(r.exec_kind[0] & DP_NES_X_IRQ), "D1: reset is entry, not irq");
-            
-            CHECK((r.flags[0x120] & DP_NES_FORCED) && !(r.flags[0x120] & DP_NES_NATURAL), "IRQ code reached, forced");
-        } else CHECK(r.flags[0x100] == 0, "not reached without the option");
-        dp_nes_results_free(&r);
-        free(rom);
-    }
-}
 
 static void test_snapshot(void) {
     uint8_t *rom = calloc(1, 16 + 2 * 0x4000 + 1 * 0x2000);
@@ -387,142 +321,7 @@ static void test_snapshot(void) {
     free(rom);
 }
 
-static void test_explorer(void) {
-    uint8_t *rom = calloc(1, 16 + 2 * 0x4000 + 1 * 0x2000);
-    set_header(rom, 2, 1, 0);
-    put(rom, 0, 0x0000, 0xAD, 0x00, 0x90,       // $8000 LDA $9000
-                        0xD0, 0x05,             // $8003 BNE $800A
-                        0xA9, 0x11,             // $8005 side A: LDA #$11
-                        0x4C, 0x00, 0x81,       // $8007 JMP $8100 (side A region)
-                        0xA9, 0x22, -1);        // $800A side B: LDA #$22
-    put(rom, 0, 0x000C, 0x85, 0x10,             // $800C STA $10 (join)
-                        0xA9, 0x80,             // $800E LDA #$80
-                        0x8D, 0x14, 0x40,       // $8010 STA $4014
-                        0x4C, 0x13, 0x80, -1);  // $8013 JMP $8013 idle
-    put(rom, 0, 0x0100, 0xA9, 0x33,             // $8100 side A only: LDA #$33
-                        0x4C, 0x0C, 0x80, -1);  // $8102 JMP $800C
-    put(rom, 0, 0x1000, 0x01, -1);              // $9000 flag: BNE taken
-    set_vector(rom, 1, 0xFFFA, 0x8000);
-    set_vector(rom, 1, 0xFFFC, 0x8000);
-    set_vector(rom, 1, 0xFFFE, 0x8000);
 
-    DpNesResults r;
-    DpNesOptions o = dp_nes_options();
-    o.max_steps = 2000;
-    {   // a queue of one slot: the fork waits aside, runs later, same coverage (§6)
-        DpNesResults rp;
-        DpNesOptions op = o;
-        op.queue_cap = 1;
-        CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &op, &rp), "tiny queue runs");
-        CHECK(rp.parked >= 1 && rp.parked_resumed == rp.parked && rp.parked_lost == 0, "parked then resumed");
-        CHECK(rp.flags[0x0005] && rp.flags[0x000A] && rp.forks >= 1, "both sides reached despite the queue wall");
-        dp_nes_results_free(&rp);
-    }
-    {   // a wall leaves states: they go to the disk lot and the next run resumes them (§6)
-        char lp[] = "/tmp/dp_nes_lotXXXXXX"; int fd = mkstemp(lp); if (fd >= 0) close(fd);
-        unlink(lp);
-        uint64_t left = 0, found = 0;
-        for (uint64_t wall = 1; wall < 400 && !left; wall++) {
-            DpNesResults rw; DpNesOptions ow = o; found = wall;
-            ow.lot_path = lp; ow.max_total = wall;
-            unlink(lp);
-            CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &ow, &rw), "walled run");
-            left = rw.lot_pending;
-            if (left) {  CHECK(rw.pending_dropped == 0 && rw.lot_written >= left, "wall leftovers saved, none dropped"); }
-            dp_nes_results_free(&rw);
-        }
-        CHECK(left > 0, "a wall leaves states in the lot");
-        {   // drain: only the saved states run (no root), the lot empties
-            DpNesResults rd; DpNesOptions od = o; od.lot_path = lp; od.lot_drain = 1;
-            CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &od, &rd), "drain run");
-            CHECK(rd.lot_read >= left && rd.lot_pending == 0, "drain empties the lot");
-            CHECK(access(lp, F_OK) != 0, "the drained lot file is removed");
-            dp_nes_results_free(&rd);
-            DpNesResults rw; DpNesOptions ow = o; ow.lot_path = lp; ow.max_total = found;
-            CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &ow, &rw), "walled run again");
-            dp_nes_results_free(&rw);
-        }
-        DpNesResults rr; DpNesOptions orr = o; orr.lot_path = lp;
-        CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &orr, &rr), "resumed run");
-        CHECK(rr.lot_read >= left && rr.lot_pending == 0, "the lot is resumed and emptied");
-        CHECK(access(lp, F_OK) != 0, "the emptied lot file is removed");
-        dp_nes_results_free(&rr);
-        {   // F2 resume: the drain reloads the saved tree, the ids of the queued states stay valid
-            char tp[] = "/tmp/dp_nes_treeXXXXXX"; int tfd = mkstemp(tp); if (tfd >= 0) close(tfd);
-            DpNesResults rw; DpNesOptions ow = o; ow.lot_path = lp; ow.tree_path = tp; ow.max_total = found;
-            unlink(lp);
-            CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &ow, &rw), "walled run with tree");
-            uint32_t saved = rw.tree_count;
-            CHECK(rw.lot_pending > 0 && saved > 0, "tree saved with states pending");
-            dp_nes_results_free(&rw);
-            DpNesResults rd; DpNesOptions od = o; od.lot_path = lp; od.lot_drain = 1; od.tree_path = tp;
-            CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &od, &rd), "drain with tree");
-            CHECK(rd.tree_count >= saved, "resumed tree keeps its nodes (%u >= %u)", rd.tree_count, saved);
-            CHECK(rd.tree_nodes && rd.tree_count && rd.tree_nodes[0].kind == DP_NES_TREE_RESET, "the reset root survives the resume");
-            dp_nes_results_free(&rd);
-            unlink(tp);
-        }
-        unlink(lp);
-    }
-    CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &o, &r), "explore runs");
-    CHECK(r.paths >= 2, "both branch sides explored: %llu paths", (unsigned long long)r.paths);
-    CHECK(r.forks >= 1, "at least one fork");
-    // both sides' code landed on physical cells
-    unsigned off_a = 0x0005, off_b = 0x000A; // bank 0 offsets of side A / B
-    CHECK(r.flags[off_a] & DP_NES_NATURAL || r.flags[off_a] & DP_NES_FORCED, "side A executed");
-    CHECK(r.flags[off_b] & DP_NES_NATURAL || r.flags[off_b] & DP_NES_FORCED, "side B executed");
-    // the flag byte was read as data
-    CHECK(r.flags[0x1000] & DP_NES_DATA, "flag byte flagged data");
-    // OAM DMA from a ROM page produced a copy record
-    CHECK(r.oam_copies >= 1, "OAM DMA counted");
-    const DpNesCopy *dma = NULL;
-    for (unsigned i = 0; i < r.copy_count && !dma; i++) if (r.copies[i].channel == 1) dma = &r.copies[i];
-    CHECK(dma != NULL, "copy record channel");
-    CHECK(dma && dma->source == 0, "DMA source cell is page $80 base");
-    // a register write landed in the log
-    unsigned dma_writes = 0;
-    for (unsigned i = 0; i < r.register_count; i++)
-        if (r.register_writes[i].addr == 0x4014) dma_writes++;
-    CHECK(dma_writes >= 1, "OAMDMA write logged");
-    // sections: the join run is required; the side-A-only region at $8100
-    // (bank 0 offset $0100) is reached only through a fork -> forced verdict
-    int saw_forced = 0, saw_required = 0;
-    for (uint32_t i = 0; i < r.section_count; i++) {
-        if (r.sections[i].verdict == DP_NES_VERDICT_FORCED) saw_forced = 1;
-        if (r.sections[i].verdict == DP_NES_VERDICT_REQUIRED) saw_required = 1;
-    }
-    CHECK(saw_required, "a required section exists (the join)");
-    CHECK(saw_forced, "a forced section exists (side A only)");
-    int forced_covers_side = 0;
-    for (uint32_t i = 0; i < r.section_count; i++)
-        if (r.sections[i].verdict == DP_NES_VERDICT_FORCED &&
-            r.sections[i].lo <= 0x0100 && r.sections[i].hi >= 0x0100)
-            forced_covers_side = 1;
-    CHECK(forced_covers_side, "the forced section is the side-A region");
-    CHECK(r.exec_outside == 0, "all execution stayed in PRG");
-    dp_nes_results_free(&r);
-    free(rom);
-}
-
-static void test_loop_bound(void) {
-    uint8_t *rom = calloc(1, 16 + 2 * 0x4000 + 1 * 0x2000);
-    set_header(rom, 2, 1, 0);
-    // tight decrement loop: LDX #10 / DEX / BNE back
-    put(rom, 0, 0x0000, 0xA2, 0x64,             // LDX #100
-                        0xCA,                   // DEX
-                        0xD0, 0xFD,             // BNE $8001 (backwards)
-                        0x4C, 0x05, 0x80, -1);      // JMP $8005 idle
-    set_vector(rom, 1, 0xFFFC, 0x8000);
-    DpNesResults r;
-    DpNesOptions o = dp_nes_options();
-    o.max_steps = 50000;
-    o.loop_cap = 4096;
-    CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &o, &r), "explore runs");
-    CHECK(r.steps >= 100, "loop body ran: %llu steps", (unsigned long long)r.steps);
-    CHECK(r.faults == 0, "no jams");
-    dp_nes_results_free(&r);
-    free(rom);
-}
 
 static void test_tas_load(void) {
     const char *fm2 =
@@ -579,286 +378,25 @@ static void test_tas_identity(void) {
 
 // S6: a decoder called with a zero-page pointer taken from a table; the stream the ROM
 // never calls is read through the replay
-static void test_streams(void) {
-    unsigned sz = 16 + 2 * 0x4000 + 0x2000;
-    uint8_t *rom = calloc(1, sz);
-    set_header(rom, 2, 1, 0);
-    put(rom, 0, 0x0000, 0xA9, 0x00, 0x85, 0x10, 0xA9, 0x90, 0x85, 0x11, 0x20, 0x00, 0x81,   // ptr $9000; jsr
-                        0xA9, 0x10, 0x85, 0x10, 0xA9, 0x90, 0x85, 0x11, 0x20, 0x00, 0x81,   // ptr $9010; jsr
-                        0x4C, 0x16, 0x80, -1);                                              // idle
-    put(rom, 0, 0x0100, 0xA0, 0x00, 0xB1, 0x10, 0x60, -1);   // ldy #0; lda ($10),y; rts
-    put(rom, 0, 0x1000, 5, -1);
-    put(rom, 0, 0x1010, 6, -1);
-    put(rom, 0, 0x1030, 7, -1);
-    put(rom, 0, 0x1100, 0x00, 0x90, 0x10, 0x90, 0x30, 0x90, -1);
-    set_vector(rom, 1, 0xFFFA, 0x8000);
-    set_vector(rom, 1, 0xFFFC, 0x8000);
-    set_vector(rom, 1, 0xFFFE, 0x8000);
-    DpNesResults r;
-    DpNesOptions o = dp_nes_options();
-    o.max_steps = 2000;
-    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "streams explore runs");
-    CHECK(r.s6_decoders >= 1, "decoder detected");
-    CHECK(r.s6_tables >= 1 && r.s6_runs >= 1, "table found and replayed");
-    CHECK(r.flags[0x1030] != 0, "the unplayed stream was read");
-    dp_nes_results_free(&r);
-    free(rom);
-}
 
 // S6 across UxROM banks: (bank, ptr) table in the fixed bank; bank 0's stream is only in the table
-static void test_streams_banked(void) {
-    unsigned sz = 16 + 4 * 0x4000;
-    uint8_t *rom = calloc(1, sz);
-    set_header(rom, 4, 0, 2);
-    put(rom, 3, 0x0000, 0xA9, 1, 0x8D, 0x00, 0x80, 0xA9, 0x00, 0x85, 0x10, 0xA9, 0x90, 0x85, 0x11, 0x20, 0x00, 0xC1,
-                        0xA9, 2, 0x8D, 0x00, 0x80, 0xA9, 0x10, 0x85, 0x10, 0xA9, 0x90, 0x85, 0x11, 0x20, 0x00, 0xC1,
-                        0x4C, 0x20, 0xC0, -1);
-    put(rom, 3, 0x0100, 0xA0, 0x00, 0xB1, 0x10, 0x60, -1);
-    put(rom, 1, 0x1000, 5, -1);
-    put(rom, 2, 0x1010, 6, -1);
-    put(rom, 0, 0x1020, 7, -1);
-    put(rom, 3, 0x1100, 1, 0x00, 0x90, 2, 0x10, 0x90, 0, 0x20, 0x90, -1);
-    set_vector(rom, 3, 0xFFFA, 0xC000);
-    set_vector(rom, 3, 0xFFFC, 0xC000);
-    set_vector(rom, 3, 0xFFFE, 0xC000);
-    DpNesResults r;
-    DpNesOptions o = dp_nes_options();
-    o.max_steps = 2000;
-    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "banked streams explore runs");
-    CHECK(r.s6_tables >= 1 && r.s6_runs >= 1, "banked table found and replayed");
-    CHECK(r.flags[0x1020] != 0, "bank 0's unplayed stream was read");
-    dp_nes_results_free(&r);
-    free(rom);
-}
 
 // S6 across MMC1 banks: same table, the bank set through the serial port
-static void test_streams_mmc1(void) {
-    unsigned sz = 16 + 4 * 0x4000;
-    uint8_t *rom = calloc(1, sz);
-    set_header(rom, 4, 0, 1);
-    put(rom, 3, 0x0000, 0xA9, 1, 0x20, 0x00, 0xC2, 0xA9, 0x00, 0x85, 0x10, 0xA9, 0x90, 0x85, 0x11, 0x20, 0x00, 0xC1,
-                        0xA9, 2, 0x20, 0x00, 0xC2, 0xA9, 0x10, 0x85, 0x10, 0xA9, 0x90, 0x85, 0x11, 0x20, 0x00, 0xC1,
-                        0x4C, 0x20, 0xC0, -1);
-    put(rom, 3, 0x0100, 0xA0, 0x00, 0xB1, 0x10, 0x60, -1);
-    put(rom, 3, 0x0200, 0x8D, 0x00, 0xE0, 0x4A, 0x8D, 0x00, 0xE0, 0x4A, 0x8D, 0x00, 0xE0, 0x4A,
-                        0x8D, 0x00, 0xE0, 0x4A, 0x8D, 0x00, 0xE0, 0x60, -1);   // set bank: 5 serial writes
-    put(rom, 1, 0x1000, 5, -1);
-    put(rom, 2, 0x1010, 6, -1);
-    put(rom, 0, 0x1020, 7, -1);
-    put(rom, 3, 0x1100, 1, 0x00, 0x90, 2, 0x10, 0x90, 0, 0x20, 0x90, -1);
-    set_vector(rom, 3, 0xFFFA, 0xC000);
-    set_vector(rom, 3, 0xFFFC, 0xC000);
-    set_vector(rom, 3, 0xFFFE, 0xC000);
-    DpNesResults r;
-    DpNesOptions o = dp_nes_options();
-    o.max_steps = 2000;
-    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "MMC1 streams explore runs");
-    CHECK(r.s6_tables >= 1 && r.s6_runs >= 1, "MMC1 banked table found and replayed");
-    CHECK(r.flags[0x1020] != 0, "MMC1 bank 0's unplayed stream was read");
-    dp_nes_results_free(&r);
-    free(rom);
-}
 
 // S6 across MMC3 banks: 8 KiB R6 window, bank set by $8000/$8001 writes
-static void test_streams_mmc3(void) {
-    unsigned sz = 16 + 4 * 0x4000;
-    uint8_t *rom = calloc(1, sz);
-    set_header(rom, 4, 0, 4);
-    put(rom, 3, 0x0000, 0xA9, 1, 0x20, 0x00, 0xC2, 0xA9, 0x00, 0x85, 0x10, 0xA9, 0x90, 0x85, 0x11, 0x20, 0x00, 0xC1,
-                        0xA9, 2, 0x20, 0x00, 0xC2, 0xA9, 0x10, 0x85, 0x10, 0xA9, 0x90, 0x85, 0x11, 0x20, 0x00, 0xC1,
-                        0x4C, 0x20, 0xC0, -1);
-    put(rom, 3, 0x0100, 0xA0, 0x00, 0xB1, 0x10, 0x60, -1);
-    put(rom, 3, 0x0200, 0xA2, 0x06, 0x8E, 0x00, 0x80, 0x8D, 0x01, 0x80, 0x60, -1);
-    put(rom, 0, 0x3000, 5, -1);   // 8K bank 1, offset $1000
-    put(rom, 1, 0x1010, 6, -1);   // 8K bank 2
-    put(rom, 0, 0x1020, 7, -1);   // 8K bank 0
-    put(rom, 3, 0x1100, 1, 0x00, 0x90, 2, 0x10, 0x90, 0, 0x20, 0x90, -1);
-    set_vector(rom, 3, 0xFFFA, 0xC000);
-    set_vector(rom, 3, 0xFFFC, 0xC000);
-    set_vector(rom, 3, 0xFFFE, 0xC000);
-    DpNesResults r;
-    DpNesOptions o = dp_nes_options();
-    o.max_steps = 2000;
-    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "MMC3 streams explore runs");
-    CHECK(r.s6_tables >= 1 && r.s6_runs >= 1, "MMC3 banked table found and replayed");
-    CHECK(r.flags[0x1020] != 0, "MMC3 bank 0's unplayed stream was read");
-    dp_nes_results_free(&r);
-    free(rom);
-}
 
 // S6 across MMC3 banks in PRG mode 1: $C000 is the switchable window, code sits in the fixed top banks
-static void test_streams_mmc3_mode1(void) {
-    unsigned sz = 16 + 4 * 0x4000;
-    uint8_t *rom = calloc(1, sz);
-    set_header(rom, 4, 0, 4);
-    put(rom, 3, 0x2000, 0xA9, 0x46, 0x8D, 0x00, 0x80, 0xA9, 1, 0x20, 0x00, 0xE2, 0xA9, 0x00, 0x85, 0x10, 0xA9, 0xD0, 0x85, 0x11, 0x20, 0x00, 0xE1,
-                        0xA9, 2, 0x20, 0x00, 0xE2, 0xA9, 0x10, 0x85, 0x10, 0xA9, 0xD0, 0x85, 0x11, 0x20, 0x00, 0xE1,
-                        0x4C, 0x07, 0xE0, -1);
-    put(rom, 3, 0x2100, 0xA0, 0x00, 0xB1, 0x10, 0x60, -1);
-    put(rom, 3, 0x2200, 0xA2, 0x46, 0x8E, 0x00, 0x80, 0x8D, 0x01, 0x80, 0x60, -1);
-    put(rom, 0, 0x3000, 5, -1);
-    put(rom, 1, 0x1010, 6, -1);
-    put(rom, 0, 0x1020, 7, -1);
-    put(rom, 3, 0x3100, 1, 0x00, 0xD0, 2, 0x10, 0xD0, 0, 0x20, 0xD0, -1);
-    set_vector(rom, 3, 0xFFFA, 0xE000);
-    set_vector(rom, 3, 0xFFFC, 0xE000);
-    set_vector(rom, 3, 0xFFFE, 0xE000);
-    DpNesResults r;
-    DpNesOptions o = dp_nes_options();
-    o.max_steps = 2000;
-    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "MMC3 mode 1 explore runs");
-    CHECK(r.s6_tables >= 1 && r.s6_runs >= 1, "MMC3 mode 1 banked table found and replayed");
-    CHECK(r.flags[0x1020] != 0, "MMC3 mode 1 bank 0's unplayed stream was read");
-    dp_nes_results_free(&r);
-    free(rom);
-}
 
 // S6 across Camerica (71) / UN1ROM (94) banks: UxROM-like, bank written at $C000+ (71) or in bits 2-4 (94)
-static void test_streams_uxlike(unsigned mapper) {
-    unsigned sz = 16 + 4 * 0x4000;
-    uint8_t *rom = calloc(1, sz);
-    set_header(rom, 4, 0, mapper);
-    uint8_t s1 = mapper == 94 ? 1 << 2 : 1, s2 = mapper == 94 ? 2 << 2 : 2;
-    put(rom, 3, 0x0000, 0xA9, s1, 0x20, 0x00, 0xC2, 0xA9, 0x00, 0x85, 0x10, 0xA9, 0x90, 0x85, 0x11, 0x20, 0x00, 0xC1,
-                        0xA9, s2, 0x20, 0x00, 0xC2, 0xA9, 0x10, 0x85, 0x10, 0xA9, 0x90, 0x85, 0x11, 0x20, 0x00, 0xC1,
-                        0x4C, 0x20, 0xC0, -1);
-    put(rom, 3, 0x0100, 0xA0, 0x00, 0xB1, 0x10, 0x60, -1);
-    put(rom, 3, 0x0200, 0x8D, 0x00, 0xC0, 0x60, -1);   // bank write at $C000
-    put(rom, 1, 0x1000, 5, -1);
-    put(rom, 2, 0x1010, 6, -1);
-    put(rom, 0, 0x1020, 7, -1);
-    put(rom, 3, 0x1100, 1, 0x00, 0x90, 2, 0x10, 0x90, 0, 0x20, 0x90, -1);
-    set_vector(rom, 3, 0xFFFA, 0xC000);
-    set_vector(rom, 3, 0xFFFC, 0xC000);
-    set_vector(rom, 3, 0xFFFE, 0xC000);
-    DpNesResults r;
-    DpNesOptions o = dp_nes_options();
-    o.max_steps = 2000;
-    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "UxROM-like streams explore runs");
-    CHECK(r.s6_tables >= 1 && r.s6_runs >= 1, "UxROM-like banked table found and replayed");
-    CHECK(r.flags[0x1020] != 0, "UxROM-like bank 0's unplayed stream was read");
-    dp_nes_results_free(&r);
-    free(rom);
-}
 
 // S6 across mapper-180 banks: $8000 is fixed, the switchable bank sits at $C000
-static void test_streams_180(void) {
-    unsigned sz = 16 + 4 * 0x4000;
-    uint8_t *rom = calloc(1, sz);
-    set_header(rom, 4, 0, 180);
-    put(rom, 0, 0x0000, 0xA9, 1, 0x20, 0x00, 0x82, 0xA9, 0x00, 0x85, 0x10, 0xA9, 0xC0, 0x85, 0x11, 0x20, 0x00, 0x81,
-                        0xA9, 2, 0x20, 0x00, 0x82, 0xA9, 0x10, 0x85, 0x10, 0xA9, 0xC0, 0x85, 0x11, 0x20, 0x00, 0x81,
-                        0x4C, 0x20, 0x80, -1);
-    put(rom, 0, 0x0100, 0xA0, 0x00, 0xB1, 0x10, 0x60, -1);
-    put(rom, 0, 0x0200, 0x8D, 0x00, 0x80, 0x60, -1);
-    put(rom, 1, 0x0000, 5, -1);
-    put(rom, 2, 0x0010, 6, -1);
-    put(rom, 3, 0x0020, 7, -1);
-    put(rom, 0, 0x1100, 1, 0x00, 0xC0, 2, 0x10, 0xC0, 3, 0x20, 0xC0, -1);
-    set_vector(rom, 0, 0xFFFA, 0x8000);
-    set_vector(rom, 0, 0xFFFC, 0x8000);
-    set_vector(rom, 0, 0xFFFE, 0x8000);
-    DpNesResults r;
-    DpNesOptions o = dp_nes_options();
-    o.max_steps = 2000;
-    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "mapper 180 streams explore runs");
-    CHECK(r.s6_tables >= 1 && r.s6_runs >= 1, "mapper 180 banked table found and replayed");
-    CHECK(r.flags[3 * 0x4000 + 0x20] != 0, "mapper 180 bank 3's unplayed stream was read");
-    dp_nes_results_free(&r);
-    free(rom);
-}
 
 // J1: random sessions restart from checkpoints earlier sessions kept
-static void test_play_pool(void) {
-    unsigned sz = 16 + 2 * 0x4000 + 0x2000;
-    uint8_t *rom = calloc(1, sz);
-    set_header(rom, 2, 1, 0);
-    put(rom, 0, 0x0000, 0x4C, 0x00, 0x80, -1);   // idle loop
-    set_vector(rom, 1, 0xFFFA, 0x8000);
-    set_vector(rom, 1, 0xFFFC, 0x8000);
-    set_vector(rom, 1, 0xFFFE, 0x8000);
-    DpNesResults r;
-    DpNesOptions o = dp_nes_options();
-    o.max_steps = 2000; o.play_frames = 600; o.play_sessions = 4; o.play_pool = 8;
-    o.novelty_frames = 0;
-    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "pool explore runs");
-    CHECK(r.pool_saved >= 2, "checkpoints kept (%llu)", (unsigned long long)r.pool_saved);
-    CHECK(r.pool_starts >= 1, "a session started from the pool (%llu)", (unsigned long long)r.pool_starts);
-    CHECK(r.play_exec_hits[0] > 0 && r.play_exec_hits[1] > 0, "played instruction and operands carry heat");
-    CHECK(r.src_flags[0] & DP_SRC_SESSION, "played execution records its session source");
-    int rng_first = 0;
-    for (uint32_t i = 0; i < r.first.n; i++)
-        if (r.first.e[i].key == 0 && r.first.e[i].actor == DP_ACTOR_RNG) rng_first = 1;
-    CHECK(rng_first, "first discovery records the random session");
-    dp_nes_results_free(&r);
-    free(rom);
-}
 
 // RAM-code archive: bytes built by immediates, then run from $0300
-static void test_ramcode(void) {
-    unsigned sz = 16 + 2 * 0x4000 + 0x2000;
-    uint8_t *rom = calloc(1, sz);
-    set_header(rom, 2, 1, 0);
-    put(rom, 0, 0x0000, 0xA9, 0xA9, 0x8D, 0x00, 0x03, 0xA9, 0x07, 0x8D, 0x01, 0x03,
-                        0xA9, 0x60, 0x8D, 0x02, 0x03, 0x20, 0x00, 0x03, 0x4C, 0x14, 0x80, -1);
-    set_vector(rom, 1, 0xFFFA, 0x8000);
-    set_vector(rom, 1, 0xFFFC, 0x8000);
-    set_vector(rom, 1, 0xFFFE, 0x8000);
-    DpNesResults r;
-    DpNesOptions o = dp_nes_options();
-    o.max_steps = 500;
-    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "ramcode explore runs");
-    CHECK(r.ra.n >= 2, "RAM instructions archived (%u)", r.ra.n);
-    int found = 0;
-    for (uint32_t i = 0; i < r.ra.cap; i++)
-        if (r.ra.e[i].key && r.ra.e[i].len == 2 && r.ra.e[i].pc == 0x0300 && r.ra.e[i].b[0] == 0xA9 && r.ra.e[i].b[1] == 0x07) found = 1;
-    CHECK(found, "LDA #$07 at $0300 kept");
-    dp_nes_results_free(&r);
-    free(rom);
-}
 
-static void test_smc(void) {
-    unsigned sz = 16 + 2 * 0x4000 + 0x2000;
-    uint8_t *rom = calloc(1, sz);
-    set_header(rom, 2, 1, 0);
-    put(rom, 0, 0x0000, 0xA9, 0xA9, 0x8D, 0x00, 0x03, 0xA9, 0x07, 0x8D, 0x01, 0x03,
-                        0xA9, 0x60, 0x8D, 0x02, 0x03, 0x20, 0x00, 0x03,
-                        0xA9, 0xEA, 0x8D, 0x00, 0x03, 0x4C, 0x17, 0x80, -1);   // rewrite $0300 after it ran
-    set_vector(rom, 1, 0xFFFA, 0x8000);
-    set_vector(rom, 1, 0xFFFC, 0x8000);
-    set_vector(rom, 1, 0xFFFE, 0x8000);
-    DpNesResults r;
-    DpNesOptions o = dp_nes_options();
-    o.max_steps = 500;
-    CHECK(dp_nes_explore(rom, sz, -1, &o, &r), "smc explore runs");
-    CHECK(r.smc_writes >= 1, "SMC write counted (%llu)", (unsigned long long)r.smc_writes);
-    dp_nes_results_free(&r);
-    free(rom);
-}
 
 // C1 liveness: a section records the work-RAM pages and register classes its code read
-static void test_liveness(void) {
-    uint8_t *rom = calloc(1, 16 + 2 * 0x4000 + 0x2000);
-    set_header(rom, 2, 1, 0);
-    put(rom, 0, 0x0000, 0xAD, 0x02, 0x20,       // $8000 LDA $2002 (PPU status)
-                        0xAD, 0x16, 0x40,       // $8003 LDA $4016 (pad)
-                        0xAD, 0x00, 0x03,       // $8006 LDA $0300 (RAM page 3)
-                        0x4C, 0x09, 0x80, -1);  // $8009 JMP $8009
-    set_vector(rom, 1, 0xFFFA, 0x8000);
-    set_vector(rom, 1, 0xFFFC, 0x8000);
-    set_vector(rom, 1, 0xFFFE, 0x8000);
-    DpNesOptions o = dp_nes_options();
-    o.max_total = 2000;
-    DpNesResults r;
-    CHECK(dp_nes_explore(rom, 16 + 2 * 0x4000 + 0x2000, -1, &o, &r), "liveness run");
-    int ok = 0;
-    for (uint32_t i = 0; i < r.section_count; i++)
-        if (r.sections[i].lo <= 0 && r.sections[i].hi >= 9 && (r.sections[i].io_reads & DP_NES_LIVE_PPU) &&
-            (r.sections[i].io_reads & DP_NES_LIVE_PAD) && (r.sections[i].ram_pages & 8)) ok = 1;
-    CHECK(ok, "section liveness: PPU + pad reads and RAM page 3");
-    dp_nes_results_free(&r);
-    free(rom);
-}
 
 // C2: the context hash projects on the RAM pages a section reads
 static void test_ctx_projection(void) {
@@ -893,26 +431,9 @@ int main(void) {
     test_gxrom();
     test_mmc1_mmc3();
     test_mmc5();
-    test_jam_cut();
-    test_seed_vectors();
-    test_dmc();
     test_snapshot();
-    test_explorer();
-    test_streams();
-    test_streams_banked();
-    test_streams_mmc1();
-    test_streams_mmc3();
-    test_streams_mmc3_mode1();
-    test_streams_uxlike(71);
-    test_streams_uxlike(94);
-    test_streams_180();
-    test_play_pool();
-    test_ramcode();
-    test_smc();
-    test_loop_bound();
     test_tas_load();
     test_tas_identity();
-    test_liveness();
     test_ctx_projection();
     if (fails) printf("%d failures\n", fails);
     else printf("test_nes: all green\n");

@@ -138,94 +138,9 @@ typedef struct {
     int novelty_cells;          // key the archive on the screen fingerprint and lives
     const char *export_state;   // write the deepest novelty cell here (DPST file, needs --novelty)
     unsigned watch_every;       // publish a frame to the watch buffer every N frames (0: off)
-    int skip_root;
-    int no_finalize;
-    void (*pre_finalize)(struct DpNesResults_ *r, void *user);
-    void *pre_user;
 } DpNesOptions;
 
-enum { DP_NES_CHR_BG = 1, DP_NES_CHR_SPR = 2, DP_NES_CHR_READ = 4 };
-
-typedef struct DpNesResults_ {
-    uint8_t *inferred;         // per PRG cell: DP_NMAP_INF_* for unclassified gaps, 0 otherwise
-    uint8_t *chr_flags;        // one byte per CHR ROM cell (DP_NES_CHR_*), NULL on CHR-RAM
-    size_t chr_size;
-    uint64_t chr_tiles_bg, chr_tiles_spr, chr_reads; // distinct 16-byte tiles / $2007 reads
-    uint8_t *live_ram, *live_io; // C1: per PRG cell of an executed opcode, RAM pages (bit per 256 B) and register classes it read
-    uint32_t *live_wram;         // C1/C2: per PRG cell, PRG-RAM ($6000-$7FFF) 256-byte pages it read
-    uint32_t *exec_hits, *data_hits; // per PRG cell: executions of the opcode byte / data reads (saturating)
-    uint32_t *play_exec_hits, *play_data_hits, *src_flags;
-    DpFirstLog first;
-    int first_ready;
-    DpNesTreeNode *tree_nodes; uint32_t tree_count, tree_capacity;
-    uint8_t *flags;            // one byte per physical PRG cell
-    uint8_t *dest;             // one byte per PRG cell: DP_DEST_* where its data ends up (0: untyped)
-    uint8_t *exec_kind;        // per PRG cell, opcode byte: DP_NES_X_ENTRY (non-sequential arrival) | DP_NES_X_IRQ (ran inside a handler)
-    size_t prg_size;
-    uint64_t s6_decoders, s6_tables, s6_candidates, s6_runs, s6_sat;   // S6 decoder replay
-    uint64_t pool_saved, pool_starts;   // J1 checkpoint pool: checkpoints kept / sessions started from one
-    uint64_t steps, paths, forks, irq_forks, exec_outside, data_reads, oam_copies;
-    uint64_t dmc_starts, dmc_bytes; // $4015 bit 4 starts (copy channel 2) / distinct sample bytes
-    uint64_t forced_paths;
-    uint64_t queue_grown;
-    uint64_t step_cuts, loop_cuts, fork_cuts, queue_cuts, global_cuts, path_cuts,
-             faults, decode_cuts;
-    uint64_t ctx_evicted, dispatch_tables, dispatch_seeds, dispatch_refused_view, prov_sites, prov_rts_sites, prov_roots, pass2_seeds, pass2_refused, pass2_capped, sib_tables, sib_ranges, sib_bytes, sib_refused, sib_caps, vectors_seeded, tas_same, tas_different, tas_unrecorded, pad_cuts, table_bytes, table_count, table_xbank_words, ctx_grew, ctx_set_full, static_bytes, static_roots, static_cap_hits, static_xwindow, padding_bytes, inferred_code, inferred_data, inferred_pad, cpu_copy_bytes, wram_copy_bytes, aux_copy_bytes, oam_chain_bytes, indirect_sites, indirect_targets, indirect_ptrs, indirect_overflow, pad_probes, pad_probe_sites, pad_probe_refused, ppu_probes, ppu_probe_sites, ppu_probe_refused, entries_seeded, entries_refused, seeds_music, seeds_reset, seeds_irq, seeds_bank, seeds_refused_queue;
-    uint64_t demo_frames_run, play_frames_run, play_sessions_run, play_steps_accounted, seeds_play;
-    uint64_t evicted;          // exact-state dedup admissions refused
-    uint64_t lot_written, lot_read, lot_pending; // disk lot (--lot): spilled / read back / left on disk
-    uint64_t parked, parked_resumed, parked_lost; // queue-full states held aside (§6), resumed, lost at the holding cap
-    uint64_t steps_deferred, loop_deferred, defer_resumed, steps_final, loop_final, defer_dropped, fork_final; // frontier §6 shared policy
-    uint64_t pending_dropped;  // queued states left undrained at a wall
-    uint64_t ram_writes, io_writes, io_reads;
-    uint64_t smc_writes; uint16_t smc_first_pc; // writes into already executed RAM bytes
-    // per-register access counts: slots 0-7 PPU $2000-$2007 (mirrors folded), 8-39 $4000-$401F
-    uint64_t io_reg_writes[40], io_reg_reads[40];
-    // sections
-    DpNesSection *sections;
-    uint32_t section_count, section_capacity;
-    uint32_t *section_of;      // physical cell -> section id + 1 (0: none)
-    // hardware logs
-    DpNesCopy copies[DP_NES_COPY_CAP];
-    unsigned copy_count;
-    uint64_t copy_overflow;
-    DpNesBankEvent banks[DP_NES_BANK_LOG_CAP];
-    unsigned bank_count;
-    uint64_t bank_overflow;
-    DpNesInterrupt interrupts[DP_NES_IRQ_LOG_CAP];
-    unsigned interrupt_count;
-    uint64_t interrupt_overflow;
-    DpNesRegisterWrite register_writes[256];
-    unsigned register_count;
-    uint64_t register_overflow;
-    uint64_t irq_counts[2];    // NMI, IRQ dispatched
-    uint64_t novelty_trials, novelty_hits, novelty_archived, novelty_replaced, novelty_frames_run, novelty_deaths;
-    uint32_t novelty_depth;
-    uint64_t watch_frames;
-    uint32_t state_exported_depth; int state_exported;
-    unsigned jobs_folded;      // --jobs 2: secondary instances folded into this report
-    DpNesOptions options;
-    DpRamArch ra;          // code executed from RAM (archive)
-} DpNesResults;
-
 DpNesOptions dp_nes_options(void);
-int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
-                   const DpNesOptions *options, DpNesResults *results);
-void dp_nes_rtcode(FILE *out, const DpNesResults *r);
-void dp_nes_results_free(DpNesResults *results);
-// --jobs 2: TAS/play phases on a second instance (own machine), see jobs.c
-int dp_nes_explore_jobs(const uint8_t *data, size_t size, int mapper, const DpNesOptions *options,
-                        DpNesResults *results, int jobs);
-uint8_t *dp_nes_map_build(const DpNesResults *r);
-void dp_nes_report(FILE *out, const DpNesResults *results);
-void dp_nes_map(FILE *out, const DpNesResults *results);
-// coverage (.cov: "bank offset flags hits") and the 256-byte-page data-read profile (romdata)
-void dp_nes_cov(FILE *out, const DpNesResults *results);
-int dp_nes_summary(const DpNesResults *results, const char *path);   // O1: JSON class counts + counters
-int dp_nes_heat(const DpNesResults *results, const char *path);      // O1: played usage per 256-byte PRG zone
-void dp_nes_romdata(FILE *out, const DpNesResults *results);
-// per-run evidence ranges, "bank start end mask" in 16 KiB PRG banks (mask = the cell flags)
-void dp_nes_evidence(FILE *out, const DpNesResults *results);
 
 // the hardware registry (src/platform/nes/registry.c)
 struct DpPlatform;
