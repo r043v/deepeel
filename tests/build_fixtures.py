@@ -154,6 +154,47 @@ def build(out):
     w(r, 0xC005, 0xC9)                           # ret
     save(out, "fix_mbc5", r)
 
+    # --- mbc_fork (B7): the game maps bank 1 and calls it; banks 2 and 3 hold code nothing selects ----------
+    r = rom(4, mbc=0x19)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x3E, 0x01)                      # ld a,1
+    w(r, 0x152, 0xEA, 0x00, 0x20)                # ld ($2000),a -> bank 1
+    w(r, 0x155, 0xCD, 0x00, 0x40)                # call $4000 (whichever bank is mapped)
+    w(r, 0x158, 0x76)                            # halt
+    for b, v in ((1, 0x05), (2, 0x12), (3, 0x34)):
+        w(r, b * 0x4000, 0x3E, v)                # ld a,v
+        w(r, b * 0x4000 + 2, 0xEA, b, 0x80)      # ld ($8000+b),a
+        w(r, b * 0x4000 + 5, 0xC9)               # ret
+    save(out, "fix_mbc_fork", r)
+
+    # --- gb_gap (B8): a routine nothing calls (speculative), illegal-opcode data and 00 padding (witnesses) ----
+    r = rom(2, mbc=0x00)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0xC3, 0x50, 0x01)                            # halt
+    w(r, 0x68, 0x76)                             # halt: the vector NOP slides stop here
+    w(r, 0x200, 0x3E, 0x01, 0xEA, 0x00, 0x80, 0x3E, 0x02, 0xC9)   # ld a,1 ; ld ($8000),a ; ld a,2 ; ret
+    w(r, 0x300, 0xD3, 0xDB, 0xDD, 0xE3, 0xE4, 0xEB, 0xEC, 0xED)   # undefined opcodes: data
+    save(out, "fix_gb_gap", r)
+
+    # --- gb_ref (B9): a 2-instruction routine nothing calls, whose address an executed `ld hl,nn` designates ---
+    r = rom(2, mbc=0x00)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x21, 0x00, 0x04, 0xC3, 0x53, 0x01)   # ld hl,$0400 ; jp $0153
+    w(r, 0x68, 0x76)
+    w(r, 0x400, 0x3E, 0x07, 0xC9)                      # ld a,7 ; ret
+    w(r, 0x40, 0x3E, 0x09, 0xC9)                       # a real VBlank handler: a non-padding vector
+    save(out, "fix_gb_ref", r)
+
+    # --- gb_inline (A13): `call` followed by inline data the callee reads; the fall-through is not code ---
+    r = rom(2, mbc=0x00)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0xCD, 0x00, 0x02)                       # call $0200
+    w(r, 0x153, 0x3E, 0x01, 0xC9)                       # inline data (looks like ld a,1 ; ret)
+    w(r, 0x156, 0x76)                                   # halt: where the callee resumes
+    w(r, 0x200, 0xE1, 0x7E, 0x23, 0x23, 0x23, 0xE9)     # pop hl ; ld a,(hl) ; inc hl x3 ; jp hl
+    w(r, 0x68, 0x76)
+    save(out, "fix_gb_inline", r)
+
     # --- mbc1m1: MBC1 mode 1 remaps the ROM0 window ($0000-$3FFF) --------------
     # 1 MiB (64 banks).  Mode 1 + upper register 1 makes the window show bank
     # $20 while the code runs there: the instruction after the switch lives in
@@ -214,6 +255,95 @@ def build(out):
     w(r, 0x172, 0xEA, 0x00, 0x80)                # ld ($8000),a
     w(r, 0x175, 0x76)                            # halt
     save(out, "fix_p1poll", r)
+
+    # --- p1afc: P1 polled through `ld a,(C)` with C=$00 -----------------------
+    # SM83 `ld a,(C)` reads $FF00+C: C=$00 addresses P1 ($FF00) and the
+    # explorer must fork per key exactly like the `ldh a,($00)` variant.
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x3E, 0x20)                      # ld a,$20 (select button keys)
+    w(r, 0x152, 0xE0, 0x00)                      # ldh ($00),a  P1 select
+    w(r, 0x154, 0x0E, 0x00)                      # ld c,$00  -> $FF00+C = $FF00 (P1)
+    w(r, 0x156, 0xF2)                            # ld a,(C)  poll P1
+    w(r, 0x157, 0xE6, 0x08)                      # and $08   Start pressed? (0 = yes)
+    w(r, 0x159, 0x28, 0x1A)                      # jr z,$175 (only with the fork)
+    w(r, 0x15B, 0x18, 0xFE)                      # jr -2: poll again (natural path)
+    w(r, 0x175, 0x3E, 0x99)                      # ld a,$99
+    w(r, 0x177, 0xEA, 0x00, 0x80)                # ld ($8000),a
+    w(r, 0x17A, 0x76)                            # halt
+    save(out, "fix_p1afc", r)
+
+    # --- p1afcneg: `ld a,(C)` with C=$FF reads $FFFF (IE), not P1 -------------
+    # The negative witness: the P1 probe must stay silent here, and the IE
+    # value must drive the branch naturally (IE = $01: bit 3 clear -> the
+    # `and $08` zeroes A; a P1 read with no keys held would give a low nibble
+    # of 1s and the branch would not go).
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x3E, 0x01)                      # ld a,$01 (vblank IRQ bit)
+    w(r, 0x152, 0xE0, 0xFF)                      # ldh ($FF),a  IE = $01 (IME 0: no dispatch)
+    w(r, 0x154, 0x0E, 0xFF)                      # ld c,$FF  -> $FF00+C = $FFFF (IE)
+    w(r, 0x156, 0xF2)                            # ld a,(C)  reads IE, not P1
+    w(r, 0x157, 0xE6, 0x08)                      # and $08 -> 0 (IE bit 3 clear)
+    w(r, 0x159, 0x28, 0x1A)                      # jr z,$175 taken naturally on the IE value
+    w(r, 0x15B, 0x18, 0xFE)                      # jr -2 (never run: the taken side returns)
+    w(r, 0x175, 0x3E, 0x99)                      # ld a,$99
+    w(r, 0x177, 0xEA, 0x00, 0x80)                # ld ($8000),a
+    w(r, 0x17A, 0x76)                            # halt
+    save(out, "fix_p1afcneg", r)
+
+    # --- verdict_nat: straight-line code reached by the reset flow -----------
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x3E, 0x42)                      # ld a,$42
+    w(r, 0x152, 0xEA, 0x00, 0x80)                # ld ($8000),a
+    w(r, 0x155, 0x76)                            # halt
+    save(out, "fix_verdict_nat", r)
+
+    # --- verdict_forced: a block only the branch fork of the flow runs -------
+    # natural path takes the jr z; the not-taken side trampolines to a block
+    # kept away from the natural run (a contiguous block would merge into the
+    # natural section), reached only by the fork, from the real flow
+    # (from_reset ancestry)
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x3E, 0x01)                      # ld a,$01
+    w(r, 0x152, 0xFE, 0x01)                      # cp $01 -> Z set
+    w(r, 0x154, 0x28, 0x02)                      # jr z,$158 (taken naturally)
+    w(r, 0x156, 0x18, 0x05)                      # jr $15D (fork-only trampoline)
+    w(r, 0x158, 0xEA, 0x00, 0x80)                # ld ($8000),a
+    w(r, 0x15B, 0x76)                            # halt (natural end)
+    w(r, 0x15D, 0x3E, 0x99)                      # ld a,$99 (fork-only block)
+    w(r, 0x15F, 0xEA, 0x00, 0x80)                # ld ($8000),a
+    w(r, 0x162, 0x76)                            # halt
+    save(out, "fix_verdict_forced", r)
+
+    # --- verdict_spec: a handler only a pointer-table word points at ---------
+    # nothing calls it: the reset flow halts; the pointer scan seeds $0200,
+    # so the section's every hit descends from a synthetic seed
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x76)                            # halt
+    w(r, 0x200, 0x3E, 0x99)                      # ld a,$99
+    w(r, 0x202, 0xEA, 0x00, 0x80)                # ld ($8000),a
+    w(r, 0x205, 0x76)                            # halt
+    w(r, 0x300, 0x00, 0x02)                      # pointer word $0200 (no caller)
+    save(out, "fix_verdict_spec", r)
+
+    # --- verdict_mix: the same section seeded AND fork-reachable -------------
+    # the branch fork of the real flow forces the taken side, the pointer
+    # table seeds the same handler: the flow fork outranks the seed (forced)
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x3E, 0x00)                      # ld a,$00
+    w(r, 0x152, 0xFE, 0x01)                      # cp $01 -> Z clear (never taken naturally)
+    w(r, 0x154, 0x28, 0x03)                      # jr z,$159 (taken by the fork only)
+    w(r, 0x156, 0x76)                            # halt (natural end)
+    w(r, 0x159, 0x3E, 0x99)                      # ld a,$99
+    w(r, 0x15B, 0xEA, 0x00, 0x80)                # ld ($8000),a
+    w(r, 0x15E, 0x76)                            # halt
+    w(r, 0x300, 0x59, 0x01)                      # pointer word $0159
+    save(out, "fix_verdict_mix", r)
 
     # --- dma: OAM DMA from ROM source ----------------------------------------
     r = rom(2)
@@ -649,16 +779,24 @@ def build_techniques_8bit(out):
         print("wrote", name)
     pce("fix_pce_save", bytes.fromhex("ad0020 c9aa d004 a901 8002 a902 80fe"))
     pce("fix_pce_rng", bytes.fromhex("ad0020 4955 8d0020 c9aa f003 4c04e0 a901 80fe"))
+    pce("fix_pce_ref", bytes([0xA9,0x40, 0x85,0x00, 0xA9,0xE0, 0x85,0x01, 0x80,0xFE]), bytes(0x20) + bytes([0xA9, 0x01, 0x60]))   # B9/B8: lda #$40 / sta $00 / lda #$E0 / sta $01 builds $E040
     pce("fix_pce_index", bytes.fromhex("ad0021 aa bd20e0 c903 f004 a901 8002 a902 80fe"), bytes([0, 0, 0, 3] + [0] * 12))
     # technique 8 (semantic cells): two conditional sites forking to the same target with the same RAM
     gb("fix_gb_index40", bytes.fromhex("fa00c3 5f 1600 212002 19 7e fe03 2804 3e01 18fe 3e02 18fe"), bytes([0] * 40 + [3] + [0] * 8))   # index 40 is outside the default 0..15
     gb("fix_gb_decomp", bytes.fromhex("212002 1100c0 0620 2a 12 13 12 13 05 20f8 18fe"), bytes(range(1, 33)))   # technique 6: 32 ROM bytes expanded 1:2
     gb("fix_gb_lyprobe", bytes.fromhex("f044 fe90 2804 3e01 18fe 3e02 18fe"))   # technique 2: one read of LY, branch on the first VBlank line
     gb("fix_gb_closure", bytes.fromhex("cd5701 0000 0000 18fe"))   # call $0157 ; return site (never reached) ; $0157: jr *
+    gb("fix_gb_padstop", bytes.fromhex("cd5f01" + "00" * 12 + "18fe"))   # A13: the return site is a 12-byte padding run, an untrusted walk stops there
+    gb("fix_gb_ptrstop", bytes.fromhex("cd0002" "004100420043" "76") + bytes(0x200 - 0x150 - 10 - 0) + bytes.fromhex("e1 232323232323 e9"))   # A13: the return site is an inline dispatch table (3 words), not code
     gb("fix_gb_cells", bytes.fromhex("af 2006 2004 00000000 18fe"))
     pce("fix_pce_decomp", bytes.fromhex("a200 a000 bd20e0 990020 c8 990020 c8 e8 e020 d0f0 80fe"), bytes(range(1, 33)))
     pce("fix_pce_status", bytes.fromhex("a9ff 5301 ad0000 2920 d004 a901 80fe a902 80fe"))   # technique 2: one VDC status read, branch on the VBlank flag
     pce("fix_pce_closure", bytes.fromhex("200be0 eaeaeaea 80fe"))
+    # B8: page 1 (ROM $2000-$3FFF) never executes, so no window was journaled for it; its uncalled routine is still scanned
+    # at the windows the mapper was seen to run code at
+    pce("fix_pce_deadpage", bytes.fromhex("80fe"))
+    with open(os.path.join(out, "fix_pce_deadpage.pce"), "r+b") as f:
+        f.seek(0x2100); f.write(bytes.fromhex("a901 a200 e8 e003 d0fb 60"))
     # S2 TAM peephole: lda #1 / tam #$80 remaps the executing window to ROM page 1; the swept fall-through is
     # followed there (page 1 holds nop,nop,bra * at the same offset)
     p = bytearray(0x4000)
@@ -674,6 +812,14 @@ def build_techniques_8bit(out):
     p2[7] = 0xC0
     with open(os.path.join(out, "fix_pce_tam2.pce"), "wb") as f:
         f.write(p2)
+    # B8 on PCE, beyond the fixed bank: page 1 is mapped at $4000 (MPR2) and loops there; an uncalled routine sits in it at +$10
+    q = bytearray(0x4000)
+    q[0:11] = bytes.fromhex("a9f85302 a9015304 4c0040")
+    q[0x2000:0x2002] = bytes.fromhex("80fe")
+    q[0x2010:0x2018] = bytes.fromhex("a905a2078d002060")
+    q[0x1FFE], q[0x1FFF] = 0x00, 0xE0
+    with open(os.path.join(out, "fix_pce_page.pce"), "wb") as f:
+        f.write(q)
     pce("fix_pce_cells", bytes.fromhex("a900 d006 d004 eaeaeaea 80fe"))
     # GBS rip verification fixture: the "engine" lives in bank 1, filled with a distinct byte
     # pattern so the zero-filled bank 0 can never be mistaken for it; fix_gbs.gbs carries
@@ -747,6 +893,12 @@ def build_md(out):
     r[0x21A:0x21C] = bytes([0x4E, 0x71]); r[0x21C:0x21E] = bytes([0x60, 0xFE])
     r[0x226:0x228] = bytes([0x4E, 0x71]); r[0x228:0x22A] = bytes([0x4E, 0x71]); r[0x22A:0x22C] = bytes([0x60, 0xFE])
     save_md(out, "fix_md_s4", r)
+    # --- B9 on the 68000: an executed `lea $400.l,a0` designates a routine nothing calls ---
+    r = md_rom()
+    r[0x200:0x206] = bytes([0x41, 0xF9, 0x00, 0x00, 0x04, 0x00])   # lea $400.l,a0
+    r[0x206:0x208] = bytes([0x60, 0xFE])                            # bra *
+    r[0x400:0x402] = bytes([0x70, 0x07]); r[0x402:0x404] = bytes([0x4E, 0x75])   # moveq #7,d0 ; rts
+    save_md(out, "fix_md_ref", r)
     # --- s4 with jsr: moveq #0,d0 ; jsr 4(pc,d0.w) -> same table; only entry 0 runs ----
     r = md_rom()
     r[0x200:0x202] = bytes([0x70, 0x00])
@@ -866,6 +1018,20 @@ def build_md(out):
                          "41f9 0000 0400 43f9 00c0 0000 7203 3018 4e71 3280 51c9 fff8 60fe")
     r[0x200:0x200 + len(code)] = code
     save_md(out, "fix_md_cpu_vram_gap", r)
+    # A3: two dbra loops at $204 and $10204 (same low 16 bits), 40 iterations each
+    r = md_rom(0x20000)
+    code = bytes.fromhex("303c 0027 51c8 fffe 4ef9 0001 0200")
+    r[0x200:0x200 + len(code)] = code
+    code = bytes.fromhex("303c 0027 51c8 fffe 60fe")
+    r[0x10200:0x10200 + len(code)] = code
+    save_md(out, "fix_md_alias", r)
+    # A1/A2: CPU copy ROM -> work RAM of NON-ZERO bytes, byte-wise (move.b) and long-wise (move.l)
+    for name, op, cnt in (("fix_md_copy_b", "12d8", "720f"), ("fix_md_copy_l", "22d8", "7203")):
+        r = md_rom()
+        code = bytes.fromhex("41f9 0000 0400 43f9 00ff 0000 " + cnt + " " + op + " 51c9 fffc 60fe")
+        r[0x200:0x200 + len(code)] = code
+        for i in range(16): r[0x400 + i] = 0x31 + 7 * i
+        save_md(out, name, r)
     # A 4-byte routine ($0400) copied word by word to work RAM, then called there (rtcode ROM source).
     r = md_rom()
     code = bytes.fromhex("41f9 0000 0400 43f9 00ff 0000 7201 32d8 51c9 fffc 4eb9 00ff 0000 60fe")
@@ -1023,6 +1189,18 @@ def build_md(out):
     save_md(out, "fix_md_vint", r)
     r[0x208:0x20C] = bytes([0x60, 0xFE, 0x4E, 0x71])     # keep reset SR interrupt mask
     save_md(out, "fix_md_vint_masked", r)
+    # --- hint: enable H-int (reg0 bit 4), vector 28 -> $300, main loop bra.s * --
+    # (same shape as vint but on the scanline interrupt: the explorer must
+    # fork level 4 too, not only V-int)
+    r = md_rom()
+    r[28 * 4:28 * 4 + 4] = (0x300).to_bytes(4, "big")
+    r[0x200:0x208] = bytes([0x33, 0xFC, 0x80, 0x10, 0x00, 0xC0, 0x00, 0x04])
+    r[0x208:0x20C] = bytes([0x46, 0xFC, 0x20, 0x00])        # move #$2000,sr (mask < 4)
+    r[0x20C:0x20E] = bytes([0x60, 0xFE])
+    r[0x300:0x302] = bytes([0x4E, 0x73])                 # rte
+    save_md(out, "fix_md_hint", r)
+    r[0x208:0x20C] = bytes([0x60, 0xFE, 0x4E, 0x71])     # keep reset SR interrupt mask
+    save_md(out, "fix_md_hint_masked", r)
 
 def build_md_techniques(out):
     # 68000 technique fixtures (3 save signature, 4 volatile byte, 7 index replay) on work RAM $FFC100..
@@ -1072,6 +1250,25 @@ def build_z80_family(out):
     z[0:len(zc)] = zc
     with open(os.path.join(out, "fix_z80_closure.sms"), "wb") as f:
         f.write(z)
+    # C4 copy-table siblings: ld hl,($0040) reads the first word of a pointer table, a ld/inc loop copies 16 bytes from it;
+    # the other two entries point at same-length siblings nothing touches
+    sb = bytearray([(i * 7 + 3) & 0xFF if i % 5 else 0x55 for i in range(0x8000)])
+    code = bytes.fromhex("2a4000 1100c0 0610 7e 12 23 13 10fa 18fe")
+    sb[0:len(code)] = code
+    sb[0x3E:0x4A] = bytes.fromhex("ffff000120014001ffff")   # table bounded by words that resolve nowhere in the ROM
+    sb[0x40:0x46] = bytes.fromhex("000120014001")
+    with open(os.path.join(out, "fix_z80_siblings.sms"), "wb") as f:
+        f.write(sb)
+    # C4 jump table: only entry 0 is read and jumped to; entries 1 and 2 point at code reached by calls, so the word run
+    # around the read cells resolves to executed code on both sides
+    jt = bytearray([(i * 7 + 3) & 0xFF if i % 5 else 0x55 for i in range(0x8000)])
+    code = bytes.fromhex("cd1001 cd2001 214000 5e 23 56 eb e9")
+    jt[0:len(code)] = code
+    jt[0x3E:0x48] = bytes.fromhex("ffff000110012001ffff")
+    jt[0x40:0x46] = bytes.fromhex("000110012001")
+    jt[0x100:0x102] = bytes.fromhex("18fe"); jt[0x110] = 0xC9; jt[0x120] = 0xC9
+    with open(os.path.join(out, "fix_z80_jumptable.sms"), "wb") as f:
+        f.write(jt)
     cells = bytes([0xB7, 0x20, 0x06, 0x20, 0x04, 0, 0, 0, 0, 0x18, 0xFE])
     z = bytearray([0xFF]) * 0x8000
     z[0:len(cells)] = cells
@@ -1102,6 +1299,13 @@ def build_z80_family(out):
     sv1[0:len(code)] = code
     with open(os.path.join(out, "fix_z80_solve.sms"), "wb") as f:
         f.write(sv1)
+    # B2: ld a,($C400) / add a,a / add a,a / cp $DC / jr z: only RAM = $37 (or $77, $B7, $F7) takes the jr, and no
+    # immediate of the window (+-1, 0, 1, $FF, powers of two) is such a value: the 256-value fallback proves it
+    s2 = bytearray([0xFF]) * 0x8000
+    code = bytes([0x3A,0x00,0xC4, 0x87, 0x87, 0xFE,0xDC, 0x28,0x04, 0x3E,0x01, 0x18,0x02, 0x3E,0x02, 0x18,0xFE])
+    s2[0:len(code)] = code
+    with open(os.path.join(out, "fix_z80_solve256.sms"), "wb") as f:
+        f.write(s2)
     # HALT then idle; NMI handler at $66 (the SMS Pause button): needs the Pause NMI probe
     nm = bytearray([0xFF]) * 0x8000
     nm[0:3] = bytes([0x76, 0x18, 0xFD])
@@ -1182,6 +1386,17 @@ def build_nes_pce(out):
     nes_prog("fix_nes_nmi.nes", bytes([0xA9,0x80, 0x8D,0x00,0x20, 0x4C,0x05,0x80]), nmi=0x10, handler=bytes([0xE6,0x10, 0x40]))
     nes_prog("fix_nes_save.nes", bytes([0xAD,0x00,0x03, 0xC9,0xAA, 0xD0,0x05, 0xA9,0x01, 0x4C,0x0E,0x80, 0xA9,0x02, 0x4C,0x0E,0x80]))
     nes_prog("fix_nes_decomp.nes", bytes([0xA2,0x00, 0xA0,0x00, 0xBD,0x20,0x80, 0x99,0x00,0x03, 0xC8, 0x99,0x00,0x03, 0xC8, 0xE8, 0xE0,0x20, 0xD0,0xF0, 0x4C,0x14,0x80]), bytes(range(1, 33)))
+    # C12: strobe, then read $4017 (pad 2) once into $00 and spin
+    # B8 on NES: a routine nothing calls at $8100 (speculative), the loop at $8000 never reaches it
+    g = bytearray(0x108); g[0:3] = bytes([0x4C, 0x00, 0x80]); g[0x100:0x108] = bytes([0xA9, 0x01, 0x8D, 0x00, 0x03, 0xA9, 0x02, 0x60])
+    nes_prog("fix_nes_gap.nes", bytes(g))
+    # B10: the cartridge RAM at $6000 holds the 0x55 pattern or not
+    # B11: the DMC sample DMA ($4015 bit 4 with $4012=0, $4013=1: 17 bytes at $C000) is a hardware copy of ROM bytes
+    nes_prog("fix_nes_dmc.nes", bytes.fromhex("a900 8d1240 a901 8d1340 a910 8d1540 4c0f80"))
+    nes_prog("fix_nes_sram.nes", bytes([0xAD,0x00,0x60, 0xC9,0x55, 0xD0,0x05, 0xA9,0x01, 0x4C,0x0E,0x80, 0xA9,0x02, 0x4C,0x0E,0x80]))
+    nes_prog("fix_nes_pad2.nes", bytes([0xA9,0x01, 0x8D,0x16,0x40, 0xA9,0x00, 0x8D,0x16,0x40, 0xAD,0x17,0x40, 0x85,0x00, 0x4C,0x0F,0x80]))
+    # B1: one pad-read site revisited under four values of the mode byte $00 (the semantic cell changes each time)
+    nes_prog("fix_nes_probectx.nes", bytes([0xA9,0x00, 0x85,0x00, 0xAD,0x16,0x40, 0xA5,0x00, 0xE6,0x00, 0xC9,0x04, 0xD0,0xF5, 0x4C,0x0F,0x80]))
     nes_prog("fix_nes_closure.nes", bytes([0x20,0x07,0x80, 0xEA,0xEA,0xEA,0xEA, 0x4C,0x07,0x80]))
     nes_prog("fix_nes_cells.nes", bytes([0xA9,0x00, 0xD0,0x06, 0xD0,0x04, 0xEA,0xEA,0xEA,0xEA, 0x4C,0x0A,0x80]))   # technique 8: two BNE sites, same target
     nes_prog("fix_nes_rng.nes", bytes([0xAD,0x00,0x03, 0x49,0x55, 0x8D,0x00,0x03, 0xC9,0xAA, 0xF0,0x03, 0x4C,0x00,0x80, 0xA9,0x01, 0x4C,0x11,0x80]))
@@ -1227,8 +1442,20 @@ def build_nes_pce(out):
         n[q:q + 2] = bytes([0x00, 0x80])
     with open(os.path.join(out, "fix_nes_jmpind.nes"), "wb") as f:
         f.write(n)
+    # same, but the word table sits at an ODD address ($8021): a 6502 table has no alignment rule (A10)
+    n[16 + 0x20:16 + 0x24] = bytes(4)
+    n[16:16 + 3] = bytes([0x6C, 0x21, 0x80])
+    n[16 + 0x21:16 + 0x25] = bytes([0x40, 0x80, 0x50, 0x80])
+    with open(os.path.join(out, "fix_nes_jmpind_odd.nes"), "wb") as f:
+        f.write(n)
     nes_prog("fix_nes_index.nes", bytes([0xAD,0x00,0x04, 0xAA, 0xBD,0x20,0x80, 0xC9,0x03, 0xF0,0x05, 0xA9,0x01, 0x4C,0x0D,0x80, 0xA9,0x02, 0x4C,0x12,0x80]),
              bytes([0,0,0,3] + [0] * 12))
+    # B4 on 6502: a word table of 12 code pointers; the byte at index 20 (the low byte of word 10) is 3, past the default bound 15
+    tw = bytearray()
+    for i in range(12): tw += bytes([0x03, 0x80]) if i == 10 else bytes([0x40, 0x80])
+    nes_prog("fix_nes_index20.nes", bytes([0xAD,0x00,0x04, 0xAA, 0xBD,0x20,0x80, 0xC9,0x03, 0xF0,0x05, 0xA9,0x01, 0x4C,0x0D,0x80, 0xA9,0x02, 0x4C,0x12,0x80]), bytes(tw))
+    # B9 on 6502: `lda #$40 / sta $00 / lda #$80 / sta $01` builds the address $8040 of a routine nothing calls
+    nes_prog("fix_nes_ref.nes", bytes([0xA9,0x40, 0x85,0x00, 0xA9,0x80, 0x85,0x01, 0x4C,0x08,0x80]), bytes(0x20) + bytes([0xA9, 0x01, 0x60]))
     # NES PPU status poll: LDA $2002 / BMI done / JMP poll; done stores and idles (technique 2)
     n = bytearray(16 + 2 * 0x4000 + 0x2000)
     n[0:4] = b"NES\x1a"

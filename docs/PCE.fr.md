@@ -9,7 +9,14 @@ signaler chaque lecture de la cartouche.
 
 ## Utilisation
 
-    deepeel pce explore jeu.pce [--text rapport.txt] [--map carte.txt] [--png carte.png]
+    deepeel pce explore jeu.pce [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N]
+        [--max-total N] [--max-steps N] [--queue N] [--queue-max N] [--loop-cap N] [--fork-cap N]
+        [--novelty STEPS] [--novelty-frames N] [--novelty-archive N] [--novelty-cells]
+        [--pad-fork-cap N] [--irq-fork-cap N] [--no-irq-fork] [--no-static] [--no-infer]
+        [--multitap] [--jobs 2] [--entry ADDR]... [--seed-banks] [--seed-vectors N]
+        [--bank-dispatch] [--ctx-cap N] [--ctx-live] [--defer-tiers N] [--play-pool]
+        [--text rapport.txt] [--map carte.txt] [--png carte.png] [--evidence FILE]
+        [--summary FILE] [--core]
     deepeel regs pce
 
 L'en-tête copieur de 512 octets est retiré s'il est présent. Les images de
@@ -26,7 +33,7 @@ rapport unique. 0.340.0 : **ça sème** — les rips hes de la bibliothèque loc
 octet à octet contre le dump (batch `tools/rip_verify.py` par banques 8 Ko à travers les
 pages MPR du header, sidecars `.verified`), la paire (rip, dump) vérifiée porte la projection
 `init_rom`/`play_rom` en espace ROM, et les graines entrent dans les deux moteurs : noyau
-(`--core`, `seed_regs` + `bank_view` — les deux pages MPR du bloc à `$4000`-`$7FFF`) et
+(`--core`, `seed_regs` + `bank_view` — les deux pages MPR du bloc à `$4000`-$`$7FFF`) et
 legacy (points d'entrée confirmés `dp_pce_enter(page, pc)` + A/SP du rip, compteur
 `music-rip seeds`). Le bloc qu'aucune fenêtre MPR ne montre est refusé et compté, jamais
 silencieux ; les collections hes locales ne matchent pas encore les dumps disponibles
@@ -63,9 +70,10 @@ silencieux ; les collections hes locales ne matchent pas encore les dumps dispon
    - l'inférence des petits trous entre du code et des données
      (`--no-static`, `--no-infer`).
 
-Les copies ROM→VRAM sont consignées. Il s'agit des écritures sur le port de
-données VDC (registre 2) d'une valeur lue juste avant en ROM, ou d'un
-transfert de bloc (TII/TDD/TIN/TIA/TAI) vers ce port.
+Les copies ROM→VRAM sont consignées sur quatre canaux : les écritures sur le
+port de données VDC (registre 2) d'une valeur lue juste avant en ROM, un
+transfert de bloc (TII/TDD/TIN/TIA/TAI) vers ce port, un stockage CPU vers
+la donnée couleur VCE, et un transfert de bloc vers ce port VCE (palette).
 
 Toute saturation est comptée et rapportée dans la ligne `cuts:` du rapport.
 Les instructions illégales coupent le chemin (`illegal`). L'exécution hors

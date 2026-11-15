@@ -2946,6 +2946,57 @@ static int core_is_sg, core_is_msx;
 // fixture differently (observed 2026-11: fix_sega_mapper reaches other ROM indexes)
 static const char *core_cov_path, *core_text_path, *core_map_path, *core_summary_path, *core_rom_name;
 static int core_jobs_auto;
+// C3 (option B): the provenance closure of this platform runs inside the kernel.  Every worker owns one
+// closure (the backend is thread-local) fed before each instruction; at the end the closures run and their
+// static bytes are folded into the kernel result as DP_CORE_STATIC.
+typedef struct CoreClosure { const DpSegaBackend *b; DpSegaClosure *c; DpSegaClosureStats st, tst, bst; uint8_t *flags; int64_t sig[10]; struct CoreClosure *next; } CoreClosure;
+static struct { DpMachine *main_m; const DpSegaBackend *main_b; const DpSegaSystem *sys; const uint8_t *rom; size_t size; DpSegaOptions opt; pthread_mutex_t mu; CoreClosure *list; int on; } core_clo = { .mu = PTHREAD_MUTEX_INITIALIZER };
+static __thread CoreClosure *tl_clo;
+static const void *sega_core_pick(unsigned w);
+static CoreClosure *core_clo_get(DpMachine *m) {
+    if (tl_clo) return tl_clo;
+    CoreClosure *k = calloc(1, sizeof *k);
+    if (!k) return NULL;
+    k->b = m == core_clo.main_m ? core_clo.main_b : sega_core_pick(0);   // worker 0 runs on the machine built by sega_core_run, the clones on the thread flavour
+    k->flags = calloc(core_clo.size ? core_clo.size : 1, 1);
+    const DpSegaOptions *o = &core_clo.opt;
+    k->st.limits = o->closure; k->tst.limits = o->closure; k->bst.limits = o->closure;
+    if (!o->target_closure) k->tst.limits.nodes = 0;
+    if (!o->target_closure || !o->block_closure) k->bst.limits.nodes = 0;
+    k->c = k->flags ? dp_sega_closure_create(k->b, core_clo.sys, core_clo.rom, core_clo.size, k->flags, o->closure, &k->st) : NULL;
+    if (k->c && o->target_closure) { if (!dp_sega_closure_targets(k->c, &k->tst) || (o->block_closure && !dp_sega_closure_blocks(k->c, &k->bst))) { dp_sega_closure_free(k->c); k->c = NULL; } }
+    if (!k->c) { free(k->flags); k->flags = NULL; }
+    tl_clo = k;
+    pthread_mutex_lock(&core_clo.mu); k->next = core_clo.list; core_clo.list = k; pthread_mutex_unlock(&core_clo.mu);
+    return k;
+}
+static int core_clo_before(void *user, DpMachine *m, uint32_t pc) {
+    (void)user; (void)pc;
+    CoreClosure *k = tl_clo ? tl_clo : core_clo_get(m);
+    if (!k || !k->c || k->st.seeds >= k->st.limits.seeds) return 1;   // saturated: no per-step cost
+    const DpSegaBackend *b = k->b;
+    static const uint16_t probe[] = {0, 0x400, 0x2000, 0x4000, 0x6000, 0x8000, 0xa000, 0x9800};
+    int64_t sig[10];
+    for (unsigned i = 0; i < 8; i++) sig[i] = b->rom_index(probe[i]);
+    sig[8] = core_is_msx ? b->msx_info().slots : 0;
+    sig[9] = b->ram_index(0xc000);
+    if (memcmp(sig, k->sig, sizeof sig)) { dp_sega_closure_invalidate(k->c); memcpy(k->sig, sig, sizeof sig); }   // a mapper move or a state load: the cached view is stale
+    dp_sega_closure_observe(k->c);
+    return 1;
+}
+static void core_clo_finish(void *user, DpCoreResult *r) {
+    (void)user;
+    for (CoreClosure *k = core_clo.list; k; k = k->next) {
+        if (!k->c) continue;
+        dp_sega_closure_run(k->c);
+        size_t n = core_clo.size < r->rom_size ? core_clo.size : r->rom_size;
+        for (size_t i = 0; i < n; i++)
+            if ((k->flags[i] & DP_SEGA_STATIC) && !(r->flags[i] & (DP_CORE_STATIC | DP_CORE_NATURAL | DP_CORE_FORCED))) { r->flags[i] |= DP_CORE_STATIC; r->closure_bytes++; }
+        r->closure_roots += k->st.seeds;
+    }
+    while (core_clo.list) { CoreClosure *k = core_clo.list; core_clo.list = k->next; if (k->c) dp_sega_closure_free(k->c); free(k->flags); free(k); }
+}
+static DpPlatformHooks core_sega_hooks;
 static const void *sega_core_pick(unsigned w) { (void)w; if(core_is_msx) return dp_msx_backendt(); if(core_is_sg) return dp_sega_backend_sgt(); return dp_sega_backend_ggt(); }
 static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *o,const DpCoreConfig *kcfg,FILE *out) {
     int msx=!strcmp(s->id,"msx");
@@ -2974,7 +3025,15 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
         cfg.seeds=mks.pcs; cfg.n_seeds=mks.n; cfg.seed_banks=mks.banks; cfg.seed_regs=mks.regs;
     }
     if(o->seed_vectors && !cfg.seeds) { cfg.seeds=vec; cfg.n_seeds=sizeof vec/sizeof *vec; }
-    if(!cfg.hooks) cfg.hooks=dp_machine_sega_hooks();
+    if(!cfg.rom_image) { cfg.rom_image=rom; cfg.rom_image_size=size; }   // B8/C4: the image feeds the speculative gaps and the static inference
+    if(!cfg.hooks) {
+        core_sega_hooks=*dp_machine_sega_hooks();
+        if(!cfg.no_closure && o->closure.nodes && !getenv("DEEPEEL_NO_SEGA_CLOSURE")) {   // C3 option B: the provenance closure inside the kernel
+            core_clo.main_m=m; core_clo.main_b=b; core_clo.sys=s; core_clo.rom=rom; core_clo.size=size; core_clo.opt=*o; core_clo.list=NULL;
+            core_sega_hooks.before_step=core_clo_before; core_sega_hooks.finish=core_clo_finish;
+        }
+        cfg.hooks=&core_sega_hooks;
+    }
     if(!cfg.visits_per_pc || cfg.visits_per_pc<262144) cfg.visits_per_pc=262144;   // the old engine loop_cap: boot delay loops run 65535 x n iterations
     DpSegaTas tas; memset(&tas,0,sizeof tas);
     if(o->tas_path && o->tas_path[0]) {
@@ -3019,9 +3078,12 @@ int dp_sega_explore_command(int argc,char **argv) {
         if(pages>0 && page>0) o.mem_cap_mb=(uint32_t)((uint64_t)pages*(uint64_t)page/2/(1024u*1024u));
     }
     o.attract_frames=DP_DEFAULT_ATTRACT_FRAMES;
-    int core_flag=0; for(int i=5;i<argc;i++) if(!strcmp(argv[i],"--core")) core_flag=1;
+    int core_flag=getenv("DEEPEEL_LEGACY")==NULL; for(int i=5;i<argc;i++) { if(!strcmp(argv[i],"--legacy")) core_flag=0; else if(!strcmp(argv[i],"--core")) core_flag=1; }   /* C9: the kernel is the default */
+    use_core=core_flag;
     for(int i=5;i<argc;i++) {
+        if(!strcmp(argv[i],"--mapwin")) { if(i+1<argc && argv[i+1][0]>='1' && argv[i+1][0]<='8' && !argv[i+1][1]) i++; continue; }   /* the kernel live map is installed by main() */
         if(!strcmp(argv[i],"--core")) { use_core=1; continue; }
+        if(!strcmp(argv[i],"--legacy")) { use_core=0; continue; }
         if(core_flag) { int kn=dp_core_parse_option(&kcfg,argc,argv,i); if(kn) { i+=kn-1; continue; } }   // only with --core: the old engine owns --attract-frames etc.
         if(!strcmp(argv[i],"--no-vector-seeds")) { o.seed_vectors=0; continue; }
         if(!strcmp(argv[i],"--no-context-evict")) { o.no_context_evict=1; continue; }

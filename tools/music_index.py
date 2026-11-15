@@ -183,10 +183,12 @@ def _p_gbs(b):
 
 
 def _p_nsf(b):
-    return _rip("nsf", b, load=struct.unpack_from("<H", b, 7)[0],
-                init=struct.unpack_from("<H", b, 9)[0],
-                play=struct.unpack_from("<H", b, 11)[0],
-                songs=b[5], first=b[6],
+    # the magic is 5 bytes ("NESM\x1a"): version 5, songs 6, first song 7,
+    # load 8-9, init 10-11, play 12-13 (little-endian), tags from 14
+    return _rip("nsf", b, load=struct.unpack_from("<H", b, 8)[0],
+                init=struct.unpack_from("<H", b, 10)[0],
+                play=struct.unpack_from("<H", b, 12)[0],
+                songs=b[6], first=b[7],
                 tma=None, tac=None, stack=None,
                 title=_tags16(b, 14), author=_tags16(b, 46), copyright=_tags16(b, 78),
                 extras={"pal_ntsc": b[122], "expansion": b[123]})
@@ -274,6 +276,10 @@ MAGICS = [
 ]
 RIP_EXTS = {".gbs", ".nsf", ".nsfe", ".kss", ".hes", ".spc", ".vgm", ".vgz",
             ".ay", ".sap", ".gym"}
+# the platform column of a generic rip row: the seeds extractor filters on it
+# (a kss rip serves MSX and the Sega 8-bit systems; the runtime verification
+# still decides by bytes, the label only bounds the tier walk)
+RIP_PLATFORMS = {"gbs": "GB", "nsf": "NES", "nsfe": "NES", "hes": "PCE", "kss": "KSS"}
 
 
 def rip_parse(path):
@@ -432,7 +438,32 @@ ENTRY_COLS = ("source,platform,format,row_no,title,title_norm,game_norm,year,mak
               "data_sha256,data_size,rip_json,origin,raw,columns").split(",")
 
 
-def _read_verified(path, load, data_size):
+def _rip_hdr(b):
+    """Size of the container header the rip's data block sits behind (the
+    .verified sidecars record the data block, the raw parsers record the
+    whole file; NSFE's data is the sum of its DATA chunks).  None: unknown."""
+    if b[:3] == b"GBS":
+        return 112
+    if b[:5] == b"NESM\x1a":
+        return 128
+    if b[:4] == b"KSSX":
+        return 0x20
+    if b[:4] == b"HESM":
+        return 0x20
+    if b[:4] == b"NSFE":
+        total, p = 0, 4
+        while p + 8 <= len(b):
+            ln, name = struct.unpack_from("<I4s", b, p)
+            if name == b"DATA":
+                total += ln
+            if name == b"NEND":
+                break
+            p += 8 + ln
+        return len(b) - total if total else None
+    return None
+
+
+def _read_verified(path, load, sizes):
     """Parse a `.verified` sidecar (deepeel --gbs byte-verify output): one line
     per verified dump, `dump crc=HEX load=N data_size=N banks=r0,r1,... [k=v]...
     rom=NAME` (rom last: dump names carry spaces; banks are the ROM bank of each
@@ -458,9 +489,9 @@ def _read_verified(path, load, data_size):
             # translate-mode sidecars carry no load/data_size to check
             if load is not None:
                 blk = int(d.get("data_size", -1))
-                # the verifier's data_size excludes the 112-byte GBS header that
-                # rip_parse counts; both conventions name the same file
-                if int(d.get("load", -1)) != load or blk not in (data_size, data_size - 112):
+                # the verifier's data_size is the rip's data block (header
+                # excluded), rip_parse's is the whole file: both name the file
+                if int(d.get("load", -1)) != load or blk not in sizes:
                     print(f"verified: {path.name}: load/data_size mismatch, line refused")
                     continue
             banks = [None if b == "-1" else int(b) for b in d.get("banks", "").split(",") if b != ""]
@@ -638,7 +669,9 @@ def build(bab_dir, rip_dirs, dbfile, alias_files=()):
             # knowledge the BAB rows carry, discovered by the tool instead of a
             # database: it turns the crc tier on for the verified dumps.  Only a
             # sidecar whose load/data_size match the parsed rip is trusted.
-            ver = _read_verified(Path(str(path) + ".verified"), g.get("load"), g["data_size"])
+            hdr = _rip_hdr(path.read_bytes())
+            blk = g["data_size"] - hdr if hdr is not None else g["data_size"]
+            ver = _read_verified(Path(str(path) + ".verified"), g.get("load"), (blk, g["data_size"]))
             vcrcs = [f"{d['crc']:08x}" for d in ver]   # hex strings, like the BAB rows
             v0 = ver[0] if ver else None
             vchunks = v0["chunks"] if v0 and "chunks" in v0 else []
@@ -652,7 +685,7 @@ def build(bab_dir, rip_dirs, dbfile, alias_files=()):
                     if e > s:
                         vchunks.append([rb * 0x4000 + load - i * 0x4000, s, e - s])
             proj = ("joshw_gbs" if is_joshw else "local_rips",
-                    "GB" if g["format"] == "gbs" else "",
+                    RIP_PLATFORMS.get(g["format"], ""),
                     g["format"], None,
                     title, norm_name(path.parent.name) or norm_name(title),
                     norm_name(re.sub(r"[\[(（]?\s*[Vv]?\d+(\.\d+)*\s*[\])）]?", "", title or "")),

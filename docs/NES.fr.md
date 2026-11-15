@@ -1,7 +1,8 @@
 # NES (deepeel)
 
 Le support NES mutualise le runtime NES de m0boy (`targets/nes/runtime` :
-cœur 6502, PPU événementiel, APU, cartouches NROM et UxROM). Deepeel ne
+cœur 6502, PPU événementiel, APU, cartouches iNES de 12 boards — mappers
+0, 1, 2, 3, 4, 5, 7, 11, 66, 71, 94 et 180). Deepeel ne
 porte plus sa propre machine NES : le même cœur joue les jeux recompilés
 dans m0boy et explore les ROMs ici, comme pour la Game Boy (`gbl_*`) et la
 Mega Drive (`md_full`).
@@ -22,8 +23,10 @@ Mega Drive (`md_full`).
   `nes_frame_rest()` reprend la frame courante (`machine.line` = prochaine
   ligne non exécutée). L'explorateur peut donc figer la machine au milieu
   d'une frame et reprendre.
-- **Passerelle** (`src/mach/nesmach.c`) : iNES (mapper 0 et 2 seulement —
-  les autres cartouches sont refusées avec un message), hooks, budgets,
+- **Passerelle** (`src/mach/nesmach.c`) : iNES — 12 boards acceptées
+  (NROM 0, MMC1 1, UxROM 2, CNROM 3, MMC3 4, MMC5 5 mode PRG 3, Color
+  Dreams 7, GxROM 66, Camerica/UN1ROM 71/94, Crazy Climber 180) ; les
+  autres cartouches sont refusées avec un message. Hooks, budgets,
   snapshots complets (`nes_state_io`, ~12,6 Kio, légaux au milieu d'une
   frame), hash d'état exact (horloges volatiles exclues) pour la dédup.
 - **Espace de noms** : les globales du runtime (`machine`, `nes_*`,
@@ -97,11 +100,17 @@ termine par un état graine pour la drain de fourches.
 ## Usage
 
 ```
-deepeel nes explore ROM.nes [--tas FILE]... [--play N] [--sessions N]
+deepeel nes explore ROM.nes [--core] [--tas FILE]... [--play N] [--sessions N]
     [--seed N] [--mapper auto|nrom|uxrom] [--max-total N] [--max-steps N]
-    [--max-paths N] [--queue N] [--loop-cap N] [--fork-cap N]
-    [--no-irq-fork] [--text FILE] [--map FILE]
+    [--max-paths N] [--queue N] [--queue-max N] [--loop-cap N] [--fork-cap N]
+    [--no-irq-fork] [--entry bank:addr]... [--seed-banks] [--seed-vectors N]
+    [--bank-dispatch] [--pad-full] [--no-event-probes] [--no-p1-fork]
+    [--ctx-live] [--defer-tiers N] [--spool FILE] [--resume FILE] [--play-pool]
+    [--summary FILE] [--text FILE] [--map FILE] [--heat FILE] [--evidence FILE]
+    [--cov FILE] [--romdata FILE] [--rtcode FILE]
 ```
+
+`--core` exécute le noyau générique à la place de l'explorateur historique.
 
 ## DuckTales (observations de l'outil, pas des mesures de matériel)
 

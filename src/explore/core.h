@@ -20,6 +20,7 @@ enum { DP_CORE_NATURAL = 1, DP_CORE_FORCED = 2, DP_CORE_COPIED = 4, DP_CORE_COMP
 enum { DP_CORE_START_NATURAL = 64, DP_CORE_START_FORCED = 128 };
 // DpSeedRegs lives in core/dpmachine.h (the seed_regs contract is on DpMachine)
 
+struct DpCoreResult;
 // optional platform hooks; every member may be NULL
 typedef struct DpPlatformHooks {
     void *user;
@@ -40,6 +41,9 @@ typedef struct DpPlatformHooks {
     // `delay` instructions (the line stays pending) and returns 1; otherwise returns 0.  The
     // live machine is left unchanged.  Counted in DpCoreResult.irq_forks.
     int (*irq_alt)(void *user, DpMachine *m, unsigned delay, uint8_t *save);
+    // called once when the workers are done, before the speculative gaps: the platform folds
+    // its own evidence into the result (Sega: the provenance closure's static bytes, C3)
+    void (*finish)(void *user, struct DpCoreResult *r);
 } DpPlatformHooks;
 
 typedef struct DpCoreConfig {
@@ -70,6 +74,17 @@ typedef struct DpCoreConfig {
     // leaves SP; needs DpMachine.seed_regs, else counted in seed_regs_absent.
     const DpSeedRegs *seed_regs;
     int no_event_probes;
+    int no_auto_seed;          // B10: off switch of the automatic cart-RAM seeding
+    int no_tas_ckpt;           // A22/B3: off switch of the movie checkpoints
+    unsigned ckpt_burst_frames;  // B3: frames of a random-pad burst run from each session checkpoint (0: none)
+    unsigned tas_ckpt_every, tas_ckpt_cap;   // movie frames between checkpoints; total cap
+    int no_held_budget;        // A26: held-pad sessions share the global budget again
+    uint64_t held_steps;       // A26: step cap of one held-pad session path (0: unbounded)
+    int no_exact;              // B5: off switch of the exact-state loop cut (the run then ends only by exhaustion or a cap)
+    int no_spec, no_live_seeds;               // B8: off switch of the speculative gap disassembly
+    int no_bank_forks;         // B7: off switch of the bank forks at mapper writes
+    unsigned bank_fork_cap;    // B7: bank forks made per site visit (0: unbounded)
+    unsigned probe_ctx_cap;    // B1: contexts one probe site is armed under (1: the historical once-per-site)
     const char *state_dir;     // --state-dir: pending forked states are saved to <dir>/frontier.bin at exit
     int resume;                // --resume: states saved there by a previous run are queued first
     int unbounded;             // --unbounded: no step/path/site-fork ceilings; the RAM queue spills to the disk spool
@@ -86,16 +101,23 @@ typedef struct DpCoreConfig {
     uint32_t play_frames;       /* generic play session: nine pad epochs over this many frames (0: off; needs frame + set_input) */
     uint32_t play_sessions;     /* number of play sessions (each starts at another catalog pad; default 1) */
     const uint8_t *tas_masks;   /* TAS replay (techniques 9): one kernel pad mask per frame, needs DpMachine.frame */
+    const uint32_t *tas_masks32; /* C12: the wide form (DpInput bits, core/dpmachine.h); wins over tas_masks */
     uint32_t tas_frames;
+    unsigned watch_every;       /* --watch: the unshifted movie replay publishes its game screen every N frames (DpMachine.render; 0 = off) */
     const char *dsy_path;       /* --dsy FILE: the unshifted TAS replay writes work RAM per frame as DSY1 */
     int no_tas_jitter;          /* 1: replay the movie unshifted only (no +-1..3 frame shifts) */
     int no_irq_jitter;          /* technique 9: only the 1-instruction IRQ delay, no 2..3 */       // 1: ignore DpPlatformHooks.event_probe (technique 2)
     int no_decompress;         // 1: do not look for decompressors (technique 6)
+    int no_infer;              // 1: skip the static inference (padding, gaps, copy-table siblings)
     int no_copies;             // 1: do not observe data accesses
     int no_novelty_order;      // 1: plain LIFO instead of uncovered-target-first
     uint32_t cell_lo, cell_hi; // technique 8: RAM range hashed into a semantic cell (cell_hi > cell_lo enables it)
     size_t queue_max;          // pending forked states held in RAM (0: unbounded)
     const DpPlatformHooks *hooks;
+    // live view: called once, right after the result arrays are allocated and before any path runs, with the
+    // result being filled (flags/src_flags are updated atomically while the workers run, so a viewer may read them)
+    void (*on_live)(void *user, const struct DpCoreResult *live);
+    void *on_live_user;
     unsigned progress_secs;   // >0: a progress line on stderr every N seconds (0 = silent)
 } DpCoreConfig;
 
@@ -103,6 +125,17 @@ typedef struct DpCoreResult {
     uint32_t *src_flags;       // per ROM index: DP_SRC_* (core/coverage.h), OR-ed over every proving source
     uint64_t *first_seen;      // per ROM index: global step count when first covered (0: never)
     uint8_t *flags;            // per ROM index: DP_CORE_NATURAL | DP_CORE_FORCED
+    uint64_t closure_stopped_data;   // A13: untrusted static walks stopped on data/copied bytes
+    uint64_t live_seeds;       // B3: vector seeds started from a live checkpoint
+    uint8_t *inferred;         // C4: DP_MAP_* inference per ROM byte (padding, gap fill, copy-table siblings); never an observation
+    uint64_t inferred_code, inferred_pad, inferred_data, padding_bytes, sib_tables, sib_bytes, sib_refused, jt_tables, jt_bytes;
+    uint8_t *page_win;
+    uint32_t *live;       // C11 liveness: per 256-byte ROM page, a bitmap of the 256-byte RAM pages its natural-path instructions read
+    uint32_t live_w;      // words of that bitmap per ROM page         // B8: per ROM page (DpMachine.page_shift), 1 + the 8 KiB window it was executed at (0 = never executed)
+    uint8_t *refs;             // B9: per ROM index, 1 = designated by an executed immediate pointer
+    uint64_t imm_refs, spec_ref_runs;
+    uint8_t *spec;             // B8: per ROM index, 1 = covered only by the speculative gap disassembly (never known)
+    uint64_t spec_runs, spec_bytes;
     uint8_t *dest;             // per ROM index: DP_DEST_* where this byte's data ends up (0: untyped)
     size_t rom_size;
     uint64_t steps, paths, forks;
@@ -129,6 +162,7 @@ typedef struct DpCoreResult {
     uint64_t index_replays;    // states queued with a RAM index byte set to 0..15 at a ROM-table read
     uint64_t rng_forks;        // states queued with a volatile RAM byte forced to 00/01/80/FF
     DpRamArch ra;              // distinct (pc, bytes) variants executed outside ROM, with their ROM copy source / approximate producer
+    uint64_t promoted_forced;             // A9: forced-only sides proven natural by the resolution
     uint64_t solved_forks, solve_tries;   // technique 1: natural states proving the other side / replays tried
     uint64_t learned_sigs;     // signature states queued from observed `ld a,(nn); cp n`
     uint64_t site_scored_picks; // picks that the per-site score moved away from the plain novelty choice
@@ -137,7 +171,8 @@ typedef struct DpCoreResult {
     int in_novelty_path;        // internal: the path being run was a novelty pick
     uint64_t seeded_ram, event_probe_sites, irq_forks, jitter_forks, sessions; // probe sites visited (technique 2)
     uint64_t event_probes;      // alternative-status states queued
-    uint64_t closure_roots, closure_bytes, closure_capped, closure_jp_tables, closure_jp_entries, prov_data_bytes; uint32_t jp_seen[256]; unsigned jp_seen_n;   // static closure: roots walked, bytes newly marked, walks stopped by the cap
+    uint64_t ckpt_bursts;   // B3: pad bursts started from session checkpoints
+    uint64_t closure_roots, closure_bytes, closure_capped, closure_jp_tables, closure_jp_entries, prov_data_bytes; uint32_t *jp_seen; unsigned jp_seen_n, jp_seen_cap; uint64_t closure_stack_dropped, pending_dropped, deferred, state_repeats, exact_states, probe_ctx_sat, probe_rearms, bank_forks, bank_fork_sat, tas_ckpts, sess_ckpts, held_stops;   // static closure: roots walked, bytes newly marked, walks stopped by the cap
     uint64_t cells;             // distinct (fork target, RAM cell) pairs queued (technique 8)
     uint64_t cell_pruned;       // forced forks dropped because their (target, RAM cell) pair was already queued
     uint64_t compressed_bytes;  // ROM bytes read as a sequential stream that fed unequal RAM writes (technique 6)
@@ -156,6 +191,7 @@ typedef struct DpCoreResult {
 typedef struct DpCoreSection {
     size_t lo, hi;             // ROM index range, inclusive
     size_t natural, forced;    // bytes covered by each kind of path
+    size_t live_pages;         // C11: distinct 256-byte RAM pages the section read on natural paths (its liveness)
     int required;
 } DpCoreSection;
 // fills up to `cap` sections, returns the total count (may exceed cap)
@@ -175,6 +211,9 @@ void dp_core_config_default(DpCoreConfig *cfg);
 int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCoreResult *out);
 // CLI wrapper: install a temporary SIGINT handler and provide a state directory
 // for unbounded runs when none was specified.  output_hint may be NULL.
+// process-wide default for DpCoreConfig.on_live, used when a run's config sets none (the CLI installs the --mapwin
+// window here once, so every platform gets the live map without touching its own driver)
+void dp_core_live_default(void (*cb)(void *, const struct DpCoreResult *), void *user);
 int dp_core_explore_cli(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg,
                         DpCoreResult *out, const char *output_hint);
 void dp_core_result_free(DpCoreResult *r);

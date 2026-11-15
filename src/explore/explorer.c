@@ -1588,7 +1588,8 @@ bad_done:
             }
             uint32_t id = dp_section_touch(res, (uint8_t)bank, pc, hi, ex->cur_forced ? 0 : 1,
                                            is_entry, ex->cur_sec,
-                                           ex->cur_from_reset && !ex->cur_forced,
+                                           ex->cur_from_reset, // real-flow ancestry, forced or not: a
+                                                               // forced hit without it is a seed's child
                                            ex->irq_depth > 0);
             ex->cur_sec = id;
         }
@@ -1895,6 +1896,12 @@ void dp_explore_finalize(DpExplorer *ex) {
             s->verdict = DP_V_REQUIRED;
         else if (s->natural_hits > 0 && s->forced_hits == 0)
             s->verdict = DP_V_PLAYED; // only ever seen in a real play session
+        else if (s->natural_hits > 0)
+            s->verdict = DP_V_FORCED; // natural execution outranks the seed provenance below
+        else if (s->forced_hits > s->spec_hits)
+            s->verdict = DP_V_FORCED; // a fork of the real flow reached it: forced, not speculative
+        else if (s->spec_hits > 0)
+            s->verdict = DP_V_SPECULATIVE; // every hit descended from a synthetic seed
         else
             s->verdict = DP_V_FORCED;
     }

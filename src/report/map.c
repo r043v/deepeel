@@ -114,7 +114,8 @@ unsigned dp_map_png_budget = 16u << 20;
 const char *dp_map_class_name(int c) {
     static const char *nm[DP_MAP_COUNT] = { "unknown", "code-natural", "code-forced",
         "code-static", "data-copied", "data-read", "data-static", "table", "padding",
-        "inferred-data", "inferred-code", "inferred-padding", "probable-code", "probable-data" };
+        "inferred-data", "inferred-code", "inferred-padding", "probable-code", "probable-data",
+        "data-musique", "data-sample", "data-palette", "data-vram" };   // a name per class: a NULL here crashed maprender
     return c >= 0 && c < DP_MAP_COUNT ? nm[c] : "?";
 }
 

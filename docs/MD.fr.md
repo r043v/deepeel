@@ -24,7 +24,8 @@ pas des mesures de matériel.
 - **Exploration à fourches** (`src/platform/md/explore.c`) : les deux issues
   de chaque Bcc/DBcc (snapshot de `MdFull`), forks d'IRQ V-int (niveau 6)
   quand le VDP les autorise, enregistrements de copies DMA 68k→VDP, journal
-  des changements de banque.
+  des changements de banque Z80 (la passe linéaire journalise, elle, toutes
+  les banques ; l'explorateur à fourches ne trace que les banques Z80).
 
 ## Utilisation
 
@@ -47,7 +48,8 @@ mais reste soumis à `--max-total` ; le nombre de trames rejouées est rapporté
 Le format n'identifie pas la ROM et la synchronisation avec Gens n'est pas
 garantie : vérifier version et progression avant de conclure. Les films PAL,
 avec état initial, multitap, manette six boutons ou entrée sur le joueur 2 sont
-refusés, pas silencieusement tronqués. BK2 Mega Drive n'est pas encore pris en charge.
+refusés, pas silencieusement tronqués. Le format BK2 est pris en charge
+(`src/platform/md/movie.c`, identité MD5 du film vérifiée avant rejeu).
 Sur Sonic 1 World Rev 00, le GMV JXQ publié sous le numéro 783 a été rejoué sur
 65 849 trames avec 466 921 654 pas au total, fourches comprises. Union observée
 hors lectures du checksum `$032C` : 43,43 %. La progression et la synchronisation
@@ -149,7 +151,9 @@ pas encore tracée : le seul désassemblage ne prouve pas quelle écriture a eu
 lieu sur le chemin témoin. Ces observations décrivent la machine de l'outil.
 Une cible déjà exécutée ne suffit pas à évincer une fourche : elle peut être
 atteinte avec un autre contexte machine. Les fourches restent bornées par site,
-avec saturation rapportée ; il n'y a pas encore de déduplication par contexte.
+avec saturation rapportée ; la déduplication par contexte existe mais reste
+opt-in (`--ctx-cap`, `--ctx-live`, dédup exacte `--exact-dedup`), sans objet
+en défaut sur les passes courantes.
 Sur une passe Sonic de 20 millions de pas, un essai de cache comparant les 64
 derniers instantanés octet pour octet n'a trouvé aucun doublon ; les horloges
 diffèrent notamment. Cet essai a été retiré : il faut une comparaison de
@@ -163,11 +167,11 @@ décrément. DBF sort sur `$FFFF` ; DBT ne peut pas brancher et n'est pas fourch
 Les sondes d'interruption attendent que le masque CPU autorise leur niveau ;
 une file pleine ne consomme plus définitivement la sonde, qui peut être
 retentée lorsque de la place se libère, y compris pendant l'exécution en RAM.
-Chaque site ROM de lecture de la manette 1 peut aussi créer quatre instantanés
-bornés (Start, A, droite, A+droite). La touche est appliquée après l'instruction
+Chaque site ROM de lecture de la manette 1 peut aussi créer des instantanés
+bornés : 14 masques couvrant les boutons 3 et 6 boutons. La touche est appliquée après l'instruction
 de lecture : elle agit sur les lectures suivantes, typiquement au prochain tour
 de polling, et non sur la valeur déjà lue. Le rapport compte ces sondes et les
-refus de file ; les autres combinaisons ne sont pas encore explorées.
+refus de file.
 Les fautes machine sont regroupées par code et instruction, avec le PC fourni
 par le cœur et les comptes. Un second journal donne le site de la dernière
 fourche ; chacun est borné à 64 entrées et son débordement est compté.
@@ -183,10 +187,11 @@ Codes du cœur actuel : 1 accès bus
 inconnu, 2 opérande invalide, 3 accès mot impair, 4 opération VDP non prise en
 charge, 6 limite interne d'instructions.
 
-Sondes de manette limitées à quatre combinaisons sur la manette 1 (voir
-plus haut), pas de fermeture statique (`jmp (An)`, tables de sauts), Z80 du
-MD non exploré, pas de GUI ni de sessions jouées ; TAS limité aux films GMV
-(pas de BK2) ; validation DMA en direct non vérifiée.
+Sondes de manette limitées à la manette 1 (14 masques, voir plus haut), pas
+de GUI ; les limites historiques de cette entrée sont levées : fermeture
+statique avec tables `jmp (An)` (S4) et second passage, Z80 du MD exploré
+(copies et exécution en Z80 RAM), sessions jouées avec pool de checkpoints,
+TAS aux formats GMV et BK2 ; la validation DMA en direct reste non vérifiée.
 
 ## Modifications côté m0boy
 

@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory() as d:
     def run(entry=None):
         report = d / "summary.json"
         cmd = [exe, "explore", str(rom), "--core", "--max-total", "100000",
-               "--attract-frames", "0", "--no-sessions", "--no-closure", "--no-pointer-scan", "--summary", str(report)]
+               "--attract-frames", "0", "--no-sessions", "--no-closure", "--no-pointer-scan", "--no-bank-forks", "--summary", str(report)]
         if entry is not None:
             cmd += ["--entry", entry]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)

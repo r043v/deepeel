@@ -218,6 +218,7 @@ DpMachine *dp_machine_sega(const void *backend) {
     s->attached = 1;
     sega_capture(s);
     m->name = "sega";
+    m->work_ram_base = 0xC000u; m->work_ram_len = 0x2000u;
     m->isa = dp_isa_z80();
     m->impl = s;
     m->state_bytes = sega_state_bytes;

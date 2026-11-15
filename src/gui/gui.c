@@ -1034,3 +1034,121 @@ void dp_mapwin_stop(void) {
     pthread_join(mw_th, NULL);
     mw_running = 0;
 }
+
+// ---- kernel ROM map window: reads the live DpCoreResult, no legacy structure involved
+#include "../explore/core.h"
+static pthread_t kw_th;
+static int kw_running;
+static atomic_int kw_quit;
+static const DpCoreResult *kw_res;
+static int kw_scale;
+static char kw_title[64];
+
+static uint32_t kw_color(uint8_t f) {
+    if (f & DP_CORE_NATURAL) return 0xff30c050u;
+    if (f & DP_CORE_FORCED) return 0xffe09030u;
+    if (f & DP_CORE_STATIC) return 0xff4070e0u;
+    if (f & DP_CORE_DATA) return 0xffd0d040u;
+    return 0xff202028u;
+}
+static void *kw_main(void *arg) {
+    (void)arg;
+    enum { TILE = 128, GAP = 4, LEG_H = 30, TILE_BYTES = TILE * TILE };
+    const DpCoreResult *res = kw_res;
+    size_t size = res->rom_size;
+    int tiles = (int)((size + TILE_BYTES - 1) / TILE_BYTES);
+    if (tiles < 1) return NULL;
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) { fprintf(stderr, "deepeel: mapwin: SDL_Init: %s\n", SDL_GetError()); return NULL; }
+    int maxW = 1280 - 40, maxH = 800 - 80;
+    SDL_Rect ub;
+    if (SDL_GetDisplayUsableBounds(0, &ub) == 0 && ub.w > 0 && ub.h > 0) { maxW = ub.w - 40; maxH = ub.h - 80; }
+    int per_row = 8, sc = 1, found = 0, ceil_sc = kw_scale >= 1 ? kw_scale : 4;
+    for (int k = ceil_sc; k >= 1 && !found; k--)
+        for (int t = 0; t < tiles && !found; t++) {
+            int pr = t < 8 ? 8 - t : t + 1;
+            if (pr > tiles) continue;
+            int rws = (tiles + pr - 1) / pr;
+            int w = GAP + pr * (TILE * k + GAP), h = GAP + rws * (TILE * k + GAP) + LEG_H;
+            if (w <= maxW && h <= maxH) { found = 1; per_row = pr; sc = k; }
+        }
+    if (!found) { per_row = tiles < 8 ? tiles : 8; sc = 1; }
+    int cols = tiles < per_row ? tiles : per_row, rows = (tiles + per_row - 1) / per_row;
+    int W = GAP + cols * (TILE * sc + GAP), H = GAP + rows * (TILE * sc + GAP) + LEG_H;
+    SDL_Window *win = SDL_CreateWindow(kw_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, W, H, SDL_WINDOW_RESIZABLE);
+    SDL_Renderer *ren = win ? SDL_CreateRenderer(win, -1, 0) : NULL;
+    SDL_Texture *tex = ren ? SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, W, H - LEG_H) : NULL;
+    uint32_t *px = tex ? malloc((size_t)W * (H - LEG_H) * 4) : NULL;
+    if (!px) {
+        fprintf(stderr, "deepeel: mapwin: %s\n", SDL_GetError());
+        if (tex) SDL_DestroyTexture(tex);
+        if (ren) SDL_DestroyRenderer(ren);
+        if (win) SDL_DestroyWindow(win);
+        SDL_Quit();
+        return NULL;
+    }
+    for (size_t i = 0; i < (size_t)W * (H - LEG_H); i++) px[i] = 0xff18181c;
+    for (int first = 1; first || !atomic_load(&kw_quit); first = 0) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e))
+            if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && (e.key.keysym.sym == SDLK_ESCAPE || e.key.keysym.sym == SDLK_q))) atomic_store(&kw_quit, 1);
+        size_t cnt[4] = { 0, 0, 0, 0 };   // natural, forced, static, data
+        for (size_t gi = 0; gi < size; gi++) {
+            uint8_t f = __atomic_load_n(&res->flags[gi], __ATOMIC_RELAXED);
+            cnt[0] += !!(f & DP_CORE_NATURAL); cnt[1] += !!(!(f & DP_CORE_NATURAL) && (f & DP_CORE_FORCED));
+            cnt[2] += !!(!(f & (DP_CORE_NATURAL | DP_CORE_FORCED)) && (f & DP_CORE_STATIC));
+            cnt[3] += !!(!(f & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC)) && (f & DP_CORE_DATA));
+            int t = (int)(gi / TILE_BYTES); size_t g = gi % TILE_BYTES;
+            int x = GAP + (t % per_row) * (TILE * sc + GAP) + (int)(g % TILE) * sc, y = GAP + (t / per_row) * (TILE * sc + GAP) + (int)(g / TILE) * sc;
+            uint32_t v = kw_color(f);
+            for (int dy = 0; dy < sc; dy++)
+                for (int dx = 0; dx < sc; dx++) px[(size_t)(y + dy) * W + x + dx] = v;
+        }
+        const char *dump = getenv("DEEPEEL_MAPWIN_DUMP");   // test hook: the last drawn map as a binary PPM
+        if (dump) {
+            FILE *f = fopen(dump, "wb");
+            if (f) {
+                fprintf(f, "P6\n%d %d\n255\n", W, H - LEG_H);
+                for (size_t i = 0; i < (size_t)W * (H - LEG_H); i++) { uint8_t t3[3] = { (uint8_t)(px[i] >> 16), (uint8_t)(px[i] >> 8), (uint8_t)px[i] }; fwrite(t3, 1, 3, f); }
+                fclose(f);
+            }
+        }
+        SDL_UpdateTexture(tex, NULL, px, W * 4);
+        SDL_SetRenderDrawColor(ren, 0x18, 0x18, 0x1c, 255);
+        SDL_RenderClear(ren);
+        SDL_Rect dst = { 0, 0, W, H - LEG_H };
+        SDL_RenderCopy(ren, tex, NULL, &dst);
+        char line[160];
+        snprintf(line, sizeof line, "natural %.1f%%  forced %.1f%%  static %.1f%%  data %.1f%%", size ? 100.0 * (double)cnt[0] / (double)size : 0.0,
+                 size ? 100.0 * (double)cnt[1] / (double)size : 0.0, size ? 100.0 * (double)cnt[2] / (double)size : 0.0, size ? 100.0 * (double)cnt[3] / (double)size : 0.0);
+        SDL_Color white = { 0xe0, 0xe0, 0xe0, 255 };
+        draw_text(ren, 6, H - LEG_H + 4, line, 1, white);
+        SDL_RenderPresent(ren);
+        for (int i = 0; i < 12 && !atomic_load(&kw_quit); i++) {   // ~0.5 s between redraws, responsive to events
+            SDL_Event e2;
+            while (SDL_PollEvent(&e2))
+                if (e2.type == SDL_QUIT || (e2.type == SDL_KEYDOWN && (e2.key.keysym.sym == SDLK_ESCAPE || e2.key.keysym.sym == SDLK_q))) atomic_store(&kw_quit, 1);
+            SDL_Delay(20);
+        }
+    }
+    free(px);
+    SDL_DestroyTexture(tex);
+    SDL_DestroyRenderer(ren);
+    SDL_DestroyWindow(win);
+    SDL_Quit();
+    return NULL;
+}
+int dp_kmapwin_start(const struct DpCoreResult *live, const char *title, int scale) {
+    if (kw_running) return 0;
+    kw_res = live; kw_scale = scale;
+    snprintf(kw_title, sizeof kw_title, "%s", title ? title : "deepeel ROM map");
+    atomic_store(&kw_quit, 0);
+    if (pthread_create(&kw_th, NULL, kw_main, NULL) != 0) return 1;
+    kw_running = 1;
+    return 0;
+}
+void dp_kmapwin_stop(void) {
+    if (!kw_running) return;
+    atomic_store(&kw_quit, 1);
+    pthread_join(kw_th, NULL);
+    kw_running = 0;
+}

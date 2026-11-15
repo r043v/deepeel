@@ -40,3 +40,10 @@ int dp_mapwin_start(const DpResults *res, int scale, DpPlay *play) {
     return 1;
 }
 void dp_mapwin_stop(void) {}
+
+int dp_kmapwin_start(const struct DpCoreResult *live, const char *title, int scale) {
+    (void)live; (void)title; (void)scale;
+    fprintf(stderr, "deepeel: built without SDL2, --mapwin unavailable\n");
+    return 1;
+}
+void dp_kmapwin_stop(void) {}

@@ -154,7 +154,7 @@ static void on_frame(void *u) {
     if (x->o->watch_every && ++x->wframe % x->o->watch_every == 0) {
         static uint32_t px[320 * 224];
         dp_mdmach_render(x->m, px);
-        if (getenv("DEEPEEL_VIDEO_LOG") && x->wframe % 100 == 0) {   // same lines as bizhawk_dsy's BIZHAWK_VIDEO_LOG: a frame-by-frame timeline to compare the cores
+        if (getenv("DEEPEEL_VIDEO_LOG") && x->wframe % (getenv("DEEPEEL_VIDEO_EVERY") ? (unsigned)atoi(getenv("DEEPEEL_VIDEO_EVERY")) : 100u) == 0) {   // same lines as bizhawk_dsy's BIZHAWK_VIDEO_LOG: a frame-by-frame timeline to compare the cores
             int nz = 0; for (int i = 0; i < 320 * 224; i++) if (px[i] & 0xFFFFFF) nz++;
             fprintf(stderr, "video f=%u 320x224 nonblack=%d\n", (unsigned)x->wframe, nz);
         }

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.345.0 LANGUAGES C)
+project(deepeel VERSION 0.367.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -348,7 +348,7 @@ if(SDL2_FOUND AND BUILD_GUI)
   add_compile_definitions(DP_HAS_GUI=1)
 endif()
 
-add_executable(deepeel src/deepeel.c src/core/tasfetch.c src/core/gbsfetch.c)
+add_executable(deepeel src/deepeel.c src/core/dpmovie.c src/core/tasfetch.c src/core/gbsfetch.c)
 target_link_libraries(deepeel PRIVATE ZLIB::ZLIB)
 add_library(deepeel_libretro STATIC src/mach/libretro.c src/mach/lr_machine.c)
 target_include_directories(deepeel_libretro PUBLIC src)

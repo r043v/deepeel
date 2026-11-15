@@ -34,6 +34,14 @@ réelles » de [COMPARATIF.fr.md](COMPARATIF.fr.md) ne sont pas réévaluées ic
 `C` est un registre de 8 bits. La conclusion « sonde inopérante » n'est pas
 établie ; des témoins positifs et négatifs sont prévus dans le
 [plan d'implémentation](PLAN-GLM-IMPLEMENTATION-PARITE.fr.md).
+**Vérifié par fixture (2026-11-14) :** le rectificatif est confirmé,
+l'hypothèse initiale est infirmée. Le backend m0boy exécute
+`gbl_rd($FF00 | C)` (`gbl_cpu.c`, case `0xF2`) et le guard `C == $00` de
+`fork_p1` est correct ; seul le commentaire a été corrigé. Témoins :
+fixtures `fix_p1afc` (C=$00 : la lecture fourche par touche,
+`forks_p1 ≥ 1`, handler atteint uniquement par la variante) et
+`fix_p1afcneg` (C=$FF : la lecture de IE=$01 pilote la branche
+naturellement, `forks_p1 == 0`), test `tests/test_p1_probe.c` (`p1_probe`).
 
 ## 1. Cartographie des moteurs et du routage
 
@@ -424,7 +432,7 @@ Aucune de ces contradictions ne doit être lue comme « la technique est
 impossible » — ce sont des retards de documentation ou des défauts de code à
 traiter individuellement.
 
-### 5.1 `docs/GB.fr.md` (non corrigé ici : le fichier est réservé par une autre tranche)
+### 5.1 `docs/GB.fr.md` — **corrigé (2026-11-14)** après libération du fichier par l'autre tranche : entrées 1–7 appliquées (défauts alignés sur le code, noyau par défaut marqué dans les entrées historiques, `ld a,(C)` corrigé en C=$00, 18 variantes/instances) ; l'entrée 8 (verdict `speculative`) est couverte par E3.
 
 | # | Document | Code | Correction proposée |
 |---|---|---|---|
@@ -435,7 +443,7 @@ traiter individuellement.
 | 5 | « l'ancien moteur reste le défaut » (`GB.fr.md:4623,5069`) | **le noyau est le défaut GB** (`deepeel.c:414`, `--legacy`/`DEEPEEL_GB_LEGACY=1`) ; les entrées tardives de la même page le reconnaissent | corriger les entrées antérieures |
 | 6 | « `ld a,(C)` avec C=$FF00 » (`GB.fr.md:136`) | le code teste `c != 0x00` (`forks.c:180`) — **défaut de code**, la doc décrit l'intention | corriger le code : `c != 0xFF` ; ajouter une fixture `ldh (C),a`-style avec C=$FF00 |
 | 7 | « 10 instances / 17 variantes » (`GB.fr.md:110-113`) | **18 machines / 18 variantes** (`CMakeLists.txt:101,104`) | corriger |
-| 8 | verdict `speculative` présenté dans la taxonomy | l'énumération existe (`explorer.h:117`) mais n'est **jamais attribuée** ; seuls required/played/forced sortent (`explorer.c:1890-1898`) — les plateformes NES/PCE/MD ont un vrai `speculative` (`nes_speculative`, `pce_speculative`, `md_speculative`) | attribuer `DP_V_SPECULATIVE` sur GB (sections forcé-seulement hors flux) ou retirer la valeur |
+| 8 | verdict `speculative` présenté dans la taxonomy | l'énumération existe (`explorer.h:117`) mais n'est **jamais attribuée** ; seuls required/played/forced sortent (`explorer.c:1890-1898`) — les plateformes NES/PCE/MD ont un vrai `speculative` (`nes_speculative`, `pce_speculative`, `md_speculative`) | attribuer `DP_V_SPECULATIVE` sur GB (sections forcé-seulement hors flux) ou retirer la valeur — **attribué (2026-11-14)** : voir E3 |
 
 ### 5.2 `docs/Z80.fr.md`
 
@@ -476,9 +484,9 @@ traiter individuellement.
 | # | Objet | Détail | Action proposée |
 |---|---|---|---|
 | 23 | Sonde P1 GB `forks.c:180` | `gbr->c != 0x00` au lieu de `!= 0xFF` : la sonde `ld a,(C)` ne fonctionne pas ; non détectée par les tests | correctif + fixture (test minimal §8, E1) |
-| 24 | `DP_V_SPECULATIVE` mort sur GB (`explorer.h:117`) | jamais attribué (`explorer.c:1890-1898`) | attribuer ou retirer |
-| 25 | Commentaire obsolète `explore.c:2912-2913` | le noyau MSX existe | mettre le commentaire à jour |
-| 26 | « screen cells » (`core.c:1608`) | nom hérité trompeur pour les cellules (cible, RAM) | renommer le libellé du rapport (incrément de version si visible) |
+| 24 | `DP_V_SPECULATIVE` mort sur GB (`explorer.h:117`) | jamais attribué (`explorer.c:1890-1898`) | attribuer ou retirer — **attribué (2026-11-14)** : voir E3 |
+| 25 | Commentaire obsolète `explore.c:2912-2913` | le noyau MSX existe | mettre le commentaire à jour — **corrigé (2026-11-14)** |
+| 26 | « screen cells » (`core.c:1608`) | nom hérité trompeur pour les cellules (cible, RAM) | renommer le libellé du rapport (incrément de version si visible) — **corrigé (2026-11-14)** : le rapport dit désormais « (target, RAM) cells archived » ; les deux tests `gb_session_cells*` suivent le libellé |
 
 ## 6. Banc de parité reproductible (proposition)
 
@@ -556,8 +564,37 @@ tranche) pilotant la CLI `deepeel` et comparant les sorties `--cov/--map/
 
 ## 7. Preuve de concept réalisée : `tests/test_audit_parity.c`
 
-Nouveau fichier propre à l'audit (ctest `audit_parity`), **GB seulement**,
-comme le permet le livrable 4 du plan. Il fait tourner, sur la même fixture
+**Extension en banc (2026-11-14, 0.331.0)** : la PoC est devenue le banc de
+parité du [plan d'implémentation](PLAN-GLM-IMPLEMENTATION-PARITE.fr.md)
+(tranche 3) — une seconde ISA (NES 6502 : `dp_nes_explore` vs
+`dp_core_explore` sur `dp_machine_nes`, fixture `fix_nes_branch`), un
+enregistrement JSON (`<build>/tests/parity.json` : version, commandes CLI
+équivalentes, budgets, saturations des deux moteurs, empreintes FNV-1a des
+ensembles d'octets, différences comptées avec leur raison), et l'auto-test du
+comparateur lui-même : perte injectée (pas/chemin coupés à 4 → `missing 57`,
+détectée), différence admise (sur-couverture noyau, comptée avec sa raison,
+jamais un échec), résultat tronqué ou incompatible (espace d'index vérifié,
+échec explicite). Résultats observés (observations de l'outil sur fixtures) :
+
+```
+audit-parity gb/branch: legacy exec 63 (nat 31 forced 32 irq 1), kernel exec 170
+  (nat 123 forced 47), missing 0, forced->natural 12, kernel extra (nat 92 forced 27)
+audit-parity gb/irq: legacy exec 27 (nat 15 forced 12 irq 3), kernel exec 32447
+  (nat 32447 forced 0), missing 0, forced->natural 12, kernel extra (nat 32432 forced 0)
+audit-parity gb/branch [perte injectée]: kernel exec 8, missing 57 — détectée
+audit-parity nes/nes_branch: legacy exec 24 (nat 5 forced 19), kernel exec 32
+  (nat 17 forced 15), missing 0, forced->natural 4, kernel extra 0
+```
+
+Limites restantes du banc : une seule fixture par ISA (pas de sondes, copies,
+banques comparées) ; NES hors NMI ; les reprises et frontières ne sont pas
+couvertes ; les sessions jouées sont désactivées des deux côtés (`no_sessions`,
+`play_sessions 0`) pour des budgets comparables, leur parité reste à mesurer.
+
+---
+
+Historique de la PoC (0.330.0, GB seulement), comme le permet le livrable 4
+du plan. Elle faisait tourner, sur la même fixture
 et à budgets égaux (2 M pas, 1000 pas/chemin, cap de fourches 4), l'explorateur
 historique (`dp_seed_gb` + `dp_explore`) et le noyau (`dp_core_explore` sur
 `dp_machine_gb` avec les hooks GB), puis compare les ensembles d'octets
@@ -600,15 +637,15 @@ Ce que ces mesures montrent (et que la matrice normative ne disait pas) :
 
 | # | Écart | Impact | Dépendances | Test minimal |
 |---|---|---|---|---|
-| E1 | Sonde P1 `ld a,(C)` inopérante (`forks.c:180`) | sonde GB fausse sur les jeux qui lisent le pad par `ld a,(C)` ; la doc le promet | aucune | fixture GB : `ld a,(C)` avec C=$FF00 en polling, CHECK `forks_p1 ≥ 1` |
+| E1 | Sonde P1 `ld a,(C)` inopérante (`forks.c:180`) | sonde GB fausse sur les jeux qui lisent le pad par `ld a,(C)` ; la doc le promet | aucune | fixture GB : `ld a,(C)` avec C=$FF00 en polling, CHECK `forks_p1 ≥ 1` — **infirmé par fixture (2026-11-14, voir le rectificatif en tête)** : le guard `C == $00` est correct |
 | E2 | Pas de coupes « nonsense » dans le noyau (padding/données/echo/pile) | verdicts noyau gonflés (padding compté « code naturel ») | aucune | la PoC §7 montre déjà le phénomène ; test : fixture padding, CHECK que le noyau ne classe pas le padding en NATURAL — **traité (2026-11-14, 0.341.0)** : hooks `DpMachine.cut_pc`/`cut_sp` (écho/OAM, pile hors RAM, par plateforme), glissade de padding noyau (fenêtre 32 octets, coupe à 4096), comptés et imprimés, `--no-nonsense` ; la coupe suit la sémantique legacy exacte (après exécution, l'octet reste couvert) ; le semis de vecteurs registry (G1) devient noyau (`vector_seeds`, bit `vector` exempté de la coupe taint) |
-| E3 | `DP_V_SPECULATIVE` jamais attribué sur GB | verdict GB incomplet vs NES/PCE/MD | aucune | réutiliser le schéma de `nes_speculative` sur fixture GB à section forcé-seulement |
+| E3 | `DP_V_SPECULATIVE` jamais attribué sur GB | verdict GB incomplet vs NES/PCE/MD | aucune | réutiliser le schéma de `nes_speculative` sur fixture GB à section forcé-seulement — **traité (2026-11-14)** : verdict attribué via la provenance des chemins (hit forcé sans ascendance flux-réel = graine synthétique), fixtures `fix_verdict_{nat,forced,spec,mix}`, test `tests/test_gb_verdicts.c` (`gb_verdicts`) ; limite : les enregistrements de sections ne sont pas persistés, les verdicts (tous types, préexistant) sont recalculés à la reprise depuis la ré-exécution |
 | E4 | `seed_banks`/`--seed-banks` noyau GB-only (écriture $2000) | les autres plateformes perdent le semis par banque en `--core` (Sega le rétablit au niveau CLI) | hooks de banque par plateforme | fixture z80 : `--core --seed-banks` atteint chaque vue — **traité (2026-11-14, 0.340.0)** : hook `DpMachine.bank_view` (GB `$2000`/`$3000`, Sega `seed_window`, NES registre du mapper dont MMC3/MMC5 par fentes 8 Ko, PCE pages MPR à `$4000`), la boucle de semis vit dans `core.c` une fois ; refus comptés (`seed_banks_absent`, imprimé) ; MD sans objet (pas de mapper 68000) |
 | E5 | Fermeture noyau : tables jp stride 3 sm83/z80 seulement, image ROM supposée banques×$4000 | provenance statique bancarisée absente en noyau 6502/huc6280/68000 | géométrie de fenêtres par plateforme dans `DpMachine` | fixture NES/PCE : table {lo,hi,bank} atteinte via `--core` |
 | E6 | Dédup exacte d'états absente du noyau (par politique) | à mesurer : risque de ré-exploitations sur grandes ROMs | banc §6 | mesure avec/sans cellules sur fixture anti-boucle |
-| E7 | Forks IRQ historiques PCE sans test unitaire ; H-int MD ; NMI NES indirect | régressions possibles non détectées | aucune | CHECK `irq_forks ≥ 1` dans `test_pce.c`/`test_md_explore.c` |
-| E8 | Éviction par contexte GB sans CHECK direct | idem GB | aucune | CHECK `evicted_ctx ≥ 1` sur fixture à ré-entrée (`test_sega_sections.c:66` porté) |
-| E9 | Écarts de documentation 5.1–5.5 (18 entrées) | pièges de lecture, défauts CLI erronés | GB.fr.md réservé — à faire par la tranche qui le tient | `audit_matrix` étendu aux défauts CLI |
+| E7 | Forks IRQ historiques PCE sans test unitaire ; H-int MD ; NMI NES indirect | régressions possibles non détectées | aucune | CHECK `irq_forks ≥ 1` dans `test_pce.c`/`test_md_explore.c` — **traité (2026-11-14)** : PCE épinglé par `tests/test_audit_e78.c` sur `fix_pce_irq.pce` (IRQ1 armée, CLI, handler marqué IRQ) ; H-int MD épinglé par `fix_md_hint`/`fix_md_hint_masked` dans `test_md_explore.c` ; NMI NES indirect reste couvert côté noyau seulement |
+| E8 | Éviction par contexte GB sans CHECK direct | idem GB | aucune | CHECK `evicted_ctx ≥ 1` sur fixture à ré-entrée (`test_sega_sections.c:66` porté) — **traité (2026-11-14)** : `tests/test_audit_e78.c` CHECK `evicted_ctx ≥ 1` sur `fix_vblank.gb` |
+| E9 | Écarts de documentation 5.1–5.5 (18 entrées) | pièges de lecture, défauts CLI erronés | GB.fr.md réservé — à faire par la tranche qui le tient | `audit_matrix` étendu aux défauts CLI — **traité (2026-11-14)** : entrées 9–22 corrigées dans Z80/MD/NES/PCE.fr.md, entrées 1–8 dans GB.fr.md (les notes historiques sont datées, pas réécrites) |
 | E10 | `--core` non propagé par l'auto-détection (`deepeel.c:552-610`) | l'utilisateur croit comparer les moteurs et compare le même moteur | aucune | test CLI : `explore` auto-détecté + `--core` refuse ou route |
 | E11 | `--unbounded` noyau sans test dédié au contrat de frontière (rien perdu, SIGINT seul arrêt) | contrat du dépôt non épinglé côté noyau | aucune | test : saturation + reprise, `spool_left` et états jamais perdus |
 | E12 | Profils de synchro TAS non appliqués en noyau GB (`deepeel.c:657-694`) | TAS noyau potentiellement désynchronisé des enregistreurs | profils `dp_tas_tune_machine` | désync sur fixture film avec profil |
@@ -634,9 +671,16 @@ volontairement) ; GUI z80 (hors périmètre assumé, `Z80.fr.md:14-16`).
 
 ## 10. Suite
 
-1. Traiter E1 (correctif + fixture) et E3 (verdict GB) — petits, autonomes.
-2. Étendre la PoC au banc complet (`tools/parity_bench.py`, §6.2) : GB legacy
-   vs noyau d'abord (les deux moteurs sont câblés), puis Sega, NES, PCE, MD.
-3. Porter les corrections de documentation 5.2–5.5 (GB.fr.md est réservé).
-4. Mettre à jour la matrice §2.1 de COUVERTURE.fr.md après révision par le
+État au 14 novembre 2026 : E1 (infirmé puis documenté), E3, E7 (PCE + MD
+H-int), E8 et E9 (corrections documentaires 5.1–5.5) sont traités ; la PoC
+est devenue le banc §7 (GB + NES, JSON, auto-tests du comparateur). Restent :
+
+1. Étendre le banc au-delà d'une fixture par ISA : sondes, copies, banques,
+   puis les autres plateformes (Sega, PCE, MD), la reprise et les frontières
+   (§6.2 ; le banc in-process est le socle, un pilote CLI reste à écrire).
+2. E2 (coupes « nonsense » du noyau) — E4 traité 2026-11-14 (hook `DpMachine.bank_view`, 0.340.0),
+   E5 (fermeture bancarisée noyau), E6 (mesure dédup exacte), E10
+   (propagation `--core` par auto-détection), E11 (contrat `--unbounded`
+   épinglé par moteur), E12 (profils de synchro TAS noyau).
+3. Mettre à jour la matrice §2.1 de COUVERTURE.fr.md après révision par le
    propriétaire — ce document est l'entrée d'audit, pas la norme.

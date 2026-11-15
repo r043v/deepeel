@@ -105,6 +105,11 @@ static int isa_mem_operand(const uint8_t *b, DpMemOp *o) {
     return 1;
 }
 
+static int isa_imm_byte(const uint8_t *b, uint8_t *v) {   // B9: lda/ldx/ldy #imm (a split pointer is loaded in two halves)
+    if (b[0] != 0xA9 && b[0] != 0xA2 && b[0] != 0xA0) return 0;
+    *v = b[1]; return 1;
+}
+
 static const DpIsa isa = { "huc6280", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
-                           isa_effect, isa_illegal, isa_disasm, isa_mem_operand };
+                           isa_effect, isa_illegal, isa_disasm, isa_mem_operand, 0, 0, 1, NULL, isa_imm_byte };
 const DpIsa *dp_isa_huc6280(void) { return &isa; }

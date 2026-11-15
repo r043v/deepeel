@@ -46,16 +46,27 @@ enum { // sources (u32), OR-ed
     DP_SRC_STATIC_SCAN = 1 << 5,  // pointer / padding scan
     DP_SRC_COPY = 1 << 6,         // observed copy ROM->VRAM/OAM
     DP_SRC_SIBLING = 1 << 7,      // sibling inference
-    DP_SRC_COUNT = 8
+    // fabricated-state origins (A6): a fork whose state the explorer built is not the game's own flow
+    DP_SRC_SOLVED = 1 << 8,       // concolic resolution of a conditional
+    DP_SRC_PROBE = 1 << 9,        // event probe (a register value patched in)
+    DP_SRC_INDEX = 1 << 10,       // table index replay
+    DP_SRC_RNG = 1 << 11,         // RNG byte forced
+    DP_SRC_SIG = 1 << 12,         // learned signature value poked
+    DP_SRC_SEEDRAM = 1 << 13,     // seed with a RAM/register/bank preparation
+    DP_SRC_IRQ = 1 << 14,         // IRQ / jitter alternative
+    DP_SRC_BANK = 1 << 15,        // bank fork: another ROM block mapped in at a mapper write (B7)
+    DP_SRC_COUNT = 16
 };
 // source families for certainty: dynamic-natural / dynamic-forced / static
 #define DP_SRC_DYN_NATURAL (DP_SRC_SESSION | DP_SRC_FORK_NATURAL | DP_SRC_COPY)
+#define DP_SRC_DYN_FABRICATED (DP_SRC_SOLVED | DP_SRC_PROBE | DP_SRC_INDEX | DP_SRC_RNG | DP_SRC_SIG | DP_SRC_SEEDRAM | DP_SRC_IRQ | DP_SRC_BANK)
 #define DP_SRC_DYN_FORCED (DP_SRC_FORK_FORCED)
 #define DP_SRC_STATIC_FAMILY (DP_SRC_CLOSURE | DP_SRC_PROVENANCE | DP_SRC_STATIC_SCAN | DP_SRC_SIBLING)
 
 static inline const char *dp_src_name(int bit) {
     static const char *n[DP_SRC_COUNT] = { "session", "fork-natural", "fork-forced",
-        "static-closure", "provenance", "static-scan", "copy", "sibling" };
+        "static-closure", "provenance", "static-scan", "copy", "sibling",
+        "solved", "probe", "index-replay", "rng", "signature", "seed-ram", "irq", "bank-fork" };
     return bit >= 0 && bit < DP_SRC_COUNT ? n[bit] : "?";
 }
 

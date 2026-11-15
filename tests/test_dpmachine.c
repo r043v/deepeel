@@ -14,7 +14,7 @@
 
 static unsigned obs_steps, obs_reads;
 static DpMach *obs_mach;
-static void obs_step(void *u, uint16_t pc, uint8_t op, int entry) {
+static void obs_step(void *u, uint32_t pc, uint8_t op, int entry) {
     (void)u; (void)pc; (void)op; (void)entry;
     if (++obs_steps >= 3000) dp_mach_cut(obs_mach, DP_CUT_QUIT);
 }
@@ -70,7 +70,7 @@ int main(int argc, char **argv) {
     {
         uint8_t image[0x2000] = {0}; image[0x1234] = 0x5A;
         struct { uint8_t *img; int reads; } cx = { image, 0 };
-        int rd(void *c, uint16_t a, uint8_t *v) { typeof(cx) *x = c; if (a >= 0x2000) return 0; *v = x->img[a]; x->reads++; return 1; }
+        int rd(void *c, uint32_t a, uint8_t *v) { typeof(cx) *x = c; if (a >= 0x2000) return 0; *v = x->img[a]; x->reads++; return 1; }
         DpProvRom rom = { &cx, rd };
         DpProvRegs r = {0};
         uint8_t ldhl[3] = { 0x21, 0x34, 0x12 }, lda[1] = { 0x7E }, ldha[1] = { 0x67 }, alu[1] = { 0x80 };

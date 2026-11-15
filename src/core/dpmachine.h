@@ -46,7 +46,7 @@ typedef struct DpProvRegs {
 // proof), 0 otherwise
 typedef struct DpProvRom {
     void *ctx;
-    int (*read)(void *ctx, uint16_t addr, uint8_t *v);
+    int (*read)(void *ctx, uint32_t addr, uint8_t *v);
 } DpProvRom;
 
 // data-memory operand of an instruction (spec §7.3 mem_operand), the input of
@@ -59,7 +59,7 @@ typedef struct DpMemOp {
     uint8_t pair;     // DP_AM_PAIR: 0 BC, 1 DE, 2 HL, 3 SP
     int8_t post;      // pair post-increment (+1/-1), 0 otherwise
     uint8_t width;    // bytes touched
-    uint16_t addr;    // DP_AM_ABS: the address; DP_AM_HIGH_IMM: $FF00 + n
+    uint32_t addr;    // DP_AM_ABS: the address; DP_AM_HIGH_IMM: $FF00 + n
 } DpMemOp;
 
 typedef struct DpIsa {
@@ -83,6 +83,12 @@ typedef struct DpIsa {
     int (*disasm)(const uint8_t *rom, uint32_t rom_size, uint16_t addr, char *out, size_t outsz);
     // data operand of the instruction at `bytes`; 1 when it touches memory
     int (*mem_operand)(const uint8_t *bytes, DpMemOp *out);
+    // C1: capabilities the kernel used to read off the ISA name
+    uint32_t code_min;                     // lowest address legal as a jump-table target (sm83: past the cartridge header)
+    uint8_t hl_jp_table;                   // `jp (hl)` dispatches through a table the closure can follow
+    uint8_t abs_ind_table;                 // `jmp (abs)` / `jmp (abs,x)` dispatch through a word table
+    int (*imm_ptr)(const uint8_t *bytes, uint32_t *imm);   // B9: 1 when the instruction loads a 16-bit immediate pointer into a register pair
+    int (*imm_byte)(const uint8_t *bytes, uint8_t *v);     // B9: 1 when the instruction loads an 8-bit immediate (two nearby ones form a split pointer)
 } DpIsa;
 
 const DpIsa *dp_isa_sm83(void);
@@ -101,10 +107,14 @@ typedef struct DpRegs {
 // observation hooks (spec §7.2 observe): every executed instruction and every
 // CPU data access, as the engine sees them
 typedef struct DpObservers {
-    void (*on_step)(void *user, uint16_t pc, uint8_t op, int entry);
+    void (*on_step)(void *user, uint32_t pc, uint8_t op, int entry);
     void (*on_read)(void *user, uint32_t addr, uint8_t v);
     void (*on_write)(void *user, uint32_t addr, uint8_t v);
+    // B11: a copy made by hardware, not by the CPU (VDP/OAM/HDMA DMA, block transfer): `len` source bytes from `src` are
+    // moved to a destination the machine owns; the CPU never read them
+    void (*on_copy)(void *user, uint32_t src, uint32_t len, unsigned channel);
 } DpObservers;
+enum { DP_COPY_DMA = 1 };
 
 // a component of the incoming state a section's behaviour may depend on
 // (spec §7.2 ctx_components): the bit index is the platform's DP_CTX_* value
@@ -132,10 +142,33 @@ typedef struct DpMachine DpMachine;
 // song number in A and starts on the rip's stack)
 typedef struct DpSeedRegs { uint8_t a; uint16_t sp; } DpSeedRegs;
 
+// C12: the kernel pad mask (DpMachine.set_input).  Per port 16 bits, port 1 in bits 0..15, port 2 in 16..31 (the
+// session / TAS markers of the explorer live above bit 28, so a pad mask must stay below 1 << 29).
+enum {
+    DP_IN_UP = 1 << 0, DP_IN_DOWN = 1 << 1, DP_IN_LEFT = 1 << 2, DP_IN_RIGHT = 1 << 3,
+    DP_IN_B1 = 1 << 4,       // NES A, PCE I, GB A, Mega Drive A, Sega button 1
+    DP_IN_B2 = 1 << 5,       // NES B, PCE II, GB B, Mega Drive B, Sega button 2
+    DP_IN_START = 1 << 6,    // Start / Run
+    DP_IN_SELECT = 1 << 7,   // Select (GB, NES, PCE); the Sega reset key
+    DP_IN_C = 1 << 8,        // Mega Drive C
+    DP_IN_X = 1 << 9, DP_IN_Y = 1 << 10, DP_IN_Z = 1 << 11, DP_IN_MODE = 1 << 12,   // Mega Drive six-button
+    DP_IN_PORT2 = 16         // shift of the second port
+};
+
 struct DpMachine {
     const char *name;                      // "gb", "sms", "nes", ...
     const DpPlatform *plat;
     const DpIsa *isa;
+    uint32_t code_base;                    // C3/B8: address of the first 16 KiB ROM window (GB 0, NES 0x8000)
+    uint8_t fixed_high;                    // 1 = the high window is the fixed (last) bank and the low one switches (NES); 0 = the reverse (GB)
+    uint32_t save_ram_en_addr; uint8_t save_ram_en_val, save_ram_en;   // B10: write that enables the cart RAM before seeding
+    uint32_t save_ram_base, save_ram_len;  // B10: battery/cart RAM window the game may validate at boot (0 len: none)
+    uint32_t work_ram_base, work_ram_len;  // A25: the CPU-visible work RAM range (0 len: unknown, defaults to $C000/$2000)
+    // C13: dense index of the CPU-addressable RAM the core keys its per-address tables on (ram_index -1: not RAM).
+    // Absent: the low 16 address bits (every 16-bit CPU).  ram_addr is the inverse, ram_size the index count.
+    int64_t (*ram_index)(struct DpMachine *, uint32_t addr);
+    uint32_t (*ram_addr)(struct DpMachine *, uint32_t idx);
+    uint32_t ram_size;
     void *impl;                            // backend instance
     // state images
     uint32_t (*state_bytes)(struct DpMachine *);
@@ -174,7 +207,9 @@ struct DpMachine {
     // low 16 KiB fixed to bank 0).  0 = the house bank * 0x4000 convention;
     // the kernel's banked static walk (closure_walk_img / the stride-3 tables)
     // consumes it instead of assuming the geometry.
+    uint8_t linear;   // 1 when the ROM is one linear space starting at address 0 (the image is the ROM, one window; MD)
     uint8_t bank_shift;
+    uint8_t page_shift;   // B8: log2 of the ROM page size when the executing address of a page depends on the mapper (PCE: 13); the kernel journals the window each page ran at
     // Optional data-destination knowledge (the shared DP_DEST_* model in
     // coverage.h): where a write to `addr` lands in the hardware (VRAM, OAM,
     // palette, sound registers...).  0 = untyped.  The kernel records the
@@ -186,8 +221,19 @@ struct DpMachine {
     // holds a pad mask (bits 0..5 = up/down/left/right/button1/button2) until changed;
     // NULL: the machine has no input model.  Entry point of the kernel's held-pad sessions.
     void (*set_input)(struct DpMachine *, uint32_t mask);
+    // C14: the next CPU read of `addr` returns `value`, once; the arming lives in the saved state.  NULL: the
+    // machine's probes patch the underlying state (save / patch / restore) instead.  Returns 0 when unsupported.
+    int (*arm_read)(struct DpMachine *, uint32_t addr, uint8_t value);
+    // B5: hash of the whole machine state with the monotonic clocks excluded (cycle / frame counters): two equal
+    // hashes at the same pc mean the machine is in the same state.  NULL: unsupported (the kernel counts it).
+    uint64_t (*state_hash)(struct DpMachine *);
     // completed frames since power-on (NULL: unknown); lets the kernel replay a movie
     uint64_t (*frame)(struct DpMachine *);
+    // Optional game-screen access (the generic live watch, platform-neutral): watch(on) makes the machine capture its picture
+    // (rendering costs time: off by default); render() writes the last completed frame as ARGB (at most `cap` pixels) and
+    // returns 1 with its size, 0 when there is no picture.  NULL: this machine has no screen view (the watch says so).
+    void (*watch)(struct DpMachine *, int on);
+    int (*render)(struct DpMachine *, uint32_t *argb, unsigned cap, int *w, int *h);
     void (*observe)(struct DpMachine *, const DpObservers *, void *user);
     int (*ctx_components)(struct DpMachine *, const DpCtxComp **out);   // count
     int (*probes)(struct DpMachine *, const DpProbe **out);             // count
@@ -229,6 +275,7 @@ struct DpMdMach;
 // the NES backend (src/mach/nes_machine.c): opens the runtime from a
 // cartridge image (mapper <0: auto) and owns it
 size_t dp_machine_nes_prg_size(DpMachine *m);
+const uint8_t *dp_machine_nes_prg(DpMachine *m);   // the PRG image (bank*0x4000 + offset layout)
 struct DpPlatformHooks;
 const struct DpPlatformHooks *dp_machine_nes_hooks(void);
 void dp_machine_sega_set_msx(DpMachine *m, int msx);   /* marks an MSX machine (keyboard probes, no Pause NMI) */

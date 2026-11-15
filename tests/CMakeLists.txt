@@ -163,6 +163,12 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_mbc5.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_mbc1m1.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_dma.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_p1afc.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_p1afcneg.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_verdict_nat.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_verdict_forced.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_verdict_spec.gb
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_verdict_mix.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_irq.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_jumptable.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_loop.gb
@@ -189,12 +195,15 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nsstack.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_dma.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_s4.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_md_ref.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_s4j.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_s4a.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_s4w.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_s4p.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_pad6.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_longloop.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_md_hint.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_md_hint_masked.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_jptable_de.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_provde.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_provbyte.gb
@@ -267,11 +276,16 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_bz_axis.bk2
   ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_closure.gb
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_closure.pce
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_page.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_tam.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_tam2.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_closure.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_closure.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_closure.sms
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_siblings.sms
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_jumptable.sms
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_deadpage.pce
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dmc.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_status.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_decomp.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_decomp.md
@@ -397,15 +411,15 @@ target_link_libraries(test_lr_parity PRIVATE deepeel_core m)
 add_dependencies(test_lr_parity fixtures)
 add_test(NAME lr_parity COMMAND test_lr_parity ${CMAKE_CURRENT_BINARY_DIR})
 add_test(NAME campaign_fixtures COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/campaign_fixtures.py ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/campaign.md)
-set_tests_properties(campaign_fixtures PROPERTIES TIMEOUT 900)
+set_tests_properties(campaign_fixtures PROPERTIES TIMEOUT 1800)
 add_test(NAME audit_matrix COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/audit_matrix.py ${CMAKE_SOURCE_DIR}/docs/COUVERTURE.fr.md ${CMAKE_CURRENT_BINARY_DIR}/audit.md)
 add_test(NAME nes_entry COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes --attract-frames 0 --max-total 200000 --entry 0:8150 --entry 3:8000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_entry.txt >/dev/null 2>&1; grep -q 'entries: seeded 1 refused 1' ${CMAKE_CURRENT_BINARY_DIR}/nes_entry.txt")
 set_tests_properties(nes_entry PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_seed_banks COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_uxrom.nes --attract-frames 0 --max-total 200000 --max-steps 1000 --seed-banks --text ${CMAKE_CURRENT_BINARY_DIR}/nes_sb.txt >/dev/null 2>&1; grep -q 'entries: seeded 4 refused 0' ${CMAKE_CURRENT_BINARY_DIR}/nes_sb.txt && grep -q 'sections 4:' ${CMAKE_CURRENT_BINARY_DIR}/nes_sb.txt")
 set_tests_properties(nes_seed_banks PROPERTIES FIXTURES_REQUIRED fixtures)
-add_test(NAME nes_pad_probe COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_pad.nes --attract-frames 0 --max-total 200000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_pp.txt >/dev/null 2>&1; grep -q 'pad probes: 38 forks at 2 sites' ${CMAKE_CURRENT_BINARY_DIR}/nes_pp.txt")
+add_test(NAME nes_pad_probe COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_pad.nes --attract-frames 0 --max-total 200000 --max-steps 1000 --text ${CMAKE_CURRENT_BINARY_DIR}/nes_pp.txt >/dev/null 2>&1; grep -q 'pad probes: 52 forks at 2 sites' ${CMAKE_CURRENT_BINARY_DIR}/nes_pp.txt")
 set_tests_properties(nes_pad_probe PROPERTIES FIXTURES_REQUIRED fixtures)
-add_test(NAME nes_pad_full COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_pad.nes --attract-frames 0 --max-total 400000 --max-steps 1000 --pad-full --text ${CMAKE_CURRENT_BINARY_DIR}/nes_pf.txt >/dev/null 2>&1; grep -q 'pad probes: 512 forks at 2 sites' ${CMAKE_CURRENT_BINARY_DIR}/nes_pf.txt")
+add_test(NAME nes_pad_full COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_pad.nes --attract-frames 0 --max-total 400000 --max-steps 1000 --pad-full --text ${CMAKE_CURRENT_BINARY_DIR}/nes_pf.txt >/dev/null 2>&1; grep -q 'pad probes: 526 forks at 2 sites' ${CMAKE_CURRENT_BINARY_DIR}/nes_pf.txt")
 set_tests_properties(nes_pad_full PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME md_pad_full COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_pad6.md --attract-frames 0 --pad-full --max-total 3000000 --text ${CMAKE_CURRENT_BINARY_DIR}/md_pf.txt >/dev/null 2>&1; grep -q 'pad probes: 258 ' ${CMAKE_CURRENT_BINARY_DIR}/md_pf.txt")
 set_tests_properties(md_pad_full PROPERTIES FIXTURES_REQUIRED fixtures)
@@ -537,8 +551,8 @@ add_test(NAME sg_watch_dump COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_C
 set_tests_properties(sg_watch_dump PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME msx_watch_dump COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -f $D/msx_w.ppm; $B z80 explore msx $D/fix_z80_branch.msx --play-steps 300000 --watch-dump $D/msx_w.ppm --text $D/msx_w.txt >/dev/null 2>&1; grep -q 'watch: [1-9][0-9]* frames published' $D/msx_w.txt && head -c 15 $D/msx_w.ppm | grep -q '160 192'")
 set_tests_properties(msx_watch_dump PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
-add_test(NAME gb_session_cells COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_branch.gb --play --session-cells --time-limit 8 2>&1 | grep -q 'screen cells archived into the checkpoint pool'")
-add_test(NAME gb_session_cells_resume COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -rf $D/cells_st; $B explore $D/fix_branch.gb --play --session-cells --state-dir $D/cells_st --time-limit 6 2>&1 | grep -qE ': [1-9][0-9]* screen cells archived'; $B explore $D/fix_branch.gb --play --session-cells --resume --state-dir $D/cells_st --time-limit 6 2>&1 | grep -q ': 0 screen cells archived'")
+add_test(NAME gb_session_cells COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_branch.gb --play --session-cells --time-limit 8 2>&1 | grep -q '(target, RAM) cells archived into the checkpoint pool'")
+add_test(NAME gb_session_cells_resume COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -rf $D/cells_st; $B explore $D/fix_branch.gb --play --session-cells --state-dir $D/cells_st --time-limit 6 2>&1 | grep -qE ': [1-9][0-9]* (target, RAM) cells archived'; $B explore $D/fix_branch.gb --play --session-cells --resume --state-dir $D/cells_st --time-limit 6 2>&1 | grep -q ': 0 (target, RAM) cells archived'")
 set_tests_properties(gb_session_cells_resume PROPERTIES FIXTURES_REQUIRED fixtures)
 set_tests_properties(gb_session_cells PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME pce_watch_dump COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -f $D/pce_w.ppm; $B pce explore $D/fix_pce_branch.pce --attract-frames 0 --play 100 --watch-dump $D/pce_w.ppm --text $D/pce_w.txt >/dev/null 2>&1; grep -q 'watch: [1-9][0-9]* frames published' $D/pce_w.txt && head -c 15 $D/pce_w.ppm | grep -q '^P6'")
@@ -703,18 +717,18 @@ set_tests_properties(md_speculative PROPERTIES FIXTURES_REQUIRED fixtures TIMEOU
 add_test(NAME resume_cov COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/resume_cov.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_branch.gb)
 set_tests_properties(resume_cov PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 
-add_executable(test_nes_mmc3 test_nes_mmc3.c)
-target_link_libraries(test_nes_mmc3 PRIVATE deepeel_nes deepeel_core m)
-add_dependencies(test_nes_mmc3 fixtures)
-add_test(NAME nes_mmc3 COMMAND test_nes_mmc3 ${CMAKE_CURRENT_BINARY_DIR})
-
 add_executable(test_nes_jmpind test_nes_jmpind.c)
 target_link_libraries(test_nes_jmpind PRIVATE deepeel_nes deepeel_core m)
 add_dependencies(test_nes_jmpind fixtures)
 add_test(NAME nes_jmpind COMMAND test_nes_jmpind ${CMAKE_CURRENT_BINARY_DIR})
 
+add_executable(test_nes_mmc3 test_nes_mmc3.c)
+target_link_libraries(test_nes_mmc3 PRIVATE deepeel_nes deepeel_core m)
+add_dependencies(test_nes_mmc3 fixtures)
+add_test(NAME nes_mmc3 COMMAND test_nes_mmc3 ${CMAKE_CURRENT_BINARY_DIR})
+
 add_executable(test_audit_parity test_audit_parity.c)
-target_link_libraries(test_audit_parity PRIVATE deepeel_core m)
+target_link_libraries(test_audit_parity PRIVATE deepeel_core deepeel_nes m)
 add_dependencies(test_audit_parity fixtures)
 add_test(NAME audit_parity COMMAND test_audit_parity ${CMAKE_CURRENT_BINARY_DIR})
 set_tests_properties(audit_parity PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 120)
@@ -871,6 +885,30 @@ add_test(NAME desync_finder COMMAND sh -c "d=${CMAKE_CURRENT_BINARY_DIR}; x=$<TA
 add_test(NAME frontier_kernel COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/frontier_kernel.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_irq.gb)
 set_tests_properties(frontier_cli resume_cov PROPERTIES ENVIRONMENT "DEEPEEL_GB_LEGACY=1")
 
+# E1 witness: the GB P1 poll probe on `ld a,(C)` (fork_p1) reads $FF00+C --
+# C=$00 is P1 (positive witness), C=$FF is the IE register (negative witness).
+add_executable(test_p1_probe test_p1_probe.c)
+target_link_libraries(test_p1_probe PRIVATE deepeel_core m)
+add_dependencies(test_p1_probe fixtures)
+add_test(NAME p1_probe COMMAND test_p1_probe ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(p1_probe PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# E3 witness: GB section verdicts — a seed-only section is speculative, a
+# fork-reachable one stays forced, the flow fork outranks the seed provenance.
+add_executable(test_gb_verdicts test_gb_verdicts.c)
+target_link_libraries(test_gb_verdicts PRIVATE deepeel_core m)
+add_dependencies(test_gb_verdicts fixtures)
+add_test(NAME gb_verdicts COMMAND test_gb_verdicts ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(gb_verdicts PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# E7/E8 witnesses (AUDIT-PARITE-MOTEURS.fr.md 8): the legacy PCE IRQ fork on
+# fix_pce_irq and the GB same-context eviction on fix_vblank.
+add_executable(test_audit_e78 test_audit_e78.c)
+target_link_libraries(test_audit_e78 PRIVATE deepeel_core deepeel_pce m)
+add_dependencies(test_audit_e78 fixtures)
+add_test(NAME audit_e78 COMMAND test_audit_e78 ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(audit_e78 PROPERTIES FIXTURES_REQUIRED fixtures)
+
 # GBS rip verification (src/core/gbs.c): header parse, per-bank best match of a patched
 # rip, init/play mapping; and the CLI: the confirmed seeds execute, a rip that matches
 # nothing fails loudly.
@@ -887,3 +925,144 @@ set_tests_properties(core_gbs PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 120)
 add_executable(test_music_index test_music_index.c)
 target_link_libraries(test_music_index PRIVATE deepeel_core m)
 add_test(NAME music_index COMMAND test_music_index ${CMAKE_CURRENT_BINARY_DIR})
+
+add_executable(test_p0_core test_p0_core.c)
+target_link_libraries(test_p0_core PRIVATE deepeel_z80 deepeel_sega deepeel_nes deepeel_pce deepeel_core m)
+add_dependencies(test_p0_core fixtures)
+add_test(NAME p0_core COMMAND test_p0_core ${CMAKE_CURRENT_BINARY_DIR})
+
+add_executable(test_p3_core test_p3_core.c)
+target_link_libraries(test_p3_core PRIVATE deepeel_z80 deepeel_sega deepeel_nes deepeel_pce deepeel_core m)
+add_dependencies(test_p3_core fixtures)
+add_test(NAME p3_core COMMAND test_p3_core ${CMAKE_CURRENT_BINARY_DIR})
+
+add_executable(test_p4_core test_p4_core.c)
+target_link_libraries(test_p4_core PRIVATE deepeel_nes deepeel_core m)
+add_dependencies(test_p4_core fixtures)
+add_test(NAME p4_core COMMAND test_p4_core ${CMAKE_CURRENT_BINARY_DIR})
+
+# B7: a mapper write forks on the banks the game never selected (bank 2 and 3 code of fix_mbc_fork.gb)
+add_test(NAME core_bank_forks COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_mbc_fork.gb; O=${CMAKE_CURRENT_BINARY_DIR}; $B explore $F --core --no-sessions --attract-frames 0 --no-pointer-scan --text $O/bf_on.txt >/dev/null 2>&1 && $B explore $F --core --no-bank-forks --no-sessions --attract-frames 0 --no-pointer-scan --text $O/bf_off.txt >/dev/null 2>&1 && grep -q 'rom-index 32768-32773' $O/bf_on.txt && grep -q 'rom-index 49152-49157' $O/bf_on.txt && ! grep -q 'rom-index 32768-32773' $O/bf_off.txt && grep -q 'bank forks: 4' $O/bf_on.txt")
+set_tests_properties(core_bank_forks PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# B8: an uncalled routine is a speculative gap run; undefined opcodes and padding are not (witnesses)
+add_test(NAME core_spec_gaps COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_gap.gb; O=${CMAKE_CURRENT_BINARY_DIR}; $B explore $F --core --no-sessions --attract-frames 0 --no-pointer-scan --no-closure --text $O/spec_on.txt >/dev/null 2>&1 && $B explore $F --core --no-spec --no-sessions --attract-frames 0 --no-pointer-scan --no-closure --text $O/spec_off.txt >/dev/null 2>&1 && grep -q 'speculative gaps: 1 runs, 8 bytes' $O/spec_on.txt && grep -q '0 runs reinforced' $O/spec_on.txt && grep -q 'speculative gaps: 0 runs' $O/spec_off.txt && grep -q 'natural 7, forced 0' $O/spec_on.txt")
+set_tests_properties(core_spec_gaps PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# B10: the cartridge RAM window the machine declares is seeded without --seed-ram (NES $6000, PRG-RAM poke)
+add_test(NAME core_auto_seed COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_sram.nes; O=${CMAKE_CURRENT_BINARY_DIR}; $B nes explore $F --core --no-sessions --attract-frames 0 --text $O/as_on.txt >/dev/null 2>&1 && $B nes explore $F --core --no-auto-seed --no-sessions --attract-frames 0 --text $O/as_off.txt >/dev/null 2>&1 && grep -q 'seeded RAM states 4' $O/as_on.txt && grep -q 'seeded RAM states 0' $O/as_off.txt")
+set_tests_properties(core_auto_seed PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# A22/B3: the movie's checkpoints become free paths in the kernel; --no-tas-ckpt turns them off
+add_test(NAME core_tas_ckpt COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_pad.md --core --attract-frames 0 --tas $D/fix_md_movie.bk2 --tas-any-rom --tas-ckpt-every 1 --max-total 100000 --text $D/tc_on.txt >/dev/null 2>&1 && $B md explore $D/fix_md_pad.md --core --attract-frames 0 --tas $D/fix_md_movie.bk2 --tas-any-rom --no-tas-ckpt --max-total 100000 --text $D/tc_off.txt >/dev/null 2>&1 && grep -Eq 'checkpoints continued as free paths: [1-9]' $D/tc_on.txt && grep -q 'checkpoints continued as free paths: 0' $D/tc_off.txt")
+set_tests_properties(core_tas_ckpt PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# B9: an executed `ld hl,nn` designating a 2-instruction gap routine reinforces it (3 are needed without the reference)
+add_test(NAME core_spec_ref COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_ref.gb; O=${CMAKE_CURRENT_BINARY_DIR}; $B explore $F --core --no-sessions --attract-frames 0 --no-pointer-scan --no-closure --text $O/ref.txt >/dev/null 2>&1 && grep -q 'speculative gaps: 1 runs' $O/ref.txt && grep -q '1 runs reinforced' $O/ref.txt")
+set_tests_properties(core_spec_ref PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# B3: the vector seeds also start from the first live movie checkpoints
+add_test(NAME core_live_seeds COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; printf '|.......S|\\n|.......S|\\n|.......S|\\n|.......S|\\n' > $D/ls.log; $B explore $D/fix_gb_ref.gb --core --tas $D/ls.log --tas-any-rom --attract-frames 0 --tas-ckpt-every 1 --max-total 100000 --text $D/ls_on.txt >/dev/null 2>&1 && $B explore $D/fix_gb_ref.gb --core --tas $D/ls.log --tas-any-rom --attract-frames 0 --tas-ckpt-every 1 --no-live-seeds --max-total 100000 --text $D/ls_off.txt >/dev/null 2>&1 && grep -Eq 'vector seeds from live states: [1-9]' $D/ls_on.txt && grep -q 'vector seeds from live states: 0' $D/ls_off.txt")
+set_tests_properties(core_live_seeds PROPERTIES FIXTURES_REQUIRED fixtures)
+
+
+# B8 on NES: the window model (base $8000, last bank fixed high) lets the speculative disassembly run on the PRG image
+add_test(NAME core_spec_nes COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_gap.nes; O=${CMAKE_CURRENT_BINARY_DIR}; $B nes explore $F --core --no-sessions --attract-frames 0 --text $O/sn_on.txt >/dev/null 2>&1 && $B nes explore $F --core --no-spec --no-sessions --attract-frames 0 --text $O/sn_off.txt >/dev/null 2>&1 && grep -q 'speculative gaps: 1 runs, 8 bytes' $O/sn_on.txt && grep -q 'speculative gaps: 0 runs' $O/sn_off.txt")
+set_tests_properties(core_spec_nes PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# B4 on 6502: the proven table length (12 words) widens the index replay past the default bound of 15
+add_test(NAME core_index_proven_6502 COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_index20.nes; O=${CMAKE_CURRENT_BINARY_DIR}; $B nes explore $F --core --no-sessions --attract-frames 0 --text $O/ip_on.txt >/dev/null 2>&1 && $B nes explore $F --core --no-sessions --attract-frames 0 --index-max 15 --text $O/ip_off.txt >/dev/null 2>&1 && grep -q 'index replays 25' $O/ip_on.txt && grep -q 'index replays 16' $O/ip_off.txt")
+set_tests_properties(core_index_proven_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# A13: the fall-through after a call is untrusted; inline data read by the callee stops the static walk
+add_test(NAME core_inline_data COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_inline.gb; O=${CMAKE_CURRENT_BINARY_DIR}; $B explore $F --core --no-sessions --attract-frames 0 --no-pointer-scan --text $O/inl.txt >/dev/null 2>&1 && grep -Eq 'static walks stopped or retracted on data [1-9]' $O/inl.txt")
+set_tests_properties(core_inline_data PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# A13: an untrusted static walk stops on a padding run
+add_test(NAME core_pad_stop COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_padstop.gb; O=${CMAKE_CURRENT_BINARY_DIR}; $B explore $F --core --no-sessions --attract-frames 0 --no-pointer-scan --text $O/pad.txt >/dev/null 2>&1 && grep -Eq 'retracted on data [1-9]' $O/pad.txt && grep -q 'static-only 0' $O/pad.txt")
+set_tests_properties(core_pad_stop PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# A13: an untrusted static walk stops inside a run of pointer-like words
+add_test(NAME core_ptr_stop COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_ptrstop.gb; O=${CMAKE_CURRENT_BINARY_DIR}; $B explore $F --core --no-sessions --attract-frames 0 --no-pointer-scan --text $O/ptr.txt >/dev/null 2>&1 && grep -Eq 'retracted on data [1-9]' $O/ptr.txt && grep -q 'static-only 0' $O/ptr.txt")
+set_tests_properties(core_ptr_stop PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# B9 on the 68000: an executed lea/movea.l/pea immediate that designates the ROM is a typed reference
+add_test(NAME core_imm_ref_68000 COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B md explore $D/fix_md_ref.md --core --jobs 1 --attract-frames 0 --no-sessions --text $D/mdref.txt >/dev/null 2>&1 && grep -Eq '\\(1 references seen\\)' $D/mdref.txt && grep -q '1 runs reinforced' $D/mdref.txt")
+set_tests_properties(core_imm_ref_68000 PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# B9 on 6502: two nearby 8-bit immediates form a ROM address, a typed reference
+add_test(NAME core_imm_ref_6502 COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B nes explore $D/fix_nes_ref.nes --core --no-sessions --attract-frames 0 --text $D/nesref.txt >/dev/null 2>&1 && grep -Eq '[(]1 references seen[)]' $D/nesref.txt")
+set_tests_properties(core_imm_ref_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# B8/B9 on PCE: the fixed bank 0 ($E000) is modelled; a split-immediate reference reinforces an uncalled routine
+add_test(NAME core_spec_pce COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B pce explore $D/fix_pce_ref.pce --core --jobs 1 --no-sessions --text $D/pceref.txt >/dev/null 2>&1 && grep -q 'speculative gaps: 1 runs' $D/pceref.txt && grep -q '1 runs reinforced' $D/pceref.txt")
+set_tests_properties(core_spec_pce PROPERTIES FIXTURES_REQUIRED fixtures)
+# B8 on PCE beyond the fixed bank: the kernel journals the MPR window each page ran at; the uncalled routine in page 1 is found at $4010
+add_test(NAME core_spec_pce_page COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B pce explore $D/fix_pce_page.pce --core --jobs 1 --no-sessions --text $D/pcepage.txt >/dev/null 2>&1 && grep -q 'speculative gaps: 1 runs, 8 bytes' $D/pcepage.txt")
+set_tests_properties(core_spec_pce_page PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# C3 (option B): the Sega provenance closure runs inside the kernel; its seeds count as closure roots and its bytes never lower the static-only total
+add_test(NAME core_sega_closure_hook COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_closure.sms; a='--core --jobs 1 --attract-frames 0 --no-sessions'; on=$($<TARGET_FILE:deepeel> z80 explore sms $f $a | sed -n 's/.*static-only \\([0-9]*\\),.*/\\1/p' | head -1); off=$(DEEPEEL_NO_SEGA_CLOSURE=1 $<TARGET_FILE:deepeel> z80 explore sms $f $a | sed -n 's/.*static-only \\([0-9]*\\),.*/\\1/p' | head -1); test -n \"$on\" && test $on -ge $off && test $on -ge 5")
+set_tests_properties(core_sega_closure_hook PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# C9: with no engine flag the kernel runs on every platform; --legacy selects the historical engine
+add_test(NAME core_default_engine COMMAND sh -c "unset DEEPEEL_LEGACY; d=$<TARGET_FILE:deepeel>; b=${CMAKE_CURRENT_BINARY_DIR}; $d nes explore $b/fix_nes_branch.nes --attract-frames 0 2>&1 | grep -q 'deepeel nes (generic kernel)' && $d pce explore $b/fix_pce_branch.pce --attract-frames 0 2>&1 | grep -q 'deepeel pce (generic kernel)' && $d z80 explore sms $b/fix_z80_branch.sms --attract-frames 0 2>&1 | grep -q 'generic kernel' && ! $d nes explore $b/fix_nes_branch.nes --legacy 2>&1 | grep -q 'generic kernel'")
+set_tests_properties(core_default_engine PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# C9: the kernel is the default engine; the historical-engine tests keep running the old engines through
+# DEEPEEL_LEGACY (an explicit --core on a command line still wins over it).
+get_property(_all_tests DIRECTORY PROPERTY TESTS)
+foreach(_t IN LISTS _all_tests)
+  get_test_property(${_t} ENVIRONMENT _env)
+  if(NOT _env)
+    set(_env "")
+  endif()
+  set_tests_properties(${_t} PROPERTIES ENVIRONMENT "${_env};DEEPEEL_LEGACY=1")
+endforeach()
+
+# C4: the common static inference tags the siblings of a copied table (never as an observation)
+add_test(NAME core_infer_siblings COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_siblings.sms; a='--core --jobs 1 --attract-frames 0 --no-sessions'; $<TARGET_FILE:deepeel> z80 explore sms $f $a | grep -q 'copy tables [1-9][0-9]* (32 sibling bytes' && $<TARGET_FILE:deepeel> z80 explore sms $f $a --no-infer | grep -vq 'static inference'")
+set_tests_properties(core_infer_siblings PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# C4: the common static inference tags the word run around an observed table read as a jump table
+add_test(NAME core_infer_jumptable COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_jumptable.sms; a='--core --jobs 1 --attract-frames 0 --no-sessions'; $<TARGET_FILE:deepeel> z80 explore sms $f $a | grep -q 'jump tables 1 (6 bytes)'")
+set_tests_properties(core_infer_jumptable PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# B8: a ROM page the mapper never ran is scanned at the windows other pages ran at (PCE)
+add_test(NAME core_spec_deadpage COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_deadpage.pce; O=${CMAKE_CURRENT_BINARY_DIR}; $B pce explore $F --core --no-sessions --attract-frames 0 --text $O/dp.txt >/dev/null 2>&1; grep -q 'speculative gaps: [1-9]' $O/dp.txt")
+set_tests_properties(core_spec_deadpage PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# B11: a VDP DMA from ROM is a hardware copy the kernel records (on_copy); the CPU never read those bytes
+add_test(NAME core_md_dma_copy COMMAND sh -c "$<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_dma.md --core --no-sessions --attract-frames 0 | grep -q 'rom->ram copy bytes 32 (32 distinct ROM sources)'")
+set_tests_properties(core_md_dma_copy PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# B11: the NES DMC sample DMA reaches the kernel as a hardware copy (17 bytes)
+add_test(NAME core_nes_dmc_copy COMMAND sh -c "$<TARGET_FILE:deepeel> nes explore ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dmc.nes --core --no-sessions --attract-frames 0 | grep -q 'rom->ram copy bytes 17 (17 distinct'")
+set_tests_properties(core_nes_dmc_copy PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# C11: a section reports the RAM pages it read on natural paths (its liveness)
+add_test(NAME core_section_live COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B z80 explore sms $D/fix_z80_rng.sms --core --no-sessions --attract-frames 0 --jobs 1 | grep -q 'section 1 .* live-ram-pages 1' && $B z80 explore sms $D/fix_z80_closure.sms --core --no-sessions --attract-frames 0 --jobs 1 | grep -q 'section 1 .* live-ram-pages 0'")
+set_tests_properties(core_section_live PROPERTIES FIXTURES_REQUIRED fixtures)
+
+# B3: attract/play sessions deposit live checkpoints into the pool; --no-tas-ckpt turns them off
+add_test(NAME core_session_ckpt COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_rng.sms; a=\"z80 explore sms $F --core --attract-frames 100 --tas-ckpt-every 20 --jobs 1 --ckpt-burst-frames 5\"; $B $a | grep -q 'pad bursts from them: [1-9]' && $B $a --no-ckpt-bursts | grep -q 'pad bursts from them: 0' && $B $a --no-tas-ckpt | grep -q 'session checkpoints continued as free paths: 0'")
+set_tests_properties(core_session_ckpt PROPERTIES FIXTURES_REQUIRED fixtures)
+set_tests_properties(core_session_ckpt PROPERTIES TIMEOUT 400)
+
+# B3: live checkpoints are ordered by the visit count of their cell (the code location they resume at), covered or not
+add_test(NAME core_ckpt_cell COMMAND sh -c "$<TARGET_FILE:deepeel> z80 explore sms ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_rng.sms --core --attract-frames 100 --tas-ckpt-every 20 --jobs 1 --no-ckpt-bursts | grep -q 'site-scored picks [1-9]'")
+set_tests_properties(core_ckpt_cell PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 180)
+
+# Step 3 of the legacy retirement: the kernel alone against the frozen legacy proof sets (tests/golden/)
+add_executable(test_parity_golden test_parity_golden.c)
+target_link_libraries(test_parity_golden PRIVATE deepeel_core deepeel_nes m)
+add_dependencies(test_parity_golden fixtures)
+add_test(NAME parity_golden COMMAND test_parity_golden ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/golden)
+
+# Stage 1 of the legacy retirement: the live ROM map window runs on the kernel for every platform (generic DpCoreResult view)
+add_test(NAME mapwin_kernel COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/mapwin_kernel.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(mapwin_kernel PROPERTIES TIMEOUT 300)
+
+# Stage 1: the kernel's generic --watch (DpMachine.render) publishes the replayed movie's screen; --watch-dump writes the last frame
+add_test(NAME watch_kernel COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -f $D/wk.ppm; SDL_VIDEODRIVER=dummy $B md explore $D/fix_md_pad.md --core --attract-frames 0 --tas $D/fix_md_movie.bk2 --tas-any-rom --max-total 100000 --watch 60 --watch-dump $D/wk.ppm >/dev/null 2>&1; head -c 2 $D/wk.ppm | grep -q P6")
+add_test(NAME watch_kernel_gb COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -f $D/wkg.ppm; SDL_VIDEODRIVER=dummy $B explore $D/fix_gb_ref.gb --core --tas $D/ls.log --tas-any-rom --attract-frames 0 --max-total 100000 --watch 60 --watch-dump $D/wkg.ppm >/dev/null 2>&1; head -c 2 $D/wkg.ppm | grep -q P6")

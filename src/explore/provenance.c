@@ -79,8 +79,10 @@ static void prov_data_mark(DpResults *res, uint16_t addr) {
 typedef struct { DpResults *res; int unused; } ProvRead;
 
 // a ROM byte at a provable address: the proof is recorded as static data
-static int prov_rom_read(void *ctx, uint16_t addr, uint8_t *v) {
+static int prov_rom_read(void *ctx, uint32_t addr32, uint8_t *v) {
     ProvRead *pr = ctx;
+    if (addr32 > 0xFFFF) return 0;   // the 16-bit ISAs only: a wider address is not a provable ROM address here
+    uint16_t addr = (uint16_t)addr32;
     uint32_t k = prov_addr_key(pr->res, addr);
     if (k == ~0u) return 0;
     *v = pr->res->cart->rom[k];

@@ -167,6 +167,10 @@ static int isa_mem_operand(const uint8_t *b, DpMemOp *o) {
     }
 }
 
+static int isa_imm_ptr(const uint8_t *b, uint32_t *imm) {   // ld bc/de/hl,nn (unprefixed)
+    if (b[0] != 0x01 && b[0] != 0x11 && b[0] != 0x21) return 0;
+    *imm = (uint32_t)b[1] | (uint32_t)b[2] << 8; return 1;
+}
 static const DpIsa isa = { "z80", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
-                           isa_effect, isa_illegal, isa_disasm, isa_mem_operand };
+                           isa_effect, isa_illegal, isa_disasm, isa_mem_operand, 0, 1, 0, isa_imm_ptr };
 const DpIsa *dp_isa_z80(void) { return &isa; }

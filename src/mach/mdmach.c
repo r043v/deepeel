@@ -225,6 +225,8 @@ uint16_t dp_mdmach_sr(const DpMdMach *d) { return d->m->sr; }
 uint32_t dp_mdmach_dn(const DpMdMach *d, unsigned n) { return d->m->d[n & 7]; }
 uint32_t dp_mdmach_an(const DpMdMach *d, unsigned n) { return d->m->a[n & 7]; }
 void dp_mdmach_set_pad(DpMdMach *d, uint8_t pad) { d->m->pad = pad; }
+// C12: six-button pad: ext bit 7 plugged, bits 0-3 Z,Y,X,Mode pressed (0 keeps the three-button pad)
+void dp_mdmach_set_pad_ext(DpMdMach *d, uint8_t ext) { if (d->m->pad_ext != ext) { d->m->pad_ext = ext; d->m->pad_cnt = 0; } }
 
 uint32_t dp_mdmach_peek32(const DpMdMach *d, uint32_t a) {
     (void)d;

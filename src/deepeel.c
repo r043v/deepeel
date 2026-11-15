@@ -44,6 +44,7 @@ int dp_gbs_fetch(const char *game, const char *dir, char *out_gbs, size_t cap, c
 #include "platform/nes/explore.h"
 #include "platform/pce/explore.h"
 #include "platform/pce/pce.h"
+#include "core/dpmovie.h"
 #include "platform/nes/tas.h"
 #include "platform/pce/tas.h"
 #include "explore/tas.h"
@@ -64,22 +65,6 @@ static const char *argv_opt(int argc, char **argv, const char *name) {
 static void core_outputs(int argc, char **argv, const char *id, const char *rom, const DpCoreResult *r) {
     dp_core_write_cov(argv_cov(argc, argv), id, r);
     if (argv_opt(argc, argv, "--rtcode") && r->ra.n) { FILE *rf = fopen(argv_opt(argc, argv, "--rtcode"), "w"); if (rf) { dp_ramarch_write(&r->ra, rf, id); fclose(rf); } }
-    if (getenv("DEEPEEL_MAPWIN_DUMP")) {   // kernel --mapwin: the final ROM map (1 px per byte, 256 wide) as a PPM; the live window is the legacy engine's
-        FILE *mf = fopen(getenv("DEEPEEL_MAPWIN_DUMP"), "wb");
-        if (mf) {
-            size_t rows = (r->rom_size + 255) / 256;
-            fprintf(mf, "P6\n256\n%zu\n255\n", rows);
-            for (size_t i = 0; i < rows * 256; i++) {
-                uint8_t f = i < r->rom_size ? r->flags[i] : 0, c[3] = { 0x20, 0x20, 0x28 };
-                if (f & DP_CORE_NATURAL) { c[0] = 0x30; c[1] = 0xc0; c[2] = 0x50; }
-                else if (f & DP_CORE_FORCED) { c[0] = 0xe0; c[1] = 0x90; c[2] = 0x30; }
-                else if (f & DP_CORE_STATIC) { c[0] = 0x40; c[1] = 0x70; c[2] = 0xe0; }
-                else if (f & DP_CORE_DATA) { c[0] = 0xd0; c[1] = 0xd0; c[2] = 0x40; }
-                fwrite(c, 1, 3, mf);
-            }
-            fclose(mf);
-        }
-    }
     if (dp_core_write_map(argv_opt(argc, argv, "--map"), id, rom, r) < 0) fprintf(stderr, "deepeel: cannot write --map\n");
     if (dp_core_write_summary(argv_opt(argc, argv, "--summary"), id, r) < 0) fprintf(stderr, "deepeel: cannot write --summary\n");
     const char *t = argv_opt(argc, argv, "--text");
@@ -141,6 +126,12 @@ static int auto_jobs(void) {
 
 int dp_lr_command(int argc, char **argv);
 int dp_bh_command(int argc, char **argv);
+// --mapwin [SCALE]: handled once in main() (kernel live map); the per-platform parsers only skip it and its optional scale
+static int skip_mapwin(int argc, char **argv, int *i) {
+    if (strcmp(argv[*i], "--mapwin")) return 0;
+    if (*i + 1 < argc && argv[*i + 1][0] >= '1' && argv[*i + 1][0] <= '8' && !argv[*i + 1][1]) (*i)++;
+    return 1;
+}
 static int cmd_nes(int argc, char **argv);
 static int cmd_pce(int argc, char **argv);
 static int cmd_maprender(int argc, char **argv);
@@ -480,6 +471,7 @@ static int cmd_explore(int argc, char **argv) {
     const char *stop_txt = "explore-only";
     unsigned long long play_frames = 0;
     int mapwin = 0, mapwin_on = 0;
+    const char *gb_wdump = NULL;
     int watch = 0, gui = 0, play = 0, human = 0, human_slot = -1, export_slot = -1, png_slot = -1;
     DpConfig cfg;
     dp_config_defaults(&cfg);
@@ -513,6 +505,7 @@ static int cmd_explore(int argc, char **argv) {
             if (i + 1 < argc && argv[i + 1][0] >= '1' && argv[i + 1][0] <= '8') mapwin = atoi(argv[++i]);
             mapwin_on = 1;
         }
+        else if (!strcmp(a, "--watch-dump") && i + 1 < argc) { gb_wdump = argv[++i]; if (!watch) watch = 30; }
         else if (!strcmp(a, "--watch")) {
             watch = 30;
             if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') watch = atoi(argv[++i]);
@@ -1014,7 +1007,10 @@ static int cmd_explore(int argc, char **argv) {
             free(gbs_pcs); free(gbs_bks); free(gbs_regs);   // copied into the kernel's seed arrays above
             gbs_pcs = NULL; gbs_bks = NULL; gbs_regs = NULL; gbs_seeds = 0;
             DpCoreResult kr;
+            if (watch) { gkcfg.watch_every = (unsigned)(60 / watch); dp_fbwatch_start("deepeel gb watch"); }   // generic screen watch (DpMachine.render)
             rc = dp_core_explore_cli(km, cart->rom_size, &gkcfg, &kr, summary ? summary : text) ? 0 : 1;
+            if (watch) dp_fbwatch_stop();
+            if (gb_wdump && dp_fb_dump_ppm(gb_wdump)) fprintf(stderr, "deepeel: no frame to dump\n");
             kr.seed_refused_cap = gseed_refused;
             free(gseed_pc); free(gseed_bk); free(gseed_regs);
             if (!rc) { dp_core_report(stdout, "gb", &kr); core_outputs(argc, argv, "gb", path, &kr); }
@@ -1731,14 +1727,15 @@ static int cmd_nes(int argc, char **argv) {
     DpNesOptions opt = dp_nes_options();   // defer_tiers 0: cuts stay final; --defer-tiers N opts in (sega's CLI defaults to 3, NES measured neutral on DuckTales)
     opt.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
     DpCliCommon cc = { .jobs = 1 };
-    int core_flag = 0; for (int i = 3; i < argc; i++) if (!strcmp(argv[i], "--core")) core_flag = 1;
-    int use_core = 0; DpCoreConfig kcfg; dp_core_config_default(&kcfg);
-    kcfg.no_sessions = 1;   // measured on SMB at 2 M steps: sessions halve the natural path's budget (4708 -> 2063 bytes); --pad-sessions N enables them
+    int core_flag = getenv("DEEPEEL_LEGACY") == NULL; for (int i = 3; i < argc; i++) { if (!strcmp(argv[i], "--legacy")) core_flag = 0; else if (!strcmp(argv[i], "--core")) core_flag = 1; }   // C9: the kernel is the default; --legacy runs the old engine
+    int use_core = core_flag; DpCoreConfig kcfg; dp_core_config_default(&kcfg);
+    kcfg.no_sessions = 0;   // A26: held-pad sessions spend their own budget (held_steps), so they no longer starve the natural path   // measured on SMB at 2 M steps: sessions halve the natural path's budget (4708 -> 2063 bytes); --pad-sessions N enables them
     kcfg.visits_per_pc = 50000;   // a frame wait is thousands of iterations (SMB: natural 15 -> 4708 bytes, old engine 4716)
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
         if (0) {}
-        else if (!strcmp(a, "--core")) use_core = 1;
+        else if (!strcmp(a, "--core")) use_core = 1;   // accepted, now the default
+        else if (!strcmp(a, "--legacy")) use_core = 0;
         else if (core_flag && dp_core_parse_option(&kcfg, argc, argv, i)) { i += dp_core_parse_option(&kcfg, argc, argv, i) - 1; }   // only with --core: the old engine owns --attract-frames etc.
         DP_CLI_COMMON(opt, cc)
         DP_CLI_PLAYED(opt)
@@ -1772,6 +1769,7 @@ static int cmd_nes(int argc, char **argv) {
             if (!parse_entry(argv[++i], &eb, &ea) || eb > 255) { fprintf(stderr, "deepeel: bad --entry '%s' (bank:addr)\n", argv[i]); return 2; }
             opt.entry_bank[opt.entry_count] = eb; opt.entry_addr[opt.entry_count++] = ea;
         }
+        else if (skip_mapwin(argc, argv, &i)) {}
         else if (!path) path = a;
         else { fprintf(stderr, "deepeel: unknown option %s\n", a); return 2; }
     }
@@ -1826,26 +1824,23 @@ static int cmd_nes(int argc, char **argv) {
         if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
         if (opt.queue_max) kcfg.queue_max = opt.queue_max;
         kcfg.hooks = dp_machine_nes_hooks();
-        DpNesTas ntas; memset(&ntas, 0, sizeof ntas);
-        uint8_t *kmasks = NULL;
-        if (opt.tas_count > 0) {   // first movie replays in the kernel (m->frame counts the frames; masks go from the NES pad layout to the kernel's)
+        DpMovie kmov; memset(&kmov, 0, sizeof kmov);
+        if (opt.tas_count > 0) {   // first movie replays in the kernel (m->frame counts the frames)
             char terr[160] = "";
-            if (dp_nes_tas_load(opt.tas_paths[0], &ntas, terr, sizeof terr) && (kmasks = malloc(ntas.frames ? ntas.frames : 1))) {
-                for (uint32_t f = 0; f < ntas.frames; f++) {
-                    uint8_t b = ntas.masks[f], k = 0;
-                    if (b & 0x01) k |= 0x10; if (b & 0x02) k |= 0x20; if (b & 0x08) k |= 0x40;
-                    if (b & 0x10) k |= 0x01; if (b & 0x20) k |= 0x02; if (b & 0x40) k |= 0x04; if (b & 0x80) k |= 0x08;
-                    kmasks[f] = k;
-                }
-                kcfg.tas_masks = kmasks; kcfg.tas_frames = ntas.frames;
-            } else fprintf(stderr, "deepeel: --tas: %s\n", terr);
+            if (dp_movie_load("nes", opt.tas_paths[0], &kmov, terr, sizeof terr)) { kcfg.tas_masks32 = kmov.masks; kcfg.tas_frames = kmov.frames; }
+            else fprintf(stderr, "deepeel: --tas: %s\n", terr);
         }
         DpCoreResult kr;
         size_t prg = dp_machine_nes_prg_size(km);
+        kcfg.rom_image = dp_machine_nes_prg(km); kcfg.rom_image_size = prg;   // B8/C3: the PRG image for the speculative gaps
+        kcfg.watch_every = opt.watch_every;   // --watch: the kernel publishes the replayed movie's screen (DpMachine.render)
+        if (nes_watch) dp_fbwatch_start("deepeel nes watch");
         int kok = dp_core_explore_cli(km, prg, &kcfg, &kr, argv_opt(argc, argv, "--summary") ? argv_opt(argc, argv, "--summary") : argv_opt(argc, argv, "--text"));
+        if (nes_watch) dp_fbwatch_stop();
+        if (nes_dump && dp_fb_dump_ppm(nes_dump)) fprintf(stderr, "deepeel: no frame to dump\n");
         if (kok) { dp_core_report(stdout, "nes", &kr); core_outputs(argc, argv, "nes", path, &kr); }
         dp_core_result_free(&kr);
-        free(kmasks); dp_nes_tas_free(&ntas);
+        dp_movie_free(&kmov);
         km->close(km);
         dp_music_seeds_kernel_free(&mks); free(mseeds);
         free(data);
@@ -1928,13 +1923,14 @@ static int cmd_pce(int argc, char **argv) {
     DpPceOptions opt = dp_pce_options();
     opt.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
     DpCliCommon cc = { .jobs = 1 };
-    int core_flag = 0; for (int i = 3; i < argc; i++) if (!strcmp(argv[i], "--core")) core_flag = 1;
-    int multitap = 0, use_core = 0; DpCoreConfig kcfg; dp_core_config_default(&kcfg);
+    int core_flag = getenv("DEEPEEL_LEGACY") == NULL; for (int i = 3; i < argc; i++) { if (!strcmp(argv[i], "--legacy")) core_flag = 0; else if (!strcmp(argv[i], "--core")) core_flag = 1; }   // C9: the kernel is the default; --legacy runs the old engine
+    int multitap = 0, use_core = core_flag; DpCoreConfig kcfg; dp_core_config_default(&kcfg);
     kcfg.visits_per_pc = 50000;   // Raiden at 2 M steps: natural 116 bytes at 64 visits, 2220 at 50000 (frame waits are long loops)
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
         if (0) {}
-        else if (!strcmp(a, "--core")) use_core = 1;
+        else if (!strcmp(a, "--core")) use_core = 1;   // accepted, now the default
+        else if (!strcmp(a, "--legacy")) use_core = 0;
         else if (core_flag && dp_core_parse_option(&kcfg, argc, argv, i)) { i += dp_core_parse_option(&kcfg, argc, argv, i) - 1; }   // only with --core: the old engine owns --attract-frames etc.
         DP_CLI_COMMON(opt, cc)
         DP_CLI_PLAYED(opt)
@@ -1963,6 +1959,7 @@ static int cmd_pce(int argc, char **argv) {
         else if (!strcmp(a, "--no-infer")) opt.infer = 0;
         else if (!strcmp(a, "--multitap")) multitap = 1;
         else if (!strcmp(a, "--bank-dispatch")) opt.bank_dispatch = 1;
+        else if (skip_mapwin(argc, argv, &i)) {}
         else if (!path) path = a;
         else { fprintf(stderr, "deepeel: unknown option %s\n", a); return 2; }
     }
@@ -2003,6 +2000,8 @@ static int cmd_pce(int argc, char **argv) {
         if (!dp_pce_init(data, size)) { fprintf(stderr, "deepeel: --core: not a PCE image\n"); free(data); return 1; }
         DpMachine *km = dp_machine_pce();
         if (km) dp_machine_pce_source(km, data, size);
+        {   size_t hdr = size % 0x2000 == 512 ? 512 : 0;   // B8: the whole HuCard, pages scanned at their journaled windows
+            kcfg.rom_image = data + hdr; kcfg.rom_image_size = size - hdr; }
         kcfg.jobs = (unsigned)pce_jobs;
         if (mks.n) { kcfg.seeds = mks.pcs; kcfg.n_seeds = mks.n; kcfg.seed_banks = mks.banks; kcfg.seed_regs = mks.regs; }
         kcfg.hooks = dp_machine_pce_hooks();
@@ -2016,23 +2015,19 @@ static int cmd_pce(int argc, char **argv) {
         if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
         if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
         if (opt.queue_max) kcfg.queue_max = opt.queue_max;
-        DpPceTas ptas; memset(&ptas, 0, sizeof ptas);
-        uint8_t *kmasks = NULL;
+        DpMovie kmov; memset(&kmov, 0, sizeof kmov);
         if (opt.tas_count > 0) {
             char terr[160] = "";
-            if (dp_pce_tas_load(opt.tas_paths[0], &ptas, terr, sizeof terr) && (kmasks = malloc(ptas.frames ? ptas.frames : 1))) {
-                for (uint32_t f = 0; f < ptas.frames; f++) {
-                    uint8_t b = ptas.pads[f], k = 0;
-                    if (b & 0x01) k |= 0x10; if (b & 0x02) k |= 0x20; if (b & 0x08) k |= 0x40;
-                    if (b & 0x10) k |= 0x01; if (b & 0x40) k |= 0x02; if (b & 0x80) k |= 0x04; if (b & 0x20) k |= 0x08;
-                    kmasks[f] = k;
-                }
-                kcfg.tas_masks = kmasks; kcfg.tas_frames = ptas.frames;
-            } else fprintf(stderr, "deepeel: --tas: %s\n", terr);
+            if (dp_movie_load("pce", opt.tas_paths[0], &kmov, terr, sizeof terr)) { kcfg.tas_masks32 = kmov.masks; kcfg.tas_frames = kmov.frames; }
+            else fprintf(stderr, "deepeel: --tas: %s\n", terr);
         }
         DpCoreResult kr;
+        kcfg.watch_every = opt.watch_every;
+        if (pce_watch) dp_fbwatch_start("deepeel pce watch");
         int kok = dp_core_explore_cli(km, dp_pce_rom_size(), &kcfg, &kr, argv_opt(argc, argv, "--summary") ? argv_opt(argc, argv, "--summary") : argv_opt(argc, argv, "--text"));
-        free(kmasks); dp_pce_tas_free(&ptas);
+        dp_movie_free(&kmov);
+        if (pce_watch) dp_fbwatch_stop();
+        if (pce_dump && dp_fb_dump_ppm(pce_dump)) fprintf(stderr, "deepeel: no frame to dump\n");
         if (kok) { dp_core_report(stdout, "pce", &kr); core_outputs(argc, argv, "pce", path, &kr); }
         dp_core_result_free(&kr);
         km->close(km);
@@ -2274,8 +2269,9 @@ static const char *md_ref_live_path(void) {
 }
 
 static int md_has_core(int argc, char **argv) {
-    for (int i = 4; i < argc; i++) if (!strcmp(argv[i], "--core")) return 1;
-    return 0;
+    int core = getenv("DEEPEEL_LEGACY") == NULL;   // C9: kernel by default; an explicit flag wins over the environment
+    for (int i = 4; i < argc; i++) { if (!strcmp(argv[i], "--legacy")) core = 0; else if (!strcmp(argv[i], "--core")) core = 1; }
+    return core;
 }
 
 static int cmd_md(int argc, char **argv) {
@@ -2303,12 +2299,18 @@ static int cmd_md(int argc, char **argv) {
         kcfg.max_path_steps = 50000000;   // boot clears RAM/VRAM with millions of dbf iterations before the first interrupt is unmasked
         kcfg.hooks = dp_machine_md_hooks();
         kcfg.visits_per_pc = 2000000;   // the header checksum loop runs ROM-size/2 iterations (Sonic 1: 262144): the old 262144 cap cut it one short; was 262144 at 2 M steps: natural 32 bytes at 64 visits, 126 at 262144 (old engine ~134)
-        const char *md_core_tas = NULL;
+        const char *md_core_tas = NULL, *md_kdump = NULL; int md_kwatch = 0;
         for (int i = 4; i < argc; i++) {
             if (!strcmp(argv[i], "--tas") && i + 1 < argc) { md_core_tas = argv[++i]; continue; }
             int used = dp_core_parse_option(&kcfg, argc, argv, i);
             if (used) { i += used - 1; continue; }
-            if (!strcmp(argv[i], "--max-total") && i + 1 < argc) kcfg.max_total = strtoull(argv[++i], NULL, 0);
+            if (!strcmp(argv[i], "--watch-dump") && i + 1 < argc) { md_kdump = argv[++i]; if (!kcfg.watch_every) kcfg.watch_every = 2; continue; }
+            if (!strcmp(argv[i], "--watch")) {   // the kernel publishes the replayed movie's screen at 1..60 img/s (default 30)
+                int fps = 30; if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') fps = atoi(argv[++i]);
+                if (fps < 1) fps = 1; if (fps > 60) fps = 60;
+                md_kwatch = 1; kcfg.watch_every = (unsigned)(60 / fps);
+            }
+            else if (!strcmp(argv[i], "--max-total") && i + 1 < argc) kcfg.max_total = strtoull(argv[++i], NULL, 0);
             else if (!strcmp(argv[i], "--fork-cap") && i + 1 < argc) kcfg.fork_site_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(argv[i], "--progress") && i + 1 < argc) kcfg.progress_secs = (unsigned)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(argv[i], "--jobs") && i + 1 < argc) { ++i; if (!strcmp(argv[i], "auto")) { kcfg.jobs = (unsigned)auto_jobs(); kcfg.adaptive = 1; } else kcfg.jobs = (unsigned)strtoul(argv[i], NULL, 0); }
@@ -2317,28 +2319,23 @@ static int cmd_md(int argc, char **argv) {
         if (mm) dp_mdmach_reset(mm);   // power-on state: the 68000 starts from the vectors (without it the path faults)
         DpMachine *km = mm ? dp_machine_md(mm) : NULL;
         if (km) dp_machine_md_source(km, c.rom, c.size);
+        kcfg.rom_image = c.rom; kcfg.rom_image_size = c.size;   // B8 on the linear ROM
         if (!km) { fprintf(stderr, "deepeel: --core: cannot open the ROM\n"); rc = 1; }
         else {
-            DpMdMovie mv; memset(&mv, 0, sizeof mv);
-            uint8_t *kmasks = NULL;
-            if (md_core_tas) {   // GMV / BK2 pads (0-3 directions, 16 A, 32 B, 64 C, 128 Start) -> kernel mask
+            DpMovie kmov; memset(&kmov, 0, sizeof kmov);
+            if (md_core_tas) {   // GMV / BK2 pads -> kernel mask
                 char terr[160] = "";
-                if (dp_md_movie_load(md_core_tas, &mv, terr, sizeof terr) && (kmasks = malloc(mv.frames ? mv.frames : 1))) {
-                    for (uint32_t f = 0; f < mv.frames; f++) {
-                        uint8_t b = mv.pads[f], k = b & 0x0F;
-                        if (b & 0x50) k |= 0x10;   // A or C
-                        if (b & 0x20) k |= 0x20;
-                        if (b & 0x80) k |= 0x40;
-                        kmasks[f] = k;
-                    }
-                    kcfg.tas_masks = kmasks; kcfg.tas_frames = mv.frames;
-                } else fprintf(stderr, "deepeel: --tas: %s\n", terr);
+                if (dp_movie_load("md", md_core_tas, &kmov, terr, sizeof terr)) { kcfg.tas_masks32 = kmov.masks; kcfg.tas_frames = kmov.frames; }
+                else fprintf(stderr, "deepeel: --tas: %s\n", terr);
             }
             DpCoreResult kr;
+            if (md_kwatch) dp_fbwatch_start("deepeel md watch");
             rc = dp_core_explore_cli(km, c.size, &kcfg, &kr, argv_opt(argc, argv, "--summary") ? argv_opt(argc, argv, "--summary") : argv_opt(argc, argv, "--text")) ? 0 : 1;
+            if (md_kwatch) dp_fbwatch_stop();
+            if (md_kdump && dp_fb_dump_ppm(md_kdump)) fprintf(stderr, "deepeel: no frame to dump\n");
             if (!rc) { dp_core_report(stdout, "md", &kr); core_outputs(argc, argv, "md", NULL, &kr); }
             dp_core_result_free(&kr);
-            free(kmasks); dp_md_movie_free(&mv);
+            dp_movie_free(&kmov);
             km->close(km);
         }
     } else if (!strcmp(argv[2], "explore")) {
@@ -2388,6 +2385,7 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(a, "--play-pool")) o.play_pool = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--shoot-every")) o.shoot_every = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(a, "--tas-any-rom")) md_any_rom = 1;
+            else if (skip_mapwin(argc, argv, &i)) {}
             else if (!strcmp(a, "--heat")) md_heat = argv[++i];   // --summary/--cov/--romdata come from DP_CLI_COMMON
             else { fprintf(stderr, "deepeel: unknown option %s\n", a); rc = 2; break; }
         }
@@ -2652,8 +2650,16 @@ static int cmd_tas(int argc, char **argv) {
 
 int dp_tasfetch_command(int argc, char **argv);
 
+static void kmapwin_cb(void *u, const DpCoreResult *r) { dp_kmapwin_start(r, "deepeel ROM map", (int)(intptr_t)u); }
 int main(int argc, char **argv) {
     if (argc < 2) return usage(), 2;
+    for (int i = 2; i < argc; i++)   // --mapwin [SCALE]: the kernel's live ROM map, for every platform (the legacy GB explorer keeps its own)
+        if (!strcmp(argv[i], "--mapwin")) {
+            int sc = i + 1 < argc && argv[i + 1][0] >= '1' && argv[i + 1][0] <= '8' ? atoi(argv[i + 1]) : 0;
+            dp_core_live_default(kmapwin_cb, (void *)(intptr_t)sc);
+            atexit(dp_kmapwin_stop);
+            break;
+        }
     if (!strcmp(argv[1], "frontier") && argc > 3 && !strcmp(argv[2], "stats")) {
         char kp[700]; snprintf(kp, sizeof kp, "%s/frontier.bin", argv[3]);   // kernel frontier (--core --state-dir)
         FILE *kf = fopen(kp, "rb");

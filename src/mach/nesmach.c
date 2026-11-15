@@ -424,11 +424,13 @@ void dp_nesmach_frame(DpNesMach *d) {
 
 void dp_nesmach_set_input(DpNesMach *d, uint8_t pad0, uint8_t pad1) {
     (void)d;
-    machine.input = pad0; /* pad 1 has no read path in the runtime yet */
+    machine.input = pad0;
+    machine.input2 = pad1;   /* C12: the second controller (m0boy nes.input2) */
 }
 
 const uint8_t *dp_nesmach_prg_rom(const DpNesMach *d) { return d->prg_rom; }
 
+void dp_nesmach_arm_read(DpNesMach *d, uint16_t addr, uint8_t value) { (void)d; machine.arm_at = (uint32_t)addr + 1u; machine.arm_val = value; }   /* C14 */
 unsigned dp_nesmach_input(const DpNesMach *d) { (void)d; return machine.input; }
 
 size_t dp_nesmach_state_size(void) {
@@ -761,7 +763,7 @@ void dp_nesmach_render(const DpNesMach *d, uint32_t *argb) {
 }
 const uint8_t *dp_nesmach_ram(const DpNesMach *d) { (void)d; return machine.ram; }
 /* debugger-style write of internal RAM (not a CPU access) */
-void dp_nesmach_poke(uint32_t addr, uint8_t v) { if (addr < 0x2000u) machine.ram[addr & 0x7FF] = v; }
+void dp_nesmach_poke(uint32_t addr, uint8_t v) { if (addr < 0x2000u) machine.ram[addr & 0x7FF] = v; else if (addr >= 0x6000u && addr < 0x8000u) nes_bus_write((uint16_t)addr, v); }   // B10: cart PRG-RAM too
 uint64_t dp_nesmach_screen_key(const DpNesMach *d) {
     (void)d;
     const nes_ppu_t *p = &machine.ppu;

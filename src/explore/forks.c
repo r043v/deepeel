@@ -177,7 +177,7 @@ void fork_p1(DpExplorer *ex, uint32_t site, uint16_t pc, uint8_t op) {
     const DpGblApi *api = ex->mach->api;
     if (op == 0xF0) { // ldh a,(n): only $FF00 is the joypad
         if (dp_mach_op(ex->mach, (uint16_t)(pc + 1)) != 0x00) return;
-    } else if (api->gbr->c != 0x00) { // ld a,(C): P1 only when C == $FF00
+    } else if (api->gbr->c != 0x00) { // ld a,(C) reads $FF00+C: P1 only when C == $00
         return;
     }
     uint32_t *cnt = fork_slot(ex, site ^ 0xC0000000u);

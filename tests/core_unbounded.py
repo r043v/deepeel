@@ -11,12 +11,13 @@ import time
 
 exe, rom = sys.argv[1:]
 fixtures = pathlib.Path(rom).parent
-cases = [("gb", ["explore", rom], ["--no-pointer-scan", "--no-nonsense"]),
-         ("gb_jobs", ["explore", rom], ["--no-pointer-scan", "--no-nonsense", "--jobs", "2"]),
+cases = [("gb", ["explore", rom], ["--no-pointer-scan", "--no-nonsense", "--no-exact-state"]),
+         ("gb_jobs", ["explore", rom], ["--no-pointer-scan", "--no-nonsense", "--jobs", "2", "--no-exact-state"]),
          ("z80", ["z80", "explore", "sms", str(fixtures / "fix_z80_branch.sms")], []),
          ("6502", ["nes", "explore", str(fixtures / "fix_nes_branch.nes")], []),
          ("huc6280", ["pce", "explore", str(fixtures / "fix_pce_branch.pce")], []),
          ("68000", ["md", "explore", str(fixtures / "fix_md_fork.md")], [])]
+exact_backends = {"68000", "6502", "huc6280"}   # backends with DpMachine.state_hash
 with tempfile.TemporaryDirectory(prefix="deepeel-unbounded-") as directory:
     bad_state = pathlib.Path(directory) / "not-a-directory"
     bad_state.write_text("occupied")
@@ -37,6 +38,13 @@ with tempfile.TemporaryDirectory(prefix="deepeel-unbounded-") as directory:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             time.sleep(2)
+            if proc.poll() is not None and name in exact_backends:
+                # E11/B5: a machine with an exact state hash ends a spin loop by itself (exhaustion), never at a cap
+                stdout, stderr = proc.communicate()
+                assert proc.returncode == 0 and "interrupted" not in stdout, (name, stdout, stderr)
+                report = json.loads(summary.read_text())
+                assert report["counters"].get("state_repeats", 0) > 0, f"{name}: ended without an exact-state cut"
+                continue
             assert proc.poll() is None, f"{name}: unbounded run stopped at a configured cap"
             proc.send_signal(signal.SIGINT)
             stdout, stderr = proc.communicate(timeout=30)

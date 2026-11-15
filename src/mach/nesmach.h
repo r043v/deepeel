@@ -46,6 +46,7 @@ void dp_nesmach_frame(DpNesMach *m);
 const uint8_t *dp_nesmach_prg_rom(const DpNesMach *m);
 void dp_nesmach_poke(uint32_t addr, uint8_t v);   /* internal RAM, no CPU access */
 unsigned dp_nesmach_input(const DpNesMach *m);   /* live pad 0 mask */
+void dp_nesmach_arm_read(DpNesMach *d, uint16_t addr, uint8_t value);   // C14: the next CPU read of addr returns value, once
 void dp_nesmach_set_input(DpNesMach *m, uint8_t pad0, uint8_t pad1);
 
 size_t dp_nesmach_state_size(void);

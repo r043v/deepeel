@@ -76,6 +76,7 @@ uint16_t dp_mdmach_sr(const DpMdMach *m);
 uint32_t dp_mdmach_dn(const DpMdMach *m, unsigned n);
 uint32_t dp_mdmach_an(const DpMdMach *m, unsigned n);
 void dp_mdmach_state_set_pad_ext(void *buf, uint8_t ext);
+void dp_mdmach_set_pad_ext(DpMdMach *d, uint8_t ext);
 void dp_mdmach_set_pad(DpMdMach *m, uint8_t pad);
 uint32_t dp_mdmach_pc(const DpMdMach *m);
 uint32_t dp_mdmach_sp(const DpMdMach *m);   /* the live A7 */

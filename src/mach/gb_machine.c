@@ -8,6 +8,8 @@
 #include "m0boy.h"
 #include "../explore/core.h"
 #include "../explore/tas.h"
+#include "../explore/explorer_priv.h"
+#include <stddef.h>
 
 void dp_tas_tune_machine(DpMach *mach, const DpTas *tas);   // sessions.c: the recorder's timing quirks
 
@@ -25,9 +27,31 @@ typedef struct GbWrap {
     uint8_t first_op;         // opcode of the instruction executed by the current gb_run
 } GbWrap;
 static GbWrap *gbw(DpMachine *m) { return m->impl; }
+// the generic game-screen watch: the PPU renders lines only while asked (DpMach.render); shades 0..3 become grays
+static void gb_watch(DpMachine *m, int on) { DpMach *d = gbw(m)->d; d->render = on; d->api->skip_render[0] = !on; }
+static int gb_render(DpMachine *m, uint32_t *argb, unsigned cap, int *w, int *h) {
+    DpMach *d = gbw(m)->d;
+    if (cap < 160u * 144u || !d->render) return 0;
+    for (int y = 0; y < 144; y++) for (int x = 0; x < 160; x++) { uint32_t v = 255u - d->screen[y][x] * 85u; argb[y * 160 + x] = 0xff000000u | v << 16 | v << 8 | v; }
+    *w = 160; *h = 144; return 1;
+}
 
 // the frame counter rides at the end of the saved state so a restored fork resumes at its own frame
 static uint32_t gb_state_bytes(DpMachine *m) { return dp_mach_state_bytes(gbw(m)->d) + 8; }
+// B5: exact state hash without the cycle counters (gbl_cpu_t.cyc and everything after it in the header only encode where time stood)
+static uint64_t gb_state_hash(DpMachine *m) {
+    uint32_t mb = dp_mach_state_bytes(gbw(m)->d);
+    uint8_t *img = malloc(mb ? mb : 1);
+    if (!img) return 0;
+    dp_mach_save(gbw(m)->d, img);
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (size_t i = 0; i < mb; i++) {
+        if (i >= offsetof(gbl_cpu_t, cyc) && i < sizeof(gbl_cpu_t)) continue;
+        h = (h ^ img[i]) * 0x100000001b3ull;
+    }
+    free(img);
+    return h;
+}
 static void gb_save(DpMachine *m, uint8_t *buf) {
     DpMach *d = gbw(m)->d;
     dp_mach_save(d, buf);
@@ -272,12 +296,16 @@ static DpMachine *gb_wrap(DpMach *impl) {
     if (!m || !g) { free(m); free(g); return NULL; }
     g->d = impl;
     m->name = "gb";
+    m->work_ram_base = 0xC000u; m->work_ram_len = 0x2000u;
+    m->save_ram_en = 1; m->save_ram_en_addr = 0x0000u; m->save_ram_en_val = 0x0A;
+    m->save_ram_base = 0xA000u; m->save_ram_len = 0x2000u;
     m->plat = dp_platform_gb();
     m->bank_shift = 14;   // the SM83's 16 KiB pointer-table window (the static closure's geometry, E5)
     m->isa = dp_isa_sm83();
     m->impl = g;
     m->state_bytes = gb_state_bytes;
     m->save = gb_save;
+    m->state_hash = gb_state_hash;
     m->load = gb_load;
     m->rom_index = gb_rom_index;
     m->fetch = gb_fetch;
@@ -292,6 +320,7 @@ static DpMachine *gb_wrap(DpMach *impl) {
     m->poke = gb_poke;
     m->set_input = gb_set_input;
     m->frame = gb_frame;
+    m->watch = gb_watch; m->render = gb_render;
     m->observe = gb_observe;
     m->ctx_components = gb_ctx_components;
     m->probes = gb_probes;

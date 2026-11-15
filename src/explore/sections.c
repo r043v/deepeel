@@ -26,7 +26,7 @@ static void sec_unlock(DpResults *res) {
 #define SEC_TC 256
 typedef struct {
     DpResults *res;
-    uint32_t sid1, hits, nat, forced, entries, boot;
+    uint32_t sid1, hits, nat, forced, entries, boot, spec;
     uint16_t hi;
     uint8_t bank, kinds;
 } SecTc;
@@ -42,10 +42,11 @@ static void sec_tc_merge(SecTc *t) {
     s->hits += t->hits;
     s->natural_hits += t->nat;
     s->forced_hits += t->forced;
+    s->spec_hits += t->spec;
     s->entries += t->entries;
     s->boot_hits += t->boot;
     s->kind_bits |= t->kinds;
-    t->hits = t->nat = t->forced = t->entries = t->boot = 0;
+    t->hits = t->nat = t->forced = t->entries = t->boot = t->spec = 0;
     t->kinds = 0;
 }
 
@@ -70,6 +71,7 @@ uint32_t dp_section_touch(DpResults *res, uint8_t bank, uint16_t pc, uint16_t hi
             if (natural) t->nat++; else t->forced++;
             if (is_entry) t->entries++;
             if (from_reset && natural) t->boot++;
+            if (!natural && !from_reset) t->spec++; // forced, no real-flow ancestry: a seed's child
             t->kinds |= (uint8_t)((natural ? DP_XF_NATURAL : DP_XF_FORCED) | (irq ? DP_XF_IRQ : 0));
             return k1 - 1;
         }
@@ -107,6 +109,7 @@ uint32_t dp_section_touch(DpResults *res, uint8_t bank, uint16_t pc, uint16_t hi
     if (is_entry) s->entries++;
     s->kind_bits |= (uint8_t)(natural ? DP_XF_NATURAL : DP_XF_FORCED);
     if (from_reset && natural) s->boot_hits++;
+    if (!natural && !from_reset) s->spec_hits++; // forced, no real-flow ancestry: a seed's child
     if (irq) s->kind_bits |= DP_XF_IRQ;
     uint32_t id = s->id;
     if (res->mt && sec_tc_on) { // remember this section for the lock-free path (hits above are already counted)

@@ -220,20 +220,6 @@ est déclaré par les machines et consommé par la marche statique bancarisée
 legacy 644 musique + 11 732 palette + 38 763 graphismes ; Raiden PCE 672 palette +
 664 graphismes ; fixture MD DMA 192 graphismes.
 
-0.344.0 : première tranche de **fermeture statique bancarisée au noyau pour 6502/HuC6280**
-(E5 de l'audit) : un `jmp (abs)` (`$6C`) ou `jmp (abs,x)` (`$7C`, HuC6280) dont l'opérande
-tombe dans la fenêtre ROM cartographiée lit la table de mots qui suit — chaque cible qui
-commence une instruction légale devient racine statique (`closure_abs_table`, stride 2,
-64 mots, comptée dans `closure_jp_tables`/`closure_jp_entries`). La sémantique
-même-fenêtre est la vue courante de la machine (`rom_index`), aucune géométrie par mapper
-n'est nécessaire pour cette forme ; les tables inter-banques restent du ressort de la
-passe `--bank-dispatch` legacy (plus riche). Fixture `fix_nes_jmpind.nes` (l'entrée 0
-tourne naturellement, l'entrée 1 n'est couverte que par la marche statique), test
-`nes_jmpind`. Bibliothèque musicale : le batch kss tourne (35 rips, 0 match aux dumps
-locaux) — et les rips joshw sont majoritairement `KSCC`, magic non reconnu par les
-parseurs (`KSSX` seulement) : la convention d'en-tête réelle de ce conteneur reste à
-établir sur des fichiers réels avant de la coder, la limite est documentée, pas devinée.
-
 0.333.0 : quand des banques matchent mais qu'un pc reste non projeté (une tranche de rip
 trop courte pour le seuil — un rip qui commence au milieu d'un `$4000` dont la tête fait
 56 octets), le vote de fragments porte désormais ce pc au lieu d'abandonner ; le vote ne
@@ -433,11 +419,11 @@ récupéré pour le GUI et les snapshots), l'APU, le timer et le joypad
 matériels sont ceux de m0boy.
 
 - **Variantes** : `GBL_MBC`/`GBL_ERAM_SIZE` sont compile-time — le build
-  compile 17 variantes MBC×RAM (0:0 ; 1:0/0x800/0x2000 ; 2:0x200 ;
-  3 et 5 : 0..0x20000) et `dp_mach_pick_variant` choisit d'après l'en-tête.
+  compile 18 variantes MBC×RAM (0:0 ; 1:0/0x800/0x2000/0x8000 ; 2:0x200 ;
+  3:0..0x20000 ; 5:0..0x20000) et `dp_mach_pick_variant` choisit d'après l'en-tête.
 - **Threads = instances** : la runtime vit dans des statics ; chaque worker
   reçoit une copie des symboles préfixée par `objcopy --redefine-syms`
-  (10 instances, `DP_MACHINES`). Les hooks (`trace`, lectures/écritures
+  (18 instances, `DP_MACHINES`). Les hooks (`trace`, lectures/écritures
   CPU interposées par `-Dgbl_rd/-Dgbl_wr`, vblank, lignes PPU) sont
   re-câblés par instance vers le moteur.
 - **États** : une image d'état (`gbl_state_io`, ~17 Kio + RAM cartouche) se
@@ -462,7 +448,7 @@ matériels sont ceux de m0boy.
 - **Touches** : deux sondes couvrent la manette — les presses quand l'IRQ
   joypad est armée (le press lève IF bit 4, comportement console) et les
   lectures directes de `$FF00` en polling (`ldh a,($00)` / `ld a,(C)` avec
-  C=$FF00) : chaque touche pressée devient une variante forcée dont seule
+  C=$00 — l'adresse effective est `$FF00+C`) : chaque touche pressée devient une variante forcée dont seule
   la valeur lue diffère (l'IRQ du press est effacée de la variante).
   `--no-key-fork` / `--no-p1-fork` pour désactiver ; compteur `forks_p1`.
 - **Budgets en cascade** (portage z80) : les phases de re-semis (cibles JP HL
@@ -658,7 +644,7 @@ atteints par flux direct seul ».
   chemin forké en produit d'autres), les graines tardives n'y meurent plus de
   faim ; elles **contournent l'éviction par contexte** (sonde délibérée, peu
   nombreuses, plafonnées).
-- Boucle `--closure-rounds N` (défaut 4) : fermeture → graines (les entrées non
+- Boucle `--closure-rounds N` (défaut 12) : fermeture → graines (les entrées non
   exécutées, plus les vues banque ambiguës) → recherche totale → fermeture…
   jusqu'à ce qu'un tour ne sème rien. Plafond de graines `--seed-cap`, rejets
   comptés (`dropped`).
@@ -672,8 +658,8 @@ atteints par flux direct seul ».
   sessions jouées ne l'épuisent plus. Chaque tour de fermeture a son mur.
 - TAS : pendant le replay, l'état de la machine est capturé en **snapshot
   PNG** (écran + machine complet, comme les snapshots humains) à intervalle
-  `min(tas_ckpt_frames, tas_ckpt_secs×60)` — par défaut `min(frames du film /
-  1024, 30 s × 60)` — plafonné à `--tas-ckpt-max` (défaut 1024) par film.
+  `max(tas_ckpt_frames, tas_ckpt_secs×60)` — par défaut `max(frames du film /
+  4096, 10 s × 60)` — au plus `--tas-ckpt-max` (défaut 4096) par film.
   Ces « shoots » ne nourrissent **pas** l'exploration pendant le jeu : une
   fois les films joués en entier et toute la couverture drainée (phase 3),
   ils sont semés chacun dans le fourcheur et une passe d'exploration
@@ -4180,7 +4166,7 @@ au-delà du plafond n'est pas reportée dans la frontière (§6), elle est compt
 
 ## 0.249.22 (second passage : plafond levé quand un lot disque existe)
 
-Le plafond de 256 racines du second passage (NES, PCE, MD) est aussi levé dès qu'un lot disque (`--lot`) est ouvert : les
+Le plafond de 256 racines du second passage (NES, PCE, MD, GB) est aussi levé dès qu'un lot disque (`--lot`) est ouvert : les
 racines en excès sont parquées puis écrites dans le lot (reprise possible) au lieu d'être comptées `capped` et abandonnées.
 Sans lot ni mode illimité, le plafond et le comptage restent ; G4 reste donc ◐ pour ces cas.
 
@@ -4632,10 +4618,12 @@ décodage propre sur SML2, dont une seule au début d'une plage inconnue : rende
 ## Segments aléatoires depuis les checkpoints TAS (0.249.61)
 
 Par défaut, une session en touches aléatoires sur deux repart d'un snapshot TAS
-(le moins déjà tiré) et joue un segment long (`3600 + [0, 7200]` images) : chaque
+(le moins déjà tiré) et joue un segment long : au moins `--tas-rng-frames`
+images, prolongé tant qu'il découvre, terminé après `--tas-rng-frames` images
+sans découverte : chaque
 graine du run quasi parfait reçoit ainsi de nombreuses explorations aléatoires de
-son voisinage. Réglages : `--tas-rng-share N` (1 départ sur N, défaut 2),
-`--tas-rng-frames N` (défaut 3600), `--no-tas-rng` pour revenir à l'ancien
+son voisinage. Réglages : `--tas-rng-share N` (1 départ sur N, défaut 1),
+`--tas-rng-frames N` (défaut 2000), `--no-tas-rng` pour revenir à l'ancien
 comportement. Les snapshots restent aussi des graines de fourches. Non mesuré sur
 ROM réelle à ce stade : à comparer à temps égal (inconnu avant/après).
 
@@ -4950,6 +4938,7 @@ manette), fourche d'IRQ vblank, session attract unique (`--attract-frames`, déf
 Bornes de temps communes à toutes les plateformes : `--min-time`, `--max-time`, `--stall-time`.
 Observation de l'outil (pas une mesure matérielle) : Super Mario Land, 50 M de pas, 1 job : natural 8945.
 Parité avec l'ancien moteur non encore mesurée ; l'ancien moteur reste le défaut.
+(Entrée historique : le noyau `dp_core_explore` est le défaut GB depuis la bascule documentée plus bas — `--legacy`/`DEEPEEL_GB_LEGACY=1` relance l'ancien.)
 
 ## Rejeu TAS sur le noyau (0.303.2)
 
@@ -5422,7 +5411,8 @@ en cascade ; à tester avec `--no-taint-cut`. Désactivé par défaut (aucun tes
 
 Test de l'hypothèse : avec `--no-taint-cut`, mêmes 16 000 graines, 150 M pas, 5 workers : forcé 9593 octets (contre 5356), naturel 8922.
 La coupe au `RET` explique donc une partie de l'écart, pas l'essentiel (142 978 pour l'ancien moteur) ; le reste n'est pas expliqué.
-L'étape 2.3 reste ouverte, l'ancien moteur reste le défaut sur GB.
+L'étape 2.3 reste ouverte, l'ancien moteur reste le défaut sur GB. (Entrée
+historique : la bascule a eu lieu, voir « Bascule effective » plus bas.)
 
 Autres essais (Zelda GB, 16 000 graines, `--no-taint-cut`) : `--max-steps 5000000 --loop-cap 100000` à 150 M pas → forcé 8528, avec
 saturation de site 3 397 030 (le plafond de forks par site borne l'exploration, rapporté). `--unbounded` : à 0,1 M pas/s (file sur
@@ -5500,7 +5490,7 @@ et `campaign_fixtures`, qui échoue par dépassement de délai sur `fix_irq.gb` 
 alors que l'ancien explorateur termine. C'est le dernier bloqueur de performance avant la bascule. Les trois tests liés aux fonctions absentes sont épinglés à l'ancien explorateur
 (`DEEPEEL_GB_LEGACY=1`, propriété de test). Les graines pointeurs (`Pending.seed`) sont abandonnées au moment du tirage si leur cible est déjà couverte.
 
-Performance du noyau sur `fix_irq.gb` : cause trouvée, des clés d'ensembles (`keyset_insert`) qui se regroupaient dans les bits bas (sondage linéaire dégénéré). Un hachage mélangé (`keyhash`) fait passer le noyau de plus de 300 s à ~9,5 s ; le fork IRQ ignore aussi sans coût les couples (site, délai) déjà vus. Le bloqueur de performance est levé. Restent, pour la bascule du défaut : le moteur de sessions, les lots de la frontière et `coverage.bin`/`disc.bin` (`resume_cov`) côté noyau. L'ancien explorateur reste le défaut GB.
+Performance du noyau sur `fix_irq.gb` : cause trouvée, des clés d'ensembles (`keyset_insert`) qui se regroupaient dans les bits bas (sondage linéaire dégénéré). Un hachage mélangé (`keyhash`) fait passer le noyau de plus de 300 s à ~9,5 s ; le fork IRQ ignore aussi sans coût les couples (site, délai) déjà vus. Le bloqueur de performance est levé. Restent, pour la bascule du défaut : le moteur de sessions, les lots de la frontière et `coverage.bin`/`disc.bin` (`resume_cov`) côté noyau. L'ancien explorateur reste le défaut GB. (Entrée historique : la bascule effective est documentée plus bas.)
 
 Carte de couverture persistante du noyau : avec `--state-dir`, `coverage.bin` (en-tête `COV1`, taille ROM, un octet de drapeaux par octet de ROM) est écrit à la fin et réinjecté par OR avec `--resume` (« resumed coverage map »). Un rapport repris ne sait donc jamais moins que le précédent. Le journal de découverte (`disc.bin`) reste propre à l'ancien explorateur.
 
@@ -5573,3 +5563,312 @@ lente dicte le pas). Variables neutres : `DEEPEEL_REF_FEED`, `DEEPEEL_REF_NAME` 
 une image par présentation, sans tressautement ; `DP_WATCH_JITTER=1` journalise l'avance par présentation.
 `--watch FPS` accepte 1..60 : `--watch 1` publie une image par seconde (c'était la cause d'une fenêtre « à 2 images par seconde »).
 Observations de l'outil, pas des mesures de matériel.
+
+## Noyau : correctifs locaux P0 du plan couverture max (0.346.0)
+
+Observations de l'outil, pas des mesures de matériel. Voir `docs/PLAN-COUVERTURE-MAX.fr.md` §A.
+
+- **MD, copies CPU** : le hook de lecture transmet l'octet lu (au lieu de 0) et le hook
+  d'écriture découpe la valeur selon la taille (octet/mot/long) ; avant, seule une copie
+  d'octets nuls était reconnue. Le noyau apparie les lectures ROM aux écritures par une
+  FIFO de 8 (`move.w`/`move.l`). Fixtures `fix_md_copy_b/l`, test `p0_core`.
+- Cap de fourches par site, rejeu par index et octets RNG : clés par index ROM / (site, adresse),
+  plus par pc seul. Clé de résolution concolique hachée.
+- Fermeture : tables `jmp (abs)` 6502/HuC6280 à adresse impaire acceptées (`fix_nes_jmpind_odd`) ;
+  bornes des tables `jp (hl)` tirées de la fenêtre ROM de la machine (z80 : cibles sous `$0150`
+  permises) ; le `ld hl,nn` doit être une instruction exécutée (anneau des derniers pc) ; pile
+  de fermeture pleine comptée (`closure_stack_dropped`).
+- Rapport : ligne `losses:` (`closure_stack_dropped`, `pending_dropped`). Une file libérée au mur de
+  pas sans `--state-dir` est comptée.
+- Toutes les mises en file passent par `queue_push` ; `frontier_save` écrit le bit `vector`.
+- RAM de travail déclarée par la machine (`work_ram_base/len`) : le DSY du noyau couvre aussi MD.
+- Carte : les classes `data-musique/sample/palette/vram` ont un nom (un NULL faisait planter
+  `maprender` sur NES/PCE).
+
+## Noyau : vérité des sources, promotion du forcé (0.347.0)
+
+Observations de l'outil. Voir `docs/PLAN-COUVERTURE-MAX.fr.md` A6, A9, B2.
+
+- **Origine héritée (A6)** : un état fabriqué (résolution, sonde d'événement, rejeu d'index, octet RNG,
+  signature apprise, graine avec préparation RAM, alternative IRQ/gigue) porte une origine
+  (`DP_SRC_SOLVED/PROBE/INDEX/RNG/SIG/SEEDRAM/IRQ`) héritée par toutes ses fourches ; les octets exécutés
+  en flux naturel depuis un tel état ne sont plus comptés « fork-natural ». Sessions et TAS : `session`.
+  Les drapeaux `NATURAL/FORCED` ne changent pas (contrat `test_explorer`).
+- **Promotion (A9)** : un côté couvert seulement en forcé passe par la résolution avant l'élagage
+  (`promoted from forced` au rapport).
+- **Résolution (B2)** : candidats + puissances de deux, puis repli sur les 256 valeurs de l'octet
+  (fixture `fix_z80_solve256.sms`, test `p0_core`).
+
+## Noyau : espaces et entrées, P2 du plan couverture max (0.348.0)
+
+Observations de l'outil (machine concrète, RAM à zéro), pas des mesures de matériel.
+
+- **C13/A3/A4** : `DpMachine.ram_index/ram_addr/ram_size` donne un index RAM dense ; `visits`,
+  `rng_stamp`, `fed*`, `ramread` et `cell_key` l'utilisent (plus de repli sur les 16 bits bas, donc
+  le 68000 24 bits ne confond plus deux boucles à +64 Kio). `DpObservers.on_step`, `DpMemOp.addr`
+  et `DpProvRom.read` passent en 32 bits.
+- **C12/A21** : masque d'entrée 32 bits (`DP_IN_*`, port 2 aux bits 16-31) ; Select NES/PCE, A/B/C
+  distincts sur MD, port 2 NES. Le catalogue de sondes NES gagne Select (52 forks sur `nes_pad_probe`,
+  526 sur `nes_pad_full`).
+- **C14** : `DpMachine.arm_read(addr, val)` : « la prochaine lecture à X rend V » ; `event_probe`
+  NES l'utilise au lieu de sauver/patcher/restaurer.
+
+## Noyau : terminaison et report, P3 (0.349.0)
+
+- **B5/A20/E6** : `state_hash` (NES, MD) hors horloges, pris sur les têtes de boucle visitées
+  ≥ 4 fois ; un état déjà vu coupe le chemin (`state_repeats`), l'ensemble est persistant
+  (`exact.bin` dans `<sortie>.state`, rechargé à `--resume`). `--unbounded` s'épuise donc sur une
+  boucle principale. **Limite** : GB, PCE et Sega n'ont pas de `state_hash` (le noyau y garde les
+  seuls plafonds ; à écrire par backend, pas impossible).
+- **B6/A16 (partiel)** : les sorties `sat_path` et `sat_loop` reportent l'état dans la frontière
+  (`deferred`) au lieu de le perdre ; `--resume --unbounded` les reprend. Restent `sat_site`, le mur
+  `max_total` avec palier et la sortie de boucle forcée.
+- **E11** : le contrat `--unbounded` est épinglé par `core_unbounded.py`.
+
+## Noyau : contexte, P4 du plan couverture max (0.350.0)
+
+- **B1** : re-armement des sondes d'un site déjà productif dans d'autres contextes
+  (`--probe-ctx-cap`, défaut 8 ; compteurs `probe_rearms`, `probe_ctx_sat`).
+- **B7** : une écriture dans la fenêtre ROM est un registre de mapper ; fourche une fois par
+  (site, banque) sur les banques jamais montrées (source `bank-fork`, `--no-bank-forks`,
+  `--bank-fork-cap`, défaut 16). **Limite** : les registres de mapper en RAM miroir (Sega
+  `$FFFC-$FFFF`) et les écritures par instruction PCE (TAM) ne sont pas vus comme écritures ROM.
+- **B10** : les machines déclarent la RAM de cartouche (`save_ram_base/len` : GB `$A000`, NES
+  `$6000`) ; sans `--seed-ram`, le noyau la sème avec 00/FF/55/AA (`--no-auto-seed`). Les
+  signatures apprises ne sont pas faites.
+- **A22/B3 (partiel)** : un film TAS dépose un point de contrôle toutes les 600 trames (cap 32,
+  `--tas-ckpt-every/-cap`, `--no-tas-ckpt`) et son état final ; chacun continue en chemin libre.
+  Le pool commun avec sessions attract/play et les graines de pointeurs sur états vivants restent à faire.
+- **A26** : les sessions à pad tenu ont leur budget (`--held-steps`, défaut 300000 par chemin ;
+  `--no-held-budget`) et ne mangent plus celui du chemin naturel ; elles sont donc actives par
+  défaut sur NES noyau.
+
+### Compléments 0.350.0
+
+- **C1 (première tranche)** : `core.c` ne nomme plus d'ISA ni de machine ; les capacités viennent de
+  `DpIsa` (`code_min`, `hl_jp_table`, `abs_ind_table`) et de `DpMachine` (`save_ram_en_*`).
+- **B5** : `state_hash` existe maintenant pour GB (image sans les compteurs de cycles, comme la
+  déduplication de l'explorateur historique) et PCE (état de contrôle, sans horloges), en plus de NES
+  et MD ; `--no-exact-state` coupe la coupe d'état exact. **Limite technique Sega/MSX/SG** : l'image
+  `save` est opaque par backend (CPU, VDP et compteurs mélangés), aucune projection hors horloges
+  n'est exacte sans la mise en forme de chaque backend ; un hachage approché pourrait couper un chemin
+  à tort, donc il n'est pas fourni.
+- **B6** : à `sat_loop`, les deux côtés de chaque conditionnel de la boucle ont déjà été mis en file à
+  leurs premières visites : la « sortie de boucle forcée » n'ajoute rien hors des sites au plafond
+  `fork_site_cap`, que `--unbounded` lève ; `sat_site` reste compté, non reporté, pour la même raison.
+- **Observation de l'outil** (Super Mario Land, 3 M pas, 16 sessions, sans pointeurs) : octets naturels
+  par sections 1034 avec les nouvelles techniques contre 635 sans (fourches de banque, graine SRAM,
+  budget de sessions, points de contrôle) ; pas une mesure de matériel.
+
+- **B8 (0.350.0)** : désassemblage spéculatif des trous (`--no-spec`). Une chaîne d'instructions légales
+  démarrant dans un trou est retenue si elle finit par un retour, un saut inconditionnel, un
+  halt ou un indirect, si chaque cible directe tombe sur du code connu ou sur un début d'instruction de la
+  chaîne, et si ce n'est pas du remplissage (00/FF, opcodes identiques, en-tête). Résultat dans
+  `DpCoreResult.spec` et la ligne « speculative gaps » : jamais compté comme connu, naturel, forcé ni
+  statique. Test `core_spec_gaps` (fixture `fix_gb_gap.gb` : une routine non appelée retenue, opcodes
+  indéfinis non retenus). **Limites** : disposition fenêtre 16 Kio (`bank_shift == 14`, donc GB et Z80
+  banqués) ; pas encore de renfort par référence (B9) ni de graines B3.
+
+## Noyau : références par immédiats, B9 du plan couverture max (0.351.0)
+
+Quand le code exécuté charge un immédiat 16 bits dans une paire de registres
+(`ld bc/de/hl,nn` sur SM83 et Z80, champ `DpIsa.imm_ptr`) et que cet immédiat
+désigne la ROM, l'index ROM est marqué dans `refs` (compteur `imm_refs`). Un
+candidat de désassemblage spéculatif (B8) visé par une telle référence est
+retenu dès 2 instructions au lieu de 3 ; il reste dans `spec` et n'est jamais
+compté connu. Le rapport affiche « runs reinforced by an immediate reference ».
+Limite : 6502, HuC6280 et 68000 n'ont pas encore de `imm_ptr` (leurs chargements
+d'adresse passent par `lda #lo/hi` ou `lea`), à porter. Observation de l'outil,
+pas une mesure matérielle ; le test `core_spec_gaps` n'épingle que l'absence de
+renfort sur sa fixture.
+
+### B4 : longueur de table prouvée (0.351.0)
+
+Sur SM83 et Z80, le rejeu par index énumère désormais toute la table prouvée
+(entrées successives dont le mot désigne la ROM au-dessus de `code_min`, au plus
+128, index mis à l'échelle ×2) au lieu de 0..15 quand `--index-max` n'est pas
+donné. Sans longueur prouvée : 0..15 (0..255 en `--unbounded`). Limite : 6502,
+HuC6280 et 68000 n'ont pas encore de preuve de longueur ; test dédié à ajouter.
+
+### B3 : graines de vecteurs sur états vivants (0.351.0)
+
+Les deux premiers points de contrôle du film lancent aussi les entrées RST/IRQ
+du registre de la plateforme (cellules non remplies de padding) comme chemins
+forcés depuis cet état de jeu, et non plus seulement depuis la mise sous
+tension (option `--no-live-seeds`, compteur « vector seeds from live states »,
+source `session`). Limite : seule GB déclare un registre de vecteurs au noyau ;
+le pool commun choisi par cellule la moins visitée n'est pas fait.
+
+### C3 : premier pas, un seul marcheur statique dans le noyau (0.351.0)
+
+`closure_walk` (machine vivante) et `closure_walk_img` (image ROM en fenêtres
+bank×fenêtre) étaient deux copies de la même marche. Elles passent par
+`closure_run` sur une vue (`ClosureView` : machine ou image) ; seuls l'index ROM
+et la source des octets diffèrent. Comportement inchangé (294 tests verts).
+Reste de C3 : fusionner avec les fermetures des moteurs historiques (GB, Sega,
+NES, PCE, MD) et la règle CALL commune (A13).
+
+### Modèle de fenêtres de la machine, B8 sur NES (0.351.0)
+
+`DpMachine.code_base` (adresse de la première fenêtre de 16 Kio) et
+`fixed_high` (fenêtre haute = dernière banque fixe, la basse commute : NES ;
+l'inverse sur GB) décrivent la géométrie de l'image ROM (`bank*0x4000 + offset`).
+Le marcheur statique sur image et le désassemblage spéculatif (B8) les
+consomment (`ImgGeo`). NES déclare `bank_shift 14`, base `$8000`, fixe haute,
+et le noyau reçoit l'image PRG : B8 tourne sur NES (test `core_spec_nes`).
+Limite : approximation 16 Kio pour MMC3 (fenêtres de 8 Kio) et MMC1 ; le
+résultat reste spéculatif, jamais compté connu. PCE (fenêtres de 8 Kio) et MD
+(espace linéaire 24 bits) restent à modéliser.
+
+### B4 sur 6502/HuC6280 : longueur prouvée (0.351.0, non épinglée)
+
+`table_proven_len` reconnaît aussi `lda abs,x` / `lda abs,y` depuis une base ROM
+et compte les mots successifs qui désignent la ROM (≥ `$8000`, au plus 128, au
+moins 2). Épinglé par `fix_nes_index20` (table de 12 mots) et `core_index_proven_6502` :
+25 rejeux d'index (0..24) contre 16 avec `--index-max 15`.
+
+### A13 dans le marcheur du noyau (0.351.0)
+
+Le marcheur statique du noyau porte un niveau de confiance : le code atteint depuis du code exécuté est de confiance, la retombée après un CALL ne l'est plus (idiome des données en ligne). Un code sans confiance s'arrête sur les octets marqués données ou copiés ; le compteur `static walks stopped on data` le rapporte. L'arrêt sur padding (8 octets identiques 00 ou FF, sans confiance) est porté, épinglé par `core_pad_stop` ; l'arrêt sur trois mots-pointeurs consécutifs (table de dispatch en ligne) est porté et épinglé par `core_ptr_stop` ; les indices de banque restent à porter.
+
+### B9 sur 68000 (0.351.0)
+
+`lea (xxx).l,An`, `movea.l #imm,An` et `pea (xxx).l` exécutés désignent une adresse ROM : référence typée comptée (`references seen`), épinglée par `core_imm_ref_68000` (`fix_md_ref`). B8 est modélisé sur MD (`DpMachine.linear` : une fenêtre couvrant l'image ROM, départs alignés sur 2, vecteurs et en-tête avant `$200` exclus) : la plage désignée par la référence est renforcée (`1 runs reinforced`). B9 sur 6502/HuC6280 : l'adresse est chargée en deux instructions ; `DpIsa.imm_byte` (`lda/ldx/ldy #imm`) et deux immédiats à moins de 3 instructions d'écart (dans les deux ordres) forment une référence typée, épinglée par `core_imm_ref_6502` (`fix_nes_ref`, plage spéculative renforcée). Heuristique : deux immédiats sans rapport peuvent former une adresse ROM à tort ; la référence ne fait que renforcer une plage spéculative, jamais « connue ».
+
+### B8 sur PCE (0.352.0, toutes les pages exécutées)
+
+Le noyau journalise, pour chaque page ROM de 8 Kio (`DpMachine.page_shift = 13`), la fenêtre MPR où elle a été exécutée (`DpCoreResult.page_win`, partagé entre les workers ; dernière fenêtre vue). À la fin, `speculative_gaps_pages` désassemble les trous de chaque page exécutée à sa propre adresse ; l'image est le HuCard entier (hors en-tête de 512 octets). Limites : une page jamais exécutée n'est pas balayée (sa fenêtre est inconnue) ; une page exécutée à deux fenêtres différentes n'est balayée qu'à la dernière ; une cible de saut sous la fenêtre d'une page non fixe invalide la chaîne. Épinglé par `core_spec_pce` (`fix_pce_ref`, banque fixe) et `core_spec_pce_page` (`fix_pce_page` : page 1 mappée en `$4000`, routine non appelée trouvée à `$4010`). Observation de l'outil, pas mesure de matériel.
+
+### B3 : graines de vecteurs depuis les états vivants les plus divers (0.353.0)
+
+Les graines de vecteurs ne partent plus des deux premiers checkpoints du film : chaque checkpoint reçoit une signature (256 octets de la RAM de travail échantillonnés régulièrement), et il n'en graine que si au moins 16 de ces octets diffèrent de chaque checkpoint déjà retenu, 4 au plus. Épinglé par `core_live_seeds` (compteur « vector seeds from live states »). Limite : la diversité est mesurée sur la RAM de travail échantillonnée, pas sur des cellules sémantiques ; le pool commun avec les sessions attract/play et les chemins naturels reste à faire. Observation de l'outil, pas mesure de matériel.
+
+Mesure (observation de l'outil, une exécution, Super Mario Land avec le film muggv3, `--core --jobs 4 --max-total 300000000`) : avec les graines vivantes 22 322 octets naturels et 9 graines issues d'états vivants ; avec `--no-live-seeds` 22 276 octets naturels. Gain de 46 octets (0,2 %), dans la marge d'une exécution parallèle non déterministe : la tranche est sans régression mais n'établit pas de hausse mesurable sur cette ROM.
+
+Fixtures « état tardif » : un essai (compteur 16 bits à franchir avant une porte, film de 4 trames, `--tas-ckpt-every 1` contre `--no-tas-ckpt`) donne 18 octets naturels dans les deux cas : le chemin du film est lui-même un chemin naturel qui traverse les états tardifs, donc le verdict naturel/forcé ne discrimine pas l'apport des checkpoints. Un critère valable demande une branche hors du chemin du film (entrée absente du film) atteinte depuis un checkpoint ; il reste à définir. Fixture retirée, rien n'est épinglé.
+
+## C3 option B : la fermeture Sega dans le noyau (0.354.0)
+
+Sur Sega/MSX/SG, le noyau (`--core`) fait désormais tourner la fermeture de provenance de la plateforme
+(`src/platform/sega/closure.c`) : chaque worker nourrit sa propre fermeture avant chaque instruction (hook
+`before_step`, invalidation quand la signature de mapping ou un chargement d'état change), et un nouveau hook
+`finish` de `DpPlatformHooks` replie les octets statiques dans le résultat (`DP_CORE_STATIC`, jamais par-dessus du
+naturel/forcé). `DEEPEEL_NO_SEGA_CLOSURE=1` ou `--no-closure` le désactive.
+Observation de l'outil (Addams Family GG, `--max-total 20000000`) : static-only 7139 → 7182, forcés 1789 → 3663.
+Correctif lié : `load` du backend GG préserve `rom`/`cart_ram` (un état de frontière sauvé par un autre processus
+portait ses pointeurs ; plantage de `--resume --jobs>1` mis au jour par ce hook). Test : `core_sega_closure_hook`.
+
+## C9 : le noyau est le moteur par défaut partout (0.355.0)
+
+NES, PCE, MD et Sega/MSX/SG lancent désormais `dp_core_explore` sans drapeau (comme GB depuis 0.3xx) ; `--legacy`
+sélectionne le moteur historique, gardé inactif ; `--core` reste accepté (sans effet). `DEEPEEL_LEGACY=1` fixe le
+défaut historique pour les scripts (un `--core` explicite l'emporte) : la suite de tests historiques l'utilise.
+Test : `core_default_engine`. Observation : la bascule ne change que le moteur choisi, pas les nombres de couverture.
+
+## C4 — inférence statique commune (0.356.0)
+
+Le noyau (`infer_static`, `src/explore/core.c`) classe après l'exploration, sur toutes les ISA portées par le noyau, des octets que
+l'exécution n'a pas touchés, **sans jamais les compter comme observés** (classes `DP_MAP_INF_*` dans la carte, ligne
+`static inference:` dans le rapport, `--no-infer` pour la débrancher) :
+
+- **bourrage** : plage répétée du même octet jamais atteinte (≥ 8 octets pour `00`/`FF`, ≥ 32 sinon) ;
+- **trous** : les trous entre sections connues sont étiquetés code / données / bourrage ;
+- **frères d'une table copiée** : une copie verbatim dont l'adresse source est un mot d'une table de pointeurs désigne des
+  entrées sœurs de même longueur ; les octets des sœurs sont rattachés à la table (refus si l'une est déjà du code).
+  Le mot de table est accepté jusqu'à 3 octets avant la copie (l'appariement lecture/écriture peut manquer le premier octet).
+
+Test : `core_infer_siblings` (fixture `fix_z80_siblings.sms`, générée par `build_fixtures.py`). Observation de l'outil, pas
+mesure matérielle. Reste de C4 : tables de sauts communes et scan `copies.c`/`report/map.c` unifié.
+
+## C4 — tables de sauts communes (0.357.0)
+
+`infer_static` gagne la passe « tables de sauts » : autour d'une cellule de données lue par l'exécution, les mots consécutifs
+(`ptr_width`, boutisme de l'ISA) qui se résolvent, par la cartographie finale de la machine, vers du code exécuté (naturel,
+forcé ou fermeture statique) forment une table de répartition, étiquetée `DP_MAP_TABLE` (jamais observée). Bornes : 256 entrées,
+au moins 2. Ligne de rapport : `jump tables N (B bytes)`. Test `core_infer_jumptable` (fixture `fix_z80_jumptable.sms`).
+Reste de C4 : retrait des scans historiques (`static_scan`/`jump_tables` Sega, `table_scan` NES, S1/S4 MD) au profit du module commun.
+
+## B8 — pages jamais exécutées sur mappeur à fenêtres (0.358.0)
+
+`speculative_gaps_pages` ne scannait que les pages dont une fenêtre CPU avait été journalisée à l'exécution. Une page jamais
+exécutée est maintenant scannée à chacune des fenêtres où le mappeur a fait tourner du code (PCE : `$E000` etc.). Un candidat n'est
+accepté que s'il se décode proprement (mêmes critères que B8) ; une mauvaise fenêtre ne donne donc rien, et la première fenêtre
+qui accepte garde les octets. Reste spéculatif, jamais compté connu. Test `core_spec_deadpage` (`fix_pce_deadpage.pce`) ;
+témoin : 0 octet sans le repli, 10 avec.
+
+## B11 — canal de copie matériel dans le noyau (0.359.0)
+
+`DpObservers.on_copy(src, len, canal)` (`dpmachine.h`) : une copie faite par le matériel (le CPU n'a pas lu les octets) enregistre
+la source ROM comme donnée copiée (`DP_CORE_DATA|COPIED`, `DP_SRC_COPY`, `copy_bytes`). Premier canal branché : le DMA VDP du Mega
+Drive (`md_on_dma_read`), jusque-là invisible au noyau. Test `core_md_dma_copy` (`fix_md_dma.md` : 32 octets distincts, 32 sources
+distinctes). Restent à brancher, canal par canal, si une ROM l'exige : HDMA GB, DMC/CHR NES, transferts de bloc HuC6280 (ces
+derniers passent par les accès mémoire de l'ISA et sont déjà vus comme lecture/écriture).
+
+## B11 — DMC NES (0.360.0)
+
+Le DMA de l'échantillon DMC (`$4015` bit 4, `$4012`/`$4013` suivis par la machine NES, repli de `$FFFF` à `$8000`) est émis comme copie
+matérielle (`on_copy`). `copy_bytes` ne compte plus que les octets nouvellement copiés. Test `core_nes_dmc_copy`
+(`fix_nes_dmc.nes` : 17 octets). HDMA GB : justifié technique — le runtime GB est DMG (pas de HDMA, registre CGB) ; l'OAM DMA GB/NES passe
+par la boucle CPU.
+
+## C11 — liveness des sections du noyau (0.361.0)
+
+Chaque section du noyau rapporte `live-ram-pages N` : le nombre de pages RAM de 256 octets que ses instructions ont lues sur des
+chemins naturels (bitmap par page ROM de 256 octets, `DpCoreResult.live`, attribué à l'instruction courante de la machine).
+Granularité de 256 octets sur l'index RAM dense de la machine ; observation de l'outil, pas mesure matérielle. Test
+`core_section_live`. Reste de C11 : projection de contexte sur `DpCtxComp` (registres, E/S) et fusion avec `sections.c`.
+
+## B3 — checkpoints des sessions attract/play (0.362.0)
+
+Les sessions attract et play déposent, comme les films, un état vivant toutes les `--tas-ckpt-every` trames de session
+(plafond propre `--tas-ckpt-cap`, compteur `session checkpoints continued as free paths`) : chacun continue comme chemin naturel
+libre, source `DP_SRC_SESSION`. `--no-tas-ckpt` les coupe aussi. Test `core_session_ckpt`. Reste de B3 : choix par cellule la moins
+visitée (Go-Explore), rafales d'entrées et mutations de segments depuis les checkpoints.
+
+## B3 — cellule la moins visitée (0.363.0)
+
+Un checkpoint (film, attract, play) reçoit pour cellule son emplacement de code (`rom_index(pc)+1`) ; le choix du chemin suivant le
+note par `(1+gain)/(1+passages)` de cette cellule (moins visitée et productive d'abord), et il n'est plus écarté parce que son pc
+est déjà couvert (il reprend du code couvert par construction). Test `core_ckpt_cell`. Reste de B3 : rafales d'entrées aléatoires et
+mutations de segments de film depuis les checkpoints.
+
+## B3 — rafales d'entrées depuis les checkpoints (0.364.0)
+
+Chaque checkpoint de session lance deux rafales d'entrées de manette (`--ckpt-burst-frames N`, 60 trames par défaut ; `--no-ckpt-bursts`
+les coupe) : un chemin « play » partant de l'état vivant, avec une entrée du catalogue décalée par checkpoint, borné en trames et sans
+nouveau checkpoint. L'indicateur de rafale est codé dans `input` (`SESSION_PLAY + 16 + k`), donc il survit au spool. Coût : le temps de
+session grimpe d'autant (observé sur `fix_z80_rng.sms`). Test `core_session_ckpt`. Les mutations de segments de film (décalages de
+trames) existaient déjà (`TAS_INPUT`).
+
+## C6/E12 — un seul `DpMovie` pour le noyau (0.365.0)
+
+`src/core/dpmovie.[ch]` : `dp_movie_load(plat, chemin, &film, …)` charge un film NES / PCE / Mega Drive (chargeurs de format
+inchangés) et le convertit une fois en masques `DpInput` du noyau ; `deepeel.c` n'a plus que trois appels au lieu de trois
+conversions recopiées. Les conversions de pad sont identiques bit à bit aux anciennes (313 tests verts, dont les rejeux TAS).
+Reste de C6/E12 : les sessions (attract/play) sur l'interface trame ne passent pas encore par ce type, et les chargeurs de format
+restent par plateforme (les formats diffèrent réellement : FM2, GMV, BK2, PCE).
+
+## Retrait des moteurs historiques — étape 1 : la carte vivante sur le noyau (0.366.0)
+
+Décision du propriétaire : retrait complet des moteurs historiques, avec un noyau extensible à de nouvelles plateformes. Ordre : réimplémenter,
+vérifier, puis supprimer.
+
+- **Références figées** (`tests/golden/`, test `parity_golden`) : les octets que les explorateurs historiques prouvaient sur les fixtures de
+  parité (GB `branch`, GB `irq`, NES `nes_branch`) sont gelés (`DP_PARITY_DUMP=<dir> test_audit_parity <build>` les régénère tant que le moteur
+  historique existe). Le noyau seul doit couvrir chaque octet gelé : la garantie « aucune perte » survit au retrait. Ce sont des
+  observations de l'outil sur des fixtures générées, pas des mesures de matériel.
+- **`--mapwin [N]` sur le noyau, pour toutes les plateformes** : `DpCoreConfig.on_live` (ou le défaut de processus
+  `dp_core_live_default`) donne à un observateur le `DpCoreResult` en cours de remplissage ; `dp_kmapwin_start` (`src/gui/gui.c`) dessine un
+  octet par pixel, une tuile de 16 Kio par banque/fenêtre, d'après `flags`. Il ne connaît aucune plateforme : une nouvelle plateforme obtient
+  la fenêtre sans code (test `mapwin_kernel`). Le vidage d'essai `DEEPEEL_MAPWIN_DUMP` reflète désormais la fenêtre.
+- Pas encore sur le noyau : la fenêtre interactive `--gui`/`--human` (sessions jouées) et `--watch` sur GB/Sega (écran du film). Elles dépendent
+  toujours des moteurs historiques et sont l'étape suivante.
+- Nettoyage : rapport accidentel `-` et `mono_crash.*.json` retirés (ignorés désormais).
+
+### 0.367.0 — `--watch` générique du noyau (NES, PCE, MD, GB)
+
+`DpMachine` gagne deux crochets optionnels : `watch(on)` (la machine capture son image, coûteux donc éteint par défaut) et
+`render(argb, cap, &w, &h)` (dernière trame complète en ARGB). Le noyau (`DpCoreConfig.watch_every`) les appelle pendant le rejeu non décalé
+du film et publie via `dp_watch_frame` : même fenêtre/PPM (`--watch [FPS]`, `--watch-dump FILE`) que les anciens moteurs, sans code par
+plateforme dans le noyau. Posés sur NES (160x128), PCE, MD (320x224), GB (160x144, test `watch_kernel_gb`) ; Sega reste à brancher (écran dans
+`DpSegaBackend`). Test : `watch_kernel`.

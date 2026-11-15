@@ -3,8 +3,8 @@
 # every platform (md, pce, nes, sms).  Each MOVIE (.bk2, .fm2, or a raw Gens .gmv on md) plays in turn on both cores
 # with the same inputs; the tiles advance in lockstep (two frames of slack, the slowest core dictates the pace), the
 # window shows 60 fps at most.  Escape closes the window and goes on to the next movie.
-# Environment: DEEPEEL_DATA (scratch/data disk), BIZHAWK_DIR, PCE_REF_CORE (pce|pcehawk), WATCH_THIRD=1 (pce: the other
-# BizHawk core as a third tile), WATCH_FRAMES (stop after N frames), BIZHAWK_DSY_RANGE (default 0-0: no memory dump).
+# Environment: DEEPEEL_DATA (scratch/data disk), BIZHAWK_DIR, PCE_REF_CORE (pce|pcehawk), WATCH_THIRD=1 (md: ClownMDEmu live tile too; pce: the other
+# BizHawk core as a third tile), BIZHAWK_INPUT_DELAY (k idle frames before the movie on the BizHawk side, for a slower boot), WATCH_FRAMES (stop after N frames), BIZHAWK_DSY_RANGE (default 0-0: no memory dump).
 set -eu
 [ $# -ge 3 ] || { echo "usage: $0 md|pce|nes|sms ROM MOVIE..." >&2; exit 2; }
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -59,6 +59,10 @@ P
   fi
   # (the movie path may hold spaces: no unquoted option string; $extra and the play count hold none)
   if [ "$sys" = md ]; then play=; else play="--play $n"; fi
+  if [ "$sys" = md ] && [ "${WATCH_THIRD:-0}" = 1 ]; then   # md third tile: deepeel's own live ClownMDEmu tile (tools/md_ref_live.sh) plus BizHawk
+    env DEEPEEL_WATCH_FRAMES="${WATCH_FRAMES:-}" DEEPEEL_REF2_FEED="$feed" DEEPEEL_REF2_NAME="$refname" "$root/build/deepeel" "$sys" explore "$rom" --tas "$film" --watch 60 $extra || true
+    kill $bhpid 2>/dev/null || true; continue
+  fi
   env DEEPEEL_WATCH_FRAMES="${WATCH_FRAMES:-}" DEEPEEL_REF_FEED="$feed" DEEPEEL_REF_NAME="$refname" ${ref2:+DEEPEEL_REF2_FEED="$ref2" DEEPEEL_REF2_NAME="$(nm "$other")"} \
     DEEPEEL_PCE_REF_CORE="$c" "$root/build/deepeel" "$sys" explore "$rom" --tas "$film" $play --watch 60 $extra || true
   kill $bhpid ${bhpid2:-} 2>/dev/null || true

@@ -92,7 +92,10 @@ namespace BizhawkDsy
 			if (args.Length < 4) { Console.Error.WriteLine("usage: bizhawk_dsy SYSTEM ROM masks.bin out.dsy [FRAMES]"); Environment.Exit(2); }
 			var rom = File.ReadAllBytes(args[1]);
 			var masks = File.ReadAllBytes(args[2]);
-			int frames = args.Length > 4 ? Math.Min(int.Parse(args[4]), masks.Length) : masks.Length;
+			// BIZHAWK_INPUT_DELAY=k: the movie starts k frames late (idle input), for a core whose boot is slower than the one that
+			// recorded the movie; the published frame number stays the movie frame (f + 1 - k), so the tiles remain comparable
+			int dl = int.TryParse(Environment.GetEnvironmentVariable("BIZHAWK_INPUT_DELAY"), out var dlv) && dlv > 0 ? dlv : 0;
+			int frames = (args.Length > 4 ? Math.Min(int.Parse(args[4]), masks.Length) : masks.Length) + dl;
 			using var fe = new DummyFrontend((efp, config, coreComm) => (Make(args[0], rom, coreComm, efp), 0));
 			var def = fe.Core.ControllerDefinition;
 			var names = new string[8];
@@ -140,19 +143,19 @@ namespace BizhawkDsy
 			for (int f = 0; f < frames; f++)
 			{
 				curF = f + 1; if (addPad != null && curF == ptLo - 1) { addPad(); addPad = null; }
-				for (int i = 0; i < 8; i++) if (names[i] != null) controller[names[i]] = (masks[f] & (1 << i)) != 0;
-				if (feed != null && syncFeed) while (feed.ReadUInt32(28) + 2 < (uint)(f + 1)) Thread.Yield();   // two frames of slack: the lockstep ping-pong with 1 ms sleeps capped the pair near 7 frames/s   // replay sync: frame f+1 only once deepeel has published it
+				for (int i = 0; i < 8; i++) if (names[i] != null) controller[names[i]] = (f >= dl && (masks[f - dl] & (1 << i)) != 0);
+				if (feed != null && syncFeed) while (f + 1 > dl && feed.ReadUInt32(28) + 2 < (uint)(f + 1 - dl)) Thread.Yield();   // two frames of slack: the lockstep ping-pong with 1 ms sleeps capped the pair near 7 frames/s   // replay sync: frame f+1 only once deepeel has published it
 				var tf = DateTime.UtcNow;
 				fe.Core.FrameAdvance(controller, true, false);
 				if (feed != null)
 				{
 					int bw = vp.BufferWidth, bh = vp.BufferHeight, sx = (bw + 425) / 426, sy = (bh + 261) / 262, ow = bw / sx, oh = bh / sy;
 					var vb = vp.GetVideoBuffer();
-					if (Environment.GetEnvironmentVariable("BIZHAWK_VIDEO_LOG") != null && f % 100 == 0) { int nz = 0; foreach (var p in vb) if ((p & 0xFFFFFF) != 0) nz++; Console.Error.WriteLine("video f=" + f + " " + bw + "x" + bh + " nonblack=" + nz + " pad=" + masks[f].ToString("x2")); }
+					if (Environment.GetEnvironmentVariable("BIZHAWK_VIDEO_LOG") != null && f % (int.TryParse(Environment.GetEnvironmentVariable("BIZHAWK_VIDEO_EVERY"), out var ve) && ve > 0 ? ve : 100) == 0) { int nz = 0; foreach (var p in vb) if ((p & 0xFFFFFF) != 0) nz++; Console.Error.WriteLine("video f=" + f + " " + bw + "x" + bh + " nonblack=" + nz + " pad=" + masks[f].ToString("x2")); }
 					uint seq = feed.ReadUInt32(4);
 					feed.Write(4, seq + 1);
 					for (int y = 0; y < oh; y++) for (int x = 0; x < ow; x++) feed.Write(36 + (y * ow + x) * 4, (uint)vb[y * sy * bw + x * sx] | 0xFF000000u);
-					feed.Write(8, (uint)(f + 1)); feed.Write(12, (uint)frames); feed.Write(16, (uint)ow); feed.Write(20, (uint)oh); feed.Write(24, f + 1 == frames ? 1u : 0u);   // done=1 on the movie's last frame
+					feed.Write(8, (uint)Math.Max(f + 1 - dl, 0)); feed.Write(12, (uint)(frames - dl)); feed.Write(16, (uint)ow); feed.Write(20, (uint)oh); feed.Write(24, f + 1 == frames ? 1u : 0u);   // done=1 on the movie's last frame
 					feed.Write(4, seq + 2);
 					worked += (DateTime.UtcNow - tf).TotalSeconds;
 					feed.Write(32, (uint)((f + 1) / Math.Max(worked, 1e-3) * 10));   // speed without the pacing sleeps, tenths of frames/s

@@ -100,6 +100,15 @@ static int isa_mem_operand(const uint8_t *b, DpMemOp *o) {
     return 0;   // the 68000 operand taxonomy (§5) stays with the MD explorer for now
 }
 
+static int isa_imm_ptr(const uint8_t *b, uint32_t *imm) {   // B9: lea (xxx).l,An / movea.l #imm,An / pea (xxx).l
+    int lea = (b[0] & 0xF1) == 0x41 && b[1] == 0xF9;
+    int movea = (b[0] & 0xF1) == 0x20 && b[1] == 0x7C;
+    int pea = b[0] == 0x48 && b[1] == 0x79;
+    if (!lea && !movea && !pea) return 0;
+    *imm = (uint32_t)b[2] << 24 | (uint32_t)b[3] << 16 | (uint32_t)b[4] << 8 | b[5];
+    return 1;
+}
+
 static const DpIsa isa = { "68000", 3, 1, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
-                           isa_effect, isa_illegal, isa_disasm, isa_mem_operand };
+                           isa_effect, isa_illegal, isa_disasm, isa_mem_operand, 0x200u, 0, 0, isa_imm_ptr };
 const DpIsa *dp_isa_68000(void) { return &isa; }

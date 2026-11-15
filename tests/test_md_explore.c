@@ -302,6 +302,17 @@ int main(int argc, char **argv) {
     CHECK(r.irq_forks == 0 && !executed(&r, 0x300));
     dp_md_results_free(&r); dp_md_cart_free(&c);
 
+    // H-int enabled: the level-4 fork reaches the handler too (E7: the H-int
+    // fork had no dedicated test)
+    CHECK(run("fix_md_hint", 100000, &r, &c) == 0);
+    CHECK(r.irq_forks >= 1);
+    CHECK(executed(&r, 0x300));
+    dp_md_results_free(&r); dp_md_cart_free(&c);
+
+    CHECK(run("fix_md_hint_masked", 100000, &r, &c) == 0);
+    CHECK(r.irq_forks == 0 && !executed(&r, 0x300));
+    dp_md_results_free(&r); dp_md_cart_free(&c);
+
     // ROM -> VDP DMA is recorded
     CHECK(run("fix_md_dma", 100000, &r, &c) == 0);
     CHECK(r.ncopy >= 1);

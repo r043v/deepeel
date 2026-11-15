@@ -17,6 +17,15 @@ typedef struct {
     int pad_armed, pad_seen;   // pad-port read detection for the event probe
 } MdMachWrap;
 
+// C13: dense RAM index: 68000 work RAM $FF0000-$FFFFFF -> 0..$FFFF, Z80 bus RAM $A00000-$A0FFFF -> $10000..$1FFFF
+static int64_t md_ram_index(DpMachine *m, uint32_t a) {
+    (void)m; a &= 0xFFFFFFu;
+    if (a >= 0xFF0000u) return (int64_t)(a & 0xFFFFu);
+    if (a >= 0xA00000u && a < 0xA10000u) return (int64_t)(0x10000u + (a & 0xFFFFu));
+    return -1;
+}
+static uint32_t md_ram_addr(DpMachine *m, uint32_t i) { (void)m; return i < 0x10000u ? 0xFF0000u + i : 0xA00000u + (i - 0x10000u); }
+
 static uint32_t md_state_bytes(DpMachine *m) { (void)m; return (uint32_t)dp_mdmach_state_size() + 8; }
 static void md_save(DpMachine *m, uint8_t *buf) { dp_mdmach_save(((MdMachWrap *)m->impl)->m, buf); memcpy(buf + dp_mdmach_state_size(), &((MdMachWrap *)m->impl)->frames, 8); }
 static void md_load(DpMachine *m, const uint8_t *buf) { dp_mdmach_load(((MdMachWrap *)m->impl)->m, buf); memcpy(&((MdMachWrap *)m->impl)->frames, buf + dp_mdmach_state_size(), 8); }
@@ -43,19 +52,32 @@ static void md_on_read(void *user, uint32_t addr, unsigned size) {
     MdMachWrap *w = user;
     if (w->pad_armed && addr >= 0xA10002u && addr <= 0xA10005u) w->pad_seen = 1;
     if (w->obs && w->obs->on_read)
-        for (unsigned k = 0; k < size; k++) w->obs->on_read(w->user, addr + k, 0);
+        for (unsigned k = 0; k < size; k++) {   // A1: the byte actually read (peek, no side effect), not 0
+            uint32_t a = addr + k;
+            uint8_t v = (a & 0xFFFFFFu) >= 0xFF0000u ? dp_mdmach_ram8(w->m, a)
+                      : (uint8_t)(dp_mdmach_peek32(w->m, a & ~3u) >> (24 - 8 * (a & 3u)));
+            w->obs->on_read(w->user, a, v);
+        }
 }
 static void md_on_write(void *user, uint32_t addr, unsigned size, uint32_t value) {
     MdMachWrap *w = user;
     if (w->obs && w->obs->on_write)
-        for (unsigned k = 0; k < size; k++) w->obs->on_write(w->user, addr + k, (uint8_t)(value >> (24 - 8 * k)));
+        for (unsigned k = 0; k < size; k++) w->obs->on_write(w->user, addr + k, (uint8_t)(value >> (8 * (size - 1 - k))));   // big-endian slice of a size-byte value (was a fixed 24-bit shift: wrong for byte/word writes)
+}
+static void md_on_dma_read(void *user, uint32_t addr, unsigned size) {
+    MdMachWrap *w = user;
+    if (w->obs && w->obs->on_copy) w->obs->on_copy(w->user, addr, size, DP_COPY_DMA);
 }
 static void md_on_frame(void *user) { ((MdMachWrap *)user)->frames++; }
+static int md_render(DpMachine *m, uint32_t *argb, unsigned cap, int *w, int *h) {
+    if (cap < 320u * 224u) return 0;
+    dp_mdmach_render(((MdMachWrap *)m->impl)->m, argb); *w = 320; *h = 224; return 1;
+}
 static uint64_t md_frame(DpMachine *m) { return ((MdMachWrap *)m->impl)->frames; }
 static void md_observe(DpMachine *m, const DpObservers *o, void *user) {
     MdMachWrap *w = m->impl;
     w->obs = o; w->user = user;
-    DpMdHooks h = { .user = w, .on_read = md_on_read, .on_write = md_on_write, .on_frame = md_on_frame };
+    DpMdHooks h = { .user = w, .on_read = md_on_read, .on_write = md_on_write, .on_frame = md_on_frame, .on_dma_read = md_on_dma_read };
     dp_mdmach_set_hooks(w->m, &h);
 }
 
@@ -100,14 +122,22 @@ static uint8_t md_data_dest(DpMachine *m, uint32_t a) {
     return DP_DEST_NONE;
 }
 
-// kernel mask (up down left right button1 button2 start) -> MD pad bits
-// (0-3 directions, 16 A, 32 B, 64 C, 128 Start): button1 holds A and C, button2 B
+// kernel mask (DpInput) -> MD pad bits (0-3 directions, 16 A, 32 B, 64 C, 128 Start); C12: A and C are distinct
+// buttons and X/Y/Z/Mode are carried to the machine (bits 8..11 of the pad word) when it models the six-button pad
+static uint64_t md_state_hash(DpMachine *m) { return dp_mdmach_state_hash(((MdMachWrap *)m->impl)->m); }   // B5
 static void md_set_input(DpMachine *m, uint32_t mask) {
     uint8_t pad = (uint8_t)(mask & 0x0F);
-    if (mask & 0x10) pad |= 16 | 64;
-    if (mask & 0x20) pad |= 32;
-    if (mask & 0x40) pad |= 128;
+    if (mask & DP_IN_B1) pad |= 16;
+    if (mask & DP_IN_B2) pad |= 32;
+    if (mask & DP_IN_C) pad |= 64;
+    if (mask & DP_IN_START) pad |= 128;
     dp_mdmach_set_pad(((MdMachWrap *)m->impl)->m, pad);
+    uint8_t ext = 0;   // X/Y/Z/Mode plug the six-button pad in (bit 7); 0 keeps the three-button pad
+    if (mask & DP_IN_Z) ext |= 1;
+    if (mask & DP_IN_Y) ext |= 2;
+    if (mask & DP_IN_X) ext |= 4;
+    if (mask & DP_IN_MODE) ext |= 8;
+    dp_mdmach_set_pad_ext(((MdMachWrap *)m->impl)->m, ext ? (uint8_t)(0x80 | ext) : 0);
 }
 
 // technique 2 on MD: an instruction that reads the pad data port ($A10003/$A10005) forks one
@@ -115,7 +145,7 @@ static void md_set_input(DpMachine *m, uint32_t mask) {
 // game's next reads see it.  The instruction is dry-run once to see whether it touches the port.
 static int md_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *bytes, unsigned k, uint8_t *save) {
     (void)user; (void)pc;
-    static const uint32_t pads[] = {0x40, 0x10, 0x20, 0x08, 0x04, 0x01, 0x02};
+    static const uint32_t pads[] = {0x40, 0x110, 0x20, 0x08, 0x04, 0x01, 0x02, 0x10, 0x100};   // C12: A+C, then A and C alone
     static const uint16_t vdp[] = {0x3400, 0x3408, 0x3404, 0x3402, 0x340C};   // VDP status: idle, VBlank, HBlank, DMA busy, VBlank+HBlank
     MdMachWrap *w = m->impl;
     // `move.w $C00004,Dn` or `move.w (An),Dn` with An at the VDP control port: one state per status value,
@@ -208,6 +238,8 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     if (!w || !m) { free(w); free(m); return NULL; }
     w->m = impl;
     m->name = "md";
+    m->work_ram_base = 0xFF0000u; m->work_ram_len = 0x10000u;
+    m->ram_index = md_ram_index; m->ram_addr = md_ram_addr; m->ram_size = 0x20000u;
     m->impl = w;             // the 68000 DpIsa wrapper is not extracted yet
     m->state_bytes = md_state_bytes;
     m->save = md_save;
@@ -215,6 +247,7 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->fetch = md_fetch;
     m->poke = md_poke;
     m->rom_index = md_rom_index;
+    m->linear = 1;
     m->run = md_run;
     m->observe = md_observe;
     m->close = md_close;
@@ -222,10 +255,12 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->pc = md_pc;
     m->set_pc = md_set_pc;
     m->set_input = md_set_input;
+    m->state_hash = md_state_hash;
     m->seed_regs = md_seed_regs;   // no 68000 mapper: bank_view stays NULL (sans objet)
     m->cut_sp = md_cut_sp;
     m->data_dest = md_data_dest;
     m->frame = md_frame;
+    m->render = md_render;   // the VDP renders from its state on demand: no watch switch
     return m;
 }
 

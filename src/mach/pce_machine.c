@@ -23,6 +23,7 @@ static void pce_ensure(DpMachine *m) {
 }
 
 static uint32_t pce_state_bytes(DpMachine *m) { (void)m; return (uint32_t)dp_pce_state_size() + 8; }
+static uint64_t pce_state_hash(DpMachine *m) { pce_ensure(m); return dp_pce_state_hash(); }   // B5: control state, no clocks
 static void pce_save(DpMachine *m, uint8_t *buf) { pce_ensure(m); dp_pce_save(buf); memcpy(buf + dp_pce_state_size(), &((PceWrap *)m->impl)->frames, 8); }
 static void pce_load(DpMachine *m, const uint8_t *buf) { pce_ensure(m); dp_pce_load(buf); memcpy(&((PceWrap *)m->impl)->frames, buf + dp_pce_state_size(), 8); }
 static uint8_t pce_fetch(DpMachine *m, uint32_t a) { pce_ensure(m); return dp_pce_peek((uint16_t)a); }
@@ -45,6 +46,7 @@ static void pce_set_input(DpMachine *m, uint32_t k) {
     if (k & 0x10) p |= 0x01;
     if (k & 0x20) p |= 0x02;
     if (k & 0x40) p |= 0x08;
+    if (k & DP_IN_SELECT) p |= 0x04;   // C12
     if (k & 0x01) p |= 0x10;
     if (k & 0x08) p |= 0x20;
     if (k & 0x02) p |= 0x40;
@@ -52,6 +54,8 @@ static void pce_set_input(DpMachine *m, uint32_t k) {
     dp_pce_input(p);
 }
 static uint64_t pce_frame(DpMachine *m) { return ((PceWrap *)m->impl)->frames; }
+static void pce_watch(DpMachine *m, int on) { (void)m; dp_pce_watch_enable(on); }
+static int pce_render(DpMachine *m, uint32_t *argb, unsigned cap, int *w, int *h) { (void)m; return dp_pce_render(argb, cap, w, h); }
 
 // the CPU core touches memory without calling the bus, so the data accesses the kernel observes
 // (technique 1 reads, the ROM->RAM copy record, technique 6 streams) are decoded from the instruction
@@ -287,13 +291,16 @@ DpMachine *dp_machine_pce(void) {
     DpMachine *m = calloc(1, sizeof *m);
     if (!w || !m) { free(w); free(m); return NULL; }
     m->name = "pce";
+    m->work_ram_base = 0x2000u; m->work_ram_len = 0x2000u;
     m->impl = w;             // the huc6280 DpIsa wrapper is not extracted yet
     m->state_bytes = pce_state_bytes;
     m->save = pce_save;
+    m->state_hash = pce_state_hash;
     m->load = pce_load;
     m->fetch = pce_fetch;
     m->poke = pce_poke;
     m->rom_index = pce_rom_index;
+    m->linear = 1; m->code_base = 0xE000; m->page_shift = 13;   // B8: each 8 KiB page is scanned at the MPR window the kernel journaled it executing at
     m->run = pce_run;
     m->observe = pce_observe;
     m->close = pce_close;
@@ -305,6 +312,7 @@ DpMachine *dp_machine_pce(void) {
     m->cut_sp = pce_cut_sp;
     m->data_dest = pce_data_dest;
     m->frame = pce_frame;
+    m->watch = pce_watch; m->render = pce_render;
     m->set_input = pce_set_input;
     return m;
 }

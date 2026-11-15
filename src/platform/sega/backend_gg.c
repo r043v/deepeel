@@ -135,7 +135,9 @@ static void hook(void) {
 }
 static void watch(unsigned every,uint64_t *published) { W.every=every; W.published=published; hook(); }
 static void load(const void *in) {
-    const State *s=in; machine=s->core; second_pad=s->second_pad; reset_button=s->reset_button; memory_control=s->memory_control; tas_compat_enabled=s->tas_compat_enabled; irq_defer=s->irq_defer;
+    const State *s=in; const uint8_t *keep_rom=machine.rom; uint8_t *keep_cart=machine.cart_ram;
+    machine=s->core; machine.rom=keep_rom; machine.cart_ram=keep_cart;   // a state saved by another process (--resume) carries that process's pointers
+    second_pad=s->second_pad; reset_button=s->reset_button; memory_control=s->memory_control; tas_compat_enabled=s->tas_compat_enabled; irq_defer=s->irq_defer;
     hook(); gg_remap(); gg_vdp_restore();
 }
 static int32_t ram_index(uint16_t a) {

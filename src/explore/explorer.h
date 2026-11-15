@@ -132,6 +132,8 @@ typedef struct DpSection {
     uint32_t entries;             // path entries into it
     uint32_t natural_hits, forced_hits;
     uint32_t boot_hits;           // hits from the reset flow specifically
+    uint32_t spec_hits;           // forced hits descended from a synthetic seed only
+                                  // (pointer/closure/vector seeds, no real-flow ancestry)
     uint8_t kind_bits;            // DP_XF_* observed inside
     uint16_t io_used[16];
     uint8_t io_used_n;
@@ -558,7 +560,10 @@ enum { DP_NS_NONE = 0, DP_NS_ECHO, DP_NS_DATA, DP_NS_STACK };
 void dp_section_tc_begin(void);              // start caching this thread's section hits (until dp_section_flush)
 void dp_section_flush(DpResults *res); // merge this thread's cached section hits (parallel mode)
 uint32_t dp_section_touch(DpResults *res, uint8_t bank, uint16_t pc, uint16_t hi, int natural, int is_entry,
-                          uint32_t cur_sec, int from_reset, int irq);
+                          uint32_t cur_sec, int from_reset, int irq); // from_reset: real-flow ancestry
+                                                                     // (reset flow or a fork of it); a
+                                                                     // forced hit without it counts as
+                                                                     // speculative-seed evidence
 void dp_section_live_reg(DpSection *s, int bit);
 void dp_section_live_wram(DpSection *s, uint32_t page);
 void dp_section_live_vram(DpSection *s, uint32_t bank, uint32_t page);
