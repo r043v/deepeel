@@ -1819,6 +1819,18 @@ static int cmd_nes(int argc, char **argv) {
             if (mks.skipped) fprintf(stderr, "deepeel: nes: %zu music-rip seed(s) outside every PRG window of this dump (another banking)\n", mks.skipped);
         }
         kcfg.jobs = (unsigned)nes_jobs;
+        uint32_t *eseed_pc = NULL; uint16_t *eseed_bk = NULL; DpSeedRegs *eseed_rg = NULL;
+        unsigned nbk = (opt.seed_banks && km->bank_view) ? 64 : 0;   // --seed-banks: every 16 KiB block at $8000 (bank_view refuses the missing ones)
+        size_t ne = opt.entry_count + nbk, tot = mks.n + ne;
+        if (ne) {   // --entry bank:addr and --seed-banks join the music seeds
+            eseed_pc = malloc(tot * sizeof *eseed_pc); eseed_bk = malloc(tot * sizeof *eseed_bk); eseed_rg = malloc(tot * sizeof *eseed_rg);
+            if (!eseed_pc || !eseed_bk || !eseed_rg) { free(eseed_pc); free(eseed_bk); free(eseed_rg); km->close(km); free(mseeds); free(data); return 1; }
+            for (size_t k = 0; k < mks.n; k++) { eseed_pc[k] = mks.pcs[k]; eseed_bk[k] = mks.banks ? mks.banks[k] : 0; eseed_rg[k] = mks.regs ? mks.regs[k] : (DpSeedRegs){ 0xFF, 0xFFFF }; }
+            size_t k = mks.n;
+            for (unsigned e = 0; e < opt.entry_count; e++, k++) { eseed_pc[k] = opt.entry_addr[e]; eseed_bk[k] = opt.entry_bank[e]; eseed_rg[k] = (DpSeedRegs){ 0xFF, 0xFFFF }; }
+            for (unsigned b = 0; b < nbk; b++, k++) { eseed_pc[k] = 0x8000; eseed_bk[k] = (uint16_t)b; eseed_rg[k] = (DpSeedRegs){ 0xFF, 0xFFFF }; }
+            kcfg.seeds = eseed_pc; kcfg.n_seeds = tot; kcfg.seed_banks = eseed_bk; kcfg.seed_regs = eseed_rg;
+        }
         if (opt.max_total) kcfg.max_total = opt.max_total;
         if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
         if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
@@ -1841,7 +1853,7 @@ static int cmd_nes(int argc, char **argv) {
         if (kok) { dp_core_report(stdout, "nes", &kr); core_outputs(argc, argv, "nes", path, &kr); }
         dp_core_result_free(&kr);
         dp_movie_free(&kmov);
-        km->close(km);
+        km->close(km); free(eseed_pc); free(eseed_bk); free(eseed_rg);
         dp_music_seeds_kernel_free(&mks); free(mseeds);
         free(data);
         return kok ? 0 : 1;
