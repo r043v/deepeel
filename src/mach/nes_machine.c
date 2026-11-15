@@ -218,17 +218,18 @@ DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err
 // the PPU can present (vblank, sprite 0, overflow and their combinations); no probe while
 // an NMI edge is pending, a planted vblank must not mask the interrupt the hardware raises
 static int nes_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *bytes, unsigned k, uint8_t *save) {
-    (void)user; (void)pc;
+    (void)pc;
     static const uint8_t st[] = { 0x80, 0x40, 0x20, 0xC0, 0xA0, 0xE0, 0x00 };
     DpNesMach *n = nes_impl(m);
     if ((bytes[0] == 0xAD || bytes[0] == 0xBD || bytes[0] == 0x8D || bytes[0] == 0x8E || bytes[0] == 0x8C) && bytes[1] == 0x16 && bytes[2] == 0x40) {   // read or strobe write of the controller port
         // controller read (LDA $4016 / LDA $4016,X): one button held from here on per alternative (as the Sega pad probe)
         static const uint32_t pads[] = { 0x10, 0x20, 0x40, 0x01, 0x02, 0x04, 0x08, 0x80 };   // C12: + Select
-        if (k >= sizeof pads / sizeof *pads) return 0;
+        int full = user != NULL;   // --pad-full (D10): every one of the 256 port-1 masks at each strobe site
+        if (k >= (full ? 256u : sizeof pads / sizeof *pads)) return 0;
         uint8_t *tmp = malloc(m->state_bytes(m));
         if (!tmp) return 0;
         m->save(m, tmp);
-        m->set_input(m, pads[k]);
+        m->set_input(m, full ? (uint32_t)k : pads[k]);
         m->save(m, save);
         m->load(m, tmp);
         free(tmp);
@@ -275,7 +276,9 @@ static int nes_irq_alt(void *user, DpMachine *m, unsigned delay, uint8_t *save) 
     free(tmp); free(off);
     return ok;
 }
-const DpPlatformHooks *dp_machine_nes_hooks(void) {
+const DpPlatformHooks *dp_machine_nes_hooks_full(int pad_full) {
     static const DpPlatformHooks h = { .event_probe = nes_event_probe, .irq_alt = nes_irq_alt };
-    return &h;
+    static const DpPlatformHooks hf = { .user = (void *)1, .event_probe = nes_event_probe, .irq_alt = nes_irq_alt };
+    return pad_full ? &hf : &h;
 }
+const DpPlatformHooks *dp_machine_nes_hooks(void) { return dp_machine_nes_hooks_full(0); }

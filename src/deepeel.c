@@ -1835,7 +1835,7 @@ static int cmd_nes(int argc, char **argv) {
         if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
         if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
         if (opt.queue_max) kcfg.queue_max = opt.queue_max;
-        kcfg.hooks = dp_machine_nes_hooks();
+        kcfg.hooks = dp_machine_nes_hooks_full(opt.pad_full);
         DpMovie kmov; memset(&kmov, 0, sizeof kmov);
         if (opt.tas_count > 0) {   // first movie replays in the kernel (m->frame counts the frames)
             char terr[160] = "";
