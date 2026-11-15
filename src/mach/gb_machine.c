@@ -273,6 +273,7 @@ static DpMachine *gb_wrap(DpMach *impl) {
     g->d = impl;
     m->name = "gb";
     m->plat = dp_platform_gb();
+    m->bank_shift = 14;   // the SM83's 16 KiB pointer-table window (the static closure's geometry, E5)
     m->isa = dp_isa_sm83();
     m->impl = g;
     m->state_bytes = gb_state_bytes;

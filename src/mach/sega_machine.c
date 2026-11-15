@@ -228,6 +228,7 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->run = sega_run;
     m->pc = sega_pc;
     m->set_pc = sega_set_pc;
+    m->bank_shift = 14;    // the Z80's 16 KiB pointer-table window (the static closure's geometry, E5)
     m->seed_regs = sega_seed_regs;
     m->bank_view = sega_bank_view;
     m->cut_pc = sega_cut_pc;

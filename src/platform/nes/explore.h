@@ -159,6 +159,7 @@ typedef struct DpNesResults_ {
     int first_ready;
     DpNesTreeNode *tree_nodes; uint32_t tree_count, tree_capacity;
     uint8_t *flags;            // one byte per physical PRG cell
+    uint8_t *dest;             // one byte per PRG cell: DP_DEST_* where its data ends up (0: untyped)
     uint8_t *exec_kind;        // per PRG cell, opcode byte: DP_NES_X_ENTRY (non-sequential arrival) | DP_NES_X_IRQ (ran inside a handler)
     size_t prg_size;
     uint64_t s6_decoders, s6_tables, s6_candidates, s6_runs, s6_sat;   // S6 decoder replay

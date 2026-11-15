@@ -793,6 +793,8 @@ static void hook_write(void *user, unsigned addr, unsigned value) {
             if (r->copy_count && r->copies[r->copy_count - 1].channel == ch &&
                 r->copies[r->copy_count - 1].source == src) r->copies[r->copy_count - 1].length = 1;
         }
+        r->dest[src] = (uint8_t)(addr == 0x4011 ? DP_DEST_SAMPLE :
+                                 addr >= 0x4000 ? DP_DEST_MUSIC : DP_DEST_SRAM);
         r->aux_copy_bytes++;
     }
     if (addr >= 0x8000 || (addr >= 0x5100 && addr < 0x5128 && dp_nesmach_mapper(x->m) == 5)) {
@@ -820,6 +822,7 @@ static void hook_write(void *user, unsigned addr, unsigned value) {
                     r->copies[r->copy_count - 1].source == src) r->copies[r->copy_count - 1].length = 1;
             }
             r->flags[x->last_read_cell] |= DP_NES_COPIED;
+            r->dest[x->last_read_cell] = (uint8_t)(dst >= 0x3F00u ? DP_DEST_CRAM : DP_DEST_VRAM);
             r->cpu_copy_bytes++;
             x->last_read_cell = -1;
         }
@@ -828,7 +831,7 @@ static void hook_write(void *user, unsigned addr, unsigned value) {
             uint32_t src_page = value << 8;
             for (unsigned i = 0; i < 256 && value >= 0x80; i++) {
                 int64_t cell = dp_nesmach_rom_index(x->m, 0x8000u | ((src_page + i) & 0x7FFF));
-                if (cell >= 0) r->flags[cell] |= DP_NES_COPIED;
+                if (cell >= 0) { r->flags[cell] |= DP_NES_COPIED; r->dest[cell] = DP_DEST_OAM; }
             }
             if (value < 0x20) {   // RAM page: bytes that a loop copied from PRG chain ROM -> WRAM -> OAM
                 for (unsigned i = 0; i < 256; i++) {
@@ -836,6 +839,7 @@ static void hook_write(void *user, unsigned addr, unsigned value) {
                     if (s < 0) continue;
                     if (!(r->flags[s] & DP_NES_COPIED)) r->oam_chain_bytes++;
                     r->flags[s] |= DP_NES_COPIED;
+                    r->dest[s] = DP_DEST_OAM;
                 }
             }
             if (value >= 0x80) r->oam_copies++;
@@ -1414,6 +1418,7 @@ void dp_nes_results_free(DpNesResults *r) {
     if (!r) return;
     dp_ramarch_free(&r->ra);
     free(r->flags);
+    free(r->dest);
     free(r->tree_nodes);
     r->tree_nodes = NULL;
     free(r->exec_hits);
@@ -1472,6 +1477,7 @@ int dp_nes_explore(const uint8_t *data, size_t size, int mapper,
     r->options = x.opt;
     r->prg_size = dp_nesmach_prg_size(x.m);
     r->flags = calloc(r->prg_size, 1);
+    r->dest = calloc(r->prg_size, 1);
     dp_first_init(&r->first,1u<<20);
     r->first_ready = 1;
     r->src_flags = calloc(r->prg_size, sizeof(uint32_t));
@@ -2417,6 +2423,16 @@ void dp_nes_report(FILE *out, const DpNesResults *r) {
     fprintf(out, "  static closure: %llu bytes from %llu roots, cap hits %llu, cross-window edges followed %llu\n", (unsigned long long)r->static_bytes, (unsigned long long)r->static_roots, (unsigned long long)r->static_cap_hits, (unsigned long long)r->static_xwindow);
     fprintf(out, "  padding %llu bytes; inferred code %llu data %llu padding %llu\n", (unsigned long long)r->padding_bytes, (unsigned long long)r->inferred_code, (unsigned long long)r->inferred_data, (unsigned long long)r->inferred_pad);
     fprintf(out, "  cpu loop copy bytes %llu, to WRAM %llu, to SRAM/APU %llu, ROM->WRAM->OAM %llu\n", (unsigned long long)r->cpu_copy_bytes, (unsigned long long)r->wram_copy_bytes, (unsigned long long)r->aux_copy_bytes, (unsigned long long)r->oam_chain_bytes);
+    if (r->dest) {   // the typed-data destinations the exploration proved (DP_DEST_*)
+        uint64_t mus = 0, smp = 0, pal = 0, vram = 0;
+        for (size_t i = 0; i < r->prg_size; i++) {
+            mus += r->dest[i] == DP_DEST_MUSIC; smp += r->dest[i] == DP_DEST_SAMPLE;
+            pal += r->dest[i] == DP_DEST_CRAM; vram += r->dest[i] == DP_DEST_VRAM || r->dest[i] == DP_DEST_OAM;
+        }
+        if (mus || smp || pal || vram)
+            fprintf(out, "  typed data: music %llu, sample %llu, palette %llu, graphics %llu bytes\n",
+                    (unsigned long long)mus, (unsigned long long)smp, (unsigned long long)pal, (unsigned long long)vram);
+    }
     fprintf(out, "  indirect jumps: %llu sites, %llu targets, %llu table addresses, overflow %llu\n", (unsigned long long)r->indirect_sites, (unsigned long long)r->indirect_targets, (unsigned long long)r->indirect_ptrs, (unsigned long long)r->indirect_overflow);
     fprintf(out, "  pad probes: %llu forks at %llu sites, refused %llu\n", (unsigned long long)r->pad_probes, (unsigned long long)r->pad_probe_sites, (unsigned long long)r->pad_probe_refused);
     fprintf(out, "  $2002 probes (3.7): %llu forks at %llu sites, refused %llu\n", (unsigned long long)r->ppu_probes, (unsigned long long)r->ppu_probe_sites, (unsigned long long)r->ppu_probe_refused);

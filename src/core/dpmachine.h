@@ -169,6 +169,12 @@ struct DpMachine {
     // NULL: no cut from this machine; every cut is counted, never silent.
     int (*cut_pc)(struct DpMachine *, uint32_t pc);
     int (*cut_sp)(struct DpMachine *);
+    // Optional static-closure geometry (audit E5): log2 of the ROM window the
+    // ISA's pointer tables fold addresses into (sm83/z80: 14 — a 16 KiB window,
+    // low 16 KiB fixed to bank 0).  0 = the house bank * 0x4000 convention;
+    // the kernel's banked static walk (closure_walk_img / the stride-3 tables)
+    // consumes it instead of assuming the geometry.
+    uint8_t bank_shift;
     // Optional data-destination knowledge (the shared DP_DEST_* model in
     // coverage.h): where a write to `addr` lands in the hardware (VRAM, OAM,
     // palette, sound registers...).  0 = untyped.  The kernel records the

@@ -309,6 +309,13 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
         uint8_t x = res->exec_flags[k], d = res->data_flags[k], s = res->static_flags[k];
         int c = dp_nature_class(dp_gb_nature(x, d, s));
         m[k] = (uint8_t)c;
+        // typed data: the GB's fine DP_DF_* flags project onto the shared classes
+        // (music/sample/palette show in the .png palette like the other platforms)
+        if (dp_map_is_data(m[k])) {
+            if (d & DP_DF_MUSIC) m[k] = DP_MAP_DATA_MUSIC;
+            else if (d & DP_DF_SAMPLE) m[k] = DP_MAP_DATA_SAMPLE;
+            else if (d & DP_DF_PALETTE) m[k] = DP_MAP_DATA_CRAM;
+        }
     }
     // inference over the unknown runs of each bank (never crossing a bank)
     const uint8_t *rom = res->cart ? res->cart->rom : NULL;

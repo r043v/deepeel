@@ -204,8 +204,12 @@ static void on_frame(void *u) {
 }
 static void on_dma_read(void *u, uint32_t addr, unsigned size) {
     X *x = u;
-    for (unsigned i = 0; i < size && addr + i < x->r->rom_size; i++)
+    unsigned code = dp_mdmach_vdp_code(x->m) & 15u;   // the command's destination: 1 VRAM, 3 CRAM, 5 VSRAM
+    uint8_t dest = code == 3 ? DP_DEST_CRAM : (code == 1 || code == 5) ? DP_DEST_VRAM : DP_DEST_NONE;
+    for (unsigned i = 0; i < size && addr + i < x->r->rom_size; i++) {
         x->r->flags[addr + i] |= DP_MDF_DMA_READ;
+        if (dest) x->r->dest[addr + i] = dest;
+    }
 }
 
 static uint32_t md_sec_touch(X *x, uint32_t off);
@@ -810,6 +814,7 @@ static void on_write(void *u, uint32_t a, unsigned size, uint32_t v) {
         v == ((uint32_t)x->c->rom[x->previous_move_src] << 8 | x->c->rom[x->previous_move_src + 1])) {
         r->flags[x->previous_move_src] |= DP_MDF_CPU_VRAM;
         r->flags[x->previous_move_src + 1] |= DP_MDF_CPU_VRAM;
+        r->dest[x->previous_move_src] = r->dest[x->previous_move_src + 1] = DP_DEST_VRAM;
         r->cpu_vram_words++;
         x->register_move_valid = 0;
     }
@@ -818,6 +823,7 @@ static void on_write(void *u, uint32_t a, unsigned size, uint32_t v) {
         v == ((uint32_t)x->c->rom[x->move_src] << 8 | x->c->rom[x->move_src + 1])) {
         r->flags[x->move_src] |= DP_MDF_CPU_VRAM;
         r->flags[x->move_src + 1] |= DP_MDF_CPU_VRAM;
+        r->dest[x->move_src] = r->dest[x->move_src + 1] = DP_DEST_VRAM;
         r->cpu_vram_words++;
         x->move_src_valid = 0;
     }
@@ -937,8 +943,8 @@ static void on_sound_store(void *u, uint16_t addr, uint8_t v, int ymreg) {
         for (unsigned i = x->nlr; i-- > 0;)
             if (x->lr[i] < r->rom_size && x->c->rom[x->lr[i]] == v) { src = x->lr[i]; break; }
     if (src == UINT32_MAX) return;
-    if (ymreg == 0x2A) { r->z80_flags[src] |= DP_MDZ_SAMPLE; r->z80_typed_sample++; }
-    else { r->z80_flags[src] |= DP_MDZ_MUSIC; r->z80_typed_music++; }
+    if (ymreg == 0x2A) { r->z80_flags[src] |= DP_MDZ_SAMPLE; r->z80_typed_sample++; r->dest[src] = DP_DEST_SAMPLE; }
+    else { r->z80_flags[src] |= DP_MDZ_MUSIC; r->z80_typed_music++; r->dest[src] = DP_DEST_MUSIC; }
 }
 
 void dp_md_options_default(DpMdOptions *o) {
@@ -1684,6 +1690,7 @@ int dp_md_explore(const DpMdCart *c, const DpMdOptions *o, DpMdResults *r) {
     r->play_data_hits = calloc(c->size, sizeof(uint32_t));
     r->src_flags = calloc(c->size, sizeof(uint32_t));
     r->z80_flags = calloc(c->size, 1);
+    r->dest = calloc(c->size, 1);
     r->copies = calloc(DP_MD_COPY_CAP, sizeof *r->copies);
     X x = {.c = c, .o = o, .r = r, .qcap = o->queue_cap};
     x.ins_rd = -1;
@@ -2012,6 +2019,7 @@ void dp_md_results_free(DpMdResults *r) {
     free(r->play_exec_hits); free(r->play_data_hits); free(r->src_flags);
     if (r->first_ready) dp_first_free(&r->first);
     free(r->z80_flags);
+    free(r->dest);
     free(r->copies);
     memset(r, 0, sizeof *r);
 }

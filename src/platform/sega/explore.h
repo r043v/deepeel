@@ -154,6 +154,7 @@ static inline uint16_t dp_sega_nature(uint8_t f,uint8_t st) {
 }
 typedef struct {
     uint8_t *flags;
+    uint8_t *dest;         // per ROM byte: DP_DEST_* where its data ends up (0: untyped)
     uint32_t *exec_hits,*data_hits; // per ROM byte, saturating: how often it was executed / read as data
     uint32_t *play_exec_hits,*play_data_hits; // played accesses only, for the shared heat map
     size_t size;

@@ -1875,6 +1875,7 @@ static int cmd_nes(int argc, char **argv) {
         size_t ml = strlen(map);
         if (ml >= 4 && !strcmp(map + ml - 4, ".png")) {
             uint8_t *classes = dp_nes_map_build(&res);
+            dp_map_apply_dest(classes, res.prg_size, res.dest);
             const char *base = strrchr(path, '/'); base = base ? base + 1 : path;
             if (!classes || !dp_map_png_from_evidence(classes, res.prg_size, res.play_exec_hits,
                                                        res.play_data_hits, res.src_flags, &res.first,
@@ -2003,13 +2004,14 @@ static int cmd_pce(int argc, char **argv) {
         DpMachine *km = dp_machine_pce();
         if (km) dp_machine_pce_source(km, data, size);
         kcfg.jobs = (unsigned)pce_jobs;
+        if (mks.n) { kcfg.seeds = mks.pcs; kcfg.n_seeds = mks.n; kcfg.seed_banks = mks.banks; kcfg.seed_regs = mks.regs; }
+        kcfg.hooks = dp_machine_pce_hooks();
+        if (!km) { free(data); return 1; }
         if (mn) {   // each seed's pc is the window this dump's MPR already shows, else re-banked (bank_view)
             if (dp_music_seeds_kernel(&mks, mseeds, mn, 0x4000, km)) { km->close(km); free(mseeds); free(data); return 1; }
             if (mks.n) { kcfg.seeds = mks.pcs; kcfg.n_seeds = mks.n; kcfg.seed_banks = mks.banks; kcfg.seed_regs = mks.regs; }
             if (mks.skipped) fprintf(stderr, "deepeel: pce: %zu music-rip seed(s) outside every MPR window of this dump (another banking)\n", mks.skipped);
         }
-        kcfg.hooks = dp_machine_pce_hooks();
-        if (!km) { free(data); return 1; }
         if (opt.max_total) kcfg.max_total = opt.max_total;
         if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
         if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
@@ -2067,6 +2069,7 @@ static int cmd_pce(int argc, char **argv) {
         size_t ml = strlen(map);
         if (ml >= 4 && !strcmp(map + ml - 4, ".png")) {
             uint8_t *classes = dp_pce_map_build(res);
+            dp_map_apply_dest(classes, res->rom_size, res->dest);
             const char *base = strrchr(path, '/'); base = base ? base + 1 : path;
             if (!classes || !dp_map_png_from_evidence(classes, res->rom_size, res->play_exec_hits,
                                                        res->play_data_hits, res->src_flags, &res->first,
@@ -2552,6 +2555,7 @@ static int cmd_md(int argc, char **argv) {
                     size_t ml = strlen(mp);
                     if (ml >= 4 && !strcmp(mp + ml - 4, ".png")) {
                         uint8_t *classes = dp_md_map_build(&r);
+                        dp_map_apply_dest(classes, r.rom_size, r.dest);
                         const char *base = strrchr(argv[3], '/'); base = base ? base + 1 : argv[3];
                         if (!classes || !dp_map_png_from_evidence(classes, r.rom_size, r.play_exec_hits,
                                                                    r.play_data_hits, r.src_flags, &r.first,

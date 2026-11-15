@@ -105,6 +105,7 @@ typedef struct {
 
 typedef struct DpMdResults_ {
     uint8_t *flags;       /* per ROM byte, DP_MDF_* */
+    uint8_t *dest;        /* per ROM byte: DP_DEST_* where its data ends up (0: untyped) */
     uint8_t *exec_kind;   /* per ROM byte, instruction start: DP_MDX_ENTRY (non-sequential arrival) | DP_MDX_IRQ (ran inside a handler) */
     uint32_t *exec_hits;  /* per ROM byte: natural-path instruction starts (heat) */
     uint32_t *data_hits;  /* per ROM byte: natural-path CPU data reads (saturating) */

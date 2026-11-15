@@ -35,6 +35,7 @@ int dp_fbwatch_start(const char *title) __attribute__((weak));
 void dp_fbwatch_stop(void) __attribute__((weak));
 int dp_map_png_from_evidence(const uint8_t *,size_t,const uint32_t *,const uint32_t *,const uint32_t *,
                              const DpFirstLog *,const char *,const char *,const char *,const char *) __attribute__((weak));
+void dp_map_apply_dest(uint8_t *,size_t,const uint8_t *) __attribute__((weak));
 
 typedef struct {
     DpZ80Provenance cpu;
@@ -264,6 +265,8 @@ static void copied(Run *x,DpZ80Origin origin,uint8_t value,unsigned space,uint32
         r->ram_copies++;
         if(space==DP_SEGA_SRAM) r->sram_copies++;
     }
+    r->dest[source]=(uint8_t)(space==DP_SEGA_VRAM?DP_DEST_VRAM:space==DP_SEGA_CRAM?DP_DEST_CRAM:
+                              space==DP_SEGA_SRAM?DP_DEST_SRAM:0);
     if(x->has_pending_copy) {
         DpSegaCopy *last=&x->pending_copy;
         int64_t source_stride=last->source_stride,destination_stride=last->destination_stride;
@@ -434,6 +437,13 @@ static void out_bus(void *user,uint16_t p,uint8_t v) {
             if(t.pair) copied(x,x->origins->cram_latch,t.latch_value,DP_SEGA_CRAM,t.address-1,0xff);
             copied(x,origin,v,t.space,t.address,t.mask);
         }
+    }
+    // the PSG and the GG's FM are fed by OUT with the accumulator's value: the
+    // data byte it last read from ROM is music data (the accumulator's origin
+    // is the provenance tracker's output tag, validated against the value)
+    if(!x->msx && ((p&255)==0x7E || (p&255)==0x7F || (p&255)==0xF0 || (p&255)==0xF1)) {
+        DpZ80Origin origin=valid_origin(x,x->origins->cpu.output,v);
+        if(origin) x->r->dest[origin-1]=DP_DEST_MUSIC;
     }
     x->b->out(p,v);
     if(remap) mapping_after(x,before,p,v,1);
@@ -1718,7 +1728,7 @@ void dp_sega_results_free(DpSegaResults *r) {
     for(uint32_t i=0;i<r->section_count;i++) dp_set_free(&r->sections[i].ctx_seen);
     free(r->sections); free(r->section_of); free(r->tree_nodes); free((void *)r->rom);
     free(r->static_flags); free(r->src_flags); dp_first_free(&r->first);
-    free(r->flags); free(r->exec_hits); free(r->data_hits); free(r->play_exec_hits); free(r->play_data_hits); free(r->copies); memset(r,0,sizeof(*r));
+    free(r->flags); free(r->dest); free(r->exec_hits); free(r->data_hits); free(r->play_exec_hits); free(r->play_data_hits); free(r->copies); memset(r,0,sizeof(*r));
 }
 // One exploration worker. worker 0 runs everything: the TAS replay, the play
 // session, the reset path. Higher workers own every jobs-th seed spec and an
@@ -1785,7 +1795,7 @@ static int sega_explore_one(const DpSegaSystem *s,const uint8_t *rom,size_t size
     x.copy_hash_size=1;
     while(x.copy_hash_size<(size_t)o->copy_cap*2) x.copy_hash_size*=2;
     x.copy_hash=calloc(x.copy_hash_size,sizeof(*x.copy_hash));
-    r->flags=calloc(size,1);
+    r->flags=calloc(size,1); r->dest=calloc(size,1);
     r->exec_hits=calloc(size,sizeof(uint32_t));
     r->data_hits=calloc(size,sizeof(uint32_t));
     r->play_exec_hits=calloc(size,sizeof(uint32_t));
@@ -3162,6 +3172,7 @@ int dp_sega_explore_command(int argc,char **argv) {
         size_t path_len=strlen(paths[i]);
         if(i==1 && path_len>=4 && !strcmp(paths[i]+path_len-4,".png")) {
             uint8_t *classes=dp_sega_map_build(&r);
+            if(dp_map_apply_dest) dp_map_apply_dest(classes,r.size,r.dest);   // typed data in the .png
             const char *base=strrchr(argv[4],'/'); base=base?base+1:argv[4];
             if(!classes || !dp_map_png_from_evidence ||
                !dp_map_png_from_evidence(classes,r.size,r.play_exec_hits,r.play_data_hits,r.src_flags,

@@ -199,6 +199,27 @@ qui demandent l'état interne d'un composant non exposé (CRAM vs VRAM du VDP Se
 documentées comme VRAM, pas devinées ; le modèle GB fin (`DP_DF_*`) reste en place et
 projette sur ces mêmes destinations.
 
+0.345.0 : le **typage DP_DEST_* est câblé dans les moteurs legacy** — dernier item de la
+phase 4 : chaque moteur porte désormais son tableau `dest` (un octet par cellule) et le
+marque à ses sites de preuve existants. NES : les copies `$2007` (VRAM, ou palette quand
+l'adresse PPU est dans `$3F00-$3F1F`), l'OAM DMA `$4014` et la chaîne ROM→WRAM→OAM (OAM),
+le port DMC `$4011` (sample), les registres APU `$4000-$4013` (musique), les copies SRAM
+`$6000-$7FFF` ; le rapport gagne une ligne `typed data: music/sample/palette/graphics`.
+PCE : les copies VDC (`VRAM`) et VCE (`CRAM`). Sega : `copied()` projette l'espace de la
+copie (VRAM/CRAM/SRAM — le `vdp_target()` du backend distingue déjà VRAM de CRAM, mieux
+que l'approximation noyau) et les OUT PSG `$7E/$7F`/FM `$F0/$F1` marquent musique par
+l'origine de l'accumulateur. MD : les lectures DMA VDP typées par le code de destination
+de la commande (1/5 graphismes, 3 palette — le complément D5 de la norme), les mots
+CPU→VRAM, et le typage sonore Z80 (DAC `$2A` → sample, le reste → musique) rejoint le
+tableau commun. Les quatre cartes PNG legacy appliquent `dp_map_apply_dest`, et la carte
+GB legacy projette ses drapeaux fins `DP_DF_*` sur les mêmes classes. Et E5 : le champ
+`DpMachine.bank_shift` (géométrie de la fenêtre des tables de pointeurs, sm83/z80 = 14)
+est déclaré par les machines et consommé par la marche statique bancarisée
+(`closure_walk_img`/tables stride 3) au lieu d'un `bank×$4000` implicite. Preuves
+(observations de l'outil) : Zelda GB legacy 679 musique + 656 sample ; Alex Kidd SMS
+legacy 644 musique + 11 732 palette + 38 763 graphismes ; Raiden PCE 672 palette +
+664 graphismes ; fixture MD DMA 192 graphismes.
+
 0.344.0 : première tranche de **fermeture statique bancarisée au noyau pour 6502/HuC6280**
 (E5 de l'audit) : un `jmp (abs)` (`$6C`) ou `jmp (abs,x)` (`$7C`, HuC6280) dont l'opérande
 tombe dans la fenêtre ROM cartographiée lit la table de mots qui suit — chaque cible qui

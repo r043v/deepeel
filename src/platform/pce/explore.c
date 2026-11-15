@@ -316,6 +316,7 @@ static void obs_io_write(void *user, uint16_t reg, uint8_t value) {
             uint64_t age = x->total_steps - x->last_read_step;
             if ((block && age == 0) ||
                 (!block && age <= 3 && x->rom[x->last_read_cell] == value)) {
+                r->dest[x->last_read_cell] = DP_DEST_CRAM;
                 if (r->pal_flags && !r->pal_flags[x->last_read_cell]) {
                     r->pal_flags[x->last_read_cell] = 1;
                     r->palette_bytes++;
@@ -337,6 +338,7 @@ static void obs_io_write(void *user, uint16_t reg, uint8_t value) {
                 (!block && age <= 3 && x->rom[x->last_read_cell] == value)) {
                 log_copy(x, (uint32_t)x->last_read_cell, block ? 2 : 1);
                 mark(x, (size_t)x->last_read_cell, DP_PCE_COPIED);
+                r->dest[x->last_read_cell] = DP_DEST_VRAM;
                 x->last_read_cell = -1;
             }
         }
@@ -1618,6 +1620,7 @@ void dp_pce_results_free(DpPceResults *r) {
     if (r->first_ready) { dp_first_free(&r->first); r->first_ready = 0; }
     free(r->live_io); r->live_io = NULL;
     free(r->pal_flags);
+    free(r->dest);
     free(r->idx_flags);
     r->idx_flags = NULL;
     free(r->sections);
@@ -1673,6 +1676,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     r->live_io = calloc(x->rom_size, 1);
     r->ctx_live = x->opt.ctx_live;
     r->pal_flags = calloc(x->rom_size, 1);
+    r->dest = calloc(x->rom_size, 1);
     r->idx_flags = calloc(x->rom_size, 1);
     x->fork_sites = calloc(x->rom_size, 1);
     x->pad_sites = calloc(x->rom_size, 1);
@@ -1686,7 +1690,7 @@ int dp_pce_explore(const uint8_t *data, size_t size, const DpPceOptions *options
     x->qcap = x->opt.queue_cap ? x->opt.queue_cap : 1;
     x->queue = calloc(x->qcap, sizeof *x->queue);
     if (!r->flags || !r->play_exec_hits || !r->play_data_hits || !r->src_flags || !x->fork_sites || !x->pad_sites || !x->irq_sites || !x->istart ||
-        !x->tmp || !x->tmp2 || !x->ztmp || !x->queue)
+        !r->dest || !x->tmp || !x->tmp2 || !x->ztmp || !x->queue)
         x->failed = 1;
     DpPceObserver o = { x, obs_rom_read, obs_io_write, obs_io_read };
     dp_pce_observe(&o);
