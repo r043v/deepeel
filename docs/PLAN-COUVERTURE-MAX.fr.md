@@ -594,3 +594,12 @@ sont sans effet à 10⁶ pas (leurs compteurs sont nuls ou trop tardifs, cf. la 
 (`--no-solve`) ou le choix par site (`--no-site-score`) *augmente* le connu à ce budget (+1,3 et +0,5 point) ; la résolution et le score de site
 dépensent des pas qui ne rapportent qu'au-delà de 10⁶ (cf. la courbe : 670 fourches résolues à 3·10⁶). Ce n'est pas une preuve qu'elles nuisent à budget
 infini, seulement qu'elles ne sont pas rentables à ce budget. Le total « connu » ne départage pas naturel et forcé : `--no-site-score` déplace 2 600 octets du naturel vers le forcé.
+
+### C3 : pistes du gain de la fermeture Sega (observation, Action Fighter UE)
+
+Les cinq plus grands blocs « statique seul » propres à `sega/closure.c` (1 058, 1 004, 866, 382, 225 octets) : pour quatre d'entre eux, un mot 16 bits égal à
+l'adresse du bloc existe en ROM, et pour le bloc de 382 octets (`$2222`) ce mot figure dans une table de pointeurs à pas de 4 (`$C87C`, `$C880`, `$C884`…). Le
+gain vient donc au moins en partie de **tables de pointeurs lues comme données** (`memory_resolved`), pas des `jp (hl)` à constante. Port à tenter dans
+le noyau : une résolution de table à pas générique (début/pas déduits de la lecture exécutée) qui amorce le marcheur sur chaque entrée plausible ; le risque
+est le sur-marquage (une entrée qui n'est pas du code), à borner par la règle de confiance A13 et à valider octet à octet avant tout retrait de
+`sega/closure.c`. Non fait.
