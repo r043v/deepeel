@@ -413,6 +413,27 @@ table décrit le contrat, la projection de contexte qui s'en servirait ne ferait
 couverture en plus) ; la liveness par page de RAM (`live`, C11 du noyau) est déjà générique sur toutes les ISA.
 Une projection par décodage d'opérandes reste un raffinement d'élagage, non un écart de couverture.
 
+## État du plan (0.382.0)
+
+Résumé honnête au 2026-11-16. Les nombres sont des observations de l'outil (`--jobs 1`, ROMs hors dépôt), pas des mesures de matériel.
+
+**Fait**
+- P0 à P4, retrait complet des moteurs historiques (le noyau `dp_core_explore` est le seul moteur), P6 et P8 par construction (voir « Statut final »).
+- B3 (cap par époque, rafales d'entrées), section E complète (courbe par budget, ablation à trois budgets), correction 0.380.1 de la simulation de banque.
+- **C11 projection de contexte (0.381.0)** : `DpMachine.ctx_reg_hash` sur GB, Sega/MSX, NES, PCE, MD ; `proj_key` (registres + pages de RAM lues) évince les fourches
+  déjà mises en file ; `--no-proj`. Ace of Aces, `--no-cells` : 1 618 fourches évincées, couverture identique. Sans décodage d'opérandes, tous les registres restent dans la clé.
+- **C3 partiel (0.382.0)** : pile de retours dans la marche du noyau (`--no-closure-ret`). Gain sur 3 ROMs sur 4 (voir le banc ci-dessus).
+- Tests : 165/165 hors `campaign_fixtures` (dernière passe complète de `campaign_fixtures` : 0.380.1, 1 217 s ; non relancée depuis 0.381.0).
+
+**Ouvert**
+1. **C3** : le noyau perd 779 octets sur Aerial Assault (GG), cause non instruite ; la fermeture Sega ajoute encore 610 à 3 007 octets (amorçage à chaque pas avec l'état
+   concret, `jp (hl)`, IX/IY). `sega/closure.c` reste en place ; il n'existe ni banc octet à octet ni vérité terrain code/données, donc le sur-marquage ne se juge pas.
+2. **MSX** : Aleste ne gagne rien de la fermeture Sega (7 094 octets avec et sans). Gradius 2 ne termine pas 300 000 pas en 500 s (946 fourches pour 1 000 pas) ; cause non instruite.
+   `--attract-frames` ralentit fortement le chemin MSX.
+3. **Projection** : utile surtout sous `--unbounded` ; avec les cellules (défaut) la clé de cellule est plus grossière. Mesure sous `--unbounded` et sur d'autres ISA non faite.
+4. `campaign_fixtures` à repasser sur 0.382.0 ; la note mémoire d'avancement (0.377.0 à 0.382.0) est à mettre à jour.
+5. Parité contre les moteurs historiques : impossible à rejouer (références figées dans `tests/golden/`).
+
 ## Statut final (0.379.0)
 
 Les moteurs historiques (GB, NES, PCE, MD, Sega/MSX) sont supprimés ; le noyau `dp_core_explore` est le seul moteur. Conséquences :
@@ -422,7 +443,7 @@ Les moteurs historiques (GB, NES, PCE, MD, Sega/MSX) sont supprimés ; le noyau 
 
 Limites déclarées, techniques et non d'implémentation :
 - **Vues commutables (C3)** : une arête qui sort de la fenêtre commutée vers une autre banque dépend du registre de banque au moment de l'exécution ; la fermeture statique ne peut que supposer la banque courante. Ces destinations sont couvertes dynamiquement (`bank_forks`, `--seed-banks`, fourches de banque) et la fermeture compte l'arête non résolue au lieu de l'ignorer.
-- **C11 (projection de contexte)** : le noyau ne consomme pas `ctx_components` ; une projection ne ferait qu'élaguer des contextes, sans octet de couverture en plus (voir 0.376.0). La liveness par page de RAM est déjà générique.
+- ~~C11 (projection de contexte)~~ : **limite levée** (0.381.0, décision du propriétaire) ; voir « État du plan (0.382.0) ».
 - **Sega (B5)** : hachage d'état exact limité par le backend (voir P3).
 - Les nombres produits sur ROMs réelles restent des observations de l'outil, pas des mesures de matériel.
 
