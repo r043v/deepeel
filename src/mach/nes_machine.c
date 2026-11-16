@@ -7,6 +7,7 @@
 #include "../core/dpmachine.h"
 #include "nesmach.h"
 #include "../explore/core.h"
+#include "../platform/nes/explore.h"
 
 typedef struct {
     DpNesMach *m;
@@ -196,6 +197,7 @@ DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err
     m->state_hash = nes_state_hash;
     m->frame = nes_frame;
     m->watch = nes_watch; m->render = nes_render;
+    m->plat = dp_nes_platform();
     m->impl = w;             // the m6502 DpIsa wrapper is not extracted yet
     m->state_bytes = nes_state_bytes;
     m->save = nes_save;

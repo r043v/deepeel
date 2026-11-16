@@ -162,7 +162,7 @@ void dp_core_result_free(DpCoreResult *r) {
     dp_ramarch_free(&r->ra);
     free(r->flags);
     free(r->dest); free(r->spec); free(r->refs); free(r->page_win); free(r->inferred); free(r->live);
-    free(r->src_flags);
+    free(r->src_flags); free(r->reg_slot); free(r->reg_reads); free(r->reg_writes); free(r->reg_vals);
     free(r->first_seen);
     memset(r, 0, sizeof *r);
 }
@@ -676,6 +676,7 @@ static uint32_t *site_count(SiteTab *t, uint32_t pc) {
 
 static void obs_read(void *u, uint32_t addr, uint8_t v) {
     CopyObs *o = u;
+    if (o->r->reg_slot && addr < 65536 && o->r->reg_slot[addr] && !o->forced && (o->r->reg_plat->io_regs[o->r->reg_slot[addr] - 1].rw & 1)) __atomic_fetch_add(&o->r->reg_reads[o->r->reg_slot[addr] - 1], 1, __ATOMIC_RELAXED);
     int64_t k = o->m->rom_index(o->m, addr);
     int64_t ri = k < 0 && o->ramread ? ridx(o->m, addr) : -1;
     if (ri >= 0 && !o->ramread[ri]) __atomic_store_n(&o->ramread[ri], 1, __ATOMIC_RELAXED);
@@ -730,6 +731,11 @@ static void obs_copy(void *u, uint32_t src, uint32_t len, unsigned channel) {
 
 static void obs_write(void *u, uint32_t addr, uint8_t v) {
     CopyObs *o = u;
+    if (o->r->reg_slot && addr < 65536 && o->r->reg_slot[addr] && !o->forced && (o->r->reg_plat->io_regs[o->r->reg_slot[addr] - 1].rw & 2)) {
+        unsigned rs = o->r->reg_slot[addr] - 1u;
+        __atomic_fetch_add(&o->r->reg_writes[rs], 1, __ATOMIC_RELAXED);
+        __atomic_fetch_or(&o->r->reg_vals[rs * 8u + (v >> 5)], 1u << (v & 31u), __ATOMIC_RELAXED);
+    }
     if (o->m->rom_index(o->m, addr) >= 0) o->mapper_w = 1;
     if (o->run_hi >= 0 && o->m->rom_index(o->m, addr) < 0) o->run_writes++;
     if (o->last_rom < 0 || o->age > 4) return;
@@ -2154,6 +2160,18 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     out->refs = calloc(rom_size ? rom_size : 1, 1);
     out->live_w = ((rsize(m) >> 8) + 31) / 32;
     out->live = calloc(((rom_size >> 8) + 1) * out->live_w, sizeof *out->live);
+    if (m->plat && m->plat->io_reg_count > 0) {   // typed register accesses: one slot per registry entry
+        out->reg_n = m->plat->io_reg_count; out->reg_plat = m->plat;
+        out->reg_slot = calloc(65536, sizeof *out->reg_slot);
+        out->reg_reads = calloc((size_t)out->reg_n, sizeof *out->reg_reads);
+        out->reg_writes = calloc((size_t)out->reg_n, sizeof *out->reg_writes);
+        out->reg_vals = calloc((size_t)out->reg_n * 8, sizeof *out->reg_vals);
+        if (!out->reg_slot || !out->reg_reads || !out->reg_writes || !out->reg_vals) { dp_core_result_free(out); return 0; }
+        for (int ri = 0; ri < out->reg_n; ri++) {
+            const DpIoReg *g = &m->plat->io_regs[ri];
+            for (uint32_t a = g->lo; a <= g->hi && a < 65536; a++) if (!out->reg_slot[a]) out->reg_slot[a] = (uint16_t)(ri + 1);
+        }
+    }
     out->page_win = calloc((rom_size >> 8) + 2, 1);   // one byte per 256 bytes: enough for any page_shift >= 8
     out->src_flags = calloc(rom_size ? rom_size : 1, sizeof *out->src_flags);
     out->first_seen = calloc(rom_size ? rom_size : 1, sizeof *out->first_seen);
@@ -2187,7 +2205,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         DpMachine *wm = i == 0 ? m : (m->clone ? m->clone(m, i) : NULL);
         if (!wm) break;                       // fewer workers than asked: reported
         w->sh = &sh; w->m = wm; w->idx = i;
-        w->loc.refs = out->refs; w->loc.page_win = out->page_win; w->loc.live = out->live; w->loc.live_w = out->live_w; w->loc.flags = out->flags; w->loc.src_flags = out->src_flags;
+        w->loc.refs = out->refs; w->loc.page_win = out->page_win; w->loc.live = out->live; w->loc.reg_slot = out->reg_slot; w->loc.reg_reads = out->reg_reads; w->loc.reg_writes = out->reg_writes; w->loc.reg_vals = out->reg_vals; w->loc.reg_n = out->reg_n; w->loc.reg_plat = out->reg_plat; w->loc.live_w = out->live_w; w->loc.flags = out->flags; w->loc.src_flags = out->src_flags;
         w->loc.dest = out->dest;
         w->loc.first_seen = out->first_seen; w->loc.rom_size = rom_size;
         w->site_n = site_n;
@@ -2559,6 +2577,18 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "bank forks: %llu (site cap hit %llu); probe re-arms: %llu (context cap hit %llu)\n", U(r->bank_forks), U(r->bank_fork_sat), U(r->probe_rearms), U(r->probe_ctx_sat));
     fprintf(out, "event probes %llu at %llu sites: %llu forced variants\n", U(r->event_probes), U(r->event_probe_sites), U(r->event_probes));
     fprintf(out, "seeded entry points %llu\n", U(r->seeded));
+    if (r->reg_plat && r->reg_n) {   // typed register accesses (natural paths), by registry entry, then by category
+        unsigned touched = 0;
+        for (int i = 0; i < r->reg_n; i++) touched += r->reg_reads[i] || r->reg_writes[i];
+        fprintf(out, "register accesses: %u of %d registry entries touched by natural paths\n", touched, r->reg_n);
+        for (int i = 0; i < r->reg_n; i++) {
+            if (!r->reg_reads[i] && !r->reg_writes[i]) continue;
+            unsigned vals = 0;
+            for (int k = 0; k < 8; k++) vals += (unsigned)__builtin_popcount(r->reg_vals[i * 8 + k]);
+            const DpIoReg *g = &r->reg_plat->io_regs[i];
+            fprintf(out, "  reg $%04X-$%04X %s [%s] reads %llu writes %llu distinct-values %u\n", g->lo, g->hi, g->name, g->category, U(r->reg_reads[i]), U(r->reg_writes[i]), vals);
+        }
+    }
     if (r->vector_seeds) fprintf(out, "vector seeds (RST/IRQ registry entries) %llu\n", U(r->vector_seeds));
     fprintf(out, "pointer seeds refused by cap %llu\n", U(r->seed_refused_cap));
     if (r->seed_regs_absent) fprintf(out, "register seeds unsupported by the machine: %llu (not seeded)\n", U(r->seed_regs_absent));

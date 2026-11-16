@@ -132,6 +132,9 @@ typedef struct DpCoreResult {
     uint64_t inferred_code, inferred_pad, inferred_data, padding_bytes, sib_tables, sib_bytes, sib_refused, jt_tables, jt_bytes;
     uint8_t *page_win;
     uint32_t *live;       // C11 liveness: per 256-byte ROM page, a bitmap of the 256-byte RAM pages its natural-path instructions read
+    // typed register accesses (natural paths only): per platform-registry slot, CPU reads, CPU writes and the set of
+    // distinct byte values written; reg_slot maps an address to its slot + 1 (0 = not a register)
+    const struct DpPlatform *reg_plat; uint16_t *reg_slot; uint64_t *reg_reads, *reg_writes; uint32_t *reg_vals; int reg_n;
     uint32_t live_w;      // words of that bitmap per ROM page         // B8: per ROM page (DpMachine.page_shift), 1 + the 8 KiB window it was executed at (0 = never executed)
     uint8_t *refs;             // B9: per ROM index, 1 = designated by an executed immediate pointer
     uint64_t imm_refs, spec_ref_runs;

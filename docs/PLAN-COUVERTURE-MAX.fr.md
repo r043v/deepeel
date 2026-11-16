@@ -354,7 +354,7 @@ Retirés : `--play-steps/--play-sessions/--play-pool`, `--novelty*`, `--export-s
 
 Écarts de couverture Sega à combler dans le noyau (pas par option) :
 - rendu (`DpMachine.render/watch`) pour SG/SMS/GG/MSX : `--watch`, `--watch-dump`, `--mapwin` sans écran de jeu ;
-- typage des accès registres/ports (YM2413 FM typé, ports MSX2 V9938, VDP, bancs) dans le rapport du noyau ;
+- typage des accès registres/ports dans le rapport du noyau : fait en 0.374.0 pour GB/NES/PCE (voir ci-dessous) ; reste Sega/MD/MSX (YM2413 FM typé, V9938, VDP, bancs : ces machines n'exposent pas encore de `DpPlatform`) ;
 - sorties `--evidence`, `--romdata`, `--rtcode` du noyau (acceptées, signalées « non produites ») ;
 - sessions de lecture TAS aléatoires (`--tas-rng-*`) : déjà couvertes par les checkpoints `--tas-ckpt-every` du noyau.
 
@@ -377,3 +377,13 @@ par lots, `--evidence`/`--romdata`/`--rtcode` GB, cellules legacy.
 lignes (`DpSegaBackend.watch_view`, capture sans publication vers la fenêtre
 framebuffer), `sega_render` recopie la dernière trame en ARGB. `--watch` couvre donc toutes
 les plateformes du noyau. Test : `test_dpmachine` (trame 160×192 observée sur la fixture SMS).
+
+## Typage des registres dans le noyau (0.374.0)
+
+Le noyau compte, par entrée du registre de la plateforme (`DpMachine.plat->io_regs`), les lectures et écritures
+CPU des chemins naturels (jamais les fourches forcées), et le nombre de valeurs d'octet distinctes écrites ;
+le rapport texte les liste (`reg $lo-$hi NOM [catégorie] reads/writes/distinct-values`). Le sens (`rw`) du
+registre filtre : une écriture dans un registre en lecture seule (fenêtre de banque) n'est pas comptée.
+`m->plat` est désormais posé pour NES et PCE (comme GB) : leurs vecteurs RST/IRQ du registre sont semés
+(« vector seeds »). Observations de l'outil sur fixtures, pas des mesures de matériel.
+Reste : une `DpPlatform` pour MD/Sega/MSX afin d'y typer YM2413/V9938/VDP.

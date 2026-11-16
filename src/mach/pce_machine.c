@@ -313,6 +313,7 @@ DpMachine *dp_machine_pce(void) {
     m->data_dest = pce_data_dest;
     m->frame = pce_frame;
     m->watch = pce_watch; m->render = pce_render;
+    m->plat = dp_pce_platform();
     m->set_input = pce_set_input;
     return m;
 }
