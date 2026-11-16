@@ -42,10 +42,10 @@ l'épuisement ou SIGINT, comme décidé par le propriétaire ; le mode borné fi
 | P2 | faite (0.348.0) : C13, C12, C14, champs 32 bits |
 | P3 | B5 et E11 faits (`state_hash` NES, MD, GB, PCE ; Sega limite technique justifiée) ; B6 : `sat_path`, `sat_loop` et le mur `max_total` (avec `--state-dir`) reportent ; `sat_site` et la sortie de boucle forcée justifiés (voir GB.fr.md) |
 | P4 | B1, B7, A26 faits ; B10 : graine automatique GB/NES faite, signatures apprises sur toutes les ISA (`ram_signature` : cp n Z80/SM83/6502/HuC6280, cmpi 68000 ; vérifié 0.376.1) ; B3/A22 : points de contrôle du film, état final et graines de vecteurs sur états vivants faits (GB, `core_live_seeds`) ; pool commun : films et sessions attract/play déposent leurs états dans la même file du noyau (source `SESSION`, cellule la moins visitée, rafales d’entrées) ; cap de fourches par site remis à zéro dans chaque époque de checkpoint (`Pending.epoch`, 0.378.0 ; borné par `tas_ckpt_cap` époques film + autant de session) ; mutations de segments de film : deux rafales d’entrées depuis chaque checkpoint de film (0.379.0, comme pour les sessions) ; B4 : énumération 0..255 en `--unbounded`, longueur prouvée faite pour SM83/Z80, 6502/HuC6280 (`lda abs,x`) et 68000 (0.376.1 : `lea` ROM + longs pointant la ROM, adresses paires) |
-| P5 | C1 première tranche faite (plus aucune ISA nommée dans `core.c`) ; B8 faite (fenêtres 16 Kio, NES, MD linéaire, PCE banque fixe) ; B9 faite pour SM83/Z80/68000/6502/HuC6280 (`imm_ptr`, `imm_byte`) ; C3 : marcheur noyau unique avec A13, arrêts padding/données/pointeurs (arêtes hors de la vue ROM comptées `closure_unresolved` depuis 0.377.0 ; restent la fusion des fermetures historiques et les indices de banque des vues commutables) ; C4 non commencé |
+| P5 | C1 première tranche faite (plus aucune ISA nommée dans `core.c`) ; B8 faite (fenêtres 16 Kio, NES, MD linéaire, PCE banque fixe) ; B9 faite pour SM83/Z80/68000/6502/HuC6280 (`imm_ptr`, `imm_byte`) ; C3 : marcheur noyau unique avec A13, arrêts padding/données/pointeurs (arêtes hors de la vue ROM comptées `closure_unresolved` depuis 0.377.0 ; restent la fusion des fermetures historiques et les indices de banque des vues commutables) ; C4 : `infer_static` du noyau (bourrage, trous, frères de table copiée, tables de sauts) a remplacé les scans historiques, tous supprimés |
 | Depuis 0.351.0 | C3/B et C9 (noyau par défaut, `--legacy`) ; C4 tranche 1-2 (`infer_static` : bourrage, trous, frères de table copiée, tables de sauts communes, `--no-infer`) ; B8 pages PCE jamais exécutées ; B11 `on_copy` (DMA VDP MD, DMC NES ; HDMA GB sans objet, runtime DMG) ; C11 liveness (pages RAM lues par section du noyau) ; B3 checkpoints attract/play, cellule la moins visitée, rafales d'entrées (0.362.0-0.364.0). `campaign_fixtures` verte sur 0.364.0 (967 s, plafond 1800 s) |
-| Reste | C4 retrait des scans historiques ; C2 rejeu S6 commun ; C10 module de copies unique ; C11 projection de contexte `DpCtxComp` (liveness des registres : demande le décodage des opérandes par ISA ; seul le GB déclare des composantes) ; C6/E12 sessions sur `DpMovie` (type unique fait 0.365.0) ; C8 workers du noyau seuls ; C7 couche de rapport unique |
-| P6 à P8 (état initial) | non commencées : refontes d'architecture (fermeture statique unifiée, reprise des cinq moteurs historiques, bascule du noyau par défaut) à découper en tranches par plateforme |
+| Reste | voir « Statut final (0.379.0) » : C2, C4, C8, C10 et la partie moteurs de C7 sont résolus par le retrait des moteurs ; C11 (projection) et les vues commutables de C3 sont des limites justifiées |
+| P6 à P8 | faits par le retrait complet : plus de moteur historique, noyau par défaut (C9), couche de rapport unique (C7) |
 
 Ce plan complète `PLAN-MUTUALISATION.fr.md` (dont les étapes 1 et 3 sont en
 grande partie faites dans le noyau) et l'audit de parité (écarts E5, E6, E10,
@@ -412,3 +412,16 @@ dépendre. Contrôle dans `test_dpmachine`. Précision : le noyau ne consomme pa
 table décrit le contrat, la projection de contexte qui s'en servirait ne ferait qu'élaguer, sans octet de
 couverture en plus) ; la liveness par page de RAM (`live`, C11 du noyau) est déjà générique sur toutes les ISA.
 Une projection par décodage d'opérandes reste un raffinement d'élagage, non un écart de couverture.
+
+## Statut final (0.379.0)
+
+Les moteurs historiques (GB, NES, PCE, MD, Sega/MSX) sont supprimés ; le noyau `dp_core_explore` est le seul moteur. Conséquences :
+- **C2** (rejeu S6 commun), **C8** (travailleurs), **C10** (copies), **C4** (scans historiques), **P6** (reprise des cinq moteurs) et **P8** (sorties) sont résolus par construction : il n'y a plus de second code à reprendre ; la couche de rapport est unique (C7, 0.375.1).
+- **B3** : points de contrôle de film et de session dans le même pool (source `SESSION`), cap de fourches par site remis à zéro par époque (0.378.0), rafales d'entrées depuis chaque point de contrôle de film (0.379.0).
+- **C3** : un marcheur unique sur `DpIsa` ; les arêtes hors de la vue ROM sont comptées (`closure_unresolved`, 0.377.0).
+
+Limites déclarées, techniques et non d'implémentation :
+- **Vues commutables (C3)** : une arête qui sort de la fenêtre commutée vers une autre banque dépend du registre de banque au moment de l'exécution ; la fermeture statique ne peut que supposer la banque courante. Ces destinations sont couvertes dynamiquement (`bank_forks`, `--seed-banks`, fourches de banque) et la fermeture compte l'arête non résolue au lieu de l'ignorer.
+- **C11 (projection de contexte)** : le noyau ne consomme pas `ctx_components` ; une projection ne ferait qu'élaguer des contextes, sans octet de couverture en plus (voir 0.376.0). La liveness par page de RAM est déjà générique.
+- **Sega (B5)** : hachage d'état exact limité par le backend (voir P3).
+- Les nombres produits sur ROMs réelles restent des observations de l'outil, pas des mesures de matériel.
