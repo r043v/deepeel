@@ -7,6 +7,7 @@
 #include "../core/dpmachine.h"
 #include "mdmach.h"
 #include "../explore/core.h"
+#include "../platform/md/md_registry.h"
 
 typedef struct {
     DpMdMach *m;
@@ -263,6 +264,7 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->data_dest = md_data_dest;
     m->frame = md_frame;
     m->render = md_render;   // the VDP renders from its state on demand: no watch switch
+    m->plat = dp_md_platform();
     return m;
 }
 

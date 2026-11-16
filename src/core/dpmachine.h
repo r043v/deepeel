@@ -113,6 +113,8 @@ typedef struct DpObservers {
     // B11: a copy made by hardware, not by the CPU (VDP/OAM/HDMA DMA, block transfer): `len` source bytes from `src` are
     // moved to a destination the machine owns; the CPU never read them
     void (*on_copy)(void *user, uint32_t src, uint32_t len, unsigned channel);
+    // CPU port I/O (Z80 IN/OUT): `port` is the 8-bit port, `v` the value read or written
+    void (*on_io)(void *user, uint16_t port, uint8_t v, int write);
 } DpObservers;
 enum { DP_COPY_DMA = 1 };
 

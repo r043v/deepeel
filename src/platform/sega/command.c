@@ -110,6 +110,7 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
     if(msx && (size>0x100000 || o->msx_mapper<DP_MSX_AUTO || o->msx_mapper>DP_MSX_KONAMI_SCC)) return 0;
     if(!b || b->init(rom,size,NULL,init_arg)!=1) return 0;
     DpMachine *m=dp_machine_sega(b); if(!m) return 0;
+    m->plat=dp_platform_sega(s);
     dp_machine_sega_init_arg(m,init_arg);
     dp_machine_sega_set_msx(m,msx);
     if(o->sega_mapper) { if(!b->select_mapper || !b->select_mapper((unsigned)o->sega_mapper)) { m->close(m); return 0; } dp_machine_sega_mapper(m,(unsigned)o->sega_mapper); }

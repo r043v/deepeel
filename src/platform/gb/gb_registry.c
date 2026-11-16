@@ -129,7 +129,6 @@ static const DpPlatform gb_platform = {
     gb_irqs, (int)(sizeof gb_irqs / sizeof gb_irqs[0]),
     gb_regions, (int)(sizeof gb_regions / sizeof gb_regions[0]),
     gb_entries, (int)(sizeof gb_entries / sizeof gb_entries[0]),
-    0x0100, 0xFFFE, 0x01, 0xB0, 0x00, 0x13, 0x00, 0xD8, 0x01, 0x4D,
 };
 
 const DpPlatform *dp_platform_gb(void) { return &gb_platform; }

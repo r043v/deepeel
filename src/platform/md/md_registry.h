@@ -23,4 +23,6 @@ extern const int dp_md_vector_count;
 /* Index in dp_md_regs of the register covering addr (24-bit, mirrors
  * folded), or -1. */
 int dp_md_reg_find(uint32_t addr);
+/* the registers (memory regions excluded) as a DpPlatform for the kernel report */
+const struct DpPlatform *dp_md_platform(void);
 #endif

@@ -58,6 +58,7 @@ const DpPlatform *dp_platform_sega(const DpSegaSystem *s) {
     p->region_count = 3;
     p->entries = NULL;
     p->entry_count = 0;
+    p->port_io = 1;
     return p;
 }
 

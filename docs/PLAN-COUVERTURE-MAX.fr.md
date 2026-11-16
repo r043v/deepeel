@@ -354,7 +354,7 @@ Retirés : `--play-steps/--play-sessions/--play-pool`, `--novelty*`, `--export-s
 
 Écarts de couverture Sega à combler dans le noyau (pas par option) :
 - rendu (`DpMachine.render/watch`) pour SG/SMS/GG/MSX : `--watch`, `--watch-dump`, `--mapwin` sans écran de jeu ;
-- typage des accès registres/ports dans le rapport du noyau : fait en 0.374.0 pour GB/NES/PCE (voir ci-dessous) ; reste Sega/MD/MSX (YM2413 FM typé, V9938, VDP, bancs : ces machines n'exposent pas encore de `DpPlatform`) ;
+- typage des accès registres/ports dans le rapport du noyau : fait pour GB/NES/PCE (0.374.0) et Sega/MSX/MD (0.375.0), voir ci-dessous ;
 - sorties `--evidence`, `--romdata`, `--rtcode` du noyau (acceptées, signalées « non produites ») ;
 - sessions de lecture TAS aléatoires (`--tas-rng-*`) : déjà couvertes par les checkpoints `--tas-ckpt-every` du noyau.
 
@@ -386,4 +386,12 @@ le rapport texte les liste (`reg $lo-$hi NOM [catégorie] reads/writes/distinct-
 registre filtre : une écriture dans un registre en lecture seule (fenêtre de banque) n'est pas comptée.
 `m->plat` est désormais posé pour NES et PCE (comme GB) : leurs vecteurs RST/IRQ du registre sont semés
 (« vector seeds »). Observations de l'outil sur fixtures, pas des mesures de matériel.
-Reste : une `DpPlatform` pour MD/Sega/MSX afin d'y typer YM2413/V9938/VDP.
+
+### Sega/MSX/MD (0.375.0)
+- Z80 : nouvel observateur `DpObservers.on_io(port, v, write)` (IN/OUT enveloppés par `sega_observe`) ;
+  `DpPlatform.port_io = 1` indique que le registre est une table de ports (SMS/GG/SG/MSX : YM2413, V9938,
+  VDP, PSG, manette) et non des adresses mémoire.
+- MD : `DpIoReg.lo/hi` passent en 32 bits et `DpPlatform.find` donne l'entrée d'une adresse 24 bits
+  (miroirs repliés, régions ROM/SRAM/RAM exclues) : pas de table de 64 Kio. `dp_md_platform()` réutilise
+  `dp_md_regs`, source unique.
+- Test `core_reg_typing` : une fixture par plateforme (GB, NES, MD, SMS YM2413, MSX V9938).

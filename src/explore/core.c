@@ -674,9 +674,19 @@ static uint32_t *site_count(SiteTab *t, uint32_t pc) {
     return &t->s[h].count;
 }
 
+// registry slot + 1 of a memory address (0 = not a register); port tables are reached through obs_io only
+static inline unsigned reg_of(const DpCoreResult *r, uint32_t addr) {
+    if (!r->reg_plat || r->reg_plat->port_io) return 0;
+    if (r->reg_plat->find) { int i = r->reg_plat->find(addr); return i < 0 ? 0u : (unsigned)i + 1u; }
+    return addr < 65536 ? r->reg_slot[addr] : 0u;
+}
+
 static void obs_read(void *u, uint32_t addr, uint8_t v) {
     CopyObs *o = u;
-    if (o->r->reg_slot && addr < 65536 && o->r->reg_slot[addr] && !o->forced && (o->r->reg_plat->io_regs[o->r->reg_slot[addr] - 1].rw & 1)) __atomic_fetch_add(&o->r->reg_reads[o->r->reg_slot[addr] - 1], 1, __ATOMIC_RELAXED);
+    if (o->r->reg_plat && !o->forced) {
+        unsigned rs = reg_of(o->r, addr);
+        if (rs && (o->r->reg_plat->io_regs[rs - 1].rw & 1)) __atomic_fetch_add(&o->r->reg_reads[rs - 1], 1, __ATOMIC_RELAXED);
+    }
     int64_t k = o->m->rom_index(o->m, addr);
     int64_t ri = k < 0 && o->ramread ? ridx(o->m, addr) : -1;
     if (ri >= 0 && !o->ramread[ri]) __atomic_store_n(&o->ramread[ri], 1, __ATOMIC_RELAXED);
@@ -729,10 +739,22 @@ static void obs_copy(void *u, uint32_t src, uint32_t len, unsigned channel) {
     }
 }
 
+// CPU port I/O: typed against the registry when the platform's registry is a port table
+static void obs_io(void *u, uint16_t port, uint8_t v, int write) {
+    CopyObs *o = u;
+    if (!o->r->reg_slot || !o->r->reg_plat->port_io || o->forced || !o->r->reg_slot[port]) return;
+    unsigned rs = o->r->reg_slot[port] - 1u;
+    if (write) {
+        __atomic_fetch_add(&o->r->reg_writes[rs], 1, __ATOMIC_RELAXED);
+        __atomic_fetch_or(&o->r->reg_vals[rs * 8u + (v >> 5)], 1u << (v & 31u), __ATOMIC_RELAXED);
+    } else __atomic_fetch_add(&o->r->reg_reads[rs], 1, __ATOMIC_RELAXED);
+}
+
 static void obs_write(void *u, uint32_t addr, uint8_t v) {
     CopyObs *o = u;
-    if (o->r->reg_slot && addr < 65536 && o->r->reg_slot[addr] && !o->forced && (o->r->reg_plat->io_regs[o->r->reg_slot[addr] - 1].rw & 2)) {
-        unsigned rs = o->r->reg_slot[addr] - 1u;
+    unsigned rs1 = o->r->reg_plat && !o->forced ? reg_of(o->r, addr) : 0;
+    if (rs1 && (o->r->reg_plat->io_regs[rs1 - 1].rw & 2)) {
+        unsigned rs = rs1 - 1u;
         __atomic_fetch_add(&o->r->reg_writes[rs], 1, __ATOMIC_RELAXED);
         __atomic_fetch_or(&o->r->reg_vals[rs * 8u + (v >> 5)], 1u << (v & 31u), __ATOMIC_RELAXED);
     }
@@ -2067,7 +2089,7 @@ static void *worker_main(void *arg) {
         return NULL;
     }
     // each worker hooks its own machine from its own thread (platform state may be thread-local)
-    DpObservers obsv = { NULL, obs_read, obs_write, obs_copy };
+    DpObservers obsv = { NULL, obs_read, obs_write, obs_copy, obs_io };
     if (!cfg->no_copies && w->m->observe) w->m->observe(w->m, &obsv, &w->cobs);
     pthread_mutex_lock(&sh->mu);
     for (;;) {
@@ -2162,12 +2184,12 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     out->live = calloc(((rom_size >> 8) + 1) * out->live_w, sizeof *out->live);
     if (m->plat && m->plat->io_reg_count > 0) {   // typed register accesses: one slot per registry entry
         out->reg_n = m->plat->io_reg_count; out->reg_plat = m->plat;
-        out->reg_slot = calloc(65536, sizeof *out->reg_slot);
+        out->reg_slot = m->plat->find ? NULL : calloc(65536, sizeof *out->reg_slot);
         out->reg_reads = calloc((size_t)out->reg_n, sizeof *out->reg_reads);
         out->reg_writes = calloc((size_t)out->reg_n, sizeof *out->reg_writes);
         out->reg_vals = calloc((size_t)out->reg_n * 8, sizeof *out->reg_vals);
-        if (!out->reg_slot || !out->reg_reads || !out->reg_writes || !out->reg_vals) { dp_core_result_free(out); return 0; }
-        for (int ri = 0; ri < out->reg_n; ri++) {
+        if ((!out->reg_slot && !m->plat->find) || !out->reg_reads || !out->reg_writes || !out->reg_vals) { dp_core_result_free(out); return 0; }
+        for (int ri = 0; out->reg_slot && ri < out->reg_n; ri++) {
             const DpIoReg *g = &m->plat->io_regs[ri];
             for (uint32_t a = g->lo; a <= g->hi && a < 65536; a++) if (!out->reg_slot[a]) out->reg_slot[a] = (uint16_t)(ri + 1);
         }

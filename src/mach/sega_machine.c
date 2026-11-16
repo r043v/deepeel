@@ -18,6 +18,8 @@ typedef struct {
     const DpObservers *obs;
     void *user;
     // the callbacks observe() wrapped, called through after reporting
+    uint8_t (*prev_in)(void *, uint16_t);
+    void (*prev_out)(void *, uint16_t, uint8_t);
     uint8_t (*prev_read)(void *, uint16_t);
     void (*prev_write)(void *, uint16_t, uint8_t);
     void *prev_user;
@@ -39,6 +41,18 @@ typedef struct {
 
 static uint32_t sega_state_bytes(DpMachine *m) { return (uint32_t)((SegaMach *)m->impl)->b->state_size; }
 static void sega_save(DpMachine *m, uint8_t *buf) { ((SegaMach *)m->impl)->b->save(buf); }
+static uint8_t sega_obs_in(void *u, uint16_t a) {
+    SegaMach *s = u;
+    uint8_t v = s->prev_in(s->prev_user, a);
+    if (s->obs && s->obs->on_io) s->obs->on_io(s->user, a & 0xFF, v, 0);
+    return v;
+}
+static void sega_obs_out(void *u, uint16_t a, uint8_t v) {
+    SegaMach *s = u;
+    if (s->obs && s->obs->on_io) s->obs->on_io(s->user, a & 0xFF, v, 1);
+    s->prev_out(s->prev_user, a, v);
+}
+
 static void sega_reinstall(SegaMach *s);
 static void sega_capture(SegaMach *s);
 static void sega_load(DpMachine *m, const uint8_t *buf) {
@@ -159,6 +173,7 @@ static void sega_reinstall(SegaMach *s) {
     if (!s->wrapped) return;
     s->prev_read = c->read; s->prev_write = c->write; s->prev_user = c->user;
     c->read = sega_obs_read; c->write = sega_obs_write; c->user = s;
+    if (c->in && c->out) { s->prev_in = c->in; s->prev_out = c->out; c->in = sega_obs_in; c->out = sega_obs_out; }
 }
 
 static void sega_observe(DpMachine *m, const DpObservers *o, void *user) {
@@ -170,6 +185,7 @@ static void sega_observe(DpMachine *m, const DpObservers *o, void *user) {
     if (o && c->read != sega_obs_read && c->read && c->write) {
         s->prev_read = c->read; s->prev_write = c->write; s->prev_user = c->user;
         c->read = sega_obs_read; c->write = sega_obs_write; c->user = s;
+        if (c->in && c->out) { s->prev_in = c->in; s->prev_out = c->out; c->in = sega_obs_in; c->out = sega_obs_out; }
         s->wrapped = 1;
     }
 }

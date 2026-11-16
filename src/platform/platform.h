@@ -31,7 +31,7 @@ enum {
 
 // one register (or register window for mapper ranges)
 typedef struct DpIoReg {
-    uint16_t lo, hi;
+    uint32_t lo, hi;
     const char *name;
     const char *category; // "video" "sound" "timer" "input" "serial" "interrupt" "mapper" "cgb" "sys"
     uint8_t rw;           // 1 = read, 2 = write, 3 = both
@@ -83,6 +83,8 @@ typedef struct DpPlatform {
     int region_count;
     const DpEntry *entries;
     int entry_count;
+    int port_io; // 1: io_regs are CPU I/O ports (Z80 IN/OUT), not memory addresses
+    int (*find)(uint32_t addr); // wide address spaces: registry index covering addr, or -1 (no 64 KiB slot table)
 } DpPlatform;
 
 // the GB registry; the other platforms expose theirs from their own

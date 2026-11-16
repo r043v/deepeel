@@ -1,3 +1,4 @@
+#include <string.h>
 #include "md_registry.h"
 
 /* Order matters only for find(): first match wins, narrower ranges first. */
@@ -43,4 +44,27 @@ int dp_md_reg_find(uint32_t a) {
     for (int i = 0; i < dp_md_reg_count; i++)
         if (a >= dp_md_regs[i].lo && a <= dp_md_regs[i].hi) return i;
     return -1;
+}
+
+#include "../platform.h"
+// the kernel's typed register view: same table, memory regions (ROM/SRAM/work RAM) are not registers
+static DpIoReg md_io[sizeof dp_md_regs / sizeof dp_md_regs[0]];
+static int md_io_n;
+static int md_find(uint32_t a) {
+    int i = dp_md_reg_find(a);
+    return i >= 0 && md_io[i].name ? i : -1;
+}
+const DpPlatform *dp_md_platform(void) {
+    static DpPlatform p;
+    if (p.name) return &p;
+    for (int i = 0; i < dp_md_reg_count; i++) {
+        if (!strcmp(dp_md_regs[i].category, "memory")) continue;
+        md_io[i] = (DpIoReg){ dp_md_regs[i].lo, dp_md_regs[i].hi, dp_md_regs[i].name, dp_md_regs[i].category, 3, 0 };
+    }
+    md_io_n = dp_md_reg_count;
+    p.name = "md";
+    p.io_regs = md_io;
+    p.io_reg_count = md_io_n;
+    p.find = md_find;
+    return &p;
 }
