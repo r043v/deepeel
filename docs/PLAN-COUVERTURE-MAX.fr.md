@@ -740,3 +740,8 @@ marquée par une marche à retour, l'ordre des marches change. Cela corrige l'in
 **Fourche statique (à faire)** : amorcer une marche à chaque pas exécuté avec les valeurs concrètes de HL/IX/IY (ce que fait `sega/closure.c`) demande un accès générique
 aux registres (`DpMachine` n'expose aujourd'hui qu'un hachage, `ctx_reg_hash`) : une primitive `ctx_reg(m, i)` par machine, puis un état de marche porteur de ces valeurs
 pour `jp (hl)`, `jp (ix)` et `ret` de pile concrète, avec un plafond de valeurs distinctes par site. Non commencée.
+
+### Vérification 0.382.0
+`campaign_fixtures` verte sur 0.382.0 (1217 s). La fourche statique (valeurs concrètes HL/IX/IY, propagation de constantes de `sega/closure.c`) reste à porter : les cibles
+de `jp (hl)` atteintes par l'exécution sont déjà marchées, les tables de pointeurs proches d'un `ld hl,nn` sont déjà lues (`closure_jp_table`) ; le reliquat est la
+propagation de constantes à travers des chaînes d'instructions, qui demande une primitive d'accès aux registres par machine et un plafond de valeurs par site.
