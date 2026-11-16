@@ -533,3 +533,15 @@ Deux essais C3 de plus rejetés (0.380.0, non livrés ; Action Fighter UE, ferme
 Hypothèses éliminées pour le gain de `sega/closure.c` : changements de banque, `jp (hl)` après `ld hl,nn`, retours résolus, confiance après appel. Il
 reste la propagation de constantes de registres vers les appels, les lectures de table et les blocs entiers ; elle se localise en instrumentant la fermeture
 Sega (quelles instructions marquent les octets que le noyau n'atteint pas), travail non fait.
+
+### Correction de méthode et de la simulation de banque (0.380.1)
+
+Erreur de mesure des sections précédentes : `--cov` ne contient que les octets naturels et forcés (format de l'ancien moteur), pas le statique ; les
+comparaisons « couverture identique » faites avec `--cov` ne disaient rien du statique. La mesure juste est l'ensemble des drapeaux `DP_CORE_STATIC`
+sans `NATURAL`/`FORCED` (vidage des drapeaux du résultat, comparé octet par octet). Refaite : la simulation de banque de 0.380.0 **perdait** 1 073 octets
+statiques sur Zelda GB (et en gagnait 159), parce que la marche simulée consommait le budget avant la continuation d'origine. 0.380.1 : la marche continue
+d'abord sous la vue d'origine (exactement le marcheur simple), la continuation sous la vue simulée passe après, avec un budget propre (`CLOSURE_INSTR/8`).
+Observation de l'outil sur Zelda (60 écritures rejouées, `--jobs 1`) : 0 octet statique perdu, 0 gagné. La simulation est donc neutre sur cette ROM ; elle
+n'a pas de gain démontré (les aides de bascule de banque se terminent par `ret` avec la banque en paramètre, sans constante visible). Les essais rejetés
+« retours résolus » et « cibles par `ld rr,nn` » avaient eux aussi été jugés sur `--cov` : le premier reste sans effet sur le compteur de statique (7 855
+inchangé), le second n'a suivi aucune cible ; leurs verdicts sur le statique sont à prendre avec cette réserve.

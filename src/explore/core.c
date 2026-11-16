@@ -342,6 +342,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
     // pending root remembers the chain of writes it was pushed under (node 0 = the live view).
     BankPoke pk[CLOSURE_BANK_NODES + 1]; int npk = 0, cur = 0, acc_known = 0, acc_age = 0; uint8_t acc = 0; uint8_t *snap = NULL;
 #define CLOSURE_POP() do { sp--; pc = stack[sp][0]; bk = stack[sp][1]; trust = stack[sp][2]; acc_known = 0; \
+        if (stack[sp][3] && budget < CLOSURE_INSTR / 8) budget = CLOSURE_INSTR / 8;   /* a simulated view gets its own bounded budget */ \
         if ((int)stack[sp][3] != cur) { bank_apply(v->m, snap, pk, (int)stack[sp][3]); cur = (int)stack[sp][3]; } } while (0)
     uint32_t trust = trust0;   // A13: code reached from executed code is trusted; the fall-through after a CALL is not (inline data idiom)
     uint32_t pc = root, bk = bank;
@@ -409,10 +410,11 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
                 if (is_map) {
                     if (!snap) { snap = malloc(v->m->state_bytes(v->m)); if (snap) v->m->save(v->m, snap); }
                     if (snap) {
-                        // additive: the continuation is also walked under the view it had before the write (nothing the plain walk marked is lost)
-                        if (sp < 256) { stack[sp][0] = pc + f.length; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)cur; sp++; }
+                        // additive and last: the walk goes on under the view it already has (exactly the plain walk); the continuation under
+                        // the new view is queued behind it and only gets what budget is left
+                        pk[++npk] = (BankPoke){ ad, acc, cur }; r->closure_bank_sims++;
+                        if (sp < 256) { stack[sp][0] = pc + f.length; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)npk; sp++; }
                         else r->closure_stack_dropped++;
-                        pk[++npk] = (BankPoke){ ad, acc, cur }; cur = npk; v->m->poke(v->m, ad, acc); r->closure_bank_sims++;
                     }
                 }
             } else if (acc_known && (f.kind != DP_FLOW_SEQ || ++acc_age > 2)) acc_known = 0;
