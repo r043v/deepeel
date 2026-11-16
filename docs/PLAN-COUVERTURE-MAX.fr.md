@@ -603,3 +603,11 @@ plages (30, 24, 23, 7 et 1 octets). Les écarts de plusieurs milliers d'octets r
 déterministe, mélangée à l'effet de la fermeture) et ne mesuraient pas la fermeture. Le port des pistes (retours par la pile concrète, IX/IY/BC) vise donc
 au plus ~1 % de statique sur cette ROM ; il reste justifié par la règle de couverture, mais n'est pas le gain massif supposé. Pas de retrait de
 `sega/closure.c` sans banc octet à octet sur SMS/GG/SG/MSX ; les 85 octets sont la cible chiffrée de ce banc. Non fait.
+
+### C3 : provenance des 85 octets (instrumentation temporaire, retirée)
+
+Sur Action Fighter UE (`--jobs 1`), les plages propres à la fermeture Sega sont atteintes par **fall-through et branches directes** d'un nœud qui suit une
+instruction déjà connue (`$1051` → `$1054`, `$6FA4` après un `call`), et non par un saut indirect ni une table : l'écart avec le noyau est la règle A13
+(confiance après `call`). Le noyau, prudent par défaut, s'arrête au fall-through d'un appel ; la fermeture Sega le suit en comptant sur son suivi de pile.
+L'essai « confiance après appel » du noyau (7 855 → 17 472) sur-marque, donc le port exige la **condition de retour** de la fermeture Sega (suivre le
+fall-through d'un appel seulement si le retour est établi par la pile concrète), pas un simple relâchement. Port non fait ; banc octet à octet requis.
