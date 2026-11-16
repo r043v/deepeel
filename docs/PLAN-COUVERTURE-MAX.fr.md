@@ -524,3 +524,12 @@ Essai C3 rejeté (0.380.0, non livré) : cible de saut indirect déduite d'un `l
 sur Action Fighter UE (fermeture Sega coupée, `--jobs 1`) : 0 cible suivie, couverture `--cov` identique. Le gain de `sega/closure.c` ne vient donc ni des
 changements de banque ni de `jp (hl)` après `ld hl,nn` ; la piste restante est la propagation des constantes vers des appels et des lectures de table
 (`indirect_resolved`/`memory_resolved` valent 0 sur cette ROM) et les retours résolus (`returns_resolved`). Non portée.
+
+Deux essais C3 de plus rejetés (0.380.0, non livrés ; Action Fighter UE, fermeture Sega coupée, `--jobs 1`, observations de l'outil) :
+- **Retours résolus** : pile d'adresses de retour par chemin de marche, un `RET` dans un appel marché reprend l'appelant en confiance. 75 retours suivis,
+  couverture `--cov` identique au marcheur seul : aucun octet de plus.
+- **Confiance après appel à un appelé exécuté** : lever la règle A13 quand l'appelé est naturel. Statique seul 7 855 → 17 472, au-delà même de la fermeture
+  Sega (11 104) : sur-marquage (données après appel), donc rejeté (témoins négatifs de P5).
+Hypothèses éliminées pour le gain de `sega/closure.c` : changements de banque, `jp (hl)` après `ld hl,nn`, retours résolus, confiance après appel. Il
+reste la propagation de constantes de registres vers les appels, les lectures de table et les blocs entiers ; elle se localise en instrumentant la fermeture
+Sega (quelles instructions marquent les octets que le noyau n'atteint pas), travail non fait.
