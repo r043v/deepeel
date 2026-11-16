@@ -251,6 +251,14 @@ static uint64_t fnv_bytes(uint64_t h, const void *p, size_t n) {
     for (size_t i = 0; i < n; i++) h = (h ^ b[i]) * 0x100000001b3ull;
     return h;
 }
+uint64_t dp_mdmach_ctx_hash(const DpMdMach *d) {   // C11: the 68000 registers (no clocks, no RAM)
+    const MdFull *m = d->m;
+    uint64_t h = 0xcbf29ce484222325ull;
+    h = fnv_bytes(h, m->d, sizeof m->d); h = fnv_bytes(h, m->a, sizeof m->a);
+    h = fnv_bytes(h, &m->pc, sizeof m->pc); h = fnv_bytes(h, &m->usp, sizeof m->usp);
+    h = fnv_bytes(h, &m->sr, sizeof m->sr); h = fnv_bytes(h, &m->z80_bank, sizeof m->z80_bank);
+    return h;
+}
 uint64_t dp_mdmach_state_hash(const DpMdMach *d) {
     const MdFull *m = d->m;
     uint64_t h = 0xcbf29ce484222325ull;

@@ -125,6 +125,7 @@ static uint8_t md_data_dest(DpMachine *m, uint32_t a) {
 
 // kernel mask (DpInput) -> MD pad bits (0-3 directions, 16 A, 32 B, 64 C, 128 Start); C12: A and C are distinct
 // buttons and X/Y/Z/Mode are carried to the machine (bits 8..11 of the pad word) when it models the six-button pad
+static uint64_t md_ctx_reg_hash(DpMachine *m) { return dp_mdmach_ctx_hash(((MdMachWrap *)m->impl)->m); }   // C11
 static uint64_t md_state_hash(DpMachine *m) { return dp_mdmach_state_hash(((MdMachWrap *)m->impl)->m); }   // B5
 static void md_set_input(DpMachine *m, uint32_t mask) {
     uint8_t pad = (uint8_t)(mask & 0x0F);
@@ -267,6 +268,7 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->close = md_close;
     m->isa = dp_isa_68000();
     m->ctx_components = md_ctx_components;
+    m->ctx_reg_hash = md_ctx_reg_hash;
     m->pc = md_pc;
     m->set_pc = md_set_pc;
     m->set_input = md_set_input;

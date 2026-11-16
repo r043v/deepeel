@@ -667,3 +667,15 @@ seulement par la mémoire. À instruire avant tout banc sur cette plateforme.
 MSX (correction) : le ralentissement venait de `--attract-frames 300` sur le chemin MSX, pas des pas eux-mêmes ; sans cette option Aleste termine (1,5·10⁶ pas,
 `--jobs 1`). Aleste : 7 094 octets statiques seuls **avec et sans** `DEEPEEL_NO_SEGA_CLOSURE=1`, donc la fermeture Sega n'agit pas sur MSX (le noyau
 générique seul). Gradius 2 : mesure **invalide** (même rapport qu'Aleste, le fichier du run précédent n'a pas été réécrit, le run a dépassé `timeout 200`) ; à refaire.
+
+## C11 : projection de contexte (0.381.0, décidée par le propriétaire)
+
+Le propriétaire a refusé la limite déclarée : la projection sert à évincer des parties déjà faites et à accélérer la recherche.
+Implémentée : `DpMachine.ctx_reg_hash` (registres CPU + mapper, sans horloges ni RAM ; GB, Sega/MSX, NES, PCE, MD) et `proj_key` dans le
+noyau : clé d'une fourche = cible + hachage des registres + octets des pages de RAM que le code de la page ROM du site et de la page
+de la cible a été vu lire (bitmap `live`). Une fourche déjà mise en file sous la même projection est évincée (`projection-pruned forks`
+au rapport ; `--no-proj` la coupe). Limite honnête : sans décodage des opérandes, tous les registres restent dans la clé (seule la RAM
+non lue est écartée). Observation de l'outil (Ace of Aces SMS, `--no-cells --jobs 1`, 3·10⁵ pas) : 1 618 fourches évincées, mêmes
+octets naturels (468), forcés (3 270) et statiques seuls (9 411) qu'avec `--no-proj`. Avec les cellules (défaut), la clé de cellule est plus
+grossière et la projection ne ferait rien sur Sega ; elle sert surtout sous `--unbounded` (cellules coupées). Gradius 2 (MSX) ne termine pas
+300 000 pas en 500 s (946 fourches pour 1 000 pas) : mesure non obtenue, à instruire.

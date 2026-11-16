@@ -183,6 +183,12 @@ static const DpCtxComp gb_ctx[] = {
     { "sram", DP_CC_PAGES, -1, 0x4000 }, { "hram", DP_CC_PAGES, -1, 0x7F },
     { "oam", DP_CC_PAGES, -1, 0xA0 },    { "io", DP_CC_PAGES, -1, 0x80 },
 };
+static uint64_t gb_ctx_reg_hash(DpMachine *m) {   // the register block before the clocks (includes pc, sp, flags, ime, rom bank)
+    const uint8_t *b = (const uint8_t *)gbw(m)->d->api->gbr;
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (size_t i = 0; i < offsetof(gbl_cpu_t, cyc); i++) h = (h ^ b[i]) * 0x100000001b3ull;
+    return h;
+}
 static int gb_ctx_components(DpMachine *m, const DpCtxComp **out) {
     (void)m;
     *out = gb_ctx;
@@ -324,6 +330,7 @@ static DpMachine *gb_wrap(DpMach *impl) {
     m->watch = gb_watch; m->render = gb_render;
     m->observe = gb_observe;
     m->ctx_components = gb_ctx_components;
+    m->ctx_reg_hash = gb_ctx_reg_hash;
     m->probes = gb_probes;
     m->close = gb_close;
     return m;

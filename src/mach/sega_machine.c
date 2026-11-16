@@ -87,6 +87,14 @@ static int sega_run(DpMachine *m) {
     return 1;
 }
 
+static uint64_t sega_ctx_reg_hash(DpMachine *m) {   // the Z80 registers (no R refresh counter, no clocks)
+    const z80_t *c = ((SegaMach *)m->impl)->b->cpu();
+    uint16_t w[] = { c->bc, c->de, c->hl, (uint16_t)(c->a << 8 | c->f), c->bc2, c->de2, c->hl2, c->af2, c->ix, c->iy, c->sp, c->pc,
+                     (uint16_t)(c->i << 8 | c->im), (uint16_t)(c->iff1 | c->iff2 << 1 | c->halted << 2) };
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (size_t i = 0; i < sizeof w; i++) h = (h ^ ((const uint8_t *)w)[i]) * 0x100000001b3ull;
+    return h;
+}
 static uint32_t sega_pc(DpMachine *m) { return ((SegaMach *)m->impl)->b->cpu()->pc; }
 static void sega_set_pc(DpMachine *m, uint32_t pc) { ((SegaMach *)m->impl)->b->cpu()->pc = (uint16_t)pc; }
 // register seeds (music rips): the Z80 registers are directly writable through the backend
@@ -266,6 +274,7 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->work_ram_base = 0xC000u; m->work_ram_len = 0x2000u;
     m->isa = dp_isa_z80();
     m->ctx_components = sega_ctx_components;
+    m->ctx_reg_hash = sega_ctx_reg_hash;
     m->impl = s;
     m->state_bytes = sega_state_bytes;
     m->save = sega_save;

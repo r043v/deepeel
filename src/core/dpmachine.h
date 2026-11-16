@@ -254,6 +254,9 @@ struct DpMachine {
     int (*render)(struct DpMachine *, uint32_t *argb, unsigned cap, int *w, int *h);
     void (*observe)(struct DpMachine *, const DpObservers *, void *user);
     int (*ctx_components)(struct DpMachine *, const DpCtxComp **out);   // count
+    // C11: hash of the DP_CC_REG components (CPU registers, mapper state; no clocks, no RAM).  With the RAM pages a section reads
+    // (DpCoreResult.live) it is the context projection the kernel evicts on.  NULL: no projection on this machine (cell key only).
+    uint64_t (*ctx_reg_hash)(struct DpMachine *);
     int (*probes)(struct DpMachine *, const DpProbe **out);             // count
     // An independent machine of the same program for parallel workers (`worker` >= 1),
     // already initialized and at its power-on state; NULL when unsupported.

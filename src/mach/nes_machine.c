@@ -126,6 +126,15 @@ static uint64_t nes_state_hash(DpMachine *m) {   // B5: the saved image minus cy
     free(b);
     return h;
 }
+static uint64_t nes_ctx_reg_hash(DpMachine *m) {   // C11
+    uint32_t sb = m->state_bytes(m);
+    uint8_t *b = malloc(sb);
+    if (!b) return 0;
+    m->save(m, b);
+    uint64_t h = dp_nesmach_ctx_hash(b);
+    free(b);
+    return h;
+}
 static int nes_arm_read(DpMachine *m, uint32_t addr, uint8_t value) { dp_nesmach_arm_read(nes_impl(m), (uint16_t)addr, value); return 1; }
 static void nes_set_input(DpMachine *m, uint32_t k) {
     uint8_t p = 0;
@@ -202,6 +211,7 @@ DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err
     m->save_ram_base = 0x6000u; m->save_ram_len = 0x2000u;
     m->isa = dp_isa_m6502();
     m->ctx_components = nes_ctx_components;
+    m->ctx_reg_hash = nes_ctx_reg_hash;
     m->pc = nes_pc;
     m->set_pc = nes_set_pc;
     m->set_input = nes_set_input;

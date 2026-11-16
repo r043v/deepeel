@@ -74,6 +74,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--resume")) { c->resume = 1; return 1; }
     if (!strcmp(a, "--no-closure")) { c->no_closure = 1; return 1; }
     if (!strcmp(a, "--no-infer")) { c->no_infer = 1; return 1; }
+    if (!strcmp(a, "--no-proj")) { c->no_proj = 1; return 1; }
     if (!strcmp(a, "--no-cells")) { c->no_cells = 1; return 1; }
     if (!strcmp(a, "--probe-ctx-cap") && i + 1 < argc) { c->probe_ctx_cap = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--no-auto-seed")) { c->no_auto_seed = 1; return 1; }
@@ -837,6 +838,26 @@ static uint64_t cell_key(const DpCoreConfig *cfg, const uint8_t *ramread, DpMach
     }
     for (uint32_t a = cfg->cell_lo; a <= cfg->cell_hi; a++) { h ^= m->fetch(m, a); h *= 1099511628211ull; }
     return h | 1;   // never 0: 0 marks an empty slot
+}
+
+// C11: the context projection of a fork: the machine's registers and mapper (ctx_reg_hash) plus the RAM pages the code of this ROM
+// page and of the target's page has been seen to read (the liveness bitmap `live`), mixed with the target.  Dead registers cannot be
+// told apart without operand decoding, so every register stays in the key: the projection only drops the RAM the code never reads.
+static uint64_t proj_key(const DpCoreResult *r, DpMachine *m, uint32_t pc, uint32_t other) {
+    uint64_t h = 1469598103934665603ull ^ m->ctx_reg_hash(m) ^ ((uint64_t)other << 24);
+    int64_t ks[2] = { m->rom_index(m, pc), m->rom_index(m, other) };
+    for (int s = 0; s < 2; s++) {
+        int64_t k = ks[s];
+        if (k < 0 || (size_t)k >= r->rom_size || !r->live) continue;
+        const uint32_t *row = r->live + ((size_t)k >> 8) * r->live_w;
+        for (uint32_t w = 0; w < r->live_w; w++)
+            for (uint32_t bits = row[w]; bits; bits &= bits - 1) {
+                uint32_t pg = w * 32u + (uint32_t)__builtin_ctz(bits);
+                for (uint32_t a = pg << 8, e = a + 256; a < e && a < rsize(m); a++) { h ^= m->fetch(m, raddr(m, a)) | ((uint64_t)s << 8); h *= 1099511628211ull; }
+            }
+        h ^= 0x9E3779B97F4A7C15ull;
+    }
+    return h | 1;
 }
 
 // 1 when the key is new (inserted), 0 when already present; caller holds sh->mu
@@ -1902,6 +1923,9 @@ static void run_path(Worker *w, Pending *p) {
                     if (cell_insert(sh, cell_key(cfg, sh->ramread, m, other))) loc->cells++;
                     else { loc->cell_pruned++; pthread_mutex_unlock(&sh->mu); free(pre); continue; }
                 }
+                if (!cfg->no_proj && m->ctx_reg_hash && loc->live) {   // C11: the same target under the same projected context was queued already
+                    if (!cell_insert(sh, proj_key(loc, m, pc, other) ^ 0xC11C11C11ull)) { loc->proj_pruned++; pthread_mutex_unlock(&sh->mu); free(pre); continue; }
+                }
                 if (cfg->fork_site_cap && *cnt >= cfg->fork_site_cap) { loc->sat_site++; if (!cur_epoch) w->capped[site_slot(m, pc, w->site_n, NULL)] = skey; }
                 else {
                     queue_push(sh, (Pending){ pre, other, 1, (uint32_t)(m->rom_index(m, pc) + 1), cur_input, 0, 0, cur_origin, cur_epoch });
@@ -2547,7 +2571,7 @@ cleanup:
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
-        out->novelty_picks += l->novelty_picks; out->closure_stopped_data += l->closure_stopped_data; out->closure_unresolved += l->closure_unresolved; out->closure_stack_dropped += l->closure_stack_dropped; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->promoted_forced += l->promoted_forced; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bank_sims += l->closure_bank_sims; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_stack_dropped += l->closure_stack_dropped; out->pending_dropped += l->pending_dropped; out->deferred += l->deferred; out->state_repeats += l->state_repeats; out->probe_ctx_sat += l->probe_ctx_sat; out->probe_rearms += l->probe_rearms; out->bank_forks += l->bank_forks; out->tas_ckpts += l->tas_ckpts; out->sess_ckpts += l->sess_ckpts; out->ckpt_bursts += l->ckpt_bursts; out->epoch_forks += l->epoch_forks; out->live_seeds += l->live_seeds; out->imm_refs += l->imm_refs; out->held_stops += l->held_stops; out->bank_fork_sat += l->bank_fork_sat; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
+        out->novelty_picks += l->novelty_picks; out->closure_stopped_data += l->closure_stopped_data; out->closure_unresolved += l->closure_unresolved; out->closure_stack_dropped += l->closure_stack_dropped; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->promoted_forced += l->promoted_forced; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bank_sims += l->closure_bank_sims; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_stack_dropped += l->closure_stack_dropped; out->pending_dropped += l->pending_dropped; out->deferred += l->deferred; out->state_repeats += l->state_repeats; out->probe_ctx_sat += l->probe_ctx_sat; out->probe_rearms += l->probe_rearms; out->bank_forks += l->bank_forks; out->tas_ckpts += l->tas_ckpts; out->sess_ckpts += l->sess_ckpts; out->ckpt_bursts += l->ckpt_bursts; out->epoch_forks += l->epoch_forks; out->live_seeds += l->live_seeds; out->imm_refs += l->imm_refs; out->held_stops += l->held_stops; out->bank_fork_sat += l->bank_fork_sat; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->proj_pruned += l->proj_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
         out->exec_outside += l->exec_outside; out->exec_wram_rom += l->exec_wram_rom; dp_ramarch_merge(&out->ra, &l->ra);
         free(l->jp_seen); l->jp_seen = NULL; free(ws[i].visits); free(ws[i].wsnap); free(ws[i].winmemo); free(ws[i].capped); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
@@ -2667,7 +2691,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "site-scored picks %llu\n", U(r->site_scored_picks));
     fprintf(out, "novelty picks %llu (new ROM bytes: novelty %llu, plain %llu)\n", U(r->novelty_picks), U(r->novelty_new_bytes), U(r->plain_new_bytes));
     fprintf(out, "workers %llu (short %llu)%s\n", U(r->workers), U(r->workers_short), r->workers_max ? "" : "");
-    fprintf(out, "cells %llu, cell-pruned forks %llu\n", U(r->cells), U(r->cell_pruned));
+    fprintf(out, "cells %llu, cell-pruned forks %llu, projection-pruned forks %llu\n", U(r->cells), U(r->cell_pruned), U(r->proj_pruned));
     fprintf(out, "deepeel: %llu (target, RAM) cells archived into the checkpoint pool\n", U(r->cells));
     fprintf(out, "decompress runs %llu, compressed ROM bytes %llu\n", U(r->decompress_runs), U(r->compressed_bytes));
     fprintf(out, "seeded RAM states %llu\n", U(r->seeded_ram));

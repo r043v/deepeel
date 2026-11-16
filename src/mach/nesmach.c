@@ -468,6 +468,19 @@ uint64_t dp_nesmach_state_hash(const void *buf) {
     return h;
 }
 
+// C11: the CPU register block (clock excluded) and the mapper registers of a saved image: the context projection's register half
+uint64_t dp_nesmach_ctx_hash(const void *buf) {
+    uint64_t h = 0xcbf29ce484222325ull;
+    const uint8_t *b = buf;
+    size_t lo = offsetof(nes_t, cpu), hi = lo + sizeof(nes6502_t), size = (size_t)nes_state_bytes();
+    for (size_t i = lo; i < hi; i++) {
+        if (i >= dp_nesmach_off_cycles && i < dp_nesmach_off_cycles + 4) continue;
+        h = (h ^ b[i]) * 0x100000001b3ull;
+    }
+    for (unsigned i = 0; i < MAPPER_TAIL; i++) h = (h ^ b[size + i]) * 0x100000001b3ull;
+    return h;
+}
+
 int64_t dp_nesmach_rom_index(const DpNesMach *d, unsigned addr) {
     if (addr < 0x8000u) return -1;
     if (BRIDGED(d->mapper))

@@ -92,6 +92,7 @@ typedef struct DpCoreConfig {
     int unbounded;             // --unbounded: no step/path/site-fork ceilings; the RAM queue spills to the disk spool
     const volatile sig_atomic_t *stop_requested; // cooperative interruption, checked between instructions
     int no_closure;            // static closure off (no STATIC marking from natural direct transfers)
+    int no_proj;               // C11 off: no context-projection eviction of forks
     int no_cells;              // technique 8 off: no (target, RAM cell) pruning of forced forks
     uint32_t seed_lo, seed_hi;  /* technique 3: RAM range pre-filled in extra start states (needs DpMachine.poke) */
     uint8_t seed_vals[8]; unsigned seed_n;   /* values (default 00 FF 55 AA) */
@@ -181,6 +182,7 @@ typedef struct DpCoreResult {
     uint64_t epoch_forks, ckpt_bursts;   // B3: pad bursts started from session checkpoints
     uint64_t closure_roots, closure_bytes, closure_capped, closure_jp_tables, closure_jp_entries, prov_data_bytes; uint32_t *jp_seen; unsigned jp_seen_n, jp_seen_cap; uint64_t closure_stack_dropped, pending_dropped, deferred, state_repeats, exact_states, probe_ctx_sat, probe_rearms, bank_forks, bank_fork_sat, tas_ckpts, sess_ckpts, held_stops;   // static closure: roots walked, bytes newly marked, walks stopped by the cap
     uint64_t cells;             // distinct (fork target, RAM cell) pairs queued (technique 8)
+    uint64_t proj_pruned;       // C11: forks evicted because the same target was already queued under the same projected context (registers + RAM pages the section reads)
     uint64_t cell_pruned;       // forced forks dropped because their (target, RAM cell) pair was already queued
     uint64_t compressed_bytes;  // ROM bytes read as a sequential stream that fed unequal RAM writes (technique 6)
     uint64_t decompress_runs;   // such streams detected

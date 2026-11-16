@@ -23,6 +23,14 @@ static void pce_ensure(DpMachine *m) {
 }
 
 static uint32_t pce_state_bytes(DpMachine *m) { (void)m; return (uint32_t)dp_pce_state_size() + 8; }
+static uint64_t pce_ctx_reg_hash(DpMachine *m) {   // C11: HuC6280 registers and the MPR bank registers (no clocks)
+    pce_ensure(m);
+    DpPceCpu c = dp_pce_cpu();
+    uint8_t b[] = { c.a, c.x, c.y, c.s, c.p, (uint8_t)c.pc, (uint8_t)(c.pc >> 8), c.mpr[0], c.mpr[1], c.mpr[2], c.mpr[3], c.mpr[4], c.mpr[5], c.mpr[6], c.mpr[7], c.irq_mask, c.speed };
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (size_t i = 0; i < sizeof b; i++) h = (h ^ b[i]) * 0x100000001b3ull;
+    return h;
+}
 static uint64_t pce_state_hash(DpMachine *m) { pce_ensure(m); return dp_pce_state_hash(); }   // B5: control state, no clocks
 static void pce_save(DpMachine *m, uint8_t *buf) { pce_ensure(m); dp_pce_save(buf); memcpy(buf + dp_pce_state_size(), &((PceWrap *)m->impl)->frames, 8); }
 static void pce_load(DpMachine *m, const uint8_t *buf) { pce_ensure(m); dp_pce_load(buf); memcpy(&((PceWrap *)m->impl)->frames, buf + dp_pce_state_size(), 8); }
@@ -317,6 +325,7 @@ DpMachine *dp_machine_pce(void) {
     m->close = pce_close;
     m->isa = dp_isa_huc6280();
     m->ctx_components = pce_ctx_components;
+    m->ctx_reg_hash = pce_ctx_reg_hash;
     m->pc = pce_pc;
     m->set_pc = pce_set_pc;
     m->seed_regs = pce_seed_regs;

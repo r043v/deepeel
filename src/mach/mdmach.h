@@ -88,6 +88,7 @@ const uint8_t *dp_mdmach_ram(const DpMdMach *m);   /* the 64 KiB work RAM */
 void dp_mdmach_render(const DpMdMach *m, uint32_t *pixels);
 /* hash of the machine without its clocks, audio and counters: equal = same future (C3) */
 uint64_t dp_mdmach_state_hash(const DpMdMach *m);
+uint64_t dp_mdmach_ctx_hash(const DpMdMach *m);   // C11: registers only
 /* C1 liveness: hardware blocks a section actually reads or writes */
 enum { DP_MDL_VIDEO = 1, DP_MDL_SOUND = 2, DP_MDL_INPUT = 4, DP_MDL_BANK = 8,
        DP_MDL_MEMORY = 16, DP_MDL_SYS = 32 };

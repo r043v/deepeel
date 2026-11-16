@@ -55,6 +55,7 @@ void dp_nesmach_load(DpNesMach *m, const void *buf);
 /* exact-state hash for the fork dedup: the volatile clock fields
  * (cpu.cycles, frames) are excluded */
 uint64_t dp_nesmach_state_hash(const void *buf);
+uint64_t dp_nesmach_ctx_hash(const void *buf);   // C11: CPU registers + mapper, no clocks, no RAM
 
 /* the canonical cartridge cell behind a CPU address with the live bank
  * mapping: bank * $4000 + (addr & $3FFF), -1 outside the PRG */
