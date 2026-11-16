@@ -840,3 +840,42 @@ lectures mémoire que de l'opérande explicite de l'instruction (lecture planifi
 **`sega/closure.c` n'est pas retiré** : l'acceptation reste le banc octet à octet SMS/GG/SG/MSX
 contre l'exigence « zéro donnée déclarée code » (égalité ou mieux en code trouvé, pas plus
 d'erreurs). Suite de tests verte sur 0.383.0 (166 tests, dont `campaign_fixtures`).
+
+### C3 : banc octet à octet de la tranche registres (observation de l'outil, 0.383.0)
+
+Mêmes réglages que le banc 0.382.0 (`--attract-frames 300 --max-total 1500000 --jobs 1`, ROMs hors
+dépôt), vidage des cartes `map v1` (la classe `code-static` de la carte égale le « static-only » du
+rapport, vérifié), trois configurations par ROM : noyau sans fermeture registres ni Sega
+(`--no-closure-regs`, reproductit les totaux 0.382.0 « avec pile » : 9 749 / 8 229 / 12 739 / 1 281),
+avec fermeture registres, avec fermeture registres + fermeture Sega. Statique seul :
+
+| ROM | noyau seul | + registres | + registres + Sega |
+|---|---|---|---|
+| Ace of Aces (SMS) | 9 749 | 9 735 (−14, 1 plage 0x32171) | 10 713 |
+| Addams Family (GG) | 8 229 | 8 229 (identique) | 8 992 |
+| Aerial Assault (GG) | 12 739 | 13 234 (+523/−28) | 15 768 |
+| Bank Panic (SG) | 1 281 | 1 277 (−4) | 1 891 |
+
+**Propriété de sûreté mesurée** : sur les quatre ROMs, l'ensemble d'octets statiques seuls du noyau
+à fermeture registres est un **sous-ensemble strict** de celui de la même run avec la fermeture Sega
+par-dessus (0 octet « regs-only » ; Sega ajoute encore 978 / 763 / 2 534 / 614 octets). La marche
+amorcée n'ajoute donc aucun marquage que la fermeture Sega ne fait pas déjà ; **`sega/closure.c`
+reste en place** — le retirer perdrait ces 614 à 2 534 octets. C3 n'est pas terminé.
+
+**Erreurs de données** (plages identifiées données du plan sur Aerial Assault, 0xb172-0xb2d4,
+0xb71c-0xb73a, 0xde03-0xde14, 0xde2b-0xdfd4, 0x1e0b7-0x1e11c, 0x1f797-0x1f7f9) : la fermeture
+registres y marque 348 octets, la fermeture Sega 378, et l'ensemble de la fermeture registres est
+inclus dans celui de Sega (regs-only : 0). Elle ne rajoute donc **pas plus d'erreurs que la
+fermeture Sega** sur ces plages ; elle en retire même une (0xaa7e-0xaa99, motifs nuls, marquée code
+par le noyau 0.382.0, plus marquée avec les registres — la fermeture Sega est d'accord). Le gain
+principal d'Aerial (+523) contient du vrai code (0x203c, 74 octets, écritures `ld (ix+d),r` sur la
+RAM $C0xx) mais aussi des re-marquages de tuiles que Sega fait aussi — sans vérité terrain octet à
+octet, ces octets restent **provisoires** (classe à venir, exigence zéro donnée code, point 2).
+
+**Échelle des plafonds** (compteurs du rapport, jamais silencieux) : `seeds refused (site cap)`
+vaut 309 079 (Ace), 235 473 (Addams), 578 489 (Aerial), 943 566 (Bank Panic) : le cap de 4 états
+par site refuse presque toutes les amorces sur ROM réelle (l'amorce est tentée à chaque pas à flot
+non séquentiel, l'état concret change quasi chaque pas). `indirect resolved` : 14 / 0 / 13 / 4 ;
+`indirect unresolved` : 1 / 0 / 7 / 8 (cible hors vue, comptée, jamais suivie). L'enrichissement
+de la tranche 2 (condition de retour par la pile concrète, plausibilité à l'entrée de marche) et
+l'étalonnage de ce cap restent à instruire avant tout retrait.
