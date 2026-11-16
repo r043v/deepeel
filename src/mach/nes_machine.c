@@ -177,6 +177,17 @@ static DpMachine *nes_clone(DpMachine *m, unsigned worker) {
 
 // opens the runtime from a cartridge image and wraps it; the DpMachine owns
 // the DpNesMach (NULL with err filled on a refused image)
+// ctx_components: the 6502 state a section can depend on and the RAM pages
+static const DpCtxComp nes_ctx[] = {
+    { "a", DP_CC_REG, 0, 1 }, { "x", DP_CC_REG, 1, 1 }, { "y", DP_CC_REG, 2, 1 }, { "sp", DP_CC_REG, 3, 1 }, { "p", DP_CC_REG, 4, 1 }, { "prg bank", DP_CC_REG, 5, 2 },
+    { "ram", DP_CC_PAGES, -1, 0x800 }, { "ppu vram", DP_CC_PAGES, -1, 0x800 }, { "prg ram", DP_CC_PAGES, -1, 0x2000 },
+};
+static int nes_ctx_components(DpMachine *m, const DpCtxComp **out) {
+    (void)m;
+    *out = nes_ctx;
+    return (int)(sizeof nes_ctx / sizeof *nes_ctx);
+}
+
 DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err, size_t errsz) {
     DpNesMach *impl = dp_nesmach_open(rom, size, mapper, err, errsz);
     if (!impl) return NULL;
@@ -190,6 +201,7 @@ DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err
     m->bank_shift = 14; m->code_base = 0x8000u; m->fixed_high = 1;   // C3/B8: 16 KiB PRG windows, the last bank fixed high
     m->save_ram_base = 0x6000u; m->save_ram_len = 0x2000u;
     m->isa = dp_isa_m6502();
+    m->ctx_components = nes_ctx_components;
     m->pc = nes_pc;
     m->set_pc = nes_set_pc;
     m->set_input = nes_set_input;

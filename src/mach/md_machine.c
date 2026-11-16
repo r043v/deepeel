@@ -234,6 +234,17 @@ static void md_close(DpMachine *m) {
 }
 
 // takes ownership of the DpMdMach
+// ctx_components: the 68000 state a section can depend on (data/address registers, SR) and the RAM pages
+static const DpCtxComp md_ctx[] = {
+    { "d0", DP_CC_REG, 0, 4 }, { "d1", DP_CC_REG, 1, 4 }, { "d2", DP_CC_REG, 2, 4 }, { "d3", DP_CC_REG, 3, 4 }, { "d4", DP_CC_REG, 4, 4 }, { "d5", DP_CC_REG, 5, 4 }, { "d6", DP_CC_REG, 6, 4 }, { "d7", DP_CC_REG, 7, 4 }, { "a0", DP_CC_REG, 8, 4 }, { "a1", DP_CC_REG, 9, 4 }, { "a2", DP_CC_REG, 10, 4 }, { "a3", DP_CC_REG, 11, 4 }, { "a4", DP_CC_REG, 12, 4 }, { "a5", DP_CC_REG, 13, 4 }, { "a6", DP_CC_REG, 14, 4 }, { "sp", DP_CC_REG, 15, 4 }, { "sr", DP_CC_REG, 16, 2 }, { "mapper bank", DP_CC_REG, 17, 2 },
+    { "work ram", DP_CC_PAGES, -1, 0x10000 }, { "vram", DP_CC_PAGES, -1, 0x10000 }, { "z80 ram", DP_CC_PAGES, -1, 0x2000 },
+};
+static int md_ctx_components(DpMachine *m, const DpCtxComp **out) {
+    (void)m;
+    *out = md_ctx;
+    return (int)(sizeof md_ctx / sizeof *md_ctx);
+}
+
 DpMachine *dp_machine_md(DpMdMach *impl) {
     MdMachWrap *w = calloc(1, sizeof *w);
     DpMachine *m = calloc(1, sizeof *m);
@@ -255,6 +266,7 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->observe = md_observe;
     m->close = md_close;
     m->isa = dp_isa_68000();
+    m->ctx_components = md_ctx_components;
     m->pc = md_pc;
     m->set_pc = md_set_pc;
     m->set_input = md_set_input;

@@ -176,6 +176,7 @@ int main(int argc, char **argv) {
         CHECK_MSG(b && b->init(rom, rn, NULL, 1) == 1, "sms backend inits");
         DpMachine *m = dp_machine_sega(b);
         CHECK_MSG(m && !strcmp(m->name, "sega") && m->isa == dp_isa_z80(), "sega machine wired");
+        { const DpCtxComp *xc; int xn = m->ctx_components ? m->ctx_components(m, &xc) : 0; CHECK_MSG(xn >= 6 && xc[0].kind == DP_CC_REG && xc[xn - 1].kind == DP_CC_PAGES, "ctx components declared"); }
         uint32_t n = m->state_bytes(m);
         CHECK_MSG(n > 0, "state size");
         uint8_t *a = malloc(n), *bb = malloc(n);
@@ -214,6 +215,7 @@ int main(int argc, char **argv) {
         char nerr[256];
         DpMachine *m = dp_machine_nes(rom, rn, -1, nerr, sizeof nerr);
         CHECK_MSG(m && !strcmp(m->name, "nes"), "nes machine wired");
+        { const DpCtxComp *xc; int xn = m->ctx_components ? m->ctx_components(m, &xc) : 0; CHECK_MSG(xn >= 6 && xc[0].kind == DP_CC_REG && xc[xn - 1].kind == DP_CC_PAGES, "ctx components declared"); }
         uint32_t n = m->state_bytes(m);
         uint8_t *a = malloc(n), *bb = malloc(n);
         m->save(m, a); m->load(m, a); m->save(m, bb); m->load(m, bb); m->save(m, a);
@@ -237,6 +239,7 @@ int main(int argc, char **argv) {
         CHECK_MSG(md, "md machine opens");
         m = dp_machine_md(md);
         CHECK_MSG(m && !strcmp(m->name, "md"), "md machine wired");
+        { const DpCtxComp *xc; int xn = m->ctx_components ? m->ctx_components(m, &xc) : 0; CHECK_MSG(xn >= 6 && xc[0].kind == DP_CC_REG && xc[xn - 1].kind == DP_CC_PAGES, "ctx components declared"); }
         n = m->state_bytes(m);
         a = malloc(n); bb = malloc(n);
         m->save(m, a); m->load(m, a); m->save(m, bb); m->load(m, bb); m->save(m, a);
@@ -263,6 +266,7 @@ int main(int argc, char **argv) {
         dp_pce_reset();
         DpMachine *m = dp_machine_pce();
         CHECK_MSG(m && !strcmp(m->name, "pce"), "pce machine wired");
+        { const DpCtxComp *xc; int xn = m->ctx_components ? m->ctx_components(m, &xc) : 0; CHECK_MSG(xn >= 6 && xc[0].kind == DP_CC_REG && xc[xn - 1].kind == DP_CC_PAGES, "ctx components declared"); }
         uint32_t n = m->state_bytes(m);
         uint8_t *a = malloc(n), *bb = malloc(n);
         m->save(m, a); m->load(m, a); m->save(m, bb); m->load(m, bb); m->save(m, a);

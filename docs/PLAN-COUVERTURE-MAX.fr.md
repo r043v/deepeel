@@ -403,3 +403,12 @@ de `dp_report_map_png`, `dp_report_map`, `dp_report_cov(_play)`, `dp_report_romd
 `dp_map_ch_encode`, `dp_map_methods_pct`, des sidecars « sticky » et de `dp_map_rgb` (aucun appelant) :
 2577 → 1978 lignes. Le vecteur de classes unique est `dp_core_map_build` (`core_map.c`) ; PNG, texte
 et JSON en sont des projections (`dp_map_png_from_evidence`, texte « map v1 », `--summary`).
+
+## Composantes de contexte hors GB (C11, 0.376.0)
+
+`DpMachine.ctx_components` est désormais déclaré pour Z80 (SMS/GG/SG/MSX), 6502 (NES), HuC6280 (PCE, registres
+MPR) et 68000 (MD : D0-D7, A0-A6, SP, SR) : registres, état du mapper et pages de RAM dont un état entrant peut
+dépendre. Contrôle dans `test_dpmachine`. Précision : le noyau ne consomme pas ces composantes (GB non plus : la
+table décrit le contrat, la projection de contexte qui s'en servirait ne ferait qu'élaguer, sans octet de
+couverture en plus) ; la liveness par page de RAM (`live`, C11 du noyau) est déjà générique sur toutes les ISA.
+Une projection par décodage d'opérandes reste un raffinement d'élagage, non un écart de couverture.

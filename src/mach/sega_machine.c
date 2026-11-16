@@ -241,6 +241,17 @@ static void sega_capture(SegaMach *s) {
     s->base_read = c0->read; s->base_write = c0->write; s->base_in = c0->in; s->base_out = c0->out; s->base_user = c0->user;
 }
 
+// ctx_components: the Z80 state a section can depend on (registers, interrupt state, mapper) and the RAM pages
+static const DpCtxComp sega_ctx[] = {
+    { "a", DP_CC_REG, 0, 1 }, { "f", DP_CC_REG, 1, 1 }, { "b", DP_CC_REG, 2, 1 }, { "c", DP_CC_REG, 3, 1 }, { "d", DP_CC_REG, 4, 1 }, { "e", DP_CC_REG, 5, 1 }, { "h", DP_CC_REG, 6, 1 }, { "l", DP_CC_REG, 7, 1 }, { "ix", DP_CC_REG, 8, 2 }, { "iy", DP_CC_REG, 9, 2 }, { "sp", DP_CC_REG, 10, 2 }, { "iff1", DP_CC_REG, 11, 1 }, { "im", DP_CC_REG, 12, 1 }, { "rom bank", DP_CC_REG, 13, 2 },
+    { "ram", DP_CC_PAGES, -1, 0x2000 }, { "vram", DP_CC_PAGES, -1, 0x4000 },
+};
+static int sega_ctx_components(DpMachine *m, const DpCtxComp **out) {
+    (void)m;
+    *out = sega_ctx;
+    return (int)(sizeof sega_ctx / sizeof *sega_ctx);
+}
+
 DpMachine *dp_machine_sega(const void *backend) {
     const DpSegaBackend *b = backend;
     SegaMach *s = calloc(1, sizeof *s);
@@ -253,6 +264,7 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->name = "sega";
     m->work_ram_base = 0xC000u; m->work_ram_len = 0x2000u;
     m->isa = dp_isa_z80();
+    m->ctx_components = sega_ctx_components;
     m->impl = s;
     m->state_bytes = sega_state_bytes;
     m->save = sega_save;

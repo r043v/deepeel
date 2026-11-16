@@ -286,6 +286,17 @@ void dp_machine_pce_source(DpMachine *m, const uint8_t *data, size_t size) {
     m->clone = pce_clone;
 }
 
+// ctx_components: the HuC6280 state a section can depend on (the MPR bank registers are the mapper) and the RAM pages
+static const DpCtxComp pce_ctx[] = {
+    { "a", DP_CC_REG, 0, 1 }, { "x", DP_CC_REG, 1, 1 }, { "y", DP_CC_REG, 2, 1 }, { "sp", DP_CC_REG, 3, 1 }, { "p", DP_CC_REG, 4, 1 }, { "mpr0", DP_CC_REG, 5, 1 }, { "mpr1", DP_CC_REG, 6, 1 }, { "mpr2", DP_CC_REG, 7, 1 }, { "mpr3", DP_CC_REG, 8, 1 }, { "mpr4", DP_CC_REG, 9, 1 }, { "mpr5", DP_CC_REG, 10, 1 }, { "mpr6", DP_CC_REG, 11, 1 }, { "mpr7", DP_CC_REG, 12, 1 },
+    { "ram", DP_CC_PAGES, -1, 0x2000 }, { "vram", DP_CC_PAGES, -1, 0x10000 },
+};
+static int pce_ctx_components(DpMachine *m, const DpCtxComp **out) {
+    (void)m;
+    *out = pce_ctx;
+    return (int)(sizeof pce_ctx / sizeof *pce_ctx);
+}
+
 DpMachine *dp_machine_pce(void) {
     PceWrap *w = calloc(1, sizeof *w);
     DpMachine *m = calloc(1, sizeof *m);
@@ -305,6 +316,7 @@ DpMachine *dp_machine_pce(void) {
     m->observe = pce_observe;
     m->close = pce_close;
     m->isa = dp_isa_huc6280();
+    m->ctx_components = pce_ctx_components;
     m->pc = pce_pc;
     m->set_pc = pce_set_pc;
     m->seed_regs = pce_seed_regs;
