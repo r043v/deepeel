@@ -1198,6 +1198,43 @@ compt × état, conformément à la note d'ouverture ; sur ntfs la relecture des
 Windows a été retenue pour la capacité. La frontière reprise est laissée en place sur la
 partition, prête pour une reprise (`frontier drain`).
 
+### Comparaison des régimes (0.388.0 — non borné vs borné, noyau seul vs closure Sega)
+
+Le même arrêt SIGINT propre, appliqué à la comparaison (Ace of Aces SMS, `--attract-frames
+300 --jobs 1`, spool/état sur la partition Windows ; obs. outil) :
+
+**Ace SMS, régime non borné** (noyau seul 7,5 min ; avec `sega/closure.c` ~10 min — les
+sessions rendent l'exploration non déterministe, les positions marquées diffèrent donc un
+peu d'un run à l'autre) :
+
+| | noyau seul | avec closure Sega | borné t4 (1,5 M pas) : noyau / Sega |
+|---|---|---|---|
+| racines de closure | 218 | 18 729 | 37 / 6 267 |
+| statique seul | 4 843 | 5 096 | 530 / 1 494 |
+| provisoire | 4 056 | 3 784 | 10 668 / 10 668 |
+| naturels | 10 517 | 10 536 | 1 600 / 1 600 |
+| inconnu | 43 852 | 39 583 | 122 500 / 122 500 |
+
+Le statique Sega (5 096 positions) est **entièrement contenu** dans les marques du noyau
+seul (statique ∪ provisoire, 8 899 positions ; sega-only 0) : la closure Sega ne prouve
+aucun octet que le noyau n'ait pas déjà touché. Son surplus de **confirmation** tombe à
++253 octets (5 096 − 4 843) contre +964 en régime borné — plus d'exécution réelle, moins
+d'écart Sega→noyau ; cela renforce le dossier de retrait de `sega/closure.c` (qui reste
+gated par la vérité terrain). Le régime non borné lui-même couvre beaucoup plus de terrain
+réel que le borné : naturels ×6,6, donnée lue ×12, inconnu 122 500 → ~40 000.
+
+**Zelda GB — le régime non borné tel quel dégrade la couverture.** Le run borné courant
+(défauts, ~2,5 min) donne 85 776 naturels, 40 634 statique, 168 800 octets de closure,
+36 788 inconnus ; les runs `--unbounded` de l'audit E11 donnent 4 835 naturels, 3 588
+statique, 35 875 inconnus après 40 min et deux passes. Cause : `--unbounded` met
+`max_path_steps` à 0, or l'exploration GB est accordée « chemins courts (1 000 pas),
+entrées nombreuses » — les 22 100 chemins bornés deviennent 216 chemins cooperatifs de
+65 536 pas, la largeur s'effondre au profit de la profondeur. `--unbounded` aide là où
+l'exploration était sous-alimentée (SMS) et nuit là où l'accordage plateforme est
+largeur-d'abord (GB) : il doit respecter la forme de chemins de la plateforme (lever les
+plafonds, pas l'accordage). À traiter avant de présenter `--unbounded` comme régime
+couverture-max sur GB.
+
 ## État du plan (0.388.0)
 
 Les tranches C3 sont soldées : propagation de constantes par `DpIsa.reg_effect` + amorçage
@@ -1222,3 +1259,8 @@ conforme sur disque de capacité suffisante — frontière complète sauvée au 
 états, 6,6 Go, `pending_dropped 0`), rapport produit, reprise `--resume` fidèle (262 131
 repris, couverture OU-ée et repartie de l'avant), seconde sauvegarde atomique (566 113
 états, 14,3 Go), aucun échec ni perte sur les deux allers-retours.
+
+**Nouveau point ouvert côté noyau** (voir « Comparaison des régimes ») : `--unbounded` doit
+respecter l'accordage plateforme de la forme des chemins — mettre `max_path_steps` à 0
+effondre la stratégie GB « chemins courts, entrées nombreuses » (85 776 naturels bornés →
+4 835 non bornés sur Zelda) ; lever les plafonds ne doit pas lever l'accordage.

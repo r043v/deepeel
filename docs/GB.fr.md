@@ -6000,3 +6000,17 @@ reproduit pas : la capacité était le seul facteur. L'état GB pèse 25 Ko — 
 est compt × état ; la frontière de 566 113 états est laissée en place sur la partition,
 prête pour `frontier drain`. Chiffres complets :
 `docs/PLAN-COUVERTURE-MAX.fr.md`, section « Audit E11 ».
+
+### Comparaison des régimes — non borné vs borné, noyau seul vs closure Sega
+
+Observations, aucune modification de code. Le même arrêt SIGINT propre appliqué à la
+comparaison (Ace of Aces SMS, 7,5-10 min non borné ; obs. outil) : le statique Sega
+(5 096 positions) est entièrement contenu dans les marques du noyau seul (statique ∪
+provisoire, 8 899 positions, sega-only 0) et son surplus de confirmation tombe à +253
+octets contre +964 en borné — plus d'exécution réelle, moins d'écart Sega→noyau. Le
+régime non borné couvre bien plus de terrain réel que le borné (naturels ×6,6, inconnu
+122 500 → ~40 000)… sur SMS. Sur GB il fait l'inverse : `--unbounded` met
+`max_path_steps` à 0 et effondre l'accordage « chemins courts, entrées nombreuses »
+(85 776 naturels bornés → 4 835 non bornés sur Zelda après 40 min) — lever les plafonds
+ne doit pas lever l'accordage ; ouvert au plan. Détails :
+`docs/PLAN-COUVERTURE-MAX.fr.md`, section « Comparaison des régimes ».
