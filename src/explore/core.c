@@ -47,6 +47,11 @@ typedef struct {
     uint32_t count;
 } Site;
 
+#define REG_SEED_SITE_CAP 4      // distinct regstate seeds per site by default (Sega closure: contexts/2 per (pc, view); --closure-seed-cap overrides)
+#define REG_IND_CAP 8            // distinct resolutions followed at one indirect site
+#define REG_SET_CAP (1u << 16)   // initial per-worker seed dedup; grows by rehashing up to REG_SET_CEIL (the Sega closure's node cap is 262144)
+#define REG_SET_CEIL (1u << 20)  // hard ceiling of the dedup set: beyond it seeds are refused and counted (memory bound)
+
 void dp_core_config_default(DpCoreConfig *c) {
     memset(c, 0, sizeof *c);
     c->max_total = 5000000;
@@ -60,6 +65,7 @@ void dp_core_config_default(DpCoreConfig *c) {
     c->bank_fork_cap = 16;
     c->held_steps = 300000;
     c->tas_ckpt_every = 600; c->tas_ckpt_cap = 32; c->ckpt_burst_frames = 60;
+    c->closure_seed_cap = REG_SEED_SITE_CAP;
 }
 
 int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
@@ -69,7 +75,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
         if (*e == '-') { c->cell_lo = (uint32_t)lo; c->cell_hi = (uint32_t)strtoul(e + 1, NULL, 0); }
         return 2;
     }
-    if (!strcmp(a, "--unbounded")) { c->unbounded = 1; c->max_total = 0; c->max_path_steps = 0; c->fork_site_cap = 0; return 1; }
+    if (!strcmp(a, "--unbounded")) { c->unbounded = 1; c->max_total = 0; c->max_path_steps = 0; c->fork_site_cap = 0; c->closure_seed_cap = 0; return 1; }
     if (!strcmp(a, "--state-dir") && i + 1 < argc) { c->state_dir = argv[i + 1]; return 2; }
     if (!strcmp(a, "--resume")) { c->resume = 1; return 1; }
     if (!strcmp(a, "--no-closure")) { c->no_closure = 1; return 1; }
@@ -92,6 +98,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--no-closure-ret")) { c->no_closure_ret = 1; return 1; }
     if (!strcmp(a, "--no-closure-banks")) { c->no_closure_banks = 1; return 1; }
     if (!strcmp(a, "--no-closure-regs")) { c->no_closure_regs = 1; return 1; }
+    if (!strcmp(a, "--closure-seed-cap") && i + 1 < argc) { c->closure_seed_cap = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }   // C3: distinct regstate seeds per site (0: no cap)
     if (!strcmp(a, "--bank-fork-cap") && i + 1 < argc) { c->bank_fork_cap = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--pad-full")) { c->pad_full = 1; return 1; }
     if (!strcmp(a, "--pad-full6")) { c->pad_full = 2; return 1; }
@@ -346,9 +353,6 @@ struct RegWalk {
     uint32_t mask;          // direct-mapped mask of the two tables above
     uint8_t *provd;         // per rom index bit: the constant read was already recorded
 };
-#define REG_SEED_SITE_CAP 4      // distinct regstate seeds per site (Sega closure: contexts/2 per (pc, view))
-#define REG_IND_CAP 8            // distinct resolutions followed at one indirect site
-#define REG_SET_CAP (1u << 16)   // per-worker seed dedup (the Sega closure's node cap; full is counted)
 static uint64_t reg_hash(const DpRegState *s) {
     uint64_t h = 0xcbf29ce484222325ull;
     for (unsigned i = 0; i < DP_REG_N; i++) h = (h ^ s->v[i]) * 0x100000001b3ull;
@@ -363,8 +367,23 @@ static int regwalk_seen(RegWalk *rw, uint64_t key) {   // 1 when already present
     }
     return 1;
 }
-static int regwalk_insert(RegWalk *rw, uint64_t key) {   // 1 inserted, 0 full
-    if (rw->set_n >= rw->set_cap - rw->set_cap / 4) return 0;
+static int regwalk_grow(RegWalk *rw) {   // rehash into a twice-as-large table (1 on success)
+    unsigned ncap = rw->set_cap << 1;
+    uint64_t *ns = calloc(ncap, sizeof *ns);
+    if (!ns) return 0;
+    for (unsigned i = 0; i < rw->set_cap; i++) {
+        if (!rw->set[i]) continue;
+        size_t h = (size_t)(rw->set[i] * 0x9E3779B97F4A7C15ull >> 40) & (ncap - 1);
+        while (ns[h]) h = (h + 1) & (ncap - 1);
+        ns[h] = rw->set[i];
+    }
+    free(rw->set);
+    rw->set = ns;
+    rw->set_cap = ncap;
+    return 1;
+}
+static int regwalk_insert(RegWalk *rw, uint64_t key) {   // 1 inserted, 0 refused: the hard ceiling is reached
+    if (rw->set_n >= rw->set_cap - rw->set_cap / 4 && (rw->set_cap >= REG_SET_CEIL || !regwalk_grow(rw))) return 0;
     size_t h = (size_t)(key * 0x9E3779B97F4A7C15ull >> 40) & (rw->set_cap - 1);
     for (unsigned i = 0; i < 64; i++, h = (h + 1) & (rw->set_cap - 1)) {
         if (!rw->set[h]) { rw->set[h] = key; rw->set_n++; return 1; }
@@ -1943,7 +1962,7 @@ static void run_path(Worker *w, Pending *p) {
                     uint64_t key = ri >= 0 ? ((uint64_t)(uint32_t)ri << 40) | (reg_hash(&cr2) & ((1ull << 40) - 1)) : 0;
                     if (ri < 0) { /* RAM-executed code: no site key */ }
                     else if (regwalk_seen(rw, key)) { /* already seeded under this state */ }
-                    else if (!cfg->unbounded && rw->site_seeds[(uint32_t)ri & rw->mask] >= REG_SEED_SITE_CAP) loc->closure_reg_seed_sat++;
+                    else if (!cfg->closure_seed_cap || (!cfg->unbounded && rw->site_seeds[(uint32_t)ri & rw->mask] >= cfg->closure_seed_cap)) loc->closure_reg_seed_sat++;
                     else if (!regwalk_insert(rw, key)) loc->closure_reg_set_sat++;
                     else {
                         rw->site_seeds[(uint32_t)ri & rw->mask]++;
@@ -2535,7 +2554,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         w->stamp = calloc(site_n, sizeof *w->stamp);
         w->wsnap = malloc(sh.sbytes ? sh.sbytes : 1); w->winmemo = calloc(0x10000, sizeof *w->winmemo);
         w->rng_stamp = calloc(site_n, sizeof *w->rng_stamp); w->rng_last = calloc(site_n, 1);
-        // C3: the regstate-aware closure state (caps lifted under --unbounded: the set grows)
+        // C3: the regstate-aware closure state (the seed set grows by rehashing to REG_SET_CEIL; --unbounded lifts the per-site caps)
         uint32_t rwm = 1; while (rwm < rom_size && rwm < (1u << 23)) rwm <<= 1;   // direct-mapped by rom index, masked
         w->regwalk = calloc(1, sizeof *w->regwalk);
         if (w->regwalk) *w->regwalk = (RegWalk){ .r = &w->loc, .cfg = cfg, .rom_size = rom_size, .mask = rwm - 1,

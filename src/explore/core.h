@@ -86,6 +86,7 @@ typedef struct DpCoreConfig {
     int no_closure_ret;        // C3: off switch of the walk-time return stack (a direct call continues where its callee returns, not blindly after it)
     int no_closure_banks;      // C3: off switch of the walk-time bank simulation (closure follows `ld a,n; ld (bankreg),a`)
     int no_closure_regs;       // C3: off switch of the regstate-aware closure (concrete bootstrapping + the ISA constant-transfer lattice)
+    unsigned closure_seed_cap; // C3: distinct regstate seeds accepted per site (0: no cap; --unbounded lifts it)
     int no_bank_forks;         // B7: off switch of the bank forks at mapper writes
     unsigned bank_fork_cap;    // B7: bank forks made per site visit (0: unbounded)
     unsigned probe_ctx_cap;    // B1: contexts one probe site is armed under (1: the historical once-per-site)
