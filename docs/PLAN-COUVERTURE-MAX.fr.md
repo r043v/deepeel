@@ -483,3 +483,8 @@ Compteur d'époque (0.379.2) : le rapport indique « forks past the per-site cap
 chemin d'époque alors que le cap par site aurait refusé hors époque. Observation de l'outil : 0 sur la fixture SMS (un seul checkpoint, aucun site saturé) et
 0 sur Action Fighter avec un film de 1 500 trames (aucun checkpoint de film produit par ce film synthétique) ; l'effet du cap par époque n'est donc pas encore
 démontré par une valeur non nulle. Il faut un film réel de la ROM ou une fixture à boucle de conditionnels.
+
+Cap par époque démontré (observation de l'outil, 0.379.2, ROM GB réelle hors dépôt — Zelda Link's Awakening USA/Europe, `--max-total 20000000`) :
+`epoch_forks` = 149 avec le cap par défaut (4) et 75 avec `--fork-site-cap 1` ; sessions attract/play, 2 checkpoints de session et 4 rafales. Ce sont des
+fourches qu'un chemin issu d'un checkpoint a pu mettre en file alors que le cap par site les aurait refusées hors époque. Le compteur n'est pas une
+mesure de couverture gagnée en octets ; l'effet sur les octets n'a pas été comparé avant/après.
