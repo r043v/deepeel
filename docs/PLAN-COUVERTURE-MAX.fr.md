@@ -1256,6 +1256,63 @@ classe carte d'un octet peut glisser statique→copié (précédence de la carte
 non bornée découvre la copie verbatim qui le couvre — un déplacement de présentation, pas
 une perte (les drapeaux sont OU-és).
 
+### Campagne en deux phases — implémentation (à faire)
+
+**Ce que la phase 1 élague déjà pour la phase 2** (état des lieux, code vérifié) :
+
+1. **La frontière est le travail reporté**, pas une éviction : à l'arrêt borné (halt
+   max-time/max-total/SIGINT avec `--state-dir`), le chemin actif est checkpointé et la
+   frontière entière (file RAM + spool + différées) est sauvée ; `--resume` la recharge.
+2. **La couverture OU-ée élague à deux endroits** : l'évaluation des fourches « les deux
+   côtés déjà couverts » (`covered()` lit les drapeaux fusionnés, `pruned_covered`) décide
+   d'emblée sur les sites que la phase 1 a couverts ; et le drain de file saute les états
+   en attente dont le pc est déjà couvert (hors sessions, B3). C'est le canal dominant —
+   cf. Gradius 2 : 6,68 M évaluations d'élagage, évitées d'emblée quand le site est connu.
+3. **Les états exacts élagent** : `exact.bin` rechargé dans l'ensemble de déduplication —
+   un chemin de phase 2 qui retombe sur un état atteint en phase 1 coupe en
+   `state_repeats` (éviction du déjà-fait).
+4. **Ce qui ne passe pas** : l'élagage par cellule est désactivé sous `--unbounded`
+   (`no_cells=1` forcé dans `dp_core_explore`), alors que `cells.bin` de la phase 1 est
+   écrit puis rechargé — sans servir à élaguer. C'est le canal d'accélération à ouvrir.
+   Les compteurs de saturation et les ensembles d'amorces repartent de zéro (sans effet :
+   les caps sont levés) ; taint-cut et forced-RAM-cut restent désactivés sous
+   `--unbounded` (choix conservé, justifié).
+
+**Méthode 1 — la phase bornée (borne adaptée).** Enchaîner les deux phases dans un
+processus, au niveau CLI (`src/deepeel.c`) : `--campaign` lance la phase 1 avec les
+défauts de la plateforme (forme largeur-d'abord préservée) et une borne explicite —
+`--max-time S` noyau (défaut proposé : 120 s, halt 1) ou `--max-total N` — puis, sur le
+même `--state-dir`, relance `--resume --unbounded` jusqu'à SIGINT ou épuisement. La borne
+reste à la main de l'utilisateur ; le contrat « frontière entière reportée, jamais
+silencieux » est déjà épinglé (audit E11). Le rapport gagne une ligne par phase (la
+reprise affiche déjà « frontier: N resumed » et les octets de couverture repris).
+
+**Méthode 2 — la phase 2 utilise le déjà-fait pour accélérer** (`src/explore/core.c`) :
+1. **Ouvrir le canal cellules** : sous `--resume --unbounded` avec un `cells.bin` non vide,
+   charger les cellules archivées et laisser l'élagage par cellule actif (la garde
+   `cell_hi > cell_lo || !no_cells` devient aussi vraie quand la reprise a rempli
+   `cellset`) — une fourche qui retombe dans une cellule déjà archivée est élaguée dès sa
+   première visite au lieu d'être rejouée. Sans `--resume`, `--unbounded` reste sans
+   cellules (pas de données antérieures à élaguer). Le coût de hachage qui a mordu sur
+   Gradius 2 sert ici à couper des fourches entières, pas seulement à archiver.
+2. **Compteurs de reprise** : afficher au chargement les cellules et états exacts repris
+   (aujourd'hui silencieux) — l'accélération doit être visible, jamais implicite.
+3. Ne rien changer à `pruned_covered`, `state_repeats` et au drain de file : canaux déjà
+   actifs. Ne pas ré-archiver ce qui l'est (existant).
+
+**Banc et acceptation** : trois cartes Zelda GB (borné seul / non borné seul / deux
+phases — les nombres mesurés ci-dessus servent de référence) ; Ace SMS en deux phases
+(cas sous-alimenté : vérifier que la phase 2 ne perd rien). Acceptation : inconnu(2
+phases) ≤ min(les deux seuls) ; `resumed == saved` ; `pending_dropped == 0` aux deux
+arrêts ; `cell_pruned > 0` en phase 2 sur un cas à cellules pré-remplies ; aucun message
+d'échec. Suite verte complète, version (le rapport devient visible), GB.fr.md +
+COUVERTURE.fr.md (la recette rejoint la norme commune), commit avec trailer.
+
+**Tâches** : `src/explore/core.c` (garde cellules + chargement reprise + compteurs) ;
+`src/deepeel.c` (`--campaign`, bornes de phase 1) ; `tests/CMakeLists.txt` + test noyau
+deux phases (fixture générée : phase 1 à budget minuscule avec `--state-dir`, phase 2
+`--resume --unbounded`, épingles resumed==saved et cell_pruned>0) ; docs.
+
 ## État du plan (0.388.0)
 
 Les tranches C3 sont soldées : propagation de constantes par `DpIsa.reg_effect` + amorçage
