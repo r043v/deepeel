@@ -1410,6 +1410,27 @@ def build_z80_family(out):
     m[0x10:0x18] = bytes([0x3E, 0x0F, 0xD3, 0x9A, 0xD3, 0x9B, 0x18, 0xFE])
     with open(os.path.join(out, "fix_msx_v9938.msx"), "wb") as f:
         f.write(m)
+    # C3 port_effect: an OUT to the primary slot select ($A8) can hide the stack RAM, so the
+    # walk discards its ghost returns before the callee's ret; the VDP write ($99) is harmless
+    # and its callee's return is still followed
+    m = bytearray([0xFF]) * 0x8000
+    m[0:2] = b"AB"
+    m[2:4] = (0x4010).to_bytes(2, "little")
+    m[4:16] = bytes(12)
+    m[0x10:0x19] = bytes([
+        0xCD, 0x50, 0x40,   # $4010: call $4050 (harmless OUT inside)
+        0xCD, 0x30, 0x40,   # $4013: call $4030 (memory-control OUT inside)
+        0x18, 0xFE,         # $4016: jr * (hangs)
+        0x00,               # $4018
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+    m[0x30:0x36] = bytes([0x3E, 0x01,   # $4030: ld a,1
+                          0xD3, 0xA8,   # out ($A8),a — primary slot select: the walk's returns die here
+                          0xC9])        # $4032: ret (never followed)
+    m[0x50:0x56] = bytes([0x3E, 0x02,   # $4050: ld a,2
+                          0xD3, 0x99,   # out ($99),a — VDP control: harmless
+                          0xC9])        # $4052: ret (followed)
+    with open(os.path.join(out, "fix_msx_portout.msx"), "wb") as f:
+        f.write(m)
 
 def build_nes_pce(out):
     # NES NROM-256 (2 x 16 KiB PRG + 8 KiB CHR): LDA $9000 / BNE (both sides) /

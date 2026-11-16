@@ -138,6 +138,7 @@ typedef struct DpCoreResult {
                                // concrete-stack return): provisional code, counted as code once confirmed only
                                // ("zero data marked code" point 2); projected to the map's probable-code class
     uint64_t closure_entry_refused;   // point 3: untrusted continuations whose entry decodes like data (tiles/pointers/no-op soup), refused
+    uint64_t closure_stack_invalidations;   // C3 port_effect: ghost returns discarded because an OUT to a memory-control port can hide the stack
     uint64_t live_seeds;       // B3: vector seeds started from a live checkpoint
     uint8_t *inferred;         // C4: DP_MAP_* inference per ROM byte (padding, gap fill, copy-table siblings); never an observation
     uint64_t inferred_code, inferred_pad, inferred_data, padding_bytes, sib_tables, sib_bytes, sib_refused, jt_tables, jt_bytes;

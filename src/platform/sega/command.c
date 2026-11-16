@@ -113,6 +113,7 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
     m->plat=dp_platform_sega(s);
     dp_machine_sega_init_arg(m,init_arg);
     dp_machine_sega_set_msx(m,msx);
+    dp_machine_sega_gg(m,!strcmp(s->id,"gg"));
     if(o->sega_mapper) { if(!b->select_mapper || !b->select_mapper((unsigned)o->sega_mapper)) { m->close(m); return 0; } dp_machine_sega_mapper(m,(unsigned)o->sega_mapper); }
     if(!msx && strcmp(s->id,"sg")) {   // SMS/GG: the cartridge mapper, detected from the image or forced by --mapper
         static const char *const names[]={"none","sega","codemasters","korean150"};

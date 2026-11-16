@@ -265,7 +265,14 @@ static int isa_entry_data_sig(const uint8_t *w, unsigned n) {
     }
     return 0;
 }
+// C3: an OUT's port expression: the immediate for `out (n),a` (0xD3), the C pair for
+// `out (c),a` (ED 79) and the undocumented `out (c),0` (ED 71) — the port rides C there.
+static int isa_out_port(const uint8_t *b, int *port_known, uint16_t *port) {
+    if (b[0] == 0xD3) { *port_known = 1; *port = b[1]; return 1; }
+    if (b[0] == 0xED && (b[1] == 0x79 || b[1] == 0x71)) { *port_known = 0; return 1; }
+    return 0;
+}
 static const DpIsa isa = { "z80", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
                            isa_reg_effect, isa_illegal, isa_disasm, isa_mem_operand, 0, 1, 0, isa_imm_ptr, NULL, isa_acc_imm, isa_st_acc_abs,
-                           .sp_slot = DP_Z80R_SP, .sp_width = 2, .sp_addr_mask = 0xFFFFu, .sp_base = 0, .entry_data_sig = isa_entry_data_sig };
+                           .sp_slot = DP_Z80R_SP, .sp_width = 2, .sp_addr_mask = 0xFFFFu, .sp_base = 0, .entry_data_sig = isa_entry_data_sig, .out_port = isa_out_port };
 const DpIsa *dp_isa_z80(void) { return &isa; }

@@ -5960,7 +5960,16 @@ provisoire ne bloque plus une racine de confiance (qui le promeut) — la classe
 dépend plus de l'ordre d'arrivée. Détails, banc et la régression re-marches corrigée :
 `docs/PLAN-COUVERTURE-MAX.fr.md`.
 
-### 0.387.0 — noyau : retours par la pile concrète sur 6502 et 68000
+### 0.388.0 — noyau : le port_effect des OUT est porté (z80, MSX/Sega)
+
+Un OUT vers un port de contrôle mémoire peut masquer la pile RAM et la ROM : la marche
+statique jette alors sa pile de retours fantômes (compteur « ghost returns discarded on
+memory-control OUT (port_effect) ») et son SP concret. `DpIsa.out_port` reconnaît `out (n),a`,
+`out (c),a` et `out (c),0` ; `DpMachine.port_control` porte le savoir plateforme (MSX : tout
+port sauf un store connu qui rate $A8 ; GG : $3E ; SMS/SG : pairs sous $40). Sémantique de
+`sega/closure.c` (port_effect + unknown_store) : jeter, jamais simuler. Fixture
+`fix_msx_portout.msx` + test `core_closure_portout_msx`. Banc 4 ROMs : 0/856/45/23 retours
+jetés, zéro octet perdu, sous-ensemble tenu. ### 0.387.0 — noyau : retours par la pile concrète sur 6502 et 68000
 
 `DpIsa.sp_ret` décrit le pull de chaque opcode de retour — largeur, biais de l'adresse
 (`rts` 6502 poppe l'adresse moins un) et décalage au-dessus du pointeur (le 6502 pousse en

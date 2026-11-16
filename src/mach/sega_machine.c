@@ -37,6 +37,7 @@ typedef struct {
     int init_arg;            // backend init's last argument: SMS flag, or the MSX mapper
     unsigned mapper;         // explicit SMS/GG mapper (DP_SEGA_MAPPER_*), 0: auto
     int sys_key;             // movie bit 6: 1 = Start (GG, MSX), 0 = Pause NMI (SG, SMS)
+    int gg;                  // Game Gear: the memory-control port is $3E (SMS/SG: the even ports under $40)
 } SegaMach;
 
 static uint32_t sega_state_bytes(DpMachine *m) { return (uint32_t)((SegaMach *)m->impl)->b->state_size; }
@@ -170,6 +171,15 @@ static void sega_poke(DpMachine *m, uint32_t a, uint8_t v) {
 }
 
 static int sega_mapper_reg(DpMachine *m, uint32_t a) { return !((SegaMach *)m->impl)->msx && a >= 0xFFFC && a <= 0xFFFF; }
+// C3: the Sega closure's port_effect — an OUT that can change what the CPU sees.  MSX: any
+// port may decode a cartridge mapper, except a known store that misses the primary slot
+// select $A8.  GG: $3E (MEMORY_CONTROL); SMS/SG: the even ports under $40.  A store whose
+// port expression is not a known constant is always suspect.
+static int sega_port_control(const DpMachine *m, uint16_t port, int port_known) {
+    SegaMach *s = m->impl;
+    if (s->msx) return !port_known || port == 0xa8;
+    return !port_known || (s->gg ? port == 0x3e : (port < 0x40 && !(port & 1)));
+}
 static uint64_t sega_frame(DpMachine *m) { const DpSegaBackend *b = ((SegaMach *)m->impl)->b; return b->frame_count ? b->frame_count() : 0; }
 static void sega_set_input(DpMachine *m, uint32_t mask) {
     DpSegaInput in;
@@ -244,7 +254,7 @@ static DpMachine *sega_clone(DpMachine *m, unsigned worker) {
     SegaMach *cs = c->impl;
     cs->attached = 0;                     // those callbacks are not this clone's: attach rebuilds them
     dp_machine_sega_source(c, s->rom, s->rom_size, s->pick);
-    cs->init_arg = s->init_arg; cs->msx = s->msx; cs->mapper = s->mapper;
+    cs->init_arg = s->init_arg; cs->msx = s->msx; cs->mapper = s->mapper; cs->gg = s->gg;
     c->attach = sega_attach;
     return c;
 }
@@ -260,6 +270,7 @@ void dp_machine_sega_tas(DpMachine *m, int sys_key, int profile) {
 }
 void dp_machine_sega_init_arg(DpMachine *m, int arg) { ((SegaMach *)m->impl)->init_arg = arg; }
 void dp_machine_sega_mapper(DpMachine *m, unsigned mapper) { ((SegaMach *)m->impl)->mapper = mapper; }
+void dp_machine_sega_gg(DpMachine *m, int gg) { ((SegaMach *)m->impl)->gg = gg; }
 void dp_machine_sega_set_msx(DpMachine *m, int msx) { ((SegaMach *)m->impl)->msx = msx; }
 
 static void sega_capture(SegaMach *s) {
@@ -308,6 +319,7 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->seed_regs = sega_seed_regs;
     m->bank_view = sega_bank_view;
     m->mapper_reg = sega_mapper_reg;
+    m->port_control = sega_port_control;
     m->cut_pc = sega_cut_pc;
     m->cut_sp = sega_cut_sp;
     m->data_dest = sega_data_dest;

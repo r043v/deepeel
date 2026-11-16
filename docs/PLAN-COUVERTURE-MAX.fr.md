@@ -1117,3 +1117,33 @@ La tranche ne change rien au z80 (banc 4 ROMs identique octet à octet : statiqu
 le `port_effect` des OUT (MSX + contrôle mémoire Sega) ; les vues de contexte Sega jouent
 leur rôle par le cap d'états par site. `sega/closure.c` reste en place (critère inchangé :
 banc octet à octet + zéro donnée déclarée code, vérité terrain d'abord).
+
+## C3 : le `port_effect` des OUT est porté (0.388.0)
+
+Le dernier mécanisme de la fermeture Sega que le noyau n'avait pas : un OUT vers un port de
+contrôle mémoire peut masquer la pile RAM et la ROM cartouche, donc les adresses de retour
+que la marche tenait pour prouvées. `DpIsa.out_port` (z80 : `out (n),a` — port immédiat
+connu ; `out (c),a` et le non documenté `out (c),0` — port = C, connu seulement si C l'est)
+et `DpMachine.port_control(port, port_known)` (le savoir plateforme : MSX — tout port peut
+décoder un mapper, sauf un store connu qui rate la sélection de slot $A8 ; GG — $3E
+MEMORY_CONTROL ; SMS/SG — les ports pairs sous $40 ; NULL = jamais de contrôle). Quand la
+marche franchit un tel OUT, elle jette sa pile de retours fantômes (comptée : « ghost
+returns discarded on memory-control OUT (port_effect) ») et efface son SP concret — la
+continuation par pile concrète et les continuations fantômes ne partent plus d'adresses que
+l'OUT peut rendre données. Exactement la sémantique de `port_effect`+`unknown_store` de
+`sega/closure.c` (jeter, jamais simuler la nouvelle vue).
+
+Fixtures et test : `fix_msx_portout.msx` — un callee avec `out ($A8),a` (les retours meurent :
+3 jetés, le `ret` n'est pas suivi) et un callee avec `out ($99),a` VDP (inoffensif : le retour
+par pile concrète est suivi, « stack returns 1 ») ; `core_closure_portout_msx` épingle les deux.
+Banc 4 ROMs : 0 / 856 / 45 / 23 retours jetés (Ace n'en franchit aucun) ; **zéro octet de
+perdu** (les continuations jetées étaient atteintes par d'autres chemins) et la propriété de
+sous-ensemble reste tenue (0 octet noyau seul sur les quatre ROMs). Addams perd 325 retours
+suivis (les `ed 79` à C inconnu sont suspects) ; Aerial déplace 20 octets du statique vers le
+provisoire (les continuations fantômes portaient la confiance du site d'appel).
+
+La liste ouverte de C3 est maintenant : la vérité terrain des ROMs de banc (propriétaire,
+hors dépôt), puis le retrait de `sega/closure.c` au banc octet à octet ; les vues de contexte
+Sega (8 contextes par adresse/vue) jouent leur rôle par le cap d'états par site. Les
+mécanismes de constantes, de retours (pile fantôme + pile concrète, toutes ISA), de vues de
+banque, de ports et de vraisemblance sont portés.

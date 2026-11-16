@@ -523,6 +523,10 @@ add_test(NAME core_closure_stackret_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY
 set_tests_properties(core_closure_stackret_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_closure_stackret_68000 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_md_stackret.md; a='--core --jobs 1 --attract-frames 0 --no-sessions --max-total 300000'; $<TARGET_FILE:deepeel> md explore $f $a | grep -q 'closure registers (C3):.*stack returns [1-9][0-9]*,' && ! $<TARGET_FILE:deepeel> md explore $f $a --no-closure-regs | grep -q 'closure registers (C3)'")
 set_tests_properties(core_closure_stackret_68000 PROPERTIES FIXTURES_REQUIRED fixtures)
+# C3 port_effect: the OUT to the primary slot select discards the walk's returns (the callee's
+# ret is not followed); the harmless VDP OUT leaves the walk's concrete-stack return intact
+add_test(NAME core_closure_portout_msx COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_msx_portout.msx; a='--core --jobs 1 --attract-frames 0 --no-sessions --max-total 200000'; $<TARGET_FILE:deepeel> z80 explore msx $f $a --text ${CMAKE_CURRENT_BINARY_DIR}/core_portout.txt >/dev/null && grep -q 'ghost returns discarded on memory-control OUT (port_effect): [1-9]' ${CMAKE_CURRENT_BINARY_DIR}/core_portout.txt && grep -q 'closure registers (C3):.*stack returns [1-9][0-9]*,' ${CMAKE_CURRENT_BINARY_DIR}/core_portout.txt")
+set_tests_properties(core_closure_portout_msx PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_closure_seedcap_z80 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_stackret.sms; a='--core --jobs 1 --attract-frames 0 --no-sessions'; $<TARGET_FILE:deepeel> z80 explore sms $f $a --closure-seed-cap 8 | grep -q 'closure registers (C3):.*stack returns [1-9][0-9]*,' && $<TARGET_FILE:deepeel> z80 explore sms $f $a --closure-seed-cap 1 | grep -q 'closure registers (C3): seed walks [1-9]'")
 set_tests_properties(core_closure_seedcap_z80 PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 120)
 # "zero data marked code" points 1+3: on the ground-truth fixture, the tile dump behind the

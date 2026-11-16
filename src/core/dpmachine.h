@@ -151,6 +151,10 @@ typedef struct DpIsa {
     // continuation).  NULL: the walk falls back to `sp_width` for every
     // return (z80, sm83).
     int (*sp_ret)(const uint8_t *bytes, unsigned *width, unsigned *bias, unsigned *off);
+    // C3: 1 when the instruction is an OUT; `port_known` = the port expression is an
+    // immediate (`out (n),a`), otherwise it rides a register pair (`out (c),a`).  NULL:
+    // this ISA has no ports.
+    int (*out_port)(const uint8_t *bytes, int *port_known, uint16_t *port);
 } DpIsa;
 
 const DpIsa *dp_isa_sm83(void);
@@ -296,6 +300,11 @@ struct DpMachine {
     // C3: 1 when a write to `addr` programs the cartridge mapper although the address is not in the ROM window (Sega $FFFC-$FFFF);
     // NULL: only writes into the ROM window count
     int (*mapper_reg)(struct DpMachine *, uint32_t addr);
+    // C3: 1 when an OUT to this port is a memory-control write (a mapper/slot decoder can
+    // hide the cartridge ROM and the stack RAM): the static walk then discards its concrete
+    // SP and its ghost-return pile (the Sega closure's port_effect).  `port_known` = the
+    // port expression is a known constant.  NULL: no port knowledge (never memory-control).
+    int (*port_control)(const struct DpMachine *, uint16_t port, int port_known);
     // holds a pad mask (bits 0..5 = up/down/left/right/button1/button2) until changed;
     // NULL: the machine has no input model.  Entry point of the kernel's held-pad sessions.
     void (*set_input)(struct DpMachine *, uint32_t mask);
@@ -367,6 +376,7 @@ struct DpPlatformHooks;
 const struct DpPlatformHooks *dp_machine_nes_hooks(void);
 void dp_machine_sega_mapper(DpMachine *m, unsigned mapper);   /* explicit SMS/GG mapper (DP_SEGA_MAPPER_*), applied after every init */
 void dp_machine_sega_set_msx(DpMachine *m, int msx);   /* marks an MSX machine (keyboard probes, no Pause NMI) */
+void dp_machine_sega_gg(DpMachine *m, int gg);   /* Game Gear: the memory-control port is $3E */
 const struct DpPlatformHooks *dp_machine_sega_hooks(void);   /* Z80 platform hooks (VDP status / counters probes) */   /* NES platform hooks for the kernel (event probes) */
 DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err, size_t errsz);
 // the Mega Drive backend (src/mach/md_machine.c); takes ownership of the machine
