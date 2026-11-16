@@ -659,3 +659,7 @@ banc octet à octet exigé avant tout retrait de `sega/closure.c`.
 Corrige l'estimation de la section précédente : les 85 octets d'Action Fighter UE étaient un cas bas ; sur ces quatre ROMs la fermeture Sega ajoute de 7 à 48 %
 de statique seul. MSX (Aleste, Gradius 2) : non mesuré, la mesure a été interrompue par le système (mémoire basse) ; à refaire sans autre charge. Le port de
 la condition de retour porte donc un enjeu réel de couverture, pas marginal.
+
+MSX (mise à jour) : Aleste (`--attract-frames 300 --max-total 200000 --jobs 1`) n'a pas terminé en 120 s (arrêt par `timeout`, aucun rapport écrit), alors
+que les ROMs SMS/GG/SG font 1,5·10⁶ pas dans ce temps. Le banc MSX est donc bloqué par un ralentissement propre au chemin MSX (cause non cherchée), pas
+seulement par la mémoire. À instruire avant tout banc sur cette plateforme.
