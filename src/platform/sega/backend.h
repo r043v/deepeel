@@ -89,6 +89,9 @@ typedef struct {
     unsigned (*service)(void);
     uint64_t (*frame_count)(void);
     unsigned (*tas_instruction)(const z80_decoded_t *decoded, unsigned cycles);
+    // kernel live watch (DpMachine.render): the last completed frame as ARGB, 0 when nothing was drawn yet.
+    // watch(UINT_MAX, ...) captures the rows without publishing them to the framebuffer window.
+    int (*watch_view)(const uint32_t **argb, int *w, int *h);
 } DpSegaBackend;
 // weak: standalone runtime tests link the backends without the framebuffer watch
 void dp_fb_publish(const uint32_t *argb, int w, int h, uint64_t frame) __attribute__((weak));

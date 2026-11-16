@@ -92,6 +92,20 @@ static int sega_bank_view(DpMachine *m, unsigned bank) {
 // nonsense cuts (audit E2): the WRAM echo $E000-$FDFF never holds real code
 // (the MSX has RAM there, not an echo); a stack below the WRAM pops garbage
 // (MSX guarantees RAM only from $E000 up)
+// the generic live watch: the backend captures the rows while watching (rendering sets sprite status, so it stays off otherwise)
+static void sega_watch(DpMachine *m, int on) {
+    const DpSegaBackend *b = ((SegaMach *)m->impl)->b;
+    static __thread uint64_t sink;
+    if (b->watch) b->watch(on ? ~0u : 0, &sink);
+}
+static int sega_render(DpMachine *m, uint32_t *argb, unsigned cap, int *w, int *h) {
+    const DpSegaBackend *b = ((SegaMach *)m->impl)->b;
+    const uint32_t *px; int pw, ph;
+    if (!b->watch_view || !b->watch_view(&px, &pw, &ph) || (unsigned)(pw * ph) > cap) return 0;
+    memcpy(argb, px, (size_t)pw * ph * sizeof *argb);
+    *w = pw; *h = ph;
+    return 1;
+}
 static int sega_cut_pc(DpMachine *m, uint32_t pc) {
     return !((SegaMach *)m->impl)->msx && pc >= 0xE000 && pc < 0xFE00;
 }
@@ -226,6 +240,7 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->impl = s;
     m->state_bytes = sega_state_bytes;
     m->save = sega_save;
+    m->watch = sega_watch; m->render = sega_render;
     m->load = sega_load;
     m->fetch = sega_fetch;
     m->rom_index = sega_rom_index;

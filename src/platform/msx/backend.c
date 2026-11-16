@@ -104,6 +104,7 @@ static void dp_msx_watch_hook(void) {
     if(!W.every) return;
     machine.row_out=watch_buf; machine.draw_line=watch_draw; machine.row=watch_row; machine.frame=watch_frame;
 }
+static int watch_view(const uint32_t **argb,int *w,int *h) { if(!W.w) return 0; *argb=W.px; *w=W.w; *h=W.h; return 1; }
 static void explore_watch(unsigned every,uint64_t *published) { W.every=every; W.published=published; dp_msx_watch_hook(); }
 int dp_msx_load(const void *state,size_t size) {
     if(!image || !state || size!=sizeof(Snapshot)) return 0;
@@ -200,6 +201,6 @@ const DpSegaBackend *dp_msx_backend(void) {
         dp_msx_in,dp_msx_out,dp_msx_advance,dp_msx_rom_index,sizeof(Snapshot),explore_save,explore_load,
         dp_msx_ram_index,explore_target,explore_input,explore_set_input,explore_mapper,explore_command,
         explore_irq,65536,65536,0xff,0x98,0x99,dp_msx_close,explore_windows,NULL,NULL,explore_geometry,explore_window,
-        dp_msx_info,dp_msx_observe,dp_msx_bios_trap,explore_screen_key,explore_ram_view,explore_watch,NULL,NULL,NULL,NULL};
+        dp_msx_info,dp_msx_observe,dp_msx_bios_trap,explore_screen_key,explore_ram_view,explore_watch,NULL,NULL,NULL,NULL,watch_view};
     return &ops;
 }

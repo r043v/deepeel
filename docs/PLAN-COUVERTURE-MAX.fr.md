@@ -25,7 +25,7 @@ historiques. `--evidence` est absorbé par le chunk `dpCv` du PNG (`COUVERTURE.f
 `--romdata` et `--rtcode` sont écrits par `core_outputs`. Restent ouverts : C11 (projection
 de contexte `DpCtxComp` hors GB), C7 (couche de rapport unique : `report/` sert encore
 `core_map.c` et la commande `map`), P6 (reprises) et P8 (sorties), plus les écarts du retrait GB
-(sessions de lecture historiques, rendu Sega, typage des registres).
+(sessions de lecture historiques, typage des registres).
 Observation : `--unbounded` sur `fix_branch.gb` ne termine pas, avec ou sans sessions.
 Diagnostic (0.372.0) : ce n'est pas la dédup exacte (le hash d'état, même rendu relatif
 aux ancres de cycle, ne change rien) mais la sémantique « les deux côtés de chaque
@@ -370,3 +370,10 @@ acceptées et ignorées avec une ligne sur stderr (`retired_option`).
 
 Écarts consignés, à combler dans le noyau : sessions de lecture historiques, frontière
 par lots, `--evidence`/`--romdata`/`--rtcode` GB, cellules legacy.
+
+## Rendu Sega dans le noyau (0.373.0)
+
+`DpMachine.watch/render` existe maintenant pour SG/SMS/GG/MSX : le backend capture les
+lignes (`DpSegaBackend.watch_view`, capture sans publication vers la fenêtre
+framebuffer), `sega_render` recopie la dernière trame en ARGB. `--watch` couvre donc toutes
+les plateformes du noyau. Test : `test_dpmachine` (trame 160×192 observée sur la fixture SMS).

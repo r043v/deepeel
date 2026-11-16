@@ -24,6 +24,7 @@ static void hook(void) {
     if(!W.every) return;
     machine.row_out=watch_buf; machine.draw_line=watch_draw; machine.row=watch_row; machine.frame=watch_frame;
 }
+static int watch_view(const uint32_t **argb,int *w,int *h) { if(!W.w) return 0; *argb=W.px; *w=W.w; *h=W.h; return 1; }
 static void watch(unsigned every,uint64_t *published) { W.every=every; W.published=published; hook(); }
 static void load(const void *in) { memcpy(&machine,in,sizeof(machine)); hook(); sg1000_palette_changed(); }
 static int32_t ram_index(uint16_t a) {
@@ -54,6 +55,6 @@ static int seed_window(uint16_t addr, unsigned bank) { (void)addr; (void)bank; r
 static uint64_t screen_key(void) { return dp_sega_name_key(machine.vram,(machine.vdp[2]&15u)<<10,768,1,0,0); }
 static const uint8_t *ram_view(size_t *n) { *n=sizeof(machine.ram); return machine.ram; }
 const DpSegaBackend *dp_sega_backend_sg(void) {
-    static const DpSegaBackend ops={init,cpu,sg1000_read,sg1000_write,in,out,advance,rom_index,sizeof(sg1000_t),save,load,ram_index,vdp_target,input,set_input,mapper,vdp_command,irq_sources,DP_SEGA_RAM_TAGS,8192,0xc1,0x80,0x81,NULL,NULL,NULL,NULL,seed_geometry,seed_window,NULL,NULL,NULL,screen_key,ram_view,watch,NULL,NULL,NULL,NULL};
+    static const DpSegaBackend ops={init,cpu,sg1000_read,sg1000_write,in,out,advance,rom_index,sizeof(sg1000_t),save,load,ram_index,vdp_target,input,set_input,mapper,vdp_command,irq_sources,DP_SEGA_RAM_TAGS,8192,0xc1,0x80,0x81,NULL,NULL,NULL,NULL,seed_geometry,seed_window,NULL,NULL,NULL,screen_key,ram_view,watch,NULL,NULL,NULL,NULL,watch_view};
     return &ops;
 }

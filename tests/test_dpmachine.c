@@ -191,6 +191,14 @@ int main(int argc, char **argv) {
         unsigned ran = 0;
         while (ran < 64 && m->run(m)) ran++;
         CHECK_MSG(ran > 0, "run executes instructions");
+        CHECK_MSG(m->watch && m->render, "sega machine has the live watch");
+        m->watch(m, 1);
+        for (unsigned k = 0; k < 400000 && m->run(m); k++) {}
+        static uint32_t px[512 * 512];
+        int pw = 0, ph = 0;
+        int got = m->render(m, px, 512u * 512u, &pw, &ph);;
+        CHECK_MSG(got && pw >= 160 && pw <= 256 && ph >= 144 && ph <= 192, "sega frame has a screen size");
+        m->watch(m, 0);
         free(a); free(bb);
         m->close(m);
     }
