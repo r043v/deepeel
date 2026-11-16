@@ -554,3 +554,19 @@ du gain de `sega/closure.c` : la fermeture est amorcée à chaque pas exécuté 
 propres (plusieurs centaines d'octets, sans `call`/`jp` absolu qui les désigne en ROM) ne viennent donc pas des `jp (hl)` à constante visible. Candidats non
 vérifiés : retours résolus par la pile concrète, tables lues en ROM. `sega/closure.c` reste en place tant qu'un banc octet à octet SMS/GG/SG/MSX ne prouve
 pas l'équivalence.
+
+### Courbe de rendement par budget (section E, observation de l'outil)
+
+Zelda GB (ROM hors dépôt), `--attract-frames 300 --jobs 1`, trois budgets. Compteurs du rapport texte ; ce sont des observations de l'outil (machine
+concrète, RAM à zéro), pas des mesures de matériel. Les octets « nouveaux » du choix par nouveauté et du choix simple sont ceux que le rapport attribue à
+chaque mode.
+
+| budget (pas) | chemins | fourches | résolues (solved) | rejeux d'index | forks RNG | forks IRQ | nouveauté / simple (octets) | statique seul |
+|---|---|---|---|---|---|---|---|---|
+| 300 000 | 480 | 634 | 1 | 0 | 0 | 0 | 2 535 / 4 748 | 239 |
+| 1 000 000 | 1 123 | 664 | 189 | 128 | 244 | 3 370 | 2 508 / 4 510 | 6 283 |
+| 3 000 000 | 3 740 | 2 596 | 670 | 698 | 344 | 9 675 | 21 949 / 8 619 | 51 235 |
+
+Lecture : les techniques à état (résolution, rejeu d'index, RNG, IRQ) ne produisent qu'à partir d'environ 10⁶ pas ; la fermeture statique domine l'octet
+gagné entre 10⁶ et 3·10⁶ pas (6 283 → 51 235), et le choix par nouveauté dépasse le choix simple seulement au plus grand budget. Ce n'est pas une courbe
+par technique à budget constant : l'attribution fine (retrait d'une technique à la fois) reste à mesurer et n'est pas faite ici.
