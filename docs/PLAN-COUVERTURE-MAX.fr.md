@@ -17,10 +17,16 @@ en §C est fiable, mais ces moteurs n'ont pas été audités ligne à ligne.
 ## Avancement (0.372.0)
 
 P0 à P5 : faites aux nuances près consignées ci-dessous. Retrait des cinq moteurs
-historiques (C9, C4 pour les scans) : **fait** (0.368.0 à 0.372.0) ; le noyau est le
-seul moteur et `campaign_fixtures` est verte. Restent ouverts : C2 (rejeu S6 commun),
-C10 (module de copies unique), C11 (projection de contexte `DpCtxComp` hors GB), C7/C8,
-P6 (reprises) et P8 (sorties) et les écarts du retrait GB. Observation : `--unbounded` sur `fix_branch.gb` ne termine pas, avec ou sans sessions.
+historiques : **fait** (0.368.0 à 0.372.0) ; le noyau est le seul moteur et
+`campaign_fixtures` est verte. Conséquences sur la mutualisation : C2 (rejeu S6),
+C5 (frontière), C8 (parallélisme), C9 et C10 (copies) n'ont plus qu'un exemplaire, celui du
+noyau, donc sont **résolues par construction** ; C4 (scans) l'est pour les scans
+historiques. `--evidence` est absorbé par le chunk `dpCv` du PNG (`COUVERTURE.fr.md` §9.3),
+`--romdata` et `--rtcode` sont écrits par `core_outputs`. Restent ouverts : C11 (projection
+de contexte `DpCtxComp` hors GB), C7 (couche de rapport unique : `report/` sert encore
+`core_map.c` et la commande `map`), P6 (reprises) et P8 (sorties), plus les écarts du retrait GB
+(sessions de lecture historiques, rendu Sega, typage des registres).
+Observation : `--unbounded` sur `fix_branch.gb` ne termine pas, avec ou sans sessions.
 Diagnostic (0.372.0) : ce n'est pas la dédup exacte (le hash d'état, même rendu relatif
 aux ancres de cycle, ne change rien) mais la sémantique « les deux côtés de chaque
 conditionnel » sans plafond : le `jr nz` de la boucle de copie, forcé « pris » quand
