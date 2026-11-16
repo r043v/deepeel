@@ -83,9 +83,47 @@ int main(int argc, char **argv) {
         CHECK_MSG((r.known[DP_SM83R_HL] & 3) == 3 && r.v[DP_SM83R_HL] == 0x5A34, "ld h,a moves the proof");
         isa->reg_effect(alu, 0x100, &r, &n2, &rom); r = n2;
         CHECK_MSG(!(r.known[DP_SM83R_A] & 1) && (r.known[DP_SM83R_HL] & 3) == 3, "alu kills A only");
+        // the pair steps ride the right pair (the rp code of the opcode is the slot)
+        uint8_t incde[1] = { 0x13 };
+        r.v[DP_SM83R_BC] = 0x0001; r.known[DP_SM83R_BC] = 3;
+        r.v[DP_SM83R_DE] = 0x0100; r.known[DP_SM83R_DE] = 3;
+        isa->reg_effect(incde, 0x100, &r, &n2, &rom); r = n2;
+        CHECK_MSG((r.known[DP_SM83R_DE] & 3) == 3 && r.v[DP_SM83R_DE] == 0x0101 && (r.known[DP_SM83R_BC] & 3) == 3 && r.v[DP_SM83R_BC] == 0x0001, "inc de steps DE only");
+        // pop with a concrete SP reads the stack words and steps SP down again
+        uint8_t popbc[1] = { 0xC1 };
+        r.known[DP_SM83R_SP] = 3; r.v[DP_SM83R_SP] = 0x1000;
+        image[0x1000] = 0x11; image[0x1001] = 0x01;
+        isa->reg_effect(popbc, 0x100, &r, &n2, &rom); r = n2;
+        CHECK_MSG((r.known[DP_SM83R_BC] & 3) == 3 && r.v[DP_SM83R_BC] == 0x0111 && (r.known[DP_SM83R_SP] & 3) == 3 && r.v[DP_SM83R_SP] == 0x1002, "pop bc reads the concrete stack");
+        uint8_t pushde[1] = { 0xD5 };
+        isa->reg_effect(pushde, 0x100, &r, &n2, &rom); r = n2;
+        CHECK_MSG((r.known[DP_SM83R_SP] & 3) == 3 && r.v[DP_SM83R_SP] == 0x1000 && (r.known[DP_SM83R_BC] & 3) == 3, "push steps SP down");
         // jp hl carries the pair of the indirect target (C3)
         isa->flow(jphl, 0, &f);
         CHECK_MSG(f.pair == DP_SM83R_HL, "JP HL names its pair");
+    }
+    // z80: the provenance engine kills the written register — the exact
+    // derivations (inc, pop through the concrete stack) must ride the input state
+    {
+        uint8_t image[0x2000] = {0};
+        struct { uint8_t *img; int reads; } cx = { image, 0 };
+        int rd(void *c, uint32_t a, uint8_t *v) { typeof(cx) *x = c; if (a >= 0x2000) return 0; *v = x->img[a]; x->reads++; return 1; }
+        DpProvRom rom = { &cx, rd };
+        const DpIsa *z = dp_isa_z80();
+        DpRegState r, n2;
+        dp_regstate_clear(&r);
+        uint8_t ldhl[3] = { 0x21, 0x34, 0x12 }, inchl[1] = { 0x23 };
+        memcpy(image + 0x100, ldhl, 3);   // the planned read takes the operand bytes from the image
+        z->reg_effect(ldhl, 0x100, &r, &n2, &rom); r = n2;
+        CHECK_MSG((r.known[DP_Z80R_HL] & 3) == 3 && r.v[DP_Z80R_HL] == 0x1234, "z80 ld hl,nn proves HL");
+        z->reg_effect(inchl, 0x100, &r, &n2, &rom); r = n2;
+        CHECK_MSG((r.known[DP_Z80R_HL] & 3) == 3 && r.v[DP_Z80R_HL] == 0x1235, "z80 inc hl keeps HL (derives from the input)");
+        uint8_t popbc[1] = { 0xC1 };
+        r.known[DP_Z80R_SP] = 3; r.v[DP_Z80R_SP] = 0x1000;
+        image[0x1000] = 0x78; image[0x1001] = 0x56;
+        z->reg_effect(popbc, 0x100, &r, &n2, &rom); r = n2;
+        CHECK_MSG((r.known[DP_Z80R_BC] & 3) == 3 && r.v[DP_Z80R_BC] == 0x5678 && (r.known[DP_Z80R_SP] & 3) == 3 && r.v[DP_Z80R_SP] == 0x1002, "z80 pop bc reads the concrete stack");
+        CHECK_MSG(z->sp_width == 2 && z->sp_slot == DP_Z80R_SP, "z80 names its stack");
     }
     // frontier policy (spec §6): tiers, caps, names
     CHECK_MSG(dp_frontier_room(0, 0, 0, DP_R_STEPS) == DP_ROOM_OK, "room at tier 0");

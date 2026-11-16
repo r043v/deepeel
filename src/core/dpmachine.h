@@ -126,6 +126,12 @@ typedef struct DpIsa {
     int (*imm_byte)(const uint8_t *bytes, uint8_t *v);     // B9: 1 when the instruction loads an 8-bit immediate (two nearby ones form a split pointer)
     int (*acc_imm)(const uint8_t *bytes, uint8_t *v);      // C3: 1 when the instruction loads the accumulator with an immediate
     int (*st_acc_abs)(const uint8_t *bytes, uint32_t *addr);   // C3: 1 when the instruction stores the accumulator at an absolute address
+    // C3: the stack-pointer register slot and the bytes a push/pop/call/ret
+    // moves it by.  When the walk carries a fully known SP, a `ret` follows the
+    // address read from the machine's stack (the Sega closure's concrete-stack
+    // returns).  sp_width 0: this ISA has no modeled stack (the feature is off)
+    unsigned sp_slot;
+    unsigned sp_width;
 } DpIsa;
 
 const DpIsa *dp_isa_sm83(void);

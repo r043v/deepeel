@@ -95,8 +95,8 @@ static void isa_reg_effect(const uint8_t *b, uint32_t pc, const DpRegState *in, 
         if ((out->known[s2] & 3) == 3 && rom->read(rom->ctx, out->v[s2], &v)) sm_set_byte(out, DP_SM83R_A, 0, v);
         else sm_kill_byte(out, DP_SM83R_A, 0);
         break; }
-    case 0x03: case 0x13: case 0x33: sm_step_pair(out, op == 0x33 ? DP_SM83R_SP : (op >> 4) - 1, 1); break;
-    case 0x0B: case 0x1B: case 0x3B: sm_step_pair(out, op == 0x3B ? DP_SM83R_SP : (op >> 4) - 1, -1); break;
+    case 0x03: case 0x13: case 0x33: sm_step_pair(out, (op >> 4) & 3, 1); break;   // rp code = slot (BC DE HL SP)
+    case 0x0B: case 0x1B: case 0x3B: sm_step_pair(out, (op >> 4) & 3, -1); break;
     case 0x34: case 0x35: break;   // inc/dec (hl): memory only
     case 0x04: case 0x0C: case 0x14: case 0x1C: case 0x24: case 0x2C: case 0x3C:
         sm_byte_slot((op >> 3) & 7, &by); sm_step_byte(out, sm_byte_slot((op >> 3) & 7, &by), by, 1);
@@ -115,9 +115,21 @@ static void isa_reg_effect(const uint8_t *b, uint32_t pc, const DpRegState *in, 
     case 0xF9:   // ld sp,hl
         out->v[DP_SM83R_SP] = in->v[DP_SM83R_HL] & 0xffff; out->known[DP_SM83R_SP] = in->known[DP_SM83R_HL] & 3;
         break;
-    case 0xF1: case 0xC1: case 0xD1: case 0xE1:   // pop af/bc/de/hl
-        if (op == 0xF1) sm_kill_byte(out, DP_SM83R_A, 0);
-        else sm_kill_pair(out, (op >> 4) - 1);
+    case 0xF1: case 0xC1: case 0xD1: case 0xE1: {   // pop af/bc/de/hl
+        unsigned s2 = (op >> 4) & 3;   // rp code 3 = AF (pop only)
+        if (s2 == 3) s2 = DP_SM83R_AF;
+        if ((out->known[DP_SM83R_SP] & 3) == 3) {   // the concrete stack proves the popped pair
+            uint8_t lo, hi;
+            if (rom->read(rom->ctx, out->v[DP_SM83R_SP] & 0xffff, &lo) && rom->read(rom->ctx, (out->v[DP_SM83R_SP] + 1) & 0xffff, &hi)) {
+                out->v[s2] = (uint32_t)(lo | hi << 8); out->known[s2] |= 3;
+            } else sm_kill_pair(out, s2);
+        } else sm_kill_pair(out, s2);
+        if (s2 == DP_SM83R_AF) sm_kill_byte(out, DP_SM83R_A, 0);   // the byte slots ride separately
+        if ((out->known[DP_SM83R_SP] & 3) == 3)   // SP advances even when the read failed
+            out->v[DP_SM83R_SP] = (uint32_t)((out->v[DP_SM83R_SP] + 2) & 0xffff);
+        break; }
+    case 0xC5: case 0xD5: case 0xE5: case 0xF5:   // push: nothing to know, SP steps down
+        if ((out->known[DP_SM83R_SP] & 3) == 3) out->v[DP_SM83R_SP] = (uint32_t)((out->v[DP_SM83R_SP] - 2) & 0xffff);
         break;
     case 0x07: case 0x0F: case 0x17: case 0x1F:   // rotates through A
     case 0x27: case 0x2F:                         // daa, cpl
@@ -230,5 +242,6 @@ static int isa_imm_ptr(const uint8_t *b, uint32_t *imm) {   // ld bc/de/hl,nn
 }
 static int isa_acc_imm(const uint8_t *b, uint8_t *v) { if (b[0] != 0x3E) return 0; *v = b[1]; return 1; }   // ld a,n
 static int isa_st_acc_abs(const uint8_t *b, uint32_t *a) { if (b[0] != 0xEA) return 0; *a = (uint32_t)b[1] | (uint32_t)b[2] << 8; return 1; }   // ld (nn),a
-static const DpIsa isa = { "sm83", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag, isa_reg_effect, isa_illegal, sm83_disasm, isa_mem_operand, 0x150u, 1, 0, isa_imm_ptr, NULL, isa_acc_imm, isa_st_acc_abs };
+static const DpIsa isa = { "sm83", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag, isa_reg_effect, isa_illegal, sm83_disasm, isa_mem_operand, 0x150u, 1, 0, isa_imm_ptr, NULL, isa_acc_imm, isa_st_acc_abs,
+                           .sp_slot = DP_SM83R_SP, .sp_width = 2 };
 const DpIsa *dp_isa_sm83(void) { return &isa; }

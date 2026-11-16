@@ -94,10 +94,12 @@ static int isa_flow(const uint8_t *bytes, uint32_t pc, DpFlowInfo *o) {
 // On top of the engine the port re-derives what the engine kills but the
 // Sega closure proves itself (inc/dec of pairs and bytes, DJNZ, the ED block
 // steps): same rules, value arithmetic instead of origin arithmetic.
-typedef struct { const DpProvRom *rom; uint16_t addr; unsigned bytes; } ZConstRead;
+typedef struct { const DpProvRom *rom; uint16_t addr; unsigned bytes; uint16_t saddr; unsigned sbytes; } ZConstRead;
 static uint32_t zconst_read(void *u, uint16_t a) {
     ZConstRead *r = u;
-    if ((uint16_t)(a - r->addr) >= r->bytes) return 0;   // not the instruction's operand: never proven
+    int in_main = (uint16_t)(a - r->addr) < r->bytes;            // the instruction's explicit operand
+    int in_stack = (uint16_t)(a - r->saddr) < r->sbytes;         // the stack words a pop / ex (sp) touches
+    if (!in_main && !in_stack) return 0;                          // anything else: never proven
     uint8_t v;
     if (!r->rom->read(r->rom->ctx, a, &v)) return 0;
     return (uint32_t)v + 1;
@@ -132,16 +134,21 @@ static unsigned ztag_of(unsigned slot, unsigned byte) {
     };
     return t[slot][byte];
 }
-// derive one byte +/- delta (exact wrap: a carry the ISA would produce only
-// touches the neighbour byte, this byte alone is deterministic)
-static void zstep_byte(DpRegState *s, unsigned slot, unsigned byte, int delta) {
+// derive one byte +/- delta from the input state (the engine's verdict already
+// killed the written bytes: the Sega closure derives from `before`, so the
+// exact arithmetic must too — an unknown input byte stays unknown)
+static void zstep_byte(const DpRegState *in, DpRegState *out, unsigned slot, unsigned byte, int delta) {
     unsigned bit = 1u << byte;
-    if (s->known[slot] & bit) s->v[slot] = (s->v[slot] & ~(0xffu << (8 * byte))) | (uint32_t)(((s->v[slot] >> (8 * byte)) + delta) & 0xff) << (8 * byte);
-    else { s->known[slot] &= (uint8_t)~bit; s->v[slot] &= ~(0xffu << (8 * byte)); }
+    if (in->known[slot] & bit) {
+        out->known[slot] |= (uint8_t)bit;
+        out->v[slot] = (out->v[slot] & ~(0xffu << (8 * byte))) | (uint32_t)(((in->v[slot] >> (8 * byte)) + delta) & 0xff) << (8 * byte);
+    } else { out->known[slot] &= (uint8_t)~bit; out->v[slot] &= ~(0xffu << (8 * byte)); }
 }
-static void zstep_pair(DpRegState *s, unsigned slot, int delta) {
-    if ((s->known[slot] & 3) == 3) s->v[slot] = (uint32_t)((uint16_t)(s->v[slot] + delta));
-    else { zstep_byte(s, slot, 0, delta); s->known[slot] &= (uint8_t)~2; s->v[slot] &= 0xffff00ffu; }
+static void zstep_pair(const DpRegState *in, DpRegState *out, unsigned slot, int delta) {
+    if ((in->known[slot] & 3) == 3) {
+        out->known[slot] |= 3;
+        out->v[slot] = (out->v[slot] & 0xffff0000u) | (uint32_t)((uint16_t)((in->v[slot] & 0xffffu) + delta));
+    } else { zstep_byte(in, out, slot, 0, delta); out->known[slot] &= (uint8_t)~2; out->v[slot] &= 0xffff00ffu; }
 }
 static void isa_reg_effect(const uint8_t *b, uint32_t pc, const DpRegState *in, DpRegState *out, const DpProvRom *rom) {
     DpZ80Instruction ins;
@@ -158,8 +165,13 @@ static void isa_reg_effect(const uint8_t *b, uint32_t pc, const DpRegState *in, 
     cpu.bc = (uint16_t)in->v[DP_Z80R_BC]; cpu.de = (uint16_t)in->v[DP_Z80R_DE]; cpu.hl = (uint16_t)in->v[DP_Z80R_HL];
     cpu.ix = (uint16_t)in->v[DP_Z80R_IX]; cpu.iy = (uint16_t)in->v[DP_Z80R_IY]; cpu.sp = (uint16_t)in->v[DP_Z80R_SP];
     cpu.f = (uint8_t)((in->known[DP_Z80R_F] & 1) ? in->v[DP_Z80R_F] : 0);
-    // the planned read: only the instruction's explicit constant operand
-    ZConstRead rd = { rom, 0, 0 };
+    // the planned read: only the instruction's explicit constant operand, plus
+    // the stack words a pop / ex (sp) touches when the concrete SP is known
+    // (the Sega closure's peek — the machine's stack proves the popped value)
+    ZConstRead rd = { rom, 0, 0, 0, 0 };
+    if ((in->known[DP_Z80R_SP] & 3) == 3 && !d->group && x == 3 && (z == 1 ? !q : (z == 3 && y == 4))) {
+        rd.saddr = (uint16_t)in->v[DP_Z80R_SP]; rd.sbytes = 2;
+    }
     unsigned pair_known[3] = { (in->known[DP_Z80R_HL] & 3) == 3, (in->known[DP_Z80R_IX] & 3) == 3, (in->known[DP_Z80R_IY] & 3) == 3 };
     unsigned ipair = d->index ? d->index : 0;   // 0 HL, 1 IX, 2 IY
     uint16_t hla = (uint16_t)(d->index == 1 ? cpu.ix : d->index == 2 ? cpu.iy : cpu.hl);
@@ -169,7 +181,7 @@ static void isa_reg_effect(const uint8_t *b, uint32_t pc, const DpRegState *in, 
     else if (!d->group && op == 0x3a) { rd.addr = d->immediate; rd.bytes = 1; }
     else if (!d->group && (op == 0x0a || op == 0x1a) && ((in->known[op == 0x0a ? DP_Z80R_BC : DP_Z80R_DE] & 3) == 3)) { rd.addr = (uint16_t)(op == 0x0a ? cpu.bc : cpu.de); rd.bytes = 1; }
     else if ((!d->group && op == 0x2a) || (d->group == 2 && x == 1 && z == 3 && q && p < 3)) { rd.addr = d->immediate; rd.bytes = 2; }
-    else if (!d->group && x == 0 && z == 1 && !q && p <= 3) { rd.addr = immediate; rd.bytes = 2; }   // ld rr,nn / ld sp,nn (DD/FD included)
+    else if (!d->group && x == 0 && z == 1 && !q && p <= 3) { rd.addr = (uint16_t)(immediate - 1); rd.bytes = 2; }   // ld rr,nn / ld sp,nn: the engine loads the pair from pc+1..pc+2 (DD/FD included)
     else if (!d->group && x == 0 && z == 6 && y != 6) { rd.addr = immediate; rd.bytes = 1; }        // ld r,n (DD/FD included)
     dp_z80_provenance_begin(&pv, &cpu, d, zconst_read, &rd);
     // read the engine's verdict back into the slot lattice
@@ -182,18 +194,26 @@ static void isa_reg_effect(const uint8_t *b, uint32_t pc, const DpRegState *in, 
         }
     }
     // what the engine kills but an exact derivation proves (the Sega closure's
-    // own rules): inc/dec of pairs and bytes, DJNZ, the ED block steps
+    // own rules): inc/dec of pairs and bytes (SP included), DJNZ, the ED block
+    // steps — the values come from the input state, the engine's verdict has
+    // already killed the written bytes
     if (!d->group && x == 0) {
-        if (z == 3 && p < 3) zstep_pair(out, zpair_slot(p, d->index), q ? -1 : 1);
+        if (z == 3 && p <= 3) zstep_pair(in, out, zpair_slot(p, d->index), q ? -1 : 1);
         else if ((z == 4 || z == 5) && y != 6) {
-            if (y == 7) zstep_byte(out, DP_Z80R_A, 0, z == 5 ? -1 : 1);
-            else zstep_byte(out, zpair_slot(y >> 1, d->index), (y & 1) ^ 1, z == 5 ? -1 : 1);   // B,D,H high; C,E,L low
-        } else if (op == 0x10) zstep_byte(out, DP_Z80R_B, 0, -1);   // DJNZ
+            if (y == 7) zstep_byte(in, out, DP_Z80R_A, 0, z == 5 ? -1 : 1);
+            else zstep_byte(in, out, zpair_slot(y >> 1, d->index), (y & 1) ^ 1, z == 5 ? -1 : 1);   // B,D,H high; C,E,L low
+        } else if (op == 0x10) zstep_byte(in, out, DP_Z80R_B, 0, -1);   // DJNZ
     } else if (d->group == 2 && x == 2 && y >= 4 && z <= 3) {
         int dir = (y & 1) ? -1 : 1;
-        zstep_pair(out, DP_Z80R_HL, dir);
-        if (z == 0) zstep_pair(out, DP_Z80R_DE, dir);
-        if (z <= 1) zstep_pair(out, DP_Z80R_BC, -1);
+        zstep_pair(in, out, DP_Z80R_HL, dir);
+        if (z == 0) zstep_pair(in, out, DP_Z80R_DE, dir);
+        if (z <= 1) zstep_pair(in, out, DP_Z80R_BC, -1);
+    }
+    // the stack pointer of the unconditional stack words (a call or a ret moves
+    // SP differently on each of its two sides: the walk applies those)
+    if ((in->known[DP_Z80R_SP] & 3) == 3 && !d->group && x == 3 && ((z == 1 && !q) || (z == 5 && !q))) {
+        out->known[DP_Z80R_SP] |= 3;
+        out->v[DP_Z80R_SP] = (out->v[DP_Z80R_SP] & 0xffff0000u) | (uint32_t)((uint16_t)(in->v[DP_Z80R_SP] + (z == 1 ? 2 : -2)));
     }
 }
 static int isa_disasm(const uint8_t *rom, uint32_t rom_size, uint16_t addr, char *out, size_t outsz) {
@@ -232,5 +252,6 @@ static int isa_imm_ptr(const uint8_t *b, uint32_t *imm) {   // ld bc/de/hl,nn (u
 static int isa_acc_imm(const uint8_t *b, uint8_t *v) { if (b[0] != 0x3E) return 0; *v = b[1]; return 1; }   // ld a,n
 static int isa_st_acc_abs(const uint8_t *b, uint32_t *a) { if (b[0] != 0x32) return 0; *a = (uint32_t)b[1] | (uint32_t)b[2] << 8; return 1; }   // ld (nn),a
 static const DpIsa isa = { "z80", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
-                           isa_reg_effect, isa_illegal, isa_disasm, isa_mem_operand, 0, 1, 0, isa_imm_ptr, NULL, isa_acc_imm, isa_st_acc_abs };
+                           isa_reg_effect, isa_illegal, isa_disasm, isa_mem_operand, 0, 1, 0, isa_imm_ptr, NULL, isa_acc_imm, isa_st_acc_abs,
+                           .sp_slot = DP_Z80R_SP, .sp_width = 2 };
 const DpIsa *dp_isa_z80(void) { return &isa; }
