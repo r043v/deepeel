@@ -595,11 +595,10 @@ sont sans effet à 10⁶ pas (leurs compteurs sont nuls ou trop tardifs, cf. la 
 dépensent des pas qui ne rapportent qu'au-delà de 10⁶ (cf. la courbe : 670 fourches résolues à 3·10⁶). Ce n'est pas une preuve qu'elles nuisent à budget
 infini, seulement qu'elles ne sont pas rentables à ce budget. Le total « connu » ne départage pas naturel et forcé : `--no-site-score` déplace 2 600 octets du naturel vers le forcé.
 
-### C3 : pistes du gain de la fermeture Sega (observation, Action Fighter UE)
+### C3 : pistes du gain de la fermeture Sega (observation, Action Fighter UE) — corrigé
 
-Les cinq plus grands blocs « statique seul » propres à `sega/closure.c` (1 058, 1 004, 866, 382, 225 octets) : pour quatre d'entre eux, un mot 16 bits égal à
-l'adresse du bloc existe en ROM, et pour le bloc de 382 octets (`$2222`) ce mot figure dans une table de pointeurs à pas de 4 (`$C87C`, `$C880`, `$C884`…). Le
-gain vient donc au moins en partie de **tables de pointeurs lues comme données** (`memory_resolved`), pas des `jp (hl)` à constante. Port à tenter dans
-le noyau : une résolution de table à pas générique (début/pas déduits de la lecture exécutée) qui amorce le marcheur sur chaque entrée plausible ; le risque
-est le sur-marquage (une entrée qui n'est pas du code), à borner par la règle de confiance A13 et à valider octet à octet avant tout retrait de
-`sega/closure.c`. Non fait.
+Première version de cette section (retirée) : elle affirmait une table de pointeurs à pas de 4 en `$C87C` désignant le bloc `$2222`. Vérification faite,
+`$C87C` contient des octets de données répétitifs (`22 22 16 16 …`, probablement des tuiles) : la coïncidence d'un mot 16 bits n'est pas une table. Seul fait
+établi : les cinq plus grands blocs propres à `sega/closure.c` (1 058, 1 004, 866, 382, 225 octets) n'ont ni `call`/`jp` absolu en ROM qui les désigne ; le
+mécanisme (retours par la pile concrète, registres IX/IY/BC, ou lecture de table) reste **non localisé**. Il faut une instrumentation de provenance par nœud
+de la fermeture Sega (qui a mis ce nœud en file, par quelle règle) ; non faite.
