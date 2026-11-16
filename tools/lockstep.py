@@ -60,7 +60,7 @@ def main():
         denv[k] = v
     state = os.path.join(work, "state")
     subprocess.run(["rm", "-rf", state])
-    subprocess.run([a.deepeel, "explore", a.rom, "--play", "--tas-solo", "--jobs", "1",
+    subprocess.run([a.deepeel, "explore", a.rom, "--jobs", "1",
                     "--state-dir", state, "--tas", a.movie], env=denv,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1200)
     th.join(timeout=5)

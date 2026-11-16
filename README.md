@@ -53,51 +53,21 @@ SDL2 est optionnel (`-DBUILD_GUI=OFF` pour s'en passer).
 ## Usage
 
 ```bash
-deepeel explore rom.gb [--gui] [--json map.json] [--text report.txt] [--cov out.cov]
-deepeel explore rom.gb --max-total 50000000 --queue 16384 --covered-keep 8 --seed-banks
-deepeel explore rom.gb --entry 2:4000        # graine supplémentaire banque 2, $4000
-
-# sessions jouées (m0boy : inputs aléatoires + attract, 10 threads, pool de
-# checkpoints, scheduler d'époques, persistance --state-dir/--resume)
-deepeel explore rom.gb --play --frames 72000 --state-dir s --cov jeu.cov --romdata jeu.prof
-deepeel explore rom.gb --play --resume --state-dir s
-# TAS : rejoue un movie tool-assisté (VBA .vmv/.vbm, BizHawk .bk2, log texte) —
-# un worker par fichier ; le TAS est prioritaire sur tout budget (frames,
-# segments, stagnation), le film est joué en entier jusqu'au bout du jeu,
-# puis le worker passe en jeu aléatoire
-deepeel explore rom.gb --play --tas supermarioland.bk2 --frames 18000
-# découverte des films : tous les fichiers-movies d'un répertoire (8 max,
-# meilleure ressemblance de titre d'abord), plus besoin de les nommer un à un
-deepeel explore rom.gb --play --tas-dir output/tas --tas-solo
-# murs de ressource : arrêt gracieux (pool sauvegardé, --resume reprend) après
-# N secondes de jeu (films TAS compris) ou une fois le RSS au-dessus de MB MiB
-deepeel explore rom.gb --play --time-limit 1800 --mem-cap 2000
-# profil compact de la passe : résumé carte + liste complète des plages
-# résiduelles + tous les compteurs (l'entrée de l'agrégation multi-ROMs)
-deepeel explore rom.gb --play --summary run.summary.json
-# fenêtre de surveillance seule (SDL2) : l'écran du film échantillonné à
-# 1..30 images/s (défaut 30), sans ralentir le TAS ; Tab = film suivant
-deepeel explore rom.gb --play --tas film.vbm --watch 10
-# export jouable : ecrit le checkpoint choisi (le plus productif, ou
-# --export-slot N) en slot 0 du <SD>.STA du projet pc m0boy — le firmware
-# pc le propose au menu (Etat -> Charger l'etat) et boote dessus avec
-# M0_STATE=0 ; le .SAV batterie suit quand la cartouche a de la RAM
-deepeel explore rom.gb --play --frames 6000 --export-playable chemin/vers/projet_pc
-# mode humain : une lane jouable au pad, chaque avancée sauvée en PNG (écran +
-# machine complète, rechargeable --from-png) et explorée automatiquement
-deepeel explore rom.gb --play --gui --human
+deepeel explore rom.gb [--text report.txt] [--summary run.json] [--cov out.cov] [--map out.png]
+deepeel explore rom.gb --max-total 50000000 --entry 2:4000   # mur global de pas ; graine banque 2, $4000
+deepeel explore rom.gb --unbounded --state-dir s             # sans plafond ; le surplus va sur disque
+deepeel explore rom.gb --resume --state-dir s                # reprend l'exploration sauvegardée
+deepeel explore rom.gb --tas film.bk2                        # rejoue un film (VBA .vmv/.vbm, BizHawk .bk2, log texte)
+deepeel explore rom.gb --watch 10 --mapwin 2                 # fenêtres SDL2 : écran échantillonné, carte vivante
 deepeel map rom.gb                           # carte statique seule (pointeurs, padding)
 deepeel regs gb                              # dump du registre matériel GB
 deepeel regs msx                             # registre MSX1 ; pont machine en cours
 deepeel dis rom.gb 2:4000 12                 # désassemblage banque 2, $4000
 ```
 
-Options d'exploration : `--max-steps` (par chemin), `--max-paths`,
-`--max-total` (mur global de pas), `--queue` + `--queue-max` (la file pleine
-**double** jusqu'au plafond au lieu de jeter des chemins entiers ; la
-croissance s'arrête au mur `--mem-cap` et chaque croissance est comptée),
-`--loop-cap`, `--seed-cap`, `--seed-banks`, `--closure-rounds` (défaut 12),
-`--covered-keep`, `--no-pointer-scan`, `--no-closure`, `--no-provenance`, `--no-siblings`, `--no-context-evict`, `--no-irq-fork`, `--no-key-fork`, `--no-p1-fork` (sondes manette : presses par IRQ joypad et lectures directes de `$FF00`).
+Le noyau générique (`src/explore/core.c`) est le seul moteur ; les options du moteur
+GB historique (`--play`, `--queue`, `--gui`, `--human`, `--closure-rounds`…) sont retirées
+(0.372.0) : acceptées et ignorées avec une ligne sur stderr.
 
 La **provenance statique** (portage de la branche z80) prouve sans machine
 les cibles des `jp hl` (chargements immédiats, tables parcourues pointeur en

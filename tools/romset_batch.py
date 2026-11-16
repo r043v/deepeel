@@ -282,13 +282,11 @@ def process(e, cat, a):
         movies = fetch_movies(hits, os.path.join(tmp, "tas")) if hits else []
         meta["movies"] = [{k: m[k] for k in ("id", "status", "name", "title", "sub_frames")} for m in movies]
         summ = os.path.join(res_dir, "summary.json")
-        base = [a.binary, "explore", zpath, "--play", "--unbounded", "--jobs", str(a.jobs),
+        base = [a.binary, "explore", zpath, "--unbounded", "--jobs", str(a.jobs),
                 "--state-dir", state, "--summary", summ, "--text", os.path.join(res_dir, "report.txt"),
-                "--map", os.path.join(res_dir, "map.png"), "--closure-rounds", "12", "--seed-banks"]
+                "--map", os.path.join(res_dir, "map.png")]
         if a.sessions:
             base += ["--sessions", str(a.sessions)]
-        if a.queue:
-            base += ["--queue", str(a.queue), "--queue-max", str(a.queue)]   # no adaptive growth: bounded RAM   # states held in RAM before spilling to spool.bin
         if a.mapwin:
             base += ["--mapwin"]
         for m in movies:

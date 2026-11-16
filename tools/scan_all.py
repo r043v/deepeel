@@ -322,13 +322,7 @@ def cmd_scan(args):
 
         cmd = [
             binary, "explore", path,
-            "--play",
-            "--queue", "4096", "--queue-max", str(args.queue_max),
-            "--mem-cap", str(args.mem_cap),
-            "--spool-cap-mb", str(args.spool_cap_mb),
             "--jobs", str(args.jobs),
-            "--covered-keep", "8", "--seed-banks",
-            "--closure-rounds", "12",
             "--max-total", str(max_total_for(rom_banks(path))),
             "--time-limit", str(time_limit),
             "--summary", summary_path,
