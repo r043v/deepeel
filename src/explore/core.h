@@ -190,6 +190,7 @@ typedef struct DpCoreResult {
     uint64_t closure_reg_indirect;     // C3: indirect transfers resolved through a known register constant
     uint64_t closure_reg_indirect_sat; // C3: resolutions refused at an indirect site past the distinct-value cap
     uint64_t closure_reg_miss;         // C3: indirect transfers the walk left unresolved (register unknown)
+    uint64_t closure_reg_stackrets;    // C3: returns followed through the machine's concrete stack (SP fully known)
     uint64_t cells;             // distinct (fork target, RAM cell) pairs queued (technique 8)
     uint64_t proj_pruned;       // C11: forks evicted because the same target was already queued under the same projected context (registers + RAM pages the section reads)
     uint64_t cell_pruned;       // forced forks dropped because their (target, RAM cell) pair was already queued

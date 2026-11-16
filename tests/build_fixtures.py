@@ -1275,6 +1275,13 @@ def build_z80_family(out):
     rc[0x100] = 0x18; rc[0x101] = 0xFE   # jr * : the dispatch target hangs the machine there
     with open(os.path.join(out, "fix_z80_regclosure.sms"), "wb") as f:
         f.write(rc)
+    # C3 concrete-stack returns: the seeded walks enter the callee without having pushed its
+    # call, so only the machine's SP proves the continuation at $0003 across the two rets
+    sr = bytearray([0xFF]) * 0x8000
+    sr[0:len(bytes.fromhex("cd2000 18fe"))] = bytes.fromhex("cd2000 18fe")
+    sr[0x20:0x28] = bytes.fromhex("3a00c0 b7 c22800 c9 c9".replace(" ", ""))
+    with open(os.path.join(out, "fix_z80_stackret.sms"), "wb") as f:
+        f.write(sr)
     # C4 copy-table siblings: ld hl,($0040) reads the first word of a pointer table, a ld/inc loop copies 16 bytes from it;
     # the other two entries point at same-length siblings nothing touches
     sb = bytearray([(i * 7 + 3) & 0xFF if i % 5 else 0x55 for i in range(0x8000)])

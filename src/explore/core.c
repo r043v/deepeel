@@ -393,7 +393,12 @@ typedef struct { RegWalk *rw; ClosureView v; const uint32_t *bk; } ProvCtx;
 static int closure_prov_read(void *ctx, uint32_t addr, uint8_t *v) {
     ProvCtx *c = ctx;
     int64_t k = cview_index(&c->v, c->rw->r, addr, *c->bk);
-    if (k < 0 || (size_t)k >= c->rw->rom_size) return 0;
+    if (k < 0 || (size_t)k >= c->rw->rom_size) {
+        // not ROM: the machine's RAM still answers (a pop or a read through a
+        // concrete stack pointer) — no data proof is recorded for it
+        if (c->v.m && c->v.m->fetch) { *v = c->v.m->fetch(c->v.m, addr); return 1; }
+        return 0;
+    }
     if (!(c->rw->provd[k >> 3] & (0x80u >> (k & 7)))) {
         c->rw->provd[k >> 3] |= (uint8_t)(0x80u >> (k & 7));
         c->rw->r->prov_data_bytes++;
@@ -412,6 +417,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
     // seeded walk starts from the concrete CPU registers, a plain one from all-unknown)
     DpRegState rg[256], regs;
     int have_regs = regs0 != NULL && isa->reg_effect != NULL;
+    unsigned spw = isa->sp_width, spmask = spw ? (1u << spw) - 1 : 0;   // the modeled stack: slot and word size
     if (regs0) regs = *regs0; else dp_regstate_clear(&regs);
 #define CLOSURE_POP() do { sp--; cr = rets[sp]; thru = 0; pc = stack[sp][0]; bk = stack[sp][1]; trust = stack[sp][2]; acc_known = 0; regs = rg[sp]; \
         if (stack[sp][3] && budget < CLOSURE_INSTR / 8) budget = CLOSURE_INSTR / 8;   /* a simulated view gets its own bounded budget */ \
@@ -529,6 +535,41 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
                 if (indirect_ok) r->closure_reg_indirect++;
             } else r->closure_reg_miss++;
         }
+        // C3: the concrete-stack return (the Sega closure's returns_resolved).
+        // A seeded walk enters routines without having pushed their call: when
+        // the walk carries a fully known SP (the machine's own stack), a `ret`
+        // takes its continuation from the address the machine holds there.  The
+        // entry state is read before reg_effect: the pop address is the SP the
+        // instruction sees.  Per-site cap as for the indirect resolutions;
+        // untrusted continuation (the path may have drifted from the machine's).
+        if (spw && cr.n == 0 && (f.kind == DP_FLOW_RET || (f.kind == DP_FLOW_COND && f.target < 0)) &&
+            (regs.known[isa->sp_slot] & spmask) == spmask && v->m) {
+            uint32_t svm = spw >= 4 ? 0xFFFFFFFFu : (1u << (8 * spw)) - 1;
+            uint32_t spv = regs.v[isa->sp_slot] & svm;
+            uint32_t ra = 0;
+            for (unsigned i = 0; i < spw; i++) ra |= (uint32_t)v->m->fetch(v->m, (uint32_t)(spv + i)) << (8 * i);   // little-endian stack
+            DpRegState rs = regs;
+            rs.v[isa->sp_slot] = (regs.v[isa->sp_slot] & ~svm) | ((spv + spw) & svm);
+            int64_t kt = cview_index(v, r, ra, bk);
+            if (f.kind == DP_FLOW_RET) {
+                if (kt < 0) r->closure_unresolved++;   // not a mapped ROM address: counted, never followed
+                else if (rw && !rw->cfg->unbounded && rw->ind_vals[(uint32_t)k & rw->mask] >= REG_IND_CAP) r->closure_reg_indirect_sat++;
+                else {
+                    if (rw) rw->ind_vals[(uint32_t)k & rw->mask]++;
+                    r->closure_reg_stackrets++;
+                    regs = rs;
+                    pc = ra; trust = 0; thru = 1; continue;
+                }
+            } else if (kt >= 0 && sp < 256) {   // ret cc: the taken side pops and jumps, the walk goes on past it
+                if (rw && !rw->cfg->unbounded && rw->ind_vals[(uint32_t)k & rw->mask] >= REG_IND_CAP) r->closure_reg_indirect_sat++;
+                else {
+                    if (rw) rw->ind_vals[(uint32_t)k & rw->mask]++;
+                    rets[sp] = cr; stack[sp][0] = ra; stack[sp][1] = bk; stack[sp][2] = 0; stack[sp][3] = (uint32_t)cur; rg[sp] = rs; sp++;
+                    r->closure_reg_stackrets++;
+                }
+            } else if (kt < 0) r->closure_unresolved++;
+            else r->closure_stack_dropped++;
+        }
         if (have_regs && isa->reg_effect) {   // the constants survive per the ISA's transfer table
             DpRegState nxt;
             isa->reg_effect(b, pc, &regs, &nxt, &rom);
@@ -544,6 +585,10 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
                     rets[sp].pc[cr.n] = pc + f.length; rets[sp].bk[cr.n] = bk; rets[sp].trust[cr.n] = trust; rets[sp].n = cr.n + 1;
                 }
                 stack[sp][0] = (uint32_t)tgt; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)cur; rg[sp] = regs; sp++;
+                if (f.kind == DP_FLOW_CALL && spw && (rg[sp - 1].known[isa->sp_slot] & spmask) == spmask) {   // the callee runs with the return address pushed
+                    uint32_t svm = spw >= 4 ? 0xFFFFFFFFu : (1u << (8 * spw)) - 1;
+                    rg[sp - 1].v[isa->sp_slot] = (rg[sp - 1].v[isa->sp_slot] & ~svm) | ((rg[sp - 1].v[isa->sp_slot] - spw) & svm);
+                }
             }
             else r->closure_stack_dropped++;   // a root lost to the fixed stack is counted, never silent
         }
@@ -2734,6 +2779,7 @@ cleanup:
         out->exec_outside += l->exec_outside; out->exec_wram_rom += l->exec_wram_rom; dp_ramarch_merge(&out->ra, &l->ra);
         out->closure_reg_roots += l->closure_reg_roots; out->closure_reg_seed_sat += l->closure_reg_seed_sat; out->closure_reg_set_sat += l->closure_reg_set_sat;
         out->closure_reg_indirect += l->closure_reg_indirect; out->closure_reg_indirect_sat += l->closure_reg_indirect_sat; out->closure_reg_miss += l->closure_reg_miss;
+        out->closure_reg_stackrets += l->closure_reg_stackrets;
         free(l->jp_seen); l->jp_seen = NULL; free(ws[i].visits); free(ws[i].wsnap); free(ws[i].winmemo); free(ws[i].capped); free(ws[i].stamp);
         if (ws[i].regwalk) { free(ws[i].regwalk->set); free(ws[i].regwalk->site_seeds); free(ws[i].regwalk->ind_vals); free(ws[i].regwalk->provd); free(ws[i].regwalk); }
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
@@ -2898,8 +2944,8 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     for (size_t i = 0; i < r->rom_size; i++) if ((r->flags[i] & (DP_CORE_STATIC | DP_CORE_NATURAL | DP_CORE_FORCED)) == DP_CORE_STATIC) stat_only++;
     fprintf(out, "speculative gaps: %llu runs, %llu bytes (never counted as known); %llu runs reinforced by an immediate reference (%llu references seen)\n", U(r->spec_runs), U(r->spec_bytes), U(r->spec_ref_runs), U(r->imm_refs));
     fprintf(out, "static closure: roots %llu, bytes %llu, static-only %zu, capped walks %llu, returns followed %llu\n", U(r->closure_roots), U(r->closure_bytes), stat_only, U(r->closure_capped), U(r->closure_rets));
-    if (r->closure_regs) fprintf(out, "closure registers (C3): seed walks %llu, indirect resolved %llu, indirect unresolved %llu, indirect site cap %llu, seeds refused (site cap %llu, set full %llu)\n",
-        U(r->closure_reg_roots), U(r->closure_reg_indirect), U(r->closure_reg_miss), U(r->closure_reg_indirect_sat), U(r->closure_reg_seed_sat), U(r->closure_reg_set_sat));
+    if (r->closure_regs) fprintf(out, "closure registers (C3): seed walks %llu, indirect resolved %llu, indirect unresolved %llu, stack returns %llu, indirect site cap %llu, seeds refused (site cap %llu, set full %llu)\n",
+        U(r->closure_reg_roots), U(r->closure_reg_indirect), U(r->closure_reg_miss), U(r->closure_reg_stackrets), U(r->closure_reg_indirect_sat), U(r->closure_reg_seed_sat), U(r->closure_reg_set_sat));
     if (r->inferred) fprintf(out, "static inference: padding %llu, gap code %llu, gap pad %llu, gap data %llu, copy tables %llu (%llu sibling bytes, %llu refused as code), jump tables %llu (%llu bytes)\n", U(r->padding_bytes), U(r->inferred_code), U(r->inferred_pad), U(r->inferred_data), U(r->sib_tables), U(r->sib_bytes), U(r->sib_refused), U(r->jt_tables), U(r->jt_bytes));
     if (r->closure_jp_entries) fprintf(out, "provenance: %llu jp-hl targets, %llu data bytes static\n", U(r->closure_jp_entries), U(r->prov_data_bytes));
     if (r->closure_jp_tables) fprintf(out, "S4 operand tables of executed JP HL: %llu tables, %llu entries\n", U(r->closure_jp_tables), U(r->closure_jp_entries));
