@@ -1133,6 +1133,29 @@ static unsigned table_proven_len(DpMachine *m, const DpIsa *isa, uint32_t pc, in
         }
         return 0;
     }
+    if (!strcmp(isa->name, "68000")) {
+        // `lea abs.l,An` / `lea d16(pc),An` from a ROM base: a table of long code pointers while the longs designate even ROM addresses
+        for (unsigned i = 0; i + 5 < 16; i += 2) {
+            uint32_t w = (uint32_t)m->fetch(m, pc + len + i) << 8 | m->fetch(m, pc + len + i + 1);
+            uint32_t base;
+            if ((w & 0xF1FF) == 0x41F9)
+                base = ((uint32_t)m->fetch(m, pc + len + i + 2) << 24 | (uint32_t)m->fetch(m, pc + len + i + 3) << 16 |
+                        (uint32_t)m->fetch(m, pc + len + i + 4) << 8 | m->fetch(m, pc + len + i + 5)) & 0xFFFFFF;
+            else if ((w & 0xF1FF) == 0x41FA)
+                base = (pc + (uint32_t)len + i + 2 + (uint32_t)(int32_t)(int16_t)((m->fetch(m, pc + len + i + 2) << 8) | m->fetch(m, pc + len + i + 3))) & 0xFFFFFF;
+            else continue;
+            if (m->rom_index(m, base) < 0) continue;
+            unsigned n = 0;
+            while (n < 128) {
+                uint32_t a4 = base + 4u * n;
+                uint32_t t = ((uint32_t)m->fetch(m, a4) << 24 | (uint32_t)m->fetch(m, a4 + 1) << 16 | (uint32_t)m->fetch(m, a4 + 2) << 8 | m->fetch(m, a4 + 3)) & 0xFFFFFF;
+                if ((t & 1u) || t < isa->code_min || m->rom_index(m, t) < 0) break;
+                n++;
+            }
+            return n >= 2 ? n : 0;
+        }
+        return 0;
+    }
     if (strcmp(isa->name, "z80") && strcmp(isa->name, "sm83")) return 0;
     for (unsigned i = 0; i < 13; i++) {
         if (m->fetch(m, pc + len + i) != 0x21) continue;
