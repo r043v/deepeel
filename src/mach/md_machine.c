@@ -166,7 +166,8 @@ static int md_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *
         free(pre);
         return 1;
     }
-    if (k >= sizeof pads / sizeof *pads) return 0;
+    uint32_t nfull = m->pad_full ? dp_pad_count(m->input_bits | (m->pad_full > 1 ? m->input_bits_ext : 0)) : 0;
+    if (k >= (nfull ? nfull : sizeof pads / sizeof *pads)) return 0;
     uint8_t *pre = malloc(md_state_bytes(m));
     if (!pre) return 0;
     m->save(m, pre);
@@ -175,7 +176,7 @@ static int md_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *
     w->pad_armed = 0;
     int hit = w->pad_seen;
     m->load(m, pre);
-    if (hit) { md_set_input(m, pads[k]); m->save(m, save); m->load(m, pre); }
+    if (hit) { md_set_input(m, nfull ? dp_pad_subset(m->input_bits | (m->pad_full > 1 ? m->input_bits_ext : 0), k) : pads[k]); m->save(m, save); m->load(m, pre); }
     free(pre);
     return hit;
 }
@@ -240,6 +241,7 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->name = "md";
     m->work_ram_base = 0xFF0000u; m->work_ram_len = 0x10000u;
     m->ram_index = md_ram_index; m->ram_addr = md_ram_addr; m->ram_size = 0x20000u;
+    m->input_bits = 0x17F; m->input_bits_ext = DP_IN_X | DP_IN_Y | DP_IN_Z | DP_IN_MODE;   // d-pad, A B C, Start; the six-button keys
     m->impl = w;             // the 68000 DpIsa wrapper is not extracted yet
     m->state_bytes = md_state_bytes;
     m->save = md_save;

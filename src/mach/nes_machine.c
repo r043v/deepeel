@@ -184,6 +184,7 @@ DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err
     if (!w || !m) { dp_nesmach_close(impl); free(w); free(m); return NULL; }
     w->m = impl;
     m->name = "nes";
+    m->input_bits = 0xFF;   // d-pad, A, B, Start, Select
     m->work_ram_base = 0; m->work_ram_len = 0x800u;
     m->bank_shift = 14; m->code_base = 0x8000u; m->fixed_high = 1;   // C3/B8: 16 KiB PRG windows, the last bank fixed high
     m->save_ram_base = 0x6000u; m->save_ram_len = 0x2000u;
@@ -224,12 +225,12 @@ static int nes_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t 
     if ((bytes[0] == 0xAD || bytes[0] == 0xBD || bytes[0] == 0x8D || bytes[0] == 0x8E || bytes[0] == 0x8C) && bytes[1] == 0x16 && bytes[2] == 0x40) {   // read or strobe write of the controller port
         // controller read (LDA $4016 / LDA $4016,X): one button held from here on per alternative (as the Sega pad probe)
         static const uint32_t pads[] = { 0x10, 0x20, 0x40, 0x01, 0x02, 0x04, 0x08, 0x80 };   // C12: + Select
-        int full = user != NULL;   // --pad-full (D10): every one of the 256 port-1 masks at each strobe site
-        if (k >= (full ? 256u : sizeof pads / sizeof *pads)) return 0;
+        int full = m->pad_full != 0;   // --pad-full (D10): every port-1 mask at each strobe site
+        if (k >= (full ? dp_pad_count(m->input_bits) : sizeof pads / sizeof *pads)) return 0;
         uint8_t *tmp = malloc(m->state_bytes(m));
         if (!tmp) return 0;
         m->save(m, tmp);
-        m->set_input(m, full ? (uint32_t)k : pads[k]);
+        m->set_input(m, full ? dp_pad_subset(m->input_bits, k) : pads[k]);
         m->save(m, save);
         m->load(m, tmp);
         free(tmp);
@@ -276,9 +277,7 @@ static int nes_irq_alt(void *user, DpMachine *m, unsigned delay, uint8_t *save) 
     free(tmp); free(off);
     return ok;
 }
-const DpPlatformHooks *dp_machine_nes_hooks_full(int pad_full) {
+const DpPlatformHooks *dp_machine_nes_hooks(void) {
     static const DpPlatformHooks h = { .event_probe = nes_event_probe, .irq_alt = nes_irq_alt };
-    static const DpPlatformHooks hf = { .user = (void *)1, .event_probe = nes_event_probe, .irq_alt = nes_irq_alt };
-    return pad_full ? &hf : &h;
+    return &h;
 }
-const DpPlatformHooks *dp_machine_nes_hooks(void) { return dp_machine_nes_hooks_full(0); }

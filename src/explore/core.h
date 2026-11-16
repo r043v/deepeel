@@ -74,6 +74,7 @@ typedef struct DpCoreConfig {
     // leaves SP; needs DpMachine.seed_regs, else counted in seed_regs_absent.
     const DpSeedRegs *seed_regs;
     int no_event_probes;
+    unsigned pad_full;        // D10: 1 probes every pad mask at each pad-read site, 2 also the extended (six-button) keys
     int no_auto_seed;          // B10: off switch of the automatic cart-RAM seeding
     int no_tas_ckpt;           // A22/B3: off switch of the movie checkpoints
     unsigned ckpt_burst_frames;  // B3: frames of a random-pad burst run from each session checkpoint (0: none)

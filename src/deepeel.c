@@ -38,8 +38,8 @@ int dp_gbs_fetch(const char *game, const char *dir, char *out_gbs, size_t cap, c
 #include "platform/sega/sega.h"
 #include "platform/msx/msx.h"
 #include "platform/sega/explore.h"
-#include "platform/md/explore.h"
 #include "platform/md/md_registry.h"
+#include "mach/mdmach.h"
 #include "cpu/m68k/m68k.h"
 #include "platform/nes/explore.h"
 #include "platform/pce/explore.h"
@@ -1786,7 +1786,6 @@ static int cmd_nes(int argc, char **argv) {
         else if (!strcmp(a, "--bank-dispatch")) opt.second_pass = opt.bank_dispatch = 1;
         else if (!strcmp(a, "--no-p1-fork")) opt.no_pad_probe = 1;
         else if (!strcmp(a, "--no-event-probes")) opt.event_probes = 0;
-        else if (!strcmp(a, "--pad-full")) opt.pad_full = 1;
         else if (!strcmp(a, "--entry") && i + 1 < argc && opt.entry_count < 32) {
             uint16_t eb, ea;
             if (!parse_entry(argv[++i], &eb, &ea) || eb > 255) { fprintf(stderr, "deepeel: bad --entry '%s' (bank:addr)\n", argv[i]); return 2; }
@@ -1850,7 +1849,7 @@ static int cmd_nes(int argc, char **argv) {
         if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
         if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
         if (opt.queue_max) kcfg.queue_max = opt.queue_max;
-        kcfg.hooks = dp_machine_nes_hooks_full(opt.pad_full);
+        kcfg.hooks = dp_machine_nes_hooks();
         DpMovie kmov; memset(&kmov, 0, sizeof kmov);
         if (opt.tas_count > 0) {   // first movie replays in the kernel (m->frame counts the frames)
             char terr[160] = "";
@@ -2139,43 +2138,6 @@ static void md_regs_print(void) {
                dp_md_regs[i].category);
 }
 
-/* per-movie output path in a --tas-dir chain: <dir-of-base>/<i>-<movie name><ext of base> */
-static void md_movie_output_path(char *out, size_t cap, const char *base, int idx, const char *movie) {
-    const char *ext = strrchr(base, '.'), *b = strrchr(movie, '/');
-    b = b ? b + 1 : movie;
-    if (ext && ext != base)
-        snprintf(out, cap, "%.*s/%02d-%s%s", (int)(ext - base), base, idx + 1, b, ext);
-    else
-        snprintf(out, cap, "%s/%02d-%s", base, idx + 1, b);
-}
-
-/* the reference tile: tools/md_ref_live (ClownMDEmu, the reference core of
- * tools/md_compare_reference) replays the same movie into the shared feed
- * (DEEPEEL_MD_REF_FEED, the GB VBA harness pattern); spawned per movie, killed
- * when the explorer moves on — the two cores run at their own pace and the
- * window shows each tile's speed separately */
-static const char *md_ref_live_path(void) {
-    const char *env = getenv("DP_MD_REF_LIVE");
-    if ((env && !strcmp(env, "none")) || getenv("DEEPEEL_REF_FEED") || getenv("DEEPEEL_MD_REF_FEED")) return NULL;   // an external reference feed (tools/watch_bizhawk.sh) is already wired   // another reference feed (BizHawk) is wired by the caller
-    if (env && *env) return env;
-    static char p[600];
-    ssize_t n = readlink("/proc/self/exe", p, sizeof p - 1);
-    if (n > 0) {
-        p[n] = 0;
-        char *s = strrchr(p, '/');
-        if (s) { snprintf(s + 1, (size_t)(sizeof p - (size_t)(s + 1 - p)), "md_ref_live"); if (!access(p, X_OK)) return p; }
-    }
-    snprintf(p, sizeof p, "build/md-reference/md_ref_live");
-    if (!access(p, X_OK)) return p;
-    return NULL;
-}
-
-static int md_has_core(int argc, char **argv) {
-    int core = getenv("DEEPEEL_LEGACY") == NULL;   // C9: kernel by default; an explicit flag wins over the environment
-    for (int i = 4; i < argc; i++) { if (!strcmp(argv[i], "--legacy")) core = 0; else if (!strcmp(argv[i], "--core")) core = 1; }
-    return core;
-}
-
 static int cmd_md(int argc, char **argv) {
     const char *md_rtcode = NULL;
     if (argc < 4) return usage(), 2;
@@ -2196,14 +2158,18 @@ static int cmd_md(int argc, char **argv) {
             printf("%06X  %s\n", pc, in.text);
             pc += len ? len : 2;
         }
-    } else if (!strcmp(argv[2], "explore") && md_has_core(argc, argv)) {
+    } else if (!strcmp(argv[2], "explore")) {
         DpCoreConfig kcfg; dp_core_config_default(&kcfg);
         kcfg.max_path_steps = 50000000;   // boot clears RAM/VRAM with millions of dbf iterations before the first interrupt is unmasked
         kcfg.hooks = dp_machine_md_hooks();
         kcfg.visits_per_pc = 2000000;   // the header checksum loop runs ROM-size/2 iterations (Sonic 1: 262144): the old 262144 cap cut it one short; was 262144 at 2 M steps: natural 32 bytes at 64 visits, 126 at 262144 (old engine ~134)
-        const char *md_core_tas = NULL, *md_kdump = NULL; int md_kwatch = 0;
+        const char *md_core_tas = NULL, *md_kdump = NULL; int md_kwatch = 0; uint32_t md_entry[16]; size_t md_ne = 0;
         for (int i = 4; i < argc; i++) {
             if (!strcmp(argv[i], "--tas") && i + 1 < argc) { md_core_tas = argv[++i]; continue; }
+            if (!strcmp(argv[i], "--entry") && i + 1 < argc) {   // an extra root, a 24-bit address
+                if (md_ne >= 16) { fprintf(stderr, "deepeel: at most 16 --entry\n"); rc = 2; break; }
+                md_entry[md_ne++] = (uint32_t)strtoul(argv[++i], NULL, 0); continue;
+            }
             int used = dp_core_parse_option(&kcfg, argc, argv, i);
             if (used) { i += used - 1; continue; }
             if (!strcmp(argv[i], "--watch-dump") && i + 1 < argc) { md_kdump = argv[++i]; if (!kcfg.watch_every) kcfg.watch_every = 2; continue; }
@@ -2222,7 +2188,10 @@ static int cmd_md(int argc, char **argv) {
         DpMachine *km = mm ? dp_machine_md(mm) : NULL;
         if (km) dp_machine_md_source(km, c.rom, c.size);
         kcfg.rom_image = c.rom; kcfg.rom_image_size = c.size;   // B8 on the linear ROM
-        if (!km) { fprintf(stderr, "deepeel: --core: cannot open the ROM\n"); rc = 1; }
+        DpMusicKernelSeeds mks = {0}; DpSeedSet kseeds = {0};
+        if (!rc && km && seedset_build(&kcfg, &mks, md_entry, NULL, md_ne, 0, &kseeds)) { km->close(km); km = NULL; }
+        if (rc) { if (km) km->close(km); }
+        else if (!km) { fprintf(stderr, "deepeel: md: cannot open the ROM\n"); rc = 1; }
         else {
             DpMovie kmov; memset(&kmov, 0, sizeof kmov);
             if (md_core_tas) {   // GMV / BK2 pads -> kernel mask
@@ -2239,247 +2208,8 @@ static int cmd_md(int argc, char **argv) {
             dp_core_result_free(&kr);
             dp_movie_free(&kmov);
             km->close(km);
+            seedset_free(&kseeds);
         }
-    } else if (!strcmp(argv[2], "explore")) {
-        DpMdOptions o;
-        int md_any_rom = 0;
-        DpCliCommon cc = { .jobs = 1 };
-        int md_unbounded = 0;
-        dp_md_options_default(&o);
-        o.fork_cap = DP_DEFAULT_BRANCH_FORK_CAP;
-        o.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
-        const char *movie_path = NULL, *md_heat = NULL, *md_tas_dir = NULL;
-        for (int i = 4; i < argc; i++) {
-            const char *a = argv[i];
-            if (i + 1 >= argc && strcmp(a, "--lot-drain") && strcmp(a, "--unbounded")) { fprintf(stderr, "deepeel: bad option %s\n", a); rc = 2; break; }
-            if (0) {}
-            DP_CLI_COMMON(o, cc)
-            else if (!strcmp(a, "--path-steps")) o.path_steps = strtoull(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--unbounded")) md_unbounded = 1;
-            else if (!strcmp(a, "--cut-padding")) o.pad_cut = 1;
-            else if (!strcmp(a, "--no-cut-padding")) o.pad_cut = 0;
-            else if (!strcmp(a, "--seed-vectors")) o.seed_vectors = 1;
-            else if (!strcmp(a, "--bank-dispatch")) o.bank_dispatch = 1;
-            else if (!strcmp(a, "--exact-dedup")) o.exact_dedup = 1;
-            else if (!strcmp(a, "--ctx-live")) o.ctx_live = 1;
-            else if (!strcmp(a, "--defer-tiers") && i + 1 < argc) {
-                o.defer_tiers = (unsigned)strtoul(argv[++i], NULL, 0);
-                if (o.defer_tiers > DP_TIER_MAX) o.defer_tiers = DP_TIER_MAX;
-            }
-            else if (!strcmp(a, "--pad-full")) o.pad_full = 1;
-            else if (!strcmp(a, "--pad-full6")) o.pad_full = o.pad_full6 = 1;
-            else if (!strcmp(a, "--entry")) {
-                if (o.entry_count >= 16) { fprintf(stderr, "deepeel: at most 16 --entry\n"); rc = 2; break; }
-                o.entries[o.entry_count++] = (uint32_t)strtoul(argv[++i], NULL, 0);
-            }
-            else if (!strcmp(a, "--queue-max")) o.queue_max = (uint32_t)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--fork-cap")) o.fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--visit-cap")) o.visit_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--watch-write")) o.watch_write = (uint32_t)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--exclude-read-pc")) o.exclude_read_pc = (uint32_t)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--tas")) movie_path = argv[++i];
-            else if (!strcmp(a, "--tas-dir") && i + 1 < argc) md_tas_dir = argv[++i];
-            else if (!strcmp(a, "--demo-frames")) o.demo_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--attract-frames")) o.demo_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--play-frames")) o.play_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--play-sessions")) o.play_sessions = (uint32_t)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--play-seed")) o.play_seed = (uint32_t)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--play-pool")) o.play_pool = (uint32_t)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--shoot-every")) o.shoot_every = (uint32_t)strtoul(argv[++i], NULL, 0);
-            else if (!strcmp(a, "--tas-any-rom")) md_any_rom = 1;
-            else if (skip_mapwin(argc, argv, &i)) {}
-            else if (!strcmp(a, "--heat")) md_heat = argv[++i];   // --summary/--cov/--romdata come from DP_CLI_COMMON
-            else { fprintf(stderr, "deepeel: unknown option %s\n", a); rc = 2; break; }
-        }
-        const char *text = cc.text, *map = cc.map, *ev = cc.evidence, *md_dump = cc.dump; md_rtcode = cc.rtcode;
-        int md_jobs = cc.jobs, md_watch = cc.watch; unsigned md_time_limit = cc.time_limit;
-        const char *movies[64];
-        int nmovies = 0;
-        if (!rc && movie_path) movies[nmovies++] = movie_path;
-        if (!rc && md_tas_dir)   // the movie chain: every replay is whole, the window moves to the next when one ends
-            tas_collect_dir(md_tas_dir, c.overseas, movies, &nmovies, (int)(sizeof movies / sizeof *movies));
-        if (!rc && !nmovies) movies[nmovies++] = NULL;   // plain exploration, no movie: one report as before
-        if (nmovies > 1) {   // per-movie outputs live in the directory of the requested file
-            mkdir(cc.summary, 0777);   // a missing --summary directory would silently lose the summaries
-            if (md_watch && !o.watch_every) o.watch_every = 2;   // the progress caption needs published frames
-        }
-        const char *reflive = md_watch ? md_ref_live_path() : NULL;
-        char feedpath[512];
-        if (reflive) {   // the window picks the feed up by name (dp_fb_ref_active)
-            { const char *td = getenv("TMPDIR"); snprintf(feedpath, sizeof feedpath, "%s/deepeel-md-ref-%d.bin", td && *td ? td : "/tmp", (int)getpid()); }
-            setenv("DEEPEEL_MD_REF_FEED", feedpath, 1);
-            {   // the reference core's name with its version (git revision of its tree, next to this checkout)
-                char dir[600], cmd[800], rev[40] = "";
-                const char *cd = getenv("CLOWN_MD_DIR");
-                if (cd) snprintf(dir, sizeof dir, "%s", cd);
-                else { snprintf(dir, sizeof dir, "%s", reflive); char *q = strstr(dir, "/build/md-reference/"); if (q) { *q = 0; strncat(dir, "/../clownmdemu-core", sizeof dir - strlen(dir) - 1); } else dir[0] = 0; }
-                snprintf(cmd, sizeof cmd, "git -C '%s' rev-parse --short HEAD 2>/dev/null", dir);
-                FILE *gp = dir[0] ? popen(cmd, "r") : NULL;
-                if (gp) { if (fgets(rev, sizeof rev, gp)) rev[strcspn(rev, "\n")] = 0; pclose(gp); }
-                char nm[80]; snprintf(nm, sizeof nm, "ClownMDEmu%s%s", rev[0] ? " " : "", rev);
-                setenv("DEEPEEL_MD_REF_NAME", nm, 1);
-            }
-        } else if (md_watch && !getenv("DEEPEEL_REF_FEED") && !getenv("DEEPEEL_MD_REF_FEED"))
-            fprintf(stderr, "deepeel: md watch: no reference tile (build it with tools/md_ref_live.sh)\n");
-        if (md_watch) dp_fbwatch_start("deepeel md watch");
-        int md_failed = 0;
-        for (int mi = 0; !rc && mi < nmovies && !md_failed; mi++) {
-            DpMdMovie movie = {0};
-            if (movies[mi] && !dp_md_movie_load(movies[mi], &movie, err, sizeof err)) {
-                fprintf(stderr, "deepeel: GMV %s: %s\n", movies[mi], err);
-                continue;
-            }
-            if (movie.has_md5) {
-                uint8_t h[16]; dp_md5(c.rom, c.size, h);
-                /* BizHawk's Genesis header hash is not a reliable ROM digest (a movie that
-                 * replays to its last frame can carry a different value): warn, never refuse */
-                if (!md_any_rom && memcmp(h, movie.md5, 16))
-                    fprintf(stderr, "deepeel: warning: BK2 header hash differs from the ROM MD5 "
-                            "(the replay will show whether the movie matches)\n");
-            }
-            { const char *wf = getenv("DEEPEEL_WATCH_FRAMES"); if (wf && *wf && movie.frames > (unsigned)atoi(wf)) movie.frames = (unsigned)atoi(wf); }   // stop the replay early (tools/watch_bizhawk.sh WATCH_FRAMES)
-            o.movie = &movie;
-            pid_t refpid = 0, hawkpid = 0, gpgxpid = 0;
-            const char *wf[3] = { NULL, NULL, NULL };   // feeds to wait on: every tile starts together
-            if (reflive && movies[mi]) {   // reset the feed, then the reference replays this movie
-                dp_md_ref_feed_open(feedpath, 1);
-                wf[0] = feedpath;
-                refpid = fork();
-                if (refpid == 0) {
-                    execl(reflive, reflive, argv[3], movies[mi], (char *)NULL);
-                    fprintf(stderr, "deepeel: md ref: exec %s failed\n", reflive);
-                    _exit(127);
-                }
-                if (refpid < 0) { fprintf(stderr, "deepeel: md ref: fork failed (no reference tile)\n"); refpid = 0; }
-            }
-            const char *gpgxexe = md_watch ? getenv("DP_MD_GPGX_LIVE") : NULL;   // tools/gpgx_lr_live: the standalone Genesis Plus GX libretro core
-            const char *gpgxcore = getenv("DP_GPGX_LR_CORE");
-            if (gpgxexe && gpgxcore && movies[mi]) {
-                char f3[560], mk3[560];
-                const char *td = getenv("TMPDIR");
-                snprintf(f3, sizeof f3, "%s/deepeel-md-gpgx-%d.bin", td && *td ? td : "/tmp", (int)getpid());
-                snprintf(mk3, sizeof mk3, "%s.masks", f3);
-                FILE *mf = fopen(mk3, "wb");
-                if (mf) { fwrite(movie.pads, 1, movie.frames, mf); fclose(mf); }
-                dp_md_ref_feed_open(f3, 1);
-                setenv("DEEPEEL_MD_REF3_FEED", f3, 1);
-                {   // the libretro core's own checkout: its release line and git revision
-                    char dir[600], cmd[700], rev[40] = ""; snprintf(dir, sizeof dir, "%s", gpgxcore);
-                    char *sl = strrchr(dir, '/'); if (sl) *sl = 0;
-                    snprintf(cmd, sizeof cmd, "git -C '%s' rev-parse --short HEAD 2>/dev/null", dir);
-                    FILE *gp = popen(cmd, "r");
-                    if (gp) { if (fgets(rev, sizeof rev, gp)) rev[strcspn(rev, "\n")] = 0; pclose(gp); }
-                    char nm[120]; snprintf(nm, sizeof nm, "Genesis Plus GX libretro%s%s", rev[0] ? " " : "", rev);
-                    setenv("DEEPEEL_MD_REF3_NAME", nm, 1);
-                }
-                wf[2] = f3;
-                gpgxpid = fork();
-                if (gpgxpid == 0) { execl(gpgxexe, gpgxexe, gpgxcore, argv[3], mk3, f3, (char *)NULL); _exit(127); }
-                if (gpgxpid < 0) gpgxpid = 0;
-            }
-            const char *hawkexe = md_watch ? getenv("DP_MD_BIZHAWK_LIVE") : NULL;   // tools/bizhawk_md_live: BizHawk's GPGX as the second tile
-            if (hawkexe && movies[mi]) {
-                char f2[560], mk[560];
-                const char *td = getenv("TMPDIR");
-                snprintf(f2, sizeof f2, "%s/deepeel-md-hawk-%d.bin", td && *td ? td : "/tmp", (int)getpid());
-                snprintf(mk, sizeof mk, "%s.masks", f2);
-                FILE *mf = fopen(mk, "wb");
-                if (mf) { fwrite(movie.pads, 1, movie.frames, mf); fclose(mf); }
-                dp_md_ref_feed_open(f2, 1);
-                setenv("DEEPEEL_MD_REF2_FEED", f2, 1);
-                {   // name the BizHawk checkout it runs (git describe)
-                    const char *bd = getenv("DP_BIZHAWK_DIR"); char cmd[600], ver[64] = "";
-                    snprintf(cmd, sizeof cmd, "git -C '%s' describe --tags --always 2>/dev/null", bd ? bd : "/home/m/dev/BizHawk");
-                    FILE *gp = popen(cmd, "r");
-                    if (gp) { if (fgets(ver, sizeof ver, gp)) ver[strcspn(ver, "\n")] = 0; pclose(gp); }
-                    char nm[120]; snprintf(nm, sizeof nm, "BizHawk GPGX%s%s", ver[0] ? " " : "", ver);
-                    setenv("DEEPEEL_MD_REF2_NAME", nm, 1);
-                }
-                wf[1] = f2;
-                hawkpid = fork();
-                if (hawkpid == 0) {
-                    const char *bd = getenv("DP_BIZHAWK_DIR");
-                    char ld[700]; snprintf(ld, sizeof ld, "%s/Assets/dll", bd ? bd : "/home/m/dev/BizHawk");
-                    setenv("LD_LIBRARY_PATH", ld, 1);
-                    execlp("mono", "mono", hawkexe, argv[3], mk, f2, (char *)NULL);
-                    _exit(127);
-                }
-                if (hawkpid < 0) hawkpid = 0;
-            }
-            for (int k = 0; k < 3; k++) {   // the harnesses boot slowly (mono, waterbox): hold our replay until each published its first frame (30 s cap)
-                DpMdRefFeed *wfd = wf[k] ? dp_md_ref_feed_open(wf[k], 0) : NULL;
-                for (int t = 0; wfd && t < 600 && wfd->vframe == 0; t++) usleep(50000);
-            }
-            char cap[240], pth[5][600];
-            const char *sum = cc.summary, *txt = text, *mp = map, *evp = ev, *heat = md_heat;
-            if (md_watch && movies[mi]) {
-                const char *b = strrchr(movies[mi], '/'); b = b ? b + 1 : movies[mi];
-                snprintf(cap, sizeof cap, "film %d/%d  %s", mi + 1, nmovies, b);
-                dp_fbwatch_caption(cap);
-                dp_fbwatch_progress(0, movie.frames, 0);
-            }
-            if (nmovies > 1) {   // suffix every requested output with the movie, none silently overwrites another
-                if (sum)  { md_movie_output_path(pth[0], sizeof pth[0], sum, mi, movies[mi]); sum = pth[0]; }
-                if (txt)  { md_movie_output_path(pth[1], sizeof pth[1], txt, mi, movies[mi]); txt = pth[1]; }
-                if (mp)   { md_movie_output_path(pth[2], sizeof pth[2], mp, mi, movies[mi]); mp = pth[2]; }
-                if (evp)  { md_movie_output_path(pth[3], sizeof pth[3], evp, mi, movies[mi]); evp = pth[3]; }
-                if (heat) { md_movie_output_path(pth[4], sizeof pth[4], heat, mi, movies[mi]); heat = pth[4]; }
-            }
-            if (md_unbounded) { // owner-decided exception: coverage over time and resources; the RAM queue stays
-                // modest and the excess states go to the disk lot (resumable with --resume); stops on exhaustion,
-                // --time-limit or SIGINT
-                o.max_total = UINT64_MAX; o.path_steps = UINT64_MAX;
-                o.fork_cap = UINT32_MAX; o.visit_cap = UINT32_MAX;
-                if (!o.queue_max) o.queue_max = o.queue_cap < 4096 ? 4096 : o.queue_cap;
-                static char lotname[600];
-                if (!o.lot_path) { snprintf(lotname, sizeof lotname, "%s.lot", text ? text : "md-unbounded"); o.lot_path = lotname; }
-                fprintf(stderr, "deepeel: md --unbounded: caps lifted, excess states spooled to %s\n", o.lot_path);
-            }
-            dp_cli_arm_stop(md_time_limit);
-            DpMdResults r;
-            int mrc = dp_md_explore_jobs(&c, &o, &r, md_jobs);
-            if (md_watch) dp_fbwatch_progress(movie.frames, movie.frames, 1);
-            if (md_dump && dp_fb_dump_ppm(md_dump)) fprintf(stderr, "deepeel: no frame to dump (the ROM never completed a frame)\n");
-            if (mrc) {
-                fprintf(stderr, "deepeel: md explore failed on %s\n", movies[mi]);
-                md_failed = 1;
-                rc = 1;
-            } else {
-                FILE *f = txt ? fopen(txt, "w") : stdout;
-                if (f) {
-                    dp_md_explore_report(&c, &o, &r, f);
-                    if (txt) fclose(f);
-                }
-                if (md_rtcode) dp_md_explore_rtcode(&r, md_rtcode);
-                if (mp) {
-                    size_t ml = strlen(mp);
-                    if (ml >= 4 && !strcmp(mp + ml - 4, ".png")) {
-                        uint8_t *classes = dp_md_map_build(&r);
-                        dp_map_apply_dest(classes, r.rom_size, r.dest);
-                        const char *base = strrchr(argv[3], '/'); base = base ? base + 1 : argv[3];
-                        if (!classes || !dp_map_png_from_evidence(classes, r.rom_size, r.play_exec_hits,
-                                                                   r.play_data_hits, r.src_flags, &r.first,
-                                                                   base, "md", base, mp))
-                            fprintf(stderr, "deepeel: cannot write %s\n", mp);
-                        free(classes);
-                    } else dp_md_explore_map(&r, mp);
-                }
-                if (evp) dp_md_explore_evidence(&r, evp);
-                if (sum) dp_md_explore_summary(&r, sum);
-                if (heat) dp_md_explore_heat(&r, heat);
-                if (cc.cov) dp_md_explore_cov(&r, cc.cov);
-                if (cc.romdata) dp_md_explore_romdata(&r, cc.romdata);
-                dp_md_results_free(&r);
-            }
-            if (gpgxpid > 0) { kill(gpgxpid, SIGKILL); waitpid(gpgxpid, NULL, 0); }
-            if (hawkpid > 0) { kill(hawkpid, SIGKILL); waitpid(hawkpid, NULL, 0); }
-            if (refpid > 0) {   // the harness exits by itself at the end of the movie; kill covers an early move-on
-                kill(refpid, SIGKILL);
-                waitpid(refpid, NULL, 0);
-            }
-            dp_md_movie_free(&movie);
-        }
-        if (md_watch) dp_fbwatch_stop();
     } else rc = (usage(), 2);
     dp_md_cart_free(&c);
     return rc;

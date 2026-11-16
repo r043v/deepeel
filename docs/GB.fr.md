@@ -5882,3 +5882,7 @@ Tests CLI NES : `tests/nes_kernel_fixtures.sh`. Les nombres restent des observat
 ### 0.369.0 — retrait du moteur PCE historique
 
 Le noyau est le seul moteur PCE ; `--entry` est câblé sur le noyau par l'assistant de graines commun. Voir `docs/PLAN-COUVERTURE-MAX.fr.md`.
+
+### 0.370.0 — retrait du moteur MD historique
+
+Le noyau est le seul moteur MD ; `--pad-full`/`--pad-full6` sont communs. Voir `docs/PLAN-COUVERTURE-MAX.fr.md`.

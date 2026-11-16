@@ -87,6 +87,8 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--no-spec")) { c->no_spec = 1; return 1; }
     if (!strcmp(a, "--no-bank-forks")) { c->no_bank_forks = 1; return 1; }
     if (!strcmp(a, "--bank-fork-cap") && i + 1 < argc) { c->bank_fork_cap = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
+    if (!strcmp(a, "--pad-full")) { c->pad_full = 1; return 1; }
+    if (!strcmp(a, "--pad-full6")) { c->pad_full = 2; return 1; }
     if (!strcmp(a, "--no-event-probes") || !strcmp(a, "--no-event-fork")) { c->no_event_probes = 1; return 1; }
     if (!strcmp(a, "--seed-ram") && i + 1 < argc) {   // LO-HI[=V,V,...]: technique 3 start states
         char *e; unsigned long lo = strtoul(argv[i + 1], &e, 0);
@@ -1662,6 +1664,7 @@ static void run_path(Worker *w, Pending *p) {
             }
             if (fresh) {
                 unsigned k = 0;
+                m->pad_full = cfg->pad_full;
                 uint8_t *snap = malloc(sh->sbytes);
                 int any = 0;
                 while (snap && cfg->hooks->event_probe(cfg->hooks->user, m, pc, bytes, k++, snap)) {

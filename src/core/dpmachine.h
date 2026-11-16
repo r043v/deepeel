@@ -138,6 +138,14 @@ typedef struct DpProbe {
 
 typedef struct DpMachine DpMachine;
 
+// --pad-full: the k-th subset of the buttons in `bits` (k deposited into the set bit positions); the count is 1 << popcount
+static inline uint32_t dp_pad_subset(uint32_t bits, uint32_t k) {
+    uint32_t r = 0;
+    for (uint32_t b = bits; b && k; b &= b - 1, k >>= 1) if (k & 1) r |= b & -b;
+    return r;
+}
+static inline uint32_t dp_pad_count(uint32_t bits) { return 1u << __builtin_popcount(bits); }
+
 // register seeds for one entry point (music rips: the init call carries the
 // song number in A and starts on the rip's stack)
 typedef struct DpSeedRegs { uint8_t a; uint16_t sp; } DpSeedRegs;
@@ -169,6 +177,9 @@ struct DpMachine {
     int64_t (*ram_index)(struct DpMachine *, uint32_t addr);
     uint32_t (*ram_addr)(struct DpMachine *, uint32_t idx);
     uint32_t ram_size;
+    // pad probes: the buttons the pad has (DP_IN_* of port 1) and the core's --pad-full level (0: the platform catalogue,
+    // 1: every subset of input_bits, 2: also the extended buttons in input_bits_ext); set by the core before each probe
+    uint32_t input_bits, input_bits_ext; unsigned pad_full;
     void *impl;                            // backend instance
     // state images
     uint32_t (*state_bytes)(struct DpMachine *);
@@ -278,7 +289,6 @@ size_t dp_machine_nes_prg_size(DpMachine *m);
 const uint8_t *dp_machine_nes_prg(DpMachine *m);   // the PRG image (bank*0x4000 + offset layout)
 struct DpPlatformHooks;
 const struct DpPlatformHooks *dp_machine_nes_hooks(void);
-const struct DpPlatformHooks *dp_machine_nes_hooks_full(int pad_full);   // pad_full: every port-1 mask at each strobe site (--pad-full)
 void dp_machine_sega_set_msx(DpMachine *m, int msx);   /* marks an MSX machine (keyboard probes, no Pause NMI) */
 const struct DpPlatformHooks *dp_machine_sega_hooks(void);   /* Z80 platform hooks (VDP status / counters probes) */   /* NES platform hooks for the kernel (event probes) */
 DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err, size_t errsz);

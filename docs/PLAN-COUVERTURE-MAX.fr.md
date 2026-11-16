@@ -303,3 +303,17 @@ Retirés avec le moteur : `--tree`, `--demo`, `--ctx-cap`, `--defer-tiers`, `--s
 - copies jumelles (`fix_pce_sibling`), sauts indirects par table (`fix_pce_ind` : tables non reconnues), vues `lda/tam` (`fix_pce_tam*`) ;
 - typage des écritures CD-ROM2/ADPCM et SuperGrafx (`fix_pce_adpcm`, `fix_pce_sgx`) : pas de ligne de rapport noyau ;
 - racine statique des glissements de fenêtre (`fix_pce_slide`), aiguillage de banque (`fix_pce_disp`).
+
+## Retrait du moteur MD historique (0.370.0)
+
+`md/explore.c`, `md/jobs.c`, `md/explore.h`, la 2e instance `md2` et `test_md_explore` sont supprimés ; `md explore` est le noyau seul.
+`--entry` passe par `seedset_build`. `--pad-full` / `--pad-full6` deviennent génériques dans le noyau (`DpMachine.input_bits`,
+`dp_pad_subset`) et servent NES et MD ; tests : `tests/kernel_fixtures.sh` (7 cas MD).
+Retirés : `--tree`, `--ctx-cap`, `--ctx-live`, `--defer-tiers`, `--second-pass`, `--bank-dispatch`, `--novelty`, `--exact-dedup`, `--jobs 2`,
+`--tas-dir` (chaîne de films), tuiles de référence de `--watch` (ClownMDEmu, BizHawk, GPGX), `--export-state`.
+
+Écarts de couverture MD à combler dans le noyau (pas par option) :
+- couche statique : tables de saut S4, copies jumelles, `bsr`/`jsr` statiques, chaleur jouée, sections de liveness ;
+- tuiles de référence à porter en un mécanisme générique de watch (toutes plateformes) ;
+- chaîne de films `--tas-dir` générique ; rtcode/`--cov`/`--romdata` MD à re-tester côté noyau.
+
