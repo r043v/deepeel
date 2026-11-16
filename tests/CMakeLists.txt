@@ -211,6 +211,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_closure.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_closure.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_closure.sms
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_regclosure.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_siblings.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_jumptable.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_deadpage.pce
@@ -513,6 +514,8 @@ add_test(NAME core_closure_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix
 set_tests_properties(core_closure_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_closure_z80 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_closure.sms; a='--core --jobs 1 --attract-frames 0 --no-sessions'; $<TARGET_FILE:deepeel> z80 explore sms $f $a | grep -q 'static closure: roots [1-9][0-9]*, bytes [0-9]*, static-only 5,' && $<TARGET_FILE:deepeel> z80 explore sms $f $a --no-closure | grep -q 'static closure: roots 0, bytes 0, static-only 0,'")
 set_tests_properties(core_closure_z80 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_closure_reg_z80 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_regclosure.sms; a='--core --jobs 1 --attract-frames 0 --no-sessions'; $<TARGET_FILE:deepeel> z80 explore sms $f $a | grep -q 'closure registers (C3): seed walks [1-9][0-9]*, indirect resolved [1-9][0-9]*,' && $<TARGET_FILE:deepeel> z80 explore sms $f $a --no-closure-regs | grep -q 'static closure: roots' && ! $<TARGET_FILE:deepeel> z80 explore sms $f $a --no-closure-regs | grep -q 'closure registers (C3)'")
+set_tests_properties(core_closure_reg_z80 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_map_sm83 COMMAND sh -c "o=${CMAKE_CURRENT_BINARY_DIR}/core_map_sm83; rm -f $o.png $o.json $o.map; $<TARGET_FILE:deepeel> explore ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_closure.gb --core --jobs 1 --attract-frames 0 --no-sessions --map $o.png --summary $o.json >/dev/null && head -c 8 $o.png | grep -q PNG && grep -q '\"code-static\":[1-9]' $o.json && $<TARGET_FILE:deepeel> explore ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_closure.gb --core --jobs 1 --attract-frames 0 --no-sessions --map $o.map >/dev/null && grep -q 'map v1' $o.map")
 set_tests_properties(core_map_sm83 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_map_huc6280 COMMAND sh -c "o=${CMAKE_CURRENT_BINARY_DIR}/core_map_huc6280; rm -f $o.png $o.json $o.map; $<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_closure.pce --core --jobs 1 --attract-frames 0 --no-sessions --map $o.png --summary $o.json >/dev/null && head -c 8 $o.png | grep -q PNG && grep -q '\"code-static\":[1-9]' $o.json && $<TARGET_FILE:deepeel> pce explore ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_closure.pce --core --jobs 1 --attract-frames 0 --no-sessions --map $o.map >/dev/null && grep -q 'map v1' $o.map")

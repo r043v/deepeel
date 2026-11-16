@@ -91,6 +91,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--no-bank-forks")) { c->no_bank_forks = 1; return 1; }
     if (!strcmp(a, "--no-closure-ret")) { c->no_closure_ret = 1; return 1; }
     if (!strcmp(a, "--no-closure-banks")) { c->no_closure_banks = 1; return 1; }
+    if (!strcmp(a, "--no-closure-regs")) { c->no_closure_regs = 1; return 1; }
     if (!strcmp(a, "--bank-fork-cap") && i + 1 < argc) { c->bank_fork_cap = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--pad-full")) { c->pad_full = 1; return 1; }
     if (!strcmp(a, "--pad-full6")) { c->pad_full = 2; return 1; }
@@ -250,6 +251,7 @@ static void run_flush(CopyObs *o) {
     o->run_lo = o->run_hi = -1; o->run_writes = 0;
 }
 
+typedef struct RegWalk RegWalk;   // C3: the regstate-aware closure state, defined below
 typedef struct {
     Shared *sh;
     DpMachine *m;
@@ -267,6 +269,7 @@ typedef struct {
     uint32_t pcring[32]; unsigned pcring_n;   // A12: the last executed instruction starts of this path (never operand bytes)
     uint8_t *wsnap;        // technique 1: state at the start of the window before a conditional
     uint32_t *winmemo;     // direct-mapped: (rom index + 1) * 2 + (a conditional follows within 5 sequential instructions)
+    RegWalk *regwalk;      // C3: the regstate-aware closure's per-worker caps and seed dedup
     int win_on; uint32_t win_pc; unsigned win_n;
     uint8_t win_imm[24]; unsigned win_ni;
     pthread_t th;
@@ -327,6 +330,48 @@ static int64_t cview_index(const ClosureView *v, const DpCoreResult *r, uint32_t
     int64_t ix = geo_index(&v->g, pc, bk);
     return (ix >= 0 && (size_t)ix + 1 <= v->cfg->rom_image_size && (size_t)ix < r->rom_size) ? ix : -1;
 }
+// --- C3: the regstate-aware closure (the generic port of the Sega closure's
+// register tracking).  The ISA supplies the transfer table (DpIsa.reg_effect)
+// and the machine the concrete state (DpMachine.get_regs); the walker carries
+// a DpRegState per path.  Caps are per worker, counted, never silent; under
+// --unbounded they are lifted (the seed set grows instead).
+struct RegWalk {
+    DpCoreResult *r;
+    const DpCoreConfig *cfg;
+    size_t rom_size;
+    uint64_t *set;          // (rom index, regstate hash) already seeded
+    unsigned set_cap, set_n;
+    uint8_t *site_seeds;    // direct-mapped per site: seed walks accepted
+    uint8_t *ind_vals;      // direct-mapped per site: resolutions followed at an indirect site
+    uint32_t mask;          // direct-mapped mask of the two tables above
+    uint8_t *provd;         // per rom index bit: the constant read was already recorded
+};
+#define REG_SEED_SITE_CAP 4      // distinct regstate seeds per site (Sega closure: contexts/2 per (pc, view))
+#define REG_IND_CAP 8            // distinct resolutions followed at one indirect site
+#define REG_SET_CAP (1u << 16)   // per-worker seed dedup (the Sega closure's node cap; full is counted)
+static uint64_t reg_hash(const DpRegState *s) {
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (unsigned i = 0; i < DP_REG_N; i++) h = (h ^ s->v[i]) * 0x100000001b3ull;
+    for (unsigned i = 0; i < DP_REG_N; i++) h = (h ^ s->known[i]) * 0x100000001b3ull;
+    return h;
+}
+static int regwalk_seen(RegWalk *rw, uint64_t key) {   // 1 when already present (or the probe is exhausted)
+    size_t h = (size_t)(key * 0x9E3779B97F4A7C15ull >> 40) & (rw->set_cap - 1);
+    for (unsigned i = 0; i < 64; i++, h = (h + 1) & (rw->set_cap - 1)) {
+        if (!rw->set[h]) return 0;
+        if (rw->set[h] == key) return 1;
+    }
+    return 1;
+}
+static int regwalk_insert(RegWalk *rw, uint64_t key) {   // 1 inserted, 0 full
+    if (rw->set_n >= rw->set_cap - rw->set_cap / 4) return 0;
+    size_t h = (size_t)(key * 0x9E3779B97F4A7C15ull >> 40) & (rw->set_cap - 1);
+    for (unsigned i = 0; i < 64; i++, h = (h + 1) & (rw->set_cap - 1)) {
+        if (!rw->set[h]) { rw->set[h] = key; rw->set_n++; return 1; }
+        if (rw->set[h] == key) return 1;
+    }
+    return 0;
+}
 #define CLOSURE_BANK_NODES 16
 typedef struct { uint32_t addr; uint8_t val; int parent; } BankPoke;
 static inline unsigned reg_of(const DpCoreResult *r, uint32_t addr);
@@ -342,18 +387,40 @@ static void bank_apply(DpMachine *m, const uint8_t *snap, const BankPoke *pk, in
 // as code and a callee that never returns never marks the caller's continuation.  Same rule as the Sega closure, ISA-neutral.
 #define CLOSURE_RET 8
 typedef struct { uint32_t pc[CLOSURE_RET], bk[CLOSURE_RET], trust[CLOSURE_RET]; unsigned n; } RetStk;
-static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa, uint32_t root, uint32_t bank, uint32_t trust0) {
-    uint32_t stack[256][4]; RetStk rets[256], cr; unsigned sp = 0, budget = CLOSURE_INSTR, kthru = 0, thru = 0; cr.n = 0; uint64_t *seen = NULL;
+// a provable ROM read handed to DpIsa.reg_effect: the byte lands, the proof is
+// recorded once per ROM byte (the explicit-constant-operand evidence)
+typedef struct { RegWalk *rw; ClosureView v; const uint32_t *bk; } ProvCtx;
+static int closure_prov_read(void *ctx, uint32_t addr, uint8_t *v) {
+    ProvCtx *c = ctx;
+    int64_t k = cview_index(&c->v, c->rw->r, addr, *c->bk);
+    if (k < 0 || (size_t)k >= c->rw->rom_size) return 0;
+    if (!(c->rw->provd[k >> 3] & (0x80u >> (k & 7)))) {
+        c->rw->provd[k >> 3] |= (uint8_t)(0x80u >> (k & 7));
+        c->rw->r->prov_data_bytes++;
+    }
+    *v = c->v.m ? c->v.m->fetch(c->v.m, addr) : c->v.cfg->rom_image[k];
+    return 1;
+}
+static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa, uint32_t root, uint32_t bank, uint32_t trust0,
+                        const DpRegState *regs0, int thru0, unsigned budget0, RegWalk *rw) {
+    uint32_t stack[256][4]; RetStk rets[256], cr; unsigned sp = 0, budget = budget0 ? budget0 : (unsigned)CLOSURE_INSTR, kthru = 0, thru = (unsigned)thru0; cr.n = 0; uint64_t *seen = NULL;
     // C3: bank-switch simulation.  `ld a,n` then a store of A to a mapper bank register is replayed through the machine's own
     // mapper (poke) so the rest of the walk sees the new ROM view; every walk restores the live state when it ends and each
     // pending root remembers the chain of writes it was pushed under (node 0 = the live view).
     BankPoke pk[CLOSURE_BANK_NODES + 1]; int npk = 0, cur = 0, acc_known = 0, acc_age = 0; uint8_t acc = 0; uint8_t *snap = NULL;
-#define CLOSURE_POP() do { sp--; cr = rets[sp]; thru = 0; pc = stack[sp][0]; bk = stack[sp][1]; trust = stack[sp][2]; acc_known = 0; \
+    // C3: the register-constant state of the walk path (one per pending side; a
+    // seeded walk starts from the concrete CPU registers, a plain one from all-unknown)
+    DpRegState rg[256], regs;
+    int have_regs = regs0 != NULL && isa->reg_effect != NULL;
+    if (regs0) regs = *regs0; else dp_regstate_clear(&regs);
+#define CLOSURE_POP() do { sp--; cr = rets[sp]; thru = 0; pc = stack[sp][0]; bk = stack[sp][1]; trust = stack[sp][2]; acc_known = 0; regs = rg[sp]; \
         if (stack[sp][3] && budget < CLOSURE_INSTR / 8) budget = CLOSURE_INSTR / 8;   /* a simulated view gets its own bounded budget */ \
         if ((int)stack[sp][3] != cur) { bank_apply(v->m, snap, pk, (int)stack[sp][3]); cur = (int)stack[sp][3]; } } while (0)
     uint32_t trust = trust0;   // A13: code reached from executed code is trusted; the fall-through after a CALL is not (inline data idiom)
     uint32_t pc = root, bk = bank;
-    if (v->m) {   // the live walk counts its roots and skips a root already known
+    ProvCtx pctx = { rw, *v, &bk };   // after bk: the provable reads follow the walk's live bank
+    DpProvRom rom = { &pctx, closure_prov_read };
+    if (v->m && !thru0) {   // the live walk counts its roots and skips a root already known (a seeded walk starts on executed code: it walks through)
         int64_t k0 = cview_index(v, r, pc, bk);
         if (k0 < 0 || (__atomic_load_n(&r->flags[k0], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC))) goto done;
         r->closure_roots++;
@@ -429,7 +496,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
                         // additive and last: the walk goes on under the view it already has (exactly the plain walk); the continuation under
                         // the new view is queued behind it and only gets what budget is left
                         pk[++npk] = (BankPoke){ ad, acc, cur }; r->closure_bank_sims++;
-                        if (sp < 256) { rets[sp] = cr; stack[sp][0] = pc + f.length; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)npk; sp++; }
+                        if (sp < 256) { rets[sp] = cr; stack[sp][0] = pc + f.length; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)npk; rg[sp] = regs; sp++; }
                         else r->closure_stack_dropped++;
                     }
                 }
@@ -442,16 +509,41 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
                 if (!(old & (DP_CORE_STATIC | DP_CORE_NATURAL | DP_CORE_FORCED))) r->closure_bytes++;
             }
         }
+        // C3: the transfer table rides the walk; a register-indirect transfer
+        // resolves through the constants proven so far (per-site value cap,
+        // counted, never silent; lifted under --unbounded)
+        int indirect_ok = 0;
+        int32_t tgt = f.target;
+        if (have_regs && f.pair != DP_REG_PAIR_NONE && (f.kind == DP_FLOW_INDIRECT || (f.kind == DP_FLOW_CALL && f.target < 0))) {
+            unsigned pw = isa->ptr_width, pm = pw >= 4 ? 0x0Fu : (1u << pw) - 1;
+            uint32_t vmask = pw >= 4 ? 0xFFFFFFFFu : pw == 3 ? 0x00FFFFFFu : 0x0000FFFFu;
+            if ((regs.known[f.pair] & pm) == pm) {
+                tgt = (int32_t)(regs.v[f.pair] & vmask);
+                int64_t kt = cview_index(v, r, (uint32_t)tgt, bk);
+                if (kt >= 0 && rw && !rw->cfg->unbounded) {
+                    uint32_t islot = (uint32_t)k & rw->mask;
+                    if (rw->ind_vals[islot] >= REG_IND_CAP) { r->closure_reg_indirect_sat++; tgt = f.target; }
+                    else { rw->ind_vals[islot]++; indirect_ok = 1; }
+                } else if (kt >= 0) indirect_ok = 1;
+                else r->closure_unresolved++;   // a resolved target outside the mapped view: counted, never silent
+                if (indirect_ok) r->closure_reg_indirect++;
+            } else r->closure_reg_miss++;
+        }
+        if (have_regs && isa->reg_effect) {   // the constants survive per the ISA's transfer table
+            DpRegState nxt;
+            isa->reg_effect(b, pc, &regs, &nxt, &rom);
+            regs = nxt;
+        }
         int fall = f.fall || f.kind == DP_FLOW_SEQ || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL;
-        if (f.kind != DP_FLOW_RET && f.kind != DP_FLOW_INDIRECT && f.target >= 0 &&
-            (f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL)) {
-            if (cview_index(v, r, (uint32_t)f.target, bk) < 0) r->closure_unresolved++;
+        if (f.kind != DP_FLOW_RET && (f.target >= 0 || (indirect_ok && f.kind == DP_FLOW_INDIRECT)) &&
+            (f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL || (f.kind == DP_FLOW_INDIRECT && indirect_ok)) && tgt >= 0) {
+            if (cview_index(v, r, (uint32_t)tgt, bk) < 0) r->closure_unresolved++;
             else if (sp < 256) {
                 rets[sp] = cr;
-                if (r->closure_ret && f.kind == DP_FLOW_CALL && f.cond < 0 && cr.n < CLOSURE_RET && !(__atomic_load_n(&r->flags[cview_index(v, r, (uint32_t)f.target, bk)], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC))) {   // a callee already known is not walked again: its return cannot be followed, the legacy fall-through applies   // the callee's path remembers where it returns to
-                    rets[sp].pc[cr.n] = pc + f.length; rets[sp].bk[cr.n] = bk; rets[sp].trust[cr.n] = trust; rets[sp].n = cr.n + 1; 
+                if (r->closure_ret && f.kind == DP_FLOW_CALL && f.cond < 0 && cr.n < CLOSURE_RET && !(__atomic_load_n(&r->flags[cview_index(v, r, (uint32_t)tgt, bk)], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC))) {   // a callee already known is not walked again: its return cannot be followed, the legacy fall-through applies   // the callee's path remembers where it returns to
+                    rets[sp].pc[cr.n] = pc + f.length; rets[sp].bk[cr.n] = bk; rets[sp].trust[cr.n] = trust; rets[sp].n = cr.n + 1;
                 }
-                stack[sp][0] = (uint32_t)f.target; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)cur; sp++;
+                stack[sp][0] = (uint32_t)tgt; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)cur; rg[sp] = regs; sp++;
             }
             else r->closure_stack_dropped++;   // a root lost to the fixed stack is counted, never silent
         }
@@ -460,9 +552,9 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
             // a return: the caller's continuation, carrying the trust the call site had (the callee proved the address is code)
             uint32_t rpc = cr.pc[cr.n - 1], rbk = cr.bk[cr.n - 1], rtr = cr.trust[cr.n - 1];
             if (f.kind == DP_FLOW_COND) {   // a conditional return: the taken side is queued, the walk goes on past it
-                if (sp < 256) { rets[sp] = cr; rets[sp].n--; stack[sp][0] = rpc; stack[sp][1] = rbk; stack[sp][2] = rtr; stack[sp][3] = (uint32_t)cur; sp++; r->closure_rets++; }
+                if (sp < 256) { rets[sp] = cr; rets[sp].n--; stack[sp][0] = rpc; stack[sp][1] = rbk; stack[sp][2] = rtr; stack[sp][3] = (uint32_t)cur; rg[sp] = regs; sp++; r->closure_rets++; }
                 else r->closure_stack_dropped++;
-            } else { cr.n--; pc = rpc; bk = rbk; trust = rtr; thru = 1; r->closure_rets++; continue; }   // the continuation after a proven return walks through what the blind fall-through already marked
+            } else { cr.n--; pc = rpc; bk = rbk; trust = rtr; thru = 1; r->closure_rets++; continue; }   // the continuation after a proven return walks through what the blind fall-through already marked (the callee's register constants ride on, the Sega closure's own rule)
         }
         if (fall) {
             pc += f.length;
@@ -475,13 +567,21 @@ done:
     if (snap) { v->m->load(v->m, snap); free(snap); }   // the live machine is left exactly as the walk found it
 #undef CLOSURE_POP
 }
-static void closure_walk(DpCoreResult *r, DpMachine *m, const DpIsa *isa, uint32_t root) {
+static void closure_walk(DpCoreResult *r, DpMachine *m, const DpIsa *isa, uint32_t root, RegWalk *rw) {
     ClosureView v = { m, NULL, { 0, 0, 0, 0 } };
-    closure_run(r, &v, isa, root, 0, 1);
+    closure_run(r, &v, isa, root, 0, 1, NULL, 0, CLOSURE_INSTR, rw);
 }
-static void closure_walk_untrusted(DpCoreResult *r, DpMachine *m, const DpIsa *isa, uint32_t root) {
+static void closure_walk_untrusted(DpCoreResult *r, DpMachine *m, const DpIsa *isa, uint32_t root, RegWalk *rw) {
     ClosureView v = { m, NULL, { 0, 0, 0, 0 } };
-    closure_run(r, &v, isa, root, 0, 0);   // A13: the return address of a call may be inline data
+    closure_run(r, &v, isa, root, 0, 0, NULL, 0, CLOSURE_INSTR, rw);   // A13: the return address of a call may be inline data
+}
+// C3: the executed step seeds a walk from the concrete CPU registers — the
+// Sega closure's per-step bootstrapping, generic.  Untrusted (the A13 data
+// guards apply) and walk-through (it starts inside executed code), like the
+// reference.
+static void closure_walk_regs(DpCoreResult *r, DpMachine *m, const DpIsa *isa, uint32_t root, const DpRegState *regs, RegWalk *rw) {
+    ClosureView v = { m, NULL, { 0, 0, 0, 0 } };
+    closure_run(r, &v, isa, root, 0, 0, regs, 1, CLOSURE_INSTR, rw);
 }
 
 // B8: speculative disassembly of the holes (never "known"): in the gaps left by every other technique, a candidate chain of
@@ -572,13 +672,13 @@ static void speculative_gaps_pages(DpCoreResult *r, const DpIsa *isa, const DpCo
 // pointers at nn; each entry that starts a legal instruction is a static root.  Stride 2, up to 64 words.
 // Static walk straight on the ROM image, for a target in a bank the machine does not currently map (S4 stride 3).
 // Addresses < 0x4000 are bank 0, the others fold into the target's own bank.
-static void closure_walk_img(DpCoreResult *r, const DpCoreConfig *cfg, const DpIsa *isa, uint32_t bank, uint32_t root, unsigned win) {
+static void closure_walk_img(DpCoreResult *r, const DpCoreConfig *cfg, const DpIsa *isa, uint32_t bank, uint32_t root, unsigned win, RegWalk *rw) {
     ClosureView v = { NULL, cfg, img_geo(NULL, cfg, win) };
-    closure_run(r, &v, isa, root, bank, 1);
+    closure_run(r, &v, isa, root, bank, 1, NULL, 0, CLOSURE_INSTR, rw);
 }
 
 // S4 stride 3: entries are {addr lo, addr hi, bank}; the table sits in the currently mapped window.
-static int closure_jp_table3(DpCoreResult *r, DpMachine *m, const DpCoreConfig *cfg, const DpIsa *isa, uint32_t base, int min_entries) {
+static int closure_jp_table3(DpCoreResult *r, DpMachine *m, const DpCoreConfig *cfg, const DpIsa *isa, uint32_t base, int min_entries, RegWalk *rw) {
     if (!cfg->rom_image || base >= 0x8000) return 0;
     unsigned win = m->bank_shift ? 1u << m->bank_shift : 0x4000u;   // the machine's window geometry (E5)
     int64_t bi = base < win ? (int64_t)base : m->rom_index(m, base);
@@ -601,7 +701,7 @@ static int closure_jp_table3(DpCoreResult *r, DpMachine *m, const DpCoreConfig *
     if (cnt < min_entries) return 0;   // validated first: nothing is marked for a table that does not hold up
     for (int e = 0; e < cnt; e++) {
         r->closure_jp_entries++; r->prov_data_bytes += 3; r->closure_roots++;
-        closure_walk_img(r, cfg, isa, tg[e][1], tg[e][0], win);
+        closure_walk_img(r, cfg, isa, tg[e][1], tg[e][0], win, rw);
     }
     if (cnt) r->closure_jp_tables++;
     return cnt;
@@ -613,7 +713,7 @@ static int closure_jp_table3(DpCoreResult *r, DpMachine *m, const DpCoreConfig *
 // is a static root (stride 2, up to 64 words).  The kernel's first banked
 // static-closure form for these ISAs (audit E5): the same-window semantics are
 // the machine's own view, the walk needs no per-mapper geometry.
-static void closure_abs_table(DpCoreResult *r, DpMachine *m, const DpIsa *isa, const uint8_t *bytes) {
+static void closure_abs_table(DpCoreResult *r, DpMachine *m, const DpIsa *isa, const uint8_t *bytes, RegWalk *rw) {
     if (bytes[0] != 0x6C && bytes[0] != 0x7C) return;
     uint32_t ta = (uint32_t)bytes[1] | ((uint32_t)bytes[2] << 8);
     int cnt = 0;
@@ -626,7 +726,7 @@ static void closure_abs_table(DpCoreResult *r, DpMachine *m, const DpIsa *isa, c
         DpFlowInfo f; memset(&f, 0, sizeof f);
         if (!isa->flow(b, t, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL) break;
         cnt++;
-        closure_walk(r, m, isa, t);
+        closure_walk(r, m, isa, t, rw);
     }
     if (cnt) { r->closure_jp_tables++; r->closure_jp_entries += (uint64_t)cnt; r->prov_data_bytes += (uint64_t)cnt * 2; }
 }
@@ -643,7 +743,7 @@ static int ring_has(const uint32_t *ring, unsigned n, uint32_t pc) {
     return 0;
 }
 
-static void closure_jp_table(DpCoreResult *r, DpMachine *m, const DpCoreConfig *cfg, const DpIsa *isa, uint32_t pc, const uint32_t *ring, unsigned nring) {
+static void closure_jp_table(DpCoreResult *r, DpMachine *m, const DpCoreConfig *cfg, const DpIsa *isa, uint32_t pc, const uint32_t *ring, unsigned nring, RegWalk *rw) {
     if (!isa->hl_jp_table) return;
     {   // byte-granular: ld b,n / ld c,m then ld h,b / ld l,c (or the reverse pair) before the jump
         int hb = -1, lc = -1, mv = 0;
@@ -657,7 +757,7 @@ static void closure_jp_table(DpCoreResult *r, DpMachine *m, const DpCoreConfig *
             uint32_t t = (uint32_t)(hb << 8 | lc);
             int64_t kt = m->rom_index(m, t);
             if (kt >= 0 && (size_t)kt < r->rom_size && !(r->flags[kt] & DP_CORE_STATIC)) r->closure_jp_entries++;
-            closure_walk(r, m, isa, t);
+            closure_walk(r, m, isa, t, rw);
             return;
         }
     }
@@ -690,11 +790,11 @@ static void closure_jp_table(DpCoreResult *r, DpMachine *m, const DpCoreConfig *
             if (fresh) {
                 r->closure_jp_entries++; r->prov_data_bytes += 2;
             }
-            closure_walk(r, m, isa, t);
+            closure_walk(r, m, isa, t, rw);
             cnt++;
         }
-        if (cnt) { r->closure_jp_tables++; if (cnt < 2) closure_jp_table3(r, m, cfg, isa, base, 2); return; }   // a lone stride-2 word may be the head of a stride-3 table
-        if (closure_jp_table3(r, m, cfg, isa, base, 1)) return;   // stride 3: the entries name their own bank
+        if (cnt) { r->closure_jp_tables++; if (cnt < 2) closure_jp_table3(r, m, cfg, isa, base, 2, rw); return; }   // a lone stride-2 word may be the head of a stride-3 table
+        if (closure_jp_table3(r, m, cfg, isa, base, 1, rw)) return;   // stride 3: the entries name their own bank
     }
 }
 
@@ -1779,13 +1879,34 @@ static void run_path(Worker *w, Pending *p) {
             } else if (imm_age < 99) imm_age++;
         }
         if (!cfg->no_closure && !cur_forced && have_flow && fi.kind != DP_FLOW_SEQ && fi.kind != DP_FLOW_ILLEGAL) {
-            if (fi.target >= 0 && (fi.kind == DP_FLOW_JUMP || fi.kind == DP_FLOW_COND || fi.kind == DP_FLOW_CALL)) closure_walk(loc, m, isa, (uint32_t)fi.target);
-            if (fi.kind == DP_FLOW_COND) closure_walk(loc, m, isa, pc + fi.length);
-            else if (fi.kind == DP_FLOW_CALL) closure_walk_untrusted(loc, m, isa, pc + fi.length);
-            if (fi.kind == DP_FLOW_INDIRECT && bytes[0] == 0xE9) closure_jp_table(loc, m, cfg, isa, pc, w->pcring_n >= 8 ? w->pcring : NULL, w->pcring_n < 32 ? w->pcring_n : 32);   // a path too young to hold the load is not filtered
+            if (fi.target >= 0 && (fi.kind == DP_FLOW_JUMP || fi.kind == DP_FLOW_COND || fi.kind == DP_FLOW_CALL)) closure_walk(loc, m, isa, (uint32_t)fi.target, w->regwalk);
+            if (fi.kind == DP_FLOW_COND) closure_walk(loc, m, isa, pc + fi.length, w->regwalk);
+            else if (fi.kind == DP_FLOW_CALL) closure_walk_untrusted(loc, m, isa, pc + fi.length, w->regwalk);
+            if (fi.kind == DP_FLOW_INDIRECT && bytes[0] == 0xE9) closure_jp_table(loc, m, cfg, isa, pc, w->pcring_n >= 8 ? w->pcring : NULL, w->pcring_n < 32 ? w->pcring_n : 32, w->regwalk);   // a path too young to hold the load is not filtered
             if (fi.kind == DP_FLOW_INDIRECT && (bytes[0] == 0x6C || bytes[0] == 0x7C) &&
                 isa->abs_ind_table)
-                closure_abs_table(loc, m, isa, bytes);
+                closure_abs_table(loc, m, isa, bytes, w->regwalk);
+            // C3: this executed step seeds a walk carrying the concrete CPU
+            // registers (the Sega closure's per-step bootstrapping, generic:
+            // DpMachine.get_regs + DpIsa.reg_effect).  Per-site cap on
+            // distinct states, global dedup, both counted, never silent.
+            if (!cfg->no_closure_regs && m->get_regs && isa->reg_effect) {
+                DpRegState cr2;
+                if (m->get_regs(m, &cr2)) {
+                    RegWalk *rw = w->regwalk;
+                    int64_t ri = m->rom_index(m, pc);
+                    uint64_t key = ri >= 0 ? ((uint64_t)(uint32_t)ri << 40) | (reg_hash(&cr2) & ((1ull << 40) - 1)) : 0;
+                    if (ri < 0) { /* RAM-executed code: no site key */ }
+                    else if (regwalk_seen(rw, key)) { /* already seeded under this state */ }
+                    else if (!cfg->unbounded && rw->site_seeds[(uint32_t)ri & rw->mask] >= REG_SEED_SITE_CAP) loc->closure_reg_seed_sat++;
+                    else if (!regwalk_insert(rw, key)) loc->closure_reg_set_sat++;
+                    else {
+                        rw->site_seeds[(uint32_t)ri & rw->mask]++;
+                        loc->closure_reg_roots++;
+                        closure_walk_regs(loc, m, isa, pc, &cr2, rw);
+                    }
+                }
+            }
         }
         if (!cfg->no_solve && !cur_forced && m->poke && have_flow) {
             // window: the sequential instructions before a conditional; their start state and RAM reads feed solve_cond
@@ -2316,6 +2437,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     out->live = calloc(((rom_size >> 8) + 1) * out->live_w, sizeof *out->live);
     if (m->plat && m->plat->io_reg_count > 0) {   // typed register accesses: one slot per registry entry
         out->reg_n = m->plat->io_reg_count; out->reg_plat = m->plat; out->closure_banks = !cfg->no_closure_banks; out->closure_ret = !cfg->no_closure_ret;
+        out->closure_regs = !cfg->no_closure_regs;
         out->reg_slot = m->plat->find ? NULL : calloc(65536, sizeof *out->reg_slot);
         out->reg_reads = calloc((size_t)out->reg_n, sizeof *out->reg_reads);
         out->reg_writes = calloc((size_t)out->reg_n, sizeof *out->reg_writes);
@@ -2368,7 +2490,14 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         w->stamp = calloc(site_n, sizeof *w->stamp);
         w->wsnap = malloc(sh.sbytes ? sh.sbytes : 1); w->winmemo = calloc(0x10000, sizeof *w->winmemo);
         w->rng_stamp = calloc(site_n, sizeof *w->rng_stamp); w->rng_last = calloc(site_n, 1);
-        if (!w->visits || !w->stamp || !w->capped) { ok = 0; break; }
+        // C3: the regstate-aware closure state (caps lifted under --unbounded: the set grows)
+        uint32_t rwm = 1; while (rwm < rom_size && rwm < (1u << 23)) rwm <<= 1;   // direct-mapped by rom index, masked
+        w->regwalk = calloc(1, sizeof *w->regwalk);
+        if (w->regwalk) *w->regwalk = (RegWalk){ .r = &w->loc, .cfg = cfg, .rom_size = rom_size, .mask = rwm - 1,
+            .set = calloc(REG_SET_CAP, sizeof *w->regwalk->set), .set_cap = REG_SET_CAP,
+            .site_seeds = calloc(rwm, 1), .ind_vals = calloc(rwm, 1), .provd = calloc((rom_size >> 3) + 1, 1) };
+        if (!w->visits || !w->stamp || !w->capped || !w->regwalk || !w->regwalk->set ||
+            !w->regwalk->site_seeds || !w->regwalk->ind_vals || !w->regwalk->provd) { ok = 0; break; }
         w->cobs = (CopyObs){ .m = wm, .r = &w->loc, .last_rom = -1, .fed = sh.fed, .age = 99, .run_lo = -1, .run_hi = -1, .no_decompress = cfg->no_decompress };
         w->cobs.fedsrc = sh.fedsrc; w->cobs.fedprod = sh.fedprod;
         w->cobs.ramread = sh.ramread;
@@ -2603,7 +2732,10 @@ cleanup:
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
         out->novelty_picks += l->novelty_picks; out->closure_stopped_data += l->closure_stopped_data; out->closure_unresolved += l->closure_unresolved; out->closure_stack_dropped += l->closure_stack_dropped; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->promoted_forced += l->promoted_forced; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bank_sims += l->closure_bank_sims; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_stack_dropped += l->closure_stack_dropped; out->pending_dropped += l->pending_dropped; out->deferred += l->deferred; out->state_repeats += l->state_repeats; out->probe_ctx_sat += l->probe_ctx_sat; out->probe_rearms += l->probe_rearms; out->bank_forks += l->bank_forks; out->tas_ckpts += l->tas_ckpts; out->sess_ckpts += l->sess_ckpts; out->ckpt_bursts += l->ckpt_bursts; out->epoch_forks += l->epoch_forks; out->live_seeds += l->live_seeds; out->imm_refs += l->imm_refs; out->held_stops += l->held_stops; out->bank_fork_sat += l->bank_fork_sat; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->closure_rets += l->closure_rets; out->proj_pruned += l->proj_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
         out->exec_outside += l->exec_outside; out->exec_wram_rom += l->exec_wram_rom; dp_ramarch_merge(&out->ra, &l->ra);
+        out->closure_reg_roots += l->closure_reg_roots; out->closure_reg_seed_sat += l->closure_reg_seed_sat; out->closure_reg_set_sat += l->closure_reg_set_sat;
+        out->closure_reg_indirect += l->closure_reg_indirect; out->closure_reg_indirect_sat += l->closure_reg_indirect_sat; out->closure_reg_miss += l->closure_reg_miss;
         free(l->jp_seen); l->jp_seen = NULL; free(ws[i].visits); free(ws[i].wsnap); free(ws[i].winmemo); free(ws[i].capped); free(ws[i].stamp);
+        if (ws[i].regwalk) { free(ws[i].regwalk->set); free(ws[i].regwalk->site_seeds); free(ws[i].regwalk->ind_vals); free(ws[i].regwalk->provd); free(ws[i].regwalk); }
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
     }
     out->steps = sh.steps;
@@ -2766,6 +2898,8 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     for (size_t i = 0; i < r->rom_size; i++) if ((r->flags[i] & (DP_CORE_STATIC | DP_CORE_NATURAL | DP_CORE_FORCED)) == DP_CORE_STATIC) stat_only++;
     fprintf(out, "speculative gaps: %llu runs, %llu bytes (never counted as known); %llu runs reinforced by an immediate reference (%llu references seen)\n", U(r->spec_runs), U(r->spec_bytes), U(r->spec_ref_runs), U(r->imm_refs));
     fprintf(out, "static closure: roots %llu, bytes %llu, static-only %zu, capped walks %llu, returns followed %llu\n", U(r->closure_roots), U(r->closure_bytes), stat_only, U(r->closure_capped), U(r->closure_rets));
+    if (r->closure_regs) fprintf(out, "closure registers (C3): seed walks %llu, indirect resolved %llu, indirect unresolved %llu, indirect site cap %llu, seeds refused (site cap %llu, set full %llu)\n",
+        U(r->closure_reg_roots), U(r->closure_reg_indirect), U(r->closure_reg_miss), U(r->closure_reg_indirect_sat), U(r->closure_reg_seed_sat), U(r->closure_reg_set_sat));
     if (r->inferred) fprintf(out, "static inference: padding %llu, gap code %llu, gap pad %llu, gap data %llu, copy tables %llu (%llu sibling bytes, %llu refused as code), jump tables %llu (%llu bytes)\n", U(r->padding_bytes), U(r->inferred_code), U(r->inferred_pad), U(r->inferred_data), U(r->sib_tables), U(r->sib_bytes), U(r->sib_refused), U(r->jt_tables), U(r->jt_bytes));
     if (r->closure_jp_entries) fprintf(out, "provenance: %llu jp-hl targets, %llu data bytes static\n", U(r->closure_jp_entries), U(r->prov_data_bytes));
     if (r->closure_jp_tables) fprintf(out, "S4 operand tables of executed JP HL: %llu tables, %llu entries\n", U(r->closure_jp_tables), U(r->closure_jp_entries));

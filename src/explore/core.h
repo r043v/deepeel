@@ -85,6 +85,7 @@ typedef struct DpCoreConfig {
     int no_spec, no_live_seeds;               // B8: off switch of the speculative gap disassembly
     int no_closure_ret;        // C3: off switch of the walk-time return stack (a direct call continues where its callee returns, not blindly after it)
     int no_closure_banks;      // C3: off switch of the walk-time bank simulation (closure follows `ld a,n; ld (bankreg),a`)
+    int no_closure_regs;       // C3: off switch of the regstate-aware closure (concrete bootstrapping + the ISA constant-transfer lattice)
     int no_bank_forks;         // B7: off switch of the bank forks at mapper writes
     unsigned bank_fork_cap;    // B7: bank forks made per site visit (0: unbounded)
     unsigned probe_ctx_cap;    // B1: contexts one probe site is armed under (1: the historical once-per-site)
@@ -182,6 +183,13 @@ typedef struct DpCoreResult {
     uint64_t event_probes;      // alternative-status states queued
     uint64_t epoch_forks, ckpt_bursts;   // B3: pad bursts started from session checkpoints
     uint64_t closure_roots, closure_bytes, closure_capped, closure_jp_tables, closure_jp_entries, prov_data_bytes; uint32_t *jp_seen; unsigned jp_seen_n, jp_seen_cap; uint64_t closure_stack_dropped, pending_dropped, deferred, state_repeats, exact_states, probe_ctx_sat, probe_rearms, bank_forks, bank_fork_sat, tas_ckpts, sess_ckpts, held_stops;   // static closure: roots walked, bytes newly marked, walks stopped by the cap
+    uint8_t closure_regs;              // C3: the regstate-aware closure is on
+    uint64_t closure_reg_roots;        // C3: regstate seed walks started from an executed step
+    uint64_t closure_reg_seed_sat;     // C3: seeds refused past the per-site cap
+    uint64_t closure_reg_set_sat;      // C3: seeds refused because the per-worker seed set is full
+    uint64_t closure_reg_indirect;     // C3: indirect transfers resolved through a known register constant
+    uint64_t closure_reg_indirect_sat; // C3: resolutions refused at an indirect site past the distinct-value cap
+    uint64_t closure_reg_miss;         // C3: indirect transfers the walk left unresolved (register unknown)
     uint64_t cells;             // distinct (fork target, RAM cell) pairs queued (technique 8)
     uint64_t proj_pruned;       // C11: forks evicted because the same target was already queued under the same projected context (registers + RAM pages the section reads)
     uint64_t cell_pruned;       // forced forks dropped because their (target, RAM cell) pair was already queued

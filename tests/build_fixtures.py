@@ -1267,6 +1267,14 @@ def build_z80_family(out):
     z[0:len(zc)] = zc
     with open(os.path.join(out, "fix_z80_closure.sms"), "wb") as f:
         f.write(z)
+    # C3 register closure: the dispatch is ld hl,($C000) then jp (hl) — the target rides no
+    # immediate and no executed pc ring, only the machine's live HL proves it; the seeded walk
+    # (get_regs + reg_effect) resolves $0100, the plain closure leaves it unresolved
+    rc = bytearray([0xFF]) * 0x8000
+    rc[0:len(bytes.fromhex("210001 2200c0 2a00c0 e9"))] = bytes.fromhex("210001 2200c0 2a00c0 e9")
+    rc[0x100] = 0x18; rc[0x101] = 0xFE   # jr * : the dispatch target hangs the machine there
+    with open(os.path.join(out, "fix_z80_regclosure.sms"), "wb") as f:
+        f.write(rc)
     # C4 copy-table siblings: ld hl,($0040) reads the first word of a pointer table, a ld/inc loop copies 16 bytes from it;
     # the other two entries point at same-length siblings nothing touches
     sb = bytearray([(i * 7 + 3) & 0xFF if i % 5 else 0x55 for i in range(0x8000)])
