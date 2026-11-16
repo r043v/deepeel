@@ -2,7 +2,7 @@
 #ifndef DP_REPORT_H
 #define DP_REPORT_H
 
-#include "../explore/explorer.h"
+#include "../explore/results.h"
 #include "../common.h"
 
 void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out);
@@ -89,8 +89,6 @@ void dp_residual_anatomy_text(const DpResults *res, const uint8_t *m, DpBuf *out
 // map summary, full residual list, every counter, tree and play facts):
 // the aggregation input of a multi-ROM campaign
 struct DpTree;
-void dp_report_summary(const DpResults *res, const DpConfig *cfg, const struct DpTree *tree,
-                       const char *stop_reason, unsigned long long frames, int tas_n, DpBuf *out);
 void dp_report_map(const DpResults *res, DpBuf *out);
 // rom_path feeds the legend's name fallback (the internal title comes first);
 // cfg rides into the "deepeel_meta" tEXt chunk (version + settings + result)

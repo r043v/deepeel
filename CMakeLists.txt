@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.371.0 LANGUAGES C)
+project(deepeel VERSION 0.372.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -268,10 +268,8 @@ set_target_properties(dp_gblmach_lib PROPERTIES IMPORTED_LOCATION ${GBL_ARCH})
 add_dependencies(dp_gblmach_lib dp_gblmach)
 
 # --- core library: everything but main(); the gui file follows SDL2 availability
-set(DP_GUI_FILE src/gui/gui_stub.c)
 set(DP_GUI_LIBS "")
 if(SDL2_FOUND AND BUILD_GUI)
-  set(DP_GUI_FILE src/gui/gui.c)
   set(DP_GUI_LIBS ${SDL2_LIBRARIES})
 endif()
 
@@ -306,27 +304,14 @@ add_library(deepeel_core STATIC
   src/mach/lr_cmd.c
   src/mach/bh_cmd.c
   ${GEN}/dp_gbl_instances.c
-  src/explore/explorer.c
+  src/explore/results.c
   src/explore/core.c
   src/explore/core_map.c
   src/explore/core_gbseeds.c
   src/explore/frontier.c
-  src/explore/frontier_disk.c
-  src/explore/forks.c
-  src/explore/streams.c
-  src/explore/seeds.c
-  src/explore/ctxproj.c
-  src/explore/sections.c
-  src/explore/copies.c
-  src/explore/rtcode.c
   src/explore/ramarch.c
   src/explore/stop.c
-  src/explore/sessions.c
   src/explore/gambatte_init.c
-  src/explore/tree.c
-  src/explore/closure.c
-  src/explore/residual.c
-  src/explore/provenance.c
   src/explore/tas.c
   src/report/report.c
   src/report/map.c
@@ -334,7 +319,7 @@ add_library(deepeel_core STATIC
     src/report/html.c
   src/gui/font5x7.c
   src/gui/fbwatch.c
-  ${DP_GUI_FILE}
+  src/gui/windows.c
 )
 find_package(Threads REQUIRED)
 find_package(ZLIB REQUIRED) # PNG maps and snapshots: compressed image and zTXt chunks

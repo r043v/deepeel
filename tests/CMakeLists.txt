@@ -258,20 +258,7 @@ add_executable(test_exec test_exec.c)
 target_link_libraries(test_exec PRIVATE deepeel_core m)
 add_test(NAME exec COMMAND test_exec)
 
-add_executable(test_explorer test_explorer.c)
-target_link_libraries(test_explorer PRIVATE deepeel_core m)
-add_dependencies(test_explorer fixtures)
-add_test(NAME explorer COMMAND test_explorer ${CMAKE_CURRENT_BINARY_DIR})
-add_test(NAME legacy_deferred COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/legacy_deferred.py $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_branch.gb)
-add_executable(test_frontier_packed test_frontier_packed.c)
-target_link_libraries(test_frontier_packed PRIVATE deepeel_core m)
-add_dependencies(test_frontier_packed fixtures)
-add_test(NAME frontier_packed COMMAND test_frontier_packed ${CMAKE_CURRENT_BINARY_DIR})
 
-add_executable(test_sessions test_sessions.c)
-target_link_libraries(test_sessions PRIVATE deepeel_core m)
-add_dependencies(test_sessions fixtures)
-add_test(NAME sessions COMMAND test_sessions ${CMAKE_CURRENT_BINARY_DIR})
 
 add_executable(test_md test_md.c)
 target_link_libraries(test_md PRIVATE deepeel_core m)
@@ -283,13 +270,6 @@ add_executable(test_export test_export.c)
 target_link_libraries(test_export PRIVATE deepeel_core m)
 add_test(NAME export COMMAND test_export)
 
-if(TARGET deepeel AND DP_HAS_GUI)
-  add_executable(test_gui test_gui.c)
-  target_link_libraries(test_gui PRIVATE deepeel_core m ${DP_GUI_LIBS})
-  target_include_directories(test_gui PRIVATE ${SDL2_INCLUDE_DIRS})
-  add_dependencies(test_gui fixtures)
-  add_test(NAME gui COMMAND test_gui ${CMAKE_CURRENT_BINARY_DIR})
-endif()
 
 add_executable(test_pce test_pce.c)
 target_link_libraries(test_pce PRIVATE deepeel_pce deepeel_core)
@@ -298,7 +278,6 @@ set_tests_properties(pce PROPERTIES TIMEOUT 60)
 add_executable(test_coverage test_coverage.c)
 target_link_libraries(test_coverage PRIVATE deepeel_core m)
 add_test(NAME coverage COMMAND test_coverage)
-add_test(NAME frontier_cli COMMAND ${CMAKE_COMMAND} -E env SEGA_ROM=${CMAKE_CURRENT_BINARY_DIR}/fix_sega_mapper.sms sh ${CMAKE_CURRENT_SOURCE_DIR}/frontier_cli.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_branch.gb)
 
 add_test(NAME zip_cli COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/zip_cli.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_branch.gb ${Python3_EXECUTABLE})
 set_tests_properties(zip_cli PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
@@ -314,9 +293,6 @@ add_executable(test_map_png test_map_png.c)
 target_link_libraries(test_map_png PRIVATE deepeel_core m)
 add_test(NAME map_png COMMAND test_map_png)
 
-add_executable(test_map_infer test_map_infer.c)
-target_link_libraries(test_map_infer PRIVATE deepeel_core m)
-add_test(NAME map_infer COMMAND test_map_infer)
 add_test(NAME maprender_cv COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/maprender_cv.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_copy1.gb)
 
 # J11: level-A libretro backend, tested on a mock core built here (no binary committed)
@@ -328,10 +304,6 @@ add_test(NAME libretro COMMAND test_libretro $<TARGET_FILE:dpmock_libretro> ${CM
 add_test(NAME lr_explore_cli COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/lr_explore_cli.sh $<TARGET_FILE:deepeel> $<TARGET_FILE:dpmock_libretro> ${CMAKE_CURRENT_BINARY_DIR}/mock_rom.bin)
 add_test(NAME lr_play_cli COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/lr_play_cli.sh $<TARGET_FILE:deepeel> $<TARGET_FILE:dpmock_libretro>)
 add_test(NAME mapwin_cli COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/mapwin_cli.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_bankdata.gb)
-add_executable(test_lr_parity test_lr_parity.c)
-target_link_libraries(test_lr_parity PRIVATE deepeel_core m)
-add_dependencies(test_lr_parity fixtures)
-add_test(NAME lr_parity COMMAND test_lr_parity ${CMAKE_CURRENT_BINARY_DIR})
 add_test(NAME campaign_fixtures COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/campaign_fixtures.py ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/campaign.md)
 set_tests_properties(campaign_fixtures PROPERTIES TIMEOUT 1800)
 add_test(NAME audit_matrix COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/audit_matrix.py ${CMAKE_SOURCE_DIR}/docs/COUVERTURE.fr.md ${CMAKE_CURRENT_BINARY_DIR}/audit.md)
@@ -352,10 +324,6 @@ add_test(NAME nes_watch_dump COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_
 set_tests_properties(nes_watch_dump PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME sms_play_pool COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B z80 explore sms $D/fix_z80_branch.sms --play-steps 900000 --play-sessions 3 --play-pool 8 --text $D/sms_pp.txt >/dev/null 2>&1; grep -Eq 'checkpoint pool: [1-9][0-9]* kept, [1-9][0-9]* sessions started from one' $D/sms_pp.txt")
 set_tests_properties(sms_play_pool PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 120)
-add_test(NAME gb_session_cells COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_branch.gb --play --session-cells --time-limit 8 2>&1 | grep -q '(target, RAM) cells archived into the checkpoint pool'")
-add_test(NAME gb_session_cells_resume COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -rf $D/cells_st; $B explore $D/fix_branch.gb --play --session-cells --state-dir $D/cells_st --time-limit 6 2>&1 | grep -qE ': [1-9][0-9]* (target, RAM) cells archived'; $B explore $D/fix_branch.gb --play --session-cells --resume --state-dir $D/cells_st --time-limit 6 2>&1 | grep -q ': 0 (target, RAM) cells archived'")
-set_tests_properties(gb_session_cells_resume PROPERTIES FIXTURES_REQUIRED fixtures)
-set_tests_properties(gb_session_cells PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME pce_watch_dump COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -f $D/pce_w.ppm; $B pce explore $D/fix_pce_branch.pce --attract-frames 0 --play 100 --watch-dump $D/pce_w.ppm --text $D/pce_w.txt >/dev/null 2>&1; head -c 15 $D/pce_w.ppm | grep -q '^P6'")
 set_tests_properties(pce_watch_dump PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME z80_novelty_cells COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; for s in sms msx; do $B z80 explore $s $D/fix_z80_branch.$s --novelty 300000 --novelty-frames 30 --novelty-cells 1 --text $D/zc_$s.txt >/dev/null 2>&1; grep -q 'novelty: depth [1-9][0-9]* frames, [1-9][0-9]* trials' $D/zc_$s.txt || exit 1; done")
@@ -370,8 +338,6 @@ add_test(NAME rtcode_generated COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAK
 set_tests_properties(rtcode_generated PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME event_probe_ly COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_lywait.gb --text $D/ly.txt >/dev/null 2>&1; grep -Eq '^event probes .*: [1-9][0-9]* forced variants' $D/ly.txt; r1=$?; $B explore $D/fix_lywait.gb --no-event-fork --text $D/ly2.txt >/dev/null 2>&1; grep -Eq '^event probes .*: 0 forced variants' $D/ly2.txt && [ $r1 = 0 ]")
 set_tests_properties(event_probe_ly PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
-add_test(NAME unbounded_spool COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_report_checks.py unbounded $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(unbounded_spool PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 90)
 add_test(NAME gb_jp_table3 COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_jptable3.gb --cov $D/jt3.cov --text $D/jt3.txt >/dev/null 2>&1; grep -Eq 'S4 operand tables of executed JP HL: [1-9][0-9]* tables, [1-9][0-9]* entries' $D/jt3.txt && grep -Eq 'S4 operand tables of executed JP HL: [1-9][0-9]* tables, ([3-9]|[1-9][0-9]+) entries' $D/jt3.txt")
 add_test(NAME gb_jp_table COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_jptable.gb --cov $D/jt2.cov --text $D/jt2.txt >/dev/null 2>&1; grep -Eq 'S4 operand tables of executed JP HL: [1-9][0-9]* tables, [1-9][0-9]* entries' $D/jt2.txt && grep -Eq '^00 0190 [1-9]' $D/jt2.cov && grep -Eq '^00 01a0 [1-9]' $D/jt2.cov")
 set_tests_properties(gb_jp_table PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
@@ -406,8 +372,6 @@ set_tests_properties(gb_prov_byte PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME nes_summary_heat COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B nes explore $D/fix_nes_branch.nes --attract-frames 0 --max-total 20000 --max-steps 1000 --summary $D/nes_sum.json >/dev/null 2>&1; grep -q '\"platform\":\"nes\"' $D/nes_sum.json && grep -q '\"known_pct\"' $D/nes_sum.json")
 set_tests_properties(nes_summary_heat PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 
-add_test(NAME resume_cov COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/resume_cov.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_branch.gb)
-set_tests_properties(resume_cov PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 
 add_executable(test_nes_jmpind test_nes_jmpind.c)
 target_link_libraries(test_nes_jmpind PRIVATE deepeel_nes deepeel_core m)
@@ -419,11 +383,6 @@ target_link_libraries(test_nes_mmc3 PRIVATE deepeel_nes deepeel_core m)
 add_dependencies(test_nes_mmc3 fixtures)
 add_test(NAME nes_mmc3 COMMAND test_nes_mmc3 ${CMAKE_CURRENT_BINARY_DIR})
 
-add_executable(test_audit_parity test_audit_parity.c)
-target_link_libraries(test_audit_parity PRIVATE deepeel_core deepeel_nes m)
-add_dependencies(test_audit_parity fixtures)
-add_test(NAME audit_parity COMMAND test_audit_parity ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(audit_parity PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 120)
 
 add_executable(test_kernel test_kernel.c)
 target_link_libraries(test_kernel PRIVATE deepeel_z80 deepeel_sega deepeel_core m)
@@ -571,23 +530,12 @@ add_test(NAME desync_finder COMMAND sh -c "d=${CMAKE_CURRENT_BINARY_DIR}; x=$<TA
 
 # Features the kernel does not have yet (play sessions, the legacy spool/lot frontier) stay pinned to the old GB explorer, which is kept but no longer the default.
 add_test(NAME frontier_kernel COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/frontier_kernel.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_irq.gb)
-set_tests_properties(frontier_cli resume_cov PROPERTIES ENVIRONMENT "DEEPEEL_GB_LEGACY=1")
 
 # E1 witness: the GB P1 poll probe on `ld a,(C)` (fork_p1) reads $FF00+C --
 # C=$00 is P1 (positive witness), C=$FF is the IE register (negative witness).
-add_executable(test_p1_probe test_p1_probe.c)
-target_link_libraries(test_p1_probe PRIVATE deepeel_core m)
-add_dependencies(test_p1_probe fixtures)
-add_test(NAME p1_probe COMMAND test_p1_probe ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(p1_probe PROPERTIES FIXTURES_REQUIRED fixtures)
 
 # E3 witness: GB section verdicts — a seed-only section is speculative, a
 # fork-reachable one stays forced, the flow fork outranks the seed provenance.
-add_executable(test_gb_verdicts test_gb_verdicts.c)
-target_link_libraries(test_gb_verdicts PRIVATE deepeel_core m)
-add_dependencies(test_gb_verdicts fixtures)
-add_test(NAME gb_verdicts COMMAND test_gb_verdicts ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(gb_verdicts PROPERTIES FIXTURES_REQUIRED fixtures)
 
 # E7/E8 witnesses (AUDIT-PARITE-MOTEURS.fr.md 8): the legacy PCE IRQ fork on
 # fix_pce_irq and the GB same-context eviction on fix_vblank.
@@ -688,20 +636,9 @@ set_tests_properties(core_spec_pce_page PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_sega_closure_hook COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_closure.sms; a='--core --jobs 1 --attract-frames 0 --no-sessions'; on=$($<TARGET_FILE:deepeel> z80 explore sms $f $a | sed -n 's/.*static-only \\([0-9]*\\),.*/\\1/p' | head -1); off=$(DEEPEEL_NO_SEGA_CLOSURE=1 $<TARGET_FILE:deepeel> z80 explore sms $f $a | sed -n 's/.*static-only \\([0-9]*\\),.*/\\1/p' | head -1); test -n \"$on\" && test $on -ge $off && test $on -ge 5")
 set_tests_properties(core_sega_closure_hook PROPERTIES FIXTURES_REQUIRED fixtures)
 
-# C9: with no engine flag the kernel runs on every platform; --legacy selects the historical engine
-add_test(NAME core_default_engine COMMAND sh -c "unset DEEPEEL_LEGACY; d=$<TARGET_FILE:deepeel>; b=${CMAKE_CURRENT_BINARY_DIR}; $d nes explore $b/fix_nes_branch.nes --attract-frames 0 2>&1 | grep -q 'deepeel nes (generic kernel)' && $d pce explore $b/fix_pce_branch.pce --attract-frames 0 2>&1 | grep -q 'deepeel pce (generic kernel)' && $d z80 explore sms $b/fix_z80_branch.sms --attract-frames 0 2>&1 | grep -q 'generic kernel' && ! $d nes explore $b/fix_nes_branch.nes --legacy 2>&1 | grep -q 'generic kernel'")
+# C9: with no engine flag the kernel runs on every platform (the only engine)
+add_test(NAME core_default_engine COMMAND sh -c "d=$<TARGET_FILE:deepeel>; b=${CMAKE_CURRENT_BINARY_DIR}; $d nes explore $b/fix_nes_branch.nes --attract-frames 0 2>&1 | grep -q 'deepeel nes (generic kernel)' && $d pce explore $b/fix_pce_branch.pce --attract-frames 0 2>&1 | grep -q 'deepeel pce (generic kernel)' && $d z80 explore sms $b/fix_z80_branch.sms --attract-frames 0 2>&1 | grep -q 'generic kernel' && ! $d nes explore $b/fix_nes_branch.nes --legacy 2>&1 | grep -q 'generic kernel'")
 set_tests_properties(core_default_engine PROPERTIES FIXTURES_REQUIRED fixtures)
-
-# C9: the kernel is the default engine; the historical-engine tests keep running the old engines through
-# DEEPEEL_LEGACY (an explicit --core on a command line still wins over it).
-get_property(_all_tests DIRECTORY PROPERTY TESTS)
-foreach(_t IN LISTS _all_tests)
-  get_test_property(${_t} ENVIRONMENT _env)
-  if(NOT _env)
-    set(_env "")
-  endif()
-  set_tests_properties(${_t} PROPERTIES ENVIRONMENT "${_env};DEEPEEL_LEGACY=1")
-endforeach()
 
 # C4: the common static inference tags the siblings of a copied table (never as an observation)
 add_test(NAME core_infer_siblings COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_siblings.sms; a='--core --jobs 1 --attract-frames 0 --no-sessions'; $<TARGET_FILE:deepeel> z80 explore sms $f $a | grep -q 'copy tables [1-9][0-9]* (32 sibling bytes' && $<TARGET_FILE:deepeel> z80 explore sms $f $a --no-infer | grep -vq 'static inference'")

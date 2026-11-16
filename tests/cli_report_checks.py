@@ -20,16 +20,7 @@ def main():
                            stderr=subprocess.PIPE, timeout=60)
             return report.read_text()
 
-        if mode == "unbounded":
-            output = run(["explore", str(fixtures / "fix_branch.gb"), "--legacy",
-                          "--queue", "1", "--queue-max", "1", "--max-paths", "2",
-                          "--unbounded"])
-            patterns = [r"^budgets: 0 paths cap hit, 0 step-wall hit, 0 queue overflows",
-                        r"^spool: [1-9][0-9]* written, [1-9][0-9]* read back, 0 refused, 0 bytes pending"]
-            for pattern in patterns:
-                if not re.search(pattern, output, re.MULTILINE):
-                    raise AssertionError(f"missing {pattern!r} in report")
-        elif mode == "md_liveness":
+        if mode == "md_liveness":
             for fixture, pattern in (("fix_md_cpu_vram.md", r"section 1 000200-.* required hits .* live: video"),
                                      ("fix_md_pad.md", r"live:.*\binput\b"),
                                      ("fix_md_dbcc.md", r"live:$")):

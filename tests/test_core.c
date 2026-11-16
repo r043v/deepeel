@@ -3,7 +3,7 @@
 #include "../src/core/cart.h"
 #include "../src/core/ckptpool.h"
 #include "../src/core/growvec.h"
-#include "../src/explore/explorer.h" // dp_rom_index
+#include "../src/explore/results.h" // dp_rom_index
 #include "../src/mach/m0boy.h"
 #include "mach_util.h"
 #include "test_util.h"

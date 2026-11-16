@@ -26,13 +26,11 @@ int dp_gbs_fetch(const char *game, const char *dir, char *out_gbs, size_t cap, c
 #include "core/sta.h"
 #include "mach/m0boy.h"
 #include "core/snapshot_png.h"
-#include "explore/explorer.h"
+#include "explore/results.h"
 #include "explore/coverage_defaults.h"
-#include "explore/sessions.h"
-#include "explore/tree.h"
 #include "report/report.h"
-#include "gui/gui.h"
 #include "gui/fbwatch.h"
+#include "gui/kmapwin.h"
 #include "cpu/sm83/sm83.h"
 #include "platform/sega/sega.h"
 #include "platform/msx/msx.h"
@@ -72,37 +70,6 @@ static void core_outputs(int argc, char **argv, const char *id, const char *rom,
 }
 
 static uint8_t *nes_read_file(const char *path, size_t *size);
-static DpExplorer *volatile g_sig_ex;
-static volatile sig_atomic_t g_alarm_fired;   // the wall-clock alarm (not a user SIGINT) stopped the run
-static unsigned g_search_limit_secs;          // --search-limit: fresh wall budget for the post-play fork search
-// SIGUSR1: one line per RAM-heavy structure (diagnostic, not async-signal-safe on purpose: the run is long-lived
-// and this is read by a human). Sizes are the live allocations the explorer holds, in MB.
-static DpTree *g_sig_tree;
-static void on_explore_usr1(int sig) {
-    (void)sig;
-    DpExplorer *ex = g_sig_ex;
-    if (!ex) return;
-    struct mallinfo2 mi = mallinfo2();
-    double mb = 1048576.0, img = (double)ex->sb;
-    fprintf(stderr, "mem: malloc in-use %.0f MB, arena %.0f MB, mmap %.0f MB\n", mi.uordblks / mb, mi.arena / mb, mi.hblkhd / mb);
-    fprintf(stderr, "mem: queue %u/%u, priority %u/%u, state image %u B\n", ex->q_len, ex->q_cap, ex->pq_len, ex->pq_cap, ex->sb);
-    if (ex->sh) fprintf(stderr, "mem: shared pool %u/%u (max %u) = up to %.0f MB of images\n", ex->sh->len, ex->sh->cap, ex->sh->max, ex->sh->len * img / mb);
-    fprintf(stderr, "mem: deferred %u/%u, exact set %zu keys (%.0f MB)\n", ex->defer_len, ex->defer_cap,
-            ex->exact.cnt, ex->exact.cap * 9 / mb);
-    if (g_sig_tree) {
-        uint32_t res_ch = 0;
-        for (uint32_t c = 0; c < g_sig_tree->nch; c++) res_ch += g_sig_tree->ch[c] != NULL;
-        fprintf(stderr, "mem: tree %u choices, %u chunks (%u resident = %.0f MB), pin %u open\n", g_sig_tree->n, g_sig_tree->nch,
-                res_ch, res_ch * 65536.0 * 20 / mb, g_sig_tree->pin_n);
-    }
-}
-
-static void on_explore_sigint(int sig) {
-    if (sig == SIGALRM) g_alarm_fired = 1;
-    dp_explore_interrupt = 1;
-    if (g_sig_ex) g_sig_ex->stop = 1;
-}
-
 // --jobs auto: one explorer per core left free (all but two), bounded by available RAM at ~1.5 GiB
 // per explorer. Decided once at launch (not re-tuned while running); stderr says what was chosen.
 static int auto_jobs(void) {
@@ -200,7 +167,6 @@ static void usage(void) {
             "    --no-covered-prune   keep forking sites whose both sides are covered\n"
             "    --covered-keep N     forks such a site still gets (default 2)\n"
             "    --fork-site-cap N    per-branch-site fork cap (default 4, bytes counters)\n"
-            "    --gui                SDL2 live viewer\n"
             "    --mapwin [SCALE]     live ROM map window (1 px per byte like the .map.png), redrawn while exploring\n"
             "    --watch [FPS]        small window showing the replaying TAS movie, 1..60 img/s (default 30; 60 shows every frame)\n"
             "    --ram-code f         executed WRAM/HRAM code as byte variants (m0boy: gbrecomp --ram-code f)\n"
@@ -357,7 +323,6 @@ static void tas_collect_dir(const char *dir, const char *title, const char **tas
     free(names);
 }
 
-static void report_lanes(const DpPlay *p, const DpResults *res, DpBuf *out);
 
 static int write_file(const char *path, const DpBuf *b) {
     FILE *f = fopen(path, "wb");
@@ -370,39 +335,12 @@ static int write_file(const char *path, const DpBuf *b) {
     return 1;
 }
 
-static void closure_rounds(DpExplorer *ex, DpResults *res, uint32_t *seed_spent, uint32_t seed_total);
 
 static int cmd_md(int argc, char **argv);
 static int g_drain_only; // frontier drain: no root seeding, only the saved frontier runs
 // the runtime-code archive: one line per distinct instruction run from RAM, input of the recompiler
-static void write_rtcode(const DpResults *res, const char *path) {
-    if (!path) return;
-    uint32_t rn;
-    DpRtCode *rt = dp_rtcode_sorted(res, &rn);
-    FILE *rf = fopen(path, "w");
-    if (rf) {
-        fprintf(rf, "# deepeel rtcode v1: pc bytes hits rom_index(-1=generated) producer(-1=none)\n");
-        for (uint32_t i = 0; i < rn; i++) {
-            fprintf(rf, "%04x ", rt[i].pc);
-            for (int k = 0; k < rt[i].len; k++) fprintf(rf, "%02x", rt[i].b[k]);
-            fprintf(rf, " %u %d %d\n", rt[i].hits, rt[i].rom_src, rt[i].derived);
-        }
-        fclose(rf);
-    }
-    free(rt);
-}
 
 // the executed WRAM/HRAM code as byte variants, input of m0boy's `gbrecomp --ram-code`
-static int g_ramcode_forced; // --ram-code-forced: also export code only forced forks reached
-static void write_ramcode(const DpResults *res, const char *path) {
-    if (!path) return;
-    uint32_t nv, ni, ns, nd, nf;
-    if (dp_rtcode_export_variants(res, path, g_ramcode_forced, &nv, &ni, &ns, &nd, &nf))
-        fprintf(stderr, "deepeel: cannot write %s\n", path);
-    else
-        printf("ram code: %u variants, %u instructions exported to %s (%u forced-only left out, %u outside WRAM/HRAM, "
-               "%u dropped)\n", nv, ni, path, nf, ns, nd);
-}
 
 // append extra {pc, bank} seeds to the kernel's arrays (the caller's extras are copied);
 // 0 ok, -1 on allocation failure (the existing seeds are kept)
@@ -457,54 +395,57 @@ static void rom_str(char *out, size_t cap, uint32_t rom) {
     else snprintf(out, cap, "bank %u $%04x", rom >> 14, 0x4000 + (rom & 0x3FFF));
 }
 
+// Options of the retired GB engine: accepted and ignored (with one stderr line) so existing scripts keep running;
+// the generic kernel has its own budgets (--max-total, --unbounded, --state-dir ...).
+static int retired_option(const char *a, int *i, int argc) {
+    static const char *const valued[] = { "--queue", "--queue-max", "--queue-mem", "--max-paths", "--loop-cap", "--nocredit-cut",
+        "--covered-keep", "--closure-rounds", "--spool-cap-mb", "--frontier-cap-gb", "--seed-cap", "--mem-cap", "--time-limit",
+        "--search-limit", "--fork-site-cap", "--tier", "--yield-min", "--yield-window", "--stagnation", "--epoch", "--frames",
+        "--seed", "--checkpoints", "--stall", "--tas-ckpt", "--tas-ckpt-secs", "--tas-ckpt-max", "--tas-rng-share", "--tas-rng-per",
+        "--tas-rng-frames", "--uniform-hold", "--fork-paths", "--from-png", "--export-playable", "--export-slot", "--inputs",
+        "--input", NULL };
+    static const char *const flags[] = { "--play", "--seed-banks", "--no-context-evict", "--no-irq-fork", "--no-key-fork",
+        "--no-p1-fork", "--no-siblings", "--no-provenance", "--no-covered-prune", "--until-static", "--tas-solo", "--session-cells",
+        "--gui", "--human", "--spool-to-frontier", "--ram-code-forced", "--no-tas-rng", "--tas-ckpt-live", NULL };
+    for (int k = 0; valued[k]; k++)
+        if (!strcmp(a, valued[k]) && *i + 1 < argc) { fprintf(stderr, "deepeel: %s: retired option, ignored\n", a); ++*i; return 1; }
+    for (int k = 0; flags[k]; k++)
+        if (!strcmp(a, flags[k])) { fprintf(stderr, "deepeel: %s: retired option, ignored\n", a); return 1; }
+    return 0;
+}
+
 static int cmd_explore(int argc, char **argv) {
-    int nocredit_set = 0;
-    const char *rtcode_path = NULL, *ramcode_path = NULL;
-    const char *json = NULL, *text = NULL, *cov = NULL, *romdata = NULL, *map = NULL, *html = NULL, *path = NULL;
-    const char *from_png = NULL, *export_dir = NULL, *summary = NULL;
+    const char *text = NULL, *path = NULL;
+    const char *summary = NULL;
     const char *gbs_path = NULL, *gbs_name = NULL, *gbs_dir = NULL;
     int gbs_fetch = 0;
     const char *midx_path = NULL;
     int midx_given = 0;
     const char *tas_dirs[64];
     int tas_dirs_n = 0;
-    const char *stop_txt = "explore-only";
-    unsigned long long play_frames = 0;
-    int mapwin = 0, mapwin_on = 0;
     const char *gb_wdump = NULL;
-    int watch = 0, gui = 0, play = 0, human = 0, human_slot = -1, export_slot = -1, png_slot = -1;
+    int watch = 0;
     DpConfig cfg;
     dp_config_defaults(&cfg);
-    DpSessionCfg scfg;
-    dp_session_cfg_defaults(&scfg);
-    uint8_t tier_limit = 0, defer_all = 0;
+    struct { const char *tas[8]; int tas_n; int tas_any_rom; } scfg = { {0}, 0, 0 };   // --tas movies (the kernel reads --state-dir/--resume itself)
     uint16_t eb[32];
-    int gb_core = 0; DpCoreConfig gkcfg; dp_core_config_default(&gkcfg); gkcfg.visits_per_pc = 2000000;   // frame waits are long loops   // --core: the generic kernel instead of the GB explorer
-    gb_core = getenv("DEEPEEL_GB_LEGACY") == NULL;   // the kernel is the GB default; --legacy (or DEEPEEL_GB_LEGACY=1) runs the old explorer, kept but deactivated
-    for (int i = 2; i < argc; i++) { if (!strcmp(argv[i], "--core")) gb_core = 1; else if (!strcmp(argv[i], "--legacy")) gb_core = 0; }
-    int spool_to_frontier = 0;
+    DpCoreConfig gkcfg; dp_core_config_default(&gkcfg); gkcfg.visits_per_pc = 2000000;   // frame waits are long loops   // --core: the generic kernel instead of the GB explorer
     uint16_t ea[32];
     int entries = 0;
     for (int i = 2; i < argc; i++) {
         const char *a = argv[i];
-        if (!strcmp(a, "--core") || !strcmp(a, "--legacy")) { /* engine choice, see gb_core above */ }
-        else if (gb_core && dp_core_parse_option(&gkcfg, argc, argv, i)) { i += dp_core_parse_option(&gkcfg, argc, argv, i) - 1; }   // kernel options first: --attract-frames etc. mean the kernel's here
-        else if (!strcmp(a, "--json") && i + 1 < argc) json = argv[++i];
+        if (!strcmp(a, "--core")) { /* accepted, no effect: the kernel is the only engine */ }
+        else if (dp_core_parse_option(&gkcfg, argc, argv, i)) { i += dp_core_parse_option(&gkcfg, argc, argv, i) - 1; }   // kernel options first: --attract-frames etc. mean the kernel's here
+        else if (!strcmp(a, "--json") && i + 1 < argc) ++i;   // written by core_outputs
         else if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
-        else if (!strcmp(a, "--rtcode") && i + 1 < argc) rtcode_path = argv[++i];
-        else if (!strcmp(a, "--ram-code") && i + 1 < argc) ramcode_path = argv[++i];
-        else if (!strcmp(a, "--ram-code-forced")) g_ramcode_forced = 1;
+        else if (!strcmp(a, "--rtcode") && i + 1 < argc) ++i;   // not produced by the kernel yet
+        else if (!strcmp(a, "--ram-code") && i + 1 < argc) ++i;   // not produced by the kernel yet
         else if (!strcmp(a, "--summary") && i + 1 < argc) summary = argv[++i];
-        else if (!strcmp(a, "--cov") && i + 1 < argc) cov = argv[++i];
-        else if (!strcmp(a, "--romdata") && i + 1 < argc) romdata = argv[++i];
-        else if (!strcmp(a, "--map") && i + 1 < argc) map = argv[++i];
-        else if (!strcmp(a, "--html") && i + 1 < argc) html = argv[++i];
-        else if (!strcmp(a, "--gui")) gui = 1;
-        else if (!strcmp(a, "--mapwin")) {
-            mapwin = 0;
-            if (i + 1 < argc && argv[i + 1][0] >= '1' && argv[i + 1][0] <= '8') mapwin = atoi(argv[++i]);
-            mapwin_on = 1;
-        }
+        else if (!strcmp(a, "--cov") && i + 1 < argc) ++i;   // written by core_outputs
+        else if (!strcmp(a, "--romdata") && i + 1 < argc) ++i;   // written by core_outputs
+        else if (!strcmp(a, "--map") && i + 1 < argc) ++i;   // written by core_outputs
+        else if (!strcmp(a, "--html") && i + 1 < argc) ++i;   // written by core_outputs
+        else if (skip_mapwin(argc, argv, &i)) {}
         else if (!strcmp(a, "--watch-dump") && i + 1 < argc) { gb_wdump = argv[++i]; if (!watch) watch = 30; }
         else if (!strcmp(a, "--watch")) {
             watch = 30;
@@ -513,30 +454,8 @@ static int cmd_explore(int argc, char **argv) {
             if (watch > 30) watch = 30;
         }
         else if (!strcmp(a, "--max-steps") && i + 1 < argc) cfg.max_steps_path = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--nocredit-cut") && i + 1 < argc) { cfg.nocredit_cut = (uint32_t)strtoul(argv[++i], NULL, 0); nocredit_set = 1; }
-        else if (!strcmp(a, "--max-paths") && i + 1 < argc) cfg.max_paths = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--max-total") && i + 1 < argc) cfg.max_steps_total = strtoull(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--queue") && i + 1 < argc) cfg.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--queue-max") && i + 1 < argc) cfg.queue_max = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--queue-mem") && i + 1 < argc) cfg.queue_mem_mb = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--loop-cap") && i + 1 < argc) cfg.loop_back_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--mem-cap") && i + 1 < argc) {
-            // one wall for both consumers: the play sessions and the queue growth
-            scfg.mem_cap_mb = strtoull(argv[++i], NULL, 0);
-            cfg.mem_cap_mb = scfg.mem_cap_mb;
-        }
-        else if (!strcmp(a, "--tier") && i + 1 < argc) {
-            const char *t = argv[++i];
-            if (!strcmp(t, "inf")) defer_all = 1; // the last tier: covered forks resume too
-            else tier_limit = (uint8_t)atoi(t);
-        }
-        else if (!strcmp(a, "--time-limit") && i + 1 < argc) scfg.time_limit_secs = strtoull(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--search-limit") && i + 1 < argc) g_search_limit_secs = (unsigned)strtoull(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--frontier-cap-gb") && i + 1 < argc) cfg.frontier_cap_mb = strtoull(argv[++i], NULL, 0) * 1024;
-        else if (!strcmp(a, "--spool-cap-mb") && i + 1 < argc) cfg.spool_cap_mb = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--jobs") && i + 1 < argc) { ++i; cfg.jobs = !strcmp(argv[i], "auto") ? auto_jobs() : atoi(argv[i]); }
-        else if (!strcmp(a, "--seed-cap") && i + 1 < argc) cfg.seed_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--seed-banks")) cfg.seed_banks = 1;
         else if (!strcmp(a, "--no-pointer-scan")) cfg.no_pointer_scan = 1;
         else if (!strcmp(a, "--gbs") && i + 1 < argc) gbs_path = argv[++i];
         else if (!strcmp(a, "--gbs-fetch")) {   // optional NAME; when omitted it is derived from the ROM file name
@@ -548,21 +467,6 @@ static int cmd_explore(int argc, char **argv) {
             midx_given = 1;
             if (i + 1 < argc && argv[i + 1][0] != '-') midx_path = argv[++i];
         }
-        else if (!strcmp(a, "--no-context-evict")) cfg.no_context_evict = 1;
-        else if (!strcmp(a, "--no-irq-fork")) cfg.no_irq_fork = 1;
-        else if (!strcmp(a, "--no-key-fork")) cfg.no_key_fork = 1;
-        else if (!strcmp(a, "--no-p1-fork")) cfg.no_p1_fork = 1;
-        else if (!strcmp(a, "--no-event-fork")) cfg.no_event_fork = 1;
-        else if (!strcmp(a, "--no-closure")) cfg.no_closure = 1;
-        else if (!strcmp(a, "--no-provenance")) cfg.no_provenance = 1;
-        else if (!strcmp(a, "--no-siblings")) cfg.no_siblings = 1;
-        else if (!strcmp(a, "--closure-rounds") && i + 1 < argc) cfg.closure_rounds = atoi(argv[++i]);
-        else if (!strcmp(a, "--no-covered-prune")) cfg.no_covered_prune = 1;
-        else if (!strcmp(a, "--covered-keep") && i + 1 < argc) cfg.covered_fork_keep = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--fork-site-cap") && i + 1 < argc) {
-            cfg.fork_site_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
-            if (cfg.fork_site_cap > 255) cfg.fork_site_cap = 255; // per-site counters are bytes
-        }
         else if (!strcmp(a, "--entry") && i + 1 < argc && entries < 32) {
             if (!parse_entry(argv[++i], &eb[entries], &ea[entries])) {
                 fprintf(stderr, "deepeel: bad --entry '%s' (bank:addr)\n", argv[i]);
@@ -571,61 +475,15 @@ static int cmd_explore(int argc, char **argv) {
             entries++;
         }
         // play sessions
-        else if (!strcmp(a, "--play")) play = 1;
-        else if (!strcmp(a, "--sessions") && i + 1 < argc) scfg.sessions = atoi(argv[++i]);
-        else if (!strcmp(a, "--epoch") && i + 1 < argc) scfg.epoch_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--attract-frames") && i + 1 < argc) scfg.attract_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--frames") && i + 1 < argc) scfg.max_frames = strtoull(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--seed") && i + 1 < argc) scfg.seed = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--stagnation") && i + 1 < argc) scfg.stagnation_frames = strtoull(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--mem-cap") && i + 1 < argc) scfg.mem_cap_mb = strtoull(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--until-static")) scfg.until_static = 1;
-        else if (!strcmp(a, "--checkpoints") && i + 1 < argc) scfg.pool_cap = atoi(argv[++i]);
-        else if (!strcmp(a, "--stall") && i + 1 < argc) scfg.stall_epochs = atoi(argv[++i]);
-        else if (!strcmp(a, "--yield-window") && i + 1 < argc) { scfg.yield_window = atoi(argv[++i]); scfg.attract_stall = scfg.yield_window; }
-        else if (!strcmp(a, "--yield-min") && i + 1 < argc) scfg.yield_min = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--state-dir") && i + 1 < argc) scfg.state_dir = argv[++i];
-        else if (!strcmp(a, "--resume")) scfg.resume = 1;
-        else if (!strcmp(a, "--spool-to-frontier")) spool_to_frontier = 1;
-        else if (!strcmp(a, "--unbounded")) {
-            // coverage first: no per-site fork cap (covered-both-sides pruning stays: it adds no code), no spool or
-            // queue ceiling, no memory stop; whatever RAM cannot hold goes to the disk
-            cfg.unbounded = scfg.unbounded = 1; cfg.fork_site_cap = 255u;
-            cfg.spool_cap_mb = 0; cfg.spool_cap_bytes = 0;
-        }
-        else if (!strcmp(a, "--input") && i + 1 < argc && scfg.inputs_n < 8) scfg.inputs[scfg.inputs_n++] = argv[++i];
         else if (!strcmp(a, "--tas") && i + 1 < argc && scfg.tas_n < (int)(sizeof scfg.tas / sizeof *scfg.tas)) scfg.tas[scfg.tas_n++] = argv[++i];
         else if (!strcmp(a, "--tas-dir") && i + 1 < argc && tas_dirs_n < 64) tas_dirs[tas_dirs_n++] = argv[++i];
-        else if (!strcmp(a, "--tas-ckpt") && i + 1 < argc) scfg.tas_ckpt_frames = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--tas-ckpt-secs") && i + 1 < argc) scfg.tas_ckpt_secs = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--tas-ckpt-max") && i + 1 < argc) scfg.tas_ckpt_max = atoi(argv[++i]);
-        else if (!strcmp(a, "--tas-ckpt-live")) scfg.tas_ckpt_live = 1;
-        else if (!strcmp(a, "--no-tas-rng")) scfg.tas_rng = 0;
-        else if (!strcmp(a, "--tas-rng-share") && i + 1 < argc) scfg.tas_rng_share = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--tas-rng-per") && i + 1 < argc) scfg.tas_rng_per = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--tas-rng-frames") && i + 1 < argc) scfg.tas_rng_min = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--session-cells")) scfg.cells = 1;
-        else if (!strcmp(a, "--tas-solo")) scfg.tas_solo = 1;
         else if (!strcmp(a, "--tas-any-rom")) scfg.tas_any_rom = 1;
-        else if (!strcmp(a, "--inputs") && i + 1 < argc && !strcmp(argv[++i], "m0x")) scfg.uniform = 0;
-        else if (!strcmp(a, "--uniform-hold") && i + 1 < argc) scfg.uniform_hold = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--fork-paths") && i + 1 < argc) scfg.fork_paths_per_epoch = atoi(argv[++i]);
-        else if (!strcmp(a, "--from-png") && i + 1 < argc) from_png = argv[++i];
-        else if (!strcmp(a, "--export-playable") && i + 1 < argc) export_dir = argv[++i];
-        else if (!strcmp(a, "--export-slot") && i + 1 < argc) export_slot = atoi(argv[++i]);
-        else if (!strcmp(a, "--human")) {
-            human = 1;
-            play = 1;
-            if (i + 1 < argc && argv[i + 1][0] != '-') human_slot = atoi(argv[++i]);
-        } else if (!path) path = a;
+        else if (retired_option(a, &i, argc)) {}
+        else if (!path) path = a;
         else { fprintf(stderr, "deepeel: unknown option %s\n", a); return 2; }
     }
     if (!path) {
         usage();
-        return 2;
-    }
-    if (human && !gui) {
-        fprintf(stderr, "deepeel: --human needs --gui (the human plays with eyes)\n");
         return 2;
     }
     char err[256];
@@ -882,14 +740,11 @@ static int cmd_explore(int argc, char **argv) {
     // cascading seed budgets (z80 branch): the re-seeding phases share one
     // total (2x the per-phase cap); each phase spends from the solde left by
     // the previous ones, refusals for a spent solde are counted
-    uint32_t seed_total = cfg.seed_cap > (1u << 30) ? cfg.seed_cap : cfg.seed_cap * 2;
-    uint32_t seed_spent = 0;
     dp_static_scan(&res);
     dp_disc_add(&res, "static-scan", 0); // method shares: the static baseline
     int vi = dp_mach_pick_variant(cart->rom);
     if (vi < 0) {
         fprintf(stderr, "deepeel: no machine variant compiled for MBC %s\n", dp_mbc_name(cart->mbc));
-        dp_mapwin_stop();
         dp_results_free(&res);
         dp_cart_free(cart);
         return 1;
@@ -900,7 +755,7 @@ static int cmd_explore(int argc, char **argv) {
     }
     DpMach *mach = dp_mach_open(vi, 0);
     dp_mach_set_rom(mach, cart->rom, cart->rom_size);
-    if (gb_core) {
+    {
         gkcfg.max_total = cfg.max_steps_total;
         gkcfg.max_path_steps = getenv("DEEPEEL_GB_PATH_STEPS") ? strtoull(getenv("DEEPEEL_GB_PATH_STEPS"), NULL, 0) : 1000;   // short paths, many entries: Zelda 39 M steps 4x the natural bytes of 100000-step paths
         gkcfg.jobs = cfg.jobs > 1 ? (unsigned)cfg.jobs : 1;
@@ -961,7 +816,7 @@ static int cmd_explore(int argc, char **argv) {
                 gkcfg.n_seeds = dp_core_gb_pointer_seeds(cart->rom, cart->rom_size, gseed_cap, &gseed_pc, &gseed_bk, &gseed_refused);
                 if (gkcfg.n_seeds == SIZE_MAX) {
                     free(gmasks); dp_tas_free(&gt); km->close(km);
-                    dp_mapwin_stop(); dp_results_free(&res); dp_cart_free(cart);
+                    dp_results_free(&res); dp_cart_free(cart);
                     fprintf(stderr, "deepeel: cannot allocate pointer seed scan\n");
                     return 1;
                 }
@@ -975,7 +830,7 @@ static int cmd_explore(int argc, char **argv) {
                 if (!pcs || !banks || !regs) {
                     free(pcs); free(banks); free(regs); free(gseed_pc); free(gseed_bk);
                     free(gmasks); dp_tas_free(&gt); km->close(km);
-                    dp_mapwin_stop(); dp_results_free(&res); dp_cart_free(cart);
+                    dp_results_free(&res); dp_cart_free(cart);
                     fprintf(stderr, "deepeel: cannot allocate explicit entry seeds\n");
                     return 1;
                 }
@@ -998,7 +853,7 @@ static int cmd_explore(int argc, char **argv) {
                     free(gbs_pcs); free(gbs_bks); free(gbs_regs);
                     free(gseed_pc); free(gseed_bk); free(gseed_regs);
                     free(gmasks); dp_tas_free(&gt); km->close(km);
-                    dp_mapwin_stop(); dp_results_free(&res); dp_cart_free(cart);
+                    dp_results_free(&res); dp_cart_free(cart);
                     fprintf(stderr, "deepeel: cannot allocate GBS seeds\n");
                     return 1;
                 }
@@ -1018,433 +873,12 @@ static int cmd_explore(int argc, char **argv) {
             free(gmasks); dp_tas_free(&gt);
             km->close(km);
         } else fprintf(stderr, "deepeel: --core: cannot wrap the machine\n");
-        dp_mapwin_stop();
         dp_results_free(&res);
         dp_cart_free(cart);
         return rc;
     }
-    if (cfg.unbounded && !nocredit_set) cfg.nocredit_cut = 20000;   // unbounded still ends a path that only loops over known code
-    if (cfg.unbounded) { cfg.max_paths = UINT32_MAX; cfg.max_steps_total = UINT64_MAX; }   // no path/step wall: the run ends when nothing is left
-    DpExplorer *ex = dp_explorer_new(&cfg, &res, mach);
-    // the common exploration tree: every seed, fork and session deposit is
-    // one choice; --resume reloads it from tree.bin
-    DpTree tree;
-    dp_tree_init(&tree);
-    ex->tree = &tree;
-    if (scfg.state_dir) {                      // closed choices leave RAM: the tree grows on disk
-        char spath[540];
-        snprintf(spath, sizeof spath, "%s/tree.spill", scfg.state_dir);
-        dp_tree_set_spill(&tree, spath);
-    }
-    if (scfg.resume && scfg.state_dir) {
-        char tpath[540];
-        snprintf(tpath, sizeof tpath, "%s/tree.bin", scfg.state_dir);
-        if (dp_tree_load(&tree, tpath)) {
-            fprintf(stderr, "deepeel: resumed tree (%u choices, depth %u)\n", tree.n - 1,
-                    tree.max_depth);
-        } else if (access(tpath, F_OK) == 0) {
-            // unreadable or over the in-RAM cap: never let the next save overwrite it silently
-            char kept[560];
-            snprintf(kept, sizeof kept, "%s.prev", tpath);
-            if (rename(tpath, kept) == 0)
-                fprintf(stderr, "deepeel: tree.bin not reloaded (too large or invalid); kept as %s, starting a new tree\n", kept);
-            else
-                fprintf(stderr, "deepeel: tree.bin not reloaded and could not be set aside (%s)\n", tpath);
-        }
-    }
-    ex->defer_tier_limit = tier_limit;
-    ex->defer_all = defer_all;
-    // the frontier directory exists whatever the options: next to the outputs
-    // when there is no --state-dir
-    char fdir_auto[600];
-    char ub_dir[600];
-    if (cfg.unbounded && !scfg.state_dir) {   // the spool needs a directory: next to the outputs
-        const char *b = json ? json : text ? text : html ? html : summary ? summary : "deepeel-unbounded";
-        snprintf(ub_dir, sizeof ub_dir, "%s.state", b);
-        mkdir(ub_dir, 0777);
-        scfg.state_dir = ub_dir;
-    }
-    if (scfg.state_dir) mkdir(scfg.state_dir, 0777);   // a missing --state-dir must not silently disable the spool
-    const char *fdir = scfg.state_dir;
-    if (!fdir) {
-        const char *base = json ? json : text ? text : html ? html : summary ? summary : NULL;
-        if (base) { snprintf(fdir_auto, sizeof fdir_auto, "%s.frontier", base); fdir = fdir_auto; }
-    }
-    // the disk spool: overflow states survive any stop, --resume continues
-    // where the previous run stopped (worklist + exact dedup)
-    char spool_path[540], exact_path[540];
-    int spool_on = 0;
-    if (scfg.state_dir) {
-        snprintf(spool_path, sizeof spool_path, "%s/spool.bin", scfg.state_dir);
-        snprintf(exact_path, sizeof exact_path, "%s/exact.bin", scfg.state_dir);
-        spool_on = dp_explorer_spool_attach(ex, spool_path, scfg.resume);
-        if (!spool_on)
-            fprintf(stderr, "deepeel: spool unavailable (%s), overflow states are refused and counted (spool_refused)\n",
-                    spool_path);
-        if (scfg.resume) dp_explorer_exact_load(ex, exact_path);
-        if (scfg.resume) {
-            char cpath[540];
-            snprintf(cpath, sizeof cpath, "%s/coverage.bin", scfg.state_dir);
-            char dpath[540];
-            snprintf(dpath, sizeof dpath, "%s/disc.bin", scfg.state_dir);
-            long dl = dp_results_disc_load(&res, dpath);
-            if (dl >= 0) fprintf(stderr, "deepeel: resumed discovery log (%ld entries)\n", dl);
-            long g = dp_results_cov_load(&res, cpath);
-            if (g >= 0) fprintf(stderr, "deepeel: resumed coverage map (%ld bytes known again)\n", g);
-            char spath[560];
-            snprintf(spath, sizeof spath, "%s.sticky", cpath);
-            long sg = dp_map_sticky_load(&res, spath);
-            if (sg >= 0) fprintf(stderr, "deepeel: resumed inferred map (%ld bytes kept)\n", sg);
-        }
-    }
-    if (scfg.resume && fdir) {
-        int fl = dp_explorer_frontier_load(ex, fdir);
-        if (fl) fprintf(stderr, "deepeel: resumed frontier (%d continuations/seeds loaded, %llu more on disk)\n", fl,
-                        (unsigned long long)dp_explorer_frontier_disk(ex));
-    }
-    if (spool_to_frontier && fdir) {
-        uint64_t cv = dp_explorer_spool_convert(ex);
-        fprintf(stderr, "deepeel: %llu spool records converted to frontier lots in %s/frontier\n", (unsigned long long)cv, fdir);
-    }
-    if (!g_drain_only) dp_seed_gb(ex); // a drain runs the saved continuations only
-    for (int i = 0; !g_drain_only && i < entries; i++)
-        dp_explorer_seed_pc(ex, ea[i] >= 0x4000 ? (eb[i] ? eb[i] : 1) : 0, ea[i], DP_SEED_POINTER, 1);
-    for (int i = 0; !g_drain_only && i < gbs_seeds; i++)   // confirmed GBS entry points (legacy explorer)
-        dp_explorer_seed_pc(ex, gbs_bks[i], gbs_pcs[i], DP_SEED_POINTER, 1);
-    free(gbs_pcs); free(gbs_bks); free(gbs_regs);   // handed to the explorer above (the legacy explorer takes {pc, bank} only)
-    gbs_pcs = NULL; gbs_bks = NULL;
-    DpPlay *play_engine = NULL;
-    if (play) {
-        play_engine = dp_play_new(&scfg, &res, ex);
-        if (from_png) png_slot = dp_play_load_png(play_engine, from_png);
-        if (from_png && png_slot < 0) return 1;
-    }
-    // plain fork exploration: SIGINT asks the explorer to stop cleanly (state, spool and report are
-    // written) instead of killing the process; --play installs its own cooperative handler below
-    g_sig_ex = ex;
-    signal(SIGINT, on_explore_sigint);
-    g_sig_tree = &tree;
-    signal(SIGUSR1, on_explore_usr1);
-    if (scfg.time_limit_secs) { // wall-clock limit for the whole run, play or not: same clean stop as SIGINT
-        signal(SIGALRM, on_explore_sigint);
-        alarm((unsigned)scfg.time_limit_secs);
-    }
-    int rc = 0;
-    if (mapwin_on && play_engine && !gui && dp_play_watch_enable(play_engine, 4)) { /* the game screen beside the map */ }
-    else if (mapwin_on && play_engine && !gui) fprintf(stderr, "deepeel: --mapwin: no game screen without a --tas movie\n");
-    if (mapwin_on) dp_mapwin_start(&res, mapwin, mapwin_on && play_engine && !gui ? play_engine : NULL);
-    if (gui && dp_gui_available()) {
-        if (human) dp_play_human_begin(play_engine, human_slot);
-        rc = dp_gui_run(&res, &cfg, ex, play_engine);
-    } else if (play) {
-        dp_play_install_sigint();
-        if (watch && play_engine) {
-            if (!dp_play_watch_enable(play_engine, watch))
-                fprintf(stderr, "deepeel: --watch needs at least one --tas movie, ignored\n");
-            else if (dp_watch_start(play_engine, watch))
-                dp_play_watch_disable(play_engine);
-        }
-        dp_disc_add(&res, "start", 0);
-        clock_t t0 = clock();
-        int reason = dp_play_run(play_engine);
-        dp_watch_stop();
-        double secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
-        static const char *why[8] = { "frame budget reached", "stagnation wall reached",
-                                      "interrupted", "every byte explained", "memory cap reached",
-                                      "TAS replay done", "time budget reached", "yield stop" };
-        fprintf(stderr, "deepeel: play done after %llu frames (%s), %.2fs\n",
-                (unsigned long long)dp_play_frames(play_engine),
-                reason >= 0 && reason < 8 ? why[reason] : "?", secs);
-        stop_txt = reason >= 0 && reason < 8 ? why[reason] : "?";
-        play_frames = dp_play_frames(play_engine);
-        if (scfg.tas_n) {
-            if (scfg.tas_ckpt_live)
-                fprintf(stderr, "deepeel: %llu TAS gameplay states handed to the fork explorer\n",
-                        (unsigned long long)dp_play_tas_ckpts(play_engine));
-            else
-                fprintf(stderr, "deepeel: %llu TAS checkpoint snapshots saved (%llu captures)\n",
-                        (unsigned long long)dp_play_tas_snap_files(play_engine),
-                        (unsigned long long)dp_play_tas_ckpts(play_engine));
-        }
-        if (scfg.cells)
-            fprintf(stderr, "deepeel: %llu screen cells archived into the checkpoint pool\n", (unsigned long long)dp_play_cells(play_engine));
-        if (scfg.tas_n)
-            fprintf(stderr, "deepeel: TAS cuts absorbed (movie kept) %llu, wedged-machine fallbacks %llu\n",
-                    (unsigned long long)dp_play_tas_cuts(play_engine),
-                    (unsigned long long)dp_play_tas_cut_stuck(play_engine));
-        // the play's cooperative SIGINT handler only stops the sessions: back to the explorer's own
-        // handler, or a SIGINT during the total search is never seen (the drain ran on without end)
-        signal(SIGINT, on_explore_sigint);
-        // phase 3, mandatory: the total search drains the frontier the
-        // sessions fed, depth-first, until every choice is closed
-        // the play budget ran out by the clock (not a user SIGINT): the fork search keeps its own
-        // wall budget instead of inheriting an already-fired alarm (it used to never start)
-        if ((g_alarm_fired || reason == 6) && g_search_limit_secs && reason != 2) {
-            g_alarm_fired = 0;
-            dp_explore_interrupt = 0;
-            ex->stop = 0;
-            alarm(g_search_limit_secs);
-            fprintf(stderr, "deepeel: play budget spent, fork search gets %us\n", g_search_limit_secs);
-        }
-        if (reason != 2 && !(g_alarm_fired && dp_explore_interrupt && !g_search_limit_secs)) {
-            clock_t t1 = clock();
-            ex->cfg.dfs = 1;
-            ex->stop = 0;
-            ex->steps_own = 0;
-            uint32_t k0 = res.disc_n ? res.disc[res.disc_n - 1].known : 0;
-            dp_explore(ex);
-            dp_disc_add(&res, "total-search", 0);
-            if (res.disc_n) res.disc[res.disc_n - 1].credit = res.disc[res.disc_n - 1].known - k0;
-            closure_rounds(ex, &res, &seed_spent, seed_total);
-            fprintf(stderr, "deepeel: total search done in %.2fs (%llu paths)\n",
-                    (double)(clock() - t1) / CLOCKS_PER_SEC, (unsigned long long)res.paths_run);
-            // phase 4: the TAS checkpoints were only saved during the replay;
-            // now that the whole coverage is drained, every one of them seeds
-            // its own pass (dedup keeps the already-known states cheap)
-            if (scfg.tas_n && !scfg.tas_ckpt_live && dp_play_tas_snap_files(play_engine)) {
-                clock_t t2 = clock();
-                dp_disc_add(&res, "tas-shoots", 0);
-                uint32_t k1 = res.disc_n ? res.disc[res.disc_n - 1].known : 0;
-                int seeds = dp_play_seed_tas_snaps(play_engine);
-                fprintf(stderr, "deepeel: TAS shoots: %d snapshots seeded (%llu from residual banks: backsearch first)\n",
-                        seeds, (unsigned long long)dp_play_tas_bank_hits(play_engine));
-                dp_explore(ex);
-                dp_disc_add(&res, "tas-shoots-search", 0);
-                if (res.disc_n) res.disc[res.disc_n - 1].credit = res.disc[res.disc_n - 1].known - k1;
-                closure_rounds(ex, &res, &seed_spent, seed_total);
-                fprintf(stderr, "deepeel: TAS shoots explored in %.2fs (%llu paths)\n",
-                        (double)(clock() - t2) / CLOCKS_PER_SEC, (unsigned long long)res.paths_run);
-            }
-            // phase 5: the dispatch targets the JP HL sites actually took —
-            // some never ran because their continuation hit a budget wall
-            int iseeds = dp_seed_indirect(ex, seed_total - seed_spent);
-            seed_spent += (uint32_t)iseeds;
-            if (iseeds) {
-                clock_t t3 = clock();
-                dp_disc_add(&res, "indirect", 0);
-                uint32_t k2 = res.disc_n ? res.disc[res.disc_n - 1].known : 0;
-                fprintf(stderr, "deepeel: indirect: %d JP HL targets seeded\n", iseeds);
-                dp_explore(ex);
-                dp_disc_add(&res, "indirect-search", 0);
-                if (res.disc_n) res.disc[res.disc_n - 1].credit = res.disc[res.disc_n - 1].known - k2;
-                closure_rounds(ex, &res, &seed_spent, seed_total);
-                fprintf(stderr, "deepeel: indirect seeds explored in %.2fs (%llu paths)\n",
-                        (double)(clock() - t3) / CLOCKS_PER_SEC, (unsigned long long)res.paths_run);
-            }
-        }
-        DpBuf out;
-        dp_buf_init(&out);
-        dp_report_text(&res, &cfg, &out);
-        report_lanes(play_engine, &res, &out);
-        {
-            char tline[512];
-            dp_tree_stats(&tree, tline, sizeof tline);
-            dp_buf_str(&out, tline);
-        }
-        fwrite(out.p, 1, out.len, stdout);
-        dp_buf_free(&out);
-        write_rtcode(&res, rtcode_path);
-        write_ramcode(&res, ramcode_path);
-        if (scfg.state_dir) {
-            char tpath[540];
-            snprintf(tpath, sizeof tpath, "%s/tree.bin", scfg.state_dir);
-            dp_tree_save(&tree, tpath);
-        }
-        // the playable export: the chosen checkpoint becomes slot 0 of the pc
-        // project's <SD>.STA, the firmware's menu then loads it; the battery
-        // .SAV follows (the state image carries the cartridge RAM too, the
-        // .SAV keeps the card in step between sessions)
-        if (export_dir) {
-            int slot = export_slot >= 0 ? export_slot : (png_slot >= 0 ? png_slot : dp_play_best_slot(play_engine));
-            const uint8_t *img = dp_play_slot_img(play_engine, slot);
-            DpSta sta;
-            if (slot < 0 || !img) {
-                fprintf(stderr, "deepeel: export: no checkpoint to export\n");
-                rc = 1;
-            } else if (!dp_sta_from_project(&sta, export_dir, ex->sb, err, sizeof err)) {
-                fprintf(stderr, "deepeel: export: %s\n", err);
-                rc = 1;
-            } else if (!dp_sta_write(&sta, 0, img, ex->sb, dp_play_slot_frame(play_engine, slot),
-                                     err, sizeof err)) {
-                fprintf(stderr, "deepeel: export: %s\n", err);
-                rc = 1;
-            } else {
-                fprintf(stderr, "deepeel: exported pool slot %d as state slot 0 of %s (frame %u)\n",
-                        slot, sta.sta_path, dp_play_slot_frame(play_engine, slot));
-                // the .SAV: load the checkpoint into the idle fork machine and
-                // copy its cartridge RAM
-                if (sta.sav_path[0] && dp_gbl_variant_eram[vi]) {
-                    dp_mach_load(mach, img);
-                    FILE *sf = fopen(sta.sav_path, "wb");
-                    if (sf) {
-                        fwrite(mach->api->eram, 1, dp_gbl_variant_eram[vi], sf);
-                        fclose(sf);
-                        fprintf(stderr, "deepeel: battery RAM written to %s\n", sta.sav_path);
-                    } else {
-                        fprintf(stderr, "deepeel: cannot write %s\n", sta.sav_path);
-                        rc = 1;
-                    }
-                }
-            }
-        }
-    } else {
-        clock_t t0 = clock();
-        dp_explore(ex);
-        dp_disc_add(&res, "explore", 0); // method shares: the fork explorer
-        closure_rounds(ex, &res, &seed_spent, seed_total);
-        int iseeds = dp_seed_indirect(ex, seed_total - seed_spent);
-        seed_spent += (uint32_t)iseeds;
-        if (iseeds) {
-            dp_disc_add(&res, "indirect", 0);
-            dp_explore(ex);
-            dp_disc_add(&res, "indirect-search", 0);
-            closure_rounds(ex, &res, &seed_spent, seed_total);
-        }
-        double secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
-        DpBuf out;
-        dp_buf_init(&out);
-        dp_report_text(&res, &cfg, &out);
-        fwrite(out.p, 1, out.len, stdout);
-        dp_buf_free(&out);
-        write_rtcode(&res, rtcode_path);
-        write_ramcode(&res, ramcode_path);
-        fprintf(stderr, "deepeel: done in %.2fs\n", secs);
-    }
-    if (json) {
-        DpBuf out;
-        dp_buf_init(&out);
-        dp_report_json(&res, &cfg, &out);
-        if (!write_file(json, &out)) rc = 1;
-        dp_buf_free(&out);
-    }
-    if (text) {
-        DpBuf out;
-        dp_buf_init(&out);
-        dp_report_text(&res, &cfg, &out);
-        if (!write_file(text, &out)) rc = 1;
-        dp_buf_free(&out);
-    }
-    if (summary) {
-        DpBuf out;
-        dp_buf_init(&out);
-        dp_report_summary(&res, &cfg, &tree, stop_txt, play_frames, scfg.tas_n, &out);
-        if (!write_file(summary, &out)) rc = 1;
-        dp_buf_free(&out);
-    }
-    if (cov) {
-        DpBuf out;
-        dp_buf_init(&out);
-        dp_report_cov(&res, &out);
-        if (!write_file(cov, &out)) rc = 1;
-        dp_buf_free(&out);
-    }
-    if (romdata) {
-        DpBuf out;
-        dp_buf_init(&out);
-        dp_report_romdata(&res, &out);
-        if (!write_file(romdata, &out)) rc = 1;
-        dp_buf_free(&out);
-    }
-    if (map) {
-        DpBuf out;
-        dp_buf_init(&out);
-        size_t ml = strlen(map);
-        int as_text = (ml > 4 && (!strcmp(map + ml - 4, ".map") || !strcmp(map + ml - 4, ".txt")));
-        if (!as_text) {
-            // the PNG is the default: 1 px per byte image + the .map, the
-            // settings and the played usage embedded (zTXt).  A path with
-            // no extension gets ".png".
-            const char *base = strrchr(map, '/');
-            base = base ? base + 1 : map;
-            char *png = NULL;
-            if (!strchr(base, '.') && (png = malloc(ml + 5))) snprintf(png, ml + 5, "%s.png", map);
-            if (!dp_report_map_png(&res, &cfg, path, png ? png : map)) rc = 1;
-            free(png);
-        } else {
-            dp_report_map(&res, &out);
-            if (!write_file(map, &out)) rc = 1;
-        }
-        dp_buf_free(&out);
-    }
-    if (html) {
-        DpBuf out;
-        dp_buf_init(&out);
-        dp_report_html(&res, &out);
-        if (!write_file(html, &out)) rc = 1;
-        dp_buf_free(&out);
-    }
-    {
-        DpMapSummary sum;
-        uint8_t *cls = dp_map_build(&res, &sum);
-        if (cls) {
-            DpBuf out;
-            dp_buf_init(&out);
-            dp_map_summary_text(&sum, &out);
-            dp_map_residual_text(&res, cls, &out);
-            fwrite(out.p, 1, out.len, stdout);
-            dp_buf_free(&out);
-            free(cls);
-        }
-    }
-    if (spool_on) {
-        uint64_t pend = dp_explorer_spool_flush(ex);
-        if (pend)
-            fprintf(stderr, "deepeel: %llu states (%llu MiB) spooled for the next --resume\n",
-                    (unsigned long long)(res.spool_writes - res.spool_reads),
-                    (unsigned long long)(pend >> 20));
-        dp_explorer_exact_save(ex, exact_path);
-    }
-    if (scfg.state_dir) {
-        char cpath[540];
-        snprintf(cpath, sizeof cpath, "%s/coverage.bin", scfg.state_dir);
-        if (!dp_results_cov_save(&res, cpath)) fprintf(stderr, "deepeel: cannot save %s\n", cpath);
-        {
-            char spath[560];
-            snprintf(spath, sizeof spath, "%s.sticky", cpath);
-            DpMapSummary ms;
-            free(dp_map_build(&res, &ms)); // refreshes the sticky classes before they are saved
-            if (!dp_map_sticky_save(&res, spath)) fprintf(stderr, "deepeel: cannot save %s\n", spath);
-        }
-        char dpath[540];
-        snprintf(dpath, sizeof dpath, "%s/disc.bin", scfg.state_dir);
-        if (!dp_results_disc_save(&res, dpath)) fprintf(stderr, "deepeel: cannot save %s\n", dpath);
-    }
-    if (fdir) {
-        if (!scfg.state_dir) mkdir(fdir, 0777);
-        int fr = dp_explorer_frontier_save(ex, fdir);
-        if (fr) fprintf(stderr, "deepeel: %d continuations/seeds saved in %s/frontier for --resume\n", fr, fdir);
-    }
-    dp_explorer_free(ex);
-    if (play_engine) dp_play_free(play_engine);
-    dp_mach_close(mach);
-    dp_mapwin_stop();
-    dp_results_free(&res);
-    dp_cart_free(cart);
-    return rc;
 }
 
-static void report_lanes(const DpPlay *p, const DpResults *res, DpBuf *out) {
-    DpSessionLane lanes[DP_MAX_SESSIONS + 1];
-    int n = dp_play_lanes((DpPlay *)p, lanes, DP_MAX_SESSIONS + 1);
-    static const char *mode[6] = { "rng", "attract", "script", "tas", "fixed", "human" };
-    dp_buf_str(out, "\nsessions (final):\n");
-    for (int i = 0; i < n; i++) {
-        dp_buf_fmt(out, "  s%d %-7s frames=%-7u epoch-credit=%-6llu total=%-8llu b%d:%04x%s%s\n",
-                   lanes[i].id, mode[lanes[i].mode & 7], lanes[i].frame,
-                   (unsigned long long)lanes[i].credit_epoch, (unsigned long long)lanes[i].credit_total,
-                   lanes[i].bank, lanes[i].pc, lanes[i].dead ? " dead" : "",
-                   lanes[i].backtracked ? " backtracked" : "");
-    }
-    uint64_t b[DP_CLS_COUNT], tot = 0;
-    dp_results_breakdown(res, b);
-    for (int i = 0; i < DP_CLS_COUNT; i++) tot += b[i];
-    static const char *nm[DP_CLS_COUNT] = { "executed (natural)", "executed (forced only)",
-        "static flow only", "data copied/verbatim", "data read", "pointer/padding", "unexplained" };
-    dp_buf_str(out, "\nper-byte classification (exclusive, tool observation):\n");
-    for (int i = 0; i < DP_CLS_COUNT; i++)
-        dp_buf_fmt(out, "  %-24s %7llu  %5.1f%%\n", nm[i], (unsigned long long)b[i],
-                   tot ? 100.0 * (double)b[i] / (double)tot : 0.0);
-}
 
 // re-render the squares image from a saved .map text — no exploration: the
 // map is trusted as written (explore --map or mapx produced it).  --meta
@@ -1755,7 +1189,6 @@ static int cmd_nes(int argc, char **argv) {
         else if (!strcmp(a, "--ctx-live")) opt.ctx_live = 1;
         else if (!strcmp(a, "--queue-max") && i + 1 < argc) opt.queue_max = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--spool") && i + 1 < argc) opt.lot_path = argv[++i];
-        else if (!strcmp(a, "--resume") && i + 1 < argc) { opt.lot_path = argv[++i]; opt.lot_drain = 1; }
         else if (!strcmp(a, "--seed-banks")) opt.seed_banks = 1;
         else if (!strcmp(a, "--music-index")) { if (i + 1 < argc && argv[i + 1][0] != '-') midx_file = argv[++i]; else midx_file = ""; }
         else if (!strcmp(a, "--seed-vectors")) opt.seed_vectors = 1;
@@ -2067,45 +1500,6 @@ static int cmd_dis(int argc, char **argv) {
 // seeds nothing — accepted or refused — or the round cap is reached.  A
 // refused seed is retried the next round, once the search freed queue room.
 // Each search gets a fresh wall.
-static void closure_rounds(DpExplorer *ex, DpResults *res, uint32_t *seed_spent,
-                           uint32_t seed_total) {
-    // --no-closure stops the flow closure and its seeds only: provenance and
-    // copy siblings have their own switches
-    for (int r = 0; !ex->cfg.no_closure && r < ex->cfg.closure_rounds; r++) {
-        uint32_t marked = dp_static_closure(res);
-        uint32_t rseeded = dp_residual_target(ex, 4096); // residual ranges: re-proof or forced entry (the tried set bounds reloops)
-        uint32_t ref0 = res->closure_seeds_refused;
-        int seeded = dp_closure_seed(ex, seed_total - *seed_spent) + (int)rseeded; // the cascade solde
-        *seed_spent += (uint32_t)seeded;
-        uint32_t refused = res->closure_seeds_refused - ref0;
-        fprintf(stderr, "deepeel: closure round %d: +%u static bytes, %d entries seeded (%u residual-targeted), %u refused\n",
-                r + 1, marked, seeded, res->residual_seeded, refused);
-        if (!seeded && !refused) break; // provenance + final closure still run
-        ex->stop = 0;
-        ex->steps_own = 0;
-        ex->cfg.dfs = 1;
-        uint32_t k0 = res->disc_n ? res->disc[res->disc_n - 1].known : 0;
-        dp_explore(ex);
-        {
-            char nm[48];
-            snprintf(nm, sizeof nm, "closure-%d", r + 1);
-            dp_disc_add(res, nm, 0);
-            if (res->disc_n) res->disc[res->disc_n - 1].credit = res->disc[res->disc_n - 1].known - k0;
-        }
-    }
-    if (!ex->cfg.no_provenance) {
-        dp_provenance(res);
-        fprintf(stderr, "deepeel: provenance: %u jp-hl targets, %u data bytes proven (%u partial, %u caps)\n",
-                res->prov_jp_hl, res->prov_data, res->prov_unresolved, res->prov_sat);
-    }
-    if (!ex->cfg.no_siblings) {
-        uint32_t sib = dp_copy_siblings(res);
-        fprintf(stderr, "deepeel: copy siblings: %u tables, %u ranges, %u bytes inferred (%u refused, %u caps)\n",
-                res->sib_tables, res->sib_ranges, sib, res->sib_refused, res->sib_caps);
-    }
-    // the last search may have opened more direct flow
-    if (!ex->cfg.no_closure) dp_static_closure(res);
-}
 
 static void md_regs_print(void) {
     printf("megadrive register registry (%d entries):\n", dp_md_reg_count);

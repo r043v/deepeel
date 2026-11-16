@@ -337,3 +337,16 @@ Retirés : `--play-steps/--play-sessions/--play-pool`, `--novelty*`, `--export-s
 - typage des accès registres/ports (YM2413 FM typé, ports MSX2 V9938, VDP, bancs) dans le rapport du noyau ;
 - sorties `--evidence`, `--romdata`, `--rtcode` du noyau (acceptées, signalées « non produites ») ;
 - sessions de lecture TAS aléatoires (`--tas-rng-*`) : déjà couvertes par les checkpoints `--tas-ckpt-every` du noyau.
+
+## Retrait du moteur GB historique (0.372.0)
+
+Le noyau `dp_core_explore` est le seul moteur, GB compris. Retirés : `explorer`,
+`forks`, `streams`, `seeds`, `ctxproj`, `sections`, `copies`, `rtcode`, `sessions`,
+`tree`, `closure`, `residual`, `provenance`, `frontier_disk`, la GUI SDL historique
+(`--gui`, `--human`, `--play`) et leurs tests. Conservés : le modèle de résultats
+(`src/explore/results.[ch]`, utilisé par la couche rapport et la commande `map`) et
+les fenêtres `--watch` / `--mapwin` (`src/gui/windows.c`). Les options retirées sont
+acceptées et ignorées avec une ligne sur stderr (`retired_option`).
+
+Écarts consignés, à combler dans le noyau : sessions de lecture historiques, frontière
+par lots, `--evidence`/`--romdata`/`--rtcode` GB, cellules legacy.

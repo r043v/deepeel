@@ -14,11 +14,12 @@ sources, frontière différée, feuille de route) est `docs/COUVERTURE.fr.md`.
   construction par `tests/build_fixtures.py` dans le répertoire de build ;
   les ROMs réelles restent hors du dépôt (essais manuels dans `output/`,
   ignoré).
-- Les changements du moteur d'exploration doivent garder les 5 tests verts :
-  `ctest --test-dir build --output-on-failure`. `test_explorer` épingle les
-  comportements contractuels : les deux côtés d'un conditionnel, l'éviction
-  par contexte, les enregistrements de copie (boucle CPU, OAM DMA), la
-  timeline de banques, le verdict `required`/`forced`, le bornage des boucles.
+- Les changements du noyau d'exploration (`src/explore/core.c`) doivent garder la
+  suite verte : `ctest --test-dir build --output-on-failure` (`test_core`,
+  `test_coverage`, fixtures du noyau). Contrats épinglés : les deux côtés d'un
+  conditionnel, l'éviction par contexte, les enregistrements de copie, la timeline
+  de banques, le verdict `required`/`forced`, le bornage des boucles. Le noyau est
+  le seul moteur (les moteurs historiques sont retirés).
 - Un fork d'exploration est borné par défaut (budget de pas, cap d'arrière-branche,
   cap de forks par site, compteur de saturation rapporté, jamais silencieux). Exception
   décidée par le propriétaire : `--unbounded` lève ces plafonds (cap de forks, file,

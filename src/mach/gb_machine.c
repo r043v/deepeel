@@ -8,10 +8,11 @@
 #include "m0boy.h"
 #include "../explore/core.h"
 #include "../explore/tas.h"
-#include "../explore/explorer_priv.h"
+#include "../explore/gambatte_init.h"
 #include <stddef.h>
 
-void dp_tas_tune_machine(DpMach *mach, const DpTas *tas);   // sessions.c: the recorder's timing quirks
+static void gb_tas_tune(DpMach *mach, const DpTas *tas);
+
 
 // The kernel-facing view of one m0boy instance.  Each wrapper owns its observer and its step
 // counter, so several instances (parallel workers, one per compiled slot) run side by side.
@@ -273,7 +274,7 @@ static DpMachine *gb_clone(DpMachine *m, unsigned worker) {
         if (!d) continue;
         dp_mach_set_rom(d, o->rom, (uint32_t)o->rom_size);
         dp_mach_reset(d);
-        if (o->tas) dp_tas_tune_machine(d, o->tas);
+        if (o->tas) gb_tas_tune(d, o->tas);
         DpMachine *c = gb_wrap(d);
         if (!c) { dp_mach_close(d); return NULL; }
         gbw(c)->rom = o->rom; gbw(c)->rom_size = o->rom_size; gbw(c)->tas = o->tas;
@@ -331,5 +332,95 @@ static DpMachine *gb_wrap(DpMach *impl) {
 // applies the movie's recorder sync profile to this instance and to every clone
 void dp_machine_gb_set_tas(DpMachine *m, const struct DpTas *tas) {
     gbw(m)->tas = tas;
-    dp_tas_tune_machine(gbw(m)->d, tas);
+    gb_tas_tune(gbw(m)->d, tas);
+}
+
+// per-recorder machine tuning for the movie loaded in w (sync profiles, frame 0 input)
+static void gb_tas_tune(DpMach *mach, const DpTas *tas) {
+    // the recording emulator's timing quirks (gbl.h movie sync
+    // knobs), for this worker's machine only and while the movie
+    // plays: random play after it runs on hardware timing again
+    // BizHawk (Gambatte) powers a cartridge up with blank battery RAM
+    // filled with $FF: games that read their save slot (Mario Land 2)
+    // branch on it, so a zeroed RAM replays another game
+    if ((tas->recorder == DP_TAS_REC_BIZHAWK || (tas->recorder == DP_TAS_REC_VBA && tas->recorder_rev == 0 && !getenv("DEEPEEL_TAS_NOINIT"))) && mach->api->eram)
+        memset(mach->api->eram, 0xFF, dp_gbl_variant_eram[mach->api->variant]);
+    // VBA-rr's V8 core (VBM minor version 1) powers WRAM up with a fixed
+    // pattern ($FF x8 / $0F x8, blocks of $800 alternating), HRAM with $FF
+    // (observed on the VBA-rr headless harness); the V7 core (minor 0)
+    // powers up zeroed, like m0boy: uninitialised reads depend on it
+    if (tas->recorder == DP_TAS_REC_VBA && tas->recorder_rev >= 1 && !getenv("DEEPEEL_TAS_NOINIT")) {
+        for (int i = 0; i < 0x2000; i++)
+            mach->api->wram[i] = (((i >> 3) ^ (i >> 11)) & 1) ? 0x0F : 0xFF;
+        memset(mach->api->hram, 0xFF, 0x7F);
+    }
+    // BizHawk's Gambatte starts from a fixed power-on RAM dump, not zeros
+    if (tas->recorder == DP_TAS_REC_BIZHAWK && tas->gambatte && !getenv("DEEPEEL_TAS_NOINIT")) {
+        memcpy(mach->api->wram, dp_gambatte_wram, 0x2000);
+        memcpy(mach->api->hram, dp_gambatte_hram, 0x7F);
+    }
+    // BizHawk's GBHawk (gbl.h): the pad is latched at the vblank
+    // edge inside its fixed frame (65,664 cycles to LY 144); the
+    // worker applies the next mask just after the m0boy vblank, so
+    // the pad needs a 14,481-cycle delay (measured window
+    // 14,470..14,550; the PPU phase below moves the m0boy vblank
+    // edge but the pad window keeps 14,481).  The divider phase at
+    // $0100 is 0xFE4D, and GBHawk is 405 cycles into line 153
+    // there (LY zeroed by its cycle-6 rule; gbl.h, sync_ppu_phase:
+    // applied to the loaded state, it makes every LY read match).
+    // GBHawk keeps the WRAM zero (no power-on dump) and its frames
+    // are always 70224 cycles, like the vblank clock: no mode-3
+    // clock change applies.
+    if (tas->recorder == DP_TAS_REC_BIZHAWK && tas->gbhawk) {
+        *mach->api->sync_pad_delay = getenv("DEEPEEL_TAS_PADDELAY")
+            ? (uint32_t)strtoul(getenv("DEEPEEL_TAS_PADDELAY"), NULL, 0) : 14481u;
+        *mach->api->sync_div_extra = getenv("DEEPEEL_TAS_DIVEXTRA")
+            ? (uint16_t)strtoul(getenv("DEEPEEL_TAS_DIVEXTRA"), NULL, 0) : 0xFE4Du;
+        *mach->api->sync_ppu_phase = getenv("DEEPEEL_TAS_PPUPHASE")
+            ? (uint16_t)strtoul(getenv("DEEPEEL_TAS_PPUPHASE"), NULL, 0) : 405u;
+        mach->api->sync_ppu_apply();
+        fprintf(stderr, "deepeel: TAS %s: GBHawk sync profile (pad latch +14481 cycles, DIV phase $FE4D, PPU phase 405)\n",
+                tas->source);
+    }
+    // BizHawk's frame clock (gbl.h, sync_vba_off_clock 3): a frame ends at
+    // the video frame or when its sample budget runs out
+    if (tas->recorder == DP_TAS_REC_BIZHAWK && tas->gambatte && !tas->equal_frames && !getenv("DEEPEEL_TAS_NOMODE3"))
+        *mach->api->sync_vba_off_clock = 3;
+    // Gambatte's DIV phase against the m0boy clock, measured on SML2 (DIV
+    // reads that seed its RNG): any skew in 25..64 matches, 40 is mid-range.
+    if (tas->recorder == DP_TAS_REC_BIZHAWK && tas->gambatte)
+        *mach->api->sync_div_skew = getenv("DEEPEEL_TAS_DIVSKEW") ? (uint8_t)atoi(getenv("DEEPEEL_TAS_DIVSKEW")) : 40;
+    if (tas->echo_old && !getenv("DEEPEEL_TAS_NOECHO")) {
+        *mach->api->sync_echo_old = 1;
+        mach->api->sync_echo_apply();
+        fprintf(stderr, "deepeel: TAS %s: VBA echoRAMFix off ($E000-$FDFF is separate memory)\n", tas->source);
+    }
+    int vba_old = tas->recorder == DP_TAS_REC_VBA && tas->recorder_rev == 0;
+    if (vba_old) {
+        // VBA 1.7.2 based recorders (VBM minor version 0): input
+        // read at each vblank, no frame while the LCD is off, a
+        // ten-line line 0 after an enable.  Partial: their CPU
+        // timing quirks (cycle table, HALT wake-up) stay hardware
+        *mach->api->sync_vba_off_clock = getenv("DEEPEEL_TAS_OFFCLOCK")
+            ? (uint8_t)atoi(getenv("DEEPEEL_TAS_OFFCLOCK")) : 2;
+        // V7 reads LY at the start of the reading instruction (gbl.h, sync_ly_lag)
+        *mach->api->sync_ly_lag = getenv("DEEPEEL_TAS_LYLAG")
+            ? (int16_t)atoi(getenv("DEEPEEL_TAS_LYLAG")) : 1;
+        // V7 counts no tick for the interrupt dispatch (20 cycles on the hardware)
+        *mach->api->sync_irq_trim = getenv("DEEPEEL_TAS_IRQTRIM")
+            ? (int16_t)atoi(getenv("DEEPEEL_TAS_IRQTRIM")) : 20;
+        // V7 wakes a halted CPU on its 96-cycle sound grid (gbl.h, sync_halt_snd);
+        // DEEPEEL_TAS_HALTSND = grid phase in cycles, -1 = hardware wake-up
+        {
+            const char *hs = getenv("DEEPEEL_TAS_HALTSND");
+            *mach->api->sync_halt_snd = (int16_t)((hs ? atoi(hs) : 0) + 1);
+        }
+        fprintf(stderr, "deepeel: TAS %s: VBA 1.7.2 sync profile (input at vblank, no LCD-off frame, "
+                        "ten-line enable)\n", tas->source);
+    } else if (tas->recorder == DP_TAS_REC_VBA) {
+        *mach->api->sync_div_skew = 4;
+        *mach->api->sync_vba_off_clock = 1;
+        fprintf(stderr, "deepeel: TAS %s: VBA sync profile (DIV read +4 cycles, VBA LCD-off frame clock)\n",
+                tas->source);
+    }
 }

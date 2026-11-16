@@ -1,7 +1,7 @@
 // test_coverage.c: the common nature projection must reproduce the historical
 // GB map classes for every flag combination, and sources must accumulate.
 #include "test_util.h"
-#include "../src/explore/explorer.h"
+#include "../src/explore/results.h"
 #include "../src/report/report.h"
 
 // the pre-J1 cascade of dp_map_build, kept here as the reference
