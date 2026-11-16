@@ -103,6 +103,8 @@ int dp_nesmach_set_bank(DpNesMach *m, unsigned bank);
  * carries the song number in A and starts on the rip's stack) */
 void dp_nesmach_set_a(unsigned a);
 void dp_nesmach_set_sp(unsigned sp);
+/* the live 6502 registers (C3: the static closure's concrete bootstrapping state) */
+void dp_nesmach_regs(unsigned *a, unsigned *x, unsigned *y, unsigned *s);
 /* the CPU address a music seed (physical PRG cell) runs at under the current
  * view (both 8 KiB halves), 0 when no window shows it, -1 outside the PRG */
 int64_t dp_nesmach_seed_pc(DpNesMach *m, uint32_t rom);

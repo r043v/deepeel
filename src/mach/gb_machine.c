@@ -189,6 +189,16 @@ static uint64_t gb_ctx_reg_hash(DpMachine *m) {   // the register block before t
     for (size_t i = 0; i < offsetof(gbl_cpu_t, cyc); i++) h = (h ^ b[i]) * 0x100000001b3ull;
     return h;
 }
+// C3: the concrete SM83 registers (every byte known) for the static closure's bootstrapping
+static int gb_get_regs(DpMachine *m, DpRegState *out) {
+    const gbl_cpu_t *c = gbw(m)->d->api->gbr;
+    dp_regstate_clear(out);
+    out->v[DP_SM83R_BC] = c->bc; out->v[DP_SM83R_DE] = c->de; out->v[DP_SM83R_HL] = c->hl; out->v[DP_SM83R_SP] = c->sp;
+    out->v[DP_SM83R_A] = c->a;
+    out->known[DP_SM83R_BC] = out->known[DP_SM83R_DE] = out->known[DP_SM83R_HL] = out->known[DP_SM83R_SP] = 3;
+    out->known[DP_SM83R_A] = 1;
+    return 1;
+}
 static int gb_ctx_components(DpMachine *m, const DpCtxComp **out) {
     (void)m;
     *out = gb_ctx;
@@ -331,6 +341,7 @@ static DpMachine *gb_wrap(DpMach *impl) {
     m->observe = gb_observe;
     m->ctx_components = gb_ctx_components;
     m->ctx_reg_hash = gb_ctx_reg_hash;
+    m->get_regs = gb_get_regs;
     m->probes = gb_probes;
     m->close = gb_close;
     return m;

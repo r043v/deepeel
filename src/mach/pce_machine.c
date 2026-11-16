@@ -193,6 +193,17 @@ static int pce_seed_regs(DpMachine *m, uint8_t a, uint16_t sp) {
     if (sp != 0xFFFF) dp_pce_set_sp((uint8_t)sp);
     return 1;
 }
+// C3: the concrete HuC6280 registers and MPR bank windows (every byte known)
+static int pce_get_regs(DpMachine *m, DpRegState *out) {
+    pce_ensure(m);
+    DpPceCpu c = dp_pce_cpu();
+    dp_regstate_clear(out);
+    out->v[DP_HUCR_A] = c.a; out->v[DP_HUCR_X] = c.x; out->v[DP_HUCR_Y] = c.y; out->v[DP_HUCR_S] = c.s;
+    for (unsigned i = 0; i < 8; i++) out->v[DP_HUCR_MPR0 + i] = c.mpr[i];
+    for (unsigned i = 0; i < 4; i++) out->known[i] = 1;
+    for (unsigned i = DP_HUCR_MPR0; i <= DP_HUCR_MPR7; i++) out->known[i] = 1;
+    return 1;
+}
 // per-bank seeding: the $4000-$7FFF window shows 16 KiB block `bank`
 static int pce_bank_view(DpMachine *m, unsigned bank) {
     pce_ensure(m);
@@ -326,6 +337,7 @@ DpMachine *dp_machine_pce(void) {
     m->isa = dp_isa_huc6280();
     m->ctx_components = pce_ctx_components;
     m->ctx_reg_hash = pce_ctx_reg_hash;
+    m->get_regs = pce_get_regs;
     m->pc = pce_pc;
     m->set_pc = pce_set_pc;
     m->seed_regs = pce_seed_regs;

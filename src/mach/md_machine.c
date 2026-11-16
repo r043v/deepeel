@@ -112,6 +112,15 @@ static int md_seed_regs(DpMachine *m, uint8_t a, uint16_t sp) {
 // an SP below that pops ROM or bus garbage (no echo/I-O pc cut: the MD maps
 // nothing a path could reasonably execute into and call code)
 static int md_cut_sp(DpMachine *m) { return dp_mdmach_sp(((MdMachWrap *)m->impl)->m) < 0xFF0000u; }
+// C3: the concrete 68000 registers (every byte known; SR is not a code pointer)
+static int md_get_regs(DpMachine *m, DpRegState *out) {
+    const DpMdMach *d = ((MdMachWrap *)m->impl)->m;
+    dp_regstate_clear(out);
+    for (unsigned i = 0; i < 8; i++) out->v[DP_M68KR_D0 + i] = dp_mdmach_dn(d, i);
+    for (unsigned i = 0; i < 8; i++) out->v[DP_M68KR_A0 + i] = dp_mdmach_an(d, i);
+    for (unsigned i = 0; i < 16; i++) out->known[i] = 0x0F;
+    return 1;
+}
 // shared DP_DEST_* knowledge: the PSG ($C00011) is fed music data, the VDP
 // data port ($C00000) writes graphics memory (the CRAM/VSRAM distinction
 // needs the VDP address register state, not exposed by the runtime: VRAM)
@@ -269,6 +278,7 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->isa = dp_isa_68000();
     m->ctx_components = md_ctx_components;
     m->ctx_reg_hash = md_ctx_reg_hash;
+    m->get_regs = md_get_regs;
     m->pc = md_pc;
     m->set_pc = md_set_pc;
     m->set_input = md_set_input;

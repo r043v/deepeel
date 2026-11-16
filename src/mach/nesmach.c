@@ -500,6 +500,10 @@ uint8_t dp_nesmach_read(const DpNesMach *d, unsigned addr) {
 
 unsigned dp_nesmach_pc(const DpNesMach *d) { (void)d; return machine.cpu.pc; }
 void dp_nesmach_set_pc(DpNesMach *d, unsigned pc) { (void)d; machine.cpu.pc = (uint16_t)pc; }
+// the live 6502 registers (C3: the static closure's concrete bootstrapping state)
+void dp_nesmach_regs(unsigned *a, unsigned *x, unsigned *y, unsigned *s) {
+    *a = machine.cpu.a; *x = machine.cpu.x; *y = machine.cpu.y; *s = machine.cpu.s;
+}
 unsigned dp_nesmach_bank(const DpNesMach *d) { (void)d; return machine.cpu.bank; }
 unsigned dp_nesmach_p(const DpNesMach *d) { (void)d; return machine.cpu.p; }
 unsigned dp_nesmach_nmi_pending(const DpNesMach *d) { (void)d; return machine.cpu.nmi_edge; }

@@ -95,6 +95,24 @@ static uint64_t sega_ctx_reg_hash(DpMachine *m) {   // the Z80 registers (no R r
     for (size_t i = 0; i < sizeof w; i++) h = (h ^ ((const uint8_t *)w)[i]) * 0x100000001b3ull;
     return h;
 }
+// C3: the concrete Z80 registers (every byte known) for the static closure's
+// bootstrapping; a halted or faulted CPU has no meaningful state
+static int sega_get_regs(DpMachine *m, DpRegState *out) {
+    const z80_t *c = ((SegaMach *)m->impl)->b->cpu();
+    if (c->halted || c->fault) return 0;
+    dp_regstate_clear(out);
+    out->v[DP_Z80R_BC] = c->bc; out->v[DP_Z80R_DE] = c->de; out->v[DP_Z80R_HL] = c->hl;
+    out->v[DP_Z80R_IX] = c->ix; out->v[DP_Z80R_IY] = c->iy; out->v[DP_Z80R_SP] = c->sp;
+    out->v[DP_Z80R_BC2] = c->bc2; out->v[DP_Z80R_DE2] = c->de2; out->v[DP_Z80R_HL2] = c->hl2;
+    out->v[DP_Z80R_AF2] = c->af2;
+    out->v[DP_Z80R_A] = c->a; out->v[DP_Z80R_F] = c->f;
+    out->v[DP_Z80R_B] = c->b; out->v[DP_Z80R_C] = c->c; out->v[DP_Z80R_D] = c->d;
+    out->v[DP_Z80R_E] = c->e; out->v[DP_Z80R_H] = c->h; out->v[DP_Z80R_L] = c->l;
+    for (unsigned i = 0; i < DP_Z80R_BC2; i++) out->known[i] = 3;   // the pairs, bytes 0-1
+    for (unsigned i = DP_Z80R_BC2; i <= DP_Z80R_AF2; i++) out->known[i] = 3;
+    for (unsigned i = DP_Z80R_A; i <= DP_Z80R_L; i++) out->known[i] = 1;
+    return 1;
+}
 static uint32_t sega_pc(DpMachine *m) { return ((SegaMach *)m->impl)->b->cpu()->pc; }
 static void sega_set_pc(DpMachine *m, uint32_t pc) { ((SegaMach *)m->impl)->b->cpu()->pc = (uint16_t)pc; }
 // register seeds (music rips): the Z80 registers are directly writable through the backend
@@ -275,6 +293,7 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->isa = dp_isa_z80();
     m->ctx_components = sega_ctx_components;
     m->ctx_reg_hash = sega_ctx_reg_hash;
+    m->get_regs = sega_get_regs;
     m->impl = s;
     m->state_bytes = sega_state_bytes;
     m->save = sega_save;

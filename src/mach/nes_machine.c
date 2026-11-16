@@ -135,6 +135,16 @@ static uint64_t nes_ctx_reg_hash(DpMachine *m) {   // C11
     free(b);
     return h;
 }
+// C3: the concrete 6502 registers (every byte known) for the static closure's bootstrapping
+static int nes_get_regs(DpMachine *m, DpRegState *out) {
+    (void)m;
+    unsigned a, x, y, s;
+    dp_nesmach_regs(&a, &x, &y, &s);
+    dp_regstate_clear(out);
+    out->v[DP_M6502R_A] = a; out->v[DP_M6502R_X] = x; out->v[DP_M6502R_Y] = y; out->v[DP_M6502R_S] = s;
+    out->known[DP_M6502R_A] = out->known[DP_M6502R_X] = out->known[DP_M6502R_Y] = out->known[DP_M6502R_S] = 1;
+    return 1;
+}
 static int nes_arm_read(DpMachine *m, uint32_t addr, uint8_t value) { dp_nesmach_arm_read(nes_impl(m), (uint16_t)addr, value); return 1; }
 static void nes_set_input(DpMachine *m, uint32_t k) {
     uint8_t p = 0;
@@ -212,6 +222,7 @@ DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err
     m->isa = dp_isa_m6502();
     m->ctx_components = nes_ctx_components;
     m->ctx_reg_hash = nes_ctx_reg_hash;
+    m->get_regs = nes_get_regs;
     m->pc = nes_pc;
     m->set_pc = nes_set_pc;
     m->set_input = nes_set_input;
