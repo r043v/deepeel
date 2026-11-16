@@ -545,3 +545,12 @@ Observation de l'outil sur Zelda (60 écritures rejouées, `--jobs 1`) : 0 octet
 n'a pas de gain démontré (les aides de bascule de banque se terminent par `ret` avec la banque en paramètre, sans constante visible). Les essais rejetés
 « retours résolus » et « cibles par `ld rr,nn` » avaient eux aussi été jugés sur `--cov` : le premier reste sans effet sur le compteur de statique (7 855
 inchangé), le second n'a suivi aucune cible ; leurs verdicts sur le statique sont à prendre avec cette réserve.
+
+### Essai C3 rejeté : `jp (hl)` par constante `ld hl,nn` (0.380.1)
+
+Observation de l'outil (Action Fighter UE, `--attract-frames 600 --max-total 3000000 --jobs 1`, fermeture Sega coupée par `DEEPEEL_NO_SEGA_CLOSURE=1`) : le
+marcheur du noyau, doté d'un suivi de HL par `ld hl,nn`, ne résout qu'**un** saut `jp (hl)` ; octets statiques seuls inchangés (7 855). Retiré. Localisation
+du gain de `sega/closure.c` : la fermeture est amorcée à chaque pas exécuté avec l'état concret de la CPU (pc, sp, HL/IX/IY/C, vue de banque) ; ses blocs
+propres (plusieurs centaines d'octets, sans `call`/`jp` absolu qui les désigne en ROM) ne viennent donc pas des `jp (hl)` à constante visible. Candidats non
+vérifiés : retours résolus par la pile concrète, tables lues en ROM. `sega/closure.c` reste en place tant qu'un banc octet à octet SMS/GG/SG/MSX ne prouve
+pas l'équivalence.
