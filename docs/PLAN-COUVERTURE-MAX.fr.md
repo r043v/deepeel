@@ -519,3 +519,8 @@ propagation reste à porter ; `sega/closure.c` n'est pas retiré.
   observations de l'outil, sans comparaison avant/après à budget égal pour chaque technique (la courbe de rendement par source n'est pas produite).
 - **Ouvert, à décider par le propriétaire** : (1) portage de la propagation de constantes de registres de `sega/closure.c` dans le noyau (chantier C3) ;
   (2) validation de la limite C11 (projection de contexte, raffinement d'élagage sans octet de couverture) ; (3) la courbe de rendement par technique (E).
+
+Essai C3 rejeté (0.380.0, non livré) : cible de saut indirect déduite d'un `ld rr,nn` précédent (≤ 3 instructions) dans le marcheur du noyau. Observation de l'outil
+sur Action Fighter UE (fermeture Sega coupée, `--jobs 1`) : 0 cible suivie, couverture `--cov` identique. Le gain de `sega/closure.c` ne vient donc ni des
+changements de banque ni de `jp (hl)` après `ld hl,nn` ; la piste restante est la propagation des constantes vers des appels et des lectures de table
+(`indirect_resolved`/`memory_resolved` valent 0 sur cette ROM) et les retours résolus (`returns_resolved`). Non portée.
