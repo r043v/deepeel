@@ -642,3 +642,20 @@ différence de 10⁶ à 3·10⁶ sur `--no-site-score` (+0,5 puis −35) montre 
 Action Fighter UE (`--jobs 1`, fermeture Sega coupée) : 7 855 → 17 472 octets statiques seuls (le même chiffre que l'essai « confiance après appel » plus
 haut, donc l'appelé connu n'apporte aucun filtre). +9 600 octets contre +85 pour la condition de retour de la fermeture Sega : sans vérité terrain (code vs
 données), le surplus ne peut pas être accepté. Retiré. La condition de retour reste à écrire à partir de la pile concrète de la fermeture Sega ; non faite.
+
+### C3 : banc comparatif de la fermeture Sega sur quatre ROMs (observation de l'outil)
+
+`--attract-frames 300 --max-total 1500000 --jobs 1`, ligne « static closure » du rapport texte, avec puis sans `DEEPEEL_NO_SEGA_CLOSURE=1` (ROMs hors dépôt).
+Les nombres sont les octets statiques seuls ; une exécution par case. Ce banc compare des totaux, **pas** des ensembles d'octets : il ne remplace pas le
+banc octet à octet exigé avant tout retrait de `sega/closure.c`.
+
+| ROM | sans | avec | écart |
+|---|---|---|---|
+| Ace of Aces (SMS) | 8 584 | 9 548 | +964 |
+| Addams Family (GG) | 8 156 | 8 919 | +763 |
+| Aerial Assault (GG) | 13 518 | 16 321 | +2 803 |
+| Bank Panic (SG) | 1 277 | 1 891 | +614 |
+
+Corrige l'estimation de la section précédente : les 85 octets d'Action Fighter UE étaient un cas bas ; sur ces quatre ROMs la fermeture Sega ajoute de 7 à 48 %
+de statique seul. MSX (Aleste, Gradius 2) : non mesuré, la mesure a été interrompue par le système (mémoire basse) ; à refaire sans autre charge. Le port de
+la condition de retour porte donc un enjeu réel de couverture, pas marginal.
