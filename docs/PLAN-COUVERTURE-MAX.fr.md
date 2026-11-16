@@ -461,3 +461,10 @@ statique (témoins négatifs non classés exigés par P5). Sur Action Fighter l'
 Fighter (+4 407) ne vient donc pas des vues croisées ; les statistiques de la fermeture Sega montrent `indirect_resolved 0` et `memory_resolved 0` sur cette ROM
 (pas de suivi de registres en cause) et `returns_resolved` non nul : la piste restante est la résolution des retours (confiance après appel dont le
 retour est établi) et les graines à chaque instruction observée sous la vue en vigueur. Non portée.
+
+Localisation de l'écart Sega (Action Fighter UE, observation de l'outil, 0.379.1) : les octets que seule la fermeture Sega marque sont de grands blocs
+contigus jamais atteints par le noyau (banque 4 : 1 058 octets à l'offset $098D, 866 à $10A8, 216 à $0FBD ; banque 2 : 1 004 octets à $0D01), précédés
+d'octets non marqués. Les adresses $498D (fenêtre 1 de la banque 4) sont des pointeurs stockés dans la ROM (aux index $10017 et $1A0E4) : le noyau ne les
+suit pas comme racines de code, la fermeture Sega le fait par ses cibles de registres (HL/IX/IY) et ses lectures de table. Suivre ces pointeurs sans
+sur-marquer exige le contrôle de plausibilité de bloc de `--block-closure` (non porté). Ce portage reste le chantier C3 ouvert ; aucun octet
+supplémentaire n'est revendiqué dans cette version.
