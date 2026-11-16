@@ -663,3 +663,7 @@ la condition de retour porte donc un enjeu réel de couverture, pas marginal.
 MSX (mise à jour) : Aleste (`--attract-frames 300 --max-total 200000 --jobs 1`) n'a pas terminé en 120 s (arrêt par `timeout`, aucun rapport écrit), alors
 que les ROMs SMS/GG/SG font 1,5·10⁶ pas dans ce temps. Le banc MSX est donc bloqué par un ralentissement propre au chemin MSX (cause non cherchée), pas
 seulement par la mémoire. À instruire avant tout banc sur cette plateforme.
+
+MSX (correction) : le ralentissement venait de `--attract-frames 300` sur le chemin MSX, pas des pas eux-mêmes ; sans cette option Aleste termine (1,5·10⁶ pas,
+`--jobs 1`). Aleste : 7 094 octets statiques seuls **avec et sans** `DEEPEEL_NO_SEGA_CLOSURE=1`, donc la fermeture Sega n'agit pas sur MSX (le noyau
+générique seul). Gradius 2 : mesure **invalide** (même rapport qu'Aleste, le fichier du run précédent n'a pas été réécrit, le run a dépassé `timeout 200`) ; à refaire.
