@@ -719,3 +719,10 @@ Banc (mêmes réglages que ci-dessus, statique seul, observations de l'outil, `D
 Bilan honnête : le noyau seul gagne sur 3 ROMs (+1 165, +73, +4) et **perd 779 octets sur Aerial Assault** (cause non instruite) ; la fermeture Sega
 apporte encore 764 à 3 007 octets au-dessus (amorçage à chaque pas avec l'état concret, `jp (hl)`/IX/IY). C3 n'est donc **pas terminé** : `sega/closure.c`
 reste en place, aucun banc octet à octet n'a été fait, et sans vérité terrain code/données le sur-marquage ne se juge pas.
+
+### C3 : la perte d'Aerial Assault n'est pas une question de budget (observation de l'outil)
+
+Aerial Assault (GG), statique seul, `DEEPEEL_NO_SEGA_CLOSURE=1`, budget de marche (`CLOSURE_INSTR`) à 4 096, 16 384 et 65 536 : 13 518 sans la pile de retours et
+12 739 avec, **identiques aux trois budgets**, « capped walks 0 » partout. L'hypothèse du budget est écartée. Seule différence visible : 29 racines sans la pile, 28 avec.
+Piste non vérifiée : l'ordre des marches. Une racine déjà marquée est sautée ; si une marche à retour l'atteint la première et s'arrête sur une heuristique de données
+(confiance 0), la marche de confiance qui en aurait tiré davantage est sautée. À instruire (journaliser la racine sautée).
