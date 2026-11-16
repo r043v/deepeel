@@ -500,6 +500,14 @@ def build(out):
     w(r, 0x150, 0x18, 0xFE)                      # jr -2 (self)
     save(out, "fix_loop", r)
 
+    # --- epoch: a main loop whose conditional keeps meeting new RAM contexts (the per-site fork cap, B3 epochs) ----
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x21, 0x00, 0xC0)                         # ld hl,$C000
+    w(r, 0x153, 0x34, 0x7E, 0xE6, 0x0F, 0xFE, 0xF5, 0x20, 0xF8)  # L: inc (hl); ld a,(hl); and $0F; cp $F5 (never equal); jr nz,L
+    w(r, 0x15B, 0x3E, 0x09, 0x76)                         # reached only by a forced fork
+    save(out, "fix_epoch", r)
+
     # --- unreach: code, untouched data blob, more code -----------------------
     r = rom(2)
     w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)

@@ -488,3 +488,6 @@ Cap par époque démontré (observation de l'outil, 0.379.2, ROM GB réelle hors
 `epoch_forks` = 149 avec le cap par défaut (4) et 75 avec `--fork-site-cap 1` ; sessions attract/play, 2 checkpoints de session et 4 rafales. Ce sont des
 fourches qu'un chemin issu d'un checkpoint a pu mettre en file alors que le cap par site les aurait refusées hors époque. Le compteur n'est pas une
 mesure de couverture gagnée en octets ; l'effet sur les octets n'a pas été comparé avant/après.
+
+Fixture du cap par époque (0.379.3) : `fix_epoch.gb` (boucle dont le conditionnel sature un site) + test `core_epoch_cap` (`--fork-site-cap 1`,
+checkpoints de session) exige `epoch_forks` non nul. Observation de l'outil : 1 sur cette fixture.
