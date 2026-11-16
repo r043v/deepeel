@@ -463,7 +463,11 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
     // seeded walk starts from the concrete CPU registers, a plain one from all-unknown)
     DpRegState rg[256], regs;
     int have_regs = regs0 != NULL && isa->reg_effect != NULL;
-    unsigned spw = isa->sp_width, spmask = spw ? (1u << spw) - 1 : 0;   // the modeled stack: slot and word size
+    unsigned spw = isa->sp_width;   // the modeled stack: word size; the register width and stack page come from the ISA (6502 S is 8 bits above $0100)
+    uint32_t spmask = isa->sp_addr_mask;                 // value mask of the SP bits that index memory
+    unsigned spk = spmask, spb = 0;                      // known-bits mask of the same bytes (known[] is per byte)
+    while (spk) { spb++; spk >>= 8; }
+    uint32_t spknown = spb ? (1u << spb) - 1 : 0;
     if (regs0) regs = *regs0; else dp_regstate_clear(&regs);
 #define CLOSURE_POP() do { sp--; cr = rets[sp]; thru = 0; pc = stack[sp][0]; bk = stack[sp][1]; trust = stack[sp][2]; acc_known = 0; regs = rg[sp]; \
         if (stack[sp][3] && budget < CLOSURE_INSTR / 8) budget = CLOSURE_INSTR / 8;   /* a simulated view gets its own bounded budget */ \
@@ -603,13 +607,16 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
         // instruction sees.  Per-site cap as for the indirect resolutions;
         // untrusted continuation (the path may have drifted from the machine's).
         if (spw && cr.n == 0 && (f.kind == DP_FLOW_RET || (f.kind == DP_FLOW_COND && f.target < 0)) &&
-            (regs.known[isa->sp_slot] & spmask) == spmask && v->m) {
-            uint32_t svm = spw >= 4 ? 0xFFFFFFFFu : (1u << (8 * spw)) - 1;
-            uint32_t spv = regs.v[isa->sp_slot] & svm;
-            uint32_t ra = 0;
-            for (unsigned i = 0; i < spw; i++) ra |= (uint32_t)v->m->fetch(v->m, (uint32_t)(spv + i)) << (8 * i);   // little-endian stack
+            (regs.known[isa->sp_slot] & spknown) == spknown && v->m) {
+            unsigned retw = spw, retb = 0, retoff = 0;   // the return opcode's own pull: width, address bias (6502 rts adds one) and byte offset (6502 pushes pre-decrement); unmodeled opcodes (rti, rte) fall past
+            uint32_t spv = 0, ra = 0;
             DpRegState rs = regs;
-            rs.v[isa->sp_slot] = (regs.v[isa->sp_slot] & ~svm) | ((spv + spw) & svm);
+            if (isa->sp_ret && !isa->sp_ret(b, &retw, &retb, &retoff)) goto no_stackret;
+            spv = regs.v[isa->sp_slot] & spmask;
+            if (isa->big_endian) for (unsigned i = 0; i < retw; i++) ra = (ra << 8) | v->m->fetch(v->m, isa->sp_base | ((spv + retoff + i) & spmask));
+            else for (unsigned i = 0; i < retw; i++) ra |= (uint32_t)v->m->fetch(v->m, isa->sp_base | ((spv + retoff + i) & spmask)) << (8 * i);
+            ra += retb;
+            rs.v[isa->sp_slot] = (regs.v[isa->sp_slot] & ~spmask) | ((spv + retw) & spmask);
             int64_t kt = cview_index(v, r, ra, bk);
             if (f.kind == DP_FLOW_RET) {
                 if (kt < 0) r->closure_unresolved++;   // not a mapped ROM address: counted, never followed
@@ -630,6 +637,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
             } else if (kt < 0) r->closure_unresolved++;
             else r->closure_stack_dropped++;
         }
+no_stackret:;
         if (have_regs && isa->reg_effect) {   // the constants survive per the ISA's transfer table
             DpRegState nxt;
             isa->reg_effect(b, pc, &regs, &nxt, &rom);
@@ -645,9 +653,8 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
                     rets[sp].pc[cr.n] = pc + f.length; rets[sp].bk[cr.n] = bk; rets[sp].trust[cr.n] = trust; rets[sp].n = cr.n + 1;
                 }
                 stack[sp][0] = (uint32_t)tgt; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)cur; rg[sp] = regs; sp++;
-                if (f.kind == DP_FLOW_CALL && spw && (rg[sp - 1].known[isa->sp_slot] & spmask) == spmask) {   // the callee runs with the return address pushed
-                    uint32_t svm = spw >= 4 ? 0xFFFFFFFFu : (1u << (8 * spw)) - 1;
-                    rg[sp - 1].v[isa->sp_slot] = (rg[sp - 1].v[isa->sp_slot] & ~svm) | ((rg[sp - 1].v[isa->sp_slot] - spw) & svm);
+                if (f.kind == DP_FLOW_CALL && spw && (rg[sp - 1].known[isa->sp_slot] & spknown) == spknown) {   // the callee runs with the return address pushed
+                    rg[sp - 1].v[isa->sp_slot] = (rg[sp - 1].v[isa->sp_slot] & ~spmask) | ((rg[sp - 1].v[isa->sp_slot] - spw) & spmask);
                 }
             }
             else r->closure_stack_dropped++;   // a root lost to the fixed stack is counted, never silent

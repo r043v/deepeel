@@ -5959,3 +5959,16 @@ statique sur un octet de données ; forcé/inféré/probable rapportés non prou
 provisoire ne bloque plus une racine de confiance (qui le promeut) — la classe d'un octet ne
 dépend plus de l'ordre d'arrivée. Détails, banc et la régression re-marches corrigée :
 `docs/PLAN-COUVERTURE-MAX.fr.md`.
+
+### 0.387.0 — noyau : retours par la pile concrète sur 6502 et 68000
+
+`DpIsa.sp_ret` décrit le pull de chaque opcode de retour — largeur, biais de l'adresse
+(`rts` 6502 poppe l'adresse moins un) et décalage au-dessus du pointeur (le 6502 pousse en
+pré-décrément : le mot de retour vit à S+1..S+2) ; `sp_addr_mask`/`sp_base` séparent la
+largeur du registre SP (S 6502 = index 8 bits dans la page $0100, A7 68000 = 32 bits) de la
+largeur du mot. `rti`/`rte`/`rtr` non modélisés (aucune continuation par pile, le
+continuation fantôme reste) ; HuC6280 non câblé (la page de pile dépend du mapping MPR).
+Fixtures `fix_nes_stackret.nes` / `fix_md_stackret.md` + tests
+`core_closure_stackret_6502` / `core_closure_stackret_68000` (« stack returns » non nul,
+ligne C3 absente sous `--no-closure-regs`). Banc z80 inchangé. Détails :
+`docs/PLAN-COUVERTURE-MAX.fr.md`.

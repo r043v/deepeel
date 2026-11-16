@@ -252,5 +252,5 @@ static int isa_entry_data_sig(const uint8_t *w, unsigned n) {
     return 0;
 }
 static const DpIsa isa = { "sm83", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag, isa_reg_effect, isa_illegal, sm83_disasm, isa_mem_operand, 0x150u, 1, 0, isa_imm_ptr, NULL, isa_acc_imm, isa_st_acc_abs,
-                           .sp_slot = DP_SM83R_SP, .sp_width = 2, .entry_data_sig = isa_entry_data_sig };
+                           .sp_slot = DP_SM83R_SP, .sp_width = 2, .sp_addr_mask = 0xFFFFu, .sp_base = 0, .entry_data_sig = isa_entry_data_sig };
 const DpIsa *dp_isa_sm83(void) { return &isa; }

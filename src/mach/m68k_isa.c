@@ -215,6 +215,12 @@ static int isa_imm_ptr(const uint8_t *b, uint32_t *imm) {   // B9: lea (xxx).l,A
     return 1;
 }
 
+// C3: `rts` pulls the 32-bit return address at (A7); `rte`/`rtr` pull more state — not modeled.
+static int isa_sp_ret(const uint8_t *b, unsigned *w, unsigned *bias, unsigned *off) {
+    if ((b[0] << 8 | b[1]) != 0x4E75) return 0;
+    *w = 4; *bias = 0; *off = 0; return 1;
+}
 static const DpIsa isa = { "68000", 3, 1, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
-                           isa_reg_effect, isa_illegal, isa_disasm, isa_mem_operand, 0x200u, 0, 0, isa_imm_ptr };
+                           isa_reg_effect, isa_illegal, isa_disasm, isa_mem_operand, 0x200u, 0, 0, isa_imm_ptr,
+                           .sp_slot = DP_M68KR_A7, .sp_width = 4, .sp_addr_mask = 0xFFFFFFFFu, .sp_base = 0, .entry_data_sig = NULL, .sp_ret = isa_sp_ret };
 const DpIsa *dp_isa_68000(void) { return &isa; }

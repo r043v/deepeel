@@ -267,5 +267,5 @@ static int isa_entry_data_sig(const uint8_t *w, unsigned n) {
 }
 static const DpIsa isa = { "z80", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
                            isa_reg_effect, isa_illegal, isa_disasm, isa_mem_operand, 0, 1, 0, isa_imm_ptr, NULL, isa_acc_imm, isa_st_acc_abs,
-                           .sp_slot = DP_Z80R_SP, .sp_width = 2, .entry_data_sig = isa_entry_data_sig };
+                           .sp_slot = DP_Z80R_SP, .sp_width = 2, .sp_addr_mask = 0xFFFFu, .sp_base = 0, .entry_data_sig = isa_entry_data_sig };
 const DpIsa *dp_isa_z80(void) { return &isa; }

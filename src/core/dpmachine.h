@@ -129,14 +129,28 @@ typedef struct DpIsa {
     // C3: the stack-pointer register slot and the bytes a push/pop/call/ret
     // moves it by.  When the walk carries a fully known SP, a `ret` follows the
     // address read from the machine's stack (the Sega closure's concrete-stack
-    // returns).  sp_width 0: this ISA has no modeled stack (the feature is off)
+    // returns).  `sp_addr_mask` is the part of the register that indexes memory
+    // (6502 S is 8 bits) and `sp_base` the stack page ORed on top ($0100);
+    // both default to the z80 case (16-bit flat).  sp_width 0: this ISA has no
+    // modeled stack (the feature is off)
     unsigned sp_slot;
     unsigned sp_width;
+    uint32_t sp_addr_mask;
+    uint32_t sp_base;
     // "zero data marked code" point 3: 1 when the byte window decodes like
     // data (repeated single-byte calls, accumulator-store soup, undocumented
     // no-op prefixes — never the head of real code).  The kernel refuses an
     // untrusted walk entry there.  NULL: this ISA has no data signature.
     int (*entry_data_sig)(const uint8_t *w, unsigned n);
+    // C3: concrete-stack returns, per return opcode.  The instruction pulls
+    // `width` bytes starting `off` bytes above the stack pointer (6502 pushes
+    // pre-decrement: the return word sits at S+1..S+2; z80/68000 read at SP),
+    // adds `bias` to the word (6502 `rts` pops the address minus one), and the
+    // stack pointer bumps by `width`.  The stack is read in the ISA's own
+    // endianness.  0 returned: this opcode is not modeled (no concrete-stack
+    // continuation).  NULL: the walk falls back to `sp_width` for every
+    // return (z80, sm83).
+    int (*sp_ret)(const uint8_t *bytes, unsigned *width, unsigned *bias, unsigned *off);
 } DpIsa;
 
 const DpIsa *dp_isa_sm83(void);

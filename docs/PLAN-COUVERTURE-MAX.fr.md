@@ -1092,3 +1092,28 @@ sont plus que de l'inférence-donnée — c'est la famille 1 du diagnostic (du v
 une clôture), à rouvrir par la qualité des vérités, pas par le budget. La contribution
 propre restante de `sega/closure.c` est 964 / 0 / 2 094 / 608 octets ; `sega/closure.c`
 reste en place (critère inchangé).
+
+## C3 : retours par la pile concrète sur 6502 et 68000 (0.387.0)
+
+Le `sp_slot`/`sp_width` de 0.384.0 ne couvrait que z80 et sm83 ; le `rts` 6502 (adresse
+popée + 1, push en pré-décrément) et le `rts` 68000 (4 octets, pile big-endian) restaient
+hors modèle. Le hook `DpIsa.sp_ret(bytes, &width, &bias, &off)` décrit maintenant le pull
+de chaque opcode de retour : largeur (le bump du pointeur), biais ajouté au mot (6502 : +1)
+et décalage du mot au-dessus du pointeur (6502 : le mot de retour vit à S+1..S+2 — les
+pushs pré-décrèment ; z80/68000 lisent à SP). Les masques sont séparés : `sp_addr_mask`
+(les bits du registre qui adressent la pile : 6502 S est un index 8 bits dans la page
+`sp_base` $0100 ; z80/sm83 16 bits à plat ; 68000 A7 32 bits) pour l'arithmétique, et le
+masque de bits connus correspondant pour la garde. Les opcodes non modélisés (`rti` 6502
+— il poppe aussi P ; `rte`/`rtr` 68000) ne suivent pas de continuation par pile (le
+continuation fantôme générique et le fall-through historiques restent). HuC6280 : non
+câblé — la page de pile dépend du mapping MPR courant, pas un `sp_base` statique.
+
+Fixtures et tests : `fix_nes_stackret.nes` (`jsr $8010` ; le promeneur semé depuis le
+`bne` du callee porte le S de la machine et le `rts` rejoint $8003 — obs. outil :
+« stack returns 4 ») + `core_closure_stackret_6502` ; `fix_md_stackret.md` (`jsr $210.l`,
+mot de retour lu big-endian 4 octets — « stack returns 2 ») + `core_closure_stackret_68000`.
+La tranche ne change rien au z80 (banc 4 ROMs identique octet à octet : statique seul
+530/3 266/7 103/14, provisoire 10 668/4 972/5 972/1 273). Il reste de la liste ouverte :
+le `port_effect` des OUT (MSX + contrôle mémoire Sega) ; les vues de contexte Sega jouent
+leur rôle par le cap d'états par site. `sega/closure.c` reste en place (critère inchangé :
+banc octet à octet + zéro donnée déclarée code, vérité terrain d'abord).

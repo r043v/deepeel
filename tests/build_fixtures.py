@@ -1231,6 +1231,17 @@ def build_md_techniques(out):
     prog("fix_md_decomp", bytes.fromhex("41f9 00000230 43f9 00ffc000 701f 12d8 12c1 51c8 fffa 60fe"), bytes(range(1, 33)))
     prog("fix_md_status", bytes.fromhex("3039 00c00004 0240 0008 6604 7201 60fe 7202 60fe"))   # technique 2: one VDP status read, branch on the VBlank flag
     prog("fix_md_closure", bytes.fromhex("4eb9 0000020a 4e71 4e71 60fe"))
+    # C3 concrete-stack returns, 68000: the machine's A7 minus the jsr push holds the return
+    # address, read big-endian 4 bytes; the seeded walk from the bne inside the callee proves it
+    prog("fix_md_stackret", bytes.fromhex(
+        "4eb9 00000210"          # $200: jsr $210.l
+        " 60fe"                  # $206: bra * (hangs)
+        " 4e714e714e714e71"      # $208: nops to $210
+        " 3039 00ff 0000"        # $210: move.w ($FF0000),d0
+        " 6604"                  # $216: bne.s $21c
+        " 4e75"                  # $218: rts
+        " 4e71"                  # $21a: nop
+        " 4e75"))                # $21c: rts
     prog("fix_md_cells", bytes.fromhex("7000 6606 6604 4e714e71 60fe"))   # technique 8: two Bne sites, same target, same RAM
     prog("fix_md_rng", bytes.fromhex("1039 00ffc200 0a00 0055 13c0 00ffc200 0c00 00aa 6702 60e8 7001 60fe"))
     prog("fix_md_index", bytes.fromhex("1039 00ffc300 0280 0000 000f 41f9 00000230 1230 0000 0c01 0003 6704 7001 60fe 7002 60fe"),
@@ -1434,6 +1445,16 @@ def build_nes_pce(out):
             f.write(n)
     # NMI enabled, spin; the handler counts frames (IRQ forks and timing jitter, techniques 2/9)
     nes_prog("fix_nes_nmi.nes", bytes([0xA9,0x80, 0x8D,0x00,0x20, 0x4C,0x05,0x80]), nmi=0x10, handler=bytes([0xE6,0x10, 0x40]))
+    # C3 concrete-stack returns, 6502: the seeded walk from the bne inside the callee carries the
+    # machine's own S, so only the stack proves the continuation at $8003 across the two rts
+    nes_prog("fix_nes_stackret.nes", bytes([0x20,0x10,0x80,            # jsr $8010
+                                            0x4C,0x03,0x80,            # $8003: jmp $8003 (hangs)
+                                            0xEA,0xEA,0xEA,0xEA,0xEA,0xEA,0xEA,0xEA,0xEA,0xEA,0xEA,0xEA,0xEA,
+                                            0xAD,0x00,0x20,            # $8010: lda $2000 (PPU status)
+                                            0xC9,0x80,                 # cmp #$80
+                                            0xD0,0x02,                 # bne $8019
+                                            0x60,                      # $8017: rts
+                                            0x60]))                    # $8019: rts
     nes_prog("fix_nes_save.nes", bytes([0xAD,0x00,0x03, 0xC9,0xAA, 0xD0,0x05, 0xA9,0x01, 0x4C,0x0E,0x80, 0xA9,0x02, 0x4C,0x0E,0x80]))
     nes_prog("fix_nes_decomp.nes", bytes([0xA2,0x00, 0xA0,0x00, 0xBD,0x20,0x80, 0x99,0x00,0x03, 0xC8, 0x99,0x00,0x03, 0xC8, 0xE8, 0xE0,0x20, 0xD0,0xF0, 0x4C,0x14,0x80]), bytes(range(1, 33)))
     # C12: strobe, then read $4017 (pad 2) once into $00 and spin
