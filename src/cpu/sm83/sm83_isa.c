@@ -242,6 +242,15 @@ static int isa_imm_ptr(const uint8_t *b, uint32_t *imm) {   // ld bc/de/hl,nn
 }
 static int isa_acc_imm(const uint8_t *b, uint8_t *v) { if (b[0] != 0x3E) return 0; *v = b[1]; return 1; }   // ld a,n
 static int isa_st_acc_abs(const uint8_t *b, uint32_t *a) { if (b[0] != 0xEA) return 0; *a = (uint32_t)b[1] | (uint32_t)b[2] << 8; return 1; }   // ld (nn),a
+// "zero data marked code" point 3: tile/index dumps decode as valid
+// instructions.  Two consecutive rst $38 (a run of $FF) or two consecutive
+// ld (bc),a / ld (de),a (tile writes through a pointer that never moves) are
+// never the head of real code.
+static int isa_entry_data_sig(const uint8_t *w, unsigned n) {
+    for (unsigned i = 1; i < n; i++)
+        if (w[i] == w[i - 1] && (w[i] == 0xFF || w[i] == 0x02 || w[i] == 0x12)) return 1;
+    return 0;
+}
 static const DpIsa isa = { "sm83", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag, isa_reg_effect, isa_illegal, sm83_disasm, isa_mem_operand, 0x150u, 1, 0, isa_imm_ptr, NULL, isa_acc_imm, isa_st_acc_abs,
-                           .sp_slot = DP_SM83R_SP, .sp_width = 2 };
+                           .sp_slot = DP_SM83R_SP, .sp_width = 2, .entry_data_sig = isa_entry_data_sig };
 const DpIsa *dp_isa_sm83(void) { return &isa; }

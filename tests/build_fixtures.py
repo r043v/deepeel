@@ -1282,6 +1282,24 @@ def build_z80_family(out):
     sr[0x20:0x28] = bytes.fromhex("3a00c0 b7 c22800 c9 c9".replace(" ", ""))
     with open(os.path.join(out, "fix_z80_stackret.sms"), "wb") as f:
         f.write(sr)
+    # "zero data marked code" points 1+3: a ground-truth fixture — the generator states
+    # which bytes are code and which are data (truth file beside the ROM).  The call's
+    # fall-through runs into a tile dump (ld (bc),a soup): an untrusted walk entry that
+    # decodes like data, refused instead of marked (point 3); truth_check.py audits the
+    # map against the truth (point 1).
+    tr = bytearray([0xFF]) * 0x8000
+    tr[0:0x05] = bytes.fromhex("3e01 cd2000")   # ld a,1 ; call $0020
+    tr[0x05:0x15] = bytes([0x02]) * 16          # tile dump: repeated ld (bc),a (the callee never returns, this is data)
+    tr[0x20:0x22] = bytes.fromhex("18fe")       # callee: jr * (hangs, so the soup is never executed)
+    with open(os.path.join(out, "fix_z80_truth.sms"), "wb") as f:
+        f.write(tr)
+    with open(os.path.join(out, "fix_z80_truth.truth"), "w") as f:
+        f.write("# ground truth of fix_z80_truth.sms (rom offsets, inclusive)\n"
+                "# c = code, d = data — written by build_fixtures.py, the generator's own knowledge\n"
+                "0000-0004 c\n"
+                "0005-001f d\n"
+                "0020-0021 c\n"
+                "0022-7fff d\n")
     # C4 copy-table siblings: ld hl,($0040) reads the first word of a pointer table, a ld/inc loop copies 16 bytes from it;
     # the other two entries point at same-length siblings nothing touches
     sb = bytearray([(i * 7 + 3) & 0xFF if i % 5 else 0x55 for i in range(0x8000)])

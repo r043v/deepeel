@@ -9,11 +9,11 @@ chk() {   # platform fixture, extra args, regex
     "$D" $p explore "$B/fix_${p}_$f.$x" --attract-frames 0 --max-total 200000 --max-steps 1000 $a --text "$W/k_${p}_$f.txt" >/dev/null 2>&1
     grep -Eq "$re" "$W/k_${p}_$f.txt" || { echo "FAIL $p:$f [$a]: $re"; rc=1; }
 }
-chk nes:static   "--max-steps 2"      'static closure: roots 22, bytes 10, static-only 5, provisional 3'
+chk nes:static   "--max-steps 2"      'static closure: roots 2, bytes 10, static-only 5, provisional 3'
 chk nes:table    ""                   'jump tables 1 \(6 bytes\)'
 chk nes:mmc1table ""                  'jump tables 1 \(6 bytes\)'
 chk nes:sibling  ""                   'copy tables 1 '
-chk nes:xwin     "--max-steps 2"      'static closure: roots 22, bytes 13, static-only 7, provisional 3'
+chk nes:xwin     "--max-steps 2"      'static closure: roots 2, bytes 13, static-only 7, provisional 3'
 chk nes:cpucopy  ""                   'rom->ram copy bytes [1-9]'
 chk nes:wramcopy ""                   'rom->ram copy bytes [1-9]'
 chk nes:sramcopy ""                   'rom->ram copy bytes [1-9]'

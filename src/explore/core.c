@@ -426,6 +426,38 @@ static int closure_prov_read(void *ctx, uint32_t addr, uint8_t *v) {
     *v = c->v.m ? c->v.m->fetch(c->v.m, addr) : c->v.cfg->rom_image[k];
     return 1;
 }
+// "zero data marked code" point 3: the first instructions of an untrusted
+// entry (a call's fall-through, the inline-data idiom) are decoded and the
+// entry is refused when they look like data: the ISA's signature on the first
+// bytes (repeated rst $38, accumulator-store soup, undocumented no-op
+// prefixes) or eight sequential instructions with no control transfer anywhere
+// (the byte soup of tiles/index tables decodes as valid straight-line code).
+// The classic first-step guards (padding and pointer runs, data flags) are NOT
+// duplicated: when the first step would hit one, the entry is left to the walk
+// so it stops there with its own counter (closure_stopped_data).
+static int closure_entry_is_data(const DpCoreResult *r, const DpIsa *isa, const ClosureView *v, uint32_t pc, int64_t k) {
+    uint8_t w[32] = {0};
+    if (v->m) for (unsigned i = 0; i < sizeof w; i++) w[i] = v->m->fetch(v->m, pc + i);
+    else for (unsigned i = 0; i < sizeof w && (size_t)k + i < v->cfg->rom_image_size; i++) w[i] = v->cfg->rom_image[k + i];
+    if ((w[0] == 0x00 || w[0] == 0xFF) && w[1] == w[0] && w[2] == w[0] && w[3] == w[0] && w[4] == w[0] && w[5] == w[0] && w[6] == w[0] && w[7] == w[0]) return 0;   // padding: the in-walk guard stops the first step
+    int hit = 1;
+    for (int o = 0; o <= 4 && hit; o++) {   // a run of 3 pointer-like words covering the first byte: the in-walk guard handles it
+        int ok = 1;
+        for (int q = 0; q < 3 && ok; q++) { uint16_t wd = (uint16_t)(w[o + 2 * q] | w[o + 2 * q + 1] << 8); ok = wd >= 0x4000 && wd < 0x8000; }
+        hit = ok;
+    }
+    if (hit) return 0;
+    if (k >= 0 && (__atomic_load_n(&r->flags[k], __ATOMIC_RELAXED) & (DP_CORE_DATA | DP_CORE_COPIED))) return 0;   // a data-marked root: the walk stops on it
+    if (isa->entry_data_sig && isa->entry_data_sig(w, 8)) return 1;
+    unsigned n = 0; uint32_t o = 0;
+    while (n < 8 && o < sizeof w) {
+        DpFlowInfo f; memset(&f, 0, sizeof f);
+        if (!isa->flow(w + o, pc + o, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL) return 0;   // the walk dies on its own at this step
+        if (f.kind != DP_FLOW_SEQ || f.halt) return 0;   // a control transfer inside the window: plausible code
+        o += f.length; n++;
+    }
+    return n >= 8;   // eight sequential instructions, no control transfer: data soup
+}
 static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa, uint32_t root, uint32_t bank, uint32_t trust0,
                         const DpRegState *regs0, int thru0, unsigned budget0, RegWalk *rw) {
     uint32_t stack[256][4]; RetStk rets[256], cr; unsigned sp = 0, budget = budget0 ? budget0 : (unsigned)CLOSURE_INSTR, kthru = 0, thru = (unsigned)thru0; cr.n = 0; uint64_t *seen = NULL;
@@ -448,13 +480,19 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
     DpProvRom rom = { &pctx, closure_prov_read };
     if (v->m && !thru0) {   // the live walk counts its roots and skips a root already known (a seeded walk starts on executed code: it walks through)
         int64_t k0 = cview_index(v, r, pc, bk);
+        if (k0 >= 0 && !trust0 && r->prov && r->prov[k0]) goto done;   // a provisional root holds nothing new for another untrusted walk
         if (k0 < 0 || (__atomic_load_n(&r->flags[k0], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC))) goto done;
         r->closure_roots++;
+    }
+    if (!trust0 && !thru0) {   // point 3: a plain untrusted entry (a call's fall-through root) whose first instructions decode like data is refused
+        int64_t k0 = cview_index(v, r, pc, bk);
+        if (k0 >= 0 && closure_entry_is_data(r, isa, v, pc, k0)) { r->closure_entry_refused++; goto done; }
     }
     for (;;) {
         int64_t k = cview_index(v, r, pc, bk);
         int pass = 0;
-        int known = k >= 0 && (__atomic_load_n(&r->flags[k], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC));
+        int known = k >= 0 && ((__atomic_load_n(&r->flags[k], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC))
+                               || (!trust && r->prov && r->prov[k]));   // a provisional byte holds nothing new for an untrusted walk; a trusted one must reach it to promote it
         if (known && r->closure_ret && (cr.n || thru) && kthru < 4096) {   // each known address is walked through once per walk
             if (!seen) seen = calloc(8192, sizeof *seen);
             if (seen) {
@@ -630,6 +668,15 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
             } else { cr.n--; pc = rpc; bk = rbk; trust = rtr; thru = 1; r->closure_rets++; continue; }   // the continuation after a proven return walks through what the blind fall-through already marked (the callee's register constants ride on, the Sega closure's own rule)
         }
         if (fall) {
+            if (f.kind == DP_FLOW_CALL) {   // point 3: the fall-through continuation of a call (always untrusted, A13) is checked like an entry
+                int64_t kx = cview_index(v, r, pc + f.length, bk);
+                if (kx >= 0 && closure_entry_is_data(r, isa, v, pc + f.length, kx)) {
+                    r->closure_entry_refused++;
+                    if (!sp) goto done;
+                    CLOSURE_POP();
+                    continue;
+                }
+            }
             pc += f.length;
             if (f.kind == DP_FLOW_CALL) trust = 0;   // A13: no trust after a call unless the callee was observed to return
         }
@@ -2977,6 +3024,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     }
     fprintf(out, "speculative gaps: %llu runs, %llu bytes (never counted as known); %llu runs reinforced by an immediate reference (%llu references seen)\n", U(r->spec_runs), U(r->spec_bytes), U(r->spec_ref_runs), U(r->imm_refs));
     fprintf(out, "static closure: roots %llu, bytes %llu, static-only %zu, provisional %zu (untrusted walks, code once confirmed), capped walks %llu, returns followed %llu\n", U(r->closure_roots), U(r->closure_bytes), stat_only, prov_only, U(r->closure_capped), U(r->closure_rets));
+    if (r->closure_entry_refused) fprintf(out, "untrusted walk entries refused (data plausibility, point 3): %llu\n", U(r->closure_entry_refused));
     if (r->closure_regs) fprintf(out, "closure registers (C3): seed walks %llu, indirect resolved %llu, indirect unresolved %llu, stack returns %llu, indirect site cap %llu, seeds refused (site cap %llu, set full %llu)\n",
         U(r->closure_reg_roots), U(r->closure_reg_indirect), U(r->closure_reg_miss), U(r->closure_reg_stackrets), U(r->closure_reg_indirect_sat), U(r->closure_reg_seed_sat), U(r->closure_reg_set_sat));
     if (r->inferred) fprintf(out, "static inference: padding %llu, gap code %llu, gap pad %llu, gap data %llu, copy tables %llu (%llu sibling bytes, %llu refused as code), jump tables %llu (%llu bytes)\n", U(r->padding_bytes), U(r->inferred_code), U(r->inferred_pad), U(r->inferred_data), U(r->sib_tables), U(r->sib_bytes), U(r->sib_refused), U(r->jt_tables), U(r->jt_bytes));

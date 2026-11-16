@@ -132,6 +132,11 @@ typedef struct DpIsa {
     // returns).  sp_width 0: this ISA has no modeled stack (the feature is off)
     unsigned sp_slot;
     unsigned sp_width;
+    // "zero data marked code" point 3: 1 when the byte window decodes like
+    // data (repeated single-byte calls, accumulator-store soup, undocumented
+    // no-op prefixes — never the head of real code).  The kernel refuses an
+    // untrusted walk entry there.  NULL: this ISA has no data signature.
+    int (*entry_data_sig)(const uint8_t *w, unsigned n);
 } DpIsa;
 
 const DpIsa *dp_isa_sm83(void);

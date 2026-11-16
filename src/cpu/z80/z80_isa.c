@@ -251,7 +251,21 @@ static int isa_imm_ptr(const uint8_t *b, uint32_t *imm) {   // ld bc/de/hl,nn (u
 }
 static int isa_acc_imm(const uint8_t *b, uint8_t *v) { if (b[0] != 0x3E) return 0; *v = b[1]; return 1; }   // ld a,n
 static int isa_st_acc_abs(const uint8_t *b, uint32_t *a) { if (b[0] != 0x32) return 0; *a = (uint32_t)b[1] | (uint32_t)b[2] << 8; return 1; }   // ld (nn),a
+// "zero data marked code" point 3: the classic tile/index dumps decode as valid
+// instructions, so the entry check needs their signatures.  Two consecutive
+// rst $38 (data of $FF), two consecutive ld (bc),a / ld (de),a (tile writes to
+// a pointer that never moves), and a DD/FD prefix whose opcode does not touch
+// IX/IY (an undocumented no-op: real code never issues it).
+static int isa_entry_data_sig(const uint8_t *w, unsigned n) {
+    for (unsigned i = 1; i < n; i++)
+        if (w[i] == w[i - 1] && (w[i] == 0xFF || w[i] == 0x02 || w[i] == 0x12)) return 1;
+    if ((w[0] == 0xDD || w[0] == 0xFD) && n >= 2 && w[1] != 0xCB && w[1] != 0xDD && w[1] != 0xFD) {
+        DpZ80Instruction in;
+        if (dp_z80_decode(w, 6, 0, &in) && in.raw.index == 0) return 1;   // the prefix is ignored by the decode: not an IX/IY instruction
+    }
+    return 0;
+}
 static const DpIsa isa = { "z80", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
                            isa_reg_effect, isa_illegal, isa_disasm, isa_mem_operand, 0, 1, 0, isa_imm_ptr, NULL, isa_acc_imm, isa_st_acc_abs,
-                           .sp_slot = DP_Z80R_SP, .sp_width = 2 };
+                           .sp_slot = DP_Z80R_SP, .sp_width = 2, .entry_data_sig = isa_entry_data_sig };
 const DpIsa *dp_isa_z80(void) { return &isa; }
