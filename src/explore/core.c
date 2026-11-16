@@ -89,6 +89,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--no-exact-state")) { c->no_exact = 1; return 1; }
     if (!strcmp(a, "--no-spec")) { c->no_spec = 1; return 1; }
     if (!strcmp(a, "--no-bank-forks")) { c->no_bank_forks = 1; return 1; }
+    if (!strcmp(a, "--no-closure-ret")) { c->no_closure_ret = 1; return 1; }
     if (!strcmp(a, "--no-closure-banks")) { c->no_closure_banks = 1; return 1; }
     if (!strcmp(a, "--bank-fork-cap") && i + 1 < argc) { c->bank_fork_cap = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--pad-full")) { c->pad_full = 1; return 1; }
@@ -336,13 +337,18 @@ static void bank_apply(DpMachine *m, const uint8_t *snap, const BankPoke *pk, in
     m->load(m, snap);
     while (n--) m->poke(m, pk[chain[n]].addr, pk[chain[n]].val);
 }
+// C3: the return stack of a walk path (the shadow of what the real stack would hold): a direct call pushes its return address and the walk
+// continues there only when the callee reaches a return, so inline data after a call (the callee pops it and jumps past) is never swept
+// as code and a callee that never returns never marks the caller's continuation.  Same rule as the Sega closure, ISA-neutral.
+#define CLOSURE_RET 8
+typedef struct { uint32_t pc[CLOSURE_RET], bk[CLOSURE_RET], trust[CLOSURE_RET]; unsigned n; } RetStk;
 static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa, uint32_t root, uint32_t bank, uint32_t trust0) {
-    uint32_t stack[256][4]; unsigned sp = 0, budget = CLOSURE_INSTR;
+    uint32_t stack[256][4]; RetStk rets[256], cr; unsigned sp = 0, budget = CLOSURE_INSTR, kthru = 0, thru = 0; cr.n = 0; uint64_t *seen = NULL;
     // C3: bank-switch simulation.  `ld a,n` then a store of A to a mapper bank register is replayed through the machine's own
     // mapper (poke) so the rest of the walk sees the new ROM view; every walk restores the live state when it ends and each
     // pending root remembers the chain of writes it was pushed under (node 0 = the live view).
     BankPoke pk[CLOSURE_BANK_NODES + 1]; int npk = 0, cur = 0, acc_known = 0, acc_age = 0; uint8_t acc = 0; uint8_t *snap = NULL;
-#define CLOSURE_POP() do { sp--; pc = stack[sp][0]; bk = stack[sp][1]; trust = stack[sp][2]; acc_known = 0; \
+#define CLOSURE_POP() do { sp--; cr = rets[sp]; thru = 0; pc = stack[sp][0]; bk = stack[sp][1]; trust = stack[sp][2]; acc_known = 0; \
         if (stack[sp][3] && budget < CLOSURE_INSTR / 8) budget = CLOSURE_INSTR / 8;   /* a simulated view gets its own bounded budget */ \
         if ((int)stack[sp][3] != cur) { bank_apply(v->m, snap, pk, (int)stack[sp][3]); cur = (int)stack[sp][3]; } } while (0)
     uint32_t trust = trust0;   // A13: code reached from executed code is trusted; the fall-through after a CALL is not (inline data idiom)
@@ -354,7 +360,16 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
     }
     for (;;) {
         int64_t k = cview_index(v, r, pc, bk);
+        int pass = 0;
         int known = k >= 0 && (__atomic_load_n(&r->flags[k], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC));
+        if (known && r->closure_ret && (cr.n || thru) && kthru < 4096) {   // each known address is walked through once per walk
+            if (!seen) seen = calloc(8192, sizeof *seen);
+            if (seen) {
+                uint64_t key = (uint64_t)k + 1; size_t hh = (size_t)(key * 0x9E3779B97F4A7C15ull >> 51) & 8191; int dup = 0;
+                while (seen[hh]) { if (seen[hh] == key) { dup = 1; break; } hh = (hh + 1) & 8191; }
+                if (!dup) { seen[hh] = key; known = 0; kthru++; pass = 1; }
+            }
+        }   // C3: a pending return walks through known code (a per-walk allowance of 2048 instructions) to find the callee's ret
         if (k < 0 || !budget || known) {
             if (v->m && k >= 0 && !budget) r->closure_capped++;
             if (!sp) goto done;
@@ -401,7 +416,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
             CLOSURE_POP();
             continue;
         }
-        budget--;
+        if (!pass) budget--;   // a walk through known code has its own allowance (kthru), it never eats the budget of new code
         if (v->m && r->closure_banks) {
             uint8_t av; uint32_t ad;
             if (isa->acc_imm && isa->acc_imm(b, &av)) { acc = av; acc_known = 1; acc_age = 0; }
@@ -414,7 +429,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
                         // additive and last: the walk goes on under the view it already has (exactly the plain walk); the continuation under
                         // the new view is queued behind it and only gets what budget is left
                         pk[++npk] = (BankPoke){ ad, acc, cur }; r->closure_bank_sims++;
-                        if (sp < 256) { stack[sp][0] = pc + f.length; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)npk; sp++; }
+                        if (sp < 256) { rets[sp] = cr; stack[sp][0] = pc + f.length; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)npk; sp++; }
                         else r->closure_stack_dropped++;
                     }
                 }
@@ -431,10 +446,24 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
         if (f.kind != DP_FLOW_RET && f.kind != DP_FLOW_INDIRECT && f.target >= 0 &&
             (f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL)) {
             if (cview_index(v, r, (uint32_t)f.target, bk) < 0) r->closure_unresolved++;
-            else if (sp < 256) { stack[sp][0] = (uint32_t)f.target; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)cur; sp++; }
+            else if (sp < 256) {
+                rets[sp] = cr;
+                if (r->closure_ret && f.kind == DP_FLOW_CALL && f.cond < 0 && cr.n < CLOSURE_RET && !(__atomic_load_n(&r->flags[cview_index(v, r, (uint32_t)f.target, bk)], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC))) {   // a callee already known is not walked again: its return cannot be followed, the legacy fall-through applies   // the callee's path remembers where it returns to
+                    rets[sp].pc[cr.n] = pc + f.length; rets[sp].bk[cr.n] = bk; rets[sp].trust[cr.n] = trust; rets[sp].n = cr.n + 1; 
+                }
+                stack[sp][0] = (uint32_t)f.target; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)cur; sp++;
+            }
             else r->closure_stack_dropped++;   // a root lost to the fixed stack is counted, never silent
         }
         if (f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_RET || f.kind == DP_FLOW_INDIRECT || f.halt) fall = 0;
+        if (r->closure_ret && cr.n && (f.kind == DP_FLOW_RET || (f.kind == DP_FLOW_COND && f.target < 0))) {
+            // a return: the caller's continuation, carrying the trust the call site had (the callee proved the address is code)
+            uint32_t rpc = cr.pc[cr.n - 1], rbk = cr.bk[cr.n - 1], rtr = cr.trust[cr.n - 1];
+            if (f.kind == DP_FLOW_COND) {   // a conditional return: the taken side is queued, the walk goes on past it
+                if (sp < 256) { rets[sp] = cr; rets[sp].n--; stack[sp][0] = rpc; stack[sp][1] = rbk; stack[sp][2] = rtr; stack[sp][3] = (uint32_t)cur; sp++; r->closure_rets++; }
+                else r->closure_stack_dropped++;
+            } else { cr.n--; pc = rpc; bk = rbk; trust = rtr; thru = 1; r->closure_rets++; continue; }   // the continuation after a proven return walks through what the blind fall-through already marked
+        }
         if (fall) {
             pc += f.length;
             if (f.kind == DP_FLOW_CALL) trust = 0;   // A13: no trust after a call unless the callee was observed to return
@@ -442,6 +471,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
         else { if (!sp) goto done; CLOSURE_POP(); }
     }
 done:
+    free(seen);
     if (snap) { v->m->load(v->m, snap); free(snap); }   // the live machine is left exactly as the walk found it
 #undef CLOSURE_POP
 }
@@ -2285,7 +2315,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     out->live_w = ((rsize(m) >> 8) + 31) / 32;
     out->live = calloc(((rom_size >> 8) + 1) * out->live_w, sizeof *out->live);
     if (m->plat && m->plat->io_reg_count > 0) {   // typed register accesses: one slot per registry entry
-        out->reg_n = m->plat->io_reg_count; out->reg_plat = m->plat; out->closure_banks = !cfg->no_closure_banks;
+        out->reg_n = m->plat->io_reg_count; out->reg_plat = m->plat; out->closure_banks = !cfg->no_closure_banks; out->closure_ret = !cfg->no_closure_ret;
         out->reg_slot = m->plat->find ? NULL : calloc(65536, sizeof *out->reg_slot);
         out->reg_reads = calloc((size_t)out->reg_n, sizeof *out->reg_reads);
         out->reg_writes = calloc((size_t)out->reg_n, sizeof *out->reg_writes);
@@ -2329,7 +2359,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         DpMachine *wm = i == 0 ? m : (m->clone ? m->clone(m, i) : NULL);
         if (!wm) break;                       // fewer workers than asked: reported
         w->sh = &sh; w->m = wm; w->idx = i;
-        w->loc.refs = out->refs; w->loc.page_win = out->page_win; w->loc.live = out->live; w->loc.reg_slot = out->reg_slot; w->loc.reg_reads = out->reg_reads; w->loc.reg_writes = out->reg_writes; w->loc.reg_vals = out->reg_vals; w->loc.reg_n = out->reg_n; w->loc.reg_plat = out->reg_plat; w->loc.closure_banks = out->closure_banks; w->loc.live_w = out->live_w; w->loc.flags = out->flags; w->loc.src_flags = out->src_flags;
+        w->loc.refs = out->refs; w->loc.page_win = out->page_win; w->loc.live = out->live; w->loc.reg_slot = out->reg_slot; w->loc.reg_reads = out->reg_reads; w->loc.reg_writes = out->reg_writes; w->loc.reg_vals = out->reg_vals; w->loc.reg_n = out->reg_n; w->loc.reg_plat = out->reg_plat; w->loc.closure_banks = out->closure_banks; w->loc.closure_ret = out->closure_ret; w->loc.live_w = out->live_w; w->loc.flags = out->flags; w->loc.src_flags = out->src_flags;
         w->loc.dest = out->dest;
         w->loc.first_seen = out->first_seen; w->loc.rom_size = rom_size;
         w->site_n = site_n;
@@ -2571,7 +2601,7 @@ cleanup:
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
-        out->novelty_picks += l->novelty_picks; out->closure_stopped_data += l->closure_stopped_data; out->closure_unresolved += l->closure_unresolved; out->closure_stack_dropped += l->closure_stack_dropped; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->promoted_forced += l->promoted_forced; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bank_sims += l->closure_bank_sims; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_stack_dropped += l->closure_stack_dropped; out->pending_dropped += l->pending_dropped; out->deferred += l->deferred; out->state_repeats += l->state_repeats; out->probe_ctx_sat += l->probe_ctx_sat; out->probe_rearms += l->probe_rearms; out->bank_forks += l->bank_forks; out->tas_ckpts += l->tas_ckpts; out->sess_ckpts += l->sess_ckpts; out->ckpt_bursts += l->ckpt_bursts; out->epoch_forks += l->epoch_forks; out->live_seeds += l->live_seeds; out->imm_refs += l->imm_refs; out->held_stops += l->held_stops; out->bank_fork_sat += l->bank_fork_sat; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->proj_pruned += l->proj_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
+        out->novelty_picks += l->novelty_picks; out->closure_stopped_data += l->closure_stopped_data; out->closure_unresolved += l->closure_unresolved; out->closure_stack_dropped += l->closure_stack_dropped; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->promoted_forced += l->promoted_forced; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bank_sims += l->closure_bank_sims; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_stack_dropped += l->closure_stack_dropped; out->pending_dropped += l->pending_dropped; out->deferred += l->deferred; out->state_repeats += l->state_repeats; out->probe_ctx_sat += l->probe_ctx_sat; out->probe_rearms += l->probe_rearms; out->bank_forks += l->bank_forks; out->tas_ckpts += l->tas_ckpts; out->sess_ckpts += l->sess_ckpts; out->ckpt_bursts += l->ckpt_bursts; out->epoch_forks += l->epoch_forks; out->live_seeds += l->live_seeds; out->imm_refs += l->imm_refs; out->held_stops += l->held_stops; out->bank_fork_sat += l->bank_fork_sat; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->closure_rets += l->closure_rets; out->proj_pruned += l->proj_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
         out->exec_outside += l->exec_outside; out->exec_wram_rom += l->exec_wram_rom; dp_ramarch_merge(&out->ra, &l->ra);
         free(l->jp_seen); l->jp_seen = NULL; free(ws[i].visits); free(ws[i].wsnap); free(ws[i].winmemo); free(ws[i].capped); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
@@ -2735,7 +2765,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     size_t stat_only = 0;
     for (size_t i = 0; i < r->rom_size; i++) if ((r->flags[i] & (DP_CORE_STATIC | DP_CORE_NATURAL | DP_CORE_FORCED)) == DP_CORE_STATIC) stat_only++;
     fprintf(out, "speculative gaps: %llu runs, %llu bytes (never counted as known); %llu runs reinforced by an immediate reference (%llu references seen)\n", U(r->spec_runs), U(r->spec_bytes), U(r->spec_ref_runs), U(r->imm_refs));
-    fprintf(out, "static closure: roots %llu, bytes %llu, static-only %zu, capped walks %llu\n", U(r->closure_roots), U(r->closure_bytes), stat_only, U(r->closure_capped));
+    fprintf(out, "static closure: roots %llu, bytes %llu, static-only %zu, capped walks %llu, returns followed %llu\n", U(r->closure_roots), U(r->closure_bytes), stat_only, U(r->closure_capped), U(r->closure_rets));
     if (r->inferred) fprintf(out, "static inference: padding %llu, gap code %llu, gap pad %llu, gap data %llu, copy tables %llu (%llu sibling bytes, %llu refused as code), jump tables %llu (%llu bytes)\n", U(r->padding_bytes), U(r->inferred_code), U(r->inferred_pad), U(r->inferred_data), U(r->sib_tables), U(r->sib_bytes), U(r->sib_refused), U(r->jt_tables), U(r->jt_bytes));
     if (r->closure_jp_entries) fprintf(out, "provenance: %llu jp-hl targets, %llu data bytes static\n", U(r->closure_jp_entries), U(r->prov_data_bytes));
     if (r->closure_jp_tables) fprintf(out, "S4 operand tables of executed JP HL: %llu tables, %llu entries\n", U(r->closure_jp_tables), U(r->closure_jp_entries));

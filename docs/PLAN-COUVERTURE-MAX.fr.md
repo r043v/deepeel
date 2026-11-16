@@ -679,3 +679,22 @@ non lue est écartée). Observation de l'outil (Ace of Aces SMS, `--no-cells --j
 octets naturels (468), forcés (3 270) et statiques seuls (9 411) qu'avec `--no-proj`. Avec les cellules (défaut), la clé de cellule est plus
 grossière et la projection ne ferait rien sur Sega ; elle sert surtout sous `--unbounded` (cellules coupées). Gradius 2 (MSX) ne termine pas
 300 000 pas en 500 s (946 fourches pour 1 000 pas) : mesure non obtenue, à instruire.
+
+## C3 : pile de retours dans la marche du noyau (0.382.0)
+
+La marche statique du noyau (`closure_run`) suit désormais une pile de retours fantôme par chemin (8 niveaux) : un appel direct dont la callee
+est inconnue pousse son adresse de retour ; quand la callee atteint un `ret`, la marche reprend chez l'appelant avec la confiance du site d'appel
+et traverse (sans consommer le budget, une fois par adresse, 4 096 au plus) le code que le fall-through aveugle avait déjà marqué. Le fall-through
+historique reste (additif). Un `ret cc` pousse la branche de retour et continue. `--no-closure-ret` la coupe ; `returns followed` au rapport.
+Banc (mêmes réglages que ci-dessus, statique seul, observations de l'outil, `DEEPEEL_NO_SEGA_CLOSURE=1` sauf dernière colonne) :
+
+| ROM | sans pile | avec pile | avec pile + Sega |
+|---|---|---|---|
+| Ace of Aces (SMS) | 8 584 | 9 749 | 10 713 |
+| Addams Family (GG) | 8 156 | 8 229 | 8 992 |
+| Aerial Assault (GG) | 13 518 | 12 739 | 15 746 |
+| Bank Panic (SG) | 1 277 | 1 281 | 1 891 |
+
+Bilan honnête : le noyau seul gagne sur 3 ROMs (+1 165, +73, +4) et **perd 779 octets sur Aerial Assault** (cause non instruite) ; la fermeture Sega
+apporte encore 764 à 3 007 octets au-dessus (amorçage à chaque pas avec l'état concret, `jp (hl)`/IX/IY). C3 n'est donc **pas terminé** : `sega/closure.c`
+reste en place, aucun banc octet à octet n'a été fait, et sans vérité terrain code/données le sur-marquage ne se juge pas.
