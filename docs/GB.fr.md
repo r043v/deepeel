@@ -5892,3 +5892,23 @@ Le noyau est le seul moteur MD ; `--pad-full`/`--pad-full6` sont communs. Voir `
 `deepeel z80 explore <sg|sms|gg|msx>` n'a plus d'autre moteur que le noyau (voir `docs/PLAN-COUVERTURE-MAX.fr.md`, section
 « Retrait du moteur Sega historique ») : options propres retirées (`--play-steps`, `--novelty*`, `--lot`, `--spool`, `--tree`,
 `--input-*`…), `--mapper`/`--entry`/`--seed-banks` désormais effectifs. `--core` reste accepté sans effet.
+
+### 0.383.0 — noyau : fermeture par l'état concret des registres (toutes ISA)
+
+Chaque pas exécuté à flot non séquentiel amorce une marche statique portant
+l'état des registres de la CPU (`DpMachine.get_regs` à l'amorçage, `DpIsa.reg_effect`
+fait avancer les constantes instruction par instruction ; ce qui n'est pas modélisé
+tue le registre, jamais deviné). Un transfert indirect par registre entièrement connu
+(`jp (hl)/(ix)/(iy)` z80, `jp hl` SM83, `jmp/jsr (An)` 68000) est suivi statiquement.
+Plafonds comptés, jamais silencieux : le rapport ajoute
+
+```
+closure registers (C3): seed walks …, indirect resolved …, indirect unresolved …,
+indirect site cap …, seeds refused (site cap …, set full …)
+```
+
+`--no-closure-regs` désactive la technique ; `--unbounded` lève les plafonds. Les
+nombres sont des observations de l'outil, non des mesures de matériel. Test :
+`core_closure_reg_z80` (fixture `fix_z80_regclosure.sms`). Voir
+`docs/PLAN-COUVERTURE-MAX.fr.md` ; `sega/closure.c` reste en place tant que le banc
+octet à octet n'a pas validé l'exigence « zéro donnée déclarée code ».

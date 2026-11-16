@@ -790,3 +790,53 @@ Version générique à écrire dans `src/explore/` (pas dans la plateforme) :
   jamais silencieux ; sous `--unbounded` le plafond est levé et l'excédent va au spool.
 - La marche générique n'est acceptée que si l'**exigence zéro donnée code** ci-dessus est mesurée, par ROM, sur la vérité terrain : égalité ou mieux en code trouvé,
   **et** pas plus d'erreurs que la fermeture Sega. Seulement alors `sega/closure.c` est retiré (règle : couverture jamais perdue, erreurs jamais ajoutées).
+
+## C3 : état de registres générique dans le marcheur du noyau (0.383.0, première tranche)
+
+Le portage est écrit : le marcheur statique du noyau porte un état de registres (`DpRegState`,
+`src/core/dpmachine.h` : 24 slots de 4 octets, masque de connaissance par octet, traité comme opaque
+par le noyau — hachage et égalité) et chaque pas de marche fait avancer les constantes par la table de
+l'ISA (`DpIsa.reg_effect`), la machine fournissant l'état concret à l'amorçage (`DpMachine.get_regs`).
+
+Conformément à la spécification ci-dessus :
+- **`DpIsa.reg_effect(bytes, pc, in, out, rom)`** par ISA : Z80 via le moteur de provenance partagé
+  (`src/cpu/z80/provenance.c`, le même que `target_constants` de la fermeture Sega, lecture planifiée
+  prouvant l'opérande explicite seule), avec re-dérivation exacte de ce que le moteur tue mais la
+  fermeture Sega prouve elle-même (inc/dec de paires et d'octets, DJNZ, pas des blocs ED) ; SM83
+  (`ld r,n`, `ld rr,nn`, `ld r,r'` avec lecture `(hl)` prouvée, pas de pointeur, `add hl,rr` exact,
+  inc/dec, pop tue) ; 6502 (immédiats, transferts, inc/dec, chargements mémoire X/Y, liste de
+  non-écriture documentée) ; HuC6280 (sous-ensemble 6502 + `tam`/`tma`/`clx`/`cly` sur MPR0-7) ;
+  68000 (`moveq`, `lea`, `movea`, `move #`, `addq/subq`, `clr`, `exg`, `swap`, `move <ea>,reg`,
+  taille respectée). Tout ce qui n'est pas modélisé **tue** le registre écrit (jamais deviné) ;
+  non écrit = passe ; écrit par valeur prouvée = constante posée. `DpFlowInfo.pair` désigne le
+  registre d'un transfert indirect par registre (`jp (hl)/(ix)/(iy)`, `jp hl`, `jmp/jsr (An)`).
+- **`DpMachine.get_regs(m, DpRegState *)`** : câblé sur Sega/MSX (Z80 complet A,F,B,C,D,E,H,L +
+  ombres), GB (SM83), NES (A,X,Y,S via `dp_nesmach_regs`), PCE (A,X,Y,S + MPR), MD (D0-D7/A0-A7).
+  La machine libretro n'en a pas (limitation documentée, l'amorçage registre n'y est pas actif).
+- **Amorçage à chaque pas exécuté** dont le flot n'est pas séquentiel : marche non fiable (règles
+  de données conservées) qui traverse le code déjà connu (4096 pas au plus), portant les constantes ;
+  c'est l'amorçage de la fermeture Sega, générique. Déduplication globale par (octet ROM, hachage
+  d'état) 64K, plafond de 4 états distincts par site, plafond de 8 valeurs indirectes résolues par
+  site ; chaque saturation **comptée au rapport** (« closure registers (C3): seed walks …, indirect
+  resolved …, indirect unresolved …, indirect site cap …, seeds refused (site cap …, set full …) »),
+  jamais silencieuse ; `--no-closure-regs` coupe tout ; `--unbounded` lève les plafonds.
+- **Résolution indirecte** : `jp (hl)/(ix)/(iy)`, `jp hl`, `jmp/jsr (An)` suivis quand la paire est
+  entièrement connue (cible dans la vue ; hors vue comptée `indirect unresolved`, jamais suivie).
+- **Retours** : la continuation d'un retour garde les constantes de l'appelé (règle de la fermeture
+  Sega, au-dessus de la pile de retours 0.382.0).
+
+Fixture et test : `fix_z80_regclosure.sms` (`ld hl,($C000)` puis `jp (hl)` — la cible ne vit dans
+aucun immédiat ni anneau de pc exécutés, seul le HL concret de la machine la prouve) + test
+`core_closure_reg_z80` : « indirect resolved ≥ 1 » et ligne C3 absente sous `--no-closure-regs`.
+Observation de l'outil sur la fixture : `seed walks 2, indirect resolved 1, indirect unresolved 0`.
+
+Limites honnêtes de la tranche : les tables 6502/HuC6280/68000 sont des sous-ensembles sains
+(alu, rotates, modes d'adressage indirect : tout tue, enrichissement après banc) ; le suivi de SP
+concret (retours par la pile de la machine) n'est pas porté ; le mode bloc Sega (`ldir`/`djnz`
+boucles) n'est partiellement couvert que par les pas ED du Z80 ; `reg_effect` ne prouve les
+lectures mémoire que de l'opérande explicite de l'instruction (lecture planifiée, comme
+`target_constants`). La réintégration des vues de contexte Sega (8 contextes) n'est pas portée.
+
+**`sega/closure.c` n'est pas retiré** : l'acceptation reste le banc octet à octet SMS/GG/SG/MSX
+contre l'exigence « zéro donnée déclarée code » (égalité ou mieux en code trouvé, pas plus
+d'erreurs). Suite de tests verte sur 0.383.0 (166 tests, dont `campaign_fixtures`).

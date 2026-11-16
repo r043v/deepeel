@@ -334,7 +334,19 @@ qui fournissent les hooks requis.
     la fenêtre fixe est résolue par vue ;
   - en même temps, raffinement des écritures indirectes connues
     (`indirect_store` :388) ;
-  - le budget est en cascade (§2.4 G4).
+  - le budget est en cascade (§2.4 G4) ;
+  - 0.383.0, **amorçage par l'état concret des registres** (générique) :
+    chaque pas exécuté à flot non séquentiel amorce une marche statique non
+    fiable qui traverse le code connu en portant un `DpRegState` (`DpIsa.reg_effect`
+    avance les constantes, `DpMachine.get_regs` fournit l'état de la CPU à
+    l'amorçage, tout ce qui n'est pas modélisé tue — jamais deviné) ; un transfert
+    indirect par registre entièrement connu (`jp (hl)/(ix)/(iy)`, `jp hl`,
+    `jmp/jsr (An)`) est suivi. Plafonds comptés au rapport (états par site,
+    valeurs indirectes par site, déduplication globale), `--no-closure-regs`
+    coupe, `--unbounded` lève. C'est l'amorçage de `sega/closure.c` porté à
+    toutes les ISA ; `sega/closure.c` n'est retiré qu'au banc octet à octet
+    SMS/GG/SG/MSX sans plus d'erreurs de données (§ exigence zéro donnée code
+    du plan).
 
 **S3 — Suivi de constantes et provenance.**
 - **Méca.** :
