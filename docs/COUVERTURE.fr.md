@@ -352,7 +352,19 @@ qui fournissent les hooks requis.
     erreurs de tuiles). C'est l'amorçage de `sega/closure.c` porté à
     toutes les ISA ; `sega/closure.c` n'est retiré qu'au banc octet à octet
     SMS/GG/SG/MSX sans plus d'erreurs de données (§ exigence zéro donnée code
-    du plan).
+    du plan).  0.386.0 : le critère « zéro donnée déclarée code » a ses
+    mécanismes — l'octet de marche non fiable est **provisoire** (classe
+    `probable-code` de la carte, « provisional N » au rapport ; il ne compte
+    comme code que confirmé par exécution, marche de confiance ou pli Sega),
+    une entrée non fiable qui porte la signature de données de l'ISA est
+    **refusée** à l'entrée (`DpIsa.entry_data_sig` : soupes de
+    `rst $38`/`ld (bc),a`, préfixe DD/FD sans IX/IY ; refus compté, les gardes
+    classiques gardent leur compteur ; la règle générique « huit instructions
+    sans transfert de contrôle » est rejetée au banc : elle refuse de vrai
+    code de feuille en ligne droite), et
+    `tests/truth_check.py` audite la carte contre un fichier de vérité
+    (erreur = naturel ou statique sur un octet de données ; forcé, inféré et
+    probable sont rapportés comme non prouvés).
 
 **S3 — Suivi de constantes et provenance.**
 - **Méca.** :

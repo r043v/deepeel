@@ -5939,3 +5939,23 @@ DJNZ, répétitions ldir déjà génériques) ; son `c` connu ne sert que le `po
 ouvert, MSX). L'écart restant Sega→noyau est diagnostiqué comme la qualité des clôtures de
 données (`DP_CORE_DATA`) — la suite est l'exigence « zéro donnée déclarée code » du plan.
 Détails et nombres : `docs/PLAN-COUVERTURE-MAX.fr.md`, tranche 3.
+
+### 0.386.0 — noyau : l'octet de marche non fiable est provisoire ; vraisemblance à l'entrée ; outil de vérité terrain
+
+Trois points de l'exigence « zéro donnée déclarée code ». **Provisoire** : un octet atteint
+seulement par une marche non fiable (chute après CALL, retour par pile concrète) n'est plus
+déclaré statique — drapeau séparé, classe `probable-code` de la carte, compteur « provisional
+N » au rapport ; il compte comme code une fois confirmé (exécution, marche de confiance, pli
+Sega). **Vraisemblance à l'entrée** : une entrée non fiable dont les premiers octets portent la
+signature de données de l'ISA (deux `rst $38` consécutifs, deux `ld (bc),a`/`ld (de),a`,
+préfixe DD/FD sans IX/IY — via `DpIsa.entry_data_sig`) est refusée et comptée, l'octet reste
+à l'inférence ; les gardes classiques de bourrage/pointeurs gardent leur compteur. La règle
+générique « huit instructions sans transfert de contrôle » a été essayée puis retirée : le
+banc montrait qu'elle refuse de vrai code de feuille en ligne droite (décalages déroulés,
+prologues exx). **Vérité terrain** :
+`tests/truth_check.py` audite une carte contre un fichier de vérité (erreur = naturel ou
+statique sur un octet de données ; forcé/inféré/probable rapportés non prouvés) ;
+`fix_z80_truth.sms` + sa vérité générée + `core_closure_truth_z80` l'épinglent. Un octet
+provisoire ne bloque plus une racine de confiance (qui le promeut) — la classe d'un octet ne
+dépend plus de l'ordre d'arrivée. Détails, banc et la régression re-marches corrigée :
+`docs/PLAN-COUVERTURE-MAX.fr.md`.

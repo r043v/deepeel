@@ -998,3 +998,97 @@ par la **qualité des clôtures de données** — exactement l'exigence « zéro
 ouvrir ces clôtures ajouterait les erreurs de la famille 2 avec celles, évitées, de la famille 1
 en face. La suite ordonnée reste celle du point « zéro donnée déclarée code » ci-dessus
 (vérité terrain d'abord). `sega/closure.c` reste en place.
+
+## « Zéro donnée déclarée code » : points 2, 3 et 4 livrés (0.386.0)
+
+**Point 2 — le provisoire distinct du statique.** Le marquage de la fermeture se splitte
+selon la confiance de la marche : un octet atteint par une marche de confiance (arête
+prouvée du code exécuté : cible de saut/appel, autre côté de conditionnel, table validée)
+reste `DP_CORE_STATIC` ; un octet atteint seulement par une marche non fiable (chute après
+CALL, retour par pile concrète) reçoit un drapeau séparé (`DpCoreResult.prov`), projeté en
+classe `probable-code` de la carte (12) et compté à part au rapport (« provisional N »,
+compté sur les tableaux : il disparaît dès qu'exécution, marche de confiance ou le pli Sega
+le confirme). Un octet provisoire ne compte jamais comme code prouvé. Le pli de
+`sega/closure.c` est inchangé : ses octets restent du statique complet (la référence du
+propriétaire), et il promeut les provisoires qu'il confirme.
+
+Propriété vérifiée octet à octet sur `fix_nes_closure` : les ensembles avant/après sont
+identiques hors les 4 octets de retombée d'appel, qui passent de code-statique à
+probable-code ; naturel, inféré et bourrage inchangés. Les fixtures de fermeture des cinq
+ISA voient leurs octets de retombée d'appel (les seuls qu'elles marquaient) devenir
+provisoires — pins mis à jour (`static-only 0, provisional 4/5`). `fix_nes_static` garde
+5 octets statiques seuls (preuves) et 3 provisoires (retombées) : les deux familles
+coexistent et se lisent séparément au rapport.
+
+**Point 3 — vraisemblance à l'entrée d'une marche.** `closure_entry_is_data` vérifie les
+premiers octets d'une entrée non fiable (racine de chute d'appel, continuation de chute en
+cours de marche) contre la signature de données de l'ISA (`DpIsa.entry_data_sig`, câblée
+z80 et sm83) : deux `rst $38` consécutifs (plaque de `$FF`), deux `ld (bc),a`/`ld (de),a`
+consécutifs (écritures de tuiles par un pointeur qui n'avance jamais), préfixe DD/FD dont
+l'opcode ne touche ni IX ni IY (no-op non documenté, jamais du code utile) ; 6502/HuC6280/
+68000 sans signature pour l'instant. L'entrée refusée est comptée (« untrusted walk entries
+refused (data plausibility, point 3) »), jamais silencieuse ; l'octet reste inconnu et
+l'inférence le juge. Les gardes classiques (plaque de bourrage, mots pointeurs, drapeaux
+`DP_CORE_DATA`) ne sont pas dupliquées : quand la première étape les toucherait, la marche
+démarre et s'y arrête avec son propre compteur (`core_pad_stop`, `core_ptr_stop` restent
+verts).
+
+**Essai rejeté (consigné)** : la règle générique « huit instructions séquentielles sans
+aucun transfert de contrôle » du point 3. Le banc l'a condamnée : du vrai code de feuille
+en ligne droite (décalage déroulé `add hl,hl` ×N d'Ace of Aces à $2186, prologues
+save/restore `exx`/`pop`, `ld a,($C100)`/`and a`/`jr z` d'Addams) décode exactement comme
+ça et l'entrée refusée perdait du code démontrable (Ace : −121 octets dont la routine
+`d9 e1 7e 87 23…` ; en cascade, le code derrière la refusée n'est plus atteint — Addams
+0x126c). Retirée ; les signatures ISA seules refusent 91/94/43/0 entrées par ROM et les
+plages de données caractéristiques (`ff ff`, `02 02`) restent couvertes par elles.
+
+**Point 1 — l'outil de vérité terrain.** `tests/truth_check.py` audite une carte `map v1`
+contre un fichier de vérité (`<lo>-<hi> c|d`, plages hex inclusives) : code trouvé/manqué,
+et « données déclarées code » séparées en **prouvé** (naturel ou statique sur un octet de
+données : l'erreur, critère de sortie) et **non prouvé** (forcé, inféré-code,
+probable-code : des prétentions à juger, rapportées sans être fatales — un marquage forcé
+est une exécution fabriquée, pas une preuve). La fixture `fix_z80_truth.sms` vient avec sa
+vérité émise par le générateur lui-même (`fix_z80_truth.truth`) : un appel dont la retombée
+plonge dans une plaque de tuiles `ld (bc),a` ; le test `core_closure_truth_z80` épingle le
+refus d'entrée et l'audit « zéro erreur prouvée ». Les vérités des ROMs réelles du banc
+restent à produire hors dépôt (désassemblage manuel d'une ou deux SMS/GG, ou ROM issue
+d'un source connu) ; le banc les audite quand le fichier existe
+(`/tmp/c3bench/bench4.sh`).
+
+**Point 4 — ordre des marches.** Réalisé structurellement par le point 2 : un octet
+provisoire est « connu » pour une marche non fiable (rien de neuf à y décoder — la marche
+passe ou s'arrête comme sur du statique) et inconnu pour une marche de confiance (qui doit
+l'atteindre pour le promouvoir). Un marquage provisoire ne bloque donc plus une racine de
+confiance, et la classe d'un octet ne dépend plus de l'ordre d'arrivée. L'ordre
+confiance-d'abord au site exécuté (cible avant chute) était déjà en place.
+
+**Régression trouvée et corrigée le même jour.** La première version du point 2 laissait
+chaque marche non fiable re-décoder les zones provisoires et ré-entrer chaque racine : sur
+`fix_streams_bank.gb` la fermeture rejouait ses simulations de banque à chaque re-marche
+et le run passait de 3,4 s à plus de 300 s (profil : `closure_run` → `dp_mach_op`, le poke
+du mapper). Correctif : la règle « connu » ci-dessus. Carte identique octet à octet à
+0.385.0 sur cette fixture, run revenu à ~3 s.
+
+**Banc** (4 ROMs, `--attract-frames 300 --max-total 1500000 --jobs 1`, obs. outil ; noyau
+seul puis avec la fermeture Sega ; le « marqué » du noyau = statique seul ∪ provisoire) :
+
+| ROM | noyau : statique seul | provisoire | refus d'entrée | + Sega : statique / provisoire | noyau ⊆ Sega (0 = tenu) | Sega ajoute |
+|---|---|---|---|---|---|---|
+| Ace of Aces (SMS) | 530 | 10 668 | 91 | 1 494 / 10 668 | 0 octet noyau seul | 964 |
+| Addams Family (GG) | 3 266 | 4 972 | 94 | 3 266 / 4 972 | 0 | 0 |
+| Aerial Assault (GG) | 7 103 | 5 972 | 43 | 11 394 / 3 775 | 0 | 2 094 |
+| Bank Panic (SG) | 14 | 1 273 | 0 | 626 / 1 269 | 0 | 608 |
+
+**Effet zéro-donnée mesuré** (diff cartes noyau 0.385.0 → 0.386.0) : Aerial perd 2 743
+octets marqués dont **2 671 reclassés données** — ce sont les plaques que le diagnostic de
+la tranche 3 montrait en erreurs (`ff 00 03 ff ff…` à 0xdab6, `00 00 00 ff…` à 0xc89c,
+motifs `f0 3f 3f 00` à 0x1d954, soupes `02 02` à 0x1fcba) — et en regagne 2 544 ailleurs ;
+les 6 plages « connues données » du plan restent hors code (5 exactement, 0xb172-0xb2d4
+encore marquée code : 349 octets, à juger sur la vérité terrain). Ace : 0 octet perdu,
++1 431 (le code retombée d'appel redevient marqué, en provisoire). Bank Panic : 3 octets
+d'en-tête `7f 7f` perdus (maintenant inférés données). Addams : solde neutre (−766/+772,
+dont 566 reclassés données) ; ~200 octets de vrai code derrière des refus en cascade ne
+sont plus que de l'inférence-donnée — c'est la famille 1 du diagnostic (du vrai code derrière
+une clôture), à rouvrir par la qualité des vérités, pas par le budget. La contribution
+propre restante de `sega/closure.c` est 964 / 0 / 2 094 / 608 octets ; `sega/closure.c`
+reste en place (critère inchangé).
