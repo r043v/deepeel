@@ -453,3 +453,11 @@ Mesure de l'apport de `sega/closure.c` (observation de l'outil, 0.379.1, interru
 --max-total 3000000`, ROMs SMS de `m0boy`, hors dépôt) : octets statiques avec/sans la fermeture Sega — Ace of Aces 12 459 / 10 428
 (+2 031), Action Fighter (UE) 12 403 / 7 996 (+4 407), em-1 sans écart (7 996 / 7 996). La fermeture Sega apporte donc de la
 couverture que le marcheur du noyau seul n'atteint pas sur certaines ROMs : la fusion exige le portage des techniques, pas la suppression.
+
+Essai C3 rejeté (0.379.1, non livré) : rejouer toutes les racines de branchement exécutées sous chaque vue de mapper observée (instantanés par
+signature de mapping, rejeu en fin de run). Observation de l'outil sur Ace of Aces, fermeture Sega coupée : 10 428 → 17 534 octets statiques, soit
+bien plus que la fermeture Sega (12 459) : c'est du sur-marquage, une racine rejouée sous une vue où son adresse n'est pas du code, donc un faux positif
+statique (témoins négatifs non classés exigés par P5). Sur Action Fighter l'essai n'apporte rien (7 996 → 8 073). Le gain de `sega/closure.c` sur Action
+Fighter (+4 407) ne vient donc pas des vues croisées ; les statistiques de la fermeture Sega montrent `indirect_resolved 0` et `memory_resolved 0` sur cette ROM
+(pas de suivi de registres en cause) et `returns_resolved` non nul : la piste restante est la résolution des retours (confiance après appel dont le
+retour est établi) et les graines à chaque instruction observée sous la vue en vigueur. Non portée.
