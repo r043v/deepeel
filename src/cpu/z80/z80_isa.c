@@ -272,7 +272,45 @@ static int isa_out_port(const uint8_t *b, int *port_known, uint16_t *port) {
     if (b[0] == 0xED && (b[1] == 0x79 || b[1] == 0x71)) { *port_known = 0; return 1; }
     return 0;
 }
+// M1: direct RAM load into the accumulator, `ld a,(nn)` (techniques 3, 4, 7)
+static int isa_ram_load(const uint8_t *b, uint32_t *addr, int *idx_reg, int *width, int *dreg) {
+    (void)idx_reg; (void)width; (void)dreg;
+    if (b[0] != 0x3A) return 0;
+    *addr = b[1] | (b[2] << 8);
+    return 3;
+}
+// M1: proven length (in entries) of the word table whose base `ld hl,nn` follows the load;
+// an entry is proven while its word designates the ROM at or above code_min (a legal code target)
+static unsigned isa_table_proven(const DpIsa *isa, DpMachine *m, uint32_t pc, int len) {
+    for (unsigned i = 0; i < 13; i++) {
+        if (m->fetch(m, pc + len + i) != 0x21) continue;
+        uint32_t base = m->fetch(m, pc + len + i + 1) | (uint32_t)m->fetch(m, pc + len + i + 2) << 8;
+        if (m->rom_index(m, base) < 0) continue;
+        unsigned n = 0;
+        while (n < 128) {
+            uint32_t t = m->fetch(m, base + 2 * n) | (uint32_t)m->fetch(m, base + 2 * n + 1) << 8;
+            if (t < isa->code_min || m->rom_index(m, t) < 0) break;
+            n++;
+        }
+        return n;
+    }
+    return 0;
+}
+// M1: a ROM table access indexed by the loaded value follows within 16 bytes:
+// `ld hl,nn` from a ROM base, then an addition folding the loaded value in
+static int isa_rom_table_follows(const DpIsa *isa, DpMachine *m, uint32_t pc, int len) {
+    (void)isa;
+    uint8_t win[16];
+    for (unsigned i = 0; i < sizeof win; i++) win[i] = m->fetch(m, pc + len + i);
+    int tab = 0;
+    for (unsigned i = 0; i + 2 < sizeof win; i++) {
+        if (win[i] == 0x21 && m->rom_index(m, win[i + 1] | (win[i + 2] << 8)) >= 0) tab = 1;
+        if (tab && (win[i] == 0x19 || win[i] == 0x09 || win[i] == 0x85 || win[i] == 0x83)) return 1;
+    }
+    return 0;
+}
 static const DpIsa isa = { "z80", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
                            isa_reg_effect, isa_illegal, isa_disasm, isa_mem_operand, 0, 1, 0, isa_imm_ptr, NULL, isa_acc_imm, isa_st_acc_abs,
-                           .sp_slot = DP_Z80R_SP, .sp_width = 2, .sp_addr_mask = 0xFFFFu, .sp_base = 0, .entry_data_sig = isa_entry_data_sig, .out_port = isa_out_port };
+                           .sp_slot = DP_Z80R_SP, .sp_width = 2, .sp_addr_mask = 0xFFFFu, .sp_base = 0, .entry_data_sig = isa_entry_data_sig, .out_port = isa_out_port,
+                           .ram_load = isa_ram_load, .cmp_imm = 0xFE, .table_proven = isa_table_proven, .rom_table_follows = isa_rom_table_follows };
 const DpIsa *dp_isa_z80(void) { return &isa; }

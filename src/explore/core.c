@@ -23,6 +23,7 @@ typedef struct {
     uint8_t vector;    // a registry vector entry: real machine state, no forced inversion (the taint RET cut does not apply)
     uint16_t origin;   // A6: DP_SRC_* bit of a fabricated or session start, inherited by every fork (0: the game's own flow)
     uint16_t epoch;    // B3: checkpoint epoch (0: none) the path descends from; the per-site fork cap restarts in each epoch
+    uint32_t tri;      // P2/A19: target rom index + 1, resolved under the pushing mapping (0: unknown — pick falls back to covered())
 } Pending;
 
 // C13: dense RAM index of an address (the machine's own, else the low 16 bits); -1 outside RAM
@@ -75,7 +76,8 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
         if (*e == '-') { c->cell_lo = (uint32_t)lo; c->cell_hi = (uint32_t)strtoul(e + 1, NULL, 0); }
         return 2;
     }
-    if (!strcmp(a, "--unbounded")) { c->unbounded = 1; c->max_total = 0; c->max_path_steps = 0; c->fork_site_cap = 0; c->closure_seed_cap = 0; return 1; }
+    if (!strcmp(a, "--campaign")) { c->campaign = 1; return 1; }
+    if (!strcmp(a, "--unbounded")) { c->unbounded = 1; c->max_total = 0; c->fork_site_cap = 0; c->closure_seed_cap = 0; return 1; }   // A8: max_path_steps stays — lifting the caps must not lift the platform's path shape (Zelda: 85 776 naturals bounded, 4 835 unbounded); --max-steps N reshapes it explicitly
     if (!strcmp(a, "--state-dir") && i + 1 < argc) { c->state_dir = argv[i + 1]; return 2; }
     if (!strcmp(a, "--resume")) { c->resume = 1; return 1; }
     if (!strcmp(a, "--no-closure")) { c->no_closure = 1; return 1; }
@@ -177,7 +179,7 @@ void dp_core_result_free(DpCoreResult *r) {
     free(r->prov);
     free(r->dest); free(r->spec); free(r->refs); free(r->page_win); free(r->inferred); free(r->live);
     free(r->src_flags); free(r->reg_slot); free(r->reg_reads); free(r->reg_writes); free(r->reg_vals);
-    free(r->first_seen);
+    free(r->first_seen); free(r->hits);
     memset(r, 0, sizeof *r);
 }
 
@@ -274,6 +276,7 @@ typedef struct {
     unsigned idx;
     uint32_t *capped;      // direct-mapped cache of conditional sites that reached fork_site_cap (pc + 1)
     unsigned step_batch;   // steps not yet added to the shared counter (flushed every 256)
+    uint64_t *pcache; unsigned pcap;   // A5: memo of the projection-pruned forks (site, projection); the shared set only grows, so a spent key stays spent
     uint32_t pcring[32]; unsigned pcring_n;   // A12: the last executed instruction starts of this path (never operand bytes)
     uint8_t *wsnap;        // technique 1: state at the start of the window before a conditional
     uint32_t *winmemo;     // direct-mapped: (rom index + 1) * 2 + (a conditional follows within 5 sequential instructions)
@@ -454,14 +457,22 @@ static int closure_entry_is_data(const DpCoreResult *r, const DpIsa *isa, const 
 }
 static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa, uint32_t root, uint32_t bank, uint32_t trust0,
                         const DpRegState *regs0, int thru0, unsigned budget0, RegWalk *rw) {
-    uint32_t stack[256][4]; RetStk rets[256], cr; unsigned sp = 0, budget = budget0 ? budget0 : (unsigned)CLOSURE_INSTR, kthru = 0, thru = (unsigned)thru0; cr.n = 0; uint64_t *seen = NULL;
+    uint32_t stack_s[256][4]; RetStk rets_s[256]; DpRegState rg_s[256];
+    uint32_t (*stack)[4] = stack_s; RetStk *rets = rets_s; DpRegState *rg = rg_s;
+    unsigned depth = 256, kthru_cap = 4096, seen_cap = 8192;
+    uint32_t (*heap)[4] = NULL; RetStk *hret = NULL; DpRegState *hrg = NULL;
+    if (v->cfg && v->cfg->unbounded) {   // P11: the fixed walk caps lift under --unbounded (budget and data rules still stop it); failures fall back silently to the small tables
+        heap = malloc(4096 * sizeof *heap); hret = malloc(4096 * sizeof *hret); hrg = malloc(4096 * sizeof *hrg);
+        if (heap && hret && hrg) { stack = heap; rets = hret; rg = hrg; depth = 4096; kthru_cap = 65536; seen_cap = 65536; }
+    }
+    RetStk cr; unsigned sp = 0, budget = budget0 ? budget0 : (unsigned)CLOSURE_INSTR, kthru = 0, thru = (unsigned)thru0; cr.n = 0; uint64_t *seen = NULL;
     // C3: bank-switch simulation.  `ld a,n` then a store of A to a mapper bank register is replayed through the machine's own
     // mapper (poke) so the rest of the walk sees the new ROM view; every walk restores the live state when it ends and each
     // pending root remembers the chain of writes it was pushed under (node 0 = the live view).
     BankPoke pk[CLOSURE_BANK_NODES + 1]; int npk = 0, cur = 0, acc_known = 0, acc_age = 0; uint8_t acc = 0; uint8_t *snap = NULL;
     // C3: the register-constant state of the walk path (one per pending side; a
     // seeded walk starts from the concrete CPU registers, a plain one from all-unknown)
-    DpRegState rg[256], regs;
+    DpRegState regs;
     int have_regs = regs0 != NULL && isa->reg_effect != NULL;
     unsigned spw = isa->sp_width;   // the modeled stack: word size; the register width and stack page come from the ISA (6502 S is 8 bits above $0100)
     uint32_t spmask = isa->sp_addr_mask;                 // value mask of the SP bits that index memory
@@ -491,11 +502,11 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
         int pass = 0;
         int known = k >= 0 && ((__atomic_load_n(&r->flags[k], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC))
                                || (!trust && r->prov && r->prov[k]));   // a provisional byte holds nothing new for an untrusted walk; a trusted one must reach it to promote it
-        if (known && r->closure_ret && (cr.n || thru) && kthru < 4096) {   // each known address is walked through once per walk
-            if (!seen) seen = calloc(8192, sizeof *seen);
+        if (known && r->closure_ret && (cr.n || thru) && kthru < kthru_cap) {   // each known address is walked through once per walk
+            if (!seen) seen = calloc(seen_cap, sizeof *seen);
             if (seen) {
-                uint64_t key = (uint64_t)k + 1; size_t hh = (size_t)(key * 0x9E3779B97F4A7C15ull >> 51) & 8191; int dup = 0;
-                while (seen[hh]) { if (seen[hh] == key) { dup = 1; break; } hh = (hh + 1) & 8191; }
+                uint64_t key = (uint64_t)k + 1; size_t hh = (size_t)(key * 0x9E3779B97F4A7C15ull >> 51) & (seen_cap - 1); int dup = 0;
+                while (seen[hh]) { if (seen[hh] == key) { dup = 1; break; } hh = (hh + 1) & (seen_cap - 1); }
                 if (!dup) { seen[hh] = key; known = 0; kthru++; pass = 1; }
             }
         }   // C3: a pending return walks through known code (a per-walk allowance of 2048 instructions) to find the callee's ret
@@ -558,7 +569,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
                         // additive and last: the walk goes on under the view it already has (exactly the plain walk); the continuation under
                         // the new view is queued behind it and only gets what budget is left
                         pk[++npk] = (BankPoke){ ad, acc, cur }; r->closure_bank_sims++;
-                        if (sp < 256) { rets[sp] = cr; stack[sp][0] = pc + f.length; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)npk; rg[sp] = regs; sp++; }
+                        if (sp < depth) { rets[sp] = cr; stack[sp][0] = pc + f.length; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)npk; rg[sp] = regs; sp++; }
                         else r->closure_stack_dropped++;
                     }
                 }
@@ -635,7 +646,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
                     regs = rs;
                     pc = ra; trust = 0; thru = 1; continue;
                 }
-            } else if (kt >= 0 && sp < 256) {   // ret cc: the taken side pops and jumps, the walk goes on past it
+            } else if (kt >= 0 && sp < depth) {   // ret cc: the taken side pops and jumps, the walk goes on past it
                 if (rw && !rw->cfg->unbounded && rw->ind_vals[(uint32_t)k & rw->mask] >= REG_IND_CAP) r->closure_reg_indirect_sat++;
                 else {
                     if (rw) rw->ind_vals[(uint32_t)k & rw->mask]++;
@@ -655,7 +666,7 @@ no_stackret:;
         if (f.kind != DP_FLOW_RET && (f.target >= 0 || (indirect_ok && f.kind == DP_FLOW_INDIRECT)) &&
             (f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL || (f.kind == DP_FLOW_INDIRECT && indirect_ok)) && tgt >= 0) {
             if (cview_index(v, r, (uint32_t)tgt, bk) < 0) r->closure_unresolved++;
-            else if (sp < 256) {
+            else if (sp < depth) {
                 rets[sp] = cr;
                 if (r->closure_ret && f.kind == DP_FLOW_CALL && f.cond < 0 && cr.n < CLOSURE_RET && !(__atomic_load_n(&r->flags[cview_index(v, r, (uint32_t)tgt, bk)], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC))) {   // a callee already known is not walked again: its return cannot be followed, the legacy fall-through applies   // the callee's path remembers where it returns to
                     rets[sp].pc[cr.n] = pc + f.length; rets[sp].bk[cr.n] = bk; rets[sp].trust[cr.n] = trust; rets[sp].n = cr.n + 1;
@@ -672,7 +683,7 @@ no_stackret:;
             // a return: the caller's continuation, carrying the trust the call site had (the callee proved the address is code)
             uint32_t rpc = cr.pc[cr.n - 1], rbk = cr.bk[cr.n - 1], rtr = cr.trust[cr.n - 1];
             if (f.kind == DP_FLOW_COND) {   // a conditional return: the taken side is queued, the walk goes on past it
-                if (sp < 256) { rets[sp] = cr; rets[sp].n--; stack[sp][0] = rpc; stack[sp][1] = rbk; stack[sp][2] = rtr; stack[sp][3] = (uint32_t)cur; rg[sp] = regs; sp++; r->closure_rets++; }
+                if (sp < depth) { rets[sp] = cr; rets[sp].n--; stack[sp][0] = rpc; stack[sp][1] = rbk; stack[sp][2] = rtr; stack[sp][3] = (uint32_t)cur; rg[sp] = regs; sp++; r->closure_rets++; }
                 else r->closure_stack_dropped++;
             } else { cr.n--; pc = rpc; bk = rbk; trust = rtr; thru = 1; r->closure_rets++; continue; }   // the continuation after a proven return walks through what the blind fall-through already marked (the callee's register constants ride on, the Sega closure's own rule)
         }
@@ -692,7 +703,7 @@ no_stackret:;
         else { if (!sp) goto done; CLOSURE_POP(); }
     }
 done:
-    free(seen);
+    free(seen); free(heap); free(hret); free(hrg);
     if (snap) { v->m->load(v->m, snap); free(snap); }   // the live machine is left exactly as the walk found it
 #undef CLOSURE_POP
 }
@@ -818,7 +829,8 @@ static int closure_jp_table3(DpCoreResult *r, DpMachine *m, const DpCoreConfig *
     for (int e = 0; e < 64 && (size_t)bi + (size_t)e * 3 + 2 < cfg->rom_image_size; e++) {
         const uint8_t *en = cfg->rom_image + bi + (size_t)e * 3;
         uint32_t t = en[0] | (uint32_t)en[1] << 8, eb = en[2];
-        if (eb >= nbanks || t < 0x150 || t >= 2u * win) break;
+        unsigned topwin = m->rom_top_win ? m->rom_top_win : 2u;   // the machine's ROM window count (P3 hygiene: was the GB 2-window top)
+        if (eb >= nbanks || t == 0x0000u || t == 0xFFFFu || t < isa->code_min || t >= topwin * win) break;
         uint32_t ix = (t < win ? 0 : eb) * win + (t & (win - 1u));
         if (ix >= r->rom_size || ix >= cfg->rom_image_size) break;
         uint8_t b[8] = {0};
@@ -872,9 +884,11 @@ static int ring_has(const uint32_t *ring, unsigned n, uint32_t pc) {
     return 0;
 }
 
-static void closure_jp_table(DpCoreResult *r, DpMachine *m, const DpCoreConfig *cfg, const DpIsa *isa, uint32_t pc, const uint32_t *ring, unsigned nring, RegWalk *rw) {
+// pair: 0 HL (`jp hl`/`jp (hl)`), 1 IX, 2 IY (`jp (ix)`/`jp (iy)`, P4) — the backward scan
+// looks for the matching pair load (`ld hl,nn` / DD|FD `ld ix,nn`).
+static void closure_jp_table(DpCoreResult *r, DpMachine *m, const DpCoreConfig *cfg, const DpIsa *isa, uint32_t pc, unsigned pair, const uint32_t *ring, unsigned nring, RegWalk *rw) {
     if (!isa->hl_jp_table) return;
-    {   // byte-granular: ld b,n / ld c,m then ld h,b / ld l,c (or the reverse pair) before the jump
+    if (pair == 0) {   // byte-granular: ld b,n / ld c,m then ld h,b / ld l,c (or the reverse pair) before the jump
         int hb = -1, lc = -1, mv = 0;
         for (uint32_t d = 1; d <= 24 && d <= pc; d++) {
             uint8_t o = m->fetch(m, pc - d);
@@ -890,14 +904,19 @@ static void closure_jp_table(DpCoreResult *r, DpMachine *m, const DpCoreConfig *
             return;
         }
     }
-    for (uint32_t d = 3; d <= 24 && d <= pc; d++) {
+    for (uint32_t d = pair ? 4u : 3u; d <= 24 && d <= pc; d++) {
         uint8_t lop = m->fetch(m, pc - d);
-        int base_ok = lop == 0x21;
-        if (lop == 0x11 || lop == 0x01)   // ld de/bc,nn then add hl,de/bc, or ld a,(de/bc) pointer reads, before the jump
-            for (uint32_t q = pc - d + 3; q < pc; q++) { uint8_t o = m->fetch(m, q); if (o == (lop == 0x11 ? 0x19 : 0x09) || o == (lop == 0x11 ? 0x1A : 0x0A)) { base_ok = 1; break; } }
+        int base_ok;
+        if (pair)   // DD/FD 21 nn nn: the prefix starts the instruction, the operand rides two bytes further
+            base_ok = lop == (pair == 1 ? 0xDDu : 0xFDu) && m->fetch(m, pc - d + 1) == 0x21;
+        else {
+            base_ok = lop == 0x21;
+            if (lop == 0x11 || lop == 0x01)   // ld de/bc,nn then add hl,de/bc, or ld a,(de/bc) pointer reads, before the jump
+                for (uint32_t q = pc - d + 3; q < pc; q++) { uint8_t o = m->fetch(m, q); if (o == (lop == 0x11 ? 0x19 : 0x09) || o == (lop == 0x11 ? 0x1A : 0x0A)) { base_ok = 1; break; } }
+        }
         if (!base_ok) continue;
         if (ring && !ring_has(ring, nring, pc - d)) continue;   // A12: the load must be an executed opcode, not an operand byte that looks like one
-        uint32_t base = m->fetch(m, pc - d + 1) | (uint32_t)m->fetch(m, pc - d + 2) << 8;
+        uint32_t base = m->fetch(m, pc - d + (pair ? 2u : 1u)) | (uint32_t)m->fetch(m, pc - d + (pair ? 3u : 2u)) << 8;
         if (base < 0x100 || m->rom_index(m, base) < 0) continue;
         int cnt = 0;
         for (int e = 0; e < 64; e++) {
@@ -931,6 +950,7 @@ static void mark(Shared *sh, DpCoreResult *r, DpMachine *m, uint32_t pc, unsigne
     for (unsigned i = 0; i < len; i++) {
         int64_t k = m->rom_index(m, pc + i);
         if (k >= 0 && (size_t)k < r->rom_size) {
+            if (!i && r->hits) __atomic_fetch_add(&r->hits[k], 1, __ATOMIC_RELAXED);   // P13: execution heat of the instruction head
             if (m->page_shift && r->page_win && how & DP_CORE_NATURAL) __atomic_store_n(&r->page_win[(size_t)k >> m->page_shift], (uint8_t)(1u + (((pc + i) >> m->page_shift) & 7u)), __ATOMIC_RELAXED);
             uint32_t srcbit = (how & DP_CORE_NATURAL) ? (origin ? origin : DP_SRC_FORK_NATURAL) : DP_SRC_FORK_FORCED;   // A6: only a natural flow can be fabricated
             uint8_t bits = how | (i == 0 ? ((how & DP_CORE_NATURAL) ? DP_CORE_START_NATURAL : DP_CORE_START_FORCED) : 0);
@@ -991,7 +1011,7 @@ static void obs_read(void *u, uint32_t addr, uint8_t v) {
     }
     int64_t k = o->m->rom_index(o->m, addr);
     int64_t ri = k < 0 && o->ramread ? ridx(o->m, addr) : -1;
-    if (ri >= 0 && !o->ramread[ri]) __atomic_store_n(&o->ramread[ri], 1, __ATOMIC_RELAXED);
+    if (ri >= 0 && !o->forced && !o->ramread[ri]) __atomic_store_n(&o->ramread[ri], 1, __ATOMIC_RELAXED);   // P6: forced paths must not join the semantic cell (same rule as the live bitmap below)
     if (k < 0 && o->track && o->nram < 4) {
         unsigned i = 0;
         while (i < o->nram && o->ram[i] != addr) i++;
@@ -1099,6 +1119,7 @@ static uint64_t cell_key(const DpCoreConfig *cfg, const uint8_t *ramread, DpMach
     return h | 1;   // never 0: 0 marks an empty slot
 }
 
+
 // C11: the context projection of a fork: the machine's registers and mapper (ctx_reg_hash) plus the RAM pages the code of this ROM
 // page and of the target's page has been seen to read (the liveness bitmap `live`), mixed with the target.  Dead registers cannot be
 // told apart without operand decoding, so every register stays in the key: the projection only drops the RAM the code never reads.
@@ -1137,11 +1158,43 @@ static int keyset_insert(uint64_t **set, size_t *cap, size_t *n, uint64_t key) {
 }
 static int cell_insert(Shared *sh, uint64_t key) { return keyset_insert(&sh->cellset, &sh->cellcap, &sh->celln, key); }
 
+// A2: the context re-arm of B1 generalized to every fork technique (index replays, RNG,
+// signatures, IRQ): one more fire of a technique already spent at this site, when the
+// semantic cell (the RAM the code has been seen to read) differs from every one seen
+// before.  The visit heuristic (1, 2, 4, 8) bounds the attempts; probe_ctx_cap bounds
+// the productive contexts per site across every technique (saturation counted, never
+// silent).  `tag` is the 4-bit channel in the key's top bits (8 index, 10 rng, 12 sig,
+// 13 irq, 11 the B1 event probes); `sub` distinguishes sibling keys of one site (the
+// IRQ delay).  1 when the (site, cell) pair was fresh and is now spent.
+static int ctx_rearm(Shared *sh, const DpCoreConfig *cfg, DpCoreResult *loc, DpMachine *m,
+                     int64_t ri, uint64_t tag, uint64_t sub, unsigned visit) {
+    if (!cfg->probe_ctx_cap || cfg->probe_ctx_cap <= 1 || !sh->probectx || ri < 0) return 0;
+    if (!visit || visit > 8 || (visit & (visit - 1))) return 0;   // B1's exponential attempt gate
+    unsigned pcx = __atomic_load_n(&sh->probectx[ri], __ATOMIC_RELAXED);
+    if (!pcx) return 0;                                           // a site that produced nothing stays spent
+    if (pcx >= cfg->probe_ctx_cap) { loc->probe_ctx_sat++; return 0; }
+    uint64_t ck = cell_key(cfg, sh->ramread, m, (uint32_t)ri) ^ 0x5bd1e995u;
+    pthread_mutex_lock(&sh->mu);
+    int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben,
+                              (keyhash(ck ^ ((uint64_t)ri << 32) ^ (tag << 24) ^ sub) & ((1ull << 60) - 1)) | (tag << 60));
+    pthread_mutex_unlock(&sh->mu);
+    return fresh;
+}
+
+// one more productive context at the site (shared counter, capped at 255)
+static void ctx_note(Shared *sh, int64_t ri) {
+    if (!sh->probectx || ri < 0) return;
+    unsigned pcx = __atomic_load_n(&sh->probectx[ri], __ATOMIC_RELAXED);
+    if (pcx < 255) __atomic_store_n(&sh->probectx[ri], (uint8_t)(pcx + 1), __ATOMIC_RELAXED);
+}
+
 
 // Queue overflow goes to disk, never away: a record is {pc, forced, site, input} + the saved state.
 // All called with sh->mu held.  If the disk is unusable the state stays in RAM beyond queue_max.
-typedef struct { uint32_t pc, forced, site, input; } SpoolHead;   // forced bit 0, seed bit 1, vector bit 2
-static void ram_push(Shared *sh, Pending p) {
+typedef struct { uint32_t pc, forced, site, input; uint16_t epoch; } SpoolHead;   // forced bit 0, seed bit 1, vector bit 2; B3 epoch (P5: was not serialized)
+static void ram_push(Shared *sh, DpMachine *m, Pending p) {
+    if (m) { int64_t k = m->rom_index(m, p.pc); p.tri = k >= 0 ? (uint32_t)k + 1u : 0u; }
+
     if (sh->qn == sh->qcap) { sh->qcap = sh->qcap ? sh->qcap * 2 : 64; sh->q = realloc(sh->q, sh->qcap * sizeof *sh->q); }
     sh->q[sh->qn++] = p;
 }
@@ -1157,12 +1210,14 @@ static int spool_open(Shared *sh) {
     return 1;
 }
 // pushes p; when the RAM queue is full, appends it to the spool.  Returns 1 if spilled.
-static int queue_push(Shared *sh, Pending p) {
+static int queue_push(Shared *sh, DpMachine *m, Pending p) {
+    if (m) { int64_t k = m->rom_index(m, p.pc); p.tri = k >= 0 ? (uint32_t)k + 1u : 0u; }   // P2: resolved once, at push, under the state's own mapping
+
     const DpCoreConfig *cfg = sh->cfg;
     if (cfg->queue_max && sh->qn >= cfg->queue_max && !sh->spool_write_failed && spool_open(sh)) {
         uint8_t *rec = malloc(sh->spool_rs);
         if (rec) {
-            SpoolHead h = { p.pc, (uint32_t)!!p.forced | ((uint32_t)!!p.seed << 1) | ((uint32_t)!!p.vector << 2) | (org_enc(p.origin) << 3), p.site, p.input };
+            SpoolHead h = { p.pc, (uint32_t)!!p.forced | ((uint32_t)!!p.seed << 1) | ((uint32_t)!!p.vector << 2) | (org_enc(p.origin) << 3), p.site, p.input, p.epoch };
             memcpy(rec, &h, sizeof h); memcpy(rec + sizeof h, p.state, sh->sbytes);
             ssize_t w = pwrite(sh->spool_fd, rec, sh->spool_rs, (off_t)(sh->spool_n * sh->spool_rs));
             free(rec);
@@ -1171,13 +1226,22 @@ static int queue_push(Shared *sh, Pending p) {
         fprintf(stderr, "deepeel: kernel spool write failed; retaining further states in RAM\n");
         sh->spool_write_failed = 1;
     }
-    ram_push(sh, p);
+    ram_push(sh, m, p);
     return 0;
 }
 // B6: a path stopped by sat_path / sat_loop reports its state instead of losing it: with a state dir the
 // snapshot joins the frontier (resumed later, e.g. under --unbounded) and is counted as deferred.
 static void defer_state(Shared *sh, DpMachine *m, DpCoreResult *loc, Pending p) {
-    if (!sh->cfg->state_dir || sh->cfg->unbounded) return;
+    if (!sh->cfg->state_dir || sh->cfg->unbounded) { free(p.state); return; }   // P7: the caller's snapshot (when it passed one) is owned here either way
+    { int64_t k = m->rom_index(m, p.pc); p.tri = k >= 0 ? (uint32_t)k + 1u : 0u; }
+    if (p.state) {   // P7: the caller already holds the state to defer (a capped fork), do not re-snapshot past it
+        pthread_mutex_lock(&sh->mu);
+        if (sh->defn == sh->defcap) { sh->defcap = sh->defcap ? sh->defcap * 2 : 64; sh->def = realloc(sh->def, sh->defcap * sizeof *sh->def); }
+        sh->def[sh->defn++] = p;
+        pthread_mutex_unlock(&sh->mu);
+        loc->deferred++;
+        return;
+    }
     uint8_t *snap = malloc(sh->sbytes ? sh->sbytes : 1);
     if (!snap) return;
     m->save(m, snap);
@@ -1203,7 +1267,7 @@ static int spool_refill(Shared *sh) {
         if (!st) { ok = 0; break; }
         memcpy(st, rec + sizeof h, sh->sbytes);
         sh->spool_n = i;
-        ram_push(sh, (Pending){ st, h.pc, (int)(h.forced & 1), h.site, h.input, (uint8_t)((h.forced >> 1) & 1), (uint8_t)((h.forced >> 2) & 1), org_dec((h.forced >> 3) & 31) });
+        ram_push(sh, NULL, (Pending){ st, h.pc, (int)(h.forced & 1), h.site, h.input, (uint8_t)((h.forced >> 1) & 1), (uint8_t)((h.forced >> 2) & 1), org_dec((h.forced >> 3) & 31), h.epoch });
     }
     free(rec);
     if (ftruncate(sh->spool_fd, (off_t)(sh->spool_n * sh->spool_rs)) != 0) { /* the next appends overwrite it anyway */ }
@@ -1241,7 +1305,7 @@ static int frontier_load(Shared *sh, const char *path, DpCoreResult *out) {
             fclose(f);
             return 0;
         }
-        queue_push(sh, (Pending){ state, h.pc, (int)(h.forced & 1), h.site, h.input, (uint8_t)((h.forced >> 1) & 1), (uint8_t)((h.forced >> 2) & 1), org_dec((h.forced >> 3) & 31) });
+        queue_push(sh, NULL, (Pending){ state, h.pc, (int)(h.forced & 1), h.site, h.input, (uint8_t)((h.forced >> 1) & 1), (uint8_t)((h.forced >> 2) & 1), org_dec((h.forced >> 3) & 31), h.epoch });
         out->resumed++;
     }
     if (fclose(f) != 0) { perror("deepeel: closing kernel frontier"); return 0; }
@@ -1270,11 +1334,11 @@ static int frontier_save(Shared *sh, const char *path, DpCoreResult *out) {
     uint32_t hd[3] = { 0x31524644u, (uint32_t)sh->sbytes, (uint32_t)count };
     int ok = fwrite(hd, sizeof *hd, 3, f) == 3;
     for (size_t i = 0; ok && i < sh->qn; i++) {
-        SpoolHead h = { sh->q[i].pc, (uint32_t)!!sh->q[i].forced | ((uint32_t)!!sh->q[i].seed << 1) | ((uint32_t)!!sh->q[i].vector << 2) | (org_enc(sh->q[i].origin) << 3), sh->q[i].site, sh->q[i].input };
+        SpoolHead h = { sh->q[i].pc, (uint32_t)!!sh->q[i].forced | ((uint32_t)!!sh->q[i].seed << 1) | ((uint32_t)!!sh->q[i].vector << 2) | (org_enc(sh->q[i].origin) << 3), sh->q[i].site, sh->q[i].input, sh->q[i].epoch };
         ok = fwrite(&h, sizeof h, 1, f) == 1 && fwrite(sh->q[i].state, 1, sh->sbytes, f) == sh->sbytes;
     }
     for (size_t i = 0; ok && i < sh->defn; i++) {
-        SpoolHead h = { sh->def[i].pc, (uint32_t)!!sh->def[i].forced | ((uint32_t)!!sh->def[i].seed << 1) | ((uint32_t)!!sh->def[i].vector << 2) | (org_enc(sh->def[i].origin) << 3), sh->def[i].site, sh->def[i].input };
+        SpoolHead h = { sh->def[i].pc, (uint32_t)!!sh->def[i].forced | ((uint32_t)!!sh->def[i].seed << 1) | ((uint32_t)!!sh->def[i].vector << 2) | (org_enc(sh->def[i].origin) << 3), sh->def[i].site, sh->def[i].input, sh->def[i].epoch };
         ok = fwrite(&h, sizeof h, 1, f) == 1 && fwrite(sh->def[i].state, 1, sh->sbytes, f) == sh->sbytes;
     }
     uint8_t *rec = sh->spool_n ? malloc(sh->spool_rs) : NULL;
@@ -1341,7 +1405,7 @@ static unsigned solve_cond(Worker *w, const DpCoreConfig *cfg, uint32_t condpc, 
             if (m->pc(m) == condpc) { m->run(m); reached = 1; }
             if (reached && m->pc(m) == other) {
                 pthread_mutex_lock(&sh->mu);
-                queue_push(sh, (Pending){ snap, w->win_pc, 0, 0, input, 0, 0, DP_SRC_SOLVED });
+                queue_push(sh, w->m, (Pending){ snap, w->win_pc, 0, 0, input, 0, 0, DP_SRC_SOLVED });
                 pthread_cond_signal(&sh->cv);
                 pthread_mutex_unlock(&sh->mu);
                 snap = malloc(sh->sbytes);
@@ -1361,177 +1425,35 @@ out:
 }
 
 
-// Direct RAM loads into the accumulator/index register, per ISA (techniques 3, 4, 7 on every ISA).
+// Direct RAM loads into the accumulator/index register (techniques 3, 4, 7 on every ISA):
+// the per-ISA decode lives in DpIsa.ram_load (M1); this wrapper adds the shared ROM check.
 // Returns the load length and fills the address, the width in bytes (big-endian ISAs: the low-order byte is the last)
 // and the destination data register (68000) when `bytes` is such a load of a non-ROM byte, else 0.
 static int direct_ram_load(DpMachine *m, const DpIsa *isa, const uint8_t *b, uint32_t *addr, int *idx_reg, int *width, int *dreg) {
-    const char *n = isa->name;
-    if (!n) return 0;
     *idx_reg = 0; *width = 1; *dreg = -1;
-    int len = 0; uint32_t a = 0;
-    if (!strcmp(n, "z80") && b[0] == 0x3A) { len = 3; a = b[1] | (b[2] << 8); }
-    else if (!strcmp(n, "sm83") && b[0] == 0xFA) { len = 3; a = b[1] | (b[2] << 8); }
-    else if (!strcmp(n, "sm83") && b[0] == 0xF0) { len = 2; a = 0xFF00 + b[1]; }
-    else if ((!strcmp(n, "m6502") || !strcmp(n, "huc6280")) && (b[0] == 0xAD || b[0] == 0xAE || b[0] == 0xAC)) { len = 3; a = b[1] | (b[2] << 8); *idx_reg = b[0] != 0xAD; }
-    else if ((!strcmp(n, "m6502") || !strcmp(n, "huc6280")) && (b[0] == 0xA5 || b[0] == 0xA6 || b[0] == 0xA4)) { len = 2; a = b[1]; *idx_reg = b[0] != 0xA5; }
-    else if (!strcmp(n, "68000")) {
-        // move.{b,w,l} abs.w|abs.l,Dn : 00 ss DDD 000 111 00x
-        unsigned w = (b[0] << 8) | b[1], sz = (w >> 12) & 3;
-        if (sz && ((w >> 6) & 7) == 0 && ((w >> 3) & 7) == 7 && (w & 7) <= 1) {
-            *width = sz == 1 ? 1 : sz == 3 ? 2 : 4;
-            *dreg = (int)((w >> 9) & 7);
-            if ((w & 7) == 0) { len = 4; a = (uint32_t)(int32_t)(int16_t)((b[2] << 8) | b[3]) & 0xFFFFFF; }
-            else { len = 6; a = ((uint32_t)b[2] << 24 | (uint32_t)b[3] << 16 | (uint32_t)b[4] << 8 | b[5]) & 0xFFFFFF; }
-        }
-    }
-    if (!len || m->rom_index(m, a) >= 0) return 0;
-    *addr = a;
+    if (!isa->ram_load) return 0;
+    int len = isa->ram_load(b, addr, idx_reg, width, dreg);
+    if (!len || m->rom_index(m, *addr) >= 0) return 0;
     return len;
-}
-
-// 68000 immediate of `width` bytes at b: returns its length in bytes, value in *v
-static int m68k_imm(const uint8_t *b, int width, uint32_t *v) {
-    if (width == 4) { *v = (uint32_t)b[0] << 24 | (uint32_t)b[1] << 16 | (uint32_t)b[2] << 8 | b[3]; return 4; }
-    if (width == 2) { *v = (uint32_t)b[0] << 8 | b[1]; return 2; }
-    *v = b[1]; return 2;
 }
 
 // technique 3: a RAM value compared with a constant, as one site.  Fills the address, value and width.
 static int ram_signature(DpMachine *m, const DpIsa *isa, uint32_t pc, const uint8_t *b, int dl_len, int idx_reg, uint32_t dl_addr,
                          int dl_width, int dl_dreg, uint32_t *addr, uint32_t *val, int *width) {
-    const char *n = isa->name;
     uint8_t f[10];
     for (unsigned i = 0; i < sizeof f; i++) f[i] = m->fetch(m, pc + (dl_len ? (unsigned)dl_len : 0) + i);
-    if (!strcmp(n, "68000")) {
-        unsigned w0 = (b[0] << 8) | b[1];
-        if (w0 == 0x0C38 || w0 == 0x0C39 || w0 == 0x0C78 || w0 == 0x0C79 || w0 == 0x0CB8 || w0 == 0x0CB9) {   // cmpi.x #imm,abs
-            int sz = (w0 >> 6) & 3, wd = sz == 0 ? 1 : sz == 1 ? 2 : 4;
-            uint8_t g[12];
-            for (unsigned i = 0; i < sizeof g; i++) g[i] = m->fetch(m, pc + 2 + i);
-            uint32_t imm; int il = m68k_imm(g, wd, &imm);
-            uint32_t a;
-            if (w0 & 1) a = ((uint32_t)g[il] << 24 | (uint32_t)g[il + 1] << 16 | (uint32_t)g[il + 2] << 8 | g[il + 3]) & 0xFFFFFF;
-            else a = (uint32_t)(int32_t)(int16_t)((g[il] << 8) | g[il + 1]) & 0xFFFFFF;
-            if (m->rom_index(m, a) >= 0) return 0;
-            *addr = a; *val = imm; *width = wd;
-            return 1;
-        }
-        if (!dl_len || dl_dreg < 0) return 0;
-        unsigned w = (f[0] << 8) | f[1];
-        int sz = dl_width == 1 ? 0 : dl_width == 2 ? 1 : 2;
-        if (w == (0x0C00u | (unsigned)sz << 6 | (unsigned)dl_dreg) ||                       // cmpi.x #imm,Dn
-            w == (0xB03Cu | (unsigned)dl_dreg << 9 | (unsigned)sz << 6)) {                   // cmp.x #imm,Dn
-            uint32_t imm; m68k_imm(f + 2, dl_width, &imm);
-            *addr = dl_addr; *val = imm; *width = dl_width;
-            return 1;
-        }
-        return 0;
-    }
-    if (!dl_len) return 0;
-    uint8_t cmpop = (!strcmp(n, "m6502") || !strcmp(n, "huc6280")) ? (idx_reg ? 0 : 0xC9) : 0xFE;
-    if (!cmpop || f[0] != cmpop) return 0;
+    if (isa->ram_signature_wide &&
+        isa->ram_signature_wide(m, pc, b, f, dl_len, dl_width, dl_dreg, dl_addr, addr, val, width))
+        return 1;
+    if (!dl_len || !isa->cmp_imm || idx_reg || f[0] != isa->cmp_imm) return 0;
     *addr = dl_addr; *val = f[1]; *width = 1;
     return 1;
 }
 
-// 1 when a ROM table access indexed by the loaded value follows within 16 bytes (technique 7)
-// B4: proven length (in entries) of the word table whose base `ld hl,nn` follows the load; 0 when unproven.
-// An entry is proven while its word designates the ROM at or above isa->code_min (a legal code target).
-static unsigned table_proven_len(DpMachine *m, const DpIsa *isa, uint32_t pc, int len) {
-    if (!strcmp(isa->name, "m6502") || !strcmp(isa->name, "6502") || !strcmp(isa->name, "huc6280")) {
-        // `lda abs,x` / `lda abs,y` from a ROM base: a word table of code pointers while the words designate ROM
-        for (unsigned i = 0; i < 13; i++) {
-            uint8_t op = m->fetch(m, pc + len + i);
-            if (op != 0xBD && op != 0xB9) continue;
-            uint32_t base = m->fetch(m, pc + len + i + 1) | (uint32_t)m->fetch(m, pc + len + i + 2) << 8;
-            if (m->rom_index(m, base) < 0) continue;
-            unsigned n = 0;
-            while (n < 128) {
-                uint32_t t = m->fetch(m, base + 2 * n) | (uint32_t)m->fetch(m, base + 2 * n + 1) << 8;
-                if (t < 0x8000u || m->rom_index(m, t) < 0) break;
-                n++;
-            }
-            return n >= 2 ? n : 0;
-        }
-        return 0;
-    }
-    if (!strcmp(isa->name, "68000")) {
-        // `lea abs.l,An` / `lea d16(pc),An` from a ROM base: a table of long code pointers while the longs designate even ROM addresses
-        for (unsigned i = 0; i + 5 < 16; i += 2) {
-            uint32_t w = (uint32_t)m->fetch(m, pc + len + i) << 8 | m->fetch(m, pc + len + i + 1);
-            uint32_t base;
-            if ((w & 0xF1FF) == 0x41F9)
-                base = ((uint32_t)m->fetch(m, pc + len + i + 2) << 24 | (uint32_t)m->fetch(m, pc + len + i + 3) << 16 |
-                        (uint32_t)m->fetch(m, pc + len + i + 4) << 8 | m->fetch(m, pc + len + i + 5)) & 0xFFFFFF;
-            else if ((w & 0xF1FF) == 0x41FA)
-                base = (pc + (uint32_t)len + i + 2 + (uint32_t)(int32_t)(int16_t)((m->fetch(m, pc + len + i + 2) << 8) | m->fetch(m, pc + len + i + 3))) & 0xFFFFFF;
-            else continue;
-            if (m->rom_index(m, base) < 0) continue;
-            unsigned n = 0;
-            while (n < 128) {
-                uint32_t a4 = base + 4u * n;
-                uint32_t t = ((uint32_t)m->fetch(m, a4) << 24 | (uint32_t)m->fetch(m, a4 + 1) << 16 | (uint32_t)m->fetch(m, a4 + 2) << 8 | m->fetch(m, a4 + 3)) & 0xFFFFFF;
-                if ((t & 1u) || t < isa->code_min || m->rom_index(m, t) < 0) break;
-                n++;
-            }
-            return n >= 2 ? n : 0;
-        }
-        return 0;
-    }
-    if (strcmp(isa->name, "z80") && strcmp(isa->name, "sm83")) return 0;
-    for (unsigned i = 0; i < 13; i++) {
-        if (m->fetch(m, pc + len + i) != 0x21) continue;
-        uint32_t base = m->fetch(m, pc + len + i + 1) | (uint32_t)m->fetch(m, pc + len + i + 2) << 8;
-        if (m->rom_index(m, base) < 0) continue;
-        unsigned n = 0;
-        while (n < 128) {
-            uint32_t t = m->fetch(m, base + 2 * n) | (uint32_t)m->fetch(m, base + 2 * n + 1) << 8;
-            if (t < isa->code_min || m->rom_index(m, t) < 0) break;
-            n++;
-        }
-        return n;
-    }
-    return 0;
-}
-static int rom_table_follows(DpMachine *m, const DpIsa *isa, uint32_t pc, int len) {
-    uint8_t win[16];
-    for (unsigned i = 0; i < sizeof win; i++) win[i] = m->fetch(m, pc + len + i);
-    const char *n = isa->name;
-    int tab = 0;
-    if (!strcmp(n, "68000")) {
-        // ROM base into An (lea abs.l / lea d16(pc) / movea.l #imm), then an (d8,An,Xn) operand of a move/ALU word
-        for (unsigned i = 0; i + 1 < sizeof win; i += 2) {
-            unsigned w = (win[i] << 8) | win[i + 1];
-            if (i + 5 < sizeof win && ((w & 0xF1FF) == 0x41F9 || w == (0x207Cu | (w & 0x0E00)))) {
-                uint32_t a = ((uint32_t)win[i + 2] << 24 | (uint32_t)win[i + 3] << 16 | (uint32_t)win[i + 4] << 8 | win[i + 5]) & 0xFFFFFF;
-                if (m->rom_index(m, a) >= 0) tab = 1;
-                i += 4;   // skip the address extension
-                continue;
-            } else if (i + 3 < sizeof win && (w & 0xF1FF) == 0x41FA) {
-                uint32_t a = (pc + (uint32_t)len + i + 2 + (uint32_t)(int32_t)(int16_t)((win[i + 2] << 8) | win[i + 3])) & 0xFFFFFF;
-                if (m->rom_index(m, a) >= 0) tab = 1;
-                i += 2;
-                continue;
-            }
-            if (tab && ((w >> 3) & 7) == 6 && (w & 0xF000) != 0x4000 && (w & 0xF000) != 0x6000) return 1;
-        }
-        return 0;
-    }
-    if (!strcmp(n, "z80") || !strcmp(n, "sm83")) {
-        for (unsigned i = 0; i + 2 < sizeof win; i++) {
-            if (win[i] == 0x21 && m->rom_index(m, win[i + 1] | (win[i + 2] << 8)) >= 0) tab = 1;
-            if (tab && (win[i] == 0x19 || win[i] == 0x09 || win[i] == 0x85 || win[i] == 0x83)) return 1;
-        }
-        return 0;
-    }
-    // 6502 family: abs,X / abs,Y load/ALU from a ROM base address
-    for (unsigned i = 0; i + 2 < sizeof win; i++) {
-        uint8_t o = win[i];
-        if ((o == 0xBD || o == 0xB9 || o == 0x7D || o == 0x79 || o == 0x3D || o == 0x39 || o == 0xDD || o == 0xD9) &&
-            m->rom_index(m, win[i + 1] | (win[i + 2] << 8)) >= 0) return 1;
-    }
-    return 0;
-}
+// 1 when a ROM table access indexed by the loaded value follows within 16 bytes (technique 7):
+// the per-ISA decode lives in DpIsa.rom_table_follows / DpIsa.table_proven (M1).
+// B4: proven length (in entries) of the word table whose base load follows the RAM load; 0 when unproven.
+// An entry is proven while its word designates the ROM at or above the ISA's legal-code floor (a legal code target).
 
 // writes `v` over `width` bytes at `addr`, most significant byte first
 static void poke_wide(DpMachine *m, uint32_t addr, int width, uint32_t v) {
@@ -1628,7 +1550,7 @@ static void run_path(Worker *w, Pending *p) {
                 if (snapshot) {
                     m->save(m, snapshot);
                     pthread_mutex_lock(&sh->mu);
-                    queue_push(sh, (Pending){ snapshot, m->pc(m), cur_forced, 0, p->input, 0, 0, cur_origin, cur_epoch });
+                    queue_push(sh, m, (Pending){ snapshot, m->pc(m), cur_forced, 0, p->input, 0, 0, cur_origin, cur_epoch });
                     pthread_mutex_unlock(&sh->mu);
                 } else {
                     fprintf(stderr, "deepeel: cannot preserve stopped kernel path\n");
@@ -1651,7 +1573,7 @@ static void run_path(Worker *w, Pending *p) {
                 uint8_t *snapshot = malloc(sh->sbytes ? sh->sbytes : 1);
                 if (snapshot) {
                     m->save(m, snapshot);
-                    ram_push(sh, (Pending){ snapshot, m->pc(m), cur_forced, 0, p->input, 0, 0, cur_origin, cur_epoch });
+                    ram_push(sh, m, (Pending){ snapshot, m->pc(m), cur_forced, 0, p->input, 0, 0, cur_origin, cur_epoch });
                     Pending yielded = sh->q[sh->qn - 1];
                     memmove(sh->q + 1, sh->q, (sh->qn - 1) * sizeof *sh->q);
                     sh->q[0] = yielded;
@@ -1705,7 +1627,7 @@ static void run_path(Worker *w, Pending *p) {
                         m->save(m, cp);
                         unsigned ep_ = __atomic_add_fetch(&sh->ckpts, 1, __ATOMIC_RELAXED);
                         pthread_mutex_lock(&sh->mu);
-                        queue_push(sh, (Pending){ cp, m->pc(m), 0, ckpt_site(m, loc), 0, 0, 0, DP_SRC_SESSION, (uint16_t)(ep_ < 0x7FFFu ? ep_ : 0x7FFFu) });
+                        queue_push(sh, m, (Pending){ cp, m->pc(m), 0, ckpt_site(m, loc), 0, 0, 0, DP_SRC_SESSION, (uint16_t)(ep_ < 0x7FFFu ? ep_ : 0x7FFFu) });
                         pthread_cond_signal(&sh->cv);
                         pthread_mutex_unlock(&sh->mu);
                         loc->tas_ckpts++;
@@ -1715,15 +1637,18 @@ static void run_path(Worker *w, Pending *p) {
                                 if (!bp) break;
                                 m->save(m, bp);
                                 pthread_mutex_lock(&sh->mu);
-                                queue_push(sh, (Pending){ bp, m->pc(m), 0, 0, SESSION_PLAY + 16u + (unsigned)((loc->tas_ckpts * 3u + bi * 5u + 1u) % 10u), 0, 0, DP_SRC_SESSION });
+                                queue_push(sh, m, (Pending){ bp, m->pc(m), 0, 0, SESSION_PLAY + 16u + (unsigned)((loc->tas_ckpts * 3u + bi * 5u + 1u) % 10u), 0, 0, DP_SRC_SESSION });
                                 pthread_cond_signal(&sh->cv);
                                 pthread_mutex_unlock(&sh->mu);
                                 loc->ckpt_bursts++;
                             }
                         }
-                        // B3: the vector seeds also start from the first live checkpoints (a game state, not the power-on one)
+                        // A1: B3 generalized beyond the platform registry: the live checkpoints (a game state, not the
+                        // power-on one) seed every entry point the platform queued at boot (cfg->seeds: reset, vectors,
+                        // user entries, music rips).  The reset seed replays boot validation (SRAM checks, mapper init)
+                        // from a live state.  >= 16 of 256 sampled work-RAM bytes must differ from every chosen state, at most 4.
                         int diverse = 0;
-                        if (m->plat && !cfg->no_vectors && !cfg->no_live_seeds) {   // B3: seed from the most diverse live states (>= 16 of 256 sampled RAM bytes differ from every chosen one), at most 4
+                        if (!cfg->no_vectors && !cfg->no_live_seeds && cfg->seeds && cfg->n_seeds) {
                             uint8_t sig[256]; uint32_t rb = m->work_ram_len ? m->work_ram_base : 0xC000u, rl = m->work_ram_len ? m->work_ram_len : 0x2000u;
                             for (unsigned q = 0; q < 256; q++) sig[q] = m->fetch(m, rb + (uint32_t)((uint64_t)q * rl / 256));
                             pthread_mutex_lock(&sh->mu);
@@ -1738,18 +1663,15 @@ static void run_path(Worker *w, Pending *p) {
                             pthread_mutex_unlock(&sh->mu);
                         }
                         if (diverse) {
-                            for (int ei = 0; ei < m->plat->entry_count; ei++) {
-                                const DpEntry *e = &m->plat->entries[ei];
-                                if (e->kind == DP_SEED_RESET) continue;
-                                uint32_t vpc = e->addr;
-                                if (e->cell) vpc = (uint32_t)(m->fetch(m, e->addr) | (m->fetch(m, (uint32_t)e->addr + 1) << 8));
+                            for (size_t ei = 0; ei < cfg->n_seeds; ei++) {
+                                uint32_t vpc = cfg->seeds[ei];
                                 int pad = 1;
                                 for (unsigned q = 0; q < 8 && pad; q++) { uint8_t bb = m->fetch(m, vpc + q); pad = bb == 0x00 || bb == 0xFF; }
                                 uint8_t *lp = pad ? NULL : malloc(sh->sbytes);
                                 if (!lp) continue;
                                 memcpy(lp, cp, sh->sbytes);
                                 pthread_mutex_lock(&sh->mu);
-                                queue_push(sh, (Pending){ lp, vpc, 1, 0, 0, 1, 1, DP_SRC_SESSION });
+                                queue_push(sh, m, (Pending){ lp, vpc, 1, 0, 0, 1, 1, DP_SRC_SESSION });
                                 pthread_mutex_unlock(&sh->mu);
                                 loc->live_seeds++;
                             }
@@ -1769,7 +1691,7 @@ static void run_path(Worker *w, Pending *p) {
                                 uint8_t *cp = malloc(sh->sbytes);
                                 if (!cp) break;
                                 memcpy(cp, sh->tas_start, sh->sbytes);
-                                queue_push(sh, (Pending){ cp, sh->tas_pc, 0, 0, TAS_INPUT + 3 + order[i], 0, 0, DP_SRC_SESSION });
+                                queue_push(sh, m, (Pending){ cp, sh->tas_pc, 0, 0, TAS_INPUT + 3 + order[i], 0, 0, DP_SRC_SESSION });
                             }
                         }
                         pthread_mutex_unlock(&sh->mu);
@@ -1794,7 +1716,7 @@ static void run_path(Worker *w, Pending *p) {
                         m->save(m, cp);
                         unsigned ep_ = __atomic_add_fetch(&sh->sess_ckpts, 1, __ATOMIC_RELAXED);
                         pthread_mutex_lock(&sh->mu);
-                        queue_push(sh, (Pending){ cp, m->pc(m), 0, ckpt_site(m, loc), 0, 0, 0, DP_SRC_SESSION, (uint16_t)(0x8000u | (ep_ < 0x7FFFu ? ep_ : 0x7FFFu)) });
+                        queue_push(sh, m, (Pending){ cp, m->pc(m), 0, ckpt_site(m, loc), 0, 0, 0, DP_SRC_SESSION, (uint16_t)(0x8000u | (ep_ < 0x7FFFu ? ep_ : 0x7FFFu)) });
                         pthread_cond_signal(&sh->cv);
                         pthread_mutex_unlock(&sh->mu);
                         loc->sess_ckpts++;
@@ -1804,7 +1726,7 @@ static void run_path(Worker *w, Pending *p) {
                                 if (!bp) break;
                                 m->save(m, bp);
                                 pthread_mutex_lock(&sh->mu);
-                                queue_push(sh, (Pending){ bp, m->pc(m), 0, 0, SESSION_PLAY + 16u + (unsigned)((loc->sess_ckpts * 3u + b * 5u) % 10u), 0, 0, DP_SRC_SESSION });
+                                queue_push(sh, m, (Pending){ bp, m->pc(m), 0, 0, SESSION_PLAY + 16u + (unsigned)((loc->sess_ckpts * 3u + b * 5u) % 10u), 0, 0, DP_SRC_SESSION });
                                 pthread_cond_signal(&sh->cv);
                                 pthread_mutex_unlock(&sh->mu);
                                 loc->ckpt_bursts++;
@@ -1902,24 +1824,28 @@ static void run_path(Worker *w, Pending *p) {
         int dl_len = (m->poke && !cur_forced) ? direct_ram_load(m, isa, bytes, &dl_addr, &dl_idx, &dl_width, &dl_dreg) : 0;
         if (dl_len) dl_addr += (uint32_t)dl_width - 1;   // big-endian: the low-order byte is the last; 1 byte elsewhere
         if (!cfg->no_index_replay && dl_len) {
-            if (rom_table_follows(m, isa, pc, dl_len)) {
+            if (isa->rom_table_follows && isa->rom_table_follows(isa, m, pc, dl_len)) {
                 uint32_t addr = dl_addr;
                 pthread_mutex_lock(&sh->mu);
                 int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, ((uint64_t)addr | ((uint64_t)(m->rom_index(m, pc) + 1) << 24)) | (7ull << 60));   // A7: (site, address)
                 pthread_mutex_unlock(&sh->mu);
+                if (!fresh) fresh = ctx_rearm(sh, cfg, loc, m, (int64_t)m->rom_index(m, pc), 8, 0, w->visits[vi]);   // A2: one more enumeration under a new semantic cell
+
                 uint8_t *tmp = fresh ? malloc(sh->sbytes) : NULL;
                 if (tmp) m->save(m, tmp);
-                unsigned proven = table_proven_len(m, isa, pc, dl_len), kmax = cfg->index_max ? cfg->index_max : cfg->unbounded ? 255 : 15;
-                if (!cfg->index_max && !cfg->unbounded && proven * 2 > kmax) kmax = proven * 2 > 255 ? 255 : proven * 2;   // B4: the whole proven table, index scaled by the entry size
+                unsigned proven = isa->table_proven ? isa->table_proven(isa, m, pc, dl_len) : 0, kmax = cfg->index_max ? cfg->index_max : cfg->unbounded ? 255 : 15;
+                unsigned tew = isa->table_entry_width ? isa->table_entry_width : 2u;   // B4: bytes of one table entry (the 68000 lea tables are longs)
+                if (!cfg->index_max && !cfg->unbounded && proven * tew > kmax) kmax = proven * tew > 255 ? 255 : proven * tew;   // B4: the whole proven table, index scaled by the entry size
                 for (unsigned k = 0; tmp && k <= kmax; k++) {   // B4: --unbounded enumerates the whole byte
                     uint8_t *snap = malloc(sh->sbytes);
                     if (!snap) break;
                     m->poke(m, addr, (uint8_t)k);
                     m->save(m, snap);
                     pthread_mutex_lock(&sh->mu);
-                    queue_push(sh, (Pending){ snap, pc, 0, 0, cur_input, 0, 0, DP_SRC_INDEX });
+                    queue_push(sh, m, (Pending){ snap, pc, 0, 0, cur_input, 0, 0, DP_SRC_INDEX });
                     pthread_mutex_unlock(&sh->mu);
                     loc->index_replays++;
+                    ctx_note(sh, (int64_t)m->rom_index(m, pc));   // A2: the context counts as productive
                 }
                 if (tmp) { m->load(m, tmp); free(tmp); }
             }
@@ -1936,6 +1862,7 @@ static void run_path(Worker *w, Pending *p) {
                 pthread_mutex_lock(&sh->mu);
                 fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, ((uint64_t)addr | ((uint64_t)(m->rom_index(m, pc) + 1) << 24)) | (5ull << 60));   // A7: (site, address)
                 pthread_mutex_unlock(&sh->mu);
+                if (!fresh) fresh = ctx_rearm(sh, cfg, loc, m, (int64_t)m->rom_index(m, pc), 10, 0, w->visits[vi]);   // A2: the byte went volatile again under a new semantic cell
             }
             if (fresh) {
                 static const uint8_t rv[4] = {0x00, 0x01, 0x80, 0xFF};
@@ -1947,9 +1874,10 @@ static void run_path(Worker *w, Pending *p) {
                     m->poke(m, addr, rv[k]);
                     m->save(m, snap);
                     pthread_mutex_lock(&sh->mu);
-                    queue_push(sh, (Pending){ snap, pc, 0, 0, cur_input, 0, 0, DP_SRC_RNG });
+                    queue_push(sh, m, (Pending){ snap, pc, 0, 0, cur_input, 0, 0, DP_SRC_RNG });
                     pthread_mutex_unlock(&sh->mu);
                     loc->rng_forks++;
+                    ctx_note(sh, (int64_t)m->rom_index(m, pc));   // A2: the context counts as productive
                 }
                 if (tmp) { m->load(m, tmp); free(tmp); }
             }
@@ -1964,6 +1892,8 @@ static void run_path(Worker *w, Pending *p) {
             int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben,
                                       ((uint64_t)addr << 32 | sigv) | (3ull << 60));
             pthread_mutex_unlock(&sh->mu);
+            if (!fresh) fresh = ctx_rearm(sh, cfg, loc, m, (int64_t)m->rom_index(m, pc), 12, 0, w->visits[vi]);   // A2: the same signature test met under a new semantic cell
+
             if (fresh) {
                 uint8_t *tmp = malloc(sh->sbytes), *snap = malloc(sh->sbytes);
                 if (tmp && snap) {
@@ -1972,9 +1902,10 @@ static void run_path(Worker *w, Pending *p) {
                     m->save(m, snap);
                     m->load(m, tmp);
                     pthread_mutex_lock(&sh->mu);
-                    queue_push(sh, (Pending){ snap, pc, 0, 0, cur_input, 0, 0, DP_SRC_SIG });
+                    queue_push(sh, m, (Pending){ snap, pc, 0, 0, cur_input, 0, 0, DP_SRC_SIG });
                     pthread_mutex_unlock(&sh->mu);
                     loc->learned_sigs++;
+                    ctx_note(sh, (int64_t)m->rom_index(m, pc));   // A2: the context counts as productive
                     snap = NULL;
                 }
                 free(tmp); free(snap);
@@ -2011,7 +1942,10 @@ static void run_path(Worker *w, Pending *p) {
             if (fi.target >= 0 && (fi.kind == DP_FLOW_JUMP || fi.kind == DP_FLOW_COND || fi.kind == DP_FLOW_CALL)) closure_walk(loc, m, isa, (uint32_t)fi.target, w->regwalk);
             if (fi.kind == DP_FLOW_COND) closure_walk(loc, m, isa, pc + fi.length, w->regwalk);
             else if (fi.kind == DP_FLOW_CALL) closure_walk_untrusted(loc, m, isa, pc + fi.length, w->regwalk);
-            if (fi.kind == DP_FLOW_INDIRECT && bytes[0] == 0xE9) closure_jp_table(loc, m, cfg, isa, pc, w->pcring_n >= 8 ? w->pcring : NULL, w->pcring_n < 32 ? w->pcring_n : 32, w->regwalk);   // a path too young to hold the load is not filtered
+            if (fi.kind == DP_FLOW_INDIRECT && isa->hl_jp_table &&
+                (bytes[0] == 0xE9 || ((bytes[0] == 0xDD || bytes[0] == 0xFD) && bytes[1] == 0xE9)))   // P4: jp (hl) and jp (ix)/(iy)
+                closure_jp_table(loc, m, cfg, isa, pc, bytes[0] == 0xDD ? 1u : bytes[0] == 0xFD ? 2u : 0u,
+                                 w->pcring_n >= 8 ? w->pcring : NULL, w->pcring_n < 32 ? w->pcring_n : 32, w->regwalk);   // a path too young to hold the load is not filtered
             if (fi.kind == DP_FLOW_INDIRECT && (bytes[0] == 0x6C || bytes[0] == 0x7C) &&
                 isa->abs_ind_table)
                 closure_abs_table(loc, m, isa, bytes, w->regwalk);
@@ -2055,19 +1989,10 @@ static void run_path(Worker *w, Pending *p) {
             int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, (uint64_t)m->rom_index(m, pc) + 1);
             pthread_mutex_unlock(&sh->mu);
             int rearm = 0;
-            if (!fresh && cfg->probe_ctx_cap > 1 && w->visits[vi] && w->visits[vi] <= 8 && !(w->visits[vi] & (w->visits[vi] - 1)) &&
-                sh->probectx && sh->probectx[m->rom_index(m, pc)]) {
-                // B1: a site that produced probes is re-armed when it is reached under another semantic cell (the RAM the
-                // code has been seen to read), up to probe_ctx_cap contexts per site (saturation counted, never silent)
-                int64_t ri = m->rom_index(m, pc);
-                if (sh->probectx[ri] >= cfg->probe_ctx_cap) loc->probe_ctx_sat++;
-                else {
-                    uint64_t ck = cell_key(cfg, sh->ramread, m, (uint32_t)ri) ^ 0x5bd1e995u;
-                    pthread_mutex_lock(&sh->mu);
-                    if (keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, (keyhash(ck ^ ((uint64_t)ri << 32)) & ((1ull << 60) - 1)) | (11ull << 60))) fresh = rearm = 1;
-                    pthread_mutex_unlock(&sh->mu);
-                }
-            }
+            int64_t pri = m->rom_index(m, pc);
+            if (!fresh && ctx_rearm(sh, cfg, loc, m, pri, 11, 0, w->visits[vi])) fresh = rearm = 1;
+            // B1: a site that produced probes is re-armed when it is reached under another semantic cell (the RAM the
+            // code has been seen to read), up to probe_ctx_cap contexts per site (saturation counted, never silent)
             if (fresh) {
                 unsigned k = 0;
                 m->pad_full = cfg->pad_full;
@@ -2077,7 +2002,7 @@ static void run_path(Worker *w, Pending *p) {
                     any = 1;
                     pthread_mutex_lock(&sh->mu);
                     {
-                        queue_push(sh, (Pending){ snap, pc, 0, (uint32_t)(m->rom_index(m, pc) + 1), cur_input, 0, 0, DP_SRC_PROBE });
+                        queue_push(sh, m, (Pending){ snap, pc, 0, (uint32_t)(m->rom_index(m, pc) + 1), cur_input, 0, 0, DP_SRC_PROBE });
                         loc->event_probes++;
                         pthread_cond_signal(&sh->cv);
                         snap = malloc(sh->sbytes);
@@ -2085,7 +2010,8 @@ static void run_path(Worker *w, Pending *p) {
                     pthread_mutex_unlock(&sh->mu);
                 }
                 free(snap);
-                if (any && sh->probectx) { int64_t ri = m->rom_index(m, pc); if (sh->probectx[ri] < 255) sh->probectx[ri]++; }
+                loc->event_probe_arms++;   // P9: an arm, not a variant — variants are counted per queued state below
+                if (any) ctx_note(sh, pri);
                 if (any && rearm) loc->probe_rearms++;
                 if (any && !rearm) loc->event_probe_sites++;
             }
@@ -2096,21 +2022,23 @@ static void run_path(Worker *w, Pending *p) {
             // answers 0 unless an interrupt is pending, so the per-(site, delay) key is
             // spent only when a fork is really produced.
             for (unsigned d = 1; d <= (cfg->no_irq_jitter ? 1u : 3u); d++) {
+                int64_t iri = (int64_t)m->rom_index(m, pc);
                 uint64_t ikey = ((uint64_t)m->rom_index(m, pc) + 1) | ((uint64_t)d << 40);
                 int known = 0;   // (site, delay) already forked: skip the costly hook and the 17 KiB snapshot
                 pthread_mutex_lock(&sh->mu);
                 if (sh->probecap) { size_t h = keyhash(ikey) & (sh->probecap - 1); while (sh->probeset[h]) { if (sh->probeset[h] == ikey) { known = 1; break; } h = (h + 1) & (sh->probecap - 1); } }
                 pthread_mutex_unlock(&sh->mu);
-                if (known) continue;
+                if (known) { if (ctx_rearm(sh, cfg, loc, m, iri, 13, (uint64_t)d << 40, w->visits[vi])) known = 0; else continue; }   // A2: one more interrupt landing under a new semantic cell
                 uint8_t *snap = malloc(sh->sbytes);
                 if (!snap) break;
                 if (!cfg->hooks->irq_alt(cfg->hooks->user, m, d, snap)) { free(snap); break; }
                 pthread_mutex_lock(&sh->mu);
-                int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, ((uint64_t)m->rom_index(m, pc) + 1) | ((uint64_t)d << 40));
+                int fresh = known || keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, ikey);
                 if (!fresh) free(snap);
                 else {
-                    queue_push(sh, (Pending){ snap, pc, 0, (uint32_t)(m->rom_index(m, pc) + 1), cur_input, 0, 0, DP_SRC_IRQ });
+                    queue_push(sh, m, (Pending){ snap, pc, 0, (uint32_t)(m->rom_index(m, pc) + 1), cur_input, 0, 0, DP_SRC_IRQ });
                     if (d == 1) loc->irq_forks++; else loc->jitter_forks++;
+                    ctx_note(sh, iri);   // A2: the context counts as productive
                     pthread_cond_signal(&sh->cv);
                 }
                 pthread_mutex_unlock(&sh->mu);
@@ -2147,7 +2075,7 @@ static void run_path(Worker *w, Pending *p) {
                     m->load(m, cur);
                     if (!ok) { free(snap); continue; }
                     pthread_mutex_lock(&sh->mu);
-                    queue_push(sh, (Pending){ snap, m->pc(m), 0, (uint32_t)(site + 1), cur_input, 0, 0, DP_SRC_BANK });
+                    queue_push(sh, m, (Pending){ snap, m->pc(m), 0, (uint32_t)(site + 1), cur_input, 0, 0, DP_SRC_BANK });
                     pthread_cond_signal(&sh->cv);
                     pthread_mutex_unlock(&sh->mu);
                     loc->bank_forks++; made++;
@@ -2195,20 +2123,39 @@ static void run_path(Worker *w, Pending *p) {
             } else if (w->win_on && w->cobs.nram && !covered(loc, m, other) && solve_cond(w, cfg, pc, other, cur_input)) {
                 free(pre);   // proved a legal way to the other side: no forced inversion
             } else {
+                uint64_t pk = 0;
+                if (!cfg->no_proj && m->ctx_reg_hash && loc->live && w->pcache) {   // A5: the memo before the locks: a (site, projection) key once spent stays spent (the shared set only grows)
+                    pk = proj_key(loc, m, pc, other) ^ 0xC11C11C11ull;
+                    if (w->pcache[keyhash(pk) & (w->pcap - 1)] == pk + 1) { loc->proj_pruned++; free(pre); continue; }
+                }
                 pthread_mutex_lock(&sh->mu);
                 int64_t sk_ = m->rom_index(m, pc);
                 uint32_t *cnt = site_count(&sh->sites, (sk_ >= 0 ? (uint32_t)sk_ + 1u : (pc | 0x80000000u)) ^ ((uint32_t)cur_epoch * 0x9E3779B1u));   // B3: the cap restarts in each checkpoint epoch   // A5: per ROM site (bank-aware), not per pc
                 int pushed = 0;
+                if (!cfg->no_proj && m->ctx_reg_hash && loc->live && w->pcache) {   // A5: the memo before the locks: a (site, projection) key once spent stays spent (the shared set only grows)
+                    uint64_t pk = proj_key(loc, m, pc, other) ^ 0xC11C11C11ull;
+                    if (w->pcache[keyhash(pk) & (w->pcap - 1)] == pk + 1) { loc->proj_pruned++; pthread_mutex_unlock(&sh->mu); free(pre); continue; }
+                }
                 if (cfg->cell_hi > cfg->cell_lo || !cfg->no_cells) {
                     if (cell_insert(sh, cell_key(cfg, sh->ramread, m, other))) loc->cells++;
                     else { loc->cell_pruned++; pthread_mutex_unlock(&sh->mu); free(pre); continue; }
                 }
                 if (!cfg->no_proj && m->ctx_reg_hash && loc->live) {   // C11: the same target under the same projected context was queued already
                     if (!cell_insert(sh, proj_key(loc, m, pc, other) ^ 0xC11C11C11ull)) { loc->proj_pruned++; pthread_mutex_unlock(&sh->mu); free(pre); continue; }
+                    else if (w->pcache && pk) w->pcache[keyhash(pk) & (w->pcap - 1)] = pk + 1;   // A5: remember the freshly spent key
                 }
-                if (cfg->fork_site_cap && *cnt >= cfg->fork_site_cap) { loc->sat_site++; if (!cur_epoch) w->capped[site_slot(m, pc, w->site_n, NULL)] = skey; }
+                if (cfg->fork_site_cap && *cnt >= cfg->fork_site_cap) {
+                    loc->sat_site++;
+                    if (!cur_epoch) {
+                        w->capped[site_slot(m, pc, w->site_n, NULL)] = skey;   // the fast path above skips the site from now on
+                        pthread_mutex_unlock(&sh->mu);   // defer_state takes the lock itself
+                        defer_state(sh, m, loc, (Pending){ pre, other, 1, (uint32_t)(m->rom_index(m, pc) + 1), cur_input, 0, 0, cur_origin, cur_epoch });
+                        pre = NULL;   // P7: the capped fork joins the deferred frontier (the defer owns the snapshot; it is kept for --resume, never re-run here)
+                        pthread_mutex_lock(&sh->mu);
+                    }
+                }
                 else {
-                    queue_push(sh, (Pending){ pre, other, 1, (uint32_t)(m->rom_index(m, pc) + 1), cur_input, 0, 0, cur_origin, cur_epoch });
+                    queue_push(sh, m, (Pending){ pre, other, 1, (uint32_t)(m->rom_index(m, pc) + 1), cur_input, 0, 0, cur_origin, cur_epoch });
                     (*cnt)++;
                     if (cur_epoch && cfg->fork_site_cap && *site_count(&sh->sites, sk_ >= 0 ? (uint32_t)sk_ + 1u : (pc | 0x80000000u)) >= cfg->fork_site_cap) loc->epoch_forks++;   // B3: a fork the cap would have refused outside any epoch
                     loc->forks++;
@@ -2507,7 +2454,12 @@ static void *worker_main(void *arg) {
         if (!session_first && !cfg->no_novelty_order) {
             double best = -1;
             for (size_t i = sh->qn; i-- > 0;) {
-                if (sh->q[i].origin != DP_SRC_SESSION && covered(&w->loc, w->m, sh->q[i].pc)) continue;   // B3: a live checkpoint resumes from covered code by design; its cell's visit count orders it
+                if (sh->q[i].origin != DP_SRC_SESSION) {   // B3: a live checkpoint resumes from covered code by design; its cell's visit count orders it
+                    uint32_t tri = sh->q[i].tri;   // P2/A19: the index stored at push, not the worker's current mapping
+                    if (tri && tri - 1 < sh->out->rom_size
+                        ? (__atomic_load_n(&sh->out->flags[tri - 1], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED))
+                        : covered(&w->loc, w->m, sh->q[i].pc)) continue;
+                }
                 double sc = 0;   // AFL-like: rare, productive parent sites first; latest wins ties
                 uint32_t st = sh->q[i].site;
                 if (!cfg->no_site_score && st && st <= sh->out->rom_size)
@@ -2548,8 +2500,8 @@ void dp_core_live_default(void (*cb)(void *, const struct DpCoreResult *), void 
 int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, DpCoreResult *out) {
     DpCoreConfig cfg_unb = *cfg_in;
     if (cfg_unb.unbounded) {
-        cfg_unb.max_total = 0; cfg_unb.max_path_steps = 0; cfg_unb.fork_site_cap = 0;
-        cfg_unb.visits_per_pc = 0; cfg_unb.max_secs = cfg_unb.stall_secs = 0;
+        cfg_unb.max_total = 0; cfg_unb.fork_site_cap = 0;   // A8: max_path_steps (the platform path shape) is kept, not lifted
+        cfg_unb.visits_per_pc = 0; cfg_unb.stall_secs = 0; cfg_unb.max_secs = 0;   // A8: the platform path shape (max_path_steps) is kept; the only stops stay exhaustion or SIGINT (the owner's contract)
         cfg_unb.no_cells = 1; cfg_unb.cell_lo = cfg_unb.cell_hi = 0;
         cfg_unb.no_taint_cut = cfg_unb.no_forced_ram_cut = 1;
     }
@@ -2581,7 +2533,8 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     out->page_win = calloc((rom_size >> 8) + 2, 1);   // one byte per 256 bytes: enough for any page_shift >= 8
     out->src_flags = calloc(rom_size ? rom_size : 1, sizeof *out->src_flags);
     out->first_seen = calloc(rom_size ? rom_size : 1, sizeof *out->first_seen);
-    if (!out->flags || !out->prov || !out->dest || !out->src_flags || !out->first_seen) { dp_core_result_free(out); return 0; }
+    out->hits = calloc(rom_size ? rom_size : 1, sizeof *out->hits);
+    if (!out->flags || !out->prov || !out->dest || !out->src_flags || !out->first_seen || !out->hits) { dp_core_result_free(out); return 0; }
     if (cfg->on_live) cfg->on_live(cfg->on_live_user, out);
     else if (g_live_cb) g_live_cb(g_live_user, out);
 
@@ -2611,7 +2564,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         DpMachine *wm = i == 0 ? m : (m->clone ? m->clone(m, i) : NULL);
         if (!wm) break;                       // fewer workers than asked: reported
         w->sh = &sh; w->m = wm; w->idx = i;
-        w->loc.refs = out->refs; w->loc.page_win = out->page_win; w->loc.live = out->live; w->loc.reg_slot = out->reg_slot; w->loc.reg_reads = out->reg_reads; w->loc.reg_writes = out->reg_writes; w->loc.reg_vals = out->reg_vals; w->loc.reg_n = out->reg_n; w->loc.reg_plat = out->reg_plat; w->loc.closure_banks = out->closure_banks; w->loc.closure_ret = out->closure_ret; w->loc.live_w = out->live_w; w->loc.flags = out->flags; w->loc.src_flags = out->src_flags;
+        w->loc.refs = out->refs; w->loc.page_win = out->page_win; w->loc.live = out->live; w->loc.reg_slot = out->reg_slot; w->loc.reg_reads = out->reg_reads; w->loc.reg_writes = out->reg_writes; w->loc.reg_vals = out->reg_vals; w->loc.reg_n = out->reg_n; w->loc.reg_plat = out->reg_plat; w->loc.closure_banks = out->closure_banks; w->loc.closure_ret = out->closure_ret; w->loc.live_w = out->live_w; w->loc.flags = out->flags; w->loc.src_flags = out->src_flags; w->loc.hits = out->hits;
         w->loc.dest = out->dest;
         w->loc.prov = out->prov;
         w->loc.first_seen = out->first_seen; w->loc.rom_size = rom_size;
@@ -2620,6 +2573,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         w->capped = calloc(site_n, sizeof *w->capped);
         w->stamp = calloc(site_n, sizeof *w->stamp);
         w->wsnap = malloc(sh.sbytes ? sh.sbytes : 1); w->winmemo = calloc(0x10000, sizeof *w->winmemo);
+        w->pcache = calloc(4096, sizeof *w->pcache); w->pcap = 4096;   // A5: 32 KiB of spent (site, projection) keys per worker
         w->rng_stamp = calloc(site_n, sizeof *w->rng_stamp); w->rng_last = calloc(site_n, 1);
         // C3: the regstate-aware closure state (the seed set grows by rehashing to REG_SET_CEIL; --unbounded lifts the per-site caps)
         uint32_t rwm = 1; while (rwm < rom_size && rwm < (1u << 23)) rwm <<= 1;   // direct-mapped by rom index, masked
@@ -2683,6 +2637,10 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         char kp[600]; snprintf(kp, sizeof kp, "%s/cells.bin", cfg->state_dir);
         FILE *kf = fopen(kp, "rb");
         if (kf) { uint64_t k; while (fread(&k, sizeof k, 1, kf) == 1) cell_insert(&sh, k); fclose(kf); }
+        if (sh.celln && cfg->unbounded) {   // campaign: the archived cells prune again in the unbounded phase — a fork falling into an archived cell is cut at its first visit (the load is visible, never implicit)
+            cfg_unb.no_cells = 0;
+            fprintf(stderr, "deepeel: resumed %zu archived cells; cell pruning re-armed under --unbounded\n", sh.celln);
+        }
     }
     if (cfg->state_dir && cfg->resume) {   // discovery order: the earliest step at which each ROM byte was ever covered
         char dp[600]; snprintf(dp, sizeof dp, "%s/disc.bin", cfg->state_dir);
@@ -2710,6 +2668,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
             uint64_t hd[2];
             if (fread(hd, sizeof *hd, 2, ef) == 2 && hd[0] == 0x3143455845504445ull)
                 for (uint64_t i = 0, k; i < hd[1] && fread(&k, sizeof k, 1, ef) == 1; i++) keyset_insert(&sh.exactset, &sh.exactcap, &sh.exactn, k);
+            if (sh.exactn) fprintf(stderr, "deepeel: resumed %zu exact states for the dedup set\n", sh.exactn);   // the acceleration must be visible, never implicit
             fclose(ef);
         }
     }
@@ -2734,7 +2693,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
                 } else out->seed_regs_absent++;   // requested but unsupported: never silent
             }
             if (prep) { m->save(m, cp); m->load(m, start); }
-            queue_push(&sh, (Pending){ cp, cfg->seeds[i], 1, 0, 0, 1, 0, prep ? DP_SRC_SEEDRAM : 0 });
+            queue_push(&sh, m, (Pending){ cp, cfg->seeds[i], 1, 0, 0, 1, 0, prep ? DP_SRC_SEEDRAM : 0 });
             out->seeded++;
         }
         // the platform registry's RST/IRQ vector entries as forced starts (the
@@ -2857,21 +2816,20 @@ cleanup:
         out->cooperative_yields += l->cooperative_yields;
         out->sat_total += l->sat_total; out->sat_path += l->sat_path; out->sat_loop += l->sat_loop;
         out->attract_paths += l->attract_paths; out->play_paths += l->play_paths; out->play_epochs += l->play_epochs; out->session_frames += l->session_frames; out->session_steps += l->session_steps; out->session_stalls += l->session_stalls;
-        out->sat_site += l->sat_site; out->sat_queue += l->sat_queue;
+        out->sat_site += l->sat_site;
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
-        out->novelty_picks += l->novelty_picks; out->closure_stopped_data += l->closure_stopped_data; out->closure_entry_refused += l->closure_entry_refused; out->closure_stack_invalidations += l->closure_stack_invalidations; out->closure_unresolved += l->closure_unresolved; out->closure_stack_dropped += l->closure_stack_dropped; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->promoted_forced += l->promoted_forced; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bank_sims += l->closure_bank_sims; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_stack_dropped += l->closure_stack_dropped; out->pending_dropped += l->pending_dropped; out->deferred += l->deferred; out->state_repeats += l->state_repeats; out->probe_ctx_sat += l->probe_ctx_sat; out->probe_rearms += l->probe_rearms; out->bank_forks += l->bank_forks; out->tas_ckpts += l->tas_ckpts; out->sess_ckpts += l->sess_ckpts; out->ckpt_bursts += l->ckpt_bursts; out->epoch_forks += l->epoch_forks; out->live_seeds += l->live_seeds; out->imm_refs += l->imm_refs; out->held_stops += l->held_stops; out->bank_fork_sat += l->bank_fork_sat; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->closure_rets += l->closure_rets; out->proj_pruned += l->proj_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
+        out->novelty_picks += l->novelty_picks; out->closure_stopped_data += l->closure_stopped_data; out->closure_entry_refused += l->closure_entry_refused; out->closure_stack_invalidations += l->closure_stack_invalidations; out->closure_unresolved += l->closure_unresolved; out->closure_stack_dropped += l->closure_stack_dropped; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->promoted_forced += l->promoted_forced; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bank_sims += l->closure_bank_sims; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_stack_dropped += l->closure_stack_dropped; out->pending_dropped += l->pending_dropped; out->deferred += l->deferred; out->state_repeats += l->state_repeats; out->probe_ctx_sat += l->probe_ctx_sat; out->probe_rearms += l->probe_rearms; out->bank_forks += l->bank_forks; out->tas_ckpts += l->tas_ckpts; out->sess_ckpts += l->sess_ckpts; out->ckpt_bursts += l->ckpt_bursts; out->epoch_forks += l->epoch_forks; out->live_seeds += l->live_seeds; out->imm_refs += l->imm_refs; out->held_stops += l->held_stops; out->bank_fork_sat += l->bank_fork_sat; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->event_probe_arms += l->event_probe_arms; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->closure_rets += l->closure_rets; out->proj_pruned += l->proj_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
         out->exec_outside += l->exec_outside; out->exec_wram_rom += l->exec_wram_rom; dp_ramarch_merge(&out->ra, &l->ra);
         out->closure_reg_roots += l->closure_reg_roots; out->closure_reg_seed_sat += l->closure_reg_seed_sat; out->closure_reg_set_sat += l->closure_reg_set_sat;
         out->closure_reg_indirect += l->closure_reg_indirect; out->closure_reg_indirect_sat += l->closure_reg_indirect_sat; out->closure_reg_miss += l->closure_reg_miss;
         out->closure_reg_stackrets += l->closure_reg_stackrets;
-        free(l->jp_seen); l->jp_seen = NULL; free(ws[i].visits); free(ws[i].wsnap); free(ws[i].winmemo); free(ws[i].capped); free(ws[i].stamp);
+        free(l->jp_seen); l->jp_seen = NULL; free(ws[i].visits); free(ws[i].wsnap); free(ws[i].winmemo); free(ws[i].capped); free(ws[i].stamp); free(ws[i].pcache);
         if (ws[i].regwalk) { free(ws[i].regwalk->set); free(ws[i].regwalk->site_seeds); free(ws[i].regwalk->ind_vals); free(ws[i].regwalk->provd); free(ws[i].regwalk); }
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
     }
-    out->steps = sh.steps;
-    for (unsigned i = 0; i < started; i++) out->steps += 0;   /* session steps are reported separately */
+    out->steps = sh.steps;   // session steps are reported separately
     out->spool_left = sh.spool_n; out->spooled = sh.spool_total;
     // Do not publish any new state after detecting an unreadable spool: even
     // later reads could return holes after a subsequent append extended it.
@@ -2931,7 +2889,7 @@ int dp_core_explore_cli(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg,
     DpCoreConfig local = *cfg;
     char state_path[1024];
     memset(out, 0, sizeof *out);
-    if (!local.state_dir && (local.unbounded || local.resume)) {
+    if (!local.state_dir && (local.unbounded || local.resume || local.campaign)) {
         const char *base = output_hint && *output_hint ? output_hint : "deepeel-unbounded";
         if (snprintf(state_path, sizeof state_path, "%s.state", base) >= (int)sizeof state_path) {
             fprintf(stderr, "deepeel: kernel state directory path is too long\n"); return 0;
@@ -2953,7 +2911,22 @@ int dp_core_explore_cli(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg,
     core_cli_interrupted = 0;
     if (sigaction(SIGINT, &act, &old) != 0) { perror("deepeel: cannot install SIGINT handler"); return 0; }
     local.stop_requested = &core_cli_interrupted;
+    if (local.campaign && !local.max_secs && !local.max_total) local.max_secs = 120;   // the phase-1 bound defaults to two minutes, halt 1
     int ok = dp_core_explore(m, rom_size, &local, out);
+    if (ok && local.campaign && out->saved && !core_cli_interrupted) {
+        // Phase 2 of the validated recipe (Zelda: -31% unknown, +3 024 naturals, +14 348 copy bytes): the
+        // same state dir, --resume --unbounded, to SIGINT or exhaustion.  The coverage arrays come back
+        // OR-ed from the state dir, so phase 2's report already reads the whole campaign.
+        dp_core_report(stderr, "campaign phase 1 (bounded)", out);   // one report per phase, never silent
+        DpCoreConfig p2 = local;
+        p2.resume = 1; p2.unbounded = 1; p2.campaign = 0;
+        p2.max_secs = 0; p2.stall_secs = 0;   // phase 2 is unbounded: the only stops stay exhaustion or SIGINT (the owner's contract)
+        DpCoreResult second;
+        int ok2 = dp_core_explore(m, rom_size, &p2, &second);
+        dp_core_result_free(out);   // the arrays are reloaded from the state dir by phase 2; phase 1's counters stay in its own report
+        *out = second;
+        if (!ok2) ok = 0;
+    }
     if (sigaction(SIGINT, &old, NULL) != 0) { perror("deepeel: cannot restore SIGINT handler"); ok = 0; }
     return ok;
 }
@@ -2973,7 +2946,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     if (r->resumed || r->saved) fprintf(out, "frontier: %llu states resumed, %llu saved\n", U(r->resumed), U(r->saved));
     fprintf(out, "spool: %llu states spilled to disk, %llu left unexplored\n", U(r->spooled), U(r->spool_left));
     if (r->cooperative_yields) fprintf(out, "cooperative yields: %llu\n", U(r->cooperative_yields));
-    fprintf(out, "saturation: total %llu path %llu loop %llu site %llu queue %llu\n", U(r->sat_total), U(r->sat_path), U(r->sat_loop), U(r->sat_site), U(r->sat_queue));
+    fprintf(out, "saturation: total %llu path %llu loop %llu site %llu\n", U(r->sat_total), U(r->sat_path), U(r->sat_loop), U(r->sat_site));
     fprintf(out, "losses: closure_stack_dropped %llu pending_dropped %llu deferred %llu\nexact state: repeats cut %llu, states %llu\n", U(r->closure_stack_dropped), U(r->pending_dropped), U(r->deferred), U(r->state_repeats), U(r->exact_states));
     fprintf(out, "static walks stopped or retracted on data %llu (A13)\n", U(r->closure_stopped_data));
     fprintf(out, "static edges to targets outside the mapped ROM view %llu (C3)\n", U(r->closure_unresolved));
@@ -2995,7 +2968,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "held-pad session paths stopped by their own budget: %llu\n", U(r->held_stops));
     fprintf(out, "closure bank writes simulated during walks: %llu\n", U(r->closure_bank_sims));
     fprintf(out, "bank forks: %llu (site cap hit %llu); probe re-arms: %llu (context cap hit %llu)\n", U(r->bank_forks), U(r->bank_fork_sat), U(r->probe_rearms), U(r->probe_ctx_sat));
-    fprintf(out, "event probes %llu at %llu sites: %llu forced variants\n", U(r->event_probes), U(r->event_probe_sites), U(r->event_probes));
+    fprintf(out, "event probes %llu at %llu sites: %llu forced variants\n", U(r->event_probe_arms), U(r->event_probe_sites), U(r->event_probes));
     fprintf(out, "seeded entry points %llu\n", U(r->seeded));
     if (r->reg_plat && r->reg_n) {   // typed register accesses (natural paths), by registry entry, then by category
         unsigned touched = 0;
@@ -3045,7 +3018,23 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
 }
 
 // --cov FILE: coverage in the old engine's line format (bank offset flags hits; flags 1 = natural, 5 = forced)
-void dp_core_write_cov(const char *path, const char *id, const DpCoreResult *r) {
+// The ROM index is the compact bank * $4000 + (addr & $3FFF) on every platform (dp_rom_index), so
+// bank = index >> 14 and the offset is the in-bank address — except GB, whose banks 1+ map at
+// $4000 and whose old format wrote the mapped address.  The one platform exception lives here,
+// named, instead of an inline ternary (P10).
+// P10: the cov offset of image byte `index` (16 KiB chunks), from the machine geometry:
+// a linear space walks the image at its own addresses (MD, and the MPR-journaled PCE),
+// a windowed machine maps bank 0 at code_base and every switchable bank at bank_window
+// (GB/Sega/PCE $4000, NES $8000); the bank column already identifies the bank, so a
+// wrapped window keeps the byte unambiguous.  0: unknown — image-relative everywhere.
+static unsigned cov_bank_offset(const DpMachine *m, size_t index) {
+    unsigned bank = (unsigned)(index >> 14), off = (unsigned)(index & 0x3fffu);
+    if (m->linear) return off + (bank << 14);
+    if (!bank || !m->bank_window) return off;
+    return m->bank_window + off;
+}
+
+void dp_core_write_cov(const char *path, const char *id, const DpMachine *m, const DpCoreResult *r) {
     if (!path || !path[0]) return;
     FILE *cf = fopen(path, "w");
     if (!cf) return;
@@ -3055,7 +3044,7 @@ void dp_core_write_cov(const char *path, const char *id, const DpCoreResult *r) 
         unsigned out = (f & DP_CORE_NATURAL) ? 1 : (f & DP_CORE_FORCED) ? 5 : 0;
         if ((f & DP_CORE_DATA) && !((f & DP_CORE_COPIED) && (f & DP_CORE_NATURAL))) out |= 8;   // a copied byte later executed is code, not plain data
         if (!out) continue;
-        fprintf(cf, "%02x %04x %x 1\n", (unsigned)(i >> 14), (unsigned)(i & 0x3fff) + ((i >> 14) && !strcmp(id, "gb") ? 0x4000u : 0u), out);
+        fprintf(cf, "%02x %04x %x 1\n", (unsigned)(i >> 14), cov_bank_offset(m, i), out);
     }
     fclose(cf);
 }

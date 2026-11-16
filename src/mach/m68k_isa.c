@@ -220,7 +220,104 @@ static int isa_sp_ret(const uint8_t *b, unsigned *w, unsigned *bias, unsigned *o
     if ((b[0] << 8 | b[1]) != 0x4E75) return 0;
     *w = 4; *bias = 0; *off = 0; return 1;
 }
+// M1: immediate of `width` bytes at b: returns its length in bytes, value in *v
+static int m68k_imm(const uint8_t *b, int width, uint32_t *v) {
+    if (width == 4) { *v = (uint32_t)b[0] << 24 | (uint32_t)b[1] << 16 | (uint32_t)b[2] << 8 | b[3]; return 4; }
+    if (width == 2) { *v = (uint32_t)b[0] << 8 | b[1]; return 2; }
+    *v = b[1]; return 2;
+}
+// M1: direct RAM load into a data register, `move.{b,w,l} abs.w|abs.l,Dn`: 00 ss DDD 000 111 00x (techniques 3, 4, 7)
+static int isa_ram_load(const uint8_t *b, uint32_t *addr, int *idx_reg, int *width, int *dreg) {
+    (void)idx_reg;
+    unsigned w = (b[0] << 8) | b[1], sz = (w >> 12) & 3;
+    if (!sz || ((w >> 6) & 7) != 0 || ((w >> 3) & 7) != 7 || (w & 7) > 1) return 0;
+    *width = sz == 1 ? 1 : sz == 3 ? 2 : 4;
+    *dreg = (int)((w >> 9) & 7);
+    if ((w & 7) == 0) { *addr = (uint32_t)(int32_t)(int16_t)((b[2] << 8) | b[3]) & 0xFFFFFF; return 4; }
+    *addr = ((uint32_t)b[2] << 24 | (uint32_t)b[3] << 16 | (uint32_t)b[4] << 8 | b[5]) & 0xFFFFFF;
+    return 6;
+}
+// M1: signature pairing for the wide ISA — a standalone `cmpi.x #imm,abs` (00 xx 111 xxx), or the
+// `cmpi.x`/`cmp.x` of the register just loaded.  Fills address, value and width; returns 1 on a signature.
+static int isa_ram_signature_wide(DpMachine *m, uint32_t pc, const uint8_t *b, const uint8_t *f,
+                                  int dl_len, int dl_width, int dl_dreg, uint32_t dl_addr,
+                                  uint32_t *addr, uint32_t *val, int *width) {
+    unsigned w0 = (b[0] << 8) | b[1];
+    if (w0 == 0x0C38 || w0 == 0x0C39 || w0 == 0x0C78 || w0 == 0x0C79 || w0 == 0x0CB8 || w0 == 0x0CB9) {   // cmpi.x #imm,abs
+        int sz = (w0 >> 6) & 3, wd = sz == 0 ? 1 : sz == 1 ? 2 : 4;
+        uint8_t g[12];
+        for (unsigned i = 0; i < sizeof g; i++) g[i] = m->fetch(m, pc + 2 + i);
+        uint32_t imm; int il = m68k_imm(g, wd, &imm);
+        uint32_t a;
+        if (w0 & 1) a = ((uint32_t)g[il] << 24 | (uint32_t)g[il + 1] << 16 | (uint32_t)g[il + 2] << 8 | g[il + 3]) & 0xFFFFFF;
+        else a = (uint32_t)(int32_t)(int16_t)((g[il] << 8) | g[il + 1]) & 0xFFFFFF;
+        if (m->rom_index(m, a) >= 0) return 0;
+        *addr = a; *val = imm; *width = wd;
+        return 1;
+    }
+    if (!dl_len || dl_dreg < 0) return 0;
+    unsigned w = (f[0] << 8) | f[1];
+    int sz = dl_width == 1 ? 0 : dl_width == 2 ? 1 : 2;
+    if (w == (0x0C00u | (unsigned)sz << 6 | (unsigned)dl_dreg) ||                       // cmpi.x #imm,Dn
+        w == (0xB03Cu | (unsigned)dl_dreg << 9 | (unsigned)sz << 6)) {                   // cmp.x #imm,Dn
+        uint32_t imm; m68k_imm(f + 2, dl_width, &imm);
+        *addr = dl_addr; *val = imm; *width = dl_width;
+        return 1;
+    }
+    return 0;
+}
+// M1: proven length (in entries) of the long table whose base `lea abs.l,An` / `lea d16(pc),An` (a ROM base)
+// follows the load; an entry is proven while its long designates an even ROM address at or above code_min
+static unsigned isa_table_proven(const DpIsa *isa, DpMachine *m, uint32_t pc, int len) {
+    for (unsigned i = 0; i + 5 < 16; i += 2) {
+        uint32_t w = (uint32_t)m->fetch(m, pc + len + i) << 8 | m->fetch(m, pc + len + i + 1);
+        uint32_t base;
+        if ((w & 0xF1FF) == 0x41F9)
+            base = ((uint32_t)m->fetch(m, pc + len + i + 2) << 24 | (uint32_t)m->fetch(m, pc + len + i + 3) << 16 |
+                    (uint32_t)m->fetch(m, pc + len + i + 4) << 8 | m->fetch(m, pc + len + i + 5)) & 0xFFFFFF;
+        else if ((w & 0xF1FF) == 0x41FA)
+            base = (pc + (uint32_t)len + i + 2 + (uint32_t)(int32_t)(int16_t)((m->fetch(m, pc + len + i + 2) << 8) | m->fetch(m, pc + len + i + 3))) & 0xFFFFFF;
+        else continue;
+        if (m->rom_index(m, base) < 0) continue;
+        unsigned n = 0;
+        while (n < 128) {
+            uint32_t a4 = base + 4u * n;
+            uint32_t t = ((uint32_t)m->fetch(m, a4) << 24 | (uint32_t)m->fetch(m, a4 + 1) << 16 | (uint32_t)m->fetch(m, a4 + 2) << 8 | m->fetch(m, a4 + 3)) & 0xFFFFFF;
+            if ((t & 1u) || t < isa->code_min || m->rom_index(m, t) < 0) break;
+            n++;
+        }
+        return n >= 2 ? n : 0;
+    }
+    return 0;
+}
+// M1: a ROM table access indexed by the loaded value follows within 16 bytes:
+// ROM base into An (lea abs.l / lea d16(pc) / movea.l #imm), then an (d8,An,Xn) operand of a move/ALU word
+static int isa_rom_table_follows(const DpIsa *isa, DpMachine *m, uint32_t pc, int len) {
+    (void)isa;
+    uint8_t win[16];
+    for (unsigned i = 0; i < sizeof win; i++) win[i] = m->fetch(m, pc + len + i);
+    int tab = 0;
+    for (unsigned i = 0; i + 1 < sizeof win; i += 2) {
+        unsigned w = (win[i] << 8) | win[i + 1];
+        if (i + 5 < sizeof win && ((w & 0xF1FF) == 0x41F9 || w == (0x207Cu | (w & 0x0E00)))) {
+            uint32_t a = ((uint32_t)win[i + 2] << 24 | (uint32_t)win[i + 3] << 16 | (uint32_t)win[i + 4] << 8 | win[i + 5]) & 0xFFFFFF;
+            if (m->rom_index(m, a) >= 0) tab = 1;
+            i += 4;   // skip the address extension
+            continue;
+        } else if (i + 3 < sizeof win && (w & 0xF1FF) == 0x41FA) {
+            uint32_t a = (pc + (uint32_t)len + i + 2 + (uint32_t)(int32_t)(int16_t)((win[i + 2] << 8) | win[i + 3])) & 0xFFFFFF;
+            if (m->rom_index(m, a) >= 0) tab = 1;
+            i += 2;
+            continue;
+        }
+        if (tab && ((w >> 3) & 7) == 6 && (w & 0xF000) != 0x4000 && (w & 0xF000) != 0x6000) return 1;
+    }
+    return 0;
+}
 static const DpIsa isa = { "68000", 3, 1, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
                            isa_reg_effect, isa_illegal, isa_disasm, isa_mem_operand, 0x200u, 0, 0, isa_imm_ptr,
-                           .sp_slot = DP_M68KR_A7, .sp_width = 4, .sp_addr_mask = 0xFFFFFFFFu, .sp_base = 0, .entry_data_sig = NULL, .sp_ret = isa_sp_ret };
+                           .sp_slot = DP_M68KR_A7, .sp_width = 4, .sp_addr_mask = 0xFFFFFFFFu, .sp_base = 0, .entry_data_sig = NULL, .sp_ret = isa_sp_ret,
+                           .ram_load = isa_ram_load, .ram_signature_wide = isa_ram_signature_wide,
+                           .table_proven = isa_table_proven, .rom_table_follows = isa_rom_table_follows,
+                           .table_entry_width = 4 };   // B4: the lea tables are longs
 const DpIsa *dp_isa_68000(void) { return &isa; }

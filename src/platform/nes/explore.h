@@ -97,8 +97,7 @@ typedef struct {
 struct DpNesResults_;
 typedef struct {
     uint64_t max_total;
-    uint32_t max_steps, max_paths, queue_cap, queue_max, loop_cap, fork_cap;   // queue_max: adaptive growth ceiling (0: fixed queue_cap)
-    unsigned defer_tiers;   // frontier §6 (shared policy): cut continuations resume with a 4x budget, N tiers (0: cuts stay final)
+    uint32_t max_steps, queue_cap, queue_max, loop_cap, fork_cap;   // queue_max: adaptive growth ceiling (0: fixed queue_cap)
     int seed_irq;          // fork the NMI/IRQ entries when enabled (default on)
     // play sessions: random-input frames before the fork exploration.  The
     // visited bytes land in the same physical map as the exploration.
@@ -106,7 +105,6 @@ typedef struct {
     uint32_t demo_frames;  // idle-pad run from power-on before the TAS and play passes (0: none)
     uint32_t play_sessions; // restart count
     uint32_t play_seed;    // RNG seed
-    uint32_t play_pool;    // shared checkpoint pool size: random sessions restart from earlier sessions' checkpoints (0: from power-on)
     // TAS movies (fm2/bk2), played from power-on before the fork drain;
     // each movie is one session, its end state seeds the fork queue
     char tas_paths[8][512];
@@ -117,10 +115,7 @@ typedef struct {
     int no_pad_probe;      // disable the strobe-site pad probes
     int event_probes;      // §3.7: fork on plausible $2002 status values at the poll sites
     int pad_full;          // D10: also probe every one of the 256 port-1 button masks at each strobe site
-    int bank_dispatch;     // second pass also scans the fixed bank for jump tables and seeds every bank view (G2, UxROM)
     unsigned ctx_cap;      // legacy C2: max admitted states per coarse context (0 = off; keeps the old opt-in admission-cap mode)
-    int ctx_live;          // --ctx-live: --ctx-cap projects the context on what the window reads (RAM/PRG-RAM pages, PPU, pads, APU)
-    int second_pass;       // after the drain, enter static-closure roots that no path executed and drain again (G4)
     int seed_vectors;      // also seed the NMI and IRQ/BRK vector targets as roots (G1)
     int seed_banks;        // also seed every switchable bank at $8000 (UxROM)
     int lot_drain;         // with a lot backlog: run only the saved states (no root, no seeds)

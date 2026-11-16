@@ -1330,6 +1330,17 @@ def build_z80_family(out):
     jt[0x100:0x102] = bytes.fromhex("18fe"); jt[0x110] = 0xC9; jt[0x120] = 0xC9
     with open(os.path.join(out, "fix_z80_jumptable.sms"), "wb") as f:
         f.write(jt)
+    # P4: the dispatch is `ld ix,nn` ... `jp (ix)` — the closure follows the table behind the
+    # IX load (prefix-aware backward scan), not only `jp (hl)`.  The C3 regwalk cannot resolve
+    # it (`ld ix,($C000)` kills IX), so only the table walk proves the never-executed entries.
+    it = bytearray([0xFF]) * 0x8000
+    code = bytes.fromhex("dd214001" "dd7e00" "3200c0" "dd7e01" "3201c0" "dd2a00c0" "dde9")
+    it[0:len(code)] = code
+    it[0x110] = 0x18; it[0x111] = 0xFE   # jr * : the dispatch target hangs the machine there
+    it[0x120] = 0xC9; it[0x130] = 0xC9   # table-only targets (never executed)
+    it[0x140:0x148] = bytes.fromhex("1001" "2001" "3001" "0000")
+    with open(os.path.join(out, "fix_z80_ixtable.sms"), "wb") as f:
+        f.write(it)
     cells = bytes([0xB7, 0x20, 0x06, 0x20, 0x04, 0, 0, 0, 0, 0x18, 0xFE])
     z = bytearray([0xFF]) * 0x8000
     z[0:len(cells)] = cells

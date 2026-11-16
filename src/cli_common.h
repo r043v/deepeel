@@ -44,7 +44,6 @@ static inline void dp_cli_arm_stop(unsigned time_limit) {
     DP_CLI_U(opt, "--ctx-cap", ctx_cap, unsigned); \
     DP_CLI_U(cc, "--time-limit", time_limit, unsigned); \
     else if (!strcmp(a, "--novelty-cells")) (opt).novelty_cells = 1; \
-    else if (!strcmp(a, "--second-pass")) (opt).second_pass = 1; \
     else if (!strcmp(a, "--lot") && i + 1 < argc) (opt).lot_path = argv[++i]; \
     else if (!strcmp(a, "--lot-drain")) (opt).lot_drain = 1; \
     else if (!strcmp(a, "--spool") && i + 1 < argc) (opt).lot_path = argv[++i]; \

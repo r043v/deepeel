@@ -316,6 +316,7 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->pc = sega_pc;
     m->set_pc = sega_set_pc;
     m->bank_shift = 14;    // the Z80's 16 KiB pointer-table window (the static closure's geometry, E5)
+    m->rom_top_win = 3; m->bank_window = 0x4000u;   // P10: the switchable window maps its bank at $4000   // SMS/GG/SG/MSX: ROM fills windows $0000/$4000/$8000 ($C000-$FFFF is RAM on every profile)
     m->seed_regs = sega_seed_regs;
     m->bank_view = sega_bank_view;
     m->mapper_reg = sega_mapper_reg;

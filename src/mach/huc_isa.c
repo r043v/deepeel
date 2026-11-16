@@ -174,6 +174,48 @@ static int isa_imm_byte(const uint8_t *b, uint8_t *v) {   // B9: lda/ldx/ldy #im
 
 static int isa_acc_imm(const uint8_t *b, uint8_t *v) { if (b[0] != 0xA9) return 0; *v = b[1]; return 1; }   // lda #n
 static int isa_st_acc_abs(const uint8_t *b, uint32_t *a) { if (b[0] != 0x8D) return 0; *a = (uint32_t)b[1] | (uint32_t)b[2] << 8; return 1; }   // sta abs
+// M1: direct RAM loads into a register — `lda/ldx/ldy abs` and `abs,X` / `abs,Y`, `zp` and `zp,X` / `zp,Y`
+// (techniques 3, 4, 7).  Indexed modes set *idx_reg: the kernel skips the immediate-compare signature then.
+static int isa_ram_load(const uint8_t *b, uint32_t *addr, int *idx_reg, int *width, int *dreg) {
+    (void)width; (void)dreg;
+    if (b[0] == 0xAD || b[0] == 0xAE || b[0] == 0xAC) { *addr = b[1] | (b[2] << 8); *idx_reg = b[0] != 0xAD; return 3; }
+    if (b[0] == 0xA5 || b[0] == 0xA6 || b[0] == 0xA4) { *addr = b[1]; *idx_reg = b[0] != 0xA5; return 2; }
+    return 0;
+}
+// M1: proven length (in entries) of the word table whose base `lda abs,X` / `lda abs,Y` (a ROM base)
+// follows the load; an entry is proven while its word designates the ROM at or above $8000
+// (the machine's ROM window — this ISA's code floor on every profile using tables)
+static unsigned isa_table_proven(const DpIsa *isa, DpMachine *m, uint32_t pc, int len) {
+    (void)isa;
+    for (unsigned i = 0; i < 13; i++) {
+        uint8_t op = m->fetch(m, pc + len + i);
+        if (op != 0xBD && op != 0xB9) continue;
+        uint32_t base = m->fetch(m, pc + len + i + 1) | (uint32_t)m->fetch(m, pc + len + i + 2) << 8;
+        if (m->rom_index(m, base) < 0) continue;
+        unsigned n = 0;
+        while (n < 128) {
+            uint32_t t = m->fetch(m, base + 2 * n) | (uint32_t)m->fetch(m, base + 2 * n + 1) << 8;
+            if (t < 0x8000u || m->rom_index(m, t) < 0) break;
+            n++;
+        }
+        return n >= 2 ? n : 0;
+    }
+    return 0;
+}
+// M1: a ROM table access indexed by the loaded value follows within 16 bytes:
+// abs,X / abs,Y load/ALU from a ROM base address
+static int isa_rom_table_follows(const DpIsa *isa, DpMachine *m, uint32_t pc, int len) {
+    (void)isa;
+    uint8_t win[16];
+    for (unsigned i = 0; i < sizeof win; i++) win[i] = m->fetch(m, pc + len + i);
+    for (unsigned i = 0; i + 2 < sizeof win; i++) {
+        uint8_t o = win[i];
+        if ((o == 0xBD || o == 0xB9 || o == 0x7D || o == 0x79 || o == 0x3D || o == 0x39 || o == 0xDD || o == 0xD9) &&
+            m->rom_index(m, win[i + 1] | (win[i + 2] << 8)) >= 0) return 1;
+    }
+    return 0;
+}
 static const DpIsa isa = { "huc6280", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
-                           isa_reg_effect, isa_illegal, isa_disasm, isa_mem_operand, 0, 0, 1, NULL, isa_imm_byte, isa_acc_imm, isa_st_acc_abs };
+                           isa_reg_effect, isa_illegal, isa_disasm, isa_mem_operand, 0, 0, 1, NULL, isa_imm_byte, isa_acc_imm, isa_st_acc_abs,
+                           .ram_load = isa_ram_load, .cmp_imm = 0xC9, .table_proven = isa_table_proven, .rom_table_follows = isa_rom_table_follows };
 const DpIsa *dp_isa_huc6280(void) { return &isa; }

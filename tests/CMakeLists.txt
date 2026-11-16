@@ -215,6 +215,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_stackret.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_siblings.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_jumptable.sms
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_ixtable.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_deadpage.pce
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_dmc.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_status.pce
@@ -265,6 +266,8 @@ add_test(NAME exec COMMAND test_exec)
 add_executable(test_md test_md.c)
 target_link_libraries(test_md PRIVATE deepeel_core m)
 add_dependencies(test_md fixtures)
+add_test(NAME md_milestone COMMAND test_md ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(md_milestone PROPERTIES FIXTURES_REQUIRED fixtures)   # A7: the save/load/save determinism covers the whole MdFull (the sound Z80 rides every snapshot)
 add_test(NAME md COMMAND test_md ${CMAKE_CURRENT_BINARY_DIR})
 
 
@@ -457,17 +460,17 @@ add_test(NAME core_solve COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_so
 set_tests_properties(core_solve PROPERTIES FIXTURES_REQUIRED fixtures)
 
 # techniques 3, 4, 7 on the 6502 (NES): the technique covers the other side as natural, its counter is never silent
-add_test(NAME core_learn_sig_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_save.nes; $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions | grep -q 'learned signatures 1' && $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions --no-solve --no-learn-sig | grep -q 'rom bytes: natural 12'")
+add_test(NAME core_learn_sig_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_save.nes; $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions | grep -q 'learned signatures 3' && $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions --no-solve --no-learn-sig | grep -q 'rom bytes: natural 12'")
 set_tests_properties(core_learn_sig_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
-add_test(NAME core_rng_bytes_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_rng.nes; $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions | grep -q 'rng-byte forks 4' && $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions --no-solve --no-rng-learn | grep -q 'rom bytes: natural 15'")
+add_test(NAME core_rng_bytes_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_rng.nes; $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions | grep -q 'rng-byte forks 8' && $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions --no-solve --no-rng-learn | grep -q 'rom bytes: natural 15'")
 set_tests_properties(core_rng_bytes_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_index_replay_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_index.nes; $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions | grep -q 'index replays 16' && $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions --no-solve --no-index-replay | grep -q 'rom bytes: natural 16'")
 set_tests_properties(core_index_replay_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
 
 # techniques 3, 4, 7 on the 68000 (Mega Drive)
-add_test(NAME core_learn_sig_68000 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_md_save.md; $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'learned signatures 1' && $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-learn-sig | grep -q 'rom bytes: natural 16'")
+add_test(NAME core_learn_sig_68000 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_md_save.md; $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'learned signatures 2' && $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-learn-sig | grep -q 'rom bytes: natural 16'")
 set_tests_properties(core_learn_sig_68000 PROPERTIES FIXTURES_REQUIRED fixtures)
-add_test(NAME core_rng_bytes_68000 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_md_rng.md; $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'rng-byte forks 4' && $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-rng-learn | grep -q 'rom bytes: natural 24'")
+add_test(NAME core_rng_bytes_68000 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_md_rng.md; $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'rng-byte forks 8' && $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-rng-learn | grep -q 'rom bytes: natural 24'")
 set_tests_properties(core_rng_bytes_68000 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_index_replay_68000 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_md_index.md; $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'index replays 16' && $<TARGET_FILE:deepeel> md explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-index-replay | grep -q 'rom bytes: natural 32'")
 set_tests_properties(core_index_replay_68000 PROPERTIES FIXTURES_REQUIRED fixtures)
@@ -477,15 +480,15 @@ add_test(NAME core_irq_fork_pce COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix
 set_tests_properties(core_irq_fork_pce PROPERTIES FIXTURES_REQUIRED fixtures)
 
 # techniques 3, 4, 7 on the SM83 (GB) and the HuC6280 (PCE)
-add_test(NAME core_learn_sig_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_save.gb; $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'learned signatures 1' && $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-learn-sig | grep -q 'rom bytes: natural 15'")
+add_test(NAME core_learn_sig_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_save.gb; $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'learned signatures 3' && $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-learn-sig | grep -q 'rom bytes: natural 15'")
 set_tests_properties(core_learn_sig_sm83 PROPERTIES FIXTURES_REQUIRED fixtures)
-add_test(NAME core_rng_bytes_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_rng.gb; $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'rng-byte forks 4' && $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-rng-learn | grep -q 'rom bytes: natural 18'")
+add_test(NAME core_rng_bytes_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_rng.gb; $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'rng-byte forks 8' && $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-rng-learn | grep -q 'rom bytes: natural 18'")
 set_tests_properties(core_rng_bytes_sm83 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_index_replay_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_index.gb; $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'index replays 16' && $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-index-replay | grep -q 'rom bytes: natural 23'")
 set_tests_properties(core_index_replay_sm83 PROPERTIES FIXTURES_REQUIRED fixtures)
-add_test(NAME core_learn_sig_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_save.pce; $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'learned signatures 1' && $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-learn-sig | grep -q 'rom bytes: natural 15'")
+add_test(NAME core_learn_sig_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_save.pce; $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'learned signatures 2' && $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-learn-sig | grep -q 'rom bytes: natural 15'")
 set_tests_properties(core_learn_sig_huc6280 PROPERTIES FIXTURES_REQUIRED fixtures)
-add_test(NAME core_rng_bytes_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_rng.pce; $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'rng-byte forks 4' && $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-rng-learn | grep -q 'rom bytes: natural 19'")
+add_test(NAME core_rng_bytes_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_rng.pce; $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'rng-byte forks 8' && $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-rng-learn | grep -q 'rom bytes: natural 19'")
 set_tests_properties(core_rng_bytes_huc6280 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_index_replay_huc6280 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_index.pce; $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'index replays 16' && $<TARGET_FILE:deepeel> pce explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-index-replay | grep -q 'rom bytes: natural 21'")
 set_tests_properties(core_index_replay_huc6280 PROPERTIES FIXTURES_REQUIRED fixtures)
@@ -517,6 +520,14 @@ add_test(NAME core_closure_z80 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_
 set_tests_properties(core_closure_z80 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_closure_reg_z80 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_regclosure.sms; a='--core --jobs 1 --attract-frames 0 --no-sessions'; $<TARGET_FILE:deepeel> z80 explore sms $f $a | grep -q 'closure registers (C3): seed walks [1-9][0-9]*, indirect resolved [1-9][0-9]*,' && $<TARGET_FILE:deepeel> z80 explore sms $f $a --no-closure-regs | grep -q 'static closure: roots' && ! $<TARGET_FILE:deepeel> z80 explore sms $f $a --no-closure-regs | grep -q 'closure registers (C3)'")
 set_tests_properties(core_closure_reg_z80 PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_campaign_z80 COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -rf $D/camp_z80.state; $B z80 explore sms $D/fix_z80_cells.sms --core --jobs 1 --attract-frames 0 --no-sessions --campaign --max-time 2 --state-dir $D/camp_z80.state --text $D/camp_z80.txt >$D/camp_z80.out 2>$D/camp_z80.err & P=$!; sleep 6; kill -INT $P 2>/dev/null; wait $P; grep -qE 'states resumed, [0-9]+ saved' $D/camp_z80.txt && grep -q 'cell pruning re-armed under --unbounded' $D/camp_z80.err && grep -q 'campaign phase 1 (bounded)' $D/camp_z80.err && grep -qE 'deferred [1-9]' $D/camp_z80.err")   # P7: the capped forks of phase 1 join the deferred frontier   # the two-phase recipe in one process: phase 2 resumes the frontier and re-arms the archived cells; SIGINT stops phase 2 (unbounded: exhaustion or SIGINT only)
+set_tests_properties(core_campaign_z80 PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 180)
+add_test(NAME core_campaign_epoch COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; rm -rf $D/camp_ep.state; $B explore $D/fix_epoch.gb --fork-site-cap 1 --tas-ckpt-every 30 --attract-frames 600 --play-frames 600 --max-total 600000 --campaign --max-time 3 --state-dir $D/camp_ep.state --text $D/camp_ep.txt >$D/camp_ep.out 2>$D/camp_ep.err & P=$!; sleep 8; kill -INT $P 2>/dev/null; wait $P; grep -q 'campaign phase 1 (bounded)' $D/camp_ep.err && grep -qE 'thanks to a checkpoint epoch [1-9]' $D/camp_ep.err")   # P5: the epoch crosses the frontier save/resume (phase 2 keeps forking through epochs until SIGINT)   # P5/P7: the epoch and the capped forks cross the frontier save/resume (deferred > 0)
+set_tests_properties(core_campaign_epoch PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 300)
+add_test(NAME z80_cov_geom COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B z80 explore sms $D/fix_z80_branch.sms --attract-frames 0 --max-total 200000 --cov $D/z80g.cov >/dev/null 2>&1; grep -q '^00 0000 [159]' $D/z80g.cov && ! grep -Eq '^00 [4-9a-f]' $D/z80g.cov && ! grep -Eq '^0[1-9a-f] [0-3]' $D/z80g.cov && grep -q '^01 4' $D/z80g.cov")   # P10: bank 0 stays at $0000, a switchable bank maps at its window base $4000
+set_tests_properties(z80_cov_geom PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME core_closure_ixtable_z80 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_ixtable.sms; a='--core --jobs 1 --attract-frames 0 --no-sessions'; $<TARGET_FILE:deepeel> z80 explore sms $f $a | grep -q 'S4 operand tables of executed JP HL: 1 tables, [3-9] entries'")
+set_tests_properties(core_closure_ixtable_z80 PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 120)
 add_test(NAME core_closure_stackret_z80 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_stackret.sms; a='--core --jobs 1 --attract-frames 0 --no-sessions'; $<TARGET_FILE:deepeel> z80 explore sms $f $a | grep -q 'closure registers (C3):.*stack returns [1-9][0-9]*,' && ! $<TARGET_FILE:deepeel> z80 explore sms $f $a --no-closure-regs | grep -q 'closure registers (C3)'")
 set_tests_properties(core_closure_stackret_z80 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_closure_stackret_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_stackret.nes; a='--core --jobs 1 --attract-frames 0 --no-sessions --max-total 300000'; $<TARGET_FILE:deepeel> nes explore $f $a | grep -q 'closure registers (C3):.*stack returns [1-9][0-9]*,' && ! $<TARGET_FILE:deepeel> nes explore $f $a --no-closure-regs | grep -q 'closure registers (C3)'")

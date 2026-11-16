@@ -93,6 +93,7 @@ typedef struct DpCoreConfig {
     const char *state_dir;     // --state-dir: pending forked states are saved to <dir>/frontier.bin at exit
     int resume;                // --resume: states saved there by a previous run are queued first
     int unbounded;             // --unbounded: no step/path/site-fork ceilings; the RAM queue spills to the disk spool
+    int campaign;              // --campaign: a bounded phase 1 (the platform's width-first shape, --max-time/--max-total bound, default 120 s) then --resume --unbounded in the same process; one report per phase
     const volatile sig_atomic_t *stop_requested; // cooperative interruption, checked between instructions
     int no_closure;            // static closure off (no STATIC marking from natural direct transfers)
     int no_proj;               // C11 off: no context-projection eviction of forks
@@ -129,6 +130,7 @@ typedef struct DpCoreConfig {
 
 typedef struct DpCoreResult {
     uint32_t *src_flags;       // per ROM index: DP_SRC_* (core/coverage.h), OR-ed over every proving source
+    uint32_t *hits;            // P13/A9: per ROM index: execution hits of the instruction head byte (the kernel's heat; shared by the workers like flags)
     uint64_t *first_seen;      // per ROM index: global step count when first covered (0: never)
     uint8_t *flags;            // per ROM index: DP_CORE_NATURAL | DP_CORE_FORCED
     uint64_t closure_bank_sims; uint8_t closure_banks, closure_ret; uint64_t closure_rets;   // C3: mapper writes replayed during a walk; walk-time bank simulation on
@@ -157,7 +159,7 @@ typedef struct DpCoreResult {
     uint64_t steps, paths, forks;
     uint64_t cooperative_yields; // active paths requeued to let pending work run
     uint64_t tas_paths;        // TAS replay paths started (unshifted + shifted)
-    uint64_t sat_total, sat_path, sat_loop, sat_site, sat_queue;   // reported caps, never silent
+    uint64_t sat_total, sat_path, sat_loop, sat_site;   // reported caps, never silent (the queue never saturates: it spills, counted by the spool line)
     uint64_t pruned_covered;   // forks skipped because both sides were already covered
     uint64_t copy_bytes;       // verbatim ROM->RAM byte copies seen (a ROM read written unchanged to RAM)
     uint64_t copy_forced;      // the same on forced paths (speculative, not marked on the ROM)
@@ -186,7 +188,8 @@ typedef struct DpCoreResult {
     uint64_t plain_new_bytes;   // the same for paths started in plain LIFO order
     int in_novelty_path;        // internal: the path being run was a novelty pick
     uint64_t seeded_ram, event_probe_sites, irq_forks, jitter_forks, sessions; // probe sites visited (technique 2)
-    uint64_t event_probes;      // alternative-status states queued
+    uint64_t event_probe_arms;  // B1: arms (a fresh site, or a re-armed context)
+    uint64_t event_probes;      // forced variants queued by the probe arms
     uint64_t epoch_forks, ckpt_bursts;   // B3: pad bursts started from session checkpoints
     uint64_t closure_roots, closure_bytes, closure_capped, closure_jp_tables, closure_jp_entries, prov_data_bytes; uint32_t *jp_seen; unsigned jp_seen_n, jp_seen_cap; uint64_t closure_stack_dropped, pending_dropped, deferred, state_repeats, exact_states, probe_ctx_sat, probe_rearms, bank_forks, bank_fork_sat, tas_ckpts, sess_ckpts, held_stops;   // static closure: roots walked, bytes newly marked, walks stopped by the cap
     uint8_t closure_regs;              // C3: the regstate-aware closure is on
@@ -243,7 +246,7 @@ int dp_core_explore_cli(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg,
                         DpCoreResult *out, const char *output_hint);
 void dp_core_result_free(DpCoreResult *r);
 
-void dp_core_write_cov(const char *path, const char *id, const DpCoreResult *r);
+void dp_core_write_cov(const char *path, const char *id, const struct DpMachine *m, const DpCoreResult *r);   // P10: the machine geometry decides the offsets
 // generic map/summary outputs (core_map.c): class vector, PNG-or-text map, JSON summary; 0 = ok, -1 = failure
 uint8_t *dp_core_map_build(const DpCoreResult *r);
 int dp_core_write_map(const char *path, const char *id, const char *rom_name, const DpCoreResult *r);

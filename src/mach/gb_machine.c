@@ -205,19 +205,6 @@ static int gb_ctx_components(DpMachine *m, const DpCtxComp **out) {
     return (int)(sizeof gb_ctx / sizeof *gb_ctx);
 }
 
-// --- probes: inputs that open the other side of a data-dependent branch ------------
-static void gb_probe_buttons(DpMachine *m, uint32_t v) {
-    gbw(m)->d->api->set_buttons((uint8_t)v);
-}
-static const DpProbe gb_probe_list[] = {
-    { "buttons", "joypad state (bit set = pressed: right left up down a b select start)", 256,
-      gb_probe_buttons },
-};
-static int gb_probes(DpMachine *m, const DpProbe **out) {
-    (void)m;
-    *out = gb_probe_list;
-    return (int)(sizeof gb_probe_list / sizeof *gb_probe_list);
-}
 
 // technique 2 on GB: an instruction that reads the joypad port ($FF00) forks one state per button
 // held; the held pad stays in the saved state.  The instruction is dry-run once to see the read.
@@ -318,6 +305,7 @@ static DpMachine *gb_wrap(DpMach *impl) {
     m->save_ram_base = 0xA000u; m->save_ram_len = 0x2000u;
     m->plat = dp_platform_gb();
     m->bank_shift = 14;   // the SM83's 16 KiB pointer-table window (the static closure's geometry, E5)
+    m->rom_top_win = 2; m->bank_window = 0x4000u;   // P10: the switchable window maps its bank at $4000   // $0000 fixed, $4000 switchable: a code target never sits at $8000 and beyond
     m->isa = dp_isa_sm83();
     m->impl = g;
     m->state_bytes = gb_state_bytes;
@@ -342,7 +330,6 @@ static DpMachine *gb_wrap(DpMach *impl) {
     m->ctx_components = gb_ctx_components;
     m->ctx_reg_hash = gb_ctx_reg_hash;
     m->get_regs = gb_get_regs;
-    m->probes = gb_probes;
     m->close = gb_close;
     return m;
 }

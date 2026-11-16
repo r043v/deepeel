@@ -90,6 +90,8 @@ typedef struct DpMemOp {
     uint32_t addr;    // DP_AM_ABS: the address; DP_AM_HIGH_IMM: $FF00 + n
 } DpMemOp;
 
+typedef struct DpMachine DpMachine;   // the machine hooks take and return it (declared in full below)
+
 typedef struct DpIsa {
     const char *name;                      // "sm83", "z80", ...
     uint8_t ptr_width;                     // bytes of a code pointer
@@ -155,6 +157,33 @@ typedef struct DpIsa {
     // immediate (`out (n),a`), otherwise it rides a register pair (`out (c),a`).  NULL:
     // this ISA has no ports.
     int (*out_port)(const uint8_t *bytes, int *port_known, uint16_t *port);
+    // M1 (P8): direct RAM load into the accumulator/index register (techniques 3, 4, 7).
+    // Returns the instruction length, fills the target address, whether the addressing
+    // mode is indexed (abs,X: the kernel skips the immediate-compare signature then),
+    // the width in bytes and the destination data register (wide ISAs), else 0.
+    // NULL: this ISA has no direct RAM load.
+    int (*ram_load)(const uint8_t *bytes, uint32_t *addr, int *idx_reg, int *width, int *dreg);
+    // M1: opcode pairing the byte loaded by `ram_load` with an immediate compare
+    // (6502/huc6280 CMP #, z80/sm83 CP n): one signature site (techniques 3+4).
+    // 0: none, or the ISA pairs its loads through `ram_signature_wide` instead (68000).
+    uint8_t cmp_imm;
+    // M1: wide-ISAs extension of the signature pairing: a wide load followed by an
+    // immediate compare of the loaded register, or a standalone compare of an absolute
+    // address with an immediate.  `b` points at the load instruction bytes (`dl_len`
+    // bytes), `f` at the 10 bytes following it.  Fills address, value and width;
+    // returns 1 on a signature.  NULL: none.
+    int (*ram_signature_wide)(struct DpMachine *m, uint32_t pc, const uint8_t *b, const uint8_t *f,
+                              int dl_len, int dl_width, int dl_dreg, uint32_t dl_addr,
+                              uint32_t *addr, uint32_t *val, int *width);
+    // M1: proven length (in entries) of the word/long table whose base load follows
+    // the RAM load within 16 bytes (technique 7).  NULL: none.
+    unsigned (*table_proven)(const struct DpIsa *isa, struct DpMachine *m, uint32_t pc, int len);
+    // M1: 1 when a ROM table access indexed by the loaded value follows within 16
+    // bytes (technique 7).  NULL: none.
+    int (*rom_table_follows)(const struct DpIsa *isa, struct DpMachine *m, uint32_t pc, int len);
+    // B4: bytes of one table entry (2: a word table everywhere but the 68000, 4: its long tables);
+    // the index replay scales the proven length by it.  0: 2 assumed.
+    uint8_t table_entry_width;
 } DpIsa;
 
 const DpIsa *dp_isa_sm83(void);
@@ -194,17 +223,6 @@ typedef struct DpCtxComp {
     uint32_t bytes;    // size of the component
 } DpCtxComp;
 
-// an input the explorer can inject to open the other side of a data-dependent
-// branch (spec §7.2 probes)
-struct DpMachine;
-typedef struct DpProbe {
-    const char *name;
-    const char *desc;
-    uint32_t values;                         // number of distinct values
-    void (*apply)(struct DpMachine *, uint32_t value);
-} DpProbe;
-
-typedef struct DpMachine DpMachine;
 
 // --pad-full: the k-th subset of the buttons in `bits` (k deposited into the set bit positions); the count is 1 << popcount
 static inline uint32_t dp_pad_subset(uint32_t bits, uint32_t k) {
@@ -236,6 +254,7 @@ struct DpMachine {
     const DpPlatform *plat;
     const DpIsa *isa;
     uint32_t code_base;                    // C3/B8: address of the first 16 KiB ROM window (GB 0, NES 0x8000)
+    uint16_t bank_window;                  // P10: CPU base address of the switchable 16 KiB window (GB/Sega/PCE $4000, NES $8000); 0: unknown (the cov offsets of banks > 0 stay image-relative)
     uint8_t fixed_high;                    // 1 = the high window is the fixed (last) bank and the low one switches (NES); 0 = the reverse (GB)
     uint32_t save_ram_en_addr; uint8_t save_ram_en_val, save_ram_en;   // B10: write that enables the cart RAM before seeding
     uint32_t save_ram_base, save_ram_len;  // B10: battery/cart RAM window the game may validate at boot (0 len: none)
@@ -289,6 +308,7 @@ struct DpMachine {
     uint8_t linear;   // 1 when the ROM is one linear space starting at address 0 (the image is the ROM, one window; MD)
     uint8_t bank_shift;
     uint8_t page_shift;   // B8: log2 of the ROM page size when the executing address of a page depends on the mapper (PCE: 13); the kernel journals the window each page ran at
+    uint8_t rom_top_win;  // how many 16 KiB windows, counted from $0000, the mapper can fill with ROM (jp-table target bound; 0: unknown, 2 assumed)
     // Optional data-destination knowledge (the shared DP_DEST_* model in
     // coverage.h): where a write to `addr` lands in the hardware (VRAM, OAM,
     // palette, sound registers...).  0 = untyped.  The kernel records the
@@ -332,7 +352,8 @@ struct DpMachine {
     // every byte known).  Returns 0 when the CPU is in no meaningful state.
     // NULL: no concrete seeding on this machine (the walk stays static-only).
     int (*get_regs)(struct DpMachine *, DpRegState *out);
-    int (*probes)(struct DpMachine *, const DpProbe **out);             // count
+   // P15/M5: the DpProbe catalogue is removed (nothing consumed it since 0.368): the pad
+   // probes (--pad-full over DpMachine.input_bits) and the event-probe hooks supersede it
     // An independent machine of the same program for parallel workers (`worker` >= 1),
     // already initialized and at its power-on state; NULL when unsupported.
     struct DpMachine *(*clone)(struct DpMachine *, unsigned worker);

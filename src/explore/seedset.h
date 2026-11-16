@@ -6,12 +6,12 @@
 #include <string.h>
 
 // Extra entry points handed to the kernel: the music-rip seeds, the user's --entry list and, with
-// all_banks, every 16 KiB block shown at $8000.  Shared by every platform front end; a bank of
+// all_banks, each 16 KiB block shown at bank_pc.  Shared by every platform front end; a bank of
 // 0xFFFF means "the current mapping" (the kernel does not re-bank that seed).
 typedef struct { uint32_t *pc; uint16_t *bk; DpSeedRegs *rg; } DpSeedSet;
 static inline void seedset_free(DpSeedSet *s) { free(s->pc); free(s->bk); free(s->rg); memset(s, 0, sizeof *s); }
 static inline int seedset_build(DpCoreConfig *cfg, const DpMusicKernelSeeds *mks, const uint32_t *epc, const uint16_t *ebk,
-                         size_t ne, unsigned all_banks, DpSeedSet *o) {
+                         size_t ne, unsigned all_banks, uint16_t bank_pc, DpSeedSet *o) {
     memset(o, 0, sizeof *o);
     size_t tot = mks->n + ne + all_banks;
     if (!(ne + all_banks)) {   // nothing to add: the music seeds go as they are
@@ -24,7 +24,7 @@ static inline int seedset_build(DpCoreConfig *cfg, const DpMusicKernelSeeds *mks
     size_t k = 0;
     for (; k < mks->n; k++) { o->pc[k] = mks->pcs[k]; o->bk[k] = mks->banks ? mks->banks[k] : 0xFFFF; o->rg[k] = mks->regs ? mks->regs[k] : none; }
     for (size_t e = 0; e < ne; e++, k++) { o->pc[k] = epc[e]; o->bk[k] = ebk ? ebk[e] : 0xFFFF; o->rg[k] = none; }
-    for (unsigned b = 0; b < all_banks; b++, k++) { o->pc[k] = 0x8000; o->bk[k] = (uint16_t)b; o->rg[k] = none; }
+    for (unsigned b = 0; b < all_banks; b++, k++) { o->pc[k] = bank_pc; o->bk[k] = (uint16_t)b; o->rg[k] = none; }   // bank_pc: the window bank_view shows the block at (was a hard-coded NES $8000, P16)
     cfg->seeds = o->pc; cfg->n_seeds = tot; cfg->seed_banks = o->bk; cfg->seed_regs = o->rg;
     return 0;
 }

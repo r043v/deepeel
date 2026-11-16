@@ -190,12 +190,10 @@ int main(int argc, char **argv) {
         CHECK_MSG(m->fetch(m, 0x0100) == c->rom[0x0100], "fetch sees the ROM");
         CHECK_MSG(m->rom_index(m, 0x0100) == 0x0100 && m->rom_index(m, 0x8000) < 0, "rom_index");
         free(a); free(b);
-        // ctx_components / probes / observe
-        const DpCtxComp *cc; const DpProbe *pr;
-        int ncc = m->ctx_components(m, &cc), npr = m->probes(m, &pr);
+        // ctx_components / observe
+        const DpCtxComp *cc;
+        int ncc = m->ctx_components(m, &cc);
         CHECK_MSG(ncc >= 14 && cc[0].kind == DP_CC_REG && cc[ncc - 1].kind == DP_CC_PAGES, "ctx components");
-        CHECK_MSG(npr >= 1 && !strcmp(pr[0].name, "buttons") && pr[0].values == 256, "probe catalog");
-        pr[0].apply(m, 0x01);
         DpObservers ob = { obs_step, obs_read, obs_write };
         obs_mach = raw;
         m->observe(m, &ob, NULL);

@@ -48,7 +48,7 @@ static int parse_entry(const char *s,DpSegaOptions *o) {
 static int core_is_sg, core_is_msx;
 // only the first two instances are trusted: gg3..gg16 resolve the bank-switch
 // fixture differently (observed 2026-11: fix_sega_mapper reaches other ROM indexes)
-static const char *core_cov_path, *core_text_path, *core_map_path, *core_summary_path, *core_rom_name;
+static const char *core_cov_path, *core_text_path, *core_map_path, *core_summary_path, *core_rom_name, *core_rtcode_path;
 static int core_jobs_auto;
 static uint32_t core_entry_pc[64]; static uint16_t core_entry_bank[64];
 // C3 (option B): the provenance closure of this platform runs inside the kernel.  Every worker owns one
@@ -100,6 +100,7 @@ static void core_clo_finish(void *user, DpCoreResult *r) {
         r->closure_roots += k->st.seeds;
     }
     while (core_clo.list) { CoreClosure *k = core_clo.list; core_clo.list = k->next; if (k->c) dp_sega_closure_free(k->c); free(k->flags); free(k); }
+    tl_clo = NULL;   // the caller thread's cached closure was just freed: a second kernel pass in the same process (--campaign phase 2) would reuse a dangling pointer
 }
 static DpPlatformHooks core_sega_hooks;
 static const void *sega_core_pick(unsigned w) { (void)w; if(core_is_msx) return dp_msx_backendt(); if(core_is_sg) return dp_sega_backend_sgt(); return dp_sega_backend_ggt(); }
@@ -127,7 +128,7 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
     if(o->max_total) cfg.max_total=o->max_total;
     if(o->max_steps) cfg.max_path_steps=o->max_steps;
     cfg.fork_site_cap=o->fork_cap; cfg.queue_max=o->queue_max;
-    if(cfg.unbounded) { cfg.max_total=0; cfg.max_path_steps=0; cfg.fork_site_cap=0; }   // coverage first: only exhaustion or SIGINT stops
+    if(cfg.unbounded) { cfg.max_total=0; cfg.fork_site_cap=0; }   // coverage first: only exhaustion or SIGINT stops; the path shape stays (A8)
     static const uint32_t vec[]={0x08,0x10,0x18,0x20,0x28,0x30,0x38,0x66};
     // Seeds: the music-rip entry points (--music-index: the $4000 window shows each rip's block, the init call
     // carries the song number in A on the rip's stack), the user's --entry bank:addr and, with --seed-banks, the
@@ -141,8 +142,7 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
     DpSeedSet kseeds; size_t ne=0;
     for(size_t i=0;i<nv;i++,ne++) { core_entry_pc[ne]=vec[i]; core_entry_bank[ne]=0xFFFF; }
     for(size_t i=0;i<o->entry_count;i++,ne++) { core_entry_pc[ne]=o->entry[i].addr; core_entry_bank[ne]=(uint16_t)o->entry[i].bank; }
-    if(seedset_build(&cfg,&mks,core_entry_pc,core_entry_bank,ne,nbanks,&kseeds)) { dp_music_seeds_kernel_free(&mks); m->close(m); return 0; }
-    for(size_t i=0;i<nbanks;i++) kseeds.pc[mks.n+ne+i]=wlo;   // the window base of each bank
+    if(seedset_build(&cfg,&mks,core_entry_pc,core_entry_bank,ne,nbanks,wlo,&kseeds)) { dp_music_seeds_kernel_free(&mks); m->close(m); return 0; }
     if(!cfg.rom_image) { cfg.rom_image=rom; cfg.rom_image_size=size; }   // B8/C4: the image feeds the speculative gaps and the static inference
     if(!cfg.hooks) {
         core_sega_hooks=*dp_machine_sega_hooks();
@@ -167,9 +167,10 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
     dp_sega_tas_free(&tas);
     if(ok) {
         dp_core_report(out,s->id,&r);
-        dp_core_write_cov(core_cov_path,s->id,&r);
+        dp_core_write_cov(core_cov_path,s->id,m,&r);
         if(dp_core_write_map(core_map_path,s->id,core_rom_name,&r)<0) fprintf(stderr,"deepeel: cannot write %s\n",core_map_path);
         if(dp_core_write_summary(core_summary_path,s->id,&r)<0) fprintf(stderr,"deepeel: cannot write %s\n",core_summary_path);
+        if(core_rtcode_path && core_rtcode_path[0] && r.ra.n) { FILE *rf=fopen(core_rtcode_path,"w"); if(rf) { dp_ramarch_write(&r.ra,rf,s->id); fclose(rf); } }
         if(core_text_path && core_text_path[0]) {   // --text: the same report, written to a file
             FILE *tf=fopen(core_text_path,"w");
             if(tf) { dp_core_report(tf,s->id,&r); fclose(tf); }
@@ -224,7 +225,8 @@ int dp_sega_explore_command(int argc,char **argv) {
         else if(!strcmp(key,"--map")) map=value;
         else if(!strcmp(key,"--summary")) summary=value;
         else if(!strcmp(key,"--cov")) cov=value;
-        else if(!strcmp(key,"--evidence") || !strcmp(key,"--romdata") || !strcmp(key,"--rtcode")) fprintf(stderr,"deepeel: %s: not produced by the kernel yet (ignored)\n",key);
+        else if(!strcmp(key,"--rtcode")) core_rtcode_path=value;   // the kernel's runtime code archive (exec_wram_rom)
+        else if(!strcmp(key,"--evidence") || !strcmp(key,"--romdata")) fprintf(stderr,"deepeel: %s: not produced by the kernel yet (ignored)\n",key);
         else if(!strcmp(key,"--mapper") && (!strcmp(s->id,"sms") || !strcmp(s->id,"gg"))) {
             const char *names[]={"auto","sega","codemasters","korean150"};
             int found=0;
@@ -274,11 +276,11 @@ int dp_sega_explore_command(int argc,char **argv) {
     if(mn==DP_MUSIC_SEEDS_LOAD_ERR && midx_file) { free(image); return 1; }
     if(mn==DP_MUSIC_SEEDS_ALLOC) { free(image); return 1; }
     if(mn>=0) { o.music_seeds=music_seeds; o.music_seed_count=(unsigned)mn; }
-    core_cov_path=cov; core_text_path=text; core_map_path=map; core_summary_path=summary; core_rom_name=argv[4];
+    core_cov_path=cov; core_text_path=text; core_map_path=map; core_summary_path=summary; core_rom_name=argv[4]; core_rtcode_path=NULL;
     int cok=sega_core_run(s,image+header,(size_t)end-header,&o,&kcfg,stdout);
     free(image); free(music_seeds);
     if(!cok) fprintf(stderr,"invalid machine profile/mapper/ROM size, or allocation failure\n");
     return cok?0:1;
 usage:
-    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--fork-cap N] [--queue-max N] [--jobs N|auto] [--entry BANK:ADDR]... [--seed-banks] [--no-vector-seeds] [--music-index [FILE]] [--tas FILE] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [kernel options: --attract-frames, --sessions, --unbounded, --state-dir, --resume, ... see dp_core_parse_option] [--text FILE] [--map FILE] [--cov FILE] [--summary FILE] [--mapwin [SCALE]] (--evidence/--romdata/--rtcode: accepted, not produced yet)\n"); return 2;
+    fprintf(stderr,"deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME (SMS/GG: auto|sega|codemasters|korean150; MSX: auto|plain|ascii8|ascii16|konami|konami-scc)] [--max-total N] [--max-steps N] [--fork-cap N] [--queue-max N] [--jobs N|auto] [--entry BANK:ADDR]... [--seed-banks] [--no-vector-seeds] [--music-index [FILE]] [--tas FILE] [--no-closure] [--no-target-closure] [--no-block-closure] [--closure-nodes N] [--closure-seeds N] [--closure-views N] [--closure-contexts N] [kernel options: --attract-frames, --sessions, --unbounded, --state-dir, --resume, ... see dp_core_parse_option] [--text FILE] [--map FILE] [--cov FILE] [--summary FILE] [--mapwin [SCALE]] (--evidence/--romdata: accepted, not produced yet; --rtcode FILE: the runtime code archive)\n"); return 2;
 }

@@ -217,7 +217,7 @@ DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err
     m->name = "nes";
     m->input_bits = 0xFF;   // d-pad, A, B, Start, Select
     m->work_ram_base = 0; m->work_ram_len = 0x800u;
-    m->bank_shift = 14; m->code_base = 0x8000u; m->fixed_high = 1;   // C3/B8: 16 KiB PRG windows, the last bank fixed high
+    m->bank_shift = 14; m->code_base = 0x8000u; m->bank_window = 0x8000u; m->fixed_high = 1;   // C3/B8: 16 KiB PRG windows, the last bank fixed high
     m->save_ram_base = 0x6000u; m->save_ram_len = 0x2000u;
     m->isa = dp_isa_m6502();
     m->ctx_components = nes_ctx_components;

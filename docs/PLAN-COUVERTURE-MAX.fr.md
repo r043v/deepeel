@@ -91,10 +91,11 @@ CLI `src/deepeel.c`, `src/explore/core_map.c`, `seedset.h`.
 | 0.387.0 | retours pile concrète 6502/68000 (`sp_ret`) |
 | 0.388.0 | `port_effect` des OUT ; notes ouvertes instruites (Gradius 2) ; audit E11 clos ; comparaison des régimes ; campagne deux phases validée |
 | 0.388.0 (relecture) | ce plan final : défauts P1-P16 (§2), améliorations A1-A10 (§3), campagne corrigée (§1), mutualisation restante (§4) |
+| 0.389.0 | implémentation : campagne deux phases (`--campaign`, canal cellules, compteurs de reprise, décision P12), A8, P1-P11 au fil des fixtures (§2) — voir « État du plan (0.389.0) » |
 
 ---
 
-## 1. Travaux engagés : la campagne en deux phases (à faire)
+## 1. Travaux engagés : la campagne en deux phases (implémentée 0.389.0)
 
 La mesure est faite (Zelda GB, obs. outil) : bornée d'abord (défauts, forme
 largeur-d'abord, `--state-dir`), non bornée ensuite (`--resume --unbounded`, un
@@ -194,7 +195,49 @@ phase 2 `--resume --unbounded`, épingles `resumed == saved` et
 
 ---
 
-## 2. Défauts actuels du noyau (relecture 0.388.0)
+## État du plan (0.390.0)
+
+**Implémenté** (chaque défaut reproduit par fixture avant correctif, suite verte) :
+- **0.389.0 — campagne deux phases** : `--campaign` (phase bornée à l'accordage
+  plateforme, borne `--max-time`/`--max-total` explicite — défaut 120 s —, puis
+  `--resume --unbounded` dans le même processus ; un rapport par phase, la phase 2
+  s'arrête par SIGINT ou épuisement comme tout régime non borné). Canal cellules ouvert :
+  la phase 2 réarme l'élagage sur les cellules archivées ; les reprises (cellules, états
+  exacts) sont affichées. **Décision P12** : option (b) — l'ensemble exact reste une
+  production du non borné (le hachage coûterait par pas en borné, cf. Gradius 2) ; la
+  phase 2 élague avec cellules + couverture OU-ée + sa propre dédup exacte. Tests
+  `core_campaign_z80` (mécanique), `core_campaign_epoch` (l'époque et les reportées
+  traversent la frontière).
+- **0.389.0 — défauts** : P1+P16 (`--seed-banks` PCE, fenêtre de semis paramétrée),
+  P2 (index ROM dans `Pending` — le tas par score reste à faire si le scan O(file) mord),
+  P3 (hygiène, `DpMachine.rom_top_win`), P4 (tables `jp (ix)/(iy)`), P5 (époque dans
+  `SpoolHead`), P6 (fourches forcées hors cellules), P7 (frontière différée), P9
+  (compteurs de sondes propres), P10 (règle cov nommée — terminée en 0.390.0),
+  P11 (plafonds de marche levés), A8 (la forme plateforme conservée). Correctif Sega :
+  `tl_clo` réinitialisé à la fusion (crash `--campaign`).
+- **0.390.0 — mutualisation et chaleur** : **M1/P8** (plus aucune ISA nommée dans le
+  noyau — hooks `DpIsa` ram_load/cmp_imm/ram_signature_wide/table_proven/
+  rom_table_follows/table_entry_width sur les cinq ISA), **P10 fini** (offsets cov par
+  `DpMachine.bank_window`, épine `z80_cov_geom` au nouveau contrat), **P13/A9** (hits
+  d'exécution par octet du noyau → tuile de chaleur + `dpCh` bit 5 ; acteurs par octet
+  restés 0, écart consigné), **A2** (ré-armement site × cellule étendu aux rejeux
+  d'index, RNG, signatures, IRQ — cap `probe_ctx_cap` par site, saturations comptées),
+  **A1** (graines vivantes sur `cfg->seeds`, le reset compris — validations de boot
+  depuis un état de jeu), **A5** (mémoïsation de l'élagage : clé (site, projection)
+  dépensée = dépensée pour toujours, mémo par worker sans verrou), **A10** (`cut_pc`
+  PCE/MD, B4 ×4 pour les tables de longs 68000), **P14** (options mortes retirées ;
+  rectification : `--queue-max` vivant, `--rtcode` produit y compris Sega),
+  **P15/M5** (`DpProbe` retiré — sondes pad + hooks événementiels le remplacent),
+  **M7** (matrice techniques 3/4/7 × ISA verte : 6502, huc6280, z80, sm83, 68000),
+  **A6/A7 vérifiés déjà résolus** (sondes run+patch toutes plateformes ; CPU son MD
+  dans chaque instantané, épinglé par `md_milestone`).
+- Versions 0.389.0/0.390.0 (rapports et fenêtre changés) ; `GB.fr.md` à jour.
+
+**Restent ouverts** : la vérité terrain puis le retrait de `sega/closure.c` (M2,
+décision propriétaire gated), les acteurs par octet côté noyau (le reste de P13/A9),
+le tas par score de la file (le reste de P2 si le scan mord).
+
+## 2. Défauts actuels du noyau (relecture 0.388.0 — corrigés en 0.389.0 sauf mention)
 
 Priorité : **1** = perte de couverture ou couverture fausse, **2** = règle
 « jamais silencieux / rien n'est perdu » violée, **3** = robustesse. Chacun

@@ -60,8 +60,8 @@ static const char *argv_opt(int argc, char **argv, const char *name) {
     return NULL;
 }
 // kernel (--core) outputs shared by every platform: --cov, --map (PNG or text), --summary, --text
-static void core_outputs(int argc, char **argv, const char *id, const char *rom, const DpCoreResult *r) {
-    dp_core_write_cov(argv_cov(argc, argv), id, r);
+static void core_outputs(int argc, char **argv, const char *id, const char *rom, const DpMachine *m, const DpCoreResult *r) {
+    dp_core_write_cov(argv_cov(argc, argv), id, m, r);
     if (argv_opt(argc, argv, "--rtcode") && r->ra.n) { FILE *rf = fopen(argv_opt(argc, argv, "--rtcode"), "w"); if (rf) { dp_ramarch_write(&r->ra, rf, id); fclose(rf); } }
     if (dp_core_write_map(argv_opt(argc, argv, "--map"), id, rom, r) < 0) fprintf(stderr, "deepeel: cannot write --map\n");
     if (dp_core_write_summary(argv_opt(argc, argv, "--summary"), id, r) < 0) fprintf(stderr, "deepeel: cannot write --summary\n");
@@ -339,8 +339,8 @@ static int cmd_explore(int argc, char **argv) {
         else if (dp_core_parse_option(&gkcfg, argc, argv, i)) { i += dp_core_parse_option(&gkcfg, argc, argv, i) - 1; }   // kernel options first: --attract-frames etc. mean the kernel's here
         else if (!strcmp(a, "--json") && i + 1 < argc) ++i;   // written by core_outputs
         else if (!strcmp(a, "--text") && i + 1 < argc) text = argv[++i];
-        else if (!strcmp(a, "--rtcode") && i + 1 < argc) ++i;   // not produced by the kernel yet
-        else if (!strcmp(a, "--ram-code") && i + 1 < argc) ++i;   // not produced by the kernel yet
+        else if (!strcmp(a, "--rtcode") && i + 1 < argc) ++i;   // written by core_outputs (the kernel's runtime code archive)
+        else if (!strcmp(a, "--ram-code") && i + 1 < argc) ++i;   // accepted for compatibility, no longer produced (use --rtcode)
         else if (!strcmp(a, "--summary") && i + 1 < argc) summary = argv[++i];
         else if (!strcmp(a, "--cov") && i + 1 < argc) ++i;   // written by core_outputs
         else if (!strcmp(a, "--romdata") && i + 1 < argc) ++i;   // written by core_outputs
@@ -769,7 +769,7 @@ static int cmd_explore(int argc, char **argv) {
             if (gb_wdump && dp_fb_dump_ppm(gb_wdump)) fprintf(stderr, "deepeel: no frame to dump\n");
             kr.seed_refused_cap = gseed_refused;
             free(gseed_pc); free(gseed_bk); free(gseed_regs);
-            if (!rc) { dp_core_report(stdout, "gb", &kr); core_outputs(argc, argv, "gb", path, &kr); }
+            if (!rc) { dp_core_report(stdout, "gb", &kr); core_outputs(argc, argv, "gb", path, km, &kr); }
             dp_core_result_free(&kr);
             free(gmasks); dp_tas_free(&gt);
             km->close(km);
@@ -1073,27 +1073,18 @@ static int cmd_nes(int argc, char **argv) {
         else if (core_flag && dp_core_parse_option(&kcfg, argc, argv, i)) { i += dp_core_parse_option(&kcfg, argc, argv, i) - 1; }   // only with --core: the old engine owns --attract-frames etc.
         DP_CLI_COMMON(opt, cc)
         DP_CLI_PLAYED(opt)
-        else if (!strcmp(a, "--play-pool") && i + 1 < argc) opt.play_pool = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--ctx-live")) opt.ctx_live = 1;
-        else if (!strcmp(a, "--defer-tiers") && i + 1 < argc) {
-            opt.defer_tiers = (unsigned)strtoul(argv[++i], NULL, 0);
-            if (opt.defer_tiers > DP_TIER_MAX) opt.defer_tiers = DP_TIER_MAX;
-        }
         else if (!strcmp(a, "--heat") && i + 1 < argc) nes_heat = argv[++i];   // --summary/--cov/--romdata come from DP_CLI_COMMON
         else if (!strcmp(a, "--tas") && i + 1 < argc) {
             if (opt.tas_count < 8) snprintf(opt.tas_paths[opt.tas_count++], 512, "%s", argv[++i]);
             else { fprintf(stderr, "deepeel: at most 8 TAS movies\n"); return 2; }
         }
         else if (!strcmp(a, "--mapper") && i + 1 < argc) mapper_name = argv[++i];
-        else if (!strcmp(a, "--max-paths") && i + 1 < argc) opt.max_paths = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--queue") && i + 1 < argc) opt.queue_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--ctx-live")) opt.ctx_live = 1;
         else if (!strcmp(a, "--queue-max") && i + 1 < argc) opt.queue_max = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--spool") && i + 1 < argc) opt.lot_path = argv[++i];
         else if (!strcmp(a, "--seed-banks")) opt.seed_banks = 1;
         else if (!strcmp(a, "--music-index")) { if (i + 1 < argc && argv[i + 1][0] != '-') midx_file = argv[++i]; else midx_file = ""; }
         else if (!strcmp(a, "--seed-vectors")) opt.seed_vectors = 1;
-        else if (!strcmp(a, "--bank-dispatch")) opt.second_pass = opt.bank_dispatch = 1;
         else if (!strcmp(a, "--no-p1-fork")) opt.no_pad_probe = 1;
         else if (!strcmp(a, "--no-event-probes")) opt.event_probes = 0;
         else if (!strcmp(a, "--entry") && i + 1 < argc && opt.entry_count < 32) {
@@ -1154,7 +1145,7 @@ static int cmd_nes(int argc, char **argv) {
         uint32_t epc[32]; uint16_t ebk[32];
         for (unsigned e = 0; e < opt.entry_count; e++) { epc[e] = opt.entry_addr[e]; ebk[e] = opt.entry_bank[e]; }
         DpSeedSet kseeds;
-        if (seedset_build(&kcfg, &mks, epc, ebk, opt.entry_count, (opt.seed_banks && km->bank_view) ? 64 : 0, &kseeds)) { km->close(km); free(mseeds); free(data); return 1; }
+        if (seedset_build(&kcfg, &mks, epc, ebk, opt.entry_count, (opt.seed_banks && km->bank_view) ? 64 : 0, 0x8000, &kseeds)) { km->close(km); free(mseeds); free(data); return 1; }
         if (opt.max_total) kcfg.max_total = opt.max_total;
         if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
         if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
@@ -1174,7 +1165,7 @@ static int cmd_nes(int argc, char **argv) {
         int kok = dp_core_explore_cli(km, prg, &kcfg, &kr, argv_opt(argc, argv, "--summary") ? argv_opt(argc, argv, "--summary") : argv_opt(argc, argv, "--text"));
         if (nes_watch) dp_fbwatch_stop();
         if (nes_dump && dp_fb_dump_ppm(nes_dump)) fprintf(stderr, "deepeel: no frame to dump\n");
-        if (kok) { dp_core_report(stdout, "nes", &kr); core_outputs(argc, argv, "nes", path, &kr); }
+        if (kok) { dp_core_report(stdout, "nes", &kr); core_outputs(argc, argv, "nes", path, km, &kr); }
         dp_core_result_free(&kr);
         dp_movie_free(&kmov);
         km->close(km); seedset_free(&kseeds);
@@ -1211,9 +1202,7 @@ static int cmd_pce(int argc, char **argv) {
         else if (core_flag && dp_core_parse_option(&kcfg, argc, argv, i)) { i += dp_core_parse_option(&kcfg, argc, argv, i) - 1; }   // only with --core: the old engine owns --attract-frames etc.
         DP_CLI_COMMON(opt, cc)
         DP_CLI_PLAYED(opt)
-        else if (!strcmp(a, "--ctx-live")) opt.ctx_live = 1;
         else if (!strcmp(a, "--queue-max") && i + 1 < argc) opt.queue_max = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--play-pool") && i + 1 < argc) opt.play_pool = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--seed-vectors")) opt.seed_vectors = 1;
         else if (!strcmp(a, "--seed-banks")) opt.seed_banks = 1;
         else if (!strcmp(a, "--music-index")) { if (i + 1 < argc && argv[i + 1][0] != '-') midx_file = argv[++i]; else midx_file = ""; }
@@ -1227,15 +1216,10 @@ static int cmd_pce(int argc, char **argv) {
             else { fprintf(stderr, "deepeel: at most 8 TAS movies\n"); return 2; }
         }
         else if (!strcmp(a, "--pad-fork-cap") && i + 1 < argc) opt.pad_fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--defer-tiers") && i + 1 < argc) {
-            opt.defer_tiers = (unsigned)strtoul(argv[++i], NULL, 0);
-            if (opt.defer_tiers > DP_TIER_MAX) opt.defer_tiers = DP_TIER_MAX;
-        }
         else if (!strcmp(a, "--irq-fork-cap") && i + 1 < argc) opt.irq_fork_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--no-static")) opt.static_closure = 0;
         else if (!strcmp(a, "--no-infer")) opt.infer = 0;
         else if (!strcmp(a, "--multitap")) multitap = 1;
-        else if (!strcmp(a, "--bank-dispatch")) opt.bank_dispatch = 1;
         else if (skip_mapwin(argc, argv, &i)) {}
         else if (!path) path = a;
         else { fprintf(stderr, "deepeel: unknown option %s\n", a); return 2; }
@@ -1277,19 +1261,21 @@ static int cmd_pce(int argc, char **argv) {
         if (!dp_pce_init(data, size)) { fprintf(stderr, "deepeel: --core: not a PCE image\n"); free(data); return 1; }
         DpMachine *km = dp_machine_pce();
         if (km) dp_machine_pce_source(km, data, size);
-        {   size_t hdr = size % 0x2000 == 512 ? 512 : 0;   // B8: the whole HuCard, pages scanned at their journaled windows
-            kcfg.rom_image = data + hdr; kcfg.rom_image_size = size - hdr; }
+        size_t hdr = size % 0x2000 == 512 ? 512 : 0;   // B8: the whole HuCard, pages scanned at their journaled windows
+        kcfg.rom_image = data + hdr; kcfg.rom_image_size = size - hdr;
         kcfg.jobs = (unsigned)pce_jobs;
         uint32_t pepc[16]; for (int e = 0; e < opt.entry_count; e++) pepc[e] = opt.entries[e];
-        DpSeedSet kseeds;
-        if (seedset_build(&kcfg, &mks, pepc, NULL, (size_t)opt.entry_count, 0, &kseeds)) { free(data); return 1; }
-        kcfg.hooks = dp_machine_pce_hooks();
         if (!km) { free(data); return 1; }
         if (mn) {   // each seed's pc is the window this dump's MPR already shows, else re-banked (bank_view)
             if (dp_music_seeds_kernel(&mks, mseeds, mn, 0x4000, km)) { km->close(km); free(mseeds); free(data); return 1; }
-            if (mks.n) { kcfg.seeds = mks.pcs; kcfg.n_seeds = mks.n; kcfg.seed_banks = mks.banks; kcfg.seed_regs = mks.regs; }
             if (mks.skipped) fprintf(stderr, "deepeel: pce: %zu music-rip seed(s) outside every MPR window of this dump (another banking)\n", mks.skipped);
         }
+        DpSeedSet kseeds;
+        // P1: --seed-banks was parsed but never passed on; every 16 KiB block of the image is
+        // seeded at the $4000-$7FFF window (the one dp_pce_bank16 programs, P16)
+        unsigned pbanks = (opt.seed_banks && km->bank_view) ? (unsigned)((size - hdr) / 0x4000) : 0;
+        if (seedset_build(&kcfg, &mks, pepc, NULL, (size_t)opt.entry_count, pbanks, 0x4000, &kseeds)) { free(data); return 1; }
+        kcfg.hooks = dp_machine_pce_hooks();
         if (opt.max_total) kcfg.max_total = opt.max_total;
         if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
         if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
@@ -1307,7 +1293,7 @@ static int cmd_pce(int argc, char **argv) {
         dp_movie_free(&kmov);
         if (pce_watch) dp_fbwatch_stop();
         if (pce_dump && dp_fb_dump_ppm(pce_dump)) fprintf(stderr, "deepeel: no frame to dump\n");
-        if (kok) { dp_core_report(stdout, "pce", &kr); core_outputs(argc, argv, "pce", path, &kr); }
+        if (kok) { dp_core_report(stdout, "pce", &kr); core_outputs(argc, argv, "pce", path, km, &kr); }
         dp_core_result_free(&kr);
         km->close(km); seedset_free(&kseeds);
         dp_music_seeds_kernel_free(&mks); free(mseeds);
@@ -1460,7 +1446,7 @@ static int cmd_md(int argc, char **argv) {
         if (km) dp_machine_md_source(km, c.rom, c.size);
         kcfg.rom_image = c.rom; kcfg.rom_image_size = c.size;   // B8 on the linear ROM
         DpMusicKernelSeeds mks = {0}; DpSeedSet kseeds = {0};
-        if (!rc && km && seedset_build(&kcfg, &mks, md_entry, NULL, md_ne, 0, &kseeds)) { km->close(km); km = NULL; }
+        if (!rc && km && seedset_build(&kcfg, &mks, md_entry, NULL, md_ne, 0, 0, &kseeds)) { km->close(km); km = NULL; }
         if (rc) { if (km) km->close(km); }
         else if (!km) { fprintf(stderr, "deepeel: md: cannot open the ROM\n"); rc = 1; }
         else {
@@ -1475,7 +1461,7 @@ static int cmd_md(int argc, char **argv) {
             rc = dp_core_explore_cli(km, c.size, &kcfg, &kr, argv_opt(argc, argv, "--summary") ? argv_opt(argc, argv, "--summary") : argv_opt(argc, argv, "--text")) ? 0 : 1;
             if (md_kwatch) dp_fbwatch_stop();
             if (md_kdump && dp_fb_dump_ppm(md_kdump)) fprintf(stderr, "deepeel: no frame to dump\n");
-            if (!rc) { dp_core_report(stdout, "md", &kr); core_outputs(argc, argv, "md", NULL, &kr); }
+            if (!rc) { dp_core_report(stdout, "md", &kr); core_outputs(argc, argv, "md", NULL, km, &kr); }
             dp_core_result_free(&kr);
             dp_movie_free(&kmov);
             km->close(km);

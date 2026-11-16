@@ -212,6 +212,7 @@ static int pce_bank_view(DpMachine *m, unsigned bank) {
 // nonsense cut (audit E2): the HuC6280 stack lives in work RAM $2000-$3FFF
 // (MPR1) — an SP below that pops the hardware I/O page; a stack an MPR2+ page
 // maps into RAM is legal, so only the low bound cuts
+static int pce_cut_pc(DpMachine *m, uint32_t pc) { (void)m; return pc < 0x2000u; }   // nonsense cut (audit E2): the MPR0 hardware I/O page never holds code
 static int pce_cut_sp(DpMachine *m) { pce_ensure(m); return dp_pce_cpu().s < 0x2000; }
 // shared DP_DEST_* knowledge: the VDC data ports write graphics memory, the
 // PSG (mirrored every $0400 from $0800) is fed music data
@@ -330,11 +331,12 @@ DpMachine *dp_machine_pce(void) {
     m->fetch = pce_fetch;
     m->poke = pce_poke;
     m->rom_index = pce_rom_index;
-    m->linear = 1; m->code_base = 0xE000; m->page_shift = 13;   // B8: each 8 KiB page is scanned at the MPR window the kernel journaled it executing at
+    m->linear = 1; m->code_base = 0xE000; m->bank_window = 0x4000u; m->page_shift = 13;   // B8: each 8 KiB page is scanned at the MPR window the kernel journaled it executing at
     m->run = pce_run;
     m->observe = pce_observe;
     m->close = pce_close;
     m->isa = dp_isa_huc6280();
+    m->cut_pc = pce_cut_pc;
     m->ctx_components = pce_ctx_components;
     m->ctx_reg_hash = pce_ctx_reg_hash;
     m->get_regs = pce_get_regs;

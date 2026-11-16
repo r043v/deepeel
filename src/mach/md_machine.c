@@ -255,6 +255,8 @@ static int md_ctx_components(DpMachine *m, const DpCtxComp **out) {
     return (int)(sizeof md_ctx / sizeof *md_ctx);
 }
 
+static int md_cut_pc(DpMachine *m, uint32_t pc) { (void)m; return pc >= 0x400000u && pc < 0xE00000u; }
+
 DpMachine *dp_machine_md(DpMdMach *impl) {
     MdMachWrap *w = calloc(1, sizeof *w);
     DpMachine *m = calloc(1, sizeof *m);
@@ -276,6 +278,7 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->observe = md_observe;
     m->close = md_close;
     m->isa = dp_isa_68000();
+    m->cut_pc = md_cut_pc;
     m->ctx_components = md_ctx_components;
     m->ctx_reg_hash = md_ctx_reg_hash;
     m->get_regs = md_get_regs;
@@ -292,3 +295,5 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     return m;
 }
 
+// nonsense cut (audit E2): the unmapped region past the 4 MiB cartridge space, the
+// peripheral page ($A00000: controllers, the Z80 bus) and the VDP ports never hold code

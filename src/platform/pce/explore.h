@@ -94,15 +94,12 @@ struct DpPceResults_;
 typedef struct {
     uint64_t max_total;
     uint32_t max_steps, queue_cap, queue_max, loop_cap, fork_cap, pad_fork_cap, irq_fork_cap;
-    unsigned defer_tiers;   // frontier §6 (shared policy): cut continuations resume with a 4x budget, N tiers (0: cuts stay final)
     int seed_vectors;      // also seed the IRQ2/IRQ1/TIMER/NMI vector targets as roots (G1)
     int seed_banks;        // also seed every 8 KiB ROM page in the $4000 window as a root (G3)
     int seed_irq;          // IRQ forks (VDC vblank, timer) at their enabling points
-    int bank_dispatch;     // seed the targets of dispatch tables (implies a second drain)
-    int second_pass;       // after the drain, seed the unexecuted static successors of executed code
     int static_closure;    // static decode from observed code (default on)
     int infer;             // padding and gap inference (default on)
-    uint32_t play_frames, play_sessions, play_seed, demo_frames, play_pool;
+    uint32_t play_frames, play_sessions, play_seed, demo_frames;
     // novelty search (Go-Explore): restore archived checkpoints that found
     // new cells and play on with random held inputs
     uint64_t novelty_steps;  // step budget (0: off)
@@ -118,7 +115,6 @@ typedef struct {
     const void *music_seeds;   // DpMusicSeed[] from --music-index (ownership: the CLI), confirmed entry points seeded first
     unsigned music_seed_count;
     unsigned ctx_cap;       // max admitted states per coarse context (0 = off, C2)
-    unsigned ctx_live;      // --ctx-live: project the context onto the target section's hardware liveness (C1 -> C2)
     int lot_drain;         // with a lot backlog: run only the saved states (no root, no seeds)
     const char *tree_path; // write the choice tree (DpTree file) here, NULL: none
     const char *lot_path;  // disk lot of deferred states (NULL: memory only); an existing file is resumed

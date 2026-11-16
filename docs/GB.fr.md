@@ -6022,3 +6022,131 @@ complete au lieu d'écraser : inconnu 35 312 → 24 358 (−31 %), naturels 85 7
 octets de copies 4 616 → 18 964, provisoires confirmés ×6, aucune perte sur les deux
 allers-retours. Un octet peut glisser statique→copié sur la carte (précédence) quand la
 copie verbatim qui le couvre est découverte — déplacement de présentation, pas une perte.
+
+## 0.389.0
+
+Relecture indépendante du noyau (plan final `docs/PLAN-COUVERTURE-MAX.fr.md`, §2) : chaque
+défaut reproduit par fixture avant correctif, suite verte.
+
+- **Campagne en deux phases implémentée** : `--campaign` enchaîne dans un même processus la
+  phase bornée (l'accordage largeur-d'abord de la plateforme, borne explicite
+  `--max-time`/`--max-total`, défaut 120 s) puis `--resume --unbounded` jusqu'à SIGINT ou
+  épuisement ; un rapport par phase (phase 1 sur stderr, phase 2 sur la sortie). La phase 2
+  réarme l'élagage par cellules sur les cellules archivées de la phase 1 (« resumed N archived
+  cells; cell pruning re-armed ») et les reprises sont visibles (« resumed N exact states »).
+  La borne `--max-time` de l'utilisateur lie chaque phase ; sous `--unbounded`, une borne
+  explicite reste honorée (elle était silencieusement ignorée), le stop de stagnation reste
+  coupé. Décision (canal exact de la campagne) : l'ensemble exact reste une production du
+  régime non borné — une phase 1 bornée n'y dépose rien (le hachage y coûterait par pas, cf.
+  Gradius 2) ; la phase 2 élague avec cellules + couverture OU-ée + sa propre dédup exacte.
+- **`--unbounded` respecte l'accordage plateforme (A8)** : `max_path_steps` n'est plus mis à
+  0 — lever les plafonds ne lève plus la forme des chemins (Zelda : 85 776 naturels bornés
+  contre 4 835 avec l'écrasement) ; `--max-steps N` re-accorde explicitement. Les plafonds
+  levés restent : pas total, fourches par site, cap d'amorces de fermeture, visites, arrêts
+  mémoire.
+- **Report du fourche saturée (P7, frontière différée)** : à un cap de fourches par site
+  atteint (hors époque, avec `--state-dir`), la fourche rejoint la frontière différée
+  (`deferred`) au lieu d'être abandonnée — comptée `sat_site`, reprise par `--resume`, jamais
+  re-run dans le run courant.
+- **Index ROM dans `Pending` (P2/A19)** : l'index ROM de la cible est résolu à la mise en file
+  (le choix par nouveauté et le drain comparent les drapeaux au lieu de re-résoudre le pc
+  dans le mapping courant du worker) — les sauts d'états couverts sont sûrs sur bancarisé.
+- **Époque sérialisée (P5)** : `SpoolHead` porte l'époque de checkpoint — un état spoolé ou
+  frontière reprend avec son époque (le cap par époque survit à un aller-retour disque).
+- **Tables derrière `jp (ix)`/`jp (iy)` (P4)** : la fermeture suit les tables des dispatch par
+  registres d'index (balayage arrière conscient du préfixe DD/FD) ; test
+  `core_closure_ixtable_z80` (fixture `fix_z80_ixtable.sms` — la C3 ne résout pas ce cas, seul
+  le suivi de table prouve les entrées jamais exécutées). Hygiène : la borne de fenêtres ROM
+  des tables de pas 3 vient de `DpMachine.rom_top_win` (P3, pas de perte démontrée côté z80 —
+  le pas 3 n'y est pas atteint avec des entrées ciblant la ROM).
+- **Lectures forcées hors des cellules (P6)** : les fourches fabriquées ne marquent plus
+  `ramread` — la clé sémantique de cellule n'est plus polluée par les chemins forcés.
+- **`--seed-banks` PCE (P1)** : l'option était parsée puis ignorée — chaque bloc 16 Kio de
+  l'image est semé à la fenêtre `$4000-$7FFF` (`dp_pce_bank16`) ; la fenêtre de semis des
+  banques est un paramètre de `seedset_build` (plus de `$8000` codé en dur, la rustine Sega
+  disparaît — P16).
+- **Plafonds de la fermeture levés sous `--unbounded` (P11)** : profondeur de pile, retours,
+  allowance de traversée et table de dédup de la marche passent de 256/4096/8192 à
+  4096/65536/65536 (retombée silencieuse sur les petits tableaux si l'allocation échoue).
+- **Compteurs de rapport justes (P9)** : la ligne sondes distingue bras et variantes forcées
+  (`event probes N arms at M sites: K forced variants`) ; `sat_queue` (jamais incrémenté,
+  la file déborde vers le spool) disparaît de la ligne saturation ; boucle morte sur `steps`
+  retirée ; le compteur de contextes de sondes est atomique.
+- **`--cov` géométrie (P10)** : la règle banque/offset est nommée (`cov_bank_offset`) —
+  l'index compact 16 Kio donne la banque partout, l'offset reste intra-banque hors GB ;
+  épinglé par `z80_cov_geom`.
+- **Sega** : le pointeur thread-local de la closure Sega est réinitialisé à la fusion — un
+  second passage noyau dans le même processus (`--campaign`) réutilisait un pointeur libéré.
+
+## 0.390.0
+
+Le reste du plan (P14-P15, M1/M4-M7, A1/A2/A5/A10, la chaleur) — chaque point
+vérifié en code avant écriture ; tests ciblés verts, épingles déplacées par les
+compteurs réarmés (A2) mises au nouveau nombre.
+
+- **M1 (P8) : plus aucune ISA nommée dans le noyau** — les décodes des techniques
+  3/4/7 quittent `core.c` pour des hooks `DpIsa` : `ram_load` (la charge directe
+  RAM, par ISA), `cmp_imm` (l'opcode de comparaison immédiate jumelée, 8 bits),
+  `ram_signature_wide` (le jumelage large du 68000 : `cmpi abs` et
+  `cmpi`/`cmp` Dn), `table_proven` (longueur prouvée de la table), 
+  `rom_table_follows` (l'accès table indexé) et `table_entry_width` (2 mots
+  partout, 4 longs 68000 — la mise à l'échelle B4 ×4). Les cinq ISA (sm83, z80,
+  m6502, huc6280, 68000) portent leur propre décode ; le noyau garde la règle
+  commune (index ROM, plancher de code, marche d'entrées prouvées).
+- **P10 terminé : les offsets `--cov` viennent de la géométrie machine** —
+  `DpMachine.bank_window` (GB/Sega/PCE 4000$, NES 8000$) ; banque 0 à 0$,
+  espace linéaire (MD, PCE journalisé) aux adresses image. L'épingle
+  `z80_cov_geom` porte le nouveau contrat : banque 0 intra-banque, banque
+  commutée à sa fenêtre.
+- **P13/A9 : chaleur d'exécution par octet** — le noyau compte les hits de
+  l'octet tête de chaque instruction exécutée (`DpCoreResult.hits`, un add
+  relaxé par pas) ; `--map *.png` les passe comme chaleur jouée (tuile de
+  chaleur à côté de chaque banque) et le canal `dpCh` porte le bit 5.
+  Écart consigné : les acteurs par octet restent 0 côté noyau (l'acteur d'une
+  découverte en replay de session n'est pas propagé dans `first_seen`).
+- **A2 : ré-armement par contexte généralisé** — le ré-armement de B1 (site ×
+  cellule sémantique) couvre désormais les rejeux d'index, les octets volatils
+  (RNG), les signatures apprises et les fourches IRQ : une technique déjà
+  dépensée à un site refait une tentative quand la cellule (la RAM que le code
+  lit) diffère de toutes celles vues, heuristique de visites 1-2-4-8, cap
+  `probe_ctx_cap` de contextes productifs par site toutes techniques confondues
+  (saturation comptée). Épingles déplacées : les fourches RNG passent de 4 à 8,
+  les signatures de 1 à 2-3 (l'essai réarmé).
+- **A1 : graines vivantes généralisées** — les checkpoints vivants amencent
+  `cfg->seeds` (reset, vecteurs, entrées utilisateur, rips musicales) et non
+  plus les seules entrées du registre plateforme : le redémarrage depuis un
+  état de jeu des validations de boot (SRAM, init mapper) devient une amorce.
+- **A5 : mémoïsation de l'élagage** — une clé (site, projection C11) dépensée
+  l'est pour toujours (l'ensemble partagé ne fait que croître) : la mémo par
+  worker (32 Kio) répond avant les verrous et avant le hachage de cellule.
+- **A10 : élagage du non-sens PCE/MD** — `cut_pc` : page I/O matérielle HuC6280
+  (`pc < 0x2000`), zone non mappée/périphériques/VDP 68000
+  (`0x400000-0xE00000`). **B4 ×4** : les tables de longs 68000 mettent à
+  l'échelle l'énumération d'index par 4 (`table_entry_width`).
+- **P14 : les options mortes sont retirées** — `--play-pool`, `--ctx-live`,
+  `--defer-tiers`, `--bank-dispatch`, `--max-paths`, `--second-pass` (plus rien
+  ne les consomme depuis le retrait des moteurs) et les champs de structure qui
+  les portaient. Rectification de l'audit : `--queue-max` est vivant (branché
+  au noyau), `--rtcode` est produit (l'archive RAM du noyau, dorénavant aussi
+  sur Sega), `--ram-code` reste accepté sans production (utiliser `--rtcode`).
+- **P15/M5 : le catalogue `DpProbe` est retiré** — jamais consommé depuis le
+  noyau unique ; les sondes pad (`--pad-full` sur `DpMachine.input_bits`) et
+  les hooks de sonde événementielle le remplacent.
+- **A6/A7 vérifiés déjà résolus** — les sondes événementielles « run+patch »
+  couvrent les lectures matérielles sur toutes les plateformes (GB LY/STAT,
+  Sega statut VDP, PCE statut VDC, MD statut VDP, pads) ; l'armement C14 reste
+  propre à NES où la lecture-efface l'exige. Le CPU son Z80 du MD voyage dans
+  chaque instantané (`MdFull` entier copié, seuls les pointeurs de callbacks
+  rebindés au load) — J7 ne se perd pas en `--core` ; épinglé par le nouveau
+  `md_milestone` (aller-retour save/load/save déterministe).
+- **A8 précisé (contrat)** : sous `--unbounded`, les seuls arrêts restent
+  l'épuisement ou SIGINT — une `--max-time` explicite y est à nouveau ignorée
+  (le contrat AGENTS.md ; la phase 2 de `--campaign` s'arrête aussi par SIGINT,
+  les tests campagne l'envoient). Sous A8, une mini-fixture à boucle s'épuise
+  vite en non borné (chaque chemin bute sur la forme plateforme puis la file se
+  vide) — arrêt légal, les tests SIGINT donnent un budget de chemin explicite.
+- **Tests** : `core_unbounded` épingle le nouveau format de frontière
+  (enregistrement 20 octets : l'époque P5) et le nouveau contrat d'arrêt ;
+  `core_campaign_*` s'arrêtent par SIGINT ; `md_milestone` enregistré dans
+  ctest ; la matrice techniques 3/4/7 × ISA (6502, huc6280, z80, sm83, 68000)
+  est verte aux compteurs réarmés.

@@ -99,11 +99,9 @@ DpNesOptions dp_nes_options(void) {
     DpNesOptions o = { 0 };
     o.max_total = 20000000;
     o.max_steps = 200000;
-    o.max_paths = 8192;
     o.queue_cap = 8192;
     o.loop_cap = 4096;
     o.fork_cap = 4;
-    o.defer_tiers = 0;   // the CLI turns it on (3 tiers, like sega); library callers keep final cuts
     o.seed_irq = 1;
     o.event_probes = 1;
     o.play_frames = 0; o.demo_frames = 0;
