@@ -174,6 +174,7 @@ size_t dp_core_sections(const DpCoreResult *r, DpCoreSection *out, size_t cap) {
 void dp_core_result_free(DpCoreResult *r) {
     dp_ramarch_free(&r->ra);
     free(r->flags);
+    free(r->prov);
     free(r->dest); free(r->spec); free(r->refs); free(r->page_win); free(r->inferred); free(r->live);
     free(r->src_flags); free(r->reg_slot); free(r->reg_reads); free(r->reg_writes); free(r->reg_vals);
     free(r->first_seen);
@@ -530,8 +531,16 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
         for (unsigned i = 0; i < f.length; i++) {
             int64_t q = v->m ? cview_index(v, r, pc + i, bk) : (k + i < (int64_t)r->rom_size ? k + i : -1);
             if (q >= 0) {
-                uint8_t old = __atomic_fetch_or(&r->flags[q], DP_CORE_STATIC, __ATOMIC_RELAXED);
-                if (!(old & (DP_CORE_STATIC | DP_CORE_NATURAL | DP_CORE_FORCED))) r->closure_bytes++;
+                // "zero data marked code" point 2: a byte reached by a trusted walk (a proven edge from
+                // executed code) is static; a byte reached only by an untrusted one (a call's fall-through,
+                // a concrete-stack return) is provisional — counted as code once execution, a trusted walk
+                // or the Sega closure confirms it, never by the provisional marking itself
+                if (trust) {
+                    uint8_t old = __atomic_fetch_or(&r->flags[q], DP_CORE_STATIC, __ATOMIC_RELAXED);
+                    if (!(old & (DP_CORE_STATIC | DP_CORE_NATURAL | DP_CORE_FORCED))) r->closure_bytes++;
+                } else if (!(__atomic_load_n(&r->flags[q], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC))) {
+                    if (r->prov && !__atomic_exchange_n(&r->prov[q], 1, __ATOMIC_RELAXED)) r->closure_bytes++;
+                }
             }
         }
         // C3: the transfer table rides the walk; a register-indirect transfer
@@ -2494,6 +2503,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     if (!m || !m->isa || !m->run || !m->save || !m->load || !m->fetch || !m->rom_index) return 0;
     if (!m->pc || !m->set_pc) { out->no_pc = 1; return 1; }
     out->flags = calloc(rom_size ? rom_size : 1, 1);
+    out->prov = calloc(rom_size ? rom_size : 1, 1);
     out->dest = calloc(rom_size ? rom_size : 1, 1);
     out->spec = calloc(rom_size ? rom_size : 1, 1);
     out->refs = calloc(rom_size ? rom_size : 1, 1);
@@ -2515,7 +2525,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     out->page_win = calloc((rom_size >> 8) + 2, 1);   // one byte per 256 bytes: enough for any page_shift >= 8
     out->src_flags = calloc(rom_size ? rom_size : 1, sizeof *out->src_flags);
     out->first_seen = calloc(rom_size ? rom_size : 1, sizeof *out->first_seen);
-    if (!out->flags || !out->dest || !out->src_flags || !out->first_seen) { dp_core_result_free(out); return 0; }
+    if (!out->flags || !out->prov || !out->dest || !out->src_flags || !out->first_seen) { dp_core_result_free(out); return 0; }
     if (cfg->on_live) cfg->on_live(cfg->on_live_user, out);
     else if (g_live_cb) g_live_cb(g_live_user, out);
 
@@ -2547,6 +2557,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         w->sh = &sh; w->m = wm; w->idx = i;
         w->loc.refs = out->refs; w->loc.page_win = out->page_win; w->loc.live = out->live; w->loc.reg_slot = out->reg_slot; w->loc.reg_reads = out->reg_reads; w->loc.reg_writes = out->reg_writes; w->loc.reg_vals = out->reg_vals; w->loc.reg_n = out->reg_n; w->loc.reg_plat = out->reg_plat; w->loc.closure_banks = out->closure_banks; w->loc.closure_ret = out->closure_ret; w->loc.live_w = out->live_w; w->loc.flags = out->flags; w->loc.src_flags = out->src_flags;
         w->loc.dest = out->dest;
+        w->loc.prov = out->prov;
         w->loc.first_seen = out->first_seen; w->loc.rom_size = rom_size;
         w->site_n = site_n;
         w->visits = calloc(site_n, sizeof *w->visits);
@@ -2794,7 +2805,7 @@ cleanup:
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
-        out->novelty_picks += l->novelty_picks; out->closure_stopped_data += l->closure_stopped_data; out->closure_unresolved += l->closure_unresolved; out->closure_stack_dropped += l->closure_stack_dropped; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->promoted_forced += l->promoted_forced; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bank_sims += l->closure_bank_sims; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_stack_dropped += l->closure_stack_dropped; out->pending_dropped += l->pending_dropped; out->deferred += l->deferred; out->state_repeats += l->state_repeats; out->probe_ctx_sat += l->probe_ctx_sat; out->probe_rearms += l->probe_rearms; out->bank_forks += l->bank_forks; out->tas_ckpts += l->tas_ckpts; out->sess_ckpts += l->sess_ckpts; out->ckpt_bursts += l->ckpt_bursts; out->epoch_forks += l->epoch_forks; out->live_seeds += l->live_seeds; out->imm_refs += l->imm_refs; out->held_stops += l->held_stops; out->bank_fork_sat += l->bank_fork_sat; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->closure_rets += l->closure_rets; out->proj_pruned += l->proj_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
+        out->novelty_picks += l->novelty_picks; out->closure_stopped_data += l->closure_stopped_data; out->closure_entry_refused += l->closure_entry_refused; out->closure_unresolved += l->closure_unresolved; out->closure_stack_dropped += l->closure_stack_dropped; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->promoted_forced += l->promoted_forced; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bank_sims += l->closure_bank_sims; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_stack_dropped += l->closure_stack_dropped; out->pending_dropped += l->pending_dropped; out->deferred += l->deferred; out->state_repeats += l->state_repeats; out->probe_ctx_sat += l->probe_ctx_sat; out->probe_rearms += l->probe_rearms; out->bank_forks += l->bank_forks; out->tas_ckpts += l->tas_ckpts; out->sess_ckpts += l->sess_ckpts; out->ckpt_bursts += l->ckpt_bursts; out->epoch_forks += l->epoch_forks; out->live_seeds += l->live_seeds; out->imm_refs += l->imm_refs; out->held_stops += l->held_stops; out->bank_fork_sat += l->bank_fork_sat; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->closure_rets += l->closure_rets; out->proj_pruned += l->proj_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
         out->exec_outside += l->exec_outside; out->exec_wram_rom += l->exec_wram_rom; dp_ramarch_merge(&out->ra, &l->ra);
         out->closure_reg_roots += l->closure_reg_roots; out->closure_reg_seed_sat += l->closure_reg_seed_sat; out->closure_reg_set_sat += l->closure_reg_set_sat;
         out->closure_reg_indirect += l->closure_reg_indirect; out->closure_reg_indirect_sat += l->closure_reg_indirect_sat; out->closure_reg_miss += l->closure_reg_miss;
@@ -2959,10 +2970,13 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "sections %zu\n", ns);
     for (size_t i = 0; i < ns && i < 64; i++)
         fprintf(out, "  section %zu rom-index %zu-%zu natural %zu forced %zu verdict %s live-ram-pages %zu\n", i + 1, secs[i].lo, secs[i].hi, secs[i].natural, secs[i].forced, secs[i].required ? "required" : "speculative", secs[i].live_pages);
-    size_t stat_only = 0;
-    for (size_t i = 0; i < r->rom_size; i++) if ((r->flags[i] & (DP_CORE_STATIC | DP_CORE_NATURAL | DP_CORE_FORCED)) == DP_CORE_STATIC) stat_only++;
+    size_t stat_only = 0, prov_only = 0;
+    for (size_t i = 0; i < r->rom_size; i++) {
+        if ((r->flags[i] & (DP_CORE_STATIC | DP_CORE_NATURAL | DP_CORE_FORCED)) == DP_CORE_STATIC) stat_only++;
+        if (r->prov && r->prov[i] && !(r->flags[i] & (DP_CORE_STATIC | DP_CORE_NATURAL | DP_CORE_FORCED))) prov_only++;
+    }
     fprintf(out, "speculative gaps: %llu runs, %llu bytes (never counted as known); %llu runs reinforced by an immediate reference (%llu references seen)\n", U(r->spec_runs), U(r->spec_bytes), U(r->spec_ref_runs), U(r->imm_refs));
-    fprintf(out, "static closure: roots %llu, bytes %llu, static-only %zu, capped walks %llu, returns followed %llu\n", U(r->closure_roots), U(r->closure_bytes), stat_only, U(r->closure_capped), U(r->closure_rets));
+    fprintf(out, "static closure: roots %llu, bytes %llu, static-only %zu, provisional %zu (untrusted walks, code once confirmed), capped walks %llu, returns followed %llu\n", U(r->closure_roots), U(r->closure_bytes), stat_only, prov_only, U(r->closure_capped), U(r->closure_rets));
     if (r->closure_regs) fprintf(out, "closure registers (C3): seed walks %llu, indirect resolved %llu, indirect unresolved %llu, stack returns %llu, indirect site cap %llu, seeds refused (site cap %llu, set full %llu)\n",
         U(r->closure_reg_roots), U(r->closure_reg_indirect), U(r->closure_reg_miss), U(r->closure_reg_stackrets), U(r->closure_reg_indirect_sat), U(r->closure_reg_seed_sat), U(r->closure_reg_set_sat));
     if (r->inferred) fprintf(out, "static inference: padding %llu, gap code %llu, gap pad %llu, gap data %llu, copy tables %llu (%llu sibling bytes, %llu refused as code), jump tables %llu (%llu bytes)\n", U(r->padding_bytes), U(r->inferred_code), U(r->inferred_pad), U(r->inferred_data), U(r->sib_tables), U(r->sib_bytes), U(r->sib_refused), U(r->jt_tables), U(r->jt_bytes));

@@ -18,7 +18,8 @@ uint8_t *dp_core_map_build(const DpCoreResult *r) {
         else if (f & DP_CORE_NATURAL) c = DP_MAP_CODE_NAT;
         else if (f & DP_CORE_FORCED) c = DP_MAP_CODE_FORCED;
         else if (f & DP_CORE_STATIC) c = DP_MAP_CODE_STATIC;
-        else if (f & (DP_CORE_DATA | DP_CORE_COMPRESSED)) c = DP_MAP_DATA_READ;
+        else if (f & (DP_CORE_DATA | DP_CORE_COMPRESSED)) c = DP_MAP_DATA_READ;   // an observed data read beats a provisional marking
+        else if (r->prov && r->prov[i]) c = DP_MAP_PROB_CODE;   // untrusted-walk marking: probable, never proven
         else if (r->inferred && r->inferred[i]) c = r->inferred[i];
         else c = DP_MAP_UNKNOWN;
         m[i] = c;
