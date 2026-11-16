@@ -10,7 +10,7 @@ L'[audit par moteur](AUDIT-PARITE-MOTEURS.fr.md) apporte une première
 matrice sourcée ; ses conclusions sont à vérifier sur le code actuel avant
 implémentation. En particulier, l'hypothèse E1 sur le registre C doit être
 confrontée au calcul `$FF00 + C`. Le travail proposé à GLM est détaillé dans
-[son plan d'implémentation](PLAN-GLM-IMPLEMENTATION-PARITE.fr.md).
+son plan d'implémentation (retiré).
 
 ## Lecture des pourcentages
 

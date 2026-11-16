@@ -1,6 +1,6 @@
 # Audit de parité des moteurs d'exploration (0.330.0)
 
-Audit réalisé le 14 novembre 2026 d'après [PLAN-GLM-PARITE.fr.md](PLAN-GLM-PARITE.fr.md),
+Audit réalisé le 14 novembre 2026 d'après PLAN-GLM-PARITE.fr.md (retiré),
 par lecture du code avec collecte de preuves `fichier:ligne` et croisement avec
 les tests `ctest` et les documents historiques. La matrice normative de
 [COUVERTURE.fr.md](COUVERTURE.fr.md) §2.1 et la photographie de
@@ -33,7 +33,7 @@ réelles » de [COMPARATIF.fr.md](COMPARATIF.fr.md) ne sont pas réévaluées ic
 `$FFFF`. Le commentaire du code qui donne `C=$FF00` est en revanche erroné :
 `C` est un registre de 8 bits. La conclusion « sonde inopérante » n'est pas
 établie ; des témoins positifs et négatifs sont prévus dans le
-[plan d'implémentation](PLAN-GLM-IMPLEMENTATION-PARITE.fr.md).
+plan d'implémentation (retiré).
 **Vérifié par fixture (2026-11-14) :** le rectificatif est confirmé,
 l'hypothèse initiale est infirmée. Le backend m0boy exécute
 `gbl_rd($FF00 | C)` (`gbl_cpu.c`, case `0xF2`) et le guard `C == $00` de
@@ -565,7 +565,7 @@ tranche) pilotant la CLI `deepeel` et comparant les sorties `--cov/--map/
 ## 7. Preuve de concept réalisée : `tests/test_audit_parity.c`
 
 **Extension en banc (2026-11-14, 0.331.0)** : la PoC est devenue le banc de
-parité du [plan d'implémentation](PLAN-GLM-IMPLEMENTATION-PARITE.fr.md)
+parité du plan d'implémentation (retiré)
 (tranche 3) — une seconde ISA (NES 6502 : `dp_nes_explore` vs
 `dp_core_explore` sur `dp_machine_nes`, fixture `fix_nes_branch`), un
 enregistrement JSON (`<build>/tests/parity.json` : version, commandes CLI
