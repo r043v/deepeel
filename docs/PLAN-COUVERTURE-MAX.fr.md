@@ -20,10 +20,13 @@ P0 à P5 : faites aux nuances près consignées ci-dessous. Retrait des cinq mot
 historiques (C9, C4 pour les scans) : **fait** (0.368.0 à 0.372.0) ; le noyau est le
 seul moteur et `campaign_fixtures` est verte. Restent ouverts : C2 (rejeu S6 commun),
 C10 (module de copies unique), C11 (projection de contexte `DpCtxComp` hors GB), C7/C8,
-P6 (reprises) et P8 (sorties) et les écarts du retrait GB. Observation : `--unbounded`
-sur `fix_branch.gb` ne termine pas (la file sature à 65 536, couverture naturelle figée
-à 163 octets) alors que le mode borné finit en ~8 s ; c'est la limite de la dédup exacte
-(B5) sur un état à compteur RAM, à traiter avec P6.
+P6 (reprises) et P8 (sorties) et les écarts du retrait GB. Observation : `--unbounded` sur `fix_branch.gb` ne termine pas, avec ou sans sessions.
+Diagnostic (0.372.0) : ce n'est pas la dédup exacte (le hash d'état, même rendu relatif
+aux ancres de cycle, ne change rien) mais la sémantique « les deux côtés de chaque
+conditionnel » sans plafond : le `jr nz` de la boucle de copie, forcé « pris » quand
+`c` vaut 0, fait boucler 256 itérations qui avancent `hl`/`de` ; chaque sortie naturelle
+rouvre une fourche, et l'espace (hl, de, c) est fini mais énorme. L'arrêt est donc
+l'épuisement ou SIGINT, comme décidé par le propriétaire ; le mode borné finit en ~8 s.
 
 (Tableau ci-dessous : état à 0.366.0.)
 
