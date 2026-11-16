@@ -425,3 +425,9 @@ Limites déclarées, techniques et non d'implémentation :
 - **C11 (projection de contexte)** : le noyau ne consomme pas `ctx_components` ; une projection ne ferait qu'élaguer des contextes, sans octet de couverture en plus (voir 0.376.0). La liveness par page de RAM est déjà générique.
 - **Sega (B5)** : hachage d'état exact limité par le backend (voir P3).
 - Les nombres produits sur ROMs réelles restent des observations de l'outil, pas des mesures de matériel.
+
+Contrôles ajoutés au statut final : test `core_movie_bursts` (film SMS à 400 trames, un point de contrôle de film et ses deux rafales
+d'entrées, observés au rapport). Observation de l'outil sur ROM réelle hors dépôt (Zelda Link's Awakening, GB, `--max-total 20000000`,
+40 s) : 55 des 69 entrées du registre touchées par des chemins naturels, 229 arêtes statiques hors de la vue ROM comptées, 1369 fourches
+résolues dont 74 promues du forcé, saturation par site 734570 rapportée. Ce ne sont pas des mesures de matériel. Le banc de parité
+contre les moteurs historiques n'existe plus : ceux-ci sont supprimés, les références figées sont dans `tests/golden/`.
