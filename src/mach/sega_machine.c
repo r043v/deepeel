@@ -33,6 +33,7 @@ typedef struct {
     int wrapped, fetching;   // fetching: opcode reads are not data accesses
     int msx;                 // MSX cartridge machine (init_arg is then the mapper)
     int init_arg;            // backend init's last argument: SMS flag, or the MSX mapper
+    unsigned mapper;         // explicit SMS/GG mapper (DP_SEGA_MAPPER_*), 0: auto
     int sys_key;             // movie bit 6: 1 = Start (GG, MSX), 0 = Pause NMI (SG, SMS)
 } SegaMach;
 
@@ -171,6 +172,7 @@ static int sega_attach(DpMachine *m) {
     SegaMach *s = m->impl;
     if (s->attached) return 1;
     if (s->b->init(s->rom, s->rom_size, NULL, s->init_arg) != 1) return 0;
+    if (s->mapper && (!s->b->select_mapper || !s->b->select_mapper(s->mapper))) return 0;
     sega_capture(s);
     s->attached = 1;
     return 1;
@@ -185,7 +187,7 @@ static DpMachine *sega_clone(DpMachine *m, unsigned worker) {
     SegaMach *cs = c->impl;
     cs->attached = 0;                     // those callbacks are not this clone's: attach rebuilds them
     dp_machine_sega_source(c, s->rom, s->rom_size, s->pick);
-    cs->init_arg = s->init_arg; cs->msx = s->msx;
+    cs->init_arg = s->init_arg; cs->msx = s->msx; cs->mapper = s->mapper;
     c->attach = sega_attach;
     return c;
 }
@@ -200,6 +202,7 @@ void dp_machine_sega_tas(DpMachine *m, int sys_key, int profile) {
     if (s->b->tas_compat) s->b->tas_compat(profile);
 }
 void dp_machine_sega_init_arg(DpMachine *m, int arg) { ((SegaMach *)m->impl)->init_arg = arg; }
+void dp_machine_sega_mapper(DpMachine *m, unsigned mapper) { ((SegaMach *)m->impl)->mapper = mapper; }
 void dp_machine_sega_set_msx(DpMachine *m, int msx) { ((SegaMach *)m->impl)->msx = msx; }
 
 static void sega_capture(SegaMach *s) {

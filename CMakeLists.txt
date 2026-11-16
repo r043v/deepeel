@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.370.0 LANGUAGES C)
+project(deepeel VERSION 0.371.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -418,81 +418,9 @@ set_target_properties(deepeel_msx PROPERTIES IMPORTED_LOCATION ${DP_MSX_ARCHIVE}
   INTERFACE_LINK_LIBRARIES deepeel_z80)
 add_dependencies(deepeel_msx dp_msx_runtime)
 target_link_libraries(deepeel PRIVATE deepeel_msx)
-add_library(deepeel_sega STATIC src/platform/sega/explore.c src/platform/sega/closure.c src/platform/sega/visits.c src/platform/sega/tas.c src/core/bizhawk.c src/platform/sega/registry.c src/explore/frontier.c src/core/bk2.c src/core/md5.c src/core/zip.c src/core/sha1.c src/core/statefile.c src/gui/fbwatch.c src/explore/ramarch.c src/explore/core.c)
+add_library(deepeel_sega STATIC src/platform/sega/command.c src/platform/sega/closure.c src/platform/sega/tas.c src/core/bizhawk.c src/platform/sega/registry.c src/explore/frontier.c src/core/bk2.c src/core/md5.c src/core/zip.c src/core/sha1.c src/core/statefile.c src/gui/fbwatch.c src/explore/ramarch.c src/explore/core.c)
 target_link_libraries(deepeel_sega PUBLIC deepeel_core)
 target_link_libraries(deepeel_sega PUBLIC ZLIB::ZLIB)
-# Second runtime instances for --jobs 2: the same sources compiled again with
-# the backend getter renamed, then every global namespaced by objcopy (the
-# dp_sega_prefix.cmake generalization of the MSX technique).
-add_library(deepeel_sg2_raw STATIC
-  ${M0BOY_DIR}/targets/sg1000/runtime/sg1000.c
-  ${M0BOY_DIR}/targets/sg1000/runtime/sg_audio.c
-  ${M0BOY_DIR}/targets/sg1000/runtime/tms9918.c
-  src/platform/sega/backend_sg.c)
-target_compile_definitions(deepeel_sg2_raw PRIVATE dp_sega_backend_sg=dp_sega_backend_sg2)
-target_include_directories(deepeel_sg2_raw PRIVATE
-  ${M0BOY_DIR}/targets/common/runtime ${M0BOY_DIR}/targets/sg1000/runtime)
-set(DP_SG2_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_sg2.a)
-add_custom_command(OUTPUT ${DP_SG2_ARCHIVE}
-  BYPRODUCTS ${DP_SG2_ARCHIVE}.syms
-  COMMAND ${CMAKE_COMMAND} -DNM=${DP_NM} -DOBJCOPY=${DP_OBJCOPY}
-    -DINPUT=$<TARGET_FILE:deepeel_sg2_raw> -DOUTPUT=${DP_SG2_ARCHIVE}
-    -DPREFIX=dp_sg2_ -DPATTERNS=machine|sg[A-Za-z0-9_]*|tms[A-Za-z0-9_]*
-    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_sega_prefix.cmake
-  DEPENDS deepeel_sg2_raw cmake/dp_sega_prefix.cmake VERBATIM)
-add_library(deepeel_sg2 STATIC IMPORTED GLOBAL)
-set_target_properties(deepeel_sg2 PROPERTIES IMPORTED_LOCATION ${DP_SG2_ARCHIVE})
-add_custom_target(dp_sg2_runtime DEPENDS ${DP_SG2_ARCHIVE})
-add_dependencies(deepeel_sg2 dp_sg2_runtime)
-add_library(deepeel_gg2_raw STATIC
-  ${M0BOY_DIR}/targets/gamegear/runtime/gg.c
-  ${DP_GG_VDP_SOURCE}
-  ${M0BOY_DIR}/targets/gamegear/runtime/gg_psg.c
-  src/platform/sega/backend_gg.c)
-target_compile_definitions(deepeel_gg2_raw PRIVATE GG_ROM_TRACE=1 dp_sega_backend_gg=dp_sega_backend_gg2)
-target_include_directories(deepeel_gg2_raw PRIVATE
-  ${M0BOY_DIR}/targets/gamegear/runtime ${M0BOY_DIR}/targets/common/runtime
-  ${M0BOY_DIR}/targets/sg1000/runtime)
-set(DP_GG2_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_gg2.a)
-add_custom_command(OUTPUT ${DP_GG2_ARCHIVE}
-  BYPRODUCTS ${DP_GG2_ARCHIVE}.syms
-  COMMAND ${CMAKE_COMMAND} -DNM=${DP_NM} -DOBJCOPY=${DP_OBJCOPY}
-    -DINPUT=$<TARGET_FILE:deepeel_gg2_raw> -DOUTPUT=${DP_GG2_ARCHIVE}
-    -DPREFIX=dp_gg2_ -DPATTERNS=machine|sg[A-Za-z0-9_]*|gg[A-Za-z0-9_]*|tms[A-Za-z0-9_]*
-    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_sega_prefix.cmake
-  DEPENDS deepeel_gg2_raw cmake/dp_sega_prefix.cmake VERBATIM)
-add_library(deepeel_gg2 STATIC IMPORTED GLOBAL)
-set_target_properties(deepeel_gg2 PROPERTIES IMPORTED_LOCATION ${DP_GG2_ARCHIVE})
-add_custom_target(dp_gg2_runtime DEPENDS ${DP_GG2_ARCHIVE})
-add_dependencies(deepeel_gg2 dp_gg2_runtime)
-# SMS/GG campaigns can use the full worker pool. Each worker needs an isolated
-# copy of the runtime globals; keep the pool size aligned with 16-core hosts.
-foreach(DP_SEGA_WORKER RANGE 3 16)
-  set(DP_GGN_RAW deepeel_gg${DP_SEGA_WORKER}_raw)
-  set(DP_GGN_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_gg${DP_SEGA_WORKER}.a)
-  add_library(${DP_GGN_RAW} STATIC
-    ${M0BOY_DIR}/targets/gamegear/runtime/gg.c
-    ${DP_GG_VDP_SOURCE}
-    ${M0BOY_DIR}/targets/gamegear/runtime/gg_psg.c
-    src/platform/sega/backend_gg.c)
-  target_compile_definitions(${DP_GGN_RAW} PRIVATE GG_ROM_TRACE=1
-    dp_sega_backend_gg=dp_sega_backend_gg${DP_SEGA_WORKER})
-  target_include_directories(${DP_GGN_RAW} PRIVATE
-    ${M0BOY_DIR}/targets/gamegear/runtime ${M0BOY_DIR}/targets/common/runtime
-    ${M0BOY_DIR}/targets/sg1000/runtime)
-  add_custom_command(OUTPUT ${DP_GGN_ARCHIVE}
-    BYPRODUCTS ${DP_GGN_ARCHIVE}.syms
-    COMMAND ${CMAKE_COMMAND} -DNM=${DP_NM} -DOBJCOPY=${DP_OBJCOPY}
-      -DINPUT=$<TARGET_FILE:${DP_GGN_RAW}> -DOUTPUT=${DP_GGN_ARCHIVE}
-      -DPREFIX=dp_gg${DP_SEGA_WORKER}_ -DPATTERNS=machine|sg[A-Za-z0-9_]*|gg[A-Za-z0-9_]*|tms[A-Za-z0-9_]*
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_sega_prefix.cmake
-    DEPENDS ${DP_GGN_RAW} cmake/dp_sega_prefix.cmake VERBATIM)
-  add_library(deepeel_gg${DP_SEGA_WORKER} STATIC IMPORTED GLOBAL)
-  set_target_properties(deepeel_gg${DP_SEGA_WORKER} PROPERTIES IMPORTED_LOCATION ${DP_GGN_ARCHIVE})
-  add_custom_target(dp_gg${DP_SEGA_WORKER}_runtime DEPENDS ${DP_GGN_ARCHIVE})
-  add_dependencies(deepeel_gg${DP_SEGA_WORKER} dp_gg${DP_SEGA_WORKER}_runtime)
-  target_link_libraries(deepeel_sega PUBLIC deepeel_gg${DP_SEGA_WORKER})
-endforeach()
 # Native 256-wide Master System instance of the GG runtime (GG_OUT_WIDTH=256,
 # the PC Master System panel: no GG window crop, no filter — gg.h) — the
 # fidelity bench plays the SMS profile on the console's own screen. Same
@@ -520,32 +448,6 @@ set_target_properties(deepeel_sms PROPERTIES IMPORTED_LOCATION ${DP_SMS_ARCHIVE}
 add_custom_target(dp_sms_runtime ALL DEPENDS ${DP_SMS_ARCHIVE})
 add_dependencies(deepeel_sms dp_sms_runtime)
 target_link_libraries(deepeel_sega PUBLIC deepeel_sms)
-# MSX second instance for --jobs 2: backend.c and the instrumented msx.c
-# recompiled with the backend getter renamed, then every global (runtime and
-# dp_msx_* alike, except the renamed getter) namespaced with dp_msx2_.
-add_library(deepeel_msx2_raw STATIC
-  ${M0BOY_DIR}/targets/sg1000/runtime/sg1000.c
-  ${M0BOY_DIR}/targets/sg1000/runtime/tms9918.c
-  ${DP_MSX_SOURCE}
-  ${M0BOY_DIR}/targets/msx/runtime/msx_ay.c
-  src/platform/msx/backend.c)
-target_compile_definitions(deepeel_msx2_raw PRIVATE SG_MSX=1 SG_MSX_RAM=65536 dp_msx_backend=dp_msx_backend2)
-target_include_directories(deepeel_msx2_raw PRIVATE
-  ${M0BOY_DIR}/targets/sg1000/runtime ${M0BOY_DIR}/targets/common/runtime
-  ${M0BOY_DIR}/targets/msx/runtime ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/msx)
-set(DP_MSX2_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_msx2.a)
-add_custom_command(OUTPUT ${DP_MSX2_ARCHIVE}
-  BYPRODUCTS ${DP_MSX2_ARCHIVE}.syms
-  COMMAND ${CMAKE_COMMAND} -DNM=${DP_NM} -DOBJCOPY=${DP_OBJCOPY}
-    -DINPUT=$<TARGET_FILE:deepeel_msx2_raw> -DOUTPUT=${DP_MSX2_ARCHIVE}
-    "-DPREFIX=dp_msx2_" "-DPATTERNS=machine|sg_[A-Za-z0-9_]*|sg1000_[A-Za-z0-9_]*|tms[A-Za-z0-9_]*|msx_[A-Za-z0-9_]*|dp_msx_(info|observe|bios_[a-z_]*|init|close|cpu|read|write|in|out|advance|rom_index|ram_index|state_size|save|load|buttons|return)"
-    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_sega_prefix.cmake
-  DEPENDS deepeel_msx2_raw cmake/dp_sega_prefix.cmake VERBATIM)
-add_library(deepeel_msx2 STATIC IMPORTED GLOBAL)
-set_target_properties(deepeel_msx2 PROPERTIES IMPORTED_LOCATION ${DP_MSX2_ARCHIVE}
-  INTERFACE_LINK_LIBRARIES deepeel_z80)
-add_custom_target(dp_msx2_runtime DEPENDS ${DP_MSX2_ARCHIVE})
-add_dependencies(deepeel_msx2 dp_msx2_runtime)
 
 # Thread-local flavour of each Sega-family runtime (kernel workers): the same sources compiled
 # with M0_TL=__thread, so one backend instance serves any number of worker threads, each with its
@@ -581,7 +483,7 @@ set(DP_TLS_DEFS_msx SG_MSX=1 SG_MSX_RAM=65536 dp_msx_backend=dp_msx_backendt)
 set(DP_TLS_INCS_msx ${M0BOY_DIR}/targets/sg1000/runtime ${M0BOY_DIR}/targets/common/runtime ${M0BOY_DIR}/targets/msx/runtime ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/msx)
 dp_sega_tls_flavour(msx dp_msxt_ "machine|sg_[A-Za-z0-9_]*|sg1000_[A-Za-z0-9_]*|tms[A-Za-z0-9_]*|msx_[A-Za-z0-9_]*|dp_msx_(info|observe|bios_[a-z_]*|init|close|cpu|read|write|in|out|advance|rom_index|ram_index|state_size|save|load|buttons|return)"
   ${M0BOY_DIR}/targets/sg1000/runtime/sg1000.c ${M0BOY_DIR}/targets/sg1000/runtime/tms9918.c ${DP_MSX_SOURCE} ${M0BOY_DIR}/targets/msx/runtime/msx_ay.c src/platform/msx/backend.c)
-target_link_libraries(deepeel_sega PUBLIC deepeel_sg deepeel_gg deepeel_msx deepeel_msx2 deepeel_sg2 deepeel_gg2 deepeel_z80 Threads::Threads)
+target_link_libraries(deepeel_sega PUBLIC deepeel_sg deepeel_gg deepeel_msx deepeel_sms deepeel_z80 Threads::Threads)
 target_link_libraries(deepeel PRIVATE deepeel_sega)
 # --- the m0boy NES machine (6502 + PPU + APU runtime) ------------------------
 # The runtime's globals (`machine`, nes_*/apu_*/ppu_*) are namespaced with

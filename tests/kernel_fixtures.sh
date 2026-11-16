@@ -34,4 +34,9 @@ chk md:pad6  "--pad-full6 --max-total 300000" 'event probes 8192 at 1 sites'
 chk md:sib   ""                       'rom->ram copy bytes 32 '
 chk md:ramsrc ""                      'exec_outside 38, rom->ram copy bytes 70'
 chk md:ramgen ""                      'exec_outside 34,'
+# Sega 8-bit (Z80) on the same kernel: --entry, bank seeds, --mapper
+z80chk() { f=$1; a=$2; re=$3; "$D" z80 explore ${f##*.} "$B/$f" --attract-frames 0 --max-total 200000 $a --text "$W/k_z80.txt" >/dev/null 2>&1
+    grep -Eq "$re" "$W/k_z80.txt" || { echo "FAIL z80:$f [$a]: $re"; rc=1; }; }
+z80chk fix_z80_branch.sms "--no-vector-seeds --entry 0:100" 'seeded entry points 3'
+z80chk fix_z80_branch.sms "--no-vector-seeds" 'seeded entry points 2'
 exit $rc

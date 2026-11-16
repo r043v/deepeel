@@ -289,6 +289,7 @@ size_t dp_machine_nes_prg_size(DpMachine *m);
 const uint8_t *dp_machine_nes_prg(DpMachine *m);   // the PRG image (bank*0x4000 + offset layout)
 struct DpPlatformHooks;
 const struct DpPlatformHooks *dp_machine_nes_hooks(void);
+void dp_machine_sega_mapper(DpMachine *m, unsigned mapper);   /* explicit SMS/GG mapper (DP_SEGA_MAPPER_*), applied after every init */
 void dp_machine_sega_set_msx(DpMachine *m, int msx);   /* marks an MSX machine (keyboard probes, no Pause NMI) */
 const struct DpPlatformHooks *dp_machine_sega_hooks(void);   /* Z80 platform hooks (VDP status / counters probes) */   /* NES platform hooks for the kernel (event probes) */
 DpMachine *dp_machine_nes(const uint8_t *rom, size_t size, int mapper, char *err, size_t errsz);

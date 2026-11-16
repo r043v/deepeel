@@ -317,3 +317,23 @@ Retirés : `--tree`, `--ctx-cap`, `--ctx-live`, `--defer-tiers`, `--second-pass`
 - tuiles de référence à porter en un mécanisme générique de watch (toutes plateformes) ;
 - chaîne de films `--tas-dir` générique ; rtcode/`--cov`/`--romdata` MD à re-tester côté noyau.
 
+
+## Retrait du moteur Sega historique (0.371.0)
+
+`sega/explore.c` (3 258 lignes), `sega/visits.c`, les instances `sg2`, `gg2`, `gg3..gg16`, `msx2` et 20 tests du moteur
+sont supprimés ; `z80 explore <sg|sms|gg|msx>` est le noyau seul (`sega/command.c`). La fermeture de provenance reste dans le noyau
+(`before_step`/`finish`). `--mapper` (SMS/GG) est enfin appliqué au noyau (`DpMachine`, `dp_machine_sega_mapper`, ré-appliqué à
+chaque clone), `--entry BANK:ADDR` et `--seed-banks` passent par `seedset_build` (extrait dans `src/explore/seedset.h`, commun aux
+plateformes) ; les vecteurs RST s'y ajoutent. Les lots portables (`--lot`, `frontier drain` d'un fichier) disparaissent avec le
+dernier moteur qui les écrivait ; la frontière du noyau est `--state-dir`. Tests : `kernel_fixtures.sh` (cas Z80) et les
+`core_*` existants.
+
+Retirés : `--play-steps/--play-sessions/--play-pool`, `--novelty*`, `--export-state`, `--tree`, `--spool/--resume FILE`,
+`--lot/--lot-drain`, `--indirect-total`, `--input-*`, `--seed-cap`, `--tas-total/--tas-rng-*`, `--watch/--watch-dump`, `--evidence`,
+`--romdata`, `--rtcode`, `--jobs 2` limité, `--legacy`.
+
+Écarts de couverture Sega à combler dans le noyau (pas par option) :
+- rendu (`DpMachine.render/watch`) pour SG/SMS/GG/MSX : `--watch`, `--watch-dump`, `--mapwin` sans écran de jeu ;
+- typage des accès registres/ports (YM2413 FM typé, ports MSX2 V9938, VDP, bancs) dans le rapport du noyau ;
+- sorties `--evidence`, `--romdata`, `--rtcode` du noyau (acceptées, signalées « non produites ») ;
+- sessions de lecture TAS aléatoires (`--tas-rng-*`) : déjà couvertes par les checkpoints `--tas-ckpt-every` du noyau.

@@ -1,5 +1,7 @@
 # Première exploration MSX1
 
+> **0.371.0** : le moteur Sega historique est retiré ; `z80 explore` est le noyau seul. Les options `--play-steps`, `--novelty*`, `--lot`, `--spool`, `--tree`, `--input-*`, `--watch`, `--evidence`… décrites plus bas n'existent plus (voir `docs/PLAN-COUVERTURE-MAX.fr.md`).
+
 Le registre matériel est accessible par `build/deepeel regs msx`. Le pont
 `src/platform/msx/` réutilise les sources MSX/SG/TMS/AY de m0boy et le CPU
 Z80 commun. Une exploration dynamique bornée produit des rapports et cartes

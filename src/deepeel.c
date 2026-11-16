@@ -28,7 +28,6 @@ int dp_gbs_fetch(const char *game, const char *dir, char *out_gbs, size_t cap, c
 #include "core/snapshot_png.h"
 #include "explore/explorer.h"
 #include "explore/coverage_defaults.h"
-#include "explore/lots.h"
 #include "explore/sessions.h"
 #include "explore/tree.h"
 #include "report/report.h"
@@ -50,6 +49,7 @@ int dp_gbs_fetch(const char *game, const char *dir, char *out_gbs, size_t cap, c
 #include "explore/tas.h"
 
 #include "explore/core.h"
+#include "explore/seedset.h"
 #include "core/bizhawk.h"
 #include "core/desync.h"
 static const char *argv_cov(int argc, char **argv) {
@@ -147,7 +147,7 @@ static void usage(void) {
     fprintf(stderr,
             "deepeel — ROM memory-map explorer (game boy first)\n\n"
             "  deepeel explore rom.gb [options]\n"
-            "  deepeel z80 explore <sg|sms|gg|msx> ROM [--input-total N] [--input-forks N] [--text FILE] [--map FILE] [--evidence FILE]\n"
+            "  deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME] [--entry BANK:ADDR]... [--seed-banks] [--tas FILE] [--text FILE] [--map FILE] [--evidence FILE]\n"
             "  deepeel z80 dis ROM hex-offset [instruction-count]\n"
             "  deepeel lr explore CORE ROM [--text FILE] [--map FILE] [--path-steps N] [--max-total N] [--queue N]\n"
             "  deepeel md explore ROM [--tas GMV] [--tas-dir DIR] [--max-total N] [--path-steps N] [--queue N] [--queue-max N] [--fork-cap N] [--visit-cap N] [--entry ADDR]... [--watch-write ADDR] [--exclude-read-pc ADDR] [--ctx-cap N] [--ctx-live] [--text FILE] [--map FILE] [--evidence FILE]\n"
@@ -1716,30 +1716,6 @@ static uint8_t *nes_read_file(const char *path, size_t *size) {
     return data;
 }
 
-// Extra entry points handed to the kernel: the music-rip seeds, the user's --entry list and, with
-// all_banks, every 16 KiB block shown at $8000.  Shared by every platform front end; a bank of
-// 0xFFFF means "the current mapping" (the kernel does not re-bank that seed).
-typedef struct { uint32_t *pc; uint16_t *bk; DpSeedRegs *rg; } DpSeedSet;
-static void seedset_free(DpSeedSet *s) { free(s->pc); free(s->bk); free(s->rg); memset(s, 0, sizeof *s); }
-static int seedset_build(DpCoreConfig *cfg, const DpMusicKernelSeeds *mks, const uint32_t *epc, const uint16_t *ebk,
-                         size_t ne, unsigned all_banks, DpSeedSet *o) {
-    memset(o, 0, sizeof *o);
-    size_t tot = mks->n + ne + all_banks;
-    if (!(ne + all_banks)) {   // nothing to add: the music seeds go as they are
-        if (mks->n) { cfg->seeds = mks->pcs; cfg->n_seeds = mks->n; cfg->seed_banks = mks->banks; cfg->seed_regs = mks->regs; }
-        return 0;
-    }
-    o->pc = malloc(tot * sizeof *o->pc); o->bk = malloc(tot * sizeof *o->bk); o->rg = malloc(tot * sizeof *o->rg);
-    if (!o->pc || !o->bk || !o->rg) { seedset_free(o); return 1; }
-    const DpSeedRegs none = { 0xFF, 0xFFFF };
-    size_t k = 0;
-    for (; k < mks->n; k++) { o->pc[k] = mks->pcs[k]; o->bk[k] = mks->banks ? mks->banks[k] : 0xFFFF; o->rg[k] = mks->regs ? mks->regs[k] : none; }
-    for (size_t e = 0; e < ne; e++, k++) { o->pc[k] = epc[e]; o->bk[k] = ebk ? ebk[e] : 0xFFFF; o->rg[k] = none; }
-    for (unsigned b = 0; b < all_banks; b++, k++) { o->pc[k] = 0x8000; o->bk[k] = (uint16_t)b; o->rg[k] = none; }
-    cfg->seeds = o->pc; cfg->n_seeds = tot; cfg->seed_banks = o->bk; cfg->seed_regs = o->rg;
-    return 0;
-}
-
 static int cmd_nes(int argc, char **argv) {
     if (argc < 4 || strcmp(argv[2], "explore")) {
         fprintf(stderr, "deepeel nes explore ROM [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N] [--mapper auto|nrom|uxrom] "
@@ -2300,26 +2276,7 @@ int main(int argc, char **argv) {
             if (fread(kh, 4, 3, kf) == 3 && kh[0] == 0x31524644u) { printf("frontier: %u kernel states pending (%u bytes each)\n", kh[2], kh[1]); fclose(kf); return 0; }
             fclose(kf);
         }
-        // pending records by reason, tier and bank (the unread part of each lot)
         char p[700], line[400];
-        struct stat lst;
-        if (!stat(argv[3], &lst) && S_ISREG(lst.st_mode)) {
-            // a portable lot (--lot of NES/PCE/MD/Sega): records and sizes
-            FILE *lf = fopen(argv[3], "rb");
-            uint32_t h[4]; char pl[5] = {0};
-            if (!lf || fread(h, sizeof h, 1, lf) != 1 || h[0] != DP_LF_MAGIC || fread(pl, 1, 4, lf) != 4) {
-                printf("frontier: %s is not a lot\n", argv[3]); if (lf) fclose(lf); return 1;
-            }
-            uint64_t raw = 0, zb = 0, n = 0, off = sizeof h + 4 + h[3];
-            uint32_t rh[4];
-            while (fseek(lf, (long)off, SEEK_SET) == 0 && fread(rh, sizeof rh, 1, lf) == 1 && rh[0] == DP_LF_REC) {
-                raw += rh[2]; zb += rh[3]; off += sizeof rh + rh[1] + rh[3]; n++;
-            }
-            printf("frontier lot (%s, image %u bytes): %llu records pending (%llu bytes raw, %llu compressed XOR deltas)\n",
-                   pl, h[2], (unsigned long long)n, (unsigned long long)raw, (unsigned long long)zb);
-            fclose(lf);
-            return 0;
-        }
         snprintf(p, sizeof p, "%s/frontier/frontier.idx", argv[3]);
         FILE *f = fopen(p, "r");
         if (!f) { printf("frontier: empty (no %s)\n", p); return 0; }
@@ -2366,34 +2323,6 @@ int main(int argc, char **argv) {
             av[n++] = argv[0]; av[n++] = (char *)"explore"; av[n++] = argv[3]; av[n++] = (char *)"--core";
             av[n++] = (char *)"--state-dir"; av[n++] = argv[4]; av[n++] = (char *)"--resume"; av[n] = NULL;
             return cmd_explore(n, av);
-        }
-        struct stat dst;
-        if (!stat(argv[4], &dst) && S_ISREG(dst.st_mode)) {
-            // a portable lot: resume its saved states only on the platform that wrote it
-            FILE *lf = fopen(argv[4], "rb");
-            uint32_t h[4]; char pl[5] = {0};
-            if (!lf || fread(h, sizeof h, 1, lf) != 1 || h[0] != DP_LF_MAGIC || fread(pl, 1, 4, lf) != 4) {
-                fprintf(stderr, "deepeel: %s is not a lot\n", argv[4]); if (lf) fclose(lf); return 1;
-            }
-            fclose(lf);
-            const char *sys = NULL;
-            for (int i = 5; i + 1 < argc; i++) if (!strcmp(argv[i], "--sys")) sys = argv[i + 1];
-            char *av[16]; int n = 0;
-            av[n++] = argv[0];
-            if (!strcmp(pl, "NES")) { av[n++] = (char *)"nes"; av[n++] = (char *)"explore"; av[n++] = argv[3]; }
-            else if (!strcmp(pl, "PCE")) { av[n++] = (char *)"pce"; av[n++] = (char *)"explore"; av[n++] = argv[3]; }
-            else if (!strcmp(pl, "MD")) { av[n++] = (char *)"md"; av[n++] = (char *)"explore"; av[n++] = argv[3]; }
-            else if (!strcmp(pl, "SEG")) {
-                if (!sys) { fprintf(stderr, "deepeel: a Sega/MSX lot needs --sys sms|gg|sg1000|msx\n"); return 2; }
-                av[n++] = (char *)"z80"; av[n++] = (char *)"explore"; av[n++] = (char *)sys; av[n++] = argv[3];
-            } else { fprintf(stderr, "deepeel: unknown lot platform %s\n", pl); return 2; }
-            av[n++] = (char *)"--lot"; av[n++] = argv[4]; av[n++] = (char *)"--lot-drain";
-            fprintf(stderr, "deepeel: draining the %s lot %s\n", pl, argv[4]);
-            argc = n; argv = av;
-            if (!strcmp(argv[1], "md")) return cmd_md(argc, argv);
-            if (!strcmp(argv[1], "nes")) return cmd_nes(argc, argv);
-            if (!strcmp(argv[1], "pce")) return cmd_pce(argc, argv);
-            return dp_sega_explore_command(argc, argv);
         }
         // frontier drain <rom> <state-dir> [--tier N] [--time-limit S]: resume the
         // saved continuations only (an explore --resume run on the same state dir)

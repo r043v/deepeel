@@ -5886,3 +5886,9 @@ Le noyau est le seul moteur PCE ; `--entry` est câblé sur le noyau par l'assis
 ### 0.370.0 — retrait du moteur MD historique
 
 Le noyau est le seul moteur MD ; `--pad-full`/`--pad-full6` sont communs. Voir `docs/PLAN-COUVERTURE-MAX.fr.md`.
+
+## Retrait du moteur Sega historique (0.371.0)
+
+`deepeel z80 explore <sg|sms|gg|msx>` n'a plus d'autre moteur que le noyau (voir `docs/PLAN-COUVERTURE-MAX.fr.md`, section
+« Retrait du moteur Sega historique ») : options propres retirées (`--play-steps`, `--novelty*`, `--lot`, `--spool`, `--tree`,
+`--input-*`…), `--mapper`/`--entry`/`--seed-banks` désormais effectifs. `--core` reste accepté sans effet.

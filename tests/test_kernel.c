@@ -36,7 +36,7 @@ static void truncate_spool(void *u, DpMachine *m, uint32_t pc) {
 }
 #endif
 
-static const void *pick_gg(unsigned w) { return dp_sega_backend_gg_worker(w); }
+static const void *pick_gg(unsigned w) { return dp_sega_backend_ggt(); }
 
 int main(int argc, char **argv) {
     CHECK(argc > 1);

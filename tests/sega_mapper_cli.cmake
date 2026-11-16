@@ -1,7 +1,7 @@
 foreach(system sms gg)
   foreach(mapper auto sega codemasters korean150)
     execute_process(COMMAND "${CLI}" z80 explore ${system} "${ROM}" --mapper ${mapper}
-      --max-total 24 --input-total 0 --fork-cap 0 --no-vector-seeds --no-closure
+      --max-total 24 --fork-cap 0 --no-vector-seeds --no-closure
       RESULT_VARIABLE status OUTPUT_VARIABLE report ERROR_VARIABLE errors)
     if(NOT status EQUAL 0)
       message(FATAL_ERROR "${system}/${mapper}: ${status}: ${errors}")
