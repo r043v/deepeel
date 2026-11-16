@@ -745,3 +745,48 @@ pour `jp (hl)`, `jp (ix)` et `ret` de pile concrète, avec un plafond de valeurs
 `campaign_fixtures` verte sur 0.382.0 (1217 s). La fourche statique (valeurs concrètes HL/IX/IY, propagation de constantes de `sega/closure.c`) reste à porter : les cibles
 de `jp (hl)` atteintes par l'exécution sont déjà marchées, les tables de pointeurs proches d'un `ld hl,nn` sont déjà lues (`closure_jp_table`) ; le reliquat est la
 propagation de constantes à travers des chaînes d'instructions, qui demande une primitive d'accès aux registres par machine et un plafond de valeurs par site.
+
+## Exigence : zéro donnée déclarée code (décision du propriétaire, 2026-11-16)
+
+Une donnée déclarée code est une **erreur**, et un état « viable » n'en contient pas. Le critère d'évaluation du statique n'est donc plus « plus d'octets » mais « aucune
+donnée marquée code » ; un octet statique seul est **provisoire** tant qu'il n'est pas prouvé.
+
+**État mesuré (Aerial Assault GG, 0.382.0, outil)** : la marche statique marque encore des données comme code, avec ou sans pile de retours (tuiles `20 20 24 25 01 02 03…`,
+motifs `ff 55 55 00…`, tables `02 fd 00 00…`, `e4 03 f3 e5 02 f3…`). La pile en retire une partie (−779 net) et en introduit d'autres (`0x1de03-0x1de91`, `0x1ffe8-0x1fff1`).
+
+**Essai de correctif rapide, retiré** : rendre illégal, pour la marche, un préfixe DD/FD suivi d'un opcode qui ne touche ni HL/H/L ni IX/IY (`fd 00` = no-op non documenté,
+jamais du code utile). Règle saine, mais le résultat est **chaotique** : −401 octets statiques seuls, dont des plages de données qui reviennent (`0xde2b`, `0x1e0b7`, `0x1f797`)
+parce que l'ordre des marches change qui marque quoi. Sans vérité terrain on ne peut pas dire que le solde est meilleur ; non conservé.
+
+**À faire (ordre)**
+1. **Vérité terrain** : par ROM de banc, fichier hors dépôt `code/données` octet à octet (désassemblage manuel d'une ou deux ROMs SMS/GG, ou ROM issue d'un source connu),
+   et un outil `tests/` qui compte « données marquées code » (erreurs) et « code manqué » ; le banc 4 ROMs les rapporte à côté des octets.
+2. **Classe provisoire** : les octets marqués par une marche non fiable (confiance 0, arrivée par pile de retours, par chute après CALL) reçoivent un drapeau `PROVISIONAL`
+   distinct de `STATIC` ; seul un octet atteint par une marche de confiance, ou confirmé par exécution, ou par une arête prouvée, compte comme code dans les rapports.
+3. **Contrôle de vraisemblance à l'entrée d'une marche** : refuser une racine dont les N premières instructions sont des no-ops préfixés, des `rst $38` répétés, des
+   `ld (bc),a` consécutifs, des suites d'opcodes sans transfert de contrôle, ou dont les octets sont dans une plage déjà reconnue comme tuiles/pointeurs/texte (la même
+   détection que `core_ptr_stop` et `core_pad_stop`, appliquée en entrée et non seulement en sortie).
+4. **Ordre des marches déterministe** : marches de confiance d'abord (racines exécutées, cibles de CALL/JP de code exécuté), non fiables ensuite, pour qu'un octet ne soit
+   plus classé selon l'ordre d'arrivée.
+
+## Portage générique du comportement de `src/platform/sega/closure.c`
+
+Comportement actuel (Sega seulement, retiré seulement quand le générique l'égale **sans erreur de données**) :
+- **Amorçage à chaque pas exécuté** avec l'état CPU concret (`DEEPEEL_NO_SEGA_CLOSURE=1` le coupe) : un nœud par (pc, banque, registres connus).
+- **Nœuds à constantes connues** : HL, IX, IY (puis BC, DE, `c` en mode bloc, `a`, `sp`) avec un masque « octet haut / octet bas connu » (`target_known`) ; hachage et
+  déduplication des nœuds (`mix` sur pc, banque, masque, valeurs) ; plafond de nœuds.
+- **Propagation de constantes instruction par instruction** (`target_constants`, `target_constants_basic`) : `ld r,n`, `ld rr,nn`, `ld r,r'`, `inc/dec` d'octet et de paire,
+  `add hl,rr`, `exx`, `ex de,hl`, `djnz` sur `b`, effets de bord sur la pile ; une instruction inconnue **efface** le registre concerné (jamais deviné).
+- **Résolution des sauts indirects** (`indirect_resolved`) : `jp (hl)`, `jp (ix)`, `jp (iy)` quand la paire est entièrement connue.
+- **Pile d'adresses de retour fantôme** (`returns_resolved`) : un `ret` dont l'adresse est connue par la pile concrète est suivi.
+- **Mode bloc** : suit les copies `ldir/lddr` et les boucles `djnz` pour ne pas perdre les constantes sur BC/DE.
+- **Fusion** : le résultat est réintégré aux drapeaux du noyau (hook `finish`).
+
+Version générique à écrire dans `src/explore/` (pas dans la plateforme) :
+- `DpIsa` : une fonction `effect(bytes, pc, DpRegState *in, DpRegState *out)` par ISA (SM83, Z80, 6502, HuC6280, 68000) qui dit quelles constantes survivent ; la table par
+  instruction vit dans l'ISA, le propagateur est unique. Valeur absente = inconnue (rien deviné).
+- `DpMachine` : primitive `get_regs(m, DpRegState *)` (registres nommés par la plateforme, masque de connaissance complet à l'amorçage) à la place du seul `ctx_reg_hash`.
+- État de marche porteur de `DpRegState` ; pour un site indirect, **plafond de valeurs distinctes par site** (comme le plafond de fourches dynamique), compteur rapporté,
+  jamais silencieux ; sous `--unbounded` le plafond est levé et l'excédent va au spool.
+- La marche générique n'est acceptée que si l'**exigence zéro donnée code** ci-dessus est mesurée, par ROM, sur la vérité terrain : égalité ou mieux en code trouvé,
+  **et** pas plus d'erreurs que la fermeture Sega. Seulement alors `sega/closure.c` est retiré (règle : couverture jamais perdue, erreurs jamais ajoutées).
