@@ -451,5 +451,5 @@ conditionnels saturant un site reste à écrire.
 
 Mesure de l'apport de `sega/closure.c` (observation de l'outil, 0.379.1, interrupteur temporaire retiré après coup ; `--attract-frames 600
 --max-total 3000000`, ROMs SMS de `m0boy`, hors dépôt) : octets statiques avec/sans la fermeture Sega — Ace of Aces 12 459 / 10 428
-(+2 031), Action Fighter (UE) 12 403 / 7 996 (+4 407), Alex Kidd-type ROM sans écart (em-1 : 7 996 / 7 996). La fermeture Sega apporte donc de la
+(+2 031), Action Fighter (UE) 12 403 / 7 996 (+4 407), em-1 sans écart (7 996 / 7 996). La fermeture Sega apporte donc de la
 couverture que le marcheur du noyau seul n'atteint pas sur certaines ROMs : la fusion exige le portage des techniques, pas la suppression.
