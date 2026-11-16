@@ -89,6 +89,8 @@ typedef struct DpIsa {
     uint8_t abs_ind_table;                 // `jmp (abs)` / `jmp (abs,x)` dispatch through a word table
     int (*imm_ptr)(const uint8_t *bytes, uint32_t *imm);   // B9: 1 when the instruction loads a 16-bit immediate pointer into a register pair
     int (*imm_byte)(const uint8_t *bytes, uint8_t *v);     // B9: 1 when the instruction loads an 8-bit immediate (two nearby ones form a split pointer)
+    int (*acc_imm)(const uint8_t *bytes, uint8_t *v);      // C3: 1 when the instruction loads the accumulator with an immediate
+    int (*st_acc_abs)(const uint8_t *bytes, uint32_t *addr);   // C3: 1 when the instruction stores the accumulator at an absolute address
 } DpIsa;
 
 const DpIsa *dp_isa_sm83(void);
@@ -231,6 +233,9 @@ struct DpMachine {
     // writes one byte through the machine's memory map, unobserved (NULL: unsupported);
     // the entry point of the RAM-seeding techniques (docs/PLAN-MUTUALISATION.fr.md, step 3)
     void (*poke)(struct DpMachine *, uint32_t addr, uint8_t value);
+    // C3: 1 when a write to `addr` programs the cartridge mapper although the address is not in the ROM window (Sega $FFFC-$FFFF);
+    // NULL: only writes into the ROM window count
+    int (*mapper_reg)(struct DpMachine *, uint32_t addr);
     // holds a pad mask (bits 0..5 = up/down/left/right/button1/button2) until changed;
     // NULL: the machine has no input model.  Entry point of the kernel's held-pad sessions.
     void (*set_input)(struct DpMachine *, uint32_t mask);

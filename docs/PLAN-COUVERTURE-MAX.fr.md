@@ -491,3 +491,18 @@ mesure de couverture gagnée en octets ; l'effet sur les octets n'a pas été co
 
 Fixture du cap par époque (0.379.3) : `fix_epoch.gb` (boucle dont le conditionnel sature un site) + test `core_epoch_cap` (`--fork-site-cap 1`,
 checkpoints de session) exige `epoch_forks` non nul. Observation de l'outil : 1 sur cette fixture.
+
+### C3 : simulation des écritures de banque dans le marcheur du noyau (0.380.0)
+
+Première tranche du portage : le marcheur statique du noyau suit `ld a,n` puis le stockage de A à une adresse qui programme le mapper (écriture dans la
+fenêtre ROM, ou registre déclaré par `DpMachine.mapper_reg`, Sega `$FFFC-$FFFF`) en rejouant l'écriture à travers le mapper de la machine
+(`DpMachine.poke`) : la suite de la marche voit la nouvelle vue ROM, l'état vivant est restauré à la fin de chaque marche, chaque racine en attente
+mémorise la chaîne d'écritures sous laquelle elle a été empilée, et la continuation est aussi marchée sous la vue d'origine (additif). Crochets `DpIsa`
+`acc_imm` / `st_acc_abs` pour SM83, Z80, 6502 et HuC6280 ; `--no-closure-banks` désactive ; compteur « closure bank writes simulated during walks ».
+Test : fixture `fix_bankwalk` (`core_closure_bank_sim`).
+
+Observation de l'outil (ROMs hors dépôt, `--jobs 1`) : la couverture finale (`--cov`) est **octet pour octet identique** avec et sans la simulation
+sur Zelda Link's Awakening (60 écritures rejouées) et sur Action Fighter UE (5, fermeture Sega coupée). Cette tranche ne fournit donc aucun octet de plus sur
+ces ROMs, et ne perd rien. Elle réfute l'hypothèse de la section précédente : l'apport « blocs » de `sega/closure.c` sur Action Fighter ne vient pas
+des changements de vue de banque mais de la propagation de constantes de registres (HL/IX/IY, C) vers des cibles de saut, d'appel et de table. Cette
+propagation reste à porter ; `sega/closure.c` n'est pas retiré.

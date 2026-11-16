@@ -110,6 +110,8 @@ static int isa_imm_byte(const uint8_t *b, uint8_t *v) {   // B9: lda/ldx/ldy #im
     *v = b[1]; return 1;
 }
 
+static int isa_acc_imm(const uint8_t *b, uint8_t *v) { if (b[0] != 0xA9) return 0; *v = b[1]; return 1; }   // lda #n
+static int isa_st_acc_abs(const uint8_t *b, uint32_t *a) { if (b[0] != 0x8D) return 0; *a = (uint32_t)b[1] | (uint32_t)b[2] << 8; return 1; }   // sta abs
 static const DpIsa isa = { "huc6280", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
-                           isa_effect, isa_illegal, isa_disasm, isa_mem_operand, 0, 0, 1, NULL, isa_imm_byte };
+                           isa_effect, isa_illegal, isa_disasm, isa_mem_operand, 0, 0, 1, NULL, isa_imm_byte, isa_acc_imm, isa_st_acc_abs };
 const DpIsa *dp_isa_huc6280(void) { return &isa; }

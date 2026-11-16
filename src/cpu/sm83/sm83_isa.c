@@ -189,5 +189,7 @@ static int isa_imm_ptr(const uint8_t *b, uint32_t *imm) {   // ld bc/de/hl,nn
     if (b[0] != 0x01 && b[0] != 0x11 && b[0] != 0x21) return 0;
     *imm = (uint32_t)b[1] | (uint32_t)b[2] << 8; return 1;
 }
-static const DpIsa isa = { "sm83", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag, isa_effect, isa_illegal, sm83_disasm, isa_mem_operand, 0x150u, 1, 0, isa_imm_ptr };
+static int isa_acc_imm(const uint8_t *b, uint8_t *v) { if (b[0] != 0x3E) return 0; *v = b[1]; return 1; }   // ld a,n
+static int isa_st_acc_abs(const uint8_t *b, uint32_t *a) { if (b[0] != 0xEA) return 0; *a = (uint32_t)b[1] | (uint32_t)b[2] << 8; return 1; }   // ld (nn),a
+static const DpIsa isa = { "sm83", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag, isa_effect, isa_illegal, sm83_disasm, isa_mem_operand, 0x150u, 1, 0, isa_imm_ptr, NULL, isa_acc_imm, isa_st_acc_abs };
 const DpIsa *dp_isa_sm83(void) { return &isa; }

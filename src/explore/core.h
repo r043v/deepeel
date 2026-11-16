@@ -83,6 +83,7 @@ typedef struct DpCoreConfig {
     uint64_t held_steps;       // A26: step cap of one held-pad session path (0: unbounded)
     int no_exact;              // B5: off switch of the exact-state loop cut (the run then ends only by exhaustion or a cap)
     int no_spec, no_live_seeds;               // B8: off switch of the speculative gap disassembly
+    int no_closure_banks;      // C3: off switch of the walk-time bank simulation (closure follows `ld a,n; ld (bankreg),a`)
     int no_bank_forks;         // B7: off switch of the bank forks at mapper writes
     unsigned bank_fork_cap;    // B7: bank forks made per site visit (0: unbounded)
     unsigned probe_ctx_cap;    // B1: contexts one probe site is armed under (1: the historical once-per-site)
@@ -126,6 +127,7 @@ typedef struct DpCoreResult {
     uint32_t *src_flags;       // per ROM index: DP_SRC_* (core/coverage.h), OR-ed over every proving source
     uint64_t *first_seen;      // per ROM index: global step count when first covered (0: never)
     uint8_t *flags;            // per ROM index: DP_CORE_NATURAL | DP_CORE_FORCED
+    uint64_t closure_bank_sims; uint8_t closure_banks;   // C3: mapper writes replayed during a walk; walk-time bank simulation on
     uint64_t closure_unresolved; // C3: static edges (jump/branch/call) whose target is outside the mapped ROM view (RAM, other bank): counted, never silent
     uint64_t closure_stopped_data;   // A13: untrusted static walks stopped on data/copied bytes
     uint64_t live_seeds;       // B3: vector seeds started from a live checkpoint

@@ -143,6 +143,7 @@ static void sega_poke(DpMachine *m, uint32_t a, uint8_t v) {
     if (s->base_write) s->base_write(s->base_user, (uint16_t)a, v);
 }
 
+static int sega_mapper_reg(DpMachine *m, uint32_t a) { return !((SegaMach *)m->impl)->msx && a >= 0xFFFC && a <= 0xFFFF; }
 static uint64_t sega_frame(DpMachine *m) { const DpSegaBackend *b = ((SegaMach *)m->impl)->b; return b->frame_count ? b->frame_count() : 0; }
 static void sega_set_input(DpMachine *m, uint32_t mask) {
     DpSegaInput in;
@@ -278,6 +279,7 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->bank_shift = 14;    // the Z80's 16 KiB pointer-table window (the static closure's geometry, E5)
     m->seed_regs = sega_seed_regs;
     m->bank_view = sega_bank_view;
+    m->mapper_reg = sega_mapper_reg;
     m->cut_pc = sega_cut_pc;
     m->cut_sp = sega_cut_sp;
     m->data_dest = sega_data_dest;

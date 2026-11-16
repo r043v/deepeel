@@ -699,3 +699,7 @@ set_tests_properties(core_movie_bursts PROPERTIES FIXTURES_REQUIRED fixtures TIM
 # B3 (0.379.3): the per-site fork cap restarts from zero per checkpoint epoch (fix_epoch saturates one site at cap 1)
 add_test(NAME core_epoch_cap COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_epoch.gb --fork-site-cap 1 --tas-ckpt-every 30 --attract-frames 600 --play-frames 600 --max-total 6000000 --text $D/epoch_cap.txt >/dev/null 2>&1; grep -Eq 'thanks to a checkpoint epoch [1-9]' $D/epoch_cap.txt")
 set_tests_properties(core_epoch_cap PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 180)
+
+# C3 (0.380.0): the static walk replays `ld a,n; ld (bankreg),a` through the machine's mapper and counts it
+add_test(NAME core_closure_bank_sim COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_bankwalk.gb --max-total 200000 --text $D/bankwalk.txt >/dev/null 2>&1; grep -Eq 'closure bank writes simulated during walks: [1-9]' $D/bankwalk.txt")
+set_tests_properties(core_closure_bank_sim PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)

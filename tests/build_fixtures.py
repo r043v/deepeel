@@ -500,6 +500,15 @@ def build(out):
     w(r, 0x150, 0x18, 0xFE)                      # jr -2 (self)
     save(out, "fix_loop", r)
 
+    # --- bankwalk: the not-taken side of a conditional switches bank then jumps into the window (C3 walk-time bank simulation) ----
+    r = rom(4, mbc=0x01)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0xFA, 0x00, 0xC0, 0xB7, 0x28, 0x08)       # ld a,($C000); or a; jr z,+8 (taken: RAM is zero)
+    w(r, 0x156, 0x3E, 0x02, 0xEA, 0x00, 0x20, 0xC3, 0x00, 0x40)   # ld a,2; ld ($2000),a; jp $4000   (never run naturally)
+    w(r, 0x15E, 0x3E, 0x01, 0x76)                         # taken side: ld a,1; halt
+    w(r, 0x8000, 0x3E, 0x07, 0x76)                        # bank 2 at $4000: ld a,7; halt
+    save(out, "fix_bankwalk", r)
+
     # --- epoch: a main loop whose conditional keeps meeting new RAM contexts (the per-site fork cap, B3 epochs) ----
     r = rom(2)
     w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)

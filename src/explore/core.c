@@ -88,6 +88,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--no-exact-state")) { c->no_exact = 1; return 1; }
     if (!strcmp(a, "--no-spec")) { c->no_spec = 1; return 1; }
     if (!strcmp(a, "--no-bank-forks")) { c->no_bank_forks = 1; return 1; }
+    if (!strcmp(a, "--no-closure-banks")) { c->no_closure_banks = 1; return 1; }
     if (!strcmp(a, "--bank-fork-cap") && i + 1 < argc) { c->bank_fork_cap = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--pad-full")) { c->pad_full = 1; return 1; }
     if (!strcmp(a, "--pad-full6")) { c->pad_full = 2; return 1; }
@@ -324,13 +325,29 @@ static int64_t cview_index(const ClosureView *v, const DpCoreResult *r, uint32_t
     int64_t ix = geo_index(&v->g, pc, bk);
     return (ix >= 0 && (size_t)ix + 1 <= v->cfg->rom_image_size && (size_t)ix < r->rom_size) ? ix : -1;
 }
+#define CLOSURE_BANK_NODES 16
+typedef struct { uint32_t addr; uint8_t val; int parent; } BankPoke;
+static inline unsigned reg_of(const DpCoreResult *r, uint32_t addr);
+// put the machine in the view of `node`: the saved live state, then the chain of mapper writes that led to the node
+static void bank_apply(DpMachine *m, const uint8_t *snap, const BankPoke *pk, int node) {
+    int chain[CLOSURE_BANK_NODES + 1], n = 0;
+    for (int i = node; i > 0 && n < CLOSURE_BANK_NODES; i = pk[i].parent) chain[n++] = i;
+    m->load(m, snap);
+    while (n--) m->poke(m, pk[chain[n]].addr, pk[chain[n]].val);
+}
 static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa, uint32_t root, uint32_t bank, uint32_t trust0) {
-    uint32_t stack[256][3]; unsigned sp = 0, budget = CLOSURE_INSTR;
+    uint32_t stack[256][4]; unsigned sp = 0, budget = CLOSURE_INSTR;
+    // C3: bank-switch simulation.  `ld a,n` then a store of A to a mapper bank register is replayed through the machine's own
+    // mapper (poke) so the rest of the walk sees the new ROM view; every walk restores the live state when it ends and each
+    // pending root remembers the chain of writes it was pushed under (node 0 = the live view).
+    BankPoke pk[CLOSURE_BANK_NODES + 1]; int npk = 0, cur = 0, acc_known = 0, acc_age = 0; uint8_t acc = 0; uint8_t *snap = NULL;
+#define CLOSURE_POP() do { sp--; pc = stack[sp][0]; bk = stack[sp][1]; trust = stack[sp][2]; acc_known = 0; \
+        if ((int)stack[sp][3] != cur) { bank_apply(v->m, snap, pk, (int)stack[sp][3]); cur = (int)stack[sp][3]; } } while (0)
     uint32_t trust = trust0;   // A13: code reached from executed code is trusted; the fall-through after a CALL is not (inline data idiom)
     uint32_t pc = root, bk = bank;
     if (v->m) {   // the live walk counts its roots and skips a root already known
         int64_t k0 = cview_index(v, r, pc, bk);
-        if (k0 < 0 || (__atomic_load_n(&r->flags[k0], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC))) return;
+        if (k0 < 0 || (__atomic_load_n(&r->flags[k0], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC))) goto done;
         r->closure_roots++;
     }
     for (;;) {
@@ -338,15 +355,15 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
         int known = k >= 0 && (__atomic_load_n(&r->flags[k], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC));
         if (k < 0 || !budget || known) {
             if (v->m && k >= 0 && !budget) r->closure_capped++;
-            if (!sp) return;
-            sp--; pc = stack[sp][0]; bk = stack[sp][1]; trust = stack[sp][2];
+            if (!sp) goto done;
+            CLOSURE_POP();
             if (!budget) budget = 1;
             continue;
         }
         if (!trust && (__atomic_load_n(&r->flags[k], __ATOMIC_RELAXED) & (DP_CORE_DATA | DP_CORE_COPIED))) {   // untrusted code stops on data
             r->closure_stopped_data++;
-            if (!sp) return;
-            sp--; pc = stack[sp][0]; bk = stack[sp][1]; trust = stack[sp][2];
+            if (!sp) goto done;
+            CLOSURE_POP();
             continue;
         }
         uint8_t b[8] = {0};
@@ -365,24 +382,41 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
             }
             if (hit) {
                 r->closure_stopped_data++;
-                if (!sp) return;
-                sp--; pc = stack[sp][0]; bk = stack[sp][1]; trust = stack[sp][2];
+                if (!sp) goto done;
+                CLOSURE_POP();
                 continue;
             }
         }
         if (!trust && (b[0] == 0x00 || b[0] == 0xFF) && b[1] == b[0] && b[2] == b[0] && b[3] == b[0] && b[4] == b[0] && b[5] == b[0] && b[6] == b[0] && b[7] == b[0]) {   // untrusted code stops on a padding run (8 bytes)
             r->closure_stopped_data++;
-            if (!sp) return;
-            sp--; pc = stack[sp][0]; bk = stack[sp][1]; trust = stack[sp][2];
+            if (!sp) goto done;
+            CLOSURE_POP();
             continue;
         }
         DpFlowInfo f; memset(&f, 0, sizeof f);
         if (!isa->flow(b, pc, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL) {
-            if (!sp) return;
-            sp--; pc = stack[sp][0]; bk = stack[sp][1]; trust = stack[sp][2];
+            if (!sp) goto done;
+            CLOSURE_POP();
             continue;
         }
         budget--;
+        if (v->m && r->closure_banks) {
+            uint8_t av; uint32_t ad;
+            if (isa->acc_imm && isa->acc_imm(b, &av)) { acc = av; acc_known = 1; acc_age = 0; }
+            else if (isa->st_acc_abs && isa->st_acc_abs(b, &ad)) {
+                int is_map = acc_known && v->m->poke && npk < CLOSURE_BANK_NODES &&
+                             (v->m->rom_index(v->m, ad) >= 0 || (v->m->mapper_reg && v->m->mapper_reg(v->m, ad)));
+                if (is_map) {
+                    if (!snap) { snap = malloc(v->m->state_bytes(v->m)); if (snap) v->m->save(v->m, snap); }
+                    if (snap) {
+                        // additive: the continuation is also walked under the view it had before the write (nothing the plain walk marked is lost)
+                        if (sp < 256) { stack[sp][0] = pc + f.length; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)cur; sp++; }
+                        else r->closure_stack_dropped++;
+                        pk[++npk] = (BankPoke){ ad, acc, cur }; cur = npk; v->m->poke(v->m, ad, acc); r->closure_bank_sims++;
+                    }
+                }
+            } else if (acc_known && (f.kind != DP_FLOW_SEQ || ++acc_age > 2)) acc_known = 0;
+        }
         for (unsigned i = 0; i < f.length; i++) {
             int64_t q = v->m ? cview_index(v, r, pc + i, bk) : (k + i < (int64_t)r->rom_size ? k + i : -1);
             if (q >= 0) {
@@ -394,7 +428,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
         if (f.kind != DP_FLOW_RET && f.kind != DP_FLOW_INDIRECT && f.target >= 0 &&
             (f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL)) {
             if (cview_index(v, r, (uint32_t)f.target, bk) < 0) r->closure_unresolved++;
-            else if (sp < 256) { stack[sp][0] = (uint32_t)f.target; stack[sp][1] = bk; stack[sp][2] = trust; sp++; }
+            else if (sp < 256) { stack[sp][0] = (uint32_t)f.target; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)cur; sp++; }
             else r->closure_stack_dropped++;   // a root lost to the fixed stack is counted, never silent
         }
         if (f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_RET || f.kind == DP_FLOW_INDIRECT || f.halt) fall = 0;
@@ -402,8 +436,11 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
             pc += f.length;
             if (f.kind == DP_FLOW_CALL) trust = 0;   // A13: no trust after a call unless the callee was observed to return
         }
-        else { if (!sp) return; sp--; pc = stack[sp][0]; bk = stack[sp][1]; trust = stack[sp][2]; }
+        else { if (!sp) goto done; CLOSURE_POP(); }
     }
+done:
+    if (snap) { v->m->load(v->m, snap); free(snap); }   // the live machine is left exactly as the walk found it
+#undef CLOSURE_POP
 }
 static void closure_walk(DpCoreResult *r, DpMachine *m, const DpIsa *isa, uint32_t root) {
     ClosureView v = { m, NULL, { 0, 0, 0, 0 } };
@@ -2222,7 +2259,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     out->live_w = ((rsize(m) >> 8) + 31) / 32;
     out->live = calloc(((rom_size >> 8) + 1) * out->live_w, sizeof *out->live);
     if (m->plat && m->plat->io_reg_count > 0) {   // typed register accesses: one slot per registry entry
-        out->reg_n = m->plat->io_reg_count; out->reg_plat = m->plat;
+        out->reg_n = m->plat->io_reg_count; out->reg_plat = m->plat; out->closure_banks = !cfg->no_closure_banks;
         out->reg_slot = m->plat->find ? NULL : calloc(65536, sizeof *out->reg_slot);
         out->reg_reads = calloc((size_t)out->reg_n, sizeof *out->reg_reads);
         out->reg_writes = calloc((size_t)out->reg_n, sizeof *out->reg_writes);
@@ -2266,7 +2303,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         DpMachine *wm = i == 0 ? m : (m->clone ? m->clone(m, i) : NULL);
         if (!wm) break;                       // fewer workers than asked: reported
         w->sh = &sh; w->m = wm; w->idx = i;
-        w->loc.refs = out->refs; w->loc.page_win = out->page_win; w->loc.live = out->live; w->loc.reg_slot = out->reg_slot; w->loc.reg_reads = out->reg_reads; w->loc.reg_writes = out->reg_writes; w->loc.reg_vals = out->reg_vals; w->loc.reg_n = out->reg_n; w->loc.reg_plat = out->reg_plat; w->loc.live_w = out->live_w; w->loc.flags = out->flags; w->loc.src_flags = out->src_flags;
+        w->loc.refs = out->refs; w->loc.page_win = out->page_win; w->loc.live = out->live; w->loc.reg_slot = out->reg_slot; w->loc.reg_reads = out->reg_reads; w->loc.reg_writes = out->reg_writes; w->loc.reg_vals = out->reg_vals; w->loc.reg_n = out->reg_n; w->loc.reg_plat = out->reg_plat; w->loc.closure_banks = out->closure_banks; w->loc.live_w = out->live_w; w->loc.flags = out->flags; w->loc.src_flags = out->src_flags;
         w->loc.dest = out->dest;
         w->loc.first_seen = out->first_seen; w->loc.rom_size = rom_size;
         w->site_n = site_n;
@@ -2508,7 +2545,7 @@ cleanup:
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
-        out->novelty_picks += l->novelty_picks; out->closure_stopped_data += l->closure_stopped_data; out->closure_unresolved += l->closure_unresolved; out->closure_stack_dropped += l->closure_stack_dropped; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->promoted_forced += l->promoted_forced; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_stack_dropped += l->closure_stack_dropped; out->pending_dropped += l->pending_dropped; out->deferred += l->deferred; out->state_repeats += l->state_repeats; out->probe_ctx_sat += l->probe_ctx_sat; out->probe_rearms += l->probe_rearms; out->bank_forks += l->bank_forks; out->tas_ckpts += l->tas_ckpts; out->sess_ckpts += l->sess_ckpts; out->ckpt_bursts += l->ckpt_bursts; out->epoch_forks += l->epoch_forks; out->live_seeds += l->live_seeds; out->imm_refs += l->imm_refs; out->held_stops += l->held_stops; out->bank_fork_sat += l->bank_fork_sat; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
+        out->novelty_picks += l->novelty_picks; out->closure_stopped_data += l->closure_stopped_data; out->closure_unresolved += l->closure_unresolved; out->closure_stack_dropped += l->closure_stack_dropped; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->promoted_forced += l->promoted_forced; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bank_sims += l->closure_bank_sims; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_stack_dropped += l->closure_stack_dropped; out->pending_dropped += l->pending_dropped; out->deferred += l->deferred; out->state_repeats += l->state_repeats; out->probe_ctx_sat += l->probe_ctx_sat; out->probe_rearms += l->probe_rearms; out->bank_forks += l->bank_forks; out->tas_ckpts += l->tas_ckpts; out->sess_ckpts += l->sess_ckpts; out->ckpt_bursts += l->ckpt_bursts; out->epoch_forks += l->epoch_forks; out->live_seeds += l->live_seeds; out->imm_refs += l->imm_refs; out->held_stops += l->held_stops; out->bank_fork_sat += l->bank_fork_sat; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
         out->exec_outside += l->exec_outside; out->exec_wram_rom += l->exec_wram_rom; dp_ramarch_merge(&out->ra, &l->ra);
         free(l->jp_seen); l->jp_seen = NULL; free(ws[i].visits); free(ws[i].wsnap); free(ws[i].winmemo); free(ws[i].capped); free(ws[i].stamp);
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
@@ -2636,6 +2673,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "IRQ forks %llu (timing jitter %llu)\n", U(r->irq_forks), U(r->jitter_forks));
     fprintf(out, "movie checkpoints continued as free paths: %llu (vector seeds from live states: %llu); session checkpoints continued as free paths: %llu, pad bursts from them: %llu\nforks past the per-site cap thanks to a checkpoint epoch %llu (B3)\n", U(r->tas_ckpts), U(r->live_seeds), U(r->sess_ckpts), U(r->ckpt_bursts), U(r->epoch_forks));
     fprintf(out, "held-pad session paths stopped by their own budget: %llu\n", U(r->held_stops));
+    fprintf(out, "closure bank writes simulated during walks: %llu\n", U(r->closure_bank_sims));
     fprintf(out, "bank forks: %llu (site cap hit %llu); probe re-arms: %llu (context cap hit %llu)\n", U(r->bank_forks), U(r->bank_fork_sat), U(r->probe_rearms), U(r->probe_ctx_sat));
     fprintf(out, "event probes %llu at %llu sites: %llu forced variants\n", U(r->event_probes), U(r->event_probe_sites), U(r->event_probes));
     fprintf(out, "seeded entry points %llu\n", U(r->seeded));
