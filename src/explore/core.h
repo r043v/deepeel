@@ -126,6 +126,7 @@ typedef struct DpCoreResult {
     uint32_t *src_flags;       // per ROM index: DP_SRC_* (core/coverage.h), OR-ed over every proving source
     uint64_t *first_seen;      // per ROM index: global step count when first covered (0: never)
     uint8_t *flags;            // per ROM index: DP_CORE_NATURAL | DP_CORE_FORCED
+    uint64_t closure_unresolved; // C3: static edges (jump/branch/call) whose target is outside the mapped ROM view (RAM, other bank): counted, never silent
     uint64_t closure_stopped_data;   // A13: untrusted static walks stopped on data/copied bytes
     uint64_t live_seeds;       // B3: vector seeds started from a live checkpoint
     uint8_t *inferred;         // C4: DP_MAP_* inference per ROM byte (padding, gap fill, copy-table siblings); never an observation
