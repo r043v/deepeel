@@ -1389,6 +1389,18 @@ static void run_path(Worker *w, Pending *p) {
                         pthread_cond_signal(&sh->cv);
                         pthread_mutex_unlock(&sh->mu);
                         loc->tas_ckpts++;
+                        if (cfg->ckpt_burst_frames && m->set_input && m->frame) {   // B3: movie segment mutation: two bursts of pad input from the live state
+                            for (unsigned bi = 0; bi < 2; bi++) {
+                                uint8_t *bp = malloc(sh->sbytes ? sh->sbytes : 1);
+                                if (!bp) break;
+                                m->save(m, bp);
+                                pthread_mutex_lock(&sh->mu);
+                                queue_push(sh, (Pending){ bp, m->pc(m), 0, 0, SESSION_PLAY + 16u + (unsigned)((loc->tas_ckpts * 3u + bi * 5u + 1u) % 10u), 0, 0, DP_SRC_SESSION });
+                                pthread_cond_signal(&sh->cv);
+                                pthread_mutex_unlock(&sh->mu);
+                                loc->ckpt_bursts++;
+                            }
+                        }
                         // B3: the vector seeds also start from the first live checkpoints (a game state, not the power-on one)
                         int diverse = 0;
                         if (m->plat && !cfg->no_vectors && !cfg->no_live_seeds) {   // B3: seed from the most diverse live states (>= 16 of 256 sampled RAM bytes differ from every chosen one), at most 4
