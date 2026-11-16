@@ -343,7 +343,10 @@ qui fournissent les hooks requis.
     indirect par registre entièrement connu (`jp (hl)/(ix)/(iy)`, `jp hl`,
     `jmp/jsr (An)`) est suivi. Plafonds comptés au rapport (états par site,
     valeurs indirectes par site, déduplication globale), `--no-closure-regs`
-    coupe, `--unbounded` lève. C'est l'amorçage de `sega/closure.c` porté à
+    coupe, `--unbounded` lève. 0.384.0 : un `ret` dont le SP de marche est
+    entièrement connu suit l'adresse lue dans la pile de la machine (le `pop`
+    prouve alors la paire popée) ; les dérivations exactes (inc/dec, DJNZ,
+    blocs ED, pop) partent de l'état d'entrée. C'est l'amorçage de `sega/closure.c` porté à
     toutes les ISA ; `sega/closure.c` n'est retiré qu'au banc octet à octet
     SMS/GG/SG/MSX sans plus d'erreurs de données (§ exigence zéro donnée code
     du plan).

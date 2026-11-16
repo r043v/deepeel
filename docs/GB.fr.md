@@ -5912,3 +5912,15 @@ nombres sont des observations de l'outil, non des mesures de matériel. Test :
 `core_closure_reg_z80` (fixture `fix_z80_regclosure.sms`). Voir
 `docs/PLAN-COUVERTURE-MAX.fr.md` ; `sega/closure.c` reste en place tant que le banc
 octet à octet n'a pas validé l'exigence « zéro donnée déclarée code ».
+
+### 0.384.0 — noyau : retours par la pile concrète, corrections du transfert Z80/SM83
+
+Quand la marche porte un SP entièrement connu (l'état concret de la machine à l'amorçage), un
+`ret` prend sa continuation à l'adresse lue dans la pile de la machine (cap par site, cible hors
+vue comptée jamais suivie) ; un `pop rr` avec ce SP prouve la paire popée. Le rapport ajoute
+« stack returns … » à la ligne `closure registers (C3)`. Corrections du transfert de constantes :
+les dérivations exactes z80 (inc/dec, DJNZ, blocs ED) lisaient la sortie tuée au lieu de
+l'entrée ; la fenêtre de `ld rr,nn` manquait l'octet bas ; SM83 stepping le mauvais slot de
+paire (inc/dec bc/de, pop af/bc/de/hl). Tests : `core_closure_stackret_z80`, cas dpmachine
+z80/sm83. Les nombres restent des observations de l'outil ; `sega/closure.c` reste en place
+(banc octet à octet + zéro donnée déclarée code).

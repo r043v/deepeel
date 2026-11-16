@@ -879,3 +879,47 @@ non séquentiel, l'état concret change quasi chaque pas). `indirect resolved` :
 `indirect unresolved` : 1 / 0 / 7 / 8 (cible hors vue, comptée, jamais suivie). L'enrichissement
 de la tranche 2 (condition de retour par la pile concrète, plausibilité à l'entrée de marche) et
 l'étalonnage de ce cap restent à instruire avant tout retrait.
+
+### C3 : tranche 2 — retours par la pile concrète, corrections du transfert (0.384.0)
+
+**Corrections de la tranche 1** (trouvées en relisant contre la fermeture Sega et en testant les
+dérivations exactes) :
+- **Z80** : les re-dérivations exactes (inc/dec de paires et d'octets, DJNZ, pas des blocs ED)
+  lisaient la **sortie** déjà tuée par le moteur de provenance — inertes, la constante mourait au
+  premier inc/dec (moins bien que Sega, qui dérive de `before`). Elles dérivent désormais de
+  l'état d'entrée ; inc/dec sp exact ajouté (p==3).
+- **Z80** : la fenêtre de la lecture planifiée `ld rr,nn` était décalée d'un octet (le moteur
+  charge la paire depuis pc+1..pc+2 ; la fenêtre couvrait pc+2..pc+3) : l'octet bas de l'opérande
+  n'était jamais prouvé, donc `ld hl,nn` ne donnait HL que sur l'octet haut.
+- **SM83** : slot de paire faux pour inc/dec bc/de (`(op>>4)-1` : sous-débordement pour 0x03,
+  mauvaise paire pour 0x13) et pour pop af/bc/de/hl (slots 11-13 hors énumération : la constante
+  obsolète survivait au pop — sur-marquage silencieux). Le code rp du décodage est le slot
+  (BC DE HL SP = 0-3 ; pop rp 3 = AF).
+
+**Retours par la pile concrète** (`returns_resolved` de la fermeture Sega) : quand la marche
+porte un SP entièrement connu (l'état concret à l'amorçage), un `ret` prend sa continuation à
+l'adresse lue dans la pile de la machine — c'est la case des marches amorcées qui entrent dans
+une routine sans avoir poussé son appel (la pile fantôme 0.382.0 ne couvre que les appels qu'elle
+a elle-même poussés). Continuation non fiable (les gardes de données s'appliquent), cap par site
+comme les résolutions indirectes, cible hors vue comptée jamais suivie, `ret cc` : côté pris
+poussé, la marche continue au-delà. Le même SP connu fait du `pop rr` une constante prouvée
+(la lecture planifiée répond pour les mots de pile). `DpIsa.sp_slot`/`sp_width` : z80 et sm83
+câblés ; 6502/HuC6280/68000 restent à `sp_width` 0 (le `rts` 6502 ajoute 1 à l'adresse popée,
+le 68000 poppe 4 octets — tranche suivante). Compteur « stack returns » au rapport, jamais
+silencieux. Fixtures : `fix_z80_stackret.sms` + `core_closure_stackret_z80` ; tests dpmachine
+(inc dérive de l'entrée, pop lit la pile).
+
+**Banc** (mêmes réglages, statique seul, observations de l'outil) : Ace 9 735 → 9 735 (0),
+Addams 8 229 → 8 229 (0), Aerial 13 234 → 13 263 (+29 : 0x7a6(3), 0x1e733(26) — la chaîne
+`ld a,$0C / ld ($DE09),a …` y est du vrai code), Bank Panic 1 277 → 1 281 (+4). `stack returns`
+suivis : 223 / 145 / 67 / 73 ; `indirect resolved` passe de 14/0/13/4 à 15/0/19/8 (des constantes
+popées résolvent des `jp (hl)` restés hors de portée) ; `indirect unresolved` 1/0/7/8 → 0/0/4/0.
+**Propriété de sûreté conservée** : l'ensemble du noyau à tranche 2 reste un sous-ensemble strict
+de la même run avec la fermeture Sega (0 octet « regs-only » sur les quatre ROMs ; Sega apporte
+encore 978 / 763 / 2 534 / 613). Suite verte 168 tests, dont `campaign_fixtures`.
+
+Reste ouvert après cette tranche : le mode bloc Sega (ldir/djnz balayés, constantes BC/DE à travers
+les boucles), le `port_effect` des sorties OUT (mappers MSX programmés par port), les vues de
+contexte Sega (8 contextes par adresse/vue, ici le cap d'états par site joue ce rôle), les SP
+6502/68000, et le cap d'amorces par site (refus comptés : 235 K à 943 K par ROM) à étalonner.
+`sega/closure.c` reste en place (critère inchangé : banc octet à octet + zéro donnée déclarée code).
