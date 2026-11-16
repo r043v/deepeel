@@ -506,3 +506,16 @@ sur Zelda Link's Awakening (60 écritures rejouées) et sur Action Fighter UE (5
 ces ROMs, et ne perd rien. Elle réfute l'hypothèse de la section précédente : l'apport « blocs » de `sega/closure.c` sur Action Fighter ne vient pas
 des changements de vue de banque mais de la propagation de constantes de registres (HL/IX/IY, C) vers des cibles de saut, d'appel et de table. Cette
 propagation reste à porter ; `sega/closure.c` n'est pas retiré.
+
+### Relecture des sections B, D et E contre le code (0.380.0)
+
+- **B1** `--probe-ctx-cap` (sondes ré-armées par contexte) ; **B2** promotion du forcé (`promoted_forced`, `solve_tries`) ; **B3** points de contrôle de film et de
+  session, époques, rafales, graines vivantes (`live_seeds`) ; **B4** longueur de table prouvée et énumération `--unbounded` (`core.c` « B4 ») ; **B5** `exact_states` /
+  `state_repeats` (Sega : limite technique du backend) ; **B6** report `sat_path` / `sat_loop` / `max_total` ; **B7** `bank_forks` et `--bank-fork-cap` ; **B8**
+  désassemblage spéculatif (`spec`) ; **B9** `imm_refs` par `imm_ptr` / `imm_byte` ; **B10** graine SRAM et signatures apprises ; **B11** `DpObservers.on_copy`.
+  Chacune a son compteur au rapport ; les options de désactivation existent sauf celles listées dans `GB.fr.md`.
+- **D** : P0 à P8 sont soldées (statut final) ; l'ordre d'acceptation par fixtures est tenu par `tests/CMakeLists.txt` (165 tests) et `campaign_fixtures`.
+- **E** : le banc de parité contre les moteurs historiques n'existe plus (références figées dans `tests/golden/`) ; la mesure sur ROMs réelles reste des
+  observations de l'outil, sans comparaison avant/après à budget égal pour chaque technique (la courbe de rendement par source n'est pas produite).
+- **Ouvert, à décider par le propriétaire** : (1) portage de la propagation de constantes de registres de `sega/closure.c` dans le noyau (chantier C3) ;
+  (2) validation de la limite C11 (projection de contexte, raffinement d'élagage sans octet de couverture) ; (3) la courbe de rendement par technique (E).
