@@ -426,17 +426,19 @@ static int closure_prov_read(void *ctx, uint32_t addr, uint8_t *v) {
     *v = c->v.m ? c->v.m->fetch(c->v.m, addr) : c->v.cfg->rom_image[k];
     return 1;
 }
-// "zero data marked code" point 3: the first instructions of an untrusted
-// entry (a call's fall-through, the inline-data idiom) are decoded and the
-// entry is refused when they look like data: the ISA's signature on the first
-// bytes (repeated rst $38, accumulator-store soup, undocumented no-op
-// prefixes) or eight sequential instructions with no control transfer anywhere
-// (the byte soup of tiles/index tables decodes as valid straight-line code).
-// The classic first-step guards (padding and pointer runs, data flags) are NOT
-// duplicated: when the first step would hit one, the entry is left to the walk
-// so it stops there with its own counter (closure_stopped_data).
+// "zero data marked code" point 3: the first bytes of an untrusted entry (a
+// call's fall-through, the inline-data idiom) are checked against the ISA's
+// data signature (repeated rst $38, accumulator-store soup, undocumented
+// no-op prefixes) and the entry is refused when they match.  A generic
+// "eight sequential instructions with no control transfer" rule was tried and
+// rejected on the bench: real straight-line leaf code (unrolled shifts,
+// save/restore prologues) decodes exactly like that, and refusing its entry
+// lost provably real code on Ace of Aces and Bank Panic.  The classic
+// first-step guards (padding and pointer runs, data flags) are NOT
+// duplicated: when the first step would hit one, the entry is left to the
+// walk so it stops there with its own counter (closure_stopped_data).
 static int closure_entry_is_data(const DpCoreResult *r, const DpIsa *isa, const ClosureView *v, uint32_t pc, int64_t k) {
-    uint8_t w[32] = {0};
+    uint8_t w[8] = {0};
     if (v->m) for (unsigned i = 0; i < sizeof w; i++) w[i] = v->m->fetch(v->m, pc + i);
     else for (unsigned i = 0; i < sizeof w && (size_t)k + i < v->cfg->rom_image_size; i++) w[i] = v->cfg->rom_image[k + i];
     if ((w[0] == 0x00 || w[0] == 0xFF) && w[1] == w[0] && w[2] == w[0] && w[3] == w[0] && w[4] == w[0] && w[5] == w[0] && w[6] == w[0] && w[7] == w[0]) return 0;   // padding: the in-walk guard stops the first step
@@ -448,15 +450,7 @@ static int closure_entry_is_data(const DpCoreResult *r, const DpIsa *isa, const 
     }
     if (hit) return 0;
     if (k >= 0 && (__atomic_load_n(&r->flags[k], __ATOMIC_RELAXED) & (DP_CORE_DATA | DP_CORE_COPIED))) return 0;   // a data-marked root: the walk stops on it
-    if (isa->entry_data_sig && isa->entry_data_sig(w, 8)) return 1;
-    unsigned n = 0; uint32_t o = 0;
-    while (n < 8 && o < sizeof w) {
-        DpFlowInfo f; memset(&f, 0, sizeof f);
-        if (!isa->flow(w + o, pc + o, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL) return 0;   // the walk dies on its own at this step
-        if (f.kind != DP_FLOW_SEQ || f.halt) return 0;   // a control transfer inside the window: plausible code
-        o += f.length; n++;
-    }
-    return n >= 8;   // eight sequential instructions, no control transfer: data soup
+    return isa->entry_data_sig && isa->entry_data_sig(w, sizeof w);
 }
 static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa, uint32_t root, uint32_t bank, uint32_t trust0,
                         const DpRegState *regs0, int thru0, unsigned budget0, RegWalk *rw) {
