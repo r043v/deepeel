@@ -22,6 +22,7 @@ typedef struct {
     uint8_t seed;      // a configured seed: dropped at pick time when its start is already covered
     uint8_t vector;    // a registry vector entry: real machine state, no forced inversion (the taint RET cut does not apply)
     uint16_t origin;   // A6: DP_SRC_* bit of a fabricated or session start, inherited by every fork (0: the game's own flow)
+    uint16_t epoch;    // B3: checkpoint epoch (0: none) the path descends from; the per-site fork cap restarts in each epoch
 } Pending;
 
 // C13: dense RAM index of an address (the machine's own, else the low 16 bits); -1 outside RAM
@@ -1291,7 +1292,7 @@ static void run_path(Worker *w, Pending *p) {
     w->win_on = w->cobs.track = 0;
     uint32_t path_id = ++w->path_id, vid = path_id, steps = 0, slice_steps = 0;
     int cur_forced = p->forced;
-    uint16_t cur_origin = p->origin;
+    uint16_t cur_origin = p->origin, cur_epoch = p->epoch;
     unsigned fdepth = 0;   // calls made since the forced fork: a ret below that pops state the path did not build
     uint8_t last_imm = 0; unsigned imm_age = 99;   // B9: the previous 8-bit immediate load and its distance in instructions
     unsigned pad_slide = 0;   // consecutive executed steps inside a pure 00/FF run (padding is not code)
@@ -1307,7 +1308,7 @@ static void run_path(Worker *w, Pending *p) {
                 if (snapshot) {
                     m->save(m, snapshot);
                     pthread_mutex_lock(&sh->mu);
-                    queue_push(sh, (Pending){ snapshot, m->pc(m), cur_forced, 0, p->input, 0, 0, cur_origin });
+                    queue_push(sh, (Pending){ snapshot, m->pc(m), cur_forced, 0, p->input, 0, 0, cur_origin, cur_epoch });
                     pthread_mutex_unlock(&sh->mu);
                 } else {
                     fprintf(stderr, "deepeel: cannot preserve stopped kernel path\n");
@@ -1330,7 +1331,7 @@ static void run_path(Worker *w, Pending *p) {
                 uint8_t *snapshot = malloc(sh->sbytes ? sh->sbytes : 1);
                 if (snapshot) {
                     m->save(m, snapshot);
-                    ram_push(sh, (Pending){ snapshot, m->pc(m), cur_forced, 0, p->input, 0, 0, cur_origin });
+                    ram_push(sh, (Pending){ snapshot, m->pc(m), cur_forced, 0, p->input, 0, 0, cur_origin, cur_epoch });
                     Pending yielded = sh->q[sh->qn - 1];
                     memmove(sh->q + 1, sh->q, (sh->qn - 1) * sizeof *sh->q);
                     sh->q[0] = yielded;
@@ -1382,9 +1383,9 @@ static void run_path(Worker *w, Pending *p) {
                     uint8_t *cp = malloc(sh->sbytes);
                     if (cp) {
                         m->save(m, cp);
-                        __atomic_fetch_add(&sh->ckpts, 1, __ATOMIC_RELAXED);
+                        unsigned ep_ = __atomic_add_fetch(&sh->ckpts, 1, __ATOMIC_RELAXED);
                         pthread_mutex_lock(&sh->mu);
-                        queue_push(sh, (Pending){ cp, m->pc(m), 0, ckpt_site(m, loc), 0, 0, 0, DP_SRC_SESSION });
+                        queue_push(sh, (Pending){ cp, m->pc(m), 0, ckpt_site(m, loc), 0, 0, 0, DP_SRC_SESSION, (uint16_t)(ep_ < 0x7FFFu ? ep_ : 0x7FFFu) });
                         pthread_cond_signal(&sh->cv);
                         pthread_mutex_unlock(&sh->mu);
                         loc->tas_ckpts++;
@@ -1459,9 +1460,9 @@ static void run_path(Worker *w, Pending *p) {
                     uint8_t *cp = malloc(sh->sbytes ? sh->sbytes : 1);
                     if (cp) {
                         m->save(m, cp);
-                        __atomic_fetch_add(&sh->sess_ckpts, 1, __ATOMIC_RELAXED);
+                        unsigned ep_ = __atomic_add_fetch(&sh->sess_ckpts, 1, __ATOMIC_RELAXED);
                         pthread_mutex_lock(&sh->mu);
-                        queue_push(sh, (Pending){ cp, m->pc(m), 0, ckpt_site(m, loc), 0, 0, 0, DP_SRC_SESSION });
+                        queue_push(sh, (Pending){ cp, m->pc(m), 0, ckpt_site(m, loc), 0, 0, 0, DP_SRC_SESSION, (uint16_t)(0x8000u | (ep_ < 0x7FFFu ? ep_ : 0x7FFFu)) });
                         pthread_cond_signal(&sh->cv);
                         pthread_mutex_unlock(&sh->mu);
                         loc->sess_ckpts++;
@@ -1498,9 +1499,9 @@ static void run_path(Worker *w, Pending *p) {
                 }
             }
         }
-        if (!cfg->unbounded && (attract || play) && steps >= (cfg->max_total ? cfg->max_total / 2 : 400000000u)) { loc->sat_path++; defer_state(sh, m, loc, (Pending){ NULL, 0, cur_forced, 0, p->input, 0, 0, cur_origin }); loc->session_frames += m->frame(m) - sess_f0; break; }   // a long session shares the budget
-        if (!tas && !attract && !play && cfg->max_path_steps && steps >= cfg->max_path_steps) { loc->sat_path++; defer_state(sh, m, loc, (Pending){ NULL, 0, cur_forced, 0, p->input, 0, 0, cur_origin }); break; }
-        if (!attract && !play && cur_input && cfg->max_total && steps >= session_cap) { loc->sat_path++; defer_state(sh, m, loc, (Pending){ NULL, 0, cur_forced, 0, p->input, 0, 0, cur_origin }); break; }
+        if (!cfg->unbounded && (attract || play) && steps >= (cfg->max_total ? cfg->max_total / 2 : 400000000u)) { loc->sat_path++; defer_state(sh, m, loc, (Pending){ NULL, 0, cur_forced, 0, p->input, 0, 0, cur_origin, cur_epoch }); loc->session_frames += m->frame(m) - sess_f0; break; }   // a long session shares the budget
+        if (!tas && !attract && !play && cfg->max_path_steps && steps >= cfg->max_path_steps) { loc->sat_path++; defer_state(sh, m, loc, (Pending){ NULL, 0, cur_forced, 0, p->input, 0, 0, cur_origin, cur_epoch }); break; }
+        if (!attract && !play && cur_input && cfg->max_total && steps >= session_cap) { loc->sat_path++; defer_state(sh, m, loc, (Pending){ NULL, 0, cur_forced, 0, p->input, 0, 0, cur_origin, cur_epoch }); break; }
         uint32_t pc = m->pc(m);
         if (cfg->hooks && cfg->hooks->before_step &&
             !cfg->hooks->before_step(cfg->hooks->user, m, pc)) break;
@@ -1511,7 +1512,7 @@ static void run_path(Worker *w, Pending *p) {
         uint32_t skey, vi = site_slot(m, pc, w->site_n, &skey);
         if (w->stamp[vi] != vid) { w->stamp[vi] = vid; w->visits[vi] = 0; }
         if (!tas && (cfg->visits_per_pc || (cfg->unbounded && m->state_hash && !cfg->no_exact))) ++w->visits[vi];   // B5 counts visits without a cap
-        if (!tas && cfg->visits_per_pc && w->visits[vi] > cfg->visits_per_pc) { loc->sat_loop++; defer_state(sh, m, loc, (Pending){ NULL, 0, cur_forced, 0, p->input, 0, 0, cur_origin }); break; }
+        if (!tas && cfg->visits_per_pc && w->visits[vi] > cfg->visits_per_pc) { loc->sat_loop++; defer_state(sh, m, loc, (Pending){ NULL, 0, cur_forced, 0, p->input, 0, 0, cur_origin, cur_epoch }); break; }
         if (cfg->unbounded && !tas && m->state_hash && !cfg->no_exact && w->visits[vi] >= 4 && (!(w->visits[vi] & (w->visits[vi] - 1)) || !(w->visits[vi] & 63))) {
             // B5: the pc was revisited 4, 8, 16... and every 64 times on this path (a loop whose period is a frame needs the dense samples); the same machine state at the same pc means
             // the continuation was (or is being) explored already: a spin loop ends here instead of running forever
@@ -1763,7 +1764,7 @@ static void run_path(Worker *w, Pending *p) {
             }
         }
         int cond = have_flow && fi.kind == DP_FLOW_COND && fi.target >= 0;
-        if (cond && cfg->fork_site_cap && w->capped[site_slot(m, pc, w->site_n, NULL)] == skey) { loc->sat_site++; cond = 0; }   // site already saturated: no snapshot, no lock
+        if (cond && cfg->fork_site_cap && !cur_epoch && w->capped[site_slot(m, pc, w->site_n, NULL)] == skey) { loc->sat_site++; cond = 0; }   // site already saturated: no snapshot, no lock
         uint8_t *pre = NULL;
         if (cond) {
             pre = malloc(sh->sbytes);
@@ -1843,15 +1844,15 @@ static void run_path(Worker *w, Pending *p) {
             } else {
                 pthread_mutex_lock(&sh->mu);
                 int64_t sk_ = m->rom_index(m, pc);
-                uint32_t *cnt = site_count(&sh->sites, sk_ >= 0 ? (uint32_t)sk_ + 1u : (pc | 0x80000000u));   // A5: per ROM site (bank-aware), not per pc
+                uint32_t *cnt = site_count(&sh->sites, (sk_ >= 0 ? (uint32_t)sk_ + 1u : (pc | 0x80000000u)) ^ ((uint32_t)cur_epoch * 0x9E3779B1u));   // B3: the cap restarts in each checkpoint epoch   // A5: per ROM site (bank-aware), not per pc
                 int pushed = 0;
                 if (cfg->cell_hi > cfg->cell_lo || !cfg->no_cells) {
                     if (cell_insert(sh, cell_key(cfg, sh->ramread, m, other))) loc->cells++;
                     else { loc->cell_pruned++; pthread_mutex_unlock(&sh->mu); free(pre); continue; }
                 }
-                if (cfg->fork_site_cap && *cnt >= cfg->fork_site_cap) { loc->sat_site++; w->capped[site_slot(m, pc, w->site_n, NULL)] = skey; }
+                if (cfg->fork_site_cap && *cnt >= cfg->fork_site_cap) { loc->sat_site++; if (!cur_epoch) w->capped[site_slot(m, pc, w->site_n, NULL)] = skey; }
                 else {
-                    queue_push(sh, (Pending){ pre, other, 1, (uint32_t)(m->rom_index(m, pc) + 1), cur_input, 0, 0, cur_origin });
+                    queue_push(sh, (Pending){ pre, other, 1, (uint32_t)(m->rom_index(m, pc) + 1), cur_input, 0, 0, cur_origin, cur_epoch });
                     (*cnt)++;
                     loc->forks++;
                     pushed = 1;
