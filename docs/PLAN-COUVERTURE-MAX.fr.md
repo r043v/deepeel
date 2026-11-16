@@ -595,10 +595,11 @@ sont sans effet à 10⁶ pas (leurs compteurs sont nuls ou trop tardifs, cf. la 
 dépensent des pas qui ne rapportent qu'au-delà de 10⁶ (cf. la courbe : 670 fourches résolues à 3·10⁶). Ce n'est pas une preuve qu'elles nuisent à budget
 infini, seulement qu'elles ne sont pas rentables à ce budget. Le total « connu » ne départage pas naturel et forcé : `--no-site-score` déplace 2 600 octets du naturel vers le forcé.
 
-### C3 : pistes du gain de la fermeture Sega (observation, Action Fighter UE) — corrigé
+### C3 : le gain réel de la fermeture Sega est de 85 octets (observation, Action Fighter UE) — corrige les sections précédentes
 
-Première version de cette section (retirée) : elle affirmait une table de pointeurs à pas de 4 en `$C87C` désignant le bloc `$2222`. Vérification faite,
-`$C87C` contient des octets de données répétitifs (`22 22 16 16 …`, probablement des tuiles) : la coïncidence d'un mot 16 bits n'est pas une table. Seul fait
-établi : les cinq plus grands blocs propres à `sega/closure.c` (1 058, 1 004, 866, 382, 225 octets) n'ont ni `call`/`jp` absolu en ROM qui les désigne ; le
-mécanisme (retours par la pile concrète, registres IX/IY/BC, ou lecture de table) reste **non localisé**. Il faut une instrumentation de provenance par nœud
-de la fermeture Sega (qui a mis ce nœud en file, par quelle règle) ; non faite.
+Mesure déterministe (`--attract-frames 600 --max-total 3000000 --jobs 1`, vidage des drapeaux du résultat, comparaison octet à octet) : avec la fermeture
+Sega 7 940 octets statiques seuls, sans elle (`DEEPEEL_NO_SEGA_CLOSURE=1`) 7 855 ; **85 octets propres à la fermeture Sega, 0 propres au noyau**, en cinq
+plages (30, 24, 23, 7 et 1 octets). Les écarts de plusieurs milliers d'octets relevés plus haut venaient de runs sans `--jobs 1` (exploration non
+déterministe, mélangée à l'effet de la fermeture) et ne mesuraient pas la fermeture. Le port des pistes (retours par la pile concrète, IX/IY/BC) vise donc
+au plus ~1 % de statique sur cette ROM ; il reste justifié par la règle de couverture, mais n'est pas le gain massif supposé. Pas de retrait de
+`sega/closure.c` sans banc octet à octet sur SMS/GG/SG/MSX ; les 85 octets sont la cible chiffrée de ce banc. Non fait.
