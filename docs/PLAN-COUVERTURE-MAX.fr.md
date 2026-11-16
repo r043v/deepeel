@@ -431,3 +431,10 @@ d'entrées, observés au rapport). Observation de l'outil sur ROM réelle hors d
 40 s) : 55 des 69 entrées du registre touchées par des chemins naturels, 229 arêtes statiques hors de la vue ROM comptées, 1369 fourches
 résolues dont 74 promues du forcé, saturation par site 734570 rapportée. Ce ne sont pas des mesures de matériel. Le banc de parité
 contre les moteurs historiques n'existe plus : ceux-ci sont supprimés, les références figées sont dans `tests/golden/`.
+
+Relecture des lignes C2/C4/C8/C10 du tableau §C contre le code (0.379.1) : les symboles listés (`streams.c`, `zstm_*`, `nstm_*`, `pstm_*`,
+`replay_streams`, `static_closure` NES/PCE, `md_static_scan`, `record_copy`, `log_copy`, `flush_copy`, `*/jobs.c`) n'existent plus ; il reste le
+noyau (`obs_copy`, `infer_static`, workers du noyau). **Écart réel restant, C3** : `src/platform/sega/closure.c` (592 lignes, fermeture de
+provenance Sega avec `--target-closure`/`--block-closure`) vit à côté du marcheur du noyau ; la fusion n'est pas faite. Option `--fork-site-cap N`
+ajoutée (0.379.1) pour régler le cap par site ; le cap par époque de checkpoint (0.378.0) n'a pas de fixture propre : la fixture SMS actuelle ne sature
+aucun site (`site 0`), il faut une fixture à boucle de conditionnels pour l'épingler.

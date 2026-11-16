@@ -81,6 +81,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--ckpt-burst-frames") && i + 1 < argc) { c->ckpt_burst_frames = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--no-tas-ckpt")) { c->no_tas_ckpt = 1; return 1; }
     if (!strcmp(a, "--tas-ckpt-every") && i + 1 < argc) { c->tas_ckpt_every = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
+    if (!strcmp(a, "--fork-site-cap") && i + 1 < argc) { c->fork_site_cap = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--tas-ckpt-cap") && i + 1 < argc) { c->tas_ckpt_cap = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--no-held-budget")) { c->no_held_budget = 1; return 1; }
     if (!strcmp(a, "--held-steps") && i + 1 < argc) { c->held_steps = strtoull(argv[i + 1], NULL, 0); return 2; }
