@@ -923,3 +923,78 @@ les boucles), le `port_effect` des sorties OUT (mappers MSX programmés par port
 contexte Sega (8 contextes par adresse/vue, ici le cap d'états par site joue ce rôle), les SP
 6502/68000, et le cap d'amorces par site (refus comptés : 235 K à 943 K par ROM) à étalonner.
 `sega/closure.c` reste en place (critère inchangé : banc octet à octet + zéro donnée déclarée code).
+
+### C3 : le mode bloc Sega est déjà absorbé (0.385.0, relecture)
+
+La relecture côte à côte de `src/platform/sega/closure.c` (mode bloc) et du portage générique
+montre que le « mode bloc » de la fermeture Sega n'a **aucun mécanisme que le noyau n'ait déjà** :
+
+- **Constantes BC/DE/C** : Sega les suit dans une seconde instance (la première les laisse
+  volontairement inconnues, « the BC/DE refinement gets the remaining budget ») ; le noyau les suit
+  dès l'amorçage (`DpMachine.get_regs` amorce A,F,B,C,D,E,H,L + ombres d'un coup) et `reg_effect`
+  les maintient (`ld r,n` prouvé par la lecture planifiée, inc/dec exacts, pas des blocs ED,
+  DJNZ).
+- **ldir/lddr/cpir/cpdr** : Sega avance HL/DE/BC à travers les répétitions classées `DP_FLOW_COND`
+  vers elles-mêmes ; le noyau z80 classifie déjà ces répétitions ainsi (`isa_flow`, `DP_Z80_REPEAT`)
+  et `reg_effect` pose les mêmes pas (`zstep_pair` HL ±1, DE ±1 pour la copie, BC −1).
+- **Le registre `c`** synchronisé avec l'octet bas de BC n'existe que pour servir `port_effect`
+  (les OUT vers les ports de contrôle mémoire invalident la pile de retours) — c'est l'entrée
+  « port_effect des OUT » de la liste ouverte, pas le mode bloc.
+- **La seconde instance à budget restant** est une stratégie de budget Sega (d'abord HL/IX/IY,
+  puis BC/DE sur le reliquat), pas un mécanisme : le noyau dépense son budget autrement (caps
+  par site + ensemble de déduplication).
+
+Le mode bloc quitte donc la liste ouverte ; elle devient : `port_effect` des OUT (MSX + contrôle
+mémoire Sega), les vues de contexte Sega, les SP 6502/68000, et (voir ci-dessous) le diagnostic
+des clôtures de données.
+
+### C3 : tranche 3 — étalonnage du cap d'amorces (0.385.0, résultat négatif et diagnostic)
+
+**Ce qui est écrit** :
+- **Knob `--closure-seed-cap N`** (`DpCoreConfig.closure_seed_cap`, défaut inchangé : 4) :
+  états d'amorce distincts acceptés par site ; 0 = sans cap ; `--unbounded` le lève. Test
+  `core_closure_seedcap_z80` (la ligne C3 reste correcte sous cap 8 et cap 1).
+- **L'ensemble de déduplication grandit** au lieu de refuser à 48 K entrées : réhaussé par
+  rehachage ×2 jusqu'à `REG_SET_CEIL` (1 M entrées, plafond mémoire compté « set full », jamais
+  silencieux). Le commentaire du code prétendait « the set grows » depuis 0.383.0 sans que le
+  code grandisse — corrigé.
+
+**Banc** (échelle des caps 4/16/64/256, noyau seul, statique seul, mêmes réglages ; obs. outil) :
+
+| ROM | cap 4 | cap 16 | cap 64 | cap 256 | + Sega (réf. 0.384.0) |
+|---|---|---|---|---|---|
+| Ace of Aces (SMS) | 9 735 | 9 735 | 9 735 | 9 735 | 10 713 |
+| Addams Family (GG) | 8 229 | 8 229 | 8 229 | 8 229 | 8 992 |
+| Aerial Assault (GG) | 13 263 | 13 315 | 13 315 | 13 315 | 15 768 |
+| Bank Panic (SG) | 1 281 | 1 281 | 1 281 | 1 281 | 1 894 |
+
+**Résultat négatif net** : à parité Sega sur les caps (cap 256 = 128 amorces/groupe Sega, refus de
+site à 0 : 88 728 marches amorcées sur Ace au lieu de 488), le statique seul ne bouge pas
+(0 octet sur trois ROMs, +52 sur Aerial). L'échelle des amorces **n'est pas** l'écart restant.
+Les +52 d'Aerial (cap ≥ 16) sont des **tuiles** (bitmaps `dc dc dc 00 00 6f…`, `38 3f c0 00 78 7f…`
+à 0xa661/0xa86c) : des erreurs « donnée déclarée code ». Ils violent la propriété de sous-ensemble
+(52 octets « regs-only ») — le défaut reste donc **cap 4** (propriété tenue : 0 « regs-only » sur
+les quatre ROMs), le knob et la croissance restent pour `--unbounded` et les tranches suivantes.
+Coût mesuré : 1 à 5 s par configuration, le temps n'a jamais approché le timeout.
+
+**Diagnostic de l'écart restant** (978 / 763 / 2 534 / 613 octets Sega seuls à cap 256, diff
+cartes `map v1` classe `code-static`) : le profil n'est pas des plages de code manquées mais des
+**paires de 2 octets** (491 paires Ace, 382 Addams, 1 263 Aerial, 306 Bank Panic), en deux
+familles :
+1. **Du vrai code derrière les clôtures de données du noyau** : la marche non fiable du noyau
+   s'arrête sur les marqueurs `DP_CORE_DATA` des chemins naturels (`closure_stopped_data`), Sega
+   ne s'arrête que sur ses propres marqueurs. Exemple Ace 0x32171 : la chaîne
+   `dd 77 01/02/05/09` (`ld (ix+n),a` — du vrai code, déjà identifiée comme la perte de la
+   tranche 1) est marquée classe 3 par Sega et laissée inconnue puis **inférée donnée** (classe 9
+   `data-inferred`) par le noyau ; de même les écritures de port GG d'Addams (`ed 79`, `d3 be`) et
+   le bloc d'Aerial à 0x467. Où la clôture est fausse (du code lu comme donnée par un chemin
+   naturel), Sega a raison.
+2. **Des erreurs de Sega** : runs de zéros (Ace 0x3cbc3, 0x3cffd) et tables (Aerial 0x1efc2,
+   BankPanic 0x7620) que Sega marque code. Où la clôture est juste, Sega se trompe.
+
+L'écart ne se ferme donc ni par le budget ni par plus de mécanismes de constantes : il se tranche
+par la **qualité des clôtures de données** — exactement l'exigence « zéro donnée déclarée code »
+(vérité terrain, classe PROVISIONAL, vraisemblance). Tant que la vérité terrain n'existe pas,
+ouvrir ces clôtures ajouterait les erreurs de la famille 2 avec celles, évitées, de la famille 1
+en face. La suite ordonnée reste celle du point « zéro donnée déclarée code » ci-dessus
+(vérité terrain d'abord). `sega/closure.c` reste en place.

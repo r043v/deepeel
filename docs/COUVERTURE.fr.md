@@ -346,7 +346,10 @@ qui fournissent les hooks requis.
     coupe, `--unbounded` lève. 0.384.0 : un `ret` dont le SP de marche est
     entièrement connu suit l'adresse lue dans la pile de la machine (le `pop`
     prouve alors la paire popée) ; les dérivations exactes (inc/dec, DJNZ,
-    blocs ED, pop) partent de l'état d'entrée. C'est l'amorçage de `sega/closure.c` porté à
+    blocs ED, pop) partent de l'état d'entrée. 0.385.0 : le cap d'amorces par
+    site est réglable (`--closure-seed-cap`, défaut 4) et l'étalonnage le
+    confirme juste (jusqu'à la parité Sega, aucune prise de code, seulement des
+    erreurs de tuiles). C'est l'amorçage de `sega/closure.c` porté à
     toutes les ISA ; `sega/closure.c` n'est retiré qu'au banc octet à octet
     SMS/GG/SG/MSX sans plus d'erreurs de données (§ exigence zéro donnée code
     du plan).

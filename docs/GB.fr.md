@@ -5924,3 +5924,18 @@ l'entrée ; la fenêtre de `ld rr,nn` manquait l'octet bas ; SM83 stepping le ma
 paire (inc/dec bc/de, pop af/bc/de/hl). Tests : `core_closure_stackret_z80`, cas dpmachine
 z80/sm83. Les nombres restent des observations de l'outil ; `sega/closure.c` reste en place
 (banc octet à octet + zéro donnée déclarée code).
+
+### 0.385.0 — noyau : cap d'amorces réglable, déduplication croissante, mode bloc Sega clos
+
+Nouveau knob `--closure-seed-cap N` (états d'amorce registres distincts par site, défaut
+inchangé : 4 ; 0 = sans cap ; `--unbounded` le lève). L'ensemble de déduplication des amorces
+grandit par rehachage (×2) jusqu'à 1 M entrées au lieu de refuser à 48 K — le dépassement du
+plafond reste compté « set full ». Banc d'étalonnage (4 ROMs, caps 4/16/64/256) : relever le
+cap jusqu'à la parité Sega n'ajoute aucun octet statique seul sur trois ROMs et +52 sur Aerial
+— qui sont des tuiles marquées code (erreurs) : le défaut reste 4 et la propriété de
+sous-ensemble est tenue. Le « mode bloc » de `sega/closure.c` est clos en analyse : la seconde
+instance BC/DE de Sega n'a aucun mécanisme absent du portage (constantes, pas de blocs ED,
+DJNZ, répétitions ldir déjà génériques) ; son `c` connu ne sert que le `port_effect` (reste
+ouvert, MSX). L'écart restant Sega→noyau est diagnostiqué comme la qualité des clôtures de
+données (`DP_CORE_DATA`) — la suite est l'exigence « zéro donnée déclarée code » du plan.
+Détails et nombres : `docs/PLAN-COUVERTURE-MAX.fr.md`, tranche 3.
