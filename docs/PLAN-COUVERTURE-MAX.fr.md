@@ -636,3 +636,9 @@ cette ROM (compteurs 128 à 698 et 244 à 344 mais sans octet nouveau : leur app
 techniques paraissaient inutiles voire nuisibles : leur rendement est **différé**, ce qui fonde la décision de ne pas les juger à petit budget. Les
 vecteurs comptent à 3·10⁵ pas (−0,7) puis disparaissent (déjà atteints par les chemins naturels). Un seul run par case : pas d'intervalle de confiance, la
 différence de 10⁶ à 3·10⁶ sur `--no-site-score` (+0,5 puis −35) montre qu'un budget intermédiaire peut inverser le signe.
+
+### Essai C3 rejeté : fall-through d'appel de confiance si l'appelé est du code connu
+
+Action Fighter UE (`--jobs 1`, fermeture Sega coupée) : 7 855 → 17 472 octets statiques seuls (le même chiffre que l'essai « confiance après appel » plus
+haut, donc l'appelé connu n'apporte aucun filtre). +9 600 octets contre +85 pour la condition de retour de la fermeture Sega : sans vérité terrain (code vs
+données), le surplus ne peut pas être accepté. Retiré. La condition de retour reste à écrire à partir de la pile concrète de la fermeture Sega ; non faite.
