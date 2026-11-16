@@ -611,3 +611,28 @@ instruction déjà connue (`$1051` → `$1054`, `$6FA4` après un `call`), et no
 (confiance après `call`). Le noyau, prudent par défaut, s'arrête au fall-through d'un appel ; la fermeture Sega le suit en comptant sur son suivi de pile.
 L'essai « confiance après appel » du noyau (7 855 → 17 472) sur-marque, donc le port exige la **condition de retour** de la fermeture Sega (suivre le
 fall-through d'un appel seulement si le retour est établi par la pile concrète), pas un simple relâchement. Port non fait ; banc octet à octet requis.
+
+### Ablation par technique à trois budgets (section E, attribution complète, observation de l'outil)
+
+Zelda GB (ROM hors dépôt), `--attract-frames 300 --jobs 1`, une exécution déterministe par case. Colonnes : connu %, octets naturel / forcé / statique / copié.
+La ligne 10⁶ pas est la table précédente (même ordre de colonnes : naturel, forcé, statique, copié).
+
+| coupé | 3·10⁵ pas | 10⁶ pas | 3·10⁶ pas |
+|---|---|---|---|
+| (rien) | 34,158 (309/6 974/239/5 162) | 35,309 | 71,321 (24 743/5 690/51 230/12 699) |
+| `--no-solve` | 34,158 | 36,611 | 59,469 (18 079/3 693/43 985/12 780) |
+| `--no-index-replay` | 34,158 | 35,309 | 71,321 |
+| `--no-rng-learn` | 34,158 | 35,309 | 71,321 |
+| `--no-learn-sig` | 34,158 | 35,253 | 60,032 (19 355/4 156/40 244/12 763) |
+| `--no-site-score` | 33,955 | 35,799 | 36,098 (8 183/2 549/3 450/12 158) |
+| `--no-event-probes` | 34,158 | 35,308 | 68,853 |
+| `--no-closure` | 34,158 | 33,517 | 65,116 (statique 0) |
+| `--no-taint-cut` | 33,784 | 35,616 | 39,549 (10 984/2 286/12 026/12 099) |
+| `--no-vectors` | 33,424 | 35,309 | 71,321 |
+
+Lecture (cette ROM, ce protocole) : **à 3·10⁶ pas, quatre techniques pèsent beaucoup** — le choix par site (−35 points), la coupe de taint (−32), la résolution
+(−12) et les signatures apprises (−11) ; la fermeture statique −6 ; les sondes d'événements −2,5. Le rejeu d'index et l'apprentissage RNG restent à 0 sur
+cette ROM (compteurs 128 à 698 et 244 à 344 mais sans octet nouveau : leur apport sur Zelda est nul, pas leur utilité en général). À 10⁶ pas les mêmes
+techniques paraissaient inutiles voire nuisibles : leur rendement est **différé**, ce qui fonde la décision de ne pas les juger à petit budget. Les
+vecteurs comptent à 3·10⁵ pas (−0,7) puis disparaissent (déjà atteints par les chemins naturels). Un seul run par case : pas d'intervalle de confiance, la
+différence de 10⁶ à 3·10⁶ sur `--no-site-score` (+0,5 puis −35) montre qu'un budget intermédiaire peut inverser le signe.
