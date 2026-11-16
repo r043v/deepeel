@@ -726,3 +726,17 @@ Aerial Assault (GG), statique seul, `DEEPEEL_NO_SEGA_CLOSURE=1`, budget de march
 12 739 avec, **identiques aux trois budgets**, « capped walks 0 » partout. L'hypothèse du budget est écartée. Seule différence visible : 29 racines sans la pile, 28 avec.
 Piste non vérifiée : l'ordre des marches. Une racine déjà marquée est sautée ; si une marche à retour l'atteint la première et s'arrête sur une heuristique de données
 (confiance 0), la marche de confiance qui en aurait tiré davantage est sautée. À instruire (journaliser la racine sautée).
+
+### C3 : ce que perd réellement la pile de retours sur Aerial Assault (observation de l'outil, 0.382.0)
+
+Dump des drapeaux octet à octet (statique seul, `--jobs 1`, sans fermeture Sega) avec et sans `--no-closure-ret` : 1 080 octets statiques seuls perdus, 301 gagnés
+(solde −779). Les plages perdues sont des **données** : `0xb172-0xb2d4` et `0xb71c-0xb73a` (suites d'indices de tuiles `20 20 24 25 01 02 03…`),
+`0xde2b-0xdfd4` et `0xde03-0xde14` (motifs de tuiles `ff 55 55 00 ff 6a 6a 00…`), `0x1e0b7-0x1e11c`, `0x1f797-0x1f7f9`. Seuls 4 octets (`0x1717-0x171a`, du code
+`3a bf c0 …`) sont du vrai code perdu. Les gains (`0x149b-0x152e`, `0x1de03-0x1de91`, `0x1ffe8-0x1fff1`) sont de vraies plages à confirmer. La « perte » est donc
+surtout du **sur-marquage retiré** : la marche aveugle d'avant décodait des tuiles comme du code. Cause du retrait : la racine `0x105` (`rst $18` / `jp (hl)`) était déjà
+marquée par une marche à retour, l'ordre des marches change. Cela corrige l'interprétation du banc : l'écart d'octets statiques ne mesure pas la couverture de code, et
+« moins d'octets » peut être « moins de faux code ». La vérité terrain reste absente ; ce jugement repose sur la lecture des octets de quelques plages.
+
+**Fourche statique (à faire)** : amorcer une marche à chaque pas exécuté avec les valeurs concrètes de HL/IX/IY (ce que fait `sega/closure.c`) demande un accès générique
+aux registres (`DpMachine` n'expose aujourd'hui qu'un hachage, `ctx_reg_hash`) : une primitive `ctx_reg(m, i)` par machine, puis un état de marche porteur de ces valeurs
+pour `jp (hl)`, `jp (ix)` et `ret` de pile concrète, avec un plafond de valeurs distinctes par site. Non commencée.
