@@ -570,3 +570,27 @@ chaque mode.
 Lecture : les techniques à état (résolution, rejeu d'index, RNG, IRQ) ne produisent qu'à partir d'environ 10⁶ pas ; la fermeture statique domine l'octet
 gagné entre 10⁶ et 3·10⁶ pas (6 283 → 51 235), et le choix par nouveauté dépasse le choix simple seulement au plus grand budget. Ce n'est pas une courbe
 par technique à budget constant : l'attribution fine (retrait d'une technique à la fois) reste à mesurer et n'est pas faite ici.
+
+### Ablation par technique à budget constant (section E, observation de l'outil)
+
+Zelda GB (ROM hors dépôt), `--attract-frames 300 --max-total 1000000 --jobs 1`, une technique coupée à la fois (une exécution chacune, déterministe).
+Référence « tout » : connu 35,309 % (naturel 6 708, forcé 307, statique 6 283, copié 11 662).
+
+| coupé | connu % | naturel | forcé | statique | copié |
+|---|---|---|---|---|---|
+| (rien) | 35,309 | 6 708 | 307 | 6 283 | 11 662 |
+| `--no-solve` | 36,611 | 6 826 | 313 | 6 161 | 11 667 |
+| `--no-index-replay` | 35,309 | = | = | = | = |
+| `--no-rng-learn` | 35,309 | = | = | = | = |
+| `--no-learn-sig` | 35,253 | 6 724 | 291 | 6 283 | 11 665 |
+| `--no-site-score` | 35,799 | 5 415 | 2 921 | 5 506 | 11 696 |
+| `--no-event-probes` | 35,308 | 6 728 | 287 | 6 283 | 11 664 |
+| `--no-closure` | 33,517 | = | = | 0 | = |
+| `--no-taint-cut` | 35,616 | 6 791 | 246 | 6 263 | 11 667 |
+| `--no-vectors` | 35,309 | = | = | = | = |
+
+Lecture, à ce budget et sur cette ROM seulement : la fermeture statique est la seule technique qui rapporte nettement (+1,8 point). Index, RNG et vecteurs
+sont sans effet à 10⁶ pas (leurs compteurs sont nuls ou trop tardifs, cf. la courbe par budget). **Observation à instruire** : couper la résolution
+(`--no-solve`) ou le choix par site (`--no-site-score`) *augmente* le connu à ce budget (+1,3 et +0,5 point) ; la résolution et le score de site
+dépensent des pas qui ne rapportent qu'au-delà de 10⁶ (cf. la courbe : 670 fourches résolues à 3·10⁶). Ce n'est pas une preuve qu'elles nuisent à budget
+infini, seulement qu'elles ne sont pas rentables à ce budget. Le total « connu » ne départage pas naturel et forcé : `--no-site-score` déplace 2 600 octets du naturel vers le forcé.
