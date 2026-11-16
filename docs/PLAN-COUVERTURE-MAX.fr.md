@@ -1235,6 +1235,27 @@ largeur-d'abord (GB) : il doit respecter la forme de chemins de la plateforme (l
 plafonds, pas l'accordage). À traiter avant de présenter `--unbounded` comme régime
 couverture-max sur GB.
 
+**La campagne en deux phases validée (Zelda GB)** — bornée d'abord (défauts, forme
+largeur-d'abord, `--state-dir`), non bornée ensuite (`--resume --unbounded`, un quart
+d'heure, SIGINT) ; obs. outil :
+
+| | borné seul | non borné seul | **borné puis non borné** |
+|---|---|---|---|
+| inconnu | 35 312 | 35 875 | **24 358** |
+| naturels | 85 776 | 4 835 | **88 800** |
+| forcés | 17 361 | 101 969 | 33 632 |
+| copies ROM→? | 4 616 | 48 | **18 964** |
+| provisoire | 27 408 | 1 034 | 4 637 (confirmés ×6) |
+
+La phase non bornée, partie d'une base large, complète au lieu d'écraser : −31 % d'inconnu,
++3 024 naturels, +14 348 octets de copies (les longs chemins trouvent des routines de copie
+que les chemins courts ne finissent pas), les provisoires du borné passent au prouvé.
+Le mécanisme existe déjà (`--state-dir`/`--resume`, frontière complète reportée au budget :
+205 612 états sauvés par la phase bornée, 205 612 repris, `pending_dropped 0`). Noter : la
+classe carte d'un octet peut glisser statique→copié (précédence de la carte) quand la phase
+non bornée découvre la copie verbatim qui le couvre — un déplacement de présentation, pas
+une perte (les drapeaux sont OU-és).
+
 ## État du plan (0.388.0)
 
 Les tranches C3 sont soldées : propagation de constantes par `DpIsa.reg_effect` + amorçage

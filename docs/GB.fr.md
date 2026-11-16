@@ -6014,3 +6014,11 @@ régime non borné couvre bien plus de terrain réel que le borné (naturels ×6
 (85 776 naturels bornés → 4 835 non bornés sur Zelda après 40 min) — lever les plafonds
 ne doit pas lever l'accordage ; ouvert au plan. Détails :
 `docs/PLAN-COUVERTURE-MAX.fr.md`, section « Comparaison des régimes ».
+
+La campagne en deux phases est validée sur Zelda GB : bornée d'abord (défauts,
+`--state-dir` — elle reporte sa frontière entière au budget : 205 612 états), puis
+`--resume --unbounded` (un quart d'heure). La phase non bornée, partie d'une base large,
+complete au lieu d'écraser : inconnu 35 312 → 24 358 (−31 %), naturels 85 776 → 88 800,
+octets de copies 4 616 → 18 964, provisoires confirmés ×6, aucune perte sur les deux
+allers-retours. Un octet peut glisser statique→copié sur la carte (précédence) quand la
+copie verbatim qui le couvre est découverte — déplacement de présentation, pas une perte.
