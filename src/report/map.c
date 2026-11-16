@@ -74,20 +74,6 @@ static void first_encode(const DpFirstLog *first, DpBuf *out) {
     }
     pthread_mutex_unlock((pthread_mutex_t *)&first->mtx);
 }
-int dp_map_ch_encode(const DpResults *res, DpBuf *out) {
-    size_t n = (size_t)res->banks * 0x4000;
-    if (n > (64u << 20) / 15) return 0;   // bounded: past it the chunk is left out
-    const void *sec[8] = { res->exec_flags, res->data_flags, res->static_flags, res->exec_hits,
-                           res->data_hits, res->play_exec_hits, res->play_data_hits, res->src_flags };
-    static const int w[8] = { 1, 1, 1, 4, 4, 4, 4, 4 };
-    uint32_t mask = 0;
-    for (int i = 0; i < 8; i++) if (sec[i] && ch_nonzero(sec[i], n * (size_t)w[i])) mask |= 1u << i;
-    dp_buf_push(out, "DPCH", 4);
-    ch_put(out, 1, 4); ch_put(out, 0, 4); ch_put(out, n, 8); ch_put(out, 0x4000, 4); ch_put(out, mask, 4);
-    for (int i = 0; i < 8; i++) if (mask & (1u << i)) dp_buf_push(out, sec[i], n * (size_t)w[i]);
-    return 1;
-}
-
 // dpCv -> .map text ("bank start end class", CPU-view addresses); 0 on a size mismatch
 int dp_map_cv_to_text(const uint8_t *cv, size_t len, int banks, DpBuf *out) {
     size_t n = (size_t)banks * 0x4000;
@@ -156,11 +142,6 @@ static void methods_pct(const DpFirstLog *first, size_t total, double mshare[5])
     // the journal is bounded (first_dropped counts the overflow, reported
     // alongside): the shares then undercount slightly, they never invent
 }
-void dp_map_methods_pct(const DpResults *res, const DpMapSummary *sp, double mshare[5]) {
-    methods_pct(&res->first, sp->total, mshare);
-    if (sp->total) mshare[4] += 100.0 * (double)sp->inferred / (double)sp->total;
-}
-
 static void method_append(char *out, size_t cap, const char *name, double pct) {
     // The UI uses one decimal place; omit values that would render as 0.0%.
     if (pct < 0.05 || !cap) return;
@@ -410,34 +391,6 @@ uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum) {
     return m;
 }
 
-// sticky inference sidecar: "DPMS", u32 banks, one class byte per ROM byte (versioned by the magic)
-int dp_map_sticky_save(const DpResults *res, const char *path) {
-    if (!res->map_sticky) return 1;
-    size_t n = (size_t)res->banks * 0x4000;
-    FILE *f = fopen(path, "wb");
-    if (!f) return 0;
-    uint32_t h[2] = { 0x534D5044u, res->banks };
-    int ok = fwrite(h, sizeof h, 1, f) == 1 && fwrite(res->map_sticky, 1, n, f) == n;
-    return fclose(f) == 0 && ok;
-}
-
-long dp_map_sticky_load(DpResults *res, const char *path) {
-    FILE *f = fopen(path, "rb");
-    if (!f || !res->map_sticky) { if (f) fclose(f); return -1; }
-    size_t n = (size_t)res->banks * 0x4000;
-    uint32_t h[2];
-    uint8_t *b = malloc(n ? n : 1);
-    long got = -1;
-    if (b && fread(h, sizeof h, 1, f) == 1 && h[0] == 0x534D5044u && h[1] == res->banks && fread(b, 1, n, f) == n) {
-        got = 0;
-        for (size_t k = 0; k < n; k++)
-            if (b[k] && !res->map_sticky[k]) { res->map_sticky[k] = b[k]; got++; }
-    }
-    free(b);
-    fclose(f);
-    return got;
-}
-
 void dp_map_summary_text(const DpMapSummary *s, DpBuf *out) {
     double t = s->total ? 100.0 / (double)s->total : 0.0;
     dp_buf_fmt(out, "memory map (tool observation, %llu bytes):\n", (unsigned long long)s->total);
@@ -613,50 +566,6 @@ uint8_t *dp_map_kinds(const DpResults *res, uint64_t count[DP_MAP_KINDS]) {
     return k;
 }
 
-void dp_report_map(const DpResults *res, DpBuf *out) {
-    DpMapSummary s;
-    uint8_t *m = dp_map_build(res, &s);
-    size_t n = s.total;
-    dp_buf_fmt(out, "# deepeel map v1: whole-ROM memory map, one class per byte\n");
-    dp_buf_fmt(out, "# rom %s, %u banks of 0x4000, %llu bytes\n", res->cart && res->cart->title[0] ? res->cart->title : "?",
-               (unsigned)res->banks, (unsigned long long)n);
-    dp_buf_fmt(out, "# 'inferred-*' classes are deduced from neighbours, not observed\n");
-    dp_buf_str(out, "# ");
-    {
-        DpBuf tmp;
-        dp_buf_init(&tmp);
-        dp_map_summary_text(&s, &tmp);
-        for (size_t i = 0; i < tmp.len; i++) {
-            dp_buf_fmt(out, "%c", tmp.p[i]);
-            if (tmp.p[i] == '\n' && i + 1 < tmp.len) dp_buf_str(out, "# ");
-        }
-        dp_buf_free(&tmp);
-    }
-    {
-        uint64_t kc[DP_MAP_KINDS];
-        uint8_t *kk = dp_map_kinds(res, kc);
-        if (kk) {
-            dp_buf_str(out, "# data copied by destination (ROM bytes a copy loop or DMA moved):");
-            for (int q = 0; q < DP_MAP_KINDS; q++)
-                dp_buf_fmt(out, " %s %llu", dp_map_kind_name[q], (unsigned long long)kc[q]);
-            dp_buf_str(out, "\n# audio is not told apart from other data reads: no destination to name it\n");
-            free(kk);
-        }
-    }
-    dp_buf_str(out, "# columns: bank start end(inclusive) class\n");
-    for (size_t bs = 0; bs < n; bs += 0x4000) {
-        for (size_t i = bs; i < bs + 0x4000;) {
-            size_t j = i;
-            while (j < bs + 0x4000 && m[j] == m[i]) j++;
-            unsigned win = bs ? 0x4000 : 0;
-            dp_buf_fmt(out, "%u %04x %04x %s\n", (unsigned)(bs / 0x4000), (unsigned)(win + (i - bs)),
-                       (unsigned)(win + (j - 1 - bs)), dp_map_class_name(m[i]));
-            i = j;
-        }
-    }
-    free(m);
-}
-
 // colour of each class in the .map.png (same palette idea as the HTML page)
 static const uint8_t map_rgb[DP_MAP_COUNT][3] = {
     { 0xd0, 0x30, 0x30 }, // unknown
@@ -678,7 +587,6 @@ static const uint8_t map_rgb[DP_MAP_COUNT][3] = {
     { 0xd1, 0x8a, 0x3a }, // data -> palette/color memory
     { 0x4a, 0xa0, 0x8a }, // data -> graphics memory (tiles, nametables)
 };
-const uint8_t *dp_map_rgb(int cls) { return map_rgb[cls >= 0 && cls < DP_MAP_COUNT ? cls : 0]; }
 
 // accented glyphs: the base lowercase letter (its top two rows are free in
 // this font) with the mark drawn in rows 0-1 — decoded from UTF-8 input
@@ -789,149 +697,6 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
                           const char *path, const char *sysname, const char *filename,
                           unsigned rom_size, const uint32_t *heat, const DpPngText *extra,
                           int n_extra, const char *methods, const uint8_t *kinds);
-int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom_path,
-                      const char *path) {
-    DpMapSummary s;
-    uint8_t *m = dp_map_build(res, &s);
-    if (!m) return 0;
-    char title[17];
-    const char *ti = res->cart && res->cart->title[0] ? res->cart->title : NULL;
-    int tl = 0;
-    if (ti) {
-        for (; *ti && tl < 16; ti++)
-            if (*ti == '?') break; // cart titles are zero-padded with '?' in places
-            else if ((unsigned char)*ti >= 0x20 && (unsigned char)*ti < 0x7f) title[tl++] = *ti;
-    }
-    if (!tl && rom_path) { // no usable internal name: the file's base name
-        const char *base = rom_path + strlen(rom_path);
-        while (base > rom_path && base[-1] != '/' && base[-1] != '\\') base--;
-        for (; *base && tl < 16; base++)
-            if ((unsigned char)*base >= 0x20 && (unsigned char)*base < 0x7f) title[tl++] = *base;
-    }
-    title[tl] = 0;
-    DpBuf txt;
-    dp_buf_init(&txt);
-    dp_report_map(res, &txt);
-    double pct = s.total ? 100.0 / (double)s.total : 0.0;
-    // played usage: per-zone ranking, the played .cov, the played ROM reads
-    // per page — what m0boy picks its native code and resident ROM by
-    uint8_t *kinds = NULL; // copy-destination colours dropped from the PNG (the text keeps the counts)
-    DpHeat heat;
-    int have_heat = dp_heat_build(res, m, &heat);
-    DpBuf heat_txt, cov_txt, rom_txt;
-    dp_buf_init(&heat_txt);
-    dp_buf_init(&cov_txt);
-    dp_buf_init(&rom_txt);
-    if (have_heat) dp_heat_text(&heat, &heat_txt);
-    dp_report_cov_play(res, &cov_txt);
-    dp_report_romdata_play(res, &rom_txt);
-    uint32_t *hb = dp_heat_bytes(res);
-    // the conversion's identity: version, rom, settings, result — a tEXt
-    // chunk next to the map itself
-    // what each exploration method added, in % of the whole ROM: the rise of
-    // the known-byte count over each discovery entry, credited by source
-    double mshare[5];
-    dp_map_methods_pct(res, &s, mshare);
-    char meth[256] = "";
-    static const char *method_names[] = { "tas", "aleatoire", "fourche", "demo", "statique+infere" };
-    for (int i = 0; i < 5; i++) method_append(meth, sizeof meth, method_names[i], mshare[i]);
-    char meta[1280];
-    snprintf(meta, sizeof meta,
-             "{\"deepeel\":\"%s\",\"rom\":{\"title\":\"%s\",\"banks\":%d,\"size\":%u},"
-             "\"config\":{\"max_steps_path\":%u,\"max_paths\":%u,\"max_steps_total\":%llu,"
-             "\"queue\":%u,\"queue_max\":%u,\"mem_cap_mb\":%llu,\"loop_cap\":%u,\"seed_cap\":%u,"
-             "\"closure_rounds\":%d,\"covered_keep\":%u,\"seed_banks\":%d},"
-             "\"map\":{\"known_pct\":%.2f,\"unknown_pct\":%.2f,\"inferred_pct\":%.2f},"
-             "\"heat\":{\"exec\":%llu,\"reads\":%llu,\"zones_used\":%d,\"hot_zones\":%d,"
-             "\"hot_bytes\":%u,\"hot_share\":0.90},"
-             "\"methods_pct\":{\"tas\":%.2f,\"random\":%.2f,\"fork\":%.2f,\"attract\":%.2f,"
-             "\"static\":%.2f}}",
-             DEEPEEL_VERSION, title, res->banks,
-             res->cart ? (unsigned)res->cart->rom_size : 0u,
-             cfg ? cfg->max_steps_path : 0u, cfg ? cfg->max_paths : 0u,
-             cfg ? (unsigned long long)cfg->max_steps_total : 0ull,
-             cfg ? cfg->queue_cap : 0u, cfg ? cfg->queue_max : 0u,
-             cfg ? (unsigned long long)cfg->mem_cap_mb : 0ull,
-             cfg ? cfg->loop_back_cap : 0u, cfg ? cfg->seed_cap : 0u,
-             cfg ? cfg->closure_rounds : 0, cfg ? cfg->covered_fork_keep : 0u,
-             cfg ? cfg->seed_banks : 0,
-             s.known * pct, s.unknown * pct, s.inferred * pct,
-             have_heat ? (unsigned long long)heat.exec_total : 0ull,
-             have_heat ? (unsigned long long)heat.read_total : 0ull, have_heat ? heat.used_n : 0,
-             have_heat ? heat.hot_n : 0, have_heat ? heat.hot_bytes : 0u,
-             mshare[0], mshare[1], mshare[2], mshare[3], mshare[4]);
-    char file[64];
-    if (rom_path) {
-        const char *b = rom_path + strlen(rom_path);
-        while (b > rom_path && b[-1] != '/' && b[-1] != '\\') b--;
-        snprintf(file, sizeof file, "%s", b);
-    } else file[0] = 0;
-    // dpFr: frontier summary — deferred / cut-for-good counts per reason
-    DpBuf fr_txt;
-    dp_buf_init(&fr_txt);
-    dp_buf_fmt(&fr_txt, "{\"deferred\":{");
-    for (int r = 1; r < DP_R_COUNT; r++)
-        dp_buf_fmt(&fr_txt, "%s\"%s\":%llu", r > 1 ? "," : "", dp_reason_name(r), (unsigned long long)res->defer_by[r]);
-    dp_buf_fmt(&fr_txt, "},\"final\":{");
-    for (int r = 1; r < DP_R_COUNT; r++)
-        dp_buf_fmt(&fr_txt, "%s\"%s\":%llu", r > 1 ? "," : "", dp_reason_name(r), (unsigned long long)res->defer_final[r]);
-    dp_buf_fmt(&fr_txt, "},\"resumed\":%llu,\"pending\":%llu,\"on_disk\":%llu,\"dropped\":%llu}",
-               (unsigned long long)res->defer_resumed, (unsigned long long)res->defer_pending,
-               (unsigned long long)res->defer_on_disk, (unsigned long long)res->defer_dropped);
-    // dpTb: pointer tables located by the decoder replay (S6): rom index, stride, entries
-    DpBuf tb_txt;
-    dp_buf_init(&tb_txt);
-    dp_buf_fmt(&tb_txt, "{\"v\":1,\"stream_tables\":[");
-    for (uint32_t t = 0; t < res->tb_n; t++)
-        dp_buf_fmt(&tb_txt, "%s{\"at\":%u,\"stride\":%u,\"n\":%u}", t ? "," : "", res->tb[t].at, res->tb[t].stride, res->tb[t].count);
-    dp_buf_fmt(&tb_txt, "]}");
-    // dpIx: ROM data-read sites (observed range, no inferred base/stride), sorted by site
-    DpBuf ix_txt;
-    dp_buf_init(&ix_txt);
-    dp_buf_fmt(&ix_txt, "{\"v\":1,\"kind\":\"read-site-range\",\"sites\":[");
-    {
-        uint32_t nix = 0;
-        for (uint32_t i = 0; i < DP_IX_CAP; i++) {
-            if (!res->ix[i].site1) continue;
-            dp_buf_fmt(&ix_txt, "%s{\"site\":%u,\"kmin\":%u,\"kmax\":%u,\"n\":%u,\"stride\":%u}", nix ? "," : "",
-                       res->ix[i].site1 - 1, res->ix[i].kmin - 1, res->ix[i].kmax - 1, res->ix[i].n, res->ix[i].g);
-            nix++;
-        }
-        dp_buf_fmt(&ix_txt, "],\"dropped\":%u}", res->ix_full);
-    }
-    DpBuf ch;
-    dp_buf_init(&ch);
-    int have_ch = dp_map_ch_encode(res, &ch);
-    DpBuf fi; dp_buf_init(&fi); first_encode(&res->first, &fi);
-    DpPngText extra[9] = {
-        { "deepeel_heat", heat_txt.p, heat_txt.len, 0 },
-        { "deepeel_cov", cov_txt.p, cov_txt.len, 0 },
-        { "deepeel_rom", rom_txt.p, rom_txt.len, 0 },
-        { "dpFr", fr_txt.p, fr_txt.len, 0 },
-        { "dpTb", tb_txt.p, tb_txt.len, 0 },
-        { "dpCh", ch.p, have_ch ? ch.len : 0, 0 },
-        { "dpIx", ix_txt.p, ix_txt.len, 0 },
-        { "dpMt", meth, strlen(meth), 0 },
-        { "dpFi", fi.p, fi.len, 0 },
-    };
-    int ok = map_png_render(m, (int)res->banks, title, &s, (const char *)txt.p, txt.len,
-                            meta, path, res->plat ? res->plat->name : "gb", file,
-                            res->cart ? (unsigned)res->cart->rom_size : 0u, hb, extra, 9, meth, NULL);
-    free(kinds);
-    dp_buf_free(&ix_txt);
-    dp_buf_free(&ch);
-    dp_buf_free(&fi);
-    dp_buf_free(&tb_txt);
-    dp_buf_free(&fr_txt);
-    free(hb);
-    if (have_heat) dp_heat_free(&heat);
-    dp_buf_free(&heat_txt);
-    dp_buf_free(&cov_txt);
-    dp_buf_free(&rom_txt);
-    dp_buf_free(&txt);
-    free(m);
-    return ok;
-}
 
 static uint64_t ch_get(const uint8_t *p, unsigned width) {
     uint64_t v = 0;

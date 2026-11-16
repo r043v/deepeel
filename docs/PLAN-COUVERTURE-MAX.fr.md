@@ -395,3 +395,11 @@ registre filtre : une écriture dans un registre en lecture seule (fenêtre de b
   (miroirs repliés, régions ROM/SRAM/RAM exclues) : pas de table de 64 Kio. `dp_md_platform()` réutilise
   `dp_md_regs`, source unique.
 - Test `core_reg_typing` : une fixture par plateforme (GB, NES, MD, SMS YM2413, MSX V9938).
+
+## Couche de rapport unique (C7, 0.375.1)
+
+`src/report/` ne garde que ce que le noyau et la commande `map` appellent : retrait de `html.c`,
+de `dp_report_map_png`, `dp_report_map`, `dp_report_cov(_play)`, `dp_report_romdata(_play)`,
+`dp_map_ch_encode`, `dp_map_methods_pct`, des sidecars « sticky » et de `dp_map_rgb` (aucun appelant) :
+2577 → 1978 lignes. Le vecteur de classes unique est `dp_core_map_build` (`core_map.c`) ; PNG, texte
+et JSON en sont des projections (`dp_map_png_from_evidence`, texte « map v1 », `--summary`).

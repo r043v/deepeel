@@ -612,14 +612,6 @@ static void report_cov(const DpResults *res, DpBuf *o, const uint32_t *exec_hits
 }
 
 // hits are the full 32-bit counts (they saturate, never wrap)
-void dp_report_cov(const DpResults *res, DpBuf *o) { report_cov(res, o, res->exec_hits, res->data_hits, 0); }
-
-// played sessions only, instruction starts only, proven-data runs as one
-// line with a 5th column (run length): what m0boy should rank its flash
-// budget by (the map PNG's deepeel_cov)
-void dp_report_cov_play(const DpResults *res, DpBuf *o) {
-    report_cov(res, o, res->play_exec_hits, res->play_data_hits, 1);
-}
 
 // --- romdata ----------------------------------------------------------------------
 // ROM data-read profile in m0boy's romdata-*.prof format ("page count", one
@@ -641,10 +633,4 @@ static void report_romdata(const DpResults *res, DpBuf *o, const uint32_t *data_
     for (size_t p = 0; p < pages; p++)
         if (counts[p]) dp_buf_fmt(o, "%zx %llu\n", p, (unsigned long long)counts[p]);
     free(counts);
-}
-
-void dp_report_romdata(const DpResults *res, DpBuf *o) { report_romdata(res, o, res->data_hits); }
-
-void dp_report_romdata_play(const DpResults *res, DpBuf *o) {
-    report_romdata(res, o, res->play_data_hits);
 }

@@ -7,13 +7,9 @@
 
 void dp_report_text(const DpResults *res, const DpConfig *cfg, DpBuf *out);
 void dp_report_json(const DpResults *res, const DpConfig *cfg, DpBuf *out);
-void dp_report_cov(const DpResults *res, DpBuf *out);
 // same lines, hits from the played sessions only (the map PNG's deepeel_cov)
-void dp_report_cov_play(const DpResults *res, DpBuf *out);
 // ROM data-read heat per 256-byte page, m0boy's romdata-*.prof format
-void dp_report_romdata(const DpResults *res, DpBuf *out);
 // same, played reads only (the map PNG's deepeel_rom, m0boy's --rom-profile)
-void dp_report_romdata_play(const DpResults *res, DpBuf *out);
 
 // ---- heat: played usage per memory-map zone (heat.c)
 typedef struct DpZone {
@@ -33,10 +29,8 @@ typedef struct DpHeat {
 // zones of a dp_map_build array, ranked by played usage
 int dp_heat_build(const DpResults *res, const uint8_t *map, DpHeat *h);
 void dp_heat_free(DpHeat *h);
-void dp_heat_text(const DpHeat *h, DpBuf *out);              // deepeel_heat chunk
 void dp_heat_top_text(const DpHeat *h, int top, DpBuf *out); // text report
 // per-byte played heat for the map image (malloc'd, banks*0x4000)
-uint32_t *dp_heat_bytes(const DpResults *res);
 
 // classification of a 64-byte block of the ROM for the map views
 char dp_block_class(const DpResults *res, int bank, int block);
@@ -54,17 +48,13 @@ typedef struct DpMapSummary {
 // malloc'd per-byte class array (banks*0x4000), caller frees
 uint8_t *dp_map_build(const DpResults *res, DpMapSummary *sum);
 // sticky inferred classes persisted beside coverage.bin (a resumed run never loses an inferred byte)
-int dp_map_sticky_save(const DpResults *res, const char *path);
-long dp_map_sticky_load(DpResults *res, const char *path);
 // what each exploration method added, in % of the whole ROM: tas, random, fork, attract, static+inferred
-void dp_map_methods_pct(const DpResults *res, const DpMapSummary *s, double out[5]);
 const char *dp_map_class_name(int c);
 enum { DP_MAP_KINDS = 4 };
 extern const char *const dp_map_kind_name[DP_MAP_KINDS];
 // per ROM byte, where a copy moved it: 0 none, 1 VRAM tiles, 2 VRAM map, 3 OAM, 4 WRAM (caller frees);
 // count[q] = bytes of kind q + 1
 uint8_t *dp_map_kinds(const DpResults *res, uint64_t count[DP_MAP_KINDS]);
-const uint8_t *dp_map_rgb(int cls); // the .map.png colour of a class (3 bytes)
 int dp_map_is_code(int c);
 int dp_map_is_data(int c);
 void dp_map_apply_dest(uint8_t *classes, size_t n, const uint8_t *dest);   // typed-data classes from the DP_DEST_* map
@@ -89,11 +79,8 @@ void dp_residual_anatomy_text(const DpResults *res, const uint8_t *m, DpBuf *out
 // map summary, full residual list, every counter, tree and play facts):
 // the aggregation input of a multi-ROM campaign
 struct DpTree;
-void dp_report_map(const DpResults *res, DpBuf *out);
 // rom_path feeds the legend's name fallback (the internal title comes first);
 // cfg rides into the "deepeel_meta" tEXt chunk (version + settings + result)
-int dp_report_map_png(const DpResults *res, const DpConfig *cfg, const char *rom_path,
-                      const char *path);
 // re-render the squares image from a saved .map text (no re-exploration):
 // the text is embedded verbatim as "deepeel_map", meta rides in "deepeel_meta"
 int dp_map_png_from_maptext(const char *text, size_t len, int banks, const char *title,
@@ -110,11 +97,9 @@ int dp_map_png_from_evidence(const uint8_t *classes, size_t size, const uint32_t
                              const char *filename, const char *path);
 // dpCv: lossless class vector (RLE) embedded in the map PNG; decode returns 1
 // when the runs fill exactly n bytes
-int dp_map_ch_encode(const DpResults *res, DpBuf *out);   // dpCh: flags and hit counters
 void dp_map_cv_encode(const uint8_t *m, size_t n, DpBuf *out);
 int dp_map_cv_decode(const uint8_t *p, size_t len, uint8_t *m, size_t n);
 int dp_map_cv_to_text(const uint8_t *cv, size_t len, int banks, DpBuf *out);
 extern unsigned dp_map_png_budget; // pixel budget of the squares image (default 16 Mpx)
-void dp_report_html(const DpResults *res, DpBuf *out);
 
 #endif
