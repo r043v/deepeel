@@ -176,7 +176,7 @@ typedef struct DpCoreResult {
     int in_novelty_path;        // internal: the path being run was a novelty pick
     uint64_t seeded_ram, event_probe_sites, irq_forks, jitter_forks, sessions; // probe sites visited (technique 2)
     uint64_t event_probes;      // alternative-status states queued
-    uint64_t ckpt_bursts;   // B3: pad bursts started from session checkpoints
+    uint64_t epoch_forks, ckpt_bursts;   // B3: pad bursts started from session checkpoints
     uint64_t closure_roots, closure_bytes, closure_capped, closure_jp_tables, closure_jp_entries, prov_data_bytes; uint32_t *jp_seen; unsigned jp_seen_n, jp_seen_cap; uint64_t closure_stack_dropped, pending_dropped, deferred, state_repeats, exact_states, probe_ctx_sat, probe_rearms, bank_forks, bank_fork_sat, tas_ckpts, sess_ckpts, held_stops;   // static closure: roots walked, bytes newly marked, walks stopped by the cap
     uint64_t cells;             // distinct (fork target, RAM cell) pairs queued (technique 8)
     uint64_t cell_pruned;       // forced forks dropped because their (target, RAM cell) pair was already queued

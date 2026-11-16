@@ -478,3 +478,8 @@ point « indices de banque des vues commutables » de C3 : le marcheur du noyau 
 `DpIsa` « stocke A à une adresse absolue » (Z80 `32`, SM83 `EA`, 6502 `8D`, HuC6280 `TAM`) + `imm_byte` (existe, B9) pour la constante, le registre
 de banque venant de `DpPlatform.io_regs` (catégorie banque) et le changement de vue de `DpMachine.bank_view`. Non commencé : c'est le dernier
 chantier C3 et il ne se prouve qu'au banc octet à octet sur les ROMs SMS/GG/SG/MSX (zéro octet statique perdu, négatifs non classés).
+
+Compteur d'époque (0.379.2) : le rapport indique « forks past the per-site cap thanks to a checkpoint epoch » (`epoch_forks`) : fourches mises en file par un
+chemin d'époque alors que le cap par site aurait refusé hors époque. Observation de l'outil : 0 sur la fixture SMS (un seul checkpoint, aucun site saturé) et
+0 sur Action Fighter avec un film de 1 500 trames (aucun checkpoint de film produit par ce film synthétique) ; l'effet du cap par époque n'est donc pas encore
+démontré par une valeur non nulle. Il faut un film réel de la ROM ou une fixture à boucle de conditionnels.
