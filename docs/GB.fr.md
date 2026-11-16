@@ -5969,7 +5969,9 @@ memory-control OUT (port_effect) ») et son SP concret. `DpIsa.out_port` reconna
 port sauf un store connu qui rate $A8 ; GG : $3E ; SMS/SG : pairs sous $40). Sémantique de
 `sega/closure.c` (port_effect + unknown_store) : jeter, jamais simuler. Fixture
 `fix_msx_portout.msx` + test `core_closure_portout_msx`. Banc 4 ROMs : 0/856/45/23 retours
-jetés, zéro octet perdu, sous-ensemble tenu. ### 0.387.0 — noyau : retours par la pile concrète sur 6502 et 68000
+jetés, zéro octet perdu, sous-ensemble tenu.
+
+### 0.387.0 — noyau : retours par la pile concrète sur 6502 et 68000
 
 `DpIsa.sp_ret` décrit le pull de chaque opcode de retour — largeur, biais de l'adresse
 (`rts` 6502 poppe l'adresse moins un) et décalage au-dessus du pointeur (le 6502 pousse en
@@ -5981,3 +5983,20 @@ Fixtures `fix_nes_stackret.nes` / `fix_md_stackret.md` + tests
 `core_closure_stackret_6502` / `core_closure_stackret_68000` (« stack returns » non nul,
 ligne C3 absente sous `--no-closure-regs`). Banc z80 inchangé. Détails :
 `docs/PLAN-COUVERTURE-MAX.fr.md`.
+
+### Audit E11 — le contrat d'arrêt/spool `--unbounded` jugé sur disque suffisant
+
+Observations, aucune modification de code (le dépôt reste en 0.388.0). Le contrat jugé sur
+ROM réelle (Zelda — Link's Awakening FR, sessions par défaut), le spool (`TMPDIR`) et
+l'état (`--state-dir`) sur la partition Windows — disque de capacité suffisante, deux
+allers-retours complets : le SIGINT sauve la frontière complète (« frontier: 0 states
+resumed, 262131 saved », fichier au octet près : 12 + 262 131 × 25 193, dont 196 595
+déversés puis relus du spool, `pending_dropped 0`, rapport produit, sortie 0) ; `--resume`
+reprend exactement les 262 131 états, OU-e la couverture au chargement et repart de l'avant
+(un quart d'heure : naturels 206 → 4 819, forcés 36 059 → 105 660, 103,9 M pas), le second
+SIGINT renomme atomiquement un `frontier.bin` de 14,3 Go (566 113 états), encore sans perte.
+L'échec tmpfs d'essai (« failed to save complete kernel frontier », rapport absent) ne se
+reproduit pas : la capacité était le seul facteur. L'état GB pèse 25 Ko — l'espace requis
+est compt × état ; la frontière de 566 113 états est laissée en place sur la partition,
+prête pour `frontier drain`. Chiffres complets :
+`docs/PLAN-COUVERTURE-MAX.fr.md`, section « Audit E11 ».

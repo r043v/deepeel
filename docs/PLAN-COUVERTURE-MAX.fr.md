@@ -1168,8 +1168,35 @@ passe bien par le spool (`<texte>.state/` écrit : cells, coverage, disc, exact)
 sauvegarde complète de la frontière (65 549 états en attente × la taille d'état GB) a besoin
 d'un espace disque égal à compt × état — sur le tmpfs d'essai l'écriture échoue (message
 compté « failed to save complete kernel frontier », jamais silencieux) et le rapport texte
-n'est pas produit. Le contrat d'arrêt/spool (`--unbounded`, E11) reste l'item d'audit ouvert
-côté propriétaire : il se juge sur un disque de capacité suffisante.
+n'est pas produit. Le contrat d'arrêt/spool (`--unbounded`, E11) est audité depuis, sur un
+disque de capacité suffisante : voir « Audit E11 » ci-dessous.
+
+### Audit E11 (0.388.0 — disque suffisant, la partition Windows sert de tmp)
+
+Le contrat d'arrêt/spool (`--unbounded`) jugé sur ROM réelle (Zelda — Link's Awakening FR,
+GB, sessions par défaut, spool et état sur la partition Windows via `TMPDIR` + `--state-dir`),
+deux allers-retours complets :
+
+1. **Arrêt SIGINT** : frontière complète sauvée — « frontier: 0 states resumed, 262131 saved »,
+   `frontier.bin` de 6 603 866 295 octets = 12 + 262 131 × 25 193 au octet près (état
+   GB = 25 177 octets), dont 196 595 déversés puis relus du spool (`refused 0`),
+   `pending_dropped 0`, rapport texte produit, sortie 0, aucun message d'échec. L'échec tmpfs
+   de l'essai précédent (échec compté, rapport absent) ne se reproduit pas : la capacité
+   était le seul facteur.
+2. **Reprise `--resume`** : les 262 131 états repris sont exactement les 262 131 sauvés ; la
+   couverture est OU-ée au chargement (« resumed coverage map (36389 bytes added) », sources
+   conservées, 36 267 entrées du journal de découverte) ; un quart d'heure d'exploration
+   reprend la couverture (naturels 206 → 4 819, forcés 36 059 → 105 660, 103,9 M pas) ;
+   second SIGINT : « saved 566113 », `frontier.bin` de 14 262 084 821 octets = 12 +
+   566 113 × 25 193, rename atomique par-dessus le précédent, encore `pending_dropped 0`,
+   `refused 0`, aucun échec.
+
+Observations (pas des défaillances) : l'état GB pèse 25 Ko — une salve `--unbounded` d'un
+quart d'heure accumule 566 113 états en attente (14,3 Go), l'espace requis est bien
+compt × état, conformément à la note d'ouverture ; sur ntfs la relecture des 6,6 Go a pris
+~17 min (~9 Mo/s, bureau chargé) — un fs natif Linux serait plus rapide, la partition
+Windows a été retenue pour la capacité. La frontière reprise est laissée en place sur la
+partition, prête pour une reprise (`frontier drain`).
 
 ## État du plan (0.388.0)
 
@@ -1188,5 +1215,10 @@ et l'effet zéro-donnée mesuré (Aerial : −2 671 erreurs de donnée déclaré
 2. le retrait de `sega/closure.c` : seulement au banc octet à octet SMS/GG/SG/MSX sans plus
    d'erreurs que la fermeture Sega — la contribution propre restante est 964 / 0 / 2 094 /
    608 octets (vraisemblablement la famille 2 du diagnostic : les erreurs de Sega — runs de
-   zéros et tables marquées code — que le noyau, désormais, ne copie plus) ;
-3. l'audit E11 (contrat d'arrêt/spool `--unbounded`) sur disque de capacité suffisante.
+   zéros et tables marquées code — que le noyau, désormais, ne copie plus).
+
+Audit E11 clos (voir « Audit E11 » ci-dessus) : le contrat d'arrêt/spool `--unbounded` est
+conforme sur disque de capacité suffisante — frontière complète sauvée au SIGINT (262 131
+états, 6,6 Go, `pending_dropped 0`), rapport produit, reprise `--resume` fidèle (262 131
+repris, couverture OU-ée et repartie de l'avant), seconde sauvegarde atomique (566 113
+états, 14,3 Go), aucun échec ni perte sur les deux allers-retours.
