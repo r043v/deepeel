@@ -5878,3 +5878,7 @@ plateforme dans le noyau. Posés sur NES (160x128), PCE, MD (320x224), GB (160x1
 Le noyau est le seul moteur NES (voir `docs/PLAN-COUVERTURE-MAX.fr.md`). `--entry`, `--seed-banks` et `--pad-full` sont portés ;
 `--tree`, `--demo`, `--second-pass`, `--bank-dispatch`, `--novelty`, `--evidence`, `--heat` et la file/étagères historiques disparaissent.
 Tests CLI NES : `tests/nes_kernel_fixtures.sh`. Les nombres restent des observations de l'outil.
+
+### 0.369.0 — retrait du moteur PCE historique
+
+Le noyau est le seul moteur PCE ; `--entry` est câblé sur le noyau par l'assistant de graines commun. Voir `docs/PLAN-COUVERTURE-MAX.fr.md`.

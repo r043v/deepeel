@@ -2284,7 +2284,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
             memcpy(cp, start, sh.sbytes);
             const DpSeedRegs *sr = cfg->seed_regs ? &cfg->seed_regs[i] : NULL;
             int prep = 0;
-            if (cfg->seed_banks) {   // bank 0 included: the reset view is not assumed
+            if (cfg->seed_banks && cfg->seed_banks[i] != 0xFFFF) {   // bank 0 included: the reset view is not assumed; 0xFFFF: the current mapping
                 if (m->bank_view) {
                     if (!prep) m->load(m, start);
                     if (m->bank_view(m, cfg->seed_banks[i])) prep = 1;

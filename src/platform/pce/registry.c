@@ -3,6 +3,7 @@
 // vectors, the memory regions.  Register offsets are relative to the
 // hardware page; the machine semantics live in m0boy's pce.c.
 #include "pce.h"
+#include "explore.h"
 
 static const DpIoReg pce_io_regs[] = {
     { 0x0000, 0x0000, "VDC_AR", "video", 3, DP_IMPL_IRQ | DP_IMPL_EVENT },
@@ -71,4 +72,28 @@ void dp_pce_regs(FILE *out) {
         "Block moves TII/TDD/TIN/TIA/TAI: the CPU's own copy channel (TIA/TIN\n"
         "  to $0002 = ROM->VRAM)\n"
         "Vectors: $FFF6 IRQ2/BRK, $FFF8 IRQ1 (VDC), $FFFA timer, $FFFC NMI, $FFFE reset\n", out);
+}
+
+// defaults of the CLI option block still shared with the kernel's front end
+DpPceOptions dp_pce_options(void) {
+    DpPceOptions o;
+    memset(&o, 0, sizeof o);
+    o.max_total = 60000000;
+    o.max_steps = 400000;
+    o.queue_cap = 8192;
+    o.queue_max = 0;
+    o.loop_cap = 2048;
+    o.fork_cap = 4;
+    o.pad_fork_cap = 2;
+    o.irq_fork_cap = 2;
+    o.seed_irq = 1;
+    o.static_closure = 1;
+    o.infer = 1;
+    o.play_frames = 0; o.demo_frames = 0;
+    o.play_sessions = 8;
+    o.play_seed = 1;
+    o.novelty_steps = 0;
+    o.novelty_frames = 240;
+    o.novelty_archive = 4096;
+    return o;
 }

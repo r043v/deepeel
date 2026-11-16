@@ -292,3 +292,14 @@ technique, ligne du rapport noyau qui la prouve) ; `core_*` couvrent le reste.
 - `--export-state` (sauvegarde de la cellule de nouveauté la plus profonde) : disparu avec la nouveauté NES.
 
 Reste du retrait : PCE, MD, Sega, GB (même démarche), puis `--legacy`/`DEEPEEL_LEGACY` et les chemins `DpExplorer`.
+
+## Retrait du moteur PCE historique (0.369.0)
+
+`pce/explore.c`, `pce/jobs.c` et la 2e instance PCE sont supprimés ; `--entry` PCE passe par l'assistant commun `seedset_build`
+(graines music-rip + `--entry` + `--seed-banks`, factorisé pour NES/PCE/MD). Tests : `tests/kernel_fixtures.sh` (NES + PCE).
+Retirés avec le moteur : `--tree`, `--demo`, `--ctx-cap`, `--defer-tiers`, `--second-pass`, `--bank-dispatch`, `--romdata`, `--novelty`, `--export-state`.
+
+Écarts de couverture PCE à traiter dans le noyau (C4/typage, pas par option) :
+- copies jumelles (`fix_pce_sibling`), sauts indirects par table (`fix_pce_ind` : tables non reconnues), vues `lda/tam` (`fix_pce_tam*`) ;
+- typage des écritures CD-ROM2/ADPCM et SuperGrafx (`fix_pce_adpcm`, `fix_pce_sgx`) : pas de ligne de rapport noyau ;
+- racine statique des glissements de fenêtre (`fix_pce_slide`), aiguillage de banque (`fix_pce_disp`).

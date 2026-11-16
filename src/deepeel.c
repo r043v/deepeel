@@ -1716,6 +1716,30 @@ static uint8_t *nes_read_file(const char *path, size_t *size) {
     return data;
 }
 
+// Extra entry points handed to the kernel: the music-rip seeds, the user's --entry list and, with
+// all_banks, every 16 KiB block shown at $8000.  Shared by every platform front end; a bank of
+// 0xFFFF means "the current mapping" (the kernel does not re-bank that seed).
+typedef struct { uint32_t *pc; uint16_t *bk; DpSeedRegs *rg; } DpSeedSet;
+static void seedset_free(DpSeedSet *s) { free(s->pc); free(s->bk); free(s->rg); memset(s, 0, sizeof *s); }
+static int seedset_build(DpCoreConfig *cfg, const DpMusicKernelSeeds *mks, const uint32_t *epc, const uint16_t *ebk,
+                         size_t ne, unsigned all_banks, DpSeedSet *o) {
+    memset(o, 0, sizeof *o);
+    size_t tot = mks->n + ne + all_banks;
+    if (!(ne + all_banks)) {   // nothing to add: the music seeds go as they are
+        if (mks->n) { cfg->seeds = mks->pcs; cfg->n_seeds = mks->n; cfg->seed_banks = mks->banks; cfg->seed_regs = mks->regs; }
+        return 0;
+    }
+    o->pc = malloc(tot * sizeof *o->pc); o->bk = malloc(tot * sizeof *o->bk); o->rg = malloc(tot * sizeof *o->rg);
+    if (!o->pc || !o->bk || !o->rg) { seedset_free(o); return 1; }
+    const DpSeedRegs none = { 0xFF, 0xFFFF };
+    size_t k = 0;
+    for (; k < mks->n; k++) { o->pc[k] = mks->pcs[k]; o->bk[k] = mks->banks ? mks->banks[k] : 0xFFFF; o->rg[k] = mks->regs ? mks->regs[k] : none; }
+    for (size_t e = 0; e < ne; e++, k++) { o->pc[k] = epc[e]; o->bk[k] = ebk ? ebk[e] : 0xFFFF; o->rg[k] = none; }
+    for (unsigned b = 0; b < all_banks; b++, k++) { o->pc[k] = 0x8000; o->bk[k] = (uint16_t)b; o->rg[k] = none; }
+    cfg->seeds = o->pc; cfg->n_seeds = tot; cfg->seed_banks = o->bk; cfg->seed_regs = o->rg;
+    return 0;
+}
+
 static int cmd_nes(int argc, char **argv) {
     if (argc < 4 || strcmp(argv[2], "explore")) {
         fprintf(stderr, "deepeel nes explore ROM [--tas FILE]... [--play FRAMES] [--sessions N] [--seed N] [--mapper auto|nrom|uxrom] "
@@ -1818,18 +1842,10 @@ static int cmd_nes(int argc, char **argv) {
             if (mks.skipped) fprintf(stderr, "deepeel: nes: %zu music-rip seed(s) outside every PRG window of this dump (another banking)\n", mks.skipped);
         }
         kcfg.jobs = (unsigned)nes_jobs;
-        uint32_t *eseed_pc = NULL; uint16_t *eseed_bk = NULL; DpSeedRegs *eseed_rg = NULL;
-        unsigned nbk = (opt.seed_banks && km->bank_view) ? 64 : 0;   // --seed-banks: every 16 KiB block at $8000 (bank_view refuses the missing ones)
-        size_t ne = opt.entry_count + nbk, tot = mks.n + ne;
-        if (ne) {   // --entry bank:addr and --seed-banks join the music seeds
-            eseed_pc = malloc(tot * sizeof *eseed_pc); eseed_bk = malloc(tot * sizeof *eseed_bk); eseed_rg = malloc(tot * sizeof *eseed_rg);
-            if (!eseed_pc || !eseed_bk || !eseed_rg) { free(eseed_pc); free(eseed_bk); free(eseed_rg); km->close(km); free(mseeds); free(data); return 1; }
-            for (size_t k = 0; k < mks.n; k++) { eseed_pc[k] = mks.pcs[k]; eseed_bk[k] = mks.banks ? mks.banks[k] : 0; eseed_rg[k] = mks.regs ? mks.regs[k] : (DpSeedRegs){ 0xFF, 0xFFFF }; }
-            size_t k = mks.n;
-            for (unsigned e = 0; e < opt.entry_count; e++, k++) { eseed_pc[k] = opt.entry_addr[e]; eseed_bk[k] = opt.entry_bank[e]; eseed_rg[k] = (DpSeedRegs){ 0xFF, 0xFFFF }; }
-            for (unsigned b = 0; b < nbk; b++, k++) { eseed_pc[k] = 0x8000; eseed_bk[k] = (uint16_t)b; eseed_rg[k] = (DpSeedRegs){ 0xFF, 0xFFFF }; }
-            kcfg.seeds = eseed_pc; kcfg.n_seeds = tot; kcfg.seed_banks = eseed_bk; kcfg.seed_regs = eseed_rg;
-        }
+        uint32_t epc[32]; uint16_t ebk[32];
+        for (unsigned e = 0; e < opt.entry_count; e++) { epc[e] = opt.entry_addr[e]; ebk[e] = opt.entry_bank[e]; }
+        DpSeedSet kseeds;
+        if (seedset_build(&kcfg, &mks, epc, ebk, opt.entry_count, (opt.seed_banks && km->bank_view) ? 64 : 0, &kseeds)) { km->close(km); free(mseeds); free(data); return 1; }
         if (opt.max_total) kcfg.max_total = opt.max_total;
         if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
         if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
@@ -1852,7 +1868,7 @@ static int cmd_nes(int argc, char **argv) {
         if (kok) { dp_core_report(stdout, "nes", &kr); core_outputs(argc, argv, "nes", path, &kr); }
         dp_core_result_free(&kr);
         dp_movie_free(&kmov);
-        km->close(km); free(eseed_pc); free(eseed_bk); free(eseed_rg);
+        km->close(km); seedset_free(&kseeds);
         dp_music_seeds_kernel_free(&mks); free(mseeds);
         free(data);
         return kok ? 0 : 1;
@@ -1876,14 +1892,13 @@ static int cmd_pce(int argc, char **argv) {
     DpPceOptions opt = dp_pce_options();
     opt.demo_frames = DP_DEFAULT_ATTRACT_FRAMES;
     DpCliCommon cc = { .jobs = 1 };
-    int core_flag = getenv("DEEPEEL_LEGACY") == NULL; for (int i = 3; i < argc; i++) { if (!strcmp(argv[i], "--legacy")) core_flag = 0; else if (!strcmp(argv[i], "--core")) core_flag = 1; }   // C9: the kernel is the default; --legacy runs the old engine
+    int core_flag = 1;   // the kernel is the only PCE engine
     int multitap = 0, use_core = core_flag; DpCoreConfig kcfg; dp_core_config_default(&kcfg);
     kcfg.visits_per_pc = 50000;   // Raiden at 2 M steps: natural 116 bytes at 64 visits, 2220 at 50000 (frame waits are long loops)
     for (int i = 3; i < argc; i++) {
         const char *a = argv[i];
         if (0) {}
-        else if (!strcmp(a, "--core")) use_core = 1;   // accepted, now the default
-        else if (!strcmp(a, "--legacy")) use_core = 0;
+        else if (!strcmp(a, "--core")) {}   // accepted: the kernel is the only engine
         else if (core_flag && dp_core_parse_option(&kcfg, argc, argv, i)) { i += dp_core_parse_option(&kcfg, argc, argv, i) - 1; }   // only with --core: the old engine owns --attract-frames etc.
         DP_CLI_COMMON(opt, cc)
         DP_CLI_PLAYED(opt)
@@ -1956,7 +1971,9 @@ static int cmd_pce(int argc, char **argv) {
         {   size_t hdr = size % 0x2000 == 512 ? 512 : 0;   // B8: the whole HuCard, pages scanned at their journaled windows
             kcfg.rom_image = data + hdr; kcfg.rom_image_size = size - hdr; }
         kcfg.jobs = (unsigned)pce_jobs;
-        if (mks.n) { kcfg.seeds = mks.pcs; kcfg.n_seeds = mks.n; kcfg.seed_banks = mks.banks; kcfg.seed_regs = mks.regs; }
+        uint32_t pepc[16]; for (int e = 0; e < opt.entry_count; e++) pepc[e] = opt.entries[e];
+        DpSeedSet kseeds;
+        if (seedset_build(&kcfg, &mks, pepc, NULL, (size_t)opt.entry_count, 0, &kseeds)) { free(data); return 1; }
         kcfg.hooks = dp_machine_pce_hooks();
         if (!km) { free(data); return 1; }
         if (mn) {   // each seed's pc is the window this dump's MPR already shows, else re-banked (bank_view)
@@ -1983,82 +2000,14 @@ static int cmd_pce(int argc, char **argv) {
         if (pce_dump && dp_fb_dump_ppm(pce_dump)) fprintf(stderr, "deepeel: no frame to dump\n");
         if (kok) { dp_core_report(stdout, "pce", &kr); core_outputs(argc, argv, "pce", path, &kr); }
         dp_core_result_free(&kr);
-        km->close(km);
+        km->close(km); seedset_free(&kseeds);
         dp_music_seeds_kernel_free(&mks); free(mseeds);
         free(data);
         return kok ? 0 : 1;
     }
-    DpPceResults *res = calloc(1, sizeof *res);
-    if (pce_watch) dp_fbwatch_start("deepeel pce watch");
-    int pce_ok = res && dp_pce_explore_jobs(data, size, &opt, res, pce_jobs);
-    if (pce_watch) dp_fbwatch_stop();
-    if (pce_dump && dp_fb_dump_ppm(pce_dump)) fprintf(stderr, "deepeel: no frame to dump\n");
-    if (!pce_ok) {
-        fprintf(stderr, "deepeel: pce explore failed (%s)\n", path);
-        free(res);
-        dp_music_seeds_kernel_free(&mks); free(mseeds);
-        free(data);
-        return 1;
-    }
-    fprintf(stderr, "deepeel: pce explore done — steps %llu, paths %llu, forks %llu, sections %u, copies %u\n",
-            (unsigned long long)res->steps, (unsigned long long)res->paths,
-            (unsigned long long)res->forks, res->section_count, res->copy_count);
-    if (cc.summary && dp_pce_summary(res, cc.summary)) fprintf(stderr, "deepeel: cannot write %s\n", cc.summary);
-    if (text) {
-        FILE *f = fopen(text, "w");
-        if (!f) fprintf(stderr, "deepeel: cannot write %s\n", text);
-        else { dp_pce_report(f, res); fclose(f); }
-    } else {
-        dp_pce_report(stdout, res);
-    }
-    char mapbuf[1024];
-    if (png && !map) { snprintf(mapbuf, sizeof mapbuf, "%s.map", png); map = mapbuf; }
-    if (map) {
-        size_t ml = strlen(map);
-        if (ml >= 4 && !strcmp(map + ml - 4, ".png")) {
-            uint8_t *classes = dp_pce_map_build(res);
-            dp_map_apply_dest(classes, res->rom_size, res->dest);
-            const char *base = strrchr(path, '/'); base = base ? base + 1 : path;
-            if (!classes || !dp_map_png_from_evidence(classes, res->rom_size, res->play_exec_hits,
-                                                       res->play_data_hits, res->src_flags, &res->first,
-                                                       base, "pce", base, map))
-                fprintf(stderr, "deepeel: cannot write %s\n", map);
-            free(classes);
-        } else {
-            FILE *f = fopen(map, "w");
-            if (!f) fprintf(stderr, "deepeel: cannot write %s\n", map);
-            else { dp_pce_map(f, res); fclose(f); }
-        }
-    }
-    if (pce_ev) {
-        FILE *f = fopen(pce_ev, "w");
-        if (!f) fprintf(stderr, "deepeel: cannot write %s\n", pce_ev);
-        else { dp_pce_evidence(f, res); fclose(f); }
-    }
-    if (cc.cov) {
-        FILE *f = fopen(cc.cov, "w");
-        if (!f) fprintf(stderr, "deepeel: cannot write %s\n", cc.cov);
-        else { dp_pce_cov(f, res); fclose(f); }
-    }
-    if (cc.romdata) {
-        FILE *f = fopen(cc.romdata, "w");
-        if (!f) fprintf(stderr, "deepeel: cannot write %s\n", cc.romdata);
-        else { dp_pce_romdata(f, res); fclose(f); }
-    }
-    if (rtcode_path) {
-        FILE *f = fopen(rtcode_path, "w");
-        if (f) { dp_pce_rtcode(f, res); fclose(f); }
-    }
-    dp_pce_results_free(res);
-    free(res);
-    dp_music_seeds_kernel_free(&mks); free(mseeds);
     free(data);
-    if (png) {
-        char *av[] = {"deepeel", "maprender", (char *)path, (char *)map, (char *)png,
-                      "--z80", "--sys", "pce"};
-        return cmd_maprender(8, av);
-    }
-    return 0;
+    fprintf(stderr, "deepeel: pce: the kernel is the only engine (the historical explorer is retired)\n");
+    return 2;
 }
 
 static void md_regs_print(void);
