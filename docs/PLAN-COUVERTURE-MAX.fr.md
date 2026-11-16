@@ -1147,3 +1147,46 @@ hors dépôt), puis le retrait de `sega/closure.c` au banc octet à octet ; les 
 Sega (8 contextes par adresse/vue) jouent leur rôle par le cap d'états par site. Les
 mécanismes de constantes, de retours (pile fantôme + pile concrète, toutes ISA), de vues de
 banque, de ports et de vraisemblance sont portés.
+
+## Mesures des notes ouvertes (0.388.0, obs. outil)
+
+**Gradius 2 (MSX) — cause instruite.** Le run `--max-total 300000` interrompu à 150 s montre
+6 682 318 fourches « deux côtés couverts » élaguées et 2 017 357 hachages de cellule pour
+31 071 chemins créés (4 290 fourches IRQ, 50 743 fourches de banque) : les pas n'avancent
+plus, tout le temps va à l'évaluation et à l'élagage des fourches d'une boucle d'attente
+(conditionnel aux deux côtés déjà couverts, rejoué à chaque pas — le contrat d'élagage est
+respecté, mais son coût d'évaluation domine). Ce n'est pas un écart de couverture ; une
+mémoïsation de la décision d'élagage par (site, projection) serait une optimisation, pas une
+technique. La note « ne termine pas 300 000 pas en 500 s » s'explique.
+
+**Projection sous d'autres ISA.** QuackShot (MD), `--no-cells --max-total 3000000` : 292
+fourches au total, `projection-pruned forks 0` avec et sans `--no-proj`, runs identiques — à
+ce budget la densité de fourches est trop faible pour que la projection morde ; elle reste
+utile là où les fourches sont denses à projection identique (Ace of Aces : 1 618 évincées,
+mesuré en 0.381.0). La mesure « sous `--unbounded` » n'a pas pu être prise : l'arrêt SIGINT
+passe bien par le spool (`<texte>.state/` écrit : cells, coverage, disc, exact), mais la
+sauvegarde complète de la frontière (65 549 états en attente × la taille d'état GB) a besoin
+d'un espace disque égal à compt × état — sur le tmpfs d'essai l'écriture échoue (message
+compté « failed to save complete kernel frontier », jamais silencieux) et le rapport texte
+n'est pas produit. Le contrat d'arrêt/spool (`--unbounded`, E11) reste l'item d'audit ouvert
+côté propriétaire : il se juge sur un disque de capacité suffisante.
+
+## État du plan (0.388.0)
+
+Les tranches C3 sont soldées : propagation de constantes par `DpIsa.reg_effect` + amorçage
+concret (`get_regs`), retours (pile fantôme + pile concrète z80/sm83/6502/68000 via
+`sp_ret`), simulation de banques mémoire, `port_effect` des OUT (`port_control` par
+plateforme), provisoire distinct du statique, vraisemblance à l'entrée, vérité terrain
+(`tests/truth_check.py` + fixture à vérité générée), ordre des marches indépendant de
+l'arrivée. Le banc 4 ROMs montre la propriété de sous-ensemble tenue (0 octet noyau seul)
+et l'effet zéro-donnée mesuré (Aerial : −2 671 erreurs de donnée déclarée code).
+
+**Restent ouverts, décision du propriétaire** :
+1. la vérité terrain des ROMs de banc (fichiers hors dépôt `code/données` octet à octet :
+   désassemblage manuel d'une ou deux SMS/GG, ou ROM issue d'un source connu) — le banc les
+   audite dès que le fichier existe (`/tmp/c3bench/bench4.sh` + `tests/truth_check.py`) ;
+2. le retrait de `sega/closure.c` : seulement au banc octet à octet SMS/GG/SG/MSX sans plus
+   d'erreurs que la fermeture Sega — la contribution propre restante est 964 / 0 / 2 094 /
+   608 octets (vraisemblablement la famille 2 du diagnostic : les erreurs de Sega — runs de
+   zéros et tables marquées code — que le noyau, désormais, ne copie plus) ;
+3. l'audit E11 (contrat d'arrêt/spool `--unbounded`) sur disque de capacité suffisante.
