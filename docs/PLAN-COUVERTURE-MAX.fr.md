@@ -468,3 +468,13 @@ d'octets non marqués. Les adresses $498D (fenêtre 1 de la banque 4) sont des p
 suit pas comme racines de code, la fermeture Sega le fait par ses cibles de registres (HL/IX/IY) et ses lectures de table. Suivre ces pointeurs sans
 sur-marquer exige le contrôle de plausibilité de bloc de `--block-closure` (non porté). Ce portage reste le chantier C3 ouvert ; aucun octet
 supplémentaire n'est revendiqué dans cette version.
+
+Décomposition de la fermeture Sega par couche (observation de l'outil, 0.379.1, Action Fighter UE, options `--no-block-closure`,
+`--no-target-closure`, `--no-closure`) : octets statiques seuls (hors natifs) — noyau seul 6 719 ; + fermeture de base Sega 8 542 (+1 823) ;
++ cibles `--target-closure` 8 632 (+90) ; + blocs `--block-closure` 11 104 (+2 472). Le gros du gain est donc le mode « blocs » : constantes
+de registres (A, C, HL/IX/IY) propagées dans le bloc et **effets sur le mapper simulés pendant la marche** (`port_effect`, `store_effect`,
+`address_effect`, `map_barriers` : un `ld a,n` suivi d'une écriture de registre de banque change la vue pour la suite de la marche). C'est le
+point « indices de banque des vues commutables » de C3 : le marcheur du noyau garde la banque en vigueur. Voie de portage générique : un crochet
+`DpIsa` « stocke A à une adresse absolue » (Z80 `32`, SM83 `EA`, 6502 `8D`, HuC6280 `TAM`) + `imm_byte` (existe, B9) pour la constante, le registre
+de banque venant de `DpPlatform.io_regs` (catégorie banque) et le changement de vue de `DpMachine.bank_view`. Non commencé : c'est le dernier
+chantier C3 et il ne se prouve qu'au banc octet à octet sur les ROMs SMS/GG/SG/MSX (zéro octet statique perdu, négatifs non classés).
