@@ -438,3 +438,13 @@ noyau (`obs_copy`, `infer_static`, workers du noyau). **Écart réel restant, C3
 provenance Sega avec `--target-closure`/`--block-closure`) vit à côté du marcheur du noyau ; la fusion n'est pas faite. Option `--fork-site-cap N`
 ajoutée (0.379.1) pour régler le cap par site ; le cap par époque de checkpoint (0.378.0) n'a pas de fixture propre : la fixture SMS actuelle ne sature
 aucun site (`site 0`), il faut une fixture à boucle de conditionnels pour l'épingler.
+
+### C3 : fermeture Sega, nature de l'écart (0.379.1)
+
+`sega/closure.c` n'est pas un doublon du marcheur du noyau : c'est une analyse plus riche (contextes de vue, registres HL/IX/IY et pile,
+résolution des retours, des sauts indirects et des lectures mémoire : `returns_resolved`, `indirect_resolved`, `memory_resolved`) que le
+marcheur générique n'a pas. Les fusionner en supprimant l'une perdrait de la couverture Sega ; la bonne fusion est de **porter ces techniques
+dans le marcheur du noyau pour toutes les ISA** (suivi de registres par `DpIsa`), puis de retirer `sega/closure.c` avec un banc de parité
+octet à octet sur les ROMs de `m0boy` (SMS/GG/SG/MSX). C'est un chantier d'une phase à part, non commencé.
+Le cap par époque de checkpoint est exercé par `core_movie_bursts` (une époque de film créée) mais pas isolé : une fixture à boucle de
+conditionnels saturant un site reste à écrire.
