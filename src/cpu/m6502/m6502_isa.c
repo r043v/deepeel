@@ -16,7 +16,7 @@ static int isa_length(uint8_t op) {
 static int isa_flow(const uint8_t *bytes, uint32_t pc, DpFlowInfo *o) {
     DpM6502Instruction in;
     o->kind = DP_FLOW_SEQ; o->fall = 1; o->call = 0; o->rst = 0; o->halt = 0;
-    o->target = -1; o->cond = -1; o->length = 1;
+    o->target = -1; o->cond = -1; o->length = 1; o->pair = DP_REG_PAIR_NONE;
     if (!dp_m6502_decode(bytes, 3, pc, &in)) { o->kind = DP_FLOW_ILLEGAL; o->fall = 0; return 1; }
     o->length = in.length;
     o->cond = in.condition;
@@ -66,9 +66,64 @@ static int isa_illegal(uint8_t op) {
     return in.flow == DP_M6502_JAM;
 }
 
-// the provenance lattice on the 6502: A and the pointer pair (zp/X/Y indirect)
-static void isa_effect(const uint8_t *b, DpProvRegs *r, const DpProvRom *rom) {
-    (void)b; (void)r; (void)rom;   // no proven pointer pair on the 6502 yet: nothing proven, nothing killed
+// --- C3: constant transfer over the DpRegState lattice ----------------------
+// Sound subset: immediates, transfers, deterministic inc/dec, and the listed
+// no-write space (branches, flags, stores, compares) keep their registers;
+// anything written from memory, arithmetic, or not modelled loses them, never
+// guessed.  Documented opcodes only: the undocumented space is killed.
+static void r_set(DpRegState *s, unsigned slot, uint8_t v) { s->v[slot] = v; s->known[slot] |= 1; }
+static void r_kill(DpRegState *s, unsigned slot) { s->known[slot] = 0; s->v[slot] = 0; }
+static void r_step(DpRegState *s, unsigned slot, int delta) {
+    if (s->known[slot] & 1) r_set(s, slot, (uint8_t)(s->v[slot] + delta));
+    else r_kill(s, slot);
+}
+static void isa_reg_effect(const uint8_t *b, uint32_t pc, const DpRegState *in, DpRegState *out, const DpProvRom *rom) {
+    (void)pc; (void)rom;
+    *out = *in;
+    uint8_t op = b[0];
+    switch (op) {
+    case 0xA9: r_set(out, DP_M6502R_A, b[1]); return;   // lda #
+    case 0xA2: r_set(out, DP_M6502R_X, b[1]); return;   // ldx #
+    case 0xA0: r_set(out, DP_M6502R_Y, b[1]); return;   // ldy #
+    case 0xAA: if (out->known[DP_M6502R_A] & 1) r_set(out, DP_M6502R_X, (uint8_t)out->v[DP_M6502R_A]); else r_kill(out, DP_M6502R_X); return;   // tax
+    case 0xA8: if (out->known[DP_M6502R_A] & 1) r_set(out, DP_M6502R_Y, (uint8_t)out->v[DP_M6502R_A]); else r_kill(out, DP_M6502R_Y); return;   // tay
+    case 0x8A: if (out->known[DP_M6502R_X] & 1) r_set(out, DP_M6502R_A, (uint8_t)out->v[DP_M6502R_X]); else r_kill(out, DP_M6502R_A); return;   // txa
+    case 0x98: if (out->known[DP_M6502R_Y] & 1) r_set(out, DP_M6502R_A, (uint8_t)out->v[DP_M6502R_Y]); else r_kill(out, DP_M6502R_A); return;   // tya
+    case 0xBA: if (out->known[DP_M6502R_S] & 1) r_set(out, DP_M6502R_X, (uint8_t)out->v[DP_M6502R_S]); else r_kill(out, DP_M6502R_X); return;   // tsx
+    case 0x9A: if (out->known[DP_M6502R_X] & 1) r_set(out, DP_M6502R_S, (uint8_t)out->v[DP_M6502R_X]); else r_kill(out, DP_M6502R_S); return;   // txs
+    case 0xE8: r_step(out, DP_M6502R_X, 1); return;   // inx
+    case 0xCA: r_step(out, DP_M6502R_X, -1); return;  // dex
+    case 0xC8: r_step(out, DP_M6502R_Y, 1); return;   // iny
+    case 0x88: r_step(out, DP_M6502R_Y, -1); return;  // dey
+    }
+    unsigned write = 0;
+    if (op == 0x68) write |= 1u << DP_M6502R_A;                       // pla
+    else if ((op & 0x1F) == 0x01) {                                  // the ORA/AND/EOR/ADC/STA/LDA/CMP/SBC group
+        unsigned grp = (op >> 5) & 7;
+        if (grp == 5) write |= 1u << DP_M6502R_A;                     // lda from memory: killed
+        else if (grp < 4 || grp == 7) write |= 1u << DP_M6502R_A;     // arithmetic: A killed (cmp keeps it)
+        // sta (4) and cmp (6) write nothing
+    }
+    if ((op & 0x9F) == 0x0A) write |= 1u << DP_M6502R_A;              // asl/lsr/rol/ror A
+    if (op == 0xAE || op == 0xA6 || op == 0xBE || op == 0xB6) write |= 1u << DP_M6502R_X;   // ldx from memory
+    if (op == 0xAC || op == 0xA4 || op == 0xBC || op == 0xB4) write |= 1u << DP_M6502R_Y;   // ldy from memory
+    if (write & (1u << DP_M6502R_A)) r_kill(out, DP_M6502R_A);
+    if (write & (1u << DP_M6502R_X)) r_kill(out, DP_M6502R_X);
+    if (write & (1u << DP_M6502R_Y)) r_kill(out, DP_M6502R_Y);
+    else {
+        static const uint16_t keeps[] = {   // the documented no-write space
+            0xEA, 0x1A, 0x3A, 0x5A, 0x7A, 0xDA, 0xFA,   // NOP family
+            0x18, 0x38, 0x58, 0x78, 0xB8, 0xD8, 0xF8,   // CLC SEC CLI SEI CLV CLD SED
+            0x10, 0x30, 0x50, 0x70, 0x90, 0xB0, 0xD0, 0xF0,   // branches
+            0x4C, 0x6C, 0x20, 0x60, 0x40, 0x00,         // jmp (ind) jsr rts rti brk
+            0x24, 0x2C, 0xC0, 0xE0, 0xC4, 0xE4,         // bit cpx cpy
+            0x81, 0x91, 0x85, 0x86, 0x84, 0x8C, 0x8E, 0x8D,   // stores
+            0xC1, 0xC5, 0xCD, 0xD1, 0xD5, 0xD9, 0xDD,   // cmp
+        };
+        unsigned keep = 0;
+        for (size_t i = 0; i < sizeof keeps / sizeof *keeps; i++) if (keeps[i] == op) keep = 1;
+        if (!keep) { r_kill(out, DP_M6502R_A); r_kill(out, DP_M6502R_X); r_kill(out, DP_M6502R_Y); r_kill(out, DP_M6502R_S); }   // unmodelled: never guessed
+    }
 }
 
 static int isa_disasm(const uint8_t *rom, uint32_t rom_size, uint16_t addr, char *out, size_t outsz) {
@@ -111,5 +166,5 @@ static int isa_imm_byte(const uint8_t *b, uint8_t *v) {   // B9: lda/ldx/ldy #im
 static int isa_acc_imm(const uint8_t *b, uint8_t *v) { if (b[0] != 0xA9) return 0; *v = b[1]; return 1; }   // lda #n
 static int isa_st_acc_abs(const uint8_t *b, uint32_t *a) { if (b[0] != 0x8D) return 0; *a = (uint32_t)b[1] | (uint32_t)b[2] << 8; return 1; }   // sta abs
 static const DpIsa isa = { "m6502", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
-                           isa_effect, isa_illegal, isa_disasm, isa_mem_operand, 0, 0, 1, NULL, isa_imm_byte, isa_acc_imm, isa_st_acc_abs };
+                           isa_reg_effect, isa_illegal, isa_disasm, isa_mem_operand, 0, 0, 1, NULL, isa_imm_byte, isa_acc_imm, isa_st_acc_abs };
 const DpIsa *dp_isa_m6502(void) { return &isa; }

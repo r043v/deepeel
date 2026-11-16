@@ -17,84 +17,121 @@ static int isa_cond_of(uint8_t op) { return sm83_cond_of(op); }
 static uint8_t isa_cond_flag(int c) { return sm83_cond_flag(c); }
 static int isa_illegal(uint8_t op) { return is_illegal(op); }
 
-// conservative kill tables: anything not proven kept is lost, never guessed
-static int hl_writes(uint8_t op) {
-    if (op == 0xCB) return 1; // rot/shift/bit ops on h/l: untracked
-    if (op >= 0x60 && op <= 0x66) return 1; // ld h,r except ld h,(hl) handled
-    if (op >= 0x68 && op <= 0x6E) return 1; // ld l,r except ld l,(hl) handled
-    switch (op) {
-    case 0x09: case 0x19: case 0x29: case 0x39: // add hl,rr
-    case 0x22:                                  // ldi (hl),a
-    case 0xE1:                                  // pop hl
-    case 0xEB:                                  // ex de,hl
-    case 0xF8:                                  // ld hl,sp+r8
-        return 1;
-    default:
-        return 0;
-    }
+// --- C3: constant transfer over the DpRegState lattice ----------------------
+// Sound and minimal: immediates, register copies, proven (hl)/(nn) reads and
+// the deterministic inc/dec of known bytes and pairs keep or set constants;
+// anything written without a provable value loses them.  Untracked: F (the
+// flags byte of AF never rides a code pointer).
+// slot of register code y/z (0 B .. 5 L, 7 A): pairs, low byte first
+static unsigned sm_byte_slot(unsigned r, unsigned *byte) {
+    *byte = (r & 1) ^ 1;                       // B,D,H high; C,E,L low
+    return r < 6 ? r >> 1 : DP_SM83R_A;         // BC DE HL, then A
 }
-
-static int a_writes(uint8_t op) {
-    if (op == 0xCB) return 1;
-    if ((op >= 0x80 && op <= 0xBF)) return 1;         // alu (except handled (hl) reads)
-    if (op >= 0x04 && op <= 0x3D && op != 0x76) return 1; // single-arg alu/rot/daa/cpl/scf..
-    switch (op) {
-    case 0x0A: case 0x1A:      // ld a,(bc) / ld a,(de)
-    case 0xF0: case 0xF2:      // ldh a,(n) / ld a,(C)
-    case 0x07: case 0x0F: case 0x17: case 0x1F: // rotates through a
-        return 1;
-    default:
-        return 0;
-    }
+static void sm_set_byte(DpRegState *s, unsigned slot, unsigned byte, uint8_t v) {
+    unsigned bit = 1u << byte;
+    s->v[slot] = (s->v[slot] & ~(0xffu << (8 * byte))) | (uint32_t)v << (8 * byte);
+    s->known[slot] |= (uint8_t)bit;
 }
-
-// a provable (hl)/(nn) read: the byte lands in A, unknown otherwise
-static void load_a(DpProvRegs *r, const DpProvRom *rom, uint16_t addr) {
-    uint8_t v;
-    if (rom->read(rom->ctx, addr, &v)) { r->a = v; r->aknown = 1; } else r->aknown = 0;
+static void sm_kill_byte(DpRegState *s, unsigned slot, unsigned byte) {
+    unsigned bit = 1u << byte;
+    s->v[slot] &= ~(0xffu << (8 * byte));
+    s->known[slot] &= (uint8_t)~bit;
 }
-
-static void isa_effect(const uint8_t *b, DpProvRegs *r, const DpProvRom *rom) {
-    uint8_t op = b[0], v;
+static void sm_step_byte(DpRegState *s, unsigned slot, unsigned byte, int delta) {
+    if (s->known[slot] & (1u << byte)) sm_set_byte(s, slot, byte, (uint8_t)((s->v[slot] >> (8 * byte)) + delta));
+    else sm_kill_byte(s, slot, byte);
+}
+static void sm_step_pair(DpRegState *s, unsigned slot, int delta) {
+    if ((s->known[slot] & 3) == 3) s->v[slot] = (uint32_t)((uint16_t)(s->v[slot] + delta));
+    else { sm_step_byte(s, slot, 0, delta); sm_kill_byte(s, slot, 1); }
+}
+static void sm_kill_pair(DpRegState *s, unsigned slot) { s->known[slot] &= (uint8_t)~3; s->v[slot] &= 0xffff0000u; }
+static void isa_reg_effect(const uint8_t *b, uint32_t pc, const DpRegState *in, DpRegState *out, const DpProvRom *rom) {
+    (void)pc;
+    *out = *in;
+    uint8_t op = b[0];
+    unsigned by, dslot, sslot;
     switch (op) {
-    case 0x21: r->p = (uint16_t)(b[1] | (b[2] << 8)); r->pmask = 3; break;
-    case 0x26: r->p = (uint16_t)((r->p & 0x00FF) | (b[1] << 8)); r->pmask |= 2; break;
-    case 0x2E: r->p = (uint16_t)((r->p & 0xFF00) | b[1]); r->pmask |= 1; break;
-    case 0x23: if (r->pmask == 3) r->p++; break;
-    case 0x2B: if (r->pmask == 3) r->p--; break;
-    case 0x2A: // ld a,(hli)
-        if (r->pmask == 3) { load_a(r, rom, r->p); r->p++; } else r->aknown = 0;
+    case 0x06: case 0x0E: case 0x16: case 0x1E: case 0x26: case 0x2E:   // ld r,n
+        sm_set_byte(out, sm_byte_slot((op >> 3) & 7, &by), by, b[1]);
         break;
-    case 0x7E: // ld a,(hl)
-        if (r->pmask == 3) load_a(r, rom, r->p); else r->aknown = 0;
+    case 0x01: case 0x11: case 0x21: case 0x31:   // ld rr,nn
+        { unsigned s2 = op == 0x31 ? DP_SM83R_SP : op >> 4;
+          out->v[s2] = (uint32_t)(b[1] | (b[2] << 8)); out->known[s2] |= 3; }
         break;
-    case 0x66: // ld h,(hl)
-        if (r->pmask == 3 && rom->read(rom->ctx, r->p, &v)) {
-            r->p = (uint16_t)((r->p & 0x00FF) | (v << 8)); r->pmask |= 2;
-        } else r->pmask &= (uint8_t)~2;
+    case 0x3E: sm_set_byte(out, DP_SM83R_A, 0, b[1]); break;   // ld a,n
+    case 0x40 ... 0x7F:   // ld d,s (HALT excluded below)
+        if (op == 0x76) break;
+        dslot = sm_byte_slot((op >> 3) & 7, &by);
+        if ((op & 7) == 6) {   // ld r,(hl): proven only through the ROM view
+            uint8_t v;
+            if ((out->known[DP_SM83R_HL] & 3) == 3 && rom->read(rom->ctx, out->v[DP_SM83R_HL], &v))
+                sm_set_byte(out, dslot, by, v);
+            else sm_kill_byte(out, dslot, by);
+        } else {   // ld r,r': copy the known byte
+            unsigned sby;
+            sslot = sm_byte_slot(op & 7, &sby);
+            if (in->known[sslot] & (1u << sby)) sm_set_byte(out, dslot, by, (uint8_t)(in->v[sslot] >> (8 * sby)));
+            else sm_kill_byte(out, dslot, by);
+        }
         break;
-    case 0x6E: // ld l,(hl)
-        if (r->pmask == 3 && rom->read(rom->ctx, r->p, &v)) {
-            r->p = (uint16_t)((r->p & 0xFF00) | v); r->pmask |= 1;
-        } else r->pmask &= (uint8_t)~1;
+    case 0x22: case 0x32: sm_step_pair(out, DP_SM83R_HL, op == 0x22 ? 1 : -1); break;   // ld (hl±),a: the pointer steps
+    case 0x2A: case 0x3A: {   // ld a,(hl±): proven read, then the pointer steps
+        uint8_t v;
+        if ((out->known[DP_SM83R_HL] & 3) == 3 && rom->read(rom->ctx, out->v[DP_SM83R_HL], &v)) sm_set_byte(out, DP_SM83R_A, 0, v);
+        else sm_kill_byte(out, DP_SM83R_A, 0);
+        sm_step_pair(out, DP_SM83R_HL, op == 0x2A ? 1 : -1);
+        break; }
+    case 0x23: sm_step_pair(out, DP_SM83R_HL, 1); break;
+    case 0x2B: sm_step_pair(out, DP_SM83R_HL, -1); break;
+    case 0x09: case 0x19: case 0x29: case 0x39:   // add hl,rr: exact only from two fully known pairs
+        { unsigned s2 = op == 0x39 ? DP_SM83R_SP : op >> 4;
+          if ((out->known[DP_SM83R_HL] & 3) == 3 && (out->known[s2] & 3) == 3) {
+              out->v[DP_SM83R_HL] = (uint32_t)((uint16_t)(out->v[DP_SM83R_HL] + out->v[s2])); out->known[DP_SM83R_HL] = 3;
+          } else sm_kill_pair(out, DP_SM83R_HL); }
         break;
-    case 0x3E: r->a = b[1]; r->aknown = 1; break; // ld a,n
-    case 0x67: // ld h,a
-        if (r->aknown) { r->p = (uint16_t)((r->p & 0x00FF) | (r->a << 8)); r->pmask |= 2; }
-        else r->pmask &= (uint8_t)~2;
+    case 0x0A: case 0x1A: {   // ld a,(bc)/(de): proven only through the ROM view
+        uint8_t v; unsigned s2 = op == 0x0A ? DP_SM83R_BC : DP_SM83R_DE;
+        if ((out->known[s2] & 3) == 3 && rom->read(rom->ctx, out->v[s2], &v)) sm_set_byte(out, DP_SM83R_A, 0, v);
+        else sm_kill_byte(out, DP_SM83R_A, 0);
+        break; }
+    case 0x03: case 0x13: case 0x33: sm_step_pair(out, op == 0x33 ? DP_SM83R_SP : (op >> 4) - 1, 1); break;
+    case 0x0B: case 0x1B: case 0x3B: sm_step_pair(out, op == 0x3B ? DP_SM83R_SP : (op >> 4) - 1, -1); break;
+    case 0x34: case 0x35: break;   // inc/dec (hl): memory only
+    case 0x04: case 0x0C: case 0x14: case 0x1C: case 0x24: case 0x2C: case 0x3C:
+        sm_byte_slot((op >> 3) & 7, &by); sm_step_byte(out, sm_byte_slot((op >> 3) & 7, &by), by, 1);
         break;
-    case 0x6F: // ld l,a
-        if (r->aknown) { r->p = (uint16_t)((r->p & 0xFF00) | r->a); r->pmask |= 1; }
-        else r->pmask &= (uint8_t)~1;
+    case 0x05: case 0x0D: case 0x15: case 0x1D: case 0x25: case 0x2D: case 0x3D:
+        sm_byte_slot((op >> 3) & 7, &by); sm_step_byte(out, sm_byte_slot((op >> 3) & 7, &by), by, -1);
         break;
-    case 0xFA: // ld a,(nn): a word read at an absolute address
-        load_a(r, rom, (uint16_t)(b[1] | (b[2] << 8)));
+    case 0xFA: {   // ld a,(nn): a proven absolute read
+        uint8_t v;
+        if (rom->read(rom->ctx, (uint32_t)(b[1] | (b[2] << 8)), &v)) sm_set_byte(out, DP_SM83R_A, 0, v);
+        else sm_kill_byte(out, DP_SM83R_A, 0);
+        break; }
+    case 0xF0: case 0xF2: sm_kill_byte(out, DP_SM83R_A, 0); break;   // ldh a,(n)/(C): I/O, never proven
+    case 0xF8: sm_kill_pair(out, DP_SM83R_HL); break;   // ld hl,sp+r8
+    case 0xE8: sm_kill_pair(out, DP_SM83R_SP); break;   // add sp,r8
+    case 0xF9:   // ld sp,hl
+        out->v[DP_SM83R_SP] = in->v[DP_SM83R_HL] & 0xffff; out->known[DP_SM83R_SP] = in->known[DP_SM83R_HL] & 3;
         break;
-    case 0x18: case 0x20: case 0x28: case 0x30: case 0x38: case 0x10: // control flow: untouched
+    case 0xF1: case 0xC1: case 0xD1: case 0xE1:   // pop af/bc/de/hl
+        if (op == 0xF1) sm_kill_byte(out, DP_SM83R_A, 0);
+        else sm_kill_pair(out, (op >> 4) - 1);
+        break;
+    case 0x07: case 0x0F: case 0x17: case 0x1F:   // rotates through A
+    case 0x27: case 0x2F:                         // daa, cpl
+        sm_kill_byte(out, DP_SM83R_A, 0);
+        break;
+    case 0xCB:   // rot/shift/bit/res/set: BIT writes nothing, the rest kills their target byte
+        if (b[1] < 0x40 || b[1] >= 0x80) {   // rot/shift (0x00-0x3F) and res/set (0x80-0xFF)
+            if ((b[1] & 7) != 6) { sm_byte_slot(b[1] & 7, &by); sm_kill_byte(out, sm_byte_slot(b[1] & 7, &by), by); }
+        }
         break;
     default:
-        if (hl_writes(op)) r->pmask = 0;
-        if (a_writes(op)) r->aknown = 0;
+        if (op >= 0x80 && op <= 0xB7) sm_kill_byte(out, DP_SM83R_A, 0);   // alu a,r/(hl) (CP 0xB8-0xBF keeps A)
+        else if (op == 0xC6 || op == 0xD6 || op == 0xE6 || op == 0xF6 || op == 0xCE || op == 0xDE || op == 0xEE)
+            sm_kill_byte(out, DP_SM83R_A, 0);   // alu a,n (cp n keeps A)
         break;
     }
 }
@@ -106,6 +143,7 @@ static int isa_flow(const uint8_t *b, uint32_t pc, DpFlowInfo *o) {
     int len = sm83_len(op);
     o->kind = DP_FLOW_SEQ; o->length = (uint8_t)len; o->fall = 1; o->call = 0;
     o->target = -1; o->cond = (int8_t)sm83_cond_of(op); o->rst = 0; o->halt = op == 0x76 || op == 0x10;
+    o->pair = DP_REG_PAIR_NONE;
     if (is_illegal(op)) { o->kind = DP_FLOW_ILLEGAL; o->fall = 0; return len; }
     switch (op) {
     case 0x18: case 0x20: case 0x28: case 0x30: case 0x38: // JR [cc]
@@ -131,6 +169,7 @@ static int isa_flow(const uint8_t *b, uint32_t pc, DpFlowInfo *o) {
         break;
     case 0xE9: // JP HL
         o->kind = DP_FLOW_INDIRECT; o->fall = 0;
+        o->pair = DP_SM83R_HL;
         break;
     default:
         if ((op & 0xC7) == 0xC7) { // RST
@@ -191,5 +230,5 @@ static int isa_imm_ptr(const uint8_t *b, uint32_t *imm) {   // ld bc/de/hl,nn
 }
 static int isa_acc_imm(const uint8_t *b, uint8_t *v) { if (b[0] != 0x3E) return 0; *v = b[1]; return 1; }   // ld a,n
 static int isa_st_acc_abs(const uint8_t *b, uint32_t *a) { if (b[0] != 0xEA) return 0; *a = (uint32_t)b[1] | (uint32_t)b[2] << 8; return 1; }   // ld (nn),a
-static const DpIsa isa = { "sm83", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag, isa_effect, isa_illegal, sm83_disasm, isa_mem_operand, 0x150u, 1, 0, isa_imm_ptr, NULL, isa_acc_imm, isa_st_acc_abs };
+static const DpIsa isa = { "sm83", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag, isa_reg_effect, isa_illegal, sm83_disasm, isa_mem_operand, 0x150u, 1, 0, isa_imm_ptr, NULL, isa_acc_imm, isa_st_acc_abs };
 const DpIsa *dp_isa_sm83(void) { return &isa; }

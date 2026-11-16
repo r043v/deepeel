@@ -66,22 +66,26 @@ int main(int argc, char **argv) {
     isa->flow(bad, 0, &f);
     CHECK_MSG(f.kind == DP_FLOW_ILLEGAL, "illegal opcode");
 
-    // regs_effect: ld hl,$1234 ; ld a,(hl) from a proven address ; ld h,a
+    // reg_effect (C3 lattice): ld hl,$1234 ; ld a,(hl) from a proven address ; ld h,a ; alu kills A only
     {
         uint8_t image[0x2000] = {0}; image[0x1234] = 0x5A;
         struct { uint8_t *img; int reads; } cx = { image, 0 };
         int rd(void *c, uint32_t a, uint8_t *v) { typeof(cx) *x = c; if (a >= 0x2000) return 0; *v = x->img[a]; x->reads++; return 1; }
         DpProvRom rom = { &cx, rd };
-        DpProvRegs r = {0};
+        DpRegState r, n2;
+        dp_regstate_clear(&r);
         uint8_t ldhl[3] = { 0x21, 0x34, 0x12 }, lda[1] = { 0x7E }, ldha[1] = { 0x67 }, alu[1] = { 0x80 };
-        isa->regs_effect(ldhl, &r, &rom);
-        CHECK_MSG(r.pmask == 3 && r.p == 0x1234, "ld hl,nn proves HL");
-        isa->regs_effect(lda, &r, &rom);
-        CHECK_MSG(r.aknown && r.a == 0x5A && cx.reads == 1, "ld a,(hl) reads the proven address");
-        isa->regs_effect(ldha, &r, &rom);
-        CHECK_MSG(r.pmask == 3 && r.p == 0x5A34, "ld h,a moves the proof");
-        isa->regs_effect(alu, &r, &rom);
-        CHECK_MSG(!r.aknown && r.pmask == 3, "alu kills A only");
+        isa->reg_effect(ldhl, 0x100, &r, &n2, &rom); r = n2;
+        CHECK_MSG((r.known[DP_SM83R_HL] & 3) == 3 && r.v[DP_SM83R_HL] == 0x1234, "ld hl,nn proves HL");
+        isa->reg_effect(lda, 0x100, &r, &n2, &rom); r = n2;
+        CHECK_MSG((r.known[DP_SM83R_A] & 1) && r.v[DP_SM83R_A] == 0x5A && cx.reads == 1, "ld a,(hl) reads the proven address");
+        isa->reg_effect(ldha, 0x100, &r, &n2, &rom); r = n2;
+        CHECK_MSG((r.known[DP_SM83R_HL] & 3) == 3 && r.v[DP_SM83R_HL] == 0x5A34, "ld h,a moves the proof");
+        isa->reg_effect(alu, 0x100, &r, &n2, &rom); r = n2;
+        CHECK_MSG(!(r.known[DP_SM83R_A] & 1) && (r.known[DP_SM83R_HL] & 3) == 3, "alu kills A only");
+        // jp hl carries the pair of the indirect target (C3)
+        isa->flow(jphl, 0, &f);
+        CHECK_MSG(f.pair == DP_SM83R_HL, "JP HL names its pair");
     }
     // frontier policy (spec §6): tiers, caps, names
     CHECK_MSG(dp_frontier_room(0, 0, 0, DP_R_STEPS) == DP_ROOM_OK, "room at tier 0");

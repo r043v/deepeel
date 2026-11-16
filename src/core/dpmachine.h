@@ -8,6 +8,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "../platform/platform.h"
 
@@ -31,15 +32,42 @@ typedef struct DpFlowInfo {
     int8_t cond;       // condition index (CPU specific), -1 if unconditional
     uint8_t rst;       // 1 for a restart vector (call to a fixed address)
     uint8_t halt;      // 1 when the run ends here (HALT / STOP)
+    uint8_t pair;      // DP_FLOW_INDIRECT / register-indirect CALL: the DpRegState register holding
+                       // the target (per-ISA indices below), DP_REG_PAIR_NONE when memory-based
 } DpFlowInfo;
 
-// register provenance lattice (spec §7.3 regs_effects): the pointer pair
-// (HL on the SM83/Z80) and the accumulator, each either a proven value or
-// unknown.  pmask: bit0 = low byte known, bit1 = high byte known.
-typedef struct DpProvRegs {
-    uint16_t p;
-    uint8_t pmask, a, aknown;
-} DpProvRegs;
+#define DP_REG_PAIR_NONE 255
+
+// -- DpRegState: the constant-transfer contract (C3, the generic port of the
+// Sega closure's register tracking).  One slot per register the ISA names
+// (indices below); for every slot `known` has a bit per value byte: 1 = the
+// byte is a proven constant of `v`.  A byte never proven stays unknown and is
+// never guessed (the Sega rule); the kernel treats the whole state as opaque
+// (hash + equality), only the ISA and the machine interpret the indices.
+#define DP_REG_N 24
+#define DP_REG_MAX_BYTES 4
+typedef struct DpRegState {
+    uint32_t v[DP_REG_N];
+    uint8_t known[DP_REG_N];   // per byte: 1 = proven constant
+} DpRegState;
+
+static inline void dp_regstate_clear(DpRegState *s) { memset(s, 0, sizeof *s); }
+
+// register indices per ISA: dp_isa_*.reg_effect and the platform's get_regs
+// agree on them.  Byte registers occupy byte 0 of their slot; pairs occupy
+// bytes 0..1 (low byte first) of their slot; the 68000 uses bytes 0..3 (its
+// pointers are 24-bit: the kernel masks the value with ptr_width bytes).
+enum { DP_SM83R_BC, DP_SM83R_DE, DP_SM83R_HL, DP_SM83R_SP, DP_SM83R_AF, DP_SM83R_A, DP_SM83R_NREGS = DP_SM83R_A + 1 };
+enum {
+    DP_Z80R_BC, DP_Z80R_DE, DP_Z80R_HL, DP_Z80R_IX, DP_Z80R_IY, DP_Z80R_SP,
+    DP_Z80R_A, DP_Z80R_F, DP_Z80R_B, DP_Z80R_C, DP_Z80R_D, DP_Z80R_E, DP_Z80R_H, DP_Z80R_L,
+    DP_Z80R_BC2, DP_Z80R_DE2, DP_Z80R_HL2, DP_Z80R_AF2, DP_Z80R_NREGS = DP_Z80R_AF2 + 1
+};
+enum { DP_M6502R_A, DP_M6502R_X, DP_M6502R_Y, DP_M6502R_S, DP_M6502R_NREGS = DP_M6502R_S + 1 };
+enum { DP_HUCR_A, DP_HUCR_X, DP_HUCR_Y, DP_HUCR_S, DP_HUCR_MPR0,
+       DP_HUCR_MPR7 = DP_HUCR_MPR0 + 7, DP_HUCR_NREGS = DP_HUCR_MPR7 + 1 };
+enum { DP_M68KR_D0, DP_M68KR_D7 = DP_M68KR_D0 + 7, DP_M68KR_A0 = 8, DP_M68KR_A7 = 15,
+       DP_M68KR_NREGS = DP_M68KR_A7 + 1 };
 
 // ROM access given to the effect function: read(ctx, addr, &v) returns 1 and
 // the byte when `addr` is a provable ROM address (the caller records the
@@ -75,8 +103,15 @@ typedef struct DpIsa {
     int (*cond_of)(uint8_t op);
     // state mask of the flag a condition tests (polarity in the low bit of cond)
     uint8_t (*cond_flag)(int cond);
-    // micro-effects of the instruction on the provenance lattice
-    void (*regs_effect)(const uint8_t *bytes, DpProvRegs *r, const DpProvRom *rom);
+    // C3: the constant-transfer function of the instruction at `bytes`: a
+    // register written with a proven value (immediate, copy of a known byte,
+    // deterministic arithmetic, proven ROM operand) keeps or gains its known
+    // bytes; a written register with no proven value loses them; unwritten
+    // registers pass through.  `rom` proves constant reads from the ROM (the
+    // caller records the evidence).  In and out may not alias.  NULL: this ISA
+    // has no constant tracking (the kernel leaves the state untouched).
+    void (*reg_effect)(const uint8_t *bytes, uint32_t pc, const DpRegState *in, DpRegState *out,
+                       const DpProvRom *rom);
     // 1 when `op` is an undefined opcode
     int (*illegal)(uint8_t op);
     // textual form; returns the length or 0 when undefined
@@ -257,6 +292,12 @@ struct DpMachine {
     // C11: hash of the DP_CC_REG components (CPU registers, mapper state; no clocks, no RAM).  With the RAM pages a section reads
     // (DpCoreResult.live) it is the context projection the kernel evicts on.  NULL: no projection on this machine (cell key only).
     uint64_t (*ctx_reg_hash)(struct DpMachine *);
+    // C3: the concrete CPU registers of the machine *right now* (the static
+    // closure's bootstrapping, generic: the executed step seeds a walk whose
+    // state is the live register state, per the ISA's DpRegState indices,
+    // every byte known).  Returns 0 when the CPU is in no meaningful state.
+    // NULL: no concrete seeding on this machine (the walk stays static-only).
+    int (*get_regs)(struct DpMachine *, DpRegState *out);
     int (*probes)(struct DpMachine *, const DpProbe **out);             // count
     // An independent machine of the same program for parallel workers (`worker` >= 1),
     // already initialized and at its power-on state; NULL when unsupported.
