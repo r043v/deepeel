@@ -132,6 +132,7 @@ typedef struct DpCoreResult {
     uint32_t *src_flags;       // per ROM index: DP_SRC_* (core/coverage.h), OR-ed over every proving source
     uint32_t *hits;            // P13/A9: per ROM index: execution hits of the instruction head byte (the kernel's heat; shared by the workers like flags)
     uint64_t *first_seen;      // per ROM index: global step count when first covered (0: never)
+    uint8_t *first_actor;      // P13/A9: actor of the first cover (DP_ACTOR_*, 0 unknown): a session replay discovery carries its play mode
     uint8_t *flags;            // per ROM index: DP_CORE_NATURAL | DP_CORE_FORCED
     uint64_t closure_bank_sims; uint8_t closure_banks, closure_ret; uint64_t closure_rets;   // C3: mapper writes replayed during a walk; walk-time bank simulation on
     uint64_t closure_unresolved; // C3: static edges (jump/branch/call) whose target is outside the mapped ROM view (RAM, other bank): counted, never silent

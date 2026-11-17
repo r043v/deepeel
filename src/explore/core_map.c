@@ -47,7 +47,8 @@ int dp_core_write_map(const char *path, const char *id, const char *rom_name, co
                 if (!g) break;
                 fl.e = g; fl.cap = nc;
             }
-            if (fl.n < fl.max) fl.e[fl.n++] = (DpFirstSeen){ (uint32_t)i, bit, r->first_seen[i], 0 };
+            if (fl.n < fl.max) fl.e[fl.n++] = (DpFirstSeen){ (uint32_t)i, bit, r->first_seen[i],
+                r->first_actor && r->first_actor[i] ? r->first_actor[i] : 0 };   // P13/A9: the kernel's first-cover actor (play mode of the session that found it)
         }
         const char *base = rom_name ? strrchr(rom_name, '/') : NULL;
         base = base ? base + 1 : (rom_name ? rom_name : id);

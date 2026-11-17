@@ -234,8 +234,12 @@ phase 2 `--resume --unbounded`, épingles `resumed == saved` et
 - Versions 0.389.0/0.390.0 (rapports et fenêtre changés) ; `GB.fr.md` à jour.
 
 **Restent ouverts** : la vérité terrain puis le retrait de `sega/closure.c` (M2,
-décision propriétaire gated), les acteurs par octet côté noyau (le reste de P13/A9),
-le tas par score de la file (le reste de P2 si le scan mord).
+décision propriétaire gated). Soldés en 0.391.0 : les acteurs par octet côté
+noyau (le reste de P13/A9 — `first_actor`, section `AOR1` de `coverage.bin`,
+chunk `fi` du PNG). Consigné sans action : le tas par score de la file (le
+reste de P2) — mesuré à 0.391.0, le balayage de pick coûte ~7 % sur la fixture
+la plus file-pleine (fix_irq) : le critère « si le scan mord » n'est pas
+atteint, le scan O(file) reste.
 
 ## 2. Défauts actuels du noyau (relecture 0.388.0 — corrigés en 0.389.0 sauf mention)
 

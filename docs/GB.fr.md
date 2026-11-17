@@ -6078,7 +6078,17 @@ défaut reproduit par fixture avant correctif, suite verte.
 - **Sega** : le pointeur thread-local de la closure Sega est réinitialisé à la fusion — un
   second passage noyau dans le même processus (`--campaign`) réutilisait un pointeur libéré.
 
-## 0.390.0
+## 0.391.0
+
+- **P13/A9 terminé : l'acteur de première découverte par octet** — le noyau
+  stampe l'acteur (`DP_ACTOR_*`) de la session qui découvre un octet pour la
+  première fois (`first_actor`, écrit dans `mark()` au premier couvert, section
+  `AOR1` ajoutée à `coverage.bin`, relue par `--resume`) ; le log des premières
+  découvertes du PNG (chunk `fi`) ne reconstruit plus l'acteur à 0 : la
+  répartition par méthode (« tas / aléatoire / démo / dirigé ») lit le vrai
+  mode de jeu de la session découvreuse au lieu de tout créditer au statique.
+  Les chemins hors session laissent 0 (la famille reste dans `src_flags`).
+
 
 Le reste du plan (P14-P15, M1/M4-M7, A1/A2/A5/A10, la chaleur) — chaque point
 vérifié en code avant écriture ; tests ciblés verts, épingles déplacées par les

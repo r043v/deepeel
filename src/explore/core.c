@@ -179,7 +179,7 @@ void dp_core_result_free(DpCoreResult *r) {
     free(r->prov);
     free(r->dest); free(r->spec); free(r->refs); free(r->page_win); free(r->inferred); free(r->live);
     free(r->src_flags); free(r->reg_slot); free(r->reg_reads); free(r->reg_writes); free(r->reg_vals);
-    free(r->first_seen); free(r->hits);
+    free(r->first_seen); free(r->first_actor); free(r->hits);
     memset(r, 0, sizeof *r);
 }
 
@@ -284,6 +284,7 @@ typedef struct {
     uint8_t *wsnap;        // technique 1: state at the start of the window before a conditional
     uint32_t *winmemo;     // direct-mapped: (rom index + 1) * 2 + (a conditional follows within 5 sequential instructions)
     RegWalk *regwalk;      // C3: the regstate-aware closure's per-worker caps and seed dedup
+    uint8_t path_actor;   // P13/A9: DP_ACTOR_* of the running path, stamped into first_actor at first cover
     int win_on; uint32_t win_pc; unsigned win_n;
     uint8_t win_imm[24]; unsigned win_ni;
     pthread_t th;
@@ -949,7 +950,7 @@ static void closure_jp_table(DpCoreResult *r, DpMachine *m, const DpCoreConfig *
     }
 }
 
-static void mark(Shared *sh, DpCoreResult *r, DpMachine *m, uint32_t pc, unsigned len, uint8_t how, uint16_t origin) {
+static void mark(Shared *sh, DpCoreResult *r, DpMachine *m, uint32_t pc, unsigned len, uint8_t how, uint16_t origin, uint8_t actor) {
     for (unsigned i = 0; i < len; i++) {
         int64_t k = m->rom_index(m, pc + i);
         if (k >= 0 && (size_t)k < r->rom_size) {
@@ -963,6 +964,7 @@ static void mark(Shared *sh, DpCoreResult *r, DpMachine *m, uint32_t pc, unsigne
             uint8_t old = __atomic_fetch_or(&r->flags[k], bits, __ATOMIC_RELAXED);
             if (!(old & (DP_CORE_NATURAL | DP_CORE_FORCED))) {
                 r->first_seen[k] = __atomic_load_n(&sh->steps, __ATOMIC_RELAXED) + 1;
+                r->first_actor[k] = actor;   // P13/A9: the byte's first-cover actor (0 on non-session paths, the src_flags carry the family)
                 if (r->in_novelty_path) r->novelty_new_bytes++; else r->plain_new_bytes++;
             }
             __atomic_fetch_or(&r->src_flags[k], srcbit, __ATOMIC_RELAXED);
@@ -1546,6 +1548,8 @@ static void run_path(Worker *w, Pending *p) {
     if (attract) loc->attract_paths++;
     if (play) loc->play_paths++;
     if (tas) loc->tas_paths++;
+    uint8_t path_actor = tas ? DP_ACTOR_TAS : play ? DP_ACTOR_SCRIPT : attract ? DP_ACTOR_ATTRACT : 0;   // P13/A9: a session replay discovery carries its play mode
+    w->path_actor = path_actor;
     // a session shares half the total budget with its siblings: it must not starve the natural path
     uint64_t session_cap = cfg->max_total / (2 * (cfg->sessions ? (cfg->sessions > 16 ? 16 : cfg->sessions) : 16));
     if (m->set_input && cur_input) m->set_input(m, cur_input - 1);   // input 0: keep the loaded state's held pad (probe forks hold theirs)
@@ -1938,7 +1942,7 @@ static void run_path(Worker *w, Pending *p) {
             if (fi.kind == DP_FLOW_RET) { if (!fdepth) { loc->taint_cut_ret++; break; } fdepth--; }
             else if (fi.call) fdepth++;
         }
-        mark(sh, loc, m, pc, (unsigned)len, cur_forced ? DP_CORE_FORCED : DP_CORE_NATURAL, cur_origin);
+        mark(sh, loc, m, pc, (unsigned)len, cur_forced ? DP_CORE_FORCED : DP_CORE_NATURAL, cur_origin, w->path_actor);
         if (!cur_forced && isa->imm_ptr && loc->refs) {   // B9: an executed immediate that designates the ROM is a typed reference
             uint32_t imm;
             if (isa->imm_ptr(bytes, &imm)) {
@@ -2554,8 +2558,9 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     out->page_win = calloc((rom_size >> 8) + 2, 1);   // one byte per 256 bytes: enough for any page_shift >= 8
     out->src_flags = calloc(rom_size ? rom_size : 1, sizeof *out->src_flags);
     out->first_seen = calloc(rom_size ? rom_size : 1, sizeof *out->first_seen);
+    out->first_actor = calloc(rom_size ? rom_size : 1, 1);
     out->hits = calloc(rom_size ? rom_size : 1, sizeof *out->hits);
-    if (!out->flags || !out->prov || !out->dest || !out->src_flags || !out->first_seen || !out->hits) { dp_core_result_free(out); return 0; }
+    if (!out->flags || !out->prov || !out->dest || !out->src_flags || !out->first_seen || !out->first_actor || !out->hits) { dp_core_result_free(out); return 0; }
     if (cfg->on_live) cfg->on_live(cfg->on_live_user, out);
     else if (g_live_cb) g_live_cb(g_live_user, out);
 
@@ -2588,7 +2593,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         w->loc.refs = out->refs; w->loc.page_win = out->page_win; w->loc.live = out->live; w->loc.reg_slot = out->reg_slot; w->loc.reg_reads = out->reg_reads; w->loc.reg_writes = out->reg_writes; w->loc.reg_vals = out->reg_vals; w->loc.reg_n = out->reg_n; w->loc.reg_plat = out->reg_plat; w->loc.closure_banks = out->closure_banks; w->loc.closure_ret = out->closure_ret; w->loc.live_w = out->live_w; w->loc.flags = out->flags; w->loc.src_flags = out->src_flags; w->loc.hits = out->hits;
         w->loc.dest = out->dest;
         w->loc.prov = out->prov;
-        w->loc.first_seen = out->first_seen; w->loc.rom_size = rom_size;
+        w->loc.first_seen = out->first_seen; w->loc.first_actor = out->first_actor; w->loc.rom_size = rom_size;
         w->site_n = site_n;
         w->visits = calloc(site_n, sizeof *w->visits);
         w->capped = calloc(site_n, sizeof *w->capped);
@@ -2652,6 +2657,11 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
                         } else fprintf(stderr, "deepeel: incomplete coverage sources; attribution not restored\n");
                         free(src);
                     } else if (ext_bytes || ferror(cf)) fprintf(stderr, "deepeel: invalid coverage source extension; attribution not restored\n");
+                    // P13/A9: the first-cover actors, an appended section (absent in older files)
+                    uint32_t act[2];
+                    if (fread(act, 1, sizeof act, cf) == sizeof act && act[0] == 0x31524F41u && act[1] == rom_size
+                        && fread(out->first_actor, 1, rom_size, cf) == rom_size)
+                        fprintf(stderr, "deepeel: resumed first-cover actors\n");
                 }
                 free(buf);
             }
@@ -2880,6 +2890,8 @@ cleanup:
             uint32_t ext[2] = { 0x31524353u, (uint32_t)rom_size };
             fwrite(hd, 4, 2, cf); fwrite(out->flags, 1, rom_size, cf);
             fwrite(ext, sizeof *ext, 2, cf); fwrite(out->src_flags, sizeof *out->src_flags, rom_size, cf);
+            uint32_t act[2] = { 0x31524F41u, (uint32_t)rom_size };   // P13/A9: "AOR1", the first-cover actor per byte
+            fwrite(act, sizeof *act, 2, cf); fwrite(out->first_actor, 1, rom_size, cf);   // appended: an older resume still reads the first three sections
             fclose(cf);
         }
     }
