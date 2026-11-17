@@ -92,6 +92,7 @@ typedef struct DpCoreConfig {
     unsigned probe_ctx_cap;    // B1: contexts one probe site is armed under (1: the historical once-per-site)
     const char *state_dir;     // --state-dir: pending forked states are saved to <dir>/frontier.bin at exit
     int resume;                // --resume: states saved there by a previous run are queued first
+    const char *cov_hits_path; // --cov-hits: a coverage v1 file whose per-line hits seed the heat (the max wins; the report then shows the played usage of that campaign)
     int unbounded;             // --unbounded: no step/path/site-fork ceilings; the RAM queue spills to the disk spool
     int campaign;              // --campaign: a bounded phase 1 (the platform's width-first shape, --max-time/--max-total bound, default 120 s) then --resume --unbounded in the same process; one report per phase
     const volatile sig_atomic_t *stop_requested; // cooperative interruption, checked between instructions
@@ -248,6 +249,13 @@ int dp_core_explore_cli(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg,
 void dp_core_result_free(DpCoreResult *r);
 
 void dp_core_write_cov(const char *path, const char *id, const struct DpMachine *m, const DpCoreResult *r);   // P10: the machine geometry decides the offsets
+/* --cov-transfer ROM COV: replay another revision's executed coverage as speculative
+ * seeds where the two images' four-byte instruction windows match exactly.  Returns
+ * the seed count; the arrays are the kernel's cfg->seeds / seed_banks format. */
+size_t dp_core_transfer_seeds(const uint8_t *rom, size_t rom_size,
+                              const char *other_rom_path, const char *cov_path,
+                              uint32_t **pcs, uint16_t **banks,
+                              uint64_t *lines_out, uint64_t *matched_out);
 // generic map/summary outputs (core_map.c): class vector, PNG-or-text map, JSON summary; 0 = ok, -1 = failure
 uint8_t *dp_core_map_build(const DpCoreResult *r);
 int dp_core_write_map(const char *path, const char *id, const char *rom_name, const DpCoreResult *r);

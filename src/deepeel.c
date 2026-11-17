@@ -132,6 +132,8 @@ static void usage(void) {
             "    --jobs N|auto        parallel workers sharing one frontier\n"
             "    --unbounded          lift every cap (forks, queue, spool, paths, steps, memory): only exhaustion or SIGINT stops\n"
             "    --state-dir D        persist the frontier/spool/coverage; --resume continues it\n"
+            "    --cov-transfer ROM COV   replay another revision's coverage as seeds where the instruction windows match byte for byte\n"
+            "    --cov-hits COV      seed the heat from a coverage file's hit counts (the max wins)\n"
             "    --entry bank:addr    extra seed (repeatable);  --seed-banks  seed every bank\n"
             "    --tas f / --tas-dir D   replay movies (VBA .vmv/.vbm, BizHawk .bk2, GMV, FM2, text log); --tas-any-rom accepts another revision\n"
             "    --no-sessions --no-solve --no-closure --no-infer --no-exact-state ...   switch one technique off (see docs/COUVERTURE.fr.md)\n"
@@ -332,6 +334,7 @@ static int cmd_explore(int argc, char **argv) {
     dp_config_defaults(&cfg);
     struct { const char *tas[8]; int tas_n; int tas_any_rom; } scfg = { {0}, 0, 0 };   // --tas movies (the kernel reads --state-dir/--resume itself)
     uint16_t eb[32];
+    const char *xfer_rom = NULL, *xfer_cov = NULL;   // --cov-transfer ROM COV: another revision's coverage, replayed where the bytes match
     DpCoreConfig gkcfg; dp_core_config_default(&gkcfg); gkcfg.visits_per_pc = 2000000;   // frame waits are long loops   // --core: the generic kernel instead of the GB explorer
     uint16_t ea[32];
     int entries = 0;
@@ -362,6 +365,8 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--jobs") && i + 1 < argc) { ++i; cfg.jobs = !strcmp(argv[i], "auto") ? auto_jobs() : atoi(argv[i]); }
         else if (!strcmp(a, "--no-pointer-scan")) cfg.no_pointer_scan = 1;
         else if (!strcmp(a, "--gbs") && i + 1 < argc) gbs_path = argv[++i];
+        else if (!strcmp(a, "--cov-transfer") && i + 2 < argc) { xfer_rom = argv[i + 1]; xfer_cov = argv[i + 2]; i += 2; }
+        else if (!strcmp(a, "--cov-hits") && i + 1 < argc) gkcfg.cov_hits_path = argv[++i];   // the heat of a previous campaign's coverage file
         else if (!strcmp(a, "--gbs-fetch")) {   // optional NAME; when omitted it is derived from the ROM file name
             gbs_fetch = 1;
             if (i + 1 < argc && argv[i + 1][0] != '-') gbs_name = argv[++i];
@@ -765,6 +770,25 @@ static int cmd_explore(int argc, char **argv) {
             }
             free(gbs_pcs); free(gbs_bks); free(gbs_regs);   // copied into the kernel's seed arrays above
             gbs_pcs = NULL; gbs_bks = NULL; gbs_regs = NULL; gbs_seeds = 0;
+            if (xfer_rom && xfer_cov) {   // --cov-transfer: the other revision's coverage, replayed where the instruction windows match byte for byte
+                uint32_t *tpcs = NULL; uint16_t *tbks = NULL; uint64_t tlines = 0, tmatched = 0;
+                size_t tn = dp_core_transfer_seeds(cart->rom, cart->rom_size, xfer_rom, xfer_cov, &tpcs, &tbks, &tlines, &tmatched);
+                DpSeedRegs *tregs = tn ? malloc(tn * sizeof *tregs) : NULL;
+                if (tn && !tregs) tn = 0;
+                for (size_t i = 0; i < tn; i++) { tregs[i].a = 0xFF; tregs[i].sp = 0xFFFF; }
+                if (tn && core_seed_append(&gseed_pc, &gseed_bk, &gseed_regs, &gkcfg.n_seeds, tpcs, tbks, tregs, tn)) {
+                    free(tpcs); free(tbks); free(tregs);
+                    free(gseed_pc); free(gseed_bk); free(gseed_regs);
+                    free(gmasks); dp_tas_free(&gt); km->close(km);
+                    dp_results_free(&res); dp_cart_free(cart);
+                    fprintf(stderr, "deepeel: cannot allocate cov-transfer seeds\n");
+                    return 1;
+                }
+                gkcfg.seeds = gseed_pc; gkcfg.seed_banks = gseed_bk; gkcfg.seed_regs = gseed_regs;
+                free(tpcs); free(tbks); free(tregs);
+                fprintf(stderr, "deepeel: --cov-transfer: %llu of %llu coverage lines byte-identical — %zu seeds queued\n",
+                        (unsigned long long)tmatched, (unsigned long long)tlines, tn);
+            }
             DpCoreResult kr;
             if (watch) { gkcfg.watch_every = (unsigned)(60 / watch); dp_fbwatch_start("deepeel gb watch"); }   // generic screen watch (DpMachine.render)
             rc = dp_core_explore_cli(km, cart->rom_size, &gkcfg, &kr, summary ? summary : text) ? 0 : 1;
@@ -824,10 +848,14 @@ static int cmd_maprender(int argc, char **argv) {
         free(text);
         return 1;
     }
-    // "md map v1" / "nes map v1" (one class digit per ROM byte): rewrite as
-    // whole-ROM runs "0 start end class" and let the z80 splitter below window them
-    if (!cv_in && ln > 11 && (!strncmp(text, "md map v1\n", 10) || !strncmp(text, "nes map v1\n", 11))) {
-        char *d = text + (text[0] == 'm' ? 10 : 11);
+    // any platform's digit map ("gb map v1", "md map v1", "nes map v1", ...):
+    // one class digit per ROM byte, rewritten as whole-ROM runs "0 start end
+    // class" for the z80 splitter below to window
+    if (!cv_in) {
+        size_t hl = 0;
+        while (hl < (size_t)ln && text[hl] != '\n') hl++;
+        if (hl < 9 || hl > 12 || strncmp(text + hl - 7, " map v1", 7) || hl + 1 >= (size_t)ln) goto not_a_digit_map;
+        char *d = text + hl + 1;
         char *dend = memchr(d, '\n', (size_t)(text + ln - d));
         if (!dend) dend = text + ln;
         DpBuf runs;
@@ -836,6 +864,7 @@ static int cmd_maprender(int argc, char **argv) {
             char *r2 = q;
             while (r2 < dend && *r2 == *q) r2++;
             int k = *q - '0';
+            if (k < 0 || k >= DP_MAP_COUNT) k = DP_MAP_UNKNOWN;   // a future class digit never garbles the runs
             dp_buf_fmt(&runs, "0 %x %x %s\n", (unsigned)(q - d), (unsigned)(r2 - d) - 1, dp_map_class_name(k));
             q = r2;
         }
@@ -844,6 +873,7 @@ static int cmd_maprender(int argc, char **argv) {
         ln = (long)runs.len;
         z80_map = 1;
     }
+    not_a_digit_map:;
     if (z80_map && !cv_in) {
         // z80 maps list physical 16 KiB banks and whole-ROM offsets; rewrite
         // each run into the windowed "bank start end class" form the renderer

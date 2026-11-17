@@ -1225,13 +1225,25 @@ static void ram_push(Shared *sh, DpMachine *m, Pending p) {
 static int spool_open(Shared *sh) {
     if (sh->spool_fd >= 0) return 1;
     if (sh->spool_fd == -1) return 0;   // failed once: stay in RAM
-    const char *dir = getenv("TMPDIR"); if (!dir || !*dir) dir = "/tmp";
-    char path[512]; snprintf(path, sizeof path, "%s/deepeel-spool-XXXXXX", dir);
-    int fd = mkstemp(path);
-    if (fd < 0) { perror("deepeel: kernel spool unavailable; retaining states in RAM"); sh->spool_fd = -1; return 0; }
-    unlink(path);
-    sh->spool_fd = fd; sh->spool_rs = (uint32_t)(sizeof(SpoolHead) + sh->sbytes);
-    return 1;
+    /* The overflow belongs on disk, wherever that is: TMPDIR, then beside the
+     * frontier (the state dir — the spool's natural home, it holds what the
+     * frontier will persist anyway), then /tmp.  A missing TMPDIR must not
+     * pin the whole frontier in RAM (Zelda US: 422 k states, ~9 GiB, the
+     * export survived by luck). */
+    const char *tmp = getenv("TMPDIR");
+    const char *dirs[3] = { (tmp && *tmp) ? tmp : NULL, sh->cfg->state_dir, "/tmp" };
+    for (int t = 0; t < 3; t++) {
+        if (!dirs[t]) continue;
+        char path[512]; snprintf(path, sizeof path, "%s/deepeel-spool-XXXXXX", dirs[t]);
+        int fd = mkstemp(path);
+        if (fd >= 0) {
+            unlink(path);
+            sh->spool_fd = fd; sh->spool_rs = (uint32_t)(sizeof(SpoolHead) + sh->sbytes);
+            return 1;
+        }
+    }
+    perror("deepeel: kernel spool unavailable (TMPDIR, the state dir and /tmp all failed); retaining states in RAM");
+    sh->spool_fd = -1; return 0;
 }
 // pushes p; when the RAM queue is full, appends it to the spool.  Returns 1 if spilled.
 static int queue_push(Shared *sh, DpMachine *m, Pending p) {
@@ -2500,12 +2512,23 @@ static void infer_static(DpCoreResult *r, DpMachine *m, const DpCoreConfig *cfg)
         size_t len = j - i;
         uint8_t lf = i ? r->flags[i - 1] : 0, rf = j < n ? r->flags[j] : 0, c = 0;
         int lpad = i && r->inferred[i - 1] == DP_MAP_PAD, rpad = j < n && r->inferred[j] == DP_MAP_PAD;
+        int ltab = i && r->inferred[i - 1] == DP_MAP_TABLE, rtab = j < n && r->inferred[j] == DP_MAP_TABLE;
         if (len <= 3 && (lf & code) && (rf & code)) c = DP_MAP_INF_CODE;
         else if (len <= 1024 && lpad && (j >= n || rpad || !(rf & any))) c = DP_MAP_INF_PAD;
         else if (len <= 1024 && ((lf & any) || (rf & any))) c = DP_MAP_INF_DATA;
+        /* The two residual shapes of a long campaign (Zelda US: the last 11
+         * unknown bytes): a small gap inside a run of table entries — the
+         * period detection missed an entry — stays table; and the tail of an
+         * inferred-data blob that meets padding or another inference, without
+         * any kernel-classified code on either side, stays inferred data.
+         * Both are inferences, never observations. */
+        else if (len <= 16 && ltab && rtab) c = DP_MAP_TABLE;
+        else if (len <= 64 && !((lf | rf) & code) &&
+                 ((i && r->inferred[i - 1] == DP_MAP_INF_DATA) || (j < n && r->inferred[j] == DP_MAP_INF_DATA)))
+            c = DP_MAP_INF_DATA;
         if (c) {
             for (size_t k = i; k < j; k++) r->inferred[k] = c;
-            if (c == DP_MAP_INF_CODE) r->inferred_code += len; else if (c == DP_MAP_INF_PAD) r->inferred_pad += len; else r->inferred_data += len;
+            if (c == DP_MAP_INF_CODE) r->inferred_code += len; else if (c == DP_MAP_INF_PAD) r->inferred_pad += len; else if (c == DP_MAP_TABLE) r->jt_bytes += len; else r->inferred_data += len;
         }
         i = j;
     }
@@ -2612,6 +2635,18 @@ static void (*g_live_cb)(void *, const struct DpCoreResult *);
 static void *g_live_user;
 void dp_core_live_default(void (*cb)(void *, const struct DpCoreResult *), void *user) { g_live_cb = cb; g_live_user = user; }
 
+// One appended "magic size entries" section of the coverage file: NULL when
+// absent or short.  The tail reads strictly in write order — one miss ends it,
+// later sections cannot align anymore.
+static void *cov_tail_section(FILE *cf, uint32_t magic, size_t n, size_t esz, int *aligned) {
+    if (!*aligned) return NULL;
+    uint32_t hd[2];
+    if (fread(hd, 1, sizeof hd, cf) != sizeof hd || hd[0] != magic || hd[1] != n) { *aligned = 0; return NULL; }
+    void *p = malloc(n ? n * esz : 1);
+    if (!p || fread(p, esz, n, cf) != n) { free(p); *aligned = 0; return NULL; }
+    return p;
+}
+
 // Bind future resumes to the ROM and backend that produced the checkpoint.
 // Legacy checkpoints without this file remain readable, with a warning.
 static int state_identity(DpMachine *m, const DpCoreConfig *cfg) {
@@ -2662,6 +2697,11 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     }
     const DpCoreConfig *cfg = &cfg_unb;
     memset(out, 0, sizeof *out);
+    // the classification products a previous run earned (execution hits, the
+    // inferred classes, the probable-code walks, the typed destinations),
+    // reloaded by --resume and merged after the fresh inference: a resumed
+    // report never knows less
+    uint32_t *sv_hits = NULL; uint8_t *sv_inf = NULL, *sv_prov = NULL, *sv_dest = NULL;
     out->rom_size = rom_size;
     if (!m || !m->isa || !m->run || !m->save || !m->load || !m->fetch || !m->rom_index) return 0;
     if (!m->state_bytes || !state_identity(m, cfg)) return 0;
@@ -2789,10 +2829,22 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
                         free(src);
                     } else if (ext_bytes || ferror(cf)) fprintf(stderr, "deepeel: invalid coverage source extension; attribution not restored\n");
                     // P13/A9: the first-cover actors, an appended section (absent in older files)
-                    uint32_t act[2];
+                    uint32_t act[2] = {0, 0};
                     if (fread(act, 1, sizeof act, cf) == sizeof act && act[0] == 0x31524F41u && act[1] == rom_size
                         && fread(out->first_actor, 1, rom_size, cf) == rom_size)
                         fprintf(stderr, "deepeel: resumed first-cover actors\n");
+                    // the classification products, appended the same way: the
+                    // execution hits (the heat), the inferred classes, the
+                    // probable-code walks, the typed data destinations
+                    int aligned = act[0] == 0x31524F41u;   // the tail follows the actor section
+                    sv_hits = cov_tail_section(cf, 0x31544948u, rom_size, sizeof *out->hits, &aligned);
+                    sv_inf = cov_tail_section(cf, 0x31464E49u, rom_size, 1, &aligned);
+                    sv_prov = cov_tail_section(cf, 0x31565250u, rom_size, 1, &aligned);
+                    sv_dest = cov_tail_section(cf, 0x31545344u, rom_size, 1, &aligned);
+                    if (sv_hits) fprintf(stderr, "deepeel: resumed execution hits (the heat)\n");
+                    if (sv_inf) fprintf(stderr, "deepeel: resumed inferred classes\n");
+                    if (sv_prov) fprintf(stderr, "deepeel: resumed probable-code marks\n");
+                    if (sv_dest) fprintf(stderr, "deepeel: resumed typed destinations\n");
                 }
                 free(buf);
             }
@@ -2821,6 +2873,25 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
                 free(buf);
             }
             fclose(df);
+        }
+    }
+    if (cfg->cov_hits_path && *cfg->cov_hits_path) {   // --cov-hits: the heat of another campaign (or this one's own export), never lowered
+        FILE *hf = fopen(cfg->cov_hits_path, "r");
+        if (!hf) perror("deepeel: --cov-hits");
+        else {
+            char hl[128];
+            size_t n = 0;
+            while (fgets(hl, sizeof hl, hf)) {
+                if (hl[0] == '#' || hl[0] == '\n') continue;
+                unsigned bank = 0, off = 0, flags = 0, hits = 0;
+                if (sscanf(hl, "%x %x %x %u", &bank, &off, &flags, &hits) < 4 || !hits) continue;
+                if ((off >= 0x4000u) != (bank != 0)) continue;   // the v1 geometry
+                size_t idx = ((size_t)bank << 14) | (off & 0x3fffu);
+                if (idx >= rom_size) continue;
+                if (hits > out->hits[idx]) { out->hits[idx] = hits; n++; }
+            }
+            fclose(hf);
+            fprintf(stderr, "deepeel: --cov-hits: %zu execution-hit maxima loaded\n", n);
         }
     }
     if (cfg->state_dir && cfg->resume) {   // states left pending by a previous run (same machine state size)
@@ -2974,6 +3045,17 @@ cleanup:
         unsigned lw = 1; while (lw < cfg->rom_image_size && lw < (1u << 30)) lw <<= 1;
         speculative_gaps(out, m->isa, cfg, m, lw);
     }
+    if (sv_inf && !out->inferred) out->inferred = calloc(rom_size ? rom_size : 1, 1);
+    if (sv_inf || sv_prov || sv_dest || sv_hits) {   // the reloaded products fill what this pass left unknown: never less
+        for (size_t i = 0; i < rom_size; i++) {
+            if (sv_inf && out->inferred && !out->inferred[i]) out->inferred[i] = sv_inf[i];
+            if (sv_prov && !out->prov[i]) out->prov[i] = sv_prov[i];
+            if (sv_dest && !out->dest[i]) out->dest[i] = sv_dest[i];
+            if (sv_hits && sv_hits[i] > out->hits[i]) out->hits[i] = sv_hits[i];
+        }
+        free(sv_hits); free(sv_inf); free(sv_prov); free(sv_dest);
+        sv_hits = NULL; sv_inf = sv_prov = sv_dest = NULL;
+    }
     for (unsigned i = 0; i < started; i++) {
         DpCoreResult *l = &ws[i].loc;
         out->paths += l->paths; out->forks += l->forks;
@@ -3021,6 +3103,19 @@ cleanup:
             fwrite(ext, sizeof *ext, 2, cf); fwrite(out->src_flags, sizeof *out->src_flags, rom_size, cf);
             uint32_t act[2] = { 0x31524F41u, (uint32_t)rom_size };   // P13/A9: "AOR1", the first-cover actor per byte
             fwrite(act, sizeof *act, 2, cf); fwrite(out->first_actor, 1, rom_size, cf);   // appended: an older resume still reads the first three sections
+            // the classification products of THIS run, appended the same way:
+            // the execution hits (the heat), the inferred classes, the
+            // probable-code walks, the typed data destinations — a later
+            // resume re-exports the same map without re-exploring
+            if (!out->inferred) out->inferred = calloc(rom_size ? rom_size : 1, 1);
+            uint32_t hs[2] = { 0x31544948u, (uint32_t)rom_size };   // "HIT1"
+            fwrite(hs, sizeof *hs, 2, cf); fwrite(out->hits, sizeof *out->hits, rom_size, cf);
+            uint32_t isec[2] = { 0x31464E49u, (uint32_t)rom_size };   // "INF1"
+            fwrite(isec, sizeof *isec, 2, cf); fwrite(out->inferred, 1, rom_size, cf);
+            uint32_t psec[2] = { 0x31565250u, (uint32_t)rom_size };   // "PRV1"
+            fwrite(psec, sizeof *psec, 2, cf); fwrite(out->prov, 1, rom_size, cf);
+            uint32_t dsec[2] = { 0x31545344u, (uint32_t)rom_size };   // "DST1"
+            fwrite(dsec, sizeof *dsec, 2, cf); fwrite(out->dest, 1, rom_size, cf);
             fclose(cf);
         }
     }
@@ -3200,16 +3295,100 @@ static unsigned cov_bank_offset(const DpMachine *m, size_t index) {
     return m->bank_window + off;
 }
 
+// Replay another revision's coverage as speculative seeds: every executed or
+// speculative line of the other campaign whose four-byte instruction window is
+// byte-identical between the two images becomes a forced-path seed at the same
+// compact index.  Nothing is marked known here — the new ROM proves its own
+// bytes by running them; a differing window is never transferred.
+size_t dp_core_transfer_seeds(const uint8_t *rom, size_t rom_size,
+                              const char *other_rom_path, const char *cov_path,
+                              uint32_t **pcs, uint16_t **banks,
+                              uint64_t *lines_out, uint64_t *matched_out) {
+    *pcs = NULL; *banks = NULL;
+    if (lines_out) *lines_out = 0;
+    if (matched_out) *matched_out = 0;
+    FILE *rf = fopen(other_rom_path, "rb");
+    if (!rf) { fprintf(stderr, "deepeel: --cov-transfer: cannot read %s\n", other_rom_path); return 0; }
+    if (fseek(rf, 0, SEEK_END) != 0) { fclose(rf); return 0; }
+    long rs = ftell(rf);
+    if (rs <= 0) { fclose(rf); return 0; }
+    if (fseek(rf, 0, SEEK_SET) != 0) { fclose(rf); return 0; }
+    size_t on = (size_t)rs, cn = on < rom_size ? on : rom_size;
+    if (on != rom_size)
+        fprintf(stderr, "deepeel: --cov-transfer: %s is %ld bytes against this ROM's %zu — comparing the common prefix only\n",
+                other_rom_path, rs, rom_size);
+    uint8_t *other = malloc(cn ? cn : 1);
+    if (!other || fread(other, 1, cn, rf) != cn) {
+        fclose(rf); free(other);
+        fprintf(stderr, "deepeel: --cov-transfer: short read of %s\n", other_rom_path);
+        return 0;
+    }
+    fclose(rf);
+    FILE *cf = fopen(cov_path, "r");
+    if (!cf) {
+        free(other);
+        fprintf(stderr, "deepeel: --cov-transfer: cannot read %s\n", cov_path);
+        return 0;
+    }
+    uint8_t *seen = calloc(cn, 1);
+    uint32_t *tp = NULL; uint16_t *tb = NULL;
+    size_t tn = 0, cap = 0;
+    uint64_t lines = 0;
+    char line[128];
+    while (fgets(line, sizeof line, cf)) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+        unsigned bank = 0, off = 0, flags = 0;
+        if (sscanf(line, "%x %x %x", &bank, &off, &flags) < 3) continue;
+        if (!(flags & 5)) continue;                                  // executed or speculative code only
+        if ((off >= 0x4000u) != (bank != 0)) continue;               // the v1 geometry: bank 0 is 0000-3FFF, others 4000-7FFF
+        size_t idx = ((size_t)bank << 14) | (off & 0x3fffu);
+        if (idx >= cn) continue;
+        lines++;
+        if (seen[idx]) continue;
+        size_t w = cn - idx < 4 ? cn - idx : 4;
+        if (memcmp(rom + idx, other + idx, w) != 0) continue;        // exactly similar, byte for byte
+        seen[idx] = 1;
+        if (tn == cap) {
+            cap = cap ? cap * 2 : 1024;
+            uint32_t *np = realloc(tp, cap * sizeof *np);
+            uint16_t *nb = realloc(tb, cap * sizeof *nb);
+            if (!np || !nb) {
+                free(np); free(nb); free(tp); free(tb); free(seen); free(other); fclose(cf);
+                fprintf(stderr, "deepeel: --cov-transfer: out of memory\n");
+                return 0;
+            }
+            tp = np; tb = nb;
+        }
+        tb[tn] = (uint16_t)bank;
+        tp[tn++] = off;
+    }
+    fclose(cf);
+    free(seen);
+    free(other);
+    *pcs = tp; *banks = tb;
+    if (lines_out) *lines_out = lines;
+    if (matched_out) *matched_out = tn;
+    return tn;
+}
+
 void dp_core_write_cov(const char *path, const char *id, const DpMachine *m, const DpCoreResult *r) {
     if (!path || !path[0]) return;
     FILE *cf = fopen(path, "w");
     if (!cf) return;
     fprintf(cf, "# deepeel %s coverage v1 (generic kernel): bank offset flags(1=exec,4=speculative,8=data read by a natural path) hits\n", id);
     for (size_t i = 0; i < r->rom_size; i++) {
-        uint8_t f = r->flags[i]; if (!f) continue;
+        uint8_t f = r->flags[i];
         unsigned out = (f & DP_CORE_NATURAL) ? 1 : (f & DP_CORE_FORCED) ? 5 : 0;
         if ((f & DP_CORE_DATA) && !((f & DP_CORE_COPIED) && (f & DP_CORE_NATURAL))) out |= 8;   // a copied byte later executed is code, not plain data
-        if (!out) continue;
+        if (!out) {
+            // The suspected code classes go out as flag 4 (speculative, never heat): the
+            // static closure's marks, the untrusted probable-code walks, the inferred-code
+            // bytes.  A consumer that compiles them acquires the suspect as code — the
+            // speculative-gap disassembly stays out, it is never known at all.
+            if ((f & DP_CORE_STATIC) || (r->prov && r->prov[i]) ||
+                (r->inferred && r->inferred[i] == DP_MAP_INF_CODE)) out = 4;
+            else continue;
+        }
         // Hits are recorded on instruction heads; retain one for covered operands
         // and data, for which the kernel does not maintain a visit counter.
         uint32_t hits = r->hits && r->hits[i] ? r->hits[i] : 1;

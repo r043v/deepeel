@@ -9,6 +9,8 @@ add_test(NAME core_spool_fair COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOUR
 set_tests_properties(core_spool_fair PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME core_spool_fair_z80 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/core_spool_fair.py $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_branch.sms sms)
 set_tests_properties(core_spool_fair_z80 PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME core_spool_fallback COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/core_spool_fallback.py $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_branch.gb)
+set_tests_properties(core_spool_fallback PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME core_condstack COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/core_condstack.py $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR})
 set_tests_properties(core_condstack PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 120)
 add_test(NAME core_wram_overwrite COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/core_wram_overwrite.py $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_wram_overwrite.gb)

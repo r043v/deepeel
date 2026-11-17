@@ -947,7 +947,8 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
         "inconnu", "code naturel", "code forcé", "code statique",
         "donnée copiée", "donnée lue", "donnée statique", "table", "padding",
         "donnée inférée", "code inféré", "padding inféré", "code probable (incertain)",
-        "donnée probable (incertain)" };
+        "donnée probable (incertain)", "donnée musique", "donnée échantillon",
+        "donnée palette", "donnée graphique" };   // one label per class: a NULL here renders as "(null)"
     // legend labels and swatches: the classes, then the destinations of copied data
     const char *lname[DP_MAP_COUNT + DP_MAP_KINDS];
     const uint8_t *lcol[DP_MAP_COUNT + DP_MAP_KINDS];

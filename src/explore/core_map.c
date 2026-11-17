@@ -82,7 +82,8 @@ int dp_core_write_summary(const char *path, const char *id, const DpCoreResult *
             DEEPEEL_VERSION, id, r->rom_size);
     static const char *const names[DP_MAP_COUNT] = { "unknown", "code-natural", "code-forced", "code-static",
         "data-copied", "data-read", "data-static", "table", "pad", "inferred-data", "inferred-code",
-        "inferred-pad", "probable-code", "probable-data" };
+        "inferred-pad", "probable-code", "probable-data", "data-musique", "data-sample",
+        "data-palette", "data-vram" };   // one name per class: a NULL here prints "(null)" as a JSON key
     for (int k = 0; k < DP_MAP_COUNT; k++) fprintf(f, "%s\"%s\":%llu", k ? "," : "", names[k], U(cls[k]));
     fprintf(f, "},\"known_pct\":%.3f,\"counters\":{\"steps\":%llu,\"paths\":%llu,\"forks\":%llu,"
                "\"saturation\":%llu,\"closure_roots\":%llu,\"closure_capped\":%llu,\"event_probes\":%llu,"

@@ -6239,3 +6239,56 @@ En mode non
 borné, un état sur disque est choisi au moins tous les 32 choix tant qu'il en
 reste, même si la file mémoire ne se vide pas. Sur Game Boy, `--queue-max`
 règle désormais effectivement la taille de cette file avant débordement disque.
+
+## 0.392.0
+
+- **`--cov` exporte le code suspecté (flag 4)** : les octets de la fermeture
+  statique (`code-static`), les marches non fiables (`probable-code`) et le
+  code inféré (`inferred-code`) partent en lignes `flags 4` — spéculatif,
+  jamais comme chaleur. Un consommateur qui les compile acquiert le suspecté
+  comme code ; le démontage des trous spéculatifs (jamais connus) reste hors
+  export.
+- **Inférence des trous résiduels** : deux règles génériques ferment les
+  formes que laisse une longue campagne (Zelda US 0.391 : les 11 derniers
+  octets inconnus) — un petit trou entre deux tranches de table marquées
+  (l'entrée que la détection de période a manquée) reste table, et la queue
+  d'un blob de données inférées qui rencontre le remplissage ou une autre
+  inférence, sans code classé de part et d'autre, reste données inférées.
+  Des inférences, jamais des observations ; comptées à part.
+- **`--cov-transfer ROM COV`** : rejouer la couverture d'une autre révision —
+  chaque ligne exécutée ou spéculative du `.cov` dont la fenêtre de quatre
+  octets est identique à l'octet près entre les deux images devient une
+  graine de chemin forcé au même index compact. Rien n'est marqué connu par
+  le transfert lui-même : la nouvelle ROM prouve ses octets en les exécutant
+  (Zelda FR depuis la campagne US 100 % : 247 382 lignes transférées sur
+  376 613, 99,45 % connus en 2 minutes bornées contre un démarrage à froid).
+- **Repli du spool disque** : `TMPDIR` cassé ou absent ne piège plus la
+  frontière en RAM — l'overflow essaie `TMPDIR`, puis `/tmp`, puis le
+  répertoire d'état, et ne reste en RAM que si tout échoue (message explicite).
+  Épinglé par `core_spool_fallback` (Zelda US : 422 k états, ~9 Go retenus
+  pour un `TMPDIR` inexistant). La campagne Kirby du 17 novembre (noyau renforcé : fourches
+  CALL/RET conditionnelles, écritures mapper) couvre désormais naturellement
+  les boucles d'attente PPU qu'un repli interpréteur payait par ligne de
+  balayage (0x20E3/0x20E5 : 3 M de pas sur 600 trames).
+
+## 0.393.0
+
+- **Un nom par classe, partout** : la légende du `--map` PNG (table FR) et les
+  clés du `--summary` JSON n'avaient que 14 entrées pour 18 classes — les
+  classes typées (musique, échantillon, palette, graphique) s'affichaient
+  « (null) » dans la légende et fusionnaient en une clé `"(null)"` dans le
+  JSON. Les deux tables couvrent les 18 classes.
+- **État fidèle : la reprise réexporte la carte exacte** — `coverage.bin`
+  embarque désormais la chaleur (`hits`, la trace d'exécution par octet du
+  PNG), les classes inférées, les marches probables (`prov`) et les
+  destinations typées (`dest`) en sections taguées (`HIT1`, `INF1`, `PRV1`,
+  `DST1`) ; `--resume` les recharge et les fusionne après l'inférence fraîche
+  (un rapport repris ne sait jamais moins). Avant : une reprise ne
+  reconstituait ni `prov` ni la chaleur — la réexport d'une campagne finie
+  perdait des octets (Zelda US 100 % : 23 octets revenus inconnus) et le PNG
+  sortait froid.
+- **`--cov-hits COV`** : charger les compteurs de passages d'un fichier de
+  couverture v1 comme chaleur de départ (le maximum gagne) — la carte d'une
+  campagne résumée retrouve son chaud/froid sans réexploration.
+- `maprender` : un chiffre de classe hors bornes dans une carte `map v1`
+  devient `unknown` au lieu de corrompre les plages.
