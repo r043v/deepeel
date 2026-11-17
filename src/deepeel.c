@@ -358,6 +358,7 @@ static int cmd_explore(int argc, char **argv) {
         }
         else if (!strcmp(a, "--max-steps") && i + 1 < argc) cfg.max_steps_path = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--max-total") && i + 1 < argc) cfg.max_steps_total = strtoull(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--queue-max") && i + 1 < argc) gkcfg.queue_max = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--jobs") && i + 1 < argc) { ++i; cfg.jobs = !strcmp(argv[i], "auto") ? auto_jobs() : atoi(argv[i]); }
         else if (!strcmp(a, "--no-pointer-scan")) cfg.no_pointer_scan = 1;
         else if (!strcmp(a, "--gbs") && i + 1 < argc) gbs_path = argv[++i];

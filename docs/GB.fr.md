@@ -6233,3 +6233,9 @@ avertissement signale qu'elles sont ignorées ; les compteurs de lectures ROM
 nécessaires à `--romdata` restent à implémenter.
 Sur Sega, `--rtcode` conserve maintenant le chemin demandé jusqu'à l'écriture
 de l'archive des instructions exécutées en RAM.
+
+La file disque transfère les états vers la mémoire dans l'ordre de leur dépôt.
+En mode non
+borné, un état sur disque est choisi au moins tous les 32 choix tant qu'il en
+reste, même si la file mémoire ne se vide pas. Sur Game Boy, `--queue-max`
+règle désormais effectivement la taille de cette file avant débordement disque.

@@ -204,7 +204,7 @@ typedef struct {
     uint64_t paths_done;       // finished paths (atomic), for the progress line
     int stop_monitor;
     int halt;                  // 0 running, 1 max-time reached, 2 stagnation (atomic): workers wind down
-    int spool_fd, spool_write_failed, spool_read_failed, checkpoint_failed; uint64_t spool_n, spool_total; uint32_t spool_rs;   // disk overflow of the pending queue: fixed-size records, LIFO
+    int spool_fd, spool_write_failed, spool_read_failed, checkpoint_failed; uint64_t spool_n, spool_head, spool_total, picks; uint32_t spool_rs;   // disk overflow: fixed-size FIFO records
     unsigned allowed;          // adaptive mode: workers with index < allowed may take work (atomic)
     unsigned wmin, wmax;
     DpCoreResult *out;
@@ -1243,7 +1243,7 @@ static int queue_push(Shared *sh, DpMachine *m, Pending p) {
         if (rec) {
             SpoolHead h = { p.pc, (uint32_t)!!p.forced | ((uint32_t)!!p.seed << 1) | ((uint32_t)!!p.vector << 2) | (org_enc(p.origin) << 3) | (p.call_depth << 8), p.site, p.input, p.epoch };
             memcpy(rec, &h, sizeof h); memcpy(rec + sizeof h, p.state, sh->sbytes);
-            ssize_t w = pwrite(sh->spool_fd, rec, sh->spool_rs, (off_t)(sh->spool_n * sh->spool_rs));
+            ssize_t w = pwrite(sh->spool_fd, rec, sh->spool_rs, (off_t)((sh->spool_head + sh->spool_n) * sh->spool_rs));
             free(rec);
             if (w == (ssize_t)sh->spool_rs) { sh->spool_n++; sh->spool_total++; free(p.state); return 1; }
         }
@@ -1276,25 +1276,26 @@ static void defer_state(Shared *sh, DpMachine *m, DpCoreResult *loc, Pending p) 
     pthread_mutex_unlock(&sh->mu);
     loc->deferred++;
 }
-// the queue is empty: bring back up to queue_max/2 of the newest spilled records
-static int spool_refill(Shared *sh) {
-    size_t want = sh->cfg->queue_max ? sh->cfg->queue_max / 2 : 64;
+// Bring back the oldest spilled records. The consumed prefix is discarded
+// when the spool becomes empty; appends never overwrite unread records.
+static int spool_refill(Shared *sh, size_t limit) {
+    size_t want = limit ? limit : sh->cfg->queue_max ? sh->cfg->queue_max / 2 : 64;
     if (want < 1) want = 1;
     uint8_t *rec = malloc(sh->spool_rs);
     if (!rec) { fprintf(stderr, "deepeel: cannot allocate kernel spool read buffer\n"); return 0; }
     int ok = 1;
     while (want-- && sh->spool_n) {
-        uint64_t i = sh->spool_n - 1;
+        uint64_t i = sh->spool_head;
         if (pread(sh->spool_fd, rec, sh->spool_rs, (off_t)(i * sh->spool_rs)) != (ssize_t)sh->spool_rs) { ok = 0; break; }
         SpoolHead h; memcpy(&h, rec, sizeof h);
         uint8_t *st = malloc(sh->sbytes);
         if (!st) { ok = 0; break; }
         memcpy(st, rec + sizeof h, sh->sbytes);
-        sh->spool_n = i;
+        sh->spool_head++; sh->spool_n--;
         ram_push(sh, NULL, (Pending){ st, h.pc, (int)(h.forced & 1), h.site, h.input, (uint8_t)((h.forced >> 1) & 1), (uint8_t)((h.forced >> 2) & 1), org_dec((h.forced >> 3) & 31), h.epoch, 0, h.forced >> 8 });
     }
     free(rec);
-    if (ftruncate(sh->spool_fd, (off_t)(sh->spool_n * sh->spool_rs)) != 0) { /* the next appends overwrite it anyway */ }
+    if (!sh->spool_n) { sh->spool_head = 0; if (ftruncate(sh->spool_fd, 0) != 0) { /* later appends overwrite it */ } }
     if (!ok) fprintf(stderr, "deepeel: cannot read complete kernel spool; exploration stopped\n");
     return ok;
 }
@@ -1368,7 +1369,7 @@ static int frontier_save(Shared *sh, const char *path, DpCoreResult *out) {
     uint8_t *rec = sh->spool_n ? malloc(sh->spool_rs) : NULL;
     if (sh->spool_n && !rec) ok = 0;
     for (uint64_t i = 0; ok && i < sh->spool_n; i++)
-        ok = pread(sh->spool_fd, rec, sh->spool_rs, (off_t)(i * sh->spool_rs)) == (ssize_t)sh->spool_rs &&
+        ok = pread(sh->spool_fd, rec, sh->spool_rs, (off_t)((sh->spool_head + i) * sh->spool_rs)) == (ssize_t)sh->spool_rs &&
              fwrite(rec, 1, sh->spool_rs, f) == sh->spool_rs;
     free(rec);
     if (fflush(f) != 0) ok = 0;
@@ -1592,7 +1593,7 @@ static void run_path(Worker *w, Pending *p) {
             // behind pending work instead of starving other forks.
             slice_steps = 0;
             pthread_mutex_lock(&sh->mu);
-            if (!sh->qn && sh->spool_n && !spool_refill(sh)) {
+            if (!sh->qn && sh->spool_n && !spool_refill(sh, 0)) {
                 sh->spool_read_failed = 1;
                 __atomic_store_n(&sh->halt, 3, __ATOMIC_RELAXED);
                 pthread_cond_broadcast(&sh->cv);
@@ -2532,7 +2533,7 @@ static void *worker_main(void *arg) {
                 }
                 break;
             }
-            if (!sh->qn && sh->spool_n && !spool_refill(sh)) {
+            if (!sh->qn && sh->spool_n && !spool_refill(sh, 0)) {
                 sh->spool_read_failed = 1;
                 __atomic_store_n(&sh->halt, 3, __ATOMIC_RELAXED);
                 pthread_cond_broadcast(&sh->cv);
@@ -2547,12 +2548,25 @@ static void *worker_main(void *arg) {
             pthread_cond_timedwait(&sh->cv, &sh->mu, &dl);
             continue;
         }
-        size_t pick = sh->qn - 1;
+        // An unlimited run must not starve disk states while its in-memory
+        // queue keeps growing. Periodically run the oldest spilled state
+        // directly, even when novelty/session priorities have work ready.
+        size_t spool_pick = SIZE_MAX;
+        if (cfg->unbounded && sh->spool_n && ++sh->picks % 32 == 0) {
+            spool_pick = sh->qn;
+            if (!spool_refill(sh, 1)) {
+                sh->spool_read_failed = 1;
+                __atomic_store_n(&sh->halt, 3, __ATOMIC_RELAXED);
+                pthread_cond_broadcast(&sh->cv);
+                continue;
+            }
+        }
+        size_t pick = spool_pick != SIZE_MAX ? spool_pick : sh->qn - 1;
         w->loc.in_novelty_path = 0;
         int session_first = 0;
-        for (size_t i = sh->qn; i-- > 0;)   // the few long sessions (attract / play) start before the fork backlog
+        for (size_t i = spool_pick != SIZE_MAX ? 0 : sh->qn; i-- > 0;)   // the few long sessions (attract / play) start before the fork backlog
             if (sh->q[i].input >= SESSION_ATTRACT) { pick = i; session_first = 1; break; }
-        if (!session_first && !cfg->no_novelty_order) {
+        if (spool_pick == SIZE_MAX && !session_first && !cfg->no_novelty_order) {
             double best = -1;
             for (size_t i = sh->qn; i-- > 0;) {
                 if (sh->q[i].origin != DP_SRC_SESSION) {   // B3: a live checkpoint resumes from covered code by design; its cell's visit count orders it

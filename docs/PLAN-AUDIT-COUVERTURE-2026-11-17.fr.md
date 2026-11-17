@@ -349,6 +349,13 @@ Incrémenter la version ou documenter dans GB.fr.md tout changement visible.
 - Les dispatchs ont un premier hook ISA ; le port complet de la fermeture
   Sega, les lectures matérielles supplémentaires, la frontière exhaustive,
   les techniques d'élargissement et les validations associées restent ouverts.
+- Le spool est repris dans l'ordre d'arrivée et une sélection périodique en
+  mode non borné évite sa famine lorsque la file mémoire reste alimentée.
+  `--queue-max` est maintenant raccordé sur Game Boy. Le test
+  `core_spool_fair` place une cible ancienne sur disque derrière un chemin
+  qui ne se termine pas et exige qu'elle soit exécutée sur GB et Sega ; le
+  scénario Sega échoue avec l'ancien noyau. L'équité de tous les
+  états de la file mémoire et la compaction du préfixe disque restent ouvertes.
 - Une campagne complète de 232 fixtures a dépassé 300 secondes sur
   `fix_irq.gb` ; le coût de l'exploration IRQ reste à traiter. Le test de
   campagne utilise maintenant un budget explicite réduit, sans modifier les
