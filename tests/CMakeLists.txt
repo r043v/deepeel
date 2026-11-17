@@ -460,7 +460,7 @@ add_test(NAME core_solve COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_so
 set_tests_properties(core_solve PROPERTIES FIXTURES_REQUIRED fixtures)
 
 # techniques 3, 4, 7 on the 6502 (NES): the technique covers the other side as natural, its counter is never silent
-add_test(NAME core_learn_sig_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_save.nes; $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions | grep -q 'learned signatures 3' && $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions --no-solve --no-learn-sig | grep -q 'rom bytes: natural 12'")
+add_test(NAME core_learn_sig_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_save.nes; $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions | grep -q 'learned signatures 2' && $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions --no-solve --no-learn-sig | grep -q 'rom bytes: natural 12'")
 set_tests_properties(core_learn_sig_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_rng_bytes_6502 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_nes_rng.nes; $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions | grep -q 'rng-byte forks 8' && $<TARGET_FILE:deepeel> nes explore $f --core --attract-frames 0 --no-sessions --no-solve --no-rng-learn | grep -q 'rom bytes: natural 15'")
 set_tests_properties(core_rng_bytes_6502 PROPERTIES FIXTURES_REQUIRED fixtures)
@@ -480,7 +480,7 @@ add_test(NAME core_irq_fork_pce COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix
 set_tests_properties(core_irq_fork_pce PROPERTIES FIXTURES_REQUIRED fixtures)
 
 # techniques 3, 4, 7 on the SM83 (GB) and the HuC6280 (PCE)
-add_test(NAME core_learn_sig_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_save.gb; $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'learned signatures 3' && $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-learn-sig | grep -q 'rom bytes: natural 15'")
+add_test(NAME core_learn_sig_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_save.gb; $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'learned signatures 2' && $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-learn-sig | grep -q 'rom bytes: natural 15'")
 set_tests_properties(core_learn_sig_sm83 PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME core_rng_bytes_sm83 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_gb_rng.gb; $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 | grep -q 'rng-byte forks 8' && $<TARGET_FILE:deepeel> explore $f --core --attract-frames 0 --no-sessions --visits-per-pc 64 --no-solve --no-rng-learn | grep -q 'rom bytes: natural 18'")
 set_tests_properties(core_rng_bytes_sm83 PROPERTIES FIXTURES_REQUIRED fixtures)

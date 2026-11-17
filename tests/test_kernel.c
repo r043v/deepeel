@@ -111,14 +111,14 @@ int main(int argc, char **argv) {
     CHECK(r.saved >= 12 && r.spooled >= 11);
     char first_frontier[512]; snprintf(first_frontier, sizeof first_frontier, "%s/frontier.bin", state_dir);
     f = fopen(first_frontier, "rb");
-    uint32_t header[3], first_record[4];
-    CHECK(f && fread(header, sizeof *header, 3, f) == 3 && fread(first_record, sizeof *first_record, 4, f) == 4);
+    uint32_t header[3], first_record[5];   // P5 (0.389.0): the record carries the checkpoint epoch (5 words, was 4)
+    CHECK(f && fread(header, sizeof *header, 3, f) == 3 && fread(first_record, sizeof *first_record, 5, f) == 5);
     CHECK(first_record[1] == 3);  // forced entry, retaining its seed identity
     CHECK(fseek(f, (long)header[1], SEEK_CUR) == 0);
     int active_saved = 0;
     for (uint32_t i = 1; i < header[2]; i++) {
-        uint32_t item[4];
-        CHECK(fread(item, sizeof *item, 4, f) == 4);
+        uint32_t item[5];
+        CHECK(fread(item, sizeof *item, 5, f) == 5);   // P5 (0.389.0): the record carries the epoch (5 words, was 4)
         if (item[0] == 3 && item[1] == 0) active_saved = 1;
         CHECK(fseek(f, (long)header[1], SEEK_CUR) == 0);
     }

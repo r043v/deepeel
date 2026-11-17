@@ -52,13 +52,16 @@ with tempfile.TemporaryDirectory() as td:
                 if os.path.exists(f):
                     os.remove(f)
             t0 = time.time()
-            r = subprocess.run(mk(rom, t, mp), capture_output=True, text=True, timeout=300)
+            try:
+                r = subprocess.run(mk(rom, t, mp), capture_output=True, text=True, timeout=300)
+            except subprocess.TimeoutExpired:
+                r = None   # one hung run must not kill the whole campaign table
             dt = time.time() - t0
-            text = open(t, errors="replace").read() if os.path.exists(t) else r.stdout
+            text = open(t, errors="replace").read() if os.path.exists(t) else (r.stdout if r else "")
             steps, known = parse(text, mp)
-            if r.returncode != 0:
+            if r is None or r.returncode != 0:
                 fails += 1
-            rows.append((name, os.path.basename(rom), r.returncode, steps, known, dt))
+            rows.append((name, os.path.basename(rom), -9 if r is None else r.returncode, steps, known, dt))
 
 with open(out, "w") as f:
     f.write("# Campagne multi-plateforme sur fixtures générées\n\n")

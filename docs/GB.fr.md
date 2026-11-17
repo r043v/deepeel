@@ -6111,7 +6111,15 @@ compteurs réarmés (A2) mises au nouveau nombre.
   lit) diffère de toutes celles vues, heuristique de visites 1-2-4-8, cap
   `probe_ctx_cap` de contextes productifs par site toutes techniques confondues
   (saturation comptée). Épingles déplacées : les fourches RNG passent de 4 à 8,
-  les signatures de 1 à 2-3 (l'essai réarmé).
+  les signatures de 1 à 2-3 (l'essai réarmé). **Coût maîtrisé (0.390.0)** : la
+  clé de cellule est hachée à chaque tentative réarmée ; sur une boucle chaude,
+  la cellule (les octets lus, pas leurs valeurs) ne change pas à chaque pas —
+  la clé est mémoïsée par worker, directe-mappée par index ROM, invalidée par
+  une époque partagée (un nouveau bit de lecture grandit l'ensemble lu), et la
+  clé composée déjà insérée court-circuite le verrou. Une clé périmée ne peut
+  que supprimer un ré-armement redondant, jamais en ajouter. Les contextes qui
+  ne diffèrent que par les *valeurs* RAM ne réarment plus (épingles : sondes
+  pad 64→48 / 2048→1536, signatures 3→2 sur les fixtures de save).
 - **A1 : graines vivantes généralisées** — les checkpoints vivants amencent
   `cfg->seeds` (reset, vecteurs, entrées utilisateur, rips musicales) et non
   plus les seules entrées du registre plateforme : le redémarrage depuis un

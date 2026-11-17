@@ -217,6 +217,7 @@ typedef struct {
     uint64_t *probeset;        // technique 2: sites already probed
     size_t probecap, proben;
     uint8_t *probectx;         // B1: contexts a probe site has been re-armed under (by rom index)
+    uint64_t ctx_epoch;        // A2: bumped whenever the semantic cell's read-set grows (new ramread bit); guards the per-worker cell-key memo
     uint64_t *exactset;        // B5: exact (pc, machine state) keys already reached, clocks excluded
     size_t exactcap, exactn;
     uint8_t *tas_start; uint32_t tas_pc; int tas_shifts_left;   // power-on state kept to queue the shifted movie replays once the unshifted one ends
@@ -239,6 +240,7 @@ typedef struct {
     // technique 1 (solve): non-ROM addresses read inside the current window
     uint32_t ram[4]; unsigned nram; int track;
     uint8_t *ramread;     // technique 8: 64 KiB bitmap of non-ROM data addresses any path has read (the semantic cell)
+    uint64_t *ctx_epoch;  // A2: shared cell-context epoch, to invalidate the per-worker memo
     uint32_t *fedsrc;     // parallel to fed: rom index + 1 of the source byte of that copy
     uint32_t *fedprod;    // rom index + 1 of the last ROM cell read before a non-copy store (approximate producer)
 } CopyObs;
@@ -277,6 +279,7 @@ typedef struct {
     uint32_t *capped;      // direct-mapped cache of conditional sites that reached fork_site_cap (pc + 1)
     unsigned step_batch;   // steps not yet added to the shared counter (flushed every 256)
     uint64_t *pcache; unsigned pcap;   // A5: memo of the projection-pruned forks (site, projection); the shared set only grows, so a spent key stays spent
+    uint64_t *ckm_ep, *ckm_ck, *ckspent; int64_t *ckm_ri;   // A2: direct-mapped per-ri cell-key memo (4096) and known-spent composed keys
     uint32_t pcring[32]; unsigned pcring_n;   // A12: the last executed instruction starts of this path (never operand bytes)
     uint8_t *wsnap;        // technique 1: state at the start of the window before a conditional
     uint32_t *winmemo;     // direct-mapped: (rom index + 1) * 2 + (a conditional follows within 5 sequential instructions)
@@ -1011,7 +1014,10 @@ static void obs_read(void *u, uint32_t addr, uint8_t v) {
     }
     int64_t k = o->m->rom_index(o->m, addr);
     int64_t ri = k < 0 && o->ramread ? ridx(o->m, addr) : -1;
-    if (ri >= 0 && !o->forced && !o->ramread[ri]) __atomic_store_n(&o->ramread[ri], 1, __ATOMIC_RELAXED);   // P6: forced paths must not join the semantic cell (same rule as the live bitmap below)
+    if (ri >= 0 && !o->forced && !o->ramread[ri]) {   // P6: forced paths must not join the semantic cell (same rule as the live bitmap below)
+        __atomic_store_n(&o->ramread[ri], 1, __ATOMIC_RELAXED);
+        if (o->ctx_epoch) __atomic_fetch_add(o->ctx_epoch, 1, __ATOMIC_RELAXED);   // A2: the semantic cell changed
+    }
     if (k < 0 && o->track && o->nram < 4) {
         unsigned i = 0;
         while (i < o->nram && o->ram[i] != addr) i++;
@@ -1166,18 +1172,33 @@ static int cell_insert(Shared *sh, uint64_t key) { return keyset_insert(&sh->cel
 // silent).  `tag` is the 4-bit channel in the key's top bits (8 index, 10 rng, 12 sig,
 // 13 irq, 11 the B1 event probes); `sub` distinguishes sibling keys of one site (the
 // IRQ delay).  1 when the (site, cell) pair was fresh and is now spent.
-static int ctx_rearm(Shared *sh, const DpCoreConfig *cfg, DpCoreResult *loc, DpMachine *m,
+static int ctx_rearm(Worker *w, const DpCoreConfig *cfg, DpCoreResult *loc, DpMachine *m,
                      int64_t ri, uint64_t tag, uint64_t sub, unsigned visit) {
+    Shared *sh = w->sh;
     if (!cfg->probe_ctx_cap || cfg->probe_ctx_cap <= 1 || !sh->probectx || ri < 0) return 0;
     if (!visit || visit > 8 || (visit & (visit - 1))) return 0;   // B1's exponential attempt gate
     unsigned pcx = __atomic_load_n(&sh->probectx[ri], __ATOMIC_RELAXED);
     if (!pcx) return 0;                                           // a site that produced nothing stays spent
     if (pcx >= cfg->probe_ctx_cap) { loc->probe_ctx_sat++; return 0; }
-    uint64_t ck = cell_key(cfg, sh->ramread, m, (uint32_t)ri) ^ 0x5bd1e995u;
+    // A2: cell_key walks the whole semantic cell; a direct-mapped per-ri memo serves the key while
+    // the read-set epoch is unchanged, and a direct-mapped memo of composed keys already inserted
+    // skips the shared lock.  Inside a hot loop (same read-set, RAM values ticking) the key is
+    // unchanged, so the composed key is already spent.  A stale memo can only suppress one
+    // redundant re-arm, never add one (the shared set only grows).
+    uint64_t ep = __atomic_load_n(&sh->ctx_epoch, __ATOMIC_RELAXED);
+    size_t slot = (size_t)ri & 4095;
+    uint64_t ck;
+    if (w->ckm_ri[slot] == ri && w->ckm_ep[slot] == ep) ck = w->ckm_ck[slot];
+    else {
+        ck = cell_key(cfg, sh->ramread, m, (uint32_t)ri) ^ 0x5bd1e995u;
+        w->ckm_ri[slot] = ri; w->ckm_ep[slot] = ep; w->ckm_ck[slot] = ck;
+    }
+    uint64_t pk = (keyhash(ck ^ ((uint64_t)ri << 32) ^ (tag << 24) ^ sub) & ((1ull << 60) - 1)) | (tag << 60);
+    if (w->ckspent[keyhash(pk) & 4095] == pk + 1) return 0;   // known spent, the shared set only grows
     pthread_mutex_lock(&sh->mu);
-    int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben,
-                              (keyhash(ck ^ ((uint64_t)ri << 32) ^ (tag << 24) ^ sub) & ((1ull << 60) - 1)) | (tag << 60));
+    int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, pk);
     pthread_mutex_unlock(&sh->mu);
+    w->ckspent[keyhash(pk) & 4095] = pk + 1;
     return fresh;
 }
 
@@ -1829,7 +1850,7 @@ static void run_path(Worker *w, Pending *p) {
                 pthread_mutex_lock(&sh->mu);
                 int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, ((uint64_t)addr | ((uint64_t)(m->rom_index(m, pc) + 1) << 24)) | (7ull << 60));   // A7: (site, address)
                 pthread_mutex_unlock(&sh->mu);
-                if (!fresh) fresh = ctx_rearm(sh, cfg, loc, m, (int64_t)m->rom_index(m, pc), 8, 0, w->visits[vi]);   // A2: one more enumeration under a new semantic cell
+                if (!fresh) fresh = ctx_rearm(w, cfg, loc, m, (int64_t)m->rom_index(m, pc), 8, 0, w->visits[vi]);   // A2: one more enumeration under a new semantic cell
 
                 uint8_t *tmp = fresh ? malloc(sh->sbytes) : NULL;
                 if (tmp) m->save(m, tmp);
@@ -1862,7 +1883,7 @@ static void run_path(Worker *w, Pending *p) {
                 pthread_mutex_lock(&sh->mu);
                 fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, ((uint64_t)addr | ((uint64_t)(m->rom_index(m, pc) + 1) << 24)) | (5ull << 60));   // A7: (site, address)
                 pthread_mutex_unlock(&sh->mu);
-                if (!fresh) fresh = ctx_rearm(sh, cfg, loc, m, (int64_t)m->rom_index(m, pc), 10, 0, w->visits[vi]);   // A2: the byte went volatile again under a new semantic cell
+                if (!fresh) fresh = ctx_rearm(w, cfg, loc, m, (int64_t)m->rom_index(m, pc), 10, 0, w->visits[vi]);   // A2: the byte went volatile again under a new semantic cell
             }
             if (fresh) {
                 static const uint8_t rv[4] = {0x00, 0x01, 0x80, 0xFF};
@@ -1892,7 +1913,7 @@ static void run_path(Worker *w, Pending *p) {
             int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben,
                                       ((uint64_t)addr << 32 | sigv) | (3ull << 60));
             pthread_mutex_unlock(&sh->mu);
-            if (!fresh) fresh = ctx_rearm(sh, cfg, loc, m, (int64_t)m->rom_index(m, pc), 12, 0, w->visits[vi]);   // A2: the same signature test met under a new semantic cell
+            if (!fresh) fresh = ctx_rearm(w, cfg, loc, m, (int64_t)m->rom_index(m, pc), 12, 0, w->visits[vi]);   // A2: the same signature test met under a new semantic cell
 
             if (fresh) {
                 uint8_t *tmp = malloc(sh->sbytes), *snap = malloc(sh->sbytes);
@@ -1990,7 +2011,7 @@ static void run_path(Worker *w, Pending *p) {
             pthread_mutex_unlock(&sh->mu);
             int rearm = 0;
             int64_t pri = m->rom_index(m, pc);
-            if (!fresh && ctx_rearm(sh, cfg, loc, m, pri, 11, 0, w->visits[vi])) fresh = rearm = 1;
+            if (!fresh && ctx_rearm(w, cfg, loc, m, pri, 11, 0, w->visits[vi])) fresh = rearm = 1;
             // B1: a site that produced probes is re-armed when it is reached under another semantic cell (the RAM the
             // code has been seen to read), up to probe_ctx_cap contexts per site (saturation counted, never silent)
             if (fresh) {
@@ -2028,7 +2049,7 @@ static void run_path(Worker *w, Pending *p) {
                 pthread_mutex_lock(&sh->mu);
                 if (sh->probecap) { size_t h = keyhash(ikey) & (sh->probecap - 1); while (sh->probeset[h]) { if (sh->probeset[h] == ikey) { known = 1; break; } h = (h + 1) & (sh->probecap - 1); } }
                 pthread_mutex_unlock(&sh->mu);
-                if (known) { if (ctx_rearm(sh, cfg, loc, m, iri, 13, (uint64_t)d << 40, w->visits[vi])) known = 0; else continue; }   // A2: one more interrupt landing under a new semantic cell
+                if (known) { if (ctx_rearm(w, cfg, loc, m, iri, 13, (uint64_t)d << 40, w->visits[vi])) known = 0; else continue; }   // A2: one more interrupt landing under a new semantic cell
                 uint8_t *snap = malloc(sh->sbytes);
                 if (!snap) break;
                 if (!cfg->hooks->irq_alt(cfg->hooks->user, m, d, snap)) { free(snap); break; }
@@ -2574,6 +2595,8 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         w->stamp = calloc(site_n, sizeof *w->stamp);
         w->wsnap = malloc(sh.sbytes ? sh.sbytes : 1); w->winmemo = calloc(0x10000, sizeof *w->winmemo);
         w->pcache = calloc(4096, sizeof *w->pcache); w->pcap = 4096;   // A5: 32 KiB of spent (site, projection) keys per worker
+        w->ckm_ri = calloc(4096, sizeof *w->ckm_ri); w->ckm_ep = calloc(4096, sizeof *w->ckm_ep);   // A2: per-ri cell-key memo
+        w->ckm_ck = calloc(4096, sizeof *w->ckm_ck); w->ckspent = calloc(4096, sizeof *w->ckspent);
         w->rng_stamp = calloc(site_n, sizeof *w->rng_stamp); w->rng_last = calloc(site_n, 1);
         // C3: the regstate-aware closure state (the seed set grows by rehashing to REG_SET_CEIL; --unbounded lifts the per-site caps)
         uint32_t rwm = 1; while (rwm < rom_size && rwm < (1u << 23)) rwm <<= 1;   // direct-mapped by rom index, masked
@@ -2582,10 +2605,12 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
             .set = calloc(REG_SET_CAP, sizeof *w->regwalk->set), .set_cap = REG_SET_CAP,
             .site_seeds = calloc(rwm, 1), .ind_vals = calloc(rwm, 1), .provd = calloc((rom_size >> 3) + 1, 1) };
         if (!w->visits || !w->stamp || !w->capped || !w->regwalk || !w->regwalk->set ||
-            !w->regwalk->site_seeds || !w->regwalk->ind_vals || !w->regwalk->provd) { ok = 0; break; }
+            !w->regwalk->site_seeds || !w->regwalk->ind_vals || !w->regwalk->provd ||
+            !w->ckm_ri || !w->ckm_ep || !w->ckm_ck || !w->ckspent) { ok = 0; break; }
         w->cobs = (CopyObs){ .m = wm, .r = &w->loc, .last_rom = -1, .fed = sh.fed, .age = 99, .run_lo = -1, .run_hi = -1, .no_decompress = cfg->no_decompress };
         w->cobs.fedsrc = sh.fedsrc; w->cobs.fedprod = sh.fedprod;
         w->cobs.ramread = sh.ramread;
+        w->cobs.ctx_epoch = &sh.ctx_epoch;   // A2: the shared cell-context epoch
         started++;
     }
     out->workers = started;
@@ -2825,7 +2850,7 @@ cleanup:
         out->closure_reg_roots += l->closure_reg_roots; out->closure_reg_seed_sat += l->closure_reg_seed_sat; out->closure_reg_set_sat += l->closure_reg_set_sat;
         out->closure_reg_indirect += l->closure_reg_indirect; out->closure_reg_indirect_sat += l->closure_reg_indirect_sat; out->closure_reg_miss += l->closure_reg_miss;
         out->closure_reg_stackrets += l->closure_reg_stackrets;
-        free(l->jp_seen); l->jp_seen = NULL; free(ws[i].visits); free(ws[i].wsnap); free(ws[i].winmemo); free(ws[i].capped); free(ws[i].stamp); free(ws[i].pcache);
+        free(l->jp_seen); l->jp_seen = NULL; free(ws[i].visits); free(ws[i].wsnap); free(ws[i].winmemo); free(ws[i].capped); free(ws[i].stamp); free(ws[i].pcache); free(ws[i].ckm_ri); free(ws[i].ckm_ep); free(ws[i].ckm_ck); free(ws[i].ckspent);
         if (ws[i].regwalk) { free(ws[i].regwalk->set); free(ws[i].regwalk->site_seeds); free(ws[i].regwalk->ind_vals); free(ws[i].regwalk->provd); free(ws[i].regwalk); }
         if (i && ws[i].m && ws[i].m->close) ws[i].m->close(ws[i].m);
     }
