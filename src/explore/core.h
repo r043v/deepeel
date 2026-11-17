@@ -93,6 +93,7 @@ typedef struct DpCoreConfig {
     const char *state_dir;     // --state-dir: pending forked states are saved to <dir>/frontier.bin at exit
     int resume;                // --resume: states saved there by a previous run are queued first
     const char *cov_hits_path; // --cov-hits: a coverage v1 file whose per-line hits seed the heat (the max wins; the report then shows the played usage of that campaign)
+    const char *cov_transfer_rom, *cov_transfer_cov;   // --cov-transfer ROM COV: another revision's (or this one's own) coverage replayed as forced-path seeds where the four-byte instruction windows match byte for byte
     int unbounded;             // --unbounded: no step/path/site-fork ceilings; the RAM queue spills to the disk spool
     int campaign;              // --campaign: a bounded phase 1 (the platform's width-first shape, --max-time/--max-total bound, default 120 s) then --resume --unbounded in the same process; one report per phase
     const volatile sig_atomic_t *stop_requested; // cooperative interruption, checked between instructions

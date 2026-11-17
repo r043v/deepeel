@@ -6306,3 +6306,19 @@ règle désormais effectivement la taille de cette file avant débordement disqu
   produits (`coverage.bin`) entre passes, et l'inférence ci-dessus pour les
   derniers octets. Les deux cartes PNG sortent avec les apports par méthode
   (dpMt), la chaleur de jeu (dpCh) et les 18 classes légendées.
+
+## 0.395.0
+
+- **`--cov-transfer` et `--cov-hits` mutualisés dans le noyau** : options du
+  parseur commun — elles marchent sur toutes les routes de plateforme
+  (`explore` GB, `z80 explore` Sega/MSX, `md`, `nes`, `pce`), plus de code
+  propre à la GB. Le transfert met en file des graines de chemin forcé au pc
+  de chaque ligne identique à l'octet près, la banque montrée par la vue de la
+  machine quand elle existe ; rien n'est marqué connu par le transfert.
+- **Banc SMS : Castle of Illusion (256 Ko) à 100,0 %** — 0 octet inconnu,
+  recette générique sans film TAS et sans code spécifique à la plateforme :
+  passes bornées (60 M puis 300 M de pas), sessions de jeu à époques de pad
+  élargies (`--sessions 64 --play-sessions 8` — 4 424 trames jouées), reprise
+  des produits entre passes, inférence de continuité. 108 534 octets naturels,
+  75 163 forcés, 30 720 lectures de données observées, le reste inférences
+  étiquetées ; apports : fourche 58,3 %, statique+inféré 24,6 %, démo 0,3 %.

@@ -82,6 +82,8 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--unbounded")) { c->unbounded = 1; c->max_total = 0; c->fork_site_cap = 0; c->closure_seed_cap = 0; return 1; }   // A8: max_path_steps stays — lifting the caps must not lift the platform's path shape (Zelda: 85 776 naturals bounded, 4 835 unbounded); --max-steps N reshapes it explicitly
     if (!strcmp(a, "--state-dir") && i + 1 < argc) { c->state_dir = argv[i + 1]; return 2; }
     if (!strcmp(a, "--resume")) { c->resume = 1; return 1; }
+    if (!strcmp(a, "--cov-transfer") && i + 2 < argc) { c->cov_transfer_rom = argv[i + 1]; c->cov_transfer_cov = argv[i + 2]; return 3; }
+    if (!strcmp(a, "--cov-hits") && i + 1 < argc) { c->cov_hits_path = argv[i + 1]; return 2; }
     if (!strcmp(a, "--no-closure")) { c->no_closure = 1; return 1; }
     if (!strcmp(a, "--no-infer")) { c->no_infer = 1; return 1; }
     if (!strcmp(a, "--no-proj")) { c->no_proj = 1; return 1; }
@@ -2933,6 +2935,34 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
             if (prep) { m->save(m, cp); m->load(m, start); }
             queue_push(&sh, m, (Pending){ cp, cfg->seeds[i], 1, 0, 0, 1, 0, prep ? DP_SRC_SEEDRAM : 0 });
             out->seeded++;
+        }
+        if (cfg->cov_transfer_rom && *cfg->cov_transfer_rom && cfg->cov_transfer_cov && *cfg->cov_transfer_cov) {
+            // --cov-transfer (generic): the other revision's coverage replayed as
+            // forced-path seeds at the same compact index where the four-byte
+            // instruction windows match byte for byte.  Nothing is marked known by
+            // the transfer itself: this ROM proves its own bytes by running them.
+            uint32_t *tpcs = NULL; uint16_t *tbks = NULL;
+            uint64_t tlines = 0, tmatched = 0;
+            size_t tn = dp_core_transfer_seeds(cfg->rom_image ? cfg->rom_image : NULL, rom_size,
+                                               cfg->cov_transfer_rom, cfg->cov_transfer_cov, &tpcs, &tbks, &tlines, &tmatched);
+            if (tn && cfg->rom_image) {
+                for (size_t i = 0; i < tn; i++) {
+                    uint8_t *cp = malloc(sh.sbytes);
+                    if (!cp) break;
+                    memcpy(cp, start, sh.sbytes);
+                    int prep = 0;
+                    if (m->bank_view) {
+                        if (m->bank_view(m, tbks[i])) prep = 1;
+                        else out->seed_banks_absent++;
+                    } else if (tbks[i] != 0 && tbks[i] != 0xFFFF) out->seed_banks_absent++;
+                    if (prep) { m->save(m, cp); m->load(m, start); }
+                    queue_push(&sh, m, (Pending){ cp, tpcs[i], 1, 0, 0, 1, 0, prep ? DP_SRC_SEEDRAM : 0 });
+                    out->seeded++;
+                }
+                fprintf(stderr, "deepeel: --cov-transfer: %llu of %llu coverage lines byte-identical — %zu seeds queued\n",
+                        (unsigned long long)tmatched, (unsigned long long)tlines, tn);
+            }
+            free(tpcs); free(tbks);
         }
         // the platform registry's RST/IRQ vector entries as forced starts (the
         // legacy engines' vector seeding, G1, mutualized): a vector cell's

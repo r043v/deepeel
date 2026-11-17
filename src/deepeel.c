@@ -334,7 +334,6 @@ static int cmd_explore(int argc, char **argv) {
     dp_config_defaults(&cfg);
     struct { const char *tas[8]; int tas_n; int tas_any_rom; } scfg = { {0}, 0, 0 };   // --tas movies (the kernel reads --state-dir/--resume itself)
     uint16_t eb[32];
-    const char *xfer_rom = NULL, *xfer_cov = NULL;   // --cov-transfer ROM COV: another revision's coverage, replayed where the bytes match
     DpCoreConfig gkcfg; dp_core_config_default(&gkcfg); gkcfg.visits_per_pc = 2000000;   // frame waits are long loops   // --core: the generic kernel instead of the GB explorer
     uint16_t ea[32];
     int entries = 0;
@@ -365,8 +364,6 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--jobs") && i + 1 < argc) { ++i; cfg.jobs = !strcmp(argv[i], "auto") ? auto_jobs() : atoi(argv[i]); }
         else if (!strcmp(a, "--no-pointer-scan")) cfg.no_pointer_scan = 1;
         else if (!strcmp(a, "--gbs") && i + 1 < argc) gbs_path = argv[++i];
-        else if (!strcmp(a, "--cov-transfer") && i + 2 < argc) { xfer_rom = argv[i + 1]; xfer_cov = argv[i + 2]; i += 2; }
-        else if (!strcmp(a, "--cov-hits") && i + 1 < argc) gkcfg.cov_hits_path = argv[++i];   // the heat of a previous campaign's coverage file
         else if (!strcmp(a, "--gbs-fetch")) {   // optional NAME; when omitted it is derived from the ROM file name
             gbs_fetch = 1;
             if (i + 1 < argc && argv[i + 1][0] != '-') gbs_name = argv[++i];
@@ -770,25 +767,6 @@ static int cmd_explore(int argc, char **argv) {
             }
             free(gbs_pcs); free(gbs_bks); free(gbs_regs);   // copied into the kernel's seed arrays above
             gbs_pcs = NULL; gbs_bks = NULL; gbs_regs = NULL; gbs_seeds = 0;
-            if (xfer_rom && xfer_cov) {   // --cov-transfer: the other revision's coverage, replayed where the instruction windows match byte for byte
-                uint32_t *tpcs = NULL; uint16_t *tbks = NULL; uint64_t tlines = 0, tmatched = 0;
-                size_t tn = dp_core_transfer_seeds(cart->rom, cart->rom_size, xfer_rom, xfer_cov, &tpcs, &tbks, &tlines, &tmatched);
-                DpSeedRegs *tregs = tn ? malloc(tn * sizeof *tregs) : NULL;
-                if (tn && !tregs) tn = 0;
-                for (size_t i = 0; i < tn; i++) { tregs[i].a = 0xFF; tregs[i].sp = 0xFFFF; }
-                if (tn && core_seed_append(&gseed_pc, &gseed_bk, &gseed_regs, &gkcfg.n_seeds, tpcs, tbks, tregs, tn)) {
-                    free(tpcs); free(tbks); free(tregs);
-                    free(gseed_pc); free(gseed_bk); free(gseed_regs);
-                    free(gmasks); dp_tas_free(&gt); km->close(km);
-                    dp_results_free(&res); dp_cart_free(cart);
-                    fprintf(stderr, "deepeel: cannot allocate cov-transfer seeds\n");
-                    return 1;
-                }
-                gkcfg.seeds = gseed_pc; gkcfg.seed_banks = gseed_bk; gkcfg.seed_regs = gseed_regs;
-                free(tpcs); free(tbks); free(tregs);
-                fprintf(stderr, "deepeel: --cov-transfer: %llu of %llu coverage lines byte-identical — %zu seeds queued\n",
-                        (unsigned long long)tmatched, (unsigned long long)tlines, tn);
-            }
             DpCoreResult kr;
             if (watch) { gkcfg.watch_every = (unsigned)(60 / watch); dp_fbwatch_start("deepeel gb watch"); }   // generic screen watch (DpMachine.render)
             rc = dp_core_explore_cli(km, cart->rom_size, &gkcfg, &kr, summary ? summary : text) ? 0 : 1;
