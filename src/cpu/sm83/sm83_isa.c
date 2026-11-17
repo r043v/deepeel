@@ -53,7 +53,8 @@ static void isa_reg_effect(const uint8_t *b, uint32_t pc, const DpRegState *in, 
     unsigned by, dslot, sslot;
     switch (op) {
     case 0x06: case 0x0E: case 0x16: case 0x1E: case 0x26: case 0x2E:   // ld r,n
-        sm_set_byte(out, sm_byte_slot((op >> 3) & 7, &by), by, b[1]);
+        dslot = sm_byte_slot((op >> 3) & 7, &by);
+        sm_set_byte(out, dslot, by, b[1]);
         break;
     case 0x01: case 0x11: case 0x21: case 0x31:   // ld rr,nn
         { unsigned s2 = op == 0x31 ? DP_SM83R_SP : op >> 4;
@@ -288,7 +289,8 @@ static int isa_rom_table_follows(const DpIsa *isa, DpMachine *m, uint32_t pc, in
     }
     return 0;
 }
+static int isa_table_dispatch(const uint8_t *b, uint32_t *p) { if (b[0] != 0xe9) return 0; *p = 0; return 1; }
 static const DpIsa isa = { "sm83", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag, isa_reg_effect, isa_illegal, sm83_disasm, isa_mem_operand, 0x150u, 1, 0, isa_imm_ptr, NULL, isa_acc_imm, isa_st_acc_abs,
                            .sp_slot = DP_SM83R_SP, .sp_width = 2, .sp_addr_mask = 0xFFFFu, .sp_base = 0, .entry_data_sig = isa_entry_data_sig,
-                           .ram_load = isa_ram_load, .cmp_imm = 0xFE, .table_proven = isa_table_proven, .rom_table_follows = isa_rom_table_follows };
+                           .ram_load = isa_ram_load, .cmp_imm = 0xFE, .table_proven = isa_table_proven, .rom_table_follows = isa_rom_table_follows, .table_dispatch = isa_table_dispatch };
 const DpIsa *dp_isa_sm83(void) { return &isa; }

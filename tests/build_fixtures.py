@@ -37,6 +37,46 @@ def save(out, name, r):
     print("wrote", path, len(r))
 
 def build(out):
+    # Conditional stack transfers: the alternative CALL must push its real
+    # return address, and the alternative RET must pop it from the stack.
+    for name, sequence in (
+        ("call", bytes.fromhex("af c4 8001 c3 9001")),
+        ("ret", bytes.fromhex("cd 8001 c3 9001")),
+    ):
+        g = rom()
+        w(g, 0x100, 0xc3, 0x50, 0x01)
+        g[0x150:0x150 + len(sequence)] = sequence
+        w(g, 0x180, *(bytes.fromhex("04 c9") if name == "call" else bytes.fromhex("af c0 c3 a0 01")))
+        w(g, 0x190, 0x18, 0xfe)
+        w(g, 0x1a0, 0x18, 0xfe)
+        save(out, "fix_condstack_" + name, g)
+        z = bytearray([0xff]) * 0x8000
+        w(z, 0, 0xc3, 0x50, 0x01)
+        z[0x150:0x150 + len(sequence)] = sequence
+        w(z, 0x180, *(bytes.fromhex("04 c9") if name == "call" else bytes.fromhex("af c0 c3 a0 01")))
+        w(z, 0x190, 0x18, 0xfe)
+        w(z, 0x1a0, 0x18, 0xfe)
+        with open(os.path.join(out, "fix_condstack_" + name + ".sms"), "wb") as f:
+            f.write(z)
+    g = rom()
+    w(g, 0x100, 0xc3, 0x50, 0x01)
+    # Visit the same non-taken CALL twice before any pending fork is run.
+    w(g, 0x150, *bytes.fromhex("06 02 af c4 80 01 05 20 f9 18 fe"))
+    w(g, 0x180, 0x04, 0xc9)
+    save(out, "fix_condstack_deferred", g)
+    g = rom()
+    w(g, 0x100, 0xc3, 0x50, 0x01)
+    w(g, 0x150, *bytes.fromhex("21 00 40 7e ea 00 c0 00 00 00 00 00 3e c9 ea 00 c0 c3 00 c0"))
+    w(g, 0x4000, 0x00)
+    save(out, "fix_wram_overwrite", g)
+    # A fork created before a copy must not inherit the other path's source.
+    g = rom()
+    w(g, 0x100, 0xc3, 0x50, 0x01)
+    w(g, 0x150, *bytes.fromhex("af 20 1d fa 00 40 ea 00 c0 c3 90 01"))
+    w(g, 0x170, 0xc3, 0x00, 0xc0)
+    w(g, 0x190, 0x18, 0xfe)
+    w(g, 0x4000, 0xc9)
+    save(out, "fix_wram_fork_source", g)
     # Ambiguous Sega image: Codemasters signature, code that banks slot zero.
     z80 = bytearray([0xff]) * 0x10000
     w(z80, 0, 0xc3, 0x00, 0x01)

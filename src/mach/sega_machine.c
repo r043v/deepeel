@@ -116,6 +116,12 @@ static int sega_get_regs(DpMachine *m, DpRegState *out) {
 }
 static uint32_t sega_pc(DpMachine *m) { return ((SegaMach *)m->impl)->b->cpu()->pc; }
 static void sega_set_pc(DpMachine *m, uint32_t pc) { ((SegaMach *)m->impl)->b->cpu()->pc = (uint16_t)pc; }
+static int sega_invert_condition(DpMachine *m, int condition) {
+    if (condition < 0 || condition > 7) return 0;
+    static const uint8_t flags[] = {0x40, 0x01, 0x04, 0x80};
+    ((SegaMach *)m->impl)->b->cpu()->f ^= flags[condition >> 1];
+    return 1;
+}
 // register seeds (music rips): the Z80 registers are directly writable through the backend
 static int sega_seed_regs(DpMachine *m, uint8_t a, uint16_t sp) {
     z80_t *c = ((SegaMach *)m->impl)->b->cpu();
@@ -315,6 +321,7 @@ DpMachine *dp_machine_sega(const void *backend) {
     m->run = sega_run;
     m->pc = sega_pc;
     m->set_pc = sega_set_pc;
+    m->invert_condition = sega_invert_condition;
     m->bank_shift = 14;    // the Z80's 16 KiB pointer-table window (the static closure's geometry, E5)
     m->rom_top_win = 3; m->bank_window = 0x4000u;   // P10: the switchable window maps its bank at $4000   // SMS/GG/SG/MSX: ROM fills windows $0000/$4000/$8000 ($C000-$FFFF is RAM on every profile)
     m->seed_regs = sega_seed_regs;

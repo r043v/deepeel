@@ -184,6 +184,9 @@ typedef struct DpIsa {
     // B4: bytes of one table entry (2: a word table everywhere but the 68000, 4: its long tables);
     // the index replay scales the proven length by it.  0: 2 assumed.
     uint8_t table_entry_width;
+    // Classify an indirect dispatch: 1 = register table (parameter selects
+    // the register view), 2 = absolute pointer table (parameter is its base).
+    int (*table_dispatch)(const uint8_t *bytes, uint32_t *parameter);
 } DpIsa;
 
 const DpIsa *dp_isa_sm83(void);
@@ -281,6 +284,9 @@ struct DpMachine {
     // side of a conditional is taken by moving pc on a restored state
     uint32_t (*pc)(struct DpMachine *);
     void (*set_pc)(struct DpMachine *, uint32_t pc);
+    // Invert the flag tested by a conditional instruction before executing
+    // it. Returns 0 when that condition cannot be inverted by this backend.
+    int (*invert_condition)(struct DpMachine *, int condition);
     // Optional: prepare the CPU registers of a seeded entry point (music rips:
     // the init call carries the song number in A and starts on the rip's
     // stack).  a == 0xFF / sp == 0xFFFF leave the register untouched.  NULL:

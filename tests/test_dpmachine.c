@@ -187,6 +187,13 @@ int main(int argc, char **argv) {
         m->load(m, b);
         m->save(m, a);   // the first image carries a few non-restored clock bytes: fixed point from the second
         CHECK_MSG(!memcmp(a, b, n), "save/load/save reaches a fixed point");
+        uint64_t h_no_ei = m->state_hash(m), suffix;
+        memcpy(&suffix, b + n - sizeof suffix, sizeof suffix);
+        suffix ^= UINT64_C(1) << 63;
+        memcpy(b + n - sizeof suffix, &suffix, sizeof suffix);
+        m->load(m, b);
+        CHECK_MSG(m->state_hash(m) != h_no_ei, "EI shadow affects state hash");
+        m->load(m, a);
         CHECK_MSG(m->fetch(m, 0x0100) == c->rom[0x0100], "fetch sees the ROM");
         CHECK_MSG(m->rom_index(m, 0x0100) == 0x0100 && m->rom_index(m, 0x8000) < 0, "rom_index");
         free(a); free(b);

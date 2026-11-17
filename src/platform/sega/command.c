@@ -95,8 +95,11 @@ static void core_clo_finish(void *user, DpCoreResult *r) {
         if (!k->c) continue;
         dp_sega_closure_run(k->c);
         size_t n = core_clo.size < r->rom_size ? core_clo.size : r->rom_size;
-        for (size_t i = 0; i < n; i++)
-            if ((k->flags[i] & DP_SEGA_STATIC) && !(r->flags[i] & (DP_CORE_STATIC | DP_CORE_NATURAL | DP_CORE_FORCED))) { r->flags[i] |= DP_CORE_STATIC; r->closure_bytes++; }
+        for (size_t i = 0; i < n; i++) {
+            if (!(k->flags[i] & DP_SEGA_STATIC)) continue;
+            r->src_flags[i] |= DP_SRC_CLOSURE;
+            if (!(r->flags[i] & (DP_CORE_STATIC | DP_CORE_NATURAL | DP_CORE_FORCED))) { r->flags[i] |= DP_CORE_STATIC; r->closure_bytes++; }
+        }
         r->closure_roots += k->st.seeds;
     }
     while (core_clo.list) { CoreClosure *k = core_clo.list; core_clo.list = k->next; if (k->c) dp_sega_closure_free(k->c); free(k->flags); free(k); }
@@ -187,7 +190,7 @@ int dp_sega_explore_command(int argc,char **argv) {
     const DpSegaSystem *s=!strcmp(argv[3],"msx")?dp_msx_system():dp_sega_system(argv[3]); if(!s) goto usage;
     DpSegaOptions o=dp_sega_options(); if(!strcmp(s->id,"msx")) o.seed_vectors=0;
     DpCoreConfig kcfg; dp_core_config_default(&kcfg);
-    const char *text=NULL,*map=NULL,*summary=NULL,*cov=NULL;
+    const char *text=NULL,*map=NULL,*summary=NULL,*cov=NULL,*rtcode=NULL;
     const char *midx_file=NULL; DpMusicSeed *music_seeds=NULL; size_t music_n=0;
     if(!strcmp(s->id,"sms") || !strcmp(s->id,"gg")) {   // coverage-first defaults: every core, every bank seeded, a deep queue
         o.fork_cap=DP_DEFAULT_BRANCH_FORK_CAP;
@@ -225,7 +228,7 @@ int dp_sega_explore_command(int argc,char **argv) {
         else if(!strcmp(key,"--map")) map=value;
         else if(!strcmp(key,"--summary")) summary=value;
         else if(!strcmp(key,"--cov")) cov=value;
-        else if(!strcmp(key,"--rtcode")) core_rtcode_path=value;   // the kernel's runtime code archive (exec_wram_rom)
+        else if(!strcmp(key,"--rtcode")) rtcode=value;   // the kernel's runtime code archive (exec_wram_rom)
         else if(!strcmp(key,"--evidence") || !strcmp(key,"--romdata")) fprintf(stderr,"deepeel: %s: not produced by the kernel yet (ignored)\n",key);
         else if(!strcmp(key,"--mapper") && (!strcmp(s->id,"sms") || !strcmp(s->id,"gg"))) {
             const char *names[]={"auto","sega","codemasters","korean150"};
@@ -276,7 +279,7 @@ int dp_sega_explore_command(int argc,char **argv) {
     if(mn==DP_MUSIC_SEEDS_LOAD_ERR && midx_file) { free(image); return 1; }
     if(mn==DP_MUSIC_SEEDS_ALLOC) { free(image); return 1; }
     if(mn>=0) { o.music_seeds=music_seeds; o.music_seed_count=(unsigned)mn; }
-    core_cov_path=cov; core_text_path=text; core_map_path=map; core_summary_path=summary; core_rom_name=argv[4]; core_rtcode_path=NULL;
+    core_cov_path=cov; core_text_path=text; core_map_path=map; core_summary_path=summary; core_rom_name=argv[4]; core_rtcode_path=rtcode;
     int cok=sega_core_run(s,image+header,(size_t)end-header,&o,&kcfg,stdout);
     free(image); free(music_seeds);
     if(!cok) fprintf(stderr,"invalid machine profile/mapper/ROM size, or allocation failure\n");

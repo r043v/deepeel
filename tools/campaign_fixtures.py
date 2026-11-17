@@ -8,6 +8,7 @@
 import glob, os, re, subprocess, sys, tempfile, time
 
 build, out = sys.argv[1], sys.argv[2]
+smoke = "--smoke" in sys.argv[3:]
 exe = os.path.join(build, "deepeel")
 fx = os.path.join(build, "tests")
 
@@ -53,7 +54,10 @@ with tempfile.TemporaryDirectory() as td:
                     os.remove(f)
             t0 = time.time()
             try:
-                r = subprocess.run(mk(rom, t, mp), capture_output=True, text=True, timeout=300)
+                cmd = mk(rom, t, mp)
+                if smoke:
+                    cmd += ["--max-total", "20000", "--max-steps", "1000", "--jobs", "1", "--no-sessions", "--attract-frames", "0"]
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             except subprocess.TimeoutExpired:
                 r = None   # one hung run must not kill the whole campaign table
             dt = time.time() - t0
@@ -68,6 +72,8 @@ with open(out, "w") as f:
     f.write("Observations de l'outil (machine concrète, RAM à zéro) sur les fixtures\n")
     f.write("construites par `tests/build_fixtures.py` ; **pas** des mesures de matériel,\n")
     f.write("**pas** des ROMs réelles. Généré par `tools/campaign_fixtures.py`.\n\n")
+    if smoke:
+        f.write("Campagne de vérification : budget de 20 000 pas, chemins de 1 000 pas, un worker, sans sessions.\n\n")
     f.write("| Plateforme | Fixture | Code retour | Pas explorés | Octets connus (%) | Durée (s) |\n|---|---|---|---|---|---|\n")
     for name, rom, rc, steps, known, dt in rows:
         f.write(f"| {name} | `{rom}` | {rc} | {steps if steps is not None else 'n/d'} | {known if known is not None else 'n/d'} | {dt:.2f} |\n")

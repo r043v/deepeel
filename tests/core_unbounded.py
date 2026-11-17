@@ -67,7 +67,7 @@ with tempfile.TemporaryDirectory(prefix="deepeel-unbounded-") as directory:
             data = (state / "frontier.bin").read_bytes()
             magic, state_size, count = struct.unpack_from("=III", data)
             assert magic == 0x31524644 and len(data) == 12 + count * (20 + state_size), name   # P5 (0.389.0): the record carries the checkpoint epoch (SpoolHead 16 -> 20)
-            records = [struct.unpack_from("=IIII", data, 12 + i * (16 + state_size)) for i in range(count)]
+            records = [struct.unpack_from("=IIII", data, 12 + i * (20 + state_size)) for i in range(count)]
             assert any(not (record[1] & 1) for record in records), f"{name}: active natural path lost"
             resumed = subprocess.run([exe, *command, "--core", "--resume", *extra,
                                       "--state-dir", str(state), "--max-total", "100",

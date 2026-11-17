@@ -309,8 +309,13 @@ static int isa_rom_table_follows(const DpIsa *isa, DpMachine *m, uint32_t pc, in
     }
     return 0;
 }
+static int isa_table_dispatch(const uint8_t *b, uint32_t *p) {
+    if (b[0] == 0xe9) { *p = 0; return 1; }
+    if ((b[0] == 0xdd || b[0] == 0xfd) && b[1] == 0xe9) { *p = b[0] == 0xdd ? 1 : 2; return 1; }
+    return 0;
+}
 static const DpIsa isa = { "z80", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
                            isa_reg_effect, isa_illegal, isa_disasm, isa_mem_operand, 0, 1, 0, isa_imm_ptr, NULL, isa_acc_imm, isa_st_acc_abs,
                            .sp_slot = DP_Z80R_SP, .sp_width = 2, .sp_addr_mask = 0xFFFFu, .sp_base = 0, .entry_data_sig = isa_entry_data_sig, .out_port = isa_out_port,
-                           .ram_load = isa_ram_load, .cmp_imm = 0xFE, .table_proven = isa_table_proven, .rom_table_follows = isa_rom_table_follows };
+                           .ram_load = isa_ram_load, .cmp_imm = 0xFE, .table_proven = isa_table_proven, .rom_table_follows = isa_rom_table_follows, .table_dispatch = isa_table_dispatch };
 const DpIsa *dp_isa_z80(void) { return &isa; }

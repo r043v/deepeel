@@ -212,8 +212,9 @@ static int isa_rom_table_follows(const DpIsa *isa, DpMachine *m, uint32_t pc, in
     }
     return 0;
 }
+static int isa_table_dispatch(const uint8_t *b, uint32_t *p) { if (b[0] != 0x6c) return 0; *p = b[1] | (uint32_t)b[2] << 8; return 2; }
 static const DpIsa isa = { "m6502", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
                            isa_reg_effect, isa_illegal, isa_disasm, isa_mem_operand, 0, 0, 1, NULL, isa_imm_byte, isa_acc_imm, isa_st_acc_abs,
                            .sp_slot = DP_M6502R_S, .sp_width = 2, .sp_addr_mask = 0xFFu, .sp_base = 0x0100u, .entry_data_sig = NULL, .sp_ret = isa_sp_ret,
-                           .ram_load = isa_ram_load, .cmp_imm = 0xC9, .table_proven = isa_table_proven, .rom_table_follows = isa_rom_table_follows };
+                           .ram_load = isa_ram_load, .cmp_imm = 0xC9, .table_proven = isa_table_proven, .rom_table_follows = isa_rom_table_follows, .table_dispatch = isa_table_dispatch };
 const DpIsa *dp_isa_m6502(void) { return &isa; }

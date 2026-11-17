@@ -1,5 +1,56 @@
 # Plateforme Game Boy
 
+Correctifs du noyau en cours : les fenêtres de décodage disposent de dix
+octets pour les instructions longues 68000, la propagation des immédiats
+SM83 distingue les octets hauts et bas, et un plafond nul d'amorces de
+fermeture signifie bien sans plafond. Le réarmement des sondes recalcule
+les valeurs RAM et les fourches IRQ réarmées sont conservées. Les écritures
+de registres mapper déclarés déclenchent les fourches de banques ; leur
+priorité est évaluée dans le mapping sauvegardé et leur plafond est levé en
+mode non borné. Validation et autres travaux du plan restent en cours.
+En mode non borné, le budget de chemin règle désormais un quantum de
+répartition : il ne supprime plus le chemin à son expiration. Une variante
+de banque refusée par le plafond borné ne consomme plus sa clé de déduplication.
+Avec un répertoire d'état, les variantes bancaires au-delà du plafond sont
+reportées dans la frontière ; la fixture `core_bank_deferred` vérifie leur
+reprise et l'exécution dans les banques correspondantes.
+Le répertoire de reprise contient désormais une identité SHA-1 de l'image
+ROM, du backend, de l'ISA et de la taille d'état ; une incompatibilité arrête
+la reprise avant lecture de la frontière. Un ancien répertoire sans identité
+reste accepté avec un avertissement : son identité antérieure ne peut pas
+être vérifiée. Cela ne garantit pas encore une transaction commune à tous les
+fichiers du checkpoint.
+La déduplication d'état en mode non borné distingue aussi les chemins forcés
+des chemins naturels : un passage forcé ne coupe plus la reprise naturelle.
+Les évictions heuristiques par cellule et projection restent désactivées en
+non borné, y compris après reprise des cellules archivées. Sur la fixture
+MD `fix_md_alias`, leur retrait révèle une multiplication de chemins forcés ;
+le test de reprise isole donc la frontière en refusant les nouvelles fourches.
+La maîtrise de cette multiplication sans perdre de couverture reste à traiter.
+La table des amorces statiques ne confond plus une longue chaîne de collisions
+avec un doublon et incorpore les 32 bits de l'index ROM à sa clé hachée ; le
+plafond de capacité est levé en mode non borné. La clé reste un condensat,
+pas une preuve d'égalité complète des états.
+La reconnaissance d'un dispatch indirect est maintenant fournie par `DpIsa`
+pour SM83, Z80, 6502 et HuC6280 ; les tests de l'interface et les fixtures de
+tables continuent de passer. Le balayage arrière des chargements HL/IX/IY
+reste spécialisé dans le noyau et doit encore être déplacé vers l'ISA.
+Les appels et retours conditionnels SM83 et Z80 disposent d'une issue
+alternative exécutée par la machine avec l'indicateur inversé ; le snapshot
+inclut les effets de pile. La fixture `core_condstack` vérifie les deux
+formes sur GB et SMS. Une alternative d'appel saturée est reportée, puis
+reprise depuis la frontière avec sa profondeur d'appel, vérifiée par la
+fixture `core_condstack`.
+Une écriture RAM observée invalide la source ROM précédemment attribuée à
+cette cellule avant de chercher une nouvelle copie ; `core_wram_overwrite`
+épingle le cas d'un octet copié puis remplacé. Les tableaux de provenance
+restent partagés entre chemins : leur restauration avec chaque snapshot
+reste à implémenter pour une attribution fiable entre fourches et workers.
+Quand l'image ROM est disponible, une attribution est aussi refusée si les
+valeurs ROM et RAM diffèrent ; la fixture `core_wram_fork_source` reproduit
+le cas d'une fourche créée avant une copie. L'égalité seule ne prouve pas la
+provenance et ne remplace pas son rattachement au snapshot.
+
 Rips GBS (Game Boy Sound Format, `--gbs FILE` / `--gbs-fetch [NAME]`, 0.332.0) : le rip du
 moteur musical du jeu est récupéré de gbs.joshw.info (index Apache parcouru par nom
 normalisé, archive `.7z` dépaquetée par le binaire `7z` dans `<gbs-dir>/<nom normalisé>/`,
@@ -6168,3 +6219,17 @@ compteurs réarmés (A2) mises au nouveau nombre.
   `core_campaign_*` s'arrêtent par SIGINT ; `md_milestone` enregistré dans
   ctest ; la matrice techniques 3/4/7 × ISA (6502, huc6280, z80, sm83, 68000)
   est verte aux compteurs réarmés.
+
+Les exports `--cov` indiquent désormais le nombre de passages enregistré sur
+les débuts d'instructions ; les autres octets couverts gardent le compteur 1,
+faute de compteur individuel. Les octets prouvés par la fermeture Sega portent
+également la source de couverture `CLOSURE`, y compris lorsqu'ils ont aussi été
+atteints par une autre méthode. L'empreinte d'état Game Boy prend en compte
+l'ombre de `EI`, qui modifie le traitement de l'interruption suivante ; les
+autres limites des empreintes d'état restent à examiner.
+Les exports `--romdata` et `--evidence` ne sont pas encore produits par le
+noyau commun. Ces options restent acceptées pour les anciens scripts et un
+avertissement signale qu'elles sont ignorées ; les compteurs de lectures ROM
+nécessaires à `--romdata` restent à implémenter.
+Sur Sega, `--rtcode` conserve maintenant le chemin demandé jusqu'à l'écriture
+de l'archive des instructions exécutées en RAM.

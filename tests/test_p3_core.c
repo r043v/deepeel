@@ -25,10 +25,20 @@ static int run(const char *dir, DpCoreConfig *cfg, DpCoreResult *r) {
     DpMachine *m = dp_machine_md(mm);
     if (!m) return 0;
     dp_machine_md_source(m, rom, rn);
-    cfg->hooks = dp_machine_md_hooks();
+    if (!cfg->hooks) cfg->hooks = dp_machine_md_hooks();
     int ok = dp_core_explore(m, rn, cfg, r);
     m->close(m);
     return ok;
+}
+
+static int stop_at_exit(void *user, DpMachine *m, uint32_t pc) {
+    (void)user; (void)m;
+    return pc != 0x10208;
+}
+
+static int no_forks(void *user, DpMachine *m, uint32_t site, uint32_t other) {
+    (void)user; (void)m; (void)site; (void)other;
+    return 0;
 }
 
 int main(int argc, char **argv) {
@@ -41,6 +51,18 @@ int main(int argc, char **argv) {
     mkdir(sd, 0777);
     DpCoreConfig cfg;
     DpCoreResult r;
+    // A finite path must reach its exit even when the scheduling quantum is
+    // much shorter than the loop; a quantum is not a destructive step cap.
+    dp_core_config_default(&cfg);
+    const DpPlatformHooks hooks = { .before_step = stop_at_exit, .veto_fork = no_forks };
+    cfg.unbounded = 1; cfg.max_path_steps = 8; cfg.no_sessions = 1;
+    cfg.attract_frames = 0; cfg.no_exact = 1; cfg.hooks = &hooks;
+    CHECK(run(argv[1], &cfg, &r));
+    fprintf(stderr, "unbounded: steps %llu repeats %llu yields %llu natural@10208 %d\n", (unsigned long long)r.steps, (unsigned long long)r.state_repeats, (unsigned long long)r.cooperative_yields, !!(r.flags[0x10208] & DP_CORE_NATURAL));
+    CHECK(r.flags[0x10206] & DP_CORE_NATURAL);
+    CHECK(r.sat_path == 0);
+    CHECK(r.cell_pruned == 0 && r.proj_pruned == 0);
+    dp_core_result_free(&r);
     dp_core_config_default(&cfg);
     cfg.max_total = 200000; cfg.no_sessions = 1; cfg.visits_per_pc = 8; cfg.state_dir = sd;
     CHECK(run(argv[1], &cfg, &r));
@@ -51,9 +73,12 @@ int main(int argc, char **argv) {
     dp_core_result_free(&r);
     dp_core_config_default(&cfg);
     cfg.no_sessions = 1; cfg.state_dir = sd; cfg.resume = 1; cfg.unbounded = 1; cfg.max_total = 0;
+    const DpPlatformHooks resume_hooks = { .veto_fork = no_forks };
+    cfg.hooks = &resume_hooks;
     CHECK(run(argv[1], &cfg, &r));
     fprintf(stderr, "phase 2: resumed %llu natural@10208 %d\n", (unsigned long long)r.resumed, !!(r.flags[0x10208] & DP_CORE_NATURAL));
     CHECK(r.resumed >= 1);
+    CHECK(r.cell_pruned == 0 && r.proj_pruned == 0);
     CHECK(r.flags[0x10208] & DP_CORE_NATURAL);
     (void)before;
     dp_core_result_free(&r);

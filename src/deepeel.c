@@ -61,6 +61,8 @@ static const char *argv_opt(int argc, char **argv, const char *name) {
 }
 // kernel (--core) outputs shared by every platform: --cov, --map (PNG or text), --summary, --text
 static void core_outputs(int argc, char **argv, const char *id, const char *rom, const DpMachine *m, const DpCoreResult *r) {
+    if (argv_opt(argc, argv, "--romdata")) fprintf(stderr, "deepeel: --romdata: not produced by the kernel yet (ignored)\n");
+    if (argv_opt(argc, argv, "--evidence")) fprintf(stderr, "deepeel: --evidence: not produced by the kernel yet (ignored)\n");
     dp_core_write_cov(argv_cov(argc, argv), id, m, r);
     if (argv_opt(argc, argv, "--rtcode") && r->ra.n) { FILE *rf = fopen(argv_opt(argc, argv, "--rtcode"), "w"); if (rf) { dp_ramarch_write(&r->ra, rf, id); fclose(rf); } }
     if (dp_core_write_map(argv_opt(argc, argv, "--map"), id, rom, r) < 0) fprintf(stderr, "deepeel: cannot write --map\n");
@@ -343,7 +345,7 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--ram-code") && i + 1 < argc) ++i;   // accepted for compatibility, no longer produced (use --rtcode)
         else if (!strcmp(a, "--summary") && i + 1 < argc) summary = argv[++i];
         else if (!strcmp(a, "--cov") && i + 1 < argc) ++i;   // written by core_outputs
-        else if (!strcmp(a, "--romdata") && i + 1 < argc) ++i;   // written by core_outputs
+        else if (!strcmp(a, "--romdata") && i + 1 < argc) ++i;   // accepted for compatibility; core_outputs reports it is unavailable
         else if (!strcmp(a, "--map") && i + 1 < argc) ++i;   // written by core_outputs
         else if (!strcmp(a, "--html") && i + 1 < argc) ++i;   // written by core_outputs
         else if (skip_mapwin(argc, argv, &i)) {}

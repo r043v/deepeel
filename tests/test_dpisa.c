@@ -26,6 +26,10 @@ static void test_z80(void) {
     CHECK(isa->flow(retz, 0x100, &fi) == 1 && fi.kind == DP_FLOW_COND && fi.fall && fi.cond == 1, "ret z");
     uint8_t jphl[] = { 0xE9 };
     CHECK(isa->flow(jphl, 0x100, &fi) == 1 && fi.kind == DP_FLOW_INDIRECT && !fi.fall, "jp hl");
+    uint32_t param = 99; uint8_t jpix[] = {0xdd, 0xe9}, jpiy[] = {0xfd, 0xe9};
+    CHECK(isa->table_dispatch(jphl, &param) == 1 && param == 0, "z80 dispatch hl");
+    CHECK(isa->table_dispatch(jpix, &param) == 1 && param == 1, "z80 dispatch ix");
+    CHECK(isa->table_dispatch(jpiy, &param) == 1 && param == 2, "z80 dispatch iy");
     uint8_t halt[] = { 0x76 };
     CHECK(isa->flow(halt, 0x100, &fi) == 1 && fi.halt, "halt");
     uint8_t ldir[] = { 0xED, 0xB0 };
@@ -53,6 +57,18 @@ static void test_sm83(void) {
     CHECK(isa->flow(ill, 0x100, &fi) == 1 && fi.kind == DP_FLOW_ILLEGAL, "illegal d3");
     uint8_t jphl[] = { 0xE9 };
     CHECK(isa->flow(jphl, 0x100, &fi) == 1 && fi.kind == DP_FLOW_INDIRECT, "jp hl");
+    uint32_t param = 99;
+    CHECK(isa->table_dispatch(jphl, &param) == 1 && param == 0, "sm83 dispatch hl");
+    const uint8_t loads[] = {0x06, 0x0e, 0x16, 0x1e, 0x26, 0x2e};
+    for (unsigned i = 0; i < sizeof loads; i++) {
+        DpRegState before, after;
+        dp_regstate_clear(&before);
+        uint8_t inst[] = {loads[i], 0x5a, 0};
+        isa->reg_effect(inst, 0, &before, &after, NULL);
+        unsigned slot = i / 2, byte = (i & 1) ^ 1;
+        CHECK((after.known[slot] & (1u << byte)) && ((after.v[slot] >> (byte * 8)) & 0xff) == 0x5a,
+              "sm83 immediate register %u", i);
+    }
 }
 
 static void test_m6502(void) {
@@ -65,6 +81,8 @@ static void test_m6502(void) {
     CHECK(isa->flow(jmp, 0x8000, &fi) == 3 && fi.kind == DP_FLOW_JUMP && !fi.fall && fi.target == 0x8050, "jmp abs");
     uint8_t jmpi[] = { 0x6C, 0x00, 0x02 };
     CHECK(isa->flow(jmpi, 0x8000, &fi) == 3 && fi.kind == DP_FLOW_INDIRECT, "jmp (ind)");
+    uint32_t param = 0;
+    CHECK(isa->table_dispatch(jmpi, &param) == 2 && param == 0x200, "6502 indirect table base");
     uint8_t jsr[] = { 0x20, 0x00, 0x90 };
     CHECK(isa->flow(jsr, 0x8000, &fi) == 3 && fi.kind == DP_FLOW_CALL && fi.call && fi.target == 0x9000, "jsr");
     uint8_t rts[] = { 0x60 };
@@ -95,6 +113,9 @@ static void test_huc6280(void) {
     CHECK(isa->flow(bne, 0x8000, &fi) == 2 && fi.kind == DP_FLOW_COND && fi.fall && fi.target == 0x8007, "bne");
     uint8_t jmpi[] = { 0x6C, 0x00, 0x20 };
     CHECK(isa->flow(jmpi, 0x8000, &fi) == 3 && fi.kind == DP_FLOW_INDIRECT, "jmp (ind)");
+    uint32_t param = 0; uint8_t jmpx[] = {0x7c, 0x34, 0x12};
+    CHECK(isa->table_dispatch(jmpi, &param) == 2 && param == 0x2000, "huc indirect table base");
+    CHECK(isa->table_dispatch(jmpx, &param) == 2 && param == 0x1234, "huc indexed table base");
     char txt[40];
     CHECK(isa->disasm(jsr, sizeof jsr, 0, txt, sizeof txt) == 3 && strstr(txt, "9000"), "disasm jsr");
 }

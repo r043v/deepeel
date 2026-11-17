@@ -215,7 +215,8 @@ static int isa_rom_table_follows(const DpIsa *isa, DpMachine *m, uint32_t pc, in
     }
     return 0;
 }
+static int isa_table_dispatch(const uint8_t *b, uint32_t *p) { if (b[0] != 0x6c && b[0] != 0x7c) return 0; *p = b[1] | (uint32_t)b[2] << 8; return 2; }
 static const DpIsa isa = { "huc6280", 2, 0, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
                            isa_reg_effect, isa_illegal, isa_disasm, isa_mem_operand, 0, 0, 1, NULL, isa_imm_byte, isa_acc_imm, isa_st_acc_abs,
-                           .ram_load = isa_ram_load, .cmp_imm = 0xC9, .table_proven = isa_table_proven, .rom_table_follows = isa_rom_table_follows };
+                           .ram_load = isa_ram_load, .cmp_imm = 0xC9, .table_proven = isa_table_proven, .rom_table_follows = isa_rom_table_follows, .table_dispatch = isa_table_dispatch };
 const DpIsa *dp_isa_huc6280(void) { return &isa; }
