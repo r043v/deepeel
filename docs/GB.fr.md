@@ -6292,3 +6292,17 @@ règle désormais effectivement la taille de cette file avant débordement disqu
   campagne résumée retrouve son chaud/froid sans réexploration.
 - `maprender` : un chiffre de classe hors bornes dans une carte `map v1`
   devient `unknown` au lieu de corrompre les plages.
+- **Inférence de continuité alignée sur le niveau rapport** : un trou de
+  données (jusqu'à 1024 octets) borné par une inférence — queue de blob
+  inféré, borne table|padding ou table|table — sans code *observé* adjacent
+  reste données inférées, la même forme que la règle
+  `donnée↔donnée ≤1024` du niveau rapport (Zelda US : les 19 derniers
+  octets ; Zelda FR : 4 plages de 79-140 octets entre tranches de table).
+  Le trou ≤16 entre deux tranches de table reste table. Des inférences,
+  jamais des observations.
+- **Zelda US et FR à 100,0 %** : la recette générique — passes bornées avec
+  `--cov-transfer` (auto-référencé pour la US, US→FR pour la FR : 302 719
+  lignes transférées sur 442 162), `--cov-hits` pour la chaleur, reprise des
+  produits (`coverage.bin`) entre passes, et l'inférence ci-dessus pour les
+  derniers octets. Les deux cartes PNG sortent avec les apports par méthode
+  (dpMt), la chaleur de jeu (dpCh) et les 18 classes légendées.

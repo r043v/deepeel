@@ -2516,15 +2516,18 @@ static void infer_static(DpCoreResult *r, DpMachine *m, const DpCoreConfig *cfg)
         if (len <= 3 && (lf & code) && (rf & code)) c = DP_MAP_INF_CODE;
         else if (len <= 1024 && lpad && (j >= n || rpad || !(rf & any))) c = DP_MAP_INF_PAD;
         else if (len <= 1024 && ((lf & any) || (rf & any))) c = DP_MAP_INF_DATA;
-        /* The two residual shapes of a long campaign (Zelda US: the last 11
-         * unknown bytes): a small gap inside a run of table entries — the
-         * period detection missed an entry — stays table; and the tail of an
-         * inferred-data blob that meets padding or another inference, without
-         * any kernel-classified code on either side, stays inferred data.
-         * Both are inferences, never observations. */
+        /* The residual shapes of a long campaign (Zelda US: the last unknown
+         * bytes): a small gap inside a run of table entries — the period
+         * detection missed an entry — stays table; and a data gap bounded by
+         * another inference (inferred-data blob tail, table|padding or
+         * table|table boundary) with no kernel-classified code on either side
+         * stays inferred data — the same data-continuity shape the report
+         * level has always inferred (data neighbours, up to 1024).  All are
+         * inferences, never observations. */
         else if (len <= 16 && ltab && rtab) c = DP_MAP_TABLE;
-        else if (len <= 64 && !((lf | rf) & code) &&
-                 ((i && r->inferred[i - 1] == DP_MAP_INF_DATA) || (j < n && r->inferred[j] == DP_MAP_INF_DATA)))
+        else if (len <= 1024 && !((lf | rf) & code) &&
+                 ((i && (r->inferred[i - 1] == DP_MAP_INF_DATA || r->inferred[i - 1] == DP_MAP_TABLE)) ||
+                  (j < n && (r->inferred[j] == DP_MAP_INF_DATA || r->inferred[j] == DP_MAP_TABLE))))
             c = DP_MAP_INF_DATA;
         if (c) {
             for (size_t k = i; k < j; k++) r->inferred[k] = c;
