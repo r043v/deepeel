@@ -143,10 +143,18 @@ static void pce_data_access(PceWrap *w, uint16_t pc, uint8_t op) {
         #define SIGMIX(v) (sig = (sig ^ (uint64_t)(v)) * 0x100000001b3ull)
         SIGMIX(pc); SIGMIX(op); SIGMIX(src); SIGMIX(dst); SIGMIX(n); SIGMIX(w->obs->mode ? w->obs->mode(w->user) : 0);
         for (int k = 0; k < 8; k++) SIGMIX(c.mpr[k]);
-        for (unsigned i = 0; i < n; i++) {
-            uint16_t sa = (uint16_t)(op == 0xC3 ? src - i : op == 0xF3 ? src + (i & 1) : src + i);
-            SIGMIX(pce_readable(sa) ? dp_pce_peek(sa) : 0x100);
-        }
+        // source bytes: ROM is immutable (the MPR map in the signature identifies it), so only a source touching
+        // anything else (WRAM, VRAM ports...) is hashed byte by byte
+        unsigned lo = op == 0xC3 ? (unsigned)src - (n - 1) : src, hi = op == 0xC3 ? src : op == 0xF3 ? (unsigned)src + 1 : (unsigned)src + n - 1;
+        int rom_src = op != 0xC3 || n - 1 <= src;   // a descending run must not wrap below 0
+        if (rom_src && hi > 0xFFFF) rom_src = 0;
+        for (unsigned pg = lo >> 13; rom_src && pg <= (hi >> 13); pg++)
+            if (dp_pce_rom_index((uint16_t)(pg << 13)) < 0) rom_src = 0;
+        if (!rom_src)
+            for (unsigned i = 0; i < n; i++) {
+                uint16_t sa = (uint16_t)(op == 0xC3 ? src - i : op == 0xF3 ? src + (i & 1) : src + i);
+                SIGMIX(pce_readable(sa) ? dp_pce_peek(sa) : 0x100);
+            }
         #undef SIGMIX
         if (w->blk_valid && w->blk_sig == sig) return;
         w->blk_sig = sig; w->blk_valid = 1;
