@@ -39,7 +39,7 @@ int dp_core_write_map(const char *path, const char *id, const char *rom_name, co
         DpFirstLog fl; dp_first_init(&fl, (uint32_t)(r->rom_size < 0x400000 ? r->rom_size : 0x400000));
         for (size_t i = 0; i < r->rom_size && r->first_seen; i++) {
             if (!r->first_seen[i]) continue;
-            uint32_t sf = r->src_flags ? r->src_flags[i] : 0;
+            uint32_t sf = r->src_flags ? r->src_flags[i] & 0xFFFFu : 0;
             uint32_t bit = sf ? (sf & (~sf + 1)) : DP_SRC_FORK_NATURAL;
             if (fl.n == fl.cap) {
                 uint32_t nc = fl.cap ? fl.cap * 2 : 1024;
@@ -75,6 +75,8 @@ int dp_core_write_summary(const char *path, const char *id, const DpCoreResult *
     if (!m) return -1;
     uint64_t cls[DP_MAP_COUNT] = { 0 };
     for (size_t i = 0; i < r->rom_size; i++) cls[m[i] < DP_MAP_COUNT ? m[i] : 0]++;
+    uint64_t swept_only = 0;   // read only by whole-ROM sweeps (checksum): counted unknown, reported apart
+    for (size_t i = 0; i < r->rom_size && r->src_flags; i++) swept_only += m[i] == DP_MAP_UNKNOWN && (r->src_flags[i] & (1u << 16));
     FILE *f = fopen(path, "w");
     if (!f) { free(m); return -1; }
     #define U(x) ((unsigned long long)(x))
@@ -85,10 +87,10 @@ int dp_core_write_summary(const char *path, const char *id, const DpCoreResult *
         "inferred-pad", "probable-code", "probable-data", "data-musique", "data-sample",
         "data-palette", "data-vram" };   // one name per class: a NULL here prints "(null)" as a JSON key
     for (int k = 0; k < DP_MAP_COUNT; k++) fprintf(f, "%s\"%s\":%llu", k ? "," : "", names[k], U(cls[k]));
-    fprintf(f, "},\"known_pct\":%.3f,\"counters\":{\"steps\":%llu,\"paths\":%llu,\"forks\":%llu,"
+    fprintf(f, "},\"swept_only\":%llu,\"known_pct\":%.3f,\"counters\":{\"steps\":%llu,\"paths\":%llu,\"forks\":%llu,"
                "\"saturation\":%llu,\"closure_roots\":%llu,\"closure_capped\":%llu,\"event_probes\":%llu,"
                "\"cells\":%llu,\"compressed_bytes\":%llu,\"copy_bytes\":%llu,\"seed_refused_cap\":%llu,\"cooperative_yields\":%llu,\"state_repeats\":%llu,\"exact_states\":%llu,\"deferred\":%llu,\"pending_dropped\":%llu}",
-            r->rom_size ? 100.0 * (double)(r->rom_size - cls[0]) / (double)r->rom_size : 0.0,
+            U(swept_only), r->rom_size ? 100.0 * (double)(r->rom_size - cls[0]) / (double)r->rom_size : 0.0,
             U(r->steps), U(r->paths), U(r->forks), U(r->sat_total), U(r->closure_roots), U(r->closure_capped),
             U(r->event_probes), U(r->cells), U(r->compressed_bytes), U(r->copy_bytes), U(r->seed_refused_cap), U(r->cooperative_yields), U(r->state_repeats), U(r->exact_states), U(r->deferred), U(r->pending_dropped));
     // Physical ROM offsets are grouped in 16 KiB chunks solely for the common

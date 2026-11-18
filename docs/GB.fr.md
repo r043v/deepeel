@@ -6388,3 +6388,10 @@ règle désormais effectivement la taille de cette file avant débordement disqu
   écrasait la valeur lue par le noyau.
 - m0boy (`../m0boy/m0boy ROM [cible]`) appelle `deepeel ROM` quand aucune couverture
   n'existe à côté de la ROM.
+
+## Balayages de la ROM (checksum) — 0.400.0
+
+Une suite de lectures séquentielles d'au moins 4096 octets, sans écriture (ou presque), est un balayage : checksum
+ou hachage de la ROM, pas une lecture de table. Ses octets ne sont plus « donnée lue » : ils restent inconnus (champ
+`swept_only` du résumé JSON) et ne bloquent plus la fermeture statique. Un octet lu aussi par un accès ordinaire
+reste « donnée lue ». Observation de l'outil, pas une mesure de matériel. Test : `core_checksum_sweep`.

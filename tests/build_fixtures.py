@@ -1042,6 +1042,18 @@ def build_md(out):
     r[0x204:0x206] = bytes([0x51, 0xC8]); r[0x206:0x208] = bytes([0xFF, 0xFE])   # loop: dbf d0,loop
     r[0x208:0x20A] = bytes([0x60, 0xFE])                 # bra.s *
     save_md(out, "fix_md_longloop", r)
+    # --- checksum: a Sonic-style sweep of $300..$3FFF (never "data read"), plus one real table read at $3000 ----
+    r = md_rom(0x4000)
+    r[0x200:0x206] = bytes([0x41, 0xF9, 0x00, 0x00, 0x03, 0x00])   # lea $300,a0
+    r[0x206:0x20A] = bytes([0x34, 0x3C, 0x1D, 0x7F])               # move.w #$1D7F,d2
+    r[0x20A:0x20C] = bytes([0xD2, 0x58])                           # loop: add.w (a0)+,d1
+    r[0x20C:0x210] = bytes([0x51, 0xCA, 0xFF, 0xFC])               # dbf d2,loop
+    r[0x210:0x216] = bytes([0x36, 0x39, 0x00, 0x00, 0x30, 0x00])   # move.w $3000,d3 (a real data read, after the sweep)
+    r[0x216:0x218] = bytes([0x60, 0xFE])                           # bra.s *
+    for i in range(0x300, 0x4000):
+        if not 0x200 <= i < 0x218 and not 0x3000 <= i < 0x3002:
+            r[i] = (i * 73 + 41) & 0xFF | 1    # non-zero, never padding
+    save_md(out, "fix_md_checksum", r)
     # --- dma: VDP regs, then a ROM->VRAM DMA of 16 words from $000400 ---------
     r = md_rom()
     pc = 0x200

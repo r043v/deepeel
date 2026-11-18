@@ -143,6 +143,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_s4p.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_pad6.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_longloop.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_md_checksum.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_hint.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_hint_masked.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_jptable_de.gb
@@ -744,3 +745,6 @@ set_tests_properties(core_epoch_cap PROPERTIES FIXTURES_REQUIRED fixtures TIMEOU
 # C3 (0.380.0): the static walk replays `ld a,n; ld (bankreg),a` through the machine's mapper and counts it
 add_test(NAME core_closure_bank_sim COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_bankwalk.gb --max-total 200000 --text $D/bankwalk.txt >/dev/null 2>&1; grep -Eq 'closure bank writes simulated during walks: [1-9]' $D/bankwalk.txt")
 set_tests_properties(core_closure_bank_sim PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+
+# a whole-ROM checksum sweep is not "data read": its bytes stay unknown (swept_only), a real table read still counts
+add_test(NAME core_checksum_sweep COMMAND sh -c "o=${CMAKE_CURRENT_BINARY_DIR}/core_checksum_sweep; rm -f $o.json; $<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_checksum.md --core --jobs 1 --attract-frames 0 --no-sessions --summary $o.json >/dev/null && grep -q '\"swept_only\":1[0-9][0-9][0-9][0-9]' $o.json && grep -q '\"data-read\":[1-9],' $o.json && ! grep -q '\"data-read\":[0-9][0-9][0-9]' $o.json")

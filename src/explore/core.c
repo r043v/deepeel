@@ -241,6 +241,7 @@ typedef struct {
     // technique 6: a sequential ROM read stream and the RAM writes it feeds
     int64_t run_lo, run_hi;
     uint32_t run_writes;
+    int run_sweep;         // the current read run is a whole-ROM style sweep (checksum, hash): its bytes are not "data read"
     int no_decompress;
     // technique 1 (solve): non-ROM addresses read inside the current window
     uint32_t ram[4]; unsigned nram; int track;
@@ -251,6 +252,9 @@ typedef struct {
 } CopyObs;
 
 #define RUN_MIN 16
+#define SWEEP_MIN 4096                 // a sequential read run this long with (almost) no writes is a sweep, not a table read
+#define SRC_SWEEP    (1u << 16)        // src_flags: byte read only by a sweep (never counted as known data)
+#define SRC_RUNFRESH (1u << 17)        // src_flags: DATA freshly set by the current run (undone if the run turns out a sweep)
 // closes the current stream: a long one whose RAM output is not 1:1 is a decompressor input
 static void run_flush(CopyObs *o) {
     if (o->run_hi >= 0 && !o->no_decompress && !o->forced) {
@@ -265,7 +269,9 @@ static void run_flush(CopyObs *o) {
             o->r->decompress_runs++;
         }
     }
-    o->run_lo = o->run_hi = -1; o->run_writes = 0;
+    if (o->run_hi >= 0 && !o->forced && o->run_hi - o->run_lo < (int64_t)o->r->rom_size)
+        for (int64_t k = o->run_lo; k <= o->run_hi; k++) __atomic_fetch_and(&o->r->src_flags[k], ~SRC_RUNFRESH, __ATOMIC_RELAXED);
+    o->run_lo = o->run_hi = -1; o->run_writes = 0; o->run_sweep = 0;
 }
 
 typedef struct RegWalk RegWalk;   // C3: the regstate-aware closure state, defined below
@@ -1069,8 +1075,12 @@ static void obs_read(void *u, uint32_t addr, uint8_t v) {
             __atomic_fetch_or(&o->r->live[((size_t)ci >> 8) * o->r->live_w + (pg >> 5)], 1u << (pg & 31u), __ATOMIC_RELAXED);
     }
     if (k >= 0 && (size_t)k < o->r->rom_size) {
-        if (!o->forced && !(__atomic_load_n(&o->r->flags[k], __ATOMIC_RELAXED) & DP_CORE_DATA)) __atomic_fetch_or(&o->r->flags[k], DP_CORE_DATA, __ATOMIC_RELAXED);
-        if (!o->forced) {   // A13: a byte read as data by a natural path is not static code unless it was ever executed
+        if (!o->forced && o->run_sweep) __atomic_fetch_or(&o->r->src_flags[k], SRC_SWEEP, __ATOMIC_RELAXED);   // inside a sweep: neither data nor a closure stopper
+        else if (!o->forced && !(__atomic_load_n(&o->r->flags[k], __ATOMIC_RELAXED) & DP_CORE_DATA)) {
+            __atomic_fetch_or(&o->r->flags[k], DP_CORE_DATA, __ATOMIC_RELAXED);
+            __atomic_fetch_or(&o->r->src_flags[k], SRC_RUNFRESH, __ATOMIC_RELAXED);
+        }
+        if (!o->forced && !o->run_sweep) {   // A13: a byte read as data by a natural path is not static code unless it was ever executed
             uint8_t fl = __atomic_load_n(&o->r->flags[k], __ATOMIC_RELAXED);
             if ((fl & DP_CORE_STATIC) && !(fl & (DP_CORE_NATURAL | DP_CORE_FORCED))) {
                 __atomic_fetch_and(&o->r->flags[k], (uint8_t)~DP_CORE_STATIC, __ATOMIC_RELAXED);
@@ -1083,6 +1093,15 @@ static void obs_read(void *u, uint32_t addr, uint8_t v) {
         o->last_rom = o->rq_idx[0]; o->last_val = o->rq_val[0]; o->age = 0;
         if (o->run_hi >= 0 && k >= o->run_hi && k <= o->run_hi + 2) o->run_hi = k;
         else { run_flush(o); o->run_lo = o->run_hi = k; }
+        if (!o->forced && !o->run_sweep && o->run_hi - o->run_lo + 1 >= SWEEP_MIN && (int64_t)o->run_writes * 16 < o->run_hi - o->run_lo + 1) {
+            o->run_sweep = 1;   // the run is a sweep: take back the DATA this very run set (bytes read elsewhere keep theirs)
+            for (int64_t j = o->run_lo; j <= o->run_hi; j++) {
+                if (!(__atomic_load_n(&o->r->src_flags[j], __ATOMIC_RELAXED) & SRC_RUNFRESH)) continue;
+                __atomic_fetch_and(&o->r->src_flags[j], ~SRC_RUNFRESH, __ATOMIC_RELAXED);
+                __atomic_fetch_or(&o->r->src_flags[j], SRC_SWEEP, __ATOMIC_RELAXED);
+                __atomic_fetch_and(&o->r->flags[j], (uint8_t)~DP_CORE_DATA, __ATOMIC_RELAXED);
+            }
+        }
     }
 }
 
