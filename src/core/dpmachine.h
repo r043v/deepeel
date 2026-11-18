@@ -92,6 +92,8 @@ typedef struct DpMemOp {
 
 typedef struct DpMachine DpMachine;   // the machine hooks take and return it (declared in full below)
 
+typedef struct DpCodeTable { uint32_t base; uint8_t stride, rel; } DpCodeTable;
+
 typedef struct DpIsa {
     const char *name;                      // "sm83", "z80", ...
     uint8_t ptr_width;                     // bytes of a code pointer
@@ -187,6 +189,10 @@ typedef struct DpIsa {
     // Classify an indirect dispatch: 1 = register table (parameter selects
     // the register view), 2 = absolute pointer table (parameter is its base).
     int (*table_dispatch)(const uint8_t *bytes, uint32_t *parameter);
+    // PC-relative code tables (68000): at an indirect jmp/jsr, the table it indexes.  rel = entries are
+    // signed 16-bit offsets from the table base; else absolute 32-bit pointers.  *load_pc: address of the
+    // instruction that loaded the table address (0: the jump itself), checked against the executed trail.
+    int (*code_table)(struct DpMachine *m, uint32_t pc, const uint8_t *bytes, DpCodeTable *out, uint32_t *load_pc);
 } DpIsa;
 
 const DpIsa *dp_isa_sm83(void);

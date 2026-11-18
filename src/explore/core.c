@@ -975,6 +975,26 @@ static void closure_jp_table(DpCoreResult *r, DpMachine *m, const DpCoreConfig *
     }
 }
 
+// 68000 PC-relative code table: word entries are signed offsets from the base; the table ends where the
+// first entry's target begins (the code the offsets point at follows the table).
+static void closure_code_table(DpCoreResult *r, DpMachine *m, const DpIsa *isa, const DpCodeTable *t, RegWalk *rw) {
+    uint32_t first = 0xFFFFFFFFu; int cnt = 0;
+    for (unsigned e = 0; e < 128; e++) {
+        uint32_t ea = (t->base + e * 2u) & 0xFFFFFFu;
+        if (ea >= first) break;
+        uint32_t w = ((uint32_t)m->fetch(m, ea) << 8) | m->fetch(m, ea + 1);
+        uint32_t tg = (t->base + (uint32_t)(int32_t)(int16_t)w) & 0xFFFFFFu;
+        if (tg & 1u || m->rom_index(m, tg) < 0) break;
+        uint8_t b[10]; for (unsigned i = 0; i < sizeof b; i++) b[i] = m->fetch(m, tg + i);
+        DpFlowInfo f; memset(&f, 0, sizeof f);
+        if (!isa->flow(b, tg, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL) break;
+        if (tg > ea && tg < first) first = tg;
+        cnt++;
+        closure_walk(r, m, isa, tg, rw);
+    }
+    if (cnt) { r->closure_jp_tables++; r->closure_jp_entries += (uint64_t)cnt; r->prov_data_bytes += (uint64_t)cnt * 2; }
+}
+
 static void mark(Shared *sh, DpCoreResult *r, DpMachine *m, uint32_t pc, unsigned len, uint8_t how, uint16_t origin, uint8_t actor) {
     for (unsigned i = 0; i < len; i++) {
         int64_t k = m->rom_index(m, pc + i);
@@ -2065,6 +2085,10 @@ static void run_path(Worker *w, Pending *p) {
                                  w->pcring_n >= 8 ? w->pcring : NULL, w->pcring_n < 32 ? w->pcring_n : 32, w->regwalk);   // a path too young to hold the load is not filtered
             if (dispatch == 2)
                 closure_abs_table(loc, m, isa, dispatch_arg, w->regwalk);
+            if (fi.kind == DP_FLOW_INDIRECT && isa->code_table) {
+                DpCodeTable ct; uint32_t lp = 0;
+                if (isa->code_table(m, pc, bytes, &ct, &lp)) closure_code_table(loc, m, isa, &ct, w->regwalk);
+            }
             // C3: this executed step seeds a walk carrying the concrete CPU
             // registers (the Sega closure's per-step bootstrapping, generic:
             // DpMachine.get_regs + DpIsa.reg_effect).  Per-site cap on

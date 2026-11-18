@@ -314,10 +314,21 @@ static int isa_rom_table_follows(const DpIsa *isa, DpMachine *m, uint32_t pc, in
     }
     return 0;
 }
+// Indirect jmp/jsr through (d8,PC,Xn): the table is the PC-relative base, its entries are signed word
+// offsets from that base (`dc.w Obj-Index`).  The table ends where the first entry's target begins.
+static int isa_code_table(struct DpMachine *m, uint32_t pc, const uint8_t *b, DpCodeTable *out, uint32_t *load_pc) {
+    (void)m;
+    unsigned op = (unsigned)(b[0] << 8 | b[1]);
+    if (op != 0x4EFB && op != 0x4EBB) return 0;   // jmp / jsr (d8,PC,Xn)
+    if (b[2] & 0x07) return 0;                     // brief extension word: bits 10..8 are zero
+    out->base = (pc + 2u + (uint32_t)(int32_t)(int8_t)b[3]) & 0xFFFFFFu;
+    out->stride = 2; out->rel = 1; *load_pc = 0;
+    return 1;
+}
 static const DpIsa isa = { "68000", 3, 1, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
                            isa_reg_effect, isa_illegal, isa_disasm, isa_mem_operand, 0x200u, 0, 0, isa_imm_ptr,
                            .sp_slot = DP_M68KR_A7, .sp_width = 4, .sp_addr_mask = 0xFFFFFFFFu, .sp_base = 0, .entry_data_sig = NULL, .sp_ret = isa_sp_ret,
                            .ram_load = isa_ram_load, .ram_signature_wide = isa_ram_signature_wide,
                            .table_proven = isa_table_proven, .rom_table_follows = isa_rom_table_follows,
-                           .table_entry_width = 4 };   // B4: the lea tables are longs
+                           .table_entry_width = 4, .code_table = isa_code_table };   // B4: the lea tables are longs
 const DpIsa *dp_isa_68000(void) { return &isa; }
