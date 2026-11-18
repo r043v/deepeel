@@ -293,14 +293,15 @@ typedef struct {
     int win_on; uint32_t win_pc; unsigned win_n;
     uint8_t win_imm[24]; unsigned win_ni;
     uint8_t *irqscratch;       // IRQ hook output, kept per worker (the hook is asked before any lock)
-    uint64_t keycache[2048];   // direct-mapped: probeset keys known present (never removed), read without the shared mutex
+    uint64_t keycache[1 << 17];   // direct-mapped: probeset keys known present (never removed), read without the shared mutex
     pthread_t th;
 } Worker;
 
-static inline int kc_known(const Worker *w, uint64_t key) { return w->keycache[(key * 0x9E3779B97F4A7C15ull) >> 53] == key; }
-static inline void kc_add(Worker *w, uint64_t key) { w->keycache[(key * 0x9E3779B97F4A7C15ull) >> 53] = key; }
+static inline int kc_known(const Worker *w, uint64_t key) { return w->keycache[(key * 0x9E3779B97F4A7C15ull) >> 47] == key; }
+static inline void kc_add(Worker *w, uint64_t key) { w->keycache[(key * 0x9E3779B97F4A7C15ull) >> 47] = key; }
 
 // 1 when a conditional follows `pc` within 5 sequential instructions (memoised per ROM site)
+static int covered_natural(DpCoreResult *r, DpMachine *m, uint32_t pc);
 static int cond_ahead(Worker *w, const DpIsa *isa, uint32_t pc) {
     DpMachine *m = w->m;
     int64_t k = m->rom_index(m, pc);
@@ -308,19 +309,28 @@ static int cond_ahead(Worker *w, const DpIsa *isa, uint32_t pc) {
     uint32_t *e = &w->winmemo[(uint64_t)k * 2654435761u >> 16 & 0xFFFF];
     if ((*e >> 1) == (uint32_t)k + 1) return *e & 1;
     int yes = 0;
-    uint32_t p = pc;
+    uint32_t p = pc, fall = 0, tgt = 0xFFFFFFFFu;
     for (int i = 0; i < 5; i++) {
         uint8_t b[10];
         for (unsigned j = 0; j < sizeof b; j++) b[j] = m->fetch(m, p + j);
         DpFlowInfo f;
         memset(&f, 0, sizeof f);
         if (!isa->flow(b, p, &f) || !f.length) break;
-        if (f.kind == DP_FLOW_COND) { yes = i > 0; break; }   // the conditional itself starts no window
+        if (f.kind == DP_FLOW_COND) { yes = i > 0; fall = p + f.length; tgt = f.target >= 0 ? (uint32_t)f.target : 0xFFFFFFFFu; break; }   // the conditional itself starts no window
         if (f.kind != DP_FLOW_SEQ) break;
         p += f.length;
     }
+    e[0x10000] = fall; e[0x20000] = tgt;   // the two sides of the conditional the window leads to (a window is useless once both are natural)
     *e = ((uint32_t)k + 1) << 1 | (uint32_t)yes;
     return yes;
+}
+
+// the conditional a window leads to has both sides covered by natural paths: nothing left to solve, no snapshot
+static int win_both_natural(Worker *w, DpCoreResult *loc, DpMachine *m, uint32_t pc) {
+    int64_t k = m->rom_index(m, pc);
+    const uint32_t *e = &w->winmemo[(uint64_t)k * 2654435761u >> 16 & 0xFFFF];
+    uint32_t fall = e[0x10000], tgt = e[0x20000];
+    return tgt != 0xFFFFFFFFu && covered_natural(loc, m, fall) && covered_natural(loc, m, tgt);
 }
 
 // static closure (all ISAs): from a natural executed direct transfer, the target and the fall-through are
@@ -2059,7 +2069,7 @@ static void run_path(Worker *w, Pending *p) {
             // window: the sequential instructions before a conditional; their start state and RAM reads feed solve_cond
             if (fi.kind == DP_FLOW_COND) { /* closes the window below */ }
             else if (fi.kind != DP_FLOW_SEQ) w->win_on = w->cobs.track = 0;
-            else if (!w->win_on && cond_ahead(w, isa, pc)) {
+            else if (!w->win_on && cond_ahead(w, isa, pc) && !win_both_natural(w, loc, m, pc)) {
                 m->save(m, w->wsnap);
                 w->win_on = 1; w->win_pc = pc; w->win_n = 0; w->win_ni = 0; w->cobs.nram = 0; w->cobs.track = 1;
             }
@@ -2149,7 +2159,10 @@ static void run_path(Worker *w, Pending *p) {
         int cond = have_flow && fi.kind == DP_FLOW_COND && fi.target >= 0;
         if (cond && cfg->fork_site_cap && !cur_epoch && w->capped[site_slot(m, pc, w->site_n, NULL)] == skey) { loc->sat_site++; cond = 0; }   // site already saturated: no snapshot, no lock
         uint8_t *pre = NULL;
-        if (cond || stack_cond) {
+        // both sides already covered by natural paths: the fork is pruned below whatever side is taken, so the
+        // full-state snapshot is not made (pruned_covered is counted all the same)
+        int pre_skip = cond && !stack_cond && covered_natural(loc, m, pc + (uint32_t)len) && covered_natural(loc, m, (uint32_t)fi.target);
+        if ((cond || stack_cond) && !pre_skip) {
             pre = malloc(sh->sbytes);
             if (pre) m->save(m, pre);
             else { cond = 0; stack_cond = 0; }
@@ -2858,7 +2871,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         w->visits = calloc(site_n, sizeof *w->visits);
         w->capped = calloc(site_n, sizeof *w->capped);
         w->stamp = calloc(site_n, sizeof *w->stamp);
-        w->wsnap = malloc(sh.sbytes ? sh.sbytes : 1); w->winmemo = calloc(0x10000, sizeof *w->winmemo);
+        w->wsnap = malloc(sh.sbytes ? sh.sbytes : 1); w->winmemo = calloc(0x30000, sizeof *w->winmemo);
         w->pcache = calloc(4096, sizeof *w->pcache); w->pcap = 4096;   // A5: 32 KiB of spent (site, projection) keys per worker
         w->ckm_ri = calloc(4096, sizeof *w->ckm_ri); w->ckm_ep = calloc(4096, sizeof *w->ckm_ep);   // A2: per-ri cell-key memo
         w->ckm_ck = calloc(4096, sizeof *w->ckm_ck); w->ckspent = calloc(4096, sizeof *w->ckspent);
