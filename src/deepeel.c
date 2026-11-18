@@ -1160,7 +1160,7 @@ static int cmd_nes(int argc, char **argv) {
         if (opt.max_total) kcfg.max_total = opt.max_total;
         if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
         if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
-        if (opt.queue_max) kcfg.queue_max = opt.queue_max;
+        if (opt.queue_max) { kcfg.queue_max = opt.queue_max; kcfg.queue_auto = 0; }
         kcfg.hooks = dp_machine_nes_hooks();
         DpMovie kmov; memset(&kmov, 0, sizeof kmov);
         if (opt.tas_count > 0) {   // first movie replays in the kernel (m->frame counts the frames)
@@ -1290,7 +1290,7 @@ static int cmd_pce(int argc, char **argv) {
         if (opt.max_total) kcfg.max_total = opt.max_total;
         if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
         if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
-        if (opt.queue_max) kcfg.queue_max = opt.queue_max;
+        if (opt.queue_max) { kcfg.queue_max = opt.queue_max; kcfg.queue_auto = 0; }
         DpMovie kmov; memset(&kmov, 0, sizeof kmov);
         if (opt.tas_count > 0) {
             char terr[160] = "";
@@ -1551,6 +1551,98 @@ static int cmd_tas(int argc, char **argv) {
 int dp_tasfetch_command(int argc, char **argv);
 
 static void kmapwin_cb(void *u, const DpCoreResult *r) { dp_kmapwin_start(r, "deepeel ROM map", (int)(intptr_t)u); }
+// ---- `deepeel ROM [options]`: the zero-argument entry -------------------------------------------------
+// The platform comes from the file (extension, then header), the outputs go to a dedicated directory
+// (<rom stem>.deepeel/ unless --out DIR), a saved analysis there is resumed on its own, and the
+// worker count and queue size follow the free RAM.  Any explicit option still wins (it comes last).
+typedef enum { AR_NONE, AR_GB, AR_NES, AR_PCE, AR_MD, AR_SMS, AR_GG, AR_SG, AR_MSX } ArSystem;
+
+static ArSystem ar_detect(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return AR_NONE;
+    struct stat st;
+    if (fstat(fileno(f), &st) != 0 || !S_ISREG(st.st_mode)) { fclose(f); return AR_NONE; }
+    uint8_t h[0x8000 + 16]; size_t n = fread(h, 1, sizeof h, f); fclose(f);
+    const char *dot = strrchr(path, '.'), *slash = strrchr(path, '/');
+    char ext[8] = ""; if (dot && (!slash || dot > slash) && strlen(dot) < sizeof ext) for (size_t i = 0; dot[i]; i++) ext[i] = (char)tolower((unsigned char)dot[i]);
+    if (n >= 4 && !memcmp(h, "NES\x1a", 4)) return AR_NES;
+    if (!strcmp(ext, ".nes")) return AR_NES;
+    if (!strcmp(ext, ".gb") || !strcmp(ext, ".gbc")) return AR_GB;
+    if (!strcmp(ext, ".pce")) return AR_PCE;
+    if (!strcmp(ext, ".gg")) return AR_GG;
+    if (!strcmp(ext, ".sms")) return AR_SMS;
+    if (!strcmp(ext, ".sg") || !strcmp(ext, ".sc")) return AR_SG;
+    if (!strcmp(ext, ".mx1") || !strcmp(ext, ".mx2")) return AR_MSX;
+    if (!strcmp(ext, ".md") || !strcmp(ext, ".gen") || !strcmp(ext, ".smd")) return AR_MD;
+    if (n >= 0x108 && !memcmp(h + 0x100, "SEGA", 4)) return AR_MD;                       // Mega Drive header
+    if (n >= 0x108 && !memcmp(h + 0x104, "\xCE\xED\x66\x66", 4)) return AR_GB;            // Nintendo logo
+    static const size_t tmr[3] = { 0x7FF0, 0x3FF0, 0x1FF0 };                              // Master System / Game Gear "TMR SEGA"
+    for (int i = 0; i < 3; i++)
+        if (n >= tmr[i] + 16 && !memcmp(h + tmr[i], "TMR SEGA", 8)) return (h[tmr[i] + 15] >> 4) >= 5 ? AR_GG : AR_SMS;
+    if (n >= 2 && h[0] == 'A' && h[1] == 'B') return AR_MSX;                              // MSX cartridge header
+    return AR_NONE;
+}
+
+static int ar_has(int argc, char **argv, const char *opt) {
+    for (int i = 2; i < argc; i++) if (!strcmp(argv[i], opt)) return 1;
+    return 0;
+}
+
+static int ar_is_subcommand(const char *a) {
+    static const char *const names[] = { "frontier", "tasfetch", "lr", "bh", "md", "nes", "pce", "z80", "explore", "mapx", "maprender", "tas", "desync", "map", "regs", "dis", NULL };
+    for (int i = 0; names[i]; i++) if (!strcmp(a, names[i])) return 1;
+    return 0;
+}
+
+static int auto_explore(int argc, char **argv, ArSystem sys) {
+    static const char *const names[] = { "", "gb", "nes", "pce", "md", "sms", "gg", "sg", "msx" };
+    const char *rom = argv[1];
+    char stem[256] = "rom"; { const char *b = strrchr(rom, '/'); b = b ? b + 1 : rom; snprintf(stem, sizeof stem, "%s", b); char *d = strrchr(stem, '.'); if (d && d != stem) *d = 0; }
+    char outdir[1024]; snprintf(outdir, sizeof outdir, "%s.deepeel", stem);
+    const char *user[512]; int nu = 0;
+    for (int i = 2; i < argc && nu < 500; i++) {
+        if (!strcmp(argv[i], "--out") && i + 1 < argc) { snprintf(outdir, sizeof outdir, "%s", argv[++i]); continue; }
+        user[nu++] = argv[i];
+    }
+    for (char *p = outdir + 1; *p; p++) if (*p == '/') { *p = 0; mkdir(outdir, 0777); *p = '/'; }
+    if (mkdir(outdir, 0777) != 0 && errno != EEXIST) { fprintf(stderr, "deepeel: cannot create %s: %s\n", outdir, strerror(errno)); return 1; }
+    static char sdir[1100], fmap[1100], ftxt[1100], fsum[1100], fcov[1100], fjobs[16];
+    snprintf(sdir, sizeof sdir, "%s/state", outdir);
+    snprintf(fmap, sizeof fmap, "%s/%s.map.png", outdir, stem);
+    snprintf(ftxt, sizeof ftxt, "%s/%s.txt", outdir, stem);
+    snprintf(fsum, sizeof fsum, "%s/%s.json", outdir, stem);
+    snprintf(fcov, sizeof fcov, "%s/%s.cov", outdir, stem);
+    char probe[1200]; snprintf(probe, sizeof probe, "%s/identity.bin", sdir);
+    int resume = access(probe, R_OK) == 0;
+    int jobs = auto_jobs(); snprintf(fjobs, sizeof fjobs, "%d", jobs);
+    const char *av[640]; int n = 0;
+    av[n++] = "deepeel";
+    if (sys == AR_GB) av[n++] = "explore";
+    else if (sys == AR_SMS || sys == AR_GG || sys == AR_SG || sys == AR_MSX) { av[n++] = "z80"; av[n++] = "explore"; av[n++] = names[sys]; }
+    else { av[n++] = names[sys]; av[n++] = "explore"; }
+    av[n++] = rom;
+    av[n++] = "--state-dir"; av[n++] = sdir;
+    if (resume) av[n++] = "--resume";
+    av[n++] = "--jobs"; av[n++] = fjobs;
+    av[n++] = "--max-total"; av[n++] = "4611686018427387904";   // no step wall (a huge budget: the sega parser reads 0 as "default"): the run ends on exhaustion, SIGINT, or 15 minutes without a new ROM byte; the queue is bounded by the RAM (dp_mem_budget)
+    av[n++] = "--stall-time"; av[n++] = "900";
+    av[n++] = "--map"; av[n++] = fmap;
+    av[n++] = "--text"; av[n++] = ftxt;
+    av[n++] = "--summary"; av[n++] = fsum;
+    av[n++] = "--cov"; av[n++] = fcov;
+    if (sys == AR_GB) { static char frt[1100]; snprintf(frt, sizeof frt, "%s/%s.rtcode", outdir, stem); av[n++] = "--rtcode"; av[n++] = frt; }
+    for (int i = 0; i < nu; i++) av[n++] = user[i];
+    av[n] = NULL;
+    fprintf(stderr, "deepeel: %s -> %s, outputs in %s/, %s, %d worker(s)\n", rom, names[sys], outdir, resume ? "resuming the saved analysis" : "fresh analysis", jobs);
+    switch (sys) {
+        case AR_GB:  return cmd_explore(n, (char **)av);
+        case AR_NES: return cmd_nes(n, (char **)av);
+        case AR_PCE: return cmd_pce(n, (char **)av);
+        case AR_MD:  return cmd_md(n, (char **)av);
+        default:     return dp_sega_explore_command(n, (char **)av);
+    }
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) return usage(), 2;
     for (int i = 2; i < argc; i++)   // --mapwin [SCALE]: the kernel's live ROM map, for every platform (the legacy GB explorer keeps its own)
@@ -1560,6 +1652,11 @@ int main(int argc, char **argv) {
             atexit(dp_kmapwin_stop);
             break;
         }
+    if (!ar_is_subcommand(argv[1]) && argv[1][0] != '-') {   // `deepeel ROM`: explore is the default, the system comes from the file
+        ArSystem sys = ar_detect(argv[1]);
+        if (sys == AR_NONE) { fprintf(stderr, "deepeel: %s: not a readable ROM, or its system is not recognised (use `deepeel <system> explore ROM`)\n", argv[1]); return 2; }
+        return auto_explore(argc, argv, sys);
+    }
     if (!strcmp(argv[1], "frontier") && argc > 3 && !strcmp(argv[2], "stats")) {
         char kp[700]; snprintf(kp, sizeof kp, "%s/frontier.bin", argv[3]);   // kernel frontier (--core --state-dir)
         FILE *kf = fopen(kp, "rb");

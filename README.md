@@ -52,6 +52,25 @@ SDL2 est optionnel (`-DBUILD_GUI=OFF` pour s'en passer).
 
 ## Usage
 
+Le cas courant : donner la ROM, rien d'autre.
+
+```bash
+deepeel jeu.md        # ou .gb .gbc .nes .pce .sms .gg .sg .mx1 : le système vient du fichier
+```
+
+Le système est détecté par l'extension puis par l'en-tête (logo Nintendo, `SEGA`,
+`TMR SEGA`, iNES, `AB` MSX). Les sorties vont dans `<nom>.deepeel/` (`--out DIR`
+pour un autre emplacement) : carte PNG, `.txt`, `.json`, `.cov` et `state/`. Si
+`state/` contient déjà une analyse, elle est reprise toute seule ; relancer la même
+commande continue donc là où le run précédent s'est arrêté (SIGINT compris). Les
+workers suivent les cœurs libres et la RAM disponible (limite cgroup comprise), et la
+file d'états en mémoire est bornée à ce que la RAM libre porte (40 % au lancement) ;
+le reste passe sur le disque (`spool.bin`). Pas de mur de pas : le run s'arrête à
+l'épuisement, sur SIGINT, ou après 15 minutes sans nouvel octet de ROM. Toute option
+donnée explicitement après la ROM prime sur ces défauts.
+
+Formes explicites :
+
 ```bash
 deepeel explore rom.gb [--text report.txt] [--summary run.json] [--cov out.cov] [--map out.png]
 deepeel explore rom.gb --max-total 50000000 --entry 2:4000   # mur global de pas ; graine banque 2, $4000

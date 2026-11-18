@@ -122,6 +122,7 @@ typedef struct DpCoreConfig {
     int no_novelty_order;      // 1: plain LIFO instead of uncovered-target-first
     uint32_t cell_lo, cell_hi; // technique 8: RAM range hashed into a semantic cell (cell_hi > cell_lo enables it)
     size_t queue_max;          // pending forked states held in RAM (0: unbounded)
+    int queue_auto;            // default 1: queue_max is lowered at launch to what the free RAM (and the cgroup limit) can hold; an explicit --queue-max clears it
     const DpPlatformHooks *hooks;
     // live view: called once, right after the result arrays are allocated and before any path runs, with the
     // result being filled (flags/src_flags are updated atomically while the workers run, so a viewer may read them)
@@ -239,6 +240,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i);
 void dp_core_report(FILE *out, const char *label, const DpCoreResult *r);
 
 void dp_core_config_default(DpCoreConfig *cfg);
+uint64_t dp_mem_budget(void);   // bytes the explorer may still take (MemAvailable, lowered to the cgroup limit); 0 if unknown
 // explores from the machine's current state; rom_size = number of ROM index slots
 int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg, DpCoreResult *out);
 // CLI wrapper: install a temporary SIGINT handler and provide a state directory

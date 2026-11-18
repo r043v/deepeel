@@ -6352,3 +6352,31 @@ règle désormais effectivement la taille de cette file avant débordement disqu
   (couvertures produites avant 0.396.0). Sur Ristar GG, 24 150 instructions
   sont retirées, et les entrées de dispatch du code généré passent de
   59 899 à 39 014.
+
+## 0.397.0
+
+- **Entrée sans argument : `deepeel ROM`.** Le système est détecté par l'extension
+  puis l'en-tête (GB/GBC, NES, PCE, MD, SMS, GG, SG-1000, MSX) ; les sorties vont dans
+  `<nom>.deepeel/` (`--out DIR`), une analyse déjà présente dans `state/` est reprise
+  automatiquement, le nombre de workers suit les cœurs et la RAM libres, et le run n'a
+  plus de mur de pas (arrêt : épuisement, SIGINT, ou 900 s sans nouvel octet de ROM).
+  Les options explicites données après la ROM prennent le pas. Les sous-commandes
+  historiques (`md explore`, `pce explore`, etc.) sont inchangées.
+- **File d'états bornée par la RAM** (`queue_auto`, toutes plateformes) : la file garde
+  au plus 40 % de la RAM disponible au lancement (`MemAvailable`, abaissée à la marge
+  restante sous la limite cgroup), divisée par la taille d'un état (MD ≈ 205 Kio, PCE ≈
+  80 Kio) ; le surplus passe sur le disque. Avant, `queue_max` valait 65 536 états
+  quelle que soit leur taille : Sonic MD pouvait dépasser 13 Go. Un `--queue-max`
+  explicite désactive ce calcul.
+- **`--queue-max` sur `md`** : l'option était ignorée sans message par `md explore`.
+  Elle est maintenant lue par l'analyseur d'options commun du noyau.
+- Constat de mesure : sur ces fixtures et ROMs, les chiffres sont des observations de
+  l'outil, pas des mesures de matériel.
+
+## 0.397.1
+
+- `deepeel ROM` écrit aussi `<nom>.rtcode` pour la Game Boy (archive lue par m0boy).
+- Le `--queue-max` explicite est respecté sur z80 (SMS/GG/SG/MSX) : l'analyseur Sega
+  écrasait la valeur lue par le noyau.
+- m0boy (`../m0boy/m0boy ROM [cible]`) appelle `deepeel ROM` quand aucune couverture
+  n'existe à côté de la ROM.

@@ -130,7 +130,7 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
     DpCoreConfig cfg=*kcfg; cfg.jobs=o->jobs>1?(unsigned)o->jobs:1; cfg.adaptive=core_jobs_auto;
     if(o->max_total) cfg.max_total=o->max_total;
     if(o->max_steps) cfg.max_path_steps=o->max_steps;
-    cfg.fork_site_cap=o->fork_cap; cfg.queue_max=o->queue_max;
+    cfg.fork_site_cap=o->fork_cap; if(cfg.queue_auto) cfg.queue_max=o->queue_max;   // an explicit --queue-max was read by the kernel parser (queue_auto 0): keep it
     if(cfg.unbounded) { cfg.max_total=0; cfg.fork_site_cap=0; }   // coverage first: only exhaustion or SIGINT stops; the path shape stays (A8)
     static const uint32_t vec[]={0x08,0x10,0x18,0x20,0x28,0x30,0x38,0x66};
     // Seeds: the music-rip entry points (--music-index: the $4000 window shows each rip's block, the init call

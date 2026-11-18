@@ -63,7 +63,7 @@ void dp_core_config_default(DpCoreConfig *c) {
     c->fork_site_cap = 4;      // DP_DEFAULT_BRANCH_FORK_CAP
     c->visits_per_pc = 64;
     c->min_secs = 0; c->max_secs = 0; c->stall_secs = 0; c->attract_frames = 6000; c->attract_stall = 1200; c->play_frames = 0; c->play_sessions = 1;   // long sessions run wherever the machine has a frame counter (+ set_input for play)
-    c->queue_max = 65536;
+    c->queue_max = 65536; c->queue_auto = 1;
     c->probe_ctx_cap = 8;
     c->bank_fork_cap = 16;
     c->held_steps = 300000;
@@ -84,6 +84,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--resume")) { c->resume = 1; return 1; }
     if (!strcmp(a, "--cov-transfer") && i + 2 < argc) { c->cov_transfer_rom = argv[i + 1]; c->cov_transfer_cov = argv[i + 2]; return 3; }
     if (!strcmp(a, "--cov-hits") && i + 1 < argc) { c->cov_hits_path = argv[i + 1]; return 2; }
+    if (!strcmp(a, "--queue-max") && i + 1 < argc) { c->queue_max = (size_t)strtoull(argv[i + 1], NULL, 0); c->queue_auto = 0; return 2; }
     if (!strcmp(a, "--no-closure")) { c->no_closure = 1; return 1; }
     if (!strcmp(a, "--no-infer")) { c->no_infer = 1; return 1; }
     if (!strcmp(a, "--no-proj")) { c->no_proj = 1; return 1; }
@@ -2718,6 +2719,30 @@ static int state_identity(DpMachine *m, const DpCoreConfig *cfg) {
     return ok;
 }
 
+// RAM the explorer may still take: MemAvailable, lowered to the room left under the cgroup limit
+// (systemd scope MemoryMax, container).  Bytes; 0 when it cannot be read.
+uint64_t dp_mem_budget(void) {
+    uint64_t avail = 0;
+    FILE *f = fopen("/proc/meminfo", "r");
+    char ln[160];
+    while (f && fgets(ln, sizeof ln, f)) { unsigned long kb; if (sscanf(ln, "MemAvailable: %lu kB", &kb) == 1) { avail = (uint64_t)kb * 1024u; break; } }
+    if (f) fclose(f);
+    char cg[256] = "";
+    f = fopen("/proc/self/cgroup", "r");
+    while (f && fgets(ln, sizeof ln, f)) if (!strncmp(ln, "0::", 3)) { snprintf(cg, sizeof cg, "%s", ln + 3); cg[strcspn(cg, "\n")] = 0; break; }
+    if (f) fclose(f);
+    if (cg[0]) {
+        char path[512]; unsigned long long lim = 0, cur = 0; int have = 0;
+        snprintf(path, sizeof path, "/sys/fs/cgroup%s/memory.max", cg);
+        f = fopen(path, "r"); if (f) { have = fscanf(f, "%llu", &lim) == 1; fclose(f); }
+        snprintf(path, sizeof path, "/sys/fs/cgroup%s/memory.current", cg);
+        f = fopen(path, "r"); if (f) { if (fscanf(f, "%llu", &cur) != 1) have = 0; fclose(f); }
+        if (have && lim > cur && lim - cur < avail) avail = lim - cur;
+        else if (have && lim <= cur) avail = 0;
+    }
+    return avail;
+}
+
 int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, DpCoreResult *out) {
     DpCoreConfig cfg_unb = *cfg_in;
     if (cfg_unb.unbounded) {
@@ -2773,6 +2798,18 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     pthread_cond_init(&sh.cv, NULL);
     sh.out = out; sh.cfg = cfg;
     sh.sbytes = m->state_bytes(m);
+    if (cfg_unb.queue_auto) {   // the queue holds whole machine snapshots: bound it by what the RAM can carry, the rest spills to the disk spool
+        uint64_t budget = dp_mem_budget();
+        if (budget) {
+            uint64_t per = (uint64_t)sh.sbytes + 128u, cap = budget * 4u / 10u / per;
+            if (cap < 256) cap = 256;
+            if (!cfg_unb.queue_max || cap < cfg_unb.queue_max) {
+                fprintf(stderr, "deepeel: queue bounded to %llu states in RAM (%u KiB each, %llu MiB available); the rest goes to the spool\n",
+                        (unsigned long long)cap, (unsigned)(sh.sbytes / 1024u), (unsigned long long)(budget >> 20));
+                cfg_unb.queue_max = (size_t)cap;
+            }
+        }
+    }
     sh.spool_fd = -2;   // not opened yet (-1 means the open failed)
     uint32_t ramn = rsize(m);
     uint32_t site_n = 0x10000u; while (site_n < rom_size && site_n < (1u << SITE_BITS)) site_n <<= 1;   // A3
