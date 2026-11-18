@@ -1125,10 +1125,11 @@ static void obs_write(void *u, uint32_t addr, uint8_t v) {
         __atomic_fetch_add(&o->r->reg_writes[rs], 1, __ATOMIC_RELAXED);
         __atomic_fetch_or(&o->r->reg_vals[rs * 8u + (v >> 5)], 1u << (v & 31u), __ATOMIC_RELAXED);
     }
-    if (o->m->rom_index(o->m, addr) >= 0 ||
+    const int64_t rik = o->m->rom_index(o->m, addr);   // one lookup: it is the hot call of block-transfer observation
+    if (rik >= 0 ||
         (o->m->mapper_reg && o->m->mapper_reg(o->m, addr))) o->mapper_w = 1;
-    if (o->run_hi >= 0 && o->m->rom_index(o->m, addr) < 0) o->run_writes++;
-    int64_t wi = o->m->rom_index(o->m, addr) < 0 ? ridx(o->m, addr) : -1;
+    if (o->run_hi >= 0 && rik < 0) o->run_writes++;
+    int64_t wi = rik < 0 ? ridx(o->m, addr) : -1;
     // A later write replaces the previous provenance even if there has been
     // no recent ROM read. Do this before the stale-read early return.
     if (!o->forced && wi >= 0) {
@@ -1143,7 +1144,7 @@ static void obs_write(void *u, uint32_t addr, uint8_t v) {
         if (dest && o->last_rom >= 0 && (size_t)o->last_rom < o->r->rom_size)
             __atomic_store_n(&o->r->dest[o->last_rom], dest, __ATOMIC_RELAXED);
     }
-    if (o->m->rom_index(o->m, addr) < 0 && v == o->last_val) {
+    if (rik < 0 && v == o->last_val) {
         if (o->forced) o->r->copy_forced++;
         else {
             __atomic_fetch_or(&o->r->flags[o->last_rom], DP_CORE_COPIED, __ATOMIC_RELAXED);
