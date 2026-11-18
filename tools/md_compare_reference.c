@@ -118,6 +118,10 @@ int main(int argc, char **argv) {
         if (getenv("DP_MD_STACK_DIFF")) { static int shown2; unsigned nd = 0, first = 0;
             for (unsigned i = (getenv("DP_MD_DEEP") ? 0xfd7e : 0xfd00); i < (getenv("DP_MD_DEEP") ? 0xfd8e : 0xfe00); i++) if (ref_byte(ref, i) != dut->ram[i]) { if (!nd) first = i; nd++; }
             if (nd && shown2 < 6) { shown2++; printf("stack-diff frame %u: %u bytes in fd00-fdff, first %04x ref=%02x dut=%02x sp=%08x/%08x pc=%06x/%06x\n", frame + 1, nd, first, ref_byte(ref, first), dut->ram[first], (unsigned)ref->m68k.address_registers[7], dut->a[7], (unsigned)ref->m68k.program_counter, dut->pc); } }
+        if (getenv("DP_MD_DUT_DUMP")) {   /* m0boy work RAM after every frame (64 KiB), to compare with a reference dump without the ClownMDEmu side */
+            static FILE *df; if (!df) df = fopen(getenv("DP_MD_DUT_DUMP"), "wb");
+            if (df) fwrite(dut->ram, 1, 0x10000, df);
+        }
         if (getenv("DP_MD_GENS_DUMP")) {   /* Gens-rr work RAM dump (tools/gens_dump.lua): 64 KiB per frame, DP_MD_GENS_SKIP frames of offset */
             static FILE *gf; static unsigned char gbuf[0x10000]; static unsigned first_ref = 0, first_dut = 0;
             if (!gf) gf = fopen(getenv("DP_MD_GENS_DUMP"), "rb");
