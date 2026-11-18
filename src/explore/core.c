@@ -486,6 +486,32 @@ static int closure_entry_is_data(const DpCoreResult *r, const DpIsa *isa, const 
     if (k >= 0 && (__atomic_load_n(&r->flags[k], __ATOMIC_RELAXED) & (DP_CORE_DATA | DP_CORE_COPIED))) return 0;   // a data-marked root: the walk stops on it
     return isa->entry_data_sig && isa->entry_data_sig(w, 8);
 }
+// Targets of a code table (DpIsa.code_table): `rel` tables hold signed word offsets from the base and end where the first
+// entry's target begins; absolute tables hold 24-bit long pointers and may start one slot early (object ids begin at 1).
+// An entry must be even, inside the ROM and decode as a legal instruction.  Returns the number of targets written.
+static unsigned code_table_targets(DpMachine *m, const DpIsa *isa, const DpCodeTable *t, uint32_t *out, unsigned max) {
+    uint32_t first = 0xFFFFFFFFu; unsigned cnt = 0;
+    const unsigned w = t->stride;
+    for (unsigned e = 0; e < 128 && cnt < max; e++) {
+        uint32_t ea = (t->base + e * w) & 0xFFFFFFu;
+        if (t->rel && ea >= first) break;
+        uint32_t v = 0; for (unsigned i = 0; i < w; i++) v = (v << 8) | m->fetch(m, ea + i);
+        uint32_t tg;
+        if (t->rel) tg = (t->base + (uint32_t)(int32_t)(int16_t)v) & 0xFFFFFFu;
+        else { if (v >> 24) { if (e == 0) continue; break; } tg = v; }
+        int bad = (tg & 1u) || m->rom_index(m, tg) < 0;
+        if (!bad) {
+            uint8_t b[10]; for (unsigned i = 0; i < sizeof b; i++) b[i] = m->fetch(m, tg + i);
+            DpFlowInfo f; memset(&f, 0, sizeof f);
+            bad = !isa->flow(b, tg, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL;
+        }
+        if (bad) { if (!t->rel && e == 0) continue; break; }   // absolute tables: slot 0 may be the code before the table
+        if (t->rel && tg > ea && tg < first) first = tg;
+        out[cnt++] = tg;
+    }
+    return cnt;
+}
+
 static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa, uint32_t root, uint32_t bank, uint32_t trust0,
                         const DpRegState *regs0, int thru0, unsigned budget0, RegWalk *rw) {
     uint32_t stack_s[256][4]; RetStk rets_s[256]; DpRegState rg_s[256];
@@ -692,6 +718,19 @@ no_stackret:;
             DpRegState nxt;
             isa->reg_effect(b, pc, &regs, &nxt, &rom);
             regs = nxt;
+        }
+        if (trust && v->m && isa->code_table && (f.kind == DP_FLOW_INDIRECT || f.kind == DP_FLOW_SEQ)) {   // a PC-relative table met by the walk: every entry is a root
+            DpCodeTable ct; uint32_t lp = 0;
+            if (isa->code_table(v->m, pc, b, &ct, &lp)) {
+                uint32_t tg[128];
+                unsigned n = code_table_targets(v->m, isa, &ct, tg, 128);
+                for (unsigned i = 0; i < n; i++) {
+                    if (cview_index(v, r, tg[i], bk) < 0) continue;
+                    if (sp < depth) { rets[sp] = cr; rets[sp].n = 0; stack[sp][0] = tg[i]; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)cur; rg[sp] = regs; sp++; }
+                    else r->closure_stack_dropped++;
+                }
+                if (n) { r->closure_jp_tables++; r->closure_jp_entries += n; r->prov_data_bytes += (uint64_t)n * ct.stride; }
+            }
         }
         int fall = f.fall || f.kind == DP_FLOW_SEQ || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL;
         if (f.kind != DP_FLOW_RET && (f.target >= 0 || (indirect_ok && f.kind == DP_FLOW_INDIRECT)) &&
@@ -978,25 +1017,10 @@ static void closure_jp_table(DpCoreResult *r, DpMachine *m, const DpCoreConfig *
 // 68000 PC-relative code table: word entries are signed offsets from the base; the table ends where the
 // first entry's target begins (the code the offsets point at follows the table).
 static void closure_code_table(DpCoreResult *r, DpMachine *m, const DpIsa *isa, const DpCodeTable *t, RegWalk *rw) {
-    uint32_t first = 0xFFFFFFFFu; int cnt = 0;
-    const unsigned w = t->stride;   // 2: signed word offsets from the base; 4: absolute long pointers
-    for (unsigned e = 0; e < 128; e++) {
-        uint32_t ea = (t->base + e * w) & 0xFFFFFFu;
-        if (t->rel && ea >= first) break;
-        uint32_t v = 0; for (unsigned i = 0; i < w; i++) v = (v << 8) | m->fetch(m, ea + i);
-        uint32_t tg;
-        if (t->rel) tg = (t->base + (uint32_t)(int32_t)(int16_t)v) & 0xFFFFFFu;
-        else { if (v >> 24) { if (e == 0) continue; break; } tg = v; }
-        int bad = tg & 1u || m->rom_index(m, tg) < 0;
-        uint8_t b[10];
-        DpFlowInfo f; memset(&f, 0, sizeof f);
-        if (!bad) { for (unsigned i = 0; i < sizeof b; i++) b[i] = m->fetch(m, tg + i); bad = !isa->flow(b, tg, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL; }
-        if (bad) { if (!t->rel && e == 0) continue; break; }   // absolute tables: slot 0 may be the code before the table
-        if (t->rel && tg > ea && tg < first) first = tg;
-        cnt++;
-        closure_walk(r, m, isa, tg, rw);
-    }
-    if (cnt) { r->closure_jp_tables++; r->closure_jp_entries += (uint64_t)cnt; r->prov_data_bytes += (uint64_t)cnt * w; }
+    uint32_t tg[128];
+    unsigned n = code_table_targets(m, isa, t, tg, 128);
+    for (unsigned i = 0; i < n; i++) closure_walk(r, m, isa, tg[i], rw);
+    if (n) { r->closure_jp_tables++; r->closure_jp_entries += n; r->prov_data_bytes += (uint64_t)n * t->stride; }
 }
 
 static void mark(Shared *sh, DpCoreResult *r, DpMachine *m, uint32_t pc, unsigned len, uint8_t how, uint16_t origin, uint8_t actor) {
@@ -2078,6 +2102,15 @@ static void run_path(Worker *w, Pending *p) {
                 last_imm = iv; imm_age = 0;
             } else if (imm_age < 99) imm_age++;
         }
+        if (!cfg->no_closure && !cur_forced && have_flow && isa->code_table && (fi.kind == DP_FLOW_INDIRECT || fi.kind == DP_FLOW_SEQ)) {
+            DpCodeTable ct; uint32_t lp = 0;
+            if (isa->code_table(m, pc, bytes, &ct, &lp)) {
+                // a table is closed once per thread: direct-mapped cache of the bases already walked (objects run the same table every frame)
+                static __thread uint32_t seen_ct[256];
+                uint32_t *slot = &seen_ct[((ct.base * 0x9e3779b1u) >> 24) & 255u], tag = ct.base | 0x80000000u | (uint32_t)ct.stride << 28;
+                if (*slot != tag) { *slot = tag; closure_code_table(loc, m, isa, &ct, w->regwalk); }
+            }
+        }
         if (!cfg->no_closure && !cur_forced && have_flow && fi.kind != DP_FLOW_SEQ && fi.kind != DP_FLOW_ILLEGAL) {
             if (fi.target >= 0 && (fi.kind == DP_FLOW_JUMP || fi.kind == DP_FLOW_COND || fi.kind == DP_FLOW_CALL)) closure_walk(loc, m, isa, (uint32_t)fi.target, w->regwalk);
             if (fi.kind == DP_FLOW_COND) closure_walk(loc, m, isa, pc + fi.length, w->regwalk);
@@ -2089,15 +2122,6 @@ static void run_path(Worker *w, Pending *p) {
                                  w->pcring_n >= 8 ? w->pcring : NULL, w->pcring_n < 32 ? w->pcring_n : 32, w->regwalk);   // a path too young to hold the load is not filtered
             if (dispatch == 2)
                 closure_abs_table(loc, m, isa, dispatch_arg, w->regwalk);
-            if (isa->code_table && (fi.kind == DP_FLOW_INDIRECT || fi.kind == DP_FLOW_SEQ)) {
-                DpCodeTable ct; uint32_t lp = 0;
-                if (isa->code_table(m, pc, bytes, &ct, &lp)) {
-                    // a table is closed once per thread: direct-mapped cache of the bases already walked (objects run the same table every frame)
-                    static __thread uint32_t seen_ct[256];
-                    uint32_t *slot = &seen_ct[((ct.base * 0x9e3779b1u) >> 24) & 255u], tag = ct.base | 0x80000000u | (uint32_t)ct.stride << 28;
-                    if (*slot != tag) { *slot = tag; closure_code_table(loc, m, isa, &ct, w->regwalk); }
-                }
-            }
             // C3: this executed step seeds a walk carrying the concrete CPU
             // registers (the Sega closure's per-step bootstrapping, generic:
             // DpMachine.get_regs + DpIsa.reg_effect).  Per-site cap on
