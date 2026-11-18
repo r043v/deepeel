@@ -203,6 +203,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_save.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_pause.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_pad.sms
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_ramp.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_irq.sms
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_ppupoll.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_decomp.sms
@@ -550,6 +551,7 @@ set_tests_properties(core_closure_seedcap_zero PROPERTIES FIXTURES_REQUIRED fixt
 # "zero data marked code" points 1+3: on the ground-truth fixture, the tile dump behind the
 # call's fall-through is refused at the untrusted entry (counter) and the map audit against
 # the generator's truth reports no data marked code
+add_test(NAME core_padding_ramp COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_ramp.sms; t=${CMAKE_CURRENT_BINARY_DIR}/core_ramp.txt; $<TARGET_FILE:deepeel> z80 explore sms $f --core --jobs 1 --attract-frames 0 --no-sessions --text $t >/dev/null && grep -q 'rom bytes: natural 10,' $t && grep -q 'rom-index 256-256 natural 1 ' $t && grep -q 'rom-index 512-513 natural 2' $t && grep -q 'padding ramps executed but not marked as code: [1-9]' $t")
 add_test(NAME core_closure_truth_z80 COMMAND sh -c "f=${CMAKE_CURRENT_BINARY_DIR}/fix_z80_truth.sms; a='--core --jobs 1 --attract-frames 0 --no-sessions'; o=${CMAKE_CURRENT_BINARY_DIR}/core_truth_z80; $<TARGET_FILE:deepeel> z80 explore sms $f $a --map $o.map --text $o.txt >/dev/null && grep -q 'untrusted walk entries refused (data plausibility, point 3): [1-9]' $o.txt && python3 ${CMAKE_SOURCE_DIR}/tests/truth_check.py $o.map ${CMAKE_CURRENT_BINARY_DIR}/fix_z80_truth.truth")
 set_tests_properties(core_closure_truth_z80 PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 120)
 add_test(NAME core_map_sm83 COMMAND sh -c "o=${CMAKE_CURRENT_BINARY_DIR}/core_map_sm83; rm -f $o.png $o.json $o.map; $<TARGET_FILE:deepeel> explore ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_closure.gb --core --jobs 1 --attract-frames 0 --no-sessions --map $o.png --summary $o.json >/dev/null && head -c 8 $o.png | grep -q PNG && grep -q '\"probable-code\":[1-9]' $o.json && $<TARGET_FILE:deepeel> explore ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_closure.gb --core --jobs 1 --attract-frames 0 --no-sessions --map $o.map >/dev/null && grep -q 'map v1' $o.map")

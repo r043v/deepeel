@@ -171,6 +171,7 @@ typedef struct DpCoreResult {
     uint64_t nonsense_pc;      // paths cut executing in echo/OAM/I-O space (machine cut_pc, audit E2)
     uint64_t nonsense_sp;      // paths cut on a RET whose stack left the RAM space (machine cut_sp)
     uint64_t pad_cuts;         // paths cut after sliding through a long 00/FF run (padding is not code)
+    uint64_t pad_unmarked;     // executed 1-byte instructions inside a long 00/FF ROM run left unmarked (a ramp of rst $38 / nop is padding, not code)
     uint64_t workers;          // workers actually started
     uint64_t workers_min, workers_max;   // adaptive mode: lowest / highest number of workers allowed
     uint64_t workers_short;    // workers requested but unavailable (no clone / init failure)

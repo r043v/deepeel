@@ -17,8 +17,29 @@ locations carry the true window per pc (a GG shows its ROM through 4000-7FFF
 AND 8000-BFFF; the deepeel cov records by bank only), and a dynamic jump that
 leaves compiled code never reaches the runtime's target recorder.  Without the
 feedback the dispatch misses those regions and the interpreter eats the loops.
+
+--rom ROM: drop the executed heads inside a padding ramp (a 1-byte $FF in a run
+of at least 16, or $00 in a run of at least 33, same rule as the kernel's
+pad_unmarked since 0.396.0).  Older coverages marked a fork's slide through the
+filler (rst $38 returning into the next $FF) as executed code: m0boy compiled
+thousands of rst $38 for nothing (Ristar GG: 28 % of its instructions).
 """
 import argparse
+
+RAMP = {0xFF: 16, 0x00: 33}
+
+
+def ramp_bytes(rom):
+    """ROM indices inside a ramp (rom index = bank * 0x4000 + offset & 0x3FFF)."""
+    out, i, n = set(), 0, len(rom)
+    while i < n:
+        v, j = rom[i], i
+        while j < n and rom[j] == v:
+            j += 1
+        if v in RAMP and j - i >= RAMP[v]:
+            out.update(range(i, j))
+        i = j
+    return out
 
 
 def main():
@@ -32,7 +53,16 @@ def main():
     ap.add_argument("--frames", type=int, default=600, help="nominal session length (rate ranking)")
     ap.add_argument("--feedback", action="append", default=[],
                     help="host profile(s) from the built project's harness; every pc becomes an entry")
+    ap.add_argument("--rom", help="the ROM image: drop executed heads inside $FF/$00 padding ramps")
     args = ap.parse_args()
+    ramps = set()
+    if args.rom:
+        with open(args.rom, "rb") as f:
+            rom = f.read()
+        if len(rom) % 0x4000 == 512:                # copier header
+            rom = rom[512:]
+        ramps = ramp_bytes(rom)
+    dropped = 0
 
     if args.system == "msx":
         args.bank_shift = 13
@@ -50,6 +80,9 @@ def main():
             bank, off, flags = int(p[0], 16), int(p[1], 16), int(p[2], 16)
             hits = int(p[3]) if len(p) > 3 else 1
             if not flags & 1:                      # executed instruction heads only
+                continue
+            if ramps and (bank << 14 | (off & 0x3FFF)) in ramps:
+                dropped += 1
                 continue
             loc = (bank << 16) | off
             out.append(f"{loc:06x} {hits}")
@@ -75,7 +108,8 @@ def main():
     with open(args.out, "w") as f:
         f.write("\n".join(out) + "\n")
     print(f"{args.out}: {n} executed pcs, {len(uniq)} entry seeds "
-          f"({min(len(entries), args.entries)} from hits, {fed} from feedback)")
+          f"({min(len(entries), args.entries)} from hits, {fed} from feedback)"
+          + (f", {dropped} padding-ramp heads dropped" if args.rom else ""))
 
 
 if __name__ == "__main__":

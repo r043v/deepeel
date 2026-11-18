@@ -975,6 +975,24 @@ static void mark(Shared *sh, DpCoreResult *r, DpMachine *m, uint32_t pc, unsigne
     }
 }
 
+// A ramp byte: pc is in ROM and inside a run of at least DP_RAMP_FF ($FF) or DP_RAMP_00 ($00)
+// identical bytes.  $FF chains rst $38 (never the head of real code twice in a row, see
+// entry_data_sig); $00 needs a longer run so the real nop delay lines of timing code stay code.
+// Only the bytes a path reaches from the ramp byte before (falling through, or an rst $38
+// returning to the next byte) are padding: the byte a jump, a call or the reset lands on is an
+// entry (the nop at $0100 before jp, a call target nop before ret) and stays code (run_path).
+#define DP_RAMP_FF 16
+#define DP_RAMP_00 33
+static int rom_ramp(DpMachine *m, uint32_t pc, uint8_t v) {
+    if (v != 0xFF && v != 0x00) return 0;
+    if (m->rom_index(m, pc) < 0) return 0;
+    const unsigned need = v == 0xFF ? DP_RAMP_FF : DP_RAMP_00;
+    unsigned n = 1;
+    for (unsigned i = 1; i < need && n < need; i++) { if (m->rom_index(m, pc - i) < 0 || m->fetch(m, pc - i) != v) break; n++; }
+    for (unsigned i = 1; i < need && n < need; i++) { if (m->rom_index(m, pc + i) < 0 || m->fetch(m, pc + i) != v) break; n++; }
+    return n >= need;
+}
+
 static int covered_natural(DpCoreResult *r, DpMachine *m, uint32_t pc) {
     int64_t k = m->rom_index(m, pc);
     return k >= 0 && (size_t)k < r->rom_size && (__atomic_load_n(&r->flags[k], __ATOMIC_RELAXED) & DP_CORE_NATURAL);
@@ -1574,6 +1592,7 @@ static void run_path(Worker *w, Pending *p) {
     w->cobs.forced = p->forced; w->cobs.last_rom = -1; w->cobs.rq_n = 0; w->pcring_n = 0;
     w->win_on = w->cobs.track = 0;
     uint32_t path_id = ++w->path_id, vid = path_id, steps = 0, slice_steps = 0;
+    uint32_t ramp_last = UINT32_MAX;   // pc of the last ramp byte this path executed (rom_ramp)
     int cur_forced = p->forced;
     uint16_t cur_origin = p->origin, cur_epoch = p->epoch;
     unsigned fdepth = p->call_depth;   // calls made since the forced fork
@@ -1968,7 +1987,15 @@ static void run_path(Worker *w, Pending *p) {
             if (fi.kind == DP_FLOW_RET) { if (!fdepth) { loc->taint_cut_ret++; break; } fdepth--; }
             else if (fi.call) fdepth++;
         }
-        mark(sh, loc, m, pc, (unsigned)len, cur_forced ? DP_CORE_FORCED : DP_CORE_NATURAL, cur_origin, w->path_actor);
+        // ramp: a 1-byte $FF (rst $38 on z80/sm83) or $00 inside a long run of the same ROM byte is
+        // padding a path slid through (an rst $38 returns into the next $FF, a forked state jumps
+        // into the filler): the path keeps going (the code after the run may be a real entry) but
+        // the run is not marked as code; counted (pad_unmarked).  TAS playback stays an observation.
+        int ramp = !tas && len == 1 && !cfg->no_nonsense && rom_ramp(m, pc, bytes[0]);
+        int slid = ramp && ramp_last != UINT32_MAX && pc == ramp_last + 1;
+        if (ramp) ramp_last = pc;   // kept across the rst $38 handler, whose ret lands on the next byte
+        if (slid) loc->pad_unmarked++;
+        else mark(sh, loc, m, pc, (unsigned)len, cur_forced ? DP_CORE_FORCED : DP_CORE_NATURAL, cur_origin, w->path_actor);
         if (!cur_forced && isa->imm_ptr && loc->refs) {   // B9: an executed immediate that designates the ROM is a typed reference
             uint32_t imm;
             if (isa->imm_ptr(bytes, &imm)) {
@@ -3098,6 +3125,7 @@ cleanup:
         out->sat_site += l->sat_site;
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
+        out->nonsense_pc += l->nonsense_pc; out->nonsense_sp += l->nonsense_sp; out->pad_cuts += l->pad_cuts; out->pad_unmarked += l->pad_unmarked;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
         out->novelty_picks += l->novelty_picks; out->closure_stopped_data += l->closure_stopped_data; out->closure_entry_refused += l->closure_entry_refused; out->closure_stack_invalidations += l->closure_stack_invalidations; out->closure_unresolved += l->closure_unresolved; out->closure_stack_dropped += l->closure_stack_dropped; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->promoted_forced += l->promoted_forced; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bank_sims += l->closure_bank_sims; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_stack_dropped += l->closure_stack_dropped; out->pending_dropped += l->pending_dropped; out->deferred += l->deferred; out->state_repeats += l->state_repeats; out->probe_ctx_sat += l->probe_ctx_sat; out->probe_rearms += l->probe_rearms; out->bank_forks += l->bank_forks; out->tas_ckpts += l->tas_ckpts; out->sess_ckpts += l->sess_ckpts; out->ckpt_bursts += l->ckpt_bursts; out->epoch_forks += l->epoch_forks; out->live_seeds += l->live_seeds; out->imm_refs += l->imm_refs; out->held_stops += l->held_stops; out->bank_fork_sat += l->bank_fork_sat; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->event_probe_arms += l->event_probe_arms; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->closure_rets += l->closure_rets; out->proj_pruned += l->proj_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
         out->exec_outside += l->exec_outside; out->exec_wram_rom += l->exec_wram_rom; dp_ramarch_merge(&out->ra, &l->ra);
@@ -3284,6 +3312,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     if (r->nonsense_pc || r->nonsense_sp || r->pad_cuts)
         fprintf(out, "nonsense cuts: echo/I-O pc %llu, stack outside RAM %llu, padding slides %llu\n",
                 U(r->nonsense_pc), U(r->nonsense_sp), U(r->pad_cuts));
+    if (r->pad_unmarked) fprintf(out, "padding ramps executed but not marked as code: %llu instructions (rst $38 / nop runs)\n", U(r->pad_unmarked));
     fprintf(out, "forced taint cuts: indirect %llu, ret %llu\n", U(r->taint_cut_indirect), U(r->taint_cut_ret));
     if (r->exec_wram_rom) fprintf(out, "RAM-executed instructions traced to ROM copy sources: %llu\n", U(r->exec_wram_rom));
     if (r->ra.n) fprintf(out, "runtime code archive: %u distinct instructions executed from RAM/VRAM/HRAM, %u attached to a ROM copy source, %u generated (no ROM source; %u with an approximate ROM producer), %u rewrote an earlier instruction at the same address (self-modifying)\n", r->ra.n, r->ra.attached, r->ra.n - r->ra.attached, r->ra.derived, r->ra.poly);

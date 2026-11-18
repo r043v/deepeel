@@ -1430,6 +1430,16 @@ def build_z80_family(out):
     pad[0:len(code)] = code
     with open(os.path.join(out, "fix_z80_pad.sms"), "wb") as f:
         f.write(pad)
+    # padding ramp: jp $0100 lands in 256 bytes of $FF; every rst $38 returns ($38: ret) into the
+    # next $FF until the jr * at $0200.  The ramp is executed by a natural path but is filler:
+    # the kernel keeps $0100 (the byte the jp lands on, an entry), leaves the 255 bytes reached
+    # from the ramp byte before unmarked (pad_unmarked) and still reaches $0200
+    rp = bytearray([0xFF]) * 0x8000
+    rp[0:6] = bytes.fromhex("31f0df c30001".replace(" ", ""))
+    rp[0x38] = 0xC9
+    rp[0x200:0x202] = bytes.fromhex("18fe")
+    with open(os.path.join(out, "fix_z80_ramp.sms"), "wb") as f:
+        f.write(rp)
     # IM 1 vblank interrupt: VDP reg1 enables the frame IRQ, EI, idle; handler at $38 (IRQ fork)
     irq = bytearray([0xFF]) * 0x8000
     boot = bytes([0x31, 0xF0, 0xDF, 0x3E, 0x20, 0xD3, 0xBF, 0x3E, 0x81, 0xD3, 0xBF,

@@ -6330,3 +6330,25 @@ règle désormais effectivement la taille de cette file avant débordement disqu
   obligatoire (la couverture enregistre par banque, pas par fenêtre
   4000-7FFF / 8000-BFFF — le profil du harnais porte les vrais pc et le
   feedback d'entrées les répare ; Ristar : 306 k → 617 pas interprétés).
+
+## 0.396.0
+
+- **Rampes de remplissage non marquées comme code** : une instruction d'un
+  octet `$FF` (rst $38 sur z80/sm83) ou `$00` dans une série d'au moins 16
+  `$FF` ou 33 `$00` identiques en ROM n'est plus marquée exécutée quand le
+  chemin y arrive depuis l'octet de rampe précédent, en glissant ou par le
+  retour d'un rst $38 dans l'octet suivant. Le chemin continue (le code au
+  bout de la série peut être une vraie entrée) ; le compte apparaît dans la
+  ligne « padding ramps executed but not marked as code ». L'octet sur
+  lequel tombe un saut, un appel ou la réinitialisation reste du code (le
+  `nop` de $0100 avant son `jp`, une cible d'appel `nop; ret`). Les films
+  TAS et `--no-nonsense` gardent l'ancien marquage. Fixture
+  `fix_z80_ramp.sms`, test `core_padding_ramp`.
+- **Compteurs de coupes corrigés** : `nonsense_pc`, `nonsense_sp` et
+  `pad_cuts` n'étaient pas fusionnés entre workers ; la ligne « nonsense
+  cuts » sous-comptait.
+- **`tools/deepeel2m0boy.py --rom`** : avec l'image ROM, le pont retire du
+  profil m0boy les têtes d'instruction situées dans ces mêmes rampes
+  (couvertures produites avant 0.396.0). Sur Ristar GG, 24 150 instructions
+  sont retirées, et les entrées de dispatch du code généré passent de
+  59 899 à 39 014.
