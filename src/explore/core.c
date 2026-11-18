@@ -292,8 +292,13 @@ typedef struct {
     uint8_t path_actor;   // P13/A9: DP_ACTOR_* of the running path, stamped into first_actor at first cover
     int win_on; uint32_t win_pc; unsigned win_n;
     uint8_t win_imm[24]; unsigned win_ni;
+    uint8_t *irqscratch;       // IRQ hook output, kept per worker (the hook is asked before any lock)
+    uint64_t keycache[2048];   // direct-mapped: probeset keys known present (never removed), read without the shared mutex
     pthread_t th;
 } Worker;
+
+static inline int kc_known(const Worker *w, uint64_t key) { return w->keycache[(key * 0x9E3779B97F4A7C15ull) >> 53] == key; }
+static inline void kc_add(Worker *w, uint64_t key) { w->keycache[(key * 0x9E3779B97F4A7C15ull) >> 53] = key; }
 
 // 1 when a conditional follows `pc` within 5 sequential instructions (memoised per ROM site)
 static int cond_ahead(Worker *w, const DpIsa *isa, uint32_t pc) {
@@ -2064,9 +2069,14 @@ static void run_path(Worker *w, Pending *p) {
             }
         }
         if (!cfg->no_event_probes && cfg->hooks && cfg->hooks->event_probe && m->rom_index(m, pc) >= 0) {
-            pthread_mutex_lock(&sh->mu);
-            int fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, (uint64_t)m->rom_index(m, pc) + 1);
-            pthread_mutex_unlock(&sh->mu);
+            uint64_t pkey = (uint64_t)m->rom_index(m, pc) + 1;
+            int fresh = 0;
+            if (!kc_known(w, pkey)) {
+                pthread_mutex_lock(&sh->mu);
+                fresh = keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, pkey);
+                pthread_mutex_unlock(&sh->mu);
+                kc_add(w, pkey);
+            }
             int rearm = 0;
             int64_t pri = m->rom_index(m, pc);
             if (!fresh && ctx_rearm(w, cfg, loc, m, pri, 11, 0, w->visits[vi])) fresh = rearm = 1;
@@ -2104,15 +2114,25 @@ static void run_path(Worker *w, Pending *p) {
                 int64_t iri = (int64_t)m->rom_index(m, pc);
                 uint64_t ikey = ((uint64_t)m->rom_index(m, pc) + 1) | ((uint64_t)d << 40);
                 int known = 0, rearmed = 0;   // (site, delay) already forked: skip the costly hook and the 17 KiB snapshot
-                pthread_mutex_lock(&sh->mu);
-                if (sh->probecap) { size_t h = keyhash(ikey) & (sh->probecap - 1); while (sh->probeset[h]) { if (sh->probeset[h] == ikey) { known = 1; break; } h = (h + 1) & (sh->probecap - 1); } }
-                pthread_mutex_unlock(&sh->mu);
+                int hooked = 0;   // the hook already ran into w->irqscratch (nothing pending => no shared state is touched)
+                if (kc_known(w, ikey)) known = 1;
+                else {
+                    if (!w->irqscratch) w->irqscratch = malloc(sh->sbytes);
+                    if (!w->irqscratch || !cfg->hooks->irq_alt(cfg->hooks->user, m, d, w->irqscratch)) break;
+                    hooked = 1;
+                    pthread_mutex_lock(&sh->mu);
+                    if (sh->probecap) { size_t h = keyhash(ikey) & (sh->probecap - 1); while (sh->probeset[h]) { if (sh->probeset[h] == ikey) { known = 1; break; } h = (h + 1) & (sh->probecap - 1); } }
+                    pthread_mutex_unlock(&sh->mu);
+                    if (known) kc_add(w, ikey);
+                }
                 if (known) { if (ctx_rearm(w, cfg, loc, m, iri, 13, (uint64_t)d << 40, w->visits[vi])) rearmed = 1; else continue; }   // A2: one more interrupt landing under a new semantic cell
                 uint8_t *snap = malloc(sh->sbytes);
                 if (!snap) break;
-                if (!cfg->hooks->irq_alt(cfg->hooks->user, m, d, snap)) { free(snap); break; }
+                if (hooked) memcpy(snap, w->irqscratch, sh->sbytes);
+                else if (!cfg->hooks->irq_alt(cfg->hooks->user, m, d, snap)) { free(snap); break; }
                 pthread_mutex_lock(&sh->mu);
                 int fresh = rearmed || keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, ikey);
+                if (fresh) kc_add(w, ikey);
                 if (!fresh) free(snap);
                 else {
                     queue_push(sh, m, (Pending){ snap, pc, 0, (uint32_t)(m->rom_index(m, pc) + 1), cur_input, 0, 0, DP_SRC_IRQ });
