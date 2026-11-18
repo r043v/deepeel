@@ -319,10 +319,14 @@ static int isa_rom_table_follows(const DpIsa *isa, DpMachine *m, uint32_t pc, in
 static int isa_code_table(struct DpMachine *m, uint32_t pc, const uint8_t *b, DpCodeTable *out, uint32_t *load_pc) {
     (void)m;
     unsigned op = (unsigned)(b[0] << 8 | b[1]);
-    if (op != 0x4EFB && op != 0x4EBB) return 0;   // jmp / jsr (d8,PC,Xn)
+    const int jump = op == 0x4EFB || op == 0x4EBB;            // jmp / jsr (d8,PC,Xn)
+    const int load = (op & 0xF1FFu) == 0x207Bu;               // movea.l (d8,PC,Xn),An: the object-index idiom, then jsr (An)
+    if (!jump && !load) return 0;
     if (b[2] & 0x07) return 0;                     // brief extension word: bits 10..8 are zero
     out->base = (pc + 2u + (uint32_t)(int32_t)(int8_t)b[3]) & 0xFFFFFFu;
-    out->stride = 2; out->rel = 1; *load_pc = 0;
+    if (jump) { out->stride = 2; out->rel = 1; }  // signed word offsets from the base
+    else { out->stride = 4; out->rel = 0; }       // absolute long pointers (entry 0 may precede the table: ids start at 1)
+    *load_pc = 0;
     return 1;
 }
 static const DpIsa isa = { "68000", 3, 1, isa_length, isa_flow, isa_cond_of, isa_cond_flag,

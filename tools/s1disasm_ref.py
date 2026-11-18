@@ -9,7 +9,7 @@ Observation of the tool vs a community disassembly; not a hardware measure."""
 import re, sys, collections
 rx=re.compile(r'^(?:\(\d+\))?\s*(\d+)/\s*([0-9A-F]+) :(.{21})(.*)$')
 DATA=re.compile(r'^(dc(\.[bwlq])?|dcb(\.[bwlq])?|incbin|binclude|ds(\.[bwlq])?|even|cnop|align|rorg|org|dc)$',re.I)
-ents=[];z80=False
+ents=[];z80=False;labels=[]
 for ln in open(sys.argv[1],errors='replace'):
     m=rx.match(ln.rstrip('\n'))
     if not m: continue
@@ -24,6 +24,8 @@ for ln in open(sys.argv[1],errors='replace'):
     if mn=='cpu' and len(toks)>1: z80 = toks[1].lower().startswith('z80')
     if mn in('phase',): z80=True
     if mn in('dephase',): z80=False
+    if src[:1] not in ' \t' and src.split() and not src.startswith(('*',';')):
+        labels.append((addr,src.split()[0].rstrip(':')))
     if not byt and not (DATA.match(mn) and not mn.startswith('ds')): continue
     if z80 or mn in('cpu','phase','dephase','!org','org','rorg'): continue
     ents.append((addr,byt,mn,ln))
@@ -66,3 +68,16 @@ for i in range(0x80000):
 for (c, d), n in sorted(C.items()): print("%-9s %-10s %7d" % (("ref-none", "ref-CODE", "ref-data")[c], d, n))
 code = sum(n for (c, d), n in C.items() if c == 1)
 print("code reference: %d octets, executed by deepeel: %d (%.1f%%)" % (code, C[(1, "exec")], 100.0 * C[(1, "exec")] / max(code, 1)))
+
+if "--missing" in sys.argv:   # unexecuted reference code grouped by the label it falls under (where to look for the missing flow)
+    import bisect
+    labels.sort(); la=[a for a,_ in labels]
+    M = collections.Counter(); T = collections.Counter()
+    for i in range(0x80000):
+        if cls[i] != 1: continue
+        k = bisect.bisect_right(la, i) - 1
+        name = labels[k][1] if k >= 0 else "?"
+        T[name] += 1
+        if not fl[i] & 1: M[name] += 1
+    print("\nmissing code bytes by label (missing/total):")
+    for name, n in M.most_common(60): print("  %-28s %5d / %5d" % (name, n, T[name]))
