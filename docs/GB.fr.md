@@ -6322,3 +6322,11 @@ règle désormais effectivement la taille de cette file avant débordement disqu
   des produits entre passes, inférence de continuité. 108 534 octets naturels,
   75 163 forcés, 30 720 lectures de données observées, le reste inférences
   étiquetées ; apports : fourche 58,3 %, statique+inféré 24,6 %, démo 0,3 %.
+- **`tools/deepeel2m0boy.py`** : le pont vers m0boy (`m0recomp --target pc`
+  sur les systèmes z80) — la couverture deepeel devient le profil du
+  générateur (locs `banque<<16|pc`, têtes d'instruction exécutées, graines
+  d'entrée par hits). Les bancs Castle/Sonic (SMS) et Ristar (GG) sortent
+  100 % → natif ; sur GG l'itération de retour du harnais hôte est
+  obligatoire (la couverture enregistre par banque, pas par fenêtre
+  4000-7FFF / 8000-BFFF — le profil du harnais porte les vrais pc et le
+  feedback d'entrées les répare ; Ristar : 306 k → 617 pas interprétés).
