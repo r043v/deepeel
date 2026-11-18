@@ -1117,6 +1117,8 @@ static void obs_io(void *u, uint16_t port, uint8_t v, int write) {
     } else __atomic_fetch_add(&o->r->reg_reads[rs], 1, __ATOMIC_RELAXED);
 }
 
+static uint32_t obs_mode(void *u) { return ((CopyObs *)u)->forced ? 1u : 0u; }
+
 static void obs_write(void *u, uint32_t addr, uint8_t v) {
     CopyObs *o = u;
     unsigned rs1 = o->r->reg_plat && !o->forced ? reg_of(o->r, addr) : 0;
@@ -2610,7 +2612,7 @@ static void *worker_main(void *arg) {
         return NULL;
     }
     // each worker hooks its own machine from its own thread (platform state may be thread-local)
-    DpObservers obsv = { NULL, obs_read, obs_write, obs_copy, obs_io };
+    DpObservers obsv = { NULL, obs_read, obs_write, obs_copy, obs_io, obs_mode };
     if (!cfg->no_copies && w->m->observe) w->m->observe(w->m, &obsv, &w->cobs);
     pthread_mutex_lock(&sh->mu);
     for (;;) {

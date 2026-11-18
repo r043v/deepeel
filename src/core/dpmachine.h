@@ -213,6 +213,9 @@ typedef struct DpObservers {
     void (*on_copy)(void *user, uint32_t src, uint32_t len, unsigned channel);
     // CPU port I/O (Z80 IN/OUT): `port` is the 8-bit port, `v` the value read or written
     void (*on_io)(void *user, uint16_t port, uint8_t v, int write);
+    // optional: a token naming the observer's current mode (e.g. forced vs natural); a machine may skip re-observing
+    // an identical block transfer only while the token is unchanged
+    uint32_t (*mode)(void *user);
 } DpObservers;
 enum { DP_COPY_DMA = 1 };
 

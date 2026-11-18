@@ -16,6 +16,9 @@ typedef struct {
     uint8_t *img; size_t img_size; int inited;
     uint64_t frames;   // completed frames (relative clock for sessions)
     const uint8_t *src; size_t src_size;
+    // last observed block transfer: an identical one (same code, operands, MPR map, source bytes, observer mode)
+    // sets the same flags again, so the byte-by-byte observation is skipped (a game loop may repeat a 64 KiB TII)
+    uint64_t blk_sig; int blk_valid;
 } PceWrap;
 static void pce_ensure(DpMachine *m) {
     PceWrap *w = m->impl;
@@ -136,6 +139,17 @@ static void pce_data_access(PceWrap *w, uint16_t pc, uint8_t op) {
     if (op == 0x73 || op == 0xC3 || op == 0xD3 || op == 0xE3 || op == 0xF3) {   // block transfers: src, dst, length
         uint16_t src = pce_w16((uint16_t)(pc + 1)), dst = pce_w16((uint16_t)(pc + 3)), len = pce_w16((uint16_t)(pc + 5));
         unsigned n = len ? len : 0x10000u;
+        uint64_t sig = 0xcbf29ce484222325ull;
+        #define SIGMIX(v) (sig = (sig ^ (uint64_t)(v)) * 0x100000001b3ull)
+        SIGMIX(pc); SIGMIX(op); SIGMIX(src); SIGMIX(dst); SIGMIX(n); SIGMIX(w->obs->mode ? w->obs->mode(w->user) : 0);
+        for (int k = 0; k < 8; k++) SIGMIX(c.mpr[k]);
+        for (unsigned i = 0; i < n; i++) {
+            uint16_t sa = (uint16_t)(op == 0xC3 ? src - i : op == 0xF3 ? src + (i & 1) : src + i);
+            SIGMIX(pce_readable(sa) ? dp_pce_peek(sa) : 0x100);
+        }
+        #undef SIGMIX
+        if (w->blk_valid && w->blk_sig == sig) return;
+        w->blk_sig = sig; w->blk_valid = 1;
         for (unsigned i = 0; i < n; i++) {
             uint16_t sa, da;
             switch (op) {
