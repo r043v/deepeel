@@ -50,7 +50,10 @@ int main(int argc, char **argv) {
     dp_mdrom_set(rom, n); md_full_reset(dut);
     if (SDL_Init(SDL_INIT_VIDEO)) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 2; }
     SDL_Window *w = SDL_CreateWindow("ClownMDEmu (gauche) | m0boy (droite)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640 * scale + 8, 224 * scale, 0);
-    SDL_Renderer *r = SDL_CreateRenderer(w, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    // software renderer by default: the accelerated path gave black windows under Wayland (DP_WATCH_GL=1 restores it)
+    SDL_Renderer *r = SDL_CreateRenderer(w, -1, getenv("DP_WATCH_GL") ? (SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC) : SDL_RENDERER_SOFTWARE);
+    if (!r) { fprintf(stderr, "SDL renderer: %s\n", SDL_GetError()); return 2; }
+    { SDL_RendererInfo ri; if (!SDL_GetRendererInfo(r, &ri)) fprintf(stderr, "renderer %s, driver %s\n", ri.name, SDL_GetCurrentVideoDriver()); }
     SDL_Texture *tr = SDL_CreateTexture(r, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 320, 224);
     SDL_Texture *td = SDL_CreateTexture(r, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 320, 224);
     int paused = 0, step = 0, quit = 0;
@@ -67,6 +70,11 @@ int main(int argc, char **argv) {
         pad = (uint8_t)~b[0]; dut->pad = pad;
         ClownMDEmu_Iterate(ref); md_full_frame(dut, 0); frame++;
         md_full_render(dut, dutpx, 320);
+        if (getenv("DP_WATCH_DUMP") && frame == (unsigned)atoi(getenv("DP_WATCH_DUMP"))) {   // headless check: both sides as PPM, then stop
+            const uint32_t *px[2] = { refpx, dutpx }; const char *nm[2] = { "ref.ppm", "dut.ppm" };
+            for (int k = 0; k < 2; k++) { FILE *o = fopen(nm[k], "wb"); if (!o) continue; fprintf(o, "P6 320 224 255\n");
+                for (int i = 0; i < 320 * 224; i++) { fputc(px[k][i] >> 16, o); fputc(px[k][i] >> 8, o); fputc(px[k][i], o); } fclose(o); }
+            break; }
         SDL_UpdateTexture(tr, NULL, refpx, 320 * 4); SDL_UpdateTexture(td, NULL, dutpx, 320 * 4);
         SDL_Rect a = {0, 0, 320 * scale, 224 * scale}, c = {320 * scale + 8, 0, 320 * scale, 224 * scale};
         SDL_SetRenderDrawColor(r, 40, 40, 40, 255); SDL_RenderClear(r);
