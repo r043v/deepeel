@@ -885,7 +885,7 @@ static int cmd_maprender(int argc, char **argv) {
     unsigned rom_size = 0;
     int rom_banks = 0;
     DpCart *cart = NULL;
-    char title[17];
+    char title[49];
     int tl = 0;
     if (!strcmp(sysname, "gb")) {
         char err[256];
@@ -928,7 +928,7 @@ static int cmd_maprender(int argc, char **argv) {
         ln = (long)t2.len;
     }
     if (title_arg) {
-        snprintf(title, sizeof title, "%.16s", title_arg);
+        snprintf(title, sizeof title, "%.48s", title_arg);
         tl = (int)strlen(title);
     } else
     for (const char *ti = cart ? cart->title : ""; *ti && tl < 16; ti++)
