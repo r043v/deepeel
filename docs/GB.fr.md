@@ -6373,6 +6373,14 @@ règle désormais effectivement la taille de cette file avant débordement disqu
 - Constat de mesure : sur ces fixtures et ROMs, les chiffres sont des observations de
   l'outil, pas des mesures de matériel.
 
+## 0.398.0
+
+- deepeel s'expose en bibliothèque : `libdeepeel.a` (cible `deepeel_lib`), `include/deepeel.h`
+  (`int deepeel_main(int argc, char **argv)`, une fois par processus ou dans un fils). L'exécutable
+  `deepeel` n'est plus qu'un `main` de deux lignes. Les tests ne sont construits que hors intégration.
+- m0boy (`gbrecomp` renommé `m0recomp`, devenu générique) s'expose de même (`libm0recomp`,
+  `m0recomp_main`) ; `m0boy ROM` embarque les deux bibliothèques : un seul exécutable.
+
 ## 0.397.1
 
 - `deepeel ROM` écrit aussi `<nom>.rtcode` pour la Game Boy (archive lue par m0boy).
