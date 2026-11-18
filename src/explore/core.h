@@ -217,6 +217,7 @@ typedef struct DpCoreResult {
     uint64_t hook_vetoed;      // forced sides refused by DpPlatformHooks.veto_fork
     uint64_t exec_outside, exec_wram_rom;     // instructions executed where rom_index < 0 (RAM/VRAM code)
     uint64_t no_pc;            // 1 when the machine has no pc/set_pc: nothing explored
+    char rom_title[64];        // the cartridge header's game title when the platform has one (shown in the map PNG); empty otherwise
 } DpCoreResult;
 
 // a section is a maximal run of ROM indexes covered by execution; its verdict

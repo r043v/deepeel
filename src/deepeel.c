@@ -1472,7 +1472,21 @@ static int cmd_md(int argc, char **argv) {
             rc = dp_core_explore_cli(km, c.size, &kcfg, &kr, argv_opt(argc, argv, "--summary") ? argv_opt(argc, argv, "--summary") : argv_opt(argc, argv, "--text")) ? 0 : 1;
             if (md_kwatch) dp_fbwatch_stop();
             if (md_kdump && dp_fb_dump_ppm(md_kdump)) fprintf(stderr, "deepeel: no frame to dump\n");
-            if (!rc) { dp_core_report(stdout, "md", &kr); core_outputs(argc, argv, "md", NULL, km, &kr); }
+            if (!rc) {
+                // Mega Drive header: overseas title at $150 (48 bytes), else the domestic one at $120; ASCII, spaces squeezed
+                for (int hv = 0; hv < 2 && !kr.rom_title[0]; hv++) {
+                    uint32_t ho = hv ? 0x120u : 0x150u; size_t tl = 0; int sp = 0;
+                    for (uint32_t k = 0; ho + k < c.size && k < 48 && tl + 1 < sizeof kr.rom_title; k++) {
+                        unsigned char ch = c.rom[ho + k];
+                        if (ch == ' ' || ch == 0) { sp = tl > 0; continue; }
+                        if (ch < 0x21 || ch > 0x7e) continue;
+                        if (sp) kr.rom_title[tl++] = ' ';
+                        sp = 0; kr.rom_title[tl++] = (char)ch;
+                    }
+                    kr.rom_title[tl] = 0;
+                }
+                dp_core_report(stdout, "md", &kr); core_outputs(argc, argv, "md", argv[3], km, &kr);
+            }
             dp_core_result_free(&kr);
             dp_movie_free(&kmov);
             km->close(km);

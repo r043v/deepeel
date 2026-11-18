@@ -52,7 +52,7 @@ int dp_core_write_map(const char *path, const char *id, const char *rom_name, co
         }
         const char *base = rom_name ? strrchr(rom_name, '/') : NULL;
         base = base ? base + 1 : (rom_name ? rom_name : id);
-        ok = dp_map_png_from_evidence(m, r->rom_size, r->hits, NULL, r->src_flags, &fl, base, id, base, path);   // P13/A9: the kernel's execution hits ride as the heat (dpCh bit 5)
+        ok = dp_map_png_from_evidence(m, r->rom_size, r->hits, NULL, r->src_flags, &fl, r->rom_title[0] ? r->rom_title : base, id, base, path);   // P13/A9: the kernel's execution hits ride as the heat (dpCh bit 5)
         dp_first_free(&fl);
     } else {
         FILE *f = fopen(path, "w");
