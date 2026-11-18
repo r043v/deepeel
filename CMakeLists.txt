@@ -330,8 +330,12 @@ if(SDL2_FOUND AND BUILD_GUI)
   add_compile_definitions(DP_HAS_GUI=1)
 endif()
 
-add_executable(deepeel src/deepeel.c src/core/dpmovie.c src/core/tasfetch.c src/core/gbsfetch.c)
-target_link_libraries(deepeel PRIVATE ZLIB::ZLIB)
+add_library(deepeel_lib STATIC src/deepeel.c src/core/dpmovie.c src/core/tasfetch.c src/core/gbsfetch.c)   # libdeepeel.a: deepeel_main() (include/deepeel.h)
+target_include_directories(deepeel_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+set_target_properties(deepeel_lib PROPERTIES OUTPUT_NAME deepeel POSITION_INDEPENDENT_CODE ON)
+add_executable(deepeel src/deepeel_cli.c)
+target_link_libraries(deepeel PRIVATE deepeel_lib)
+target_link_libraries(deepeel_lib PUBLIC ZLIB::ZLIB)
 add_library(deepeel_libretro STATIC src/mach/libretro.c src/mach/lr_machine.c)
 target_include_directories(deepeel_libretro PUBLIC src)
 target_link_libraries(deepeel PRIVATE deepeel_libretro ${CMAKE_DL_LIBS})
@@ -401,7 +405,7 @@ add_library(deepeel_msx STATIC IMPORTED GLOBAL)
 set_target_properties(deepeel_msx PROPERTIES IMPORTED_LOCATION ${DP_MSX_ARCHIVE}
   INTERFACE_LINK_LIBRARIES deepeel_z80)
 add_dependencies(deepeel_msx dp_msx_runtime)
-target_link_libraries(deepeel PRIVATE deepeel_msx)
+target_link_libraries(deepeel_lib PUBLIC deepeel_msx)
 add_library(deepeel_sega STATIC src/platform/sega/command.c src/platform/sega/closure.c src/platform/sega/tas.c src/core/bizhawk.c src/platform/sega/registry.c src/explore/frontier.c src/core/bk2.c src/core/md5.c src/core/zip.c src/core/sha1.c src/core/statefile.c src/gui/fbwatch.c src/explore/ramarch.c src/explore/core.c)
 target_link_libraries(deepeel_sega PUBLIC deepeel_core)
 target_link_libraries(deepeel_sega PUBLIC ZLIB::ZLIB)
@@ -468,7 +472,7 @@ set(DP_TLS_INCS_msx ${M0BOY_DIR}/targets/sg1000/runtime ${M0BOY_DIR}/targets/com
 dp_sega_tls_flavour(msx dp_msxt_ "machine|sg_[A-Za-z0-9_]*|sg1000_[A-Za-z0-9_]*|tms[A-Za-z0-9_]*|msx_[A-Za-z0-9_]*|dp_msx_(info|observe|bios_[a-z_]*|init|close|cpu|read|write|in|out|advance|rom_index|ram_index|state_size|save|load|buttons|return)"
   ${M0BOY_DIR}/targets/sg1000/runtime/sg1000.c ${M0BOY_DIR}/targets/sg1000/runtime/tms9918.c ${DP_MSX_SOURCE} ${M0BOY_DIR}/targets/msx/runtime/msx_ay.c src/platform/msx/backend.c)
 target_link_libraries(deepeel_sega PUBLIC deepeel_sg deepeel_gg deepeel_msx deepeel_sms deepeel_z80 Threads::Threads)
-target_link_libraries(deepeel PRIVATE deepeel_sega)
+target_link_libraries(deepeel_lib PUBLIC deepeel_sega)
 # --- the m0boy NES machine (6502 + PPU + APU runtime) ------------------------
 # The runtime's globals (`machine`, nes_*/apu_*/ppu_*) are namespaced with
 # objcopy — the MSX/Sega technique — so they cannot collide with the other
@@ -513,7 +517,7 @@ add_custom_target(dp_nes_runtime DEPENDS ${DP_NES_ARCHIVE})
 add_library(deepeel_nes STATIC IMPORTED GLOBAL)
 set_target_properties(deepeel_nes PROPERTIES IMPORTED_LOCATION ${DP_NES_ARCHIVE})
 add_dependencies(deepeel_nes dp_nes_runtime)
-target_link_libraries(deepeel PRIVATE deepeel_z80 deepeel_nes deepeel_core)
+target_link_libraries(deepeel_lib PUBLIC deepeel_z80 deepeel_nes deepeel_core)
 set(DP_PCE_RUNTIME "${M0BOY_DIR}/targets/pce/runtime")
 add_library(deepeel_pce STATIC
   src/platform/pce/hucdec.c
@@ -530,12 +534,12 @@ target_include_directories(deepeel_pce PUBLIC src ${DP_PCE_RUNTIME}
   "${M0BOY_DIR}/targets/common/runtime")
 target_compile_definitions(deepeel_pce PRIVATE PCE_TRACE M0_TL=__thread M0_NO_INPUT_PROBE)
 target_link_libraries(deepeel_pce PUBLIC deepeel_core)
-target_link_libraries(deepeel PRIVATE deepeel_pce)
+target_link_libraries(deepeel_lib PUBLIC deepeel_pce)
 
-target_link_libraries(deepeel PRIVATE deepeel_core m ${DP_GUI_LIBS})
+target_link_libraries(deepeel_lib PUBLIC deepeel_core m ${DP_GUI_LIBS})
 
 option(BUILD_TESTS "Build the test suite" ON)
-if(BUILD_TESTS)
+if(BUILD_TESTS AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)   # not when embedded (m0boy links libdeepeel)
   enable_testing()
   add_subdirectory(tests)
 endif()

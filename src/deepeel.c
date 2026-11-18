@@ -1643,7 +1643,7 @@ static int auto_explore(int argc, char **argv, ArSystem sys) {
     }
 }
 
-int main(int argc, char **argv) {
+int deepeel_main(int argc, char **argv) {   // the library entry point; src/deepeel_cli.c is the executable's main
     if (argc < 2) return usage(), 2;
     for (int i = 2; i < argc; i++)   // --mapwin [SCALE]: the kernel's live ROM map, for every platform (the legacy GB explorer keeps its own)
         if (!strcmp(argv[i], "--mapwin")) {
