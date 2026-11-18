@@ -3263,7 +3263,8 @@ cleanup:
     }
     if (ok && cfg->state_dir) {   // the pending frontier (RAM queue, then the disk spool) for --resume
         char fp[600]; snprintf(fp, sizeof fp, "%s/frontier.bin", cfg->state_dir);
-        if (!frontier_save(&sh, fp, out)) ok = 0;
+        if (!frontier_save(&sh, fp, out))   // the map and the coverage are complete without it: only an exact resume of the pending states is lost
+            fprintf(stderr, "deepeel: the pending frontier was not saved (disk space?); outputs are kept, a resume restarts from the coverage alone\n");
     }
     if (sh.spool_fd >= 0) close(sh.spool_fd);
     for (size_t i = 0; i < sh.qn; i++) free(sh.q[i].state);
