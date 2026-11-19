@@ -730,3 +730,5 @@ La reprise ne se fait plus qu'à l'intérieur d'une trame (`line == 261 && frame
 ligne 0). Observation de l'outil, Ristar 1506S, réglages Gens : 3398 échantillons de V-int, WRAM identique à Gens-rr
 (hors pile) sur tous sauf 9 (écarts de 21 à 28 octets, transitoires) ; avant : écart dès l'échantillon 1, centaines
 d'octets dès le 6.
+
+Même correctif, Castle of Illusion film 233S, réglages Gens (`DP_TAS_PAD_SHIFT=1`) : 2578 échantillons de V-int du noyau, aucun écart de plus de 30 octets de WRAM (hors pile) face à Gens-rr. Observation de l'outil.
