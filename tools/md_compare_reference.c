@@ -122,6 +122,16 @@ int main(int argc, char **argv) {
             static FILE *df; if (!df) df = fopen(getenv("DP_MD_DUT_DUMP"), "wb");
             if (df) fwrite(dut->ram, 1, 0x10000, df);
         }
+        if (getenv("DP_MD_DUT_DSY")) {   /* replay-only DSY1 producer for `deepeel desync`: m0boy "wram" (64 KiB) + "regs" (D0-7, A0-7, PC as u32 LE) per frame */
+            static FILE *sf; if (!sf) { sf = fopen(getenv("DP_MD_DUT_DSY"), "wb"); if (sf) fwrite("DSY1", 1, 4, sf); }
+            if (sf) {
+                uint32_t fn = frame, len = 0x10000, rl = 68, regs[17]; uint16_t nb = 2; uint8_t n4 = 4;
+                for (int i = 0; i < 8; i++) { regs[i] = dut->d[i]; regs[8 + i] = dut->a[i]; } regs[16] = dut->pc;
+                fwrite(&fn, 4, 1, sf); fwrite(&nb, 2, 1, sf);
+                fwrite(&n4, 1, 1, sf); fwrite("wram", 1, 4, sf); fwrite(&len, 4, 1, sf); fwrite(dut->ram, 1, 0x10000, sf);
+                fwrite(&n4, 1, 1, sf); fwrite("regs", 1, 4, sf); fwrite(&rl, 4, 1, sf); fwrite(regs, 4, 17, sf);
+            }
+        }
         if (getenv("DP_MD_GENS_DUMP")) {   /* Gens-rr work RAM dump (tools/gens_dump.lua): 64 KiB per frame, DP_MD_GENS_SKIP frames of offset */
             static FILE *gf; static unsigned char gbuf[0x10000]; static unsigned first_ref = 0, first_dut = 0;
             if (!gf) gf = fopen(getenv("DP_MD_GENS_DUMP"), "rb");

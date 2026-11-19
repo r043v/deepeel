@@ -503,3 +503,15 @@ ligne). Différences réelles : (1) m0boy fige le débit à la ligne de départ 
 (un DMA commencé à l'affichage et fini en vblank accélère chez Gens seulement) ; (2) le gel de Gens commence à la ligne
 suivante. Elles n'expliquent pas à elles seules l'avance d'une trame de m0boy après chaque chargement (trames 293, 336,
 419, 468 du film 1843S, compteur vblank `$FE0C` : écart 0→3), qui reste à isoler par trace de cycles côté Gens.
+
+### Chaîne DSY1 Gens-rr ↔ m0boy, sans l'exploration (19 novembre 2026)
+
+- Côté m0boy : `DP_MD_DUT_DSY=m0.dsy` dans `tools/md_compare_reference` (rejeu du film seul, pas d'exploration ; `deepeel --dsy`
+  lance l'exploration complète après le film et n'écrit que la RAM) écrit par image `wram` (64 Kio) et `regs` (D0-7, A0-7, PC).
+- Côté Gens-rr : `tools/gens_dsy.lua` (sous wine, seul hôte possible de Gens-rr ; adapter les deux chemins `Z:\…`) écrit le même
+  format DSY1 (`memory.getregister("main.d0")`…).
+- Comparaison : `deepeel desync gens.dsy m0.dsy --ignore wram:fc00-ffff --ignore regs:0-67 --offset-a N --window 4 --ring DIR`.
+  Les registres ne se comparent pas à la frontière de trame (les deux émulateurs rendent la main à des points différents de la
+  trame) : les ignorer. Film 1843S : première différence `wram` à la trame 59 (`$F641`/`$F645`, posés une trame plus tôt par
+  m0boy qu'avec Gens), c'est-à-dire le décalage de boot de 1–2 trames ; le chercheur s'arrête à la première différence,
+  d'où le recours à des `--ignore` pour les compteurs de phase (`$F600-$F62F`, `$F000-$F00F`, `$FE0C-$FE0F`).
