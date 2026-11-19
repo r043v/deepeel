@@ -79,7 +79,7 @@ int main(int argc, char **argv) {
     cb.pcm_audio_to_be_generated = audio; cb.cdda_audio_to_be_generated = audio;
     ClownMDEmu_Constant_Initialise(); ClownMDEmu_Initialise(ref, &config, &cb);
     ClownMDEmu_SetCartridge(ref, words, n/2); ClownMDEmu_HardReset(ref, 1, 0);
-    dp_mdrom_set(rom, n); md_full_reset(dut); if (getenv("DP_MD_DSY_PHASE")) { dut->phase_hook = dsy_line_hook; dut->phase_cycle = (uint16_t)atoi(getenv("DP_MD_DSY_PHASE")); }
+    dp_mdrom_set(rom, n); md_full_reset(dut); if (getenv("DP_MD_DSY_PHASE")) { dut->phase_hook = dsy_line_hook; { unsigned pl = 37, pc = 360; sscanf(getenv("DP_MD_DSY_PHASE"), "%u:%u", &pl, &pc); dut->phase_line = (uint16_t)pl; dut->phase_cycle = (uint16_t)pc; } }
     unsigned limit = (unsigned)strtoul(argv[3], NULL, 0);
     unsigned trace_begin = 1, trace_end = 0;
     const char *range = getenv("DP_MD_TRACE_RANGE");

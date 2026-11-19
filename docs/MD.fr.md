@@ -614,3 +614,21 @@ début de frame (section masquée) et le gestionnaire s'exécute de 14 158 à �
 l'échantillon (18 416) tombe en plein dedans : une différence de quelques centaines de
 cycles dans la section masquée suffit. Le modèle DMA par ligne de Gens, re-testé à la
 bonne phase, dégrade (351 frames identiques) : non retenu.
+
+### Frontières de frame : ce que le comptage de tours dit
+
+Comptage des passages de la boucle masquée `$1432` avant la V-int de la frame 87
+(registerexec côté Gens-rr, trace PC/cycles côté m0boy) : **1312 tours dans les deux
+machines** (m0boy 752 + 560, Gens 687 + 625). L'exécution est la même ; seule la
+frontière de frame diffère (65 tours, ≈ 1430 cycles, ≈ 3 lignes), et elle glisse puisque
+la frame de m0boy dure 112 cycles de plus (127 968 contre 127 856).
+
+Essais d'échantillonnage (`DP_MD_DSY_PHASE=ligne:cycle`, 700 premières frames) : la
+phase « 38 lignes après la V-int » reste la meilleure (première différence frame 87) ;
+des phases de 0 à 261 lignes, avec indexation directe ou décalée d'une frame, et avec
+des lignes de Gens (3416), ne font pas mieux. La différence de la frame 87 (palette
+`$FB00` écrite à l'échantillon chez m0boy, pas encore chez Gens) est un décalage de
+frontière de ≈ 3 lignes dans un gestionnaire de V-int, pas un défaut d'exécution.
+Pour la lever il faut caler la grille de frames de m0boy sur celle de Gens (frame de
+127 856 cycles ET frontière à la bonne phase) avec une comptabilité DMA/V-int qui reste
+fidèle ; essayé séparément, chaque moitié seule ne suffit pas.
