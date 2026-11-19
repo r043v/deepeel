@@ -1,3 +1,6 @@
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
 // deepeel.c: command line front-end.
 //
 //   deepeel explore rom.gb [options] [--json f] [--text f] [--cov f] [--gui]
@@ -1695,6 +1698,10 @@ static int auto_explore(int argc, char **argv, ArSystem sys) {
 }
 
 int deepeel_main(int argc, char **argv) {   // the library entry point; src/deepeel_cli.c is the executable's main
+#ifdef __GLIBC__
+    // machine states are 100+ KiB buffers allocated and freed at every conditional step: keep them in the heap (the default mmap threshold would map and zero fresh pages each time)
+    mallopt(M_MMAP_THRESHOLD, 1 << 20); mallopt(M_TRIM_THRESHOLD, 16 << 20); mallopt(M_ARENA_MAX, 4);
+#endif
     if (argc < 2) return usage(), 2;
     for (int i = 2; i < argc; i++)   // --mapwin [SCALE]: the kernel's live ROM map, for every platform (the legacy GB explorer keeps its own)
         if (!strcmp(argv[i], "--mapwin")) {

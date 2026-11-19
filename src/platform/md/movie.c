@@ -107,13 +107,19 @@ int dp_md_movie_load(const char *path, DpMdMovie *out, char *err, size_t errsz) 
     out->frames = (uint32_t)((size - 64) / 3);
     out->pads = malloc(out->frames);
     if (!out->pads) { free(data); snprintf(err, errsz, "out of memory"); return 0; }
+    int two = 0;   // pad 2 carries input: a two-player movie
+    for (uint32_t i = 0; i < out->frames; i++) if (data[64 + 3 * i + 1] != 0xFF) { two = 1; break; }
+    if (two) { out->pads2 = malloc(out->frames); if (!out->pads2) { free(data); dp_md_movie_free(out); snprintf(err, errsz, "out of memory"); return 0; } }
+    if (six) { out->ext = malloc(out->frames); if (!out->ext) { free(data); dp_md_movie_free(out); snprintf(err, errsz, "out of memory"); return 0; } }
     for (uint32_t i = 0; i < out->frames; i++) {
-        if (data[64 + 3 * i + 1] != 0xFF || (!six && data[64 + 3 * i + 2] != 0xFF)) {
+        if (!six && data[64 + 3 * i + 2] != 0xFF) {
             free(data); dp_md_movie_free(out); snprintf(err, errsz, "GMV uses unsupported additional input"); return 0;
         }
         out->pads[i] = (uint8_t)~data[64 + 3 * i];
+        if (two) out->pads2[i] = (uint8_t)~data[64 + 3 * i + 1];
+        if (six) out->ext[i] = (uint8_t)(~data[64 + 3 * i + 2] & 0x0F);
     }
     free(data);
     return 1;
 }
-void dp_md_movie_free(DpMdMovie *movie) { free(movie->pads); memset(movie, 0, sizeof *movie); }
+void dp_md_movie_free(DpMdMovie *movie) { free(movie->pads); free(movie->pads2); free(movie->ext); memset(movie, 0, sizeof *movie); }

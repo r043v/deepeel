@@ -758,3 +758,11 @@ Ristar avec B11 étendu (seuil 12), sans film, 150 s, 4 fils : code IDA couvert 
 Mesures finales de la session (B11, seuil 12, observations de l'outil) : Streets of Rage sans film, 600 s, 4 fils : code de référence manquant 1,3 % (exécuté 42,7 %, prouvé sans exécution 54 329 octets) ; plus grands trous restants `$1893A` (82 octets), `$1884A` (78), `$188F2` (64). Ristar : quatre adresses du dasm IDA restent non couvertes (`$397EC`, `$3BDBA`, `$3B134`, `$DA9A`) : elles suivent des données (pas de terminateur) et `$DA9A` est une entrée de table longue mêlée de cases partagées ; assouplir la forme (cases ROM quelconques) n'a rien gagné (99,6 %), essai retiré.
 
 Films Gens anciens (`TEST6` et avant, ex. Castle 250S) : sans octets de manettes dans l'en-tête, ils étaient refusés (« unsupported controllers ») et le watch tournait sans entrées. Un champ vide sur une version < `A` vaut deux manettes à 3 boutons. Castle 250S, réglages Gens : 2258 échantillons de V-int, WRAM identique à Gens-rr (0 échantillon à plus de 30 octets d'écart). Observation de l'outil.
+
+## 0.415.0 — films 2 joueurs, fin de film, vitesse et mémoire
+
+- Les films Gens à deux manettes (SoR 1064M) sont lus : le port 2 est branché (bit 31 du masque d'entrée) et décodé comme manette 3 boutons.
+- Fin de film : une session « attract » reste sur l'état final (avec détection de stagnation).
+- Vitesse : accès direct à la RAM de travail (`DpMachine.ram_view`) pour `cell_key`/`proj_key` (hachage par mots de 8 octets sur les pages vivantes), balayage des zéros par blocs de 32 octets, tas glibc sans `mmap` pour les états. `DP_MD_DSY_STRIDE=N` n'échantillonne qu'une V-int sur N.
+- Mémoire : la file d'états en RAM est bornée à 12 % de la RAM disponible (1,5 Gio au plus) ; le reste va au spool disque.
+- Les clés `cell_key`/`proj_key` ont changé de fonction de hachage : les anciens fichiers d'état ne sont pas réutilisables.

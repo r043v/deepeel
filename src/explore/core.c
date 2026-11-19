@@ -32,6 +32,8 @@ typedef struct {
 static inline int64_t ridx(DpMachine *m, uint32_t a) { return m->ram_index ? m->ram_index(m, a) : (int64_t)(a & 0xFFFF); }
 static inline uint32_t rsize(DpMachine *m) { return m->ram_size ? m->ram_size : 0x10000u; }
 static inline uint32_t raddr(DpMachine *m, uint32_t i) { return m->ram_addr ? m->ram_addr(m, i) : i; }
+// the byte of RAM index i: straight from the platform's contiguous view when it has one, else through fetch
+static inline uint8_t rbyte(DpMachine *m, const uint8_t *view, uint32_t i) { return view && i < m->ram_view_len ? view[i] : m->fetch(m, raddr(m, i)); }
 // A3: per-site tables (visits, capped, rng) keyed on the ROM index (bank-aware), folded when the ROM exceeds the table
 #define SITE_BITS 20u
 static inline uint32_t site_slot(DpMachine *m, uint32_t pc, uint32_t n, uint32_t *key) {
@@ -1296,10 +1298,18 @@ static void obs_write(void *u, uint32_t addr, uint8_t v) {
 // FNV-1a over the configured RAM range, mixed with the fork target
 static uint64_t cell_key(const DpCoreConfig *cfg, const uint8_t *ramread, DpMachine *m, uint32_t other) {
     uint64_t h = 1469598103934665603ull ^ other;
+    const uint8_t *view = m->ram_view ? m->ram_view(m) : NULL;
     if (!(cfg->cell_hi > cfg->cell_lo)) {   // semantic cell: the RAM bytes the code has been seen to read (at most 4096), no game knowledge
         unsigned n = 0;
-        for (uint32_t a = 0, rn = rsize(m); a < rn && n < 4096; a++)
-            if (ramread[a]) { h ^= m->fetch(m, raddr(m, a)) | ((uint64_t)n << 8); h *= 1099511628211ull; n++; }
+        // the read-set is sparse: skip 8 bytes at a time while they are all zero (this scan runs under the shared lock at every fork)
+        for (uint32_t a = 0, rn = rsize(m); a < rn && n < 4096; ) {
+            uint64_t w;
+            if (rn - a >= 32) { uint64_t q[4]; memcpy(q, ramread + a, 32); if (!(q[0] | q[1] | q[2] | q[3])) { a += 32; continue; } }
+            if (rn - a >= 8) { memcpy(&w, ramread + a, 8); if (!w) { a += 8; continue; } }
+            uint32_t e = rn - a >= 8 ? a + 8 : rn;
+            for (; a < e && n < 4096; a++)
+                if (ramread[a]) { h ^= rbyte(m, view, a) | ((uint64_t)n << 8); h *= 1099511628211ull; n++; }
+        }
         return h | 1;
     }
     for (uint32_t a = cfg->cell_lo; a <= cfg->cell_hi; a++) { h ^= m->fetch(m, a); h *= 1099511628211ull; }
@@ -1313,6 +1323,8 @@ static uint64_t cell_key(const DpCoreConfig *cfg, const uint8_t *ramread, DpMach
 static uint64_t proj_key(const DpCoreResult *r, DpMachine *m, uint32_t pc, uint32_t other) {
     uint64_t h = 1469598103934665603ull ^ m->ctx_reg_hash(m) ^ ((uint64_t)other << 24);
     int64_t ks[2] = { m->rom_index(m, pc), m->rom_index(m, other) };
+    const uint8_t *view = m->ram_view ? m->ram_view(m) : NULL;
+    const uint32_t rn = rsize(m);
     for (int s = 0; s < 2; s++) {
         int64_t k = ks[s];
         if (k < 0 || (size_t)k >= r->rom_size || !r->live) continue;
@@ -1320,7 +1332,11 @@ static uint64_t proj_key(const DpCoreResult *r, DpMachine *m, uint32_t pc, uint3
         for (uint32_t w = 0; w < r->live_w; w++)
             for (uint32_t bits = row[w]; bits; bits &= bits - 1) {
                 uint32_t pg = w * 32u + (uint32_t)__builtin_ctz(bits);
-                for (uint32_t a = pg << 8, e = a + 256; a < e && a < rsize(m); a++) { h ^= m->fetch(m, raddr(m, a)) | ((uint64_t)s << 8); h *= 1099511628211ull; }
+                uint32_t a = pg << 8, e = a + 256;
+                if (view && e <= m->ram_view_len && e <= rn) {   // contiguous page: 8 bytes per multiply instead of one
+                    for (; a < e; a += 8) { uint64_t w; memcpy(&w, view + a, 8); h = (h ^ w ^ ((uint64_t)s << 61)) * 0x9E3779B97F4A7C15ull; h ^= h >> 32; }
+                } else
+                for (; a < e && a < rn; a++) { h ^= rbyte(m, view, a) | ((uint64_t)s << 8); h *= 1099511628211ull; }
             }
         h ^= 0x9E3779B97F4A7C15ull;
     }
@@ -1897,6 +1913,17 @@ static void run_path(Worker *w, Pending *p) {
                 if (k >= (int64_t)cfg->tas_frames) {
                     m->set_input(m, 0); tas = 0;
                     tas_ended = 1; if (tas_shift == 0) fprintf(stderr, "deepeel: TAS movie played to its end (%llu frames)\n", (unsigned long long)cfg->tas_frames);
+                    // the end state of the unshifted movie keeps running as an attract session (no input; it stops on stagnation: --attract-stall)
+                    if (tas_shift == 0 && !cfg->no_sessions && m->frame) {
+                        uint8_t *ep = malloc(sh->sbytes);
+                        if (ep) {
+                            m->save(m, ep);
+                            pthread_mutex_lock(&sh->mu);
+                            queue_push(sh, m, (Pending){ ep, m->pc(m), 0, 0, SESSION_ATTRACT, 0, 0, DP_SRC_SESSION });
+                            pthread_mutex_unlock(&sh->mu);
+                            fprintf(stderr, "deepeel: the movie's end state continues as an attract session (stops on stagnation)\n");
+                        }
+                    }
                     // the unshifted movie is over: queue the shifted replays on top, so they run next
                     if (tas_shift == 0 && sh->tas_start) {
                         pthread_mutex_lock(&sh->mu);
@@ -3017,7 +3044,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     if (cfg_unb.queue_auto) {   // the queue holds whole machine snapshots: bound it by what the RAM can carry, the rest spills to the disk spool
         uint64_t budget = dp_mem_budget();
         if (budget) {
-            uint64_t per = (uint64_t)sh.sbytes + 128u, cap = budget * 4u / 10u / per;
+            uint64_t per = (uint64_t)sh.sbytes + 128u, cap = (budget / 8u < (3ull << 29) ? budget / 8u : (3ull << 29)) / per;   // 12 % of the available RAM, at most 1.5 GiB
             if (cap < 256) cap = 256;
             if (!cfg_unb.queue_max || cap < cfg_unb.queue_max) {
                 fprintf(stderr, "deepeel: queue bounded to %llu states in RAM (%u KiB each, %llu MiB available); the rest goes to the spool\n",

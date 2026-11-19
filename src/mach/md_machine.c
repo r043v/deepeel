@@ -27,6 +27,7 @@ static int64_t md_ram_index(DpMachine *m, uint32_t a) {
 }
 static uint32_t md_ram_addr(DpMachine *m, uint32_t i) { (void)m; return i < 0x10000u ? 0xFF0000u + i : 0xA00000u + (i - 0x10000u); }
 
+static const uint8_t *md_ram_view(DpMachine *m) { return dp_mdmach_ram(((MdMachWrap *)m->impl)->m); }
 static uint32_t md_state_bytes(DpMachine *m) { (void)m; return (uint32_t)dp_mdmach_state_size() + 8; }
 static void md_save(DpMachine *m, uint8_t *buf) { dp_mdmach_save(((MdMachWrap *)m->impl)->m, buf); memcpy(buf + dp_mdmach_state_size(), &((MdMachWrap *)m->impl)->frames, 8); }
 static void md_load(DpMachine *m, const uint8_t *buf) { dp_mdmach_load(((MdMachWrap *)m->impl)->m, buf); memcpy(&((MdMachWrap *)m->impl)->frames, buf + dp_mdmach_state_size(), 8); }
@@ -143,6 +144,14 @@ static void md_set_input(DpMachine *m, uint32_t mask) {
     if (mask & DP_IN_C) pad |= 64;
     if (mask & DP_IN_START) pad |= 128;
     dp_mdmach_set_pad(((MdMachWrap *)m->impl)->m, pad);
+    {   // port 2: bit 31 = a second pad is plugged (two-player movie), bits 16-19 directions, 20 A, 21 B, 22 C, 23 Start
+        uint32_t q = mask >> DP_IN_PORT2; uint8_t p2 = (uint8_t)(q & 0x0F);
+        if (q & DP_IN_B1) p2 |= 16;
+        if (q & DP_IN_B2) p2 |= 32;
+        if (q & DP_IN_C) p2 |= 64;
+        if (q & DP_IN_START) p2 |= 128;
+        dp_mdmach_set_pad2(((MdMachWrap *)m->impl)->m, (mask >> 31) & 1u, p2);
+    }
     uint8_t ext = 0;   // X/Y/Z/Mode plug the six-button pad in (bit 7); 0 keeps the three-button pad
     if (mask & DP_IN_Z) ext |= 1;
     if (mask & DP_IN_Y) ext |= 2;
@@ -265,6 +274,7 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->name = "md";
     m->work_ram_base = 0xFF0000u; m->work_ram_len = 0x10000u;
     m->ram_index = md_ram_index; m->ram_addr = md_ram_addr; m->ram_size = 0x20000u;
+    m->ram_view = md_ram_view; m->ram_view_len = 0x10000u;
     m->input_bits = 0x17F; m->input_bits_ext = DP_IN_X | DP_IN_Y | DP_IN_Z | DP_IN_MODE;   // d-pad, A B C, Start; the six-button keys
     m->impl = w;             // the 68000 DpIsa wrapper is not extracted yet
     m->state_bytes = md_state_bytes;

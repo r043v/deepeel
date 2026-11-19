@@ -115,11 +115,14 @@ static void vint_sample(void *u, const struct MdFull *m) {
     static int64_t last_frame = -1;
     if (!vint_dsy || m != vint_owner) return;
     if ((int64_t)m->frames <= last_frame) return;   // forks restored on this machine replay earlier frames: the primary replay owns each frame
-    last_frame = m->frames;   // only the first machine (the primary replay), not shifted replays or forks
+    last_frame = m->frames;
+    { static unsigned stride = ~0u; if (stride == ~0u) { const char *e = getenv("DP_MD_DSY_STRIDE"); stride = e ? (unsigned)atoi(e) : 0; }
+      if (stride > 1 && vint_n % stride) { vint_n++; return; } }   // DP_MD_DSY_STRIDE=N: write every N-th V-int only (long movies)
+    // only the first machine (the primary replay), not shifted replays or forks
     if (getenv("DP_MD_VINT_LOG")) fprintf(stderr, "V n=%u frames=%u line=%u pc=%06x f62a=%02x\n", vint_n, (unsigned)m->frames, (unsigned)m->line, (unsigned)m->pc, m->ram[0xf62a]);
     uint16_t nb = 2; uint8_t nl = 4; uint32_t len = 0x10000u, rl = 68, regs[17];
     for (int i = 0; i < 8; i++) { regs[i] = m->d[i]; regs[8 + i] = m->a[i]; }
-    regs[16] = m->pc;
+    { uint32_t sp = m->a[7]; regs[16] = ((uint32_t)m->ram[(sp + 2) & 0xffff] << 24) | ((uint32_t)m->ram[(sp + 3) & 0xffff] << 16) | ((uint32_t)m->ram[(sp + 4) & 0xffff] << 8) | m->ram[(sp + 5) & 0xffff]; }   // the interrupted PC (pushed by the interrupt), what Gens reports at the vector
     fwrite(&vint_n, 4, 1, vint_dsy); fwrite(&nb, 2, 1, vint_dsy); fwrite(&nl, 1, 1, vint_dsy); fwrite("wram", 1, 4, vint_dsy);
     fwrite(&len, 4, 1, vint_dsy); fwrite(m->ram, 1, len, vint_dsy);
     fwrite(&nl, 1, 1, vint_dsy); fwrite("regs", 1, 4, vint_dsy); fwrite(&rl, 4, 1, vint_dsy); fwrite(regs, 4, 17, vint_dsy); fflush(vint_dsy);
@@ -249,6 +252,8 @@ uint16_t dp_mdmach_sr(const DpMdMach *d) { return d->m->sr; }
 uint32_t dp_mdmach_dn(const DpMdMach *d, unsigned n) { return d->m->d[n & 7]; }
 uint32_t dp_mdmach_an(const DpMdMach *d, unsigned n) { return d->m->a[n & 7]; }
 void dp_mdmach_set_pad(DpMdMach *d, uint8_t pad) { d->m->pad = pad; }
+// port 2 (second three-button pad): on = plugged in; off keeps every read at $7F
+void dp_mdmach_set_pad2(DpMdMach *d, int on, uint8_t pad) { d->m->pad2_on = on != 0; d->m->pad2 = pad; }
 // C12: six-button pad: ext bit 7 plugged, bits 0-3 Z,Y,X,Mode pressed (0 keeps the three-button pad)
 void dp_mdmach_set_pad_ext(DpMdMach *d, uint8_t ext) { if (d->m->pad_ext != ext) { d->m->pad_ext = ext; d->m->pad_cnt = 0; } }
 
@@ -293,7 +298,7 @@ uint64_t dp_mdmach_state_hash(const DpMdMach *d) {
     h = fnv_bytes(h, m->vsram, sizeof m->vsram); h = fnv_bytes(h, m->cram, sizeof m->cram);
     h = fnv_bytes(h, m->vdp_reg, sizeof m->vdp_reg);
     h = fnv_bytes(h, &m->vdp_addr, sizeof m->vdp_addr); h = fnv_bytes(h, &m->vdp_first, sizeof m->vdp_first);
-    uint8_t flags[] = { m->vdp_code, m->vdp_pending, m->dma_fill, m->pad, m->pad_th, m->pad_control, m->pad_ext, m->pad_cnt,
+    uint8_t flags[] = { m->vdp_code, m->vdp_pending, m->dma_fill, m->pad, m->pad_th, m->pad_control, m->pad_ext, m->pad_cnt, m->pad2, m->pad2_th, m->pad2_on,
                         m->z80_bus, m->z80_reset, m->sram_enable, m->sram_protect, m->stopped, m->fault,
                         m->irq_pending, m->hint_pending, m->hint_counter };
     h = fnv_bytes(h, flags, sizeof flags);

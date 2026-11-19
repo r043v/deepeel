@@ -48,7 +48,11 @@ int dp_movie_load(const char *plat, const char *path, DpMovie *out, char *err, s
         dp_pce_tas_free(&t);
     } else if (!strcmp(plat, "md")) {
         DpMdMovie t; memset(&t, 0, sizeof t);
-        if (dp_md_movie_load(path, &t, err, errsz)) ok = convert(t.pads, t.frames, dp_movie_md_pad, out);
+        if (dp_md_movie_load(path, &t, err, errsz)) {
+            ok = convert(t.pads, t.frames, dp_movie_md_pad, out);
+            // two-player movie: pad 2 rides in bits 16-23 of the mask, bit 31 = second pad plugged in
+            if (ok && t.pads2) for (uint32_t f = 0; f < t.frames; f++) out->masks[f] |= (dp_movie_md_pad(t.pads2[f]) << DP_IN_PORT2) | 0x80000000u;
+        }
         dp_md_movie_free(&t);
     } else if (err && errsz) { strncpy(err, "unknown platform", errsz - 1); err[errsz - 1] = 0; }
     return ok;

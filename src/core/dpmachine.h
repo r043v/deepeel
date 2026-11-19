@@ -282,6 +282,10 @@ struct DpMachine {
     // Absent: the low 16 address bits (every 16-bit CPU).  ram_addr is the inverse, ram_size the index count.
     int64_t (*ram_index)(struct DpMachine *, uint32_t addr);
     uint32_t (*ram_addr)(struct DpMachine *, uint32_t idx);
+    // Optional fast path: pointer to the first ram_view_len RAM indices as contiguous bytes (same values as fetch(ram_addr(i))), so the
+    // exploration core hashes RAM without one indirect call per byte.
+    const uint8_t *(*ram_view)(struct DpMachine *);
+    uint32_t ram_view_len;
     uint32_t ram_size;
     // pad probes: the buttons the pad has (DP_IN_* of port 1) and the core's --pad-full level (0: the platform catalogue,
     // 1: every subset of input_bits, 2: also the extended buttons in input_bits_ext); set by the core before each probe
