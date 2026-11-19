@@ -378,7 +378,7 @@ static int reaches_jump(struct DpMachine *m, uint32_t at, unsigned dn, int *via_
 // The base is PC-relative or a register slot (+ displacement) read from the concrete CPU / a walk's proven constants.
 static int isa_code_table(struct DpMachine *m, uint32_t pc, const uint8_t *b, DpCodeTable *out, uint32_t *load_pc) {
     unsigned op = (unsigned)(b[0] << 8 | b[1]);
-    *load_pc = 0; out->base_reg = -1; out->disp = 0; out->slots = 0; out->hi = 0;
+    *load_pc = 0; out->base_reg = -1; out->disp = 0; out->slots = 0; out->hi = 0; out->tdelta = 0;
     int jump = op == 0x4EFB || op == 0x4EBB || (op & 0xFFF8u) == 0x4EF0u || (op & 0xFFF8u) == 0x4EB0u;
     int pcrel, size = 0, adda = 0; unsigned dn = 8;
     if (jump) { pcrel = (op & 0xFFF0u) != 0x4EB0u && (op & 0xFFF0u) != 0x4EF0u; pcrel = op == 0x4EFB || op == 0x4EBB; size = 2; }
@@ -423,8 +423,9 @@ static int isa_code_table(struct DpMachine *m, uint32_t pc, const uint8_t *b, Dp
         if (via_idx) return 0;                      // a long read re-indexed: not a table of code
         out->stride = 4; out->rel = 0;              // absolute pointers (entry 0 may precede the table: ids start at 1)
     } else if (via_idx) {                           // move.w T,Dn ... jmp T(pc|An,Xn): offsets from the same base (displacement must match)
-        if (d8j != d8) return 0;
-        out->stride = 2; out->rel = 1;
+        int dl = d8j - d8;   // the jump's base may sit a few bytes after the read's (move.w 4(pc,d0.w),d0 ; jmp 2(pc,d0.w)): targets measured from it
+        if (dl != 0 && !(pcrel && dl >= -8 && dl <= 8 && !(dl & 1))) return 0;
+        out->stride = 2; out->rel = 1; out->tdelta = (int8_t)dl;
     } else {
         // the word is added to a register (ext.l ; adda.l) or loaded as an absolute address: told apart by the glue
         int rebase = 0;

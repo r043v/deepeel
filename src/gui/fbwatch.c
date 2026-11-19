@@ -136,7 +136,9 @@ int dp_fb_read(uint32_t *out, unsigned cap, int *w, int *h, uint64_t *frame) {
     return ok;
 }
 
+static void watch_ring_flush(void);
 int dp_fb_dump_ppm(const char *path) {
+    watch_ring_flush();
     static uint32_t tmp[DP_FB_MAX_W * DP_FB_MAX_H];
     int w, h;
     uint64_t f;
@@ -151,13 +153,87 @@ int dp_fb_dump_ppm(const char *path) {
     return fclose(o) ? 1 : 0;
 }
 
+/* Movie replay smoothing: the explorer does heavy work between some frames (closure walks, fork snapshots), so the replay
+ * advances in bursts.  The frames go through a ring read by a presenter thread at a steady rate (DP_WATCH_FPS, default 60),
+ * after a prefill of about a second and a half; the producer is held back when the ring is full.  DP_WATCH_SMOOTH=0 disables. */
+#define RING_CAP 360
+#define RING_PRE 90
+typedef struct { uint32_t *px; int w, h; uint64_t frame; uint32_t mf, total; int done; } RingSlot;
+static RingSlot ring[RING_CAP];
+static unsigned ring_head, ring_n;
+static pthread_mutex_t ring_mu = PTHREAD_MUTEX_INITIALIZER;
+static double ring_last_push;
+
+static void *presenter(void *arg) {
+    (void)arg;
+    const char *e = getenv("DP_WATCH_FPS"); double fps = e && *e ? atof(e) : 60.0;   /* DP_WATCH_FPS=0: no cap, the window shows the newest image */
+    double next = 0; int primed = 0;
+    while (!dp_stop) {
+        pthread_mutex_lock(&ring_mu);
+        unsigned n = ring_n; double lp = ring_last_push;
+        pthread_mutex_unlock(&ring_mu);
+        double now = mono_now();
+        if (!primed) { if (n >= RING_PRE || (n && now - lp > 0.5)) { primed = 1; next = now; } else { usleep(2000); continue; } }
+        if (!n) { if (now - lp > 0.5) primed = 0; usleep(1000); next = mono_now(); continue; }
+        RingSlot sl;
+        pthread_mutex_lock(&ring_mu);
+        sl = ring[ring_head]; ring_head = (ring_head + 1) % RING_CAP; ring_n--;
+        pthread_mutex_unlock(&ring_mu);
+        dp_fbwatch_progress(sl.mf, sl.total, sl.done);
+        dp_fb_publish(sl.px, sl.w, sl.h, sl.frame);
+        free(sl.px);
+        next += 1.0 / fps;
+        for (;;) { double left = next - mono_now(); if (left <= 0 || dp_stop) break; usleep(left > 0.002 ? (useconds_t)((left - 0.001) * 1e6) : 100); }
+        if (mono_now() - next > 0.25) next = mono_now();
+    }
+    return NULL;
+}
+
+/* the queued frames of a finished replay: the last one is the picture dumped / left in the window */
+static void watch_ring_flush(void) {
+    pthread_mutex_lock(&ring_mu);
+    while (ring_n) {
+        RingSlot sl = ring[ring_head]; ring_head = (ring_head + 1) % RING_CAP; ring_n--;
+        if (!ring_n) { dp_fbwatch_progress(sl.mf, sl.total, sl.done); dp_fb_publish(sl.px, sl.w, sl.h, sl.frame); }
+        free(sl.px);
+    }
+    pthread_mutex_unlock(&ring_mu);
+}
+
+/* 1 when the frame was not queued (smoothing off or allocation failure): the caller publishes it directly */
+static int watch_ring_push(const uint32_t *px, int w, int h, uint64_t frame, uint32_t mf, uint32_t total, int done) {
+    static int mode = -1; static pthread_t th;
+    if (mode < 0) {
+        const char *e = getenv("DP_WATCH_SMOOTH");
+        const char *f = getenv("DP_WATCH_FPS");
+        mode = !(e && *e == '0') && !(f && *f && atof(f) <= 0);   /* DP_WATCH_FPS=0: uncapped, frames go straight to the window */
+        if (mode && w > 0 && h > 0 && pthread_create(&th, NULL, presenter, NULL) == 0) pthread_detach(th); else mode = 0;
+    }
+    if (!mode || w <= 0 || h <= 0 || w > DP_FB_MAX_W || h > DP_FB_MAX_H) return 1;
+    uint32_t *cp = malloc((size_t)w * h * sizeof *cp);
+    if (!cp) return 1;
+    memcpy(cp, px, (size_t)w * h * sizeof *cp);
+    for (;;) {
+        pthread_mutex_lock(&ring_mu);
+        if (ring_n < RING_CAP) {
+            RingSlot *sl = &ring[(ring_head + ring_n) % RING_CAP];
+            sl->px = cp; sl->w = w; sl->h = h; sl->frame = frame; sl->mf = mf; sl->total = total; sl->done = done;
+            ring_n++; ring_last_push = mono_now();
+            pthread_mutex_unlock(&ring_mu);
+            return 0;
+        }
+        pthread_mutex_unlock(&ring_mu);
+        if (dp_stop) { free(cp); return 0; }
+        usleep(1000);
+    }
+}
+
 /* the one per-frame entry of every platform's --watch: progress caption, stagnation warning (a movie keeps the
  * picture moving; the same image for 900 frames means the replay probably desynchronised), then the publish.
  * `movie_frame`/`total`: the replayed movie's position (total 0: no movie in progress). */
 void dp_watch_frame(const uint32_t *px, int w, int h, uint64_t frame, uint32_t movie_frame, uint32_t total, int done) {
     static uint64_t hsh_last, since; static int warned;
     if (total) {
-        dp_fbwatch_progress(movie_frame, total, done);
         uint64_t hsh = 1469598103934665603ull;
         for (size_t i = 0, n = (size_t)w * (size_t)h; i < n; i++) hsh = (hsh ^ px[i]) * 1099511628211ull;
         if (hsh != hsh_last) { hsh_last = hsh; since = movie_frame; warned = 0; }
@@ -166,5 +242,6 @@ void dp_watch_frame(const uint32_t *px, int w, int h, uint64_t frame, uint32_t m
             fprintf(stderr, "tas: STAGNATION - same image since movie frame %llu, probable desync with the movie (frame %u/%u)\n", (unsigned long long)since, movie_frame, total);
         }
     }
+    if (total && !watch_ring_push(px, w, h, frame, movie_frame, total, done)) return;
     dp_fb_publish(px, w, h, frame);
 }

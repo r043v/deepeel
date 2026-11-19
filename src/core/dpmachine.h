@@ -95,7 +95,7 @@ typedef struct DpMachine DpMachine;   // the machine hooks take and return it (d
 // A code table: `stride` bytes per entry, `rel` = signed offsets from the base (else absolute pointers).  base_reg >= 0:
 // the base is the value of that register slot plus `disp`, read from the concrete CPU (or a walk's proven constants) -- the
 // dispatch routine shared by several callers, each passing its own table in a register (the table is the caller's `lea`).
-typedef struct DpCodeTable { uint32_t base; uint8_t stride, rel; int8_t base_reg; int32_t disp; uint8_t slots; uint32_t hi; } DpCodeTable;   // hi: bits OR-ed into a 16-bit absolute entry (the dispatcher seeded the register's high word: moveq #1,Dn ; swap Dn)
+typedef struct DpCodeTable { uint32_t base; uint8_t stride, rel; int8_t base_reg; int32_t disp; uint8_t slots; uint32_t hi; int8_t tdelta; } DpCodeTable;   // hi: bits OR-ed into a 16-bit absolute entry (the dispatcher seeded the register's high word: moveq #1,Dn ; swap Dn)
 //   // slots: the entries are instructions (bra.w/bra.s/jmp) of `stride` bytes, each slot itself a root
 
 typedef struct DpIsa {

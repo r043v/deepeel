@@ -529,7 +529,7 @@ static unsigned code_table_targets(DpMachine *m, const DpIsa *isa, const DpCodeT
         if (t->rel && ea >= first) break;
         uint32_t v = 0; for (unsigned i = 0; i < w; i++) v = (v << 8) | m->fetch(m, ea + i);
         uint32_t tg;
-        if (t->rel) tg = (t->base + (uint32_t)(int32_t)(int16_t)v) & 0xFFFFFFu;
+        if (t->rel) tg = (t->base + (uint32_t)(int32_t)t->tdelta + (uint32_t)(int32_t)(int16_t)v) & 0xFFFFFFu;
         else { if (v >> 24) { if (e == 0) continue; break; } tg = v | (w == 2 ? t->hi : 0); }
         int bad = (tg & 1u) || m->rom_index(m, tg) < 0;
         if (!bad) {
@@ -537,7 +537,7 @@ static unsigned code_table_targets(DpMachine *m, const DpIsa *isa, const DpCodeT
             DpFlowInfo f; memset(&f, 0, sizeof f);
             bad = !isa->flow(b, tg, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL;
         }
-        if (bad) { if (!t->rel && e == 0) continue; break; }   // absolute tables: slot 0 may be the code before the table
+        if (bad) { if ((!t->rel || t->tdelta) && e == 0) continue; break; }   // absolute tables: slot 0 may be the code before the table
         if (t->rel && tg > ea && tg < first) first = tg;
         out[cnt++] = tg;
     }
@@ -759,7 +759,7 @@ no_stackret:;
             isa->reg_effect(b, pc, &regs, &nxt, &rom);
             regs = nxt;
         }
-        if (trust && v->m && isa->code_table && (f.kind == DP_FLOW_INDIRECT || f.kind == DP_FLOW_SEQ)) {   // a PC-relative table met by the walk: every entry is a root
+        if (v->m && isa->code_table && (f.kind == DP_FLOW_INDIRECT || f.kind == DP_FLOW_SEQ)) {   // a PC-relative table met by the walk: every entry is a root
             DpCodeTable ct; uint32_t lp = 0;
             if (isa->code_table(v->m, pc, b, &ct, &lp) && code_table_resolve(v->m, isa, &ct, &regs_pre)) {
                 uint32_t tg[DP_CODE_TABLE_MAX];
@@ -1808,7 +1808,9 @@ static void run_path(Worker *w, Pending *p) {
                     if (!winit) { winit = 1; const char *wn = getenv("DEEPEEL_TAS_WRAM"); if (wn) wf = fopen(wn, "wb"); }
                     if (wf) { uint8_t wb[0x2000]; for (unsigned i = 0; i < 0x2000; i++) wb[i] = m->fetch(m, 0xC000 + i); fwrite(wb, 1, sizeof wb, wf); fflush(wf); }
                 }
-                int64_t k = (int64_t)f - tas_shift;
+                static int env_shift = -99;   // DP_TAS_PAD_SHIFT=k: the unshifted replay sees the movie's input k frames later (Gens-rr films: 1)
+                if (env_shift == -99) { const char *e = getenv("DP_TAS_PAD_SHIFT"); env_shift = e && *e ? atoi(e) : 0; }
+                int64_t k = (int64_t)f - tas_shift - (tas_shift == 0 ? env_shift : 0);
                 // A22/B3: live movie states feed the exploration. A checkpoint every tas_ckpt_every frames (bounded) and the
                 // end state each continue as a free natural path, so branches reachable only from a late state are forked
                 if (tas_shift == 0 && !cfg->no_tas_ckpt && cfg->tas_ckpt_every && f > 0 &&
