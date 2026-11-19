@@ -51,6 +51,7 @@ static void dsy_line_hook(void *u, const MdFull *m) {
         if (vf) { uint32_t len = 0x10000, rl = 68, regs[17]; uint16_t nb = 2; uint8_t n4 = 4;
             for (int i = 0; i < 8; i++) { regs[i] = m->d[i]; regs[8 + i] = m->a[i]; } regs[16] = m->pc;
             fwrite(&vn, 4, 1, vf); fwrite(&nb, 2, 1, vf);
+            { static FILE *kf; if (!kf) { char kp[512]; snprintf(kp, sizeof kp, "%s.k", getenv("DP_MD_DUT_DSY")); kf = fopen(kp, "w"); } if (kf) { fprintf(kf, "%u\n", (unsigned)m->frames + 1u); fflush(kf); } }   /* the emulated frame (1-based, like Gens' loop counter) of each sample */
             fwrite(&n4, 1, 1, vf); fwrite("wram", 1, 4, vf); fwrite(&len, 4, 1, vf); fwrite(m->ram, 1, 0x10000, vf);
             fwrite(&n4, 1, 1, vf); fwrite("regs", 1, 4, vf); fwrite(&rl, 4, 1, vf); fwrite(regs, 4, 17, vf); fflush(vf); ++vn; }
         return;
