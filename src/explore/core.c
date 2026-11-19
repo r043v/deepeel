@@ -63,7 +63,7 @@ void dp_core_config_default(DpCoreConfig *c) {
     c->max_path_steps = 100000;
     c->fork_site_cap = 4;      // DP_DEFAULT_BRANCH_FORK_CAP
     c->visits_per_pc = 64;
-    c->min_secs = 0; c->max_secs = 0; c->stall_secs = 0; c->attract_frames = 6000; c->attract_stall = 1200; c->play_frames = 0; c->play_sessions = 1;   // long sessions run wherever the machine has a frame counter (+ set_input for play)
+    c->min_secs = 0; c->max_secs = 0; c->stall_secs = 0; c->attract_frames = 216000; c->attract_min = 36000; c->attract_stall = 3600; c->play_frames = 0; c->play_sessions = 1;   // long sessions run wherever the machine has a frame counter (+ set_input for play)
     c->queue_max = 65536; c->queue_auto = 1;
     c->probe_ctx_cap = 8;
     c->bank_fork_cap = 16;
@@ -144,6 +144,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--min-time") && i + 1 < argc) { c->min_secs = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--max-time") && i + 1 < argc) { c->max_secs = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--stall-time") && i + 1 < argc) { c->stall_secs = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
+    if (!strcmp(a, "--attract-min") && i + 1 < argc) { c->attract_min = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--attract-stall") && i + 1 < argc) { c->attract_stall = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--play-frames") && i + 1 < argc) { c->play_frames = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--play-sessions") && i + 1 < argc) { c->play_sessions = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
@@ -1904,7 +1905,7 @@ static void run_path(Worker *w, Pending *p) {
                 if (attract && cfg->attract_stall) {   // stop after attract_stall frames without a newly covered ROM byte
                     uint64_t cov = sess_cov;
                     if (cov != sess_last_cov) { sess_last_cov = cov; sess_prog_f = f; }
-                    else if (f - sess_prog_f >= cfg->attract_stall) { loc->session_frames += f - sess_f0; loc->session_stalls++; break; }
+                    else if (f - sess_f0 >= cfg->attract_min && f - sess_prog_f >= cfg->attract_stall) { loc->session_frames += f - sess_f0; loc->session_stalls++; break; }
                 }
                 if ((attract || play) && sess_limit && f - sess_f0 >= sess_limit) {
                     loc->session_frames += f - sess_f0;

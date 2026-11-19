@@ -106,6 +106,7 @@ typedef struct DpCoreConfig {
     int no_sessions;
     uint32_t attract_frames;    /* generic attract session: no input for this many frames from power-on (0: off; needs DpMachine.frame) */
     uint32_t min_secs, max_secs, stall_secs;   /* wall-clock limits, 0 = off: min before a stagnation stop; hard max; seconds without a new ROM byte */
+    uint32_t attract_min;       /* attract runs at least this many frames before a stagnation stop (default 36000: 10 min of game time); attract_frames is the hard max */
     uint32_t attract_stall;     /* attract stops after this many frames without a newly covered ROM byte (0: never) */
     uint32_t play_frames;       /* generic play session: nine pad epochs over this many frames (0: off; needs frame + set_input) */
     uint32_t play_sessions;     /* number of play sessions (each starts at another catalog pad; default 1) */

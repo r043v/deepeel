@@ -6412,3 +6412,9 @@ une table de code que si l'instruction suivante appelle le registre chargé.
 jmp (a1)`), adresses 32 bits (`move.l T(pc,d0.w),d0 ; movea.l d0,a0 ; jsr (a0)`, la boucle de jeu), décalages relatifs
 à un registre (`adda.w (a1,d0.w),a1 ; jmp (a1)`, `ext.l ; adda.l d0,a1`). Un `movea.l` non suivi d'un appel reste une
 table de données. Test : `m68k_code_table`.
+
+## 0.405.0 — attract : 10 minutes de jeu minimum, puis stagnation
+
+Le défaut précédent (6 000 images) ne faisait que 100 s de jeu à 60 Hz (la doc disait à tort 10 min). La session
+attract tient désormais au moins `--attract-min` images (36 000 = 10 min de jeu, défaut) ; ensuite elle s'arrête quand
+`--attract-stall` images (3 600) passent sans nouvel octet ROM couvert, ou au plafond `--attract-frames` (216 000).
