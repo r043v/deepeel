@@ -548,3 +548,19 @@ Boucle `nop` + `dbf d0` (14 cycles par tour), `d0` décompté d'une frame à l'a
 La longueur de frame seule n'explique donc pas l'écart : environ 112 cycles par frame
 sont consommés chez Gens par autre chose que le balayage (coût d'entrée/sortie de la
 V-int, arbitrage de bus Z80 ou DMA) pendant cette boucle. À mesurer par une trace PC/cycles.
+
+### Lignes de Gens avec l'arrondi exact (essai retiré)
+
+Essai : horloge exacte conservée (arrondi du DMA, phase), mais lignes uniformes de
+3416 horloges maîtres (488 cycles, 127856 par frame, la frame exacte de Gens dans la
+boucle `$71FC4`). Même film 1843S, 3000 frames, meilleur décalage −8..+8 par frame :
+
+- frames 100, 300, 500 : identiques à la base ;
+- à partir de ≈ 1000-1500 la partie diverge franchement (≈ 1000 à 2800 octets par
+  frame, décalage jusqu'à −8) alors que la base reste à 1-30 octets, décalage 0/−1.
+
+L'horloge exacte du cœur de référence reste donc la meilleure approximation moyenne,
+bien que la boucle d'attente de la frame 270-291 montre 112 cycles de moins par frame
+chez Gens. Cet écart local n'est pas une longueur de frame constante : il faut la
+trace PC/cycles de Gens-rr pour savoir où ces cycles sont consommés. Essai non
+conservé dans m0boy.
