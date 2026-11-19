@@ -689,3 +689,7 @@ Résultat observé : Castle of Illusion 233S, 2579 échantillons sur 2580 identi
 sur tout le film ; seuls les échantillons 168 et 386 diffèrent (tampons de
 sprites/hscroll, 26 et 183 octets, transitoires : l'échantillon suivant
 concorde). Ce sont des observations de l'outil, pas des mesures de matériel.
+
+`DP_MD_GENS_MODE=1 sh tools/md_compare_reference.sh ROM film.gmv N` positionne
+d'un coup tous ces réglages (DMA, horloge, power-on, IRQ immédiate, décalage de
+manette, échantillonnage à la V-int, horloge de référence Gens).

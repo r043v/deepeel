@@ -5,6 +5,10 @@ if [ "$#" -ne 3 ]; then
     echo "usage: $0 ROM movie.gmv-or-zip frames" >&2
     exit 2
 fi
+# DP_MD_GENS_MODE=1: every knob that makes m0boy replay like Gens-rr v11c (see docs/MD.fr.md, "mode Gens").
+if [ "${DP_MD_GENS_MODE:-0}" = 1 ]; then
+    export DP_MD_GENS_DMA=1 DP_MD_CLOWN_CLOCK=3416 DP_MD_POWERON=gens MD_IRQ_IMMEDIATE=1 DP_MD_DUT_PAD_SHIFT=1 DP_MD_DSY_VINT=1 DP_MD_REF_GENS_CLOCK=1
+fi
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 reference=${CLOWN_MD_DIR:-"$root/../clownmdemu-core"}
 runtime=${M0BOY_DIR:-"$root/../m0boy"}
