@@ -732,3 +732,15 @@ ligne 0). Observation de l'outil, Ristar 1506S, réglages Gens : 3398 échantill
 d'octets dès le 6.
 
 Même correctif, Castle of Illusion film 233S, réglages Gens (`DP_TAS_PAD_SHIFT=1`) : 2578 échantillons de V-int du noyau, aucun écart de plus de 30 octets de WRAM (hors pile) face à Gens-rr. Observation de l'outil.
+
+## Technique B11 : tables d'adresses de routines reconnues par leur forme (0.414.0)
+
+Streets of Rage range ses objets dans une table de mots `$1D40-$1E0E` (`$2140 $2140 … $291E $291E …`) dont le lecteur n'est
+jamais exécuté par l'exploration sans film : aucune lecture de la table n'est observée, donc aucune cible suivie (`$294E`,
+`$284A`, `$291E`, premier trou de la comparaison au dasm). Au démarrage, le noyau cherche dans la ROM (68000, adresses < 4 Mio)
+les suites d'au moins 6 entrées alignées de 16 ou 32 bits dont chaque valeur pointe une adresse ROM paire précédée d'un
+terminateur (`rts`, `rte`, `rtr`, `bra`, `jmp`) ; les zéros sont tolérés dans la suite, un mot isolé aussi en 16 bits. Chaque
+entrée est marchée comme entrée non fiable (code provisoire, jamais « exécuté » ; compteur « RAM-parked code pointers »
+partagé). Observation de l'outil, SoR sans film, 150 s, 4 fils : code de référence manquant 12,1 % → 9,0 % (prouvé sans
+exécution 77 587 → 80 601 octets). Ristar, 150 s : statique/spéculatif 55,6 → 60,7 % du code IDA (les parts exécutées
+diffèrent d'un run à l'autre). Limite : une table dont les cibles ne suivent pas un terminateur n'est pas vue.

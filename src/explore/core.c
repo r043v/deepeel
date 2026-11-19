@@ -3072,6 +3072,38 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     if (started < nw && ok) out->workers_short = nw - started;
     ok = ok && started > 0;
 
+    // B11: ROM tables of routine addresses recognised by shape (68000 family): a run of >= 6 aligned 16- or 32-bit entries
+    // that all land on a ROM address right after a terminator (rts/rte/rtr/bra/jmp) is a table of code pointers, even when
+    // the game's reader is never run.  Each entry is walked as an untrusted entry (provisional code, never "executed").
+    if (ok && !cfg->no_closure && m->isa->code_ptr_store && ws[0].regwalk) {
+        Worker *w0 = &ws[0]; DpMachine *wm0 = w0->m; uint32_t lim = rom_size < 0x400000u ? (uint32_t)rom_size : 0x400000u;
+        for (unsigned wide = 0; wide < 2; wide++) {
+            unsigned stp = wide ? 4 : 2; uint32_t run_start = 0, good = 0, bad = 0;
+            for (uint32_t a = 0x200; a + stp <= lim + stp; a += 2) {
+                uint32_t v = 0; int valid = 0, zero = 0;
+                if (a + stp <= lim) {
+                    v = wide ? ((uint32_t)wm0->fetch(wm0, a) << 24 | (uint32_t)wm0->fetch(wm0, a + 1) << 16 | (uint32_t)wm0->fetch(wm0, a + 2) << 8 | wm0->fetch(wm0, a + 3))
+                             : ((uint32_t)wm0->fetch(wm0, a) << 8 | wm0->fetch(wm0, a + 1));
+                    zero = v == 0;
+                    if (!zero && !(v & 1u) && v >= 0x200 && v < lim && wm0->rom_index(wm0, v) >= 0) {
+                        unsigned pw = (unsigned)(wm0->fetch(wm0, v - 2) << 8 | wm0->fetch(wm0, v - 1));
+                        valid = pw == 0x4E75 || pw == 0x4E73 || pw == 0x4E77 || (pw & 0xFF00u) == 0x6000u || pw == 0x4EF9 || pw == 0x4EFA || pw == 0x4EF8 || (pw & 0xFFF8u) == 0x4ED0u;
+                    }
+                }
+                if (valid || (zero && run_start)) { if (!run_start) run_start = a; if (valid) good++; bad = 0; a += stp - 2; continue; }
+                if (run_start && bad < 1 && a + stp <= lim && !zero && wide == 0) { bad++; continue; }   // one stray word tolerated in a 16-bit run
+                if (run_start && good >= 6) {
+                    for (uint32_t t = run_start; t < a; t += stp) {
+                        uint32_t tv = stp == 4 ? ((uint32_t)wm0->fetch(wm0, t) << 24 | (uint32_t)wm0->fetch(wm0, t + 1) << 16 | (uint32_t)wm0->fetch(wm0, t + 2) << 8 | wm0->fetch(wm0, t + 3))
+                                                : ((uint32_t)wm0->fetch(wm0, t) << 8 | wm0->fetch(wm0, t + 1));
+                        if (tv >= 0x200 && !(tv & 1u) && tv < lim && wm0->rom_index(wm0, tv) >= 0) { closure_walk_untrusted(&w0->loc, wm0, m->isa, tv, w0->regwalk); w0->loc.closure_ptr_stores++; }
+                    }
+                }
+                run_start = 0; good = 0; bad = 0;
+            }
+        }
+    }
+
     if (ok) {
         // every worker observes its own machine; the start state is the main one's
         uint8_t *start = malloc(sh.sbytes);
