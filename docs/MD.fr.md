@@ -744,3 +744,11 @@ entrée est marchée comme entrée non fiable (code provisoire, jamais « exécu
 partagé). Observation de l'outil, SoR sans film, 150 s, 4 fils : code de référence manquant 12,1 % → 9,0 % (prouvé sans
 exécution 77 587 → 80 601 octets). Ristar, 150 s : statique/spéculatif 55,6 → 60,7 % du code IDA (les parts exécutées
 diffèrent d'un run à l'autre). Limite : une table dont les cibles ne suivent pas un terminateur n'est pas vue.
+
+Extension de B11 (même version) : les entrées 16 bits sont aussi complétées par un numéro de banque `k` (`moveq #k,Dn ; swap Dn`
+du dispatcheur, tables d'états de SoR vers `$1xxxx`), une valeur répétée prolonge la suite (état au repos répété), et une cible
+est plausible quand elle suit un terminateur **ou** démarre une chaîne d'au moins 3 instructions légales finissant par un retour
+ou un saut (les routines d'une table ne suivent pas toujours un `rts`) ; la suite doit alors compter au moins 12 entrées.
+Observation de l'outil, SoR sans film, 150 s : code de référence manquant 9,0 % → 3,2 % (prouvé sans exécution 80 601 →
+86 295 octets) ; contrepartie : 10 457 octets provisoires hors du code de référence (49 % de précision sur le gain), tous en
+code provisoire (jamais « exécuté »). Avec un seuil de 6 entrées : 0,8 % manquant mais 16 455 octets hors référence.

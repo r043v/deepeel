@@ -829,6 +829,18 @@ done:
     if (snap) { v->m->load(v->m, snap); free(snap); }   // the live machine is left exactly as the walk found it
 #undef CLOSURE_POP
 }
+// B11 helper: the address starts a straight-line chain of legal instructions that ends (within 24 instructions) in a return,
+// an unconditional or computed jump, with at least 3 instructions before it.
+static int chain_plausible(DpMachine *m, const DpIsa *isa, uint32_t pc) {
+    for (unsigned n = 0; n < 24; n++) {
+        uint8_t b[10]; for (unsigned i = 0; i < sizeof b; i++) b[i] = m->fetch(m, pc + i);
+        DpFlowInfo f; memset(&f, 0, sizeof f);
+        if (!isa->flow(b, pc, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL) return 0;
+        if (f.kind == DP_FLOW_RET || f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_INDIRECT) return n >= 2;
+        pc += f.length;
+    }
+    return 0;
+}
 static void closure_walk(DpCoreResult *r, DpMachine *m, const DpIsa *isa, uint32_t root, RegWalk *rw) {
     ClosureView v = { m, NULL, { 0, 0, 0, 0 } };
     closure_run(r, &v, isa, root, 0, 1, NULL, 0, CLOSURE_INSTR, rw);
@@ -3077,25 +3089,29 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     // the game's reader is never run.  Each entry is walked as an untrusted entry (provisional code, never "executed").
     if (ok && !cfg->no_closure && m->isa->code_ptr_store && ws[0].regwalk) {
         Worker *w0 = &ws[0]; DpMachine *wm0 = w0->m; uint32_t lim = rom_size < 0x400000u ? (uint32_t)rom_size : 0x400000u;
-        for (unsigned wide = 0; wide < 2; wide++) {
-            unsigned stp = wide ? 4 : 2; uint32_t run_start = 0, good = 0, bad = 0;
+        for (unsigned pass = 0; pass < 2 + (lim >> 16 > 15 ? 15 : (lim >> 16)); pass++) {   // passes 0: 16-bit, 1: 32-bit, k+2: 16-bit entries completed by bank k (the dispatcher's `moveq #k,Dn ; swap Dn`)
+            unsigned wide = pass == 1, hik = pass >= 2 ? pass - 1 : 0;
+            if (pass >= 2 && hik == 0) continue;
+            unsigned stp = wide ? 4 : 2; uint32_t run_start = 0, good = 0, bad = 0, prev_v = 0xFFFFFFFFu;
             for (uint32_t a = 0x200; a + stp <= lim + stp; a += 2) {
                 uint32_t v = 0; int valid = 0, zero = 0;
                 if (a + stp <= lim) {
                     v = wide ? ((uint32_t)wm0->fetch(wm0, a) << 24 | (uint32_t)wm0->fetch(wm0, a + 1) << 16 | (uint32_t)wm0->fetch(wm0, a + 2) << 8 | wm0->fetch(wm0, a + 3))
                              : ((uint32_t)wm0->fetch(wm0, a) << 8 | wm0->fetch(wm0, a + 1));
-                    zero = v == 0;
+                    zero = v == 0; if (!wide && !zero) v |= hik << 16;
                     if (!zero && !(v & 1u) && v >= 0x200 && v < lim && wm0->rom_index(wm0, v) >= 0) {
                         unsigned pw = (unsigned)(wm0->fetch(wm0, v - 2) << 8 | wm0->fetch(wm0, v - 1));
-                        valid = pw == 0x4E75 || pw == 0x4E73 || pw == 0x4E77 || (pw & 0xFF00u) == 0x6000u || pw == 0x4EF9 || pw == 0x4EFA || pw == 0x4EF8 || (pw & 0xFFF8u) == 0x4ED0u;
+                        valid = chain_plausible(wm0, m->isa, v) || pw == 0x4E75 || pw == 0x4E73 || pw == 0x4E77 || (pw & 0xFF00u) == 0x6000u || pw == 0x4EF9 || pw == 0x4EFA || pw == 0x4EF8 || (pw & 0xFFF8u) == 0x4ED0u;
                     }
                 }
-                if (valid || (zero && run_start)) { if (!run_start) run_start = a; if (valid) good++; bad = 0; a += stp - 2; continue; }
+                if (!valid && !zero && run_start && v == prev_v && a + stp <= lim) valid = 2;   // a repeated entry (state tables repeat their idle routine) keeps the run going
+                if (valid || (zero && run_start)) { prev_v = v; if (!run_start) run_start = a; if (valid == 1) good++; bad = 0; a += stp - 2; continue; }
                 if (run_start && bad < 1 && a + stp <= lim && !zero && wide == 0) { bad++; continue; }   // one stray word tolerated in a 16-bit run
-                if (run_start && good >= 6) {
+                if (run_start && good >= 12) {
                     for (uint32_t t = run_start; t < a; t += stp) {
                         uint32_t tv = stp == 4 ? ((uint32_t)wm0->fetch(wm0, t) << 24 | (uint32_t)wm0->fetch(wm0, t + 1) << 16 | (uint32_t)wm0->fetch(wm0, t + 2) << 8 | wm0->fetch(wm0, t + 3))
                                                 : ((uint32_t)wm0->fetch(wm0, t) << 8 | wm0->fetch(wm0, t + 1));
+                        if (!wide && tv) tv |= hik << 16;
                         if (tv >= 0x200 && !(tv & 1u) && tv < lim && wm0->rom_index(wm0, tv) >= 0) { closure_walk_untrusted(&w0->loc, wm0, m->isa, tv, w0->regwalk); w0->loc.closure_ptr_stores++; }
                     }
                 }
