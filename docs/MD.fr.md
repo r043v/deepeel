@@ -532,3 +532,19 @@ déjà absorbé : `init` à l'indice 52 côté Gens, 51 côté m0boy) :
 
 Reste à départager par une trace PC/cycles instruction par instruction autour de la
 frame 292 (`memory.registerexec` côté Gens-rr, `DP_MD_CYCLE_TRACE` côté m0boy).
+
+### Cadence de la boucle d'attente `$71FC4` (frames 270-291 de 1843S)
+
+Boucle `nop` + `dbf d0` (14 cycles par tour), `d0` décompté d'une frame à l'autre :
+
+- Gens-rr : 9133 tours par frame, constant ;
+- m0boy (horloge exacte du cœur de référence, 895780/7 cycles par frame) : 9140-9141,
+  soit ≈ 112 cycles de plus par frame ;
+- m0boy avec `DP_MD_CLOWN_CLOCK=3416` (lignes de 488 cycles, 127856 par frame, comme
+  `CPL_M68K` de Gens) : 9132-9133, la cadence colle, mais la fidélité d'ensemble
+  s'effondre (écart médian de 1173 octets par frame contre 15 avec l'horloge exacte,
+  meilleur décalage −1/0/+1, WRAM hors pile, 3000 frames).
+
+La longueur de frame seule n'explique donc pas l'écart : environ 112 cycles par frame
+sont consommés chez Gens par autre chose que le balayage (coût d'entrée/sortie de la
+V-int, arbitrage de bus Z80 ou DMA) pendant cette boucle. À mesurer par une trace PC/cycles.
