@@ -661,3 +661,28 @@ pour −1, 124 pour +1) : ce n'est pas un décalage d'entrée mais un travail de
 qui dépasse de quelques cycles le budget de la frame chez m0boy (ou que la V-int de m0boy
 tombe trop tôt dans ce travail). Piste suivante : compter les instructions et cycles du
 travail entre les V-int 122 et 124 des deux côtés.
+
+## Synchronisation avec Gens : mode « Gens » de m0boy (observations de l'outil)
+
+Réglages m0boy qui alignent la rejouée sur Gens-rr v11c (échantillon DSY1 pris à
+l'entrée du vecteur V-int, comme le hook d'exécution de Gens ; fichier `.k` à
+côté) :
+
+- `DP_MD_POWERON=gens` (démarrage à la ligne 38, pas de V-int au tour 0),
+  `DP_MD_CLOWN_CLOCK=3416`, `MD_IRQ_IMMEDIATE=1` (V-int livré tout de suite
+  après l'instruction qui le démasque), `DP_MD_DUT_PAD_SHIFT=1` (manette décalée
+  d'une trame) ;
+- `DP_MD_GENS_DMA=1` : modèle DMA de Gens (copie instantanée, `Update_DMA` par
+  ligne, bit 1 « busy » du statut tant que `DMAT_Lenght > 0`, y compris fill) ;
+- `DP_MD_VDBG=1` / `DP_MD_VDBG2=1` : trace des V-int, DMA et de l'état à chaque
+  début de trame (diagnostic).
+
+Résultat observé : Castle of Illusion 233S, 2579 échantillons sur 2580 identiques
+(WRAM + séquence de V-int). Sonic 1 1843S : échantillons 0-216 identiques (sauf
+le 168, transitoire de 58 octets) ; divergence à l'échantillon 217, le premier
+V-int après la boucle de délai masquée `$71FC4` (≈ 129 trames dans le handler,
+sr=`$2608`). m0boy livre le V-int latché au `rte` (principal dans `WaitForVBla`,
+`$29AC`), alors que Gens l'a livré avec le principal déjà hors de l'attente
+(`$F62A=$0C`, pile sans l'appel). Supprimer le latch aggrave l'écart dès
+l'échantillon 99 : le latch est nécessaire, la différence est ailleurs (reste
+ouvert). Ce sont des observations de l'outil, pas des mesures de matériel.
