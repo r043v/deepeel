@@ -515,3 +515,20 @@ suivante. Elles n'expliquent pas à elles seules l'avance d'une trame de m0boy a
   trame) : les ignorer. Film 1843S : première différence `wram` à la trame 59 (`$F641`/`$F645`, posés une trame plus tôt par
   m0boy qu'avec Gens), c'est-à-dire le décalage de boot de 1–2 trames ; le chercheur s'arrête à la première différence,
   d'où le recours à des `--ignore` pour les compteurs de phase (`$F600-$F62F`, `$F000-$F00F`, `$FE0C-$FE0F`).
+
+### Premier écart localisé : la frame 292 de 1843S
+
+Mesure de l'outil (flux DSY1 Gens-rr ↔ m0boy, décalage de démarrage de 1 frame
+déjà absorbé : `init` à l'indice 52 côté Gens, 51 côté m0boy) :
+
+- les frames 280 à 291 sont identiques octet pour octet (WRAM hors pile) ;
+- à la frame 292, `$FE0C–$FE0F` (compteur de V-int) vaut 98 chez Gens et 100 chez
+  m0boy ; à la frame 293 les deux valent 101. Même nombre total de V-int, répartis
+  autrement entre les deux frames : la frontière de frame tombe à un instant
+  différent d'un traitement long (chargement), pas de V-int manquante ;
+- retarder la V-int de 128 cycles dans la ligne (comme `main68k_exec(Cycles_M68K - 360)`
+  de Gens) ne change rien à la dérive (+2 final identique) ;
+- le modèle DMA par ligne de Gens ne la change pas non plus.
+
+Reste à départager par une trace PC/cycles instruction par instruction autour de la
+frame 292 (`memory.registerexec` côté Gens-rr, `DP_MD_CYCLE_TRACE` côté m0boy).
