@@ -6431,3 +6431,8 @@ attract tient désormais au moins `--attract-min` images (36 000 = 10 min de jeu
 
 - L'idiome 68000 de Sonic 1 (`move.w Idx(pc,d0.w),d1 ; jmp Idx(pc,d1.w)`) n'était reconnu que si les deux déplacements `d8` étaient égaux ; or les deux instructions sont à des adresses différentes. La comparaison porte désormais sur la **base effective** (test `obj state table`).
 - Mesure (observation de l'outil, Sonic 1 REV00, 10 min, film 1843S, référence s1disasm) : code exécuté ou prouvé 75,5 % → 89,5 % (exécuté 51,3 %, prouvé sans exécution 34 254 octets).
+
+## 0.408.0 — tables à slots de branchements (`jmp d8(pc,Xn)` + `bra.w`)
+
+- Un `jmp d8(pc,Xn)` dont la base porte une suite de `bra.w` / `bra.s` / `jmp` (idiome de Ristar : `jmp 2(pc,d0.w)` puis `bra.w` de 4 octets) n'est plus lu comme une table d'offsets : chaque **slot est une racine de code** (`DpCodeTable.slots`, test `bra slots`). Les slots s'arrêtent au premier opcode de classe différente.
+- Mesure (observation de l'outil, Ristar USA/Europe, 10 min sans film, référence `.idb` IDA, 316 638 octets de code) : exécuté ou prouvé 36,8 % → 42,7 %.

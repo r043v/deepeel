@@ -361,7 +361,7 @@ static int reaches_jump(struct DpMachine *m, uint32_t at, unsigned dn, int *via_
 // The base is PC-relative or a register slot (+ displacement) read from the concrete CPU / a walk's proven constants.
 static int isa_code_table(struct DpMachine *m, uint32_t pc, const uint8_t *b, DpCodeTable *out, uint32_t *load_pc) {
     unsigned op = (unsigned)(b[0] << 8 | b[1]);
-    *load_pc = 0; out->base_reg = -1; out->disp = 0;
+    *load_pc = 0; out->base_reg = -1; out->disp = 0; out->slots = 0;
     int jump = op == 0x4EFB || op == 0x4EBB || (op & 0xFFF8u) == 0x4EF0u || (op & 0xFFF8u) == 0x4EB0u;
     int pcrel, size = 0, adda = 0; unsigned dn = 8;
     if (jump) { pcrel = (op & 0xFFF0u) != 0x4EB0u && (op & 0xFFF0u) != 0x4EF0u; pcrel = op == 0x4EFB || op == 0x4EBB; size = 2; }
@@ -375,7 +375,14 @@ static int isa_code_table(struct DpMachine *m, uint32_t pc, const uint8_t *b, Dp
     int d8 = (int8_t)b[3];
     if (jump) {   // the jump itself indexes the table: offsets relative to its own base
         out->stride = 2; out->rel = 1;
-        if (pcrel) out->base = (pc + 2u + (uint32_t)(int32_t)d8) & 0xFFFFFFu;
+        if (pcrel) {
+            out->base = (pc + 2u + (uint32_t)(int32_t)d8) & 0xFFFFFFu;
+            unsigned w0 = rd16(m, out->base);   // jmp d8(pc,Xn) into a run of branch instructions: the slots are the code (bra.w / bra.s / jmp)
+            unsigned sl = w0 == 0x6000u ? 4 : (w0 & 0xFF00u) == 0x6000u && (w0 & 0xFFu) != 0xFFu ? 2 : w0 == 0x4EFAu || w0 == 0x4EF8u ? 4 : w0 == 0x4EF9u ? 6 : 0;
+            if (sl) { out->slots = 1; out->stride = (uint8_t)sl; out->rel = 0; }
+            return 1;
+        }
+        if (0) out->base = 0;
         else { out->base_reg = (int8_t)(DP_M68KR_A0 + an); out->disp = d8; out->base = 0; }
         return 1;
     }

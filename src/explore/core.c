@@ -511,6 +511,18 @@ static int code_table_resolve(DpMachine *m, const DpIsa *isa, DpCodeTable *t, co
 static unsigned code_table_targets(DpMachine *m, const DpIsa *isa, const DpCodeTable *t, uint32_t *out, unsigned max) {
     uint32_t first = 0xFFFFFFFFu; unsigned cnt = 0;
     const unsigned w = t->stride;
+    if (t->slots) {   // a run of branch instructions: every slot of the same opcode class is a root
+        unsigned hi = m->fetch(m, t->base);
+        for (unsigned e = 0; e < 128 && cnt < max; e++) {
+            uint32_t ea = (t->base + e * w) & 0xFFFFFFu;
+            if (m->fetch(m, ea) != hi || m->rom_index(m, ea) < 0) break;
+            uint8_t b[10]; for (unsigned i = 0; i < sizeof b; i++) b[i] = m->fetch(m, ea + i);
+            DpFlowInfo f; memset(&f, 0, sizeof f);
+            if (!isa->flow(b, ea, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL) break;
+            out[cnt++] = ea;
+        }
+        return cnt;
+    }
     for (unsigned e = 0; e < 128 && cnt < max; e++) {
         uint32_t ea = (t->base + e * w) & 0xFFFFFFu;
         if (t->rel && ea >= first) break;
@@ -749,7 +761,7 @@ no_stackret:;
                     if (sp < depth) { rets[sp] = cr; rets[sp].n = 0; stack[sp][0] = tg[i]; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)cur; rg[sp] = regs; sp++; }
                     else r->closure_stack_dropped++;
                 }
-                if (n) { r->closure_jp_tables++; r->closure_jp_entries += n; r->prov_data_bytes += (uint64_t)n * ct.stride; }
+                if (n) { r->closure_jp_tables++; r->closure_jp_entries += n; r->prov_data_bytes += (uint64_t)n * (ct.slots ? 0 : ct.stride); }
             }
         }
         int fall = f.fall || f.kind == DP_FLOW_SEQ || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL;
@@ -1040,7 +1052,7 @@ static void closure_code_table(DpCoreResult *r, DpMachine *m, const DpIsa *isa, 
     uint32_t tg[128];
     unsigned n = code_table_targets(m, isa, t, tg, 128);
     for (unsigned i = 0; i < n; i++) closure_walk(r, m, isa, tg[i], rw);
-    if (n) { r->closure_jp_tables++; r->closure_jp_entries += n; r->prov_data_bytes += (uint64_t)n * t->stride; }
+    if (n) { r->closure_jp_tables++; r->closure_jp_entries += n; r->prov_data_bytes += (uint64_t)n * (t->slots ? 0 : t->stride); }
 }
 
 static void mark(Shared *sh, DpCoreResult *r, DpMachine *m, uint32_t pc, unsigned len, uint8_t how, uint16_t origin, uint8_t actor) {

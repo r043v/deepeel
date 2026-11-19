@@ -38,6 +38,8 @@ int main(void) {
     { uint8_t c[] = {0x30,0x31,0x00,0x00, 0x4E,0xF1,0x00,0x00}; check("move.w+jmp An,Xn", c, 8, 1, 2, 1, DP_M68KR_A0 + 1); }
     // Sonic 1 Junction: move.w Jun_Index(pc,d0.w),d1 ; jmp Jun_Index(pc,d1.w)  (d8 6 then 2: same base)
     { uint8_t c[] = {0x32,0x3B,0x00,0x06, 0x4E,0xFB,0x10,0x02}; check("obj state table", c, 8, 1, 2, 1, -1); }
+    // Ristar: jmp 2(pc,d0.w) into bra.w slots
+    { uint8_t c[] = {0x4E,0xFB,0x00,0x02, 0x60,0x00,0x00,0x22, 0x60,0x00,0x02,0xFA}; memset(mem,0,sizeof mem); memcpy(mem+0x1000,c,12); DpMachine m; memset(&m,0,sizeof m); m.fetch=fetch; DpCodeTable t; uint32_t lp; int g = dp_isa_68000()->code_table(&m,0x1000,mem+0x1000,&t,&lp); if(!(g && t.slots && t.stride==4 && t.base==0x1004)) { fails++; printf("FAIL bra slots\n"); } }
     // negatives: movea.l T,a0 not followed by a call: a data pointer table
     { uint8_t c[] = {0x20,0x7B,0x00,0x10, 0x4E,0x71}; check("data ptr", c, 6, 0, 0, 0, 0); }
     // move.w then a plain use: not a dispatch
