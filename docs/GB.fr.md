@@ -6404,3 +6404,11 @@ reste « donnée lue ». Observation de l'outil, pas une mesure de matériel. Te
 registre non entièrement connu ne produit rien (jamais deviné). Le crochet `DpIsa.code_table` reste générique : toute
 ISA peut renvoyer `base_reg` (index de `DpRegState`) avec un `stride`/`rel` de son choix. Le chargement `movea.l` n'est
 une table de code que si l'instruction suivante appelle le registre chargé.
+
+## 0.404.0 — idiomes de dispatch lus à la table (68000, relevés dans SoR.asm)
+
+`DpIsa.code_table` se déclenche à la lecture de la table et regarde jusqu'à 4 instructions de colle
+(`movea.l Dn,Am`, `ext.l`, `adda.l/w`, `lea`) avant le `jmp/jsr` : adresses 16 bits (`move.w T,d0 ; movea.l d0,a1 ;
+jmp (a1)`), adresses 32 bits (`move.l T(pc,d0.w),d0 ; movea.l d0,a0 ; jsr (a0)`, la boucle de jeu), décalages relatifs
+à un registre (`adda.w (a1,d0.w),a1 ; jmp (a1)`, `ext.l ; adda.l d0,a1`). Un `movea.l` non suivi d'un appel reste une
+table de données. Test : `m68k_code_table`.

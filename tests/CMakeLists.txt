@@ -748,3 +748,7 @@ set_tests_properties(core_closure_bank_sim PROPERTIES FIXTURES_REQUIRED fixtures
 
 # a whole-ROM checksum sweep is not "data read": its bytes stay unknown (swept_only), a real table read still counts
 add_test(NAME core_checksum_sweep COMMAND sh -c "o=${CMAKE_CURRENT_BINARY_DIR}/core_checksum_sweep; rm -f $o.json; $<TARGET_FILE:deepeel> md explore ${CMAKE_CURRENT_BINARY_DIR}/fix_md_checksum.md --core --jobs 1 --attract-frames 0 --no-sessions --summary $o.json >/dev/null && grep -q '\"swept_only\":1[0-9][0-9][0-9][0-9]' $o.json && grep -q '\"data-read\":[1-9],' $o.json && ! grep -q '\"data-read\":[0-9][0-9][0-9]' $o.json")
+
+add_executable(test_m68k_code_table test_m68k_code_table.c)
+target_link_libraries(test_m68k_code_table PRIVATE deepeel_pce deepeel_sega deepeel_core m)
+add_test(NAME m68k_code_table COMMAND test_m68k_code_table)

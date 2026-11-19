@@ -314,31 +314,104 @@ static int isa_rom_table_follows(const DpIsa *isa, DpMachine *m, uint32_t pc, in
     }
     return 0;
 }
-// The instruction after a table load must call or jump through the loaded register (jsr/jmp (Am)): otherwise the longs
-// are plain data pointers, not code (a pointer table of art or maps is read the same way).
-static int follows_call(struct DpMachine *m, uint32_t at, unsigned am) {
-    unsigned op = (unsigned)(m->fetch(m, at) << 8 | m->fetch(m, at + 1));
-    return op == (0x4E90u | am) || op == (0x4ED0u | am);
+// Register/addressing helpers for the table-read idioms.
+static unsigned rd16(struct DpMachine *m, uint32_t at) { return (unsigned)(m->fetch(m, at) << 8 | m->fetch(m, at + 1)); }
+static unsigned insn_len(struct DpMachine *m, uint32_t at) {
+    uint8_t b[10]; for (unsigned i = 0; i < sizeof b; i++) b[i] = m->fetch(m, at + i);
+    DpFlowInfo f; memset(&f, 0, sizeof f);
+    return isa_flow(b, at, &f) && f.length ? (unsigned)f.length : 0;
 }
-// Indirect jmp/jsr through (d8,PC,Xn) or (d8,An,Xn), and the object-index idiom movea.l (d8,PC|An,Xn),Am ; jsr (Am).
-//  - jmp/jsr (d8,PC,Xn): the table is the PC-relative base, entries are signed word offsets from it (`dc.w Obj-Index`).
-//  - jmp/jsr (d8,An,Xn): the same, the base is the caller's An + d8 (a shared dispatch routine; the table is the caller's lea).
-//  - movea.l (d8,PC,Xn),Am / (d8,An,Xn),Am followed by jsr/jmp (Am): absolute long pointers.
-// The table ends where the first entry's target begins; entries must be legal code (checked by the kernel).
+// What consumes the value read from a table: up to 4 instructions of glue (movea.l Dn,Am / ext.l Dn / adda.l Dn,Am /
+// adda.w Dn,Am) then jmp/jsr (Am) or jmp/jsr (d8,PC|Am,Xn).  Returns 1 when the value reaches an indirect jump/call.
+// *via_idx = 1 when the final jump re-indexes the table itself (the value is an offset from the base).
+static int reaches_jump(struct DpMachine *m, uint32_t at, unsigned dn, int *via_idx, int *d8j, int *abs_via_a) {
+    unsigned cur = dn; int isa_ = 0; *via_idx = 0; *abs_via_a = -1; *d8j = 0;
+    for (int n = 0; n < 4; n++) {
+        unsigned op = rd16(m, at); unsigned len = insn_len(m, at);
+        if (!len) return 0;
+        if ((op & 0xFFF8u) == 0x4EF0u || (op & 0xFFF8u) == 0x4EB0u || op == 0x4EFB || op == 0x4EBB) { *via_idx = 1; *d8j = (int8_t)m->fetch(m, at + 3); return 1; }
+        if ((op & 0xFFF8u) == 0x4ED0u || (op & 0xFFF8u) == 0x4E90u) { *abs_via_a = (int)(op & 7); return 1; }
+        if ((op & 0xF1F8u) == 0x2040u && (op & 7) == cur) isa_ = 1;                    // movea.l Dn,Am
+        else if ((op & 0xFFF8u) == 0x48C0u && (op & 7) == cur) isa_ = 1;               // ext.l Dn
+        else if ((op & 0xF1F8u) == 0xD1C0u && (op & 7) == cur) isa_ = 1;               // adda.l Dn,Am
+        else if ((op & 0xF1F8u) == 0xD0C0u && (op & 7) == cur) isa_ = 1;               // adda.w Dn,Am
+        else if ((op & 0xF1F8u) == 0x41F0u) isa_ = 1;                                  // lea (An,Xn),Am (rebase)
+        else return 0;
+        at += len;
+    }
+    return 0;
+}
+// Indirect dispatch through a table the code reads just before: the kernel calls this at every sequential or indirect
+// instruction; it returns the table once the read is followed (within 4 instructions) by a jump or call through it.
+//   jmp/jsr (d8,PC|An,Xn)                         word offsets from the base               (rel16)
+//   move.w T(pc|An,Xn),Dn ; ... ; jmp T(pc|An,Xn) word offsets from the base               (rel16)
+//   adda.w (An,Xn),An ; jmp (An)                  word offsets from An                     (rel16, base_reg)
+//   move.w T,Dn ; ext.l ; adda.l Dn,An ; jmp (An) word offsets from An                     (rel16, base_reg)
+//   move.w T,Dn ; movea.l Dn,Am ; jmp/jsr (Am)    16-bit absolute addresses                (abs16)
+//   move.l/movea.l T,Dn|Am ; ... ; jsr (Am)       32-bit absolute addresses                (abs32)
+// The base is PC-relative or a register slot (+ displacement) read from the concrete CPU / a walk's proven constants.
 static int isa_code_table(struct DpMachine *m, uint32_t pc, const uint8_t *b, DpCodeTable *out, uint32_t *load_pc) {
     unsigned op = (unsigned)(b[0] << 8 | b[1]);
-    int pcrel = op == 0x4EFB || op == 0x4EBB || (op & 0xF1FFu) == 0x207Bu;
-    int areg = (op & 0xFFF8u) == 0x4EF0u || (op & 0xFFF8u) == 0x4EB0u || (op & 0xF1F8u) == 0x2070u;   // jmp/jsr (d8,An,Xn); movea.l (d8,An,Xn),Am
-    if (!pcrel && !areg) return 0;
+    *load_pc = 0; out->base_reg = -1; out->disp = 0;
+    int jump = op == 0x4EFB || op == 0x4EBB || (op & 0xFFF8u) == 0x4EF0u || (op & 0xFFF8u) == 0x4EB0u;
+    int pcrel, size = 0, adda = 0; unsigned dn = 8;
+    if (jump) { pcrel = (op & 0xFFF0u) != 0x4EB0u && (op & 0xFFF0u) != 0x4EF0u; pcrel = op == 0x4EFB || op == 0x4EBB; size = 2; }
+    else if ((op & 0xF1FFu) == 0x303Bu || (op & 0xF1F8u) == 0x3030u) { pcrel = (op & 0xF1FFu) == 0x303Bu; size = 2; dn = (op >> 9) & 7; }   // move.w (d8,PC|An,Xn),Dn
+    else if ((op & 0xF1FFu) == 0x203Bu || (op & 0xF1F8u) == 0x2030u) { pcrel = (op & 0xF1FFu) == 0x203Bu; size = 4; dn = (op >> 9) & 7; }   // move.l ...,Dn
+    else if ((op & 0xF1FFu) == 0x207Bu || (op & 0xF1F8u) == 0x2070u) { pcrel = (op & 0xF1FFu) == 0x207Bu; size = 4; dn = 8; }              // movea.l ...,Am
+    else if ((op & 0xF1F8u) == 0xD0F0u) { pcrel = 0; size = 2; adda = 1; }                                                                  // adda.w (d8,An,Xn),Am
+    else return 0;
     if (b[2] & 0x07) return 0;                     // brief extension word: bits 10..8 are zero
-    int jump = (op & 0xFFF0u) == 0x4EB0u || (op & 0xFFF0u) == 0x4EF0u || op == 0x4EFB || op == 0x4EBB;
-    if (!jump && !follows_call(m, pc + 4, (op >> 9) & 7)) return 0;
-    out->base_reg = -1; out->disp = 0;
-    if (pcrel) out->base = (pc + 2u + (uint32_t)(int32_t)(int8_t)b[3]) & 0xFFFFFFu;
-    else { out->base_reg = (int8_t)(DP_M68KR_A0 + (op & 7)); out->disp = (int8_t)b[3]; out->base = 0; }
-    if (jump) { out->stride = 2; out->rel = 1; }  // signed word offsets from the base
-    else { out->stride = 4; out->rel = 0; }       // absolute long pointers (entry 0 may precede the table: ids start at 1)
-    *load_pc = 0;
+    unsigned an = pcrel ? 8 : (op & 7);
+    int d8 = (int8_t)b[3];
+    if (jump) {   // the jump itself indexes the table: offsets relative to its own base
+        out->stride = 2; out->rel = 1;
+        if (pcrel) out->base = (pc + 2u + (uint32_t)(int32_t)d8) & 0xFFFFFFu;
+        else { out->base_reg = (int8_t)(DP_M68KR_A0 + an); out->disp = d8; out->base = 0; }
+        return 1;
+    }
+    uint32_t after = pc + 4u; int via_idx, d8j, via_a;
+    unsigned cur = dn;
+    if (adda) {
+        // the sum lands in Am; Am must then be jumped through
+        cur = 8;
+        unsigned am = (op >> 9) & 7;
+        unsigned nop = rd16(m, after);
+        if (!((nop & 0xFFF8u) == 0x4ED0u || (nop & 0xFFF8u) == 0x4E90u) || (nop & 7) != am || am != (op & 7) || d8 != 0) return 0;
+        out->stride = 2; out->rel = 1; out->base_reg = (int8_t)(DP_M68KR_A0 + am); out->disp = 0; out->base = 0;
+        return 1;
+    }
+    if (cur == 8) {   // movea.l T,Am: the jump must go through Am
+        unsigned am = (op >> 9) & 7, nop = rd16(m, after);
+        if (!((nop & 0xFFF8u) == 0x4ED0u || (nop & 0xFFF8u) == 0x4E90u) || (nop & 7) != am) return 0;
+        via_idx = 0;
+    } else if (!reaches_jump(m, after, cur, &via_idx, &d8j, &via_a)) return 0;
+    if (size == 4) {
+        if (via_idx) return 0;                      // a long read re-indexed: not a table of code
+        out->stride = 4; out->rel = 0;              // absolute pointers (entry 0 may precede the table: ids start at 1)
+    } else if (via_idx) {                           // move.w T,Dn ... jmp T(pc|An,Xn): offsets from the same base (displacement must match)
+        if (d8j != d8) return 0;
+        out->stride = 2; out->rel = 1;
+    } else {
+        // the word is added to a register (ext.l ; adda.l) or loaded as an absolute address: told apart by the glue
+        int rebase = 0;
+        for (uint32_t at = after, n = 0; n < 4; n++) {
+            unsigned o = rd16(m, at), l = insn_len(m, at);
+            if (!l) break;
+            if ((o & 0xF1F8u) == 0xD1C0u || (o & 0xF1F8u) == 0xD0C0u) { rebase = (int)(((o >> 9) & 7) + 1); break; }   // adda: offsets from Am
+            if ((o & 0xFFF8u) == 0x4ED0u || (o & 0xFFF8u) == 0x4E90u) break;
+            at += l;
+        }
+        if (rebase) {   // offsets from the register read as base: only the same register as the read's An is a table-relative base
+            if (pcrel || (unsigned)(rebase - 1) != an || d8 != 0) return 0;
+            out->stride = 2; out->rel = 1; out->base_reg = (int8_t)(DP_M68KR_A0 + an); out->disp = 0; out->base = 0;
+            return 1;
+        }
+        out->stride = 2; out->rel = 0;              // 16-bit absolute addresses (high word clear)
+    }
+    if (pcrel) out->base = (pc + 2u + (uint32_t)(int32_t)d8) & 0xFFFFFFu;
+    else { out->base_reg = (int8_t)(DP_M68KR_A0 + an); out->disp = d8; out->base = 0; }
+    (void)via_a;
     return 1;
 }
 static const DpIsa isa = { "68000", 3, 1, isa_length, isa_flow, isa_cond_of, isa_cond_flag,
