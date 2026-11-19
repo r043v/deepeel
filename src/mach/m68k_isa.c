@@ -237,6 +237,23 @@ static int isa_imm_ptr(const uint8_t *b, uint32_t *imm) {   // B9: lea (xxx).l,A
     return 1;
 }
 
+// B10: `move.l #imm,<dst>` where dst is a memory slot (abs.w/abs.l RAM, (An), (An)+, -(An), d16(An)): the
+// immediate is a routine address parked in RAM (function-pointer slot, object routine field).
+static int isa_code_ptr_store(const uint8_t *b, uint32_t *imm) {
+    unsigned w = (b[0] << 8) | b[1];
+    if ((w & 0xF03Fu) != 0x203Cu) return 0;   // move.l, source = immediate
+    unsigned mode = (w >> 6) & 7, reg = (w >> 9) & 7;
+    if (mode == 0 || mode == 1) return 0;     // register destinations are not a store
+    if (mode == 7 && reg > 1) return 0;       // only abs.w / abs.l
+    if (mode == 7) {
+        uint32_t da = reg == 0 ? ((uint32_t)(int32_t)(int16_t)((b[6] << 8) | b[7]) & 0xFFFFFFu)
+                               : (((uint32_t)b[6] << 24 | (uint32_t)b[7] << 16 | (uint32_t)b[8] << 8 | b[9]) & 0xFFFFFFu);
+        if (da < 0xFF0000u && !(da >= 0xA00000u && da < 0xA10000u)) return 0;   // stores into RAM only
+    }
+    *imm = (uint32_t)b[2] << 24 | (uint32_t)b[3] << 16 | (uint32_t)b[4] << 8 | b[5];
+    return 1;
+}
+
 // C3: `rts` pulls the 32-bit return address at (A7); `rte`/`rtr` pull more state — not modeled.
 static int isa_sp_ret(const uint8_t *b, unsigned *w, unsigned *bias, unsigned *off) {
     if ((b[0] << 8 | b[1]) != 0x4E75) return 0;
@@ -458,5 +475,5 @@ static const DpIsa isa = { "68000", 3, 1, isa_length, isa_flow, isa_cond_of, isa
                            .sp_slot = DP_M68KR_A7, .sp_width = 4, .sp_addr_mask = 0xFFFFFFFFu, .sp_base = 0, .entry_data_sig = NULL, .sp_ret = isa_sp_ret,
                            .ram_load = isa_ram_load, .ram_signature_wide = isa_ram_signature_wide,
                            .table_proven = isa_table_proven, .rom_table_follows = isa_rom_table_follows,
-                           .table_entry_width = 4, .code_table = isa_code_table };   // B4: the lea tables are longs
+                           .table_entry_width = 4, .code_table = isa_code_table, .code_ptr_store = isa_code_ptr_store };   // B4: the lea tables are longs
 const DpIsa *dp_isa_68000(void) { return &isa; }

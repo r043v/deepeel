@@ -708,3 +708,13 @@ Ces chiffres sont des observations de l'outil (pas des mesures de matériel). - 
 - **Échantillon à la V-int côté noyau** (`DP_MD_DSY_VINT=<fichier>`, diagnostic) : le noyau écrit un DSY1 (WRAM + registres) à l'entrée du vecteur de V-int, pour la seule relecture principale (les forks restaurés sur la même machine rejouent des trames déjà vues et sont écartés : sans ce filtre, les échantillons sont pollués et l'on croit à tort le noyau décalé). Observation de l'outil, Sonic 1 1843S, réglages Gens (`DP_MD_CLOCK_OFF=0`, `DP_TAS_PAD_SHIFT=1`) : le noyau est identique au harnais m0boy en mode Gens (WRAM hors pile) sur les échantillons 0 à 123 ; la première différence est l'échantillon 124 (`$F62A` : 18 chez Gens et le harnais de référence, 0 chez le noyau), exactement la divergence m0boy/Gens déjà décrite. Cette divergence au V-int 124 était en réalité un défaut du noyau (voir ci-dessous), pas de m0boy.
 - **Cause de l'écart noyau/harnais (corrigée, 0.411.0)** : le noyau découpe l'exécution en budgets de pas ; une reprise en milieu de ligne rejouait le travail de début de ligne, dont `md_full_gens_dma_line` (avance du DMA à la manière de Gens). Le DMA finissait trop tôt, la section masquée du chargement de niveau était plus courte (V-int 123 à la trame 334 ligne 258 au lieu de 336 ligne 144) et le V-int 124 arrivait trop tôt (`$F62A` = 0 au lieu de 18). Le travail de début de ligne n'est plus rejoué à la reprise (adaptation CMake). Observation de l'outil, Sonic 1 1843S, réglages Gens : le noyau est identique au harnais m0boy sur 2900 échantillons de V-int, et à Gens-rr sauf les échantillons 168 et 386 (transitoires, déjà connus).
 - Options de relecture : `DP_TAS_PAD_SHIFT=k` (le film voit son entrée k trames plus tard, films Gens-rr : 1) et lissage du watch (tampon de 360 images, `DP_WATCH_SMOOTH=0` le coupe).
+
+## Technique B10 : adresse de routine immédiate parquée en RAM (0.412.0)
+
+Un `move.l #routine,<case RAM>` exécuté (taille mot long, source immédiate, destination en RAM `$FF0000+` ou Z80)
+dépose une adresse de code dans une variable que le jeu appelle plus tard par `movea.l`/`jsr (a1)` — c'est le
+dispatch par état de Ristar et de Streets of Rage. Le noyau marche désormais cette adresse comme entrée non
+fiable (confiance 0) de la fermeture statique ; le compteur « RAM-parked code pointers » l'indique dans le résumé.
+Observations de l'outil face aux dasm : Ristar 49,9 → 66,5 % du code IDA couvert (34 393 pointeurs parqués) ;
+Streets of Rage, code de référence manquant 9,1 % → 4,8 % (sans film). Restes : blocs atteints par des tables de
+sauts indexées ($294E, $1727A, $113C8 en SoR ; $397EC en Ristar).

@@ -197,6 +197,9 @@ typedef struct DpIsa {
     // signed 16-bit offsets from the table base; else absolute 32-bit pointers.  *load_pc: address of the
     // instruction that loaded the table address (0: the jump itself), checked against the executed trail.
     int (*code_table)(struct DpMachine *m, uint32_t pc, const uint8_t *bytes, DpCodeTable *out, uint32_t *load_pc);
+    // B10: 1 when the instruction stores an immediate code address in memory (RAM function-pointer slot, object
+    // routine field: `move.l #routine,x(a0)`); the closure walks the address as an untrusted entry
+    int (*code_ptr_store)(const uint8_t *bytes, uint32_t *imm);
 } DpIsa;
 
 const DpIsa *dp_isa_sm83(void);

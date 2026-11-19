@@ -773,6 +773,17 @@ no_stackret:;
                     if (!pass) { unsigned more = n * 512u, room = 16u * CLOSURE_INSTR; budget = budget + more > room ? (budget > room ? budget : room) : budget + more; } }   // every entry brings its own routine: the budget grows with the fan-out (bounded)
             }
         }
+        if (isa->code_ptr_store && !pass) {   // B10: an immediate routine address parked in RAM becomes an untrusted entry (never from a pass over known code)
+            uint32_t cp;
+            if (isa->code_ptr_store(b, &cp) && !(cp & 1u)) {
+                int64_t kc = cview_index(v, r, cp, bk);
+                if (kc >= 0 && !(__atomic_load_n(&r->flags[kc], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC))) {
+                    if (closure_entry_is_data(r, isa, v, cp, kc)) r->closure_entry_refused++;
+                    else if (sp < depth) { rets[sp] = cr; rets[sp].n = 0; stack[sp][0] = cp; stack[sp][1] = bk; stack[sp][2] = 0; stack[sp][3] = (uint32_t)cur; rg[sp] = regs; sp++; r->closure_ptr_stores++; }
+                    else r->closure_stack_dropped++;
+                }
+            }
+        }
         int fall = f.fall || f.kind == DP_FLOW_SEQ || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL;
         if (f.kind != DP_FLOW_RET && (f.target >= 0 || (indirect_ok && f.kind == DP_FLOW_INDIRECT)) &&
             (f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL || (f.kind == DP_FLOW_INDIRECT && indirect_ok)) && tgt >= 0) {
@@ -2180,6 +2191,10 @@ static void run_path(Worker *w, Pending *p) {
                 }
             }
         }
+        if (!cfg->no_closure && !cur_forced && isa->code_ptr_store) {   // B10: an executed `move.l #routine,<RAM slot>` parks a code address: walk it as an untrusted entry
+            uint32_t cp;
+            if (isa->code_ptr_store(bytes, &cp) && !(cp & 1u) && m->rom_index(m, cp) >= 0) { closure_walk_untrusted(loc, m, isa, cp, w->regwalk); loc->closure_ptr_stores++; }
+        }
         if (!cfg->no_closure && !cur_forced && have_flow && fi.kind != DP_FLOW_SEQ && fi.kind != DP_FLOW_ILLEGAL) {
             if (fi.target >= 0 && (fi.kind == DP_FLOW_JUMP || fi.kind == DP_FLOW_COND || fi.kind == DP_FLOW_CALL)) closure_walk(loc, m, isa, (uint32_t)fi.target, w->regwalk);
             if (fi.kind == DP_FLOW_COND) closure_walk(loc, m, isa, pc + fi.length, w->regwalk);
@@ -3353,7 +3368,7 @@ cleanup:
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
         out->nonsense_pc += l->nonsense_pc; out->nonsense_sp += l->nonsense_sp; out->pad_cuts += l->pad_cuts; out->pad_unmarked += l->pad_unmarked;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
-        out->novelty_picks += l->novelty_picks; out->closure_stopped_data += l->closure_stopped_data; out->closure_entry_refused += l->closure_entry_refused; out->closure_stack_invalidations += l->closure_stack_invalidations; out->closure_unresolved += l->closure_unresolved; out->closure_stack_dropped += l->closure_stack_dropped; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->promoted_forced += l->promoted_forced; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bank_sims += l->closure_bank_sims; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_stack_dropped += l->closure_stack_dropped; out->pending_dropped += l->pending_dropped; out->deferred += l->deferred; out->state_repeats += l->state_repeats; out->probe_ctx_sat += l->probe_ctx_sat; out->probe_rearms += l->probe_rearms; out->bank_forks += l->bank_forks; out->tas_ckpts += l->tas_ckpts; out->sess_ckpts += l->sess_ckpts; out->ckpt_bursts += l->ckpt_bursts; out->epoch_forks += l->epoch_forks; out->live_seeds += l->live_seeds; out->imm_refs += l->imm_refs; out->held_stops += l->held_stops; out->bank_fork_sat += l->bank_fork_sat; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->event_probe_arms += l->event_probe_arms; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->closure_rets += l->closure_rets; out->proj_pruned += l->proj_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
+        out->novelty_picks += l->novelty_picks; out->closure_stopped_data += l->closure_stopped_data; out->closure_ptr_stores += l->closure_ptr_stores; out->closure_entry_refused += l->closure_entry_refused; out->closure_stack_invalidations += l->closure_stack_invalidations; out->closure_unresolved += l->closure_unresolved; out->closure_stack_dropped += l->closure_stack_dropped; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->promoted_forced += l->promoted_forced; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bank_sims += l->closure_bank_sims; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_stack_dropped += l->closure_stack_dropped; out->pending_dropped += l->pending_dropped; out->deferred += l->deferred; out->state_repeats += l->state_repeats; out->probe_ctx_sat += l->probe_ctx_sat; out->probe_rearms += l->probe_rearms; out->bank_forks += l->bank_forks; out->tas_ckpts += l->tas_ckpts; out->sess_ckpts += l->sess_ckpts; out->ckpt_bursts += l->ckpt_bursts; out->epoch_forks += l->epoch_forks; out->live_seeds += l->live_seeds; out->imm_refs += l->imm_refs; out->held_stops += l->held_stops; out->bank_fork_sat += l->bank_fork_sat; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->event_probe_arms += l->event_probe_arms; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->closure_rets += l->closure_rets; out->proj_pruned += l->proj_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
         out->exec_outside += l->exec_outside; out->exec_wram_rom += l->exec_wram_rom; dp_ramarch_merge(&out->ra, &l->ra);
         out->closure_reg_roots += l->closure_reg_roots; out->closure_reg_seed_sat += l->closure_reg_seed_sat; out->closure_reg_set_sat += l->closure_reg_set_sat;
         out->closure_reg_indirect += l->closure_reg_indirect; out->closure_reg_indirect_sat += l->closure_reg_indirect_sat; out->closure_reg_miss += l->closure_reg_miss;
@@ -3556,7 +3571,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
         if (r->prov && r->prov[i] && !(r->flags[i] & (DP_CORE_STATIC | DP_CORE_NATURAL | DP_CORE_FORCED))) prov_only++;
     }
     fprintf(out, "speculative gaps: %llu runs, %llu bytes (never counted as known); %llu runs reinforced by an immediate reference (%llu references seen)\n", U(r->spec_runs), U(r->spec_bytes), U(r->spec_ref_runs), U(r->imm_refs));
-    fprintf(out, "static closure: roots %llu, bytes %llu, static-only %zu, provisional %zu (untrusted walks, code once confirmed), capped walks %llu, returns followed %llu\n", U(r->closure_roots), U(r->closure_bytes), stat_only, prov_only, U(r->closure_capped), U(r->closure_rets));
+    fprintf(out, "static closure: roots %llu, bytes %llu, static-only %zu, provisional %zu (untrusted walks, code once confirmed), capped walks %llu, returns followed %llu, RAM-parked code pointers %llu\n", U(r->closure_roots), U(r->closure_bytes), stat_only, prov_only, U(r->closure_capped), U(r->closure_rets), U(r->closure_ptr_stores));
     if (r->closure_entry_refused) fprintf(out, "untrusted walk entries refused (data plausibility, point 3): %llu\n", U(r->closure_entry_refused));
     if (r->closure_stack_invalidations) fprintf(out, "ghost returns discarded on memory-control OUT (port_effect): %llu\n", U(r->closure_stack_invalidations));
     if (r->closure_regs) fprintf(out, "closure registers (C3): seed walks %llu, indirect resolved %llu, indirect unresolved %llu, stack returns %llu, indirect site cap %llu, seeds refused (site cap %llu, set full %llu)\n",
