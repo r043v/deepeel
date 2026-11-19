@@ -138,6 +138,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--no-learn-sig")) { c->no_learn_sig = 1; return 1; }
     if (!strcmp(a, "--no-taint-cut")) { c->no_taint_cut = 1; return 1; }
     if (!strcmp(a, "--no-forced-ram-cut")) { c->no_forced_ram_cut = 1; return 1; }
+    if (!strcmp(a, "--no-dispatch-forks")) { c->no_dispatch_forks = 1; return 1; }
     if (!strcmp(a, "--no-site-score")) { c->no_site_score = 1; return 1; }
     if (!strcmp(a, "--no-novelty-order")) { c->no_novelty_order = 1; return 1; }
     if (!strcmp(a, "--attract-frames") && i + 1 < argc) { c->attract_frames = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
@@ -548,7 +549,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
     // C3: the register-constant state of the walk path (one per pending side; a
     // seeded walk starts from the concrete CPU registers, a plain one from all-unknown)
     DpRegState regs;
-    int have_regs = regs0 != NULL && isa->reg_effect != NULL;
+    int have_regs = (regs0 != NULL || isa->code_table != NULL) && isa->reg_effect != NULL;   // an ISA with register-based code tables tracks constants in every walk (lea T,a1 ; jmp helper)
     unsigned spw = isa->sp_width;   // the modeled stack: word size; the register width and stack page come from the ISA (6502 S is 8 bits above $0100)
     uint32_t spmask = isa->sp_addr_mask;                 // value mask of the SP bits that index memory
     unsigned spk = spmask, spb = 0;                      // known-bits mask of the same bytes (known[] is per byte)
@@ -732,6 +733,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
             else r->closure_stack_dropped++;
         }
 no_stackret:;
+        DpRegState regs_pre = regs;   // the state before this instruction: a table read's base register (adda.w (a1,d0.w),a1 rewrites it)
         if (have_regs && isa->reg_effect) {   // the constants survive per the ISA's transfer table
             DpRegState nxt;
             isa->reg_effect(b, pc, &regs, &nxt, &rom);
@@ -739,7 +741,7 @@ no_stackret:;
         }
         if (trust && v->m && isa->code_table && (f.kind == DP_FLOW_INDIRECT || f.kind == DP_FLOW_SEQ)) {   // a PC-relative table met by the walk: every entry is a root
             DpCodeTable ct; uint32_t lp = 0;
-            if (isa->code_table(v->m, pc, b, &ct, &lp) && code_table_resolve(v->m, isa, &ct, have_regs ? &regs : NULL)) {
+            if (isa->code_table(v->m, pc, b, &ct, &lp) && code_table_resolve(v->m, isa, &ct, &regs_pre)) {
                 uint32_t tg[128];
                 unsigned n = code_table_targets(v->m, isa, &ct, tg, 128);
                 for (unsigned i = 0; i < n; i++) {
@@ -2120,13 +2122,39 @@ static void run_path(Worker *w, Pending *p) {
                 last_imm = iv; imm_age = 0;
             } else if (imm_age < 99) imm_age++;
         }
-        if (!cfg->no_closure && !cur_forced && have_flow && isa->code_table && (fi.kind == DP_FLOW_INDIRECT || fi.kind == DP_FLOW_SEQ)) {
+        if (!cfg->no_closure && have_flow && isa->code_table && (fi.kind == DP_FLOW_INDIRECT || fi.kind == DP_FLOW_SEQ)) {   // forced paths too: their registers are concrete (the dispatch helper reached by a forced handler)
             DpCodeTable ct; uint32_t lp = 0;
             if (isa->code_table(m, pc, bytes, &ct, &lp) && code_table_resolve(m, isa, &ct, NULL)) {
                 // a table is closed once per thread: direct-mapped cache of the bases already walked (objects run the same table every frame)
                 static __thread uint32_t seen_ct[256];
                 uint32_t *slot = &seen_ct[((ct.base * 0x9e3779b1u) >> 24) & 255u], tag = ct.base | 0x80000000u | (uint32_t)ct.stride << 28;
                 if (*slot != tag) { *slot = tag; closure_code_table(loc, m, isa, &ct, w->regwalk); }
+                // Dispatch forks: every target of the table this path has not executed yet becomes a forced path started in the
+                // current state (the handler of an object/mode the film never spawns).  Once per (table, target) globally,
+                // never from a forced path (bounded), counted as forks; the RET taint cut ends them.
+                if (!cur_forced && !cfg->no_dispatch_forks && m->set_pc && ct.stride) {
+                    uint32_t tg[128]; unsigned nt = code_table_targets(m, isa, &ct, tg, 128);
+                    uint8_t *cur = NULL;
+                    for (unsigned ti = 0; ti < nt; ti++) {
+                        if (covered(loc, m, tg[ti])) continue;
+                        uint32_t key = (ct.base * 0x9E3779B1u) ^ (tg[ti] * 0x85EBCA6Bu) ^ 0xD15Fu;
+                        pthread_mutex_lock(&sh->mu);
+                        uint32_t *cnt = site_count(&sh->sites, key);
+                        int first = *cnt == 0; if (first) (*cnt)++;
+                        pthread_mutex_unlock(&sh->mu);
+                        if (!first) continue;
+                        if (!cur) { cur = malloc(sh->sbytes); if (!cur) break; m->save(m, cur); }
+                        uint8_t *alt = malloc(sh->sbytes);
+                        if (!alt) break;
+                        m->load(m, cur); m->set_pc(m, tg[ti]); m->save(m, alt);
+                        Pending q = { alt, tg[ti], 1, skey, cur_input, 0, 0, cur_origin, cur_epoch };
+                        pthread_mutex_lock(&sh->mu);
+                        queue_push(sh, m, q); loc->forks++; loc->dispatch_forks++;
+                        pthread_cond_signal(&sh->cv);
+                        pthread_mutex_unlock(&sh->mu);
+                    }
+                    if (cur) { m->load(m, cur); free(cur); }
+                }
             }
         }
         if (!cfg->no_closure && !cur_forced && have_flow && fi.kind != DP_FLOW_SEQ && fi.kind != DP_FLOW_ILLEGAL) {
@@ -3296,7 +3324,7 @@ cleanup:
         out->paths += l->paths; out->forks += l->forks;
         out->cooperative_yields += l->cooperative_yields;
         out->sat_total += l->sat_total; out->sat_path += l->sat_path; out->sat_loop += l->sat_loop;
-        out->attract_paths += l->attract_paths; out->play_paths += l->play_paths; out->play_epochs += l->play_epochs; out->session_frames += l->session_frames; out->session_steps += l->session_steps; out->session_stalls += l->session_stalls;
+        out->dispatch_forks += l->dispatch_forks; out->attract_paths += l->attract_paths; out->play_paths += l->play_paths; out->play_epochs += l->play_epochs; out->session_frames += l->session_frames; out->session_steps += l->session_steps; out->session_stalls += l->session_stalls;
         out->sat_site += l->sat_site;
         out->pruned_covered += l->pruned_covered; out->copy_bytes += l->copy_bytes;
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
@@ -3440,6 +3468,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     fprintf(out, "deepeel %s (generic kernel)\n", label);
     fprintf(out, "steps %llu paths %llu forks %llu pruned-covered %llu\n", U(r->steps), U(r->paths), U(r->forks), U(r->pruned_covered));
     if (r->halted) fprintf(out, "halted: %s\n", r->halted == 1 ? "--max-time reached" : r->halted == 2 ? "--stall-time: no new ROM byte" : r->halted == 4 ? "interrupted" : "spool error");
+    if (r->dispatch_forks) fprintf(out, "dispatch forks: %llu (targets of executed code tables not yet run)\n", U(r->dispatch_forks));
     if (r->attract_paths || r->play_paths) fprintf(out, "sessions: %llu attract, %llu play (%llu pad epochs), %llu frames played, %llu steps, %llu stopped by stagnation\n", U(r->attract_paths), U(r->play_paths), U(r->play_epochs), U(r->session_frames), U(r->session_steps), U(r->session_stalls));
     if (r->resumed || r->saved) fprintf(out, "frontier: %llu states resumed, %llu saved\n", U(r->resumed), U(r->saved));
     fprintf(out, "spool: %llu states spilled to disk, %llu left unexplored\n", U(r->spooled), U(r->spool_left));

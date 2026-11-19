@@ -85,6 +85,7 @@ typedef struct DpCoreConfig {
     int no_spec, no_live_seeds;               // B8: off switch of the speculative gap disassembly
     int no_closure_ret;        // C3: off switch of the walk-time return stack (a direct call continues where its callee returns, not blindly after it)
     int no_closure_banks;      // C3: off switch of the walk-time bank simulation (closure follows `ld a,n; ld (bankreg),a`)
+    int no_dispatch_forks;     // off switch of the dispatch forks (every unexecuted target of a code table met by an executed path)
     int no_closure_regs;       // C3: off switch of the regstate-aware closure (concrete bootstrapping + the ISA constant-transfer lattice)
     unsigned closure_seed_cap; // C3: distinct regstate seeds accepted per site (0: no cap; --unbounded lifts it)
     int no_bank_forks;         // B7: off switch of the bank forks at mapper writes
@@ -216,7 +217,7 @@ typedef struct DpCoreResult {
     uint64_t resumed, saved; uint64_t spooled;          // forked states that overflowed the RAM queue onto disk (none is dropped)
     uint64_t spool_left;       // spilled states never run (the exploration ended first)
     unsigned halted;   /* 1: max-time, 2: stall-time, 3: spool error, 4: interruption */
-    uint64_t attract_paths, play_paths, play_epochs, session_frames, session_steps, session_stalls;   // generic long sessions run
+    uint64_t dispatch_forks, attract_paths, play_paths, play_epochs, session_frames, session_steps, session_stalls;   // generic long sessions run
     uint64_t hook_vetoed;      // forced sides refused by DpPlatformHooks.veto_fork
     uint64_t exec_outside, exec_wram_rom;     // instructions executed where rom_index < 0 (RAM/VRAM code)
     uint64_t no_pc;            // 1 when the machine has no pc/set_pc: nothing explored

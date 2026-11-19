@@ -95,7 +95,7 @@ static void m68_setn(DpRegState *s, unsigned slot, uint32_t v, unsigned bytes) {
 }
 static void m68_kill(DpRegState *s, unsigned slot) { s->known[slot] = 0; s->v[slot] = 0; }
 static void isa_reg_effect(const uint8_t *b, uint32_t pc, const DpRegState *in, DpRegState *out, const DpProvRom *rom) {
-    (void)pc; (void)rom;
+    (void)rom;
     *out = *in;
     uint16_t op = (uint16_t)(b[0] << 8 | b[1]);
     unsigned src_mode = (op >> 3) & 7, src_reg = op & 7;
@@ -104,6 +104,11 @@ static void isa_reg_effect(const uint8_t *b, uint32_t pc, const DpRegState *in, 
     if ((op & 0xF100) == 0x7000) { m68_set32(out, DP_M68KR_D0 + dst_reg, (uint32_t)(int32_t)(int8_t)op); return; }   // moveq
     if ((op & 0xF1FF) == 0x41F9) {   // lea (xxx).l,An
         m68_set32(out, DP_M68KR_A0 + dst_reg, (uint32_t)b[2] << 24 | (uint32_t)b[3] << 16 | (uint32_t)b[4] << 8 | b[5]);
+        return;
+    }
+    if ((op & 0xF1FF) == 0x41FA) {   // lea d16(pc),An: a proven constant (the ROM table a shared dispatch helper reads)
+        int16_t d = (int16_t)(b[2] << 8 | b[3]);
+        m68_set32(out, DP_M68KR_A0 + dst_reg, (pc + 2u + (uint32_t)(int32_t)d) & 0xFFFFFFu);
         return;
     }
     if ((op & 0xF1FF) == 0x207C || (op & 0xF1FF) == 0x307C) {   // movea.l/.w #imm,An

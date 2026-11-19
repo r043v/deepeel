@@ -24,6 +24,8 @@ int main(void) {
     { uint8_t c[] = {0x4E,0xF1,0x00,0x00}; check("jmp An,Xn", c, 4, 1, 2, 1, DP_M68KR_A0 + 1); }
     // move.w T(pc,d0.w),d0 ; movea.l d0,a1 ; jmp (a1)  -> abs16
     { uint8_t c[] = {0x30,0x3B,0x00,0x10, 0x22,0x40, 0x4E,0xD1}; check("abs16", c, 8, 1, 2, 0, -1); }
+    // SoR sub_B186: move.w (a1,d0.w),d0 ; movea.l d0,a1 ; jmp (a1)  -> abs16 from the register
+    { uint8_t c[] = {0x30,0x31,0x00,0x00, 0x22,0x40, 0x4E,0xD1}; check("abs16 An", c, 8, 1, 2, 0, DP_M68KR_A0 + 1); }
     // move.l T(pc,d0.w),d0 ; movea.l d0,a0 ; jsr (a0)  -> abs32
     { uint8_t c[] = {0x20,0x3B,0x00,0x10, 0x20,0x40, 0x4E,0x90}; check("abs32 GameModeArray", c, 8, 1, 4, 0, -1); }
     // movea.l T(pc,d0.w),a0 ; jsr (a0)

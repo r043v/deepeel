@@ -6418,3 +6418,11 @@ table de données. Test : `m68k_code_table`.
 Le défaut précédent (6 000 images) ne faisait que 100 s de jeu à 60 Hz (la doc disait à tort 10 min). La session
 attract tient désormais au moins `--attract-min` images (36 000 = 10 min de jeu, défaut) ; ensuite elle s'arrête quand
 `--attract-stall` images (3 600) passent sans nouvel octet ROM couvert, ou au plafond `--attract-frames` (216 000).
+
+## 0.406.0 — forks de dispatch, constantes de `lea d16(pc)`, tables sur chemins forcés
+
+- **Forks de dispatch** : chaque cible d'une table de code exécutée (`code_table`) pas encore couverte devient un chemin forcé, une fois par (table, cible), jamais depuis un chemin forcé ; compteur `dispatch forks` dans le rapport, `--no-dispatch-forks` pour les couper.
+- **`lea d16(pc),An`** est suivi comme constante prouvée (`isa_reg_effect` 68000) : `lea table(pc),a1 ; jmp helper` résout la table lue par l'aide partagée (`sub_B186` de Streets of Rage).
+- La fermeture des tables de code tourne aussi sur les chemins forcés (leurs registres sont concrets) ; les forks restent réservés aux chemins naturels.
+- Mesure (observation de l'outil, SoR, 10 min, référence IDA) : code manquant 38,0 % → 22,2 %, code prouvé 26 284 octets ; 729 octets marqués code sont des données de la référence (≈ 1 %).
+- Outil : `tools/cov_compare.py ref.cov ours.cov` (plus gros trous de code).
