@@ -493,6 +493,7 @@ static int closure_entry_is_data(const DpCoreResult *r, const DpIsa *isa, const 
 // A register-based table (DpCodeTable.base_reg): the base is the register's proven value plus the displacement.  `rs`: a walk's
 // constants, or NULL for the concrete CPU.  Only ROM tables count (a table in RAM is data the program writes).  Returns 0 when
 // the register is not fully known or the table is not in the ROM.
+#define DP_CODE_TABLE_MAX 256   // entries followed per code table (byte-indexed dispatch: object ids reach 0xFF)
 static int code_table_resolve(DpMachine *m, const DpIsa *isa, DpCodeTable *t, const DpRegState *rs) {
     if (t->base_reg < 0) return 1;
     DpRegState cur;
@@ -513,7 +514,7 @@ static unsigned code_table_targets(DpMachine *m, const DpIsa *isa, const DpCodeT
     const unsigned w = t->stride;
     if (t->slots) {   // a run of branch instructions: every slot of the same opcode class is a root
         unsigned hi = m->fetch(m, t->base);
-        for (unsigned e = 0; e < 128 && cnt < max; e++) {
+        for (unsigned e = 0; e < DP_CODE_TABLE_MAX && cnt < max; e++) {
             uint32_t ea = (t->base + e * w) & 0xFFFFFFu;
             if (m->fetch(m, ea) != hi || m->rom_index(m, ea) < 0) break;
             uint8_t b[10]; for (unsigned i = 0; i < sizeof b; i++) b[i] = m->fetch(m, ea + i);
@@ -523,13 +524,13 @@ static unsigned code_table_targets(DpMachine *m, const DpIsa *isa, const DpCodeT
         }
         return cnt;
     }
-    for (unsigned e = 0; e < 128 && cnt < max; e++) {
+    for (unsigned e = 0; e < DP_CODE_TABLE_MAX && cnt < max; e++) {
         uint32_t ea = (t->base + e * w) & 0xFFFFFFu;
         if (t->rel && ea >= first) break;
         uint32_t v = 0; for (unsigned i = 0; i < w; i++) v = (v << 8) | m->fetch(m, ea + i);
         uint32_t tg;
         if (t->rel) tg = (t->base + (uint32_t)(int32_t)(int16_t)v) & 0xFFFFFFu;
-        else { if (v >> 24) { if (e == 0) continue; break; } tg = v; }
+        else { if (v >> 24) { if (e == 0) continue; break; } tg = v | (w == 2 ? t->hi : 0); }
         int bad = (tg & 1u) || m->rom_index(m, tg) < 0;
         if (!bad) {
             uint8_t b[10]; for (unsigned i = 0; i < sizeof b; i++) b[i] = m->fetch(m, tg + i);
@@ -754,8 +755,8 @@ no_stackret:;
         if (trust && v->m && isa->code_table && (f.kind == DP_FLOW_INDIRECT || f.kind == DP_FLOW_SEQ)) {   // a PC-relative table met by the walk: every entry is a root
             DpCodeTable ct; uint32_t lp = 0;
             if (isa->code_table(v->m, pc, b, &ct, &lp) && code_table_resolve(v->m, isa, &ct, &regs_pre)) {
-                uint32_t tg[128];
-                unsigned n = code_table_targets(v->m, isa, &ct, tg, 128);
+                uint32_t tg[DP_CODE_TABLE_MAX];
+                unsigned n = code_table_targets(v->m, isa, &ct, tg, DP_CODE_TABLE_MAX);
                 for (unsigned i = 0; i < n; i++) {
                     if (cview_index(v, r, tg[i], bk) < 0) continue;
                     if (sp < depth) { rets[sp] = cr; rets[sp].n = 0; stack[sp][0] = tg[i]; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)cur; rg[sp] = regs; sp++; }
@@ -1049,8 +1050,8 @@ static void closure_jp_table(DpCoreResult *r, DpMachine *m, const DpCoreConfig *
 // 68000 PC-relative code table: word entries are signed offsets from the base; the table ends where the
 // first entry's target begins (the code the offsets point at follows the table).
 static void closure_code_table(DpCoreResult *r, DpMachine *m, const DpIsa *isa, const DpCodeTable *t, RegWalk *rw) {
-    uint32_t tg[128];
-    unsigned n = code_table_targets(m, isa, t, tg, 128);
+    uint32_t tg[DP_CODE_TABLE_MAX];
+    unsigned n = code_table_targets(m, isa, t, tg, DP_CODE_TABLE_MAX);
     for (unsigned i = 0; i < n; i++) closure_walk(r, m, isa, tg[i], rw);
     if (n) { r->closure_jp_tables++; r->closure_jp_entries += n; r->prov_data_bytes += (uint64_t)n * (t->slots ? 0 : t->stride); }
 }
@@ -2145,7 +2146,7 @@ static void run_path(Worker *w, Pending *p) {
                 // current state (the handler of an object/mode the film never spawns).  Once per (table, target) globally,
                 // never from a forced path (bounded), counted as forks; the RET taint cut ends them.
                 if (!cur_forced && !cfg->no_dispatch_forks && m->set_pc && ct.stride) {
-                    uint32_t tg[128]; unsigned nt = code_table_targets(m, isa, &ct, tg, 128);
+                    uint32_t tg[DP_CODE_TABLE_MAX]; unsigned nt = code_table_targets(m, isa, &ct, tg, DP_CODE_TABLE_MAX);
                     uint8_t *cur = NULL;
                     for (unsigned ti = 0; ti < nt; ti++) {
                         if (covered(loc, m, tg[ti])) continue;

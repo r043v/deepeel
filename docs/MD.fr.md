@@ -693,3 +693,12 @@ concorde). Ce sont des observations de l'outil, pas des mesures de matériel.
 `DP_MD_GENS_MODE=1 sh tools/md_compare_reference.sh ROM film.gmv N` positionne
 d'un coup tous ces réglages (DMA, horloge, power-on, IRQ immédiate, décalage de
 manette, échantillonnage à la V-int, horloge de référence Gens).
+
+## Tables de code : deux trous trouvés en comparant aux dasm (0.409.0, observations de l'outil)
+
+Chaque essai de couverture est comparé au désassemblage de référence ; les écarts ont désigné deux limites du suivi des tables de code (`code_table_targets`, `isa_code_table`).
+
+- **Plafond de 128 entrées** : la table d'objets de Sonic 1 (`Obj_Index`, pointeurs longs) a des ids jusqu'à `$8C` ; au-delà de 128 entrées, ses objets (ex. `ScrapEggman`) n'étaient jamais suivis. Le plafond est `DP_CODE_TABLE_MAX` = 256 (ids sur un octet). Sonic 1, film 1843S, 10 min : code de référence « exécuté ou prouvé » 77,2 % → 96,4 % (la part exécutée, 52 %, ne change pas : le film couvre le début du jeu).
+- **Mot haut posé par le dispatcheur** : Streets of Rage appelle `lea Table(pc),a1 ; jmp $15848(pc)` ; le dispatcheur fait `moveq #1,d0 ; swap d0 ; move.w 0(a1,d0.w),d0 ; movea.l d0,a1 ; jmp (a1)`, donc les entrées 16 bits sont des adresses `$1xxxx`. Le suivi lisait `$750A` au lieu de `$1750A`. `DpCodeTable.hi` reprend le `moveq #k,Dn ; swap Dn` qui précède la lecture. Streets of Rage, exploration autonome 10 min : code de référence manquant 22,0 % → 15,3 % (prouvé sans exécution 23 840 → 40 038 octets ; la part exécutée est plus basse qu'à 47 min).
+
+Ces chiffres sont des observations de l'outil (pas des mesures de matériel). Les dispatcheurs à base de registre posée par l'appelant (`lea T(pc),a5 ; jmp sub`) restent à suivre à travers l'appel.

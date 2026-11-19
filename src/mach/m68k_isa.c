@@ -361,7 +361,7 @@ static int reaches_jump(struct DpMachine *m, uint32_t at, unsigned dn, int *via_
 // The base is PC-relative or a register slot (+ displacement) read from the concrete CPU / a walk's proven constants.
 static int isa_code_table(struct DpMachine *m, uint32_t pc, const uint8_t *b, DpCodeTable *out, uint32_t *load_pc) {
     unsigned op = (unsigned)(b[0] << 8 | b[1]);
-    *load_pc = 0; out->base_reg = -1; out->disp = 0; out->slots = 0;
+    *load_pc = 0; out->base_reg = -1; out->disp = 0; out->slots = 0; out->hi = 0;
     int jump = op == 0x4EFB || op == 0x4EBB || (op & 0xFFF8u) == 0x4EF0u || (op & 0xFFF8u) == 0x4EB0u;
     int pcrel, size = 0, adda = 0; unsigned dn = 8;
     if (jump) { pcrel = (op & 0xFFF0u) != 0x4EB0u && (op & 0xFFF0u) != 0x4EF0u; pcrel = op == 0x4EFB || op == 0x4EBB; size = 2; }
@@ -423,7 +423,12 @@ static int isa_code_table(struct DpMachine *m, uint32_t pc, const uint8_t *b, Dp
             out->stride = 2; out->rel = 1; out->base_reg = (int8_t)(DP_M68KR_A0 + an); out->disp = 0; out->base = 0;
             return 1;
         }
-        out->stride = 2; out->rel = 0;              // 16-bit absolute addresses (high word clear)
+        out->stride = 2; out->rel = 0;              // 16-bit absolute addresses (high word clear unless the dispatcher seeded it)
+        if (dn < 8)   // moveq #k,Dn ; swap Dn shortly before the read: the loaded word completes an address in bank k
+            for (uint32_t back = 4; back <= 16; back += 2) {
+                uint32_t at = pc - back;
+                if (rd16(m, at + 2) == (0x4840u | dn) && (rd16(m, at) & 0xF100u) == 0x7000u && ((rd16(m, at) >> 9) & 7) == dn) { out->hi = (uint32_t)(rd16(m, at) & 0x7Fu) << 16; break; }
+            }
     }
     if (pcrel) out->base = (pc + 2u + (uint32_t)(int32_t)d8) & 0xFFFFFFu;
     else { out->base_reg = (int8_t)(DP_M68KR_A0 + an); out->disp = d8; out->base = 0; }

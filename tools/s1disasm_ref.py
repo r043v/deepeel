@@ -89,7 +89,7 @@ st = sum(1 for i in range(0x80000) if cls[i] == 1 and not fl[i] & 1 and fl[i] & 
 print("code reference + statically proven (flag 4, not executed): %d octets (%.1f%% executed or proven)" % (st, 100.0 * (C[(1, "exec")] + st) / max(code, 1)))
 print("code reference: %d octets, executed by deepeel: %d (%.1f%%)" % (code, C[(1, "exec")], 100.0 * C[(1, "exec")] / max(code, 1)))
 
-if "--missing" in sys.argv:   # unexecuted reference code grouped by the label it falls under (where to look for the missing flow)
+if "--missing" in sys.argv or "--unproven" in sys.argv:   # unexecuted reference code grouped by the label it falls under (where to look for the missing flow)
     import bisect
     labels.sort(); la=[a for a,_ in labels]
     M = collections.Counter(); T = collections.Counter()
@@ -98,6 +98,6 @@ if "--missing" in sys.argv:   # unexecuted reference code grouped by the label i
         k = bisect.bisect_right(la, i) - 1
         name = labels[k][1] if k >= 0 else "?"
         T[name] += 1
-        if not fl[i] & 1: M[name] += 1
+        if not fl[i] & (5 if '--unproven' in sys.argv else 1): M[name] += 1
     print("\nmissing code bytes by label (missing/total):")
     for name, n in M.most_common(60): print("  %-28s %5d / %5d" % (name, n, T[name]))
