@@ -642,3 +642,22 @@ origine ne lève les frames 87, 292, 320-335. Le glissement de 112 cycles par fr
 donc pas le facteur limitant ; ce qui reste est de la comptabilité fine à l'intérieur
 de la frame (durée de la section masquée, entrée de V-int, DMA) que seule une trace
 cycle par cycle côté Gens-rr peut départager. Code d'essai non conservé.
+
+### Échantillonnage à l'événement : la V-int (`DP_MD_DSY_VINT`)
+
+L'instant d'échantillonnage n'est plus un temps mais un événement : la première
+instruction du vecteur de V-int (`memory.registerexec` côté Gens-rr, `tools/gens_dsy_vint.lua` ;
+sortie de `interrupt()` côté m0boy, `DP_MD_DSY_VINT=1`). Les frontières de frame sont
+alors les mêmes dans les deux machines par construction. Sur 1843S (2694 V-int côté Gens,
+2696 côté m0boy) : **124 frames identiques d'affilée** (87 avec la phase fixe), première
+divergence à la frame 124.
+
+Frame 124 : `$FFF62A` (`v_vbla_routine`) vaut 18 chez Gens et 0 chez m0boy, et le fondu de
+palette (`$FB04…`) démarre une frame plus tôt chez Gens. La boucle principale de Gens a donc
+posé la routine `$12` avant la V-int 124 et celle de m0boy non : m0boy subit une frame
+« lag » (V-int pendant le travail de la boucle) que Gens n'a pas. Décaler l'entrée de ±1
+frame (`DP_MD_DUT_PAD_SHIFT`) ne change pas la première divergence (146 frames identiques
+pour −1, 124 pour +1) : ce n'est pas un décalage d'entrée mais un travail de boucle principale
+qui dépasse de quelques cycles le budget de la frame chez m0boy (ou que la V-int de m0boy
+tombe trop tôt dans ce travail). Piste suivante : compter les instructions et cycles du
+travail entre les V-int 122 et 124 des deux côtés.

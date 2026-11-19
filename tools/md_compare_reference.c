@@ -45,7 +45,16 @@ static void dp_trace_end(void *u, MdFull *m, uint32_t pc, uint32_t npc) { (void)
     if (dp_trace_on_d) fprintf(dp_trace_d, "%06x %u\n", (unsigned)pc, (unsigned)(m->cycles - dp_trace_c0)); }
 #endif
 static uint8_t dsy_snap_ram[0x10000]; static uint32_t dsy_snap_regs[17];
-static void dsy_line_hook(void *u, const MdFull *m) {   /* the end of a Gens frame: 38 lines after its V-int line start less 128 cycles */
+static void dsy_line_hook(void *u, const MdFull *m) {
+    if (getenv("DP_MD_DSY_VINT")) {   /* event sampling: the record is written when the V-int vector is entered, as Gens' exec hook does */
+        static FILE *vf; static uint32_t vn; if (!vf) { vf = fopen(getenv("DP_MD_DUT_DSY"), "wb"); if (vf) fwrite("DSY1", 1, 4, vf); }
+        if (vf) { uint32_t len = 0x10000, rl = 68, regs[17]; uint16_t nb = 2; uint8_t n4 = 4;
+            for (int i = 0; i < 8; i++) { regs[i] = m->d[i]; regs[8 + i] = m->a[i]; } regs[16] = m->pc;
+            fwrite(&vn, 4, 1, vf); fwrite(&nb, 2, 1, vf);
+            fwrite(&n4, 1, 1, vf); fwrite("wram", 1, 4, vf); fwrite(&len, 4, 1, vf); fwrite(m->ram, 1, 0x10000, vf);
+            fwrite(&n4, 1, 1, vf); fwrite("regs", 1, 4, vf); fwrite(&rl, 4, 1, vf); fwrite(regs, 4, 17, vf); fflush(vf); ++vn; }
+        return;
+    }   /* the end of a Gens frame: 38 lines after its V-int line start less 128 cycles */
     (void)u;
     memcpy(dsy_snap_ram, m->ram, sizeof dsy_snap_ram);
     for (int i = 0; i < 8; i++) { dsy_snap_regs[i] = m->d[i]; dsy_snap_regs[8 + i] = m->a[i]; } dsy_snap_regs[16] = m->pc; }
@@ -79,7 +88,7 @@ int main(int argc, char **argv) {
     cb.pcm_audio_to_be_generated = audio; cb.cdda_audio_to_be_generated = audio;
     ClownMDEmu_Constant_Initialise(); ClownMDEmu_Initialise(ref, &config, &cb);
     ClownMDEmu_SetCartridge(ref, words, n/2); ClownMDEmu_HardReset(ref, 1, 0);
-    dp_mdrom_set(rom, n); md_full_reset(dut); if (getenv("DP_MD_DSY_PHASE")) { dut->phase_hook = dsy_line_hook; { unsigned pl = 37, pc = 360; sscanf(getenv("DP_MD_DSY_PHASE"), "%u:%u", &pl, &pc); dut->phase_line = (uint16_t)pl; dut->phase_cycle = (uint16_t)pc; } }
+    dp_mdrom_set(rom, n); md_full_reset(dut); if (getenv("DP_MD_DSY_VINT")) { dut->phase_hook = dsy_line_hook; dut->phase_on_vint = 1; } else if (getenv("DP_MD_DSY_PHASE")) { dut->phase_hook = dsy_line_hook; { unsigned pl = 37, pc = 360; sscanf(getenv("DP_MD_DSY_PHASE"), "%u:%u", &pl, &pc); dut->phase_line = (uint16_t)pl; dut->phase_cycle = (uint16_t)pc; } }
     unsigned limit = (unsigned)strtoul(argv[3], NULL, 0);
     unsigned trace_begin = 1, trace_end = 0;
     const char *range = getenv("DP_MD_TRACE_RANGE");
@@ -91,6 +100,11 @@ int main(int argc, char **argv) {
         unsigned char b[3]; if (fread(b, 1, 3, movie) != 3) break;
         if (b[1] != 0xff || b[2] != 0xff) { fprintf(stderr, "unsupported GMV input at frame %u\n", frame); return 2; }
         pad = (uint8_t)~b[0]; dut->pad = pad;
+        if (getenv("DP_MD_DUT_PAD_SHIFT")) {   /* experiment: the DUT sees the movie input k frames later (k<0: earlier) than the reference */
+            static unsigned char hist[8]; static unsigned nh; const int k = atoi(getenv("DP_MD_DUT_PAD_SHIFT"));
+            for (int i = 7; i > 0; i--) hist[i] = hist[i - 1]; hist[0] = (uint8_t)pad; if (nh < 8) nh++;
+            if (k >= 0 && (unsigned)k < nh) dut->pad = hist[k];
+            else if (k < 0) { long pos = ftell(movie); unsigned char c[3]; fseek(movie, (-k - 1) * 3, SEEK_CUR); dut->pad = fread(c, 1, 3, movie) == 3 ? (uint8_t)~c[0] : pad; fseek(movie, pos, SEEK_SET); } }
 #ifdef DP_CYCLE_TRACE
         if (getenv("DP_MD_CYCLE_TRACE") && frame + 1 == (unsigned)atoi(getenv("DP_MD_CYCLE_TRACE"))) {
             dp_trace_f = fopen("cyc_ref.txt", "w"); dp_trace_d = fopen("cyc_dut.txt", "w"); dp_trace_on = dp_trace_on_d = 1; md_trace.step = dp_trace_step; md_trace.end = dp_trace_end; }
@@ -127,7 +141,7 @@ int main(int argc, char **argv) {
             static FILE *df; if (!df) df = fopen(getenv("DP_MD_DUT_DUMP"), "wb");
             if (df) fwrite(dut->ram, 1, 0x10000, df);
         }
-        if (getenv("DP_MD_DUT_DSY")) {   /* replay-only DSY1 producer for `deepeel desync`: m0boy "wram" (64 KiB) + "regs" (D0-7, A0-7, PC as u32 LE) per frame */
+        if (getenv("DP_MD_DUT_DSY") && !getenv("DP_MD_DSY_VINT")) {   /* replay-only DSY1 producer for `deepeel desync`: m0boy "wram" (64 KiB) + "regs" (D0-7, A0-7, PC as u32 LE) per frame */
             static FILE *sf; if (!sf) { sf = fopen(getenv("DP_MD_DUT_DSY"), "wb"); if (sf) fwrite("DSY1", 1, 4, sf); }
             if (sf) {
                 uint32_t fn = frame, len = 0x10000, rl = 68, regs[17]; uint16_t nb = 2; uint8_t n4 = 4;

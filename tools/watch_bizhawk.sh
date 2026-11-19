@@ -21,6 +21,7 @@ case $sys in
   sms) core=sms;  wbx=;      name="BizHawk SMSHawk"; extra= ;;
   *) echo "watch_bizhawk: unknown system $sys" >&2; exit 2 ;;
 esac
+extra="$extra ${WATCH_EXTRA:-}"
 [ -z "$wbx" ] || [ -f "$(dirname "$bh")/dll/$wbx.wbx" ] || { mkdir -p "$(dirname "$bh")/dll"; zstd -d -q "$hawk/Assets/dll/$wbx.wbx.zst" -o "$(dirname "$bh")/dll/$wbx.wbx"; }
 feedinit() { python3 -I -c "
 import struct,sys
