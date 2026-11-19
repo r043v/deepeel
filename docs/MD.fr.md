@@ -677,12 +677,15 @@ côté) :
 - `DP_MD_VDBG=1` / `DP_MD_VDBG2=1` : trace des V-int, DMA et de l'état à chaque
   début de trame (diagnostic).
 
+- Pas de bit busy YM2612 (`$A04000` bit 7) en mode Gens : Gens ne le lève jamais
+  (`YM2612.status` ne porte que les drapeaux de timer). Les boucles d'attente du
+  pilote sonore de Sonic (`$7272E…`) durent donc moins longtemps que sur m0boy
+  « matériel » ; c'était la cause de la divergence à l'échantillon 217 (la trame
+  523 consommait ≈125 000 des 127 856 cycles, le V-int arrivait avant la fin du
+  travail principal).
+
 Résultat observé : Castle of Illusion 233S, 2579 échantillons sur 2580 identiques
-(WRAM + séquence de V-int). Sonic 1 1843S : échantillons 0-216 identiques (sauf
-le 168, transitoire de 58 octets) ; divergence à l'échantillon 217, le premier
-V-int après la boucle de délai masquée `$71FC4` (≈ 129 trames dans le handler,
-sr=`$2608`). m0boy livre le V-int latché au `rte` (principal dans `WaitForVBla`,
-`$29AC`), alors que Gens l'a livré avec le principal déjà hors de l'attente
-(`$F62A=$0C`, pile sans l'appel). Supprimer le latch aggrave l'écart dès
-l'échantillon 99 : le latch est nécessaire, la différence est ailleurs (reste
-ouvert). Ce sont des observations de l'outil, pas des mesures de matériel.
+(WRAM + séquence de V-int). Sonic 1 1843S : 2991 échantillons sur 2993 identiques
+sur tout le film ; seuls les échantillons 168 et 386 diffèrent (tampons de
+sprites/hscroll, 26 et 183 octets, transitoires : l'échantillon suivant
+concorde). Ce sont des observations de l'outil, pas des mesures de matériel.
