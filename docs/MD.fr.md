@@ -718,3 +718,15 @@ fiable (confiance 0) de la fermeture statique ; le compteur « RAM-parked code p
 Observations de l'outil face aux dasm : Ristar 49,9 → 66,5 % du code IDA couvert (34 393 pointeurs parqués) ;
 Streets of Rage, code de référence manquant 9,1 % → 4,8 % (sans film). Restes : blocs atteints par des tables de
 sauts indexées ($294E, $1727A, $113C8 en SoR ; $397EC en Ristar).
+
+## Reprise d'un état de frontière de trame (0.413.0)
+
+`dp_mdmach_load` repartait toujours en mode reprise (`resume_frame = 1`). Un état sauvé entre deux trames (trame terminée,
+`line` encore à 261, `frame_cycles` revenu à ~400) rejouait donc la ligne 261 de la trame suivante et sautait le travail
+de début de trame, dont la demande de V-int de la ligne 0 : le V-int de la trame était perdu. Sur Ristar (ROM JP, film
+1506S), le handler 0 se terminait sur une trame sans V-int en attente, alors que Gens livre le V-int suivant au `rte`
+(`$4370`) ; le thread principal du noyau avait une trame d'avance (RNG `$EA22` d'un pas, `$EA01`, décompression).
+La reprise ne se fait plus qu'à l'intérieur d'une trame (`line == 261 && frame_cycles < 100000` = frontière : départ en
+ligne 0). Observation de l'outil, Ristar 1506S, réglages Gens : 3398 échantillons de V-int, WRAM identique à Gens-rr
+(hors pile) sur tous sauf 9 (écarts de 21 à 28 octets, transitoires) ; avant : écart dès l'échantillon 1, centaines
+d'octets dès le 6.

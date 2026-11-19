@@ -189,7 +189,9 @@ void dp_mdmach_load(DpMdMach *d, const void *buf) {
     m->ym_log = ym_log; m->ym_log_user = ym_log_user;
     m->coverage = coverage; m->screen = screen;
     m->line_hook = line_hook; m->hook_user = hook_user;
-    d->resume_frame = 1;
+    // a state saved between frames (frame wrapped, line still 261) restarts at line 0: resuming at line 261 would replay that
+    // line and skip the frame-start work (the V-int request)
+    d->resume_frame = !(m->line == 261 && m->frame_cycles < 100000u);
     md_full_cram_sync(d->m);
 }
 void dp_mdmach_state_set_pc(void *buf, uint32_t pc) { ((MdFull *)buf)->pc = pc; }
