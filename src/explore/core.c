@@ -591,10 +591,17 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
         int pass = 0;
         int known = k >= 0 && ((__atomic_load_n(&r->flags[k], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC))
                                || (!trust && r->prov && r->prov[k]));   // a provisional byte holds nothing new for an untrusted walk; a trusted one must reach it to promote it
-        if (known && r->closure_ret && (cr.n || thru) && kthru < kthru_cap) {   // each known address is walked through once per walk
+        // a known helper entered with a ROM address in a register (lea Table(pc),a5 ; jmp helper) is walked through once per distinct
+        // register context: the helper's own table read resolves for this caller, which the first caller's walk could not do for it
+        uint64_t rctx = 0;
+        if (known && have_regs && isa->code_table && v->m && !cr.n && !thru)
+            for (unsigned ri = 0; ri < DP_REG_N; ri++)
+                if ((regs.known[ri] & 0x0F) == 0x0F && v->m->rom_index(v->m, regs.v[ri] & 0xFFFFFFu) >= 0 && (int)ri != isa->sp_slot)
+                    rctx = (rctx ^ ((uint64_t)regs.v[ri] + ri)) * 0x100000001B3ull;
+        if (known && r->closure_ret && (cr.n || thru || rctx) && kthru < kthru_cap) {   // each known address is walked through once per walk
             if (!seen) seen = calloc(seen_cap, sizeof *seen);
             if (seen) {
-                uint64_t key = (uint64_t)k + 1; size_t hh = (size_t)(key * 0x9E3779B97F4A7C15ull >> 51) & (seen_cap - 1); int dup = 0;
+                uint64_t key = ((uint64_t)k + 1) ^ (rctx << 20); size_t hh = (size_t)(key * 0x9E3779B97F4A7C15ull >> 51) & (seen_cap - 1); int dup = 0;
                 while (seen[hh]) { if (seen[hh] == key) { dup = 1; break; } hh = (hh + 1) & (seen_cap - 1); }
                 if (!dup) { seen[hh] = key; known = 0; kthru++; pass = 1; }
             }
@@ -762,7 +769,8 @@ no_stackret:;
                     if (sp < depth) { rets[sp] = cr; rets[sp].n = 0; stack[sp][0] = tg[i]; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)cur; rg[sp] = regs; sp++; }
                     else r->closure_stack_dropped++;
                 }
-                if (n) { r->closure_jp_tables++; r->closure_jp_entries += n; r->prov_data_bytes += (uint64_t)n * (ct.slots ? 0 : ct.stride); }
+                if (n) { r->closure_jp_tables++; r->closure_jp_entries += n; r->prov_data_bytes += (uint64_t)n * (ct.slots ? 0 : ct.stride);
+                    if (!pass) { unsigned more = n * 512u, room = 16u * CLOSURE_INSTR; budget = budget + more > room ? (budget > room ? budget : room) : budget + more; } }   // every entry brings its own routine: the budget grows with the fan-out (bounded)
             }
         }
         int fall = f.fall || f.kind == DP_FLOW_SEQ || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL;

@@ -183,6 +183,7 @@ static void isa_reg_effect(const uint8_t *b, uint32_t pc, const DpRegState *in, 
     if ((op & 0xF1C0) == 0xB000 || (op & 0xF1C0) == 0xB0C0 || (op & 0xFF00) == 0x0C00 ||
         (op & 0xFF00) == 0x0C80 || (op & 0xFF00) == 0x0D00 || (op & 0xFF00) == 0x0D80) keep = 1;   // cmp/cmpa/cmpi family
     if ((op & 0xF9FF) == 0x4AC0) keep = 1;     // tst (reads only)
+    if ((op & 0xFFC0) == 0x4EC0) keep = 1;     // jmp: writes no register (lea T(pc),a5 ; jmp helper keeps the table base for the helper)
     unsigned pea = (op & 0xFFF8) == 0x4870 || op == 0x4878 || op == 0x4879;
     if (pea) keep = 1;                         // pea (An)/(xxx).w/(xxx).l: writes no D/A
     if (keep) {
@@ -191,6 +192,22 @@ static void isa_reg_effect(const uint8_t *b, uint32_t pc, const DpRegState *in, 
         if (pea) m68_kill(out, DP_M68KR_A7);                                                  // pea pushes
         if (op == 0x4E75 || op == 0x4E73 || op == 0x4E77) m68_kill(out, DP_M68KR_A7);         // rts/rte/rtr pop
         return;
+    }
+    {   // writers whose only register effect is one Dn (plus an autoincremented/decremented source An): the other constants survive
+        unsigned grp = op >> 12, mode = (op >> 3) & 7, rg0 = op & 7, rx = (op >> 9) & 7, opm = (op >> 6) & 7;
+        int dn = -1, an = -1, ok = 0;
+        if ((grp == 0x8 || grp == 0xC || grp == 0x9 || grp == 0xD) && !(op & 0x0100) && opm != 3 && opm != 7) { dn = (int)rx; ok = 1; }   // or/and/sub/add <ea>,Dn
+        else if ((grp == 0x8 || grp == 0xC) && (opm == 3 || opm == 7) && !(grp == 0xC && opm == 7 && mode <= 1)) { dn = (int)rx; ok = 1; }   // mulu/muls/divu/divs <ea>,Dn
+        else if ((grp == 0x9 || grp == 0xD) && (opm == 3 || opm == 7)) { an = (int)rx; ok = 1; }                                         // suba/adda <ea>,An
+        else if (grp == 0x0 && mode == 0 && (op & 0x0100) == 0 && ((op & 0x0E00) == 0x0000 || (op & 0x0E00) == 0x0200 || (op & 0x0E00) == 0x0400 || (op & 0x0E00) == 0x0600 || (op & 0x0E00) == 0x0A00)) { dn = (int)rg0; ok = 1; mode = 8; }   // ori/andi/subi/addi/eori #imm,Dn
+        else if (grp == 0xE && ((op >> 6) & 3) != 3) { dn = (int)rg0; ok = 1; mode = 8; }                                                  // register shift/rotate
+        else if ((op & 0xFFF8) == 0x4880 || (op & 0xFFF8) == 0x48C0 || (op & 0xFFF8) == 0x49C0 || (op & 0xFF38) == 0x4400 || (op & 0xFF38) == 0x4000 || (op & 0xFF38) == 0x4600) { if ((op & 0xFF38) == 0x4400 || (op & 0xFF38) == 0x4000 || (op & 0xFF38) == 0x4600) { if (mode == 0 && ((op >> 6) & 3) != 3) { dn = (int)rg0; ok = 1; mode = 8; } } else { dn = (int)rg0; ok = 1; mode = 8; } }   // neg/negx/not/ext/extb Dn
+        if (ok) {
+            if (dn >= 0) m68_kill(out, DP_M68KR_D0 + (unsigned)dn);
+            if (an >= 0) m68_kill(out, DP_M68KR_A0 + (unsigned)an);
+            if (mode == 3 || mode == 4) m68_kill(out, DP_M68KR_A0 + rg0);
+            return;
+        }
     }
     for (unsigned s2 = 0; s2 < 16; s2++) m68_kill(out, s2);   // unmodelled: never guessed
 }
