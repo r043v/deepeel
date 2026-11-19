@@ -1162,6 +1162,7 @@ static int cmd_nes(int argc, char **argv) {
         if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
         if (opt.queue_max) { kcfg.queue_max = opt.queue_max; kcfg.queue_auto = 0; }
         kcfg.hooks = dp_machine_nes_hooks();
+        kcfg.snap_cov = argv_cov(argc, argv);
         DpMovie kmov; memset(&kmov, 0, sizeof kmov);
         if (opt.tas_count > 0) {   // first movie replays in the kernel (m->frame counts the frames)
             char terr[160] = "";
@@ -1287,6 +1288,7 @@ static int cmd_pce(int argc, char **argv) {
         unsigned pbanks = (opt.seed_banks && km->bank_view) ? (unsigned)((size - hdr) / 0x4000) : 0;
         if (seedset_build(&kcfg, &mks, pepc, NULL, (size_t)opt.entry_count, pbanks, 0x4000, &kseeds)) { free(data); return 1; }
         kcfg.hooks = dp_machine_pce_hooks();
+        kcfg.snap_cov = argv_cov(argc, argv);
         if (opt.max_total) kcfg.max_total = opt.max_total;
         if (opt.max_steps) kcfg.max_path_steps = opt.max_steps;
         if (opt.fork_cap) kcfg.fork_site_cap = opt.fork_cap;
@@ -1430,6 +1432,7 @@ static int cmd_md(int argc, char **argv) {
         DpCoreConfig kcfg; dp_core_config_default(&kcfg);
         kcfg.max_path_steps = 50000000;   // boot clears RAM/VRAM with millions of dbf iterations before the first interrupt is unmasked
         kcfg.hooks = dp_machine_md_hooks();
+        kcfg.snap_cov = argv_cov(argc, argv);   // periodic coverage snapshot next to the final one
         kcfg.visits_per_pc = 2000000;   // the header checksum loop runs ROM-size/2 iterations (Sonic 1: 262144): the old 262144 cap cut it one short; was 262144 at 2 M steps: natural 32 bytes at 64 visits, 126 at 262144 (old engine ~134)
         const char *md_core_tas = NULL, *md_kdump = NULL; int md_kwatch = 0; uint32_t md_entry[16]; size_t md_ne = 0;
         for (int i = 4; i < argc; i++) {
@@ -1449,6 +1452,7 @@ static int cmd_md(int argc, char **argv) {
             else if (!strcmp(argv[i], "--max-total") && i + 1 < argc) kcfg.max_total = strtoull(argv[++i], NULL, 0);
             else if (!strcmp(argv[i], "--fork-cap") && i + 1 < argc) kcfg.fork_site_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(argv[i], "--progress") && i + 1 < argc) kcfg.progress_secs = (unsigned)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(argv[i], "--cov-every") && i + 1 < argc) kcfg.snap_secs = (unsigned)strtoul(argv[++i], NULL, 0);
             else if (!strcmp(argv[i], "--jobs") && i + 1 < argc) { ++i; if (!strcmp(argv[i], "auto")) { kcfg.jobs = (unsigned)auto_jobs(); kcfg.adaptive = 1; } else kcfg.jobs = (unsigned)strtoul(argv[i], NULL, 0); }
         }
         DpMdMach *mm = dp_mdmach_open(c.rom, c.size);

@@ -129,6 +129,8 @@ typedef struct DpCoreConfig {
     void (*on_live)(void *user, const struct DpCoreResult *live);
     void *on_live_user;
     unsigned progress_secs;   // >0: a progress line on stderr every N seconds (0 = silent)
+    const char *snap_cov;     // path of the periodic coverage snapshot (written to <path>.tmp then renamed); NULL = none
+    unsigned snap_secs;       // snapshot period in seconds (default 600; 0 = none)
 } DpCoreConfig;
 
 typedef struct DpCoreResult {

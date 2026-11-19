@@ -59,6 +59,7 @@ void dp_core_config_default(DpCoreConfig *c) {
     memset(c, 0, sizeof *c);
     c->max_total = 5000000;
     c->progress_secs = 5;
+    c->snap_secs = 600;
     c->max_path_steps = 100000;
     c->fork_site_cap = 4;      // DP_DEFAULT_BRANCH_FORK_CAP
     c->visits_per_pc = 64;
@@ -226,6 +227,7 @@ typedef struct {
     uint64_t *exactset;        // B5: exact (pc, machine state) keys already reached, clocks excluded
     size_t exactcap, exactn;
     uint8_t *tas_start; uint32_t tas_pc; int tas_shifts_left;   // power-on state kept to queue the shifted movie replays once the unshifted one ends
+    const DpMachine *snap_m;   // geometry for the periodic coverage snapshot
 } Shared;
 
 typedef struct {
@@ -2432,7 +2434,7 @@ static void run_path(Worker *w, Pending *p) {
 static void *monitor_main(void *arg) {
     Shared *sh = arg;
     unsigned secs = sh->cfg->progress_secs, t = 0;
-    time_t t0 = time(NULL);
+    time_t t0 = time(NULL); long last_snap = 0;
     while (!__atomic_load_n(&sh->stop_monitor, __ATOMIC_RELAXED)) {
         struct timespec ts = {0, 100000000};
         nanosleep(&ts, NULL);
@@ -2453,6 +2455,14 @@ static void *monitor_main(void *arg) {
                 el / 60, el % 60, st, el ? st / 1e6 / el : 0.0,
                 (unsigned long long)__atomic_load_n(&sh->paths_done, __ATOMIC_RELAXED), qn, act, nat, forced,
                 sh->cfg->max_total ? "" : " (no step limit)");
+        if (sh->cfg->snap_cov && sh->cfg->snap_secs && sh->snap_m && el - last_snap >= (long)sh->cfg->snap_secs) {   // periodic coverage snapshot: a crash or a kill no longer loses the run
+            char tmp[1024];
+            snprintf(tmp, sizeof tmp, "%s.tmp", sh->cfg->snap_cov);
+            dp_core_write_cov(tmp, "snapshot", sh->snap_m, sh->out);
+            int ok = rename(tmp, sh->cfg->snap_cov) == 0;
+            last_snap = el;
+            fprintf(stderr, "[%ldm%02lds] snapshot %s: %s (natural %zu, forced %zu)\n", el / 60, el % 60, sh->cfg->snap_cov, ok ? "written" : "FAILED", nat, forced);
+        }
     }
     return NULL;
 }
@@ -2908,7 +2918,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     memset(&sh, 0, sizeof sh);
     pthread_mutex_init(&sh.mu, NULL);
     pthread_cond_init(&sh.cv, NULL);
-    sh.out = out; sh.cfg = cfg;
+    sh.out = out; sh.cfg = cfg; sh.snap_m = m;
     sh.sbytes = m->state_bytes(m);
     if (cfg_unb.queue_auto) {   // the queue holds whole machine snapshots: bound it by what the RAM can carry, the rest spills to the disk spool
         uint64_t budget = dp_mem_budget();
