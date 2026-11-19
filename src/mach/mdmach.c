@@ -85,7 +85,6 @@ static void t_rd(void *u, MdFull *m, uint32_t a, unsigned sz) {
 
 static void t_wr(void *u, MdFull *m, uint32_t a, unsigned sz, uint32_t v) {
     DpMdMach *d = u;
-    (void)m;
     if (d->h.on_write) d->h.on_write(d->h.user, a, sz, v);
 }
 
@@ -113,10 +112,17 @@ void dp_mdmach_set_hooks(DpMdMach *d, const DpMdHooks *h) { d->h = *h; }
 static FILE *vint_dsy; static uint32_t vint_n; static const struct MdFull *vint_owner;
 static void vint_sample(void *u, const struct MdFull *m) {
     (void)u;
-    if (!vint_dsy || m != vint_owner) return;   // only the first machine (the primary replay), not shifted replays or forks
-    uint16_t nb = 1; uint8_t nl = 4; uint32_t len = 0x10000u;
+    static int64_t last_frame = -1;
+    if (!vint_dsy || m != vint_owner) return;
+    if ((int64_t)m->frames <= last_frame) return;   // forks restored on this machine replay earlier frames: the primary replay owns each frame
+    last_frame = m->frames;   // only the first machine (the primary replay), not shifted replays or forks
+    if (getenv("DP_MD_VINT_LOG")) fprintf(stderr, "V n=%u frames=%u line=%u pc=%06x f62a=%02x\n", vint_n, (unsigned)m->frames, (unsigned)m->line, (unsigned)m->pc, m->ram[0xf62a]);
+    uint16_t nb = 2; uint8_t nl = 4; uint32_t len = 0x10000u, rl = 68, regs[17];
+    for (int i = 0; i < 8; i++) { regs[i] = m->d[i]; regs[8 + i] = m->a[i]; }
+    regs[16] = m->pc;
     fwrite(&vint_n, 4, 1, vint_dsy); fwrite(&nb, 2, 1, vint_dsy); fwrite(&nl, 1, 1, vint_dsy); fwrite("wram", 1, 4, vint_dsy);
-    fwrite(&len, 4, 1, vint_dsy); fwrite(m->ram, 1, len, vint_dsy); fflush(vint_dsy);
+    fwrite(&len, 4, 1, vint_dsy); fwrite(m->ram, 1, len, vint_dsy);
+    fwrite(&nl, 1, 1, vint_dsy); fwrite("regs", 1, 4, vint_dsy); fwrite(&rl, 4, 1, vint_dsy); fwrite(regs, 4, 17, vint_dsy); fflush(vint_dsy);
     vint_n++;
 }
 
