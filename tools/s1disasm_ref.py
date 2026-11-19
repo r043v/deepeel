@@ -55,6 +55,19 @@ for i,(a,b,m) in enumerate(rows):
             if cls[k]==0: cls[k]=c
 pass
 
+# The Z80 sound driver and everything after it (music, samples) is listed with Z80 addresses (`CPU Z80` + phase): it is
+# no 68000 code, so the unlisted tail is data; unlisted holes of 1-3 bytes between classified bytes are alignment padding.
+tail = max((k for k in range(0x80000) if cls[k]), default=-1) + 1
+for k in range(tail, 0x80000): cls[k] = 2
+k = 0
+while k < tail:
+    if cls[k]: k += 1; continue
+    e = k
+    while e < tail and not cls[e]: e += 1
+    if e - k <= 3:
+        for q in range(k, e): cls[q] = 2
+    k = e
+
 if '--ref-cov' in sys.argv:   # the reference itself as a deepeel .cov (code -> flag 1, data -> flag 8), for `deepeel covmap`
     with open(sys.argv[sys.argv.index('--ref-cov') + 1], 'w') as o:
         for k in range(0x80000):

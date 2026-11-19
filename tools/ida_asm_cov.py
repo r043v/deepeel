@@ -98,14 +98,20 @@ while i < N:
         e = flush_insns(pos, n)
         if e is None: e = pos + 2 * n
         pos = e; i = j; regions += 1; continue
-    if kind == 'data': pos += pl
+    if kind == 'data':
+        for k in range(pos, min(pos + pl, 0x80000)):
+            if not cov[k]: cov[k] = 2   # dc/dcb/ds: data (code wins when both claim a byte)
+        pos += pl
     elif kind == 'pad':
-        if pos & 1: pos += 1
+        if pos & 1:
+            if pos < 0x80000 and not cov[pos]: cov[pos] = 2
+            pos += 1
     i += 1
-code = sum(cov)
+code = sum(1 for c in cov if c == 1)
+ndata = sum(1 for c in cov[:0x80000] if c == 2)
 print('regions %d, resync mismatches %d %s' % (regions, mism, first))
-print('reference code bytes: %d of %d' % (code, 0x80000))
+print('reference code bytes: %d, data bytes: %d, of %d' % (code, ndata, 0x80000))
 with open(out, 'w') as f:
-    f.write('# reference coverage from %s (IDA listing), flag 1 = instruction byte\n' % lst.split('/')[-1])
+    f.write('# reference coverage from %s (IDA listing), flag 1 = instruction byte, 8 = data\n' % lst.split('/')[-1])
     for i in range(0x80000):
-        if cov[i]: f.write('%02x %04x 1 1\n' % (i >> 14, i & 0x3FFF))
+        if cov[i]: f.write('%02x %04x %x 1\n' % (i >> 14, i & 0x3FFF, 1 if cov[i] == 1 else 8))
