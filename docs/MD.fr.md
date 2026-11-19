@@ -486,3 +486,20 @@ une divergence de logique de jeu. Observation de l'outil sur dumps Gens-rr, pas 
 
 Conséquence : l'écart Gens/m0boy est un décalage de départ + de petites dérives de position, pas une horloge différente
 sur toute la durée. Prochaine étape : fixer le décalage de départ (trames de boot de Gens) et traquer la dérive de X.
+
+### Modèle DMA de Gens lu dans le source (`gens/src/gens/gens_core/vdp/vdp_io.asm`, 19 novembre 2026)
+
+`Update_DMA` est appelée à chaque début de ligne (`gens.c` : `Cycles_M68K += CPL_M68K` puis `main68k_addCycles(Update_DMA())`)
+avec `CPL_M68K = round(CLOCK_NTSC/7/60/262) = 488`. Table de mots par ligne (`DMA_Timing_Table`, H32 ; H40 : +1 colonne) :
+bloc 68000→VRAM 83 (vblank) / 8 (affichage), 68000→CRAM/VSRAM 167 / 16, remplissage 166 / 15, copie 83 / 8 ;
+H40 : 102/205/204/102 et 9/18/17/9. Le choix vblank/affichage est refait **à chaque ligne** (ligne ≥ lignes visibles ou
+affichage coupé → débit vblank). Tant que le transfert dure, le 68000 est gelé pendant la ligne **entière** (488 cycles) ;
+à la dernière ligne le gel est proportionnel (`CPL * restant / débit`, virgule fixe 16.16). Remplissage et copie
+(`DMAT_Type` bit 1) ne gèlent jamais le 68000. Le gel démarre à la **ligne suivante**, pas à l'instruction qui lance le DMA.
+
+Comparaison avec `vdp_dma` de m0boy : mêmes débits (m0boy double les lectures VRAM : 166/2 = 83, 204/2 = 102) à 1 mot près
+(Gens 167/205 pour CRAM/VSRAM en vblank, m0boy 166/204), même durée totale à ≈ 0,1 % près (488 contre 488,57 cycles par
+ligne). Différences réelles : (1) m0boy fige le débit à la ligne de départ du DMA, Gens le recalcule par ligne
+(un DMA commencé à l'affichage et fini en vblank accélère chez Gens seulement) ; (2) le gel de Gens commence à la ligne
+suivante. Elles n'expliquent pas à elles seules l'avance d'une trame de m0boy après chaque chargement (trames 293, 336,
+419, 468 du film 1843S, compteur vblank `$FE0C` : écart 0→3), qui reste à isoler par trace de cycles côté Gens.
