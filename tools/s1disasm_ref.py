@@ -55,6 +55,11 @@ for i,(a,b,m) in enumerate(rows):
             if cls[k]==0: cls[k]=c
 pass
 
+if '--ref-cov' in sys.argv:   # the reference itself as a deepeel .cov (code -> flag 1, data -> flag 8), for `deepeel covmap`
+    with open(sys.argv[sys.argv.index('--ref-cov') + 1], 'w') as o:
+        for k in range(0x80000):
+            if cls[k]: o.write("%x %x %x 1\n" % (k >> 14, k & 0x3fff, 1 if cls[k] == 1 else 8))
+
 fl = bytearray(0x80000)
 for l in open(sys.argv[2]):
     if l[0] == "#": continue
@@ -67,6 +72,8 @@ for i in range(0x80000):
     C[(cls[i], "exec" if f & 1 else "data-read" if f & 8 else "unseen")] += 1
 for (c, d), n in sorted(C.items()): print("%-9s %-10s %7d" % (("ref-none", "ref-CODE", "ref-data")[c], d, n))
 code = sum(n for (c, d), n in C.items() if c == 1)
+st = sum(1 for i in range(0x80000) if cls[i] == 1 and not fl[i] & 1 and fl[i] & 4)
+print("code reference + statically proven (flag 4, not executed): %d octets (%.1f%% executed or proven)" % (st, 100.0 * (C[(1, "exec")] + st) / max(code, 1)))
 print("code reference: %d octets, executed by deepeel: %d (%.1f%%)" % (code, C[(1, "exec")], 100.0 * C[(1, "exec")] / max(code, 1)))
 
 if "--missing" in sys.argv:   # unexecuted reference code grouped by the label it falls under (where to look for the missing flow)
