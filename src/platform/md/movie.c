@@ -97,6 +97,8 @@ int dp_md_movie_load(const char *path, DpMdMovie *out, char *err, size_t errsz) 
     /* A 6-button pad answers the 3-button protocol (two TH phases) with the
      * same eight bits; X/Y/Z/Mode (frame byte 2) are only visible to a game
      * that runs the third TH cycle, which the replayed pad does not model. */
+    // old Gens movies (TEST6 and before, e.g. TAS 250S) carry no controller bytes: a blank field means two 3-button pads
+    if (!data[20] && !data[21] && data[15] < 'A') { data[20] = '3'; data[21] = '3'; }
     int six = data[20] == '6' || data[21] == '6';
     if ((data[20] != '3' && data[20] != '6') || (data[21] != '3' && data[21] != '6') ||
         (data[15] >= 'A' && (data[22] & 0xE0))) {
