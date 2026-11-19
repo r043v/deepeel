@@ -330,11 +330,15 @@ static unsigned insn_len(struct DpMachine *m, uint32_t at) {
 // adda.w Dn,Am) then jmp/jsr (Am) or jmp/jsr (d8,PC|Am,Xn).  Returns 1 when the value reaches an indirect jump/call.
 // *via_idx = 1 when the final jump re-indexes the table itself (the value is an offset from the base).
 static int reaches_jump(struct DpMachine *m, uint32_t at, unsigned dn, int *via_idx, int *d8j, int *abs_via_a) {
-    unsigned cur = dn; int isa_ = 0; *via_idx = 0; *abs_via_a = -1; *d8j = 0;
+    const uint32_t start = at; unsigned cur = dn; int isa_ = 0; *via_idx = 0; *abs_via_a = -1; *d8j = 0;
     for (int n = 0; n < 4; n++) {
         unsigned op = rd16(m, at); unsigned len = insn_len(m, at);
         if (!len) return 0;
-        if ((op & 0xFFF8u) == 0x4EF0u || (op & 0xFFF8u) == 0x4EB0u || op == 0x4EFB || op == 0x4EBB) { *via_idx = 1; *d8j = (int8_t)m->fetch(m, at + 3); return 1; }
+        if ((op & 0xFFF8u) == 0x4EF0u || (op & 0xFFF8u) == 0x4EB0u || op == 0x4EFB || op == 0x4EBB) {   // a PC-relative jump is compared to the read by effective base: the reads sit at start-4, the jump at `at`
+            *via_idx = 1; *d8j = (int8_t)m->fetch(m, at + 3);
+            if (op == 0x4EFB || op == 0x4EBB) *d8j += (int)(at - start) + 4;
+            return 1;
+        }
         if ((op & 0xFFF8u) == 0x4ED0u || (op & 0xFFF8u) == 0x4E90u) { *abs_via_a = (int)(op & 7); return 1; }
         if ((op & 0xF1F8u) == 0x2040u && (op & 7) == cur) isa_ = 1;                    // movea.l Dn,Am
         else if ((op & 0xFFF8u) == 0x48C0u && (op & 7) == cur) isa_ = 1;               // ext.l Dn

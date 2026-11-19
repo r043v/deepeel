@@ -6426,3 +6426,8 @@ attract tient désormais au moins `--attract-min` images (36 000 = 10 min de jeu
 - La fermeture des tables de code tourne aussi sur les chemins forcés (leurs registres sont concrets) ; les forks restent réservés aux chemins naturels.
 - Mesure (observation de l'outil, SoR, 10 min, référence IDA) : code manquant 38,0 % → 22,2 %, code prouvé 26 284 octets ; 729 octets marqués code sont des données de la référence (≈ 1 %).
 - Outil : `tools/cov_compare.py ref.cov ours.cov` (plus gros trous de code).
+
+## 0.407.0 — tables d'états d'objets (`move.w T(pc,Xn),Dn ; jmp T(pc,Xn)`)
+
+- L'idiome 68000 de Sonic 1 (`move.w Idx(pc,d0.w),d1 ; jmp Idx(pc,d1.w)`) n'était reconnu que si les deux déplacements `d8` étaient égaux ; or les deux instructions sont à des adresses différentes. La comparaison porte désormais sur la **base effective** (test `obj state table`).
+- Mesure (observation de l'outil, Sonic 1 REV00, 10 min, film 1843S, référence s1disasm) : code exécuté ou prouvé 75,5 % → 89,5 % (exécuté 51,3 %, prouvé sans exécution 34 254 octets).

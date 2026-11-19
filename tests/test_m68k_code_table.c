@@ -36,6 +36,8 @@ int main(void) {
     { uint8_t c[] = {0x30,0x31,0x00,0x00, 0x48,0xC0, 0xD3,0xC0, 0x4E,0xD1}; check("ext+adda.l", c, 10, 1, 2, 1, DP_M68KR_A0 + 1); }
     // move.w (a1,d0.w),d0 ; jmp (a1,d0.w) -> rel16, the jump is also a table
     { uint8_t c[] = {0x30,0x31,0x00,0x00, 0x4E,0xF1,0x00,0x00}; check("move.w+jmp An,Xn", c, 8, 1, 2, 1, DP_M68KR_A0 + 1); }
+    // Sonic 1 Junction: move.w Jun_Index(pc,d0.w),d1 ; jmp Jun_Index(pc,d1.w)  (d8 6 then 2: same base)
+    { uint8_t c[] = {0x32,0x3B,0x00,0x06, 0x4E,0xFB,0x10,0x02}; check("obj state table", c, 8, 1, 2, 1, -1); }
     // negatives: movea.l T,a0 not followed by a call: a data pointer table
     { uint8_t c[] = {0x20,0x7B,0x00,0x10, 0x4E,0x71}; check("data ptr", c, 6, 0, 0, 0, 0); }
     // move.w then a plain use: not a dispatch
