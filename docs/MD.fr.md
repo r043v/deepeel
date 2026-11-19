@@ -473,3 +473,16 @@ La connaissance de destination (DP_DEST_* : où la donnée lue en ROM atterrit �
 (`DpMachine.data_dest`) et consommée par le noyau, dont la carte PNG teinte les
 octets typés. Les moteurs legacy ne portent pas ce tableau : ils convergent vers le
 noyau plutôt que de dupliquer la plomberie (`--core` a la carte typée).
+
+### Gens-rr contre m0boy, avec décalage de trames (19 novembre 2026) : film 1843S, 3000 trames
+
+Les écarts de « centaines d'octets » ci-dessus comparaient la trame N de Gens-rr à la trame N de m0boy. Or les deux ne
+comptent pas les trames de la même façon au démarrage (la marque `init` de `$FFFC` apparaît dès la trame 52 côté m0boy,
+plus tard côté Gens ; les compteurs `$F001`/`$FE0F` diffèrent de 1–2). En cherchant, pour chaque trame Gens, la trame
+m0boy la plus proche parmi N−2…N+2 (RAM `$0000–$EFFF`, hors pile) : l'écart tombe à **0–12 octets** sur les 2700
+trames (décalage −2 ou −1 selon le moment ; 0 octet aux trames 40–600, 1100 et 2100). Le reste (≤ 12 octets) est la
+position et la vitesse du joueur (`$D009–$D015`) et un octet de variable (`$AD01`) : un écart de quelques pixels, pas
+une divergence de logique de jeu. Observation de l'outil sur dumps Gens-rr, pas une mesure matérielle.
+
+Conséquence : l'écart Gens/m0boy est un décalage de départ + de petites dérives de position, pas une horloge différente
+sur toute la durée. Prochaine étape : fixer le décalage de départ (trames de boot de Gens) et traquer la dérive de X.
