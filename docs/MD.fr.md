@@ -754,3 +754,5 @@ Observation de l'outil, SoR sans film, 150 s : code de référence manquant 9,0 
 code provisoire (jamais « exécuté »). Avec un seuil de 6 entrées : 0,8 % manquant mais 16 455 octets hors référence.
 
 Ristar avec B11 étendu (seuil 12), sans film, 150 s, 4 fils : code IDA couvert 66,1 % → 99,7 % (exécuté 11,8 % + statique/spéculatif 87,9 %), 1 463 octets exécutés hors du code IDA. Observation de l'outil ; la part statique est provisoire (non exécutée).
+
+Mesures finales de la session (B11, seuil 12, observations de l'outil) : Streets of Rage sans film, 600 s, 4 fils : code de référence manquant 1,3 % (exécuté 42,7 %, prouvé sans exécution 54 329 octets) ; plus grands trous restants `$1893A` (82 octets), `$1884A` (78), `$188F2` (64). Ristar : quatre adresses du dasm IDA restent non couvertes (`$397EC`, `$3BDBA`, `$3B134`, `$DA9A`) : elles suivent des données (pas de terminateur) et `$DA9A` est une entrée de table longue mêlée de cases partagées ; assouplir la forme (cases ROM quelconques) n'a rien gagné (99,6 %), essai retiré.
