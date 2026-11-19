@@ -564,3 +564,22 @@ bien que la boucle d'attente de la frame 270-291 montre 112 cycles de moins par 
 chez Gens. Cet écart local n'est pas une longueur de frame constante : il faut la
 trace PC/cycles de Gens-rr pour savoir où ces cycles sont consommés. Essai non
 conservé dans m0boy.
+
+### Correction de l'essai « lignes de Gens » et état du démarrage
+
+L'échec de l'essai précédent venait d'un défaut de l'essai : `line_master` (3419 en mode
+exact) servait encore au compteur HV et au statut VDP alors que les lignes valaient 3416.
+Refait avec les deux alignés (`DP_MD_EXACT_LINE=3416`, expérience non committée dans
+m0boy : lignes uniformes de 488 cycles, comptabilité exacte conservée) :
+
+- la boucle `$71FC4` suit Gens : 9132-9133 tours par frame (9140-9141 avec la base) ;
+- l'ensemble reste aussi fidèle que la base : écart médian de 15 octets par frame,
+  334 frames identiques, 48 frames à plus de 50 octets (base : 47) ;
+- les marches de dérive du compteur de V-int tombent aux mêmes frames (292-295
+  transitoires, puis 336, 419, 470 durables) : la longueur de frame n'en est pas la cause.
+
+Démarrage (`regs`, boucle de checksum `$32C-$330`) : les deux machines sortent de la
+boucle à la même frame (indice 52, PC `$370`/`$372`) ; `a0` diffère de 14 à 18 octets
+(7 à 9 tours, moins de 250 cycles) sur 49 frames. Le « décalage d'une frame » du marqueur
+`init` n'est donc pas un décalage d'exécution. Les marches durables sont à chercher aux
+phases de chargement (frames 335, 418, 467), par trace PC/cycles de ces frames.
