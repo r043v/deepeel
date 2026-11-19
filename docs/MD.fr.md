@@ -752,3 +752,5 @@ ou un saut (les routines d'une table ne suivent pas toujours un `rts`) ; la suit
 Observation de l'outil, SoR sans film, 150 s : code de référence manquant 9,0 % → 3,2 % (prouvé sans exécution 80 601 →
 86 295 octets) ; contrepartie : 10 457 octets provisoires hors du code de référence (49 % de précision sur le gain), tous en
 code provisoire (jamais « exécuté »). Avec un seuil de 6 entrées : 0,8 % manquant mais 16 455 octets hors référence.
+
+Ristar avec B11 étendu (seuil 12), sans film, 150 s, 4 fils : code IDA couvert 66,1 % → 99,7 % (exécuté 11,8 % + statique/spéculatif 87,9 %), 1 463 octets exécutés hors du code IDA. Observation de l'outil ; la part statique est provisoire (non exécutée).
