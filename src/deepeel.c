@@ -126,7 +126,8 @@ static void usage(void) {
             "  deepeel regs <gb|nes|pce|md|sg|sms|gg|msx>   dump the register registry\n"
             "  deepeel map rom.gb                           static map only (pointer tables, padding)\n"
             "  deepeel maprender rom.gb in.map out.map.png [--meta f]\n"
-            "  deepeel mapx x.map.png out [--chunk NAME]    extract one chunk of a map PNG\n\n"
+            "  deepeel mapx x.map.png out [--chunk NAME]    extract one chunk of a map PNG\n"
+            "  deepeel covmap ROM in.cov out.png [--title T] render a .cov (reference coverage) as a map PNG\n\n"
             "common options (every platform):\n"
             "    --max-total N        global step wall\n"
             "    --jobs N|auto        parallel workers sharing one frontier\n"
@@ -790,6 +791,38 @@ static int cmd_explore(int argc, char **argv) {
 // map is trusted as written (explore --map or mapx produced it).  --meta
 // embeds a file verbatim as deepeel_meta, otherwise a compact identity is
 // synthesized (version, rom, source)
+// covmap ROM in.cov out.png [--title T]: render a .cov (e.g. a reference from a disassembly) with the kernel's own map writer
+static int cmd_covmap(int argc, char **argv) {
+    if (argc < 5) { fprintf(stderr, "usage: deepeel covmap ROM in.cov out.png [--title T]\n"); return 2; }
+    const char *title = argv_opt(argc, argv, "--title");
+    FILE *rf = fopen(argv[2], "rb");
+    if (!rf) { fprintf(stderr, "deepeel: cannot read %s\n", argv[2]); return 1; }
+    fseek(rf, 0, SEEK_END); long rs = ftell(rf); fclose(rf);
+    DpCoreResult r; memset(&r, 0, sizeof r);
+    r.rom_size = (size_t)rs;
+    r.flags = calloc((size_t)rs, 1); r.hits = calloc((size_t)rs, sizeof *r.hits);
+    if (!r.flags || !r.hits) return 1;
+    FILE *cf = fopen(argv[3], "r");
+    if (!cf) { fprintf(stderr, "deepeel: cannot read %s\n", argv[3]); return 1; }
+    char line[256]; unsigned long lines = 0;
+    while (fgets(line, sizeof line, cf)) {
+        unsigned bank, off, fl, hits = 1;
+        if (line[0] == '#' || sscanf(line, "%x %x %x %u", &bank, &off, &fl, &hits) < 3) continue;
+        size_t i = ((size_t)bank << 14) + (off & 0x3FFFu);
+        if (i >= (size_t)rs) continue;
+        if (fl & 1) r.flags[i] |= DP_CORE_NATURAL;
+        else if (fl & 4) r.flags[i] |= DP_CORE_STATIC;
+        if (fl & 8) r.flags[i] |= DP_CORE_DATA;
+        r.hits[i] = hits; lines++;
+    }
+    fclose(cf);
+    if (title) snprintf(r.rom_title, sizeof r.rom_title, "%s", title);
+    int rc = dp_core_write_map(argv[4], "reference", argv[2], &r) < 0;
+    fprintf(stderr, "covmap: %lu cov lines -> %s\n", lines, argv[4]);
+    free(r.flags); free(r.hits);
+    return rc;
+}
+
 static int cmd_maprender(int argc, char **argv) {
     const char *meta_src = NULL, *rom = NULL, *inmap = NULL, *out = NULL;
     const char *sysname = "gb", *title_arg = NULL;
@@ -1607,7 +1640,7 @@ static int ar_has(int argc, char **argv, const char *opt) {
 }
 
 static int ar_is_subcommand(const char *a) {
-    static const char *const names[] = { "frontier", "tasfetch", "lr", "bh", "md", "nes", "pce", "z80", "explore", "mapx", "maprender", "tas", "desync", "map", "regs", "dis", NULL };
+    static const char *const names[] = { "frontier", "tasfetch", "lr", "bh", "md", "nes", "pce", "z80", "explore", "mapx", "maprender", "covmap", "tas", "desync", "map", "regs", "dis", NULL };
     for (int i = 0; names[i]; i++) if (!strcmp(a, names[i])) return 1;
     return 0;
 }
@@ -1753,6 +1786,7 @@ int deepeel_main(int argc, char **argv) {   // the library entry point; src/deep
     if (!strcmp(argv[1], "explore")) return cmd_explore(argc, argv);
     if (!strcmp(argv[1], "mapx")) return cmd_mapx(argc, argv);
     if (!strcmp(argv[1], "maprender")) return cmd_maprender(argc, argv);
+    if (!strcmp(argv[1], "covmap")) return cmd_covmap(argc, argv);
     if (!strcmp(argv[1], "tas")) return cmd_tas(argc, argv);
     if (!strcmp(argv[1], "desync")) return cmd_desync(argc, argv);
     if (!strcmp(argv[1], "map")) return cmd_map(argc, argv);
