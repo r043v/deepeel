@@ -108,11 +108,27 @@ void dp_mdmach_close(DpMdMach *d) {
 
 void dp_mdmach_set_hooks(DpMdMach *d, const DpMdHooks *h) { d->h = *h; }
 
+/* DP_MD_DSY_VINT=<file>: diagnostic DSY1 writer sampling work RAM at the V-int vector like the Gens exec hook
+ * (the reference side of `deepeel desync`); one sample per V-int, numbered from 0. */
+static FILE *vint_dsy; static uint32_t vint_n; static const struct MdFull *vint_owner;
+static void vint_sample(void *u, const struct MdFull *m) {
+    (void)u;
+    if (!vint_dsy || m != vint_owner) return;   // only the first machine (the primary replay), not shifted replays or forks
+    uint16_t nb = 1; uint8_t nl = 4; uint32_t len = 0x10000u;
+    fwrite(&vint_n, 4, 1, vint_dsy); fwrite(&nb, 2, 1, vint_dsy); fwrite(&nl, 1, 1, vint_dsy); fwrite("wram", 1, 4, vint_dsy);
+    fwrite(&len, 4, 1, vint_dsy); fwrite(m->ram, 1, len, vint_dsy); fflush(vint_dsy);
+    vint_n++;
+}
+
 void dp_mdmach_reset(DpMdMach *d) {
     /* ClownMDEmu's clock (exact, phase 3) keeps real Sonic 1 films in step for 13 800+ frames where the 3420-master
      * default loses a frame near 1423 (docs/MD.fr.md); still overridable from the environment. */
     setenv("DP_MD_CLOWN_CLOCK", "exact", 0); setenv("DP_MD_CLOCK_OFF", "3", 0);
     md_full_reset(d->m);
+    { const char *vp = getenv("DP_MD_DSY_VINT");
+      if (vp && *vp && !vint_dsy) { vint_dsy = fopen(vp, "wb"); if (vint_dsy) fwrite("DSY1", 1, 4, vint_dsy); }
+      if (vint_dsy && !vint_owner) vint_owner = d->m;
+      if (vint_dsy) { d->m->phase_hook = vint_sample; d->m->phase_on_vint = 1; } }
     d->resume_frame = 0;
     d->steps = 0;
 }
