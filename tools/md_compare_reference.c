@@ -44,6 +44,11 @@ static void dp_trace_step(void *u, MdFull *m, uint32_t pc, uint16_t op) { (void)
 static void dp_trace_end(void *u, MdFull *m, uint32_t pc, uint32_t npc) { (void)u; (void)npc;
     if (dp_trace_on_d) fprintf(dp_trace_d, "%06x %u\n", (unsigned)pc, (unsigned)(m->cycles - dp_trace_c0)); }
 #endif
+static uint8_t dsy_snap_ram[0x10000]; static uint32_t dsy_snap_regs[17];
+static void dsy_line_hook(void *u, const MdFull *m) {   /* the end of a Gens frame: 38 lines after its V-int line start less 128 cycles */
+    (void)u;
+    memcpy(dsy_snap_ram, m->ram, sizeof dsy_snap_ram);
+    for (int i = 0; i < 8; i++) { dsy_snap_regs[i] = m->d[i]; dsy_snap_regs[8 + i] = m->a[i]; } dsy_snap_regs[16] = m->pc; }
 int main(int argc, char **argv) {
     /* ClownMDEmu's own clock: the m0boy exact clock with a 3-master-clock phase tracks 1843S/1437S/s6k (13 800 frames)
      * where the default 3420-master line drifts by one frame near 1423; both still overridable from the environment. */
@@ -74,7 +79,7 @@ int main(int argc, char **argv) {
     cb.pcm_audio_to_be_generated = audio; cb.cdda_audio_to_be_generated = audio;
     ClownMDEmu_Constant_Initialise(); ClownMDEmu_Initialise(ref, &config, &cb);
     ClownMDEmu_SetCartridge(ref, words, n/2); ClownMDEmu_HardReset(ref, 1, 0);
-    dp_mdrom_set(rom, n); md_full_reset(dut);
+    dp_mdrom_set(rom, n); md_full_reset(dut); if (getenv("DP_MD_DSY_PHASE")) { dut->phase_hook = dsy_line_hook; dut->phase_cycle = (uint16_t)atoi(getenv("DP_MD_DSY_PHASE")); }
     unsigned limit = (unsigned)strtoul(argv[3], NULL, 0);
     unsigned trace_begin = 1, trace_end = 0;
     const char *range = getenv("DP_MD_TRACE_RANGE");
@@ -126,9 +131,12 @@ int main(int argc, char **argv) {
             static FILE *sf; if (!sf) { sf = fopen(getenv("DP_MD_DUT_DSY"), "wb"); if (sf) fwrite("DSY1", 1, 4, sf); }
             if (sf) {
                 uint32_t fn = frame, len = 0x10000, rl = 68, regs[17]; uint16_t nb = 2; uint8_t n4 = 4;
+                const uint8_t *ramp = dut->ram;
                 for (int i = 0; i < 8; i++) { regs[i] = dut->d[i]; regs[8 + i] = dut->a[i]; } regs[16] = dut->pc;
+                if (getenv("DP_MD_DSY_PHASE")) {   /* sample where Gens does: the end of its frame, 38 lines after the V-int, not before the next V-int */
+                    memcpy(regs, dsy_snap_regs, sizeof regs); ramp = dsy_snap_ram; }
                 fwrite(&fn, 4, 1, sf); fwrite(&nb, 2, 1, sf);
-                fwrite(&n4, 1, 1, sf); fwrite("wram", 1, 4, sf); fwrite(&len, 4, 1, sf); fwrite(dut->ram, 1, 0x10000, sf);
+                fwrite(&n4, 1, 1, sf); fwrite("wram", 1, 4, sf); fwrite(&len, 4, 1, sf); fwrite(ramp, 1, 0x10000, sf);
                 fwrite(&n4, 1, 1, sf); fwrite("regs", 1, 4, sf); fwrite(&rl, 4, 1, sf); fwrite(regs, 4, 17, sf);
             }
         }

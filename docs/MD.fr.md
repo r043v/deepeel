@@ -583,3 +583,34 @@ boucle à la même frame (indice 52, PC `$370`/`$372`) ; `a0` diffère de 14 à 
 (7 à 9 tours, moins de 250 cycles) sur 49 frames. Le « décalage d'une frame » du marqueur
 `init` n'est donc pas un décalage d'exécution. Les marches durables sont à chercher aux
 phases de chargement (frames 335, 418, 467), par trace PC/cycles de ces frames.
+
+### Cause trouvée : l'instant d'échantillonnage n'était pas le même
+
+Les deux flux DSY1 n'étaient pas pris au même instant d'une frame :
+
+- une frame de Gens-rr va de la ligne 0 de l'écran actif à la ligne 261 ; la V-int
+  tombe à la ligne 224 (+128 cycles) et l'échantillon est pris **38 lignes après** ;
+- une frame de m0boy commence à la V-int et l'échantillon était pris **262 lignes
+  après**, juste avant la suivante.
+
+Les états comparés étaient donc distants de 224 lignes d'émulation. Les « marches » de
+dérive du compteur de V-int, la boucle `$71FC4`, le « décalage de démarrage » étaient
+en grande partie cet artefact (sur une attente stable les deux coïncident, d'où
+l'impression d'un bon alignement).
+
+Correction : `DP_MD_DSY_PHASE=<cycles>` (`md_compare_reference`, avec le crochet
+`phase_hook` de m0boy appelé `phase_cycle` cycles après le début de la ligne 37 ;
+360 = 38 lignes moins 128 cycles). Mesures de l'outil, 1843S, 3000 frames, WRAM hors pile :
+
+| échantillon m0boy | frames identiques | médiane d'octets | frames > 50 octets | première différence |
+|---|---|---|---|---|
+| fin de frame (avant) | 334 | 15 | 47 | frame 59 |
+| 38 lignes après la V-int | 600-616 | 10 | 17-18 | frame 87 |
+
+Le réglage fin (0 à 488 cycles) ne change presque rien. Restent, aux frames 87, 292,
+320-335 : une palette (`$FB00`) ou le tampon de décompression Nemesis, écrits un peu plus
+tôt chez m0boy. Frame 87 (trace m0boy) : la V-int n'est prise qu'à ≈ 14 100 cycles du
+début de frame (section masquée) et le gestionnaire s'exécute de 14 158 à ≈ 20 400,
+l'échantillon (18 416) tombe en plein dedans : une différence de quelques centaines de
+cycles dans la section masquée suffit. Le modèle DMA par ligne de Gens, re-testé à la
+bonne phase, dégrade (351 frames identiques) : non retenu.
