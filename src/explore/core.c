@@ -488,6 +488,21 @@ static int closure_entry_is_data(const DpCoreResult *r, const DpIsa *isa, const 
     if (k >= 0 && (__atomic_load_n(&r->flags[k], __ATOMIC_RELAXED) & (DP_CORE_DATA | DP_CORE_COPIED))) return 0;   // a data-marked root: the walk stops on it
     return isa->entry_data_sig && isa->entry_data_sig(w, 8);
 }
+// A register-based table (DpCodeTable.base_reg): the base is the register's proven value plus the displacement.  `rs`: a walk's
+// constants, or NULL for the concrete CPU.  Only ROM tables count (a table in RAM is data the program writes).  Returns 0 when
+// the register is not fully known or the table is not in the ROM.
+static int code_table_resolve(DpMachine *m, const DpIsa *isa, DpCodeTable *t, const DpRegState *rs) {
+    if (t->base_reg < 0) return 1;
+    DpRegState cur;
+    if (!rs) { if (!m->get_regs || !m->get_regs(m, &cur)) return 0; rs = &cur; }
+    unsigned pw = isa->ptr_width >= 4 ? 0x0Fu : (1u << (isa->ptr_width ? isa->ptr_width : 2)) - 1;
+    if ((unsigned)t->base_reg >= DP_REG_N || (rs->known[t->base_reg] & pw) != pw) return 0;
+    uint32_t vmask = isa->ptr_width >= 4 ? 0xFFFFFFFFu : isa->ptr_width == 3 ? 0x00FFFFFFu : 0x0000FFFFu;
+    t->base = (rs->v[t->base_reg] + (uint32_t)t->disp) & vmask;
+    t->base_reg = -1;
+    return m->rom_index(m, t->base) >= 0;
+}
+
 // Targets of a code table (DpIsa.code_table): `rel` tables hold signed word offsets from the base and end where the first
 // entry's target begins; absolute tables hold 24-bit long pointers and may start one slot early (object ids begin at 1).
 // An entry must be even, inside the ROM and decode as a legal instruction.  Returns the number of targets written.
@@ -723,7 +738,7 @@ no_stackret:;
         }
         if (trust && v->m && isa->code_table && (f.kind == DP_FLOW_INDIRECT || f.kind == DP_FLOW_SEQ)) {   // a PC-relative table met by the walk: every entry is a root
             DpCodeTable ct; uint32_t lp = 0;
-            if (isa->code_table(v->m, pc, b, &ct, &lp)) {
+            if (isa->code_table(v->m, pc, b, &ct, &lp) && code_table_resolve(v->m, isa, &ct, have_regs ? &regs : NULL)) {
                 uint32_t tg[128];
                 unsigned n = code_table_targets(v->m, isa, &ct, tg, 128);
                 for (unsigned i = 0; i < n; i++) {
@@ -2106,7 +2121,7 @@ static void run_path(Worker *w, Pending *p) {
         }
         if (!cfg->no_closure && !cur_forced && have_flow && isa->code_table && (fi.kind == DP_FLOW_INDIRECT || fi.kind == DP_FLOW_SEQ)) {
             DpCodeTable ct; uint32_t lp = 0;
-            if (isa->code_table(m, pc, bytes, &ct, &lp)) {
+            if (isa->code_table(m, pc, bytes, &ct, &lp) && code_table_resolve(m, isa, &ct, NULL)) {
                 // a table is closed once per thread: direct-mapped cache of the bases already walked (objects run the same table every frame)
                 static __thread uint32_t seen_ct[256];
                 uint32_t *slot = &seen_ct[((ct.base * 0x9e3779b1u) >> 24) & 255u], tag = ct.base | 0x80000000u | (uint32_t)ct.stride << 28;

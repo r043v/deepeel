@@ -6395,3 +6395,12 @@ Une suite de lectures séquentielles d'au moins 4096 octets, sans écriture (ou 
 ou hachage de la ROM, pas une lecture de table. Ses octets ne sont plus « donnée lue » : ils restent inconnus (champ
 `swept_only` du résumé JSON) et ne bloquent plus la fermeture statique. Un octet lu aussi par un accès ordinaire
 reste « donnée lue ». Observation de l'outil, pas une mesure de matériel. Test : `core_checksum_sweep`.
+
+## 0.403.0 — tables de code à base en registre (68000)
+
+`DpCodeTable` gagne `base_reg`/`disp` : un `jmp/jsr (d8,An,Xn)` ou un `movea.l (d8,An,Xn),Am` suivi de `jsr/jmp (Am)`
+(routine de dispatch partagée dont l'appelant fournit la table par `lea`) est résolu par la valeur concrète du registre
+(CPU au pas exécuté) ou par les constantes prouvées d'une marche de fermeture. Seules les tables en ROM comptent ; un
+registre non entièrement connu ne produit rien (jamais deviné). Le crochet `DpIsa.code_table` reste générique : toute
+ISA peut renvoyer `base_reg` (index de `DpRegState`) avec un `stride`/`rel` de son choix. Le chargement `movea.l` n'est
+une table de code que si l'instruction suivante appelle le registre chargé.

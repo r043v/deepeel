@@ -92,7 +92,10 @@ typedef struct DpMemOp {
 
 typedef struct DpMachine DpMachine;   // the machine hooks take and return it (declared in full below)
 
-typedef struct DpCodeTable { uint32_t base; uint8_t stride, rel; } DpCodeTable;
+// A code table: `stride` bytes per entry, `rel` = signed offsets from the base (else absolute pointers).  base_reg >= 0:
+// the base is the value of that register slot plus `disp`, read from the concrete CPU (or a walk's proven constants) -- the
+// dispatch routine shared by several callers, each passing its own table in a register (the table is the caller's `lea`).
+typedef struct DpCodeTable { uint32_t base; uint8_t stride, rel; int8_t base_reg; int32_t disp; } DpCodeTable;
 
 typedef struct DpIsa {
     const char *name;                      // "sm83", "z80", ...

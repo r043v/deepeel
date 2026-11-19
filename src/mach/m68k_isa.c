@@ -314,16 +314,28 @@ static int isa_rom_table_follows(const DpIsa *isa, DpMachine *m, uint32_t pc, in
     }
     return 0;
 }
-// Indirect jmp/jsr through (d8,PC,Xn): the table is the PC-relative base, its entries are signed word
-// offsets from that base (`dc.w Obj-Index`).  The table ends where the first entry's target begins.
+// The instruction after a table load must call or jump through the loaded register (jsr/jmp (Am)): otherwise the longs
+// are plain data pointers, not code (a pointer table of art or maps is read the same way).
+static int follows_call(struct DpMachine *m, uint32_t at, unsigned am) {
+    unsigned op = (unsigned)(m->fetch(m, at) << 8 | m->fetch(m, at + 1));
+    return op == (0x4E90u | am) || op == (0x4ED0u | am);
+}
+// Indirect jmp/jsr through (d8,PC,Xn) or (d8,An,Xn), and the object-index idiom movea.l (d8,PC|An,Xn),Am ; jsr (Am).
+//  - jmp/jsr (d8,PC,Xn): the table is the PC-relative base, entries are signed word offsets from it (`dc.w Obj-Index`).
+//  - jmp/jsr (d8,An,Xn): the same, the base is the caller's An + d8 (a shared dispatch routine; the table is the caller's lea).
+//  - movea.l (d8,PC,Xn),Am / (d8,An,Xn),Am followed by jsr/jmp (Am): absolute long pointers.
+// The table ends where the first entry's target begins; entries must be legal code (checked by the kernel).
 static int isa_code_table(struct DpMachine *m, uint32_t pc, const uint8_t *b, DpCodeTable *out, uint32_t *load_pc) {
-    (void)m;
     unsigned op = (unsigned)(b[0] << 8 | b[1]);
-    const int jump = op == 0x4EFB || op == 0x4EBB;            // jmp / jsr (d8,PC,Xn)
-    const int load = (op & 0xF1FFu) == 0x207Bu;               // movea.l (d8,PC,Xn),An: the object-index idiom, then jsr (An)
-    if (!jump && !load) return 0;
+    int pcrel = op == 0x4EFB || op == 0x4EBB || (op & 0xF1FFu) == 0x207Bu;
+    int areg = (op & 0xFFF8u) == 0x4EF0u || (op & 0xFFF8u) == 0x4EB0u || (op & 0xF1F8u) == 0x2070u;   // jmp/jsr (d8,An,Xn); movea.l (d8,An,Xn),Am
+    if (!pcrel && !areg) return 0;
     if (b[2] & 0x07) return 0;                     // brief extension word: bits 10..8 are zero
-    out->base = (pc + 2u + (uint32_t)(int32_t)(int8_t)b[3]) & 0xFFFFFFu;
+    int jump = (op & 0xFFF0u) == 0x4EB0u || (op & 0xFFF0u) == 0x4EF0u || op == 0x4EFB || op == 0x4EBB;
+    if (!jump && !follows_call(m, pc + 4, (op >> 9) & 7)) return 0;
+    out->base_reg = -1; out->disp = 0;
+    if (pcrel) out->base = (pc + 2u + (uint32_t)(int32_t)(int8_t)b[3]) & 0xFFFFFFu;
+    else { out->base_reg = (int8_t)(DP_M68KR_A0 + (op & 7)); out->disp = (int8_t)b[3]; out->base = 0; }
     if (jump) { out->stride = 2; out->rel = 1; }  // signed word offsets from the base
     else { out->stride = 4; out->rel = 0; }       // absolute long pointers (entry 0 may precede the table: ids start at 1)
     *load_pc = 0;
