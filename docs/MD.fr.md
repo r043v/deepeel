@@ -632,3 +632,13 @@ frontière de ≈ 3 lignes dans un gestionnaire de V-int, pas un défaut d'exéc
 Pour la lever il faut caler la grille de frames de m0boy sur celle de Gens (frame de
 127 856 cycles ET frontière à la bonne phase) avec une comptabilité DMA/V-int qui reste
 fidèle ; essayé séparément, chaque moitié seule ne suffit pas.
+
+### Grille absolue de 127 856 cycles (essai retiré)
+
+Échantillonner m0boy tous les 127 856 cycles absolus (la période de Gens) au lieu d'une
+phase fixe par frame, avec huit origines de 12 000 à 135 000 cycles (700 frames) : au
+mieux 377-395 frames différentes, contre 368 pour « 38 lignes après la V-int ». Aucune
+origine ne lève les frames 87, 292, 320-335. Le glissement de 112 cycles par frame n'est
+donc pas le facteur limitant ; ce qui reste est de la comptabilité fine à l'intérieur
+de la frame (durée de la section masquée, entrée de V-int, DMA) que seule une trace
+cycle par cycle côté Gens-rr peut départager. Code d'essai non conservé.
