@@ -885,3 +885,11 @@ correctif. Observation de l'outil sur cette plage ; la suite du film n'a pas de 
 Dump Gens-rr `gens_ristar.dsy` (3 398 V-int, film `UpthornRistarV2`, RAM `$0000-$FAFF`) contre le noyau en `--replay-only` (réglages Gens), appariement
 glissant : 3 065 échantillons sur 3 398 identiques à l'octet, aucun écart au-dessus de 200 octets, aucune dérive durable ; les écarts (1 à 100 octets, par
 paquets : 37-54, 389, 429-435…) se résorbent d'eux-mêmes (phase sous-trame du thread principal). Observation de l'outil.
+
+#### SoR 2 joueurs (1845S) : début de la désynchro vers le V-int 20 270 (20 novembre 2026)
+
+Dumps Gens-rr (`gens_dsy_vint.lua`, fenêtre à 1 échantillon par V-int) contre le noyau (`--replay-only`, `DP_TAS_PAD_SHIFT=1`) : identiques à l'octet (au décalage
+constant de numérotation près, 3 V-int entre les deux compteurs) du V-int 20 100 au V-int 20 266. À l'échantillon Gens 20 267, un seul octet diffère : le drapeau
+`$FFFA00` (Gens 1, noyau 0), le même que dans la trame 92 de 1064M. L'échantillon suivant montre le noyau en retard d'un V-int sur les compteurs de `$F04E-$F1FE` (écart
+d'un pas) puis les différences grandissent (16 octets, 100, 250 en 30 V-int) : le thread principal du noyau finit son travail de la trame après le V-int
+alors que Gens l'a fini avant (trame en dépassement). Même classe de défaut que Ristar/Castle ; non corrigé. Observation de l'outil.
