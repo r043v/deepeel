@@ -1508,7 +1508,10 @@ static int cmd_md(int argc, char **argv) {
                 else fprintf(stderr, "deepeel: --tas: %s\n", terr);
             }
             DpCoreResult kr;
-            if (md_kwatch) dp_fbwatch_start("deepeel md watch");
+            if (md_kwatch) {
+                dp_fbwatch_start("deepeel md watch");
+                if (md_core_tas) { const char *b = strrchr(md_core_tas, '/'); dp_fbwatch_caption(b ? b + 1 : md_core_tas); }   // the window title names the replayed movie
+            }
             rc = dp_core_explore_cli(km, c.size, &kcfg, &kr, argv_opt(argc, argv, "--summary") ? argv_opt(argc, argv, "--summary") : argv_opt(argc, argv, "--text")) ? 0 : 1;
             if (md_kwatch) dp_fbwatch_stop();
             if (md_kdump && dp_fb_dump_ppm(md_kdump)) fprintf(stderr, "deepeel: no frame to dump\n");

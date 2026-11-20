@@ -867,3 +867,9 @@ Mesure avec un dump Gens-rr régénéré (`tools/gens_dsy_vint.lua`, 1 échantil
 avec le correctif, 8 échantillons seulement (8 372, 15 750, 15 792, 18 214, 18 228, 28 490, 28 504, 36 428), tous isolés, l'état se
 recale à l'échantillon suivant. Observation de l'outil, pas une mesure de matériel. La cause réelle n'était donc pas la coupure du V-int
 mais le service du H-int de la ligne 223 (handler d'eau LZ qui exécute `VBlank_UpdateScreen` différé, `f_doupdatesinhblank`) après le V-int suivant.
+
+Les 8 échantillons isolés restants (V-int 8 372 … 36 428) ont été examinés octet par octet : 1 à 42 octets, groupés dans des zones de travail
+(`$AD01-AD06` minuteurs voisins des compteurs ignorés, `$D841-D859` et `$928E-92A6` tampons de sprites, `$07C5-07CD`, `$8216-823D` listes en cours de
+remplissage, `$F921`, `$04AF`). Dans chaque cas l'état est identique à l'échantillon suivant : c'est la phase du thread principal à l'intérieur de la
+trame (un tampon vu avant/après son remplissage, un minuteur à ±2), pas un décalage de livraison d'IRQ ni une dérive. Reste de la classe « glissement
+de phase sous-trame » ; aucune action sur la logique des V-int/H-int n'est justifiée par ces échantillons.
