@@ -148,7 +148,24 @@ static void sega_watch(DpMachine *m, int on) {
 static int sega_render(DpMachine *m, uint32_t *argb, unsigned cap, int *w, int *h) {
     const DpSegaBackend *b = ((SegaMach *)m->impl)->b;
     const uint32_t *px; int pw, ph;
-    if (!b->watch_view || !b->watch_view(&px, &pw, &ph) || (unsigned)(pw * ph) > cap) return 0;
+    if (!b->watch_view || !b->watch_view(&px, &pw, &ph)) return 0;
+    const SegaMach *s = m->impl;
+    if (!s->gg && !s->msx && pw == 160 && ph == 192 && 256u * 192u <= cap) {
+        // the SMS shares the Game Gear backend, whose rows are box-filtered from the VDP's 256 columns to 160:
+        // stretch them back so the picture has the console's 4:3 shape instead of 160x192
+        for (int y = 0; y < ph; y++)
+            for (int x = 0; x < 256; x++) {
+                const unsigned f = (unsigned)x * 160u, i = f / 256u, r = f % 256u;
+                const uint32_t a = px[y * pw + i], c = px[y * pw + (i + 1 < 160 ? i + 1 : i)];
+                uint32_t o = 0xFF000000u;
+                for (int sh = 0; sh < 24; sh += 8)
+                    o |= (((a >> sh & 255u) * (256u - r) + (c >> sh & 255u) * r) >> 8) << sh;
+                argb[y * 256 + x] = o;
+            }
+        *w = 256; *h = 192;
+        return 1;
+    }
+    if ((unsigned)(pw * ph) > cap) return 0;
     memcpy(argb, px, (size_t)pw * ph * sizeof *argb);
     *w = pw; *h = ph;
     return 1;

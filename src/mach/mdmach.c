@@ -251,9 +251,11 @@ uint16_t dp_mdmach_vdp_reg(const DpMdMach *d, unsigned r) { return d->m->vdp_reg
 uint16_t dp_mdmach_sr(const DpMdMach *d) { return d->m->sr; }
 uint32_t dp_mdmach_dn(const DpMdMach *d, unsigned n) { return d->m->d[n & 7]; }
 uint32_t dp_mdmach_an(const DpMdMach *d, unsigned n) { return d->m->a[n & 7]; }
-void dp_mdmach_set_pad(DpMdMach *d, uint8_t pad) { d->m->pad = pad; }
+// DP_MD_PAD_LINE0=1: the input of a movie frame is latched at the first active line (Gens-rr), not at the V-int that opens the frame
+static int pad_line0(void) { static int v = -1; if (v < 0) { const char *e = getenv("DP_MD_PAD_LINE0"); v = e && *e && *e != '0'; } return v; }
+void dp_mdmach_set_pad(DpMdMach *d, uint8_t pad) { if (pad_line0()) { d->m->pad_pend = pad; d->m->pend_set = 1; } else d->m->pad = pad; }
 // port 2 (second three-button pad): on = plugged in; off keeps every read at $7F
-void dp_mdmach_set_pad2(DpMdMach *d, int on, uint8_t pad) { d->m->pad2_on = on != 0; d->m->pad2 = pad; }
+void dp_mdmach_set_pad2(DpMdMach *d, int on, uint8_t pad) { if (pad_line0()) { d->m->pad2_on_pend = on != 0; d->m->pad2_pend = pad; d->m->pend_set = 1; } else { d->m->pad2_on = on != 0; d->m->pad2 = pad; } }
 // C12: six-button pad: ext bit 7 plugged, bits 0-3 Z,Y,X,Mode pressed (0 keeps the three-button pad)
 void dp_mdmach_set_pad_ext(DpMdMach *d, uint8_t ext) { if (d->m->pad_ext != ext) { d->m->pad_ext = ext; d->m->pad_cnt = 0; } }
 
@@ -356,6 +358,7 @@ uint64_t dp_mdmach_screen_key(const DpMdMach *d) {
     return h;
 }
 void dp_mdmach_poke(DpMdMach *d, uint32_t a, uint8_t v) { if (a >= 0xFF0000u) d->m->ram[a & 0xFFFFu] = v; }
+unsigned dp_mdmach_audio_read(DpMdMach *d, int16_t *stereo, unsigned max_frames) { return md_full_audio_read(d->m, stereo, max_frames); }
 uint8_t dp_mdmach_ram8(const DpMdMach *d, uint32_t a) { return d->m->ram[a & 0xFFFFu]; }
 
 

@@ -362,7 +362,23 @@ void dp_kmapwin_stop(void) {
     pthread_join(kw_th, NULL);
     kw_running = 0;
 }
+/* watch sound: one queued SDL device, opened on the first frame; the presenter's 60 fps clock paces it */
+static SDL_AudioDeviceID au_dev; static int au_tried;
+void dp_audio_play(const int16_t *st, unsigned frames) {
+    if (!au_tried) {
+        au_tried = 1;
+        if (SDL_InitSubSystem(SDL_INIT_AUDIO) == 0) {
+            SDL_AudioSpec want; SDL_zero(want); want.freq = 44100; want.format = AUDIO_S16SYS; want.channels = 2; want.samples = 1024;
+            au_dev = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
+            if (au_dev) SDL_PauseAudioDevice(au_dev, 0); else fprintf(stderr, "deepeel: watch: no audio device: %s\n", SDL_GetError());
+        }
+    }
+    if (!au_dev || !frames) return;
+    if (SDL_GetQueuedAudioSize(au_dev) > 44100u / 6u * 4u) return;   /* more than ~170 ms queued: drop, the latency must not grow */
+    SDL_QueueAudio(au_dev, st, frames * 4u);
+}
 #else   // built without SDL2: the CLI reports it
+void dp_audio_play(const int16_t *stereo, unsigned frames) { (void)stereo; (void)frames; }
 int dp_fbwatch_available(void) { return 0; }
 int dp_fbwatch_start(const char *title) {
     (void)title;

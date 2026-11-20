@@ -367,6 +367,8 @@ struct DpMachine {
     // returns 1 with its size, 0 when there is no picture.  NULL: this machine has no screen view (the watch says so).
     void (*watch)(struct DpMachine *, int on);
     int (*render)(struct DpMachine *, uint32_t *argb, unsigned cap, int *w, int *h);
+    /* optional: takes the stereo 44.1 kHz int16 frames produced since the last call (at most max_frames); returns the frame count (watch sound) */
+    unsigned (*audio_read)(struct DpMachine *, int16_t *stereo, unsigned max_frames);
     void (*observe)(struct DpMachine *, const DpObservers *, void *user);
     int (*ctx_components)(struct DpMachine *, const DpCtxComp **out);   // count
     // C11: hash of the DP_CC_REG components (CPU registers, mapper state; no clocks, no RAM).  With the RAM pages a section reads

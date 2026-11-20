@@ -164,10 +164,10 @@ int main(int argc, char **argv) {
     CHECK(setrlimit(RLIMIT_FSIZE, &short_limit) == 0);
     b->init(rom, rn, NULL, 1);
     cfg.resume = 0; cfg.seeds = entries; cfg.n_seeds = 12;
-    int failed_write = !dp_core_explore(m, rn, &cfg, &r);
+    (void)dp_core_explore(m, rn, &cfg, &r);   // a failing spool write keeps the states in RAM (bounded queue, 0.415): the run may finish, the frontier must not be reported saved
     CHECK(setrlimit(RLIMIT_FSIZE, &old_limit) == 0);
     signal(SIGXFSZ, old_sig);
-    CHECK(failed_write && r.saved == 0);
+    CHECK(r.saved == 0);
     CHECK(stat(frontier_path, &st) == 0 && st.st_size == 12);
     f = fopen(frontier_path, "rb"); CHECK(f && fread(new_header, 1, sizeof new_header, f) == sizeof new_header); fclose(f);
     CHECK(memcmp(old_header, new_header, sizeof old_header) == 0);
@@ -176,7 +176,7 @@ int main(int argc, char **argv) {
     CHECK(unlink(frontier_path) == 0 && mkdir(frontier_path, 0700) == 0);
     b->init(rom, rn, NULL, 1);
     cfg.resume = 0; cfg.seeds = entries; cfg.n_seeds = 12;
-    CHECK(!dp_core_explore(m, rn, &cfg, &r));
+    (void)dp_core_explore(m, rn, &cfg, &r);
     CHECK(r.saved == 0 && stat(frontier_path, &st) == 0 && S_ISDIR(st.st_mode));
     dp_core_result_free(&r);
     CHECK(rmdir(frontier_path) == 0);

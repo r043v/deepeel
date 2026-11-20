@@ -158,7 +158,13 @@ int dp_fb_dump_ppm(const char *path) {
  * after a prefill of about a second and a half; the producer is held back when the ring is full.  DP_WATCH_SMOOTH=0 disables. */
 #define RING_CAP 360
 #define RING_PRE 90
-typedef struct { uint32_t *px; int w, h; uint64_t frame; uint32_t mf, total; int done; } RingSlot;
+typedef struct { uint32_t *px; int w, h; uint64_t frame; uint32_t mf, total; int done; int16_t *au; unsigned au_n; } RingSlot;
+
+/* sound: the samples of the frame follow it through the ring and are queued to SDL when the presenter shows it, so the 60 fps clock paces them */
+static __thread int16_t pend_au[2 * 1024]; static __thread unsigned pend_au_n;
+void dp_watch_audio(const int16_t *st, unsigned frames) { if (frames > 1024) frames = 1024; memcpy(pend_au, st, frames * 2u * sizeof *st); pend_au_n = frames; }
+void dp_audio_play(const int16_t *stereo, unsigned frames);   /* windows.c: queues 44.1 kHz stereo frames to the sound device */
+#define audio_play dp_audio_play
 static RingSlot ring[RING_CAP];
 static unsigned ring_head, ring_n;
 static pthread_mutex_t ring_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -181,6 +187,7 @@ static void *presenter(void *arg) {
         pthread_mutex_unlock(&ring_mu);
         dp_fbwatch_progress(sl.mf, sl.total, sl.done);
         dp_fb_publish(sl.px, sl.w, sl.h, sl.frame);
+        if (sl.au) { audio_play(sl.au, sl.au_n); free(sl.au); }
         free(sl.px);
         next += 1.0 / fps;
         for (;;) { double left = next - mono_now(); if (left <= 0 || dp_stop) break; usleep(left > 0.002 ? (useconds_t)((left - 0.001) * 1e6) : 100); }
@@ -195,7 +202,7 @@ static void watch_ring_flush(void) {
     while (ring_n) {
         RingSlot sl = ring[ring_head]; ring_head = (ring_head + 1) % RING_CAP; ring_n--;
         if (!ring_n) { dp_fbwatch_progress(sl.mf, sl.total, sl.done); dp_fb_publish(sl.px, sl.w, sl.h, sl.frame); }
-        free(sl.px);
+        free(sl.au); free(sl.px);
     }
     pthread_mutex_unlock(&ring_mu);
 }
@@ -218,6 +225,9 @@ static int watch_ring_push(const uint32_t *px, int w, int h, uint64_t frame, uin
         if (ring_n < RING_CAP) {
             RingSlot *sl = &ring[(ring_head + ring_n) % RING_CAP];
             sl->px = cp; sl->w = w; sl->h = h; sl->frame = frame; sl->mf = mf; sl->total = total; sl->done = done;
+            sl->au = NULL; sl->au_n = 0;
+            if (pend_au_n && (sl->au = malloc(pend_au_n * 2u * sizeof *sl->au))) { memcpy(sl->au, pend_au, pend_au_n * 2u * sizeof *sl->au); sl->au_n = pend_au_n; }
+            pend_au_n = 0;
             ring_n++; ring_last_push = mono_now();
             pthread_mutex_unlock(&ring_mu);
             return 0;

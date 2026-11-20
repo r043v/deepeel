@@ -27,6 +27,7 @@ static int64_t md_ram_index(DpMachine *m, uint32_t a) {
 }
 static uint32_t md_ram_addr(DpMachine *m, uint32_t i) { (void)m; return i < 0x10000u ? 0xFF0000u + i : 0xA00000u + (i - 0x10000u); }
 
+static unsigned md_audio_read(DpMachine *m, int16_t *st, unsigned max) { return dp_mdmach_audio_read(((MdMachWrap *)m->impl)->m, st, max); }
 static const uint8_t *md_ram_view(DpMachine *m) { return dp_mdmach_ram(((MdMachWrap *)m->impl)->m); }
 static uint32_t md_state_bytes(DpMachine *m) { (void)m; return (uint32_t)dp_mdmach_state_size() + 8; }
 static void md_save(DpMachine *m, uint8_t *buf) { dp_mdmach_save(((MdMachWrap *)m->impl)->m, buf); memcpy(buf + dp_mdmach_state_size(), &((MdMachWrap *)m->impl)->frames, 8); }
@@ -300,6 +301,7 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->cut_sp = md_cut_sp;
     m->data_dest = md_data_dest;
     m->frame = md_frame;
+    m->audio_read = md_audio_read;
     m->render = md_render;   // the VDP renders from its state on demand: no watch switch
     m->plat = dp_md_platform();
     return m;

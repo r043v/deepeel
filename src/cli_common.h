@@ -51,7 +51,7 @@ static inline void dp_cli_arm_stop(unsigned time_limit) {
     else if (!strcmp(a, "--tree") && i + 1 < argc) (opt).tree_path = argv[++i]; \
     else if (!strcmp(a, "--jobs") && i + 1 < argc) (cc).jobs = atoi(argv[++i]); \
     else if (!strcmp(a, "--export-state") && i + 1 < argc) (opt).export_state = argv[++i]; \
-    else if (!strcmp(a, "--watch-dump") && i + 1 < argc) { (cc).dump = argv[++i]; if (!(opt).watch_every) (opt).watch_every = 2; } \
+    else if (!strcmp(a, "--watch-dump") && i + 1 < argc) { (cc).dump = argv[++i]; setenv("DP_WATCH_SMOOTH", "0", 0); if (!(opt).watch_every) (opt).watch_every = 2; } \
     else if (!strcmp(a, "--watch")) { \
         int fps_ = 30; \
         if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') fps_ = atoi(argv[++i]); \

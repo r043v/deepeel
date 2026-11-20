@@ -166,3 +166,7 @@ int dp_tasfetch_command(int argc, char **argv) {   /* argv: deepeel tasfetch GAM
     printf("\n");
     return 0;
 }
+
+/* Shared with tasdb.c: HTTP GET with retries, and movie extraction from a zip held in memory. */
+unsigned char *dp_tas_http(const char *url, size_t *len) { return fetch(url, len); }
+int dp_tas_unzip(const unsigned char *z, size_t n, const char *dir) { return unzip_movies(z, n, dir); }

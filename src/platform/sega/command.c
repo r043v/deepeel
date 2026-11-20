@@ -8,6 +8,7 @@
 #include "../../core/dpmachine.h"
 #include "../../core/music_index_seeds.h"
 #include "backend.h"
+#include "../../gui/fbwatch.h"
 #include "tas.h"
 #include "../msx/msx.h"
 #include "../msx/explore.h"
@@ -106,10 +107,13 @@ static void core_clo_finish(void *user, DpCoreResult *r) {
     tl_clo = NULL;   // the caller thread's cached closure was just freed: a second kernel pass in the same process (--campaign phase 2) would reuse a dangling pointer
 }
 static DpPlatformHooks core_sega_hooks;
-static const void *sega_core_pick(unsigned w) { (void)w; if(core_is_msx) return dp_msx_backendt(); if(core_is_sg) return dp_sega_backend_sgt(); return dp_sega_backend_ggt(); }
+static const char *watch_dump;   /* --watch-dump FILE: the last published frame as a PPM, no window */
+static int core_sms_wide;   /* --watch on the SMS: the 256-column runtime flavour */
+static const void *sega_core_pick(unsigned w) { (void)w; if(core_sms_wide) return dp_sega_backend_smst(); if(core_is_msx) return dp_msx_backendt(); if(core_is_sg) return dp_sega_backend_sgt(); return dp_sega_backend_ggt(); }
 static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,const DpSegaOptions *o,const DpCoreConfig *kcfg,FILE *out) {
     int msx=!strcmp(s->id,"msx");
-    const DpSegaBackend *b=msx?dp_msx_backend():!strcmp(s->id,"sg")?dp_sega_backend_sg():dp_sega_backend_gg();
+    core_sms_wide=kcfg->watch_every && !strcmp(s->id,"sms");
+    const DpSegaBackend *b=msx?dp_msx_backend():!strcmp(s->id,"sg")?dp_sega_backend_sg():core_sms_wide?dp_sega_backend_smst():dp_sega_backend_gg();
     int init_arg=msx?o->msx_mapper:1;
     if(msx && (size>0x100000 || o->msx_mapper<DP_MSX_AUTO || o->msx_mapper>DP_MSX_KONAMI_SCC)) return 0;
     if(!b || b->init(rom,size,NULL,init_arg)!=1) return 0;
@@ -166,7 +170,10 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
         else fprintf(out,"tas: %s\n",terr);
     }
     DpCoreResult r;
+    if(cfg.watch_every && !watch_dump) dp_fbwatch_start("deepeel sega watch");
     int ok=dp_core_explore_cli(m,size,&cfg,&r,core_summary_path?core_summary_path:core_text_path);
+    if(cfg.watch_every && !watch_dump) dp_fbwatch_stop();
+    if(watch_dump && dp_fb_dump_ppm(watch_dump)) fprintf(stderr,"deepeel: no frame to dump\n");
     dp_sega_tas_free(&tas);
     if(ok) {
         dp_core_report(out,s->id,&r);
@@ -214,6 +221,13 @@ int dp_sega_explore_command(int argc,char **argv) {
         if(!strcmp(argv[i],"--no-block-closure")) { o.block_closure=0; continue; }
         if(!strcmp(argv[i],"--no-target-closure")) { o.target_closure=0; continue; }
         if(!strcmp(argv[i],"--no-closure")) { o.closure.nodes=0; kcfg.no_closure=1; continue; }
+        if(!strcmp(argv[i],"--watch")) {   // the kernel publishes the replayed movie's screen at 1..60 img/s (default 30)
+            int fps=30; if(i+1<argc && argv[i+1][0]>='0' && argv[i+1][0]<='9') fps=atoi(argv[++i]);
+            if(fps<1) fps=1;
+            if(fps>60) fps=60;
+            kcfg.watch_every=(unsigned)(60/fps); continue;
+        }
+        if(!strcmp(argv[i],"--watch-dump")) { if(i+1>=argc) goto usage; watch_dump=argv[++i]; setenv("DP_WATCH_SMOOTH","0",0); if(!kcfg.watch_every) kcfg.watch_every=2; continue; }
         if(!strcmp(argv[i],"--tas")) { if(i+1>=argc) goto usage; o.tas_path=argv[++i]; continue; }
         if(!strcmp(argv[i],"--jobs")) {
             if(i+1>=argc) goto usage;

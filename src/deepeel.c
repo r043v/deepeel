@@ -355,7 +355,7 @@ static int cmd_explore(int argc, char **argv) {
         else if (!strcmp(a, "--map") && i + 1 < argc) ++i;   // written by core_outputs
         else if (!strcmp(a, "--html") && i + 1 < argc) ++i;   // written by core_outputs
         else if (skip_mapwin(argc, argv, &i)) {}
-        else if (!strcmp(a, "--watch-dump") && i + 1 < argc) { gb_wdump = argv[++i]; if (!watch) watch = 30; }
+        else if (!strcmp(a, "--watch-dump") && i + 1 < argc) { gb_wdump = argv[++i]; setenv("DP_WATCH_SMOOTH", "0", 0); if (!watch) watch = 30; }
         else if (!strcmp(a, "--watch")) {
             watch = 30;
             if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') watch = atoi(argv[++i]);
@@ -1479,7 +1479,7 @@ static int cmd_md(int argc, char **argv) {
             }
             int used = dp_core_parse_option(&kcfg, argc, argv, i);
             if (used) { i += used - 1; continue; }
-            if (!strcmp(argv[i], "--watch-dump") && i + 1 < argc) { md_kdump = argv[++i]; if (!kcfg.watch_every) kcfg.watch_every = 2; continue; }
+            if (!strcmp(argv[i], "--watch-dump") && i + 1 < argc) { md_kdump = argv[++i]; setenv("DP_WATCH_SMOOTH", "0", 0); if (!kcfg.watch_every) kcfg.watch_every = 2; continue; }
             if (!strcmp(argv[i], "--watch")) {   // the kernel publishes the replayed movie's screen at 1..60 img/s (default 30)
                 int fps = 30; if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') fps = atoi(argv[++i]);
                 if (fps < 1) fps = 1; if (fps > 60) fps = 60;
@@ -1603,6 +1603,7 @@ static int cmd_tas(int argc, char **argv) {
 }
 
 int dp_tasfetch_command(int argc, char **argv);
+int dp_tasdb_command(int argc, char **argv);
 
 static void kmapwin_cb(void *u, const DpCoreResult *r) { dp_kmapwin_start(r, "deepeel ROM map", (int)(intptr_t)u); }
 // ---- `deepeel ROM [options]`: the zero-argument entry -------------------------------------------------
@@ -1643,7 +1644,7 @@ static int ar_has(int argc, char **argv, const char *opt) {
 }
 
 static int ar_is_subcommand(const char *a) {
-    static const char *const names[] = { "frontier", "tasfetch", "lr", "bh", "md", "nes", "pce", "z80", "explore", "mapx", "maprender", "covmap", "tas", "desync", "map", "regs", "dis", NULL };
+    static const char *const names[] = { "frontier", "tasfetch", "tasdb", "lr", "bh", "md", "nes", "pce", "z80", "explore", "mapx", "maprender", "covmap", "tas", "desync", "map", "regs", "dis", NULL };
     for (int i = 0; names[i]; i++) if (!strcmp(a, names[i])) return 1;
     return 0;
 }
@@ -1782,6 +1783,7 @@ int deepeel_main(int argc, char **argv) {   // the library entry point; src/deep
         return cmd_explore(n, av);
     }
     if (!strcmp(argv[1], "tasfetch")) return dp_tasfetch_command(argc, argv);
+    if (!strcmp(argv[1], "tasdb")) return dp_tasdb_command(argc, argv);
     if (!strcmp(argv[1], "lr")) return dp_lr_command(argc, argv);
     if (!strcmp(argv[1], "bh")) return dp_bh_command(argc, argv);
     if (!strcmp(argv[1], "md")) return cmd_md(argc, argv);

@@ -105,6 +105,7 @@ typedef struct DpCoreConfig {
     uint8_t seed_vals[8]; unsigned seed_n;   /* values (default 00 FF 55 AA) */
     uint32_t sessions;          /* held-pad sessions started from power-on (0: off); default 16 when the machine has set_input */
     int no_sessions;
+    int no_start_attract;   /* --no-start-attract: no no-input attract session from power-on (the movie's end-state attract stays) */
     uint32_t attract_frames;    /* generic attract session: no input for this many frames from power-on (0: off; needs DpMachine.frame) */
     uint32_t min_secs, max_secs, stall_secs;   /* wall-clock limits, 0 = off: min before a stagnation stop; hard max; seconds without a new ROM byte */
     uint32_t attract_min;       /* attract runs at least this many frames before a stagnation stop (default 36000: 10 min of game time); attract_frames is the hard max */

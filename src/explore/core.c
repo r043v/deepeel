@@ -2,10 +2,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "core.h"
+#include <lz4.h>
 #include "../core/sha1.h"
 #include "../report/report.h"
 // weak: the standalone kernel tests link without the framebuffer watch (src/gui/fbwatch.c)
 extern void dp_watch_frame(const uint32_t *argb, int w, int h, uint64_t frame, uint32_t movie_frame, uint32_t total, int done) __attribute__((weak));
+extern void dp_watch_audio(const int16_t *stereo, unsigned frames) __attribute__((weak));   // the sound of the frame about to be published (44.1 kHz stereo)
 
 #include <pthread.h>
 #include <errno.h>
@@ -126,6 +128,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--dsy") && i + 1 < argc) { c->dsy_path = argv[i + 1]; return 2; }
     if (!strcmp(a, "--no-tas-jitter")) { c->no_tas_jitter = 1; return 1; }
     if (!strcmp(a, "--no-sessions")) { c->no_sessions = 1; return 1; }
+    if (!strcmp(a, "--no-start-attract")) { c->no_start_attract = 1; return 1; }
     if (!strcmp(a, "--no-nonsense")) { c->no_nonsense = 1; return 1; }
     if (!strcmp(a, "--no-vectors")) { c->no_vectors = 1; return 1; }
     if (!strcmp(a, "--sessions") && i + 1 < argc) { c->sessions = (uint32_t)strtoul(argv[i + 1], NULL, 0); c->no_sessions = 0; return 2; }
@@ -212,7 +215,7 @@ typedef struct {
     uint64_t paths_done;       // finished paths (atomic), for the progress line
     int stop_monitor;
     int halt;                  // 0 running, 1 max-time reached, 2 stagnation (atomic): workers wind down
-    int spool_fd, spool_write_failed, spool_read_failed, checkpoint_failed; uint64_t spool_n, spool_head, spool_total, picks; uint32_t spool_rs;   // disk overflow: fixed-size FIFO records
+    int spool_fd, spool_write_failed, spool_read_failed, checkpoint_failed; uint64_t spool_n, spool_head, spool_total, picks; uint32_t spool_rs; uint64_t *spool_off; size_t spool_offcap; uint64_t spool_end;   // disk overflow: FIFO of zlib-compressed records, spool_off[i] = file offset of record i
     unsigned allowed;          // adaptive mode: workers with index < allowed may take work (atomic)
     unsigned wmin, wmax;
     DpCoreResult *out;
@@ -802,7 +805,9 @@ no_stackret:;
             }
             else r->closure_stack_dropped++;   // a root lost to the fixed stack is counted, never silent
         }
-        if (f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_RET || f.kind == DP_FLOW_INDIRECT || f.halt) fall = 0;
+        const int icall = f.kind == DP_FLOW_INDIRECT && f.call && f.fall;   // `jsr (An)` / `jsr d(pc,Dn)`: a computed call still returns to the next instruction (untrusted, like a direct call)
+        if (f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_RET || (f.kind == DP_FLOW_INDIRECT && !icall) || f.halt) fall = 0;
+        else if (icall) fall = 1;
         if (r->closure_ret && cr.n && (f.kind == DP_FLOW_RET || (f.kind == DP_FLOW_COND && f.target < 0))) {
             // a return: the caller's continuation, carrying the trust the call site had (the callee proved the address is code)
             uint32_t rpc = cr.pc[cr.n - 1], rbk = cr.bk[cr.n - 1], rtr = cr.trust[cr.n - 1];
@@ -812,7 +817,7 @@ no_stackret:;
             } else { cr.n--; pc = rpc; bk = rbk; trust = rtr; thru = 1; r->closure_rets++; continue; }   // the continuation after a proven return walks through what the blind fall-through already marked (the callee's register constants ride on, the Sega closure's own rule)
         }
         if (fall) {
-            if (f.kind == DP_FLOW_CALL) {   // point 3: the fall-through continuation of a call (always untrusted, A13) is checked like an entry
+            if (f.kind == DP_FLOW_CALL || icall) {   // point 3: the fall-through continuation of a call (always untrusted, A13) is checked like an entry
                 int64_t kx = cview_index(v, r, pc + f.length, bk);
                 if (kx >= 0 && closure_entry_is_data(r, isa, v, pc + f.length, kx)) {
                     r->closure_entry_refused++;
@@ -822,7 +827,7 @@ no_stackret:;
                 }
             }
             pc += f.length;
-            if (f.kind == DP_FLOW_CALL) trust = 0;   // A13: no trust after a call unless the callee was observed to return
+            if (f.kind == DP_FLOW_CALL || icall) trust = 0;   // A13: no trust after a call unless the callee was observed to return
         }
         else { if (!sp) goto done; CLOSURE_POP(); }
     }
@@ -830,6 +835,18 @@ done:
     free(seen); free(heap); free(hret); free(hrg);
     if (snap) { v->m->load(v->m, snap); free(snap); }   // the live machine is left exactly as the walk found it
 #undef CLOSURE_POP
+}
+// B11 helper (dispatch-confirmed entries): like chain_plausible but a single instruction before the terminator is enough
+// (`move.b x,d0 ; bra y` stubs); legal instructions only, a terminator within 24.
+static int chain_short(DpMachine *m, const DpIsa *isa, uint32_t pc) {
+    for (unsigned n = 0; n < 24; n++) {
+        uint8_t b[10]; for (unsigned i = 0; i < sizeof b; i++) b[i] = m->fetch(m, pc + i);
+        DpFlowInfo f; memset(&f, 0, sizeof f);
+        if (!isa->flow(b, pc, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL) return 0;
+        if (f.kind == DP_FLOW_RET || f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_INDIRECT) return n >= 1;
+        pc += f.length;
+    }
+    return 0;
 }
 // B11 helper: the address starts a straight-line chain of legal instructions that ends (within 24 instructions) in a return,
 // an unconditional or computed jump, with at least 3 instructions before it.
@@ -1437,13 +1454,30 @@ static int queue_push(Shared *sh, DpMachine *m, Pending p) {
 
     const DpCoreConfig *cfg = sh->cfg;
     if (cfg->queue_max && sh->qn >= cfg->queue_max && !sh->spool_write_failed && spool_open(sh)) {
-        uint8_t *rec = malloc(sh->spool_rs);
+        // record = SpoolHead, u32 clen (0: raw), payload; states are mostly empty RAM/VRAM, so LZ4 cuts the disk traffic several-fold
+        int cb_ = LZ4_compressBound((int)sh->sbytes);
+        uint8_t *rec = malloc(sizeof(SpoolHead) + 4 + (size_t)cb_);
         if (rec) {
             SpoolHead h = { p.pc, (uint32_t)!!p.forced | ((uint32_t)!!p.seed << 1) | ((uint32_t)!!p.vector << 2) | (org_enc(p.origin) << 3) | (p.call_depth << 8), p.site, p.input, p.epoch };
-            memcpy(rec, &h, sizeof h); memcpy(rec + sizeof h, p.state, sh->sbytes);
-            ssize_t w = pwrite(sh->spool_fd, rec, sh->spool_rs, (off_t)((sh->spool_head + sh->spool_n) * sh->spool_rs));
-            free(rec);
-            if (w == (ssize_t)sh->spool_rs) { sh->spool_n++; sh->spool_total++; free(p.state); return 1; }
+            memcpy(rec, &h, sizeof h);
+            uint8_t *pl = rec + sizeof h + 4;
+            uint32_t clen = 0;
+            int cl = LZ4_compress_default((const char *)p.state, (char *)pl, (int)sh->sbytes, cb_);
+            if (cl > 0 && (uint32_t)cl < sh->sbytes) clen = (uint32_t)cl;
+            else memcpy(pl, p.state, sh->sbytes);
+            memcpy(rec + sizeof h, &clen, 4);
+            size_t len = sizeof h + 4 + (clen ? clen : sh->sbytes);
+            uint64_t idx = sh->spool_head + sh->spool_n;
+            if (idx >= sh->spool_offcap) {
+                size_t nc = sh->spool_offcap ? sh->spool_offcap * 2 : 4096;
+                uint64_t *no = realloc(sh->spool_off, nc * sizeof *no);
+                if (no) { sh->spool_off = no; sh->spool_offcap = nc; }
+            }
+            if (idx < sh->spool_offcap) {
+                ssize_t w = pwrite(sh->spool_fd, rec, len, (off_t)sh->spool_end);
+                free(rec);
+                if (w == (ssize_t)len) { sh->spool_off[idx] = sh->spool_end; sh->spool_end += len; sh->spool_n++; sh->spool_total++; free(p.state); return 1; }
+            } else free(rec);
         }
         fprintf(stderr, "deepeel: kernel spool write failed; retaining further states in RAM\n");
         sh->spool_write_failed = 1;
@@ -1474,26 +1508,38 @@ static void defer_state(Shared *sh, DpMachine *m, DpCoreResult *loc, Pending p) 
     pthread_mutex_unlock(&sh->mu);
     loc->deferred++;
 }
+// reads record i of the spool into a freshly allocated raw state; 0 on failure
+static int spool_read(Shared *sh, uint64_t i, SpoolHead *h, uint8_t **state) {
+    uint8_t hd[sizeof(SpoolHead) + 4];
+    off_t off = (off_t)sh->spool_off[i];
+    if (pread(sh->spool_fd, hd, sizeof hd, off) != (ssize_t)sizeof hd) return 0;
+    uint32_t clen; memcpy(h, hd, sizeof *h); memcpy(&clen, hd + sizeof *h, 4);
+    uint8_t *st = malloc(sh->sbytes ? sh->sbytes : 1);
+    if (!st) return 0;
+    if (!clen) {
+        if (pread(sh->spool_fd, st, sh->sbytes, off + (off_t)sizeof hd) != (ssize_t)sh->sbytes) { free(st); return 0; }
+    } else {
+        uint8_t *cb = malloc(clen);
+        int ok = cb && pread(sh->spool_fd, cb, clen, off + (off_t)sizeof hd) == (ssize_t)clen && LZ4_decompress_safe((const char *)cb, (char *)st, (int)clen, (int)sh->sbytes) == (int)sh->sbytes;
+        free(cb);
+        if (!ok) { free(st); return 0; }
+    }
+    *state = st;
+    return 1;
+}
 // Bring back the oldest spilled records. The consumed prefix is discarded
 // when the spool becomes empty; appends never overwrite unread records.
 static int spool_refill(Shared *sh, size_t limit) {
     size_t want = limit ? limit : sh->cfg->queue_max ? sh->cfg->queue_max / 2 : 64;
     if (want < 1) want = 1;
-    uint8_t *rec = malloc(sh->spool_rs);
-    if (!rec) { fprintf(stderr, "deepeel: cannot allocate kernel spool read buffer\n"); return 0; }
     int ok = 1;
     while (want-- && sh->spool_n) {
-        uint64_t i = sh->spool_head;
-        if (pread(sh->spool_fd, rec, sh->spool_rs, (off_t)(i * sh->spool_rs)) != (ssize_t)sh->spool_rs) { ok = 0; break; }
-        SpoolHead h; memcpy(&h, rec, sizeof h);
-        uint8_t *st = malloc(sh->sbytes);
-        if (!st) { ok = 0; break; }
-        memcpy(st, rec + sizeof h, sh->sbytes);
+        SpoolHead h; uint8_t *st = NULL;
+        if (!spool_read(sh, sh->spool_head, &h, &st)) { ok = 0; break; }
         sh->spool_head++; sh->spool_n--;
         ram_push(sh, NULL, (Pending){ st, h.pc, (int)(h.forced & 1), h.site, h.input, (uint8_t)((h.forced >> 1) & 1), (uint8_t)((h.forced >> 2) & 1), org_dec((h.forced >> 3) & 31), h.epoch, 0, h.forced >> 8 });
     }
-    free(rec);
-    if (!sh->spool_n) { sh->spool_head = 0; if (ftruncate(sh->spool_fd, 0) != 0) { /* later appends overwrite it */ } }
+    if (!sh->spool_n) { sh->spool_head = 0; sh->spool_end = 0; if (ftruncate(sh->spool_fd, 0) != 0) { /* later appends overwrite it */ } }
     if (!ok) fprintf(stderr, "deepeel: cannot read complete kernel spool; exploration stopped\n");
     return ok;
 }
@@ -1564,12 +1610,11 @@ static int frontier_save(Shared *sh, const char *path, DpCoreResult *out) {
         SpoolHead h = { sh->def[i].pc, (uint32_t)!!sh->def[i].forced | ((uint32_t)!!sh->def[i].seed << 1) | ((uint32_t)!!sh->def[i].vector << 2) | (org_enc(sh->def[i].origin) << 3) | (sh->def[i].call_depth << 8), sh->def[i].site, sh->def[i].input, sh->def[i].epoch };
         ok = fwrite(&h, sizeof h, 1, f) == 1 && fwrite(sh->def[i].state, 1, sh->sbytes, f) == sh->sbytes;
     }
-    uint8_t *rec = sh->spool_n ? malloc(sh->spool_rs) : NULL;
-    if (sh->spool_n && !rec) ok = 0;
-    for (uint64_t i = 0; ok && i < sh->spool_n; i++)
-        ok = pread(sh->spool_fd, rec, sh->spool_rs, (off_t)((sh->spool_head + i) * sh->spool_rs)) == (ssize_t)sh->spool_rs &&
-             fwrite(rec, 1, sh->spool_rs, f) == sh->spool_rs;
-    free(rec);
+    for (uint64_t i = 0; ok && i < sh->spool_n; i++) {
+        SpoolHead h; uint8_t *st = NULL;
+        ok = spool_read(sh, sh->spool_head + i, &h, &st) && fwrite(&h, sizeof h, 1, f) == 1 && fwrite(st, 1, sh->sbytes, f) == sh->sbytes;
+        free(st);
+    }
     if (fflush(f) != 0) ok = 0;
     if (fclose(f) != 0) ok = 0;
     if (ok && rename(temp, path) != 0) ok = 0;
@@ -1693,7 +1738,10 @@ static void core_watch_publish(const DpCoreConfig *cfg, DpMachine *m, uint64_t f
     static __thread uint32_t px[512 * 512];
     if (!cfg->watch_every || !m->render || !dp_watch_frame || f % cfg->watch_every) return;
     int w = 0, h = 0;
-    if (m->render(m, px, 512u * 512u, &w, &h) && w > 0 && h > 0) dp_watch_frame(px, w, h, f, movie_frame, total, 0);
+    if (m->render(m, px, 512u * 512u, &w, &h) && w > 0 && h > 0) {
+        if (m->audio_read && dp_watch_audio) { int16_t au[2 * 1024]; unsigned n = m->audio_read(m, au, 1024); if (n) dp_watch_audio(au, n); }
+        dp_watch_frame(px, w, h, f, movie_frame, total, 0);
+    }
 }
 
 static void core_dsy_frame(const DpCoreConfig *cfg, DpMachine *m, uint64_t f) {
@@ -2234,10 +2282,14 @@ static void run_path(Worker *w, Pending *p) {
             uint32_t cp;
             if (isa->code_ptr_store(bytes, &cp) && !(cp & 1u) && m->rom_index(m, cp) >= 0) { closure_walk_untrusted(loc, m, isa, cp, w->regwalk); loc->closure_ptr_stores++; }
         }
+        if (!cfg->no_closure && cur_forced && have_flow && (fi.kind == DP_FLOW_COND || fi.kind == DP_FLOW_JUMP || fi.kind == DP_FLOW_CALL)) {   // a forced step ran a real instruction: both sides of its transfer are walked as untrusted entries (the forced state is hypothetical, the A13 data guards apply)
+            if (fi.target >= 0) closure_walk_untrusted(loc, m, isa, (uint32_t)fi.target, w->regwalk);
+            if (fi.kind != DP_FLOW_JUMP) closure_walk_untrusted(loc, m, isa, pc + fi.length, w->regwalk);
+        }
         if (!cfg->no_closure && !cur_forced && have_flow && fi.kind != DP_FLOW_SEQ && fi.kind != DP_FLOW_ILLEGAL) {
             if (fi.target >= 0 && (fi.kind == DP_FLOW_JUMP || fi.kind == DP_FLOW_COND || fi.kind == DP_FLOW_CALL)) closure_walk(loc, m, isa, (uint32_t)fi.target, w->regwalk);
             if (fi.kind == DP_FLOW_COND) closure_walk(loc, m, isa, pc + fi.length, w->regwalk);
-            else if (fi.kind == DP_FLOW_CALL) closure_walk_untrusted(loc, m, isa, pc + fi.length, w->regwalk);
+            else if (fi.kind == DP_FLOW_CALL || (fi.kind == DP_FLOW_INDIRECT && fi.call && fi.fall)) closure_walk_untrusted(loc, m, isa, pc + fi.length, w->regwalk);
             uint32_t dispatch_arg = 0;
             int dispatch = fi.kind == DP_FLOW_INDIRECT && isa->table_dispatch ? isa->table_dispatch(bytes, &dispatch_arg) : 0;
             if (dispatch == 1)
@@ -3044,7 +3096,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     if (cfg_unb.queue_auto) {   // the queue holds whole machine snapshots: bound it by what the RAM can carry, the rest spills to the disk spool
         uint64_t budget = dp_mem_budget();
         if (budget) {
-            uint64_t per = (uint64_t)sh.sbytes + 128u, cap = (budget / 8u < (3ull << 29) ? budget / 8u : (3ull << 29)) / per;   // 12 % of the available RAM, at most 1.5 GiB
+            uint64_t per = (uint64_t)sh.sbytes + 128u, cap = (budget / 4u < (3ull << 30) ? budget / 4u : (3ull << 30)) / per;   // 25 % of the available RAM, at most 3 GiB
             if (cap < 256) cap = 256;
             if (!cfg_unb.queue_max || cap < cfg_unb.queue_max) {
                 fprintf(stderr, "deepeel: queue bounded to %llu states in RAM (%u KiB each, %llu MiB available); the rest goes to the spool\n",
@@ -3129,6 +3181,11 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
                     if (!zero && !(v & 1u) && v >= 0x200 && v < lim && wm0->rom_index(wm0, v) >= 0) {
                         unsigned pw = (unsigned)(wm0->fetch(wm0, v - 2) << 8 | wm0->fetch(wm0, v - 1));
                         valid = chain_plausible(wm0, m->isa, v) || pw == 0x4E75 || pw == 0x4E73 || pw == 0x4E77 || (pw & 0xFF00u) == 0x6000u || pw == 0x4EF9 || pw == 0x4EFA || pw == 0x4EF8 || (pw & 0xFFF8u) == 0x4ED0u;
+                        if (!valid) {   // a terminator with an extension word right before the entry: jmp d16(pc) / jmp abs.w / bra.w (opcode 4 bytes before), jmp abs.l (6 bytes before)
+                            unsigned w4 = v >= 4 ? (unsigned)(wm0->fetch(wm0, v - 4) << 8 | wm0->fetch(wm0, v - 3)) : 0, w6 = v >= 6 ? (unsigned)(wm0->fetch(wm0, v - 6) << 8 | wm0->fetch(wm0, v - 5)) : 0;
+                            valid = w4 == 0x4EFA || w4 == 0x4EF8 || w4 == 0x6000 || w6 == 0x4EF9;
+                        }
+                        if (!valid && chain_short(wm0, m->isa, v)) valid = 2;   // inside a running table a stub (`lea table(pc),An ; jmp dispatcher`) is an entry too
                     }
                 }
                 if (!valid && !zero && run_start && v == prev_v && a + stp <= lim) valid = 2;   // a repeated entry (state tables repeat their idle routine) keeps the run going
@@ -3144,6 +3201,67 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
                 }
                 run_start = 0; good = 0; bad = 0;
             }
+        }
+    }
+
+    // B11 (records): tables of 6/8/10-byte records whose first field is a 32-bit routine address (state/script tables:
+    // pointer, duration, padding).  Four consecutive records whose pointers land right after a terminator are enough
+    // (these tables are short); every pointer is walked as an untrusted entry, provisional and never "executed".
+    if (ok && !cfg->no_closure && m->isa->code_ptr_store && ws[0].regwalk) {
+        Worker *w0 = &ws[0]; DpMachine *wm0 = w0->m; uint32_t lim = rom_size < 0x400000u ? (uint32_t)rom_size : 0x400000u;
+        uint8_t *okp = lim > 0x204 ? calloc(lim / 2 + 2, 1) : NULL;
+        if (okp) {
+            for (uint32_t a = 0x200; a + 4 <= lim; a += 2) {
+                uint32_t v = (uint32_t)wm0->fetch(wm0, a) << 24 | (uint32_t)wm0->fetch(wm0, a + 1) << 16 | (uint32_t)wm0->fetch(wm0, a + 2) << 8 | wm0->fetch(wm0, a + 3);
+                if (v >= 0x200 && v < lim && !(v & 1u) && wm0->rom_index(wm0, v) >= 0) {
+                    unsigned pw = (unsigned)(wm0->fetch(wm0, v - 2) << 8 | wm0->fetch(wm0, v - 1));
+                    okp[a / 2] = chain_plausible(wm0, m->isa, v) || pw == 0x4E75 || pw == 0x4E73 || pw == 0x4E77 || (pw & 0xFF00u) == 0x6000u || pw == 0x4EF9 || pw == 0x4EFA || pw == 0x4EF8 || (pw & 0xFFF8u) == 0x4ED0u;
+                }
+            }
+            for (unsigned stride = 6; stride <= 10; stride += 2)
+                for (uint32_t a = 0x200; a + 4 <= lim; a += 2) {
+                    if (!okp[a / 2] || (a >= 0x200 + stride && okp[(a - stride) / 2])) continue;   // only at the start of a run
+                    unsigned n = 0;
+                    for (uint32_t t = a; t + 4 <= lim && okp[t / 2]; t += stride) n++;
+                    if (n < 4) continue;
+                    for (unsigned i = 0; i < n; i++) {
+                        uint32_t t = a + i * stride;
+                        uint32_t tv = (uint32_t)wm0->fetch(wm0, t) << 24 | (uint32_t)wm0->fetch(wm0, t + 1) << 16 | (uint32_t)wm0->fetch(wm0, t + 2) << 8 | wm0->fetch(wm0, t + 3);
+                        closure_walk_untrusted(&w0->loc, wm0, m->isa, tv, w0->regwalk); w0->loc.closure_ptr_stores++;
+                    }
+                }
+            free(okp);
+        }
+    }
+
+    // B11 (relative tables): `lea table(pc),An ... adda.l Dn,An ; jmp/jsr (An)` — the table holds signed 16-bit offsets from its
+    // own start (the `move.w -2(a1,d0.w),d0 ; adda.l d0,a1 ; jmp (a1)` dispatcher).  A `lea d16(pc),An` followed within 24
+    // bytes by `jmp (An)` / `jsr (An)` gives the table base; consecutive words whose base+offset lands right after a terminator
+    // (at least 3 of them) are walked as untrusted entries.  Provisional, never "executed".
+    if (ok && !cfg->no_closure && m->isa->code_ptr_store && ws[0].regwalk) {
+        Worker *w0 = &ws[0]; DpMachine *wm0 = w0->m; uint32_t lim = rom_size < 0x400000u ? (uint32_t)rom_size : 0x400000u;
+        for (uint32_t a = 0x200; a + 4 <= lim; a += 2) {
+            unsigned op = (unsigned)(wm0->fetch(wm0, a) << 8 | wm0->fetch(wm0, a + 1));
+            if ((op & 0xF1FFu) != 0x41FAu) continue;   // lea d16(pc),An
+            unsigned an = (op >> 9) & 7u; int jmp = 0;
+            for (uint32_t k = a + 4; k < a + 24 && k + 2 <= lim; k += 2) {
+                unsigned w = (unsigned)(wm0->fetch(wm0, k) << 8 | wm0->fetch(wm0, k + 1));
+                if (w == (0x4ED0u | an) || w == (0x4E90u | an)) { jmp = 1; break; }
+            }
+            if (!jmp) continue;
+            int16_t d = (int16_t)(wm0->fetch(wm0, a + 2) << 8 | wm0->fetch(wm0, a + 3));
+            uint32_t base = (uint32_t)((int32_t)a + 2 + d);
+            if (base < 0x200 || base + 6 > lim || (base & 1u)) continue;
+            uint32_t tg[64]; unsigned n = 0, minv = 0xFFFFFFFFu;   // the table ends where its lowest target starts
+            for (uint32_t t = base; t + 2 <= lim && n < 64 && t < minv; t += 2) {
+                int16_t o = (int16_t)(wm0->fetch(wm0, t) << 8 | wm0->fetch(wm0, t + 1));
+                uint32_t v = (uint32_t)((int32_t)base + o);
+                if (o <= 0 || v < 0x200 || v >= lim || (v & 1u) || wm0->rom_index(wm0, v) < 0 || !chain_short(wm0, m->isa, v)) break;
+                if (v < minv) minv = v;
+                tg[n++] = v;
+            }
+            if (n < 2 || (n < 3 && minv != base + 2u * n)) continue;   // a clean table (ends exactly at its lowest target) may be short
+            for (unsigned i = 0; i < n; i++) { closure_walk_untrusted(&w0->loc, wm0, m->isa, tg[i], w0->regwalk); w0->loc.closure_ptr_stores++; }
         }
     }
 
@@ -3370,7 +3488,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         }
         // generic long sessions from power-on (need a frame counter): attract (no input) and play (pad epochs)
         if (m->frame) {
-            unsigned na = cfg->attract_frames ? 1 : 0, np = (m->set_input && cfg->play_frames) ? (cfg->play_sessions ? cfg->play_sessions : 1) : 0;
+            unsigned na = cfg->attract_frames && !cfg->no_start_attract ? 1 : 0, np = (m->set_input && cfg->play_frames) ? (cfg->play_sessions ? cfg->play_sessions : 1) : 0;
             if (np > 8) np = 8;
             for (unsigned i = 0; i < na + np; i++) {
                 uint8_t *cp = malloc(sh.sbytes);

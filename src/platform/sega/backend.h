@@ -95,13 +95,18 @@ typedef struct {
 } DpSegaBackend;
 // weak: standalone runtime tests link the backends without the framebuffer watch
 void dp_fb_publish(const uint32_t *argb, int w, int h, uint64_t frame) __attribute__((weak));
-typedef struct { uint32_t px[256*192]; int w,h; unsigned every,n; uint64_t *published; } DpSegaWatch;
+typedef struct { uint32_t px[256*192]; int w,h; unsigned every,n; uint64_t *published; int sms; } DpSegaWatch;   // sms: 2-bit channels, four even levels
 static inline void dp_sega_watch_row(DpSegaWatch *k,unsigned y,const uint16_t *p,int w,int h) {
     if(y>=(unsigned)h || w>256) return;
     k->w=w; k->h=h;
     for(int i=0;i<w;i++) {
         uint16_t c=p[i];
         uint32_t r=(uint32_t)((c>>11)&31)*255/31,g=(uint32_t)((c>>5)&63)*255/63,b=(uint32_t)(c&31)*255/31;
+        if(k->sms) {   // the SMS palette (0,10,21,31 in 5 bits; 0,21,42,63 in 6) is 0/85/170/255 on screen, equal on all three channels
+            static const uint8_t lv[4]={0,85,170,255};
+            const unsigned r5=(c>>11)&31,g6=(c>>5)&63,b5=c&31;
+            r=lv[r5>=31?3:r5>=21?2:r5>=10?1:0]; g=lv[g6>=63?3:g6>=42?2:g6>=21?1:0]; b=lv[b5>=31?3:b5>=21?2:b5>=10?1:0];
+        }
         k->px[y*(unsigned)w+(unsigned)i]=0xff000000u|r<<16|g<<8|b;
     }
 }
@@ -127,4 +132,5 @@ const DpSegaBackend *dp_sega_backend_ggt(void);
 const DpSegaBackend *dp_sega_backend_sgt(void);
 const DpSegaBackend *dp_msx_backendt(void);
 const DpSegaBackend *dp_sega_backend_sms(void);
+const DpSegaBackend *dp_sega_backend_smst(void);   /* thread-local, 256 columns (live watch of the SMS) */
 #endif

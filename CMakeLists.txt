@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.415.0 LANGUAGES C)
+project(deepeel VERSION 0.420.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -327,8 +327,9 @@ add_library(deepeel_core STATIC
   src/gui/windows.c
 )
 find_package(Threads REQUIRED)
+find_library(LZ4_LIB lz4 REQUIRED) # fast state compression for the exploration spool
 find_package(ZLIB REQUIRED) # PNG maps and snapshots: compressed image and zTXt chunks
-target_link_libraries(deepeel_core PUBLIC Threads::Threads ZLIB::ZLIB m dp_gblmach_lib dp_mdmach_lib deepeel_libretro ${CMAKE_DL_LIBS})
+target_link_libraries(deepeel_core PUBLIC Threads::Threads ZLIB::ZLIB ${LZ4_LIB} m dp_gblmach_lib dp_mdmach_lib deepeel_libretro ${CMAKE_DL_LIBS})
 target_include_directories(deepeel_core PUBLIC
   src include ${GEN} ${DP_GBL_RUNTIME} ${SDL2_INCLUDE_DIRS})
 if(SDL2_FOUND AND BUILD_GUI)
@@ -336,7 +337,7 @@ if(SDL2_FOUND AND BUILD_GUI)
   add_compile_definitions(DP_HAS_GUI=1)
 endif()
 
-add_library(deepeel_lib STATIC src/deepeel.c src/core/dpmovie.c src/core/tasfetch.c src/core/gbsfetch.c)   # libdeepeel.a: deepeel_main() (include/deepeel.h)
+add_library(deepeel_lib STATIC src/deepeel.c src/core/dpmovie.c src/core/tasfetch.c src/core/tasdb.c src/core/gbsfetch.c)   # libdeepeel.a: deepeel_main() (include/deepeel.h)
 target_include_directories(deepeel_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set_target_properties(deepeel_lib PROPERTIES OUTPUT_NAME deepeel POSITION_INDEPENDENT_CODE ON)
 add_executable(deepeel src/deepeel_cli.c)
@@ -468,6 +469,11 @@ endfunction()
 set(DP_TLS_DEFS_gg GG_ROM_TRACE=1 dp_sega_backend_gg=dp_sega_backend_ggt)
 set(DP_TLS_INCS_gg ${M0BOY_DIR}/targets/gamegear/runtime ${M0BOY_DIR}/targets/common/runtime ${M0BOY_DIR}/targets/sg1000/runtime)
 dp_sega_tls_flavour(gg dp_ggt_ "machine|sg[A-Za-z0-9_]*|gg[A-Za-z0-9_]*|tms[A-Za-z0-9_]*"
+  ${M0BOY_DIR}/targets/gamegear/runtime/gg.c ${DP_GG_VDP_SOURCE} ${M0BOY_DIR}/targets/gamegear/runtime/gg_psg.c src/platform/sega/backend_gg.c)
+# 256-column Master System flavour of the GG runtime for the live watch (the Game Gear flavour box-filters to 160)
+set(DP_TLS_DEFS_sms GG_ROM_TRACE=1 GG_OUT_WIDTH=256 dp_sega_backend_gg=dp_sega_backend_smst)
+set(DP_TLS_INCS_sms ${M0BOY_DIR}/targets/gamegear/runtime ${M0BOY_DIR}/targets/common/runtime ${M0BOY_DIR}/targets/sg1000/runtime)
+dp_sega_tls_flavour(sms dp_smst_ "machine|sg[A-Za-z0-9_]*|gg[A-Za-z0-9_]*|tms[A-Za-z0-9_]*"
   ${M0BOY_DIR}/targets/gamegear/runtime/gg.c ${DP_GG_VDP_SOURCE} ${M0BOY_DIR}/targets/gamegear/runtime/gg_psg.c src/platform/sega/backend_gg.c)
 set(DP_TLS_DEFS_sg dp_sega_backend_sg=dp_sega_backend_sgt)
 set(DP_TLS_INCS_sg ${M0BOY_DIR}/targets/common/runtime ${M0BOY_DIR}/targets/sg1000/runtime)
