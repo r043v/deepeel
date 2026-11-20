@@ -900,3 +900,7 @@ tandis que le noyau est à `$17FC6` (`tst.b $FA5A`, tête de la routine par tram
 que Gens, juste après le V-int au lieu d'avant. C'est une marge de fin de trame (slack) trop courte côté noyau, la même signature que Sonic 1843S (slack
 minimal 2 contre 19). Il faut une comparaison du nombre de cycles de la trame (trace d'instructions de la trame 20 266 dans les deux émulateurs) pour trouver
 l'instruction ou le temps d'attente (VDP, DMA, rafraîchissement) qui diffère ; non fait.
+
+Essais de réglages sur la fenêtre SoR 1845S (V-int 20 205-20 305, `DP_MD_GENS_BUSREQ`, `DP_MD_DMA_REFROUND`, `DP_MD_DMA_NOPHASE`) : résultat identique
+à la référence (premier écart > 8 octets au même échantillon, 25 PC sur 94 égaux) : ces réglages ne touchent pas la cause. Elle est donc ailleurs que dans le calage DMA
+(coût d'instruction ou attente de bus du travail de la trame) ; piste suivante : trace d'instructions de la trame avec cycles cumulés des deux côtés.
