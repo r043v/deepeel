@@ -910,3 +910,9 @@ Marge de fin de trame SoR 1845S (itérations de la boucle d'attente `$10510` par
 au V-int 20 267 où le noyau tombe à 0 : le noyau a une marge inférieure d'au plus une itération (≈ 22 cycles) à ce moment critique, ce qui suffit à renvoyer la
 fin du travail après le V-int. `MD_IRQ_IMMEDIATE=0` n'y change rien ; `DP_MD_VINT_DELAY` (12/24/40) casse la numérotation des échantillons (dsy vide), à ne pas utiliser pour ce test.
 Le décalage de l'ordre de 20 cycles par trame est du niveau du coût d'une instruction ou d'une attente de bus isolée : il faut les cycles cumulés par instruction de la trame 20 266 des deux côtés.
+
+Sonde de durées instruction par instruction (Gens `-lua` contre noyau, ROM de test générée, boucle `instruction + addq.l + bra.w`, nombre d'itérations par trame après 90 trames ; cycles = 127 900 / itérations − 18).
+Identiques des deux côtés : `nop` 4, `lea` 8, `btst #n,Dn` 10, `btst Dn,Dn` 6, MULU/MULS (valeurs dépendant des données). Seul écart relevé jusqu'ici : `BCLR/BSET/BCHG` sur Dn, Gens
+(Starscream) paye toujours le prix « bit long » (+2) même pour un bit < 16 (`bclr #3,d2` 14 contre 12, `bset`/`bchg` 12 contre 10, `bclr Dn,Dn` 10 contre 8, `bset Dn,Dn` 8 contre 6) ;
+c'est ce que couvre `DP_MD_STAR_TIME`, donc compatibilité Gens et non fidélité matérielle (m0boy suit le manuel : +2 seulement pour un bit ≥ 16). La base de la boucle diffère
+de 5 itérations par trame (≈ 110 cycles : 5 813 noyau, 5 808 Gens), à expliquer (coût d'entrée de V-int / découpage par ligne). Sonic 1 REV00 contre s1disasm après le correctif H-int : 75 740 / 89 880 octets (84,3 %) exécutés, contre 56 676 (63,1 %).
