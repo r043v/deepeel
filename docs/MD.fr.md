@@ -893,3 +893,10 @@ constant de numérotation près, 3 V-int entre les deux compteurs) du V-int 20 1
 `$FFFA00` (Gens 1, noyau 0), le même que dans la trame 92 de 1064M. L'échantillon suivant montre le noyau en retard d'un V-int sur les compteurs de `$F04E-$F1FE` (écart
 d'un pas) puis les différences grandissent (16 octets, 100, 250 en 30 V-int) : le thread principal du noyau finit son travail de la trame après le V-int
 alors que Gens l'a fini avant (trame en dépassement). Même classe de défaut que Ristar/Castle ; non corrigé. Observation de l'outil.
+
+Complément (PC interrompus, mêmes fenêtres) : jusqu'à l'échantillon Gens 59 les deux machines interrompent le thread principal aux mêmes PC de la boucle
+d'attente (`$1050C/$10510/$1051E/$10522`, compteur `d0` identique 48, 45, 42, 3F…). À l'échantillon 60 Gens est encore dans la boucle d'attente (`d0`=3F)
+tandis que le noyau est à `$17FC6` (`tst.b $FA5A`, tête de la routine par trame, `d0`=13C) : le noyau a fini le travail de la trame **quelques cycles plus tard**
+que Gens, juste après le V-int au lieu d'avant. C'est une marge de fin de trame (slack) trop courte côté noyau, la même signature que Sonic 1843S (slack
+minimal 2 contre 19). Il faut une comparaison du nombre de cycles de la trame (trace d'instructions de la trame 20 266 dans les deux émulateurs) pour trouver
+l'instruction ou le temps d'attente (VDP, DMA, rafraîchissement) qui diffère ; non fait.
