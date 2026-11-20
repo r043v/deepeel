@@ -904,3 +904,9 @@ l'instruction ou le temps d'attente (VDP, DMA, rafraîchissement) qui diffère ;
 Essais de réglages sur la fenêtre SoR 1845S (V-int 20 205-20 305, `DP_MD_GENS_BUSREQ`, `DP_MD_DMA_REFROUND`, `DP_MD_DMA_NOPHASE`) : résultat identique
 à la référence (premier écart > 8 octets au même échantillon, 25 PC sur 94 égaux) : ces réglages ne touchent pas la cause. Elle est donc ailleurs que dans le calage DMA
 (coût d'instruction ou attente de bus du travail de la trame) ; piste suivante : trace d'instructions de la trame avec cycles cumulés des deux côtés.
+
+Marge de fin de trame SoR 1845S (itérations de la boucle d'attente `$10510` par V-int, Gens `registerexec` contre `DP_MD_PCLOG`, échelle ×20 côté Gens) : du V-int 20 255
+à 20 266 les deux séries concordent à une itération près (≈ 27, 34, 38, 43 côté Gens ; 28, 34, 38, 44 côté noyau, noyau décalé de 1 V-int), puis Gens tombe à ≈ 0,65 itération
+au V-int 20 267 où le noyau tombe à 0 : le noyau a une marge inférieure d'au plus une itération (≈ 22 cycles) à ce moment critique, ce qui suffit à renvoyer la
+fin du travail après le V-int. `MD_IRQ_IMMEDIATE=0` n'y change rien ; `DP_MD_VINT_DELAY` (12/24/40) casse la numérotation des échantillons (dsy vide), à ne pas utiliser pour ce test.
+Le décalage de l'ordre de 20 cycles par trame est du niveau du coût d'une instruction ou d'une attente de bus isolée : il faut les cycles cumulés par instruction de la trame 20 266 des deux côtés.
