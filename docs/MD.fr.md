@@ -879,3 +879,9 @@ de phase sous-trame » ; aucune action sur la logique des V-int/H-int n'est just
 Les 556 échantillons du dump Gens `sor2pf_gens.dsy` (V-int 62-701, film `aka,mukki` 1064M, RAM `$0000-$FAFF`) retrouvent chacun un échantillon du
 noyau (`--replay-only`, `DP_TAS_PAD_SHIFT=1`) avec **0 octet de différence**, y compris la trame 92 (livraison de Start) qui divergeait avant le
 correctif. Observation de l'outil sur cette plage ; la suite du film n'a pas de dump Gens.
+
+#### Ristar 1506S après le H-int de la dernière ligne (20 novembre 2026)
+
+Dump Gens-rr `gens_ristar.dsy` (3 398 V-int, film `UpthornRistarV2`, RAM `$0000-$FAFF`) contre le noyau en `--replay-only` (réglages Gens), appariement
+glissant : 3 065 échantillons sur 3 398 identiques à l'octet, aucun écart au-dessus de 200 octets, aucune dérive durable ; les écarts (1 à 100 octets, par
+paquets : 37-54, 389, 429-435…) se résorbent d'eux-mêmes (phase sous-trame du thread principal). Observation de l'outil.
