@@ -873,3 +873,9 @@ Les 8 échantillons isolés restants (V-int 8 372 … 36 428) ont été examiné
 remplissage, `$F921`, `$04AF`). Dans chaque cas l'état est identique à l'échantillon suivant : c'est la phase du thread principal à l'intérieur de la
 trame (un tampon vu avant/après son remplissage, un minuteur à ±2), pas un décalage de livraison d'IRQ ni une dérive. Reste de la classe « glissement
 de phase sous-trame » ; aucune action sur la logique des V-int/H-int n'est justifiée par ces échantillons.
+
+#### SoR 1064M après le H-int de la dernière ligne (20 novembre 2026)
+
+Les 556 échantillons du dump Gens `sor2pf_gens.dsy` (V-int 62-701, film `aka,mukki` 1064M, RAM `$0000-$FAFF`) retrouvent chacun un échantillon du
+noyau (`--replay-only`, `DP_TAS_PAD_SHIFT=1`) avec **0 octet de différence**, y compris la trame 92 (livraison de Start) qui divergeait avant le
+correctif. Observation de l'outil sur cette plage ; la suite du film n'a pas de dump Gens.
