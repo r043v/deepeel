@@ -116,6 +116,9 @@ typedef struct DpCoreConfig {
     const uint32_t *tas_masks32; /* C12: the wide form (DpInput bits, core/dpmachine.h); wins over tas_masks */
     uint32_t tas_frames;
     unsigned watch_every;       /* --watch: the unshifted movie replay publishes its game screen every N frames (DpMachine.render; 0 = off) */
+    int replay_only;            /* --replay-only: play the movie lean (no fork, scan or spool work), stop at its end or after the last --save-frames frame */
+    const char *save_frames;    /* --save-frames SPEC (N, A-B, comma list): full machine state + screen + work RAM of those movie frames, written to save_dir */
+    const char *save_dir;       /* --save-dir D (default .) */
     const char *dsy_path;       /* --dsy FILE: the unshifted TAS replay writes work RAM per frame as DSY1 */
     int no_tas_jitter;          /* 1: replay the movie unshifted only (no +-1..3 frame shifts) */
     int no_irq_jitter;          /* technique 9: only the 1-instruction IRQ delay, no 2..3 */       // 1: ignore DpPlatformHooks.event_probe (technique 2)

@@ -2,6 +2,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "core.h"
+#include "stop.h"
 #include <lz4.h>
 #include "../core/sha1.h"
 #include "../report/report.h"
@@ -125,6 +126,9 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
         } else { static const uint8_t d[4] = {0x00, 0xFF, 0x55, 0xAA}; memcpy(c->seed_vals, d, 4); c->seed_n = 4; }
         return 2;
     }
+    if (!strcmp(a, "--replay-only")) { c->replay_only = 1; c->no_tas_jitter = 1; return 1; }
+    if (!strcmp(a, "--save-frames") && i + 1 < argc) { c->save_frames = argv[i + 1]; return 2; }
+    if (!strcmp(a, "--save-dir") && i + 1 < argc) { c->save_dir = argv[i + 1]; return 2; }
     if (!strcmp(a, "--dsy") && i + 1 < argc) { c->dsy_path = argv[i + 1]; return 2; }
     if (!strcmp(a, "--no-tas-jitter")) { c->no_tas_jitter = 1; return 1; }
     if (!strcmp(a, "--no-sessions")) { c->no_sessions = 1; return 1; }
@@ -1448,8 +1452,10 @@ static int spool_open(Shared *sh) {
     perror("deepeel: kernel spool unavailable (TMPDIR, the state dir and /tmp all failed); retaining states in RAM");
     sh->spool_fd = -1; return 0;
 }
+static __thread int g_lean_drop;   // watch, single worker, movie main replay: nobody consumes the queue meanwhile, so a push is pure cost (LZ4 spool writes froze the window)
 // pushes p; when the RAM queue is full, appends it to the spool.  Returns 1 if spilled.
 static int queue_push(Shared *sh, DpMachine *m, Pending p) {
+    if (g_lean_drop && p.state) { free(p.state); return 0; }
     if (m) { int64_t k = m->rom_index(m, p.pc); p.tri = k >= 0 ? (uint32_t)k + 1u : 0u; }   // P2: resolved once, at push, under the state's own mapping
 
     const DpCoreConfig *cfg = sh->cfg;
@@ -1734,6 +1740,14 @@ static void poke_wide(DpMachine *m, uint32_t addr, int width, uint32_t v) {
 static pthread_mutex_t dsy_mu = PTHREAD_MUTEX_INITIALIZER;
 static FILE *dsy_file; static uint64_t dsy_last;
 // the generic game-screen watch: every watch_every-th frame of the replayed movie / a session goes to the framebuffer window
+// watch: the movie's main replay only plays (no fork snapshot, RAM scan, spool compression or table-target walk per conditional/dispatch:
+// those were the freezes and a 3-7x slower replay).  DP_WATCH_LEAN=0 restores the exploring replay.
+static int watch_lean(const DpCoreConfig *cfg) {
+    static int lean = -1;
+    if (lean < 0) { const char *e = getenv("DP_WATCH_LEAN"); lean = e && *e == '0' ? 0 : 1; }
+    return lean && (cfg->watch_every || cfg->replay_only);
+}
+
 static void core_watch_publish(const DpCoreConfig *cfg, DpMachine *m, uint64_t f, uint32_t movie_frame, uint32_t total) {
     static __thread uint32_t px[512 * 512];
     if (!cfg->watch_every || !m->render || !dp_watch_frame || f % cfg->watch_every) return;
@@ -1758,6 +1772,54 @@ static void core_dsy_frame(const DpCoreConfig *cfg, DpMachine *m, uint64_t f) {
         dsy_last = f;
     }
     pthread_mutex_unlock(&dsy_mu);
+}
+
+
+// --save-frames SPEC: parse "N", "A-B" or a comma list; returns whether f is selected and, through *last, the highest selected frame
+static int frame_spec(const char *p, uint64_t f, uint64_t *last) {
+    int hit = 0; if (last) *last = 0;
+    while (p && *p) {
+        char *e; uint64_t a = strtoull(p, &e, 10), b = a;
+        if (e == p) break;
+        if (*e == '-') { p = e + 1; b = strtoull(p, &e, 10); }
+        if (f >= a && f <= b) hit = 1;
+        if (last && b > *last) *last = b;
+        if (*e != ',') break;
+        p = e + 1;
+    }
+    return hit;
+}
+
+// one selected movie frame: <dir>/f<N>.state (raw machine state, DpMachine.save), .ppm (screen) and .ram (work RAM)
+static int core_save_frame(const DpCoreConfig *cfg, DpMachine *m, uint64_t f) {
+    uint64_t last; if (!frame_spec(cfg->save_frames, f, &last)) return f >= last && last > 0;
+    const char *dir = cfg->save_dir ? cfg->save_dir : ".";
+    char fn[600];
+    mkdir(dir, 0777);   /* an existing directory is fine */
+    if (m->state_bytes && m->save) {
+        uint32_t n = m->state_bytes(m); uint8_t *buf = malloc(n);
+        snprintf(fn, sizeof fn, "%s/f%llu.state", dir, (unsigned long long)f);
+        FILE *o = buf ? fopen(fn, "wb") : NULL;
+        if (o) { m->save(m, buf); fwrite(buf, 1, n, o); fclose(o); }
+        free(buf);
+    }
+    if (m->work_ram_len) {
+        snprintf(fn, sizeof fn, "%s/f%llu.ram", dir, (unsigned long long)f);
+        FILE *o = fopen(fn, "wb");
+        if (o) { for (uint32_t i = 0; i < m->work_ram_len; i++) fputc(m->fetch(m, m->work_ram_base + i), o); fclose(o); }
+    }
+    if (m->render) {
+        static __thread uint32_t px[512 * 512]; int w = 0, h = 0;
+        if (m->render(m, px, 512u * 512u, &w, &h) && w > 0 && h > 0) {
+            snprintf(fn, sizeof fn, "%s/f%llu.ppm", dir, (unsigned long long)f);
+            FILE *o = fopen(fn, "wb");
+            if (o) { fprintf(o, "P6\n%d %d\n255\n", w, h);
+                for (int i = 0; i < w * h; i++) { uint8_t c[3] = { (uint8_t)(px[i] >> 16), (uint8_t)(px[i] >> 8), (uint8_t)px[i] }; fwrite(c, 1, 3, o); }
+                fclose(o); }
+        }
+    }
+    fprintf(stderr, "deepeel: saved movie frame %llu in %s\n", (unsigned long long)f, dir);
+    return f >= last;
 }
 
 static void run_path(Worker *w, Pending *p) {
@@ -1824,7 +1886,7 @@ static void run_path(Worker *w, Pending *p) {
                 if (snapshot) {
                     m->save(m, snapshot);
                     pthread_mutex_lock(&sh->mu);
-                    Pending q = { snapshot, m->pc(m), cur_forced, 0, p->input, 0, p->vector, cur_origin, cur_epoch };
+                    Pending q = { snapshot, m->pc(m), cur_forced, 0, p->input, 0, m->vector_seeds ? 0 : p->vector, cur_origin, cur_epoch };
                     q.call_depth = fdepth;
                     queue_push(sh, m, q);
                     pthread_mutex_unlock(&sh->mu);
@@ -1849,7 +1911,7 @@ static void run_path(Worker *w, Pending *p) {
                 uint8_t *snapshot = malloc(sh->sbytes ? sh->sbytes : 1);
                 if (snapshot) {
                     m->save(m, snapshot);
-                    Pending q = { snapshot, m->pc(m), cur_forced, 0, p->input, 0, p->vector, cur_origin, cur_epoch };
+                    Pending q = { snapshot, m->pc(m), cur_forced, 0, p->input, 0, m->vector_seeds ? 0 : p->vector, cur_origin, cur_epoch };
                     q.call_depth = fdepth;
                     ram_push(sh, m, q);
                     Pending yielded = sh->q[sh->qn - 1];
@@ -1864,6 +1926,7 @@ static void run_path(Worker *w, Pending *p) {
             }
             pthread_mutex_unlock(&sh->mu);
         }
+        g_lean_drop = tas && tas_shift == 0 && cfg->jobs <= 1 && watch_lean(cfg);
         if (!(attract || play || held) && cfg->max_total && __atomic_load_n(&sh->steps, __ATOMIC_RELAXED) + w->step_batch >= cfg->max_total) {
             loc->sat_total++;
             pthread_mutex_lock(&sh->mu);
@@ -1884,6 +1947,7 @@ static void run_path(Worker *w, Pending *p) {
             if (f != tas_last) {
                 tas_last = f;
                 if (tas_shift == 0 && cfg->dsy_path && f > 0) core_dsy_frame(cfg, m, f);
+                if (tas_shift == 0 && cfg->save_frames && core_save_frame(cfg, m, f)) { __atomic_store_n(&sh->halt, 4, __ATOMIC_RELAXED); pthread_mutex_lock(&sh->mu); pthread_cond_broadcast(&sh->cv); pthread_mutex_unlock(&sh->mu); }
                 if (tas_shift == 0) core_watch_publish(cfg, m, f, (uint32_t)f, (uint32_t)cfg->tas_frames);
                 if (tas_shift == 0) {   // DEEPEEL_TAS_HRAM=<file>: HRAM per movie frame, comparable with the old engine's dump
                     static FILE *hf; static int hinit;
@@ -1900,7 +1964,7 @@ static void run_path(Worker *w, Pending *p) {
                 int64_t k = (int64_t)f - tas_shift - (tas_shift == 0 ? env_shift : 0);
                 // A22/B3: live movie states feed the exploration. A checkpoint every tas_ckpt_every frames (bounded) and the
                 // end state each continue as a free natural path, so branches reachable only from a late state are forked
-                if (tas_shift == 0 && !cfg->no_tas_ckpt && cfg->tas_ckpt_every && f > 0 &&
+                if (tas_shift == 0 && !cfg->no_tas_ckpt && cfg->tas_ckpt_every && f > 0 && !(cfg->jobs <= 1 && watch_lean(cfg)) &&
                     (k >= (int64_t)cfg->tas_frames || (f % cfg->tas_ckpt_every == 0 && __atomic_load_n(&sh->ckpts, __ATOMIC_RELAXED) < cfg->tas_ckpt_cap))) {
                     uint8_t *cp = malloc(sh->sbytes);
                     if (cp) {
@@ -1960,7 +2024,7 @@ static void run_path(Worker *w, Pending *p) {
                 }
                 if (k >= (int64_t)cfg->tas_frames) {
                     m->set_input(m, 0); tas = 0;
-                    tas_ended = 1; if (tas_shift == 0) fprintf(stderr, "deepeel: TAS movie played to its end (%llu frames)\n", (unsigned long long)cfg->tas_frames);
+                    tas_ended = 1; if (tas_shift == 0 && cfg->replay_only) { __atomic_store_n(&sh->halt, 4, __ATOMIC_RELAXED); pthread_mutex_lock(&sh->mu); pthread_cond_broadcast(&sh->cv); pthread_mutex_unlock(&sh->mu); } if (tas_shift == 0) fprintf(stderr, "deepeel: TAS movie played to its end (%llu frames)\n", (unsigned long long)cfg->tas_frames);
                     // the end state of the unshifted movie keeps running as an attract session (no input; it stops on stagnation: --attract-stall)
                     if (tas_shift == 0 && !cfg->no_sessions && m->frame) {
                         uint8_t *ep = malloc(sh->sbytes);
@@ -2045,6 +2109,7 @@ static void run_path(Worker *w, Pending *p) {
             }
         }
         if (!cfg->unbounded && (attract || play) && steps >= (cfg->max_total ? cfg->max_total / 2 : 400000000u)) { loc->sat_path++; defer_state(sh, m, loc, (Pending){ NULL, 0, cur_forced, 0, p->input, 0, 0, cur_origin, cur_epoch }); loc->session_frames += m->frame(m) - sess_f0; break; }   // a long session shares the budget
+        if (p->vector && m->vector_seeds && steps >= 4096) { loc->sat_path++; break; }   // an exception/interrupt handler is short: a longer run is the game itself (forced), which would only pollute the natural coverage
         if (!cfg->unbounded && !tas && !attract && !play && cfg->max_path_steps && steps >= cfg->max_path_steps) { loc->sat_path++; defer_state(sh, m, loc, (Pending){ NULL, 0, cur_forced, 0, p->input, 0, 0, cur_origin, cur_epoch }); break; }
         if (!attract && !play && cur_input && cfg->max_total && steps >= session_cap) { loc->sat_path++; defer_state(sh, m, loc, (Pending){ NULL, 0, cur_forced, 0, p->input, 0, 0, cur_origin, cur_epoch }); break; }
         uint32_t pc = m->pc(m);
@@ -2072,14 +2137,13 @@ static void run_path(Worker *w, Pending *p) {
             if (!fresh) { loc->state_repeats++; break; }
         }
         uint8_t bytes[10] = {0};
-        for (unsigned i = 0; i < sizeof bytes; i++) bytes[i] = m->fetch(m, pc + i);
+        if (m->fetch_n) m->fetch_n(m, pc, bytes, sizeof bytes); else for (unsigned i = 0; i < sizeof bytes; i++) bytes[i] = m->fetch(m, pc + i);
         w->cobs.age++;
         w->pcring[w->pcring_n++ & 31] = pc;
-        int len = isa->length(bytes[0]);
         DpFlowInfo fi;
         memset(&fi, 0, sizeof fi);
         int have_flow = isa->flow && isa->flow(bytes, pc, &fi);
-        if (have_flow && fi.length) len = fi.length;
+        int len = have_flow && fi.length ? fi.length : isa->length(bytes[0]);   // flow first: length() is a second full decode
         if (len <= 0) len = 1;
         // nonsense cuts (E2, the GB legacy eviction mutualized): an executed
         // instruction in echo/OAM/I-O space, a RET whose stack left the RAM
@@ -2253,7 +2317,7 @@ static void run_path(Worker *w, Pending *p) {
                 // Dispatch forks: every target of the table this path has not executed yet becomes a forced path started in the
                 // current state (the handler of an object/mode the film never spawns).  Once per (table, target) globally,
                 // never from a forced path (bounded), counted as forks; the RET taint cut ends them.
-                if (!cur_forced && !cfg->no_dispatch_forks && m->set_pc && ct.stride) {
+                if (!cur_forced && !cfg->no_dispatch_forks && m->set_pc && ct.stride && !(tas && tas_shift == 0 && watch_lean(cfg))) {
                     uint32_t tg[DP_CODE_TABLE_MAX]; unsigned nt = code_table_targets(m, isa, &ct, tg, DP_CODE_TABLE_MAX);
                     uint8_t *cur = NULL;
                     for (unsigned ti = 0; ti < nt; ti++) {
@@ -2411,6 +2475,7 @@ static void run_path(Worker *w, Pending *p) {
                          ((fi.kind == DP_FLOW_CALL && fi.call) ||
                           (fi.kind == DP_FLOW_COND && fi.target < 0));
         int cond = have_flow && fi.kind == DP_FLOW_COND && fi.target >= 0;
+        if (tas && tas_shift == 0 && watch_lean(cfg)) { cond = 0; stack_cond = 0; }
         if (cond && cfg->fork_site_cap && !cur_epoch && w->capped[site_slot(m, pc, w->site_n, NULL)] == skey) { loc->sat_site++; cond = 0; }   // site already saturated: no snapshot, no lock
         uint8_t *pre = NULL;
         // both sides already covered by natural paths: the fork is pruned below whatever side is taken, so the
@@ -2915,8 +2980,12 @@ static void *worker_main(void *arg) {
         size_t pick = spool_pick != SIZE_MAX ? spool_pick : sh->qn - 1;
         w->loc.in_novelty_path = 0;
         int session_first = 0;
+        if (!session_first)
         for (size_t i = spool_pick != SIZE_MAX ? 0 : sh->qn; i-- > 0;)   // the few long sessions (attract / play) start before the fork backlog
             if (sh->q[i].input >= SESSION_ATTRACT) { pick = i; session_first = 1; break; }
+        if (spool_pick == SIZE_MAX && !session_first && w->m->vector_seeds && !(cfg->tas_masks || cfg->tas_masks32))   // after the natural path/session has had its turn (a handler can run on into the game as a forced path and pollute it); vector-table handlers (exception/interrupt entries) are short: first, so they never starve behind a session
+            for (size_t i = sh->qn; i-- > 0;)
+                if (sh->q[i].vector && sh->q[i].seed && !covered(&w->loc, w->m, sh->q[i].pc)) { pick = i; session_first = 1; break; }
         if (spool_pick == SIZE_MAX && !session_first && !cfg->no_novelty_order) {
             double best = -1;
             for (size_t i = sh->qn; i-- > 0;) {
@@ -3449,6 +3518,18 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         // the natural path goes last: it is the first one taken
         if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
         sh.q[sh.qn++] = (Pending){ start, start_pc, 0, 0, 0 };
+        if (m->vector_seeds && !cfg->no_vectors && !getenv("DP_NO_VSEED")) {   // wide-address vector tables (68000): every handler is a forced start, queued after the natural path so they run first (cheap, and starved otherwise)
+            uint32_t vp[64]; unsigned nv = m->vector_seeds(m, vp, 64);
+            for (unsigned i = 0; i < nv; i++) {
+                if (vp[i] == start_pc) continue;   // the entry point is the natural path itself
+                uint8_t *cp = malloc(sh.sbytes);
+                if (!cp) break;
+                memcpy(cp, start, sh.sbytes);
+                if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
+                sh.q[sh.qn++] = (Pending){ cp, vp[i], 1, 0, 0, 1, 1 };
+                out->vector_seeds++;
+            }
+        }
         // technique 3: start states whose RAM range already holds a plausible valid save
         uint32_t sd_lo = cfg->seed_lo, sd_hi = cfg->seed_hi; unsigned sd_n = cfg->seed_n; uint8_t sd_v[8];
         memcpy(sd_v, cfg->seed_vals, sizeof sd_v);

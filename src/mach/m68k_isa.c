@@ -3,6 +3,7 @@
 #include "../core/dpmachine.h"
 #include "../cpu/m68k/m68k.h"
 #include <stdio.h>
+#include <string.h>
 
 static int isa_length(uint8_t op) {
     DpM68kInsn in;
@@ -10,7 +11,7 @@ static int isa_length(uint8_t op) {
     return dp_m68k_decode(bytes, sizeof bytes, 0, &in) ? (int)in.len : 2;
 }
 
-static int isa_flow(const uint8_t *bytes, uint32_t pc, DpFlowInfo *o) {
+static int isa_flow_raw(const uint8_t *bytes, uint32_t pc, DpFlowInfo *o) {
     DpM68kInsn in;
     o->kind = DP_FLOW_SEQ; o->fall = 1; o->call = 0; o->rst = 0; o->halt = 0;
     o->target = -1; o->cond = -1; o->length = 2; o->pair = DP_REG_PAIR_NONE;
@@ -71,6 +72,18 @@ static int isa_cond_of(uint8_t op) {
 static uint8_t isa_cond_flag(int cond) {
     (void)cond;
     return 0;   // no single-flag mapping (68000 conditions are composed)
+}
+
+/* The exploration decodes the same few thousand instructions millions of times (every executed instruction, snprintf-built text included).
+ * flow depends only on (bytes, pc): a small per-thread direct-mapped memo keyed on both, verified byte for byte. */
+typedef struct { uint32_t pc; uint8_t bytes[10]; uint8_t ok; int ret; DpFlowInfo fi; } FlowMemo;
+static int isa_flow(const uint8_t *bytes, uint32_t pc, DpFlowInfo *o) {
+    static __thread FlowMemo memo[4096];
+    FlowMemo *e = &memo[(pc * 0x9E3779B1u >> 20) & 4095u];
+    if (e->ok && e->pc == pc && !memcmp(e->bytes, bytes, 10)) { *o = e->fi; return e->ret; }
+    int r = isa_flow_raw(bytes, pc, o);
+    e->pc = pc; memcpy(e->bytes, bytes, 10); e->fi = *o; e->ret = r; e->ok = 1;
+    return r;
 }
 
 static int isa_illegal(uint8_t op) {

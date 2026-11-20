@@ -5,6 +5,7 @@
 #include <string.h>
 #include "md_full.h"
 #include "md_trace.h"
+#include "md_dbg.h"
 
 void dp_mdrom_set(const uint8_t *rom, size_t size);
 uint32_t dp_mdrom_peek32(uint32_t a);
@@ -15,6 +16,7 @@ struct DpMdMach {
     DpMdHooks h;
     uint64_t steps, budget;
     int resume_frame;
+    uint32_t *screen;   // watch only: the frame drawn line by line (H-int palette swaps, e.g. Sonic 1 water line)
 };
 
 static __thread DpMdMach *cur;   // per thread: parallel workers each run their own machine
@@ -57,8 +59,16 @@ void dp_md_sound_store(MdFull *m, uint16_t addr, uint8_t value) {
     cur->h.on_sound_store(cur->h.user, addr, value, ymreg);
 }
 
+static uint32_t vint_n; static const struct MdFull *vint_owner;
+static uint32_t cur_ipc;   // PC of the instruction being executed (for the write log)
 static void t_step(void *u, MdFull *m, uint32_t pc, uint16_t op) {
     DpMdMach *d = u;
+    cur_ipc = pc;
+    { static int init; static uint32_t va, vb, lo, hi;
+      if (!init) { init = 1; const char *e = getenv("DP_MD_PCLOG_V"), *r = getenv("DP_MD_PCLOG");   // diagnostic: instruction PCs in V-int window a:b, optional pc range lo:hi
+          if (!(e && sscanf(e, "%u:%u", &va, &vb) == 2)) vb = 0; if (!(r && sscanf(r, "%x:%x", &lo, &hi) == 2)) { lo = 0; hi = 0xffffff; } }
+      if (vb && m == vint_owner && vint_n >= va && vint_n <= vb && pc >= lo && pc <= hi)
+          fprintf(stderr, "I v=%u line=%u pc=%06x op=%04x cyc=%u\n", vint_n, (unsigned)m->line, (unsigned)pc, op, (unsigned)m->cycles); }
     if (d->steps >= d->budget) {
         m->fault = DP_MD_FAULT_BUDGET;
         m->fault_pc = pc;
@@ -83,8 +93,20 @@ static void t_rd(void *u, MdFull *m, uint32_t a, unsigned sz) {
     if (d->h.on_read) d->h.on_read(d->h.user, a, sz);
 }
 
+/* DP_MD_WLOG=lo:hi (hex work-RAM-style address range) with DP_MD_WLOG_V=a:b (V-int sample numbers): diagnostic log of the
+ * CPU writes into the range, with the V-int count, frame, line and the writing instruction's PC (compare with Gens-rr's
+ * memory.registerwrite, tools/gens_wlog.lua). */
+static void wlog(MdFull *m, uint32_t a, unsigned sz, uint32_t v) {
+    static int init; static uint32_t lo, hi, va, vb;
+    if (!init) { init = 1; const char *e = getenv("DP_MD_WLOG"), *g = getenv("DP_MD_WLOG_V");
+        if (e && sscanf(e, "%x:%x", &lo, &hi) == 2) { va = 0; vb = ~0u; if (g) sscanf(g, "%u:%u", &va, &vb); } else hi = 0; }
+    if (!hi || m != vint_owner || a < lo || a > hi || vint_n < va || vint_n > vb) return;
+    fprintf(stderr, "W v=%u frames=%u line=%u pc=%06x a=%06x sz=%u v=%0*x\n", vint_n, (unsigned)m->frames, (unsigned)m->line,
+            (unsigned)cur_ipc, (unsigned)a, sz, (int)sz * 2, (unsigned)v);
+}
 static void t_wr(void *u, MdFull *m, uint32_t a, unsigned sz, uint32_t v) {
     DpMdMach *d = u;
+    wlog(m, a, sz, v);
     if (d->h.on_write) d->h.on_write(d->h.user, a, sz, v);
 }
 
@@ -102,6 +124,7 @@ void dp_mdmach_close(DpMdMach *d) {
     if (!d) return;
     if (cur == d) { memset(&md_trace, 0, sizeof md_trace); cur = NULL; }
     free(d->m);
+    free(d->screen);
     free(d);
 }
 
@@ -109,7 +132,7 @@ void dp_mdmach_set_hooks(DpMdMach *d, const DpMdHooks *h) { d->h = *h; }
 
 /* DP_MD_DSY_VINT=<file>: diagnostic DSY1 writer sampling work RAM at the V-int vector like the Gens exec hook
  * (the reference side of `deepeel desync`); one sample per V-int, numbered from 0. */
-static FILE *vint_dsy; static uint32_t vint_n; static const struct MdFull *vint_owner;
+static FILE *vint_dsy;
 static void vint_sample(void *u, const struct MdFull *m) {
     (void)u;
     static int64_t last_frame = -1;
@@ -117,7 +140,18 @@ static void vint_sample(void *u, const struct MdFull *m) {
     if ((int64_t)m->frames <= last_frame) return;   // forks restored on this machine replay earlier frames: the primary replay owns each frame
     last_frame = m->frames;
     { static unsigned stride = ~0u; if (stride == ~0u) { const char *e = getenv("DP_MD_DSY_STRIDE"); stride = e ? (unsigned)atoi(e) : 0; }
-      if (stride > 1 && vint_n % stride) { vint_n++; return; } }   // DP_MD_DSY_STRIDE=N: write every N-th V-int only (long movies)
+      if (stride > 1 && vint_n % stride && !getenv("DP_MD_DSY_FROM")) { vint_n++; return; } }   // DP_MD_DSY_STRIDE=N: write every N-th V-int only (long movies)
+    { static long lo = -2, hi = -2; if (lo == -2) { const char *e = getenv("DP_MD_DSY_FROM"), *t = getenv("DP_MD_DSY_TO"); lo = e ? atol(e) : -1; hi = t ? atol(t) : -1; }
+      if ((lo >= 0 && (long)vint_n < lo) || (hi >= 0 && (long)vint_n > hi)) { vint_n++; return; } }   // DP_MD_DSY_FROM/TO: a V-int window (stride 1 around a desync)
+    { static long shot_lo = -2, shot_hi = -2; static const char *shot_pre; static MdFrameSel shot_sel;   /* DP_MD_SHOT=prefix DP_MD_SHOT_FROM/TO=V-int window: PPM of the rendered frame */
+      if (shot_lo == -2) { shot_pre = getenv("DP_MD_SHOT"); const char *e = getenv("DP_MD_SHOT_FROM"), *t = getenv("DP_MD_SHOT_TO"); shot_lo = e ? atol(e) : -1; shot_hi = t ? atol(t) : shot_lo; }
+      if (shot_pre && (getenv("DP_MD_SHOT_FRAMES") ? md_frame_sel(&shot_sel, "DP_MD_SHOT_FRAMES", vint_n) : (shot_lo >= 0 && (long)vint_n >= shot_lo && (long)vint_n <= shot_hi)) && (!getenv("DP_MD_SHOT_STEP") || vint_n % (unsigned)atoi(getenv("DP_MD_SHOT_STEP")) == 0)) {
+          uint32_t *px = calloc(320u * 224u, sizeof *px);
+          if (px) { char fn[512]; snprintf(fn, sizeof fn, "%s%u.ppm", shot_pre, vint_n); FILE *sf = fopen(fn, "wb");
+              if (sf) { if (m->screen) memcpy(px, m->screen, 320u * 224u * sizeof *px); else md_full_render((MdFull *)m, px, 320); fprintf(sf, "P6\n320 224\n255\n");
+                  for (int i = 0; i < 320 * 224; i++) { uint8_t c[3] = { (uint8_t)(px[i] >> 16), (uint8_t)(px[i] >> 8), (uint8_t)px[i] }; fwrite(c, 1, 3, sf); }
+                  fclose(sf); }
+              free(px); } } }
     // only the first machine (the primary replay), not shifted replays or forks
     if (getenv("DP_MD_VINT_LOG")) fprintf(stderr, "V n=%u frames=%u line=%u pc=%06x f62a=%02x\n", vint_n, (unsigned)m->frames, (unsigned)m->line, (unsigned)m->pc, m->ram[0xf62a]);
     uint16_t nb = 2; uint8_t nl = 4; uint32_t len = 0x10000u, rl = 68, regs[17];
@@ -134,6 +168,7 @@ void dp_mdmach_reset(DpMdMach *d) {
      * default loses a frame near 1423 (docs/MD.fr.md); still overridable from the environment. */
     setenv("DP_MD_CLOWN_CLOCK", "exact", 0); setenv("DP_MD_CLOCK_OFF", "3", 0);
     md_full_reset(d->m);
+    if ((getenv("DP_MD_SHOT") || getenv("DP_MD_LINESCREEN")) && !d->screen) { d->screen = calloc(320u * 224u, sizeof *d->screen); if (d->screen) d->m->screen = d->screen; }   /* per-line screen for DP_MD_SHOT (H-int palette swaps) */
     { const char *vp = getenv("DP_MD_DSY_VINT");
       if (vp && *vp && !vint_dsy) { vint_dsy = fopen(vp, "wb"); if (vint_dsy) fwrite("DSY1", 1, 4, vint_dsy); }
       if (vint_dsy && !vint_owner) vint_owner = d->m;
@@ -276,7 +311,17 @@ int dp_mdmach_rom_visible(const DpMdMach *d, uint32_t addr) {
     return addr < 0x400000u && !(d->m->sram_enable && addr >= 0x200000u && addr < 0x210000u);
 }
 const uint8_t *dp_mdmach_ram(const DpMdMach *d) { return d->m->ram; }
-void dp_mdmach_render(const DpMdMach *d, uint32_t *pixels) { md_full_render(d->m, pixels, 320); }
+void dp_mdmach_render(const DpMdMach *d, uint32_t *pixels) {
+    DpMdMach *w = (DpMdMach *)d;
+    // First call (the watch is the only caller): from now on the kernel draws each active line as it is emulated,
+    // so mid-frame CRAM writes (H-int palette swap) show; before that, fall back to the end-of-frame palette.
+    if (!w->screen) {
+        w->screen = calloc(320u * 224u, sizeof *w->screen);
+        if (w->screen) w->m->screen = w->screen;
+    }
+    if (w->screen && w->m->screen == w->screen && w->screen[0] != 0u) { memcpy(pixels, w->screen, 320u * 224u * sizeof *pixels); return; }
+    md_full_render(d->m, pixels, 320);
+}
 static uint64_t fnv_bytes(uint64_t h, const void *p, size_t n) {
     const uint8_t *b = p;
     for (size_t i = 0; i < n; i++) h = (h ^ b[i]) * 0x100000001b3ull;

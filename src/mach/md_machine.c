@@ -38,8 +38,29 @@ static uint8_t md_fetch(DpMachine *m, uint32_t a) {
     uint32_t w = dp_mdmach_peek32(((MdMachWrap *)m->impl)->m, a & ~3u);
     return (uint8_t)(w >> (24 - 8 * (a & 3)));
 }
+extern uint8_t md_rom[]; extern uint32_t md_rom_size;
+// same bytes as n calls of md_fetch: straight from the ROM image when every word md_fetch would read lies inside it
+static void md_fetch_n(DpMachine *m, uint32_t a, uint8_t *o, unsigned n) {
+    const uint32_t r = a & 0xFFFFFFu;
+    if (r + n + 3u <= md_rom_size) { memcpy(o, md_rom + r, n); return; }
+    for (unsigned i = 0; i < n; i++) o[i] = md_fetch(m, a + i);
+}
 static void md_poke(DpMachine *m, uint32_t a, uint8_t v) { dp_mdmach_poke(((MdMachWrap *)m->impl)->m, a, v); }
 // the ROM sits at $000000: a visible CPU address is its physical offset
+// 68000 exception/interrupt vector table: vectors 2..63 (long, big-endian) are handler entries (bus/address error, illegal,
+// zero divide, CHK, TRAPV, privilege, trace, line A/F, traps, IRQ levels); padding and non-ROM targets are skipped.
+static unsigned md_vector_seeds(DpMachine *m, uint32_t *out, unsigned max) {
+    unsigned n = 0;
+    for (uint32_t v = 2; v < 64 && n < max; v++) {
+        uint32_t pc = 0;
+        for (unsigned k = 0; k < 4; k++) pc = (pc << 8) | m->fetch(m, v * 4 + k);
+        if (!pc || pc == 0xFFFFFFFFu || (pc & 1) || pc >= 0x400000u) continue;
+        unsigned dup = 0;
+        for (unsigned j = 0; j < n; j++) dup |= out[j] == pc;
+        if (!dup) out[n++] = pc;
+    }
+    return n;
+}
 static int64_t md_rom_index(DpMachine *m, uint32_t a) {
     return dp_mdmach_rom_visible(((MdMachWrap *)m->impl)->m, a) ? (int64_t)a : -1;
 }
@@ -281,7 +302,7 @@ DpMachine *dp_machine_md(DpMdMach *impl) {
     m->state_bytes = md_state_bytes;
     m->save = md_save;
     m->load = md_load;
-    m->fetch = md_fetch;
+    m->fetch = md_fetch; m->fetch_n = md_fetch_n; m->vector_seeds = md_vector_seeds;
     m->poke = md_poke;
     m->rom_index = md_rom_index;
     m->linear = 1;

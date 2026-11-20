@@ -783,3 +783,87 @@ Ristar avec 0.419.0 (420 s, 4 fils) : code IDA manquant 472 → 442 octets (47 t
 ## Base TASVideos locale (`deepeel tasdb`, 0.420.0)
 
 `deepeel tasdb sync [--systems A,B]` interroge l'API TASVideos (`/api/v1/systems`, `games`, `publications`, `submissions`) et range des TSV dans `tasdb/` à côté de l'exécutable (`DEEPEEL_TASDB` ou `--dir` pour changer) : jeux avec les hachages MD5/SHA-1 de chaque version de ROM, publications, soumissions (tous statuts). `deepeel tasdb find ROM [--fetch]` hache la ROM, retrouve le jeu et sa version, liste publications ET soumissions (date, émulateur, ROM de l'enregistrement) et télécharge les films dans `tasdb/movies/<jeu>/<id>M|S/`. `deepeel tasdb fetch GAME_ID` fait de même par identifiant. Exemple : la ROM `Streets of Rage (W) (REV00)` (SHA-1 `3d74dbc8…`) est le jeu 115 ; ses films sont 130M/67S (SprintGod, Gens 9, 2004) et 1064M/1845S (Mitjitsu & Mukki, GENS, 2008).
+
+### SoR 1064M, échantillon 4690 : le V-int arrive 2 instructions plus tôt dans le noyau (20 novembre 2026)
+
+Diagnostics ajoutés (désactivés par défaut) : `DP_MD_WLOG=lo:hi` + `DP_MD_WLOG_V=a:b` (journal des écritures CPU : numéro de
+V-int, trame, ligne, PC de l'instruction), `DP_MD_PCLOG=lo:hi` + `DP_MD_PCLOG_V=a:b` (PC, ligne et cycles de chaque
+instruction), côté Gens-rr `tools/gens_wlog.lua`. Observation de l'outil (film 1064M, réglages Gens, `DP_MD_CLOWN_CLOCK=3416`) :
+l'écart de 8 octets de l'échantillon 4690 (`$C0A9` : Gens `ec`, noyau `ee`, puis `$DC10-15`, `$E281`, `$FA40`) vient du
+constructeur de table de sprites (`$AFFA-$B048`) : Gens l'écrit avant le V-int 4690, le noyau après (échantillon 4691, ligne 76).
+Le PC interrompu à l'échantillon 4690 est `$B0E8` chez Gens (dans le sous-programme appelé en `$AFF6`) et `$AFF4` chez le
+noyau : Gens exécute deux instructions de plus (`addq` 8 cycles + `jsr` 18 cycles) avant de prendre l'IRQ, soit un retard de
+prise d'IRQ compris entre 8 et 26 cycles dans ce cas. Les échantillons 4684-4689 sont identiques (PC et registres). Même
+classe que SoR 130M (échantillon 4760) : un décalage global de `DP_MD_VINT_DELAY` ne convient pas (9-10 cycles cassent dès
+4500) ; il faut modéliser la quantification de la prise d'IRQ de Gens (fin de ligne à l'instruction près).
+
+### Sync Gens / m0boy : coûts d'instructions comparés à Starscream (20 novembre 2026)
+
+Les coûts statiques de `md_m68k_cycles` ont été comparés à la table extraite de `Star.c` (Gens-rr, compilé sous Linux). Divergences relevées : `ADDQ/SUBQ.W #,An` (Starscream 4, matériel 8 : le noyau garde 8, une première « correction » à 4 faisait diverger Sonic 1843S dès la trame 168, contre 1628 sans elle), `MOVEP` (long = bit 6, corrigé par défaut), et des écarts propres à Starscream (BTST/BSET/BCLR registre, CLR mémoire, TAS, Scc/DBcc) regroupés derrière `DP_MD_STAR_TIME=1` (md_star_adjust, opt-in). Délai d'octroi du bus Z80 de Gens (16 cycles, `DP_MD_GENS_BUSREQ=1`, opt-in) : implémenté, sans effet sur l'écart de SoR 1064M à l'échantillon 4690 (15 octets, PC `$B0E8` Gens contre `$B9F6` noyau) ; piste écartée. Observations de l'outil, pas des mesures de matériel. Reste : coûts dynamiques (pénalités de bus/VDP de Gens).
+
+### Sonic 1 (film 1843S) : watch et desync de la trame 37 3xx (20 novembre 2026)
+
+Observations de l'outil (pas des mesures matérielles).
+
+- **Watch** : le rendu se fait ligne par ligne (`m->screen`, palette par ligne : l'eau de Labyrinth Zone) ; le rejeu principal du
+  watch ne fait plus d'exploration (`DP_WATCH_LEAN=0` la rétablit) : ni fork, ni snapshot, ni checkpoint TAS, ni file/spool LZ4
+  tant que le film joue (1,4 M pas/s au lieu de 1,1). Le film (60 644 trames) se rejoue en entier en ~5 min ; la session
+  d'attract qui suit explore (forks, spool) et reste plus lente. `isa_flow` est mémoïsé, `fetch_n` lit la fenêtre d'instruction
+  en un appel.
+- **Vecteurs d'exception 68000** : `DpMachine.vector_seeds` (MD : vecteurs 2..63 de la table, gestionnaires dans la ROM) ;
+  chaque gestionnaire est une graine forcée, prise avant les sessions (hors film). Avant : `BusError`, `AddressError`, `ZeroDivide`
+  du listing s1disasm restaient hors couverture.
+- **Desync 37 3xx vs Gens-rr** (échantillonné aux V-int, `DP_MD_DSY_FROM/TO` pour une fenêtre à pas 1) : identique jusqu'à la
+  trame 37 300 ; première différence hors pile en 37 312 (buffer de scroll `$F000-$F2CF`), l'objet de Sonic (`$D000`) diverge à
+  37 318 ; à 37 317 Gens est encore dans `WaitForVBlank` (`$29AC`) alors que le noyau est interrompu en pleine logique de jeu
+  (`$63C6`) : la logique de cette trame est plus lente dans le noyau, une trame de lag apparaît d'un seul côté (plateforme
+  ratée). Écartés : `DP_MD_STAR_TIME` (sans `ADDQ.W An`, qui casse dès la trame 168-180), `DP_MD_STAR_DIV`, leur combinaison.
+
+**0.421.0 — graines de vecteurs 68000 bornées.** Les handlers de la table de vecteurs (2..63) sont des départs forcés ; ils passent après les sessions longues (jamais avant : un handler comme `$200` de SoR court dans le jeu en chemin forcé et pollue le chemin naturel) et sont bornés à 4 096 pas (propre aux machines qui fournissent `vector_seeds`, le NES garde son comportement). Mesures de l'outil, 600 s, 4 fils, contre le dasm : SoR 845 octets manquants (0,9 %, inchangé ; sans la borne 1 983 à 3 851 et plus aucune session de jeu), Ristar 442 (inchangé), Sonic 1 : exécuté 42 302 → 42 742 octets, `BusError`/`AddressError`/`ZeroDivide` atteints, 99,4 % exécuté ou prouvé. Restes de Sonic : code de debug (`Debug_Init`, cheat) et code mort.
+
+**Restes de couverture MD après 0.421.0 (observations de l'outil).** SoR avec le film 1064M (600 s, 4 fils) : 64,4 % du code du dasm exécuté, 708 octets manquants (0,7 %) ; sans film 846. Les restes de SoR examinés (`$4FC4` : remplissage `ori.b #0` que le listing classe en code ; `$12AAE`, `$178A6`, `$ACA6`, `$74DE`, `$17858` : aucun appelant, et les mots de la ROM égaux à ces adresses tombent dans du code ou des constantes, pas dans des tables) sont des routines sans accès statique ni dynamique : même limite technique que Sonic 1 `$14C4E` et Ristar `$6374`. Castle of Illusion n'a pas de dasm : sa couverture n'est mesurée que par l'exécution (59 910 octets naturels en 222 min, 24 734 en 300 s) et ne peut pas être comparée à une référence ; le nouveau noyau n'y change rien (graines de vecteurs : 2).
+
+### Sonic 1 (film 1843S) : slack de la boucle d'attente autour de la trame 37 316 (20 novembre 2026)
+
+Mesure : exécutions de `$29AC` (`WaitForVBlank`) par V-int, Gens (Lua, `slack.lua`) contre noyau
+(`DP_MD_PCLOG=29ac:29ac`, `DP_MD_PCLOG_V=37289:37320`). Observations de l'outil, pas du matériel.
+
+- Jusqu'à 37 314, les deux émulateurs ont un slack stable (Gens ≈ 2 300, noyau ≈ 210 : unités différentes, rapport ≈ 10).
+- Le slack s'effondre dans les deux : Gens 1 632 → 188 → 887 → 2 110 (V-int 37 315..37 318) ; noyau 208 → 154 → 2 → 404 (même suite, décalée d'un V-int, décalage connu depuis 37 312).
+- Le minimum du noyau (≈ 2 itérations) est plus bas que celui de Gens (≈ 19 en échelle noyau) : la logique de cette trame dure ≈ 17 itérations (~ 450 cycles) de plus dans le noyau, suffisant pour franchir le V-int suivant et retarder les écritures de logique d'un V-int.
+- DMA de la trame (noyau) : 64 + 448 + 320 (+ 368) mots ; la cause exacte du surcoût (arrondi de DMA, coût d'instruction) n'est pas encore isolée. Pistes écartées : `DP_MD_STAR_TIME/DIV/ADDQ`.
+
+Complément (même jour) : la trame lourde est la routine `$72500..$72DFE` (≈ 25 000 cycles dans le noyau). Instructions exécutées dans cette plage, par V-int : noyau 1 934 puis 6 832 (V-int 37 316, 37 317) ; Gens 932 puis 3 416 (37 315, 37 316), soit exactement la moitié (le hook Gens compte une fois par mot d'adresse paire) — le travail est identique, seul le point de coupure par le V-int diffère de quelques dizaines d'instructions. Le décalage vient donc d'un écart de temps inférieur à 0,5 % de trame, pas d'une divergence logique. Gens n'expose pas de compteur de cycles : sans référence cycle-exacte, aucun réglage de coût ne peut être validé ; limite technique de la référence, pas du noyau. `ctest` complet : 184 passent (`rtcode_sms_source` est instable sous `-j2`, passe seul).
+
+### Restes Ristar (442 octets) : vérification des références (20 novembre 2026)
+
+Pour les entrées de blocs manquants (`$5FC4A`, `$BB88`, `$4DB98`, `$6374`, `$519CA`, `$297D8`, `$346E2`, `$4D97C`, `$4DA14`, `$5CC12`), recherche dans la ROM de longs absolus et de `jsr/jmp/bsr` en mot absolu : aucune référence, sauf `$BB88` (pointeur en `$BB02` et `$6BF1A`, jamais suivi par le jeu dans le film). Les autres sont atteignables seulement par branchement relatif ou table relative depuis du code non exécuté ; `$12B6E` est du désassemblage de données. Aucune technique de l'outil n'ajoute ces entrées sans exécution réelle : limite d'atteignabilité, pas de technique manquante. Observation de l'outil sur une ROM et un film donnés.
+
+### Diagnostic : captures PPM au V-int (`DP_MD_SHOT`) (20 novembre 2026)
+
+`DP_MD_SHOT=<préfixe> DP_MD_SHOT_FROM/TO=<fenêtre de V-int> [DP_MD_SHOT_STEP=N]` écrit `<préfixe><n>.ppm` (rendu fin de trame, 320×224) ; il faut aussi `DP_MD_DSY_VINT`, `DP_MD_DSY_FROM/TO` couvrant la même fenêtre (même point d'échantillonnage). Sonic 1 film 1843S, V-int 32 600-33 400 (pas de 10 à 100) et 33 400-37 400 (pas de 100) : aucun tile corrompu observé (moniteur détruit en 33 080-33 130, HUD, décor). Le bug « tiles de la TV vers 33k » vu dans la fenêtre `--watch` n'est donc pas reproduit par le rendu fin de trame ; la piste restante est le rendu ligne par ligne de la fenêtre (`screen`), non utilisé par ces captures. Observation de l'outil.
+
+### Restes SoR (846 octets) : vérification des entrées (20 novembre 2026)
+
+Les 12 plus grands blocs manquants (`$4FC4`, `$12AAE`, `$178A6`, `$25FE`, `$256C`, `$ACA6`, `$74DE`, `$17858`, `$5904`, `$140B4`, `$196B4`, `$13FE4`) n'ont aucune référence en long absolu, `jsr/jmp` mot absolu ni `bsr/bra.w` dans la ROM. `$4FC4` est du remplissage nul (`ori.b #0,d0` ×n, 46 octets) classé code par la référence : non exécutable par construction. `$12AAE`, `$178A6`, `$25FE` sont des états d'objets derrière un `rts`/`jmp` : atteints seulement par table d'états relative quand le jeu y entre ; absents du film joué. Limite d'atteignabilité de la ROM, observation de l'outil (film 1064M + exploration).
+
+### Palette de l'eau LZ : H-int de la dernière ligne (20 novembre 2026)
+
+- Cause : quand la surface de l'eau est hors écran, `v_hblank_line` vaut 223 (`LZWaterFeatures.asm`) et le H-int tombe sur la dernière ligne active.
+  Le noyau le servait après le V-int suivant, dont la copie de palette sèche était alors écrasée par le handler (palette d'eau). Gens lève le H-int
+  404 cycles avant la fin de la ligne. Correctif dans m0boy `md_full_frame` (`DP_MD_HINT_LATE=1` rétablit l'ancien comportement).
+- Observation de l'outil : aux trames de film 33 100 et 33 110, aucune différence de pixel avec Gens hors zone OSD ; à 33 920, 16 pixels sur une
+  seule ligne (bord eau/sec). La « TV » aux tuiles bizarres de 33 920 est identique chez Gens (pas un défaut du noyau).
+- Effet sur l'état du jeu (A/B 1843S, stride 14) : 5 octets de RAM en échantillons 2085-2086 puis identique ; pas de comparaison à Gens faute de dump
+  de référence aligné pour cet environnement.
+- Outils : `--replay-only --save-frames N,A-B,… --save-dir D` (rejeu allégé, état complet + RAM + écran des trames choisies, arrêt après la dernière) ;
+  `DP_MD_LINESCREEN=1` (écran ligne par ligne) ; sélecteur `N,A-B,…` pour `DP_MD_VDBG`, `DP_MD_VDBG2`, `DP_MD_CRLOG`, `DP_MD_SHOT_FRAMES`.
+
+#### Desynchro 37 316 : corrigée par le H-int de la dernière ligne (20 novembre 2026)
+
+Mesure avec un dump Gens-rr régénéré (`tools/gens_dsy_vint.lua`, 1 échantillon sur 14 V-int, 38 100 trames, film 1843S) contre le noyau en
+`--replay-only` (mêmes variables d'environnement), RAM `$0000-$FBFF` hors compteurs de phase (`aa00-abff`, `3500-35ff`, `f600-f62f`, `f000-f00f`,
+`fe0c-fe0f`) : sans le correctif, 46 échantillons diffèrent dont la désynchro durable à partir de l'échantillon 37 324 (600 à 2 000 octets) ;
+avec le correctif, 8 échantillons seulement (8 372, 15 750, 15 792, 18 214, 18 228, 28 490, 28 504, 36 428), tous isolés, l'état se
+recale à l'échantillon suivant. Observation de l'outil, pas une mesure de matériel. La cause réelle n'était donc pas la coupure du V-int
+mais le service du H-int de la ligne 223 (handler d'eau LZ qui exécute `VBlank_UpdateScreen` différé, `f_doupdatesinhblank`) après le V-int suivant.

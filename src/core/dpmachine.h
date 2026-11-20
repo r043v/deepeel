@@ -298,6 +298,8 @@ struct DpMachine {
     // memory geometry
     int64_t (*rom_index)(struct DpMachine *, uint32_t addr);  // <0 when not ROM
     uint8_t (*fetch)(struct DpMachine *, uint32_t addr);      // opcode view
+    unsigned (*vector_seeds)(struct DpMachine *, uint32_t *pcs, unsigned max);   // optional: handler addresses of a wide-address vector table (68000 exception vectors), seeded as forced starts
+    void (*fetch_n)(struct DpMachine *, uint32_t addr, uint8_t *out, unsigned n);   // optional: n consecutive fetch() bytes in one call (the per-instruction window)
     // execution (NULL when the backend only advances by frames)
     int (*run)(struct DpMachine *);
     // program counter access for the generic explorer (core.c): the forced
