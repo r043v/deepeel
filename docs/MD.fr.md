@@ -916,3 +916,9 @@ Identiques des deux côtés : `nop` 4, `lea` 8, `btst #n,Dn` 10, `btst Dn,Dn` 6,
 (Starscream) paye toujours le prix « bit long » (+2) même pour un bit < 16 (`bclr #3,d2` 14 contre 12, `bset`/`bchg` 12 contre 10, `bclr Dn,Dn` 10 contre 8, `bset Dn,Dn` 8 contre 6) ;
 c'est ce que couvre `DP_MD_STAR_TIME`, donc compatibilité Gens et non fidélité matérielle (m0boy suit le manuel : +2 seulement pour un bit ≥ 16). La base de la boucle diffère
 de 5 itérations par trame (≈ 110 cycles : 5 813 noyau, 5 808 Gens), à expliquer (coût d'entrée de V-int / découpage par ligne). Sonic 1 REV00 contre s1disasm après le correctif H-int : 75 740 / 89 880 octets (84,3 %) exécutés, contre 56 676 (63,1 %).
+
+Sondes CLR/TAS et synchro SoR 1845S (observations de l'outil) : sans quirks, `clr.b/w abs.w` coûte 16 côté noyau contre 14 chez Gens, `clr.l Dn` 6 contre 8, `tas abs.w` 18 contre 22 ;
+`DP_MD_STAR_TIME` couvre ces trois écarts (compatibilité Starscream, pas fidélité matérielle). Avec `DP_MD_STAR_TIME/DIV/ADDQ`, `DP_MD_PAD_LINE0=1`, `DP_TAS_PAD_SHIFT=1` les trames 3 à ~120 sont
+identiques à Gens (0 octet de diff, étiquette noyau = étiquette Gens + 1). Le diagnostic `DP_TAS_PAD_SHIFT_AT=F` + `DP_TAS_PAD_SHIFT2=k` (décalage d'entrée changé à la trame F) donne 0 octet de diff
+de la V-int 8 414 à ~10 864 (≈ 2 450 V-ints) avec F=9000, k=0 ; la règle physique du décalage reste à expliquer. Nouvelle rupture aux V-int 10 866-10 878 (drapeau `$FFFA00`, marge de la boucle d'attente) :
+cause présumée la durée de ligne (Gens 488 cycles, noyau 488,57). Expérience négative : déplacer la ligne de latch d'entrée (0, 2, 15) casse la scène entière.

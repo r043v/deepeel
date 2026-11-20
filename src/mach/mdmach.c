@@ -68,7 +68,7 @@ static void t_step(void *u, MdFull *m, uint32_t pc, uint16_t op) {
       if (!init) { init = 1; const char *e = getenv("DP_MD_PCLOG_V"), *r = getenv("DP_MD_PCLOG");   // diagnostic: instruction PCs in V-int window a:b, optional pc range lo:hi
           if (!(e && sscanf(e, "%u:%u", &va, &vb) == 2)) vb = 0; if (!(r && sscanf(r, "%x:%x", &lo, &hi) == 2)) { lo = 0; hi = 0xffffff; } }
       if (vb && m == vint_owner && vint_n >= va && vint_n <= vb && pc >= lo && pc <= hi)
-          fprintf(stderr, "I v=%u line=%u pc=%06x op=%04x cyc=%u\n", vint_n, (unsigned)m->line, (unsigned)pc, op, (unsigned)m->cycles); }
+          fprintf(stderr, "I v=%u line=%u pc=%06x op=%04x cyc=%u d0=%08x a0=%08x\n", vint_n, (unsigned)m->line, (unsigned)pc, op, (unsigned)m->cycles, (unsigned)m->d[0], (unsigned)m->a[0]); }
     if (d->steps >= d->budget) {
         m->fault = DP_MD_FAULT_BUDGET;
         m->fault_pc = pc;

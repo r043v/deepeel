@@ -1961,7 +1961,9 @@ static void run_path(Worker *w, Pending *p) {
                 }
                 static int env_shift = -99;   // DP_TAS_PAD_SHIFT=k: the unshifted replay sees the movie's input k frames later (Gens-rr films: 1)
                 if (env_shift == -99) { const char *e = getenv("DP_TAS_PAD_SHIFT"); env_shift = e && *e ? atoi(e) : 0; }
-                int64_t k = (int64_t)f - tas_shift - (tas_shift == 0 ? env_shift : 0);
+                static int64_t shift_at = -1; static int shift2 = 0;   // DP_TAS_PAD_SHIFT_AT=F with DP_TAS_PAD_SHIFT2=k: from frame F the shift becomes k (diagnostic)
+                if (shift_at == -1) { const char *e = getenv("DP_TAS_PAD_SHIFT_AT"), *e2 = getenv("DP_TAS_PAD_SHIFT2"); shift_at = e && *e ? atoll(e) : -2; shift2 = e2 && *e2 ? atoi(e2) : 0; }
+                int64_t k = (int64_t)f - tas_shift - (tas_shift == 0 ? (shift_at >= 0 && (int64_t)f >= shift_at ? shift2 : env_shift) : 0);
                 // A22/B3: live movie states feed the exploration. A checkpoint every tas_ckpt_every frames (bounded) and the
                 // end state each continue as a free natural path, so branches reachable only from a late state are forked
                 if (tas_shift == 0 && !cfg->no_tas_ckpt && cfg->tas_ckpt_every && f > 0 && !(cfg->jobs <= 1 && watch_lean(cfg)) &&
