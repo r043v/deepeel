@@ -1088,3 +1088,11 @@ un Z80 qui progresse moins vite par relâche (instruction Z80 plus coûteuse, ou
 cycles 68000 par trame et renvoie la fin du travail après le V-int, ce qui est la rupture 20 407 (marge ≤ 1 itération déjà notée à 20 267). Piste suivante :
 trace Z80 (PC et cycles de l'octet `$1FFD`) des deux côtés pour comparer le coût par instruction du pilote ; pas de correction retenue.
 Observations de l'outil, pas du matériel.
+
+### Couverture Ristar : tables de pointeurs 32 bits à en-têtes de données (0.425.0, 21 novembre 2026)
+
+Ristar contre l'IDB (`tools/ida_idb_code.py`), 600 s, 2 workers : 0.424.0 → 382 octets de code IDA manquants. Cause d'un lot : la table de gestionnaires `$41F4` (entrées 32 bits)
+dont les cibles sont précédées d'un en-tête de données (`$519AC`, `$51BEA`, …) rompait la course B11 (une entrée dont le mot précédent n'est pas un terminateur invalidait la course).
+Règle ajoutée (`core.c`, course B11 large) : dans une course de pointeurs 32 bits déjà établie (≥ 4 entrées conformes à la forme), tout pointeur pair dans la ROM est une entrée (marche non fiable,
+code provisoire, jamais « exécuté »). Résultat 0.425.0 : 280 octets manquants (−102), aucun octet exécuté nouveau hors IDA (1 863 inchangé). Reste surtout du code orphelin sans référence
+(`$6374`, 78 octets, `$6422`, `$5FC4A`) : aucune référence statique dans la ROM (ni pointeur, ni `bsr`/`jmp`/`lea`), limite technique. Observations de l'outil, pas du matériel.
