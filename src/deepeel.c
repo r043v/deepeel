@@ -1565,10 +1565,22 @@ static int cmd_ngp(int argc, char **argv) {
     if (argc < 4) return usage(), 2;
     int rc = 0;
     size_t size = 0;
-    uint8_t *data = nes_read_file(argv[3], &size);
-    if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", argv[3]); return 1; }
+    uint8_t *raw = nes_read_file(argv[3], &size);
+    if (!raw) { fprintf(stderr, "deepeel: cannot read %s\n", argv[3]); return 1; }
+    uint8_t *data = raw;
+    // some dumps carry a loader's padding prefix, the header then sits at
+    // 0x20100: strip it so the image maps flat from $200000 (as m0boy does)
+    uint32_t pc0 = size >= 0x30 ? (uint32_t)data[0x1C] | ((uint32_t)data[0x1D] << 8) | ((uint32_t)data[0x1E] << 16) : 0;
+    uint8_t mode0 = size >= 0x30 ? data[0x23] : 0xFF;
+    if (!(pc0 >= 0x200000u && pc0 < 0xA00000u && (mode0 == 0x00 || mode0 == 0x10)) && size >= 0x20130) {
+        uint32_t pc = data[0x2011C] | ((uint32_t)data[0x2011D] << 8) | ((uint32_t)data[0x2011E] << 16);
+        uint8_t mode = data[0x20123];
+        if (pc >= 0x200000u && pc < 0xA00000u && (mode == 0x00 || mode == 0x10)) {
+            data += 0x20100; size -= 0x20100;
+        }
+    }
     if (!strcmp(argv[2], "dis")) {
-        if (argc < 5) { free(data); return usage(), 2; }
+        if (argc < 5) { free(raw); return usage(), 2; }
         uint32_t off = (uint32_t)strtoul(argv[4], NULL, 16);
         if (off < 0x200000u) off += 0x200000u;   // accept both the image offset and the cartridge address
         uint32_t img = off - 0x200000u;
@@ -1649,7 +1661,7 @@ static int cmd_ngp(int argc, char **argv) {
             seedset_free(&kseeds);
         }
     } else rc = (usage(), 2);
-    free(data);
+    free(raw);
     return rc;
 }
 
