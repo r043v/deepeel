@@ -553,6 +553,18 @@ static unsigned code_table_targets(DpMachine *m, const DpIsa *isa, const DpCodeT
     return cnt;
 }
 
+// A walk's pending-side stack grows on demand (doubling, on the heap) instead of dropping roots at a fixed 256 entries: a dropped branch
+// side left whole routines unreached (Sonic 1 final boss, 1 712 drops on a 600 s run).  The cap stays (reported by closure_stack_dropped).
+static int closure_grow(uint32_t (**stack)[4], RetStk **rets, DpRegState **rg, unsigned *depth, uint32_t (**heap)[4], RetStk **hret, DpRegState **hrg, unsigned cap) {
+    if (*depth >= cap) return 0;
+    unsigned nd = *depth * 2 > cap ? cap : *depth * 2;
+    uint32_t (*ns)[4] = malloc((size_t)nd * sizeof *ns); RetStk *nr = malloc((size_t)nd * sizeof *nr); DpRegState *ng = malloc((size_t)nd * sizeof *ng);
+    if (!ns || !nr || !ng) { free(ns); free(nr); free(ng); return 0; }
+    memcpy(ns, *stack, (size_t)*depth * sizeof *ns); memcpy(nr, *rets, (size_t)*depth * sizeof *nr); memcpy(ng, *rg, (size_t)*depth * sizeof *ng);
+    free(*heap); free(*hret); free(*hrg);
+    *heap = *stack = ns; *hret = *rets = nr; *hrg = *rg = ng; *depth = nd;
+    return 1;
+}
 static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa, uint32_t root, uint32_t bank, uint32_t trust0,
                         const DpRegState *regs0, int thru0, unsigned budget0, RegWalk *rw) {
     uint32_t stack_s[256][4]; RetStk rets_s[256]; DpRegState rg_s[256];
@@ -563,6 +575,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
         heap = malloc(4096 * sizeof *heap); hret = malloc(4096 * sizeof *hret); hrg = malloc(4096 * sizeof *hrg);
         if (heap && hret && hrg) { stack = heap; rets = hret; rg = hrg; depth = 4096; kthru_cap = 65536; seen_cap = 65536; }
     }
+#define CLOSURE_ROOM() (sp < depth || closure_grow(&stack, &rets, &rg, &depth, &heap, &hret, &hrg, (v->cfg && v->cfg->unbounded) ? (1u << 22) : (1u << 14)))
     RetStk cr; unsigned sp = 0, budget = budget0 ? budget0 : (unsigned)CLOSURE_INSTR, kthru = 0, thru = (unsigned)thru0; cr.n = 0; uint64_t *seen = NULL;
     // C3: bank-switch simulation.  `ld a,n` then a store of A to a mapper bank register is replayed through the machine's own
     // mapper (poke) so the rest of the walk sees the new ROM view; every walk restores the live state when it ends and each
@@ -674,7 +687,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
                         // additive and last: the walk goes on under the view it already has (exactly the plain walk); the continuation under
                         // the new view is queued behind it and only gets what budget is left
                         pk[++npk] = (BankPoke){ ad, acc, cur }; r->closure_bank_sims++;
-                        if (sp < depth) { rets[sp] = cr; stack[sp][0] = pc + f.length; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)npk; rg[sp] = regs; sp++; }
+                        if (CLOSURE_ROOM()) { rets[sp] = cr; stack[sp][0] = pc + f.length; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)npk; rg[sp] = regs; sp++; }
                         else r->closure_stack_dropped++;
                     }
                 }
@@ -751,7 +764,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
                     regs = rs;
                     pc = ra; trust = 0; thru = 1; continue;
                 }
-            } else if (kt >= 0 && sp < depth) {   // ret cc: the taken side pops and jumps, the walk goes on past it
+            } else if (kt >= 0 && CLOSURE_ROOM()) {   // ret cc: the taken side pops and jumps, the walk goes on past it
                 if (rw && !rw->cfg->unbounded && rw->ind_vals[(uint32_t)k & rw->mask] >= REG_IND_CAP) r->closure_reg_indirect_sat++;
                 else {
                     if (rw) rw->ind_vals[(uint32_t)k & rw->mask]++;
@@ -775,7 +788,7 @@ no_stackret:;
                 unsigned n = code_table_targets(v->m, isa, &ct, tg, DP_CODE_TABLE_MAX);
                 for (unsigned i = 0; i < n; i++) {
                     if (cview_index(v, r, tg[i], bk) < 0) continue;
-                    if (sp < depth) { rets[sp] = cr; rets[sp].n = 0; stack[sp][0] = tg[i]; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)cur; rg[sp] = regs; sp++; }
+                    if (CLOSURE_ROOM()) { rets[sp] = cr; rets[sp].n = 0; stack[sp][0] = tg[i]; stack[sp][1] = bk; stack[sp][2] = trust; stack[sp][3] = (uint32_t)cur; rg[sp] = regs; sp++; }
                     else r->closure_stack_dropped++;
                 }
                 if (n) { r->closure_jp_tables++; r->closure_jp_entries += n; r->prov_data_bytes += (uint64_t)n * (ct.slots ? 0 : ct.stride);
@@ -788,7 +801,7 @@ no_stackret:;
                 int64_t kc = cview_index(v, r, cp, bk);
                 if (kc >= 0 && !(__atomic_load_n(&r->flags[kc], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC))) {
                     if (closure_entry_is_data(r, isa, v, cp, kc)) r->closure_entry_refused++;
-                    else if (sp < depth) { rets[sp] = cr; rets[sp].n = 0; stack[sp][0] = cp; stack[sp][1] = bk; stack[sp][2] = 0; stack[sp][3] = (uint32_t)cur; rg[sp] = regs; sp++; r->closure_ptr_stores++; }
+                    else if (CLOSURE_ROOM()) { rets[sp] = cr; rets[sp].n = 0; stack[sp][0] = cp; stack[sp][1] = bk; stack[sp][2] = 0; stack[sp][3] = (uint32_t)cur; rg[sp] = regs; sp++; r->closure_ptr_stores++; }
                     else r->closure_stack_dropped++;
                 }
             }
@@ -797,7 +810,7 @@ no_stackret:;
         if (f.kind != DP_FLOW_RET && (f.target >= 0 || (indirect_ok && f.kind == DP_FLOW_INDIRECT)) &&
             (f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL || (f.kind == DP_FLOW_INDIRECT && indirect_ok)) && tgt >= 0) {
             if (cview_index(v, r, (uint32_t)tgt, bk) < 0) r->closure_unresolved++;
-            else if (sp < depth) {
+            else if (CLOSURE_ROOM()) {
                 rets[sp] = cr;
                 if (r->closure_ret && f.kind == DP_FLOW_CALL && f.cond < 0 && cr.n < CLOSURE_RET && !(__atomic_load_n(&r->flags[cview_index(v, r, (uint32_t)tgt, bk)], __ATOMIC_RELAXED) & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_STATIC))) {   // a callee already known is not walked again: its return cannot be followed, the legacy fall-through applies   // the callee's path remembers where it returns to
                     rets[sp].pc[cr.n] = pc + f.length; rets[sp].bk[cr.n] = bk; rets[sp].trust[cr.n] = trust; rets[sp].n = cr.n + 1;
@@ -816,7 +829,7 @@ no_stackret:;
             // a return: the caller's continuation, carrying the trust the call site had (the callee proved the address is code)
             uint32_t rpc = cr.pc[cr.n - 1], rbk = cr.bk[cr.n - 1], rtr = cr.trust[cr.n - 1];
             if (f.kind == DP_FLOW_COND) {   // a conditional return: the taken side is queued, the walk goes on past it
-                if (sp < depth) { rets[sp] = cr; rets[sp].n--; stack[sp][0] = rpc; stack[sp][1] = rbk; stack[sp][2] = rtr; stack[sp][3] = (uint32_t)cur; rg[sp] = regs; sp++; r->closure_rets++; }
+                if (CLOSURE_ROOM()) { rets[sp] = cr; rets[sp].n--; stack[sp][0] = rpc; stack[sp][1] = rbk; stack[sp][2] = rtr; stack[sp][3] = (uint32_t)cur; rg[sp] = regs; sp++; r->closure_rets++; }
                 else r->closure_stack_dropped++;
             } else { cr.n--; pc = rpc; bk = rbk; trust = rtr; thru = 1; r->closure_rets++; continue; }   // the continuation after a proven return walks through what the blind fall-through already marked (the callee's register constants ride on, the Sega closure's own rule)
         }
@@ -839,6 +852,7 @@ done:
     free(seen); free(heap); free(hret); free(hrg);
     if (snap) { v->m->load(v->m, snap); free(snap); }   // the live machine is left exactly as the walk found it
 #undef CLOSURE_POP
+#undef CLOSURE_ROOM
 }
 // B11 helper (dispatch-confirmed entries): like chain_plausible but a single instruction before the terminator is enough
 // (`move.b x,d0 ; bra y` stubs); legal instructions only, a terminator within 24.

@@ -1066,3 +1066,5 @@ Essais sans effet ou négatifs :
 - Sondes `MULU/MULS` indexé et PC-relatif : écarts dus à l'opérande lu (registre d'index modifié), pas au coût ; `DIVU`, `CLR`, `TAS` égaux à Gens.
 
 Piste restante : comment Gens fait avancer le Z80 pendant les relâchements courts du bus (le noyau le fait à l'instruction près), puis l'épisode 12 150-12 250.
+
+**0.424.0 — pile du parcours statique extensible.** La pile des côtés en attente d'un parcours (`closure_run`) était fixée à 256 entrées (4 096 avec `--unbounded`) : au-delà, des cibles de branches conditionnelles étaient abandonnées (compteur `closure_stack_dropped`), ce qui laissait des routines entières non atteintes (Sonic 1 : boss final `$19F50-$19F92`, 1 712 abandons sur un run de 600 s). Elle double maintenant sur le tas (plafond 16 384 entrées, 4 M avec `--unbounded`, toujours rapporté). Observation de l'outil, Sonic 1 (film 1843S, 600 s, 2 fils) contre le dasm s1disasm : code de référence manquant 544 → 418 octets (0,6 → 0,5 %), abandons 1 712 → 0. Restes : code mort sans appelant (`$14C4E`, 80 octets) et quelques routines (`$2C76`, `$3FD8`, `$6BB0`) à examiner.
