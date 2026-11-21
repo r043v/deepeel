@@ -1110,3 +1110,8 @@ Observations de l'outil, pas du matériel.
 
 Dans une course de pointeurs 16 bits déjà établie (≥ 8 entrées conformes à la forme), toute adresse paire en ROM devient une entrée (`valid = 2`), comme pour les tables 32 bits (seuil 4).
 SoR (900 s, 2 workers, sans film) : 701 → 635 octets manquants. Code provisoire (marche non fiable), jamais « exécuté ». Observation de l'outil, pas une mesure du matériel.
+
+### Couverture SoR : courses 16 bits courtes à entrée légale (0.428.0, 21 novembre 2026)
+
+68000 seulement : dans une course de pointeurs 16 bits avec ≥ 4 entrées conformes, une adresse paire en ROM dont les huit premières instructions sont légales (ou qui atteint un terminateur) est une entrée (table SoR `$5C36`, entrée `$5D84`).
+SoR (900 s, 2 workers, sans film) : 635 → 473 octets manquants. Code provisoire, jamais « exécuté ». Observation de l'outil, pas une mesure du matériel.

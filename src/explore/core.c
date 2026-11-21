@@ -3286,7 +3286,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
                             valid = w4 == 0x4EFA || w4 == 0x4EF8 || w4 == 0x6000 || w6 == 0x4EF9;
                         }
                         if (!valid && chain_short(wm0, m->isa, v)) valid = 2;   // inside a running table a stub (`lea table(pc),An ; jmp dispatcher`) is an entry too
-                        if (!valid && run_start && good >= (wide ? 4u : 8u)) valid = 2;   // inside a running 32-bit table (>= 4 shape-proven entries) any even in-ROM pointer is an entry: handlers preceded by data headers (Ristar $41F4: $519AC)
+                        if (!valid && run_start && ((wide && good >= 4) || (!wide && good >= 8) || (!wide && m->isa->big_endian && good >= 4 && chain_legal(wm0, m->isa, v)))) valid = 2;   // inside a running 32-bit table (>= 4 shape-proven entries) any even in-ROM pointer is an entry: handlers preceded by data headers (Ristar $41F4: $519AC)
                     }
                 }
                 if (!valid && !zero && run_start && v == prev_v && a + stp <= lim) valid = 2;   // a repeated entry (state tables repeat their idle routine) keeps the run going
