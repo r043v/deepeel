@@ -934,3 +934,8 @@ ligne 3416, `CLOCK_OFF=0`, `PAD_LINE0`, `GENS_DMA`, `POWERON=gens`, `MD_IRQ_IMME
 Résultat SoR avec le profil : échantillons exacts de 0 à 774 (V-int ~10 850) avec des écarts isolés de 1 à 39 octets sur un échantillon (phase sous-instruction du thread principal), puis rupture
 au V-int 10 865 : le noyau est encore dans une routine appelée par la boucle d'attente (`$03B2`) quand Gens est déjà à `$10510` (écart de phase de quelques cycles à l'arrivée du V-int,
 drapeau `$FFFA00` 1 chez Gens, 0 chez le noyau). Piste en cours : sonde de durées étendue (`probe/gen2.py`, ~530 instructions × modes d'adressage).
+
+Balayage de durées étendu (`probe/gen2.py`, 533 sondes exploitables : MOVE/ADD/SUB/AND/OR/CMP/EOR, MULU/MULS, DIVU, CLR/NEG/NEGX/NOT/TST, ADDQ/SUBQ, ADDI…CMPI, décalages mémoire, BTST/BSET, Scc, TAS, LEA/PEA, MOVEQ, MOVEA, LINK/UNLK, ABCD/SBCD/NBCD, décalages registre, MOVEM, en .W/.L × les 12 modes d'adressage), noyau contre Gens, observations de l'outil :
+seuls 24 écarts de plus de 0,6 cycle, **tous déjà classés** : `CLR.W` mémoire −2 (Gens), `TAS` mémoire +4, `DIVU` constant 133, `DBT` 12 contre 16 (Starscream : `DP_MD_STAR_TIME/DIV`) ; `MULU/MULS (d8,An,Xn)` et `(d8,PC,Xn)` varient avec la donnée lue
+(adresse différente d'un côté à l'autre dans la sonde, pas un écart de coût) ; `BSET/Scc (An)+` : sonde invalide côté Gens (compensation `lea` à revoir). Aucun écart matériel : le coût des instructions n'explique donc pas la rupture au V-int 10 865 de SoR 1845S ; il reste les
+attentes de bus (VDP, Z80, DMA), l'entrée/sortie d'interruption et le découpage par ligne.
