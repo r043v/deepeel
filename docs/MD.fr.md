@@ -939,3 +939,7 @@ Balayage de durées étendu (`probe/gen2.py`, 533 sondes exploitables : MOVE/ADD
 seuls 24 écarts de plus de 0,6 cycle, **tous déjà classés** : `CLR.W` mémoire −2 (Gens), `TAS` mémoire +4, `DIVU` constant 133, `DBT` 12 contre 16 (Starscream : `DP_MD_STAR_TIME/DIV`) ; `MULU/MULS (d8,An,Xn)` et `(d8,PC,Xn)` varient avec la donnée lue
 (adresse différente d'un côté à l'autre dans la sonde, pas un écart de coût) ; `BSET/Scc (An)+` : sonde invalide côté Gens (compensation `lea` à revoir). Aucun écart matériel : le coût des instructions n'explique donc pas la rupture au V-int 10 865 de SoR 1845S ; il reste les
 attentes de bus (VDP, Z80, DMA), l'entrée/sortie d'interruption et le découpage par ligne.
+
+Ablation des compensations du profil `DP_MD_GENS=1` (SoR 1845S, 840 échantillons contre `s20.dsy`, observations de l'outil ; les réglages `DP_MD_*` sont testés par `getenv != NULL`, donc `=0` ne les désactive pas : il faut les retirer de l'environnement) :
+référence 78 échantillons écartés, rupture soutenue à l'échantillon 775 ; sans `GENS_DMA` : écart dès l'échantillon 1 (indispensable) ; sans `PAD_LINE0` : écart dès l'échantillon 1 (indispensable) ; sans `STAR_TIME` : 395 écartés, rupture soutenue à 450 (nécessaire) ;
+sans `STAR_DIV` : 77 écartés (aucun effet mesurable sur SoR, conservé pour Sonic) ; `CLOCK_OFF` sans effet avec la ligne à 3416. Aucune compensation n'est donc devenue inutile : la ligne de 488 n'a pas remplacé le modèle DMA ni le verrou d'entrée de Gens.
