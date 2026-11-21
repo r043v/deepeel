@@ -621,7 +621,7 @@ couverture.
 | NES | 8 | 6 | 1 | 1 | 75 % | 81 % | CHR-ROM non indexée ; illégaux NOP |
 | PCE | 6 | 2 | 1 | 3 | 33 % | 58 % | ADPCM/CD-ROM², SF2/SuperGrafx, multitap absents |
 | MD | 6 | 2 | 2 | 2 | 33 % | 58 % | Z80 son ◐ (copie driver typée 0.251.19, fourches = backport m0boy) ; SRAM/SVP/32X absents ; pad catalogue opt-in (0.251.17 : YM2612 typé par registre, pad 14 motifs par défaut) |
-| NGP/NGPC | 11 | 8 | 2 | 1 | 73 % | 82 % | port de communication absent ; RTC lue statique (sonde de valeur à porter, §3.8) |
+| NGP/NGPC | 11 | 8 | 2 | 1 | 73 % | 82 % | port de communication absent ; RTC lue statique (sonde de valeur à porter, §3.9) |
 
 Priorité de portée (ordre de travail) : MD (Z80 son exploré : fourches, copie
 du driver) → SMS/GG entrées non couvertes (phaser/paddle/3D) → NES CHR/DMC →
@@ -650,7 +650,7 @@ un à un (cause harnais vs cause moteur).
 | Surface | État | Contribution exigée |
 |---|---|---|
 | SM83, IRQ ×5, RST ×8 | ✅ | — |
-| PPU (LY, STAT, LYC, SCX…) | réel m0boy ; **sondes de valeur** 0.249.48 sur lectures LY/STAT/DIV/TIMA/SC/SB (§3.8) | ✅ |
+| PPU (LY, STAT, LYC, SCX…) | réel m0boy ; **sondes de valeur** 0.249.48 sur lectures LY/STAT/DIV/TIMA/SC/SB (§3.9) | ✅ |
 | OAM DMA `$FF46` | ✅ ROM | **Copie** depuis la WRAM avec provenance (chaîne ROM→WRAM→OAM) |
 | APU NR10-NR52, wave RAM `$FF30-3F` | observé seulement | **Type** music (registres) / samples (wave RAM) |
 | Timer DIV/TIMA/TMA/TAC | réel, IRQ fourchée | **Sonde** DIV/TIMA (graines RNG) |
@@ -670,7 +670,7 @@ un à un (cause harnais vs cause moteur).
 | Z80, VDP (TMS9918 / mode 4), PSG SN76489 | ✅ | **Type** : port VDP → tiles/tilemap/palette selon l'adresse VRAM/CRAM ; PSG → music |
 | `$3E` contrôle mémoire, mappers sega/codemasters/korean150 | ✅ | — |
 | Pause NMI | ✅ | — |
-| V/H-counter `$7E/$7F`, statut VDP `$BF` | **sondes de valeur** 0.251.11 (§3.8) : fourche par valeur plausible, garde « jamais sur IRQ en attente », `--no-event-probes` | ✅ |
+| V/H-counter `$7E/$7F`, statut VDP `$BF` | **sondes de valeur** 0.251.11 (§3.9) : fourche par valeur plausible, garde « jamais sur IRQ en attente », `--no-event-probes` | ✅ |
 | YM2413 FM (SMS japonaise) | ◐ 0.156 : écritures `$F0/$F1` observées et typées « music » dans le rapport (la puce n'est pas émulée) | Obs. + **Type** music |
 | Phaser, paddle, lunettes 3D, port de lien GG | ◐ 0.251.19 : les sondes d'événement couvrent **les lignes que les sondes d'entrée ne modélisent pas** — TH A/B sur `$DD` (les détections phaser/paddle/3D bifurquent) et bits région/écran de `$00` GG (0x00/0x40) ; les touches pad, Pause et Start restent aux sondes d'entrée (pas de double emploi), et `input_masks 0` désactive aussi ces sondes-là. Le protocole réel (position phaser/paddle, obturateur 3D) reste non émulé (TH modélisé côté pont `backend_gg.c`) | **Sonde** ✅ ; émulation : libretro/limite |
 | Fidélité TAS vs référence (GPGX) | 0.251.22 : les films BizHawk SMS rejoués en entier sur le banc GG/SMS — **Sonic SMS 5129S/6255S** : RAM de gameplay `$C000-$CFFF` identique sur 99,95 % des trames, le film va jusqu'au bout ; **Alex Kidd (5136S/3154M)** : film complet, divergence de gameplay par plages dès la trame 68 (signature front de bouton ±1 trame, harnais réparé : débordement `dut_row` 192 lignes, écrans 160×192, identité MD5 des en-têtes SMSHawk) — chasse ouverte (détails `docs/Z80.fr.md`) | Sonic convergé ; Alex Kidd : à démêler |
@@ -681,7 +681,7 @@ un à un (cause harnais vs cause moteur).
 |---|---|---|
 | Slots, PPI, AY, VDP TMS, 5 mappers | ✅ | — |
 | BIOS | simulé par traps | BIOS réel optionnel (libretro ou ROM fournie hors dépôt) |
-| Matrice clavier (PPI port B) | ✅ sonde de valeur 0.251.14 (§3.8) : une lecture `$A9` d'une ligne non modélisée par les sondes d'entrée (toute ligne sauf RETURN 7 et pad 8) fourche par touche unique active-basse, cap 2/site, coupures comptées, garde IRQ | — |
+| Matrice clavier (PPI port B) | ✅ sonde de valeur 0.251.14 (§3.9) : une lecture `$A9` d'une ligne non modélisée par les sondes d'entrée (toute ligne sauf RETURN 7 et pad 8) fourche par touche unique active-basse, cap 2/site, coupures comptées, garde IRQ | — |
 | SCC (ondes) | listé comme mapper | **Type** samples (RAM d'onde SCC) |
 | V9938 (MSX2), FM-PAC, disque, cassette | absents ; limites déclarées dans le rapport (0.157) | limites ou libretro |
 
@@ -694,7 +694,7 @@ un à un (cause harnais vs cause moteur).
 | CHR-ROM | **non suivie** (seul le PRG est indexé) | Index ROM étendu au CHR, **Type** tiles par les fetchs PPU |
 | DMC DMA | ✅ (J9) : `$4012/$4013` suivis, lectures DMC typées **samples** (`test_dmc`) | **Copie** + **Type** samples |
 | `$4016/$4017` | ✅ sondes manette (strobe-site : boutons uniques, accords, catalogue `--pad-full`) ; les lectures ≥ 9 renvoient 1 (signature NESdev, m0boy) | — |
-| `$2002` (vblank, sprite 0) | ✅ sonde de valeur 0.251.16 (§3.8) : première lecture LDA/BIT abs d'un site fourche par octet de statut plausible, garde NMI de principe, opt-out `--no-event-probes` | — |
+| `$2002` (vblank, sprite 0) | ✅ sonde de valeur 0.251.16 (§3.9) : première lecture LDA/BIT abs d'un site fourche par octet de statut plausible, garde NMI de principe, opt-out `--no-event-probes` | — |
 | Opcodes illégaux | NOP | à émuler ou comptés |
 
 ### 3.5 PC Engine
@@ -803,10 +803,41 @@ Inventaire des surfaces (11), avec leur contribution :
 | Manette (espace de travail BIOS `$6F82`) | plein ; 9 sondes de valeur, `--pad-full` pour les 256 masques hors défaut | Sonde |
 | BIOS synthétisé (installer les vecteurs, amorce cartouche) | plein ; le PC de reset est l'entrée de l'en-tête (`$20001C`) | Obs. |
 | Flash cartouche (sauvegardes) | ◐ observé/typé, fenêtre `$200000/$800000` ; persistence côté m0boy à finir | Obs. |
-| RTC | ◐ lue statique `DP_IMPL_EVENT` (sonde de valeur à porter, §3.8) | Sonde |
+| RTC | ◐ lue statique `DP_IMPL_EVENT` (sonde de valeur à porter, §3.9) | Sonde |
 | Port de communication (SIO) | ✗ absent — limite documentée | — |
 
-### 3.8 Sondes de registres événementiels (proposition transversale)
+### 3.8 WonderSwan / WonderSwan Color (0.431.0)
+
+Le pont m0boy (`targets/wonderswan/runtime`, V30MZ + SoC), plateforme
+« ws » complète sur le noyau générique, modèle NGP (§7.4) :
+
+- bus linéaire 20 bits (segment << 4 | offset) : RAM 64 Kio `$00000-$0FFFF`,
+  SRAM `$10000-$1FFFF`, ROM `$20000+` par segments de 64 Kio (registres
+  `$C0-$C3`, mappers 2003 `$CC-$D5`) ;
+- registre des ports IN/OUT `$00-$D5` (34 entrées, `deepeel regs ws`) ;
+- IRQ : registre de base `$B0` + 8 sources (ligne, timers h/v, vblank,
+  série), vecteurs lus en segment 0 (`vector_seeds`, convention large MD),
+  fourches IRQ par patch `irq_pending` (`irq_alt`) quand la source est
+  démasquée et IF posé ;
+- décodeur statique V30MZ (`src/cpu/v30mz/`) : longueur/flux/conditions
+  (70-7F, loop/jcxz en conditions CX), opérandes absolues (moffs, modrm
+  mod 0 rm 6), désassemblage ; couverture d'opcodes calée sur le runtime
+  m0boy (les formes qu'il refuse sont illégales) ;
+- sondes : manette (ports `$B5/$B6`, secousse sèche puis pad tenu, 9
+  alternatives par défaut, `--pad-full` pour les sous-ensembles), IRQ ;
+- repères d'observation par les sinks du runtime (instruction, lecture,
+  écriture, ports) — les fetchs d'opcode sont exclus de la lecture de
+  données (`ws_peek`) ;
+- replay TAS : BizHawk `.bk2` plateforme `WS` (X1 gauche, X3 droite, Y1
+  haut, Y3 bas, A/B/Start), timing BizHawk du runtime (verrouillé
+  clock-par-clock contre Cygne, dérive permanente nulle sur le TAS
+  Rockman & Forte 79796 trames) ;
+- boot : style watch TAS (start IO Cygne, SRAM pile adossée).
+
+Surfaces restantes : RTC modélisée mais sans sonde de valeur ; port série
+observé sans pair ; EEPROM cartouche observée/typée.
+
+### 3.9 Sondes de registres événementiels (proposition transversale)
 
 **Constat.** Aujourd'hui, un registre `DP_IMPL_EVENT` (LY, STAT, DIV, TIMA,
 V-counter, `$2002`) est tenu statique pour l'explorateur. Une boucle d'attente
@@ -918,7 +949,7 @@ Correspondance complète en annexe A.
 |---|---|
 | `fork-natural` | chemin du fork-explorer sans fourche forcée |
 | `fork-forced` | chemin issu d'une fourche (D7-D11) |
-| `probe-input` / `probe-event` | branche de sonde (D10, §3.8) |
+| `probe-input` / `probe-event` | branche de sonde (D10, §3.9) |
 | `session-attract` / `session-random` / `session-script` / `session-human` | sessions jouées (J1) |
 | `tas` | rejeu de film (J2) — avec identité du film dans la table creuse |
 | `go-explore` | segment choisi par l'archive de cellules (J4) |
@@ -1249,7 +1280,7 @@ typedef struct DpMachine {
     void (*observe)(const DpObservers *); // exec, read, write, io, dma, bank, fetch PPU
     // entrées
     void (*set_input)(uint32_t port, uint32_t mask);
-    const DpProbeCatalog *(*probes)(void); // D10 + §3.8
+    const DpProbeCatalog *(*probes)(void); // D10 + §3.9
     // mémoire
     int64_t (*rom_index)(uint32_t addr);   // offset physique ROM, <0 sinon
     int32_t (*ram_index)(uint32_t addr);
@@ -1510,7 +1541,7 @@ puis sections: nature[u16·N], types[u32·N], sources[u32·N],
 
 ## 10. Propositions supplémentaires
 
-1. **Sondes de registres événementiels** (§3.8). C'est le plus gros gain attendu
+1. **Sondes de registres événementiels** (§3.9). C'est le plus gros gain attendu
    pour un coût faible.
 2. **Fourche « sauvegarde valide »**.
    - Constat : la RAM est à zéro, donc le code « charger la partie » n'est jamais

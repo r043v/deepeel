@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.430.0 LANGUAGES C)
+project(deepeel VERSION 0.431.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -589,6 +589,48 @@ add_library(deepeel_ngp STATIC IMPORTED GLOBAL)
 set_target_properties(deepeel_ngp PROPERTIES IMPORTED_LOCATION ${DP_NGP_ARCHIVE})
 add_dependencies(deepeel_ngp dp_ngp_runtime)
 target_link_libraries(deepeel_lib PUBLIC deepeel_ngp)
+
+# --- the m0boy WonderSwan machine (V30MZ + SoC) ------------------------------
+# No trace-compile switch is needed: the runtime exposes the observation
+# points as function-pointer sinks (instruction/memory read/memory write)
+# that the bridge installs per observer.  The archive is prefixed dp_ws_ so
+# the runtime's ws_* symbols cannot meet anything else; the bridge's own
+# dp_ws_* entry points are not matched by the prefix patterns (anchored).
+set(DP_WS_RUNTIME "${M0BOY_DIR}/targets/wonderswan/runtime")
+if(NOT EXISTS "${DP_WS_RUNTIME}/ws.c" OR NOT EXISTS "${DP_WS_RUNTIME}/ws_cpu.c")
+  message(FATAL_ERROR "M0BOY_DIR must provide targets/wonderswan/runtime (ws.c, ws_cpu.c)")
+endif()
+set(DP_WS_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_ws.a)
+add_library(deepeel_ws_raw STATIC
+  src/cpu/v30mz/v30mz.c
+  src/mach/ws_isa.c
+  src/mach/ws_machine.c
+  src/platform/ws/wsmach.c
+  src/platform/ws/registry.c
+  ${DP_WS_RUNTIME}/ws.c
+  ${DP_WS_RUNTIME}/ws_cpu.c
+  ${DP_WS_RUNTIME}/ws_video.c
+  ${DP_WS_RUNTIME}/ws_eeprom.c
+  ${DP_WS_RUNTIME}/ws_uart.c
+  ${DP_WS_RUNTIME}/ws_audio.c
+  ${DP_WS_RUNTIME}/ws_rtc.c
+  ${DP_WS_RUNTIME}/ws_flash.c)
+target_compile_definitions(deepeel_ws_raw PRIVATE WS_ENABLE_BIZHAWK_TIMING=1 WS_ENABLE_COLOR=1)
+target_include_directories(deepeel_ws_raw PUBLIC src
+  ${DP_WS_RUNTIME} "${M0BOY_DIR}/targets/wonderswan/host")
+target_link_libraries(deepeel_ws_raw PUBLIC deepeel_core)
+add_custom_command(OUTPUT ${DP_WS_ARCHIVE}
+  BYPRODUCTS ${DP_WS_ARCHIVE}.syms
+  COMMAND ${CMAKE_COMMAND} -DNM=${DP_NM} -DOBJCOPY=${DP_OBJCOPY}
+    -DINPUT=$<TARGET_FILE:deepeel_ws_raw> -DOUTPUT=${DP_WS_ARCHIVE}
+    -DPREFIX=dp_ws_ -DPATTERNS=ws_[A-Za-z0-9_]*
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_sega_prefix.cmake
+  DEPENDS deepeel_ws_raw cmake/dp_sega_prefix.cmake VERBATIM)
+add_custom_target(dp_ws_runtime DEPENDS ${DP_WS_ARCHIVE})
+add_library(deepeel_ws STATIC IMPORTED GLOBAL)
+set_target_properties(deepeel_ws PROPERTIES IMPORTED_LOCATION ${DP_WS_ARCHIVE})
+add_dependencies(deepeel_ws dp_ws_runtime)
+target_link_libraries(deepeel_lib PUBLIC deepeel_ws)
 
 target_link_libraries(deepeel_lib PUBLIC deepeel_core m ${DP_GUI_LIBS})
 

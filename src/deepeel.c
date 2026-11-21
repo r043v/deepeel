@@ -43,7 +43,9 @@ int dp_gbs_fetch(const char *game, const char *dir, char *out_gbs, size_t cap, c
 #include "mach/mdmach.h"
 #include "cpu/m68k/m68k.h"
 #include "cpu/tlcs900/tlcs900.h"
+#include "cpu/v30mz/v30mz.h"
 #include "platform/ngp/ngp_platform.h"
+#include "platform/ws/ws_platform.h"
 #include "platform/nes/explore.h"
 #include "platform/pce/explore.h"
 #include "platform/pce/pce.h"
@@ -127,10 +129,11 @@ static void usage(void) {
             "  deepeel pce explore ROM [options]\n"
             "  deepeel md explore ROM [options]\n"
             "  deepeel ngp explore ROM [options]          Neo Geo Pocket / Pocket Color\n"
+            "  deepeel ws explore ROM [options]            WonderSwan / WonderSwan Color\n"
             "  deepeel lr explore CORE ROM [options]       libretro core as machine\n"
-            "  deepeel z80|md|ngp dis ROM addr [instruction-count]\n"
+            "  deepeel z80|md|ngp|ws dis ROM addr [instruction-count]\n"
             "  deepeel dis rom.gb bank:addr [n]\n"
-            "  deepeel regs <gb|nes|pce|md|ngp|sg|sms|gg|msx>   dump the register registry\n"
+            "  deepeel regs <gb|nes|pce|md|ngp|ws|sg|sms|gg|msx>   dump the register registry\n"
             "  deepeel map rom.gb                           static map only (pointer tables, padding)\n"
             "  deepeel maprender rom.gb in.map out.map.png [--meta f]\n"
             "  deepeel mapx x.map.png out [--chunk NAME]    extract one chunk of a map PNG\n"
@@ -1391,10 +1394,22 @@ static int cmd_regs(int argc, char **argv) {
             printf("  irq %s: vector $%06x, slot %d\n", p->irqs[i].name, p->irqs[i].vector, p->irqs[i].bit);
         return 0;
     }
+    if (argc >= 3 && !strcmp(argv[2], "ws")) {
+        const DpPlatform *p = dp_ws_platform();
+        printf("%s register registry (%d entries, %d irqs):\n", p->name, p->io_reg_count, p->irq_count);
+        for (int i = 0; i < p->io_reg_count; i++) {
+            const DpIoReg *r = &p->io_regs[i];
+            printf("  %04x-%04x  %-12s %-10s %s%s%s\n", r->lo, r->hi, r->name, r->category,
+                   (r->rw & 1) ? "r" : "-", (r->rw & 2) ? "w" : "-", (r->rw & 3) ? " " : "-");
+        }
+        for (int i = 0; i < p->irq_count; i++)
+            printf("  irq %s: vector slot %d\n", p->irqs[i].name, p->irqs[i].bit);
+        return 0;
+    }
     const DpSegaSystem *sega = argc >= 3 ? dp_sega_system(argv[2]) : NULL;
     if (sega) { dp_sega_regs(stdout, sega); return 0; }
     if (argc < 3 || strcmp(argv[2], "gb")) {
-        fprintf(stderr, "deepeel regs <platform> — platforms: gb, sg, sms, gg, msx, nes, pce\n");
+        fprintf(stderr, "deepeel regs <platform> — platforms: gb, sg, sms, gg, msx, nes, pce, ngp, ws\n");
         return 2;
     }
     const DpPlatform *p = dp_platform_gb();
@@ -1744,6 +1759,146 @@ static int cmd_ngp(int argc, char **argv) {
 }
 
 
+// deepeel ws explore ROM [options]: the WonderSwan/WonderSwan Color through
+// the m0boy runtime (V30MZ, a flat 20-bit bus).  The machine boots directly
+// into the cartridge's reset flow, so the default root is the reset PC;
+// --entry adds 20-bit linear roots.  `deepeel ws dis ROM ADDR [N]`
+// disassembles from an image offset (the cov convention, linear=1).
+static int cmd_ws(int argc, char **argv) {
+    if (argc < 4) return usage(), 2;
+    int rc = 0;
+    size_t size = 0;
+    uint8_t *data = nes_read_file(argv[3], &size);
+    if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", argv[3]); return 1; }
+    if (!strcmp(argv[2], "dis")) {
+        if (argc < 5) { free(data); return usage(), 2; }
+        uint32_t off = (uint32_t)strtoul(argv[4], NULL, 16);
+        int n = argc > 5 ? atoi(argv[5]) : 16;
+        for (int i = 0; i < n && off < size; i++) {
+            char text[64];
+            int len = dp_v30mz_disasm(data + off, (unsigned)(size - off), off, text, sizeof text);
+            printf("%06X  %s\n", off, len ? text : "(bad)");
+            off += (uint32_t)(len ? len : 1);
+        }
+    } else if (!strcmp(argv[2], "explore")) {
+        DpCoreConfig kcfg; dp_core_config_default(&kcfg);
+        kcfg.hooks = dp_machine_ws_hooks();
+        kcfg.snap_cov = argv_cov(argc, argv);
+        uint32_t entry[16]; size_t ne = 0;
+        int kwatch = 0; const char *ktas = NULL; int tas_any_rom = 0;
+        for (int i = 4; i < argc && !rc; i++) {
+            if (!strcmp(argv[i], "--tas") && i + 1 < argc) { ktas = argv[++i]; continue; }
+            if (!strcmp(argv[i], "--tas-any-rom")) { tas_any_rom = 1; continue; }
+            if (!strcmp(argv[i], "--entry") && i + 1 < argc) {
+                if (ne >= 16) { fprintf(stderr, "deepeel: at most 16 --entry\n"); rc = 2; break; }
+                entry[ne++] = (uint32_t)strtoul(argv[++i], NULL, 0); continue;
+            }
+            int used = dp_core_parse_option(&kcfg, argc, argv, i);
+            if (used) { i += used - 1; continue; }
+            if (!strcmp(argv[i], "--watch-dump") && i + 1 < argc) { setenv("DP_WATCH_SMOOTH", "0", 0); if (!kcfg.watch_every) kcfg.watch_every = 2; continue; }
+            if (!strcmp(argv[i], "--watch")) {
+                int fps = 30; if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') fps = atoi(argv[++i]);
+                if (fps < 1) fps = 1; if (fps > 60) fps = 60;
+                kwatch = 1; kcfg.watch_every = (unsigned)(60 / fps);
+            }
+            else if (!strcmp(argv[i], "--max-total") && i + 1 < argc) kcfg.max_total = strtoull(argv[++i], NULL, 0);
+            else if (!strcmp(argv[i], "--fork-cap") && i + 1 < argc) kcfg.fork_site_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(argv[i], "--progress") && i + 1 < argc) kcfg.progress_secs = (unsigned)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(argv[i], "--cov-every") && i + 1 < argc) kcfg.snap_secs = (unsigned)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(argv[i], "--jobs") && i + 1 < argc) { ++i; if (!strcmp(argv[i], "auto")) { kcfg.jobs = (unsigned)auto_jobs(); kcfg.adaptive = 1; } else kcfg.jobs = (unsigned)strtoul(argv[i], NULL, 0); }
+            else if (!strcmp(argv[i], "--text") && i + 1 < argc) ++i;
+            else if (!strcmp(argv[i], "--map") && i + 1 < argc) ++i;
+            else if (!strcmp(argv[i], "--summary") && i + 1 < argc) ++i;
+            else if (!strcmp(argv[i], "--cov") && i + 1 < argc) ++i;
+            else if (!strcmp(argv[i], "--rtcode") && i + 1 < argc) ++i;
+            else if (!strcmp(argv[i], "--romdata") && i + 1 < argc) ++i;
+            else if (!strcmp(argv[i], "--evidence") && i + 1 < argc) ++i;
+            else if (!strcmp(argv[i], "--mapwin") && i + 1 < argc && argv[i + 1][0] >= '1' && argv[i + 1][0] <= '8') ++i;
+            else if (!strcmp(argv[i], "--mapwin")) {}
+            else { fprintf(stderr, "deepeel: unknown option %s\n", argv[i]); rc = 2; }
+        }
+        DpMachine *km = rc ? NULL : dp_machine_ws();
+        if (km) dp_machine_ws_source(km, data, size);
+        if (ktas && !rc) {   // the BizHawk WonderSwan pad (X1-X4 Y1-Y4 A B Start)
+            DpBzMovie bz; memset(&bz, 0, sizeof bz);
+            size_t rn = 0; uint8_t *rd = nes_read_file(ktas, &rn);
+            char terr[160] = "";
+            if (!rd || !dp_bz_load(rd, rn, &bz, terr, sizeof terr)) {
+                fprintf(stderr, "deepeel: --tas: %s\n", terr[0] ? terr : "cannot read the movie");
+                free(rd); rc = 1;
+            } else if (strcasecmp(bz.platform, "WS")) {
+                fprintf(stderr, "deepeel: --tas: movie platform %s, not WS\n", bz.platform);
+                dp_bz_free(&bz); free(rd); rc = 1;
+            } else {
+                // the standard WonderSwan pad: X1 left, X3 right, Y1 up, Y3 down
+                int up = dp_bz_find(&bz, "Y1"), dn = dp_bz_find(&bz, "Y3"),
+                    lf = dp_bz_find(&bz, "X1"), rt = dp_bz_find(&bz, "X3"),
+                    a = dp_bz_find(&bz, "A"), b = dp_bz_find(&bz, "B"), st = dp_bz_find(&bz, "Start");
+                if (up < 0) up = dp_bz_find(&bz, "Up");
+                if (dn < 0) dn = dp_bz_find(&bz, "Down");
+                if (lf < 0) lf = dp_bz_find(&bz, "Left");
+                if (rt < 0) rt = dp_bz_find(&bz, "Right");
+                if (up < 0 || dn < 0 || lf < 0 || rt < 0 || a < 0 || b < 0 || st < 0) {
+                    fprintf(stderr, "deepeel: --tas: movie LogKey lacks a WonderSwan pad column\n");
+                    dp_bz_free(&bz); free(rd); rc = 1;
+                } else {
+                    uint8_t sha[20]; char hex[41];
+                    dp_sha1(data, size, sha);
+                    for (int i = 0; i < 20; i++) snprintf(hex + i * 2, 3, "%02X", sha[i]);
+                    if (strcasecmp(hex, bz.sha1) && !tas_any_rom) {
+                        fprintf(stderr, "deepeel: TAS %s refused: recorded on another ROM (movie %s, file %s); --tas-any-rom forces it\n", ktas, bz.sha1, hex);
+                        dp_bz_free(&bz); free(rd); rc = 1;
+                    } else {
+                        if (!strcasecmp(hex, bz.sha1)) fprintf(stderr, "deepeel: TAS %s: ROM identity verified (%s)\n", ktas, bz.sha1);
+                        uint32_t *kmasks = malloc((bz.nframes ? bz.nframes : 1) * sizeof *kmasks);
+                        if (!kmasks) rc = 1;
+                        else {
+                            for (uint32_t f = 0; f < bz.nframes; f++) {
+                                uint32_t k = 0;
+                                if (dp_bz_held(&bz, f, up)) k |= DP_IN_UP;
+                                if (dp_bz_held(&bz, f, dn)) k |= DP_IN_DOWN;
+                                if (dp_bz_held(&bz, f, lf)) k |= DP_IN_LEFT;
+                                if (dp_bz_held(&bz, f, rt)) k |= DP_IN_RIGHT;
+                                if (dp_bz_held(&bz, f, a)) k |= DP_IN_B1;
+                                if (dp_bz_held(&bz, f, b)) k |= DP_IN_B2;
+                                if (dp_bz_held(&bz, f, st)) k |= DP_IN_START;
+                                kmasks[f] = k;
+                            }
+                            kcfg.tas_masks32 = kmasks;
+                            kcfg.tas_frames = bz.nframes;
+                        }
+                        dp_bz_free(&bz); free(rd);
+                    }
+                }
+            }
+        }
+        if (km && km->attach && !km->attach(km)) { km->close(km); km = NULL; }
+        kcfg.rom_image = data; kcfg.rom_image_size = size;
+        DpMusicKernelSeeds mks = {0}; DpSeedSet kseeds = {0};
+        if (!rc && (!km || seedset_build(&kcfg, &mks, entry, NULL, ne, 0, 0, &kseeds))) {
+            fprintf(stderr, "deepeel: ws: cannot open the ROM\n");
+            if (km) km->close(km);
+            km = NULL; rc = 1;
+        }
+        if (km) {
+            DpCoreResult kr;
+            if (kwatch) dp_fbwatch_start("deepeel ws watch");
+            rc = dp_core_explore_cli(km, size, &kcfg, &kr, argv_opt(argc, argv, "--summary") ? argv_opt(argc, argv, "--summary") : argv_opt(argc, argv, "--text")) ? 0 : 1;
+            if (kwatch) dp_fbwatch_stop();
+            if (!rc) {
+                dp_core_report(stdout, "ws", &kr);
+                core_outputs(argc, argv, "ws", argv[3], km, &kr);
+            }
+            dp_core_result_free(&kr);
+            km->close(km);
+            seedset_free(&kseeds);
+        }
+    } else rc = (usage(), 2);
+    free(data);
+    return rc;
+}
+
+
 // deepeel tas info MOVIE | deepeel tas diff A B : generic BizHawk movie reader (any core)
 static int bz_open(const char *path, DpBzMovie *m) {
     size_t n = 0;
@@ -1816,7 +1971,7 @@ static void kmapwin_cb(void *u, const DpCoreResult *r) { dp_kmapwin_start(r, "de
 // The platform comes from the file (extension, then header), the outputs go to a dedicated directory
 // (<rom stem>.deepeel/ unless --out DIR), a saved analysis there is resumed on its own, and the
 // worker count and queue size follow the free RAM.  Any explicit option still wins (it comes last).
-typedef enum { AR_NONE, AR_GB, AR_NES, AR_PCE, AR_MD, AR_SMS, AR_GG, AR_SG, AR_MSX, AR_NGP } ArSystem;
+typedef enum { AR_NONE, AR_GB, AR_NES, AR_PCE, AR_MD, AR_SMS, AR_GG, AR_SG, AR_MSX, AR_NGP, AR_WS } ArSystem;
 
 static ArSystem ar_detect(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -1836,6 +1991,7 @@ static ArSystem ar_detect(const char *path) {
     if (!strcmp(ext, ".mx1") || !strcmp(ext, ".mx2")) return AR_MSX;
     if (!strcmp(ext, ".md") || !strcmp(ext, ".gen") || !strcmp(ext, ".smd")) return AR_MD;
     if (!strcmp(ext, ".ngp") || !strcmp(ext, ".ngc") || !strcmp(ext, ".ngd")) return AR_NGP;
+    if (!strcmp(ext, ".ws") || !strcmp(ext, ".wsc")) return AR_WS;
     // the Neo Geo Pocket header: the 24-bit entry at 0x1C lands in the cartridge
     // windows and the colour-mode byte at 0x23 is 0x00 (mono) or 0x10 (colour);
     // some dumps carry 256 padding bytes, the header then sits at 0x20100
@@ -1861,13 +2017,13 @@ static int ar_has(int argc, char **argv, const char *opt) {
 }
 
 static int ar_is_subcommand(const char *a) {
-    static const char *const names[] = { "frontier", "tasfetch", "tasdb", "lr", "bh", "md", "nes", "pce", "ngp", "z80", "explore", "mapx", "maprender", "covmap", "tas", "desync", "map", "regs", "dis", NULL };
+    static const char *const names[] = { "frontier", "tasfetch", "tasdb", "lr", "bh", "md", "nes", "pce", "ngp", "ws", "z80", "explore", "mapx", "maprender", "covmap", "tas", "desync", "map", "regs", "dis", NULL };
     for (int i = 0; names[i]; i++) if (!strcmp(a, names[i])) return 1;
     return 0;
 }
 
 static int auto_explore(int argc, char **argv, ArSystem sys) {
-    static const char *const names[] = { "", "gb", "nes", "pce", "md", "sms", "gg", "sg", "msx", "ngp" };
+    static const char *const names[] = { "", "gb", "nes", "pce", "md", "sms", "gg", "sg", "msx", "ngp", "ws" };
     const char *rom = argv[1];
     char stem[256] = "rom"; { const char *b = strrchr(rom, '/'); b = b ? b + 1 : rom; snprintf(stem, sizeof stem, "%s", b); char *d = strrchr(stem, '.'); if (d && d != stem) *d = 0; }
     char outdir[1024]; snprintf(outdir, sizeof outdir, "%s.deepeel", stem);
@@ -1912,6 +2068,7 @@ static int auto_explore(int argc, char **argv, ArSystem sys) {
         case AR_PCE: return cmd_pce(n, (char **)av);
         case AR_MD:  return cmd_md(n, (char **)av);
         case AR_NGP: return cmd_ngp(n, (char **)av);
+        case AR_WS: return cmd_ws(n, (char **)av);
         default:     return dp_sega_explore_command(n, (char **)av);
     }
 }
@@ -2008,6 +2165,7 @@ int deepeel_main(int argc, char **argv) {   // the library entry point; src/deep
     if (!strcmp(argv[1], "nes")) return cmd_nes(argc, argv);
     if (!strcmp(argv[1], "pce")) return cmd_pce(argc, argv);
     if (!strcmp(argv[1], "ngp")) return cmd_ngp(argc, argv);
+    if (!strcmp(argv[1], "ws")) return cmd_ws(argc, argv);
     if (!strcmp(argv[1], "z80") && argc > 2 && !strcmp(argv[2], "explore"))
         return dp_sega_explore_command(argc, argv);
     if (!strcmp(argv[1], "z80")) return dp_z80_command(argc, argv);

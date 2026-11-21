@@ -1,7 +1,8 @@
 # deepeel
 
 Outil générique de découverte de la **memory map** des ROMs, plateforme par
-plateforme. Il contient le registre matériel complet de chaque console
+plateforme (GB, NES, PCE, Mega Drive, SG/SMS/GG, MSX, Neo Geo Pocket,
+WonderSwan). Il contient le registre matériel complet de chaque console
 (registres IO, fenêtres de mapper, IRQ), il exécute la ROM dans la **machine
 m0boy** (l'interpréteur GB dont le run_hash est tenu par la suite de tests
 m0boy, embarquée comme dépendance `M0BOY_DIR`) et consigne **tout** : chaque
