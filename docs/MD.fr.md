@@ -922,3 +922,15 @@ Sondes CLR/TAS et synchro SoR 1845S (observations de l'outil) : sans quirks, `cl
 identiques à Gens (0 octet de diff, étiquette noyau = étiquette Gens + 1). Le diagnostic `DP_TAS_PAD_SHIFT_AT=F` + `DP_TAS_PAD_SHIFT2=k` (décalage d'entrée changé à la trame F) donne 0 octet de diff
 de la V-int 8 414 à ~10 864 (≈ 2 450 V-ints) avec F=9000, k=0 ; la règle physique du décalage reste à expliquer. Nouvelle rupture aux V-int 10 866-10 878 (drapeau `$FFFA00`, marge de la boucle d'attente) :
 cause présumée la durée de ligne (Gens 488 cycles, noyau 488,57). Expérience négative : déplacer la ligne de latch d'entrée (0, 2, 15) casse la scène entière.
+
+#### SoR 1845S : profil `DP_MD_GENS=1`, ligne de 488 cycles, ADDQ matériel (21 novembre 2026)
+
+Observations de l'outil (comparaison au dump Gens-rr `s20.dsy`, un échantillon tous les 14 V-int, RAM `$0000-$FAFF`, depuis le premier V-int). Trois corrections cumulées font passer la
+synchro exacte de ~25 V-int à ~10 850 V-int : (1) ligne de 488 cycles (`DP_MD_CLOWN_CLOCK=3416`, 3416/7 = 488 exactement ; Gens arrondit la ligne à 488 là où le matériel fait 488,57 :
+compatibilité Gens, pas fidélité matérielle) ; (2) `DP_TAS_PAD_SHIFT=0` (le décalage d'entrée de 1 trame compensait la durée de ligne ; il n'est plus nécessaire, le diagnostic
+`DP_TAS_PAD_SHIFT_AT` n'est plus utile) ; (3) **sans** `DP_MD_STAR_ADDQ` (ADDQ.W An à 8 cycles, valeur matérielle) : avec ADDQ=4 la synchro s'arrête à ~6 290 V-int. Les anciens
+réglages faisaient donc compenser des coûts faux les uns par les autres. Le profil `DP_MD_GENS=1` (dans `dp_mdmach_reset`, chaque réglage reste surchargeable par l'environnement) pose :
+ligne 3416, `CLOCK_OFF=0`, `PAD_LINE0`, `GENS_DMA`, `POWERON=gens`, `MD_IRQ_IMMEDIATE`, `STAR_TIME`, `STAR_DIV`. Sonic 1843S garde le même premier écart (trame 8 360) avec ou sans ligne à 488.
+Résultat SoR avec le profil : échantillons exacts de 0 à 774 (V-int ~10 850) avec des écarts isolés de 1 à 39 octets sur un échantillon (phase sous-instruction du thread principal), puis rupture
+au V-int 10 865 : le noyau est encore dans une routine appelée par la boucle d'attente (`$03B2`) quand Gens est déjà à `$10510` (écart de phase de quelques cycles à l'arrivée du V-int,
+drapeau `$FFFA00` 1 chez Gens, 0 chez le noyau). Piste en cours : sonde de durées étendue (`probe/gen2.py`, ~530 instructions × modes d'adressage).
