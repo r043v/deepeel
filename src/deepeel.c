@@ -41,6 +41,8 @@ int dp_gbs_fetch(const char *game, const char *dir, char *out_gbs, size_t cap, c
 #include "platform/md/md_registry.h"
 #include "mach/mdmach.h"
 #include "cpu/m68k/m68k.h"
+#include "cpu/tlcs900/tlcs900.h"
+#include "platform/ngp/ngp_platform.h"
 #include "platform/nes/explore.h"
 #include "platform/pce/explore.h"
 #include "platform/pce/pce.h"
@@ -117,16 +119,17 @@ static int cmd_maprender(int argc, char **argv);
 
 static void usage(void) {
     fprintf(stderr,
-            "deepeel — ROM memory-map explorer (generic kernel: GB, NES, PCE, MD, SG/SMS/GG/MSX)\n\n"
+            "deepeel — ROM memory-map explorer (generic kernel: GB, NES, PCE, MD, NGP, SG/SMS/GG/MSX)\n\n"
             "  deepeel explore rom.gb [options]\n"
             "  deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME] [options]\n"
             "  deepeel nes explore ROM [options]\n"
             "  deepeel pce explore ROM [options]\n"
             "  deepeel md explore ROM [options]\n"
+            "  deepeel ngp explore ROM [options]          Neo Geo Pocket / Pocket Color\n"
             "  deepeel lr explore CORE ROM [options]       libretro core as machine\n"
-            "  deepeel z80|md dis ROM hex-offset [instruction-count]\n"
+            "  deepeel z80|md|ngp dis ROM addr [instruction-count]\n"
             "  deepeel dis rom.gb bank:addr [n]\n"
-            "  deepeel regs <gb|nes|pce|md|sg|sms|gg|msx>   dump the register registry\n"
+            "  deepeel regs <gb|nes|pce|md|ngp|sg|sms|gg|msx>   dump the register registry\n"
             "  deepeel map rom.gb                           static map only (pointer tables, padding)\n"
             "  deepeel maprender rom.gb in.map out.map.png [--meta f]\n"
             "  deepeel mapx x.map.png out [--chunk NAME]    extract one chunk of a map PNG\n"
@@ -1360,6 +1363,18 @@ static int cmd_regs(int argc, char **argv) {
     if(argc>=3 && !strcmp(argv[2],"msx")) { dp_msx_regs(stdout); return 0; }
     if (argc >= 3 && !strcmp(argv[2], "nes")) { dp_nes_regs(stdout); return 0; }
     if (argc >= 3 && !strcmp(argv[2], "pce")) { dp_pce_regs(stdout); return 0; }
+    if (argc >= 3 && !strcmp(argv[2], "ngp")) {
+        const DpPlatform *p = dp_ngp_platform();
+        printf("%s register registry (%d entries, %d irqs):\n", p->name, p->io_reg_count, p->irq_count);
+        for (int i = 0; i < p->io_reg_count; i++) {
+            const DpIoReg *r = &p->io_regs[i];
+            printf("  %06x-%06x  %-8s %-10s %s%s%s\n", r->lo, r->hi, r->name, r->category,
+                   (r->rw & 1) ? "r" : "-", (r->rw & 2) ? "w" : "-", (r->rw & 3) ? " " : "-");
+        }
+        for (int i = 0; i < p->irq_count; i++)
+            printf("  irq %s: vector $%06x, slot %d\n", p->irqs[i].name, p->irqs[i].vector, p->irqs[i].bit);
+        return 0;
+    }
     const DpSegaSystem *sega = argc >= 3 ? dp_sega_system(argv[2]) : NULL;
     if (sega) { dp_sega_regs(stdout, sega); return 0; }
     if (argc < 3 || strcmp(argv[2], "gb")) {
@@ -1541,6 +1556,104 @@ static int cmd_md(int argc, char **argv) {
 }
 
 
+// deepeel ngp explore ROM [options]: the Neo Geo Pocket through the m0boy
+// runtime (TLCS-900H).  The machine boots the cartridge directly, so the
+// default root is the header's entry point (the reset PC); --entry adds
+// 24-bit roots.  `deepeel ngp dis ROM ADDR [N]` disassembles from a
+// cartridge address (the $200000 window).
+static int cmd_ngp(int argc, char **argv) {
+    if (argc < 4) return usage(), 2;
+    int rc = 0;
+    size_t size = 0;
+    uint8_t *data = nes_read_file(argv[3], &size);
+    if (!data) { fprintf(stderr, "deepeel: cannot read %s\n", argv[3]); return 1; }
+    if (!strcmp(argv[2], "dis")) {
+        if (argc < 5) { free(data); return usage(), 2; }
+        uint32_t off = (uint32_t)strtoul(argv[4], NULL, 16);
+        if (off < 0x200000u) off += 0x200000u;   // accept both the image offset and the cartridge address
+        uint32_t img = off - 0x200000u;
+        int n = argc > 5 ? atoi(argv[5]) : 16;
+        for (int i = 0; i < n && img < size; i++) {
+            DpTlcsInsn in;
+            unsigned len = dp_tlcs900_decode(data + img, size - img, off, &in);
+            printf("%06X  %s\n", off, in.text);
+            unsigned adv = len ? len : 1;
+            off += adv; img += adv;
+        }
+    } else if (!strcmp(argv[2], "explore")) {
+        DpCoreConfig kcfg; dp_core_config_default(&kcfg);
+        kcfg.hooks = dp_machine_ngp_hooks();
+        kcfg.snap_cov = argv_cov(argc, argv);   // periodic coverage snapshot next to the final one
+        uint32_t entry[16]; size_t ne = 0;
+        int kwatch = 0; const char *kdump = NULL;
+        for (int i = 4; i < argc && !rc; i++) {
+            if (!strcmp(argv[i], "--entry") && i + 1 < argc) {   // an extra root, a 24-bit cartridge address
+                if (ne >= 16) { fprintf(stderr, "deepeel: at most 16 --entry\n"); rc = 2; break; }
+                entry[ne++] = (uint32_t)strtoul(argv[++i], NULL, 0); continue;
+            }
+            int used = dp_core_parse_option(&kcfg, argc, argv, i);
+            if (used) { i += used - 1; continue; }
+            if (!strcmp(argv[i], "--watch-dump") && i + 1 < argc) { kdump = argv[++i]; setenv("DP_WATCH_SMOOTH", "0", 0); if (!kcfg.watch_every) kcfg.watch_every = 2; continue; }
+            if (!strcmp(argv[i], "--watch")) {   // the kernel's game-screen window (SDL2)
+                int fps = 30; if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') fps = atoi(argv[++i]);
+                if (fps < 1) fps = 1; if (fps > 60) fps = 60;
+                kwatch = 1; kcfg.watch_every = (unsigned)(60 / fps);
+            }
+            else if (!strcmp(argv[i], "--max-total") && i + 1 < argc) kcfg.max_total = strtoull(argv[++i], NULL, 0);
+            else if (!strcmp(argv[i], "--fork-cap") && i + 1 < argc) kcfg.fork_site_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(argv[i], "--progress") && i + 1 < argc) kcfg.progress_secs = (unsigned)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(argv[i], "--cov-every") && i + 1 < argc) kcfg.snap_secs = (unsigned)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(argv[i], "--jobs") && i + 1 < argc) { ++i; if (!strcmp(argv[i], "auto")) { kcfg.jobs = (unsigned)auto_jobs(); kcfg.adaptive = 1; } else kcfg.jobs = (unsigned)strtoul(argv[i], NULL, 0); }
+            else if (!strcmp(argv[i], "--text") && i + 1 < argc) ++i;   // the outputs: written by core_outputs from argv
+            else if (!strcmp(argv[i], "--map") && i + 1 < argc) ++i;
+            else if (!strcmp(argv[i], "--summary") && i + 1 < argc) ++i;
+            else if (!strcmp(argv[i], "--cov") && i + 1 < argc) ++i;
+            else if (!strcmp(argv[i], "--rtcode") && i + 1 < argc) ++i;
+            else if (!strcmp(argv[i], "--romdata") && i + 1 < argc) ++i;   // accepted; core_outputs reports it is not produced yet
+            else if (!strcmp(argv[i], "--evidence") && i + 1 < argc) ++i;
+            else if (!strcmp(argv[i], "--mapwin") && i + 1 < argc && argv[i + 1][0] >= '1' && argv[i + 1][0] <= '8') ++i;   // handled in main() (with the optional scale)
+            else if (!strcmp(argv[i], "--mapwin")) {}
+            else { fprintf(stderr, "deepeel: unknown option %s\n", argv[i]); rc = 2; }
+        }
+        DpMachine *km = rc ? NULL : dp_machine_ngp();
+        if (km) dp_machine_ngp_source(km, data, size);
+        // the main thread boots its own machine first: the start state (the
+        // header's entry, the reset PC) is saved from it before the workers clone
+        if (km && km->attach && !km->attach(km)) { km->close(km); km = NULL; }
+        kcfg.rom_image = data; kcfg.rom_image_size = size;   // B8: the cov offsets are the image offsets
+        DpMusicKernelSeeds mks = {0}; DpSeedSet kseeds = {0};
+        if (!rc && (!km || seedset_build(&kcfg, &mks, entry, NULL, ne, 0, 0, &kseeds))) {
+            fprintf(stderr, "deepeel: ngp: cannot open the ROM\n");
+            if (km) km->close(km);
+            km = NULL; rc = 1;
+        }
+        if (km) {
+            DpCoreResult kr;
+            if (kwatch) dp_fbwatch_start("deepeel ngp watch");
+            rc = dp_core_explore_cli(km, size, &kcfg, &kr, argv_opt(argc, argv, "--summary") ? argv_opt(argc, argv, "--summary") : argv_opt(argc, argv, "--text")) ? 0 : 1;
+            if (kwatch) dp_fbwatch_stop();
+            if (kdump && dp_fb_dump_ppm(kdump)) fprintf(stderr, "deepeel: no frame to dump\n");
+            if (!rc) {
+                // Neo Geo Pocket header: the 12-byte name at 0x24 (printable run; the
+                // Japanese releases carry UTF-16, the run is empty then — the file stem shows)
+                size_t tl = 0;
+                for (uint32_t k = 0x24; k < 0x30 && k < size && tl + 1 < sizeof kr.rom_title; k++) {
+                    unsigned char ch = data[k];
+                    if (ch >= 0x20 && ch < 0x7f) kr.rom_title[tl++] = (char)ch;
+                }
+                kr.rom_title[tl] = 0;
+                dp_core_report(stdout, "ngp", &kr); core_outputs(argc, argv, "ngp", argv[3], km, &kr);
+            }
+            dp_core_result_free(&kr);
+            km->close(km);
+            seedset_free(&kseeds);
+        }
+    } else rc = (usage(), 2);
+    free(data);
+    return rc;
+}
+
+
 // deepeel tas info MOVIE | deepeel tas diff A B : generic BizHawk movie reader (any core)
 static int bz_open(const char *path, DpBzMovie *m) {
     size_t n = 0;
@@ -1613,7 +1726,7 @@ static void kmapwin_cb(void *u, const DpCoreResult *r) { dp_kmapwin_start(r, "de
 // The platform comes from the file (extension, then header), the outputs go to a dedicated directory
 // (<rom stem>.deepeel/ unless --out DIR), a saved analysis there is resumed on its own, and the
 // worker count and queue size follow the free RAM.  Any explicit option still wins (it comes last).
-typedef enum { AR_NONE, AR_GB, AR_NES, AR_PCE, AR_MD, AR_SMS, AR_GG, AR_SG, AR_MSX } ArSystem;
+typedef enum { AR_NONE, AR_GB, AR_NES, AR_PCE, AR_MD, AR_SMS, AR_GG, AR_SG, AR_MSX, AR_NGP } ArSystem;
 
 static ArSystem ar_detect(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -1632,6 +1745,17 @@ static ArSystem ar_detect(const char *path) {
     if (!strcmp(ext, ".sg") || !strcmp(ext, ".sc")) return AR_SG;
     if (!strcmp(ext, ".mx1") || !strcmp(ext, ".mx2")) return AR_MSX;
     if (!strcmp(ext, ".md") || !strcmp(ext, ".gen") || !strcmp(ext, ".smd")) return AR_MD;
+    if (!strcmp(ext, ".ngp") || !strcmp(ext, ".ngc") || !strcmp(ext, ".ngd")) return AR_NGP;
+    // the Neo Geo Pocket header: the 24-bit entry at 0x1C lands in the cartridge
+    // windows and the colour-mode byte at 0x23 is 0x00 (mono) or 0x10 (colour);
+    // some dumps carry 256 padding bytes, the header then sits at 0x20100
+    for (int hv = 0; hv < 2; hv++) {
+        size_t ho = hv ? 0x20100u : 0;
+        if (n < ho + 0x30) break;
+        uint32_t pc = h[ho + 0x1C] | ((uint32_t)h[ho + 0x1D] << 8) | ((uint32_t)h[ho + 0x1E] << 16);
+        uint8_t mode = h[ho + 0x23];
+        if (pc >= 0x200000u && pc < 0xA00000u && (mode == 0x00 || mode == 0x10)) return AR_NGP;
+    }
     if (n >= 0x108 && !memcmp(h + 0x100, "SEGA", 4)) return AR_MD;                       // Mega Drive header
     if (n >= 0x108 && !memcmp(h + 0x104, "\xCE\xED\x66\x66", 4)) return AR_GB;            // Nintendo logo
     static const size_t tmr[3] = { 0x7FF0, 0x3FF0, 0x1FF0 };                              // Master System / Game Gear "TMR SEGA"
@@ -1647,13 +1771,13 @@ static int ar_has(int argc, char **argv, const char *opt) {
 }
 
 static int ar_is_subcommand(const char *a) {
-    static const char *const names[] = { "frontier", "tasfetch", "tasdb", "lr", "bh", "md", "nes", "pce", "z80", "explore", "mapx", "maprender", "covmap", "tas", "desync", "map", "regs", "dis", NULL };
+    static const char *const names[] = { "frontier", "tasfetch", "tasdb", "lr", "bh", "md", "nes", "pce", "ngp", "z80", "explore", "mapx", "maprender", "covmap", "tas", "desync", "map", "regs", "dis", NULL };
     for (int i = 0; names[i]; i++) if (!strcmp(a, names[i])) return 1;
     return 0;
 }
 
 static int auto_explore(int argc, char **argv, ArSystem sys) {
-    static const char *const names[] = { "", "gb", "nes", "pce", "md", "sms", "gg", "sg", "msx" };
+    static const char *const names[] = { "", "gb", "nes", "pce", "md", "sms", "gg", "sg", "msx", "ngp" };
     const char *rom = argv[1];
     char stem[256] = "rom"; { const char *b = strrchr(rom, '/'); b = b ? b + 1 : rom; snprintf(stem, sizeof stem, "%s", b); char *d = strrchr(stem, '.'); if (d && d != stem) *d = 0; }
     char outdir[1024]; snprintf(outdir, sizeof outdir, "%s.deepeel", stem);
@@ -1697,6 +1821,7 @@ static int auto_explore(int argc, char **argv, ArSystem sys) {
         case AR_NES: return cmd_nes(n, (char **)av);
         case AR_PCE: return cmd_pce(n, (char **)av);
         case AR_MD:  return cmd_md(n, (char **)av);
+        case AR_NGP: return cmd_ngp(n, (char **)av);
         default:     return dp_sega_explore_command(n, (char **)av);
     }
 }
@@ -1792,6 +1917,7 @@ int deepeel_main(int argc, char **argv) {   // the library entry point; src/deep
     if (!strcmp(argv[1], "md")) return cmd_md(argc, argv);
     if (!strcmp(argv[1], "nes")) return cmd_nes(argc, argv);
     if (!strcmp(argv[1], "pce")) return cmd_pce(argc, argv);
+    if (!strcmp(argv[1], "ngp")) return cmd_ngp(argc, argv);
     if (!strcmp(argv[1], "z80") && argc > 2 && !strcmp(argv[2], "explore"))
         return dp_sega_explore_command(argc, argv);
     if (!strcmp(argv[1], "z80")) return dp_z80_command(argc, argv);

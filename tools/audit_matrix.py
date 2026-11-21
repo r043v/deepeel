@@ -18,13 +18,13 @@ for line in text[start:end].splitlines():
     cells = [c.strip() for c in line.strip().strip("|").split("|")]
     rows.append(cells)
 
-PLAT = ["GB", "SMS/GG", "MSX", "NES", "PCE", "MD"]
+PLAT = ["GB", "SMS/GG", "MSX", "NES", "PCE", "MD", "NGP"]
 problems = []
 tally = {p: {"done": 0, "partial": 0, "missing": 0, "na": 0} for p in PLAT}
 open_cells = []
 for r in rows:
-    if len(r) != 8:
-        problems.append(f"{r[0] if r else '?'}: {len(r)} cells, expected 8")
+    if len(r) != 9:
+        problems.append(f"{r[0] if r else '?'}: {len(r)} cells, expected 9")
         continue
     rid, tech, vals = r[0], r[1], r[2:]
     for p, v in zip(PLAT, vals):

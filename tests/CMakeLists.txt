@@ -41,10 +41,18 @@ add_test(NAME registry COMMAND test_registry)
 
 # the DpIsa kernel interface (spec §7.3), pinned per CPU
 add_executable(test_dpisa test_dpisa.c)
-target_link_libraries(test_dpisa PRIVATE deepeel_z80 deepeel_core deepeel_nes deepeel_pce)
+target_link_libraries(test_dpisa PRIVATE deepeel_z80 deepeel_core deepeel_nes deepeel_pce deepeel_ngp)
 target_include_directories(test_dpisa PRIVATE ${M0BOY_DIR}/targets/pce/runtime)
 add_test(NAME dpisa COMMAND test_dpisa)
 set_tests_properties(dpisa PROPERTIES TIMEOUT 30)
+
+# the TLCS-900H decoder, the DpIsa contract and the NGP machine (spec §7.2)
+add_executable(test_ngp test_ngp.c)
+target_link_libraries(test_ngp PRIVATE deepeel_ngp deepeel_core m)
+target_include_directories(test_ngp PRIVATE ${M0BOY_DIR}/targets/ngp/runtime)
+add_dependencies(test_ngp fixtures)
+add_test(NAME ngp COMMAND test_ngp ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(ngp PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 
 
 add_executable(test_nes_cpu test_nes_cpu.c)
@@ -156,6 +164,7 @@ set(FIXTURES
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_save.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_rng.md
   ${CMAKE_CURRENT_BINARY_DIR}/fix_md_index.md
+  ${CMAKE_CURRENT_BINARY_DIR}/fix_ngp_branch.ngp
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_save.nes
   ${CMAKE_CURRENT_BINARY_DIR}/fix_gb_save.gb
@@ -332,6 +341,12 @@ add_test(NAME pce_cov COMMAND sh -c "$<TARGET_FILE:deepeel> pce explore ${CMAKE_
 set_tests_properties(pce_cov PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME pce_summary COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_pce_slide.pce; $B pce explore $F --attract-frames 0 --max-total 20000 --max-steps 200 --summary ${CMAKE_CURRENT_BINARY_DIR}/pce_sum.json >/dev/null 2>&1; grep -q '\"platform\":\"pce\"' ${CMAKE_CURRENT_BINARY_DIR}/pce_sum.json && grep -q '\"known_pct\":[0-9]' ${CMAKE_CURRENT_BINARY_DIR}/pce_sum.json && python3 -c \"import json; json.load(open('${CMAKE_CURRENT_BINARY_DIR}/pce_sum.json'))\"")
 set_tests_properties(pce_summary PROPERTIES FIXTURES_REQUIRED fixtures)
+add_test(NAME ngp_cov COMMAND sh -c "$<TARGET_FILE:deepeel> ngp explore ${CMAKE_CURRENT_BINARY_DIR}/fix_ngp_branch.ngp --max-total 20000 --cov ${CMAKE_CURRENT_BINARY_DIR}/ngp.cov >/dev/null 2>&1 && grep -Eq '^00 0030 1 [1-9][0-9]*$' ${CMAKE_CURRENT_BINARY_DIR}/ngp.cov && grep -Eq '^00 0038 1 [1-9][0-9]*$' ${CMAKE_CURRENT_BINARY_DIR}/ngp.cov")
+set_tests_properties(ngp_cov PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME ngp_summary COMMAND sh -c "B=$<TARGET_FILE:deepeel>; F=${CMAKE_CURRENT_BINARY_DIR}/fix_ngp_branch.ngp; $B ngp explore $F --max-total 20000 --summary ${CMAKE_CURRENT_BINARY_DIR}/ngp_sum.json >/dev/null 2>&1; grep -q '\"platform\":\"ngp\"' ${CMAKE_CURRENT_BINARY_DIR}/ngp_sum.json && grep -q '\"known_pct\":[0-9]' ${CMAKE_CURRENT_BINARY_DIR}/ngp_sum.json && python3 -c \"import json; json.load(open('${CMAKE_CURRENT_BINARY_DIR}/ngp_sum.json'))\"")
+set_tests_properties(ngp_summary PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+add_test(NAME ngp_coverage_png COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/platform_coverage_png.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_ngp_branch.ngp ngp noheat)
+set_tests_properties(ngp_coverage_png PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 add_test(NAME nes_coverage_png COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/platform_coverage_png.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_nes_branch.nes nes noheat)
 set_tests_properties(nes_coverage_png PROPERTIES FIXTURES_REQUIRED fixtures)
 add_test(NAME pce_coverage_png COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/platform_coverage_png.sh $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR}/fix_pce_branch.pce pce noheat)
@@ -361,7 +376,7 @@ target_link_libraries(test_tas_logkey PRIVATE deepeel_core)
 add_test(NAME tas_logkey COMMAND test_tas_logkey)
 set_tests_properties(tas_logkey PROPERTIES TIMEOUT 30)
 
-add_test(NAME rtcode_sms_source COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B z80 explore sms $D/fix_sms_ramsrc.sms --rtcode $D/sr.rt --text $D/sr.txt >/dev/null 2>&1; grep -Eq '^c000 3e42 [0-9]+ 512 -?[0-9]+$' $D/sr.rt && grep -Eq '^c002 c9 [0-9]+ 514 -?[0-9]+$' $D/sr.rt")
+add_test(NAME rtcode_sms_source COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B z80 explore sms $D/fix_sms_ramsrc.sms --jobs 1 --rtcode $D/sr.rt --text $D/sr.txt >/dev/null 2>&1; grep -Eq '^c000 3e42 [0-9]+ 512 -?[0-9]+$' $D/sr.rt && grep -Eq '^c002 c9 [0-9]+ 514 -?[0-9]+$' $D/sr.rt")
 set_tests_properties(rtcode_sms_source PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
 
 

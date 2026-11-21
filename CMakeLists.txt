@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.428.0 LANGUAGES C)
+project(deepeel VERSION 0.429.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -547,6 +547,46 @@ target_include_directories(deepeel_pce PUBLIC src ${DP_PCE_RUNTIME}
 target_compile_definitions(deepeel_pce PRIVATE PCE_TRACE M0_TL=__thread M0_NO_INPUT_PROBE)
 target_link_libraries(deepeel_pce PUBLIC deepeel_core)
 target_link_libraries(deepeel_lib PUBLIC deepeel_pce)
+
+# --- the m0boy Neo Geo Pocket machine (TLCS-900H + K2GE + T6W28) -------------
+# The runtime is compiled with the trace hooks on (NGP_TRACE) and a
+# thread-local machine global (M0_TL), then the whole archive is prefixed
+# dp_ngp_ so the names cannot meet the other embedded runtimes (the GG one
+# exports its own `machine`, and the sound Z80 shares the SG-1000 core).
+set(DP_NGP_RUNTIME "${M0BOY_DIR}/targets/ngp/runtime")
+if(NOT EXISTS "${DP_NGP_RUNTIME}/ngp.c" OR NOT EXISTS "${DP_NGP_RUNTIME}/ngp_trace.h")
+  message(FATAL_ERROR "M0BOY_DIR must provide targets/ngp/runtime with the NGP_TRACE hooks")
+endif()
+set(DP_NGP_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libdeepeel_ngp.a)
+add_library(deepeel_ngp_raw STATIC
+  src/cpu/tlcs900/tlcs900.c
+  src/mach/ngp_isa.c
+  src/mach/ngp_machine.c
+  src/platform/ngp/ngpmach.c
+  src/platform/ngp/registry.c
+  ${DP_NGP_RUNTIME}/ngp.c
+  ${DP_NGP_RUNTIME}/ngp_cpu.c
+  ${DP_NGP_RUNTIME}/ngp_gfx.c
+  ${DP_NGP_RUNTIME}/ngp_psg.c
+  ${DP_NGP_RUNTIME}/ngp_z80.c
+  ${DP_NGP_RUNTIME}/ngp_bios.c
+  ${DP_MD_Z80}/z80.c)
+target_compile_definitions(deepeel_ngp_raw PRIVATE NGP_TRACE M0_TL=__thread)
+target_include_directories(deepeel_ngp_raw PUBLIC src
+  ${DP_NGP_RUNTIME} ${DP_MD_Z80} "${M0BOY_DIR}/targets/common/runtime")
+target_link_libraries(deepeel_ngp_raw PUBLIC deepeel_core)
+add_custom_command(OUTPUT ${DP_NGP_ARCHIVE}
+  BYPRODUCTS ${DP_NGP_ARCHIVE}.syms
+  COMMAND ${CMAKE_COMMAND} -DNM=${DP_NM} -DOBJCOPY=${DP_OBJCOPY}
+    -DINPUT=$<TARGET_FILE:deepeel_ngp_raw> -DOUTPUT=${DP_NGP_ARCHIVE}
+    -DPREFIX=dp_ngp_ -DPATTERNS=machine|ngp_[A-Za-z0-9_]*|z80_[A-Za-z0-9_]*
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dp_sega_prefix.cmake
+  DEPENDS deepeel_ngp_raw cmake/dp_sega_prefix.cmake VERBATIM)
+add_custom_target(dp_ngp_runtime DEPENDS ${DP_NGP_ARCHIVE})
+add_library(deepeel_ngp STATIC IMPORTED GLOBAL)
+set_target_properties(deepeel_ngp PROPERTIES IMPORTED_LOCATION ${DP_NGP_ARCHIVE})
+add_dependencies(deepeel_ngp dp_ngp_runtime)
+target_link_libraries(deepeel_lib PUBLIC deepeel_ngp)
 
 target_link_libraries(deepeel_lib PUBLIC deepeel_core m ${DP_GUI_LIBS})
 

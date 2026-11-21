@@ -13,7 +13,10 @@ with tempfile.TemporaryDirectory() as tmp:
             rom = fixtures / ("fix_condstack_" + kind + "." + system)
             cmd = [exe, "explore", str(rom)] if system == "gb" else [exe, "z80", "explore", "sms", str(rom)]
             summary = pathlib.Path(tmp) / (system + kind + ".json")
-            cmd += ["--no-sessions", "--attract-frames", "0", "--max-total", "5000", "--no-closure", "--no-auto-seed", "--summary", str(summary)]
+            # --max-steps gives the SMS path the same 1000-step shape the GB
+            # explorer already has: the loop path is cut and the queued fork
+            # side always runs (the step wall alone left it to the workers' race)
+            cmd += ["--no-sessions", "--attract-frames", "0", "--max-total", "5000", "--max-steps", "1000", "--no-closure", "--no-auto-seed", "--summary", str(summary)]
             if system == "gb":
                 cmd += ["--no-pointer-scan"]
             subprocess.run(cmd, check=True, capture_output=True, timeout=30)

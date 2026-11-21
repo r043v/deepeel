@@ -438,6 +438,12 @@ DpMachine *dp_machine_pce(void);
 /* give the PCE machine its ROM image (kept by the caller) so clone() can start workers */
 void dp_machine_pce_source(DpMachine *m, const uint8_t *data, size_t size);
 const struct DpPlatformHooks *dp_machine_pce_hooks(void);   /* IRQ-source probes */
+// the Neo Geo Pocket backend (src/mach/ngp_machine.c): dp_ngp_init(data,size)
+// first (src/platform/ngp/ngpmach.h), the thread-local runtime singleton
+const DpIsa *dp_isa_tlcs900(void);
+DpMachine *dp_machine_ngp(void);
+void dp_machine_ngp_source(DpMachine *m, const uint8_t *data, size_t size);
+const struct DpPlatformHooks *dp_machine_ngp_hooks(void);   /* pad + IRQ-source probes */
 // the libretro backend (src/mach/lr_machine.c), level A (§8.1): frames only,
 // the kernel degrades; takes ownership of the DpLibretro instance
 struct DpLibretro;

@@ -144,12 +144,51 @@ static void test_68000(void) {
     CHECK(isa->disasm(jsr, sizeof jsr, 0, txt, sizeof txt) == 6 && strstr(txt, "100000"), "disasm jsr");
 }
 
+static void test_tlcs900(void) {
+    const DpIsa *isa = dp_isa_tlcs900();
+    CHECK(!strcmp(isa->name, "tlcs900h"), "name");
+    CHECK(isa->ptr_width == 3 && !isa->big_endian, "24-bit little-endian pointers");
+    DpFlowInfo fi;
+    uint8_t nop[] = { 0x00 };
+    CHECK(isa->flow(nop, 0x200030, &fi) == 1 && fi.kind == DP_FLOW_SEQ && fi.fall, "nop");
+    uint8_t jp[] = { 0x1B, 0x00, 0x01, 0x20 };
+    CHECK(isa->flow(jp, 0x200000, &fi) == 4 && fi.kind == DP_FLOW_JUMP && !fi.fall && fi.target == 0x200100, "jp nn24");
+    uint8_t jr[] = { 0x66, 0x05 };
+    CHECK(isa->flow(jr, 0x200036, &fi) == 2 && fi.kind == DP_FLOW_COND && fi.fall && fi.target == 0x20003D && fi.cond == 6, "jr eq");
+    uint8_t call[] = { 0x1C, 0x34, 0x12 };
+    CHECK(isa->flow(call, 0x200000, &fi) == 3 && fi.kind == DP_FLOW_CALL && fi.call && fi.target == 0x001234, "call nn16");
+    uint8_t ret[] = { 0x0E };
+    CHECK(isa->flow(ret, 0x200000, &fi) == 1 && fi.kind == DP_FLOW_RET && !fi.fall, "ret");
+    uint8_t retcc[] = { 0xB2, 0xFB };
+    CHECK(isa->flow(retcc, 0x200000, &fi) == 2 && fi.kind == DP_FLOW_COND && fi.fall && fi.target < 0, "ret cc");
+    uint8_t djnz[] = { 0xC9, 0x1C, 0xF8 };
+    CHECK(isa->flow(djnz, 0x200030, &fi) == 3 && fi.kind == DP_FLOW_COND && fi.cond == 16, "djnz carries its own condition");
+    uint8_t jpmem[] = { 0xF1, 0x00, 0x40, 0xD1 };
+    CHECK(isa->flow(jpmem, 0x200000, &fi) == 4 && fi.kind == DP_FLOW_COND && fi.target == 0x4000, "jp cc,(abs) is conditional");
+    uint32_t param = 99;
+    uint8_t jpxhl[] = { 0xB3, 0xD6 };
+    CHECK(isa->flow(jpxhl, 0x200000, &fi) == 2 && fi.kind == DP_FLOW_INDIRECT && !fi.fall, "jp cc,(reg) is indirect");
+    CHECK(isa->table_dispatch(jpxhl, &param) == 1 && param == 3, "dispatch names the (xhl) slot");
+    uint8_t halt[] = { 0x05 };
+    CHECK(isa->flow(halt, 0x200000, &fi) == 1 && fi.halt, "halt");
+    uint8_t swi[] = { 0xF9 };
+    CHECK(isa->flow(swi, 0x200000, &fi) == 1 && fi.kind == DP_FLOW_CALL && fi.rst, "swi is a software call");
+    unsigned w = 0, bias = 0, off = 0;
+    CHECK(isa->sp_ret(ret, &w, &bias, &off) && w == 4 && off == 0, "ret pops 4 bytes");
+    uint32_t imm = 0;
+    uint8_t ldbc[] = { 0x31, 0x34, 0x12 };
+    CHECK(isa->imm_ptr(ldbc, &imm) && imm == 0x1234, "ld bc,#imm is a pointer load");
+    char txt[96];
+    CHECK(isa->disasm(jp, sizeof jp, 0, txt, sizeof txt) == 4 && strstr(txt, "200100"), "disasm jp");
+}
+
 int main(void) {
     test_z80();
     test_sm83();
     test_m6502();
     test_huc6280();
     test_68000();
+    test_tlcs900();
     printf(fails ? "dpisa: %d checks failed\n" : "dpisa: all checks passed\n", fails);
     return fails != 0;
 }

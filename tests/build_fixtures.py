@@ -1505,6 +1505,29 @@ def build_z80_family(out):
     with open(os.path.join(out, "fix_msx_portout.msx"), "wb") as f:
         f.write(m)
 
+def build_ngp(out):
+    # Neo Geo Pocket (TLCS-900H): header (entry $200030, mono), a byte store to
+    # work RAM ($4000), then jr eq forked both ways (each side halts).  The
+    # interpreter byte order applies: the (mem) operand bytes precede the op byte.
+    rom = bytearray(0x1000)
+    rom[0x00:0x1C] = b"DEEPEEL FIXTURE - NEO GEO POCKET..."[:28]
+    rom[0x1C:0x1F] = bytes([0x30, 0x00, 0x20])   # entry $200030 (LE24)
+    rom[0x20:0x22] = b"\x01\x00"                 # catalog word
+    rom[0x23] = 0x00                             # colour mode: mono (NGP)
+    rom[0x24:0x2A] = b"DPNGP"                    # the 12-byte name (printable run)
+    code = bytes([
+        0x21, 0x7F,              # $200030: ld a,$7F
+        0xF1, 0x00, 0x40, 0x41,  # $200032: ld ($4000),a (d16 mode, op byte last)
+        0x66, 0x05,              # $200036: jr eq,+5 -> $20003D (fork site; Z is clear at reset)
+        0x05,                    # $200038: halt (fall side)
+        0x00, 0x00, 0x00, 0x00,  # $200039-$20003C: padding (nops)
+        0x05,                    # $20003D: halt (jump side)
+    ])
+    rom[0x30:0x30 + len(code)] = code
+    with open(os.path.join(out, "fix_ngp_branch.ngp"), "wb") as f:
+        f.write(rom)
+
+
 def build_nes_pce(out):
     # NES NROM-256 (2 x 16 KiB PRG + 8 KiB CHR): LDA $9000 / BNE (both sides) /
     # STA $4014 (OAM DMA from page $80); vectors -> $8000
@@ -2110,6 +2133,7 @@ def build_movies(out):
     bk2("fix_bz_axis.bk2", "N64", "Mupen64Plus", "#P1 A|P1 B|#P1 X Axis|P1 Y Axis", ["|..|   0,   0|", "|A.|  12, -34|", "|.B| 127,-128|"])
 
 if __name__ == "__main__":
+    build_ngp(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_nes_pce(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_z80_family(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_movies(sys.argv[1] if len(sys.argv) > 1 else ".")

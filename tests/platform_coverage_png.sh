@@ -15,6 +15,9 @@ for jobs in 1 2; do
     if [ "$system" = md ]; then
         "$binary" "$system" explore "$rom" --play-frames 20 --play-sessions 2 --jobs "$jobs" \
             --map "$dir/map.png" >"$dir/log" 2>&1
+    elif [ "$system" = ngp ]; then
+        "$binary" "$system" explore "$rom" --jobs "$jobs" \
+            --map "$dir/map.png" >"$dir/log" 2>&1
     else
         "$binary" "$system" explore "$rom" --play 20 --sessions 2 --jobs "$jobs" \
             --map "$dir/map.png" >"$dir/log" 2>&1
