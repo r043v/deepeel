@@ -1115,3 +1115,7 @@ SoR (900 s, 2 workers, sans film) : 701 → 635 octets manquants. Code provisoir
 
 68000 seulement : dans une course de pointeurs 16 bits avec ≥ 4 entrées conformes, une adresse paire en ROM dont les huit premières instructions sont légales (ou qui atteint un terminateur) est une entrée (table SoR `$5C36`, entrée `$5D84`).
 SoR (900 s, 2 workers, sans film) : 635 → 473 octets manquants. Code provisoire, jamais « exécuté ». Observation de l'outil, pas une mesure du matériel.
+
+### SoR 1845S : RAM Z80 Gens contre noyau autour de 20 406 (21 novembre 2026)
+
+`DP_MD_DSY_ZRAM=1` ajoute un bloc `zram` (8 Kio de RAM Z80) aux dumps `DP_MD_DSY_VINT`. Contre le dump Gens-rr au V-int 20 405 (octets échangés par paires, comme renvoyés par `memory.readbyterange`), la RAM Z80 du noyau ne diffère que de 1 à 2 octets sur 8 192 aux V-int 20 403-20 406 : `$1FFD` (le drapeau lu par `btst #7,$A01FFD`) et `$002E`. Le programme Z80 est donc dans le même état logique des deux côtés ; l'écart est un décalage de phase (instant où le 68000 lit le drapeau), pas un état de pilote divergent. Observation de l'outil ; prochaine étape : trace PC/cycles du Z80 sur la poignée de main côté Gens et noyau.

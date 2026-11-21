@@ -154,12 +154,15 @@ static void vint_sample(void *u, const struct MdFull *m) {
               free(px); } } }
     // only the first machine (the primary replay), not shifted replays or forks
     if (getenv("DP_MD_VINT_LOG")) fprintf(stderr, "V n=%u frames=%u line=%u pc=%06x f62a=%02x\n", vint_n, (unsigned)m->frames, (unsigned)m->line, (unsigned)m->pc, m->ram[0xf62a]);
-    uint16_t nb = 2; uint8_t nl = 4; uint32_t len = 0x10000u, rl = 68, regs[17];
+    int zdump = getenv("DP_MD_DSY_ZRAM") != NULL;   // DP_MD_DSY_ZRAM=1: add the 8 KiB Z80 RAM block "zram" (Z80 handshake debugging)
+    uint16_t nb = zdump ? 3 : 2; uint8_t nl = 4; uint32_t len = 0x10000u, rl = 68, regs[17];
     for (int i = 0; i < 8; i++) { regs[i] = m->d[i]; regs[8 + i] = m->a[i]; }
     { uint32_t sp = m->a[7]; regs[16] = ((uint32_t)m->ram[(sp + 2) & 0xffff] << 24) | ((uint32_t)m->ram[(sp + 3) & 0xffff] << 16) | ((uint32_t)m->ram[(sp + 4) & 0xffff] << 8) | m->ram[(sp + 5) & 0xffff]; }   // the interrupted PC (pushed by the interrupt), what Gens reports at the vector
     fwrite(&vint_n, 4, 1, vint_dsy); fwrite(&nb, 2, 1, vint_dsy); fwrite(&nl, 1, 1, vint_dsy); fwrite("wram", 1, 4, vint_dsy);
     fwrite(&len, 4, 1, vint_dsy); fwrite(m->ram, 1, len, vint_dsy);
-    fwrite(&nl, 1, 1, vint_dsy); fwrite("regs", 1, 4, vint_dsy); fwrite(&rl, 4, 1, vint_dsy); fwrite(regs, 4, 17, vint_dsy); fflush(vint_dsy);
+    fwrite(&nl, 1, 1, vint_dsy); fwrite("regs", 1, 4, vint_dsy); fwrite(&rl, 4, 1, vint_dsy); fwrite(regs, 4, 17, vint_dsy); 
+    if (zdump) { uint32_t zl = 0x2000u; fwrite(&nl, 1, 1, vint_dsy); fwrite("zram", 1, 4, vint_dsy); fwrite(&zl, 4, 1, vint_dsy); fwrite(m->zram, 1, zl, vint_dsy); }
+    fflush(vint_dsy);
     vint_n++;
 }
 
