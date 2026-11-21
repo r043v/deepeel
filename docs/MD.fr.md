@@ -1076,3 +1076,15 @@ Fenêtre V-int 19 550-19 580 contre `e_195.dsy` (Gens), WRAM hors `$FE70-$FE90`,
 ### SoR 1845S : le Z80 est positionné au début de l'instruction (21 novembre 2026)
 
 Lecture des sources de Gens-rr (`Gens.cpp`, `Mem_M68k.asm`) : le Z80 n'est exécuté qu'en fin de ligne (`z80_Exec(Cycles_Z80)` si l'état vaut 3, sinon `z80_Set_Odo`) et sur une requête de bus (`A11100`) ; la position est calculée avec l'odomètre de Starscream, qui dans une écriture vaut le **début** de l'instruction (m0boy dépense le coût de l'instruction avant de l'exécuter, donc voyait sa fin). `DP_MD_GENS_Z80START=1` (m0boy, dans le profil `DP_MD_GENS`) ramène la requête/relâchement du bus au début de l'instruction et fixe l'odomètre Z80 exactement sur un saut. Observations de l'outil, SoR 1845S, échantillons tous les 25 V-int (10 850–25 650) : propres (≤ 8 octets d'écart) 340 → 377 sur 581 ; l'épisode 12 150–12 250 et la rupture 19 559 disparaissent ; la première rupture durable passe à 20 407 (objets `$B8xx`, `$FA00` à 1 chez Gens, 0 chez nous). Essais négatifs : `DP_MD_GENS_Z80LINE=1` (Z80 rattrapé en fin de ligne) corrige 12 150 mais rompt à 13 625, seul ou avec `START` ; `DP_MD_GENS_Z80IRQ=1` (/INT à 60 cycles Z80 dans la ligne) n'a aucun effet. Sonic 1 1843S, fenêtre 37 280–37 330 contre `g37w.dsy` (WRAM hors `$AA00-ABFF`, `$FC00-FFFF`, registres 0-67) : profil complet `DP_MD_GENS=1` (ADDQ et `START` compris) identique sur les 51 échantillons, comme l'ancien réglage ; la desync 37 31x notée plus haut n'apparaît plus.
+
+### SoR 1845S, rupture 20 407 : la poignée de main Z80 (21 novembre 2026)
+
+Traces de la trame 20 406 des deux côtés (Gens `registerexec` sur les PC vus côté noyau, `DP_MD_PCLOG`). Les flots de PC sont identiques jusqu'à la boucle
+de poignée de main du pilote sonore (`$73298` : demande de bus, attente d'octroi, `btst #7,$A01FFD`, relâche, `nop`×3, nouvelle demande) : le noyau refait
+des passes là où Gens sort. Nombre de passages en `$732b2` par V-int (Gens / noyau) : 20 400 : 43/44, 20 402 : 13/13, 20 404 : 14/14, 20 405 : 4/10 (phase du V-int),
+20 406 : 20/23, 20 407 : 77/90, 20 408 : 61/74 ; le rapport passe d'environ 1,0 à 1,17–1,21 à partir de 20 406. Côté Gens le drapeau `$1FFD` bit 7 est lu à 1
+dans la quasi-totalité des passes (16 sur 20 en 20 406), le noyau en a donc 3 de plus par trame : il faut plus de passes pour que le Z80 efface le drapeau, soit
+un Z80 qui progresse moins vite par relâche (instruction Z80 plus coûteuse, ou durée libre par passe plus courte) pendant la routine en cours. Cela coûte ~68 k
+cycles 68000 par trame et renvoie la fin du travail après le V-int, ce qui est la rupture 20 407 (marge ≤ 1 itération déjà notée à 20 267). Piste suivante :
+trace Z80 (PC et cycles de l'octet `$1FFD`) des deux côtés pour comparer le coût par instruction du pilote ; pas de correction retenue.
+Observations de l'outil, pas du matériel.
