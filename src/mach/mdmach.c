@@ -101,7 +101,7 @@ static void wlog(MdFull *m, uint32_t a, unsigned sz, uint32_t v) {
     if (!init) { init = 1; const char *e = getenv("DP_MD_WLOG"), *g = getenv("DP_MD_WLOG_V");
         if (e && sscanf(e, "%x:%x", &lo, &hi) == 2) { va = 0; vb = ~0u; if (g) sscanf(g, "%u:%u", &va, &vb); } else hi = 0; }
     if (!hi || m != vint_owner || a < lo || a > hi || vint_n < va || vint_n > vb) return;
-    fprintf(stderr, "W v=%u frames=%u line=%u pc=%06x a=%06x sz=%u v=%0*x\n", vint_n, (unsigned)m->frames, (unsigned)m->line,
+    fprintf(stderr, "W v=%u frames=%u line=%u cyc=%u pc=%06x a=%06x sz=%u v=%0*x\n", vint_n, (unsigned)m->frames, (unsigned)m->line, (unsigned)m->cycles,
             (unsigned)cur_ipc, (unsigned)a, sz, (int)sz * 2, (unsigned)v);
 }
 static void t_wr(void *u, MdFull *m, uint32_t a, unsigned sz, uint32_t v) {
