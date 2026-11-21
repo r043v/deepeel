@@ -167,11 +167,11 @@ void dp_mdmach_reset(DpMdMach *d) {
     /* ClownMDEmu's clock (exact, phase 3) keeps real Sonic 1 films in step for 13 800+ frames where the 3420-master
      * default loses a frame near 1423 (docs/MD.fr.md); still overridable from the environment. */
     /* DP_MD_GENS=1: Gens-rr compatibility profile for TAS films recorded on Gens (not hardware fidelity): 488-cycle lines (3416 master),
-     * Starscream's fixed bit-op/CLR/TAS/DIV times and ADDQ.W/.L #n,An at 4 cycles (SUBQ stays 8), Gens' DMA and input latch.
+     * Starscream's fixed bit-op/CLR/TAS/DIV times and ADDQ.W/.L #n,An at 4 cycles (SUBQ stays 8), Gens' DMA and input latch, and the Z80 position at a bus request taken at the instruction start (Starscream odometer).
      * Each knob stays overridable. */
     if (getenv("DP_MD_GENS")) {
         setenv("DP_MD_CLOWN_CLOCK", "3416", 0); setenv("DP_MD_CLOCK_OFF", "0", 0); setenv("DP_MD_PAD_LINE0", "1", 0); setenv("DP_MD_GENS_DMA", "1", 0);
-        setenv("DP_MD_POWERON", "gens", 0); setenv("MD_IRQ_IMMEDIATE", "1", 0); setenv("DP_MD_STAR_TIME", "1", 0); setenv("DP_MD_STAR_DIV", "1", 0); setenv("DP_MD_STAR_ADDQ", "1", 0);
+        setenv("DP_MD_POWERON", "gens", 0); setenv("MD_IRQ_IMMEDIATE", "1", 0); setenv("DP_MD_STAR_TIME", "1", 0); setenv("DP_MD_STAR_DIV", "1", 0); setenv("DP_MD_STAR_ADDQ", "1", 0); setenv("DP_MD_GENS_Z80START", "1", 0);
     }
     setenv("DP_MD_CLOWN_CLOCK", "exact", 0); setenv("DP_MD_CLOCK_OFF", "3", 0);
     md_full_reset(d->m);
