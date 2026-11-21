@@ -6,7 +6,7 @@
 # Environment: DEEPEEL_DATA (scratch/data disk), BIZHAWK_DIR, PCE_REF_CORE (pce|pcehawk), WATCH_THIRD=1 (md: ClownMDEmu live tile too; pce: the other
 # BizHawk core as a third tile), BIZHAWK_INPUT_DELAY (k idle frames before the movie on the BizHawk side, for a slower boot), WATCH_FRAMES (stop after N frames), BIZHAWK_DSY_RANGE (default 0-0: no memory dump).
 set -eu
-[ $# -ge 3 ] || { echo "usage: $0 md|pce|nes|sms ROM MOVIE..." >&2; exit 2; }
+[ $# -ge 3 ] || { echo "usage: $0 md|pce|nes|sms|ngp ROM MOVIE..." >&2; exit 2; }
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 sys=$1; rom=$2; shift 2
 D=${DEEPEEL_DATA:-/run/media/m/Windows/deepeel-data}
@@ -19,6 +19,7 @@ case $sys in
   pce) core=pce;  wbx=turbo; name=; extra= ;;
   nes) core=nes;  wbx=;      name="BizHawk NesHawk"; extra= ;;
   sms) core=sms;  wbx=;      name="BizHawk SMSHawk"; extra= ;;
+  ngp) core=ngp;  wbx=ngp;   name="BizHawk NeoPop";  extra="--replay-only --no-sessions --no-event-probes --no-tas-ckpt --max-total 0" ;;
   *) echo "watch_bizhawk: unknown system $sys" >&2; exit 2 ;;
 esac
 extra="$extra ${WATCH_EXTRA:-}"
@@ -59,7 +60,7 @@ P
     run_bh "$other" "$feed2" "$TMPDIR/watch_$sys.log2"; bhpid2=$!; ref2=$feed2
   fi
   # (the movie path may hold spaces: no unquoted option string; $extra and the play count hold none)
-  if [ "$sys" = md ]; then play=; else play="--play $n"; fi
+  if [ "$sys" = md ] || [ "$sys" = ngp ]; then play=; else play="--play $n"; fi
   if [ "$sys" = md ] && [ "${WATCH_THIRD:-0}" = 1 ]; then   # md third tile: deepeel's own live ClownMDEmu tile (tools/md_ref_live.sh) plus BizHawk
     env DEEPEEL_WATCH_FRAMES="${WATCH_FRAMES:-}" DEEPEEL_REF2_FEED="$feed" DEEPEEL_REF2_NAME="$refname" "$root/build/deepeel" "$sys" explore "$rom" --tas "$film" --watch 60 $extra || true
     kill $bhpid 2>/dev/null || true; continue

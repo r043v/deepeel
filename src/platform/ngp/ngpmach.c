@@ -66,10 +66,18 @@ void dp_ngp_close(void) {
 
 int dp_ngp_step(void) {
     machine.cpu.fault = 0;
+    // the step path never enters ngp_run_frame: count the V-INT boundary here,
+    // and clear v_int like the next run_frame iteration does
+    if (machine.cpu.halted) {   // HALT waits for the next line: tick it so the timers and the V-INT keep running
+        ngp_tick(NGP_LINE_TICKS);
+        if (machine.v_int) { machine.frames++; machine.v_int = 0; }
+        return machine.cpu.fault ? 0 : 1;
+    }
     int32_t cycles = ngp_step();
-    if (machine.cpu.fault || machine.cpu.halted) return 0;   // a wild fetch, a faulted opcode or HALT: no progress
+    if (machine.cpu.fault) return 0;   // a wild fetch, a faulted opcode: no progress
     ngp_tick((uint32_t)cycles);
-    return machine.cpu.fault ? 0 : 1;
+    if (machine.v_int) { machine.frames++; machine.v_int = 0; }
+    return 1;
 }
 
 uint32_t dp_ngp_pc(void) { return machine.cpu.pc; }

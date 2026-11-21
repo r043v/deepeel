@@ -23,6 +23,7 @@ using BizHawk.Emulation.Cores.Consoles.NEC.PCE;
 using BizHawk.Emulation.Cores.PCEngine;
 using BizHawk.Emulation.Cores.Nintendo.NES;
 using BizHawk.Emulation.Cores.Waterbox;
+using BizHawk.Emulation.Cores.Consoles.SNK;
 using SMSHawk = BizHawk.Emulation.Cores.Sega.MasterSystem.SMS;
 using BizHawk.Tests.Testroms;
 
@@ -80,8 +81,10 @@ namespace BizhawkDsy
 						Comm = coreComm, DeterministicEmulationRequested = true, Game = GameInfo.NullInstance,
 						Roms = { new PceRom(rom) }, Settings = new(), SyncSettings = new(),
 					});
+				case "ngp":   // NeoPop (Mednafen, waterbox), the BizHawk NGP core; the movie's .ngc extension selects the Color BIOS path
+					return new NeoGeoPort(coreComm, rom, GameInfo.NullInstance, new(), new(), deterministic: true, ".ngc");
 				default:
-					Console.Error.WriteLine("unknown system " + system + " (gen | sms | nes | pce | pcehawk)");
+					Console.Error.WriteLine("unknown system " + system + " (gen | sms | nes | pce | pcehawk | ngp)");
 					Environment.Exit(2);
 					return null;
 			}
@@ -90,6 +93,7 @@ namespace BizhawkDsy
 		private static void Main(string[] args)
 		{
 			if (args.Length < 4) { Console.Error.WriteLine("usage: bizhawk_dsy SYSTEM ROM masks.bin out.dsy [FRAMES]"); Environment.Exit(2); }
+			var system = args[0];
 			var rom = File.ReadAllBytes(args[1]);
 			var masks = File.ReadAllBytes(args[2]);
 			// BIZHAWK_INPUT_DELAY=k: the movie starts k frames late (idle input), for a core whose boot is slower than the one that
@@ -99,8 +103,9 @@ namespace BizhawkDsy
 			using var fe = new DummyFrontend((efp, config, coreComm) => (Make(args[0], rom, coreComm, efp), 0));
 			var def = fe.Core.ControllerDefinition;
 			var names = new string[8];
-			for (int i = 0; i < 8; i++)   // PC Engine names: II = B, I = A, Run = Start
-				names[i] = def.BoolButtons.FirstOrDefault(b => b.StartsWith("P1 ") && (b.EndsWith(" " + (args[0] == "gen" && i == 6 ? "C" : Words[i])) || ((args[0] == "pce" || args[0] == "pcehawk") && b.EndsWith(" " + (i == 4 ? (args[0] == "pcehawk" ? "B2" : "II") : i == 5 ? (args[0] == "pcehawk" ? "B1" : "I") : i == 7 ? "Run" : "\0")))));
+			var pre = args[0] == "ngp" ? "" : "P1 ";   // NGP: the NeoPop controller has no port prefix
+			for (int i = 0; i < 8; i++)   // PC Engine names: II = B, I = A, Run = Start; NGP: bit 6 = Option
+				names[i] = def.BoolButtons.FirstOrDefault(b => b.StartsWith(pre) && (b.EndsWith(" " + (args[0] == "gen" && i == 6 ? "C" : args[0] == "ngp" && i == 6 ? "Option" : Words[i])) || ((args[0] == "pce" || args[0] == "pcehawk") && b.EndsWith(" " + (i == 4 ? (args[0] == "pcehawk" ? "B2" : "II") : i == 5 ? (args[0] == "pcehawk" ? "B1" : "I") : i == 7 ? "Run" : "\0")))));
 			Console.Error.WriteLine("buttons: " + string.Join(", ", names.Select((n, i) => Words[i] + "=" + (n ?? "-"))));
 			var controller = new SimpleController(def);
 			var domains = fe.CoreAsMemDomains;
@@ -108,6 +113,18 @@ namespace BizhawkDsy
 			var used = new HashSet<string>();
 			foreach (var d in domains)
 				if (Blocks.TryGetValue(d.Name, out var blk) && used.Add(blk)) picked.Add((blk, d));
+			// NGP: deepeel declares its work RAM as the 12 KiB at $4000; NeoPop's 16 KiB "RAM" domain is that CPU window
+			// ($4000-$7FFF), so the game's WRAM starts at domain offset 0 (BIZHAWK_NGP_WRAM_BASE/LEN to override)
+			MemoryDomain ngpDom = null;
+			long ngpBase = 0x0000, ngpLen = 0x3000;
+			if (system == "ngp")
+			{
+				if (long.TryParse(Environment.GetEnvironmentVariable("BIZHAWK_NGP_WRAM_BASE"), out var b2)) ngpBase = b2;
+				if (long.TryParse(Environment.GetEnvironmentVariable("BIZHAWK_NGP_WRAM_LEN"), out var l2)) ngpLen = l2;
+				ngpDom = domains.FirstOrDefault(d => (d.Name.Contains("RAM") || d.Name.Contains("ram")) && d.Size >= ngpBase + ngpLen && d.Name == "RAM");
+				if (ngpDom == null) { Console.Error.WriteLine("ngp: no RAM domain covering $" + ngpBase.ToString("x") + "+$" + ngpLen.ToString("x") + "; domains: " + string.Join(", ", domains.Select(d => d.Name + "(" + d.Size + ")"))); Environment.Exit(2); }
+				Console.Error.WriteLine("ngp: wram $" + ngpBase.ToString("x") + "+$" + ngpLen.ToString("x") + " from domain '" + ngpDom.Name + "' (" + ngpDom.Size + ")");
+			}
 			Console.Error.WriteLine("blocks: " + string.Join(", ", picked.Select(p => p.block + "<-" + p.dom.Name + "(" + p.dom.Size + ")")));
 			// BIZHAWK_DSY_RANGE=lo-hi (hex, inclusive): only that window of every block is read, the rest stays zero
 			long lo = 0, hi = long.MaxValue;
@@ -147,6 +164,16 @@ namespace BizhawkDsy
 				if (feed != null && syncFeed) while (f + 1 > dl && feed.ReadUInt32(28) + 2 < (uint)(f + 1 - dl)) Thread.Yield();   // two frames of slack: the lockstep ping-pong with 1 ms sleeps capped the pair near 7 frames/s   // replay sync: frame f+1 only once deepeel has published it
 				var tf = DateTime.UtcNow;
 				fe.Core.FrameAdvance(controller, true, false);
+				// BIZHAWK_PPM_DIR=<dir>: write the frame as <dir>/f000001.ppm (binary P6, native resolution), for pixel comparison with deepeel's --save-frames
+				var ppmDir = Environment.GetEnvironmentVariable("BIZHAWK_PPM_DIR");
+				if (ppmDir != null && f + 1 - dl >= 0)
+				{
+					var vb2 = vp.GetVideoBuffer(); int bw2 = vp.BufferWidth, bh2 = vp.BufferHeight;
+					var ms2 = new MemoryStream(); var tw = new StreamWriter(ms2) { AutoFlush = false };
+					tw.Write("P6\n" + bw2 + " " + bh2 + "\n255\n"); tw.Flush();
+					foreach (var p in vb2) { ms2.WriteByte((byte)((p >> 16) & 0xFF)); ms2.WriteByte((byte)((p >> 8) & 0xFF)); ms2.WriteByte((byte)(p & 0xFF)); }
+					File.WriteAllBytes(System.IO.Path.Combine(ppmDir, "f" + (f + 1).ToString("D6") + ".ppm"), ms2.ToArray());
+				}
 				if (feed != null)
 				{
 					int bw = vp.BufferWidth, bh = vp.BufferHeight, sx = (bw + 425) / 426, sy = (bh + 261) / 262, ow = bw / sx, oh = bh / sy;
@@ -162,8 +189,16 @@ namespace BizhawkDsy
 					var due = syncFeed ? TimeSpan.Zero : t0.AddSeconds((f + 1) / (double)feedFps) - DateTime.UtcNow;
 					if (due > TimeSpan.Zero) Thread.Sleep(due);
 				}
-				w.Write((uint)(f + 1)); w.Write((ushort)picked.Count);
-				foreach (var (blk, dom) in picked)
+				w.Write((uint)(f + 1)); w.Write((ushort)(system == "ngp" ? 1 : picked.Count));
+				if (system == "ngp")
+				{
+					var buf = new byte[ngpLen];
+					if (lo == 0 && hi >= ngpLen) ngpDom.BulkPeekByte(ngpBase.RangeToExclusive(ngpBase + ngpLen), buf);
+					else for (long a = 0; a < ngpLen; a++) buf[a] = ngpDom.PeekByte(ngpBase + a);
+					var bn = Encoding.ASCII.GetBytes("wram");
+					w.Write((byte)bn.Length); w.Write(bn); w.Write((uint)ngpLen); w.Write(buf);
+				}
+				else foreach (var (blk, dom) in picked)
 				{
 					var bn = Encoding.ASCII.GetBytes(blk);
 					w.Write((byte)bn.Length); w.Write(bn); w.Write((uint)dom.Size);

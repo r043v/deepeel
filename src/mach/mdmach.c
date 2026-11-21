@@ -153,7 +153,7 @@ static void vint_sample(void *u, const struct MdFull *m) {
                   fclose(sf); }
               free(px); } } }
     // only the first machine (the primary replay), not shifted replays or forks
-    if (getenv("DP_MD_VINT_LOG")) fprintf(stderr, "V n=%u frames=%u line=%u pc=%06x f62a=%02x\n", vint_n, (unsigned)m->frames, (unsigned)m->line, (unsigned)m->pc, m->ram[0xf62a]);
+    if (getenv("DP_MD_VINT_LOG")) fprintf(stderr, "V n=%u frames=%u line=%u fc=%u pc=%06x f62a=%02x\n", vint_n, (unsigned)m->frames, (unsigned)m->line, (unsigned)m->frame_cycles, (unsigned)m->pc, m->ram[0xf62a]);
     int zdump = getenv("DP_MD_DSY_ZRAM") != NULL;   // DP_MD_DSY_ZRAM=1: add the 8 KiB Z80 RAM block "zram" (Z80 handshake debugging)
     uint16_t nb = zdump ? 3 : 2; uint8_t nl = 4; uint32_t len = 0x10000u, rl = 68, regs[17];
     for (int i = 0; i < 8; i++) { regs[i] = m->d[i]; regs[8 + i] = m->a[i]; }

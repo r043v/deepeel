@@ -15,6 +15,7 @@
 #include <sys/wait.h>
 #include "explore/md_ref_feed.h"
 #include "core/md5.h"
+#include "core/sha1.h"
 #include "core/cart.h"
 #include "core/cart_md.h"
 #include "core/gbs.h"
@@ -1597,8 +1598,10 @@ static int cmd_ngp(int argc, char **argv) {
         kcfg.hooks = dp_machine_ngp_hooks();
         kcfg.snap_cov = argv_cov(argc, argv);   // periodic coverage snapshot next to the final one
         uint32_t entry[16]; size_t ne = 0;
-        int kwatch = 0; const char *kdump = NULL;
+        int kwatch = 0; const char *kdump = NULL; const char *ktas = NULL; int tas_any_rom = 0;
         for (int i = 4; i < argc && !rc; i++) {
+            if (!strcmp(argv[i], "--tas") && i + 1 < argc) { ktas = argv[++i]; continue; }   // a BizHawk .bk2 replayed as the first path
+            if (!strcmp(argv[i], "--tas-any-rom")) { tas_any_rom = 1; continue; }
             if (!strcmp(argv[i], "--entry") && i + 1 < argc) {   // an extra root, a 24-bit cartridge address
                 if (ne >= 16) { fprintf(stderr, "deepeel: at most 16 --entry\n"); rc = 2; break; }
                 entry[ne++] = (uint32_t)strtoul(argv[++i], NULL, 0); continue;
@@ -1629,6 +1632,66 @@ static int cmd_ngp(int argc, char **argv) {
         }
         DpMachine *km = rc ? NULL : dp_machine_ngp();
         if (km) dp_machine_ngp_source(km, data, size);
+        if (ktas && !rc) {   // NGP pad (Up Down Left Right A B Option) -> kernel bits; the Power column is ignored
+            DpBzMovie bz; memset(&bz, 0, sizeof bz);
+            size_t rn = 0; uint8_t *rd = nes_read_file(ktas, &rn);
+            char terr[160] = "";
+            if (!rd || !dp_bz_load(rd, rn, &bz, terr, sizeof terr)) {
+                fprintf(stderr, "deepeel: --tas: %s\n", terr[0] ? terr : "cannot read the movie");
+                free(rd); rc = 1;
+            } else if (strcasecmp(bz.platform, "NGP")) {
+                fprintf(stderr, "deepeel: --tas: movie platform %s, not NGP\n", bz.platform);
+                dp_bz_free(&bz); free(rd); rc = 1;
+            } else {
+                int up = dp_bz_find(&bz, "Up"), dn = dp_bz_find(&bz, "Down"), lf = dp_bz_find(&bz, "Left"),
+                    rt = dp_bz_find(&bz, "Right"), a = dp_bz_find(&bz, "A"), b = dp_bz_find(&bz, "B"),
+                    op = dp_bz_find(&bz, "Option");
+                if (up < 0 || dn < 0 || lf < 0 || rt < 0 || a < 0 || b < 0 || op < 0) {
+                    fprintf(stderr, "deepeel: --tas: movie LogKey lacks an NGP pad column\n");
+                    dp_bz_free(&bz); free(rd); rc = 1;
+                } else {
+                    uint8_t sha[20]; char hex[41];
+                    dp_sha1(raw, (size_t)(data - raw) + size, sha);   // digest of the file as loaded (the header SHA1 covers the whole dump)
+                    for (int i = 0; i < 20; i++) snprintf(hex + i * 2, 3, "%02X", sha[i]);
+                    if (strcasecmp(hex, bz.sha1) && !tas_any_rom) {   // another revision desyncs by construction
+                        fprintf(stderr, "deepeel: TAS %s refused: recorded on another ROM (movie %s, file %s); --tas-any-rom forces it\n", ktas, bz.sha1, hex);
+                        dp_bz_free(&bz); free(rd); rc = 1;
+                    } else {
+                        if (!strcasecmp(hex, bz.sha1)) fprintf(stderr, "deepeel: TAS %s: ROM identity verified (%s)\n", ktas, bz.sha1);
+                        uint32_t *kmasks = malloc((bz.nframes ? bz.nframes : 1) * sizeof *kmasks);
+                        if (!kmasks) rc = 1;
+                        else {
+                            for (uint32_t f = 0; f < bz.nframes; f++) {
+                                uint32_t k = 0;
+                                if (dp_bz_held(&bz, f, up)) k |= DP_IN_UP;
+                                if (dp_bz_held(&bz, f, dn)) k |= DP_IN_DOWN;
+                                if (dp_bz_held(&bz, f, lf)) k |= DP_IN_LEFT;
+                                if (dp_bz_held(&bz, f, rt)) k |= DP_IN_RIGHT;
+                                if (dp_bz_held(&bz, f, a)) k |= DP_IN_B1;
+                                if (dp_bz_held(&bz, f, b)) k |= DP_IN_B2;
+                                if (dp_bz_held(&bz, f, op)) k |= DP_IN_START;   // Option
+                                kmasks[f] = k;
+                            }
+                            kcfg.tas_masks32 = kmasks;
+                            kcfg.tas_frames = bz.nframes;
+                        }
+                        if (rc) { dp_bz_free(&bz); free(rd); }
+                        else if (getenv("DEEPEEL_TAS_MASKS")) {   // the movie as lr_dsy masks (U D L R B A Option -), for the BizHawk reference side
+                            FILE *mf = fopen(getenv("DEEPEEL_TAS_MASKS"), "wb");
+                            if (mf) {
+                                for (uint32_t f = 0; f < bz.nframes; f++) {
+                                    uint32_t k = kcfg.tas_masks32[f]; uint8_t r = (uint8_t)(k & 0x0F);
+                                    if (k & DP_IN_B2) r |= 0x10; if (k & DP_IN_B1) r |= 0x20; if (k & DP_IN_START) r |= 0x40;
+                                    fputc(r, mf);
+                                }
+                                fclose(mf);
+                            }
+                            dp_bz_free(&bz); free(rd);
+                        } else { dp_bz_free(&bz); free(rd); }
+                    }
+                }
+            }
+        }
         // the main thread boots its own machine first: the start state (the
         // header's entry, the reset PC) is saved from it before the workers clone
         if (km && km->attach && !km->attach(km)) { km->close(km); km = NULL; }

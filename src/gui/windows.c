@@ -1,3 +1,4 @@
+#include <signal.h>
 // windows.c: the SDL2 windows of the explorer: the framebuffer watch (--watch) and the
 // live ROM map (--mapwin). Both read published/live data only and never drive exploration.
 #include "fbwatch.h"
@@ -93,7 +94,10 @@ static void *fb_main(void *arg) {
     while (!atomic_load(&fb_quit)) {
         SDL_Event e;
         while (SDL_PollEvent(&e))
-            if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)) atomic_store(&fb_quit, 1);
+            if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)) {
+                atomic_store(&fb_quit, 1);
+                kill(getpid(), SIGINT);   // closing the window ends the run like Ctrl-C (report written), not just the display
+            }
         int W = 640, H = 480;
         SDL_GetRendererOutputSize(ren, &W, &H);
         int w, h;
