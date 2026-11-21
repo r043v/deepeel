@@ -878,6 +878,23 @@ static int chain_plausible(DpMachine *m, const DpIsa *isa, uint32_t pc) {
     }
     return 0;
 }
+// B11 helper: eight consecutive legal instructions (or a terminator first): a routine too long to reach its terminator inside chain_short's window.
+static int chain_legal(DpMachine *m, const DpIsa *isa, uint32_t pc) {
+    for (unsigned n = 0; n < 8; n++) {
+        uint8_t b[10]; for (unsigned i = 0; i < sizeof b; i++) b[i] = m->fetch(m, pc + i);
+        DpFlowInfo f; memset(&f, 0, sizeof f);
+        if (!isa->flow(b, pc, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL) return 0;
+        if (f.kind == DP_FLOW_RET || f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_INDIRECT) return 1;
+        pc += f.length;
+    }
+    return 1;
+}
+// B11 helper: the address is a bare transfer stub (`jmp d16(pc)` / `bra` as the very first instruction): an entry of a table the dispatcher proves.
+static int chain_stub(DpMachine *m, const DpIsa *isa, uint32_t pc) {
+    uint8_t b[10]; for (unsigned i = 0; i < sizeof b; i++) b[i] = m->fetch(m, pc + i);
+    DpFlowInfo f; memset(&f, 0, sizeof f);
+    return isa->flow(b, pc, &f) && f.length && f.kind == DP_FLOW_JUMP;
+}
 static void closure_walk(DpCoreResult *r, DpMachine *m, const DpIsa *isa, uint32_t root, RegWalk *rw) {
     ClosureView v = { m, NULL, { 0, 0, 0, 0 } };
     closure_run(r, &v, isa, root, 0, 1, NULL, 0, CLOSURE_INSTR, rw);
@@ -3328,9 +3345,19 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
             unsigned op = (unsigned)(wm0->fetch(wm0, a) << 8 | wm0->fetch(wm0, a + 1));
             if ((op & 0xF1FFu) != 0x41FAu) continue;   // lea d16(pc),An
             unsigned an = (op >> 9) & 7u; int jmp = 0;
-            for (uint32_t k = a + 4; k < a + 24 && k + 2 <= lim; k += 2) {
-                unsigned w = (unsigned)(wm0->fetch(wm0, k) << 8 | wm0->fetch(wm0, k + 1));
-                if (w == (0x4ED0u | an) || w == (0x4E90u | an)) { jmp = 1; break; }
+            uint32_t from = a + 4;
+            for (unsigned hop = 0; hop < 2 && !jmp; hop++) {   // the lea may hand over to a shared dispatcher by `jmp d16(pc)` / `bra.w` (SoR $25B8 -> $25A4: move.w (a1,d0.w),d0 ; jmp (a1,d0.w))
+                for (uint32_t k = from; k < from + 24 && k + 2 <= lim; k += 2) {
+                    unsigned w = (unsigned)(wm0->fetch(wm0, k) << 8 | wm0->fetch(wm0, k + 1));
+                    if (w == (0x4ED0u | an) || w == (0x4E90u | an) || w == (0x4EF0u | an) || w == (0x4EB0u | an)) { jmp = 1; break; }
+                }
+                if (jmp) break;
+                unsigned h = (unsigned)(wm0->fetch(wm0, from) << 8 | wm0->fetch(wm0, from + 1));
+                if (h != 0x4EFAu && h != 0x6000u) break;
+                int16_t hd = (int16_t)(wm0->fetch(wm0, from + 2) << 8 | wm0->fetch(wm0, from + 3));
+                uint32_t nt = (uint32_t)((int32_t)from + 2 + hd);
+                if (nt < 0x200 || nt + 24 > lim || (nt & 1u)) break;
+                from = nt;
             }
             if (!jmp) continue;
             int16_t d = (int16_t)(wm0->fetch(wm0, a + 2) << 8 | wm0->fetch(wm0, a + 3));
@@ -3340,7 +3367,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
             for (uint32_t t = base; t + 2 <= lim && n < 64 && t < minv; t += 2) {
                 int16_t o = (int16_t)(wm0->fetch(wm0, t) << 8 | wm0->fetch(wm0, t + 1));
                 uint32_t v = (uint32_t)((int32_t)base + o);
-                if (o <= 0 || v < 0x200 || v >= lim || (v & 1u) || wm0->rom_index(wm0, v) < 0 || !chain_short(wm0, m->isa, v)) break;
+                if (o <= 0 || v < 0x200 || v >= lim || (v & 1u) || wm0->rom_index(wm0, v) < 0 || !(chain_short(wm0, m->isa, v) || chain_stub(wm0, m->isa, v) || chain_legal(wm0, m->isa, v))) break;
                 if (v < minv) minv = v;
                 tg[n++] = v;
             }

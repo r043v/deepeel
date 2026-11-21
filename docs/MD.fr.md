@@ -1096,3 +1096,12 @@ dont les cibles sont précédées d'un en-tête de données (`$519AC`, `$51BEA`,
 Règle ajoutée (`core.c`, course B11 large) : dans une course de pointeurs 32 bits déjà établie (≥ 4 entrées conformes à la forme), tout pointeur pair dans la ROM est une entrée (marche non fiable,
 code provisoire, jamais « exécuté »). Résultat 0.425.0 : 280 octets manquants (−102), aucun octet exécuté nouveau hors IDA (1 863 inchangé). Reste surtout du code orphelin sans référence
 (`$6374`, 78 octets, `$6422`, `$5FC4A`) : aucune référence statique dans la ROM (ni pointeur, ni `bsr`/`jmp`/`lea`), limite technique. Observations de l'outil, pas du matériel.
+
+### Couverture SoR : tables relatives derrière un répartiteur partagé (0.426.0, 21 novembre 2026)
+
+SoR contre `sor_ref.cov`, 900 s, 2 workers sans film : 0.425.0 → 825 octets manquants. Trois élargissements de la règle B11 « tables relatives » (`lea d16(pc),An` + saut indexé) :
+(1) le `lea` peut passer la main à un répartiteur partagé par `jmp d16(pc)` / `bra.w` (≤ 2 sauts) ; (2) `jmp/jsr (d8,An,Xn)` compte comme saut par la table ; (3) une entrée peut être un simple stub
+`jmp`/`bra` (`chain_stub`) ou une routine trop longue pour atteindre un terminateur (huit instructions légales, `chain_legal`). Exemple : table `$25C0` (entrées `$25DA`, `$25FE`, `$2606`, …).
+Résultat : 701 octets manquants (−124), marches non fiables donc code provisoire, jamais « exécuté ». Sonic 1 : 418 octets manquants inchangés, tous du code orphelin sans aucune
+référence statique dans la ROM (`$14C4E`, `$2C76`, `$3FD8`, `$6BB0`, `$6A82`, `$132D4`, `$626C`, `$1BB9C` : ni pointeur 32 bits, ni `bsr`/`bra`/`jmp`/`lea` pc-relatif) — limite technique justifiée.
+Observations de l'outil, pas du matériel.
