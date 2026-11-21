@@ -1105,3 +1105,8 @@ SoR contre `sor_ref.cov`, 900 s, 2 workers sans film : 0.425.0 → 825 octets ma
 Résultat : 701 octets manquants (−124), marches non fiables donc code provisoire, jamais « exécuté ». Sonic 1 : 418 octets manquants inchangés, tous du code orphelin sans aucune
 référence statique dans la ROM (`$14C4E`, `$2C76`, `$3FD8`, `$6BB0`, `$6A82`, `$132D4`, `$626C`, `$1BB9C` : ni pointeur 32 bits, ni `bsr`/`bra`/`jmp`/`lea` pc-relatif) — limite technique justifiée.
 Observations de l'outil, pas du matériel.
+
+### Couverture SoR : courses 16 bits plus longues (0.427.0, 21 novembre 2026)
+
+Dans une course de pointeurs 16 bits déjà établie (≥ 8 entrées conformes à la forme), toute adresse paire en ROM devient une entrée (`valid = 2`), comme pour les tables 32 bits (seuil 4).
+SoR (900 s, 2 workers, sans film) : 701 → 635 octets manquants. Code provisoire (marche non fiable), jamais « exécuté ». Observation de l'outil, pas une mesure du matériel.
