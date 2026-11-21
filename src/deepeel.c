@@ -364,7 +364,7 @@ static int cmd_explore(int argc, char **argv) {
             watch = 30;
             if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') watch = atoi(argv[++i]);
             if (watch < 1) watch = 1;
-            if (watch > 30) watch = 30;
+            if (watch > 60) watch = 60;
         }
         else if (!strcmp(a, "--max-steps") && i + 1 < argc) cfg.max_steps_path = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--max-total") && i + 1 < argc) cfg.max_steps_total = strtoull(argv[++i], NULL, 0);
@@ -692,6 +692,21 @@ static int cmd_explore(int argc, char **argv) {
                         fprintf(stderr, "deepeel: TAS %s refused: recorded on another ROM (%s); --tas-any-rom forces it\n", gt.source, why);
                         dp_tas_free(&gt); memset(&gt, 0, sizeof gt);
                     } else if (match == 1) fprintf(stderr, "deepeel: TAS %s: ROM identity verified (%s)\n", gt.source, why);
+                }
+                const char *bios = getenv("DEEPEEL_TAS_CGB_BIOS");
+                if (bios && *bios) {
+                    if (!(cart->rom[0x143] & 0x80) ||
+                        !DP_GBL_COLOR_BUILD) {
+                        snprintf(terr, sizeof terr, "CGB BIOS requires a CGB cartridge and a DP_GBL_CGB build");
+                    } else if (dp_tas_load_cgb_bios(&gt, bios, terr, sizeof terr)) {
+                        fprintf(stderr, "deepeel: CGB BIOS identity verified (%s)\n", bios);
+                    }
+                    if (!gt.cgb_bios_loaded) {
+                        fprintf(stderr, "deepeel: --tas: %s\n", terr);
+                        dp_tas_free(&gt); km->close(km);
+                        dp_results_free(&res); dp_cart_free(cart);
+                        return 1;
+                    }
                 }
                 if (gt.frames && (gmasks = malloc(gt.frames))) {
                     for (uint32_t f = 0; f < gt.frames; f++) {

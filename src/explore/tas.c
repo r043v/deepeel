@@ -52,6 +52,7 @@ static uint8_t btn_mask(const char *n) {
 static int log_parse_positional(const uint8_t *d, size_t n, DpTas *out, char *err, size_t errsz) {
     const char *p = (const char *)d, *end = (const char *)d + n;
     uint8_t key_mask[64];
+    int power_key = -1;
     int nkey = 0;
     int in_input = 0, any_frame = 0;
     char line[4096];
@@ -74,6 +75,7 @@ static int log_parse_positional(const uint8_t *d, size_t n, DpTas *out, char *er
         }
         if (!strncmp(line, "LogKey:", 7)) {
             nkey = 0;
+            power_key = -1;
             // one key per '|' field ("#P1 Up|P1 Down|..."): a field may hold a space ("P1 Up"), so only
             // '|' separates; the controller prefix is dropped, the button name is what remains
             char *tok = strtok(line + 7, "|");
@@ -81,6 +83,7 @@ static int log_parse_positional(const uint8_t *d, size_t n, DpTas *out, char *er
                 while (*tok == '#' || *tok == ' ' || *tok == '\t') tok++;
                 if ((tok[0] == 'P' || tok[0] == 'p') && isdigit((unsigned char)tok[1]) && tok[2] == ' ') tok += 3;
                 for (char *c = tok; *c; c++) *c = (char)tolower((unsigned char)*c);
+                if (!strcmp(tok, "power")) power_key = nkey;
                 key_mask[nkey++] = btn_mask(tok);
                 tok = strtok(NULL, "|");
             }
@@ -102,7 +105,10 @@ static int log_parse_positional(const uint8_t *d, size_t n, DpTas *out, char *er
             }
             if (*c == '\n' || *c == '\r') break;
             if (nkey && idx < nkey) {
-                if (*c != '.') mask |= key_mask[idx];
+                if (*c != '.') {
+                    mask |= key_mask[idx];
+                    if (idx == power_key) out->has_power_event = 1;
+                }
                 idx++;
             } else {
                 // no LogKey: classic GB mnemonic order R L U D B A Select Start
@@ -230,6 +236,15 @@ static void bk2_header(const uint8_t *h, size_t n, DpTas *out) {
                 else out->sha1[k] = (uint8_t)(a << 4 | b);
             }
             out->has_sha1 = ok;
+        } else if (len == 59 && !strncmp(l, "GBC_Firmware_World ", 19)) {
+            out->has_cgb_bios_hash = 1;
+            for (int k = 0; k < 20; k++) {
+                int a = hexv(l[19 + 2 * k]), b = hexv(l[20 + 2 * k]);
+                if (a < 0 || b < 0) { out->has_cgb_bios_hash = 0; break; }
+                out->cgb_bios_hash[k] = (uint8_t)(a << 4 | b);
+            }
+        } else if (len == 11 && !strncmp(l, "IsCGBMode 1", 11)) {
+            out->is_cgb = 1;
         } else if (len > 40 && !strncmp(l, "GB_Firmware", 11) &&
                    memmem(l, len, "4ED31EC6B0B175BB109C0EB5FD3D193DA823339F", 40)) {
             // the original DMG boot ROM: the movie starts at power-on and the
@@ -247,8 +262,8 @@ static void bk2_header(const uint8_t *h, size_t n, DpTas *out) {
         }
         i = j + 1;
     }
-    // only Gambatte's boot timing is modelled (GBHawk and the other BizHawk
-    // cores boot differently and keep the plain frame-0 alignment)
+    // The original DMG boot offset is shared by the Gambatte and GBHawk
+    // replay profiles. Other cores and boot ROMs keep frame-0 alignment.
     if (dmg_boot && (out->gambatte || gbhawk)) out->boot_frames = DP_TAS_GAMBATTE_DMG_BOOT_FRAMES;
 }
 
@@ -287,7 +302,8 @@ static int tas_load_zip(uint8_t *d, size_t n, DpTas *out, char *err, size_t errs
     size_t hn = 0;
     uint8_t *hdr = dp_zip_read(d, n, "header", &hn, NULL);
     if (hdr) {
-        if (strcasestr((const char *)hdr, "startsfromsavestate true")) out->anchored = 1;
+        if (strcasestr((const char *)hdr, "startsfromsavestate true") ||
+            strcasestr((const char *)hdr, "startsfromsaveram true")) out->anchored = 1;
         bk2_header(hdr, hn, out);
         free(hdr);
     }
@@ -373,6 +389,34 @@ int dp_tas_load(const char *path, DpTas *out, char *err, size_t errsz) {
         out->frames -= (uint32_t)out->boot_frames;
     } else out->boot_frames = 0;
     return ok;
+}
+
+int dp_tas_load_cgb_bios(DpTas *t, const char *path, char *err, size_t errsz) {
+    if (!t->frames || !t->gambatte || !t->is_cgb || !t->has_cgb_bios_hash ||
+        t->anchored || t->has_power_event || t->equal_frames) {
+        snprintf(err, errsz, "CGB BIOS replay requires a power-on Gambatte BK2 with VBlank-driven frames");
+        return 0;
+    }
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        snprintf(err, errsz, "cannot read CGB BIOS %s", path);
+        return 0;
+    }
+    size_t n = fread(t->cgb_bios, 1, sizeof t->cgb_bios, f);
+    int extra = fgetc(f), failed = ferror(f);
+    fclose(f);
+    if (n != sizeof t->cgb_bios || extra != EOF || failed) {
+        snprintf(err, errsz, "expected a 2304-byte CGB BIOS");
+        return 0;
+    }
+    uint8_t hash[20];
+    dp_sha1(t->cgb_bios, sizeof t->cgb_bios, hash);
+    if (memcmp(hash, t->cgb_bios_hash, sizeof hash)) {
+        snprintf(err, errsz, "CGB BIOS SHA-1 differs from GBC_Firmware_World in the BK2");
+        return 0;
+    }
+    t->cgb_bios_loaded = 1;
+    return 1;
 }
 
 void dp_tas_free(DpTas *t) {

@@ -12,6 +12,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define DP_CGB_BOOT_SIZE 0x900u
+
 typedef struct DpTas {
     uint8_t *masks;   // one byte per frame
     uint32_t frames;
@@ -46,6 +48,9 @@ typedef struct DpTas {
     int gambatte;
     // BizHawk header "Core GBHawk": the GBHawk pad-latch/DIV profile applies
     int gbhawk;
+    int is_cgb, has_cgb_bios_hash, has_power_event, cgb_bios_loaded;
+    uint8_t cgb_bios_hash[20];
+    uint8_t cgb_bios[DP_CGB_BOOT_SIZE];
 } DpTas;
 
 // Gambatte, original DMG boot ROM: $0100 is reached 4496 cycles into movie
@@ -62,5 +67,6 @@ int dp_tas_rom_match(const DpTas *t, const uint8_t *rom, size_t rom_size, char *
 // message in `err` otherwise
 int dp_tas_load(const char *path, DpTas *out, char *err, size_t errsz);
 void dp_tas_free(DpTas *t);
+int dp_tas_load_cgb_bios(DpTas *t, const char *path, char *err, size_t errsz);
 
 #endif

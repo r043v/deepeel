@@ -116,6 +116,27 @@ diff -ruN a/gbl_core.c b/gbl_core.c
  #endif
  #if GBL_OAM_DMA_BUS
          dma_start(src); /* the copy itself happens when the transfer begins */
+@@ -1556,8 +1601,18 @@
+ void gbl_speed_switch(void) {
+     gbl_key1 = 0;
+     gbl_io_wr(0x04, 0);
+-    gbl_ppu_set_speed(gbl_dshift ^ 1u);
+-    gbr.cyc += 8200u;
++    if (gbl_sync_vba_off_clock == 3) {
++        /* Gambatte schedules unhalt 0x20000 + 4 cycles after the operand
++         * fetch. Normal-to-double changes the PPU clock eight cycles
++         * after that fetch. */
++        uint32_t fetch = gbr.cyc;
++        if (!gbl_dshift) gbr.cyc += 8;
++        gbl_ppu_set_speed(gbl_dshift ^ 1u);
++        gbr.cyc = fetch + 0x20004u;
++    } else {
++        gbl_ppu_set_speed(gbl_dshift ^ 1u);
++        gbr.cyc += 8200u;
++    }
+     gbl_update_evt();
+ }
+ #endif
 @@ -1652,5 +1697,5 @@
  #else
      if (a >= 0xFE00) return a < 0xFEA0 ? gbl_oam[a - 0xFE00] : 0xFF;
@@ -482,8 +503,8 @@ diff -ruN a/gbl.h b/gbl.h
  extern uint8_t gbl_interp_only;     /* ignore compiled code (reference mode) */
  extern uint32_t gbl_frame;
 diff -ruN a/gbl_ppu.c b/gbl_ppu.c
---- a/gbl_ppu.c	2026-11-06 21:47:21.672263505 +0100
-+++ b/gbl_ppu.c	2026-11-07 12:51:53.081479718 +0100
+--- a/gbl_ppu.c
++++ b/gbl_ppu.c
 @@ -1,3 +1,4 @@
 +#include <stdio.h>
  /*
@@ -513,7 +534,23 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      stat_line = line;
  }
  
-@@ -979,10 +986,42 @@
+@@ -899,6 +906,7 @@
+ /* KEY1 speed switch: the position inside the current line (or virtual frame)
+  * is kept, only its unit changes. */
+ int gbl_ppu_in_hblank(void) { return lcd_on && ly < 144 && mode == 0; }
++static void gam_cgb_speed_change(uint32_t now, uint8_t d);
+ void gbl_ppu_set_speed(uint8_t d) {
+     if (d == gbl_dshift) return;
+     uint32_t now = gbr.cyc;
+@@ -909,6 +917,7 @@
+     next_stage_off = d ? next_stage_off << 1 : next_stage_off >> 1;
+     P.m0_start = (uint16_t)(d ? P.m0_start << 1 : P.m0_start >> 1);
+     gbl_dshift = d;
++    gam_cgb_speed_change(now, d);
+     update_due();
+     P.evt_dirty = 1;
+ }
+@@ -984,10 +993,96 @@
   * calls (register polls, VRAM writes) land between two transitions. */
  uint32_t gbl_ppu_due;
  
@@ -533,31 +570,87 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
 +static uint8_t gam_v0_pend, gam_stage;
 +static uint32_t gam_a; /* the running frame's budget end (the real first hook) */
 +#define GAM_K 1822u /* LCD off write -> first video-frame completion */
++/* A Gambatte movie frame and a hardware VBlank are independent. An LCD-off
++ * blit can enter the blank state without ending the host frame. The sample
++ * budget still applies across LCD writes and changes unit on STOP. */
++#define CGB_GAMBATTE_CLOCK (GBL_CGB_ON && gbl_sync_vba_off_clock == 3)
++#if GBL_CGB
++static struct {
++    uint32_t budget, blit;
++    uint8_t blank;
++} gam_cgb;
++
++static uint32_t gam_cgb_due(void) {
++    return (int32_t)(gam_cgb.blit - gam_cgb.budget) < 0 ? gam_cgb.blit : gam_cgb.budget;
++}
++
++static uint32_t gam_cgb_vblank(void) {
++    return line_start + (ly < 144 ? lines_span(ly, 144) : lines_span(ly, 154) + lines_span(0, 144));
++}
++
++static void gam_cgb_speed_change(uint32_t now, uint8_t d) {
++    if (!CGB_GAMBATTE_CLOCK) return;
++    uint32_t left = gam_cgb.budget - now;
++    gam_cgb.budget = now + (d ? left << 1 : left >> 1);
++    gam_cgb.blit = lcd_on ? gam_cgb_vblank() : now + FRAME_CYCLES;
++}
++
++static void gam_cgb_advance(uint32_t now) {
++    for (;;) {
++        uint32_t due = gam_cgb_due();
++        if ((int32_t)(now - due) < 0) return;
++        int frame = due == gam_cgb.budget;
++        if (due == gam_cgb.blit) {
++            if (lcd_on || gam_cgb.blank) frame = 1;
++            gam_cgb.blank = !lcd_on;
++            gam_cgb.blit += FRAME_CYCLES;
++        }
++        if (frame) {
++            gam_cgb.budget = ((due + 3u) & ~3u) + FRAME_CYCLES;
++            ppu_moved = 1;
++            P.evt_dirty = 1;
++            gbl_frame++;
++            gbl_platform_vblank();
++        }
++    }
++}
++#endif
 +static uint32_t gam_next(void) {
 +    uint32_t nb = gam_last + FRAME_CYCLES;
 +    if (gam_v0_pend && (int32_t)(gam_v0 - nb) < 0) nb = gam_v0;
 +    return nb;
 +}
 +static uint32_t off_due(void) {
++#if GBL_CGB
++    if (CGB_GAMBATTE_CLOCK) return gam_cgb_due();
++#endif
 +    if (gbl_sync_vba_off_clock == 3) return gam_next();
 +    uint32_t f = off_start + FRAME_CYCLES;
 +    return (on_pend && (int32_t)(on_at - f) < 0) ? on_at : f;
 +}
  static void update_due(void) {
 -    gbl_ppu_due = lcd_on ? line_start + next_stage_off : off_start + FRAME_CYCLES;
+-}
+-
 +    uint32_t d = lcd_on ? line_start + next_stage_off : off_due();
++#if GBL_CGB
++    if (CGB_GAMBATTE_CLOCK) {
++        uint32_t next = gam_cgb_due();
++        if ((int32_t)(next - d) < 0) d = next;
++    } else
++#endif
 +    if (lcd_on && gbl_sync_vba_off_clock == 3) {
 +        uint32_t nb = gam_last + FRAME_CYCLES;
 +        if ((int32_t)(nb - d) < 0) d = nb;
 +    }
 +    gbl_ppu_due = d;
- }
- 
++}
++
 +static void lcd_enable_at(uint32_t at, int lyc_edge);
  /* LCD off: a virtual frame clock (the assembly version jumps here too). */
  #if GBL_TIMING_ASM
  void gbl_ppu_advance_off(uint32_t now);
-@@ -990,10 +1029,50 @@
+@@ -995,10 +1090,57 @@
  static
  #endif
  void gbl_ppu_advance_off(uint32_t now) {
@@ -571,6 +664,13 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
 +        gbl_ppu_advance(now);
 +        return;
 +    }
++#if GBL_CGB
++    if (CGB_GAMBATTE_CLOCK) {
++        gam_cgb_advance(now);
++        update_due();
++        return;
++    }
++#endif
 +    if (gbl_sync_vba_off_clock == 3) {
 +        for (;;) {
 +            uint32_t nb = gam_next();
@@ -609,7 +709,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
          gbl_frame++;
          gbl_platform_vblank();
      }
-@@ -1046,6 +1125,7 @@
+@@ -1051,6 +1193,7 @@
              pen += 6;
          }
      }
@@ -617,11 +717,16 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      return (uint16_t)(MODE0_START + PS(pen));
  }
  #endif
-@@ -1058,6 +1138,25 @@
+@@ -1061,8 +1204,30 @@
+         gbl_ppu_advance_off(now);
+         return;
      }
++#if GBL_CGB
++    if (CGB_GAMBATTE_CLOCK) gam_cgb_advance(now);
++#endif
      for (;;) {
          uint32_t off = now - line_start;
-+        if (gbl_sync_vba_off_clock == 3) {
++        if (!CGB_GAMBATTE_CLOCK && gbl_sync_vba_off_clock == 3) {
 +            /* a frame the host's budget ends before the LCD completes one
 +             * (an enable late in the frame) */
 +            uint32_t nb = gam_last + FRAME_CYCLES;
@@ -643,7 +748,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
          if (ly < 144) {
              if (stage == 0) {
                  if (off < MODE3_START) break;
-@@ -1084,7 +1183,7 @@
+@@ -1089,7 +1254,7 @@
              /* line 153: LY reads 0 after LY153_ZERO cycles; the LYC
               * comparator sees 0 two cycles later (an LYC=0 match fires here,
               * a line before line 0) */
@@ -652,7 +757,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
              ppu_moved = 1;
              P.evt_dirty = 1;
              stage = 1;
-@@ -1099,6 +1198,7 @@
+@@ -1104,6 +1269,7 @@
          P.evt_dirty = 1;
          line_start += llen;
          stage = 0;
@@ -660,17 +765,21 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
          if (++ly == 154) {
              ly = 0;
              win_line = 0;
-@@ -1114,7 +1214,9 @@
+@@ -1119,27 +1285,31 @@
  #endif
              mode = 1;
              IF |= 0x01;
 +            gbl_vbl_cyc = line_start;
              stat_update();
-+            gam_last = line_start;
-             gbl_frame++;
-             gbl_platform_vblank();
+-            gbl_frame++;
+-            gbl_platform_vblank();
++            if (!CGB_GAMBATTE_CLOCK) {
++                gam_last = line_start;
++                gbl_frame++;
++                gbl_platform_vblank();
++            }
          } else {
-@@ -1122,19 +1224,19 @@
+             if (ly < 144) mode = 2;
              stat_update();
          }
      }
@@ -694,7 +803,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      uint8_t s = STAT;
  #if GBL_CGB
      if (gbl_hdma_pend) return gbr.cyc;
-@@ -1146,7 +1248,7 @@
+@@ -1151,7 +1321,7 @@
      if (ly < 144 && stage == 0 && (s & 0x08)) return line_start + MODE3_START; /* mode 0 offset known at mode 3 */
      if (ly < 144 && stage == 1 && (s & 0x08)) return line_start + P.m0_start;
  #endif
@@ -703,7 +812,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      if (GBL_PPU_BATCH == 1 || (s & 0x20)) return line_start + line_len(ly);
      /* Nothing observable happens inside a batch: the next line start that
       * matters is the batch end, VBlank, the LYC line, or the next frame. */
-@@ -1162,6 +1264,17 @@
+@@ -1167,6 +1337,17 @@
      return t;
  }
  
@@ -721,7 +830,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
  #ifndef GBL_VBL_DELAY
  /* reference mode: the CPU services a VBlank request 2 dots after the
   * dispatcher would see it (mooneye di_timing-GS: DI wins by one NOP) */
-@@ -1208,6 +1321,7 @@
+@@ -1213,6 +1394,7 @@
  #if GBL_ACCESS_BLOCK
  /* CPU access blocking by mode (GBL_ACCESS_BLOCK): 1 = VRAM, 2 = OAM. */
  int gbl_ppu_blocked(int what) {
@@ -729,10 +838,28 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      ppu_moved = 0;
      gbl_ppu_sync(gbr.cyc);
      if (ppu_moved) gbl_update_evt();
-@@ -1250,12 +1364,47 @@
+@@ -1255,10 +1437,63 @@
          ppu_moved = 0;
          gbl_ppu_sync(gbr.cyc);
          if (ppu_moved) gbl_update_evt();
++#if GBL_CGB
++        if (n == 0x44 && GBL_CGB_ON && gbl_sync_vba_off_clock == 3) {
++            if (!lcd_on) return 0;
++            /* Native lines start two dots before Gambatte's LY counter.
++             * Reproduce its transient LY value just before a line ends. */
++            uint8_t line = ly;
++            int32_t left = (int32_t)(line_start + line_len(line) + PS(2u) - gbr.cyc);
++            if (gbr.cyc - line_start < PS(2u)) {
++                line = ly ? ly - 1 : 153;
++                left -= (int32_t)line_len(ly);
++            }
++            if (line == 153) return left > (int32_t)(LINE_CYCLES - 2u * gbl_dshift) ? 153 : 0;
++            int32_t early = 6 + 4 * gbl_dshift;
++            if (left == early) return (uint8_t)(line & (line + 1));
++            if (left < early) return (uint8_t)(line + 1);
++            return line;
++        }
++#endif
 +        if (n == 0x44 && lcd_on && gbl_sync_ly_lag) {
 +            int32_t at = (int32_t)(gbl_insn_cyc - line_start) + gbl_sync_ly_lag;
 +            if (gbl_sync_halt_snd > 0) {
@@ -750,14 +877,14 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
          return (uint8_t)(0x80 | (STAT & 0x78) | ((lcd_on ? (ly_visible() == LYC) : GBL_PPU_REF ? off_cmp : 0) ? 4 : 0) | (lcd_on ? mode : 0));
      }
      return gbl_io[n];
- }
- 
++}
++
 +static void lcd_enable_at(uint32_t at, int lyc_edge) {
 +    lcd_on = 1;
-+    /* The frame restarted by an enable runs 2 cycles ahead of the
++    /* The frame restarted by an enable runs 2 dots ahead of the
 +     * write (SameBoy and Gambatte: the first VBlank after enable is
-+     * requested 65662 cycles after the write's bus cycle). */
-+    line_start = at - 2u;
++     * requested 65662 dots after the write's bus cycle). */
++    line_start = at - PS(2u);
 +    ly = 0;
 +    stage = 0;
 +    next_stage_off = MODE3_START;
@@ -772,21 +899,19 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
 +    lyc_refresh();
 +    if (lyc_edge && P.lyc_line && !(GBL_PPU_REF && off_cmp)) IF |= 0x02;
 +    stat_line = P.lyc_line;
-+}
-+
+ }
+
  void gbl_ppu_write(uint8_t n, uint8_t v) {
-     gbl_ppu_sync(gbr.cyc);
- #if GBL_FRAME_SIGNATURE
-@@ -1264,39 +1413,54 @@
+@@ -1269,39 +1504,61 @@
  #endif
      switch (n) {
      case 0x40:
 -        if ((v & 0x80) && !lcd_on) {
 -            lcd_on = 1;
--            /* The frame restarted by an enable runs 2 cycles ahead of the
+-            /* The frame restarted by an enable runs 2 dots ahead of the
 -             * write (SameBoy and Gambatte: the first VBlank after enable is
--             * requested 65662 cycles after the write's bus cycle). */
--            line_start = gbr.cyc - 2u;
+-             * requested 65662 dots after the write's bus cycle). */
+-            line_start = gbr.cyc - PS(2u);
 -            ly = 0;
 -            stage = 0;
 -            next_stage_off = MODE3_START;
@@ -810,6 +935,9 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
 +                on_at = gbl_insn_cyc + 9u * LINE_CYCLES + (gbl_sync_halt_snd > 0 ? 2u : (uint32_t)(gbr.cyc - gbl_insn_cyc)); /* VBA V7: counted from the start of the writing instruction */
 +            } else
 +                lcd_enable_at(gbr.cyc, 1);
++#if GBL_CGB
++            if (CGB_GAMBATTE_CLOCK) gam_cgb.blit = gam_cgb_vblank() + (gam_cgb.blank ? 0u : FRAME_CYCLES);
++#endif
 +        } else if (!(v & 0x80) && on_pend) {
 +            on_pend = 0;
          } else if (!(v & 0x80) && lcd_on) {
@@ -821,6 +949,10 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
              stat_line = 0;
              off_start = gbr.cyc;
 +            off_silent = 0;
++#if GBL_CGB
++            if (CGB_GAMBATTE_CLOCK) gam_cgb.blit = gbr.cyc + 4u * LINE_CYCLES;
++            else
++#endif
 +            if (gbl_sync_vba_off_clock == 3) {
 +                /* gbl.h: a write the movie's frames see: the budget ends the
 +                 * running frame, a video frame completes GAM_K later */
@@ -853,7 +985,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      case 0x44: return;
      default: gbl_io[n] = v; break;
      }
-@@ -1310,7 +1474,29 @@
+@@ -1315,7 +1572,33 @@
      }
  }
  
@@ -876,6 +1008,10 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
 +}
 +
  void gbl_ppu_reset(void) {
++#if GBL_CGB
++    gam_cgb.budget = gam_cgb.blit = gbr.cyc + FRAME_CYCLES;
++    gam_cgb.blank = 0;
++#endif
 +    gam_v0_pend = 0;
 +    gam_last = 0;
 +    on_pend = 0;
@@ -883,7 +1019,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      LCDC = 0x91;
      STAT = 0x00;
      BGP = 0xFC;
-@@ -1325,6 +1511,7 @@
+@@ -1330,6 +1613,7 @@
      stat_line = 0;
      off_start = gbr.cyc;
      update_due();
@@ -891,9 +1027,13 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      stat_refresh();
      P.spr_ly = 0xFF;
      bg_pairs_bgp = -1;
-@@ -1340,6 +1527,14 @@
+@@ -1344,7 +1628,18 @@
+  * a load, everything derived from VRAM, OAM and the registers is voided. */
  void gbl_ppu_state_io(gbl_state_fn io, void *ctx, int load) {
      io(&gbl_ppu_state, sizeof(gbl_ppu_state), ctx);
++#if GBL_CGB
++    io(&gam_cgb, sizeof(gam_cgb), ctx);
++#endif
      if (!load) return;
 +    /* statics outside the saved state belong to the previous run of this
 +     * instance (a queued movie, a restored snapshot): drop them */
@@ -906,7 +1046,7 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      P.evt_dirty = 1;
      P.moved = 1;
      P.spr_ly = 0xFF;
-@@ -1359,3 +1554,4 @@
+@@ -1364,3 +1659,4 @@
  #endif
      update_due();
  }

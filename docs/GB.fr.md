@@ -1032,6 +1032,22 @@ courante et la vitesse réelle du rejeu en frames/s (observation de l'outil) ;
 un film terminé garde sa dernière image marquée « done ». `Échap` ferme la
 fenêtre seule, le run continue. Sans SDL2, l'option affiche un message et est ignorée.
 
+Sur Game Boy, `--watch 60` échantillonne chaque trame émulée. Avec
+`DP_WATCH_FPS=0`, la fenêtre SDL2 tourne sans limite de débit.
+Une compilation avec `DP_GBL_CGB=ON` affiche les couleurs des cartouches CGB
+dans cette fenêtre.
+
+Un BK2 CGB Gambatte qui démarre à l’allumage et cadence ses trames sur le
+VBlank peut être rejoué avec son BIOS de 2 304 octets. Deepeel vérifie son
+SHA-1 par rapport à `GBC_Firmware_World` et exécute les instructions du
+BIOS avant celles de la cartouche.
+
+```sh
+DEEPEEL_TAS_CGB_BIOS=/chemin/vers/cgb.bin DP_WATCH_FPS=0 DP_WATCH_SMOOTH=0 \
+  deepeel explore jeu.gbc --tas film.bk2 --replay-only --jobs 1 \
+  --no-event-probes --no-pointer-scan --no-closure --max-total 0 --watch 60
+```
+
 ## Copies des longues sessions, provenance, sources sœurs, identité des films (0.22.0)
 
 Quatre corrections génériques du moteur et de la carte, mesurées sur toute la
@@ -5322,7 +5338,40 @@ contre 45 px). Observation de l'outil sur Sonic 1 uniquement ; le résidu reste 
 `cc -O2 -std=gnu99 -Isrc tools/lr_dsy.c src/mach/libretro.c -ldl -lm -o build/lr_dsy` ; `lr_dsy CORE.so ROM masks.bin
 out.dsy [N]` rejoue un film (1 octet/trame, bits U D L R B A Select Start) dans n'importe quel cœur libretro et écrit
 `wram` / `vram` / `sram` par trame, à comparer par `deepeel desync`. Vérifié : Gambatte sur Zelda GB, deux runs
-identiques sur 300 trames. Côté deepeel (m0boy GB/NES/PCE) le producteur natif reste à écrire.
+identiques sur 300 trames. Pour GB et GBC, le producteur natif est intégré à la relecture.
+
+### GB et GBC : état exporté par `explore --dsy`
+
+La relecture exporte la fenêtre WRAM visible du CPU (`wram`), les banques
+physiques (`wram_banks`), la VRAM, l'OAM, la HRAM, la SRAM de la
+cartouche, les registres CPU (`regs`, ordre PC, SP, A, F, BC, DE, HL,
+en petit-boutiste), les octets internes des registres d'E/S (`io_raw`)
+et IE. `deepeel desync` compare les blocs de même nom. Comparer les
+numéros de trame indiqués dans le rapport avant d'interpréter un écart
+de mémoire. Les offsets du comparateur décalent les enregistrements,
+indépendamment du numéro de trame qu'ils contiennent.
+
+Pour un BK2 CGB Gambatte à trames pilotées par le VBlank, produire le flux
+de référence avec la bibliothèque native de BizHawk et le BIOS du film.
+
+```sh
+python3 tools/gambatte_dsy.py libgambatte.so jeu.gbc bios.bin film.bk2 reference.dsy --frames 1500
+deepeel desync native.dsy reference.dsy
+```
+
+Le script vérifie les SHA-1 du BK2 et conserve les directions opposées.
+Les films qui démarrent depuis un état sauvegardé ou utilisent la touche
+Power requièrent un autre producteur. `io_raw` reste propre à Deepeel.
+Avec `--instructions reference.txt`, le producteur exporte aussi le PC et
+les registres avant chaque instruction. Pour le flux natif, utiliser
+`DEEPEEL_TAS_INSTR=native.txt` avec `--jobs 1 --replay-only --no-event-probes`
+pour écarter les traces des sondes. Le premier champ est un compteur
+d’échantillons cumulé. À vitesse normale, le multiplier par deux pour
+le comparer aux cycles CPU du flux natif `DEEPEEL_TAS_INSTR`. À double
+vitesse, un échantillon couvre quatre cycles CPU. La ligne suivante
+montre l’état laissé par l’instruction, après une éventuelle interruption.
+La dernière colonne indique un opcode préchargé. Lors d’un GDMA,
+Gambatte a déjà avancé le PC d’un octet pour ce préchargement.
 
 ### NES : `tools/nes_dsy` (m0boy) contre `bizhawk_dsy nes` (NesHawk)
 

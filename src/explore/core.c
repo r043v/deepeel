@@ -1793,7 +1793,11 @@ static void core_dsy_frame(const DpCoreConfig *cfg, DpMachine *m, uint64_t f) {
     uint32_t base = m->work_ram_len ? m->work_ram_base : 0xC000u, len = m->work_ram_len ? m->work_ram_len : 0x2000u;   // declared by the machine (A25)
     pthread_mutex_lock(&dsy_mu);
     if (!dsy_file) { dsy_file = fopen(cfg->dsy_path, "wb"); if (dsy_file) fwrite("DSY1", 1, 4, dsy_file); }
-    if (dsy_file && f > dsy_last) {
+    if (dsy_file && f > dsy_last && m->dump_dsy) {
+        m->dump_dsy(m, dsy_file, (uint32_t)f);
+        fflush(dsy_file);
+        dsy_last = f;
+    } else if (dsy_file && f > dsy_last) {
         static uint8_t buf[0x10000];
         if (len > sizeof buf) len = sizeof buf;
         for (uint32_t i = 0; i < len; i++) buf[i] = m->fetch(m, base + i);

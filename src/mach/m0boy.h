@@ -39,6 +39,9 @@ typedef struct DpMach DpMach;
 struct DpMach {
     const DpGblApi *api;
     int vi, ii;
+    const uint8_t *cart_rom;
+    const uint8_t *cgb_bios;
+    uint8_t cgb_bios_mapped;
     void *owner; /* engine back-pointer (the explorer / worker) */
     void (*on_step)(DpMach *m, uint16_t pc, uint8_t op, int entry);
     void (*on_read)(DpMach *m, uint16_t a, uint8_t v);
@@ -84,6 +87,11 @@ void dp_mach_attach(DpMach *m, void *owner,
  * buffer) and reset the machine. */
 void dp_mach_set_rom(DpMach *m, const uint8_t *rom, uint32_t size);
 void dp_mach_reset(DpMach *m);
+void dp_mach_start_cgb_bios(DpMach *m, const uint8_t *bios);
+void dp_mach_map_cgb_bios(DpMach *m, int mapped);
+static inline int dp_mach_in_cgb_bios(const DpMach *m, uint32_t address) {
+    return m->cgb_bios_mapped && (address < 0x100u || (address >= 0x200u && address < 0x900u));
+}
 /* Run until a hook cuts.  Re-entry continues from the live state without
  * reloading. */
 int dp_mach_run(DpMach *m);

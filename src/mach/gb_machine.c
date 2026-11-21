@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "../core/dpmachine.h"
+#include "../core/desync.h"
 #include "m0boy.h"
 #include "../explore/core.h"
 #include "../explore/tas.h"
@@ -28,12 +29,27 @@ typedef struct GbWrap {
     uint8_t first_op;         // opcode of the instruction executed by the current gb_run
 } GbWrap;
 static GbWrap *gbw(DpMachine *m) { return m->impl; }
-// the generic game-screen watch: the PPU renders lines only while asked (DpMach.render); shades 0..3 become grays
+// The PPU renders lines only while the watch is open.
 static void gb_watch(DpMachine *m, int on) { DpMach *d = gbw(m)->d; d->render = on; d->api->skip_render[0] = !on; }
 static int gb_render(DpMachine *m, uint32_t *argb, unsigned cap, int *w, int *h) {
-    DpMach *d = gbw(m)->d;
+    const GbWrap *gb = gbw(m);
+    const DpMach *d = gb->d;
     if (cap < 160u * 144u || !d->render) return 0;
-    for (int y = 0; y < 144; y++) for (int x = 0; x < 160; x++) { uint32_t v = 255u - d->screen[y][x] * 85u; argb[y * 160 + x] = 0xff000000u | v << 16 | v << 8 | v; }
+    const int colour = DP_GBL_COLOR_BUILD && gb->rom_size > 0x143 && (gb->rom[0x143] & 0x80);
+    for (int y = 0; y < 144; y++) {
+        for (int x = 0; x < 160; x++) {
+            uint32_t r, g, b;
+            if (colour) {
+                uint16_t pixel = d->screen16[y][x];
+                r = (pixel >> 11) * 255u / 31u;
+                g = ((pixel >> 5) & 63u) * 255u / 63u;
+                b = (pixel & 31u) * 255u / 31u;
+            } else {
+                r = g = b = 255u - d->screen[y][x] * 85u;
+            }
+            argb[y * 160 + x] = 0xff000000u | r << 16 | g << 8 | b;
+        }
+    }
     *w = 160; *h = 144; return 1;
 }
 
@@ -51,13 +67,15 @@ static uint64_t gb_state_hash(DpMachine *m) {
         h = (h ^ img[i]) * 0x100000001b3ull;
     }
     h = (h ^ (uint8_t)gbw(m)->last_ei) * 0x100000001b3ull;
+    if (gbw(m)->d->cgb_bios_mapped) h = (h ^ 1u) * 0x100000001b3ull;
     free(img);
     return h;
 }
 static void gb_save(DpMachine *m, uint8_t *buf) {
     DpMach *d = gbw(m)->d;
     dp_mach_save(d, buf);
-    uint64_t f = *d->api->frame | ((uint64_t)gbw(m)->last_ei << 63);   // EI shadow rides in the top bit
+    uint64_t f = *d->api->frame | ((uint64_t)gbw(m)->last_ei << 63)
+                               | ((uint64_t)d->cgb_bios_mapped << 62);
     memcpy(buf + dp_mach_state_bytes(d), &f, 8);
 }
 static void gb_load(DpMachine *m, const uint8_t *buf) {
@@ -65,7 +83,8 @@ static void gb_load(DpMachine *m, const uint8_t *buf) {
     dp_mach_load(d, buf);
     uint64_t f; memcpy(&f, buf + dp_mach_state_bytes(d), 8);
     gbw(m)->last_ei = (int)(f >> 63);
-    f &= ~(1ull << 63);
+    dp_mach_map_cgb_bios(d, (int)((f >> 62) & 1));
+    f &= (1ull << 62) - 1;
     *d->api->frame = (typeof(*d->api->frame))f;
 }
 // side-effect-free view: work RAM bank 0/1 area and HRAM are read from the instance, the rest through the op view
@@ -75,10 +94,35 @@ static uint8_t gb_fetch(DpMachine *m, uint32_t a) {
     if (a >= 0xFF80 && a < 0xFFFF && d->api->hram) return d->api->hram[a - 0xFF80];
     return dp_mach_op(d, (uint16_t)a);
 }
+static void gb_dump_dsy(DpMachine *m, FILE *file, uint32_t frame) {
+    const DpGblApi *api = gbw(m)->d->api;
+    const gbl_cpu_t *cpu = api->gbr;
+    const unsigned variant = (unsigned)api->variant;
+    const uint8_t flags = (cpu->zr == 0 ? 0x80 : 0) | (cpu->nf ? 0x40 : 0) |
+                          (cpu->hf ? 0x20 : 0) | (cpu->cf ? 0x10 : 0);
+    // CPU-visible WRAM uses the mapper's active bank. Export physical banks separately.
+    uint8_t wram[0x2000];
+    memcpy(wram, api->wram, 0x1000);
+    memcpy(wram + 0x1000, api->rmap[0xD] + 0xD000u, 0x1000);
+    const uint8_t regs[] = {
+        cpu->pc, cpu->pc >> 8, cpu->sp, cpu->sp >> 8, cpu->a, flags,
+        cpu->bc, cpu->bc >> 8, cpu->de, cpu->de >> 8, cpu->hl, cpu->hl >> 8
+    };
+    const char *names[] = {"wram", "wram_banks", "vram", "oam", "hram", "regs", "io_raw", "ie", "sram"};
+    const uint8_t *data[] = {wram, api->wram, api->vram, api->oam, api->hram, regs, api->io, api->ie, api->eram};
+    const uint32_t len[] = {
+        sizeof wram, DP_GBL_COLOR_BUILD ? 0x8000 : 0x2000,
+        DP_GBL_COLOR_BUILD ? 0x4000 : 0x2000, 0xA0, 0x7F,
+        sizeof regs, 0x80, 1, dp_gbl_variant_eram[variant]
+    };
+    DpDsyWriter writer = {file};
+    dp_dsy_frame(&writer, frame, len[8] ? 9 : 8, names, data, len);
+}
+
 // compact ROM index bank * 0x4000 + (addr & 0x3FFF); the window bank comes from the mapper state
 static int64_t gb_rom_index(DpMachine *m, uint32_t a) {
     DpMach *d = gbw(m)->d;
-    if (a >= 0x8000) return -1;
+    if (a >= 0x8000 || dp_mach_in_cgb_bios(d, a)) return -1;
     uint32_t bank = dp_gbl_bank_of(d->api, (uint16_t)a);
     int64_t idx = (int64_t)bank * 0x4000 + (a & 0x3FFF);
     return gbw(m)->rom_size && (size_t)idx >= gbw(m)->rom_size ? -1 : idx;
@@ -309,6 +353,7 @@ static DpMachine *gb_wrap(DpMach *impl) {
     g->d = impl;
     m->name = "gb";
     m->work_ram_base = 0xC000u; m->work_ram_len = 0x2000u;
+    m->dump_dsy = gb_dump_dsy;
     m->save_ram_en = 1; m->save_ram_en_addr = 0x0000u; m->save_ram_en_val = 0x0A;
     m->save_ram_base = 0xA000u; m->save_ram_len = 0x2000u;
     m->plat = dp_platform_gb();
@@ -351,6 +396,7 @@ void dp_machine_gb_set_tas(DpMachine *m, const struct DpTas *tas) {
 
 // per-recorder machine tuning for the movie loaded in w (sync profiles, frame 0 input)
 static void gb_tas_tune(DpMach *mach, const DpTas *tas) {
+    if (tas->cgb_bios_loaded) dp_mach_start_cgb_bios(mach, tas->cgb_bios);
     // the recording emulator's timing quirks (gbl.h movie sync
     // knobs), for this worker's machine only and while the movie
     // plays: random play after it runs on hardware timing again
@@ -369,7 +415,8 @@ static void gb_tas_tune(DpMach *mach, const DpTas *tas) {
         memset(mach->api->hram, 0xFF, 0x7F);
     }
     // BizHawk's Gambatte starts from a fixed power-on RAM dump, not zeros
-    if (tas->recorder == DP_TAS_REC_BIZHAWK && tas->gambatte && !getenv("DEEPEEL_TAS_NOINIT")) {
+    if (tas->recorder == DP_TAS_REC_BIZHAWK && tas->gambatte &&
+        !tas->cgb_bios_loaded && !getenv("DEEPEEL_TAS_NOINIT")) {
         memcpy(mach->api->wram, dp_gambatte_wram, 0x2000);
         memcpy(mach->api->hram, dp_gambatte_hram, 0x7F);
     }

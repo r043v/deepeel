@@ -8,6 +8,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "../platform/platform.h"
@@ -278,6 +279,8 @@ struct DpMachine {
     uint32_t save_ram_en_addr; uint8_t save_ram_en_val, save_ram_en;   // B10: write that enables the cart RAM before seeding
     uint32_t save_ram_base, save_ram_len;  // B10: battery/cart RAM window the game may validate at boot (0 len: none)
     uint32_t work_ram_base, work_ram_len;  // A25: the CPU-visible work RAM range (0 len: unknown, defaults to $C000/$2000)
+    // Optional DSY1 frame writer for machines with comparable state beyond the CPU WRAM window.
+    void (*dump_dsy)(struct DpMachine *, FILE *, uint32_t frame);
     // C13: dense index of the CPU-addressable RAM the core keys its per-address tables on (ram_index -1: not RAM).
     // Absent: the low 16 address bits (every 16-bit CPU).  ram_addr is the inverse, ram_size the index count.
     int64_t (*ram_index)(struct DpMachine *, uint32_t addr);
@@ -441,6 +444,12 @@ const struct DpPlatformHooks *dp_machine_pce_hooks(void);   /* IRQ-source probes
 // the Neo Geo Pocket backend (src/mach/ngp_machine.c): dp_ngp_init(data,size)
 // first (src/platform/ngp/ngpmach.h), the thread-local runtime singleton
 const DpIsa *dp_isa_tlcs900(void);
+const DpIsa *dp_isa_v30mz(void);
+/* the WonderSwan backend (src/mach/ws_machine.c): dp_ws_init(data,size) first
+ * (src/platform/ws/wsmach.h), one heap Ws per machine — clones are trivial */
+DpMachine *dp_machine_ws(void);
+void dp_machine_ws_source(DpMachine *m, const uint8_t *data, size_t size);
+const struct DpPlatformHooks *dp_machine_ws_hooks(void);   /* pad + IRQ-source probes */
 DpMachine *dp_machine_ngp(void);
 void dp_machine_ngp_source(DpMachine *m, const uint8_t *data, size_t size);
 const struct DpPlatformHooks *dp_machine_ngp_hooks(void);   /* pad + IRQ-source probes */

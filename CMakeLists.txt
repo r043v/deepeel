@@ -330,6 +330,7 @@ find_package(Threads REQUIRED)
 find_library(LZ4_LIB lz4 REQUIRED) # fast state compression for the exploration spool
 find_package(ZLIB REQUIRED) # PNG maps and snapshots: compressed image and zTXt chunks
 target_link_libraries(deepeel_core PUBLIC Threads::Threads ZLIB::ZLIB ${LZ4_LIB} m dp_gblmach_lib dp_mdmach_lib deepeel_libretro ${CMAKE_DL_LIBS})
+target_compile_definitions(deepeel_core PRIVATE DP_GBL_COLOR_BUILD=$<BOOL:${DP_GBL_CGB}>)
 target_include_directories(deepeel_core PUBLIC
   src include ${GEN} ${DP_GBL_RUNTIME} ${SDL2_INCLUDE_DIRS})
 if(SDL2_FOUND AND BUILD_GUI)
@@ -338,6 +339,7 @@ if(SDL2_FOUND AND BUILD_GUI)
 endif()
 
 add_library(deepeel_lib STATIC src/deepeel.c src/core/dpmovie.c src/core/tasfetch.c src/core/tasdb.c src/core/gbsfetch.c)   # libdeepeel.a: deepeel_main() (include/deepeel.h)
+target_compile_definitions(deepeel_lib PRIVATE DP_GBL_COLOR_BUILD=$<BOOL:${DP_GBL_CGB}>)
 target_include_directories(deepeel_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set_target_properties(deepeel_lib PROPERTIES OUTPUT_NAME deepeel POSITION_INDEPENDENT_CODE ON)
 add_executable(deepeel src/deepeel_cli.c)

@@ -87,6 +87,8 @@ void dp_mach_close(DpMach *m) {
 void dp_mach_set_rom(DpMach *m, const uint8_t *rom, uint32_t size) {
     if (size > m->api->rom_max) size = m->api->rom_max; // the caller checked
     memcpy(m->api->rom, rom, size);
+    m->cart_rom = rom;
+    m->cgb_bios_mapped = 0;
     /* the mapper wraps bank numbers at the cartridge's real size */
     uint32_t banks = 2;
     while (banks * 0x4000u < size) banks <<= 1;
@@ -101,9 +103,30 @@ void dp_mach_set_rom(DpMach *m, const uint8_t *rom, uint32_t size) {
     *m->api->mbc1m = (uint8_t)(games >= 2);
 }
 
+void dp_mach_map_cgb_bios(DpMach *m, int mapped) {
+    if (!m->cgb_bios || m->cgb_bios_mapped == mapped) return;
+    const uint8_t *image = mapped ? m->cgb_bios : m->cart_rom;
+    memcpy(m->api->rom, image, 0x100);
+    memcpy(m->api->rom + 0x200, image + 0x200, 0x700);
+    m->cgb_bios_mapped = (uint8_t)mapped;
+}
+
+void dp_mach_start_cgb_bios(DpMach *m, const uint8_t *bios) {
+    m->cgb_bios = bios;
+    dp_mach_map_cgb_bios(m, 1);
+    gbl_cpu_t *cpu = m->api->gbr;
+    cpu->pc = cpu->sp = cpu->bc = cpu->de = cpu->hl = 0;
+    cpu->a = cpu->nf = cpu->hf = cpu->cf = 0;
+    cpu->zr = 1;
+    m->api->wr(0xff40, 0);
+    m->api->wr(0xff04, 0);
+    m->api->io[0x0f] = 0;
+}
+
 void dp_mach_reset(DpMach *m) {
     m->last_instrs = 0;
     m->stalls = 0;
+    dp_mach_map_cgb_bios(m, 0);
     m->api->reset();
 }
 
@@ -180,14 +203,16 @@ static FILE *dp_instr_f;
 static int instr_init_win;
 void dp_gbl_hook_trace(int v, int i, uint16_t pc) {
     DpMach *m = mach_at[v][i];
-    if (m && m->cut_pending) dp_mach_cut(m, m->cut_pending); /* instruction boundary: pc is exact */
+    if (!m) return;
+    if (m->cut_pending) dp_mach_cut(m, m->cut_pending); /* instruction boundary: pc is exact */
     if (dp_dbg_trace && dp_dbg_trace_f) { // desync diagnostics: one frame's pc sequence
         const gbl_cpu_t *c = m->api->gbr;
         fprintf(dp_dbg_trace_f, "%d.%d %04x %02x %04x %04x %04x %04x cyc=%u ime=%u if=%02x s=%02x%02x%02x%02x\n", v, i, pc, c->a, c->bc, c->de, c->hl, c->sp, (unsigned)c->cyc, c->ime, m->api->io ? m->api->io[0x0F] : 0, m->api->eram[0x8f7], m->api->eram[0x8f8], m->api->eram[0x8f9], m->api->eram[0x8fa]);
     }
+    /* The stepping observer may cut before this instruction executes. */
+    if (m->on_step) m->on_step(m, pc, dp_mach_op(m, pc), 0);
     // DEEPEEL_TAS_INSTR=<file>: one "<cycle> <pc> <a> <f> <bc> <de> <hl> <sp> <ime>"
-    // per executed instruction (--tas-solo: the TAS worker's machine is the only
-    // one), the same columns tools/gbhawk_ref --instr writes
+    // per executed instruction, the same columns tools/gbhawk_ref --instr writes
     {
         static int instr_init; // getenv once, not on every instruction
         if (!instr_init) {
@@ -208,8 +233,6 @@ void dp_gbl_hook_trace(int v, int i, uint16_t pc) {
             if (getenv("DEEPEEL_TAS_INSTR_IF")) fprintf(dp_instr_f, "#IF=%02x IE=%02x LY=%02x\n", m->api->io[0x0F], m->api->ie ? *m->api->ie : 0, m->api->io[0x44]);
         }
     }
-    if (!m || !m->on_step) return;
-    m->on_step(m, pc, dp_mach_op(m, pc), 0);
 }
 
 void dp_gbl_hook_read(int v, int i, uint16_t a, uint8_t val) {
@@ -225,6 +248,7 @@ void dp_gbl_hook_read(int v, int i, uint16_t a, uint8_t val) {
 
 void dp_gbl_hook_write(int v, int i, uint16_t a, uint8_t val) {
     DpMach *m = mach_at[v][i];
+    if (m && a == 0xff50 && val) dp_mach_map_cgb_bios(m, 0);
     static long watchw = -2;
     if (watchw == -2) {
         const char *e = getenv("DEEPEEL_DEBUG_WATCHW"); // desync diagnostics
