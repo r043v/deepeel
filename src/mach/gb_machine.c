@@ -19,15 +19,20 @@ static void gb_tas_tune(DpMach *mach, const DpTas *tas);
 // counter, so several instances (parallel workers, one per compiled slot) run side by side.
 typedef struct GbWrap {
     DpMach *d;
+    DpMachine *machine;
     DpObservers o;
     void *user;
     unsigned seen;            // instructions started in the current gb_run
     int joy_armed, joy_seen;  // joypad-port read detection for the event probe
+    int probing;              // suppress observations from a speculative dry run
     const uint8_t *rom; size_t rom_size;   // for clone()
     const DpTas *tas;         // movie whose recorder sync profile every instance takes
     int last_ei;              // the last executed instruction was EI: the IRQ check skips the next one
     uint8_t first_op;         // opcode of the instruction executed by the current gb_run
+    uint32_t *ram_sources;    // CGB physical RAM provenance, part of each snapshot
+    uint32_t ram_indices;     // includes physically mapped cartridge RAM
 } GbWrap;
+#define GB_CGB_RAM_INDICES 0x1C000u
 static GbWrap *gbw(DpMachine *m) { return m->impl; }
 // The PPU renders lines only while the watch is open.
 static void gb_watch(DpMachine *m, int on) { DpMach *d = gbw(m)->d; d->render = on; d->api->skip_render[0] = !on; }
@@ -54,20 +59,28 @@ static int gb_render(DpMachine *m, uint32_t *argb, unsigned cap, int *w, int *h)
 }
 
 // the frame counter rides at the end of the saved state so a restored fork resumes at its own frame
-static uint32_t gb_state_bytes(DpMachine *m) { return dp_mach_state_bytes(gbw(m)->d) + 8; }
-// B5: exact state hash without the cycle counters (gbl_cpu_t.cyc and everything after it in the header only encode where time stood)
+static uint32_t gb_state_bytes(DpMachine *m) { return dp_mach_state_bytes(gbw(m)->d) + 8 + gbw(m)->ram_indices * sizeof(uint32_t); }
+// B5: an exact-state candidate must include time. Timer, PPU, DMA, serial,
+// RTC and pending-input deadlines are interpreted relative to the CPU clock;
+// equal saved deadlines at different cycles are not equivalent states.
 static uint64_t gb_state_hash(DpMachine *m) {
     uint32_t mb = dp_mach_state_bytes(gbw(m)->d);
     uint8_t *img = malloc(mb ? mb : 1);
     if (!img) return 0;
     dp_mach_save(gbw(m)->d, img);
     uint64_t h = 0xcbf29ce484222325ull;
-    for (size_t i = 0; i < mb; i++) {
-        if (i >= offsetof(gbl_cpu_t, cyc) && i < sizeof(gbl_cpu_t)) continue;
-        h = (h ^ img[i]) * 0x100000001b3ull;
-    }
+    for (size_t i = 0; i < mb; i++) h = (h ^ img[i]) * 0x100000001b3ull;
     h = (h ^ (uint8_t)gbw(m)->last_ei) * 0x100000001b3ull;
     if (gbw(m)->d->cgb_bios_mapped) h = (h ^ 1u) * 0x100000001b3ull;
+    uint64_t frame = *gbw(m)->d->api->frame;
+    for (unsigned i = 0; i < sizeof frame; ++i) {
+        h = (h ^ (uint8_t)frame) * 0x100000001b3ull;
+        frame >>= 8;
+    }
+    if (gbw(m)->ram_sources) {
+        const uint8_t *p = (const uint8_t *)gbw(m)->ram_sources;
+        for (size_t i = 0; i < gbw(m)->ram_indices * sizeof(uint32_t); i++) h = (h ^ p[i]) * 0x100000001b3ull;
+    }
     free(img);
     return h;
 }
@@ -77,6 +90,7 @@ static void gb_save(DpMachine *m, uint8_t *buf) {
     uint64_t f = *d->api->frame | ((uint64_t)gbw(m)->last_ei << 63)
                                | ((uint64_t)d->cgb_bios_mapped << 62);
     memcpy(buf + dp_mach_state_bytes(d), &f, 8);
+    if (gbw(m)->ram_sources) memcpy(buf + dp_mach_state_bytes(d) + 8, gbw(m)->ram_sources, gbw(m)->ram_indices * sizeof(uint32_t));
 }
 static void gb_load(DpMachine *m, const uint8_t *buf) {
     DpMach *d = gbw(m)->d;
@@ -86,14 +100,76 @@ static void gb_load(DpMachine *m, const uint8_t *buf) {
     dp_mach_map_cgb_bios(d, (int)((f >> 62) & 1));
     f &= (1ull << 62) - 1;
     *d->api->frame = (typeof(*d->api->frame))f;
+    if (gbw(m)->ram_sources) memcpy(gbw(m)->ram_sources, buf + dp_mach_state_bytes(d) + 8, gbw(m)->ram_indices * sizeof(uint32_t));
 }
-// side-effect-free view: work RAM bank 0/1 area and HRAM are read from the instance, the rest through the op view
+static uint32_t gb_ram_source(DpMachine *m, uint32_t i) {
+    return i < gbw(m)->ram_indices ? gbw(m)->ram_sources[i] : 0;
+}
+static void gb_ram_source_set(DpMachine *m, uint32_t i, uint32_t source) {
+    // MBC2 stores four bits and reads the upper nibble as ones. Only retain
+    // an origin when the ROM byte survives that transformation unchanged.
+    if (source && i >= GB_CGB_RAM_INDICES &&
+        dp_gbl_variant_mbc[gbw(m)->d->api->variant] == 2 &&
+        (source > gbw(m)->rom_size || (gbw(m)->rom[source - 1] & 0xf0u) != 0xf0u))
+        source = 0;
+    if (i < gbw(m)->ram_indices) gbw(m)->ram_sources[i] = source;
+}
+// Side-effect-free view through the current memory mapping, including CGB WRAM banks.
 static uint8_t gb_fetch(DpMachine *m, uint32_t a) {
     DpMach *d = gbw(m)->d;
-    if (a >= 0xC000 && a < 0xE000 && d->api->wram) return d->api->wram[a - 0xC000];
+    // Synthetic addresses expose all physical CGB WRAM banks to the core's
+    // dense RAM indices without changing the CPU-visible 16-bit bus.
+    if (a >= 0x10000u && a < 0x18000u) return d->api->wram[a - 0x10000u];
+    if (a >= 0x18000u && a < 0x1C000u) return d->api->vram[a - 0x18000u];
+    if (a >= GB_CGB_RAM_INDICES && a < gbw(m)->ram_indices) {
+        uint8_t v = d->api->eram[a - GB_CGB_RAM_INDICES];
+        return dp_gbl_variant_mbc[d->api->variant] == 2 ? v | 0xf0u : v;
+    }
+    if (a >= 0x8000 && a < 0xA000) {
+        unsigned bank = DP_GBL_COLOR_BUILD && gbw(m)->rom_size > 0x143 &&
+                        (gbw(m)->rom[0x143] & 0x80) ? d->api->rd(0xFF4F) & 1u : 0;
+        return d->api->vram[(a - 0x8000) + bank * 0x2000u];
+    }
+    if (a >= 0xFE00 && a < 0xFEA0) return d->api->oam[a - 0xFE00];
     if (a >= 0xFF80 && a < 0xFFFF && d->api->hram) return d->api->hram[a - 0xFF80];
     return dp_mach_op(d, (uint16_t)a);
 }
+// The instruction window must see the CPU bus, including OAM-DMA conflicts
+// and PPU access restrictions. Keep fetch() as the side-effect-free physical
+// inspection view used by provenance and static analysis. Avoid speculative
+// reads of I/O registers beyond the current instruction.
+static void gb_fetch_instruction(DpMachine *m, uint32_t a, uint8_t *out, unsigned n) {
+    const DpGblApi *api = gbw(m)->d->api;
+    for (unsigned i = 0; i < n; ++i) {
+        uint16_t addr = (uint16_t)(a + i);
+        out[i] = addr >= 0xFF00u && addr < 0xFF80u
+                     ? gb_fetch(m, addr) : api->rd(addr);
+    }
+}
+static int64_t gb_cgb_ram_index(DpMachine *m, uint32_t a) {
+    if (a >= 0xA000u && a < 0xC000u) {
+        const DpGblApi *api = gbw(m)->d->api;
+        int32_t offset = api->eram_index((uint16_t)a);
+        return offset >= 0 ? GB_CGB_RAM_INDICES + (int64_t)offset : -1;
+    }
+    if (a >= 0x8000u && a < 0xA000u) {
+        unsigned bank = gbw(m)->d->api->rd(0xFF4F) & 1u;
+        return 0x18000u + bank * 0x2000u + (a - 0x8000u);
+    }
+    if (a >= 0xE000u && a < 0xFE00u) a -= 0x2000u;
+    if (a >= 0xD000u && a < 0xE000u) {
+        unsigned bank = gbw(m)->d->api->rd(0xFF70) & 7u;
+        if (!bank) bank = 1;
+        return 0x10000u + bank * 0x1000u + (a - 0xD000u);
+    }
+    return a < 0x10000u ? (int64_t)a : -1;
+}
+static int64_t gb_dmg_ram_index(DpMachine *m, uint32_t a) {
+    (void)m;
+    if (a >= 0xE000u && a < 0xFE00u) a -= 0x2000u;
+    return a < 0x10000u ? (int64_t)a : -1;
+}
+static uint32_t gb_cgb_ram_addr(DpMachine *m, uint32_t i) { (void)m; return i; }
 static void gb_dump_dsy(DpMachine *m, FILE *file, uint32_t frame) {
     const DpGblApi *api = gbw(m)->d->api;
     const gbl_cpu_t *cpu = api->gbr;
@@ -133,20 +209,47 @@ static void gb_on_step(DpMach *m, uint16_t pc, uint8_t op, int entry) {
     GbWrap *g = m->owner;
     if (g->seen == 0) g->first_op = op;
     if (g->seen++ >= 1) dp_mach_cut(m, DP_CUT_STEPS);
-    if (g->o.on_step) g->o.on_step(g->user, pc, op, entry);
+    if (!g->probing && g->o.on_step) g->o.on_step(g->user, pc, op, entry);
 }
 static void gb_on_read(DpMach *m, uint16_t a, uint8_t v) {
     GbWrap *g = m->owner;
     if (g->joy_armed && a == 0xFF00) g->joy_seen = 1;
-    if (g->o.on_read) g->o.on_read(g->user, a, v);
+    if (!g->probing && g->o.on_read) g->o.on_read(g->user, a, v);
 }
 static void gb_on_write(DpMach *m, uint16_t a, uint8_t v) {
     GbWrap *g = m->owner;
-    if (g->o.on_write) g->o.on_write(g->user, a, v);
+    if (g->probing && g->ram_sources) {
+        /* A speculative instruction changes its own saved RAM as well. The
+         * global observer is suppressed, so discard stale local provenance. */
+        int64_t index = g->machine->ram_index(g->machine, a);
+        if (index >= 0) gb_ram_source_set(g->machine, (uint32_t)index, 0);
+    }
+    if (!g->probing && g->o.on_write) g->o.on_write(g->user, a, v);
+}
+static void gb_on_copy(DpMach *m, uint16_t src, uint16_t dst, uint16_t len, unsigned channel) {
+    GbWrap *g = m->owner;
+    /* The CGB OAM DMA runtime reads $E000-$FFFF through the WRAM echo.
+     * Report the address actually read, including $FE00-$FFFF where the
+     * CPU's own address space would instead select OAM or I/O. */
+    if (g->ram_sources && channel == DP_COPY_GB_OAM && src >= 0xE000u)
+        src = (uint16_t)(src - 0x2000u);
+    if (g->ram_sources) {
+        for (unsigned i = 0; i < len; i++) {
+            uint16_t s = (uint16_t)(src + i), d = (uint16_t)(dst + i);
+            int64_t from_rom = g->machine->rom_index(g->machine, s);
+            int64_t from_ram = from_rom < 0 ? g->machine->ram_index(g->machine, s) : -1;
+            int64_t to_ram = g->machine->ram_index(g->machine, d);
+            uint32_t provenance = from_rom >= 0 ? (uint32_t)from_rom + 1u :
+                from_ram >= 0 ? gb_ram_source(g->machine, (uint32_t)from_ram) : 0;
+            if (to_ram >= 0) gb_ram_source_set(g->machine, (uint32_t)to_ram, provenance);
+        }
+    }
+    if (!g->probing && g->o.on_copy) g->o.on_copy(g->user, src, len, channel);
 }
 static void gb_attach_hooks(DpMachine *m) {
     GbWrap *g = gbw(m);
     dp_mach_attach(g->d, g, gb_on_step, gb_on_read, gb_on_write, NULL);
+    g->d->on_copy = gb_on_copy;
 }
 static void gb_observe(DpMachine *m, const DpObservers *o, void *user) {
     GbWrap *g = gbw(m);
@@ -183,18 +286,59 @@ static int gb_seed_regs(DpMachine *m, uint8_t a, uint16_t sp) {
     if (sp != 0xFFFF) gbw(m)->d->api->gbr->sp = sp;
     return 1;
 }
-static void gb_poke(DpMachine *m, uint32_t a, uint8_t v) { gbw(m)->d->api->wr((uint16_t)a, v); }
+static void gb_poke(DpMachine *m, uint32_t a, uint8_t v) {
+    GbWrap *g = gbw(m);
+    uint16_t addr = (uint16_t)a;
+    /* Exploration mutations bypass the CPU write hook. Keep provenance only
+     * when the physical byte actually remains unchanged (including rejected
+     * writes and mirrored/banked RAM), without creating a coverage event. */
+    int memory = (addr >= 0x8000u && addr < 0xFEA0u) ||
+                 (addr >= 0xFF80u && addr < 0xFFFFu);
+    int64_t index = g->ram_sources && memory ? m->ram_index(m, addr) : -1;
+    uint8_t old = index >= 0 ? gb_fetch(m, m->ram_addr(m, (uint32_t)index)) : 0;
+    g->d->api->wr(addr, v);
+    if (index >= 0 && old != gb_fetch(m, m->ram_addr(m, (uint32_t)index)))
+        gb_ram_source_set(m, (uint32_t)index, 0);
+}
 // per-bank seeding: the $4000 window shows 16 KiB block `bank` (the kernel's seed_banks);
 // bank 0 included — the reset view is not assumed, the boot may have selected another bank
 static int gb_bank_view(DpMachine *m, unsigned bank) {
-    gb_poke(m, 0x2000, (uint8_t)bank);
-    if (bank > 0xff) gb_poke(m, 0x3000, (uint8_t)(bank >> 8));
-    return 1;
+    DpMach *d = gbw(m)->d;
+    unsigned mbc = dp_gbl_variant_mbc[d->api->variant];
+    if (bank >= *d->api->rom_banks) return 0;
+    switch (mbc) {
+    case 0:
+        break; /* fixed bank 1 */
+    case 1: {
+        unsigned shift = *d->api->mbc1m ? 4u : 5u;
+        unsigned low = bank & ((1u << shift) - 1u);
+        /* MBC1M can select low nibble zero with bit 4 set; ordinary
+         * MBC1 instead remaps each low-zero bank to its successor. */
+        if (*d->api->mbc1m && !low) low = 0x10;
+        gb_poke(m, 0x2000, (uint8_t)low);
+        gb_poke(m, 0x4000, (uint8_t)(bank >> shift));
+        break;
+    }
+    case 2:
+        gb_poke(m, 0x2100, (uint8_t)bank); /* address bit 8 selects ROM */
+        break;
+    case 3:
+        gb_poke(m, 0x2000, (uint8_t)bank);
+        break;
+    case 5:
+        gb_poke(m, 0x2000, (uint8_t)bank);
+        gb_poke(m, 0x3000, (uint8_t)(bank >> 8));
+        break;
+    default:
+        return 0;
+    }
+    /* Report unavailable or bus-blocked mappings instead of seeding an
+     * unintended bank. MBC1/2/3 cannot select every nominal bank. */
+    return d->api->gbr->rom_bank == bank;
 }
-// nonsense cuts (audit E2): echo RAM $E000-$FDFF and OAM $FE00-$FEFF never hold
-// real code (HRAM $FF00+ does — the boot code runs there); a stack outside
-// WRAM/HRAM pops garbage
-static int gb_cut_pc(DpMachine *m, uint32_t pc) { (void)m; return pc >= 0xE000 && pc < 0xFF00; }
+// Echo RAM mirrors executable WRAM; only the OAM/unusable window is cut.
+// A stack outside WRAM/HRAM pops garbage.
+static int gb_cut_pc(DpMachine *m, uint32_t pc) { (void)m; return pc >= 0xFE00 && pc < 0xFF00; }
 // shared DP_DEST_* knowledge: where a write lands in the hardware (the GB's
 // finer DP_DF_* types project onto these same destinations)
 static uint8_t gb_data_dest(DpMachine *m, uint32_t a) {
@@ -236,6 +380,10 @@ static const DpCtxComp gb_ctx[] = {
     { "oam", DP_CC_PAGES, -1, 0xA0 },    { "io", DP_CC_PAGES, -1, 0x80 },
 };
 static uint64_t gb_ctx_reg_hash(DpMachine *m) {   // the register block before the clocks (includes pc, sp, flags, ime, rom bank)
+    // CGB banking and DMA state are outside gbl_cpu_t. Preserve the full
+    // machine state in the projection key rather than merging banked states.
+    if (DP_GBL_COLOR_BUILD && gbw(m)->rom_size > 0x143 && (gbw(m)->rom[0x143] & 0x80))
+        return gb_state_hash(m);
     const uint8_t *b = (const uint8_t *)gbw(m)->d->api->gbr;
     uint64_t h = 0xcbf29ce484222325ull;
     for (size_t i = 0; i < offsetof(gbl_cpu_t, cyc); i++) h = (h ^ b[i]) * 0x100000001b3ull;
@@ -257,28 +405,85 @@ static int gb_ctx_components(DpMachine *m, const DpCtxComp **out) {
     return (int)(sizeof gb_ctx / sizeof *gb_ctx);
 }
 
+static int gb_probe_run(DpMachine *m) {
+    GbWrap *g = gbw(m);
+    g->probing = 1;
+    int ran = gb_run(m);
+    g->probing = 0;
+    return ran;
+}
+
 
 // technique 2 on GB: an instruction that reads the joypad port ($FF00) forks one state per button
 // held; the held pad stays in the saved state.  The instruction is dry-run once to see the read.
 static int gb_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *bytes, unsigned k, uint8_t *save) {
     (void)user; (void)pc;
     static const uint8_t pads[] = {0x80, 0x10, 0x20, 0x40, 0x04, 0x08, 0x02, 0x01};
-    static const uint8_t ly[] = {0x00, 0x90, 0x99, 0x8F};     // line 0, first VBlank line, last line, last visible line
-    static const uint8_t stat[] = {0x00, 0x01, 0x02, 0x03};   // PPU mode 0..3
     GbWrap *g = gbw(m);
-    // a read of LY ($FF44) or STAT ($FF41) forks one state per plausible value: the instruction runs
-    // on the live machine, A is overwritten, the state is saved, then the live state is restored
-    int rly  = (bytes[0] == 0xF0 && bytes[1] == 0x44) || (bytes[0] == 0xFA && bytes[1] == 0x44 && bytes[2] == 0xFF);
-    int rsta = (bytes[0] == 0xF0 && bytes[1] == 0x41) || (bytes[0] == 0xFA && bytes[1] == 0x41 && bytes[2] == 0xFF);
-    if (rly || rsta) {
-        const uint8_t *vals = rly ? ly : stat;
-        unsigned n = rly ? sizeof ly : sizeof stat;
-        if (k >= n) return 0;
+    // Externally supplied IR and DAC samples are not determined by the ROM.
+    // Substitute the bus read during the instruction, so arithmetic, bit
+    // operations and read-modify-write instructions see the alternative too.
+    uint32_t read_addr = 0x10000u;
+    if (bytes[0] == 0xF0) read_addr = 0xFF00u | bytes[1];
+    else if (bytes[0] == 0xFA) read_addr = (uint32_t)bytes[1] | ((uint32_t)bytes[2] << 8);
+    else if (bytes[0] == 0xF2) read_addr = 0xFF00u | (g->d->api->gbr->bc & 0xFFu);
+    else if (bytes[0] == 0x0A) read_addr = g->d->api->gbr->bc;
+    else if (bytes[0] == 0x1A) read_addr = g->d->api->gbr->de;
+    else if (bytes[0] == 0x2A || bytes[0] == 0x3A) read_addr = g->d->api->gbr->hl;
+    else if ((bytes[0] & 0xC7u) == 0x46u && bytes[0] != 0x76u) {
+        read_addr = g->d->api->gbr->hl;
+    }
+    else if ((bytes[0] >= 0x80 && bytes[0] <= 0xbf && (bytes[0] & 7u) == 6u) ||
+             bytes[0] == 0x34 || bytes[0] == 0x35 ||
+             (bytes[0] == 0xcb && (bytes[1] & 7u) == 6u))
+        read_addr = g->d->api->gbr->hl;
+    else if ((bytes[0] & 0xcfu) == 0xc1u || bytes[0] == 0xc9 || bytes[0] == 0xd9 ||
+             bytes[0] == 0xc0 || bytes[0] == 0xc8 || bytes[0] == 0xd0 || bytes[0] == 0xd8) {
+        uint16_t sp = g->d->api->gbr->sp;
+        if (sp == 0xff01 || sp == 0xff02 || sp == 0xff41 || sp == 0xff44 ||
+            sp == 0xff56 || sp == 0xff76 || sp == 0xff77)
+            read_addr = sp;
+        else read_addr = (uint16_t)(sp + 1u);
+    }
+    int cgb = DP_GBL_COLOR_BUILD && g->rom_size > 0x143 && (g->rom[0x143] & 0x80);
+    int rly = read_addr == 0xFF44;
+    int rsta = read_addr == 0xFF41;
+    int ir = cgb && read_addr == 0xFF56 && (g->d->api->io[0x56] & 0xC0) == 0xC0;
+    int pcm = cgb && (read_addr == 0xFF76 || read_addr == 0xFF77);
+    // A headless run has no serial peer. Explore received bytes on either
+    // clock, including reads after the completion IRQ has been acknowledged.
+    uint8_t sc = g->d->api->io[0x02];
+    int serial = (read_addr == 0xFF01 && ((sc & 0x80u) || *g->d->api->serial_received)) ||
+                 (read_addr == 0xFF02 && (sc & 0x81u) == 0x80u);
+    if (rly || rsta || ir || pcm || serial) {
+        int lcd_on = (g->d->api->io[0x40] & 0x80u) != 0;
+        unsigned count = rly ? (lcd_on ? 154u : 1u) :
+                         rsta ? (lcd_on ? 8u : 1u) :
+                         ir || (serial && read_addr == 0xFF02) ? 2u : 256u;
+        if (k >= count) return 0;
         uint8_t *pre = malloc(m->state_bytes(m));
         if (!pre) return 0;
         m->save(m, pre);
-        gb_run(m);
-        g->d->api->gbr->a = vals[k];
+        uint8_t value = rsta ? (uint8_t)(lcd_on ? (g->d->api->rd(0xFF41) & 0xF8u) | k :
+                                                   g->d->api->rd(0xFF41) & 0xFCu) :
+                        ir ? (uint8_t)((g->d->api->rd(0xFF56) & ~2u) | (k << 1)) : (uint8_t)k;
+        if (serial && read_addr == 0xFF02) {
+            value = (uint8_t)((g->d->api->rd(0xFF02) & 0x7Fu) | (k ? 0x80u : 0));
+            if (!k) {
+                g->d->api->io[0x02] &= 0x7Fu;
+                g->d->api->io[0x0F] |= 8u;
+                *g->d->api->serial_received = 1;
+            }
+        } else if (serial) {
+            g->d->api->io[0x01] = value;
+        }
+        g->d->probe_address = (uint16_t)read_addr;
+        g->d->probe_value = value;
+        g->d->probe_hit = 0;
+        g->d->probe_enabled = 1;
+        int ran = gb_probe_run(m);
+        g->d->probe_enabled = 0;
+        if (!ran || !g->d->probe_hit) { m->load(m, pre); free(pre); return 0; }
         m->save(m, save);
         m->load(m, pre);
         free(pre);
@@ -289,7 +494,7 @@ static int gb_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *
     if (!pre) return 0;
     m->save(m, pre);
     g->joy_armed = 1; g->joy_seen = 0;
-    gb_run(m);
+    gb_probe_run(m);
     g->joy_armed = 0;
     int hit = g->joy_seen;
     m->load(m, pre);
@@ -297,23 +502,49 @@ static int gb_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *
     free(pre);
     return hit;
 }
-// IRQ fork: where the vertical blank interrupt is enabled and the master enable is on, one state
-// with the VBlank request raised (delay 1 only)
-static int gb_irq_alt(void *user, DpMachine *m, unsigned delay, uint8_t *save) {
+// Explore each enabled interrupt line independently, preserving the concrete
+// requests and priority. The snapshot is restored before the dispatcher runs.
+static void gb_irq_request(DpMach *d, unsigned source, uint8_t bit) {
+    if (source == 3 && (d->api->io[0x02] & 0x81u) == 0x80u) {
+        /* A peer clock can finish an externally clocked transfer while the
+         * CPU waits for its IRQ. Leave the received byte open to subsequent
+         * SB probes and make SC reflect the completed transfer. */
+        d->api->wr(0xFF02, d->api->io[0x02] & 0x7Fu);
+        d->api->io[0x01] = 0xFF;
+        *d->api->serial_received = 1;
+    }
+    d->api->io[0x0F] |= bit;
+}
+static int gb_irq_source_alt(void *user, DpMachine *m, unsigned source, unsigned delay, uint8_t *save) {
     (void)user;
     DpMach *d = gbw(m)->d;
-    if (delay != 1 || !d->api->gbr->ime || !d->api->ie || !(*d->api->ie & 1) || (d->api->io[0x0F] & 1)) return 0;
-    d->api->io[0x0F] |= 1;     // raise the request, snapshot, then lower it: the live machine is untouched
-    m->save(m, save);
-    d->api->io[0x0F] &= (uint8_t)~1u;
-    return 1;
+    if (source >= 5 || delay < 1 || delay > 3 || !d->api->gbr->ime || !d->api->ie) return 0;
+    uint8_t bit = (uint8_t)(1u << source);
+    if (!(*d->api->ie & bit) || (d->api->io[0x0F] & bit)) return 0;
+    /* Jitter the arrival itself, keeping the intervening concrete machine
+     * state and leaving the live path and its observations untouched. */
+    uint8_t *before = malloc(m->state_bytes(m));
+    if (!before) return 0;
+    m->save(m, before);
+    int ok = 1;
+    for (unsigned i = 1; i < delay && ok; i++) ok = gb_probe_run(m);
+    if (ok && d->api->gbr->ime && (*d->api->ie & bit) && !(d->api->io[0x0F] & bit)) {
+        gb_irq_request(d, source, bit);
+        m->save(m, save);
+    } else ok = 0;
+    m->load(m, before);
+    free(before);
+    return ok;
 }
-static const DpPlatformHooks gb_hooks = { .event_probe = gb_event_probe, .irq_alt = gb_irq_alt };
+static const DpPlatformHooks gb_hooks = {
+    .event_probe = gb_event_probe, .irq_source_count = 5, .irq_source_alt = gb_irq_source_alt
+};
 const DpPlatformHooks *dp_machine_gb_hooks(void) { return &gb_hooks; }
 
 static void gb_close(DpMachine *m) {
     if (!m) return;
     dp_mach_close(gbw(m)->d);
+    free(gbw(m)->ram_sources);
     free(m->impl);
     free(m);
 }
@@ -332,14 +563,40 @@ static DpMachine *gb_clone(DpMachine *m, unsigned worker) {
         if (o->tas) gb_tas_tune(d, o->tas);
         DpMachine *c = gb_wrap(d);
         if (!c) { dp_mach_close(d); return NULL; }
-        gbw(c)->rom = o->rom; gbw(c)->rom_size = o->rom_size; gbw(c)->tas = o->tas;
-        c->clone = gb_clone;
+        dp_machine_gb_source(c, o->rom, o->rom_size);
+        gbw(c)->tas = o->tas;
         return c;
     }
     return NULL;   // every compiled instance is taken
 }
 void dp_machine_gb_source(DpMachine *m, const uint8_t *rom, size_t size) {
     gbw(m)->rom = rom; gbw(m)->rom_size = size;
+    m->ram_index = gb_dmg_ram_index;
+    if (DP_GBL_COLOR_BUILD && size > 0x143 && (rom[0x143] & 0x80)) {
+        uint32_t indices = GB_CGB_RAM_INDICES + dp_gbl_variant_eram[gbw(m)->d->api->variant];
+        if (gbw(m)->ram_indices != indices) {
+            free(gbw(m)->ram_sources);
+            gbw(m)->ram_sources = calloc(indices, sizeof(uint32_t));
+            if (!gbw(m)->ram_sources) {
+                fprintf(stderr, "deepeel: cannot allocate CGB RAM provenance\n");
+                abort();
+            }
+            gbw(m)->ram_indices = indices;
+        }
+        m->ram_index = gb_cgb_ram_index;
+        m->ram_addr = gb_cgb_ram_addr;
+        m->ram_size = gbw(m)->ram_indices;
+        m->ram_source = gb_ram_source;
+        m->ram_source_set = gb_ram_source_set;
+    } else {
+        free(gbw(m)->ram_sources);
+        gbw(m)->ram_sources = NULL;
+        gbw(m)->ram_indices = 0;
+        m->ram_addr = NULL;
+        m->ram_size = 0;
+        m->ram_source = NULL;
+        m->ram_source_set = NULL;
+    }
     m->clone = gb_clone;
 }
 
@@ -351,6 +608,7 @@ static DpMachine *gb_wrap(DpMach *impl) {
     GbWrap *g = calloc(1, sizeof *g);
     if (!m || !g) { free(m); free(g); return NULL; }
     g->d = impl;
+    g->machine = m;
     m->name = "gb";
     m->work_ram_base = 0xC000u; m->work_ram_len = 0x2000u;
     m->dump_dsy = gb_dump_dsy;
@@ -367,6 +625,7 @@ static DpMachine *gb_wrap(DpMach *impl) {
     m->load = gb_load;
     m->rom_index = gb_rom_index;
     m->fetch = gb_fetch;
+    m->fetch_n = gb_fetch_instruction;
     m->run = gb_run;
     m->pc = gb_pc;
     m->set_pc = gb_set_pc;

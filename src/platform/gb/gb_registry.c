@@ -59,9 +59,8 @@ static const DpIoReg gb_io_regs[] = {
     { 0xFF4B, 0xFF4B, "WX", "video", 2, 0 },
     // CGB
     { 0xFF4D, 0xFF4D, "KEY1", "cgb", 3, DP_IMPL_WINDOW },
-    // CGB registers: the m0boy GB runtime is DMG (one VRAM bank, no HDMA),
-    // so VBK/SVBK/HDMA are listed for the record, not modelled
-    { 0xFF4F, 0xFF4F, "VBK", "cgb", 2, DP_IMPL_WINDOW },
+    // The CGB runtime is selected at build time; DMG builds retain the registry.
+    { 0xFF4F, 0xFF4F, "VBK", "cgb", 3, DP_IMPL_WINDOW },
     { 0xFF50, 0xFF50, "BOOTROM", "sys", 2, 0 },
     { 0xFF51, 0xFF51, "HDMA1", "cgb", 2, DP_IMPL_HDMA },
     { 0xFF52, 0xFF52, "HDMA2", "cgb", 2, DP_IMPL_HDMA },
@@ -74,7 +73,7 @@ static const DpIoReg gb_io_regs[] = {
     { 0xFF6A, 0xFF6A, "OCPS", "cgb", 2, 0 },
     { 0xFF6B, 0xFF6B, "OCPD", "cgb", 3, 0 },
     { 0xFF6C, 0xFF6C, "OPRI", "cgb", 2, 0 },
-    { 0xFF70, 0xFF70, "SVBK", "cgb", 2, DP_IMPL_WINDOW },
+    { 0xFF70, 0xFF70, "SVBK", "cgb", 3, DP_IMPL_WINDOW },
     { 0xFF72, 0xFF72, "FF72", "cgb", 3, 0 },
     { 0xFF73, 0xFF73, "FF73", "cgb", 3, 0 },
     { 0xFF74, 0xFF74, "FF74", "cgb", 3, 0 },

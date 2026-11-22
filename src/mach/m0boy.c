@@ -75,6 +75,7 @@ void dp_mach_attach(DpMach *m, void *owner,
     m->on_step = on_step;
     m->on_read = on_read;
     m->on_write = on_write;
+    m->on_copy = NULL;
     m->on_vblank = on_vblank;
 }
 
@@ -88,6 +89,7 @@ void dp_mach_set_rom(DpMach *m, const uint8_t *rom, uint32_t size) {
     if (size > m->api->rom_max) size = m->api->rom_max; // the caller checked
     memcpy(m->api->rom, rom, size);
     m->cart_rom = rom;
+    *m->api->rtc_present = size > 0x147 && (rom[0x147] == 0x0f || rom[0x147] == 0x10);
     m->cgb_bios_mapped = 0;
     /* the mapper wraps bank numbers at the cartridge's real size */
     uint32_t banks = 2;
@@ -210,7 +212,9 @@ void dp_gbl_hook_trace(int v, int i, uint16_t pc) {
         fprintf(dp_dbg_trace_f, "%d.%d %04x %02x %04x %04x %04x %04x cyc=%u ime=%u if=%02x s=%02x%02x%02x%02x\n", v, i, pc, c->a, c->bc, c->de, c->hl, c->sp, (unsigned)c->cyc, c->ime, m->api->io ? m->api->io[0x0F] : 0, m->api->eram[0x8f7], m->api->eram[0x8f8], m->api->eram[0x8f9], m->api->eram[0x8fa]);
     }
     /* The stepping observer may cut before this instruction executes. */
-    if (m->on_step) m->on_step(m, pc, dp_mach_op(m, pc), 0);
+    /* Match the CPU bus even when the fast page is unmapped (HRAM/VRAM)
+     * or an OAM DMA changes the value fetched from an otherwise mapped page. */
+    if (m->on_step) m->on_step(m, pc, m->api->rd(pc), 0);
     // DEEPEEL_TAS_INSTR=<file>: one "<cycle> <pc> <a> <f> <bc> <de> <hl> <sp> <ime>"
     // per executed instruction, the same columns tools/gbhawk_ref --instr writes
     {
@@ -235,8 +239,12 @@ void dp_gbl_hook_trace(int v, int i, uint16_t pc) {
     }
 }
 
-void dp_gbl_hook_read(int v, int i, uint16_t a, uint8_t val) {
+uint8_t dp_gbl_hook_read(int v, int i, uint16_t a, uint8_t val) {
     DpMach *m = mach_at[v][i];
+    if (m && m->probe_enabled && m->probe_address == a) {
+        m->probe_hit = 1;
+        val = m->probe_value;
+    }
     static long watchr = -2;
     if (watchr == -2) {
         const char *e = getenv("DEEPEEL_DEBUG_WATCHR"); // desync diagnostics
@@ -244,6 +252,7 @@ void dp_gbl_hook_read(int v, int i, uint16_t a, uint8_t val) {
     }
     if (m && watchr == a) fprintf(stderr, "R v=%u a=%04x val=%02x pc=%04x\n", (unsigned)*m->api->frame, a, val, m->api->gbr->pc);
     if (m && m->on_read) m->on_read(m, a, val);
+    return val;
 }
 
 void dp_gbl_hook_write(int v, int i, uint16_t a, uint8_t val) {
@@ -266,6 +275,11 @@ void dp_gbl_hook_write(int v, int i, uint16_t a, uint8_t val) {
                 (unsigned)*m->api->frame, a, val, c->pc, c->a, c->bc, c->de, c->hl, c->sp, c->rom_bank);
     }
     if (m && m->on_write) m->on_write(m, a, val);
+}
+
+void dp_gbl_hook_dma(int v, int i, uint16_t src, uint16_t dst, uint16_t len, unsigned channel) {
+    DpMach *m = mach_at[v][i];
+    if (m && m->on_copy) m->on_copy(m, src, dst, len, channel);
 }
 
 uint16_t *dp_gbl_hook_line_begin(int v, int i, uint8_t ly) {

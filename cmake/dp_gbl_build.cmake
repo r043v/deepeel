@@ -55,6 +55,7 @@ foreach(v RANGE ${nv})
 ${cgbdef}#define GBL_ERAM_SIZE ${eram}
 #define GBL_ERAM_ON_SD 0
 #define GBL_BATTERY 0
+#define GBL_RTC 1
 #define GBL_ROM_STREAM 0
 #define GBL_ROM_PACKED 0
 #define GBL_TITLE \"DEEPEEL\"
@@ -74,7 +75,7 @@ ${cgbdef}#define GBL_ERAM_SIZE ${eram}
     execute_process(
       COMMAND ${CMAKE_C_COMPILER} -c -O2 -w -fno-stack-protector
         -I${DP_GBL_SRC} -I${cfg}
-        -DGBL_COVERAGE -DGBL_TRACE -DGBL_VRAM_HOOK=1 -DGBL_ACCESS_BLOCK=1
+        -DGBL_COVERAGE -DGBL_TRACE -DGBL_VRAM_HOOK=1 -DGBL_ACCESS_BLOCK=1 -DGBL_DEEPEEL_DMA_HOOK=1
         ${hooks}
         ${BASE_FLAGS}
         ${DP_GBL_SRC}/${src} -o ${obj}

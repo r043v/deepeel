@@ -1,5 +1,138 @@
 # Plateforme Game Boy
 
+L'amorçage des banques ROM utilise les registres propres à chaque contrôleur :
+bits hauts MBC1 et MBC5, adresse de sélection MBC2 et remise à zéro du
+neuvième bit MBC5. Une banque impossible à afficher est signalée au noyau au
+lieu de produire une graine dans une autre banque. Ce chemin commun au DMG et
+au CGB reste à valider.
+
+Pour le DMA OAM CGB dont l'adresse source est dans `$E000–$FFFF`, l'observateur
+utilise l'adresse miroir WRAM effectivement lue par le runtime. La provenance
+de la copie ne confond donc plus les plages `$FE00–$FFFF` avec l'OAM ou les E/S
+du processeur. Ce comportement du runtime reste à valider sur matériel.
+
+Les écritures de recherche qui modifient directement une RAM CGB invalident
+la provenance de l'octet physique concerné, y compris par un miroir ou dans
+une banque sélectionnée. Une écriture sans effet conserve cette provenance.
+Ces mutations ne sont pas comptées comme des écritures du programme. À valider.
+
+La clé de déduplication d'état GB inclut les cycles CPU et le numéro de trame,
+en DMG comme en CGB : deux échéances identiques ne désignent pas le même état
+si l'horloge courante diffère. Cela réduit les évictions de boucles dépendantes
+du temps, au prix de davantage d'états conservés. La clé reste un condensat,
+pas une comparaison octet par octet. À valider.
+
+Les sondes LY et STAT injectent leurs alternatives dans la lecture effective,
+donc aussi dans les calculs et les lectures indirectes, en DMG comme en CGB.
+LCD actif, LY explore les 154 lignes et STAT les combinaisons de mode et de
+coïncidence en conservant ses bits hauts ; LCD arrêté, les valeurs sont
+contraintes à son état. Ces combinaisons constituent une surapproximation de
+l'instant vidéo, pas une simulation des événements PPU correspondants. À valider.
+
+Pendant une exécution d’essai, les écritures invalident la provenance RAM
+locale et les copies DMA la propagent dans le snapshot alternatif, sans
+ajouter d’observations au chemin courant. À valider.
+
+Le transfert série à horloge interne décale maintenant SB bit par bit et
+conserve son avancement dans les snapshots ; une désactivation annule son
+échéance. Les entrées non connectées valent 1. À valider en DMG et CGB.
+
+La réinitialisation des instances GB remet à zéro les entrées et temporisations
+internes, le compteur de trames et la mémoire miroir de compatibilité ; les
+réglages de synchronisation du film restent configurables. À valider.
+
+La recherche crée des fourches distinctes pour les cinq sources IRQ GB
+(VBlank, LCD, timer, série et joypad) lorsque chacune est activée ; leur
+identité est conservée dans la déduplication. La variation temporelle peut
+retarder leur arrivée de une ou deux instructions. Comportement à valider en
+DMG et CGB.
+
+Le décodage observé au début d’une instruction utilise le bus CPU, y compris
+pour le code exécuté en VRAM ou HRAM et les conflits avec le DMA OAM.
+La fenêtre de décodage du noyau utilise elle aussi le bus pour ces adresses ;
+les registres d'E/S restent lus par la vue d'inspection pour éviter des effets
+de bord anticipés. Les octets de la fenêtre sont échantillonnés au même instant,
+sans prédire l'évolution du DMA pendant les cycles de l'instruction. Cette
+modification reste à valider en DMG et CGB.
+
+Les snapshots préservent aussi les échéances de PPU et d’entrée différée,
+les temporisations d’interruption et le DMA OAM lorsqu’il est activé. Le
+changement de vitesse CGB suspend DIV et les fronts du timer pendant ses
+8200 cycles ; le verrouillage vidéo et le rendu pendant cette pause restent
+à modéliser. Ces changements ne sont pas encore validés.
+
+Travail CGB en cours : la compilation neuve active désormais le runtime CGB
+par défaut ; `-DDP_GBL_CGB=0` conserve une compilation DMG indépendante.
+Les blocs HDMA/GDMA réellement transférés sont transmis à l'observateur de
+copies et les snapshots conservent le transfert HDMA en attente. Les lectures
+d'inspection respectent la banque WRAM courante ; pour une cartouche CGB, la
+clé de projection inclut l'état machine afin de ne pas fusionner des banques
+différentes. Ces changements restent à valider sur les deux configurations ;
+ils ne garantissent pas à eux seuls une émulation intégrale du matériel CGB.
+Les indices de provenance WRAM et VRAM CGB distinguent les banques physiques, y
+compris depuis les instances clonées ; les adresses miroir pointent sur les
+mêmes indices. La RAM miroir reste exécutable en DMG comme en CGB et partage
+son indice de provenance avec la WRAM. En CGB, la provenance des copies
+verbatim suit désormais chaque snapshot, y compris les transferts DMA ; les
+autres plateformes conservent encore le tableau partagé entre fourches.
+La RAM cartouche possède elle aussi un indice physique, y compris les petites
+RAM et leurs miroirs. Pour les quatre bits de RAM MBC2, une provenance verbatim
+n'est retenue que si les bits hauts lus restent identiques à ceux de la ROM.
+La RAM désactivée et les registres d'horloge sélectionnés ne sont pas assimilés
+à des octets de RAM. Les types MBC3 avec horloge disposent des registres et du
+verrouillage RTC ; les autres types MBC3 n'exposent pas ces registres. Sans
+horloge hôte, le runtime avance cette horloge selon les cycles émulés, à raison
+de 4 194 304 cycles par seconde en vitesse normale et du double en vitesse CGB
+rapide ; la fraction de seconde est conservée dans le snapshot, même LCD éteint.
+Ces comportements restent à valider en CGB et DMG.
+Cette provenance augmente la taille
+brute de chaque snapshot CGB de 448 Kio plus quatre fois la taille de la RAM
+cartouche ; le tampon de compatibilité echo ajoute 8 Kio aux snapshots GB
+des deux modes. Le spool peut les compresser. La validation reste à effectuer.
+Le port série utilise aussi l'horloge rapide CGB lorsque SC bit 1 est armé ;
+le chemin DMG conserve son horloge et son masque de lecture habituels. La
+lecture d'inspection de la VRAM choisit la banque courante même lorsque les
+accès CPU passent par le chemin lent. Ces deux corrections restent à valider.
+Les copies OAM directes sont également transmises à l'observateur en modes
+DMG et CGB ; le cache d'événements est invalidé au changement d'état HDMA.
+En mode CGB, le DMA OAM avance maintenant par octet sur 160 cycles machine,
+arbitre les accès CPU par bus et conserve son avancement dans les snapshots ;
+le comportement DMG existant est conservé. Le rendu pendant le transfert
+et les cas de redémarrage restent à valider. En CGB, les accès CPU bloqués
+par le DMA ou par la PPU ne sont plus attribués comme lectures ou écritures
+effectives à la couverture.
+Un transfert VRAM s'arrête à la fin de la fenêtre au lieu de reboucler au
+début ; l'état exact des registres lors de ce débordement reste incertain.
+Le HDMA est suspendu pendant l'attente `HALT` ; cet état d'attente est inclus
+dans le snapshot pour qu'une reprise depuis une trame ne relance pas le CPU.
+Ce comportement et ses interactions avec les interruptions restent à valider.
+Les registres de palette respectent l'interdiction d'accès en mode 3 et leur
+auto-incrément, et les masques des registres CGB infrarouge et FF6C/FF72–FF75
+sont pris en compte. L'entrée infrarouge ne reçoit pas encore de signal
+externe concret ; les sondes explorent ses deux niveaux à la lecture et les
+256 valeurs des registres PCM. La valeur alternative est injectée dans le
+bus avant l'exécution du calcul SM83, y compris pour les lectures suivies
+d'opérations arithmétiques ou de manipulation de bits. Pour une liaison série
+DMG ou CGB, les lectures de SB donnent aussi lieu à des variantes de réception,
+y compris après une transmission à horloge interne et l’acquittement de son
+interruption. À horloge externe, SC propose également la fin de transfert. Ces
+fins sont aussi possibles depuis une fourche d'interruption série : SC passe
+alors à l'état terminé et SB reste ouvert aux variantes de réception. Ce chemin
+est disponible en CGB et en DMG ; il reste à valider. Les variantes de sonde
+ne remplacent pas une simulation audio ou une liaison IR.
+Leurs exécutions d'essai ne produisent plus d'observations de couverture ou
+de copies sur le chemin concret ; seul l'état alternatif mis en file compte.
+Pour les cartouches CGB, le runtime avance l'audio lors des accès aux
+registres et des synchronisations matérielles, même sans sortie sonore ; les
+registres PCM exposent les sorties numériques courantes et la fraction de
+temps est conservée dans les snapshots. La synthèse reste approximative et
+non validée au cycle.
+Le rendu CGB utilise la priorité des sprites par indice OAM après amorçage.
+OPRI est lisible et modifiable, mais seule sa valeur avant le verrouillage de
+la ROM d'amorçage détermine la priorité ; les écritures ultérieures ne la
+changent pas ([SameBoy BESS](https://github.com/LIJI32/SameBoy/blob/master/BESS.md)).
+L'amorçage spécial PGB n'est pas émulé.
+
 Correctifs du noyau en cours : les fenêtres de décodage disposent de dix
 octets pour les instructions longues 68000, la propagation des immédiats
 SM83 distingue les octets hauts et bas, et un plafond nul d'amorces de
@@ -10,6 +143,10 @@ priorité est évaluée dans le mapping sauvegardé et leur plafond est levé en
 mode non borné. Validation et autres travaux du plan restent en cours.
 En mode non borné, le budget de chemin règle désormais un quantum de
 répartition : il ne supprime plus le chemin à son expiration. Une variante
+de sonde peut aussi être réarmée sans le plafond de contextes borné, et les
+checkpoints TAS et sessions ne sont plus limités à 32. Une variante
+de rejeu depuis un checkpoint utilise désormais une séquence de touches
+pseudo-aléatoire reproductible par groupes de quatre trames. Une variante
 de banque refusée par le plafond borné ne consomme plus sa clé de déduplication.
 Avec un répertoire d'état, les variantes bancaires au-delà du plafond sont
 reportées dans la frontière ; la fixture `core_bank_deferred` vérifie leur
@@ -530,10 +667,9 @@ matériels sont ceux de m0boy.
   d'IRQ.
 - **RAM initiale à zéro**, registres au reset DMG ($01B0…) — l'exploration
   est déterministe ; deux exécutions donnent la même carte.
-- **CGB non modélisé** : le runtime m0boy GB est DMG — une seule banque VRAM,
-  pas de HDMA, une seule banque WRAM. VBK, SVBK et HDMA1-5 figurent au
-  registre pour mémoire, sans le drapeau `modelled` (corrigé en J0 : ils
-  étaient annoncés modélisés).
+- **CGB en cours de validation** : le runtime peut utiliser les banques VRAM
+  et WRAM et les transferts HDMA ; voir l'état des travaux en tête de page.
+  La couverture du matériel et la conservation des états restent à vérifier.
 - RTC MBC3 : sélecteur journalisé, horloge non simulée.
 - L'exploration est un superset du jeu réel : les chemins forcés explorent
   des cas qu'aucune partie ne produit (c'est le but — la nécessité par
@@ -1315,8 +1451,8 @@ Les correctifs relevés par la norme (`docs/COUVERTURE.fr.md` §10.12) :
   passe. `--no-closure` ne coupe plus que la fermeture.
 - **Graines d'IRQ** : les vecteurs RST et IRQ sont semés comme forcés, et non
   plus comme flux naturel.
-- **Registre** : VBK, SVBK et HDMA1-5 ne sont plus marqués `modelled`. Le
-  runtime est DMG (voir §Limites).
+- **Registre à ce jalon** : VBK, SVBK et HDMA1-5 n'étaient pas marqués
+  `modelled` ; le runtime employé était DMG (voir l'état actuel en tête de page).
 - **Autres plateformes**, même jalon :
   - Sega : `tree.bin` passe en version 2 et porte enfin le nombre de nœuds,
     que la version 1 écrasait ; `--resume` sans spool démarre à neuf ;

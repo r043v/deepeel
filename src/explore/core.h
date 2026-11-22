@@ -41,6 +41,11 @@ typedef struct DpPlatformHooks {
     // `delay` instructions (the line stays pending) and returns 1; otherwise returns 0.  The
     // live machine is left unchanged.  Counted in DpCoreResult.irq_forks.
     int (*irq_alt)(void *user, DpMachine *m, unsigned delay, uint8_t *save);
+    // Optional independently enumerable interrupt sources. Source numbers are stable
+    // within a backend; a missing or disabled source returns 0 without consuming
+    // the site key. When supplied, this replaces irq_alt for this backend.
+    unsigned irq_source_count;
+    int (*irq_source_alt)(void *user, DpMachine *m, unsigned source, unsigned delay, uint8_t *save);
     // called once when the workers are done, before the speculative gaps: the platform folds
     // its own evidence into the result (Sega: the provenance closure's static bytes, C3)
     void (*finish)(void *user, struct DpCoreResult *r);

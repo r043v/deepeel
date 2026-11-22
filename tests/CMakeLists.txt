@@ -317,6 +317,11 @@ target_include_directories(test_dpmachine PRIVATE ${M0BOY_DIR}/targets/sg1000/ru
 add_dependencies(test_dpmachine fixtures)
 add_test(NAME dpmachine COMMAND test_dpmachine ${CMAKE_CURRENT_BINARY_DIR})
 
+add_executable(test_gb_banks_dma test_gb_banks_dma.c)
+target_link_libraries(test_gb_banks_dma PRIVATE deepeel_core m)
+target_compile_definitions(test_gb_banks_dma PRIVATE TEST_CGB=$<BOOL:${DP_GBL_CGB}>)
+add_test(NAME gb_banks_dma COMMAND test_gb_banks_dma)
+
 add_executable(test_map_png test_map_png.c)
 target_link_libraries(test_map_png PRIVATE deepeel_core m)
 add_test(NAME map_png COMMAND test_map_png)

@@ -105,8 +105,9 @@ target_include_directories(dp_mdmach_lib PUBLIC src/mach PRIVATE ${DP_MD_RUNTIME
 target_compile_options(dp_mdmach_lib PRIVATE -w)
 
 set(DP_MACHINES "18" CACHE STRING "compiled m0boy machine instances (session workers)")
-# GBL_CGB in the m0boy runtime (host, optional): -DDP_GBL_CGB=1
-set(DP_GBL_CGB 0 CACHE STRING "build the m0boy runtime with Game Boy Color support")
+# CGB-capable runtime also runs DMG cartridges in DMG mode. A DMG-only
+# build remains available for small machines or separate regression runs.
+set(DP_GBL_CGB 1 CACHE STRING "build the m0boy runtime with Game Boy Color support")
 set(DP_GBL_VARIANTS "0:0;1:0;1:0x800;1:0x2000;1:0x8000;2:0x200;3:0;3:0x800;3:0x2000;3:0x8000;3:0x10000;3:0x20000;5:0;5:0x800;5:0x2000;5:0x8000;5:0x10000;5:0x20000"
     CACHE STRING "cartridge shapes compiled into the machine (MBC:ERAM)")
 
@@ -166,11 +167,17 @@ foreach(spec ${DP_GBL_VARIANTS})
     endif()
     string(APPEND g_body "\
 extern uint8_t ${p}gbl_rd(uint16_t a);
+extern int32_t ${p}gbl_deepeel_eram_index(uint16_t a);
+extern uint8_t ${p}gbl_deepeel_rtc_present, ${p}gbl_deepeel_serial_received;
+int ${p}gbl_platform_save_read(uint32_t sector, uint8_t *dst) { (void)sector; (void)dst; return 0; }
+int ${p}gbl_platform_save_write(uint32_t sector, const uint8_t *src) { (void)sector; (void)src; return 0; }
+extern int ${p}gbl_deepeel_cpu_access(uint16_t a);
 void ${p}gbl_coverage_hit(uint16_t bank, uint16_t addr, int entry) { dp_gbl_hook_coverage(${v}, ${i}, bank, addr, entry); }
 void ${p}gbl_trace_hook(uint16_t pc) { dp_gbl_hook_trace(${v}, ${i}, pc); }
-uint8_t ${p}dp_gbl_rd(uint16_t a) { uint8_t val = ${p}gbl_rd(a); dp_gbl_hook_read(${v}, ${i}, a, val); return val; }
+uint8_t ${p}dp_gbl_rd(uint16_t a) { int allowed = ${p}gbl_deepeel_cpu_access(a); uint8_t val = ${p}gbl_rd(a); if (allowed) val = dp_gbl_hook_read(${v}, ${i}, a, val); return val; }
 extern void ${p}gbl_wr(uint16_t a, uint8_t val);
-void ${p}dp_gbl_wr(uint16_t a, uint8_t val) { dp_gbl_hook_write(${v}, ${i}, a, val); ${p}gbl_wr(a, val); }
+void ${p}dp_gbl_wr(uint16_t a, uint8_t val) { if (${p}gbl_deepeel_cpu_access(a)) dp_gbl_hook_write(${v}, ${i}, a, val); ${p}gbl_wr(a, val); }
+void ${p}gbl_deepeel_dma(uint16_t src, uint16_t dst, uint16_t len, unsigned channel) { dp_gbl_hook_dma(${v}, ${i}, src, dst, len, channel); }
 uint16_t *${p}gbl_platform_line_begin(uint8_t ly) { return dp_gbl_hook_line_begin(${v}, ${i}, ly); }
 void ${p}gbl_platform_line_end(uint8_t ly) { dp_gbl_hook_line_end(${v}, ${i}, ly); }
 int ${p}gbl_platform_line_check(uint8_t ly, uint32_t sig) { (void)ly; (void)sig; return 1; }
@@ -209,9 +216,10 @@ static const DpGblApi inst_${v}_${i} = {
     &${p}gbr, ${p}gbl_io, &${p}gbl_ie, ${p}gbl_wram, ${p}gbl_vram, ${p}gbl_oam, ${p}gbl_hram,
     &${p}gbl_joyp, ${eram_ref}, (const uint8_t *const *)&${p}gbl_rmap, &${p}gbl_frame,
     &${p}gbl_interp_instrs, &${p}gbl_interp_only, &${p}gbl_skip_render,
-    (uint8_t *)${p}gbl_rom, ${rommax}, ${p}gbl_wr,
+    (uint8_t *)${p}gbl_rom, ${rommax}, ${p}gbl_wr, ${p}gbl_rd,
     &${p}gbl_sync_div_skew, &${p}gbl_sync_vba_off_clock, &${p}gbl_sync_pad_delay, &${p}gbl_sync_div_extra, &${p}gbl_sync_ppu_phase, ${p}gbl_ppu_phase_apply, &${p}gbl_rom0_bank, &${p}gbl_rom_banks, &${p}gbl_mbc1m,
     &${p}gbl_sync_echo_old, ${p}gbl_echo_apply, &${p}gbl_sync_ly_lag, &${p}gbl_sync_irq_trim, &${p}gbl_sync_halt_snd,
+    ${p}gbl_deepeel_eram_index, &${p}gbl_deepeel_rtc_present, &${p}gbl_deepeel_serial_received,
 };
 ")
     string(APPEND g_rows "[${v}][${i}] = &inst_${v}_${i},

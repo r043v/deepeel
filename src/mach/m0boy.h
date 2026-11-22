@@ -42,10 +42,13 @@ struct DpMach {
     const uint8_t *cart_rom;
     const uint8_t *cgb_bios;
     uint8_t cgb_bios_mapped;
+    uint16_t probe_address;
+    uint8_t probe_value, probe_enabled, probe_hit;
     void *owner; /* engine back-pointer (the explorer / worker) */
     void (*on_step)(DpMach *m, uint16_t pc, uint8_t op, int entry);
     void (*on_read)(DpMach *m, uint16_t a, uint8_t v);
     void (*on_write)(DpMach *m, uint16_t a, uint8_t v);
+    void (*on_copy)(DpMach *m, uint16_t src, uint16_t dst, uint16_t len, unsigned channel);
     void (*on_vblank)(DpMach *m);
 
     /* screen, filled when render is on (gbl_skip_render == 0) */

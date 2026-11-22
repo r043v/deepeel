@@ -36,6 +36,7 @@ typedef struct DpGblApi {
     /* the instance's real bus write (mapper registers, seeding): bypasses
      * the interposed read/write hooks on purpose */
     void (*wr)(uint16_t a, uint8_t v);
+    uint8_t (*rd)(uint16_t a);
     /* movie sync compatibility knobs (gbl.h): 0 = hardware behaviour */
     uint8_t *sync_div_skew, *sync_vba_off_clock;
     /* GBHawk profile (gbl.h): pad latch delay in cycles, extra DIV skew */
@@ -61,6 +62,9 @@ typedef struct DpGblApi {
     int16_t *sync_irq_trim;
     /* VBA 1.7.2 cores (gbl.h): HALT woken by vblank resumes on the sound grid (phase + 1, 0 = off) */
     int16_t *sync_halt_snd;
+    /* Physical RAM offset, or -1 for disabled RAM and cartridge registers. */
+    int32_t (*eram_index)(uint16_t address);
+    uint8_t *rtc_present, *serial_received;
 } DpGblApi;
 
 /* the ROM bank behind a pc/address of the fixed-or-switchable windows */
@@ -78,8 +82,9 @@ const char *dp_gbl_variant_name(int v);
  * hooks may longjmp (path cut). */
 void dp_gbl_hook_coverage(int v, int i, uint16_t bank, uint16_t addr, int entry);
 void dp_gbl_hook_trace(int v, int i, uint16_t pc);
-void dp_gbl_hook_read(int v, int i, uint16_t a, uint8_t val);
+uint8_t dp_gbl_hook_read(int v, int i, uint16_t a, uint8_t val);
 void dp_gbl_hook_write(int v, int i, uint16_t a, uint8_t val);
+void dp_gbl_hook_dma(int v, int i, uint16_t src, uint16_t dst, uint16_t len, unsigned channel);
 uint16_t *dp_gbl_hook_line_begin(int v, int i, uint8_t ly);
 void dp_gbl_hook_line_end(int v, int i, uint8_t ly);
 void dp_gbl_hook_vblank(int v, int i);

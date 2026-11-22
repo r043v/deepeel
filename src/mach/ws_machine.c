@@ -216,7 +216,8 @@ static DpMachine *ws_clone(DpMachine *m, unsigned worker) {
 }
 static int ws_attach(DpMachine *m) {
     WsWrap *w = m->impl;
-    if (!w->rom || w->d) return 0;
+    if (!w->rom) { fprintf(stderr, "deepeel: ws: attach: no image\n"); return 0; }
+    if (w->d) return 0;
     w->d = dp_ws_open(w->rom, w->rom_size);
     return w->d != NULL;
 }

@@ -63,14 +63,15 @@ static void sink_audio(void *ctx, uint8_t speaker, int16_t left, int16_t right) 
 // ---- boot -------------------------------------------------------------------
 
 DpWs *dp_ws_open(const uint8_t *data, size_t size) {
-    if (!data || !size) return NULL;
+    if (!data || !size) { fprintf(stderr, "deepeel: ws: open: null image\n"); return NULL; }
     DpWs *d = calloc(1, sizeof *d);
-    if (!d) return NULL;
+    if (!d) { fprintf(stderr, "deepeel: ws: open: out of memory\n"); return NULL; }
     d->rom_copy = malloc(size);
-    if (!d->rom_copy) { free(d); return NULL; }
+    if (!d->rom_copy) { fprintf(stderr, "deepeel: ws: open: out of memory (%zu)\n", size); free(d); return NULL; }
     memcpy(d->rom_copy, data, size);
     d->rom_bytes = (uint32_t)size;
     if (!ws_boot_model(&d->ws, (WsRom){dp_ws_rom_read, d->rom_copy, d->rom_bytes}, true, NULL)) {
+        fprintf(stderr, "deepeel: ws: open: boot refused (%zu bytes)\n", size);
         free(d->rom_copy); free(d);
         return NULL;
     }

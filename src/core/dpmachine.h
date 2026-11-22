@@ -231,7 +231,7 @@ typedef struct DpObservers {
     // an identical block transfer only while the token is unchanged
     uint32_t (*mode)(void *user);
 } DpObservers;
-enum { DP_COPY_DMA = 1 };
+enum { DP_COPY_DMA = 1, DP_COPY_GB_VRAM = 2, DP_COPY_GB_OAM = 3 };
 
 // a component of the incoming state a section's behaviour may depend on
 // (spec §7.2 ctx_components): the bit index is the platform's DP_CTX_* value
@@ -285,6 +285,10 @@ struct DpMachine {
     // Absent: the low 16 address bits (every 16-bit CPU).  ram_addr is the inverse, ram_size the index count.
     int64_t (*ram_index)(struct DpMachine *, uint32_t addr);
     uint32_t (*ram_addr)(struct DpMachine *, uint32_t idx);
+    // Optional path-local verbatim ROM provenance, saved with machine state.
+    // Values are compact ROM indices plus one; zero means unknown.
+    uint32_t (*ram_source)(struct DpMachine *, uint32_t idx);
+    void (*ram_source_set)(struct DpMachine *, uint32_t idx, uint32_t source);
     // Optional fast path: pointer to the first ram_view_len RAM indices as contiguous bytes (same values as fetch(ram_addr(i))), so the
     // exploration core hashes RAM without one indirect call per byte.
     const uint8_t *(*ram_view)(struct DpMachine *);

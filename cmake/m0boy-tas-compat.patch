@@ -76,15 +76,19 @@ diff -ruN a/gbl_core.c b/gbl_core.c
      if (pressed & ~buttons) IF |= 0x10;
      buttons = pressed;
      joypad_update();
-@@ -1336,9 +1381,9 @@
+@@ -1336,13 +1381,14 @@
  #endif
  uint8_t gbl_io_rd(uint8_t n) {
      switch (n) {
 -    case 0x00: return gbl_joyp;
--    case 0x02: return gbl_io[0x02] | 0x7E;
--    case 0x04: return (uint8_t)((gbr.cyc - div_base) >> 8);
 +    case 0x00: gbl_pad_pending_check(gbr.cyc); return gbl_joyp;
-+    case 0x02: return gbl_sync_halt_snd > 0 ? gbl_io[0x02] : gbl_io[0x02] | 0x7E; /* VBA: the raw byte */
+     case 0x02:
++        if (gbl_sync_halt_snd > 0) return gbl_io[0x02]; /* VBA: the raw byte */
+ #if GBL_CGB
+         if (gbl_cgb) return gbl_io[0x02] | 0x7C;
+ #endif
+         return gbl_io[0x02] | 0x7E;
+-    case 0x04: return (uint8_t)((gbr.cyc - div_base) >> 8);
 +    case 0x04: return (uint8_t)((gbr.cyc + gbl_sync_div_skew + gbl_sync_div_extra - div_base) >> 8);
      case 0x05: timer_sync(gbr.cyc); return TIMA;
      case 0x07: return TAC | 0xF8;
@@ -1051,3 +1055,509 @@ diff -ruN a/gbl_ppu.c b/gbl_ppu.c
      update_due();
  }
 +
+diff -ruN a/gbl_core.c b/gbl_core.c
+--- a/gbl_core.c
++++ b/gbl_core.c
+@@ -518,6 +518,25 @@
+ #else
+ #define RTC_PENDING 0
+ #define RTC_SEL() 0 /* never selected: no RTC in this build */
++#endif
++
++#if defined(GBL_DEEPEEL_DMA_HOOK)
++/* Stable physical cartridge RAM address, including mirrored small RAM and
++ * MBC2. RTC registers and disabled RAM are not memory cells. */
++int32_t gbl_deepeel_eram_index(uint16_t a) {
++#if GBL_ERAM_SIZE > 0 && !GBL_ERAM_ON_SD
++    if (a < 0xA000u || a >= 0xC000u || !mbc.ram_enable || RTC_SEL() >= 8)
++        return -1;
++#if GBL_MBC == 2
++    return a & 0x1FFu;
++#else
++    return (int32_t)((eram_bank() * 0x2000u + (a - 0xA000u)) % GBL_ERAM_SIZE);
++#endif
++#else
++    (void)a;
++    return -1;
++#endif
++}
+ #endif
+ 
+ #if GBL_ERAM_SIZE > 0
+diff -ruN a/gbl_core.c b/gbl_core.c
+--- a/gbl_core.c
++++ b/gbl_core.c
+@@ -61,6 +61,8 @@
+ uint8_t *gbl_wmap[16];
+ 
+ uint8_t gbl_interp_only;
++/* Set from the cartridge header before reset; constant for this ROM. */
++uint8_t gbl_deepeel_rtc_present;
+ uint8_t gbl_sync_div_skew;      /* gbl.h: movie sync compatibility */
+ uint32_t gbl_insn_cyc;           /* gbl.h: cycle count at the start of the running instruction */
+ int16_t gbl_sync_irq_trim;      /* gbl.h: cycles taken off the 20-cycle interrupt dispatch */
+@@ -1121,7 +1123,11 @@
+      * gbl_wr_slow. */
+     uint32_t off = (eram_bank() * 0x2000u) % GBL_ERAM_SIZE;
+ #if GBL_RTC && GBL_MBC == 3
+-    if (RTC_SEL() >= 8) return;
++    if (RTC_SEL() >= 8) {
++        gbl_rmap[0xA] = gbl_rmap[0xB] = 0;
++        gbl_wmap[0xA] = gbl_wmap[0xB] = 0;
++        return;
++    }
+ #endif
+     uint8_t *base = mbc.ram_enable ? BIAS(gbl_eram + off, 0xA000u) : 0;
+     gbl_rmap[0xA] = gbl_rmap[0xB] = base;
+@@ -1296,8 +1302,8 @@
+     default:
+ #if GBL_RTC && !defined(ESP8266)
+         /* The latch: 00 arms, 01 snapshots the registers. */
+-        if (v == 0x00) rtc.armed = 1;
+-        else if (v == 0x01 && rtc.armed) {
++        if (gbl_deepeel_rtc_present && v == 0x00) rtc.armed = 1;
++        else if (gbl_deepeel_rtc_present && v == 0x01 && rtc.armed) {
+             rtc_latch();
+             rtc.armed = 0;
+         }
+@@ -2122,7 +2128,8 @@
+     if (a >= 0xA000 && a < 0xC000 && mbc.ram_enable) {
+         uint8_t sel = RTC_SEL();
+         /* Registers, then 0D-0F open bus. */
+-        return sel >= 8 && sel <= 0xC ? rtc.latched[sel - 8] : 0xFF;
++        if (sel >= 8)
++            return gbl_deepeel_rtc_present && sel <= 0xC ? rtc.latched[sel - 8] : 0xFF;
+     }
+ #endif
+ #if GBL_MBC == 2
+@@ -2245,8 +2252,10 @@
+ #if GBL_RTC && GBL_MBC == 3 && !defined(ESP8266)
+     if (a >= 0xA000 && a < 0xC000 && mbc.ram_enable) {
+         uint8_t sel = RTC_SEL();
+-        if (sel >= 8 && sel <= 0xC) rtc_reg_write(sel - 8, v);
+-        return; /* 0D-0F: ignored, like the real chip */
++        if (sel >= 8) {
++            if (gbl_deepeel_rtc_present && sel <= 0xC) rtc_reg_write(sel - 8, v);
++            return; /* 0D-0F: ignored, like the real chip */
++        }
+     }
+ #endif
+ #if GBL_MBC == 2
+--- a/gbl_ppu.c
++++ b/gbl_ppu.c
+@@ -1599,10 +1599,12 @@
+     gam_cgb.budget = gam_cgb.blit = gbr.cyc + FRAME_CYCLES;
+     gam_cgb.blank = 0;
+ #endif
+-    gam_v0_pend = 0;
+-    gam_last = 0;
++    gam_v0_pend = gam_stage = 0;
++    gam_last = gam_v0 = gam_a = 0;
+     on_pend = 0;
++    on_at = 0;
+     off_silent = 0;
++    q153 = 0;
+     LCDC = 0x91;
+     STAT = 0x00;
+     BGP = 0xFC;
+@@ -1635,15 +1637,18 @@
+ #if GBL_CGB
+     io(&gam_cgb, sizeof(gam_cgb), ctx);
+ #endif
++    /* Timing compatibility state affects future PPU transitions and must
++     * follow each fork, rather than leaking from the previously loaded path. */
++    io(&on_pend, sizeof(on_pend), ctx);
++    io(&on_at, sizeof(on_at), ctx);
++    io(&off_silent, sizeof(off_silent), ctx);
++    io(&gam_last, sizeof(gam_last), ctx);
++    io(&gam_v0, sizeof(gam_v0), ctx);
++    io(&gam_v0_pend, sizeof(gam_v0_pend), ctx);
++    io(&gam_stage, sizeof(gam_stage), ctx);
++    io(&gam_a, sizeof(gam_a), ctx);
++    io(&q153, sizeof(q153), ctx);
+     if (!load) return;
+-    /* statics outside the saved state belong to the previous run of this
+-     * instance (a queued movie, a restored snapshot): drop them */
+-    on_pend = 0;
+-    on_at = 0;
+-    off_silent = 0;
+-    gam_v0_pend = 0;
+-    gam_stage = 0;
+-    q153 = 0;
+     P.evt_dirty = 1;
+     P.moved = 1;
+     P.spr_ly = 0xFF;
+--- a/gbl_core.c
++++ b/gbl_core.c
+@@ -2903,6 +2903,30 @@
+     io(&gbl_ie, sizeof(gbl_ie), ctx);
+     io(&mbc, sizeof(mbc), ctx);
+     io(&gbl_timer_state, sizeof(gbl_timer_state), ctx);
++#if GBL_TIMER_EDGE
++    io(&tima_reload_at, sizeof(tima_reload_at), ctx);
++#endif
++    io(echo_old, sizeof(echo_old), ctx);
++    io(&vbl_wait, sizeof(vbl_wait), ctx);
++    io(&vbl_wst, sizeof(vbl_wst), ctx);
++    io(&vbl_ei_insn, sizeof(vbl_ei_insn), ctx);
++    io(&vbl_halt_woke, sizeof(vbl_halt_woke), ctx);
++    io(&pad_pending, sizeof(pad_pending), ctx);
++    io(&pad_queued, sizeof(pad_queued), ctx);
++    io(&pad_at, sizeof(pad_at), ctx);
++    io(&gbl_insn_cyc, sizeof(gbl_insn_cyc), ctx);
++    io(&gbl_vbl_cyc, sizeof(gbl_vbl_cyc), ctx);
++    io(&halt_last_cyc, sizeof(halt_last_cyc), ctx);
++    io(&gbl_sync_halt_snd, sizeof(gbl_sync_halt_snd), ctx);
++#if GBL_OAM_DMA_BUS
++    io(dma_s, sizeof(dma_s), ctx);
++    io(dma_e, sizeof(dma_e), ctx);
++    io(dma_src, sizeof(dma_src), ctx);
++    io(&dma_n, sizeof(dma_n), ctx);
++    io(&dma_pend, sizeof(dma_pend), ctx);
++    io(&dma_psrc, sizeof(dma_psrc), ctx);
++    io(&dma_pat, sizeof(dma_pat), ctx);
++#endif
+     io(&buttons, sizeof(buttons), ctx);
+     io(&gbl_frame, sizeof(gbl_frame), ctx);
+ #if GBL_RTC && GBL_MBC == 3 && !defined(ESP8266)
+@@ -2968,20 +2990,6 @@
+     gbl_ppu_state_io(io, ctx, load);
+     gbl_apu_state_io(io, ctx, load);
+     if (!load) return;
+-    /* statics outside the saved state belong to the previous run of this
+-     * instance (a queued movie, a restored snapshot): a loaded state starts
+-     * with no vblank wait, no EI memory and no pending pad latch */
+-    vbl_wait = 0;
+-    vbl_wst = 0;
+-    vbl_ei_insn = 0xFFFFFFFFu;
+-    vbl_halt_woke = 0;
+-    pad_pending = pad_queued = 0;
+-    pad_at = 0;
+-    /* absolute cycle stamps of the previous run (the host may load a state
+-     * from inside an instruction hook): a loaded state restarts the clock */
+-    gbl_insn_cyc = gbr.cyc;
+-    halt_last_cyc = gbr.cyc;
+-    gbl_vbl_cyc = gbr.cyc - 1000000u;
+     map_pages();
+ #if GBL_LOOKUP_CACHE
+     for (int i = 0; i < GBL_LOOKUP_CACHE; i++) lookup_cache[i].pc = 0xFFFF;
+--- a/gbl_core.c
++++ b/gbl_core.c
+@@ -1936,6 +1936,13 @@
+     } else {
+         gbl_ppu_set_speed(gbl_dshift ^ 1u);
+         gbr.cyc += 8200u;
++        /* The divider clock is stopped throughout the speed-switch pause.
++         * Move both timer anchors so no phantom TIMA edges are generated. */
++        div_base += 8200u;
++        tima_sync += 8200u;
++        if (gbl_timer_state.tima_irq_pending)
++            gbl_timer_state.tima_irq_at += 8200u;
++        core_invalidate();
+     }
+     gbl_update_evt();
+ }
+--- a/gbl_core.c
++++ b/gbl_core.c
+@@ -2278,6 +2278,23 @@
+ }
+ 
+ #if !(GBL_CORE_ASM && defined(__ARM_ARCH_6M__)) /* else gbl_core_asm.S */
++#if defined(GBL_DEEPEEL_DMA_HOOK)
++/* Stack accesses participate in bus arbitration and coverage just like
++ * ordinary CPU loads/stores; the WRAM shortcut bypasses both. */
++extern uint8_t dp_gbl_rd(uint16_t a);
++extern void dp_gbl_wr(uint16_t a, uint8_t v);
++void gbl_push(uint16_t v) {
++    gbr.sp = (uint16_t)(gbr.sp - 2);
++    dp_gbl_wr((uint16_t)(gbr.sp + 1), (uint8_t)(v >> 8));
++    dp_gbl_wr(gbr.sp, (uint8_t)v);
++}
++uint16_t gbl_pop(void) {
++    uint16_t s = gbr.sp;
++    gbr.sp = (uint16_t)(s + 2);
++    uint8_t lo = dp_gbl_rd(s);
++    return (uint16_t)(lo | (dp_gbl_rd((uint16_t)(s + 1)) << 8));
++}
++#else
+ void gbl_push(uint16_t v) {
+     gbr.sp = (uint16_t)(gbr.sp - 2);
+     uint16_t s = gbr.sp;
+@@ -2302,6 +2319,7 @@
+     return (uint16_t)(lo | (gbl_rd((uint16_t)(s + 1)) << 8));
+ #endif
+ }
++#endif
+ #endif
+ 
+ /* ---- interrupts and execution ------------------------------------------- */
+--- a/gbl_core.c
++++ b/gbl_core.c
+@@ -2846,6 +2846,24 @@
+ void gbl_reset(void) {
+     __asm__ volatile("" : : "r"(&gbl_input_probe));
+     memset(&gbr, 0, sizeof(gbr));
++#if defined(GBL_DEEPEEL_DMA_HOOK)
++    /* Instances are reused by independent exploration paths and ROMs. */
++    gbl_frame = 0;
++    buttons = pad_pending = pad_queued = 0;
++    pad_at = 0;
++    vbl_wait = 0;
++    vbl_wst = vbl_halt_woke = 0;
++    vbl_ei_insn = 0xFFFFFFFFu;
++    gbl_insn_cyc = halt_last_cyc = 0;
++    gbl_vbl_cyc = (uint32_t)-1000000;
++    memset(echo_old, 0, sizeof(echo_old));
++#if GBL_TIMER_EDGE
++    tima_reload_at = (uint32_t)-4;
++#endif
++#if defined(GBL_PPU_REF) && GBL_PPU_REF
++    gbl_halt_bug = 0;
++#endif
++#endif
+ #if GBL_OAM_DMA_BUS
+     dma_n = dma_pend = 0;
+     dma_in = 0;
+--- a/gbl_core.c
++++ b/gbl_core.c
+@@ -1355,6 +1355,11 @@
+ #define tima_sync gbl_timer_state.tima_sync
+ #define serial_done gbl_timer_state.serial_done
+ #define serial_busy gbl_timer_state.serial_busy
++#if defined(GBL_DEEPEEL_DMA_HOOK)
++/* serial_done is the next bit edge in the deepeel runtime. */
++static uint8_t serial_bits;
++static uint16_t serial_period;
++#endif
+ const uint8_t gbl_tac_shift[4] = {10, 4, 6, 8};
+ #define tac_shift gbl_tac_shift
+ 
+@@ -1479,6 +1484,19 @@
+ static inline __attribute__((always_inline))
+ #endif
+ void gbl_sync_serial(uint32_t now) {
++#if defined(GBL_DEEPEEL_DMA_HOOK)
++    while (serial_busy && (int32_t)(now - serial_done) >= 0) {
++        /* An unconnected input is high. Each clock shifts one bit, so SB
++         * reads during the transfer see the partial result. */
++        gbl_io[0x01] = (uint8_t)((gbl_io[0x01] << 1) | 1u);
++        if (++serial_bits == 8) {
++            serial_busy = 0;
++            gbl_io[0x02] &= 0x7Fu;
++            IF |= 0x08;
++        } else serial_done += serial_period;
++        core_invalidate();
++    }
++#else
+     if (serial_busy && (int32_t)(now - serial_done) >= 0) {
+         serial_busy = 0;
+         core_invalidate();
+@@ -1486,6 +1504,7 @@
+         gbl_io[0x02] &= 0x7F;
+         IF |= 0x08;
+     }
++#endif
+     gbl_update_evt();
+ }
+ 
+@@ -1653,7 +1672,13 @@
+ #endif
+     switch (n) {
+     case 0x00: gbl_pad_pending_check(gbr.cyc); return gbl_joyp;
++#if defined(GBL_DEEPEEL_DMA_HOOK)
++    case 0x01: gbl_sync_serial(gbr.cyc); return gbl_io[0x01];
++#endif
+     case 0x02:
++#if defined(GBL_DEEPEEL_DMA_HOOK)
++        gbl_sync_serial(gbr.cyc);
++#endif
+         if (gbl_sync_halt_snd > 0) return gbl_io[0x02]; /* VBA: the raw byte */
+ #if GBL_CGB
+         if (gbl_cgb) return gbl_io[0x02] | 0x7C;
+@@ -1746,7 +1771,28 @@
+ #endif
+     switch (n) {
+     case 0x00: gbl_pad_pending_check(gbr.cyc); gbl_io[0x00] = v & 0x30; joypad_update(); return;
++#if defined(GBL_DEEPEEL_DMA_HOOK)
++    case 0x01:
++        gbl_sync_serial(gbr.cyc);
++        gbl_io[0x01] = v;
++        return;
++#endif
+     case 0x02:
++#if defined(GBL_DEEPEEL_DMA_HOOK)
++        gbl_sync_serial(gbr.cyc);
++        gbl_io[0x02] = v;
++        serial_busy = (v & 0x81u) == 0x81u;
++        serial_bits = 0;
++#if GBL_CGB
++        serial_period = gbl_cgb && (v & 2u) ? 16u : 512u;
++#else
++        serial_period = 512u;
++#endif
++        if (serial_busy) serial_done = gbr.cyc + serial_period;
++        core_invalidate();
++        gbl_update_evt();
++        return;
++#else
+         gbl_io[0x02] = v;
+         if ((v & 0x81) == 0x81) {
+             serial_busy = 1;
+@@ -1760,6 +1806,7 @@
+             gbl_update_evt();
+         }
+         return;
++#endif
+     case 0x04:
+         timer_sync(gbr.cyc);
+ #if GBL_TIMER_EDGE
+@@ -2897,6 +2944,10 @@
+     div_base = (uint32_t)0 - 0xABCCu;
+     tima_sync = 0;
+     serial_busy = 0;
++#if defined(GBL_DEEPEEL_DMA_HOOK)
++    serial_bits = 0;
++    serial_period = 0;
++#endif
+     core_invalidate();
+ 
+     map_pages();
+@@ -2928,6 +2979,10 @@
+     io(&gbl_ie, sizeof(gbl_ie), ctx);
+     io(&mbc, sizeof(mbc), ctx);
+     io(&gbl_timer_state, sizeof(gbl_timer_state), ctx);
++#if defined(GBL_DEEPEEL_DMA_HOOK)
++    io(&serial_bits, sizeof(serial_bits), ctx);
++    io(&serial_period, sizeof(serial_period), ctx);
++#endif
+ #if GBL_TIMER_EDGE
+     io(&tima_reload_at, sizeof(tima_reload_at), ctx);
+ #endif
+--- a/gbl_core.c
++++ b/gbl_core.c
+@@ -1358,6 +1358,7 @@
+ #if defined(GBL_DEEPEEL_DMA_HOOK)
+ /* serial_done is the next bit edge in the deepeel runtime. */
+ static uint8_t serial_bits;
++uint8_t gbl_deepeel_serial_received;
+ static uint16_t serial_period;
+ #endif
+ const uint8_t gbl_tac_shift[4] = {10, 4, 6, 8};
+@@ -1491,6 +1492,7 @@
+         gbl_io[0x01] = (uint8_t)((gbl_io[0x01] << 1) | 1u);
+         if (++serial_bits == 8) {
+             serial_busy = 0;
++            gbl_deepeel_serial_received = 1;
+             gbl_io[0x02] &= 0x7Fu;
+             IF |= 0x08;
+         } else serial_done += serial_period;
+@@ -1775,6 +1777,7 @@
+     case 0x01:
+         gbl_sync_serial(gbr.cyc);
+         gbl_io[0x01] = v;
++        gbl_deepeel_serial_received = 0;
+         return;
+ #endif
+     case 0x02:
+@@ -2964,6 +2967,7 @@
+     serial_busy = 0;
+ #if defined(GBL_DEEPEEL_DMA_HOOK)
+     serial_bits = 0;
++    gbl_deepeel_serial_received = 0;
+     serial_period = 0;
+ #endif
+     core_invalidate();
+@@ -2999,6 +3003,7 @@
+     io(&gbl_timer_state, sizeof(gbl_timer_state), ctx);
+ #if defined(GBL_DEEPEEL_DMA_HOOK)
+     io(&serial_bits, sizeof(serial_bits), ctx);
++    io(&gbl_deepeel_serial_received, sizeof(gbl_deepeel_serial_received), ctx);
+     io(&serial_period, sizeof(serial_period), ctx);
+ #endif
+ #if GBL_TIMER_EDGE
+--- a/gbl_core.c
++++ b/gbl_core.c
+@@ -395,6 +395,9 @@
+     uint32_t days;        /* absolute day counter (register view: days & 1FF) */
+     uint32_t carry_ref;   /* day count at the last carry clear/rewrite */
+     uint32_t frame_anchor, wall_anchor;
++#if defined(GBL_DEEPEEL_DMA_HOOK)
++    uint32_t cycle_anchor, subsecond; /* half-dot units, modulo 2 * 4194304 */
++#endif
+     uint8_t armed, halted, carry;
+     uint8_t latched[5];   /* S M H DL DH, as the game latched them */
+     uint8_t dirty, pending;
+@@ -421,10 +424,28 @@
+         rtc.wall_anchor += e;
+         rtc.frame_anchor += e * 60u;
+     } else {
++#if defined(GBL_DEEPEEL_DMA_HOOK)
++        /* CPU cycles wrap at 32 bits; regular hardware synchronizations keep
++         * each unsigned interval shorter than one wrap. Double-speed cycles
++         * are half a normal-speed dot. The remainder is snapshot state. */
++        uint32_t delta = gbr.cyc - rtc.cycle_anchor;
++        rtc.cycle_anchor = gbr.cyc;
++        if (rtc.halted) return;
++#if GBL_CGB
++        unsigned scale = gbl_cgb && gbl_dshift ? 1u : 2u;
++#else
++        unsigned scale = 2u;
++#endif
++        uint64_t elapsed = (uint64_t)rtc.subsecond + (uint64_t)delta * scale;
++        e = (uint32_t)(elapsed / 8388608u);
++        rtc.subsecond = (uint32_t)(elapsed % 8388608u);
++        if (!e) return;
++#else
+         int32_t f = (int32_t)(gbl_frame - rtc.frame_anchor) / 60;
+         if (f <= 0) return;
+         e = (uint32_t)f;
+         rtc.frame_anchor += e * 60u;
++#endif
+     }
+     if (rtc.halted) return;
+     rtc.days += e / 86400u;
+@@ -522,6 +543,9 @@
+     rtc.carry_ref = rtc.days;
+     rtc.frame_anchor = gbl_frame;
+     rtc.wall_anchor = gbl_platform_rtc();
++#if defined(GBL_DEEPEEL_DMA_HOOK)
++    rtc.cycle_anchor = gbr.cyc;
++#endif
+ }
+ 
+ static int rtc_flush_one(void) {
+@@ -1513,6 +1537,9 @@
+ #if !GBL_TIMING_ASM /* else gbl_timing_asm.S */
+ void gbl_sync(void) {
+     uint32_t now = gbr.cyc;
++#if defined(GBL_DEEPEEL_DMA_HOOK) && GBL_RTC && GBL_MBC == 3 && !defined(ESP8266)
++    if (gbl_deepeel_rtc_present) rtc_sync();
++#endif
+ #if GBL_CGB && defined(GBL_DEEPEEL_DMA_HOOK)
+     gbl_apu_coverage_sync(now);
+     if (gbl_cgb) cgb_dma_sync();
+@@ -1970,6 +1997,9 @@
+ /* STOP with KEY1 armed: change speed (DIV restarts; the switch itself takes
+  * about 2050 M-cycles). */
+ void gbl_speed_switch(void) {
++#if defined(GBL_DEEPEEL_DMA_HOOK) && GBL_RTC && GBL_MBC == 3 && !defined(ESP8266)
++    if (gbl_deepeel_rtc_present) rtc_sync(); /* settle at the old clock rate */
++#endif
+ #if defined(GBL_DEEPEEL_DMA_HOOK)
+     gbl_apu_coverage_sync(gbr.cyc);
+ #endif
+--- a/gbl_core.c
++++ b/gbl_core.c
+@@ -2011,6 +2011,12 @@
+          * after that fetch. */
+         uint32_t fetch = gbr.cyc;
+         if (!gbl_dshift) gbr.cyc += 8;
++#if defined(GBL_DEEPEEL_DMA_HOOK) && GBL_RTC && GBL_MBC == 3 && !defined(ESP8266)
++        if (gbl_deepeel_rtc_present) rtc_sync(); /* account for the old-speed interval */
++#endif
++#if defined(GBL_DEEPEEL_DMA_HOOK)
++        gbl_apu_coverage_sync(gbr.cyc);
++#endif
+         gbl_ppu_set_speed(gbl_dshift ^ 1u);
+         gbr.cyc = fetch + 0x20004u;
+     } else {

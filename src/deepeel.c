@@ -1826,14 +1826,16 @@ static int cmd_ws(int argc, char **argv) {
             if (!rd || !dp_bz_load(rd, rn, &bz, terr, sizeof terr)) {
                 fprintf(stderr, "deepeel: --tas: %s\n", terr[0] ? terr : "cannot read the movie");
                 free(rd); rc = 1;
-            } else if (strcasecmp(bz.platform, "WS")) {
+            } else if (strcasecmp(bz.platform, "WS") && strcasecmp(bz.platform, "WSWAN")) {
                 fprintf(stderr, "deepeel: --tas: movie platform %s, not WS\n", bz.platform);
                 dp_bz_free(&bz); free(rd); rc = 1;
             } else {
                 // the standard WonderSwan pad: X1 left, X3 right, Y1 up, Y3 down
-                int up = dp_bz_find(&bz, "Y1"), dn = dp_bz_find(&bz, "Y3"),
-                    lf = dp_bz_find(&bz, "X1"), rt = dp_bz_find(&bz, "X3"),
-                    a = dp_bz_find(&bz, "A"), b = dp_bz_find(&bz, "B"), st = dp_bz_find(&bz, "Start");
+                // (BizHawk names the columns "P1 X1", "P1 Y1", ... on the WSWAN core)
+                #define BZ_WS_KEY(k) (dp_bz_find(&bz, k) >= 0 ? dp_bz_find(&bz, k) : dp_bz_find(&bz, "P1 " k))
+                int up = BZ_WS_KEY("Y1"), dn = BZ_WS_KEY("Y3"),
+                    lf = BZ_WS_KEY("X1"), rt = BZ_WS_KEY("X3"),
+                    a = BZ_WS_KEY("A"), b = BZ_WS_KEY("B"), st = BZ_WS_KEY("Start");
                 if (up < 0) up = dp_bz_find(&bz, "Up");
                 if (dn < 0) dn = dp_bz_find(&bz, "Down");
                 if (lf < 0) lf = dp_bz_find(&bz, "Left");

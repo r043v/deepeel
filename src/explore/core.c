@@ -235,7 +235,7 @@ typedef struct {
     size_t probecap, proben;
     uint8_t *probectx;         // B1: contexts a probe site has been re-armed under (by rom index)
     uint64_t ctx_epoch;        // A2: bumped whenever the semantic cell's read-set grows (new ramread bit); guards the per-worker cell-key memo
-    uint64_t *exactset;        // B5: exact (pc, machine state) keys already reached, clocks excluded
+    uint64_t *exactset;        // B5: (pc, backend state hash) keys already reached
     size_t exactcap, exactn;
     uint8_t *tas_start; uint32_t tas_pc; int tas_shifts_left;   // power-on state kept to queue the shifted movie replays once the unshifted one ends
     const DpMachine *snap_m;   // geometry for the periodic coverage snapshot
@@ -1280,13 +1280,21 @@ static inline uint32_t ckpt_site(DpMachine *m, const DpCoreResult *loc) {
 
 static void obs_copy(void *u, uint32_t src, uint32_t len, unsigned channel) {
     CopyObs *o = u;
-    (void)channel;
     if (o->forced) { o->r->copy_forced += len; return; }
     for (uint32_t i = 0; i < len; i++) {
         int64_t k = o->m->rom_index(o->m, src + i);
+        if (k < 0 && o->m->ram_source) {
+            int64_t ri = ridx(o->m, src + i);
+            uint32_t origin = ri >= 0 ? o->m->ram_source(o->m, (uint32_t)ri) : 0;
+            if (origin) k = (int64_t)origin - 1;
+        }
         if (k < 0 || (size_t)k >= o->r->rom_size) continue;
         uint8_t was = __atomic_fetch_or(&o->r->flags[k], DP_CORE_DATA | DP_CORE_COPIED, __ATOMIC_RELAXED);
         __atomic_fetch_or(&o->r->src_flags[k], DP_SRC_COPY, __ATOMIC_RELAXED);
+        if (channel == DP_COPY_GB_VRAM)
+            __atomic_store_n(&o->r->dest[k], DP_DEST_VRAM, __ATOMIC_RELAXED);
+        else if (channel == DP_COPY_GB_OAM)
+            __atomic_store_n(&o->r->dest[k], DP_DEST_OAM, __ATOMIC_RELAXED);
         if (!(was & DP_CORE_COPIED)) o->r->copy_bytes++;
     }
 }
@@ -1317,6 +1325,7 @@ static void obs_write(void *u, uint32_t addr, uint8_t v) {
         (o->m->mapper_reg && o->m->mapper_reg(o->m, addr))) o->mapper_w = 1;
     if (o->run_hi >= 0 && rik < 0) o->run_writes++;
     int64_t wi = rik < 0 ? ridx(o->m, addr) : -1;
+    if (wi >= 0 && o->m->ram_source_set) o->m->ram_source_set(o->m, (uint32_t)wi, 0);
     // A later write replaces the previous provenance even if there has been
     // no recent ROM read. Do this before the stale-read early return.
     if (!o->forced && wi >= 0) {
@@ -1332,6 +1341,11 @@ static void obs_write(void *u, uint32_t addr, uint8_t v) {
             __atomic_store_n(&o->r->dest[o->last_rom], dest, __ATOMIC_RELAXED);
     }
     if (rik < 0 && v == o->last_val) {
+        // Provenance describes the current machine state, including forced
+        // paths. Keep it even when speculative copies are excluded from the
+        // global coverage counters below.
+        if (o->m->ram_source_set && wi >= 0)
+            o->m->ram_source_set(o->m, (uint32_t)wi, (uint32_t)o->last_rom + 1);
         if (o->forced) o->r->copy_forced++;
         else {
             __atomic_fetch_or(&o->r->flags[o->last_rom], DP_CORE_COPIED, __ATOMIC_RELAXED);
@@ -1424,16 +1438,18 @@ static int cell_insert(Shared *sh, uint64_t key) { return keyset_insert(&sh->cel
 static int ctx_rearm(Worker *w, const DpCoreConfig *cfg, DpCoreResult *loc, DpMachine *m,
                      int64_t ri, uint64_t tag, uint64_t sub, unsigned visit) {
     Shared *sh = w->sh;
-    if (!cfg->probe_ctx_cap || cfg->probe_ctx_cap <= 1 || !sh->probectx || ri < 0) return 0;
-    if (!visit || visit > 8 || (visit & (visit - 1))) return 0;   // B1's exponential attempt gate
+    if (!sh->probectx || ri < 0) return 0;
+    if (!cfg->unbounded && (!cfg->probe_ctx_cap || cfg->probe_ctx_cap <= 1)) return 0;
+    if (!cfg->unbounded && (!visit || visit > 8 || (visit & (visit - 1)))) return 0;
     unsigned pcx = __atomic_load_n(&sh->probectx[ri], __ATOMIC_RELAXED);
     if (!pcx) return 0;                                           // a site that produced nothing stays spent
-    if (pcx >= cfg->probe_ctx_cap) { loc->probe_ctx_sat++; return 0; }
+    if (!cfg->unbounded && pcx >= cfg->probe_ctx_cap) { loc->probe_ctx_sat++; return 0; }
     // Recompute the semantic cell at each attempt; a memo of already spent
     // composed keys still skips the shared lock.
     // The read set can remain unchanged while its RAM values change, and
     // loading a snapshot can change them without an observed write.
     uint64_t ck = cell_key(cfg, sh->ramread, m, (uint32_t)ri) ^ 0x5bd1e995u;
+    if (cfg->unbounded && m->ctx_reg_hash) ck ^= keyhash(m->ctx_reg_hash(m));
     uint64_t pk = (keyhash(ck ^ ((uint64_t)ri << 32) ^ (tag << 24) ^ sub) & ((1ull << 60) - 1)) | (tag << 60);
     if (w->ckspent[keyhash(pk) & 4095] == pk + 1) return 0;   // known spent, the shared set only grows
     pthread_mutex_lock(&sh->mu);
@@ -2000,7 +2016,7 @@ static void run_path(Worker *w, Pending *p) {
                 // A22/B3: live movie states feed the exploration. A checkpoint every tas_ckpt_every frames (bounded) and the
                 // end state each continue as a free natural path, so branches reachable only from a late state are forked
                 if (tas_shift == 0 && !cfg->no_tas_ckpt && cfg->tas_ckpt_every && f > 0 && !(cfg->jobs <= 1 && watch_lean(cfg)) &&
-                    (k >= (int64_t)cfg->tas_frames || (f % cfg->tas_ckpt_every == 0 && __atomic_load_n(&sh->ckpts, __ATOMIC_RELAXED) < cfg->tas_ckpt_cap))) {
+                    (k >= (int64_t)cfg->tas_frames || (f % cfg->tas_ckpt_every == 0 && (cfg->unbounded || __atomic_load_n(&sh->ckpts, __ATOMIC_RELAXED) < cfg->tas_ckpt_cap)))) {
                     uint8_t *cp = malloc(sh->sbytes);
                     if (cp) {
                         m->save(m, cp);
@@ -2100,7 +2116,7 @@ static void run_path(Worker *w, Pending *p) {
                 // B3: attract and play sessions drop live states into the same pool as the movie: a checkpoint every tas_ckpt_every
                 // session frames (bounded by tas_ckpt_cap) continues as a free natural path
                 if ((attract || play) && !burst && !cfg->no_tas_ckpt && cfg->tas_ckpt_every && f > sess_f0 && (f - sess_f0) % cfg->tas_ckpt_every == 0 &&
-                    __atomic_load_n(&sh->sess_ckpts, __ATOMIC_RELAXED) < cfg->tas_ckpt_cap) {
+                    (cfg->unbounded || __atomic_load_n(&sh->sess_ckpts, __ATOMIC_RELAXED) < cfg->tas_ckpt_cap)) {
                     uint8_t *cp = malloc(sh->sbytes ? sh->sbytes : 1);
                     if (cp) {
                         m->save(m, cp);
@@ -2134,10 +2150,16 @@ static void run_path(Worker *w, Pending *p) {
                     break;
                 }
                 if (play && sess_limit) {
-                    unsigned ep = (unsigned)((f - sess_f0) / (sess_limit / 9 ? sess_limit / 9 : 1));
+                    // Checkpoint bursts use a reproducible pseudo-random pad
+                    // sequence, changing every four frames. Ordinary sessions
+                    // retain their deterministic nine-epoch schedule.
+                    unsigned ep = burst ? (unsigned)((f - sess_f0) / 4u) :
+                        (unsigned)((f - sess_f0) / (sess_limit / 9 ? sess_limit / 9 : 1));
                     if (ep != sess_epoch) {
                         sess_epoch = ep;
-                        m->set_input(m, play_catalog[(ep + play_k) % 10]);
+                        unsigned pick = burst ? (unsigned)(keyhash(sess_f0 ^ ((uint64_t)play_k << 32) ^ ep) % 10u)
+                                              : (ep + play_k) % 10u;
+                        m->set_input(m, play_catalog[pick]);
                         loc->play_epochs++;
                     }
                 }
@@ -2190,13 +2212,16 @@ static void run_path(Worker *w, Pending *p) {
                      have_flow && fi.kind == DP_FLOW_RET;
         if (m->rom_index(m, pc) < 0) {
             int64_t pri = ridx(m, pc);
-            if (cur_forced && !cfg->no_forced_ram_cut && !(sh->fed && pri >= 0 && __atomic_load_n(&sh->fed[pri], __ATOMIC_RELAXED))) {
+            uint32_t local_src = pri >= 0 && m->ram_source ? m->ram_source(m, (uint32_t)pri) : 0;
+            int fed = m->ram_source ? local_src != 0 : (sh->fed && pri >= 0 && __atomic_load_n(&sh->fed[pri], __ATOMIC_RELAXED));
+            if (cur_forced && !cfg->no_forced_ram_cut && !fed) {
                 loc->forced_ram_cuts++;
                 break;
             }
             loc->exec_outside++;
             if (sh->fedsrc && pri >= 0) {
-                uint32_t s0 = __atomic_load_n(&sh->fedsrc[pri], __ATOMIC_RELAXED), p0 = __atomic_load_n(&sh->fedprod[pri], __ATOMIC_RELAXED);
+                uint32_t s0 = m->ram_source ? local_src : __atomic_load_n(&sh->fedsrc[pri], __ATOMIC_RELAXED);
+                uint32_t p0 = m->ram_source ? 0 : __atomic_load_n(&sh->fedprod[pri], __ATOMIC_RELAXED);
                 if (s0 && cfg->rom_image && ((size_t)(s0 - 1) >= cfg->rom_image_size || cfg->rom_image[s0 - 1] != bytes[0])) s0 = 0;
                 dp_ramarch_add_p(&loc->ra, (uint16_t)pc, bytes, len > 10 ? 10 : len, s0 ? (int32_t)(s0 - 1) : -1, s0 ? -1 : (p0 ? (int32_t)(p0 - 1) : -1));
             }
@@ -2204,7 +2229,7 @@ static void run_path(Worker *w, Pending *p) {
                 int any = 0;
                 for (int i = 0; i < len; i++) {
                     int64_t si = ridx(m, pc + (uint32_t)i);
-                    uint32_t src = si >= 0 ? __atomic_load_n(&sh->fedsrc[si], __ATOMIC_RELAXED) : 0;
+                    uint32_t src = si < 0 ? 0 : m->ram_source ? m->ram_source(m, (uint32_t)si) : __atomic_load_n(&sh->fedsrc[si], __ATOMIC_RELAXED);
                     if (src && src - 1 < loc->rom_size &&
                         (!cfg->rom_image || ((size_t)(src - 1) < cfg->rom_image_size && cfg->rom_image[src - 1] == bytes[i]))) {
                         __atomic_fetch_or(&loc->flags[src - 1], DP_CORE_NATURAL, __ATOMIC_RELAXED);
@@ -2468,31 +2493,44 @@ static void run_path(Worker *w, Pending *p) {
                 if (any && !rearm) loc->event_probe_sites++;
             }
         }
-        if (cfg->hooks && cfg->hooks->irq_alt && m->rom_index(m, pc) >= 0) {
+        if (cfg->hooks && (cfg->hooks->irq_alt || cfg->hooks->irq_source_alt) && m->rom_index(m, pc) >= 0) {
             // delay d = 1 is the plain IRQ fork; d = 2..3 is technique 9 (temporal
             // perturbation: the interrupt lands a few instructions later).  The hook
             // answers 0 unless an interrupt is pending, so the per-(site, delay) key is
             // spent only when a fork is really produced.
-            for (unsigned d = 1; d <= (cfg->no_irq_jitter ? 1u : 3u); d++) {
+            unsigned nsources = cfg->hooks->irq_source_alt ? cfg->hooks->irq_source_count : 1u;
+            for (unsigned source = 0; source < nsources; source++) {
+              for (unsigned d = 1; d <= (cfg->no_irq_jitter ? 1u : 3u); d++) {
                 int64_t iri = (int64_t)m->rom_index(m, pc);
-                uint64_t ikey = ((uint64_t)m->rom_index(m, pc) + 1) | ((uint64_t)d << 40);
+                uint64_t sub = ((uint64_t)d << 40) |
+                    (cfg->hooks->irq_source_alt ? ((uint64_t)(source + 1u) << 48) : 0);
+                uint64_t ikey = ((uint64_t)iri + 1) | sub;
                 int known = 0, rearmed = 0;   // (site, delay) already forked: skip the costly hook and the 17 KiB snapshot
                 int hooked = 0;   // the hook already ran into w->irqscratch (nothing pending => no shared state is touched)
                 if (kc_known(w, ikey)) known = 1;
                 else {
                     if (!w->irqscratch) w->irqscratch = malloc(sh->sbytes);
-                    if (!w->irqscratch || !cfg->hooks->irq_alt(cfg->hooks->user, m, d, w->irqscratch)) break;
+                    if (!w->irqscratch) break;
+                    int available = cfg->hooks->irq_source_alt ?
+                        cfg->hooks->irq_source_alt(cfg->hooks->user, m, source, d, w->irqscratch) :
+                        cfg->hooks->irq_alt(cfg->hooks->user, m, d, w->irqscratch);
+                    if (!available) break;
                     hooked = 1;
                     pthread_mutex_lock(&sh->mu);
                     if (sh->probecap) { size_t h = keyhash(ikey) & (sh->probecap - 1); while (sh->probeset[h]) { if (sh->probeset[h] == ikey) { known = 1; break; } h = (h + 1) & (sh->probecap - 1); } }
                     pthread_mutex_unlock(&sh->mu);
                     if (known) kc_add(w, ikey);
                 }
-                if (known) { if (ctx_rearm(w, cfg, loc, m, iri, 13, (uint64_t)d << 40, w->visits[vi])) rearmed = 1; else continue; }   // A2: one more interrupt landing under a new semantic cell
+                if (known) { if (ctx_rearm(w, cfg, loc, m, iri, 13, sub, w->visits[vi])) rearmed = 1; else continue; }   // A2: one more interrupt landing under a new semantic cell
                 uint8_t *snap = malloc(sh->sbytes);
                 if (!snap) break;
                 if (hooked) memcpy(snap, w->irqscratch, sh->sbytes);
-                else if (!cfg->hooks->irq_alt(cfg->hooks->user, m, d, snap)) { free(snap); break; }
+                else {
+                    int available = cfg->hooks->irq_source_alt ?
+                        cfg->hooks->irq_source_alt(cfg->hooks->user, m, source, d, snap) :
+                        cfg->hooks->irq_alt(cfg->hooks->user, m, d, snap);
+                    if (!available) { free(snap); break; }
+                }
                 pthread_mutex_lock(&sh->mu);
                 int fresh = rearmed || keyset_insert(&sh->probeset, &sh->probecap, &sh->proben, ikey);
                 if (fresh) kc_add(w, ikey);
@@ -2504,6 +2542,7 @@ static void run_path(Worker *w, Pending *p) {
                     pthread_cond_signal(&sh->cv);
                 }
                 pthread_mutex_unlock(&sh->mu);
+              }
             }
         }
         int stack_cond = have_flow && fi.cond >= 0 && m->invert_condition &&
