@@ -67,6 +67,8 @@ typedef struct DpGblApi {
     uint8_t *rtc_present, *serial_received;
     void (*apu_set_rate)(uint32_t hz);
     void (*apu_render)(uint8_t *samples, unsigned count);
+    /* Gambatte 2.3.2 cycle RTC (gbl.h): divisor in CPU cycles, 0 = frame-based RTC */
+    uint32_t *sync_rtc_div;
 } DpGblApi;
 
 /* the ROM bank behind a pc/address of the fixed-or-switchable windows */

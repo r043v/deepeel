@@ -125,6 +125,12 @@ def compare(native, ref, boot, show_n, ignore):
     return total, first, count, detail
 
 
+def rtc_offset(movie):
+    import json, zipfile
+    with zipfile.ZipFile(movie) as z:
+        return json.loads(z.read("SyncSettings.json"))["o"].get("RTCDivisorOffset", 0)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--deepeel", type=Path, required=True)
@@ -164,6 +170,8 @@ def main():
         refproc = subprocess.Popen(cmd, stderr=subprocess.DEVNULL)   # the 2.3 core logs DIV events on stderr
         env = dict(os.environ, DEEPEEL_TAS_CGB_BIOS=str(args.bios.resolve()), DEEPEEL_DSY_FRAMES=str(args.frames),
                    DEEPEEL_DSY_FROM=str(args.from_frame), DEEPEEL_DSY_DIGEST="1" if args.digest else "0")
+        if "2.3.2" in emu:   # cycle RTC with the movie's divisor offset
+            env["DEEPEEL_TAS_RTCOFF"] = str(rtc_offset(args.movie))
         cmd = [str(args.deepeel), "explore", str(args.rom), "--tas", str(args.movie), "--replay-only", "--jobs", "1",
                "--no-event-probes", "--no-pointer-scan", "--no-closure", "--max-total", "0", "--dsy", str(native)]
         print("native   :", " ".join(cmd), file=sys.stderr)

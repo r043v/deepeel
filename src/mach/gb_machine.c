@@ -704,6 +704,10 @@ static void gb_tas_tune(DpMach *mach, const DpTas *tas) {
     int legacy_cgb_clock = vblank_clock && tas->bizhawk_23 && tas->is_cgb && tas->cgb_bios_loaded;
     if (tas->cgb_bios_loaded) dp_mach_start_cgb_bios(mach, tas->cgb_bios, legacy_cgb_clock ? 8u : 0u);
     if (vblank_clock) *mach->api->sync_vba_off_clock = legacy_cgb_clock ? 4 : 3;
+    // BizHawk 2.3.2 Gambatte: RTC counted in CPU cycles, divisor 0x400000 + movie offset. The emulator
+    // identity comes from the TASVideos API (tools/tasmeta.py exports DEEPEEL_TAS_RTCOFF), never the header.
+    if (legacy_cgb_clock && getenv("DEEPEEL_TAS_RTCOFF"))
+        *mach->api->sync_rtc_div = (uint32_t)(0x400000 + atoi(getenv("DEEPEEL_TAS_RTCOFF")));
     if (gambatte) {
         const char *skew = getenv("DEEPEEL_TAS_DIVSKEW");
         // The older CGB core starts its CPU counter at 8 with DIV based at 0.

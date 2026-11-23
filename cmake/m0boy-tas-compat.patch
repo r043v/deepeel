@@ -55,7 +55,7 @@
 +void gbl_vba_ei(void);
 +extern uint32_t gbl_insn_cyc;
 +extern uint8_t gbl_sync_div_skew;
-+extern uint8_t gbl_sync_vba_off_clock;
++extern uint8_t gbl_sync_vba_off_clock; extern uint32_t gbl_sync_rtc_div;
 +/* GBHawk (BizHawk's own core) pad and divider schedule, for its .bk2 movies.
 + *  - gbl_sync_pad_delay: cycles between the host's gbl_set_buttons (at the
 + *    frame boundary) and the pad becoming readable.  GBHawk advances one
@@ -126,7 +126,7 @@
 +static uint8_t vbl_halt_woke;     /* the pending VBL ended a HALT: no wait */
 +int16_t gbl_sync_halt_snd;      /* gbl.h: HALT woken by vblank resumes on the VBA sound grid */
 +int16_t gbl_sync_ly_lag;        /* gbl.h: LY reads see the state this many cycles earlier */
-+uint8_t gbl_sync_vba_off_clock;
++uint8_t gbl_sync_vba_off_clock; uint32_t gbl_sync_rtc_div; /* 0 = frame RTC; else Gambatte 2.3.2 cycle RTC, divisor in cycles */
 +uint32_t gbl_sync_pad_delay;
 +uint16_t gbl_sync_div_extra;
 +uint16_t gbl_sync_ppu_phase;
@@ -148,7 +148,7 @@
          rtc.wall_anchor += e;
          rtc.frame_anchor += e * 60u;
 +#if GBL_CGB
-+    } else if (gbl_cgb && gbl_sync_vba_off_clock == 4) {
++    } else if (gbl_cgb && gbl_sync_vba_off_clock == 4 && !gbl_sync_rtc_div) {
 +        /* BizHawk increments its movie frame before running Gambatte. */
 +        uint32_t seconds = (uint32_t)(((uint64_t)gbl_frame + 1u) * 4389u >> 18);
 +        if (seconds <= rtc.wall_anchor) return;
@@ -169,8 +169,8 @@
 +        unsigned scale = 2u;
 +#endif
 +        uint64_t elapsed = (uint64_t)rtc.subsecond + (uint64_t)delta * scale;
-+        e = (uint32_t)(elapsed / 8388608u);
-+        rtc.subsecond = (uint32_t)(elapsed % 8388608u);
++        e = (uint32_t)(elapsed / (gbl_sync_rtc_div ? 2ull * gbl_sync_rtc_div : 8388608ull));
++        rtc.subsecond = (uint32_t)(elapsed % (gbl_sync_rtc_div ? 2ull * gbl_sync_rtc_div : 8388608ull));
 +        if (!e) return;
 +#else
          int32_t f = (int32_t)(gbl_frame - rtc.frame_anchor) / 60;

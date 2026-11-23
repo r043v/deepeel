@@ -198,7 +198,7 @@ extern uint8_t ${p}gbl_io[0x80];
 extern uint8_t ${p}gbl_ie, ${p}gbl_wram[0x2000], ${p}gbl_vram[0x2000], ${p}gbl_oam[0xA0], ${p}gbl_hram[0x80];
 extern uint8_t ${p}gbl_joyp, ${p}gbl_interp_only, ${p}gbl_skip_render;
 extern uint8_t ${p}gbl_sync_div_skew, ${p}gbl_sync_vba_off_clock;
-extern uint32_t ${p}gbl_sync_pad_delay;
+extern uint32_t ${p}gbl_sync_pad_delay, ${p}gbl_sync_rtc_div;
 extern uint16_t ${p}gbl_sync_div_extra;
 extern uint16_t ${p}gbl_sync_ppu_phase;
 extern void ${p}gbl_ppu_phase_apply(void);
@@ -222,7 +222,7 @@ static const DpGblApi inst_${v}_${i} = {
     &${p}gbl_sync_div_skew, &${p}gbl_sync_vba_off_clock, &${p}gbl_sync_pad_delay, &${p}gbl_sync_div_extra, &${p}gbl_sync_ppu_phase, ${p}gbl_ppu_phase_apply, &${p}gbl_rom0_bank, &${p}gbl_rom_banks, &${p}gbl_mbc1m,
     &${p}gbl_sync_echo_old, ${p}gbl_echo_apply, &${p}gbl_sync_ly_lag, &${p}gbl_sync_irq_trim, &${p}gbl_sync_halt_snd,
     ${p}gbl_deepeel_eram_index, &${p}gbl_deepeel_rtc_present, &${p}gbl_deepeel_serial_received,
-    ${p}gbl_apu_set_rate, ${p}gbl_apu_render,
+    ${p}gbl_apu_set_rate, ${p}gbl_apu_render, &${p}gbl_sync_rtc_div,
 };
 ")
     string(APPEND g_rows "[${v}][${i}] = &inst_${v}_${i},
