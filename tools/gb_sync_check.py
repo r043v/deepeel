@@ -27,6 +27,9 @@ import struct
 import subprocess
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import tasmeta
+
 HERE = Path(__file__).resolve().parent
 NOISY = ('wram_banks', 'vram', 'oam', 'hram')
 REGS = ("pc", "sp", "a", "f", "bc", "de", "hl")
@@ -132,6 +135,7 @@ def main():
     p.add_argument("--frames", type=int, default=3000)
     p.add_argument("--work", type=Path, required=True, help="directory for the two .dsy files (large: ~90 KiB/frame)")
     p.add_argument("--bizhawk-23", action="store_true")
+    p.add_argument("--bizhawk-232", action="store_true", help="libgambatte of BizHawk 2.3.2 (cycle-based RTC)")
     p.add_argument("--digest", action="store_true", help="long scan: CRCs of the large blocks, ~150 bytes/frame")
     p.add_argument("--from-frame", type=int, default=0, help="detailed window: write frames >= N only")
     p.add_argument("--reuse", action="store_true", help="compare existing native.dsy/ref.dsy without regenerating")
@@ -140,6 +144,8 @@ def main():
     p.add_argument("--ignore", action="append", default=[], metavar="BLOCK", help="skip a block (e.g. sram)")
     args = p.parse_args()
 
+    emu = tasmeta.require_emulator(args.deepeel, args.rom, args.movie)   # mandatory: the TASVideos API names the emulator
+    tasmeta.require_lib_for(emu, args.lib)
     args.work.mkdir(parents=True, exist_ok=True)
     native, ref = args.work / "native.dsy", args.work / "ref.dsy"
     if not args.reuse:
@@ -149,6 +155,8 @@ def main():
                str(args.movie), str(ref), "--frames", str(args.frames)]
         if args.bizhawk_23:
             cmd.append("--bizhawk-23")
+        if args.bizhawk_232:
+            cmd.append("--bizhawk-232")
         if args.digest:
             cmd.append("--digest")
         cmd += ["--from-frame", str(args.from_frame)]

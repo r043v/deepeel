@@ -23,7 +23,7 @@ def replay(args):
         sync = json.loads(movie.read("SyncSettings.json"))["o"]
         if (header.get("Core") != "Gambatte" or header.get("IsCGBMode") != "1"
                 or sync.get("EqualLengthFrames") is not False
-                or (not args.bizhawk_23 and (sync.get("GBACGB") or sync.get("MulticartCompat")
+                or (not (args.bizhawk_23 or args.bizhawk_232) and (sync.get("GBACGB") or sync.get("MulticartCompat")
                                            or sync.get("InitialDiv", 0) or sync.get("RTCInitialTime", 0)))
                 or sync.get("RealTimeRTC")
                 or any(header.get(key, "").lower() == "true" for key in
@@ -66,7 +66,20 @@ def replay(args):
     try:
         mask = 0
         frame = 0
-        if args.bizhawk_23:
+        if args.bizhawk_232:
+            # BizHawk 2.3.2: cycle-based RTC inside the library, divisor offset from the movie, load(flags) then loadbios
+            flags = (2 if sync.get("GBACGB") else 0) | (4 if sync.get("MulticartCompat") else 0)
+            if bind("load", integer, ptr, ct.c_char_p, uint, uint)(core, rom, len(rom), flags):
+                raise ValueError("Gambatte rejected the ROM")
+            if bind("loadbios", integer, ptr, ct.c_char_p, uint)(core, bios, len(bios)):
+                raise ValueError("Gambatte rejected the BIOS")
+            bind("setrtcdivisoroffset", None, ptr, integer)(core, sync.get("RTCDivisorOffset", 0))
+            callback_type = ct.CFUNCTYPE(uint)
+            callback = callback_type(lambda: mask)
+            bind("setinputgetter", None, ptr, callback_type)(core, callback)
+            run = bind("runfor", integer, ptr, ptr, ct.POINTER(uint))
+            blit = bind("blitto", None, ptr, ptr, integer)
+        elif args.bizhawk_23:
             initial_time = sync.get("RTCInitialTime", 0)
             initial_div = sync.get("InitialDiv", 0) & 0xfffc
             flags = (2 if sync.get("GBACGB") else 0) | (4 if sync.get("MulticartCompat") else 0)
@@ -111,7 +124,7 @@ def replay(args):
                 def instruction(r):
                     # The 2.3 ABI supplies a CPU counter. The newer ABI
                     # supplies a sample offset from the current runfor call.
-                    when = r[0] if args.bizhawk_23 else elapsed_samples + r[0]
+                    when = r[0] if (args.bizhawk_23 or args.bizhawk_232) else elapsed_samples + r[0]
                     trace.write(f"{when} {r[1]:04x} {r[3]:02x} {r[8]:02x} "
                                 f"{r[4]:02x}{r[5]:02x} {r[6]:02x}{r[7]:02x} "
                                 f"{r[9]:02x}{r[10]:02x} {r[2]:04x} {r[11]}\n")
@@ -125,7 +138,7 @@ def replay(args):
                     elif frame == args.trace_end + 1:
                         set_trace(core, trace_type())
                 samples = uint(35112)
-                if args.bizhawk_23:
+                if args.bizhawk_23 or args.bizhawk_232:
                     if run(core, audio, ct.byref(samples)) > 0:
                         blit(core, video, 160)
                 else:
@@ -169,6 +182,7 @@ def main():
         parser.add_argument(name, type=Path)
     parser.add_argument("--frames", type=int)
     parser.add_argument("--bizhawk-23", action="store_true", help="use the Gambatte ABI from BizHawk 2.3")
+    parser.add_argument("--bizhawk-232", action="store_true", help="use the Gambatte ABI/RTC of BizHawk 2.3.2")
     parser.add_argument("--instructions", type=Path, metavar="FILE",
                         help="also export pre-instruction time, PC, A, F, BC, DE, HL, SP, prefetch flag")
     parser.add_argument("--digest", action="store_true", help="write regs/hram/ie and CRC-32 of the large blocks only")

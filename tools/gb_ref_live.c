@@ -74,7 +74,7 @@ int main(int argc, char **argv) {
     int (*area)(void *, int, void **, int *);
     #define SYM(v, n) do { *(void **)(&v) = dlsym(so, "gambatte_" n); if (!v) { fprintf(stderr, "gb_ref_live: %s missing\n", n); return 2; } } while (0)
     SYM(create, "create"); SYM(area, "getmemoryarea");
-    int want23 = getenv("GB_REF_ABI23") && *getenv("GB_REF_ABI23") == '1';
+    int want23 = getenv("GB_REF_ABI23") && *getenv("GB_REF_ABI23") >= '1';
     if (!want23) { SYM(loadbiosbuf, "loadbiosbuf"); SYM(loadbuf, "loadbuf"); SYM(runfor, "runfor"); SYM(setinputgetter, "setinputgetter"); SYM(setlayers, "setlayers"); }
     #define SYMO(v, n) do { *(void **)(&v) = dlsym(so, "gambatte_" n); } while (0)
     SYMO(setcgbpalette, "setcgbpalette");
@@ -82,13 +82,21 @@ int main(int argc, char **argv) {
 
     /* GB_REF_ABI23=1: the BizHawk 2.3 libgambatte (load/loadgbcbios/runfor+blitto, RTC callback), the reference
      * of the power-on CGB movies recorded on 2.3 (same calls as tools/gambatte_dsy.py --bizhawk-23) */
-    int abi23 = getenv("GB_REF_ABI23") && *getenv("GB_REF_ABI23") == '1';
+    int abi23 = getenv("GB_REF_ABI23") && *getenv("GB_REF_ABI23") >= '1';
     int (*load23)(void *, const char *, unsigned, long long, unsigned, unsigned) = 0;
     int (*bios23)(void *, const char *) = 0;
     int (*runfor23)(void *, void *, unsigned *) = 0;
     void (*blit23)(void *, void *, int) = 0;
     void (*setin23)(void *, unsigned (*)(void)) = 0, (*setrtc23)(void *, unsigned (*)(void)) = 0;
-    if (abi23) {
+    /* GB_REF_ABI23=2: the BizHawk 2.3.2 library (cycle-based RTC inside the lib, divisor offset, load(flags), loadbios) */
+    int abi232 = abi23 && getenv("GB_REF_ABI23")[0] == '2' ;
+    int (*load232)(void *, const char *, unsigned, unsigned) = 0;
+    int (*bios232)(void *, const char *, unsigned) = 0;
+    void (*setdiv232)(void *, int) = 0;
+    if (abi232) {
+        SYM(load232, "load"); SYM(bios232, "loadbios"); SYM(runfor23, "runfor"); SYM(blit23, "blitto");
+        SYM(setin23, "setinputgetter"); SYM(setdiv232, "setrtcdivisoroffset");
+    } else if (abi23) {
         SYM(load23, "load"); SYM(bios23, "loadgbcbios"); SYM(runfor23, "runfor"); SYM(blit23, "blitto");
         SYM(setin23, "setinputgetter"); SYM(setrtc23, "setrtccallback");
     }
@@ -110,7 +118,7 @@ int main(int argc, char **argv) {
     size_t bn = fread(bbuf, 1, sizeof bbuf, fb);
     fclose(fb);
     if (bn < 256) { fprintf(stderr, "gb_ref_live: short BIOS\n"); return 2; }
-    if (abi23 ? bios23(g, (char *)bbuf) : loadbiosbuf(g, (char *)bbuf, (unsigned)bn)) { fprintf(stderr, "gb_ref_live: BIOS rejected\n"); return 2; }
+    if (abi232 ? bios232(g, (char *)bbuf, (unsigned)bn) : abi23 ? bios23(g, (char *)bbuf) : loadbiosbuf(g, (char *)bbuf, (unsigned)bn)) { fprintf(stderr, "gb_ref_live: BIOS rejected\n"); return 2; }
     FILE *fr = fopen(argv[2], "rb");
     if (!fr) { fprintf(stderr, "gb_ref_live: cannot open %s\n", argv[2]); return 2; }
     fseek(fr, 0, SEEK_END); long rs = ftell(fr); rewind(fr);
@@ -119,8 +127,9 @@ int main(int argc, char **argv) {
     fclose(fr);
     /* GB_REF_FLAGS overrides the load flags: 17 = CGB + skipBIOS(0x10), 1 = CGB with the BIOS boot */
     unsigned lflags = getenv("GB_REF_FLAGS") ? (unsigned)atoi(getenv("GB_REF_FLAGS")) : 17u;
-    if (abi23 ? load23(g, (char *)rbuf, (unsigned)rs, 0, 2u, 0) : loadbuf(g, (char *)rbuf, (unsigned)rs, lflags)) { fprintf(stderr, "gb_ref_live: ROM rejected\n"); return 2; }
-    if (abi23) { setin23(g, input23); setrtc23(g, rtc23); }
+    if (abi232 ? load232(g, (char *)rbuf, (unsigned)rs, 2u) : abi23 ? load23(g, (char *)rbuf, (unsigned)rs, 0, 2u, 0) : loadbuf(g, (char *)rbuf, (unsigned)rs, lflags)) { fprintf(stderr, "gb_ref_live: ROM rejected\n"); return 2; }
+    if (abi232) { setin23(g, input23); setdiv232(g, getenv("GB_REF_DIVOFF") ? atoi(getenv("GB_REF_DIVOFF")) : -90); }
+    else if (abi23) { setin23(g, input23); setrtc23(g, rtc23); }
     else { setinputgetter(g, input_cb, 0); setlayers(g, 7); }
 
     static uint32_t video[160 * 144];

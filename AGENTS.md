@@ -39,6 +39,10 @@ sources, frontière différée, feuille de route) est `docs/COUVERTURE.fr.md`.
 - Les nombres produits sur ROMs réelles sont des observations de l'outil
   (machine concrète, RAM à zéro, registres événementiels statiques) — pas des
   mesures de matériel. Ne pas les présenter comme telles.
+- **L'API TASVideos est la source unique et obligatoire des métadonnées d'un film TAS** (émulateur et version
+  de publication/soumission, nombre de trames…) : `deepeel tasdb emu ROM TRAMES` (base locale `deepeel tasdb
+  sync`), via `tools/tasmeta.py` pour les outils Python. Jamais l'en-tête du film (un BK2 « 2.3.0 » peut ne
+  se synchroniser qu'en 2.3.2), jamais de mémoire : un outil qui rejoue un film s'arrête si l'API ne le résout pas.
 - Langue : code et identifiants en anglais, commentaires en anglais, docs
   utilisateur en français.
 
