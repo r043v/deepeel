@@ -18,7 +18,7 @@
 #include "explore/md_ref_feed.h"
 
 static unsigned g_frame;
-static unsigned char g_masks[240000];
+static unsigned char g_masks[700000];
 static unsigned g_nmasks;
 
 static unsigned g_shift;   /* GB_REF_SHIFT: the movie inputs start N frames late */
@@ -30,6 +30,8 @@ static unsigned input_cb(void *unused) {
 /* the movie's input lines: one char per button, '.' released, anything else held.
  * GB_REF_BITS=std: gambatte.h's own mask order (R 1, L 2, U 4, D 8, A 0x10, B 0x20, Sel 0x40, Start 0x80)
  * instead of the deepeel pad order (U 0x40, D 0x80, L 0x20, R 0x10, Start 8, Sel 4, B 2, A 1). */
+static unsigned input23(void) { return input_cb(0); }
+static unsigned rtc23(void) { return g_frame * 4389u / 262144u; }
 static const int *bits;
 static const int bits_d[9] = {64, 128, 32, 16, 8, 4, 2, 1, 0};
 static const int bits_s[9] = {4, 8, 2, 1, 128, 64, 32, 16, 0};
@@ -47,7 +49,7 @@ int main(int argc, char **argv) {
     FILE *fi = fopen(argv[3], "r");
     if (!fi) { fprintf(stderr, "gb_ref_live: cannot open %s\n", argv[3]); return 2; }
     char line[64];
-    while (fgets(line, sizeof line, fi) && g_nmasks < 240000) {
+    while (fgets(line, sizeof line, fi) && g_nmasks < 700000) {
         size_t l = strlen(line);
         while (l && (line[l-1] == '\n' || line[l-1] == '\r')) line[--l] = 0;
         if (l < 9) continue;
@@ -71,13 +73,25 @@ int main(int argc, char **argv) {
     void (*setcgbpalette)(void *, unsigned *);
     int (*area)(void *, int, void **, int *);
     #define SYM(v, n) do { *(void **)(&v) = dlsym(so, "gambatte_" n); if (!v) { fprintf(stderr, "gb_ref_live: %s missing\n", n); return 2; } } while (0)
-    SYM(create, "create"); SYM(loadbiosbuf, "loadbiosbuf"); SYM(loadbuf, "loadbuf");
-    SYM(runfor, "runfor"); SYM(setinputgetter, "setinputgetter"); SYM(setlayers, "setlayers");
-    SYM(area, "getmemoryarea");
+    SYM(create, "create"); SYM(area, "getmemoryarea");
+    int want23 = getenv("GB_REF_ABI23") && *getenv("GB_REF_ABI23") == '1';
+    if (!want23) { SYM(loadbiosbuf, "loadbiosbuf"); SYM(loadbuf, "loadbuf"); SYM(runfor, "runfor"); SYM(setinputgetter, "setinputgetter"); SYM(setlayers, "setlayers"); }
     #define SYMO(v, n) do { *(void **)(&v) = dlsym(so, "gambatte_" n); } while (0)
     SYMO(setcgbpalette, "setcgbpalette");
 
 
+    /* GB_REF_ABI23=1: the BizHawk 2.3 libgambatte (load/loadgbcbios/runfor+blitto, RTC callback), the reference
+     * of the power-on CGB movies recorded on 2.3 (same calls as tools/gambatte_dsy.py --bizhawk-23) */
+    int abi23 = getenv("GB_REF_ABI23") && *getenv("GB_REF_ABI23") == '1';
+    int (*load23)(void *, const char *, unsigned, long long, unsigned, unsigned) = 0;
+    int (*bios23)(void *, const char *) = 0;
+    int (*runfor23)(void *, void *, unsigned *) = 0;
+    void (*blit23)(void *, void *, int) = 0;
+    void (*setin23)(void *, unsigned (*)(void)) = 0, (*setrtc23)(void *, unsigned (*)(void)) = 0;
+    if (abi23) {
+        SYM(load23, "load"); SYM(bios23, "loadgbcbios"); SYM(runfor23, "runfor"); SYM(blit23, "blitto");
+        SYM(setin23, "setinputgetter"); SYM(setrtc23, "setrtccallback");
+    }
     void *g = create();
     /* the linear CGB colour profile: the m0boy one, byte for byte (5-bit channel
      * scaled to 8 bits, exactly what the TAS video shows) */
@@ -96,7 +110,7 @@ int main(int argc, char **argv) {
     size_t bn = fread(bbuf, 1, sizeof bbuf, fb);
     fclose(fb);
     if (bn < 256) { fprintf(stderr, "gb_ref_live: short BIOS\n"); return 2; }
-    if (loadbiosbuf(g, (char *)bbuf, (unsigned)bn)) { fprintf(stderr, "gb_ref_live: BIOS rejected\n"); return 2; }
+    if (abi23 ? bios23(g, (char *)bbuf) : loadbiosbuf(g, (char *)bbuf, (unsigned)bn)) { fprintf(stderr, "gb_ref_live: BIOS rejected\n"); return 2; }
     FILE *fr = fopen(argv[2], "rb");
     if (!fr) { fprintf(stderr, "gb_ref_live: cannot open %s\n", argv[2]); return 2; }
     fseek(fr, 0, SEEK_END); long rs = ftell(fr); rewind(fr);
@@ -105,9 +119,9 @@ int main(int argc, char **argv) {
     fclose(fr);
     /* GB_REF_FLAGS overrides the load flags: 17 = CGB + skipBIOS(0x10), 1 = CGB with the BIOS boot */
     unsigned lflags = getenv("GB_REF_FLAGS") ? (unsigned)atoi(getenv("GB_REF_FLAGS")) : 17u;
-    if (loadbuf(g, (char *)rbuf, (unsigned)rs, lflags)) { fprintf(stderr, "gb_ref_live: ROM rejected\n"); return 2; }
-    setinputgetter(g, input_cb, 0);
-    setlayers(g, 7);
+    if (abi23 ? load23(g, (char *)rbuf, (unsigned)rs, 0, 2u, 0) : loadbuf(g, (char *)rbuf, (unsigned)rs, lflags)) { fprintf(stderr, "gb_ref_live: ROM rejected\n"); return 2; }
+    if (abi23) { setin23(g, input23); setrtc23(g, rtc23); }
+    else { setinputgetter(g, input_cb, 0); setlayers(g, 7); }
 
     static uint32_t video[160 * 144];
     static int16_t audio[2 * 40000];
@@ -148,7 +162,9 @@ int main(int argc, char **argv) {
             if (el > 0.01) feed->unsync_x10 = (uint32_t)(10.0 * g_frame / el);
         }
         unsigned samples = 35112;
-        long csb = runfor(g, video, 160, audio, &samples);
+        long csb = 0;
+        if (abi23) { if (runfor23(g, audio, &samples) > 0) blit23(g, video, 160); }
+        else csb = runfor(g, video, 160, audio, &samples);
         if (getenv("GB_REF_BOUND_LOG") && csb >= 0)
             fprintf(stderr, "refbound %u %ld\n", g_frame + 1, (long)((long long)(g_frame + 1) * 70224 - csb));
         if (getenv("GB_PAL_LOG")) {
