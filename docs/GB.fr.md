@@ -6660,3 +6660,11 @@ attract tient désormais au moins `--attract-min` images (36 000 = 10 min de jeu
 - **Mesure** (Crystal mrwint, 100 000 trames, BizHawk 2.3) : aucune divergence persistante ; écarts transitoires
   seulement (PC de fin de trame décalé dans 1,7 % des trames, 1 à 57 trames par bloc pour WRAM/HRAM/VRAM).
   Observation de l'outil, pas une mesure de matériel.
+
+## Synchro Crystal (TAS BizHawk 2.3.2) : état et méthode
+
+- Métadonnées du film : API TASVideos obligatoire (`deepeel tasdb emu`, `tools/tasmeta.py`). Crystal = BizHawk 2.3.2 (Gambatte 2.3.2) ; `tools/gb_sync_check.py --bizhawk-232`, `GB_REF_ABI23=2`.
+- Modèle de trame Gambatte 2.3.2 (vérifié sur les sources) : les événements sont traités à la première frontière d'instruction dont cc ≥ date de l'événement ; budget de trame = cc de la frontière + 70224 (sans arrondi) ; extinction LCD : `blit = cc_écriture + 456*4`.
+- RTC : cycles Gambatte 2.3.2, `DEEPEEL_TAS_RTCOFF` posé par `gb_sync_check`.
+- Les registres concordent jusqu'à la trame 9982 (avant : 2490). Restent : wram0 2508 (7 octets, $C0BD..), hram 10702, combat 11055-11058.
+- Piste ouverte (trame ~9982) : à cc 699928072 la référence prend l'IRQ STAT (0048, événement mode0 à t=699928069) juste après un `reti`, le natif ne lève pas l'IF STAT dans la fenêtre (IF=10 constant). À examiner : bord STAT / événement mode0 à LY=0 après la coupe de trame.
