@@ -181,6 +181,18 @@
      }
      if (rtc.halted) return;
      rtc.days += e / 86400u;
+@@ -463,5 +513,10 @@
+     rtc_sync();
+     switch (k) {
+-    case 0: rtc.S = (uint8_t)(v & 0x3Fu); break;
++#if defined(GBL_DEEPEEL_DMA_HOOK)
++    /* Gambatte Rtc::setS -> Time::reset: writing the seconds restarts the sub-second phase */
++    case 0: rtc.S = (uint8_t)(v & 0x3Fu); if (gbl_sync_rtc_div) rtc.subsecond = 0; break;
++#else
++    case 0: rtc.S = (uint8_t)(v & 0x3Fu); break;
++#endif
+     case 1: rtc.M = (uint8_t)(v & 0x3Fu); break;
+     case 2: rtc.H = (uint8_t)(v & 0x1Fu); break;
 @@ -505,6 +555,9 @@
      rtc.carry_ref = rtc.days;
      rtc.frame_anchor = gbl_frame;
