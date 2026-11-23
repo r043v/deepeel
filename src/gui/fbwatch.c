@@ -252,6 +252,13 @@ void dp_watch_frame(const uint32_t *px, int w, int h, uint64_t frame, uint32_t m
             fprintf(stderr, "tas: STAGNATION - same image since movie frame %llu, probable desync with the movie (frame %u/%u)\n", (unsigned long long)since, movie_frame, total);
         }
     }
-    if (total && !watch_ring_push(px, w, h, frame, movie_frame, total, done)) return;
+    if (total) {
+        if (!watch_ring_push(px, w, h, frame, movie_frame, total, done)) return;
+        dp_fbwatch_progress(movie_frame, total, done);
+    }
     dp_fb_publish(px, w, h, frame);
+    if (pend_au_n) {
+        audio_play(pend_au, pend_au_n);
+        pend_au_n = 0;
+    }
 }

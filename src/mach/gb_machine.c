@@ -35,7 +35,25 @@ typedef struct GbWrap {
 #define GB_CGB_RAM_INDICES 0x1C000u
 static GbWrap *gbw(DpMachine *m) { return m->impl; }
 // The PPU renders lines only while the watch is open.
-static void gb_watch(DpMachine *m, int on) { DpMach *d = gbw(m)->d; d->render = on; d->api->skip_render[0] = !on; }
+static void gb_watch(DpMachine *m, int on) {
+    DpMach *d = gbw(m)->d;
+    d->render = on;
+    d->api->skip_render[0] = !on;
+    if (on) d->api->apu_set_rate(44100);
+}
+
+static unsigned gb_audio_read(DpMachine *m, int16_t *stereo, unsigned cap) {
+    const DpMach *d = gbw(m)->d;
+    if (!d->render) return 0;
+    uint8_t mono[44100 / 60];
+    unsigned count = cap < sizeof mono ? cap : sizeof mono;
+    d->api->apu_render(mono, count);
+    for (unsigned i = 0; i < count; ++i) {
+        int16_t sample = (int16_t)(((int)mono[i] - 128) * 256);
+        stereo[2 * i] = stereo[2 * i + 1] = sample;
+    }
+    return count;
+}
 static int gb_render(DpMachine *m, uint32_t *argb, unsigned cap, int *w, int *h) {
     const GbWrap *gb = gbw(m);
     const DpMach *d = gb->d;
@@ -639,6 +657,7 @@ static DpMachine *gb_wrap(DpMach *impl) {
     m->set_input = gb_set_input;
     m->frame = gb_frame;
     m->watch = gb_watch; m->render = gb_render;
+    m->audio_read = gb_audio_read;
     m->observe = gb_observe;
     m->ctx_components = gb_ctx_components;
     m->ctx_reg_hash = gb_ctx_reg_hash;
@@ -655,7 +674,25 @@ void dp_machine_gb_set_tas(DpMachine *m, const struct DpTas *tas) {
 
 // per-recorder machine tuning for the movie loaded in w (sync profiles, frame 0 input)
 static void gb_tas_tune(DpMach *mach, const DpTas *tas) {
-    if (tas->cgb_bios_loaded) dp_mach_start_cgb_bios(mach, tas->cgb_bios);
+    int gambatte = tas->recorder == DP_TAS_REC_BIZHAWK && tas->gambatte;
+    int vblank_clock = gambatte && !tas->equal_frames && !getenv("DEEPEEL_TAS_NOMODE3");
+    int legacy_cgb_clock = vblank_clock && tas->bizhawk_23 && tas->is_cgb && tas->cgb_bios_loaded;
+    if (tas->cgb_bios_loaded) dp_mach_start_cgb_bios(mach, tas->cgb_bios, legacy_cgb_clock ? 8u : 0u);
+    if (vblank_clock) *mach->api->sync_vba_off_clock = legacy_cgb_clock ? 4 : 3;
+    if (gambatte) {
+        const char *skew = getenv("DEEPEEL_TAS_DIVSKEW");
+        // The older CGB core starts its CPU counter at 8 with DIV based at 0.
+        // Other movies retain the read correction measured on SML2.
+        *mach->api->sync_div_skew = skew ? (uint8_t)atoi(skew) : (legacy_cgb_clock ? 0 : 40);
+    }
+    if (tas->cgb_bios_loaded && getenv("DEEPEEL_DEBUG_CGB_WRAM")) {
+        FILE *f = fopen(getenv("DEEPEEL_DEBUG_CGB_WRAM"), "rb");
+        if (f) { (void)fread(mach->api->wram, 1, 0x8000, f); fclose(f); }
+    }
+    if (tas->cgb_bios_loaded && getenv("DEEPEEL_DEBUG_CGB_HRAM")) {
+        FILE *f = fopen(getenv("DEEPEEL_DEBUG_CGB_HRAM"), "rb");
+        if (f) { (void)fread(mach->api->hram, 1, 0x7F, f); fclose(f); }
+    }
     // the recording emulator's timing quirks (gbl.h movie sync
     // knobs), for this worker's machine only and while the movie
     // plays: random play after it runs on hardware timing again
@@ -702,14 +739,6 @@ static void gb_tas_tune(DpMach *mach, const DpTas *tas) {
         fprintf(stderr, "deepeel: TAS %s: GBHawk sync profile (pad latch +14481 cycles, DIV phase $FE4D, PPU phase 405)\n",
                 tas->source);
     }
-    // BizHawk's frame clock (gbl.h, sync_vba_off_clock 3): a frame ends at
-    // the video frame or when its sample budget runs out
-    if (tas->recorder == DP_TAS_REC_BIZHAWK && tas->gambatte && !tas->equal_frames && !getenv("DEEPEEL_TAS_NOMODE3"))
-        *mach->api->sync_vba_off_clock = 3;
-    // Gambatte's DIV phase against the m0boy clock, measured on SML2 (DIV
-    // reads that seed its RNG): any skew in 25..64 matches, 40 is mid-range.
-    if (tas->recorder == DP_TAS_REC_BIZHAWK && tas->gambatte)
-        *mach->api->sync_div_skew = getenv("DEEPEEL_TAS_DIVSKEW") ? (uint8_t)atoi(getenv("DEEPEEL_TAS_DIVSKEW")) : 40;
     if (tas->echo_old && !getenv("DEEPEEL_TAS_NOECHO")) {
         *mach->api->sync_echo_old = 1;
         mach->api->sync_echo_apply();

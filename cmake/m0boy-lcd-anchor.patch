@@ -1,0 +1,32 @@
+--- a/gbl_ppu.c
++++ b/gbl_ppu.c
+@@ -1061,6 +1061,15 @@
+ }
+ 
+ 
++/* LCD off: gambatte's frame clock at the disable write (memory.cpp FF40):
++ * the next blit is cc + 4 lines, then every frame length.  off_start keeps
++ * the "last frame start <= now" invariant: first off frame at write+4*LINE,
++ * then +FRAME_CYCLES each (the Crystal TAS desync: a whole-frame anchor
++ * shifts the frame numbering across every LCD-off period). */
++static uint32_t lcd_off_anchor(uint32_t now, uint8_t off_ly) {
++    (void)off_ly;
++    return now - (FRAME_CYCLES - 4u * LINE_CYCLES);
++}
+ #if !GBL_TIMING_ASM
+ /* Mode 3 length of the current line (Pan Docs "Mode 3 length"; SameBoy and
+  * Gambatte agree): 172 dots + SCX%8 + 6 when the window starts on the line +
+@@ -1347,11 +1356,12 @@
+             stat_line = P.lyc_line;
+         } else if (!(v & 0x80) && lcd_on) {
+             if (GBL_PPU_REF) off_cmp = (uint8_t)(ly_visible() == LYC); /* the LY=LYC bit is kept while the LCD is off */
++            uint32_t off_ly = ly;
+             lcd_on = 0;
+             ly = 0;
+             mode = 0;
+             stat_line = 0;
+-            off_start = gbr.cyc;
++            off_start = lcd_off_anchor(gbr.cyc, off_ly);
+         }
+         LCDC = v;
+         update_due();

@@ -65,6 +65,8 @@ typedef struct DpGblApi {
     /* Physical RAM offset, or -1 for disabled RAM and cartridge registers. */
     int32_t (*eram_index)(uint16_t address);
     uint8_t *rtc_present, *serial_received;
+    void (*apu_set_rate)(uint32_t hz);
+    void (*apu_render)(uint8_t *samples, unsigned count);
 } DpGblApi;
 
 /* the ROM bank behind a pc/address of the fixed-or-switchable windows */

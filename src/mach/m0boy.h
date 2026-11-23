@@ -90,7 +90,7 @@ void dp_mach_attach(DpMach *m, void *owner,
  * buffer) and reset the machine. */
 void dp_mach_set_rom(DpMach *m, const uint8_t *rom, uint32_t size);
 void dp_mach_reset(DpMach *m);
-void dp_mach_start_cgb_bios(DpMach *m, const uint8_t *bios);
+void dp_mach_start_cgb_bios(DpMach *m, const uint8_t *bios, uint32_t initial_cycles);
 void dp_mach_map_cgb_bios(DpMach *m, int mapped);
 static inline int dp_mach_in_cgb_bios(const DpMach *m, uint32_t address) {
     return m->cgb_bios_mapped && (address < 0x100u || (address >= 0x200u && address < 0x900u));

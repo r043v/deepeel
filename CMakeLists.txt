@@ -211,6 +211,8 @@ extern uint32_t ${p}gbl_frame, ${p}gbl_interp_instrs;
 extern uint16_t ${p}gbl_rom0_bank;
 extern uint32_t ${p}gbl_rom_banks;
 extern uint8_t ${p}gbl_mbc1m;
+extern void ${p}gbl_apu_set_rate(uint32_t hz);
+extern void ${p}gbl_apu_render(uint8_t *samples, unsigned count);
 static const DpGblApi inst_${v}_${i} = {
     ${v}, ${p}gbl_reset, ${p}gbl_run, ${p}gbl_set_buttons, ${p}gbl_state_bytes, ${p}gbl_state_io,
     &${p}gbr, ${p}gbl_io, &${p}gbl_ie, ${p}gbl_wram, ${p}gbl_vram, ${p}gbl_oam, ${p}gbl_hram,
@@ -220,6 +222,7 @@ static const DpGblApi inst_${v}_${i} = {
     &${p}gbl_sync_div_skew, &${p}gbl_sync_vba_off_clock, &${p}gbl_sync_pad_delay, &${p}gbl_sync_div_extra, &${p}gbl_sync_ppu_phase, ${p}gbl_ppu_phase_apply, &${p}gbl_rom0_bank, &${p}gbl_rom_banks, &${p}gbl_mbc1m,
     &${p}gbl_sync_echo_old, ${p}gbl_echo_apply, &${p}gbl_sync_ly_lag, &${p}gbl_sync_irq_trim, &${p}gbl_sync_halt_snd,
     ${p}gbl_deepeel_eram_index, &${p}gbl_deepeel_rtc_present, &${p}gbl_deepeel_serial_received,
+    ${p}gbl_apu_set_rate, ${p}gbl_apu_render,
 };
 ")
     string(APPEND g_rows "[${v}][${i}] = &inst_${v}_${i},
@@ -274,7 +277,7 @@ add_custom_command(OUTPUT ${GBL_ARCH}
           ${DP_GBL_RUNTIME}/gbl_ppu.c ${DP_GBL_RUNTIME}/gbl_apu.c
           ${DP_GBL_RUNTIME}/gbl.h ${DP_GBL_RUNTIME}/gbl_internal.h
           ${DP_GBL_RUNTIME}/gbl_options.h
-          cmake/dp_gbl_build.cmake cmake/m0boy-tas-compat.patch
+          cmake/dp_gbl_build.cmake cmake/m0boy-tas-compat.patch cmake/m0boy-lcd-anchor.patch
   COMMENT "Building the m0boy GB machine (${nv} variants x ${DP_MACHINES} instances)")
 add_custom_target(dp_gblmach DEPENDS ${GBL_ARCH})
 add_library(dp_gblmach_lib STATIC IMPORTED GLOBAL)

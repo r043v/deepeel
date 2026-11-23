@@ -250,6 +250,8 @@ static void bk2_header(const uint8_t *h, size_t n, DpTas *out) {
             // the original DMG boot ROM: the movie starts at power-on and the
             // cartridge's code only begins at $0100 once it has run
             dmg_boot = 1;
+        } else if (len == 24 && !memcmp(l, "emuVersion Version 2.3.0", 24)) {
+            out->bizhawk_23 = 1;
         } else if (len >= 12 && !strncmp(l, "Core Gambatte", 13)) {
             out->gambatte = 1;
         } else if (len >= 11 && !strncmp(l, "Core GBHawk", 11)) {
@@ -316,6 +318,7 @@ static int tas_load_zip(uint8_t *d, size_t n, DpTas *out, char *err, size_t errs
             memcpy(z, sync, sn);
             z[sn] = 0;
             if (strstr(z, "\"EqualLengthFrames\":true")) out->equal_frames = 1;
+            if (strstr(z, "\"GBACGB\":true")) out->gba_cgb = 1;
             free(z);
         }
         free(sync);
@@ -414,6 +417,13 @@ int dp_tas_load_cgb_bios(DpTas *t, const char *path, char *err, size_t errsz) {
     if (memcmp(hash, t->cgb_bios_hash, sizeof hash)) {
         snprintf(err, errsz, "CGB BIOS SHA-1 differs from GBC_Firmware_World in the BK2");
         return 0;
+    }
+    /* BizHawk 2.3 Gambatte changes BIOS reads in GBA compatibility mode.
+     * Verify the original firmware first; the override is not part of its hash. */
+    if (t->gba_cgb) {
+        static const uint8_t delta[13] = { 0xff, 0, 0xcd, 3, 0x35, 0xaa, 0x31, 0x90, 0x94, 0, 0, 0, 0 };
+        for (unsigned i = 0; i < sizeof delta; ++i)
+            t->cgb_bios[0xf3 + i] += delta[i];
     }
     t->cgb_bios_loaded = 1;
     return 1;

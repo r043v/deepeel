@@ -113,15 +113,16 @@ void dp_mach_map_cgb_bios(DpMach *m, int mapped) {
     m->cgb_bios_mapped = (uint8_t)mapped;
 }
 
-void dp_mach_start_cgb_bios(DpMach *m, const uint8_t *bios) {
+void dp_mach_start_cgb_bios(DpMach *m, const uint8_t *bios, uint32_t initial_cycles) {
     m->cgb_bios = bios;
     dp_mach_map_cgb_bios(m, 1);
     gbl_cpu_t *cpu = m->api->gbr;
     cpu->pc = cpu->sp = cpu->bc = cpu->de = cpu->hl = 0;
     cpu->a = cpu->nf = cpu->hf = cpu->cf = 0;
     cpu->zr = 1;
-    m->api->wr(0xff40, 0);
     m->api->wr(0xff04, 0);
+    cpu->cyc += initial_cycles;
+    m->api->wr(0xff40, 0);
     m->api->io[0x0f] = 0;
 }
 
@@ -250,7 +251,8 @@ uint8_t dp_gbl_hook_read(int v, int i, uint16_t a, uint8_t val) {
         const char *e = getenv("DEEPEEL_DEBUG_WATCHR"); // desync diagnostics
         watchr = e ? strtol(e, NULL, 16) : -1;
     }
-    if (m && watchr == a) fprintf(stderr, "R v=%u a=%04x val=%02x pc=%04x\n", (unsigned)*m->api->frame, a, val, m->api->gbr->pc);
+    if (m && watchr == a) fprintf(stderr, "R v=%u a=%04x val=%02x pc=%04x cyc=%u\n",
+        (unsigned)*m->api->frame, a, val, m->api->gbr->pc, (unsigned)m->api->gbr->cyc);
     if (m && m->on_read) m->on_read(m, a, val);
     return val;
 }

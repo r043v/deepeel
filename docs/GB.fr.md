@@ -1171,7 +1171,9 @@ fenêtre seule, le run continue. Sans SDL2, l'option affiche un message et est i
 Sur Game Boy, `--watch 60` échantillonne chaque trame émulée. Avec
 `DP_WATCH_FPS=0`, la fenêtre SDL2 tourne sans limite de débit.
 Une compilation avec `DP_GBL_CGB=ON` affiche les couleurs des cartouches CGB
-dans cette fenêtre.
+dans cette fenêtre. Le watch GB utilise l'APU de m0boy pour le son, envoyé
+à SDL à 44,1 kHz sur les deux canaux. Pour écouter à vitesse normale,
+utiliser `--watch 60` et `DP_WATCH_FPS=60`.
 
 Un BK2 CGB Gambatte qui démarre à l’allumage et cadence ses trames sur le
 VBlank peut être rejoué avec son BIOS de 2 304 octets. Deepeel vérifie son
@@ -5498,16 +5500,35 @@ deepeel desync native.dsy reference.dsy
 Le script vérifie les SHA-1 du BK2 et conserve les directions opposées.
 Les films qui démarrent depuis un état sauvegardé ou utilisent la touche
 Power requièrent un autre producteur. `io_raw` reste propre à Deepeel.
+Avec une bibliothèque compilée à partir de BizHawk 2.3, ajouter
+`--bizhawk-23`. Cette version applique elle-même le réglage `GBACGB`
+au BIOS. La référence utilise les réglages DIV et RTC de BizHawk 2.3.
+Le profil natif correspondant cale aussi l'IRQ STAT de HBlank et le réveil
+de HALT sur Gambatte et ajoute son cycle machine de fin à chaque bloc HDMA.
+Sur le TAS Pokémon Crystal, le coût HDMA décalait la boucle de lecture de
+LY à la frame 6 116, puis la lecture de DIV qui alimente le RNG à la frame
+6 120.
 Avec `--instructions reference.txt`, le producteur exporte aussi le PC et
-les registres avant chaque instruction. Pour le flux natif, utiliser
+les registres avant chaque instruction. `--trace-start N --trace-end M`
+borne la trace d'instructions aux images N à M. Pour le flux natif, utiliser
 `DEEPEEL_TAS_INSTR=native.txt` avec `--jobs 1 --replay-only --no-event-probes`
-pour écarter les traces des sondes. Le premier champ est un compteur
-d’échantillons cumulé. À vitesse normale, le multiplier par deux pour
+pour écarter les traces des sondes. En mode `--replay-only`, les entrées
+GB issues du balayage des pointeurs ne sont plus mises en file. La commande
+abrégée `deepeel ROM --tas FILM --replay-only` utilise un seul worker par
+défaut et ouvre une relecture sans reprendre le dossier d'exploration.
+Avec `--bizhawk-23`, le premier champ de la référence est le compteur
+de cycles CPU interne du cœur. Sur l'ABI récente, c'est un compteur
+d'échantillons cumulé. À vitesse normale, le multiplier par deux pour
 le comparer aux cycles CPU du flux natif `DEEPEEL_TAS_INSTR`. À double
 vitesse, un échantillon couvre quatre cycles CPU. La ligne suivante
 montre l’état laissé par l’instruction, après une éventuelle interruption.
 La dernière colonne indique un opcode préchargé. Lors d’un GDMA,
 Gambatte a déjà avancé le PC d’un octet pour ce préchargement.
+
+Le planificateur LCD de m0boy vérifie chaque ligne quand l'interruption
+STAT de mode 0 est armée. Grouper les lignes après l'entrée en HBlank
+retardait ou regroupait plusieurs interruptions. Sur Pokémon Crystal,
+la divergence affectait les routines graphiques à partir de la frame 367.
 
 ### NES : `tools/nes_dsy` (m0boy) contre `bizhawk_dsy nes` (NesHawk)
 

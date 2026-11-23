@@ -741,7 +741,7 @@ static int cmd_explore(int argc, char **argv) {
             }
             uint32_t *gseed_pc = NULL; uint16_t *gseed_bk = NULL; DpSeedRegs *gseed_regs = NULL;
             uint64_t gseed_refused = 0;
-            size_t gseed_cap = cfg.no_pointer_scan ? 0 :
+            size_t gseed_cap = cfg.no_pointer_scan || gkcfg.replay_only ? 0 :
                 (getenv("DEEPEEL_GB_POINTER_SEEDS") ? (size_t)atol(getenv("DEEPEEL_GB_POINTER_SEEDS")) : 40000);
             if (gkcfg.unbounded && gseed_cap) gseed_cap = cart->rom_size;
             if (gseed_cap) {   // pointer-table entry discovery (core_gbseeds.c), to match the GB explorer's speculative seeds
@@ -794,7 +794,14 @@ static int cmd_explore(int argc, char **argv) {
             free(gbs_pcs); free(gbs_bks); free(gbs_regs);   // copied into the kernel's seed arrays above
             gbs_pcs = NULL; gbs_bks = NULL; gbs_regs = NULL; gbs_seeds = 0;
             DpCoreResult kr;
-            if (watch) { gkcfg.watch_every = (unsigned)(60 / watch); dp_fbwatch_start("deepeel gb watch"); }   // generic screen watch (DpMachine.render)
+            if (watch) {
+                gkcfg.watch_every = (unsigned)(60 / watch);
+                if (gkcfg.tas_frames) {
+                    const char *base = strrchr(gt.source, '/');
+                    dp_fbwatch_caption(base ? base + 1 : gt.source);
+                }
+                dp_fbwatch_start("deepeel gb watch");
+            }
             rc = dp_core_explore_cli(km, cart->rom_size, &gkcfg, &kr, summary ? summary : text) ? 0 : 1;
             if (watch) dp_fbwatch_stop();
             if (gb_wdump && dp_fb_dump_ppm(gb_wdump)) fprintf(stderr, "deepeel: no frame to dump\n");
@@ -2043,16 +2050,19 @@ static int auto_explore(int argc, char **argv, ArSystem sys) {
     snprintf(fsum, sizeof fsum, "%s/%s.json", outdir, stem);
     snprintf(fcov, sizeof fcov, "%s/%s.cov", outdir, stem);
     char probe[1200]; snprintf(probe, sizeof probe, "%s/identity.bin", sdir);
-    int resume = access(probe, R_OK) == 0;
-    int jobs = auto_jobs(); snprintf(fjobs, sizeof fjobs, "%d", jobs);
+    int gb_replay = sys == AR_GB && ar_has(argc, argv, "--replay-only") && ar_has(argc, argv, "--tas");
+    int resume = !gb_replay && access(probe, R_OK) == 0;
+    int jobs = gb_replay ? 1 : auto_jobs(); snprintf(fjobs, sizeof fjobs, "%d", jobs);
     const char *av[640]; int n = 0;
     av[n++] = "deepeel";
     if (sys == AR_GB) av[n++] = "explore";
     else if (sys == AR_SMS || sys == AR_GG || sys == AR_SG || sys == AR_MSX) { av[n++] = "z80"; av[n++] = "explore"; av[n++] = names[sys]; }
     else { av[n++] = names[sys]; av[n++] = "explore"; }
     av[n++] = rom;
-    av[n++] = "--state-dir"; av[n++] = sdir;
-    if (resume) av[n++] = "--resume";
+    if (!gb_replay) {
+        av[n++] = "--state-dir"; av[n++] = sdir;
+        if (resume) av[n++] = "--resume";
+    }
     av[n++] = "--jobs"; av[n++] = fjobs;
     av[n++] = "--max-total"; av[n++] = "4611686018427387904";   // no step wall (a huge budget: the sega parser reads 0 as "default"): the run ends on exhaustion, SIGINT, or 15 minutes without a new ROM byte; the queue is bounded by the RAM (dp_mem_budget)
     av[n++] = "--stall-time"; av[n++] = "900";

@@ -46,9 +46,10 @@ typedef struct DpTas {
     int boot_frames;
     // BizHawk header "Core Gambatte": the sync profile calibrated on libgambatte applies
     int gambatte;
+    int bizhawk_23;      // BK2 header "emuVersion Version 2.3.0"
     // BizHawk header "Core GBHawk": the GBHawk pad-latch/DIV profile applies
     int gbhawk;
-    int is_cgb, has_cgb_bios_hash, has_power_event, cgb_bios_loaded;
+    int is_cgb, has_cgb_bios_hash, has_power_event, cgb_bios_loaded, gba_cgb;
     uint8_t cgb_bios_hash[20];
     uint8_t cgb_bios[DP_CGB_BOOT_SIZE];
 } DpTas;

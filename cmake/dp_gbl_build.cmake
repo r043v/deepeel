@@ -18,6 +18,19 @@ if(DP_GBL_PATCH)
   set(rt ${DP_GBL_OUT}/runtime)
   file(REMOVE_RECURSE ${rt})
   file(COPY ${DP_GBL_SRC}/ DESTINATION ${rt})
+  # Some m0boy checkouts already contain the LCD-off anchor incorporated in
+  # the compatibility patch. Normalize only the copied runtime in that case.
+  get_filename_component(patch_dir "${DP_GBL_PATCH}" DIRECTORY)
+  set(anchor_patch "${patch_dir}/m0boy-lcd-anchor.patch")
+  execute_process(COMMAND patch -R -p1 --dry-run -s -i ${anchor_patch}
+    WORKING_DIRECTORY ${rt} RESULT_VARIABLE anchor_present OUTPUT_QUIET ERROR_QUIET)
+  if(anchor_present EQUAL 0)
+    execute_process(COMMAND patch -R -p1 -s -i ${anchor_patch}
+      WORKING_DIRECTORY ${rt} RESULT_VARIABLE anchor_result)
+    if(NOT anchor_result EQUAL 0)
+      message(FATAL_ERROR "dp_gbl: could not normalize copied LCD-off anchor")
+    endif()
+  endif()
   execute_process(COMMAND patch -p1 --no-backup-if-mismatch -s -i ${DP_GBL_PATCH}
     WORKING_DIRECTORY ${rt} RESULT_VARIABLE r OUTPUT_VARIABLE out ERROR_VARIABLE out)
   if(NOT r EQUAL 0)
