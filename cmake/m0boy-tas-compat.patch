@@ -1288,7 +1288,7 @@
      /* Nothing observable happens inside a batch: the next line start that
       * matters is the batch end, VBlank, the LYC line, or the next frame. */
      uint32_t target = ly < 144 ? ((uint32_t)ly | (GBL_PPU_BATCH - 1u)) + 1u : 154u;
-@@ -1222,6 +1452,17 @@
+@@ -1222,6 +1452,21 @@
      return t;
  }
  
@@ -1300,6 +1300,10 @@
 +        uint32_t tb = line_start + lines_span(ly, 153u);
 +        if ((int32_t)(tb - t) < 0) t = tb;
 +    }
++#if GBL_CGB
++    /* Gambatte's frame event is seen at the first access at or after it, whatever the line events */
++    if (CGB_GAMBATTE_CLOCK && lcd_on) { uint32_t g = gam_cgb_due(); if ((int32_t)(g - t) < 0) t = g; }
++#endif
 +    return t;
 +}
 +
