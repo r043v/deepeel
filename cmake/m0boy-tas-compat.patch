@@ -654,15 +654,17 @@
  #if defined(GBL_PPU_REF) && GBL_PPU_REF
      /* HALT with IME=0 and an interrupt already pending does not halt: the
       * byte after it is fetched twice (halt bug). */
-@@ -2324,17 +2614,93 @@
+@@ -2324,17 +2614,95 @@
       * and the CPU resumes 2 cycles after the sample that sees the request:
       * already pending at h -> h+4; request at t > h -> max(h+8, (t+5)&~3). */
      uint32_t t = gbr.cyc;
 +#if GBL_CGB && defined(GBL_DEEPEEL_DMA_HOOK)
 +    if (gbl_cgb && gbl_sync_vba_off_clock == 4) {
 +        /* Gambatte detects the interrupt on the CPU grid, then spends
-+         * one M-cycle leaving HALT before dispatch or the next opcode. */
-+        gbr.cyc = ((t + 3u) & ~3u) + 4u;
++         * one M-cycle leaving HALT before dispatch or the next opcode.  An
++         * interrupt already flagged when HALT reads IF (after its fetch
++         * cycle) never halts: the dispatch starts at once. */
++        gbr.cyc = slept ? ((t + 3u) & ~3u) + 4u : h0;
 +    } else
 +#endif
      if (h0 & 3u) {
