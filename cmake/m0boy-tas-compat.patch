@@ -561,7 +561,7 @@
  #endif
  
  /* ---- interrupts and execution ------------------------------------------- */
-@@ -2237,14 +2457,69 @@
+@@ -2237,14 +2457,71 @@
  }
  #endif
  
@@ -615,15 +615,17 @@
 +        gbr.cyc += 4;
 +        gbl_sync();
 +        dp_gbl_wr(--gbr.sp, (uint8_t)pc);
-+        pending = ie & IF & 0x1F;
-+        gbr.cyc += 4;
++        gbr.cyc += 3;
 +        gbl_sync();
++        pending = ie & IF & 0x1F;
 +        gbr.pc = 0;
 +        if (pending) {
 +            int bit = __builtin_ctz((unsigned)pending);
 +            IF &= (uint8_t)~(1u << bit);
 +            gbr.pc = (uint16_t)(0x40 + bit * 8);
 +        }
++        gbr.cyc += 1;
++        gbl_sync(); /* Gambatte clears IF before the events due at the vector fetch */
 +        gbl_update_evt();
 +        return 1;
 +    }
@@ -985,7 +987,7 @@
 +} gam_cgb;
 +
 +static uint32_t gam_cgb_due(void) {
-+    if (gam_cgb.fix) return gam_cgb.hit; /* a frame hit in mid-instruction: the budget is set at the next boundary */
++    if (gam_cgb.fix) { if (++gam_cgb.spin > 8) gam_cgb.fix = 0; else return gam_cgb.hit; } /* a frame hit in mid-instruction: the budget is set at the next boundary */
 +    return (int32_t)(gam_cgb.blit - gam_cgb.budget) < 0 ? gam_cgb.blit : gam_cgb.budget;
 +}
 +
