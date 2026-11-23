@@ -1997,7 +1997,16 @@ static void run_path(Worker *w, Pending *p) {
             uint64_t f = m->frame(m);
             if (f != tas_last) {
                 tas_last = f;
-                if (tas_shift == 0 && cfg->dsy_path && f > 0) core_dsy_frame(cfg, m, f);
+                if (tas_shift == 0 && cfg->dsy_path && f > 0) {   // DEEPEEL_DSY_FROM=N: only frames >= N are written (window around a divergence)
+                    static uint64_t dsy_from; static int dsy_from_init;
+                    if (!dsy_from_init) { dsy_from_init = 1; const char *e = getenv("DEEPEEL_DSY_FROM"); if (e && *e) dsy_from = strtoull(e, NULL, 10); }
+                    if (f >= dsy_from) core_dsy_frame(cfg, m, f);
+                }
+                if (tas_shift == 0 && cfg->dsy_path && f > 0) {   // DEEPEEL_DSY_FRAMES=N: the DSY1 reference stops after frame N
+                    static uint64_t dsy_stop = ~0ull; static int dsy_stop_init;
+                    if (!dsy_stop_init) { dsy_stop_init = 1; const char *e = getenv("DEEPEEL_DSY_FRAMES"); if (e && *e) dsy_stop = strtoull(e, NULL, 10); }
+                    if (f >= dsy_stop) { __atomic_store_n(&sh->halt, 4, __ATOMIC_RELAXED); pthread_mutex_lock(&sh->mu); pthread_cond_broadcast(&sh->cv); pthread_mutex_unlock(&sh->mu); }
+                }
                 if (tas_shift == 0 && cfg->save_frames && core_save_frame(cfg, m, f)) { __atomic_store_n(&sh->halt, 4, __ATOMIC_RELAXED); pthread_mutex_lock(&sh->mu); pthread_cond_broadcast(&sh->cv); pthread_mutex_unlock(&sh->mu); }
                 if (tas_shift == 0) core_watch_publish(cfg, m, f, (uint32_t)f, (uint32_t)cfg->tas_frames);
                 if (tas_shift == 0) {   // DEEPEEL_TAS_HRAM=<file>: HRAM per movie frame, comparable with the old engine's dump
@@ -2443,7 +2452,7 @@ static void run_path(Worker *w, Pending *p) {
                 }
             }
         }
-        if (!cfg->no_solve && !cur_forced && m->poke && have_flow) {
+        if (!cfg->no_solve && !cur_forced && m->poke && have_flow && !(tas && tas_shift == 0 && watch_lean(cfg))) {   // lean replay: no solver window snapshots
             // window: the sequential instructions before a conditional; their start state and RAM reads feed solve_cond
             if (fi.kind == DP_FLOW_COND) { /* closes the window below */ }
             else if (fi.kind != DP_FLOW_SEQ) w->win_on = w->cobs.track = 0;
@@ -2493,7 +2502,8 @@ static void run_path(Worker *w, Pending *p) {
                 if (any && !rearm) loc->event_probe_sites++;
             }
         }
-        if (cfg->hooks && (cfg->hooks->irq_alt || cfg->hooks->irq_source_alt) && m->rom_index(m, pc) >= 0) {
+        if (cfg->hooks && (cfg->hooks->irq_alt || cfg->hooks->irq_source_alt) && m->rom_index(m, pc) >= 0 &&
+            !(tas && tas_shift == 0 && watch_lean(cfg))) {   // lean replay: no IRQ-jitter snapshots on the live movie path
             // delay d = 1 is the plain IRQ fork; d = 2..3 is technique 9 (temporal
             // perturbation: the interrupt lands a few instructions later).  The hook
             // answers 0 unless an interrupt is pending, so the per-(site, delay) key is

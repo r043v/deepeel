@@ -188,6 +188,13 @@ static int64_t gb_dmg_ram_index(DpMachine *m, uint32_t a) {
     return a < 0x10000u ? (int64_t)a : -1;
 }
 static uint32_t gb_cgb_ram_addr(DpMachine *m, uint32_t i) { (void)m; return i; }
+static uint32_t dsy_crc32(const uint8_t *p, size_t n) {
+    static uint32_t t[256];
+    if (!t[1]) for (uint32_t i = 0; i < 256; i++) { uint32_t c = i; for (int k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1; t[i] = c; }
+    uint32_t c = 0xFFFFFFFFu;
+    for (size_t i = 0; i < n; i++) c = t[(c ^ p[i]) & 255] ^ (c >> 8);
+    return ~c;
+}
 static void gb_dump_dsy(DpMachine *m, FILE *file, uint32_t frame) {
     const DpGblApi *api = gbw(m)->d->api;
     const gbl_cpu_t *cpu = api->gbr;
@@ -202,6 +209,24 @@ static void gb_dump_dsy(DpMachine *m, FILE *file, uint32_t frame) {
         cpu->pc, cpu->pc >> 8, cpu->sp, cpu->sp >> 8, cpu->a, flags,
         cpu->bc, cpu->bc >> 8, cpu->de, cpu->de >> 8, cpu->hl, cpu->hl >> 8
     };
+    // DEEPEEL_DSY_DIGEST=1: long-run scans keep regs/hram/ie and a CRC-32 of each large block (tools/gb_sync_check.py --digest)
+    static int digest = -1;
+    if (digest < 0) { const char *e = getenv("DEEPEEL_DSY_DIGEST"); digest = e && *e && *e != '0'; }
+    if (digest) {
+        enum { MAXD = 8 + 2 + 1 + 1 };   // 8 WRAM banks, 2 VRAM banks, OAM, SRAM
+        uint32_t crc[MAXD]; char nm[MAXD][16]; const char *dn[3 + MAXD] = {"regs", "hram", "ie"};
+        const uint8_t *dd[3 + MAXD] = {regs, api->hram, api->ie};
+        uint32_t dl[3 + MAXD] = {sizeof regs, 0x7F, 1};
+        unsigned n = 3, k = 0, wb = DP_GBL_COLOR_BUILD ? 8 : 2, vb = DP_GBL_COLOR_BUILD ? 2 : 1;
+        for (unsigned i = 0; i < wb; i++, k++) { crc[k] = dsy_crc32(api->wram + i * 0x1000, 0x1000); snprintf(nm[k], 16, "wram%u_crc", i); }
+        for (unsigned i = 0; i < vb; i++, k++) { crc[k] = dsy_crc32(api->vram + i * 0x2000, 0x2000); snprintf(nm[k], 16, "vram%u_crc", i); }
+        crc[k] = dsy_crc32(api->oam, 0xA0); snprintf(nm[k++], 16, "oam_crc");
+        if (dp_gbl_variant_eram[variant]) { crc[k] = dsy_crc32(api->eram, dp_gbl_variant_eram[variant]); snprintf(nm[k++], 16, "sram_crc"); }
+        for (unsigned i = 0; i < k; i++, n++) { dn[n] = nm[i]; dd[n] = (const uint8_t *)&crc[i]; dl[n] = 4; }
+        DpDsyWriter dw = {file};
+        dp_dsy_frame(&dw, frame, n, dn, dd, dl);
+        return;
+    }
     const char *names[] = {"wram", "wram_banks", "vram", "oam", "hram", "regs", "io_raw", "ie", "sram"};
     const uint8_t *data[] = {wram, api->wram, api->vram, api->oam, api->hram, regs, api->io, api->ie, api->eram};
     const uint32_t len[] = {

@@ -6642,3 +6642,21 @@ attract tient désormais au moins `--attract-min` images (36 000 = 10 min de jeu
 
 - Un `jmp d8(pc,Xn)` dont la base porte une suite de `bra.w` / `bra.s` / `jmp` (idiome de Ristar : `jmp 2(pc,d0.w)` puis `bra.w` de 4 octets) n'est plus lu comme une table d'offsets : chaque **slot est une racine de code** (`DpCodeTable.slots`, test `bra slots`). Les slots s'arrêtent au premier opcode de classe différente.
 - Mesure (observation de l'outil, Ristar USA/Europe, 10 min sans film, référence `.idb` IDA, 316 638 octets de code) : exécuté ou prouvé 36,8 % → 42,7 %.
+
+## 0.432.0 — rejeu GB ×17 plus rapide, `tools/gb_sync_check.py`
+
+- **Vitesse** : en rejeu pur (`--replay-only`, `--watch`), le noyau prenait encore, à chaque instruction, un
+  instantané complet de l'état (fenêtre du solveur avant un conditionnel) et les instantanés des forks d'IRQ.
+  Inutiles sur le chemin du film, ils sont désormais sautés (même garde `watch_lean` que les autres forks).
+  Pokémon Crystal CGB (mrwint) : 43 → ~730 trames/s (observation de l'outil, un worker, sans fenêtre).
+- **Vérification d'état complète** : `python3 tools/gb_sync_check.py --deepeel BIN --lib libgambatte.so
+  [--bizhawk-23] --rom R --bios B --movie M.bk2 --frames N --work DIR` produit les deux flux DSY1 (m0boy via
+  `explore --dsy`, Gambatte via `gambatte_dsy.py`) et compare à chaque trame regs, WRAM (banques), VRAM, OAM,
+  HRAM, SRAM, IE. Il rapporte, par bloc, la première trame divergente après le boot, le nombre de trames
+  divergentes, les octets avec leur adresse (`$FF8B`, `bank3:$C0CA`…) et les registres de la trame précédente. Les
+  octets que ni l'un ni l'autre cœur n'a écrits (motif d'allumage différent) sont ignorés. `--digest` (CRC-32 par banque,
+  `DEEPEEL_DSY_DIGEST=1`) permet de balayer des centaines de milliers de trames ; `--from-frame N`
+  (`DEEPEEL_DSY_FROM`) écrit une fenêtre détaillée autour d'une divergence ; `DEEPEEL_DSY_FRAMES=N` borne le natif.
+- **Mesure** (Crystal mrwint, 100 000 trames, BizHawk 2.3) : aucune divergence persistante ; écarts transitoires
+  seulement (PC de fin de trame décalé dans 1,7 % des trames, 1 à 57 trames par bloc pour WRAM/HRAM/VRAM).
+  Observation de l'outil, pas une mesure de matériel.

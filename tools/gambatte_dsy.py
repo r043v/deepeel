@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import struct
 import zipfile
+import zlib
 
 
 def replay(args):
@@ -144,6 +145,16 @@ def replay(args):
                 wram = blocks["wram_banks"]
                 bank = read(core, 0xff70) & 7 or 1
                 blocks["wram"] = wram[:0x1000] + wram[bank * 0x1000:(bank + 1) * 0x1000]
+                if frame < args.from_frame:
+                    continue
+                if args.digest:   # same names and CRC-32 as DEEPEEL_DSY_DIGEST=1 on the native side
+                    crc = lambda data: zlib.crc32(data).to_bytes(4, "little")
+                    wr, vr = blocks["wram_banks"], blocks["vram"]
+                    blocks = {"regs": blocks["regs"], "hram": blocks["hram"], "ie": blocks["ie"],
+                              **{f"wram{i}_crc": crc(wr[i * 0x1000:(i + 1) * 0x1000]) for i in range(len(wr) // 0x1000)},
+                              **{f"vram{i}_crc": crc(vr[i * 0x2000:(i + 1) * 0x2000]) for i in range(len(vr) // 0x2000)},
+                              "oam_crc": crc(blocks["oam"]),
+                              **({"sram_crc": crc(blocks["sram"])} if "sram" in blocks else {})}
                 output.write(struct.pack("<IH", frame, len(blocks)))
                 for name, data in blocks.items():
                     output.write(bytes([len(name)]) + name.encode("ascii") + struct.pack("<I", len(data)))
@@ -160,6 +171,8 @@ def main():
     parser.add_argument("--bizhawk-23", action="store_true", help="use the Gambatte ABI from BizHawk 2.3")
     parser.add_argument("--instructions", type=Path, metavar="FILE",
                         help="also export pre-instruction time, PC, A, F, BC, DE, HL, SP, prefetch flag")
+    parser.add_argument("--digest", action="store_true", help="write regs/hram/ie and CRC-32 of the large blocks only")
+    parser.add_argument("--from-frame", type=int, default=0, metavar="N", help="write only frames >= N")
     parser.add_argument("--trace-start", type=int, default=1, metavar="FRAME")
     parser.add_argument("--trace-end", type=int, default=float("inf"), metavar="FRAME")
     args = parser.parse_args()
