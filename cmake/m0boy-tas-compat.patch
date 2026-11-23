@@ -1007,7 +1007,7 @@
 +            gam_cgb.blit += FRAME_CYCLES;
 +        }
 +        if (frame) {
-+            gam_cgb.budget = ((due + 3u) & ~3u) + FRAME_CYCLES;
++            gam_cgb.budget = now + FRAME_CYCLES; /* Gambatte: the next runFor ends 70224 after the instruction boundary that handled the frame */
 +            ppu_moved = 1;
 +            P.evt_dirty = 1;
 +            gbl_frame++;
