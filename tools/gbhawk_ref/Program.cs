@@ -37,6 +37,7 @@ class Mc : IMemoryCallback {
 static class P {
     static int CurF, TrFrom = 0, TrTo = int.MaxValue;
     static int Main(string[] a) {
+        if (a.Length > 0 && a[0] == "--live") return Live.Run(a);
         if (a.Length < 4) { Console.Error.WriteLine("gbh ROM inputlog.txt out.txt BIOS [shotprefix every]"); return 2; }
         var rom = File.ReadAllBytes(a[0]);
         var keys = new[] { "Up", "Down", "Left", "Right", "Start", "Select", "B", "A" };

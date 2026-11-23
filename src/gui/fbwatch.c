@@ -94,19 +94,31 @@ void dp_fb_sync_gate(uint64_t frame) {
     pace_frame();
     static double last_prog[2], stale_since[2];
     static uint32_t last_v[2];
-    int any = 0;
-    for (int k = 0; k < DP_NREF; k++) if (dp_fb_ref_active(k)) { ref_feed[k]->leader = (uint32_t)frame; any = 1; }
-    if (!any) return;
+    /* DEEPEEL_REF_WAIT_S: how long a reference may take to start (feed file, first frame) or to move before the
+     * core runs on without it; every configured reference is a participant of one shared frame counter */
+    static double wait_s = -1, first_call;
+    if (wait_s < 0) { const char *e = getenv("DEEPEEL_REF_WAIT_S"); wait_s = e && *e ? atof(e) : 2.0; first_call = mono_now(); }
+    int any = 0, configured = 0;
+    for (int k = 0; k < DP_NREF; k++) {
+        if (env2(ref_env_g[k], ref_env[k])) configured = 1;
+        if (dp_fb_ref_active(k)) { ref_feed[k]->leader = (uint32_t)frame; any = 1; }
+    }
+    if (!any && !configured) return;
     double t0 = mono_now();
     for (;;) {
         int wait = 0;
         double now = mono_now();
         for (int k = 0; k < DP_NREF; k++) {
-            if (!dp_fb_ref_active(k) || ref_feed[k]->done) continue;
+            if (!dp_fb_ref_active(k)) {   /* configured but not started yet (the harness loads its ROM first) */
+                if (env2(ref_env_g[k], ref_env[k]) && now - first_call < wait_s) wait = 1;
+                continue;
+            }
+            ref_feed[k]->leader = (uint32_t)frame;
+            if (ref_feed[k]->done) continue;
             uint32_t v = ref_feed[k]->vframe;
             if (v != last_v[k] || !last_prog[k]) { last_v[k] = v; last_prog[k] = now; }
-            if (now - last_prog[k] > 2.0 && v == 0) continue;   /* the harness never started: do not stall on it */
-            if (now - last_prog[k] > 3.0) continue;               /* stalled harness */
+            if (now - last_prog[k] > wait_s && v == 0) continue;   /* the harness never started: do not stall on it */
+            if (now - last_prog[k] > wait_s + 1.0) continue;               /* stalled harness */
             if (frame > (uint64_t)v + 2) wait = 1;
         }
         if (!wait || dp_stop) break;
@@ -243,6 +255,8 @@ static int watch_ring_push(const uint32_t *px, int w, int h, uint64_t frame, uin
  * `movie_frame`/`total`: the replayed movie's position (total 0: no movie in progress). */
 void dp_watch_frame(const uint32_t *px, int w, int h, uint64_t frame, uint32_t movie_frame, uint32_t total, int done) {
     static uint64_t hsh_last, since; static int warned;
+    /* shared frame counter: publish ours, then wait for every reference tile (the gate paces to the fps cap too) */
+    dp_fb_sync_gate(total ? movie_frame : frame);
     if (total) {
         uint64_t hsh = 1469598103934665603ull;
         for (size_t i = 0, n = (size_t)w * (size_t)h; i < n; i++) hsh = (hsh ^ px[i]) * 1099511628211ull;
