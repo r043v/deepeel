@@ -17,6 +17,70 @@ static void copied(void *u, uint32_t src, uint32_t len, unsigned channel) {
 }
 
 #if TEST_CGB
+static void check_gambatte_halted_frame(void) {
+    uint8_t *rom = calloc(1, 0x8000);
+    CHECK_MSG(rom, "HALT ROM allocated");
+    if (!rom) return;
+    rom[0x143] = 0x80;
+    rom[0x100] = 0x76; // HALT, followed by NOP
+    DpMach *raw = dp_mach_open(dp_mach_pick_variant(rom), 0);
+    CHECK_MSG(raw, "HALT instance opens");
+    if (!raw) { free(rom); return; }
+    dp_mach_set_rom(raw, rom, 0x8000);
+    dp_mach_reset(raw);
+    DpMachine *m = dp_machine_gb(raw);
+    CHECK_MSG(m, "HALT wrapper opens");
+    if (!m) { dp_mach_close(raw); free(rom); return; }
+    m->observe(m, &(DpObservers){0}, NULL);
+    *raw->api->sync_vba_off_clock = 4;
+    m->poke(m, 0xff40, 0);
+    m->poke(m, 0xff00, 0x10); // select the buttons
+    m->poke(m, 0xffff, 0x10);
+    m->poke(m, 0xff0f, 0);
+    raw->api->gbr->pc = 0x100;
+    raw->api->gbr->ime = 0;
+    CHECK_MSG(m->run(m) && m->frame(m) == 1 && m->pc(m) == 0x101,
+              "a movie frame can end in HALT with no pending IRQ");
+    uint8_t *snapshot = malloc(m->state_bytes(m));
+    CHECK_MSG(snapshot, "halted frame snapshot allocated");
+    if (snapshot) {
+        m->save(m, snapshot);
+        CHECK_MSG(m->run(m) && m->frame(m) == 2 && m->pc(m) == 0x101,
+                  "the next frame advances without executing the NOP");
+        m->load(m, snapshot);
+        m->set_input(m, 0x10); // A
+        CHECK_MSG(m->run(m) && m->frame(m) == 1 && m->pc(m) == 0x102,
+                  "new frame input wakes the restored HALT");
+        free(snapshot);
+    }
+    *raw->api->sync_vba_off_clock = 0;
+    m->close(m);
+    free(rom);
+}
+
+static void check_gambatte_timer_stop(void) {
+    uint8_t rom[0x8000] = { [0x143] = 0x80 };
+    DpMach *raw = dp_mach_open(dp_mach_pick_variant(rom), 0);
+    CHECK_MSG(raw, "CGB timer instance opens");
+    if (!raw) return;
+    dp_mach_set_rom(raw, rom, sizeof rom);
+    dp_mach_reset(raw);
+    const DpGblApi *api = raw->api;
+    *api->sync_vba_off_clock = 4;
+    api->wr(0xff04, 0);
+    api->wr(0xff05, 0xc8);
+    api->wr(0xff07, 4);
+    api->gbr->cyc += 836;
+    api->wr(0xff07, 4);
+    CHECK_MSG(api->rd(0xff05) == 0xc8, "an unchanged TAC leaves TIMA alone");
+    api->wr(0xff07, 0);
+    api->gbr->cyc += 36;
+    api->wr(0xff07, 4);
+    CHECK_MSG(api->rd(0xff05) == 0xc9, "Gambatte advances TIMA when TAC stops a high clock");
+    *api->sync_vba_off_clock = 0;
+    dp_mach_close(raw);
+}
+
 static void check_pcm_alu_probe(void) {
     uint8_t *rom = calloc(1, 0x8000);
     CHECK_MSG(rom, "probe ROM allocated");
@@ -557,6 +621,10 @@ static void check_mbc3_rtc(int present, int colour) {
         raw->api->gbr->cyc += 2097152u;
         m->poke(m, 0x6000, 0); m->poke(m, 0x6000, 1);
         CHECK_MSG(raw->api->rd(0xa000) == 0, "RTC preserves half a second");
+        raw->api->gbr->cyc -= 4;
+        m->poke(m, 0x6000, 0); m->poke(m, 0x6000, 1);
+        CHECK_MSG(raw->api->rd(0xa000) == 0, "RTC ignores a temporary cycle rewind");
+        raw->api->gbr->cyc += 4;
         snapshot = malloc(m->state_bytes(m));
         CHECK_MSG(snapshot, "fractional RTC snapshot allocated");
         if (snapshot) {
@@ -758,6 +826,30 @@ static void check_machine(int colour) {
     free(rom);
 }
 
+static void check_timer_counter_wrap(void) {
+    uint8_t rom[0x8000] = {0};
+    DpMach *raw = dp_mach_open(dp_mach_pick_variant(rom), 0);
+    CHECK_MSG(raw, "timer instance opens");
+    if (!raw) return;
+    dp_mach_set_rom(raw, rom, sizeof rom);
+    dp_mach_reset(raw);
+    const DpGblApi *api = raw->api;
+    api->wr(0xff04, 0);
+    api->gbr->cyc = 0x7ffffff0u;
+    (void)api->rd(0xff05);
+    api->gbr->cyc = 0xffffffe0u;
+    (void)api->rd(0xff05);
+    api->io[0x05] = 0x20;
+    api->io[0x07] = 0x05; // TIMA enabled, one tick per 16 CPU cycles
+    api->io[0x0f] = 0;
+    api->gbr->cyc = 16;
+    CHECK_MSG(api->rd(0xff05) == 0x23 && !(api->io[0x0f] & 4),
+              "TIMA counts three ticks across the wrap without requesting an IRQ");
+    api->gbr->cyc = 12;
+    CHECK_MSG(api->rd(0xff05) == 0x23, "TIMA ignores a temporary cycle rewind");
+    dp_mach_close(raw);
+}
+
 int main(void) {
     check_mapper_bank_seeds(0, 0x01, 128);
     check_mapper_bank_seeds(0, 0x05, 16);
@@ -772,7 +864,9 @@ int main(void) {
     check_ram_instruction_trace(0);
     check_mbc3_rtc(0, 0);
     check_mbc3_rtc(1, 0);
+    check_timer_counter_wrap();
 #if TEST_CGB
+    check_gambatte_timer_stop();
     check_mapper_bank_seeds(1, 0x01, 128);
     check_mapper_bank_seeds(1, 0x05, 16);
     check_mapper_bank_seeds(1, 0x19, 512);
@@ -784,6 +878,7 @@ int main(void) {
     check_time_in_state_hash(1);
     check_video_event_probe(1);
     check_ram_instruction_trace(1);
+    check_gambatte_halted_frame();
     check_pcm_alu_probe();
     check_cartridge_ram_banks();
     check_small_cartridge_ram(0x05, 0); // MBC2 internal 512 nibbles

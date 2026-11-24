@@ -25,6 +25,7 @@ enum {
     DP_CUT_PAD,        /* slid into a padding run */
     DP_CUT_HALT,       /* no instruction for several frames */
     DP_CUT_SEGEND,     /* session segment over (frames, stagnation, death) */
+    DP_CUT_FRAME,      /* a movie frame ended while the CPU was halted */
     DP_CUT_QUIT,       /* global stop (SIGINT, budgets, completion) */
     DP_CUT_LOADED,     /* engine swapped the state, restart from gbr.pc */
 };

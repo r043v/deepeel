@@ -335,6 +335,8 @@ void dp_gbl_hook_vblank(int v, int i) {
 }
 
 void dp_gbl_hook_safe(int v, int i) {
-    (void)v;
-    (void)i; /* state changes happen from the engine loop, never mid-path */
+    DpMach *m = mach_at[v][i];
+    /* The Gambatte HALT wait has saved its continuation and settled due events. */
+    if (m && *m->api->sync_vba_off_clock == 4)
+        dp_mach_cut(m, DP_CUT_FRAME);
 }

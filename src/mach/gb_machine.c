@@ -309,10 +309,10 @@ static int gb_run(DpMachine *m) {
     volatile uint32_t *ne = &g->d->api->gbr->next_evt;
     uint32_t saved = *ne, far = g->d->api->gbr->cyc + 0x40000000u;
     if (g->last_ei) *ne = far;
-    dp_mach_run(g->d);
+    int cut = dp_mach_run(g->d);
     if (g->last_ei && *ne == far) *ne = saved;
     if (g->seen > 0) g->last_ei = (g->first_op == 0xFB);
-    return g->seen > 0;
+    return g->seen > 0 || cut == DP_CUT_FRAME;
 }
 static uint32_t gb_pc(DpMachine *m) { return gbw(m)->d->api->gbr->pc; }
 static void gb_set_pc(DpMachine *m, uint32_t pc) { gbw(m)->d->api->gbr->pc = (uint16_t)pc; }
