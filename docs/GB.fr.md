@@ -6833,3 +6833,5 @@ bout en bout (lectures et analyse statique comprises). Les enfants d'observation
   par une : en haut, puis juste dessous, puis la colonne suivante. Une nouvelle paire de rangées ne commence qu'au bord
   de l'écran. La fenêtre est redimensionnée sur place, sans être fermée.
 
+
+**0.438.3** — Les enfants de la campagne tournent en priorité basse (nice 19, classes CPU et disque « idle » sous Linux) : la machine reste réactive. Chaque run `--random` écrit dans le log de l'enfant ses trames, les octets de code et de données nouveaux et la trame de la dernière découverte de chacun.

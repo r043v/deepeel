@@ -297,6 +297,7 @@ typedef struct {
     uint64_t *ctx_epoch;  // A2: shared cell-context epoch, to invalidate the per-worker memo
     uint32_t *fedsrc;     // parallel to fed: rom index + 1 of the source byte of that copy
     uint32_t *fedprod;    // rom index + 1 of the last ROM cell read before a non-copy store (approximate producer)
+    uint64_t data_new;   // ROM bytes this worker was the first to mark as data
 } CopyObs;
 
 #define RUN_MIN 16
@@ -1282,6 +1283,7 @@ static void obs_read(void *u, uint32_t addr, uint8_t v) {
         else if (!o->forced && !(__atomic_load_n(&o->r->flags[k], __ATOMIC_RELAXED) & DP_CORE_DATA)) {
             __atomic_fetch_or(&o->r->flags[k], DP_CORE_DATA, __ATOMIC_RELAXED);
             __atomic_fetch_or(&o->r->src_flags[k], SRC_RUNFRESH, __ATOMIC_RELAXED);
+            o->data_new++;
         }
         if (!o->forced && !o->run_sweep) {   // A13: a byte read as data by a natural path is not static code unless it was ever executed
             uint8_t fl = __atomic_load_n(&o->r->flags[k], __ATOMIC_RELAXED);
@@ -1327,6 +1329,7 @@ static void obs_copy(void *u, uint32_t src, uint32_t len, unsigned channel) {
         }
         if (k < 0 || (size_t)k >= o->r->rom_size) continue;
         uint8_t was = __atomic_fetch_or(&o->r->flags[k], DP_CORE_DATA | DP_CORE_COPIED, __ATOMIC_RELAXED);
+        if (!(was & DP_CORE_DATA)) o->data_new++;
         __atomic_fetch_or(&o->r->src_flags[k], DP_SRC_COPY, __ATOMIC_RELAXED);
         if (channel == DP_COPY_GB_VRAM)
             __atomic_store_n(&o->r->dest[k], DP_DEST_VRAM, __ATOMIC_RELAXED);
@@ -2088,6 +2091,10 @@ static void run_path(Worker *w, Pending *p) {
     if ((cfg->watch_every || cfg->tas_summary || cfg->live_frame) && m->watch && ((tas && tas_shift == 0) || ((attract || play) && (!burst || rnd)))) m->watch(m, 1);
     unsigned shot_next = 1; unsigned sess_epoch = ~0u, sess_hold = 0; uint64_t sess_last_cov = 0; uint64_t tas_stalled_at = 0, tas_last_new = 0;
     uint64_t sess_cov = 0, sess_prog_f = sess_f0;
+    // --random statistics of this run: new code and data bytes, and the frame of the last of each
+    uint64_t run_c0 = loc->plain_new_bytes + loc->novelty_new_bytes, run_d0 = w->cobs.data_new, run_c = run_c0, run_d = run_d0, run_cf = sess_f0, run_df = sess_f0;
+#define RUN_STATS() do { if (rnd) fprintf(stderr, "random run %u: frames %llu code %llu last %llu data %llu last %llu\n", play_k, (unsigned long long)(m->frame(m) - sess_f0), \
+        (unsigned long long)(run_c - run_c0), (unsigned long long)(run_cf - sess_f0), (unsigned long long)(run_d - run_d0), (unsigned long long)(run_df - sess_f0)); } while (0)
     uint8_t *sess_seen = (attract && cfg->attract_stall) || (tas && tas_shift == 0 && cfg->tas_stall_frames) ? calloc(loc->rom_size / 8 + 1, 1) : NULL;   // ROM bytes this very session executed
     int framed = m->frame && (attract || play || cur_input);   // visit counts restart every frame: a game loop is not a runaway loop
     if (attract) loc->attract_paths++;
@@ -2373,12 +2380,18 @@ static void run_path(Worker *w, Pending *p) {
                     if (cov != sess_last_cov) { sess_last_cov = cov; sess_prog_f = f; }
                     else if (f - sess_f0 >= cfg->attract_min && f - sess_prog_f >= cfg->attract_stall) { loc->session_frames += f - sess_f0; loc->session_stalls++; break; }
                 }
+                if (rnd) {
+                    uint64_t c = loc->plain_new_bytes + loc->novelty_new_bytes;
+                    if (c != run_c) { run_c = c; run_cf = f; }
+                    if (w->cobs.data_new != run_d) { run_d = w->cobs.data_new; run_df = f; }
+                }
                 if (rnd && cfg->random_stall) {   // a random run ends after random_stall frames without a ROM byte new to the process
                     uint64_t cov = loc->plain_new_bytes + loc->novelty_new_bytes;
                     if (cov != sess_last_cov) { sess_last_cov = cov; sess_prog_f = f; }
-                    else if (f - sess_f0 >= cfg->random_min && f - sess_prog_f >= cfg->random_stall) { loc->session_frames += f - sess_f0; loc->session_stalls++; break; }
+                    else if (f - sess_f0 >= cfg->random_min && f - sess_prog_f >= cfg->random_stall) { RUN_STATS(); loc->session_frames += f - sess_f0; loc->session_stalls++; break; }
                 }
                 if ((attract || play) && sess_limit && f - sess_f0 >= sess_limit) {
+                    RUN_STATS();
                     loc->session_frames += f - sess_f0;
                     break;
                 }
