@@ -6,11 +6,13 @@
 #include <SDL.h>
 static SDL_Window *win; static SDL_Renderer *ren; static SDL_Texture *tex; static int tw, th, dead, inited;
 int dp_livewin_show(const DpCanvas *c, const char *title) {
+    const char *dump = getenv("DEEPEEL_LIVE_DUMP"); if (dump && *dump) dp_canvas_save_png(c, dump);   // control output: what the window shows
     if (dead) return 1;
     if (!inited) {
         inited = 1;
         const char *d = getenv("DISPLAY"), *w = getenv("WAYLAND_DISPLAY");
         if ((!d || !*d) && (!w || !*w)) { dead = 1; return 1; }
+        SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR, "0");   // libdecor's GTK plugin pulls libglycin, which segfaults in its worker thread
         SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");   // the supervisor owns SIGINT/SIGTERM
         if (SDL_Init(SDL_INIT_VIDEO) != 0) { fprintf(stderr, "deepeel: live window unavailable: %s\n", SDL_GetError()); dead = 1; return 1; }
     }
