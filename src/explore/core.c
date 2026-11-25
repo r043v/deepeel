@@ -968,6 +968,7 @@ static void closure_walk_regs(DpCoreResult *r, DpMachine *m, const DpIsa *isa, u
 typedef struct {
     DpCoreResult *r; const DpMachine *m; const DpIsa *isa; const uint8_t *rom; size_t n;
     uint8_t *seen, *returns;   // bitmaps over ROM indices: walked instruction starts; callees seen to return
+    uint8_t *disp;             // callees that dispatch through the pointer table written after their call
     uint32_t *stack; size_t sp, cap;
 } Proof;
 #define PROOF_BIT(b, i) ((b)[(i) >> 3] & (1u << ((i) & 7)))
@@ -984,17 +985,19 @@ static int proof_decode(const Proof *p, size_t k, uint32_t pc, DpFlowInfo *f) {
     return p->isa->flow(b, pc, f) && f->length && f->kind != DP_FLOW_ILLEGAL && k + f->length <= p->n;
 }
 // ROM index of the direct target of the instruction at k, or -1 when the mapping leaves it uncertain
+// the GB mapping of address t as seen by the instruction at k
+static int64_t proof_gb(const Proof *p, size_t k, uint32_t t) {
+    if (t < 0x4000u) return t < p->n ? (int64_t)t : -1;
+    if (t >= 0x8000u) return -1;
+    size_t bank = k >> 14;
+    if (!bank) { if (p->n > 0x8000u) return -1; bank = 1; }   // the fixed bank does not say which bank it calls
+    size_t x = bank * 0x4000u + (t & 0x3FFFu);
+    return x < p->n ? (int64_t)x : -1;
+}
 static int64_t proof_target(const Proof *p, size_t k, const DpFlowInfo *f) {
     if (f->target < 0) return -1;
     uint32_t pc = proof_pc(p, k), t = (uint32_t)f->target;
-    if (p->m->fixed_low_banked) {
-        if (t < 0x4000u) return t < p->n ? (int64_t)t : -1;
-        if (t >= 0x8000u) return -1;
-        size_t bank = k >> 14;
-        if (!bank) { if (p->n > 0x8000u) return -1; bank = 1; }   // the fixed bank does not say which bank it calls
-        size_t x = bank * 0x4000u + (t & 0x3FFFu);
-        return x < p->n ? (int64_t)x : -1;
-    }
+    if (p->m->fixed_low_banked) return proof_gb(p, k, t);
     if (p->m->linear && !p->m->page_shift) {
         if (t < p->m->code_base || t - p->m->code_base >= p->n) return -1;
         return (int64_t)(t - p->m->code_base);
@@ -1019,6 +1022,21 @@ static int64_t proof_next(const Proof *p, size_t k, unsigned len) {
     if (!(p->m->linear && !p->m->page_shift) && (x >> 13) != (k >> 13)) return -1;
     return x < p->n ? (int64_t)x : -1;
 }
+// Entries of the pointer table at `a`, the bytes after a call to a dispatcher (GB: the idiom is `rst`, then `dw`).  The
+// table ends at executed or walked code, at the lowest entry that follows it, or at a word that is no code address.
+#define PROOF_TABLE_MAX 256
+static unsigned proof_table(const Proof *p, size_t call, size_t a, uint32_t *out) {
+    unsigned n = 0; size_t low = (size_t)-1;
+    for (; n < PROOF_TABLE_MAX && a + 1 < p->n && (a >> 14) == (call >> 14) && a < low; a += 2) {
+        if (((p->r->flags[a] | p->r->flags[a + 1]) & DP_CORE_NATURAL) || PROOF_BIT(p->seen, a)) break;
+        uint32_t w = p->rom[a] | (uint32_t)p->rom[a + 1] << 8;
+        int64_t x = w >= p->isa->code_min ? proof_gb(p, call, w) : -1;
+        if (x < 0) break;
+        if ((size_t)x > a && (size_t)x < low) low = (size_t)x;
+        out[n++] = (uint32_t)x;
+    }
+    return n;
+}
 static void proof_walk(Proof *p) {
     while (p->sp) {
         size_t k = p->stack[--p->sp];
@@ -1039,16 +1057,22 @@ static void proof_walk(Proof *p) {
         int direct = f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL;
         int64_t t = direct ? proof_target(p, k, &f) : -1;
         if (t >= 0) proof_push(p, t);
+        if (f.kind == DP_FLOW_CALL && f.cond < 0 && t >= 0 && PROOF_BIT(p->disp, t)) {   // the other entries of the table are code
+            uint32_t e[PROOF_TABLE_MAX]; unsigned ne = proof_table(p, k, k + f.length, e);
+            for (unsigned i = 0; i < ne; i++) proof_push(p, e[i]);
+            continue;
+        }
         int fall = f.kind == DP_FLOW_SEQ || f.kind == DP_FLOW_COND;
         if (f.kind == DP_FLOW_CALL) fall = f.cond >= 0 || (t >= 0 && PROOF_BIT(p->returns, t));
         if (fall && !f.halt) proof_push(p, proof_next(p, k, f.length));
     }
 }
 static void static_proof(DpCoreResult *r, const DpMachine *m, const DpCoreConfig *cfg) {
-    Proof p = { r, m, m->isa, cfg->rom_image, r->rom_size < cfg->rom_image_size ? r->rom_size : cfg->rom_image_size, NULL, NULL, NULL, 0, 0 };
-    p.seen = calloc(p.n / 8 + 1, 1); p.returns = calloc(p.n / 8 + 1, 1);
-    // two sweeps over the executed runs (each starts on an instruction): first the callees that return, then the seeds
-    for (int sweep = 0; p.seen && p.returns && sweep < 2; sweep++) {
+    Proof p = { r, m, m->isa, cfg->rom_image, r->rom_size < cfg->rom_image_size ? r->rom_size : cfg->rom_image_size, NULL, NULL, NULL, NULL, 0, 0 };
+    p.seen = calloc(p.n / 8 + 1, 1); p.returns = calloc(p.n / 8 + 1, 1); p.disp = calloc(p.n / 8 + 1, 1);
+    // three sweeps over the executed runs (each starts on an instruction): the callees that return, then the dispatchers
+    // (never seen to return, and a word after one of their calls was executed), then the seeds
+    for (int sweep = 0; p.seen && p.returns && p.disp && sweep < 3; sweep++) {
         for (size_t k = 0; k < p.n; ) {
             if (!(r->flags[k] & DP_CORE_NATURAL)) { k++; continue; }
             DpFlowInfo f;
@@ -1059,16 +1083,25 @@ static void static_proof(DpCoreResult *r, const DpMachine *m, const DpCoreConfig
             int64_t t = direct ? proof_target(&p, k, &f) : -1, nx = proof_next(&p, k, f.length);
             if (!sweep) {
                 if (f.kind == DP_FLOW_CALL && f.cond < 0 && t >= 0 && nx >= 0 && (r->flags[nx] & DP_CORE_NATURAL)) PROOF_SET(p.returns, t);
+            } else if (sweep == 1) {
+                if (m->fixed_low_banked && f.kind == DP_FLOW_CALL && f.cond < 0 && t >= 0 && !PROOF_BIT(p.returns, t) && nx >= 0 && !(r->flags[nx] & DP_CORE_NATURAL)) {
+                    uint32_t e[PROOF_TABLE_MAX]; unsigned ne = proof_table(&p, k, (size_t)nx, e);
+                    for (unsigned i = 0; i < ne; i++) if (r->flags[e[i]] & DP_CORE_NATURAL) PROOF_SET(p.disp, t);
+                }
             } else {
                 size_t before = p.sp;
                 if (t >= 0) proof_push(&p, t);
+                if (f.kind == DP_FLOW_CALL && f.cond < 0 && t >= 0 && nx >= 0 && PROOF_BIT(p.disp, t)) {
+                    uint32_t e[PROOF_TABLE_MAX]; unsigned ne = proof_table(&p, k, (size_t)nx, e);
+                    for (unsigned i = 0; i < ne; i++) proof_push(&p, e[i]);
+                }
                 if (f.kind == DP_FLOW_COND && nx >= 0) proof_push(&p, nx);
                 if (p.sp > before) { r->proof_roots += p.sp - before; proof_walk(&p); }
             }
             k += f.length;
         }
     }
-    free(p.seen); free(p.returns); free(p.stack);
+    free(p.seen); free(p.returns); free(p.disp); free(p.stack);
 }
 
 // B8: speculative disassembly of the holes (never "known"): in the gaps left by every other technique, a candidate chain of

@@ -828,6 +828,14 @@ Une cible n'est suivie que si son octet ROM est certain :
 - suite d'un appel : seulement si l'exécution naturelle a vu cet appelé revenir
   (données placées après un `call`/`rst` sinon).
 
+Tables après un répartiteur (0.443.1, GB) : un appelé que l'exécution n'a jamais
+vu revenir, et dont un des mots écrits après l'appel a été exécuté, est un
+répartiteur (`rst $00` puis `dw` sur Zelda DX). Chaque appel exécuté ou prouvé
+vers lui prouve les entrées de sa table. Sur la même couverture Zelda DX, la
+passe monte à 24 538 octets, dont 18 117 vus seulement forcés (99,6 % de code
+selon le désassemblage). Les autres tables de pointeurs ne sont pas suivies : un
+essai hors noyau sur les tables lues comme données tombait à 86 % de code.
+
 Limite connue : un conditionnel toujours vrai (ou toujours faux) peut précéder des
 données. Observation de l'outil sur Zelda DX (campagne existante, comparée au
 désassemblage communautaire `azle`) : 15 524 octets prouvés, dont 12 460 vus
