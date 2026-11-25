@@ -6819,7 +6819,7 @@ bout en bout (lectures et analyse statique comprises). Les enfants d'observation
 - **Appuis longs** (0.438.0, `--random-hold N`) : un appui sur 32 est maintenu 0,5 à 4 s, les autres durent
   8 trames (les appuis longs font environ un tiers à la moitié du temps).
 - **Notation des snapshots** (0.438.0) : un snapshot vaut ce que le film a découvert autour de lui ; les mieux notés
-  passent d'abord. Une passe aléatoire qui trouve au moins 64 octets neufs est rejouée avec d'autres graines et une
+  passent d'abord. Une passe aléatoire qui trouve au moins 32 octets neufs est rejouée avec d'autres graines et une
   durée minimale plus longue (jusqu'à 5 passes). `snapshots.tsv` consigne score et découvertes par passe.
 - **Mémoire** (0.438.0) : un quart de la RAM (3 Gio au moins) reste à la machine ; sous la moitié de cette réserve,
   l'enfant le plus récent est tué puis remis en file.
@@ -6837,7 +6837,7 @@ bout en bout (lectures et analyse statique comprises). Les enfants d'observation
 **0.438.3** — Les enfants de la campagne tournent en priorité basse (nice 19, classes CPU et disque « idle » sous Linux) : la machine reste réactive. Chaque run `--random` écrit dans le log de l'enfant ses trames, les octets de code et de données nouveaux et la trame de la dernière découverte de chacun.
 
 **0.439.0** — Campagne autonome :
-- *Shot de shot* : un run aléatoire qui trouve au moins 64 octets neufs sauve l'état de la machine (au plus un toutes les 5 s de jeu) ; des runs aléatoires et une fourche repartent de ces états, sans limite de profondeur autre que les découvertes.
+- *Shot de shot* : un run aléatoire qui trouve au moins 32 octets neufs sauve l'état de la machine (au plus un toutes les 5 s de jeu) ; des runs aléatoires et une fourche repartent de ces états, sans limite de profondeur autre que les découvertes.
 - Les 12 runs d'une passe sont faits en deux moitiés de 6 : toutes les premières moitiés passent avant les secondes. Parmi les snapshots d'un film, un sur quatre est joué d'abord. Rien n'est élagué.
 - Répartition par passe : 3 runs sans Start ni Select, 3 sans Start, 6 avec toutes les touches. La stagnation d'un run compte les données neuves comme le code.
 - La mémoire d'échange qui grossit ne tue un enfant que si la RAM disponible est sous la réserve.
