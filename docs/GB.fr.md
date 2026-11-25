@@ -6925,3 +6925,14 @@ l'outil, cause non isolée, aucune référence FCEUX disponible localement).
 - NES : le premier vblank après la mise sous tension n'a pas lieu, comme dans
   FCEUX. Sur Super Mario Bros., le joueur prend la main à la trame attendue par
   le film FM2 (196 au lieu de 216) ; la divergence dans le niveau 1-1 demeure.
+
+## 0.442.1 — plantages des explorations depuis un snapshot
+
+- WonderSwan : recharger un état écrit par un autre processus recopiait ses
+  pointeurs hôtes (lecture de la ROM, observateurs, SRAM) : presque toutes les
+  explorations depuis un snapshot plantaient. L’instance garde désormais les
+  siens.
+- Noyau : quand les deux côtés d’un conditionnel étaient déjà couverts avant
+  l’instruction (aucun état sauvegardé) mais plus après elle (un CALL qui empile
+  sur un registre de mapper change la banque), une fourche sans état entrait dans
+  la file et plantait au dépilage (observé sur MSX).

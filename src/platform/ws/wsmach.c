@@ -141,7 +141,27 @@ size_t dp_ws_state_size(DpWs *d) { (void)d; return sizeof(Ws); }
 
 void dp_ws_save(DpWs *d, uint8_t *buf) { memcpy(buf, &d->ws, sizeof(Ws)); }
 
-void dp_ws_load(DpWs *d, const uint8_t *buf) { memcpy(&d->ws, buf, sizeof(Ws)); }
+// The explorer's states cross instances (worker threads, --from-state, --resume): the saved image
+// carries the saver's host pointers, so this instance's own are kept.
+#define WS_HOST_FIELDS(X) \
+    X(rom) X(instruction_sink) X(instruction_context) X(memory_write_sink) X(memory_write_context) \
+    X(memory_read_sink) X(memory_read_context) X(io_sink) X(io_context) X(flash.store) X(flash.context) \
+    X(boot_rom) X(audio.sink) X(audio.context) X(uart_send) X(uart_context) X(internal_eeprom.data) \
+    X(cart_eeprom.data) X(sram) X(sram_context) X(sram_read) X(sram_write)
+
+void dp_ws_load(DpWs *d, const uint8_t *buf) {
+#define SIZE(f) + sizeof d->ws.f
+    uint8_t keep[0 WS_HOST_FIELDS(SIZE)], *k = keep;
+#define SAVE(f) memcpy(k, &d->ws.f, sizeof d->ws.f); k += sizeof d->ws.f;
+    WS_HOST_FIELDS(SAVE)
+    memcpy(&d->ws, buf, sizeof(Ws));
+    k = keep;
+#define RESTORE(f) memcpy(&d->ws.f, k, sizeof d->ws.f); k += sizeof d->ws.f;
+    WS_HOST_FIELDS(RESTORE)
+#undef SIZE
+#undef SAVE
+#undef RESTORE
+}
 
 #define FNV_AT(h, at, n) { const uint8_t *q = (const uint8_t *)&d->ws + (at); \
     for (size_t k = 0; k < (n); k++) { h ^= q[k]; h *= 0x01000193ull; } }

@@ -2961,7 +2961,9 @@ static void run_path(Worker *w, Pending *p) {
             uint32_t fall = pc + (uint32_t)len, tgt = (uint32_t)fi.target;
             uint32_t other = after == tgt ? fall : tgt;
             if (after != tgt && after != fall) { free(pre); continue; }   // an IRQ intervened
-            if (covered(loc, m, other) && covered(loc, m, after)) {
+            // pre_skip: no snapshot exists, so nothing can be queued — even if the step moved the mapping since (a CALL
+            // pushing onto a mapper register) and the same addresses now look uncovered
+            if (pre_skip || (covered(loc, m, other) && covered(loc, m, after))) {
                 // A9: an other side covered only by forced paths is still unproven as natural: try to solve it
                 if (w->win_on && w->cobs.nram && !covered_natural(loc, m, other) && solve_cond(w, cfg, pc, other, cur_input)) { loc->promoted_forced++; free(pre); }
                 else { loc->pruned_covered++; free(pre); }
