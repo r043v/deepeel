@@ -2472,7 +2472,7 @@ static void run_path(Worker *w, Pending *p) {
                     uint32_t src = si < 0 ? 0 : m->ram_source ? m->ram_source(m, (uint32_t)si) : __atomic_load_n(&sh->fedsrc[si], __ATOMIC_RELAXED);
                     if (src && src - 1 < loc->rom_size &&
                         (!cfg->rom_image || ((size_t)(src - 1) < cfg->rom_image_size && cfg->rom_image[src - 1] == bytes[i]))) {
-                        __atomic_fetch_or(&loc->flags[src - 1], DP_CORE_NATURAL, __ATOMIC_RELAXED);
+                        __atomic_fetch_or(&loc->flags[src - 1], cfg->fabricated_forced && (cur_origin & DP_SRC_DYN_FABRICATED) ? DP_CORE_FORCED : DP_CORE_NATURAL, __ATOMIC_RELAXED);
                         any = 1;
                     }
                 }
