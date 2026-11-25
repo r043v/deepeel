@@ -13,7 +13,6 @@ typedef struct { uint8_t v[16]; uint8_t shift, cnt; } DpNesMapRegs;
 struct DpNesMach {
     DpNesHooks h;
     uint64_t steps, budget;
-    int in_frame;      /* a frame is part-run: resume with nes_frame_rest */
     /* offsets into the state blob excluded from the exact-state hash */
     size_t off_cycles, off_frames;
     /* bridge-side mappers: 0 NROM, 2 UxROM (runtime), 1 MMC1, 3 CNROM,
@@ -319,7 +318,6 @@ void dp_nesmach_reset(DpNesMach *d) {
     memset(&d->rg, 0, sizeof d->rg);
     mapper_regs_init(d);
     mapper_apply(d);
-    d->in_frame = 0;
     d->steps = 0;
 }
 
@@ -368,6 +366,12 @@ int64_t dp_nesmach_seed_pc(DpNesMach *d, uint32_t rom) {
     return 0;
 }
 
+/* A frame runs from one vblank to the next, as FCEUX and NesHawk count them:
+ * the NMI served at its start reads this frame's pads however long the game
+ * takes to reach $4016. The runtime raises the NMI on line 241 and hands back
+ * with the line counter already past it. */
+#define NES_FRAME_EDGE 242u
+
 uint64_t dp_nesmach_run(DpNesMach *d, uint64_t max_steps) {
     nes_trace.user = d;
     nes_trace.step = t_step;
@@ -378,11 +382,11 @@ uint64_t dp_nesmach_run(DpNesMach *d, uint64_t max_steps) {
     d->steps = 0;
     d->budget = max_steps;
     while (d->steps < max_steps) {
-        if (d->in_frame) nes_frame_rest();
-        else {
+        const unsigned before = machine.line >= 262u ? 0u : machine.line;
+        if (machine.line >= 262u) {
             if (watch_on) machine.ppu.panel_out = watch_buf;
             nes_frame();
-        }
+        } else nes_frame_rest();
         if (d->mapper == 4 && machine.line < 240u) {   /* MMC3 scanline IRQ: the scanline
             * approximation of the A12-edge counter (the standard banked-cart model:
             * one count per visible line, reload through $C000/$C001, gate $E000/$E001) */
@@ -393,14 +397,9 @@ uint64_t dp_nesmach_run(DpNesMach *d, uint64_t max_steps) {
                 else if (r->v[11] && !--r->v[11]) machine.cpu.irq_line = 1;
             }
         }
-        /* a completed frame (line 262) reports on_frame even when a hook
-         * stop raced its end; a mid-frame stop resumes through rest() */
-        if (machine.line >= 262u) {
-            d->in_frame = 0;
-            if (d->h.on_frame) d->h.on_frame(d->h.user);
-        } else {
-            d->in_frame = 1;
-        }
+        /* the frame boundary is the vblank (see NES_FRAME_EDGE): on_frame once
+         * it is passed, even when a hook stop raced it */
+        if (before < NES_FRAME_EDGE && machine.line >= NES_FRAME_EDGE && d->h.on_frame) d->h.on_frame(d->h.user);
         if (nes_trace.stop) break;
     }
     return d->steps;
@@ -417,12 +416,14 @@ void dp_nesmach_frame(DpNesMach *d) {
     d->budget = UINT64_MAX;   /* the step hook stops on budget otherwise:
         * a zeroed instance never executed a single instruction (found by
         * the fidelity harness: the DUT sat at its reset loop forever) */
-    if (d->in_frame) {
+    if (machine.line >= NES_FRAME_EDGE && machine.line < 262u) {   /* finish the picture */
         while (machine.line < 262u) nes_frame_rest();
-        d->in_frame = 0;
     }
-    nes_frame();
-    while (machine.line < 262u) nes_frame_rest();   // the traced runtime hands back at the NMI
+    if (machine.line >= 262u) {
+        if (watch_on) machine.ppu.panel_out = watch_buf;
+        nes_frame();
+    }
+    while (machine.line < NES_FRAME_EDGE) nes_frame_rest();
     if (d->h.on_frame) d->h.on_frame(d->h.user);
 }
 
@@ -453,7 +454,6 @@ void dp_nesmach_load(DpNesMach *d, const void *buf) {
     nes_state_io(io_paste, &p, 1);
     memcpy(&d->rg, p, MAPPER_TAIL);
     mapper_apply(d);
-    d->in_frame = machine.line < 262u && (machine.line || machine.line_left);   /* the loaded state may sit mid-frame */
 }
 
 const unsigned dp_nesmach_off_cycles = offsetof(nes_t, cpu) + offsetof(nes6502_t, cycles);

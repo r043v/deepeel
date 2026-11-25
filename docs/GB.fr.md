@@ -6900,3 +6900,17 @@ Remplace les passes en moitiés et les quotas de la 0.439 (réglages dans `src/e
 
 - **Films FM2 (NES)** : `T` (Start) et `S` (Select) étaient inversés, et les directions de la manette 2 s'ajoutaient aux
   boutons de la manette 1. Aucun film FM2 ne lançait la partie.
+
+## 0.441.2 — trame NES de vblank à vblank
+
+La trame NES va désormais d'un vblank au suivant, comme dans FCEUX et NesHawk
+(elle finissait à la ligne 261). La NMI servie en début de trame lit les
+manettes de cette trame, quel que soit le temps mis par le jeu pour atteindre
+`$4016`. Sur Super Mario Bros., la manette lue par le jeu pouvait être celle de
+la trame courante ou de la suivante selon la durée du moteur sonore ; sur
+400 trames observées, elle suit maintenant le film sans écart. Limite connue :
+les films FM2 de ce jeu divergent encore pendant le niveau 1-1 (observation de
+l'outil, cause non isolée, aucune référence FCEUX disponible localement).
+
+`DEEPEEL_TAS_WRAM_BASE` déplace la fenêtre de 8 Kio écrite par
+`DEEPEEL_TAS_WRAM` (`0` pour la RAM de la NES).

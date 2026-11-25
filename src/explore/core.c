@@ -2219,10 +2219,10 @@ static void run_path(Worker *w, Pending *p) {
                     if (!hinit) { hinit = 1; const char *hn = getenv("DEEPEEL_TAS_HRAM"); if (hn) hf = fopen(hn, "wb"); }
                     if (hf) { uint8_t hb[0x80]; for (unsigned i = 0; i < 0x7F; i++) hb[i] = m->fetch(m, 0xFF80 + i); hb[0x7F] = 0; fwrite(hb, 1, 0x80, hf); }
                 }
-                if (tas_shift == 0) {   // DEEPEEL_TAS_WRAM=<file>: 8 KiB at $C000 per movie frame (Z80 machines), comparable with DP_SEGA_TAS_RAM_DUMP
+                if (tas_shift == 0) {   // DEEPEEL_TAS_WRAM=<file>: 8 KiB at $C000 (DEEPEEL_TAS_WRAM_BASE overrides) per movie frame, comparable with DP_SEGA_TAS_RAM_DUMP
                     static FILE *wf; static int winit;
                     if (!winit) { winit = 1; const char *wn = getenv("DEEPEEL_TAS_WRAM"); if (wn) wf = fopen(wn, "wb"); }
-                    if (wf) { uint8_t wb[0x2000]; for (unsigned i = 0; i < 0x2000; i++) wb[i] = m->fetch(m, 0xC000 + i); fwrite(wb, 1, sizeof wb, wf); fflush(wf); }
+                    if (wf) { uint8_t wb[0x2000]; static long wbase = -1; if (wbase < 0) { const char *e = getenv("DEEPEEL_TAS_WRAM_BASE"); wbase = e && *e ? strtol(e, NULL, 0) : 0xC000; } for (unsigned i = 0; i < 0x2000; i++) wb[i] = m->fetch(m, (unsigned)wbase + i); fwrite(wb, 1, sizeof wb, wf); fflush(wf); }
                 }
                 static int env_shift = -99;   // DP_TAS_PAD_SHIFT=k: the unshifted replay sees the movie's input k frames later (Gens-rr films: 1)
                 if (env_shift == -99) { const char *e = getenv("DP_TAS_PAD_SHIFT"); env_shift = e && *e ? atoi(e) : 0; }
