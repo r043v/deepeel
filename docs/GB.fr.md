@@ -849,6 +849,13 @@ Zelda DX, entrées relevées en rejouant deux films : 796 entrées, 1 080 octets
 prouvés de plus (25 618 au total) ; les octets nouvellement prouvés par la passe
 sont du code à 99,7 % selon le désassemblage.
 
+Copies DMA de nouveau observées (0.443.3) : le runtime m0boy de la branche CGB
+avait perdu les crochets de copie ; OAM DMA, GDMA et HDMA n'étaient plus
+consignés (provenance ROM → VRAM / OAM absente des couvertures produites entre
+temps). Le correctif `cmake/m0boy-tas-compat.patch` les rétablit, avec la
+lecture des registres `$FF56` et `$FF72`–`$FF75` et l'arrêt d'un transfert en fin
+de VRAM. Le film Cristal de 604 876 trames se rejoue toujours en entier.
+
 Limite connue : un conditionnel toujours vrai (ou toujours faux) peut précéder des
 données. Observation de l'outil sur Zelda DX (campagne existante, comparée au
 désassemblage communautaire `azle`) : 15 524 octets prouvés, dont 12 460 vus

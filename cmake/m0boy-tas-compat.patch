@@ -96,11 +96,15 @@
  extern uint32_t gbl_frame;
 --- a/gbl_internal.h
 +++ b/gbl_internal.h
-@@ -65,3 +65,3 @@
+@@ -63,7 +63,7 @@
+ void gbl_apu_state_io(gbl_state_fn io, void *ctx, int load);
+ 
  int gbl_irq_enter(void);     /* push PC and vector if IME and pending */
 -void gbl_halt_wait(void);    /* advance time until an interrupt is pending */
 +void gbl_halt_wait(int fetched_halt); /* advance time until an interrupt is pending */
  extern uint8_t gbl_halt_bug;
+ 
+ #if GBL_ERAM_SIZE > 0 && !GBL_ERAM_ON_SD
 --- a/gbl_core.c
 +++ b/gbl_core.c
 @@ -1,8 +1,13 @@
@@ -143,7 +147,7 @@
  uint32_t gbl_frame;
  uint32_t gbl_interp_instrs;
  uintptr_t gbl_stack_limit;
-@@ -378,6 +402,9 @@
+@@ -386,6 +410,9 @@
      uint32_t days;        /* absolute day counter (register view: days & 1FF) */
      uint32_t carry_ref;   /* day count at the last carry clear/rewrite */
      uint32_t frame_anchor, wall_anchor;
@@ -153,7 +157,7 @@
      uint8_t armed, halted, carry;
      uint8_t latched[5];   /* S M H DL DH, as the game latched them */
      uint8_t dirty, pending;
-@@ -403,11 +430,38 @@
+@@ -411,11 +438,38 @@
          e = wall - rtc.wall_anchor;
          rtc.wall_anchor += e;
          rtc.frame_anchor += e * 60u;
@@ -192,7 +196,7 @@
      }
      if (rtc.halted) return;
      rtc.days += e / 86400u;
-@@ -462,7 +516,12 @@
+@@ -470,7 +524,12 @@
  static void rtc_reg_write(uint8_t k, uint8_t v) {
      rtc_sync();
      switch (k) {
@@ -205,7 +209,7 @@
      case 1: rtc.M = (uint8_t)(v & 0x3Fu); break;
      case 2: rtc.H = (uint8_t)(v & 0x1Fu); break;
      case 3:
-@@ -505,6 +564,9 @@
+@@ -513,6 +572,9 @@
      rtc.carry_ref = rtc.days;
      rtc.frame_anchor = gbl_frame;
      rtc.wall_anchor = gbl_platform_rtc();
@@ -215,10 +219,10 @@
  }
  
  static int rtc_flush_one(void) {
-@@ -524,6 +586,25 @@
+@@ -532,6 +594,25 @@
  #define RTC_SEL() 0 /* never selected: no RTC in this build */
  #endif
-
+ 
 +#if defined(GBL_DEEPEEL_DMA_HOOK)
 +/* Stable physical cartridge RAM address, including mirrored small RAM and
 + * MBC2. RTC registers and disabled RAM are not memory cells. */
@@ -241,7 +245,7 @@
  #if GBL_ERAM_SIZE > 0
  static uint32_t eram_offset(uint16_t a) {
  #if GBL_MBC == 2
-@@ -1087,7 +1168,11 @@
+@@ -1095,7 +1176,11 @@
       * gbl_wr_slow. */
      uint32_t off = (eram_bank() * 0x2000u) % GBL_ERAM_SIZE;
  #if GBL_RTC && GBL_MBC == 3
@@ -254,7 +258,7 @@
  #endif
      uint8_t *base = mbc.ram_enable ? BIAS(gbl_eram + off, 0xA000u) : 0;
      gbl_rmap[0xA] = gbl_rmap[0xB] = base;
-@@ -1262,8 +1347,8 @@
+@@ -1270,8 +1355,8 @@
      default:
  #if GBL_RTC && !defined(ESP8266)
          /* The latch: 00 arms, 01 snapshots the registers. */
@@ -265,7 +269,7 @@
              rtc_latch();
              rtc.armed = 0;
          }
-@@ -1315,6 +1400,12 @@
+@@ -1323,6 +1408,12 @@
  #define tima_sync gbl_timer_state.tima_sync
  #define serial_done gbl_timer_state.serial_done
  #define serial_busy gbl_timer_state.serial_busy
@@ -278,7 +282,7 @@
  const uint8_t gbl_tac_shift[4] = {10, 4, 6, 8};
  #define tac_shift gbl_tac_shift
  
-@@ -1336,6 +1427,8 @@
+@@ -1344,6 +1435,8 @@
  static
  #endif
  void timer_sync(uint32_t now) {
@@ -287,7 +291,7 @@
  #if !GBL_TIMING_ASM
      if (gbl_timer_state.tima_irq_pending && (int32_t)(now - gbl_timer_state.tima_irq_at) >= 0) {
          gbl_timer_state.tima_irq_pending = 0;
-@@ -1349,7 +1442,9 @@
+@@ -1357,7 +1450,9 @@
      if (TAC & 4) {
          uint32_t s = tac_shift[TAC & 3];
          uint32_t done = (tima_sync - div_base) >> s;
@@ -298,10 +302,10 @@
          while (ticks) {
              uint32_t room = 256u - TIMA;
              if (ticks < room) { TIMA = (uint8_t)(TIMA + ticks); break; }
-@@ -1376,6 +1471,30 @@
+@@ -1384,6 +1479,30 @@
      tima_sync = now;
  }
-
+ 
 +#if GBL_CGB && defined(GBL_DEEPEEL_DMA_HOOK) && !GBL_TIMING_ASM
 +#define GBL_GAMBATTE_TIMA (gbl_cgb && gbl_sync_vba_off_clock == 4)
 +/* Gambatte advances the old timer phase by half a tick plus its three-cycle
@@ -329,7 +333,7 @@
  #if GBL_TIMER_EDGE
  /* A clock edge forced by a DIV or TAC write: TIMA advances by one. */
  static void tima_edge_tick(void) {
-@@ -1439,6 +1558,20 @@
+@@ -1447,6 +1566,20 @@
  static inline __attribute__((always_inline))
  #endif
  void gbl_sync_serial(uint32_t now) {
@@ -350,7 +354,7 @@
      if (serial_busy && (int32_t)(now - serial_done) >= 0) {
          serial_busy = 0;
          core_invalidate();
-@@ -1446,12 +1579,16 @@
+@@ -1454,12 +1587,16 @@
          gbl_io[0x02] &= 0x7F;
          IF |= 0x08;
      }
@@ -367,7 +371,7 @@
  #if GBL_CGB
      if (gbl_cgb) cgb_dma_sync();
  #endif
-@@ -1547,6 +1684,22 @@
+@@ -1555,6 +1692,22 @@
      gbl_joyp = (uint8_t)(0xC0 | (sel & 0x30) | (v & 0x0F));
  }
  
@@ -390,7 +394,7 @@
  void gbl_set_buttons(uint8_t pressed) {
  #if GBL_DEBUG_RESTART
      if (pressed != gbl_dbg_restart.buttons[(gbl_dbg_restart.pos - 1u) & 15u]) {
-@@ -1556,6 +1709,16 @@
+@@ -1564,6 +1717,16 @@
      }
      if ((pressed & 0x0F) == 0x0F) gbl_dbg_restart.combo_frames++; /* A+B+Select+Start */
  #endif
@@ -407,7 +411,7 @@
      if (pressed & ~buttons) IF |= 0x10;
      buttons = pressed;
      joypad_update();
-@@ -1578,9 +1741,20 @@
+@@ -1586,9 +1749,20 @@
  #endif
  uint8_t gbl_io_rd(uint8_t n) {
      switch (n) {
@@ -431,7 +435,17 @@
      case 0x05: timer_sync(gbr.cyc); return TIMA;
      case 0x07: return TAC | 0xF8;
      case 0x0F: gbl_sync(); return IF | 0xE0;
-@@ -1596,7 +1770,7 @@
+@@ -1596,6 +1770,9 @@
+     case 0x4F: return gbl_cgb ? (uint8_t)(0xFE | gbl_vbk) : 0xFF;
+     case 0x70: return gbl_cgb ? (uint8_t)(0xF8 | gbl_svbk) : 0xFF;
+     case 0x68: case 0x69: case 0x6A: case 0x6B: return gbl_cgb ? gbl_cgb_pal_rd(n) : 0xFF;
++    case 0x56: return gbl_cgb ? (uint8_t)(0x3E | (gbl_io[n] & 0xC1)) : 0xFF;
++    case 0x72: case 0x73: case 0x74: return gbl_cgb ? gbl_io[n] : 0xFF;
++    case 0x75: return gbl_cgb ? (uint8_t)(0x8F | (gbl_io[n] & 0x70)) : 0xFF;
+     case 0x55: return gbl_cgb ? (uint8_t)(gbl_hdma_active ? hdma_len : 0x80 | hdma_len) : 0xFF;
+     case 0x51: case 0x52: case 0x53: case 0x54: return 0xFF;
+     case 0x4D: return gbl_cgb ? (uint8_t)(0x7E | gbl_dshift << 7 | (gbl_key1 & 1)) : 0xFF;
+@@ -1604,7 +1781,7 @@
          if (n >= 0x10 && n < 0x40) return gbl_apu_read(n);
          if (n >= 0x40 && n < 0x4C) return gbl_ppu_read(n);
          /* unconnected registers read 1s on the DMG (mooneye unused_hwio) */
@@ -440,11 +454,27 @@
  #if GBL_CGB
          if (n >= 0x4C && n < 0x80 && !gbl_cgb) return 0xFF;
  #else
-@@ -1654,8 +1828,30 @@
+@@ -1627,6 +1804,10 @@
+ static inline __attribute__((always_inline)) void oam_dma_copy(uint16_t src) {
+     uint32_t changed = 0;
+     gbl_ppu_sync(gbr.cyc);
++#ifdef GBL_DEEPEEL_DMA_HOOK
++    extern void gbl_deepeel_dma(uint16_t src, uint16_t dst, uint16_t len, unsigned channel);
++    gbl_deepeel_dma(src, 0xFE00, 0xA0, 3);
++#endif
+     /* XX00-XX9F never leaves its 4 KiB page: a mapped page is copied
+      * straight, without a gbl_rd call per byte (about 30 cycles each
+      * on the M0+, 4,800 per DMA). */
+@@ -1662,8 +1843,35 @@
  #endif
  void gbl_io_wr(uint8_t n, uint8_t v) {
      switch (n) {
 -    case 0x00: gbl_io[0x00] = v & 0x30; joypad_update(); return;
++#if GBL_CGB
++    case 0x56: if (gbl_cgb) gbl_io[n] = v & 0xC1; return;
++    case 0x72: case 0x73: case 0x74: if (gbl_cgb) gbl_io[n] = v; return;
++    case 0x75: if (gbl_cgb) gbl_io[n] = v & 0x70; return;
++#endif
 +    case 0x00: gbl_pad_pending_check(gbr.cyc); gbl_io[0x00] = v & 0x30; joypad_update(); return;
 +#if defined(GBL_DEEPEEL_DMA_HOOK)
 +    case 0x01:
@@ -472,7 +502,7 @@
          gbl_io[0x02] = v;
          if ((v & 0x81) == 0x81) {
              serial_busy = 1;
-@@ -1664,10 +1860,15 @@
+@@ -1672,10 +1880,15 @@
              gbl_update_evt();
          }
          return;
@@ -489,7 +519,7 @@
  #endif
          div_base = gbr.cyc;
          core_invalidate();
-@@ -1686,8 +1887,11 @@
+@@ -1694,8 +1907,11 @@
  #endif
          return;
      case 0x07: timer_sync(gbr.cyc);
@@ -502,7 +532,7 @@
              uint32_t c = gbr.cyc - div_base;
              int o = (TAC & 4) && ((c >> (tac_shift[TAC & 3] - 1)) & 1);
              int n = (v & 4) && ((c >> (tac_shift[v & 3] - 1)) & 1);
-@@ -1733,7 +1937,7 @@
+@@ -1741,7 +1957,7 @@
  #else
  #define GBL_CGB_ON 0
  #endif
@@ -511,16 +541,51 @@
  #endif
  #if GBL_CGB
          if (gbl_cgb) { cgb_dma_start(src); gbl_io[0x46] = v; return; } /* spread transfer, see cgb_dma_sync */
-@@ -1775,6 +1979,8 @@
+@@ -1767,7 +1983,11 @@
+ 
+ #if GBL_CGB
+ /* One 16-byte block of a VRAM DMA (GDMA or HDMA). */
+-static void hdma_block(void) {
++static int hdma_block(void) {
++#ifdef GBL_DEEPEEL_DMA_HOOK
++    extern void gbl_deepeel_dma(uint16_t src, uint16_t dst, uint16_t len, unsigned channel);
++    gbl_deepeel_dma(hdma_src, (uint16_t)(0x8000u + hdma_dst), 16, 2);
++#endif
+     { static int8_t dlog = -1; if (dlog < 0) dlog = getenv("GBL_SPRITE_LOG") && *getenv("GBL_SPRITE_LOG") == '1';
+       if (dlog) fprintf(stderr, "hdma blk f%u src %04x dst %04x vbk %u\n", gbl_frame, hdma_src, hdma_dst, gbl_vbk); }
+     for (unsigned i = 0; i < 16; i++) {
+@@ -1775,15 +1995,19 @@
+         gbl_vram_wr((uint16_t)((hdma_dst + i) & 0x1FFFu), v);
+     }
+     hdma_src = (uint16_t)(hdma_src + 16u);
++    int overflow = hdma_dst + 16u >= 0x2000u; /* the transfer ends with VRAM, it does not wrap */
+     hdma_dst = (uint16_t)((hdma_dst + 16u) & 0x1FF0u);
+     gbr.cyc += 32u << gbl_dshift;
++    return overflow;
+ }
+ 
+ static void hdma_service(void) {
      gbl_hdma_pend = 0;
      if (!gbl_hdma_active || !gbl_ppu_in_hblank()) return;
-     hdma_block();
+-    hdma_block();
+-    if (hdma_len-- == 0) { gbl_hdma_active = 0; hdma_len = 0x7F; }
++    int overflow = hdma_block();
 +    /* Gambatte charges a final M-cycle for each HBlank DMA request. */
 +    if (gbl_sync_vba_off_clock == 4) gbr.cyc += 4;
-     if (hdma_len-- == 0) { gbl_hdma_active = 0; hdma_len = 0x7F; }
++    if (hdma_len-- == 0 || overflow) { gbl_hdma_active = 0; hdma_len = 0x7F; }
      gbl_update_evt();
  }
-@@ -1810,10 +2016,33 @@
+ 
+@@ -1807,7 +2031,7 @@
+             { static int8_t dlog = -1; if (dlog < 0) dlog = getenv("GBL_SPRITE_LOG") && *getenv("GBL_SPRITE_LOG") == '1';
+               if (dlog) fprintf(stderr, "hdma gdma f%u src %04x dst %04x len %u vbk %u\n",
+                                 gbl_frame, hdma_src, hdma_dst, (unsigned)hdma_len + 1u, gbl_vbk); }
+-            for (unsigned b = 0; b <= hdma_len; b++) hdma_block();
++            for (unsigned b = 0; b <= hdma_len; b++) if (hdma_block()) break;
+             gbr.cyc += 4; /* one CPU M-cycle at the end of the transfer */
+             hdma_len = 0x7F;
+         }
+@@ -1818,10 +2042,33 @@
  /* STOP with KEY1 armed: change speed (DIV restarts; the switch itself takes
   * about 2050 M-cycles). */
  void gbl_speed_switch(void) {
@@ -556,7 +621,18 @@
      gbl_update_evt();
  }
  #endif
-@@ -1958,6 +2187,20 @@
+@@ -1920,6 +2167,10 @@
+         while (cgb_dma_pos < target) {
+             uint16_t src = (uint16_t)(cgb_dma_src + cgb_dma_pos);
+             uint8_t value = cgb_dma_source_read(src);
++#ifdef GBL_DEEPEEL_DMA_HOOK
++            extern void gbl_deepeel_dma(uint16_t src, uint16_t dst, uint16_t len, unsigned channel);
++            gbl_deepeel_dma(src, (uint16_t)(0xFE00u + cgb_dma_pos), 1, 3);
++#endif
+             if (gbl_oam[cgb_dma_pos] != value) {
+                 gbl_oam[cgb_dma_pos] = value;
+                 gbl_oam_dirty = 1;
+@@ -1966,6 +2217,20 @@
      return 1;
  }
  #endif
@@ -577,7 +653,7 @@
  /* Unmapped pages (IO, OAM, HRAM, MBC registers, streamed ROM...); also the
   * tail of the assembly gbl_rd. */
  uint8_t gbl_rd_slow(uint16_t a) {
-@@ -1980,12 +2223,13 @@
+@@ -1988,12 +2253,13 @@
  #else
      if (a >= 0xFE00) return a < 0xFEA0 ? gbl_oam[a - 0xFE00] : 0xFF;
  #endif
@@ -593,7 +669,7 @@
      }
  #endif
  #if GBL_MBC == 2
-@@ -2101,15 +2345,17 @@
+@@ -2109,15 +2375,17 @@
          gbl_dbg_tables.echo_last = (uint32_t)a << 16 | (uint32_t)v << 8;
          gbl_dbg_tables.echo_frame = gbl_frame;
  #endif
@@ -614,7 +690,7 @@
      }
  #endif
  #if GBL_MBC == 2
-@@ -2125,6 +2371,23 @@
+@@ -2133,6 +2401,23 @@
  }
  
  #if !(GBL_CORE_ASM && defined(__ARM_ARCH_6M__)) /* else gbl_core_asm.S */
@@ -638,15 +714,15 @@
  void gbl_push(uint16_t v) {
      gbr.sp = (uint16_t)(gbr.sp - 2);
      uint16_t s = gbr.sp;
-@@ -2150,6 +2413,7 @@
+@@ -2158,6 +2443,7 @@
  #endif
  }
  #endif
 +#endif
  
  /* ---- interrupts and execution ------------------------------------------- */
-
-@@ -2237,14 +2501,71 @@
+ 
+@@ -2245,14 +2531,71 @@
  }
  #endif
  
@@ -718,7 +794,7 @@
  #if GBL_STACK_TIMING
      {
          /* Reference mode: two idle M-cycles, the high byte, the low byte, and
-@@ -2277,7 +2598,7 @@
+@@ -2285,7 +2628,7 @@
      while (!(pending & (1u << bit))) bit++;
      IF &= (uint8_t)~(1u << bit);
      gbr.ime = 0;
@@ -727,7 +803,7 @@
  #if GBL_DEBUG_RESTART
      if (gbr.pc - 0x68u < 0x150u - 0x68u && !gbl_dbg_badirq.frame)
          dbg_badirq((uint32_t)(uintptr_t)__builtin_return_address(0));
-@@ -2301,22 +2622,60 @@
+@@ -2309,22 +2652,60 @@
  
  /* Wait in HALT until an interrupt is pending, then service it when IME is
   * set.  Returns nonzero when control did not come back to resume_pc. */
@@ -790,7 +866,7 @@
      }
      /* DMG HALT exit (SameBoy model, Gambatte agrees on every traced case):
       * HALT ends at h (on the M-cycle grid: every CPU time is a multiple of
-@@ -2324,22 +2683,101 @@
+@@ -2332,22 +2713,101 @@
       * and the CPU resumes 2 cycles after the sample that sees the request:
       * already pending at h -> h+4; request at t > h -> max(h+8, (t+5)&~3). */
      uint32_t t = gbr.cyc;
@@ -892,8 +968,8 @@
 +    gbl_halt_wait(0);
      return gbl_event(resume_pc);
  }
-
-@@ -2501,6 +2939,13 @@
+ 
+@@ -2509,6 +2969,13 @@
          gbr.cyc = (gbr.cyc & ~3u) + 4u;
          gbl_sync();
      }
@@ -907,7 +983,7 @@
      for (;;) {
          gbl_fn fn = (gbl_interp_only || !room) ? 0 : gbl_lookup(gbr.pc);
          if (fn) fn(); else gbl_interp_block();
-@@ -2533,13 +2978,34 @@
+@@ -2541,13 +3008,34 @@
  #endif
      /* E000-EFFF echoes C000-CFFF (F000-FDFF shares a page with OAM, IO
       * and HRAM and stays on the slow path). */
@@ -915,7 +991,7 @@
 +    gbl_rmap[0xE] = gbl_wmap[0xE] = BIAS(gbl_sync_echo_old ? echo_old : gbl_wram, 0xE000u);
      map_eram();
  }
-
+ 
 +/* the host sets gbl_sync_echo_old, then re-maps the pages */
 +void gbl_echo_apply(void) { map_pages(); }
 +
@@ -943,7 +1019,7 @@
  #if GBL_OAM_DMA_BUS
      dma_n = dma_pend = 0;
      dma_in = 0;
-@@ -2583,12 +3049,18 @@
+@@ -2591,12 +3079,18 @@
      gbr.sp = 0xFFFE; gbr.pc = 0x0100;
      gbl_ie = 0;
      gbl_io[0x00] = 0x30;
@@ -962,7 +1038,7 @@
      core_invalidate();
  
      map_pages();
-@@ -2620,6 +3092,35 @@
+@@ -2628,6 +3122,35 @@
      io(&gbl_ie, sizeof(gbl_ie), ctx);
      io(&mbc, sizeof(mbc), ctx);
      io(&gbl_timer_state, sizeof(gbl_timer_state), ctx);
@@ -1022,7 +1098,10 @@
          uint8_t v = get_r(r);
          if (grp == 0) set_r(r, gbl_cbop((uint8_t)n8, v));
          else if (grp == 1) { gbr.zr = v & (1u << bit); gbr.nf = 0; gbr.hf = 1; }
-@@ -363,1 +369,6 @@
+@@ -354,7 +360,12 @@
+     }
+ #endif
+     /* Always here (the assembly sends these to gbl_interp_op). */
 -    case 0x76: gbl_halt_wait(); jump = 1; break;
 +    case 0x76:
 +        gbl_boundary = 1;
@@ -1030,7 +1109,10 @@
 +        gbl_boundary = 0;
 +        jump = 1;
 +        break;
-@@ -400,7 +406,7 @@
+     case 0x08: gbl_wr(n16, (uint8_t)gbr.sp); gbl_wr((uint16_t)(n16 + 1), (uint8_t)(gbr.sp >> 8)); gbr.pc += 2; break;
+     case 0x10:
+ #if GBL_CGB
+@@ -400,7 +411,7 @@
      case 0xF5: PUSHV((uint16_t)((gbr.a << 8) | gbl_getf())); break;
      case 0xE8: gbr.sp = gbl_spofs(n8); gbr.pc++; break;
      case 0xF8: gbr.hl = gbl_spofs(n8); gbr.pc++; break;
@@ -1039,12 +1121,20 @@
          gbr.ime = 1; gbl_update_evt(); break;
      default:
          /* Undefined opcode: the DMG locks up.  Spin in place so the
-@@ -422,1 +428,3 @@
+@@ -413,7 +424,9 @@
+             gbl_dbg_restart.lock_bank = gbr.rom_bank;
+         }
+ #endif
 -        gbl_halt_wait();
 +        gbl_boundary = 1;
 +        gbl_halt_wait(0);
 +        gbl_boundary = 0;
-@@ -438,14 +444,18 @@
+         jump = 1;
+         break;
+     }
+@@ -436,10 +449,11 @@
+     for (;;) {
+         /* EI takes effect after the following instruction. */
          if (!ei_delay && (int32_t)(gbr.cyc - gbr.next_evt) >= 0) {
 -            gbl_sync();
 +            gbl_boundary = 1; gbl_sync(); gbl_boundary = 0; /* an instruction boundary: Gambatte handles its frame events here */
@@ -1055,15 +1145,16 @@
          uint16_t pc = gbr.pc;
  #ifdef GBL_COVERAGE
          if (pc < 0x8000) gbl_coverage_hit(pc < 0x4000 ? 0 : gbr.rom_bank, pc, pc != cov_next);
- #endif
+@@ -447,6 +461,9 @@
  #ifdef GBL_TRACE
          gbl_trace_hook(pc);
-+#endif
+ #endif
 +#ifdef GBL_TRACE
 +        gbl_pad_pending_check(gbr.cyc); /* gbl.h: GBHawk pad latch mid-frame */
- #endif
++#endif
  #ifdef GBL_ROM_TRACE
          extern uint8_t gbl_rom_fetch; /* opcode fetches are not data reads */
+         gbl_rom_fetch = 1;
 --- a/gbl_ppu.c
 +++ b/gbl_ppu.c
 @@ -1,3 +1,4 @@
@@ -1212,8 +1303,6 @@
 +}
  static void update_due(void) {
 -    gbl_ppu_due = lcd_on ? line_start + next_stage_off : off_start + FRAME_CYCLES;
--}
--
 +    uint32_t d = lcd_on ? line_start + next_stage_off : off_due();
 +#if GBL_CGB
 +    if (CGB_GAMBATTE_CLOCK) {
@@ -1226,13 +1315,13 @@
 +        if ((int32_t)(nb - d) < 0) d = nb;
 +    }
 +    gbl_ppu_due = d;
-+}
-+
+ }
+ 
 +static void lcd_enable_at(uint32_t at, int lyc_edge);
  /* LCD off: a virtual frame clock (the assembly version jumps here too). */
  #if GBL_TIMING_ASM
  void gbl_ppu_advance_off(uint32_t now);
-@@ -1050,10 +1146,57 @@
+@@ -1050,10 +1157,57 @@
  static
  #endif
  void gbl_ppu_advance_off(uint32_t now) {
@@ -1291,7 +1380,7 @@
          gbl_frame++;
          gbl_platform_vblank();
      }
-@@ -1061,13 +1204,90 @@
+@@ -1061,13 +1215,90 @@
  }
  
  
@@ -1382,7 +1471,7 @@
      /* the SCX%8 discard shows on STAT in 2-dot steps (an odd SCX%8 ends mode
       * 3 like the even value below it), and line 0 runs 2 dots longer; both
       * measured over ~11k lines against SameBoy (which matches Gambatte) */
-@@ -1106,6 +1308,7 @@
+@@ -1106,6 +1337,7 @@
              pen += 6;
          }
      }
@@ -1390,7 +1479,7 @@
      return (uint16_t)(MODE0_START + PS(pen));
  }
  #endif
-@@ -1116,8 +1319,30 @@
+@@ -1116,8 +1348,30 @@
          gbl_ppu_advance_off(now);
          return;
      }
@@ -1421,7 +1510,7 @@
          if (ly < 144) {
              if (stage == 0) {
                  if (off < MODE3_START) break;
-@@ -1144,7 +1369,7 @@
+@@ -1144,7 +1398,7 @@
              /* line 153: LY reads 0 after LY153_ZERO cycles; the LYC
               * comparator sees 0 two cycles later (an LYC=0 match fires here,
               * a line before line 0) */
@@ -1430,7 +1519,9 @@
              ppu_moved = 1;
              P.evt_dirty = 1;
              stage = 1;
-@@ -1155,9 +1380,19 @@
+@@ -1154,14 +1408,24 @@
+         /* DMG reference: line 0 starts 4 dots late and is 4 dots shorter
+          * (frame length unchanged; mooneye intr_1_2_timing) */
          uint32_t llen = line_len(ly);
 +#if GBL_CGB
 +        if (CGB_GAMBATTE_23) gambatte23_window_advance(off);
@@ -1450,7 +1541,10 @@
 +#if GBL_CGB
 +            gam_cgb.window = (LCDC & 0x20) && WY == 0 ? GAM_WINDOW_LATCH : 0;
 +#endif
-@@ -1174,27 +1400,31 @@
+ #if GBL_FRAME_SIGNATURE
+             sig_frame_start();
+ #endif
+@@ -1174,27 +1438,31 @@
  #endif
              mode = 1;
              IF |= 0x01;
@@ -1488,7 +1582,7 @@
      uint8_t s = STAT;
  #if GBL_CGB
      if (gbl_hdma_pend) return gbr.cyc;
-@@ -1206,8 +1436,8 @@
+@@ -1206,8 +1474,8 @@
      if (ly < 144 && stage == 0 && (s & 0x08)) return line_start + MODE3_START; /* mode 0 offset known at mode 3 */
      if (ly < 144 && stage == 1 && (s & 0x08)) return line_start + P.m0_start;
  #endif
@@ -1499,7 +1593,7 @@
      /* Nothing observable happens inside a batch: the next line start that
       * matters is the batch end, VBlank, the LYC line, or the next frame. */
      uint32_t target = ly < 144 ? ((uint32_t)ly | (GBL_PPU_BATCH - 1u)) + 1u : 154u;
-@@ -1222,6 +1452,21 @@
+@@ -1222,6 +1490,21 @@
      return t;
  }
  
@@ -1521,7 +1615,7 @@
  #ifndef GBL_VBL_DELAY
  /* reference mode: the CPU services a VBlank request 2 dots after the
   * dispatcher would see it (mooneye di_timing-GS: DI wins by one NOP) */
-@@ -1268,6 +1509,7 @@
+@@ -1268,6 +1551,7 @@
  #if GBL_ACCESS_BLOCK
  /* CPU access blocking by mode (GBL_ACCESS_BLOCK): 1 = VRAM, 2 = OAM. */
  int gbl_ppu_blocked(int what) {
@@ -1529,7 +1623,7 @@
      ppu_moved = 0;
      gbl_ppu_sync(gbr.cyc);
      if (ppu_moved) gbl_update_evt();
-@@ -1310,14 +1552,78 @@
+@@ -1310,53 +1594,140 @@
          ppu_moved = 0;
          gbl_ppu_sync(gbr.cyc);
          if (ppu_moved) gbl_update_evt();
@@ -1573,8 +1667,8 @@
          return (uint8_t)(0x80 | (STAT & 0x78) | ((lcd_on ? (ly_visible() == LYC) : GBL_PPU_REF ? off_cmp : 0) ? 4 : 0) | (lcd_on ? mode : 0));
      }
      return gbl_io[n];
-+}
-+
+ }
+ 
 +static void lcd_enable_at(uint32_t at, int lyc_edge) {
 +    lcd_on = 1;
 +    /* BizHawk 2.3 Gambatte resets its CGB LY counter on the LCDC write.
@@ -1597,8 +1691,8 @@
 +    lyc_refresh();
 +    if (lyc_edge && P.lyc_line && !(GBL_PPU_REF && off_cmp)) IF |= 0x02;
 +    stat_line = P.lyc_line;
- }
- 
++}
++
  void gbl_ppu_write(uint8_t n, uint8_t v) {
      gbl_ppu_sync(gbr.cyc);
 +#if GBL_CGB && !GBL_TIMING_ASM
@@ -1608,7 +1702,6 @@
  #if GBL_FRAME_SIGNATURE
      if (n != 0x41 && n != 0x44 && n != 0x45 && gbl_io[n] != v)
          sig_mix(((uint32_t)ly << 18) | ((uint32_t)stage << 16) | ((uint32_t)n << 8) | v);
-@@ -1324,39 +1623,62 @@
  #endif
      switch (n) {
      case 0x40:
@@ -1693,7 +1786,7 @@
      case 0x44: return;
      default: gbl_io[n] = v; break;
      }
-@@ -1370,7 +1692,35 @@
+@@ -1370,7 +1741,35 @@
      }
  }
  
@@ -1729,7 +1822,7 @@
      LCDC = 0x91;
      STAT = 0x00;
      BGP = 0xFC;
-@@ -1385,6 +1735,7 @@
+@@ -1385,6 +1784,7 @@
      stat_line = 0;
      off_start = gbr.cyc;
      update_due();
@@ -1737,7 +1830,7 @@
      stat_refresh();
      P.spr_ly = 0xFF;
      bg_pairs_bgp = -1;
-@@ -1399,6 +1750,20 @@
+@@ -1399,6 +1799,20 @@
   * a load, everything derived from VRAM, OAM and the registers is voided. */
  void gbl_ppu_state_io(gbl_state_fn io, void *ctx, int load) {
      io(&gbl_ppu_state, sizeof(gbl_ppu_state), ctx);
@@ -1758,7 +1851,7 @@
      if (!load) return;
      P.evt_dirty = 1;
      P.moved = 1;
-@@ -1419,3 +1784,4 @@
+@@ -1419,3 +1833,4 @@
  #endif
      update_due();
  }
