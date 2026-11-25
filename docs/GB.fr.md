@@ -6843,3 +6843,4 @@ bout en bout (lectures et analyse statique comprises). Les enfants d'observation
 - La mémoire d'échange qui grossit ne tue un enfant que si la RAM disponible est sous la réserve.
 - Une campagne relancée dans le même répertoire reprend la couverture déjà obtenue (les tâches sont rejouées).
 - Build guidé par profil, pour la machine locale (environ 20 % de temps en moins sur les runs mesurés) : `cmake -DROM=<rom> -P cmake/pgo.cmake`, binaire dans `build-pgo/`.
+- LTO essayé puis écarté (observations sur Zelda DX, une machine) : appliqué à l'intérieur de m0boy, il gagne environ 10 % de plus mais le rejeu du film diffère de `-O2` (2 snapshots sur 166, l'arrêt de fin de trame tombe une instruction plus tôt ; cause non isolée dans m0boy) ; limité à deepeel, le rejeu est identique mais les runs aléatoires mesurés sont environ 9 % plus lents que le PGO seul. À ne pas activer sans refaire la comparaison des snapshots.
