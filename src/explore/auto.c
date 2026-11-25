@@ -190,7 +190,7 @@ static int read_live_frame(const char *path, LiveFrame *lf) {
     if (ok) { lf->w = hd[0]; lf->h = hd[1]; free(lf->px); lf->px = malloc((size_t)hd[0] * hd[1] * 4); ok = lf->px && fread(lf->px, 4, (size_t)hd[0] * hd[1], f) == (size_t)hd[0] * hd[1]; }
     fclose(f); return ok;
 }
-static void draw_live(const Union *un, const char *name, time_t t_start, Task *tk, size_t nt, const Movie *mv, uint32_t *sw, uint32_t *sh_) {
+static int draw_live(const Union *un, const char *name, time_t t_start, Task *tk, size_t nt, const Movie *mv, uint32_t *sw, uint32_t *sh_) {
     enum { INFO = 22, GAP = 4, MAXW = 1900, MAXH = 1000 };
     static LiveFrame lf[64]; size_t shown[64], ns = 0;
     for (size_t i = 0; i < nt && ns < 64; i++) {
@@ -206,16 +206,27 @@ static void draw_live(const Union *un, const char *name, time_t t_start, Task *t
         if (cols * cw <= MAXW && rows * chh <= MAXH) break;
     }
     if (z < 1) { z = 1; cw = (int)w0 + GAP; chh = (int)h0 + INFO + GAP; }
-    DpCanvas *c = dp_canvas_new(cols * cw + GAP, rows * chh + GAP, 0xff15151au); if (!c) return;
-    // coverage tile (2x2 cells)
-    size_t cov = union_count(un); char l[200];
+    DpCanvas *c = dp_canvas_new(cols * cw + GAP, rows * chh + GAP, 0xff15151au); if (!c) return 1;
+    // coverage tile (2x2 cells): redrawn once a second at most (it walks the whole ROM), copied from its cache otherwise
     int cx = GAP, cy = GAP, cwid = 2 * cw - GAP, chei = 2 * chh - GAP;
-    size_t block = un->n ? dp_canvas_covmap(c, cx, cy, cwid, chei - INFO, un->u, un->n, 0x4000) : 0;
-    long el = (long)(time(NULL) - t_start);
-    snprintf(l, sizeof l, "%s  coverage %.1f%%  %zu/%zu B  time %02ld:%02ld:%02ld", name, un->n ? 100.0 * (double)cov / (double)un->n : 0.0, cov, un->n, el / 3600, el / 60 % 60, el % 60);
-    dp_canvas_text(c, cx + 2, cy + chei - INFO + 3, l, 1, 0xff80e090u);
-    snprintf(l, sizeof l, "1 square = %zu bytes (never 1 px = 1 byte unless the ROM is tiny)", block);
-    dp_canvas_text(c, cx + 2, cy + chei - INFO + 13, l, 1, 0xffa0a0a8u);
+    static DpCanvas *cache; static time_t cache_t;
+    time_t nowt = time(NULL);
+    if (!cache || cache->w != cwid || cache->h != chei || nowt != cache_t) {
+        if (cache && (cache->w != cwid || cache->h != chei)) { dp_canvas_free(cache); cache = NULL; }
+        if (!cache) cache = dp_canvas_new(cwid, chei, 0xff15151au); else dp_canvas_rect(cache, 0, 0, cwid, chei, 0xff15151au);
+        cache_t = nowt;
+        if (cache) {
+            size_t cov = union_count(un); char l[200];
+            size_t block = un->n ? dp_canvas_covmap(cache, 0, 0, cwid, chei - INFO, un->u, un->n, 0x4000) : 0;
+            long el = (long)(nowt - t_start);
+            snprintf(l, sizeof l, "%s  coverage %.1f%%  %zu/%zu B  time %02ld:%02ld:%02ld", name, un->n ? 100.0 * (double)cov / (double)un->n : 0.0, cov, un->n, el / 3600, el / 60 % 60, el % 60);
+            dp_canvas_text(cache, 2, chei - INFO + 3, l, 1, 0xff80e090u);
+            snprintf(l, sizeof l, "1 square = %zu bytes (never 1 px = 1 byte unless the ROM is tiny)", block);
+            dp_canvas_text(cache, 2, chei - INFO + 13, l, 1, 0xffa0a0a8u);
+        }
+    }
+    if (cache) for (int y = 0; y < chei && cy + y < c->h; y++) memcpy(c->px + (size_t)(cy + y) * c->w + cx, cache->px + (size_t)y * cwid, (size_t)(cx + cwid <= c->w ? cwid : c->w - cx) * 4);
+    char l[200];
     // movie tiles fill the cells the coverage tile leaves free
     size_t k = 0;
     for (int r = 0; r < rows && k < ns; r++) for (int q = 0; q < cols && k < ns; q++) {
@@ -228,9 +239,10 @@ static void draw_live(const Union *un, const char *name, time_t t_start, Task *t
         snprintf(l, sizeof l, "%llu/%u  %u%%", (unsigned long long)f->frame, f->total, f->total ? (unsigned)(100ull * f->frame / f->total) : 0u);
         dp_canvas_text(c, tx + 2, ty + (int)h0 * z + 13, l, 1, 0xff96c8ffu);
     }
-    dp_livewin_show(c, "deepeel - live coverage");
+    int gone = dp_livewin_show(c, "deepeel - live coverage") && !getenv("DEEPEEL_LIVE_DUMP");   // closed or no display: stop composing
     dp_canvas_free(c);
     for (size_t i = 0; i < ns; i++) { free(lf[i].px); lf[i].px = NULL; }
+    return !gone;
 }
 
 static unsigned bitrev(unsigned v) { unsigned r = 0; for (int i = 0; i < 16; i++) { r = (r << 1) | (v & 1); v >>= 1; } return r; }
@@ -440,9 +452,9 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             int fresh = 0; for (size_t i = 0; i < nt; i++) fresh += tk[i].kind == 2 && !tk[i].pid && !tk[i].done;
             if (!fresh) break;
         } else if (!running && no_gain >= (cap * 2 > 8 ? cap * 2 : 8) && movie_next >= nm) break;
-        for (int sl = 0; sl < 8; sl++) {   // fast RSS watch between two supervision ticks
+        for (int sl = 0; sl < 2000 / CAMP_WINDOW_MS; sl++) {   // fast RSS watch and live window between two supervision ticks (~2 s)
             usleep(CAMP_WINDOW_MS * 1000);
-            if (win_on) draw_live(&un, name, t_start, tk, nt, mv, &scr_w, &scr_h);
+            if (win_on) win_on = draw_live(&un, name, t_start, tk, nt, mv, &scr_w, &scr_h);
             for (size_t i = 0; i < nt; i++) if (tk[i].pid && !tk[i].done && !tk[i].over_t) {
                 size_t rss = proc_rss(tk[i].pid); if (rss > tk[i].rss_peak) tk[i].rss_peak = rss;
                 if (rss > CHILD_RSS_CAP) {
@@ -461,6 +473,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
     if (cf) { uint32_t hd[2] = { 0x31564F43u, (uint32_t)un.n }; fwrite(hd, 4, 2, cf); if (un.u) fwrite(un.u, 1, un.n, cf); fclose(cf); }
     if (repf) fclose(repf);
     for (size_t i = 0; i < nt; i++) if (tk[i].lfr[0]) unlink(tk[i].lfr);   // screens published in /dev/shm
+    dp_livewin_close();
     fprintf(stderr, "deepeel auto: finished, %zu/%zu ROM bytes covered (%.1f%%), observations of the tool; map %s, movies report %s, merged coverage %s\n",
             total, un.n, un.n ? 100.0 * total / un.n : 0.0, png, rep_all, cb);
     free(un.u); free(mv); free(tk);

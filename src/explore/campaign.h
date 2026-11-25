@@ -39,8 +39,8 @@
 /* ---- live window and reports ---- */
 #define CAMP_LOG_SECS          15       /* progress line period on stderr */
 #define CAMP_PNG_SECS          120      /* coverage PNG refresh */
-#define CAMP_WINDOW_MS         250      /* live window refresh period: movie tiles follow their screens at this rate */
-#define CAMP_LIVE_FRAME_MS     100      /* a movie child publishes its screen this often (in /dev/shm: memory only, no disk traffic) */
+#define CAMP_WINDOW_MS         33       /* live window refresh period: movie tiles follow their screens at this rate */
+#define CAMP_LIVE_FRAME_MS     33       /* a movie child publishes its screen this often (in /dev/shm: memory only, no disk traffic) */
 #define CAMP_BLOCK_BYTES       256      /* ROM bytes shown by one square of the live map */
 
 #endif

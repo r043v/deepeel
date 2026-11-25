@@ -2,19 +2,38 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #ifdef DP_HAS_GUI
 #include <SDL.h>
+#include <unistd.h>
+static char decor_dir[64];
+// a private plugin directory holding only libdecor-cairo (LIBDECOR_PLUGIN_DIR); 1 when it is in place
+static int cairo_decor_only(void) {
+    if (getenv("LIBDECOR_PLUGIN_DIR")) return 1;   // the user's choice
+    static const char *const cand[] = { "/usr/lib/libdecor/plugins-1/libdecor-cairo.so", "/usr/lib64/libdecor/plugins-1/libdecor-cairo.so",
+        "/usr/lib/x86_64-linux-gnu/libdecor/plugins-1/libdecor-cairo.so", "/usr/lib/aarch64-linux-gnu/libdecor/plugins-1/libdecor-cairo.so" };
+    for (size_t i = 0; i < sizeof cand / sizeof *cand; i++) {
+        if (access(cand[i], R_OK)) continue;
+        snprintf(decor_dir, sizeof decor_dir, "/dev/shm/deepeel-decor-XXXXXX");
+        if (!mkdtemp(decor_dir)) return 0;
+        char link[128]; snprintf(link, sizeof link, "%s/libdecor-cairo.so", decor_dir);
+        if (symlink(cand[i], link)) { rmdir(decor_dir); decor_dir[0] = 0; return 0; }
+        setenv("LIBDECOR_PLUGIN_DIR", decor_dir, 1);
+        return 1;
+    }
+    return 0;
+}
 static SDL_Window *win; static SDL_Renderer *ren; static SDL_Texture *tex; static int tw, th, dead, inited;
 int dp_livewin_show(const DpCanvas *c, const char *title) {
-    const char *dump = getenv("DEEPEEL_LIVE_DUMP"); if (dump && *dump) dp_canvas_save_png(c, dump);   // control output: what the window shows
+    const char *dump = getenv("DEEPEEL_LIVE_DUMP"); static time_t dumped; if (dump && *dump && time(NULL) != dumped) { dumped = time(NULL); dp_canvas_save_png(c, dump); }   // control output: what the window shows, once a second
     if (dead) return 1;
     if (!inited) {
         inited = 1;
         const char *d = getenv("DISPLAY"), *w = getenv("WAYLAND_DISPLAY");
         if ((!d || !*d) && (!w || !*w)) { dead = 1; return 1; }
-        // X11 (XWayland) first: the compositor then draws a normal title bar and border (move, resize), with no libdecor plugin
-        if (d && *d) SDL_SetHint(SDL_HINT_VIDEODRIVER, "x11");
-        SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR, "0");   // libdecor's GTK plugin pulls libglycin, which segfaults in its worker thread
+        // same minimal decoration as the --watch window: libdecor with its cairo plugin only. Its GTK plugin (picked when SDL runs
+        // on the main thread) pulls libglycin, which segfaults. Without that plugin: X11, where the window manager draws the frame.
+        if (w && *w && !cairo_decor_only()) { if (d && *d) SDL_SetHint(SDL_HINT_VIDEODRIVER, "x11"); SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR, "0"); }
         SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");   // the supervisor owns SIGINT/SIGTERM
         if (SDL_Init(SDL_INIT_VIDEO) != 0 && (SDL_SetHint(SDL_HINT_VIDEODRIVER, ""), SDL_Init(SDL_INIT_VIDEO) != 0)) { fprintf(stderr, "deepeel: live window unavailable: %s\n", SDL_GetError()); dead = 1; return 1; }
     }
@@ -36,6 +55,7 @@ int dp_livewin_show(const DpCanvas *c, const char *title) {
 void dp_livewin_close(void) {
     if (tex) SDL_DestroyTexture(tex); if (ren) SDL_DestroyRenderer(ren); if (win) SDL_DestroyWindow(win);
     tex = NULL; ren = NULL; win = NULL;
+    if (decor_dir[0]) { char link[128]; snprintf(link, sizeof link, "%s/libdecor-cairo.so", decor_dir); unlink(link); rmdir(decor_dir); decor_dir[0] = 0; unsetenv("LIBDECOR_PLUGIN_DIR"); }
 }
 #else
 int dp_livewin_show(const DpCanvas *c, const char *title) { (void)c; (void)title; return 1; }
