@@ -318,7 +318,7 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
     return n;
 }
 
-typedef struct { uint8_t *u; size_t n; uint8_t *inf, *prov, *xpo; } Union;   // observed flags, the two suspect classes, what other ROM versions showed (DP_XPOSE_*)
+typedef struct { uint8_t *u; size_t n; uint8_t *inf, *prov, *xpo, *jt; } Union;   // observed flags, the two suspect classes, what other ROM versions showed (DP_XPOSE_*)
 static size_t merge_flags(Union *un, const char *path) {   // header "COV1" + size, one flag byte per ROM index, then optional sections
     FILE *f = fopen(path, "rb"); uint32_t hd[2];
     if (!f) return 0;
@@ -339,6 +339,7 @@ static size_t merge_flags(Union *un, const char *path) {   // header "COV1" + si
         while (fread(sh, 4, 2, f) == 2 && sh[1] == un->n) {
             uint8_t *dst = sh[0] == 0x31464E49u ? un->inf : sh[0] == 0x31565250u ? un->prov : NULL;
             if (sh[0] == 0x314F5058u) { if (!un->xpo) un->xpo = calloc(un->n, 1); dst = un->xpo; }   // "XPO1": kept across runs
+            if (sh[0] == 0x3154504Au) { if (!un->jt) un->jt = calloc(un->n, 1); dst = un->jt; }   // "JPT1": the pointer tables seen behind computed jumps
             if (dst) { if (fread(b, 1, un->n, f) != un->n) break; for (size_t i = 0; i < un->n; i++) if (!dst[i]) dst[i] = b[i]; continue; }
             long skip = sh[0] == 0x31524353u || sh[0] == 0x31544948u ? 4l * (long)un->n : (long)un->n;   // SCR1, HIT1 are words
             if (fseek(f, skip, SEEK_CUR)) break;
@@ -384,6 +385,8 @@ static void save_union(const Union *un, const char *path) {   // "COV1" flags, t
              fwrite(ps, 4, 2, f) == 2 && fwrite(un->prov, 1, un->n, f) == un->n;
     uint32_t xs[2] = { 0x314F5058u, (uint32_t)un->n };   // "XPO1"
     if (un->xpo) ok = ok && fwrite(xs, 4, 2, f) == 2 && fwrite(un->xpo, 1, un->n, f) == un->n;
+    uint32_t js[2] = { 0x3154504Au, (uint32_t)un->n };   // "JPT1"
+    if (un->jt) ok = ok && fwrite(js, 4, 2, f) == 2 && fwrite(un->jt, 1, un->n, f) == un->n;
     if (fclose(f) || !ok || rename(tmp, path)) unlink(tmp);
 }
 static int seed_state(const Union *un, const char *sdir, int forced) {   // a child resumes from everything observed so far: "new" means new for the whole campaign
@@ -397,6 +400,8 @@ static int seed_state(const Union *un, const char *sdir, int forced) {   // a ch
     for (size_t i = 0; i < un->n; i++) u[i] = forced ? un->u[i] : un->u[i] & ~DP_CORE_FORCED;   // an observing run must see a forced-only byte as unknown
     int ok = fwrite(hd, 4, 2, cf) == 2 && fwrite(u, 1, un->n, cf) == un->n;
     free(u);
+    uint32_t js[2] = { 0x3154504Au, (uint32_t)un->n };   // "JPT1": the final pass proves the tables' neighbours
+    if (un->jt) ok = ok && fwrite(js, 4, 2, cf) == 2 && fwrite(un->jt, 1, un->n, cf) == un->n;
     return fclose(cf) == 0 && ok;
 }
 // what each other version of the ROM showed, moved onto ours by content (recomputed whole: the sources only grow)

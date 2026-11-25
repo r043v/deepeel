@@ -10,6 +10,7 @@ Every fixture is a minimal ROM exercising one exploration behaviour:
   calldispatch - inline table behind a plain call to a dispatcher routine
   copytable  - code-pointer table copied ROM->WRAM then indexed there
   rstdispatch - rst $28 jump table inline after the call site
+  jtproof    - JP HL through two entries of a table: the proof reaches the others
   dispatch   - indexed JP HL (ld hl,TABLE; add hl,de; ld h,(hl); jp hl): the table's other entries proven code
   loop       - infinite loop, must be contained by the guards
   unreach    - a data blob no code ever touches
@@ -508,6 +509,17 @@ def build(out):
     w(r, 0x270, 0x3E, 0x02, 0x76)
     w(r, 0x280, 0x3E, 0x03, 0x76)
     save(out, "fix_calldispatch", r)
+
+    # --- jtproof: two entries of a table jumped to; the entry between them and the next are proven --
+    r = rom(2)
+    w(r, 0x100, 0x00, 0xC3, 0x50, 0x01)
+    w(r, 0x150, 0x26, 0x02, 0x2E, 0x30, 0x2A, 0x66, 0x6F, 0xE9)   # ld h,$02; ld l,$30; ld a,(hl+); ld h,(hl); ld l,a; jp hl
+    w(r, 0x230, 0x50, 0x02, 0x60, 0x02, 0x70, 0x02, 0x80, 0x02)
+    w(r, 0x250, 0x26, 0x02, 0x2E, 0x34, 0x2A, 0x66, 0x6F, 0xE9)   # entry 0: jump through entry 2
+    w(r, 0x260, 0x3E, 0x02, 0x76)                # entry 1 (never taken)
+    w(r, 0x270, 0x18, 0xFE)                      # entry 2 (taken)
+    w(r, 0x280, 0x3E, 0x04, 0x76)                # entry 3 (never taken)
+    save(out, "fix_jtproof", r)
 
     # --- copytable: a pointer table copied ROM->WRAM, then indexed there ----------
     r = rom(2)

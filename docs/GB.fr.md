@@ -833,8 +833,21 @@ vu revenir, et dont un des mots écrits après l'appel a été exécuté, est un
 répartiteur (`rst $00` puis `dw` sur Zelda DX). Chaque appel exécuté ou prouvé
 vers lui prouve les entrées de sa table. Sur la même couverture Zelda DX, la
 passe monte à 24 538 octets, dont 18 117 vus seulement forcés (99,6 % de code
-selon le désassemblage). Les autres tables de pointeurs ne sont pas suivies : un
-essai hors noyau sur les tables lues comme données tombait à 86 % de code.
+selon le désassemblage). Les tables seulement lues comme données ne sont pas
+suivies : un essai hors noyau tombait à 86 % de code.
+
+Tables derrière un `jp hl` (0.443.2) : à chaque saut calculé exécuté sur un
+chemin naturel, le noyau note les deux octets de la ROM, parmi les dernières
+lectures, qui contenaient l'adresse atteinte (section `JPT1` de `coverage.bin`,
+cumulée d'une exploration à l'autre). La passe de preuve réunit les entrées
+distantes de 16 octets au plus en une table, puis prouve les mots intermédiaires
+et les mots voisins dont la cible reste à 256 octets des cibles réellement
+atteintes. La relève est faite sur toutes les machines à pointeurs de 16 bits ;
+la preuve ne l'exploite que sur GB, où la banque d'un mot se déduit de celle de
+la table (les autres plateformes restent à faire). Observation de l'outil sur
+Zelda DX, entrées relevées en rejouant deux films : 796 entrées, 1 080 octets
+prouvés de plus (25 618 au total) ; les octets nouvellement prouvés par la passe
+sont du code à 99,7 % selon le désassemblage.
 
 Limite connue : un conditionnel toujours vrai (ou toujours faux) peut précéder des
 données. Observation de l'outil sur Zelda DX (campagne existante, comparée au

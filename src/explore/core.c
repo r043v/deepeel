@@ -226,7 +226,7 @@ void dp_core_result_free(DpCoreResult *r) {
     dp_ramarch_free(&r->ra);
     free(r->flags);
     free(r->prov);
-    free(r->dest); free(r->spec); free(r->refs); free(r->page_win); free(r->inferred); free(r->live);
+    free(r->jtent); free(r->dest); free(r->spec); free(r->refs); free(r->page_win); free(r->inferred); free(r->live);
     free(r->src_flags); free(r->reg_slot); free(r->reg_reads); free(r->reg_writes); free(r->reg_vals);
     free(r->first_seen); free(r->first_actor); free(r->hits);
     memset(r, 0, sizeof *r);
@@ -1067,6 +1067,51 @@ static void proof_walk(Proof *p) {
         if (fall && !f.halt) proof_push(p, proof_next(p, k, f.length));
     }
 }
+// The tables behind the computed jumps that ran (r->jtent: GB, where the bank of a word follows from the table's own
+// address).  Observed entries at most PROOF_JT_GAP bytes apart make one table; the words between them are its entries,
+// and so are the neighbours whose target stays within PROOF_JT_SPAN of the targets that were jumped to.
+#define PROOF_JT_GAP 16
+#define PROOF_JT_SPAN 256
+static int64_t proof_jt_word(const Proof *p, size_t a) {
+    uint32_t w = p->rom[a] | (uint32_t)p->rom[a + 1] << 8;
+    return w >= p->isa->code_min ? proof_gb(p, a, w) : -1;
+}
+static void proof_jump_tables(Proof *p) {
+    const uint8_t *jt = p->r->jtent, *fl = p->r->flags;
+    for (size_t a = 0; a + 1 < p->n; a++) {
+        if (!jt[a]) continue;
+        size_t last = a; int64_t lo = INT64_MAX, hi = -1;
+        for (size_t b = a; b + 1 < p->n && b <= last + PROOF_JT_GAP && (b >> 14) == (a >> 14); b += 2) {
+            if (b != a && ((fl[b] | fl[b + 1]) & DP_CORE_NATURAL)) break;
+            if (!jt[b]) continue;
+            last = b;
+            int64_t x = proof_jt_word(p, b);
+            if (x < 0 || !(fl[x] & DP_CORE_NATURAL)) continue;   // the jump went to another bank: it says nothing
+            if (x < lo) lo = x;
+            if (x > hi) hi = x;
+        }
+        if (hi >= 0) {
+            lo -= PROOF_JT_SPAN; hi += PROOF_JT_SPAN;
+            uint64_t before = p->r->proof_bytes;
+            for (int dir = -1; dir <= 1; dir += 2) {   // outwards from the observed entries; -1 also covers the words between them
+                int64_t low = INT64_MAX;   // a table ends where the lowest code it points at begins
+                for (int64_t b = dir > 0 ? (int64_t)last + 2 : (int64_t)last; b >= 0 && b + 1 < (int64_t)p->n && ((size_t)b >> 14) == (a >> 14); b += 2 * dir) {
+                    int inside = b >= (int64_t)a && b <= (int64_t)last;
+                    if (!inside && (((fl[b] | fl[b + 1]) & DP_CORE_NATURAL) || PROOF_BIT(p->seen, b))) break;
+                    int64_t x = proof_jt_word(p, (size_t)b);
+                    if (!inside && (x < lo || x > hi || (dir > 0 && b >= low))) break;
+                    if (x < 0) continue;
+                    if (x > b && x < low) low = x;
+                    size_t sp = p->sp;
+                    proof_push(p, x);
+                    if (p->sp > sp) { p->r->proof_roots++; proof_walk(p); }
+                }
+            }
+            p->r->proof_jt_bytes += p->r->proof_bytes - before;
+        }
+        a = last + 1;
+    }
+}
 static void static_proof(DpCoreResult *r, const DpMachine *m, const DpCoreConfig *cfg) {
     Proof p = { r, m, m->isa, cfg->rom_image, r->rom_size < cfg->rom_image_size ? r->rom_size : cfg->rom_image_size, NULL, NULL, NULL, NULL, 0, 0 };
     p.seen = calloc(p.n / 8 + 1, 1); p.returns = calloc(p.n / 8 + 1, 1); p.disp = calloc(p.n / 8 + 1, 1);
@@ -1101,6 +1146,7 @@ static void static_proof(DpCoreResult *r, const DpMachine *m, const DpCoreConfig
             k += f.length;
         }
     }
+    if (m->fixed_low_banked && r->jtent && p.seen && p.returns && p.disp) proof_jump_tables(&p);
     free(p.seen); free(p.returns); free(p.disp); free(p.stack);
 }
 
@@ -1466,6 +1512,20 @@ static void obs_read(void *u, uint32_t addr, uint8_t v) {
     }
 }
 
+// The pointer table behind a computed jump (`ld a,(hl+) / ld h,(hl) / ... / jp hl`): the two ROM bytes among the recent
+// data reads that hold the address just jumped to.  Little-endian 16-bit pointers: the 8-bit CPUs.
+static void jt_note(CopyObs *o, DpMachine *m) {
+    if (m->linear && !m->page_shift) return;
+    if (o->age > 8) return;
+    uint32_t t = m->pc(m);
+    if (t > 0xFFFFu) return;
+    for (unsigned i = o->rq_n; i-- > 0; )
+        for (unsigned j = o->rq_n; j-- > 0; )
+            if (o->rq_idx[j] == o->rq_idx[i] + 1 && o->rq_val[i] == (t & 255u) && o->rq_val[j] == (t >> 8)) {
+                __atomic_store_n(&o->r->jtent[o->rq_idx[i]], 1, __ATOMIC_RELAXED);
+                return;
+            }
+}
 // B11: a hardware copy (DMA) moves ROM bytes the CPU never read: the source is data that was copied
 // B3: a checkpoint's cell is the code location it was taken at: the per-site pick count (least visited first) orders it
 static inline uint32_t ckpt_site(DpMachine *m, const DpCoreResult *loc) {
@@ -2986,6 +3046,7 @@ static void run_path(Worker *w, Pending *p) {
             else { cond = 0; stack_cond = 0; }
         }
         if (!m->run(m)) { free(pre); break; }
+        if (!cur_forced && have_flow && fi.kind == DP_FLOW_INDIRECT && loc->jtent) jt_note(&w->cobs, m);
         if (stack_cond) {
             uint8_t *post = malloc(sh->sbytes);
             if (post) {
@@ -3646,6 +3707,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     out->flags = calloc(rom_size ? rom_size : 1, 1);
     out->prov = calloc(rom_size ? rom_size : 1, 1);
     out->dest = calloc(rom_size ? rom_size : 1, 1);
+    out->jtent = calloc(rom_size ? rom_size : 1, 1);
     out->spec = calloc(rom_size ? rom_size : 1, 1);
     out->refs = calloc(rom_size ? rom_size : 1, 1);
     out->live_w = ((rsize(m) >> 8) + 31) / 32;
@@ -3711,7 +3773,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         if (!wm) break;                       // fewer workers than asked: reported
         w->sh = &sh; w->m = wm; w->idx = i;
         w->loc.refs = out->refs; w->loc.page_win = out->page_win; w->loc.live = out->live; w->loc.reg_slot = out->reg_slot; w->loc.reg_reads = out->reg_reads; w->loc.reg_writes = out->reg_writes; w->loc.reg_vals = out->reg_vals; w->loc.reg_n = out->reg_n; w->loc.reg_plat = out->reg_plat; w->loc.closure_banks = out->closure_banks; w->loc.closure_ret = out->closure_ret; w->loc.live_w = out->live_w; w->loc.flags = out->flags; w->loc.src_flags = out->src_flags; w->loc.hits = out->hits;
-        w->loc.dest = out->dest;
+        w->loc.dest = out->dest; w->loc.jtent = out->jtent;
         w->loc.prov = out->prov;
         w->loc.first_seen = out->first_seen; w->loc.first_actor = out->first_actor; w->loc.rom_size = rom_size;
         w->site_n = site_n;
@@ -3919,6 +3981,17 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
             }
             fclose(cf);
         }
+    }
+    if (cfg->state_dir && cfg->resume && out->jtent) {   // "JPT1" wherever it sits: a supervisor's seed file holds no other section
+        char cp[600]; snprintf(cp, sizeof cp, "%s/coverage.bin", cfg->state_dir);
+        FILE *cf = fopen(cp, "rb"); uint32_t hd[2];
+        uint8_t *buf = malloc(rom_size ? rom_size : 1);
+        if (cf && buf && fread(hd, 4, 2, cf) == 2 && hd[0] == 0x31564F43u && hd[1] == rom_size && !fseek(cf, (long)rom_size, SEEK_CUR))
+            while (fread(hd, 4, 2, cf) == 2 && hd[1] == rom_size) {
+                if (hd[0] == 0x3154504Au) { if (fread(buf, 1, rom_size, cf) == rom_size) for (size_t i = 0; i < rom_size; i++) out->jtent[i] |= buf[i]; break; }
+                if (fseek(cf, (long)((hd[0] == 0x31524353u || hd[0] == 0x31544948u ? 4u : 1u) * rom_size), SEEK_CUR)) break;
+            }
+        free(buf); if (cf) fclose(cf);
     }
     if (cfg->state_dir && cfg->resume) {   // cells already archived by previous runs are not archived again
         char kp[600]; snprintf(kp, sizeof kp, "%s/cells.bin", cfg->state_dir);
@@ -4242,6 +4315,8 @@ cleanup:
             fwrite(psec, sizeof *psec, 2, cf); fwrite(out->prov, 1, rom_size, cf);
             uint32_t dsec[2] = { 0x31545344u, (uint32_t)rom_size };   // "DST1"
             fwrite(dsec, sizeof *dsec, 2, cf); fwrite(out->dest, 1, rom_size, cf);
+            uint32_t jsec[2] = { 0x3154504Au, (uint32_t)rom_size };   // "JPT1"
+            if (out->jtent) { fwrite(jsec, sizeof *jsec, 2, cf); fwrite(out->jtent, 1, rom_size, cf); }
             fclose(cf);
         }
     }
@@ -4399,7 +4474,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     }
     fprintf(out, "speculative gaps: %llu runs, %llu bytes (never counted as known); %llu runs reinforced by an immediate reference (%llu references seen)\n", U(r->spec_runs), U(r->spec_bytes), U(r->spec_ref_runs), U(r->imm_refs));
     fprintf(out, "static closure: roots %llu, bytes %llu, static-only %zu, provisional %zu (untrusted walks, code once confirmed), capped walks %llu, returns followed %llu, RAM-parked code pointers %llu\n", U(r->closure_roots), U(r->closure_bytes), stat_only, prov_only, U(r->closure_capped), U(r->closure_rets), U(r->closure_ptr_stores));
-    if (r->proof_roots) fprintf(out, "static proof from executed transfers: roots %llu, bytes %llu (%llu seen only on forced paths before)\n", U(r->proof_roots), U(r->proof_bytes), U(r->proof_forced));
+    if (r->proof_roots) fprintf(out, "static proof from executed transfers: roots %llu, bytes %llu (%llu seen only on forced paths before), of which computed-jump tables %llu\n", U(r->proof_roots), U(r->proof_bytes), U(r->proof_forced), U(r->proof_jt_bytes));
     if (r->closure_entry_refused) fprintf(out, "untrusted walk entries refused (data plausibility, point 3): %llu\n", U(r->closure_entry_refused));
     if (r->closure_stack_invalidations) fprintf(out, "ghost returns discarded on memory-control OUT (port_effect): %llu\n", U(r->closure_stack_invalidations));
     if (r->closure_regs) fprintf(out, "closure registers (C3): seed walks %llu, indirect resolved %llu, indirect unresolved %llu, stack returns %llu, indirect site cap %llu, seeds refused (site cap %llu, set full %llu)\n",

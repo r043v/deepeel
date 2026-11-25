@@ -758,6 +758,10 @@ add_test(NAME core_reg_typing COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE
 add_test(NAME core_movie_bursts COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; python3 -c \"print('|.......S|\\n'*400,end='')\" > $D/mv_bursts.log; $B z80 explore sms $D/fix_z80_branch.sms --tas $D/mv_bursts.log --attract-frames 0 --tas-ckpt-every 20 --max-total 400000 --text $D/mv_bursts.txt >/dev/null 2>&1; grep -Eq 'movie checkpoints continued as free paths: [1-9].*pad bursts from them: [1-9]' $D/mv_bursts.txt")
 set_tests_properties(core_movie_bursts PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 120)
 
+# the static proof reaches the entries of a pointer table that were not jumped to
+add_test(NAME core_jt_proof COMMAND sh -c "$<TARGET_FILE:deepeel> explore ${CMAKE_CURRENT_BINARY_DIR}/fix_jtproof.gb --observe --max-total 100000 --text ${CMAKE_CURRENT_BINARY_DIR}/jt_proof.txt >/dev/null 2>&1; grep -E 'static proof.*computed-jump tables 6$' ${CMAKE_CURRENT_BINARY_DIR}/jt_proof.txt")
+set_tests_properties(core_jt_proof PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 60)
+
 # B3 (0.379.3): the per-site fork cap restarts from zero per checkpoint epoch (fix_epoch saturates one site at cap 1)
 add_test(NAME core_epoch_cap COMMAND sh -c "B=$<TARGET_FILE:deepeel>; D=${CMAKE_CURRENT_BINARY_DIR}; $B explore $D/fix_epoch.gb --fork-site-cap 1 --tas-ckpt-every 30 --attract-frames 600 --play-frames 600 --max-total 6000000 --text $D/epoch_cap.txt >/dev/null 2>&1; grep -Eq 'thanks to a checkpoint epoch [1-9]' $D/epoch_cap.txt")
 set_tests_properties(core_epoch_cap PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 180)
