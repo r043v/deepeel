@@ -417,8 +417,12 @@ void dp_nesmach_frame(DpNesMach *d) {
     d->budget = UINT64_MAX;   /* the step hook stops on budget otherwise:
         * a zeroed instance never executed a single instruction (found by
         * the fidelity harness: the DUT sat at its reset loop forever) */
-    if (d->in_frame) { nes_frame_rest(); d->in_frame = 0; }
+    if (d->in_frame) {
+        while (machine.line < 262u) nes_frame_rest();
+        d->in_frame = 0;
+    }
     nes_frame();
+    while (machine.line < 262u) nes_frame_rest();   // the traced runtime hands back at the NMI
     if (d->h.on_frame) d->h.on_frame(d->h.user);
 }
 
@@ -449,6 +453,7 @@ void dp_nesmach_load(DpNesMach *d, const void *buf) {
     nes_state_io(io_paste, &p, 1);
     memcpy(&d->rg, p, MAPPER_TAIL);
     mapper_apply(d);
+    d->in_frame = machine.line < 262u && (machine.line || machine.line_left);   /* the loaded state may sit mid-frame */
 }
 
 const unsigned dp_nesmach_off_cycles = offsetof(nes_t, cpu) + offsetof(nes6502_t, cycles);
@@ -495,6 +500,7 @@ uint8_t dp_nesmach_read(const DpNesMach *d, unsigned addr) {
     if (addr >= 0x8000u)
         return machine.prg[(addr & 0x3FFFu) +
                            (addr >= 0xC000u ? machine.cpu.fixed_base : machine.cpu.bank_base)];
+    if (addr < 0x4020u) return 0;   /* a peek never touches the registers: reading $2002 or $4015 acknowledges flags */
     return nes_bus_read((uint16_t)addr);
 }
 

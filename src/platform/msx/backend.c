@@ -12,7 +12,7 @@ _Static_assert((int)DP_MSX_PLAIN==M0_MSX_PLAIN && (int)DP_MSX_ASCII8==M0_MSX_ASC
     (int)DP_MSX_KONAMI_SCC==M0_MSX_KONAMI_SCC,"MSX mapper IDs changed upstream");
 static M0_TL uint8_t *image;
 static M0_TL size_t image_size;
-static M0_TL uint64_t generation;
+static M0_TL uint64_t generation, image_hash;
 static M0_TL DpMsxObserver observer;
 static M0_TL void *observer_user;
 void msx_ay_write(unsigned reg,uint8_t value);
@@ -36,7 +36,7 @@ void dp_msx_bios_ay_write(unsigned reg,uint8_t value) {
     msx_ay_write(reg,value);
     if(image && reg<16) event(DP_MSX_AY_WRITE,reg,value);
 }
-typedef struct { sg1000_t machine; uint64_t generation; } Snapshot;
+typedef struct { sg1000_t machine; uint64_t generation, image_hash; } Snapshot;
 static void output_bus(void *user,uint16_t port,uint8_t value) { (void)user; dp_msx_out(port,value); }
 int dp_msx_init(const uint8_t *rom,size_t size,int mapper) {
     if(!rom || mapper<DP_MSX_AUTO || mapper>DP_MSX_KONAMI_SCC) return 0;
@@ -46,6 +46,8 @@ int dp_msx_init(const uint8_t *rom,size_t size,int mapper) {
     uint8_t *next=malloc(padded); if(!next) return 0;
     memset(next,0xff,padded); memcpy(next,rom,size);
     dp_msx_close(); image=next; image_size=size; generation++;
+    image_hash=0xcbf29ce484222325ull;
+    for(size_t i=0;i<size;i++) image_hash=(image_hash^rom[i])*0x100000001b3ull;
     msx_set_mapper(mapper); sg1000_init(image,size,NULL);
     // INIT must run in the cartridge's slot, including a mapped cartridge
     // whose header points into page 2 rather than the usual page 1.
@@ -92,7 +94,7 @@ int32_t dp_msx_ram_index(uint16_t a) { return image && machine.wr_win[a>>13]?(in
 size_t dp_msx_state_size(void) { return sizeof(Snapshot); }
 int dp_msx_save(void *state,size_t size) {
     if(!image || !state || size!=sizeof(Snapshot)) return 0;
-    Snapshot *saved=state; memset(saved,0,size); saved->machine=machine; saved->generation=generation; return 1;
+    Snapshot *saved=state; memset(saved,0,size); saved->machine=machine; saved->generation=generation; saved->image_hash=image_hash; return 1;
 }
 #include "../sega/backend.h"
 static M0_TL DpSegaWatch W;
@@ -106,12 +108,23 @@ static void dp_msx_watch_hook(void) {
 }
 static int watch_view(const uint32_t **argb,int *w,int *h) { if(!W.w) return 0; *argb=W.px; *w=W.w; *h=W.h; return 1; }
 static void explore_watch(unsigned every,uint64_t *published) { W.every=every; W.published=published; dp_msx_watch_hook(); }
+// Same ROM and mapper only. The state may come from another process or worker thread: keep this instance's pointers.
+static int restore(const Snapshot *saved) {
+    const sg1000_t keep=machine;
+    if(saved->image_hash!=image_hash || saved->machine.rom_size!=keep.rom_size || saved->machine.msx_mapper!=keep.msx_mapper) return 0;
+    machine=saved->machine;
+    machine.rom=keep.rom; machine.cart_ram=keep.cart_ram; machine.row_out=keep.row_out; machine.platform=keep.platform;
+    machine.draw_line=keep.draw_line; machine.row=keep.row; machine.ref_row=keep.ref_row; machine.frame=keep.frame;
+    machine.lookup=keep.lookup; machine.coverage=keep.coverage; machine.entries=keep.entries;
+    machine.cpu.read=keep.cpu.read; machine.cpu.write=keep.cpu.write; machine.cpu.in=keep.cpu.in; machine.cpu.out=keep.cpu.out;
+    machine.cpu.user=keep.cpu.user;
+    dp_msx_watch_hook(); msx_state_loaded(); sg1000_palette_changed(); return 1;
+}
 int dp_msx_load(const void *state,size_t size) {
-    if(!image || !state || size!=sizeof(Snapshot)) return 0;
-    // Snapshots are private to this ROM instance, never a portable file format.
+    // Public snapshots are private to this ROM instance, never a portable file format.
     const Snapshot *saved=state;
-    if(saved->generation!=generation || saved->machine.rom!=image || saved->machine.rom_size!=image_size) return 0;
-    machine=saved->machine; dp_msx_watch_hook(); msx_state_loaded(); sg1000_palette_changed(); return 1;
+    if(!image || !state || size!=sizeof(Snapshot) || saved->generation!=generation || saved->machine.rom!=image) return 0;
+    return restore(saved);
 }
 void dp_msx_buttons(unsigned player,uint8_t pressed) { if(image && player<2) sg1000_buttons(player,pressed&63); }
 void dp_msx_return(int pressed) { if(image) sg1000_pause(pressed); }
@@ -131,7 +144,8 @@ static int explore_init(const uint8_t *rom,size_t size,uint8_t *ram,int mapper) 
     (void)ram; return dp_msx_init(rom,size,mapper);
 }
 static void explore_save(void *state) { dp_msx_save(state,sizeof(Snapshot)); }
-static void explore_load(const void *state) { dp_msx_load(state,sizeof(Snapshot)); }
+// the explorer's states cross instances: worker threads, --from-state and --resume
+static void explore_load(const void *state) { if(image) restore(state); }
 static DpSegaVdpTarget explore_target(void) {
     return (DpSegaVdpTarget){DP_SEGA_VRAM,machine.vdp_address,0xff,0,0,0};
 }
@@ -196,11 +210,12 @@ static int explore_window(uint16_t addr, unsigned bank) {
 }
 static uint64_t explore_screen_key(void) { return dp_sega_name_key(machine.vram,(machine.vdp[2]&15u)<<10,768,1,0,0); }
 static const uint8_t *explore_ram_view(size_t *n) { *n=sizeof(machine.ram)<8192?sizeof(machine.ram):8192; return machine.ram; }
+static uint64_t explore_frame_count(void) { return machine.frames; }
 const DpSegaBackend *dp_msx_backend(void) {
     static const DpSegaBackend ops={explore_init,dp_msx_cpu,dp_msx_read,dp_msx_write,
         dp_msx_in,dp_msx_out,dp_msx_advance,dp_msx_rom_index,sizeof(Snapshot),explore_save,explore_load,
         dp_msx_ram_index,explore_target,explore_input,explore_set_input,explore_mapper,explore_command,
         explore_irq,65536,65536,0xff,0x98,0x99,dp_msx_close,explore_windows,NULL,NULL,explore_geometry,explore_window,
-        dp_msx_info,dp_msx_observe,dp_msx_bios_trap,explore_screen_key,explore_ram_view,explore_watch,NULL,NULL,NULL,NULL,watch_view};
+        dp_msx_info,dp_msx_observe,dp_msx_bios_trap,explore_screen_key,explore_ram_view,explore_watch,NULL,NULL,explore_frame_count,NULL,watch_view};
     return &ops;
 }

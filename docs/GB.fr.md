@@ -6874,3 +6874,24 @@ Remplace les passes en moitiés et les quotas de la 0.439 (réglages dans `src/e
 - La mémoire prévue par worker est le plus grand pic mesuré plus un quart, après quatre travaux terminés.
 - `snapshots.tsv` donne par travail la technique, le score, les octets neufs et les secondes de processeur ; la ligne
   de progression donne les octets par seconde de processeur mesurés pour chaque technique.
+
+## 0.441.0 — campagne sur toutes les plateformes
+
+- `deepeel ROM [REP_DÉBORDEMENT]` lance la campagne autonome pour GB/GBC, NES, PC Engine, Mega Drive, Master System,
+  Game Gear, SG-1000, MSX, Neo Geo Pocket et WonderSwan : même superviseur, mêmes réglages (`campaign.h`), seule la
+  commande d'exploration des travaux change.
+- La transposition de couverture depuis une autre version de la ROM reste propre à la Game Boy ; ailleurs un film
+  enregistré sur une autre version est signalé et écarté.
+- **Reprise depuis un snapshot** (SMS, Game Gear, SG-1000, MSX) : l'état restauré gardait des pointeurs du processus
+  qui l'avait écrit. Une fourche pouvait planter (SMS/GG) et, sur MSX, un chargement venu d'un autre processus ou
+  d'un autre thread était refusé sans message.
+- **Identification NES** : une ROM dont l'en-tête diffère de l'iNES 1.0 haché par TASVideos (champs NES 2.0) est
+  retrouvée avec les octets 8 à 15 remis à zéro.
+- **Démarrage des plateformes en campagne** : Game Gear démarrait en mode SMS, WonderSwan ne s'attachait pas, SG-1000
+  et MSX ne comptaient pas les trames, la NES ne progressait presque pas (reprise en milieu de ligne et lecture
+  d'observation qui touchait aux registres), la Neo Geo Pocket bouclait sur la RAM partagée avec le Z80.
+- **Plusieurs threads** : des états d'exécution (registres du Z80 son NGP, PPU/APU NES, VCE et IRQ différée PC Engine,
+  tampons VDP) étaient partagés entre threads ; ils sont propres à chaque instance. Les registres du Z80 NGP et
+  l'état VCE/IRQ PC Engine manquants entrent dans les états sauvés.
+- **Fourches PC Engine** : le chargement d'un snapshot reprenait les pointeurs du processus qui l'avait écrit
+  (plantage des travaux à fourches).

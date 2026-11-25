@@ -114,7 +114,7 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
     int msx=!strcmp(s->id,"msx");
     core_sms_wide=kcfg->watch_every && !strcmp(s->id,"sms");
     const DpSegaBackend *b=msx?dp_msx_backend():!strcmp(s->id,"sg")?dp_sega_backend_sg():core_sms_wide?dp_sega_backend_smst():dp_sega_backend_gg();
-    int init_arg=msx?o->msx_mapper:1;
+    int init_arg=msx?o->msx_mapper:!strcmp(s->id,"sms");   // the backend's mode flag: Master System or Game Gear
     if(msx && (size>0x100000 || o->msx_mapper<DP_MSX_AUTO || o->msx_mapper>DP_MSX_KONAMI_SCC)) return 0;
     if(!b || b->init(rom,size,NULL,init_arg)!=1) return 0;
     DpMachine *m=dp_machine_sega(b); if(!m) return 0;

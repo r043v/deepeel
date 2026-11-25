@@ -2006,6 +2006,8 @@ static void kmapwin_cb(void *u, const DpCoreResult *r) { dp_kmapwin_start(r, "de
 // worker count and queue size follow the free RAM.  Any explicit option still wins (it comes last).
 typedef enum { AR_NONE, AR_GB, AR_NES, AR_PCE, AR_MD, AR_SMS, AR_GG, AR_SG, AR_MSX, AR_NGP, AR_WS } ArSystem;
 
+static const char *const ar_names[] = { "", "gb", "nes", "pce", "md", "sms", "gg", "sg", "msx", "ngp", "ws" };
+
 static ArSystem ar_detect(const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) return AR_NONE;
@@ -2056,7 +2058,7 @@ static int ar_is_subcommand(const char *a) {
 }
 
 static int auto_explore(int argc, char **argv, ArSystem sys) {
-    static const char *const names[] = { "", "gb", "nes", "pce", "md", "sms", "gg", "sg", "msx", "ngp", "ws" };
+    const char *const *names = ar_names;
     const char *rom = argv[1];
     char stem[256] = "rom"; { const char *b = strrchr(rom, '/'); b = b ? b + 1 : rom; snprintf(stem, sizeof stem, "%s", b); char *d = strrchr(stem, '.'); if (d && d != stem) *d = 0; }
     char outdir[1024]; snprintf(outdir, sizeof outdir, "%s.deepeel", stem);
@@ -2125,11 +2127,11 @@ int deepeel_main(int argc, char **argv) {   // the library entry point; src/deep
     if (!ar_is_subcommand(argv[1]) && argv[1][0] != '-') {   // `deepeel ROM`: explore is the default, the system comes from the file
         ArSystem sys = ar_detect(argv[1]);
         if (sys == AR_NONE) { fprintf(stderr, "deepeel: %s: not a readable ROM, or its system is not recognised (use `deepeel <system> explore ROM`)\n", argv[1]); return 2; }
-        if (sys == AR_GB && (argc == 2 || (argc == 3 && argv[2][0] != '-'))) {   // `deepeel ROM [OVERFLOW_DIR]`: the whole campaign is managed by the supervisor
+        if (argc == 2 || (argc == 3 && argv[2][0] != '-')) {   // `deepeel ROM [OVERFLOW_DIR]`: the whole campaign is managed by the supervisor
             char exe[1024]; ssize_t el = readlink("/proc/self/exe", exe, sizeof exe - 1); if (el <= 0) snprintf(exe, sizeof exe, "%s", argv[0]); else exe[el] = 0;
             char stem[256]; { const char *b = strrchr(argv[1], '/'); b = b ? b + 1 : argv[1]; snprintf(stem, sizeof stem, "%s", b); char *d = strrchr(stem, '.'); if (d && d != stem) *d = 0; }
             char outdir[1100]; snprintf(outdir, sizeof outdir, "%s.deepeel", stem); mkdir(outdir, 0777);
-            return dp_auto_campaign(exe, argv[1], argc == 3 ? argv[2] : NULL, 0, outdir, stem);
+            return dp_auto_campaign(exe, ar_names[sys], argv[1], argc == 3 ? argv[2] : NULL, 0, outdir, stem);
         }
         return auto_explore(argc, argv, sys);
     }

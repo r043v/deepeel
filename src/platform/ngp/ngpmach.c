@@ -150,6 +150,9 @@ static void state_hashes(const void *buf, uint64_t *full, uint64_t *cl) {
     FNV(h, o_ram, NGP_RAM_BYTES);
     FNV(h, o_rtc, o_sq - o_rtc);
     FNV(h, o_sq, offsetof(ngp_t, flash_shadow) - offsetof(ngp_t, sq_period));
+    // the Z80 registers close the buffer; its cycle counter is a clock
+    const size_t o_z80 = ngp_state_bytes() - NGP_Z80_STATE_BYTES;
+    FNV(h, o_z80, NGP_Z80_STATE_BYTES - sizeof(uint64_t));
     *full = h;
     // the clocks: cyc, frames (in the sq_period span), timer_clock/timer_hint
     // (in the trun span), z80_runtime, psg_runtime

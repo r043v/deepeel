@@ -21,8 +21,9 @@ chk nes:apucopy  ""                   'rom->ram copy bytes [1-9]'
 chk nes:oamchain ""                   'rom->ram copy bytes [1-9]'
 chk nes:branch   "--entry 0:8150 --entry 3:8000" 'seeded entry points 2'
 chk nes:uxrom    "--seed-banks"       'bank seeds the machine cannot show'
-chk nes:pad      ""                   'event probes [1-9][0-9]* at 3 sites: 64 forced variants'
-chk nes:pad      "--pad-full"         'event probes [1-9][0-9]* at 3 sites: 2048 forced variants'
+# 3 sites, 3 re-arms: 6 arms x 8 pads (x 256 with --pad-full)
+chk nes:pad      ""                   'event probes [1-9][0-9]* at 3 sites: 48 forced variants'
+chk nes:pad      "--pad-full"         'event probes [1-9][0-9]* at 3 sites: 1536 forced variants'
 chk pce:branch "--entry 0xE018 --entry 0xE025" 'seeded entry points 2'
 chk pce:branch "--entry 0xE018 --entry 0xE025 --seed-banks" 'seeded entry points 3'   # P1: the image's 16 KiB block joins the two entries
 chk pce:ind    ""                 'static closure: roots 2, bytes 7'

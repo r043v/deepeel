@@ -14,8 +14,8 @@ void gg_rom_trace_insn(uint32_t offset) { (void)offset; }
 void gg_cart_trace(uint32_t offset,unsigned write) { (void)offset; (void)write; }
 // The imported runtime has only the first pad. Extra SMS pins belong to the
 // bridge snapshot too; the generic CPU reaches them through this input bus.
-static uint8_t second_pad,reset_button,memory_control;
-static uint8_t tas_compat_enabled,irq_defer;
+static M0_TL uint8_t second_pad,reset_button,memory_control;
+static M0_TL uint8_t tas_compat_enabled,irq_defer;
 typedef struct { gg_t core; uint8_t second_pad,reset_button,memory_control,tas_compat_enabled,irq_defer; } State;
 enum { HAWK_LINE_START=1, HAWK_RESET_PHASE=2, HAWK_DEFER_FRAME_EDGE=4,
        HAWK_DEFER_ALL_EDGES=8, HAWK_OLD_REFRESH=16, HAWK_OLD_INDEX_ADD=32 };
@@ -136,8 +136,14 @@ static void hook(void) {
 static int watch_view(const uint32_t **argb,int *w,int *h) { if(!W.w) return 0; *argb=W.px; *w=W.w; *h=W.h; return 1; }
 static void watch(unsigned every,uint64_t *published) { W.every=every; W.published=published; hook(); }
 static void load(const void *in) {
-    const State *s=in; const uint8_t *keep_rom=machine.rom; uint8_t *keep_cart=machine.cart_ram;
-    machine=s->core; machine.rom=keep_rom; machine.cart_ram=keep_cart;   // a state saved by another process (--resume) carries that process's pointers
+    const State *s=in; const gg_t keep=machine;
+    machine=s->core;
+    // a state saved by another process (--from-state, --resume) or worker thread carries that instance's pointers
+    machine.rom=keep.rom; machine.cart_ram=keep.cart_ram; machine.row_out=keep.row_out; machine.row_tmp=keep.row_tmp;
+    machine.platform=keep.platform; machine.draw_line=keep.draw_line; machine.row=keep.row; machine.frame=keep.frame;
+    machine.lookup=keep.lookup; machine.coverage=keep.coverage; machine.entries=keep.entries;
+    machine.cpu.read=keep.cpu.read; machine.cpu.write=keep.cpu.write; machine.cpu.in=keep.cpu.in; machine.cpu.out=keep.cpu.out;
+    machine.cpu.user=keep.cpu.user;
     second_pad=s->second_pad; reset_button=s->reset_button; memory_control=s->memory_control; tas_compat_enabled=s->tas_compat_enabled; irq_defer=s->irq_defer;
     hook(); gg_remap(); gg_vdp_restore();
 }

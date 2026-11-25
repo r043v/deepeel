@@ -26,7 +26,18 @@ static void hook(void) {
 }
 static int watch_view(const uint32_t **argb,int *w,int *h) { if(!W.w) return 0; *argb=W.px; *w=W.w; *h=W.h; return 1; }
 static void watch(unsigned every,uint64_t *published) { W.every=every; W.published=published; hook(); }
-static void load(const void *in) { memcpy(&machine,in,sizeof(machine)); hook(); sg1000_palette_changed(); }
+// A state saved by another process (--from-state, --resume) or worker thread
+// carries that instance's pointers: keep ours (as sg_state_io does).
+static void load(const void *in) {
+    const sg1000_t keep=machine;
+    memcpy(&machine,in,sizeof(machine));
+    machine.rom=keep.rom; machine.cart_ram=keep.cart_ram; machine.row_out=keep.row_out; machine.platform=keep.platform;
+    machine.draw_line=keep.draw_line; machine.row=keep.row; machine.ref_row=keep.ref_row; machine.frame=keep.frame;
+    machine.lookup=keep.lookup; machine.coverage=keep.coverage; machine.entries=keep.entries; machine.cpu=((const sg1000_t *)in)->cpu;
+    machine.cpu.read=keep.cpu.read; machine.cpu.write=keep.cpu.write; machine.cpu.in=keep.cpu.in; machine.cpu.out=keep.cpu.out;
+    machine.cpu.user=keep.cpu.user;
+    hook(); sg1000_palette_changed();
+}
 static int32_t ram_index(uint16_t a) {
     if(a>=0xc000) return a&1023;
     if(a>=0x8000 && machine.cart_ram) return 8192+(a&(SG_CART_RAM_SIZE-1));
@@ -54,7 +65,8 @@ static int seed_geometry(DpSegaSeedGeometry *g) { memset(g,0,sizeof(*g)); return
 static int seed_window(uint16_t addr, unsigned bank) { (void)addr; (void)bank; return 0; }
 static uint64_t screen_key(void) { return dp_sega_name_key(machine.vram,(machine.vdp[2]&15u)<<10,768,1,0,0); }
 static const uint8_t *ram_view(size_t *n) { *n=sizeof(machine.ram); return machine.ram; }
+static uint64_t frame_count(void) { return machine.frames; }
 const DpSegaBackend *dp_sega_backend_sg(void) {
-    static const DpSegaBackend ops={init,cpu,sg1000_read,sg1000_write,in,out,advance,rom_index,sizeof(sg1000_t),save,load,ram_index,vdp_target,input,set_input,mapper,vdp_command,irq_sources,DP_SEGA_RAM_TAGS,8192,0xc1,0x80,0x81,NULL,NULL,NULL,NULL,seed_geometry,seed_window,NULL,NULL,NULL,screen_key,ram_view,watch,NULL,NULL,NULL,NULL,watch_view};
+    static const DpSegaBackend ops={init,cpu,sg1000_read,sg1000_write,in,out,advance,rom_index,sizeof(sg1000_t),save,load,ram_index,vdp_target,input,set_input,mapper,vdp_command,irq_sources,DP_SEGA_RAM_TAGS,8192,0xc1,0x80,0x81,NULL,NULL,NULL,NULL,seed_geometry,seed_window,NULL,NULL,NULL,screen_key,ram_view,watch,NULL,NULL,frame_count,NULL,watch_view};
     return &ops;
 }

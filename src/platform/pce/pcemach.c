@@ -25,11 +25,11 @@ int pce_sat_hdw;
 static void (*frame_hook_fn)(void);
 static unsigned boot_master(void) { const char *e = getenv("PCE_BOOT0"); return e ? (unsigned)atoi(e) : 237u; }   // calibration knob: master clocks of the first line piece
 int pce_vce_model;      // the VCE's vblank counter drives the VDC's phase re-arm (TurboNyma; PCEHawk rewinds at line 0)
-static int vce_vblank;      // the VCE vblank flag's state (TurboNyma model)
-static int vce_vb_left;     // master clocks until the next vblank edge
-static int vce_first_frame; // the reference's frame 0 is its 257-line boot frame (the VCE resets 237 master clocks into the hsync)
-static unsigned vce_frame_total;     // the current frame's line count: the VCE cycle that was current when the frame started
-static unsigned vce_frame_total_next; // the sample taken at the last vblank end, applied at the next frame boundary
+static M0_TL int vce_vblank;      // the VCE vblank flag's state (TurboNyma model)
+static M0_TL int vce_vb_left;     // master clocks until the next vblank edge
+static M0_TL int vce_first_frame; // the reference's frame 0 is its 257-line boot frame (the VCE resets 237 master clocks into the hsync)
+static M0_TL unsigned vce_frame_total;     // the current frame's line count: the VCE cycle that was current when the frame started
+static M0_TL unsigned vce_frame_total_next; // the sample taken at the last vblank end, applied at the next frame boundary
 
 // the display side of pce_frame's line loop, which the stepper replaces: first active line,
 // then the row callback (watch picture) with the VCE applied
@@ -61,6 +61,8 @@ typedef struct {
     int vb_left;
     unsigned vft;       // the frame's line count (sampled at the last vblank end)
     unsigned vft2;      // and the staged one (applied at the next frame boundary)
+    int first_frame;    // the VCE model's boot frame is still running
+    int irq_defer;      // CPU cycles IRQ1 is still held back
 } PceBridgeState;
 
 static M0_TL uint8_t *rom;           // owned, header stripped
@@ -299,7 +301,7 @@ int dp_pce_irq_due(void) {
 // returns 1 when the frame completed (the boot frame before frame 1 is not reported)
 
 unsigned pce_vsync_extra = 0;   // CPU cycles the vsync's VD is held back (TurboNyma profile; calibration knob PCE_VSEXTRA)
-static int irq_defer;   // CPU cycles IRQ1 is still held back after a line end (TurboNyma profile)
+static M0_TL int irq_defer;   // CPU cycles IRQ1 is still held back after a line end (TurboNyma profile)
 static void vce_edge_advance(unsigned spent) {
     if (!pce_vce_model || vce_vb_left <= 0) return;
     vce_vb_left -= (int)(spent * (machine.cpu.speed ? 3u : 12u));
@@ -428,11 +430,20 @@ void dp_pce_save(void *dst) {
     s->vb_left = vce_vb_left;
     s->vft = vce_frame_total;
     s->vft2 = vce_frame_total_next;
+    s->first_frame = vce_first_frame;
+    s->irq_defer = irq_defer;
 }
 
 void dp_pce_load(const void *src) {
     const PceBridgeState *s = src;
+    // the saved image carries the saver's host pointers (another thread, or
+    // another process): keep this instance's
+    void (*const row)(void *, unsigned, const uint16_t *, unsigned) = machine.row;
+    void *const host = machine.host;
     memcpy(&machine, &s->m, sizeof machine);
+    machine.row = row;
+    machine.host = host;
+    machine.cpu.rom = rom;
     master_carry = s->carry;
     line_no = s->line;
     line_left = s->line_left;
@@ -441,8 +452,8 @@ void dp_pce_load(const void *src) {
     vce_vb_left = s->vb_left;
     vce_frame_total = s->vft;
     vce_frame_total_next = s->vft2;
-    // the windows point into this process's machine (same global): rebuild
-    // them anyway so a snapshot from another build layout stays coherent
+    vce_first_frame = s->first_frame;
+    irq_defer = s->irq_defer;
     machine.cpu.wram = machine.wram;
     machine.cpu.rom_bytes = 0;
     huc6280_map(&machine.cpu);
@@ -519,7 +530,7 @@ void pce_trace_regs(uint8_t a, uint8_t x, uint8_t y, uint8_t s, uint8_t p, uint3
 }
 
 static unsigned cut_cycles;          // the reference samples its WRAM this many CPU cycles before the frame's last line ends
-static uint8_t cut_wram[0x2000]; static int cut_valid;
+static M0_TL uint8_t cut_wram[0x2000]; static M0_TL int cut_valid;
 void dp_pce_set_cut(unsigned cycles) { cut_cycles = cycles; }
 void dp_pce_run_frame(void) {
     huc6280_t *c = &machine.cpu;

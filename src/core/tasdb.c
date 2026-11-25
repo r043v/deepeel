@@ -246,16 +246,28 @@ static void on_emu_sub(const char *sys, const char *line, void *u) {
     int byid = q->id && !strcmp(q->id + strlen(q->id) - 1, "S") && !strncmp(q->id, id, strlen(q->id) - 1) && strlen(id) == strlen(q->id) - 1;
     if (atol(fr) == q->frames || byid) { printf("emulator=%s kind=submission id=%s\n", emu, id); q->n++; }
 }
+/* The games holding the ROM, by SHA1 then MD5 of the file; md / sh receive the identity that matched.  TASVideos
+ * hashes NES dumps with an iNES 1.0 header: a file whose header differs (NES 2.0 fields, trailing bytes) is tried
+ * again with bytes 8-15 cleared. */
+static Match match_rom(uint8_t *d, size_t sz, char md[33], char sh[41]) {
+    for (int pass = 0;; pass++) {
+        uint8_t m[16], s[20]; dp_md5(d, sz, m); dp_sha1(d, sz, s);
+        for (int i = 0; i < 16; i++) sprintf(md + 2 * i, "%02x", m[i]); for (int i = 0; i < 20; i++) sprintf(sh + 2 * i, "%02x", s[i]);
+        Match mt = { {0}, 0, md, sh }; scan("games", 3, sh, on_game, &mt);
+        if (!mt.n) scan("games", 2, md, on_game, &mt);
+        if (mt.n || pass || sz < 16 || memcmp(d, "NES\x1a", 4)) return mt;
+        if ((d[7] & 0x0C) == 0x08) d[7] &= 0xF3;
+        memset(d + 8, 0, 8);
+    }
+}
+
 static int cmd_emu(const char *rom, long frames, const char *mid) {
     char sysf[PATH_MAX + 64]; snprintf(sysf, sizeof sysf, "%s/systems.tsv", root);
     if (access(sysf, R_OK)) { fprintf(stderr, "tasdb: no database in %s (run `deepeel tasdb sync` first)\n", root); return 3; }
     FILE *f = fopen(rom, "rb"); if (!f) { perror(rom); return 2; }
     fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
     uint8_t *d = malloc((size_t)sz + 1); if (fread(d, 1, (size_t)sz, f) != (size_t)sz) { fclose(f); free(d); return 2; } fclose(f);
-    uint8_t m[16], s[20]; char md[33], sh[41]; dp_md5(d, (size_t)sz, m); dp_sha1(d, (size_t)sz, s); free(d);
-    for (int i = 0; i < 16; i++) sprintf(md + 2 * i, "%02x", m[i]); for (int i = 0; i < 20; i++) sprintf(sh + 2 * i, "%02x", s[i]);
-    Match mt = { {0}, 0, md, sh }; scan("games", 3, sh, on_game, &mt);
-    if (!mt.n) scan("games", 2, md, on_game, &mt);
+    char md[33], sh[41]; Match mt = match_rom(d, (size_t)sz, md, sh); free(d);
     EmuQ q = { frames, 0, mid };
     for (int i = 0; i < mt.n; i++) { char g[32]; snprintf(g, sizeof g, "%ld", mt.gids[i]); scan("pubs", 1, g, on_emu_pub, &q); scan("subs", 2, g, on_emu_sub, &q); }
     if (!q.n) fprintf(stderr, "tasdb: no publication/submission of this ROM has %ld frames\n", frames);
@@ -267,11 +279,8 @@ static int cmd_find(const char *rom, int fetch) {
     FILE *f = fopen(rom, "rb"); if (!f) { perror(rom); return 2; }
     fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
     uint8_t *d = malloc((size_t)sz + 1); if (fread(d, 1, (size_t)sz, f) != (size_t)sz) { fclose(f); free(d); return 2; } fclose(f);
-    uint8_t m[16], s[20]; char md[33], sh[41]; dp_md5(d, (size_t)sz, m); dp_sha1(d, (size_t)sz, s);
-    for (int i = 0; i < 16; i++) sprintf(md + 2 * i, "%02x", m[i]); for (int i = 0; i < 20; i++) sprintf(sh + 2 * i, "%02x", s[i]);
-    fprintf(stderr, "ROM md5 %s sha1 %s\n", md, sh);
-    Match mt = { {0}, 0, md, sh }; scan("games", 3, sh, on_game, &mt);
-    if (!mt.n) scan("games", 2, md, on_game, &mt);
+    char md[33], sh[41]; Match mt = match_rom(d, (size_t)sz, md, sh);
+    fprintf(stderr, "ROM md5 %s sha1 %s\n", md, sh);   // the identity the database knows the ROM under (read by the campaign)
     if (!mt.n && sz % 1024 == 512) {   /* .smd: 512-byte header, interleaved; not the TASVideos hash */
         fprintf(stderr, "no match (a 512-byte header suggests an SMD dump: use a plain .bin/.md)\n"); }
     free(d);

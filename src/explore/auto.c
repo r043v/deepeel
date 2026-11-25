@@ -12,6 +12,7 @@
 #include "core.h"
 #include "tas.h"
 #include "xpose.h"
+#include "../core/dpmovie.h"
 #include "../core/sha1.h"
 #include "../core/shquote.h"
 #include <dirent.h>
@@ -188,14 +189,36 @@ static uint8_t *read_rom(const char *path, size_t *n) {   // a Game Boy ROM file
     if (f) fclose(f);
     return d;
 }
+// How the campaign reaches each platform: its explore command, its TASVideos systems and its ROM file extensions.
+// Everything else (kernel options, coverage file, snapshots, live frames) is the same for all of them.
+typedef struct { const char *id, *cli[3], *systems, *exts; } Plat;
+static const Plat PLATS[] = {
+    { "gb",  { "explore" },              "GB,GBC",  " .gb .gbc .sgb " },
+    { "nes", { "nes", "explore" },       "NES",     " .nes " },
+    { "pce", { "pce", "explore" },       "PCE,SGX", " .pce " },
+    { "md",  { "md", "explore" },        "Genesis", " .md .gen .bin .smd " },
+    { "sms", { "z80", "explore", "sms" }, "SMS",    " .sms " },
+    { "gg",  { "z80", "explore", "gg" },  "GG",     " .gg " },
+    { "sg",  { "z80", "explore", "sg" },  "SG1000", " .sg .sc " },
+    { "msx", { "z80", "explore", "msx" }, "MSX",    " .rom .mx1 .mx2 " },
+    { "ngp", { "ngp", "explore" },       "NGP",     " .ngp .ngc .ngd " },
+    { "ws",  { "ws", "explore" },        "WSWAN",   " .ws .wsc " },
+};
+static const Plat *plat = &PLATS[0];   // the campaign's platform
+#define PLAT_CLI(av, n) for (int c_ = 0; c_ < 3 && plat->cli[c_]; c_++) av[n++] = (char *)plat->cli[c_]
+static int rom_ext(const char *name) {
+    const char *ext = strrchr(name, '.'); char key[12];
+    if (!ext || strlen(ext) > 8) return 0;
+    snprintf(key, sizeof key, " %s ", ext); for (char *p = key; *p; p++) if (*p >= 'A' && *p <= 'Z') *p += 32;
+    return strstr(plat->exts, key) != NULL;
+}
 // the ROM of that SHA1 among the files beside ours: another version of the game, on which its movies replay
 static int find_sibling(const char *rom, const char *sha1, char *out, size_t cap) {
     char *real = realpath(rom, NULL); if (!real) return 0;
     char *sl = strrchr(real, '/'); if (sl) *sl = 0;
     DIR *d = opendir(real); struct dirent *de; int found = 0;
     while (d && !found && (de = readdir(d))) {
-        const char *ext = strrchr(de->d_name, '.');
-        if (!ext || (strcasecmp(ext, ".gb") && strcasecmp(ext, ".gbc") && strcasecmp(ext, ".sgb"))) continue;
+        if (!rom_ext(de->d_name)) continue;
         char p[1100]; if ((size_t)snprintf(p, sizeof p, "%s/%s", real, de->d_name) >= sizeof p) continue;
         size_t n; uint8_t *b = read_rom(p, &n); if (!b) continue;
         uint8_t h[20]; char hex[41]; dp_sha1(b, n, h); free(b);
@@ -205,6 +228,11 @@ static int find_sibling(const char *rom, const char *sha1, char *out, size_t cap
     if (d) closedir(d);
     free(real);
     return found;
+}
+static int movie_ext(const char *ext) {   // the recording formats the platform loaders read
+    static const char *const e[] = { ".bk2", ".vbm", ".vmv", ".gbm", ".gmv", ".fm2", ".mmv", ".mc2", ".fmv", ".smv", ".gm2" };
+    for (size_t i = 0; i < sizeof e / sizeof *e; i++) if (!strcasecmp(ext, e[i])) return 1;
+    return 0;
 }
 // the movies of the ROM, from the TASVideos-backed database (sync on demand, fetch the files): the `tasdb find
 // ROM --fetch` listing gives "game N" and one "  <id>M|S ... N frames" line per publication/submission; the files
@@ -216,7 +244,7 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
     if (getenv("DEEPEEL_TASDB")) snprintf(db, sizeof db, "%s", getenv("DEEPEEL_TASDB"));   // the same root as the tasdb module
     for (int attempt = 0; attempt < 2 && !n; attempt++) {
         if (attempt) {
-            char c[2400], qe[2300]; snprintf(c, sizeof c, "%s tasdb sync --systems GB,GBC >&2", dp_shquote(exe, qe, sizeof qe));
+            char c[2400], qe[2300]; snprintf(c, sizeof c, "%s tasdb sync --systems %s >&2", dp_shquote(exe, qe, sizeof qe), plat->systems);
             if (system(c)) break;
         }
         // the listing is parsed only once the command is over: its lines come out before their downloads are written
@@ -226,9 +254,10 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
         if (in) pclose(in);
         if (p) rewind(p);
         char *line = NULL; size_t lc = 0; unsigned game = 0, ver = 0;   // ver: the ROM's own version in the listed game; a movie replays on its own ROM only
-        char own[41] = ""; { size_t rn; uint8_t *rb = read_rom(rom, &rn); if (rb) { uint8_t h[20]; dp_sha1(rb, rn, h); free(rb); for (int i = 0; i < 20; i++) sprintf(own + 2 * i, "%02x", h[i]); } }
+        char own[41] = "";   // the identity the database knows our ROM under
         struct { unsigned id; char sha1[44], path[1100]; int looked; } vs[64]; size_t nvs = 0;
         while (p && getline(&line, &lc, p) > 0) {
+            sscanf(line, "ROM md5 %*32s sha1 %40s", own);
             unsigned g; if (sscanf(line, "game %u", &g) == 1) { if (g != game) { ver = 0; nvs = 0; } game = g; }   // one block per game the ROM belongs to
             { unsigned v; const char *sh = strstr(line, ", sha1 ");
               if (sh && sscanf(line, " version %u:", &v) == 1 && nvs < 64) { vs[nvs].id = v; vs[nvs].looked = 0; vs[nvs].path[0] = 0; snprintf(vs[nvs].sha1, sizeof vs[nvs].sha1, "%.40s", sh + 7); vs[nvs].sha1[strcspn(vs[nvs].sha1, "\n")] = 0;
@@ -244,6 +273,9 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
                 char *tg = strstr(line, "[v"); unsigned other = tg ? (unsigned)strtoul(tg + 2, NULL, 10) : 0;
                 size_t k = 0; while (k < nvs && vs[k].id != other) k++;
                 if (k < nvs && !vs[k].looked) { vs[k].looked = 1; if (vs[k].sha1[0]) find_sibling(rom, vs[k].sha1, vs[k].path, sizeof vs[k].path); }
+                if (strcmp(plat->id, "gb")) {   // no content transposition on this platform yet: another version's coverage has nowhere to go
+                    fprintf(stderr, "deepeel auto: %s skipped: recorded on another version of the game (transposition is Game Boy only)\n", id); continue;
+                }
                 if (k == nvs || !vs[k].path[0]) {
                     fprintf(stderr, "deepeel auto: %s skipped: recorded on another version of the game; put the ROM of SHA1 %s beside ours to replay it there\n", id, k < nvs ? vs[k].sha1 : "?"); continue;
                 }
@@ -257,14 +289,16 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
                 char f[1500]; snprintf(f, sizeof f, "%s/%s", dir, de->d_name); struct stat sb;
                 if (stat(f, &sb) || !S_ISREG(sb.st_mode)) continue;
                 const char *ext = strrchr(de->d_name, '.');
-                if (ext && (!strcasecmp(ext, ".bk2") || !strcasecmp(ext, ".vbm") || !strcasecmp(ext, ".vmv") || !strcasecmp(ext, ".gbm")) && sb.st_size > bsz) { snprintf(best, sizeof best, "%.1099s", f); bsz = sb.st_size; }
+                if (ext && movie_ext(ext) && sb.st_size > bsz) { snprintf(best, sizeof best, "%.1099s", f); bsz = sb.st_size; }
             }
             closedir(d);
             if (!best[0]) continue;
             uint64_t input = 0;   // FNV-1a of the decoded pad frames
-            { DpTas tas; memset(&tas, 0, sizeof tas); char terr[160];
+            if (!strcmp(plat->id, "gb")) { DpTas tas; memset(&tas, 0, sizeof tas); char terr[160];
               if (dp_tas_load(best, &tas, terr, sizeof terr)) { input = 0xcbf29ce484222325ull; for (uint32_t i = 0; i < tas.frames; i++) input = (input ^ tas.masks[i]) * 0x100000001b3ull; }
               dp_tas_free(&tas); }
+            else { DpMovie m; char terr[160];
+              if (dp_movie_load(plat->id, best, &m, terr, sizeof terr)) { input = 0xcbf29ce484222325ull; for (uint32_t i = 0; i < m.frames; i++) input = (input ^ m.masks[i]) * 0x100000001b3ull; dp_movie_free(&m); } }
             int dup = 0; for (size_t i = 0; i < n; i++) if ((*out)[i].frames == frames && ((*out)[i].size == (unsigned long)bsz || (input && (*out)[i].input == input))) dup = 1;   // the same movie as publication and submission
             if (dup) continue;
             if (n == cap) { cap = cap ? cap * 2 : 16; *out = realloc(*out, cap * sizeof **out); }
@@ -401,7 +435,9 @@ static void infer_union(const char *exe, const char *rom, const char *local, Uni
     mkdirs(dir);
     if (!seed_state(un, sdir, 1)) return;
     fprintf(stderr, "deepeel auto: static inference on the merged coverage\n");
-    char *av[] = { (char *)exe, "explore", (char *)rom, "--jobs", "1", "--state-dir", sdir, "--no-frontier", "--resume", "--observe", "--no-start-attract", NULL };
+    char *av[16]; int n = 0; av[n++] = (char *)exe; PLAT_CLI(av, n);
+    { const char *const rest[] = { rom, "--jobs", "1", "--state-dir", sdir, "--no-frontier", "--resume", "--observe", "--no-start-attract" }; for (size_t i = 0; i < sizeof rest / sizeof *rest; i++) av[n++] = (char *)rest[i]; }
+    av[n] = NULL;
     pid_t pid = spawn(exe, av, log); int st = 0;
     if (pid < 0 || waitpid(pid, &st, 0) != pid || !WIFEXITED(st) || WEXITSTATUS(st)) { fprintf(stderr, "deepeel auto: static inference failed, see %s\n", log); return; }
     memset(un->inf, 0, un->n);
@@ -554,7 +590,9 @@ static void collect_deep(Stack *s, const Task *t, int splice, int forks, unsigne
 }
 
 #define FORK_CAP (cap / CAMP_FORK_SHARE > 1 ? cap / CAMP_FORK_SHARE : 1)
-int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, size_t rom_size, const char *outdir, const char *name) {
+int dp_auto_campaign(const char *exe, const char *platform, const char *rom, const char *overflow, size_t rom_size, const char *outdir, const char *name) {
+    plat = NULL; for (size_t i = 0; i < sizeof PLATS / sizeof *PLATS; i++) if (!strcmp(PLATS[i].id, platform)) plat = &PLATS[i];
+    if (!plat) { fprintf(stderr, "deepeel auto: no campaign for platform %s\n", platform); return 2; }
     signal(SIGINT, on_int); signal(SIGTERM, on_int);
     long ncpu = sysconf(_SC_NPROCESSORS_ONLN); if (ncpu < 1) ncpu = 1;
     long cap = ncpu > CAMP_SPARE_CPUS ? ncpu - CAMP_SPARE_CPUS : 1;   // one worker per core, all at the lowest priority
@@ -770,7 +808,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             snprintf(t->lfr, sizeof t->lfr, "/dev/shm/deepeel-%d-%s.frame", (int)getpid(), id);
             char *av[64]; int n = 0;
 #define A(x) av[n++] = (char *)(x)
-            A(exe); A("explore"); A(SIBLING(t) ? mv[t->movie].rom : rom);
+            A(exe); PLAT_CLI(av, n); A(SIBLING(t) ? mv[t->movie].rom : rom);
             A("--jobs"); A("1"); A("--max-total"); A(HUGE_STEPS); A("--queue-max"); A(queue_arg);   // RAM share of one child: the rest spills to its disk spool
             A("--state-dir"); A(sdir); A("--no-frontier"); A("--spool-max"); A(spool_arg);
             A("--live-flags"); A(t->live); A("--live-frame"); A(t->lfr); A("--live-frame-ms"); A(CAMP_STR(CAMP_LIVE_FRAME_MS));
