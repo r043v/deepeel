@@ -6781,7 +6781,9 @@ Les passes 1 à 3 sont des **observations** (`--observe`) : aucune fourche, aucu
 s'exécute est enregistré. Options associées : `--random N`, `--random-first K`, `--random-min TRAMES`,
 `--random-stall TRAMES`, `--random-no-start N`, `--random-no-select N`, `--random-hold N`. Les réglages sont dans `src/explore/campaign.h`.
 
-**Chiffres** (somme = « known ») :
+**Chiffres** (depuis 0.439.1, « known without suspects » = observé + statique prouvé + autres versions ; les suspects,
+forcé compris, n'y sont plus ; auparavant « known » les additionnait et pouvait afficher 100 %). La reprise d'une
+campagne conserve aussi la classe « autres versions », et `DEEPEEL_TASDB` vaut pour les films de la campagne :
 
 - *observed code / data* : exécuté, lu, copié ou décompressé pendant l'exécution ;
 - *proven static code* (bleu clair) : atteint par des sauts directs depuis du code exécuté ;

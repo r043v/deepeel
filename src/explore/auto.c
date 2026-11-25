@@ -216,6 +216,8 @@ static int find_sibling(const char *rom, const char *sha1, char *out, size_t cap
 static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
     size_t n = 0, cap = 0; *out = NULL;
     char db[1100]; snprintf(db, sizeof db, "%s", exe); { char *sl = strrchr(db, '/'); if (sl) *sl = 0; }
+    { size_t l = strlen(db); snprintf(db + l, sizeof db - l, "/tasdb"); }
+    if (getenv("DEEPEEL_TASDB")) snprintf(db, sizeof db, "%s", getenv("DEEPEEL_TASDB"));   // the same root as the tasdb module
     for (int attempt = 0; attempt < 2 && !n; attempt++) {
         if (attempt) {
             char c[2400], qe[2300]; snprintf(c, sizeof c, "%s tasdb sync --systems GB,GBC >&2", dp_shquote(exe, qe, sizeof qe));
@@ -250,7 +252,7 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
                 }
                 mrom = sibling = vs[k].path;
             } }
-            char dir[1300]; snprintf(dir, sizeof dir, "%s/tasdb/movies/%u/%s", db, game, id);
+            char dir[1300]; snprintf(dir, sizeof dir, "%s/movies/%u/%s", db, game, id);
             DIR *d = opendir(dir); if (!d) continue;
             struct dirent *de; char best[1100] = ""; off_t bsz = 0;
             while ((de = readdir(d))) {
@@ -305,6 +307,7 @@ static size_t merge_flags(Union *un, const char *path) {   // header "COV1" + si
         uint32_t sh[2];
         while (fread(sh, 4, 2, f) == 2 && sh[1] == un->n) {
             uint8_t *dst = sh[0] == 0x31464E49u ? un->inf : sh[0] == 0x31565250u ? un->prov : NULL;
+            if (sh[0] == 0x314F5058u) { if (!un->xpo) un->xpo = calloc(un->n, 1); dst = un->xpo; }   // "XPO1": kept across runs
             if (dst) { if (fread(b, 1, un->n, f) != un->n) break; for (size_t i = 0; i < un->n; i++) if (!dst[i]) dst[i] = b[i]; continue; }
             long skip = sh[0] == 0x31524353u || sh[0] == 0x31544948u ? 4l * (long)un->n : (long)un->n;   // SCR1, HIT1 are words
             if (fseek(f, skip, SEEK_CUR)) break;
@@ -316,8 +319,8 @@ static size_t merge_flags(Union *un, const char *path) {   // header "COV1" + si
 // Each ROM byte counts once.  Observed while running: code (executed by a natural path), else data (read, copied,
 // decompressed).  Proven without running: code reached by direct transfers from executed code.  Suspect: forced (only
 // executed on a forced or fabricated path), code (probable walk, inferred), data (inferred data, tables), padding
-// (filler runs and the gaps against them).  known = all of them.
-typedef struct { size_t code, data, proven, xcode, xdata, forced, scode, sdata, pad, known; } CovStats;
+// (filler runs and the gaps against them).  known = observed, proven and other versions; classified adds the suspects.
+typedef struct { size_t code, data, proven, xcode, xdata, forced, scode, sdata, pad, known, classified; } CovStats;
 static CovStats union_stats(const Union *un) {
     CovStats c = { 0 };
     for (size_t i = 0; i < un->n; i++) {
@@ -332,12 +335,13 @@ static CovStats union_stats(const Union *un) {
         else if (in == DP_MAP_PAD || in == DP_MAP_INF_PAD) c.pad++;
         else if (in) c.sdata++;
     }
-    c.known = c.code + c.data + c.proven + c.xcode + c.xdata + c.forced + c.scode + c.sdata + c.pad;
+    c.known = c.code + c.data + c.proven + c.xcode + c.xdata;
+    c.classified = c.known + c.forced + c.scode + c.sdata + c.pad;
     return c;
 }
 static void cov_line(const Union *un, char *out, size_t n) {
     CovStats c = union_stats(un); double t = un->n ? 100.0 / (double)un->n : 0.0;
-    snprintf(out, n, "observed: code %.1f%% data %.1f%% | proven static code %.1f%% | from other versions: code %.1f%% data %.1f%% | suspect: forced %.1f%% code %.1f%% data %.1f%% padding %.1f%% | known %.1f%% of %zu bytes",
+    snprintf(out, n, "observed: code %.1f%% data %.1f%% | proven static code %.1f%% | from other versions: code %.1f%% data %.1f%% | suspect: forced %.1f%% code %.1f%% data %.1f%% padding %.1f%% | known without suspects %.1f%% of %zu bytes",
              c.code * t, c.data * t, c.proven * t, c.xcode * t, c.xdata * t, c.forced * t, c.scode * t, c.sdata * t, c.pad * t, c.known * t, un->n);
 }
 static void save_union(const Union *un, const char *path) {   // "COV1" flags, then the suspects: "INF1", "PRV1"; atomic
@@ -843,7 +847,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
         time_t now = time(NULL);
         for (size_t i = 0; i < nt; i++) if (running_task(&tk[i])) { size_t a = merge_flags(UNION_OF(&tk[i]), tk[i].live); tk[i].gain += a; if (a && SIBLING(&tk[i])) other_new = 1; }
         if (other_new && now - t_xpose >= CAMP_XPOSE_SECS) { transpose(&un, rom, other, mv, nm); other_new = 0; t_xpose = now; }
-        size_t total = union_stats(&un).known;
+        size_t total = union_stats(&un).classified;
         if (now - t_log >= CAMP_LOG_SECS) {
             t_log = now;
             size_t films = 0, films_n = 0, rq = 0, rd = 0, fq = 0;
