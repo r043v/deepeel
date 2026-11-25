@@ -138,6 +138,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--random-min") && i + 1 < argc) { c->random_min = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--random-no-start") && i + 1 < argc) { c->random_no_start = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--random-no-select") && i + 1 < argc) { c->random_no_select = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
+    if (!strcmp(a, "--random-hold") && i + 1 < argc) { c->random_hold = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--random-first") && i + 1 < argc) { c->random_first = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--live-flags") && i + 1 < argc) { c->live_flags = argv[i + 1]; return 2; }
     if (!strcmp(a, "--from-state") && i + 1 < argc) { c->from_state = argv[i + 1]; return 2; }
@@ -2082,7 +2083,7 @@ static void run_path(Worker *w, Pending *p) {
     uint64_t sess_limit = attract ? cfg->attract_frames : rnd ? cfg->random_frames : burst ? cfg->ckpt_burst_frames : play ? cfg->play_frames : 0;
     uint64_t sess_f0 = (attract || play) ? m->frame(m) : 0, sess_last = ~0ull;
     if ((cfg->watch_every || cfg->tas_summary || cfg->live_frame) && m->watch && ((tas && tas_shift == 0) || ((attract || play) && (!burst || rnd)))) m->watch(m, 1);
-    unsigned shot_next = 1; unsigned sess_epoch = ~0u; uint64_t sess_last_cov = 0; uint64_t tas_stalled_at = 0, tas_last_new = 0;
+    unsigned shot_next = 1; unsigned sess_epoch = ~0u, sess_hold = 0; uint64_t sess_last_cov = 0; uint64_t tas_stalled_at = 0, tas_last_new = 0;
     uint64_t sess_cov = 0, sess_prog_f = sess_f0;
     uint8_t *sess_seen = (attract && cfg->attract_stall) || (tas && tas_shift == 0 && cfg->tas_stall_frames) ? calloc(loc->rom_size / 8 + 1, 1) : NULL;   // ROM bytes this very session executed
     int framed = m->frame && (attract || play || cur_input);   // visit counts restart every frame: a game loop is not a runaway loop
@@ -2382,8 +2383,12 @@ static void run_path(Worker *w, Pending *p) {
                     // retain their deterministic nine-epoch schedule.
                     unsigned ep = rnd ? (unsigned)((f - sess_f0) / 8u) : burst ? (unsigned)((f - sess_f0) / 4u) :
                         (unsigned)((f - sess_f0) / (sess_limit / 9 ? sess_limit / 9 : 1));
-                    if (ep != sess_epoch) {
+                    if (ep != sess_epoch && !(rnd && ep < sess_hold)) {
                         sess_epoch = ep;
+                        if (rnd && cfg->random_hold) {   // now and then a long press (4 to 32 epochs): walking, charging, a held button
+                            uint64_t h = keyhash(sess_f0 ^ ((uint64_t)rnd_k << 32) ^ ep ^ 0x9e3779b9u);
+                            sess_hold = h % cfg->random_hold ? 0 : ep + 4u + (unsigned)((h >> 32) % 29u);
+                        }
                         unsigned pick = burst ? (unsigned)(keyhash(sess_f0 ^ ((uint64_t)(rnd ? rnd_k : play_k) << 32) ^ ep) % 10u)
                                               : (ep + play_k) % 10u;
                         uint32_t pm = play_catalog[pick];

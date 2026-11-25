@@ -19,6 +19,9 @@
 #define CAMP_RANDOM_NO_SELECT  6        /* ... and among those, this many never press Select either: 6 without Start and Select, 2 without Start, 4 full */
 #define CAMP_RANDOM_MIN        3600     /* a random run lasts at least this long (1 min of game time) */
 #define CAMP_RANDOM_STALL      600      /* then ends after this many frames without a ROM byte new to the campaign (10 s) */
+#define CAMP_RANDOM_HOLD       32       /* one press in this many is held 0.5 to 4 s; the others last 8 frames (long presses: about a third of the time) */
+#define CAMP_RANDOM_PASSES     5        /* a snapshot whose random runs found new bytes is played again, other seeds, up to this many passes (64 seed ranks) */
+#define CAMP_RANDOM_AGAIN      64       /* ... if the pass found at least this many bytes new to the campaign; pass n runs n times CAMP_RANDOM_MIN at least */
 #define CAMP_XPOSE_SECS        10       /* coverage of the other ROM versions moved onto ours this often (seconds) */
 #define CAMP_RANDOM_PARALLEL   4        /* random children of one movie at a time: the four quarters of its tile */
 #define CAMP_BOOT_RANDOM_TASKS 4        /* power-on random children (each its own seeds) */
@@ -37,6 +40,8 @@
 #define CAMP_POST_ATTRACT_STALL 3600
 
 /* ---- machine load ---- */
+#define CAMP_RAM_RESERVE_DIV   4        /* memory left to the machine: 1/4 of the RAM ... */
+#define CAMP_RAM_RESERVE_MIN   (3072ull << 20)   /* ... and this much at least; under half of it the newest child is killed and re-queued */
 #define CAMP_NICE              10       /* priority of every child: the desktop stays responsive */
 #define CAMP_IO_PAUSE          35       /* /proc/pressure/io "full avg10" above this: one more fork is stopped (SIGSTOP) */
 #define CAMP_IO_RESUME         15       /* below this: one stopped fork resumes */

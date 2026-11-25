@@ -6779,7 +6779,7 @@ Les passes, dans l'ordre :
 
 Les passes 1 à 3 sont des **observations** (`--observe`) : aucune fourche, aucun état déversé sur disque, seul ce qui
 s'exécute est enregistré. Options associées : `--random N`, `--random-first K`, `--random-min TRAMES`,
-`--random-stall TRAMES`, `--random-no-start N`, `--random-no-select N`. Les réglages sont dans `src/explore/campaign.h`.
+`--random-stall TRAMES`, `--random-no-start N`, `--random-no-select N`, `--random-hold N`. Les réglages sont dans `src/explore/campaign.h`.
 
 **Chiffres** (somme = « known ») :
 
@@ -6808,8 +6808,17 @@ supprimés. Les états déversés sont compressés (différence XOR avec un éta
   exécuté ; tuiles de 16 octets lues comme données). Elle forme une classe à part (« from other versions », violet :
   code, turquoise : données), jamais confondue avec ce qui a été observé sur notre ROM, et ne sert pas de graine aux
   explorations. `coverage.bin` la porte dans la section `XPO1` ; la couverture brute de l'autre version est dans
-  `versions/<film>.cov`. Pas d'exploration depuis les snapshots d'une autre version.
+  `versions/<film>.cov`.
 - **Tuiles aléatoires** : un groupe reçoit ses 4 quarts avant que le suivant commence.
+- **Appuis longs** (0.438.0, `--random-hold N`) : un appui sur 32 est maintenu 0,5 à 4 s, les autres durent
+  8 trames (les appuis longs font environ un tiers à la moitié du temps).
+- **Notation des snapshots** (0.438.0) : un snapshot vaut ce que le film a découvert autour de lui ; les mieux notés
+  passent d'abord. Une passe aléatoire qui trouve au moins 64 octets neufs est rejouée avec d'autres graines et une
+  durée minimale plus longue (jusqu'à 5 passes). `snapshots.tsv` consigne score et découvertes par passe.
+- **Mémoire** (0.438.0) : un quart de la RAM (3 Gio au moins) reste à la machine ; sous la moitié de cette réserve,
+  l'enfant le plus récent est tué puis remis en file.
+- **Autre version** : ses snapshots reçoivent aussi les runs aléatoires, sur sa ROM, transposés comme son film
+  (pas de fourches).
 - **Fenêtre live** : la carte, banques serrées, prend exactement sa largeur ; les tuiles s'ajoutent à sa droite, une
   par une : en haut, puis juste dessous, puis la colonne suivante. Une nouvelle paire de rangées ne commence qu'au bord
   de l'écran. La fenêtre est redimensionnée sur place, sans être fermée.

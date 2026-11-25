@@ -55,6 +55,8 @@ typedef struct {
     int done; time_t over_t;       // when the RSS ceiling was first hit (SIGINT, then SIGKILL after 15 s)
     char ph[12]; unsigned rnd_done, rnd_total; size_t queued;   // from <lfr>.st: current phase, random runs, states queued in the child
     int stalled;                   // kind 1: the replay ended on stagnation
+    size_t gain, mark;             // bytes this child added to its coverage; films: the gain already credited to snapshots
+    unsigned pass; size_t score;   // K_RANDOM: pass number from 0; what made the snapshot worth playing (bytes found there)
 } Task;
 enum { K_MOVIE = 1, K_FORK = 2, K_BOOT = 3, K_RANDOM = 4 };
 static int is_film(const Task *t) { return t->kind == K_MOVIE || t->kind == K_BOOT; }
@@ -487,6 +489,7 @@ static int draw_live(const Union *un, const char *name, time_t t_start, Task *tk
             any = 1;
             if (f[j].px) dp_canvas_tile(c, tx + (j & 1) * hw, ty + (j >> 1) * hh, hw, hh, f[j].px, (int)f[j].w, (int)f[j].h);
             char from[24]; if (t->snap[0]) snprintf(from, sizeof from, "s%u", t->frame); else snprintf(from, sizeof from, "boot");
+            if (t->pass) snprintf(from + strlen(from), sizeof from - strlen(from), " p%u", t->pass + 1);
             snprintf(l, sizeof l, "%s %u/%u %ufps", from, t->rnd_done < t->rnd_total ? t->rnd_done + 1 : t->rnd_done, t->rnd_total, f[j].px ? live_fps(t, f[j].frame) : 0u);
             dp_canvas_text(c, tx + 2 + (j & 1) * hw, ty + th + 3 + (j >> 1) * 10, l, 1, 0xffc8c8d0u);
         }
@@ -509,11 +512,13 @@ static Task *add_task(Task *tk, size_t *nt, size_t max, int kind, int group) {
 }
 static void requeue(Task *tk, size_t *nt, size_t max, const Task *o, int shrink) {
     Task *r = add_task(tk, nt, max, o->kind, o->movie); if (!r) return;
-    memcpy(r->snap, o->snap, sizeof r->snap); r->key = o->key; r->frame = o->frame; r->first = o->first; r->shrink = shrink;
+    memcpy(r->snap, o->snap, sizeof r->snap); r->pass = o->pass; r->score = o->score; r->key = o->key; r->frame = o->frame; r->first = o->first; r->shrink = shrink;
 }
 // The next child, by technique: the films (power-on attract, then the movies, longest first); then the random runs of a
 // finished film, CAMP_RANDOM_PARALLEL per group, a group being filled before the next one starts (spread coarse-to-fine
-// over the movie); then the fork explorations.
+// over the movie among snapshots of equal worth); then the fork explorations.
+// the worth of a random task: the order of magnitude of what was found at its snapshot, less for each pass already played
+static int worth(const Task *t) { int v = 0; for (size_t s = t->score; s; s >>= 1) v++; return v - 2 * (int)t->pass; }
 static Task *next_task(Task *tk, size_t nt, size_t ng, long cap, int forks_ok, int *slot) {
     for (size_t i = 0; i < nt; i++) if (is_film(&tk[i]) && !tk[i].pid && !tk[i].done) return &tk[i];
     static char busy[1024]; static unsigned used[1024];   // per group: its film is not over; the quarters taken by running random children
@@ -532,7 +537,7 @@ static Task *next_task(Task *tk, size_t nt, size_t ng, long cap, int forks_ok, i
     for (size_t i = 0; i < nt && rnd < rnd_cap; i++) {
         Task *t = &tk[i]; if (t->kind != K_RANDOM || t->pid || t->done || (size_t)t->movie >= ng || busy[t->movie]) continue;
         int n = __builtin_popcount(used[t->movie]); if (n >= CAMP_RANDOM_PARALLEL) continue;
-        if (!best || n > bn || (n == bn && t->key < best->key)) { best = t; bn = n; }
+        if (!best || n > bn || (n == bn && (worth(t) > worth(best) || (worth(t) == worth(best) && t->key < best->key)))) { best = t; bn = n; }
     }
     if (best) { int s = 0; while (used[best->movie] & (1u << s)) s++; *slot = s; return best; }
     // while films run, the forks hold a few workers only: the random runs of a film start as soon as it ends
@@ -562,7 +567,8 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
     Union un = { rom_size ? calloc(rom_size, 1) : NULL, rom_size, rom_size ? calloc(rom_size, 1) : NULL, rom_size ? calloc(rom_size, 1) : NULL, NULL };
     Union *other = calloc(nm + 1, sizeof *other);   // per movie recorded on another ROM version: its coverage, on that ROM
     int other_new = 0; time_t t_xpose = 0;
-#define UNION_OF(t) ((t)->kind == K_MOVIE && mv[(t)->movie].rom[0] ? &other[(t)->movie] : &un)
+#define SIBLING(t) ((size_t)(t)->movie < nm && mv[(t)->movie].rom[0])   // the group of a movie recorded on another ROM version
+#define UNION_OF(t) (SIBLING(t) ? &other[(t)->movie] : &un)
     const size_t max_tasks = 2 * nm + 64 + CAMP_SNAPSHOT_TASKS;
     Task *tk = calloc(max_tasks, sizeof *tk); size_t nt = 0;
     unsigned *gsnap = calloc(nm + 1, sizeof *gsnap);   // per group: the last snapshot frame queued
@@ -577,6 +583,9 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
     char cb[1200]; snprintf(cb, sizeof cb, "%s/coverage.bin", outdir);
     char rep_all[1200]; snprintf(rep_all, sizeof rep_all, "%s/movies.txt", outdir);
     FILE *repf = fopen(rep_all, "w");
+    char snap_all[1200]; snprintf(snap_all, sizeof snap_all, "%s/snapshots.tsv", outdir);
+    FILE *snapf = fopen(snap_all, "w");
+    if (snapf) fprintf(snapf, "movie\tframe\tpass\tscore\tnew_bytes\n");
     int stopping = 0; time_t last_shed = 0, stop_t = 0;
 
     for (;;) {
@@ -593,16 +602,16 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             size_t *est = t->kind == K_FORK ? &rss_heavy : &rss_light;
             if (t->rss_peak > *est && t->rss_peak <= CHILD_RSS_CAP) *est = t->rss_peak;
             char sc[1250]; snprintf(sc, sizeof sc, "%s/state/coverage.bin", t->dir);
-            size_t a = merge_flags(UNION_OF(t), sc); a += merge_flags(UNION_OF(t), t->live);
+            size_t a = merge_flags(UNION_OF(t), sc); a += merge_flags(UNION_OF(t), t->live); t->gain += a;
             if (UNION_OF(t) != &un && a) other_new = 1;
             int ok = WIFEXITED(st) && !WEXITSTATUS(st);
             if (!ok && !t->over_t && !stopping && !g_stop) { failed++; fprintf(stderr, "deepeel auto: child failed (%s %d), see %s\n", WIFSIGNALED(st) ? "signal" : "exit", WIFSIGNALED(st) ? WTERMSIG(st) : WEXITSTATUS(st), t->log); }
-            if (is_film(t) && a && UNION_OF(t) == &un) no_gain = 0;
+            if (is_film(t) && a && !SIBLING(t)) no_gain = 0;
             if (t->kind == K_MOVIE) {
                 char rl[400] = ""; FILE *rf = fopen(t->rep, "r"); if (rf) { if (!fgets(rl, sizeof rl, rf)) rl[0] = 0; fclose(rf); }
                 size_t L = strlen(rl); if (L && rl[L - 1] == '\n') rl[L - 1] = 0;
                 int stalled = strstr(rl, "stalled=1") != NULL; t->stalled = stalled;
-                fprintf(stderr, "deepeel auto: movie %s %s [%s] +%zu bytes\n", mv[t->movie].path, stalled ? "STAGNATION (desynced or incompatible)" : *rl ? "done" : "NOT REPLAYED (see its log)", rl, a);
+                fprintf(stderr, "deepeel auto: movie %s %s [%s] +%zu bytes\n", mv[t->movie].path, stalled ? "STAGNATION (desynced or incompatible)" : *rl ? "done" : "NOT REPLAYED (see its log)", rl, t->gain);
                 if (t->shot[0]) {   // <out>/summaries/<movie>.png: the replay at a glance
                     char sd[1300], dst[1500]; snprintf(sd, sizeof sd, "%s/summaries", outdir); mkdirs(sd);
                     const char *b = strrchr(mv[t->movie].path, '/'); snprintf(dst, sizeof dst, "%s/%s.png", sd, b ? b + 1 : mv[t->movie].path);
@@ -610,8 +619,16 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
                 }
                 if (repf) { fprintf(repf, "%s\t%s\t%u\t%s\t%s\n", mv[t->movie].path, mv[t->movie].emu, mv[t->movie].frames, stalled ? "stagnation" : !ok ? "failed" : *rl ? "ok" : "not replayed", rl); fflush(repf); }
             } else if (t->kind == K_FORK) { forks_done++; no_gain = a ? 0 : no_gain + 1; }
+            else if (t->kind == K_RANDOM) {
+                if (snapf) { fprintf(snapf, "%s\t%u\t%u\t%zu\t%zu\n", t->movie < (int)nm ? mv[t->movie].path : "power-on", t->frame, t->pass + 1, t->score, t->gain); fflush(snapf); }
+                if (ok && !stopping && !g_stop && t->gain >= CAMP_RANDOM_AGAIN && t->pass + 1 < CAMP_RANDOM_PASSES) {   // a snapshot that still finds things is played again
+                    Task *r = add_task(tk, &nt, max_tasks, K_RANDOM, t->movie);
+                    if (r) { memcpy(r->snap, t->snap, sizeof r->snap); r->key = t->key; r->frame = t->frame; r->pass = t->pass + 1;
+                             r->first = t->first + (t->snap[0] ? 1u : CAMP_BOOT_RANDOM_TASKS) * CAMP_RANDOM_RUNS; r->score = t->gain; }
+                }
+            }
             char st_[1160]; snprintf(st_, sizeof st_, "%s.st", t->lfr); unlink(st_); unlink(t->lfr);
-            if (ok && !is_film(t)) gone[ngone++] = t;
+            if (ok && !is_film(t) && !(t->kind == K_FORK && getenv("DEEPEEL_AUTO_KEEP"))) gone[ngone++] = t;   // test control: the forks keep their coverage files
         }
         if (ngone) {   // the merged coverage is on disk before a child's copy of it goes
             save_union(&un, cb);
@@ -634,11 +651,12 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             }
             closedir(d);
             qsort(names, nn, sizeof *names, cmp_snap);
+            size_t found = nn ? (f->gain - f->mark) / nn : 0; if (nn) f->mark = f->gain;   // what the movie found around these snapshots
             for (size_t k = 0; k < nn; k++) {
                 unsigned fr = (unsigned)snap_frame(names[k]);
-                for (int kind = 0; kind < 2; kind++) {
+                for (int kind = 0; kind < (SIBLING(f) ? 1 : 2); kind++) {   // another ROM version: random runs only
                     Task *t = add_task(tk, &nt, max_tasks, kind ? K_FORK : K_RANDOM, f->movie); if (!t) break;
-                    snprintf(t->snap, sizeof t->snap, "%s/%s", sd, names[k]); t->frame = fr; t->key = bitrev(fr / CAMP_SNAP_EVERY);
+                    snprintf(t->snap, sizeof t->snap, "%s/%s", sd, names[k]); t->frame = fr; t->key = bitrev(fr / CAMP_SNAP_EVERY); t->score = kind ? 0 : found;
                 }
                 gsnap[f->movie] = fr;
                 free(names[k]);
@@ -649,7 +667,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
 
         // 3. resources, then start what fits
         uint64_t avail = meminfo("MemAvailable:"), tot = meminfo("MemTotal:");
-        uint64_t reserve = tot / 8 > (1500ull << 20) ? tot / 8 : (1500ull << 20);
+        uint64_t reserve = tot / CAMP_RAM_RESERVE_DIV > CAMP_RAM_RESERVE_MIN ? tot / CAMP_RAM_RESERVE_DIV : CAMP_RAM_RESERVE_MIN;
         // swapping counts only while memory is short, and once per rise: pages left in swap are not ours to wait for
         uint64_t sw = swap_used(); if (sw < swap_ref) swap_ref = sw;
         int swap_grew = sw > swap_ref + (128ull << 20);
@@ -678,7 +696,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             if (v != (size_t)-1) {
                 Task *t = &tk[v];
                 fprintf(stderr, "deepeel auto: RAM %llu MiB available%s: %s %s killed, re-queued\n", (unsigned long long)(avail >> 20), swap_grew ? ", swap growing" : "", t->kind == K_MOVIE ? mv[t->movie].path : "exploration", t->snap);
-                kill(-t->pid, SIGKILL); waitpid(t->pid, NULL, 0); t->done = 1; merge_flags(UNION_OF(t), t->live);
+                kill(-t->pid, SIGKILL); waitpid(t->pid, NULL, 0); t->done = 1; t->gain += merge_flags(UNION_OF(t), t->live);
                 size_t *est = t->kind == K_FORK ? &rss_heavy : &rss_light; if (t->rss_peak > *est) *est = t->rss_peak;
                 requeue(tk, &nt, max_tasks, t, t->shrink);
                 running--;
@@ -700,7 +718,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             snprintf(t->dir, sizeof t->dir, "%s/%s", base, id); mkdirs(t->dir);
             snprintf(t->live, sizeof t->live, "%s/live.bin", t->dir); snprintf(t->log, sizeof t->log, "%s/log.txt", t->dir);
             snprintf(t->rep, sizeof t->rep, "%s/report.txt", t->dir);
-            char sdir[1250], snaps[1250], spool_arg[32], queue_arg[32], first_arg[16];
+            char sdir[1250], snaps[1250], spool_arg[32], queue_arg[32], first_arg[16], min_arg[16];
             {   // queued states by RAM, not by count: a Colour machine state is five times a monochrome one
                 struct stat sb; static size_t state_bytes;
                 if (t->snap[0] && !stat(t->snap, &sb) && sb.st_size > 0) state_bytes = (size_t)sb.st_size;
@@ -717,7 +735,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             snprintf(t->lfr, sizeof t->lfr, "/dev/shm/deepeel-%d-%zu.frame", (int)getpid(), (size_t)(t - tk));
             char *av[64]; int n = 0;
 #define A(x) av[n++] = (char *)(x)
-            A(exe); A("explore"); A(t->kind == K_MOVIE && mv[t->movie].rom[0] ? mv[t->movie].rom : rom);
+            A(exe); A("explore"); A(SIBLING(t) ? mv[t->movie].rom : rom);
             A("--jobs"); A("1"); A("--max-total"); A(HUGE_STEPS); A("--queue-max"); A(queue_arg);   // RAM share of one child: the rest spills to its disk spool
             A("--state-dir"); A(sdir); A("--no-frontier"); A("--spool-max"); A(spool_arg);
             A("--live-flags"); A(t->live); A("--live-frame"); A(t->lfr); A("--live-frame-ms"); A(CAMP_STR(CAMP_LIVE_FRAME_MS));
@@ -726,7 +744,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             if (t->snap[0]) { A("--from-state"); A(t->snap); }
             if (t->kind == K_MOVIE) {   // the movie, then no input from its end state (the ending, the credits)
                 A("--tas"); A(mv[t->movie].path); A("--no-start-attract");
-                if (!mv[t->movie].rom[0]) { mkdirs(snaps); A("--snap-every"); A(CAMP_STR(CAMP_SNAP_EVERY)); A("--snap-dir"); A(snaps); }   // no exploration from another ROM's states
+                mkdirs(snaps); A("--snap-every"); A(CAMP_STR(CAMP_SNAP_EVERY)); A("--snap-dir"); A(snaps);
                 A("--tas-stall"); A(CAMP_STR(CAMP_MOVIE_STALL)); A("--tas-report"); A(t->rep);
                 snprintf(t->shot, sizeof t->shot, "%s/summary.png", t->dir); A("--tas-summary"); A(t->shot);
                 A("--attract-frames"); A(CAMP_STR(CAMP_ATTRACT_MAX)); A("--attract-min"); A(CAMP_STR(CAMP_POST_ATTRACT_MIN)); A("--attract-stall"); A(CAMP_STR(CAMP_POST_ATTRACT_STALL));
@@ -734,13 +752,15 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
                 A("--attract-frames"); A(CAMP_STR(CAMP_ATTRACT_MAX)); A("--attract-min"); A(CAMP_STR(CAMP_ATTRACT_MIN)); A("--attract-stall"); A(CAMP_STR(CAMP_ATTRACT_STALL));
             } else {
                 A("--no-start-attract");
-                if (seed_state(&un, sdir)) A("--resume");
+                if (seed_state(UNION_OF(t), sdir)) A("--resume");
                 if (t->kind == K_RANDOM) {
                     snprintf(first_arg, sizeof first_arg, "%u", t->first);
                     A("--random"); A(CAMP_STR(CAMP_RANDOM_RUNS)); A("--random-first"); A(first_arg);
                     A("--random-no-start"); A(CAMP_STR(CAMP_RANDOM_NO_START));
                     A("--random-no-select"); A(CAMP_STR(CAMP_RANDOM_NO_SELECT));
-                    A("--random-min"); A(CAMP_STR(CAMP_RANDOM_MIN)); A("--random-stall"); A(CAMP_STR(CAMP_RANDOM_STALL));
+                    snprintf(min_arg, sizeof min_arg, "%u", CAMP_RANDOM_MIN * (t->pass + 1));
+                    A("--random-min"); A(min_arg); A("--random-stall"); A(CAMP_STR(CAMP_RANDOM_STALL));
+                    A("--random-hold"); A(CAMP_STR(CAMP_RANDOM_HOLD));
                 } else {
                     A("--stall-time"); A(CAMP_STR(CAMP_EXPLORE_STALL_SECS));
                     if (CAMP_EXPLORE_MAX_SECS) { A("--max-time"); A(CAMP_STR(CAMP_EXPLORE_MAX_SECS)); }
@@ -762,7 +782,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
 
         // 4. monitor, periodic PNG
         time_t now = time(NULL);
-        for (size_t i = 0; i < nt; i++) if (running_task(&tk[i])) { if (merge_flags(UNION_OF(&tk[i]), tk[i].live) && UNION_OF(&tk[i]) != &un) other_new = 1; }
+        for (size_t i = 0; i < nt; i++) if (running_task(&tk[i])) { size_t a = merge_flags(UNION_OF(&tk[i]), tk[i].live); tk[i].gain += a; if (a && SIBLING(&tk[i])) other_new = 1; }
         if (other_new && now - t_xpose >= CAMP_XPOSE_SECS) { transpose(&un, rom, other, mv, nm); other_new = 0; t_xpose = now; }
         size_t total = union_stats(&un).known;
         if (now - t_log >= CAMP_LOG_SECS) {
@@ -815,6 +835,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
     write_png(&un, png, "auto", name);
     save_union(&un, cb);
     if (repf) fclose(repf);
+    if (snapf) fclose(snapf);
     for (size_t i = 0; i < nt; i++) if (tk[i].lfr[0]) { char st[1160]; snprintf(st, sizeof st, "%s.st", tk[i].lfr); unlink(st); unlink(tk[i].lfr); }   // screens published in /dev/shm
     dp_livewin_close();
     char cl[300]; cov_line(&un, cl, sizeof cl);
