@@ -7,6 +7,9 @@
 #include "nes_native.h"
 #include "nes_trace.h"
 
+/* the first vblank after power-on does not happen: FCEUX raises its first one at the start of movie frame 2 */
+#define NES_PPU_WARMUP 1u
+
 typedef struct { uint8_t v[16]; uint8_t shift, cnt; } DpNesMapRegs;
 
 /* the runtime's one machine (like MdFull, one ROM live per process) */
@@ -305,6 +308,7 @@ DpNesMach *dp_nesmach_open(const uint8_t *data, size_t size, int mapper,
     memset(&d->rg, 0, sizeof d->rg);
     mapper_regs_init(d);
     mapper_apply(d);
+    machine.ppu.warmup = NES_PPU_WARMUP;
     return d;
 }
 
@@ -315,6 +319,7 @@ void dp_nesmach_close(DpNesMach *d) {
 
 void dp_nesmach_reset(DpNesMach *d) {
     nes_reset();
+    machine.ppu.warmup = NES_PPU_WARMUP;
     memset(&d->rg, 0, sizeof d->rg);
     mapper_regs_init(d);
     mapper_apply(d);

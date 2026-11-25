@@ -60,13 +60,17 @@ static double priority(const Stack *s, const Task *t) {
     if (s->sibling[t->movie]) p /= CAMP_SIBLING_DIV;   // another ROM version: its bytes only reach ours by transposition
     return p;
 }
-Task *stack_next(Stack *s, int forks_ok, long fork_cap) {
-    long forks = 0;
+Task *stack_next(Stack *s, int forks_ok, long fork_cap, long film_cap) {
+    long forks = 0, films = 0; Task *film = NULL; int other = 0;
     for (size_t i = 0; i < s->nt; i++) {
         Task *t = &s->tk[i];
-        if (is_film(t) && !t->pid && !t->done) return t;
+        const int waiting = !t->pid && !t->done;
+        if (is_film(t) && waiting && !film) film = t;
+        if (!is_film(t) && waiting && (t->kind != K_FORK || forks_ok)) other = 1;
+        films += is_film(t) && running_task(t);
         forks += t->kind == K_FORK && running_task(t);
     }
+    if (film && (films < film_cap || !other)) return film;
     if (forks >= fork_cap) forks_ok = 0;
     // the floor: one start in CAMP_FLOOR_EVERY goes to the technique served least, on its coarsest untried snapshot
     int floor = -1;

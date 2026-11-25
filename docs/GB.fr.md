@@ -6914,3 +6914,14 @@ l'outil, cause non isolée, aucune référence FCEUX disponible localement).
 
 `DEEPEEL_TAS_WRAM_BASE` déplace la fenêtre de 8 Kio écrite par
 `DEEPEEL_TAS_WRAM` (`0` pour la RAM de la NES).
+
+## 0.442.0 — part des films dans la campagne, démarrage de la NES
+
+- `CAMP_FILM_PCT` (50) : les films n'occupent au plus que la moitié des workers
+  tant que des explorations depuis les snapshots attendent. Sur une ROM aux
+  nombreux films (Super Mario Bros., 98 films), ils prenaient tous les workers
+  pendant plus de 10 minutes. Observation de l'outil, 10 minutes, 16 threads :
+  couverture connue sans suspects 49,6 % à 100 %, 56,1 % à 75 %, 56,5 % à 50 %.
+- NES : le premier vblank après la mise sous tension n'a pas lieu, comme dans
+  FCEUX. Sur Super Mario Bros., le joueur prend la main à la trame attendue par
+  le film FM2 (196 au lieu de 216) ; la divergence dans le niveau 1-1 demeure.

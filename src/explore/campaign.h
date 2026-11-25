@@ -11,6 +11,9 @@
 
 /* ---- movies (TAS replay) ---- */
 #define CAMP_SNAP_EVERY        300      /* movie frames between two machine snapshots (5 s of game time) */
+#ifndef CAMP_FILM_PCT
+#define CAMP_FILM_PCT          50      /* movies hold at most this share of the workers while snapshot items wait */
+#endif
 #define CAMP_MOVIE_STALL       36000    /* movie frames without a new ROM byte = stagnation (10 min of game time: a game may walk known parts for long) */
 
 /* ---- pad-driven play from each snapshot and from power-on: random pads, and splices of the movie ---- */

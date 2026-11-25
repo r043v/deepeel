@@ -59,7 +59,7 @@ void stack_compact(Stack *s);
 // the three techniques on one snapshot (film_group: a movie exists to splice from)
 void stack_add_snapshot(Stack *s, int group, const char *snap, unsigned frame, unsigned key, size_t score, unsigned depth, int splice, int forks);
 // the next item to start, NULL if nothing may start now
-Task *stack_next(Stack *s, int forks_ok, long fork_cap);
+Task *stack_next(Stack *s, int forks_ok, long fork_cap, long film_cap);
 void stack_launched(Stack *s, const Task *t);
 // a child ended on its own: teach the model and, if it found enough, queue it again with other seeds
 void stack_result(Stack *s, Task *t, double cpu_secs, size_t boot_tasks);

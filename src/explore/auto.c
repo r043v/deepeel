@@ -590,6 +590,7 @@ static void collect_deep(Stack *s, const Task *t, int splice, int forks, unsigne
 }
 
 #define FORK_CAP (cap / CAMP_FORK_SHARE > 1 ? cap / CAMP_FORK_SHARE : 1)
+#define FILM_CAP (cap * CAMP_FILM_PCT / 100 > 1 ? cap * CAMP_FILM_PCT / 100 : 1)
 int dp_auto_campaign(const char *exe, const char *platform, const char *rom, const char *overflow, size_t rom_size, const char *outdir, const char *name) {
     plat = NULL; for (size_t i = 0; i < sizeof PLATS / sizeof *PLATS; i++) if (!strcmp(PLATS[i].id, platform)) plat = &PLATS[i];
     if (!plat) { fprintf(stderr, "deepeel auto: no campaign for platform %s\n", platform); return 2; }
@@ -777,7 +778,7 @@ int dp_auto_campaign(const char *exe, const char *platform, const char *rom, con
         int forks_ok = no_gain < gain_limit;
         for (; room > 0 && !g_stop && !stopping && !swap_grew && dfree > LOCAL_MIN_FREE / 2; room--) {
             const int forks_fit = avail > reserve + headroom + rss_heavy;   // no room for a fork: a lighter item takes the core
-            Task *t = stack_next(&stk, forks_ok && forks_fit && io < CAMP_IO_PAUSE && !paused, FORK_CAP);
+            Task *t = stack_next(&stk, forks_ok && forks_fit && io < CAMP_IO_PAUSE && !paused, FORK_CAP, FILM_CAP);
             if (!t) break;
             size_t need = t->kind == K_FORK ? rss_heavy : rss_light;
             if (avail <= reserve + headroom + need) break;
@@ -888,7 +889,7 @@ int dp_auto_campaign(const char *exe, const char *platform, const char *rom, con
             if (!stop_t) { stop_t = now; for (size_t i = 0; i < stk.nt; i++) if (running_task(&tk[i])) { kill(-tk[i].pid, SIGCONT); kill(-tk[i].pid, SIGINT); tk[i].paused = 0; } }
             if (!running || now - stop_t > CAMP_STOP_SECS) break;
         } else if (!running) {
-            if (!stack_next(&stk, no_gain < gain_limit, FORK_CAP)) break;
+            if (!stack_next(&stk, no_gain < gain_limit, FORK_CAP, FILM_CAP)) break;
         }
         for (int sl = 0; sl < 2000 / CAMP_WINDOW_MS; sl++) {   // fast RSS watch and live window between two supervision ticks (~2 s)
             usleep(CAMP_WINDOW_MS * 1000);
