@@ -37,7 +37,7 @@
 #define SHED_FREE CAMP_SHED_FREE
 #define HARD_MIN_FREE CAMP_HARD_MIN_FREE
 
-typedef struct { char path[1100]; unsigned frames; unsigned long size; char emu[48]; uint64_t input; } Movie;   // emu: the source emulator, from the TASVideos API
+typedef struct { char path[1100]; unsigned frames; unsigned long size; char emu[48]; uint64_t input; int other; } Movie;   // emu: the source emulator, from the TASVideos API
 typedef struct {
     int kind;                      // K_MOVIE, K_FORK, K_BOOT, K_RANDOM
     int movie;                     // the group: index in the movies array, nm for the power-on group
@@ -161,6 +161,7 @@ static const char *bulk_base(const char *local, const char *overflow) {   // whe
 
 static int cmp_movie(const void *a, const void *b) {
     const Movie *x = a, *y = b;
+    if (x->other != y->other) return x->other - y->other;   // the movies of this very ROM version first
     return x->frames < y->frames ? 1 : x->frames > y->frames ? -1 : strcmp(x->path, y->path);
 }
 // the movies of the ROM, from the TASVideos-backed database (sync on demand, fetch the files): the `tasdb find
@@ -180,7 +181,7 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
         while (p && in && (got = fread(cp, 1, sizeof cp, in)) > 0) fwrite(cp, 1, got, p);
         if (in) pclose(in);
         if (p) rewind(p);
-        char *line = NULL; size_t lc = 0; unsigned game = 0, ver = 0; char mname[300] = "";   // ver: the ROM's own version, other versions' movies do not replay on it
+        char *line = NULL; size_t lc = 0; unsigned game = 0, ver = 0; char mname[300] = "";   // ver: the ROM's own version; the movies of the other versions are replayed after its own
         while (p && getline(&line, &lc, p) > 0) {
             unsigned g; if (sscanf(line, "game %u", &g) == 1 || sscanf(line, "ROM matches game %u", &g) == 1) game = g;
             { char *a = strstr(line, "ROM matches game "), *b = a ? strchr(a, '(') : NULL, *e = b ? strstr(b, ", version ") : NULL;
@@ -191,7 +192,7 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
             if (!game || !fr || sscanf(line, " %31s", id) != 1 || !strchr("MS", id[strlen(id) - 1]) || id[0] < '0' || id[0] > '9') continue;
             char *q = fr; while (q > line && q[-1] >= '0' && q[-1] <= '9') q--;
             frames = (unsigned)strtoul(q, NULL, 10);
-            if (ver) { char tag[24]; snprintf(tag, sizeof tag, "[v%u]", ver); if (!strstr(line, tag)) continue; }
+            int other = 0; if (ver) { char tag[24]; snprintf(tag, sizeof tag, "[v%u]", ver); other = !strstr(line, tag); }
             char dir[1300]; snprintf(dir, sizeof dir, "%s/tasdb/movies/%u/%s", db, game, id);
             DIR *d = opendir(dir); if (!d) continue;
             struct dirent *de; char best[1100] = ""; off_t bsz = 0;
@@ -211,7 +212,7 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
             int dup = 0; for (size_t i = 0; i < n; i++) if ((*out)[i].frames == frames && ((*out)[i].size == (unsigned long)bsz || (input && (*out)[i].input == input))) dup = 1;   // the same movie as publication and submission
             if (dup) continue;
             if (n == cap) { cap = cap ? cap * 2 : 16; *out = realloc(*out, cap * sizeof **out); }
-            snprintf((*out)[n].path, sizeof (*out)[n].path, "%s", best); (*out)[n].frames = frames; (*out)[n].size = (unsigned long)bsz; (*out)[n].input = input;
+            snprintf((*out)[n].path, sizeof (*out)[n].path, "%s", best); (*out)[n].frames = frames; (*out)[n].size = (unsigned long)bsz; (*out)[n].input = input; (*out)[n].other = other;
             snprintf((*out)[n].emu, sizeof (*out)[n].emu, "unresolved");
             { char q2[7000]; snprintf(q2, sizeof q2, "%s tasdb emu %s %u --id %s 2>/dev/null", dp_shquote(exe, qe, sizeof qe), dp_shquote(rom, qr, sizeof qr), frames, id);
               FILE *e = popen(q2, "r"); char el[256];
@@ -219,6 +220,7 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
               if (e) { while (fgets(el, sizeof el, e)) {} pclose(e); } }
             if (!strcmp((*out)[n].emu, "unresolved")) { fprintf(stderr, "deepeel auto: %s skipped: the TASVideos API does not name its emulator\n", best); continue; }
             if (!strncmp((*out)[n].emu, CAMP_SKIP_EMULATOR, strlen(CAMP_SKIP_EMULATOR))) { fprintf(stderr, "deepeel auto: %s skipped: %s movies are disabled for now (desync)\n", best, (*out)[n].emu); continue; }
+            if (other) fprintf(stderr, "deepeel auto: %s targets another version of the game: replayed too, after this version's movies (a desync is expected)\n", best);
             n++;
         }
         free(line); if (p) fclose(p);
@@ -342,7 +344,7 @@ static unsigned live_fps(Task *t, uint64_t frame) {
     return t->fps;
 }
 static int draw_live(const Union *un, const char *name, time_t t_start, Task *tk, size_t nt, const Movie *mv, size_t nm, uint32_t *sw, uint32_t *sh_) {
-    enum { INFO = 32, COVINFO = 96, GAP = 4, MAXW = 1900, MAXH = 1000, TILES = 64 };
+    enum { INFO = 32, COVINFO = 96, GAP = 4, MAXW = 1900, MAXH = 1000, TILES = 64, TEXTW = 400, MAPH = 2 * (2 * 144 + INFO + GAP) - GAP - COVINFO };
     typedef struct { int g; Task *film, *q[CAMP_RANDOM_PARALLEL]; size_t rd, rt; } Tile;
     static LiveFrame lf[TILES][CAMP_RANDOM_PARALLEL]; static Tile tl[TILES]; size_t ns = 0;
     for (size_t i = 0; i < nt; i++) if (running_task(&tk[i])) read_phase(&tk[i]);
@@ -364,17 +366,24 @@ static int draw_live(const Union *un, const char *name, time_t t_start, Task *tk
         if (!*sw) { *sw = lf[k][j].w; *sh_ = lf[k][j].h; }
     }
     uint32_t w0 = *sw ? *sw : 160, h0 = *sh_ ? *sh_ : 144;
-    int z = 2, cols = 0, rows = 0, cw, chh;
-    for (; z >= 1; z--) {   // largest zoom whose grid fits the display budget
+    // the map on the left, exactly as wide as it draws; the tiles to its right, stacked one by one: top, below it, then
+    // the next column to the right; a second band of two starts only once the screen width is reached
+    int z = 2, tc = 1, cw, chh, mapw, maph;
+    for (;; z--) {   // largest zoom whose two rows of tiles fit the screen width
         cw = (int)w0 * z + GAP; chh = (int)h0 * z + INFO + GAP;
-        int n = 4 + (int)ns; cols = 2; rows = 2;
-        while (cols * rows < n) { if (cols * cw + cw <= MAXW && (cols <= rows || (rows + 1) * chh > MAXH)) cols++; else rows++; }
-        if (cols * cw <= MAXW && rows * chh <= MAXH) break;
+        maph = 2 * chh - GAP - COVINFO; if (maph < MAPH) maph = MAPH;
+        mapw = dp_canvas_covmap_width(un->n, 0x4000, maph, maph);
+        if (mapw < TEXTW) mapw = TEXTW;   // the text lines under the map
+        tc = (MAXW - 2 * GAP - mapw) / cw; if (tc < 1) tc = 1;
+        if (z <= 1 || 2 * (size_t)tc >= ns) break;
     }
-    if (z < 1) { z = 1; cw = (int)w0 + GAP; chh = (int)h0 + INFO + GAP; }
-    DpCanvas *c = dp_canvas_new(cols * cw + GAP, rows * chh + GAP, 0xff15151au); if (!c) return 1;
-    // coverage tile (2x2 cells): redrawn once a second at most (it walks the whole ROM), copied from its cache otherwise
-    int cx = GAP, cy = GAP, cwid = 2 * cw - GAP, chei = 2 * chh - GAP;
+    size_t band = 2 * (size_t)tc;
+    int used = ns >= band ? tc : (int)((ns + 1) / 2);
+    int rows = (int)(2 * (ns / band)) + (ns % band > 1 ? 2 : (int)(ns % band));
+    int cwid = mapw, chei = maph + COVINFO, height = rows * chh - GAP > chei ? rows * chh - GAP : chei;
+    DpCanvas *c = dp_canvas_new(cwid + used * cw + 2 * GAP, height + 2 * GAP, 0xff15151au); if (!c) return 1;
+    // coverage tile: redrawn once a second at most (it walks the whole ROM), copied from its cache otherwise
+    int cx = GAP, cy = GAP;
     static DpCanvas *cache; static time_t cache_t;
     time_t nowt = time(NULL);
     if (!cache || cache->w != cwid || cache->h != chei || nowt != cache_t) {
@@ -383,7 +392,7 @@ static int draw_live(const Union *un, const char *name, time_t t_start, Task *tk
         cache_t = nowt;
         if (cache) {
             char l[200]; CovStats cs = union_stats(un); double pc = un->n ? 100.0 / (double)un->n : 0.0;
-            size_t block = un->n ? dp_canvas_covmap(cache, 0, 0, cwid, chei - COVINFO, un->u, un->n, 0x4000, un->inf, un->prov) : 0;
+            size_t block = un->n ? dp_canvas_covmap(cache, 0, 0, maph, maph, un->u, un->n, 0x4000, un->inf, un->prov) : 0;
             long el = (long)(nowt - t_start);
             snprintf(l, sizeof l, "%s  %02ld:%02ld:%02ld  known %.1f%%", name, el / 3600, el / 60 % 60, el % 60, cs.known * pc);
             dp_canvas_text(cache, 2, chei - COVINFO + 3, l, 1, 0xff80e090u);
@@ -396,11 +405,9 @@ static int draw_live(const Union *un, const char *name, time_t t_start, Task *tk
     }
     if (cache) for (int y = 0; y < chei && cy + y < c->h; y++) memcpy(c->px + (size_t)(cy + y) * c->w + cx, cache->px + (size_t)y * cwid, (size_t)(cx + cwid <= c->w ? cwid : c->w - cx) * 4);
     char l[200];
-    // group tiles fill the cells the coverage tile leaves free
-    size_t k = 0;
-    for (int r = 0; r < rows && k < ns; r++) for (int q = 0; q < cols && k < ns; q++) {
-        if (r < 2 && q < 2) continue;
-        int tx = GAP + q * cw, ty = GAP + r * chh, tw = (int)w0 * z, th = (int)h0 * z;
+    // the group tiles
+    for (size_t k = 0; k < ns; ) {
+        int tx = 2 * GAP + cwid + (int)(k % band / 2) * cw, ty = GAP + (int)(2 * (k / band) + k % 2) * chh, tw = (int)w0 * z, th = (int)h0 * z;
         Tile *g = &tl[k]; LiveFrame *f = lf[k]; k++;
         const char *b = "power-on"; if (g->g < (int)nm) { b = strrchr(mv[g->g].path, '/'); b = b ? b + 1 : mv[g->g].path; }
         dp_canvas_rect(c, tx, ty, tw, th + INFO, 0xff0c0c10u);
@@ -413,7 +420,7 @@ static int draw_live(const Union *un, const char *name, time_t t_start, Task *tk
             else if (att) snprintf(l, sizeof l, "movie over, no input  frame %llu  %u fps", fr, fps);
             else snprintf(l, sizeof l, "%llu/%u  %u%%  %u fps", fr, mv[g->g].frames, mv[g->g].frames ? (unsigned)(100ull * fr / mv[g->g].frames) : 0u, fps);
             dp_canvas_text(c, tx + 2, ty + th + 13, l, 1, 0xff96c8ffu);
-            if (t->kind == K_MOVIE) { snprintf(l, sizeof l, "source: %.40s", mv[g->g].emu); dp_canvas_text(c, tx + 2, ty + th + 23, l, 1, 0xffd0b060u); }
+            if (t->kind == K_MOVIE) { snprintf(l, sizeof l, "source: %.24s%s", mv[g->g].emu, mv[g->g].other ? " | other ROM version" : ""); dp_canvas_text(c, tx + 2, ty + th + 23, l, 1, 0xffd0b060u); }
             continue;
         }
         int hw = tw / 2, hh = th / 2, any = 0;   // its random runs: four at a time, a quarter screen each
@@ -532,13 +539,13 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
                 char rl[400] = ""; FILE *rf = fopen(t->rep, "r"); if (rf) { if (!fgets(rl, sizeof rl, rf)) rl[0] = 0; fclose(rf); }
                 size_t L = strlen(rl); if (L && rl[L - 1] == '\n') rl[L - 1] = 0;
                 int stalled = strstr(rl, "stalled=1") != NULL; t->stalled = stalled;
-                fprintf(stderr, "deepeel auto: movie %s %s [%s] +%zu bytes\n", mv[t->movie].path, stalled ? "STAGNATION (desynced or incompatible)" : "done", rl, a);
+                fprintf(stderr, "deepeel auto: movie %s %s [%s] +%zu bytes\n", mv[t->movie].path, stalled ? "STAGNATION (desynced or incompatible)" : *rl ? "done" : "NOT REPLAYED (see its log)", rl, a);
                 if (t->shot[0]) {   // <out>/summaries/<movie>.png: the replay at a glance
                     char sd[1300], dst[1500]; snprintf(sd, sizeof sd, "%s/summaries", outdir); mkdirs(sd);
                     const char *b = strrchr(mv[t->movie].path, '/'); snprintf(dst, sizeof dst, "%s/%s.png", sd, b ? b + 1 : mv[t->movie].path);
                     copy_file(t->shot, dst);
                 }
-                if (repf) { fprintf(repf, "%s\t%s\t%u\t%s\t%s\n", mv[t->movie].path, mv[t->movie].emu, mv[t->movie].frames, stalled ? "stagnation" : ok ? "ok" : "failed", rl); fflush(repf); }
+                if (repf) { fprintf(repf, "%s\t%s\t%u\t%s\t%s\n", mv[t->movie].path, mv[t->movie].emu, mv[t->movie].frames, stalled ? "stagnation" : !ok ? "failed" : *rl ? "ok" : "not replayed", rl); fflush(repf); }
             } else if (t->kind == K_FORK) { forks_done++; no_gain = a ? 0 : no_gain + 1; }
             char st_[1160]; snprintf(st_, sizeof st_, "%s.st", t->lfr); unlink(st_); unlink(t->lfr);
             if (ok && !is_film(t)) gone[ngone++] = t;
@@ -657,6 +664,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             if (t->kind == K_MOVIE) {   // the movie, then no input from its end state (the ending, the credits)
                 mkdirs(snaps);
                 A("--tas"); A(mv[t->movie].path); A("--no-start-attract");
+                if (mv[t->movie].other) A("--tas-any-rom");   // recorded on another version of the game
                 A("--snap-every"); A(CAMP_STR(CAMP_SNAP_EVERY)); A("--snap-dir"); A(snaps);
                 A("--tas-stall"); A(CAMP_STR(CAMP_MOVIE_STALL)); A("--tas-report"); A(t->rep);
                 snprintf(t->shot, sizeof t->shot, "%s/summary.png", t->dir); A("--tas-summary"); A(t->shot);
@@ -670,6 +678,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
                     snprintf(first_arg, sizeof first_arg, "%u", t->first);
                     A("--random"); A(CAMP_STR(CAMP_RANDOM_RUNS)); A("--random-first"); A(first_arg);
                     A("--random-no-start"); A(CAMP_STR(CAMP_RANDOM_NO_START));
+                    A("--random-no-select"); A(CAMP_STR(CAMP_RANDOM_NO_SELECT));
                     A("--random-min"); A(CAMP_STR(CAMP_RANDOM_MIN)); A("--random-stall"); A(CAMP_STR(CAMP_RANDOM_STALL));
                 } else {
                     A("--stall-time"); A(CAMP_STR(CAMP_EXPLORE_STALL_SECS));

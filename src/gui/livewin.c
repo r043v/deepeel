@@ -37,10 +37,12 @@ int dp_livewin_show(const DpCanvas *c, const char *title) {
         SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");   // the supervisor owns SIGINT/SIGTERM
         if (SDL_Init(SDL_INIT_VIDEO) != 0 && (SDL_SetHint(SDL_HINT_VIDEODRIVER, ""), SDL_Init(SDL_INIT_VIDEO) != 0)) { fprintf(stderr, "deepeel: live window unavailable: %s\n", SDL_GetError()); dead = 1; return 1; }
     }
-    if (!win || tw != c->w || th != c->h) {
-        if (tex) SDL_DestroyTexture(tex); if (ren) SDL_DestroyRenderer(ren); if (win) SDL_DestroyWindow(win);
-        win = SDL_CreateWindow(title ? title : "deepeel", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, c->w, c->h, SDL_WINDOW_RESIZABLE);
-        ren = win ? SDL_CreateRenderer(win, -1, 0) : NULL;
+    if (!win || tw != c->w || th != c->h) {   // a new layout resizes the same window: only the texture is made again
+        if (tex) SDL_DestroyTexture(tex);
+        if (!win) {
+            win = SDL_CreateWindow(title ? title : "deepeel", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, c->w, c->h, SDL_WINDOW_RESIZABLE);
+            ren = win ? SDL_CreateRenderer(win, -1, 0) : NULL;
+        } else SDL_SetWindowSize(win, c->w, c->h);
         tex = ren ? SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, c->w, c->h) : NULL;
         if (!tex) { fprintf(stderr, "deepeel: live window unavailable: %s\n", SDL_GetError()); dead = 1; return 1; }
         SDL_RenderSetLogicalSize(ren, c->w, c->h);   // resizing keeps the aspect ratio (letterbox)

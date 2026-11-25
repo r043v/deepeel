@@ -82,6 +82,16 @@ static uint32_t cov_square(const uint8_t *fl, size_t lo, size_t hi) {   // domin
 }
 // one tile per ROM bank, one square per `block` bytes; the block is the smallest power of two whose squares stay >= 3 px, so a square is
 // never one byte except for tiny ROMs. Returns the block used.
+int dp_canvas_covmap_width(size_t n, size_t bank, int cw, int ch) {   // the width dp_canvas_covmap really draws in a (cw, ch) cell
+    if (!n || !bank || cw < 8 || ch < 8) return 0;
+    size_t banks = (n + bank - 1) / bank; int rows;
+    int cols = dp_canvas_grid((int)banks, 1, 1, cw, ch, &rows);
+    int tile = (cw / cols < ch / rows ? cw / cols : ch / rows), gap = tile > 24 ? 4 : 1; tile -= gap;
+    int per = 1; size_t block = 1;
+    for (;; block <<= 1) { per = 1; while ((size_t)per * per * block < bank) per++; if (tile / per >= 3 || block >= bank) break; }
+    int sq = tile / per; if (sq < 1) sq = 1;
+    return cols * per * sq + (cols - 1) * gap;
+}
 size_t dp_canvas_covmap(DpCanvas *c, int cx, int cy, int cw, int ch, const uint8_t *fl, size_t n, size_t bank, const uint8_t *inf, const uint8_t *prov) {
     if (!n || !bank || cw < 8 || ch < 8) return 0;
     size_t banks = (n + bank - 1) / bank; int rows;
@@ -93,6 +103,7 @@ size_t dp_canvas_covmap(DpCanvas *c, int cx, int cy, int cw, int ch, const uint8
         sq = tile / per; if (sq >= 3 || block >= bank) break;
     }
     if (sq < 1) sq = 1;
+    tile = per * sq;   // the banks are packed: what rounding leaves over stays outside the map
     for (size_t b = 0; b < banks; b++) {
         int tx = cx + (int)(b % cols) * (tile + gap), ty = cy + (int)(b / cols) * (tile + gap);
         dp_canvas_rect(c, tx, ty, per * sq, per * sq, 0xff101014u);

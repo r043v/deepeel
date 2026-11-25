@@ -162,6 +162,7 @@ typedef struct DpCoreConfig {
     uint32_t random_min;      // --random-min N: a random run lasts at least N frames before stagnation may end it
     unsigned random_first;    // --random-first N: seed rank of the first random run (parallel processes play different pads)
     unsigned random_no_start; // --random-no-start N: the first N random runs never press Start (no pause or menu); the others use every button
+    unsigned random_no_select; // --random-no-select N: the first N random runs never press Select (GB/GBC pad bit)
     uint32_t random_stall;    // --random-stall N: frames without a new ROM byte that end a random run (default 36000 = 10 min of game time)
 } DpCoreConfig;
 

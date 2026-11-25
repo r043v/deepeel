@@ -6769,7 +6769,8 @@ Les passes, dans l'ordre :
    arrêt après 1 min sans nouveauté, 1 h au plus). Chaque film pose un snapshot toutes les 5 s de jeu.
 2. **Fin de film** : l'état final tourne sans touche, 3 min au moins, arrêt après 1 min sans nouveauté.
 3. **Aléatoire** : dès qu'un film est terminé, ses snapshots sont rejoués avec des touches aléatoires, quatre à la
-   fois par film : 12 runs par snapshot (8 sans jamais appuyer sur Start, 4 avec toutes les touches),
+   fois par film : 12 runs par snapshot (6 sans jamais appuyer sur Start ni Select,
+   2 sans Start, 4 avec toutes les touches),
    1 min de jeu au moins, arrêt après 10 s sans nouveauté. Des runs partent
    aussi de l'allumage. L'ordre des snapshots couvre le film du grossier au fin.
 4. **Fourches** (les deux issues de chaque conditionnel) depuis l'allumage et depuis chaque snapshot, amorcées avec
@@ -6778,7 +6779,7 @@ Les passes, dans l'ordre :
 
 Les passes 1 à 3 sont des **observations** (`--observe`) : aucune fourche, aucun état déversé sur disque, seul ce qui
 s'exécute est enregistré. Options associées : `--random N`, `--random-first K`, `--random-min TRAMES`,
-`--random-stall TRAMES`, `--random-no-start N`. Les réglages sont dans `src/explore/campaign.h`.
+`--random-stall TRAMES`, `--random-no-start N`, `--random-no-select N`. Les réglages sont dans `src/explore/campaign.h`.
 
 **Chiffres** (somme = « known ») :
 
@@ -6795,3 +6796,15 @@ tuile attract disparaît quand l'attract se termine. La tuile principale donne u
 suspendues une à une puis reprises ; sous manque de mémoire le dernier enfant lancé est tué puis relancé plus tard.
 Dès qu'un enfant se termine, sa couverture est réunie dans `<sortie>/coverage.bin` et ses fichiers d'état sont
 supprimés. Les états déversés sont compressés (différence XOR avec un état de référence).
+
+## 0.436.0 — campagne : films des autres versions, fenêtre live
+
+- **Films** : tous ceux du jeu que l'API TASVideos nomme sont rejoués. Ceux d'une autre version de la ROM (autre
+  région ou révision) passent après ceux de la version exacte, avec la mention *other ROM version* : une
+  désynchronisation est attendue, détectée par la stagnation. Ce qu'ils exécutent reste une observation de la ROM
+  fournie. Restent écartés : les films VBA-rr (désactivés) et les doublons (publication et soumission du même film).
+  Pour rejouer fidèlement un film d'une autre version, lancer la campagne sur la ROM de cette version.
+- **Fenêtre live** : la carte, banques serrées, prend exactement sa largeur ; les tuiles s'ajoutent à sa droite, une
+  par une : en haut, puis juste dessous, puis la colonne suivante. Une nouvelle paire de rangées ne commence qu'au bord
+  de l'écran. La fenêtre est redimensionnée sur place, sans être fermée.
+

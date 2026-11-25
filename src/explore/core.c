@@ -137,6 +137,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--observe")) { c->observe = c->replay_only = 1; c->no_tas_jitter = 1; c->visits_per_pc = 0; return 1; }
     if (!strcmp(a, "--random-min") && i + 1 < argc) { c->random_min = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--random-no-start") && i + 1 < argc) { c->random_no_start = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
+    if (!strcmp(a, "--random-no-select") && i + 1 < argc) { c->random_no_select = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--random-first") && i + 1 < argc) { c->random_first = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--live-flags") && i + 1 < argc) { c->live_flags = argv[i + 1]; return 2; }
     if (!strcmp(a, "--from-state") && i + 1 < argc) { c->from_state = argv[i + 1]; return 2; }
@@ -2387,7 +2388,9 @@ static void run_path(Worker *w, Pending *p) {
                                               : (ep + play_k) % 10u;
                         uint32_t pm = play_catalog[pick];
                         if (rnd) { uint64_t h = keyhash(sess_f0 ^ ((uint64_t)rnd_k << 32) ^ ep ^ 0x5bd1e995u); if (h & 1) pm |= play_catalog[(h >> 8) % 10u]; if (!(h & 6)) pm = 0;   // chords and idle frames
-                            if (((rnd_k - 32u - cfg->random_first) & 0x3Fu) < cfg->random_no_start) pm &= ~0x40u; }   // 0x40: Start
+                            const uint32_t ri = (rnd_k - 32u - cfg->random_first) & 0x3Fu;
+                            if (ri < cfg->random_no_start) pm &= ~0x40u;               // 0x40: Start
+                            if (ri < cfg->random_no_select) pm &= ~0x80u; }            // 0x80: Select
                         m->set_input(m, pm);
                         loc->play_epochs++;
                     }

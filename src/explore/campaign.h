@@ -15,7 +15,8 @@
 
 /* ---- random play from each snapshot and from power-on ---- */
 #define CAMP_RANDOM_RUNS       12       /* seeded random-pad runs per snapshot */
-#define CAMP_RANDOM_NO_START   8        /* of which this many never press Start; the others use every button */
+#define CAMP_RANDOM_NO_START   8        /* of which this many (the first ones) never press Start; the others use every button */
+#define CAMP_RANDOM_NO_SELECT  6        /* ... and among those, this many never press Select either: 6 without Start and Select, 2 without Start, 4 full */
 #define CAMP_RANDOM_MIN        3600     /* a random run lasts at least this long (1 min of game time) */
 #define CAMP_RANDOM_STALL      600      /* then ends after this many frames without a ROM byte new to the campaign (10 s) */
 #define CAMP_RANDOM_PARALLEL   4        /* random children of one movie at a time: the four quarters of its tile */
