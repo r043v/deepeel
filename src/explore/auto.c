@@ -225,14 +225,15 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
         while (p && in && (got = fread(cp, 1, sizeof cp, in)) > 0) fwrite(cp, 1, got, p);
         if (in) pclose(in);
         if (p) rewind(p);
-        char *line = NULL; size_t lc = 0; unsigned game = 0, ver = 0; char mname[300] = "";   // ver: the ROM's own version; a movie replays on its own ROM only
+        char *line = NULL; size_t lc = 0; unsigned game = 0, ver = 0;   // ver: the ROM's own version in the listed game; a movie replays on its own ROM only
+        char own[41] = ""; { size_t rn; uint8_t *rb = read_rom(rom, &rn); if (rb) { uint8_t h[20]; dp_sha1(rb, rn, h); free(rb); for (int i = 0; i < 20; i++) sprintf(own + 2 * i, "%02x", h[i]); } }
         struct { unsigned id; char sha1[44], path[1100]; int looked; } vs[64]; size_t nvs = 0;
         while (p && getline(&line, &lc, p) > 0) {
-            unsigned g; if (sscanf(line, "game %u", &g) == 1 || sscanf(line, "ROM matches game %u", &g) == 1) game = g;
-            { char *a = strstr(line, "ROM matches game "), *b = a ? strchr(a, '(') : NULL, *e = b ? strstr(b, ", version ") : NULL;
-              if (e && (size_t)(e - b - 1) < sizeof mname) { snprintf(mname, sizeof mname, "%.*s", (int)(e - b - 1), b + 1); } }
-            { unsigned v; char nm[300]; if (mname[0] && sscanf(line, " version %u: %299[^\n]", &v, nm) == 2) { char *t = strstr(nm, ", region "); if (t) *t = 0; if (!strcmp(nm, mname)) ver = v;
-                  const char *sh = strstr(line, ", sha1 "); if (sh && nvs < 64) { vs[nvs].id = v; vs[nvs].looked = 0; vs[nvs].path[0] = 0; snprintf(vs[nvs].sha1, sizeof vs[nvs].sha1, "%.40s", sh + 7); vs[nvs].sha1[strcspn(vs[nvs].sha1, "\n")] = 0; nvs++; } } }
+            unsigned g; if (sscanf(line, "game %u", &g) == 1) { if (g != game) { ver = 0; nvs = 0; } game = g; }   // one block per game the ROM belongs to
+            { unsigned v; const char *sh = strstr(line, ", sha1 ");
+              if (sh && sscanf(line, " version %u:", &v) == 1 && nvs < 64) { vs[nvs].id = v; vs[nvs].looked = 0; vs[nvs].path[0] = 0; snprintf(vs[nvs].sha1, sizeof vs[nvs].sha1, "%.40s", sh + 7); vs[nvs].sha1[strcspn(vs[nvs].sha1, "\n")] = 0;
+                  if (own[0] && !strcasecmp(vs[nvs].sha1, own)) ver = v;
+                  nvs++; } }
             char id[32]; unsigned frames = 0;
             char *fr = strstr(line, " frames");
             if (!game || !fr || sscanf(line, " %31s", id) != 1 || !strchr("MS", id[strlen(id) - 1]) || id[0] < '0' || id[0] > '9') continue;
