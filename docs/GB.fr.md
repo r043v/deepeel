@@ -6756,8 +6756,41 @@ film (`CAMP_POST_ATTRACT_*`).
 - Observations de l'outil sur Zelda DX V1.0 : les films BizHawk 2.3 atteignent la fin du jeu. Les films VBA-rr de
   cette ROM essayés (599M, 2628M) désynchronisent et sont signalés comme tels sur leur PNG.
 - Les chemins contenant une apostrophe sont désormais correctement transmis aux commandes internes.
-- **Chiffres** : « observed code / data » vient de l'exécution, « suspect code / data » de l'analyse statique et de
-  l'inférence, « known » est leur somme. Les rejeux de films n'ajoutent aucun suspect (ni fermeture ni inférence) :
-  il vient des explorations.
-- **Fenêtre live** : chaque tuile de film donne la trame, les images par seconde et l'émulateur d'origine ; les
-  explorations aléatoires issues des snapshots sont affichées au quart de taille, quatre par tuile.
+- **VBA-rr désactivé** pour l'instant ; la liste des émulateurs source et révisions suivis est dans
+  [EMULATEURS.fr.md](EMULATEURS.fr.md). `movies.txt` donne désormais l'émulateur de chaque film.
+- **Mémoire** : la réserve d'états différés d'un enfant est plafonnée en octets (192 Mio), le surplus va sur disque ;
+  les explorations CGB ne dépassent plus le plafond de 1 Gio.
+
+## 0.435.0 — campagne : observation, passes et chiffres
+
+Les passes, dans l'ordre :
+
+1. **Films TAS** (les plus longs d'abord) et **attract depuis l'allumage** (sans touche : 10 min de jeu au moins,
+   arrêt après 1 min sans nouveauté, 1 h au plus). Chaque film pose un snapshot toutes les 10 s de jeu.
+2. **Fin de film** : l'état final tourne sans touche, 3 min au moins, arrêt après 1 min sans nouveauté.
+3. **Aléatoire** : dès qu'un film est terminé, ses snapshots sont rejoués avec des touches aléatoires, quatre à la
+   fois par film : 10 runs par snapshot, 1 min de jeu au moins, arrêt après 10 s sans nouveauté. Des runs partent
+   aussi de l'allumage. L'ordre des snapshots couvre le film du grossier au fin.
+4. **Fourches** (les deux issues de chaque conditionnel) depuis l'allumage et depuis chaque snapshot, amorcées avec
+   la couverture déjà réunie. Tant qu'un film tourne, elles n'occupent qu'un quart des workers.
+5. **Analyse statique finale**, une seule fois, sur la couverture réunie (aussi à l'arrêt par Ctrl-C).
+
+Les passes 1 à 3 sont des **observations** (`--observe`) : aucune fourche, aucun état déversé sur disque, seul ce qui
+s'exécute est enregistré. Options associées : `--random N`, `--random-first K`, `--random-min TRAMES`,
+`--random-stall TRAMES`. Les réglages sont dans `src/explore/campaign.h`.
+
+**Chiffres** (somme = « known ») :
+
+- *observed code / data* : exécuté, lu, copié ou décompressé pendant l'exécution ;
+- *proven static code* (bleu clair) : atteint par des sauts directs depuis du code exécuté ;
+- *suspect* (orange) : code probable, données inférées ou tables, et remplissage (*padding*). Ce suspect n'apparaît
+  qu'à la passe 5.
+
+**Fenêtre live** : un film en cours (ou l'attract) occupe un écran entier avec sa trame, sa vitesse et l'émulateur
+d'origine ; film terminé, sa tuile montre ses quatre runs aléatoires en quarts d'écran (snapshot, run, vitesse). La
+tuile attract disparaît quand l'attract se termine. La tuile principale donne une ligne par passe.
+
+**Machine** : les enfants tournent en priorité basse ; sous pression disque (`/proc/pressure/io`) les fourches sont
+suspendues une à une puis reprises ; sous manque de mémoire le dernier enfant lancé est tué puis relancé plus tard.
+Dès qu'un enfant se termine, sa couverture est réunie dans `<sortie>/coverage.bin` et ses fichiers d'état sont
+supprimés. Les états déversés sont compressés (différence XOR avec un état de référence).

@@ -134,6 +134,9 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
         return 2;
     }
     if (!strcmp(a, "--replay-only")) { c->replay_only = 1; c->no_tas_jitter = 1; return 1; }
+    if (!strcmp(a, "--observe")) { c->observe = c->replay_only = 1; c->no_tas_jitter = 1; c->visits_per_pc = 0; return 1; }
+    if (!strcmp(a, "--random-min") && i + 1 < argc) { c->random_min = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
+    if (!strcmp(a, "--random-first") && i + 1 < argc) { c->random_first = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--live-flags") && i + 1 < argc) { c->live_flags = argv[i + 1]; return 2; }
     if (!strcmp(a, "--from-state") && i + 1 < argc) { c->from_state = argv[i + 1]; return 2; }
     if (!strcmp(a, "--tas-stall") && i + 1 < argc) { c->tas_stall_frames = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
@@ -232,6 +235,7 @@ typedef struct {
     Pending *q;
     size_t qn, qcap;
     uint64_t spool_dropped;   // forks refused by --spool-max, added to pending_dropped at the end
+    uint8_t *spool_ref, *def_ref;   // spilled states are stored XORed with the first one of their file: siblings differ little, LZ4 then writes a fraction of the bytes
     int def_fd1; uint64_t def_end, def_spilled;   // deferred states beyond DEF_RAM_MAX live in an unlinked file (fd+1; 0 = none yet), read back only by the frontier export
     Pending *def; size_t defn, defcap;   // B6: states of paths stopped by a bounded cap, kept for the frontier (never re-run in this run)
     SiteTab sites;
@@ -242,6 +246,7 @@ typedef struct {
     unsigned sess_ckpts;       // B3: attract/play session checkpoints queued so far (atomic, own cap)
     uint8_t live_sig[4][256]; unsigned live_chosen;   // B3: sampled work-RAM signatures of the checkpoints the live vector seeds start from (guarded by mu)
     uint64_t paths_done;       // finished paths (atomic), for the progress line
+    unsigned rnd_done;         // finished --random runs (atomic), for the phase file
     int stop_monitor;
     int halt;                  // 0 running, 1 max-time reached, 2 stagnation (atomic): workers wind down
     int spool_fd, spool_write_failed, spool_read_failed, checkpoint_failed; uint64_t spool_n, spool_head, spool_total, picks; uint32_t spool_rs; uint64_t *spool_off; size_t spool_offcap; uint64_t spool_end;   // disk overflow: FIFO of zlib-compressed records, spool_off[i] = file offset of record i
@@ -1525,10 +1530,25 @@ static int spool_open(Shared *sh) {
     perror("deepeel: kernel spool unavailable (TMPDIR, the state dir and /tmp all failed); retaining states in RAM");
     sh->spool_fd = -1; return 0;
 }
+static void state_xor(uint8_t *restrict d, const uint8_t *restrict s, const uint8_t *restrict ref, size_t n) { for (size_t i = 0; i < n; i++) d[i] = s[i] ^ ref[i]; }
+static void state_unxor(uint8_t *restrict st, const uint8_t *restrict ref, size_t n) { for (size_t i = 0; i < n; i++) st[i] ^= ref[i]; }
+// payload of one spilled state: XOR with *ref (taken from the first state seen), then LZ4; *clen 0 = stored uncompressed
+static int spill_pack(uint8_t **ref, const uint8_t *state, uint32_t n, uint8_t *pl, int cap, uint32_t *clen) {
+    uint8_t *d = malloc(n ? n : 1);
+    if (!d) return 0;
+    if (!*ref) { if (!(*ref = malloc(n ? n : 1))) { free(d); return 0; } memcpy(*ref, state, n); }
+    state_xor(d, state, *ref, n);
+    int cl = LZ4_compress_default((const char *)d, (char *)pl, (int)n, cap);
+    *clen = 0;
+    if (cl > 0 && (uint32_t)cl < n) *clen = (uint32_t)cl; else memcpy(pl, d, n);
+    free(d);
+    return 1;
+}
+enum { TAS_INPUT = 0x40000000, SESSION_ATTRACT = 0x20000000, SESSION_PLAY = 0x20001000 };
 static __thread int g_lean_drop;   // watch, single worker, movie main replay: nobody consumes the queue meanwhile, so a push is pure cost (LZ4 spool writes froze the window)
 // pushes p; when the RAM queue is full, appends it to the spool.  Returns 1 if spilled.
 static int queue_push(Shared *sh, DpMachine *m, Pending p) {
-    if (g_lean_drop && p.state) { free(p.state); return 0; }
+    if (p.state && (sh->cfg->observe ? p.input < SESSION_ATTRACT : g_lean_drop)) { free(p.state); return 0; }   // observation: sessions only
     if (m) { int64_t k = m->rom_index(m, p.pc); p.tri = k >= 0 ? (uint32_t)k + 1u : 0u; }   // P2: resolved once, at push, under the state's own mapping
 
     const DpCoreConfig *cfg = sh->cfg;
@@ -1544,9 +1564,8 @@ static int queue_push(Shared *sh, DpMachine *m, Pending p) {
             memcpy(rec, &h, sizeof h);
             uint8_t *pl = rec + sizeof h + 4;
             uint32_t clen = 0;
-            int cl = LZ4_compress_default((const char *)p.state, (char *)pl, (int)sh->sbytes, cb_);
-            if (cl > 0 && (uint32_t)cl < sh->sbytes) clen = (uint32_t)cl;
-            else memcpy(pl, p.state, sh->sbytes);
+            if (!sh->spool_n) { free(sh->spool_ref); sh->spool_ref = NULL; }   // empty file: take a fresher reference
+            int packed = spill_pack(&sh->spool_ref, p.state, sh->sbytes, pl, cb_, &clen);
             memcpy(rec + sizeof h, &clen, 4);
             size_t len = sizeof h + 4 + (clen ? clen : sh->sbytes);
             uint64_t idx = sh->spool_head + sh->spool_n;
@@ -1555,7 +1574,7 @@ static int queue_push(Shared *sh, DpMachine *m, Pending p) {
                 uint64_t *no = realloc(sh->spool_off, nc * sizeof *no);
                 if (no) { sh->spool_off = no; sh->spool_offcap = nc; }
             }
-            if (idx < sh->spool_offcap) {
+            if (packed && idx < sh->spool_offcap) {
                 ssize_t w = pwrite(sh->spool_fd, rec, len, (off_t)sh->spool_end);
                 free(rec);
                 if (w == (ssize_t)len) { sh->spool_off[idx] = sh->spool_end; sh->spool_end += len; sh->spool_n++; sh->spool_total++; free(p.state); return 1; }
@@ -1569,6 +1588,8 @@ static int queue_push(Shared *sh, DpMachine *m, Pending p) {
 }
 #define DEF_TOTAL_MAX 8192u   // deferred states kept in all (RAM + disk): a saturated site re-deferring forever must not fill the disk; the rest is counted in pending_dropped
 #define DEF_RAM_MAX 1024u   // deferred states kept in RAM; the rest go to the deferred spool (never silent, never lost)
+#define DEF_RAM_BYTES (192ull << 20)   // and never more than this: a Colour machine state is 664 KiB, 1024 of them overflow a 1 GiB child
+static size_t def_ram_max(const Shared *sh) { size_t n = sh->sbytes ? (size_t)(DEF_RAM_BYTES / sh->sbytes) : DEF_RAM_MAX; return n < DEF_RAM_MAX ? n : DEF_RAM_MAX; }
 // appends p (state consumed) to the deferred spool; 1 on success.  Called with sh->mu held.
 static int def_spill(Shared *sh, Pending p) {
     if (!sh->def_fd1) {
@@ -1589,8 +1610,7 @@ static int def_spill(Shared *sh, Pending p) {
     memcpy(rec, &h, sizeof h);
     uint8_t *pl = rec + sizeof h + 4;
     uint32_t clen = 0;
-    int cl = LZ4_compress_default((const char *)p.state, (char *)pl, (int)sh->sbytes, cb);
-    if (cl > 0 && (uint32_t)cl < sh->sbytes) clen = (uint32_t)cl; else memcpy(pl, p.state, sh->sbytes);
+    if (!spill_pack(&sh->def_ref, p.state, sh->sbytes, pl, cb, &clen)) { free(rec); return 0; }
     memcpy(rec + sizeof h, &clen, 4);
     size_t len = sizeof h + 4 + (clen ? clen : sh->sbytes);
     ssize_t w = pwrite(sh->def_fd1 - 1, rec, len, (off_t)sh->def_end);
@@ -1603,12 +1623,12 @@ static int def_spill(Shared *sh, Pending p) {
 // B6: a path stopped by sat_path / sat_loop reports its state instead of losing it: with a state dir the
 // snapshot joins the frontier (resumed later, e.g. under --unbounded) and is counted as deferred.
 static void defer_state(Shared *sh, DpMachine *m, DpCoreResult *loc, Pending p) {
-    if (!sh->cfg->state_dir || sh->cfg->unbounded) { free(p.state); return; }   // P7
+    if (!sh->cfg->state_dir || sh->cfg->unbounded || sh->cfg->observe) { free(p.state); return; }   // P7
     if (__atomic_load_n(&sh->defn, __ATOMIC_RELAXED) + __atomic_load_n(&sh->def_spilled, __ATOMIC_RELAXED) >= DEF_TOTAL_MAX) { free(p.state); loc->pending_dropped++; return; }   // P7: the caller's snapshot (when it passed one) is owned here either way
     { int64_t k = m->rom_index(m, p.pc); p.tri = k >= 0 ? (uint32_t)k + 1u : 0u; }
     if (p.state) {   // P7: the caller already holds the state to defer (a capped fork), do not re-snapshot past it
         pthread_mutex_lock(&sh->mu);
-        if (sh->defn >= DEF_RAM_MAX && def_spill(sh, p)) { pthread_mutex_unlock(&sh->mu); loc->deferred++; return; }
+        if (sh->defn >= def_ram_max(sh) && def_spill(sh, p)) { pthread_mutex_unlock(&sh->mu); loc->deferred++; return; }
         if (sh->defn == sh->defcap) { sh->defcap = sh->defcap ? sh->defcap * 2 : 64; sh->def = realloc(sh->def, sh->defcap * sizeof *sh->def); }
         sh->def[sh->defn++] = p;
         pthread_mutex_unlock(&sh->mu);
@@ -1620,7 +1640,7 @@ static void defer_state(Shared *sh, DpMachine *m, DpCoreResult *loc, Pending p) 
     m->save(m, snap);
     p.state = snap; p.pc = m->pc(m);
     pthread_mutex_lock(&sh->mu);
-    if (sh->defn >= DEF_RAM_MAX && def_spill(sh, p)) { pthread_mutex_unlock(&sh->mu); loc->deferred++; return; }
+    if (sh->defn >= def_ram_max(sh) && def_spill(sh, p)) { pthread_mutex_unlock(&sh->mu); loc->deferred++; return; }
     if (sh->defn == sh->defcap) { sh->defcap = sh->defcap ? sh->defcap * 2 : 64; sh->def = realloc(sh->def, sh->defcap * sizeof *sh->def); }
     sh->def[sh->defn++] = p;
     pthread_mutex_unlock(&sh->mu);
@@ -1642,6 +1662,7 @@ static int spool_read(Shared *sh, uint64_t i, SpoolHead *h, uint8_t **state) {
         free(cb);
         if (!ok) { free(st); return 0; }
     }
+    state_unxor(st, sh->spool_ref, sh->sbytes);
     *state = st;
     return 1;
 }
@@ -1776,6 +1797,7 @@ static int frontier_save(Shared *sh, const char *path, DpCoreResult *out) {
             cbuf = malloc(clen);
             ok = cbuf && pread(sh->def_fd1 - 1, cbuf, clen, (off_t)(off + sizeof hd)) == (ssize_t)clen && LZ4_decompress_safe((const char *)cbuf, (char *)st, (int)clen, (int)sh->sbytes) == (int)sh->sbytes;
         }
+        if (ok) state_unxor(st, sh->def_ref, sh->sbytes);
         if (ok) { off += sizeof hd + (clen ? clen : sh->sbytes); ok = frontier_write_record(f, &h, st, sh->sbytes, buffer, capacity); }
         free(cbuf); free(st);
     }
@@ -1798,7 +1820,6 @@ static int frontier_save(Shared *sh, const char *path, DpCoreResult *out) {
     return 1;
 }
 
-enum { TAS_INPUT = 0x40000000, SESSION_ATTRACT = 0x20000000, SESSION_PLAY = 0x20001000 };
 // pad masks cycled by play sessions (kernel mask bits: up down left right button1 button2 start)
 static const uint32_t play_catalog[10] = {0, 0x10, 0x40, 0x20, 0x01, 0x02, 0x04, 0x08, 0x80, 0x100};   // C12: + Select, C
 // technique 1 (concolic form): the window start state `wsnap` is replayed with each RAM byte the window read set
@@ -1943,6 +1964,21 @@ static void core_live_frame(const DpCoreConfig *cfg, DpMachine *m, uint64_t f) {
     if (fclose(o) || !ok || rename(tmp, cfg->live_frame)) unlink(tmp);
 }
 
+// <live-frame>.st: what this process is doing, for the supervisor: "phase random_done random_total queued".  Written
+// when the phase changes, else twice a second at most.
+static void core_phase(const DpCoreConfig *cfg, const char *phase, unsigned rnd_done, size_t queued) {
+    static __thread double last; static __thread const char *was;
+    if (!cfg->live_frame) return;
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    double now = (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+    if (was == phase && now - last < 0.5) return;
+    was = phase; last = now;
+    char path[1100], tmp[1110]; snprintf(path, sizeof path, "%s.st", cfg->live_frame); snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *o = fopen(tmp, "w"); if (!o) return;
+    fprintf(o, "%s %u %u %zu\n", phase, rnd_done, cfg->random_runs, queued);
+    if (fclose(o) || rename(tmp, path)) unlink(tmp);
+}
+
 static void core_dsy_frame(const DpCoreConfig *cfg, DpMachine *m, uint64_t f) {
     uint32_t base = m->work_ram_len ? m->work_ram_base : 0xC000u, len = m->work_ram_len ? m->work_ram_len : 0x2000u;   // declared by the machine (A25)
     pthread_mutex_lock(&dsy_mu);
@@ -2031,6 +2067,8 @@ static void run_path(Worker *w, Pending *p) {
     // play = a pad epoch schedule (nine epochs over play_frames frames, each session starting at another catalog entry)
     int attract = cur_input == SESSION_ATTRACT && m->frame;
     int play = cur_input >= SESSION_PLAY && cur_input < TAS_INPUT && m->frame && m->set_input;
+    // lean path: nothing is forked or scanned (the watched / replay-only movie, and every session of an --observe run)
+    #define LEAN_PATH (watch_lean(cfg) && ((tas && tas_shift == 0) || (cfg->observe && (attract || play))))
     int held = cur_input > 0 && cur_input < SESSION_ATTRACT && m->set_input && !cfg->no_sessions && !cfg->no_held_budget;
     uint64_t held_n = 0;
     unsigned play_k = play ? cur_input - SESSION_PLAY : 0;
@@ -2041,7 +2079,7 @@ static void run_path(Worker *w, Pending *p) {
     if (cur_input == SESSION_ATTRACT || cur_input >= SESSION_PLAY) cur_input = 0;
     uint64_t sess_limit = attract ? cfg->attract_frames : rnd ? cfg->random_frames : burst ? cfg->ckpt_burst_frames : play ? cfg->play_frames : 0;
     uint64_t sess_f0 = (attract || play) ? m->frame(m) : 0, sess_last = ~0ull;
-    if ((cfg->watch_every || cfg->tas_summary || cfg->live_frame) && m->watch && ((tas && tas_shift == 0) || ((attract || play) && !burst))) m->watch(m, 1);
+    if ((cfg->watch_every || cfg->tas_summary || cfg->live_frame) && m->watch && ((tas && tas_shift == 0) || ((attract || play) && (!burst || rnd)))) m->watch(m, 1);
     unsigned shot_next = 1; unsigned sess_epoch = ~0u; uint64_t sess_last_cov = 0; uint64_t tas_stalled_at = 0, tas_last_new = 0;
     uint64_t sess_cov = 0, sess_prog_f = sess_f0;
     uint8_t *sess_seen = (attract && cfg->attract_stall) || (tas && tas_shift == 0 && cfg->tas_stall_frames) ? calloc(loc->rom_size / 8 + 1, 1) : NULL;   // ROM bytes this very session executed
@@ -2117,7 +2155,7 @@ static void run_path(Worker *w, Pending *p) {
             }
             pthread_mutex_unlock(&sh->mu);
         }
-        g_lean_drop = tas && tas_shift == 0 && cfg->jobs <= 1 && watch_lean(cfg);
+        g_lean_drop = tas && tas_shift == 0 && cfg->jobs <= 1 && watch_lean(cfg) && !cfg->observe;
         if (!(attract || play || held) && cfg->max_total && __atomic_load_n(&sh->steps, __ATOMIC_RELAXED) + w->step_batch >= cfg->max_total) {
             loc->sat_total++;
             pthread_mutex_lock(&sh->mu);
@@ -2256,7 +2294,7 @@ static void run_path(Worker *w, Pending *p) {
                         DpTasSummary ts = { cfg->tas_name, cfg->tas_emu, cfg->tas_profile, cfg->tas_rom, cfg->tas_frames, f, tas_stalled_at ? 1 : 0, tas_stalled_at, sess_cov, sh->out->flags, sh->out->rom_size };
                         dp_tasshot_finish(cfg->tas_summary, &ts);
                     }
-                    if (tas_shift == 0 && cfg->replay_only) { __atomic_store_n(&sh->halt, 4, __ATOMIC_RELAXED); pthread_mutex_lock(&sh->mu); pthread_cond_broadcast(&sh->cv); pthread_mutex_unlock(&sh->mu); } if (tas_shift == 0) fprintf(stderr, "deepeel: TAS movie played to its end (%llu frames)\n", (unsigned long long)cfg->tas_frames);
+                    if (tas_shift == 0 && cfg->replay_only && !cfg->observe) { __atomic_store_n(&sh->halt, 4, __ATOMIC_RELAXED); pthread_mutex_lock(&sh->mu); pthread_cond_broadcast(&sh->cv); pthread_mutex_unlock(&sh->mu); } if (tas_shift == 0) fprintf(stderr, "deepeel: TAS movie played to its end (%llu frames)\n", (unsigned long long)cfg->tas_frames);
                     // the end state of the unshifted movie keeps running as an attract session (no input; it stops on stagnation: --attract-stall)
                     if (tas_shift == 0 && !cfg->no_sessions && m->frame) {
                         uint8_t *ep = malloc(sh->sbytes);
@@ -2297,7 +2335,7 @@ static void run_path(Worker *w, Pending *p) {
                 vid = ++w->path_id;
                 // B3: attract and play sessions drop live states into the same pool as the movie: a checkpoint every tas_ckpt_every
                 // session frames (bounded by tas_ckpt_cap) continues as a free natural path
-                if ((attract || play) && !burst && !cfg->no_tas_ckpt && cfg->tas_ckpt_every && f > sess_f0 && (f - sess_f0) % cfg->tas_ckpt_every == 0 &&
+                if ((attract || play) && !burst && !cfg->no_tas_ckpt && !cfg->observe && cfg->tas_ckpt_every && f > sess_f0 && (f - sess_f0) % cfg->tas_ckpt_every == 0 &&
                     (cfg->unbounded || __atomic_load_n(&sh->sess_ckpts, __ATOMIC_RELAXED) < cfg->tas_ckpt_cap)) {
                     uint8_t *cp = malloc(sh->sbytes ? sh->sbytes : 1);
                     if (cp) {
@@ -2330,13 +2368,13 @@ static void run_path(Worker *w, Pending *p) {
                 if (rnd && cfg->random_stall) {   // a random run ends after random_stall frames without a ROM byte new to the process
                     uint64_t cov = loc->plain_new_bytes + loc->novelty_new_bytes;
                     if (cov != sess_last_cov) { sess_last_cov = cov; sess_prog_f = f; }
-                    else if (f - sess_prog_f >= cfg->random_stall) { loc->session_frames += f - sess_f0; loc->session_stalls++; break; }
+                    else if (f - sess_f0 >= cfg->random_min && f - sess_prog_f >= cfg->random_stall) { loc->session_frames += f - sess_f0; loc->session_stalls++; break; }
                 }
                 if ((attract || play) && sess_limit && f - sess_f0 >= sess_limit) {
                     loc->session_frames += f - sess_f0;
                     break;
                 }
-                if (play && sess_limit) {
+                if (play && (sess_limit || rnd)) {   // a random run needs no frame cap to change pads
                     // Checkpoint bursts use a reproducible pseudo-random pad
                     // sequence, changing every four frames. Ordinary sessions
                     // retain their deterministic nine-epoch schedule.
@@ -2566,7 +2604,7 @@ static void run_path(Worker *w, Pending *p) {
                 // Dispatch forks: every target of the table this path has not executed yet becomes a forced path started in the
                 // current state (the handler of an object/mode the film never spawns).  Once per (table, target) globally,
                 // never from a forced path (bounded), counted as forks; the RET taint cut ends them.
-                if (!cur_forced && !cfg->no_dispatch_forks && m->set_pc && ct.stride && !(tas && tas_shift == 0 && watch_lean(cfg))) {
+                if (!cur_forced && !cfg->no_dispatch_forks && m->set_pc && ct.stride && !LEAN_PATH) {
                     uint32_t tg[DP_CODE_TABLE_MAX]; unsigned nt = code_table_targets(m, isa, &ct, tg, DP_CODE_TABLE_MAX);
                     uint8_t *cur = NULL;
                     for (unsigned ti = 0; ti < nt; ti++) {
@@ -2632,7 +2670,7 @@ static void run_path(Worker *w, Pending *p) {
                 }
             }
         }
-        if (!cfg->no_solve && !cur_forced && m->poke && have_flow && !(tas && tas_shift == 0 && watch_lean(cfg))) {   // lean replay: no solver window snapshots
+        if (!cfg->no_solve && !cur_forced && m->poke && have_flow && !LEAN_PATH) {   // lean replay: no solver window snapshots
             // window: the sequential instructions before a conditional; their start state and RAM reads feed solve_cond
             if (fi.kind == DP_FLOW_COND) { /* closes the window below */ }
             else if (fi.kind != DP_FLOW_SEQ) w->win_on = w->cobs.track = 0;
@@ -2683,7 +2721,7 @@ static void run_path(Worker *w, Pending *p) {
             }
         }
         if (cfg->hooks && (cfg->hooks->irq_alt || cfg->hooks->irq_source_alt) && m->rom_index(m, pc) >= 0 &&
-            !(tas && tas_shift == 0 && watch_lean(cfg))) {   // lean replay: no IRQ-jitter snapshots on the live movie path
+            !LEAN_PATH) {   // lean replay: no IRQ-jitter snapshots on the live movie path
             // delay d = 1 is the plain IRQ fork; d = 2..3 is technique 9 (temporal
             // perturbation: the interrupt lands a few instructions later).  The hook
             // answers 0 unless an interrupt is pending, so the per-(site, delay) key is
@@ -2739,7 +2777,7 @@ static void run_path(Worker *w, Pending *p) {
                          ((fi.kind == DP_FLOW_CALL && fi.call) ||
                           (fi.kind == DP_FLOW_COND && fi.target < 0));
         int cond = have_flow && fi.kind == DP_FLOW_COND && fi.target >= 0;
-        if (tas && tas_shift == 0 && watch_lean(cfg)) { cond = 0; stack_cond = 0; }
+        if (LEAN_PATH) { cond = 0; stack_cond = 0; }
         if (cond && cfg->fork_site_cap && !cur_epoch && w->capped[site_slot(m, pc, w->site_n, NULL)] == skey) { loc->sat_site++; cond = 0; }   // site already saturated: no snapshot, no lock
         uint8_t *pre = NULL;
         // both sides already covered by natural paths: the fork is pruned below whatever side is taken, so the
@@ -3200,6 +3238,7 @@ static void infer_static(DpCoreResult *r, DpMachine *m, const DpCoreConfig *cfg)
     }
 }
 
+#undef LEAN_PATH
 static void *worker_main(void *arg) {
     Worker *w = arg;
     Shared *sh = w->sh;
@@ -3282,9 +3321,14 @@ static void *worker_main(void *arg) {
         sh->q[pick] = sh->q[sh->qn - 1];
         sh->qn--;
         sh->active++;
+        size_t left = sh->qn;
         pthread_mutex_unlock(&sh->mu);
         uint64_t before = w->loc.novelty_new_bytes + w->loc.plain_new_bytes;
+        int is_rnd = p.input >= SESSION_PLAY + 32u && p.input < TAS_INPUT;
+        core_phase(sh->cfg, p.input >= TAS_INPUT ? "tas" : p.input == SESSION_ATTRACT ? "attract" : is_rnd ? "random" : p.input >= SESSION_PLAY ? "play" : "fork",
+                   __atomic_load_n(&sh->rnd_done, __ATOMIC_RELAXED), left);
         run_path(w, &p);
+        if (is_rnd) __atomic_fetch_add(&sh->rnd_done, 1, __ATOMIC_RELAXED);
         run_flush(&w->cobs);
         __atomic_fetch_add(&sh->paths_done, 1, __ATOMIC_RELAXED);
         if (p.site && p.site <= sh->out->rom_size) {
@@ -3876,7 +3920,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
                 if (!cp) break;
                 memcpy(cp, start, sh.sbytes);
                 if (sh.qn == sh.qcap) { sh.qcap = sh.qcap ? sh.qcap * 2 : 64; sh.q = realloc(sh.q, sh.qcap * sizeof *sh.q); }
-                sh.q[sh.qn++] = (Pending){ cp, start_pc, 0, 0, SESSION_PLAY + 32u + (i & 0x3Fu), 0, 0, DP_SRC_SESSION };
+                sh.q[sh.qn++] = (Pending){ cp, start_pc, 0, 0, SESSION_PLAY + 32u + ((cfg->random_first + i) & 0x3Fu), 0, 0, DP_SRC_SESSION };
             }
         }
         // technique 9 (TAS form): the movie from power-on, unshifted and shifted by 1..3 frames
@@ -3894,6 +3938,11 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         if (m->frame && m->set_input && (cfg->tas_masks || cfg->tas_masks32) && cfg->tas_frames && !cfg->no_tas_jitter) {
             sh.tas_start = malloc(sh.sbytes);
             if (sh.tas_start) { memcpy(sh.tas_start, sh.q[sh.qn - 1].state, sh.sbytes); sh.tas_pc = start_pc; sh.tas_shifts_left = 1; }
+        }
+        if (cfg->observe) {   // --observe: only the sessions (movie, attract, random) run
+            size_t k = 0;
+            for (size_t i = 0; i < sh.qn; i++) if (sh.q[i].input >= SESSION_ATTRACT) sh.q[k++] = sh.q[i]; else free(sh.q[i].state);
+            sh.qn = k;
         }
         // clones start from power-on, the same state the main machine saved
         for (unsigned i = 1; i < started; i++) pthread_create(&ws[i].th, NULL, worker_main, &ws[i]);
@@ -3913,6 +3962,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
 cleanup:
     free(sh.tas_start);
     if (cfg->hooks && cfg->hooks->finish && out->flags) cfg->hooks->finish(cfg->hooks->user, out);
+    if (!cfg->no_infer || !cfg->no_spec) core_phase(cfg, "static", sh.rnd_done, sh.qn);
     if (!cfg->no_infer && out->flags && cfg->rom_image && m->isa) infer_static(out, m, cfg);
     if (!cfg->no_spec && m->bank_shift == 14 && m->isa && out->flags) speculative_gaps(out, m->isa, cfg, m, 0x4000u);
     else if (!cfg->no_spec && m->page_shift && m->isa && out->flags) speculative_gaps_pages(out, m->isa, cfg, m);
@@ -4014,6 +4064,7 @@ cleanup:
     }
     if (sh.spool_fd >= 0) close(sh.spool_fd);
     if (sh.def_fd1) close(sh.def_fd1 - 1);
+    free(sh.spool_ref); free(sh.def_ref);
     for (size_t i = 0; i < sh.qn; i++) free(sh.q[i].state);
     for (size_t i = 0; i < sh.defn; i++) free(sh.def[i].state);
     free(sh.def);

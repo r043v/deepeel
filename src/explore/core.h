@@ -158,6 +158,9 @@ typedef struct DpCoreConfig {
     const char *live_flags;   // --live-flags FILE: the coverage flag bytes (coverage.bin layout) rewritten at every progress tick, for a supervising process
     unsigned random_runs;     // --random N: N seeded random-pad runs started from the start state (each stops on random_stall frames without a new ROM byte)
     uint32_t random_frames;   // --random-frames N: frame cap of one random run (0 = none: only stagnation stops a run)
+    int observe;              // --observe: sessions only (movie, attract, random): no fork, no deferred state; the movie's end state runs on as attract
+    uint32_t random_min;      // --random-min N: a random run lasts at least N frames before stagnation may end it
+    unsigned random_first;    // --random-first N: seed rank of the first random run (parallel processes play different pads)
     uint32_t random_stall;    // --random-stall N: frames without a new ROM byte that end a random run (default 36000 = 10 min of game time)
 } DpCoreConfig;
 

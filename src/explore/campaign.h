@@ -13,28 +13,40 @@
 #define CAMP_SNAP_EVERY        600      /* movie frames between two machine snapshots (10 s of game time) */
 #define CAMP_MOVIE_STALL       36000    /* movie frames without a new ROM byte = stagnation (10 min of game time: a game may walk known parts for long) */
 
-/* ---- random play from each snapshot ---- */
+/* ---- random play from each snapshot and from power-on ---- */
 #define CAMP_RANDOM_RUNS       10       /* seeded random-pad runs per snapshot */
-#define CAMP_RANDOM_MAX        7200     /* hard cap of one random run (2 min of game time) */
-#define CAMP_RANDOM_STALL      3600     /* a random run ends after this many frames without a ROM byte new to the campaign (1 min) */
-#define CAMP_EXPLORE_STALL_SECS 1800    /* wall-clock seconds without any new byte before a whole exploration child ends */
-#define CAMP_EXPLORE_MAX_SECS  900      /* wall-clock cap of one fork exploration (0: none): forks are the long part, rerun later on demand */
+#define CAMP_RANDOM_MIN        3600     /* a random run lasts at least this long (1 min of game time) */
+#define CAMP_RANDOM_STALL      600      /* then ends after this many frames without a ROM byte new to the campaign (10 s) */
+#define CAMP_RANDOM_PARALLEL   4        /* random children of one movie at a time: the four quarters of its tile */
+#define CAMP_BOOT_RANDOM_TASKS 4        /* power-on random children (each its own seeds) */
+
+/* ---- fork exploration (both sides of every conditional) ---- */
+#define CAMP_FORK_RESERVE      2        /* workers the random runs leave to the forks */
+#define CAMP_FORK_SHARE        4        /* while films run, the forks hold at most 1/4 of the workers */
+#define CAMP_EXPLORE_STALL_SECS 1800    /* wall-clock seconds without any new byte before a fork exploration ends */
+#define CAMP_EXPLORE_MAX_SECS  900      /* wall-clock cap of one fork exploration (0: none) */
 
 /* ---- attract mode (no input) ---- */
-#define CAMP_ATTRACT_MAX       216000   /* from power-on: hard cap, frames (1 h of game time) */
-#define CAMP_ATTRACT_MIN       36000    /* runs at least this long before a stagnation stop (10 min) */
+#define CAMP_ATTRACT_MAX       216000   /* hard cap, frames (1 h of game time) */
+#define CAMP_ATTRACT_MIN       36000    /* from power-on: at least this long before a stagnation stop (10 min) */
 #define CAMP_ATTRACT_STALL     3600     /* frames without a new ROM byte ends it (1 min) */
-#define CAMP_POST_ATTRACT_MAX  36000    /* attract from the end state of each movie, frames (10 min) */
-#define CAMP_POST_ATTRACT_MIN  3600     /* it runs at least this long before a stagnation stop */
+#define CAMP_POST_ATTRACT_MIN  10800    /* from the end state of each movie: at least 3 min */
 #define CAMP_POST_ATTRACT_STALL 3600
 
+/* ---- machine load ---- */
+#define CAMP_NICE              10       /* priority of every child: the desktop stays responsive */
+#define CAMP_IO_PAUSE          35       /* /proc/pressure/io "full avg10" above this: one more fork is stopped (SIGSTOP) */
+#define CAMP_IO_RESUME         15       /* below this: one stopped fork resumes */
+#define CAMP_LIGHT_RSS         (256ull << 20)   /* first estimate of an observation child, then its measured peak */
+#define CAMP_HEAVY_RSS         (600ull << 20)   /* same, fork exploration */
+#define CAMP_STOP_SECS         30       /* a stop waits this long for the children, then kills them */
+
 /* ---- queues and disk ---- */
-#define CAMP_QUEUE_MOVIE       1000     /* forked states held in RAM by a movie child (the rest spills to its disk spool) */
 #define CAMP_QUEUE_EXPLORE     1500
 #define CAMP_QUEUE_BYTES       (384ull << 20)   /* RAM held by an exploration's queued states: the count follows the state size (GB CGB: 680 KiB) */
 #define CAMP_QUEUE_MIN         64
 #define CAMP_RSS_RETRIES       2        /* a child killed over its RSS cap is re-queued this many times, its queue halved each time */
-#define CAMP_SNAPSHOT_TASKS    65536    /* snapshot explorations the supervisor can hold */
+#define CAMP_SNAPSHOT_TASKS    131072   /* snapshot tasks the supervisor can hold (a random and a fork per snapshot) */
 #define CAMP_CHILD_RSS_CAP     (1ull << 30)   /* a child above this is killed, its last live coverage is kept */
 #define CAMP_LOCAL_MIN_FREE    (8ull << 30)   /* under this the bulk data goes to the overflow disk */
 #define CAMP_SHED_FREE         (14ull << 30)  /* under this the child holding the biggest spool is stopped */
@@ -48,4 +60,5 @@
 #define CAMP_LIVE_FRAME_MS     33       /* a movie child publishes its screen this often (in /dev/shm: memory only, no disk traffic) */
 #define CAMP_BLOCK_BYTES       256      /* ROM bytes shown by one square of the live map */
 
+#define CAMP_SKIP_EMULATOR "VBA-rr"   // movies of this emulator are not replayed for now: they all desync (name from the TASVideos API)
 #endif

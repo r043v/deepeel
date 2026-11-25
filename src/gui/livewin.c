@@ -25,7 +25,7 @@ static int cairo_decor_only(void) {
 }
 static SDL_Window *win; static SDL_Renderer *ren; static SDL_Texture *tex; static int tw, th, dead, inited;
 int dp_livewin_show(const DpCanvas *c, const char *title) {
-    const char *dump = getenv("DEEPEEL_LIVE_DUMP"); static time_t dumped; if (dump && *dump && time(NULL) != dumped) { dumped = time(NULL); dp_canvas_save_png(c, dump); }   // control output: what the window shows, once a second
+    const char *dump = getenv("DEEPEEL_LIVE_DUMP"); static time_t dumped; if (dump && *dump && time(NULL) != dumped) { dumped = time(NULL); char tmp[4096]; snprintf(tmp, sizeof tmp, "%s.tmp", dump); if (dp_canvas_save_png(c, tmp)) rename(tmp, dump); }   /* whole file or the previous one */   // control output: what the window shows, once a second
     if (dead) return 1;
     if (!inited) {
         inited = 1;
