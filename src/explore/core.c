@@ -1842,6 +1842,7 @@ static int frontier_save(Shared *sh, const char *path, DpCoreResult *out) {
 
 // pad masks cycled by play sessions (kernel mask bits: up down left right button1 button2 start)
 static const uint32_t play_catalog[10] = {0, 0x10, 0x40, 0x20, 0x01, 0x02, 0x04, 0x08, 0x80, 0x100};   // C12: + Select, C
+#define PLAY_PADS(m) ((m)->play_pads ? (m)->n_play_pads : 10u)
 // technique 1 (concolic form): the window start state `wsnap` is replayed with each RAM byte the window read set
 // to a few candidate values (immediates of the window, +-1, 0, 1, 0xFF); a value that makes the conditional at
 // `condpc` land on `other` is queued as a *natural* state (source: solved), no forced inversion.  Returns the
@@ -2263,7 +2264,7 @@ static void run_path(Worker *w, Pending *p) {
                                 if (!bp) break;
                                 m->save(m, bp);
                                 pthread_mutex_lock(&sh->mu);
-                                queue_push(sh, m, (Pending){ bp, m->pc(m), 0, 0, SESSION_PLAY + 16u + (unsigned)((loc->tas_ckpts * 3u + bi * 5u + 1u) % 10u), 0, 0, DP_SRC_SESSION });
+                                queue_push(sh, m, (Pending){ bp, m->pc(m), 0, 0, SESSION_PLAY + 16u + (unsigned)((loc->tas_ckpts * 3u + bi * 5u + 1u) % PLAY_PADS(m)), 0, 0, DP_SRC_SESSION });
                                 pthread_cond_signal(&sh->cv);
                                 pthread_mutex_unlock(&sh->mu);
                                 loc->ckpt_bursts++;
@@ -2375,7 +2376,7 @@ static void run_path(Worker *w, Pending *p) {
                                 if (!bp) break;
                                 m->save(m, bp);
                                 pthread_mutex_lock(&sh->mu);
-                                queue_push(sh, m, (Pending){ bp, m->pc(m), 0, 0, SESSION_PLAY + 16u + (unsigned)((loc->sess_ckpts * 3u + b * 5u) % 10u), 0, 0, DP_SRC_SESSION });
+                                queue_push(sh, m, (Pending){ bp, m->pc(m), 0, 0, SESSION_PLAY + 16u + (unsigned)((loc->sess_ckpts * 3u + b * 5u) % PLAY_PADS(m)), 0, 0, DP_SRC_SESSION });
                                 pthread_cond_signal(&sh->cv);
                                 pthread_mutex_unlock(&sh->mu);
                                 loc->ckpt_bursts++;
@@ -2429,10 +2430,11 @@ static void run_path(Worker *w, Pending *p) {
                             uint64_t h = keyhash(sess_f0 ^ ((uint64_t)rnd_k << 32) ^ ep ^ 0x9e3779b9u);
                             sess_hold = h % cfg->random_hold ? 0 : ep + 4u + (unsigned)((h >> 32) % 29u);
                         }
-                        unsigned pick = burst ? (unsigned)(keyhash(sess_f0 ^ ((uint64_t)(rnd ? rnd_k : play_k) << 32) ^ ep) % 10u)
-                                              : (ep + play_k) % 10u;
-                        uint32_t pm = play_catalog[pick];
-                        if (rnd) { uint64_t h = keyhash(sess_f0 ^ ((uint64_t)rnd_k << 32) ^ ep ^ 0x5bd1e995u); if (h & 1) pm |= play_catalog[(h >> 8) % 10u]; if (!(h & 6)) pm = 0;   // chords and idle frames
+                        unsigned pick = burst ? (unsigned)(keyhash(sess_f0 ^ ((uint64_t)(rnd ? rnd_k : play_k) << 32) ^ ep) % PLAY_PADS(m))
+                                              : (ep + play_k) % PLAY_PADS(m);
+                        const uint32_t *const pads = m->play_pads ? m->play_pads : play_catalog;
+                        uint32_t pm = pads[pick];
+                        if (rnd) { uint64_t h = keyhash(sess_f0 ^ ((uint64_t)rnd_k << 32) ^ ep ^ 0x5bd1e995u); if (h & 1) pm |= pads[(h >> 8) % PLAY_PADS(m)]; if (!(h & 6)) pm = 0;   // chords and idle frames
                             const uint32_t ri = (rnd_k - 32u - cfg->random_first) & 0x3Fu;
                             if (ri < cfg->random_no_start) pm &= ~0x40u;               // 0x40: Start
                             if (ri < cfg->random_no_select) pm &= ~0x80u; }            // 0x80: Select

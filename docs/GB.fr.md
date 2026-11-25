@@ -6946,3 +6946,15 @@ l'outil, cause non isolée, aucune référence FCEUX disponible localement).
 - Mesuré aussi : la part de fourches de la campagne (`CAMP_FORK_SHARE` 1, 2 ou 4)
   ne change pas la couverture au-delà du bruit (Super Mario Bros., Alex Kidd) ;
   la valeur 4 est conservée.
+
+## 0.442.3 — touches pressées par l’exploration
+
+- Game Gear et MSX : sans film, le bit Start devenait le bouton Pause de la
+  Master System, donc Start n’était jamais pressé (et les clones des workers
+  perdaient le réglage avec un film). Le port `$00` de la Game Gear est aussi
+  sondé (Start tenu). Observation de l’outil, Aerial Assault, 4 minutes : 30,2 %
+  puis 40,8 et 41,8 % « known without suspects ».
+- Chaque machine peut donner son catalogue de touches. Sega et MSX : plus de
+  Reset de la Master System pendant les sessions. WonderSwan : les deux pavés
+  complets (X1 à X4, Y1 à Y4) ; `Y2` était traduit en `X2`.
+- Sans effet mesurable sur WS, MSX et SG en 4 minutes.

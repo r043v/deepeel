@@ -277,8 +277,9 @@ static DpMachine *sega_clone(DpMachine *m, unsigned worker) {
     SegaMach *cs = c->impl;
     cs->attached = 0;                     // those callbacks are not this clone's: attach rebuilds them
     dp_machine_sega_source(c, s->rom, s->rom_size, s->pick);
-    cs->init_arg = s->init_arg; cs->msx = s->msx; cs->mapper = s->mapper; cs->gg = s->gg;
+    cs->init_arg = s->init_arg; cs->msx = s->msx; cs->mapper = s->mapper; cs->gg = s->gg; cs->sys_key = s->sys_key;
     c->attach = sega_attach;
+    c->play_pads = m->play_pads; c->n_play_pads = m->n_play_pads;
     return c;
 }
 void dp_machine_sega_source(DpMachine *m, const uint8_t *rom, size_t size, const void *(*pick)(unsigned worker)) {
@@ -293,7 +294,13 @@ void dp_machine_sega_tas(DpMachine *m, int sys_key, int profile) {
 }
 void dp_machine_sega_init_arg(DpMachine *m, int arg) { ((SegaMach *)m->impl)->init_arg = arg; }
 void dp_machine_sega_mapper(DpMachine *m, unsigned mapper) { ((SegaMach *)m->impl)->mapper = mapper; }
-void dp_machine_sega_gg(DpMachine *m, int gg) { ((SegaMach *)m->impl)->gg = gg; }
+// Bit 6 of the input mask is Start where the console has one (GG, MSX), with or without a movie.
+// No Select nor C on these consoles; bit 7 is the Master System Reset key, which throws a session's progress away.
+static const uint32_t sega_pads[] = {0, DP_IN_B1, DP_IN_START, DP_IN_B2, DP_IN_UP, DP_IN_DOWN, DP_IN_LEFT, DP_IN_RIGHT};
+void dp_machine_sega_gg(DpMachine *m, int gg) {
+    SegaMach *s = m->impl; s->gg = gg; s->sys_key = gg || s->msx;
+    m->play_pads = sega_pads; m->n_play_pads = sizeof sega_pads / sizeof *sega_pads;
+}
 void dp_machine_sega_set_msx(DpMachine *m, int msx) { ((SegaMach *)m->impl)->msx = msx; }
 
 static void sega_capture(SegaMach *s) {
@@ -384,6 +391,7 @@ static int sega_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t
     }
     if (bytes[0] != 0xDB) return 0;                       // in a,(n)
     if (c->irq || c->nmi) return 0;
+    static const uint8_t start[] = {0x40};   // GG port $00: bit 7 low = Start held, export region
     const uint8_t *vals; unsigned n;
     if (s->msx) {
         // MSX keyboard matrix: PPI port B ($A9) forks one key down (active low) per alternative
@@ -398,7 +406,8 @@ static int sega_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t
         free(tmp);
         return ok;
     }
-    switch (bytes[1] & 0xC1) {
+    if (s->gg && !bytes[1]) { vals = start; n = sizeof start; }
+    else switch (bytes[1] & 0xC1) {
     case 0x81: vals = st; n = sizeof st; break;
     case 0x40: vals = vc; n = sizeof vc; break;
     case 0x41: vals = hc; n = sizeof hc; break;

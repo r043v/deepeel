@@ -280,8 +280,8 @@ void dp_ws_set_input(DpWs *d, uint32_t mask) {
     if (mask & DP_IN_B1) keys |= 0x0004;      // A
     if (mask & DP_IN_B2) keys |= 0x0008;      // B
     if (mask & DP_IN_START) keys |= 0x0002;   // Start
-    if (mask & DP_IN_SELECT) keys |= 0x0020;  // Y2
-    if (mask & DP_IN_X) keys |= 0x0020;       // Y2 (the sixth WS button set)
+    if (mask & DP_IN_SELECT) keys |= 0x0020;  // X2
+    if (mask & DP_IN_X) keys |= 0x0200;       // Y2
     if (mask & DP_IN_Y) keys |= 0x0080;       // X4
     if (mask & DP_IN_Z) keys |= 0x0800;       // Y4
     ws_set_keys(&d->ws, keys);

@@ -159,7 +159,8 @@ static int ws_render(DpMachine *m, uint32_t *argb, unsigned cap, int *w, int *h)
 static int ws_event_probe(void *user, DpMachine *m, uint32_t pc, const uint8_t *bytes, unsigned k, uint8_t *save) {
     (void)user; (void)pc; (void)bytes;
     static const uint32_t pads[] = { 0, DP_IN_B1, DP_IN_B2, DP_IN_B1 | DP_IN_B2,
-                                     DP_IN_UP, DP_IN_DOWN, DP_IN_LEFT, DP_IN_RIGHT, DP_IN_START };
+                                     DP_IN_UP, DP_IN_DOWN, DP_IN_LEFT, DP_IN_RIGHT, DP_IN_START,
+                                     DP_IN_SELECT, DP_IN_Y, DP_IN_X, DP_IN_Z };
     unsigned nfull = m->pad_full ? dp_pad_count(m->input_bits) : 0;
     if (k >= (nfull ? nfull : sizeof pads / sizeof *pads)) return 0;
     DpWs *d = ws_of(m);
@@ -235,6 +236,10 @@ static void ws_close(DpMachine *m) {
     free(m);
 }
 
+// The whole keypad for play and random sessions: both direction pads (X1..X4 = left, Select, right, Y masks;
+// Y1..Y4 = up, X, down, Z), A, B and Start.
+static const uint32_t ws_pads[] = {0, DP_IN_B1, DP_IN_START, DP_IN_B2, DP_IN_LEFT, DP_IN_SELECT, DP_IN_RIGHT, DP_IN_Y,
+                                   DP_IN_UP, DP_IN_DOWN, DP_IN_X, DP_IN_Z};
 DpMachine *dp_machine_ws(void) {
     WsWrap *w = calloc(1, sizeof *w);
     DpMachine *m = calloc(1, sizeof *m);
@@ -270,6 +275,7 @@ DpMachine *dp_machine_ws(void) {
     m->ctx_reg_hash = ws_ctx_reg_hash;
     m->frame = ws_wrap_frame;
     m->set_input = ws_set_input;
+    m->play_pads = ws_pads; m->n_play_pads = sizeof ws_pads / sizeof *ws_pads;
     m->observe = ws_observe;
     m->ctx_components = ws_ctx_components;
     m->get_regs = ws_get_regs_w;

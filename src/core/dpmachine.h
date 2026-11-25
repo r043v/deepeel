@@ -363,6 +363,9 @@ struct DpMachine {
     // holds a pad mask (bits 0..5 = up/down/left/right/button1/button2) until changed;
     // NULL: the machine has no input model.  Entry point of the kernel's held-pad sessions.
     void (*set_input)(struct DpMachine *, uint32_t mask);
+    // the masks the explorer's play and random sessions press, when the console's keys differ from the default
+    // catalogue (B1, Start, B2, the four directions, Select, C); NULL: the default.  Idle (0) comes first.
+    const uint32_t *play_pads; unsigned n_play_pads;
     // C14: the next CPU read of `addr` returns `value`, once; the arming lives in the saved state.  NULL: the
     // machine's probes patch the underlying state (save / patch / restore) instead.  Returns 0 when unsupported.
     int (*arm_read)(struct DpMachine *, uint32_t addr, uint8_t value);
