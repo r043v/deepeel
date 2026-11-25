@@ -12,9 +12,11 @@ int dp_livewin_show(const DpCanvas *c, const char *title) {
         inited = 1;
         const char *d = getenv("DISPLAY"), *w = getenv("WAYLAND_DISPLAY");
         if ((!d || !*d) && (!w || !*w)) { dead = 1; return 1; }
+        // X11 (XWayland) first: the compositor then draws a normal title bar and border (move, resize), with no libdecor plugin
+        if (d && *d) SDL_SetHint(SDL_HINT_VIDEODRIVER, "x11");
         SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR, "0");   // libdecor's GTK plugin pulls libglycin, which segfaults in its worker thread
         SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");   // the supervisor owns SIGINT/SIGTERM
-        if (SDL_Init(SDL_INIT_VIDEO) != 0) { fprintf(stderr, "deepeel: live window unavailable: %s\n", SDL_GetError()); dead = 1; return 1; }
+        if (SDL_Init(SDL_INIT_VIDEO) != 0 && (SDL_SetHint(SDL_HINT_VIDEODRIVER, ""), SDL_Init(SDL_INIT_VIDEO) != 0)) { fprintf(stderr, "deepeel: live window unavailable: %s\n", SDL_GetError()); dead = 1; return 1; }
     }
     if (!win || tw != c->w || th != c->h) {
         if (tex) SDL_DestroyTexture(tex); if (ren) SDL_DestroyRenderer(ren); if (win) SDL_DestroyWindow(win);
@@ -22,6 +24,7 @@ int dp_livewin_show(const DpCanvas *c, const char *title) {
         ren = win ? SDL_CreateRenderer(win, -1, 0) : NULL;
         tex = ren ? SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, c->w, c->h) : NULL;
         if (!tex) { fprintf(stderr, "deepeel: live window unavailable: %s\n", SDL_GetError()); dead = 1; return 1; }
+        SDL_RenderSetLogicalSize(ren, c->w, c->h);   // resizing keeps the aspect ratio (letterbox)
         tw = c->w; th = c->h;
     }
     SDL_Event e;

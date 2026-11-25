@@ -150,6 +150,7 @@ typedef struct DpCoreConfig {
     uint32_t tas_stall_frames;   // --tas-stall N: the unshifted movie replay stops after N frames without a ROM byte new to it (a desynced or idle movie); reported in tas_report (0: off)
     unsigned snap_every;      // --snap-every N: the unshifted movie replay writes <snap_dir>/s<frame>.state every N frames (0: off)
     const char *snap_dir;     // --snap-dir D
+    unsigned live_frame_ms;   // --live-frame-ms N: minimum wall-clock gap between two screen publications (default 500)
     const char *live_frame;   // --live-frame FILE: the unshifted movie replay writes its screen there (w,h,frame,total + ARGB) about twice a second, for the supervisor's live window
     const char *tas_summary;  // --tas-summary FILE.png: one picture (<=1920x1080) of the movie replay: key screens, identity, verdict
     const char *tas_name, *tas_emu, *tas_profile, *tas_rom;   // --tas-name/--tas-emu/--tas-profile: what the summary prints (emu: TASVideos API)

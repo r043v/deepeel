@@ -139,6 +139,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--tas-stall") && i + 1 < argc) { c->tas_stall_frames = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--snap-every") && i + 1 < argc) { c->snap_every = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--snap-dir") && i + 1 < argc) { c->snap_dir = argv[i + 1]; return 2; }
+    if (!strcmp(a, "--live-frame-ms") && i + 1 < argc) { c->live_frame_ms = (unsigned)atoi(argv[i + 1]); return 2; }
     if (!strcmp(a, "--live-frame") && i + 1 < argc) { c->live_frame = argv[i + 1]; return 2; }
     if (!strcmp(a, "--tas-summary") && i + 1 < argc) { c->tas_summary = argv[i + 1]; return 2; }
     if (!strcmp(a, "--tas-name") && i + 1 < argc) { c->tas_name = argv[i + 1]; return 2; }
@@ -1931,7 +1932,7 @@ static void core_tas_shot(const DpCoreConfig *cfg, DpMachine *m, uint64_t f, con
 static void core_live_frame(const DpCoreConfig *cfg, DpMachine *m, uint64_t f) {
     static __thread double last; struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
     double now = (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
-    if (now - last < 0.5) return;
+    if (now - last < (cfg->live_frame_ms ? cfg->live_frame_ms : 500u) * 1e-3) return;
     last = now;
     static __thread uint32_t px[512 * 512]; int w = 0, h = 0;
     if (!m->render || !m->render(m, px, 512u * 512u, &w, &h) || w < 1 || h < 1) return;

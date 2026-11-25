@@ -394,7 +394,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
                 av[n++] = "--snap-every"; av[n++] = CAMP_STR(CAMP_SNAP_EVERY); av[n++] = "--snap-dir"; av[n++] = snaps;
                 av[n++] = "--tas-stall"; av[n++] = CAMP_STR(CAMP_MOVIE_STALL); av[n++] = "--tas-report"; av[n++] = t->rep;
                 snprintf(t->shot, sizeof t->shot, "%s/summary.png", t->dir); av[n++] = "--tas-summary"; av[n++] = t->shot;
-                snprintf(t->lfr, sizeof t->lfr, "%s/frame.bin", t->dir); av[n++] = "--live-frame"; av[n++] = t->lfr;   // one-glance picture of the replay
+                snprintf(t->lfr, sizeof t->lfr, "/dev/shm/deepeel-%d-%zu.frame", (int)getpid(), (size_t)(t - tk)); av[n++] = "--live-frame"; av[n++] = t->lfr; av[n++] = "--live-frame-ms"; av[n++] = CAMP_STR(CAMP_LIVE_FRAME_MS);   // one-glance picture of the replay
             } else {
                 if (t->snap[0]) { av[n++] = "--from-state"; av[n++] = t->snap; }
                 if (un.n && un.u) {   // seed the child with everything proved so far: it explores beyond the union, and its stagnation means "nothing new for the whole campaign"
@@ -419,8 +419,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
         time_t now = time(NULL);
         for (size_t i = 0; i < nt; i++) if (tk[i].pid && !tk[i].done) merge_flags(&un, tk[i].live);
         size_t total = union_count(&un);
-        if (win_on && now - t_win >= CAMP_WINDOW_SECS) { t_win = now; draw_live(&un, name, t_start, tk, nt, mv, &scr_w, &scr_h); }
-        if (now - t_log >= CAMP_LOG_SECS) {
+                if (now - t_log >= CAMP_LOG_SECS) {
             t_log = now;
             size_t queued = 0; for (size_t i = 0; i < nt; i++) queued += tk[i].kind == 2 && !tk[i].pid && !tk[i].done;
             fprintf(stderr, "[%ldm%02lds] ROM bytes covered %zu/%zu (%.1f%%) | workers %d/%ld (movies %zu/%zu started, explorations running %d, queued %zu, done %d) | RAM avail %llu MiB, child peak %zu MiB | swap +%lld MiB | disk %s %llu GiB free | stagnation streak %d\n",
@@ -442,7 +441,8 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             if (!fresh) break;
         } else if (!running && no_gain >= (cap * 2 > 8 ? cap * 2 : 8) && movie_next >= nm) break;
         for (int sl = 0; sl < 8; sl++) {   // fast RSS watch between two supervision ticks
-            usleep(250000);
+            usleep(CAMP_WINDOW_MS * 1000);
+            if (win_on) draw_live(&un, name, t_start, tk, nt, mv, &scr_w, &scr_h);
             for (size_t i = 0; i < nt; i++) if (tk[i].pid && !tk[i].done && !tk[i].over_t) {
                 size_t rss = proc_rss(tk[i].pid); if (rss > tk[i].rss_peak) tk[i].rss_peak = rss;
                 if (rss > CHILD_RSS_CAP) {
@@ -460,6 +460,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
     FILE *cf = fopen(cb, "wb");
     if (cf) { uint32_t hd[2] = { 0x31564F43u, (uint32_t)un.n }; fwrite(hd, 4, 2, cf); if (un.u) fwrite(un.u, 1, un.n, cf); fclose(cf); }
     if (repf) fclose(repf);
+    for (size_t i = 0; i < nt; i++) if (tk[i].lfr[0]) unlink(tk[i].lfr);   // screens published in /dev/shm
     fprintf(stderr, "deepeel auto: finished, %zu/%zu ROM bytes covered (%.1f%%), observations of the tool; map %s, movies report %s, merged coverage %s\n",
             total, un.n, un.n ? 100.0 * total / un.n : 0.0, png, rep_all, cb);
     free(un.u); free(mv); free(tk);
