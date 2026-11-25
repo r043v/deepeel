@@ -146,6 +146,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--tas-stall") && i + 1 < argc) { c->tas_stall_frames = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--snap-every") && i + 1 < argc) { c->snap_every = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--snap-dir") && i + 1 < argc) { c->snap_dir = argv[i + 1]; return 2; }
+    if (!strcmp(a, "--snap-min") && i + 1 < argc) { c->snap_min = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--live-frame-ms") && i + 1 < argc) { c->live_frame_ms = (unsigned)atoi(argv[i + 1]); return 2; }
     if (!strcmp(a, "--live-frame") && i + 1 < argc) { c->live_frame = argv[i + 1]; return 2; }
     if (!strcmp(a, "--tas-summary") && i + 1 < argc) { c->tas_summary = argv[i + 1]; return 2; }
@@ -304,6 +305,15 @@ typedef struct {
 #define SWEEP_MIN 4096                 // a sequential read run this long with (almost) no writes is a sweep, not a table read
 #define SRC_SWEEP    (1u << 16)        // src_flags: byte read only by a sweep (never counted as known data)
 #define SRC_RUNFRESH (1u << 17)        // src_flags: DATA freshly set by the current run (undone if the run turns out a sweep)
+// the machine state as a file, restartable with --from-state; atomic: a supervisor never reads a half-written one
+static void core_snapshot(DpMachine *m, const char *path) {
+    if (!m->state_bytes || !m->save) return;
+    uint32_t n = m->state_bytes(m); uint8_t *b = malloc(n ? n : 1);
+    char tmp[720]; snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *f = b ? fopen(tmp, "wb") : NULL;
+    if (f) { m->save(m, b); int ok = fwrite(b, 1, n, f) == n; if (fclose(f) || !ok || rename(tmp, path)) unlink(tmp); }
+    free(b);
+}
 // closes the current stream: a long one whose RAM output is not 1:1 is a decompressor input
 static void run_flush(CopyObs *o) {
     if (o->run_hi >= 0 && !o->no_decompress && !o->forced) {
@@ -2093,6 +2103,7 @@ static void run_path(Worker *w, Pending *p) {
     uint64_t sess_cov = 0, sess_prog_f = sess_f0;
     // --random statistics of this run: new code and data bytes, and the frame of the last of each
     uint64_t run_c0 = loc->plain_new_bytes + loc->novelty_new_bytes, run_d0 = w->cobs.data_new, run_c = run_c0, run_d = run_d0, run_cf = sess_f0, run_df = sess_f0;
+    uint64_t snap_found = run_c0 + run_d0, snap_f = sess_f0;   // --snap-min: what was found up to the last snapshot of this run
 #define RUN_STATS() do { if (rnd) fprintf(stderr, "random run %u: frames %llu code %llu last %llu data %llu last %llu\n", play_k, (unsigned long long)(m->frame(m) - sess_f0), \
         (unsigned long long)(run_c - run_c0), (unsigned long long)(run_cf - sess_f0), (unsigned long long)(run_d - run_d0), (unsigned long long)(run_df - sess_f0)); } while (0)
     uint8_t *sess_seen = (attract && cfg->attract_stall) || (tas && tas_shift == 0 && cfg->tas_stall_frames) ? calloc(loc->rom_size / 8 + 1, 1) : NULL;   // ROM bytes this very session executed
@@ -2218,11 +2229,7 @@ static void run_path(Worker *w, Pending *p) {
                 if (tas_shift == 0 && cfg->snap_every && cfg->snap_dir && f > 0 && f % cfg->snap_every == 0 && k >= 0 && k < (int64_t)cfg->tas_frames && m->state_bytes && m->save) {
                     // autonomous campaign: the machine state every snap_every movie frames, restartable with --from-state
                     char sfn[700]; snprintf(sfn, sizeof sfn, "%s/s%llu.state", cfg->snap_dir, (unsigned long long)f);
-                    uint32_t sn = m->state_bytes(m); uint8_t *sb = malloc(sn ? sn : 1);
-                    char sft[720]; snprintf(sft, sizeof sft, "%s.tmp", sfn);   // atomic: a supervisor never reads a half-written snapshot
-                    FILE *so = sb ? fopen(sft, "wb") : NULL;
-                    if (so) { m->save(m, sb); int wok = fwrite(sb, 1, sn, so) == sn; if (fclose(so) || !wok || rename(sft, sfn)) unlink(sft); }
-                    free(sb);
+                    core_snapshot(m, sfn);
                 }
                 if (tas_shift == 0 && cfg->live_frame) core_live_frame(cfg, m, f);
                 if (tas_shift == 0 && cfg->tas_summary && cfg->tas_frames && shot_next < 8 && k >= (int64_t)((uint64_t)shot_next * cfg->tas_frames / 8)) { core_tas_shot(cfg, m, f, "key"); shot_next++; }
@@ -2384,9 +2391,15 @@ static void run_path(Worker *w, Pending *p) {
                     uint64_t c = loc->plain_new_bytes + loc->novelty_new_bytes;
                     if (c != run_c) { run_c = c; run_cf = f; }
                     if (w->cobs.data_new != run_d) { run_d = w->cobs.data_new; run_df = f; }
+                    // a run that goes somewhere new is a new starting point: runs started there go deeper
+                    if (cfg->snap_min && cfg->snap_dir && cfg->snap_every && run_c + run_d - snap_found >= cfg->snap_min && f - snap_f >= cfg->snap_every) {
+                        char sfn[700]; snprintf(sfn, sizeof sfn, "%s/d%llu-%u-%llu.state", cfg->snap_dir, (unsigned long long)(run_c + run_d - snap_found), play_k, (unsigned long long)f);
+                        core_snapshot(m, sfn);
+                        snap_found = run_c + run_d; snap_f = f;
+                    }
                 }
-                if (rnd && cfg->random_stall) {   // a random run ends after random_stall frames without a ROM byte new to the process
-                    uint64_t cov = loc->plain_new_bytes + loc->novelty_new_bytes;
+                if (rnd && cfg->random_stall) {   // a random run ends after random_stall frames without a ROM byte (code or data) new to the process
+                    uint64_t cov = loc->plain_new_bytes + loc->novelty_new_bytes + w->cobs.data_new;
                     if (cov != sess_last_cov) { sess_last_cov = cov; sess_prog_f = f; }
                     else if (f - sess_f0 >= cfg->random_min && f - sess_prog_f >= cfg->random_stall) { RUN_STATS(); loc->session_frames += f - sess_f0; loc->session_stalls++; break; }
                 }

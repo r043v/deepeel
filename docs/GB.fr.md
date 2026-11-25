@@ -6835,3 +6835,11 @@ bout en bout (lectures et analyse statique comprises). Les enfants d'observation
 
 
 **0.438.3** — Les enfants de la campagne tournent en priorité basse (nice 19, classes CPU et disque « idle » sous Linux) : la machine reste réactive. Chaque run `--random` écrit dans le log de l'enfant ses trames, les octets de code et de données nouveaux et la trame de la dernière découverte de chacun.
+
+**0.439.0** — Campagne autonome :
+- *Shot de shot* : un run aléatoire qui trouve au moins 64 octets neufs sauve l'état de la machine (au plus un toutes les 5 s de jeu) ; des runs aléatoires et une fourche repartent de ces états, sans limite de profondeur autre que les découvertes.
+- Les 12 runs d'une passe sont faits en deux moitiés de 6 : toutes les premières moitiés passent avant les secondes. Parmi les snapshots d'un film, un sur quatre est joué d'abord. Rien n'est élagué.
+- Répartition par passe : 3 runs sans Start ni Select, 3 sans Start, 6 avec toutes les touches. La stagnation d'un run compte les données neuves comme le code.
+- La mémoire d'échange qui grossit ne tue un enfant que si la RAM disponible est sous la réserve.
+- Une campagne relancée dans le même répertoire reprend la couverture déjà obtenue (les tâches sont rejouées).
+- Build guidé par profil, pour la machine locale (environ 20 % de temps en moins sur les runs mesurés) : `cmake -DROM=<rom> -P cmake/pgo.cmake`, binaire dans `build-pgo/`.

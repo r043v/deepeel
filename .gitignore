@@ -1,4 +1,5 @@
 build/
+build-pgo/
 *.gb
 *.gbc
 *.sav

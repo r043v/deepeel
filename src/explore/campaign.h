@@ -14,9 +14,12 @@
 #define CAMP_MOVIE_STALL       36000    /* movie frames without a new ROM byte = stagnation (10 min of game time: a game may walk known parts for long) */
 
 /* ---- random play from each snapshot and from power-on ---- */
-#define CAMP_RANDOM_RUNS       12       /* seeded random-pad runs per snapshot */
-#define CAMP_RANDOM_NO_START   8        /* of which this many (the first ones) never press Start; the others use every button */
-#define CAMP_RANDOM_NO_SELECT  6        /* ... and among those, this many never press Select either: 6 without Start and Select, 2 without Start, 4 full */
+#define CAMP_RANDOM_RUNS       6        /* seeded random-pad runs of one random task; a pass on a snapshot is two tasks (halves), 12 runs */
+#define CAMP_RANDOM_NO_START   3        /* of which this many (the first ones) never press Start; the others use every button */
+#define CAMP_RANDOM_NO_SELECT_A 2       /* ... and among those, this many never press Select either, first half */
+#define CAMP_RANDOM_NO_SELECT_B 1       /* ... second half: over a pass 3 without Start and Select, 3 without Start, 6 full */
+#define CAMP_SPARSE            4        /* the first halves start with one movie snapshot in this many, the others follow */
+#define CAMP_DEEP_MIN          64       /* a random run that found this many new bytes saves a snapshot (one per CAMP_SNAP_EVERY frames at most); runs and forks start from it */
 #define CAMP_RANDOM_MIN        3600     /* a random run lasts at least this long (1 min of game time) */
 #define CAMP_RANDOM_STALL      600      /* then ends after this many frames without a ROM byte new to the campaign (10 s) */
 #define CAMP_RANDOM_HOLD       32       /* one press in this many is held 0.5 to 4 s; the others last 8 frames (long presses: about a third of the time) */
