@@ -262,6 +262,7 @@ static int cmd_emu(const char *rom, long frames, const char *mid) {
 }
 
 static int cmd_find(const char *rom, int fetch) {
+    setvbuf(stdout, NULL, _IOLBF, 0);   // callers merge both streams: whole lines only
     FILE *f = fopen(rom, "rb"); if (!f) { perror(rom); return 2; }
     fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
     uint8_t *d = malloc((size_t)sz + 1); if (fread(d, 1, (size_t)sz, f) != (size_t)sz) { fclose(f); free(d); return 2; } fclose(f);

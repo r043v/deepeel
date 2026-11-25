@@ -7,6 +7,8 @@
 #include "../core/zip.h"
 #include "../core/bizhawk.h"
 
+#include <sys/stat.h>
+#include <dirent.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +32,10 @@ static int emit(DpTas *out, uint8_t mask, char *err, size_t errsz) {
     out->masks[out->frames++] = mask;
     return 1;
 }
+
+#ifndef DP_FIRMWARE_DIR
+#define DP_FIRMWARE_DIR "../m0boy/roms"
+#endif
 
 // --- shared button-name mapping (bk2 log keys and mnemonic strings) ---------
 static uint8_t btn_mask(const char *n) {
@@ -319,6 +325,8 @@ static int tas_load_zip(uint8_t *d, size_t n, DpTas *out, char *err, size_t errs
             z[sn] = 0;
             if (strstr(z, "\"EqualLengthFrames\":true")) out->equal_frames = 1;
             if (strstr(z, "\"GBACGB\":true")) out->gba_cgb = 1;
+            const char *rt = strstr(z, "\"RTCDivisorOffset\":");
+            if (rt) out->rtc_div_offset = atoi(rt + 19);
             free(z);
         }
         free(sync);
@@ -427,6 +435,50 @@ int dp_tas_load_cgb_bios(DpTas *t, const char *path, char *err, size_t errsz) {
     }
     t->cgb_bios_loaded = 1;
     return 1;
+}
+
+// the boot ROM the movie names (SHA-1) among the 2304-byte files under dir
+static int find_cgb_bios(DpTas *t, const char *dir, int depth, char *out, size_t outsz) {
+    DIR *d = opendir(dir);
+    if (!d) return 0;
+    int found = 0;
+    for (struct dirent *e; !found && (e = readdir(d));) {
+        if (e->d_name[0] == '.') continue;
+        char p[4096], err[96];
+        if ((size_t)snprintf(p, sizeof p, "%s/%s", dir, e->d_name) >= sizeof p) continue;
+        struct stat sb;
+        if (lstat(p, &sb)) continue;
+        if (S_ISDIR(sb.st_mode)) found = depth > 0 && find_cgb_bios(t, p, depth - 1, out, outsz);
+        else if (S_ISREG(sb.st_mode) && sb.st_size == (off_t)sizeof t->cgb_bios && dp_tas_load_cgb_bios(t, p, err, sizeof err)) {
+            snprintf(out, outsz, "%s", p);
+            found = 1;
+        }
+    }
+    closedir(d);
+    return found;
+}
+
+int dp_tas_needs_cgb_bios(const DpTas *t) {
+    return t->frames && t->gambatte && t->is_cgb && t->has_cgb_bios_hash;
+}
+
+int dp_tas_find_cgb_bios(DpTas *t, const char *rom_path, char *out, size_t outsz) {
+    char dir[4096];
+    const char *home = getenv("HOME"), *slash = strrchr(rom_path, '/'), *src = strrchr(t->source, '/');
+    // next to the ROM, next to the movie, the user's deepeel directories, the m0boy checkout
+    snprintf(dir, sizeof dir, "%.*s", slash ? (int)(slash - rom_path) : 1, slash ? rom_path : ".");
+    if (find_cgb_bios(t, dir, 0, out, outsz)) return 1;
+    if (src) {
+        snprintf(dir, sizeof dir, "%.*s", (int)(src - t->source), t->source);
+        if (find_cgb_bios(t, dir, 0, out, outsz)) return 1;
+    }
+    if (home) {
+        snprintf(dir, sizeof dir, "%s/.config/deepeel", home);
+        if (find_cgb_bios(t, dir, 2, out, outsz)) return 1;
+        snprintf(dir, sizeof dir, "%s/.local/share/deepeel", home);
+        if (find_cgb_bios(t, dir, 2, out, outsz)) return 1;
+    }
+    return find_cgb_bios(t, DP_FIRMWARE_DIR, 2, out, outsz);
 }
 
 void dp_tas_free(DpTas *t) {

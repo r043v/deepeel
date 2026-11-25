@@ -9,6 +9,8 @@
 #define _GNU_SOURCE
 #include "auto.h"
 #include "core.h"
+#include "tas.h"
+#include "../core/shquote.h"
 #include <dirent.h>
 #include <strings.h>
 #include <errno.h>
@@ -25,6 +27,7 @@
 #include <unistd.h>
 
 #include "campaign.h"
+#include "../report/report.h"
 #include "../gui/livewin.h"
 #define CHILD_RSS_CAP CAMP_CHILD_RSS_CAP
 #define HUGE_STEPS "4611686018427387904"
@@ -32,7 +35,7 @@
 #define SHED_FREE CAMP_SHED_FREE
 #define HARD_MIN_FREE CAMP_HARD_MIN_FREE
 
-typedef struct { char path[1100]; unsigned frames; unsigned long size; } Movie;
+typedef struct { char path[1100]; unsigned frames; unsigned long size; char emu[48]; uint64_t input; } Movie;   // emu: the source emulator, from the TASVideos API
 typedef struct {
     int kind;                      // 1 movie replay, 2 snapshot exploration
     int movie;                     // index in the movies array
@@ -41,6 +44,8 @@ typedef struct {
     pid_t pid; time_t t0; size_t rss_peak;
     char dir[1100], live[1150], log[1150], rep[1150], shot[1150], lfr[1150];
     int end;                       // kind 2: the snapshot closing its movie (post-movie attract)
+    int shrink;                    // kind 2: times it was killed over the RSS cap and re-queued with half the queue
+    uint64_t fps_frame; double fps_t; unsigned fps;   // live window: emulated frames per second of this child
     int done; time_t over_t;       // when the RSS ceiling was first hit (SIGINT, then SIGKILL after 15 s)
 } Task;
 
@@ -104,16 +109,21 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
     char db[1100]; snprintf(db, sizeof db, "%s", exe); { char *sl = strrchr(db, '/'); if (sl) *sl = 0; }
     for (int attempt = 0; attempt < 2 && !n; attempt++) {
         if (attempt) {
-            char c[2400]; snprintf(c, sizeof c, "'%s' tasdb sync --systems GB,GBC >&2", exe);
+            char c[2400], qe[2300]; snprintf(c, sizeof c, "%s tasdb sync --systems GB,GBC >&2", dp_shquote(exe, qe, sizeof qe));
             if (system(c)) break;
         }
-        char c[2400]; snprintf(c, sizeof c, "'%s' tasdb find '%s' --fetch 2>&1", exe, rom);
-        FILE *p = popen(c, "r"); char *line = NULL; size_t lc = 0; unsigned game = 0, ver = 0; char mname[300] = "";   // ver: the ROM's own version, other versions' movies do not replay on it
+        // the listing is parsed only once the command is over: its lines come out before their downloads are written
+        char c[7000], qe[2300], qr[4400]; snprintf(c, sizeof c, "%s tasdb find %s --fetch 2>&1", dp_shquote(exe, qe, sizeof qe), dp_shquote(rom, qr, sizeof qr));
+        FILE *p = tmpfile(), *in = popen(c, "r"); char cp[4096]; size_t got;
+        while (p && in && (got = fread(cp, 1, sizeof cp, in)) > 0) fwrite(cp, 1, got, p);
+        if (in) pclose(in);
+        if (p) rewind(p);
+        char *line = NULL; size_t lc = 0; unsigned game = 0, ver = 0; char mname[300] = "";   // ver: the ROM's own version, other versions' movies do not replay on it
         while (p && getline(&line, &lc, p) > 0) {
             unsigned g; if (sscanf(line, "game %u", &g) == 1 || sscanf(line, "ROM matches game %u", &g) == 1) game = g;
             { char *a = strstr(line, "ROM matches game "), *b = a ? strchr(a, '(') : NULL, *e = b ? strstr(b, ", version ") : NULL;
               if (e && (size_t)(e - b - 1) < sizeof mname) { snprintf(mname, sizeof mname, "%.*s", (int)(e - b - 1), b + 1); } }
-            { unsigned v; char nm[300]; if (mname[0] && sscanf(line, " version %u: %299[^,]", &v, nm) == 2 && !strcmp(nm, mname)) ver = v; }
+            { unsigned v; char nm[300]; if (mname[0] && sscanf(line, " version %u: %299[^\n]", &v, nm) == 2) { char *t = strstr(nm, ", region "); if (t) *t = 0; if (!strcmp(nm, mname)) ver = v; } }
             char id[32]; unsigned frames = 0;
             char *fr = strstr(line, " frames");
             if (!game || !fr || sscanf(line, " %31s", id) != 1 || !strchr("MS", id[strlen(id) - 1]) || id[0] < '0' || id[0] > '9') continue;
@@ -132,12 +142,23 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
             }
             closedir(d);
             if (!best[0]) continue;
-            int dup = 0; for (size_t i = 0; i < n; i++) if ((*out)[i].frames == frames && (*out)[i].size == (unsigned long)bsz) dup = 1;   // the same movie as publication and submission
+            uint64_t input = 0;   // FNV-1a of the decoded pad frames
+            { DpTas tas; memset(&tas, 0, sizeof tas); char terr[160];
+              if (dp_tas_load(best, &tas, terr, sizeof terr)) { input = 0xcbf29ce484222325ull; for (uint32_t i = 0; i < tas.frames; i++) input = (input ^ tas.masks[i]) * 0x100000001b3ull; }
+              dp_tas_free(&tas); }
+            int dup = 0; for (size_t i = 0; i < n; i++) if ((*out)[i].frames == frames && ((*out)[i].size == (unsigned long)bsz || (input && (*out)[i].input == input))) dup = 1;   // the same movie as publication and submission
             if (dup) continue;
             if (n == cap) { cap = cap ? cap * 2 : 16; *out = realloc(*out, cap * sizeof **out); }
-            snprintf((*out)[n].path, sizeof (*out)[n].path, "%s", best); (*out)[n].frames = frames; (*out)[n].size = (unsigned long)bsz; n++;
+            snprintf((*out)[n].path, sizeof (*out)[n].path, "%s", best); (*out)[n].frames = frames; (*out)[n].size = (unsigned long)bsz; (*out)[n].input = input;
+            snprintf((*out)[n].emu, sizeof (*out)[n].emu, "unresolved");
+            { char q2[7000]; snprintf(q2, sizeof q2, "%s tasdb emu %s %u --id %s 2>/dev/null", dp_shquote(exe, qe, sizeof qe), dp_shquote(rom, qr, sizeof qr), frames, id);
+              FILE *e = popen(q2, "r"); char el[256];
+              while (e && fgets(el, sizeof el, e)) if (!strncmp(el, "emulator=", 9)) { char *k = strstr(el, " kind="); if (k) *k = 0; el[strcspn(el, "\n")] = 0; snprintf((*out)[n].emu, sizeof (*out)[n].emu, "%.47s", el + 9); break; }
+              if (e) { while (fgets(el, sizeof el, e)) {} pclose(e); } }
+            if (!strcmp((*out)[n].emu, "unresolved")) { fprintf(stderr, "deepeel auto: %s skipped: the TASVideos API does not name its emulator\n", best); continue; }
+            n++;
         }
-        free(line); if (p) pclose(p);
+        free(line); if (p) fclose(p);
     }
     if (n) qsort(*out, n, sizeof **out, cmp_movie);
     return n;
@@ -186,21 +207,25 @@ static size_t merge_flags(Union *un, const char *path) {   // header "COV1" + si
     free(b); fclose(f);
     return added;
 }
-// known = 100% - unknown (every classified byte, suspects included); sure = observed while running (no suspect); code = executed
-typedef struct { size_t known, sure, code; } CovStats;
+// Each ROM byte counts once.  Observed while running: code (executed), else data (read, copied, decompressed).  Suspect
+// (nothing observed): code (static walk, probable walk, inferred) or data (inferred data, tables, padding).  known = the four.
+typedef struct { size_t code, data, scode, sdata, known; } CovStats;
 static CovStats union_stats(const Union *un) {
-    CovStats c = { 0, 0, 0 };
+    CovStats c = { 0, 0, 0, 0, 0 };
     for (size_t i = 0; i < un->n; i++) {
-        uint8_t f = un->u[i];
-        int sure = f & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_COPIED | DP_CORE_COMPRESSED | DP_CORE_DATA);
-        c.code += (f & (DP_CORE_NATURAL | DP_CORE_FORCED)) != 0; c.sure += sure != 0;
-        c.known += sure || (f & DP_CORE_STATIC) || un->inf[i] || un->prov[i];
+        uint8_t f = un->u[i], in = un->inf[i];
+        if (f & (DP_CORE_NATURAL | DP_CORE_FORCED)) c.code++;
+        else if (f & (DP_CORE_COPIED | DP_CORE_COMPRESSED | DP_CORE_DATA)) c.data++;
+        else if ((f & DP_CORE_STATIC) || un->prov[i] || in == DP_MAP_INF_CODE) c.scode++;
+        else if (in) c.sdata++;
     }
+    c.known = c.code + c.data + c.scode + c.sdata;
     return c;
 }
 static void cov_line(const Union *un, char *out, size_t n) {
     CovStats c = union_stats(un); double t = un->n ? 100.0 / (double)un->n : 0.0;
-    snprintf(out, n, "known %.1f%% (without suspect %.1f%%, code %.1f%%) of %zu bytes", c.known * t, c.sure * t, c.code * t, un->n);
+    snprintf(out, n, "observed: code %.1f%% data %.1f%% | suspect: code %.1f%% data %.1f%% | known %.1f%% of %zu bytes",
+             c.code * t, c.data * t, c.scode * t, c.sdata * t, c.known * t, un->n);
 }
 
 static void write_png(const Union *un, const char *png, const char *id, const char *name) {
@@ -222,18 +247,31 @@ static int read_live_frame(const char *path, LiveFrame *lf) {
     if (ok) { lf->w = hd[0]; lf->h = hd[1]; free(lf->px); lf->px = malloc((size_t)hd[0] * hd[1] * 4); ok = lf->px && fread(lf->px, 4, (size_t)hd[0] * hd[1], f) == (size_t)hd[0] * hd[1]; }
     fclose(f); return ok;
 }
+// emulated frames per second of a child, from the frame counter it publishes, averaged over one second
+static unsigned live_fps(Task *t, uint64_t frame) {
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); double now = (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+    if (!t->fps_t || frame < t->fps_frame) { t->fps_t = now; t->fps_frame = frame; t->fps = 0; }
+    else if (now - t->fps_t >= 1.0) { t->fps = (unsigned)((double)(frame - t->fps_frame) / (now - t->fps_t) + 0.5); t->fps_t = now; t->fps_frame = frame; }
+    return t->fps;
+}
 static int draw_live(const Union *un, const char *name, time_t t_start, Task *tk, size_t nt, const Movie *mv, uint32_t *sw, uint32_t *sh_) {
-    enum { INFO = 22, GAP = 4, MAXW = 1900, MAXH = 1000 };
+    enum { INFO = 32, GAP = 4, MAXW = 1900, MAXH = 1000 };
     static LiveFrame lf[64]; size_t shown[64], ns = 0;
     for (size_t i = 0; i < nt && ns < 64; i++) {
         Task *t = &tk[i]; if (t->kind != 1 || !t->pid || t->done || !t->lfr[0]) continue;
         if (read_live_frame(t->lfr, &lf[ns])) { if (!*sw) { *sw = lf[ns].w; *sh_ = lf[ns].h; } shown[ns++] = i; }
     }
+    static LiveFrame xf[64]; size_t xshown[64], nx = 0; time_t fresh = time(NULL) - 2;
+    for (size_t i = 0; i < nt && nx < 64; i++) {   // random-pad / attract screens of the snapshot explorations, while they move
+        Task *t = &tk[i]; struct stat sb; if (t->kind != 2 || !t->pid || t->done || !t->lfr[0] || stat(t->lfr, &sb) || sb.st_mtime < fresh) continue;
+        if (read_live_frame(t->lfr, &xf[nx])) { if (!*sw) { *sw = xf[nx].w; *sh_ = xf[nx].h; } xshown[nx++] = i; }
+    }
+    size_t nq = (nx + 3) / 4;
     uint32_t w0 = *sw ? *sw : 160, h0 = *sh_ ? *sh_ : 144;
     int z = 2, cols = 0, rows = 0, cw, chh;
     for (; z >= 1; z--) {   // largest zoom whose grid fits the display budget
         cw = (int)w0 * z + GAP; chh = (int)h0 * z + INFO + GAP;
-        int n = 4 + (int)ns; cols = 2; rows = 2;
+        int n = 4 + (int)ns + (int)nq; cols = 2; rows = 2;
         while (cols * rows < n) { if (cols * cw + cw <= MAXW && (cols <= rows || (rows + 1) * chh > MAXH)) cols++; else rows++; }
         if (cols * cw <= MAXW && rows * chh <= MAXH) break;
     }
@@ -251,29 +289,47 @@ static int draw_live(const Union *un, const char *name, time_t t_start, Task *tk
             char l[200]; CovStats cs = union_stats(un); double pc = un->n ? 100.0 / (double)un->n : 0.0;
             size_t block = un->n ? dp_canvas_covmap(cache, 0, 0, cwid, chei - INFO, un->u, un->n, 0x4000, un->inf, un->prov) : 0;
             long el = (long)(nowt - t_start);
-            snprintf(l, sizeof l, "%s  known %.1f%%  without suspect %.1f%%  code %.1f%%  time %02ld:%02ld:%02ld", name, cs.known * pc, cs.sure * pc, cs.code * pc, el / 3600, el / 60 % 60, el % 60);
+            snprintf(l, sizeof l, "%s  %02ld:%02ld:%02ld  known %.1f%%", name, el / 3600, el / 60 % 60, el % 60, cs.known * pc);
             dp_canvas_text(cache, 2, chei - INFO + 3, l, 1, 0xff80e090u);
-            snprintf(l, sizeof l, "1 square = %zu bytes | blue code, green data, orange suspect only, dark unknown", block);
-            dp_canvas_text(cache, 2, chei - INFO + 13, l, 1, 0xffa0a0a8u);
+            snprintf(l, sizeof l, "code %.1f%%  data %.1f%%  suspect: code %.1f%% data %.1f%%", cs.code * pc, cs.data * pc, cs.scode * pc, cs.sdata * pc);
+            dp_canvas_text(cache, 2, chei - INFO + 13, l, 1, 0xff96c8ffu);
+            snprintf(l, sizeof l, "1 square = %zu bytes | blue code, green data, orange suspect, dark unknown", block);
+            dp_canvas_text(cache, 2, chei - INFO + 23, l, 1, 0xffa0a0a8u);
         }
     }
     if (cache) for (int y = 0; y < chei && cy + y < c->h; y++) memcpy(c->px + (size_t)(cy + y) * c->w + cx, cache->px + (size_t)y * cwid, (size_t)(cx + cwid <= c->w ? cwid : c->w - cx) * 4);
     char l[200];
     // movie tiles fill the cells the coverage tile leaves free
     size_t k = 0;
-    for (int r = 0; r < rows && k < ns; r++) for (int q = 0; q < cols && k < ns; q++) {
+    for (int r = 0; r < rows && k < ns + nq; r++) for (int q = 0; q < cols && k < ns + nq; q++) {
         if (r < 2 && q < 2) continue;
-        int tx = GAP + q * cw, ty = GAP + r * chh; LiveFrame *f = &lf[k]; Task *t = &tk[shown[k]]; k++;
+        int tx = GAP + q * cw, ty = GAP + r * chh;
+        if (k >= ns) {   // an exploration tile: four screens at half width and height
+            size_t first = (k++ - ns) * 4; int hw = (int)w0 * z / 2, hh = (int)h0 * z / 2;
+            dp_canvas_rect(c, tx, ty, (int)w0 * z, (int)h0 * z + INFO, 0xff0c0c10u);
+            for (size_t j = 0; j < 4 && first + j < nx; j++) {
+                LiveFrame *f = &xf[first + j]; int qx = tx + (int)(j & 1) * hw, qy = ty + (int)(j >> 1) * hh;
+                dp_canvas_tile(c, qx, qy, hw - 1, hh - 1, f->px, (int)f->w, (int)f->h);
+                Task *t = &tk[xshown[first + j]]; const char *b = t->snap[0] ? strrchr(t->snap, '/') : NULL;
+                snprintf(l, sizeof l, "%.14s %u fps", b ? b + 1 : "power-on", live_fps(t, f->frame));
+                char *dot = strstr(l, ".state"); if (dot) memmove(dot, dot + 6, strlen(dot + 6) + 1);
+                dp_canvas_text(c, tx + 2 + (int)(j & 1) * hw, ty + (int)h0 * z + 3 + (int)(j >> 1) * 10, l, 1, 0xffc8c8d0u);
+            }
+            continue;
+        }
+        LiveFrame *f = &lf[k]; Task *t = &tk[shown[k]]; k++;
         dp_canvas_rect(c, tx, ty, (int)w0 * z, (int)h0 * z + INFO, 0xff0c0c10u);
         dp_canvas_tile(c, tx, ty, (int)w0 * z, (int)h0 * z, f->px, (int)f->w, (int)f->h);
         const char *b = strrchr(mv[t->movie].path, '/'); b = b ? b + 1 : mv[t->movie].path;
         snprintf(l, sizeof l, "%.28s", b); dp_canvas_text(c, tx + 2, ty + (int)h0 * z + 3, l, 1, 0xffc8c8d0u);
-        snprintf(l, sizeof l, "%llu/%u  %u%%", (unsigned long long)f->frame, f->total, f->total ? (unsigned)(100ull * f->frame / f->total) : 0u);
+        snprintf(l, sizeof l, "%llu/%u  %u%%  %u fps", (unsigned long long)f->frame, f->total, f->total ? (unsigned)(100ull * f->frame / f->total) : 0u, live_fps(t, f->frame));
         dp_canvas_text(c, tx + 2, ty + (int)h0 * z + 13, l, 1, 0xff96c8ffu);
+        snprintf(l, sizeof l, "source: %.40s", mv[t->movie].emu); dp_canvas_text(c, tx + 2, ty + (int)h0 * z + 23, l, 1, 0xffd0b060u);
     }
     int gone = dp_livewin_show(c, "deepeel - live coverage") && !getenv("DEEPEEL_LIVE_DUMP");   // closed or no display: stop composing
     dp_canvas_free(c);
     for (size_t i = 0; i < ns; i++) { free(lf[i].px); lf[i].px = NULL; }
+    for (size_t i = 0; i < nx; i++) { free(xf[i].px); xf[i].px = NULL; }
     return !gone;
 }
 
@@ -296,7 +352,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
     fprintf(stderr, "deepeel auto: %zu movie(s) for this ROM%s\n", nm, nm ? ", longest first" : " (no TAS: exploration from the power-on state only)");
 
     Union un = { rom_size ? calloc(rom_size, 1) : NULL, rom_size, rom_size ? calloc(rom_size, 1) : NULL, rom_size ? calloc(rom_size, 1) : NULL };
-    Task *tk = calloc(nm + 4096 + 1, sizeof *tk); size_t nt = 0;
+    Task *tk = calloc(nm + CAMP_SNAPSHOT_TASKS + 1, sizeof *tk); size_t nt = 0;
     for (size_t m = 0; m < nm; m++) { Task *t = &tk[nt++]; t->kind = 1; t->movie = (int)m; }   // movie replays, longest first
     tk[nt].kind = 2; nt++;   // power-on exploration: attract from the very start, random runs and forks (the only task of a game without TAS)
     size_t movie_next = nm;
@@ -366,7 +422,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
                 if (dup) continue;
                 if (nseen == seencap) { seencap = seencap ? seencap * 2 : 256; seen = realloc(seen, seencap * sizeof *seen); }
                 seen[nseen++] = strdup(full);
-                if (nt >= nm + 4096) continue;
+                if (nt >= nm + CAMP_SNAPSHOT_TASKS) continue;
                 Task *t = &tk[nt++]; memset(t, 0, sizeof *t);
                 t->kind = 2; t->movie = (int)m; snprintf(t->snap, sizeof t->snap, "%s", full); t->key = bitrev((unsigned)i); t->end = fin && i + 1 == nn;
             }
@@ -396,7 +452,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
                 kill(-tk[i].pid, SIGINT); fprintf(stderr, "deepeel auto: RAM %llu MiB available%s: %s stopped, re-queued\n", (unsigned long long)(avail >> 20), swap_grew ? ", swap growing" : "", tk[i].kind == 1 ? mv[tk[i].movie].path : tk[i].snap);
                 waitpid(tk[i].pid, NULL, 0); tk[i].done = 1;
                 if (tk[i].rss_peak > rss_est) rss_est = tk[i].rss_peak;
-                if (nt < nm + 4096) { Task *r = &tk[nt++]; memset(r, 0, sizeof *r); r->kind = tk[i].kind; r->movie = tk[i].movie; memcpy(r->snap, tk[i].snap, sizeof r->snap); r->key = tk[i].key; r->end = tk[i].end; }
+                if (nt < nm + CAMP_SNAPSHOT_TASKS) { Task *r = &tk[nt++]; memset(r, 0, sizeof *r); r->kind = tk[i].kind; r->movie = tk[i].movie; memcpy(r->snap, tk[i].snap, sizeof r->snap); r->key = tk[i].key; r->end = tk[i].end; }
                 running--; break;
             }
         }
@@ -417,7 +473,15 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             snprintf(t->dir, sizeof t->dir, "%s/%s", base, id); mkdirs(t->dir);
             snprintf(t->live, sizeof t->live, "%s/live.bin", t->dir); snprintf(t->log, sizeof t->log, "%s/log.txt", t->dir);
             snprintf(t->rep, sizeof t->rep, "%s/report.txt", t->dir);
-            char sdir[1250], snaps[1250], jobs[8] = "1", spool_arg[32];
+            char sdir[1250], snaps[1250], jobs[8] = "1", spool_arg[32], queue_arg[32];
+            {   // queued states by RAM, not by count: a Colour machine state is five times a monochrome one
+                struct stat sb; static size_t state_bytes;
+                if (t->snap[0] && !stat(t->snap, &sb) && sb.st_size > 0) state_bytes = (size_t)sb.st_size;
+                size_t q = state_bytes ? (size_t)(CAMP_QUEUE_BYTES / state_bytes) : 400;
+                if (q > CAMP_QUEUE_EXPLORE) q = CAMP_QUEUE_EXPLORE;
+                q >>= t->shrink; if (q < CAMP_QUEUE_MIN) q = CAMP_QUEUE_MIN;
+                snprintf(queue_arg, sizeof queue_arg, "%zu", q);
+            }
             {   // disk budget per child: what is free beyond the shed line, shared by the workers, 2 GiB at least
                 uint64_t fb = free_bytes(base), per = fb > SHED_FREE ? (fb - SHED_FREE) / (cap ? cap : 1) : 0;
                 snprintf(spool_arg, sizeof spool_arg, "%llu", (unsigned long long)(per > CAMP_SPOOL_MIN ? per : CAMP_SPOOL_MIN));
@@ -426,19 +490,21 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             char *av[64]; int n = 0;
             av[n++] = (char *)exe; av[n++] = "explore"; av[n++] = (char *)rom;
             av[n++] = "--jobs"; av[n++] = jobs;
-            av[n++] = "--max-total"; av[n++] = HUGE_STEPS; av[n++] = "--queue-max"; av[n++] = t->kind == 1 ? CAMP_STR(CAMP_QUEUE_MOVIE) : CAMP_STR(CAMP_QUEUE_EXPLORE);   // RAM share of one child: the rest spills to its disk spool
+            av[n++] = "--max-total"; av[n++] = HUGE_STEPS; av[n++] = "--queue-max"; av[n++] = t->kind == 1 ? CAMP_STR(CAMP_QUEUE_MOVIE) : queue_arg;   // RAM share of one child: the rest spills to its disk spool
             av[n++] = "--state-dir"; av[n++] = sdir; av[n++] = "--no-frontier";
             av[n++] = "--spool-max"; av[n++] = spool_arg;
             av[n++] = "--live-flags"; av[n++] = t->live;
             if (t->kind == 1) {
                 mkdirs(snaps);
                 av[n++] = "--tas"; av[n++] = mv[t->movie].path; av[n++] = "--replay-only";
+                av[n++] = "--no-closure"; av[n++] = "--no-infer"; av[n++] = "--no-spec";   // a replay only observes: suspects come from the explorations
                 av[n++] = "--snap-every"; av[n++] = CAMP_STR(CAMP_SNAP_EVERY); av[n++] = "--snap-dir"; av[n++] = snaps;
                 av[n++] = "--tas-stall"; av[n++] = CAMP_STR(CAMP_MOVIE_STALL); av[n++] = "--tas-report"; av[n++] = t->rep;
                 snprintf(t->shot, sizeof t->shot, "%s/summary.png", t->dir); av[n++] = "--tas-summary"; av[n++] = t->shot;
                 snprintf(t->lfr, sizeof t->lfr, "/dev/shm/deepeel-%d-%zu.frame", (int)getpid(), (size_t)(t - tk)); av[n++] = "--live-frame"; av[n++] = t->lfr; av[n++] = "--live-frame-ms"; av[n++] = CAMP_STR(CAMP_LIVE_FRAME_MS);   // one-glance picture of the replay
             } else {
                 if (t->snap[0]) { av[n++] = "--from-state"; av[n++] = t->snap; }
+                snprintf(t->lfr, sizeof t->lfr, "/dev/shm/deepeel-%d-%zu.frame", (int)getpid(), (size_t)(t - tk)); av[n++] = "--live-frame"; av[n++] = t->lfr; av[n++] = "--live-frame-ms"; av[n++] = CAMP_STR(CAMP_LIVE_FRAME_MS);
                 if (un.n && un.u) {   // seed the child with everything proved so far: it explores beyond the union, and its stagnation means "nothing new for the whole campaign"
                     mkdirs(sdir);
                     char cp[1300]; snprintf(cp, sizeof cp, "%s/coverage.bin", sdir);
@@ -455,6 +521,13 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
                 if (CAMP_EXPLORE_MAX_SECS) { av[n++] = "--max-time"; av[n++] = CAMP_STR(CAMP_EXPLORE_MAX_SECS); }
             }
             av[n] = NULL;
+            // BizHawk 2.3.2 Gambatte counts its RTC in CPU cycles: the API names the release, the movie gives the divisor offset
+            unsetenv("DEEPEEL_TAS_RTCOFF");
+            if (t->kind == 1 && strstr(mv[t->movie].emu, "2.3.2")) {
+                DpTas tas; memset(&tas, 0, sizeof tas); char terr[160], off[16];
+                if (dp_tas_load(mv[t->movie].path, &tas, terr, sizeof terr)) { snprintf(off, sizeof off, "%d", tas.rtc_div_offset); setenv("DEEPEEL_TAS_RTCOFF", off, 1); }
+                dp_tas_free(&tas);
+            }
             t->t0 = time(NULL); t->pid = spawn(exe, av, t->log);
             if (t->pid < 0) { t->pid = 0; t->done = 1; }
             else { running++; running_x += t->kind == 2; }
@@ -494,7 +567,9 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
                 size_t rss = proc_rss(tk[i].pid); if (rss > tk[i].rss_peak) tk[i].rss_peak = rss;
                 if (rss > CHILD_RSS_CAP) {
                     tk[i].over_t = time(NULL); kill(-tk[i].pid, SIGKILL); killed_big++;
-                    fprintf(stderr, "deepeel auto: child over %llu MiB (%zu MiB), killed (coverage so far kept, not re-queued): %s\n", (unsigned long long)(CHILD_RSS_CAP >> 20), rss >> 20, tk[i].kind == 1 ? mv[tk[i].movie].path : tk[i].snap);
+                    int again = tk[i].kind == 2 && tk[i].shrink < CAMP_RSS_RETRIES && nt < nm + CAMP_SNAPSHOT_TASKS;
+                    if (again) { Task *r = &tk[nt++]; memset(r, 0, sizeof *r); r->kind = 2; r->movie = tk[i].movie; memcpy(r->snap, tk[i].snap, sizeof r->snap); r->key = tk[i].key; r->end = tk[i].end; r->shrink = tk[i].shrink + 1; }
+                    fprintf(stderr, "deepeel auto: child over %llu MiB (%zu MiB), killed, coverage so far kept, %s: %s\n", (unsigned long long)(CHILD_RSS_CAP >> 20), rss >> 20, again ? "re-queued with half the queue" : "not re-queued", tk[i].kind == 1 ? mv[tk[i].movie].path : tk[i].snap);
                 }
             }
         }

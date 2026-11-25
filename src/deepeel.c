@@ -702,7 +702,17 @@ static int cmd_explore(int argc, char **argv) {
                     } else if (match == 1) fprintf(stderr, "deepeel: TAS %s: ROM identity verified (%s)\n", gt.source, why);
                 }
                 const char *bios = getenv("DEEPEEL_TAS_CGB_BIOS");
-                if (bios && *bios) {
+                if (!(bios && *bios) && DP_GBL_COLOR_BUILD && (cart->rom[0x143] & 0x80) && dp_tas_needs_cgb_bios(&gt)) {
+                    static char found[4096];
+                    if (dp_tas_find_cgb_bios(&gt, path, found, sizeof found))
+                        fprintf(stderr, "deepeel: CGB BIOS identity verified (%s)\n", found);
+                    else {   // without its boot ROM the movie desyncs by construction
+                        fprintf(stderr, "deepeel: --tas: the movie needs a CGB boot ROM that was not found (2304 bytes, put it next to the ROM or in ~/.config/deepeel)\n");
+                        dp_tas_free(&gt); km->close(km);
+                        dp_results_free(&res); dp_cart_free(cart);
+                        return 1;
+                    }
+                } else if (bios && *bios) {
                     if (!(cart->rom[0x143] & 0x80) ||
                         !DP_GBL_COLOR_BUILD) {
                         snprintf(terr, sizeof terr, "CGB BIOS requires a CGB cartridge and a DP_GBL_CGB build");

@@ -1,6 +1,7 @@
 // tasshot.c: the TAS replay summary picture. The kernel hands over the key screens of the unshifted replay
 // (any machine: the screen is just a w*h ARGB buffer); this file composes them on a DpCanvas with the movie's
 // identity and a verdict, then writes one PNG of at most 1920x1080 that can be judged at a glance.
+#include "../core/shquote.h"
 #include "tasshot.h"
 #include "../gui/canvas.h"
 #include <stdio.h>
@@ -75,14 +76,15 @@ int dp_tasshot_finish(const char *path, const DpTasSummary *s) {
 }
 
 void dp_tasshot_emu(const char *rom, uint32_t frames, const char *movie, char *out, size_t n) {
-    char cmd[2600], idarg[80] = ""; out[0] = 0;
+    char cmd[7000], idarg[80] = ""; out[0] = 0;
     if (movie) {   // .../movies/<game>/<NNNN[M|S]>/file
         const char *e = strrchr(movie, '/');
         if (e) { const char *b = e; while (b > movie && b[-1] != '/') b--; size_t l = (size_t)(e - b), d = 0; while (d + 1 < l && b[d] >= '0' && b[d] <= '9') d++;
                  if (l >= 2 && d == l - 1 && (b[l - 1] == 'M' || b[l - 1] == 'S') && l < 20) snprintf(idarg, sizeof idarg, " --id %.*s", (int)l, b); }
     }
     char exe[1100]; ssize_t el = readlink("/proc/self/exe", exe, sizeof exe - 1); if (el <= 0) return; exe[el] = 0;   // popen's shell would otherwise be "self"
-    snprintf(cmd, sizeof cmd, "'%s' tasdb emu '%s' %u%s 2>/dev/null", exe, rom, frames, idarg);
+    char qe[2300], qr[4400];
+    snprintf(cmd, sizeof cmd, "%s tasdb emu %s %u%s 2>/dev/null", dp_shquote(exe, qe, sizeof qe), dp_shquote(rom, qr, sizeof qr), frames, idarg);
     FILE *p = popen(cmd, "r"); if (!p) return;
     char line[256];
     while (fgets(line, sizeof line, p)) if (!strncmp(line, "emulator=", 9)) { char *e = strstr(line, " kind="); if (e) *e = 0; line[strcspn(line, "\n")] = 0; snprintf(out, n, "%s", line + 9); break; }

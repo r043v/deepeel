@@ -6743,3 +6743,21 @@ Les inférences ne remontent qu'à la fin de chaque enfant : « known » progres
 carrés suspects seulement. L'attract est lancé depuis l'allumage (`CAMP_ATTRACT_*`) et depuis la dernière sauvegarde de chaque
 film (`CAMP_POST_ATTRACT_*`).
 
+
+## Campagne : synchro des films, couverture et fenêtre (2026-11-25)
+
+- **BIOS CGB** : un film Gambatte CGB démarre dans le boot ROM qu'il nomme (SHA-1 `GBC_Firmware_World`). L'exécutable
+  le cherche seul, par empreinte, parmi les fichiers de 2 304 octets : dossier de la ROM, dossier du film,
+  `~/.config/deepeel`, `~/.local/share/deepeel`, `roms/` du dépôt m0boy. `DEEPEEL_TAS_CGB_BIOS` reste prioritaire.
+  Introuvable : le film est refusé (il désynchroniserait par construction).
+- **RTC BizHawk 2.3.2** : quand l'API TASVideos nomme cette version, la campagne passe elle-même le
+  `RTCDivisorOffset` du film au rejeu.
+- Un film dont l'API ne nomme pas l'émulateur est écarté ; deux fiches aux mêmes entrées ne sont rejouées qu'une fois.
+- Observations de l'outil sur Zelda DX V1.0 : les films BizHawk 2.3 atteignent la fin du jeu. Les films VBA-rr de
+  cette ROM essayés (599M, 2628M) désynchronisent et sont signalés comme tels sur leur PNG.
+- Les chemins contenant une apostrophe sont désormais correctement transmis aux commandes internes.
+- **Chiffres** : « observed code / data » vient de l'exécution, « suspect code / data » de l'analyse statique et de
+  l'inférence, « known » est leur somme. Les rejeux de films n'ajoutent aucun suspect (ni fermeture ni inférence) :
+  il vient des explorations.
+- **Fenêtre live** : chaque tuile de film donne la trame, les images par seconde et l'émulateur d'origine ; les
+  explorations aléatoires issues des snapshots sont affichées au quart de taille, quatre par tuile.

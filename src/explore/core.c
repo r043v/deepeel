@@ -2293,6 +2293,7 @@ static void run_path(Worker *w, Pending *p) {
             if (f != sess_last) {
                 sess_last = f;
                 if (!burst) core_watch_publish(cfg, m, f, (uint32_t)(f - sess_f0), (uint32_t)sess_limit);   // the live screen also follows the attract/play sessions
+                if ((attract || rnd) && cfg->live_frame) core_live_frame(cfg, m, f);
                 vid = ++w->path_id;
                 // B3: attract and play sessions drop live states into the same pool as the movie: a checkpoint every tas_ckpt_every
                 // session frames (bounded by tas_ckpt_cap) continues as a free natural path

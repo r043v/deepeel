@@ -31,6 +31,10 @@
 /* ---- queues and disk ---- */
 #define CAMP_QUEUE_MOVIE       1000     /* forked states held in RAM by a movie child (the rest spills to its disk spool) */
 #define CAMP_QUEUE_EXPLORE     1500
+#define CAMP_QUEUE_BYTES       (384ull << 20)   /* RAM held by an exploration's queued states: the count follows the state size (GB CGB: 680 KiB) */
+#define CAMP_QUEUE_MIN         64
+#define CAMP_RSS_RETRIES       2        /* a child killed over its RSS cap is re-queued this many times, its queue halved each time */
+#define CAMP_SNAPSHOT_TASKS    65536    /* snapshot explorations the supervisor can hold */
 #define CAMP_CHILD_RSS_CAP     (1ull << 30)   /* a child above this is killed, its last live coverage is kept */
 #define CAMP_LOCAL_MIN_FREE    (8ull << 30)   /* under this the bulk data goes to the overflow disk */
 #define CAMP_SHED_FREE         (14ull << 30)  /* under this the child holding the biggest spool is stopped */

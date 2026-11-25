@@ -50,6 +50,7 @@ typedef struct DpTas {
     // BizHawk header "Core GBHawk": the GBHawk pad-latch/DIV profile applies
     int gbhawk;
     int is_cgb, has_cgb_bios_hash, has_power_event, cgb_bios_loaded, gba_cgb;
+    int rtc_div_offset;   // BK2 SyncSettings RTCDivisorOffset
     uint8_t cgb_bios_hash[20];
     uint8_t cgb_bios[DP_CGB_BOOT_SIZE];
 } DpTas;
@@ -71,6 +72,8 @@ void dp_tas_profile(const DpTas *t, char *out, size_t n);
 // message in `err` otherwise
 int dp_tas_load(const char *path, DpTas *out, char *err, size_t errsz);
 void dp_tas_free(DpTas *t);
+int dp_tas_needs_cgb_bios(const DpTas *t);
+int dp_tas_find_cgb_bios(DpTas *t, const char *rom_path, char *out, size_t outsz);   // by the movie's SHA-1
 int dp_tas_load_cgb_bios(DpTas *t, const char *path, char *err, size_t errsz);
 
 #endif
