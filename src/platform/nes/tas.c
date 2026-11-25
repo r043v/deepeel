@@ -9,10 +9,10 @@
 
 /* fm2 controller characters, in the movie's column order, to nes.input
  * bits (A=1 B=2 Select=4 Start=8 Up=16 Down=32 Left=64 Right=128):
- * R L D U S T B A with S = Start, T = Select */
+ * R L D U T S B A with T = Start, S = Select */
 static const struct { char ch; uint8_t bit; } fm2_cols[8] = {
     { 'R', 0x80 }, { 'L', 0x40 }, { 'D', 0x20 }, { 'U', 0x10 },
-    { 'S', 0x08 }, { 'T', 0x04 }, { 'B', 0x02 }, { 'A', 0x01 },
+    { 'T', 0x08 }, { 'S', 0x04 }, { 'B', 0x02 }, { 'A', 0x01 },
 };
 
 static int fm2_mask(const char *field) {
@@ -61,8 +61,7 @@ static int tas_load_fm2(FILE *f, DpNesTas *t, char *err, size_t errsz) {
             if (!nm || !nc) { free(nm); free(nc); snprintf(err, errsz, "fm2: out of memory"); return 0; }
             t->masks = nm; t->cmds = nc;
         }
-        uint8_t mask = (uint8_t)fm2_mask(tok[1]);
-        if (ntok >= 4) mask |= (uint8_t)(fm2_mask(tok[2]) >> 4); /* pad 2 parked high */
+        uint8_t mask = (uint8_t)fm2_mask(tok[1]);   /* player 1 only, as for bk2 */
         t->masks[t->frames] = mask;
         t->cmds[t->frames] = (uint8_t)cmd;
         t->frames++;

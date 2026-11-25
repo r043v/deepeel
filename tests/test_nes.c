@@ -330,8 +330,8 @@ static void test_tas_load(void) {
         "|2|........|||\n"
         "|0|........|||\n"
         "|0|.......A.|||\n"   // A pressed -> bit 0
-        "|0|S.......|||\n"    // S (first col slot 4) = Start -> bit 3
-        "|0|T.......|||\n"    // T = Select -> bit 2
+        "|0|....T...|||\n"    // RLDUTSBA: T = Start -> bit 3
+        "|0|.....S..|||\n"    // S = Select -> bit 2
         "|0|R......B|||\n";   // R = Right bit 7, B = bit 1
     FILE *f = fopen("test_tas.fm2", "wb");
     fwrite(fm2, 1, strlen(fm2), f);

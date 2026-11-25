@@ -6895,3 +6895,8 @@ Remplace les passes en moitiés et les quotas de la 0.439 (réglages dans `src/e
   l'état VCE/IRQ PC Engine manquants entrent dans les états sauvés.
 - **Fourches PC Engine** : le chargement d'un snapshot reprenait les pointeurs du processus qui l'avait écrit
   (plantage des travaux à fourches).
+
+## 0.441.1 — films FM2 NES
+
+- **Films FM2 (NES)** : `T` (Start) et `S` (Select) étaient inversés, et les directions de la manette 2 s'ajoutaient aux
+  boutons de la manette 1. Aucun film FM2 ne lançait la partie.

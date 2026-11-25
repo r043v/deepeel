@@ -808,7 +808,8 @@ int dp_auto_campaign(const char *exe, const char *platform, const char *rom, con
             snprintf(t->lfr, sizeof t->lfr, "/dev/shm/deepeel-%d-%s.frame", (int)getpid(), id);
             char *av[64]; int n = 0;
 #define A(x) av[n++] = (char *)(x)
-            A(exe); PLAT_CLI(av, n); A(SIBLING(t) ? mv[t->movie].rom : rom);
+            const char *av_rom = SIBLING(t) ? mv[t->movie].rom : rom;
+            A(exe); PLAT_CLI(av, n); A(av_rom);
             A("--jobs"); A("1"); A("--max-total"); A(HUGE_STEPS); A("--queue-max"); A(queue_arg);   // RAM share of one child: the rest spills to its disk spool
             A("--state-dir"); A(sdir); A("--no-frontier"); A("--spool-max"); A(spool_arg);
             A("--live-flags"); A(t->live); A("--live-frame"); A(t->lfr); A("--live-frame-ms"); A(CAMP_STR(CAMP_LIVE_FRAME_MS));
@@ -821,6 +822,9 @@ int dp_auto_campaign(const char *exe, const char *platform, const char *rom, con
                 mkdirs(snaps); A("--snap-every"); A(CAMP_STR(CAMP_SNAP_EVERY)); A("--snap-dir"); A(snaps);
                 A("--tas-stall"); A(CAMP_STR(CAMP_MOVIE_STALL)); A("--tas-report"); A(t->rep);
                 snprintf(t->shot, sizeof t->shot, "%s/summary.png", t->dir); A("--tas-summary"); A(t->shot);
+                // identity printed on the picture: the source emulator is the TASVideos API's (resolved when the movie was listed)
+                { const char *b = strrchr(mv[t->movie].path, '/'); A("--tas-name"); A(b ? b + 1 : mv[t->movie].path);
+                  A("--tas-emu"); A(mv[t->movie].emu); b = strrchr(av_rom, '/'); A("--tas-rom"); A(b ? b + 1 : av_rom); }
                 A("--attract-frames"); A(CAMP_STR(CAMP_ATTRACT_MAX)); A("--attract-min"); A(CAMP_STR(CAMP_POST_ATTRACT_MIN)); A("--attract-stall"); A(CAMP_STR(CAMP_POST_ATTRACT_STALL));
             } else if (t->kind == K_BOOT) {
                 A("--attract-frames"); A(CAMP_STR(CAMP_ATTRACT_MAX)); A("--attract-min"); A(CAMP_STR(CAMP_ATTRACT_MIN)); A("--attract-stall"); A(CAMP_STR(CAMP_ATTRACT_STALL));
