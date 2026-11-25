@@ -235,6 +235,7 @@ typedef struct DpCoreResult {
     uint64_t event_probe_arms;  // B1: arms (a fresh site, or a re-armed context)
     uint64_t event_probes;      // forced variants queued by the probe arms
     uint64_t epoch_forks, ckpt_bursts;   // B3: pad bursts started from session checkpoints
+    uint64_t proof_roots, proof_bytes, proof_forced;   // end-of-run static proof: seeds, bytes newly static, of which only forced before
     uint64_t closure_roots, closure_bytes, closure_capped, closure_jp_tables, closure_jp_entries, prov_data_bytes; uint32_t *jp_seen; unsigned jp_seen_n, jp_seen_cap; uint64_t closure_stack_dropped, pending_dropped, deferred, state_repeats, exact_states, probe_ctx_sat, probe_rearms, bank_forks, bank_fork_sat, tas_ckpts, sess_ckpts, held_stops;   // static closure: roots walked, bytes newly marked, walks stopped by the cap
     uint8_t closure_regs;              // C3: the regstate-aware closure is on
     uint64_t closure_reg_roots;        // C3: regstate seed walks started from an executed step

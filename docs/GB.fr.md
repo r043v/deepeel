@@ -807,6 +807,34 @@ Perdu entre threads (l'entrelacement dépend de l'ordonnanceur) ; par contre
 chaque session reste rejouable individuellement (graine ou script), et un
 run à masques fixes + `--fork-paths 0` est reproductible.
 
+## Preuve statique de fin d'exploration (0.443.0)
+
+La fermeture en cours d'exploration s'arrête sur tout octet déjà connu, y compris
+un octet seulement exécuté sur un chemin forcé ; et la dernière passe d'une
+campagne n'a que les drapeaux fusionnés. Une passe finale du noyau (toutes les
+ISA, coupée par `--no-closure`) repart donc de la carte : chaque transfert direct
+exécuté naturellement prouve son autre côté (la cible, la suite d'un
+conditionnel), parcouru jusqu'à un retour, un saut calculé, un opcode illégal,
+une donnée lue ou du code exécuté. Les octets atteints, forcés compris, passent en
+« statique prouvé ». Rapport : `static proof from executed transfers`.
+
+Une cible n'est suivie que si son octet ROM est certain :
+
+- branchement relatif dans sa page de 8 Kio : toutes les ISA ;
+- saut ou appel absolu : seulement quand le mapping est fixe (banques GB, ROM
+  linéaire). Depuis la banque 0, une cible `$4000-$7FFF` est ignorée s'il y a
+  plus de deux banques. NES, PCE, SMS/GG/MSX et WonderSwan ne suivent pas les
+  absolus : il faudrait journaliser la fenêtre d'exécution de chaque page ;
+- suite d'un appel : seulement si l'exécution naturelle a vu cet appelé revenir
+  (données placées après un `call`/`rst` sinon).
+
+Limite connue : un conditionnel toujours vrai (ou toujours faux) peut précéder des
+données. Observation de l'outil sur Zelda DX (campagne existante, comparée au
+désassemblage communautaire `azle`) : 15 524 octets prouvés, dont 12 460 vus
+seulement sur des chemins forcés ; le désassemblage appelle code 99,6 % de ces
+derniers. Le reste du forcé (12 % de code selon la même référence) n'est pas
+atteignable par des transferts fixes depuis le code exécuté.
+
 ## Fermeture statique et élagage (0.4.0)
 
 La machine prouve le code en l'exécutant ; ses garde-fous (budget par chemin,

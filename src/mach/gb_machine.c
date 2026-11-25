@@ -658,6 +658,7 @@ static DpMachine *gb_wrap(DpMach *impl) {
     m->save_ram_en = 1; m->save_ram_en_addr = 0x0000u; m->save_ram_en_val = 0x0A;
     m->save_ram_base = 0xA000u; m->save_ram_len = 0x2000u;
     m->plat = dp_platform_gb();
+    m->fixed_low_banked = 1;
     m->bank_shift = 14;   // the SM83's 16 KiB pointer-table window (the static closure's geometry, E5)
     m->rom_top_win = 2; m->bank_window = 0x4000u;   // P10: the switchable window maps its bank at $4000   // $0000 fixed, $4000 switchable: a code target never sits at $8000 and beyond
     m->isa = dp_isa_sm83();

@@ -328,6 +328,10 @@ qui fournissent les hooks requis.
   - GB `dp_static_closure` `src/explore/closure.c:79-221` ;
   - z80 à **vues de banques et de slots** `src/platform/sega/closure.c` (583 lignes ;
     `view_hash` :45, `capture` :104, `address_effect` :223).
+- 0.443.0, **preuve statique de fin d'exploration** (générique, `docs/GB.fr.md`) :
+  depuis les transferts directs exécutés, à travers les octets forcés ; absolus
+  suivis en GB et ROM linéaire, relatifs seuls ailleurs (la fenêtre d'exécution
+  des pages n'est pas persistée : travail restant, pas une limite technique) ;
 - **Norme** :
   - la fermeture **à vues** (z80) devient la référence, GB compris : chaque
     contexte de mapping (banque, MPR, slot) est une vue, et une arête qui sort de

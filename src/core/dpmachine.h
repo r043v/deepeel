@@ -275,6 +275,7 @@ struct DpMachine {
     const DpIsa *isa;
     uint32_t code_base;                    // C3/B8: address of the first 16 KiB ROM window (GB 0, NES 0x8000)
     uint16_t bank_window;                  // P10: CPU base address of the switchable 16 KiB window (GB/Sega/PCE $4000, NES $8000); 0: unknown (the cov offsets of banks > 0 stay image-relative)
+    uint8_t fixed_low_banked;              // 1: pc < one bank is bank 0 and the next window holds the code's own bank (GB): static proof follows absolute targets
     uint8_t fixed_high;                    // 1 = the high window is the fixed (last) bank and the low one switches (NES); 0 = the reverse (GB)
     uint32_t save_ram_en_addr; uint8_t save_ram_en_val, save_ram_en;   // B10: write that enables the cart RAM before seeding
     uint32_t save_ram_base, save_ram_len;  // B10: battery/cart RAM window the game may validate at boot (0 len: none)

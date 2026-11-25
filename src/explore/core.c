@@ -959,6 +959,118 @@ static void closure_walk_regs(DpCoreResult *r, DpMachine *m, const DpIsa *isa, u
     closure_run(r, &v, isa, root, 0, 0, regs, 1, CLOSURE_INSTR, rw);
 }
 
+// --- static proof: the end-of-run pass over the merged flags.  A naturally executed direct transfer proves its other
+// side (the target, the fall-through of a conditional): the code there is walked, through forced bytes too (the live
+// closure stops on them), up to a return, a computed transfer, an illegal opcode, read data or executed code.  The
+// marks are DP_CORE_STATIC.  A target is followed only when its ROM byte is certain: a relative branch inside its
+// 8 KiB page on every ISA; absolute targets where the mapping is fixed (GB banking, linear ROM).  The fall-through of a
+// call is followed only when execution was seen to come back from that callee (inline data after a call otherwise).
+typedef struct {
+    DpCoreResult *r; const DpMachine *m; const DpIsa *isa; const uint8_t *rom; size_t n;
+    uint8_t *seen, *returns;   // bitmaps over ROM indices: walked instruction starts; callees seen to return
+    uint32_t *stack; size_t sp, cap;
+} Proof;
+#define PROOF_BIT(b, i) ((b)[(i) >> 3] & (1u << ((i) & 7)))
+#define PROOF_SET(b, i) ((b)[(i) >> 3] |= (uint8_t)(1u << ((i) & 7)))
+static uint32_t proof_pc(const Proof *p, size_t k) {
+    if (p->m->fixed_low_banked) return (uint32_t)(k < 0x4000u ? k : 0x4000u + (k & 0x3FFFu));
+    if (p->m->linear && !p->m->page_shift) return p->m->code_base + (uint32_t)k;
+    return p->m->code_base + (uint32_t)(k & 0x1FFFu);   // some window: only relative targets are used
+}
+static int proof_decode(const Proof *p, size_t k, uint32_t pc, DpFlowInfo *f) {
+    uint8_t b[10] = {0};
+    for (unsigned i = 0; i < sizeof b && k + i < p->n; i++) b[i] = p->rom[k + i];
+    memset(f, 0, sizeof *f);
+    return p->isa->flow(b, pc, f) && f->length && f->kind != DP_FLOW_ILLEGAL && k + f->length <= p->n;
+}
+// ROM index of the direct target of the instruction at k, or -1 when the mapping leaves it uncertain
+static int64_t proof_target(const Proof *p, size_t k, const DpFlowInfo *f) {
+    if (f->target < 0) return -1;
+    uint32_t pc = proof_pc(p, k), t = (uint32_t)f->target;
+    if (p->m->fixed_low_banked) {
+        if (t < 0x4000u) return t < p->n ? (int64_t)t : -1;
+        if (t >= 0x8000u) return -1;
+        size_t bank = k >> 14;
+        if (!bank) { if (p->n > 0x8000u) return -1; bank = 1; }   // the fixed bank does not say which bank it calls
+        size_t x = bank * 0x4000u + (t & 0x3FFFu);
+        return x < p->n ? (int64_t)x : -1;
+    }
+    if (p->m->linear && !p->m->page_shift) {
+        if (t < p->m->code_base || t - p->m->code_base >= p->n) return -1;
+        return (int64_t)(t - p->m->code_base);
+    }
+    DpFlowInfo g; uint32_t pc2 = pc ^ 0x0100u;   // a relative branch moves with its own address, an absolute one does not
+    if (!proof_decode(p, k, pc2, &g) || g.target < 0 || (uint32_t)(g.target - (int32_t)pc2) != (uint32_t)(f->target - (int32_t)pc)) return -1;
+    int64_t x = (int64_t)k + (int32_t)(t - pc);
+    return (x >= 0 && (size_t)x < p->n && ((size_t)x >> 13) == (k >> 13)) ? x : -1;
+}
+static void proof_push(Proof *p, int64_t k) {
+    if (k < 0 || (size_t)k >= p->n || PROOF_BIT(p->seen, k) || (p->r->flags[k] & (DP_CORE_NATURAL | DP_CORE_DATA | DP_CORE_COPIED | DP_CORE_COMPRESSED))) return;
+    if (p->sp == p->cap) {
+        size_t nc = p->cap ? p->cap * 2 : 1024; uint32_t *ns = realloc(p->stack, nc * sizeof *ns);
+        if (!ns) return;
+        p->stack = ns; p->cap = nc;
+    }
+    p->stack[p->sp++] = (uint32_t)k;
+}
+// the next instruction in the same page (banked) or anywhere (linear)
+static int64_t proof_next(const Proof *p, size_t k, unsigned len) {
+    size_t x = k + len;
+    if (!(p->m->linear && !p->m->page_shift) && (x >> 13) != (k >> 13)) return -1;
+    return x < p->n ? (int64_t)x : -1;
+}
+static void proof_walk(Proof *p) {
+    while (p->sp) {
+        size_t k = p->stack[--p->sp];
+        if (PROOF_BIT(p->seen, k)) continue;
+        PROOF_SET(p->seen, k);
+        if (k + 8 <= p->n && (p->rom[k] == 0x00 || p->rom[k] == 0xFF) && !memcmp(p->rom + k, p->rom + k + 1, 7)) continue;   // filler
+        DpFlowInfo f;
+        if (!proof_decode(p, k, proof_pc(p, k), &f)) continue;
+        int clash = 0;
+        for (unsigned i = 0; i < f.length; i++) if (p->r->flags[k + i] & (DP_CORE_NATURAL | DP_CORE_DATA | DP_CORE_COPIED | DP_CORE_COMPRESSED)) clash = 1;
+        if (clash) continue;
+        for (unsigned i = 0; i < f.length; i++) {
+            uint8_t old = p->r->flags[k + i];
+            if (old & DP_CORE_STATIC) continue;
+            p->r->flags[k + i] = old | DP_CORE_STATIC; p->r->proof_bytes++;
+            if (old & DP_CORE_FORCED) p->r->proof_forced++;
+        }
+        int direct = f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL;
+        int64_t t = direct ? proof_target(p, k, &f) : -1;
+        if (t >= 0) proof_push(p, t);
+        int fall = f.kind == DP_FLOW_SEQ || f.kind == DP_FLOW_COND;
+        if (f.kind == DP_FLOW_CALL) fall = f.cond >= 0 || (t >= 0 && PROOF_BIT(p->returns, t));
+        if (fall && !f.halt) proof_push(p, proof_next(p, k, f.length));
+    }
+}
+static void static_proof(DpCoreResult *r, const DpMachine *m, const DpCoreConfig *cfg) {
+    Proof p = { r, m, m->isa, cfg->rom_image, r->rom_size < cfg->rom_image_size ? r->rom_size : cfg->rom_image_size, NULL, NULL, NULL, 0, 0 };
+    p.seen = calloc(p.n / 8 + 1, 1); p.returns = calloc(p.n / 8 + 1, 1);
+    // two sweeps over the executed runs (each starts on an instruction): first the callees that return, then the seeds
+    for (int sweep = 0; p.seen && p.returns && sweep < 2; sweep++) {
+        for (size_t k = 0; k < p.n; ) {
+            if (!(r->flags[k] & DP_CORE_NATURAL)) { k++; continue; }
+            DpFlowInfo f;
+            int ok = proof_decode(&p, k, proof_pc(&p, k), &f);
+            for (unsigned i = 0; ok && i < f.length; i++) ok = (r->flags[k + i] & DP_CORE_NATURAL) != 0;
+            if (!ok) { while (k < p.n && (r->flags[k] & DP_CORE_NATURAL)) k++; continue; }   // out of step: the rest of the run is left alone
+            int direct = f.kind == DP_FLOW_JUMP || f.kind == DP_FLOW_COND || f.kind == DP_FLOW_CALL;
+            int64_t t = direct ? proof_target(&p, k, &f) : -1, nx = proof_next(&p, k, f.length);
+            if (!sweep) {
+                if (f.kind == DP_FLOW_CALL && f.cond < 0 && t >= 0 && nx >= 0 && (r->flags[nx] & DP_CORE_NATURAL)) PROOF_SET(p.returns, t);
+            } else {
+                size_t before = p.sp;
+                if (t >= 0) proof_push(&p, t);
+                if (f.kind == DP_FLOW_COND && nx >= 0) proof_push(&p, nx);
+                if (p.sp > before) { r->proof_roots += p.sp - before; proof_walk(&p); }
+            }
+            k += f.length;
+        }
+    }
+    free(p.seen); free(p.returns); free(p.stack);
+}
+
 // B8: speculative disassembly of the holes (never "known"): in the gaps left by every other technique, a candidate chain of
 // legal instructions is accepted when it ends in a return / unconditional jump / halt, every direct target lands on known
 // code or on an instruction start of the chain itself, and it is not padding.  Works on the 16 KiB-window image layout.
@@ -4017,6 +4129,7 @@ cleanup:
     free(sh.tas_start);
     if (cfg->hooks && cfg->hooks->finish && out->flags) cfg->hooks->finish(cfg->hooks->user, out);
     if (!cfg->no_infer || !cfg->no_spec) core_phase(cfg, "static", sh.rnd_done, sh.qn);
+    if (!cfg->no_closure && out->flags && cfg->rom_image && m->isa) static_proof(out, m, cfg);
     if (!cfg->no_infer && out->flags && cfg->rom_image && m->isa) infer_static(out, m, cfg);
     if (!cfg->no_spec && m->bank_shift == 14 && m->isa && out->flags) speculative_gaps(out, m->isa, cfg, m, 0x4000u);
     else if (!cfg->no_spec && m->page_shift && m->isa && out->flags) speculative_gaps_pages(out, m->isa, cfg, m);
@@ -4253,6 +4366,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     }
     fprintf(out, "speculative gaps: %llu runs, %llu bytes (never counted as known); %llu runs reinforced by an immediate reference (%llu references seen)\n", U(r->spec_runs), U(r->spec_bytes), U(r->spec_ref_runs), U(r->imm_refs));
     fprintf(out, "static closure: roots %llu, bytes %llu, static-only %zu, provisional %zu (untrusted walks, code once confirmed), capped walks %llu, returns followed %llu, RAM-parked code pointers %llu\n", U(r->closure_roots), U(r->closure_bytes), stat_only, prov_only, U(r->closure_capped), U(r->closure_rets), U(r->closure_ptr_stores));
+    if (r->proof_roots) fprintf(out, "static proof from executed transfers: roots %llu, bytes %llu (%llu seen only on forced paths before)\n", U(r->proof_roots), U(r->proof_bytes), U(r->proof_forced));
     if (r->closure_entry_refused) fprintf(out, "untrusted walk entries refused (data plausibility, point 3): %llu\n", U(r->closure_entry_refused));
     if (r->closure_stack_invalidations) fprintf(out, "ghost returns discarded on memory-control OUT (port_effect): %llu\n", U(r->closure_stack_invalidations));
     if (r->closure_regs) fprintf(out, "closure registers (C3): seed walks %llu, indirect resolved %llu, indirect unresolved %llu, stack returns %llu, indirect site cap %llu, seeds refused (site cap %llu, set full %llu)\n",
