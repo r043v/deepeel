@@ -2100,11 +2100,13 @@ static void run_path(Worker *w, Pending *p) {
     if (m->set_input && cur_input) m->set_input(m, cur_input - 1);   // input 0: keep the loaded state's held pad (probe forks hold theirs)
     loc->paths++;
     run_flush(&w->cobs);
-    w->cobs.forced = p->forced; w->cobs.last_rom = -1; w->cobs.rq_n = 0; w->pcring_n = 0;
+    // a path born from a fabricated state (--fabricated-forced) is a forced path: its code, data reads and closures are hypotheses
+    int forced0 = p->forced || (cfg->fabricated_forced && (p->origin & DP_SRC_DYN_FABRICATED));
+    w->cobs.forced = forced0; w->cobs.last_rom = -1; w->cobs.rq_n = 0; w->pcring_n = 0;
     w->win_on = w->cobs.track = 0;
     uint32_t path_id = ++w->path_id, vid = path_id, steps = 0, slice_steps = 0;
     uint32_t ramp_last = UINT32_MAX;   // pc of the last ramp byte this path executed (rom_ramp)
-    int cur_forced = p->forced;
+    int cur_forced = forced0;
     uint16_t cur_origin = p->origin, cur_epoch = p->epoch;
     unsigned fdepth = p->call_depth;   // calls made since the forced fork
     uint8_t last_imm = 0; unsigned imm_age = 99;   // B9: the previous 8-bit immediate load and its distance in instructions

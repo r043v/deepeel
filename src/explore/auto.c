@@ -282,7 +282,10 @@ static size_t merge_flags(Union *un, const char *path) {   // header "COV1" + si
     }
     uint8_t *b = malloc(un->n); size_t added = 0;
     if (b && fread(b, 1, un->n, f) == un->n) {
-        for (size_t i = 0; i < un->n; i++) { uint8_t v = b[i] & ~un->u[i]; if (v) { if (!un->u[i]) added++; un->u[i] |= b[i]; } }
+        for (size_t i = 0; i < un->n; i++) {   // gain: bytes that get their first evidence other than forced execution
+            if ((b[i] & ~DP_CORE_FORCED) && !(un->u[i] & ~DP_CORE_FORCED)) added++;
+            un->u[i] |= b[i];
+        }
         // a finished child's coverage.bin appends its suspects: "INF1" (static inference) and "PRV1" (probable-code walks)
         uint32_t sh[2];
         while (fread(sh, 4, 2, f) == 2 && sh[1] == un->n) {
@@ -295,30 +298,32 @@ static size_t merge_flags(Union *un, const char *path) {   // header "COV1" + si
     free(b); fclose(f);
     return added;
 }
-// Each ROM byte counts once.  Observed while running: code (executed), else data (read, copied, decompressed).  Proven
-// without running: code reached by direct transfers from executed code.  Suspect: code (probable walk, inferred), data
-// (inferred data, tables), padding (filler runs and the gaps against them).  known = all of them.
-typedef struct { size_t code, data, proven, xcode, xdata, scode, sdata, pad, known; } CovStats;
+// Each ROM byte counts once.  Observed while running: code (executed by a natural path), else data (read, copied,
+// decompressed).  Proven without running: code reached by direct transfers from executed code.  Suspect: forced (only
+// executed on a forced or fabricated path), code (probable walk, inferred), data (inferred data, tables), padding
+// (filler runs and the gaps against them).  known = all of them.
+typedef struct { size_t code, data, proven, xcode, xdata, forced, scode, sdata, pad, known; } CovStats;
 static CovStats union_stats(const Union *un) {
     CovStats c = { 0 };
     for (size_t i = 0; i < un->n; i++) {
         uint8_t f = un->u[i], in = un->inf[i];
-        if (f & (DP_CORE_NATURAL | DP_CORE_FORCED)) c.code++;
+        if (f & DP_CORE_NATURAL) c.code++;
         else if (f & (DP_CORE_COPIED | DP_CORE_COMPRESSED | DP_CORE_DATA)) c.data++;
         else if (f & DP_CORE_STATIC) c.proven++;
         else if (un->xpo && un->xpo[i] == DP_XPOSE_CODE) c.xcode++;
         else if (un->xpo && un->xpo[i] == DP_XPOSE_DATA) c.xdata++;
+        else if (f & DP_CORE_FORCED) c.forced++;
         else if (un->prov[i] || in == DP_MAP_INF_CODE) c.scode++;
         else if (in == DP_MAP_PAD || in == DP_MAP_INF_PAD) c.pad++;
         else if (in) c.sdata++;
     }
-    c.known = c.code + c.data + c.proven + c.xcode + c.xdata + c.scode + c.sdata + c.pad;
+    c.known = c.code + c.data + c.proven + c.xcode + c.xdata + c.forced + c.scode + c.sdata + c.pad;
     return c;
 }
 static void cov_line(const Union *un, char *out, size_t n) {
     CovStats c = union_stats(un); double t = un->n ? 100.0 / (double)un->n : 0.0;
-    snprintf(out, n, "observed: code %.1f%% data %.1f%% | proven static code %.1f%% | from other versions: code %.1f%% data %.1f%% | suspect: code %.1f%% data %.1f%% padding %.1f%% | known %.1f%% of %zu bytes",
-             c.code * t, c.data * t, c.proven * t, c.xcode * t, c.xdata * t, c.scode * t, c.sdata * t, c.pad * t, c.known * t, un->n);
+    snprintf(out, n, "observed: code %.1f%% data %.1f%% | proven static code %.1f%% | from other versions: code %.1f%% data %.1f%% | suspect: forced %.1f%% code %.1f%% data %.1f%% padding %.1f%% | known %.1f%% of %zu bytes",
+             c.code * t, c.data * t, c.proven * t, c.xcode * t, c.xdata * t, c.forced * t, c.scode * t, c.sdata * t, c.pad * t, c.known * t, un->n);
 }
 static void save_union(const Union *un, const char *path) {   // "COV1" flags, then the suspects: "INF1", "PRV1"; atomic
     if (!un->n) return;
@@ -331,13 +336,17 @@ static void save_union(const Union *un, const char *path) {   // "COV1" flags, t
     if (un->xpo) ok = ok && fwrite(xs, 4, 2, f) == 2 && fwrite(un->xpo, 1, un->n, f) == un->n;
     if (fclose(f) || !ok || rename(tmp, path)) unlink(tmp);
 }
-static int seed_state(const Union *un, const char *sdir) {   // a child resumes from everything observed so far: "new" means new for the whole campaign
+static int seed_state(const Union *un, const char *sdir, int forced) {   // a child resumes from everything observed so far: "new" means new for the whole campaign
     if (!un->n) return 0;
     mkdirs(sdir);
     char cp[1300]; snprintf(cp, sizeof cp, "%s/coverage.bin", sdir);
     FILE *cf = fopen(cp, "wb"); uint32_t hd[2] = { 0x31564F43u, (uint32_t)un->n };
     if (!cf) return 0;
-    int ok = fwrite(hd, 4, 2, cf) == 2 && fwrite(un->u, 1, un->n, cf) == un->n;
+    uint8_t *u = malloc(un->n);
+    if (!u) { fclose(cf); return 0; }
+    for (size_t i = 0; i < un->n; i++) u[i] = forced ? un->u[i] : un->u[i] & ~DP_CORE_FORCED;   // an observing run must see a forced-only byte as unknown
+    int ok = fwrite(hd, 4, 2, cf) == 2 && fwrite(u, 1, un->n, cf) == un->n;
+    free(u);
     return fclose(cf) == 0 && ok;
 }
 // what each other version of the ROM showed, moved onto ours by content (recomputed whole: the sources only grow)
@@ -366,7 +375,7 @@ static void infer_union(const char *exe, const char *rom, const char *local, Uni
     char dir[1200], sdir[1250], log[1250], cov[1300];
     snprintf(dir, sizeof dir, "%s/final", local); snprintf(sdir, sizeof sdir, "%s/state", dir); snprintf(log, sizeof log, "%s/log.txt", dir); snprintf(cov, sizeof cov, "%s/coverage.bin", sdir);
     mkdirs(dir);
-    if (!seed_state(un, sdir)) return;
+    if (!seed_state(un, sdir, 1)) return;
     fprintf(stderr, "deepeel auto: static inference on the merged coverage\n");
     char *av[] = { (char *)exe, "explore", (char *)rom, "--jobs", "1", "--state-dir", sdir, "--no-frontier", "--resume", "--observe", "--no-start-attract", NULL };
     pid_t pid = spawn(exe, av, log); int st = 0;
@@ -753,7 +762,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
                 A("--attract-frames"); A(CAMP_STR(CAMP_ATTRACT_MAX)); A("--attract-min"); A(CAMP_STR(CAMP_ATTRACT_MIN)); A("--attract-stall"); A(CAMP_STR(CAMP_ATTRACT_STALL));
             } else {
                 A("--no-start-attract");
-                if (seed_state(UNION_OF(t), sdir)) A("--resume");
+                if (seed_state(UNION_OF(t), sdir, t->kind == K_FORK)) A("--resume");
                 if (t->kind == K_RANDOM) {
                     snprintf(first_arg, sizeof first_arg, "%u", t->first);
                     A("--random"); A(CAMP_STR(CAMP_RANDOM_RUNS)); A("--random-first"); A(first_arg);

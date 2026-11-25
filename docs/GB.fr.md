@@ -6797,6 +6797,12 @@ suspendues une à une puis reprises ; sous manque de mémoire le dernier enfant 
 Dès qu'un enfant se termine, sa couverture est réunie dans `<sortie>/coverage.bin` et ses fichiers d'état sont
 supprimés. Les états déversés sont compressés (différence XOR avec un état de référence).
 
+**0.438.2 — le forcé n'est plus compté comme observé.** Jusque-là *observed code* additionnait le naturel et le forcé :
+les taux de code publiés avant cette version sont très surévalués. *observed* ne compte plus que l'exécution et les
+lectures naturelles ; l'exécution des fourches forcées forme la classe *suspect: forced* (comprise dans « known »). Un
+chemin issu d'un état fabriqué (`--fabricated-forced` : banque forcée, interruption injectée…) est traité en forcé de
+bout en bout (lectures et analyse statique comprises). Les enfants d'observation reçoivent une graine sans le forcé.
+
 ## 0.436.1 — campagne : films, fenêtre live
 
 - **Films** : un film ne se rejoue que sur sa propre ROM (la version que l'API TASVideos lui attribue) et avec un

@@ -8,7 +8,7 @@
 #include <string.h>
 
 #define BANK 0x4000u
-#define CODE_BITS (DP_CORE_NATURAL | DP_CORE_FORCED)
+#define CODE_BITS DP_CORE_NATURAL   // forced execution proves nothing about a byte
 #define DATA_BITS (DP_CORE_COPIED | DP_CORE_COMPRESSED | DP_CORE_DATA)
 #define WIN_VERBATIM 24
 #define WIN_MASKED 20
