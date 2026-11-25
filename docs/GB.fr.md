@@ -6936,3 +6936,13 @@ l'outil, cause non isolée, aucune référence FCEUX disponible localement).
   l’instruction (aucun état sauvegardé) mais plus après elle (un CALL qui empile
   sur un registre de mapper change la banque), une fourche sans état entrait dans
   la file et plantait au dépilage (observé sur MSX).
+
+## 0.442.2 — NGP : multiplications et divisions entre registres
+
+- Le runtime TLCS-900H (m0boy, `e88c35f`) n’implémentait pas `MUL`, `MULS`,
+  `DIV` et `DIVS` sous leur forme registre : la session depuis le démarrage de
+  Metal Slug mettait le CPU en défaut (`MUL XWA,BC`). Observation de l’outil,
+  4 minutes de campagne : 4,3 % puis 9,4 % de la ROM « known without suspects ».
+- Mesuré aussi : la part de fourches de la campagne (`CAMP_FORK_SHARE` 1, 2 ou 4)
+  ne change pas la couverture au-delà du bruit (Super Mario Bros., Alex Kidd) ;
+  la valeur 4 est conservée.
