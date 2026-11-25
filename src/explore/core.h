@@ -161,6 +161,7 @@ typedef struct DpCoreConfig {
     int observe;              // --observe: sessions only (movie, attract, random): no fork, no deferred state; the movie's end state runs on as attract
     uint32_t random_min;      // --random-min N: a random run lasts at least N frames before stagnation may end it
     unsigned random_first;    // --random-first N: seed rank of the first random run (parallel processes play different pads)
+    unsigned random_no_start; // --random-no-start N: the first N random runs never press Start (no pause or menu); the others use every button
     uint32_t random_stall;    // --random-stall N: frames without a new ROM byte that end a random run (default 36000 = 10 min of game time)
 } DpCoreConfig;
 

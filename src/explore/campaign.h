@@ -10,11 +10,12 @@
 #define CAMP_STR(x) CAMP_STR_(x)
 
 /* ---- movies (TAS replay) ---- */
-#define CAMP_SNAP_EVERY        600      /* movie frames between two machine snapshots (10 s of game time) */
+#define CAMP_SNAP_EVERY        300      /* movie frames between two machine snapshots (5 s of game time) */
 #define CAMP_MOVIE_STALL       36000    /* movie frames without a new ROM byte = stagnation (10 min of game time: a game may walk known parts for long) */
 
 /* ---- random play from each snapshot and from power-on ---- */
-#define CAMP_RANDOM_RUNS       10       /* seeded random-pad runs per snapshot */
+#define CAMP_RANDOM_RUNS       12       /* seeded random-pad runs per snapshot */
+#define CAMP_RANDOM_NO_START   8        /* of which this many never press Start; the others use every button */
 #define CAMP_RANDOM_MIN        3600     /* a random run lasts at least this long (1 min of game time) */
 #define CAMP_RANDOM_STALL      600      /* then ends after this many frames without a ROM byte new to the campaign (10 s) */
 #define CAMP_RANDOM_PARALLEL   4        /* random children of one movie at a time: the four quarters of its tile */

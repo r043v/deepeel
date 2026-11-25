@@ -6766,10 +6766,11 @@ film (`CAMP_POST_ATTRACT_*`).
 Les passes, dans l'ordre :
 
 1. **Films TAS** (les plus longs d'abord) et **attract depuis l'allumage** (sans touche : 10 min de jeu au moins,
-   arrêt après 1 min sans nouveauté, 1 h au plus). Chaque film pose un snapshot toutes les 10 s de jeu.
+   arrêt après 1 min sans nouveauté, 1 h au plus). Chaque film pose un snapshot toutes les 5 s de jeu.
 2. **Fin de film** : l'état final tourne sans touche, 3 min au moins, arrêt après 1 min sans nouveauté.
 3. **Aléatoire** : dès qu'un film est terminé, ses snapshots sont rejoués avec des touches aléatoires, quatre à la
-   fois par film : 10 runs par snapshot, 1 min de jeu au moins, arrêt après 10 s sans nouveauté. Des runs partent
+   fois par film : 12 runs par snapshot (8 sans jamais appuyer sur Start, 4 avec toutes les touches),
+   1 min de jeu au moins, arrêt après 10 s sans nouveauté. Des runs partent
    aussi de l'allumage. L'ordre des snapshots couvre le film du grossier au fin.
 4. **Fourches** (les deux issues de chaque conditionnel) depuis l'allumage et depuis chaque snapshot, amorcées avec
    la couverture déjà réunie. Tant qu'un film tourne, elles n'occupent qu'un quart des workers.
@@ -6777,7 +6778,7 @@ Les passes, dans l'ordre :
 
 Les passes 1 à 3 sont des **observations** (`--observe`) : aucune fourche, aucun état déversé sur disque, seul ce qui
 s'exécute est enregistré. Options associées : `--random N`, `--random-first K`, `--random-min TRAMES`,
-`--random-stall TRAMES`. Les réglages sont dans `src/explore/campaign.h`.
+`--random-stall TRAMES`, `--random-no-start N`. Les réglages sont dans `src/explore/campaign.h`.
 
 **Chiffres** (somme = « known ») :
 

@@ -669,6 +669,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
                 if (t->kind == K_RANDOM) {
                     snprintf(first_arg, sizeof first_arg, "%u", t->first);
                     A("--random"); A(CAMP_STR(CAMP_RANDOM_RUNS)); A("--random-first"); A(first_arg);
+                    A("--random-no-start"); A(CAMP_STR(CAMP_RANDOM_NO_START));
                     A("--random-min"); A(CAMP_STR(CAMP_RANDOM_MIN)); A("--random-stall"); A(CAMP_STR(CAMP_RANDOM_STALL));
                 } else {
                     A("--stall-time"); A(CAMP_STR(CAMP_EXPLORE_STALL_SECS));
