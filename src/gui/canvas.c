@@ -92,7 +92,7 @@ int dp_canvas_covmap_width(size_t n, size_t bank, int cw, int ch) {   // the wid
     int sq = tile / per; if (sq < 1) sq = 1;
     return cols * per * sq + (cols - 1) * gap;
 }
-size_t dp_canvas_covmap(DpCanvas *c, int cx, int cy, int cw, int ch, const uint8_t *fl, size_t n, size_t bank, const uint8_t *inf, const uint8_t *prov) {
+size_t dp_canvas_covmap(DpCanvas *c, int cx, int cy, int cw, int ch, const uint8_t *fl, size_t n, size_t bank, const uint8_t *inf, const uint8_t *prov, const uint8_t *xpo) {
     if (!n || !bank || cw < 8 || ch < 8) return 0;
     size_t banks = (n + bank - 1) / bank; int rows;
     int cols = dp_canvas_grid((int)banks, 1, 1, cw, ch, &rows);
@@ -112,6 +112,10 @@ size_t dp_canvas_covmap(DpCanvas *c, int cx, int cy, int cw, int ch, const uint8
             int x = tx + (int)(i % per) * sq, y = ty + (int)(i / per) * sq;
             uint32_t col = cov_square(fl, lo, hi);
             if (col == 0xff26262eu) for (size_t k = lo; k < hi; k++) if ((inf && inf[k]) || (prov && prov[k])) { col = 0xffb07828u; break; }
+            if (xpo && (col == 0xff26262eu || col == 0xffb07828u)) {   // nothing observed here: what another version of the ROM showed
+                size_t code = 0, data = 0; for (size_t k = lo; k < hi; k++) { code += xpo[k] == 1; data += xpo[k] == 2; }
+                if (code || data) col = code > data ? 0xffa060d0u : 0xff309890u;
+            }
             dp_canvas_rect(c, x, y, sq > 2 ? sq - 1 : sq, sq > 2 ? sq - 1 : sq, col);
         }
     }

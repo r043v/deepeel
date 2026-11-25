@@ -52,7 +52,7 @@ int dp_tasshot_finish(const char *path, const DpTasSummary *s) {
     for (size_t i = 0; s->flags && i < tot; i++) { uint8_t f = s->flags[i]; if (f & 1) cls[0]++; else if (f & 2) cls[1]++; else if (f & 32) cls[2]++; else if (f & (4 | 8 | 16)) cls[3]++; }
     cov = cls[0] + cls[1] + cls[2] + cls[3];
     size_t block = 0;
-    if (s->flags && tot) block = dp_canvas_covmap(c, 1250, 4, 660, 112, s->flags, tot, 0x4000, NULL, NULL);
+    if (s->flags && tot) block = dp_canvas_covmap(c, 1250, 4, 660, 112, s->flags, tot, 0x4000, NULL, NULL, NULL);
     if (tot) {
         snprintf(l, sizeof l, "this movie alone, classified: %zu / %zu bytes = %.1f%% (static inference not included)   code natural %zu, forced %zu, static %zu, data %zu   1 square = %zu bytes",
                  cov, tot, 100.0 * (double)cov / (double)tot, cls[0], cls[1], cls[2], cls[3], block);

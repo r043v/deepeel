@@ -218,7 +218,8 @@ static void on_sub(const char *sys, const char *line, void *u) {
 static void on_version(const char *sys, const char *line, void *u) {
     char vid[32], reg[16], ver[32], name[200]; (void)sys; (void)u;
     col_of(line, 1, vid, sizeof vid); col_of(line, 4, reg, sizeof reg); col_of(line, 5, ver, sizeof ver); col_of(line, 6, name, sizeof name);
-    printf("  version %s: %s, region %s, %s\n", vid, name, reg, ver);
+    char sha[64]; col_of(line, 3, sha, sizeof sha);
+    printf("  version %s: %s, region %s, %s, sha1 %s\n", vid, name, reg, ver, sha);
 }
 static int list_game(long gid, int fetch) {
     char g[32]; snprintf(g, sizeof g, "%ld", gid); Lst l = { gid, fetch, 0, 0 };

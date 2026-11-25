@@ -19,6 +19,7 @@
 #define CAMP_RANDOM_NO_SELECT  6        /* ... and among those, this many never press Select either: 6 without Start and Select, 2 without Start, 4 full */
 #define CAMP_RANDOM_MIN        3600     /* a random run lasts at least this long (1 min of game time) */
 #define CAMP_RANDOM_STALL      600      /* then ends after this many frames without a ROM byte new to the campaign (10 s) */
+#define CAMP_XPOSE_SECS        10       /* coverage of the other ROM versions moved onto ours this often (seconds) */
 #define CAMP_RANDOM_PARALLEL   4        /* random children of one movie at a time: the four quarters of its tile */
 #define CAMP_BOOT_RANDOM_TASKS 4        /* power-on random children (each its own seeds) */
 

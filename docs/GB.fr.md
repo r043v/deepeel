@@ -6800,9 +6800,16 @@ supprimés. Les états déversés sont compressés (différence XOR avec un éta
 ## 0.436.1 — campagne : films, fenêtre live
 
 - **Films** : un film ne se rejoue que sur sa propre ROM (la version que l'API TASVideos lui attribue) et avec un
-  émulateur compatible. Ceux d'une autre version (autre région ou révision) sont écartés et nommés dans le journal ;
-  pour les jouer, lancer la campagne sur la ROM de cette version. Restent aussi écartés les films VBA-rr (désactivés)
-  et les doublons (publication et soumission du même film).
+  émulateur compatible. S'il vise une autre version (autre région ou révision), la campagne cherche la ROM de ce
+  SHA1 **dans le dossier de la ROM donnée** et le rejoue dessus ; absente, le film est écarté et le SHA1 attendu est
+  nommé dans le journal. Restent écartés les films VBA-rr (désactivés) et les doublons.
+- **Transposition** (0.437.0) : la couverture observée sur l'autre version est reportée sur la nôtre par contenu
+  (suites identiques de 24 octets et plus ; mêmes instructions avec adresses 16 bits masquées, à partir de code
+  exécuté ; tuiles de 16 octets lues comme données). Elle forme une classe à part (« from other versions », violet :
+  code, turquoise : données), jamais confondue avec ce qui a été observé sur notre ROM, et ne sert pas de graine aux
+  explorations. `coverage.bin` la porte dans la section `XPO1` ; la couverture brute de l'autre version est dans
+  `versions/<film>.cov`. Pas d'exploration depuis les snapshots d'une autre version.
+- **Tuiles aléatoires** : un groupe reçoit ses 4 quarts avant que le suivant commence.
 - **Fenêtre live** : la carte, banques serrées, prend exactement sa largeur ; les tuiles s'ajoutent à sa droite, une
   par une : en haut, puis juste dessous, puis la colonne suivante. Une nouvelle paire de rangées ne commence qu'au bord
   de l'écran. La fenêtre est redimensionnée sur place, sans être fermée.

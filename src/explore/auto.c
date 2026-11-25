@@ -10,6 +10,8 @@
 #include "auto.h"
 #include "core.h"
 #include "tas.h"
+#include "xpose.h"
+#include "../core/sha1.h"
 #include "../core/shquote.h"
 #include <dirent.h>
 #include <strings.h>
@@ -37,7 +39,7 @@
 #define SHED_FREE CAMP_SHED_FREE
 #define HARD_MIN_FREE CAMP_HARD_MIN_FREE
 
-typedef struct { char path[1100]; unsigned frames; unsigned long size; char emu[48]; uint64_t input; } Movie;   // emu: the source emulator, from the TASVideos API
+typedef struct { char path[1100]; unsigned frames; unsigned long size; char emu[48]; uint64_t input; char rom[1100]; } Movie;   // emu: the source emulator, from the TASVideos API; rom: the ROM of another version it was recorded on (empty: ours)
 typedef struct {
     int kind;                      // K_MOVIE, K_FORK, K_BOOT, K_RANDOM
     int movie;                     // the group: index in the movies array, nm for the power-on group
@@ -163,6 +165,34 @@ static int cmp_movie(const void *a, const void *b) {
     const Movie *x = a, *y = b;
     return x->frames < y->frames ? 1 : x->frames > y->frames ? -1 : strcmp(x->path, y->path);
 }
+static uint8_t *read_rom(const char *path, size_t *n) {   // a Game Boy ROM file, NULL if it is not of a plausible size
+    FILE *f = fopen(path, "rb"); struct stat sb; uint8_t *d = NULL;
+    if (f && !fstat(fileno(f), &sb) && S_ISREG(sb.st_mode) && sb.st_size >= 0x8000 && sb.st_size <= (16 << 20)) {
+        d = malloc((size_t)sb.st_size);
+        if (d && fread(d, 1, (size_t)sb.st_size, f) != (size_t)sb.st_size) { free(d); d = NULL; }
+        if (d) *n = (size_t)sb.st_size;
+    }
+    if (f) fclose(f);
+    return d;
+}
+// the ROM of that SHA1 among the files beside ours: another version of the game, on which its movies replay
+static int find_sibling(const char *rom, const char *sha1, char *out, size_t cap) {
+    char *real = realpath(rom, NULL); if (!real) return 0;
+    char *sl = strrchr(real, '/'); if (sl) *sl = 0;
+    DIR *d = opendir(real); struct dirent *de; int found = 0;
+    while (d && !found && (de = readdir(d))) {
+        const char *ext = strrchr(de->d_name, '.');
+        if (!ext || (strcasecmp(ext, ".gb") && strcasecmp(ext, ".gbc") && strcasecmp(ext, ".sgb"))) continue;
+        char p[1100]; if ((size_t)snprintf(p, sizeof p, "%s/%s", real, de->d_name) >= sizeof p) continue;
+        size_t n; uint8_t *b = read_rom(p, &n); if (!b) continue;
+        uint8_t h[20]; char hex[41]; dp_sha1(b, n, h); free(b);
+        for (int i = 0; i < 20; i++) sprintf(hex + 2 * i, "%02x", h[i]);
+        if (!strcasecmp(hex, sha1)) { snprintf(out, cap, "%s", p); found = 1; }
+    }
+    if (d) closedir(d);
+    free(real);
+    return found;
+}
 // the movies of the ROM, from the TASVideos-backed database (sync on demand, fetch the files): the `tasdb find
 // ROM --fetch` listing gives "game N" and one "  <id>M|S ... N frames" line per publication/submission; the files
 // live in <db>/movies/<game>/<id>/
@@ -181,18 +211,28 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
         if (in) pclose(in);
         if (p) rewind(p);
         char *line = NULL; size_t lc = 0; unsigned game = 0, ver = 0; char mname[300] = "";   // ver: the ROM's own version; a movie replays on its own ROM only
+        struct { unsigned id; char sha1[44], path[1100]; int looked; } vs[64]; size_t nvs = 0;
         while (p && getline(&line, &lc, p) > 0) {
             unsigned g; if (sscanf(line, "game %u", &g) == 1 || sscanf(line, "ROM matches game %u", &g) == 1) game = g;
             { char *a = strstr(line, "ROM matches game "), *b = a ? strchr(a, '(') : NULL, *e = b ? strstr(b, ", version ") : NULL;
               if (e && (size_t)(e - b - 1) < sizeof mname) { snprintf(mname, sizeof mname, "%.*s", (int)(e - b - 1), b + 1); } }
-            { unsigned v; char nm[300]; if (mname[0] && sscanf(line, " version %u: %299[^\n]", &v, nm) == 2) { char *t = strstr(nm, ", region "); if (t) *t = 0; if (!strcmp(nm, mname)) ver = v; } }
+            { unsigned v; char nm[300]; if (mname[0] && sscanf(line, " version %u: %299[^\n]", &v, nm) == 2) { char *t = strstr(nm, ", region "); if (t) *t = 0; if (!strcmp(nm, mname)) ver = v;
+                  const char *sh = strstr(line, ", sha1 "); if (sh && nvs < 64) { vs[nvs].id = v; vs[nvs].looked = 0; vs[nvs].path[0] = 0; snprintf(vs[nvs].sha1, sizeof vs[nvs].sha1, "%.40s", sh + 7); vs[nvs].sha1[strcspn(vs[nvs].sha1, "\n")] = 0; nvs++; } } }
             char id[32]; unsigned frames = 0;
             char *fr = strstr(line, " frames");
             if (!game || !fr || sscanf(line, " %31s", id) != 1 || !strchr("MS", id[strlen(id) - 1]) || id[0] < '0' || id[0] > '9') continue;
             char *q = fr; while (q > line && q[-1] >= '0' && q[-1] <= '9') q--;
             frames = (unsigned)strtoul(q, NULL, 10);
-            if (ver) { char tag[24]; snprintf(tag, sizeof tag, "[v%u]", ver); if (!strstr(line, tag)) {
-                fprintf(stderr, "deepeel auto: %.*s skipped: recorded on another version of the game (a movie replays on its own ROM only)\n", (int)strcspn(line + strspn(line, " "), " "), line + strspn(line, " ")); continue; } }
+            const char *mrom = rom, *sibling = "";
+            if (ver) { char tag[24]; snprintf(tag, sizeof tag, "[v%u]", ver); if (!strstr(line, tag)) {   // recorded on another version
+                char *tg = strstr(line, "[v"); unsigned other = tg ? (unsigned)strtoul(tg + 2, NULL, 10) : 0;
+                size_t k = 0; while (k < nvs && vs[k].id != other) k++;
+                if (k < nvs && !vs[k].looked) { vs[k].looked = 1; if (vs[k].sha1[0]) find_sibling(rom, vs[k].sha1, vs[k].path, sizeof vs[k].path); }
+                if (k == nvs || !vs[k].path[0]) {
+                    fprintf(stderr, "deepeel auto: %s skipped: recorded on another version of the game; put the ROM of SHA1 %s beside ours to replay it there\n", id, k < nvs ? vs[k].sha1 : "?"); continue;
+                }
+                mrom = sibling = vs[k].path;
+            } }
             char dir[1300]; snprintf(dir, sizeof dir, "%s/tasdb/movies/%u/%s", db, game, id);
             DIR *d = opendir(dir); if (!d) continue;
             struct dirent *de; char best[1100] = ""; off_t bsz = 0;
@@ -212,9 +252,9 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
             int dup = 0; for (size_t i = 0; i < n; i++) if ((*out)[i].frames == frames && ((*out)[i].size == (unsigned long)bsz || (input && (*out)[i].input == input))) dup = 1;   // the same movie as publication and submission
             if (dup) continue;
             if (n == cap) { cap = cap ? cap * 2 : 16; *out = realloc(*out, cap * sizeof **out); }
-            snprintf((*out)[n].path, sizeof (*out)[n].path, "%s", best); (*out)[n].frames = frames; (*out)[n].size = (unsigned long)bsz; (*out)[n].input = input;
+            snprintf((*out)[n].path, sizeof (*out)[n].path, "%s", best); snprintf((*out)[n].rom, sizeof (*out)[n].rom, "%s", sibling); (*out)[n].frames = frames; (*out)[n].size = (unsigned long)bsz; (*out)[n].input = input;
             snprintf((*out)[n].emu, sizeof (*out)[n].emu, "unresolved");
-            { char q2[7000]; snprintf(q2, sizeof q2, "%s tasdb emu %s %u --id %s 2>/dev/null", dp_shquote(exe, qe, sizeof qe), dp_shquote(rom, qr, sizeof qr), frames, id);
+            { char q2[7000]; snprintf(q2, sizeof q2, "%s tasdb emu %s %u --id %s 2>/dev/null", dp_shquote(exe, qe, sizeof qe), dp_shquote(mrom, qr, sizeof qr), frames, id);
               FILE *e = popen(q2, "r"); char el[256];
               while (e && fgets(el, sizeof el, e)) if (!strncmp(el, "emulator=", 9)) { char *k = strstr(el, " kind="); if (k) *k = 0; el[strcspn(el, "\n")] = 0; snprintf((*out)[n].emu, sizeof (*out)[n].emu, "%.47s", el + 9); break; }
               if (e) { while (fgets(el, sizeof el, e)) {} pclose(e); } }
@@ -228,7 +268,7 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
     return n;
 }
 
-typedef struct { uint8_t *u; size_t n; uint8_t *inf, *prov; } Union;   // observed flags + the two suspect classes
+typedef struct { uint8_t *u; size_t n; uint8_t *inf, *prov, *xpo; } Union;   // observed flags, the two suspect classes, what other ROM versions showed (DP_XPOSE_*)
 static size_t merge_flags(Union *un, const char *path) {   // header "COV1" + size, one flag byte per ROM index, then optional sections
     FILE *f = fopen(path, "rb"); uint32_t hd[2];
     if (!f) return 0;
@@ -256,25 +296,27 @@ static size_t merge_flags(Union *un, const char *path) {   // header "COV1" + si
 // Each ROM byte counts once.  Observed while running: code (executed), else data (read, copied, decompressed).  Proven
 // without running: code reached by direct transfers from executed code.  Suspect: code (probable walk, inferred), data
 // (inferred data, tables), padding (filler runs and the gaps against them).  known = all of them.
-typedef struct { size_t code, data, proven, scode, sdata, pad, known; } CovStats;
+typedef struct { size_t code, data, proven, xcode, xdata, scode, sdata, pad, known; } CovStats;
 static CovStats union_stats(const Union *un) {
-    CovStats c = { 0, 0, 0, 0, 0, 0, 0 };
+    CovStats c = { 0 };
     for (size_t i = 0; i < un->n; i++) {
         uint8_t f = un->u[i], in = un->inf[i];
         if (f & (DP_CORE_NATURAL | DP_CORE_FORCED)) c.code++;
         else if (f & (DP_CORE_COPIED | DP_CORE_COMPRESSED | DP_CORE_DATA)) c.data++;
         else if (f & DP_CORE_STATIC) c.proven++;
+        else if (un->xpo && un->xpo[i] == DP_XPOSE_CODE) c.xcode++;
+        else if (un->xpo && un->xpo[i] == DP_XPOSE_DATA) c.xdata++;
         else if (un->prov[i] || in == DP_MAP_INF_CODE) c.scode++;
         else if (in == DP_MAP_PAD || in == DP_MAP_INF_PAD) c.pad++;
         else if (in) c.sdata++;
     }
-    c.known = c.code + c.data + c.proven + c.scode + c.sdata + c.pad;
+    c.known = c.code + c.data + c.proven + c.xcode + c.xdata + c.scode + c.sdata + c.pad;
     return c;
 }
 static void cov_line(const Union *un, char *out, size_t n) {
     CovStats c = union_stats(un); double t = un->n ? 100.0 / (double)un->n : 0.0;
-    snprintf(out, n, "observed: code %.1f%% data %.1f%% | proven static code %.1f%% | suspect: code %.1f%% data %.1f%% padding %.1f%% | known %.1f%% of %zu bytes",
-             c.code * t, c.data * t, c.proven * t, c.scode * t, c.sdata * t, c.pad * t, c.known * t, un->n);
+    snprintf(out, n, "observed: code %.1f%% data %.1f%% | proven static code %.1f%% | from other versions: code %.1f%% data %.1f%% | suspect: code %.1f%% data %.1f%% padding %.1f%% | known %.1f%% of %zu bytes",
+             c.code * t, c.data * t, c.proven * t, c.xcode * t, c.xdata * t, c.scode * t, c.sdata * t, c.pad * t, c.known * t, un->n);
 }
 static void save_union(const Union *un, const char *path) {   // "COV1" flags, then the suspects: "INF1", "PRV1"; atomic
     if (!un->n) return;
@@ -283,6 +325,8 @@ static void save_union(const Union *un, const char *path) {   // "COV1" flags, t
     uint32_t hd[2] = { 0x31564F43u, (uint32_t)un->n }, is[2] = { 0x31464E49u, (uint32_t)un->n }, ps[2] = { 0x31565250u, (uint32_t)un->n };
     int ok = fwrite(hd, 4, 2, f) == 2 && fwrite(un->u, 1, un->n, f) == un->n && fwrite(is, 4, 2, f) == 2 && fwrite(un->inf, 1, un->n, f) == un->n &&
              fwrite(ps, 4, 2, f) == 2 && fwrite(un->prov, 1, un->n, f) == un->n;
+    uint32_t xs[2] = { 0x314F5058u, (uint32_t)un->n };   // "XPO1"
+    if (un->xpo) ok = ok && fwrite(xs, 4, 2, f) == 2 && fwrite(un->xpo, 1, un->n, f) == un->n;
     if (fclose(f) || !ok || rename(tmp, path)) unlink(tmp);
 }
 static int seed_state(const Union *un, const char *sdir) {   // a child resumes from everything observed so far: "new" means new for the whole campaign
@@ -293,6 +337,19 @@ static int seed_state(const Union *un, const char *sdir) {   // a child resumes 
     if (!cf) return 0;
     int ok = fwrite(hd, 4, 2, cf) == 2 && fwrite(un->u, 1, un->n, cf) == un->n;
     return fclose(cf) == 0 && ok;
+}
+// what each other version of the ROM showed, moved onto ours by content (recomputed whole: the sources only grow)
+static void transpose(Union *un, const char *rom, const Union *other, const Movie *mv, size_t nm) {
+    size_t n; uint8_t *dst = un->n ? read_rom(rom, &n) : NULL; if (!dst) return;
+    if (!un->xpo) un->xpo = calloc(un->n, 1);
+    if (n > un->n) n = un->n;
+    for (size_t m = 0; m < nm && un->xpo; m++) {
+        if (!mv[m].rom[0] || !other[m].n) continue;
+        size_t sn; uint8_t *src = read_rom(mv[m].rom, &sn);
+        if (src) dp_xpose_gb(src, sn < other[m].n ? sn : other[m].n, other[m].u, dst, n, un->xpo);
+        free(src);
+    }
+    free(dst);
 }
 // stops a child's process group; after `secs` without an exit it is killed (the live coverage it published is kept)
 static void stop_child(pid_t pid, int secs) {
@@ -319,7 +376,7 @@ static void infer_union(const char *exe, const char *rom, const char *local, Uni
 static void write_png(const Union *un, const char *png, const char *id, const char *name) {
     if (!un->n) return;
     DpCoreResult r; memset(&r, 0, sizeof r);
-    r.rom_size = un->n; r.flags = un->u; r.inferred = un->inf; r.prov = un->prov;
+    r.rom_size = un->n; r.flags = un->u; r.inferred = un->inf; r.prov = un->prov;   // transposed bytes stay out of the map file: it shows this ROM's own evidence
     snprintf(r.rom_title, sizeof r.rom_title, "%s", name);
     dp_core_write_map(png, id, name, &r);
 }
@@ -343,7 +400,7 @@ static unsigned live_fps(Task *t, uint64_t frame) {
     return t->fps;
 }
 static int draw_live(const Union *un, const char *name, time_t t_start, Task *tk, size_t nt, const Movie *mv, size_t nm, uint32_t *sw, uint32_t *sh_) {
-    enum { INFO = 32, COVINFO = 96, GAP = 4, MAXW = 1900, MAXH = 1000, TILES = 64, TEXTW = 400, MAPH = 2 * (2 * 144 + INFO + GAP) - GAP - COVINFO };
+    enum { INFO = 32, COVINFO = 106, GAP = 4, MAXW = 1900, MAXH = 1000, TILES = 64, TEXTW = 400, MAPH = 2 * (2 * 144 + INFO + GAP) - GAP - COVINFO };   // COVINFO: the four text lines and the phases
     typedef struct { int g; Task *film, *q[CAMP_RANDOM_PARALLEL]; size_t rd, rt; } Tile;
     static LiveFrame lf[TILES][CAMP_RANDOM_PARALLEL]; static Tile tl[TILES]; size_t ns = 0;
     for (size_t i = 0; i < nt; i++) if (running_task(&tk[i])) read_phase(&tk[i]);
@@ -391,7 +448,7 @@ static int draw_live(const Union *un, const char *name, time_t t_start, Task *tk
         cache_t = nowt;
         if (cache) {
             char l[200]; CovStats cs = union_stats(un); double pc = un->n ? 100.0 / (double)un->n : 0.0;
-            size_t block = un->n ? dp_canvas_covmap(cache, 0, 0, maph, maph, un->u, un->n, 0x4000, un->inf, un->prov) : 0;
+            size_t block = un->n ? dp_canvas_covmap(cache, 0, 0, maph, maph, un->u, un->n, 0x4000, un->inf, un->prov, un->xpo) : 0;
             long el = (long)(nowt - t_start);
             snprintf(l, sizeof l, "%s  %02ld:%02ld:%02ld  known %.1f%%", name, el / 3600, el / 60 % 60, el % 60, cs.known * pc);
             dp_canvas_text(cache, 2, chei - COVINFO + 3, l, 1, 0xff80e090u);
@@ -399,7 +456,9 @@ static int draw_live(const Union *un, const char *name, time_t t_start, Task *tk
             dp_canvas_text(cache, 2, chei - COVINFO + 13, l, 1, 0xff96c8ffu);
             snprintf(l, sizeof l, "suspect: code %.1f%% data %.1f%% padding %.1f%% | 1 square %zu B", cs.scode * pc, cs.sdata * pc, cs.pad * pc, block);
             dp_canvas_text(cache, 2, chei - COVINFO + 23, l, 1, 0xffd0a050u);
-            draw_phases(cache, chei - COVINFO + 36, tk, nt);
+            snprintf(l, sizeof l, "from other ROM versions: code %.1f%% data %.1f%%", cs.xcode * pc, cs.xdata * pc);
+            dp_canvas_text(cache, 2, chei - COVINFO + 33, l, 1, 0xffc090e8u);
+            draw_phases(cache, chei - COVINFO + 46, tk, nt);
         }
     }
     if (cache) for (int y = 0; y < chei && cy + y < c->h; y++) memcpy(c->px + (size_t)(cy + y) * c->w + cx, cache->px + (size_t)y * cwid, (size_t)(cx + cwid <= c->w ? cwid : c->w - cx) * 4);
@@ -419,7 +478,7 @@ static int draw_live(const Union *un, const char *name, time_t t_start, Task *tk
             else if (att) snprintf(l, sizeof l, "movie over, no input  frame %llu  %u fps", fr, fps);
             else snprintf(l, sizeof l, "%llu/%u  %u%%  %u fps", fr, mv[g->g].frames, mv[g->g].frames ? (unsigned)(100ull * fr / mv[g->g].frames) : 0u, fps);
             dp_canvas_text(c, tx + 2, ty + th + 13, l, 1, 0xff96c8ffu);
-            if (t->kind == K_MOVIE) { snprintf(l, sizeof l, "source: %.40s", mv[g->g].emu); dp_canvas_text(c, tx + 2, ty + th + 23, l, 1, 0xffd0b060u); }
+            if (t->kind == K_MOVIE) { snprintf(l, sizeof l, "source: %.24s%s", mv[g->g].emu, mv[g->g].rom[0] ? " | on its own ROM" : ""); dp_canvas_text(c, tx + 2, ty + th + 23, l, 1, 0xffd0b060u); }
             continue;
         }
         int hw = tw / 2, hh = th / 2, any = 0;   // its random runs: four at a time, a quarter screen each
@@ -453,7 +512,8 @@ static void requeue(Task *tk, size_t *nt, size_t max, const Task *o, int shrink)
     memcpy(r->snap, o->snap, sizeof r->snap); r->key = o->key; r->frame = o->frame; r->first = o->first; r->shrink = shrink;
 }
 // The next child, by technique: the films (power-on attract, then the movies, longest first); then the random runs of a
-// finished film, CAMP_RANDOM_PARALLEL per group (spread coarse-to-fine over the movie); then the fork explorations.
+// finished film, CAMP_RANDOM_PARALLEL per group, a group being filled before the next one starts (spread coarse-to-fine
+// over the movie); then the fork explorations.
 static Task *next_task(Task *tk, size_t nt, size_t ng, long cap, int forks_ok, int *slot) {
     for (size_t i = 0; i < nt; i++) if (is_film(&tk[i]) && !tk[i].pid && !tk[i].done) return &tk[i];
     static char busy[1024]; static unsigned used[1024];   // per group: its film is not over; the quarters taken by running random children
@@ -468,11 +528,11 @@ static Task *next_task(Task *tk, size_t nt, size_t ng, long cap, int forks_ok, i
         forks_wait |= t->kind == K_FORK && !t->pid && !t->done;
     }
     long rnd_cap = forks_ok && forks_wait ? cap - CAMP_FORK_RESERVE : cap; if (rnd_cap < 1) rnd_cap = 1;
-    Task *best = NULL; int bn = 99;
+    Task *best = NULL; int bn = -1;
     for (size_t i = 0; i < nt && rnd < rnd_cap; i++) {
         Task *t = &tk[i]; if (t->kind != K_RANDOM || t->pid || t->done || (size_t)t->movie >= ng || busy[t->movie]) continue;
         int n = __builtin_popcount(used[t->movie]); if (n >= CAMP_RANDOM_PARALLEL) continue;
-        if (!best || n < bn || (n == bn && t->key < best->key)) { best = t; bn = n; }
+        if (!best || n > bn || (n == bn && t->key < best->key)) { best = t; bn = n; }
     }
     if (best) { int s = 0; while (used[best->movie] & (1u << s)) s++; *slot = s; return best; }
     // while films run, the forks hold a few workers only: the random runs of a film start as soon as it ends
@@ -499,7 +559,10 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
     Movie *mv; size_t nm = fetch_movies(exe, rom, &mv);
     fprintf(stderr, "deepeel auto: %zu movie(s) for this ROM%s\n", nm, nm ? ", longest first" : " (no TAS: exploration from the power-on state only)");
 
-    Union un = { rom_size ? calloc(rom_size, 1) : NULL, rom_size, rom_size ? calloc(rom_size, 1) : NULL, rom_size ? calloc(rom_size, 1) : NULL };
+    Union un = { rom_size ? calloc(rom_size, 1) : NULL, rom_size, rom_size ? calloc(rom_size, 1) : NULL, rom_size ? calloc(rom_size, 1) : NULL, NULL };
+    Union *other = calloc(nm + 1, sizeof *other);   // per movie recorded on another ROM version: its coverage, on that ROM
+    int other_new = 0; time_t t_xpose = 0;
+#define UNION_OF(t) ((t)->kind == K_MOVIE && mv[(t)->movie].rom[0] ? &other[(t)->movie] : &un)
     const size_t max_tasks = 2 * nm + 64 + CAMP_SNAPSHOT_TASKS;
     Task *tk = calloc(max_tasks, sizeof *tk); size_t nt = 0;
     unsigned *gsnap = calloc(nm + 1, sizeof *gsnap);   // per group: the last snapshot frame queued
@@ -530,10 +593,11 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             size_t *est = t->kind == K_FORK ? &rss_heavy : &rss_light;
             if (t->rss_peak > *est && t->rss_peak <= CHILD_RSS_CAP) *est = t->rss_peak;
             char sc[1250]; snprintf(sc, sizeof sc, "%s/state/coverage.bin", t->dir);
-            size_t a = merge_flags(&un, sc); a += merge_flags(&un, t->live);
+            size_t a = merge_flags(UNION_OF(t), sc); a += merge_flags(UNION_OF(t), t->live);
+            if (UNION_OF(t) != &un && a) other_new = 1;
             int ok = WIFEXITED(st) && !WEXITSTATUS(st);
             if (!ok && !t->over_t && !stopping && !g_stop) { failed++; fprintf(stderr, "deepeel auto: child failed (%s %d), see %s\n", WIFSIGNALED(st) ? "signal" : "exit", WIFSIGNALED(st) ? WTERMSIG(st) : WEXITSTATUS(st), t->log); }
-            if (is_film(t) && a) no_gain = 0;
+            if (is_film(t) && a && UNION_OF(t) == &un) no_gain = 0;
             if (t->kind == K_MOVIE) {
                 char rl[400] = ""; FILE *rf = fopen(t->rep, "r"); if (rf) { if (!fgets(rl, sizeof rl, rf)) rl[0] = 0; fclose(rf); }
                 size_t L = strlen(rl); if (L && rl[L - 1] == '\n') rl[L - 1] = 0;
@@ -614,7 +678,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             if (v != (size_t)-1) {
                 Task *t = &tk[v];
                 fprintf(stderr, "deepeel auto: RAM %llu MiB available%s: %s %s killed, re-queued\n", (unsigned long long)(avail >> 20), swap_grew ? ", swap growing" : "", t->kind == K_MOVIE ? mv[t->movie].path : "exploration", t->snap);
-                kill(-t->pid, SIGKILL); waitpid(t->pid, NULL, 0); t->done = 1; merge_flags(&un, t->live);
+                kill(-t->pid, SIGKILL); waitpid(t->pid, NULL, 0); t->done = 1; merge_flags(UNION_OF(t), t->live);
                 size_t *est = t->kind == K_FORK ? &rss_heavy : &rss_light; if (t->rss_peak > *est) *est = t->rss_peak;
                 requeue(tk, &nt, max_tasks, t, t->shrink);
                 running--;
@@ -653,7 +717,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             snprintf(t->lfr, sizeof t->lfr, "/dev/shm/deepeel-%d-%zu.frame", (int)getpid(), (size_t)(t - tk));
             char *av[64]; int n = 0;
 #define A(x) av[n++] = (char *)(x)
-            A(exe); A("explore"); A(rom);
+            A(exe); A("explore"); A(t->kind == K_MOVIE && mv[t->movie].rom[0] ? mv[t->movie].rom : rom);
             A("--jobs"); A("1"); A("--max-total"); A(HUGE_STEPS); A("--queue-max"); A(queue_arg);   // RAM share of one child: the rest spills to its disk spool
             A("--state-dir"); A(sdir); A("--no-frontier"); A("--spool-max"); A(spool_arg);
             A("--live-flags"); A(t->live); A("--live-frame"); A(t->lfr); A("--live-frame-ms"); A(CAMP_STR(CAMP_LIVE_FRAME_MS));
@@ -661,9 +725,8 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             A("--no-infer"); A("--no-spec");   // the inference runs once, on the merged coverage
             if (t->snap[0]) { A("--from-state"); A(t->snap); }
             if (t->kind == K_MOVIE) {   // the movie, then no input from its end state (the ending, the credits)
-                mkdirs(snaps);
                 A("--tas"); A(mv[t->movie].path); A("--no-start-attract");
-                A("--snap-every"); A(CAMP_STR(CAMP_SNAP_EVERY)); A("--snap-dir"); A(snaps);
+                if (!mv[t->movie].rom[0]) { mkdirs(snaps); A("--snap-every"); A(CAMP_STR(CAMP_SNAP_EVERY)); A("--snap-dir"); A(snaps); }   // no exploration from another ROM's states
                 A("--tas-stall"); A(CAMP_STR(CAMP_MOVIE_STALL)); A("--tas-report"); A(t->rep);
                 snprintf(t->shot, sizeof t->shot, "%s/summary.png", t->dir); A("--tas-summary"); A(t->shot);
                 A("--attract-frames"); A(CAMP_STR(CAMP_ATTRACT_MAX)); A("--attract-min"); A(CAMP_STR(CAMP_POST_ATTRACT_MIN)); A("--attract-stall"); A(CAMP_STR(CAMP_POST_ATTRACT_STALL));
@@ -699,7 +762,8 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
 
         // 4. monitor, periodic PNG
         time_t now = time(NULL);
-        for (size_t i = 0; i < nt; i++) if (running_task(&tk[i])) merge_flags(&un, tk[i].live);
+        for (size_t i = 0; i < nt; i++) if (running_task(&tk[i])) { if (merge_flags(UNION_OF(&tk[i]), tk[i].live) && UNION_OF(&tk[i]) != &un) other_new = 1; }
+        if (other_new && now - t_xpose >= CAMP_XPOSE_SECS) { transpose(&un, rom, other, mv, nm); other_new = 0; t_xpose = now; }
         size_t total = union_stats(&un).known;
         if (now - t_log >= CAMP_LOG_SECS) {
             t_log = now;
@@ -739,7 +803,13 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
         }
     }
     for (size_t i = 0; i < nt; i++) if (running_task(&tk[i])) stop_child(tk[i].pid, 5);
-    for (size_t i = 0; i < nt; i++) if (tk[i].pid) { char sc[1250]; snprintf(sc, sizeof sc, "%s/state/coverage.bin", tk[i].dir); merge_flags(&un, sc); merge_flags(&un, tk[i].live); }
+    for (size_t i = 0; i < nt; i++) if (tk[i].pid) { char sc[1250]; snprintf(sc, sizeof sc, "%s/state/coverage.bin", tk[i].dir); merge_flags(UNION_OF(&tk[i]), sc); merge_flags(UNION_OF(&tk[i]), tk[i].live); }
+    for (size_t m = 0; m < nm; m++) if (other[m].n) {   // each other version's coverage is kept as observed on its ROM
+        char p[1300]; snprintf(p, sizeof p, "%s/versions", outdir); mkdirs(p);
+        const char *b = strrchr(mv[m].path, '/'); snprintf(p, sizeof p, "%s/versions/%s.cov", outdir, b ? b + 1 : mv[m].path);
+        save_union(&other[m], p);
+    }
+    transpose(&un, rom, other, mv, nm);
     save_union(&un, cb);
     infer_union(exe, rom, local, &un);
     write_png(&un, png, "auto", name);
@@ -750,6 +820,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
     char cl[300]; cov_line(&un, cl, sizeof cl);
     fprintf(stderr, "deepeel auto: finished, ROM %s, observations of the tool; map %s, movies report %s, merged coverage %s\n",
             cl, png, rep_all, cb);
-    free(un.u); free(un.inf); free(un.prov); free(mv); free(tk); free(gsnap);
+    for (size_t m = 0; m < nm; m++) { free(other[m].u); free(other[m].inf); free(other[m].prov); }
+    free(other); free(un.u); free(un.inf); free(un.prov); free(un.xpo); free(mv); free(tk); free(gsnap);
     return 0;
 }
