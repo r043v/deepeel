@@ -140,6 +140,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--random-no-select") && i + 1 < argc) { c->random_no_select = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--fabricated-forced")) { c->fabricated_forced = 1; return 1; }
     if (!strcmp(a, "--random-hold") && i + 1 < argc) { c->random_hold = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
+    if (!strcmp(a, "--random-movie") && i + 1 < argc) { c->random_movie = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--random-first") && i + 1 < argc) { c->random_first = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--live-flags") && i + 1 < argc) { c->live_flags = argv[i + 1]; return 2; }
     if (!strcmp(a, "--from-state") && i + 1 < argc) { c->from_state = argv[i + 1]; return 2; }
@@ -2099,7 +2100,7 @@ static void run_path(Worker *w, Pending *p) {
     uint64_t sess_limit = attract ? cfg->attract_frames : rnd ? cfg->random_frames : burst ? cfg->ckpt_burst_frames : play ? cfg->play_frames : 0;
     uint64_t sess_f0 = (attract || play) ? m->frame(m) : 0, sess_last = ~0ull;
     if ((cfg->watch_every || cfg->tas_summary || cfg->live_frame) && m->watch && ((tas && tas_shift == 0) || ((attract || play) && (!burst || rnd)))) m->watch(m, 1);
-    unsigned shot_next = 1; unsigned sess_epoch = ~0u, sess_hold = 0; uint64_t sess_last_cov = 0; uint64_t tas_stalled_at = 0, tas_last_new = 0;
+    unsigned shot_next = 1; uint64_t seg_frame = ~0ull; unsigned sess_epoch = ~0u, sess_hold = 0; uint64_t sess_last_cov = 0; uint64_t tas_stalled_at = 0, tas_last_new = 0;
     uint64_t sess_cov = 0, sess_prog_f = sess_f0;
     // --random statistics of this run: new code and data bytes, and the frame of the last of each
     uint64_t run_c0 = loc->plain_new_bytes + loc->novelty_new_bytes, run_d0 = w->cobs.data_new, run_c = run_c0, run_d = run_d0, run_cf = sess_f0, run_df = sess_f0;
@@ -2414,7 +2415,15 @@ static void run_path(Worker *w, Pending *p) {
                     // retain their deterministic nine-epoch schedule.
                     unsigned ep = rnd ? (unsigned)((f - sess_f0) / 8u) : burst ? (unsigned)((f - sess_f0) / 4u) :
                         (unsigned)((f - sess_f0) / (sess_limit / 9 ? sess_limit / 9 : 1));
-                    if (ep != sess_epoch && !(rnd && ep < sess_hold)) {
+                    if (rnd && (cfg->tas_masks || cfg->tas_masks32) && cfg->tas_frames && ((rnd_k - 32u - cfg->random_first) & 0x3Fu) < cfg->random_movie) {
+                        if (f != seg_frame) {   // movie splicing: real play (menus, combos, long walks) applied to a state it was not recorded on
+                            const uint64_t g = (f - sess_f0) / 300u, h = keyhash(sess_f0 ^ ((uint64_t)rnd_k << 32) ^ g ^ 0xc2b2ae35u);
+                            const uint64_t at = h % cfg->tas_frames + (f - sess_f0) % 300u;
+                            m->set_input(m, at >= cfg->tas_frames ? 0 : cfg->tas_masks32 ? cfg->tas_masks32[at] : cfg->tas_masks[at]);
+                            seg_frame = f; loc->play_epochs += (f - sess_f0) % 300u == 0;
+                        }
+                    }
+                    else if (ep != sess_epoch && !(rnd && ep < sess_hold)) {
                         sess_epoch = ep;
                         if (rnd && cfg->random_hold) {   // now and then a long press (4 to 32 epochs): walking, charging, a held button
                             uint64_t h = keyhash(sess_f0 ^ ((uint64_t)rnd_k << 32) ^ ep ^ 0x9e3779b9u);
@@ -3965,7 +3974,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
             }
         }
         // technique 9 (TAS form): the movie from power-on, unshifted and shifted by 1..3 frames
-        if (m->frame && m->set_input && (cfg->tas_masks || cfg->tas_masks32) && cfg->tas_frames) {
+        if (m->frame && m->set_input && (cfg->tas_masks || cfg->tas_masks32) && cfg->tas_frames && !cfg->random_movie) {
             static const int order[6] = {-3, -2, -1, 1, 2, 3};
             for (int i = 6; i < 7; i++) {
                 int sh_ = i < 6 ? order[i] : 0;

@@ -166,6 +166,7 @@ typedef struct DpCoreConfig {
     unsigned random_no_select; // --random-no-select N: the first N random runs never press Select (GB/GBC pad bit)
     int fabricated_forced;    // --fabricated-forced: what runs in a state the explorer made up (DP_SRC_DYN_FABRICATED) is recorded as forced, not natural
     unsigned random_hold;     // --random-hold N: one press in N of a random run is held 0.5 to 4 s instead of 8 frames (0: none)
+    unsigned random_movie;    // --random-movie N: the first N random runs play 5 s segments of the --tas movie, drawn at random, instead of random pads
     uint32_t random_stall;    // --random-stall N: frames without a new ROM byte that end a random run (default 36000 = 10 min of game time)
 } DpCoreConfig;
 

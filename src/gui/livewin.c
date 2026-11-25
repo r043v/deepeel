@@ -23,26 +23,45 @@ static int cairo_decor_only(void) {
     }
     return 0;
 }
-static SDL_Window *win; static SDL_Renderer *ren; static SDL_Texture *tex; static int tw, th, dead, inited;
+static SDL_Window *win; static SDL_Renderer *ren; static SDL_Texture *tex; static int tw, th, dead, inited, sized;   // sized: the size is the user's
+static int video(void) {   // SDL started on first use; 0: no window to be had
+    if (dead) return 0;
+    if (inited) return 1;
+    inited = 1;
+    const char *d = getenv("DISPLAY"), *w = getenv("WAYLAND_DISPLAY");
+    if ((!d || !*d) && (!w || !*w)) { dead = 1; return 0; }
+    // same minimal decoration as the --watch window: libdecor with its cairo plugin only. Its GTK plugin (picked when SDL runs
+    // on the main thread) pulls libglycin, which segfaults. Without that plugin: X11, where the window manager draws the frame.
+    if (w && *w && !cairo_decor_only()) { if (d && *d) SDL_SetHint(SDL_HINT_VIDEODRIVER, "x11"); SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR, "0"); }
+    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");   // the supervisor owns SIGINT/SIGTERM
+    if (SDL_Init(SDL_INIT_VIDEO) != 0 && (SDL_SetHint(SDL_HINT_VIDEODRIVER, ""), SDL_Init(SDL_INIT_VIDEO) != 0)) { fprintf(stderr, "deepeel: live window unavailable: %s\n", SDL_GetError()); dead = 1; return 0; }
+    return 1;
+}
+int dp_livewin_area(int *w, int *h) {
+    enum { W = 1900, H = 1000, BARS = 90 };   // without a display; BARS: the desktop's top bar and the window's title bar
+    *w = W; *h = H;
+    if (!video()) return 0;
+    if (win) {
+        int cw, ch; SDL_GetWindowSize(win, &cw, &ch);
+        if (cw != tw || ch != th || (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED)) sized = 1;
+        if (sized) { *w = cw; *h = ch; return 1; }
+    }
+    SDL_Rect r;
+    if (!SDL_GetDisplayUsableBounds(win ? SDL_GetWindowDisplayIndex(win) : 0, &r) && r.w > 320 && r.h > 320) { *w = r.w - 20; *h = r.h - BARS; }
+    return 0;
+}
 int dp_livewin_show(const DpCanvas *c, const char *title) {
     const char *dump = getenv("DEEPEEL_LIVE_DUMP"); static time_t dumped; if (dump && *dump && time(NULL) != dumped) { dumped = time(NULL); char tmp[4096]; snprintf(tmp, sizeof tmp, "%s.tmp", dump); if (dp_canvas_save_png(c, tmp)) rename(tmp, dump); }   /* whole file or the previous one */   // control output: what the window shows, once a second
-    if (dead) return 1;
-    if (!inited) {
-        inited = 1;
-        const char *d = getenv("DISPLAY"), *w = getenv("WAYLAND_DISPLAY");
-        if ((!d || !*d) && (!w || !*w)) { dead = 1; return 1; }
-        // same minimal decoration as the --watch window: libdecor with its cairo plugin only. Its GTK plugin (picked when SDL runs
-        // on the main thread) pulls libglycin, which segfaults. Without that plugin: X11, where the window manager draws the frame.
-        if (w && *w && !cairo_decor_only()) { if (d && *d) SDL_SetHint(SDL_HINT_VIDEODRIVER, "x11"); SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR, "0"); }
-        SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");   // the supervisor owns SIGINT/SIGTERM
-        if (SDL_Init(SDL_INIT_VIDEO) != 0 && (SDL_SetHint(SDL_HINT_VIDEODRIVER, ""), SDL_Init(SDL_INIT_VIDEO) != 0)) { fprintf(stderr, "deepeel: live window unavailable: %s\n", SDL_GetError()); dead = 1; return 1; }
-    }
+    if (!video()) return 1;
     if (!win || tw != c->w || th != c->h) {   // a new layout resizes the same window: only the texture is made again
         if (tex) SDL_DestroyTexture(tex);
         if (!win) {
             win = SDL_CreateWindow(title ? title : "deepeel", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, c->w, c->h, SDL_WINDOW_RESIZABLE);
             ren = win ? SDL_CreateRenderer(win, -1, 0) : NULL;
-        } else SDL_SetWindowSize(win, c->w, c->h);
+        } else {
+            int cw, ch; SDL_GetWindowSize(win, &cw, &ch);
+            if (cw != c->w || ch != c->h) SDL_SetWindowSize(win, c->w, c->h);
+        }
         tex = ren ? SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, c->w, c->h) : NULL;
         if (!tex) { fprintf(stderr, "deepeel: live window unavailable: %s\n", SDL_GetError()); dead = 1; return 1; }
         SDL_RenderSetLogicalSize(ren, c->w, c->h);   // resizing keeps the aspect ratio (letterbox)
@@ -61,5 +80,6 @@ void dp_livewin_close(void) {
 }
 #else
 int dp_livewin_show(const DpCanvas *c, const char *title) { (void)c; (void)title; return 1; }
+int dp_livewin_area(int *w, int *h) { *w = 1900; *h = 1000; return 0; }
 void dp_livewin_close(void) {}
 #endif

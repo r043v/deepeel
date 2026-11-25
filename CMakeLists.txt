@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.439.1 LANGUAGES C)
+project(deepeel VERSION 0.440.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -324,6 +324,7 @@ add_library(deepeel_core STATIC
   src/explore/results.c
   src/explore/core.c
   src/explore/auto.c
+  src/explore/stack.c
   src/explore/xpose.c
   src/explore/core_map.c
   src/explore/core_gbseeds.c

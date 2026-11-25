@@ -165,7 +165,7 @@ static int sega_core_run(const DpSegaSystem *s,const uint8_t *rom,size_t size,co
         char terr[256]="";
         if(dp_sega_tas_load(o->tas_path,&tas,terr,sizeof terr)) {
             cfg.tas_masks=tas.masks; cfg.tas_frames=tas.frames;
-            dp_machine_sega_tas(m,!strcmp(s->id,"gg")||msx,!strcmp(s->id,"sms")?dp_sega_tas_smshawk_profile(&tas):0);
+            dp_machine_sega_tas(m,!strcmp(s->id,"gg")||msx,!strcmp(s->id,"sms") && !cfg.random_movie?dp_sega_tas_smshawk_profile(&tas):0);
         }
         else fprintf(out,"tas: %s\n",terr);
     }

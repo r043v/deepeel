@@ -13,27 +13,37 @@
 #define CAMP_SNAP_EVERY        300      /* movie frames between two machine snapshots (5 s of game time) */
 #define CAMP_MOVIE_STALL       36000    /* movie frames without a new ROM byte = stagnation (10 min of game time: a game may walk known parts for long) */
 
-/* ---- random play from each snapshot and from power-on ---- */
-#define CAMP_RANDOM_RUNS       6        /* seeded random-pad runs of one random task; a pass on a snapshot is two tasks (halves), 12 runs */
-#define CAMP_RANDOM_NO_START   3        /* of which this many (the first ones) never press Start; the others use every button */
-#define CAMP_RANDOM_NO_SELECT_A 2       /* ... and among those, this many never press Select either, first half */
-#define CAMP_RANDOM_NO_SELECT_B 1       /* ... second half: over a pass 3 without Start and Select, 3 without Start, 6 full */
-#define CAMP_SPARSE            4        /* the first halves start with one movie snapshot in this many, the others follow */
-#define CAMP_DEEP_MIN          32       /* a random run that found this many new bytes saves a snapshot (one per CAMP_SNAP_EVERY frames at most); runs and forks start from it */
-#define CAMP_RANDOM_MIN        3600     /* a random run lasts at least this long (1 min of game time) */
+/* ---- pad-driven play from each snapshot and from power-on: random pads, and splices of the movie ---- */
+#define CAMP_RANDOM_RUNS       4        /* seeded runs of one item (random pads, or 5 s movie segments drawn at random) */
+#define CAMP_RANDOM_NO_START   2        /* random pads: of which this many (the first ones) never press Start */
+#define CAMP_RANDOM_NO_SELECT  1        /* ... and among those, this many never press Select either */
+#define CAMP_DEEP_MIN          32       /* a run that found this many new bytes saves a snapshot (one per CAMP_SNAP_EVERY frames at most), queued like any other */
+#define CAMP_RANDOM_MIN        3600     /* a run lasts at least this long (1 min of game time; two runs of 1 min beat four of 30 s) */
 #define CAMP_RANDOM_STALL      600      /* then ends after this many frames without a ROM byte new to the campaign (10 s) */
-#define CAMP_RANDOM_HOLD       32       /* one press in this many is held 0.5 to 4 s; the others last 8 frames (long presses: about a third of the time) */
-#define CAMP_RANDOM_PASSES     5        /* a snapshot whose random runs found new bytes is played again, other seeds, up to this many passes (64 seed ranks) */
-#define CAMP_RANDOM_AGAIN      64       /* ... if the pass found at least this many bytes new to the campaign; pass n runs n times CAMP_RANDOM_MIN at least */
+#define CAMP_RANDOM_HOLD       32       /* random pads: one press in this many is held 0.5 to 4 s; the others last 8 frames */
+#define CAMP_RANDOM_AGAIN      64       /* an item that found this many new bytes is queued again, other seeds ... */
+#define CAMP_RANDOM_PASSES     12       /* ... up to this many plays */
 #define CAMP_XPOSE_SECS        10       /* coverage of the other ROM versions moved onto ours this often (seconds) */
-#define CAMP_RANDOM_PARALLEL   4        /* random children of one movie at a time: the four quarters of its tile */
-#define CAMP_BOOT_RANDOM_TASKS 4        /* power-on random children (each its own seeds) */
+#define CAMP_BOOT_RANDOM_TASKS 4        /* power-on random items (each its own seeds) */
+#define CAMP_QUADRANTS         4        /* live window: children shown per tile, a quarter screen each */
+
+/* ---- the work stack (stack.c): priority = new bytes expected per CPU second ---- */
+#define CAMP_PRIOR_BYTES       16       /* guess before any measure: this many bytes ... */
+#define CAMP_PRIOR_SCORE_DIV   16       /* ... plus the snapshot's score (bytes found there) over this ... */
+#define CAMP_PRIOR_SCORE_CAP   16000
+#define CAMP_PRIOR_PADS_SECS   15       /* ... for an item of this many CPU seconds */
+#define CAMP_PRIOR_FORK_SECS   600
+#define CAMP_PRIOR_WEIGHT      4        /* the guess weighs as much as this many measured items */
+#define CAMP_REGION_FRAMES     1800     /* neighbourhood of a snapshot (30 s of its film): what it gave corrects its other items */
+#define CAMP_REGION_PRIOR      256      /* bytes of doubt before a neighbourhood's results count in full */
+#define CAMP_SIBLING_DIV       4        /* items on another ROM version are worth this much less */
+#define CAMP_FLOOR_EVERY       8        /* one start in this many goes to the technique served least, coarsest snapshot first */
+#define CAMP_SAVE_SECS         30       /* coverage and stack written to disk this often */
 
 /* ---- fork exploration (both sides of every conditional) ---- */
-#define CAMP_FORK_RESERVE      2        /* workers the random runs leave to the forks */
-#define CAMP_FORK_SHARE        4        /* while films run, the forks hold at most 1/4 of the workers */
+#define CAMP_FORK_SHARE        4        /* fork explorations hold at most 1/4 of the workers (memory and disk) */
 #define CAMP_EXPLORE_STALL_SECS 1800    /* wall-clock seconds without any new byte before a fork exploration ends */
-#define CAMP_EXPLORE_MAX_SECS  900      /* wall-clock cap of one fork exploration (0: none) */
+#define CAMP_EXPLORE_MAX_SECS  0        /* wall-clock cap of one fork exploration (0: none, only stagnation stops it) */
 
 /* ---- attract mode (no input) ---- */
 #define CAMP_ATTRACT_MAX       216000   /* hard cap, frames (1 h of game time) */
@@ -43,6 +53,7 @@
 #define CAMP_POST_ATTRACT_STALL 3600
 
 /* ---- machine load ---- */
+#define CAMP_SPARE_CPUS        0        /* cores left without a worker: none, every child runs at the lowest priority */
 #define CAMP_RAM_RESERVE_DIV   4        /* memory left to the machine: 1/4 of the RAM ... */
 #define CAMP_RAM_RESERVE_MIN   (3072ull << 20)   /* ... and this much at least; under half of it the newest child is killed and re-queued */
 #define CAMP_NICE              19       /* priority of every child: the rest of the machine comes first */
@@ -58,6 +69,7 @@
 #define CAMP_QUEUE_EXPLORE     1500
 #define CAMP_QUEUE_BYTES       (384ull << 20)   /* RAM held by an exploration's queued states: the count follows the state size (GB CGB: 680 KiB) */
 #define CAMP_QUEUE_MIN         64
+#define CAMP_RSS_SAMPLES       4        /* ended children after which the measured peaks replace the first estimates */
 #define CAMP_RSS_RETRIES       2        /* a child killed over its RSS cap is re-queued this many times, its queue halved each time */
 #define CAMP_SNAPSHOT_TASKS    131072   /* snapshot tasks the supervisor can hold (a random and a fork per snapshot) */
 #define CAMP_CHILD_RSS_CAP     (1ull << 30)   /* a child above this is killed, its last live coverage is kept */

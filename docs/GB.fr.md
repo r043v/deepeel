@@ -6846,3 +6846,31 @@ bout en bout (lectures et analyse statique comprises). Les enfants d'observation
 - Une campagne relancée dans le même répertoire reprend la couverture déjà obtenue (les tâches sont rejouées).
 - Build guidé par profil, pour la machine locale (environ 20 % de temps en moins sur les runs mesurés) : `cmake -DROM=<rom> -P cmake/pgo.cmake`, binaire dans `build-pgo/`.
 - LTO activé dans `cmake/pgo.cmake` (observations sur Zelda DX, une machine) : environ 6 % de temps en moins que le PGO seul sur le run mesuré ; rejeu complet d'un film identique à `-O2` (snapshots, couverture, états par trame jusqu'à la trame 63 000). Le premier essai divergeait : l'édition de liens partielle du runtime m0boy ne voit que les définitions `weak` par défaut et supprimait l'appel à `gbl_platform_safe_point` (fin de trame pendant `HALT`) ; corrigé dans m0boy (`noipa`). Après un changement de compilation, refaire cette comparaison.
+
+## 0.440.0 — campagne : pile de travail unifiée, segments de film
+
+Remplace les passes en moitiés et les quotas de la 0.439 (réglages dans `src/explore/campaign.h`).
+
+- **Une seule pile** (`src/explore/stack.c`) : chaque snapshot donne trois travaux, `random` (touches aléatoires),
+  `splice` (segments de film) et `fork` (les deux côtés des conditionnels). Les films passent d'abord ; ensuite le
+  travail dont on attend le plus d'octets neufs par seconde de processeur. L'attente est apprise pendant la campagne,
+  par technique, première lecture ou rejeu, et ordre de grandeur du score du snapshot, puis corrigée par ce que le
+  même passage du jeu (30 s de film) a rendu. Un lancement sur huit revient à la technique la moins servie, sur son
+  snapshot le plus « grossier » : rien n'est oublié. Les fourches occupent au plus un quart des workers.
+- **Segments de film** (`--random-movie N` avec `--tas FILM`) : les N premiers runs aléatoires rejouent, depuis le
+  snapshot, des segments de 5 s du film tirés au hasard au lieu de touches aléatoires : du jeu réel (menus,
+  enchaînements, longues marches) appliqué à un état sur lequel il n'a pas été enregistré.
+- Un travail `random` ou `splice` fait 4 runs d'au moins 1 min de jeu ; s'il trouve au moins 64 octets neufs, il
+  revient dans la pile avec d'autres graines (12 lectures au plus).
+- **Un worker par cœur**, tous en priorité basse. La fenêtre live montre des tuiles de 4 quarts (un quart par
+  worker, à place fixe), puis les films en tuiles pleines.
+- **Reprise** : la pile est écrite dans `<sortie>/stack.tsv` toutes les 30 s et à l'arrêt, après la couverture. Une
+  campagne relancée dans le même répertoire reprend les travaux en attente ou interrompus et les statistiques ; les
+  films terminés ne sont pas rejoués, un film ajouté depuis l'est. Les répertoires de travail ne sont jamais
+  réutilisés. Les travaux dont le snapshot a disparu sont écartés et comptés au démarrage.
+- La fenêtre live remplit chaque colonne de tuiles jusqu'au bas (3 ou 4 rangées sur un écran de 1080 lignes) avant
+  d'en ajouter une à droite, sans agrandir la fenêtre ; redimensionnée ou maximisée, elle est composée à sa taille.
+- Une fourche n'a plus de durée maximale : seule la stagnation l'arrête (30 min sans octet neuf).
+- La mémoire prévue par worker est le plus grand pic mesuré plus un quart, après quatre travaux terminés.
+- `snapshots.tsv` donne par travail la technique, le score, les octets neufs et les secondes de processeur ; la ligne
+  de progression donne les octets par seconde de processeur mesurés pour chaque technique.

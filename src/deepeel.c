@@ -751,7 +751,9 @@ static int cmd_explore(int argc, char **argv) {
                         }
                     }
                     gkcfg.tas_masks = gmasks; gkcfg.tas_frames = gt.frames;
-                    dp_machine_gb_set_tas(km, &gt);   // the recorder's sync profile
+                    // the recorder's sync profile, for a replay only: --random-movie takes the pad masks and leaves the machine alone
+                    // (the profile restarts the boot ROM and rewrites RAM, which kills a run started from a saved state)
+                    if (!gkcfg.random_movie) dp_machine_gb_set_tas(km, &gt);
                     if (gkcfg.tas_summary) {   // summary picture identity: movie, ROM, source emulator (TASVideos API), profile applied
                         static char prof[200], emu[96]; const char *mb = strrchr(scfg.tas[0], '/'), *rb = strrchr(path, '/');
                         if (!gkcfg.tas_name) gkcfg.tas_name = mb ? mb + 1 : scfg.tas[0];
