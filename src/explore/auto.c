@@ -740,6 +740,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             A("--state-dir"); A(sdir); A("--no-frontier"); A("--spool-max"); A(spool_arg);
             A("--live-flags"); A(t->live); A("--live-frame"); A(t->lfr); A("--live-frame-ms"); A(CAMP_STR(CAMP_LIVE_FRAME_MS));
             if (t->kind != K_FORK) { A("--observe"); A("--no-closure"); }   // observation: no fork, no spool; what runs is recorded
+            A("--fabricated-forced");   // a bank or event fork runs a state the game never reached: not an observation
             A("--no-infer"); A("--no-spec");   // the inference runs once, on the merged coverage
             if (t->snap[0]) { A("--from-state"); A(t->snap); }
             if (t->kind == K_MOVIE) {   // the movie, then no input from its end state (the ending, the credits)

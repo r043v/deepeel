@@ -6817,6 +6817,10 @@ supprimés. Les états déversés sont compressés (différence XOR avec un éta
   durée minimale plus longue (jusqu'à 5 passes). `snapshots.tsv` consigne score et découvertes par passe.
 - **Mémoire** (0.438.0) : un quart de la RAM (3 Gio au moins) reste à la machine ; sous la moitié de cette réserve,
   l'enfant le plus récent est tué puis remis en file.
+- **Code observé** (0.438.1, `--fabricated-forced`) : ce qui s'exécute dans un état fabriqué par l'explorateur
+  (banque forcée, interruption ou événement injecté, valeur résolue) est compté forcé, plus naturel : les banques
+  graphiques exécutées par ces fourches gonflaient le code observé. Les runs d'observation ne sauvegardent plus
+  d'états pour des fourches de banque qu'ils jetaient.
 - **Autre version** : ses snapshots reçoivent aussi les runs aléatoires, sur sa ROM, transposés comme son film
   (pas de fourches).
 - **Fenêtre live** : la carte, banques serrées, prend exactement sa largeur ; les tuiles s'ajoutent à sa droite, une

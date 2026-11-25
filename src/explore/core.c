@@ -138,6 +138,7 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--random-min") && i + 1 < argc) { c->random_min = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--random-no-start") && i + 1 < argc) { c->random_no_start = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--random-no-select") && i + 1 < argc) { c->random_no_select = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
+    if (!strcmp(a, "--fabricated-forced")) { c->fabricated_forced = 1; return 1; }
     if (!strcmp(a, "--random-hold") && i + 1 < argc) { c->random_hold = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--random-first") && i + 1 < argc) { c->random_first = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--live-flags") && i + 1 < argc) { c->live_flags = argv[i + 1]; return 2; }
@@ -1176,12 +1177,14 @@ static void closure_code_table(DpCoreResult *r, DpMachine *m, const DpIsa *isa, 
 }
 
 static void mark(Shared *sh, DpCoreResult *r, DpMachine *m, uint32_t pc, unsigned len, uint8_t how, uint16_t origin, uint8_t actor) {
+    uint32_t nat_src = (how & DP_CORE_NATURAL) ? (origin ? origin : DP_SRC_FORK_NATURAL) : 0;
+    if (sh->cfg->fabricated_forced && (nat_src & DP_SRC_DYN_FABRICATED)) how = (uint8_t)((how & ~DP_CORE_NATURAL) | DP_CORE_FORCED);   // the source bit stays
     for (unsigned i = 0; i < len; i++) {
         int64_t k = m->rom_index(m, pc + i);
         if (k >= 0 && (size_t)k < r->rom_size) {
             if (!i && r->hits) __atomic_fetch_add(&r->hits[k], 1, __ATOMIC_RELAXED);   // P13: execution heat of the instruction head
             if (m->page_shift && r->page_win && how & DP_CORE_NATURAL) __atomic_store_n(&r->page_win[(size_t)k >> m->page_shift], (uint8_t)(1u + (((pc + i) >> m->page_shift) & 7u)), __ATOMIC_RELAXED);
-            uint32_t srcbit = (how & DP_CORE_NATURAL) ? (origin ? origin : DP_SRC_FORK_NATURAL) : DP_SRC_FORK_FORCED;   // A6: only a natural flow can be fabricated
+            uint32_t srcbit = nat_src ? nat_src : DP_SRC_FORK_FORCED;   // A6: only a natural flow can be fabricated
             uint8_t bits = how | (i == 0 ? ((how & DP_CORE_NATURAL) ? DP_CORE_START_NATURAL : DP_CORE_START_FORCED) : 0);
             // read first: an atomic read-modify-write on an already covered byte only bounces the cache line
             uint8_t cur = __atomic_load_n(&r->flags[k], __ATOMIC_RELAXED);
@@ -2841,7 +2844,7 @@ static void run_path(Worker *w, Pending *p) {
         }
         if (w->cobs.mapper_w) {
             w->cobs.mapper_w = 0;
-            if (!cfg->no_bank_forks && m->bank_view && !tas && !w->cobs.forced) {
+            if (!cfg->no_bank_forks && m->bank_view && !tas && !w->cobs.forced && !LEAN_PATH) {   // a lean path drops its forks: no state is saved for them
                 // B7: a write into the ROM window is a mapper register: fork once per (site, bank) on every ROM block this
                 // site has not shown yet, in the state the game really reached (bounded per site, saturation counted)
                 unsigned nb = (unsigned)(loc->rom_size / 0x4000), made = 0;
