@@ -40,6 +40,7 @@ typedef struct {
     unsigned key;                  // kind 2: coarse-to-fine rank
     pid_t pid; time_t t0; size_t rss_peak;
     char dir[1100], live[1150], log[1150], rep[1150], shot[1150], lfr[1150];
+    int end;                       // kind 2: the snapshot closing its movie (post-movie attract)
     int done; time_t over_t;       // when the RSS ceiling was first hit (SIGINT, then SIGKILL after 15 s)
 } Task;
 
@@ -78,8 +79,11 @@ static void mkdirs(const char *path) {
     mkdir(t, 0777);
 }
 static const char *bulk_base(const char *local, const char *overflow) {   // where the next heavy data goes
-    if (free_bytes(local) >= LOCAL_MIN_FREE || !overflow) return local;
-    return free_bytes(overflow) > free_bytes(local) ? overflow : local;
+    uint64_t lf = free_bytes(local);
+    const char *cap = getenv("DEEPEEL_LOCAL_FREE_CAP_GB");   // test control: pretend the local disk has at most N GiB free
+    if (cap && *cap && ((uint64_t)strtoull(cap, NULL, 10) << 30) < lf) lf = (uint64_t)strtoull(cap, NULL, 10) << 30;
+    if (lf >= LOCAL_MIN_FREE || !overflow) return local;
+    return free_bytes(overflow) > lf ? overflow : local;
 }
 
 static int cmp_movie(const void *a, const void *b) {
@@ -157,24 +161,52 @@ static pid_t spawn(const char *exe, char **av, const char *log) {
     return pid;
 }
 
-typedef struct { uint8_t *u; size_t n; } Union;
-static size_t merge_flags(Union *un, const char *path) {   // header "COV1" + size, then one flag byte per ROM index
+typedef struct { uint8_t *u; size_t n; uint8_t *inf, *prov; } Union;   // observed flags + the two suspect classes
+static size_t merge_flags(Union *un, const char *path) {   // header "COV1" + size, one flag byte per ROM index, then optional sections
     FILE *f = fopen(path, "rb"); uint32_t hd[2];
     if (!f) return 0;
     if (fread(hd, 4, 2, f) != 2 || hd[0] != 0x31564F43u || !hd[1] || (un->n && hd[1] != un->n)) { fclose(f); return 0; }
-    if (!un->n) { un->u = calloc(hd[1], 1); if (!un->u) { fclose(f); return 0; } un->n = hd[1]; }   // the kernel's compact ROM size, learned from the first child
+    if (!un->n) {   // the kernel's compact ROM size, learned from the first child
+        un->u = calloc(hd[1], 1); un->inf = calloc(hd[1], 1); un->prov = calloc(hd[1], 1);
+        if (!un->u || !un->inf || !un->prov) { fclose(f); return 0; }
+        un->n = hd[1];
+    }
     uint8_t *b = malloc(un->n); size_t added = 0;
-    if (b && fread(b, 1, un->n, f) == un->n)
+    if (b && fread(b, 1, un->n, f) == un->n) {
         for (size_t i = 0; i < un->n; i++) { uint8_t v = b[i] & ~un->u[i]; if (v) { if (!un->u[i]) added++; un->u[i] |= b[i]; } }
+        // a finished child's coverage.bin appends its suspects: "INF1" (static inference) and "PRV1" (probable-code walks)
+        uint32_t sh[2];
+        while (fread(sh, 4, 2, f) == 2 && sh[1] == un->n) {
+            uint8_t *dst = sh[0] == 0x31464E49u ? un->inf : sh[0] == 0x31565250u ? un->prov : NULL;
+            if (dst) { if (fread(b, 1, un->n, f) != un->n) break; for (size_t i = 0; i < un->n; i++) if (!dst[i]) dst[i] = b[i]; continue; }
+            long skip = sh[0] == 0x31524353u || sh[0] == 0x31544948u ? 4l * (long)un->n : (long)un->n;   // SCR1, HIT1 are words
+            if (fseek(f, skip, SEEK_CUR)) break;
+        }
+    }
     free(b); fclose(f);
     return added;
 }
-static size_t union_count(const Union *un) { size_t c = 0; for (size_t i = 0; i < un->n; i++) c += (un->u[i] & 3) != 0; return c; }
+// known = 100% - unknown (every classified byte, suspects included); sure = observed while running (no suspect); code = executed
+typedef struct { size_t known, sure, code; } CovStats;
+static CovStats union_stats(const Union *un) {
+    CovStats c = { 0, 0, 0 };
+    for (size_t i = 0; i < un->n; i++) {
+        uint8_t f = un->u[i];
+        int sure = f & (DP_CORE_NATURAL | DP_CORE_FORCED | DP_CORE_COPIED | DP_CORE_COMPRESSED | DP_CORE_DATA);
+        c.code += (f & (DP_CORE_NATURAL | DP_CORE_FORCED)) != 0; c.sure += sure != 0;
+        c.known += sure || (f & DP_CORE_STATIC) || un->inf[i] || un->prov[i];
+    }
+    return c;
+}
+static void cov_line(const Union *un, char *out, size_t n) {
+    CovStats c = union_stats(un); double t = un->n ? 100.0 / (double)un->n : 0.0;
+    snprintf(out, n, "known %.1f%% (without suspect %.1f%%, code %.1f%%) of %zu bytes", c.known * t, c.sure * t, c.code * t, un->n);
+}
 
 static void write_png(const Union *un, const char *png, const char *id, const char *name) {
     if (!un->n) return;
     DpCoreResult r; memset(&r, 0, sizeof r);
-    r.rom_size = un->n; r.flags = un->u;
+    r.rom_size = un->n; r.flags = un->u; r.inferred = un->inf; r.prov = un->prov;
     snprintf(r.rom_title, sizeof r.rom_title, "%s", name);
     dp_core_write_map(png, id, name, &r);
 }
@@ -216,12 +248,12 @@ static int draw_live(const Union *un, const char *name, time_t t_start, Task *tk
         if (!cache) cache = dp_canvas_new(cwid, chei, 0xff15151au); else dp_canvas_rect(cache, 0, 0, cwid, chei, 0xff15151au);
         cache_t = nowt;
         if (cache) {
-            size_t cov = union_count(un); char l[200];
-            size_t block = un->n ? dp_canvas_covmap(cache, 0, 0, cwid, chei - INFO, un->u, un->n, 0x4000) : 0;
+            char l[200]; CovStats cs = union_stats(un); double pc = un->n ? 100.0 / (double)un->n : 0.0;
+            size_t block = un->n ? dp_canvas_covmap(cache, 0, 0, cwid, chei - INFO, un->u, un->n, 0x4000, un->inf, un->prov) : 0;
             long el = (long)(nowt - t_start);
-            snprintf(l, sizeof l, "%s  coverage %.1f%%  %zu/%zu B  time %02ld:%02ld:%02ld", name, un->n ? 100.0 * (double)cov / (double)un->n : 0.0, cov, un->n, el / 3600, el / 60 % 60, el % 60);
+            snprintf(l, sizeof l, "%s  known %.1f%%  without suspect %.1f%%  code %.1f%%  time %02ld:%02ld:%02ld", name, cs.known * pc, cs.sure * pc, cs.code * pc, el / 3600, el / 60 % 60, el % 60);
             dp_canvas_text(cache, 2, chei - INFO + 3, l, 1, 0xff80e090u);
-            snprintf(l, sizeof l, "1 square = %zu bytes (never 1 px = 1 byte unless the ROM is tiny)", block);
+            snprintf(l, sizeof l, "1 square = %zu bytes | blue code, green data, orange suspect only, dark unknown", block);
             dp_canvas_text(cache, 2, chei - INFO + 13, l, 1, 0xffa0a0a8u);
         }
     }
@@ -263,9 +295,10 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
     Movie *mv; size_t nm = fetch_movies(exe, rom, &mv);
     fprintf(stderr, "deepeel auto: %zu movie(s) for this ROM%s\n", nm, nm ? ", longest first" : " (no TAS: exploration from the power-on state only)");
 
-    Union un = { rom_size ? calloc(rom_size, 1) : NULL, rom_size };
+    Union un = { rom_size ? calloc(rom_size, 1) : NULL, rom_size, rom_size ? calloc(rom_size, 1) : NULL, rom_size ? calloc(rom_size, 1) : NULL };
     Task *tk = calloc(nm + 4096 + 1, sizeof *tk); size_t nt = 0;
     for (size_t m = 0; m < nm; m++) { Task *t = &tk[nt++]; t->kind = 1; t->movie = (int)m; }   // movie replays, longest first
+    tk[nt].kind = 2; nt++;   // power-on exploration: attract from the very start, random runs and forks (the only task of a game without TAS)
     size_t movie_next = nm;
     char **seen = NULL; size_t nseen = 0, seencap = 0;
     size_t rss_est = 600ull << 20, last_total = 0; int no_gain = 0, explore_done = 0;
@@ -335,7 +368,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
                 seen[nseen++] = strdup(full);
                 if (nt >= nm + 4096) continue;
                 Task *t = &tk[nt++]; memset(t, 0, sizeof *t);
-                t->kind = 2; t->movie = (int)m; snprintf(t->snap, sizeof t->snap, "%s", full); t->key = bitrev((unsigned)i);
+                t->kind = 2; t->movie = (int)m; snprintf(t->snap, sizeof t->snap, "%s", full); t->key = bitrev((unsigned)i); t->end = fin && i + 1 == nn;
             }
             for (size_t i = 0; i < nn; i++) free(names[i]);
             free(names);
@@ -363,7 +396,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
                 kill(-tk[i].pid, SIGINT); fprintf(stderr, "deepeel auto: RAM %llu MiB available%s: %s stopped, re-queued\n", (unsigned long long)(avail >> 20), swap_grew ? ", swap growing" : "", tk[i].kind == 1 ? mv[tk[i].movie].path : tk[i].snap);
                 waitpid(tk[i].pid, NULL, 0); tk[i].done = 1;
                 if (tk[i].rss_peak > rss_est) rss_est = tk[i].rss_peak;
-                if (nt < nm + 4096) { Task *r = &tk[nt++]; memset(r, 0, sizeof *r); r->kind = tk[i].kind; r->movie = tk[i].movie; memcpy(r->snap, tk[i].snap, sizeof r->snap); r->key = tk[i].key; }
+                if (nt < nm + 4096) { Task *r = &tk[nt++]; memset(r, 0, sizeof *r); r->kind = tk[i].kind; r->movie = tk[i].movie; memcpy(r->snap, tk[i].snap, sizeof r->snap); r->key = tk[i].key; r->end = tk[i].end; }
                 running--; break;
             }
         }
@@ -378,9 +411,6 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             Task *t = NULL;
             for (size_t i = 0; i < nt && !t; i++) if (tk[i].kind == 1 && !tk[i].pid && !tk[i].done) t = &tk[i];   // movies first
             for (size_t i = 0; i < nt && !t; i++) if (tk[i].kind == 2 && !tk[i].pid && !tk[i].done) t = &tk[i];
-            if (!t && nm == 0 && !explore_done && !running) {   // no movie: one exploration from power-on
-                t = &tk[nt++]; memset(t, 0, sizeof *t); t->kind = 2; t->movie = 0; t->snap[0] = 0;
-            }
             if (t && t->kind == 2 && no_gain >= (cap * 2 > 8 ? cap * 2 : 8)) t = NULL;   // the union stagnates over a whole wave of explorations
             if (!t) break;
             char id[64]; snprintf(id, sizeof id, "%s%zu", t->kind == 1 ? "m" : "x", (size_t)(t - tk));
@@ -393,7 +423,7 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
                 snprintf(spool_arg, sizeof spool_arg, "%llu", (unsigned long long)(per > CAMP_SPOOL_MIN ? per : CAMP_SPOOL_MIN));
             }
             snprintf(sdir, sizeof sdir, "%s/state", t->dir); snprintf(snaps, sizeof snaps, "%s/snaps", t->dir);
-            char *av[48]; int n = 0;
+            char *av[64]; int n = 0;
             av[n++] = (char *)exe; av[n++] = "explore"; av[n++] = (char *)rom;
             av[n++] = "--jobs"; av[n++] = jobs;
             av[n++] = "--max-total"; av[n++] = HUGE_STEPS; av[n++] = "--queue-max"; av[n++] = t->kind == 1 ? CAMP_STR(CAMP_QUEUE_MOVIE) : CAMP_STR(CAMP_QUEUE_EXPLORE);   // RAM share of one child: the rest spills to its disk spool
@@ -418,6 +448,10 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
                 av[n++] = "--random"; av[n++] = CAMP_STR(CAMP_RANDOM_RUNS); av[n++] = "--random-stall"; av[n++] = CAMP_STR(CAMP_RANDOM_STALL);
                 av[n++] = "--random-frames"; av[n++] = CAMP_STR(CAMP_RANDOM_MAX);
                 av[n++] = "--stall-time"; av[n++] = CAMP_STR(CAMP_EXPLORE_STALL_SECS);
+                // attract (no input): long from power-on, shorter from the end state of each movie, none from the other snapshots
+                if (!t->snap[0]) { av[n++] = "--attract-frames"; av[n++] = CAMP_STR(CAMP_ATTRACT_MAX); av[n++] = "--attract-min"; av[n++] = CAMP_STR(CAMP_ATTRACT_MIN); av[n++] = "--attract-stall"; av[n++] = CAMP_STR(CAMP_ATTRACT_STALL); }
+                else if (t->end) { av[n++] = "--attract-frames"; av[n++] = CAMP_STR(CAMP_POST_ATTRACT_MAX); av[n++] = "--attract-min"; av[n++] = CAMP_STR(CAMP_POST_ATTRACT_MIN); av[n++] = "--attract-stall"; av[n++] = CAMP_STR(CAMP_POST_ATTRACT_STALL); }
+                else av[n++] = "--no-start-attract";
                 if (CAMP_EXPLORE_MAX_SECS) { av[n++] = "--max-time"; av[n++] = CAMP_STR(CAMP_EXPLORE_MAX_SECS); }
             }
             av[n] = NULL;
@@ -430,12 +464,13 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
         // 4. monitor, periodic PNG
         time_t now = time(NULL);
         for (size_t i = 0; i < nt; i++) if (tk[i].pid && !tk[i].done) merge_flags(&un, tk[i].live);
-        size_t total = union_count(&un);
+        size_t total = union_stats(&un).known;
                 if (now - t_log >= CAMP_LOG_SECS) {
             t_log = now;
             size_t queued = 0; for (size_t i = 0; i < nt; i++) queued += tk[i].kind == 2 && !tk[i].pid && !tk[i].done;
-            fprintf(stderr, "[%ldm%02lds] ROM bytes covered %zu/%zu (%.1f%%) | workers %d/%ld (movies %zu/%zu started, explorations running %d, queued %zu, done %d) | RAM avail %llu MiB, child peak %zu MiB | swap +%lld MiB | disk %s %llu GiB free | stagnation streak %d\n",
-                    (long)(now - t_start) / 60, (long)(now - t_start) % 60, total, un.n, un.n ? 100.0 * total / un.n : 0.0, running, cap, movie_next, nm, running_x, queued, explore_done,
+            char cl[200]; cov_line(&un, cl, sizeof cl);
+            fprintf(stderr, "[%ldm%02lds] ROM %s | workers %d/%ld (movies %zu/%zu started, explorations running %d, queued %zu, done %d) | RAM avail %llu MiB, child peak %zu MiB | swap +%lld MiB | disk %s %llu GiB free | stagnation streak %d\n",
+                    (long)(now - t_start) / 60, (long)(now - t_start) % 60, cl, running, cap, movie_next, nm, running_x, queued, explore_done,
                     (unsigned long long)(avail >> 20), rss_est >> 20, (long long)((int64_t)swap_used() - (int64_t)swap0) >> 20, base == local ? "local" : "overflow", (unsigned long long)(dfree >> 30), no_gain);
         }
         if (now - t_png >= CAMP_PNG_SECS || total != last_total) { if (now - t_png >= CAMP_PNG_SECS) { write_png(&un, png, "auto", name); t_png = now; } }
@@ -466,16 +501,19 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
     }
     for (size_t i = 0; i < nt; i++) if (tk[i].pid && !tk[i].done) { kill(-tk[i].pid, SIGINT); waitpid(tk[i].pid, NULL, 0); }
     for (size_t i = 0; i < nt; i++) if (tk[i].pid) { char sc[1250]; snprintf(sc, sizeof sc, "%s/state/coverage.bin", tk[i].dir); merge_flags(&un, sc); merge_flags(&un, tk[i].live); }
-    size_t total = union_count(&un);
     write_png(&un, png, "auto", name);
     char cb[1200]; snprintf(cb, sizeof cb, "%s/coverage.bin", outdir);
     FILE *cf = fopen(cb, "wb");
-    if (cf) { uint32_t hd[2] = { 0x31564F43u, (uint32_t)un.n }; fwrite(hd, 4, 2, cf); if (un.u) fwrite(un.u, 1, un.n, cf); fclose(cf); }
+    if (cf) { uint32_t hd[2] = { 0x31564F43u, (uint32_t)un.n }; fwrite(hd, 4, 2, cf); if (un.u) fwrite(un.u, 1, un.n, cf);
+        uint32_t is[2] = { 0x31464E49u, (uint32_t)un.n }, ps[2] = { 0x31565250u, (uint32_t)un.n };   // the suspects ride along: "INF1", "PRV1"
+        if (un.inf && un.prov) { fwrite(is, 4, 2, cf); fwrite(un.inf, 1, un.n, cf); fwrite(ps, 4, 2, cf); fwrite(un.prov, 1, un.n, cf); }
+        fclose(cf); }
     if (repf) fclose(repf);
     for (size_t i = 0; i < nt; i++) if (tk[i].lfr[0]) unlink(tk[i].lfr);   // screens published in /dev/shm
     dp_livewin_close();
-    fprintf(stderr, "deepeel auto: finished, %zu/%zu ROM bytes covered (%.1f%%), observations of the tool; map %s, movies report %s, merged coverage %s\n",
-            total, un.n, un.n ? 100.0 * total / un.n : 0.0, png, rep_all, cb);
-    free(un.u); free(mv); free(tk);
+    char cl[200]; cov_line(&un, cl, sizeof cl);
+    fprintf(stderr, "deepeel auto: finished, ROM %s, observations of the tool; map %s, movies report %s, merged coverage %s\n",
+            cl, png, rep_all, cb);
+    free(un.u); free(un.inf); free(un.prov); free(mv); free(tk);
     return 0;
 }

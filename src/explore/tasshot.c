@@ -48,12 +48,12 @@ int dp_tasshot_finish(const char *path, const DpTasSummary *s) {
     dp_canvas_text(c, 12, 94, why, 1, 0xffa0a0a8u);
     // concrete ROM coverage this movie brings (its own replay from power-on, the classes of the kernel's flags)
     size_t cls[4] = {0}, tot = s->rom_size, cov = 0;
-    for (size_t i = 0; s->flags && i < tot; i++) { uint8_t f = s->flags[i]; if (f & 1) cls[0]++; else if (f & 2) cls[1]++; else if (f & 32) cls[2]++; else if (f & 16) cls[3]++; }
+    for (size_t i = 0; s->flags && i < tot; i++) { uint8_t f = s->flags[i]; if (f & 1) cls[0]++; else if (f & 2) cls[1]++; else if (f & 32) cls[2]++; else if (f & (4 | 8 | 16)) cls[3]++; }
     cov = cls[0] + cls[1] + cls[2] + cls[3];
     size_t block = 0;
-    if (s->flags && tot) block = dp_canvas_covmap(c, 1250, 4, 660, 112, s->flags, tot, 0x4000);
+    if (s->flags && tot) block = dp_canvas_covmap(c, 1250, 4, 660, 112, s->flags, tot, 0x4000, NULL, NULL);
     if (tot) {
-        snprintf(l, sizeof l, "ROM coverage of this movie alone: %zu / %zu bytes = %.1f%%   code natural %zu, forced %zu, static %zu, data read %zu   map: 1 square = %zu bytes",
+        snprintf(l, sizeof l, "this movie alone, classified: %zu / %zu bytes = %.1f%% (static inference not included)   code natural %zu, forced %zu, static %zu, data %zu   1 square = %zu bytes",
                  cov, tot, 100.0 * (double)cov / (double)tot, cls[0], cls[1], cls[2], cls[3], block);
         dp_canvas_text(c, 12, 108, l, 1, 0xff80e090u);
     }

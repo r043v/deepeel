@@ -82,7 +82,7 @@ static uint32_t cov_square(const uint8_t *fl, size_t lo, size_t hi) {   // domin
 }
 // one tile per ROM bank, one square per `block` bytes; the block is the smallest power of two whose squares stay >= 3 px, so a square is
 // never one byte except for tiny ROMs. Returns the block used.
-size_t dp_canvas_covmap(DpCanvas *c, int cx, int cy, int cw, int ch, const uint8_t *fl, size_t n, size_t bank) {
+size_t dp_canvas_covmap(DpCanvas *c, int cx, int cy, int cw, int ch, const uint8_t *fl, size_t n, size_t bank, const uint8_t *inf, const uint8_t *prov) {
     if (!n || !bank || cw < 8 || ch < 8) return 0;
     size_t banks = (n + bank - 1) / bank; int rows;
     int cols = dp_canvas_grid((int)banks, 1, 1, cw, ch, &rows);
@@ -99,7 +99,9 @@ size_t dp_canvas_covmap(DpCanvas *c, int cx, int cy, int cw, int ch, const uint8
         for (size_t i = 0; i * block < bank; i++) {
             size_t lo = b * bank + i * block, hi = lo + block; if (lo >= n) break; if (hi > n) hi = n;
             int x = tx + (int)(i % per) * sq, y = ty + (int)(i / per) * sq;
-            dp_canvas_rect(c, x, y, sq > 2 ? sq - 1 : sq, sq > 2 ? sq - 1 : sq, cov_square(fl, lo, hi));
+            uint32_t col = cov_square(fl, lo, hi);
+            if (col == 0xff26262eu) for (size_t k = lo; k < hi; k++) if ((inf && inf[k]) || (prov && prov[k])) { col = 0xffb07828u; break; }
+            dp_canvas_rect(c, x, y, sq > 2 ? sq - 1 : sq, sq > 2 ? sq - 1 : sq, col);
         }
     }
     return block;

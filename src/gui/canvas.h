@@ -20,7 +20,8 @@ int dp_canvas_fit(int w, int h, int cw, int ch, int *dw, int *dh);
 int dp_canvas_tile(DpCanvas *c, int cx, int cy, int cw, int ch, const uint32_t *src, int sw, int sh);
 // ROM coverage as the .map.png: one tile per bank (`bank` bytes), one square per block of bytes coloured by the dominant class, laid out to
 // fit the cell; flags: one byte per compact ROM index. The block (power of two, squares >= 3 px) is returned: a square is not a byte.
-size_t dp_canvas_covmap(DpCanvas *c, int cx, int cy, int cw, int ch, const uint8_t *flags, size_t n, size_t bank);
+size_t dp_canvas_covmap(DpCanvas *c, int cx, int cy, int cw, int ch, const uint8_t *flags, size_t n, size_t bank,
+                        const uint8_t *inf, const uint8_t *prov);   // suspects (may be NULL): squares nothing observed but inferred/probable are orange
 int dp_canvas_save_png(const DpCanvas *c, const char *path);
 // grid of `n` equal tiles inside (w,h): best columns for the aspect (tile_w:tile_h); returns columns, rows
 int dp_canvas_grid(int n, int tile_w, int tile_h, int w, int h, int *rows);

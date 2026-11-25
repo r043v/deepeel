@@ -6729,3 +6729,17 @@ snapshot = 7200 trames max (2 min de jeu) et arrêt après 3600 trames sans octe
    un rejeu TAS = une tuile sans son ni limite de trames ; un jeu humain = une tuile). Taille d'une tuile = écran maximal de la machine
    source (zoom x2 ou /2) + bandeau d'infos ; la fenêtre s'adapte au nombre de tuiles. Rafraîchissement réduit.
 5. Factorisation : aucun code propre à une machine hors `DpPlatform` / `DpMachine`.
+
+### Campagne : chiffres de couverture (2026-11-25)
+
+La campagne affiche trois taux de la ROM, calculés sur l'union de tous les enfants :
+
+- **known** = 100 % − inconnu : tout octet classé, suspects compris (analyse statique, marches « probables », inférences de
+  bourrage, tables et trous) ;
+- **without suspect** : octets observés pendant l'exécution (code naturel ou forcé, données lues, copiées, compressées) ;
+- **code** : octets exécutés seuls (l'ancien chiffre unique « coverage »).
+
+Les inférences ne remontent qu'à la fin de chaque enfant : « known » progresse par paliers. Dans la carte, l'orange marque les
+carrés suspects seulement. L'attract est lancé depuis l'allumage (`CAMP_ATTRACT_*`) et depuis la dernière sauvegarde de chaque
+film (`CAMP_POST_ATTRACT_*`).
+

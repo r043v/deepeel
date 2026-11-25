@@ -25,6 +25,7 @@
 #define CAMP_ATTRACT_MIN       36000    /* runs at least this long before a stagnation stop (10 min) */
 #define CAMP_ATTRACT_STALL     3600     /* frames without a new ROM byte ends it (1 min) */
 #define CAMP_POST_ATTRACT_MAX  36000    /* attract from the end state of each movie, frames (10 min) */
+#define CAMP_POST_ATTRACT_MIN  3600     /* it runs at least this long before a stagnation stop */
 #define CAMP_POST_ATTRACT_STALL 3600
 
 /* ---- queues and disk ---- */
