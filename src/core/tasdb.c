@@ -232,18 +232,20 @@ static int list_game(long gid, int fetch) {
 /* `tasdb emu ROM FRAMES`: the single, mandatory source of the emulator a movie was made and verified on.  The game is
  * matched by ROM hash, then the publication/submission with the same frame count; stdout carries machine-readable
  * lines `emulator=BizHawk 2.3.2 kind=publication id=4015` (exit 0), nothing otherwise (exit 1: no match, 3: no database). */
-typedef struct { long frames; int n; } EmuQ;
+typedef struct { long frames; int n; const char *id; } EmuQ;   /* id: NNNN[M|S] (the movie directory name in the database) matches without the frame count */
 static void on_emu_pub(const char *sys, const char *line, void *u) {
     EmuQ *q = u; char id[32], fr[32], emu[64]; (void)sys;
     col_of(line, 0, id, sizeof id); col_of(line, 3, fr, sizeof fr); col_of(line, 5, emu, sizeof emu);
-    if (atol(fr) == q->frames) { printf("emulator=%s kind=publication id=%s\n", emu, id); q->n++; }
+    int byid = q->id && !strcmp(q->id + strlen(q->id) - 1, "M") && !strncmp(q->id, id, strlen(q->id) - 1) && strlen(id) == strlen(q->id) - 1;
+    if (atol(fr) == q->frames || byid) { printf("emulator=%s kind=publication id=%s\n", emu, id); q->n++; }
 }
 static void on_emu_sub(const char *sys, const char *line, void *u) {
     EmuQ *q = u; char id[32], fr[32], emu[64]; (void)sys;
     col_of(line, 0, id, sizeof id); col_of(line, 5, fr, sizeof fr); col_of(line, 7, emu, sizeof emu);
-    if (atol(fr) == q->frames) { printf("emulator=%s kind=submission id=%s\n", emu, id); q->n++; }
+    int byid = q->id && !strcmp(q->id + strlen(q->id) - 1, "S") && !strncmp(q->id, id, strlen(q->id) - 1) && strlen(id) == strlen(q->id) - 1;
+    if (atol(fr) == q->frames || byid) { printf("emulator=%s kind=submission id=%s\n", emu, id); q->n++; }
 }
-static int cmd_emu(const char *rom, long frames) {
+static int cmd_emu(const char *rom, long frames, const char *mid) {
     char sysf[PATH_MAX + 64]; snprintf(sysf, sizeof sysf, "%s/systems.tsv", root);
     if (access(sysf, R_OK)) { fprintf(stderr, "tasdb: no database in %s (run `deepeel tasdb sync` first)\n", root); return 3; }
     FILE *f = fopen(rom, "rb"); if (!f) { perror(rom); return 2; }
@@ -253,7 +255,7 @@ static int cmd_emu(const char *rom, long frames) {
     for (int i = 0; i < 16; i++) sprintf(md + 2 * i, "%02x", m[i]); for (int i = 0; i < 20; i++) sprintf(sh + 2 * i, "%02x", s[i]);
     Match mt = { {0}, 0, md, sh }; scan("games", 3, sh, on_game, &mt);
     if (!mt.n) scan("games", 2, md, on_game, &mt);
-    EmuQ q = { frames, 0 };
+    EmuQ q = { frames, 0, mid };
     for (int i = 0; i < mt.n; i++) { char g[32]; snprintf(g, sizeof g, "%ld", mt.gids[i]); scan("pubs", 1, g, on_emu_pub, &q); scan("subs", 2, g, on_emu_sub, &q); }
     if (!q.n) fprintf(stderr, "tasdb: no publication/submission of this ROM has %ld frames\n", frames);
     return q.n ? 0 : 1;
@@ -277,19 +279,20 @@ static int cmd_find(const char *rom, int fetch) {
 }
 
 int dp_tasdb_command(int argc, char **argv) {
-    const char *dir = 0, *systems = 0, *pos = 0, *pos2 = 0; int fetch = 0;
+    const char *dir = 0, *systems = 0, *pos = 0, *pos2 = 0, *mid = 0; int fetch = 0;
     for (int i = 3; i < argc; i++) {
         if (!strcmp(argv[i], "--dir") && i + 1 < argc) dir = argv[++i];
         else if (!strcmp(argv[i], "--systems") && i + 1 < argc) systems = argv[++i];
+        else if (!strcmp(argv[i], "--id") && i + 1 < argc) mid = argv[++i];
         else if (!strcmp(argv[i], "--fetch")) fetch = 1;
         else if (!pos) pos = argv[i];
         else if (!pos2) pos2 = argv[i];
     }
-    if (argc < 3) { fprintf(stderr, "usage: deepeel tasdb sync [--systems A,B] | emu ROM FRAMES | find ROM [--fetch] | fetch GAME_ID   [--dir D]\n"); return 2; }
+    if (argc < 3) { fprintf(stderr, "usage: deepeel tasdb sync [--systems A,B] | emu ROM FRAMES [--id NNNN[M|S]] | find ROM [--fetch] | fetch GAME_ID   [--dir D]\n"); return 2; }
     set_root(dir);
-    if (!strcmp(argv[2], "emu") && pos && pos2) return cmd_emu(pos, atol(pos2));
+    if (!strcmp(argv[2], "emu") && pos && pos2) return cmd_emu(pos, atol(pos2), mid);
     if (!strcmp(argv[2], "sync")) return cmd_sync(systems);
     if (!strcmp(argv[2], "find") && pos) return cmd_find(pos, fetch);
     if (!strcmp(argv[2], "fetch") && pos) return list_game(atol(pos), 1) ? 0 : 1;
-    fprintf(stderr, "usage: deepeel tasdb sync [--systems A,B] | emu ROM FRAMES | find ROM [--fetch] | fetch GAME_ID   [--dir D]\n"); return 2;
+    fprintf(stderr, "usage: deepeel tasdb sync [--systems A,B] | emu ROM FRAMES [--id NNNN[M|S]] | find ROM [--fetch] | fetch GAME_ID   [--dir D]\n"); return 2;
 }

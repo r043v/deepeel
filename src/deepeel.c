@@ -55,6 +55,10 @@ int dp_gbs_fetch(const char *game, const char *dir, char *out_gbs, size_t cap, c
 #include "explore/tas.h"
 
 #include "explore/core.h"
+#include "explore/auto.h"
+#include "explore/tasshot.h"
+// the kernel reaches the summary composer through weak symbols: one strong reference makes the archive member link
+const void *const dp_tasshot_keep[] = { (const void *)dp_tasshot_capture, (const void *)dp_tasshot_finish };
 #include "explore/seedset.h"
 #include "core/bizhawk.h"
 #include "core/desync.h"
@@ -143,6 +147,7 @@ static void usage(void) {
             "    --jobs N|auto        parallel workers sharing one frontier\n"
             "    --unbounded          lift every cap (forks, queue, spool, paths, steps, memory): only exhaustion or SIGINT stops\n"
             "    --state-dir D        persist the frontier/spool/coverage; --resume continues it\n"
+            "    --frontier-lz4       compress saved frontier records\n"
             "    --cov-transfer ROM COV   replay another revision's coverage as seeds where the instruction windows match byte for byte\n"
             "    --cov-hits COV      seed the heat from a coverage file's hit counts (the max wins)\n"
             "    --entry bank:addr    extra seed (repeatable);  --seed-banks  seed every bank\n"
@@ -737,6 +742,13 @@ static int cmd_explore(int argc, char **argv) {
                     }
                     gkcfg.tas_masks = gmasks; gkcfg.tas_frames = gt.frames;
                     dp_machine_gb_set_tas(km, &gt);   // the recorder's sync profile
+                    if (gkcfg.tas_summary) {   // summary picture identity: movie, ROM, source emulator (TASVideos API), profile applied
+                        static char prof[200], emu[96]; const char *mb = strrchr(scfg.tas[0], '/'), *rb = strrchr(path, '/');
+                        if (!gkcfg.tas_name) gkcfg.tas_name = mb ? mb + 1 : scfg.tas[0];
+                        if (!gkcfg.tas_rom) gkcfg.tas_rom = rb ? rb + 1 : path;
+                        if (!gkcfg.tas_profile) { dp_tas_profile(&gt, prof, sizeof prof); gkcfg.tas_profile = prof; }
+                        if (!gkcfg.tas_emu) { dp_tasshot_emu(path, gt.frames, scfg.tas[0], emu, sizeof emu); gkcfg.tas_emu = emu; }
+                    }
                 } else fprintf(stderr, "deepeel: --tas: %s\n", terr);
             }
             uint32_t *gseed_pc = NULL; uint16_t *gseed_bk = NULL; DpSeedRegs *gseed_regs = NULL;
@@ -2101,6 +2113,12 @@ int deepeel_main(int argc, char **argv) {   // the library entry point; src/deep
     if (!ar_is_subcommand(argv[1]) && argv[1][0] != '-') {   // `deepeel ROM`: explore is the default, the system comes from the file
         ArSystem sys = ar_detect(argv[1]);
         if (sys == AR_NONE) { fprintf(stderr, "deepeel: %s: not a readable ROM, or its system is not recognised (use `deepeel <system> explore ROM`)\n", argv[1]); return 2; }
+        if (sys == AR_GB && (argc == 2 || (argc == 3 && argv[2][0] != '-'))) {   // `deepeel ROM [OVERFLOW_DIR]`: the whole campaign is managed by the supervisor
+            char exe[1024]; ssize_t el = readlink("/proc/self/exe", exe, sizeof exe - 1); if (el <= 0) snprintf(exe, sizeof exe, "%s", argv[0]); else exe[el] = 0;
+            char stem[256]; { const char *b = strrchr(argv[1], '/'); b = b ? b + 1 : argv[1]; snprintf(stem, sizeof stem, "%s", b); char *d = strrchr(stem, '.'); if (d && d != stem) *d = 0; }
+            char outdir[1100]; snprintf(outdir, sizeof outdir, "%s.deepeel", stem); mkdir(outdir, 0777);
+            return dp_auto_campaign(exe, argv[1], argc == 3 ? argv[2] : NULL, 0, outdir, stem);
+        }
         return auto_explore(argc, argv, sys);
     }
     if (!strcmp(argv[1], "frontier") && argc > 3 && !strcmp(argv[2], "stats")) {
@@ -2108,7 +2126,7 @@ int deepeel_main(int argc, char **argv) {   // the library entry point; src/deep
         FILE *kf = fopen(kp, "rb");
         if (kf) {
             uint32_t kh[3];
-            if (fread(kh, 4, 3, kf) == 3 && kh[0] == 0x31524644u) { printf("frontier: %u kernel states pending (%u bytes each)\n", kh[2], kh[1]); fclose(kf); return 0; }
+            if (fread(kh, 4, 3, kf) == 3 && (kh[0] == 0x31524644u || kh[0] == 0x32524644u)) { printf("frontier: %u kernel states pending (%u bytes each)\n", kh[2], kh[1]); fclose(kf); return 0; }
             fclose(kf);
         }
         char p[700], line[400];

@@ -64,6 +64,9 @@ enum { DP_TAS_REC_UNKNOWN = 0, DP_TAS_REC_VBA, DP_TAS_REC_BIZHAWK };
 // -1 the movie records no identity.  `why` gets a human description.
 int dp_tas_rom_match(const DpTas *t, const uint8_t *rom, size_t rom_size, char *why, size_t whysz);
 
+// human description of the recorder sync profile this movie selects (what gb_tas_tune applies), for reports and summaries
+void dp_tas_profile(const DpTas *t, char *out, size_t n);
+
 // sniff and load any supported format; returns 1 on success, 0 with a human
 // message in `err` otherwise
 int dp_tas_load(const char *path, DpTas *out, char *err, size_t errsz);

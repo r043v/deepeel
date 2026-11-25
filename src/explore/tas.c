@@ -434,3 +434,11 @@ void dp_tas_free(DpTas *t) {
     free(t->masks);
     memset(t, 0, sizeof *t);
 }
+
+void dp_tas_profile(const DpTas *t, char *out, size_t n) {
+    const char *base = t->recorder == DP_TAS_REC_VBA ? (t->recorder_rev >= 1 ? "VBA-rr V8 (WRAM pattern, HRAM $FF)" : "VBA V7 (DIV read +4, LCD-off frame clock)")
+                     : t->recorder == DP_TAS_REC_BIZHAWK ? (t->gambatte ? (t->equal_frames ? "BizHawk Gambatte (equal-length frames, DIV skew)" : "BizHawk Gambatte (vblank clock, DIV skew)")
+                                                          : t->gbhawk ? "BizHawk GBHawk (pad latch, DIV phase)" : "BizHawk")
+                     : "default (hardware timing)";
+    snprintf(out, n, "%s%s%s%s", base, t->bizhawk_23 ? ", 2.3.x legacy clock" : "", t->cgb_bios_loaded ? ", CGB boot ROM" : "", t->boot_frames ? ", DMG boot frames dropped" : "");
+}

@@ -97,6 +97,7 @@ typedef struct DpCoreConfig {
     unsigned bank_fork_cap;    // B7: bank forks made per site visit (0: unbounded)
     unsigned probe_ctx_cap;    // B1: contexts one probe site is armed under (1: the historical once-per-site)
     const char *state_dir;     // --state-dir: pending forked states are saved to <dir>/frontier.bin at exit
+    int frontier_lz4;          // --frontier-lz4: persist pending states in compressed records
     int resume;                // --resume: states saved there by a previous run are queued first
     const char *cov_hits_path; // --cov-hits: a coverage v1 file whose per-line hits seed the heat (the max wins; the report then shows the played usage of that campaign)
     const char *cov_transfer_rom, *cov_transfer_cov;   // --cov-transfer ROM COV: another revision's (or this one's own) coverage replayed as forced-path seeds where the four-byte instruction windows match byte for byte
@@ -132,6 +133,8 @@ typedef struct DpCoreConfig {
     int no_copies;             // 1: do not observe data accesses
     int no_novelty_order;      // 1: plain LIFO instead of uncovered-target-first
     uint32_t cell_lo, cell_hi; // technique 8: RAM range hashed into a semantic cell (cell_hi > cell_lo enables it)
+    uint64_t spool_max;        // bytes the disk spool may hold (0: no cap); past it a pushed fork is dropped and counted in pending_dropped
+    int no_frontier;           // do not export frontier.bin at the end (the caller owns the continuation)
     size_t queue_max;          // pending forked states held in RAM (0: unbounded)
     int queue_auto;            // default 1: queue_max is lowered at launch to what the free RAM (and the cgroup limit) can hold; an explicit --queue-max clears it
     const DpPlatformHooks *hooks;
@@ -142,6 +145,19 @@ typedef struct DpCoreConfig {
     unsigned progress_secs;   // >0: a progress line on stderr every N seconds (0 = silent)
     const char *snap_cov;     // path of the periodic coverage snapshot (written to <path>.tmp then renamed); NULL = none
     unsigned snap_secs;       // snapshot period in seconds (default 600; 0 = none)
+    // autonomous campaign (src/explore/auto.c): movie stagnation, machine snapshots, restarts from a snapshot, random runs
+    const char *from_state;   // --from-state FILE: explore from this saved machine state (DpMachine.save layout, e.g. a movie snapshot) instead of power-on
+    uint32_t tas_stall_frames;   // --tas-stall N: the unshifted movie replay stops after N frames without a ROM byte new to it (a desynced or idle movie); reported in tas_report (0: off)
+    unsigned snap_every;      // --snap-every N: the unshifted movie replay writes <snap_dir>/s<frame>.state every N frames (0: off)
+    const char *snap_dir;     // --snap-dir D
+    const char *live_frame;   // --live-frame FILE: the unshifted movie replay writes its screen there (w,h,frame,total + ARGB) about twice a second, for the supervisor's live window
+    const char *tas_summary;  // --tas-summary FILE.png: one picture (<=1920x1080) of the movie replay: key screens, identity, verdict
+    const char *tas_name, *tas_emu, *tas_profile, *tas_rom;   // --tas-name/--tas-emu/--tas-profile: what the summary prints (emu: TASVideos API)
+    const char *tas_report;   // --tas-report FILE: one line "frames=.. end=.. stalled=0|1 stall_frame=.. last_new=.. new_bytes=.." written when the unshifted replay ends
+    const char *live_flags;   // --live-flags FILE: the coverage flag bytes (coverage.bin layout) rewritten at every progress tick, for a supervising process
+    unsigned random_runs;     // --random N: N seeded random-pad runs started from the start state (each stops on random_stall frames without a new ROM byte)
+    uint32_t random_frames;   // --random-frames N: frame cap of one random run (0 = none: only stagnation stops a run)
+    uint32_t random_stall;    // --random-stall N: frames without a new ROM byte that end a random run (default 36000 = 10 min of game time)
 } DpCoreConfig;
 
 typedef struct DpCoreResult {

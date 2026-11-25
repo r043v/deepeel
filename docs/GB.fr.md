@@ -443,6 +443,10 @@ la même limite de file RAM que les nouvelles fourches : les états excédentair
 sont transférés vers le stockage temporaire sur disque. Si ce stockage est
 indisponible, ils restent en RAM ; la sauvegarde de fin de run est encore
 nécessaire pour les conserver après l'arrêt.
+L'option `--frontier-lz4` compresse les états de `frontier.bin` pour réduire
+l'espace nécessaire à la sauvegarde. La reprise et `frontier stats` lisent
+aussi les sauvegardes brutes existantes. La reprise d'une sauvegarde compressée
+conserve ce format.
 Le noyau signale ce repli en RAM ; une erreur de lecture du stockage différé
 interrompt l'exploration et renvoie un échec au lieu d'annoncer un épuisement.
 Les graines d'entrée passent elles aussi par cette limite ; leur statut de
@@ -6671,3 +6675,57 @@ attract tient désormais au moins `--attract-min` images (36 000 = 10 min de jeu
 - Le calcul de TIMA conserve le bon nombre de ticks au débordement du compteur CPU. TIMA et la RTC ignorent les reculs temporaires du compteur pendant la synchronisation des périphériques. Le profil CGB 2.3.2 reproduit aussi l'avance de phase de TIMA quand une écriture dans TAC ou DIV arrête l'ancienne horloge du timer. Ce tick décale une IRQ après le reset logiciel de Crystal vers la trame 455 200.
 - Sur le film Crystal de la publication TASVideos 4015, les 31 000 premières trames donnent des digests identiques pour les registres, les banques WRAM et VRAM, l'OAM, la HRAM, la SRAM et IE après exclusion du bruit de démarrage. Le rejeu franchit également l'ancien blocage à 95 983 et la désynchronisation durable à 183 706.
 - Sur les 604 876 trames du film, le correctif TAC élimine le décalage durable qui commençait à 455 706. Le dernier écart transitoire est à 505 349. Les digests des 99 527 trames suivantes concordent selon les filtres de `gb_sync_check.py`.
+
+## 0.434.0 — campagne autonome : `deepeel ROM [DISQUE_DEBORDEMENT]`
+
+Sans autre argument qu'un éventuel chemin de débordement (par ex. le disque Windows), l'exécutable
+gère seul la recherche de couverture (`src/explore/auto.c`, superviseur ; les enfants sont des
+`deepeel explore ...` lancés par `fork`/`exec` de l'exécutable lui-même, aucun script).
+
+1. **Films** : `tasdb sync` si la base est vide, puis `tasdb find ROM --fetch` (API TASVideos, seule
+   source). Seuls les films de **la même version de ROM** sont rejoués (un film d'une autre version
+   désynchronise et gonfle la mémoire). Rejeu en parallèle, **les plus longs d'abord**.
+2. **Stagnation** : `--tas-stall N` arrête un rejeu quand aucun octet de ROM nouveau n'est apparu depuis
+   N trames (défaut du superviseur : 36000 = 10 min de jeu réel) ; message `TAS-STAGNATION`, rapport
+   `--tas-report`, et `<sortie>/movies.txt` liste chaque film : `ok`, `stagnation` (désynchronisé ou
+   incompatible) ou `failed`. Seule la stagnation arrête une recherche (pas de limite de temps ni de pas).
+3. **Snapshots** : `--snap-every 600 --snap-dir D` écrit l'état machine toutes les 600 trames
+   (`sN.state`, écriture atomique), repris avec `--from-state`.
+4. **Exploration depuis chaque snapshot** : `--from-state S --random 10` (dix parcours à pad aléatoire,
+   chacun arrêté par `--random-stall`, défaut 36000 trames sans octet nouveau) et fourches des deux côtés
+   de chaque conditionnel, dans l'ordre grossier→fin (bisection des snapshots de chaque film).
+   Arrêt global : une vague de explorations (2×workers, au moins 8) sans aucun octet nouveau.
+5. **Ressources** : workers = cœurs − 2 ; un enfant démarré à la fois (montée en charge de 8 s) et
+   seulement si `MemAvailable` couvre réserve (1/8 de la RAM, ≥ 1,5 Gio) + pic observé + marge restante des
+   enfants en cours ; **jamais de swap** : si la RAM tombe sous la moitié de la réserve ou si le swap
+   croît de plus de 128 Mio, le dernier enfant est arrêté (SIGINT) et remis en file. File de chaque enfant
+   bornée (`--queue-max`), le reste va au spool disque de son répertoire d'état. Disque : les données
+   lourdes vont en local tant que ≥ 8 Gio libres, sinon sur le chemin de débordement ; sous 1 Gio libre,
+   arrêt propre.
+6. **Sortie** : `<ROM>.deepeel/<ROM>.map.png` (union des couvertures de tous les enfants, réécrite toutes
+   les 2 min et à la fin), `coverage.bin` fusionné, `movies.txt`, journal de supervision sur stderr
+   (couverture, workers, RAM, swap, disque).
+7. `--live-flags FILE` (noyau) : le noyau réécrit à chaque tick de progrès ses octets de couverture
+   (format `coverage.bin`) pour le superviseur ; `--random N`, `--random-frames`, `--random-stall`,
+   `--from-state`, `--snap-*`, `--tas-stall`, `--tas-report` sont de nouvelles options de `explore`.
+
+Limites connues : la couverture des enfants n'est pas pré-semée avec l'union (chaque enfant redécouvre ce
+qui est connu, la stagnation globale compense) ; Pokémon Crystal et les autres jeux CGB demandent
+l'exécutable CGB (`build-cgb/deepeel`).
+
+## Plan campagne (amendé 2026-11-25)
+
+Réglages : tout vit dans `src/explore/campaign.h` (trames entre snapshots, stagnation film/aléatoire/attract, nombre de
+parcours aléatoires par snapshot, plafonds RAM/disque, périodes d'affichage). Défauts concrets : aléatoire depuis un
+snapshot = 7200 trames max (2 min de jeu) et arrêt après 3600 trames sans octet nouveau (1 min) ; film : stagnation
+36000 trames (10 min de jeu) ; attract : 216000 max, 36000 min, 3600 de stagnation.
+
+À livrer, dans l'ordre :
+1. Attract depuis la mise sous tension et depuis l'état final de chaque film (paramètres `CAMP_ATTRACT_*`, `CAMP_POST_ATTRACT_*`).
+2. Validation multi-plateformes : chaque ROM de test a un TAS résolu par l'API, le rejeu va à son terme (fin du film ou
+   stagnation haute, journalisée) ; un jeu sans TAS atteint une couverture élevée par attract + aléatoire seuls.
+3. Mode de jeu humain : jouer depuis le début ou depuis un snapshot, la trace d'entrées alimente la recherche.
+4. Fenêtre « live » par défaut : une tuile par vue (couverture = carrés de `CAMP_BLOCK_BYTES` octets avec % et temps total ;
+   un rejeu TAS = une tuile sans son ni limite de trames ; un jeu humain = une tuile). Taille d'une tuile = écran maximal de la machine
+   source (zoom x2 ou /2) + bandeau d'infos ; la fenêtre s'adapte au nombre de tuiles. Rafraîchissement réduit.
+5. Factorisation : aucun code propre à une machine hors `DpPlatform` / `DpMachine`.

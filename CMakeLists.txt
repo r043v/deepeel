@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.433.0 LANGUAGES C)
+project(deepeel VERSION 0.434.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -323,6 +323,7 @@ add_library(deepeel_core STATIC
   ${GEN}/dp_gbl_instances.c
   src/explore/results.c
   src/explore/core.c
+  src/explore/auto.c
   src/explore/core_map.c
   src/explore/core_gbseeds.c
   src/explore/frontier.c
@@ -334,6 +335,9 @@ add_library(deepeel_core STATIC
   src/report/map.c
   src/report/heat.c
   src/gui/font5x7.c
+  src/gui/canvas.c
+  src/gui/livewin.c
+  src/explore/tasshot.c
   src/gui/fbwatch.c
   src/gui/windows.c
 )

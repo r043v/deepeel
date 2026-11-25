@@ -131,10 +131,15 @@ int main(int argc, char **argv) {
     dp_core_result_free(&r);
     b->init(rom, rn, NULL, 1);
     m->set_pc(m, 0x200);  // the only new instruction cannot recreate source 0
-    cfg.resume = 1; cfg.seeds = NULL; cfg.n_seeds = 0;
+    cfg.resume = 1; cfg.seeds = NULL; cfg.n_seeds = 0; cfg.frontier_lz4 = 1;
     CHECK(dp_core_explore(m, rn, &cfg, &r));
     CHECK(r.resumed >= 12 && r.spooled >= r.resumed - 1);
     CHECK(r.saved > 0);
+    uint64_t compressed_count = r.saved;
+    f = fopen(first_frontier, "rb");
+    CHECK(f && fread(header, sizeof *header, 3, f) == 3);
+    CHECK(header[0] == 0x32524644u && header[2] == compressed_count);
+    fclose(f);
     for (size_t i = 0; i < r.rom_size; i++) CHECK((r.src_flags[i] & sources[i]) == sources[i]);
     free(sources);
     dp_core_result_free(&r);
@@ -142,8 +147,13 @@ int main(int argc, char **argv) {
     char coverage_path[512]; snprintf(coverage_path, sizeof coverage_path, "%s/coverage.bin", state_dir);
     CHECK(truncate(coverage_path, (off_t)(8 + rn)) == 0);
     b->init(rom, rn, NULL, 1);
+    cfg.frontier_lz4 = 0;  // Resuming a compressed frontier keeps its format.
     CHECK(dp_core_explore(m, rn, &cfg, &r));
-    CHECK(r.flags[0] & DP_CORE_NATURAL);
+    CHECK(r.resumed == compressed_count && r.flags[0] & DP_CORE_NATURAL);
+    f = fopen(first_frontier, "rb");
+    CHECK(f && fread(header, sizeof *header, 3, f) == 3);
+    CHECK(header[0] == 0x32524644u && header[2] == r.saved);
+    fclose(f);
     dp_core_result_free(&r);
     // A truncated frontier is rejected without replacing the damaged file.
     char frontier_path[512]; snprintf(frontier_path, sizeof frontier_path, "%s/frontier.bin", state_dir);
