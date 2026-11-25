@@ -29,6 +29,10 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sched.h>
+#include <sys/syscall.h>
+#endif
 
 #include "campaign.h"
 #include "../report/report.h"
@@ -138,13 +142,22 @@ static void copy_file(const char *from, const char *to) {
     if (a) fclose(a);
     if (b) fclose(b);
 }
+// A child only takes what nothing else wants: lowest nice and, on Linux, the idle CPU and disk classes (threads inherit them)
+static void background_priority(void) {
+    setpriority(PRIO_PROCESS, 0, CAMP_NICE);
+#ifdef __linux__
+    struct sched_param sp = { 0 };
+    if (CAMP_IDLE_CPU) sched_setscheduler(0, 5 /* SCHED_IDLE */, &sp);
+    if (CAMP_IDLE_IO) syscall(SYS_ioprio_set, 1 /* this process */, 0, 3 << 13 /* idle class */);
+#endif
+}
 static pid_t spawn(const char *exe, char **av, const char *log) {
     pid_t pid = fork();
     if (pid == 0) {
         int fd = open(log, 1 | 64 | 512, 0666);   // O_WRONLY|O_CREAT|O_TRUNC
         if (fd >= 0) { dup2(fd, 1); dup2(fd, 2); close(fd); }
         setpgid(0, 0);
-        setpriority(PRIO_PROCESS, 0, CAMP_NICE);   // the desktop and the supervisor stay responsive
+        background_priority();   // the rest of the machine comes first
         execv(exe, av);
         _exit(127);
     }

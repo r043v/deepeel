@@ -42,7 +42,9 @@
 /* ---- machine load ---- */
 #define CAMP_RAM_RESERVE_DIV   4        /* memory left to the machine: 1/4 of the RAM ... */
 #define CAMP_RAM_RESERVE_MIN   (3072ull << 20)   /* ... and this much at least; under half of it the newest child is killed and re-queued */
-#define CAMP_NICE              10       /* priority of every child: the desktop stays responsive */
+#define CAMP_NICE              19       /* priority of every child: the rest of the machine comes first */
+#define CAMP_IDLE_CPU          1        /* 1: children in the Linux idle CPU class (they run when nothing else wants the core) */
+#define CAMP_IDLE_IO           1        /* 1: children in the Linux idle disk class */
 #define CAMP_IO_PAUSE          35       /* /proc/pressure/io "full avg10" above this: one more fork is stopped (SIGSTOP) */
 #define CAMP_IO_RESUME         15       /* below this: one stopped fork resumes */
 #define CAMP_LIGHT_RSS         (256ull << 20)   /* first estimate of an observation child, then its measured peak */
