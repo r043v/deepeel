@@ -6797,13 +6797,12 @@ suspendues une à une puis reprises ; sous manque de mémoire le dernier enfant 
 Dès qu'un enfant se termine, sa couverture est réunie dans `<sortie>/coverage.bin` et ses fichiers d'état sont
 supprimés. Les états déversés sont compressés (différence XOR avec un état de référence).
 
-## 0.436.0 — campagne : films des autres versions, fenêtre live
+## 0.436.1 — campagne : films, fenêtre live
 
-- **Films** : tous ceux du jeu que l'API TASVideos nomme sont rejoués. Ceux d'une autre version de la ROM (autre
-  région ou révision) passent après ceux de la version exacte, avec la mention *other ROM version* : une
-  désynchronisation est attendue, détectée par la stagnation. Ce qu'ils exécutent reste une observation de la ROM
-  fournie. Restent écartés : les films VBA-rr (désactivés) et les doublons (publication et soumission du même film).
-  Pour rejouer fidèlement un film d'une autre version, lancer la campagne sur la ROM de cette version.
+- **Films** : un film ne se rejoue que sur sa propre ROM (la version que l'API TASVideos lui attribue) et avec un
+  émulateur compatible. Ceux d'une autre version (autre région ou révision) sont écartés et nommés dans le journal ;
+  pour les jouer, lancer la campagne sur la ROM de cette version. Restent aussi écartés les films VBA-rr (désactivés)
+  et les doublons (publication et soumission du même film).
 - **Fenêtre live** : la carte, banques serrées, prend exactement sa largeur ; les tuiles s'ajoutent à sa droite, une
   par une : en haut, puis juste dessous, puis la colonne suivante. Une nouvelle paire de rangées ne commence qu'au bord
   de l'écran. La fenêtre est redimensionnée sur place, sans être fermée.

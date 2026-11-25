@@ -37,7 +37,7 @@
 #define SHED_FREE CAMP_SHED_FREE
 #define HARD_MIN_FREE CAMP_HARD_MIN_FREE
 
-typedef struct { char path[1100]; unsigned frames; unsigned long size; char emu[48]; uint64_t input; int other; } Movie;   // emu: the source emulator, from the TASVideos API
+typedef struct { char path[1100]; unsigned frames; unsigned long size; char emu[48]; uint64_t input; } Movie;   // emu: the source emulator, from the TASVideos API
 typedef struct {
     int kind;                      // K_MOVIE, K_FORK, K_BOOT, K_RANDOM
     int movie;                     // the group: index in the movies array, nm for the power-on group
@@ -161,7 +161,6 @@ static const char *bulk_base(const char *local, const char *overflow) {   // whe
 
 static int cmp_movie(const void *a, const void *b) {
     const Movie *x = a, *y = b;
-    if (x->other != y->other) return x->other - y->other;   // the movies of this very ROM version first
     return x->frames < y->frames ? 1 : x->frames > y->frames ? -1 : strcmp(x->path, y->path);
 }
 // the movies of the ROM, from the TASVideos-backed database (sync on demand, fetch the files): the `tasdb find
@@ -181,7 +180,7 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
         while (p && in && (got = fread(cp, 1, sizeof cp, in)) > 0) fwrite(cp, 1, got, p);
         if (in) pclose(in);
         if (p) rewind(p);
-        char *line = NULL; size_t lc = 0; unsigned game = 0, ver = 0; char mname[300] = "";   // ver: the ROM's own version; the movies of the other versions are replayed after its own
+        char *line = NULL; size_t lc = 0; unsigned game = 0, ver = 0; char mname[300] = "";   // ver: the ROM's own version; a movie replays on its own ROM only
         while (p && getline(&line, &lc, p) > 0) {
             unsigned g; if (sscanf(line, "game %u", &g) == 1 || sscanf(line, "ROM matches game %u", &g) == 1) game = g;
             { char *a = strstr(line, "ROM matches game "), *b = a ? strchr(a, '(') : NULL, *e = b ? strstr(b, ", version ") : NULL;
@@ -192,7 +191,8 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
             if (!game || !fr || sscanf(line, " %31s", id) != 1 || !strchr("MS", id[strlen(id) - 1]) || id[0] < '0' || id[0] > '9') continue;
             char *q = fr; while (q > line && q[-1] >= '0' && q[-1] <= '9') q--;
             frames = (unsigned)strtoul(q, NULL, 10);
-            int other = 0; if (ver) { char tag[24]; snprintf(tag, sizeof tag, "[v%u]", ver); other = !strstr(line, tag); }
+            if (ver) { char tag[24]; snprintf(tag, sizeof tag, "[v%u]", ver); if (!strstr(line, tag)) {
+                fprintf(stderr, "deepeel auto: %.*s skipped: recorded on another version of the game (a movie replays on its own ROM only)\n", (int)strcspn(line + strspn(line, " "), " "), line + strspn(line, " ")); continue; } }
             char dir[1300]; snprintf(dir, sizeof dir, "%s/tasdb/movies/%u/%s", db, game, id);
             DIR *d = opendir(dir); if (!d) continue;
             struct dirent *de; char best[1100] = ""; off_t bsz = 0;
@@ -212,7 +212,7 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
             int dup = 0; for (size_t i = 0; i < n; i++) if ((*out)[i].frames == frames && ((*out)[i].size == (unsigned long)bsz || (input && (*out)[i].input == input))) dup = 1;   // the same movie as publication and submission
             if (dup) continue;
             if (n == cap) { cap = cap ? cap * 2 : 16; *out = realloc(*out, cap * sizeof **out); }
-            snprintf((*out)[n].path, sizeof (*out)[n].path, "%s", best); (*out)[n].frames = frames; (*out)[n].size = (unsigned long)bsz; (*out)[n].input = input; (*out)[n].other = other;
+            snprintf((*out)[n].path, sizeof (*out)[n].path, "%s", best); (*out)[n].frames = frames; (*out)[n].size = (unsigned long)bsz; (*out)[n].input = input;
             snprintf((*out)[n].emu, sizeof (*out)[n].emu, "unresolved");
             { char q2[7000]; snprintf(q2, sizeof q2, "%s tasdb emu %s %u --id %s 2>/dev/null", dp_shquote(exe, qe, sizeof qe), dp_shquote(rom, qr, sizeof qr), frames, id);
               FILE *e = popen(q2, "r"); char el[256];
@@ -220,7 +220,6 @@ static size_t fetch_movies(const char *exe, const char *rom, Movie **out) {
               if (e) { while (fgets(el, sizeof el, e)) {} pclose(e); } }
             if (!strcmp((*out)[n].emu, "unresolved")) { fprintf(stderr, "deepeel auto: %s skipped: the TASVideos API does not name its emulator\n", best); continue; }
             if (!strncmp((*out)[n].emu, CAMP_SKIP_EMULATOR, strlen(CAMP_SKIP_EMULATOR))) { fprintf(stderr, "deepeel auto: %s skipped: %s movies are disabled for now (desync)\n", best, (*out)[n].emu); continue; }
-            if (other) fprintf(stderr, "deepeel auto: %s targets another version of the game: replayed too, after this version's movies (a desync is expected)\n", best);
             n++;
         }
         free(line); if (p) fclose(p);
@@ -420,7 +419,7 @@ static int draw_live(const Union *un, const char *name, time_t t_start, Task *tk
             else if (att) snprintf(l, sizeof l, "movie over, no input  frame %llu  %u fps", fr, fps);
             else snprintf(l, sizeof l, "%llu/%u  %u%%  %u fps", fr, mv[g->g].frames, mv[g->g].frames ? (unsigned)(100ull * fr / mv[g->g].frames) : 0u, fps);
             dp_canvas_text(c, tx + 2, ty + th + 13, l, 1, 0xff96c8ffu);
-            if (t->kind == K_MOVIE) { snprintf(l, sizeof l, "source: %.24s%s", mv[g->g].emu, mv[g->g].other ? " | other ROM version" : ""); dp_canvas_text(c, tx + 2, ty + th + 23, l, 1, 0xffd0b060u); }
+            if (t->kind == K_MOVIE) { snprintf(l, sizeof l, "source: %.40s", mv[g->g].emu); dp_canvas_text(c, tx + 2, ty + th + 23, l, 1, 0xffd0b060u); }
             continue;
         }
         int hw = tw / 2, hh = th / 2, any = 0;   // its random runs: four at a time, a quarter screen each
@@ -664,7 +663,6 @@ int dp_auto_campaign(const char *exe, const char *rom, const char *overflow, siz
             if (t->kind == K_MOVIE) {   // the movie, then no input from its end state (the ending, the credits)
                 mkdirs(snaps);
                 A("--tas"); A(mv[t->movie].path); A("--no-start-attract");
-                if (mv[t->movie].other) A("--tas-any-rom");   // recorded on another version of the game
                 A("--snap-every"); A(CAMP_STR(CAMP_SNAP_EVERY)); A("--snap-dir"); A(snaps);
                 A("--tas-stall"); A(CAMP_STR(CAMP_MOVIE_STALL)); A("--tas-report"); A(t->rep);
                 snprintf(t->shot, sizeof t->shot, "%s/summary.png", t->dir); A("--tas-summary"); A(t->shot);
