@@ -663,3 +663,12 @@ if(SDL2_FOUND AND BUILD_GUI)
 else()
   message(STATUS "SDL2 not found: gui disabled")
 endif()
+
+# Link-time optimisation (cmake/pgo.cmake): the platform runtimes whose symbols are renamed by objcopy after
+# compilation must stay ordinary objects (objcopy does not rename inside LTO bytecode)
+get_property(dp_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(t IN LISTS dp_targets)
+  if(t MATCHES "_raw$")
+    target_compile_options(${t} PRIVATE -fno-lto)
+  endif()
+endforeach()

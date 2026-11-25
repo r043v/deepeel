@@ -13,6 +13,7 @@
 # into the build tree and the patch applied to the copy.
 
 set(SOURCES gbl_core.c gbl_cpu.c gbl_ppu.c gbl_apu.c)
+separate_arguments(BASE_FLAGS UNIX_COMMAND "${BASE_FLAGS}")
 file(MAKE_DIRECTORY ${DP_GBL_OUT})
 if(DP_GBL_PATCH)
   set(rt ${DP_GBL_OUT}/runtime)
@@ -98,6 +99,24 @@ ${cgbdef}#define GBL_ERAM_SIZE ${eram}
     endif()
     list(APPEND vobjs ${obj})
   endforeach()
+
+  # with -flto: the variant is optimised across its files here, into one ordinary object (objcopy cannot
+  # rename symbols inside LTO bytecode)
+  if(BASE_FLAGS MATCHES "-flto" OR BASE_FLAGS MATCHES "^@")
+    set(obj ${DP_GBL_OUT}/v${v}_all.o)
+    execute_process(COMMAND ${CMAKE_C_COMPILER} -r -nostdlib -O2 ${BASE_FLAGS} -flinker-output=nolto-rel ${vobjs} -o ${obj}
+      RESULT_VARIABLE r)
+    if(NOT r EQUAL 0)
+      message(FATAL_ERROR "dp_gbl: partial link failed (variant ${v})")
+    endif()
+    # the merged object also exports compiler-made names (gcov constructors...): only the runtime's stay global
+    execute_process(COMMAND objcopy --wildcard --keep-global-symbol=gbl_* --keep-global-symbol=dp_gbl_* --keep-global-symbol=gbr ${obj}
+      RESULT_VARIABLE r)
+    if(NOT r EQUAL 0)
+      message(FATAL_ERROR "dp_gbl: symbol localisation failed (variant ${v})")
+    endif()
+    set(vobjs ${obj})
+  endif()
 
   # every gbl_*/dp_gbl_*/gbr symbol (defined here or cross-object), leaving
   # libc alone: those are the names the instance prefix must rewrite.

@@ -1,4 +1,5 @@
-# Profile-guided build of deepeel for this machine (cmake -P): instrumented build, training on a ROM, optimised build.
+# Profile-guided build with link-time optimisation of deepeel for this machine (cmake -P, gcc): instrumented build,
+# training on a ROM, optimised build.
 #   cmake -DROM=<rom> [-DOUT=<dir>] [-DJOBS=<n>] [-DCONFIGURE=<extra cmake arguments, ;-separated>] -P cmake/pgo.cmake
 # OUT (default build-pgo) then holds the optimised deepeel.  The ROM stays outside the repository.
 if(NOT ROM)
@@ -15,12 +16,14 @@ get_filename_component(ROM "${ROM}" ABSOLUTE)
 get_filename_component(OUT "${OUT}" ABSOLUTE)
 set(PROF "${OUT}/profile")
 set(B "${OUT}/obj")   # the same path for both stages: the profile files are named after the objects
+find_program(GCC_AR gcc-ar REQUIRED)
+find_program(GCC_RANLIB gcc-ranlib REQUIRED)
 file(REMOVE_RECURSE "${PROF}" "${OUT}/train")
 file(MAKE_DIRECTORY "${PROF}" "${OUT}/train")
 
 # response files: the GB core's own build script passes CMAKE_C_FLAGS as one argument
-file(WRITE "${OUT}/gen.rsp" "-march=native -fprofile-update=atomic -fprofile-generate=${PROF}\n")
-file(WRITE "${OUT}/use.rsp" "-march=native -fprofile-use=${PROF} -fprofile-partial-training -Wno-missing-profile -Wno-coverage-mismatch\n")
+file(WRITE "${OUT}/gen.rsp" "-march=native -flto=auto -fprofile-update=atomic -fprofile-generate=${PROF}\n")
+file(WRITE "${OUT}/use.rsp" "-march=native -flto=auto -fprofile-use=${PROF} -fprofile-partial-training -Wno-missing-profile -Wno-coverage-mismatch\n")
 
 function(run)
   execute_process(COMMAND ${ARGN} RESULT_VARIABLE r OUTPUT_QUIET ERROR_VARIABLE e)
@@ -30,7 +33,8 @@ function(run)
 endfunction()
 function(build stage)
   file(REMOVE_RECURSE "${B}")
-  run(${CMAKE_COMMAND} -S "${SRC}" -B "${B}" "-DCMAKE_C_FLAGS=@${OUT}/${stage}.rsp" "-DCMAKE_EXE_LINKER_FLAGS=@${OUT}/${stage}.rsp" ${CONFIGURE})
+  run(${CMAKE_COMMAND} -S "${SRC}" -B "${B}" "-DCMAKE_C_FLAGS=@${OUT}/${stage}.rsp" "-DCMAKE_EXE_LINKER_FLAGS=@${OUT}/${stage}.rsp"
+      "-DCMAKE_AR=${GCC_AR}" "-DCMAKE_RANLIB=${GCC_RANLIB}" ${CONFIGURE})
   run(${CMAKE_COMMAND} --build "${B}" --target deepeel -j${JOBS})
 endfunction()
 
