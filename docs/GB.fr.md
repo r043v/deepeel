@@ -863,6 +863,18 @@ seulement sur des chemins forcés ; le désassemblage appelle code 99,6 % de ces
 derniers. Le reste du forcé (12 % de code selon la même référence) n'est pas
 atteignable par des transferts fixes depuis le code exécuté.
 
+Observation plus rapide (0.444.0) : en mode `--observe`, les sondes
+d'événements, les rejeux d'index et l'apprentissage du hasard ne construisaient
+que des états forcés aussitôt jetés ; ils sont coupés. La PCE lit désormais les
+octets d'instruction par bloc. Observations de l'outil sur Bonk 3, rejeu d'un
+film pendant 60 s : 4,6 millions de pas par seconde avant (build guidé par profil
+entraîné sur GB seul), 7,2 après sans profil, 11,6 avec profil ; couverture
+identique octet pour octet sur un rejeu borné. `cmake/pgo.cmake` accepte
+plusieurs ROMs (`-DROM="a.gbc;b.pce"`) et lance pour chacune la commande de sa
+machine, avec des passes bornées en temps. Campagne de 10 minutes sur Bonk 3 :
+79,6 % « connu sans suspects » (62,9 % à la précédente, dont les films
+n'allaient pas au bout).
+
 ## Fermeture statique et élagage (0.4.0)
 
 La machine prouve le code en l'exécutant ; ses garde-fous (budget par chemin,

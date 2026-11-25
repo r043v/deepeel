@@ -2726,7 +2726,7 @@ static void run_path(Worker *w, Pending *p) {
         // technique 7 (restricted form): z80 `ld a,(RAM)` whose value then indexes a ROM table
         // (`ld hl,ROM` + `add hl,de` within 12 bytes): replay the site with each index 0..index_max (default 15, --index-max up to 255)
         uint32_t dl_addr = 0; int dl_idx = 0, dl_width = 1, dl_dreg = -1;
-        int dl_len = (m->poke && !cur_forced) ? direct_ram_load(m, isa, bytes, &dl_addr, &dl_idx, &dl_width, &dl_dreg) : 0;
+        int dl_len = (m->poke && !cur_forced && !cfg->observe) ? direct_ram_load(m, isa, bytes, &dl_addr, &dl_idx, &dl_width, &dl_dreg) : 0;
         if (dl_len) dl_addr += (uint32_t)dl_width - 1;   // big-endian: the low-order byte is the last; 1 byte elsewhere
         if (!cfg->no_index_replay && dl_len) {
             if (isa->rom_table_follows && isa->rom_table_follows(isa, m, pc, dl_len)) {
@@ -2790,7 +2790,7 @@ static void run_path(Worker *w, Pending *p) {
         // technique 3 (learned form): z80 `ld a,(nn)` of RAM straight followed by `cp n` is a signature test;
         // queue a state whose byte already holds n so the matching side runs as natural
         uint32_t sg_addr = 0, sg_val = 0; int sg_w = 1;
-        if (!cfg->no_learn_sig && m->poke && !cur_forced &&
+        if (!cfg->no_learn_sig && m->poke && !cur_forced && !cfg->observe &&
             ram_signature(m, isa, pc, bytes, dl_len, dl_idx, dl_len ? dl_addr - (uint32_t)dl_width + 1 : 0, dl_width, dl_dreg, &sg_addr, &sg_val, &sg_w)) {
             uint32_t addr = sg_addr; uint32_t sigv = sg_val;
             pthread_mutex_lock(&sh->mu);
@@ -2940,7 +2940,7 @@ static void run_path(Worker *w, Pending *p) {
                 for (int i = 1; i < len && w->win_ni < sizeof w->win_imm; i++) w->win_imm[w->win_ni++] = bytes[i];
             }
         }
-        if (!cfg->no_event_probes && cfg->hooks && cfg->hooks->event_probe && m->rom_index(m, pc) >= 0) {
+        if (!cfg->no_event_probes && !cfg->observe && cfg->hooks && cfg->hooks->event_probe && m->rom_index(m, pc) >= 0) {   // observation: queue_push drops these states, so neither they nor their context keys are built
             uint64_t pkey = (uint64_t)m->rom_index(m, pc) + 1;
             int fresh = 0;
             if (!kc_known(w, pkey)) {

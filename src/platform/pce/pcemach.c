@@ -236,6 +236,18 @@ uint8_t dp_pce_peek(uint16_t addr) {
     return 0xFF;
 }
 
+// n bytes from addr (n <= 0x2000): one MPR lookup per 8 KiB page, the same bytes dp_pce_peek returns one by one
+void dp_pce_peek_n(uint16_t addr, uint8_t *out, unsigned n) {
+    while (n) {
+        const unsigned off = addr & 0x1FFF, k = n < 0x2000 - off ? n : 0x2000 - off;
+        const uint8_t v = machine.cpu.mpr[addr >> 13];
+        if (page_valid[v]) memcpy(out, rom + (size_t)page_map[v] * 0x2000 + off, k);
+        else if (v >= 0xF8 && v <= 0xFB) memcpy(out, machine.wram + off, k);
+        else memset(out, 0xFF, k);
+        out += k; n -= k; addr = (uint16_t)(addr + k);
+    }
+}
+
 void dp_pce_poke(uint16_t addr, uint8_t v) {
     uint8_t m = machine.cpu.mpr[addr >> 13];
     if (m >= 0xF8 && m <= 0xFB) machine.wram[addr & 0x1FFF] = v;

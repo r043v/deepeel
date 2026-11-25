@@ -1,7 +1,8 @@
 # Profile-guided build with link-time optimisation of deepeel for this machine (cmake -P, gcc): instrumented build,
 # training on a ROM, optimised build.
-#   cmake -DROM=<rom> [-DOUT=<dir>] [-DJOBS=<n>] [-DCONFIGURE=<extra cmake arguments, ;-separated>] -P cmake/pgo.cmake
-# OUT (default build-pgo) then holds the optimised deepeel.  The ROM stays outside the repository.
+#   cmake -DROM=<rom>[;<rom>...] [-DOUT=<dir>] [-DJOBS=<n>] [-DCONFIGURE=<extra cmake arguments, ;-separated>] -P cmake/pgo.cmake
+# OUT (default build-pgo) then holds the optimised deepeel.  The ROMs stay outside the repository.  One ROM per platform
+# in use: a platform without a training run keeps its plain optimisation (its CPU core and bus gain nothing from PGO).
 if(NOT ROM)
   message(FATAL_ERROR "usage: cmake -DROM=<rom> [-DOUT=<dir>] -P cmake/pgo.cmake")
 endif()
@@ -12,7 +13,6 @@ endif()
 if(NOT JOBS)
   set(JOBS 4)
 endif()
-get_filename_component(ROM "${ROM}" ABSOLUTE)
 get_filename_component(OUT "${OUT}" ABSOLUTE)
 set(PROF "${OUT}/profile")
 set(B "${OUT}/obj")   # the same path for both stages: the profile files are named after the objects
@@ -41,9 +41,39 @@ endfunction()
 message(STATUS "pgo: instrumented build")
 build(gen)
 message(STATUS "pgo: training (observation runs, then forks)")
-run("${B}/deepeel" explore "${ROM}" --jobs 1 --observe --no-closure --no-start-attract --no-infer --no-spec --no-frontier
-    --state-dir "${OUT}/train/observe" --random 4 --random-min 3600 --random-stall 600)
-run("${B}/deepeel" explore "${ROM}" --jobs 1 --no-infer --no-spec --no-frontier --state-dir "${OUT}/train/fork" --max-time 60)
+set(n 0)
+foreach(r IN LISTS ROM)
+  get_filename_component(r "${r}" ABSOLUTE)
+  math(EXPR n "${n} + 1")
+  # `deepeel explore` is the GB explorer: every other machine names its own sub-command
+  string(TOLOWER "${r}" low)
+  if(low MATCHES "\\.(gb|gbc)$")
+    set(cmd explore)
+  elseif(low MATCHES "\\.pce$")
+    set(cmd pce explore)
+  elseif(low MATCHES "\\.nes$")
+    set(cmd nes explore)
+  elseif(low MATCHES "\\.(md|gen)$")
+    set(cmd md explore)
+  elseif(low MATCHES "\\.(ngp|ngc)$")
+    set(cmd ngp explore)
+  elseif(low MATCHES "\\.(ws|wsc)$")
+    set(cmd ws explore)
+  elseif(low MATCHES "\\.sms$")
+    set(cmd z80 explore sms)
+  elseif(low MATCHES "\\.gg$")
+    set(cmd z80 explore gg)
+  elseif(low MATCHES "\\.sg$")
+    set(cmd z80 explore sg)
+  elseif(low MATCHES "\\.(mx1|mx2)$")
+    set(cmd z80 explore msx)
+  else()
+    message(FATAL_ERROR "pgo: unknown machine for ${r}")
+  endif()
+  run("${B}/deepeel" ${cmd} "${r}" --jobs 1 --observe --no-closure --no-start-attract --no-infer --no-spec --no-frontier
+      --state-dir "${OUT}/train/observe${n}" --random 4 --random-min 3600 --random-stall 600 --max-time 60)
+  run("${B}/deepeel" ${cmd} "${r}" --jobs 1 --no-infer --no-spec --no-frontier --state-dir "${OUT}/train/fork${n}" --max-time 60)
+endforeach()
 message(STATUS "pgo: optimised build")
 build(use)
 file(COPY "${B}/deepeel" DESTINATION "${OUT}")

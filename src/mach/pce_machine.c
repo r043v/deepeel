@@ -38,6 +38,7 @@ static uint64_t pce_state_hash(DpMachine *m) { pce_ensure(m); return dp_pce_stat
 static void pce_save(DpMachine *m, uint8_t *buf) { pce_ensure(m); dp_pce_save(buf); memcpy(buf + dp_pce_state_size(), &((PceWrap *)m->impl)->frames, 8); }
 static void pce_load(DpMachine *m, const uint8_t *buf) { pce_ensure(m); dp_pce_load(buf); memcpy(&((PceWrap *)m->impl)->frames, buf + dp_pce_state_size(), 8); }
 static uint8_t pce_fetch(DpMachine *m, uint32_t a) { pce_ensure(m); return dp_pce_peek((uint16_t)a); }
+static void pce_fetch_n(DpMachine *m, uint32_t a, uint8_t *o, unsigned n) { pce_ensure(m); dp_pce_peek_n((uint16_t)a, o, n); }
 static void pce_poke(DpMachine *m, uint32_t a, uint8_t v) { pce_ensure(m); dp_pce_poke((uint16_t)a, v); }
 static int64_t pce_rom_index(DpMachine *m, uint32_t a) { pce_ensure(m); return dp_pce_rom_index((uint16_t)a); }
 
@@ -350,7 +351,7 @@ DpMachine *dp_machine_pce(void) {
     m->save = pce_save;
     m->state_hash = pce_state_hash;
     m->load = pce_load;
-    m->fetch = pce_fetch;
+    m->fetch_n = pce_fetch_n; m->fetch = pce_fetch;
     m->poke = pce_poke;
     m->rom_index = pce_rom_index;
     m->linear = 1; m->code_base = 0xE000; m->bank_window = 0x4000u; m->page_shift = 13;   // B8: each 8 KiB page is scanned at the MPR window the kernel journaled it executing at
