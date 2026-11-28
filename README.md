@@ -2,7 +2,7 @@
 
 Outil générique de découverte de la **memory map** des ROMs, plateforme par
 plateforme (GB, NES, PCE, Mega Drive, SG/SMS/GG, MSX, Neo Geo Pocket,
-WonderSwan). Il contient le registre matériel complet de chaque console
+WonderSwan, GP32). Il contient le registre matériel complet de chaque console
 (registres IO, fenêtres de mapper, IRQ), il exécute la ROM dans la **machine
 m0boy** (l'interpréteur GB dont le run_hash est tenu par la suite de tests
 m0boy, embarquée comme dépendance `M0BOY_DIR`) et consigne **tout** : chaque
@@ -170,6 +170,10 @@ par m0boy (`.cov`, PNG, `.map`, code en RAM) est documentée dans
 - **NES** (0.28.0) : le runtime NES de m0boy embarqué (NROM, UxROM),
   exploration à fourches avec snapshots exacts pris au milieu d'une frame,
   rejeu TAS `.fm2`/`.bk2` et sessions jouées. Voir `docs/NES.fr.md`.
+- **GP32** (0.446.0, instantanés PNG relançables) : le runtime S3C2400/ARM920T de m0boy, firmware HLE ou
+  BIOS réel, image prise après démarrage (applications auto-décompressées
+  comprises), 170 registres. `deepeel jeu.fxe` ou `deepeel gp32 explore`. Voir
+  [docs/GP32.fr.md](docs/GP32.fr.md).
 - Autres plateformes : l'architecture est prête (`src/platform/platform.h`,
   `src/cpu/`) — une plateforme = une table de registres + des hooks ; un CPU
   = un décodeur/exécuteur qui journalise ses effets. Z80, 6502, HuC6280,

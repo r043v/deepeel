@@ -126,7 +126,7 @@ static int cmd_maprender(int argc, char **argv);
 
 static void usage(void) {
     fprintf(stderr,
-            "deepeel — ROM memory-map explorer (generic kernel: GB, NES, PCE, MD, NGP, SG/SMS/GG/MSX)\n\n"
+            "deepeel — ROM memory-map explorer (generic kernel: GB, NES, PCE, MD, NGP, WS, GP32, SG/SMS/GG/MSX)\n\n"
             "  deepeel explore rom.gb [options]\n"
             "  deepeel z80 explore <sg|sms|gg|msx> ROM [--mapper NAME] [options]\n"
             "  deepeel nes explore ROM [options]\n"
@@ -134,10 +134,11 @@ static void usage(void) {
             "  deepeel md explore ROM [options]\n"
             "  deepeel ngp explore ROM [options]          Neo Geo Pocket / Pocket Color\n"
             "  deepeel ws explore ROM [options]            WonderSwan / WonderSwan Color\n"
+            "  deepeel gp32 explore APP [--bios F] [--card F] [--code F] [--cpi N] [options]   GP32 (.fxe .gxb .zpk)\n"
             "  deepeel lr explore CORE ROM [options]       libretro core as machine\n"
             "  deepeel z80|md|ngp|ws dis ROM addr [instruction-count]\n"
             "  deepeel dis rom.gb bank:addr [n]\n"
-            "  deepeel regs <gb|nes|pce|md|ngp|ws|sg|sms|gg|msx>   dump the register registry\n"
+            "  deepeel regs <gb|nes|pce|md|ngp|ws|sg|sms|gg|msx|gp32>   dump the register registry\n"
             "  deepeel map rom.gb                           static map only (pointer tables, padding)\n"
             "  deepeel maprender rom.gb in.map out.map.png [--meta f]\n"
             "  deepeel mapx x.map.png out [--chunk NAME]    extract one chunk of a map PNG\n"
@@ -1437,10 +1438,20 @@ static int cmd_regs(int argc, char **argv) {
             printf("  irq %s: vector slot %d\n", p->irqs[i].name, p->irqs[i].bit);
         return 0;
     }
+    if (argc >= 3 && !strcmp(argv[2], "gp32")) {
+        const DpPlatform *p = dp_machine_gp32_platform();
+        printf("%s register registry (%d entries, %d irqs):\n", p->name, p->io_reg_count, p->irq_count);
+        for (int i = 0; i < p->io_reg_count; i++) {
+            const DpIoReg *r = &p->io_regs[i];
+            printf("  %08x-%08x  %-10s %-10s %s%s\n", r->lo, r->hi, r->name, r->category, (r->rw & 1) ? "r" : "-", (r->rw & 2) ? "w" : "-");
+        }
+        for (int i = 0; i < p->irq_count; i++) printf("  irq %-6s source %d\n", p->irqs[i].name, p->irqs[i].bit);
+        return 0;
+    }
     const DpSegaSystem *sega = argc >= 3 ? dp_sega_system(argv[2]) : NULL;
     if (sega) { dp_sega_regs(stdout, sega); return 0; }
     if (argc < 3 || strcmp(argv[2], "gb")) {
-        fprintf(stderr, "deepeel regs <platform> — platforms: gb, sg, sms, gg, msx, nes, pce, ngp, ws\n");
+        fprintf(stderr, "deepeel regs <platform> — platforms: gb, sg, sms, gg, msx, nes, pce, ngp, ws, gp32\n");
         return 2;
     }
     const DpPlatform *p = dp_platform_gb();
@@ -1790,6 +1801,161 @@ static int cmd_ngp(int argc, char **argv) {
 }
 
 
+// deepeel gp32 explore APP [options]: a GP32 application (.fxe, .gxb, .zpk)
+// on the m0boy S3C2400 runtime (ARM920T), with the HLE firmware or a BIOS.
+// There are no movies for this machine: the coverage comes from the forks,
+// many random-pad runs and the static analysis.
+
+// the code map a recompiler consumes: runs of image bytes of one class and one instruction set
+static void gp32_write_code(const char *path, const uint8_t *image, size_t size, int64_t bios, const DpCoreResult *r) {
+    FILE *f = fopen(path, "w");
+    if (!f) { fprintf(stderr, "deepeel: cannot write %s\n", path); return; }
+    uint8_t sha[20]; char hex[41];
+    dp_sha1(image, size, sha);
+    for (int i = 0; i < 20; i++) snprintf(hex + i * 2, 3, "%02x", sha[i]);
+    fprintf(f, "# deepeel gp32 code v1: offset length class(natural|forced|static|inferred|data) mode(arm|thumb|-)\n");
+    fprintf(f, "base 0c000000\nimage %zu %s\n", size, hex);
+    if (bios >= 0) fprintf(f, "bios %06llx 00000000\n", (unsigned long long)bios);   // from this offset the image is the ROM at address 0
+    static const char *const cls[] = { "", "natural", "forced", "static", "inferred", "data" };
+    static const char *const modes[] = { "-", "arm", "thumb" };
+    size_t n = r->rom_size < size ? r->rom_size : size, from = 0;
+    int c0 = 0, m0 = 0;
+    for (size_t i = 0; i <= n; i++) {
+        int c = 0, m = 0;
+        if (i < n) {
+            uint8_t fl = r->flags[i];
+            if (fl & DP_CORE_NATURAL) c = 1;
+            else if (fl & DP_CORE_FORCED) c = 2;
+            else if ((fl & DP_CORE_STATIC) || (r->prov && r->prov[i])) c = 3;
+            else if (r->inferred && r->inferred[i] == DP_MAP_INF_CODE) c = 4;
+            if (fl & DP_CORE_COPIED) c = (c == 1) ? 1 : c;
+            if (!c && (fl & DP_CORE_DATA)) c = 5;
+            if (c && c != 5 && r->isa_mode) {
+                m = r->isa_mode[i];
+                // operand bytes carry no mode of their own: the instruction's head does
+                if (!m && c == c0) m = m0;
+                if (m > 2) m = 0;
+            }
+        }
+        if (c == c0 && m == m0) continue;
+        if (c0) fprintf(f, "%06zx %zx %s %s\n", from, i - from, cls[c0], modes[m0]);
+        from = i; c0 = c; m0 = m;
+    }
+    fclose(f);
+}
+
+static int cmd_gp32(int argc, char **argv) {
+    if (argc < 4 || strcmp(argv[2], "explore")) return usage(), 2;
+    DpCoreConfig kcfg; dp_core_config_default(&kcfg);
+    kcfg.hooks = dp_machine_gp32_hooks();
+    kcfg.snap_cov = argv_cov(argc, argv);
+    // a frame is about a million instructions here, and ARM's dense encoding makes the speculative disassembly of holes noise
+    kcfg.max_total = 400000000ull; kcfg.max_path_steps = 500000; kcfg.no_spec = 1;
+    kcfg.visits_per_pc = 4000000;   // clearing or decompressing megabytes and waiting for a frame are loops of millions of iterations
+    kcfg.frontier_lz4 = 1;   // a state is mostly zeroed caches and sparse page ids
+    kcfg.no_irq_jitter = 1;  // one delivery point per interrupt: this SoC takes it at once
+    unsigned irq_cap = 512;
+    kcfg.lean_sessions = 1;
+    kcfg.random_runs = 24; kcfg.random_min = 1800; kcfg.random_stall = 1800; kcfg.random_hold = 4;
+    DpGp32Options o = { .exec_path = argv[3] };
+    uint32_t entry[16]; size_t ne = 0;
+    int rc = 0, kwatch = 0; const char *kdump = NULL, *code = NULL, *image_out = NULL;
+    for (int i = 4; i < argc && !rc; i++) {
+        const char *a = argv[i];
+        int more = i + 1 < argc;
+        if (!strcmp(a, "--bios") && more) o.bios_path = argv[++i];
+        else if (!strcmp(a, "--card") && more) o.card_path = argv[++i];
+        else if (!strcmp(a, "--card-readonly")) o.card_readonly = 1;
+        else if (!strcmp(a, "--probe-frames") && more) o.probe_frames = (unsigned)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--image") && more) {
+            const char *v = argv[++i];
+            if (!strcmp(v, "auto")) o.image = DP_GP32_IMAGE_AUTO;
+            else if (!strcmp(v, "payload")) o.image = DP_GP32_IMAGE_PAYLOAD;
+            else if (!strcmp(v, "snapshot")) o.image = DP_GP32_IMAGE_SNAPSHOT;
+            else { fprintf(stderr, "deepeel: --image auto|payload|snapshot\n"); rc = 2; }
+        }
+        else if (!strcmp(a, "--irq-cap") && more) irq_cap = (unsigned)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--cpi") && more) o.cpi = (unsigned)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--code") && more) code = argv[++i];
+        else if (!strcmp(a, "--image-out") && more) image_out = argv[++i];
+        else if (!strcmp(a, "--spec")) kcfg.no_spec = 0;
+        else if (!strcmp(a, "--entry") && more) {   // an extra root, an SDRAM address; an odd address is Thumb
+            if (ne >= 16) { fprintf(stderr, "deepeel: at most 16 --entry\n"); rc = 2; break; }
+            uint32_t v = (uint32_t)strtoul(argv[++i], NULL, 0);
+            entry[ne++] = (v & 1u) ? (v - 1u) | DP_ARM_THUMB : v;
+        } else {
+            int used = dp_core_parse_option(&kcfg, argc, argv, i);
+            if (used) { i += used - 1; continue; }
+            if (!strcmp(a, "--watch-dump") && more) { kdump = argv[++i]; setenv("DP_WATCH_SMOOTH", "0", 0); if (!kcfg.watch_every) kcfg.watch_every = 2; }
+            else if (!strcmp(a, "--watch")) {
+                int fps = 30; if (more && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') fps = atoi(argv[++i]);
+                if (fps < 1) fps = 1;
+                if (fps > 60) fps = 60;
+                kwatch = 1; kcfg.watch_every = (unsigned)(60 / fps);
+            }
+            else if (!strcmp(a, "--max-total") && more) kcfg.max_total = strtoull(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--max-steps") && more) kcfg.max_path_steps = strtoull(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--fork-cap") && more) kcfg.fork_site_cap = (uint32_t)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--progress") && more) kcfg.progress_secs = (unsigned)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--cov-every") && more) kcfg.snap_secs = (unsigned)strtoul(argv[++i], NULL, 0);
+            else if (!strcmp(a, "--jobs") && more) { ++i; if (!strcmp(argv[i], "auto")) { kcfg.jobs = (unsigned)auto_jobs(); kcfg.adaptive = 1; } else kcfg.jobs = (unsigned)strtoul(argv[i], NULL, 0); }
+            else if ((!strcmp(a, "--text") || !strcmp(a, "--map") || !strcmp(a, "--summary") || !strcmp(a, "--cov") ||
+                      !strcmp(a, "--rtcode") || !strcmp(a, "--romdata") || !strcmp(a, "--evidence")) && more) ++i;   // written by core_outputs
+            else if (!skip_mapwin(argc, argv, &i)) { fprintf(stderr, "deepeel: unknown option %s\n", a); rc = 2; }
+        }
+    }
+    if (rc) return rc;
+    const char *hint = argv_opt(argc, argv, "--summary") ? argv_opt(argc, argv, "--summary") : argv_opt(argc, argv, "--text");
+    // the page store lives beside the frontier, so a state directory is settled before the machine exists
+    static char state[1100], cards[1200];
+    if (!kcfg.state_dir && (kcfg.unbounded || kcfg.resume || kcfg.campaign)) {
+        if (snprintf(state, sizeof state, "%s.state", hint ? hint : "deepeel-unbounded") >= (int)sizeof state) return 2;
+        kcfg.state_dir = state;
+    }
+    o.state_dir = kcfg.state_dir;
+    o.irq_cap = kcfg.unbounded ? 0 : irq_cap;
+    const char *base = strrchr(argv[3], '/'); base = base ? base + 1 : argv[3];
+    if (!getenv("M0_GP32_CARDS")) {   // where a package's card resources are unpacked
+        if (kcfg.state_dir) { mkdir(kcfg.state_dir, 0777); snprintf(cards, sizeof cards, "%s/cards", kcfg.state_dir); }
+        else snprintf(cards, sizeof cards, "%s.cards", base);
+        mkdir(cards, 0777);
+        setenv("M0_GP32_CARDS", cards, 1);
+    }
+    DpMachine *km = dp_machine_gp32(&o);
+    if (!km) return 1;
+    size_t size = 0;
+    const uint8_t *image = dp_gp32_image(km, &size);
+    dp_gp32_report(km, stderr);
+    char ip[1200];
+    if (!image_out && code) { snprintf(ip, sizeof ip, "%s.image.bin", code); image_out = ip; }
+    if (image_out) {
+        FILE *f = fopen(image_out, "wb");
+        if (!f || fwrite(image, 1, size, f) != size) fprintf(stderr, "deepeel: cannot write %s\n", image_out);
+        if (f) fclose(f);
+    }
+    DpMusicKernelSeeds mks = {0}; DpSeedSet kseeds = {0};
+    kcfg.rom_image = image; kcfg.rom_image_size = size;
+    if ((km->attach && !km->attach(km)) || seedset_build(&kcfg, &mks, entry, NULL, ne, 0, 0, &kseeds)) { km->close(km); return 1; }
+    DpCoreResult kr;
+    if (kwatch) dp_fbwatch_start("deepeel gp32 watch");
+    rc = dp_core_explore_cli(km, size, &kcfg, &kr, hint) ? 0 : 1;
+    if (kwatch) dp_fbwatch_stop();
+    if (kdump && dp_fb_dump_ppm(kdump)) fprintf(stderr, "deepeel: no frame to dump\n");
+    if (!rc) {
+        size_t tl = 0;
+        for (; base[tl] && base[tl] != '.' && tl + 1 < sizeof kr.rom_title; tl++) kr.rom_title[tl] = base[tl];
+        kr.rom_title[tl] = 0;
+        dp_core_report(stdout, "gp32", &kr); core_outputs(argc, argv, "gp32", argv[3], km, &kr);
+        if (code) gp32_write_code(code, image, size, dp_gp32_bios_offset(km), &kr);
+        dp_gp32_report(km, stdout);
+        if (kr.reg_reads && kr.reg_writes) dp_gp32_report_refs(km, stdout, kr.reg_reads, kr.reg_writes);
+    }
+    dp_core_result_free(&kr);
+    km->close(km);
+    seedset_free(&kseeds);
+    return rc;
+}
+
 // deepeel ws explore ROM [options]: the WonderSwan/WonderSwan Color through
 // the m0boy runtime (V30MZ, a flat 20-bit bus).  The machine boots directly
 // into the cartridge's reset flow, so the default root is the reset PC;
@@ -2004,9 +2170,9 @@ static void kmapwin_cb(void *u, const DpCoreResult *r) { dp_kmapwin_start(r, "de
 // The platform comes from the file (extension, then header), the outputs go to a dedicated directory
 // (<rom stem>.deepeel/ unless --out DIR), a saved analysis there is resumed on its own, and the
 // worker count and queue size follow the free RAM.  Any explicit option still wins (it comes last).
-typedef enum { AR_NONE, AR_GB, AR_NES, AR_PCE, AR_MD, AR_SMS, AR_GG, AR_SG, AR_MSX, AR_NGP, AR_WS } ArSystem;
+typedef enum { AR_NONE, AR_GB, AR_NES, AR_PCE, AR_MD, AR_SMS, AR_GG, AR_SG, AR_MSX, AR_NGP, AR_WS, AR_GP32 } ArSystem;
 
-static const char *const ar_names[] = { "", "gb", "nes", "pce", "md", "sms", "gg", "sg", "msx", "ngp", "ws" };
+static const char *const ar_names[] = { "", "gb", "nes", "pce", "md", "sms", "gg", "sg", "msx", "ngp", "ws", "gp32" };
 
 static ArSystem ar_detect(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -2018,6 +2184,7 @@ static ArSystem ar_detect(const char *path) {
     char ext[8] = ""; if (dot && (!slash || dot > slash) && strlen(dot) < sizeof ext) for (size_t i = 0; dot[i]; i++) ext[i] = (char)tolower((unsigned char)dot[i]);
     if (n >= 4 && !memcmp(h, "NES\x1a", 4)) return AR_NES;
     if (!strcmp(ext, ".nes")) return AR_NES;
+    if (!strcmp(ext, ".fxe") || !strcmp(ext, ".gxb") || !strcmp(ext, ".zpk")) return AR_GP32;
     if (!strcmp(ext, ".gb") || !strcmp(ext, ".gbc")) return AR_GB;
     if (!strcmp(ext, ".pce")) return AR_PCE;
     if (!strcmp(ext, ".gg")) return AR_GG;
@@ -2052,7 +2219,7 @@ static int ar_has(int argc, char **argv, const char *opt) {
 }
 
 static int ar_is_subcommand(const char *a) {
-    static const char *const names[] = { "frontier", "tasfetch", "tasdb", "lr", "bh", "md", "nes", "pce", "ngp", "ws", "z80", "explore", "mapx", "maprender", "covmap", "tas", "desync", "map", "regs", "dis", NULL };
+    static const char *const names[] = { "frontier", "tasfetch", "tasdb", "lr", "bh", "md", "nes", "pce", "ngp", "ws", "gp32", "z80", "explore", "mapx", "maprender", "covmap", "tas", "desync", "map", "regs", "dis", NULL };
     for (int i = 0; names[i]; i++) if (!strcmp(a, names[i])) return 1;
     return 0;
 }
@@ -2097,6 +2264,7 @@ static int auto_explore(int argc, char **argv, ArSystem sys) {
     av[n++] = "--summary"; av[n++] = fsum;
     av[n++] = "--cov"; av[n++] = fcov;
     if (sys == AR_GB) { static char frt[1100]; snprintf(frt, sizeof frt, "%s/%s.rtcode", outdir, stem); av[n++] = "--rtcode"; av[n++] = frt; }
+    if (sys == AR_GP32) { static char fcode[1100]; snprintf(fcode, sizeof fcode, "%s/%s.code", outdir, stem); av[n++] = "--code"; av[n++] = fcode; av[n++] = "--random"; av[n++] = "64"; }   // 64: every distinct pad sequence the kernel can seed
     for (int i = 0; i < nu; i++) av[n++] = user[i];
     av[n] = NULL;
     fprintf(stderr, "deepeel: %s -> %s, outputs in %s/, %s, %d worker(s)\n", rom, names[sys], outdir, resume ? "resuming the saved analysis" : "fresh analysis", jobs);
@@ -2107,6 +2275,7 @@ static int auto_explore(int argc, char **argv, ArSystem sys) {
         case AR_MD:  return cmd_md(n, (char **)av);
         case AR_NGP: return cmd_ngp(n, (char **)av);
         case AR_WS: return cmd_ws(n, (char **)av);
+        case AR_GP32: return cmd_gp32(n, (char **)av);
         default:     return dp_sega_explore_command(n, (char **)av);
     }
 }
@@ -2121,13 +2290,15 @@ int deepeel_main(int argc, char **argv) {   // the library entry point; src/deep
         if (!strcmp(argv[i], "--mapwin")) {
             int sc = i + 1 < argc && argv[i + 1][0] >= '1' && argv[i + 1][0] <= '8' ? atoi(argv[i + 1]) : 0;
             dp_core_live_default(kmapwin_cb, (void *)(intptr_t)sc);
+            dp_core_live_release(dp_kmapwin_release);
             atexit(dp_kmapwin_stop);
             break;
         }
     if (!ar_is_subcommand(argv[1]) && argv[1][0] != '-') {   // `deepeel ROM`: explore is the default, the system comes from the file
         ArSystem sys = ar_detect(argv[1]);
         if (sys == AR_NONE) { fprintf(stderr, "deepeel: %s: not a readable ROM, or its system is not recognised (use `deepeel <system> explore ROM`)\n", argv[1]); return 2; }
-        if (argc == 2 || (argc == 3 && argv[2][0] != '-')) {   // `deepeel ROM [OVERFLOW_DIR]`: the whole campaign is managed by the supervisor
+        // no movie exists for the GP32 and its image is built by the machine: one exploration with many pad runs instead of a campaign
+        if (sys != AR_GP32 && (argc == 2 || (argc == 3 && argv[2][0] != '-'))) {   // `deepeel ROM [OVERFLOW_DIR]`: the whole campaign is managed by the supervisor
             char exe[1024]; ssize_t el = readlink("/proc/self/exe", exe, sizeof exe - 1); if (el <= 0) snprintf(exe, sizeof exe, "%s", argv[0]); else exe[el] = 0;
             char stem[256]; { const char *b = strrchr(argv[1], '/'); b = b ? b + 1 : argv[1]; snprintf(stem, sizeof stem, "%s", b); char *d = strrchr(stem, '.'); if (d && d != stem) *d = 0; }
             char outdir[1100]; snprintf(outdir, sizeof outdir, "%s.deepeel", stem); mkdir(outdir, 0777);
@@ -2210,6 +2381,7 @@ int deepeel_main(int argc, char **argv) {   // the library entry point; src/deep
     if (!strcmp(argv[1], "pce")) return cmd_pce(argc, argv);
     if (!strcmp(argv[1], "ngp")) return cmd_ngp(argc, argv);
     if (!strcmp(argv[1], "ws")) return cmd_ws(argc, argv);
+    if (!strcmp(argv[1], "gp32")) return cmd_gp32(argc, argv);
     if (!strcmp(argv[1], "z80") && argc > 2 && !strcmp(argv[2], "explore"))
         return dp_sega_explore_command(argc, argv);
     if (!strcmp(argv[1], "z80")) return dp_z80_command(argc, argv);

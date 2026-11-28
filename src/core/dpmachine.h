@@ -58,6 +58,8 @@ static inline void dp_regstate_clear(DpRegState *s) { memset(s, 0, sizeof *s); }
 // agree on them.  Byte registers occupy byte 0 of their slot; pairs occupy
 // bytes 0..1 (low byte first) of their slot; the 68000 uses bytes 0..3 (its
 // pointers are 24-bit: the kernel masks the value with ptr_width bytes).
+enum { DP_ARMR_R0 = 0, DP_ARMR_SP = 13, DP_ARMR_LR = 14, DP_ARMR_PC = 15, DP_ARMR_NREGS = 16 };
+#define DP_ARM_THUMB 0x40000000u   // code addresses of the ARM ISA: this bit of `pc` marks the Thumb state
 enum { DP_SM83R_BC, DP_SM83R_DE, DP_SM83R_HL, DP_SM83R_SP, DP_SM83R_AF, DP_SM83R_A, DP_SM83R_NREGS = DP_SM83R_A + 1 };
 enum {
     DP_Z80R_BC, DP_Z80R_DE, DP_Z80R_HL, DP_Z80R_IX, DP_Z80R_IY, DP_Z80R_SP,
@@ -96,7 +98,7 @@ typedef struct DpMachine DpMachine;   // the machine hooks take and return it (d
 // A code table: `stride` bytes per entry, `rel` = signed offsets from the base (else absolute pointers).  base_reg >= 0:
 // the base is the value of that register slot plus `disp`, read from the concrete CPU (or a walk's proven constants) -- the
 // dispatch routine shared by several callers, each passing its own table in a register (the table is the caller's `lea`).
-typedef struct DpCodeTable { uint32_t base; uint8_t stride, rel; int8_t base_reg; int32_t disp; uint8_t slots; uint32_t hi; int8_t tdelta; } DpCodeTable;   // hi: bits OR-ed into a 16-bit absolute entry (the dispatcher seeded the register's high word: moveq #1,Dn ; swap Dn)
+typedef struct DpCodeTable { uint32_t base; uint8_t stride, rel; int8_t base_reg; int32_t disp; uint8_t slots; uint32_t hi; int8_t tdelta; uint16_t count; } DpCodeTable;   // hi: bits OR-ed into a 16-bit absolute entry (the dispatcher seeded the register's high word: moveq #1,Dn ; swap Dn)
 //   // slots: the entries are instructions (bra.w/bra.s/jmp) of `stride` bytes, each slot itself a root
 
 typedef struct DpIsa {
@@ -201,9 +203,24 @@ typedef struct DpIsa {
     // B10: 1 when the instruction stores an immediate code address in memory (RAM function-pointer slot, object
     // routine field: `move.l #routine,x(a0)`); the closure walks the address as an untrusted entry
     int (*code_ptr_store)(const uint8_t *bytes, uint32_t *imm);
+    // ISAs with several instruction sets: the bits of `pc` that carry the decoder state (ARM: the Thumb tag).  They travel
+    // with every code address (DpMachine.fetch / rom_index ignore them) and the kernel records them per instruction head
+    // (DpCoreResult.isa_mode), so the static passes decode each byte the way it ran.  0: one instruction set.
+    uint32_t mode_mask;
+    // little-endian ISAs whose normal instruction stream looks like a table of 0x4000-0x7FFF words: 1 turns that
+    // "banked pointer table" data guard off
+    uint8_t no_ptr16_guard;
+    // the code address of a register-indirect transfer: `v` is the proven register value (ARM interworking: bit 0
+    // selects Thumb).  NULL: the value is the address.
+    uint32_t (*reg_target)(const uint8_t *bytes, uint32_t pc, uint32_t v);
+    // static analysis of the whole image: candidate routine heads (prologues, pointer words) as code addresses, each
+    // walked as an untrusted entry (provisional, never "executed").  `base` is the CPU address of rom[0].  Returns the
+    // number written to `out` (at most `max`).
+    size_t (*static_roots)(const uint8_t *rom, size_t n, uint32_t base, uint32_t *out, size_t max);
 } DpIsa;
 
 const DpIsa *dp_isa_sm83(void);
+const DpIsa *dp_isa_arm920t(void);
 const DpIsa *dp_isa_z80(void);
 const DpIsa *dp_isa_m6502(void);
 const DpIsa *dp_isa_huc6280(void);
@@ -303,6 +320,10 @@ struct DpMachine {
     uint32_t (*state_bytes)(struct DpMachine *);
     void (*save)(struct DpMachine *, uint8_t *buf);
     void (*load)(struct DpMachine *, const uint8_t *buf);
+    // optional: portable snapshots, a PNG of the screen carrying the whole machine.  When present, snapshot files are
+    // written in that form and --from-state accepts them.  Both return 1 on success; a failed load changes nothing.
+    int (*shot_save)(struct DpMachine *, const char *path);
+    int (*shot_load)(struct DpMachine *, const char *path);
     // memory geometry
     int64_t (*rom_index)(struct DpMachine *, uint32_t addr);  // <0 when not ROM
     uint8_t (*fetch)(struct DpMachine *, uint32_t addr);      // opcode view
@@ -465,5 +486,27 @@ const struct DpPlatformHooks *dp_machine_ngp_hooks(void);   /* pad + IRQ-source 
 // the kernel degrades; takes ownership of the DpLibretro instance
 struct DpLibretro;
 DpMachine *dp_machine_libretro(struct DpLibretro *lr);
+
+// -- GP32 (S3C2400 / ARM920T, the m0boy runtime) -------------------------------
+enum { DP_GP32_IMAGE_AUTO = 0, DP_GP32_IMAGE_PAYLOAD, DP_GP32_IMAGE_SNAPSHOT };
+typedef struct DpGp32Options {
+    const char *exec_path;        // .fxe / .gxb / .zpk application
+    const char *bios_path;        // NULL: HLE firmware
+    const char *card_path;        // SmartMedia image or directory; NULL: what the package carries
+    const char *state_dir;        // holds the page store; NULL: memory
+    int card_readonly;
+    int image;                    // DP_GP32_IMAGE_*
+    unsigned probe_frames;        // 0: default
+    unsigned irq_cap;             // interrupt forks per source (0: no cap)
+    unsigned cpi;                 // FCLK cycles per instruction: sets how many instructions a frame holds (0: 16)
+} DpGp32Options;
+DpMachine *dp_machine_gp32(const DpGp32Options *o);                 // NULL: the reason was printed
+const uint8_t *dp_gp32_image(DpMachine *m, size_t *size);           // what rom_index indexes (owned by the machine)
+void dp_gp32_report(DpMachine *m, FILE *out);
+// registers the image refers to, against the ones the exploration touched
+void dp_gp32_report_refs(DpMachine *m, FILE *out, const uint64_t *reads, const uint64_t *writes);
+int64_t dp_gp32_bios_offset(DpMachine *m);                           // offset of the BIOS in the image, -1: HLE
+const struct DpPlatformHooks *dp_machine_gp32_hooks(void);
+const struct DpPlatform *dp_machine_gp32_platform(void);
 
 #endif

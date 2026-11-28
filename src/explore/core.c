@@ -41,6 +41,7 @@ static inline uint32_t raddr(DpMachine *m, uint32_t i) { return m->ram_addr ? m-
 // the byte of RAM index i: straight from the platform's contiguous view when it has one, else through fetch
 static inline uint8_t rbyte(DpMachine *m, const uint8_t *view, uint32_t i) { return view && i < m->ram_view_len ? view[i] : m->fetch(m, raddr(m, i)); }
 // A3: per-site tables (visits, capped, rng) keyed on the ROM index (bank-aware), folded when the ROM exceeds the table
+#define RAMREAD_BLOCK 12u
 #define SITE_BITS 20u
 static inline uint32_t site_slot(DpMachine *m, uint32_t pc, uint32_t n, uint32_t *key) {
     int64_t k = m->rom_index(m, pc);
@@ -138,12 +139,23 @@ int dp_core_parse_option(DpCoreConfig *c, int argc, char **argv, int i) {
     if (!strcmp(a, "--random-min") && i + 1 < argc) { c->random_min = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--random-no-start") && i + 1 < argc) { c->random_no_start = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--random-no-select") && i + 1 < argc) { c->random_no_select = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
+    if (!strcmp(a, "--freeze") && i + 1 < argc) {
+        char *end; const uint32_t addr = (uint32_t)strtoul(argv[i + 1], &end, 16);
+        const size_t digits = *end == '=' ? strlen(end + 1) : 0;
+        if (!digits || digits > 16 || digits % 2 || strspn(end + 1, "0123456789abcdefABCDEF") != digits || c->freeze_n >= DP_FREEZE_MAX) {
+            fprintf(stderr, "deepeel: --freeze %s: expected ADDR=HEXBYTES (1 to 8 bytes, %u at most)\n", argv[i + 1], DP_FREEZE_MAX); exit(2);
+        }
+        c->freeze[c->freeze_n].addr = addr; c->freeze[c->freeze_n].len = (uint8_t)(digits / 2);
+        for (size_t k = 0; k < digits / 2; k++) { const char pair[3] = { end[1 + 2 * k], end[2 + 2 * k], 0 }; c->freeze[c->freeze_n].data[k] = (uint8_t)strtoul(pair, NULL, 16); }
+        c->freeze_n++; return 2;
+    }
     if (!strcmp(a, "--fabricated-forced")) { c->fabricated_forced = 1; return 1; }
     if (!strcmp(a, "--random-hold") && i + 1 < argc) { c->random_hold = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--random-movie") && i + 1 < argc) { c->random_movie = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--random-first") && i + 1 < argc) { c->random_first = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--live-flags") && i + 1 < argc) { c->live_flags = argv[i + 1]; return 2; }
     if (!strcmp(a, "--from-state") && i + 1 < argc) { c->from_state = argv[i + 1]; return 2; }
+    if (!strcmp(a, "--resave") && i + 1 < argc) { c->resave = argv[i + 1]; return 2; }
     if (!strcmp(a, "--tas-stall") && i + 1 < argc) { c->tas_stall_frames = (uint32_t)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--snap-every") && i + 1 < argc) { c->snap_every = (unsigned)strtoul(argv[i + 1], NULL, 0); return 2; }
     if (!strcmp(a, "--snap-dir") && i + 1 < argc) { c->snap_dir = argv[i + 1]; return 2; }
@@ -222,11 +234,15 @@ size_t dp_core_sections(const DpCoreResult *r, DpCoreSection *out, size_t cap) {
     return n;
 }
 
+static void (*g_release_cb)(const DpCoreResult *);
+void dp_core_live_release(void (*cb)(const DpCoreResult *)) { g_release_cb = cb; }
+
 void dp_core_result_free(DpCoreResult *r) {
+    if (g_release_cb) g_release_cb(r);
     dp_ramarch_free(&r->ra);
     free(r->flags);
     free(r->prov);
-    free(r->jtent); free(r->dest); free(r->spec); free(r->refs); free(r->page_win); free(r->inferred); free(r->live);
+    free(r->jtent); free(r->isa_mode); free(r->dest); free(r->spec); free(r->refs); free(r->page_win); free(r->inferred); free(r->live);
     free(r->src_flags); free(r->reg_slot); free(r->reg_reads); free(r->reg_writes); free(r->reg_vals);
     free(r->first_seen); free(r->first_actor); free(r->hits);
     memset(r, 0, sizeof *r);
@@ -306,8 +322,18 @@ typedef struct {
 #define SWEEP_MIN 4096                 // a sequential read run this long with (almost) no writes is a sweep, not a table read
 #define SRC_SWEEP    (1u << 16)        // src_flags: byte read only by a sweep (never counted as known data)
 #define SRC_RUNFRESH (1u << 17)        // src_flags: DATA freshly set by the current run (undone if the run turns out a sweep)
-// the machine state as a file, restartable with --from-state; atomic: a supervisor never reads a half-written one
+// the machine state as a file, restartable with --from-state; atomic: a supervisor never reads a half-written one.
+// A machine with shots writes `path` as a ".png" (replacing a ".state" suffix)
 static void core_snapshot(DpMachine *m, const char *path) {
+    if (m->shot_save) {
+        size_t n = strlen(path);
+        if (n > 6 && !strcmp(path + n - 6, ".state")) n -= 6;
+        else if (n > 4 && !strcmp(path + n - 4, ".png")) n -= 4;
+        char png[720];
+        if (snprintf(png, sizeof png, "%.*s.png", (int)n, path) >= (int)sizeof png || !m->shot_save(m, png))
+            fprintf(stderr, "deepeel: cannot write the snapshot %s\n", png);
+        return;
+    }
     if (!m->state_bytes || !m->save) return;
     uint32_t n = m->state_bytes(m); uint8_t *b = malloc(n ? n : 1);
     char tmp[720]; snprintf(tmp, sizeof tmp, "%s.tmp", path);
@@ -536,7 +562,7 @@ static int closure_entry_is_data(const DpCoreResult *r, const DpIsa *isa, const 
     if (v->m) for (unsigned i = 0; i < sizeof w; i++) w[i] = v->m->fetch(v->m, pc + i);
     else for (unsigned i = 0; i < sizeof w && (size_t)k + i < v->cfg->rom_image_size; i++) w[i] = v->cfg->rom_image[k + i];
     if ((w[0] == 0x00 || w[0] == 0xFF) && w[1] == w[0] && w[2] == w[0] && w[3] == w[0] && w[4] == w[0] && w[5] == w[0] && w[6] == w[0] && w[7] == w[0]) return 0;   // padding: the in-walk guard stops the first step
-    int hit = 1;
+    int hit = !isa->no_ptr16_guard;
     for (int o = 0; o <= 4 && hit; o++) {   // a run of 3 pointer-like words covering the first byte: the in-walk guard handles it
         int ok = 1;
         for (int q = 0; q < 3 && ok; q++) { uint16_t wd = (uint16_t)(w[o + 2 * q] | w[o + 2 * q + 1] << 8); ok = wd >= 0x4000 && wd < 0x8000; }
@@ -568,11 +594,15 @@ static int code_table_resolve(DpMachine *m, const DpIsa *isa, DpCodeTable *t, co
 static unsigned code_table_targets(DpMachine *m, const DpIsa *isa, const DpCodeTable *t, uint32_t *out, unsigned max) {
     uint32_t first = 0xFFFFFFFFu; unsigned cnt = 0;
     const unsigned w = t->stride;
+    const unsigned le = !isa->big_endian;
+    const uint32_t amask = le ? 0xFFFFFFFFu : 0x00FFFFFFu;
+    const unsigned limit = t->count && t->count < DP_CODE_TABLE_MAX ? t->count : DP_CODE_TABLE_MAX;
     if (t->slots) {   // a run of branch instructions: every slot of the same opcode class is a root
-        unsigned hi = m->fetch(m, t->base);
-        for (unsigned e = 0; e < DP_CODE_TABLE_MAX && cnt < max; e++) {
-            uint32_t ea = (t->base + e * w) & 0xFFFFFFu;
-            if (m->fetch(m, ea) != hi || m->rom_index(m, ea) < 0) break;
+        const unsigned opb = le ? w - 1u : 0u;   // the byte of a slot that holds its opcode
+        unsigned hi = m->fetch(m, t->base + opb);
+        for (unsigned e = 0; e < limit && cnt < max; e++) {
+            uint32_t ea = (t->base + e * w) & amask;
+            if (m->fetch(m, ea + opb) != hi || m->rom_index(m, ea) < 0) break;
             uint8_t b[10]; for (unsigned i = 0; i < sizeof b; i++) b[i] = m->fetch(m, ea + i);
             DpFlowInfo f; memset(&f, 0, sizeof f);
             if (!isa->flow(b, ea, &f) || !f.length || f.kind == DP_FLOW_ILLEGAL) break;
@@ -580,12 +610,13 @@ static unsigned code_table_targets(DpMachine *m, const DpIsa *isa, const DpCodeT
         }
         return cnt;
     }
-    for (unsigned e = 0; e < DP_CODE_TABLE_MAX && cnt < max; e++) {
-        uint32_t ea = (t->base + e * w) & 0xFFFFFFu;
+    for (unsigned e = 0; e < limit && cnt < max; e++) {
+        uint32_t ea = (t->base + e * w) & amask;
         if (t->rel && ea >= first) break;
-        uint32_t v = 0; for (unsigned i = 0; i < w; i++) v = (v << 8) | m->fetch(m, ea + i);
+        uint32_t v = 0; for (unsigned i = 0; i < w; i++) v |= (uint32_t)m->fetch(m, ea + i) << (8 * (le ? i : w - 1 - i));
         uint32_t tg;
-        if (t->rel) tg = (t->base + (uint32_t)(int32_t)t->tdelta + (uint32_t)(int32_t)(int16_t)v) & 0xFFFFFFu;
+        if (t->rel) tg = (t->base + (uint32_t)(int32_t)t->tdelta + (uint32_t)(int32_t)(int16_t)v) & amask;
+        else if (le) tg = (isa->reg_target ? isa->reg_target(NULL, t->base, v) : v) | t->hi;
         else { if (v >> 24) { if (e == 0) continue; break; } tg = v | (w == 2 ? t->hi : 0); }
         int bad = (tg & 1u) || m->rom_index(m, tg) < 0;
         if (!bad) {
@@ -665,7 +696,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
         uint64_t rctx = 0;
         if (known && have_regs && isa->code_table && v->m && !cr.n && !thru)
             for (unsigned ri = 0; ri < DP_REG_N; ri++)
-                if ((regs.known[ri] & 0x0F) == 0x0F && v->m->rom_index(v->m, regs.v[ri] & 0xFFFFFFu) >= 0 && (int)ri != isa->sp_slot)
+                if ((regs.known[ri] & 0x0F) == 0x0F && v->m->rom_index(v->m, regs.v[ri] & (isa->big_endian ? 0xFFFFFFu : 0xFFFFFFFFu)) >= 0 && (int)ri != isa->sp_slot)
                     rctx = (rctx ^ ((uint64_t)regs.v[ri] + ri)) * 0x100000001B3ull;
         if (known && r->closure_ret && (cr.n || thru || rctx) && kthru < kthru_cap) {   // each known address is walked through once per walk
             if (!seen) seen = calloc(seen_cap, sizeof *seen);
@@ -691,7 +722,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
         uint8_t b[10] = {0};
         if (v->m) for (unsigned i = 0; i < sizeof b; i++) b[i] = v->m->fetch(v->m, pc + i);
         else for (unsigned i = 0; i < sizeof b && (size_t)k + i < v->cfg->rom_image_size; i++) b[i] = v->cfg->rom_image[k + i];
-        if (!trust && !isa->big_endian) {   // untrusted code stops inside a run of 3 pointer-like words (dispatch table), either alignment
+        if (!trust && !isa->big_endian && !isa->no_ptr16_guard) {   // untrusted code stops inside a run of 3 pointer-like words (dispatch table), either alignment
             uint8_t w[12] = {0};   // bytes pc-4 .. pc+7
             if (v->m) for (int i = 0; i < 12; i++) w[i] = v->m->fetch(v->m, (uint32_t)((int)pc - 4 + i));
             else if (v->cfg && v->cfg->rom_image)
@@ -748,6 +779,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
                 regs.known[isa->sp_slot] = 0;
             }
         }
+        if (r->isa_mode && k >= 0 && !r->isa_mode[k]) r->isa_mode[k] = (pc & isa->mode_mask) ? 2 : 1;
         for (unsigned i = 0; i < f.length; i++) {
             int64_t q = v->m ? cview_index(v, r, pc + i, bk) : (k + i < (int64_t)r->rom_size ? k + i : -1);
             if (q >= 0) {
@@ -773,6 +805,7 @@ static void closure_run(DpCoreResult *r, const ClosureView *v, const DpIsa *isa,
             uint32_t vmask = pw >= 4 ? 0xFFFFFFFFu : pw == 3 ? 0x00FFFFFFu : 0x0000FFFFu;
             if ((regs.known[f.pair] & pm) == pm) {
                 tgt = (int32_t)(regs.v[f.pair] & vmask);
+                if (isa->reg_target) tgt = (int32_t)isa->reg_target(b, pc, (uint32_t)tgt);
                 int64_t kt = cview_index(v, r, (uint32_t)tgt, bk);
                 if (kt >= 0 && rw && !rw->cfg->unbounded) {
                     uint32_t islot = (uint32_t)k & rw->mask;
@@ -829,7 +862,7 @@ no_stackret:;
             regs = nxt;
         }
         if (v->m && isa->code_table && (f.kind == DP_FLOW_INDIRECT || f.kind == DP_FLOW_SEQ)) {   // a PC-relative table met by the walk: every entry is a root
-            DpCodeTable ct; uint32_t lp = 0;
+            DpCodeTable ct = {0}; uint32_t lp = 0;
             if (isa->code_table(v->m, pc, b, &ct, &lp) && code_table_resolve(v->m, isa, &ct, &regs_pre)) {
                 uint32_t tg[DP_CODE_TABLE_MAX];
                 unsigned n = code_table_targets(v->m, isa, &ct, tg, DP_CODE_TABLE_MAX);
@@ -969,13 +1002,14 @@ typedef struct {
     DpCoreResult *r; const DpMachine *m; const DpIsa *isa; const uint8_t *rom; size_t n;
     uint8_t *seen, *returns;   // bitmaps over ROM indices: walked instruction starts; callees seen to return
     uint8_t *disp;             // callees that dispatch through the pointer table written after their call
+    uint8_t *mode;             // DpIsa.mode_mask: per ROM index, 2 = decode with the mode bits set (r->isa_mode, extended by the walk)
     uint32_t *stack; size_t sp, cap;
 } Proof;
 #define PROOF_BIT(b, i) ((b)[(i) >> 3] & (1u << ((i) & 7)))
 #define PROOF_SET(b, i) ((b)[(i) >> 3] |= (uint8_t)(1u << ((i) & 7)))
 static uint32_t proof_pc(const Proof *p, size_t k) {
     if (p->m->fixed_low_banked) return (uint32_t)(k < 0x4000u ? k : 0x4000u + (k & 0x3FFFu));
-    if (p->m->linear && !p->m->page_shift) return p->m->code_base + (uint32_t)k;
+    if (p->m->linear && !p->m->page_shift) return (p->m->code_base + (uint32_t)k) | (p->mode && p->mode[k] == 2 ? p->isa->mode_mask : 0);
     return p->m->code_base + (uint32_t)(k & 0x1FFFu);   // some window: only relative targets are used
 }
 static int proof_decode(const Proof *p, size_t k, uint32_t pc, DpFlowInfo *f) {
@@ -997,6 +1031,12 @@ static int64_t proof_gb(const Proof *p, size_t k, uint32_t t) {
 static int64_t proof_target(const Proof *p, size_t k, const DpFlowInfo *f) {
     if (f->target < 0) return -1;
     uint32_t pc = proof_pc(p, k), t = (uint32_t)f->target;
+    if (p->mode) {   // a mode-tagged ISA: the walk learns the target's mode, then indexes the plain address
+        int64_t x = (int64_t)(t & ~p->isa->mode_mask) - (int64_t)p->m->code_base;
+        if (x < 0 || (size_t)x >= p->n) return -1;
+        if (!p->mode[x]) p->mode[x] = (t & p->isa->mode_mask) ? 2 : 1;
+        return x;
+    }
     if (p->m->fixed_low_banked) return proof_gb(p, k, t);
     if (p->m->linear && !p->m->page_shift) {
         if (t < p->m->code_base || t - p->m->code_base >= p->n) return -1;
@@ -1062,9 +1102,13 @@ static void proof_walk(Proof *p) {
             for (unsigned i = 0; i < ne; i++) proof_push(p, e[i]);
             continue;
         }
-        int fall = f.kind == DP_FLOW_SEQ || f.kind == DP_FLOW_COND;
+        int fall = f.kind == DP_FLOW_SEQ || f.kind == DP_FLOW_COND || (f.kind == DP_FLOW_INDIRECT && f.fall && f.cond >= 0);
         if (f.kind == DP_FLOW_CALL) fall = f.cond >= 0 || (t >= 0 && PROOF_BIT(p->returns, t));
-        if (fall && !f.halt) proof_push(p, proof_next(p, k, f.length));
+        if (fall && !f.halt) {
+            int64_t nx = proof_next(p, k, f.length);
+            if (p->mode && nx >= 0 && !p->mode[nx]) p->mode[nx] = p->mode[k] ? p->mode[k] : 1;
+            proof_push(p, nx);
+        }
     }
 }
 // The tables behind the computed jumps that ran (r->jtent: GB, where the bank of a word follows from the table's own
@@ -1113,7 +1157,8 @@ static void proof_jump_tables(Proof *p) {
     }
 }
 static void static_proof(DpCoreResult *r, const DpMachine *m, const DpCoreConfig *cfg) {
-    Proof p = { r, m, m->isa, cfg->rom_image, r->rom_size < cfg->rom_image_size ? r->rom_size : cfg->rom_image_size, NULL, NULL, NULL, NULL, 0, 0 };
+    Proof p = { .r = r, .m = m, .isa = m->isa, .rom = cfg->rom_image, .n = r->rom_size < cfg->rom_image_size ? r->rom_size : cfg->rom_image_size,
+                .mode = r->isa_mode };
     p.seen = calloc(p.n / 8 + 1, 1); p.returns = calloc(p.n / 8 + 1, 1); p.disp = calloc(p.n / 8 + 1, 1);
     // three sweeps over the executed runs (each starts on an instruction): the callees that return, then the dispatchers
     // (never seen to return, and a word after one of their calls was executed), then the seeds
@@ -1386,6 +1431,7 @@ static void mark(Shared *sh, DpCoreResult *r, DpMachine *m, uint32_t pc, unsigne
         int64_t k = m->rom_index(m, pc + i);
         if (k >= 0 && (size_t)k < r->rom_size) {
             if (!i && r->hits) __atomic_fetch_add(&r->hits[k], 1, __ATOMIC_RELAXED);   // P13: execution heat of the instruction head
+            if (!i && r->isa_mode && (how & DP_CORE_NATURAL || !r->isa_mode[k])) __atomic_store_n(&r->isa_mode[k], (uint8_t)((pc & m->isa->mode_mask) ? 2 : 1), __ATOMIC_RELAXED);
             if (m->page_shift && r->page_win && how & DP_CORE_NATURAL) __atomic_store_n(&r->page_win[(size_t)k >> m->page_shift], (uint8_t)(1u + (((pc + i) >> m->page_shift) & 7u)), __ATOMIC_RELAXED);
             uint32_t srcbit = nat_src ? nat_src : DP_SRC_FORK_FORCED;   // A6: only a natural flow can be fabricated
             uint8_t bits = how | (i == 0 ? ((how & DP_CORE_NATURAL) ? DP_CORE_START_NATURAL : DP_CORE_START_FORCED) : 0);
@@ -1467,6 +1513,7 @@ static void obs_read(void *u, uint32_t addr, uint8_t v) {
     int64_t ri = k < 0 && o->ramread ? ridx(o->m, addr) : -1;
     if (ri >= 0 && !o->forced && !o->ramread[ri]) {   // P6: forced paths must not join the semantic cell (same rule as the live bitmap below)
         __atomic_store_n(&o->ramread[ri], 1, __ATOMIC_RELAXED);
+        __atomic_store_n(&o->ramread[rsize(o->m) + ((uint32_t)ri >> RAMREAD_BLOCK)], 1, __ATOMIC_RELAXED);
         if (o->ctx_epoch) __atomic_fetch_add(o->ctx_epoch, 1, __ATOMIC_RELAXED);   // A2: the semantic cell changed
     }
     if (k < 0 && o->track && o->nram < 4) {
@@ -1626,6 +1673,7 @@ static uint64_t cell_key(const DpCoreConfig *cfg, const uint8_t *ramread, DpMach
         // the read-set is sparse: skip 8 bytes at a time while they are all zero (this scan runs under the shared lock at every fork)
         for (uint32_t a = 0, rn = rsize(m); a < rn && n < 4096; ) {
             uint64_t w;
+            if (!(a & ((1u << RAMREAD_BLOCK) - 1)) && !ramread[(size_t)rn + (a >> RAMREAD_BLOCK)]) { a += rn - a > (1u << RAMREAD_BLOCK) ? 1u << RAMREAD_BLOCK : rn - a; continue; }
             if (rn - a >= 32) { uint64_t q[4]; memcpy(q, ramread + a, 32); if (!(q[0] | q[1] | q[2] | q[3])) { a += 32; continue; } }
             if (rn - a >= 8) { memcpy(&w, ramread + a, 8); if (!w) { a += 8; continue; } }
             uint32_t e = rn - a >= 8 ? a + 8 : rn;
@@ -2085,11 +2133,13 @@ static unsigned solve_cond(Worker *w, const DpCoreConfig *cfg, uint32_t condpc, 
             }
             m->load(m, w->wsnap);
             m->poke(m, addr, val);
-            m->save(m, snap);
             int reached = 0;
             for (int st = 0; st < 16 && m->pc(m) != condpc; st++) if (!m->run(m)) break;
             if (m->pc(m) == condpc) { m->run(m); reached = 1; }
             if (reached && m->pc(m) == other) {
+                m->load(m, w->wsnap);   // only a value that works is saved: a machine may keep what a save names
+                m->poke(m, addr, val);
+                m->save(m, snap);
                 pthread_mutex_lock(&sh->mu);
                 queue_push(sh, w->m, (Pending){ snap, w->win_pc, 0, 0, input, 0, 0, DP_SRC_SOLVED });
                 pthread_cond_signal(&sh->cv);
@@ -2247,7 +2297,10 @@ static int core_save_frame(const DpCoreConfig *cfg, DpMachine *m, uint64_t f) {
     const char *dir = cfg->save_dir ? cfg->save_dir : ".";
     char fn[600];
     mkdir(dir, 0777);   /* an existing directory is fine */
-    if (m->state_bytes && m->save) {
+    if (m->shot_save) {
+        snprintf(fn, sizeof fn, "%s/f%llu.state", dir, (unsigned long long)f);
+        core_snapshot(m, fn);
+    } else if (m->state_bytes && m->save) {
         uint32_t n = m->state_bytes(m); uint8_t *buf = malloc(n);
         snprintf(fn, sizeof fn, "%s/f%llu.state", dir, (unsigned long long)f);
         FILE *o = buf ? fopen(fn, "wb") : NULL;
@@ -2294,7 +2347,7 @@ static void run_path(Worker *w, Pending *p) {
     int attract = cur_input == SESSION_ATTRACT && m->frame;
     int play = cur_input >= SESSION_PLAY && cur_input < TAS_INPUT && m->frame && m->set_input;
     // lean path: nothing is forked or scanned (the watched / replay-only movie, and every session of an --observe run)
-    #define LEAN_PATH (watch_lean(cfg) && ((tas && tas_shift == 0) || (cfg->observe && (attract || play))))
+    #define LEAN_PATH ((watch_lean(cfg) && ((tas && tas_shift == 0) || (cfg->observe && (attract || play)))) || (cfg->lean_sessions && (attract || play)))
     int held = cur_input > 0 && cur_input < SESSION_ATTRACT && m->set_input && !cfg->no_sessions && !cfg->no_held_budget;
     uint64_t held_n = 0;
     unsigned play_k = play ? cur_input - SESSION_PLAY : 0;
@@ -2559,6 +2612,9 @@ static void run_path(Worker *w, Pending *p) {
             uint64_t f = m->frame(m);
             if (f != sess_last) {
                 sess_last = f;
+                if ((attract || play) && m->poke)   // frozen memory: the sessions then observe a modified game
+                    for (unsigned z = 0; z < cfg->freeze_n; z++)
+                        for (unsigned k = 0; k < cfg->freeze[z].len; k++) m->poke(m, cfg->freeze[z].addr + k, cfg->freeze[z].data[k]);
                 if (!burst) core_watch_publish(cfg, m, f, (uint32_t)(f - sess_f0), (uint32_t)sess_limit);   // the live screen also follows the attract/play sessions
                 if ((attract || rnd) && cfg->live_frame) core_live_frame(cfg, m, f);
                 vid = ++w->path_id;
@@ -2852,7 +2908,7 @@ static void run_path(Worker *w, Pending *p) {
             } else if (imm_age < 99) imm_age++;
         }
         if (!cfg->no_closure && have_flow && isa->code_table && (fi.kind == DP_FLOW_INDIRECT || fi.kind == DP_FLOW_SEQ)) {   // forced paths too: their registers are concrete (the dispatch helper reached by a forced handler)
-            DpCodeTable ct; uint32_t lp = 0;
+            DpCodeTable ct = {0}; uint32_t lp = 0;
             if (isa->code_table(m, pc, bytes, &ct, &lp) && code_table_resolve(m, isa, &ct, NULL)) {
                 // a table is closed once per thread: direct-mapped cache of the bases already walked (objects run the same table every frame)
                 static __thread uint32_t seen_ct[256];
@@ -2896,7 +2952,7 @@ static void run_path(Worker *w, Pending *p) {
         }
         if (!cfg->no_closure && !cur_forced && have_flow && fi.kind != DP_FLOW_SEQ && fi.kind != DP_FLOW_ILLEGAL) {
             if (fi.target >= 0 && (fi.kind == DP_FLOW_JUMP || fi.kind == DP_FLOW_COND || fi.kind == DP_FLOW_CALL)) closure_walk(loc, m, isa, (uint32_t)fi.target, w->regwalk);
-            if (fi.kind == DP_FLOW_COND) closure_walk(loc, m, isa, pc + fi.length, w->regwalk);
+            if (fi.kind == DP_FLOW_COND || (fi.kind == DP_FLOW_INDIRECT && fi.fall && fi.cond >= 0)) closure_walk(loc, m, isa, pc + fi.length, w->regwalk);   // a conditional computed transfer (ARM switch): the other side is plain code
             else if (fi.kind == DP_FLOW_CALL || (fi.kind == DP_FLOW_INDIRECT && fi.call && fi.fall)) closure_walk_untrusted(loc, m, isa, pc + fi.length, w->regwalk);
             uint32_t dispatch_arg = 0;
             int dispatch = fi.kind == DP_FLOW_INDIRECT && isa->table_dispatch ? isa->table_dispatch(bytes, &dispatch_arg) : 0;
@@ -2984,7 +3040,10 @@ static void run_path(Worker *w, Pending *p) {
             // answers 0 unless an interrupt is pending, so the per-(site, delay) key is
             // spent only when a fork is really produced.
             unsigned nsources = cfg->hooks->irq_source_alt ? cfg->hooks->irq_source_count : 1u;
-            for (unsigned source = 0; source < nsources; source++) {
+            uint64_t ready = cfg->hooks->irq_source_alt && cfg->hooks->irq_source_ready ?
+                cfg->hooks->irq_source_ready(cfg->hooks->user, m) : ~0ull;
+            for (unsigned source = 0; ready && source < nsources; source++) {
+              if (source < 64 && !(ready >> source & 1u)) continue;
               for (unsigned d = 1; d <= (cfg->no_irq_jitter ? 1u : 3u); d++) {
                 int64_t iri = (int64_t)m->rom_index(m, pc);
                 uint64_t sub = ((uint64_t)d << 40) |
@@ -3708,6 +3767,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     out->prov = calloc(rom_size ? rom_size : 1, 1);
     out->dest = calloc(rom_size ? rom_size : 1, 1);
     out->jtent = calloc(rom_size ? rom_size : 1, 1);
+    if (m->isa && m->isa->mode_mask) out->isa_mode = calloc(rom_size ? rom_size : 1, 1);
     out->spec = calloc(rom_size ? rom_size : 1, 1);
     out->refs = calloc(rom_size ? rom_size : 1, 1);
     out->live_w = ((rsize(m) >> 8) + 31) / 32;
@@ -3758,7 +3818,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
     sh.fed = calloc(ramn, 1);
     sh.fedsrc = calloc(ramn, sizeof(uint32_t));
     sh.fedprod = calloc(ramn, sizeof(uint32_t));
-    sh.ramread = calloc(ramn, 1);
+    sh.ramread = calloc((size_t)ramn + (ramn >> RAMREAD_BLOCK) + 1, 1);   // the bitmap, then one mark per block: a sparse 8 MiB scan skips unread blocks
     sh.probectx = calloc(rom_size ? rom_size : 1, 1);
     sh.site_picks = calloc(rom_size + 1, sizeof *sh.site_picks);
     sh.site_gain = calloc(rom_size + 1, sizeof *sh.site_gain);
@@ -3773,7 +3833,7 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         if (!wm) break;                       // fewer workers than asked: reported
         w->sh = &sh; w->m = wm; w->idx = i;
         w->loc.refs = out->refs; w->loc.page_win = out->page_win; w->loc.live = out->live; w->loc.reg_slot = out->reg_slot; w->loc.reg_reads = out->reg_reads; w->loc.reg_writes = out->reg_writes; w->loc.reg_vals = out->reg_vals; w->loc.reg_n = out->reg_n; w->loc.reg_plat = out->reg_plat; w->loc.closure_banks = out->closure_banks; w->loc.closure_ret = out->closure_ret; w->loc.live_w = out->live_w; w->loc.flags = out->flags; w->loc.src_flags = out->src_flags; w->loc.hits = out->hits;
-        w->loc.dest = out->dest; w->loc.jtent = out->jtent;
+        w->loc.dest = out->dest; w->loc.jtent = out->jtent; w->loc.isa_mode = out->isa_mode;
         w->loc.prov = out->prov;
         w->loc.first_seen = out->first_seen; w->loc.first_actor = out->first_actor; w->loc.rom_size = rom_size;
         w->site_n = site_n;
@@ -3923,14 +3983,32 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         }
     }
 
+    // static analysis of a linear image (DpIsa.static_roots): prologues and pointer words as untrusted entries
+    if (ok && !cfg->no_closure && !cfg->observe && m->isa->static_roots && m->linear && cfg->rom_image && ws[0].regwalk) {
+        size_t n = rom_size < cfg->rom_image_size ? rom_size : cfg->rom_image_size, max = n / 4 + 1;
+        uint32_t *roots = malloc(max * sizeof *roots);
+        if (roots) {
+            size_t c = m->isa->static_roots(cfg->rom_image, n, m->code_base, roots, max);
+            Worker *w0 = &ws[0];
+            for (size_t i = 0; i < c; i++)
+                if (w0->m->rom_index(w0->m, roots[i]) >= 0) { closure_walk_untrusted(&w0->loc, w0->m, m->isa, roots[i], w0->regwalk); w0->loc.static_roots++; }
+            free(roots);
+        }
+    }
+
     if (ok) {
         // every worker observes its own machine; the start state is the main one's
         if (cfg->from_state && *cfg->from_state) {   // --from-state: the exploration starts from a saved machine state (a movie snapshot)
             FILE *sf = fopen(cfg->from_state, "rb"); uint8_t *sb = malloc(sh.sbytes ? sh.sbytes : 1); int sok = 0;
-            if (sf && sb && fread(sb, 1, sh.sbytes, sf) == sh.sbytes && fgetc(sf) == EOF) { m->load(m, sb); sok = 1; }
+            unsigned char magic[4] = { 0 };
+            if (m->shot_load && sf && fread(magic, 1, 4, sf) == 4 && !memcmp(magic, "\x89PNG", 4)) sok = m->shot_load(m, cfg->from_state);
+            else if (sf && sb && !fseek(sf, 0, SEEK_SET) && fread(sb, 1, sh.sbytes, sf) == sh.sbytes && fgetc(sf) == EOF) { m->load(m, sb); sok = 1; }
             if (sf) fclose(sf); free(sb);
-            if (!sok) { fprintf(stderr, "deepeel: --from-state %s: not a %u-byte state of this machine\n", cfg->from_state, (unsigned)sh.sbytes); out->halted = 3; }
-            else fprintf(stderr, "deepeel: exploring from state %s\n", cfg->from_state);
+            if (!sok) { fprintf(stderr, "deepeel: --from-state %s: not a %u-byte state%s of this machine\n", cfg->from_state, (unsigned)sh.sbytes, m->shot_load ? " nor a shot" : ""); out->halted = 3; }
+            else if (cfg->resave) {   // a conversion only: no exploration, and the state directory is left as it was
+                core_snapshot(m, cfg->resave);
+                exit(0);
+            } else fprintf(stderr, "deepeel: exploring from state %s\n", cfg->from_state);
         }
         uint8_t *start = malloc(sh.sbytes);
         m->save(m, start);
@@ -3988,7 +4066,12 @@ int dp_core_explore(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg_in, D
         uint8_t *buf = malloc(rom_size ? rom_size : 1);
         if (cf && buf && fread(hd, 4, 2, cf) == 2 && hd[0] == 0x31564F43u && hd[1] == rom_size && !fseek(cf, (long)rom_size, SEEK_CUR))
             while (fread(hd, 4, 2, cf) == 2 && hd[1] == rom_size) {
-                if (hd[0] == 0x3154504Au) { if (fread(buf, 1, rom_size, cf) == rom_size) for (size_t i = 0; i < rom_size; i++) out->jtent[i] |= buf[i]; break; }
+                if (hd[0] == 0x3154504Au || (hd[0] == 0x31444F4Du && out->isa_mode)) {
+                    if (fread(buf, 1, rom_size, cf) != rom_size) break;
+                    uint8_t *to = hd[0] == 0x3154504Au ? out->jtent : out->isa_mode;
+                    for (size_t i = 0; i < rom_size; i++) if (!to[i]) to[i] = buf[i];
+                    continue;
+                }
                 if (fseek(cf, (long)((hd[0] == 0x31524353u || hd[0] == 0x31544948u ? 4u : 1u) * rom_size), SEEK_CUR)) break;
             }
         free(buf); if (cf) fclose(cf);
@@ -4265,7 +4348,7 @@ cleanup:
         out->copy_forced += l->copy_forced; out->forced_ram_cuts += l->forced_ram_cuts;
         out->nonsense_pc += l->nonsense_pc; out->nonsense_sp += l->nonsense_sp; out->pad_cuts += l->pad_cuts; out->pad_unmarked += l->pad_unmarked;
         out->taint_cut_indirect += l->taint_cut_indirect; out->taint_cut_ret += l->taint_cut_ret;
-        out->novelty_picks += l->novelty_picks; out->closure_stopped_data += l->closure_stopped_data; out->closure_ptr_stores += l->closure_ptr_stores; out->closure_entry_refused += l->closure_entry_refused; out->closure_stack_invalidations += l->closure_stack_invalidations; out->closure_unresolved += l->closure_unresolved; out->closure_stack_dropped += l->closure_stack_dropped; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->promoted_forced += l->promoted_forced; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bank_sims += l->closure_bank_sims; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_stack_dropped += l->closure_stack_dropped; out->pending_dropped += l->pending_dropped; out->deferred += l->deferred; out->state_repeats += l->state_repeats; out->probe_ctx_sat += l->probe_ctx_sat; out->probe_rearms += l->probe_rearms; out->bank_forks += l->bank_forks; out->tas_ckpts += l->tas_ckpts; out->sess_ckpts += l->sess_ckpts; out->ckpt_bursts += l->ckpt_bursts; out->epoch_forks += l->epoch_forks; out->live_seeds += l->live_seeds; out->imm_refs += l->imm_refs; out->held_stops += l->held_stops; out->bank_fork_sat += l->bank_fork_sat; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->event_probe_arms += l->event_probe_arms; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->closure_rets += l->closure_rets; out->proj_pruned += l->proj_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
+        out->novelty_picks += l->novelty_picks; out->closure_stopped_data += l->closure_stopped_data; out->closure_ptr_stores += l->closure_ptr_stores; out->static_roots += l->static_roots; out->closure_entry_refused += l->closure_entry_refused; out->closure_stack_invalidations += l->closure_stack_invalidations; out->closure_unresolved += l->closure_unresolved; out->closure_stack_dropped += l->closure_stack_dropped; out->site_scored_picks += l->site_scored_picks; out->learned_sigs += l->learned_sigs; out->solved_forks += l->solved_forks; out->promoted_forced += l->promoted_forced; out->solve_tries += l->solve_tries; out->rng_forks += l->rng_forks; out->index_replays += l->index_replays; out->compressed_bytes += l->compressed_bytes; out->decompress_runs += l->decompress_runs; out->cells += l->cells; out->closure_roots += l->closure_roots; out->closure_bank_sims += l->closure_bank_sims; out->closure_bytes += l->closure_bytes; out->closure_capped += l->closure_capped; out->closure_stack_dropped += l->closure_stack_dropped; out->pending_dropped += l->pending_dropped; out->deferred += l->deferred; out->state_repeats += l->state_repeats; out->probe_ctx_sat += l->probe_ctx_sat; out->probe_rearms += l->probe_rearms; out->bank_forks += l->bank_forks; out->tas_ckpts += l->tas_ckpts; out->sess_ckpts += l->sess_ckpts; out->ckpt_bursts += l->ckpt_bursts; out->epoch_forks += l->epoch_forks; out->live_seeds += l->live_seeds; out->imm_refs += l->imm_refs; out->held_stops += l->held_stops; out->bank_fork_sat += l->bank_fork_sat; out->closure_jp_tables += l->closure_jp_tables; out->closure_jp_entries += l->closure_jp_entries; out->prov_data_bytes += l->prov_data_bytes; out->event_probes += l->event_probes; out->event_probe_sites += l->event_probe_sites; out->event_probe_arms += l->event_probe_arms; out->irq_forks += l->irq_forks; out->jitter_forks += l->jitter_forks; out->cell_pruned += l->cell_pruned; out->closure_rets += l->closure_rets; out->proj_pruned += l->proj_pruned; out->novelty_new_bytes += l->novelty_new_bytes; out->plain_new_bytes += l->plain_new_bytes; out->hook_vetoed += l->hook_vetoed; out->tas_paths += l->tas_paths;
         out->exec_outside += l->exec_outside; out->exec_wram_rom += l->exec_wram_rom; dp_ramarch_merge(&out->ra, &l->ra);
         out->closure_reg_roots += l->closure_reg_roots; out->closure_reg_seed_sat += l->closure_reg_seed_sat; out->closure_reg_set_sat += l->closure_reg_set_sat;
         out->closure_reg_indirect += l->closure_reg_indirect; out->closure_reg_indirect_sat += l->closure_reg_indirect_sat; out->closure_reg_miss += l->closure_reg_miss;
@@ -4317,6 +4400,8 @@ cleanup:
             fwrite(dsec, sizeof *dsec, 2, cf); fwrite(out->dest, 1, rom_size, cf);
             uint32_t jsec[2] = { 0x3154504Au, (uint32_t)rom_size };   // "JPT1"
             if (out->jtent) { fwrite(jsec, sizeof *jsec, 2, cf); fwrite(out->jtent, 1, rom_size, cf); }
+            uint32_t msec[2] = { 0x31444F4Du, (uint32_t)rom_size };   // "MOD1": the instruction set of each instruction head
+            if (out->isa_mode) { fwrite(msec, sizeof *msec, 2, cf); fwrite(out->isa_mode, 1, rom_size, cf); }
             fclose(cf);
         }
     }
@@ -4474,6 +4559,7 @@ void dp_core_report(FILE *out, const char *label, const DpCoreResult *r) {
     }
     fprintf(out, "speculative gaps: %llu runs, %llu bytes (never counted as known); %llu runs reinforced by an immediate reference (%llu references seen)\n", U(r->spec_runs), U(r->spec_bytes), U(r->spec_ref_runs), U(r->imm_refs));
     fprintf(out, "static closure: roots %llu, bytes %llu, static-only %zu, provisional %zu (untrusted walks, code once confirmed), capped walks %llu, returns followed %llu, RAM-parked code pointers %llu\n", U(r->closure_roots), U(r->closure_bytes), stat_only, prov_only, U(r->closure_capped), U(r->closure_rets), U(r->closure_ptr_stores));
+    if (r->static_roots) fprintf(out, "static roots: %llu candidate routine heads from the image analysis (prologues, code pointers)\n", U(r->static_roots));
     if (r->proof_roots) fprintf(out, "static proof from executed transfers: roots %llu, bytes %llu (%llu seen only on forced paths before), of which computed-jump tables %llu\n", U(r->proof_roots), U(r->proof_bytes), U(r->proof_forced), U(r->proof_jt_bytes));
     if (r->closure_entry_refused) fprintf(out, "untrusted walk entries refused (data plausibility, point 3): %llu\n", U(r->closure_entry_refused));
     if (r->closure_stack_invalidations) fprintf(out, "ghost returns discarded on memory-control OUT (port_effect): %llu\n", U(r->closure_stack_invalidations));

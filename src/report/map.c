@@ -1087,6 +1087,8 @@ static int map_png_render(uint8_t *m, int banks, const char *title, const DpMapS
                 if (cnt[0] > cnt[cls]) cls = 0;
             }
             const uint8_t *c = map_rgb[cls];
+            static const uint8_t outside[3] = {0, 0, 0};
+            if (rom_size && k >= rom_size && cls == DP_MAP_UNKNOWN) c = outside;   // past the end of the file
             if (kinds && dp_map_is_data(cls)) { // data a copy moved: coloured by its destination
                 for (int q = 0; q < bpp; q++)
                     if (kinds[k + (size_t)q]) { c = map_kind_rgb[kinds[k + (size_t)q] - 1]; break; }

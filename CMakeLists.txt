@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(deepeel VERSION 0.444.0 LANGUAGES C)
+project(deepeel VERSION 0.446.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -73,6 +73,11 @@ string(REPLACE "${DP_MD_DMA_READ}" "uint32_t dma_addr = (source++ << 1) & 0xffff
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/dp_md_full_bus.c" "#include \"md_full.h\"\nvoid dp_md_dma_observe(MdFull *, uint32_t);\n${DP_MD_BUS}")
 # Z80 sound CPU observation: hooks around its step, its ROM-window reads and
 # every sound-bus store (generated copy of md_full_audio.c).
+# The generated copy lives in the build directory: bring the headers it includes.
+if(EXISTS "${M0BOY_DIR}/targets/common/runtime/m0_divide.h")
+  configure_file("${M0BOY_DIR}/targets/common/runtime/m0_divide.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/m0_divide.h" COPYONLY)
+endif()
 file(READ "${DP_MD_RUNTIME}/md_full_audio.c" DP_MD_AUDIO)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${DP_MD_RUNTIME}/md_full_audio.c")
 function(dp_md_audio_patch old new)
@@ -650,6 +655,39 @@ add_library(deepeel_ws STATIC IMPORTED GLOBAL)
 set_target_properties(deepeel_ws PROPERTIES IMPORTED_LOCATION ${DP_WS_ARCHIVE})
 add_dependencies(deepeel_ws dp_ws_runtime)
 target_link_libraries(deepeel_lib PUBLIC deepeel_ws)
+
+# --- the m0boy GP32 machine (S3C2400 / ARM920T) ------------------------------
+# The runtime is a plain re-entrant library (every symbol carries its own
+# prefix): compiled as it is, with link time optimisation when available.
+set(DP_GP32_RUNTIME "${M0BOY_DIR}/targets/gp32/runtime")
+if(NOT EXISTS "${DP_GP32_RUNTIME}/s3c2400.c" OR NOT EXISTS "${DP_GP32_RUNTIME}/gp32_host.c")
+  message(FATAL_ERROR "M0BOY_DIR must provide targets/gp32/runtime (s3c2400.c, gp32_host.c)")
+endif()
+add_library(deepeel_gp32 STATIC
+  src/mach/arm_isa.c
+  src/mach/gp32_machine.c
+  src/platform/gp32/pages.c
+  src/platform/gp32/registry.c
+  ${DP_GP32_RUNTIME}/s3c2400_bus.c
+  ${DP_GP32_RUNTIME}/arm920t.c
+  ${DP_GP32_RUNTIME}/s3c2400.c
+  ${DP_GP32_RUNTIME}/gp32_smc.c
+  ${DP_GP32_RUNTIME}/gp32_exec.c
+  ${DP_GP32_RUNTIME}/gp32_hle.c
+  ${DP_GP32_RUNTIME}/gp32_host.c
+  ${DP_GP32_RUNTIME}/gp32_state.c
+  ${DP_GP32_RUNTIME}/gp32_shot.c)
+target_compile_definitions(deepeel_gp32 PRIVATE GP32_SYNC_CARD="${DP_GP32_RUNTIME}/../sync_card.py")
+target_include_directories(deepeel_gp32 PUBLIC src ${DP_GP32_RUNTIME})
+target_link_libraries(deepeel_gp32 PUBLIC deepeel_core ZLIB::ZLIB m)
+include(CheckIPOSupported)
+check_ipo_supported(RESULT DP_HAS_LTO LANGUAGES C)
+# Not when embedded: the host project links this archive with its own toolchain,
+# which may not read link time optimisation objects (Clang without a plugin).
+if(DP_HAS_LTO AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  set_target_properties(deepeel_gp32 PROPERTIES INTERPROCEDURAL_OPTIMIZATION ON)
+endif()
+target_link_libraries(deepeel_lib PUBLIC deepeel_gp32)
 
 target_link_libraries(deepeel_lib PUBLIC deepeel_core m ${DP_GUI_LIBS})
 

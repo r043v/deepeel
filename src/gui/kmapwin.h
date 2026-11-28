@@ -5,4 +5,5 @@
 struct DpCoreResult;
 int dp_kmapwin_start(const struct DpCoreResult *live, const char *title, int scale);   // 0 on success
 void dp_kmapwin_stop(void);
+void dp_kmapwin_release(const struct DpCoreResult *r);   // stops the window if it shows this result
 #endif

@@ -841,6 +841,15 @@ Le pont m0boy (`targets/wonderswan/runtime`, V30MZ + SoC), plateforme
 Surfaces restantes : RTC modélisée mais sans sonde de valeur ; port série
 observé sans pair ; EEPROM cartouche observée/typée.
 
+### 3.8 bis GP32 (0.445.0)
+
+Le pont m0boy (`targets/gp32/runtime`, ARM920T + S3C2400X01) sur le noyau
+générique. Particularités : couverture indexée sur une image prise en SDRAM
+après démarrage, états paginés (1 Kio adressé par contenu), ARM et Thumb,
+fourches d'IRQ sur les 32 sources, sessions allégées. Pas de film TAS : les
+techniques TAS sont sans objet, remplacées par les sessions aléatoires et le
+statique. Détail et limites : [GP32.fr.md](GP32.fr.md).
+
 ### 3.9 Sondes de registres événementiels (proposition transversale)
 
 **Constat.** Aujourd'hui, un registre `DP_IMPL_EVENT` (LY, STAT, DIV, TIMA,

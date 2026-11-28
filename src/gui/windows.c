@@ -366,6 +366,7 @@ void dp_kmapwin_stop(void) {
     pthread_join(kw_th, NULL);
     kw_running = 0;
 }
+void dp_kmapwin_release(const struct DpCoreResult *r) { if (r == kw_res) dp_kmapwin_stop(); }
 /* watch sound: one queued SDL device, opened on the first frame; the presenter's 60 fps clock paces it */
 static SDL_AudioDeviceID au_dev; static int au_tried;
 void dp_audio_play(const int16_t *st, unsigned frames) {
@@ -396,4 +397,5 @@ int dp_kmapwin_start(const struct DpCoreResult *live, const char *title, int sca
     return 1;
 }
 void dp_kmapwin_stop(void) {}
+void dp_kmapwin_release(const struct DpCoreResult *r) { (void)r; }
 #endif

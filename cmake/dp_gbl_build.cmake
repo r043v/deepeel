@@ -32,6 +32,12 @@ if(DP_GBL_PATCH)
       message(FATAL_ERROR "dp_gbl: could not normalize copied LCD-off anchor")
     endif()
   endif()
+  # Older m0boy checkouts do not build the sprite selection without CGB
+  # support; newer ones carry this correction themselves.
+  file(READ ${rt}/gbl_ppu.c ppu)
+  string(REPLACE "    if (gbl_cgb) {\n        for (int k = 0; k < 10; k++)"
+    "    if (GBL_CGB_ON) {\n        for (int k = 0; k < 10; k++)" ppu "${ppu}")
+  file(WRITE ${rt}/gbl_ppu.c "${ppu}")
   execute_process(COMMAND patch -p1 --no-backup-if-mismatch -s -i ${DP_GBL_PATCH}
     WORKING_DIRECTORY ${rt} RESULT_VARIABLE r OUTPUT_VARIABLE out ERROR_VARIABLE out)
   if(NOT r EQUAL 0)

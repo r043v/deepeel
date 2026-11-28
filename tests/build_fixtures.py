@@ -2144,7 +2144,75 @@ def build_movies(out):
     bk2("fix_bz_b.bk2", "NES", "QuickNES", key, ["|..|...|", "|..|U..|", "|.P|.DA|", "|..|...|"])
     bk2("fix_bz_axis.bk2", "N64", "Mupen64Plus", "#P1 A|P1 B|#P1 X Axis|P1 Y Axis", ["|..|   0,   0|", "|A.|  12, -34|", "|.B| 127,-128|"])
 
+def build_gp32(out):
+    # GP32 applications (GXB layout: branch, SDRAM base, section limits), hand
+    # assembled ARM and Thumb.
+    import struct
+    base = 0x0c000000
+    ldr_pc = lambda rd, at, lit: 0xe59f0000 | rd << 12 | (lit - at - 8)
+    jump = lambda op, at, to: op | ((to - at - 8) >> 2 & 0xffffff)
+    def gxb(name, words):
+        size = 0x1c + 4 * len(words)
+        head = [jump(0xea000000, 0, 0x1c), base] + [base + size] * 5
+        with open(os.path.join(out, name), "wb") as f:
+            f.write(struct.pack("<%dI" % (7 + len(words)), *(head + words)))
+
+    # fix_gp32_branch: a pad-dependent branch, a computed jump through a table
+    # and a call into Thumb code.  Offsets are listed on the left.
+    gxb("fix_gp32_branch.gxb", [
+        ldr_pc(1, 0x1c, 0x68),          # 1c ldr r1, =PEDAT
+        0xe5910000,                     # 20 ldr r0, [r1]
+        0xe3100c01,                     # 24 tst r0, #0x100
+        jump(0x0a000000, 0x28, 0x34),   # 28 beq 34
+        0xe2833001,                     # 2c add r3, r3, #1
+        jump(0xea000000, 0x30, 0x38),   # 30 b 38
+        0xe2833002,                     # 34 add r3, r3, #2
+        0xe2002001,                     # 38 and r2, r0, #1
+        0xe79ff102,                     # 3c ldr pc, [pc, r2, lsl #2]
+        0xe1a00000,                     # 40 nop
+        base + 0x4c, base + 0x54,       # 44 the table
+        0xe2833004,                     # 4c add r3, r3, #4
+        jump(0xea000000, 0x50, 0x58),   # 50 b 58
+        0xe2833008,                     # 54 add r3, r3, #8
+        ldr_pc(4, 0x58, 0x6c),          # 58 ldr r4, =thumb
+        0xe1a0e00f,                     # 5c mov lr, pc
+        0xe12fff14,                     # 60 bx r4
+        jump(0xea000000, 0x64, 0x1c),   # 64 b 1c
+        0x15600030, base + 0x70 + 1,    # 68 literals
+        0x47702001,                     # 70 movs r0, #1 ; bx lr
+    ])
+
+    # fix_gp32_unpack: a stub that spins longer than the probe window, copies a
+    # routine past the loaded file and jumps there; the routine then wipes the
+    # stub, as unpackers do.
+    routine = [0xe2800001] * 1200 + [     # add r0, r0, #1
+        0xe3a01503,                       # mov r1, #0x00c00000
+        0xe2811303,                       # add r1, r1, #0x0c000000
+        0xe2811020,                       # add r1, r1, #0x20
+        0xe3a02000,                       # mov r2, #0
+        0xe5812000,                       # str r2, [r1]   (wipes the stub's second word at 0x20)
+        0xeafffffe]                       # b .
+    routine[1200:1203] = [0xe3a01303, 0xe2811020, 0xe1a00000]   # mov r1, #0x0c000000 ; add r1, r1, #0x20 ; nop
+    stub = [
+        ldr_pc(0, 0x1c, 0x64),          # 1c ldr r0, =spins
+        *[0xe1a00000] * 6,              # 20 nop x 6 (many instructions, few loop visits)
+        0xe2500001,                     # 38 subs r0, r0, #1
+        jump(0x1a000000, 0x3c, 0x20),   # 3c bne 20
+        ldr_pc(1, 0x40, 0x68),          # 40 ldr r1, =source
+        ldr_pc(2, 0x44, 0x6c),          # 44 ldr r2, =destination
+        ldr_pc(3, 0x48, 0x70),          # 48 ldr r3, =words
+        0xe4914004,                     # 4c ldr r4, [r1], #4
+        0xe4824004,                     # 50 str r4, [r2], #4
+        0xe2533001,                     # 54 subs r3, r3, #1
+        jump(0x1a000000, 0x58, 0x4c),   # 58 bne 4c
+        ldr_pc(5, 0x5c, 0x6c),          # 5c ldr r5, =destination
+        0xe12fff15,                     # 60 bx r5
+        3000000, base + 0x74, base + 0x100000, len(routine),
+    ]
+    gxb("fix_gp32_unpack.gxb", stub + routine)
+
 if __name__ == "__main__":
+    build_gp32(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_ngp(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_nes_pce(sys.argv[1] if len(sys.argv) > 1 else ".")
     build_z80_family(sys.argv[1] if len(sys.argv) > 1 else ".")

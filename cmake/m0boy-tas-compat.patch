@@ -1186,15 +1186,6 @@
      stat_line = line;
  }
  
-@@ -376,7 +383,7 @@
-         while (b > 0 && cand[b - 1] > v) { cand[b] = cand[b - 1]; b--; }
-         cand[b] = v;
-     }
--    if (gbl_cgb) {
-+    if (GBL_CGB_ON) {
-         for (int k = 0; k < 10; k++) sel[k] = cand[k];   /* already index-sorted */
-         return 10;
-     }
 @@ -954,6 +961,7 @@
  /* KEY1 speed switch: the position inside the current line (or virtual frame)
   * is kept, only its unit changes. */

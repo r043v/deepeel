@@ -776,3 +776,7 @@ add_test(NAME core_checksum_sweep COMMAND sh -c "o=${CMAKE_CURRENT_BINARY_DIR}/c
 add_executable(test_m68k_code_table test_m68k_code_table.c)
 target_link_libraries(test_m68k_code_table PRIVATE deepeel_pce deepeel_sega deepeel_core m)
 add_test(NAME m68k_code_table COMMAND test_m68k_code_table)
+
+# GP32: branches, computed jump, Thumb, input register, self-unpacking application (generated programs)
+add_test(NAME core_gp32 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/core_gp32.py $<TARGET_FILE:deepeel> ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(core_gp32 PROPERTIES FIXTURES_REQUIRED fixtures TIMEOUT 180)

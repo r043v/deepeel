@@ -1227,6 +1227,10 @@ frame = machine réellement bloquée, repli en jeu aléatoire. Les deux compteur
 (« TAS cuts absorbed », « wedged-machine fallbacks ») sont rapportés sur
 stderr ; une saturation n'est jamais silencieuse.
 
+Dans le PNG, les pixels situés après la fin du fichier (dernière tuile
+incomplète) sont noirs : ils ne sont pas « inconnus » et ne comptent pas dans
+les pourcentages (0.446.0).
+
 ## Fenêtre de surveillance `--watch` (0.5.1)
 
 `deepeel explore ROM --play --tas film.vbm --watch [FPS]` ouvre une petite
@@ -6848,6 +6852,11 @@ Les passes, dans l'ordre :
 Les passes 1 à 3 sont des **observations** (`--observe`) : aucune fourche, aucun état déversé sur disque, seul ce qui
 s'exécute est enregistré. Options associées : `--random N`, `--random-first K`, `--random-min TRAMES`,
 `--random-stall TRAMES`, `--random-no-start N`, `--random-no-select N`, `--random-hold N`. Les réglages sont dans `src/explore/campaign.h`.
+
+`--freeze ADRESSE=OCTETS` (hexadécimal, répétable, toutes plateformes ayant `poke`) réécrit ces octets à chaque trame des
+sessions d'attract et aléatoires, par exemple pour figer des points de vie et atteindre la suite d'un jeu. La couverture
+obtenue ainsi vient d'un jeu **modifié** : la garder dans des fichiers séparés et le signaler (ou ajouter
+`--fabricated-forced` selon l'usage).
 
 **Chiffres** (depuis 0.439.1, « known without suspects » = observé + statique prouvé + autres versions ; les suspects,
 forcé compris, n'y sont plus ; auparavant « known » les additionnait et pouvait afficher 100 %). La reprise d'une

@@ -46,6 +46,9 @@ typedef struct DpPlatformHooks {
     // the site key. When supplied, this replaces irq_alt for this backend.
     unsigned irq_source_count;
     int (*irq_source_alt)(void *user, DpMachine *m, unsigned source, unsigned delay, uint8_t *save);
+    // optional: the sources that could fork right now, one bit each; the others are not even tried
+    // (asked once per instruction, so it must be cheap)
+    uint64_t (*irq_source_ready)(void *user, DpMachine *m);
     // called once when the workers are done, before the speculative gaps: the platform folds
     // its own evidence into the result (Sega: the provenance closure's static bytes, C3)
     void (*finish)(void *user, struct DpCoreResult *r);
@@ -147,6 +150,7 @@ typedef struct DpCoreConfig {
     unsigned snap_secs;       // snapshot period in seconds (default 600; 0 = none)
     // autonomous campaign (src/explore/auto.c): movie stagnation, machine snapshots, restarts from a snapshot, random runs
     const char *from_state;   // --from-state FILE: explore from this saved machine state (DpMachine.save layout, e.g. a movie snapshot) instead of power-on
+    const char *resave;       // --resave FILE: write the --from-state machine as a snapshot (a shot where the machine has them) and stop
     uint32_t tas_stall_frames;   // --tas-stall N: the unshifted movie replay stops after N frames without a ROM byte new to it (a desynced or idle movie); reported in tas_report (0: off)
     unsigned snap_every;      // --snap-every N: the unshifted movie replay writes <snap_dir>/s<frame>.state every N frames (0: off)
     const char *snap_dir;     // --snap-dir D
@@ -160,10 +164,14 @@ typedef struct DpCoreConfig {
     unsigned random_runs;     // --random N: N seeded random-pad runs started from the start state (each stops on random_stall frames without a new ROM byte)
     uint32_t random_frames;   // --random-frames N: frame cap of one random run (0 = none: only stagnation stops a run)
     int observe;              // --observe: sessions only (movie, attract, random): no fork, no deferred state; the movie's end state runs on as attract
+    int lean_sessions;        // attract and random sessions run without forks (a slow machine plays far); their checkpoints still fork
     uint32_t random_min;      // --random-min N: a random run lasts at least N frames before stagnation may end it
     unsigned random_first;    // --random-first N: seed rank of the first random run (parallel processes play different pads)
     unsigned random_no_start; // --random-no-start N: the first N random runs never press Start (no pause or menu); the others use every button
     unsigned random_no_select; // --random-no-select N: the first N random runs never press Select (GB/GBC pad bit)
+#define DP_FREEZE_MAX 16
+    unsigned freeze_n;        // --freeze ADDR=HEXBYTES (repeatable): bytes rewritten at every frame of the attract and random sessions
+    struct { uint32_t addr; uint8_t len, data[8]; } freeze[DP_FREEZE_MAX];
     int fabricated_forced;    // --fabricated-forced: what runs in a state the explorer made up (DP_SRC_DYN_FABRICATED) is recorded as forced, not natural
     unsigned random_hold;     // --random-hold N: one press in N of a random run is held 0.5 to 4 s instead of 8 frames (0: none)
     unsigned random_movie;    // --random-movie N: the first N random runs play 5 s segments of the --tas movie, drawn at random, instead of random pads
@@ -199,6 +207,8 @@ typedef struct DpCoreResult {
     uint64_t spec_runs, spec_bytes;
     uint8_t *jtent;            // per ROM index, 1 = low byte of a ROM word that became the target of a natural computed jump
     uint8_t *dest;             // per ROM index: DP_DEST_* where this byte's data ends up (0: untyped)
+    uint8_t *isa_mode;         // DpIsa.mode_mask ISAs, per instruction head: 1 = base set, 2 = mode bits set (Thumb); NULL otherwise
+    uint64_t static_roots;     // candidate routine heads of DpIsa.static_roots walked
     size_t rom_size;
     uint64_t steps, paths, forks;
     uint64_t cooperative_yields; // active paths requeued to let pending work run
@@ -294,6 +304,8 @@ void dp_core_live_default(void (*cb)(void *, const struct DpCoreResult *), void 
 int dp_core_explore_cli(DpMachine *m, size_t rom_size, const DpCoreConfig *cfg,
                         DpCoreResult *out, const char *output_hint);
 void dp_core_result_free(DpCoreResult *r);
+// called by dp_core_result_free before the arrays go, so that a live viewer (--mapwin) stops reading them
+void dp_core_live_release(void (*cb)(const DpCoreResult *r));
 
 void dp_core_write_cov(const char *path, const char *id, const struct DpMachine *m, const DpCoreResult *r);   // P10: the machine geometry decides the offsets
 /* --cov-transfer ROM COV: replay another revision's executed coverage as speculative
